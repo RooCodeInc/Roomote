@@ -144,10 +144,25 @@ export type BackgroundAutomationProvider =
 
 export type BackgroundAutomationTargetKind =
   | 'slack_channel'
+  | 'slack_user'
   | 'teams_channel'
+  | 'teams_user'
   | 'telegram_chat'
+  | 'telegram_user'
   | 'discord_channel'
+  | 'discord_user'
   | 'sentry_project';
+
+export function isBackgroundAutomationUserTargetKind(
+  value: unknown,
+): value is 'slack_user' | 'teams_user' | 'telegram_user' | 'discord_user' {
+  return (
+    value === 'slack_user' ||
+    value === 'teams_user' ||
+    value === 'telegram_user' ||
+    value === 'discord_user'
+  );
+}
 
 /**
  * A single automation target stored in automations.targets (jsonb array).
@@ -161,7 +176,7 @@ export type AutomationTarget = {
 
 /**
  * A custom automation's stored report destination: a full AutomationTarget,
- * or the empty object (the column default) when no report channel is
+ * or the empty object (the column default) when no report destination is
  * configured.
  */
 export type OptionalAutomationTarget = AutomationTarget | Record<string, never>;

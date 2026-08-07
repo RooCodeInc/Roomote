@@ -13,6 +13,7 @@ import {
 } from '@roomote/db/server';
 import {
   isConfiguredAutomationTarget,
+  isBackgroundAutomationUserTargetKind,
   resolveEvalHarnessSelection,
   TaskPayloadKind,
   type AutomationTarget,
@@ -39,8 +40,16 @@ import {
   type AutomationRunNowResult,
   type AutomationRunOpts,
 } from './types';
+import { findUserDirectMessageDestination } from '../lib/user-direct-message';
 
 const LOG_PREFIX = '[custom-automations]';
+
+const PROVIDER_LABELS: Record<CommunicationProvider, string> = {
+  discord: 'Discord',
+  slack: 'Slack',
+  teams: 'Teams',
+  telegram: 'Telegram',
+};
 
 const WINDOW_DAYS: Record<string, number> = {
   every_hour: 1 / 24,
@@ -76,6 +85,16 @@ async function resolveDestination(
     return null;
   }
 
+  if (isBackgroundAutomationUserTargetKind(target.targetKind)) {
+    const destination = await findUserDirectMessageDestination(
+      provider,
+      target.externalRef,
+    );
+    return destination
+      ? { provider, ...destination, source: 'automation_target' }
+      : null;
+  }
+
   if (provider === 'teams') {
     const metadataServiceUrl =
       typeof target.metadata?.serviceUrl === 'string'
@@ -108,7 +127,7 @@ async function resolveDestination(
 }
 
 /**
- * Anchors a custom automation's prompt to its configured report channel,
+ * Anchors a custom automation's prompt to its configured report conversation,
  * mirroring how the built-in channel automations tell the agent which surface
  * and posting tool to report through.
  */
@@ -125,7 +144,7 @@ function buildChannelAnchoredDescription(
   <${promptContext.channelTag}>${destination.channelId}</${promptContext.channelTag}>
 </task_context>
 
-This run is anchored to the ${promptContext.surfaceLabel} channel above and reports through \`send_chat_reply\`; do not use \`${promptContext.postToolName}\` and do not post to any other channel. Stay silent while work is in flight: send no opening acknowledgement and do not post progress updates. Send a ${promptContext.surfaceLabel} message only for your final result, a durable blocker, or a required user input. Your first message creates this run's thread in that channel, so make it one self-contained message that stands alone for readers who have not seen this task; later messages and user replies continue that same thread. Write the report as the result itself, like a teammate sharing what they found or did: do not mention this automation, the schedule, the task, or that anything requested the work; the message footer already attributes the automation. Lead with the outcome, not with framing like "Automation requested ..." or "Outcome: ...".`;
+This run is anchored to the ${promptContext.surfaceLabel} conversation above and reports through \`send_chat_reply\`; do not use \`${promptContext.postToolName}\` and do not post anywhere else. Stay silent while work is in flight: send no opening acknowledgement and do not post progress updates. Send a ${promptContext.surfaceLabel} message only for your final result, a durable blocker, or a required user input. Your first message creates this run's thread in that conversation, so make it one self-contained message that stands alone for readers who have not seen this task; later messages and user replies continue that same thread. Write the report as the result itself, like a teammate sharing what they found or did: do not mention this automation, the schedule, the task, or that anything requested the work; the message footer already attributes the automation. Lead with the outcome, not with framing like "Automation requested ..." or "Outcome: ...".`;
 }
 
 async function launchCustomAutomationRow(
@@ -220,8 +239,11 @@ async function launchCustomAutomationRow(
   if (isConfiguredAutomationTarget(automation.target)) {
     destination = await resolveDestination(automation.target);
     if (!destination) {
-      const message =
-        automation.target.provider === 'teams'
+      const message = isBackgroundAutomationUserTargetKind(
+        automation.target.targetKind,
+      )
+        ? `The automation owner does not have a linked ${PROVIDER_LABELS[automation.target.provider as CommunicationProvider]} account that can receive direct messages.`
+        : automation.target.provider === 'teams'
           ? 'Teams report destination is missing a resolvable service URL.'
           : 'Report destination could not be resolved.';
       result.skippedReason = message;
@@ -297,6 +319,12 @@ async function launchCustomAutomationRow(
             ? {
                 channel: destination.channelId,
                 slackChannel: destination.channelId,
+                ...(destination.teamId
+                  ? {
+                      teamId: destination.teamId,
+                      slackTeamId: destination.teamId,
+                    }
+                  : {}),
               }
             : {}),
           ...(modelOverride?.harnessModelOverrides

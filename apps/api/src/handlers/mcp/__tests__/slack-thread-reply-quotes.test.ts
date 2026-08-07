@@ -40,7 +40,7 @@ vi.mock('@roomote/db/server', () => ({
   findBackgroundAutomationSlackThread: vi.fn().mockResolvedValue(null),
   getCustomAutomationById: vi.fn(),
   getTaskAutomationInitiatorKey: vi.fn().mockResolvedValue(null),
-  slackInstallations: { isActive: 'isActive' },
+  slackInstallations: { isActive: 'isActive', teamId: 'teamId' },
   taskRuns: { id: 'id' },
   tasks: {
     id: 'id',
@@ -132,6 +132,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
 
 import { mcpAuthMiddleware } from '../middleware';
 import { slackMcp } from '../slack';
+import { eq } from '@roomote/db/server';
 
 const runToken: RunTokenContext = {
   runId: 42,
@@ -213,6 +214,31 @@ describe('Slack thread reply quotes', () => {
       'slack',
       42,
       'quote-image',
+    );
+  });
+
+  it('uses the task Slack workspace when selecting the reply installation', async () => {
+    taskRunFindFirstMock.mockResolvedValue({
+      id: 42,
+      actingUserId: null,
+      taskId: 'task-1',
+      payload: {
+        channel: 'D123',
+        thread_ts: '111.222',
+        slackTeamId: 'T_DM',
+      },
+    });
+
+    const response = await createApp().request('/mcp/thread_reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'Private report' }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(eq).toHaveBeenCalledWith('teamId', 'T_DM');
+    expect(postMessageDetailedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'D123' }),
     );
   });
 

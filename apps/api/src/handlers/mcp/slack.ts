@@ -16,6 +16,7 @@ import {
   workItems,
 } from '@roomote/db/server';
 import {
+  getSlackTeamIdFromTaskPayload,
   getTriggerableBackgroundAutomationDescriptorByKey,
   type SlackBlock,
 } from '@roomote/types';
@@ -862,9 +863,15 @@ slackMcp.post('/thread_reply', async (c) => {
     );
   }
 
+  const slackTeamId = getSlackTeamIdFromTaskPayload(taskRun.payload);
   const slackInstallation = await db.query.slackInstallations.findFirst({
     columns: { botAccessToken: true, teamId: true },
-    where: eq(slackInstallations.isActive, true),
+    where: slackTeamId
+      ? and(
+          eq(slackInstallations.isActive, true),
+          eq(slackInstallations.teamId, slackTeamId),
+        )
+      : eq(slackInstallations.isActive, true),
   });
 
   if (!slackInstallation?.botAccessToken) {

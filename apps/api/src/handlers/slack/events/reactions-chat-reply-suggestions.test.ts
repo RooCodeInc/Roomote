@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   trackedMessageFindFirst: vi.fn(),
   resolveWorkspace: vi.fn(),
   lookupSlackUserMapping: vi.fn(),
+  startAutoRoutedSlackTask: vi.fn(),
   startSlackAppMentionTask: vi.fn(),
   postStartedMessage: vi.fn(),
   getConfiguration: vi.fn(),
@@ -88,6 +89,7 @@ vi.mock('@roomote/slack', () => ({
     ackEmoji: 'eyes',
     completionEmoji: 'white_check_mark',
   })),
+  startAutoRoutedSlackTask: mocks.startAutoRoutedSlackTask,
   startSlackAppMentionTask: mocks.startSlackAppMentionTask,
 }));
 
@@ -138,8 +140,14 @@ describe('chat reply suggestion reactions', () => {
     mocks.trackedMessageFindFirst.mockResolvedValue({
       id: 'tracked-message-1',
       workItemId: 'work-item-1',
-      metadata: { suggestionType: 'suggested_tasks' },
+      metadata: { suggestionType: 'suggested_tasks', launchRouting: 'router' },
     });
+    mocks.lookupSlackUserMapping.mockResolvedValue({
+      hasInactiveMapping: false,
+      activeMapping: { userId: 'user-1' },
+    });
+    mocks.claimWorkItem.mockResolvedValue({ launchClaimedAt: claimedAt });
+    mocks.finalizeWorkItemLaunched.mockResolvedValue(true);
     mocks.resolveWorkspace.mockResolvedValue({
       workspace: {
         repoForPayload: 'acme/app',
@@ -148,12 +156,12 @@ describe('chat reply suggestion reactions', () => {
       },
       failureReason: null,
     });
-    mocks.lookupSlackUserMapping.mockResolvedValue({
-      hasInactiveMapping: false,
-      activeMapping: { userId: 'user-1' },
+    mocks.startAutoRoutedSlackTask.mockResolvedValue({
+      status: 'started',
+      threadId: 'seeded-thread-ts',
+      runId: 42,
+      taskId: 'task-new',
     });
-    mocks.claimWorkItem.mockResolvedValue({ launchClaimedAt: claimedAt });
-    mocks.finalizeWorkItemLaunched.mockResolvedValue(true);
     mocks.startSlackAppMentionTask.mockResolvedValue({
       id: 42,
       taskId: 'task-new',
@@ -170,7 +178,104 @@ describe('chat reply suggestion reactions', () => {
     await handleReactionAddedEvent({
       context: {
         teamId: 'T1',
-        slackInstallation: { botUserId: 'UROOMOTE' },
+        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
+        slack,
+      } as never,
+      event: {
+        type: 'reaction_added',
+        user: 'U1',
+        reaction: 'thumbsup',
+        item: { type: 'message', channel: 'C1', ts: 'card-ts' },
+        event_ts: 'event-ts',
+      },
+    });
+
+    expect(mocks.startAutoRoutedSlackTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C1',
+        prompt:
+          'Start this suggested task: Add retry telemetry\n\nInstrument retry exhaustion.',
+        agentPromptTextOverride: 'implementation prompt',
+      }),
+    );
+    expect(mocks.startSlackAppMentionTask).not.toHaveBeenCalled();
+    expect(mocks.finalizeWorkItemLaunched).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        id: 'work-item-1',
+        taskId: 'task-new',
+        claimedAt,
+      },
+    );
+    expect(mocks.postStartedMessage).not.toHaveBeenCalled();
+  });
+
+  it('releases the suggestion when routing cannot choose a workspace', async () => {
+    mocks.startAutoRoutedSlackTask.mockResolvedValue({
+      status: 'not_started',
+      code: 'routing_fallback',
+      threadId: 'seeded-thread-ts',
+      message: 'Slack auto-routing needs manual environment selection.',
+    });
+    const slack = {
+      postMessage: vi
+        .fn()
+        .mockResolvedValueOnce('seeded-thread-ts')
+        .mockResolvedValueOnce('failure-ts'),
+      deleteMessage: vi.fn(async () => undefined),
+      getMessageMetadata: vi.fn(),
+    };
+
+    await handleReactionAddedEvent({
+      context: {
+        teamId: 'T1',
+        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
+        slack,
+      } as never,
+      event: {
+        type: 'reaction_added',
+        user: 'U1',
+        reaction: 'thumbsup',
+        item: { type: 'message', channel: 'C1', ts: 'card-ts' },
+        event_ts: 'event-ts',
+      },
+    });
+
+    expect(mocks.releaseWorkItemClaim).toHaveBeenCalledWith(expect.anything(), {
+      id: 'work-item-1',
+      claimedAt,
+    });
+    expect(mocks.finalizeWorkItemLaunched).not.toHaveBeenCalled();
+    expect(slack.deleteMessage).toHaveBeenCalledWith({
+      channel: 'C1',
+      ts: 'seeded-thread-ts',
+    });
+    expect(slack.postMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        channel: 'C1',
+        text: expect.stringContaining(
+          'Slack auto-routing needs manual environment selection.',
+        ),
+      }),
+    );
+  });
+
+  it('keeps unmarked suggestion cards pinned to their verified workspace', async () => {
+    mocks.trackedMessageFindFirst.mockResolvedValue({
+      id: 'tracked-message-1',
+      workItemId: 'work-item-1',
+      metadata: { suggestionType: 'suggested_tasks' },
+    });
+    const slack = {
+      postMessage: vi.fn(async () => 'seeded-thread-ts'),
+      deleteMessage: vi.fn(async () => undefined),
+      getMessageMetadata: vi.fn(),
+    };
+
+    await handleReactionAddedEvent({
+      context: {
+        teamId: 'T1',
+        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
         slack,
       } as never,
       event: {
@@ -189,26 +294,10 @@ describe('chat reply suggestion reactions', () => {
     });
     expect(mocks.startSlackAppMentionTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        channel: 'C1',
         repo: 'acme/app',
         environmentId: 'environment-1',
-        agentPromptText: 'implementation prompt',
       }),
     );
-    expect(mocks.finalizeWorkItemLaunched).toHaveBeenCalledWith(
-      expect.anything(),
-      {
-        id: 'work-item-1',
-        taskId: 'task-new',
-        claimedAt,
-      },
-    );
-    expect(mocks.postStartedMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channelId: 'C1',
-        threadTs: 'seeded-thread-ts',
-        taskId: 'task-new',
-      }),
-    );
+    expect(mocks.startAutoRoutedSlackTask).not.toHaveBeenCalled();
   });
 });

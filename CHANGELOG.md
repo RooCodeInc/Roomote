@@ -2,6 +2,31 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.36.0 (2026-08-07)
+
+This release adds deployment-wide custom MCP servers, makes suggested tasks easier to launch from chat, and gives automations private delivery options across communication providers alongside reliability improvements.
+
+### Highlights
+
+- Configure custom remote and local MCP servers once for every task, with secure authentication and per-tool controls.
+- Launch suggested follow-up tasks directly from Slack, Discord, Telegram, and Teams with clearer, consistent interactions.
+- Send custom automation reports privately to the owner's linked Slack, Discord, Teams, or Telegram account.
+- Keep active pull-request reviews current when new commits arrive, while preserving chat context and task status notifications more reliably.
+
+### Minor changes
+
+- Let users send custom automation reports privately to their linked Slack, Discord, Teams, or Telegram account with the new DM me destination.
+- Make suggested follow-up tasks a first-class part of chat replies across Slack, Discord, Telegram, and Teams, with clear launch instructions, reaction-based starts, and workspace routing when users approve them.
+- Let deployment administrators configure custom remote and local MCP servers for every task, with OAuth and header authentication, per-tool controls, encrypted secrets, and protected network access. Thanks to @T4cC0re for reporting [#1142](https://github.com/RooCodeInc/Roomote/issues/1142).
+
+### Patch changes
+
+- Keep active automated pull-request reviews running when new commits arrive so the latest pushed head is reviewed before the task finishes.
+- Preserve the original message, attachments, and mention context when Roomote starts from emoji-triggered Slack requests or forwarded Discord messages.
+- Keep self-hosted Node services within container memory limits by applying safe default heap caps while preserving operator overrides.
+- Stop recommending Mimo V2.5 in newly connected model-provider lists while preserving existing explicit configurations.
+- Restore merge and close notifications for tracked pull requests in repositories excluded from automated GitHub processing.
+
 ## 0.35.0 (2026-08-06)
 
 This release expands source-control setup and review workflows, adds a direct homepage feedback path, and improves reliability across automations, Slack routing, and self-hosted sandboxes.

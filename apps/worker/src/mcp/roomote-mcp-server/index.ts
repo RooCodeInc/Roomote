@@ -84,7 +84,7 @@ roomoteMcpServer.registerTool(
   {
     title: 'Manage Custom Automations',
     description:
-      'Admin-only management of deployment custom automations. List existing automations, resolve a cron or natural-language schedule, create or update an automation, delete an automation by exact ID, or run an enabled automation now. Natural-language schedules are converted to validated five-field cron in the deployment scheduling timezone. When a user asks an automation to offer help, suggest tasks, make follow-ups actionable or launchable, or turn findings or action items into tasks, encode that intent in product language by instructing the automation to post concrete actions as launchable suggested tasks alongside its report. Do not expose runtime tool names or parameter syntax in the stored prompt. A request only to summarize or list action items is not suggested-task intent. Only promise launchable suggested tasks when the automation has both a configured chat report destination and a repository or environment for executable work; otherwise keep actions as report text and explain the missing capability. After successfully creating an automation in response to a conversational request, ask the user whether they want to run it now to test it.',
+      'Admin-only management of deployment custom automations. List existing automations, resolve a cron or natural-language schedule, create or update an automation, delete an automation by exact ID, or run an enabled automation now. When the user asks an automation to DM them, set their preferred connected targetProvider and targetMode to direct_message; no targetChannelId is needed. Natural-language schedules are converted to validated five-field cron in the deployment scheduling timezone. When a user asks an automation to offer help, suggest tasks, make follow-ups actionable or launchable, or turn findings or action items into tasks, encode that intent in product language by instructing the automation to post concrete actions as launchable suggested tasks alongside its report. Do not expose runtime tool names or parameter syntax in the stored prompt. A request only to summarize or list action items is not suggested-task intent. Only promise launchable suggested tasks when the automation has both a configured chat report destination and a repository or environment for executable work; otherwise keep actions as report text and explain the missing capability. After successfully creating an automation in response to a conversational request, ask the user whether they want to run it now to test it.',
     inputSchema: {
       action: z.enum([
         'list',
@@ -125,6 +125,12 @@ roomoteMcpServer.registerTool(
         .nullable()
         .describe(
           'Destination provider. Pass null on update to clear the report destination.',
+        )
+        .optional(),
+      targetMode: z
+        .enum(['channel', 'direct_message'])
+        .describe(
+          'Destination mode. Use direct_message to send reports privately to the automation owner through the selected connected provider.',
         )
         .optional(),
       targetChannelId: z.string().optional(),
@@ -1211,6 +1217,26 @@ roomoteMcpServer.registerTool(
 
 if (shouldRegisterSlackThreadReplyTool()) {
   const chatReplySurfaceLabel = getChatReplySurfaceLabel();
+  const usesPinnedSuggestionContract =
+    process.env.ROOMOTE_TASK_TYPE === TaskPayloadKind.Scan;
+  const chatReplySuggestionSchema = usesPinnedSuggestionContract
+    ? z.object({
+        title: z.string().min(1).max(140),
+        brief: z.string().min(1).max(2000),
+        category: z
+          .enum(['bug', 'security', 'chore', 'feature', 'improvement'])
+          .optional(),
+        priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
+        investigationContext: z.string().min(1).max(4000).optional(),
+        targetRepositoryFullName: z.string().min(1),
+        targetEnvironmentId: z.string().uuid().optional(),
+        workspaceReadiness: workspaceReadinessSchema.optional(),
+        readinessMessage: z.string().min(1).max(500).optional(),
+      })
+    : z.object({
+        title: z.string().min(1).max(140),
+        brief: z.string().min(1).max(2000),
+      });
   const chatReplyMarkdownGuidance =
     chatReplySurfaceLabel === 'Slack'
       ? 'Supports the modern Slack Markdown contract from the Slack instructions. Use rich Markdown when it improves scanability. '
@@ -1265,21 +1291,7 @@ if (shouldRegisterSlackThreadReplyTool()) {
             'Optional already-uploaded artifact IDs for images to attach.',
           ),
         suggestions: z
-          .array(
-            z.object({
-              title: z.string().min(1).max(140),
-              brief: z.string().min(1).max(2000),
-              category: z
-                .enum(['bug', 'security', 'chore', 'feature', 'improvement'])
-                .optional(),
-              priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
-              investigationContext: z.string().min(1).max(4000).optional(),
-              targetRepositoryFullName: z.string().min(1),
-              targetEnvironmentId: z.string().uuid().optional(),
-              workspaceReadiness: workspaceReadinessSchema.optional(),
-              readinessMessage: z.string().min(1).max(500).optional(),
-            }),
-          )
+          .array(chatReplySuggestionSchema)
           .refine(
             (suggestions) =>
               suggestions.length >= 1 && suggestions.length <= 10,
@@ -1289,7 +1301,9 @@ if (shouldRegisterSlackThreadReplyTool()) {
           )
           .optional()
           .describe(
-            `Optional list of 1 to 10 independent actions to post inside the originating ${chatReplySurfaceLabel} conversation. Use only for high-confidence tasks not explicitly identified in the conversation as already underway. Every suggestion must identify its target repository; include hidden investigation context when it will help the implementing agent.`,
+            usesPinnedSuggestionContract
+              ? `Optional list of 1 to 10 independent actions to post inside the originating ${chatReplySurfaceLabel} conversation. This scheduled suggestion workflow must include its verified target repository and may include implementation metadata used when the task is started.`
+              : `Optional list of 1 to 10 independent actions to post inside the originating ${chatReplySurfaceLabel} conversation. Use only for high-confidence tasks not explicitly identified in the conversation as already underway. Each suggestion contains only the title and description shown to users; Roomote routes the task when it is started.`,
           ),
       },
       annotations: {

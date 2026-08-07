@@ -20,6 +20,8 @@ import { findTelegramPrimaryChatId } from '../lib/telegram-primary-chat';
 export type ResolvedAutomationDestination = {
   provider: CommunicationProvider;
   channelId: string;
+  /** Slack workspace that owns the channel when routing must be installation-specific. */
+  teamId?: string;
   /** Bot Framework serviceUrl; present for Teams destinations. */
   serviceUrl?: string;
   /** Which waterfall level produced this destination. */

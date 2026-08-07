@@ -25,6 +25,7 @@ import type {
   CustomAutomationScheduleMode,
   OptionalAutomationTarget,
 } from '@roomote/types';
+import { isBackgroundAutomationUserTargetKind } from '@roomote/types';
 import { toActivationAutomationDestinationProvider } from '@roomote/telemetry';
 import { captureActivationCustomAutomationChanged } from '@roomote/telemetry/server';
 
@@ -52,6 +53,7 @@ const writeSchema = z.object({
   model: modelSchema.optional(),
   environmentId: z.string().uuid(),
   targetProvider: z.enum(['slack', 'discord', 'teams', 'telegram']).optional(),
+  targetMode: z.enum(['channel', 'direct_message']).optional(),
   targetChannelId: z.string().trim().min(1).max(160).optional(),
   targetServiceUrl: z.string().trim().min(1).max(500).optional(),
 });
@@ -67,6 +69,7 @@ const updateSchema = z.object({
     .enum(['slack', 'discord', 'teams', 'telegram'])
     .nullable()
     .optional(),
+  targetMode: z.enum(['channel', 'direct_message']).optional(),
   targetChannelId: z.string().trim().min(1).max(160).optional(),
   targetServiceUrl: z.string().trim().min(1).max(500).optional(),
 });
@@ -148,7 +151,7 @@ const VALIDATION_ERROR_PATTERNS: RegExp[] = [
   /^Environment is required\.$/,
   /^Selected environment was not found\.$/,
   /^Custom automation was not found\.$/,
-  /^Report destination must include a provider, target kind, and channel\.$/,
+  /^Report destination must include a provider, target kind, and reference\.$/,
   /^You can create at most \d+ custom automations\.$/,
   /^targetChannelId is required when targetProvider is set\.$/,
   /^Timezone is required\.$/,
@@ -205,11 +208,13 @@ async function requireAdmin(auth: McpAuth): Promise<string | null> {
 function buildTarget(
   input: Pick<
     z.infer<typeof writeSchema>,
-    'targetProvider' | 'targetChannelId' | 'targetServiceUrl'
+    'targetProvider' | 'targetMode' | 'targetChannelId' | 'targetServiceUrl'
   >,
+  ownerUserId: string,
 ): OptionalAutomationTarget {
   if (!input.targetProvider) return {};
-  if (!input.targetChannelId) {
+  const directMessage = input.targetMode === 'direct_message';
+  if (!directMessage && !input.targetChannelId) {
     throw new Error('targetChannelId is required when targetProvider is set.');
   }
 
@@ -219,11 +224,19 @@ function buildTarget(
     teams: 'teams_channel',
     telegram: 'telegram_chat',
   };
+  const userKinds: Record<string, BackgroundAutomationTargetKind> = {
+    slack: 'slack_user',
+    discord: 'discord_user',
+    teams: 'teams_user',
+    telegram: 'telegram_user',
+  };
   return {
     provider: input.targetProvider as BackgroundAutomationProvider,
-    targetKind: kinds[input.targetProvider]!,
-    externalRef: input.targetChannelId,
-    ...(input.targetServiceUrl
+    targetKind: directMessage
+      ? userKinds[input.targetProvider]!
+      : kinds[input.targetProvider]!,
+    externalRef: directMessage ? ownerUserId : input.targetChannelId!,
+    ...(!directMessage && input.targetServiceUrl
       ? { metadata: { serviceUrl: input.targetServiceUrl } }
       : {}),
   };
@@ -328,7 +341,7 @@ customAutomationsRouter.post('/', async (c) => {
       cronExpression: schedule.cronExpression,
       model: parsed.data.model ?? null,
       environmentId: parsed.data.environmentId,
-      target: buildTarget(parsed.data),
+      target: buildTarget(parsed.data, adminId(c)),
       createdByUserId: adminId(c),
     });
     void captureActivationCustomAutomationChanged(
@@ -371,6 +384,10 @@ customAutomationsRouter.patch('/:id', async (c) => {
     }
     const existingTarget = existing.target;
     const clearTarget = parsed.data.targetProvider === null;
+    const providerChanged =
+      parsed.data.targetProvider !== undefined &&
+      parsed.data.targetProvider !== null &&
+      parsed.data.targetProvider !== existingTarget.provider;
     const targetProvider =
       parsed.data.targetProvider ??
       (existingTarget.provider === 'slack' ||
@@ -379,8 +396,35 @@ customAutomationsRouter.patch('/:id', async (c) => {
       existingTarget.provider === 'telegram'
         ? existingTarget.provider
         : undefined);
+    const targetMode =
+      parsed.data.targetMode ??
+      (!providerChanged &&
+      isBackgroundAutomationUserTargetKind(existingTarget.targetKind)
+        ? 'direct_message'
+        : 'channel');
     const targetChannelId =
-      parsed.data.targetChannelId ?? existingTarget.externalRef ?? undefined;
+      parsed.data.targetChannelId ??
+      (targetMode === 'channel' &&
+      !providerChanged &&
+      !isBackgroundAutomationUserTargetKind(existingTarget.targetKind)
+        ? existingTarget.externalRef
+        : undefined);
+    const destinationChanged =
+      parsed.data.targetProvider !== undefined ||
+      parsed.data.targetMode !== undefined ||
+      parsed.data.targetChannelId !== undefined ||
+      parsed.data.targetServiceUrl !== undefined;
+    if (
+      !clearTarget &&
+      destinationChanged &&
+      targetProvider &&
+      targetMode === 'channel' &&
+      !targetChannelId
+    ) {
+      throw new Error(
+        'targetChannelId is required when targetProvider is set.',
+      );
+    }
     const existingServiceUrl =
       typeof existingTarget.metadata?.serviceUrl === 'string'
         ? existingTarget.metadata.serviceUrl
@@ -399,13 +443,17 @@ customAutomationsRouter.patch('/:id', async (c) => {
       environmentId: parsed.data.environmentId ?? existing.environmentId ?? '',
       target: clearTarget
         ? {}
-        : targetProvider && targetChannelId
-          ? buildTarget({
-              targetProvider,
-              targetChannelId,
-              targetServiceUrl:
-                parsed.data.targetServiceUrl ?? existingServiceUrl,
-            })
+        : targetProvider && (targetMode === 'direct_message' || targetChannelId)
+          ? buildTarget(
+              {
+                targetProvider,
+                targetMode,
+                targetChannelId,
+                targetServiceUrl:
+                  parsed.data.targetServiceUrl ?? existingServiceUrl,
+              },
+              existing.createdByUserId ?? adminId(c),
+            )
           : existingTarget,
     });
     return c.json({ automation, resolution: schedule.resolution });

@@ -39,6 +39,7 @@ export async function postCurrentThreadSuggestionsToTelegram(params: {
   sourceTaskId: string;
   suggestionGroupKey: string;
   createdByUserId: string | null;
+  launchRouting?: 'router';
   chatId: string;
   threadId?: string | null;
   suggestions: TelegramAutomationSuggestion[];
@@ -76,6 +77,9 @@ export async function postCurrentThreadSuggestionsToTelegram(params: {
         suggestionType: 'suggested_tasks',
         suggestionKey: `${params.sourceTaskId}:${suggestion.id}`,
         suggestionGroupKey: params.suggestionGroupKey,
+        ...(params.launchRouting
+          ? { launchRouting: params.launchRouting }
+          : {}),
       },
     };
     await db
