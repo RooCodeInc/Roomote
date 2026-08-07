@@ -17,7 +17,7 @@ export type ClaimedCurrentThreadSuggestion = {
   launchClaimedAt: Date;
 };
 
-export type CurrentThreadSuggestionReactionClaim =
+type CurrentThreadSuggestionReactionClaim =
   | { outcome: 'no_card' }
   | { outcome: 'already_started' }
   | { outcome: 'claimed'; suggestion: ClaimedCurrentThreadSuggestion };

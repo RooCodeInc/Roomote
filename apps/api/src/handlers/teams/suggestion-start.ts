@@ -76,7 +76,7 @@ export type ClaimedTeamsSuggestion = {
   launchClaimedAt: Date;
 };
 
-export type TeamsSuggestionStartResolution =
+type TeamsSuggestionStartResolution =
   /** No tracked suggestion cards in this conversation — fall through. */
   | { outcome: 'no_cards' }
   /** Cards exist but N is outside the latest posted list. */
