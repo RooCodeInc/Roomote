@@ -14,6 +14,7 @@ import {
   Schemas as GitHubSchemas,
   createTaskRunGitHubToken,
   getOctokit,
+  resolveConfiguredGitHubAppSlug,
 } from '@roomote/github';
 import { setLatestSlackBotReply, trackSlackBotReply } from '@roomote/slack';
 import {
@@ -570,12 +571,18 @@ async function fetchPrDiscussionSignals({
   let latestReviewStatus: string | null = null;
   let latestReviewSummaryComment: string | null = null;
   let latestTerminalReviewSummaryHeadSha: string | null = null;
+  const reviewSummaryComments = result.issueComments.filter((comment) =>
+    comment.body.trimStart().startsWith(REVIEW_SUMMARY_MARKER),
+  );
 
-  for (const comment of result.issueComments) {
+  if (reviewSummaryComments.length > 0) {
+    await resolveConfiguredGitHubAppSlug();
+  }
+
+  for (const comment of reviewSummaryComments) {
     if (
       !comment.author ||
-      !GitHubSchemas.isRoomoteGitHubLogin(comment.author) ||
-      !comment.body.trimStart().startsWith(REVIEW_SUMMARY_MARKER)
+      !GitHubSchemas.isRoomoteGitHubLogin(comment.author)
     ) {
       continue;
     }

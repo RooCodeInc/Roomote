@@ -10,6 +10,8 @@ const {
   mockPullsGet,
   mockListCheckRunsForRef,
   mockGetCombinedStatusForRef,
+  mockIsRoomoteGitHubLogin,
+  mockResolveConfiguredGitHubAppSlug,
 } = vi.hoisted(() => ({
   mockGenerateObject: vi.fn(),
   mockReadSourceControlPullRequest: vi.fn(),
@@ -22,6 +24,8 @@ const {
   mockPullsGet: vi.fn(),
   mockListCheckRunsForRef: vi.fn(),
   mockGetCombinedStatusForRef: vi.fn(),
+  mockIsRoomoteGitHubLogin: vi.fn((login: string) => login === 'roomote[bot]'),
+  mockResolveConfiguredGitHubAppSlug: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
@@ -84,8 +88,9 @@ vi.mock('@roomote/slack', () => ({
 
 vi.mock('@roomote/github', () => ({
   Schemas: {
-    isRoomoteGitHubLogin: (login: string) => login === 'roomote[bot]',
+    isRoomoteGitHubLogin: (login: string) => mockIsRoomoteGitHubLogin(login),
   },
+  resolveConfiguredGitHubAppSlug: () => mockResolveConfiguredGitHubAppSlug(),
   createTaskRunGitHubToken: (...args: unknown[]) =>
     mockCreateTaskRunGitHubToken(...args),
   getOctokit: () => ({
@@ -138,6 +143,13 @@ const events: PrReviewActivityEvent[] = [
 ];
 
 const eventsWithoutSelfReview: PrReviewActivityEvent[] = events.slice(0, 2);
+
+beforeEach(() => {
+  mockIsRoomoteGitHubLogin.mockImplementation(
+    (login: string) => login === 'roomote[bot]',
+  );
+  mockResolveConfiguredGitHubAppSlug.mockResolvedValue('roomote');
+});
 
 function mockGreenCiChecks() {
   mockCreateTaskRunGitHubToken.mockResolvedValue('github-token');
@@ -466,6 +478,48 @@ describe('preparePrReviewNotificationDelivery', () => {
     });
 
     expect(mockGenerateObject).toHaveBeenCalled();
+  });
+
+  it('resolves a custom GitHub App slug before classifying summary authors', async () => {
+    mockResolveConfiguredGitHubAppSlug.mockResolvedValue('acme');
+    mockIsRoomoteGitHubLogin.mockImplementation((login: string) => {
+      expect(mockResolveConfiguredGitHubAppSlug).toHaveBeenCalled();
+      return login === 'acme[bot]';
+    });
+    mockReadSourceControlPullRequest.mockResolvedValue({
+      success: true,
+      provider: 'github',
+      repositoryFullName: 'owner/repo',
+      number: 42,
+      threads: [],
+      issueComments: [
+        {
+          id: 'c1',
+          author: 'acme[bot]',
+          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->',
+          createdAt: null,
+          url: null,
+        },
+      ],
+      warnings: [],
+    });
+
+    await expect(
+      preparePrReviewNotificationDelivery({
+        taskRun,
+        request,
+        events: [
+          {
+            kind: 'review_comment',
+            authorLogin: 'acme[bot]',
+            roomoteAuthored: true,
+            reviewHeadSha: 'abc',
+          },
+        ],
+      }),
+    ).resolves.toEqual({ post: false, reason: 'not_worth_notifying' });
+
+    expect(mockGenerateObject).not.toHaveBeenCalled();
   });
 });
 
