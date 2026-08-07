@@ -84,7 +84,6 @@ export const activePrReviewFollowUpJob = async (
           prompt,
           source: 'github-pr-synchronize',
           clientMessageId: buildClientMessageId(data),
-          queueOnly: true,
           visibleInTranscript: false,
         }),
     });

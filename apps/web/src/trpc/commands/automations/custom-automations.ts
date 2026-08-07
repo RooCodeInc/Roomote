@@ -105,15 +105,7 @@ function buildTarget(
   if (!input.targetProvider) {
     return {};
   }
-  if (
-    input.targetMode === 'direct_message' &&
-    input.targetProvider !== 'slack'
-  ) {
-    throw new Error('Direct-message destinations currently require Slack.');
-  }
-
-  const directMessage =
-    input.targetProvider === 'slack' && input.targetMode === 'direct_message';
+  const directMessage = input.targetMode === 'direct_message';
   const externalRef = directMessage
     ? ownerUserId
     : (input.targetChannelId?.trim() ?? '');
@@ -132,18 +124,27 @@ function buildTarget(
     teams: 'teams_channel',
     telegram: 'telegram_chat',
   };
+  const userTargetKindByProvider: Record<
+    NonNullable<CustomAutomationWriteInput['targetProvider']>,
+    BackgroundAutomationTargetKind
+  > = {
+    slack: 'slack_user',
+    discord: 'discord_user',
+    teams: 'teams_user',
+    telegram: 'telegram_user',
+  };
 
   const provider = input.targetProvider as BackgroundAutomationProvider;
   const target: AutomationTarget = {
     provider,
     targetKind: directMessage
-      ? 'slack_user'
+      ? userTargetKindByProvider[input.targetProvider]
       : targetKindByProvider[input.targetProvider],
     externalRef,
   };
 
   const serviceUrl = input.targetServiceUrl?.trim();
-  if (serviceUrl) {
+  if (!directMessage && serviceUrl) {
     target.metadata = { serviceUrl };
   }
 

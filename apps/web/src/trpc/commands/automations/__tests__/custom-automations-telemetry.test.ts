@@ -102,32 +102,41 @@ describe('custom automation activation telemetry', () => {
     );
   });
 
-  it('stores DM me against the automation owner', async () => {
-    mocks.createCustomAutomation.mockResolvedValue(
-      customAutomation({ provider: 'slack' }),
-    );
+  it.each([
+    ['slack', 'slack_user'],
+    ['discord', 'discord_user'],
+    ['teams', 'teams_user'],
+    ['telegram', 'telegram_user'],
+  ] as const)(
+    'stores %s DM me against the automation owner',
+    async (provider, targetKind) => {
+      mocks.listConnectedCommunicationProviders.mockResolvedValue([provider]);
+      mocks.createCustomAutomation.mockResolvedValue(
+        customAutomation({ provider }),
+      );
 
-    await createCustomAutomationCommand(adminAuth, {
-      name: 'Private automation name',
-      prompt: 'Private prompt',
-      enabled: true,
-      scheduleMode: 'daily',
-      environmentId: 'environment-id',
-      targetProvider: 'slack',
-      targetMode: 'direct_message',
-    });
+      await createCustomAutomationCommand(adminAuth, {
+        name: 'Private automation name',
+        prompt: 'Private prompt',
+        enabled: true,
+        scheduleMode: 'daily',
+        environmentId: 'environment-id',
+        targetProvider: provider,
+        targetMode: 'direct_message',
+      });
 
-    expect(mocks.createCustomAutomation).toHaveBeenCalledWith(
-      expect.objectContaining({
-        createdByUserId: 'user-admin',
-        target: {
-          provider: 'slack',
-          targetKind: 'slack_user',
-          externalRef: 'user-admin',
-        },
-      }),
-    );
-  });
+      expect(mocks.createCustomAutomation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          createdByUserId: 'user-admin',
+          target: {
+            provider,
+            targetKind,
+            externalRef: 'user-admin',
+          },
+        }),
+      );
+    },
+  );
 
   it('tracks deletion with only the persisted destination provider classification', async () => {
     mocks.getCustomAutomationById.mockResolvedValue(
