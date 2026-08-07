@@ -423,10 +423,191 @@ describe('triagePrReviewActivity', () => {
         summary: 'A reviewer left feedback on the pull request.',
         followUpQuestion: 'Would you like me to resolve these issues?',
         followUpPrompt:
-          'Review and resolve the unresolved feedback on [owner/repo#42](https://github.com/owner/repo/pull/42). Revalidate each comment against the current code, address valid issues, and update the pull request.',
+          'Review and resolve the actionable problems on [owner/repo#42](https://github.com/owner/repo/pull/42). Revalidate each unresolved review comment against the current code and address valid issues. Update the pull request with the validated fixes.',
       });
     },
   );
+
+  it('adds a deterministic resolve offer when a CI check is failing', async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        worthNotifying: true,
+        summary: 'The pull request has a failing check.',
+        followUpQuestion: '',
+        followUpPrompt: '',
+      },
+    });
+
+    await expect(
+      triagePrReviewActivity({
+        ...request,
+        events: eventsWithoutSelfReview,
+        context: {
+          resolvedThreadCount: 0,
+          unresolvedThreadCount: 0,
+          latestReviewStatus: null,
+          latestReviewSummaryComment: null,
+          ciStatus: {
+            checks: [
+              { name: 'CI / Lint', status: 'success' },
+              { name: 'CI / Tests', status: 'failure' },
+            ],
+          },
+          mergeable: true,
+        },
+      }),
+    ).resolves.toEqual({
+      post: true,
+      summary: 'The pull request has a failing check.',
+      followUpQuestion: 'Would you like me to resolve this issue?',
+      followUpPrompt:
+        'Review and resolve the actionable problems on [owner/repo#42](https://github.com/owner/repo/pull/42). Investigate and fix the failing CI checks: CI / Tests. Update the pull request with the validated fixes.',
+    });
+  });
+
+  it('adds a deterministic resolve offer when the pull request has merge conflicts', async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        worthNotifying: true,
+        summary: 'The pull request has merge conflicts.',
+        followUpQuestion: '',
+        followUpPrompt: '',
+      },
+    });
+
+    await expect(
+      triagePrReviewActivity({
+        ...request,
+        events: eventsWithoutSelfReview,
+        context: {
+          resolvedThreadCount: 0,
+          unresolvedThreadCount: 0,
+          latestReviewStatus: null,
+          latestReviewSummaryComment: null,
+          ciStatus: null,
+          mergeable: false,
+        },
+      }),
+    ).resolves.toEqual({
+      post: true,
+      summary: 'The pull request has merge conflicts.',
+      followUpQuestion: 'Would you like me to resolve this issue?',
+      followUpPrompt:
+        "Review and resolve the actionable problems on [owner/repo#42](https://github.com/owner/repo/pull/42). Resolve the pull request's merge conflicts without discarding either side's intended changes. Update the pull request with the validated fixes.",
+    });
+  });
+
+  it('combines review feedback, failing checks, and merge conflicts in one resolve offer', async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        worthNotifying: true,
+        summary: 'The pull request has several actionable problems.',
+        followUpQuestion: '',
+        followUpPrompt: '',
+      },
+    });
+
+    await expect(
+      triagePrReviewActivity({
+        ...request,
+        events: eventsWithoutSelfReview,
+        context: {
+          resolvedThreadCount: 0,
+          unresolvedThreadCount: 1,
+          latestReviewStatus: null,
+          latestReviewSummaryComment: null,
+          ciStatus: {
+            checks: [{ name: 'CI / Tests', status: 'error' }],
+          },
+          mergeable: false,
+        },
+      }),
+    ).resolves.toEqual({
+      post: true,
+      summary: 'The pull request has several actionable problems.',
+      followUpQuestion: 'Would you like me to resolve these issues?',
+      followUpPrompt:
+        "Review and resolve the actionable problems on [owner/repo#42](https://github.com/owner/repo/pull/42). Revalidate each unresolved review comment against the current code and address valid issues. Investigate and fix the failing CI checks: CI / Tests. Resolve the pull request's merge conflicts without discarding either side's intended changes. Update the pull request with the validated fixes.",
+    });
+  });
+
+  it('replaces a generated offer with the complete live actionable state', async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        worthNotifying: true,
+        summary: 'A reviewer left feedback.',
+        followUpQuestion: 'Would you like me to resolve the review feedback?',
+        followUpPrompt: 'Resolve the review comments.',
+      },
+    });
+
+    const result = await triagePrReviewActivity({
+      ...request,
+      events: eventsWithoutSelfReview,
+      context: {
+        resolvedThreadCount: 0,
+        unresolvedThreadCount: 1,
+        latestReviewStatus: null,
+        latestReviewSummaryComment: null,
+        ciStatus: {
+          checks: [{ name: 'CI / Tests', status: 'failure' }],
+        },
+        mergeable: false,
+      },
+    });
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        post: true,
+        followUpQuestion: 'Would you like me to resolve these issues?',
+        followUpPrompt: expect.stringContaining(
+          'Investigate and fix the failing CI checks: CI / Tests.',
+        ),
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        followUpPrompt: expect.stringContaining(
+          "Resolve the pull request's merge conflicts",
+        ),
+      }),
+    );
+  });
+
+  it('notifies with a deterministic summary when triage rejects live actionable state', async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        worthNotifying: false,
+        summary: '',
+        followUpQuestion: '',
+        followUpPrompt: '',
+      },
+    });
+
+    await expect(
+      triagePrReviewActivity({
+        ...request,
+        events: eventsWithoutSelfReview,
+        context: {
+          resolvedThreadCount: 0,
+          unresolvedThreadCount: 0,
+          latestReviewStatus: null,
+          latestReviewSummaryComment: null,
+          ciStatus: {
+            checks: [{ name: 'CI / Tests', status: 'failure' }],
+          },
+          mergeable: true,
+        },
+      }),
+    ).resolves.toEqual({
+      post: true,
+      summary:
+        '[owner/repo#42](https://github.com/owner/repo/pull/42) needs attention: 1 CI check is failing.',
+      followUpQuestion: 'Would you like me to resolve this issue?',
+      followUpPrompt:
+        'Review and resolve the actionable problems on [owner/repo#42](https://github.com/owner/repo/pull/42). Investigate and fix the failing CI checks: CI / Tests. Update the pull request with the validated fixes.',
+    });
+  });
 
   it('keeps a notification informational when no unresolved threads remain', async () => {
     mockGenerateObject.mockResolvedValue({

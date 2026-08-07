@@ -750,11 +750,44 @@ export async function triagePrReviewActivity({
     prompt,
   });
 
-  if (!object.worthNotifying && !containsSelfReviewResult) {
+  const unresolvedThreadCount = context?.unresolvedThreadCount ?? 0;
+  const failedCheckNames =
+    context?.ciStatus?.checks
+      .filter((check) => check.status === 'failure' || check.status === 'error')
+      .map((check) => check.name) ?? [];
+  const hasMergeConflicts = context?.mergeable === false;
+  const actionableProblemCount =
+    unresolvedThreadCount +
+    failedCheckNames.length +
+    (hasMergeConflicts ? 1 : 0);
+  const hasLiveActionableState = actionableProblemCount > 0;
+
+  if (
+    !object.worthNotifying &&
+    !containsSelfReviewResult &&
+    !hasLiveActionableState
+  ) {
     return { post: false, reason: 'not_worth_notifying' };
   }
 
-  const summary = object.summary.trim();
+  const deterministicSummary = [
+    ...(unresolvedThreadCount > 0
+      ? [
+          `${unresolvedThreadCount} unresolved review ${unresolvedThreadCount === 1 ? 'thread remains' : 'threads remain'}`,
+        ]
+      : []),
+    ...(failedCheckNames.length > 0
+      ? [
+          `${failedCheckNames.length} CI ${failedCheckNames.length === 1 ? 'check is' : 'checks are'} failing`,
+        ]
+      : []),
+    ...(hasMergeConflicts ? ['the pull request has merge conflicts'] : []),
+  ].join(', ');
+  const summary =
+    object.summary.trim() ||
+    (hasLiveActionableState
+      ? `[${repository}#${prNumber}](${prUrl}) needs attention: ${deterministicSummary}.`
+      : '');
 
   if (!summary) {
     throw new Error(
@@ -764,32 +797,44 @@ export async function triagePrReviewActivity({
 
   const followUpQuestion = object.followUpQuestion.trim();
   const followUpPrompt = object.followUpPrompt.trim();
-  // The offer is only actionable when both halves exist; a question without
-  // an injectable instruction (or vice versa) uses a deterministic fallback
-  // when live PR state still shows unresolved review threads.
   const hasGeneratedFollowUp =
     followUpQuestion.length > 0 && followUpPrompt.length > 0;
-  const unresolvedThreadCount = context?.unresolvedThreadCount ?? 0;
-  const fallbackFollowUp =
-    !hasGeneratedFollowUp && unresolvedThreadCount > 0
-      ? {
-          question:
-            unresolvedThreadCount === 1
-              ? 'Would you like me to resolve this issue?'
-              : 'Would you like me to resolve these issues?',
-          prompt: `Review and resolve the unresolved feedback on [${repository}#${prNumber}](${prUrl}). Revalidate each comment against the current code, address valid issues, and update the pull request.`,
-        }
-      : null;
+  const fallbackInstructions = [
+    ...(unresolvedThreadCount > 0
+      ? [
+          'Revalidate each unresolved review comment against the current code and address valid issues.',
+        ]
+      : []),
+    ...(failedCheckNames.length > 0
+      ? [
+          `Investigate and fix the failing CI checks: ${failedCheckNames.join(', ')}.`,
+        ]
+      : []),
+    ...(hasMergeConflicts
+      ? [
+          "Resolve the pull request's merge conflicts without discarding either side's intended changes.",
+        ]
+      : []),
+  ];
+  const fallbackFollowUp = hasLiveActionableState
+    ? {
+        question:
+          actionableProblemCount === 1
+            ? 'Would you like me to resolve this issue?'
+            : 'Would you like me to resolve these issues?',
+        prompt: `Review and resolve the actionable problems on [${repository}#${prNumber}](${prUrl}). ${fallbackInstructions.join(' ')} Update the pull request with the validated fixes.`,
+      }
+    : null;
 
   return {
     post: true,
     summary,
-    followUpQuestion: hasGeneratedFollowUp
-      ? followUpQuestion
-      : (fallbackFollowUp?.question ?? null),
-    followUpPrompt: hasGeneratedFollowUp
-      ? followUpPrompt
-      : (fallbackFollowUp?.prompt ?? null),
+    followUpQuestion:
+      fallbackFollowUp?.question ??
+      (hasGeneratedFollowUp ? followUpQuestion : null),
+    followUpPrompt:
+      fallbackFollowUp?.prompt ??
+      (hasGeneratedFollowUp ? followUpPrompt : null),
   };
 }
 
