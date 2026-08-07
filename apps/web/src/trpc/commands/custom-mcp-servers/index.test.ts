@@ -288,13 +288,20 @@ describe('custom-mcp-servers commands', () => {
       // Session-less tools/list refused by a strict server.
       .mockResolvedValueOnce(new Response('session required', { status: 400 }))
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: {} }), {
-          status: 200,
-          headers: {
-            'content-type': 'application/json',
-            'mcp-session-id': 'sess-1',
+        new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            result: { protocolVersion: '2024-11-05' },
+          }),
+          {
+            status: 200,
+            headers: {
+              'content-type': 'application/json',
+              'mcp-session-id': 'sess-1',
+            },
           },
-        }),
+        ),
       )
       // notifications/initialized is accepted without a body.
       .mockResolvedValueOnce(new Response(null, { status: 202 }))
@@ -322,12 +329,74 @@ describe('custom-mcp-servers commands', () => {
       method: 'notifications/initialized',
     });
     expect(notificationInit?.headers?.['mcp-session-id']).toBe('sess-1');
+    expect(notificationInit?.headers?.['mcp-protocol-version']).toBe(
+      '2024-11-05',
+    );
     expect(notificationInit?.headers?.['x-api-key']).toBe('secret-one');
 
     const [, listInit] = safeFetchMock.mock.calls[3]!;
     expect(JSON.parse(String(listInit?.body)).method).toBe('tools/list');
     expect(listInit?.headers?.['mcp-session-id']).toBe('sess-1');
+    expect(listInit?.headers?.['mcp-protocol-version']).toBe('2024-11-05');
   });
+
+  it.each([
+    {
+      responseName: 'a JSON-RPC error',
+      payload: {
+        jsonrpc: '2.0',
+        id: 1,
+        error: { code: -32001, message: 'Session required' },
+      },
+    },
+    {
+      responseName: 'no tool-list result',
+      payload: { jsonrpc: '2.0', id: 1, result: {} },
+    },
+  ])(
+    'initializes when a session-less tools/list returns $responseName',
+    async ({ payload }) => {
+      const { id } = await createCustomMcpServerCommand(adminAuth, remoteInput);
+
+      safeFetchMock.mockReset();
+      safeFetchMock
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(payload), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: {} }), {
+            status: 200,
+            headers: {
+              'content-type': 'application/json',
+              'mcp-session-id': 'sess-1',
+            },
+          }),
+        )
+        .mockResolvedValueOnce(new Response(null, { status: 202 }))
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              jsonrpc: '2.0',
+              id: 2,
+              result: { tools: [{ name: 'query' }] },
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          ),
+        );
+
+      const { tools } = await listCustomMcpServerToolsCommand(adminAuth, {
+        id,
+      });
+
+      expect(tools).toEqual([
+        { name: 'query', description: null, enabled: true },
+      ]);
+      expect(safeFetchMock).toHaveBeenCalledTimes(4);
+    },
+  );
 
   it('still lists tools when the initialized notification is refused', async () => {
     const { id } = await createCustomMcpServerCommand(adminAuth, remoteInput);

@@ -341,12 +341,15 @@ type ListedCustomMcpTool = {
   enabled: boolean;
 };
 
+const CUSTOM_MCP_PROTOCOL_VERSION = '2025-06-18';
+
 async function callCustomMcpServer(input: {
   url: string;
   headers: Record<string, string>;
   method: string;
   params: unknown;
   sessionId?: string | null;
+  protocolVersion?: string;
   requestId: number;
 }): Promise<{
   payload: unknown;
@@ -360,6 +363,9 @@ async function callCustomMcpServer(input: {
       'content-type': 'application/json',
       accept: 'application/json, text/event-stream',
       ...(input.sessionId ? { 'mcp-session-id': input.sessionId } : {}),
+      ...(input.protocolVersion
+        ? { 'mcp-protocol-version': input.protocolVersion }
+        : {}),
       ...input.headers,
     },
     body: JSON.stringify({
@@ -399,6 +405,7 @@ async function sendCustomMcpInitializedNotification(input: {
   url: string;
   headers: Record<string, string>;
   sessionId: string | null;
+  protocolVersion: string;
 }): Promise<void> {
   try {
     await safeFetch(input.url, {
@@ -408,6 +415,7 @@ async function sendCustomMcpInitializedNotification(input: {
         'content-type': 'application/json',
         accept: 'application/json, text/event-stream',
         ...(input.sessionId ? { 'mcp-session-id': input.sessionId } : {}),
+        'mcp-protocol-version': input.protocolVersion,
         ...input.headers,
       },
       body: JSON.stringify({
@@ -486,6 +494,18 @@ export async function listCustomMcpServerToolsCommand(
       params: {},
       requestId: 1,
     });
+
+    const directResult =
+      direct.payload &&
+      typeof direct.payload === 'object' &&
+      'result' in direct.payload
+        ? (direct.payload as { result?: { tools?: unknown } }).result
+        : undefined;
+
+    if (!directResult || !Array.isArray(directResult.tools)) {
+      throw new Error('Custom MCP server requires initialization.');
+    }
+
     toolsPayload = direct.payload;
   } catch {
     const initialized = await callCustomMcpServer({
@@ -493,17 +513,30 @@ export async function listCustomMcpServerToolsCommand(
       headers,
       method: 'initialize',
       params: {
-        protocolVersion: '2025-06-18',
+        protocolVersion: CUSTOM_MCP_PROTOCOL_VERSION,
         capabilities: {},
         clientInfo: { name: 'Roomote', version: '1.0.0' },
       },
       requestId: 1,
     });
 
+    const initializedResult =
+      initialized.payload &&
+      typeof initialized.payload === 'object' &&
+      'result' in initialized.payload
+        ? (initialized.payload as { result?: { protocolVersion?: unknown } })
+            .result
+        : undefined;
+    const protocolVersion =
+      typeof initializedResult?.protocolVersion === 'string'
+        ? initializedResult.protocolVersion
+        : CUSTOM_MCP_PROTOCOL_VERSION;
+
     await sendCustomMcpInitializedNotification({
       url: server.url,
       headers,
       sessionId: initialized.sessionId,
+      protocolVersion,
     });
 
     const listed = await callCustomMcpServer({
@@ -512,6 +545,7 @@ export async function listCustomMcpServerToolsCommand(
       method: 'tools/list',
       params: {},
       sessionId: initialized.sessionId,
+      protocolVersion,
       requestId: 2,
     });
     toolsPayload = listed.payload;
