@@ -320,4 +320,59 @@ describe('createCustomMcpProxy', () => {
     expect(response.status).toBe(413);
     expect(lastUpstreamHeaders).toBeNull();
   });
+
+  it('rejects on Content-Length before the body is parsed', async () => {
+    mockFindCustomServer.mockResolvedValue(
+      buildServerRow({ url: upstreamUrl() }),
+    );
+
+    // Deliberately invalid JSON: parsing first would answer 400, so a 413
+    // here proves the size check runs before the body is parsed at all.
+    const response = await createApp().request(`/custom/${SERVER_ID}`, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json, text/event-stream',
+        'content-type': 'application/json',
+        'content-length': String(1024 * 1024 * 64),
+      },
+      body: 'not-json',
+    });
+
+    expect(response.status).toBe(413);
+    expect(lastUpstreamHeaders).toBeNull();
+  });
+
+  it('aborts a chunked body that understates its size', async () => {
+    mockFindCustomServer.mockResolvedValue(
+      buildServerRow({ url: upstreamUrl() }),
+    );
+
+    // No content-length, and the stream would never end on its own: only the
+    // streamed byte cap can stop this.
+    let enqueuedChunks = 0;
+    const chunk = new TextEncoder().encode('x'.repeat(64 * 1024));
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        enqueuedChunks += 1;
+        controller.enqueue(chunk);
+      },
+    });
+
+    const response = await createApp().request(`/custom/${SERVER_ID}`, {
+      method: 'POST',
+      headers: {
+        accept: 'application/json, text/event-stream',
+        'content-type': 'application/json',
+      },
+      body,
+      // @ts-expect-error -- required by undici for streaming request bodies.
+      duplex: 'half',
+    });
+
+    expect(response.status).toBe(413);
+    expect(lastUpstreamHeaders).toBeNull();
+    // The cap is 1 MiB, so the read stops long before an unbounded stream
+    // could exhaust memory.
+    expect(enqueuedChunks).toBeLessThan(64);
+  });
 });

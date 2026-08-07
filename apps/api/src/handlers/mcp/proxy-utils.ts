@@ -459,6 +459,68 @@ function filterToolsListPayload(
   };
 }
 
+class RequestBodyTooLargeError extends Error {
+  constructor(readonly observedBytes: number) {
+    super('Request body exceeds the configured limit');
+    this.name = 'RequestBodyTooLargeError';
+  }
+}
+
+/**
+ * Read a request body as text without ever buffering more than `maxBytes`.
+ *
+ * `Content-Length` is checked first so an oversized request is rejected
+ * before a single chunk is read, but it is only a hint: chunked bodies omit
+ * it and a hostile client can understate it. The streamed read is therefore
+ * the real bound — it aborts as soon as the accumulated size crosses the
+ * limit, so an unbounded body can never be materialized (nor re-serialized)
+ * in memory.
+ */
+async function readBoundedRequestText(
+  request: Request,
+  maxBytes: number,
+): Promise<string> {
+  const declaredLength = Number(request.headers.get('content-length'));
+
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw new RequestBodyTooLargeError(declaredLength);
+  }
+
+  const body = request.body;
+
+  if (!body) {
+    return '';
+  }
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  let total = 0;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    if (!value) {
+      continue;
+    }
+
+    total += value.byteLength;
+
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new RequestBodyTooLargeError(total);
+    }
+
+    text += decoder.decode(value, { stream: true });
+  }
+
+  return text + decoder.decode();
+}
+
 export function createMcpProxy(config: McpProxyConfig) {
   const {
     name,
@@ -571,9 +633,39 @@ export function createMcpProxy(config: McpProxyConfig) {
 
     if (method === 'POST') {
       try {
-        parsedBody = await c.req.json();
-        upstreamBody = JSON.stringify(parsedBody);
-      } catch {
+        if (maxRequestBodyBytes === undefined) {
+          parsedBody = await c.req.json();
+          upstreamBody = JSON.stringify(parsedBody);
+        } else {
+          // Capped upstreams (custom servers) must be bounded *before* the
+          // body is buffered or parsed, so forward the vetted text as-is
+          // rather than re-serializing it.
+          upstreamBody = await readBoundedRequestText(
+            c.req.raw,
+            maxRequestBodyBytes,
+          );
+          parsedBody = JSON.parse(upstreamBody);
+        }
+      } catch (error) {
+        if (error instanceof RequestBodyTooLargeError) {
+          console.warn(
+            formatSingleLineLog(`${logPrefix} Request body too large`, {
+              requestId,
+              method,
+              path,
+              tokenType: auth.tokenType,
+              userId: auth.userId,
+              bytes: error.observedBytes,
+              limit: maxRequestBodyBytes,
+            }),
+          );
+          return jsonRpcErrorResponse(
+            413,
+            -32600,
+            `${name} MCP request body exceeds the size limit`,
+          );
+        }
+
         console.warn(
           formatSingleLineLog(`${logPrefix} Invalid JSON request body`, {
             requestId,
@@ -584,28 +676,6 @@ export function createMcpProxy(config: McpProxyConfig) {
           }),
         );
         return jsonRpcErrorResponse(400, -32700, 'Invalid JSON body');
-      }
-
-      if (
-        maxRequestBodyBytes !== undefined &&
-        upstreamBody !== undefined &&
-        Buffer.byteLength(upstreamBody, 'utf8') > maxRequestBodyBytes
-      ) {
-        console.warn(
-          formatSingleLineLog(`${logPrefix} Request body too large`, {
-            requestId,
-            method,
-            path,
-            tokenType: auth.tokenType,
-            userId: auth.userId,
-            bytes: Buffer.byteLength(upstreamBody, 'utf8'),
-          }),
-        );
-        return jsonRpcErrorResponse(
-          413,
-          -32600,
-          `${name} MCP request body exceeds the size limit`,
-        );
       }
     }
 
