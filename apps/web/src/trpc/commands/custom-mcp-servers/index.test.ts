@@ -14,10 +14,19 @@ import {
   createCustomMcpServerCommand,
   deleteCustomMcpServerCommand,
   listCustomMcpServersCommand,
+  listCustomMcpServerToolsCommand,
   setCustomMcpServerDisabledToolsCommand,
   setCustomMcpServerEnabledCommand,
   updateCustomMcpServerCommand,
 } from './index';
+
+vi.mock('@roomote/sdk/server/safe-fetch', () => ({
+  safeFetch: vi.fn(),
+}));
+
+import { safeFetch } from '@roomote/sdk/server/safe-fetch';
+
+const safeFetchMock = vi.mocked(safeFetch);
 
 import type { UserAuthSuccess } from '@/types';
 
@@ -255,6 +264,104 @@ describe('custom-mcp-servers commands', () => {
 
     listed = await listCustomMcpServersCommand(adminAuth);
     expect(listed[0]!.enabled).toBe(false);
+  });
+
+  it('allows editing the tool deny list on a disabled server', async () => {
+    const { id } = await createCustomMcpServerCommand(adminAuth, remoteInput);
+    await setCustomMcpServerEnabledCommand(adminAuth, { id, enabled: false });
+
+    await setCustomMcpServerDisabledToolsCommand(adminAuth, {
+      id,
+      disabledTools: ['dangerous_tool'],
+    });
+
+    const listed = await listCustomMcpServersCommand(adminAuth);
+    expect(listed[0]!.disabledTools).toEqual(['dangerous_tool']);
+    expect(listed[0]!.enabled).toBe(false);
+  });
+
+  it('sends notifications/initialized before the session tools/list fallback', async () => {
+    const { id } = await createCustomMcpServerCommand(adminAuth, remoteInput);
+
+    safeFetchMock.mockReset();
+    safeFetchMock
+      // Session-less tools/list refused by a strict server.
+      .mockResolvedValueOnce(new Response('session required', { status: 400 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: {} }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'mcp-session-id': 'sess-1',
+          },
+        }),
+      )
+      // notifications/initialized is accepted without a body.
+      .mockResolvedValueOnce(new Response(null, { status: 202 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 2,
+            result: { tools: [{ name: 'query', description: 'Run a query' }] },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      );
+
+    const { tools } = await listCustomMcpServerToolsCommand(adminAuth, { id });
+
+    expect(tools).toEqual([
+      { name: 'query', description: 'Run a query', enabled: true },
+    ]);
+    expect(safeFetchMock).toHaveBeenCalledTimes(4);
+
+    const [, notificationInit] = safeFetchMock.mock.calls[2]!;
+    expect(JSON.parse(String(notificationInit?.body))).toEqual({
+      jsonrpc: '2.0',
+      method: 'notifications/initialized',
+    });
+    expect(notificationInit?.headers?.['mcp-session-id']).toBe('sess-1');
+    expect(notificationInit?.headers?.['x-api-key']).toBe('secret-one');
+
+    const [, listInit] = safeFetchMock.mock.calls[3]!;
+    expect(JSON.parse(String(listInit?.body)).method).toBe('tools/list');
+    expect(listInit?.headers?.['mcp-session-id']).toBe('sess-1');
+  });
+
+  it('still lists tools when the initialized notification is refused', async () => {
+    const { id } = await createCustomMcpServerCommand(adminAuth, remoteInput);
+
+    safeFetchMock.mockReset();
+    safeFetchMock
+      .mockResolvedValueOnce(new Response('session required', { status: 400 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: {} }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'mcp-session-id': 'sess-1',
+          },
+        }),
+      )
+      // A lenient server that rejects the notification outright.
+      .mockRejectedValueOnce(new Error('unexpected notification'))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 2,
+            result: { tools: [{ name: 'query' }] },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      );
+
+    const { tools } = await listCustomMcpServerToolsCommand(adminAuth, { id });
+
+    expect(tools).toEqual([
+      { name: 'query', description: null, enabled: true },
+    ]);
   });
 
   it('kill switch blocks mutations with a clear message', () => {

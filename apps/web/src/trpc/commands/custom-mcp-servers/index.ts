@@ -389,6 +389,38 @@ async function callCustomMcpServer(input: {
 }
 
 /**
+ * Best-effort `notifications/initialized` between `initialize` and
+ * `tools/list`: the MCP lifecycle requires it, and strict servers refuse
+ * requests until the client confirms initialization, while lenient ones
+ * simply ignore it. Failures are non-fatal; if the server truly required the
+ * notification, the following `tools/list` fails loudly on its own.
+ */
+async function sendCustomMcpInitializedNotification(input: {
+  url: string;
+  headers: Record<string, string>;
+  sessionId: string | null;
+}): Promise<void> {
+  try {
+    await safeFetch(input.url, {
+      allowedPrivateCidrs: Env.R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS,
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        ...(input.sessionId ? { 'mcp-session-id': input.sessionId } : {}),
+        ...input.headers,
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'notifications/initialized',
+      }),
+    });
+  } catch {
+    // Non-fatal; see above.
+  }
+}
+
+/**
  * List the tools a custom remote server exposes, flagged with the stored
  * deny-list state. The fetch runs control-plane-side through the SSRF guard
  * with the server's real credentials (which never reach the browser).
@@ -466,6 +498,12 @@ export async function listCustomMcpServerToolsCommand(
         clientInfo: { name: 'Roomote', version: '1.0.0' },
       },
       requestId: 1,
+    });
+
+    await sendCustomMcpInitializedNotification({
+      url: server.url,
+      headers,
+      sessionId: initialized.sessionId,
     });
 
     const listed = await callCustomMcpServer({
@@ -615,22 +653,19 @@ export async function setCustomMcpServerDisabledToolsCommand(
   assertAdmin(auth);
   assertCustomMcpEnabled();
 
+  // Deliberately no enabled filter: adjusting the deny list on a disabled
+  // server is a natural part of preparing it for re-enablement.
   const [updated] = await db
     .update(customMcpServers)
     .set({
       disabledTools: input.disabledTools,
       updatedAt: new Date(),
     })
-    .where(
-      and(
-        eq(customMcpServers.id, input.id),
-        eq(customMcpServers.enabled, true),
-      ),
-    )
+    .where(eq(customMcpServers.id, input.id))
     .returning({ id: customMcpServers.id });
 
   if (!updated) {
-    throw new Error('Custom MCP server not found or disabled.');
+    throw new Error('Custom MCP server not found.');
   }
 
   return { disabledTools: input.disabledTools };
