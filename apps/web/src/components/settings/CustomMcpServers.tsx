@@ -29,6 +29,7 @@ import {
 } from '@/components/system';
 import { Loading } from '@/components/layout';
 import { Section } from '@/components/settings';
+import type { CustomMcpServerListEntry } from '@/trpc/commands/custom-mcp-servers';
 import { useTRPC } from '@/trpc/client';
 
 type Transport = 'remote' | 'stdio';
@@ -48,22 +49,7 @@ interface ServerFormValues {
   stdioEnv: { name: string; value: string }[];
 }
 
-interface ListedServer {
-  id: string;
-  name: string;
-  transport: Transport;
-  url: string | null;
-  authType: AuthType;
-  headerNames: string[];
-  stdioCommand: string | null;
-  stdioArgs: string[];
-  stdioEnvNames: string[];
-  disabledTools: string[];
-  hasManualClient: boolean;
-  oauthResourceIndicatorDisabled: boolean;
-  authStatus: 'pending' | 'authenticated' | 'error' | null;
-  enabled: boolean;
-}
+type ListedServer = Omit<CustomMcpServerListEntry, 'createdAt' | 'updatedAt'>;
 
 const EMPTY_FORM: ServerFormValues = {
   name: '',
