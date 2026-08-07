@@ -1271,6 +1271,20 @@ export async function submitTaskSuggestions(
     const payload = run.payload as SuggestedTasksPayload;
     const usesPinnedOrgWideLaunchContract =
       usesRouterLaunchContract && payload.repo === ALL_REPOSITORIES;
+    if (
+      usesPinnedOrgWideLaunchContract &&
+      parsedBody.data.suggestions.some(
+        (suggestion) => !suggestion.targetRepositoryFullName?.trim(),
+      )
+    ) {
+      return c.json(
+        {
+          error:
+            'targetRepositoryFullName is required for org-wide current-thread suggestions',
+        },
+        400,
+      );
+    }
     const currentThreadLaunchRouting =
       usesRouterLaunchContract && !usesPinnedOrgWideLaunchContract
         ? ('router' as const)
