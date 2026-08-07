@@ -5,3 +5,6 @@ export const isOrgEnabled = (mcpId: string) =>
 
 export const getMcpServerConfigs = () =>
   client.mcpConnections.getMcpServerConfigs.query();
+
+export const getCustomStdioMcpServers = () =>
+  client.mcpConnections.getCustomStdioMcpServers.query();

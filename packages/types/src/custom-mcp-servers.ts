@@ -39,6 +39,13 @@ export const RESERVED_CUSTOM_MCP_SERVER_NAMES: ReadonlySet<string> = new Set([
 /** The mcpConnections.mcpId namespace for custom-server OAuth connections. */
 export const CUSTOM_MCP_CONNECTION_PREFIX = 'custom:';
 
+/**
+ * API proxy path prefix for custom remote servers. Shared by the SDK config
+ * delivery (which emits these URLs), the worker (which recognizes them and
+ * injects the cloud token), and the API handler (which mounts the route).
+ */
+export const CUSTOM_MCP_PROXY_PATH_PREFIX = '/api/mcp/custom/';
+
 export function customMcpConnectionId(serverId: string): string {
   return `${CUSTOM_MCP_CONNECTION_PREFIX}${serverId}`;
 }

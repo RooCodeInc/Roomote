@@ -8,6 +8,7 @@ vi.mock('@roomote/env', () => ({
   Env: mockEnv,
   areCuratedIntegrationsDisabled: (value: boolean | undefined) =>
     value === true,
+  isCustomMcpDisabled: (value: boolean | undefined) => value === true,
 }));
 
 const {
@@ -26,6 +27,8 @@ const {
   mockIsNull,
   mockInArray,
   mockDesc,
+  mockFindCustomServers,
+  mockFindConnectionFirst,
 } = vi.hoisted(() => {
   const mockOrderBy = vi.fn();
   const mockWhere = vi.fn(() => ({
@@ -64,6 +67,8 @@ const {
       values,
     })),
     mockDesc: vi.fn((column: unknown) => ({ type: 'desc', column })),
+    mockFindCustomServers: vi.fn(async () => []),
+    mockFindConnectionFirst: vi.fn(async () => undefined),
   };
 });
 
@@ -78,9 +83,19 @@ vi.mock('@roomote/db/server', () => ({
       },
       mcpConnections: {
         findMany: mockFindConnections,
+        findFirst: mockFindConnectionFirst,
+      },
+      customMcpServers: {
+        findMany: mockFindCustomServers,
         findFirst: vi.fn(),
       },
     },
+  },
+  customMcpServers: {
+    id: 'customServer.id',
+    name: 'customServer.name',
+    enabled: 'customServer.enabled',
+    stdio: 'customServer.stdio',
   },
   mcpConnections: {
     id: 'connection.id',
@@ -101,7 +116,14 @@ vi.mock('@roomote/db/server', () => ({
   and: mockAnd,
   or: mockOr,
   isNull: mockIsNull,
+  isNotNull: vi.fn((column: unknown) => ({ type: 'isNotNull', column })),
   inArray: mockInArray,
+}));
+
+vi.mock('@roomote/db/encryption', () => ({
+  encrypt: vi.fn((value: string) => `enc(${value})`),
+  decrypt: vi.fn((value: string) => value.replace(/^enc\(|\)$/g, '')),
+  decryptText: vi.fn((value: string) => value),
 }));
 
 vi.mock('../lib/mcp/data', () => ({
@@ -855,5 +877,143 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     ).getMcpServerConfigs();
 
     expect(consoleErrorSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('custom MCP server delivery', () => {
+  beforeEach(() => {
+    mockFindCustomServers.mockReset();
+    mockFindCustomServers.mockResolvedValue([]);
+    mockFindConnectionFirst.mockReset();
+    mockFindConnectionFirst.mockResolvedValue(undefined);
+    mockEnv.R_CURATED_INTEGRATIONS_DISABLED = false;
+    mockEnv.R_CUSTOM_MCP_DISABLED = false;
+  });
+
+  const remoteRow = {
+    id: 'server-uuid-1',
+    name: 'internal-tools',
+    url: 'https://mcp.internal.example/mcp',
+    authType: 'static_headers',
+    stdio: null,
+    enabled: true,
+  };
+
+  it('delivers custom proxy entries even when curated integrations are disabled', async () => {
+    mockEnv.R_CURATED_INTEGRATIONS_DISABLED = true;
+    mockFindCustomServers.mockResolvedValue([remoteRow]);
+
+    const result = await createJobCaller(
+      'https://app.example.com/api/trpc/x',
+    ).getMcpServerConfigs();
+
+    expect(result.servers['internal-tools']).toEqual({
+      url: 'https://app.example.com/api/mcp/custom/server-uuid-1',
+      headers: { 'X-MCP-Client': 'Roomote' },
+    });
+    // The upstream URL and static headers never appear in the response.
+    expect(JSON.stringify(result)).not.toContain('mcp.internal.example');
+  });
+
+  it('honors the custom kill switch independently of the curated flag', async () => {
+    mockEnv.R_CUSTOM_MCP_DISABLED = true;
+    mockFindCustomServers.mockResolvedValue([remoteRow]);
+    mockFindEnablements.mockResolvedValue([]);
+    mockOrderBy.mockResolvedValue([]);
+
+    const result = await createJobCaller(
+      'https://app.example.com/api/trpc/x',
+    ).getMcpServerConfigs();
+
+    expect(result.servers['internal-tools']).toBeUndefined();
+  });
+
+  it('skips oauth custom servers without an authenticated connection', async () => {
+    mockFindCustomServers.mockResolvedValue([
+      { ...remoteRow, authType: 'oauth' },
+    ]);
+    mockFindEnablements.mockResolvedValue([]);
+    mockOrderBy.mockResolvedValue([]);
+    mockFindConnectionFirst.mockResolvedValue({ authStatus: 'pending' });
+
+    const result = await createJobCaller(
+      'https://app.example.com/api/trpc/x',
+    ).getMcpServerConfigs();
+
+    expect(result.servers['internal-tools']).toBeUndefined();
+  });
+
+  it('includes oauth custom servers once authenticated', async () => {
+    mockFindCustomServers.mockResolvedValue([
+      { ...remoteRow, authType: 'oauth' },
+    ]);
+    mockFindEnablements.mockResolvedValue([]);
+    mockOrderBy.mockResolvedValue([]);
+    mockFindConnectionFirst.mockResolvedValue({ authStatus: 'authenticated' });
+
+    const result = await createJobCaller(
+      'https://app.example.com/api/trpc/x',
+    ).getMcpServerConfigs();
+
+    expect(result.servers['internal-tools']?.url).toBe(
+      'https://app.example.com/api/mcp/custom/server-uuid-1',
+    );
+  });
+
+  it('excludes stdio rows from remote delivery', async () => {
+    mockFindCustomServers.mockResolvedValue([
+      {
+        ...remoteRow,
+        url: null,
+        stdio: { command: 'npx', env: { TOKEN: 'enc(sec)' } },
+      },
+    ]);
+    mockFindEnablements.mockResolvedValue([]);
+    mockOrderBy.mockResolvedValue([]);
+
+    const result = await createJobCaller(
+      'https://app.example.com/api/trpc/x',
+    ).getMcpServerConfigs();
+
+    expect(Object.keys(result.servers)).toHaveLength(0);
+  });
+});
+
+describe('getCustomStdioMcpServers', () => {
+  beforeEach(() => {
+    mockFindCustomServers.mockReset();
+    mockFindCustomServers.mockResolvedValue([]);
+    mockEnv.R_CUSTOM_MCP_DISABLED = false;
+  });
+
+  it('rejects plain auth tokens', async () => {
+    await expect(
+      createCaller().getCustomStdioMcpServers(),
+    ).rejects.toMatchObject({ code: 'FORBIDDEN' });
+  });
+
+  it('returns decrypted stdio env values to run tokens', async () => {
+    mockFindCustomServers.mockResolvedValue([
+      {
+        id: 'server-uuid-2',
+        name: 'local-tools',
+        url: null,
+        authType: 'none',
+        stdio: {
+          command: 'npx',
+          args: ['-y', '@example/server'],
+          env: { EXAMPLE_TOKEN: 'enc(stdio-secret)' },
+        },
+        enabled: true,
+      },
+    ]);
+
+    const result = await createJobCaller().getCustomStdioMcpServers();
+
+    expect(result.servers['local-tools']).toEqual({
+      command: 'npx',
+      args: ['-y', '@example/server'],
+      env: { EXAMPLE_TOKEN: 'stdio-secret' },
+    });
   });
 });
