@@ -19,6 +19,7 @@ export * from './issue-fixer-prompt';
 
 export * from './ci-failure-triage-claims';
 export * from './automation-root-summary';
+export * from './audio-transcription';
 export * from './file-attachments';
 export * from './fast-agent';
 export * from './github-message-instructions';
