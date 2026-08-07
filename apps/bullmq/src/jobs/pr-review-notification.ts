@@ -35,7 +35,8 @@ import {
 } from '@roomote/slack';
 import {
   buildPrReviewActionCallbackData,
-  isActivelyRunningTask,
+  isTaskExecutingTurn,
+  RunStatus,
 } from '@roomote/types';
 
 type PrReviewNotificationJob = Job<PrReviewNotificationRequest, void, string>;
@@ -240,10 +241,7 @@ export const prReviewNotificationJob = async (
     return;
   }
 
-  // This is an out-of-band conversation message, not an injected agent turn.
-  // Use the same active/idle contract as the task UI so a stale `running`
-  // phase on an already-idle run cannot suppress review feedback indefinitely.
-  if (isActivelyRunningTask(latestJob.status, latestJob.taskPhase)) {
+  if (isTaskExecutingTurn(latestJob.status, latestJob.taskPhase)) {
     if (data.deferrals < PR_REVIEW_NOTIFICATION_MAX_DEFERRALS) {
       await schedulePrReviewNotificationJob({
         request: { ...data, deferrals: data.deferrals + 1 },
@@ -256,11 +254,20 @@ export const prReviewNotificationJob = async (
       return;
     }
 
-    console.warn(
-      `[PrReviewNotification] Task ${data.taskId} never went idle after ${data.deferrals} deferrals, dropping pending review activity for ${data.repository}#${data.prNumber}`,
-    );
-    await consumePendingPrReviewActivity(target);
-    return;
+    // Live-sandbox follow-up turns use Idle + running, so preserve the normal
+    // deferral window. At the cap, trust the durable Idle status rather than
+    // dropping feedback forever when the runtime phase became stale.
+    if (latestJob.status === RunStatus.Idle) {
+      console.warn(
+        `[PrReviewNotification] Task ${data.taskId} is idle with a running phase after ${data.deferrals} deferrals; delivering pending review activity for ${data.repository}#${data.prNumber}`,
+      );
+    } else {
+      console.warn(
+        `[PrReviewNotification] Task ${data.taskId} never went idle after ${data.deferrals} deferrals, dropping pending review activity for ${data.repository}#${data.prNumber}`,
+      );
+      await consumePendingPrReviewActivity(target);
+      return;
+    }
   }
 
   const prLink = await db.query.taskPullRequests.findFirst({
