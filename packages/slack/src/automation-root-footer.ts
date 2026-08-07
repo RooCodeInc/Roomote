@@ -22,10 +22,11 @@ export function buildAutomationRootFooterBlocks(params: {
       ? [params.linkedPrUrl]
       : [];
 
-  for (const [index, linkedPrUrl] of linkedPrUrls.entries()) {
+  // Leave room for the task button in Slack's 25-element actions-block limit.
+  for (const [index, linkedPrUrl] of linkedPrUrls.slice(0, 24).entries()) {
     actionElements.push({
       type: 'button',
-      action_id: 'late_bound_automation_view_pr',
+      action_id: `late_bound_automation_view_pr_${index + 1}`,
       text: {
         type: 'plain_text',
         text: linkedPrUrls.length === 1 ? 'See PR' : `See PR ${index + 1}`,
