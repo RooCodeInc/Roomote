@@ -21,6 +21,7 @@ jobs:
     outputs:
       docs_only: ${{ steps.changed-paths.outputs.docs_only }}
       worker_image_affected: ${{ steps.changed-paths.outputs.worker_image_affected }}
+      pr_image_version: ${{ steps.changed-paths.outputs.pr_image_version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -31,6 +32,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          echo 'pr_image_version=' >> "$GITHUB_OUTPUT"
 
           # Fail safe: when we cannot compute a reliable diff (manual dispatch,
           # force-push over a gone base, or an empty diff), build everything.
@@ -47,6 +50,7 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
             base="${{ github.event.pull_request.base.sha }}"
             head="${{ github.event.pull_request.head.sha }}"
+            echo "pr_image_version=pr-${{ github.event.pull_request.number }}-${head}-${base}" >> "$GITHUB_OUTPUT"
             changed_files="$(git diff --name-only "$base...$head")"
           else
             before="${{ github.event.before }}"
@@ -102,6 +106,24 @@ jobs:
 
           echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
           echo "worker_image_affected=$worker_image_affected" >> "$GITHUB_OUTPUT"
+      - name: Write PR image metadata
+        if: ${{ github.event_name == 'pull_request' && steps.changed-paths.outputs.docs_only != 'true' }}
+        env:
+          WORKER_IMAGE_AFFECTED: ${{ steps.changed-paths.outputs.worker_image_affected }}
+        shell: bash
+        run: |
+          jq -n \
+            --arg worker_image_affected "$WORKER_IMAGE_AFFECTED" \
+            '{workerImageAffected: ($worker_image_affected == "true")}' \
+            > /tmp/pr-image-metadata.json
+      - name: Upload PR image metadata
+        if: ${{ github.event_name == 'pull_request' && steps.changed-paths.outputs.docs_only != 'true' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pr-image-metadata
+          path: /tmp/pr-image-metadata.json
+          if-no-files-found: error
+          retention-days: 1
 
   lint:
     name: Lint
@@ -308,6 +330,7 @@ jobs:
       - name: Set up Docker builder
         uses: useblacksmith/setup-docker-builder@47a5d0102cc44712a17a633c2599f755008cc40e # v1
       - name: Build ${{ matrix.app }} Dockerfile (${{ matrix.arch }})
+        if: ${{ github.event_name != 'pull_request' || matrix.arch != 'amd64' }}
         uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2
         with:
           context: .
@@ -316,6 +339,34 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           push: false
           build-args: R_APP_ENV=development
+      - name: Read product version
+        if: ${{ github.event_name == 'pull_request' && matrix.arch == 'amd64' }}
+        id: app-product
+        shell: bash
+        run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+      - name: Build publishable ${{ matrix.app }} image (${{ matrix.arch }})
+        if: ${{ github.event_name == 'pull_request' && matrix.arch == 'amd64' }}
+        uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          platforms: linux/${{ matrix.arch }}
+          tags: local/roomote-${{ matrix.app }}:${{ needs.changes.outputs.pr_image_version }}
+          outputs: type=docker,dest=/tmp/roomote-${{ matrix.app }}.tar
+          build-args: |
+            R_APP_ENV=preview
+            RELEASE_VERSION=${{ needs.changes.outputs.pr_image_version }}
+            RELEASE_PRODUCT_VERSION=${{ steps.app-product.outputs.version }}
+      - name: Upload publishable ${{ matrix.app }} image
+        if: ${{ github.event_name == 'pull_request' && matrix.arch == 'amd64' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pr-image-${{ matrix.app }}
+          path: /tmp/roomote-${{ matrix.app }}.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
 
   # The worker image builds FROM ubuntu and copies no monorepo source, so it is
   # skipped unless its own Dockerfile or build context changed (see the
@@ -349,6 +400,7 @@ jobs:
       - name: Set up Docker builder
         uses: useblacksmith/setup-docker-builder@47a5d0102cc44712a17a633c2599f755008cc40e # v1
       - name: Build ${{ matrix.app }} Dockerfile (${{ matrix.arch }})
+        if: ${{ github.event_name != 'pull_request' || matrix.arch != 'amd64' }}
         uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2
         with:
           context: .
@@ -357,6 +409,34 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           push: false
           build-args: R_APP_ENV=development
+      - name: Read product version
+        if: ${{ github.event_name == 'pull_request' && matrix.arch == 'amd64' }}
+        id: worker-product
+        shell: bash
+        run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+      - name: Build publishable ${{ matrix.app }} image (${{ matrix.arch }})
+        if: ${{ github.event_name == 'pull_request' && matrix.arch == 'amd64' }}
+        uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          platforms: linux/${{ matrix.arch }}
+          tags: local/roomote-${{ matrix.app }}:${{ needs.changes.outputs.pr_image_version }}
+          outputs: type=docker,dest=/tmp/roomote-${{ matrix.app }}.tar
+          build-args: |
+            R_APP_ENV=preview
+            RELEASE_VERSION=${{ needs.changes.outputs.pr_image_version }}
+            RELEASE_PRODUCT_VERSION=${{ steps.worker-product.outputs.version }}
+      - name: Upload publishable ${{ matrix.app }} image
+        if: ${{ github.event_name == 'pull_request' && matrix.arch == 'amd64' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pr-image-${{ matrix.app }}
+          path: /tmp/roomote-${{ matrix.app }}.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
 
   deployment-config:
     name: Deployment artifacts

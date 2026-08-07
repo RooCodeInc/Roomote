@@ -1,0 +1,323 @@
+name: Publish PR Images
+
+on:
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: publish-pr-images-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Resolve PR build metadata
+    if: >-
+      github.event.issue.pull_request &&
+      github.event.issue.state == 'open' &&
+      github.event.comment.body == '/publish-images' &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    outputs:
+      owner: ${{ steps.pr.outputs.owner }}
+      sha: ${{ steps.pr.outputs.sha }}
+      version: ${{ steps.pr.outputs.version }}
+      run_id: ${{ steps.pr.outputs.run_id }}
+      worker_artifact: ${{ steps.pr.outputs.worker_artifact }}
+      base_version: ${{ steps.pr.outputs.base_version }}
+      base_sha: ${{ steps.pr.outputs.base_sha }}
+      reuse_artifacts: ${{ steps.pr.outputs.reuse_artifacts }}
+      merge_sha: ${{ steps.pr.outputs.merge_sha }}
+    steps:
+      - name: Resolve PR head
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pr="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")"
+          sha="$(jq -r '.head.sha' <<<"$pr")"
+          state="$(jq -r '.state' <<<"$pr")"
+          base_ref="$(jq -r '.base.ref' <<<"$pr")"
+          base_sha="$(jq -r '.base.sha' <<<"$pr")"
+          merge_sha="$(jq -r '.merge_commit_sha' <<<"$pr")"
+          [ "$state" = 'open' ] || {
+            echo "Pull request #${PR_NUMBER} is not open." >&2
+            exit 1
+          }
+          case "$sha" in
+            '' | *[!0-9a-f]*)
+              echo "Invalid pull request head SHA: $sha" >&2
+              exit 1
+              ;;
+          esac
+          [ "${#sha}" -eq 40 ] || {
+            echo "Invalid pull request head SHA length: $sha" >&2
+            exit 1
+          }
+          case "$merge_sha" in
+            '' | null | *[!0-9a-f]*)
+              echo "Invalid pull request merge SHA: $merge_sha" >&2
+              exit 1
+              ;;
+          esac
+          [ "${#merge_sha}" -eq 40 ] || {
+            echo "Invalid pull request merge SHA length: $merge_sha" >&2
+            exit 1
+          }
+          case "$base_ref" in
+            develop | main) ;;
+            *)
+              echo "Unsupported pull request base branch: $base_ref" >&2
+              exit 1
+              ;;
+          esac
+
+          runs="$(gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/actions/workflows/CI.yml/runs?event=pull_request&per_page=100")"
+          run="$(jq -c \
+            --argjson number "$PR_NUMBER" \
+            --arg sha "$sha" \
+            --arg base_sha "$base_sha" \
+            '[.[].workflow_runs[] | select(.status == "completed" and .conclusion == "success") | select(any(.pull_requests[]?; .number == $number and .head.sha == $sha and .base.sha == $base_sha))] | sort_by(.run_number) | reverse | .[0] // empty' \
+            <<<"$runs")"
+          [ -n "$run" ] || {
+            echo "No successful CI run found for PR #${PR_NUMBER} at ${sha} against ${base_sha}." >&2
+            exit 1
+          }
+          run_id="$(jq -r '.id' <<<"$run")"
+          artifacts="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts?per_page=100")"
+          reuse_artifacts=false
+          worker_artifact=false
+          if jq -e '.artifacts[] | select(.name == "pr-image-app" and .expired == false)' <<<"$artifacts" >/dev/null \
+            && jq -e '.artifacts[] | select(.name == "pr-image-metadata" and .expired == false)' <<<"$artifacts" >/dev/null; then
+            reuse_artifacts=true
+            if jq -e '.artifacts[] | select(.name == "pr-image-worker" and .expired == false)' <<<"$artifacts" >/dev/null; then
+              worker_artifact=true
+            fi
+          else
+            # Keep old PRs usable without duplicating fresh CI builds.
+            worker_artifact=true
+          fi
+
+          owner="$(printf '%s' "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          echo "owner=$owner" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "version=pr-${PR_NUMBER}-${sha}-${base_sha}" >> "$GITHUB_OUTPUT"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "worker_artifact=$worker_artifact" >> "$GITHUB_OUTPUT"
+          echo "base_version=${base_ref}-${base_sha:0:8}" >> "$GITHUB_OUTPUT"
+          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+          echo "reuse_artifacts=$reuse_artifacts" >> "$GITHUB_OUTPUT"
+          echo "merge_sha=$merge_sha" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Rebuild ${{ matrix.app }} image
+    needs: prepare
+    if: ${{ needs.prepare.outputs.reuse_artifacts != 'true' }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: app
+            dockerfile: .docker/app/Dockerfile
+            target: runtime-app
+            image: roomote-app
+          - app: worker
+            dockerfile: apps/worker/Dockerfile
+            target: runtime
+            image: roomote-worker
+    steps:
+      - name: Checkout PR merge
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/merge
+          persist-credentials: false
+
+      - name: Verify PR merge
+        env:
+          EXPECTED_MERGE_SHA: ${{ needs.prepare.outputs.merge_sha }}
+        shell: bash
+        run: |
+          actual_merge_sha="$(git rev-parse HEAD)"
+          [ "$actual_merge_sha" = "$EXPECTED_MERGE_SHA" ] || {
+            echo "PR merge advanced from $EXPECTED_MERGE_SHA to $actual_merge_sha; run /publish-images again." >&2
+            exit 1
+          }
+
+      - name: Read product version
+        id: product
+        shell: bash
+        run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker builder
+        uses: useblacksmith/setup-docker-builder@47a5d0102cc44712a17a633c2599f755008cc40e # v1
+
+      - name: Build ${{ matrix.app }} image
+        uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          tags: local/${{ matrix.image }}:${{ needs.prepare.outputs.version }}
+          outputs: type=docker,dest=/tmp/${{ matrix.image }}.tar
+          build-args: |
+            R_APP_ENV=preview
+            RELEASE_VERSION=${{ needs.prepare.outputs.version }}
+            RELEASE_PRODUCT_VERSION=${{ steps.product.outputs.version }}
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pr-image-${{ matrix.app }}
+          path: /tmp/${{ matrix.image }}.tar
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish PR images
+    needs: [prepare, build]
+    if: ${{ always() && needs.prepare.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    permissions:
+      actions: read
+      contents: read
+      packages: write
+      pull-requests: read
+    outputs:
+      mutable_updated: ${{ steps.images.outputs.mutable_updated }}
+    steps:
+      - name: Download CI image artifacts
+        if: ${{ needs.prepare.outputs.reuse_artifacts == 'true' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: pr-image-*
+          path: /tmp/images
+          merge-multiple: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ needs.prepare.outputs.run_id }}
+
+      - name: Download rebuilt image artifacts
+        if: ${{ needs.prepare.outputs.reuse_artifacts != 'true' }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: pr-image-*
+          path: /tmp/images
+          merge-multiple: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Import and publish images
+        id: images
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ needs.prepare.outputs.owner }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          WORKER_ARTIFACT: ${{ needs.prepare.outputs.worker_artifact }}
+          BASE_VERSION: ${{ needs.prepare.outputs.base_version }}
+          BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
+          REUSE_ARTIFACTS: ${{ needs.prepare.outputs.reuse_artifacts }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mutable_version="pr-${PR_NUMBER}"
+          echo 'mutable_updated=false' >> "$GITHUB_OUTPUT"
+
+          docker load --input '/tmp/images/roomote-app.tar'
+          worker_image_affected=true
+          if [ "$REUSE_ARTIFACTS" = 'true' ]; then
+            worker_image_affected="$(jq -r '.workerImageAffected' /tmp/images/pr-image-metadata.json)"
+          fi
+          if [ "$WORKER_ARTIFACT" = 'true' ]; then
+            docker load --input '/tmp/images/roomote-worker.tar'
+          else
+            [ "$worker_image_affected" = 'false' ] || {
+              echo 'CI marked the worker image as affected but produced no worker artifact.' >&2
+              exit 1
+            }
+            docker pull "ghcr.io/${OWNER}/roomote-worker:${BASE_VERSION}"
+            docker tag \
+              "ghcr.io/${OWNER}/roomote-worker:${BASE_VERSION}" \
+              "local/roomote-worker:${VERSION}"
+          fi
+
+          for image in roomote-app roomote-worker; do
+            local_ref="local/${image}:${VERSION}"
+            immutable_ref="ghcr.io/${OWNER}/${image}:${VERSION}"
+            docker tag "$local_ref" "$immutable_ref"
+            docker push "$immutable_ref"
+          done
+
+          current_pr="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")"
+          current_sha="$(jq -r '.head.sha' <<<"$current_pr")"
+          current_base_sha="$(jq -r '.base.sha' <<<"$current_pr")"
+          if [ "$current_sha" != "$SHA" ] || [ "$current_base_sha" != "$BASE_SHA" ]; then
+            echo "PR head or base advanced; leaving movable tags unchanged."
+            exit 0
+          fi
+
+          for image in roomote-app roomote-worker; do
+            immutable_ref="ghcr.io/${OWNER}/${image}:${VERSION}"
+            mutable_ref="ghcr.io/${OWNER}/${image}:${mutable_version}"
+            docker tag "$immutable_ref" "$mutable_ref"
+            docker push "$mutable_ref"
+          done
+          echo 'mutable_updated=true' >> "$GITHUB_OUTPUT"
+
+  comment:
+    name: Comment PR image references
+    needs: [prepare, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Post published image references
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ needs.prepare.outputs.owner }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          MUTABLE_UPDATED: ${{ needs.publish.outputs.mutable_updated }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mutable_version="pr-${PR_NUMBER}"
+          if [ "$MUTABLE_UPDATED" = 'true' ]; then
+            mutable_note="$(cat <<EOF
+          Movable references:
+
+          - \`ghcr.io/${OWNER}/roomote-app:${mutable_version}\`
+          - \`ghcr.io/${OWNER}/roomote-worker:${mutable_version}\`
+
+          Re-run with \`/publish-images\` after new commits to refresh them.
+          EOF
+          )"
+          else
+            mutable_note="The PR advanced during the build, so the movable references were left unchanged. Re-run \`/publish-images\` to refresh them."
+          fi
+          gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$(cat <<EOF
+          Published amd64 GHCR images for this PR:
+
+          - \`ghcr.io/${OWNER}/roomote-app:${VERSION}\`
+          - \`ghcr.io/${OWNER}/roomote-worker:${VERSION}\`
+
+          ${mutable_note}
+          EOF
+          )"
