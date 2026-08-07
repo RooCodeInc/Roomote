@@ -1,11 +1,13 @@
 import type { UserAuthSuccess } from '@/types';
 
 const {
+  cloudState,
   mockDbTransaction,
   mockFetch,
   mockReadFile,
   mockUpsertDeploymentEnvironmentVariables,
 } = vi.hoisted(() => ({
+  cloudState: { enabled: false },
   mockDbTransaction: vi.fn(),
   mockFetch: vi.fn(),
   mockReadFile: vi.fn(),
@@ -27,6 +29,10 @@ vi.mock('@/lib/server', () => ({
     R_APP_URL: 'http://localhost:3000/',
     R_PUBLIC_URL: 'https://roomote.example.com/',
   },
+}));
+
+vi.mock('@/lib/server/env', () => ({
+  isRoomoteCloudEnabled: () => cloudState.enabled,
 }));
 
 vi.mock('../environment-variables', () => ({
@@ -91,6 +97,7 @@ function mockSuccessfulCreateResponse() {
 describe('createSlackAppFromManifestCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    cloudState.enabled = false;
     mockDbTransaction.mockImplementation(async (callback) =>
       callback({ kind: 'tx' }),
     );
@@ -188,6 +195,35 @@ describe('createSlackAppFromManifestCommand', () => {
         ],
       },
     );
+  });
+
+  it('adds support-channel scopes to Cloud-created Slack apps', async () => {
+    cloudState.enabled = true;
+    mockFetch
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => mockSuccessfulCreateResponse(),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true }),
+      });
+
+    await createSlackAppFromManifestCommand(buildMockAuth(), {
+      configToken: 'xoxe.xoxp-token',
+    });
+
+    const createInit = mockFetch.mock.calls[0]?.[1] as RequestInit;
+    const body = JSON.parse(String(createInit.body)) as { manifest: string };
+    const manifest = JSON.parse(body.manifest) as {
+      oauth_config: { scopes: { bot: string[] } };
+    };
+    expect(manifest.oauth_config.scopes.bot).toEqual(
+      expect.arrayContaining(['groups:write', 'conversations.connect:write']),
+    );
+    expect(manifest.oauth_config.scopes.bot).not.toContain('channels:manage');
   });
 
   it('still succeeds when the app icon cannot be set', async () => {

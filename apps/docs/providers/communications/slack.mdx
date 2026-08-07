@@ -111,6 +111,28 @@ After adding or changing scopes, reinstall the app from **OAuth & Permissions >
 Install to Workspace**. Slack does not apply new scopes to an existing
 installation until you reinstall.
 
+### Roomote Cloud support channel
+
+Roomote Cloud deployments can create a dedicated private Slack Connect channel
+with Roomote support from **Settings → Communications**. Cloud-generated Slack
+apps also request these bot scopes:
+
+```text
+groups:write
+conversations.connect:write
+```
+
+`groups:write` lets the app create the private support channel;
+`conversations.connect:write` lets it send the external invitation. Self-hosted
+deployments do not request either scope. Existing Cloud Slack apps must add both
+scopes and reinstall the app before the support-channel action becomes
+available.
+
+Creating the channel sends the invitation, but Slack may still require invite
+acceptance and approval from one or both organizations' admins. The support
+channel is separate from the Manager Channel and does not receive manager
+automations or ordinary task output automatically.
+
 ## Events and interactivity
 
 Turn on **Event Subscriptions** and set **Request URL** to:

@@ -8,6 +8,7 @@ export const REDIS_KEYS = {
   MENTIONED_THREADS: 'slack:mentioned_threads',
   PENDING_WORKSPACE_SELECTIONS: 'slack:pending_workspace_selections',
   SLACK_AUTO_START_CHANNEL: 'slack:auto-start-channel',
+  SLACK_SUPPORT_CHANNEL_CREATE: 'slack:support-channel:create',
   DISCORD_AUTO_START_CHANNEL: 'discord:auto-start-channel',
   CONTROLLER_HEARTBEAT: 'controller:heartbeat',
   /** Cached GitHub release notes payload keyed as `${prefix}:${version}`. */

@@ -5,6 +5,7 @@ import {
   SLACK_MANIFEST_BOT_EVENTS,
   SLACK_MANIFEST_BOT_SCOPES,
   SLACK_MANIFEST_DESCRIPTION,
+  SLACK_SUPPORT_CHANNEL_BOT_SCOPES,
 } from './slack-app-manifest';
 
 function relativeLuminance(hex: string): number {
@@ -128,6 +129,26 @@ describe('Slack app manifest builder', () => {
         'message.im',
         'reaction_added',
       ]),
+    );
+  });
+
+  it('adds support-channel scopes only when enabled', () => {
+    const standardManifest = buildSlackAppManifest({
+      publicOrigin: 'https://roomote.example.com',
+    });
+    const cloudManifest = buildSlackAppManifest({
+      publicOrigin: 'https://roomote.example.com',
+      supportChannelEnabled: true,
+    });
+
+    expect(standardManifest.oauth_config.scopes.bot).not.toEqual(
+      expect.arrayContaining([...SLACK_SUPPORT_CHANNEL_BOT_SCOPES]),
+    );
+    expect(cloudManifest.oauth_config.scopes.bot).toEqual(
+      expect.arrayContaining([...SLACK_SUPPORT_CHANNEL_BOT_SCOPES]),
+    );
+    expect(cloudManifest.oauth_config.scopes.bot).not.toContain(
+      'channels:manage',
     );
   });
 

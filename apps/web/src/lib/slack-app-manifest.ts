@@ -24,6 +24,17 @@ export const SLACK_MANIFEST_BOT_SCOPES = [
   'users:read',
 ] as const;
 
+export const SLACK_SUPPORT_CHANNEL_BOT_SCOPES = [
+  'groups:write',
+  'conversations.connect:write',
+] as const;
+
+export function getSlackManifestBotScopes(supportChannelEnabled = false) {
+  return supportChannelEnabled
+    ? [...SLACK_MANIFEST_BOT_SCOPES, ...SLACK_SUPPORT_CHANNEL_BOT_SCOPES]
+    : [...SLACK_MANIFEST_BOT_SCOPES];
+}
+
 export const SLACK_MANIFEST_BOT_EVENTS = [
   'app_mention',
   'entity_details_requested',
@@ -43,11 +54,13 @@ export const SLACK_MANIFEST_BACKGROUND_COLOR = '#000000';
 type SlackAppManifestInput = {
   publicOrigin: string;
   appName?: string;
+  supportChannelEnabled?: boolean;
 };
 
 export function buildSlackAppManifest({
   publicOrigin,
   appName = 'Roomote',
+  supportChannelEnabled = false,
 }: SlackAppManifestInput) {
   const origin = publicOrigin.replace(/\/+$/, '');
   const webhookUrl = `${origin}/api/webhooks/slack`;
@@ -75,7 +88,7 @@ export function buildSlackAppManifest({
         `${origin}${SLACK_APP_INSTALL_CALLBACK_PATH}`,
       ],
       scopes: {
-        bot: [...SLACK_MANIFEST_BOT_SCOPES],
+        bot: getSlackManifestBotScopes(supportChannelEnabled),
       },
       pkce_enabled: false,
     },

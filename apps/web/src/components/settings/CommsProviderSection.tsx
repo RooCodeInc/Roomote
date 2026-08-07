@@ -86,6 +86,7 @@ import {
 import { Section } from './Section';
 import { TelegramLinkAccountStep } from './TelegramLinkAccountStep';
 import { DiscordSetupStatus } from './DiscordSetupStatus';
+import { SlackSupportChannelPanel } from './SlackSupportChannelPanel';
 
 function getProviderIconId(providerId: CommsProviderId): string {
   return providerId === 'microsoft' ? 'teams' : providerId;
@@ -599,6 +600,9 @@ export function CommsProviderSection({
             />
 
             <div className="space-y-2 text-sm text-muted-foreground">
+              {provider.id === 'slack' && hasConfiguredValues ? (
+                <SlackSupportChannelPanel />
+              ) : null}
               {provider.id === 'telegram' && provider.telegramWebhook && (
                 <div className="flex items-start gap-2 mt-4">
                   {TELEGRAM_WEBHOOK_STATUS_COPY[provider.telegramWebhook.status]

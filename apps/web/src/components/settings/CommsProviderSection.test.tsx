@@ -201,6 +201,10 @@ vi.mock('./TelegramLinkAccountStep', () => ({
   TelegramLinkAccountStep: () => <div>Telegram link step</div>,
 }));
 
+vi.mock('./SlackSupportChannelPanel', () => ({
+  SlackSupportChannelPanel: () => <div>Slack support channel</div>,
+}));
+
 vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({
     slack: {
