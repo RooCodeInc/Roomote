@@ -470,6 +470,23 @@ function guardedAgentFor(config: GuardedAgentConfig): Agent {
 }
 
 /**
+ * A `fetch`-shaped wrapper around {@link safeFetch} for callers that thread a
+ * fetch implementation through protocol code (the MCP OAuth layer).
+ */
+export function createGuardedFetch(allowedPrivateCidrs?: string) {
+  return (
+    url: string,
+    init?: { method?: string; headers?: Record<string, string>; body?: string },
+  ): Promise<Response> =>
+    safeFetch(url, {
+      allowedPrivateCidrs,
+      method: init?.method,
+      headers: init?.headers,
+      body: init?.body,
+    });
+}
+
+/**
  * Fetch an operator-supplied URL with SSRF guards. Redirects are refused:
  * callers that legitimately need to follow one must re-validate the target
  * through this function themselves.

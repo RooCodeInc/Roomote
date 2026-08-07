@@ -213,8 +213,10 @@ import {
 } from '../commands/mcp-connections';
 
 import {
+  connectCustomMcpServerCommand,
   createCustomMcpServerCommand,
   deleteCustomMcpServerCommand,
+  disconnectCustomMcpServerCommand,
   getCustomMcpAvailabilityCommand,
   listCustomMcpServersCommand,
   setCustomMcpServerDisabledToolsCommand,
@@ -1623,6 +1625,20 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         setCustomMcpServerDisabledToolsCommand(auth, input),
+      ),
+
+    connect: protectedProcedure
+      .input(
+        z.object({ id: z.string().uuid(), redirectTo: z.string().optional() }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        connectCustomMcpServerCommand(auth, input),
+      ),
+
+    disconnect: protectedProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        disconnectCustomMcpServerCommand(auth, input),
       ),
   }),
 

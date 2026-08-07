@@ -331,6 +331,85 @@ export async function deleteCustomMcpServerCommand(
   return { deleted: true };
 }
 
+/**
+ * Mint (or reset) the pending deployment-scoped OAuth connection for a
+ * custom server and return the initiate URL, mirroring connectMcpCommand.
+ */
+export async function connectCustomMcpServerCommand(
+  auth: UserAuthSuccess,
+  input: { id: string; redirectTo?: string },
+) {
+  assertAdmin(auth);
+  assertCustomMcpEnabled();
+
+  const server = await db.query.customMcpServers.findFirst({
+    where: eq(customMcpServers.id, input.id),
+  });
+
+  if (!server) {
+    throw new Error('Custom MCP server not found.');
+  }
+
+  if (server.authType !== 'oauth' || !server.url) {
+    throw new Error('This custom MCP server does not use OAuth.');
+  }
+
+  if (
+    input.redirectTo &&
+    (!input.redirectTo.startsWith('/') || input.redirectTo.startsWith('//'))
+  ) {
+    throw new Error('redirectTo must be a relative path');
+  }
+
+  const [connection] = await db
+    .insert(mcpConnections)
+    .values({
+      userId: null,
+      mcpId: customMcpConnectionId(server.id),
+      connectionRole: 'default',
+      authConfig: {},
+      enabled: false,
+      authStatus: 'pending',
+    })
+    .onConflictDoUpdate({
+      target: [
+        mcpConnections.userId,
+        mcpConnections.mcpId,
+        mcpConnections.connectionRole,
+      ],
+      set: {
+        authConfig: {},
+        enabled: false,
+        authStatus: 'pending',
+        updatedAt: new Date(),
+      },
+    })
+    .returning();
+
+  if (!connection) {
+    throw new Error('Failed to create MCP connection');
+  }
+
+  // Relative path so the browser stays on its current domain.
+  return input.redirectTo
+    ? `/api/mcp-oauth/initiate/${connection.id}?redirectTo=${encodeURIComponent(input.redirectTo)}`
+    : `/api/mcp-oauth/initiate/${connection.id}`;
+}
+
+/** Drop the stored OAuth connection (tokens) without deleting the server. */
+export async function disconnectCustomMcpServerCommand(
+  auth: UserAuthSuccess,
+  input: { id: string },
+) {
+  assertAdmin(auth);
+
+  await db
+    .delete(mcpConnections)
+    .where(eq(mcpConnections.mcpId, customMcpConnectionId(input.id)));
+
+  return { disconnected: true };
+}
+
 export async function setCustomMcpServerEnabledCommand(
   auth: UserAuthSuccess,
   input: { id: string; enabled: boolean },

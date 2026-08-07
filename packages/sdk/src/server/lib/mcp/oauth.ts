@@ -4,8 +4,12 @@
  * Pure protocol logic: endpoint discovery, PKCE, client registration,
  * token exchange, token refresh. No database access.
  *
- * SSRF validation is not needed because all MCP server URLs come from
- * the integration MCP_INTEGRATIONS constant — we control them.
+ * Catalog integration URLs come from the MCP_INTEGRATIONS constant and are
+ * fetched with the plain global fetch. Custom-server flows target
+ * operator-supplied URLs — and discovery follows URLs the *remote server*
+ * supplies (WWW-Authenticate hints, authorization_servers lists) — so those
+ * callers MUST pass an SSRF-guarded fetch via `OAuthRequestOptions.fetchImpl`;
+ * it is used for every hop.
  */
 import type {
   OAuthTokens,
@@ -19,6 +23,35 @@ import type {
 // Refresh token 5 minutes before expiration to avoid race conditions
 const TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const DEFAULT_TOKEN_ENDPOINT_AUTH_METHOD = 'client_secret_post';
+
+export interface OAuthRequestOptions {
+  /**
+   * Fetch used for every protocol request. Custom-server flows pass an
+   * SSRF-guarded implementation; defaults to the global fetch.
+   */
+  fetchImpl?: (
+    url: string,
+    init?: {
+      method?: string;
+      headers?: Record<string, string>;
+      body?: string;
+    },
+  ) => Promise<Response>;
+  /**
+   * RFC 8707 resource indicator sent on token requests. The current MCP
+   * authorization spec requires clients to send the canonical server URL;
+   * per-server opt-out exists because some servers reject unknown params.
+   */
+  resource?: string;
+}
+
+function resolveFetch(options?: OAuthRequestOptions) {
+  return (
+    options?.fetchImpl ??
+    ((url: string, init?: RequestInit) =>
+      init === undefined ? fetch(url) : fetch(url, init))
+  );
+}
 
 function buildDirectAuthorizationServerMetadataUrl(
   mcpServerUrl: string,
@@ -79,8 +112,9 @@ function getFetchErrorMessage(
 
 async function fetchOAuthServerMetadata(
   metadataUrl: string,
+  options?: OAuthRequestOptions,
 ): Promise<OAuthServerMetadata> {
-  const response = await fetch(metadataUrl);
+  const response = await resolveFetch(options)(metadataUrl);
 
   if (!response.ok) {
     throw new Error(
@@ -101,8 +135,9 @@ async function fetchOAuthServerMetadata(
 
 async function fetchProtectedResourceMetadata(
   metadataUrl: string,
+  options?: OAuthRequestOptions,
 ): Promise<OAuthProtectedResourceMetadata> {
-  const response = await fetch(metadataUrl);
+  const response = await resolveFetch(options)(metadataUrl);
 
   if (!response.ok) {
     throw new Error(
@@ -119,8 +154,9 @@ async function fetchProtectedResourceMetadata(
 
 async function fetchAdvertisedProtectedResourceMetadata(
   mcpServerUrl: string,
+  options?: OAuthRequestOptions,
 ): Promise<OAuthProtectedResourceMetadata> {
-  const response = await fetch(mcpServerUrl);
+  const response = await resolveFetch(options)(mcpServerUrl);
   const metadataUrl = getResourceMetadataUrlFromWwwAuthenticate(
     response.headers.get('www-authenticate'),
   );
@@ -132,7 +168,9 @@ async function fetchAdvertisedProtectedResourceMetadata(
     );
   }
 
-  return fetchProtectedResourceMetadata(metadataUrl);
+  // The metadata URL came from the server's own WWW-Authenticate header:
+  // it goes through the same (possibly guarded) fetch as every other hop.
+  return fetchProtectedResourceMetadata(metadataUrl, options);
 }
 
 function formatDiscoveryError(error: unknown): string {
@@ -145,17 +183,22 @@ function formatDiscoveryError(error: unknown): string {
  */
 export async function discoverOAuthProtectedResourceMetadata(
   mcpServerUrl: string,
+  options?: OAuthRequestOptions,
 ): Promise<OAuthProtectedResourceMetadata | undefined> {
   try {
     return await fetchProtectedResourceMetadata(
       buildProtectedResourceMetadataUrl(mcpServerUrl),
+      options,
     );
   } catch {
     // Fall through to the advertised metadata hint.
   }
 
   try {
-    return await fetchAdvertisedProtectedResourceMetadata(mcpServerUrl);
+    return await fetchAdvertisedProtectedResourceMetadata(
+      mcpServerUrl,
+      options,
+    );
   } catch {
     return undefined;
   }
@@ -169,12 +212,14 @@ export async function discoverOAuthProtectedResourceMetadata(
  */
 export async function discoverOAuthEndpoints(
   mcpServerUrl: string,
+  options?: OAuthRequestOptions,
 ): Promise<OAuthServerMetadata> {
   const errors: string[] = [];
 
   try {
     return await fetchOAuthServerMetadata(
       buildDirectAuthorizationServerMetadataUrl(mcpServerUrl),
+      options,
     );
   } catch (error) {
     errors.push(formatDiscoveryError(error));
@@ -182,7 +227,7 @@ export async function discoverOAuthEndpoints(
 
   try {
     const protectedResourceMetadata =
-      await discoverOAuthProtectedResourceMetadata(mcpServerUrl);
+      await discoverOAuthProtectedResourceMetadata(mcpServerUrl, options);
 
     if (!protectedResourceMetadata?.authorization_servers?.length) {
       throw new Error(
@@ -193,8 +238,11 @@ export async function discoverOAuthEndpoints(
     for (const issuerUrl of protectedResourceMetadata.authorization_servers ??
       []) {
       try {
+        // authorization_servers entries are server-supplied URLs: same
+        // (possibly guarded) fetch as every other hop.
         return await fetchOAuthServerMetadata(
           buildAuthorizationServerMetadataUrlFromIssuer(issuerUrl),
+          options,
         );
       } catch (error) {
         errors.push(formatDiscoveryError(error));
@@ -213,8 +261,9 @@ export async function discoverOAuthEndpoints(
 export async function registerOAuthClient(
   registrationEndpoint: string,
   metadata: OAuthClientMetadata,
+  options?: OAuthRequestOptions,
 ): Promise<OAuthClientInformation> {
-  const response = await fetch(registrationEndpoint, {
+  const response = await resolveFetch(options)(registrationEndpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -374,6 +423,7 @@ export async function exchangeCodeForTokens(
   codeVerifier: string,
   clientInfo: OAuthClientInformation,
   redirectUri: string,
+  options?: OAuthRequestOptions,
 ): Promise<OAuthTokens> {
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
@@ -381,12 +431,17 @@ export async function exchangeCodeForTokens(
     redirect_uri: redirectUri,
     code_verifier: codeVerifier,
   });
+
+  if (options?.resource) {
+    body.append('resource', options.resource);
+  }
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/x-www-form-urlencoded',
   };
   applyTokenEndpointClientAuthentication(body, headers, clientInfo);
 
-  const response = await fetch(tokenEndpoint, {
+  const response = await resolveFetch(options)(tokenEndpoint, {
     method: 'POST',
     headers,
     body: body.toString(),
@@ -413,17 +468,23 @@ export async function refreshOAuthToken(
   tokenEndpoint: string,
   clientInfo: OAuthClientInformation,
   refreshToken: string,
+  options?: OAuthRequestOptions,
 ): Promise<OAuthTokens> {
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
     refresh_token: refreshToken,
   });
+
+  if (options?.resource) {
+    body.append('resource', options.resource);
+  }
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/x-www-form-urlencoded',
   };
   applyTokenEndpointClientAuthentication(body, headers, clientInfo);
 
-  const response = await fetch(tokenEndpoint, {
+  const response = await resolveFetch(options)(tokenEndpoint, {
     method: 'POST',
     headers,
     body: body.toString(),

@@ -314,7 +314,15 @@ export {
   generateCodeChallenge,
   generateState,
   exchangeCodeForTokens,
+  type OAuthRequestOptions,
 } from './lib/mcp/oauth';
+
+export {
+  resolveCustomMcpAuthTarget,
+  ensureCustomMcpServerMetadata,
+  isDefinitiveOAuthRejection,
+  type CustomMcpAuthTarget,
+} from './lib/mcp/custom-auth-target';
 
 export {
   LINEAR_ORG_CONNECTION_ROLE,

@@ -11,6 +11,7 @@ import {
   getMcpIntegration,
   getMcpIntegrationDefaultDisabledTools,
   getMcpIntegrationOauthEndpoints,
+  isCustomMcpConnectionId,
   isDeploymentScopedMcpIntegration,
   isSelfServeMcpIntegration,
 } from '@roomote/types';
@@ -21,8 +22,11 @@ import {
   storeTokens,
   getClientInformation,
   updateAuthStatus,
+  resolveCustomMcpAuthTarget,
+  ensureCustomMcpServerMetadata,
 } from '@roomote/sdk/server';
 import { authorize } from '@/lib/server';
+import { isCustomMcpDisabled } from '@/lib/server/env';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import { logger } from '@/lib/server/logger';
@@ -167,9 +171,9 @@ export async function GET(request: NextRequest) {
   const redirectToResult = (result: McpOAuthResult) =>
     redirectWithMcpResult(webUrl, redirectPath, result, state);
 
-  if (webEnv.R_CURATED_INTEGRATIONS_DISABLED === true) {
-    return redirectToResult({ status: 'error', reason: 'callback_failed' });
-  }
+  // Kill-switch checks happen after the connection lookup: catalog
+  // connections are gated by the curated flag, custom-server connections by
+  // their own flag.
 
   // Handle OAuth errors
   if (error) {
@@ -282,19 +286,38 @@ export async function GET(request: NextRequest) {
     integrationId = connection.mcpId;
     connectionRole = connection.connectionRole;
 
-    const integration = getMcpIntegration(connection.mcpId);
-    if (!integration) {
-      return redirectToResult({ status: 'error', reason: 'not_found' });
+    const customTarget = isCustomMcpConnectionId(connection.mcpId)
+      ? await resolveCustomMcpAuthTarget(connection.mcpId)
+      : null;
+    const integration = customTarget
+      ? null
+      : getMcpIntegration(connection.mcpId);
+
+    if (customTarget) {
+      if (isCustomMcpDisabled(webEnv.R_CUSTOM_MCP_DISABLED)) {
+        return redirectToResult({ status: 'error', reason: 'callback_failed' });
+      }
+    } else {
+      if (webEnv.R_CURATED_INTEGRATIONS_DISABLED === true) {
+        return redirectToResult({ status: 'error', reason: 'callback_failed' });
+      }
+
+      if (
+        !integration ||
+        !isSelfServeMcpIntegration(integration) ||
+        !integration.url
+      ) {
+        return redirectToResult({ status: 'error', reason: 'not_found' });
+      }
     }
 
-    if (!isSelfServeMcpIntegration(integration) || !integration.url) {
-      return redirectToResult({ status: 'error', reason: 'not_found' });
-    }
-
-    const requiresOrgAdmin = isDeploymentScopedMcpIntegration(
-      integration,
-      connection.connectionRole,
-    );
+    // Custom-server connections are deployment-scoped by construction.
+    const requiresOrgAdmin = customTarget
+      ? true
+      : isDeploymentScopedMcpIntegration(
+          integration!,
+          connection.connectionRole,
+        );
     const isAdmin = authResult.isAdmin;
 
     if (
@@ -311,9 +334,10 @@ export async function GET(request: NextRequest) {
     }
 
     failureStage = 'provider_discovery';
-    const tokenEndpoint =
-      getMcpIntegrationOauthEndpoints(integration)?.tokenEndpoint ??
-      (await discoverOAuthEndpoints(integration.url)).token_endpoint;
+    const tokenEndpoint = customTarget
+      ? (await ensureCustomMcpServerMetadata(customTarget)).token_endpoint
+      : (getMcpIntegrationOauthEndpoints(integration!)?.tokenEndpoint ??
+        (await discoverOAuthEndpoints(integration!.url!)).token_endpoint);
     const redirectUri = new URL(CALLBACK_PATH, webUrl).toString();
 
     failureStage = 'token_exchange';
@@ -323,9 +347,10 @@ export async function GET(request: NextRequest) {
       oauthState.codeVerifier,
       clientInfo,
       redirectUri,
+      customTarget?.oauthOptions,
     );
 
-    if (integration.id === 'linear') {
+    if (integration?.id === 'linear') {
       failureStage = 'linear_metadata';
       await hydrateLinearMcpConnectionAfterOauth({
         connection,
@@ -338,7 +363,9 @@ export async function GET(request: NextRequest) {
       await storeTokens(resolvedConnectionId, tokens);
     }
 
-    if (requiresOrgAdmin) {
+    // Custom servers carry their own enablement on the server row; only
+    // catalog integrations write deploymentMcpEnablements.
+    if (requiresOrgAdmin && integration) {
       failureStage = 'deployment_enablement';
       const defaultDisabledTools =
         getMcpIntegrationDefaultDisabledTools(integration);

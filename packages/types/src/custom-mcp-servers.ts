@@ -54,6 +54,14 @@ export function isCustomMcpConnectionId(mcpId: string): boolean {
   return mcpId.startsWith(CUSTOM_MCP_CONNECTION_PREFIX);
 }
 
+export function customMcpServerIdFromConnectionId(
+  mcpId: string,
+): string | null {
+  return isCustomMcpConnectionId(mcpId)
+    ? mcpId.slice(CUSTOM_MCP_CONNECTION_PREFIX.length)
+    : null;
+}
+
 export const MAX_CUSTOM_MCP_SERVERS = 25;
 export const MAX_CUSTOM_MCP_HEADERS = 16;
 export const MAX_CUSTOM_MCP_HEADER_VALUE_LENGTH = 4096;
