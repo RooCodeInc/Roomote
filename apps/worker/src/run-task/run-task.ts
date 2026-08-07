@@ -941,6 +941,27 @@ export const runTask = async ({
       );
     }
 
+    // Deployment-scoped custom stdio MCP servers. Same best-effort posture:
+    // a fetch failure means the task runs without them, never that it blocks.
+    let deploymentMcpServers:
+      | Record<
+          string,
+          { command: string; args?: string[]; env?: Record<string, string> }
+        >
+      | undefined;
+
+    try {
+      const { servers } = await sdk.mcpConnections.getCustomStdioMcpServers();
+
+      if (Object.keys(servers).length > 0) {
+        deploymentMcpServers = servers;
+      }
+    } catch (error) {
+      logger.warn(
+        `[runTask] Failed to fetch custom stdio MCP server configs: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
     const slackReplyContext = getSlackReplyContext(taskRun);
     const communicationReplyContext = getCommunicationReplyContext(taskRun);
     if (slackReplyContext?.threadTs) {
@@ -1193,6 +1214,7 @@ export const runTask = async ({
       integrations,
       mcpTaskEnv,
       environmentMcpServers: environmentConfig?.mcpServers,
+      deploymentMcpServers,
       // The pre-injection snapshot, NOT deploymentEnvVars: by harness start,
       // `envVars` has been mutated with runtime-internal entries (auth bypass
       // values, BASH_ENV, ...) that must not ride the operator overlay past
