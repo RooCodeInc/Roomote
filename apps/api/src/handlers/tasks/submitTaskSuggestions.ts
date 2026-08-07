@@ -291,7 +291,14 @@ async function resolveRepositoryIdsForSuggestedTask(params: {
       fullName: repositories.fullName,
     })
     .from(repositories)
-    .where(inArray(repositories.fullName, repositoryFullNames));
+    .where(
+      params.payload.repo === ALL_REPOSITORIES
+        ? and(
+            inArray(repositories.fullName, repositoryFullNames),
+            eq(repositories.isActive, true),
+          )
+        : inArray(repositories.fullName, repositoryFullNames),
+    );
 
   const rowsByFullName = new Map(
     rows.map((repository) => [repository.fullName, repository]),
@@ -1343,10 +1350,14 @@ export async function submitTaskSuggestions(
       });
 
       if (candidateRepositories.length === 0) {
+        const targetRepositoryFullName = requiresOrgWideTargetRepository
+          ? parsedBody.data.suggestions[0]?.targetRepositoryFullName?.trim()
+          : null;
         return c.json(
           {
-            error:
-              'This Suggested Tasks run did not resolve to any repositories in this deployment.',
+            error: targetRepositoryFullName
+              ? `targetRepositoryFullName "${targetRepositoryFullName}" is not part of this org-wide task`
+              : 'This Suggested Tasks run did not resolve to any repositories in this deployment.',
           },
           400,
         );

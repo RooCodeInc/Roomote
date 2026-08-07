@@ -38,7 +38,11 @@ const {
 
 // Mutable so a test can simulate "Slack installed but no channel resolves".
 let slackInstallationChannelRows: unknown[] = [{ channelId: 'C-FALLBACK' }];
-let repositoryRows = [{ id: 'repo-1', fullName: 'acme/app' }];
+let repositoryRows: Array<{
+  id: string;
+  fullName: string;
+  isActive?: boolean;
+}> = [{ id: 'repo-1', fullName: 'acme/app' }];
 
 function makeSelectResult(name: string): unknown[] {
   switch (name) {
@@ -68,12 +72,18 @@ function makeSelectResult(name: string): unknown[] {
 
 function createSelectBuilder() {
   let tableName = '';
+  let filtersActiveRepositories = false;
   const builder = {
     from(table: { _name?: string }) {
       tableName = table?._name ?? '';
       return builder;
     },
-    where() {
+    where(condition?: { type?: string; args?: unknown[] }) {
+      filtersActiveRepositories =
+        tableName === 'repositories' &&
+        (condition?.type === 'and' ||
+          (condition?.type === 'eq' &&
+            condition.args?.includes(true) === true));
       return builder;
     },
     orderBy() {
@@ -86,7 +96,17 @@ function createSelectBuilder() {
       resolve: (rows: unknown[]) => T,
       reject?: (error: unknown) => T,
     ): Promise<T> {
-      return Promise.resolve(makeSelectResult(tableName)).then(resolve, reject);
+      const rows = makeSelectResult(tableName);
+      const filteredRows = filtersActiveRepositories
+        ? rows.filter(
+            (row) =>
+              !row ||
+              typeof row !== 'object' ||
+              !('isActive' in row) ||
+              row.isActive !== false,
+          )
+        : rows;
+      return Promise.resolve(filteredRows).then(resolve, reject);
     },
   };
   return builder;
@@ -622,14 +642,56 @@ describe('submitTaskSuggestions', () => {
       expectedError:
         'targetRepositoryFullName "wrong/repository" is not part of this org-wide task',
     },
+    {
+      description: 'standard suggestions with an inactive target repository',
+      payloadKind: TaskPayloadKind.StandardTask,
+      targetRepositoryFullName: 'acme/inactive',
+      selectedRepositories: ['acme/inactive'],
+      repositoryRowsOverride: [
+        {
+          id: 'repo-inactive',
+          fullName: 'acme/inactive',
+          isActive: false,
+        },
+      ],
+      expectedError:
+        'targetRepositoryFullName "acme/inactive" is not part of this org-wide task',
+    },
+    {
+      description: 'scan suggestions with an inactive target repository',
+      payloadKind: TaskPayloadKind.Scan,
+      targetRepositoryFullName: 'acme/inactive',
+      selectedRepositories: ['acme/inactive'],
+      repositoryRowsOverride: [
+        {
+          id: 'repo-inactive',
+          fullName: 'acme/inactive',
+          isActive: false,
+        },
+      ],
+      expectedError:
+        'targetRepositoryFullName "acme/inactive" is not part of this org-wide task',
+    },
   ])(
     'rejects org-wide current-thread $description',
-    async ({ payloadKind, targetRepositoryFullName, expectedError }) => {
+    async ({
+      payloadKind,
+      targetRepositoryFullName,
+      selectedRepositories,
+      repositoryRowsOverride,
+      expectedError,
+    }) => {
+      if (repositoryRowsOverride) {
+        repositoryRows = repositoryRowsOverride;
+      }
       mockTaskRunFindFirst.mockResolvedValue({
         id: 1,
         payloadKind,
         actingUserId: 'user-1',
-        payload: { repo: ALL_REPOSITORIES },
+        payload: {
+          repo: ALL_REPOSITORIES,
+          ...(selectedRepositories ? { selectedRepositories } : {}),
+        },
       });
       mockTaskFindFirst.mockResolvedValue({
         initiatorUserId: 'user-1',
