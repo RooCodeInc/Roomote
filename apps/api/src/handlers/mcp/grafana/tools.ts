@@ -13,6 +13,16 @@ const TOOL_ANNOTATIONS = {
   readOnlyHint: true,
 } as const;
 
+const nonEmptyStringSchema = z.string().refine((value) => value.length > 0, {
+  message: 'Value must be non-empty.',
+});
+const nonEmptyTrimmedStringSchema = z
+  .string()
+  .trim()
+  .refine((value) => value.length > 0, {
+    message: 'Value must be non-empty.',
+  });
+
 const GRAFANA_ALLOWED_TOOL_NAMES = new Set<string>(
   GRAFANA_READ_ONLY_TOOL_NAMES,
 );
@@ -89,20 +99,17 @@ type GrafanaAlertInstance = {
 };
 
 const searchDashboardsInputSchema = {
-  query: z
-    .string()
-    .trim()
-    .min(1)
+  query: nonEmptyTrimmedStringSchema
     .optional()
-    .describe('Optional free-text search query.'),
+    .describe('Optional non-empty free-text search query.'),
   folder_uids: z
-    .array(z.string().min(1))
+    .array(nonEmptyStringSchema)
     .optional()
-    .describe('Optional folder UIDs to constrain the search.'),
+    .describe('Optional non-empty folder UIDs to constrain the search.'),
   tags: z
-    .array(z.string().min(1))
+    .array(nonEmptyStringSchema)
     .optional()
-    .describe('Optional dashboard tags that must match.'),
+    .describe('Optional non-empty dashboard tags that must match.'),
   starred: z
     .boolean()
     .optional()
@@ -110,44 +117,43 @@ const searchDashboardsInputSchema = {
   page: z
     .number()
     .int()
-    .positive()
+    .refine((value) => value > 0, {
+      message: 'Page number must be positive.',
+    })
     .optional()
-    .describe('Optional search result page number.'),
+    .describe('Optional positive search result page number.'),
   limit: z
     .number()
     .int()
-    .positive()
-    .max(500)
+    .refine((value) => value >= 1 && value <= 500, {
+      message: 'Limit must be between 1 and 500.',
+    })
     .optional()
-    .describe('Maximum number of dashboards to return.'),
+    .describe('Number of dashboards to return, from 1 to 500.'),
 } as const;
 
 const alertRuleFilterInputSchema = {
-  query: z
-    .string()
-    .trim()
-    .min(1)
+  query: nonEmptyTrimmedStringSchema
     .optional()
-    .describe('Optional free-text filter applied to alert rule title or uid.'),
-  folder_uid: z
-    .string()
-    .trim()
-    .min(1)
+    .describe(
+      'Optional non-empty free-text filter applied to alert rule title or uid.',
+    ),
+  folder_uid: nonEmptyTrimmedStringSchema
     .optional()
-    .describe('Optional Grafana folder UID filter.'),
-  rule_group: z
-    .string()
-    .trim()
-    .min(1)
+    .describe('Optional non-empty Grafana folder UID filter.'),
+  rule_group: nonEmptyTrimmedStringSchema
     .optional()
-    .describe('Optional alert rule group filter.'),
+    .describe('Optional non-empty alert rule group filter.'),
   limit: z
     .number()
     .int()
-    .positive()
-    .max(500)
+    .refine((value) => value >= 1 && value <= 500, {
+      message: 'Limit must be between 1 and 500.',
+    })
     .optional()
-    .describe('Maximum number of alert rules to return after filtering.'),
+    .describe(
+      'Number of alert rules to return after filtering, from 1 to 500.',
+    ),
 } as const;
 
 function assertAllowedToolName(name: string) {
@@ -377,11 +383,9 @@ function registerGetDashboardTool(
       title: 'Get Dashboard',
       description: 'Fetch a Grafana dashboard by dashboard UID.',
       inputSchema: {
-        dashboard_uid: z
-          .string()
-          .trim()
-          .min(1)
-          .describe('The Grafana dashboard UID.'),
+        dashboard_uid: nonEmptyTrimmedStringSchema.describe(
+          'The non-empty Grafana dashboard UID.',
+        ),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: TOOL_ANNOTATIONS,
@@ -454,11 +458,9 @@ function registerGetAlertRuleTool(
       title: 'Get Alert Rule',
       description: 'Fetch a Grafana alert rule by alert rule UID.',
       inputSchema: {
-        alert_rule_uid: z
-          .string()
-          .trim()
-          .min(1)
-          .describe('The Grafana alert rule UID.'),
+        alert_rule_uid: nonEmptyTrimmedStringSchema.describe(
+          'The non-empty Grafana alert rule UID.',
+        ),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: TOOL_ANNOTATIONS,
@@ -504,19 +506,17 @@ function registerListAlertInstancesTool(
           .boolean()
           .optional()
           .describe('Whether to include unprocessed alert instances.'),
-        receiver: z
-          .string()
-          .trim()
-          .min(1)
+        receiver: nonEmptyTrimmedStringSchema
           .optional()
-          .describe('Optional Alertmanager receiver name filter.'),
+          .describe('Optional non-empty Alertmanager receiver name filter.'),
         limit: z
           .number()
           .int()
-          .positive()
-          .max(500)
+          .refine((value) => value >= 1 && value <= 500, {
+            message: 'Limit must be between 1 and 500.',
+          })
           .optional()
-          .describe('Maximum number of alert instances to return.'),
+          .describe('Number of alert instances to return, from 1 to 500.'),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: TOOL_ANNOTATIONS,
@@ -560,25 +560,22 @@ function registerListDataSourcesTool(
       description:
         'List Grafana data sources visible to the configured service account.',
       inputSchema: {
-        query: z
-          .string()
-          .trim()
-          .min(1)
+        query: nonEmptyTrimmedStringSchema
           .optional()
-          .describe('Optional free-text filter applied to name, uid, or type.'),
-        type: z
-          .string()
-          .trim()
-          .min(1)
+          .describe(
+            'Optional non-empty free-text filter applied to name, uid, or type.',
+          ),
+        type: nonEmptyTrimmedStringSchema
           .optional()
-          .describe('Optional Grafana data source type filter.'),
+          .describe('Optional non-empty Grafana data source type filter.'),
         limit: z
           .number()
           .int()
-          .positive()
-          .max(500)
+          .refine((value) => value >= 1 && value <= 500, {
+            message: 'Limit must be between 1 and 500.',
+          })
           .optional()
-          .describe('Maximum number of data sources to return.'),
+          .describe('Number of data sources to return, from 1 to 500.'),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: TOOL_ANNOTATIONS,
@@ -643,41 +640,42 @@ function registerListAnnotationsTool(
           .describe(
             'Optional end time as Unix epoch milliseconds or ISO 8601.',
           ),
-        dashboard_uid: z
-          .string()
-          .trim()
-          .min(1)
+        dashboard_uid: nonEmptyTrimmedStringSchema
           .optional()
-          .describe('Optional Grafana dashboard UID filter.'),
+          .describe('Optional non-empty Grafana dashboard UID filter.'),
         panel_id: z
           .number()
           .int()
-          .nonnegative()
+          .refine((value) => value >= 0, {
+            message: 'Panel ID must be non-negative.',
+          })
           .optional()
-          .describe('Optional panel ID filter.'),
+          .describe('Optional non-negative integer panel ID filter.'),
         alert_id: z
           .number()
           .int()
-          .nonnegative()
+          .refine((value) => value >= 0, {
+            message: 'Alert ID must be non-negative.',
+          })
           .optional()
-          .describe('Optional alert ID filter.'),
+          .describe('Optional non-negative integer alert ID filter.'),
         tags: z
-          .array(z.string().min(1))
+          .array(nonEmptyStringSchema)
           .optional()
-          .describe('Optional annotation tags to match.'),
-        text_query: z
-          .string()
-          .trim()
-          .min(1)
+          .describe('Optional non-empty annotation tags to match.'),
+        text_query: nonEmptyTrimmedStringSchema
           .optional()
-          .describe('Optional client-side text filter for annotation text.'),
+          .describe(
+            'Optional non-empty client-side text filter for annotation text.',
+          ),
         limit: z
           .number()
           .int()
-          .positive()
-          .max(500)
+          .refine((value) => value >= 1 && value <= 500, {
+            message: 'Limit must be between 1 and 500.',
+          })
           .optional()
-          .describe('Maximum number of annotations to return.'),
+          .describe('Number of annotations to return, from 1 to 500.'),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: TOOL_ANNOTATIONS,

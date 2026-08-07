@@ -17,6 +17,10 @@ const TOOL_ANNOTATIONS = {
   openWorldHint: false,
 } as const;
 
+const nonEmptyStringSchema = z.string().refine((value) => value.length > 0, {
+  message: 'Value must be non-empty.',
+});
+
 const LEADING_SQL_COMMENTS_PATTERN =
   /^\s*(?:(?:--[^\n]*(?:\r?\n|$))|(?:\/\*[\s\S]*?\*\/))*\s*/;
 const TOP_LEVEL_STATEMENT_KEYWORDS = new Set([
@@ -268,7 +272,9 @@ export function registerSnowflakeTools(
       description:
         'Execute a Snowflake SQL statement and return the result rows as JSON.',
       inputSchema: {
-        sql: z.string().min(1).describe('The SQL statement to execute.'),
+        sql: nonEmptyStringSchema.describe(
+          'The non-empty SQL statement to execute.',
+        ),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: {
@@ -326,10 +332,9 @@ export function registerSnowflakeTools(
       title: 'List Schemas',
       description: 'List schemas in a Snowflake database.',
       inputSchema: {
-        database: z
-          .string()
-          .min(1)
-          .describe('Database name to inspect for schemas.'),
+        database: nonEmptyStringSchema.describe(
+          'Non-empty database name to inspect for schemas.',
+        ),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: {
@@ -362,14 +367,12 @@ export function registerSnowflakeTools(
       title: 'List Tables',
       description: 'List tables in a Snowflake schema.',
       inputSchema: {
-        database: z
-          .string()
-          .min(1)
-          .describe('Database name containing the schema.'),
-        schema: z
-          .string()
-          .min(1)
-          .describe('Schema name to inspect for tables.'),
+        database: nonEmptyStringSchema.describe(
+          'Non-empty database name containing the schema.',
+        ),
+        schema: nonEmptyStringSchema.describe(
+          'Non-empty schema name to inspect for tables.',
+        ),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: {
@@ -405,12 +408,9 @@ export function registerSnowflakeTools(
       description:
         'Describe a Snowflake table and return column metadata as JSON.',
       inputSchema: {
-        table_name: z
-          .string()
-          .min(1)
-          .describe(
-            'Fully-qualified table name in database.schema.table format.',
-          ),
+        table_name: nonEmptyStringSchema.describe(
+          'Non-empty fully-qualified table name in database.schema.table format.',
+        ),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: {

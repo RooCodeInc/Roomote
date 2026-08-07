@@ -6,72 +6,69 @@ import { handleSubmitAutomationWorkItems } from './submit-automation-work-items.
 import { errorResult } from './tool-result.js';
 import type { RoomoteConfig, ToolResult } from './types.js';
 
+const boundedNonEmptyTrimmedStringSchema = (maximumLength: number) =>
+  z
+    .string()
+    .trim()
+    .refine((value) => value.length > 0 && value.length <= maximumLength, {
+      message: `Value must contain 1 to ${maximumLength} characters.`,
+    });
+const nonEmptyTrimmedStringSchema = z
+  .string()
+  .trim()
+  .refine((value) => value.length > 0, {
+    message: 'Value must be non-empty.',
+  });
+const uuidStringSchema = z
+  .string()
+  .refine((value) => z.string().uuid().safeParse(value).success, {
+    message: 'Value must be a UUID.',
+  });
+
 // One flat work item per call. The previous array-of-nested-objects schema
 // was routinely mangled by some models (arrays sent as JSON strings, fields
 // dropped, reasoning leaking into optional fields), wedging automation scans
 // in retry loops. Fields the platform derives or rejects for automation act
 // items (disposition, workspaceReadiness, readinessMessage) are omitted.
 export const automationWorkItemInputSchema = {
-  title: z.string().trim().min(1).max(140).describe('Short work item title.'),
-  brief: z
-    .string()
-    .trim()
-    .min(1)
-    .max(2000)
-    .describe('What is wrong and why it is worth acting on.'),
+  title: boundedNonEmptyTrimmedStringSchema(140).describe(
+    'Non-empty work item title of at most 140 characters.',
+  ),
+  brief: boundedNonEmptyTrimmedStringSchema(2000).describe(
+    'Non-empty explanation of what is wrong and why it is worth acting on, at most 2,000 characters.',
+  ),
   category: z
     .enum(['bug', 'security', 'chore', 'feature', 'improvement'])
     .optional(),
   priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
-  actionKind: z
-    .string()
-    .trim()
-    .min(1)
-    .max(120)
-    .describe(
-      'Action kind for policy and reporting, such as code_change_pr or sentry_issue_mutation.',
-    ),
+  actionKind: boundedNonEmptyTrimmedStringSchema(120).describe(
+    'Non-empty action kind of at most 120 characters for policy and reporting, such as code_change_pr or sentry_issue_mutation.',
+  ),
   disposition: z
     .enum(['act'])
     .optional()
     .describe(
       'Optional; always act. Roomote starts the work immediately. Approval-gated suggestions are no longer accepted.',
     ),
-  executionPrompt: z
-    .string()
-    .trim()
-    .min(1)
-    .max(6000)
-    .describe('Execution instructions for the auto-started execution task.'),
-  investigationContext: z
-    .string()
-    .trim()
-    .min(1)
-    .max(4000)
+  executionPrompt: boundedNonEmptyTrimmedStringSchema(6000).describe(
+    'Non-empty execution instructions of at most 6,000 characters for the auto-started execution task.',
+  ),
+  investigationContext: boundedNonEmptyTrimmedStringSchema(4000)
     .optional()
     .describe(
-      'Optional hidden implementation context for the execution task. Not shown to Slack users.',
+      'Optional non-empty hidden implementation context of at most 4,000 characters for the execution task. Not shown to Slack users.',
     ),
-  fingerprint: z
-    .string()
-    .trim()
-    .min(1)
-    .max(255)
+  fingerprint: boundedNonEmptyTrimmedStringSchema(255)
     .optional()
     .describe(
-      'Optional stable duplicate-suppression fingerprint for this work item.',
+      'Optional non-empty stable duplicate-suppression fingerprint of at most 255 characters for this work item.',
     ),
-  targetRepositoryFullName: z
-    .string()
-    .trim()
-    .min(1)
-    .describe('Owner/repo launch target for this work item.'),
-  targetEnvironmentId: z
-    .string()
-    .uuid()
-    .describe(
-      'Environment UUID for the environment-backed launch. Copy it from the repository environments list.',
-    ),
+  targetRepositoryFullName: nonEmptyTrimmedStringSchema.describe(
+    'Non-empty owner/repo launch target for this work item.',
+  ),
+  targetEnvironmentId: uuidStringSchema.describe(
+    'Environment UUID for the environment-backed launch. Copy it from the repository environments list.',
+  ),
 };
 
 type AutomationWorkItemToolParams = z.infer<
