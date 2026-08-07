@@ -288,6 +288,7 @@ export {
 export { type PullRequestFactSnapshot } from './lib/pull-requests/pull-request-facts-store';
 
 export * from './lib/auth';
+export * from './lib/safe-fetch';
 
 export {
   storeOAuthStateWithId,

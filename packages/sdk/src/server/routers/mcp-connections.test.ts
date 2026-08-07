@@ -2,6 +2,7 @@ import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
 
 const mockEnv = vi.hoisted(() => ({
   R_CURATED_INTEGRATIONS_DISABLED: false,
+  R_CUSTOM_MCP_DISABLED: false,
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -67,8 +68,12 @@ const {
       values,
     })),
     mockDesc: vi.fn((column: unknown) => ({ type: 'desc', column })),
-    mockFindCustomServers: vi.fn(async () => []),
-    mockFindConnectionFirst: vi.fn(async () => undefined),
+    mockFindCustomServers: vi.fn<(...args: unknown[]) => Promise<unknown>>(
+      async () => [],
+    ),
+    mockFindConnectionFirst: vi.fn<(...args: unknown[]) => Promise<unknown>>(
+      async () => undefined,
+    ),
   };
 });
 

@@ -347,71 +347,114 @@ export interface SafeFetchOptions {
 
 interface GuardedAgentConfig {
   allowedPrivateCidrs: string | undefined;
-  lookup: DnsLookupFn;
+  lookup?: DnsLookupFn;
+}
+
+/**
+ * Hygiene + IP-literal vetting for an operator-supplied URL. IP literals
+ * never reach a DNS lookup hook, so they must be checked here; hostnames are
+ * vetted at connect time by {@link createGuardedConnectOptions}.
+ */
+export function assertEgressUrlAllowed(
+  target: string | URL,
+  allowedPrivateCidrs?: string,
+): URL {
+  const url = validateEgressUrl(target);
+  const bareHostname = url.hostname.replace(/^\[|\]$/g, '');
+
+  if (isIP(bareHostname) !== 0) {
+    const reason = checkAddressAllowed(
+      bareHostname,
+      parseCidrList(allowedPrivateCidrs),
+    );
+
+    if (reason !== null) {
+      throw new SafeFetchViolationError(reason);
+    }
+  }
+
+  return url;
+}
+
+/**
+ * undici `connect` options that vet and pin every DNS answer. Exported so
+ * callers with their own Agent needs (e.g. the API's long-lived-stream proxy
+ * dispatcher) can compose the guard with other Agent options.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function createGuardedConnectOptions(config: GuardedAgentConfig): any {
+  const allowed = parseCidrList(config.allowedPrivateCidrs);
+  const lookup = config.lookup ?? nodeDnsLookup;
+
+  return {
+    lookup: (
+      hostname: string,
+      options: { all?: boolean } & Record<string, unknown>,
+      callback: (
+        error: NodeJS.ErrnoException | null,
+        address: unknown,
+        family?: number,
+      ) => void,
+    ) => {
+      lookup(
+        hostname,
+        { ...options, all: true, verbatim: true },
+        (error, addresses) => {
+          if (error) {
+            callback(error, '', 4);
+            return;
+          }
+
+          const results = (
+            Array.isArray(addresses)
+              ? addresses
+              : [{ address: addresses as unknown as string, family: 4 }]
+          ) as { address: string; family: number }[];
+
+          const vetted = results.filter(
+            (result) => checkAddressAllowed(result.address, allowed) === null,
+          );
+
+          if (vetted.length === 0) {
+            const reason =
+              results.length === 0
+                ? `DNS for '${hostname}' returned no addresses.`
+                : (checkAddressAllowed(results[0]!.address, allowed) ??
+                  'refused');
+
+            callback(new SafeFetchViolationError(reason), '', 4);
+            return;
+          }
+
+          // Pin the connection to the vetted answers: undici connects to
+          // these literal addresses, so no later re-resolution can rebind.
+          if (options.all) {
+            callback(
+              null,
+              vetted.map((result) => ({
+                address: result.address,
+                family: result.family,
+              })),
+              undefined,
+            );
+          } else {
+            callback(null, vetted[0]!.address, vetted[0]!.family);
+          }
+        },
+      );
+    },
+  };
 }
 
 function createGuardedAgent(config: GuardedAgentConfig): Agent {
-  const allowed = parseCidrList(config.allowedPrivateCidrs);
-
-  return new Agent({
-    connect: {
-      lookup: (hostname, options, callback) => {
-        config.lookup(
-          hostname,
-          { ...options, all: true, verbatim: true },
-          (error, addresses) => {
-            if (error) {
-              callback(error, '', 4);
-              return;
-            }
-
-            const results = (
-              Array.isArray(addresses)
-                ? addresses
-                : [{ address: addresses as unknown as string, family: 4 }]
-            ) as { address: string; family: number }[];
-
-            const vetted = results.filter(
-              (result) => checkAddressAllowed(result.address, allowed) === null,
-            );
-
-            if (vetted.length === 0) {
-              const reason =
-                results.length === 0
-                  ? `DNS for '${hostname}' returned no addresses.`
-                  : (checkAddressAllowed(results[0]!.address, allowed) ??
-                    'refused');
-
-              callback(new SafeFetchViolationError(reason), '', 4);
-              return;
-            }
-
-            // Pin the connection to the vetted answers: undici connects to
-            // these literal addresses, so no later re-resolution can rebind.
-            if (options.all) {
-              callback(
-                null,
-                vetted.map((result) => ({
-                  address: result.address,
-                  family: result.family,
-                })) as never,
-                undefined as never,
-              );
-            } else {
-              callback(null, vetted[0]!.address, vetted[0]!.family);
-            }
-          },
-        );
-      },
-    },
-  });
+  return new Agent({ connect: createGuardedConnectOptions(config) });
 }
 
 const agentCache = new Map<string, Agent>();
 
 function guardedAgentFor(config: GuardedAgentConfig): Agent {
   // Custom lookup functions are test-only; never cache those agents.
-  if (config.lookup !== nodeDnsLookup) {
+  if (config.lookup && config.lookup !== nodeDnsLookup) {
     return createGuardedAgent(config);
   }
 
@@ -435,24 +478,11 @@ export async function safeFetch(
   target: string | URL,
   options: SafeFetchOptions = {},
 ): Promise<Response> {
-  const url = validateEgressUrl(target);
-  const allowed = parseCidrList(options.allowedPrivateCidrs);
-
-  // IP literals never hit the lookup hook: vet them here.
-  if (isIP(url.hostname.replace(/^\[|\]$/g, '')) !== 0) {
-    const reason = checkAddressAllowed(
-      url.hostname.replace(/^\[|\]$/g, ''),
-      allowed,
-    );
-
-    if (reason !== null) {
-      throw new SafeFetchViolationError(reason);
-    }
-  }
+  const url = assertEgressUrlAllowed(target, options.allowedPrivateCidrs);
 
   const dispatcher = guardedAgentFor({
     allowedPrivateCidrs: options.allowedPrivateCidrs,
-    lookup: options.lookup ?? nodeDnsLookup,
+    lookup: options.lookup,
   });
 
   let response;

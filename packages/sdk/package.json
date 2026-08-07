@@ -51,6 +51,10 @@
     "./server/teams-primary-conversation": {
       "import": "./src/server/lib/teams-primary-conversation.ts",
       "require": "./src/server/lib/teams-primary-conversation.ts"
+    },
+    "./server/safe-fetch": {
+      "import": "./src/server/lib/safe-fetch.ts",
+      "require": "./src/server/lib/safe-fetch.ts"
     }
   },
   "scripts": {
