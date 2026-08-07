@@ -24,6 +24,7 @@ import { apiLogger } from '../../logging.js';
 import { cancelOrphanedWorkItemRunBestEffort } from '../tasks/orphaned-work-item-run.js';
 import {
   claimCurrentThreadSuggestionByMessage,
+  findCurrentThreadSuggestionIdByMessage,
   type ClaimedCurrentThreadSuggestion,
 } from '../tasks/current-thread-suggestion-reaction.js';
 import { stopTaskRun } from '../tasks/task-stop.js';
@@ -159,6 +160,7 @@ async function handleSuggestionLaunchCallback(params: {
   query: TelegramCallbackQuery;
   suggestionId: string;
   claimedSuggestion?: ClaimedCurrentThreadSuggestion;
+  senderUserId?: string;
   answerCallback?: boolean;
 }): Promise<void> {
   const message = params.query.message;
@@ -173,9 +175,9 @@ async function handleSuggestionLaunchCallback(params: {
     return;
   }
 
-  const senderUserId = await resolveTelegramSenderUserId(
-    String(params.query.from.id),
-  );
+  const senderUserId =
+    params.senderUserId ??
+    (await resolveTelegramSenderUserId(String(params.query.from.id)));
 
   if (!senderUserId) {
     if (params.claimedSuggestion) {
@@ -374,6 +376,27 @@ export async function handleTelegramSuggestionReaction(
 
   const chatId = String(reaction.chat.id);
   const messageId = String(reaction.message_id);
+  const suggestionId = await findCurrentThreadSuggestionIdByMessage({
+    surface: 'telegram',
+    channelId: chatId,
+    messageId,
+  });
+  if (!suggestionId) {
+    return false;
+  }
+
+  const senderUserId = await resolveTelegramSenderUserId(
+    String(reaction.user.id),
+  );
+  if (!senderUserId) {
+    await postTelegramMessageBestEffort({
+      chatId,
+      replyToMessageId: messageId,
+      text: 'Link your Roomote account to start tasks from Telegram.',
+    });
+    return true;
+  }
+
   const claim = await claimCurrentThreadSuggestionByMessage({
     surface: 'telegram',
     channelId: chatId,
@@ -407,6 +430,7 @@ export async function handleTelegramSuggestionReaction(
     },
     suggestionId: suggestion.id,
     claimedSuggestion: suggestion,
+    senderUserId,
     answerCallback: false,
   });
   return true;

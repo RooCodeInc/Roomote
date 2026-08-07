@@ -479,6 +479,9 @@ describe('Teams webhook handler', () => {
   });
 
   it('launches the exact suggested task when a linked user likes its card', async () => {
+    trackedSuggestionMessageFindFirstMock.mockResolvedValue({
+      workItemId: 'suggestion-1',
+    });
     teamsUserMappingFindFirstMock.mockResolvedValue({
       userId: 'mapped-user-1',
     });
@@ -528,6 +531,36 @@ describe('Teams webhook handler', () => {
       }),
     );
     expect(callViaEmojiConfigMock).not.toHaveBeenCalled();
+  });
+
+  it('does not claim a reaction suggestion when account mapping fails', async () => {
+    trackedSuggestionMessageFindFirstMock.mockResolvedValue({
+      workItemId: 'suggestion-1',
+    });
+    teamsUserMappingFindFirstMock.mockRejectedValue(
+      new Error('database unavailable'),
+    );
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer valid-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({
+          type: 'messageReaction',
+          id: 'suggestion-reaction-error',
+          text: undefined,
+          entities: undefined,
+          replyToId: 'suggestion-card-1',
+          reactionsAdded: [{ type: 'like' }],
+        }),
+      ),
+    });
+
+    expect(response.status).toBe(500);
+    expect(resolveAndClaimTeamsSuggestionReactionMock).not.toHaveBeenCalled();
   });
 
   it('ignores reaction types outside the Teams native set', async () => {

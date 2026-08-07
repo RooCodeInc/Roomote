@@ -69,6 +69,7 @@ import {
 import { apiLogger } from '../../logging.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
+import { findCurrentThreadSuggestionIdByMessage } from '../tasks/current-thread-suggestion-reaction.js';
 import {
   attachOutOfBandContextToCommunicationMessage,
   releaseCommunicationOutOfBandClaim,
@@ -1707,31 +1708,14 @@ teams.post('/', async (c) => {
       (reaction) => reaction.type === 'like',
     );
     if (hasLikeReaction && reactionTargetMessageId) {
-      const reactionResolution = await resolveAndClaimTeamsSuggestionReaction({
-        conversationId: activity.conversation.id,
+      const suggestionId = await findCurrentThreadSuggestionIdByMessage({
+        surface: 'teams',
+        channelId: activity.conversation.id,
         messageId: reactionTargetMessageId,
       });
-      if (reactionResolution.outcome === 'already_started') {
-        const metadata = getTeamsActivityCommunicationMetadata(activity);
-        await postTeamsMessageBestEffort({
-          conversationId: metadata.communicationChannelId,
-          threadId: metadata.communicationThreadId,
-          serviceUrl: metadata.communicationServiceUrl,
-          text: 'That idea was already started or is no longer available.',
-        });
-        return c.json({
-          ok: true,
-          queued: false,
-          reason: 'suggestion_already_started',
-        });
-      }
-      if (reactionResolution.outcome === 'claimed') {
+      if (suggestionId) {
         suggestionReactionMappedUserId = await findMappedTeamsUserId(activity);
         if (!suggestionReactionMappedUserId) {
-          await releaseWorkItemClaim(db, {
-            id: reactionResolution.suggestion.id,
-            claimedAt: reactionResolution.suggestion.launchClaimedAt,
-          });
           const metadata = getTeamsActivityCommunicationMetadata(activity);
           await postTeamsAccountLinkPrompt({ activity, metadata });
           return c.json({
@@ -1740,7 +1724,29 @@ teams.post('/', async (c) => {
             reason: 'account_link_required',
           });
         }
-        claimedSuggestionReaction = reactionResolution.suggestion;
+        const reactionResolution = await resolveAndClaimTeamsSuggestionReaction(
+          {
+            conversationId: activity.conversation.id,
+            messageId: reactionTargetMessageId,
+          },
+        );
+        if (reactionResolution.outcome === 'already_started') {
+          const metadata = getTeamsActivityCommunicationMetadata(activity);
+          await postTeamsMessageBestEffort({
+            conversationId: metadata.communicationChannelId,
+            threadId: metadata.communicationThreadId,
+            serviceUrl: metadata.communicationServiceUrl,
+            text: 'That idea was already started or is no longer available.',
+          });
+          return c.json({
+            ok: true,
+            queued: false,
+            reason: 'suggestion_already_started',
+          });
+        }
+        if (reactionResolution.outcome === 'claimed') {
+          claimedSuggestionReaction = reactionResolution.suggestion;
+        }
       }
     }
 

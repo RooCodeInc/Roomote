@@ -28,6 +28,7 @@ import { apiLogger } from '../../logging.js';
 import { cancelOrphanedWorkItemRunBestEffort } from '../tasks/orphaned-work-item-run.js';
 import {
   claimCurrentThreadSuggestionByMessage,
+  findCurrentThreadSuggestionIdByMessage,
   type ClaimedCurrentThreadSuggestion,
 } from '../tasks/current-thread-suggestion-reaction.js';
 import { stopTaskRun } from '../tasks/task-stop.js';
@@ -428,6 +429,27 @@ export async function handleDiscordSuggestionReaction(input: {
   sender: DiscordUser;
   senderDisplayName?: string | null;
 }): Promise<boolean> {
+  const suggestionId = await findCurrentThreadSuggestionIdByMessage({
+    surface: 'discord',
+    channelId: input.channelId,
+    messageId: input.messageId,
+  });
+  if (!suggestionId) {
+    return false;
+  }
+
+  const senderUserId = await findDiscordMappedUserId(input.sender.id);
+  if (!senderUserId) {
+    await input.provider.postMessage({
+      channelId: input.channel.parentChannelId ?? input.channel.channelId,
+      ...(input.channel.parentChannelId
+        ? { threadId: input.channel.channelId }
+        : {}),
+      text: 'Link your Roomote account before starting suggested tasks.',
+    });
+    return true;
+  }
+
   const claim = await claimCurrentThreadSuggestionByMessage({
     surface: 'discord',
     channelId: input.channelId,
@@ -447,22 +469,6 @@ export async function handleDiscordSuggestionReaction(input: {
     return true;
   }
   const suggestion = claim.suggestion;
-
-  const senderUserId = await findDiscordMappedUserId(input.sender.id);
-  if (!senderUserId) {
-    await input.provider.postMessage({
-      channelId: input.channel.parentChannelId ?? input.channel.channelId,
-      ...(input.channel.parentChannelId
-        ? { threadId: input.channel.channelId }
-        : {}),
-      text: 'Link your Roomote account before starting suggested tasks.',
-    });
-    await releaseWorkItemClaim(db, {
-      id: suggestion.id,
-      claimedAt: suggestion.launchClaimedAt,
-    });
-    return true;
-  }
 
   await launchClaimedDiscordSuggestion({
     provider: input.provider,

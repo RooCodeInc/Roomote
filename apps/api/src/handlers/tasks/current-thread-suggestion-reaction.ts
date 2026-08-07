@@ -22,11 +22,15 @@ type CurrentThreadSuggestionReactionClaim =
   | { outcome: 'already_started' }
   | { outcome: 'claimed'; suggestion: ClaimedCurrentThreadSuggestion };
 
-export async function claimCurrentThreadSuggestionByMessage(input: {
+type CurrentThreadSuggestionMessage = {
   surface: 'discord' | 'telegram' | 'teams';
   channelId: string;
   messageId: string;
-}): Promise<CurrentThreadSuggestionReactionClaim> {
+};
+
+export async function findCurrentThreadSuggestionIdByMessage(
+  input: CurrentThreadSuggestionMessage,
+): Promise<string | null> {
   const channelCondition =
     input.surface === 'teams'
       ? sql`split_part(${trackedMessages.channelId}, ';messageid=', 1) = split_part(${input.channelId}, ';messageid=', 1)`
@@ -41,11 +45,19 @@ export async function claimCurrentThreadSuggestionByMessage(input: {
     columns: { workItemId: true },
   });
 
-  if (!trackedCard?.workItemId) {
+  return trackedCard?.workItemId ?? null;
+}
+
+export async function claimCurrentThreadSuggestionByMessage(
+  input: CurrentThreadSuggestionMessage,
+): Promise<CurrentThreadSuggestionReactionClaim> {
+  const workItemId = await findCurrentThreadSuggestionIdByMessage(input);
+
+  if (!workItemId) {
     return { outcome: 'no_card' };
   }
 
-  const claimed = await claimWorkItem(db, { id: trackedCard.workItemId });
+  const claimed = await claimWorkItem(db, { id: workItemId });
   if (!claimed) {
     return { outcome: 'already_started' };
   }
