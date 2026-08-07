@@ -132,6 +132,16 @@ vi.mock('./task-suggestion-reaction-contention.js', () => ({
 import { handleReactionAddedEvent } from './reactions';
 
 describe('chat reply suggestion reactions', () => {
+  function buildReactionEvent(eventTs: string) {
+    return {
+      type: 'reaction_added',
+      user: 'U1',
+      reaction: 'thumbsup',
+      item: { type: 'message', channel: 'C1', ts: 'card-ts' },
+      event_ts: eventTs,
+    } as const;
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getConfiguration.mockResolvedValue(null);
@@ -173,13 +183,7 @@ describe('chat reply suggestion reactions', () => {
         slackInstallation: { botUserId: 'UROOMOTE' },
         slack,
       } as never,
-      event: {
-        type: 'reaction_added',
-        user: 'U1',
-        reaction: 'thumbsup',
-        item: { type: 'message', channel: 'C1', ts: 'card-ts' },
-        event_ts: 'event-ts',
-      },
+      event: buildReactionEvent('event-ts'),
     });
 
     expect(mocks.resolveWorkspace).toHaveBeenCalledWith({
@@ -193,6 +197,11 @@ describe('chat reply suggestion reactions', () => {
         repo: 'acme/app',
         environmentId: 'environment-1',
         agentPromptText: 'implementation prompt',
+        initiator: {
+          kind: 'user',
+          externalId: 'U1',
+          matchedUserId: 'user-1',
+        },
       }),
     );
     expect(mocks.finalizeWorkItemLaunched).toHaveBeenCalledWith(
@@ -210,5 +219,67 @@ describe('chat reply suggestion reactions', () => {
         taskId: 'task-new',
       }),
     );
+  });
+
+  it('requires the reacting user to have a linked Roomote account', async () => {
+    mocks.lookupSlackUserMapping.mockResolvedValue({
+      hasInactiveMapping: false,
+      activeMapping: null,
+    });
+    const slack = {
+      postMessage: vi.fn(async () => 'failure-message-ts'),
+      deleteMessage: vi.fn(async () => undefined),
+      getMessageMetadata: vi.fn(),
+    };
+
+    await handleReactionAddedEvent({
+      context: {
+        teamId: 'T1',
+        slackInstallation: { botUserId: 'UROOMOTE' },
+        slack,
+      } as never,
+      event: buildReactionEvent('unlinked-event-ts'),
+    });
+
+    expect(slack.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining(
+          'Link your Roomote account to start tasks from Slack.',
+        ),
+      }),
+    );
+    expect(mocks.claimWorkItem).not.toHaveBeenCalled();
+    expect(mocks.startSlackAppMentionTask).not.toHaveBeenCalled();
+  });
+
+  it('creates one task when duplicate reactions contend for the same suggestion', async () => {
+    mocks.claimWorkItem
+      .mockResolvedValueOnce({ launchClaimedAt: claimedAt })
+      .mockResolvedValue(null);
+    const slack = {
+      postMessage: vi.fn(async () => 'seeded-thread-ts'),
+      deleteMessage: vi.fn(async () => undefined),
+      getMessageMetadata: vi.fn(),
+    };
+    const context = {
+      teamId: 'T1',
+      slackInstallation: { botUserId: 'UROOMOTE' },
+      slack,
+    } as never;
+
+    await Promise.all([
+      handleReactionAddedEvent({
+        context,
+        event: buildReactionEvent('contention-event-1'),
+      }),
+      handleReactionAddedEvent({
+        context,
+        event: buildReactionEvent('contention-event-2'),
+      }),
+    ]);
+
+    expect(mocks.claimWorkItem).toHaveBeenCalledTimes(2);
+    expect(mocks.startSlackAppMentionTask).toHaveBeenCalledTimes(1);
+    expect(mocks.finalizeWorkItemLaunched).toHaveBeenCalledTimes(1);
   });
 });

@@ -132,6 +132,19 @@ describe('work_items launch claim helpers', () => {
     expect(row?.launchClaimedAt).toBeInstanceOf(Date);
   });
 
+  it('grants exactly one claim under concurrent contention', async () => {
+    const id = await seedWorkItem();
+
+    const claims = await Promise.all(
+      Array.from({ length: 8 }, () => claimWorkItem(db, { id })),
+    );
+
+    expect(claims.filter((claim) => claim !== null)).toHaveLength(1);
+    const row = await readStatus(id);
+    expect(row?.status).toBe('launching');
+    expect(row?.launchClaimedAt).toBeInstanceOf(Date);
+  });
+
   it('reclaims a stale launching item (crash recovery)', async () => {
     const staleClaimedAt = new Date(
       Date.now() - WORK_ITEM_LAUNCH_STALE_CLAIM_MS - 60_000,

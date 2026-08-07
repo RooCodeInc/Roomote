@@ -533,6 +533,59 @@ describe('Teams webhook handler', () => {
     expect(callViaEmojiConfigMock).not.toHaveBeenCalled();
   });
 
+  it('creates one task when duplicate likes contend for the same suggestion', async () => {
+    trackedSuggestionMessageFindFirstMock.mockResolvedValue({
+      workItemId: 'suggestion-1',
+    });
+    teamsUserMappingFindFirstMock.mockResolvedValue({
+      userId: 'mapped-user-1',
+    });
+    resolveAndClaimTeamsSuggestionReactionMock
+      .mockResolvedValueOnce({
+        outcome: 'claimed',
+        suggestion: {
+          id: 'suggestion-1',
+          title: 'Fix the flaky test',
+          brief: 'Remove the timing race.',
+          investigationContext: null,
+          targetRepositoryFullName: null,
+          targetEnvironmentId: null,
+          launchClaimedAt: new Date('2026-08-07T00:00:00.000Z'),
+        },
+      })
+      .mockResolvedValue({
+        outcome: 'already_started',
+        title: 'Fix the flaky test',
+      });
+
+    const request = (id: string) =>
+      createApp().request('/teams', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer valid-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(
+          createTeamsActivity({
+            type: 'messageReaction',
+            id,
+            text: undefined,
+            entities: undefined,
+            replyToId: 'suggestion-card-1',
+            reactionsAdded: [{ type: 'like' }],
+          }),
+        ),
+      });
+
+    await Promise.all([
+      request('suggestion-reaction-contention-1'),
+      request('suggestion-reaction-contention-2'),
+    ]);
+
+    expect(resolveAndClaimTeamsSuggestionReactionMock).toHaveBeenCalledTimes(2);
+    expect(launchClaimedTeamsSuggestionMock).toHaveBeenCalledTimes(1);
+  });
+
   it('does not claim a reaction suggestion when account mapping fails', async () => {
     trackedSuggestionMessageFindFirstMock.mockResolvedValue({
       workItemId: 'suggestion-1',

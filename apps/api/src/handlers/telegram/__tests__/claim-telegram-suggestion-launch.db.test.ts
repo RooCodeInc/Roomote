@@ -99,20 +99,15 @@ describe('claimTelegramSuggestionLaunch (work_items launch CAS)', () => {
     );
   });
 
-  it('returns null for a second claim (double-tap is a no-op)', async () => {
+  it('grants one claim when concurrent taps contend', async () => {
     const workItemId = await seedSuggestionWorkItem();
 
-    const first = await claimTelegramSuggestionLaunch({
-      suggestionId: workItemId,
-      chatId,
-    });
-    const second = await claimTelegramSuggestionLaunch({
-      suggestionId: workItemId,
-      chatId,
-    });
+    const [first, second] = await Promise.all([
+      claimTelegramSuggestionLaunch({ suggestionId: workItemId, chatId }),
+      claimTelegramSuggestionLaunch({ suggestionId: workItemId, chatId }),
+    ]);
 
-    expect(first).not.toBeNull();
-    expect(second).toBeNull();
+    expect([first, second].filter((claim) => claim !== null)).toHaveLength(1);
   });
 
   it('does not claim a launched work item', async () => {

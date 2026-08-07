@@ -13,7 +13,10 @@ import {
   workItems,
 } from '@roomote/db/server';
 
-import { resolveAndClaimTeamsSuggestionStart } from '../suggestion-start';
+import {
+  resolveAndClaimTeamsSuggestionReaction,
+  resolveAndClaimTeamsSuggestionStart,
+} from '../suggestion-start';
 
 describe('resolveAndClaimTeamsSuggestionStart (work_items launch CAS)', () => {
   const workItemIds: string[] = [];
@@ -142,6 +145,35 @@ describe('resolveAndClaimTeamsSuggestionStart (work_items launch CAS)', () => {
     });
 
     expect(resolution).toEqual({ outcome: 'no_cards' });
+  });
+
+  it('claims a reaction card exactly once under contention', async () => {
+    await seedSuggestionGroup({
+      introMessageId: 'reaction-card',
+      titles: ['Idea one'],
+      createdAt: new Date(),
+      oneMessagePerSuggestion: true,
+    });
+
+    const resolutions = await Promise.all([
+      resolveAndClaimTeamsSuggestionReaction({
+        conversationId,
+        messageId: 'reaction-card-1',
+      }),
+      resolveAndClaimTeamsSuggestionReaction({
+        conversationId,
+        messageId: 'reaction-card-1',
+      }),
+    ]);
+
+    expect(
+      resolutions.filter((resolution) => resolution.outcome === 'claimed'),
+    ).toHaveLength(1);
+    expect(
+      resolutions.filter(
+        (resolution) => resolution.outcome === 'already_started',
+      ),
+    ).toHaveLength(1);
   });
 
   it('returns already_started when the claim CAS loses (double reply)', async () => {

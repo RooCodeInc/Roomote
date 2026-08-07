@@ -7,7 +7,10 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { TelegramCallbackQuery } from '@roomote/communication/telegram-update';
+import type {
+  TelegramCallbackQuery,
+  TelegramMessageReaction,
+} from '@roomote/communication/telegram-update';
 
 const {
   answerCallbackMock,
@@ -208,6 +211,41 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
       }),
     );
     expect(answerCallbackMock).not.toHaveBeenCalled();
+  });
+
+  it('creates one task when duplicate reactions contend for the same suggestion', async () => {
+    const suggestion = {
+      id: WORK_ITEM_ID,
+      title: 'Fix the flaky test',
+      brief: 'The retry loop never terminates.',
+      investigationContext: null,
+      targetRepositoryFullName: null,
+      launchClaimedAt: CLAIMED_AT,
+    };
+    claimCurrentThreadSuggestionByMessageMock
+      .mockResolvedValueOnce({ outcome: 'claimed', suggestion })
+      .mockResolvedValue({ outcome: 'already_started' });
+    startNewTelegramTaskMock.mockResolvedValue({
+      status: 'started',
+      launchResult: { id: 7, taskId: 'task-1' },
+    });
+    const reaction: TelegramMessageReaction = {
+      chat: { id: 555, type: 'private' },
+      message_id: 100,
+      date: 0,
+      user: { id: 42, first_name: 'Matt' },
+      old_reaction: [],
+      new_reaction: [{ type: 'emoji', emoji: '👍' }],
+    };
+
+    await Promise.all([
+      handleTelegramSuggestionReaction(reaction),
+      handleTelegramSuggestionReaction(reaction),
+    ]);
+
+    expect(claimCurrentThreadSuggestionByMessageMock).toHaveBeenCalledTimes(2);
+    expect(startNewTelegramTaskMock).toHaveBeenCalledTimes(1);
+    expect(finalizeWorkItemLaunchedMock).toHaveBeenCalledTimes(1);
   });
 
   it('starts a suggestion in a fresh topic while preserving its source topic for fallback', async () => {
