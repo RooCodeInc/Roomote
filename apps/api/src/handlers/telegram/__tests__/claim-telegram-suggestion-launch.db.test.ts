@@ -55,10 +55,7 @@ describe('claimTelegramSuggestionLaunch (work_items launch CAS)', () => {
         suggestionType: 'setup_onboarding',
         suggestionKey: `source-task:${workItemId}`,
         ...(overrides?.launchRouting
-          ? {
-              launchRouting: overrides.launchRouting,
-              suggestionGroupKey: 'reply-1',
-            }
+          ? { launchRouting: overrides.launchRouting }
           : {}),
       },
     });
@@ -122,7 +119,7 @@ describe('claimTelegramSuggestionLaunch (work_items launch CAS)', () => {
     expect(second).toBeNull();
   });
 
-  it('discards pinned metadata for current-thread suggestion cards', async () => {
+  it('discards pinned metadata for router-launched suggestion cards', async () => {
     const workItemId = await seedSuggestionWorkItem({
       launchRouting: 'router',
     });
@@ -133,7 +130,6 @@ describe('claimTelegramSuggestionLaunch (work_items launch CAS)', () => {
     });
 
     expect(claimed).toMatchObject({
-      launchRouting: 'router',
       investigationContext: null,
       targetRepositoryFullName: null,
       targetEnvironmentId: null,

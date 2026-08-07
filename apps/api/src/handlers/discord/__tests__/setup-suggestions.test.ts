@@ -238,10 +238,10 @@ describe('Discord setup suggestions', () => {
     ).resolves.toBeNull();
   });
 
-  it('discards pinned metadata for current-thread suggestion cards', async () => {
+  it('discards pinned metadata for router-launched suggestion cards', async () => {
     findTrackedCardMock.mockResolvedValue({
       id: 'tracked-1',
-      metadata: { suggestionGroupKey: 'reply-1' },
+      metadata: { launchRouting: 'router' },
     });
     claimWorkItemMock.mockResolvedValue({
       id: 'suggestion-1',
@@ -259,7 +259,6 @@ describe('Discord setup suggestions', () => {
     });
 
     expect(claim).toMatchObject({
-      launchRouting: 'router',
       investigationContext: null,
       targetRepositoryFullName: null,
       targetEnvironmentId: null,

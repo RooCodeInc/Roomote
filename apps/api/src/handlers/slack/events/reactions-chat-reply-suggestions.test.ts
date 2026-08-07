@@ -5,7 +5,6 @@ const mocks = vi.hoisted(() => ({
   finalizeWorkItemLaunched: vi.fn(),
   releaseWorkItemClaim: vi.fn(),
   trackedMessageFindFirst: vi.fn(),
-  taskRunFindFirst: vi.fn(),
   resolveWorkspace: vi.fn(),
   lookupSlackUserMapping: vi.fn(),
   startAutoRoutedSlackTask: vi.fn(),
@@ -17,7 +16,6 @@ const mocks = vi.hoisted(() => ({
 const claimedAt = new Date('2026-08-06T00:00:00.000Z');
 const workItem = {
   id: 'work-item-1',
-  sourceTaskId: 'source-task-1',
   title: 'Add retry telemetry',
   brief: 'Instrument retry exhaustion.',
   category: 'improvement',
@@ -59,12 +57,8 @@ vi.mock('@roomote/db/server', () => ({
     messageTs: 'messageTs',
     workItemId: 'workItemId',
   },
-  taskRuns: {
-    taskId: 'taskId',
-  },
   workItems: {
     id: 'id',
-    sourceTaskId: 'sourceTaskId',
     title: 'title',
     brief: 'brief',
     category: 'category',
@@ -74,7 +68,6 @@ vi.mock('@roomote/db/server', () => ({
     targetRepositoryFullName: 'targetRepositoryFullName',
     targetEnvironmentId: 'targetEnvironmentId',
     readinessMessage: 'readinessMessage',
-    fingerprint: 'fingerprint',
     sortOrder: 'sortOrder',
     status: 'status',
   },
@@ -84,7 +77,6 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       trackedMessages: { findFirst: mocks.trackedMessageFindFirst },
-      taskRuns: { findFirst: mocks.taskRunFindFirst },
       deploymentSettings: { findFirst: vi.fn() },
     },
     select: () => createWorkItemSelectBuilder(),
@@ -148,10 +140,7 @@ describe('chat reply suggestion reactions', () => {
     mocks.trackedMessageFindFirst.mockResolvedValue({
       id: 'tracked-message-1',
       workItemId: 'work-item-1',
-      metadata: { suggestionType: 'suggested_tasks' },
-    });
-    mocks.taskRunFindFirst.mockResolvedValue({
-      payloadKind: 'standard_task',
+      metadata: { suggestionType: 'suggested_tasks', launchRouting: 'router' },
     });
     mocks.lookupSlackUserMapping.mockResolvedValue({
       hasInactiveMapping: false,
@@ -271,8 +260,12 @@ describe('chat reply suggestion reactions', () => {
     );
   });
 
-  it('keeps scheduled suggestion cards pinned to their verified workspace', async () => {
-    mocks.taskRunFindFirst.mockResolvedValue({ payloadKind: 'scan' });
+  it('keeps unmarked suggestion cards pinned to their verified workspace', async () => {
+    mocks.trackedMessageFindFirst.mockResolvedValue({
+      id: 'tracked-message-1',
+      workItemId: 'work-item-1',
+      metadata: { suggestionType: 'suggested_tasks' },
+    });
     const slack = {
       postMessage: vi.fn(async () => 'seeded-thread-ts'),
       deleteMessage: vi.fn(async () => undefined),

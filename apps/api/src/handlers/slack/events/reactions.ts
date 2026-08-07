@@ -3,7 +3,6 @@ import {
   AGENT_DISPLAY_NAME,
   formatErrorForLog,
   normalizeSetupNewState,
-  TaskPayloadKind,
 } from '@roomote/types';
 import {
   buildSeededSuggestionSlackText,
@@ -30,7 +29,6 @@ import {
   eq,
   finalizeWorkItemLaunched,
   releaseWorkItemClaim,
-  taskRuns,
   trackedMessages,
   workItems,
 } from '@roomote/db/server';
@@ -273,7 +271,6 @@ async function launchTaskSuggestionTaskFromReaction({
   const [workItem] = await db
     .select({
       id: workItems.id,
-      sourceTaskId: workItems.sourceTaskId,
       title: workItems.title,
       brief: workItems.brief,
       category: workItems.category,
@@ -306,20 +303,13 @@ async function launchTaskSuggestionTaskFromReaction({
   }
 
   const suggestionBrief = workItem.brief ?? '';
-  const legacySourceRun =
-    suggestionType === 'suggested_tasks' &&
-    suggestionCard.metadata?.launchRouting === undefined &&
-    workItem.sourceTaskId
-      ? await db.query.taskRuns.findFirst({
-          where: eq(taskRuns.taskId, workItem.sourceTaskId),
-          columns: { payloadKind: true },
-        })
-      : null;
+  // Cards marked launchRouting: 'router' are presentation-only chat-reply
+  // suggestions; the task router selects the workspace at launch. Unmarked
+  // cards (scan, setup, and cards posted before the marker existed) launch
+  // pinned to their persisted targets.
   const usesRouterLaunch =
     suggestionType === 'suggested_tasks' &&
-    (suggestionCard.metadata?.launchRouting === 'router' ||
-      (legacySourceRun != null &&
-        legacySourceRun.payloadKind !== TaskPayloadKind.Scan));
+    suggestionCard.metadata?.launchRouting === 'router';
 
   let suggestionWorkspace: SuggestionLaunchWorkspace | null = null;
   let launchFailureReason: string | null = null;
