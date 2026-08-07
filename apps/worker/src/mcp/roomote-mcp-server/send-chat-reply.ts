@@ -14,6 +14,42 @@ import {
 } from './tasks-api-client.js';
 import type { ArtifactConfig, RoomoteConfig, ToolResult } from './types.js';
 
+export type ChatReplySurface =
+  | 'Slack'
+  | 'Teams'
+  | 'Telegram'
+  | 'Discord'
+  | 'chat';
+
+const SUGGESTION_START_INSTRUCTIONS: Record<ChatReplySurface, string> = {
+  Slack:
+    "Want me to take one of these on? React with a :thumbsup: on a suggested task below and I'll start it.",
+  Discord:
+    "Want me to take one of these on? Choose Start on a suggested task below and I'll start it.",
+  Telegram:
+    "Want me to take one of these on? Tap Start on a suggested task below and I'll start it.",
+  Teams:
+    "Want me to take one of these on? Reply with `start idea 1` (using the number you want) and I'll start it.",
+  chat: 'Want me to take one of these on? Use the Start action on a suggested task below.',
+};
+
+function appendSuggestionStartInstruction(
+  summary: string | undefined,
+  surface: ChatReplySurface,
+  hasSuggestions: boolean,
+): string | undefined {
+  if (!summary || !hasSuggestions) {
+    return summary;
+  }
+
+  const instruction = SUGGESTION_START_INSTRUCTIONS[surface];
+  if (summary.includes(instruction)) {
+    return summary;
+  }
+
+  return `${summary}\n\n${instruction}`;
+}
+
 export async function handleSendChatReply(
   input: {
     taskId: string;
@@ -21,11 +57,16 @@ export async function handleSendChatReply(
     imagePaths?: string[];
     imageArtifactIds?: string[];
     suggestions?: TaskSuggestionInput[];
+    chatReplySurface?: ChatReplySurface;
   },
   artifactConfig: ArtifactConfig,
   roomoteConfig: RoomoteConfig,
 ): Promise<ToolResult> {
-  const summary = normalizeOptionalSlackText(input.summary);
+  const summary = appendSuggestionStartInstruction(
+    normalizeOptionalSlackText(input.summary),
+    input.chatReplySurface ?? 'chat',
+    Boolean(input.suggestions?.length),
+  );
   const imagePaths = uniqueNonEmpty(input.imagePaths);
   const imageArtifactIds = uniqueNonEmpty(input.imageArtifactIds);
 

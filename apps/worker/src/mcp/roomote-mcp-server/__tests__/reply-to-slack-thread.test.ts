@@ -100,6 +100,7 @@ describe('handleReplyToSlackThread', () => {
         taskId: 'task-1',
         summary: 'One follow-up is ready to start.',
         suggestions,
+        chatReplySurface: 'Slack',
       },
       artifactConfig,
       roomoteConfig,
@@ -114,11 +115,92 @@ describe('handleReplyToSlackThread', () => {
         submissionKey: '111.222',
       },
     );
+    const summary =
+      "One follow-up is ready to start.\n\nWant me to take one of these on? React with a :thumbsup: on a suggested task below and I'll start it.";
+    expect(replyToChatThread).toHaveBeenCalledWith(roomoteConfig, {
+      text: summary,
+    });
     expect(JSON.parse(result.content[0]!.text)).toEqual({
       success: true,
       messageTs: '111.222',
-      summary: 'One follow-up is ready to start.',
+      summary,
       suggestionCount: 1,
+    });
+  });
+
+  it.each([
+    [
+      'Discord',
+      "Want me to take one of these on? Choose Start on a suggested task below and I'll start it.",
+    ],
+    [
+      'Telegram',
+      "Want me to take one of these on? Tap Start on a suggested task below and I'll start it.",
+    ],
+    [
+      'Teams',
+      "Want me to take one of these on? Reply with `start idea 1` (using the number you want) and I'll start it.",
+    ],
+  ] as const)(
+    'adds the %s launch instruction when suggestions are present',
+    async (chatReplySurface, instruction) => {
+      vi.mocked(replyToChatThread).mockResolvedValue({ messageTs: '111.222' });
+      vi.mocked(submitTaskSuggestions).mockResolvedValue({
+        success: true,
+        suggestionCount: 1,
+      });
+
+      await handleSendChatReply(
+        {
+          taskId: 'task-1',
+          summary: 'One follow-up is ready to start.',
+          suggestions: [
+            {
+              title: 'Add retry telemetry',
+              brief: 'Instrument retry exhaustion.',
+              targetRepositoryFullName: 'acme/app',
+            },
+          ],
+          chatReplySurface,
+        },
+        artifactConfig,
+        roomoteConfig,
+      );
+
+      expect(replyToChatThread).toHaveBeenCalledWith(roomoteConfig, {
+        text: `One follow-up is ready to start.\n\n${instruction}`,
+      });
+    },
+  );
+
+  it('does not duplicate an existing Slack launch instruction', async () => {
+    vi.mocked(replyToChatThread).mockResolvedValue({ messageTs: '111.222' });
+    vi.mocked(submitTaskSuggestions).mockResolvedValue({
+      success: true,
+      suggestionCount: 1,
+    });
+    const summary =
+      "Want me to take one of these on? React with a :thumbsup: on a suggested task below and I'll start it.";
+
+    await handleSendChatReply(
+      {
+        taskId: 'task-1',
+        summary,
+        suggestions: [
+          {
+            title: 'Add retry telemetry',
+            brief: 'Instrument retry exhaustion.',
+            targetRepositoryFullName: 'acme/app',
+          },
+        ],
+        chatReplySurface: 'Slack',
+      },
+      artifactConfig,
+      roomoteConfig,
+    );
+
+    expect(replyToChatThread).toHaveBeenCalledWith(roomoteConfig, {
+      text: summary,
     });
   });
 
@@ -140,6 +222,7 @@ describe('handleReplyToSlackThread', () => {
             targetRepositoryFullName: 'acme/app',
           },
         ],
+        chatReplySurface: 'Slack',
       },
       artifactConfig,
       roomoteConfig,
@@ -148,7 +231,8 @@ describe('handleReplyToSlackThread', () => {
     expect(JSON.parse(result.content[0]!.text)).toEqual({
       success: true,
       messageTs: '111.222',
-      summary: 'The report was posted.',
+      summary:
+        "The report was posted.\n\nWant me to take one of these on? React with a :thumbsup: on a suggested task below and I'll start it.",
       suggestionError: 'Task is not bound to an originating Slack thread.',
     });
   });
