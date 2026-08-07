@@ -593,51 +593,54 @@ describe('submitTaskSuggestions', () => {
     );
   });
 
-  it('rejects org-wide current-thread suggestions without a target repository', async () => {
-    mockTaskRunFindFirst.mockResolvedValue({
-      id: 1,
-      payloadKind: TaskPayloadKind.StandardTask,
-      actingUserId: 'user-1',
-      payload: { repo: ALL_REPOSITORIES },
-    });
-    mockTaskFindFirst.mockResolvedValue({
-      initiatorUserId: 'user-1',
-      initiatorAutomation: 'custom_automation',
-      slackChannelId: 'C123',
-      slackThreadTs: '111.222',
-    });
-    const app = createApp({
-      runId: 1,
-      userId: 'user-1',
-      principal: 'user',
-      tokenType: 'run',
-      version: 1,
-    });
+  it.each([TaskPayloadKind.StandardTask, TaskPayloadKind.Scan])(
+    'rejects org-wide current-thread %s suggestions without a target repository',
+    async (payloadKind) => {
+      mockTaskRunFindFirst.mockResolvedValue({
+        id: 1,
+        payloadKind,
+        actingUserId: 'user-1',
+        payload: { repo: ALL_REPOSITORIES },
+      });
+      mockTaskFindFirst.mockResolvedValue({
+        initiatorUserId: 'user-1',
+        initiatorAutomation: 'custom_automation',
+        slackChannelId: 'C123',
+        slackThreadTs: '111.222',
+      });
+      const app = createApp({
+        runId: 1,
+        userId: 'user-1',
+        principal: 'user',
+        tokenType: 'run',
+        version: 1,
+      });
 
-    const response = await app.request(
-      new Request('http://localhost/tasks/task-1/task_suggestions', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          delivery: 'current_thread',
-          submissionKey: 'org-wide-reply',
-          suggestions: [
-            {
-              title: 'Fix the parser',
-              brief: 'Nil access is crashing the parser.',
-            },
-          ],
+      const response = await app.request(
+        new Request('http://localhost/tasks/task-1/task_suggestions', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            delivery: 'current_thread',
+            submissionKey: 'org-wide-reply',
+            suggestions: [
+              {
+                title: 'Fix the parser',
+                brief: 'Nil access is crashing the parser.',
+              },
+            ],
+          }),
         }),
-      }),
-    );
+      );
 
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error:
-        'targetRepositoryFullName is required for org-wide current-thread suggestions',
-    });
-    expect(insertedWorkItemValues).toHaveLength(0);
-  });
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error:
+          'targetRepositoryFullName is required for org-wide current-thread suggestions',
+      });
+      expect(insertedWorkItemValues).toHaveLength(0);
+    },
+  );
 
   it('persists later reply suggestion batches independently', async () => {
     mockTaskRunFindFirst.mockResolvedValue({

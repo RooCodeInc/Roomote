@@ -1269,10 +1269,12 @@ export async function submitTaskSuggestions(
     }
 
     const payload = run.payload as SuggestedTasksPayload;
+    const requiresOrgWideTargetRepository =
+      isCurrentThreadTask && payload.repo === ALL_REPOSITORIES;
     const usesPinnedOrgWideLaunchContract =
-      usesRouterLaunchContract && payload.repo === ALL_REPOSITORIES;
+      usesRouterLaunchContract && requiresOrgWideTargetRepository;
     if (
-      usesPinnedOrgWideLaunchContract &&
+      requiresOrgWideTargetRepository &&
       parsedBody.data.suggestions.some(
         (suggestion) => !suggestion.targetRepositoryFullName?.trim(),
       )
