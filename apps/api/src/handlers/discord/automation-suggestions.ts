@@ -27,6 +27,7 @@ export async function postCurrentThreadSuggestionsToDiscord(params: {
   sourceTaskId: string;
   suggestionGroupKey: string;
   createdByUserId: string | null;
+  launchRouting?: 'router';
   channelId: string;
   threadId?: string | null;
   suggestions: DiscordAutomationSuggestion[];
@@ -66,6 +67,9 @@ export async function postCurrentThreadSuggestionsToDiscord(params: {
         suggestionType: 'suggested_tasks',
         suggestionKey: `${params.sourceTaskId}:${suggestion.id}`,
         suggestionGroupKey: params.suggestionGroupKey,
+        ...(params.launchRouting
+          ? { launchRouting: params.launchRouting }
+          : {}),
       },
     };
     await db

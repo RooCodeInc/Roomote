@@ -36,6 +36,7 @@ export async function postCurrentThreadSuggestionsToTeams(params: {
   sourceTaskId: string;
   suggestionGroupKey: string;
   createdByUserId: string | null;
+  launchRouting?: 'router';
   conversationId: string;
   serviceUrl: string;
   threadId?: string | null;
@@ -70,6 +71,9 @@ export async function postCurrentThreadSuggestionsToTeams(params: {
         suggestionType: 'suggested_tasks',
         suggestionKey: `${params.sourceTaskId}:${suggestion.id}`,
         suggestionGroupKey: params.suggestionGroupKey,
+        ...(params.launchRouting
+          ? { launchRouting: params.launchRouting }
+          : {}),
       },
     };
     await db

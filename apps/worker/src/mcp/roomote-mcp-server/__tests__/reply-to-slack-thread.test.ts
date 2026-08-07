@@ -91,7 +91,6 @@ describe('handleReplyToSlackThread', () => {
         title: 'Add retry telemetry',
         brief:
           'Instrument retry exhaustion so operators can diagnose failures.',
-        targetRepositoryFullName: 'acme/app',
       },
     ];
 
@@ -158,7 +157,6 @@ describe('handleReplyToSlackThread', () => {
             {
               title: 'Add retry telemetry',
               brief: 'Instrument retry exhaustion.',
-              targetRepositoryFullName: 'acme/app',
             },
           ],
           chatReplySurface,
@@ -190,7 +188,6 @@ describe('handleReplyToSlackThread', () => {
           {
             title: 'Add retry telemetry',
             brief: 'Instrument retry exhaustion.',
-            targetRepositoryFullName: 'acme/app',
           },
         ],
         chatReplySurface: 'Slack',
@@ -219,7 +216,6 @@ describe('handleReplyToSlackThread', () => {
           {
             title: 'Add retry telemetry',
             brief: 'Instrument retry exhaustion.',
-            targetRepositoryFullName: 'acme/app',
           },
         ],
         chatReplySurface: 'Slack',

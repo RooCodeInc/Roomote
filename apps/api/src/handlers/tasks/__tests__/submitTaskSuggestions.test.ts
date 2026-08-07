@@ -262,7 +262,11 @@ function requestSuggestions(app: Hono<{ Variables: Variables }>) {
           {
             title: 'Fix the parser',
             brief: 'Nil access is crashing the parser.',
+            category: 'bug',
+            priority: 'P1',
+            investigationContext: 'Parser crash path in apps/api.',
             targetRepositoryFullName: 'acme/app',
+            workspaceReadiness: 'bare_repo',
           },
         ],
       }),
@@ -285,7 +289,13 @@ function requestCurrentThreadSuggestions(
           {
             title: 'Fix the parser',
             brief: 'Nil access is crashing the parser.',
-            targetRepositoryFullName: 'acme/app',
+            category: 'bug',
+            priority: 'P0',
+            investigationContext: 'Legacy hidden context.',
+            targetRepositoryFullName: 'wrong/repository',
+            targetEnvironmentId: '10b031ec-b728-4d8f-a9a0-1ed4aa500511',
+            workspaceReadiness: 'environment_backed',
+            readinessMessage: 'Legacy readiness message.',
           },
         ],
       }),
@@ -373,7 +383,19 @@ describe('submitTaskSuggestions', () => {
       channelId: 'C123',
       metadata: {
         suggestionType: 'suggested_tasks',
+        launchRouting: 'router',
       },
+    });
+    expect(insertedWorkItemValues[0]).toMatchObject({
+      title: 'Fix the parser',
+      brief: 'Nil access is crashing the parser.',
+      category: null,
+      priority: null,
+      investigationContext: null,
+      targetRepositoryFullName: null,
+      targetEnvironmentId: null,
+      workspaceReadiness: null,
+      readinessMessage: null,
     });
   });
 
@@ -405,6 +427,62 @@ describe('submitTaskSuggestions', () => {
       success: true,
       suggestionCount: 1,
     });
+  });
+
+  it('keeps current-thread scan suggestions pinned to verified metadata', async () => {
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 1,
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
+      payload: { repo: 'acme/app', selectedRepositories: ['acme/app'] },
+    });
+    mockTaskFindFirst.mockResolvedValue({
+      initiatorUserId: 'user-1',
+      initiatorAutomation: 'suggest_ideas',
+      slackChannelId: 'C123',
+      slackThreadTs: '111.222',
+    });
+    const app = createApp({
+      runId: 1,
+      userId: 'user-1',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    });
+
+    const response = await app.request(
+      new Request('http://localhost/tasks/task-1/task_suggestions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          delivery: 'current_thread',
+          submissionKey: 'scan-reply',
+          suggestions: [
+            {
+              title: 'Fix the parser',
+              brief: 'Nil access is crashing the parser.',
+              category: 'bug',
+              priority: 'P1',
+              investigationContext: 'Parser crash path in apps/api.',
+              targetRepositoryFullName: 'acme/app',
+              workspaceReadiness: 'bare_repo',
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(insertedWorkItemValues[0]).toMatchObject({
+      category: 'bug',
+      priority: 'P1',
+      investigationContext: 'Parser crash path in apps/api.',
+      targetRepositoryFullName: 'acme/app',
+      workspaceReadiness: 'bare_repo',
+    });
+    expect(insertedTrackedMessageValues[0]?.metadata).not.toHaveProperty(
+      'launchRouting',
+    );
   });
 
   it('resolves standard task repositories from the selected environment', async () => {
@@ -561,6 +639,11 @@ describe('submitTaskSuggestions', () => {
     expect(insertedWorkItemValues[0]).toMatchObject({
       kind: 'suggestion',
       automationKey: 'suggest_ideas',
+      category: 'bug',
+      priority: 'P1',
+      investigationContext: 'Parser crash path in apps/api.',
+      targetRepositoryFullName: 'acme/app',
+      workspaceReadiness: 'bare_repo',
     });
 
     // Regression 1: a null poster does not suppress the Slack summary post

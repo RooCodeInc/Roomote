@@ -28,9 +28,12 @@ type CurrentThreadSuggestionMessage = {
   messageId: string;
 };
 
-export async function findCurrentThreadSuggestionIdByMessage(
+async function findCurrentThreadSuggestionCardByMessage(
   input: CurrentThreadSuggestionMessage,
-): Promise<string | null> {
+): Promise<{
+  workItemId: string | null;
+  metadata: Record<string, unknown> | null;
+} | null> {
   const channelCondition =
     input.surface === 'teams'
       ? sql`split_part(${trackedMessages.channelId}, ';messageid=', 1) = split_part(${input.channelId}, ';messageid=', 1)`
@@ -42,16 +45,24 @@ export async function findCurrentThreadSuggestionIdByMessage(
       channelCondition,
       eq(trackedMessages.messageTs, input.messageId),
     ),
-    columns: { workItemId: true },
+    columns: { workItemId: true, metadata: true },
   });
 
+  return trackedCard ?? null;
+}
+
+export async function findCurrentThreadSuggestionIdByMessage(
+  input: CurrentThreadSuggestionMessage,
+): Promise<string | null> {
+  const trackedCard = await findCurrentThreadSuggestionCardByMessage(input);
   return trackedCard?.workItemId ?? null;
 }
 
 export async function claimCurrentThreadSuggestionByMessage(
   input: CurrentThreadSuggestionMessage,
 ): Promise<CurrentThreadSuggestionReactionClaim> {
-  const workItemId = await findCurrentThreadSuggestionIdByMessage(input);
+  const trackedCard = await findCurrentThreadSuggestionCardByMessage(input);
+  const workItemId = trackedCard?.workItemId;
 
   if (!workItemId) {
     return { outcome: 'no_card' };
@@ -62,15 +73,23 @@ export async function claimCurrentThreadSuggestionByMessage(
     return { outcome: 'already_started' };
   }
 
+  // Cards marked launchRouting: 'router' are presentation-only chat-reply
+  // suggestions; drop their pinned launch metadata so the task router selects
+  // the workspace. Unmarked cards (scan and setup) keep their verified
+  // targets.
+  const routed = trackedCard.metadata?.launchRouting === 'router';
+
   return {
     outcome: 'claimed',
     suggestion: {
       id: claimed.id,
       title: claimed.title,
       brief: claimed.brief,
-      investigationContext: claimed.investigationContext,
-      targetRepositoryFullName: claimed.targetRepositoryFullName,
-      targetEnvironmentId: claimed.targetEnvironmentId,
+      investigationContext: routed ? null : claimed.investigationContext,
+      targetRepositoryFullName: routed
+        ? null
+        : claimed.targetRepositoryFullName,
+      targetEnvironmentId: routed ? null : claimed.targetEnvironmentId,
       launchClaimedAt: claimed.launchClaimedAt,
     },
   };

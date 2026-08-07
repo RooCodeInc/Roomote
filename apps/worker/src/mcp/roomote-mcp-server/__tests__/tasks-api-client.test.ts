@@ -497,7 +497,7 @@ describe('launchTask', () => {
 describe('submitTaskSuggestions', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('should POST task suggestions including hidden investigation context', async () => {
+  it('should POST task suggestions with only user-visible fields', async () => {
     const mockResponse = {
       success: true,
       suggestionCount: 1,
@@ -513,12 +513,6 @@ describe('submitTaskSuggestions', () => {
         {
           title: 'Fix cron retries',
           brief: 'Retry metadata is dropped when rebuilding the payload.',
-          priority: 'P1',
-          investigationContext:
-            'apps/api/src/jobs/retry.ts:92 drops the persisted retry delay.',
-          targetRepositoryFullName: 'acme/app',
-          targetEnvironmentId: '10b031ec-b728-4d8f-a9a0-1ed4aa500511',
-          workspaceReadiness: 'environment_backed',
         },
       ],
     });
@@ -538,12 +532,6 @@ describe('submitTaskSuggestions', () => {
         {
           title: 'Fix cron retries',
           brief: 'Retry metadata is dropped when rebuilding the payload.',
-          priority: 'P1',
-          investigationContext:
-            'apps/api/src/jobs/retry.ts:92 drops the persisted retry delay.',
-          targetRepositoryFullName: 'acme/app',
-          targetEnvironmentId: '10b031ec-b728-4d8f-a9a0-1ed4aa500511',
-          workspaceReadiness: 'environment_backed',
         },
       ],
     });

@@ -17,6 +17,7 @@ import {
 } from '../helpers/suggestion-workspace.js';
 import {
   resolveSlackReactionNames,
+  startAutoRoutedSlackTask,
   startSlackAppMentionTask,
   type SlackNotifier,
   type SlackReactionAddedEvent,
@@ -175,12 +176,14 @@ const REMOVED_SLACK_ACCOUNT_LAUNCH_FAILURE =
 
 async function launchTaskSuggestionTaskFromReaction({
   teamId,
+  slackInstallation,
   slack,
   reactionEvent,
   ackEmoji,
   completionEmoji,
 }: {
   teamId: string;
+  slackInstallation: SlackWebhookContext['slackInstallation'];
   slack: SlackNotifier;
   reactionEvent: SlackReactionAddedEvent;
   ackEmoji: string;
@@ -300,6 +303,13 @@ async function launchTaskSuggestionTaskFromReaction({
   }
 
   const suggestionBrief = workItem.brief ?? '';
+  // Cards marked launchRouting: 'router' are presentation-only chat-reply
+  // suggestions; the task router selects the workspace at launch. Unmarked
+  // cards (scan, setup, and cards posted before the marker existed) launch
+  // pinned to their persisted targets.
+  const usesRouterLaunch =
+    suggestionType === 'suggested_tasks' &&
+    suggestionCard.metadata?.launchRouting === 'router';
 
   let suggestionWorkspace: SuggestionLaunchWorkspace | null = null;
   let launchFailureReason: string | null = null;
@@ -370,7 +380,7 @@ async function launchTaskSuggestionTaskFromReaction({
         workspaceDisplayName: matchingEnvironment.name,
       };
     }
-  } else if (suggestionType === 'suggested_tasks') {
+  } else if (suggestionType === 'suggested_tasks' && !usesRouterLaunch) {
     const resolved = await resolveSuggestionLaunchWorkspaceFromMetadata({
       targetRepositoryFullName: workItem.targetRepositoryFullName,
       targetEnvironmentId: workItem.targetEnvironmentId,
@@ -378,7 +388,7 @@ async function launchTaskSuggestionTaskFromReaction({
     });
     suggestionWorkspace = resolved.workspace;
     launchFailureReason = resolved.failureReason;
-  } else {
+  } else if (suggestionType !== 'suggested_tasks') {
     return false;
   }
 
@@ -414,7 +424,7 @@ async function launchTaskSuggestionTaskFromReaction({
   // reclaimed cannot stomp the new claimant's state.
   const claimedAt = claimedWorkItem.launchClaimedAt;
 
-  if (!suggestionWorkspace) {
+  if (!usesRouterLaunch && !suggestionWorkspace) {
     await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
 
     apiLogger.warn(
@@ -441,15 +451,9 @@ async function launchTaskSuggestionTaskFromReaction({
     return true;
   }
 
-  const suggestionSlackTargetRepositoryFullName =
-    workItem.targetRepositoryFullName;
-
   const suggestionSlackText = buildSuggestionSlackText({
     title: workItem.title,
     brief: suggestionBrief,
-    category: workItem.category,
-    priority: workItem.priority,
-    targetRepositoryFullName: suggestionSlackTargetRepositoryFullName,
   });
   const seededSuggestionSlackText = buildSeededSuggestionSlackText(
     suggestionSlackText,
@@ -459,17 +463,20 @@ async function launchTaskSuggestionTaskFromReaction({
     title: workItem.title,
     brief: suggestionBrief,
     investigationContext: workItem.investigationContext,
-    readinessMessage:
-      suggestionWorkspace.readinessMessage ?? workItem.readinessMessage,
+    readinessMessage: !usesRouterLaunch
+      ? (suggestionWorkspace?.readinessMessage ?? workItem.readinessMessage)
+      : null,
     suggestionType,
     category: workItem.category,
     priority: workItem.priority,
-    targetRepositoryFullName: suggestionSlackTargetRepositoryFullName,
+    targetRepositoryFullName: !usesRouterLaunch
+      ? workItem.targetRepositoryFullName
+      : null,
   });
 
   let seededThreadTs: string | undefined;
-  let taskRun: Awaited<ReturnType<typeof startSlackAppMentionTask>> | null =
-    null;
+  let taskRun: { id: number | null; taskId: string | null } | null = null;
+  const directWorkspaceName = suggestionWorkspace?.workspaceDisplayName ?? null;
   try {
     seededThreadTs = await slack.postMessage({
       channel: channelId,
@@ -490,38 +497,83 @@ async function launchTaskSuggestionTaskFromReaction({
       return false;
     }
 
-    // The reacting human is the initiator; the old fallback to the
-    // suggestion creator's identity is gone.
-    taskRun = await startSlackAppMentionTask({
-      initiator: {
-        kind: 'user',
-        externalId: reactionEvent.user,
-        ...(reactingUserMapping.activeMapping?.userId
-          ? { matchedUserId: reactingUserMapping.activeMapping.userId }
-          : {}),
-      },
-      trigger: 'manual',
-      channel: channelId,
-      teamId,
-      slackUserId: reactionEvent.user,
-      text: suggestionSlackText,
-      agentPromptText: suggestionTaskPrompt,
-      ts: seededThreadTs,
-      threadTs: seededThreadTs,
-      repo: suggestionWorkspace.repoForPayload,
-      environmentId: suggestionWorkspace.environmentId,
-      readinessMessage: suggestionWorkspace.readinessMessage ?? undefined,
-      webPath: suggestionType === 'setup_onboarding' ? '/setup' : undefined,
-      ackEmoji,
-      completionEmoji,
-      queuedStartedMessage: {
-        ts: seededThreadTs,
-        agentName: AGENT_DISPLAY_NAME,
+    const initiator = {
+      kind: 'user' as const,
+      externalId: reactionEvent.user,
+      ...(reactingUserMapping.activeMapping?.userId
+        ? { matchedUserId: reactingUserMapping.activeMapping.userId }
+        : {}),
+    };
+
+    if (usesRouterLaunch) {
+      const routedLaunch = await startAutoRoutedSlackTask({
+        slackInstallation,
+        slack,
+        initiator,
+        trigger: 'manual',
+        launchUserId: reactingUserMapping.activeMapping?.userId,
+        slackUserId: reactionEvent.user,
+        persistedSlackUserId: reactionEvent.user,
         initiatingSlackUserId: reactionEvent.user,
-        workspaceDisplayName: suggestionWorkspace.workspaceDisplayName,
-        workspaceOnly: false,
-      },
-    });
+        channel: channelId,
+        prompt: `Start this suggested task: ${workItem.title}\n\n${suggestionBrief}`,
+        threadTs: seededThreadTs,
+        originMessageTs: seededThreadTs,
+        agentPromptTextOverride: suggestionTaskPrompt,
+        skipMcpSetupSuggestion: true,
+      });
+
+      if (routedLaunch.status !== 'started') {
+        await releaseWorkItemClaim(db, { id: workItemId, claimedAt });
+        await slack
+          .deleteMessage({ channel: channelId, ts: seededThreadTs })
+          .catch(() => {});
+        await postSuggestionLaunchFailureMessage({
+          slack,
+          channelId,
+          title: workItem.title,
+          brief: suggestionBrief,
+          reason:
+            routedLaunch.message ||
+            "I couldn't determine which workspace should run this suggestion.",
+        });
+        return true;
+      }
+
+      taskRun = {
+        id: routedLaunch.runId,
+        taskId: routedLaunch.taskId,
+      };
+    } else {
+      if (!suggestionWorkspace) {
+        throw new Error('Setup suggestion workspace was not resolved.');
+      }
+
+      taskRun = await startSlackAppMentionTask({
+        initiator,
+        trigger: 'manual',
+        channel: channelId,
+        teamId,
+        slackUserId: reactionEvent.user,
+        text: suggestionSlackText,
+        agentPromptText: suggestionTaskPrompt,
+        ts: seededThreadTs,
+        threadTs: seededThreadTs,
+        repo: suggestionWorkspace.repoForPayload,
+        environmentId: suggestionWorkspace.environmentId,
+        readinessMessage: suggestionWorkspace.readinessMessage ?? undefined,
+        webPath: suggestionType === 'setup_onboarding' ? '/setup' : undefined,
+        ackEmoji,
+        completionEmoji,
+        queuedStartedMessage: {
+          ts: seededThreadTs,
+          agentName: AGENT_DISPLAY_NAME,
+          initiatingSlackUserId: reactionEvent.user,
+          workspaceDisplayName: suggestionWorkspace.workspaceDisplayName,
+          workspaceOnly: false,
+        },
+      });
+    }
 
     const launched = await markWorkItemLaunched({
       workItemId,
@@ -555,15 +607,17 @@ async function launchTaskSuggestionTaskFromReaction({
       return true;
     }
 
-    await postTaskSuggestionStartedMessage({
-      slack,
-      channelId,
-      threadTs: seededThreadTs,
-      workspaceName: suggestionWorkspace.workspaceDisplayName,
-      runId: taskRun.id,
-      initiatingSlackUserId: reactionEvent.user,
-      taskId: taskRun.taskId,
-    });
+    if (!usesRouterLaunch && directWorkspaceName) {
+      await postTaskSuggestionStartedMessage({
+        slack,
+        channelId,
+        threadTs: seededThreadTs,
+        workspaceName: directWorkspaceName,
+        runId: taskRun.id,
+        initiatingSlackUserId: reactionEvent.user,
+        taskId: taskRun.taskId,
+      });
+    }
 
     apiLogger.debug(
       `${logPrefix} completed reaction launch lifecycle taskId=${taskRun.taskId ?? 'null'} launchedThreadTs=${seededThreadTs}`,
@@ -623,20 +677,22 @@ async function launchTaskSuggestionTaskFromReaction({
         `${logPrefix} reaction launch recovered after post-enqueue failure taskId=${taskRun.taskId} launchedThreadTs=${seededThreadTs ?? 'unknown'}`,
       );
 
-      if (seededThreadTs) {
-        await postTaskSuggestionStartedMessage({
-          slack,
-          channelId,
-          threadTs: seededThreadTs,
-          workspaceName: suggestionWorkspace.workspaceDisplayName,
-          runId: taskRun.id,
-          initiatingSlackUserId: reactionEvent.user,
-          taskId: taskRun.taskId,
-        });
-      } else {
-        console.warn(
-          `${logPrefix} recovered launch missing seeded thread ts; started message skipped`,
-        );
+      if (!usesRouterLaunch) {
+        if (seededThreadTs && directWorkspaceName) {
+          await postTaskSuggestionStartedMessage({
+            slack,
+            channelId,
+            threadTs: seededThreadTs,
+            workspaceName: directWorkspaceName,
+            runId: taskRun.id,
+            initiatingSlackUserId: reactionEvent.user,
+            taskId: taskRun.taskId,
+          });
+        } else {
+          console.warn(
+            `${logPrefix} recovered direct launch missing seeded thread or workspace; started message skipped`,
+          );
+        }
       }
 
       apiLogger.debug(
@@ -776,6 +832,7 @@ export async function handleReactionAddedEvent(params: {
         launch: () =>
           launchTaskSuggestionTaskFromReaction({
             teamId: context.teamId,
+            slackInstallation: context.slackInstallation,
             slack: context.slack,
             reactionEvent: event,
             ackEmoji: reactionNames.ackEmoji,
