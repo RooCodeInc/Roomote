@@ -174,10 +174,12 @@ RUN cd /roomote && pnpm dlx esbuild@0.25.5 packages/db/src/run-migrations.ts \
   --banner:js="import{createRequire as __createRequire}from 'module';const require=__createRequire(import.meta.url);" && \
   cp -R packages/db/drizzle /migrate/drizzle
 
-# Runtime-only dependency tree for the externals tsup does not bundle.
-RUN mkdir -p /runtime-deps && cd /runtime-deps && npm init -y >/dev/null && \
-  npm install --omit=dev --no-audit --no-fund \
-    "snowflake-sdk@$(cd /roomote/apps/api && node -p "require('snowflake-sdk/package.json').version")"
+# Runtime-only dependency tree for the externals tsup does not bundle. Keep its
+# transitive versions locked so image builds do not resolve a new tree from npm.
+COPY .docker/app/runtime-deps/package.json .docker/app/runtime-deps/package-lock.json /runtime-deps/
+RUN test "$(node -p "require('snowflake-sdk/package.json').version")" = \
+    "$(node -p "require('/runtime-deps/package.json').dependencies['snowflake-sdk']")" && \
+  cd /runtime-deps && npm ci --omit=dev --no-audit --no-fund
 
 # ---------------------------------------------------------------------------
 # controller: bundled dist plus the packaged worker release archives that the

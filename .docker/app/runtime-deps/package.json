@@ -1,0 +1,7 @@
+{
+  "name": "roomote-app-runtime-deps",
+  "private": true,
+  "dependencies": {
+    "snowflake-sdk": "2.4.3"
+  }
+}
