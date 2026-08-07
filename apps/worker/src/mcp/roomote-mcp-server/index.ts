@@ -1228,6 +1228,8 @@ roomoteMcpServer.registerTool(
 
 if (shouldRegisterSlackThreadReplyTool()) {
   const chatReplySurfaceLabel = getChatReplySurfaceLabel();
+  const supportsChatReplySuggestions =
+    process.env.ROOMOTE_AUTOMATION_TASK === 'true';
   const usesPinnedSuggestionContract =
     process.env.ROOMOTE_TASK_TYPE === TaskPayloadKind.Scan;
   const chatReplySuggestionSchema = usesPinnedSuggestionContract
@@ -1280,6 +1282,9 @@ if (shouldRegisterSlackThreadReplyTool()) {
     chatReplySurfaceLabel === 'Slack'
       ? 'Use the modern Slack Markdown contract from the Slack instructions; tables, headings, blockquotes, and fenced code blocks are allowed when they make the reply clearer.'
       : 'Use Markdown when it makes the reply clearer.';
+  const chatReplySuggestionGuidance = supportsChatReplySuggestions
+    ? 'Use the optional suggestions parameter when the automation prompt explicitly asks for task suggestions, launchable follow-ups, or help taking concrete actions. Do not infer suggested-task intent from a request that only asks for a summary or action-item list. Suggestions are posted inside the originating conversation. Do not use suggestions for ordinary summary bullets, status updates, questions, speculative ideas, or work explicitly identified in the conversation as already underway. When suggestions are present, the tool automatically adds the surface-specific instruction for starting one; do not write a separate launch instruction. '
+    : '';
   roomoteMcpServer.registerTool(
     'send_chat_reply',
     {
@@ -1292,8 +1297,7 @@ if (shouldRegisterSlackThreadReplyTool()) {
         "For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. " +
         chatReplyMarkdownGuidance +
         chatReplySourceLinkingGuidance +
-        'Use the optional suggestions parameter only when the reply identifies independent, high-confidence actions that users may want Roomote to start as separate tasks. Suggestions are posted inside the originating conversation. Do not use suggestions for ordinary summary bullets, status updates, questions, speculative ideas, or work explicitly identified in the conversation as already underway. ' +
-        'When suggestions are present, the tool automatically adds the surface-specific instruction for starting one; do not write a separate launch instruction. ' +
+        chatReplySuggestionGuidance +
         'Write the message so its content clearly matches the selected purpose.',
       inputSchema: {
         purpose: z
@@ -1318,21 +1322,25 @@ if (shouldRegisterSlackThreadReplyTool()) {
           .describe(
             'Optional already-uploaded artifact IDs for images to attach.',
           ),
-        suggestions: z
-          .array(chatReplySuggestionSchema)
-          .refine(
-            (suggestions) =>
-              suggestions.length >= 1 && suggestions.length <= 10,
-            {
-              message: 'Provide between 1 and 10 suggestions.',
-            },
-          )
-          .optional()
-          .describe(
-            usesPinnedSuggestionContract
-              ? `Optional list of 1 to 10 independent actions to post inside the originating ${chatReplySurfaceLabel} conversation. This scheduled suggestion workflow must include its verified target repository and may include implementation metadata used when the task is started.`
-              : `Optional list of 1 to 10 independent actions to post inside the originating ${chatReplySurfaceLabel} conversation. Use only for high-confidence tasks not explicitly identified in the conversation as already underway. Each suggestion contains only the title and description shown to users; Roomote routes the task when it is started.`,
-          ),
+        ...(supportsChatReplySuggestions
+          ? {
+              suggestions: z
+                .array(chatReplySuggestionSchema)
+                .refine(
+                  (suggestions) =>
+                    suggestions.length >= 1 && suggestions.length <= 10,
+                  {
+                    message: 'Provide between 1 and 10 suggestions.',
+                  },
+                )
+                .optional()
+                .describe(
+                  usesPinnedSuggestionContract
+                    ? `Optional list of 1 to 10 independent actions to post inside the originating ${chatReplySurfaceLabel} conversation when the automation prompt explicitly asks for task suggestions. This scheduled suggestion workflow must include its verified target repository and may include implementation metadata used when the task is started.`
+                    : `Optional list of 1 to 10 independent actions to post inside the originating ${chatReplySurfaceLabel} conversation when the automation prompt explicitly asks for task suggestions. Use only for high-confidence tasks not explicitly identified in the conversation as already underway. Each suggestion contains only the title and description shown to users; Roomote routes the task when it is started.`,
+                ),
+            }
+          : {}),
       },
       annotations: {
         readOnlyHint: false,

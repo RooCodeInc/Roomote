@@ -741,6 +741,11 @@ export const runTask = async ({
       ROOMOTE_TASK_ID: taskRun.taskId,
       AGENT_BROWSER_SESSION: taskRun.taskId,
       ROOMOTE_TASK_TYPE: taskRun.payloadKind,
+      ROOMOTE_AUTOMATION_TASK:
+        taskRun.payloadKind === TaskPayloadKind.Scan ||
+        isSilentChannelAutomationLaunch(taskRun)
+          ? 'true'
+          : 'false',
       ...(unsanitizedEnv.ROOMOTE_AUTH_BYPASS_VALUE && {
         ROOMOTE_AUTH_BYPASS_VALUE: unsanitizedEnv.ROOMOTE_AUTH_BYPASS_VALUE,
       }),
