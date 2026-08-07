@@ -170,7 +170,9 @@ export {
 
 export {
   findSlackUserDirectMessageDestination,
+  findUserDirectMessageDestination,
   sendUserDirectMessageBestEffort,
+  type UserDirectMessageDestination,
   type UserDirectMessageProvider,
 } from './lib/user-direct-message';
 

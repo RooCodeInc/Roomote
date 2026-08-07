@@ -34,7 +34,7 @@ vi.mock('../destination', () => ({
 }));
 
 vi.mock('../../lib/user-direct-message', () => ({
-  findSlackUserDirectMessageDestination: vi.fn(),
+  findUserDirectMessageDestination: vi.fn(),
 }));
 
 vi.mock('../scheduling-utils', () => ({
@@ -64,7 +64,7 @@ import {
   tryClaimCustomAutomationLaunch,
 } from '@roomote/db/server';
 import { TaskPayloadKind } from '@roomote/types';
-import { findSlackUserDirectMessageDestination } from '../../lib/user-direct-message';
+import { findUserDirectMessageDestination } from '../../lib/user-direct-message';
 
 import {
   customAutomationsJob,
@@ -73,6 +73,7 @@ import {
 import {
   buildDestinationTaskPayloadFields,
   findTeamsConversationServiceUrl,
+  listConnectedCommunicationProviders,
 } from '../destination';
 import { isRunDue } from '../scheduling-utils';
 
@@ -117,10 +118,14 @@ describe('customAutomationsJob', () => {
     vi.mocked(enqueueTask).mockResolvedValue({
       taskId: 'task_abc',
     } as never);
-    vi.mocked(findSlackUserDirectMessageDestination).mockResolvedValue({
+    vi.mocked(findUserDirectMessageDestination).mockResolvedValue({
       channelId: 'D123',
       teamId: 'T123',
     });
+    vi.mocked(listConnectedCommunicationProviders).mockResolvedValue([
+      'slack',
+      'teams',
+    ]);
   });
 
   it('launches a StandardTask for due automations', async () => {
@@ -246,7 +251,8 @@ describe('customAutomationsJob', () => {
     const result = await customAutomationsJob();
 
     expect(result.launchedTaskId).toBe('task_abc');
-    expect(findSlackUserDirectMessageDestination).toHaveBeenCalledWith(
+    expect(findUserDirectMessageDestination).toHaveBeenCalledWith(
+      'slack',
       'user-1',
     );
     expect(enqueueTask).toHaveBeenCalledWith(
@@ -275,7 +281,7 @@ describe('customAutomationsJob', () => {
         },
       } as never,
     ]);
-    vi.mocked(findSlackUserDirectMessageDestination).mockResolvedValue(null);
+    vi.mocked(findUserDirectMessageDestination).mockResolvedValue(null);
 
     const result = await customAutomationsJob();
 
@@ -284,6 +290,54 @@ describe('customAutomationsJob', () => {
     ]);
     expect(enqueueTask).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [
+      'teams',
+      'teams_user',
+      {
+        channelId: 'teams-dm-1',
+        serviceUrl: 'https://smba.example.com/amer/',
+      },
+    ],
+    ['discord', 'discord_user', { channelId: 'discord-dm-1' }],
+    ['telegram', 'telegram_user', { channelId: 'telegram-dm-1' }],
+  ] as const)(
+    'resolves a %s DM target for the automation owner',
+    async (provider, targetKind, resolvedDestination) => {
+      vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+        {
+          ...automation,
+          target: {
+            provider,
+            targetKind,
+            externalRef: 'user-1',
+          },
+          createdByUserId: 'user-1',
+        } as never,
+      ]);
+      vi.mocked(findUserDirectMessageDestination).mockResolvedValue(
+        resolvedDestination,
+      );
+      vi.mocked(listConnectedCommunicationProviders).mockResolvedValue([
+        provider,
+      ]);
+
+      const result = await customAutomationsJob();
+
+      expect(result.launchedTaskId).toBe('task_abc');
+      expect(findUserDirectMessageDestination).toHaveBeenCalledWith(
+        provider,
+        'user-1',
+      );
+      expect(buildDestinationTaskPayloadFields).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider,
+          ...resolvedDestination,
+        }),
+      );
+    },
+  );
 
   it('launches without channel anchoring when no report channel is configured', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([

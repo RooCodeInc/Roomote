@@ -1,19 +1,28 @@
 import {
   and,
   db,
+  discordUserMappings,
   eq,
   slackInstallations,
   slackUserMappings,
   teamsUserMappings,
   telegramUserMappings,
 } from '@roomote/db/server';
+import type { CommunicationProvider } from '@roomote/types';
 import { SlackNotifier } from '@roomote/slack';
 
+import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from './teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
 import { findTeamsPrimaryConversation } from './teams-primary-conversation';
 
 export type UserDirectMessageProvider = 'slack' | 'teams' | 'telegram';
+
+export type UserDirectMessageDestination = {
+  channelId: string;
+  teamId?: string;
+  serviceUrl?: string;
+};
 
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -59,6 +68,81 @@ export async function findSlackUserDirectMessageDestination(
   return destination
     ? { channelId: destination.channelId, teamId: destination.teamId }
     : null;
+}
+
+async function findTeamsUserDirectMessageDestination(
+  userId: string,
+): Promise<UserDirectMessageDestination | null> {
+  const mapping = await db.query.teamsUserMappings.findFirst({
+    where: eq(teamsUserMappings.userId, userId),
+    columns: { teamsUserId: true, teamsTenantId: true },
+  });
+  if (!mapping) return null;
+
+  const conversation = await findTeamsPrimaryConversation();
+  if (!conversation) return null;
+
+  const provider =
+    await createTeamsCommunicationProviderFromRuntimeCredentials();
+  if (!provider) return null;
+
+  const destination = await provider.createDirectMessage({
+    serviceUrl: conversation.serviceUrl,
+    tenantId: mapping.teamsTenantId,
+    userId: mapping.teamsUserId,
+  });
+  return {
+    channelId: destination.channelId,
+    serviceUrl: conversation.serviceUrl,
+  };
+}
+
+async function findTelegramUserDirectMessageDestination(
+  userId: string,
+): Promise<UserDirectMessageDestination | null> {
+  const mapping = await db.query.telegramUserMappings.findFirst({
+    where: eq(telegramUserMappings.userId, userId),
+    columns: { telegramChatId: true },
+  });
+  return mapping ? { channelId: mapping.telegramChatId } : null;
+}
+
+async function findDiscordUserDirectMessageDestination(
+  userId: string,
+): Promise<UserDirectMessageDestination | null> {
+  const mapping = await db.query.discordUserMappings.findFirst({
+    where: eq(discordUserMappings.userId, userId),
+    columns: { discordDmChannelId: true, discordUserId: true },
+  });
+  if (!mapping) return null;
+  if (mapping.discordDmChannelId) {
+    return { channelId: mapping.discordDmChannelId };
+  }
+
+  const provider =
+    await createDiscordCommunicationProviderFromRuntimeCredentials();
+  if (!provider) return null;
+
+  const destination = await provider.createDirectMessage(mapping.discordUserId);
+  return { channelId: destination.id };
+}
+
+export async function findUserDirectMessageDestination(
+  provider: CommunicationProvider,
+  userId: string,
+): Promise<UserDirectMessageDestination | null> {
+  switch (provider) {
+    case 'slack':
+      return findSlackUserDirectMessageDestination(userId);
+    case 'teams':
+      return findTeamsUserDirectMessageDestination(userId);
+    case 'telegram':
+      return findTelegramUserDirectMessageDestination(userId);
+    case 'discord':
+      return findDiscordUserDirectMessageDestination(userId);
+  }
+
+  return null;
 }
 
 async function sendSlackUserDirectMessage(
