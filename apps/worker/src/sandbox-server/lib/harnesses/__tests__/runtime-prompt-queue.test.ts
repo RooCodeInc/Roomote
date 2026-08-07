@@ -374,6 +374,51 @@ describe('RuntimePromptQueue', () => {
       });
     });
 
+    it('replaces a hidden deliverable prompt with the same client message id', () => {
+      const { queue, emittedEvents } = createQueue();
+
+      const firstId = queue.enqueue({
+        text: 'review head a',
+        visibleInTranscript: false,
+        clientMessageId: 'github-pr-synchronize:100:owner/repo:42',
+      });
+      const replacementId = queue.enqueue({
+        text: 'review head b',
+        visibleInTranscript: false,
+        clientMessageId: 'github-pr-synchronize:100:owner/repo:42',
+      });
+
+      expect(replacementId).toBe(firstId);
+      expect(queue.snapshot()).toEqual([
+        expect.objectContaining({
+          id: firstId,
+          text: 'review head b',
+          visibleInTranscript: false,
+        }),
+      ]);
+      expect(emittedEvents.at(-1)?.payload).toMatchObject({
+        cause: 'replace',
+        queuedMessages: [],
+        deliverableCount: 1,
+      });
+    });
+
+    it('never replaces user-visible prompts that share a client message id', () => {
+      const { queue } = createQueue();
+
+      const firstId = queue.enqueue({
+        text: 'first message',
+        clientMessageId: 'client-message-1',
+      });
+      const secondId = queue.enqueue({
+        text: 'second message',
+        clientMessageId: 'client-message-1',
+      });
+
+      expect(secondId).not.toBe(firstId);
+      expect(queue.snapshot()).toHaveLength(2);
+    });
+
     it('hides internal continuations from the visible payload but counts them as deliverable', () => {
       const { queue, emittedEvents } = createQueue();
 
