@@ -1269,6 +1269,11 @@ if (shouldRegisterSlackThreadReplyTool()) {
         brief: boundedNonEmptyStringSchema(2000).describe(
           'Non-empty suggestion brief of at most 2,000 characters.',
         ),
+        targetRepositoryFullName: nonEmptyStringSchema
+          .optional()
+          .describe(
+            'Repository full name for org-wide runs. Required when the task workspace covers all repositories.',
+          ),
       });
   const chatReplyMarkdownGuidance =
     chatReplySurfaceLabel === 'Slack'
@@ -1337,7 +1342,7 @@ if (shouldRegisterSlackThreadReplyTool()) {
                 .describe(
                   usesPinnedSuggestionContract
                     ? `Optional list of 1 to 10 independent actions to post inside the originating ${chatReplySurfaceLabel} conversation when the automation prompt explicitly asks for task suggestions. This scheduled suggestion workflow must include its verified target repository and may include implementation metadata used when the task is started.`
-                    : `Optional list of 1 to 10 independent actions to post inside the originating ${chatReplySurfaceLabel} conversation when the automation prompt explicitly asks for task suggestions. Use only for high-confidence tasks not explicitly identified in the conversation as already underway. Each suggestion contains only the title and description shown to users; Roomote routes the task when it is started.`,
+                    : `Optional list of 1 to 10 independent actions to post inside the originating ${chatReplySurfaceLabel} conversation when the automation prompt explicitly asks for task suggestions. Use only for high-confidence tasks not explicitly identified in the conversation as already underway. For org-wide runs, include the concrete targetRepositoryFullName so Roomote can route the task to the appropriate environment when it is started.`,
                 ),
             }
           : {}),

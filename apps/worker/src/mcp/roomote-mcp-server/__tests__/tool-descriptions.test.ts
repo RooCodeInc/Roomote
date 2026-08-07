@@ -478,9 +478,16 @@ describe('roomote MCP tool descriptions', () => {
       ) as z.ZodArray<z.ZodObject<z.ZodRawShape>>
     ).element;
 
-    expect(Object.keys(suggestionItem.shape)).toEqual(['title', 'brief']);
+    expect(Object.keys(suggestionItem.shape)).toEqual([
+      'title',
+      'brief',
+      'targetRepositoryFullName',
+    ]);
     expect(getInputSchemaField(replyTool, 'suggestions').description).toContain(
       'when the automation prompt explicitly asks for task suggestions',
+    );
+    expect(getInputSchemaField(replyTool, 'suggestions').description).toContain(
+      'For org-wide runs, include the concrete targetRepositoryFullName',
     );
   });
 

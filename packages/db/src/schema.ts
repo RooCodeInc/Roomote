@@ -2733,6 +2733,7 @@ export const customAutomations = pgTable(
     environmentId: uuid('environment_id').references(() => environments.id, {
       onDelete: 'set null',
     }),
+    allRepositories: boolean('all_repositories').notNull().default(false),
     target: jsonb('target')
       .notNull()
       .default(sql`'{}'::jsonb`)

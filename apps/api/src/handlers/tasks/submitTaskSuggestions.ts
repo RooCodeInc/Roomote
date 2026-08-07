@@ -22,6 +22,7 @@ import {
 } from '@roomote/types';
 import { SlackNotifier } from '@roomote/slack';
 import { SETUP_SUGGESTIONS_THREAD_INTRO_TEXT } from '@roomote/communication/chat-messages';
+import { findEnvironmentForRepo } from '@roomote/cloud-agents/server';
 import {
   buildAutomationRootSummaryMessage,
   buildAutomationRootSummaryText,
@@ -228,6 +229,10 @@ function buildSuggestedTasksSummaryLockKey(params: {
   return `suggested_tasks:${params.sourceTaskId}`;
 }
 
+function normalizeRepositoryFullName(repositoryFullName: string): string {
+  return repositoryFullName.trim().toLowerCase();
+}
+
 function getSuggestedTaskRepositoryFullNames(
   payload: SuggestedTasksPayload,
 ): string[] {
@@ -246,6 +251,18 @@ async function resolveRepositoryIdsForSuggestedTask(params: {
   payload: SuggestedTasksPayload;
 }): Promise<ResolvedRepository[]> {
   let repositoryFullNames = getSuggestedTaskRepositoryFullNames(params.payload);
+
+  if (
+    params.payload.repo === ALL_REPOSITORIES &&
+    repositoryFullNames.length === 0 &&
+    !params.payload.environmentId
+  ) {
+    return db
+      .select({ id: repositories.id, fullName: repositories.fullName })
+      .from(repositories)
+      .where(eq(repositories.isActive, true))
+      .orderBy(asc(repositories.fullName));
+  }
 
   if (repositoryFullNames.length === 0 && params.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
@@ -278,7 +295,14 @@ async function resolveRepositoryIdsForSuggestedTask(params: {
       fullName: repositories.fullName,
     })
     .from(repositories)
-    .where(inArray(repositories.fullName, repositoryFullNames));
+    .where(
+      params.payload.repo === ALL_REPOSITORIES
+        ? and(
+            inArray(repositories.fullName, repositoryFullNames),
+            eq(repositories.isActive, true),
+          )
+        : inArray(repositories.fullName, repositoryFullNames),
+    );
 
   const rowsByFullName = new Map(
     rows.map((repository) => [repository.fullName, repository]),
@@ -331,7 +355,9 @@ function prepareTaskSuggestion(params: {
 
   if (
     targetRepositoryFullName &&
-    !candidateRepositorySet.has(targetRepositoryFullName)
+    !candidateRepositorySet.has(
+      normalizeRepositoryFullName(targetRepositoryFullName),
+    )
   ) {
     throw new Error(
       `Suggestion "${suggestion.title}" targets repository "${targetRepositoryFullName}", which is not part of this suggestion run.`,
@@ -442,7 +468,9 @@ async function resolvePreparedSuggestions(params: {
   tolerateInvalidSuggestions?: boolean;
 }): Promise<PreparedTaskSuggestion[]> {
   const candidateRepositorySet = new Set(
-    params.candidateRepositories.map((repository) => repository.fullName),
+    params.candidateRepositories.map((repository) =>
+      normalizeRepositoryFullName(repository.fullName),
+    ),
   );
   const targetEnvironmentIds = [
     ...new Set(
@@ -1256,6 +1284,28 @@ export async function submitTaskSuggestions(
     }
 
     const payload = run.payload as SuggestedTasksPayload;
+    const requiresOrgWideTargetRepository =
+      isCurrentThreadTask && payload.repo === ALL_REPOSITORIES;
+    const usesPinnedOrgWideLaunchContract =
+      usesRouterLaunchContract && requiresOrgWideTargetRepository;
+    if (
+      requiresOrgWideTargetRepository &&
+      parsedBody.data.suggestions.some(
+        (suggestion) => !suggestion.targetRepositoryFullName?.trim(),
+      )
+    ) {
+      return c.json(
+        {
+          error:
+            'targetRepositoryFullName is required for org-wide current-thread suggestions',
+        },
+        400,
+      );
+    }
+    const currentThreadLaunchRouting =
+      usesRouterLaunchContract && !usesPinnedOrgWideLaunchContract
+        ? ('router' as const)
+        : undefined;
     const setupNewState = normalizeSetupNewState(
       deploymentSettings?.setupNewState,
     );
@@ -1308,10 +1358,41 @@ export async function submitTaskSuggestions(
       });
 
       if (candidateRepositories.length === 0) {
+        const targetRepositoryFullName = requiresOrgWideTargetRepository
+          ? parsedBody.data.suggestions[0]?.targetRepositoryFullName?.trim()
+          : null;
         return c.json(
           {
-            error:
-              'This Suggested Tasks run did not resolve to any repositories in this deployment.',
+            error: targetRepositoryFullName
+              ? `targetRepositoryFullName "${targetRepositoryFullName}" is not an active repository in this org-wide task`
+              : 'This Suggested Tasks run did not resolve to any repositories in this deployment.',
+          },
+          400,
+        );
+      }
+    }
+
+    const candidateRepositoriesByNormalizedFullName = new Map(
+      candidateRepositories.map((repository) => [
+        normalizeRepositoryFullName(repository.fullName),
+        repository,
+      ]),
+    );
+    if (requiresOrgWideTargetRepository) {
+      const invalidTargetRepository = parsedBody.data.suggestions
+        .map((suggestion) => suggestion.targetRepositoryFullName?.trim())
+        .find(
+          (targetRepositoryFullName) =>
+            targetRepositoryFullName &&
+            !candidateRepositoriesByNormalizedFullName.has(
+              normalizeRepositoryFullName(targetRepositoryFullName),
+            ),
+        );
+
+      if (invalidTargetRepository) {
+        return c.json(
+          {
+            error: `targetRepositoryFullName "${invalidTargetRepository}" is not an active repository in this org-wide task`,
           },
           400,
         );
@@ -1321,6 +1402,12 @@ export async function submitTaskSuggestions(
     const repositoryIds = candidateRepositories.map(
       (repository) => repository.id,
     );
+    const repositoryIdsByFullName = new Map(
+      candidateRepositories.map((repository) => [
+        normalizeRepositoryFullName(repository.fullName),
+        repository.id,
+      ]),
+    );
     // Chat-reply suggestions are presentation-only proposals. Ignore launch
     // metadata from older workers so the task router chooses the workspace
     // when a user starts one instead of trusting the proposing agent.
@@ -1328,10 +1415,49 @@ export async function submitTaskSuggestions(
       ? parsedBody.data.suggestions.map((suggestion) => ({
           title: suggestion.title,
           brief: suggestion.brief,
+          ...(usesPinnedOrgWideLaunchContract &&
+          suggestion.targetRepositoryFullName
+            ? {
+                targetRepositoryFullName: suggestion.targetRepositoryFullName,
+              }
+            : {}),
         }))
       : parsedBody.data.suggestions;
+    const suggestionsWithCanonicalTargets = requiresOrgWideTargetRepository
+      ? submittedSuggestions.map((suggestion) => {
+          const targetRepositoryFullName =
+            suggestion.targetRepositoryFullName?.trim();
+          const canonicalRepository = targetRepositoryFullName
+            ? candidateRepositoriesByNormalizedFullName.get(
+                normalizeRepositoryFullName(targetRepositoryFullName),
+              )
+            : null;
+          return canonicalRepository
+            ? {
+                ...suggestion,
+                targetRepositoryFullName: canonicalRepository.fullName,
+              }
+            : suggestion;
+        })
+      : submittedSuggestions;
+    const suggestionsWithLaunchTargets = usesPinnedOrgWideLaunchContract
+      ? await Promise.all(
+          suggestionsWithCanonicalTargets.map(async (suggestion) => {
+            if (!suggestion.targetRepositoryFullName) {
+              return suggestion;
+            }
+
+            const targetEnvironmentId = await findEnvironmentForRepo(
+              suggestion.targetRepositoryFullName,
+            );
+            return targetEnvironmentId
+              ? { ...suggestion, targetEnvironmentId }
+              : suggestion;
+          }),
+        )
+      : suggestionsWithCanonicalTargets;
     const preparedSuggestions = await resolvePreparedSuggestions({
-      suggestions: submittedSuggestions,
+      suggestions: suggestionsWithLaunchTargets,
       candidateRepositories,
       tolerateInvalidSuggestions: !isOnboardingTrigger,
     });
@@ -1340,7 +1466,8 @@ export async function submitTaskSuggestions(
       ? preparedSuggestions
       : prioritizeScheduledSuggestions(preparedSuggestions);
     const suggestionsMissingLaunchMetadata =
-      isOnboardingTrigger || usesRouterLaunchContract
+      isOnboardingTrigger ||
+      (usesRouterLaunchContract && !usesPinnedOrgWideLaunchContract)
         ? []
         : suggestions.filter(
             (suggestion) => suggestion.targetRepositoryFullName === null,
@@ -1348,14 +1475,12 @@ export async function submitTaskSuggestions(
 
     if (suggestionsMissingLaunchMetadata.length > 0) {
       apiLogger.warn(
-        `[submitTaskSuggestions] Persisting scheduled suggestions without per-idea launch metadata for taskId=${taskId}`,
-      );
-      apiLogger.warn(
         `[submitTaskSuggestions] Dropping ${suggestionsMissingLaunchMetadata.length} scheduled suggestions without per-idea launch metadata for taskId=${taskId}`,
       );
     }
     const suggestionsToPersist =
-      isOnboardingTrigger || usesRouterLaunchContract
+      isOnboardingTrigger ||
+      (usesRouterLaunchContract && !usesPinnedOrgWideLaunchContract)
         ? suggestions
         : suggestions.filter(
             (suggestion) => suggestion.targetRepositoryFullName !== null,
@@ -1413,11 +1538,25 @@ export async function submitTaskSuggestions(
         .insert(workItems)
         .values(
           suggestionsToPersist.map((suggestion, index) => {
+            let suggestionRepositoryIds = repositoryIds;
+            if (suggestion.targetRepositoryFullName) {
+              const targetRepositoryId = repositoryIdsByFullName.get(
+                normalizeRepositoryFullName(
+                  suggestion.targetRepositoryFullName,
+                ),
+              );
+              if (!targetRepositoryId) {
+                throw new Error(
+                  `Suggestion target repository "${suggestion.targetRepositoryFullName}" was not resolved.`,
+                );
+              }
+              suggestionRepositoryIds = [targetRepositoryId];
+            }
             const contentHash = buildTaskSuggestionContentHash({
               title: suggestion.title,
               brief: suggestion.brief,
               targetRepositoryFullName: suggestion.targetRepositoryFullName,
-              repositoryIds,
+              repositoryIds: suggestionRepositoryIds,
             });
 
             return {
@@ -1431,7 +1570,7 @@ export async function submitTaskSuggestions(
               category: suggestion.category,
               priority: suggestion.priority,
               investigationContext: suggestion.investigationContext,
-              repositoryIds,
+              repositoryIds: suggestionRepositoryIds,
               targetRepositoryFullName: suggestion.targetRepositoryFullName,
               fingerprint: submissionPrefix
                 ? `${submissionPrefix}${index}:${contentHash}`
@@ -1488,7 +1627,7 @@ export async function submitTaskSuggestions(
                 slackChannelId: task.slackChannelId,
                 slackThreadTs: task.slackThreadTs,
                 createdByUserId,
-                launchRouting: usesRouterLaunchContract ? 'router' : undefined,
+                launchRouting: currentThreadLaunchRouting,
                 suggestions: missingSuggestions,
               })
             : communicationProvider === 'discord' && communicationChannel
@@ -1496,9 +1635,7 @@ export async function submitTaskSuggestions(
                   sourceTaskId: taskId,
                   suggestionGroupKey: parsedBody.data.submissionKey ?? taskId,
                   createdByUserId,
-                  launchRouting: usesRouterLaunchContract
-                    ? 'router'
-                    : undefined,
+                  launchRouting: currentThreadLaunchRouting,
                   channelId: communicationChannel,
                   threadId: communicationThread,
                   suggestions: numberedMissingSuggestions,
@@ -1508,9 +1645,7 @@ export async function submitTaskSuggestions(
                     sourceTaskId: taskId,
                     suggestionGroupKey: parsedBody.data.submissionKey ?? taskId,
                     createdByUserId,
-                    launchRouting: usesRouterLaunchContract
-                      ? 'router'
-                      : undefined,
+                    launchRouting: currentThreadLaunchRouting,
                     chatId: communicationChannel,
                     threadId: communicationThread,
                     suggestions: numberedMissingSuggestions,
@@ -1525,9 +1660,7 @@ export async function submitTaskSuggestions(
                             suggestionGroupKey:
                               parsedBody.data.submissionKey ?? taskId,
                             createdByUserId,
-                            launchRouting: usesRouterLaunchContract
-                              ? 'router'
-                              : undefined,
+                            launchRouting: currentThreadLaunchRouting,
                             conversationId: communicationChannel,
                             serviceUrl,
                             threadId: communicationThread,

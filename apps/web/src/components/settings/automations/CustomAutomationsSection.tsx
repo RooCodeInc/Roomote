@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
+  ALL_REPOSITORIES,
   isBackgroundAutomationUserTargetKind,
   MAX_CUSTOM_AUTOMATIONS,
   type CustomAutomationScheduleMode,
@@ -335,11 +336,13 @@ export function CustomAutomationsSection() {
       ?.label ?? 'Provider';
 
   const environmentOptions = useMemo(
-    () =>
-      (environmentsQuery.data ?? []).map((environment) => ({
+    () => [
+      { id: ALL_REPOSITORIES, name: 'All repositories' },
+      ...(environmentsQuery.data ?? []).map((environment) => ({
         id: environment.id,
         name: environment.name,
       })),
+    ],
     [environmentsQuery.data],
   );
 
