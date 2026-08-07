@@ -19,11 +19,12 @@ import {
   resolveCustomAutomationSchedule,
   runCustomAutomationNow,
 } from '@roomote/sdk/server';
-import type {
-  BackgroundAutomationProvider,
-  BackgroundAutomationTargetKind,
-  CustomAutomationScheduleMode,
-  OptionalAutomationTarget,
+import {
+  ALL_REPOSITORIES,
+  type BackgroundAutomationProvider,
+  type BackgroundAutomationTargetKind,
+  type CustomAutomationScheduleMode,
+  type OptionalAutomationTarget,
 } from '@roomote/types';
 import { isBackgroundAutomationUserTargetKind } from '@roomote/types';
 import { toActivationAutomationDestinationProvider } from '@roomote/telemetry';
@@ -45,13 +46,18 @@ const modelSchema = z
   .max(200)
   .regex(/^[^/\s]+\/.+$/u, 'Model must use provider/model format.');
 
+const environmentTargetSchema = z.union([
+  z.string().uuid(),
+  z.literal(ALL_REPOSITORIES),
+]);
+
 const writeSchema = z.object({
   name: z.string().trim().min(1).max(100),
   prompt: z.string().trim().min(1).max(8_000),
   enabled: z.boolean().default(true),
   schedule: z.string().trim().min(1).max(500),
   model: modelSchema.optional(),
-  environmentId: z.string().uuid(),
+  environmentId: environmentTargetSchema,
   targetProvider: z.enum(['slack', 'discord', 'teams', 'telegram']).optional(),
   targetMode: z.enum(['channel', 'direct_message']).optional(),
   targetChannelId: z.string().trim().min(1).max(160).optional(),
@@ -64,7 +70,7 @@ const updateSchema = z.object({
   enabled: z.boolean().optional(),
   schedule: z.string().trim().min(1).max(500).optional(),
   model: modelSchema.nullable().optional(),
-  environmentId: z.string().uuid().optional(),
+  environmentId: environmentTargetSchema.optional(),
   targetProvider: z
     .enum(['slack', 'discord', 'teams', 'telegram'])
     .nullable()
@@ -290,8 +296,21 @@ function adminId(c: {
   return c.get('customAutomationAdminId');
 }
 
+function toApiAutomation<
+  T extends { allRepositories: boolean; environmentId: string | null },
+>(automation: T): Omit<T, 'environmentId'> & { environmentId: string | null } {
+  return {
+    ...automation,
+    environmentId: automation.allRepositories
+      ? ALL_REPOSITORIES
+      : automation.environmentId,
+  };
+}
+
 customAutomationsRouter.get('/', async (c) =>
-  c.json({ automations: await listCustomAutomations() }),
+  c.json({
+    automations: (await listCustomAutomations()).map(toApiAutomation),
+  }),
 );
 
 customAutomationsRouter.post('/resolve-schedule', async (c) => {
@@ -348,7 +367,13 @@ customAutomationsRouter.post('/', async (c) => {
       'created',
       parsed.data.targetProvider ?? null,
     );
-    return c.json({ automation, resolution: schedule.resolution }, 201);
+    return c.json(
+      {
+        automation: toApiAutomation(automation),
+        resolution: schedule.resolution,
+      },
+      201,
+    );
   } catch (error) {
     const known = knownErrorResponse(c, error);
     if (known) return known;
@@ -440,7 +465,11 @@ customAutomationsRouter.patch('/:id', async (c) => {
         parsed.data.model === null
           ? null
           : (parsed.data.model ?? existing.model),
-      environmentId: parsed.data.environmentId ?? existing.environmentId ?? '',
+      environmentId:
+        parsed.data.environmentId ??
+        (existing.allRepositories
+          ? ALL_REPOSITORIES
+          : (existing.environmentId ?? '')),
       target: clearTarget
         ? {}
         : targetProvider && (targetMode === 'direct_message' || targetChannelId)
@@ -456,7 +485,10 @@ customAutomationsRouter.patch('/:id', async (c) => {
             )
           : existingTarget,
     });
-    return c.json({ automation, resolution: schedule.resolution });
+    return c.json({
+      automation: toApiAutomation(automation),
+      resolution: schedule.resolution,
+    });
   } catch (error) {
     const known = knownErrorResponse(c, error);
     if (known) return known;

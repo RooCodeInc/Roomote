@@ -1,6 +1,10 @@
 import { Hono } from 'hono';
 
-import { type RunTokenContext, TaskPayloadKind } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  type RunTokenContext,
+  TaskPayloadKind,
+} from '@roomote/types';
 
 import type { Variables } from '../../../types';
 import { mcpAuthMiddleware } from '../../mcp/middleware';
@@ -16,6 +20,7 @@ const {
   mockDeploymentSettingsFindFirst,
   mockSlackInstallationFindFirst,
   mockEnvironmentFindFirst,
+  mockFindEnvironmentForRepo,
   mockPostMessage,
   insertedWorkItemValues,
   insertedTrackedMessageValues,
@@ -25,6 +30,7 @@ const {
   mockDeploymentSettingsFindFirst: vi.fn(),
   mockSlackInstallationFindFirst: vi.fn(),
   mockEnvironmentFindFirst: vi.fn(),
+  mockFindEnvironmentForRepo: vi.fn(),
   mockPostMessage: vi.fn(),
   insertedWorkItemValues: [] as Record<string, unknown>[],
   insertedTrackedMessageValues: [] as Record<string, unknown>[],
@@ -143,6 +149,10 @@ vi.mock('@roomote/slack', () => ({
 
 vi.mock('@roomote/communication/chat-messages', () => ({
   SETUP_SUGGESTIONS_THREAD_INTRO_TEXT: 'intro',
+}));
+
+vi.mock('@roomote/cloud-agents/server', () => ({
+  findEnvironmentForRepo: mockFindEnvironmentForRepo,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -310,6 +320,7 @@ describe('submitTaskSuggestions', () => {
     mockDeploymentSettingsFindFirst.mockReset();
     mockSlackInstallationFindFirst.mockReset();
     mockEnvironmentFindFirst.mockReset();
+    mockFindEnvironmentForRepo.mockReset();
     mockPostMessage.mockReset();
     insertedWorkItemValues.length = 0;
     insertedTrackedMessageValues.length = 0;
@@ -329,6 +340,7 @@ describe('submitTaskSuggestions', () => {
       botAccessToken: 'xoxb-test',
     });
     mockEnvironmentFindFirst.mockResolvedValue(null);
+    mockFindEnvironmentForRepo.mockResolvedValue(undefined);
     mockTaskRunFindFirst.mockResolvedValue({
       id: 1,
       payloadKind: TaskPayloadKind.Scan,
@@ -520,6 +532,59 @@ describe('submitTaskSuggestions', () => {
       suggestionCount: 1,
     });
     expect(mockPostMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('pins org-wide current-thread suggestions to a concrete repository', async () => {
+    mockFindEnvironmentForRepo.mockResolvedValue(
+      '10b031ec-b728-4d8f-a9a0-1ed4aa500511',
+    );
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 1,
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: 'user-1',
+      payload: { repo: ALL_REPOSITORIES },
+    });
+    mockTaskFindFirst.mockResolvedValue({
+      initiatorUserId: 'user-1',
+      initiatorAutomation: 'custom_automation',
+      slackChannelId: 'C123',
+      slackThreadTs: '111.222',
+    });
+    const app = createApp({
+      runId: 1,
+      userId: 'user-1',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    });
+
+    const response = await app.request(
+      new Request('http://localhost/tasks/task-1/task_suggestions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          delivery: 'current_thread',
+          submissionKey: 'org-wide-reply',
+          suggestions: [
+            {
+              title: 'Fix the parser',
+              brief: 'Nil access is crashing the parser.',
+              targetRepositoryFullName: 'acme/app',
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(insertedWorkItemValues[0]).toMatchObject({
+      targetRepositoryFullName: 'acme/app',
+      targetEnvironmentId: '10b031ec-b728-4d8f-a9a0-1ed4aa500511',
+      repositoryIds: ['repo-1'],
+    });
+    expect(insertedTrackedMessageValues[0]?.metadata).not.toHaveProperty(
+      'launchRouting',
+    );
   });
 
   it('persists later reply suggestion batches independently', async () => {

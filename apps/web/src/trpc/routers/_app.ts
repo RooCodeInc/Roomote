@@ -6,6 +6,7 @@ import {
 import { FeatureFlag } from '@roomote/feature-flags';
 
 import {
+  ALL_REPOSITORIES,
   CONFLICT_RESOLUTION_MAX_PR_AGE_DAYS_OPTIONS,
   launchCodingHarnesses,
   computeProviders,
@@ -715,7 +716,10 @@ const automationsRouter = createRouter({
           .regex(/^[^/\s]+\/.+$/u, 'Model must use provider/model format.')
           .nullable()
           .optional(),
-        environmentId: z.string().uuid(),
+        environmentId: z.union([
+          z.string().uuid(),
+          z.literal(ALL_REPOSITORIES),
+        ]),
         targetProvider: z
           .enum(['slack', 'discord', 'teams', 'telegram'])
           .optional(),
@@ -758,7 +762,10 @@ const automationsRouter = createRouter({
           .regex(/^[^/\s]+\/.+$/u, 'Model must use provider/model format.')
           .nullable()
           .optional(),
-        environmentId: z.string().uuid(),
+        environmentId: z.union([
+          z.string().uuid(),
+          z.literal(ALL_REPOSITORIES),
+        ]),
         targetProvider: z
           .enum(['slack', 'discord', 'teams', 'telegram'])
           .optional(),

@@ -1,0 +1,1 @@
+ALTER TABLE "custom_automations" ADD COLUMN "all_repositories" boolean DEFAULT false NOT NULL;

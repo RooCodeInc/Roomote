@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { AuthTokenContext } from '@roomote/types';
+import { ALL_REPOSITORIES } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 import type { McpAuth } from '../../mcp/middleware';
@@ -120,6 +121,34 @@ describe('custom-automations MCP routes', () => {
   });
 
   describe('POST / (create)', () => {
+    it('accepts the all-repositories workspace target', async () => {
+      const { app } = createApp();
+      mockResolveCustomAutomationSchedule.mockResolvedValue({
+        status: 'resolved',
+        scheduleMode: 'daily',
+        cronExpression: null,
+        resolution: null,
+      });
+      mockCreateCustomAutomation.mockResolvedValue({
+        id: 'automation-1',
+        environmentId: null,
+        allRepositories: true,
+      });
+
+      const res = await postCreate(
+        app,
+        createBody({ environmentId: ALL_REPOSITORIES }),
+      );
+
+      expect(res.status).toBe(201);
+      expect(mockCreateCustomAutomation).toHaveBeenCalledWith(
+        expect.objectContaining({ environmentId: ALL_REPOSITORIES }),
+      );
+      await expect(res.json()).resolves.toMatchObject({
+        automation: { environmentId: ALL_REPOSITORIES },
+      });
+    });
+
     it('tracks creation with only the destination provider', async () => {
       const { app } = createApp();
       mockResolveCustomAutomationSchedule.mockResolvedValue({
@@ -343,6 +372,31 @@ describe('custom-automations MCP routes', () => {
       environmentId: ENVIRONMENT_ID,
       target: {},
     };
+
+    it('switches an existing automation to all repositories', async () => {
+      const { app } = createApp();
+      mockGetCustomAutomationById.mockResolvedValue(existing);
+      mockUpdateCustomAutomation.mockResolvedValue({
+        ...existing,
+        environmentId: null,
+        allRepositories: true,
+      });
+
+      const res = await app.request('/custom-automations/automation-1', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ environmentId: ALL_REPOSITORIES }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockUpdateCustomAutomation).toHaveBeenCalledWith(
+        'automation-1',
+        expect.objectContaining({ environmentId: ALL_REPOSITORIES }),
+      );
+      await expect(res.json()).resolves.toMatchObject({
+        automation: { environmentId: ALL_REPOSITORIES },
+      });
+    });
 
     it('preserves a DM-me target without treating its user reference as a channel', async () => {
       const { app } = createApp();

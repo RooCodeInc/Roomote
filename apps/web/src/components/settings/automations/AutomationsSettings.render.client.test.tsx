@@ -1046,6 +1046,41 @@ describe('AutomationsSettings', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('offers and displays the all-repositories workspace target', async () => {
+    state.customAutomations = [
+      {
+        id: 'automation-all-repos',
+        name: 'Org-wide digest',
+        prompt: 'Summarize work across the organization.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        environmentId: '__all_repositories__',
+        target: { provider: 'slack', externalRef: 'C123MANAGER' },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    expect(
+      await screen.findByText('Daily, in All repositories →'),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Environment' }));
+    expect(
+      screen.getByRole('option', { name: 'All repositories' }),
+    ).toBeInTheDocument();
+  });
+
   it('humanizes custom schedules and shows the last run when available', async () => {
     state.environments = [{ id: 'env-1', name: 'Production' }];
     state.customAutomations = [

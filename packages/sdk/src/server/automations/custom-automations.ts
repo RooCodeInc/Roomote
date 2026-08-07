@@ -12,6 +12,7 @@ import {
   type CustomAutomation,
 } from '@roomote/db/server';
 import {
+  ALL_REPOSITORIES,
   isConfiguredAutomationTarget,
   isBackgroundAutomationUserTargetKind,
   resolveEvalHarnessSelection,
@@ -134,8 +135,12 @@ async function resolveDestination(
 function buildChannelAnchoredDescription(
   prompt: string,
   destination: ResolvedAutomationDestination,
+  options: { allRepositories: boolean },
 ): string {
   const promptContext = buildDestinationPromptContext(destination);
+  const orgWideSuggestionInstruction = options.allRepositories
+    ? ' This run spans all active repositories. Every launchable suggestion must include the concrete `targetRepositoryFullName` that owns the work so Roomote can start it in the matching environment.'
+    : '';
 
   return `${prompt}
 
@@ -144,7 +149,7 @@ function buildChannelAnchoredDescription(
   <${promptContext.channelTag}>${destination.channelId}</${promptContext.channelTag}>
 </task_context>
 
-This run is anchored to the ${promptContext.surfaceLabel} conversation above and reports through \`send_chat_reply\`; do not use \`${promptContext.postToolName}\` and do not post anywhere else. Stay silent while work is in flight: send no opening acknowledgement and do not post progress updates. Send a ${promptContext.surfaceLabel} message only for your final result, a durable blocker, or a required user input. Your first message creates this run's thread in that conversation, so make it one self-contained message that stands alone for readers who have not seen this task; later messages and user replies continue that same thread. Write the report as the result itself, like a teammate sharing what they found or did: do not mention this automation, the schedule, the task, or that anything requested the work; the message footer already attributes the automation. Lead with the outcome, not with framing like "Automation requested ..." or "Outcome: ...".`;
+This run is anchored to the ${promptContext.surfaceLabel} conversation above and reports through \`send_chat_reply\`; do not use \`${promptContext.postToolName}\` and do not post anywhere else. Stay silent while work is in flight: send no opening acknowledgement and do not post progress updates. Send a ${promptContext.surfaceLabel} message only for your final result, a durable blocker, or a required user input. Your first message creates this run's thread in that conversation, so make it one self-contained message that stands alone for readers who have not seen this task; later messages and user replies continue that same thread. Write the report as the result itself, like a teammate sharing what they found or did: do not mention this automation, the schedule, the task, or that anything requested the work; the message footer already attributes the automation. Lead with the outcome, not with framing like "Automation requested ..." or "Outcome: ...".${orgWideSuggestionInstruction}`;
 }
 
 async function launchCustomAutomationRow(
@@ -206,7 +211,7 @@ async function launchCustomAutomationRow(
     }
   }
 
-  if (!automation.environmentId) {
+  if (!automation.allRepositories && !automation.environmentId) {
     result.skippedReason = 'Environment is not configured.';
     result.errors.push('Environment is not configured.');
     await recordCustomAutomationRunOutcome(db, {
@@ -217,12 +222,14 @@ async function launchCustomAutomationRow(
     return result;
   }
 
-  const environment = await db.query.environments.findFirst({
-    columns: { id: true },
-    where: eq(environments.id, automation.environmentId),
-  });
+  const environment = automation.allRepositories
+    ? null
+    : await db.query.environments.findFirst({
+        columns: { id: true },
+        where: eq(environments.id, automation.environmentId!),
+      });
 
-  if (!environment) {
+  if (!automation.allRepositories && !environment) {
     result.skippedReason = 'Environment no longer exists.';
     result.errors.push('Environment no longer exists.');
     await recordCustomAutomationRunOutcome(db, {
@@ -300,10 +307,14 @@ async function launchCustomAutomationRow(
         type: TaskPayloadKind.StandardTask,
         ...(modelOverride?.harness ? { harness: modelOverride.harness } : {}),
         payload: {
-          repo: '',
-          environmentId: automation.environmentId,
+          repo: automation.allRepositories ? ALL_REPOSITORIES : '',
+          ...(automation.environmentId
+            ? { environmentId: automation.environmentId }
+            : {}),
           description: destination
-            ? buildChannelAnchoredDescription(automation.prompt, destination)
+            ? buildChannelAnchoredDescription(automation.prompt, destination, {
+                allRepositories: automation.allRepositories,
+              })
             : automation.prompt,
           ...(destination
             ? buildDestinationTaskPayloadFields(destination)

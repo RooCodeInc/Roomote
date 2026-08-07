@@ -22,6 +22,7 @@ import {
 } from '@roomote/types';
 import { SlackNotifier } from '@roomote/slack';
 import { SETUP_SUGGESTIONS_THREAD_INTRO_TEXT } from '@roomote/communication/chat-messages';
+import { findEnvironmentForRepo } from '@roomote/cloud-agents/server';
 import {
   buildAutomationRootSummaryMessage,
   buildAutomationRootSummaryText,
@@ -246,6 +247,18 @@ async function resolveRepositoryIdsForSuggestedTask(params: {
   payload: SuggestedTasksPayload;
 }): Promise<ResolvedRepository[]> {
   let repositoryFullNames = getSuggestedTaskRepositoryFullNames(params.payload);
+
+  if (
+    params.payload.repo === ALL_REPOSITORIES &&
+    repositoryFullNames.length === 0 &&
+    !params.payload.environmentId
+  ) {
+    return db
+      .select({ id: repositories.id, fullName: repositories.fullName })
+      .from(repositories)
+      .where(eq(repositories.isActive, true))
+      .orderBy(asc(repositories.fullName));
+  }
 
   if (repositoryFullNames.length === 0 && params.payload.environmentId) {
     const environment = await db.query.environments.findFirst({
@@ -1256,6 +1269,12 @@ export async function submitTaskSuggestions(
     }
 
     const payload = run.payload as SuggestedTasksPayload;
+    const usesPinnedOrgWideLaunchContract =
+      usesRouterLaunchContract && payload.repo === ALL_REPOSITORIES;
+    const currentThreadLaunchRouting =
+      usesRouterLaunchContract && !usesPinnedOrgWideLaunchContract
+        ? ('router' as const)
+        : undefined;
     const setupNewState = normalizeSetupNewState(
       deploymentSettings?.setupNewState,
     );
@@ -1328,10 +1347,32 @@ export async function submitTaskSuggestions(
       ? parsedBody.data.suggestions.map((suggestion) => ({
           title: suggestion.title,
           brief: suggestion.brief,
+          ...(usesPinnedOrgWideLaunchContract &&
+          suggestion.targetRepositoryFullName
+            ? {
+                targetRepositoryFullName: suggestion.targetRepositoryFullName,
+              }
+            : {}),
         }))
       : parsedBody.data.suggestions;
+    const suggestionsWithLaunchTargets = usesPinnedOrgWideLaunchContract
+      ? await Promise.all(
+          submittedSuggestions.map(async (suggestion) => {
+            if (!suggestion.targetRepositoryFullName) {
+              return suggestion;
+            }
+
+            const targetEnvironmentId = await findEnvironmentForRepo(
+              suggestion.targetRepositoryFullName,
+            );
+            return targetEnvironmentId
+              ? { ...suggestion, targetEnvironmentId }
+              : suggestion;
+          }),
+        )
+      : submittedSuggestions;
     const preparedSuggestions = await resolvePreparedSuggestions({
-      suggestions: submittedSuggestions,
+      suggestions: suggestionsWithLaunchTargets,
       candidateRepositories,
       tolerateInvalidSuggestions: !isOnboardingTrigger,
     });
@@ -1340,7 +1381,8 @@ export async function submitTaskSuggestions(
       ? preparedSuggestions
       : prioritizeScheduledSuggestions(preparedSuggestions);
     const suggestionsMissingLaunchMetadata =
-      isOnboardingTrigger || usesRouterLaunchContract
+      isOnboardingTrigger ||
+      (usesRouterLaunchContract && !usesPinnedOrgWideLaunchContract)
         ? []
         : suggestions.filter(
             (suggestion) => suggestion.targetRepositoryFullName === null,
@@ -1355,7 +1397,8 @@ export async function submitTaskSuggestions(
       );
     }
     const suggestionsToPersist =
-      isOnboardingTrigger || usesRouterLaunchContract
+      isOnboardingTrigger ||
+      (usesRouterLaunchContract && !usesPinnedOrgWideLaunchContract)
         ? suggestions
         : suggestions.filter(
             (suggestion) => suggestion.targetRepositoryFullName !== null,
@@ -1488,7 +1531,7 @@ export async function submitTaskSuggestions(
                 slackChannelId: task.slackChannelId,
                 slackThreadTs: task.slackThreadTs,
                 createdByUserId,
-                launchRouting: usesRouterLaunchContract ? 'router' : undefined,
+                launchRouting: currentThreadLaunchRouting,
                 suggestions: missingSuggestions,
               })
             : communicationProvider === 'discord' && communicationChannel
@@ -1496,9 +1539,7 @@ export async function submitTaskSuggestions(
                   sourceTaskId: taskId,
                   suggestionGroupKey: parsedBody.data.submissionKey ?? taskId,
                   createdByUserId,
-                  launchRouting: usesRouterLaunchContract
-                    ? 'router'
-                    : undefined,
+                  launchRouting: currentThreadLaunchRouting,
                   channelId: communicationChannel,
                   threadId: communicationThread,
                   suggestions: numberedMissingSuggestions,
@@ -1508,9 +1549,7 @@ export async function submitTaskSuggestions(
                     sourceTaskId: taskId,
                     suggestionGroupKey: parsedBody.data.submissionKey ?? taskId,
                     createdByUserId,
-                    launchRouting: usesRouterLaunchContract
-                      ? 'router'
-                      : undefined,
+                    launchRouting: currentThreadLaunchRouting,
                     chatId: communicationChannel,
                     threadId: communicationThread,
                     suggestions: numberedMissingSuggestions,
@@ -1525,9 +1564,7 @@ export async function submitTaskSuggestions(
                             suggestionGroupKey:
                               parsedBody.data.submissionKey ?? taskId,
                             createdByUserId,
-                            launchRouting: usesRouterLaunchContract
-                              ? 'router'
-                              : undefined,
+                            launchRouting: currentThreadLaunchRouting,
                             conversationId: communicationChannel,
                             serviceUrl,
                             threadId: communicationThread,

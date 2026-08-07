@@ -379,14 +379,18 @@ describe('roomote MCP tool descriptions', () => {
     expect(replyTool.config.inputSchema.questions).toBeUndefined();
     expect(replyTool.config.inputSchema.suggestedNextSteps).toBeUndefined();
     expect(getInputSchemaField(replyTool, 'suggestions').description).toBe(
-      'Optional independent actions to post inside the originating Slack conversation (maximum 10). Use only for high-confidence tasks not explicitly identified in the conversation as already underway. Each suggestion contains only the title and description shown to users; Roomote routes the task when it is started.',
+      'Optional independent actions to post inside the originating Slack conversation (maximum 10). Use only for high-confidence tasks not explicitly identified in the conversation as already underway. For org-wide runs, include the concrete targetRepositoryFullName so Roomote can route the task to the appropriate environment when it is started.',
     );
     const suggestionItem = (
       replyTool.config.inputSchema.suggestions as unknown as {
         unwrap: () => { element: { shape: Record<string, unknown> } };
       }
     ).unwrap().element;
-    expect(Object.keys(suggestionItem.shape)).toEqual(['title', 'brief']);
+    expect(Object.keys(suggestionItem.shape)).toEqual([
+      'title',
+      'brief',
+      'targetRepositoryFullName',
+    ]);
   });
 
   it('documents the Teams chat reply tool when Teams communication context exists', async () => {
