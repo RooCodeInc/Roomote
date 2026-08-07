@@ -102,6 +102,33 @@ describe('custom automation activation telemetry', () => {
     );
   });
 
+  it('stores DM me against the automation owner', async () => {
+    mocks.createCustomAutomation.mockResolvedValue(
+      customAutomation({ provider: 'slack' }),
+    );
+
+    await createCustomAutomationCommand(adminAuth, {
+      name: 'Private automation name',
+      prompt: 'Private prompt',
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: 'environment-id',
+      targetProvider: 'slack',
+      targetMode: 'direct_message',
+    });
+
+    expect(mocks.createCustomAutomation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        createdByUserId: 'user-admin',
+        target: {
+          provider: 'slack',
+          targetKind: 'slack_user',
+          externalRef: 'user-admin',
+        },
+      }),
+    );
+  });
+
   it('tracks deletion with only the persisted destination provider classification', async () => {
     mocks.getCustomAutomationById.mockResolvedValue(
       customAutomation({ provider: 'discord' }),

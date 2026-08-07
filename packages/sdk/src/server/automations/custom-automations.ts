@@ -39,6 +39,7 @@ import {
   type AutomationRunNowResult,
   type AutomationRunOpts,
 } from './types';
+import { findSlackUserDirectMessageDestination } from '../lib/user-direct-message';
 
 const LOG_PREFIX = '[custom-automations]';
 
@@ -76,6 +77,15 @@ async function resolveDestination(
     return null;
   }
 
+  if (provider === 'slack' && target.targetKind === 'slack_user') {
+    const destination = await findSlackUserDirectMessageDestination(
+      target.externalRef,
+    );
+    return destination
+      ? { provider, ...destination, source: 'automation_target' }
+      : null;
+  }
+
   if (provider === 'teams') {
     const metadataServiceUrl =
       typeof target.metadata?.serviceUrl === 'string'
@@ -108,7 +118,7 @@ async function resolveDestination(
 }
 
 /**
- * Anchors a custom automation's prompt to its configured report channel,
+ * Anchors a custom automation's prompt to its configured report conversation,
  * mirroring how the built-in channel automations tell the agent which surface
  * and posting tool to report through.
  */
@@ -125,7 +135,7 @@ function buildChannelAnchoredDescription(
   <${promptContext.channelTag}>${destination.channelId}</${promptContext.channelTag}>
 </task_context>
 
-This run is anchored to the ${promptContext.surfaceLabel} channel above and reports through \`send_chat_reply\`; do not use \`${promptContext.postToolName}\` and do not post to any other channel. Stay silent while work is in flight: send no opening acknowledgement and do not post progress updates. Send a ${promptContext.surfaceLabel} message only for your final result, a durable blocker, or a required user input. Your first message creates this run's thread in that channel, so make it one self-contained message that stands alone for readers who have not seen this task; later messages and user replies continue that same thread. Write the report as the result itself, like a teammate sharing what they found or did: do not mention this automation, the schedule, the task, or that anything requested the work; the message footer already attributes the automation. Lead with the outcome, not with framing like "Automation requested ..." or "Outcome: ...".`;
+This run is anchored to the ${promptContext.surfaceLabel} conversation above and reports through \`send_chat_reply\`; do not use \`${promptContext.postToolName}\` and do not post anywhere else. Stay silent while work is in flight: send no opening acknowledgement and do not post progress updates. Send a ${promptContext.surfaceLabel} message only for your final result, a durable blocker, or a required user input. Your first message creates this run's thread in that conversation, so make it one self-contained message that stands alone for readers who have not seen this task; later messages and user replies continue that same thread. Write the report as the result itself, like a teammate sharing what they found or did: do not mention this automation, the schedule, the task, or that anything requested the work; the message footer already attributes the automation. Lead with the outcome, not with framing like "Automation requested ..." or "Outcome: ...".`;
 }
 
 async function launchCustomAutomationRow(
@@ -221,9 +231,11 @@ async function launchCustomAutomationRow(
     destination = await resolveDestination(automation.target);
     if (!destination) {
       const message =
-        automation.target.provider === 'teams'
-          ? 'Teams report destination is missing a resolvable service URL.'
-          : 'Report destination could not be resolved.';
+        automation.target.targetKind === 'slack_user'
+          ? 'The automation owner does not have a linked Slack account that can receive direct messages.'
+          : automation.target.provider === 'teams'
+            ? 'Teams report destination is missing a resolvable service URL.'
+            : 'Report destination could not be resolved.';
       result.skippedReason = message;
       result.errors.push(message);
       await recordCustomAutomationRunOutcome(db, {
@@ -297,6 +309,12 @@ async function launchCustomAutomationRow(
             ? {
                 channel: destination.channelId,
                 slackChannel: destination.channelId,
+                ...(destination.teamId
+                  ? {
+                      teamId: destination.teamId,
+                      slackTeamId: destination.teamId,
+                    }
+                  : {}),
               }
             : {}),
           ...(modelOverride?.harnessModelOverrides

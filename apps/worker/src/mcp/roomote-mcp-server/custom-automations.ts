@@ -22,6 +22,7 @@ type ManageCustomAutomationsParams = {
   model?: string | null;
   environmentId?: string;
   targetProvider?: 'slack' | 'discord' | 'teams' | 'telegram' | null;
+  targetMode?: 'channel' | 'direct_message';
   targetChannelId?: string;
   targetServiceUrl?: string;
 };
@@ -65,6 +66,7 @@ export async function handleManageCustomAutomations(
         model: params.model,
         environmentId: params.environmentId,
         targetProvider: params.targetProvider,
+        targetMode: params.targetMode,
         targetChannelId: params.targetChannelId,
         targetServiceUrl: params.targetServiceUrl,
       }).filter((entry) => entry[1] !== undefined),

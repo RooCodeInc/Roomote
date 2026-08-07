@@ -33,6 +33,10 @@ vi.mock('../destination', () => ({
   listConnectedCommunicationProviders: vi.fn(async () => ['slack', 'teams']),
 }));
 
+vi.mock('../../lib/user-direct-message', () => ({
+  findSlackUserDirectMessageDestination: vi.fn(),
+}));
+
 vi.mock('../scheduling-utils', () => ({
   DAILY_WEEKLY_SCHEDULE_HOUR_LOCAL: 3,
   isRunDue: vi.fn(),
@@ -60,6 +64,7 @@ import {
   tryClaimCustomAutomationLaunch,
 } from '@roomote/db/server';
 import { TaskPayloadKind } from '@roomote/types';
+import { findSlackUserDirectMessageDestination } from '../../lib/user-direct-message';
 
 import {
   customAutomationsJob,
@@ -112,6 +117,10 @@ describe('customAutomationsJob', () => {
     vi.mocked(enqueueTask).mockResolvedValue({
       taskId: 'task_abc',
     } as never);
+    vi.mocked(findSlackUserDirectMessageDestination).mockResolvedValue({
+      channelId: 'D123',
+      teamId: 'T123',
+    });
   });
 
   it('launches a StandardTask for due automations', async () => {
@@ -219,6 +228,61 @@ describe('customAutomationsJob', () => {
     expect(enqueued.task.payload.description).toContain(
       'do not mention this automation',
     );
+  });
+
+  it('resolves a Slack DM target for the automation owner', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        target: {
+          provider: 'slack',
+          targetKind: 'slack_user',
+          externalRef: 'user-1',
+        },
+        createdByUserId: 'user-1',
+      } as never,
+    ]);
+
+    const result = await customAutomationsJob();
+
+    expect(result.launchedTaskId).toBe('task_abc');
+    expect(findSlackUserDirectMessageDestination).toHaveBeenCalledWith(
+      'user-1',
+    );
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            channel: 'D123',
+            slackChannel: 'D123',
+            teamId: 'T123',
+            slackTeamId: 'T123',
+          }),
+        }),
+        channels: { slackChannelId: 'D123' },
+      }),
+    );
+  });
+
+  it('fails clearly when the automation owner cannot receive Slack DMs', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        target: {
+          provider: 'slack',
+          targetKind: 'slack_user',
+          externalRef: 'user-1',
+        },
+      } as never,
+    ]);
+    vi.mocked(findSlackUserDirectMessageDestination).mockResolvedValue(null);
+
+    const result = await customAutomationsJob();
+
+    expect(result.errors).toEqual([
+      'Flaky tests: The automation owner does not have a linked Slack account that can receive direct messages.',
+    ]);
+    expect(enqueueTask).not.toHaveBeenCalled();
   });
 
   it('launches without channel anchoring when no report channel is configured', async () => {

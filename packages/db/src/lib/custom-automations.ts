@@ -36,7 +36,7 @@ export type CustomAutomationWriteInput = {
   /** Optional provider/model launch override; null uses the deployment default. */
   model?: string | null;
   environmentId: string;
-  /** Full destination target, or {} when the automation has no report channel. */
+  /** Full destination target, or {} when the automation has no report destination. */
   target: OptionalAutomationTarget;
   createdByUserId?: string | null;
 };
@@ -120,7 +120,7 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
   );
   if (hasAnyTargetField && !isConfiguredAutomationTarget(input.target)) {
     throw new Error(
-      'Report destination must include a provider, target kind, and channel.',
+      'Report destination must include a provider, target kind, and reference.',
     );
   }
 

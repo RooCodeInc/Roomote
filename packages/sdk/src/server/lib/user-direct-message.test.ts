@@ -67,7 +67,37 @@ vi.mock('./teams-primary-conversation', () => ({
 }));
 
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from './telegram-communication';
-import { sendUserDirectMessageBestEffort } from './user-direct-message';
+import {
+  findSlackUserDirectMessageDestination,
+  sendUserDirectMessageBestEffort,
+} from './user-direct-message';
+
+describe('findSlackUserDirectMessageDestination', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSlackInstallationsFindMany.mockResolvedValue([
+      { botAccessToken: 'xoxb-token', teamId: 'T123' },
+    ]);
+    mockSlackUserMappingsFindFirst.mockResolvedValue({ slackUserId: 'U123' });
+    mockOpenConversation.mockResolvedValue('D123');
+  });
+
+  it('opens a DM for the linked Slack identity', async () => {
+    await expect(
+      findSlackUserDirectMessageDestination('user-1'),
+    ).resolves.toEqual({ channelId: 'D123', teamId: 'T123' });
+    expect(mockOpenConversation).toHaveBeenCalledWith('U123');
+  });
+
+  it('returns null when the user has no linked Slack identity', async () => {
+    mockSlackUserMappingsFindFirst.mockResolvedValue(undefined);
+
+    await expect(
+      findSlackUserDirectMessageDestination('user-1'),
+    ).resolves.toBeNull();
+    expect(mockOpenConversation).not.toHaveBeenCalled();
+  });
+});
 
 describe('sendUserDirectMessageBestEffort', () => {
   beforeEach(() => {
