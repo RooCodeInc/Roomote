@@ -288,13 +288,20 @@ describe('custom-mcp-servers commands', () => {
       // Session-less tools/list refused by a strict server.
       .mockResolvedValueOnce(new Response('session required', { status: 400 }))
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: {} }), {
-          status: 200,
-          headers: {
-            'content-type': 'application/json',
-            'mcp-session-id': 'sess-1',
+        new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            result: { protocolVersion: '2024-11-05' },
+          }),
+          {
+            status: 200,
+            headers: {
+              'content-type': 'application/json',
+              'mcp-session-id': 'sess-1',
+            },
           },
-        }),
+        ),
       )
       // notifications/initialized is accepted without a body.
       .mockResolvedValueOnce(new Response(null, { status: 202 }))
@@ -322,11 +329,15 @@ describe('custom-mcp-servers commands', () => {
       method: 'notifications/initialized',
     });
     expect(notificationInit?.headers?.['mcp-session-id']).toBe('sess-1');
+    expect(notificationInit?.headers?.['mcp-protocol-version']).toBe(
+      '2024-11-05',
+    );
     expect(notificationInit?.headers?.['x-api-key']).toBe('secret-one');
 
     const [, listInit] = safeFetchMock.mock.calls[3]!;
     expect(JSON.parse(String(listInit?.body)).method).toBe('tools/list');
     expect(listInit?.headers?.['mcp-session-id']).toBe('sess-1');
+    expect(listInit?.headers?.['mcp-protocol-version']).toBe('2024-11-05');
   });
 
   it.each([
