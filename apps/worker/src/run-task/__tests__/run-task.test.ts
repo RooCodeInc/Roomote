@@ -1248,6 +1248,7 @@ describe('runTask', () => {
       JSON.stringify({
         startedAtMs: 456_000,
         currentTurnRequiresInitialAck: false,
+        suppressChannelRepliesWithoutTurn: true,
       }),
       'utf8',
     );
