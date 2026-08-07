@@ -33,6 +33,12 @@ interface CreateHarnessOptions {
   mcpTaskEnv: Record<string, string>;
   environmentMcpServers?: EnvironmentMcpServers;
   /**
+   * Deployment-scoped custom stdio MCP servers, fetched once at task start.
+   * Merged after environment servers, so an environment entry with the same
+   * name wins.
+   */
+  deploymentMcpServers?: EnvironmentMcpServers;
+  /**
    * Operator-defined deployment env vars. Always eligible for ${...}
    * substitution in custom MCP config, regardless of variable name.
    */
@@ -66,6 +72,7 @@ export async function createHarness({
   integrations,
   mcpTaskEnv,
   environmentMcpServers,
+  deploymentMcpServers,
   operatorEnvVars,
   taskRun,
   developerInstructionsContent,
@@ -98,6 +105,7 @@ export async function createHarness({
       integrations,
       environmentMcpServers,
       operatorEnvVars,
+      deploymentMcpServers,
     );
     const modelOverride = taskRun.payload?.harnessModelOverrides
       ? getHarnessModelOverride(

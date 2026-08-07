@@ -10,6 +10,11 @@ import {
   parseMcpJsonRpcPayload,
 } from '@roomote/types';
 import { db, eq, taskRuns } from '@roomote/db/server';
+import { Agent } from 'undici';
+import {
+  assertEgressUrlAllowed,
+  createGuardedConnectOptions,
+} from '@roomote/sdk/server/safe-fetch';
 
 import type { Variables } from '../../types';
 import { fetchWithLongLivedStreamDispatcher } from '../long-lived-fetch';
@@ -212,7 +217,7 @@ export async function assertTaskRunTokenTargetExists(
 }
 
 function buildProxyRequestHeaders(
-  authHeader: string,
+  authHeader: string | null,
   requestHeaders: Headers,
   method: string,
 ): Headers {
@@ -225,10 +230,13 @@ function buildProxyRequestHeaders(
     'accept',
     requestHeaders.get('accept') ?? 'application/json, text/event-stream',
   );
-  headers.set(
-    'authorization',
-    authHeader.startsWith('Bearer ') ? authHeader : `Bearer ${authHeader}`,
-  );
+
+  if (authHeader) {
+    headers.set(
+      'authorization',
+      authHeader.startsWith('Bearer ') ? authHeader : `Bearer ${authHeader}`,
+    );
+  }
 
   const sessionId = requestHeaders.get('mcp-session-id');
   if (sessionId) {
@@ -284,9 +292,15 @@ function isJsonResponse(contentType: string | null): boolean {
 }
 
 interface ResolvedCredentials {
-  authHeader: string;
+  /** `null` for upstreams that take no Authorization header. */
+  authHeader: string | null;
   extraHeaders?: Record<string, string>;
   disabledToolNames?: readonly string[] | null;
+  /**
+   * Per-request upstream URL. Required when the proxy was constructed without
+   * a static `upstream` (custom servers resolve theirs from the database).
+   */
+  upstream?: string;
 }
 
 export interface McpAuthContext {
@@ -302,13 +316,26 @@ export interface McpAuthContext {
 
 interface McpProxyConfig {
   name: string;
-  upstream: string;
-  resolveCredentials: (auth: McpAuthContext) => Promise<ResolvedCredentials>;
+  /** Static upstream URL; omit when resolveCredentials returns one. */
+  upstream?: string;
+  resolveCredentials: (
+    auth: McpAuthContext,
+    routeParams: Record<string, string>,
+  ) => Promise<ResolvedCredentials>;
   allowAuthTokens?: boolean;
   validateTaskRunToken?: (auth: RunTokenContext) => Promise<Response | null>;
   allowedToolNames?: readonly string[];
   stripToolSchemaPatterns?: boolean;
   timeoutMs?: number;
+  /**
+   * Enable SSRF guarding for operator-controlled upstreams: URL and DNS
+   * answers are vetted (with connect pinned to the vetted addresses), and
+   * upstream redirects are refused rather than followed — following one
+   * would re-send the injected Authorization header to a server-chosen URL.
+   */
+  guardUpstreamEgress?: { allowedPrivateCidrs?: string };
+  /** Reject request bodies larger than this many bytes (413). */
+  maxRequestBodyBytes?: number;
 }
 
 export class McpProxyError extends Error {
@@ -432,6 +459,68 @@ function filterToolsListPayload(
   };
 }
 
+class RequestBodyTooLargeError extends Error {
+  constructor(readonly observedBytes: number) {
+    super('Request body exceeds the configured limit');
+    this.name = 'RequestBodyTooLargeError';
+  }
+}
+
+/**
+ * Read a request body as text without ever buffering more than `maxBytes`.
+ *
+ * `Content-Length` is checked first so an oversized request is rejected
+ * before a single chunk is read, but it is only a hint: chunked bodies omit
+ * it and a hostile client can understate it. The streamed read is therefore
+ * the real bound — it aborts as soon as the accumulated size crosses the
+ * limit, so an unbounded body can never be materialized (nor re-serialized)
+ * in memory.
+ */
+async function readBoundedRequestText(
+  request: Request,
+  maxBytes: number,
+): Promise<string> {
+  const declaredLength = Number(request.headers.get('content-length'));
+
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    throw new RequestBodyTooLargeError(declaredLength);
+  }
+
+  const body = request.body;
+
+  if (!body) {
+    return '';
+  }
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  let total = 0;
+
+  for (;;) {
+    const { done, value } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    if (!value) {
+      continue;
+    }
+
+    total += value.byteLength;
+
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new RequestBodyTooLargeError(total);
+    }
+
+    text += decoder.decode(value, { stream: true });
+  }
+
+  return text + decoder.decode();
+}
+
 export function createMcpProxy(config: McpProxyConfig) {
   const {
     name,
@@ -442,7 +531,27 @@ export function createMcpProxy(config: McpProxyConfig) {
     validateTaskRunToken = verifyTaskRunTokenTargetExists,
     allowedToolNames,
     stripToolSchemaPatterns: shouldStripToolSchemaPatterns = false,
+    guardUpstreamEgress,
+    maxRequestBodyBytes,
   } = config;
+
+  // Guarded dispatchers pin connections to DNS answers vetted against the
+  // private-range blocklist; constructed once per proxy, shared by requests.
+  const guardedLongLivedDispatcher = guardUpstreamEgress
+    ? new Agent({
+        bodyTimeout: 0,
+        connect: createGuardedConnectOptions({
+          allowedPrivateCidrs: guardUpstreamEgress.allowedPrivateCidrs,
+        }),
+      })
+    : null;
+  const guardedDefaultDispatcher = guardUpstreamEgress
+    ? new Agent({
+        connect: createGuardedConnectOptions({
+          allowedPrivateCidrs: guardUpstreamEgress.allowedPrivateCidrs,
+        }),
+      })
+    : null;
 
   const app = new Hono<{ Variables: Variables }>();
 
@@ -524,9 +633,39 @@ export function createMcpProxy(config: McpProxyConfig) {
 
     if (method === 'POST') {
       try {
-        parsedBody = await c.req.json();
-        upstreamBody = JSON.stringify(parsedBody);
-      } catch {
+        if (maxRequestBodyBytes === undefined) {
+          parsedBody = await c.req.json();
+          upstreamBody = JSON.stringify(parsedBody);
+        } else {
+          // Capped upstreams (custom servers) must be bounded *before* the
+          // body is buffered or parsed, so forward the vetted text as-is
+          // rather than re-serializing it.
+          upstreamBody = await readBoundedRequestText(
+            c.req.raw,
+            maxRequestBodyBytes,
+          );
+          parsedBody = JSON.parse(upstreamBody);
+        }
+      } catch (error) {
+        if (error instanceof RequestBodyTooLargeError) {
+          console.warn(
+            formatSingleLineLog(`${logPrefix} Request body too large`, {
+              requestId,
+              method,
+              path,
+              tokenType: auth.tokenType,
+              userId: auth.userId,
+              bytes: error.observedBytes,
+              limit: maxRequestBodyBytes,
+            }),
+          );
+          return jsonRpcErrorResponse(
+            413,
+            -32600,
+            `${name} MCP request body exceeds the size limit`,
+          );
+        }
+
         console.warn(
           formatSingleLineLog(`${logPrefix} Invalid JSON request body`, {
             requestId,
@@ -543,7 +682,7 @@ export function createMcpProxy(config: McpProxyConfig) {
     let credentials: ResolvedCredentials;
 
     try {
-      credentials = await resolveCredentials(auth);
+      credentials = await resolveCredentials(auth, c.req.param());
     } catch (error) {
       console.warn(
         formatSingleLineLog(`${logPrefix} Failed to resolve credentials`, {
@@ -564,6 +703,23 @@ export function createMcpProxy(config: McpProxyConfig) {
         `Failed to resolve ${name} credentials: ${
           error instanceof Error ? error.message : String(error)
         }`,
+      );
+    }
+
+    const effectiveUpstream = credentials.upstream ?? upstream;
+
+    if (!effectiveUpstream) {
+      console.error(
+        formatSingleLineLog(`${logPrefix} No upstream URL resolved`, {
+          requestId,
+          method,
+          path,
+        }),
+      );
+      return jsonRpcErrorResponse(
+        500,
+        -32603,
+        `${name} MCP has no upstream URL configured`,
       );
     }
 
@@ -655,14 +811,51 @@ export function createMcpProxy(config: McpProxyConfig) {
         headers: proxyHeaders,
         body: upstreamBody,
         signal,
+        // Operator-controlled upstreams must not have their redirects
+        // followed: a 302 would re-send the injected Authorization header to
+        // a server-chosen URL, bypassing the egress guard.
+        ...(guardUpstreamEgress ? { redirect: 'manual' as const } : {}),
       };
 
-      const upstreamResponse = isLongLivedStreamableTransportRequest
-        ? await fetchWithLongLivedStreamDispatcher(
-            upstream,
-            upstreamRequestInit,
-          )
-        : await fetch(upstream, upstreamRequestInit);
+      let upstreamResponse: Response;
+
+      if (guardUpstreamEgress) {
+        assertEgressUrlAllowed(
+          effectiveUpstream,
+          guardUpstreamEgress.allowedPrivateCidrs,
+        );
+
+        upstreamResponse = await fetch(effectiveUpstream, {
+          ...upstreamRequestInit,
+          dispatcher: isLongLivedStreamableTransportRequest
+            ? guardedLongLivedDispatcher!
+            : guardedDefaultDispatcher!,
+        } as RequestInit);
+
+        if (upstreamResponse.status >= 300 && upstreamResponse.status < 400) {
+          console.warn(
+            formatSingleLineLog(`${logPrefix} Refused upstream redirect`, {
+              requestId,
+              method,
+              path,
+              upstream: effectiveUpstream,
+              status: upstreamResponse.status,
+            }),
+          );
+          return jsonRpcErrorResponse(
+            502,
+            -32000,
+            `${name} MCP upstream answered with a redirect, which is not followed for custom servers`,
+          );
+        }
+      } else {
+        upstreamResponse = isLongLivedStreamableTransportRequest
+          ? await fetchWithLongLivedStreamDispatcher(
+              effectiveUpstream,
+              upstreamRequestInit,
+            )
+          : await fetch(effectiveUpstream, upstreamRequestInit);
+      }
 
       const elapsedMs = Date.now() - startedAt;
       const contentType = upstreamResponse.headers.get('content-type');
@@ -673,7 +866,7 @@ export function createMcpProxy(config: McpProxyConfig) {
             requestId,
             method,
             path,
-            upstream,
+            upstream: effectiveUpstream,
             status: upstreamResponse.status,
             statusText: upstreamResponse.statusText,
             contentType,
@@ -733,7 +926,7 @@ export function createMcpProxy(config: McpProxyConfig) {
             requestId,
             method,
             path,
-            upstream,
+            upstream: effectiveUpstream,
             status: upstreamResponse.status,
             tokenType: auth.tokenType,
             userId: auth.userId ?? undefined,
@@ -756,7 +949,7 @@ export function createMcpProxy(config: McpProxyConfig) {
         requestId,
         method,
         path,
-        upstream,
+        upstream: effectiveUpstream,
         tokenType: auth.tokenType,
         userId: auth.userId,
         elapsedMs: Date.now() - startedAt,

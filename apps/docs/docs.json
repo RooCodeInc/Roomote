@@ -134,6 +134,7 @@
         "group": "Integrations",
         "pages": [
           "integrations/index",
+          "integrations/custom-mcp-servers",
           "integrations/asana",
           "integrations/better-stack",
           "integrations/braintrust",

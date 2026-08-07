@@ -131,6 +131,19 @@ type DiscordApiMessage = {
     url?: string;
     proxy_url?: string;
   }>;
+  message_snapshots?: Array<{
+    message: {
+      content?: string;
+      attachments?: Array<{
+        id: string;
+        filename: string;
+        content_type?: string;
+        size: number;
+        url?: string;
+        proxy_url?: string;
+      }>;
+    };
+  }>;
   thread?: { id: string };
 };
 
@@ -340,7 +353,13 @@ function compareDiscordMessageIds(left: string, right: string): number {
 function toCommunicationMessage(
   message: DiscordApiMessage,
 ): CommunicationMessage {
-  const files = (message.attachments ?? []).map((attachment) => {
+  const attachments = [
+    ...(message.attachments ?? []),
+    ...(message.message_snapshots ?? []).flatMap(
+      (snapshot) => snapshot.message.attachments ?? [],
+    ),
+  ];
+  const files = attachments.map((attachment) => {
     const url = attachment.url?.trim() || attachment.proxy_url?.trim();
     return {
       id: attachment.id,
@@ -350,13 +369,21 @@ function toCommunicationMessage(
       ...(url ? { url } : {}),
     };
   });
+  const text = [
+    message.content,
+    ...(message.message_snapshots ?? []).map(
+      (snapshot) => snapshot.message.content,
+    ),
+  ]
+    .filter((content): content is string => Boolean(content?.trim()))
+    .join('\n\n');
   return {
     provider: 'discord',
     id: message.id,
     user: message.author?.id ?? 'unknown',
     ...(message.author?.username ? { username: message.author.username } : {}),
     ...(message.author?.bot ? { botId: message.author.id } : {}),
-    text: message.content ?? '',
+    text,
     channelId: message.channel_id,
     ...(message.thread?.id ? { threadId: message.thread.id } : {}),
     fileCount: files.length,

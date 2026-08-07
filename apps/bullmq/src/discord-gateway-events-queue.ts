@@ -50,7 +50,10 @@ export async function processDiscordGatewayEventJob(
   );
 }
 
-export function startDiscordGatewayEventsQueue() {
+export function startDiscordGatewayEventsQueue(): {
+  queue: Queue<DiscordGatewayEvent>;
+  worker: Worker<DiscordGatewayEvent>;
+} {
   const connection = getRedis();
   const queue = new Queue<DiscordGatewayEvent>(
     DISCORD_GATEWAY_EVENTS_QUEUE_NAME,

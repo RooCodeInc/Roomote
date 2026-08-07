@@ -322,9 +322,19 @@ async function getSetupCompletionMcpRecommendationContext(
     return null;
   }
 
-  const configuredCustomServerIds = Object.keys(
-    (matchingEnvironment.config as EnvironmentConfig).mcpServers ?? {},
-  );
+  // Environment-scoped custom servers plus deployment-wide custom servers:
+  // both mean "this service is already wired", so the setup agent should not
+  // recommend configuring it again.
+  const deploymentCustomServers = await db.query.customMcpServers.findMany({
+    where: (table, { eq: whereEq }) => whereEq(table.enabled, true),
+    columns: { name: true },
+  });
+  const configuredCustomServerIds = [
+    ...Object.keys(
+      (matchingEnvironment.config as EnvironmentConfig).mcpServers ?? {},
+    ),
+    ...deploymentCustomServers.map(({ name }) => name),
+  ];
   const enabledIntegrationIds = [
     ...new Set([
       ...enabledDeploymentMcpRows.map(({ mcpId }) => mcpId),

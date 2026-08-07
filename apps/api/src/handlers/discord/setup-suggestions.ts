@@ -49,6 +49,7 @@ type DiscordSuggestionLaunchClaim = {
   brief: string | null;
   investigationContext: string | null;
   targetRepositoryFullName: string | null;
+  targetEnvironmentId?: string | null;
   launchClaimedAt: Date;
 };
 
@@ -193,7 +194,7 @@ export async function claimDiscordSuggestionLaunch(input: {
       eq(trackedMessages.channelId, input.channelId),
       eq(trackedMessages.workItemId, input.suggestionId),
     ),
-    columns: { id: true },
+    columns: { id: true, metadata: true },
   });
 
   if (!trackedCard) {
@@ -205,12 +206,19 @@ export async function claimDiscordSuggestionLaunch(input: {
     return null;
   }
 
+  // Cards marked launchRouting: 'router' are presentation-only chat-reply
+  // suggestions; drop their pinned launch metadata so the task router selects
+  // the workspace. Unmarked cards (scan and setup) keep their verified
+  // targets.
+  const routed = trackedCard.metadata?.launchRouting === 'router';
+
   return {
     id: claimed.id,
     title: claimed.title,
     brief: claimed.brief,
-    investigationContext: claimed.investigationContext,
-    targetRepositoryFullName: claimed.targetRepositoryFullName,
+    investigationContext: routed ? null : claimed.investigationContext,
+    targetRepositoryFullName: routed ? null : claimed.targetRepositoryFullName,
+    targetEnvironmentId: routed ? null : claimed.targetEnvironmentId,
     launchClaimedAt: claimed.launchClaimedAt,
   };
 }

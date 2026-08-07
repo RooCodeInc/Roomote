@@ -162,6 +162,7 @@ export async function claimTelegramSuggestionLaunch(input: {
   brief: string | null;
   investigationContext: string | null;
   targetRepositoryFullName: string | null;
+  targetEnvironmentId?: string | null;
   launchClaimedAt: Date;
 } | null> {
   // Scope: a suggestion card for this work item must have been posted in this
@@ -173,7 +174,7 @@ export async function claimTelegramSuggestionLaunch(input: {
       eq(trackedMessages.channelId, input.chatId),
       eq(trackedMessages.workItemId, input.suggestionId),
     ),
-    columns: { id: true },
+    columns: { id: true, metadata: true },
   });
 
   if (!trackedCard) {
@@ -186,12 +187,19 @@ export async function claimTelegramSuggestionLaunch(input: {
     return null;
   }
 
+  // Cards marked launchRouting: 'router' are presentation-only chat-reply
+  // suggestions; drop their pinned launch metadata so the task router selects
+  // the workspace. Unmarked cards (scan and setup) keep their verified
+  // targets.
+  const routed = trackedCard.metadata?.launchRouting === 'router';
+
   return {
     id: claimed.id,
     title: claimed.title,
     brief: claimed.brief,
-    investigationContext: claimed.investigationContext,
-    targetRepositoryFullName: claimed.targetRepositoryFullName,
+    investigationContext: routed ? null : claimed.investigationContext,
+    targetRepositoryFullName: routed ? null : claimed.targetRepositoryFullName,
+    targetEnvironmentId: routed ? null : claimed.targetEnvironmentId,
     launchClaimedAt: claimed.launchClaimedAt,
   };
 }

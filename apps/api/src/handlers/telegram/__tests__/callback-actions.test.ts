@@ -14,20 +14,26 @@ const {
   apiLoggerMock,
   cancelOrphanedWorkItemRunBestEffortMock,
   claimTelegramSuggestionLaunchMock,
+  findCurrentThreadSuggestionIdByMessageMock,
+  claimCurrentThreadSuggestionByMessageMock,
   finalizeWorkItemLaunchedMock,
   postTelegramMessageBestEffortMock,
   releaseWorkItemClaimMock,
   resolveTelegramSenderUserIdMock,
+  resolveTelegramWorkspaceMock,
   startNewTelegramTaskMock,
 } = vi.hoisted(() => ({
   answerCallbackMock: vi.fn(),
   apiLoggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
   cancelOrphanedWorkItemRunBestEffortMock: vi.fn(),
   claimTelegramSuggestionLaunchMock: vi.fn(),
+  findCurrentThreadSuggestionIdByMessageMock: vi.fn(),
+  claimCurrentThreadSuggestionByMessageMock: vi.fn(),
   finalizeWorkItemLaunchedMock: vi.fn(),
   postTelegramMessageBestEffortMock: vi.fn(),
   releaseWorkItemClaimMock: vi.fn(),
   resolveTelegramSenderUserIdMock: vi.fn(),
+  resolveTelegramWorkspaceMock: vi.fn(),
   startNewTelegramTaskMock: vi.fn(),
 }));
 
@@ -60,6 +66,13 @@ vi.mock('../../tasks/orphaned-work-item-run.js', () => ({
   cancelOrphanedWorkItemRunBestEffort: cancelOrphanedWorkItemRunBestEffortMock,
 }));
 
+vi.mock('../../tasks/current-thread-suggestion-reaction.js', () => ({
+  findCurrentThreadSuggestionIdByMessage:
+    findCurrentThreadSuggestionIdByMessageMock,
+  claimCurrentThreadSuggestionByMessage:
+    claimCurrentThreadSuggestionByMessageMock,
+}));
+
 vi.mock('../linked-user.js', () => ({
   resolveTelegramSenderUserId: resolveTelegramSenderUserIdMock,
 }));
@@ -84,7 +97,14 @@ vi.mock('../task-orchestration.js', () => ({
   startNewTelegramTask: startNewTelegramTaskMock,
 }));
 
-import { handleTelegramCallbackQuery } from '../callback-actions.js';
+vi.mock('../task-launch.js', () => ({
+  resolveTelegramWorkspace: resolveTelegramWorkspaceMock,
+}));
+
+import {
+  handleTelegramCallbackQuery,
+  handleTelegramSuggestionReaction,
+} from '../callback-actions.js';
 
 const WORK_ITEM_ID = 'work-item-1';
 const CLAIMED_AT = new Date('2026-07-01T12:00:00.000Z');
@@ -114,14 +134,82 @@ beforeEach(() => {
     targetRepositoryFullName: null,
     launchClaimedAt: CLAIMED_AT,
   });
+  findCurrentThreadSuggestionIdByMessageMock.mockResolvedValue(WORK_ITEM_ID);
+  claimCurrentThreadSuggestionByMessageMock.mockResolvedValue({
+    outcome: 'claimed',
+    suggestion: {
+      id: WORK_ITEM_ID,
+      title: 'Fix the flaky test',
+      brief: 'The retry loop never terminates.',
+      investigationContext: null,
+      targetRepositoryFullName: null,
+      launchClaimedAt: CLAIMED_AT,
+    },
+  });
   finalizeWorkItemLaunchedMock.mockResolvedValue(true);
   releaseWorkItemClaimMock.mockResolvedValue(true);
   cancelOrphanedWorkItemRunBestEffortMock.mockResolvedValue(
     'orphaned run canceled',
   );
+  resolveTelegramWorkspaceMock.mockResolvedValue({
+    environmentId: 'env-1',
+    repoForPayload: 'acme/app',
+    workspaceDisplayName: 'App',
+  });
 });
 
 describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
+  it('does not claim a reaction suggestion when account mapping fails', async () => {
+    resolveTelegramSenderUserIdMock.mockRejectedValue(
+      new Error('database unavailable'),
+    );
+
+    await expect(
+      handleTelegramSuggestionReaction({
+        chat: { id: 555, type: 'private' },
+        message_id: 100,
+        date: 0,
+        user: { id: 42, first_name: 'Matt' },
+        old_reaction: [],
+        new_reaction: [{ type: 'emoji', emoji: '👍' }],
+      }),
+    ).rejects.toThrow('database unavailable');
+    expect(claimCurrentThreadSuggestionByMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('launches a reaction against the exact tracked suggestion message with linked-user attribution', async () => {
+    startNewTelegramTaskMock.mockResolvedValue({
+      status: 'started',
+      launchResult: { id: 7, taskId: 'task-1' },
+    });
+
+    const handled = await handleTelegramSuggestionReaction({
+      chat: { id: 555, type: 'private' },
+      message_id: 100,
+      date: 0,
+      user: { id: 42, first_name: 'Matt' },
+      old_reaction: [],
+      new_reaction: [{ type: 'emoji', emoji: '👍' }],
+    });
+
+    expect(handled).toBe(true);
+    expect(claimCurrentThreadSuggestionByMessageMock).toHaveBeenCalledWith({
+      surface: 'telegram',
+      channelId: '555',
+      messageId: '100',
+    });
+    expect(startNewTelegramTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        launchOwnerUserId: 'user-1',
+        queuedMessage: expect.objectContaining({
+          user: 'Matt',
+          userId: 'user-1',
+        }),
+      }),
+    );
+    expect(answerCallbackMock).not.toHaveBeenCalled();
+  });
+
   it('starts a suggestion in a fresh topic while preserving its source topic for fallback', async () => {
     startNewTelegramTaskMock.mockResolvedValue({
       status: 'started',
@@ -135,6 +223,35 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
         forceNewTopic: true,
         queuedMessage: expect.objectContaining({ threadTs: '44' }),
         metadata: expect.objectContaining({ communicationThreadId: '44' }),
+      }),
+    );
+  });
+
+  it('launches directly in the environment saved on the suggestion', async () => {
+    claimTelegramSuggestionLaunchMock.mockResolvedValue({
+      id: WORK_ITEM_ID,
+      title: 'Fix the flaky test',
+      brief: 'The retry loop never terminates.',
+      investigationContext: null,
+      targetRepositoryFullName: 'acme/app',
+      targetEnvironmentId: 'env-1',
+      launchClaimedAt: CLAIMED_AT,
+    });
+    startNewTelegramTaskMock.mockResolvedValue({
+      status: 'started',
+      launchResult: { id: 7, taskId: 'task-1' },
+    });
+
+    await handleTelegramCallbackQuery(buildSuggestionQuery());
+
+    expect(resolveTelegramWorkspaceMock).toHaveBeenCalledWith({
+      type: 'environment',
+      id: 'env-1',
+      name: 'env-1',
+    });
+    expect(startNewTelegramTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceOverride: expect.objectContaining({ environmentId: 'env-1' }),
       }),
     );
   });

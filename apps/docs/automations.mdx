@@ -43,7 +43,7 @@ These automations react to pull requests, issues, and repository state.
 | Automation                 | What it does                                                      | Good first use                                                         |
 | -------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | **Review Code**            | Reviews pull requests automatically or on demand                  | Add an extra reviewer for regressions, risky changes, and missed tests |
-| **Triage Issues**          | Posts an implementation plan when an issue is opened/reopened on GitHub, GitLab, or Gitea | Get a grounded plan on the issue without auto-opening a PR           |
+| **Triage Issues**          | Posts clarifying questions or an implementation plan when an issue is opened/reopened on GitHub, GitLab, or Gitea | Get a grounded plan on the issue without auto-opening a PR           |
 | **Resolve PR Conflicts**   | Looks for merge conflicts and helps fix them on open PRs          | Keep long-running branches from getting stuck                          |
 
 For **Review Code**, decide whether Roomote should review new commits
@@ -55,10 +55,10 @@ For **Triage Issues**, turn the toggle on once a supported source-control
 provider is connected (GitHub, GitLab, or Gitea) and the repos you care about
 have configured Roomote environments. When an issue is opened or reopened,
 Roomote starts a task immediately, investigates the issue, and posts a concrete
-plan as a comment on that issue. It does not need a Manager Channel, does not
-post Slack digests, does not implement the fix, and does not open a pull
-request automatically. Azure DevOps work items and Bitbucket issues are not
-covered yet.
+plan or clarifying questions as a comment on that issue. It does not need a
+Manager Channel, does not post Slack digests, does not implement the fix, and
+does not open a pull request automatically. Azure DevOps work items and
+Bitbucket issues are not covered yet.
 
 For **Resolve PR Conflicts**, pick a schedule, PR age cap, and label. The
 label is the team-controlled opt-in for scheduled scans. Make sure the label
@@ -77,11 +77,17 @@ Create arbitrary scheduled agent runs with:
 - one required **environment**
 - an optional **model** override for the runs; the default follows the
   deployment task model
-- an optional **report destination** channel (Slack, Discord, Teams, or
-  Telegram)
+- an optional **report destination**: a direct message to the automation owner,
+  or a channel, through Slack, Discord, Teams, or Telegram
 
 Each automation card summarizes its cadence, environment, report destination,
 creator, and most recent run.
+
+When creating an automation through Roomote chat, ask for **suggested tasks** or
+**launchable follow-ups** if qualifying findings should become tasks that
+teammates can start from the report. Asking only for a summary or list of action
+items keeps those actions as report text. Launchable suggestions require a chat
+report destination and an environment that can run the work.
 
 Admins can also choose **Custom schedule** and enter either a standard
 five-field cron expression or a natural-language schedule such as “weekdays at
@@ -92,11 +98,14 @@ Custom schedules do not support seconds or cron macros.
 On each due tick, Roomote launches a normal task with that prompt in the selected
 environment. A run can skip or fail before task creation when its configuration
 or launch state prevents it from starting. When a report destination is set,
-the run is anchored to that channel: Roomote's first message (the final result,
-or a blocker or question that needs input) starts a thread, later updates
-continue that same thread, and you can reply in the thread to talk to the task.
+the run is anchored to that conversation: Roomote's first message (the final
+result, or a blocker or question that needs input) starts a thread, later
+updates continue that same thread, and you can reply in the thread to talk to the task.
 There is no progress chatter in between. Without a destination, the run happens
 silently and its results appear only in the task view.
+
+Direct-message destinations require the automation owner to link an account for
+the selected communications provider and make the bot reachable there.
 
 Use **Run now** on an enabled automation to test it immediately. Each card has
 its own run state, so starting one custom automation does not prevent you from

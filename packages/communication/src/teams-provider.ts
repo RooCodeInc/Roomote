@@ -39,6 +39,11 @@ export type TeamsDirectMessageInput = {
   userId: string;
 };
 
+export type TeamsDirectMessageDestinationInput = Omit<
+  TeamsDirectMessageInput,
+  'text' | 'textFormat'
+>;
+
 const MAX_TEAMS_IMAGE_ATTACHMENTS = 10;
 const MAX_TEAMS_IMAGE_BYTES = 10 * 1024 * 1024;
 const MAX_TEAMS_IMAGE_TOTAL_BYTES = 25 * 1024 * 1024;
@@ -202,24 +207,31 @@ export class TeamsCommunicationProvider implements CommunicationProviderAdapter 
   async postDirectMessage(
     input: TeamsDirectMessageInput,
   ): Promise<CommunicationPostMessageResult> {
-    const conversation = await this.client.createDirectConversation({
-      serviceUrl: input.serviceUrl,
-      tenantId: input.tenantId,
-      userId: input.userId,
-      ...(input.botName ? { botName: input.botName } : {}),
-    });
+    const conversation = await this.createDirectMessage(input);
     const result = await this.client.sendActivity({
       serviceUrl: input.serviceUrl,
-      conversationId: conversation.id,
+      conversationId: conversation.channelId,
       text: input.text,
       ...(input.textFormat ? { textFormat: input.textFormat } : {}),
     });
 
     return {
       provider: 'teams',
-      channelId: conversation.id,
+      channelId: conversation.channelId,
       messageId: result.id,
     };
+  }
+
+  async createDirectMessage(
+    input: TeamsDirectMessageDestinationInput,
+  ): Promise<{ channelId: string }> {
+    const conversation = await this.client.createDirectConversation({
+      serviceUrl: input.serviceUrl,
+      tenantId: input.tenantId,
+      userId: input.userId,
+      ...(input.botName ? { botName: input.botName } : {}),
+    });
+    return { channelId: conversation.id };
   }
 
   async updateMessage(input: {

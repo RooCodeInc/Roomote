@@ -11,6 +11,7 @@ export { findTeamsPrimaryConversation } from '@roomote/sdk/server/teams-primary-
 export async function postTeamsAutomationMessageBestEffort(input: {
   conversationId: string;
   serviceUrl: string;
+  threadId?: string;
   text: string;
 }): Promise<{ messageId: string | null } | null> {
   const provider =
@@ -26,6 +27,7 @@ export async function postTeamsAutomationMessageBestEffort(input: {
   try {
     const result = await provider.postMessage({
       channelId: input.conversationId,
+      ...(input.threadId ? { threadId: input.threadId } : {}),
       serviceUrl: input.serviceUrl,
       text: input.text,
       textFormat: 'markdown',

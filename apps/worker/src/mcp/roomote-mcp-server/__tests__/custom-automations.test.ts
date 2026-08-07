@@ -75,6 +75,24 @@ describe('handleManageCustomAutomations', () => {
     });
   });
 
+  it('sends the direct-message destination mode', async () => {
+    await handleManageCustomAutomations(
+      {
+        action: 'update',
+        automationId: 'automation-1',
+        targetProvider: 'slack',
+        targetMode: 'direct_message',
+      },
+      config,
+    );
+
+    const [, request] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(request.body as string)).toEqual({
+      targetProvider: 'slack',
+      targetMode: 'direct_message',
+    });
+  });
+
   it('still requires all create fields and defaults enabled to true', async () => {
     const missing = await handleManageCustomAutomations(
       { action: 'create', name: 'Incomplete' },

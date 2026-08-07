@@ -213,6 +213,43 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
         runHandler({ payload: messagePayload({ type: 19 }) }),
       ).resolves.toBe(true);
     });
+
+    it('accepts forwarded snapshot content and processes its attachments', async () => {
+      const attachment = {
+        id: 'attachment-1',
+        filename: 'context.png',
+        content_type: 'image/png',
+        size: 1234,
+        url: 'https://cdn.discordapp.com/attachments/context.png',
+      };
+
+      await expect(
+        runHandler({
+          payload: messagePayload({
+            content: '',
+            message_snapshots: [
+              {
+                message: {
+                  content: 'Forwarded request',
+                  mentions: [],
+                  attachments: [attachment],
+                },
+              },
+            ],
+          }),
+        }),
+      ).resolves.toBe(true);
+      await flushBackgroundWork();
+
+      expect(mocks.processAttachments).toHaveBeenCalledWith([attachment]);
+      expect(mocks.startNewTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          queuedMessage: expect.objectContaining({
+            text: 'Forwarded request\n\nImage: context.png',
+          }),
+        }),
+      );
+    });
   });
 
   it('fast-rejects via the empty cache sentinel without loading settings', async () => {

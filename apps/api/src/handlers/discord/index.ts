@@ -5,6 +5,7 @@ import {
   getDiscordInteractionCommand,
   getDiscordInteractionCreate,
   getDiscordInteractionUser,
+  getDiscordMessageAttachments,
   getDiscordMessageCreate,
   getDiscordReactionAdd,
   isDiscordBotMentioned,
@@ -20,6 +21,7 @@ import {
   queueCommunicationMessageOnce,
   setLatestInboundMessageId,
 } from '@roomote/communication/messages';
+import { reactionEmojiMatches } from '@roomote/communication/reaction-emoji';
 import { getTaskUrl } from '@roomote/cloud-agents/server';
 import {
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
@@ -58,7 +60,10 @@ import {
   DISCORD_GATEWAY_SECRET_HEADER,
   verifyDiscordGatewaySecret,
 } from './auth.js';
-import { handleDiscordComponentInteraction } from './callback-actions.js';
+import {
+  handleDiscordComponentInteraction,
+  handleDiscordSuggestionReaction,
+} from './callback-actions.js';
 import { maybeHandleDiscordChannelAutoStart } from './channel-auto-start.js';
 import {
   claimPendingDiscordAccountLinkTask,
@@ -259,6 +264,33 @@ async function processDiscordGatewayEvent(
     const resolved = await resolveDiscordProvider();
     if (reaction.user_id === resolved.botUserId || !reaction.emoji.name) {
       return { ok: true, ignored: 'bot_or_missing_reaction' };
+    }
+
+    if (reactionEmojiMatches('thumbsup', reaction.emoji.name)) {
+      const channel = await resolveDiscordChannelContext(
+        resolved.provider,
+        reaction.channel_id,
+      );
+      const author = reaction.member?.user ?? {
+        id: reaction.user_id,
+        username: `Discord user ${reaction.user_id}`,
+      };
+      const handled = await handleDiscordSuggestionReaction({
+        provider: resolved.provider,
+        applicationId: resolved.applicationId,
+        channel,
+        channelId: reaction.channel_id,
+        messageId: reaction.message_id,
+        eventId: event.eventId,
+        sender: author,
+        senderDisplayName:
+          typeof reaction.member?.nick === 'string'
+            ? reaction.member.nick
+            : undefined,
+      });
+      if (handled) {
+        return { ok: true, suggestionStarted: true };
+      }
     }
 
     const configuration = await getCallRoomoteViaEmojiConfiguration(
@@ -649,8 +681,11 @@ async function processDiscordGatewayEvent(
     userId: senderUserId,
   });
 
-  const processedAttachments = message?.attachments.length
-    ? await processDiscordAttachments(message.attachments)
+  const messageAttachments = message
+    ? getDiscordMessageAttachments(message)
+    : [];
+  const processedAttachments = messageAttachments.length
+    ? await processDiscordAttachments(messageAttachments)
     : { images: [], attachmentTexts: [], warnings: [] };
   for (const warning of processedAttachments.warnings) {
     apiLogger.warn(`[discord] Attachment warning: ${warning}`);

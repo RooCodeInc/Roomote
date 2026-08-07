@@ -7,6 +7,10 @@ vi.mock('../chat-api-client.js', () => ({
   replyToChatThread: vi.fn(),
 }));
 
+vi.mock('../tasks-api-client.js', () => ({
+  submitTaskSuggestions: vi.fn(),
+}));
+
 import {
   prepareLocalArtifactUpload,
   uploadPreparedArtifact,
@@ -14,6 +18,7 @@ import {
 import { replyToChatThread } from '../chat-api-client.js';
 import { ChatDeliveryError } from '../chat-delivery-error.js';
 import { handleSendChatReply } from '../send-chat-reply.js';
+import { submitTaskSuggestions } from '../tasks-api-client.js';
 import type { ArtifactConfig, RoomoteConfig } from '../types.js';
 
 const artifactConfig: ArtifactConfig = {
@@ -72,6 +77,159 @@ describe('handleReplyToSlackThread', () => {
       success: true,
       messageTs: '111.222',
       summary,
+    });
+  });
+
+  it('posts structured suggestions into the current Slack thread', async () => {
+    vi.mocked(replyToChatThread).mockResolvedValue({ messageTs: '111.222' });
+    vi.mocked(submitTaskSuggestions).mockResolvedValue({
+      success: true,
+      suggestionCount: 1,
+    });
+    const suggestions = [
+      {
+        title: 'Add retry telemetry',
+        brief:
+          'Instrument retry exhaustion so operators can diagnose failures.',
+      },
+    ];
+
+    const result = await handleSendChatReply(
+      {
+        taskId: 'task-1',
+        summary: 'One follow-up is ready to start.',
+        suggestions,
+        chatReplySurface: 'Slack',
+      },
+      artifactConfig,
+      roomoteConfig,
+    );
+
+    expect(submitTaskSuggestions).toHaveBeenCalledWith(
+      roomoteConfig,
+      'task-1',
+      {
+        suggestions,
+        delivery: 'current_thread',
+        submissionKey: '111.222',
+      },
+    );
+    const summary =
+      "One follow-up is ready to start.\n\nWant me to take one of these on? React with a :thumbsup: on a suggested task below and I'll start it.";
+    expect(replyToChatThread).toHaveBeenCalledWith(roomoteConfig, {
+      text: summary,
+    });
+    expect(JSON.parse(result.content[0]!.text)).toEqual({
+      success: true,
+      messageTs: '111.222',
+      summary,
+      suggestionCount: 1,
+    });
+  });
+
+  it.each([
+    [
+      'Discord',
+      "Want me to take one of these on? React with a 👍 on a suggested task below and I'll start it.",
+    ],
+    [
+      'Telegram',
+      "Want me to take one of these on? React with a 👍 on a suggested task below and I'll start it.",
+    ],
+    [
+      'Teams',
+      "Want me to take one of these on? React with a 👍 on a suggested task below and I'll start it.",
+    ],
+  ] as const)(
+    'adds the %s launch instruction when suggestions are present',
+    async (chatReplySurface, instruction) => {
+      vi.mocked(replyToChatThread).mockResolvedValue({ messageTs: '111.222' });
+      vi.mocked(submitTaskSuggestions).mockResolvedValue({
+        success: true,
+        suggestionCount: 1,
+      });
+
+      await handleSendChatReply(
+        {
+          taskId: 'task-1',
+          summary: 'One follow-up is ready to start.',
+          suggestions: [
+            {
+              title: 'Add retry telemetry',
+              brief: 'Instrument retry exhaustion.',
+            },
+          ],
+          chatReplySurface,
+        },
+        artifactConfig,
+        roomoteConfig,
+      );
+
+      expect(replyToChatThread).toHaveBeenCalledWith(roomoteConfig, {
+        text: `One follow-up is ready to start.\n\n${instruction}`,
+      });
+    },
+  );
+
+  it('does not duplicate an existing Slack launch instruction', async () => {
+    vi.mocked(replyToChatThread).mockResolvedValue({ messageTs: '111.222' });
+    vi.mocked(submitTaskSuggestions).mockResolvedValue({
+      success: true,
+      suggestionCount: 1,
+    });
+    const summary =
+      "Want me to take one of these on? React with a :thumbsup: on a suggested task below and I'll start it.";
+
+    await handleSendChatReply(
+      {
+        taskId: 'task-1',
+        summary,
+        suggestions: [
+          {
+            title: 'Add retry telemetry',
+            brief: 'Instrument retry exhaustion.',
+          },
+        ],
+        chatReplySurface: 'Slack',
+      },
+      artifactConfig,
+      roomoteConfig,
+    );
+
+    expect(replyToChatThread).toHaveBeenCalledWith(roomoteConfig, {
+      text: summary,
+    });
+  });
+
+  it('reports suggestion failures without marking the visible reply as failed', async () => {
+    vi.mocked(replyToChatThread).mockResolvedValue({ messageTs: '111.222' });
+    vi.mocked(submitTaskSuggestions).mockResolvedValue({
+      success: false,
+      error: 'Task is not bound to an originating Slack thread.',
+    });
+
+    const result = await handleSendChatReply(
+      {
+        taskId: 'task-1',
+        summary: 'The report was posted.',
+        suggestions: [
+          {
+            title: 'Add retry telemetry',
+            brief: 'Instrument retry exhaustion.',
+          },
+        ],
+        chatReplySurface: 'Slack',
+      },
+      artifactConfig,
+      roomoteConfig,
+    );
+
+    expect(JSON.parse(result.content[0]!.text)).toEqual({
+      success: true,
+      messageTs: '111.222',
+      summary:
+        "The report was posted.\n\nWant me to take one of these on? React with a :thumbsup: on a suggested task below and I'll start it.",
+      suggestionError: 'Task is not bound to an originating Slack thread.',
     });
   });
 

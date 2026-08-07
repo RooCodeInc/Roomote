@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   createTaskThreadMock,
+  postMessageMock,
   findDestinationMock,
   insertMock,
   insertValuesMock,
@@ -9,6 +10,7 @@ const {
   selectLimitMock,
 } = vi.hoisted(() => ({
   createTaskThreadMock: vi.fn(),
+  postMessageMock: vi.fn(),
   findDestinationMock: vi.fn(),
   insertMock: vi.fn(),
   insertValuesMock: vi.fn(),
@@ -63,7 +65,10 @@ vi.mock('../provider.js', () => ({
   resolveDiscordProvider: resolveProviderMock,
 }));
 
-import { postScheduledSuggestionsToDiscord } from '../automation-suggestions';
+import {
+  postCurrentThreadSuggestionsToDiscord,
+  postScheduledSuggestionsToDiscord,
+} from '../automation-suggestions';
 
 describe('Discord scheduled suggestions', () => {
   beforeEach(() => {
@@ -82,7 +87,16 @@ describe('Discord scheduled suggestions', () => {
       name: 'Suggested tasks',
     });
     resolveProviderMock.mockResolvedValue({
-      provider: { createTaskThread: createTaskThreadMock },
+      provider: {
+        createTaskThread: createTaskThreadMock,
+        postMessage: postMessageMock,
+      },
+    });
+    postMessageMock.mockResolvedValue({
+      provider: 'discord',
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      messageId: 'message-2',
     });
     insertValuesMock.mockReturnValue({
       onConflictDoNothing: vi.fn().mockResolvedValue(undefined),
@@ -127,5 +141,70 @@ describe('Discord scheduled suggestions', () => {
         workItemId: 'suggestion-1',
       }),
     ]);
+  });
+
+  it('posts current-thread suggestions without creating another thread', async () => {
+    postMessageMock
+      .mockResolvedValueOnce({
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+        messageId: 'message-a',
+      })
+      .mockResolvedValueOnce({
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+        messageId: 'message-b',
+      });
+    const delivered = await postCurrentThreadSuggestionsToDiscord({
+      sourceTaskId: 'task-1',
+      suggestionGroupKey: 'reply-1',
+      createdByUserId: 'user-1',
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      suggestions: [
+        {
+          id: 'suggestion-1',
+          title: 'Fix tests',
+          brief: 'Repair the flaky test.',
+          category: 'bug',
+          targetRepositoryFullName: 'owner/repo',
+        },
+        {
+          id: 'suggestion-2',
+          title: 'Add coverage',
+          brief: 'Cover the regression.',
+          category: 'chore',
+          targetRepositoryFullName: 'owner/repo',
+        },
+      ],
+    });
+
+    expect(delivered).toBe(true);
+    expect(createTaskThreadMock).not.toHaveBeenCalled();
+    expect(postMessageMock).toHaveBeenCalledTimes(2);
+    expect(postMessageMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+      }),
+    );
+    expect(postMessageMock.mock.calls[0]?.[0]).not.toHaveProperty('buttons');
+    expect(insertValuesMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        messageTs: 'message-a',
+        workItemId: 'suggestion-1',
+      }),
+    );
+    expect(insertValuesMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        messageTs: 'message-b',
+        workItemId: 'suggestion-2',
+      }),
+    );
   });
 });

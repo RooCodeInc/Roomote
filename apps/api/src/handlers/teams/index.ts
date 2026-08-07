@@ -39,6 +39,7 @@ import {
   environments,
   eq,
   microsoftAuthUserMappings,
+  releaseWorkItemClaim,
   resolveTeamsBotRuntimeCredentials,
   teamsInstallations,
   teamsUserMappings,
@@ -68,6 +69,7 @@ import {
 import { apiLogger } from '../../logging.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
+import { findCurrentThreadSuggestionIdByMessage } from '../tasks/current-thread-suggestion-reaction.js';
 import {
   attachOutOfBandContextToCommunicationMessage,
   releaseCommunicationOutOfBandClaim,
@@ -81,6 +83,8 @@ import {
   launchClaimedTeamsSuggestion,
   parseTeamsSuggestionStartText,
   resolveAndClaimTeamsSuggestionStart,
+  resolveAndClaimTeamsSuggestionReaction,
+  type ClaimedTeamsSuggestion,
 } from './suggestion-start.js';
 import { shouldRouteUnmentionedTeamsThreadReplyToAgent } from './unmentioned-thread-reply.js';
 
@@ -1262,6 +1266,7 @@ async function startNewTeamsTask(input: {
   mappedUserId: string;
   queuedMessage: QueuedTeamsCommunicationMessage;
   metadata: TeamsActivityCommunicationMetadata;
+  workspaceOverride?: TeamsWorkspaceSelection;
 }) {
   const launchUserId = input.mappedUserId;
   const threadHistory = await fetchTeamsThreadMessagesBestEffort({
@@ -1300,7 +1305,10 @@ async function startNewTeamsTask(input: {
   });
   const routingDecision = await routeTask(routingContext);
 
-  if (routingDecision.status === 'platform_answer') {
+  if (
+    routingDecision.status === 'platform_answer' &&
+    !input.workspaceOverride
+  ) {
     await postTeamsMessageBestEffort({
       conversationId: input.metadata.communicationChannelId,
       threadId: input.metadata.communicationThreadId,
@@ -1315,12 +1323,13 @@ async function startNewTeamsTask(input: {
   }
 
   const workspace =
-    routingDecision.status === 'routed'
+    input.workspaceOverride ??
+    (routingDecision.status === 'routed'
       ? await resolveTeamsWorkspace(routingDecision.result.workspace)
       : {
           repoForPayload: ALL_REPOSITORIES,
           workspaceDisplayName: 'all repos',
-        };
+        });
 
   if (!workspace) {
     throw new Error('Teams task routing selected an unavailable workspace.');
@@ -1679,21 +1688,86 @@ teams.post('/', async (c) => {
     return c.json({ ok: true, ignored: 'bot_activity' });
   }
 
+  let claimedSuggestionReaction: ClaimedTeamsSuggestion | null = null;
+  let suggestionReactionMappedUserId: string | null = null;
+  let claimedReactionActivity = false;
+
   if (activity.type === 'messageReaction') {
-    let configuration: Awaited<
-      ReturnType<typeof getCallRoomoteViaEmojiConfiguration>
-    > = null;
-    for (const reaction of activity.reactionsAdded ?? []) {
-      if (!isTeamsNativeReactionType(reaction.type)) {
-        continue;
-      }
-      configuration = await getCallRoomoteViaEmojiConfiguration(reaction.type);
-      if (configuration) {
-        break;
+    if (activity.id) {
+      claimedReactionActivity = await claimTeamsActivity(activity.id);
+      if (!claimedReactionActivity) {
+        apiLogger.debug(
+          `[teams] Skipping duplicate Teams reaction activity ${activity.id}`,
+        );
+        return c.json({ ok: true, duplicate: true });
       }
     }
 
-    if (!configuration) {
+    const reactionTargetMessageId = activity.replyToId?.trim();
+    const hasLikeReaction = (activity.reactionsAdded ?? []).some(
+      (reaction) => reaction.type === 'like',
+    );
+    if (hasLikeReaction && reactionTargetMessageId) {
+      const suggestionId = await findCurrentThreadSuggestionIdByMessage({
+        surface: 'teams',
+        channelId: activity.conversation.id,
+        messageId: reactionTargetMessageId,
+      });
+      if (suggestionId) {
+        suggestionReactionMappedUserId = await findMappedTeamsUserId(activity);
+        if (!suggestionReactionMappedUserId) {
+          const metadata = getTeamsActivityCommunicationMetadata(activity);
+          await postTeamsAccountLinkPrompt({ activity, metadata });
+          return c.json({
+            ok: true,
+            queued: false,
+            reason: 'account_link_required',
+          });
+        }
+        const reactionResolution = await resolveAndClaimTeamsSuggestionReaction(
+          {
+            conversationId: activity.conversation.id,
+            messageId: reactionTargetMessageId,
+          },
+        );
+        if (reactionResolution.outcome === 'already_started') {
+          const metadata = getTeamsActivityCommunicationMetadata(activity);
+          await postTeamsMessageBestEffort({
+            conversationId: metadata.communicationChannelId,
+            threadId: metadata.communicationThreadId,
+            serviceUrl: metadata.communicationServiceUrl,
+            text: 'That idea was already started or is no longer available.',
+          });
+          return c.json({
+            ok: true,
+            queued: false,
+            reason: 'suggestion_already_started',
+          });
+        }
+        if (reactionResolution.outcome === 'claimed') {
+          claimedSuggestionReaction = reactionResolution.suggestion;
+        }
+      }
+    }
+
+    let configuration: Awaited<
+      ReturnType<typeof getCallRoomoteViaEmojiConfiguration>
+    > = null;
+    if (!claimedSuggestionReaction) {
+      for (const reaction of activity.reactionsAdded ?? []) {
+        if (!isTeamsNativeReactionType(reaction.type)) {
+          continue;
+        }
+        configuration = await getCallRoomoteViaEmojiConfiguration(
+          reaction.type,
+        );
+        if (configuration) {
+          break;
+        }
+      }
+    }
+
+    if (!configuration && !claimedSuggestionReaction) {
       return c.json({ ok: true, ignored: 'reaction_not_configured' });
     }
 
@@ -1708,7 +1782,9 @@ teams.post('/', async (c) => {
       ...activity,
       type: 'message',
       id: activity.id ?? randomUUID(),
-      text: `${mentionText} ${configuration.prompt}`,
+      text: claimedSuggestionReaction
+        ? `${mentionText} start suggested task`
+        : `${mentionText} ${configuration!.prompt}`,
       replyToId: targetMessageId,
       entities: [
         {
@@ -1722,8 +1798,8 @@ teams.post('/', async (c) => {
   }
 
   await persistTeamsInstallationFromActivity(activity);
-
-  const mappedUserId = await findMappedTeamsUserId(activity);
+  const mappedUserId =
+    suggestionReactionMappedUserId ?? (await findMappedTeamsUserId(activity));
   let queuedMessage = teamsActivityToQueuedCommunicationMessage(activity, {
     ...(mappedUserId ? { userId: mappedUserId } : {}),
   }) as QueuedTeamsCommunicationMessage | null;
@@ -1732,7 +1808,8 @@ teams.post('/', async (c) => {
     return c.json({ ok: true, ignored: 'unsupported_activity' });
   }
 
-  const claimed = await claimTeamsActivity(queuedMessage.ts);
+  const claimed =
+    claimedReactionActivity || (await claimTeamsActivity(queuedMessage.ts));
 
   if (!claimed) {
     apiLogger.debug(
@@ -1742,6 +1819,63 @@ teams.post('/', async (c) => {
   }
 
   const metadata = getTeamsActivityCommunicationMetadata(activity);
+  if (claimedSuggestionReaction) {
+    const workspaceOverride = claimedSuggestionReaction.targetEnvironmentId
+      ? await resolveTeamsWorkspace({
+          type: 'environment',
+          id: claimedSuggestionReaction.targetEnvironmentId,
+          name: claimedSuggestionReaction.targetEnvironmentId,
+        })
+      : undefined;
+    if (claimedSuggestionReaction.targetEnvironmentId && !workspaceOverride) {
+      await releaseWorkItemClaim(db, {
+        id: claimedSuggestionReaction.id,
+        claimedAt: claimedSuggestionReaction.launchClaimedAt,
+      });
+      await postTeamsMessageBestEffort({
+        conversationId: metadata.communicationChannelId,
+        threadId: metadata.communicationThreadId,
+        serviceUrl: metadata.communicationServiceUrl,
+        text: 'That idea’s target environment is no longer available.',
+      });
+      return c.json({
+        ok: true,
+        queued: false,
+        reason: 'suggestion_environment_unavailable',
+      });
+    }
+    const suggestionLaunch = await launchClaimedTeamsSuggestion({
+      suggestion: claimedSuggestionReaction,
+      launchTask: (promptText) =>
+        startNewTeamsTask({
+          activity,
+          mappedUserId: mappedUserId!,
+          queuedMessage: {
+            ...queuedMessage!,
+            text: promptText,
+          } as QueuedTeamsCommunicationMessage,
+          metadata,
+          ...(workspaceOverride ? { workspaceOverride } : {}),
+        }),
+      postMessage: (text) =>
+        postTeamsMessageBestEffort({
+          conversationId: metadata.communicationChannelId,
+          threadId: metadata.communicationThreadId,
+          serviceUrl: metadata.communicationServiceUrl,
+          text,
+        }),
+    });
+
+    return c.json(
+      suggestionLaunch.result === 'started'
+        ? { ok: true, started: true, runId: suggestionLaunch.runId }
+        : {
+            ok: true,
+            queued: false,
+            reason: `suggestion_${suggestionLaunch.result}`,
+          },
+    );
+  }
   const activeRun = await findActiveTeamsTaskRun({
     conversationId: metadata.communicationChannelId,
     threadId: metadata.communicationThreadId,
@@ -1800,6 +1934,9 @@ teams.post('/', async (c) => {
     if (suggestionIdeaNumber !== null) {
       const resolution = await resolveAndClaimTeamsSuggestionStart({
         conversationId: metadata.communicationChannelId,
+        ...(metadata.communicationThreadId
+          ? { threadId: metadata.communicationThreadId }
+          : {}),
         ideaNumber: suggestionIdeaNumber,
       });
 
@@ -1834,6 +1971,30 @@ teams.post('/', async (c) => {
       }
 
       if (resolution.outcome === 'claimed') {
+        const workspaceOverride = resolution.suggestion.targetEnvironmentId
+          ? await resolveTeamsWorkspace({
+              type: 'environment',
+              id: resolution.suggestion.targetEnvironmentId,
+              name: resolution.suggestion.targetEnvironmentId,
+            })
+          : undefined;
+        if (resolution.suggestion.targetEnvironmentId && !workspaceOverride) {
+          await releaseWorkItemClaim(db, {
+            id: resolution.suggestion.id,
+            claimedAt: resolution.suggestion.launchClaimedAt,
+          });
+          await postTeamsMessageBestEffort({
+            conversationId: metadata.communicationChannelId,
+            threadId: metadata.communicationThreadId,
+            serviceUrl: metadata.communicationServiceUrl,
+            text: 'That idea’s target environment is no longer available.',
+          });
+          return c.json({
+            ok: true,
+            queued: false,
+            reason: 'suggestion_environment_unavailable',
+          });
+        }
         const suggestionLaunch = await launchClaimedTeamsSuggestion({
           suggestion: resolution.suggestion,
           launchTask: (promptText) =>
@@ -1842,6 +2003,7 @@ teams.post('/', async (c) => {
               mappedUserId,
               queuedMessage: { ...queuedMessage!, text: promptText },
               metadata,
+              ...(workspaceOverride ? { workspaceOverride } : {}),
             }),
           postMessage: (text) =>
             postTeamsMessageBestEffort({

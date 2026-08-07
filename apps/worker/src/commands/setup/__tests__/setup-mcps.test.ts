@@ -368,7 +368,7 @@ describe('resolveBuiltInMcpServers', () => {
     expect(roomoteConfig.type).toBe('stdio');
     expect(roomoteConfig.command).toBe('node');
     expect(warnSpy).toHaveBeenCalledWith(
-      "[resolveBuiltInMcpServers] Skipping custom MCP 'roomote': name conflicts with an existing MCP server",
+      "[resolveBuiltInMcpServers] Skipping environment custom MCP 'roomote': name conflicts with an existing MCP server",
     );
   });
 
@@ -981,5 +981,122 @@ describe('resolveBuiltInMcpServers', () => {
     const parsed = { mcpServers: resolveBuiltInMcpServers() };
 
     expect(Object.keys(parsed.mcpServers).sort()).toEqual(['roomote']);
+  });
+});
+
+describe('resolveBuiltInMcpServers deployment custom servers', () => {
+  const originalEnv = { ...process.env };
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    process.env = {
+      ...originalEnv,
+      HOME: '/home/testuser',
+      MISE_DATA_DIR: '/opt/mise',
+      TRPC_URL: 'https://api.test.com',
+    };
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  const taskEnv = {
+    ROOMOTE_CLOUD_TOKEN: 'test-cloud-token',
+    R_APP_URL: 'https://app.test.com',
+  };
+
+  it('rewrites custom proxy entries to the API origin with the run token', () => {
+    const resolved = resolveBuiltInMcpServers(taskEnv, {
+      userMcpServers: {
+        'internal-tools': {
+          url: 'https://app.test.com/api/mcp/custom/4c72c9dd-3f5e-4d3e-9f7a-2c1b8a6e5d40',
+          headers: { 'X-MCP-Client': 'Roomote' },
+        },
+      },
+    });
+
+    expect(resolved['internal-tools']).toEqual({
+      type: 'streamable-http',
+      url: 'https://api.test.com/api/mcp/custom/4c72c9dd-3f5e-4d3e-9f7a-2c1b8a6e5d40',
+      headers: {
+        'X-MCP-Client': 'Roomote',
+        Authorization: 'Bearer test-cloud-token',
+      },
+    });
+  });
+
+  it('skips custom proxy entries when the cloud token is missing', () => {
+    const resolved = resolveBuiltInMcpServers(
+      {},
+      {
+        userMcpServers: {
+          'internal-tools': {
+            url: 'https://app.test.com/api/mcp/custom/4c72c9dd-3f5e-4d3e-9f7a-2c1b8a6e5d40',
+          },
+        },
+      },
+    );
+
+    expect(resolved['internal-tools']).toBeUndefined();
+  });
+
+  it('merges deployment stdio servers after environment servers', () => {
+    const resolved = resolveBuiltInMcpServers(
+      taskEnv,
+      undefined,
+      {
+        'shared-name': { url: 'https://env.example.com/mcp' },
+      },
+      { MY_DEPLOYMENT_SECRET: 'operator-value' },
+      {
+        'shared-name': { command: 'deployment-loses' },
+        'local-tools': {
+          command: 'npx',
+          args: ['-y', '@example/server'],
+          env: { EXAMPLE_TOKEN: '${MY_DEPLOYMENT_SECRET}' },
+        },
+      },
+    );
+
+    // Environment wins the name collision (more specific scope).
+    expect(resolved['shared-name']).toMatchObject({
+      type: 'streamable-http',
+      url: 'https://env.example.com/mcp',
+    });
+
+    // Deployment stdio servers ride the same substitution + mise pipeline.
+    expect(resolved['local-tools']).toMatchObject({
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', '@example/server'],
+    });
+    expect(
+      (resolved['local-tools'] as { env: Record<string, string> }).env,
+    ).toMatchObject({
+      EXAMPLE_TOKEN: 'operator-value',
+      MISE_DATA_DIR: '/opt/mise',
+    });
+  });
+
+  it('redacts reserved references in deployment stdio env values', () => {
+    const resolved = resolveBuiltInMcpServers(
+      taskEnv,
+      undefined,
+      undefined,
+      undefined,
+      {
+        'local-tools': {
+          command: 'npx',
+          env: { STOLEN: '${ROOMOTE_CLOUD_TOKEN}' },
+        },
+      },
+    );
+
+    const env = (resolved['local-tools'] as { env: Record<string, string> })
+      .env;
+
+    expect(env.STOLEN).not.toContain('test-cloud-token');
+    expect(env.STOLEN).toBe('roomote-refused-reserved-env-reference');
   });
 });

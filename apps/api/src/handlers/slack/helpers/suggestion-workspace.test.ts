@@ -79,24 +79,18 @@ describe('buildSuggestionTaskPromptText', () => {
 });
 
 describe('buildSuggestionSlackText', () => {
-  it('can render suggested-task Slack copy with only the priority color emoji and block quotes', () => {
+  it('renders suggested-task Slack copy with only the title and description', () => {
     const text = buildSuggestionSlackText(
       {
         title: 'Fix cron retries',
         brief: 'Fix cron retries',
-        category: 'bug',
-        priority: 'P0',
-        targetRepositoryFullName: 'acme/app',
       },
       {
-        badgeStyle: 'color_only',
         quote: true,
       },
     );
 
-    expect(text).toBe(
-      '> **🔴 [Bug] Fix cron retries** [acme/app](https://github.com/acme/app)\n> Fix cron retries',
-    );
+    expect(text).toBe('> **Fix cron retries**\n> Fix cron retries');
   });
 });
 
@@ -140,7 +134,6 @@ describe('shared scheduled suggestion Slack model helpers', () => {
     expect(
       getSharedScheduledSuggestionSlackTextOptions('suggested_tasks'),
     ).toEqual({
-      badgeStyle: 'color_only',
       quote: true,
     });
     expect(

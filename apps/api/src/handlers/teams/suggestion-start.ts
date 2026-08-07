@@ -19,6 +19,7 @@ import {
 
 import { apiLogger } from '../../logging.js';
 import { cancelOrphanedWorkItemRunBestEffort } from '../tasks/orphaned-work-item-run.js';
+import { claimCurrentThreadSuggestionByMessage } from '../tasks/current-thread-suggestion-reaction.js';
 import { stripTeamsMessageIdSuffix } from './find-active-teams-run.js';
 
 /**
@@ -71,6 +72,7 @@ export type ClaimedTeamsSuggestion = {
   brief: string | null;
   investigationContext: string | null;
   targetRepositoryFullName: string | null;
+  targetEnvironmentId?: string | null;
   launchClaimedAt: Date;
 };
 
@@ -101,6 +103,7 @@ type TeamsSuggestionStartResolution =
  */
 export async function resolveAndClaimTeamsSuggestionStart(input: {
   conversationId: string;
+  threadId?: string;
   ideaNumber: number;
 }): Promise<TeamsSuggestionStartResolution> {
   const conversationBase = stripTeamsMessageIdSuffix(input.conversationId);
@@ -109,6 +112,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
     .select({
       workItemId: trackedMessages.workItemId,
       messageTs: trackedMessages.messageTs,
+      threadTs: trackedMessages.threadTs,
       createdAt: trackedMessages.createdAt,
     })
     .from(trackedMessages)
@@ -117,11 +121,19 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
         eq(trackedMessages.surface, 'teams'),
         eq(trackedMessages.kind, 'suggestion_card'),
         sql`split_part(${trackedMessages.channelId}, ';messageid=', 1) = ${conversationBase}`,
+        sql`${trackedMessages.metadata} ->> 'suggestionGroupKey' IS NULL`,
         isNotNull(trackedMessages.workItemId),
       ),
     );
 
-  if (cards.length === 0) {
+  const inputThreadId =
+    input.threadId ?? input.conversationId.split(';messageid=')[1] ?? null;
+  const matchingThreadCards = inputThreadId
+    ? cards.filter((card) => card.threadTs === inputThreadId)
+    : [];
+  const scopedCards = inputThreadId ? matchingThreadCards : cards;
+
+  if (scopedCards.length === 0) {
     return { outcome: 'no_cards' };
   }
 
@@ -130,16 +142,16 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
   // the known workItemId suffix (intro ids may themselves contain ':').
   const groups = new Map<string, { createdAt: Date; workItemIds: string[] }>();
 
-  for (const card of cards) {
+  for (const card of scopedCards) {
     if (!card.workItemId || !card.messageTs) {
       continue;
     }
 
     const suffix = `:${card.workItemId}`;
-    const introMessageId = card.messageTs.endsWith(suffix)
+    const groupKey = card.messageTs.endsWith(suffix)
       ? card.messageTs.slice(0, -suffix.length)
       : card.messageTs;
-    const group = groups.get(introMessageId);
+    const group = groups.get(groupKey);
 
     if (group) {
       group.workItemIds.push(card.workItemId);
@@ -148,7 +160,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
         group.createdAt = card.createdAt;
       }
     } else {
-      groups.set(introMessageId, {
+      groups.set(groupKey, {
         createdAt: card.createdAt,
         workItemIds: [card.workItemId],
       });
@@ -187,9 +199,29 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
       brief: claimed.brief,
       investigationContext: claimed.investigationContext,
       targetRepositoryFullName: claimed.targetRepositoryFullName,
+      targetEnvironmentId: claimed.targetEnvironmentId,
       launchClaimedAt: claimed.launchClaimedAt,
     },
   };
+}
+
+export async function resolveAndClaimTeamsSuggestionReaction(input: {
+  conversationId: string;
+  messageId: string;
+}): Promise<TeamsSuggestionStartResolution> {
+  const claim = await claimCurrentThreadSuggestionByMessage({
+    surface: 'teams',
+    channelId: input.conversationId,
+    messageId: input.messageId,
+  });
+
+  if (claim.outcome === 'no_card') {
+    return { outcome: 'no_cards' };
+  }
+  if (claim.outcome === 'already_started') {
+    return { outcome: 'already_started', title: 'That idea' };
+  }
+  return { outcome: 'claimed', suggestion: claim.suggestion };
 }
 
 /** Mirrors the Telegram suggestion-button prompt shape. */
@@ -202,6 +234,9 @@ function buildTeamsSuggestionTaskPromptText(
     suggestion.brief ?? '',
     ...(suggestion.targetRepositoryFullName
       ? ['', `Target repository: ${suggestion.targetRepositoryFullName}`]
+      : []),
+    ...(suggestion.targetEnvironmentId
+      ? ['', `Target environment: ${suggestion.targetEnvironmentId}`]
       : []),
     ...(suggestion.investigationContext
       ? ['', `Context: ${suggestion.investigationContext}`]

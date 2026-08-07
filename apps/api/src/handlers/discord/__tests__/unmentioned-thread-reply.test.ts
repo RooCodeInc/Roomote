@@ -41,6 +41,7 @@ function threadReplyMessage(params: {
   user?: string;
   content?: string;
   mentions?: Array<{ id: string; username: string; bot?: boolean }>;
+  messageSnapshots?: DiscordMessage['message_snapshots'];
 }): DiscordMessage {
   const userId = params.user ?? USER_1;
   return {
@@ -51,6 +52,9 @@ function threadReplyMessage(params: {
     content: params.content ?? 'sounds good, keep going',
     mentions: params.mentions ?? [],
     attachments: [],
+    ...(params.messageSnapshots
+      ? { message_snapshots: params.messageSnapshots }
+      : {}),
   } as DiscordMessage;
 }
 
@@ -261,6 +265,62 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
         threadReplyMessage({
           content: `hey <@${USER_3}> look at this`,
           mentions: [{ id: USER_3, username: 'grace' }],
+        }),
+      ),
+    ).resolves.toBe(false);
+  });
+
+  it('does not route a forwarded snapshot that mentions someone else', async () => {
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanHistory(
+        THREAD_ROOT_ID,
+        USER_1,
+        `<@${BOT_USER_ID}> please fix the bug`,
+      ),
+      botHistory('200'),
+    ]);
+
+    await expect(
+      routeDecision(
+        threadReplyMessage({
+          content: '',
+          messageSnapshots: [
+            {
+              message: {
+                content: `hey <@${USER_3}> look at this`,
+                mentions: [{ id: USER_3, username: 'grace' }],
+                attachments: [],
+              },
+            },
+          ],
+        }),
+      ),
+    ).resolves.toBe(false);
+  });
+
+  it('uses resolved forwarded snapshot mentions when checking the recipient', async () => {
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanHistory(
+        THREAD_ROOT_ID,
+        USER_1,
+        `<@${BOT_USER_ID}> please fix the bug`,
+      ),
+      botHistory('200'),
+    ]);
+
+    await expect(
+      routeDecision(
+        threadReplyMessage({
+          content: '',
+          messageSnapshots: [
+            {
+              message: {
+                content: 'hey Grace, look at this',
+                mentions: [{ id: USER_3, username: 'grace' }],
+                attachments: [],
+              },
+            },
+          ],
         }),
       ),
     ).resolves.toBe(false);

@@ -453,7 +453,11 @@ describe('MockTelegramServer', () => {
 
     const info = await provider.getWebhookInfo();
     expect(info.url).toBe('https://roomote.example.test/api/webhooks/telegram');
-    expect(info.allowedUpdates).toEqual(['message', 'callback_query']);
+    expect(info.allowedUpdates).toEqual([
+      'message',
+      'callback_query',
+      'message_reaction',
+    ]);
     expect(server.getState().webhook?.secretToken).toBe('webhook-secret');
   });
 

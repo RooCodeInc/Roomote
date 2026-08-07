@@ -20,7 +20,68 @@ type DiscordAutomationSuggestion = {
   brief: string;
   category: string | null;
   targetRepositoryFullName: string | null;
+  suggestionNumber?: number;
 };
+
+export async function postCurrentThreadSuggestionsToDiscord(params: {
+  sourceTaskId: string;
+  suggestionGroupKey: string;
+  createdByUserId: string | null;
+  launchRouting?: 'router';
+  channelId: string;
+  threadId?: string | null;
+  suggestions: DiscordAutomationSuggestion[];
+}): Promise<boolean> {
+  if (params.suggestions.length === 0) {
+    return true;
+  }
+
+  let provider: Awaited<ReturnType<typeof resolveDiscordProvider>>['provider'];
+  try {
+    ({ provider } = await resolveDiscordProvider());
+  } catch {
+    return false;
+  }
+
+  for (const [index, suggestion] of params.suggestions.entries()) {
+    const posted = await provider.postMessage({
+      channelId: params.channelId,
+      ...(params.threadId ? { threadId: params.threadId } : {}),
+      text: `**${suggestion.suggestionNumber ?? index + 1}. ${suggestion.title}**\n${suggestion.brief}`,
+    });
+
+    if (!posted.messageId) {
+      return false;
+    }
+
+    const trackedRow = {
+      surface: 'discord' as const,
+      kind: 'suggestion_card' as const,
+      dedupeKey: `${posted.threadId ?? posted.channelId}:${posted.messageId}`,
+      channelId: posted.threadId ?? posted.channelId,
+      ...(posted.threadId ? { threadTs: posted.threadId } : {}),
+      messageTs: posted.messageId,
+      workItemId: suggestion.id,
+      createdByUserId: params.createdByUserId,
+      metadata: {
+        suggestionType: 'suggested_tasks',
+        suggestionKey: `${params.sourceTaskId}:${suggestion.id}`,
+        suggestionGroupKey: params.suggestionGroupKey,
+        ...(params.launchRouting
+          ? { launchRouting: params.launchRouting }
+          : {}),
+      },
+    };
+    await db
+      .insert(trackedMessages)
+      .values(trackedRow)
+      .onConflictDoNothing({
+        target: [trackedMessages.kind, trackedMessages.dedupeKey],
+      });
+  }
+
+  return true;
+}
 
 function fitDiscordInitialPost(text: string): string {
   if (text.length <= DISCORD_MAX_INITIAL_POST_LENGTH) {

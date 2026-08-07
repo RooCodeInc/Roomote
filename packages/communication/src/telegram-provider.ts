@@ -516,7 +516,7 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     await this.callBotApi('setWebhook', {
       url: input.url,
       secret_token: input.secretToken,
-      allowed_updates: ['message', 'callback_query'],
+      allowed_updates: ['message', 'callback_query', 'message_reaction'],
     });
   }
 

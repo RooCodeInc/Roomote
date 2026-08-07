@@ -14,6 +14,8 @@ const {
   mockTaskRunFindFirst,
   mockTaskFindFirst,
   mockDeploymentSettingsFindFirst,
+  mockSlackInstallationFindFirst,
+  mockEnvironmentFindFirst,
   mockPostMessage,
   insertedWorkItemValues,
   insertedTrackedMessageValues,
@@ -21,6 +23,8 @@ const {
   mockTaskRunFindFirst: vi.fn(),
   mockTaskFindFirst: vi.fn(),
   mockDeploymentSettingsFindFirst: vi.fn(),
+  mockSlackInstallationFindFirst: vi.fn(),
+  mockEnvironmentFindFirst: vi.fn(),
   mockPostMessage: vi.fn(),
   insertedWorkItemValues: [] as Record<string, unknown>[],
   insertedTrackedMessageValues: [] as Record<string, unknown>[],
@@ -40,8 +44,16 @@ function makeSelectResult(name: string): unknown[] {
     // Existing suggestion work_items + existing summary tracked_messages both
     // resolve empty so the persist + post paths run fresh.
     case 'workItems':
+      return insertedWorkItemValues;
     case 'trackedMessages':
+      return [];
     case 'environments':
+      return [
+        {
+          id: '10b031ec-b728-4d8f-a9a0-1ed4aa500511',
+          config: { repositories: [{ repository: 'acme/app' }] },
+        },
+      ];
     default:
       return [];
   }
@@ -78,7 +90,11 @@ function createInsertBuilder(table: { _name?: string }) {
   return {
     values(values: Record<string, unknown>[]) {
       if (tableName === 'workItems') {
-        insertedWorkItemValues.push(...values);
+        const rows = values.map((value, index) => ({
+          ...value,
+          id: `wi-${insertedWorkItemValues.length + index}`,
+        }));
+        insertedWorkItemValues.push(...rows);
       }
       if (tableName === 'trackedMessages') {
         insertedTrackedMessageValues.push(...values);
@@ -87,7 +103,7 @@ function createInsertBuilder(table: { _name?: string }) {
         returning() {
           if (tableName === 'workItems') {
             return Promise.resolve(
-              values.map((value, index) => ({ ...value, id: `wi-${index}` })),
+              insertedWorkItemValues.slice(-values.length),
             );
           }
           return Promise.resolve([]);
@@ -209,8 +225,16 @@ vi.mock('@roomote/db/server', () => ({
         findFirst: (...args: unknown[]) =>
           mockDeploymentSettingsFindFirst(...args),
       },
+      slackInstallations: {
+        findFirst: (...args: unknown[]) =>
+          mockSlackInstallationFindFirst(...args),
+      },
+      environments: {
+        findFirst: (...args: unknown[]) => mockEnvironmentFindFirst(...args),
+      },
     },
     select: () => createSelectBuilder(),
+    insert: (table: { _name?: string }) => createInsertBuilder(table),
     transaction: async (cb: (executor: typeof tx) => unknown) => cb(tx),
   },
 }));
@@ -238,7 +262,40 @@ function requestSuggestions(app: Hono<{ Variables: Variables }>) {
           {
             title: 'Fix the parser',
             brief: 'Nil access is crashing the parser.',
+            category: 'bug',
+            priority: 'P1',
+            investigationContext: 'Parser crash path in apps/api.',
             targetRepositoryFullName: 'acme/app',
+            workspaceReadiness: 'bare_repo',
+          },
+        ],
+      }),
+    }),
+  );
+}
+
+function requestCurrentThreadSuggestions(
+  app: Hono<{ Variables: Variables }>,
+  submissionKey = 'reply-1',
+) {
+  return app.request(
+    new Request('http://localhost/tasks/task-1/task_suggestions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        delivery: 'current_thread',
+        submissionKey,
+        suggestions: [
+          {
+            title: 'Fix the parser',
+            brief: 'Nil access is crashing the parser.',
+            category: 'bug',
+            priority: 'P0',
+            investigationContext: 'Legacy hidden context.',
+            targetRepositoryFullName: 'wrong/repository',
+            targetEnvironmentId: '10b031ec-b728-4d8f-a9a0-1ed4aa500511',
+            workspaceReadiness: 'environment_backed',
+            readinessMessage: 'Legacy readiness message.',
           },
         ],
       }),
@@ -251,6 +308,8 @@ describe('submitTaskSuggestions', () => {
     mockTaskRunFindFirst.mockReset();
     mockTaskFindFirst.mockReset();
     mockDeploymentSettingsFindFirst.mockReset();
+    mockSlackInstallationFindFirst.mockReset();
+    mockEnvironmentFindFirst.mockReset();
     mockPostMessage.mockReset();
     insertedWorkItemValues.length = 0;
     insertedTrackedMessageValues.length = 0;
@@ -266,6 +325,10 @@ describe('submitTaskSuggestions', () => {
     let ts = 0;
     mockPostMessage.mockImplementation(async () => `ts-${++ts}`);
     mockDeploymentSettingsFindFirst.mockResolvedValue({ setupNewState: {} });
+    mockSlackInstallationFindFirst.mockResolvedValue({
+      botAccessToken: 'xoxb-test',
+    });
+    mockEnvironmentFindFirst.mockResolvedValue(null);
     mockTaskRunFindFirst.mockResolvedValue({
       id: 1,
       payloadKind: TaskPayloadKind.Scan,
@@ -276,6 +339,275 @@ describe('submitTaskSuggestions', () => {
         notifySlack: true,
       },
     });
+  });
+
+  it('posts standard task suggestions inside the task thread without a second root message', async () => {
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 1,
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: 'user-1',
+      payload: {
+        repo: 'acme/app',
+      },
+    });
+    mockTaskFindFirst.mockResolvedValue({
+      initiatorUserId: 'user-1',
+      initiatorAutomation: null,
+      slackChannelId: 'C123',
+      slackThreadTs: '111.222',
+    });
+    const app = createApp({
+      runId: 1,
+      userId: 'user-1',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    });
+
+    const response = await requestCurrentThreadSuggestions(app);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      success: true,
+      suggestionCount: 1,
+    });
+    expect(mockPostMessage).toHaveBeenCalledTimes(1);
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        thread_ts: '111.222',
+      }),
+    );
+    expect(insertedTrackedMessageValues).toHaveLength(1);
+    expect(insertedTrackedMessageValues[0]).toMatchObject({
+      channelId: 'C123',
+      metadata: {
+        suggestionType: 'suggested_tasks',
+        launchRouting: 'router',
+      },
+    });
+    expect(insertedWorkItemValues[0]).toMatchObject({
+      title: 'Fix the parser',
+      brief: 'Nil access is crashing the parser.',
+      category: null,
+      priority: null,
+      investigationContext: null,
+      targetRepositoryFullName: null,
+      targetEnvironmentId: null,
+      workspaceReadiness: null,
+      readinessMessage: null,
+    });
+  });
+
+  it('allows Slack app mention replies to attach suggestions', async () => {
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 1,
+      payloadKind: TaskPayloadKind.SlackAppMention,
+      actingUserId: 'user-1',
+      payload: { repo: 'acme/app' },
+    });
+    mockTaskFindFirst.mockResolvedValue({
+      initiatorUserId: 'user-1',
+      initiatorAutomation: null,
+      slackChannelId: 'C123',
+      slackThreadTs: '111.222',
+    });
+    const app = createApp({
+      runId: 1,
+      userId: 'user-1',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    });
+
+    const response = await requestCurrentThreadSuggestions(app);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      suggestionCount: 1,
+    });
+  });
+
+  it('keeps current-thread scan suggestions pinned to verified metadata', async () => {
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 1,
+      payloadKind: TaskPayloadKind.Scan,
+      actingUserId: 'user-1',
+      payload: { repo: 'acme/app', selectedRepositories: ['acme/app'] },
+    });
+    mockTaskFindFirst.mockResolvedValue({
+      initiatorUserId: 'user-1',
+      initiatorAutomation: 'suggest_ideas',
+      slackChannelId: 'C123',
+      slackThreadTs: '111.222',
+    });
+    const app = createApp({
+      runId: 1,
+      userId: 'user-1',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    });
+
+    const response = await app.request(
+      new Request('http://localhost/tasks/task-1/task_suggestions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          delivery: 'current_thread',
+          submissionKey: 'scan-reply',
+          suggestions: [
+            {
+              title: 'Fix the parser',
+              brief: 'Nil access is crashing the parser.',
+              category: 'bug',
+              priority: 'P1',
+              investigationContext: 'Parser crash path in apps/api.',
+              targetRepositoryFullName: 'acme/app',
+              workspaceReadiness: 'bare_repo',
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(insertedWorkItemValues[0]).toMatchObject({
+      category: 'bug',
+      priority: 'P1',
+      investigationContext: 'Parser crash path in apps/api.',
+      targetRepositoryFullName: 'acme/app',
+      workspaceReadiness: 'bare_repo',
+    });
+    expect(insertedTrackedMessageValues[0]?.metadata).not.toHaveProperty(
+      'launchRouting',
+    );
+  });
+
+  it('resolves standard task repositories from the selected environment', async () => {
+    mockEnvironmentFindFirst.mockResolvedValue({
+      config: { repositories: [{ repository: 'acme/app' }] },
+    });
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 1,
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: 'user-1',
+      payload: {
+        repo: '',
+        environmentId: '10b031ec-b728-4d8f-a9a0-1ed4aa500511',
+      },
+    });
+    mockTaskFindFirst.mockResolvedValue({
+      initiatorUserId: 'user-1',
+      initiatorAutomation: null,
+      slackChannelId: 'C123',
+      slackThreadTs: '111.222',
+    });
+    const app = createApp({
+      runId: 1,
+      userId: 'user-1',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    });
+
+    const response = await requestCurrentThreadSuggestions(app);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      success: true,
+      suggestionCount: 1,
+    });
+    expect(mockPostMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('persists later reply suggestion batches independently', async () => {
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 1,
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: 'user-1',
+      payload: { repo: 'acme/app' },
+    });
+    mockTaskFindFirst.mockResolvedValue({
+      initiatorUserId: 'user-1',
+      initiatorAutomation: null,
+      slackChannelId: 'C123',
+      slackThreadTs: '111.222',
+    });
+    const app = createApp({
+      runId: 1,
+      userId: 'user-1',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    });
+
+    expect((await requestCurrentThreadSuggestions(app, 'reply-1')).status).toBe(
+      200,
+    );
+    expect((await requestCurrentThreadSuggestions(app, 'reply-2')).status).toBe(
+      200,
+    );
+
+    expect(insertedWorkItemValues).toHaveLength(2);
+    expect(insertedWorkItemValues.map((item) => item.sortOrder)).toEqual([
+      0, 1,
+    ]);
+    expect(insertedWorkItemValues[0]?.fingerprint).toMatch(/^reply-1:/);
+    expect(insertedWorkItemValues[1]?.fingerprint).toMatch(/^reply-2:/);
+  });
+
+  it('reports partial Slack card delivery as incomplete', async () => {
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 1,
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: 'user-1',
+      payload: { repo: 'acme/app' },
+    });
+    mockTaskFindFirst.mockResolvedValue({
+      initiatorUserId: 'user-1',
+      initiatorAutomation: null,
+      slackChannelId: 'C123',
+      slackThreadTs: '111.222',
+    });
+    mockPostMessage
+      .mockResolvedValueOnce('card-1')
+      .mockResolvedValueOnce(undefined);
+    const app = createApp({
+      runId: 1,
+      userId: 'user-1',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    });
+
+    const response = await app.request(
+      new Request('http://localhost/tasks/task-1/task_suggestions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          delivery: 'current_thread',
+          submissionKey: 'reply-partial',
+          suggestions: [
+            {
+              title: 'First',
+              brief: 'First action.',
+              targetRepositoryFullName: 'acme/app',
+            },
+            {
+              title: 'Second',
+              brief: 'Second action.',
+              targetRepositoryFullName: 'acme/app',
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({ success: false });
+    expect(insertedTrackedMessageValues).toHaveLength(1);
   });
 
   it('posts to Slack and stamps automationKey for an automation-initiated scan with no user', async () => {
@@ -307,6 +639,11 @@ describe('submitTaskSuggestions', () => {
     expect(insertedWorkItemValues[0]).toMatchObject({
       kind: 'suggestion',
       automationKey: 'suggest_ideas',
+      category: 'bug',
+      priority: 'P1',
+      investigationContext: 'Parser crash path in apps/api.',
+      targetRepositoryFullName: 'acme/app',
+      workspaceReadiness: 'bare_repo',
     });
 
     // Regression 1: a null poster does not suppress the Slack summary post
@@ -316,6 +653,43 @@ describe('submitTaskSuggestions', () => {
     expect(insertedTrackedMessageValues[0]).toMatchObject({
       createdByUserId: null,
     });
+  });
+
+  it('keeps mixed-readiness suggestion batches above the old limit of five', async () => {
+    mockTaskFindFirst.mockResolvedValue({
+      initiatorUserId: 'user-1',
+      initiatorAutomation: 'suggest_ideas',
+    });
+    const app = createApp({
+      runId: 1,
+      userId: 'user-1',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    });
+
+    const suggestions = Array.from({ length: 6 }, (_, index) => ({
+      title: `Suggestion ${index + 1}`,
+      brief: `Action ${index + 1}.`,
+      targetRepositoryFullName: 'acme/app',
+      ...(index % 2 === 0
+        ? {
+            targetEnvironmentId: '10b031ec-b728-4d8f-a9a0-1ed4aa500511',
+            workspaceReadiness: 'environment_backed',
+          }
+        : { workspaceReadiness: 'bare_repo' }),
+    }));
+
+    const response = await app.request(
+      new Request('http://localhost/tasks/task-1/task_suggestions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ suggestions }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(insertedWorkItemValues).toHaveLength(6);
   });
 
   it('still posts and leaves automationKey null for a user-initiated scan', async () => {

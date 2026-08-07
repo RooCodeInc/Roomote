@@ -32,7 +32,66 @@ type TelegramAutomationSuggestion = {
   brief: string;
   category: string | null;
   targetRepositoryFullName: string | null;
+  suggestionNumber?: number;
 };
+
+export async function postCurrentThreadSuggestionsToTelegram(params: {
+  sourceTaskId: string;
+  suggestionGroupKey: string;
+  createdByUserId: string | null;
+  launchRouting?: 'router';
+  chatId: string;
+  threadId?: string | null;
+  suggestions: TelegramAutomationSuggestion[];
+}): Promise<boolean> {
+  if (params.suggestions.length === 0) {
+    return true;
+  }
+
+  for (const [index, suggestion] of params.suggestions.entries()) {
+    const buttons: CommunicationMessageButton[][] = [
+      [{ text: '▶️ Start', callbackData: `idea:${suggestion.id}` }],
+    ];
+    const posted = await postTelegramMessageBestEffort({
+      chatId: params.chatId,
+      ...(params.threadId ? { threadId: params.threadId } : {}),
+      text: `**${suggestion.suggestionNumber ?? index + 1}. ${suggestion.title}**\n${suggestion.brief}`,
+      textFormat: 'markdown',
+      buttons,
+    });
+
+    if (!posted) {
+      return false;
+    }
+
+    const trackedRow = {
+      surface: 'telegram' as const,
+      kind: 'suggestion_card' as const,
+      dedupeKey: `${params.chatId}:${posted.messageId}`,
+      channelId: params.chatId,
+      ...(params.threadId ? { threadTs: params.threadId } : {}),
+      messageTs: posted.messageId,
+      workItemId: suggestion.id,
+      createdByUserId: params.createdByUserId,
+      metadata: {
+        suggestionType: 'suggested_tasks',
+        suggestionKey: `${params.sourceTaskId}:${suggestion.id}`,
+        suggestionGroupKey: params.suggestionGroupKey,
+        ...(params.launchRouting
+          ? { launchRouting: params.launchRouting }
+          : {}),
+      },
+    };
+    await db
+      .insert(trackedMessages)
+      .values(trackedRow)
+      .onConflictDoNothing({
+        target: [trackedMessages.kind, trackedMessages.dedupeKey],
+      });
+  }
+
+  return true;
+}
 
 async function resolveTelegramSuggestionChatId(
   automationKey: BackgroundAutomationKey,

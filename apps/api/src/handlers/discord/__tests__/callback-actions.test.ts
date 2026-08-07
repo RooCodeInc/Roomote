@@ -3,9 +3,12 @@ const mocks = vi.hoisted(() => ({
   stopTaskRun: vi.fn(),
   reply: vi.fn(),
   findMappedUser: vi.fn(),
+  findSuggestionByMessage: vi.fn(),
+  claimSuggestionByMessage: vi.fn(),
   claimSuggestion: vi.fn(),
   startNewTask: vi.fn(),
   resolveChannel: vi.fn(),
+  resolveWorkspace: vi.fn(),
   finalizeWorkItem: vi.fn(),
   releaseWorkItem: vi.fn(),
 }));
@@ -46,20 +49,60 @@ vi.mock('../task-orchestration.js', () => ({
 }));
 vi.mock('../task-launch.js', () => ({
   resolveDiscordChannelContext: mocks.resolveChannel,
+  resolveDiscordWorkspace: mocks.resolveWorkspace,
   discordMetadataForChannel: vi.fn(),
 }));
 vi.mock('../../tasks/orphaned-work-item-run.js', () => ({
   cancelOrphanedWorkItemRunBestEffort: vi.fn(),
 }));
+vi.mock('../../tasks/current-thread-suggestion-reaction.js', () => ({
+  findCurrentThreadSuggestionIdByMessage: mocks.findSuggestionByMessage,
+  claimCurrentThreadSuggestionByMessage: mocks.claimSuggestionByMessage,
+}));
 
-import { handleDiscordComponentInteraction } from '../callback-actions.js';
+import {
+  handleDiscordComponentInteraction,
+  handleDiscordSuggestionReaction,
+} from '../callback-actions.js';
 
 describe('Discord component callbacks', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.reply.mockResolvedValue({ messageId: 'response-1' });
     mocks.findMappedUser.mockResolvedValue('user-1');
+    mocks.findSuggestionByMessage.mockResolvedValue('suggestion-1');
     mocks.releaseWorkItem.mockResolvedValue(true);
+    mocks.resolveWorkspace.mockResolvedValue({
+      environmentId: 'env-1',
+      repoForPayload: 'acme/app',
+      workspaceDisplayName: 'App',
+    });
+  });
+
+  it('does not claim a reaction suggestion when account mapping fails', async () => {
+    mocks.findMappedUser.mockRejectedValue(new Error('database unavailable'));
+    const postMessage = vi.fn();
+
+    await expect(
+      handleDiscordSuggestionReaction({
+        provider: { postMessage } as never,
+        applicationId: 'app-1',
+        channel: {
+          channelId: 'thread-1',
+          channelName: 'Suggested tasks',
+          channelType: 11,
+          guildId: 'guild-1',
+          parentChannelId: 'channel-1',
+          isDirectMessage: false,
+          isThread: true,
+        },
+        channelId: 'thread-1',
+        messageId: 'suggestion-message-1',
+        eventId: 'reaction-1',
+        sender: { id: 'discord-user-1', username: 'matt' },
+      }),
+    ).rejects.toThrow('database unavailable');
+    expect(mocks.claimSuggestionByMessage).not.toHaveBeenCalled();
   });
 
   it('cancels an active run only when it belongs to the interaction channel', async () => {
@@ -309,6 +352,7 @@ describe('Discord component callbacks', () => {
       title: 'Fix the flaky login test',
       brief: null,
       targetRepositoryFullName: null,
+      targetEnvironmentId: 'env-1',
       investigationContext: null,
       launchClaimedAt: new Date(),
     });
@@ -348,8 +392,16 @@ describe('Discord component callbacks', () => {
     // instead of throwing and releasing the claim.
     expect(mocks.resolveChannel).not.toHaveBeenCalled();
     expect(mocks.startNewTask).toHaveBeenCalledWith(
-      expect.objectContaining({ channel: dmChannel }),
+      expect.objectContaining({
+        channel: dmChannel,
+        workspaceOverride: expect.objectContaining({ environmentId: 'env-1' }),
+      }),
     );
+    expect(mocks.resolveWorkspace).toHaveBeenCalledWith({
+      type: 'environment',
+      id: 'env-1',
+      name: 'env-1',
+    });
     expect(mocks.releaseWorkItem).not.toHaveBeenCalled();
     expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({

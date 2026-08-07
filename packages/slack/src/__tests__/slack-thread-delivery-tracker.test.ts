@@ -239,6 +239,47 @@ describe('SlackThreadDeliveryTracker', () => {
     expect(turnPolicy).toEqual({ reactionsAllowed: false });
   });
 
+  it('excludes an explicitly embedded source message from incremental context', async () => {
+    claimUndeliveredSlackThreadMessagesMock.mockResolvedValue(['109.000']);
+    const tracker = new SlackThreadDeliveryTracker('C123', '108.000');
+
+    const { formattedPrompt } = await tracker.buildContinuationPrompt({
+      currentMessageTs: '111.000',
+      currentMessageText: 'Act on this\n\nMessage to act on:\nSource message',
+      excludedContextTimestamps: ['110.000'],
+      fetchThreadMessages: async () => [
+        {
+          user: 'U111',
+          text: 'Earlier context',
+          ts: '109.000',
+          type: 'message',
+        },
+        {
+          user: 'U123',
+          text: 'Source message',
+          ts: '110.000',
+          type: 'message',
+        },
+      ],
+      normalizeMessageText: async (text) => text,
+      getTrackedBotReply: async () => null,
+      botUserId: 'B123',
+    });
+
+    expect(claimUndeliveredSlackThreadMessagesMock).toHaveBeenCalledWith(
+      'C123',
+      '108.000',
+      ['109.000'],
+    );
+    expect(formattedPrompt).toContain('Earlier context');
+    expect(formattedPrompt).toContain(
+      '<slack_message ts="111.000">\nAct on this\n\nMessage to act on:\nSource message\n</slack_message>',
+    );
+    expect(formattedPrompt).not.toContain(
+      '<slack_thread_message ts="110.000">',
+    );
+  });
+
   it('ignores the tracked started message when deciding the continuation reply target', async () => {
     claimUndeliveredSlackThreadMessagesMock.mockResolvedValue(['110.750']);
     const tracker = new SlackThreadDeliveryTracker('C123', '111.000');

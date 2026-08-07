@@ -550,13 +550,8 @@ github.post('/', async (c) => {
           );
         });
 
-        if (isRepoSkipped(payload.repository.full_name)) {
-          return {
-            status: 'ok' as const,
-            message: `Skipping merge webhook for ${payload.repository.full_name}`,
-          };
-        }
-
+        // Skipped repositories suppress automated review work, not lifecycle
+        // notifications for tasks that already track this pull request.
         return handlePrMerge(payload);
       }),
     );

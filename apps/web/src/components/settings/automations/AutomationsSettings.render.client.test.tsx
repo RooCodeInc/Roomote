@@ -18,13 +18,22 @@ const state = vi.hoisted(() => ({
     name: string;
     prompt: string;
     enabled: boolean;
-    scheduleMode: 'weekly' | 'cron';
+    scheduleMode: 'daily' | 'weekly' | 'cron';
     cronExpression: string | null;
     model: null;
     environmentId: string;
     target: {
-      provider: 'slack';
+      provider: 'slack' | 'discord' | 'teams' | 'telegram';
       externalRef: string;
+      targetKind?:
+        | 'slack_channel'
+        | 'slack_user'
+        | 'discord_channel'
+        | 'discord_user'
+        | 'teams_channel'
+        | 'teams_user'
+        | 'telegram_chat'
+        | 'telegram_user';
       metadata?: Record<string, unknown>;
     };
     lastRunAt: Date | null;
@@ -1072,6 +1081,95 @@ describe('AutomationsSettings', () => {
       /Created by Ada · Last run \d+s ago/,
     );
     expect(screen.queryByText('0 9 * * 1-5')).not.toBeInTheDocument();
+  });
+
+  it('shows Slack DM me as a custom automation destination', async () => {
+    state.environments = [{ id: 'env-1', name: 'Production' }];
+    state.customAutomations = [
+      {
+        id: 'automation-1',
+        name: 'Personal daily brief',
+        prompt: 'Summarize my priorities.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        environmentId: 'env-1',
+        target: {
+          provider: 'slack',
+          targetKind: 'slack_user',
+          externalRef: 'user-1',
+        },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    expect(await screen.findByText('Slack DM me')).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Configure Personal daily brief' }),
+    );
+    expect(
+      screen.getByRole('combobox', { name: 'Slack destination type' }),
+    ).toHaveTextContent('DM me');
+    expect(
+      screen.getByText(
+        'Results are sent privately to your linked Slack account.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('shows DM me for non-Slack custom automation destinations', async () => {
+    state.environments = [{ id: 'env-1', name: 'Production' }];
+    state.settingsQuery.data.capabilities.discordConnected = true;
+    state.customAutomations = [
+      {
+        id: 'automation-1',
+        name: 'Discord daily brief',
+        prompt: 'Summarize my priorities.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        environmentId: 'env-1',
+        target: {
+          provider: 'discord',
+          targetKind: 'discord_user',
+          externalRef: 'user-1',
+        },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    expect(await screen.findByText('Discord DM me')).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Configure Discord daily brief' }),
+    );
+    expect(
+      screen.getByRole('combobox', { name: 'Discord destination type' }),
+    ).toHaveTextContent('DM me');
+    expect(
+      screen.getByText(
+        'Results are sent privately to your linked Discord account.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('only offers connected providers as custom automation destinations', async () => {

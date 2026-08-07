@@ -12,13 +12,17 @@ import {
   storeOAuthStateWithId,
   storeClientInformation,
   getClientInformation,
+  resolveCustomMcpAuthTarget,
+  ensureCustomMcpServerMetadata,
 } from '@roomote/sdk/server';
 import type {
   OAuthClientMetadata,
   OAuthClientInformation,
+  OAuthProtectedResourceMetadata,
   OAuthServerMetadata,
 } from '@roomote/types';
 import {
+  isCustomMcpConnectionId,
   type McpConnectionRole,
   getMcpIntegrationAuthorizationParameters,
   getMcpIntegrationOauthEndpoints,
@@ -162,11 +166,9 @@ export async function GET(
     DEFAULT_REDIRECT_PATH;
   const replayToken = requestUrl.searchParams.get('replayToken');
 
-  if (webEnv.R_CURATED_INTEGRATIONS_DISABLED === true) {
-    return NextResponse.redirect(
-      withMcpQuery(webUrl, redirectPath, 'error', 'disabled'),
-    );
-  }
+  // Kill-switch checks happen after the connection lookup: catalog
+  // connections are gated by the curated flag, custom-server connections by
+  // their own flag.
 
   const authResult = await authorize();
   if (!authResult.success) {
@@ -187,23 +189,44 @@ export async function GET(
       );
     }
 
-    const integration = getMcpIntegration(connection.mcpId);
-    if (!integration) {
-      return NextResponse.redirect(
-        withMcpQuery(webUrl, redirectPath, 'error', 'not_found'),
-      );
+    const customTarget = isCustomMcpConnectionId(connection.mcpId)
+      ? await resolveCustomMcpAuthTarget(connection.mcpId)
+      : null;
+    const integration = customTarget
+      ? null
+      : getMcpIntegration(connection.mcpId);
+
+    if (customTarget) {
+      if (webEnv.R_CUSTOM_MCP_DISABLED === true) {
+        return NextResponse.redirect(
+          withMcpQuery(webUrl, redirectPath, 'error', 'disabled'),
+        );
+      }
+    } else {
+      if (webEnv.R_CURATED_INTEGRATIONS_DISABLED === true) {
+        return NextResponse.redirect(
+          withMcpQuery(webUrl, redirectPath, 'error', 'disabled'),
+        );
+      }
+
+      if (
+        !integration ||
+        !isSelfServeMcpIntegration(integration) ||
+        !integration.url
+      ) {
+        return NextResponse.redirect(
+          withMcpQuery(webUrl, redirectPath, 'error', 'not_found'),
+        );
+      }
     }
 
-    if (!isSelfServeMcpIntegration(integration) || !integration.url) {
-      return NextResponse.redirect(
-        withMcpQuery(webUrl, redirectPath, 'error', 'not_found'),
-      );
-    }
-
-    const requiresOrgAdmin = isDeploymentScopedMcpIntegration(
-      integration,
-      connection.connectionRole,
-    );
+    // Custom-server connections are deployment-scoped by construction.
+    const requiresOrgAdmin = customTarget
+      ? true
+      : isDeploymentScopedMcpIntegration(
+          integration!,
+          connection.connectionRole,
+        );
     const isAdmin = authResult.isAdmin;
 
     if (
@@ -215,23 +238,52 @@ export async function GET(
       );
     }
 
-    const serverMetadataOverride = getOAuthServerMetadataOverride(integration);
-    const [serverMetadata, protectedResourceMetadata] = serverMetadataOverride
-      ? [serverMetadataOverride, undefined]
-      : await Promise.all([
-          discoverOAuthEndpoints(integration.url),
-          discoverOAuthProtectedResourceMetadata(integration.url),
-        ]);
-    const redirectUri = new URL('/api/mcp-oauth/callback', webUrl).toString();
-    const requestedScope = getRequestedScope(
-      protectedResourceMetadata?.scopes_supported ??
-        serverMetadata.scopes_supported,
-      integration,
-      connection.connectionRole,
-    );
+    const serverUrl = customTarget?.url ?? integration!.url!;
 
-    const staticClientInfo =
-      await resolveDeploymentStaticOauthClientInformation(webEnv, integration);
+    let serverMetadata: OAuthServerMetadata;
+    let protectedResourceMetadata: OAuthProtectedResourceMetadata | undefined;
+
+    if (customTarget) {
+      // Discovery for operator URLs runs through the SSRF-guarded fetch,
+      // including hops the server itself supplies. The AS metadata is
+      // persisted on the server row and pinned for callback and refresh.
+      serverMetadata = await ensureCustomMcpServerMetadata(customTarget);
+      protectedResourceMetadata = await discoverOAuthProtectedResourceMetadata(
+        serverUrl,
+        customTarget.oauthOptions,
+      );
+    } else {
+      const serverMetadataOverride = getOAuthServerMetadataOverride(
+        integration!,
+      );
+      [serverMetadata, protectedResourceMetadata] = serverMetadataOverride
+        ? [serverMetadataOverride, undefined]
+        : await Promise.all([
+            discoverOAuthEndpoints(serverUrl),
+            discoverOAuthProtectedResourceMetadata(serverUrl),
+          ]);
+    }
+
+    const redirectUri = new URL('/api/mcp-oauth/callback', webUrl).toString();
+    const requestedScope = customTarget
+      ? // MCP auth spec: request the scopes the protected resource
+        // advertises; otherwise let the server apply its defaults.
+        protectedResourceMetadata?.scopes_supported?.join(' ') || undefined
+      : getRequestedScope(
+          protectedResourceMetadata?.scopes_supported ??
+            serverMetadata.scopes_supported,
+          integration!,
+          connection.connectionRole,
+        );
+
+    // Manual client credentials on the custom-server row are the analogue of
+    // deployment-static catalog credentials: authoritative when present.
+    const staticClientInfo = customTarget
+      ? customTarget.manualClient
+      : await resolveDeploymentStaticOauthClientInformation(
+          webEnv,
+          integration!,
+        );
     let clientInfo: OAuthClientInformation | undefined;
 
     if (staticClientInfo) {
@@ -251,7 +303,7 @@ export async function GET(
       const tokenEndpointAuthMethod =
         getPreferredTokenEndpointAuthMethod(serverMetadata);
       const clientMetadata: OAuthClientMetadata = {
-        client_name: `${PRODUCT_NAME} - ${integration.name}`,
+        client_name: `${PRODUCT_NAME} - ${customTarget?.name ?? integration!.name}`,
         redirect_uris: [redirectUri],
         grant_types: ['authorization_code', 'refresh_token'],
         response_types: ['code'],
@@ -259,10 +311,18 @@ export async function GET(
         ...(requestedScope ? { scope: requestedScope } : {}),
       };
 
-      const registeredClient = await registerOAuthClient(
-        serverMetadata.registration_endpoint,
-        clientMetadata,
-      );
+      // Catalog registrations keep their historical call shape; custom
+      // targets add the guarded fetch options.
+      const registeredClient = customTarget
+        ? await registerOAuthClient(
+            serverMetadata.registration_endpoint,
+            clientMetadata,
+            customTarget.oauthOptions,
+          )
+        : await registerOAuthClient(
+            serverMetadata.registration_endpoint,
+            clientMetadata,
+          );
 
       const storedClientInfo: OAuthClientInformation = {
         ...registeredClient,
@@ -302,11 +362,20 @@ export async function GET(
     if (requestedScope) {
       authUrl.searchParams.set('scope', requestedScope);
     }
-    for (const parameter of getMcpIntegrationAuthorizationParameters(
-      integration,
-      connection.connectionRole,
-    )) {
-      authUrl.searchParams.set(parameter.name, parameter.value);
+
+    if (customTarget?.oauthOptions.resource) {
+      // RFC 8707 resource indicator, required of MCP clients by the current
+      // authorization spec; per-server opt-out for servers that reject it.
+      authUrl.searchParams.set('resource', customTarget.oauthOptions.resource);
+    }
+
+    if (integration) {
+      for (const parameter of getMcpIntegrationAuthorizationParameters(
+        integration,
+        connection.connectionRole,
+      )) {
+        authUrl.searchParams.set(parameter.name, parameter.value);
+      }
     }
 
     return NextResponse.redirect(authUrl.toString());

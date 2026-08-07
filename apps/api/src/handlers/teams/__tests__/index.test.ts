@@ -25,11 +25,14 @@ const {
   queueCommunicationMessageMock,
   redisSetMock,
   routeTaskMock,
+  launchClaimedTeamsSuggestionMock,
+  resolveAndClaimTeamsSuggestionReactionMock,
   setTrustedRunActingUserMock,
   shouldRouteUnmentionedReplyMock,
   teamsInstallationsTable,
   teamsUserMappingsTable,
   teamsUserMappingFindFirstMock,
+  trackedSuggestionMessageFindFirstMock,
   usersFindFirstMock,
   verifyBotFrameworkJwtMock,
   withContentionMock,
@@ -74,6 +77,8 @@ const {
   queueCommunicationMessageMock: vi.fn(),
   redisSetMock: vi.fn(),
   routeTaskMock: vi.fn(),
+  launchClaimedTeamsSuggestionMock: vi.fn(),
+  resolveAndClaimTeamsSuggestionReactionMock: vi.fn(),
   setTrustedRunActingUserMock: vi.fn(),
   shouldRouteUnmentionedReplyMock: vi.fn(),
   teamsInstallationsTable: {
@@ -85,6 +90,7 @@ const {
     teamsUserId: 'teamsUserId',
   },
   teamsUserMappingFindFirstMock: vi.fn(),
+  trackedSuggestionMessageFindFirstMock: vi.fn(),
   usersFindFirstMock: vi.fn(),
   verifyBotFrameworkJwtMock: vi.fn(),
   withContentionMock: vi.fn(),
@@ -104,6 +110,16 @@ vi.mock('@roomote/redis', () => ({
     set: redisSetMock,
   })),
   withContention: withContentionMock,
+}));
+
+vi.mock('../suggestion-start.js', () => ({
+  launchClaimedTeamsSuggestion: launchClaimedTeamsSuggestionMock,
+  parseTeamsSuggestionStartText: vi.fn(() => null),
+  resolveAndClaimTeamsSuggestionStart: vi.fn(async () => ({
+    outcome: 'no_cards',
+  })),
+  resolveAndClaimTeamsSuggestionReaction:
+    resolveAndClaimTeamsSuggestionReactionMock,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -134,6 +150,12 @@ vi.mock('@roomote/db/server', () => ({
     actingUserId: 'actingUserId',
     port: 'port',
     result: 'result',
+  },
+  trackedMessages: {
+    surface: 'surface',
+    kind: 'kind',
+    channelId: 'channelId',
+    messageTs: 'messageTs',
   },
   tasks: {
     id: 'tasks.id',
@@ -188,6 +210,9 @@ vi.mock('@roomote/db/server', () => ({
       },
       teamsUserMappings: {
         findFirst: teamsUserMappingFindFirstMock,
+      },
+      trackedMessages: {
+        findFirst: trackedSuggestionMessageFindFirstMock,
       },
       users: {
         findFirst: usersFindFirstMock,
@@ -379,6 +404,14 @@ describe('Teams webhook handler', () => {
     verifyBotFrameworkJwtMock.mockResolvedValue({ payload: {} });
     shouldRouteUnmentionedReplyMock.mockResolvedValue(false);
     callViaEmojiConfigMock.mockResolvedValue(null);
+    trackedSuggestionMessageFindFirstMock.mockResolvedValue(null);
+    resolveAndClaimTeamsSuggestionReactionMock.mockResolvedValue({
+      outcome: 'no_cards',
+    });
+    launchClaimedTeamsSuggestionMock.mockResolvedValue({
+      result: 'started',
+      runId: 91,
+    });
     withContentionMock.mockImplementation(
       async (
         _key: string,
@@ -443,6 +476,91 @@ describe('Teams webhook handler', () => {
         threadTs: 'activity-root',
       }),
     );
+  });
+
+  it('launches the exact suggested task when a linked user likes its card', async () => {
+    trackedSuggestionMessageFindFirstMock.mockResolvedValue({
+      workItemId: 'suggestion-1',
+    });
+    teamsUserMappingFindFirstMock.mockResolvedValue({
+      userId: 'mapped-user-1',
+    });
+    resolveAndClaimTeamsSuggestionReactionMock.mockResolvedValue({
+      outcome: 'claimed',
+      suggestion: {
+        id: 'suggestion-1',
+        title: 'Fix the flaky test',
+        brief: 'Remove the timing race.',
+        investigationContext: null,
+        targetRepositoryFullName: null,
+        targetEnvironmentId: null,
+        launchClaimedAt: new Date('2026-08-07T00:00:00.000Z'),
+      },
+    });
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer valid-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({
+          type: 'messageReaction',
+          id: 'suggestion-reaction-1',
+          text: undefined,
+          entities: undefined,
+          replyToId: 'suggestion-card-1',
+          reactionsAdded: [{ type: 'like' }],
+        }),
+      ),
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      started: true,
+      runId: 91,
+    });
+    expect(resolveAndClaimTeamsSuggestionReactionMock).toHaveBeenCalledWith({
+      conversationId: '19:conversation@thread.v2',
+      messageId: 'suggestion-card-1',
+    });
+    expect(launchClaimedTeamsSuggestionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        suggestion: expect.objectContaining({ id: 'suggestion-1' }),
+      }),
+    );
+    expect(callViaEmojiConfigMock).not.toHaveBeenCalled();
+  });
+
+  it('does not claim a reaction suggestion when account mapping fails', async () => {
+    trackedSuggestionMessageFindFirstMock.mockResolvedValue({
+      workItemId: 'suggestion-1',
+    });
+    teamsUserMappingFindFirstMock.mockRejectedValue(
+      new Error('database unavailable'),
+    );
+
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer valid-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({
+          type: 'messageReaction',
+          id: 'suggestion-reaction-error',
+          text: undefined,
+          entities: undefined,
+          replyToId: 'suggestion-card-1',
+          reactionsAdded: [{ type: 'like' }],
+        }),
+      ),
+    });
+
+    expect(response.status).toBe(500);
+    expect(resolveAndClaimTeamsSuggestionReactionMock).not.toHaveBeenCalled();
   });
 
   it('ignores reaction types outside the Teams native set', async () => {

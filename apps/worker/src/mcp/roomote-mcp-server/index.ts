@@ -55,7 +55,6 @@ import { handleGetChatChannelMessages } from './get-chat-channel-messages.js';
 import { handleGetChatMessageContext } from './get-chat-message-context.js';
 import { handleAddReactionToSlackMessage } from './add-reaction-to-slack-message.js';
 import { handleSendChatReactionEmoji } from './send-chat-reaction-emoji.js';
-import { handleSubmitTaskSuggestions } from './submit-task-suggestions.js';
 import { handleReportPlatformIssue } from './report-platform-issue.js';
 import { handleManageSourceControl } from './source-control.js';
 import { getArtifactConfig, getRoomoteConfig } from './config.js';
@@ -85,7 +84,7 @@ roomoteMcpServer.registerTool(
   {
     title: 'Manage Custom Automations',
     description:
-      'Admin-only management of deployment custom automations. List existing automations, resolve a cron or natural-language schedule, create or update an automation, delete an automation by exact ID, or run an enabled automation now. Natural-language schedules are converted to validated five-field cron in the deployment scheduling timezone. After successfully creating an automation in response to a conversational request, ask the user whether they want to run it now to test it.',
+      'Admin-only management of deployment custom automations. List existing automations, resolve a cron or natural-language schedule, create or update an automation, delete an automation by exact ID, or run an enabled automation now. When the user asks an automation to DM them, set their preferred connected targetProvider and targetMode to direct_message; no targetChannelId is needed. Natural-language schedules are converted to validated five-field cron in the deployment scheduling timezone. When a user asks an automation to offer help, suggest tasks, make follow-ups actionable or launchable, or turn findings or action items into tasks, encode that intent in product language by instructing the automation to post concrete actions as launchable suggested tasks alongside its report. Do not expose runtime tool names or parameter syntax in the stored prompt. A request only to summarize or list action items is not suggested-task intent. Only promise launchable suggested tasks when the automation has both a configured chat report destination and a repository or environment for executable work; otherwise keep actions as report text and explain the missing capability. After successfully creating an automation in response to a conversational request, ask the user whether they want to run it now to test it.',
     inputSchema: {
       action: z.enum([
         'list',
@@ -100,7 +99,12 @@ roomoteMcpServer.registerTool(
         .optional()
         .describe('Required for update, delete, and run_now.'),
       name: z.string().optional(),
-      prompt: z.string().optional(),
+      prompt: z
+        .string()
+        .optional()
+        .describe(
+          'Automation instructions written in product language. When the user intends actionable or launchable follow-up tasks and the automation has both a chat report destination and an executable workspace, instruct it to post qualifying actions as launchable suggested tasks alongside the report; otherwise keep actions as report text. Do not mention internal tool names or parameters.',
+        ),
       enabled: z.boolean().optional(),
       schedule: z
         .string()
@@ -121,6 +125,12 @@ roomoteMcpServer.registerTool(
         .nullable()
         .describe(
           'Destination provider. Pass null on update to clear the report destination.',
+        )
+        .optional(),
+      targetMode: z
+        .enum(['channel', 'direct_message'])
+        .describe(
+          'Destination mode. Use direct_message to send reports privately to the automation owner through the selected connected provider.',
         )
         .optional(),
       targetChannelId: z.string().optional(),
@@ -507,7 +517,7 @@ function shouldRegisterPlatformIssueTool(): boolean {
   return Boolean(process.env.ROOMOTE_TASK_ID?.trim());
 }
 
-function shouldRegisterTaskSuggestionsTool(): boolean {
+function shouldRegisterAutomationWorkItemsTool(): boolean {
   return process.env.ROOMOTE_TASK_TYPE === TaskPayloadKind.Scan;
 }
 
@@ -1098,118 +1108,7 @@ if (shouldRegisterPlatformIssueTool()) {
   );
 }
 
-function registerTaskSuggestionsTool(toolName: string) {
-  roomoteMcpServer.registerTool(
-    toolName,
-    {
-      title: 'Submit Task Suggestions',
-      description:
-        'Submit the final suggested tasks or actions discovered for the selected repositories. ' +
-        'Use this only after enough investigation. ' +
-        'Return up to 5 high-confidence, no-brainer suggestions that a user would likely want Roomote to start automatically.',
-      inputSchema: {
-        suggestions: z
-          .array(
-            z.object({
-              title: z
-                .string()
-                .min(1)
-                .max(140)
-                .describe('Short title for the suggested task'),
-              brief: z
-                .string()
-                .min(1)
-                .max(2000)
-                .describe(
-                  'Brief action-oriented description of the suggested task',
-                ),
-              category: z
-                .enum(['bug', 'security', 'chore', 'feature', 'improvement'])
-                .optional()
-                .describe(
-                  'Optional suggestion category: bug, security, chore, feature, or improvement.',
-                ),
-              priority: z
-                .enum(['P0', 'P1', 'P2', 'P3'])
-                .optional()
-                .describe('Optional suggestion priority: P0, P1, P2, or P3.'),
-              investigationContext: z
-                .string()
-                .min(1)
-                .max(4000)
-                .optional()
-                .describe(
-                  'Optional hidden implementation context for the implementing agent. This is not shown to Slack users.',
-                ),
-              targetRepositoryFullName: z
-                .string()
-                .min(1)
-                .optional()
-                .describe(
-                  'Optional owner/repo launch target for this suggestion.',
-                ),
-              targetEnvironmentId: z
-                .string()
-                .uuid()
-                .optional()
-                .describe(
-                  'Optional environment UUID to use when this suggestion should launch into an environment-backed workspace.',
-                ),
-              workspaceReadiness: workspaceReadinessSchema
-                .optional()
-                .describe(
-                  'Optional readiness mode for this suggestion: environment_backed or bare_repo.',
-                ),
-              readinessMessage: z
-                .string()
-                .min(1)
-                .max(500)
-                .optional()
-                .describe(
-                  'Optional short readiness note for bare-repo launches.',
-                ),
-            }),
-          )
-          .max(5)
-          .describe('Ordered list of up to 5 suggested tasks to persist'),
-      },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: false,
-        openWorldHint: false,
-      },
-    },
-    async (params): Promise<ToolResult> => {
-      const config = getRoomoteConfig();
-      if (!config) {
-        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
-      }
-
-      const taskId = process.env.ROOMOTE_TASK_ID;
-      if (!taskId?.trim()) {
-        return errorResult('ROOMOTE_TASK_ID environment variable not set');
-      }
-
-      const result = await handleSubmitTaskSuggestions(
-        {
-          taskId,
-          suggestions: params.suggestions,
-        },
-        config,
-      );
-
-      if (taskSuggestionResultHasSubmittedSuggestions(result)) {
-        hasSubmittedAutomationSlackSummary = true;
-      }
-
-      return result;
-    },
-  );
-}
-
-if (shouldRegisterTaskSuggestionsTool()) {
-  registerTaskSuggestionsTool('submit_task_suggestions');
+if (shouldRegisterAutomationWorkItemsTool()) {
   registerAutomationWorkItemsTool({
     server: roomoteMcpServer,
     toolName: 'submit_automation_work_items',
@@ -1308,6 +1207,26 @@ roomoteMcpServer.registerTool(
 
 if (shouldRegisterSlackThreadReplyTool()) {
   const chatReplySurfaceLabel = getChatReplySurfaceLabel();
+  const usesPinnedSuggestionContract =
+    process.env.ROOMOTE_TASK_TYPE === TaskPayloadKind.Scan;
+  const chatReplySuggestionSchema = usesPinnedSuggestionContract
+    ? z.object({
+        title: z.string().min(1).max(140),
+        brief: z.string().min(1).max(2000),
+        category: z
+          .enum(['bug', 'security', 'chore', 'feature', 'improvement'])
+          .optional(),
+        priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
+        investigationContext: z.string().min(1).max(4000).optional(),
+        targetRepositoryFullName: z.string().min(1),
+        targetEnvironmentId: z.string().uuid().optional(),
+        workspaceReadiness: workspaceReadinessSchema.optional(),
+        readinessMessage: z.string().min(1).max(500).optional(),
+      })
+    : z.object({
+        title: z.string().min(1).max(140),
+        brief: z.string().min(1).max(2000),
+      });
   const chatReplyMarkdownGuidance =
     chatReplySurfaceLabel === 'Slack'
       ? 'Supports the modern Slack Markdown contract from the Slack instructions. Use rich Markdown when it improves scanability. '
@@ -1332,6 +1251,8 @@ if (shouldRegisterSlackThreadReplyTool()) {
         "For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. " +
         chatReplyMarkdownGuidance +
         chatReplySourceLinkingGuidance +
+        'Use the optional suggestions parameter only when the reply identifies independent, high-confidence actions that users may want Roomote to start as separate tasks. Suggestions are posted inside the originating conversation. Do not use suggestions for ordinary summary bullets, status updates, questions, speculative ideas, or work explicitly identified in the conversation as already underway. ' +
+        'When suggestions are present, the tool automatically adds the surface-specific instruction for starting one; do not write a separate launch instruction. ' +
         'Write the message so its content clearly matches the selected purpose.',
       inputSchema: {
         purpose: z
@@ -1358,6 +1279,16 @@ if (shouldRegisterSlackThreadReplyTool()) {
           .optional()
           .describe(
             'Optional already-uploaded artifact IDs for images to attach.',
+          ),
+        suggestions: z
+          .array(chatReplySuggestionSchema)
+          .min(1)
+          .max(10)
+          .optional()
+          .describe(
+            usesPinnedSuggestionContract
+              ? `Optional independent actions to post inside the originating ${chatReplySurfaceLabel} conversation (maximum 10). This scheduled suggestion workflow must include its verified target repository and may include implementation metadata used when the task is started.`
+              : `Optional independent actions to post inside the originating ${chatReplySurfaceLabel} conversation (maximum 10). Use only for high-confidence tasks not explicitly identified in the conversation as already underway. Each suggestion contains only the title and description shown to users; Roomote routes the task when it is started.`,
           ),
       },
       annotations: {
@@ -1389,10 +1320,19 @@ if (shouldRegisterSlackThreadReplyTool()) {
           summary: params.message,
           imagePaths: params.imagePaths,
           imageArtifactIds: params.imageArtifactIds,
+          suggestions: params.suggestions,
+          chatReplySurface: chatReplySurfaceLabel,
         },
         artifactConfig,
         roomoteConfig,
       );
+
+      if (
+        params.suggestions &&
+        taskSuggestionResultHasSubmittedSuggestions(result)
+      ) {
+        hasSubmittedAutomationSlackSummary = true;
+      }
 
       recordSuccessfulSlackTurnSatisfactionResult(result, 'send_chat_reply', {
         replyPurpose: params.purpose,

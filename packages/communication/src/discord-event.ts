@@ -26,6 +26,18 @@ export const discordAttachmentSchema = z
   })
   .passthrough();
 
+const discordMessageSnapshotSchema = z
+  .object({
+    message: z
+      .object({
+        content: z.string().default(''),
+        mentions: z.array(discordUserSchema).default([]),
+        attachments: z.array(discordAttachmentSchema).default([]),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
 const discordChannelSchema = z
   .object({
     id: z.string(),
@@ -58,6 +70,7 @@ export const discordMessageSchema = z
       .optional(),
     mentions: z.array(discordUserSchema).default([]),
     attachments: z.array(discordAttachmentSchema).default([]),
+    message_snapshots: z.array(discordMessageSnapshotSchema).optional(),
     channel: discordChannelSchema.optional(),
     message_reference: z
       .object({
@@ -331,12 +344,41 @@ export function getDiscordEventCommunicationMetadata(
 export function getDiscordMessageAttachments(
   eventOrMessage: DiscordGatewayEvent | DiscordMessage,
 ): DiscordAttachment[] {
-  if (isDiscordGatewayEventValue(eventOrMessage)) {
-    return eventOrMessage.eventType === 'MESSAGE_CREATE'
-      ? eventOrMessage.payload.attachments
-      : [];
-  }
-  return eventOrMessage.attachments;
+  const message = isDiscordGatewayEventValue(eventOrMessage)
+    ? eventOrMessage.eventType === 'MESSAGE_CREATE'
+      ? eventOrMessage.payload
+      : undefined
+    : eventOrMessage;
+  if (!message) return [];
+  return [
+    ...message.attachments,
+    ...(message.message_snapshots ?? []).flatMap(
+      (snapshot) => snapshot.message.attachments,
+    ),
+  ];
+}
+
+export function getDiscordMessageContent(message: DiscordMessage): string {
+  return [
+    message.content,
+    ...(message.message_snapshots ?? []).map(
+      (snapshot) => snapshot.message.content,
+    ),
+  ]
+    .map((content) => content.trim())
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+export function getDiscordMessageMentions(
+  message: DiscordMessage,
+): DiscordUser[] {
+  return [
+    ...message.mentions,
+    ...(message.message_snapshots ?? []).flatMap(
+      (snapshot) => snapshot.message.mentions,
+    ),
+  ];
 }
 
 function isDiscordGatewayEventValue(
@@ -403,10 +445,12 @@ export function isDiscordBotMentioned(
   botUserId: string | undefined,
 ): boolean {
   if (!botUserId) return false;
+  const mentions = getDiscordMessageMentions(message);
+  const content = getDiscordMessageContent(message);
   return (
-    message.mentions.some((mention) => mention.id === botUserId) ||
-    message.content.includes(`<@${botUserId}>`) ||
-    message.content.includes(`<@!${botUserId}>`)
+    mentions.some((mention) => mention.id === botUserId) ||
+    content.includes(`<@${botUserId}>`) ||
+    content.includes(`<@!${botUserId}>`)
   );
 }
 
@@ -496,7 +540,8 @@ export function isDiscordTaskEntryEvent(
   if (message) {
     if (message.author.bot && options.channelAutoStart !== true) return false;
     const hasContent = Boolean(
-      message.content.trim() || message.attachments.length,
+      getDiscordMessageContent(message) ||
+      getDiscordMessageAttachments(message).length,
     );
     return (
       hasContent &&
@@ -531,11 +576,14 @@ export function discordEventToQueuedCommunicationMessage(
   const message = getDiscordMessageCreate(event);
   if (message) {
     const attachmentSummary = formatDiscordAttachmentSummary(
-      message.attachments,
+      getDiscordMessageAttachments(message),
     );
     const strippedText = expandDiscordUserMentions(
-      stripDiscordBotMention(message.content, options.botUserId),
-      message.mentions,
+      stripDiscordBotMention(
+        getDiscordMessageContent(message),
+        options.botUserId,
+      ),
+      getDiscordMessageMentions(message),
     );
     const extractedText = (options.attachmentText ?? [])
       .map((text) => text.trim())

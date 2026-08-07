@@ -16,11 +16,13 @@ import {
   getTelegramUpdateCallbackQuery,
   getTelegramUpdateCommunicationMetadata,
   getTelegramUpdateMessage,
+  getTelegramUpdateMessageReaction,
   getTelegramNewTaskCommand,
   isTelegramImplicitTopicCreatedMessage,
   isTelegramPrivateChat,
   isTelegramStartCommand,
   isTelegramTaskEntryUpdate,
+  isNewTelegramThumbsUpReaction,
   parseTelegramUpdate,
   telegramUpdateToQueuedCommunicationMessage,
 } from '@roomote/communication/telegram-update';
@@ -39,7 +41,10 @@ import {
   restoreTelegramLinkCode,
 } from '@roomote/sdk/server';
 
-import { handleTelegramCallbackQuery } from './callback-actions.js';
+import {
+  handleTelegramCallbackQuery,
+  handleTelegramSuggestionReaction,
+} from './callback-actions.js';
 import { handleTelegramRoutingReply } from './routing-confirmation.js';
 import {
   resolveTelegramSenderUserId,
@@ -123,6 +128,25 @@ telegram.post('/', async (c) => {
   }
 
   const update = parsed.data;
+  const messageReaction = getTelegramUpdateMessageReaction(update);
+
+  if (messageReaction) {
+    const claimedReaction = await claimTelegramUpdate(update.update_id);
+    if (!claimedReaction) {
+      return c.json({ ok: true, duplicate: true });
+    }
+    if (!isNewTelegramThumbsUpReaction(messageReaction)) {
+      return c.json({ ok: true, ignored: 'unsupported_reaction' });
+    }
+
+    const handled = await handleTelegramSuggestionReaction(messageReaction);
+    return c.json(
+      handled
+        ? { ok: true, suggestionStarted: true }
+        : { ok: true, ignored: 'reaction_target_not_suggestion' },
+    );
+  }
+
   const callbackQuery = getTelegramUpdateCallbackQuery(update);
 
   if (callbackQuery) {

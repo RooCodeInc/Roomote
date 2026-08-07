@@ -586,7 +586,7 @@ describe('TelegramCommunicationProvider', () => {
         body: JSON.stringify({
           url: 'https://app.example.test/api/webhooks/telegram',
           secret_token: 'hook-secret',
-          allowed_updates: ['message', 'callback_query'],
+          allowed_updates: ['message', 'callback_query', 'message_reaction'],
         }),
       }),
     );
@@ -601,7 +601,7 @@ describe('TelegramCommunicationProvider', () => {
           pending_update_count: 2,
           last_error_message: '502 Bad Gateway',
           last_error_date: 1_783_200_000,
-          allowed_updates: ['message', 'callback_query'],
+          allowed_updates: ['message', 'callback_query', 'message_reaction'],
         },
       }),
     );
@@ -616,7 +616,7 @@ describe('TelegramCommunicationProvider', () => {
       pendingUpdateCount: 2,
       lastErrorMessage: '502 Bad Gateway',
       lastErrorAtMs: 1_783_200_000_000,
-      allowedUpdates: ['message', 'callback_query'],
+      allowedUpdates: ['message', 'callback_query', 'message_reaction'],
     });
   });
 

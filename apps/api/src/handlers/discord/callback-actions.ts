@@ -16,13 +16,21 @@ import {
   sql,
   taskRuns,
 } from '@roomote/db/server';
-import type { DiscordInteraction } from '@roomote/communication/discord-event';
+import type {
+  DiscordInteraction,
+  DiscordUser,
+} from '@roomote/communication/discord-event';
 import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import { findDiscordMappedUserId } from '@roomote/sdk/server';
 import { parsePrReviewActionCallbackData } from '@roomote/types';
 
 import { apiLogger } from '../../logging.js';
 import { cancelOrphanedWorkItemRunBestEffort } from '../tasks/orphaned-work-item-run.js';
+import {
+  claimCurrentThreadSuggestionByMessage,
+  findCurrentThreadSuggestionIdByMessage,
+  type ClaimedCurrentThreadSuggestion,
+} from '../tasks/current-thread-suggestion-reaction.js';
 import { stopTaskRun } from '../tasks/task-stop.js';
 import { replyToDiscordEvent } from './replies.js';
 import {
@@ -37,6 +45,7 @@ import type { DiscordChannelContext } from './task-launch.js';
 import {
   discordMetadataForChannel,
   resolveDiscordChannelContext,
+  resolveDiscordWorkspace,
 } from './task-launch.js';
 import { claimDiscordSuggestionLaunch } from './setup-suggestions.js';
 import { startNewDiscordTask } from './task-orchestration.js';
@@ -263,6 +272,30 @@ async function handleSuggestionCallback(input: {
     });
     return;
   }
+
+  await launchClaimedDiscordSuggestion({
+    provider: input.provider,
+    applicationId: input.applicationId,
+    channel: input.channel,
+    suggestion,
+    sender,
+    senderUserId,
+    triggerId: input.interaction.id,
+    senderDisplayName: input.interaction.member?.nick,
+  });
+}
+
+async function launchClaimedDiscordSuggestion(input: {
+  provider: DiscordCommunicationProvider;
+  applicationId: string;
+  channel: DiscordChannelContext;
+  suggestion: ClaimedCurrentThreadSuggestion;
+  sender: DiscordUser;
+  senderUserId: string;
+  triggerId: string;
+  senderDisplayName?: string | null;
+}): Promise<void> {
+  const suggestion = input.suggestion;
   const claimedAt = suggestion.launchClaimedAt;
   try {
     if (!input.channel.parentChannelId && !input.channel.isDirectMessage) {
@@ -285,6 +318,9 @@ async function handleSuggestionCallback(input: {
       ...(suggestion.targetRepositoryFullName
         ? ['', `Target repository: ${suggestion.targetRepositoryFullName}`]
         : []),
+      ...(suggestion.targetEnvironmentId
+        ? ['', `Target environment: ${suggestion.targetEnvironmentId}`]
+        : []),
       ...(suggestion.investigationContext
         ? ['', `Context: ${suggestion.investigationContext}`]
         : []),
@@ -293,26 +329,37 @@ async function handleSuggestionCallback(input: {
       provider: 'discord',
       text: promptText,
       user:
-        input.interaction.member?.nick?.trim() ||
-        sender.global_name?.trim() ||
-        sender.username,
-      userId: senderUserId,
-      ts: input.interaction.id,
+        input.senderDisplayName?.trim() ||
+        input.sender.global_name?.trim() ||
+        input.sender.username,
+      userId: input.senderUserId,
+      ts: input.triggerId,
       channel: launchChannel.channelId,
       turnPolicy: { reactionsAllowed: true },
     };
+    const workspaceOverride = suggestion.targetEnvironmentId
+      ? await resolveDiscordWorkspace({
+          type: 'environment',
+          id: suggestion.targetEnvironmentId,
+          name: suggestion.targetEnvironmentId,
+        })
+      : undefined;
+    if (suggestion.targetEnvironmentId && !workspaceOverride) {
+      throw new Error('The suggestion target environment is unavailable.');
+    }
     const started = await startNewDiscordTask({
       provider: input.provider,
       applicationId: input.applicationId,
-      requesterDiscordUserId: sender.id,
-      launchOwnerUserId: senderUserId,
+      requesterDiscordUserId: input.sender.id,
+      launchOwnerUserId: input.senderUserId,
       queuedMessage,
       metadata: discordMetadataForChannel({
         channel: launchChannel,
-        messageId: input.interaction.id,
+        messageId: input.triggerId,
       }),
       channel: launchChannel,
       skipRoutingConfirmation: true,
+      ...(workspaceOverride ? { workspaceOverride } : {}),
     });
     if (started.status !== 'started') {
       await releaseWorkItemClaim(db, { id: suggestion.id, claimedAt });
@@ -370,6 +417,70 @@ async function handleSuggestionCallback(input: {
         : `Could not start “${suggestion.title}” — try describing the task in a message instead.`,
     });
   }
+}
+
+export async function handleDiscordSuggestionReaction(input: {
+  provider: DiscordCommunicationProvider;
+  applicationId: string;
+  channel: DiscordChannelContext;
+  channelId: string;
+  messageId: string;
+  eventId: string;
+  sender: DiscordUser;
+  senderDisplayName?: string | null;
+}): Promise<boolean> {
+  const suggestionId = await findCurrentThreadSuggestionIdByMessage({
+    surface: 'discord',
+    channelId: input.channelId,
+    messageId: input.messageId,
+  });
+  if (!suggestionId) {
+    return false;
+  }
+
+  const senderUserId = await findDiscordMappedUserId(input.sender.id);
+  if (!senderUserId) {
+    await input.provider.postMessage({
+      channelId: input.channel.parentChannelId ?? input.channel.channelId,
+      ...(input.channel.parentChannelId
+        ? { threadId: input.channel.channelId }
+        : {}),
+      text: 'Link your Roomote account before starting suggested tasks.',
+    });
+    return true;
+  }
+
+  const claim = await claimCurrentThreadSuggestionByMessage({
+    surface: 'discord',
+    channelId: input.channelId,
+    messageId: input.messageId,
+  });
+  if (claim.outcome === 'no_card') {
+    return false;
+  }
+  if (claim.outcome === 'already_started') {
+    await input.provider.postMessage({
+      channelId: input.channel.parentChannelId ?? input.channel.channelId,
+      ...(input.channel.parentChannelId
+        ? { threadId: input.channel.channelId }
+        : {}),
+      text: 'That idea was already started or is no longer available.',
+    });
+    return true;
+  }
+  const suggestion = claim.suggestion;
+
+  await launchClaimedDiscordSuggestion({
+    provider: input.provider,
+    applicationId: input.applicationId,
+    channel: input.channel,
+    suggestion,
+    sender: input.sender,
+    senderUserId,
+    triggerId: input.eventId,
+    senderDisplayName: input.senderDisplayName,
+  });
+  return true;
 }
 
 export async function handleDiscordComponentInteraction(input: {

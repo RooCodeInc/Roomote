@@ -42,6 +42,22 @@ After connecting the provider, run a small task from chat and confirm that:
 - replies in the thread continue the same task
 - final summaries and links are posted back to chat
 
+## Start suggested tasks
+
+When a task or automation report identifies independent follow-up work, Roomote
+can post each action as a suggested task in the originating conversation. Start
+the exact suggestion you want by reacting to its message:
+
+- on Slack, add a thumbs-up reaction
+- on Discord, add a 👍 reaction
+- on Microsoft Teams, use the native Like reaction
+- on Telegram, add a new 👍 reaction or use the suggestion's **Start** button
+
+The person starting the suggestion must have a linked Roomote account. Roomote
+also needs an environment that can run the suggestion's target repository.
+Configured **Call Roomote via emoji** automations are separate from these
+suggestion reactions.
+
 Use the same stable public URL for every provider app setting that requires a
 callback or webhook. If you change that URL, update those provider settings and
 restart Roomote with the matching deployment URL. Discord receives messages

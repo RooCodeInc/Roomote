@@ -32,6 +32,61 @@ type TeamsAutomationSuggestion = {
   targetEnvironmentId: string | null;
 };
 
+export async function postCurrentThreadSuggestionsToTeams(params: {
+  sourceTaskId: string;
+  suggestionGroupKey: string;
+  createdByUserId: string | null;
+  launchRouting?: 'router';
+  conversationId: string;
+  serviceUrl: string;
+  threadId?: string | null;
+  suggestions: TeamsAutomationSuggestion[];
+}): Promise<boolean> {
+  if (params.suggestions.length === 0) {
+    return true;
+  }
+
+  for (const [index, suggestion] of params.suggestions.entries()) {
+    const posted = await postTeamsAutomationMessageBestEffort({
+      conversationId: params.conversationId,
+      serviceUrl: params.serviceUrl,
+      ...(params.threadId ? { threadId: params.threadId } : {}),
+      text: `**${index + 1}. ${suggestion.title}**\n${suggestion.brief}`,
+    });
+
+    if (!posted?.messageId) {
+      return false;
+    }
+
+    const trackedRow = {
+      surface: 'teams' as const,
+      kind: 'suggestion_card' as const,
+      dedupeKey: `${params.conversationId}:${posted.messageId}`,
+      channelId: params.conversationId,
+      ...(params.threadId ? { threadTs: params.threadId } : {}),
+      messageTs: posted.messageId,
+      workItemId: suggestion.id,
+      createdByUserId: params.createdByUserId,
+      metadata: {
+        suggestionType: 'suggested_tasks',
+        suggestionKey: `${params.sourceTaskId}:${suggestion.id}`,
+        suggestionGroupKey: params.suggestionGroupKey,
+        ...(params.launchRouting
+          ? { launchRouting: params.launchRouting }
+          : {}),
+      },
+    };
+    await db
+      .insert(trackedMessages)
+      .values(trackedRow)
+      .onConflictDoNothing({
+        target: [trackedMessages.kind, trackedMessages.dedupeKey],
+      });
+  }
+
+  return true;
+}
+
 /**
  * Teams counterpart of the scheduled-automation Slack/Telegram summaries, and
  * the last fallback (Slack > Telegram > Teams). Posts one markdown message to

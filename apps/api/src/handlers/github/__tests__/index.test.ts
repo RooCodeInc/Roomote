@@ -412,6 +412,83 @@ describe('github webhook router', () => {
     expect(mockHandlePrComment).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      label: 'merges',
+      merged: true,
+      mergedAt: '2026-08-06T12:00:00Z',
+      status: 'merged',
+    },
+    {
+      label: 'closes without merging',
+      merged: false,
+      mergedAt: null,
+      status: 'closed',
+    },
+  ] as const)(
+    'notifies linked tasks when a pull request $label in a skipped repository',
+    async ({ merged, mergedAt, status }) => {
+      mockIsRepoSkipped.mockReturnValue(true);
+      mockHandlePrMerge.mockResolvedValue({ status: 'ok' });
+      mockUpdateTaskPrStatus.mockResolvedValue(undefined);
+      mockUpsertGitHubPullRequestFactFromWebhook.mockResolvedValue(undefined);
+
+      const payload = {
+        action: 'closed',
+        installation: { id: 1 },
+        repository: {
+          id: 10,
+          full_name: 'test-org/test-repo',
+        },
+        pull_request: {
+          id: 100,
+          number: 42,
+          title: 'Test PR',
+          html_url: 'https://github.com/test-org/test-repo/pull/42',
+          state: 'closed',
+          draft: false,
+          merged,
+          merged_at: mergedAt,
+          closed_at: '2026-08-06T12:00:00Z',
+          created_at: '2026-08-06T11:00:00Z',
+          updated_at: '2026-08-06T12:00:00Z',
+          user: { login: 'author' },
+          merged_by: merged ? { login: 'merger' } : null,
+        },
+        sender: { login: merged ? 'merger' : 'closer' },
+      };
+
+      const response = await app.request(
+        'http://localhost/api/webhooks/github',
+        {
+          method: 'POST',
+          headers: {
+            'x-github-delivery': `delivery-skipped-repo-${status}`,
+            'x-github-event': 'pull_request',
+            'x-hub-signature-256': 'sha256=test',
+          },
+          body: JSON.stringify(payload),
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(mockUpdateTaskPrStatus).toHaveBeenCalledWith(
+        'github',
+        'test-org/test-repo',
+        42,
+        status,
+      );
+      expect(mockRecordPrStatusChangeInTaskHistory).toHaveBeenCalledWith(
+        expect.objectContaining({
+          repository: 'test-org/test-repo',
+          prNumber: 42,
+          status,
+        }),
+      );
+      expect(mockHandlePrMerge).toHaveBeenCalledWith(payload);
+    },
+  );
+
   it('verifies deliveries with a secret that only exists in encrypted deployment env vars', async () => {
     mockResolveDeploymentEnvVar.mockResolvedValue('db-only-secret');
 

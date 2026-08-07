@@ -9,10 +9,7 @@ import {
   SUGGESTION_PRIORITY_LABELS,
 } from '@roomote/types';
 
-type SuggestionBadgeStyle = 'full' | 'color_only';
-
 type SuggestionSlackTextOptions = {
-  badgeStyle?: SuggestionBadgeStyle;
   quote?: boolean;
 };
 
@@ -39,7 +36,6 @@ export function getSharedScheduledSuggestionSlackTextOptions(
   }
 
   return {
-    badgeStyle: 'color_only',
     quote: true,
   };
 }
@@ -60,27 +56,12 @@ export function buildSuggestionSlackText(
   params: {
     title: string;
     brief: string;
-    category?: string | null;
-    priority?: string | null;
-    targetRepositoryFullName?: string | null;
     footerText?: string | null;
   },
   options: SuggestionSlackTextOptions = {},
 ): string {
-  const repoLabel = params.targetRepositoryFullName
-    ? ` [${params.targetRepositoryFullName}](https://github.com/${params.targetRepositoryFullName})`
-    : '';
-
-  const prefix = buildSuggestionBadgePrefix(
-    {
-      category: params.category,
-      priority: params.priority,
-    },
-    { style: options.badgeStyle },
-  );
-
   const text = [
-    `**${prefix}${params.title}**${repoLabel}`,
+    `**${params.title}**`,
     params.brief,
     params.footerText?.trim() || null,
   ]
@@ -90,31 +71,23 @@ export function buildSuggestionSlackText(
   return options.quote ? quoteSlackMarkdown(text) : text;
 }
 
-export function buildSuggestionBadgePrefix(
-  params: {
-    category?: string | null;
-    priority?: string | null;
-  },
-  options: { style?: SuggestionBadgeStyle } = {},
-): string {
+export function buildSuggestionBadgePrefix(params: {
+  category?: string | null;
+  priority?: string | null;
+}): string {
   const badges: string[] = [];
-  const badgeStyle = options.style ?? 'full';
 
   if (params.priority && suggestionPrioritySet.has(params.priority)) {
     const priority = params.priority as SuggestionPriority;
     badges.push(
-      badgeStyle === 'color_only'
-        ? SUGGESTION_PRIORITY_EMOJIS[priority]
-        : `${SUGGESTION_PRIORITY_EMOJIS[priority]} [${SUGGESTION_PRIORITY_LABELS[priority]}]`,
+      `${SUGGESTION_PRIORITY_EMOJIS[priority]} [${SUGGESTION_PRIORITY_LABELS[priority]}]`,
     );
   }
 
   if (params.category && suggestionCategorySet.has(params.category)) {
     const category = params.category as SuggestionCategory;
     badges.push(
-      badgeStyle === 'color_only'
-        ? `[${SUGGESTION_CATEGORY_LABELS[category]}]`
-        : `${SUGGESTION_CATEGORY_EMOJIS[category]} [${SUGGESTION_CATEGORY_LABELS[category]}]`,
+      `${SUGGESTION_CATEGORY_EMOJIS[category]} [${SUGGESTION_CATEGORY_LABELS[category]}]`,
     );
   }
 

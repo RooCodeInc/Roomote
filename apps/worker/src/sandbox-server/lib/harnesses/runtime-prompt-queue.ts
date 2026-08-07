@@ -24,6 +24,13 @@ interface RuntimePromptQueueCallbacks {
   emitRuntimeOutput: (event: AcpMessage) => void;
 }
 
+function isHiddenPlatformPrompt(prompt: {
+  queueOnly?: boolean;
+  visibleInTranscript?: boolean;
+}): boolean {
+  return prompt.queueOnly === true || prompt.visibleInTranscript === false;
+}
+
 export class RuntimePromptQueue {
   private queuedMessages: QueuedPromptMessage[] = [];
   private queuedMessageIdCounter = 0;
@@ -43,11 +50,15 @@ export class RuntimePromptQueue {
     userImageUrl?: string;
     clientMessageId?: string;
   }): string {
+    // Hidden platform follow-ups reuse one clientMessageId per logical
+    // notification (e.g. the PR re-review prompt for a run), so a newer
+    // enqueue supersedes the queued one instead of stacking duplicates.
+    // User-visible messages are never replaced.
     const replaceIndex =
-      prompt.queueOnly && prompt.clientMessageId
+      isHiddenPlatformPrompt(prompt) && prompt.clientMessageId
         ? this.queuedMessages.findIndex(
             (message) =>
-              message.queueOnly &&
+              isHiddenPlatformPrompt(message) &&
               message.clientMessageId === prompt.clientMessageId,
           )
         : -1;
