@@ -1353,6 +1353,28 @@ export async function submitTaskSuggestions(
       }
     }
 
+    if (requiresOrgWideTargetRepository) {
+      const candidateRepositorySet = new Set(
+        candidateRepositories.map((repository) => repository.fullName),
+      );
+      const invalidTargetRepository = parsedBody.data.suggestions
+        .map((suggestion) => suggestion.targetRepositoryFullName?.trim())
+        .find(
+          (targetRepositoryFullName) =>
+            targetRepositoryFullName &&
+            !candidateRepositorySet.has(targetRepositoryFullName),
+        );
+
+      if (invalidTargetRepository) {
+        return c.json(
+          {
+            error: `targetRepositoryFullName "${invalidTargetRepository}" is not part of this org-wide task`,
+          },
+          400,
+        );
+      }
+    }
+
     const repositoryIds = candidateRepositories.map(
       (repository) => repository.id,
     );

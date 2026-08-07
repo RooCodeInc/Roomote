@@ -593,9 +593,38 @@ describe('submitTaskSuggestions', () => {
     );
   });
 
-  it.each([TaskPayloadKind.StandardTask, TaskPayloadKind.Scan])(
-    'rejects org-wide current-thread %s suggestions without a target repository',
-    async (payloadKind) => {
+  it.each([
+    {
+      description: 'standard suggestions without a target repository',
+      payloadKind: TaskPayloadKind.StandardTask,
+      targetRepositoryFullName: undefined,
+      expectedError:
+        'targetRepositoryFullName is required for org-wide current-thread suggestions',
+    },
+    {
+      description: 'scan suggestions without a target repository',
+      payloadKind: TaskPayloadKind.Scan,
+      targetRepositoryFullName: undefined,
+      expectedError:
+        'targetRepositoryFullName is required for org-wide current-thread suggestions',
+    },
+    {
+      description: 'standard suggestions with an unknown target repository',
+      payloadKind: TaskPayloadKind.StandardTask,
+      targetRepositoryFullName: 'wrong/repository',
+      expectedError:
+        'targetRepositoryFullName "wrong/repository" is not part of this org-wide task',
+    },
+    {
+      description: 'scan suggestions with an unknown target repository',
+      payloadKind: TaskPayloadKind.Scan,
+      targetRepositoryFullName: 'wrong/repository',
+      expectedError:
+        'targetRepositoryFullName "wrong/repository" is not part of this org-wide task',
+    },
+  ])(
+    'rejects org-wide current-thread $description',
+    async ({ payloadKind, targetRepositoryFullName, expectedError }) => {
       mockTaskRunFindFirst.mockResolvedValue({
         id: 1,
         payloadKind,
@@ -627,6 +656,9 @@ describe('submitTaskSuggestions', () => {
               {
                 title: 'Fix the parser',
                 brief: 'Nil access is crashing the parser.',
+                ...(targetRepositoryFullName
+                  ? { targetRepositoryFullName }
+                  : {}),
               },
             ],
           }),
@@ -635,8 +667,7 @@ describe('submitTaskSuggestions', () => {
 
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toEqual({
-        error:
-          'targetRepositoryFullName is required for org-wide current-thread suggestions',
+        error: expectedError,
       });
       expect(insertedWorkItemValues).toHaveLength(0);
     },
