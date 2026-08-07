@@ -145,6 +145,63 @@ describe('custom-automations MCP routes', () => {
       );
     });
 
+    it('stores DM me as a logical Slack user target', async () => {
+      const { app } = createApp();
+      mockResolveCustomAutomationSchedule.mockResolvedValue({
+        status: 'resolved',
+        scheduleMode: 'daily',
+        cronExpression: null,
+        resolution: null,
+      });
+      mockCreateCustomAutomation.mockResolvedValue({ id: 'automation-1' });
+
+      const res = await postCreate(
+        app,
+        createBody({
+          targetProvider: 'slack',
+          targetMode: 'direct_message',
+        }),
+      );
+
+      expect(res.status).toBe(201);
+      expect(mockCreateCustomAutomation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          createdByUserId: 'admin-1',
+          target: {
+            provider: 'slack',
+            targetKind: 'slack_user',
+            externalRef: 'admin-1',
+          },
+        }),
+      );
+    });
+
+    it('rejects direct-message mode for providers without DM support', async () => {
+      const { app } = createApp();
+      mockListConnectedCommunicationProviders.mockResolvedValue(['discord']);
+      mockResolveCustomAutomationSchedule.mockResolvedValue({
+        status: 'resolved',
+        scheduleMode: 'daily',
+        cronExpression: null,
+        resolution: null,
+      });
+
+      const res = await postCreate(
+        app,
+        createBody({
+          targetProvider: 'discord',
+          targetMode: 'direct_message',
+          targetChannelId: 'channel-1',
+        }),
+      );
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: 'Direct-message destinations currently require Slack.',
+      });
+      expect(mockCreateCustomAutomation).not.toHaveBeenCalled();
+    });
+
     it('returns 400 with the message when the environment does not exist', async () => {
       const { app } = createApp();
       mockCreateCustomAutomation.mockRejectedValue(
@@ -273,6 +330,63 @@ describe('custom-automations MCP routes', () => {
       environmentId: ENVIRONMENT_ID,
       target: {},
     };
+
+    it('preserves a DM-me target without treating its user reference as a channel', async () => {
+      const { app } = createApp();
+      mockGetCustomAutomationById.mockResolvedValue({
+        ...existing,
+        createdByUserId: 'admin-1',
+        target: {
+          provider: 'slack',
+          targetKind: 'slack_user',
+          externalRef: 'admin-1',
+        },
+      });
+      mockUpdateCustomAutomation.mockResolvedValue({ id: 'automation-1' });
+
+      const res = await app.request('/custom-automations/automation-1', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ enabled: false }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockUpdateCustomAutomation).toHaveBeenCalledWith(
+        'automation-1',
+        expect.objectContaining({
+          target: {
+            provider: 'slack',
+            targetKind: 'slack_user',
+            externalRef: 'admin-1',
+          },
+        }),
+      );
+    });
+
+    it('rejects switching a DM target to channel mode without a channel', async () => {
+      const { app } = createApp();
+      mockGetCustomAutomationById.mockResolvedValue({
+        ...existing,
+        createdByUserId: 'admin-1',
+        target: {
+          provider: 'slack',
+          targetKind: 'slack_user',
+          externalRef: 'admin-1',
+        },
+      });
+
+      const res = await app.request('/custom-automations/automation-1', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ targetMode: 'channel' }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({
+        error: 'targetChannelId is required when targetProvider is set.',
+      });
+      expect(mockUpdateCustomAutomation).not.toHaveBeenCalled();
+    });
 
     it('returns 400 with the message for a known validation failure', async () => {
       const { app } = createApp();

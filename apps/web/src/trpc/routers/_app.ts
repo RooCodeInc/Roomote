@@ -719,6 +719,7 @@ const automationsRouter = createRouter({
         targetProvider: z
           .enum(['slack', 'discord', 'teams', 'telegram'])
           .optional(),
+        targetMode: z.enum(['channel', 'direct_message']).optional(),
         targetChannelId: z.string().trim().min(1).max(160).optional(),
         targetServiceUrl: z
           .string()
@@ -761,6 +762,7 @@ const automationsRouter = createRouter({
         targetProvider: z
           .enum(['slack', 'discord', 'teams', 'telegram'])
           .optional(),
+        targetMode: z.enum(['channel', 'direct_message']).optional(),
         targetChannelId: z.string().trim().min(1).max(160).optional(),
         targetServiceUrl: z
           .string()

@@ -144,6 +144,7 @@ export type BackgroundAutomationProvider =
 
 export type BackgroundAutomationTargetKind =
   | 'slack_channel'
+  | 'slack_user'
   | 'teams_channel'
   | 'telegram_chat'
   | 'discord_channel'
@@ -161,7 +162,7 @@ export type AutomationTarget = {
 
 /**
  * A custom automation's stored report destination: a full AutomationTarget,
- * or the empty object (the column default) when no report channel is
+ * or the empty object (the column default) when no report destination is
  * configured.
  */
 export type OptionalAutomationTarget = AutomationTarget | Record<string, never>;

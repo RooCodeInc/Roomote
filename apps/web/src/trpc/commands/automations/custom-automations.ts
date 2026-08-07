@@ -58,8 +58,9 @@ export type CustomAutomationWriteInput = {
   /** Provider/model launch override, or null for the deployment default. */
   model?: string | null;
   environmentId: string;
-  /** Omitted when the automation has no report destination channel. */
+  /** Omitted when the automation has no report destination. */
   targetProvider?: 'slack' | 'discord' | 'teams' | 'telegram';
+  targetMode?: 'channel' | 'direct_message';
   targetChannelId?: string;
   targetServiceUrl?: string | null;
 };
@@ -99,12 +100,23 @@ function toListItem(
 
 function buildTarget(
   input: CustomAutomationWriteInput,
+  ownerUserId: string,
 ): OptionalAutomationTarget {
   if (!input.targetProvider) {
     return {};
   }
+  if (
+    input.targetMode === 'direct_message' &&
+    input.targetProvider !== 'slack'
+  ) {
+    throw new Error('Direct-message destinations currently require Slack.');
+  }
 
-  const externalRef = input.targetChannelId?.trim() ?? '';
+  const directMessage =
+    input.targetProvider === 'slack' && input.targetMode === 'direct_message';
+  const externalRef = directMessage
+    ? ownerUserId
+    : (input.targetChannelId?.trim() ?? '');
   if (!externalRef) {
     throw new Error(
       'Choose a destination channel for the selected provider, or set the destination to None.',
@@ -124,7 +136,9 @@ function buildTarget(
   const provider = input.targetProvider as BackgroundAutomationProvider;
   const target: AutomationTarget = {
     provider,
-    targetKind: targetKindByProvider[input.targetProvider],
+    targetKind: directMessage
+      ? 'slack_user'
+      : targetKindByProvider[input.targetProvider],
     externalRef,
   };
 
@@ -189,7 +203,7 @@ export async function createCustomAutomationCommand(
     cronExpression,
     model: input.model ?? null,
     environmentId: input.environmentId,
-    target: buildTarget(input),
+    target: buildTarget(input, auth.userId),
     createdByUserId: auth.userId,
   });
 
@@ -218,6 +232,11 @@ export async function updateCustomAutomationCommand(
     await assertDestinationConnected(input.targetProvider);
   }
 
+  const existing = await getCustomAutomationById(input.id);
+  if (!existing) {
+    throw new Error('Custom automation was not found.');
+  }
+
   const updated = await updateCustomAutomation(input.id, {
     name: input.name,
     prompt: input.prompt,
@@ -226,7 +245,7 @@ export async function updateCustomAutomationCommand(
     cronExpression,
     model: input.model ?? null,
     environmentId: input.environmentId,
-    target: buildTarget(input),
+    target: buildTarget(input, existing.createdByUserId ?? auth.userId),
   });
 
   return toListItem(updated);

@@ -19,39 +19,58 @@ function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+async function resolveSlackUserDirectMessage(userId: string): Promise<{
+  channelId: string;
+  slack: SlackNotifier;
+  teamId: string;
+} | null> {
+  const installations = await db.query.slackInstallations.findMany({
+    where: eq(slackInstallations.isActive, true),
+    columns: { botAccessToken: true, teamId: true },
+  });
+
+  for (const installation of installations) {
+    const mapping = await db.query.slackUserMappings.findFirst({
+      where: and(
+        eq(slackUserMappings.userId, userId),
+        eq(slackUserMappings.slackTeamId, installation.teamId),
+      ),
+      columns: { slackUserId: true },
+    });
+
+    if (!mapping) {
+      continue;
+    }
+
+    const slack = new SlackNotifier(installation.botAccessToken);
+    const channelId = await slack.openConversation(mapping.slackUserId);
+    if (channelId) {
+      return { channelId, slack, teamId: installation.teamId };
+    }
+  }
+
+  return null;
+}
+
+export async function findSlackUserDirectMessageDestination(
+  userId: string,
+): Promise<{ channelId: string; teamId: string } | null> {
+  const destination = await resolveSlackUserDirectMessage(userId);
+  return destination
+    ? { channelId: destination.channelId, teamId: destination.teamId }
+    : null;
+}
+
 async function sendSlackUserDirectMessage(
   userId: string,
   text: string,
   logContext: string,
 ): Promise<boolean> {
   try {
-    const installations = await db.query.slackInstallations.findMany({
-      where: eq(slackInstallations.isActive, true),
-      columns: { botAccessToken: true, teamId: true },
-    });
-
-    for (const installation of installations) {
-      const mapping = await db.query.slackUserMappings.findFirst({
-        where: and(
-          eq(slackUserMappings.userId, userId),
-          eq(slackUserMappings.slackTeamId, installation.teamId),
-        ),
-        columns: { slackUserId: true },
-      });
-
-      if (!mapping) {
-        continue;
-      }
-
-      const slack = new SlackNotifier(installation.botAccessToken);
-      const dmChannelId = await slack.openConversation(mapping.slackUserId);
-
-      if (!dmChannelId) {
-        continue;
-      }
-
-      const messageTs = await slack.postMessage({
-        channel: dmChannelId,
+    const destination = await resolveSlackUserDirectMessage(userId);
+    if (destination) {
+      const messageTs = await destination.slack.postMessage({
+        channel: destination.channelId,
         text,
       });
 

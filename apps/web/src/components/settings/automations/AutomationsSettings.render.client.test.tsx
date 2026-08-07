@@ -18,13 +18,14 @@ const state = vi.hoisted(() => ({
     name: string;
     prompt: string;
     enabled: boolean;
-    scheduleMode: 'weekly' | 'cron';
+    scheduleMode: 'daily' | 'weekly' | 'cron';
     cronExpression: string | null;
     model: null;
     environmentId: string;
     target: {
       provider: 'slack';
       externalRef: string;
+      targetKind?: 'slack_channel' | 'slack_user';
       metadata?: Record<string, unknown>;
     };
     lastRunAt: Date | null;
@@ -1072,6 +1073,50 @@ describe('AutomationsSettings', () => {
       /Created by Ada · Last run \d+s ago/,
     );
     expect(screen.queryByText('0 9 * * 1-5')).not.toBeInTheDocument();
+  });
+
+  it('shows Slack DM me as a custom automation destination', async () => {
+    state.environments = [{ id: 'env-1', name: 'Production' }];
+    state.customAutomations = [
+      {
+        id: 'automation-1',
+        name: 'Personal daily brief',
+        prompt: 'Summarize my priorities.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        environmentId: 'env-1',
+        target: {
+          provider: 'slack',
+          targetKind: 'slack_user',
+          externalRef: 'user-1',
+        },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    expect(await screen.findByText('Slack DM me')).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Configure Personal daily brief' }),
+    );
+    expect(
+      screen.getByRole('combobox', { name: 'Slack destination type' }),
+    ).toHaveTextContent('DM me');
+    expect(
+      screen.getByText(
+        'Results are sent privately to your linked Slack account.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('only offers connected providers as custom automation destinations', async () => {

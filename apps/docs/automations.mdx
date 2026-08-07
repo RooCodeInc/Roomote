@@ -77,8 +77,8 @@ Create arbitrary scheduled agent runs with:
 - one required **environment**
 - an optional **model** override for the runs; the default follows the
   deployment task model
-- an optional **report destination** channel (Slack, Discord, Teams, or
-  Telegram)
+- an optional **report destination**: a Slack direct message to the automation
+  owner, or a Slack, Discord, Teams, or Telegram channel
 
 Each automation card summarizes its cadence, environment, report destination,
 creator, and most recent run.
@@ -98,9 +98,9 @@ Custom schedules do not support seconds or cron macros.
 On each due tick, Roomote launches a normal task with that prompt in the selected
 environment. A run can skip or fail before task creation when its configuration
 or launch state prevents it from starting. When a report destination is set,
-the run is anchored to that channel: Roomote's first message (the final result,
-or a blocker or question that needs input) starts a thread, later updates
-continue that same thread, and you can reply in the thread to talk to the task.
+the run is anchored to that conversation: Roomote's first message (the final
+result, or a blocker or question that needs input) starts a thread, later
+updates continue that same thread, and you can reply in the thread to talk to the task.
 There is no progress chatter in between. Without a destination, the run happens
 silently and its results appear only in the task view.
 

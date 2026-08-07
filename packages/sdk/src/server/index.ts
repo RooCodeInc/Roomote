@@ -169,6 +169,7 @@ export {
 } from './lib/teams-primary-conversation';
 
 export {
+  findSlackUserDirectMessageDestination,
   sendUserDirectMessageBestEffort,
   type UserDirectMessageProvider,
 } from './lib/user-direct-message';

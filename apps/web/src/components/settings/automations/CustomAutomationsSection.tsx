@@ -53,6 +53,7 @@ type CustomAutomationFormState = {
   /** Provider/model launch override; empty string means deployment default. */
   model: string;
   targetProvider: 'none' | 'slack' | 'discord' | 'teams' | 'telegram';
+  targetMode: 'channel' | 'direct_message';
   targetChannelId: string;
   targetServiceUrl: string;
 };
@@ -71,6 +72,7 @@ const EMPTY_FORM: CustomAutomationFormState = {
   cronExpression: '',
   model: '',
   targetProvider: 'slack',
+  targetMode: 'channel',
   targetChannelId: '',
   targetServiceUrl: '',
 };
@@ -177,11 +179,17 @@ function CustomAutomationRunButton({
 
 function targetFromRow(row: CustomAutomationListItem): {
   provider: CustomAutomationFormState['targetProvider'];
+  mode: CustomAutomationFormState['targetMode'];
   channelId: string;
   serviceUrl: string;
 } {
   if (!row.target.provider || !row.target.externalRef) {
-    return { provider: 'none', channelId: '', serviceUrl: '' };
+    return {
+      provider: 'none',
+      mode: 'channel',
+      channelId: '',
+      serviceUrl: '',
+    };
   }
 
   const provider =
@@ -196,7 +204,11 @@ function targetFromRow(row: CustomAutomationListItem): {
       : '';
   return {
     provider,
-    channelId: row.target.externalRef ?? '',
+    mode: row.target.targetKind === 'slack_user' ? 'direct_message' : 'channel',
+    channelId:
+      row.target.targetKind === 'slack_user'
+        ? ''
+        : (row.target.externalRef ?? ''),
     serviceUrl,
   };
 }
@@ -219,6 +231,7 @@ function formFromRow(
     cronExpression: row.cronExpression ?? '',
     model: row.model ?? '',
     targetProvider: targetIsConnected ? target.provider : 'none',
+    targetMode: target.mode,
     targetChannelId: targetIsConnected ? target.channelId : '',
     targetServiceUrl: targetIsConnected ? target.serviceUrl : '',
   };
@@ -238,7 +251,10 @@ function writeInputFromRow(row: CustomAutomationListItem) {
     ...(target.provider !== 'none'
       ? {
           targetProvider: target.provider,
-          targetChannelId: target.channelId,
+          targetMode: target.mode,
+          ...(target.mode === 'channel'
+            ? { targetChannelId: target.channelId }
+            : {}),
         }
       : {}),
     ...(target.provider === 'teams' && target.serviceUrl
@@ -535,6 +551,7 @@ export function CustomAutomationsSection() {
         : {
             ...current,
             targetProvider: 'none',
+            targetMode: 'channel',
             targetChannelId: '',
             targetServiceUrl: '',
           },
@@ -554,7 +571,11 @@ export function CustomAutomationsSection() {
       );
       return;
     }
-    if (form.targetProvider !== 'none' && !form.targetChannelId.trim()) {
+    if (
+      form.targetProvider !== 'none' &&
+      form.targetMode === 'channel' &&
+      !form.targetChannelId.trim()
+    ) {
       toast.error(
         'Choose a destination channel, or set the destination to None.',
       );
@@ -573,7 +594,10 @@ export function CustomAutomationsSection() {
       ...(form.targetProvider !== 'none'
         ? {
             targetProvider: form.targetProvider,
-            targetChannelId: form.targetChannelId,
+            targetMode: form.targetMode,
+            ...(form.targetMode === 'channel'
+              ? { targetChannelId: form.targetChannelId }
+              : {}),
           }
         : {}),
       ...(form.targetProvider === 'teams' && form.targetServiceUrl.trim()
@@ -760,6 +784,7 @@ export function CustomAutomationsSection() {
                   ...current,
                   targetProvider:
                     value as CustomAutomationFormState['targetProvider'],
+                  targetMode: 'channel',
                   targetChannelId:
                     value === 'slack'
                       ? managerSlackChannelId
@@ -792,26 +817,50 @@ export function CustomAutomationsSection() {
                 Results appear only in the task view.
               </p>
             ) : form.targetProvider === 'slack' ? (
-              <div className="flex min-w-0 flex-1 items-center gap-2">
-                <Label
-                  htmlFor="custom-automation-destination-channel"
-                  className="shrink-0"
-                >
-                  Channel
-                </Label>
-                <SlackChannelSelect
-                  id="custom-automation-destination-channel"
-                  className="flex-1"
-                  value={form.targetChannelId || null}
-                  options={slackOptions}
+              <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+                <Select
+                  value={form.targetMode}
                   disabled={busy}
-                  onChange={(value) =>
+                  onValueChange={(value) =>
                     setForm((current) => ({
                       ...current,
-                      targetChannelId: value ?? '',
+                      targetMode:
+                        value as CustomAutomationFormState['targetMode'],
+                      targetChannelId:
+                        value === 'channel' ? managerSlackChannelId : '',
                     }))
                   }
-                />
+                >
+                  <SelectTrigger
+                    aria-label="Slack destination type"
+                    className="w-full sm:w-36"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="channel">Channel</SelectItem>
+                    <SelectItem value="direct_message">DM me</SelectItem>
+                  </SelectContent>
+                </Select>
+                {form.targetMode === 'channel' ? (
+                  <SlackChannelSelect
+                    id="custom-automation-destination-channel"
+                    className="flex-1"
+                    value={form.targetChannelId || null}
+                    options={slackOptions}
+                    disabled={busy}
+                    onChange={(value) =>
+                      setForm((current) => ({
+                        ...current,
+                        targetChannelId: value ?? '',
+                      }))
+                    }
+                  />
+                ) : (
+                  <p className="self-center text-sm text-muted-foreground">
+                    Results are sent privately to your linked Slack account.
+                  </p>
+                )}
               </div>
             ) : form.targetProvider === 'discord' ? (
               <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -1022,17 +1071,19 @@ export function CustomAutomationsSection() {
                 const destinationLabel =
                   target.provider === 'none'
                     ? ''
-                    : target.provider === 'slack'
-                      ? (slackOptions.find(
-                          (option) =>
-                            option.id === target.channelId ||
-                            option.name === target.channelId,
-                        )?.label ?? target.channelId)
-                      : target.provider === 'discord'
-                        ? (discordOptions.find(
-                            (option) => option.id === target.channelId,
+                    : target.mode === 'direct_message'
+                      ? 'DM me'
+                      : target.provider === 'slack'
+                        ? (slackOptions.find(
+                            (option) =>
+                              option.id === target.channelId ||
+                              option.name === target.channelId,
                           )?.label ?? target.channelId)
-                        : target.channelId;
+                        : target.provider === 'discord'
+                          ? (discordOptions.find(
+                              (option) => option.id === target.channelId,
+                            )?.label ?? target.channelId)
+                          : target.channelId;
 
                 return (
                   <div
