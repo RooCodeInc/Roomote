@@ -940,6 +940,7 @@ describe('resolveBuiltInMcpServers', () => {
       ROOMOTE_AUTH_BYPASS_HEADER_NAME: 'x-bypass-roomote-auth',
       ROOMOTE_AUTH_BYPASS_VALUE: 'bypass-token',
       ROOMOTE_TASK_TYPE: 'standard',
+      ROOMOTE_AUTOMATION_TASK: 'true',
       ROOMOTE_SLACK_CHANNEL: 'C123',
       ROOMOTE_SLACK_THREAD_TS: '111.222',
       ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE:
@@ -965,6 +966,7 @@ describe('resolveBuiltInMcpServers', () => {
     );
     expect(roomoteEnv.ROOMOTE_AUTH_BYPASS_VALUE).toBe('bypass-token');
     expect(roomoteEnv.ROOMOTE_TASK_TYPE).toBe('standard');
+    expect(roomoteEnv.ROOMOTE_AUTOMATION_TASK).toBe('true');
     expect(roomoteEnv.ROOMOTE_SLACK_CHANNEL).toBe('C123');
     expect(roomoteEnv.ROOMOTE_SLACK_THREAD_TS).toBe('111.222');
     expect(roomoteEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE).toBe(

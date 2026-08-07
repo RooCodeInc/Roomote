@@ -1194,6 +1194,13 @@ describe('runTask', () => {
       }),
       'utf8',
     );
+    expect(createHarnessMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        runtimeEnv: expect.objectContaining({
+          ROOMOTE_AUTOMATION_TASK: 'true',
+        }),
+      }),
+    );
   });
 
   it('keeps scheduled automation scans silent without requiring a closeout', async () => {
