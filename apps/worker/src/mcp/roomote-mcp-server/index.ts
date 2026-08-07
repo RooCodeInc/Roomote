@@ -1201,6 +1201,26 @@ roomoteMcpServer.registerTool(
 
 if (shouldRegisterSlackThreadReplyTool()) {
   const chatReplySurfaceLabel = getChatReplySurfaceLabel();
+  const usesPinnedSuggestionContract =
+    process.env.ROOMOTE_TASK_TYPE === TaskPayloadKind.Scan;
+  const chatReplySuggestionSchema = usesPinnedSuggestionContract
+    ? z.object({
+        title: z.string().min(1).max(140),
+        brief: z.string().min(1).max(2000),
+        category: z
+          .enum(['bug', 'security', 'chore', 'feature', 'improvement'])
+          .optional(),
+        priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
+        investigationContext: z.string().min(1).max(4000).optional(),
+        targetRepositoryFullName: z.string().min(1),
+        targetEnvironmentId: z.string().uuid().optional(),
+        workspaceReadiness: workspaceReadinessSchema.optional(),
+        readinessMessage: z.string().min(1).max(500).optional(),
+      })
+    : z.object({
+        title: z.string().min(1).max(140),
+        brief: z.string().min(1).max(2000),
+      });
   const chatReplyMarkdownGuidance =
     chatReplySurfaceLabel === 'Slack'
       ? 'Supports the modern Slack Markdown contract from the Slack instructions. Use rich Markdown when it improves scanability. '
@@ -1255,26 +1275,14 @@ if (shouldRegisterSlackThreadReplyTool()) {
             'Optional already-uploaded artifact IDs for images to attach.',
           ),
         suggestions: z
-          .array(
-            z.object({
-              title: z.string().min(1).max(140),
-              brief: z.string().min(1).max(2000),
-              category: z
-                .enum(['bug', 'security', 'chore', 'feature', 'improvement'])
-                .optional(),
-              priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
-              investigationContext: z.string().min(1).max(4000).optional(),
-              targetRepositoryFullName: z.string().min(1),
-              targetEnvironmentId: z.string().uuid().optional(),
-              workspaceReadiness: workspaceReadinessSchema.optional(),
-              readinessMessage: z.string().min(1).max(500).optional(),
-            }),
-          )
+          .array(chatReplySuggestionSchema)
           .min(1)
           .max(10)
           .optional()
           .describe(
-            `Optional independent actions to post inside the originating ${chatReplySurfaceLabel} conversation (maximum 10). Use only for high-confidence tasks not explicitly identified in the conversation as already underway. Every suggestion must identify its target repository; include hidden investigation context when it will help the implementing agent.`,
+            usesPinnedSuggestionContract
+              ? `Optional independent actions to post inside the originating ${chatReplySurfaceLabel} conversation (maximum 10). This scheduled suggestion workflow must include its verified target repository and may include implementation metadata used when the task is started.`
+              : `Optional independent actions to post inside the originating ${chatReplySurfaceLabel} conversation (maximum 10). Use only for high-confidence tasks not explicitly identified in the conversation as already underway. Each suggestion contains only the title and description shown to users; Roomote routes the task when it is started.`,
           ),
       },
       annotations: {

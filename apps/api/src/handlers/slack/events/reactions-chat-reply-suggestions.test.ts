@@ -5,8 +5,10 @@ const mocks = vi.hoisted(() => ({
   finalizeWorkItemLaunched: vi.fn(),
   releaseWorkItemClaim: vi.fn(),
   trackedMessageFindFirst: vi.fn(),
+  taskRunFindFirst: vi.fn(),
   resolveWorkspace: vi.fn(),
   lookupSlackUserMapping: vi.fn(),
+  startAutoRoutedSlackTask: vi.fn(),
   startSlackAppMentionTask: vi.fn(),
   postStartedMessage: vi.fn(),
   getConfiguration: vi.fn(),
@@ -15,6 +17,7 @@ const mocks = vi.hoisted(() => ({
 const claimedAt = new Date('2026-08-06T00:00:00.000Z');
 const workItem = {
   id: 'work-item-1',
+  sourceTaskId: 'source-task-1',
   title: 'Add retry telemetry',
   brief: 'Instrument retry exhaustion.',
   category: 'improvement',
@@ -56,8 +59,12 @@ vi.mock('@roomote/db/server', () => ({
     messageTs: 'messageTs',
     workItemId: 'workItemId',
   },
+  taskRuns: {
+    taskId: 'taskId',
+  },
   workItems: {
     id: 'id',
+    sourceTaskId: 'sourceTaskId',
     title: 'title',
     brief: 'brief',
     category: 'category',
@@ -67,6 +74,7 @@ vi.mock('@roomote/db/server', () => ({
     targetRepositoryFullName: 'targetRepositoryFullName',
     targetEnvironmentId: 'targetEnvironmentId',
     readinessMessage: 'readinessMessage',
+    fingerprint: 'fingerprint',
     sortOrder: 'sortOrder',
     status: 'status',
   },
@@ -76,6 +84,7 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       trackedMessages: { findFirst: mocks.trackedMessageFindFirst },
+      taskRuns: { findFirst: mocks.taskRunFindFirst },
       deploymentSettings: { findFirst: vi.fn() },
     },
     select: () => createWorkItemSelectBuilder(),
@@ -88,6 +97,7 @@ vi.mock('@roomote/slack', () => ({
     ackEmoji: 'eyes',
     completionEmoji: 'white_check_mark',
   })),
+  startAutoRoutedSlackTask: mocks.startAutoRoutedSlackTask,
   startSlackAppMentionTask: mocks.startSlackAppMentionTask,
 }));
 
@@ -140,6 +150,15 @@ describe('chat reply suggestion reactions', () => {
       workItemId: 'work-item-1',
       metadata: { suggestionType: 'suggested_tasks' },
     });
+    mocks.taskRunFindFirst.mockResolvedValue({
+      payloadKind: 'standard_task',
+    });
+    mocks.lookupSlackUserMapping.mockResolvedValue({
+      hasInactiveMapping: false,
+      activeMapping: { userId: 'user-1' },
+    });
+    mocks.claimWorkItem.mockResolvedValue({ launchClaimedAt: claimedAt });
+    mocks.finalizeWorkItemLaunched.mockResolvedValue(true);
     mocks.resolveWorkspace.mockResolvedValue({
       workspace: {
         repoForPayload: 'acme/app',
@@ -148,12 +167,12 @@ describe('chat reply suggestion reactions', () => {
       },
       failureReason: null,
     });
-    mocks.lookupSlackUserMapping.mockResolvedValue({
-      hasInactiveMapping: false,
-      activeMapping: { userId: 'user-1' },
+    mocks.startAutoRoutedSlackTask.mockResolvedValue({
+      status: 'started',
+      threadId: 'seeded-thread-ts',
+      runId: 42,
+      taskId: 'task-new',
     });
-    mocks.claimWorkItem.mockResolvedValue({ launchClaimedAt: claimedAt });
-    mocks.finalizeWorkItemLaunched.mockResolvedValue(true);
     mocks.startSlackAppMentionTask.mockResolvedValue({
       id: 42,
       taskId: 'task-new',
@@ -170,7 +189,100 @@ describe('chat reply suggestion reactions', () => {
     await handleReactionAddedEvent({
       context: {
         teamId: 'T1',
-        slackInstallation: { botUserId: 'UROOMOTE' },
+        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
+        slack,
+      } as never,
+      event: {
+        type: 'reaction_added',
+        user: 'U1',
+        reaction: 'thumbsup',
+        item: { type: 'message', channel: 'C1', ts: 'card-ts' },
+        event_ts: 'event-ts',
+      },
+    });
+
+    expect(mocks.startAutoRoutedSlackTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C1',
+        prompt:
+          'Start this suggested task: Add retry telemetry\n\nInstrument retry exhaustion.',
+        agentPromptTextOverride: 'implementation prompt',
+      }),
+    );
+    expect(mocks.startSlackAppMentionTask).not.toHaveBeenCalled();
+    expect(mocks.finalizeWorkItemLaunched).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        id: 'work-item-1',
+        taskId: 'task-new',
+        claimedAt,
+      },
+    );
+    expect(mocks.postStartedMessage).not.toHaveBeenCalled();
+  });
+
+  it('releases the suggestion when routing cannot choose a workspace', async () => {
+    mocks.startAutoRoutedSlackTask.mockResolvedValue({
+      status: 'not_started',
+      code: 'routing_fallback',
+      threadId: 'seeded-thread-ts',
+      message: 'Slack auto-routing needs manual environment selection.',
+    });
+    const slack = {
+      postMessage: vi
+        .fn()
+        .mockResolvedValueOnce('seeded-thread-ts')
+        .mockResolvedValueOnce('failure-ts'),
+      deleteMessage: vi.fn(async () => undefined),
+      getMessageMetadata: vi.fn(),
+    };
+
+    await handleReactionAddedEvent({
+      context: {
+        teamId: 'T1',
+        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
+        slack,
+      } as never,
+      event: {
+        type: 'reaction_added',
+        user: 'U1',
+        reaction: 'thumbsup',
+        item: { type: 'message', channel: 'C1', ts: 'card-ts' },
+        event_ts: 'event-ts',
+      },
+    });
+
+    expect(mocks.releaseWorkItemClaim).toHaveBeenCalledWith(expect.anything(), {
+      id: 'work-item-1',
+      claimedAt,
+    });
+    expect(mocks.finalizeWorkItemLaunched).not.toHaveBeenCalled();
+    expect(slack.deleteMessage).toHaveBeenCalledWith({
+      channel: 'C1',
+      ts: 'seeded-thread-ts',
+    });
+    expect(slack.postMessage).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        channel: 'C1',
+        text: expect.stringContaining(
+          'Slack auto-routing needs manual environment selection.',
+        ),
+      }),
+    );
+  });
+
+  it('keeps scheduled suggestion cards pinned to their verified workspace', async () => {
+    mocks.taskRunFindFirst.mockResolvedValue({ payloadKind: 'scan' });
+    const slack = {
+      postMessage: vi.fn(async () => 'seeded-thread-ts'),
+      deleteMessage: vi.fn(async () => undefined),
+      getMessageMetadata: vi.fn(),
+    };
+
+    await handleReactionAddedEvent({
+      context: {
+        teamId: 'T1',
+        slackInstallation: { botUserId: 'UROOMOTE', teamId: 'T1' },
         slack,
       } as never,
       event: {
@@ -189,26 +301,10 @@ describe('chat reply suggestion reactions', () => {
     });
     expect(mocks.startSlackAppMentionTask).toHaveBeenCalledWith(
       expect.objectContaining({
-        channel: 'C1',
         repo: 'acme/app',
         environmentId: 'environment-1',
-        agentPromptText: 'implementation prompt',
       }),
     );
-    expect(mocks.finalizeWorkItemLaunched).toHaveBeenCalledWith(
-      expect.anything(),
-      {
-        id: 'work-item-1',
-        taskId: 'task-new',
-        claimedAt,
-      },
-    );
-    expect(mocks.postStartedMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channelId: 'C1',
-        threadTs: 'seeded-thread-ts',
-        taskId: 'task-new',
-      }),
-    );
+    expect(mocks.startAutoRoutedSlackTask).not.toHaveBeenCalled();
   });
 });

@@ -14,6 +14,7 @@ export type ClaimedCurrentThreadSuggestion = {
   investigationContext: string | null;
   targetRepositoryFullName: string | null;
   targetEnvironmentId?: string | null;
+  launchRouting?: 'router' | 'pinned';
   launchClaimedAt: Date;
 };
 
@@ -68,9 +69,10 @@ export async function claimCurrentThreadSuggestionByMessage(
       id: claimed.id,
       title: claimed.title,
       brief: claimed.brief,
-      investigationContext: claimed.investigationContext,
-      targetRepositoryFullName: claimed.targetRepositoryFullName,
-      targetEnvironmentId: claimed.targetEnvironmentId,
+      investigationContext: null,
+      targetRepositoryFullName: null,
+      targetEnvironmentId: null,
+      launchRouting: 'router',
       launchClaimedAt: claimed.launchClaimedAt,
     },
   };

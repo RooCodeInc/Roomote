@@ -168,6 +168,7 @@ type TaskSuggestionType =
 
 type SuggestionCardMessageRow = {
   suggestionType: TaskSuggestionType;
+  launchRouting?: 'router';
   messageTs: string;
   channelId: string;
   workItemId: string;
@@ -195,6 +196,7 @@ function buildSlackSuggestionCardValues(
     metadata: {
       suggestionType: row.suggestionType,
       suggestionKey: row.suggestionKey,
+      ...(row.launchRouting ? { launchRouting: row.launchRouting } : {}),
     },
   }));
 }
@@ -602,6 +604,7 @@ async function postTaskSuggestionsThreadToSlack(params: {
   slackChannelId: string;
   createdByUserId: string | null;
   suggestionType: TaskSuggestionType;
+  launchRouting?: 'router';
   rootText: string;
   existingRootMessageTs?: string;
   automationLabel?: string | null;
@@ -698,12 +701,14 @@ async function postTaskSuggestionsThreadToSlack(params: {
     const targetEnvironmentName = suggestion.targetEnvironmentId
       ? (environmentNamesById.get(suggestion.targetEnvironmentId) ?? null)
       : null;
-    const footer = buildSuggestionSlackFooter({
-      category: suggestion.category,
-      targetRepositoryFullName: suggestion.targetRepositoryFullName,
-      targetEnvironmentName,
-      automationLabel: params.automationLabel,
-    });
+    const footer = useSharedSuggestionFormatting
+      ? null
+      : buildSuggestionSlackFooter({
+          category: suggestion.category,
+          targetRepositoryFullName: suggestion.targetRepositoryFullName,
+          targetEnvironmentName,
+          automationLabel: params.automationLabel,
+        });
     const footerContextBlock = footer
       ? [
           {
@@ -727,9 +732,6 @@ async function postTaskSuggestionsThreadToSlack(params: {
         {
           title: suggestion.title,
           brief: suggestion.brief,
-          category: suggestion.category,
-          priority: suggestion.priority,
-          targetRepositoryFullName: suggestion.targetRepositoryFullName,
           footerText: footer,
         },
         sharedOptions,
@@ -738,9 +740,6 @@ async function postTaskSuggestionsThreadToSlack(params: {
         {
           title: suggestion.title,
           brief: suggestion.brief,
-          category: suggestion.category,
-          priority: suggestion.priority,
-          targetRepositoryFullName: suggestion.targetRepositoryFullName,
           footerText: null,
         },
         sharedOptions,
@@ -772,6 +771,7 @@ async function postTaskSuggestionsThreadToSlack(params: {
 
     suggestionMessageRows.push({
       suggestionType: params.suggestionType,
+      ...(params.launchRouting ? { launchRouting: params.launchRouting } : {}),
       messageTs,
       channelId: params.slackChannelId,
       workItemId: suggestion.id,
@@ -803,6 +803,7 @@ async function postCurrentThreadSuggestionsToSlack(params: {
   slackChannelId: string;
   slackThreadTs: string;
   createdByUserId: string | null;
+  launchRouting?: 'router';
   suggestions: PersistedTaskSuggestion[];
 }): Promise<boolean> {
   const missingSuggestions = await getMissingTrackedSuggestions(
@@ -830,6 +831,7 @@ async function postCurrentThreadSuggestionsToSlack(params: {
     slackChannelId: params.slackChannelId,
     createdByUserId: params.createdByUserId,
     suggestionType: 'suggested_tasks',
+    launchRouting: params.launchRouting,
     rootText: '',
     existingRootMessageTs: params.slackThreadTs,
     suggestions: missingSuggestions,
@@ -1239,6 +1241,8 @@ export async function submitTaskSuggestions(
       (run.payloadKind === TaskPayloadKind.StandardTask ||
         run.payloadKind === TaskPayloadKind.Scan ||
         run.payloadKind === TaskPayloadKind.SlackAppMention);
+    const usesRouterLaunchContract =
+      isCurrentThreadTask && run.payloadKind !== TaskPayloadKind.Scan;
 
     if (run.payloadKind !== TaskPayloadKind.Scan && !isCurrentThreadTask) {
       return c.json({ error: 'Task is not a Suggested Tasks task' }, 400);
@@ -1317,18 +1321,15 @@ export async function submitTaskSuggestions(
     const repositoryIds = candidateRepositories.map(
       (repository) => repository.id,
     );
-    const submittedSuggestions =
-      isCurrentThreadTask && payload.environmentId
-        ? parsedBody.data.suggestions.map((suggestion) =>
-            suggestion.targetEnvironmentId
-              ? suggestion
-              : {
-                  ...suggestion,
-                  targetEnvironmentId: payload.environmentId,
-                  workspaceReadiness: 'environment_backed' as const,
-                },
-          )
-        : parsedBody.data.suggestions;
+    // Chat-reply suggestions are presentation-only proposals. Ignore launch
+    // metadata from older workers so the task router chooses the workspace
+    // when a user starts one instead of trusting the proposing agent.
+    const submittedSuggestions = usesRouterLaunchContract
+      ? parsedBody.data.suggestions.map((suggestion) => ({
+          title: suggestion.title,
+          brief: suggestion.brief,
+        }))
+      : parsedBody.data.suggestions;
     const preparedSuggestions = await resolvePreparedSuggestions({
       suggestions: submittedSuggestions,
       candidateRepositories,
@@ -1338,26 +1339,12 @@ export async function submitTaskSuggestions(
     const suggestions = isOnboardingTrigger
       ? preparedSuggestions
       : prioritizeScheduledSuggestions(preparedSuggestions);
-    const currentThreadSuggestionsMissingLaunchMetadata = isCurrentThreadTask
-      ? suggestions.filter(
-          (suggestion) => suggestion.targetRepositoryFullName === null,
-        )
-      : [];
-
-    if (currentThreadSuggestionsMissingLaunchMetadata.length > 0) {
-      return c.json(
-        {
-          error:
-            'Current-thread suggestions must include targetRepositoryFullName.',
-        },
-        400,
-      );
-    }
-    const suggestionsMissingLaunchMetadata = isOnboardingTrigger
-      ? []
-      : suggestions.filter(
-          (suggestion) => suggestion.targetRepositoryFullName === null,
-        );
+    const suggestionsMissingLaunchMetadata =
+      isOnboardingTrigger || usesRouterLaunchContract
+        ? []
+        : suggestions.filter(
+            (suggestion) => suggestion.targetRepositoryFullName === null,
+          );
 
     if (suggestionsMissingLaunchMetadata.length > 0) {
       apiLogger.warn(
@@ -1367,11 +1354,12 @@ export async function submitTaskSuggestions(
         `[submitTaskSuggestions] Dropping ${suggestionsMissingLaunchMetadata.length} scheduled suggestions without per-idea launch metadata for taskId=${taskId}`,
       );
     }
-    const suggestionsToPersist = isOnboardingTrigger
-      ? suggestions
-      : suggestions.filter(
-          (suggestion) => suggestion.targetRepositoryFullName !== null,
-        );
+    const suggestionsToPersist =
+      isOnboardingTrigger || usesRouterLaunchContract
+        ? suggestions
+        : suggestions.filter(
+            (suggestion) => suggestion.targetRepositoryFullName !== null,
+          );
 
     const persistedSuggestions = await db.transaction(async (tx) => {
       const workItemColumns = {
@@ -1500,6 +1488,7 @@ export async function submitTaskSuggestions(
                 slackChannelId: task.slackChannelId,
                 slackThreadTs: task.slackThreadTs,
                 createdByUserId,
+                launchRouting: usesRouterLaunchContract ? 'router' : undefined,
                 suggestions: missingSuggestions,
               })
             : communicationProvider === 'discord' && communicationChannel
@@ -1507,6 +1496,9 @@ export async function submitTaskSuggestions(
                   sourceTaskId: taskId,
                   suggestionGroupKey: parsedBody.data.submissionKey ?? taskId,
                   createdByUserId,
+                  launchRouting: usesRouterLaunchContract
+                    ? 'router'
+                    : undefined,
                   channelId: communicationChannel,
                   threadId: communicationThread,
                   suggestions: numberedMissingSuggestions,
@@ -1516,6 +1508,9 @@ export async function submitTaskSuggestions(
                     sourceTaskId: taskId,
                     suggestionGroupKey: parsedBody.data.submissionKey ?? taskId,
                     createdByUserId,
+                    launchRouting: usesRouterLaunchContract
+                      ? 'router'
+                      : undefined,
                     chatId: communicationChannel,
                     threadId: communicationThread,
                     suggestions: numberedMissingSuggestions,
@@ -1530,6 +1525,9 @@ export async function submitTaskSuggestions(
                             suggestionGroupKey:
                               parsedBody.data.submissionKey ?? taskId,
                             createdByUserId,
+                            launchRouting: usesRouterLaunchContract
+                              ? 'router'
+                              : undefined,
                             conversationId: communicationChannel,
                             serviceUrl,
                             threadId: communicationThread,

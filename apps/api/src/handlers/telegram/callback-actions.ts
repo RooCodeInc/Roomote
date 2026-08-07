@@ -229,13 +229,14 @@ async function handleSuggestionLaunchCallback(params: {
     `Start this suggested task: ${suggestion.title}`,
     '',
     suggestion.brief,
-    ...(suggestion.targetRepositoryFullName
+    ...(suggestion.launchRouting !== 'router' &&
+    suggestion.targetRepositoryFullName
       ? ['', `Target repository: ${suggestion.targetRepositoryFullName}`]
       : []),
-    ...(suggestion.targetEnvironmentId
+    ...(suggestion.launchRouting !== 'router' && suggestion.targetEnvironmentId
       ? ['', `Target environment: ${suggestion.targetEnvironmentId}`]
       : []),
-    ...(suggestion.investigationContext
+    ...(suggestion.launchRouting !== 'router' && suggestion.investigationContext
       ? ['', `Context: ${suggestion.investigationContext}`]
       : []),
   ].join('\n');
@@ -266,14 +267,19 @@ async function handleSuggestionLaunchCallback(params: {
   const claimedAt = suggestion.launchClaimedAt;
 
   try {
-    const workspaceOverride = suggestion.targetEnvironmentId
-      ? await resolveTelegramWorkspace({
-          type: 'environment',
-          id: suggestion.targetEnvironmentId,
-          name: suggestion.targetEnvironmentId,
-        })
-      : undefined;
-    if (suggestion.targetEnvironmentId && !workspaceOverride) {
+    const workspaceOverride =
+      suggestion.launchRouting !== 'router' && suggestion.targetEnvironmentId
+        ? await resolveTelegramWorkspace({
+            type: 'environment',
+            id: suggestion.targetEnvironmentId,
+            name: suggestion.targetEnvironmentId,
+          })
+        : undefined;
+    if (
+      suggestion.launchRouting !== 'router' &&
+      suggestion.targetEnvironmentId &&
+      !workspaceOverride
+    ) {
       throw new Error('The suggestion target environment is unavailable.');
     }
     const started = await startNewTelegramTask({

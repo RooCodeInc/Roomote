@@ -219,7 +219,7 @@ describe('Discord setup suggestions', () => {
     });
 
     expect(findTrackedCardMock).toHaveBeenCalledWith(
-      expect.objectContaining({ columns: { id: true } }),
+      expect.objectContaining({ columns: { id: true, metadata: true } }),
     );
     expect(claimWorkItemMock).toHaveBeenCalledWith(expect.anything(), {
       id: 'suggestion-1',
@@ -236,5 +236,33 @@ describe('Discord setup suggestions', () => {
         channelId: 'different-thread',
       }),
     ).resolves.toBeNull();
+  });
+
+  it('discards pinned metadata for current-thread suggestion cards', async () => {
+    findTrackedCardMock.mockResolvedValue({
+      id: 'tracked-1',
+      metadata: { suggestionGroupKey: 'reply-1' },
+    });
+    claimWorkItemMock.mockResolvedValue({
+      id: 'suggestion-1',
+      title: 'Fix tests',
+      brief: 'Repair the flaky test.',
+      investigationContext: 'Legacy context.',
+      targetRepositoryFullName: 'wrong/repo',
+      targetEnvironmentId: 'wrong-environment',
+      launchClaimedAt: new Date('2026-07-12T12:00:00.000Z'),
+    });
+
+    const claim = await claimDiscordSuggestionLaunch({
+      suggestionId: 'suggestion-1',
+      channelId: 'thread-1',
+    });
+
+    expect(claim).toMatchObject({
+      launchRouting: 'router',
+      investigationContext: null,
+      targetRepositoryFullName: null,
+      targetEnvironmentId: null,
+    });
   });
 });

@@ -379,8 +379,14 @@ describe('roomote MCP tool descriptions', () => {
     expect(replyTool.config.inputSchema.questions).toBeUndefined();
     expect(replyTool.config.inputSchema.suggestedNextSteps).toBeUndefined();
     expect(getInputSchemaField(replyTool, 'suggestions').description).toBe(
-      'Optional independent actions to post inside the originating Slack conversation (maximum 10). Use only for high-confidence tasks not explicitly identified in the conversation as already underway. Every suggestion must identify its target repository; include hidden investigation context when it will help the implementing agent.',
+      'Optional independent actions to post inside the originating Slack conversation (maximum 10). Use only for high-confidence tasks not explicitly identified in the conversation as already underway. Each suggestion contains only the title and description shown to users; Roomote routes the task when it is started.',
     );
+    const suggestionItem = (
+      replyTool.config.inputSchema.suggestions as unknown as {
+        unwrap: () => { element: { shape: Record<string, unknown> } };
+      }
+    ).unwrap().element;
+    expect(Object.keys(suggestionItem.shape)).toEqual(['title', 'brief']);
   });
 
   it('documents the Teams chat reply tool when Teams communication context exists', async () => {
@@ -423,6 +429,35 @@ describe('roomote MCP tool descriptions', () => {
     );
     expect(reactionTool.config.description).toContain(
       'Teams reactions post a plain Teams message containing only the emoji',
+    );
+  });
+
+  it('keeps the rich suggestion contract for scheduled scan workflows', async () => {
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_SLACK_CHANNEL: 'C123',
+      ROOMOTE_SLACK_THREAD_TS: '123.456',
+      ROOMOTE_TASK_TYPE: 'scan',
+    });
+    const replyTool = getRegisteredTool(registeredTools, 'send_chat_reply');
+    const suggestionItem = (
+      replyTool.config.inputSchema.suggestions as unknown as {
+        unwrap: () => { element: { shape: Record<string, unknown> } };
+      }
+    ).unwrap().element;
+
+    expect(Object.keys(suggestionItem.shape)).toEqual([
+      'title',
+      'brief',
+      'category',
+      'priority',
+      'investigationContext',
+      'targetRepositoryFullName',
+      'targetEnvironmentId',
+      'workspaceReadiness',
+      'readinessMessage',
+    ]);
+    expect(getInputSchemaField(replyTool, 'suggestions').description).toContain(
+      'scheduled suggestion workflow must include its verified target repository',
     );
   });
 
@@ -804,18 +839,6 @@ describe('roomote MCP tool descriptions', () => {
     expect(definitionSchema).toBeInstanceOf(z.ZodString);
     expect(definitionSchema).not.toBeInstanceOf(z.ZodUnion);
     expect(definitionField.description).toContain('YAML or JSON string');
-  });
-
-  it('keeps investigation context on chat reply suggestions', () => {
-    const source = readFileSync(
-      path.resolve(thisDirPath, '../index.ts'),
-      'utf8',
-    );
-
-    expect(source).toContain('investigationContext: z');
-    expect(source).not.toContain(
-      "registerTaskSuggestionsTool('submit_task_suggestions')",
-    );
   });
 
   it('forwards issueNumber from manage_source_control tool params', async () => {

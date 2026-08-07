@@ -73,6 +73,7 @@ export type ClaimedTeamsSuggestion = {
   investigationContext: string | null;
   targetRepositoryFullName: string | null;
   targetEnvironmentId?: string | null;
+  launchRouting?: 'router' | 'pinned';
   launchClaimedAt: Date;
 };
 
@@ -200,6 +201,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
       investigationContext: claimed.investigationContext,
       targetRepositoryFullName: claimed.targetRepositoryFullName,
       targetEnvironmentId: claimed.targetEnvironmentId,
+      launchRouting: 'pinned',
       launchClaimedAt: claimed.launchClaimedAt,
     },
   };
@@ -232,13 +234,14 @@ function buildTeamsSuggestionTaskPromptText(
     `Start this suggested task: ${suggestion.title}`,
     '',
     suggestion.brief ?? '',
-    ...(suggestion.targetRepositoryFullName
+    ...(suggestion.launchRouting !== 'router' &&
+    suggestion.targetRepositoryFullName
       ? ['', `Target repository: ${suggestion.targetRepositoryFullName}`]
       : []),
-    ...(suggestion.targetEnvironmentId
+    ...(suggestion.launchRouting !== 'router' && suggestion.targetEnvironmentId
       ? ['', `Target environment: ${suggestion.targetEnvironmentId}`]
       : []),
-    ...(suggestion.investigationContext
+    ...(suggestion.launchRouting !== 'router' && suggestion.investigationContext
       ? ['', `Context: ${suggestion.investigationContext}`]
       : []),
   ].join('\n');

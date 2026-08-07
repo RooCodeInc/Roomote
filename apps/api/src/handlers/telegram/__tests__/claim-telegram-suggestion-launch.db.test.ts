@@ -25,6 +25,7 @@ describe('claimTelegramSuggestionLaunch (work_items launch CAS)', () => {
     status?: 'open' | 'launching' | 'launched';
     launchClaimedAt?: Date | null;
     channelId?: string;
+    launchRouting?: 'router';
   }): Promise<string> {
     const [row] = await db
       .insert(workItems)
@@ -53,6 +54,12 @@ describe('claimTelegramSuggestionLaunch (work_items launch CAS)', () => {
       metadata: {
         suggestionType: 'setup_onboarding',
         suggestionKey: `source-task:${workItemId}`,
+        ...(overrides?.launchRouting
+          ? {
+              launchRouting: overrides.launchRouting,
+              suggestionGroupKey: 'reply-1',
+            }
+          : {}),
       },
     });
 
@@ -113,6 +120,24 @@ describe('claimTelegramSuggestionLaunch (work_items launch CAS)', () => {
 
     expect(first).not.toBeNull();
     expect(second).toBeNull();
+  });
+
+  it('discards pinned metadata for current-thread suggestion cards', async () => {
+    const workItemId = await seedSuggestionWorkItem({
+      launchRouting: 'router',
+    });
+
+    const claimed = await claimTelegramSuggestionLaunch({
+      suggestionId: workItemId,
+      chatId,
+    });
+
+    expect(claimed).toMatchObject({
+      launchRouting: 'router',
+      investigationContext: null,
+      targetRepositoryFullName: null,
+      targetEnvironmentId: null,
+    });
   });
 
   it('does not claim a launched work item', async () => {

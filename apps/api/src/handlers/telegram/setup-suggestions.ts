@@ -163,6 +163,7 @@ export async function claimTelegramSuggestionLaunch(input: {
   investigationContext: string | null;
   targetRepositoryFullName: string | null;
   targetEnvironmentId?: string | null;
+  launchRouting?: 'router' | 'pinned';
   launchClaimedAt: Date;
 } | null> {
   // Scope: a suggestion card for this work item must have been posted in this
@@ -174,7 +175,7 @@ export async function claimTelegramSuggestionLaunch(input: {
       eq(trackedMessages.channelId, input.chatId),
       eq(trackedMessages.workItemId, input.suggestionId),
     ),
-    columns: { id: true },
+    columns: { id: true, metadata: true },
   });
 
   if (!trackedCard) {
@@ -187,13 +188,23 @@ export async function claimTelegramSuggestionLaunch(input: {
     return null;
   }
 
+  const launchRouting =
+    trackedCard.metadata?.launchRouting === 'router' ||
+    typeof trackedCard.metadata?.suggestionGroupKey === 'string'
+      ? 'router'
+      : 'pinned';
+
   return {
     id: claimed.id,
     title: claimed.title,
     brief: claimed.brief,
-    investigationContext: claimed.investigationContext,
-    targetRepositoryFullName: claimed.targetRepositoryFullName,
-    targetEnvironmentId: claimed.targetEnvironmentId,
+    investigationContext:
+      launchRouting === 'pinned' ? claimed.investigationContext : null,
+    targetRepositoryFullName:
+      launchRouting === 'pinned' ? claimed.targetRepositoryFullName : null,
+    targetEnvironmentId:
+      launchRouting === 'pinned' ? claimed.targetEnvironmentId : null,
+    launchRouting,
     launchClaimedAt: claimed.launchClaimedAt,
   };
 }
