@@ -188,6 +188,12 @@ async function callFastAgentTaskApi({
 const fastAgentTaskStatusSchema = z.enum(['active', 'completed', 'all']);
 const fastAgentTaskOrderSchema = z.enum(['asc', 'desc']);
 const fastAgentTaskTypeSchema = z.enum(['standard']);
+const nonEmptyTrimmedStringSchema = z
+  .string()
+  .trim()
+  .refine((value) => value.length > 0, {
+    message: 'Value must be non-empty.',
+  });
 
 export function createFastAgentTaskTools(
   context: FastAgentTaskApiContext,
@@ -210,18 +216,13 @@ export function createFastAgentTaskTools(
         'Launch a new Roomote coding task in a specific environment.',
       inputSchema: z
         .object({
-          prompt: z
-            .string()
-            .trim()
-            .min(1)
-            .describe('The coding request or task description'),
-          environmentId: z
-            .string()
-            .trim()
-            .min(1)
+          prompt: nonEmptyTrimmedStringSchema.describe(
+            'The non-empty coding request or task description',
+          ),
+          environmentId: nonEmptyTrimmedStringSchema
             .optional()
             .describe(
-              'Optional environment ID. Omit it or pass "__all_repositories__" to use the deployment-wide default target',
+              'Optional non-empty environment ID. Omit it or pass "__all_repositories__" to use the deployment-wide default target',
             ),
           type: fastAgentTaskTypeSchema
             .optional()
@@ -247,12 +248,11 @@ export function createFastAgentTaskTools(
       description: 'Search Roomote tasks by text or status.',
       inputSchema: z
         .object({
-          query: z
-            .string()
-            .trim()
-            .min(1)
+          query: nonEmptyTrimmedStringSchema
             .optional()
-            .describe('Optional text to match against task titles and prompts'),
+            .describe(
+              'Optional non-empty text to match against task titles and prompts',
+            ),
           status: fastAgentTaskStatusSchema
             .optional()
             .describe('Optional task-status filter'),
@@ -282,7 +282,9 @@ export function createFastAgentTaskTools(
       description: 'Get the message history for a Roomote task.',
       inputSchema: z
         .object({
-          taskId: z.string().trim().min(1).describe('The Roomote task ID'),
+          taskId: nonEmptyTrimmedStringSchema.describe(
+            'The non-empty Roomote task ID',
+          ),
           limit: z
             .number()
             .int()
@@ -311,12 +313,12 @@ export function createFastAgentTaskTools(
       description: 'Send a follow-up message to a running Roomote task.',
       inputSchema: z
         .object({
-          taskId: z.string().trim().min(1).describe('The Roomote task ID'),
-          message: z
-            .string()
-            .trim()
-            .min(1)
-            .describe('The follow-up message to send'),
+          taskId: nonEmptyTrimmedStringSchema.describe(
+            'The non-empty Roomote task ID',
+          ),
+          message: nonEmptyTrimmedStringSchema.describe(
+            'The non-empty follow-up message to send',
+          ),
         })
         .strict(),
       execute: async ({ taskId, message }) =>
@@ -331,7 +333,9 @@ export function createFastAgentTaskTools(
       description: 'Cancel a running Roomote task.',
       inputSchema: z
         .object({
-          taskId: z.string().trim().min(1).describe('The Roomote task ID'),
+          taskId: nonEmptyTrimmedStringSchema.describe(
+            'The non-empty Roomote task ID',
+          ),
         })
         .strict(),
       execute: async ({ taskId }) =>

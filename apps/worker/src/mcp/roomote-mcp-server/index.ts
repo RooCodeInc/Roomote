@@ -78,6 +78,20 @@ export const roomoteMcpServer = new McpServer({
 
 let hasSubmittedAutomationSlackSummary = false;
 const manageArtifactsUploadTypeSchema = z.enum(['general', 'visual-proof']);
+const nonEmptyStringSchema = z.string().refine((value) => value.length > 0, {
+  message: 'Value must be non-empty.',
+});
+const boundedNonEmptyStringSchema = (maximumLength: number) =>
+  z
+    .string()
+    .refine((value) => value.length > 0 && value.length <= maximumLength, {
+      message: `Value must contain 1 to ${maximumLength} characters.`,
+    });
+const uuidStringSchema = z
+  .string()
+  .refine((value) => z.string().uuid().safeParse(value).success, {
+    message: 'Value must be a UUID.',
+  });
 
 roomoteMcpServer.registerTool(
   'manage_custom_automations',
@@ -204,12 +218,9 @@ roomoteMcpServer.registerTool(
       'Do not use it for ordinary prose or collecting user input; use request_user_input when you need answers. ' +
       'Optional textFallback is delivered to the originating chat surface (Slack/Teams/Telegram/Discord) when the task was started from chat.',
     inputSchema: {
-      html: z
-        .string()
-        .min(1)
-        .describe(
-          'Compact HTML fragment or full document to display, including inline SVG. Avoid long prose, large lists, and dense data likely to require scrolling. Scripts and nested browsing contexts are stripped. Built-in widget classes include rw-card, rw-stack, rw-row, rw-grid, rw-stat, rw-badge, rw-callout, and rw-muted.',
-        ),
+      html: nonEmptyStringSchema.describe(
+        'Non-empty compact HTML fragment or full document to display, including inline SVG. Avoid long prose, large lists, and dense data likely to require scrolling. Scripts and nested browsing contexts are stripped. Built-in widget classes include rw-card, rw-stack, rw-row, rw-grid, rw-stat, rw-badge, rw-callout, and rw-muted.',
+      ),
       title: z
         .string()
         .optional()
@@ -1221,21 +1232,41 @@ if (shouldRegisterSlackThreadReplyTool()) {
     process.env.ROOMOTE_TASK_TYPE === TaskPayloadKind.Scan;
   const chatReplySuggestionSchema = usesPinnedSuggestionContract
     ? z.object({
-        title: z.string().min(1).max(140),
-        brief: z.string().min(1).max(2000),
+        title: boundedNonEmptyStringSchema(140).describe(
+          'Non-empty suggestion title of at most 140 characters.',
+        ),
+        brief: boundedNonEmptyStringSchema(2000).describe(
+          'Non-empty suggestion brief of at most 2,000 characters.',
+        ),
         category: z
           .enum(['bug', 'security', 'chore', 'feature', 'improvement'])
           .optional(),
         priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional(),
-        investigationContext: z.string().min(1).max(4000).optional(),
-        targetRepositoryFullName: z.string().min(1),
-        targetEnvironmentId: z.string().uuid().optional(),
+        investigationContext: boundedNonEmptyStringSchema(4000)
+          .optional()
+          .describe(
+            'Optional non-empty investigation context of at most 4,000 characters.',
+          ),
+        targetRepositoryFullName: nonEmptyStringSchema.describe(
+          'Non-empty target repository full name.',
+        ),
+        targetEnvironmentId: uuidStringSchema
+          .optional()
+          .describe('Optional target environment UUID.'),
         workspaceReadiness: workspaceReadinessSchema.optional(),
-        readinessMessage: z.string().min(1).max(500).optional(),
+        readinessMessage: boundedNonEmptyStringSchema(500)
+          .optional()
+          .describe(
+            'Optional non-empty readiness message of at most 500 characters.',
+          ),
       })
     : z.object({
-        title: z.string().min(1).max(140),
-        brief: z.string().min(1).max(2000),
+        title: boundedNonEmptyStringSchema(140).describe(
+          'Non-empty suggestion title of at most 140 characters.',
+        ),
+        brief: boundedNonEmptyStringSchema(2000).describe(
+          'Non-empty suggestion brief of at most 2,000 characters.',
+        ),
       });
   const chatReplyMarkdownGuidance =
     chatReplySurfaceLabel === 'Slack'
@@ -1270,14 +1301,11 @@ if (shouldRegisterSlackThreadReplyTool()) {
           .describe(
             `The lifecycle purpose for this ${chatReplySurfaceLabel}-visible reply. Choose ack for the first visible response before work that will not post to ${chatReplySurfaceLabel}, progress for new useful state or silence prevention, closeout for the final answer/result/blocker/handoff, or clarification for a lightweight question. Use closeout before final task completion.`,
           ),
-        message: z
-          .string()
-          .min(1)
-          .describe(
-            `Markdown text to post in the ${chatReplySurfaceLabel} thread. Match the selected purpose, lead with the useful takeaway, and keep it conversational like a teammate in a thread. ` +
-              "For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step instead of listing exact validation commands, passed checks, or proof-applicability notes unless the user asked for them or they materially change what the user should do next. " +
-              chatReplyMessageMarkdownGuidance,
-          ),
+        message: nonEmptyStringSchema.describe(
+          `Non-empty Markdown text to post in the ${chatReplySurfaceLabel} thread. Match the selected purpose, lead with the useful takeaway, and keep it conversational like a teammate in a thread. ` +
+            "For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step instead of listing exact validation commands, passed checks, or proof-applicability notes unless the user asked for them or they materially change what the user should do next. " +
+            chatReplyMessageMarkdownGuidance,
+        ),
         imagePaths: z
           .array(z.string())
           .optional()
@@ -1585,12 +1613,9 @@ if (shouldRegisterChannelPostTool()) {
             : []),
         ].join(' '),
         inputSchema: {
-          name: z
-            .string()
-            .min(1)
-            .describe(
-              'Emoji name without surrounding colons, for example eyes or thumbsup',
-            ),
+          name: nonEmptyStringSchema.describe(
+            'Non-empty emoji name without surrounding colons, for example eyes or thumbsup',
+          ),
         },
         annotations: {
           readOnlyHint: false,
@@ -1640,16 +1665,12 @@ if (shouldRegisterChannelPostTool()) {
           .describe(
             'Slack channel ID, channel name, or Slack channel mention that contains the target message',
           ),
-        messageTs: z
-          .string()
-          .min(1)
-          .describe('Slack message timestamp for the message to react to'),
-        name: z
-          .string()
-          .min(1)
-          .describe(
-            'Slack emoji name without surrounding colons, for example eyes or white_check_mark',
-          ),
+        messageTs: nonEmptyStringSchema.describe(
+          'Non-empty Slack message timestamp for the message to react to',
+        ),
+        name: nonEmptyStringSchema.describe(
+          'Non-empty Slack emoji name without surrounding colons, for example eyes or white_check_mark',
+        ),
       },
       annotations: {
         readOnlyHint: false,

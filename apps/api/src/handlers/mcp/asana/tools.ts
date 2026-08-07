@@ -15,6 +15,10 @@ const TOOL_ANNOTATIONS = {
   readOnlyHint: true,
 } as const;
 
+const nonEmptyStringSchema = z.string().refine((value) => value.length > 0, {
+  message: 'Value must be non-empty.',
+});
+
 const paginationSchema = {
   limit: z
     .number()
@@ -31,9 +35,9 @@ const paginationSchema = {
 } as const;
 
 const optFieldsSchema = z
-  .array(z.string().min(1))
+  .array(nonEmptyStringSchema)
   .optional()
-  .describe('Optional list of Asana opt_fields to request.');
+  .describe('Optional list of non-empty Asana opt_fields to request.');
 
 type AsanaListResponse = {
   data: unknown[];
@@ -152,7 +156,9 @@ function registerGetProjectTool(server: McpServer, accessToken: string) {
       title: 'Get Project',
       description: 'Fetch an Asana project by gid.',
       inputSchema: {
-        project_gid: z.string().min(1).describe('The Asana project gid.'),
+        project_gid: nonEmptyStringSchema.describe(
+          'The non-empty Asana project gid.',
+        ),
         opt_fields: optFieldsSchema,
       },
       outputSchema: z.object({}).passthrough(),
@@ -179,7 +185,9 @@ function registerListProjectsTool(server: McpServer, accessToken: string) {
       title: 'List Projects',
       description: 'List projects in an Asana workspace.',
       inputSchema: {
-        workspace_gid: z.string().min(1).describe('The Asana workspace gid.'),
+        workspace_gid: nonEmptyStringSchema.describe(
+          'The non-empty Asana workspace gid.',
+        ),
         archived: z
           .boolean()
           .optional()
@@ -224,7 +232,9 @@ function registerGetTaskTool(server: McpServer, accessToken: string) {
       title: 'Get Task',
       description: 'Fetch an Asana task by gid.',
       inputSchema: {
-        task_gid: z.string().min(1).describe('The Asana task gid.'),
+        task_gid: nonEmptyStringSchema.describe(
+          'The non-empty Asana task gid.',
+        ),
         opt_fields: optFieldsSchema,
       },
       outputSchema: z.object({}).passthrough(),
@@ -254,7 +264,9 @@ function registerListTasksForProjectTool(
       title: 'List Tasks For Project',
       description: 'List tasks in an Asana project.',
       inputSchema: {
-        project_gid: z.string().min(1).describe('The Asana project gid.'),
+        project_gid: nonEmptyStringSchema.describe(
+          'The non-empty Asana project gid.',
+        ),
         completed_since: z
           .string()
           .optional()
@@ -301,7 +313,9 @@ function registerSearchTasksTool(server: McpServer, accessToken: string) {
       title: 'Search Tasks',
       description: 'Search tasks within an Asana workspace.',
       inputSchema: {
-        workspace_gid: z.string().min(1).describe('The Asana workspace gid.'),
+        workspace_gid: nonEmptyStringSchema.describe(
+          'The non-empty Asana workspace gid.',
+        ),
         text: z.string().optional().describe('Free-text task search query.'),
         project: z
           .string()
@@ -378,7 +392,9 @@ function registerGetTaskCommentsTool(server: McpServer, accessToken: string) {
       title: 'Get Task Comments',
       description: 'Fetch comment stories for an Asana task.',
       inputSchema: {
-        task_gid: z.string().min(1).describe('The Asana task gid.'),
+        task_gid: nonEmptyStringSchema.describe(
+          'The non-empty Asana task gid.',
+        ),
         ...paginationSchema,
         opt_fields: optFieldsSchema,
       },
@@ -426,7 +442,9 @@ function registerListTeamsTool(server: McpServer, accessToken: string) {
       title: 'List Teams',
       description: 'List teams in an Asana workspace.',
       inputSchema: {
-        workspace_gid: z.string().min(1).describe('The Asana workspace gid.'),
+        workspace_gid: nonEmptyStringSchema.describe(
+          'The non-empty Asana workspace gid.',
+        ),
         ...paginationSchema,
         opt_fields: optFieldsSchema,
       },
@@ -459,7 +477,9 @@ function registerGetUserTool(server: McpServer, accessToken: string) {
       title: 'Get User',
       description: 'Fetch an Asana user by gid.',
       inputSchema: {
-        user_gid: z.string().min(1).describe('The Asana user gid.'),
+        user_gid: nonEmptyStringSchema.describe(
+          'The non-empty Asana user gid.',
+        ),
         opt_fields: optFieldsSchema,
       },
       outputSchema: z.object({}).passthrough(),

@@ -18,6 +18,10 @@ const TOOL_ANNOTATIONS = {
   readOnlyHint: true,
 } as const;
 
+const nonEmptyStringSchema = z.string().refine((value) => value.length > 0, {
+  message: 'Value must be non-empty.',
+});
+
 type VercelTeam = {
   id: string;
   slug?: string;
@@ -501,10 +505,9 @@ function registerGetProjectTool(
       description:
         'Fetch detailed Vercel project information including domains and latest deployments.',
       inputSchema: {
-        projectId: z
-          .string()
-          .min(1)
-          .describe('The Vercel project ID or project slug.'),
+        projectId: nonEmptyStringSchema.describe(
+          'The non-empty Vercel project ID or project slug.',
+        ),
         teamId: optionalTeamIdSchema,
       },
       outputSchema: z.object({}).passthrough(),
@@ -535,7 +538,9 @@ function registerListDeploymentsTool(
       description:
         'List Vercel deployments for a project with state, target, and timing metadata.',
       inputSchema: {
-        projectId: z.string().min(1).describe('The Vercel project ID.'),
+        projectId: nonEmptyStringSchema.describe(
+          'The non-empty Vercel project ID.',
+        ),
         teamId: optionalTeamIdSchema,
         since: z
           .number()
@@ -604,10 +609,9 @@ function registerGetDeploymentTool(
       description:
         'Fetch detailed information for a deployment by deployment ID or hostname.',
       inputSchema: {
-        idOrUrl: z
-          .string()
-          .min(1)
-          .describe('The Vercel deployment ID or hostname.'),
+        idOrUrl: nonEmptyStringSchema.describe(
+          'The non-empty Vercel deployment ID or hostname.',
+        ),
         teamId: optionalTeamIdSchema,
       },
       outputSchema: z.object({}).passthrough(),
@@ -638,10 +642,9 @@ function registerGetDeploymentBuildLogsTool(
       description:
         'Get build log events for a deployment by deployment ID or hostname.',
       inputSchema: {
-        idOrUrl: z
-          .string()
-          .min(1)
-          .describe('The Vercel deployment ID or hostname.'),
+        idOrUrl: nonEmptyStringSchema.describe(
+          'The non-empty Vercel deployment ID or hostname.',
+        ),
         teamId: optionalTeamIdSchema,
         limit: z
           .number()
