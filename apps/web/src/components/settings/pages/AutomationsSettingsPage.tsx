@@ -10,10 +10,9 @@ import {
   Alert,
   AlertCircle,
   AlertDescription,
-  Button,
-  Lightbulb,
+  BookOpenText,
+  HeaderCallout,
 } from '@/components/system';
-import { BookOpenText } from 'lucide-react';
 
 export function AutomationsSettingsPage() {
   const { isAdmin } = useAuthorizedUser();
@@ -30,22 +29,12 @@ export function AutomationsSettingsPage() {
               Get {PRODUCT_NAME} automatically working on your behalf.
             </p>
           </div>
-          <div className="flex flex-wrap shrink-0 -mt-4 md:mt-3 items-center gap-2 text-sm animate-[enter-down_1s_1_2000ms_backwards]">
-            <Lightbulb className="size-4 shrink-0 text-muted-foreground hidden lg:block" />
-            <div>
-              <span className="mr-1">Unsure how automations can help?</span>
-              <Button asChild variant="link" className="inline" size="sm">
-                <a
-                  href={DOCS_COOKBOOK_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <BookOpenText className="hidden md:inline mr-1" />
-                  Explore recipes
-                </a>
-              </Button>
-            </div>
-          </div>
+          <HeaderCallout
+            icon={BookOpenText}
+            text="Unsure how automations can help?"
+            action={DOCS_COOKBOOK_URL}
+            buttonLabel="Explore recipes"
+          />
         </header>
 
         {isAdmin ? (
