@@ -403,10 +403,11 @@ function registerListTeamsTool(
         limit: z
           .number()
           .int()
-          .positive()
-          .max(100)
+          .refine((value) => value >= 1 && value <= 100, {
+            message: 'Limit must be between 1 and 100.',
+          })
           .optional()
-          .describe('Optional page size. Vercel caps this at 100.'),
+          .describe('Optional page size from 1 to 100.'),
         since: z
           .number()
           .int()
@@ -460,10 +461,11 @@ function registerListProjectsTool(
         limit: z
           .number()
           .int()
-          .positive()
-          .max(100)
+          .refine((value) => value >= 1 && value <= 100, {
+            message: 'Limit must be between 1 and 100.',
+          })
           .optional()
-          .describe('Optional page size.'),
+          .describe('Optional page size from 1 to 100.'),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: TOOL_ANNOTATIONS,
@@ -552,10 +554,11 @@ function registerListDeploymentsTool(
         limit: z
           .number()
           .int()
-          .positive()
-          .max(100)
+          .refine((value) => value >= 1 && value <= 100, {
+            message: 'Limit must be between 1 and 100.',
+          })
           .optional()
-          .describe('Maximum number of deployments to return.'),
+          .describe('Number of deployments to return, from 1 to 100.'),
         target: z
           .string()
           .trim()
@@ -643,10 +646,11 @@ function registerGetDeploymentBuildLogsTool(
         limit: z
           .number()
           .int()
-          .positive()
-          .max(500)
+          .refine((value) => value >= 1 && value <= 500, {
+            message: 'Limit must be between 1 and 500.',
+          })
           .optional()
-          .describe('Maximum number of build events to return.'),
+          .describe('Number of build events to return, from 1 to 500.'),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: TOOL_ANNOTATIONS,
@@ -705,10 +709,11 @@ function registerGetRuntimeLogsTool(
         limit: z
           .number()
           .int()
-          .positive()
-          .max(500)
+          .refine((value) => value >= 1 && value <= 500, {
+            message: 'Limit must be between 1 and 500.',
+          })
           .optional()
-          .describe('Maximum number of runtime log rows to return.'),
+          .describe('Number of runtime log rows to return, from 1 to 500.'),
         since: z
           .union([z.number().int(), z.string().trim()])
           .optional()
@@ -898,19 +903,27 @@ function registerCheckDomainAvailabilityAndPriceTool(
         'Check whether domains are available and fetch purchase pricing for available names.',
       inputSchema: {
         names: z
-          .array(z.string().trim().min(1))
-          .min(1)
-          .max(50)
-          .describe('One or more domain names to inspect.'),
+          .array(z.string().trim())
+          .refine(
+            (names) =>
+              names.length >= 1 &&
+              names.length <= 50 &&
+              names.every((name) => name.length > 0),
+            {
+              message: 'Provide 1 to 50 non-empty domain names.',
+            },
+          )
+          .describe('From 1 to 50 non-empty domain names to inspect.'),
         teamId: optionalTeamIdSchema,
         years: z
           .number()
           .int()
-          .positive()
-          .max(10)
+          .refine((value) => value >= 1 && value <= 10, {
+            message: 'Years must be between 1 and 10.',
+          })
           .optional()
           .describe(
-            'Optional number of years to quote for the purchase price.',
+            'Optional number of years to quote for the purchase price, from 1 to 10.',
           ),
       },
       outputSchema: z.object({}).passthrough(),

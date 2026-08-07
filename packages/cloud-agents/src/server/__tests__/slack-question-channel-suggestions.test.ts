@@ -1,3 +1,5 @@
+import zodToJsonSchema from 'zod-to-json-schema';
+
 const { mockGenerateTrackedNonTaskObject } = vi.hoisted(() => ({
   mockGenerateTrackedNonTaskObject: vi.fn(),
 }));
@@ -79,6 +81,38 @@ describe('suggestSlackQuestionChannels', () => {
       expect.objectContaining({
         prompt: expect.stringContaining('- CQUESTIONS | #questions-backend'),
       }),
+    );
+  });
+
+  it('keeps wire constraints out of the schema while preserving validation', async () => {
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: { suggestedChannelIds: [] },
+    });
+
+    await suggestSlackQuestionChannels({
+      channels: [{ id: 'CGENERAL', name: 'general' }],
+    });
+
+    const schema = mockGenerateTrackedNonTaskObject.mock.calls[0]?.[0]?.schema;
+    expect(schema).toBeDefined();
+    expect(
+      schema.safeParse({ suggestedChannelIds: ['C1', 'C2', 'C3', 'C4'] })
+        .success,
+    ).toBe(true);
+    expect(
+      schema.safeParse({ suggestedChannelIds: ['C1', 'C2', 'C3', 'C4', 'C5'] })
+        .success,
+    ).toBe(false);
+    expect(schema.safeParse({ suggestedChannelIds: [' '] }).success).toBe(
+      false,
+    );
+
+    const wireSchema = zodToJsonSchema(schema, {
+      $refStrategy: 'none',
+      target: 'jsonSchema7',
+    });
+    expect(JSON.stringify(wireSchema)).not.toMatch(
+      /"(?:minItems|maxItems|minLength|maxLength|minimum|maximum|exclusiveMinimum|exclusiveMaximum)"/,
     );
   });
 

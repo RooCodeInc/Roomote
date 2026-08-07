@@ -110,16 +110,19 @@ const searchDashboardsInputSchema = {
   page: z
     .number()
     .int()
-    .positive()
+    .refine((value) => value > 0, {
+      message: 'Page number must be positive.',
+    })
     .optional()
-    .describe('Optional search result page number.'),
+    .describe('Optional positive search result page number.'),
   limit: z
     .number()
     .int()
-    .positive()
-    .max(500)
+    .refine((value) => value >= 1 && value <= 500, {
+      message: 'Limit must be between 1 and 500.',
+    })
     .optional()
-    .describe('Maximum number of dashboards to return.'),
+    .describe('Number of dashboards to return, from 1 to 500.'),
 } as const;
 
 const alertRuleFilterInputSchema = {
@@ -144,10 +147,13 @@ const alertRuleFilterInputSchema = {
   limit: z
     .number()
     .int()
-    .positive()
-    .max(500)
+    .refine((value) => value >= 1 && value <= 500, {
+      message: 'Limit must be between 1 and 500.',
+    })
     .optional()
-    .describe('Maximum number of alert rules to return after filtering.'),
+    .describe(
+      'Number of alert rules to return after filtering, from 1 to 500.',
+    ),
 } as const;
 
 function assertAllowedToolName(name: string) {
@@ -513,10 +519,11 @@ function registerListAlertInstancesTool(
         limit: z
           .number()
           .int()
-          .positive()
-          .max(500)
+          .refine((value) => value >= 1 && value <= 500, {
+            message: 'Limit must be between 1 and 500.',
+          })
           .optional()
-          .describe('Maximum number of alert instances to return.'),
+          .describe('Number of alert instances to return, from 1 to 500.'),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: TOOL_ANNOTATIONS,
@@ -575,10 +582,11 @@ function registerListDataSourcesTool(
         limit: z
           .number()
           .int()
-          .positive()
-          .max(500)
+          .refine((value) => value >= 1 && value <= 500, {
+            message: 'Limit must be between 1 and 500.',
+          })
           .optional()
-          .describe('Maximum number of data sources to return.'),
+          .describe('Number of data sources to return, from 1 to 500.'),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: TOOL_ANNOTATIONS,
@@ -652,15 +660,19 @@ function registerListAnnotationsTool(
         panel_id: z
           .number()
           .int()
-          .nonnegative()
+          .refine((value) => value >= 0, {
+            message: 'Panel ID must be non-negative.',
+          })
           .optional()
-          .describe('Optional panel ID filter.'),
+          .describe('Optional non-negative integer panel ID filter.'),
         alert_id: z
           .number()
           .int()
-          .nonnegative()
+          .refine((value) => value >= 0, {
+            message: 'Alert ID must be non-negative.',
+          })
           .optional()
-          .describe('Optional alert ID filter.'),
+          .describe('Optional non-negative integer alert ID filter.'),
         tags: z
           .array(z.string().min(1))
           .optional()
@@ -674,10 +686,11 @@ function registerListAnnotationsTool(
         limit: z
           .number()
           .int()
-          .positive()
-          .max(500)
+          .refine((value) => value >= 1 && value <= 500, {
+            message: 'Limit must be between 1 and 500.',
+          })
           .optional()
-          .describe('Maximum number of annotations to return.'),
+          .describe('Number of annotations to return, from 1 to 500.'),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: TOOL_ANNOTATIONS,

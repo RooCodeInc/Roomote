@@ -20,12 +20,11 @@ const paginationSchema = {
   page_size: z
     .number()
     .int()
-    .min(1)
-    .max(30)
+    .refine((value) => value >= 1 && value <= 30, {
+      message: 'Page size must be between 1 and 30.',
+    })
     .optional()
-    .describe(
-      'Maximum results per page. Granola defaults to 10 and caps at 30.',
-    ),
+    .describe('Results per page from 1 to 30. Granola defaults to 10.'),
 } as const;
 
 const dateFilterSchema = z

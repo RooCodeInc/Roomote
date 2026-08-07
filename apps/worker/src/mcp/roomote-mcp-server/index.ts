@@ -575,11 +575,12 @@ const manageTasksInputSchema = {
   limit: z
     .number()
     .int()
-    .min(1)
-    .max(1000)
+    .refine((value) => value >= 1 && value <= 1000, {
+      message: 'Limit must be between 1 and 1,000.',
+    })
     .optional()
     .describe(
-      'Max results for search (default 20, max 100) or max latest messages for get_messages (max 1000)',
+      'Positive result limit: 1 to 100 for search (default 20), or 1 to 1000 for get_messages',
     ),
   cursor: z
     .string()
@@ -766,18 +767,22 @@ roomoteMcpServer.registerTool(
       prNumber: z
         .number()
         .int()
-        .positive()
+        .refine((value) => value > 0, {
+          message: 'Pull request number must be positive.',
+        })
         .optional()
         .describe(
-          'Required for single-PR/MR actions; unused by issue actions, create_or_update_pull_request, and list_pull_requests.',
+          'Positive pull request number required for single-PR/MR actions; unused by issue actions, create_or_update_pull_request, and list_pull_requests.',
         ),
       issueNumber: z
         .number()
         .int()
-        .positive()
+        .refine((value) => value > 0, {
+          message: 'Issue number must be positive.',
+        })
         .optional()
         .describe(
-          'Required for get_issue, list_issue_comments, and create_issue_comment.',
+          'Positive issue number required for get_issue, list_issue_comments, and create_issue_comment.',
         ),
       state: z
         .literal('open')
@@ -788,11 +793,12 @@ roomoteMcpServer.registerTool(
       limit: z
         .number()
         .int()
-        .positive()
-        .max(200)
+        .refine((value) => value >= 1 && value <= 200, {
+          message: 'Limit must be between 1 and 200.',
+        })
         .optional()
         .describe(
-          'Optional cap for list_pull_requests on how many pull requests to return (default 100, max 200).',
+          'Optional list_pull_requests result limit from 1 to 200 (default 100).',
         ),
       threadId: z
         .string()
@@ -827,7 +833,9 @@ roomoteMcpServer.registerTool(
       line: z
         .number()
         .int()
-        .positive()
+        .refine((value) => value > 0, {
+          message: 'Line number must be positive.',
+        })
         .optional()
         .describe(
           'Required for create_pull_request_review_comment: 1-based line number in the file version named by side. The line must be part of the current PR/MR diff; if the provider rejects the anchor, the call errors so you can correct the anchor and retry once, then fall back to carrying the finding in the review summary comment.',
@@ -841,7 +849,9 @@ roomoteMcpServer.registerTool(
       startLine: z
         .number()
         .int()
-        .positive()
+        .refine((value) => value > 0, {
+          message: 'Start line must be positive.',
+        })
         .optional()
         .describe(
           'Optional multi-line range start for create_pull_request_review_comment; must not exceed line. GitHub and Azure DevOps honor the range; other providers anchor to line and report a warning.',
@@ -1270,11 +1280,16 @@ if (shouldRegisterSlackThreadReplyTool()) {
               readinessMessage: z.string().min(1).max(500).optional(),
             }),
           )
-          .min(1)
-          .max(10)
+          .refine(
+            (suggestions) =>
+              suggestions.length >= 1 && suggestions.length <= 10,
+            {
+              message: 'Provide between 1 and 10 suggestions.',
+            },
+          )
           .optional()
           .describe(
-            `Optional independent actions to post inside the originating ${chatReplySurfaceLabel} conversation (maximum 10). Use only for high-confidence tasks not explicitly identified in the conversation as already underway. Every suggestion must identify its target repository; include hidden investigation context when it will help the implementing agent.`,
+            `Optional list of 1 to 10 independent actions to post inside the originating ${chatReplySurfaceLabel} conversation. Use only for high-confidence tasks not explicitly identified in the conversation as already underway. Every suggestion must identify its target repository; include hidden investigation context when it will help the implementing agent.`,
           ),
       },
       annotations: {

@@ -259,10 +259,11 @@ export function createFastAgentTaskTools(
           limit: z
             .number()
             .int()
-            .min(1)
-            .max(100)
+            .refine((value) => value >= 1 && value <= 100, {
+              message: 'Limit must be between 1 and 100.',
+            })
             .optional()
-            .describe('Maximum number of tasks to return'),
+            .describe('Maximum number of tasks to return, from 1 to 100'),
         })
         .strict(),
       execute: async ({ query, status, limit }) =>
@@ -285,10 +286,11 @@ export function createFastAgentTaskTools(
           limit: z
             .number()
             .int()
-            .min(1)
-            .max(1000)
+            .refine((value) => value >= 1 && value <= 1000, {
+              message: 'Limit must be between 1 and 1,000.',
+            })
             .optional()
-            .describe('Maximum number of messages to return'),
+            .describe('Maximum number of messages to return, from 1 to 1,000'),
           order: fastAgentTaskOrderSchema
             .optional()
             .describe('Message order: oldest first or newest first'),

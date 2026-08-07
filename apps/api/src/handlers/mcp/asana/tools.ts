@@ -19,10 +19,11 @@ const paginationSchema = {
   limit: z
     .number()
     .int()
-    .positive()
-    .max(100)
+    .refine((value) => value >= 1 && value <= 100, {
+      message: 'Limit must be between 1 and 100.',
+    })
     .optional()
-    .describe('Optional page size. Asana caps this at 100.'),
+    .describe('Optional page size from 1 to 100.'),
   offset: z
     .string()
     .optional()
