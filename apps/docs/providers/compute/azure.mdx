@@ -83,7 +83,8 @@ Azure snapshots capture memory and disk, so a restored sandbox resumes in
 sub-second time with processes still alive. Task standby uses the same
 memory-preserving suspend/resume, and sandboxes bill storage-only while
 suspended. Preview port URLs do not survive a snapshot restore; Roomote
-re-adds ports after resume.
+re-adds ports after resume. Suspended tasks wake only when Roomote explicitly
+resumes them, such as for a follow-up; preview traffic does not wake a sandbox.
 
 ## Egress TLS inspection
 
