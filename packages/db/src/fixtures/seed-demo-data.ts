@@ -288,7 +288,6 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
         prTitle: pullRequest.prTitle,
         repository: pullRequest.repository,
         status: pullRequest.status,
-        createdByRoomote: true,
       });
     }
 
