@@ -65,7 +65,9 @@ header, and outbound replies use `R_TELEGRAM_BOT_TOKEN`.
 
 When you save Telegram credentials in Roomote, the webhook is registered
 automatically at `<public-url>/api/webhooks/telegram` with the managed secret
-token and `allowed_updates` including `message` and `callback_query`.
+token and `allowed_updates` including `message`, `callback_query`, and
+`message_reaction`. Roomote uses newly added 👍 reactions on suggested-task
+messages to launch the selected task.
 If the connection check reports a mismatch, delivery error, or stale update
 configuration, use **Repair** in Telegram settings to re-register it.
 
@@ -78,7 +80,7 @@ curl -sS "https://api.telegram.org/bot${R_TELEGRAM_BOT_TOKEN}/setWebhook" \
   -d '{
     "url": "<public-url>/api/webhooks/telegram",
     "secret_token": "<random-secret>",
-    "allowed_updates": ["message", "callback_query"]
+    "allowed_updates": ["message", "callback_query", "message_reaction"]
   }'
 ```
 
