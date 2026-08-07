@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 type ListedServer = {
@@ -107,7 +107,8 @@ vi.mock('@/trpc/client', () => ({
   }),
 }));
 
-import { CustomMcpServers } from './CustomMcpServers';
+import type { IntegrationItem } from './integration-card';
+import { useCustomMcpServers } from './CustomMcpServers';
 
 function buildServer(overrides: Partial<ListedServer> = {}): ListedServer {
   return {
@@ -129,54 +130,94 @@ function buildServer(overrides: Partial<ListedServer> = {}): ListedServer {
   };
 }
 
-function renderComponent() {
+/**
+ * Renders what the hook produces: custom servers become plain integration
+ * items, so the assertions below mirror what the Integrations grids show.
+ */
+function Harness() {
+  const { isEnabled, items, dialogs } = useCustomMcpServers();
+
+  return (
+    <div>
+      <span data-testid="enabled">{String(isEnabled)}</span>
+      <ul>
+        {items.map((item: IntegrationItem) => (
+          <li key={item.id} data-testid="item">
+            <span data-testid="name">{item.name}</span>
+            <span data-testid="description">{item.description}</span>
+            <span data-testid="badge">{item.badge}</span>
+            <span data-testid="status">{item.status}</span>
+            <span data-testid="secondary">{item.secondaryAction?.label}</span>
+            <span data-testid="utility">{item.utilityAction?.label}</span>
+            <span data-testid="configured">{String(item.configured)}</span>
+            <span data-testid="item-enabled">{String(item.enabled)}</span>
+          </li>
+        ))}
+      </ul>
+      {dialogs}
+    </div>
+  );
+}
+
+function renderHarness() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <CustomMcpServers />
+      <Harness />
     </QueryClientProvider>,
   );
 }
 
-describe('CustomMcpServers', () => {
+describe('useCustomMcpServers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     state.availability = { enabled: true };
     state.servers = [];
   });
 
-  it('renders the empty state', async () => {
-    renderComponent();
-
-    expect(
-      await screen.findByText('No custom MCP servers configured yet.'),
-    ).toBeInTheDocument();
-  });
-
-  it('renders nothing when the operator kill switch is set', async () => {
-    state.availability = { enabled: false };
-
-    renderComponent();
+  it('produces no items when there are no servers', async () => {
+    renderHarness();
 
     await waitFor(() => {
-      expect(screen.queryByText('Custom MCP Servers')).not.toBeInTheDocument();
+      expect(screen.getByTestId('enabled')).toHaveTextContent('true');
     });
+    expect(screen.queryAllByTestId('item')).toHaveLength(0);
   });
 
-  it('lists servers with masked header badges and never shows values', async () => {
+  it('reports disabled when the operator kill switch is set', async () => {
+    state.availability = { enabled: false };
     state.servers = [buildServer()];
 
-    renderComponent();
+    renderHarness();
 
-    expect(await screen.findByText('internal-tools')).toBeInTheDocument();
-    expect(screen.getByText('https://mcp.example.com/mcp')).toBeInTheDocument();
-    expect(screen.getByText(/1 header/)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('enabled')).toHaveTextContent('false');
+    });
+    expect(screen.queryAllByTestId('item')).toHaveLength(0);
   });
 
-  it('shows a Connect button for unauthenticated oauth servers', async () => {
+  it('renders a remote server as a Custom-badged item without leaking secrets', async () => {
+    state.servers = [buildServer()];
+
+    renderHarness();
+
+    expect(await screen.findByTestId('name')).toHaveTextContent(
+      'internal-tools',
+    );
+    expect(screen.getByTestId('badge')).toHaveTextContent('Custom');
+    expect(screen.getByTestId('description')).toHaveTextContent(
+      'https://mcp.example.com/mcp',
+    );
+    // Disabled custom servers group with "Configured", never "Available".
+    expect(screen.getByTestId('configured')).toHaveTextContent('true');
+    expect(screen.getByTestId('utility')).toHaveTextContent('Manage tools');
+    expect(screen.getByTestId('secondary')).toHaveTextContent('Edit');
+  });
+
+  it('offers Connect and a status for unauthenticated oauth servers', async () => {
     state.servers = [
       buildServer({
         authType: 'oauth',
@@ -185,35 +226,54 @@ describe('CustomMcpServers', () => {
       }),
     ];
 
-    renderComponent();
+    renderHarness();
 
-    expect(await screen.findByText('Connect')).toBeInTheDocument();
-    expect(screen.getByText(/not connected/)).toBeInTheDocument();
+    expect(await screen.findByTestId('secondary')).toHaveTextContent('Connect');
+    expect(screen.getByTestId('status')).toHaveTextContent('Not connected yet');
   });
 
-  it('shows a reconnect badge when refresh definitively failed', async () => {
+  it('surfaces a reconnect prompt when a refresh was rejected', async () => {
+    state.servers = [
+      buildServer({ authType: 'oauth', headerNames: [], authStatus: 'error' }),
+    ];
+
+    renderHarness();
+
+    expect(await screen.findByTestId('status')).toHaveTextContent(
+      'needs to be reconnected',
+    );
+  });
+
+  it('describes stdio servers by their command and omits tool management', async () => {
     state.servers = [
       buildServer({
-        authType: 'oauth',
+        transport: 'stdio',
+        url: null,
+        authType: 'none',
         headerNames: [],
-        authStatus: 'error',
+        stdioCommand: 'npx',
+        stdioArgs: ['-y', '@example/server'],
+        stdioEnvNames: ['EXAMPLE_TOKEN'],
       }),
     ];
 
-    renderComponent();
+    renderHarness();
 
-    expect(await screen.findByText(/reconnect needed/)).toBeInTheDocument();
+    expect(await screen.findByTestId('description')).toHaveTextContent(
+      'npx -y @example/server',
+    );
+    // Local servers bypass the proxy, so there is nothing to enforce tool
+    // filtering and no Manage tools affordance.
+    expect(screen.getByTestId('utility')).toBeEmptyDOMElement();
   });
 
-  it('opens the add dialog', async () => {
-    renderComponent();
+  it('marks disabled servers so they leave the Connected group', async () => {
+    state.servers = [buildServer({ enabled: false })];
 
-    fireEvent.click(await screen.findByRole('button', { name: /add/i }));
+    renderHarness();
 
-    expect(
-      await screen.findByText('Add custom MCP server'),
-    ).toBeInTheDocument();
-    expect(screen.getByText('Remote (HTTP)')).toBeInTheDocument();
-    expect(screen.getByText('Local (stdio)')).toBeInTheDocument();
+    expect(await screen.findByTestId('item-enabled')).toHaveTextContent(
+      'false',
+    );
   });
 });

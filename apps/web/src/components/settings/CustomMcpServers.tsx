@@ -1,5 +1,6 @@
 'use client';
 
+import type { ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
@@ -15,7 +16,6 @@ import {
   DialogTitle,
   Input,
   Label,
-  Lock,
   Pencil,
   Plus,
   RadioGroup,
@@ -28,8 +28,9 @@ import {
   X,
 } from '@/components/system';
 import { Loading } from '@/components/layout';
-import { Section } from '@/components/settings';
 import type { CustomMcpServerListEntry } from '@/trpc/commands/custom-mcp-servers';
+
+import type { IntegrationItem } from './integration-card';
 import { useTRPC } from '@/trpc/client';
 
 type Transport = 'remote' | 'stdio';
@@ -619,14 +620,30 @@ function CustomToolManagementDialog({
   );
 }
 
-export function CustomMcpServers() {
+/**
+ * Custom MCP servers rendered as regular integration cards.
+ *
+ * They live in the same Connected/Configured grids as the built-in catalog
+ * (a "Custom" badge is the only visual difference), so this exposes items
+ * plus the dialogs they drive rather than owning a section of its own.
+ */
+export function useCustomMcpServers(): {
+  isEnabled: boolean;
+  items: IntegrationItem[];
+  openAddDialog: () => void;
+  dialogs: ReactNode;
+} {
   const trpc = useTRPC();
   const queryClient = useQueryClient();
 
   const availability = useQuery(
     trpc.customMcpServers.availability.queryOptions(),
   );
-  const serversQuery = useQuery(trpc.customMcpServers.list.queryOptions());
+  const isEnabled = availability.data?.enabled !== false;
+
+  const serversQuery = useQuery(
+    trpc.customMcpServers.list.queryOptions(undefined, { enabled: isEnabled }),
+  );
 
   const deleteServer = useMutation(
     trpc.customMcpServers.delete.mutationOptions(),
@@ -645,169 +662,117 @@ export function CustomMcpServers() {
       queryKey: trpc.customMcpServers.list.queryKey(),
     });
 
-  if (availability.data?.enabled === false) {
-    return null;
-  }
+  const servers = useMemo(
+    () => (serversQuery.data ?? []) as ListedServer[],
+    [serversQuery.data],
+  );
 
-  const servers = (serversQuery.data ?? []) as ListedServer[];
-
-  const authSummary = (server: ListedServer) => {
-    if (server.transport === 'stdio') {
-      return <Badge variant="outline">stdio</Badge>;
+  const items = useMemo<IntegrationItem[]>(() => {
+    if (!isEnabled) {
+      return [];
     }
 
-    if (server.authType === 'static_headers') {
-      return (
-        <Badge variant="outline">
-          <Lock className="size-2 text-muted-foreground" />
-          {server.headerNames.length} header
-          {server.headerNames.length === 1 ? '' : 's'}
-        </Badge>
-      );
-    }
+    return servers.map((server) => {
+      const needsConnection =
+        server.transport === 'remote' &&
+        server.authType === 'oauth' &&
+        server.authStatus !== 'authenticated';
 
-    if (server.authType === 'oauth') {
-      if (server.authStatus === 'authenticated') {
-        return <Badge variant="outline">OAuth · connected</Badge>;
-      }
+      const description =
+        server.transport === 'remote'
+          ? (server.url ?? '')
+          : [server.stdioCommand, ...server.stdioArgs].join(' ');
 
-      return (
-        <Badge variant="destructive">
-          OAuth ·{' '}
-          {server.authStatus === 'error' ? 'reconnect needed' : 'not connected'}
-        </Badge>
-      );
-    }
+      return {
+        id: `custom-${server.id}`,
+        name: server.name,
+        description,
+        icon: <ServerCog className="size-5" />,
+        badge: (
+          <Badge variant="outline" className="shrink-0">
+            Custom
+          </Badge>
+        ),
+        enabled: server.enabled,
+        // Custom servers are always deployment-defined, so a disabled one
+        // belongs with "Configured" rather than the catalog's "Available".
+        configured: true,
+        isMcpBased: true,
+        isPending:
+          setEnabled.isPending && setEnabled.variables?.id === server.id,
+        actionLabel: server.enabled
+          ? `Disable ${server.name}`
+          : `Enable ${server.name}`,
+        onAction: async () => {
+          await setEnabled.mutateAsync({
+            id: server.id,
+            enabled: !server.enabled,
+          });
+          refresh();
+        },
+        status: needsConnection
+          ? server.authStatus === 'error'
+            ? 'This server needs to be reconnected before agents can use it.'
+            : 'Not connected yet.'
+          : undefined,
+        ...(server.transport === 'remote'
+          ? {
+              utilityAction: {
+                label: 'Manage tools',
+                ariaLabel: `Manage ${server.name} tools`,
+                onAction: () => setToolsServer(server),
+                isPending: false,
+                icon: <Wrench className="size-4" />,
+              },
+            }
+          : {}),
+        secondaryAction: needsConnection
+          ? {
+              label: 'Connect',
+              ariaLabel: `Connect ${server.name}`,
+              onAction: async () => {
+                const initiateUrl = await connect.mutateAsync({
+                  id: server.id,
+                  redirectTo: '/settings/integrations',
+                });
+                window.location.href = initiateUrl;
+              },
+              isPending: connect.isPending,
+            }
+          : {
+              label: 'Edit',
+              ariaLabel: `Edit ${server.name}`,
+              onAction: () => {
+                setEditingServer(server);
+                setFormOpen(true);
+              },
+              isPending: false,
+              icon: <Pencil className="size-4" />,
+            },
+        headerAction: {
+          label: 'Remove',
+          ariaLabel: `Remove ${server.name}`,
+          onAction: async () => {
+            if (
+              confirm(
+                `Delete custom MCP server '${server.name}'? Stored credentials are removed as well.`,
+              )
+            ) {
+              await deleteServer.mutateAsync({ id: server.id });
+              refresh();
+            }
+          },
+          isPending:
+            deleteServer.isPending && deleteServer.variables?.id === server.id,
+          icon: <Trash2 className="size-4" />,
+        },
+      } satisfies IntegrationItem;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [servers, isEnabled, setEnabled, deleteServer, connect]);
 
-    return <Badge variant="outline">no auth</Badge>;
-  };
-
-  return (
+  const dialogs = (
     <>
-      <Section
-        icon={ServerCog}
-        title="Custom MCP Servers"
-        action={
-          <Button
-            type="button"
-            variant="secondary"
-            size="sm"
-            onClick={() => {
-              setEditingServer(null);
-              setFormOpen(true);
-            }}
-          >
-            <Plus />
-            Add
-          </Button>
-        }
-      >
-        <p className="text-sm text-muted-foreground">
-          Connect MCP servers that are not in the catalog. Available to agents
-          in every task; an environment&apos;s own <code>mcpServers</code> entry
-          with the same name takes precedence in that environment.
-        </p>
-
-        {serversQuery.isPending ? (
-          <Skeleton className="h-16 w-full" />
-        ) : servers.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No custom MCP servers configured yet.
-          </p>
-        ) : (
-          <table className="w-full">
-            <tbody>
-              {servers.map((server) => (
-                <tr
-                  key={server.id}
-                  className="text-sm text-left border-b border-border last:border-none"
-                >
-                  <th className="font-mono py-2">{server.name}</th>
-                  <td className="text-muted-foreground font-mono text-xs max-w-64 truncate">
-                    {server.transport === 'remote'
-                      ? server.url
-                      : [server.stdioCommand, ...server.stdioArgs].join(' ')}
-                  </td>
-                  <td>{authSummary(server)}</td>
-                  <td className="text-right py-1">
-                    {server.transport === 'remote' &&
-                      server.authType === 'oauth' &&
-                      server.authStatus !== 'authenticated' && (
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          disabled={connect.isPending}
-                          onClick={async () => {
-                            const initiateUrl = await connect.mutateAsync({
-                              id: server.id,
-                              redirectTo: '/settings/integrations',
-                            });
-                            window.location.href = initiateUrl;
-                          }}
-                        >
-                          Connect
-                        </Button>
-                      )}
-                    {server.transport === 'remote' && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        title="Manage tools"
-                        onClick={() => setToolsServer(server)}
-                      >
-                        <Wrench className="size-4" />
-                      </Button>
-                    )}
-                    <Switch
-                      checked={server.enabled}
-                      onCheckedChange={async (checked) => {
-                        await setEnabled.mutateAsync({
-                          id: server.id,
-                          enabled: checked,
-                        });
-                        refresh();
-                      }}
-                      className="mx-2 align-middle"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setEditingServer(server);
-                        setFormOpen(true);
-                      }}
-                    >
-                      <Pencil className="size-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={deleteServer.isPending}
-                      onClick={async () => {
-                        if (
-                          confirm(
-                            `Delete custom MCP server '${server.name}'? Stored credentials are removed as well.`,
-                          )
-                        ) {
-                          await deleteServer.mutateAsync({ id: server.id });
-                          refresh();
-                        }
-                      }}
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </Section>
-
       <ServerFormDialog
         open={formOpen}
         onOpenChange={setFormOpen}
@@ -817,7 +782,6 @@ export function CustomMcpServers() {
           refresh();
         }}
       />
-
       <CustomToolManagementDialog
         server={toolsServer}
         open={Boolean(toolsServer)}
@@ -830,4 +794,14 @@ export function CustomMcpServers() {
       />
     </>
   );
+
+  return {
+    isEnabled,
+    items,
+    openAddDialog: () => {
+      setEditingServer(null);
+      setFormOpen(true);
+    },
+    dialogs,
+  };
 }
