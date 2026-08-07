@@ -143,39 +143,43 @@ function KeyValueRows({
     <div className="space-y-2">
       {entries.map((entry, index) => (
         <div key={index} className="flex gap-2">
-          <Input
-            className="font-mono flex-1"
-            placeholder={namePlaceholder}
-            value={entry.name}
-            onChange={(event) =>
-              onChange(
-                entries.map((candidate, candidateIndex) =>
-                  candidateIndex === index
-                    ? { ...candidate, name: event.target.value }
-                    : candidate,
-                ),
-              )
-            }
-            data-1p-ignore
-          />
-          <Input
-            secret
-            className="font-mono flex-1"
-            placeholder={
-              isEdit ? 'Leave blank to keep the existing value' : 'Value'
-            }
-            value={entry.value}
-            onChange={(event) =>
-              onChange(
-                entries.map((candidate, candidateIndex) =>
-                  candidateIndex === index
-                    ? { ...candidate, value: event.target.value }
-                    : candidate,
-                ),
-              )
-            }
-            data-1p-ignore
-          />
+          <div className="flex-1">
+            <Input
+              className="font-mono"
+              placeholder={namePlaceholder}
+              value={entry.name}
+              onChange={(event) =>
+                onChange(
+                  entries.map((candidate, candidateIndex) =>
+                    candidateIndex === index
+                      ? { ...candidate, name: event.target.value }
+                      : candidate,
+                  ),
+                )
+              }
+              data-1p-ignore
+            />
+          </div>
+          <div className="flex-1">
+            <Input
+              secret
+              className="font-mono"
+              placeholder={
+                isEdit ? 'Leave blank to keep the existing value' : 'Value'
+              }
+              value={entry.value}
+              onChange={(event) =>
+                onChange(
+                  entries.map((candidate, candidateIndex) =>
+                    candidateIndex === index
+                      ? { ...candidate, value: event.target.value }
+                      : candidate,
+                  ),
+                )
+              }
+              data-1p-ignore
+            />
+          </div>
           <Button
             type="button"
             variant="ghost"
