@@ -1,6 +1,7 @@
 import * as path from 'node:path';
 
 import {
+  CUSTOM_MCP_PROXY_PATH_PREFIX,
   getMcpIntegrationUpstreamUrl,
   isReservedRuntimeMcpEnvVarName,
   isRoomoteNamespacedEnvVarName,
@@ -235,6 +236,24 @@ function parseUrl(url: string): URL | null {
   }
 }
 
+/**
+ * Returns the `/api/mcp/custom/<id>` path when the URL is a deployment
+ * custom-server proxy entry (path-only or absolute), else null.
+ */
+function parseCustomMcpProxyPath(url: string): string | null {
+  if (url.startsWith(CUSTOM_MCP_PROXY_PATH_PREFIX)) {
+    return url;
+  }
+
+  const parsed = parseUrl(url);
+
+  if (parsed?.pathname.startsWith(CUSTOM_MCP_PROXY_PATH_PREFIX)) {
+    return parsed.pathname;
+  }
+
+  return null;
+}
+
 function isExpectedProxyUrl(url: string, proxyPath: string): boolean {
   if (url === proxyPath) {
     return true;
@@ -300,6 +319,7 @@ export function resolveBuiltInMcpServers(
   integrations?: IntegrationMcpOptions,
   environmentMcpServers?: EnvironmentMcpServers,
   operatorEnvVars?: Record<string, string>,
+  deploymentMcpServers?: EnvironmentMcpServers,
 ): Record<string, McpServerConfig> {
   // The extension's StdioClientTransport only inherits a minimal set of
   // env vars (HOME, PATH, SHELL, TERM, USER) via getDefaultEnvironment().
@@ -408,6 +428,34 @@ export function resolveBuiltInMcpServers(
         continue;
       }
 
+      // Deployment custom servers arrive as Roomote proxy URLs; rewrite the
+      // origin to the API base and inject the run token, exactly like the
+      // curated integration proxies above. The real upstream credentials
+      // stay server-side.
+      const customProxyPath = parseCustomMcpProxyPath(config.url);
+
+      if (customProxyPath) {
+        const apiUrl = resolveApiBaseUrl(taskEnv);
+        const cloudToken = taskEnv?.ROOMOTE_CLOUD_TOKEN;
+
+        if (!apiUrl || !cloudToken) {
+          console.warn(
+            `[resolveBuiltInMcpServers] Skipping custom MCP '${name}': missing API base URL or ROOMOTE_CLOUD_TOKEN in task env`,
+          );
+          continue;
+        }
+
+        resolvedMcps[name] = {
+          type: 'streamable-http',
+          url: `${apiUrl}${customProxyPath}`,
+          headers: withPreviewProxyBypassHeader(
+            withTaskRunTokenAuthHeader(config.headers, cloudToken),
+            taskEnv,
+          ),
+        };
+        continue;
+      }
+
       resolvedMcps[name] = {
         type: 'streamable-http',
         url: config.url,
@@ -416,18 +464,23 @@ export function resolveBuiltInMcpServers(
     }
   }
 
-  // Add environment-specific MCP servers.
-  // Built-ins and integration MCPs take precedence over custom names.
-  if (environmentMcpServers) {
-    const substitutionLookup = buildMcpSubstitutionLookup(
-      taskEnv,
-      operatorEnvVars,
-    );
+  const substitutionLookup = buildMcpSubstitutionLookup(
+    taskEnv,
+    operatorEnvVars,
+  );
 
-    for (const [name, config] of Object.entries(environmentMcpServers)) {
+  const mergeOperatorMcpServers = (
+    servers: EnvironmentMcpServers | undefined,
+    source: 'environment' | 'deployment',
+  ) => {
+    if (!servers) {
+      return;
+    }
+
+    for (const [name, config] of Object.entries(servers)) {
       if (resolvedMcps[name]) {
         console.warn(
-          `[resolveBuiltInMcpServers] Skipping custom MCP '${name}': name conflicts with an existing MCP server`,
+          `[resolveBuiltInMcpServers] Skipping ${source} custom MCP '${name}': name conflicts with an existing MCP server`,
         );
         continue;
       }
@@ -456,7 +509,12 @@ export function resolveBuiltInMcpServers(
         };
       }
     }
-  }
+  };
+
+  // Environment-specific servers first, then deployment-wide stdio servers:
+  // the more specific scope wins name collisions.
+  mergeOperatorMcpServers(environmentMcpServers, 'environment');
+  mergeOperatorMcpServers(deploymentMcpServers, 'deployment');
 
   return resolvedMcps;
 }

@@ -284,6 +284,17 @@ vi.mock('@/trpc/client', () => ({
   useTRPC: () => ({}),
 }));
 
+// Custom MCP servers are covered by their own suite; this one exercises the
+// catalog cards, so stub the hook that feeds custom cards into the grids.
+vi.mock('./CustomMcpServers', () => ({
+  useCustomMcpServers: () => ({
+    isEnabled: true,
+    items: [],
+    openAddDialog: vi.fn(),
+    dialogs: null,
+  }),
+}));
+
 vi.mock('@/components/system', () => ({
   Alert: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   AlertDescription: ({
@@ -434,11 +445,8 @@ vi.mock('@/components/system', () => ({
   X: () => <svg aria-hidden="true" />,
 }));
 
-import {
-  Integrations,
-  sortIntegrationItems,
-  splitIntegrationItems,
-} from './Integrations';
+import { Integrations, sortIntegrationItems } from './Integrations';
+import { splitIntegrationItems } from './integration-card';
 
 describe('Integrations settings', () => {
   beforeEach(() => {

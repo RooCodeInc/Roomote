@@ -86,6 +86,8 @@ vi.mock('@roomote/sdk/server', () => ({
   storeTokens: storeTokensMock,
   getClientInformation: getClientInformationMock,
   updateAuthStatus: updateAuthStatusMock,
+  resolveCustomMcpAuthTarget: vi.fn(async () => null),
+  ensureCustomMcpServerMetadata: vi.fn(),
 }));
 
 vi.mock('@roomote/types', () => ({
@@ -95,6 +97,7 @@ vi.mock('@roomote/types', () => ({
   getMcpIntegrationOauthEndpoints: getMcpIntegrationOauthEndpointsMock,
   isDeploymentScopedMcpIntegration: isDeploymentScopedMcpIntegrationMock,
   isSelfServeMcpIntegration: isSelfServeMcpIntegrationMock,
+  isCustomMcpConnectionId: (mcpId: string) => mcpId.startsWith('custom:'),
 }));
 
 import { LinearReplayIdentityMismatchError } from '@/lib/server/mcp-linear';
@@ -193,7 +196,9 @@ describe('GET /api/mcp-oauth/callback', () => {
     expect(response.headers.get('location')).toBe(
       'https://customer.example/settings?mcp=error&reason=callback_failed',
     );
-    expect(consumeOAuthStateMock).not.toHaveBeenCalled();
+    // The kill switch now applies per connection kind (custom servers have
+    // their own flag), so the one-time state is consumed during lookup; the
+    // flow must still stop before any token exchange.
     expect(exchangeCodeForTokensMock).not.toHaveBeenCalled();
   });
 

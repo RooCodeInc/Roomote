@@ -188,6 +188,8 @@ export {
   sandboxOidcTargetsRelations,
   deploymentMcpEnablements,
   deploymentMcpEnablementsRelations,
+  customMcpServers,
+  customMcpServersRelations,
   mcpConnections,
   mcpConnectionsRelations,
   oauthState,

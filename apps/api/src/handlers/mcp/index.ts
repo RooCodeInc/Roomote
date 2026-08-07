@@ -1,5 +1,9 @@
 import { Hono, type MiddlewareHandler } from 'hono';
-import { Env, areCuratedIntegrationsDisabled } from '@roomote/env';
+import {
+  Env,
+  areCuratedIntegrationsDisabled,
+  isCustomMcpDisabled,
+} from '@roomote/env';
 import { isNativeMcpIntegration, MCP_INTEGRATIONS } from '@roomote/types';
 
 import type { Variables } from '../../types';
@@ -9,6 +13,7 @@ import { communicationMcp } from './communication';
 import { environmentsRouter } from '../environments';
 import { customAutomationsRouter } from '../custom-automations';
 import { tasksRouter } from '../tasks';
+import { createCustomMcpProxy } from './custom-mcp';
 import { createIntegrationMcpProxy } from './integration-mcp';
 import { granolaMcp } from './granola';
 import { grafanaMcp } from './grafana';
@@ -35,6 +40,22 @@ for (const integration of MCP_INTEGRATIONS) {
   mcp.use(`/${integration.id}`, requireCuratedIntegrations);
   mcp.use(`/${integration.id}/*`, requireCuratedIntegrations);
 }
+
+// Deployment custom servers have their own kill switch, deliberately
+// independent of the curated-catalog flag: operators who disable the catalog
+// are the primary custom-server audience.
+const requireCustomMcp: MiddlewareHandler<{
+  Variables: Variables;
+}> = async (c, next) => {
+  if (isCustomMcpDisabled(Env.R_CUSTOM_MCP_DISABLED)) {
+    return c.notFound();
+  }
+
+  await next();
+};
+
+mcp.use('/custom/*', requireCustomMcp);
+mcp.route('/custom/:serverId', createCustomMcpProxy());
 
 mcp.route('/asana', asanaMcp);
 mcp.route('/granola', granolaMcp);

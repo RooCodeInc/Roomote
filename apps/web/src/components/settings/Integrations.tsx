@@ -39,6 +39,12 @@ import {
 } from '@/hooks/mcp-connections';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import {
+  IntegrationSection,
+  splitIntegrationItems,
+  type IntegrationItem,
+} from './integration-card';
+import { useCustomMcpServers } from './CustomMcpServers';
+import {
   saveAsanaConnectionSchema,
   saveGrafanaConnectionSchema,
   saveGranolaConnectionSchema,
@@ -50,33 +56,23 @@ import {
   Alert,
   AlertDescription,
   AlertTitle,
-  BasicTooltip,
   Button,
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
   Dialog,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  Info,
-  InfoTooltip,
   Input,
   Label,
   LinearLogo,
   Pencil,
   Plus,
-  PlugIcon,
   RefreshCw,
   Settings2,
   Spinner,
   Textarea,
   TriangleAlert,
-  X,
 } from '@/components/system';
 import { McpToolManagementDialog } from './McpToolManagementDialog';
 import { McpIcon } from './McpIcon';
@@ -119,43 +115,6 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
   vercel:
     'Roomote will be able to inspect Vercel teams, projects, deployments, logs, and domain availability.',
   zero: 'Roomote will be able to authenticate the workspace Zero connection so agents can discover and pay for external capabilities.',
-};
-type IntegrationItem = {
-  id: string;
-  name: string;
-  description: string;
-  icon: ReactNode;
-  enabled: boolean;
-  configured?: boolean;
-  needsConfiguration?: boolean;
-  isMcpBased: boolean;
-  onAction?: () => void;
-  isPending: boolean;
-  actionLabel?: string;
-  status?: ReactNode;
-  statusIcon?: ReactNode;
-  secondaryAction?: {
-    label: string;
-    ariaLabel: string;
-    onAction: () => void;
-    isPending: boolean;
-    icon?: ReactNode;
-  };
-  headerAction?: {
-    label: string;
-    ariaLabel: string;
-    onAction: () => void;
-    isPending: boolean;
-    icon: ReactNode;
-  };
-  utilityAction?: {
-    label: string;
-    ariaLabel: string;
-    onAction: () => void;
-    isPending: boolean;
-    icon: ReactNode;
-  };
-  highlighted?: boolean;
 };
 
 type OauthReadinessStatus = 'ready' | 'missing' | 'partial';
@@ -406,16 +365,6 @@ export function sortIntegrationItems<T extends { id: string; name: string }>(
   });
 }
 
-export function splitIntegrationItems<
-  T extends { enabled: boolean; configured?: boolean },
->(items: T[]) {
-  return {
-    installed: items.filter((item) => item.enabled),
-    configured: items.filter((item) => !item.enabled && item.configured),
-    available: items.filter((item) => !item.enabled && !item.configured),
-  };
-}
-
 function buildAdminConfiguredIntegrationItem({
   integration,
   connection,
@@ -484,168 +433,17 @@ function buildAdminConfiguredIntegrationItem({
   };
 }
 
-function IntegrationCard({ item }: { item: IntegrationItem }) {
-  const actionLabel = item.onAction
-    ? (item.actionLabel ??
-      (item.enabled ? `Disable ${item.name}` : `Enable ${item.name}`))
-    : undefined;
-  const integrationTypeContent = item.isMcpBased
-    ? 'MCP-based integration'
-    : 'First-class integration';
-  const integrationTypeIcon = item.isMcpBased ? PlugIcon : Info;
-  const footerActions = [item.secondaryAction, item.headerAction].filter(
-    (action): action is NonNullable<IntegrationItem['secondaryAction']> =>
-      action != null,
-  );
-  const iconColumnWidthClass = 'w-[34px]';
-
+function AddCustomMcpServerBar({ onAdd }: { onAdd: () => void }) {
   return (
-    <Card
-      id={`integration-${item.id}`}
-      className={`h-full gap-3 ${item.highlighted ? 'border-accent-foreground ring-2 ring-primary/50 bg-primary/5' : ''}`}
-      data-highlighted={item.highlighted ? 'true' : undefined}
-    >
-      <CardHeader>
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 items-start gap-3">
-            <div
-              className={`mt-0.5 flex ${iconColumnWidthClass} shrink-0 items-start justify-center`}
-            >
-              <div className="rounded-xl border border-border/70 bg-muted/30 p-2">
-                {item.icon}
-              </div>
-            </div>
-            <div className="min-w-0 space-y-1">
-              <div className="flex items-center gap-1.5">
-                <CardTitle className="text-base">{item.name}</CardTitle>
-                <InfoTooltip
-                  content={integrationTypeContent}
-                  icon={integrationTypeIcon}
-                  iconClassName="size-4"
-                />
-              </div>
-              <CardDescription>{item.description}</CardDescription>
-            </div>
-          </div>
-
-          {item.onAction || item.utilityAction ? (
-            <div className="flex items-center gap-1">
-              {item.utilityAction ? (
-                <BasicTooltip content={item.utilityAction.label}>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    aria-label={item.utilityAction.ariaLabel}
-                    onClick={item.utilityAction.onAction}
-                    disabled={item.utilityAction.isPending}
-                  >
-                    {item.utilityAction.isPending ? (
-                      <Spinner size="sm" />
-                    ) : (
-                      item.utilityAction.icon
-                    )}
-                  </Button>
-                </BasicTooltip>
-              ) : null}
-              {actionLabel ? (
-                <BasicTooltip content={actionLabel}>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    aria-label={actionLabel}
-                    onClick={item.onAction}
-                    disabled={item.isPending}
-                  >
-                    {item.isPending ? (
-                      <Spinner size="sm" />
-                    ) : item.needsConfiguration ? (
-                      <Settings2 />
-                    ) : item.enabled ? (
-                      <X />
-                    ) : (
-                      <Plus />
-                    )}
-                  </Button>
-                </BasicTooltip>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </CardHeader>
-
-      {item.status || footerActions.length > 0 ? (
-        <CardContent>
-          <div className="flex gap-3 p-0">
-            <div
-              className={`mt-0.5 ${iconColumnWidthClass} shrink-0`}
-              aria-hidden="true"
-            />
-            <div className="min-w-0 space-y-3">
-              {item.status && (
-                <div className="flex items-start gap-2">
-                  {item.statusIcon ? (
-                    <span className="mt-0.5 shrink-0 text-destructive">
-                      {item.statusIcon}
-                    </span>
-                  ) : null}
-                  <p className="text-sm text-muted-foreground">{item.status}</p>
-                </div>
-              )}
-              {footerActions.length > 0 ? (
-                <div className="-ml-4 flex gap-2">
-                  {footerActions.map((action) => (
-                    <Button
-                      key={action.ariaLabel}
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      aria-label={action.ariaLabel}
-                      onClick={action.onAction}
-                      disabled={action.isPending}
-                    >
-                      {action.isPending ? <Spinner size="sm" /> : action.icon}
-                      {action.label}
-                    </Button>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </CardContent>
-      ) : null}
-    </Card>
-  );
-}
-
-function IntegrationSection({
-  id,
-  title,
-  items,
-  emptyState,
-}: {
-  id: string;
-  title: string;
-  items: IntegrationItem[];
-  emptyState?: ReactNode;
-}) {
-  return (
-    <section aria-labelledby={id} className="space-y-3">
-      <h2 id={id} className="text-sm font-semibold text-foreground">
-        {title}
-      </h2>
-
-      {items.length > 0 ? (
-        <div className="grid gap-4 md:grid-cols-2">
-          {items.map((item) => (
-            <IntegrationCard key={item.id} item={item} />
-          ))}
-        </div>
-      ) : (
-        emptyState
-      )}
-    </section>
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-dashed border-border/70 px-4 py-3">
+      <p className="text-sm text-muted-foreground">
+        Not in the catalog? Connect your own MCP server, remote or local.
+      </p>
+      <Button type="button" variant="secondary" size="sm" onClick={onAdd}>
+        <Plus />
+        Add custom server
+      </Button>
+    </div>
   );
 }
 
@@ -1822,7 +1620,17 @@ export function Integrations() {
     userMcpConnections.data,
   ]);
 
-  const { installed, configured, available } = splitIntegrationItems(items);
+  const {
+    isEnabled: customMcpEnabled,
+    items: customMcpItems,
+    openAddDialog: openCustomMcpDialog,
+    dialogs: customMcpDialogs,
+  } = useCustomMcpServers();
+
+  const { installed, configured, available } = splitIntegrationItems([
+    ...items,
+    ...customMcpItems,
+  ]);
   const highlightedItem =
     items.find((item) => item.id === highlightedIntegrationId) ?? null;
   const deepLinkDialogItem =
@@ -2207,13 +2015,31 @@ export function Integrations() {
 
   if (integrationsAvailability.data?.enabled === false) {
     return (
-      <Alert>
-        <AlertTitle>Integrations disabled by deployment operator</AlertTitle>
-        <AlertDescription>
-          Curated integrations cannot be connected or used on this Roomote
-          instance.
-        </AlertDescription>
-      </Alert>
+      <div className="space-y-8">
+        <Alert>
+          <AlertTitle>Integrations disabled by deployment operator</AlertTitle>
+          <AlertDescription>
+            Curated integrations cannot be connected or used on this Roomote
+            instance.
+          </AlertDescription>
+        </Alert>
+        {customMcpEnabled ? (
+          <>
+            {customMcpDialogs}
+            <AddCustomMcpServerBar onAdd={openCustomMcpDialog} />
+            <IntegrationSection
+              id="custom-mcp-servers"
+              title="Custom MCP servers"
+              items={customMcpItems}
+              emptyState={
+                <p className="text-sm text-muted-foreground">
+                  No custom MCP servers configured yet.
+                </p>
+              }
+            />
+          </>
+        ) : null}
+      </div>
     );
   }
 
@@ -2365,6 +2191,10 @@ export function Integrations() {
           deepLinkDialogItem.onAction?.();
         }}
       />
+      {customMcpDialogs}
+      {customMcpEnabled ? (
+        <AddCustomMcpServerBar onAdd={openCustomMcpDialog} />
+      ) : null}
       <IntegrationSection
         id="installed-integrations"
         title="Connected"

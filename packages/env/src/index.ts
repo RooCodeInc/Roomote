@@ -122,6 +122,15 @@ const serverSchema = {
   // by default; operators opt out explicitly. Existing connections remain
   // stored but cannot be configured or used while disabled.
   R_CURATED_INTEGRATIONS_DISABLED: optInBoolean(),
+  // Operator kill switch for admin-configured custom MCP servers. Deliberately
+  // independent of R_CURATED_INTEGRATIONS_DISABLED: operators who disable the
+  // curated catalog are the primary custom-server audience.
+  R_CUSTOM_MCP_DISABLED: optInBoolean(),
+  // Comma-separated CIDR ranges the custom-MCP egress guard may connect to in
+  // addition to public addresses. Self-host escape hatch for MCP servers on
+  // private networks; a CIDR list rather than a boolean so opening one
+  // internal host does not re-expose every adjacent service.
+  R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS: z.string().min(1).optional(),
   R_INTERCOM_APP_ID: z.string().min(1).optional(),
   R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
   R_POSTHOG_HOST: z.string().url().optional(),
@@ -439,6 +448,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_PING_BASE_URL',
   'R_INSTANCE_ID',
   'STATUSPAGE_INCIDENTS_ENABLED_INSTANCE_ID',
+  'R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS',
   'R_INTERCOM_APP_ID',
   'R_POSTHOG_PROJECT_KEY',
   'R_POSTHOG_HOST',
@@ -583,6 +593,16 @@ export function areCuratedIntegrationsDisabled(
   }
 
   return value === true;
+}
+
+/**
+ * Whether the deployment opted out of admin-configured custom MCP servers.
+ * Same normalization contract as areCuratedIntegrationsDisabled.
+ */
+export function isCustomMcpDisabled(
+  value: string | boolean | undefined,
+): boolean {
+  return areCuratedIntegrationsDisabled(value);
 }
 
 /**

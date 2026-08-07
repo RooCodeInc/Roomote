@@ -4,6 +4,7 @@ import path from 'node:path';
 import * as dotenvx from '@dotenvx/dotenvx';
 import {
   areCuratedIntegrationsDisabled,
+  isCustomMcpDisabled,
   createRoomoteEnv,
   getAllowedDevOrigins as getSharedAllowedDevOrigins,
   getArtifactSigningKey,
@@ -197,6 +198,7 @@ function getWebRuntimeEnv(): RoomoteEnv {
 
 export {
   areCuratedIntegrationsDisabled,
+  isCustomMcpDisabled,
   getArtifactSigningKey,
   getArtifactSigningKeyPrevious,
   getBetterAuthSecret,

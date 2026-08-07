@@ -51,6 +51,10 @@
     "./server/teams-primary-conversation": {
       "import": "./src/server/lib/teams-primary-conversation.ts",
       "require": "./src/server/lib/teams-primary-conversation.ts"
+    },
+    "./server/safe-fetch": {
+      "import": "./src/server/lib/safe-fetch.ts",
+      "require": "./src/server/lib/safe-fetch.ts"
     }
   },
   "scripts": {
@@ -85,6 +89,7 @@
     "bullmq": "^5.78.0",
     "cron-parser": "5.6.1",
     "superjson": "^2.2.6",
+    "undici": "^7.29.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {

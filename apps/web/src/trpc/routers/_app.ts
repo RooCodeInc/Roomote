@@ -19,6 +19,7 @@ import {
   SETUP_AUTH_PROVIDER_IDS,
   isSetupModelProviderId,
   isOpenAiCompatibleProviderId,
+  customMcpServerInputSchema,
   prActions,
   sourceControlProviderSchema,
   sourceControlTokenBackedProviderSchema,
@@ -210,6 +211,19 @@ import {
   connectMcpCommand,
   disconnectMcpCommand,
 } from '../commands/mcp-connections';
+
+import {
+  connectCustomMcpServerCommand,
+  createCustomMcpServerCommand,
+  deleteCustomMcpServerCommand,
+  disconnectCustomMcpServerCommand,
+  getCustomMcpAvailabilityCommand,
+  listCustomMcpServerToolsCommand,
+  listCustomMcpServersCommand,
+  setCustomMcpServerDisabledToolsCommand,
+  setCustomMcpServerEnabledCommand,
+  updateCustomMcpServerCommand,
+} from '../commands/custom-mcp-servers';
 
 import {
   getEnvVarsCommand,
@@ -1565,6 +1579,73 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         restoreTaskRunSnapshotCommand(auth, input),
+      ),
+  }),
+
+  customMcpServers: createRouter({
+    availability: protectedProcedure.query(() =>
+      getCustomMcpAvailabilityCommand(),
+    ),
+
+    list: protectedProcedure.query(({ ctx: { auth } }) =>
+      listCustomMcpServersCommand(auth),
+    ),
+
+    create: protectedProcedure
+      .input(customMcpServerInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        createCustomMcpServerCommand(auth, input),
+      ),
+
+    update: protectedProcedure
+      .input(
+        z.object({ id: z.string().uuid(), server: customMcpServerInputSchema }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        updateCustomMcpServerCommand(auth, input),
+      ),
+
+    delete: protectedProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        deleteCustomMcpServerCommand(auth, input),
+      ),
+
+    setEnabled: protectedProcedure
+      .input(z.object({ id: z.string().uuid(), enabled: z.boolean() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        setCustomMcpServerEnabledCommand(auth, input),
+      ),
+
+    setDisabledTools: protectedProcedure
+      .input(
+        z.object({
+          id: z.string().uuid(),
+          disabledTools: z.array(z.string().min(1)),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        setCustomMcpServerDisabledToolsCommand(auth, input),
+      ),
+
+    listTools: protectedProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .query(({ ctx: { auth }, input }) =>
+        listCustomMcpServerToolsCommand(auth, input),
+      ),
+
+    connect: protectedProcedure
+      .input(
+        z.object({ id: z.string().uuid(), redirectTo: z.string().optional() }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        connectCustomMcpServerCommand(auth, input),
+      ),
+
+    disconnect: protectedProcedure
+      .input(z.object({ id: z.string().uuid() }))
+      .mutation(({ ctx: { auth }, input }) =>
+        disconnectCustomMcpServerCommand(auth, input),
       ),
   }),
 

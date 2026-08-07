@@ -417,19 +417,49 @@ export async function getValidAccessToken(
 
   if (needsRefresh) {
     if (storedTokens.refresh_token) {
+      const {
+        resolveCustomMcpAuthTarget,
+        ensureCustomMcpServerMetadata,
+        isDefinitiveOAuthRejection,
+      } = await import('./custom-auth-target');
+
+      const connection = await db.query.mcpConnections.findFirst({
+        where: eq(mcpConnections.id, connectionId),
+        columns: { mcpId: true },
+      });
+      const customTarget = connection
+        ? await resolveCustomMcpAuthTarget(connection.mcpId)
+        : null;
+
       try {
-        const clientInfo = await getClientInformation(connectionId);
+        const clientInfo =
+          customTarget?.manualClient ??
+          (await getClientInformation(connectionId));
+
         if (clientInfo) {
-          const integration = MCP_INTEGRATIONS.find(
-            (candidate) => candidate.url === mcpUrl,
-          );
-          const tokenEndpoint =
-            getMcpIntegrationOauthEndpoints(integration)?.tokenEndpoint ??
-            (await discoverOAuthEndpoints(mcpUrl)).token_endpoint;
+          let tokenEndpoint: string;
+          let oauthOptions: import('./oauth').OAuthRequestOptions | undefined;
+
+          if (customTarget) {
+            // Custom servers refresh against the pinned metadata through the
+            // SSRF-guarded fetch; never against a catalog match by URL.
+            const metadata = await ensureCustomMcpServerMetadata(customTarget);
+            tokenEndpoint = metadata.token_endpoint;
+            oauthOptions = customTarget.oauthOptions;
+          } else {
+            const integration = MCP_INTEGRATIONS.find(
+              (candidate) => candidate.url === mcpUrl,
+            );
+            tokenEndpoint =
+              getMcpIntegrationOauthEndpoints(integration)?.tokenEndpoint ??
+              (await discoverOAuthEndpoints(mcpUrl)).token_endpoint;
+          }
+
           const newTokens = await refreshOAuthToken(
             tokenEndpoint,
             clientInfo,
             storedTokens.refresh_token,
+            oauthOptions,
           );
           // Preserve existing refresh token if server didn't issue a new one (RFC 6749 §6)
           if (!newTokens.refresh_token) {
@@ -439,10 +469,23 @@ export async function getValidAccessToken(
           accessToken = newTokens.access_token;
         }
       } catch (error) {
-        console.error(
-          `[getValidAccessToken] Token refresh failed:`,
-          error instanceof Error ? error.message : String(error),
-        );
+        const message = error instanceof Error ? error.message : String(error);
+
+        console.error(`[getValidAccessToken] Token refresh failed:`, message);
+
+        // Custom servers: a definitive rejection means the grant is dead.
+        // Surface the reconnect state instead of silently retrying with a
+        // stale token forever (there is no other feedback channel for a
+        // broken deployment-scoped connection). Transient failures (5xx,
+        // network) still fall through with the stale token below.
+        if (customTarget && isDefinitiveOAuthRejection(error)) {
+          await db
+            .update(mcpConnections)
+            .set({ authStatus: 'error', updatedAt: new Date() })
+            .where(eq(mcpConnections.id, connectionId));
+
+          return undefined;
+        }
         // Fall through — try with existing (potentially expired) token
       }
     } else {

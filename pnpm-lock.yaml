@@ -1613,6 +1613,9 @@ importers:
       superjson:
         specifier: ^2.2.6
         version: 2.2.6
+      undici:
+        specifier: ^7.29.0
+        version: 7.29.0
       zod:
         specifier: ^3.25.76
         version: 3.25.76

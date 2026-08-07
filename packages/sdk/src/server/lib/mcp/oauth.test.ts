@@ -3,6 +3,7 @@ import {
   discoverOAuthProtectedResourceMetadata,
   exchangeCodeForTokens,
   getPreferredTokenEndpointAuthMethod,
+  OAuthTokenRequestError,
   refreshOAuthToken,
 } from './oauth';
 
@@ -341,5 +342,42 @@ describe('refreshOAuthToken', () => {
 
     expect(params.get('client_id')).toBe('client-id');
     expect(params.has('client_secret')).toBe(false);
+  });
+
+  it('carries the structured RFC 6749 error code on token-endpoint failures', async () => {
+    mockFetch.mockResolvedValue(
+      createJsonResponse(
+        { error: 'invalid_grant', error_description: 'revoked' },
+        { status: 400 },
+      ),
+    );
+
+    const failure = await refreshOAuthToken(
+      'https://provider.example.com/token',
+      { client_id: 'client-id', token_endpoint_auth_method: 'none' },
+      'refresh-token',
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(OAuthTokenRequestError);
+    expect((failure as OAuthTokenRequestError).oauthErrorCode).toBe(
+      'invalid_grant',
+    );
+  });
+
+  it('reports no error code when the failure body is not an OAuth error', async () => {
+    mockFetch.mockResolvedValue(
+      new Response('<html>bad gateway that mentions invalid_grant</html>', {
+        status: 502,
+      }),
+    );
+
+    const failure = await refreshOAuthToken(
+      'https://provider.example.com/token',
+      { client_id: 'client-id', token_endpoint_auth_method: 'none' },
+      'refresh-token',
+    ).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(OAuthTokenRequestError);
+    expect((failure as OAuthTokenRequestError).oauthErrorCode).toBeNull();
   });
 });

@@ -288,6 +288,7 @@ export {
 export { type PullRequestFactSnapshot } from './lib/pull-requests/pull-request-facts-store';
 
 export * from './lib/auth';
+export * from './lib/safe-fetch';
 
 export {
   storeOAuthStateWithId,
@@ -313,7 +314,16 @@ export {
   generateCodeChallenge,
   generateState,
   exchangeCodeForTokens,
+  OAuthTokenRequestError,
+  type OAuthRequestOptions,
 } from './lib/mcp/oauth';
+
+export {
+  resolveCustomMcpAuthTarget,
+  ensureCustomMcpServerMetadata,
+  isDefinitiveOAuthRejection,
+  type CustomMcpAuthTarget,
+} from './lib/mcp/custom-auth-target';
 
 export {
   LINEAR_ORG_CONNECTION_ROLE,
