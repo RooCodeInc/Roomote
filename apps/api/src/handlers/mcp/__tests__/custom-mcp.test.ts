@@ -208,6 +208,20 @@ describe('createCustomMcpProxy', () => {
     expect(lastUpstreamHeaders?.authorization).toBeUndefined();
   });
 
+  it('sends an operator-configured static Authorization header upstream', async () => {
+    mockFindCustomServer.mockResolvedValue(
+      buildServerRow({
+        url: upstreamUrl(),
+        headers: { Authorization: 'enc(Bearer operator-api-key)' },
+      }),
+    );
+
+    const response = await postMcp(createApp(), initializeRequest);
+
+    expect(response.status).toBe(200);
+    expect(lastUpstreamHeaders?.authorization).toBe('Bearer operator-api-key');
+  });
+
   it('injects the OAuth access token for oauth servers', async () => {
     mockFindCustomServer.mockResolvedValue(
       buildServerRow({ url: upstreamUrl(), authType: 'oauth', headers: null }),

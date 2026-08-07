@@ -483,7 +483,10 @@ function ServerFormDialog({
                   />
                   <p className="text-xs text-muted-foreground">
                     Values are encrypted at rest and injected by the proxy; they
-                    are never sent to the browser or the task sandbox.
+                    are never sent to the browser or the task sandbox. For
+                    servers that expect a bearer API key, add an{' '}
+                    <code className="font-mono">Authorization</code> header with
+                    a <code className="font-mono">Bearer ...</code> value.
                   </p>
                 </div>
               )}

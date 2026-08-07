@@ -70,12 +70,18 @@ export const MAX_CUSTOM_MCP_URL_LENGTH = 2048;
 /**
  * Header names the proxy owns. Operator headers are applied after the proxy's
  * allowlist rebuild, so without this check a custom header could silently
- * override the injected auth or session headers, and a `Host` override could
- * reach internal vhosts behind shared ingress even when IP-level egress
- * checks pass.
+ * override the session headers, and a `Host` override could reach internal
+ * vhosts behind shared ingress even when IP-level egress checks pass.
+ *
+ * `Authorization` is deliberately NOT denied: many MCP servers expect a
+ * static `Authorization: Bearer <api-key>`, and header auth is the only way
+ * to provide one. This is safe because custom headers are restricted to the
+ * static_headers auth mode (the schema rejects headers with OAuth), so there
+ * is never a proxy-injected credential to override, and the proxy rebuilds
+ * upstream headers from scratch, so the caller's run token is never
+ * forwarded regardless.
  */
 const DENIED_CUSTOM_MCP_HEADER_NAMES: ReadonlySet<string> = new Set([
-  'authorization',
   'host',
   'content-type',
   'content-length',

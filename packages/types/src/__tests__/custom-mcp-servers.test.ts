@@ -157,22 +157,25 @@ describe('customMcpServerInputSchema', () => {
 });
 
 describe('validateCustomMcpHeaderName', () => {
-  it.each([
-    'authorization',
-    'Authorization',
-    'Host',
-    'mcp-session-id',
-    'Cookie',
-  ])('denies proxy-managed header %s', (name) => {
-    expect(validateCustomMcpHeaderName(name)).not.toBeNull();
-  });
-
-  it.each(['x-api-key', 'X-Custom-Token', 'api-version'])(
-    'allows custom header %s',
+  it.each(['Host', 'mcp-session-id', 'Cookie'])(
+    'denies proxy-managed header %s',
     (name) => {
-      expect(validateCustomMcpHeaderName(name)).toBeNull();
+      expect(validateCustomMcpHeaderName(name)).not.toBeNull();
     },
   );
+
+  // Authorization is allowed on purpose: static bearer API keys are the
+  // common auth scheme for remote MCP servers, headers are restricted to the
+  // static_headers mode, and the proxy never forwards the caller's run token.
+  it.each([
+    'x-api-key',
+    'X-Custom-Token',
+    'api-version',
+    'authorization',
+    'Authorization',
+  ])('allows custom header %s', (name) => {
+    expect(validateCustomMcpHeaderName(name)).toBeNull();
+  });
 
   it('rejects header names with illegal characters', () => {
     expect(validateCustomMcpHeaderName('bad header')).not.toBeNull();

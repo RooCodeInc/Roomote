@@ -32,6 +32,10 @@ real credentials per request. This means:
 
 - Header values and OAuth tokens never appear in sandbox-readable
   configuration or in the browser after saving.
+- Header auth covers servers that expect a static
+  `Authorization: Bearer <api-key>` as well as custom schemes like
+  `x-api-key`. Roomote's own caller credentials are never forwarded
+  upstream.
 - OAuth tokens refresh centrally, so long-running tasks keep working across
   token expiry.
 - Per-tool disables (the **Manage tools** dialog) are enforced at the proxy:
