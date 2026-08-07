@@ -691,17 +691,12 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: 'google',
     label: 'Google Gemini',
     envVarName: 'GEMINI_API_KEY',
-    defaultRoomoteModel: 'google/gemini-3.1-pro-preview',
+    defaultRoomoteModel: 'google/gemini-3.6-flash',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
       'gemini-3-6-flash': 'google/gemini-3.6-flash',
     }),
-    // Pro is the coding default, and code review and planning follow it via
-    // "same as coding"; Flash covers the high-volume cheap roles.
-    recommendedRoleModels: {
-      helper: 'google/gemini-3.6-flash',
-      explore: 'google/gemini-3.6-flash',
-    },
+    // All non-coding roles follow the Flash coding default.
   },
   {
     // Provider id matches the models.dev/opencode `xai` provider so
