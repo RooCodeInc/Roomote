@@ -169,7 +169,7 @@ describe('preparePrReviewNotificationDelivery', () => {
       number: 42,
       threads: [
         { id: 't1', resolved: true, path: null, line: null, comments: [] },
-        { id: 't2', resolved: false, path: null, line: null, comments: [] },
+        { id: 't2', resolved: true, path: null, line: null, comments: [] },
       ],
       issueComments: [
         {
@@ -381,6 +381,82 @@ describe('triagePrReviewActivity', () => {
       '(URL: https://github.com/owner/repo/pull/42#issuecomment-7)',
     );
     expect(prompt).not.toContain('Current pull request state:');
+  });
+
+  it.each([
+    { followUpQuestion: '', followUpPrompt: '' },
+    {
+      followUpQuestion: 'Generated question without an instruction?',
+      followUpPrompt: '',
+    },
+    {
+      followUpQuestion: '',
+      followUpPrompt: 'Generated instruction without a question.',
+    },
+  ])(
+    'adds a deterministic resolve offer when unresolved threads remain and triage returns an incomplete offer',
+    async ({ followUpQuestion, followUpPrompt }) => {
+      mockGenerateObject.mockResolvedValue({
+        object: {
+          worthNotifying: true,
+          summary: 'A reviewer left feedback on the pull request.',
+          followUpQuestion,
+          followUpPrompt,
+        },
+      });
+
+      await expect(
+        triagePrReviewActivity({
+          ...request,
+          events: eventsWithoutSelfReview,
+          context: {
+            resolvedThreadCount: 1,
+            unresolvedThreadCount: 2,
+            latestReviewStatus: null,
+            latestReviewSummaryComment: null,
+            ciStatus: null,
+            mergeable: true,
+          },
+        }),
+      ).resolves.toEqual({
+        post: true,
+        summary: 'A reviewer left feedback on the pull request.',
+        followUpQuestion: 'Would you like me to resolve these issues?',
+        followUpPrompt:
+          'Review and resolve the unresolved feedback on [owner/repo#42](https://github.com/owner/repo/pull/42). Revalidate each comment against the current code, address valid issues, and update the pull request.',
+      });
+    },
+  );
+
+  it('keeps a notification informational when no unresolved threads remain', async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        worthNotifying: true,
+        summary: 'The feedback has already been addressed.',
+        followUpQuestion: '',
+        followUpPrompt: '',
+      },
+    });
+
+    await expect(
+      triagePrReviewActivity({
+        ...request,
+        events: eventsWithoutSelfReview,
+        context: {
+          resolvedThreadCount: 1,
+          unresolvedThreadCount: 0,
+          latestReviewStatus: null,
+          latestReviewSummaryComment: null,
+          ciStatus: null,
+          mergeable: true,
+        },
+      }),
+    ).resolves.toEqual({
+      post: true,
+      summary: 'The feedback has already been addressed.',
+      followUpQuestion: null,
+      followUpPrompt: null,
+    });
   });
 
   it('passes the source-control provider label into the triage prompt', async () => {

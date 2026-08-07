@@ -765,14 +765,31 @@ export async function triagePrReviewActivity({
   const followUpQuestion = object.followUpQuestion.trim();
   const followUpPrompt = object.followUpPrompt.trim();
   // The offer is only actionable when both halves exist; a question without
-  // an injectable instruction (or vice versa) degrades to a plain summary.
-  const hasFollowUp = followUpQuestion.length > 0 && followUpPrompt.length > 0;
+  // an injectable instruction (or vice versa) uses a deterministic fallback
+  // when live PR state still shows unresolved review threads.
+  const hasGeneratedFollowUp =
+    followUpQuestion.length > 0 && followUpPrompt.length > 0;
+  const unresolvedThreadCount = context?.unresolvedThreadCount ?? 0;
+  const fallbackFollowUp =
+    !hasGeneratedFollowUp && unresolvedThreadCount > 0
+      ? {
+          question:
+            unresolvedThreadCount === 1
+              ? 'Would you like me to resolve this issue?'
+              : 'Would you like me to resolve these issues?',
+          prompt: `Review and resolve the unresolved feedback on [${repository}#${prNumber}](${prUrl}). Revalidate each comment against the current code, address valid issues, and update the pull request.`,
+        }
+      : null;
 
   return {
     post: true,
     summary,
-    followUpQuestion: hasFollowUp ? followUpQuestion : null,
-    followUpPrompt: hasFollowUp ? followUpPrompt : null,
+    followUpQuestion: hasGeneratedFollowUp
+      ? followUpQuestion
+      : (fallbackFollowUp?.question ?? null),
+    followUpPrompt: hasGeneratedFollowUp
+      ? followUpPrompt
+      : (fallbackFollowUp?.prompt ?? null),
   };
 }
 
