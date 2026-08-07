@@ -595,7 +595,7 @@ describe('submitTaskSuggestions', () => {
             {
               title: 'Fix the parser',
               brief: 'Nil access is crashing the parser.',
-              targetRepositoryFullName: 'acme/app',
+              targetRepositoryFullName: 'Acme/App',
             },
           ],
         }),
@@ -608,6 +608,7 @@ describe('submitTaskSuggestions', () => {
       targetEnvironmentId: '10b031ec-b728-4d8f-a9a0-1ed4aa500511',
       repositoryIds: ['repo-1'],
     });
+    expect(mockFindEnvironmentForRepo).toHaveBeenCalledWith('acme/app');
     expect(insertedTrackedMessageValues[0]?.metadata).not.toHaveProperty(
       'launchRouting',
     );
@@ -633,14 +634,14 @@ describe('submitTaskSuggestions', () => {
       payloadKind: TaskPayloadKind.StandardTask,
       targetRepositoryFullName: 'wrong/repository',
       expectedError:
-        'targetRepositoryFullName "wrong/repository" is not part of this org-wide task',
+        'targetRepositoryFullName "wrong/repository" is not an active repository in this org-wide task',
     },
     {
       description: 'scan suggestions with an unknown target repository',
       payloadKind: TaskPayloadKind.Scan,
       targetRepositoryFullName: 'wrong/repository',
       expectedError:
-        'targetRepositoryFullName "wrong/repository" is not part of this org-wide task',
+        'targetRepositoryFullName "wrong/repository" is not an active repository in this org-wide task',
     },
     {
       description: 'standard suggestions with an inactive target repository',
@@ -655,7 +656,7 @@ describe('submitTaskSuggestions', () => {
         },
       ],
       expectedError:
-        'targetRepositoryFullName "acme/inactive" is not part of this org-wide task',
+        'targetRepositoryFullName "acme/inactive" is not an active repository in this org-wide task',
     },
     {
       description: 'scan suggestions with an inactive target repository',
@@ -670,7 +671,7 @@ describe('submitTaskSuggestions', () => {
         },
       ],
       expectedError:
-        'targetRepositoryFullName "acme/inactive" is not part of this org-wide task',
+        'targetRepositoryFullName "acme/inactive" is not an active repository in this org-wide task',
     },
   ])(
     'rejects org-wide current-thread $description',

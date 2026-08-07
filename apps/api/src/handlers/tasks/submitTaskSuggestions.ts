@@ -229,6 +229,10 @@ function buildSuggestedTasksSummaryLockKey(params: {
   return `suggested_tasks:${params.sourceTaskId}`;
 }
 
+function normalizeRepositoryFullName(repositoryFullName: string): string {
+  return repositoryFullName.trim().toLowerCase();
+}
+
 function getSuggestedTaskRepositoryFullNames(
   payload: SuggestedTasksPayload,
 ): string[] {
@@ -351,7 +355,9 @@ function prepareTaskSuggestion(params: {
 
   if (
     targetRepositoryFullName &&
-    !candidateRepositorySet.has(targetRepositoryFullName)
+    !candidateRepositorySet.has(
+      normalizeRepositoryFullName(targetRepositoryFullName),
+    )
   ) {
     throw new Error(
       `Suggestion "${suggestion.title}" targets repository "${targetRepositoryFullName}", which is not part of this suggestion run.`,
@@ -462,7 +468,9 @@ async function resolvePreparedSuggestions(params: {
   tolerateInvalidSuggestions?: boolean;
 }): Promise<PreparedTaskSuggestion[]> {
   const candidateRepositorySet = new Set(
-    params.candidateRepositories.map((repository) => repository.fullName),
+    params.candidateRepositories.map((repository) =>
+      normalizeRepositoryFullName(repository.fullName),
+    ),
   );
   const targetEnvironmentIds = [
     ...new Set(
@@ -1356,7 +1364,7 @@ export async function submitTaskSuggestions(
         return c.json(
           {
             error: targetRepositoryFullName
-              ? `targetRepositoryFullName "${targetRepositoryFullName}" is not part of this org-wide task`
+              ? `targetRepositoryFullName "${targetRepositoryFullName}" is not an active repository in this org-wide task`
               : 'This Suggested Tasks run did not resolve to any repositories in this deployment.',
           },
           400,
@@ -1364,22 +1372,27 @@ export async function submitTaskSuggestions(
       }
     }
 
+    const candidateRepositoriesByNormalizedFullName = new Map(
+      candidateRepositories.map((repository) => [
+        normalizeRepositoryFullName(repository.fullName),
+        repository,
+      ]),
+    );
     if (requiresOrgWideTargetRepository) {
-      const candidateRepositorySet = new Set(
-        candidateRepositories.map((repository) => repository.fullName),
-      );
       const invalidTargetRepository = parsedBody.data.suggestions
         .map((suggestion) => suggestion.targetRepositoryFullName?.trim())
         .find(
           (targetRepositoryFullName) =>
             targetRepositoryFullName &&
-            !candidateRepositorySet.has(targetRepositoryFullName),
+            !candidateRepositoriesByNormalizedFullName.has(
+              normalizeRepositoryFullName(targetRepositoryFullName),
+            ),
         );
 
       if (invalidTargetRepository) {
         return c.json(
           {
-            error: `targetRepositoryFullName "${invalidTargetRepository}" is not part of this org-wide task`,
+            error: `targetRepositoryFullName "${invalidTargetRepository}" is not an active repository in this org-wide task`,
           },
           400,
         );
@@ -1391,7 +1404,7 @@ export async function submitTaskSuggestions(
     );
     const repositoryIdsByFullName = new Map(
       candidateRepositories.map((repository) => [
-        repository.fullName,
+        normalizeRepositoryFullName(repository.fullName),
         repository.id,
       ]),
     );
@@ -1410,9 +1423,26 @@ export async function submitTaskSuggestions(
             : {}),
         }))
       : parsedBody.data.suggestions;
+    const suggestionsWithCanonicalTargets = requiresOrgWideTargetRepository
+      ? submittedSuggestions.map((suggestion) => {
+          const targetRepositoryFullName =
+            suggestion.targetRepositoryFullName?.trim();
+          const canonicalRepository = targetRepositoryFullName
+            ? candidateRepositoriesByNormalizedFullName.get(
+                normalizeRepositoryFullName(targetRepositoryFullName),
+              )
+            : null;
+          return canonicalRepository
+            ? {
+                ...suggestion,
+                targetRepositoryFullName: canonicalRepository.fullName,
+              }
+            : suggestion;
+        })
+      : submittedSuggestions;
     const suggestionsWithLaunchTargets = usesPinnedOrgWideLaunchContract
       ? await Promise.all(
-          submittedSuggestions.map(async (suggestion) => {
+          suggestionsWithCanonicalTargets.map(async (suggestion) => {
             if (!suggestion.targetRepositoryFullName) {
               return suggestion;
             }
@@ -1425,7 +1455,7 @@ export async function submitTaskSuggestions(
               : suggestion;
           }),
         )
-      : submittedSuggestions;
+      : suggestionsWithCanonicalTargets;
     const preparedSuggestions = await resolvePreparedSuggestions({
       suggestions: suggestionsWithLaunchTargets,
       candidateRepositories,
@@ -1444,9 +1474,6 @@ export async function submitTaskSuggestions(
           );
 
     if (suggestionsMissingLaunchMetadata.length > 0) {
-      apiLogger.warn(
-        `[submitTaskSuggestions] Persisting scheduled suggestions without per-idea launch metadata for taskId=${taskId}`,
-      );
       apiLogger.warn(
         `[submitTaskSuggestions] Dropping ${suggestionsMissingLaunchMetadata.length} scheduled suggestions without per-idea launch metadata for taskId=${taskId}`,
       );
@@ -1514,7 +1541,9 @@ export async function submitTaskSuggestions(
             let suggestionRepositoryIds = repositoryIds;
             if (suggestion.targetRepositoryFullName) {
               const targetRepositoryId = repositoryIdsByFullName.get(
-                suggestion.targetRepositoryFullName,
+                normalizeRepositoryFullName(
+                  suggestion.targetRepositoryFullName,
+                ),
               );
               if (!targetRepositoryId) {
                 throw new Error(

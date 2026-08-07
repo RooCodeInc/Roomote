@@ -89,7 +89,9 @@ teammates can start from the report. Asking only for a summary or list of action
 items keeps those actions as report text. Launchable suggestions require a chat
 report destination. Runs scoped to **All repositories** pin each suggestion to a
 concrete repository, then start it in a matching named environment when one is
-available.
+available. Those runs prepare every active repository, so they can take longer
+in large deployments. Use a named environment when the automation only needs a
+specific repository set.
 
 Admins can also choose **Custom schedule** and enter either a standard
 five-field cron expression or a natural-language schedule such as “weekdays at
