@@ -8,6 +8,13 @@ built-in integration for. Deployment admins configure them under
 **Settings → Integrations → Custom MCP Servers**, and they become available to
 agents in every task.
 
+Most MCP servers publish a JSON snippet in their docs. The add dialog's
+**Import from JSON** button accepts a pasted `mcpServers` snippet (or a bare
+server config) and prefills the form from it, for both remote and local
+servers. Snippets that launch `mcp-remote` are converted to remote servers on
+the upstream URL, which keeps credentials behind the Roomote proxy and
+enables per-tool management.
+
 Three kinds of servers are supported:
 
 | Kind                    | How it connects                                                            | Where credentials live                          |

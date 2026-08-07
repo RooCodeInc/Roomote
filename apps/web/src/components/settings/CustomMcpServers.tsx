@@ -28,6 +28,10 @@ import {
   X,
 } from '@/components/system';
 import { Loading } from '@/components/layout';
+import {
+  parseCustomMcpServerJson,
+  type CustomMcpJsonImport,
+} from '@/lib/custom-mcp-json-import';
 import type { CustomMcpServerListEntry } from '@/trpc/commands/custom-mcp-servers';
 
 import type { IntegrationItem } from './integration-card';
@@ -79,6 +83,37 @@ function serverToFormValues(server: ListedServer): ServerFormValues {
     stdioCommand: server.stdioCommand ?? '',
     stdioArgs: server.stdioArgs.join('\n'),
     stdioEnv: server.stdioEnvNames.map((name) => ({ name, value: '' })),
+  };
+}
+
+/**
+ * Map a parsed JSON snippet onto the form. The import prefills fields rather
+ * than saving directly, so the admin reviews (and can finish naming) before
+ * submitting. A snippet without a usable name keeps whatever is typed.
+ */
+function importToFormValues(
+  parsed: CustomMcpJsonImport,
+  currentName: string,
+): ServerFormValues {
+  return {
+    ...EMPTY_FORM,
+    name: parsed.name ?? currentName,
+    transport: parsed.transport,
+    url: parsed.url ?? '',
+    authType:
+      parsed.transport === 'remote' && parsed.headers
+        ? 'static_headers'
+        : 'none',
+    headers: Object.entries(parsed.headers ?? {}).map(([name, value]) => ({
+      name,
+      value,
+    })),
+    stdioCommand: parsed.stdio?.command ?? '',
+    stdioArgs: (parsed.stdio?.args ?? []).join('\n'),
+    stdioEnv: Object.entries(parsed.stdio?.env ?? {}).map(([name, value]) => ({
+      name,
+      value,
+    })),
   };
 }
 
@@ -229,10 +264,18 @@ function ServerFormDialog({
     if (open) {
       reset(editingServer ? serverToFormValues(editingServer) : EMPTY_FORM);
       setError(null);
+      setJsonImportOpen(false);
+      setJsonText('');
+      setImportError(null);
+      setImportNotes([]);
     }
   }, [open, editingServer, reset]);
 
   const [error, setError] = useState<string | null>(null);
+  const [jsonImportOpen, setJsonImportOpen] = useState(false);
+  const [jsonText, setJsonText] = useState('');
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importNotes, setImportNotes] = useState<string[]>([]);
   const transport = watch('transport');
   const authType = watch('authType');
   const headers = watch('headers');
@@ -285,6 +328,78 @@ function ServerFormDialog({
         </DialogHeader>
 
         <form onSubmit={onSubmit} className="space-y-4">
+          {!isEdit && (
+            <div className="space-y-2">
+              {jsonImportOpen ? (
+                <>
+                  <Label htmlFor="custom-mcp-json-import">
+                    Paste a JSON config
+                  </Label>
+                  <textarea
+                    id="custom-mcp-json-import"
+                    className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm font-mono min-h-28"
+                    placeholder='{"mcpServers": {"example": {"command": "npx", "args": ["-y", "@example/mcp-server"]}}}'
+                    value={jsonText}
+                    onChange={(event) => setJsonText(event.target.value)}
+                  />
+                  {importError && (
+                    <p className="text-sm text-destructive">{importError}</p>
+                  )}
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => {
+                        try {
+                          const parsed = parseCustomMcpServerJson(jsonText);
+
+                          reset(importToFormValues(parsed, watch('name')));
+                          setImportNotes(parsed.notes);
+                          setImportError(null);
+                          setJsonImportOpen(false);
+                          setJsonText('');
+                        } catch (parseError) {
+                          setImportError(
+                            parseError instanceof Error
+                              ? parseError.message
+                              : String(parseError),
+                          );
+                        }
+                      }}
+                    >
+                      Fill form from JSON
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        setJsonImportOpen(false);
+                        setImportError(null);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setJsonImportOpen(true)}
+                >
+                  Import from JSON
+                </Button>
+              )}
+              {importNotes.map((note) => (
+                <p key={note} className="text-xs text-muted-foreground">
+                  {note}
+                </p>
+              ))}
+            </div>
+          )}
+
           <div className="space-y-2">
             <Label>Name</Label>
             <Input

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 type ListedServer = {
@@ -135,11 +135,14 @@ function buildServer(overrides: Partial<ListedServer> = {}): ListedServer {
  * items, so the assertions below mirror what the Integrations grids show.
  */
 function Harness() {
-  const { isEnabled, items, dialogs } = useCustomMcpServers();
+  const { isEnabled, items, openAddDialog, dialogs } = useCustomMcpServers();
 
   return (
     <div>
       <span data-testid="enabled">{String(isEnabled)}</span>
+      <button type="button" data-testid="open-add" onClick={openAddDialog}>
+        Add
+      </button>
       <ul>
         {items.map((item: IntegrationItem) => (
           <li key={item.id} data-testid="item">
@@ -275,5 +278,85 @@ describe('useCustomMcpServers', () => {
     expect(await screen.findByTestId('item-enabled')).toHaveTextContent(
       'false',
     );
+  });
+
+  it('prefills the add dialog from a pasted JSON snippet', async () => {
+    renderHarness();
+
+    fireEvent.click(await screen.findByTestId('open-add'));
+    fireEvent.click(screen.getByRole('button', { name: 'Import from JSON' }));
+    fireEvent.change(screen.getByLabelText('Paste a JSON config'), {
+      target: {
+        value: JSON.stringify({
+          mcpServers: {
+            'example-tools': {
+              command: 'npx',
+              args: ['-y', '@example/mcp-server'],
+              env: { EXAMPLE_TOKEN: 'tok' },
+            },
+          },
+        }),
+      },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Fill form from JSON' }),
+    );
+
+    expect(screen.getByPlaceholderText('e.g. internal-tools')).toHaveValue(
+      'example-tools',
+    );
+    expect(screen.getByPlaceholderText('e.g. npx')).toHaveValue('npx');
+    expect(screen.getByPlaceholderText(/@example\/mcp-server/)).toHaveValue(
+      '-y\n@example/mcp-server',
+    );
+    expect(screen.getByPlaceholderText('e.g. EXAMPLE_TOKEN')).toHaveValue(
+      'EXAMPLE_TOKEN',
+    );
+  });
+
+  it('converts a pasted mcp-remote launcher into a remote server', async () => {
+    renderHarness();
+
+    fireEvent.click(await screen.findByTestId('open-add'));
+    fireEvent.click(screen.getByRole('button', { name: 'Import from JSON' }));
+    fireEvent.change(screen.getByLabelText('Paste a JSON config'), {
+      target: {
+        value: JSON.stringify({
+          mcpServers: {
+            notion: {
+              command: 'npx',
+              args: ['-y', 'mcp-remote', 'https://mcp.notion.com/mcp'],
+            },
+          },
+        }),
+      },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Fill form from JSON' }),
+    );
+
+    expect(
+      screen.getByPlaceholderText('https://mcp.example.com/mcp'),
+    ).toHaveValue('https://mcp.notion.com/mcp');
+    expect(
+      screen.getByText(/Converted an mcp-remote launcher/),
+    ).toBeInTheDocument();
+  });
+
+  it('reports a parse error without touching the form', async () => {
+    renderHarness();
+
+    fireEvent.click(await screen.findByTestId('open-add'));
+    fireEvent.click(screen.getByRole('button', { name: 'Import from JSON' }));
+    fireEvent.change(screen.getByLabelText('Paste a JSON config'), {
+      target: { value: 'not json' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Fill form from JSON' }),
+    );
+
+    expect(
+      screen.getByText('The pasted text is not valid JSON.'),
+    ).toBeInTheDocument();
   });
 });
