@@ -10,6 +10,8 @@ const {
   mockPullsGet,
   mockListCheckRunsForRef,
   mockGetCombinedStatusForRef,
+  mockIsRoomoteGitHubLogin,
+  mockResolveConfiguredGitHubAppSlug,
 } = vi.hoisted(() => ({
   mockGenerateObject: vi.fn(),
   mockReadSourceControlPullRequest: vi.fn(),
@@ -22,6 +24,8 @@ const {
   mockPullsGet: vi.fn(),
   mockListCheckRunsForRef: vi.fn(),
   mockGetCombinedStatusForRef: vi.fn(),
+  mockIsRoomoteGitHubLogin: vi.fn((login: string) => login === 'roomote[bot]'),
+  mockResolveConfiguredGitHubAppSlug: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
@@ -53,6 +57,8 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
     return content.slice(start + startMarker.length, end);
   },
+  isReviewInProgressStatusLine: (line: string) =>
+    /^(Self-reviewing|Reviewing|Re-reviewing)/i.test(line.trim()),
 }));
 
 vi.mock('../../pull-requests/source-control-pull-request-reads', () => ({
@@ -81,6 +87,10 @@ vi.mock('@roomote/slack', () => ({
 }));
 
 vi.mock('@roomote/github', () => ({
+  Schemas: {
+    isRoomoteGitHubLogin: (login: string) => mockIsRoomoteGitHubLogin(login),
+  },
+  resolveConfiguredGitHubAppSlug: () => mockResolveConfiguredGitHubAppSlug(),
   createTaskRunGitHubToken: (...args: unknown[]) =>
     mockCreateTaskRunGitHubToken(...args),
   getOctokit: () => ({
@@ -133,6 +143,13 @@ const events: PrReviewActivityEvent[] = [
 ];
 
 const eventsWithoutSelfReview: PrReviewActivityEvent[] = events.slice(0, 2);
+
+beforeEach(() => {
+  mockIsRoomoteGitHubLogin.mockImplementation(
+    (login: string) => login === 'roomote[bot]',
+  );
+  mockResolveConfiguredGitHubAppSlug.mockResolvedValue('roomote');
+});
 
 function mockGreenCiChecks() {
   mockCreateTaskRunGitHubToken.mockResolvedValue('github-token');
@@ -330,6 +347,180 @@ describe('preparePrReviewNotificationDelivery', () => {
       }),
     ).resolves.toEqual({ post: false, reason: 'not_worth_notifying' });
   });
+
+  it('suppresses Roomote activity represented by a terminal summary for the same head', async () => {
+    await expect(
+      preparePrReviewNotificationDelivery({
+        taskRun,
+        request,
+        events: [
+          {
+            kind: 'review_comment',
+            authorLogin: 'roomote[bot]',
+            roomoteAuthored: true,
+            reviewHeadSha: 'abc',
+          },
+        ],
+      }),
+    ).resolves.toEqual({ post: false, reason: 'not_worth_notifying' });
+
+    expect(mockGenerateObject).not.toHaveBeenCalled();
+    expect(mockFormatMessage).not.toHaveBeenCalled();
+  });
+
+  it('keeps human activity when matching Roomote activity is coalesced', async () => {
+    await preparePrReviewNotificationDelivery({
+      taskRun,
+      request,
+      events: [
+        {
+          kind: 'review_comment',
+          authorLogin: 'roomote[bot]',
+          roomoteAuthored: true,
+          reviewHeadSha: 'abc',
+        },
+        {
+          kind: 'review_comment',
+          authorLogin: 'alice',
+          reviewHeadSha: 'abc',
+        },
+      ],
+    });
+
+    const prompt = mockGenerateObject.mock.calls[0]?.[0]?.prompt as string;
+    expect(prompt).toContain('- alice left an inline review comment');
+    expect(prompt).not.toContain('you (this is your own review)');
+  });
+
+  it('keeps Roomote activity from a different reviewed head', async () => {
+    await preparePrReviewNotificationDelivery({
+      taskRun,
+      request,
+      events: [
+        {
+          kind: 'review_comment',
+          authorLogin: 'roomote[bot]',
+          roomoteAuthored: true,
+          reviewHeadSha: 'def',
+        },
+      ],
+    });
+
+    const prompt = mockGenerateObject.mock.calls[0]?.[0]?.prompt as string;
+    expect(prompt).toContain('you (this is your own review)');
+  });
+
+  it('keeps Roomote activity while the matching summary is still in progress', async () => {
+    mockReadSourceControlPullRequest.mockResolvedValue({
+      success: true,
+      provider: 'github',
+      repositoryFullName: 'owner/repo',
+      number: 42,
+      threads: [],
+      issueComments: [
+        {
+          id: 'c1',
+          author: 'roomote[bot]',
+          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\nReviewing the PR now.\n<!-- roomote-review-status:end -->',
+          createdAt: null,
+          url: null,
+        },
+      ],
+      warnings: [],
+    });
+
+    await preparePrReviewNotificationDelivery({
+      taskRun,
+      request,
+      events: [
+        {
+          kind: 'review_comment',
+          authorLogin: 'roomote[bot]',
+          roomoteAuthored: true,
+          reviewHeadSha: 'abc',
+        },
+      ],
+    });
+
+    expect(mockGenerateObject).toHaveBeenCalled();
+  });
+
+  it('keeps Roomote activity when a human posts a marker-shaped comment', async () => {
+    mockReadSourceControlPullRequest.mockResolvedValue({
+      success: true,
+      provider: 'github',
+      repositoryFullName: 'owner/repo',
+      number: 42,
+      threads: [],
+      issueComments: [
+        {
+          id: 'c1',
+          author: 'alice',
+          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->',
+          createdAt: null,
+          url: null,
+        },
+      ],
+      warnings: [],
+    });
+
+    await preparePrReviewNotificationDelivery({
+      taskRun,
+      request,
+      events: [
+        {
+          kind: 'review_comment',
+          authorLogin: 'roomote[bot]',
+          roomoteAuthored: true,
+          reviewHeadSha: 'abc',
+        },
+      ],
+    });
+
+    expect(mockGenerateObject).toHaveBeenCalled();
+  });
+
+  it('resolves a custom GitHub App slug before classifying summary authors', async () => {
+    mockResolveConfiguredGitHubAppSlug.mockResolvedValue('acme');
+    mockIsRoomoteGitHubLogin.mockImplementation((login: string) => {
+      expect(mockResolveConfiguredGitHubAppSlug).toHaveBeenCalled();
+      return login === 'acme[bot]';
+    });
+    mockReadSourceControlPullRequest.mockResolvedValue({
+      success: true,
+      provider: 'github',
+      repositoryFullName: 'owner/repo',
+      number: 42,
+      threads: [],
+      issueComments: [
+        {
+          id: 'c1',
+          author: 'acme[bot]',
+          body: '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n1 issue outstanding.\n<!-- roomote-review-status:end -->',
+          createdAt: null,
+          url: null,
+        },
+      ],
+      warnings: [],
+    });
+
+    await expect(
+      preparePrReviewNotificationDelivery({
+        taskRun,
+        request,
+        events: [
+          {
+            kind: 'review_comment',
+            authorLogin: 'acme[bot]',
+            roomoteAuthored: true,
+            reviewHeadSha: 'abc',
+          },
+        ],
+      }),
+    ).resolves.toEqual({ post: false, reason: 'not_worth_notifying' });
+
+    expect(mockGenerateObject).not.toHaveBeenCalled();
+  });
 });
 
 describe('triagePrReviewActivity', () => {
@@ -455,6 +646,7 @@ describe('triagePrReviewActivity', () => {
         latestReviewStatus: '2 issues outstanding.',
         latestReviewSummaryComment:
           '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-checklist:start -->\n- [ ] `apps/api/src/foo.ts:10` - Handle null actor ids\n- [ ] `apps/api/src/bar.ts:20` - Rename the helper to match its return shape\n<!-- roomote-review-checklist:end -->',
+        latestTerminalReviewSummaryHeadSha: 'abc',
         ciStatus: {
           checks: [
             { name: 'CI / Lint', status: 'success' },
@@ -497,6 +689,7 @@ describe('triagePrReviewActivity', () => {
         unresolvedThreadCount: 0,
         latestReviewStatus: null,
         latestReviewSummaryComment: null,
+        latestTerminalReviewSummaryHeadSha: null,
         ciStatus: {
           checks: [{ name: 'CI / Tests', status: 'failure' }],
         },
@@ -603,6 +796,7 @@ describe('gatherPrReviewTriageContext', () => {
       latestReviewStatus: 'All 1 issue addressed. See task',
       latestReviewSummaryComment:
         '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
+      latestTerminalReviewSummaryHeadSha: 'abc',
       ciStatus: {
         checks: [
           { name: 'CI / Lint', status: 'success' },
@@ -709,6 +903,7 @@ describe('gatherPrReviewTriageContext', () => {
       unresolvedThreadCount: null,
       latestReviewStatus: null,
       latestReviewSummaryComment: null,
+      latestTerminalReviewSummaryHeadSha: null,
       ciStatus: null,
       mergeable: null,
     });

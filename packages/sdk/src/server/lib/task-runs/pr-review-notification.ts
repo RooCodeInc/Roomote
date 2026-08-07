@@ -46,6 +46,8 @@ const SCHEDULED_MARKER_TTL_BUFFER_SECONDS = 15 * 60;
 export const prReviewActivityEventSchema = z.object({
   kind: z.enum(['review', 'review_comment', 'review_summary']),
   authorLogin: z.string(),
+  /** Commit SHA reviewed by this event, used to coalesce one review pass. */
+  reviewHeadSha: z.string().optional(),
   /** GitHub review state for `review` events, e.g. `approved`. */
   reviewState: z.string().optional(),
   /** Short human-readable summary text for `review_summary` events. */
