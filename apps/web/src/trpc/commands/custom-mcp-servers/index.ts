@@ -47,7 +47,7 @@ export function getCustomMcpAvailabilityCommand() {
  * header and stdio-env *names* round-trip so edit dialogs can render rows,
  * but values never leave the server.
  */
-export interface CustomMcpServerListEntry {
+interface CustomMcpServerListEntry {
   id: string;
   name: string;
   transport: 'remote' | 'stdio';

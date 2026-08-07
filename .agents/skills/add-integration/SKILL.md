@@ -86,7 +86,7 @@ Stop and ask the user to choose one of these paths:
 
 - Build a native MCP server inside Roomote with `serverMode: 'native'` and `connectionMode: 'admin_configured'`
 - Wait for the provider to ship an official remote MCP server
-- Recommend that the user configure a custom MCP server in their environment instead
+- Recommend that the user configure a deployment-wide custom MCP server (Settings → Integrations → Custom MCP Servers; supports header auth and OAuth via the proxy) or an environment-scoped `mcpServers` entry instead
 
 Do not quietly convert a missing remote MCP into a built-in integration without that product decision.
 

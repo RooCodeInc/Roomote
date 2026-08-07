@@ -1,0 +1,110 @@
+---
+title: 'Custom MCP Servers'
+description: 'Connect MCP servers that are not in the built-in catalog'
+---
+
+Custom MCP servers let agents use services that Roomote does not ship a
+built-in integration for. Deployment admins configure them under
+**Settings → Integrations → Custom MCP Servers**, and they become available to
+agents in every task.
+
+Three kinds of servers are supported:
+
+| Kind                    | How it connects                                                            | Where credentials live                          |
+| ----------------------- | -------------------------------------------------------------------------- | ----------------------------------------------- |
+| Remote, no auth         | Streamable HTTP through the Roomote proxy                                  | None                                            |
+| Remote, header auth     | Streamable HTTP through the Roomote proxy                                  | Encrypted server-side; injected by the proxy    |
+| Remote, OAuth           | Streamable HTTP through the Roomote proxy                                  | Tokens stored and refreshed server-side         |
+| Local (stdio)           | Launched inside the task sandbox                                           | Encrypted at rest; visible inside the sandbox   |
+
+## How remote servers are reached
+
+Remote custom servers are never handed to the task sandbox directly. The
+sandbox sees an authenticated Roomote proxy URL, and the proxy injects the
+real credentials per request. This means:
+
+- Header values and OAuth tokens never appear in sandbox-readable
+  configuration or in the browser after saving.
+- OAuth tokens refresh centrally, so long-running tasks keep working across
+  token expiry.
+- Per-tool disables (the **Manage tools** dialog) are enforced at the proxy:
+  disabled tools are hidden from agents and blocked even if called directly.
+
+## OAuth
+
+For servers that support the MCP authorization spec, pick **OAuth** and use
+**Connect** after saving. Roomote discovers the authorization server, uses
+Dynamic Client Registration when the server supports it, and completes the
+flow with PKCE. For servers without Dynamic Client Registration, register an
+OAuth client for the callback URL shown in the dialog
+(`https://<your-roomote>/api/mcp-oauth/callback`) and enter the client ID and
+secret manually.
+
+If a token refresh is rejected by the server, the connection is marked as
+needing reconnection: agents get a clear error pointing at Settings, and the
+server card shows **Connect** again.
+
+Roomote sends the RFC 8707 `resource` indicator by default, as required by
+the current MCP authorization spec. A per-server toggle disables it for
+servers that reject unknown parameters.
+
+## Local (stdio) servers
+
+Local servers run inside the task sandbox, launched with the command,
+arguments, and environment variables you configure. Two things to know:
+
+- The process runs with the same privileges as the agent itself; its
+  environment values are visible inside the sandbox at runtime, exactly like
+  environment-scoped stdio servers.
+- Environment values can reference
+  [deployment environment variables](/settings#deployment-environment-variables)
+  with `${VAR}` syntax. References to Roomote runtime credentials are
+  rejected at save time.
+
+The sandbox image ships `node`, `npx`, `uvx`, and `python`, so
+`npx -y <package>` style servers work out of the box.
+
+## Scoping and precedence
+
+Custom servers configured in Settings apply to every task. An environment's
+own [`mcpServers`](/environments/definition#mcp-servers) entry with the same
+name takes precedence in that environment, so the more specific scope wins.
+Names that collide with built-in integrations (for example `linear` or
+`github`) are reserved and rejected.
+
+## Private networks and self-hosting
+
+For security, the Roomote control plane refuses to connect to private and
+special-use address ranges (RFC 1918, link-local, cloud metadata) when
+proxying to custom servers or running OAuth discovery. Self-hosted
+deployments that intentionally run MCP servers on an internal network can
+allow specific ranges with the `R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS`
+environment variable, for example:
+
+```bash
+R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS=10.20.0.0/16,192.168.7.0/24
+```
+
+This is a CIDR list rather than an on/off switch so that opening one internal
+host does not expose adjacent services (databases, caches) to
+operator-configured URLs. Redirects from custom servers are never followed.
+
+## Operator controls
+
+- Custom servers are managed by deployment admins only.
+- `R_CUSTOM_MCP_DISABLED=true` disables the feature entirely: the Settings
+  section, the proxy routes, and delivery to tasks. It is independent of
+  `R_CURATED_INTEGRATIONS_DISABLED`, so a deployment can disable the built-in
+  catalog while still using its own custom servers.
+- A custom server's tool descriptions are provided by that server and are
+  untrusted model input; review new servers the way you would review a
+  dependency.
+
+## Notes
+
+- Changes to custom servers apply to newly started tasks. Remote credential
+  edits (headers, reconnects) apply immediately because the proxy resolves
+  them per request.
+- Editing a server's URL or auth mode clears its stored OAuth tokens and
+  requires reconnecting, so credentials can never be replayed against a
+  different endpoint.

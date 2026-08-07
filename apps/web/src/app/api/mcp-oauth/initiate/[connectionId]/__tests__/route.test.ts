@@ -83,6 +83,8 @@ vi.mock('@roomote/sdk/server', () => ({
   storeOAuthStateWithId: storeOAuthStateWithIdMock,
   storeClientInformation: storeClientInformationMock,
   getClientInformation: getClientInformationMock,
+  resolveCustomMcpAuthTarget: vi.fn(async () => null),
+  ensureCustomMcpServerMetadata: vi.fn(),
 }));
 
 vi.mock('@roomote/types', () => ({
@@ -96,6 +98,7 @@ vi.mock('@roomote/types', () => ({
   getMcpIntegration: getMcpIntegrationMock,
   isDeploymentScopedMcpIntegration: isDeploymentScopedMcpIntegrationMock,
   isSelfServeMcpIntegration: isSelfServeMcpIntegrationMock,
+  isCustomMcpConnectionId: (mcpId: string) => mcpId.startsWith('custom:'),
   PRODUCT_NAME: 'Roomote',
 }));
 
@@ -181,7 +184,7 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     });
   });
 
-  it('rejects OAuth before authentication when integrations are disabled', async () => {
+  it('rejects catalog OAuth when integrations are disabled', async () => {
     bootstrapWebRuntimeEnvMock.mockResolvedValue({
       R_APP_URL: 'http://localhost:13000',
       R_PUBLIC_URL: 'https://customer.example',
@@ -195,8 +198,11 @@ describe('GET /api/mcp-oauth/initiate/[connectionId]', () => {
     expect(response.headers.get('location')).toBe(
       'https://customer.example/settings?mcp=error&reason=disabled',
     );
-    expect(authorizeMock).not.toHaveBeenCalled();
-    expect(mcpConnectionsFindFirstMock).not.toHaveBeenCalled();
+    // The kill switch now applies per connection kind (custom servers have
+    // their own flag), so it is evaluated after the connection lookup; no
+    // OAuth work may happen regardless.
+    expect(registerOAuthClientMock).not.toHaveBeenCalled();
+    expect(storeOAuthStateWithIdMock).not.toHaveBeenCalled();
   });
 
   it('uses the Linear API OAuth flow instead of Linear MCP OAuth', async () => {

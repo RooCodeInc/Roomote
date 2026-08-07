@@ -74,9 +74,16 @@ from [Personal Settings](/personal-settings).
 
 ## Custom MCP servers
 
-Beyond the built-in catalog, environments can configure custom MCP servers so
-tasks can reach tools that are specific to your team. Add them in the YAML view
-of the environment editor. See [Environments](/environments).
+Beyond the built-in catalog, you can connect your own MCP servers at two
+scopes:
+
+- **Deployment-wide**, under Settings → Integrations →
+  [Custom MCP Servers](/integrations/custom-mcp-servers): remote servers
+  (with header or OAuth authentication, credentials held server-side) and
+  local stdio servers, available to agents in every task.
+- **Per-environment**, in the YAML view of the environment editor. See
+  [Environments](/environments). An environment entry with the same name as a
+  deployment-wide server takes precedence in that environment.
 
 Use deployment or user-linked integrations when the tool is broadly useful
 across teams. Use an environment-level MCP server when the tool only makes

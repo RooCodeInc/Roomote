@@ -26,7 +26,6 @@ import {
   ensureCustomMcpServerMetadata,
 } from '@roomote/sdk/server';
 import { authorize } from '@/lib/server';
-import { isCustomMcpDisabled } from '@/lib/server/env';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import { logger } from '@/lib/server/logger';
@@ -294,7 +293,7 @@ export async function GET(request: NextRequest) {
       : getMcpIntegration(connection.mcpId);
 
     if (customTarget) {
-      if (isCustomMcpDisabled(webEnv.R_CUSTOM_MCP_DISABLED)) {
+      if (webEnv.R_CUSTOM_MCP_DISABLED === true) {
         return redirectToResult({ status: 'error', reason: 'callback_failed' });
       }
     } else {
@@ -341,14 +340,24 @@ export async function GET(request: NextRequest) {
     const redirectUri = new URL(CALLBACK_PATH, webUrl).toString();
 
     failureStage = 'token_exchange';
-    const tokens = await exchangeCodeForTokens(
-      tokenEndpoint,
-      code,
-      oauthState.codeVerifier,
-      clientInfo,
-      redirectUri,
-      customTarget?.oauthOptions,
-    );
+    // Catalog exchanges keep their historical call shape; custom targets add
+    // the guarded fetch + resource indicator options.
+    const tokens = customTarget
+      ? await exchangeCodeForTokens(
+          tokenEndpoint,
+          code,
+          oauthState.codeVerifier,
+          clientInfo,
+          redirectUri,
+          customTarget.oauthOptions,
+        )
+      : await exchangeCodeForTokens(
+          tokenEndpoint,
+          code,
+          oauthState.codeVerifier,
+          clientInfo,
+          redirectUri,
+        );
 
     if (integration?.id === 'linear') {
       failureStage = 'linear_metadata';

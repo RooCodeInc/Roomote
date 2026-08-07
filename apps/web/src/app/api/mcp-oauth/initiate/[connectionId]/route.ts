@@ -15,7 +15,6 @@ import {
   resolveCustomMcpAuthTarget,
   ensureCustomMcpServerMetadata,
 } from '@roomote/sdk/server';
-import { isCustomMcpDisabled } from '@/lib/server/env';
 import type {
   OAuthClientMetadata,
   OAuthClientInformation,
@@ -198,7 +197,7 @@ export async function GET(
       : getMcpIntegration(connection.mcpId);
 
     if (customTarget) {
-      if (isCustomMcpDisabled(webEnv.R_CUSTOM_MCP_DISABLED)) {
+      if (webEnv.R_CUSTOM_MCP_DISABLED === true) {
         return NextResponse.redirect(
           withMcpQuery(webUrl, redirectPath, 'error', 'disabled'),
         );
@@ -312,11 +311,18 @@ export async function GET(
         ...(requestedScope ? { scope: requestedScope } : {}),
       };
 
-      const registeredClient = await registerOAuthClient(
-        serverMetadata.registration_endpoint,
-        clientMetadata,
-        customTarget?.oauthOptions,
-      );
+      // Catalog registrations keep their historical call shape; custom
+      // targets add the guarded fetch options.
+      const registeredClient = customTarget
+        ? await registerOAuthClient(
+            serverMetadata.registration_endpoint,
+            clientMetadata,
+            customTarget.oauthOptions,
+          )
+        : await registerOAuthClient(
+            serverMetadata.registration_endpoint,
+            clientMetadata,
+          );
 
       const storedClientInfo: OAuthClientInformation = {
         ...registeredClient,
