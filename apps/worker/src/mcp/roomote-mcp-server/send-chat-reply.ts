@@ -14,12 +14,7 @@ import {
 } from './tasks-api-client.js';
 import type { ArtifactConfig, RoomoteConfig, ToolResult } from './types.js';
 
-export type ChatReplySurface =
-  | 'Slack'
-  | 'Teams'
-  | 'Telegram'
-  | 'Discord'
-  | 'chat';
+type ChatReplySurface = 'Slack' | 'Teams' | 'Telegram' | 'Discord' | 'chat';
 
 const SUGGESTION_START_INSTRUCTIONS: Record<ChatReplySurface, string> = {
   Slack:
