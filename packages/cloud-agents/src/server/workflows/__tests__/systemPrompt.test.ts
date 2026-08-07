@@ -11,13 +11,18 @@ describe('ROOMOTE_SYSTEM_PROMPT', () => {
     );
     expect(ROOMOTE_SYSTEM_PROMPT).toContain('# Roomote Identity');
     expect(ROOMOTE_SYSTEM_PROMPT).toContain('# Personality');
+    expect(ROOMOTE_SYSTEM_PROMPT).toContain(
+      'You work inside the codebase or codebases assigned by the current workspace and environment.',
+    );
+    expect(ROOMOTE_SYSTEM_PROMPT).toContain(
+      'You layer task-specific specialist behavior such as coder, planner, reviewer, and explainer on top of this core identity depending on the current job.',
+    );
     expect(buildRoomoteSystemPrompt()).toContain(
       DEFAULT_ROOMOTE_STYLE_GUIDANCE,
     );
 
-    expect(ROOMOTE_SYSTEM_PROMPT).not.toContain('Roomote-packaged skills');
-    expect(ROOMOTE_SYSTEM_PROMPT).not.toContain('todo-management tool');
-    expect(ROOMOTE_SYSTEM_PROMPT).not.toContain('commentary channel');
-    expect(ROOMOTE_SYSTEM_PROMPT).not.toContain('Frontend guidance');
+    expect(ROOMOTE_SYSTEM_PROMPT).not.toContain('<initial_routing>');
+    expect(ROOMOTE_SYSTEM_PROMPT).not.toContain('<execution_mode_policy>');
+    expect(ROOMOTE_SYSTEM_PROMPT).not.toContain('create-draft-pr');
   });
 });
