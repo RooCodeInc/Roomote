@@ -342,7 +342,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'vercel/openai/gpt-5.6-sol',
       'gpt-5-6-terra': 'vercel/openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'vercel/openai/gpt-5.6-luna',
-      'gemini-3-1-pro': 'vercel/google/gemini-3.1-pro-preview',
       'gemini-3-6-flash': 'vercel/google/gemini-3.6-flash',
       'deepseek-v4-flash-0731': 'vercel/deepseek/deepseek-v4-flash-0731',
       'deepseek-v4-pro': 'vercel/deepseek/deepseek-v4-pro',
@@ -591,7 +590,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'opencode/gpt-5.6-sol',
       'gpt-5-6-terra': 'opencode/gpt-5.6-terra',
       'gpt-5-6-luna': 'opencode/gpt-5.6-luna',
-      'gemini-3-1-pro': 'opencode/gemini-3.1-pro',
       'gemini-3-6-flash': 'opencode/gemini-3.6-flash',
       // Zen serves the dated Flash release under this stable model alias.
       'deepseek-v4-flash-0731': 'opencode/deepseek-v4-flash',
@@ -696,7 +694,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'google/gemini-3.1-pro-preview',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
-      'gemini-3-1-pro': 'google/gemini-3.1-pro-preview',
       'gemini-3-6-flash': 'google/gemini-3.6-flash',
     }),
     // Pro is the coding default, and code review and planning follow it via
@@ -800,7 +797,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'github-copilot/gpt-5.6-sol',
       'gpt-5-6-terra': 'github-copilot/gpt-5.6-terra',
       'gpt-5-6-luna': 'github-copilot/gpt-5.6-luna',
-      'gemini-3-1-pro': 'github-copilot/gemini-3.1-pro-preview',
       'kimi-k2-7-code': 'github-copilot/kimi-k2.7-code',
     }),
     recommendedRoleModels: {
