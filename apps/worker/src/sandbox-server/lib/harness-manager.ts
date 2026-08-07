@@ -1392,7 +1392,9 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
 
   private onTaskCompleted(payload: TaskEventCompletedPayload): void {
     if (payload[0] === this.state.sessionId) {
-      this.logger.info(`[HarnessManager] Task completed: ${payload[0]}`);
+      this.logger.info(
+        `[HarnessManager] Task completed: ${payload[0]} (phase=${this.phase}, queuedRuntimePrompts=${this.runtimeQueuedMessagesCount}, deferredSettlement=${this.deferredTurnSettlement ?? 'none'})`,
+      );
 
       if (this.runtimeQueuedMessagesCount > 0) {
         // A deferred abort takes priority — don't overwrite it with a
