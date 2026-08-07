@@ -131,15 +131,15 @@ describe('handleReplyToSlackThread', () => {
   it.each([
     [
       'Discord',
-      "Want me to take one of these on? Choose Start on a suggested task below and I'll start it.",
+      "Want me to take one of these on? React with a 👍 on a suggested task below and I'll start it.",
     ],
     [
       'Telegram',
-      "Want me to take one of these on? Tap Start on a suggested task below and I'll start it.",
+      "Want me to take one of these on? React with a 👍 on a suggested task below and I'll start it.",
     ],
     [
       'Teams',
-      "Want me to take one of these on? Reply with `start idea 1` (using the number you want) and I'll start it.",
+      "Want me to take one of these on? React with a 👍 on a suggested task below and I'll start it.",
     ],
   ] as const)(
     'adds the %s launch instruction when suggestions are present',

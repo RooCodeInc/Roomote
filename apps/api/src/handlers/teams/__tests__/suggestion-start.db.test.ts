@@ -25,6 +25,7 @@ describe('resolveAndClaimTeamsSuggestionStart (work_items launch CAS)', () => {
     createdAt: Date;
     channelId?: string;
     threadId?: string;
+    oneMessagePerSuggestion?: boolean;
   }): Promise<string[]> {
     const channelId = params.channelId ?? conversationId;
     const rows = await db
@@ -43,18 +44,23 @@ describe('resolveAndClaimTeamsSuggestionStart (work_items launch CAS)', () => {
     workItemIds.push(...ids);
 
     await db.insert(trackedMessages).values(
-      ids.map((workItemId) => ({
+      ids.map((workItemId, index) => ({
         surface: 'teams' as const,
         kind: 'suggestion_card' as const,
         dedupeKey: `${channelId}:${params.introMessageId}:${workItemId}`,
         channelId,
         ...(params.threadId ? { threadTs: params.threadId } : {}),
-        messageTs: `${params.introMessageId}:${workItemId}`,
+        messageTs: params.oneMessagePerSuggestion
+          ? `${params.introMessageId}-${index + 1}`
+          : `${params.introMessageId}:${workItemId}`,
         workItemId,
         createdAt: params.createdAt,
         metadata: {
           suggestionType: 'suggested_tasks',
           suggestionKey: `source-task:${workItemId}`,
+          ...(params.oneMessagePerSuggestion
+            ? { suggestionGroupKey: 'source-task' }
+            : {}),
         },
       })),
     );
@@ -120,6 +126,22 @@ describe('resolveAndClaimTeamsSuggestionStart (work_items launch CAS)', () => {
     expect(resolution.suggestion.launchClaimedAt.getTime()).toBe(
       row?.launchClaimedAt?.getTime(),
     );
+  });
+
+  it('does not apply the typed fallback to current-thread reaction cards', async () => {
+    await seedSuggestionGroup({
+      introMessageId: 'current-thread-card',
+      titles: ['Idea one', 'Idea two'],
+      createdAt: new Date(),
+      oneMessagePerSuggestion: true,
+    });
+
+    const resolution = await resolveAndClaimTeamsSuggestionStart({
+      conversationId,
+      ideaNumber: 2,
+    });
+
+    expect(resolution).toEqual({ outcome: 'no_cards' });
   });
 
   it('returns already_started when the claim CAS loses (double reply)', async () => {

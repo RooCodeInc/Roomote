@@ -34,6 +34,7 @@ type TeamsAutomationSuggestion = {
 
 export async function postCurrentThreadSuggestionsToTeams(params: {
   sourceTaskId: string;
+  suggestionGroupKey: string;
   createdByUserId: string | null;
   conversationId: string;
   serviceUrl: string;
@@ -44,46 +45,40 @@ export async function postCurrentThreadSuggestionsToTeams(params: {
     return true;
   }
 
-  const posted = await postTeamsAutomationMessageBestEffort({
-    conversationId: params.conversationId,
-    serviceUrl: params.serviceUrl,
-    ...(params.threadId ? { threadId: params.threadId } : {}),
-    text: params.suggestions
-      .map(
-        (suggestion, index) =>
-          `**${index + 1}. ${suggestion.title}**\n${suggestion.brief}`,
-      )
-      .join('\n\n'),
-  });
-
-  if (!posted?.messageId) {
-    return false;
-  }
-
-  await db
-    .insert(trackedMessages)
-    .values(
-      params.suggestions.map((suggestion) => {
-        const messageTs = `${posted.messageId}:${suggestion.id}`;
-        return {
-          surface: 'teams' as const,
-          kind: 'suggestion_card' as const,
-          dedupeKey: `${params.conversationId}:${messageTs}`,
-          channelId: params.conversationId,
-          ...(params.threadId ? { threadTs: params.threadId } : {}),
-          messageTs,
-          workItemId: suggestion.id,
-          createdByUserId: params.createdByUserId,
-          metadata: {
-            suggestionType: 'suggested_tasks',
-            suggestionKey: `${params.sourceTaskId}:${suggestion.id}`,
-          },
-        };
-      }),
-    )
-    .onConflictDoNothing({
-      target: [trackedMessages.kind, trackedMessages.dedupeKey],
+  for (const [index, suggestion] of params.suggestions.entries()) {
+    const posted = await postTeamsAutomationMessageBestEffort({
+      conversationId: params.conversationId,
+      serviceUrl: params.serviceUrl,
+      ...(params.threadId ? { threadId: params.threadId } : {}),
+      text: `**${index + 1}. ${suggestion.title}**\n${suggestion.brief}`,
     });
+
+    if (!posted?.messageId) {
+      return false;
+    }
+
+    const trackedRow = {
+      surface: 'teams' as const,
+      kind: 'suggestion_card' as const,
+      dedupeKey: `${params.conversationId}:${posted.messageId}`,
+      channelId: params.conversationId,
+      ...(params.threadId ? { threadTs: params.threadId } : {}),
+      messageTs: posted.messageId,
+      workItemId: suggestion.id,
+      createdByUserId: params.createdByUserId,
+      metadata: {
+        suggestionType: 'suggested_tasks',
+        suggestionKey: `${params.sourceTaskId}:${suggestion.id}`,
+        suggestionGroupKey: params.suggestionGroupKey,
+      },
+    };
+    await db
+      .insert(trackedMessages)
+      .values(trackedRow)
+      .onConflictDoNothing({
+        target: [trackedMessages.kind, trackedMessages.dedupeKey],
+      });
+  }
 
   return true;
 }

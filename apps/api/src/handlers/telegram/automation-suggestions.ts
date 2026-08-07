@@ -32,10 +32,12 @@ type TelegramAutomationSuggestion = {
   brief: string;
   category: string | null;
   targetRepositoryFullName: string | null;
+  suggestionNumber?: number;
 };
 
 export async function postCurrentThreadSuggestionsToTelegram(params: {
   sourceTaskId: string;
+  suggestionGroupKey: string;
   createdByUserId: string | null;
   chatId: string;
   threadId?: string | null;
@@ -45,52 +47,44 @@ export async function postCurrentThreadSuggestionsToTelegram(params: {
     return true;
   }
 
-  const buttons: CommunicationMessageButton[][] = params.suggestions.map(
-    (suggestion, index) => [
-      { text: `▶️ Start ${index + 1}`, callbackData: `idea:${suggestion.id}` },
-    ],
-  );
-  const posted = await postTelegramMessageBestEffort({
-    chatId: params.chatId,
-    ...(params.threadId ? { threadId: params.threadId } : {}),
-    text: params.suggestions
-      .map(
-        (suggestion, index) =>
-          `**${index + 1}. ${suggestion.title}**\n${suggestion.brief}`,
-      )
-      .join('\n\n'),
-    textFormat: 'markdown',
-    buttons,
-  });
-
-  if (!posted) {
-    return false;
-  }
-
-  await db
-    .insert(trackedMessages)
-    .values(
-      params.suggestions.map((suggestion) => {
-        const messageTs = `${posted.messageId}:${suggestion.id}`;
-        return {
-          surface: 'telegram' as const,
-          kind: 'suggestion_card' as const,
-          dedupeKey: `${params.chatId}:${messageTs}`,
-          channelId: params.chatId,
-          ...(params.threadId ? { threadTs: params.threadId } : {}),
-          messageTs,
-          workItemId: suggestion.id,
-          createdByUserId: params.createdByUserId,
-          metadata: {
-            suggestionType: 'suggested_tasks',
-            suggestionKey: `${params.sourceTaskId}:${suggestion.id}`,
-          },
-        };
-      }),
-    )
-    .onConflictDoNothing({
-      target: [trackedMessages.kind, trackedMessages.dedupeKey],
+  for (const [index, suggestion] of params.suggestions.entries()) {
+    const buttons: CommunicationMessageButton[][] = [
+      [{ text: '▶️ Start', callbackData: `idea:${suggestion.id}` }],
+    ];
+    const posted = await postTelegramMessageBestEffort({
+      chatId: params.chatId,
+      ...(params.threadId ? { threadId: params.threadId } : {}),
+      text: `**${suggestion.suggestionNumber ?? index + 1}. ${suggestion.title}**\n${suggestion.brief}`,
+      textFormat: 'markdown',
+      buttons,
     });
+
+    if (!posted) {
+      return false;
+    }
+
+    const trackedRow = {
+      surface: 'telegram' as const,
+      kind: 'suggestion_card' as const,
+      dedupeKey: `${params.chatId}:${posted.messageId}`,
+      channelId: params.chatId,
+      ...(params.threadId ? { threadTs: params.threadId } : {}),
+      messageTs: posted.messageId,
+      workItemId: suggestion.id,
+      createdByUserId: params.createdByUserId,
+      metadata: {
+        suggestionType: 'suggested_tasks',
+        suggestionKey: `${params.sourceTaskId}:${suggestion.id}`,
+        suggestionGroupKey: params.suggestionGroupKey,
+      },
+    };
+    await db
+      .insert(trackedMessages)
+      .values(trackedRow)
+      .onConflictDoNothing({
+        target: [trackedMessages.kind, trackedMessages.dedupeKey],
+      });
+  }
 
   return true;
 }

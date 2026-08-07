@@ -88,18 +88,42 @@ const telegramCallbackQuerySchema = z
   })
   .passthrough();
 
+const telegramReactionTypeSchema = z
+  .object({
+    type: z.string(),
+    emoji: z.string().optional(),
+    custom_emoji_id: z.string().optional(),
+  })
+  .passthrough();
+
+const telegramMessageReactionSchema = z
+  .object({
+    chat: telegramChatSchema,
+    message_id: z.number().int(),
+    message_thread_id: z.number().int().optional(),
+    date: z.number().int(),
+    user: telegramUserSchema.optional(),
+    old_reaction: z.array(telegramReactionTypeSchema),
+    new_reaction: z.array(telegramReactionTypeSchema),
+  })
+  .passthrough();
+
 export const telegramUpdateSchema = z
   .object({
     update_id: z.number().int(),
     message: telegramMessageSchema.optional(),
     edited_message: telegramMessageSchema.optional(),
     callback_query: telegramCallbackQuerySchema.optional(),
+    message_reaction: telegramMessageReactionSchema.optional(),
   })
   .passthrough();
 
 export type TelegramUpdate = z.infer<typeof telegramUpdateSchema>;
 export type TelegramMessage = z.infer<typeof telegramMessageSchema>;
 export type TelegramCallbackQuery = z.infer<typeof telegramCallbackQuerySchema>;
+export type TelegramMessageReaction = z.infer<
+  typeof telegramMessageReactionSchema
+>;
 export type TelegramUpdateCommunicationMetadata = {
   communicationProvider: 'telegram';
   communicationChannelId: string;
@@ -156,6 +180,23 @@ export function getTelegramUpdateCallbackQuery(
   update: TelegramUpdate,
 ): TelegramCallbackQuery | undefined {
   return update.callback_query;
+}
+
+export function getTelegramUpdateMessageReaction(
+  update: TelegramUpdate,
+): TelegramMessageReaction | undefined {
+  return update.message_reaction;
+}
+
+export function isNewTelegramThumbsUpReaction(
+  reaction: TelegramMessageReaction,
+): boolean {
+  const hasThumbsUp = (reactions: TelegramMessageReaction['new_reaction']) =>
+    reactions.some((item) => item.type === 'emoji' && item.emoji === '👍');
+
+  return (
+    hasThumbsUp(reaction.new_reaction) && !hasThumbsUp(reaction.old_reaction)
+  );
 }
 
 export function getTelegramChatId(message: TelegramMessage): string {

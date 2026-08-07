@@ -19,6 +19,7 @@ import {
 
 import { apiLogger } from '../../logging.js';
 import { cancelOrphanedWorkItemRunBestEffort } from '../tasks/orphaned-work-item-run.js';
+import { claimCurrentThreadSuggestionByMessage } from '../tasks/current-thread-suggestion-reaction.js';
 import { stripTeamsMessageIdSuffix } from './find-active-teams-run.js';
 
 /**
@@ -120,6 +121,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
         eq(trackedMessages.surface, 'teams'),
         eq(trackedMessages.kind, 'suggestion_card'),
         sql`split_part(${trackedMessages.channelId}, ';messageid=', 1) = ${conversationBase}`,
+        sql`${trackedMessages.metadata} ->> 'suggestionGroupKey' IS NULL`,
         isNotNull(trackedMessages.workItemId),
       ),
     );
@@ -146,10 +148,10 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
     }
 
     const suffix = `:${card.workItemId}`;
-    const introMessageId = card.messageTs.endsWith(suffix)
+    const groupKey = card.messageTs.endsWith(suffix)
       ? card.messageTs.slice(0, -suffix.length)
       : card.messageTs;
-    const group = groups.get(introMessageId);
+    const group = groups.get(groupKey);
 
     if (group) {
       group.workItemIds.push(card.workItemId);
@@ -158,7 +160,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
         group.createdAt = card.createdAt;
       }
     } else {
-      groups.set(introMessageId, {
+      groups.set(groupKey, {
         createdAt: card.createdAt,
         workItemIds: [card.workItemId],
       });
@@ -201,6 +203,25 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
       launchClaimedAt: claimed.launchClaimedAt,
     },
   };
+}
+
+export async function resolveAndClaimTeamsSuggestionReaction(input: {
+  conversationId: string;
+  messageId: string;
+}): Promise<TeamsSuggestionStartResolution> {
+  const claim = await claimCurrentThreadSuggestionByMessage({
+    surface: 'teams',
+    channelId: input.conversationId,
+    messageId: input.messageId,
+  });
+
+  if (claim.outcome === 'no_card') {
+    return { outcome: 'no_cards' };
+  }
+  if (claim.outcome === 'already_started') {
+    return { outcome: 'already_started', title: 'That idea' };
+  }
+  return { outcome: 'claimed', suggestion: claim.suggestion };
 }
 
 /** Mirrors the Telegram suggestion-button prompt shape. */

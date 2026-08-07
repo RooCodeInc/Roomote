@@ -20,11 +20,11 @@ const SUGGESTION_START_INSTRUCTIONS: Record<ChatReplySurface, string> = {
   Slack:
     "Want me to take one of these on? React with a :thumbsup: on a suggested task below and I'll start it.",
   Discord:
-    "Want me to take one of these on? Choose Start on a suggested task below and I'll start it.",
+    "Want me to take one of these on? React with a 👍 on a suggested task below and I'll start it.",
   Telegram:
-    "Want me to take one of these on? Tap Start on a suggested task below and I'll start it.",
+    "Want me to take one of these on? React with a 👍 on a suggested task below and I'll start it.",
   Teams:
-    "Want me to take one of these on? Reply with `start idea 1` (using the number you want) and I'll start it.",
+    "Want me to take one of these on? React with a 👍 on a suggested task below and I'll start it.",
   chat: 'Want me to take one of these on? Use the Start action on a suggested task below.',
 };
 

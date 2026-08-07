@@ -20,10 +20,12 @@ type DiscordAutomationSuggestion = {
   brief: string;
   category: string | null;
   targetRepositoryFullName: string | null;
+  suggestionNumber?: number;
 };
 
 export async function postCurrentThreadSuggestionsToDiscord(params: {
   sourceTaskId: string;
+  suggestionGroupKey: string;
   createdByUserId: string | null;
   channelId: string;
   threadId?: string | null;
@@ -40,51 +42,39 @@ export async function postCurrentThreadSuggestionsToDiscord(params: {
     return false;
   }
 
-  const buttons: CommunicationMessageButton[][] = params.suggestions.map(
-    (suggestion, index) => [
-      { text: `▶️ Start ${index + 1}`, callbackData: `idea:${suggestion.id}` },
-    ],
-  );
-  const posted = await provider.postMessage({
-    channelId: params.channelId,
-    ...(params.threadId ? { threadId: params.threadId } : {}),
-    text: params.suggestions
-      .map(
-        (suggestion, index) =>
-          `**${index + 1}. ${suggestion.title}**\n${suggestion.brief}`,
-      )
-      .join('\n\n'),
-    buttons,
-  });
-
-  if (!posted.messageId) {
-    return false;
-  }
-
-  await db
-    .insert(trackedMessages)
-    .values(
-      params.suggestions.map((suggestion) => {
-        const messageTs = `${posted.messageId}:${suggestion.id}`;
-        return {
-          surface: 'discord' as const,
-          kind: 'suggestion_card' as const,
-          dedupeKey: `${posted.threadId ?? posted.channelId}:${messageTs}`,
-          channelId: posted.threadId ?? posted.channelId,
-          ...(posted.threadId ? { threadTs: posted.threadId } : {}),
-          messageTs,
-          workItemId: suggestion.id,
-          createdByUserId: params.createdByUserId,
-          metadata: {
-            suggestionType: 'suggested_tasks',
-            suggestionKey: `${params.sourceTaskId}:${suggestion.id}`,
-          },
-        };
-      }),
-    )
-    .onConflictDoNothing({
-      target: [trackedMessages.kind, trackedMessages.dedupeKey],
+  for (const [index, suggestion] of params.suggestions.entries()) {
+    const posted = await provider.postMessage({
+      channelId: params.channelId,
+      ...(params.threadId ? { threadId: params.threadId } : {}),
+      text: `**${suggestion.suggestionNumber ?? index + 1}. ${suggestion.title}**\n${suggestion.brief}`,
     });
+
+    if (!posted.messageId) {
+      return false;
+    }
+
+    const trackedRow = {
+      surface: 'discord' as const,
+      kind: 'suggestion_card' as const,
+      dedupeKey: `${posted.threadId ?? posted.channelId}:${posted.messageId}`,
+      channelId: posted.threadId ?? posted.channelId,
+      ...(posted.threadId ? { threadTs: posted.threadId } : {}),
+      messageTs: posted.messageId,
+      workItemId: suggestion.id,
+      createdByUserId: params.createdByUserId,
+      metadata: {
+        suggestionType: 'suggested_tasks',
+        suggestionKey: `${params.sourceTaskId}:${suggestion.id}`,
+        suggestionGroupKey: params.suggestionGroupKey,
+      },
+    };
+    await db
+      .insert(trackedMessages)
+      .values(trackedRow)
+      .onConflictDoNothing({
+        target: [trackedMessages.kind, trackedMessages.dedupeKey],
+      });
+  }
 
   return true;
 }

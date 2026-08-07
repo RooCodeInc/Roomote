@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   startNewTask: vi.fn(),
   reply: vi.fn(),
   component: vi.fn(),
+  suggestionReaction: vi.fn(),
   getTaskUrl: vi.fn(),
   getChannel: vi.fn(),
   addReaction: vi.fn(),
@@ -158,6 +159,7 @@ vi.mock('../replies.js', () => ({ replyToDiscordEvent: mocks.reply }));
 
 vi.mock('../callback-actions.js', () => ({
   handleDiscordComponentInteraction: mocks.component,
+  handleDiscordSuggestionReaction: mocks.suggestionReaction,
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -279,6 +281,7 @@ describe('Discord Gateway event handler', () => {
     mocks.redisGetdel.mockResolvedValue(null);
     mocks.redisDel.mockResolvedValue(1);
     mocks.component.mockResolvedValue('handled');
+    mocks.suggestionReaction.mockResolvedValue(false);
     mocks.channelAutoStart.mockResolvedValue(false);
     mocks.findPendingRoutingReply.mockResolvedValue(null);
     mocks.hasPendingRouteCallback.mockResolvedValue(null);
@@ -422,6 +425,47 @@ describe('Discord Gateway event handler', () => {
         contextThroughMessageId: 'message-1',
       }),
     );
+  });
+
+  it('starts an exactly tracked suggestion before configured emoji routing', async () => {
+    mocks.suggestionReaction.mockResolvedValue(true);
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      name: 'Task thread',
+      type: 11,
+      guildId: 'guild-1',
+      parentId: 'channel-1',
+    });
+
+    const response = await postEvent({
+      eventId: 'thread-1:suggestion-message:discord-user-1:thumbsup',
+      eventType: 'MESSAGE_REACTION_ADD',
+      receivedAt: '2026-07-12T15:00:00.000Z',
+      payload: {
+        user_id: 'discord-user-1',
+        channel_id: 'thread-1',
+        message_id: 'suggestion-message',
+        guild_id: 'guild-1',
+        emoji: { id: null, name: '👍' },
+        member: {
+          nick: 'Matt',
+          user: { id: 'discord-user-1', username: 'matt' },
+        },
+      },
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      suggestionStarted: true,
+    });
+    expect(mocks.suggestionReaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'thread-1',
+        messageId: 'suggestion-message',
+        sender: expect.objectContaining({ id: 'discord-user-1' }),
+      }),
+    );
+    expect(mocks.callViaEmojiConfig).not.toHaveBeenCalled();
   });
 
   it('rejects an invalid Gateway secret before claiming the event', async () => {

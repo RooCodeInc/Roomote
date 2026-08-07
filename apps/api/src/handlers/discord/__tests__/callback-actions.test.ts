@@ -3,6 +3,8 @@ const mocks = vi.hoisted(() => ({
   stopTaskRun: vi.fn(),
   reply: vi.fn(),
   findMappedUser: vi.fn(),
+  findSuggestionByMessage: vi.fn(),
+  claimSuggestionByMessage: vi.fn(),
   claimSuggestion: vi.fn(),
   startNewTask: vi.fn(),
   resolveChannel: vi.fn(),
@@ -53,20 +55,54 @@ vi.mock('../task-launch.js', () => ({
 vi.mock('../../tasks/orphaned-work-item-run.js', () => ({
   cancelOrphanedWorkItemRunBestEffort: vi.fn(),
 }));
+vi.mock('../../tasks/current-thread-suggestion-reaction.js', () => ({
+  findCurrentThreadSuggestionIdByMessage: mocks.findSuggestionByMessage,
+  claimCurrentThreadSuggestionByMessage: mocks.claimSuggestionByMessage,
+}));
 
-import { handleDiscordComponentInteraction } from '../callback-actions.js';
+import {
+  handleDiscordComponentInteraction,
+  handleDiscordSuggestionReaction,
+} from '../callback-actions.js';
 
 describe('Discord component callbacks', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.reply.mockResolvedValue({ messageId: 'response-1' });
     mocks.findMappedUser.mockResolvedValue('user-1');
+    mocks.findSuggestionByMessage.mockResolvedValue('suggestion-1');
     mocks.releaseWorkItem.mockResolvedValue(true);
     mocks.resolveWorkspace.mockResolvedValue({
       environmentId: 'env-1',
       repoForPayload: 'acme/app',
       workspaceDisplayName: 'App',
     });
+  });
+
+  it('does not claim a reaction suggestion when account mapping fails', async () => {
+    mocks.findMappedUser.mockRejectedValue(new Error('database unavailable'));
+    const postMessage = vi.fn();
+
+    await expect(
+      handleDiscordSuggestionReaction({
+        provider: { postMessage } as never,
+        applicationId: 'app-1',
+        channel: {
+          channelId: 'thread-1',
+          channelName: 'Suggested tasks',
+          channelType: 11,
+          guildId: 'guild-1',
+          parentChannelId: 'channel-1',
+          isDirectMessage: false,
+          isThread: true,
+        },
+        channelId: 'thread-1',
+        messageId: 'suggestion-message-1',
+        eventId: 'reaction-1',
+        sender: { id: 'discord-user-1', username: 'matt' },
+      }),
+    ).rejects.toThrow('database unavailable');
+    expect(mocks.claimSuggestionByMessage).not.toHaveBeenCalled();
   });
 
   it('cancels an active run only when it belongs to the interaction channel', async () => {

@@ -1,4 +1,7 @@
-import type { TelegramCallbackQuery } from '@roomote/communication/telegram-update';
+import type {
+  TelegramCallbackQuery,
+  TelegramMessageReaction,
+} from '@roomote/communication/telegram-update';
 import {
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
   activeRunStatuses,
@@ -19,6 +22,11 @@ import {
 
 import { apiLogger } from '../../logging.js';
 import { cancelOrphanedWorkItemRunBestEffort } from '../tasks/orphaned-work-item-run.js';
+import {
+  claimCurrentThreadSuggestionByMessage,
+  findCurrentThreadSuggestionIdByMessage,
+  type ClaimedCurrentThreadSuggestion,
+} from '../tasks/current-thread-suggestion-reaction.js';
 import { stopTaskRun } from '../tasks/task-stop.js';
 import {
   parseCancelTaskCallbackData,
@@ -151,46 +159,71 @@ async function handleCancelTaskCallback(params: {
 async function handleSuggestionLaunchCallback(params: {
   query: TelegramCallbackQuery;
   suggestionId: string;
+  claimedSuggestion?: ClaimedCurrentThreadSuggestion;
+  senderUserId?: string;
+  answerCallback?: boolean;
 }): Promise<void> {
   const message = params.query.message;
   const chatId = message ? String(message.chat.id) : null;
 
   if (!chatId || !message) {
-    await answerTelegramCallbackQueryBestEffort({
-      callbackQueryId: params.query.id,
-    });
+    if (params.answerCallback !== false) {
+      await answerTelegramCallbackQueryBestEffort({
+        callbackQueryId: params.query.id,
+      });
+    }
     return;
   }
 
-  const senderUserId = await resolveTelegramSenderUserId(
-    String(params.query.from.id),
-  );
+  const senderUserId =
+    params.senderUserId ??
+    (await resolveTelegramSenderUserId(String(params.query.from.id)));
 
   if (!senderUserId) {
-    await answerTelegramCallbackQueryBestEffort({
-      callbackQueryId: params.query.id,
-      text: 'Link your Roomote account to start tasks from Telegram.',
-    });
+    if (params.claimedSuggestion) {
+      await releaseWorkItemClaim(db, {
+        id: params.claimedSuggestion.id,
+        claimedAt: params.claimedSuggestion.launchClaimedAt,
+      });
+    }
+    if (params.answerCallback !== false) {
+      await answerTelegramCallbackQueryBestEffort({
+        callbackQueryId: params.query.id,
+        text: 'Link your Roomote account to start tasks from Telegram.',
+      });
+    } else {
+      await postTelegramMessageBestEffort({
+        chatId,
+        replyToMessageId: String(message.message_id),
+        text: 'Link your Roomote account to start tasks from Telegram.',
+      });
+    }
     return;
   }
 
-  const suggestion = await claimTelegramSuggestionLaunch({
-    suggestionId: params.suggestionId,
-    chatId,
-  });
+  const suggestion =
+    params.claimedSuggestion ??
+    (await claimTelegramSuggestionLaunch({
+      suggestionId: params.suggestionId,
+      chatId,
+    }));
 
   if (!suggestion) {
-    await answerTelegramCallbackQueryBestEffort({
-      callbackQueryId: params.query.id,
-      text: 'That idea was already started or is no longer available.',
-    });
+    if (params.answerCallback !== false) {
+      await answerTelegramCallbackQueryBestEffort({
+        callbackQueryId: params.query.id,
+        text: 'That idea was already started or is no longer available.',
+      });
+    }
     return;
   }
 
-  await answerTelegramCallbackQueryBestEffort({
-    callbackQueryId: params.query.id,
-    text: `Starting: ${suggestion.title}`,
-  });
+  if (params.answerCallback !== false) {
+    await answerTelegramCallbackQueryBestEffort({
+      callbackQueryId: params.query.id,
+      text: `Starting: ${suggestion.title}`,
+    });
+  }
 
   const promptText = [
     `Start this suggested task: ${suggestion.title}`,
@@ -214,7 +247,13 @@ async function handleSuggestionLaunchCallback(params: {
   const queuedMessage: QueuedTelegramCommunicationMessage = {
     provider: 'telegram',
     text: promptText,
-    user: 'Telegram operator',
+    user:
+      [params.query.from.first_name, params.query.from.last_name]
+        .filter(Boolean)
+        .join(' ')
+        .trim() ||
+      params.query.from.username ||
+      `Telegram user ${params.query.from.id}`,
     userId: senderUserId,
     ts: messageId,
     channel: chatId,
@@ -326,6 +365,75 @@ async function handleSuggestionLaunchCallback(params: {
         : `Could not start "${suggestion.title}" — try describing the task in a message instead.`,
     });
   }
+}
+
+export async function handleTelegramSuggestionReaction(
+  reaction: TelegramMessageReaction,
+): Promise<boolean> {
+  if (!reaction.user) {
+    return false;
+  }
+
+  const chatId = String(reaction.chat.id);
+  const messageId = String(reaction.message_id);
+  const suggestionId = await findCurrentThreadSuggestionIdByMessage({
+    surface: 'telegram',
+    channelId: chatId,
+    messageId,
+  });
+  if (!suggestionId) {
+    return false;
+  }
+
+  const senderUserId = await resolveTelegramSenderUserId(
+    String(reaction.user.id),
+  );
+  if (!senderUserId) {
+    await postTelegramMessageBestEffort({
+      chatId,
+      replyToMessageId: messageId,
+      text: 'Link your Roomote account to start tasks from Telegram.',
+    });
+    return true;
+  }
+
+  const claim = await claimCurrentThreadSuggestionByMessage({
+    surface: 'telegram',
+    channelId: chatId,
+    messageId,
+  });
+  if (claim.outcome === 'no_card') {
+    return false;
+  }
+  if (claim.outcome === 'already_started') {
+    await postTelegramMessageBestEffort({
+      chatId,
+      replyToMessageId: messageId,
+      text: 'That idea was already started or is no longer available.',
+    });
+    return true;
+  }
+  const suggestion = claim.suggestion;
+
+  await handleSuggestionLaunchCallback({
+    query: {
+      id: `reaction:${chatId}:${messageId}:${reaction.user.id}`,
+      from: reaction.user,
+      message: {
+        message_id: reaction.message_id,
+        ...(reaction.message_thread_id !== undefined
+          ? { message_thread_id: reaction.message_thread_id }
+          : {}),
+        date: reaction.date,
+        chat: reaction.chat,
+      },
+    },
+    suggestionId: suggestion.id,
+    claimedSuggestion: suggestion,
+    senderUserId,
+    answerCallback: false,
+  });
+  return true;
 }
 
 /**
