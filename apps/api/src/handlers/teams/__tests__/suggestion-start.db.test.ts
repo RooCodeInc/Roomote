@@ -128,8 +128,8 @@ describe('resolveAndClaimTeamsSuggestionStart (work_items launch CAS)', () => {
     );
   });
 
-  it('keeps typed idea-number fallback across separately posted current-thread cards', async () => {
-    const [, secondId] = await seedSuggestionGroup({
+  it('does not apply the typed fallback to current-thread reaction cards', async () => {
+    await seedSuggestionGroup({
       introMessageId: 'current-thread-card',
       titles: ['Idea one', 'Idea two'],
       createdAt: new Date(),
@@ -141,12 +141,7 @@ describe('resolveAndClaimTeamsSuggestionStart (work_items launch CAS)', () => {
       ideaNumber: 2,
     });
 
-    expect(resolution).toEqual(
-      expect.objectContaining({
-        outcome: 'claimed',
-        suggestion: expect.objectContaining({ id: secondId }),
-      }),
-    );
+    expect(resolution).toEqual({ outcome: 'no_cards' });
   });
 
   it('returns already_started when the claim CAS loses (double reply)', async () => {

@@ -30,7 +30,6 @@ type TeamsAutomationSuggestion = {
   category: string | null;
   targetRepositoryFullName: string | null;
   targetEnvironmentId: string | null;
-  suggestionNumber?: number;
 };
 
 export async function postCurrentThreadSuggestionsToTeams(params: {
@@ -47,12 +46,11 @@ export async function postCurrentThreadSuggestionsToTeams(params: {
   }
 
   for (const [index, suggestion] of params.suggestions.entries()) {
-    const suggestionNumber = suggestion.suggestionNumber ?? index + 1;
     const posted = await postTeamsAutomationMessageBestEffort({
       conversationId: params.conversationId,
       serviceUrl: params.serviceUrl,
       ...(params.threadId ? { threadId: params.threadId } : {}),
-      text: `**${suggestionNumber}. ${suggestion.title}**\n${suggestion.brief}\n\n_You can also reply with \`start idea ${suggestionNumber}\`._`,
+      text: `**${index + 1}. ${suggestion.title}**\n${suggestion.brief}`,
     });
 
     if (!posted?.messageId) {

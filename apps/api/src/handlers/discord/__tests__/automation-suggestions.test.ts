@@ -189,11 +189,9 @@ describe('Discord scheduled suggestions', () => {
       expect.objectContaining({
         channelId: 'channel-1',
         threadId: 'thread-1',
-        buttons: [
-          [expect.objectContaining({ callbackData: 'idea:suggestion-1' })],
-        ],
       }),
     );
+    expect(postMessageMock.mock.calls[0]?.[0]).not.toHaveProperty('buttons');
     expect(insertValuesMock).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({

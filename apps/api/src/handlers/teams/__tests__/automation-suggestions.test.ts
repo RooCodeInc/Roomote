@@ -165,7 +165,7 @@ describe('postScheduledSuggestionsToTeams', () => {
     );
   });
 
-  it('preserves suggestion numbers when retrying a partially delivered group', async () => {
+  it('does not advertise the typed suggestion fallback on current-thread cards', async () => {
     postMessageMock.mockResolvedValueOnce({ messageId: '1720000000002' });
 
     await postCurrentThreadSuggestionsToTeams({
@@ -175,18 +175,11 @@ describe('postScheduledSuggestionsToTeams', () => {
       conversationId: '19:bound@thread.tacv2',
       serviceUrl: 'https://smba.trafficmanager.net/amer/',
       threadId: 'activity-root',
-      suggestions: [
-        {
-          ...buildSuggestion('bbb', 'Add coverage'),
-          suggestionNumber: 2,
-        },
-      ],
+      suggestions: [buildSuggestion('bbb', 'Add coverage')],
     });
 
-    expect(postMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: expect.stringContaining('start idea 2'),
-      }),
+    expect(postMessageMock.mock.calls[0]?.[0]?.text).not.toContain(
+      'start idea',
     );
   });
 

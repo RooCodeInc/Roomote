@@ -43,14 +43,10 @@ export async function postCurrentThreadSuggestionsToDiscord(params: {
   }
 
   for (const [index, suggestion] of params.suggestions.entries()) {
-    const buttons: CommunicationMessageButton[][] = [
-      [{ text: '▶️ Start', callbackData: `idea:${suggestion.id}` }],
-    ];
     const posted = await provider.postMessage({
       channelId: params.channelId,
       ...(params.threadId ? { threadId: params.threadId } : {}),
       text: `**${suggestion.suggestionNumber ?? index + 1}. ${suggestion.title}**\n${suggestion.brief}`,
-      buttons,
     });
 
     if (!posted.messageId) {

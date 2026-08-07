@@ -114,7 +114,6 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
       messageTs: trackedMessages.messageTs,
       threadTs: trackedMessages.threadTs,
       createdAt: trackedMessages.createdAt,
-      metadata: trackedMessages.metadata,
     })
     .from(trackedMessages)
     .where(
@@ -122,6 +121,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
         eq(trackedMessages.surface, 'teams'),
         eq(trackedMessages.kind, 'suggestion_card'),
         sql`split_part(${trackedMessages.channelId}, ';messageid=', 1) = ${conversationBase}`,
+        sql`${trackedMessages.metadata} ->> 'suggestionGroupKey' IS NULL`,
         isNotNull(trackedMessages.workItemId),
       ),
     );
@@ -147,19 +147,10 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
       continue;
     }
 
-    const suggestionGroupKey =
-      card.metadata &&
-      typeof card.metadata === 'object' &&
-      !Array.isArray(card.metadata) &&
-      typeof (card.metadata as Record<string, unknown>).suggestionGroupKey ===
-        'string'
-        ? String((card.metadata as Record<string, unknown>).suggestionGroupKey)
-        : null;
     const suffix = `:${card.workItemId}`;
-    const messageGroupKey = card.messageTs.endsWith(suffix)
+    const groupKey = card.messageTs.endsWith(suffix)
       ? card.messageTs.slice(0, -suffix.length)
       : card.messageTs;
-    const groupKey = suggestionGroupKey ?? messageGroupKey;
     const group = groups.get(groupKey);
 
     if (group) {
