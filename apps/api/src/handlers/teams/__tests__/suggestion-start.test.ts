@@ -10,11 +10,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const {
   apiLoggerMock,
   cancelOrphanedWorkItemRunBestEffortMock,
+  claimCurrentThreadSuggestionByMessageMock,
   finalizeWorkItemLaunchedMock,
   releaseWorkItemClaimMock,
 } = vi.hoisted(() => ({
   apiLoggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
   cancelOrphanedWorkItemRunBestEffortMock: vi.fn(),
+  claimCurrentThreadSuggestionByMessageMock: vi.fn(),
   finalizeWorkItemLaunchedMock: vi.fn(),
   releaseWorkItemClaimMock: vi.fn(),
 }));
@@ -49,9 +51,15 @@ vi.mock('../../tasks/orphaned-work-item-run.js', () => ({
   cancelOrphanedWorkItemRunBestEffort: cancelOrphanedWorkItemRunBestEffortMock,
 }));
 
+vi.mock('../../tasks/current-thread-suggestion-reaction.js', () => ({
+  claimCurrentThreadSuggestionByMessage:
+    claimCurrentThreadSuggestionByMessageMock,
+}));
+
 import {
   launchClaimedTeamsSuggestion,
   parseTeamsSuggestionStartText,
+  resolveAndClaimTeamsSuggestionReaction,
   type ClaimedTeamsSuggestion,
 } from '../suggestion-start.js';
 
@@ -80,6 +88,28 @@ describe('parseTeamsSuggestionStartText', () => {
     '',
   ])('rejects %j (falls through to normal task entry)', (text) => {
     expect(parseTeamsSuggestionStartText(text)).toBeNull();
+  });
+});
+
+describe('resolveAndClaimTeamsSuggestionReaction', () => {
+  it('claims the exact tracked card message', async () => {
+    const suggestion = buildClaimedSuggestion();
+    claimCurrentThreadSuggestionByMessageMock.mockResolvedValue({
+      outcome: 'claimed',
+      suggestion,
+    });
+
+    await expect(
+      resolveAndClaimTeamsSuggestionReaction({
+        conversationId: '19:channel@thread.v2;messageid=root',
+        messageId: 'card-2',
+      }),
+    ).resolves.toEqual({ outcome: 'claimed', suggestion });
+    expect(claimCurrentThreadSuggestionByMessageMock).toHaveBeenCalledWith({
+      surface: 'teams',
+      channelId: '19:channel@thread.v2;messageid=root',
+      messageId: 'card-2',
+    });
   });
 });
 

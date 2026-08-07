@@ -144,8 +144,22 @@ describe('Discord scheduled suggestions', () => {
   });
 
   it('posts current-thread suggestions without creating another thread', async () => {
+    postMessageMock
+      .mockResolvedValueOnce({
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+        messageId: 'message-a',
+      })
+      .mockResolvedValueOnce({
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+        messageId: 'message-b',
+      });
     const delivered = await postCurrentThreadSuggestionsToDiscord({
       sourceTaskId: 'task-1',
+      suggestionGroupKey: 'reply-1',
       createdByUserId: 'user-1',
       channelId: 'channel-1',
       threadId: 'thread-1',
@@ -157,18 +171,41 @@ describe('Discord scheduled suggestions', () => {
           category: 'bug',
           targetRepositoryFullName: 'owner/repo',
         },
+        {
+          id: 'suggestion-2',
+          title: 'Add coverage',
+          brief: 'Cover the regression.',
+          category: 'chore',
+          targetRepositoryFullName: 'owner/repo',
+        },
       ],
     });
 
     expect(delivered).toBe(true);
     expect(createTaskThreadMock).not.toHaveBeenCalled();
-    expect(postMessageMock).toHaveBeenCalledWith(
+    expect(postMessageMock).toHaveBeenCalledTimes(2);
+    expect(postMessageMock).toHaveBeenNthCalledWith(
+      1,
       expect.objectContaining({
         channelId: 'channel-1',
         threadId: 'thread-1',
         buttons: [
           [expect.objectContaining({ callbackData: 'idea:suggestion-1' })],
         ],
+      }),
+    );
+    expect(insertValuesMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        messageTs: 'message-a',
+        workItemId: 'suggestion-1',
+      }),
+    );
+    expect(insertValuesMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        messageTs: 'message-b',
+        workItemId: 'suggestion-2',
       }),
     );
   });

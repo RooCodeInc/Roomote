@@ -4,6 +4,8 @@ import {
   getTelegramNewTaskCommand,
   getTelegramUpdateCallbackQuery,
   getTelegramUpdateCommunicationMetadata,
+  getTelegramUpdateMessageReaction,
+  isNewTelegramThumbsUpReaction,
   isTelegramStartCommand,
   isTelegramTaskEntryUpdate,
   parseTelegramUpdate,
@@ -63,6 +65,33 @@ describe('Telegram update helpers', () => {
     expect(callbackQuery?.id).toBe('cb-1');
     expect(callbackQuery?.data).toBe('cancel_task:42');
     expect(callbackQuery?.message?.message_id).toBe(777);
+  });
+
+  it('parses newly-added native thumbs-up reactions', () => {
+    const parsed = parseTelegramUpdate({
+      update_id: 6,
+      message_reaction: {
+        chat: { id: -100456, type: 'supergroup' },
+        message_id: 778,
+        message_thread_id: 7,
+        date: 1_700_000_000,
+        user: { id: 111, first_name: 'Ada' },
+        old_reaction: [],
+        new_reaction: [{ type: 'emoji', emoji: '👍' }],
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+    const reaction = getTelegramUpdateMessageReaction(parsed.data!);
+    expect(reaction?.message_id).toBe(778);
+    expect(reaction && isNewTelegramThumbsUpReaction(reaction)).toBe(true);
+    expect(
+      reaction &&
+        isNewTelegramThumbsUpReaction({
+          ...reaction,
+          old_reaction: [{ type: 'emoji', emoji: '👍' }],
+        }),
+    ).toBe(false);
   });
 
   it('parses Telegram messages into queued communication messages', () => {

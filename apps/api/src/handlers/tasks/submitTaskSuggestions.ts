@@ -1482,6 +1482,15 @@ export async function submitTaskSuggestions(
             providerSurface,
           )
         : persistedSuggestions;
+      const numberedMissingSuggestions = missingSuggestions.map(
+        (suggestion) => ({
+          ...suggestion,
+          suggestionNumber:
+            persistedSuggestions.findIndex(
+              (candidate) => candidate.id === suggestion.id,
+            ) + 1,
+        }),
+      );
       const delivered =
         missingSuggestions.length === 0
           ? true
@@ -1496,18 +1505,20 @@ export async function submitTaskSuggestions(
             : communicationProvider === 'discord' && communicationChannel
               ? await postCurrentThreadSuggestionsToDiscord({
                   sourceTaskId: taskId,
+                  suggestionGroupKey: parsedBody.data.submissionKey ?? taskId,
                   createdByUserId,
                   channelId: communicationChannel,
                   threadId: communicationThread,
-                  suggestions: missingSuggestions,
+                  suggestions: numberedMissingSuggestions,
                 })
               : communicationProvider === 'telegram' && communicationChannel
                 ? await postCurrentThreadSuggestionsToTelegram({
                     sourceTaskId: taskId,
+                    suggestionGroupKey: parsedBody.data.submissionKey ?? taskId,
                     createdByUserId,
                     chatId: communicationChannel,
                     threadId: communicationThread,
-                    suggestions: missingSuggestions,
+                    suggestions: numberedMissingSuggestions,
                   })
                 : communicationProvider === 'teams' && communicationChannel
                   ? await (async () => {
@@ -1516,11 +1527,13 @@ export async function submitTaskSuggestions(
                       return serviceUrl
                         ? postCurrentThreadSuggestionsToTeams({
                             sourceTaskId: taskId,
+                            suggestionGroupKey:
+                              parsedBody.data.submissionKey ?? taskId,
                             createdByUserId,
                             conversationId: communicationChannel,
                             serviceUrl,
                             threadId: communicationThread,
-                            suggestions: missingSuggestions,
+                            suggestions: numberedMissingSuggestions,
                           })
                         : false;
                     })()

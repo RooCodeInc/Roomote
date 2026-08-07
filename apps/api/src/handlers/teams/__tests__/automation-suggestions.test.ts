@@ -123,21 +123,69 @@ describe('postScheduledSuggestionsToTeams', () => {
   });
 
   it('posts current-thread suggestions to the bound conversation', async () => {
+    postMessageMock
+      .mockResolvedValueOnce({ messageId: '1720000000000' })
+      .mockResolvedValueOnce({ messageId: '1720000000001' });
     const delivered = await postCurrentThreadSuggestionsToTeams({
       sourceTaskId: 'task-1',
+      suggestionGroupKey: 'reply-1',
       createdByUserId: 'user-1',
       conversationId: '19:bound@thread.tacv2',
       serviceUrl: 'https://smba.trafficmanager.net/amer/',
       threadId: 'activity-root',
-      suggestions: [buildSuggestion('aaa', 'Fix crash')],
+      suggestions: [
+        buildSuggestion('aaa', 'Fix crash'),
+        buildSuggestion('bbb', 'Add coverage'),
+      ],
     });
 
     expect(delivered).toBe(true);
-    expect(postMessageMock).toHaveBeenCalledWith(
+    expect(postMessageMock).toHaveBeenCalledTimes(2);
+    expect(postMessageMock).toHaveBeenNthCalledWith(
+      1,
       expect.objectContaining({
         conversationId: '19:bound@thread.tacv2',
         threadId: 'activity-root',
         text: expect.stringContaining('Fix crash'),
+      }),
+    );
+    expect(insertValuesMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        messageTs: '1720000000000',
+        workItemId: 'aaa',
+      }),
+    );
+    expect(insertValuesMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        messageTs: '1720000000001',
+        workItemId: 'bbb',
+      }),
+    );
+  });
+
+  it('preserves suggestion numbers when retrying a partially delivered group', async () => {
+    postMessageMock.mockResolvedValueOnce({ messageId: '1720000000002' });
+
+    await postCurrentThreadSuggestionsToTeams({
+      sourceTaskId: 'task-1',
+      suggestionGroupKey: 'reply-1',
+      createdByUserId: 'user-1',
+      conversationId: '19:bound@thread.tacv2',
+      serviceUrl: 'https://smba.trafficmanager.net/amer/',
+      threadId: 'activity-root',
+      suggestions: [
+        {
+          ...buildSuggestion('bbb', 'Add coverage'),
+          suggestionNumber: 2,
+        },
+      ],
+    });
+
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('start idea 2'),
       }),
     );
   });

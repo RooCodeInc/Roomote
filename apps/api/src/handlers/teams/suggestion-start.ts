@@ -19,6 +19,7 @@ import {
 
 import { apiLogger } from '../../logging.js';
 import { cancelOrphanedWorkItemRunBestEffort } from '../tasks/orphaned-work-item-run.js';
+import { claimCurrentThreadSuggestionByMessage } from '../tasks/current-thread-suggestion-reaction.js';
 import { stripTeamsMessageIdSuffix } from './find-active-teams-run.js';
 
 /**
@@ -75,7 +76,7 @@ export type ClaimedTeamsSuggestion = {
   launchClaimedAt: Date;
 };
 
-type TeamsSuggestionStartResolution =
+export type TeamsSuggestionStartResolution =
   /** No tracked suggestion cards in this conversation — fall through. */
   | { outcome: 'no_cards' }
   /** Cards exist but N is outside the latest posted list. */
@@ -113,6 +114,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
       messageTs: trackedMessages.messageTs,
       threadTs: trackedMessages.threadTs,
       createdAt: trackedMessages.createdAt,
+      metadata: trackedMessages.metadata,
     })
     .from(trackedMessages)
     .where(
@@ -145,11 +147,20 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
       continue;
     }
 
+    const suggestionGroupKey =
+      card.metadata &&
+      typeof card.metadata === 'object' &&
+      !Array.isArray(card.metadata) &&
+      typeof (card.metadata as Record<string, unknown>).suggestionGroupKey ===
+        'string'
+        ? String((card.metadata as Record<string, unknown>).suggestionGroupKey)
+        : null;
     const suffix = `:${card.workItemId}`;
-    const introMessageId = card.messageTs.endsWith(suffix)
+    const messageGroupKey = card.messageTs.endsWith(suffix)
       ? card.messageTs.slice(0, -suffix.length)
       : card.messageTs;
-    const group = groups.get(introMessageId);
+    const groupKey = suggestionGroupKey ?? messageGroupKey;
+    const group = groups.get(groupKey);
 
     if (group) {
       group.workItemIds.push(card.workItemId);
@@ -158,7 +169,7 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
         group.createdAt = card.createdAt;
       }
     } else {
-      groups.set(introMessageId, {
+      groups.set(groupKey, {
         createdAt: card.createdAt,
         workItemIds: [card.workItemId],
       });
@@ -201,6 +212,25 @@ export async function resolveAndClaimTeamsSuggestionStart(input: {
       launchClaimedAt: claimed.launchClaimedAt,
     },
   };
+}
+
+export async function resolveAndClaimTeamsSuggestionReaction(input: {
+  conversationId: string;
+  messageId: string;
+}): Promise<TeamsSuggestionStartResolution> {
+  const claim = await claimCurrentThreadSuggestionByMessage({
+    surface: 'teams',
+    channelId: input.conversationId,
+    messageId: input.messageId,
+  });
+
+  if (claim.outcome === 'no_card') {
+    return { outcome: 'no_cards' };
+  }
+  if (claim.outcome === 'already_started') {
+    return { outcome: 'already_started', title: 'That idea' };
+  }
+  return { outcome: 'claimed', suggestion: claim.suggestion };
 }
 
 /** Mirrors the Telegram suggestion-button prompt shape. */
