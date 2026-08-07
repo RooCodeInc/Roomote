@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
+  isBackgroundAutomationUserTargetKind,
   MAX_CUSTOM_AUTOMATIONS,
   type CustomAutomationScheduleMode,
 } from '@roomote/types';
@@ -204,11 +205,12 @@ function targetFromRow(row: CustomAutomationListItem): {
       : '';
   return {
     provider,
-    mode: row.target.targetKind === 'slack_user' ? 'direct_message' : 'channel',
-    channelId:
-      row.target.targetKind === 'slack_user'
-        ? ''
-        : (row.target.externalRef ?? ''),
+    mode: isBackgroundAutomationUserTargetKind(row.target.targetKind)
+      ? 'direct_message'
+      : 'channel',
+    channelId: isBackgroundAutomationUserTargetKind(row.target.targetKind)
+      ? ''
+      : (row.target.externalRef ?? ''),
     serviceUrl,
   };
 }
@@ -257,7 +259,9 @@ function writeInputFromRow(row: CustomAutomationListItem) {
             : {}),
         }
       : {}),
-    ...(target.provider === 'teams' && target.serviceUrl
+    ...(target.provider === 'teams' &&
+    target.mode === 'channel' &&
+    target.serviceUrl
       ? { targetServiceUrl: target.serviceUrl }
       : {}),
   };
@@ -326,6 +330,9 @@ export function CustomAutomationsSection() {
     : DESTINATION_OPTIONS.filter(
         (option) => option.value === form.targetProvider,
       );
+  const selectedDestinationLabel =
+    DESTINATION_OPTIONS.find((option) => option.value === form.targetProvider)
+      ?.label ?? 'Provider';
 
   const environmentOptions = useMemo(
     () =>
@@ -600,7 +607,9 @@ export function CustomAutomationsSection() {
               : {}),
           }
         : {}),
-      ...(form.targetProvider === 'teams' && form.targetServiceUrl.trim()
+      ...(form.targetProvider === 'teams' &&
+      form.targetMode === 'channel' &&
+      form.targetServiceUrl.trim()
         ? { targetServiceUrl: form.targetServiceUrl.trim() }
         : {}),
     };
@@ -816,7 +825,7 @@ export function CustomAutomationsSection() {
               <p className="self-center text-sm text-muted-foreground">
                 Results appear only in the task view.
               </p>
-            ) : form.targetProvider === 'slack' ? (
+            ) : (
               <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
                 <Select
                   value={form.targetMode}
@@ -827,12 +836,20 @@ export function CustomAutomationsSection() {
                       targetMode:
                         value as CustomAutomationFormState['targetMode'],
                       targetChannelId:
-                        value === 'channel' ? managerSlackChannelId : '',
+                        value === 'channel'
+                          ? current.targetProvider === 'slack'
+                            ? managerSlackChannelId
+                            : current.targetProvider === 'discord'
+                              ? managerDiscordChannelId
+                              : ''
+                          : '',
+                      targetServiceUrl:
+                        value === 'channel' ? current.targetServiceUrl : '',
                     }))
                   }
                 >
                   <SelectTrigger
-                    aria-label="Slack destination type"
+                    aria-label={`${selectedDestinationLabel} destination type`}
                     className="w-full sm:w-36"
                   >
                     <SelectValue />
@@ -842,7 +859,12 @@ export function CustomAutomationsSection() {
                     <SelectItem value="direct_message">DM me</SelectItem>
                   </SelectContent>
                 </Select>
-                {form.targetMode === 'channel' ? (
+                {form.targetMode === 'direct_message' ? (
+                  <p className="self-center text-sm text-muted-foreground">
+                    Results are sent privately to your linked{' '}
+                    {selectedDestinationLabel} account.
+                  </p>
+                ) : form.targetProvider === 'slack' ? (
                   <SlackChannelSelect
                     id="custom-automation-destination-channel"
                     className="flex-1"
@@ -856,63 +878,54 @@ export function CustomAutomationsSection() {
                       }))
                     }
                   />
+                ) : form.targetProvider === 'discord' ? (
+                  <Select
+                    value={form.targetChannelId || undefined}
+                    disabled={busy}
+                    onValueChange={(value) =>
+                      setForm((current) => ({
+                        ...current,
+                        targetChannelId: value,
+                      }))
+                    }
+                  >
+                    <SelectTrigger
+                      aria-label="Destination channel"
+                      className="flex-1"
+                    >
+                      <SelectValue placeholder="Select Discord channel" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {discordOptions.map((channel) => (
+                        <SelectItem key={channel.id} value={channel.id}>
+                          {channel.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 ) : (
-                  <p className="self-center text-sm text-muted-foreground">
-                    Results are sent privately to your linked Slack account.
-                  </p>
-                )}
-              </div>
-            ) : form.targetProvider === 'discord' ? (
-              <div className="flex min-w-0 flex-1 items-center gap-2">
-                <Label className="shrink-0">Channel</Label>
-                <Select
-                  value={form.targetChannelId || undefined}
-                  disabled={busy}
-                  onValueChange={(value) =>
-                    setForm((current) => ({
-                      ...current,
-                      targetChannelId: value,
-                    }))
-                  }
-                >
-                  <SelectTrigger
+                  <Input
                     aria-label="Destination channel"
                     className="flex-1"
-                  >
-                    <SelectValue placeholder="Select Discord channel" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {discordOptions.map((channel) => (
-                      <SelectItem key={channel.id} value={channel.id}>
-                        {channel.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            ) : (
-              <div className="flex min-w-0 flex-1 items-center gap-2">
-                <Label className="shrink-0">Channel</Label>
-                <Input
-                  aria-label="Destination channel"
-                  className="flex-1"
-                  value={form.targetChannelId}
-                  disabled={busy}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      targetChannelId: event.target.value,
-                    }))
-                  }
-                  placeholder={
-                    form.targetProvider === 'teams'
-                      ? 'Teams conversation ID'
-                      : 'Telegram chat ID'
-                  }
-                />
+                    value={form.targetChannelId}
+                    disabled={busy}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        targetChannelId: event.target.value,
+                      }))
+                    }
+                    placeholder={
+                      form.targetProvider === 'teams'
+                        ? 'Teams conversation ID'
+                        : 'Telegram chat ID'
+                    }
+                  />
+                )}
               </div>
             )}
-            {form.targetProvider === 'teams' ? (
+            {form.targetProvider === 'teams' &&
+            form.targetMode === 'channel' ? (
               <div className="flex min-w-0 flex-1 items-center gap-2">
                 <Label
                   htmlFor="custom-automation-service-url"

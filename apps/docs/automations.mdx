@@ -77,8 +77,8 @@ Create arbitrary scheduled agent runs with:
 - one required **environment**
 - an optional **model** override for the runs; the default follows the
   deployment task model
-- an optional **report destination**: a Slack direct message to the automation
-  owner, or a Slack, Discord, Teams, or Telegram channel
+- an optional **report destination**: a direct message to the automation owner,
+  or a channel, through Slack, Discord, Teams, or Telegram
 
 Each automation card summarizes its cadence, environment, report destination,
 creator, and most recent run.
@@ -103,6 +103,9 @@ result, or a blocker or question that needs input) starts a thread, later
 updates continue that same thread, and you can reply in the thread to talk to the task.
 There is no progress chatter in between. Without a destination, the run happens
 silently and its results appear only in the task view.
+
+Direct-message destinations require the automation owner to link an account for
+the selected communications provider and make the bot reachable there.
 
 Use **Run now** on an enabled automation to test it immediately. Each card has
 its own run state, so starting one custom automation does not prevent you from

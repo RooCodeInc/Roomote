@@ -146,9 +146,23 @@ export type BackgroundAutomationTargetKind =
   | 'slack_channel'
   | 'slack_user'
   | 'teams_channel'
+  | 'teams_user'
   | 'telegram_chat'
+  | 'telegram_user'
   | 'discord_channel'
+  | 'discord_user'
   | 'sentry_project';
+
+export function isBackgroundAutomationUserTargetKind(
+  value: unknown,
+): value is 'slack_user' | 'teams_user' | 'telegram_user' | 'discord_user' {
+  return (
+    value === 'slack_user' ||
+    value === 'teams_user' ||
+    value === 'telegram_user' ||
+    value === 'discord_user'
+  );
+}
 
 /**
  * A single automation target stored in automations.targets (jsonb array).

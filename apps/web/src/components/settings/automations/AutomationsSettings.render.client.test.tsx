@@ -23,9 +23,17 @@ const state = vi.hoisted(() => ({
     model: null;
     environmentId: string;
     target: {
-      provider: 'slack';
+      provider: 'slack' | 'discord' | 'teams' | 'telegram';
       externalRef: string;
-      targetKind?: 'slack_channel' | 'slack_user';
+      targetKind?:
+        | 'slack_channel'
+        | 'slack_user'
+        | 'discord_channel'
+        | 'discord_user'
+        | 'teams_channel'
+        | 'teams_user'
+        | 'telegram_chat'
+        | 'telegram_user';
       metadata?: Record<string, unknown>;
     };
     lastRunAt: Date | null;
@@ -1115,6 +1123,51 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByText(
         'Results are sent privately to your linked Slack account.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('shows DM me for non-Slack custom automation destinations', async () => {
+    state.environments = [{ id: 'env-1', name: 'Production' }];
+    state.settingsQuery.data.capabilities.discordConnected = true;
+    state.customAutomations = [
+      {
+        id: 'automation-1',
+        name: 'Discord daily brief',
+        prompt: 'Summarize my priorities.',
+        enabled: true,
+        scheduleMode: 'daily',
+        cronExpression: null,
+        model: null,
+        environmentId: 'env-1',
+        target: {
+          provider: 'discord',
+          targetKind: 'discord_user',
+          externalRef: 'user-1',
+        },
+        lastRunAt: null,
+        lastSucceededAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        lastLaunchedTaskId: null,
+        createdByName: 'Ada',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    ];
+
+    render(<AutomationsSettings />);
+
+    expect(await screen.findByText('Discord DM me')).toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Configure Discord daily brief' }),
+    );
+    expect(
+      screen.getByRole('combobox', { name: 'Discord destination type' }),
+    ).toHaveTextContent('DM me');
+    expect(
+      screen.getByText(
+        'Results are sent privately to your linked Discord account.',
       ),
     ).toBeInTheDocument();
   });

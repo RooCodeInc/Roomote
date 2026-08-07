@@ -25,6 +25,7 @@ import type {
   CustomAutomationScheduleMode,
   OptionalAutomationTarget,
 } from '@roomote/types';
+import { isBackgroundAutomationUserTargetKind } from '@roomote/types';
 import { toActivationAutomationDestinationProvider } from '@roomote/telemetry';
 import { captureActivationCustomAutomationChanged } from '@roomote/telemetry/server';
 
@@ -153,7 +154,6 @@ const VALIDATION_ERROR_PATTERNS: RegExp[] = [
   /^Report destination must include a provider, target kind, and reference\.$/,
   /^You can create at most \d+ custom automations\.$/,
   /^targetChannelId is required when targetProvider is set\.$/,
-  /^Direct-message destinations currently require Slack\.$/,
   /^Timezone is required\.$/,
   /^Choose a valid IANA timezone\.$/,
 ];
@@ -213,14 +213,7 @@ function buildTarget(
   ownerUserId: string,
 ): OptionalAutomationTarget {
   if (!input.targetProvider) return {};
-  if (
-    input.targetMode === 'direct_message' &&
-    input.targetProvider !== 'slack'
-  ) {
-    throw new Error('Direct-message destinations currently require Slack.');
-  }
-  const directMessage =
-    input.targetProvider === 'slack' && input.targetMode === 'direct_message';
+  const directMessage = input.targetMode === 'direct_message';
   if (!directMessage && !input.targetChannelId) {
     throw new Error('targetChannelId is required when targetProvider is set.');
   }
@@ -231,11 +224,19 @@ function buildTarget(
     teams: 'teams_channel',
     telegram: 'telegram_chat',
   };
+  const userKinds: Record<string, BackgroundAutomationTargetKind> = {
+    slack: 'slack_user',
+    discord: 'discord_user',
+    teams: 'teams_user',
+    telegram: 'telegram_user',
+  };
   return {
     provider: input.targetProvider as BackgroundAutomationProvider,
-    targetKind: directMessage ? 'slack_user' : kinds[input.targetProvider]!,
+    targetKind: directMessage
+      ? userKinds[input.targetProvider]!
+      : kinds[input.targetProvider]!,
     externalRef: directMessage ? ownerUserId : input.targetChannelId!,
-    ...(input.targetServiceUrl
+    ...(!directMessage && input.targetServiceUrl
       ? { metadata: { serviceUrl: input.targetServiceUrl } }
       : {}),
   };
@@ -397,14 +398,15 @@ customAutomationsRouter.patch('/:id', async (c) => {
         : undefined);
     const targetMode =
       parsed.data.targetMode ??
-      (!providerChanged && existingTarget.targetKind === 'slack_user'
+      (!providerChanged &&
+      isBackgroundAutomationUserTargetKind(existingTarget.targetKind)
         ? 'direct_message'
         : 'channel');
     const targetChannelId =
       parsed.data.targetChannelId ??
       (targetMode === 'channel' &&
       !providerChanged &&
-      existingTarget.targetKind !== 'slack_user'
+      !isBackgroundAutomationUserTargetKind(existingTarget.targetKind)
         ? existingTarget.externalRef
         : undefined);
     const destinationChanged =

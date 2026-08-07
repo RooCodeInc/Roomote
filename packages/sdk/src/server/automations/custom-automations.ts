@@ -13,6 +13,7 @@ import {
 } from '@roomote/db/server';
 import {
   isConfiguredAutomationTarget,
+  isBackgroundAutomationUserTargetKind,
   resolveEvalHarnessSelection,
   TaskPayloadKind,
   type AutomationTarget,
@@ -39,9 +40,16 @@ import {
   type AutomationRunNowResult,
   type AutomationRunOpts,
 } from './types';
-import { findSlackUserDirectMessageDestination } from '../lib/user-direct-message';
+import { findUserDirectMessageDestination } from '../lib/user-direct-message';
 
 const LOG_PREFIX = '[custom-automations]';
+
+const PROVIDER_LABELS: Record<CommunicationProvider, string> = {
+  discord: 'Discord',
+  slack: 'Slack',
+  teams: 'Teams',
+  telegram: 'Telegram',
+};
 
 const WINDOW_DAYS: Record<string, number> = {
   every_hour: 1 / 24,
@@ -77,8 +85,9 @@ async function resolveDestination(
     return null;
   }
 
-  if (provider === 'slack' && target.targetKind === 'slack_user') {
-    const destination = await findSlackUserDirectMessageDestination(
+  if (isBackgroundAutomationUserTargetKind(target.targetKind)) {
+    const destination = await findUserDirectMessageDestination(
+      provider,
       target.externalRef,
     );
     return destination
@@ -230,12 +239,13 @@ async function launchCustomAutomationRow(
   if (isConfiguredAutomationTarget(automation.target)) {
     destination = await resolveDestination(automation.target);
     if (!destination) {
-      const message =
-        automation.target.targetKind === 'slack_user'
-          ? 'The automation owner does not have a linked Slack account that can receive direct messages.'
-          : automation.target.provider === 'teams'
-            ? 'Teams report destination is missing a resolvable service URL.'
-            : 'Report destination could not be resolved.';
+      const message = isBackgroundAutomationUserTargetKind(
+        automation.target.targetKind,
+      )
+        ? `The automation owner does not have a linked ${PROVIDER_LABELS[automation.target.provider as CommunicationProvider]} account that can receive direct messages.`
+        : automation.target.provider === 'teams'
+          ? 'Teams report destination is missing a resolvable service URL.'
+          : 'Report destination could not be resolved.';
       result.skippedReason = message;
       result.errors.push(message);
       await recordCustomAutomationRunOutcome(db, {
