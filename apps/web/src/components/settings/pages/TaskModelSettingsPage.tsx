@@ -10,7 +10,7 @@ import { splitInferenceProviders } from '@/components/settings/taskModelProvider
 import { HeaderCallout, Medal } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 
-const MODEL_RECOMMENDATIONS_URL = 'https://roomote.dev/evals';
+const MODEL_RECOMMENDATIONS_URL = 'https://roomote.dev/models';
 
 export function TaskModelSettingsPage() {
   const trpc = useTRPC();
