@@ -486,6 +486,18 @@ export async function listCustomMcpServerToolsCommand(
       params: {},
       requestId: 1,
     });
+
+    const directResult =
+      direct.payload &&
+      typeof direct.payload === 'object' &&
+      'result' in direct.payload
+        ? (direct.payload as { result?: { tools?: unknown } }).result
+        : undefined;
+
+    if (!directResult || !Array.isArray(directResult.tools)) {
+      throw new Error('Custom MCP server requires initialization.');
+    }
+
     toolsPayload = direct.payload;
   } catch {
     const initialized = await callCustomMcpServer({
