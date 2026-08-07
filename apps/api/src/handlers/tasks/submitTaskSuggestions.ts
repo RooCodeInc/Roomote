@@ -1340,6 +1340,12 @@ export async function submitTaskSuggestions(
     const repositoryIds = candidateRepositories.map(
       (repository) => repository.id,
     );
+    const repositoryIdsByFullName = new Map(
+      candidateRepositories.map((repository) => [
+        repository.fullName,
+        repository.id,
+      ]),
+    );
     // Chat-reply suggestions are presentation-only proposals. Ignore launch
     // metadata from older workers so the task router chooses the workspace
     // when a user starts one instead of trusting the proposing agent.
@@ -1456,11 +1462,23 @@ export async function submitTaskSuggestions(
         .insert(workItems)
         .values(
           suggestionsToPersist.map((suggestion, index) => {
+            let suggestionRepositoryIds = repositoryIds;
+            if (suggestion.targetRepositoryFullName) {
+              const targetRepositoryId = repositoryIdsByFullName.get(
+                suggestion.targetRepositoryFullName,
+              );
+              if (!targetRepositoryId) {
+                throw new Error(
+                  `Suggestion target repository "${suggestion.targetRepositoryFullName}" was not resolved.`,
+                );
+              }
+              suggestionRepositoryIds = [targetRepositoryId];
+            }
             const contentHash = buildTaskSuggestionContentHash({
               title: suggestion.title,
               brief: suggestion.brief,
               targetRepositoryFullName: suggestion.targetRepositoryFullName,
-              repositoryIds,
+              repositoryIds: suggestionRepositoryIds,
             });
 
             return {
@@ -1474,7 +1492,7 @@ export async function submitTaskSuggestions(
               category: suggestion.category,
               priority: suggestion.priority,
               investigationContext: suggestion.investigationContext,
-              repositoryIds,
+              repositoryIds: suggestionRepositoryIds,
               targetRepositoryFullName: suggestion.targetRepositoryFullName,
               fingerprint: submissionPrefix
                 ? `${submissionPrefix}${index}:${contentHash}`

@@ -38,11 +38,12 @@ const {
 
 // Mutable so a test can simulate "Slack installed but no channel resolves".
 let slackInstallationChannelRows: unknown[] = [{ channelId: 'C-FALLBACK' }];
+let repositoryRows = [{ id: 'repo-1', fullName: 'acme/app' }];
 
 function makeSelectResult(name: string): unknown[] {
   switch (name) {
     case 'repositories':
-      return [{ id: 'repo-1', fullName: 'acme/app' }];
+      return repositoryRows;
     case 'slackInstallations':
       return [{ id: 'inst-1', botAccessToken: 'xoxb-test', teamId: 'T1' }];
     case 'slackInstallationChannels':
@@ -325,6 +326,7 @@ describe('submitTaskSuggestions', () => {
     insertedWorkItemValues.length = 0;
     insertedTrackedMessageValues.length = 0;
     slackInstallationChannelRows = [{ channelId: 'C-FALLBACK' }];
+    repositoryRows = [{ id: 'repo-1', fullName: 'acme/app' }];
     vi.mocked(getAutomationRuntime).mockResolvedValue({
       slackChannelId: 'C-AUTO',
     } as unknown as Awaited<ReturnType<typeof getAutomationRuntime>>);
@@ -535,6 +537,10 @@ describe('submitTaskSuggestions', () => {
   });
 
   it('pins org-wide current-thread suggestions to a concrete repository', async () => {
+    repositoryRows = [
+      { id: 'repo-1', fullName: 'acme/app' },
+      { id: 'repo-2', fullName: 'acme/api' },
+    ];
     mockFindEnvironmentForRepo.mockResolvedValue(
       '10b031ec-b728-4d8f-a9a0-1ed4aa500511',
     );
