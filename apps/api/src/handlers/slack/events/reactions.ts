@@ -172,6 +172,8 @@ async function markWorkItemLaunched(params: {
 
 const REMOVED_SLACK_ACCOUNT_LAUNCH_FAILURE =
   'I could not start this because your linked Roomote account was removed. Ask an admin to restore your access, then reconnect Slack.';
+const UNLINKED_SLACK_ACCOUNT_LAUNCH_FAILURE =
+  'Link your Roomote account to start tasks from Slack.';
 
 async function launchTaskSuggestionTaskFromReaction({
   teamId,
@@ -403,6 +405,20 @@ async function launchTaskSuggestionTaskFromReaction({
     return true;
   }
 
+  if (!reactingUserMapping.activeMapping) {
+    await postSuggestionLaunchFailureMessage({
+      slack,
+      channelId,
+      title: `${buildSuggestionBadgePrefix({
+        category: workItem.category,
+        priority: workItem.priority,
+      })}${workItem.title}`,
+      brief: suggestionBrief,
+      reason: UNLINKED_SLACK_ACCOUNT_LAUNCH_FAILURE,
+    });
+    return true;
+  }
+
   const claimedWorkItem = await claimWorkItem(db, { id: workItemId });
 
   if (!claimedWorkItem) {
@@ -496,9 +512,7 @@ async function launchTaskSuggestionTaskFromReaction({
       initiator: {
         kind: 'user',
         externalId: reactionEvent.user,
-        ...(reactingUserMapping.activeMapping?.userId
-          ? { matchedUserId: reactingUserMapping.activeMapping.userId }
-          : {}),
+        matchedUserId: reactingUserMapping.activeMapping.userId,
       },
       trigger: 'manual',
       channel: channelId,
