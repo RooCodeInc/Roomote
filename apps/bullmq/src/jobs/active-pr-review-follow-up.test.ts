@@ -109,7 +109,7 @@ describe('activePrReviewFollowUpJob', () => {
     );
   });
 
-  it('queues one hidden OpenCode follow-up behind the active turn', async () => {
+  it('sends a hidden follow-up that keeps the active task alive', async () => {
     mockFindFirstRun.mockResolvedValue({
       id: 100,
       taskId: 'task-100',
@@ -128,7 +128,6 @@ describe('activePrReviewFollowUpJob', () => {
       prompt: 'Review the latest live PR head.',
       source: 'github-pr-synchronize',
       clientMessageId: 'github-pr-synchronize:100:owner/repo:42',
-      queueOnly: true,
       visibleInTranscript: false,
     });
     expect(mockUpdateWhere).toHaveBeenCalledOnce();
