@@ -48,6 +48,9 @@ import type {
   TaskMessageMetadata,
   TaskMessagePayload,
   McpConnectionAuthConfig,
+  CustomMcpServerAuthType,
+  CustomMcpServerStdioConfig,
+  OAuthServerMetadata,
   SetupNewState,
   LinearPendingSelectionStep,
   AutomationScanCursor,
@@ -3303,6 +3306,68 @@ export const deploymentMcpEnablementsRelations = relations(
   ({ one }) => ({
     enabledByUser: one(users, {
       fields: [deploymentMcpEnablements.enabledByUserId],
+      references: [users.id],
+    }),
+  }),
+);
+
+/**
+ * customMcpServers
+ *
+ * Deployment-scoped custom MCP servers managed by admins in Settings.
+ *
+ * Remote servers are never handed to sandboxes directly: they are delivered as
+ * authenticated proxy URLs (`/api/mcp/custom/<id>`) and the API proxy injects
+ * credentials per request. `headers` values are individually encrypted by the
+ * command layer before persisting (admin_configured connection precedent), so
+ * header *names* can round-trip to the browser while values never do.
+ *
+ * OAuth connections for these servers live in `mcpConnections` under the
+ * `custom:<id>` mcpId namespace (see customMcpConnectionId in
+ * packages/types), reusing oauth_state and the encrypted token columns.
+ * Previous-release code ignores those rows because every curated query
+ * filters mcpId against the catalog id list.
+ *
+ * `url` is null for stdio servers and `stdio` is null for remote servers;
+ * the command layer enforces exactly one transport per row.
+ */
+export const customMcpServers = pgTable(
+  'custom_mcp_servers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: text('name').notNull(),
+    url: text('url'),
+    authType: text('auth_type')
+      .notNull()
+      .default('none')
+      .$type<CustomMcpServerAuthType>(),
+    headers: jsonb('headers').$type<Record<string, string>>(),
+    stdio: jsonb('stdio').$type<CustomMcpServerStdioConfig>(),
+    disabledTools: text('disabled_tools').array(),
+    manualClientId: text('manual_client_id'),
+    manualClientSecret: encryptedText('manual_client_secret'),
+    oauthServerMetadata: jsonb(
+      'oauth_server_metadata',
+    ).$type<OAuthServerMetadata>(),
+    oauthServerMetadataFetchedAt: timestamp('oauth_server_metadata_fetched_at'),
+    oauthResourceIndicatorDisabled: boolean('oauth_resource_indicator_disabled')
+      .notNull()
+      .default(false),
+    enabled: boolean('enabled').notNull().default(true),
+    createdByUserId: text('created_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [unique('custom_mcp_servers_name_unique').on(table.name)],
+);
+
+export const customMcpServersRelations = relations(
+  customMcpServers,
+  ({ one }) => ({
+    createdByUser: one(users, {
+      fields: [customMcpServers.createdByUserId],
       references: [users.id],
     }),
   }),
