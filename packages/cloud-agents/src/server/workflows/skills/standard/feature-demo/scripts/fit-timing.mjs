@@ -2,8 +2,8 @@
 // clips and produces the final pacing:
 //
 // 1. Trims the dead opening hold so the demo starts immediately.
-// 2. Speeds the voice-over slightly (pitch-preserving atempo) into a
-//    conversational pace band.
+// 2. Optionally retimes the voice-over (pitch-preserving atempo, off by
+//    default).
 // 3. Solves a video playback rate (<= 1) so every narration line finishes
 //    before the next visual beat: the voice leads each zoom instead of the
 //    video freezing at the end waiting for the audio.
@@ -44,13 +44,9 @@ const narration = existsSync(narrationPath)
   ? JSON.parse(readFileSync(narrationPath, 'utf8'))
   : { clips: [] };
 
-// v3 reads noticeably slower than a conversational pace and benefits from a
-// pitch-preserving speed-up; v2-family models pace naturally. An explicit
-// argv override wins either way.
-const defaultAtempo = (narration.modelId ?? '').startsWith('eleven_v3')
-  ? 1.12
-  : 1.0;
-const ATEMPO = Number(process.argv[2] || defaultAtempo);
+// The narration model paces naturally, so no speed-up by default; pass an
+// atempo argv (e.g. 1.1) to tighten a read that came back slow.
+const ATEMPO = Number(process.argv[2] || '1.0');
 
 // --- 1. Trim the dead opening (all times still in source-video seconds) ---
 

@@ -108,7 +108,6 @@ export const INSTANCE_SECRET_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
 export const MEDIA_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   'R_ELEVENLABS_API_KEY',
   'R_ELEVENLABS_VOICE_ID',
-  'R_ELEVENLABS_MODEL',
 ]);
 
 /**

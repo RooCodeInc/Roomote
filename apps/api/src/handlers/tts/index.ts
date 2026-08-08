@@ -34,11 +34,11 @@ const MAX_NARRATION_LINE_CHARS = 1_200;
 const MAX_NARRATION_REQUEST_BYTES = 64 * 1024;
 
 /**
- * v3 is the most natural read for voice clones; stability 1.0 ("robust")
- * anchors delivery to the reference audio, which prevents the accent drift
- * v3 exhibits at lower stability on instant clones.
+ * multilingual_v2 gives voice clones a natural, conversational read at a
+ * natural pace (the more "expressive" models lean announcer-voice on
+ * professional clones and read too slowly).
  */
-const DEFAULT_ELEVENLABS_MODEL = 'eleven_v3';
+const ELEVENLABS_MODEL_ID = 'eleven_multilingual_v2';
 const ELEVENLABS_TTS_TIMEOUT_MS = 60_000;
 
 async function readRequestBodyBytes(
@@ -111,7 +111,6 @@ function parseNarrationLines(body: NarrationBody): string[] | null {
 async function synthesizeLine(options: {
   apiKey: string;
   voiceId: string;
-  modelId: string;
   text: string;
 }): Promise<Buffer> {
   const response = await fetch(
@@ -126,10 +125,12 @@ async function synthesizeLine(options: {
       },
       body: JSON.stringify({
         text: options.text,
-        model_id: options.modelId,
-        voice_settings: options.modelId.startsWith('eleven_v3')
-          ? { stability: 1.0, similarity_boost: 0.75 }
-          : { stability: 0.5, similarity_boost: 0.75 },
+        model_id: ELEVENLABS_MODEL_ID,
+        voice_settings: {
+          stability: 0.35,
+          similarity_boost: 0.75,
+          style: 0.45,
+        },
       }),
       signal: AbortSignal.timeout(ELEVENLABS_TTS_TIMEOUT_MS),
     },
@@ -198,14 +199,13 @@ tts.post('/narration', async (c) => {
     );
   }
 
-  const modelId = Env.R_ELEVENLABS_MODEL || DEFAULT_ELEVENLABS_MODEL;
   const clips: { audioBase64: string }[] = [];
 
   // Sequential on purpose: ElevenLabs enforces per-key concurrency limits,
   // and a narration is a handful of short lines.
   for (const text of lines) {
     try {
-      const audio = await synthesizeLine({ apiKey, voiceId, modelId, text });
+      const audio = await synthesizeLine({ apiKey, voiceId, text });
 
       clips.push({ audioBase64: audio.toString('base64') });
     } catch (error) {
@@ -214,7 +214,5 @@ tts.post('/narration', async (c) => {
     }
   }
 
-  // The model id lets callers adapt post-processing (e.g. v3 reads slowly
-  // and benefits from a pitch-preserving speed-up; v2 paces naturally).
-  return c.json({ clips, modelId });
+  return c.json({ clips });
 });

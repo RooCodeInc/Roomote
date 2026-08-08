@@ -137,7 +137,6 @@ const serverSchema = {
   // feature is off and the endpoint 404s.
   R_ELEVENLABS_API_KEY: z.string().min(1).optional(),
   R_ELEVENLABS_VOICE_ID: z.string().min(1).optional(),
-  R_ELEVENLABS_MODEL: z.string().min(1).optional(),
   R_INTERCOM_APP_ID: z.string().min(1).optional(),
   R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
   R_POSTHOG_HOST: z.string().url().optional(),
@@ -458,7 +457,6 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS',
   'R_ELEVENLABS_API_KEY',
   'R_ELEVENLABS_VOICE_ID',
-  'R_ELEVENLABS_MODEL',
   'R_INTERCOM_APP_ID',
   'R_POSTHOG_PROJECT_KEY',
   'R_POSTHOG_HOST',

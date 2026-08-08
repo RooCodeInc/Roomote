@@ -64,7 +64,7 @@ const run = async () => {
     throw new Error(`TTS request failed with status ${response.status}`);
   }
 
-  const { clips, modelId } = await response.json();
+  const { clips } = await response.json();
 
   if (!Array.isArray(clips) || clips.length !== lines.length) {
     throw new Error('TTS response did not include one clip per line');
@@ -88,12 +88,9 @@ const run = async () => {
 
   writeFileSync(
     `${WORK_DIR}/narration.json`,
-    JSON.stringify({ clips: manifest, modelId: modelId ?? null }, null, 2),
+    JSON.stringify({ clips: manifest }, null, 2),
   );
-  console.log(
-    `narration: wrote ${manifest.length} clips to ${WORK_DIR}/vo` +
-      (modelId ? ` (model ${modelId})` : ''),
-  );
+  console.log(`narration: wrote ${manifest.length} clips to ${WORK_DIR}/vo`);
 };
 
 run().catch((e) => {

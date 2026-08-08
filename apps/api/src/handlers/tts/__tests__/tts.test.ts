@@ -7,7 +7,6 @@ const { mockEnv } = vi.hoisted(() => ({
   mockEnv: {
     R_ELEVENLABS_API_KEY: undefined as string | undefined,
     R_ELEVENLABS_VOICE_ID: undefined as string | undefined,
-    R_ELEVENLABS_MODEL: undefined as string | undefined,
   },
 }));
 
@@ -54,7 +53,6 @@ const originalFetch = globalThis.fetch;
 beforeEach(() => {
   mockEnv.R_ELEVENLABS_API_KEY = 'el-key';
   mockEnv.R_ELEVENLABS_VOICE_ID = 'voice-1';
-  mockEnv.R_ELEVENLABS_MODEL = undefined;
 });
 
 afterEach(() => {
@@ -169,9 +167,8 @@ describe('POST /tts/narration', () => {
       voice_settings: { stability: number };
     };
 
-    // v3 default anchors the clone's accent with "robust" stability.
-    expect(body.model_id).toBe('eleven_v3');
-    expect(body.voice_settings.stability).toBe(1.0);
+    expect(body.model_id).toBe('eleven_multilingual_v2');
+    expect(body.voice_settings.stability).toBe(0.35);
   });
 
   it('502s when the upstream synthesis fails', async () => {
