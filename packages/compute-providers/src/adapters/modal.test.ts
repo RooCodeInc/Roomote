@@ -991,6 +991,20 @@ describe('ModalClient', () => {
     expect(dockerfile).toContain('/opt/remotion/.installed');
   });
 
+  it('pre-installs the feature-demo render dependencies from the skill package.json', () => {
+    const dockerfile = fs.readFileSync(
+      new URL('../../../../apps/worker/Dockerfile', import.meta.url),
+      'utf8',
+    );
+
+    // Keyed off the skill's own pinned package.json so the baked node_modules
+    // cannot drift from what the render project expects.
+    expect(dockerfile).toContain(
+      'COPY packages/cloud-agents/src/server/workflows/skills/standard/feature-demo/render/package.json /opt/feature-demo/render/package.json',
+    );
+    expect(dockerfile).toContain('/opt/feature-demo/render/.installed');
+  });
+
   it('expects PM2 to be available in the worker runtime', () => {
     const dockerfile = fs.readFileSync(
       new URL('../../../../apps/worker/Dockerfile', import.meta.url),

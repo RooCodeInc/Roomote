@@ -138,6 +138,17 @@ describe('feature-demo skill', () => {
     expect(skillContent).toContain('npx remotion browser ensure');
   });
 
+  it('reuses the image-baked render dependencies instead of installing', () => {
+    // Fast path copies the baked node_modules; npm install is only the
+    // adapted-deps / old-snapshot fallback.
+    expect(skillContent).toContain(
+      'cp -R /opt/feature-demo/render/node_modules /tmp/feature-demo/render/node_modules',
+    );
+    expect(skillContent).toContain(
+      'only if you adapted the composition to add dependencies',
+    );
+  });
+
   it('delivers through manage_artifacts with canonical URLs only', () => {
     expect(skillContent).toContain('manage_artifacts');
     expect(skillContent).toContain('never invent URLs');

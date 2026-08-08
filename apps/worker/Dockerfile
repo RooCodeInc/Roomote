@@ -251,6 +251,19 @@ RUN sudo mkdir -p /opt/remotion \
   && cd / \
   && rm -rf "$REMOTION_TMP"
 
+# Pre-install the feature-demo render project's dependencies (Remotion +
+# React) so demos reuse them instead of running a multi-minute npm install on
+# every render. Keyed off the skill's own pinned package.json (the single
+# source of truth), so the baked modules cannot drift from what the render
+# project expects. The skill reuses /opt/feature-demo/render/node_modules and
+# falls back to npm install only when it is absent or an adapted composition
+# adds dependencies.
+COPY packages/cloud-agents/src/server/workflows/skills/standard/feature-demo/render/package.json /opt/feature-demo/render/package.json
+RUN sudo chown -R roomote:roomote /opt/feature-demo \
+  && cd /opt/feature-demo/render \
+  && npm install --no-audit --no-fund \
+  && printf '%s\n' "ready" > /opt/feature-demo/render/.installed
+
 RUN npm install --prefix /sandbox --no-save --no-package-lock \
     "node-pty@${NODE_PTY_VERSION}" \
     "opencode-ai@${OPENCODE_CLI_VERSION}" \
