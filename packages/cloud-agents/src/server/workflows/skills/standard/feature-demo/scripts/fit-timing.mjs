@@ -4,9 +4,10 @@
 // 1. Trims the dead opening hold so the demo starts immediately.
 // 2. Optionally retimes the voice-over (pitch-preserving atempo, off by
 //    default).
-// 3. Solves a video playback rate (<= 1) so every narration line finishes
-//    before the next visual beat: the voice leads each zoom instead of the
-//    video freezing at the end waiting for the audio.
+// 3. Solves a video playback rate (<= 1) so every narration line STARTS
+//    just before its zoom lands and then plays over the zoom's hold — the
+//    voice leads each beat, and no line is pushed past its anchor by an
+//    earlier line still speaking.
 // 4. Rewrites caption windows to match the spoken lines.
 //
 // Captions-only mode (no narration.json clips) still gets the opening trim.
@@ -120,21 +121,46 @@ for (let i = 0; i < narration.clips.length; i++) {
 // --- 3. solve the playback rate so the voice leads every beat ---
 
 // Beat anchors are the (trimmed) caption starts in source-video seconds; the
-// first line is anchored to the video open instead of its beat.
+// first line is anchored to the video open instead of its beat. A line is
+// meant to START at its anchor (just before the zoom lands) and play over
+// the zoom's hold; the schedule fails only when a line cannot start on time
+// because an earlier line is still speaking.
+//
+// Solved by simulation rather than closed form: a line that waits for a
+// late anchor ends later than any cumulative-duration estimate, so the only
+// reliable check is to lay the schedule out at a candidate rate and look
+// for a line pushed past its anchor.
 const beats = timeline.captions.map((c) => c.start);
-let rate = 1;
 
-for (let i = 1; i < beats.length && i < durations.length; i++) {
-  let needed = FIRST_LINE_AT;
-  for (let j = 0; j < i; j++) {
-    needed += durations[j] + LINE_GAP;
+function scheduleAt(candidateRate) {
+  let prevEnd = 0;
+  const lineStarts = [];
+  let pushedPastAnchor = false;
+
+  for (let i = 0; i < durations.length; i++) {
+    // A line without a matching caption beat just runs sequentially.
+    const anchor =
+      i === 0
+        ? FIRST_LINE_AT
+        : beats[i] !== undefined
+          ? beats[i] / candidateRate - BEAT_LEAD
+          : prevEnd + LINE_GAP;
+    const start = Math.max(i === 0 ? 0 : prevEnd + LINE_GAP, anchor);
+    if (start > anchor + 0.01) {
+      pushedPastAnchor = true;
+    }
+    lineStarts.push(Math.round(start * 100) / 100);
+    prevEnd = start + durations[i];
   }
-  // Need beats[i]/rate - BEAT_LEAD >= needed  =>  rate <= beats[i]/(needed+LEAD)
-  const maxRate = beats[i] / (needed + BEAT_LEAD);
-  rate = Math.min(rate, maxRate);
+
+  return { lineStarts, pushedPastAnchor };
 }
 
-rate = Math.max(MIN_RATE, Math.min(1, Math.round(rate * 100) / 100));
+let rate = 1;
+while (rate > MIN_RATE && scheduleAt(rate).pushedPastAnchor) {
+  rate = Math.round((rate - 0.01) * 100) / 100;
+}
+rate = Math.max(MIN_RATE, rate);
 
 if (rate !== 1) {
   const stretch = 1 / rate;
@@ -158,16 +184,7 @@ timeline.video.playbackRate = rate;
 
 // --- 4. schedule lines (voice leads each beat) + matching captions ---
 
-let prevEnd = 0;
-const starts = [];
-
-for (let i = 0; i < durations.length; i++) {
-  const beatAt = i === 0 ? FIRST_LINE_AT : beats[i] / rate - BEAT_LEAD;
-  const start =
-    Math.round(Math.max(i === 0 ? 0 : prevEnd + LINE_GAP, beatAt) * 100) / 100;
-  starts.push(start);
-  prevEnd = start + durations[i];
-}
+const { lineStarts: starts } = scheduleAt(rate);
 
 for (let i = 0; i < durations.length; i++) {
   narration.clips[i].startSeconds = starts[i];

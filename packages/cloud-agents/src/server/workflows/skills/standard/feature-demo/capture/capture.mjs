@@ -49,9 +49,17 @@ let t0 = 0;
 const now = () => (Date.now() - t0) / 1000; // seconds since record start
 
 function rect(sel) {
-  const js = `(function(){var e=document.querySelector(${JSON.stringify(
-    sel,
-  )});if(!e)return null;var r=e.getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,h:r.height};})()`;
+  // The selector travels into the page-eval as base64 so no selector bytes
+  // are ever interpolated into code; the alphabet check makes that a hard
+  // guarantee rather than an encoding assumption.
+  const selB64 = Buffer.from(String(sel), 'utf8').toString('base64');
+  if (!/^[A-Za-z0-9+/=]*$/.test(selB64)) {
+    throw new Error(`unencodable selector: ${sel}`);
+  }
+  const js =
+    `(function(){var e=document.querySelector(atob("${selB64}"));` +
+    `if(!e)return null;var r=e.getBoundingClientRect();` +
+    `return{x:r.x,y:r.y,w:r.width,h:r.height};})()`;
   const out = ab('eval', js).trim();
   const r = JSON.parse(out);
   if (!r) throw new Error(`element not found: ${sel}`);
@@ -75,8 +83,18 @@ const timeline = {
 };
 
 let cur = { scale: 1, focal: { x: 0.5, y: 0.5 } };
+// Track the cursor so motion can be bracketed by a hold key: the renderer
+// eases between consecutive keys, so without a hold at motion start the
+// synthetic cursor would drift toward the next target through every wait,
+// hold, and scroll in between while the real mouse is stationary.
+let curCursor = { x: 0.5, y: 1.1 };
 const pushScale = (t, v) => timeline.scaleKeys.push({ t, v });
 const pushFocal = (t, v) => timeline.focalKeys.push({ t, v });
+const pushCursorMove = (startT, endT, target) => {
+  timeline.cursorKeys.push({ t: startT, v: curCursor });
+  timeline.cursorKeys.push({ t: endT, v: target });
+  curCursor = target;
+};
 
 async function run() {
   mkdirSync(OUT_DIR, { recursive: true });
@@ -113,7 +131,7 @@ async function run() {
       const end = now();
       pushScale(end, beat.scale ?? 1.5);
       pushFocal(end, c);
-      timeline.cursorKeys.push({ t: end, v: c });
+      pushCursorMove(start, end, c);
       if (beat.caption) {
         timeline.captions.push({
           start: start + 0.15,
@@ -130,7 +148,11 @@ async function run() {
       const c = centerNorm(rect(beat.sel));
       const t = now();
       timeline.clicks.push({ t, at: c });
-      timeline.cursorKeys.push({ t, v: c });
+      // Usually the cursor is already here from a preceding focus; when it
+      // is not, give it a short bracketed hop instead of a slow drift.
+      if (curCursor.x !== c.x || curCursor.y !== c.y) {
+        pushCursorMove(Math.max(0, t - 0.25), t, c);
+      }
       ab('click', beat.sel);
       sleep(beat.holdMs ?? 300);
       continue;
