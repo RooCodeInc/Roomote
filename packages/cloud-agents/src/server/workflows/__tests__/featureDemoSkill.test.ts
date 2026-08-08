@@ -51,12 +51,13 @@ describe('feature-demo skill', () => {
       "Treat the advisor's plan as internal guidance, not finished work",
     );
     // Repository-backed surfaces verify against source; external public
-    // pages have no local source, so selectors are validated through a
-    // read-only proof-runner pre-flight instead.
+    // pages have no local source and no separate browser pre-flight (the
+    // proof-runner takes one brief per task), so they rely on capture's own
+    // loud per-selector failure within the allowed retry.
     expect(skillContent).toContain('Repository-backed surface');
     expect(skillContent).toContain('External public page named by the user');
     expect(skillContent).toContain(
-      'delegate a lightweight resolve-only brief to the `proof-runner`',
+      'the runner resolves every selector live and fails loudly naming any that do not resolve',
     );
   });
 
