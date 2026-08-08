@@ -33,7 +33,7 @@ describe('createProofRunnerAgentPrompt', () => {
     );
 
     expect(prompt).toContain(
-      'the feature-demo capture runner at `/tmp/feature-demo/capture.mjs`',
+      'the feature-demo capture runner staged by the parent at `/tmp/feature-demo/capture.mjs`',
     );
     expect(prompt).toContain(
       'running it via `node` with the environment variables the brief specifies is compliant browser work',
