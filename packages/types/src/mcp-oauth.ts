@@ -672,6 +672,26 @@ export function isNativeMcpIntegration(
   return integration?.serverMode === 'native';
 }
 
+/**
+ * Credential-only integrations store admin-configured credentials for
+ * control-plane features and expose no MCP tools to agents, so they get no
+ * proxy route and are never delivered to task sandboxes.
+ */
+export function isCredentialOnlyMcpIntegration(
+  integrationOrId: McpIntegration | string | undefined,
+): boolean {
+  if (!integrationOrId) {
+    return false;
+  }
+
+  const integration =
+    typeof integrationOrId === 'string'
+      ? getMcpIntegration(integrationOrId)
+      : integrationOrId;
+
+  return integration?.serverMode === 'credential_only';
+}
+
 export function getMcpIntegrationUpstreamUrl(
   integrationOrId: McpIntegration | string | undefined,
 ): string | null {
