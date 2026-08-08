@@ -33,9 +33,11 @@ regenerate from scratch.
 
 ## Keep definitions in source control
 
-Self-hosted deployments can check environment definitions into git alongside
-their deployment configuration. This gives environment changes the same review
-and rollback workflow as application infrastructure.
+Environment definitions are plain YAML, so any team can store them in a git
+repository and review changes through pull requests. On Roomote Cloud, apply a
+reviewed change by pasting the file into the environment editor's **YAML** view.
+Applying the change is manual: Roomote Cloud does not read or sync environment
+files from your repository.
 
 A typical repository layout is:
 
@@ -47,8 +49,11 @@ A typical repository layout is:
 docker-compose.override.yml
 ```
 
-To apply the checked-in files, mount the directory read-only into the Roomote
-API container and point `ROOMOTE_ENVIRONMENTS_DIR` at the mounted path:
+### Self-hosted only: automatic file-based reconciliation
+
+Self-hosted deployments can apply checked-in files automatically at API
+startup. Mount the directory read-only into the Roomote API container and point
+`ROOMOTE_ENVIRONMENTS_DIR` at the mounted path:
 
 ```yaml
 services:
@@ -83,10 +88,11 @@ After deployment, open **Settings > Environments** and confirm that each
 environment has the **Managed from file** badge. API startup logs also report
 which definitions were created, updated, unchanged, or skipped.
 
-Roomote does not clone or poll a separate configuration repository. The
-deployment must check out the files and mount them, or supply their contents
-through `ROOMOTE_ENVIRONMENTS_YAML`. See [Environments](/environments#provision-environments-declaratively)
-for reconciliation behavior and [Self-hosting](/self-hosting) for deployment
+The startup provisioning mechanism does not clone or poll a separate
+configuration repository. A self-hosted deployment must check out the files and
+mount them, or supply their contents through `ROOMOTE_ENVIRONMENTS_YAML`. See
+[Environments](/environments#provision-environments-declaratively) for
+reconciliation behavior and [Self-hosting](/self-hosting) for deployment
 options.
 
 ## Relationship to Dev Containers
