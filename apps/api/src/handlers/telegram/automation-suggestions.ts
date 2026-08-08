@@ -172,7 +172,7 @@ async function postToStickyOrNewTopic(params: {
  * Telegram counterpart of the scheduled-automation Slack summaries
  * (suggester, Sentry triage, Dependabot triage, security/code-quality
  * auditors, CI failure triage). Posts one message to the captured primary
- * chat orconfigured Telegram destination.
+ * chat or configured Telegram destination.
  *
  * Suggest Ideas reuses a sticky "Suggest Ideas" forum topic (create once,
  * recreate on failure). Other automations still open a one-shot "Suggested
