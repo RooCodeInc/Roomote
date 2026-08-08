@@ -149,6 +149,18 @@ If you want to start tasks by direct message, make sure the app can receive DMs.
 Enable the app surfaces needed for messages to the bot, then keep the
 `message.im` event subscription enabled.
 
+### Audio attachments
+
+Roomote transcribes the first audio attachment in a Slack message and includes
+the transcript in the task prompt. Audio must be no larger than 20 MiB and use
+AAC, FLAC, MP4, MPEG, OGG, WAV, or WebM. The deployment also needs at least one
+configured model that supports audio input.
+
+If a message contains multiple audio attachments, Roomote transcribes only the
+first and adds a warning to the task prompt. It also adds a warning when the
+audio format is unsupported, the file is too large, no configured model can
+transcribe it, or transcription fails.
+
 ## Local URL changes
 
 Keep the public URL stable. When it changes, update the Slack app's redirect
