@@ -1,6 +1,6 @@
 ---
 title: Record feature demo videos
-description: Ask Roomote for a polished, narrated demo video of a feature — recorded live, with zooms, captions, and an optional voice-over.
+description: Ask Roomote for a polished, narrated demo video of a feature, recorded live with zooms, captions, and an optional voice-over.
 contributor: Matt Rubens
 contributor_url: https://github.com/mrubens
 contributor_company: Roomote
@@ -22,7 +22,7 @@ narration configured, the demo gets a voice-over that leads each visual beat.
 
 ## Ingredients
 
-- Any task where the feature is reachable — a running dev environment or a
+- Any task where the feature is reachable: a running dev environment or a
   public page
 - Optional: an [ElevenLabs](https://elevenlabs.io) API key and voice ID for
   narration
@@ -41,9 +41,9 @@ narration configured, the demo gets a voice-over that leads each visual beat.
 Captioned demos work out of the box. For a voice-over in your own (cloned)
 voice, a deployment admin sets two environment variables:
 
-- `R_ELEVENLABS_API_KEY` — an ElevenLabs key. A key scoped to
+- `R_ELEVENLABS_API_KEY`: an ElevenLabs key. A key scoped to
   **text-to-speech only**, with a credit cap, is sufficient and recommended.
-- `R_ELEVENLABS_VOICE_ID` — the voice to narrate with.
+- `R_ELEVENLABS_VOICE_ID`: the voice to narrate with.
 
 The key stays on the Roomote control plane: task sandboxes send narration
 text to an authenticated Roomote endpoint and receive audio back, so the
