@@ -37,8 +37,16 @@ const VIEWPORT = script.viewport || { w: 1280, h: 800 };
 // wide between every zoom reads as jumpy. The final reset goes fully wide.
 const GLIDE_SCALE = 1.18;
 
+// Record headed by default. GPU-backed canvases (games, 3D, WebGL/WebGPU)
+// never present to the headless compositor, which starves the screencast and
+// collapses a long interaction into a sub-second clip — agent-browser's own
+// docs prescribe `--headed` for exactly this, and on displayless Linux it
+// auto-starts a private Xvfb (present in the worker image). Harmless on
+// ordinary pages. Set HEADED=0 to force headless.
+const HEADED = process.env.HEADED !== '0';
+
 const ab = (...args) =>
-  execFileSync(AB, args, {
+  execFileSync(AB, HEADED ? ['--headed', ...args] : args, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });

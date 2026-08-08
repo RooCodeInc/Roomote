@@ -91,6 +91,20 @@ describe('feature-demo skill', () => {
     );
   });
 
+  it('records headed so GPU-backed canvases do not stall the screencast', () => {
+    const captureRunner = fs.readFileSync(
+      path.join(skillDirPath, 'capture/capture.mjs'),
+      'utf8',
+    );
+
+    // Default headed with an explicit opt-out; the flag rides every command.
+    expect(captureRunner).toContain(
+      "const HEADED = process.env.HEADED !== '0'",
+    );
+    expect(captureRunner).toContain("HEADED ? ['--headed', ...args] : args");
+    expect(skillContent).toContain('records headed by default');
+  });
+
   it('frames the render project as an adaptable reference template', () => {
     expect(skillContent).toContain('**reference template**');
     expect(skillContent).toContain('npx -y skills add remotion-dev/skills');
