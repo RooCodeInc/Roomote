@@ -431,6 +431,7 @@ describe('taskRunsRouter queue message guards', () => {
       taskId: 'task-1',
       prRepo: null,
       prNumber: null,
+      linkedPrs: [],
       channelId: 'C123',
       threadTs: '1710000000.123',
     });
