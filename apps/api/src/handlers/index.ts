@@ -26,6 +26,9 @@ export { mcpRouting } from './mcp/routing';
 // inference gateway
 export { inference } from './inference';
 
+// narration tts
+export { tts } from './tts';
+
 // task runs
 export { taskRunsRouter } from './task-runs';
 

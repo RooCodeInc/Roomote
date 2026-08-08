@@ -10,7 +10,7 @@ import type { StartupLogger } from '../../logging';
 import { isCommandAvailable } from './command-availability';
 import { withAptLock } from './package-manager';
 
-const AGENT_BROWSER_VERSION = '0.27.0';
+const AGENT_BROWSER_VERSION = '0.33.2';
 
 const AGENT_BROWSER_INSTALL_ROOT = '/opt/agent-browser';
 

@@ -38,6 +38,10 @@ const state = vi.hoisted(() => ({
   granolaConnection: null as null | {
     authStatus?: string | null;
   },
+  elevenLabsConnection: null as null | {
+    authStatus?: string | null;
+    voiceId?: string;
+  },
   grafanaConnection: null as null | {
     authStatus?: string | null;
     baseUrl: string;
@@ -95,6 +99,7 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     setDisabledTools: vi.fn(),
     saveAsanaConnection: vi.fn(),
     saveGranolaConnection: vi.fn(),
+    saveElevenLabsConnection: vi.fn(),
     saveGrafanaConnection: vi.fn(),
     saveSnowflakeConnection: vi.fn(),
     saveVercelConnection: vi.fn(),
@@ -252,6 +257,14 @@ vi.mock('@/hooks/mcp-connections', () => ({
   }),
   useGranolaConnection: () => ({
     data: state.granolaConnection,
+    isPending: false,
+  }),
+  useSaveElevenLabsConnection: () => ({
+    isPending: false,
+    mutate: mutations.saveElevenLabsConnection,
+  }),
+  useElevenLabsConnection: () => ({
+    data: state.elevenLabsConnection,
     isPending: false,
   }),
   useSaveGrafanaConnection: () => ({
@@ -821,6 +834,7 @@ describe('Integrations settings', () => {
       'Asana',
       'Better Stack',
       'Braintrust',
+      'ElevenLabs',
       'Grafana',
       'Granola',
       'Jira',

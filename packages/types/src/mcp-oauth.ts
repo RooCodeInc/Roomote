@@ -134,6 +134,21 @@ export interface McpConnectionGranolaConfig {
 }
 
 /**
+ * Deployment-scoped ElevenLabs connection config stored in
+ * mcpConnections.authConfig.
+ *
+ * Credential-only: consumed by the control-plane narration TTS endpoint
+ * (/api/tts) and deliberately excluded from agent MCP config delivery — the
+ * key never reaches a task sandbox. The API key is expected to be encrypted
+ * before persistence; the voice id is plain configuration.
+ */
+export interface McpConnectionElevenLabsConfig {
+  type: 'elevenlabs';
+  encryptedApiKey: string;
+  voiceId: string;
+}
+
+/**
  * Organization-scoped Vercel connection config stored in mcpConnections.authConfig.
  *
  * The bearer token is expected to be encrypted before persistence.
@@ -168,6 +183,7 @@ export type McpConnectionAuthConfig =
   | McpConnectionSnowflakeConfig
   | McpConnectionAsanaConfig
   | McpConnectionGranolaConfig
+  | McpConnectionElevenLabsConfig
   | McpConnectionVercelConfig
   | McpConnectionGrafanaConfig
   | Record<string, never>;
@@ -244,7 +260,18 @@ export type LinkedAccountSetup = {
 
 export type McpIntegrationOauthScopeMode = 'all' | 'read-only';
 export type McpIntegrationConnectionMode = 'oauth' | 'admin_configured';
-export type McpIntegrationServerMode = 'upstream_proxy' | 'native';
+/**
+ * - `upstream_proxy`: tools come from a remote MCP server reached through the
+ *   Roomote proxy.
+ * - `native`: tools come from a Roomote-implemented MCP handler.
+ * - `credential_only`: the integration stores admin-configured credentials
+ *   consumed by control-plane features; it exposes no MCP tools to agents
+ *   and is never delivered to task sandboxes.
+ */
+export type McpIntegrationServerMode =
+  | 'upstream_proxy'
+  | 'native'
+  | 'credential_only';
 
 export type McpIntegrationOAuthClientEnv = {
   clientIdEnv: string;
@@ -502,6 +529,15 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
       'Use Granola to browse and read meeting notes, transcripts, folders, decisions, and action items through the deployment API key. The built-in tools are read-only.',
   },
   {
+    id: 'elevenlabs',
+    name: 'ElevenLabs',
+    description: `Connect ElevenLabs so ${PRODUCT_NAME} can narrate feature-demo videos with your voice. The API key stays on the control plane; agents get no ElevenLabs tools and the key never enters a task sandbox`,
+    icon: 'elevenlabs',
+    connectionScope: 'deployment',
+    connectionMode: 'admin_configured',
+    serverMode: 'credential_only',
+  },
+  {
     id: 'supermemory',
     name: 'Supermemory',
     url: 'https://mcp.supermemory.ai/mcp',
@@ -634,6 +670,26 @@ export function isNativeMcpIntegration(
       : integrationOrId;
 
   return integration?.serverMode === 'native';
+}
+
+/**
+ * Credential-only integrations store admin-configured credentials for
+ * control-plane features and expose no MCP tools to agents, so they get no
+ * proxy route and are never delivered to task sandboxes.
+ */
+export function isCredentialOnlyMcpIntegration(
+  integrationOrId: McpIntegration | string | undefined,
+): boolean {
+  if (!integrationOrId) {
+    return false;
+  }
+
+  const integration =
+    typeof integrationOrId === 'string'
+      ? getMcpIntegration(integrationOrId)
+      : integrationOrId;
+
+  return integration?.serverMode === 'credential_only';
 }
 
 export function getMcpIntegrationUpstreamUrl(
@@ -819,6 +875,21 @@ export function isMcpConnectionGranolaConfig(
     authConfig.type === 'granola' &&
     'encryptedApiKey' in authConfig &&
     typeof authConfig.encryptedApiKey === 'string',
+  );
+}
+
+export function isMcpConnectionElevenLabsConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionElevenLabsConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'elevenlabs' &&
+    'encryptedApiKey' in authConfig &&
+    typeof authConfig.encryptedApiKey === 'string' &&
+    'voiceId' in authConfig &&
+    typeof authConfig.voiceId === 'string',
   );
 }
 

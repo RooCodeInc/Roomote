@@ -236,6 +236,24 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     policy: 'task-token',
   },
 
+  // Narration text-to-speech for task sandboxes: the ElevenLabs key is
+  // injected server-side and never enters the sandbox. The client-keyed
+  // limit is a global ceiling (server-to-server callers share one bucket)
+  // sized far above legitimate use — a demo narrates a handful of lines
+  // once — to blunt credit-drain from a leaked run token.
+  {
+    name: 'tts',
+    match: { type: 'prefix', path: '/api/tts' },
+    policy: 'task-token',
+    rateLimits: [
+      {
+        keySource: 'client',
+        limit: 60,
+        windowSeconds: 60,
+      },
+    ],
+  },
+
   // Router-facing MCP endpoints: accept user auth tokens (LLM router
   // gathering context before a run exists) and task run tokens.
   {

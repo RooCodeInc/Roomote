@@ -4,8 +4,16 @@ export const ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME = 'proof-runner';
  * Builds the hidden proof-runner subagent prompt. The browser target is baked
  * in at config-generation time so the runner never depends on a staged
  * runtime handoff file for its capture configuration.
+ *
+ * `featureDemoCaptureRunnerSha256` is the digest of the activated
+ * feature-demo capture runner. The runner's staging path (/tmp) is writable
+ * by any parent flow, so the sanction binds to verified content, not the
+ * pathname; without a digest the sanction is omitted entirely.
  */
-export function createProofRunnerAgentPrompt(browserTarget: string): string {
+export function createProofRunnerAgentPrompt(
+  browserTarget: string,
+  featureDemoCaptureRunnerSha256?: string,
+): string {
   return [
     'You are the single delegated proof runner for this task.',
     '',
@@ -27,6 +35,17 @@ export function createProofRunnerAgentPrompt(browserTarget: string): string {
     '- Before the first browser command, explicitly load the `agent-browser` skill or CLI-served guidance exactly once. If the OpenCode Skill tool is available, invoke the `agent-browser` skill. If it is not available, run `agent-browser skills get core --full` in the shell and treat that output as the browser usage guide.',
     '- `agent-browser` is a command-line executable, not an OpenCode tool or MCP tool. Invoke it with shell commands such as `agent-browser get url`; do not look for an internal tool named `agent-browser`.',
     '- `agent-browser` is the only allowed browser automation CLI. Do not use Playwright, browser DevTools, curl-only screenshot substitutes, or any other browser automation path.',
+    ...(featureDemoCaptureRunnerSha256
+      ? [
+          '- One sanctioned exception: the feature-demo capture runner staged by the parent at `/tmp/feature-demo/capture.mjs`. It is an `agent-browser` orchestrator — every browser action it performs goes through the `agent-browser` CLI — so running it (with the environment variables the brief specifies) is compliant browser work, not a disallowed automation path. The staging path is in shared, parent-writable `/tmp`, so a separate hash step then a `node <path>` step would leave the file swappable in between. Close that window by reading the file exactly once and executing the same bytes you hashed — run precisely this command (it hashes the loaded bytes and, only on an exact match, executes those same bytes, never re-opening the file):',
+          '',
+          '  ```',
+          `  SCRIPT=/tmp/feature-demo/demo-script.json OUT_DIR=/tmp/feature-demo/work node --input-type=module -e 'import{readFileSync}from"node:fs";import{createHash}from"node:crypto";const b=readFileSync("/tmp/feature-demo/capture.mjs");if(createHash("sha256").update(b).digest("hex")!=="${featureDemoCaptureRunnerSha256}"){console.error("capture runner integrity mismatch");process.exit(1)}await import("data:text/javascript;base64,"+b.toString("base64"))'`,
+          '  ```',
+          '',
+          '  On the `capture runner integrity mismatch` exit, or if the file is missing, report blocked with blocker type `capture runner integrity mismatch` and do not run any other command in its place. Adjust only the `SCRIPT`/`OUT_DIR` values per the brief; never change the read-hash-execute body, and never fall back to `node /tmp/feature-demo/capture.mjs`. This exception covers exactly this verified-execution command and no other script.',
+        ]
+      : []),
     '- If the `agent-browser` skill/guidance cannot be loaded, or if the `agent-browser` executable is unavailable, report blocked with blocker type `proof runtime unavailable` and describe the missing skill guidance or CLI explicitly.',
     '- Treat the browser target above as the primary proof surface. Preserve its hostname exactly; do not rewrite `localhost` to `127.0.0.1` or the reverse, and do not substitute another surface.',
     '- Before deep diagnostics, inspect the live state with `agent-browser get url`, `agent-browser get title`, or `agent-browser snapshot -i`.',

@@ -37,6 +37,7 @@ describe('buildDockerWorkerResourceArgs', () => {
         logMaxFiles: 3,
       }),
     ).toEqual([
+      '--init',
       '--cpus',
       '2',
       '--memory',
@@ -58,6 +59,18 @@ describe('buildDockerWorkerResourceArgs', () => {
       '--cap-drop',
       'NET_RAW',
     ]);
+  });
+
+  it('runs an init process to reap orphaned browser child processes', () => {
+    expect(
+      buildDockerWorkerResourceArgs({
+        cpuLimit: 2,
+        memoryLimit: '4g',
+        pidsLimit: 512,
+        logMaxSize: '10m',
+        logMaxFiles: 3,
+      }),
+    ).toContain('--init');
   });
 
   it('omits the storage option when the driver cannot enforce a disk limit', () => {
@@ -85,6 +98,7 @@ describe('buildDockerTaskDaemonResourceArgs', () => {
     });
 
     expect(args).toContain('--pids-limit');
+    expect(args).toContain('--init');
     expect(args).toEqual(
       expect.arrayContaining(['--memory', '8g', '--memory-swap', '8g']),
     );

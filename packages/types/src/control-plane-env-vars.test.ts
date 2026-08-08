@@ -27,6 +27,8 @@ describe('CONTROL_PLANE_ENV_VAR_NAMES', () => {
       'DATABASE_URL',
       'S3_SECRET_ACCESS_KEY',
       'R_LICENSE_KEY',
+      'R_ELEVENLABS_API_KEY',
+      'R_ELEVENLABS_VOICE_ID',
     ]) {
       expect(CONTROL_PLANE_ENV_VAR_NAMES.has(name)).toBe(true);
     }
