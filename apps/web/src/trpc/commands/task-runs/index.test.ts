@@ -23,6 +23,13 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   routeTask: vi.fn(),
 }));
 
+// Short-circuit the sdk server import chain: the command module only needs
+// the cancel-teardown helper from it, and loading the real package would pull
+// schema tables into this file's hand-rolled @roomote/db/server mock.
+vi.mock('@roomote/sdk/server', () => ({
+  destroyCanceledTaskRunSandbox: vi.fn(() => Promise.resolve('skipped')),
+}));
+
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...conditions: unknown[]) => ({ type: 'and', conditions })),
   db: {
