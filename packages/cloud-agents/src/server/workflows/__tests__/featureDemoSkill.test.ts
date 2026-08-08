@@ -126,7 +126,11 @@ describe('feature-demo skill', () => {
 
   it('frames the render project as an adaptable reference template', () => {
     expect(skillContent).toContain('**reference template**');
-    expect(skillContent).toContain('npx -y skills add remotion-dev/skills');
+    // Pin to the three skills relevant to editing a composition, not the
+    // full bundle.
+    expect(skillContent).toContain(
+      'npx -y skills add remotion-dev/skills --skill remotion-markup --skill remotion-render --skill remotion-docs --yes',
+    );
     expect(skillContent).toContain(
       'The timeline JSON schema is the stable contract',
     );
