@@ -131,6 +131,13 @@ const serverSchema = {
   // private networks; a CIDR list rather than a boolean so opening one
   // internal host does not re-expose every adjacent service.
   R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS: z.string().min(1).optional(),
+  // ElevenLabs credentials for the narration TTS endpoint. The key stays on
+  // the control plane; task sandboxes reach TTS only through /api/tts with
+  // their run-scoped token (see apps/api/src/handlers/tts). Unset means the
+  // feature is off and the endpoint 404s.
+  R_ELEVENLABS_API_KEY: z.string().min(1).optional(),
+  R_ELEVENLABS_VOICE_ID: z.string().min(1).optional(),
+  R_ELEVENLABS_MODEL: z.string().min(1).optional(),
   R_INTERCOM_APP_ID: z.string().min(1).optional(),
   R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
   R_POSTHOG_HOST: z.string().url().optional(),
@@ -449,6 +456,9 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_INSTANCE_ID',
   'STATUSPAGE_INCIDENTS_ENABLED_INSTANCE_ID',
   'R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS',
+  'R_ELEVENLABS_API_KEY',
+  'R_ELEVENLABS_VOICE_ID',
+  'R_ELEVENLABS_MODEL',
   'R_INTERCOM_APP_ID',
   'R_POSTHOG_PROJECT_KEY',
   'R_POSTHOG_HOST',

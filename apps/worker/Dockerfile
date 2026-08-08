@@ -17,6 +17,10 @@ ARG FFPROBE_INSTALLER_VERSION=2.1.2
 ARG GH_VERSION=2.81.0
 ARG NODE_PTY_VERSION=1.1.0
 ARG PM2_VERSION=7.0.1
+# Remotion mirrors chrome-headless-shell builds for both linux64 and
+# linux-arm64; the bundled agent-browser Chrome cannot render Remotion
+# compositions (Chrome 143 removed old-headless).
+ARG REMOTION_VERSION=4.0.507
 
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -122,6 +126,7 @@ ENV PATH=/home/roomote/.local/bin:/opt/mise/shims:${PATH}
 ENV AGENT_BROWSER_EXECUTABLE_PATH="/opt/agent-browser/chrome"
 ENV FFMPEG_EXECUTABLE_PATH="/opt/ffmpeg/bin/ffmpeg"
 ENV FFPROBE_EXECUTABLE_PATH="/opt/ffmpeg/bin/ffprobe"
+ENV REMOTION_HEADLESS_SHELL_PATH="/opt/remotion/headless-shell"
 ENV ROOMOTE_BAKED_OPENCODE_CLI_VERSION=${OPENCODE_CLI_VERSION}
 
 COPY .docker/sandbox/install-browser-agent.sh /tmp/install-browser-agent.sh
@@ -219,6 +224,33 @@ RUN sudo mkdir -p /opt/ffmpeg/bin \
   && ln -sf "${FFMPEG_EXECUTABLE_PATH}" "$HOME/.local/bin/ffmpeg" \
   && ln -sf "${FFPROBE_EXECUTABLE_PATH}" "$HOME/.local/bin/ffprobe" \
   && printf '%s\n' "${FFMPEG_INSTALLER_VERSION}+${FFPROBE_INSTALLER_VERSION}" > /opt/ffmpeg/.installed
+
+# Bake Remotion's chrome-headless-shell at a fixed path so renders never
+# download a browser at runtime. `npx remotion browser ensure` fetches the
+# matching linux64/linux-arm64 build into node_modules/.remotion; copy that
+# tree to /opt/remotion and expose a stable arch-independent symlink at
+# ${REMOTION_HEADLESS_SHELL_PATH} so consumers need no arch logic.
+RUN sudo mkdir -p /opt/remotion \
+  && sudo chown -R roomote:roomote /opt/remotion \
+  && REMOTION_TMP="$(mktemp -d)" \
+  && cd "$REMOTION_TMP" \
+  && printf '%s\n' '{ "name": "remotion-browser-seed", "private": true }' > package.json \
+  && npm install --no-save --no-package-lock \
+    "@remotion/cli@${REMOTION_VERSION}" \
+    "remotion@${REMOTION_VERSION}" \
+  && npx remotion browser ensure \
+  && cp -R node_modules/.remotion/chrome-headless-shell /opt/remotion/chrome-headless-shell \
+  && case "$(uname -m)" in \
+    aarch64) REMOTION_PLATFORM="linux-arm64" ;; \
+    x86_64) REMOTION_PLATFORM="linux64" ;; \
+    *) echo "Unsupported architecture for Remotion headless shell: $(uname -m)" >&2; exit 1 ;; \
+  esac \
+  && REMOTION_SHELL="/opt/remotion/chrome-headless-shell/${REMOTION_PLATFORM}/chrome-headless-shell-${REMOTION_PLATFORM}/headless_shell" \
+  && test -x "$REMOTION_SHELL" \
+  && ln -sf "$REMOTION_SHELL" "${REMOTION_HEADLESS_SHELL_PATH}" \
+  && printf '%s\n' "${REMOTION_VERSION}" > /opt/remotion/.installed \
+  && cd / \
+  && rm -rf "$REMOTION_TMP"
 
 RUN npm install --prefix /sandbox --no-save --no-package-lock \
     "node-pty@${NODE_PTY_VERSION}" \

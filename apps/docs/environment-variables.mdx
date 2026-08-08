@@ -340,6 +340,9 @@ as per-task auth tokens or workspace paths.
 | `R_MICROSOFT_CLIENT_SECRET`    | Microsoft sign-in | Microsoft OAuth client secret.                                                   |
 | `R_MICROSOFT_TENANT_ID`        | Microsoft sign-in | Microsoft tenant ID. Also accepted as the Azure DevOps tenant ID fallback.       |
 | `R_ALLOWED_EMAILS`             | Optional          | Comma-separated email allowlist for deployments that restrict sign-in by email.  |
+| `R_ELEVENLABS_API_KEY`         | Optional          | ElevenLabs API key for narrated feature-demo videos. The key stays on the control plane; sandboxes reach text-to-speech only through an authenticated Roomote endpoint. A key scoped to text-to-speech only is sufficient and recommended. |
+| `R_ELEVENLABS_VOICE_ID`        | Optional          | ElevenLabs voice ID used for feature-demo narration. Required alongside the API key for narration to be available.                                                       |
+| `R_ELEVENLABS_MODEL`           | Optional          | ElevenLabs TTS model override. Defaults to `eleven_v3`.                          |
 
 During Microsoft Teams setup, Roomote uses the Microsoft Entra app values for
 the Teams bot by default. Use **Show advanced config** after the Directory

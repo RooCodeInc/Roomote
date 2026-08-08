@@ -962,6 +962,28 @@ describe('ModalClient', () => {
     );
   });
 
+  it('expects the Remotion chrome-headless-shell to be baked into the worker runtime', () => {
+    const dockerfile = fs.readFileSync(
+      new URL('../../../../apps/worker/Dockerfile', import.meta.url),
+      'utf8',
+    );
+
+    expect(dockerfile).toContain('ARG REMOTION_VERSION=');
+    expect(dockerfile).toContain(
+      'ENV REMOTION_HEADLESS_SHELL_PATH="/opt/remotion/headless-shell"',
+    );
+    expect(dockerfile).toContain('"@remotion/cli@${REMOTION_VERSION}"');
+    expect(dockerfile).toContain('"remotion@${REMOTION_VERSION}"');
+    expect(dockerfile).toContain('npx remotion browser ensure');
+    expect(dockerfile).toContain(
+      'cp -R node_modules/.remotion/chrome-headless-shell /opt/remotion/chrome-headless-shell',
+    );
+    expect(dockerfile).toContain(
+      'ln -sf "$REMOTION_SHELL" "${REMOTION_HEADLESS_SHELL_PATH}"',
+    );
+    expect(dockerfile).toContain('/opt/remotion/.installed');
+  });
+
   it('expects PM2 to be available in the worker runtime', () => {
     const dockerfile = fs.readFileSync(
       new URL('../../../../apps/worker/Dockerfile', import.meta.url),
