@@ -7,6 +7,7 @@ import {
   type TeamsActivityCommunicationMetadata,
   getTeamsActivityChannelId,
   getTeamsActivityCommunicationMetadata,
+  getTeamsActivityAudioAttachments,
   getTeamsActivityImageAttachments,
   getTeamsActivityTeamId,
   getTeamsActivityTenantId,
@@ -58,11 +59,17 @@ import {
   populateSnapshotResumeCommunicationMetadata,
   restoreSnapshotResumeVisiblePromptFields,
 } from '@roomote/types';
+import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import {
+  AUDIO_TRANSCRIPTION_MAX_SIZE_BYTES,
   buildTeamsRoutingContext,
   enqueueTask,
+  formatAudioAttachmentWarning,
+  formatAudioTranscriptionResult,
   getTaskUrl,
+  resolveAudioTranscriptionMimeType,
   routeTask,
+  transcribeAudioAttachment,
   type RoutingWorkspace,
 } from '@roomote/cloud-agents/server';
 
@@ -730,7 +737,7 @@ async function resolveTeamsActivityImageDataUrls(
   return images;
 }
 
-async function attachTeamsActivityImagesToQueuedMessage(
+async function attachTeamsActivityMediaToQueuedMessage(
   activity: TeamsActivity,
   queuedMessage: QueuedTeamsCommunicationMessage,
   options: { userId?: string } = {},
@@ -739,13 +746,77 @@ async function attachTeamsActivityImagesToQueuedMessage(
   const images = await resolveTeamsActivityImageDataUrls(activity, {
     ...(userId ? { userId } : {}),
   });
+  const attachmentTexts: string[] = [];
+  const audioAttachments = getTeamsActivityAudioAttachments(activity);
+  const audio = audioAttachments[0];
 
-  return images.length > 0
-    ? {
-        ...queuedMessage,
-        images,
+  if (audio) {
+    const filename = audio.name ?? 'audio-attachment';
+    const mimeType = resolveAudioTranscriptionMimeType({
+      mimeType: audio.contentType,
+      filename,
+    });
+    if (!mimeType) {
+      attachmentTexts.push(
+        formatAudioAttachmentWarning(
+          filename,
+          `could not be transcribed because ${audio.contentType ?? 'its media type'} is not supported`,
+        ),
+      );
+    } else {
+      const provider = await createTeamsCommunicationProvider();
+      if (!provider) {
+        attachmentTexts.push(
+          formatAudioAttachmentWarning(filename, 'could not be downloaded'),
+        );
+      } else {
+        try {
+          const downloaded = await provider.downloadAudioAttachment(audio, {
+            ...(activity.serviceUrl ? { serviceUrl: activity.serviceUrl } : {}),
+            maxBytes: AUDIO_TRANSCRIPTION_MAX_SIZE_BYTES,
+          });
+          const result = await transcribeAudioAttachment({
+            audioBytes: downloaded.bytes,
+            mimeType,
+            filename,
+            userId,
+            userTextContext: queuedMessage.text,
+          });
+          attachmentTexts.push(
+            formatAudioTranscriptionResult(filename, result),
+          );
+        } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error);
+          apiLogger.warn(
+            `[teams] Failed to process audio attachment: ${errorMessage}`,
+          );
+          attachmentTexts.push(
+            formatAudioAttachmentWarning(
+              filename,
+              errorMessage.includes('exceeded max size')
+                ? 'could not be transcribed because it exceeds the 20 MiB limit'
+                : 'could not be downloaded',
+            ),
+          );
+        }
       }
-    : queuedMessage;
+    }
+    if (audioAttachments.length > 1) {
+      attachmentTexts.push(
+        `[Only the first of ${audioAttachments.length} audio attachments was transcribed.]`,
+      );
+    }
+  }
+
+  return {
+    ...queuedMessage,
+    text: appendAttachmentTextsToPromptText({
+      text: queuedMessage.text,
+      attachmentTexts,
+    }),
+    ...(images.length > 0 ? { images } : {}),
+  };
 }
 
 async function postTeamsMessageBestEffort(input: {
@@ -1435,12 +1506,11 @@ async function resumePendingTeamsAuthToken(
     return { success: false, error: 'unsupported_activity' };
   }
 
-  const queuedMessageWithImages =
-    await attachTeamsActivityImagesToQueuedMessage(
-      claimedPending.activity,
-      queuedMessage,
-      { userId: mappedUserId },
-    );
+  const queuedMessageWithImages = await attachTeamsActivityMediaToQueuedMessage(
+    claimedPending.activity,
+    queuedMessage,
+    { userId: mappedUserId },
+  );
 
   const activeRun = await findActiveTeamsTaskRun({
     conversationId: metadata.communicationChannelId,
@@ -2032,7 +2102,7 @@ teams.post('/', async (c) => {
       // outcome === 'no_cards': fall through to normal task entry.
     }
 
-    queuedMessage = await attachTeamsActivityImagesToQueuedMessage(
+    queuedMessage = await attachTeamsActivityMediaToQueuedMessage(
       activity,
       queuedMessage,
       { userId: mappedUserId },
@@ -2147,7 +2217,7 @@ teams.post('/', async (c) => {
     });
   }
 
-  queuedMessage = await attachTeamsActivityImagesToQueuedMessage(
+  queuedMessage = await attachTeamsActivityMediaToQueuedMessage(
     activity,
     queuedMessage,
     { ...(mappedUserId ? { userId: mappedUserId } : {}) },

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   getTeamsActivityCommunicationMetadata,
+  getTeamsActivityAudioAttachments,
   getTeamsActivityImageAttachments,
   getTeamsConversationMessageIdSuffix,
   isTeamsBotAuthoredActivity,
@@ -172,6 +173,33 @@ describe('Teams activity helpers', () => {
     }
 
     expect(teamsActivityToQueuedCommunicationMessage(parsed.data)).toBeNull();
+  });
+
+  it('accepts audio-only activities and resolves their download metadata', () => {
+    const parsed = parseTeamsActivity({
+      type: 'message',
+      id: 'activity-audio',
+      conversation: { id: 'a:personal-conversation' },
+      attachments: [
+        {
+          contentType: 'audio/mpeg',
+          contentUrl: 'https://smba.trafficmanager.net/audio/clip.mp3',
+          name: 'clip.mp3',
+        },
+      ],
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(getTeamsActivityAudioAttachments(parsed.data!)).toEqual([
+      {
+        contentType: 'audio/mpeg',
+        contentUrl: 'https://smba.trafficmanager.net/audio/clip.mp3',
+        name: 'clip.mp3',
+      },
+    ]);
+    expect(
+      teamsActivityToQueuedCommunicationMessage(parsed.data!),
+    ).toMatchObject({ text: 'Audio attachment' });
   });
 
   it('strips Teams mention markup from message text', () => {

@@ -9,7 +9,9 @@ vi.mock('../non-task-provider-usage', async (importOriginal) => ({
 
 import {
   AUDIO_TRANSCRIPTION_MAX_SIZE_BYTES,
+  formatAudioTranscriptionResult,
   isAudioTranscriptionSupportedMimeType,
+  resolveAudioTranscriptionMimeType,
   transcribeAudioAttachment,
 } from '../audio-transcription';
 import { NonTaskInputModalityUnsupportedError } from '../non-task-provider-usage';
@@ -76,5 +78,24 @@ describe('audio transcription', () => {
       }),
     ).resolves.toEqual({ status: 'oversized' });
     expect(generateTrackedNonTaskTextMock).not.toHaveBeenCalled();
+  });
+
+  it('normalizes provider MIME metadata and formats actionable warnings', () => {
+    expect(
+      resolveAudioTranscriptionMimeType({
+        mimeType: 'audio/mpeg; charset=binary',
+      }),
+    ).toBe('audio/mpeg');
+    expect(resolveAudioTranscriptionMimeType({ filename: 'voice.m4a' })).toBe(
+      'audio/mp4',
+    );
+    expect(resolveAudioTranscriptionMimeType({ filename: 'voice.wma' })).toBe(
+      null,
+    );
+    expect(
+      formatAudioTranscriptionResult('voice.ogg', {
+        status: 'unsupported_model',
+      }),
+    ).toContain('no configured model supports audio input');
   });
 });

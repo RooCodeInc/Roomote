@@ -121,7 +121,14 @@ export type TeamsActivityImageAttachment = {
   name?: string;
 };
 
+export type TeamsActivityAudioAttachment = {
+  contentUrl: string;
+  contentType?: string;
+  name?: string;
+};
+
 const TEAMS_IMAGE_ATTACHMENT_TEXT = 'Image attachment';
+const TEAMS_AUDIO_ATTACHMENT_TEXT = 'Audio attachment';
 
 function cleanOptionalString(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
@@ -496,14 +503,22 @@ export function teamsActivityToQueuedCommunicationMessage(
   const activityId = cleanOptionalString(activity.id);
   const text = stripTeamsBotMentions(activity.text ?? '', activity);
   const imageAttachments = getTeamsActivityImageAttachments(activity);
+  const audioAttachments = getTeamsActivityAudioAttachments(activity);
 
-  if (!activityId || (!text && imageAttachments.length === 0)) {
+  if (
+    !activityId ||
+    (!text && imageAttachments.length === 0 && audioAttachments.length === 0)
+  ) {
     return null;
   }
 
   return {
     provider: 'teams',
-    text: text || TEAMS_IMAGE_ATTACHMENT_TEXT,
+    text:
+      text ||
+      (imageAttachments.length
+        ? TEAMS_IMAGE_ATTACHMENT_TEXT
+        : TEAMS_AUDIO_ATTACHMENT_TEXT),
     user: activity.from?.name ?? activity.from?.id ?? 'Teams user',
     ...(options.userId ? { userId: options.userId } : {}),
     ts: activityId,
@@ -554,6 +569,40 @@ export function getTeamsActivityImageAttachments(
     attachments.push({
       contentUrl,
       contentType,
+      ...(name ? { name } : {}),
+    });
+  }
+
+  return attachments;
+}
+
+export function getTeamsActivityAudioAttachments(
+  activity: TeamsActivity,
+): TeamsActivityAudioAttachment[] {
+  const attachments: TeamsActivityAudioAttachment[] = [];
+
+  for (const rawAttachment of activity.attachments ?? []) {
+    const attachment = readRecord(rawAttachment);
+    if (!attachment) continue;
+
+    const content = readRecord(attachment.content);
+    const name = readString(attachment, 'name');
+    const contentType =
+      readString(attachment, 'contentType') ??
+      (content ? readString(content, 'contentType') : undefined);
+    const contentUrl =
+      readString(attachment, 'contentUrl') ??
+      (content ? readString(content, 'downloadUrl') : undefined) ??
+      (content ? readString(content, 'contentUrl') : undefined) ??
+      (content ? readString(content, 'url') : undefined);
+    const isAudio =
+      contentType?.toLowerCase().startsWith('audio/') === true ||
+      /\.(?:aac|flac|m4a|mp3|mp4|oga|ogg|opus|wav|webm)$/iu.test(name ?? '');
+
+    if (!contentUrl || !isAudio) continue;
+    attachments.push({
+      contentUrl,
+      ...(contentType ? { contentType } : {}),
       ...(name ? { name } : {}),
     });
   }

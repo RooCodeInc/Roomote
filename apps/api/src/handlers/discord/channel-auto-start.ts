@@ -2,6 +2,7 @@ import {
   discordEventToQueuedCommunicationMessage,
   getDiscordMessageAttachments,
   getDiscordMessageContent,
+  isDiscordAudioAttachment,
   isDiscordBotMentioned,
   type DiscordGatewayEvent,
   type DiscordMessage,
@@ -241,7 +242,12 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
 
   const messageAttachments = getDiscordMessageAttachments(message);
   const processedAttachments = messageAttachments.length
-    ? await processDiscordAttachments(messageAttachments)
+    ? messageAttachments.some(isDiscordAudioAttachment)
+      ? await processDiscordAttachments(messageAttachments, {
+          ...(queuedMessageUserId ? { userId: queuedMessageUserId } : {}),
+          userTextContext: message.content,
+        })
+      : await processDiscordAttachments(messageAttachments)
     : { images: [], attachmentTexts: [], warnings: [] };
   for (const warning of processedAttachments.warnings) {
     apiLogger.warn(`[DiscordChannelAutoStart] Attachment warning: ${warning}`);

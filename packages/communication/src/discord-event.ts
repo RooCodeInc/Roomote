@@ -420,6 +420,17 @@ export function isDiscordTextDocumentAttachment(
   );
 }
 
+export function isDiscordAudioAttachment(
+  attachment: DiscordAttachment,
+): boolean {
+  return (
+    attachment.content_type?.toLowerCase().startsWith('audio/') === true ||
+    /\.(?:aac|flac|m4a|mp3|mp4|oga|ogg|opus|wav|webm)$/iu.test(
+      attachment.filename,
+    )
+  );
+}
+
 export function formatDiscordAttachmentSummary(
   attachments: DiscordAttachment[],
 ): string {
@@ -428,9 +439,11 @@ export function formatDiscordAttachmentSummary(
     .map((attachment) => {
       const kind = isDiscordImageAttachment(attachment)
         ? 'Image'
-        : isDiscordTextDocumentAttachment(attachment)
-          ? 'Document'
-          : 'Attachment';
+        : isDiscordAudioAttachment(attachment)
+          ? 'Audio'
+          : isDiscordTextDocumentAttachment(attachment)
+            ? 'Document'
+            : 'Attachment';
       return `${kind}: ${attachment.filename}`;
     })
     .join('\n');
