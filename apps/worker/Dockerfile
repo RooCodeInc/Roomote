@@ -240,12 +240,11 @@ RUN sudo mkdir -p /opt/remotion \
     "remotion@${REMOTION_VERSION}" \
   && npx remotion browser ensure \
   && cp -R node_modules/.remotion/chrome-headless-shell /opt/remotion/chrome-headless-shell \
-  && case "$(uname -m)" in \
-    aarch64) REMOTION_PLATFORM="linux-arm64" ;; \
-    x86_64) REMOTION_PLATFORM="linux64" ;; \
-    *) echo "Unsupported architecture for Remotion headless shell: $(uname -m)" >&2; exit 1 ;; \
-  esac \
-  && REMOTION_SHELL="/opt/remotion/chrome-headless-shell/${REMOTION_PLATFORM}/chrome-headless-shell-${REMOTION_PLATFORM}/headless_shell" \
+  # The binary name differs per platform (headless_shell on linux-arm64,
+  # chrome-headless-shell on linux64), so resolve it by search instead of
+  # assuming either name.
+  && REMOTION_SHELL="$(find /opt/remotion/chrome-headless-shell -type f \( -name headless_shell -o -name chrome-headless-shell \) | head -n 1)" \
+  && test -n "$REMOTION_SHELL" \
   && test -x "$REMOTION_SHELL" \
   && ln -sf "$REMOTION_SHELL" "${REMOTION_HEADLESS_SHELL_PATH}" \
   && printf '%s\n' "${REMOTION_VERSION}" > /opt/remotion/.installed \
