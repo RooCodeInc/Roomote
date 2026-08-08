@@ -58,7 +58,12 @@ describe('feature-demo skill', () => {
     expect(skillContent).toContain(
       'cp "$HOME/.agents/skills/feature-demo/capture/capture.mjs" /tmp/feature-demo/capture.mjs',
     );
-    expect(skillContent).toContain('node /tmp/feature-demo/capture.mjs');
+    expect(skillContent).toContain('/tmp/feature-demo/capture.mjs');
+    // The parent hands off the paths; the proof-runner owns the integrity-
+    // verified node invocation, so the skill must not dictate a raw node run.
+    expect(skillContent).toContain(
+      'Do not dictate the `node` invocation yourself; the proof-runner owns that.',
+    );
   });
 
   it('keeps TTS provider keys out of the sandbox', () => {

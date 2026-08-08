@@ -35,21 +35,27 @@ describe('createProofRunnerAgentPrompt', () => {
     expect(prompt).toContain(
       'the feature-demo capture runner staged by the parent at `/tmp/feature-demo/capture.mjs`',
     );
+
+    // The staging path is shared/parent-writable, so the sanction closes the
+    // check/use race by reading the file exactly once and executing the same
+    // bytes it hashed (a single node process; no separate hash-then-run step,
+    // no re-open of the swappable path).
+    expect(prompt).toContain('reading the file exactly once');
     expect(prompt).toContain(
-      'running it via `node` with the environment variables the brief specifies is compliant browser work',
+      'const b=readFileSync("/tmp/feature-demo/capture.mjs")',
     );
-    // The staging path is parent-writable, so the sanction binds to content —
-    // and to close the verify/execute race, the runner digests and executes a
-    // private copy, never the swappable staging path.
-    expect(prompt).toContain('copy the file to a fresh private path first');
-    expect(prompt).toContain('sha256sum "$RUNNER"');
     expect(prompt).toContain(
-      'execute that verified copy — never the original path',
+      `createHash("sha256").update(b).digest("hex")!=="${digest}"`,
     );
-    expect(prompt).toContain(`\`${digest}\``);
+    expect(prompt).toContain(
+      'await import("data:text/javascript;base64,"+b.toString("base64"))',
+    );
     expect(prompt).toContain('capture runner integrity mismatch');
     expect(prompt).toContain(
-      'This exception covers exactly that digest-verified copy and no other script.',
+      'never fall back to `node /tmp/feature-demo/capture.mjs`',
+    );
+    expect(prompt).toContain(
+      'This exception covers exactly this verified-execution command and no other script.',
     );
   });
 
