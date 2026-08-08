@@ -37,9 +37,10 @@ this pipeline is ever committed to the repository.
 <workflow>
 
 <step number="1">
-<name>Scope the demo</name>
+<name>Scope and plan the demo (advisor)</name>
 <actions>
-<action>Identify the feature, the surface to record (running app in the sandbox, or a public page the user names), and 2-5 story beats. A good demo is 10-25 seconds of motion; more beats than that dilutes it.</action>
+<action>Delegate the creative plan to the `advisor` subagent with the Task tool — it runs the planning model at deeper reasoning and can read the repository to study the feature. Give it a complete brief: the user's request, the surface to record (URL), the relevant source paths for the feature's UI, the beat vocabulary and pacing constraints from step 2 verbatim, and the caption style rules. Ask it to return, as short final text: 2-5 story beats in order (each with the on-screen element to focus, a proposed resilient CSS selector from the source, a 3-9 word caption that doubles as the spoken narration line, and any click/type interactions the story needs), plus which preset(s) fit. A good demo is 10-25 seconds of motion; more beats than that dilutes it.</action>
+<action>Treat the advisor's plan as internal guidance, not finished work: the advisor cannot run commands or see the live page, so its selectors are educated guesses from source. You own verification (step 2) and every artifact. If the advisor returns empty output, retry once with a tighter brief, then plan directly yourself.</action>
 <action>Pick presets: `wide` (1920x1080) is the default; add `vertical` (1080x1920) only when the user wants a social/short-form cut.</action>
 <action>If the surface needs the app running, make sure the environment is up first (dev server reachable) before capturing.</action>
 </actions>
@@ -57,7 +58,7 @@ this pipeline is ever committed to the repository.
 - `{ "a": "reset", "ms": ~600 }` — pull back between beats (partial by design; pass `"full": true` only for the closing shot).</action>
 <action>Keep the opening tight: one short `wait` for page load, then get moving. Dead opening seconds are trimmed automatically, but do not rely on it.</action>
 <action>Write captions as short, conversational spoken lines (they double as the narration): contractions are good, symbols and long clauses are not. 3-9 words on screen; if the spoken wording should differ from the on-screen caption, put the spoken variants in `/tmp/feature-demo/lines.json` (array, one string per caption).</action>
-<action>Selectors must be resilient: prefer ids, stable data attributes, or unique semantic tags over deep CSS chains. The capture fails loudly on a selector that resolves to nothing.</action>
+<action>Selectors must be resilient: prefer ids, stable data attributes, or unique semantic tags over deep CSS chains. Verify each selector the advisor proposed against the actual page source (grep the component/template files) before writing the script — the capture fails loudly on a selector that resolves to nothing, and a wrong selector costs a full capture round.</action>
 </actions>
 </step>
 

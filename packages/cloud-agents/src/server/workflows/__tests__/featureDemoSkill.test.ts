@@ -42,6 +42,19 @@ describe('feature-demo skill', () => {
     }
   });
 
+  it('delegates demo planning to the advisor with parent-owned verification', () => {
+    expect(skillContent).toContain(
+      'Delegate the creative plan to the `advisor` subagent with the Task tool',
+    );
+    // The advisor cannot see the live page; the parent must verify selectors.
+    expect(skillContent).toContain(
+      "Treat the advisor's plan as internal guidance, not finished work",
+    );
+    expect(skillContent).toContain(
+      'Verify each selector the advisor proposed against the actual page source',
+    );
+  });
+
   it('keeps browser work delegated to proof-runner', () => {
     expect(skillContent).toContain(
       "Browser automation is the proof-runner subagent's exclusive surface",
