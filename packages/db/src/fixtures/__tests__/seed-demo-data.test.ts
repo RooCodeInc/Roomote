@@ -6,6 +6,7 @@ import {
   environments,
   githubInstallations,
   repositories,
+  taskPullRequests,
   tasks,
   users,
 } from '../../schema';
@@ -13,6 +14,7 @@ import { db } from '../../db';
 import {
   demoSeedEnvironmentName,
   demoSeedRepositories,
+  demoSeedPullRequests,
   demoSeedTasks,
   demoSeedUserId,
   seedDemoData,
@@ -30,6 +32,9 @@ function withoutSettings(labels: string[]) {
 }
 
 async function cleanup() {
+  await db
+    .delete(taskPullRequests)
+    .where(inArray(taskPullRequests.taskId, demoTaskIds));
   await db.delete(taskRuns).where(inArray(taskRuns.taskId, demoTaskIds));
   await db.delete(tasks).where(inArray(tasks.id, demoTaskIds));
   await db
@@ -77,8 +82,11 @@ describe('seedDemoData', () => {
 
     expect(withoutSettings(summary.skipped)).toEqual([]);
     expect(withoutSettings(summary.created)).toHaveLength(
-      // user + installation + environment + repositories + tasks + task runs
-      3 + demoSeedRepositories.length + demoSeedTasks.length * 2,
+      // user + installation + environment + repositories + tasks + task runs + PRs
+      3 +
+        demoSeedRepositories.length +
+        demoSeedTasks.length * 2 +
+        demoSeedPullRequests.length,
     );
 
     const settings = await db.query.deploymentSettings.findFirst({
@@ -134,6 +142,20 @@ describe('seedDemoData', () => {
       expect(taskRun).toBeDefined();
       expect(taskRun?.status).toBe(seedTask.taskRunStatus);
     }
+
+    const seededPullRequests = await db.query.taskPullRequests.findMany({
+      where: inArray(taskPullRequests.taskId, demoTaskIds),
+    });
+    expect(seededPullRequests).toHaveLength(demoSeedPullRequests.length);
+    for (const seedPullRequest of demoSeedPullRequests) {
+      expect(
+        seededPullRequests.some(
+          (pullRequest) =>
+            pullRequest.taskId === seedPullRequest.taskId &&
+            pullRequest.prUrl === seedPullRequest.prUrl,
+        ),
+      ).toBe(true);
+    }
   });
 
   it('is idempotent and leaves existing rows untouched on re-run', async () => {
@@ -147,7 +169,10 @@ describe('seedDemoData', () => {
 
     expect(summary.created).toEqual([]);
     expect(withoutSettings(summary.skipped)).toHaveLength(
-      3 + demoSeedRepositories.length + demoSeedTasks.length * 2,
+      3 +
+        demoSeedRepositories.length +
+        demoSeedTasks.length * 2 +
+        demoSeedPullRequests.length,
     );
 
     const userAfter = await db.query.users.findFirst({

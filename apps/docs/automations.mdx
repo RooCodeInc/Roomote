@@ -130,7 +130,11 @@ an explicit IANA timezone.
 
 Admins can also manage custom automations from a Roomote task through the
 `manage_custom_automations` tool: list, resolve a schedule, create, update,
-delete, or run an enabled automation immediately.
+delete, or run an enabled automation immediately. Use its model-list action to
+see the deployment's enabled model IDs and default before setting an override.
+Model IDs preserve the configured inference route: `openrouter/...` targets
+OpenRouter, while `openai/...` uses the deployment's OpenAI route, including a
+connected ChatGPT subscription when configured.
 
 ## Call Roomote via emoji
 

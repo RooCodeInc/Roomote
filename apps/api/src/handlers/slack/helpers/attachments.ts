@@ -2,9 +2,14 @@ import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
 import { formatErrorForLog } from '@roomote/types';
 import { isRoomoteTextExtractableAttachment } from '@roomote/cloud-agents';
 import {
+  AUDIO_TRANSCRIPTION_MAX_SIZE_BYTES,
   describeVideoAttachment,
   extractPromptTextAttachments,
+  formatAudioAttachmentWarning,
+  formatAudioTranscriptionResult,
+  isAudioTranscriptionSupportedMimeType,
   isVideoAgentSupportedMimeType,
+  transcribeAudioAttachment,
   VIDEO_AGENT_MAX_VIDEO_SIZE_BYTES,
 } from '@roomote/cloud-agents/server';
 import {
@@ -22,6 +27,10 @@ function getFirstSlackVideoFile(files: SlackFile[]): SlackFile | undefined {
       isVideoAgentSupportedMimeType(file.mimetype) &&
       file.size <= VIDEO_AGENT_MAX_VIDEO_SIZE_BYTES,
   );
+}
+
+function getSlackAudioFiles(files: SlackFile[]): SlackFile[] {
+  return files.filter((file) => file.mimetype.startsWith('audio/'));
 }
 
 export async function processSlackAttachments({
@@ -44,6 +53,8 @@ export async function processSlackAttachments({
   }
 
   const firstVideoFile = getFirstSlackVideoFile(files);
+  const audioFiles = getSlackAudioFiles(files);
+  const firstAudioFile = audioFiles[0];
 
   const imagePromise = slack.processSlackFiles(files).catch((error) => {
     console.error(
@@ -120,13 +131,84 @@ export async function processSlackAttachments({
     return [] as string[];
   });
 
-  const [images, attachmentTexts, videoDescriptions] = await Promise.all([
-    imagePromise,
-    attachmentTextPromise,
-    videoDescriptionPromise,
-  ]);
+  const audioTranscriptPromise = (async () => {
+    if (!firstAudioFile) {
+      return [] as string[];
+    }
 
-  return { images, attachmentTexts, videoDescriptions };
+    if (!isAudioTranscriptionSupportedMimeType(firstAudioFile.mimetype)) {
+      return [
+        formatAudioAttachmentWarning(
+          firstAudioFile.name,
+          `could not be transcribed because ${firstAudioFile.mimetype} is not supported`,
+        ),
+      ];
+    }
+
+    if (firstAudioFile.size > AUDIO_TRANSCRIPTION_MAX_SIZE_BYTES) {
+      return [
+        formatAudioAttachmentWarning(
+          firstAudioFile.name,
+          'could not be transcribed because it exceeds the 20 MiB limit',
+        ),
+      ];
+    }
+
+    const fileBytes = await slack.downloadSlackFile(firstAudioFile);
+    if (!fileBytes) {
+      return [
+        formatAudioAttachmentWarning(
+          firstAudioFile.name,
+          'could not be downloaded',
+        ),
+      ];
+    }
+
+    const result = await transcribeAudioAttachment({
+      audioBytes: fileBytes,
+      mimeType: firstAudioFile.mimetype,
+      filename: firstAudioFile.name,
+      userId,
+      userTextContext,
+    });
+    const messages = [
+      formatAudioTranscriptionResult(firstAudioFile.name, result),
+    ];
+
+    if (audioFiles.length > 1) {
+      messages.push(
+        `[Only the first of ${audioFiles.length} audio attachments was transcribed.]`,
+      );
+    }
+
+    return messages;
+  })().catch((error) => {
+    console.error(
+      `[SlackWebhook] Failed to process Slack audio file: ${formatErrorForLog(error)}`,
+    );
+    return firstAudioFile
+      ? [
+          formatAudioAttachmentWarning(
+            firstAudioFile.name,
+            'could not be transcribed',
+          ),
+        ]
+      : [];
+  });
+
+  const [images, attachmentTexts, videoDescriptions, audioTranscriptTexts] =
+    await Promise.all([
+      imagePromise,
+      attachmentTextPromise,
+      videoDescriptionPromise,
+      audioTranscriptPromise,
+    ]);
+
+  return {
+    images,
+    attachmentTexts: [...attachmentTexts, ...audioTranscriptTexts],
+    videoDescriptions,
+  };
 }
 
 export async function buildResolvedCurrentMessageText({

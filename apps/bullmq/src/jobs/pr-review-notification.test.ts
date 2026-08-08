@@ -106,7 +106,7 @@ vi.mock('@roomote/sdk/server', () => ({
 
 import type { Job } from 'bullmq';
 
-import { RunStatus } from '@roomote/types';
+import { RunStatus, WORKER_HEARTBEAT_STALE_MS } from '@roomote/types';
 
 import { prReviewNotificationJob } from './pr-review-notification';
 
@@ -136,6 +136,7 @@ describe('prReviewNotificationJob', () => {
       sourceRunId: null,
       status: RunStatus.Idle,
       taskPhase: 'waiting_for_prompt',
+      workerHeartbeatAt: new Date(),
     });
     mockFindFirstTaskPullRequest.mockResolvedValue({
       status: 'open',
@@ -536,7 +537,7 @@ describe('prReviewNotificationJob', () => {
     expect(mockPostMessage).not.toHaveBeenCalled();
   });
 
-  it('defers during follow-up turns on a live sandbox (Idle status with a running phase)', async () => {
+  it('defers during follow-up turns on a live sandbox before the cap', async () => {
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
       payload: {},
@@ -544,6 +545,7 @@ describe('prReviewNotificationJob', () => {
       sourceRunId: null,
       status: RunStatus.Idle,
       taskPhase: 'running',
+      workerHeartbeatAt: new Date(),
     });
 
     await prReviewNotificationJob(makeJob() as never);
@@ -554,6 +556,44 @@ describe('prReviewNotificationJob', () => {
     });
     expect(mockConsumePending).not.toHaveBeenCalled();
     expect(mockPostMessage).not.toHaveBeenCalled();
+  });
+
+  it('posts immediately when a running phase is backed by a stale worker heartbeat', async () => {
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 1,
+      payload: { channel: 'C123' },
+      slackThreadTs: '111.222',
+      sourceRunId: null,
+      status: RunStatus.Idle,
+      taskPhase: 'running',
+      workerHeartbeatAt: new Date(Date.now() - WORKER_HEARTBEAT_STALE_MS - 1),
+    });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockSchedule).not.toHaveBeenCalled();
+    expect(mockConsumePending).toHaveBeenCalled();
+    expect(mockPrepareDelivery).toHaveBeenCalled();
+    expect(mockStickyFooterPost).toHaveBeenCalled();
+  });
+
+  it('drops at the deferral cap when an idle running phase has a fresh heartbeat', async () => {
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 1,
+      payload: {},
+      slackThreadTs: '111.222',
+      sourceRunId: null,
+      status: RunStatus.Idle,
+      taskPhase: 'running',
+      workerHeartbeatAt: new Date(),
+    });
+
+    await prReviewNotificationJob(makeJob({ deferrals: 3 }) as never);
+
+    expect(mockSchedule).not.toHaveBeenCalled();
+    expect(mockConsumePending).toHaveBeenCalled();
+    expect(mockPrepareDelivery).not.toHaveBeenCalled();
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
   });
 
   it('drops pending activity without posting when the deferral cap is reached while still running', async () => {

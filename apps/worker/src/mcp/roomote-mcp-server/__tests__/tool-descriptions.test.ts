@@ -162,6 +162,27 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
+  it('directs agents to discover enabled models before setting an override', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const automationsTool = getRegisteredTool(
+      registeredTools,
+      'manage_custom_automations',
+    );
+
+    expect(automationsTool.config.description).toContain(
+      'Use list_models before setting a model override',
+    );
+    expect(getInputSchemaField(automationsTool, 'model').description).toContain(
+      'Call list_models first and pass an exact returned model ID',
+    );
+    expect(automationsTool.config.description).toContain(
+      'Model IDs encode the inference route',
+    );
+    expect(automationsTool.config.description).toContain(
+      'openai/... uses the deployment OpenAI route, including a connected ChatGPT subscription',
+    );
+  });
+
   it('maps conversational automation intent to launchable suggested tasks', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const automationsTool = getRegisteredTool(

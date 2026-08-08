@@ -1617,6 +1617,13 @@ export class OpenCodeServerHarness
   // duplicate reminder into the fresh reminder turn. This guard swallows that
   // exact follow-up idle; any busy/retry transition clears it first.
   private ignoreNextStopHookSessionIdle = false;
+  // Same paired-idle hazard for the queued-prompt drain: when the
+  // status-sourced turn completion drains a queued follow-up, submitPrompt
+  // re-arms inFlight, so the paired session.idle would re-enter
+  // finishCurrentTurn with an empty queue, emit a second taskCompleted, and
+  // finalize the run while the drained turn is still running. This guard
+  // swallows that exact follow-up idle; any busy/retry transition clears it.
+  private ignoreNextQueuedDrainSessionIdle = false;
   private readonly stallWatchdogs: OpenCodeStallWatchdogs;
   private resolveEventStreamReady: (() => void) | undefined;
   private rejectEventStreamReady: ((error: unknown) => void) | undefined;
@@ -2121,6 +2128,7 @@ export class OpenCodeServerHarness
     this.queuedUserInputReplayPromptId = null;
     this.ignoreNextUserInputReplaySessionIdle = false;
     this.ignoreNextStopHookSessionIdle = false;
+    this.ignoreNextQueuedDrainSessionIdle = false;
     this.currentWorkflowPhase = command.data.workflowPhase ?? null;
     this.activeWorkflowSkill = null;
     this.cancelRequestedBeforeSession = false;
@@ -3749,6 +3757,7 @@ export class OpenCodeServerHarness
       this.ignoreNextProviderRecoverySessionIdle = false;
       this.ignoreNextUserInputReplaySessionIdle = false;
       this.ignoreNextStopHookSessionIdle = false;
+      this.ignoreNextQueuedDrainSessionIdle = false;
       this.inFlight = true;
       this.stallWatchdogs.noteActivity();
       this.stallWatchdogs.ensureTurnStallArmed();
@@ -3761,6 +3770,7 @@ export class OpenCodeServerHarness
       this.ignoreNextProviderRecoverySessionIdle = false;
       this.ignoreNextUserInputReplaySessionIdle = false;
       this.ignoreNextStopHookSessionIdle = false;
+      this.ignoreNextQueuedDrainSessionIdle = false;
       this.inFlight = true;
       // Status transitions prove the session is alive (e.g. a provider retry
       // loop), but not that the turn's loop advanced — a steer awaiting
@@ -3850,6 +3860,11 @@ export class OpenCodeServerHarness
 
     if (this.ignoreNextStopHookSessionIdle) {
       this.ignoreNextStopHookSessionIdle = false;
+      return;
+    }
+
+    if (this.ignoreNextQueuedDrainSessionIdle) {
+      this.ignoreNextQueuedDrainSessionIdle = false;
       return;
     }
 
@@ -4672,6 +4687,19 @@ export class OpenCodeServerHarness
     }
 
     await this.drainQueuedPrompts();
+
+    // If the drain submitted a queued prompt on the status-sourced entry,
+    // inFlight is re-armed and the paired session.idle for the turn that just
+    // ended would complete the drained turn immediately (second taskCompleted,
+    // empty queue, premature run finalization). Swallow that exact idle. The
+    // replay guard set above already covers the queued-replay drain.
+    if (
+      source === 'session_status' &&
+      this.inFlight &&
+      !this.ignoreNextUserInputReplaySessionIdle
+    ) {
+      this.ignoreNextQueuedDrainSessionIdle = true;
+    }
   }
 
   private armStopHookReminderStall(sessionId: string): void {

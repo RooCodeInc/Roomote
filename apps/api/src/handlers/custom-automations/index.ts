@@ -8,6 +8,7 @@ import {
   db,
   deleteCustomAutomation,
   eq,
+  getDeploymentTaskModelOptions,
   getCustomAutomationById,
   isNull,
   listCustomAutomations,
@@ -154,6 +155,7 @@ const VALIDATION_ERROR_PATTERNS: RegExp[] = [
   /^Use a standard five-field cron expression\.$/,
   /^Model must be at most \d+ characters\.$/,
   /^Model must use provider\/model format\.$/,
+  /^Model ".+" is not enabled for new tasks\.$/,
   /^Environment is required\.$/,
   /^Selected environment was not found\.$/,
   /^Custom automation was not found\.$/,
@@ -296,6 +298,15 @@ function adminId(c: {
   return c.get('customAutomationAdminId');
 }
 
+async function assertEnabledModel(model: string | null | undefined) {
+  if (!model) return;
+
+  const { models } = await getDeploymentTaskModelOptions();
+  if (!models.some((option) => option.id === model)) {
+    throw new Error(`Model "${model}" is not enabled for new tasks.`);
+  }
+}
+
 function toApiAutomation<
   T extends { allRepositories: boolean; environmentId: string | null },
 >(automation: T): Omit<T, 'environmentId'> & { environmentId: string | null } {
@@ -311,6 +322,10 @@ customAutomationsRouter.get('/', async (c) =>
   c.json({
     automations: (await listCustomAutomations()).map(toApiAutomation),
   }),
+);
+
+customAutomationsRouter.get('/models', async (c) =>
+  c.json(await getDeploymentTaskModelOptions()),
 );
 
 customAutomationsRouter.post('/resolve-schedule', async (c) => {
@@ -336,6 +351,7 @@ customAutomationsRouter.post('/', async (c) => {
   const parsed = writeSchema.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
   try {
+    await assertEnabledModel(parsed.data.model);
     const schedule = await resolveWriteSchedule(
       parsed.data.schedule,
       adminId(c),
@@ -389,6 +405,9 @@ customAutomationsRouter.patch('/:id', async (c) => {
     return c.json({ error: 'Custom automation was not found.' }, 404);
   }
   try {
+    if (typeof parsed.data.model === 'string') {
+      await assertEnabledModel(parsed.data.model);
+    }
     const schedule = parsed.data.schedule
       ? await resolveWriteSchedule(parsed.data.schedule, adminId(c))
       : {

@@ -17,12 +17,14 @@ import { PageNavigationShell } from './PageNavigationShell';
 type SettingsShellProps = {
   pageId: SettingsPageId;
   adminOnly?: boolean;
+  headerAction?: ReactNode;
   children: ReactNode;
 };
 
 export function SettingsShell({
   pageId,
   adminOnly = false,
+  headerAction,
   children,
 }: SettingsShellProps) {
   const router = useRouter();
@@ -49,6 +51,7 @@ export function SettingsShell({
       title={navigationItem.title}
       description={navigationItem.description}
       mobileLabel="Settings page"
+      headerAction={headerAction}
       onItemSelect={(value) => {
         const nextItem = accessibleItems.find((item) => item.id === value);
         if (nextItem) {

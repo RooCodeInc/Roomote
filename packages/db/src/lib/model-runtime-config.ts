@@ -5,6 +5,7 @@ import {
   CHATGPT_OPENCODE_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
+  getDefaultTaskModelId,
   getEnabledTaskModels,
   getModelProviderEnvKeyCandidates,
   getTaskModelCatalog,
@@ -97,7 +98,16 @@ async function loadPersistedRuntimeModelConfig(
     ),
     catalogModels: getTaskModelCatalog(deployment?.taskModelSettings),
     enabledCatalogModels: getEnabledTaskModels(deployment?.taskModelSettings),
+    defaultModelId: getDefaultTaskModelId(deployment?.taskModelSettings),
   };
+}
+
+export async function getDeploymentTaskModelOptions(
+  executor: DatabaseOrTransaction = db,
+): Promise<{ models: TaskModelOption[]; defaultModelId: string }> {
+  const { enabledCatalogModels, defaultModelId } =
+    await loadPersistedRuntimeModelConfig(executor);
+  return { models: enabledCatalogModels, defaultModelId };
 }
 
 function normalizeConfiguredValue(
