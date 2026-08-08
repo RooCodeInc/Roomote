@@ -4,8 +4,16 @@ export const ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME = 'proof-runner';
  * Builds the hidden proof-runner subagent prompt. The browser target is baked
  * in at config-generation time so the runner never depends on a staged
  * runtime handoff file for its capture configuration.
+ *
+ * `featureDemoCaptureRunnerSha256` is the digest of the activated
+ * feature-demo capture runner. The runner's staging path (/tmp) is writable
+ * by any parent flow, so the sanction binds to verified content, not the
+ * pathname; without a digest the sanction is omitted entirely.
  */
-export function createProofRunnerAgentPrompt(browserTarget: string): string {
+export function createProofRunnerAgentPrompt(
+  browserTarget: string,
+  featureDemoCaptureRunnerSha256?: string,
+): string {
   return [
     'You are the single delegated proof runner for this task.',
     '',
@@ -27,7 +35,12 @@ export function createProofRunnerAgentPrompt(browserTarget: string): string {
     '- Before the first browser command, explicitly load the `agent-browser` skill or CLI-served guidance exactly once. If the OpenCode Skill tool is available, invoke the `agent-browser` skill. If it is not available, run `agent-browser skills get core --full` in the shell and treat that output as the browser usage guide.',
     '- `agent-browser` is a command-line executable, not an OpenCode tool or MCP tool. Invoke it with shell commands such as `agent-browser get url`; do not look for an internal tool named `agent-browser`.',
     '- `agent-browser` is the only allowed browser automation CLI. Do not use Playwright, browser DevTools, curl-only screenshot substitutes, or any other browser automation path.',
-    '- One sanctioned exception: the feature-demo capture runner at `/tmp/feature-demo/capture.mjs`, staged there by the parent. It is an `agent-browser` orchestrator — every browser action it performs goes through the `agent-browser` CLI — and running it via `node` with the environment variables the brief specifies is compliant browser work, not a disallowed automation path. Its outputs land where the brief says (typically `/tmp/feature-demo/work/`), not under `/tmp/capture-visual-proof/`. This exception covers exactly that staged runner and no other script.',
+    ...(featureDemoCaptureRunnerSha256
+      ? [
+          '- One sanctioned exception: the feature-demo capture runner at `/tmp/feature-demo/capture.mjs`, staged there by the parent. It is an `agent-browser` orchestrator — every browser action it performs goes through the `agent-browser` CLI — and running it via `node` with the environment variables the brief specifies is compliant browser work, not a disallowed automation path. The staging path is parent-writable, so verify content before executing: run `sha256sum /tmp/feature-demo/capture.mjs` and confirm the digest is exactly ' +
+            `\`${featureDemoCaptureRunnerSha256}\`. On any mismatch or missing file, report blocked with blocker type \`capture runner integrity mismatch\` and do not execute it. Its outputs land where the brief says (typically \`/tmp/feature-demo/work/\`), not under \`/tmp/capture-visual-proof/\`. This exception covers exactly that digest-verified file and no other script.`,
+        ]
+      : []),
     '- If the `agent-browser` skill/guidance cannot be loaded, or if the `agent-browser` executable is unavailable, report blocked with blocker type `proof runtime unavailable` and describe the missing skill guidance or CLI explicitly.',
     '- Treat the browser target above as the primary proof surface. Preserve its hostname exactly; do not rewrite `localhost` to `127.0.0.1` or the reverse, and do not substitute another surface.',
     '- Before deep diagnostics, inspect the live state with `agent-browser get url`, `agent-browser get title`, or `agent-browser snapshot -i`.',

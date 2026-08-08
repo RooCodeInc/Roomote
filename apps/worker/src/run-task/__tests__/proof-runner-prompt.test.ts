@@ -25,8 +25,12 @@ describe('createProofRunnerAgentPrompt', () => {
     );
   });
 
-  it('sanctions exactly the staged feature-demo capture runner', () => {
-    const prompt = createProofRunnerAgentPrompt('http://127.0.0.1:3000');
+  it('sanctions only the digest-verified feature-demo capture runner', () => {
+    const digest = 'a'.repeat(64);
+    const prompt = createProofRunnerAgentPrompt(
+      'http://127.0.0.1:3000',
+      digest,
+    );
 
     expect(prompt).toContain(
       'the feature-demo capture runner at `/tmp/feature-demo/capture.mjs`',
@@ -34,9 +38,20 @@ describe('createProofRunnerAgentPrompt', () => {
     expect(prompt).toContain(
       'running it via `node` with the environment variables the brief specifies is compliant browser work',
     );
+    // The staging path is parent-writable, so the sanction binds to content.
+    expect(prompt).toContain('sha256sum /tmp/feature-demo/capture.mjs');
+    expect(prompt).toContain(`\`${digest}\``);
+    expect(prompt).toContain('capture runner integrity mismatch');
     expect(prompt).toContain(
-      'This exception covers exactly that staged runner and no other script.',
+      'This exception covers exactly that digest-verified file and no other script.',
     );
+  });
+
+  it('omits the capture-runner sanction entirely without a digest', () => {
+    const prompt = createProofRunnerAgentPrompt('http://127.0.0.1:3000');
+
+    expect(prompt).not.toContain('/tmp/feature-demo/capture.mjs');
+    expect(prompt).not.toContain('sanctioned exception');
   });
 
   it('returns artifact IDs and explicit parent sharing guidance', () => {
