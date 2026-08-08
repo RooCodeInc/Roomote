@@ -77,6 +77,14 @@ describe('feature-demo skill', () => {
     );
   });
 
+  it('frames the render project as an adaptable reference template', () => {
+    expect(skillContent).toContain('**reference template**');
+    expect(skillContent).toContain('npx -y skills add remotion-dev/skills');
+    expect(skillContent).toContain(
+      'The timeline JSON schema is the stable contract',
+    );
+  });
+
   it('renders with the baked headless shell and a runtime fallback', () => {
     expect(skillContent).toContain(
       '--browser-executable="${REMOTION_HEADLESS_SHELL_PATH:-/opt/remotion/headless-shell}"',

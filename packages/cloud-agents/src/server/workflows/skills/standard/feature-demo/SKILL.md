@@ -24,6 +24,12 @@ it targets.
 Pipeline: author script → capture (browser, delegated) → narrate (optional)
 → fit timing → render → verify → upload.
 
+The bundled `render/` project is a **reference template**, not a fixed
+pipeline stage: copy it to the work dir and adapt the copy freely (branding,
+caption styling, layout, extra presets) when the demo calls for it. The
+timeline JSON is the stable contract between capture and render — keep the
+copy consuming it and any adaptation stays in sync with the recording.
+
 All work happens under `/tmp/feature-demo/work` (the work dir). Nothing from
 this pipeline is ever committed to the repository.
 </architecture>
@@ -92,6 +98,7 @@ and to report the runner's printed summary plus `ls -la /tmp/feature-demo/work`.
 - `cp /tmp/feature-demo/work/timeline.json /tmp/feature-demo/work/narration.json /tmp/feature-demo/render/props/` (skip narration.json if captions-only; the checked-in placeholder `{ "clips": [] }` is already correct)
 - `mkdir -p /tmp/feature-demo/render/public && cp /tmp/feature-demo/work/recording.mp4 /tmp/feature-demo/render/public/`
 - `cp -R /tmp/feature-demo/work/vo /tmp/feature-demo/render/public/vo` (narrated demos only)</action>
+<action>Adapt the copied composition when the default look does not fit the request — different backdrop, caption treatment, brand colors, an extra preset, a layout change. Before writing Remotion code, install Remotion's official agent skills into the render copy and read them for current API guidance: `cd /tmp/feature-demo/render && npx -y skills add remotion-dev/skills`. Preserve the pieces that encode hard-won correctness unless you have a reason not to: the zoom transform with its counter-scaled cursor, the edge-clamp guard (only clamp an axis when the scaled window exceeds the canvas), and the timeline-driven keyframe interpolation.</action>
 <action>`cd /tmp/feature-demo/render && npm install` (versions are pinned; takes a few minutes on first run).</action>
 <action>Render with the image's baked headless shell:
 
@@ -125,6 +132,7 @@ If that binary does not exist (older sandbox snapshot), run `npx remotion browse
 <rule>Never load or invoke `agent-browser` (or any other browser automation) from this skill — capture is always delegated to the `proof-runner` subagent.</rule>
 <rule>Never ask for, read, or handle TTS provider keys. Narration goes through the control-plane endpoint with the run token; a 404 there means captions-only.</rule>
 <rule>All intermediate files live under `/tmp/feature-demo`. Never commit recordings, renders, node_modules, or props into the repository.</rule>
+<rule>Adapt the work-dir copy of the render template, never the installed skill sources under `~/.agents/skills/feature-demo`. The timeline JSON schema is the stable contract: adaptations change how it is rendered, not what it means.</rule>
 <rule>Report blockers honestly: a missing selector, a failed render, or a visibly broken frame is a blocker with evidence, not a reason to narrow the claim or ship a degraded video silently.</rule>
 <rule>Voice, wording, and pacing choices belong to the user when they express them; defaults are: wide preset, captions as narration lines, conversational tone.</rule>
 </rules>
