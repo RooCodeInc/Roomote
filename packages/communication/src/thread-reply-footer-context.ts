@@ -88,6 +88,42 @@ export async function resolveThreadReplyLinkedPr(params: {
   return null;
 }
 
+export async function resolveThreadReplyLinkedPrs(params: {
+  taskId: string | null | undefined;
+  prRepo: string | null | undefined;
+  prNumber: number | null | undefined;
+}): Promise<ThreadReplyLinkedPr[]> {
+  const linkedTaskPrs = params.taskId
+    ? await db.query.taskPullRequests.findMany({
+        columns: {
+          prUrl: true,
+          prNumber: true,
+          status: true,
+        },
+        where: eq(taskPullRequests.taskId, params.taskId),
+        orderBy: (table, { desc }) => [
+          desc(table.detectedAt),
+          desc(table.createdAt),
+        ],
+      })
+    : [];
+
+  const activeTaskPrs = linkedTaskPrs.flatMap((pr) =>
+    pr.status && TERMINAL_LINKED_TASK_PR_STATUSES.has(pr.status)
+      ? []
+      : typeof pr.prNumber === 'number' && typeof pr.prUrl === 'string'
+        ? [{ prNumber: pr.prNumber, prUrl: pr.prUrl }]
+        : [],
+  );
+
+  if (activeTaskPrs.length > 0) {
+    return activeTaskPrs;
+  }
+
+  const fallbackPr = await resolveThreadReplyLinkedPr(params);
+  return fallbackPr ? [fallbackPr] : [];
+}
+
 /**
  * Resolves the shareable live-preview URL for an environment-backed task.
  *

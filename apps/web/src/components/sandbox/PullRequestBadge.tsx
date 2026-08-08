@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 interface PullRequestBadgeProps {
   repo: string;
   prNumber: number;
+  url?: string;
   className?: string;
   iconClassName?: string;
 }
@@ -12,15 +13,16 @@ interface PullRequestBadgeProps {
 export function PullRequestBadge({
   repo,
   prNumber,
+  url,
   className,
   iconClassName,
 }: PullRequestBadgeProps) {
-  const url = `https://github.com/${repo}/pull/${prNumber}`;
+  const pullRequestUrl = url ?? `https://github.com/${repo}/pull/${prNumber}`;
   const repoName = repo.split('/')[1] ?? repo;
 
   return (
     <a
-      href={url}
+      href={pullRequestUrl}
       target="_blank"
       rel="noopener noreferrer"
       className={cn(

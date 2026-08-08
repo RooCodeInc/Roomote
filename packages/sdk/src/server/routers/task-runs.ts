@@ -611,9 +611,9 @@ export const taskRunsRouter = router({
       });
     }
 
-    // PR linkage lives on task_pull_requests; use the task's primary
-    // (earliest-detected) GitHub PR for the footer link.
-    const linkedPr = await db.query.taskPullRequests.findFirst({
+    // PR linkage lives on task_pull_requests; include every active GitHub PR
+    // so the existing footer can point users to the full task split.
+    const linkedPrs = await db.query.taskPullRequests.findMany({
       where: and(
         eq(taskPullRequests.taskId, taskRun.taskId),
         eq(taskPullRequests.sourceControlProvider, 'github'),
@@ -624,14 +624,25 @@ export const taskRunsRouter = router({
       columns: {
         repository: true,
         prNumber: true,
+        prUrl: true,
+        status: true,
       },
     });
+
+    const activeLinkedPrs = linkedPrs.filter(
+      (pr) => pr.status !== 'closed' && pr.status !== 'merged',
+    );
 
     return buildSlackThreadFooterText({
       taskUrl: input.taskUrl,
       taskId: taskRun.taskId,
-      prRepo: linkedPr?.repository ?? null,
-      prNumber: linkedPr?.prNumber ?? null,
+      prRepo: activeLinkedPrs[0]?.repository ?? null,
+      prNumber: activeLinkedPrs[0]?.prNumber ?? null,
+      linkedPrs: activeLinkedPrs.flatMap((pr) =>
+        pr.prNumber !== null && pr.prUrl
+          ? [{ prNumber: pr.prNumber, prUrl: pr.prUrl }]
+          : [],
+      ),
       channelId: input.slackChannelId,
       threadTs: input.threadTs,
     });

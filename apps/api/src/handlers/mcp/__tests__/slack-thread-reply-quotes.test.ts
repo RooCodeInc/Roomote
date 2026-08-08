@@ -70,6 +70,7 @@ vi.mock('@roomote/slack', async (importOriginal) => ({
     livePreviewUrl: null,
   }),
   resolveSlackThreadLinkedPr: vi.fn(),
+  resolveSlackThreadLinkedPrs: vi.fn(),
   resolveSlackThreadLivePreviewUrl: vi.fn(),
   ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID: 'roomote_thread_reply_quote',
   setLatestSlackBotReply: vi.fn(),

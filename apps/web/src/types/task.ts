@@ -88,6 +88,11 @@ export type ArtifactWithContent = {
 export type TaskRunWithPullRequest = TaskRun & {
   prRepo: string | null;
   prNumber: number | null;
+  pullRequests?: Array<{
+    repository: string;
+    prNumber: number;
+    prUrl?: string;
+  }>;
 };
 
 export type TaskWithAssociations = Task & {
