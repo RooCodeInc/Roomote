@@ -224,15 +224,15 @@ on the next restart (every overwrite is kept in version history). Removing a
 definition never deletes the environment; it just returns it to normal manual
 management.
 
-Definitions may reference repositories that are not linked yet; the
-environment is created anyway and repository mappings backfill on the next
-startup after linking. Keep secrets out of definition files — the
-per-environment `env` map is stored in plaintext, so use deployment
-environment variables under **Settings > Environments > Deployment Environment
-Variables** for secret values.
+Repositories in a definition must already be linked to the deployment. Roomote
+skips definitions with missing repository mappings, logs the reason, and tries
+them again on the next startup. Keep secrets out of definition files — the
+per-environment `env` map is stored in plaintext, so use deployment environment
+variables under **Settings > Environments > Deployment Environment Variables**
+for secret values.
 
-See the [self-hosting guide](/self-hosting) for the compose mount pattern and
-operational details.
+See [Keep definitions in source control](/environments/definition#keep-definitions-in-source-control)
+for the Compose mount pattern and deployment workflow.
 
 ## Make verification possible
 

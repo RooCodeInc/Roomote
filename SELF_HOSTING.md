@@ -861,10 +861,9 @@ Semantics:
   to normal manual management; it keeps all data and loses only the badge.
 - Renaming `name` inside a definition creates a new environment under the new
   name and orphans the old one.
-- Definitions may reference repositories that are not linked to the
-  deployment yet (for example before the GitHub App is installed). The
-  environment is created anyway and repository mappings backfill on the next
-  startup after the repositories are linked.
+- Repositories in a definition must already be linked to the deployment.
+  Definitions with missing repository mappings are skipped with a logged error
+  and retried on the next startup.
 - Invalid definitions are skipped with a logged error; they never prevent the
   API from starting or other definitions from applying. A missing or
   unreadable definitions directory is skipped the same way, so inline
