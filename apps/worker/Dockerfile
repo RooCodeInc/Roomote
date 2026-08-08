@@ -229,7 +229,10 @@ RUN sudo mkdir -p /opt/ffmpeg/bin \
 # download a browser at runtime. `npx remotion browser ensure` fetches the
 # matching linux64/linux-arm64 build into node_modules/.remotion; copy that
 # tree to /opt/remotion and expose a stable arch-independent symlink at
-# ${REMOTION_HEADLESS_SHELL_PATH} so consumers need no arch logic.
+# ${REMOTION_HEADLESS_SHELL_PATH} so consumers need no arch logic. The
+# binary name differs per platform (headless_shell on linux-arm64,
+# chrome-headless-shell on linux64), so it is resolved by search instead of
+# assuming either name.
 RUN sudo mkdir -p /opt/remotion \
   && sudo chown -R roomote:roomote /opt/remotion \
   && REMOTION_TMP="$(mktemp -d)" \
@@ -240,9 +243,6 @@ RUN sudo mkdir -p /opt/remotion \
     "remotion@${REMOTION_VERSION}" \
   && npx remotion browser ensure \
   && cp -R node_modules/.remotion/chrome-headless-shell /opt/remotion/chrome-headless-shell \
-  # The binary name differs per platform (headless_shell on linux-arm64,
-  # chrome-headless-shell on linux64), so resolve it by search instead of
-  # assuming either name.
   && REMOTION_SHELL="$(find /opt/remotion/chrome-headless-shell -type f \( -name headless_shell -o -name chrome-headless-shell \) | head -n 1)" \
   && test -n "$REMOTION_SHELL" \
   && test -x "$REMOTION_SHELL" \

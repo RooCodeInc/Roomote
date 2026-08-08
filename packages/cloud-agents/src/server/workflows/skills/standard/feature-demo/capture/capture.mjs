@@ -137,6 +137,9 @@ async function run() {
           start: start + 0.15,
           end: end + (beat.holdMs ?? 900) / 1000,
           text: beat.caption,
+          // When the zoom LANDS — narration schedules against this, not the
+          // caption fade-in (which begins with the glide, ~moveMs earlier).
+          anchor: end,
         });
       }
       cur = { scale: beat.scale ?? 1.5, focal: c };

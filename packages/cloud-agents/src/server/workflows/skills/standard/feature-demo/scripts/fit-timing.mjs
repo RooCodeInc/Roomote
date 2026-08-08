@@ -84,6 +84,9 @@ if (trim > 0) {
   for (const cap of timeline.captions) {
     cap.start = Math.max(0, cap.start - trim);
     cap.end = Math.max(0, cap.end - trim);
+    if (cap.anchor !== undefined) {
+      cap.anchor = Math.max(0, cap.anchor - trim);
+    }
   }
   timeline.video.startFromSeconds =
     (timeline.video.startFromSeconds ?? 0) + trim;
@@ -130,7 +133,10 @@ for (let i = 0; i < narration.clips.length; i++) {
 // late anchor ends later than any cumulative-duration estimate, so the only
 // reliable check is to lay the schedule out at a candidate rate and look
 // for a line pushed past its anchor.
-const beats = timeline.captions.map((c) => c.start);
+// Anchor to when each zoom LANDS (capture emits it as `anchor`); the caption
+// `start` begins with the glide, ~moveMs before the zoom arrives, and using
+// it would start narration before the zoom even begins moving.
+const beats = timeline.captions.map((c) => c.anchor ?? c.start);
 
 function scheduleAt(candidateRate) {
   let prevEnd = 0;
