@@ -393,6 +393,18 @@ async function buildCuratedMcpServerConfigs(ctx: {
       continue;
     }
 
+    // Credential-only integrations (e.g. ElevenLabs narration) are consumed
+    // by control-plane features exclusively: no MCP server exists for them
+    // and their credentials must never be delivered toward a task sandbox.
+    if (integration.serverMode === 'credential_only') {
+      console.info('[getMcpServerConfigs] Skipping connection:', {
+        connectionId: connection.id,
+        mcpId: connection.mcpId,
+        reason: 'credential_only_integration',
+      });
+      continue;
+    }
+
     if (connection.mcpId === 'linear') {
       if (!INTEGRATION_PROXY_MCP_IDS.has(connection.mcpId)) {
         continue;

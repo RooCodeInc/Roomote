@@ -39,15 +39,19 @@ narration configured, the demo gets a voice-over that leads each visual beat.
 ## Narration
 
 Captioned demos work out of the box. For a voice-over in your own (cloned)
-voice, a deployment admin sets two environment variables:
+voice, a deployment admin connects ElevenLabs under **Settings →
+Integrations → ElevenLabs** with:
 
-- `R_ELEVENLABS_API_KEY`: an ElevenLabs key. A key scoped to
-  **text-to-speech only**, with a credit cap, is sufficient and recommended.
-- `R_ELEVENLABS_VOICE_ID`: the voice to narrate with.
+- an ElevenLabs API key, scoped to **text-to-speech only** with a credit cap
+  (sufficient and recommended), and
+- the voice ID to narrate with.
 
-The key stays on the Roomote control plane: task sandboxes send narration
-text to an authenticated Roomote endpoint and receive audio back, so the
-provider credential never enters a sandbox.
+The key is encrypted at rest and stays on the Roomote control plane: task
+sandboxes send narration text to an authenticated Roomote endpoint and
+receive audio back, so the provider credential never enters a sandbox and
+agents get no ElevenLabs tools. (Operators self-hosting can alternatively set
+the `R_ELEVENLABS_API_KEY` and `R_ELEVENLABS_VOICE_ID` environment variables;
+the integration takes precedence when both are present.)
 
 ## Tips
 

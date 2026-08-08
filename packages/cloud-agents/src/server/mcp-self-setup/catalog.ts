@@ -165,6 +165,13 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
       'Keep access read-only and limited by the Granola key configuration',
     ],
   },
+  elevenlabs: {
+    capabilities: [
+      'Narrate feature-demo videos in a configured ElevenLabs voice',
+      'Keep the API key on the control plane, never exposed to agents',
+      'Configure once per deployment with a text-to-speech-scoped key',
+    ],
+  },
   supermemory: {
     capabilities: [
       'Save important decisions and context as shared memories during tasks',

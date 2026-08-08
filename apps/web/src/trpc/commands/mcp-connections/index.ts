@@ -18,6 +18,7 @@ import {
   type McpConnectionRole,
   isMcpConnectionAsanaConfig,
   isMcpConnectionGranolaConfig,
+  isMcpConnectionElevenLabsConfig,
   isMcpConnectionGrafanaConfig,
   isMcpConnectionSnowflakeConfig,
   isMcpConnectionVercelConfig,
@@ -42,6 +43,7 @@ import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-er
 import type {
   SaveAsanaConnectionInput,
   SaveGranolaConnectionInput,
+  SaveElevenLabsConnectionInput,
   SaveGrafanaConnectionInput,
   SaveSnowflakeConnectionInput,
   SaveVercelConnectionInput,
@@ -776,6 +778,30 @@ export async function getGranolaConnectionCommand(auth: UserAuthSuccess) {
   };
 }
 
+export async function getElevenLabsConnectionCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+
+  const connection = await db.query.mcpConnections.findFirst({
+    where: and(
+      eq(mcpConnections.mcpId, 'elevenlabs'),
+      isNull(mcpConnections.userId),
+    ),
+    columns: {
+      authConfig: true,
+      authStatus: true,
+    },
+  });
+
+  if (!connection || !isMcpConnectionElevenLabsConfig(connection.authConfig)) {
+    return null;
+  }
+
+  return {
+    authStatus: connection.authStatus,
+    voiceId: connection.authConfig.voiceId,
+  };
+}
+
 export async function getVercelConnectionCommand(
   auth: UserAuthSuccess,
 ): Promise<VercelConnectionData | null> {
@@ -1129,6 +1155,91 @@ export async function saveGranolaConnectionCommand(
     .insert(deploymentMcpEnablements)
     .values({
       mcpId: 'granola',
+      enabled: true,
+      enabledByUserId: auth.userId,
+    })
+    .onConflictDoUpdate({
+      target: [deploymentMcpEnablements.mcpId],
+      set: {
+        enabled: true,
+        enabledByUserId: auth.userId,
+        updatedAt: new Date(),
+      },
+    });
+
+  return {
+    authStatus: 'authenticated' as const,
+  };
+}
+
+export async function saveElevenLabsConnectionCommand(
+  auth: UserAuthSuccess,
+  input: SaveElevenLabsConnectionInput,
+) {
+  assertAdmin(auth);
+  assertCuratedIntegrationsEnabled();
+
+  const existingConnection = await db.query.mcpConnections.findFirst({
+    where: and(
+      eq(mcpConnections.mcpId, 'elevenlabs'),
+      isNull(mcpConnections.userId),
+    ),
+    columns: {
+      authConfig: true,
+    },
+  });
+
+  const existingConfig = isMcpConnectionElevenLabsConfig(
+    existingConnection?.authConfig,
+  )
+    ? existingConnection.authConfig
+    : null;
+  const nextEncryptedApiKey =
+    input.apiKey.length > 0
+      ? encrypt(input.apiKey)
+      : existingConfig?.encryptedApiKey;
+
+  if (!nextEncryptedApiKey) {
+    throw new Error(
+      'ElevenLabs API key is required when no ElevenLabs key is already stored.',
+    );
+  }
+
+  const authConfig = {
+    type: 'elevenlabs' as const,
+    encryptedApiKey: nextEncryptedApiKey,
+    voiceId: input.voiceId,
+  };
+
+  await db
+    .insert(mcpConnections)
+    .values({
+      userId: null,
+      mcpId: 'elevenlabs',
+      connectionRole: 'default',
+      authConfig,
+      enabled: true,
+      authStatus: 'authenticated',
+    })
+    .onConflictDoUpdate({
+      target: [
+        mcpConnections.userId,
+        mcpConnections.mcpId,
+        mcpConnections.connectionRole,
+      ],
+      set: {
+        connectionRole: 'default',
+        authConfig,
+        enabled: true,
+        authStatus: 'authenticated',
+        updatedAt: new Date(),
+      },
+    });
+
+  await db
+    .insert(deploymentMcpEnablements)
+    .values({
+      mcpId: 'elevenlabs',
       enabled: true,
       enabledByUserId: auth.userId,
     })

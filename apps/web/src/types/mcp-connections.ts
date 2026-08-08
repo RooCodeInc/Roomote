@@ -44,6 +44,18 @@ export type SaveGranolaConnectionInput = z.infer<
   typeof saveGranolaConnectionSchema
 >;
 
+export const saveElevenLabsConnectionSchema = z.object({
+  apiKey: z.string().transform((value) => value.trim()),
+  voiceId: z
+    .string()
+    .transform((value) => value.trim())
+    .pipe(z.string().min(1, 'Voice ID is required')),
+});
+
+export type SaveElevenLabsConnectionInput = z.infer<
+  typeof saveElevenLabsConnectionSchema
+>;
+
 export const saveVercelConnectionSchema = z.object({
   accessToken: z.string().transform((value) => value.trim()),
   defaultTeamIdOrSlug: z

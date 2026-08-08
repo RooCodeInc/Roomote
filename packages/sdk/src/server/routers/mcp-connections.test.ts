@@ -481,6 +481,31 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     expect(JSON.stringify(result)).not.toContain('enc:secret');
   });
 
+  it('never delivers a credential-only ElevenLabs connection to agents', async () => {
+    mockOrderBy.mockResolvedValue([
+      buildJoinedConnectionRow({
+        id: 'conn-elevenlabs',
+        userId: null,
+        mcpId: 'elevenlabs',
+        authConfig: {
+          type: 'elevenlabs',
+          encryptedApiKey: 'enc:secret',
+          voiceId: 'v1',
+        },
+      }),
+    ]);
+
+    const result = await createCaller(
+      'https://api.preview.roomote.run/trpc/mcpConnections.getMcpServerConfigs',
+    ).getMcpServerConfigs();
+
+    // Credential-only: no MCP server, and the secret never leaves the
+    // control plane toward a task sandbox.
+    expect(result).toEqual({ servers: {} });
+    expect(JSON.stringify(result)).not.toContain('enc:secret');
+    expect(JSON.stringify(result)).not.toContain('v1');
+  });
+
   it('returns Vercel proxy config without requesting OAuth tokens', async () => {
     mockOrderBy.mockResolvedValue([
       buildJoinedConnectionRow({

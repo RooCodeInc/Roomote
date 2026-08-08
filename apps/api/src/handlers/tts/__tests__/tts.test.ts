@@ -3,15 +3,12 @@ import type { RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
-const { mockEnv } = vi.hoisted(() => ({
-  mockEnv: {
-    R_ELEVENLABS_API_KEY: undefined as string | undefined,
-    R_ELEVENLABS_VOICE_ID: undefined as string | undefined,
-  },
+const { mockResolveCredentials } = vi.hoisted(() => ({
+  mockResolveCredentials: vi.fn(),
 }));
 
-vi.mock('@roomote/env', () => ({
-  Env: mockEnv,
+vi.mock('../connection', () => ({
+  resolveElevenLabsCredentials: mockResolveCredentials,
 }));
 
 import { tts } from '../index';
@@ -51,8 +48,10 @@ function narrationRequest(body: unknown): Request {
 const originalFetch = globalThis.fetch;
 
 beforeEach(() => {
-  mockEnv.R_ELEVENLABS_API_KEY = 'el-key';
-  mockEnv.R_ELEVENLABS_VOICE_ID = 'voice-1';
+  mockResolveCredentials.mockResolvedValue({
+    apiKey: 'el-key',
+    voiceId: 'voice-1',
+  });
 });
 
 afterEach(() => {
@@ -62,7 +61,7 @@ afterEach(() => {
 
 describe('POST /tts/narration', () => {
   it('404s when the deployment has no ElevenLabs credentials', async () => {
-    mockEnv.R_ELEVENLABS_API_KEY = undefined;
+    mockResolveCredentials.mockResolvedValue(undefined);
 
     const response = await createApp(createRunToken()).request(
       narrationRequest({ lines: ['hello'] }),
@@ -71,14 +70,18 @@ describe('POST /tts/narration', () => {
     expect(response.status).toBe(404);
   });
 
-  it('404s when only the voice id is missing', async () => {
-    mockEnv.R_ELEVENLABS_VOICE_ID = undefined;
+  it('500s without leaking details when credential resolution throws', async () => {
+    mockResolveCredentials.mockRejectedValue(new Error('db exploded'));
 
     const response = await createApp(createRunToken()).request(
       narrationRequest({ lines: ['hello'] }),
     );
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(500);
+
+    const payload = (await response.json()) as { error: string };
+
+    expect(payload.error).not.toContain('db exploded');
   });
 
   it('rejects non-run-token callers', async () => {

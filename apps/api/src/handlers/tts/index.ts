@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
-import { Env } from '@roomote/env';
 import type { RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../types';
 import { logHandlerError } from '../utils';
+import { resolveElevenLabsCredentials } from './connection';
 
 /**
  * Narration text-to-speech for task sandboxes, used by the feature-demo
@@ -148,13 +148,21 @@ async function synthesizeLine(options: {
 export const tts = new Hono<{ Variables: Variables }>();
 
 tts.post('/narration', async (c) => {
-  const apiKey = Env.R_ELEVENLABS_API_KEY;
-  const voiceId = Env.R_ELEVENLABS_VOICE_ID;
+  let credentials;
+
+  try {
+    credentials = await resolveElevenLabsCredentials();
+  } catch (error) {
+    logHandlerError('ttsNarration', error);
+    return c.json({ error: 'Narration synthesis failed' }, 500);
+  }
 
   // Not configured => the feature does not exist on this deployment.
-  if (!apiKey || !voiceId) {
+  if (!credentials) {
     return c.json({ error: 'Narration TTS is not configured' }, 404);
   }
+
+  const { apiKey, voiceId } = credentials;
 
   const auth = c.get('authContext');
 
