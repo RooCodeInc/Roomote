@@ -36,7 +36,7 @@ import {
 import {
   buildPrReviewActionCallbackData,
   isTaskExecutingTurn,
-  RunStatus,
+  WORKER_HEARTBEAT_STALE_MS,
 } from '@roomote/types';
 
 type PrReviewNotificationJob = Job<PrReviewNotificationRequest, void, string>;
@@ -241,7 +241,16 @@ export const prReviewNotificationJob = async (
     return;
   }
 
-  if (isTaskExecutingTurn(latestJob.status, latestJob.taskPhase)) {
+  const isExecutingTurn = isTaskExecutingTurn(
+    latestJob.status,
+    latestJob.taskPhase,
+  );
+  const isWorkerHeartbeatStale =
+    latestJob.workerHeartbeatAt != null &&
+    Date.now() - latestJob.workerHeartbeatAt.getTime() >=
+      WORKER_HEARTBEAT_STALE_MS;
+
+  if (isExecutingTurn && !isWorkerHeartbeatStale) {
     if (data.deferrals < PR_REVIEW_NOTIFICATION_MAX_DEFERRALS) {
       await schedulePrReviewNotificationJob({
         request: { ...data, deferrals: data.deferrals + 1 },
@@ -254,20 +263,17 @@ export const prReviewNotificationJob = async (
       return;
     }
 
-    // Live-sandbox follow-up turns use Idle + running, so preserve the normal
-    // deferral window. At the cap, trust the durable Idle status rather than
-    // dropping feedback forever when the runtime phase became stale.
-    if (latestJob.status === RunStatus.Idle) {
-      console.warn(
-        `[PrReviewNotification] Task ${data.taskId} is idle with a running phase after ${data.deferrals} deferrals; delivering pending review activity for ${data.repository}#${data.prNumber}`,
-      );
-    } else {
-      console.warn(
-        `[PrReviewNotification] Task ${data.taskId} never went idle after ${data.deferrals} deferrals, dropping pending review activity for ${data.repository}#${data.prNumber}`,
-      );
-      await consumePendingPrReviewActivity(target);
-      return;
-    }
+    console.warn(
+      `[PrReviewNotification] Task ${data.taskId} never went idle after ${data.deferrals} deferrals, dropping pending review activity for ${data.repository}#${data.prNumber}`,
+    );
+    await consumePendingPrReviewActivity(target);
+    return;
+  }
+
+  if (isExecutingTurn && isWorkerHeartbeatStale) {
+    console.warn(
+      `[PrReviewNotification] Task ${data.taskId} has a stale worker heartbeat while its phase is running; delivering pending review activity for ${data.repository}#${data.prNumber}`,
+    );
   }
 
   const prLink = await db.query.taskPullRequests.findFirst({
