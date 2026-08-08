@@ -52,6 +52,15 @@ describe('feature-demo skill', () => {
     );
   });
 
+  it('stages the capture runner at the sanctioned /tmp path for delegation', () => {
+    // Home-directory paths do not survive the delegation boundary, and the
+    // proof-runner prompt sanctions exactly this staged path.
+    expect(skillContent).toContain(
+      'cp "$HOME/.agents/skills/feature-demo/capture/capture.mjs" /tmp/feature-demo/capture.mjs',
+    );
+    expect(skillContent).toContain('node /tmp/feature-demo/capture.mjs');
+  });
+
   it('keeps TTS provider keys out of the sandbox', () => {
     expect(skillContent).toContain(
       'Never ask for, read, or handle TTS provider keys.',

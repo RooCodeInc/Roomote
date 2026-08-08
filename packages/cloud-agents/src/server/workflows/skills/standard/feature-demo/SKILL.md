@@ -64,11 +64,14 @@ this pipeline is ever committed to the repository.
 <step number="3">
 <name>Capture (delegated browser work)</name>
 <actions>
+<action>Stage the capture runner where the delegated runtime can see it — home-directory paths do not survive the delegation boundary, so always copy first:
+
+`mkdir -p /tmp/feature-demo && cp "$HOME/.agents/skills/feature-demo/capture/capture.mjs" /tmp/feature-demo/capture.mjs`</action>
 <action>Browser automation is the proof-runner subagent's exclusive surface — do not load `agent-browser` or run the capture yourself. Delegate with the Task tool to `proof-runner` with a brief that instructs it to run exactly:
 
-`SCRIPT=/tmp/feature-demo/demo-script.json OUT_DIR=/tmp/feature-demo/work node ~/.agents/skills/feature-demo/capture/capture.mjs`
+`SCRIPT=/tmp/feature-demo/demo-script.json OUT_DIR=/tmp/feature-demo/work node /tmp/feature-demo/capture.mjs`
 
-and to report the runner's printed summary plus `ls -la /tmp/feature-demo/work`. The runner is an agent-browser orchestrator (it shells the `agent-browser` CLI for every browser action), so it stays inside proof-runner's sanctioned tooling.</action>
+and to report the runner's printed summary plus `ls -la /tmp/feature-demo/work`. The staged runner is proof-runner's one sanctioned script exception (its own instructions say so): an agent-browser orchestrator that shells the `agent-browser` CLI for every browser action.</action>
 <action>If the harness has no proof-runner registered, report a blocker (`proof runtime unavailable`) instead of driving the browser from this skill.</action>
 <action>Expected outputs: `/tmp/feature-demo/work/recording.mp4` and `/tmp/feature-demo/work/timeline.json`. Verify both exist and that `ffprobe` reports a duration close to the timeline's `durationSeconds` (the runner itself fails loudly when the recording is much shorter than the interaction). One retry on failure; then report blocked with the runner's error.</action>
 <action>If the runner's error mentions sparse screencast frames or `record stop` reports an ffmpeg failure, the sandbox is likely running a stale snapshot with an outdated runtime ffmpeg — report the blocker as `stale sandbox runtime` so an operator refreshes the snapshot pool; do not retry more than once.</action>
@@ -78,7 +81,7 @@ and to report the runner's printed summary plus `ls -la /tmp/feature-demo/work`.
 <step number="4">
 <name>Narration (optional, degrades cleanly)</name>
 <actions>
-<action>Run `WORK_DIR=/tmp/feature-demo/work node ~/.agents/skills/feature-demo/scripts/build-narration.mjs` (add `LINES=/tmp/feature-demo/lines.json` if spoken lines differ from captions). This posts the caption text to the Roomote control plane, which holds the TTS credentials — no provider key exists in this sandbox, and you must never ask for one.</action>
+<action>Run `WORK_DIR=/tmp/feature-demo/work node "$HOME/.agents/skills/feature-demo/scripts/build-narration.mjs"` (add `LINES=/tmp/feature-demo/lines.json` if spoken lines differ from captions). This posts the caption text to the Roomote control plane, which holds the TTS credentials — no provider key exists in this sandbox, and you must never ask for one.</action>
 <action>Exit code 3 means narration is not configured on this deployment: proceed captions-only, and mention in the final report that narration is available if an admin sets `R_ELEVENLABS_API_KEY` + `R_ELEVENLABS_VOICE_ID`.</action>
 </actions>
 </step>
@@ -86,7 +89,7 @@ and to report the runner's printed summary plus `ls -la /tmp/feature-demo/work`.
 <step number="5">
 <name>Fit timing</name>
 <actions>
-<action>Run `WORK_DIR=/tmp/feature-demo/work node ~/.agents/skills/feature-demo/scripts/fit-timing.mjs`. It trims the dead opening, paces the voice-over (pitch-preserving atempo), solves a video playback rate so each spoken line finishes before its zoom lands, and rewrites caption windows to match the audio. Captions-only demos still get the opening trim.</action>
+<action>Run `WORK_DIR=/tmp/feature-demo/work node "$HOME/.agents/skills/feature-demo/scripts/fit-timing.mjs"`. It trims the dead opening, optionally paces the voice-over (pitch-preserving atempo), solves a video playback rate so each spoken line starts just before its zoom lands, and rewrites caption windows to match the audio. Captions-only demos still get the opening trim.</action>
 <action>Check its printed schedule: no line should start before the previous one ends. If lines overlap or the rate hits the 0.75 floor, the narration is too long for the motion — shorten the lines or add holds to the script and recapture.</action>
 </actions>
 </step>
@@ -95,7 +98,7 @@ and to report the runner's printed summary plus `ls -la /tmp/feature-demo/work`.
 <name>Render</name>
 <actions>
 <action>Assemble the render project in the work dir:
-- `cp -R ~/.agents/skills/feature-demo/render /tmp/feature-demo/render`
+- `cp -R "$HOME/.agents/skills/feature-demo/render" /tmp/feature-demo/render`
 - `cp /tmp/feature-demo/work/timeline.json /tmp/feature-demo/work/narration.json /tmp/feature-demo/render/props/` (skip narration.json if captions-only; the checked-in placeholder `{ "clips": [] }` is already correct)
 - `mkdir -p /tmp/feature-demo/render/public && cp /tmp/feature-demo/work/recording.mp4 /tmp/feature-demo/render/public/`
 - `cp -R /tmp/feature-demo/work/vo /tmp/feature-demo/render/public/vo` (narrated demos only)</action>

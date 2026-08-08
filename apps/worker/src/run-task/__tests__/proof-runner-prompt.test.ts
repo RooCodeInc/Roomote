@@ -25,6 +25,20 @@ describe('createProofRunnerAgentPrompt', () => {
     );
   });
 
+  it('sanctions exactly the staged feature-demo capture runner', () => {
+    const prompt = createProofRunnerAgentPrompt('http://127.0.0.1:3000');
+
+    expect(prompt).toContain(
+      'the feature-demo capture runner at `/tmp/feature-demo/capture.mjs`',
+    );
+    expect(prompt).toContain(
+      'running it via `node` with the environment variables the brief specifies is compliant browser work',
+    );
+    expect(prompt).toContain(
+      'This exception covers exactly that staged runner and no other script.',
+    );
+  });
+
   it('returns artifact IDs and explicit parent sharing guidance', () => {
     const prompt = createProofRunnerAgentPrompt('http://127.0.0.1:3000');
 
