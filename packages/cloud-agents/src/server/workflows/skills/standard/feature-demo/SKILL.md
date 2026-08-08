@@ -74,7 +74,7 @@ this pipeline is ever committed to the repository.
 and to report the runner's printed summary plus `ls -la /tmp/feature-demo/work`. The staged runner is proof-runner's one sanctioned script exception (its own instructions say so): an agent-browser orchestrator that shells the `agent-browser` CLI for every browser action.</action>
 <action>If the harness has no proof-runner registered, report a blocker (`proof runtime unavailable`) instead of driving the browser from this skill.</action>
 <action>Expected outputs: `/tmp/feature-demo/work/recording.mp4` and `/tmp/feature-demo/work/timeline.json`. Verify both exist and that `ffprobe` reports a duration close to the timeline's `durationSeconds` (the runner itself fails loudly when the recording is much shorter than the interaction). One retry on failure; then report blocked with the runner's error.</action>
-<action>If the runner's error mentions sparse screencast frames or `record stop` reports an ffmpeg failure, the sandbox is likely running a stale snapshot with an outdated runtime ffmpeg — report the blocker as `stale sandbox runtime` so an operator refreshes the snapshot pool; do not retry more than once.</action>
+<action>If the runner fails with a recording much shorter than the interaction, diagnose by target: WebGL/canvas-heavy surfaces (games, 3D visualizations) can stall headless frame production for the whole page, so ordinary web UIs on the same sandbox record fine while that one surface collapses. Report the blocker as `webgl surface stalls headless recording`, naming the surface — do not burn retries. Separately, if `record stop` itself reports an ffmpeg error, the sandbox is likely a stale snapshot with an outdated runtime ffmpeg (`stale sandbox runtime`).</action>
 </actions>
 </step>
 
