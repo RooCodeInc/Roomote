@@ -36,6 +36,7 @@ import {
 import {
   buildPrReviewActionCallbackData,
   isTaskExecutingTurn,
+  WORKER_HEARTBEAT_STALE_MS,
 } from '@roomote/types';
 
 type PrReviewNotificationJob = Job<PrReviewNotificationRequest, void, string>;
@@ -240,11 +241,16 @@ export const prReviewNotificationJob = async (
     return;
   }
 
-  // The notification only posts while the owning task is idle. Hold it while
-  // the task is actively working, and once the deferral cap is reached (the
-  // task has effectively been running for the whole pending-events window),
-  // drop the pending feedback instead of posting mid-run.
-  if (isTaskExecutingTurn(latestJob.status, latestJob.taskPhase)) {
+  const isExecutingTurn = isTaskExecutingTurn(
+    latestJob.status,
+    latestJob.taskPhase,
+  );
+  const isWorkerHeartbeatStale =
+    latestJob.workerHeartbeatAt != null &&
+    Date.now() - latestJob.workerHeartbeatAt.getTime() >=
+      WORKER_HEARTBEAT_STALE_MS;
+
+  if (isExecutingTurn && !isWorkerHeartbeatStale) {
     if (data.deferrals < PR_REVIEW_NOTIFICATION_MAX_DEFERRALS) {
       await schedulePrReviewNotificationJob({
         request: { ...data, deferrals: data.deferrals + 1 },
@@ -262,6 +268,12 @@ export const prReviewNotificationJob = async (
     );
     await consumePendingPrReviewActivity(target);
     return;
+  }
+
+  if (isExecutingTurn && isWorkerHeartbeatStale) {
+    console.warn(
+      `[PrReviewNotification] Task ${data.taskId} has a stale worker heartbeat while its phase is running; delivering pending review activity for ${data.repository}#${data.prNumber}`,
+    );
   }
 
   const prLink = await db.query.taskPullRequests.findFirst({
