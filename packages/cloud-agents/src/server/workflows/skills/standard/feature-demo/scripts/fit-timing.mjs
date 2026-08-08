@@ -17,7 +17,6 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 
 const WORK_DIR = process.env.WORK_DIR || '/tmp/feature-demo/work';
-const ATEMPO = Number(process.argv[2] || '1.12');
 
 const INTRO_SECONDS = 1.2; // what survives of the opening hold
 const FIRST_LINE_AT = 0.7; // narration start after the video opens
@@ -44,6 +43,14 @@ const timeline = JSON.parse(readFileSync(timelinePath, 'utf8'));
 const narration = existsSync(narrationPath)
   ? JSON.parse(readFileSync(narrationPath, 'utf8'))
   : { clips: [] };
+
+// v3 reads noticeably slower than a conversational pace and benefits from a
+// pitch-preserving speed-up; v2-family models pace naturally. An explicit
+// argv override wins either way.
+const defaultAtempo = (narration.modelId ?? '').startsWith('eleven_v3')
+  ? 1.12
+  : 1.0;
+const ATEMPO = Number(process.argv[2] || defaultAtempo);
 
 // --- 1. Trim the dead opening (all times still in source-video seconds) ---
 

@@ -214,5 +214,7 @@ tts.post('/narration', async (c) => {
     }
   }
 
-  return c.json({ clips });
+  // The model id lets callers adapt post-processing (e.g. v3 reads slowly
+  // and benefits from a pitch-preserving speed-up; v2 paces naturally).
+  return c.json({ clips, modelId });
 });
