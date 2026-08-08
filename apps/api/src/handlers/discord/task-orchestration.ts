@@ -5,7 +5,10 @@ import {
   getTaskUrl,
   routeTask,
 } from '@roomote/cloud-agents/server';
-import type { DiscordInteraction } from '@roomote/communication/discord-event';
+import {
+  isDiscordAudioAttachment,
+  type DiscordInteraction,
+} from '@roomote/communication/discord-event';
 import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import { findDiscordInstallationByGuildId } from '@roomote/sdk/server';
 import {
@@ -225,7 +228,12 @@ export async function startNewDiscordTask(input: {
         })
       : [];
     const threadAttachments = historyAttachments.length
-      ? await processDiscordAttachments(historyAttachments)
+      ? historyAttachments.some(isDiscordAudioAttachment)
+        ? await processDiscordAttachments(historyAttachments, {
+            userId: input.queuedMessage.userId,
+            userTextContext: input.queuedMessage.text,
+          })
+        : await processDiscordAttachments(historyAttachments)
       : { images: [], attachmentTexts: [], warnings: [] };
     for (const warning of threadAttachments.warnings) {
       console.warn(`[discord] Thread attachment warning: ${warning}`);

@@ -5,6 +5,8 @@ import {
   AUDIO_TRANSCRIPTION_MAX_SIZE_BYTES,
   describeVideoAttachment,
   extractPromptTextAttachments,
+  formatAudioAttachmentWarning,
+  formatAudioTranscriptionResult,
   isAudioTranscriptionSupportedMimeType,
   isVideoAgentSupportedMimeType,
   transcribeAudioAttachment,
@@ -29,14 +31,6 @@ function getFirstSlackVideoFile(files: SlackFile[]): SlackFile | undefined {
 
 function getSlackAudioFiles(files: SlackFile[]): SlackFile[] {
   return files.filter((file) => file.mimetype.startsWith('audio/'));
-}
-
-function formatAudioTranscript(filename: string, transcript: string): string {
-  return `Audio attachment transcript ("${filename}"):\n${transcript}`;
-}
-
-function formatAudioWarning(filename: string, reason: string): string {
-  return `[Audio attachment "${filename}" ${reason}.]`;
 }
 
 export async function processSlackAttachments({
@@ -144,7 +138,7 @@ export async function processSlackAttachments({
 
     if (!isAudioTranscriptionSupportedMimeType(firstAudioFile.mimetype)) {
       return [
-        formatAudioWarning(
+        formatAudioAttachmentWarning(
           firstAudioFile.name,
           `could not be transcribed because ${firstAudioFile.mimetype} is not supported`,
         ),
@@ -153,7 +147,7 @@ export async function processSlackAttachments({
 
     if (firstAudioFile.size > AUDIO_TRANSCRIPTION_MAX_SIZE_BYTES) {
       return [
-        formatAudioWarning(
+        formatAudioAttachmentWarning(
           firstAudioFile.name,
           'could not be transcribed because it exceeds the 20 MiB limit',
         ),
@@ -163,7 +157,10 @@ export async function processSlackAttachments({
     const fileBytes = await slack.downloadSlackFile(firstAudioFile);
     if (!fileBytes) {
       return [
-        formatAudioWarning(firstAudioFile.name, 'could not be downloaded'),
+        formatAudioAttachmentWarning(
+          firstAudioFile.name,
+          'could not be downloaded',
+        ),
       ];
     }
 
@@ -174,29 +171,9 @@ export async function processSlackAttachments({
       userId,
       userTextContext,
     });
-    const messages =
-      result.status === 'transcribed'
-        ? [formatAudioTranscript(firstAudioFile.name, result.transcript)]
-        : result.status === 'unsupported_model'
-          ? [
-              formatAudioWarning(
-                firstAudioFile.name,
-                'could not be transcribed because no configured model supports audio input',
-              ),
-            ]
-          : result.status === 'oversized'
-            ? [
-                formatAudioWarning(
-                  firstAudioFile.name,
-                  'could not be transcribed because it exceeds the 20 MiB limit',
-                ),
-              ]
-            : [
-                formatAudioWarning(
-                  firstAudioFile.name,
-                  'could not be transcribed',
-                ),
-              ];
+    const messages = [
+      formatAudioTranscriptionResult(firstAudioFile.name, result),
+    ];
 
     if (audioFiles.length > 1) {
       messages.push(
@@ -210,7 +187,12 @@ export async function processSlackAttachments({
       `[SlackWebhook] Failed to process Slack audio file: ${formatErrorForLog(error)}`,
     );
     return firstAudioFile
-      ? [formatAudioWarning(firstAudioFile.name, 'could not be transcribed')]
+      ? [
+          formatAudioAttachmentWarning(
+            firstAudioFile.name,
+            'could not be transcribed',
+          ),
+        ]
       : [];
   });
 

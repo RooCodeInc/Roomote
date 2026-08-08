@@ -141,6 +141,29 @@ describe('Telegram update helpers', () => {
     });
   });
 
+  it('accepts native voice notes as task entry messages', () => {
+    const parsed = parseTelegramUpdate({
+      update_id: 1008,
+      message: {
+        message_id: 49,
+        chat: { id: 123, type: 'private' },
+        voice: {
+          file_id: 'voice-file',
+          file_unique_id: 'voice-unique',
+          duration: 4,
+          mime_type: 'audio/ogg',
+          file_size: 1234,
+        },
+      },
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(isTelegramTaskEntryUpdate(parsed.data!)).toBe(true);
+    expect(
+      telegramUpdateToQueuedCommunicationMessage(parsed.data!),
+    ).toMatchObject({ text: 'Audio attachment: voice message' });
+  });
+
   it('tracks Telegram forum topics as communication threads', () => {
     const parsed = parseTelegramUpdate({
       update_id: 1002,

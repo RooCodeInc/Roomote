@@ -15,6 +15,27 @@ vi.mock('@roomote/cloud-agents/server', () => ({
     attachmentTexts: [],
     warnings: [],
   })),
+  formatAudioAttachmentWarning: vi.fn(
+    (filename: string, reason: string) =>
+      `[Audio attachment "${filename}" ${reason}.]`,
+  ),
+  formatAudioTranscriptionResult: vi.fn(
+    (
+      filename: string,
+      result:
+        | { status: 'transcribed'; transcript: string }
+        | { status: 'unsupported_model' }
+        | { status: 'oversized' }
+        | { status: 'failed' },
+    ) =>
+      result.status === 'transcribed'
+        ? `Audio attachment transcript ("${filename}"):\n${result.transcript}`
+        : result.status === 'unsupported_model'
+          ? `[Audio attachment "${filename}" could not be transcribed because no configured model supports audio input.]`
+          : result.status === 'oversized'
+            ? `[Audio attachment "${filename}" could not be transcribed because it exceeds the 20 MiB limit.]`
+            : `[Audio attachment "${filename}" could not be transcribed.]`,
+  ),
   isAudioTranscriptionSupportedMimeType: vi.fn(
     (mimeType: string) => mimeType === 'audio/mp4',
   ),

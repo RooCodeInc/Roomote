@@ -387,18 +387,6 @@ telegram.post('/', async (c) => {
     userId: senderUserId,
   }) as QueuedTelegramCommunicationMessage | null;
 
-  if (
-    queuedMessage &&
-    botToken &&
-    (message.photo?.length || message.document)
-  ) {
-    queuedMessage = await attachTelegramMediaToQueuedMessage({
-      message,
-      queuedMessage,
-      botToken,
-    });
-  }
-
   const metadata = getTelegramUpdateCommunicationMetadata(update);
   const conversation = {
     chatId: metadata.communicationChannelId,
@@ -452,6 +440,25 @@ telegram.post('/', async (c) => {
       ? repliedToAutomationReport
       : undefined
     : await findActiveTelegramTaskRun(conversation);
+
+  const hasMedia = Boolean(
+    message.photo?.length || message.document || message.audio || message.voice,
+  );
+  const shouldProcessMedia = Boolean(
+    activeRun ||
+    newTaskCommand ||
+    repliedToAutomationReport ||
+    isTelegramTaskEntryUpdate(update, {
+      botUsername: botUsername ?? undefined,
+    }),
+  );
+  if (queuedMessage && hasMedia && shouldProcessMedia) {
+    queuedMessage = await attachTelegramMediaToQueuedMessage({
+      message,
+      queuedMessage,
+      ...(botToken ? { botToken } : {}),
+    });
+  }
 
   if (activeRun && newTaskCommand) {
     const commandLabel = `/${newTaskCommand.command}`;

@@ -1,8 +1,16 @@
 import { isRoomoteTextExtractableAttachment } from '@roomote/cloud-agents';
-import { extractPromptTextAttachments } from '@roomote/cloud-agents/server';
+import {
+  AUDIO_TRANSCRIPTION_MAX_SIZE_BYTES,
+  extractPromptTextAttachments,
+  formatAudioAttachmentWarning,
+  formatAudioTranscriptionResult,
+  resolveAudioTranscriptionMimeType,
+  transcribeAudioAttachment,
+} from '@roomote/cloud-agents/server';
 import type { DiscordAttachment } from '@roomote/communication/discord-event';
 import {
   isDiscordImageAttachment,
+  isDiscordAudioAttachment,
   isDiscordTextDocumentAttachment,
 } from '@roomote/communication/discord-event';
 import { formatErrorForLog } from '@roomote/types';
@@ -111,27 +119,66 @@ type ProcessedDiscordAttachments = {
  */
 export async function processDiscordAttachments(
   attachments: DiscordAttachment[],
-  options: { fetch?: typeof fetch } = {},
+  options: {
+    fetch?: typeof fetch;
+    userId?: string;
+    userTextContext?: string;
+  } = {},
 ): Promise<ProcessedDiscordAttachments> {
   const fetchImpl = options.fetch ?? fetch;
   const images: string[] = [];
   const attachmentTexts: string[] = [];
   const warnings: string[] = [];
   let totalBytes = 0;
+  let audioProcessed = false;
 
   for (const attachment of attachments.slice(0, MAX_DISCORD_ATTACHMENTS)) {
     const isImage = isDiscordImageAttachment(attachment);
+    const isAudio = isDiscordAudioAttachment(attachment);
     const isText =
       isDiscordTextDocumentAttachment(attachment) &&
       isRoomoteTextExtractableAttachment({
         filename: attachment.filename,
         mimeType: attachment.content_type,
       });
-    if (!isImage && !isText) continue;
+    if (!isImage && !isText && !isAudio) continue;
+
+    if (isAudio && audioProcessed) {
+      warnings.push('Only the first audio attachment was transcribed.');
+      continue;
+    }
+    if (isAudio) audioProcessed = true;
+
+    const audioMimeType = isAudio
+      ? resolveAudioTranscriptionMimeType({
+          mimeType: attachment.content_type,
+          filename: attachment.filename,
+        })
+      : null;
+    if (isAudio && !audioMimeType) {
+      attachmentTexts.push(
+        formatAudioAttachmentWarning(
+          attachment.filename,
+          `could not be transcribed because ${attachment.content_type ?? 'its media type'} is not supported`,
+        ),
+      );
+      continue;
+    }
 
     const maxBytes = isImage
       ? MAX_DISCORD_IMAGE_BYTES
-      : MAX_DISCORD_DOCUMENT_BYTES;
+      : isAudio
+        ? AUDIO_TRANSCRIPTION_MAX_SIZE_BYTES
+        : MAX_DISCORD_DOCUMENT_BYTES;
+    if (isAudio && attachment.size > AUDIO_TRANSCRIPTION_MAX_SIZE_BYTES) {
+      attachmentTexts.push(
+        formatAudioAttachmentWarning(
+          attachment.filename,
+          'could not be transcribed because it exceeds the 20 MiB limit',
+        ),
+      );
+      continue;
+    }
     if (totalBytes + attachment.size > MAX_DISCORD_TOTAL_BYTES) {
       warnings.push(
         `Skipped ${attachment.filename}: attachment total is too large.`,
@@ -159,6 +206,19 @@ export async function processDiscordAttachments(
         );
         continue;
       }
+      if (isAudio && audioMimeType) {
+        const result = await transcribeAudioAttachment({
+          audioBytes: Buffer.from(downloaded.bytes),
+          mimeType: audioMimeType,
+          filename: attachment.filename,
+          userId: options.userId,
+          userTextContext: options.userTextContext,
+        });
+        attachmentTexts.push(
+          formatAudioTranscriptionResult(attachment.filename, result),
+        );
+        continue;
+      }
       const extracted = await extractPromptTextAttachments([
         {
           filename: attachment.filename,
@@ -170,9 +230,18 @@ export async function processDiscordAttachments(
       attachmentTexts.push(...extracted.attachmentTexts);
       warnings.push(...extracted.warnings);
     } catch (error) {
-      warnings.push(
-        `Skipped ${attachment.filename}: ${formatErrorForLog(error)}`,
-      );
+      if (isAudio) {
+        attachmentTexts.push(
+          formatAudioAttachmentWarning(
+            attachment.filename,
+            'could not be downloaded',
+          ),
+        );
+      } else {
+        warnings.push(
+          `Skipped ${attachment.filename}: ${formatErrorForLog(error)}`,
+        );
+      }
     }
   }
 
