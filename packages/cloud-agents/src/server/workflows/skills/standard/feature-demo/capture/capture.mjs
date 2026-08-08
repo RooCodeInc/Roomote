@@ -96,11 +96,34 @@ const pushCursorMove = (startT, endT, target) => {
   curCursor = target;
 };
 
+// The recorder captures via CDP screencast, which only emits frames when the
+// page visually changes — and stamps them without wall-clock gaps. On a
+// statically-rendered surface (games between state changes, idle dashboards)
+// a long session collapses into a sub-second video. Injecting an
+// imperceptible 2px corner dot that re-paints every animation frame keeps
+// compositor damage — and therefore frames — flowing at wall-clock rate.
+const TICKER_JS =
+  '(function(){var d=document.createElement("div");' +
+  'd.style.cssText="position:fixed;left:0;bottom:0;width:2px;height:2px;' +
+  'z-index:2147483647;pointer-events:none;background:#000;opacity:0.01";' +
+  'document.body.appendChild(d);var f=0;' +
+  '(function t(){d.style.opacity=(f++%2)?"0.02":"0.01";' +
+  'requestAnimationFrame(t)})()})()';
+
 async function run() {
   mkdirSync(OUT_DIR, { recursive: true });
+  // `record start` creates a fresh browser context; a pre-existing page
+  // (e.g. from an earlier inspection step) would leave the beats driving one
+  // page while the recorder watches another. Start from a clean slate.
+  try {
+    ab('close', '--all');
+  } catch {
+    // no active session is fine
+  }
   ab('set', 'viewport', String(VIEWPORT.w), String(VIEWPORT.h));
   ab('record', 'start', `${OUT_DIR}/raw.webm`, script.url);
   t0 = Date.now();
+  ab('eval', TICKER_JS);
   sleep(300); // let the first frames settle
 
   for (const beat of script.beats) {
@@ -201,6 +224,36 @@ async function run() {
     ab('close', '--all');
   } catch {
     // best-effort; the recording is already on disk
+  }
+
+  // Honest-state gate: a recording much shorter than the interaction means
+  // the screencast stalled (or frames stayed sparse despite the ticker) and
+  // the demo would be garbage. Fail loudly instead of shipping it.
+  const recordedSeconds = parseFloat(
+    execFileSync('ffprobe', [
+      '-v',
+      'error',
+      '-show_entries',
+      'format=duration',
+      '-of',
+      'default=nw=1:nk=1',
+      `${OUT_DIR}/raw.webm`,
+    ])
+      .toString()
+      .trim(),
+  );
+
+  if (
+    !Number.isFinite(recordedSeconds) ||
+    recordedSeconds < timeline.durationSeconds * 0.75
+  ) {
+    throw new Error(
+      `recording is ${recordedSeconds}s but the interaction ran ` +
+        `${timeline.durationSeconds.toFixed(2)}s — screencast frames were ` +
+        `sparse or the recorder stalled. If \`record stop\` also reported an ` +
+        `ffmpeg error, the sandbox runtime is likely a stale snapshot with ` +
+        `an outdated ffmpeg. Report this as a blocker; do not render.`,
+    );
   }
 
   // WebM (VP8/VP9) -> H.264 mp4 for the renderer.

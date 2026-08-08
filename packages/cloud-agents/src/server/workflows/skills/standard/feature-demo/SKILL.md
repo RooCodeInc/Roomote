@@ -70,7 +70,8 @@ this pipeline is ever committed to the repository.
 
 and to report the runner's printed summary plus `ls -la /tmp/feature-demo/work`. The runner is an agent-browser orchestrator (it shells the `agent-browser` CLI for every browser action), so it stays inside proof-runner's sanctioned tooling.</action>
 <action>If the harness has no proof-runner registered, report a blocker (`proof runtime unavailable`) instead of driving the browser from this skill.</action>
-<action>Expected outputs: `/tmp/feature-demo/work/recording.mp4` and `/tmp/feature-demo/work/timeline.json`. Verify both exist and that `ffprobe` reports a duration close to the timeline's `durationSeconds`. One retry on failure; then report blocked with the runner's error.</action>
+<action>Expected outputs: `/tmp/feature-demo/work/recording.mp4` and `/tmp/feature-demo/work/timeline.json`. Verify both exist and that `ffprobe` reports a duration close to the timeline's `durationSeconds` (the runner itself fails loudly when the recording is much shorter than the interaction). One retry on failure; then report blocked with the runner's error.</action>
+<action>If the runner's error mentions sparse screencast frames or `record stop` reports an ffmpeg failure, the sandbox is likely running a stale snapshot with an outdated runtime ffmpeg — report the blocker as `stale sandbox runtime` so an operator refreshes the snapshot pool; do not retry more than once.</action>
 </actions>
 </step>
 
