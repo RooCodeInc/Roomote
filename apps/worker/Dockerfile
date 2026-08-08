@@ -8,7 +8,7 @@ FROM ubuntu:24.04 AS runtime
 # to their source.
 LABEL org.opencontainers.image.source=https://github.com/RooCodeInc/Roomote
 
-ARG AGENT_BROWSER_VERSION=0.27.0
+ARG AGENT_BROWSER_VERSION=0.33.2
 ARG OPENCODE_CLI_VERSION=1.18.10
 ARG FFMPEG_INSTALLER_VERSION=1.1.0
 # @ffprobe-installer (not ffprobe-static, which ships no linux/arm64 binary
