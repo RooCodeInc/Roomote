@@ -93,6 +93,12 @@ describe('audio transcription', () => {
       null,
     );
     expect(
+      resolveAudioTranscriptionMimeType({
+        mimeType: 'video/mp4',
+        filename: 'clip.mp4',
+      }),
+    ).toBe(null);
+    expect(
       formatAudioTranscriptionResult('voice.ogg', {
         status: 'unsupported_model',
       }),

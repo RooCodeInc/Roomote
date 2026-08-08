@@ -423,11 +423,20 @@ export function isDiscordTextDocumentAttachment(
 export function isDiscordAudioAttachment(
   attachment: DiscordAttachment,
 ): boolean {
-  return (
-    attachment.content_type?.toLowerCase().startsWith('audio/') === true ||
-    /\.(?:aac|flac|m4a|mp3|mp4|oga|ogg|opus|wav|webm)$/iu.test(
-      attachment.filename,
-    )
+  const contentType = attachment.content_type
+    ?.split(';')[0]
+    ?.trim()
+    .toLowerCase();
+  if (contentType?.startsWith('audio/')) return true;
+  if (
+    contentType &&
+    contentType !== 'application/octet-stream' &&
+    contentType !== 'binary/octet-stream'
+  ) {
+    return false;
+  }
+  return /\.(?:aac|flac|m4a|mp3|mp4|oga|ogg|opus|wav|webm)$/iu.test(
+    attachment.filename,
   );
 }
 

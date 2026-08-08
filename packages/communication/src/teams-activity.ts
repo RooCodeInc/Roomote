@@ -595,9 +595,18 @@ export function getTeamsActivityAudioAttachments(
       (content ? readString(content, 'downloadUrl') : undefined) ??
       (content ? readString(content, 'contentUrl') : undefined) ??
       (content ? readString(content, 'url') : undefined);
+    const normalizedContentType = contentType
+      ?.split(';')[0]
+      ?.trim()
+      .toLowerCase();
+    const canInferFromName =
+      !normalizedContentType ||
+      normalizedContentType === 'application/octet-stream' ||
+      normalizedContentType === 'binary/octet-stream';
     const isAudio =
-      contentType?.toLowerCase().startsWith('audio/') === true ||
-      /\.(?:aac|flac|m4a|mp3|mp4|oga|ogg|opus|wav|webm)$/iu.test(name ?? '');
+      normalizedContentType?.startsWith('audio/') === true ||
+      (canInferFromName &&
+        /\.(?:aac|flac|m4a|mp3|mp4|oga|ogg|opus|wav|webm)$/iu.test(name ?? ''));
 
     if (!contentUrl || !isAudio) continue;
     attachments.push({

@@ -202,6 +202,24 @@ describe('Teams activity helpers', () => {
     ).toMatchObject({ text: 'Audio attachment' });
   });
 
+  it('does not classify explicitly typed video attachments as audio', () => {
+    const parsed = parseTeamsActivity({
+      type: 'message',
+      id: 'activity-video',
+      conversation: { id: 'a:personal-conversation' },
+      attachments: [
+        {
+          contentType: 'video/mp4',
+          contentUrl: 'https://smba.trafficmanager.net/video/clip.mp4',
+          name: 'clip.mp4',
+        },
+      ],
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(getTeamsActivityAudioAttachments(parsed.data!)).toEqual([]);
+  });
+
   it('strips Teams mention markup from message text', () => {
     expect(
       stripTeamsBotMentions('<at id="0">Roomote</at>&nbsp;please continue'),

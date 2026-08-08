@@ -150,4 +150,25 @@ describe('processDiscordAttachments', () => {
     );
     expect(oversized.attachmentTexts[0]).toContain('20 MiB limit');
   });
+
+  it('does not send explicitly typed video files to audio transcription', async () => {
+    const fetchImpl = vi.fn();
+
+    const result = await processDiscordAttachments(
+      [
+        {
+          id: 'video-1',
+          filename: 'clip.mp4',
+          content_type: 'video/mp4',
+          size: 3,
+          url: 'https://cdn.discordapp.com/attachments/1/2/clip.mp4',
+        },
+      ],
+      { fetch: fetchImpl },
+    );
+
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(transcribeAudioAttachmentMock).not.toHaveBeenCalled();
+    expect(result).toEqual({ images: [], attachmentTexts: [], warnings: [] });
+  });
 });

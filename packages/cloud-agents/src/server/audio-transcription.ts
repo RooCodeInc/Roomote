@@ -51,6 +51,13 @@ export function resolveAudioTranscriptionMimeType(input: {
   if (mimeType && isAudioTranscriptionSupportedMimeType(mimeType)) {
     return mimeType;
   }
+  if (
+    mimeType &&
+    mimeType !== 'application/octet-stream' &&
+    mimeType !== 'binary/octet-stream'
+  ) {
+    return null;
+  }
 
   const extension = input.filename?.match(/\.([^.]+)$/u)?.[1]?.toLowerCase();
   return extension ? (AUDIO_MIME_TYPES_BY_EXTENSION[extension] ?? null) : null;
