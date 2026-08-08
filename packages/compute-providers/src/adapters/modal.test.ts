@@ -927,9 +927,16 @@ describe('ModalClient', () => {
     expect(installBrowserAgentScript).toContain(
       'AGENT_BROWSER_FORWARD_ARGS=()',
     );
+    // Default headless preserved, with an explicit per-invocation headed
+    // opt-in (the feature-demo capture runner passes --headed so GPU-backed
+    // canvases present to the compositor).
     expect(installBrowserAgentScript).toContain(
       'export AGENT_BROWSER_HEADED=false',
     );
+    expect(installBrowserAgentScript).toContain(
+      'export AGENT_BROWSER_HEADED=true',
+    );
+    expect(installBrowserAgentScript).toContain('AGENT_BROWSER_WANT_HEADED=1');
     expect(installBrowserAgentScript).toContain(
       'exec "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_FORWARD_ARGS[@]}"',
     );

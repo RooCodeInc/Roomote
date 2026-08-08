@@ -374,21 +374,35 @@ collect_cli_browser_args() {
   local i=0
   AGENT_BROWSER_EXEC_ARGS=()
   AGENT_BROWSER_FORWARD_ARGS=()
+  # Default headless; a caller may opt a single invocation into headed mode
+  # (e.g. the feature-demo capture runner, so GPU-backed canvases present to
+  # the compositor). On displayless Linux agent-browser auto-starts Xvfb.
+  AGENT_BROWSER_WANT_HEADED=0
 
   while [ "$i" -lt "${#args[@]}" ]; do
     local arg="${args[$i]}"
 
     case "$arg" in
       --headed)
+        AGENT_BROWSER_WANT_HEADED=1
+        AGENT_BROWSER_FORWARD_ARGS+=("$arg")
         if [ "$i" -lt $(( ${#args[@]} - 1 )) ]; then
           case "${args[$((i + 1))]}" in
             true|false)
               i=$((i + 1))
+              [ "${args[$i]}" = false ] && AGENT_BROWSER_WANT_HEADED=0
+              AGENT_BROWSER_FORWARD_ARGS+=("${args[$i]}")
               ;;
           esac
         fi
         ;;
+      --headed=false)
+        AGENT_BROWSER_WANT_HEADED=0
+        AGENT_BROWSER_FORWARD_ARGS+=("$arg")
+        ;;
       --headed=*)
+        AGENT_BROWSER_WANT_HEADED=1
+        AGENT_BROWSER_FORWARD_ARGS+=("$arg")
         ;;
       --args)
         AGENT_BROWSER_FORWARD_ARGS+=("$arg")
@@ -512,7 +526,14 @@ if should_clear_seed_cache; then
 fi
 
 resolve_cli_paths
-export AGENT_BROWSER_HEADED=false
+# Preview-cookie seeding above always runs headless (inline env). The task
+# command itself honors an explicit --headed opt-in; everything else stays
+# headless as before.
+if [ "${AGENT_BROWSER_WANT_HEADED:-0}" = 1 ]; then
+  export AGENT_BROWSER_HEADED=true
+else
+  export AGENT_BROWSER_HEADED=false
+fi
 exec "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_FORWARD_ARGS[@]}"
 EOF_WRAPPER
 }
