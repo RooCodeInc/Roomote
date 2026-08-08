@@ -68,7 +68,7 @@
     "ai": "^6.0.116",
     "jszip": "^3.10.1",
     "mammoth": "^1.11.0",
-    "pdfjs-dist": "^5.4.394",
+    "pdfjs-dist": "^6.2.108",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.2/xlsx-0.20.2.tgz",
     "zod": "^3.25.76",
     "zod-to-json-schema": "3.25.1"
