@@ -38,12 +38,18 @@ describe('createProofRunnerAgentPrompt', () => {
     expect(prompt).toContain(
       'running it via `node` with the environment variables the brief specifies is compliant browser work',
     );
-    // The staging path is parent-writable, so the sanction binds to content.
-    expect(prompt).toContain('sha256sum /tmp/feature-demo/capture.mjs');
+    // The staging path is parent-writable, so the sanction binds to content —
+    // and to close the verify/execute race, the runner digests and executes a
+    // private copy, never the swappable staging path.
+    expect(prompt).toContain('copy the file to a fresh private path first');
+    expect(prompt).toContain('sha256sum "$RUNNER"');
+    expect(prompt).toContain(
+      'execute that verified copy — never the original path',
+    );
     expect(prompt).toContain(`\`${digest}\``);
     expect(prompt).toContain('capture runner integrity mismatch');
     expect(prompt).toContain(
-      'This exception covers exactly that digest-verified file and no other script.',
+      'This exception covers exactly that digest-verified copy and no other script.',
     );
   });
 
