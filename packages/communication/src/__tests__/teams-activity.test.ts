@@ -220,6 +220,52 @@ describe('Teams activity helpers', () => {
     expect(getTeamsActivityAudioAttachments(parsed.data!)).toEqual([]);
   });
 
+  it('extracts audio from Teams file-download wrapper metadata', () => {
+    const parsed = parseTeamsActivity({
+      type: 'message',
+      id: 'activity-audio-wrapper',
+      conversation: { id: 'a:personal-conversation' },
+      attachments: [
+        {
+          contentType: 'application/vnd.microsoft.teams.file.download.info',
+          content: {
+            downloadUrl: 'https://files.example.test/voice-note',
+            fileType: 'mp3',
+          },
+        },
+        {
+          contentType: 'application/vnd.microsoft.teams.file.download.info',
+          content: {
+            contentType: 'audio/ogg',
+            downloadUrl: 'https://files.example.test/recording',
+          },
+          name: 'recording.ogg',
+        },
+        {
+          contentType: 'application/vnd.microsoft.teams.file.download.info',
+          content: {
+            contentType: 'video/mp4',
+            downloadUrl: 'https://files.example.test/video',
+          },
+          name: 'video.mp4',
+        },
+      ],
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(getTeamsActivityAudioAttachments(parsed.data!)).toEqual([
+      {
+        contentUrl: 'https://files.example.test/voice-note',
+        name: 'attachment.mp3',
+      },
+      {
+        contentType: 'audio/ogg',
+        contentUrl: 'https://files.example.test/recording',
+        name: 'recording.ogg',
+      },
+    ]);
+  });
+
   it('strips Teams mention markup from message text', () => {
     expect(
       stripTeamsBotMentions('<at id="0">Roomote</at>&nbsp;please continue'),

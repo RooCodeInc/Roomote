@@ -587,9 +587,19 @@ export function getTeamsActivityAudioAttachments(
 
     const content = readRecord(attachment.content);
     const name = readString(attachment, 'name');
-    const contentType =
-      readString(attachment, 'contentType') ??
-      (content ? readString(content, 'contentType') : undefined);
+    const attachmentContentType = readString(attachment, 'contentType');
+    const nestedContentType = content
+      ? readString(content, 'contentType')
+      : undefined;
+    const contentFileType = content
+      ? readString(content, 'fileType')
+      : undefined;
+    const isFileDownloadWrapper =
+      attachmentContentType?.toLowerCase() ===
+      'application/vnd.microsoft.teams.file.download.info';
+    const contentType = isFileDownloadWrapper
+      ? nestedContentType
+      : (attachmentContentType ?? nestedContentType);
     const contentUrl =
       readString(attachment, 'contentUrl') ??
       (content ? readString(content, 'downloadUrl') : undefined) ??
@@ -603,16 +613,23 @@ export function getTeamsActivityAudioAttachments(
       !normalizedContentType ||
       normalizedContentType === 'application/octet-stream' ||
       normalizedContentType === 'binary/octet-stream';
+    const inferenceName =
+      name ??
+      (contentFileType
+        ? `attachment.${contentFileType.replace(/^\./u, '')}`
+        : '');
     const isAudio =
       normalizedContentType?.startsWith('audio/') === true ||
       (canInferFromName &&
-        /\.(?:aac|flac|m4a|mp3|mp4|oga|ogg|opus|wav|webm)$/iu.test(name ?? ''));
+        /\.(?:aac|flac|m4a|mp3|mp4|oga|ogg|opus|wav|webm)$/iu.test(
+          inferenceName,
+        ));
 
     if (!contentUrl || !isAudio) continue;
     attachments.push({
       contentUrl,
       ...(contentType ? { contentType } : {}),
-      ...(name ? { name } : {}),
+      ...(inferenceName ? { name: inferenceName } : {}),
     });
   }
 
