@@ -30,7 +30,7 @@ const {
     DOCKER_WORKER_CPU_LIMIT: 2,
     DOCKER_WORKER_MEMORY_LIMIT: '4g',
     DOCKER_TASK_DAEMON_MEMORY_LIMIT: '8g',
-    DOCKER_WORKER_PIDS_LIMIT: 512,
+    DOCKER_WORKER_PIDS_LIMIT: 2048,
     DOCKER_WORKER_DISK_LIMIT: '20g',
     DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: false,
     DOCKER_WORKER_LOG_MAX_SIZE: '10m',
@@ -132,7 +132,7 @@ describe('RoomoteController', () => {
     mockEnv.DOCKER_WORKER_CPU_LIMIT = 2;
     mockEnv.DOCKER_WORKER_MEMORY_LIMIT = '4g';
     mockEnv.DOCKER_TASK_DAEMON_MEMORY_LIMIT = '8g';
-    mockEnv.DOCKER_WORKER_PIDS_LIMIT = 512;
+    mockEnv.DOCKER_WORKER_PIDS_LIMIT = 2048;
     mockEnv.DOCKER_WORKER_DISK_LIMIT = '20g';
     mockEnv.DOCKER_WORKER_ALLOW_UNBOUNDED_DISK = false;
     mockEnv.DOCKER_WORKER_LOG_MAX_SIZE = '10m';
@@ -195,7 +195,7 @@ describe('RoomoteController', () => {
         cpuLimit: 2,
         memoryLimit: '4g',
         taskDaemonMemoryLimit: '8g',
-        pidsLimit: 512,
+        pidsLimit: 2048,
         diskLimit: '20g',
         allowUnboundedDisk: false,
         logMaxSize: '10m',

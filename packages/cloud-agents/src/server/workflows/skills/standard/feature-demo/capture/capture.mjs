@@ -11,7 +11,7 @@
 //          node capture.mjs
 // See SKILL.md for the demo-script schema.
 
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 const AB = process.env.AGENT_BROWSER_BIN || 'agent-browser';
@@ -50,6 +50,21 @@ const ab = (...args) =>
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+
+// Same invocation, but returns combined stdout+stderr so warnings that
+// agent-browser writes to stderr (e.g. the "--headed ignored" notice) can be
+// inspected. Throws on a non-zero exit like execFileSync would.
+const abCapture = (...args) => {
+  const res = spawnSync(AB, HEADED ? ['--headed', ...args] : args, {
+    encoding: 'utf8',
+  });
+  if (res.error) throw res.error;
+  const out = `${res.stdout ?? ''}${res.stderr ?? ''}`;
+  if (res.status !== 0) {
+    throw new Error(`agent-browser ${args.join(' ')} failed: ${out}`);
+  }
+  return out;
+};
 
 const sleep = (ms) => execFileSync('sleep', [String(ms / 1000)]);
 
@@ -120,16 +135,31 @@ const TICKER_JS =
 
 async function run() {
   mkdirSync(OUT_DIR, { recursive: true });
-  // `record start` creates a fresh browser context; a pre-existing page
-  // (e.g. from an earlier inspection step) would leave the beats driving one
-  // page while the recorder watches another. Start from a clean slate.
+  // Fully stop any existing agent-browser daemon before recording. `--headed`
+  // (and other launch options) only take effect when the daemon launches the
+  // browser; against an already-running daemon agent-browser prints
+  // "--headed ignored: daemon already running" and records headless. `close`
+  // (alias quit/exit) tears the daemon down; `close --all` alone only clears
+  // sessions. This also gives `record start` a clean slate so the beats and
+  // the recorder share one page.
   try {
-    ab('close', '--all');
+    ab('close');
   } catch {
-    // no active session is fine
+    // no active daemon is fine
   }
   ab('set', 'viewport', String(VIEWPORT.w), String(VIEWPORT.h));
-  ab('record', 'start', `${OUT_DIR}/raw.webm`, script.url);
+
+  const startOut = abCapture('record', 'start', `${OUT_DIR}/raw.webm`, script.url);
+  // If the daemon survived the close and swallowed our launch options, the
+  // recording would silently be headless — fail loudly instead of producing
+  // a stalled clip on a GPU-backed surface.
+  if (HEADED && /--headed ignored|daemon already running/i.test(startOut)) {
+    throw new Error(
+      'agent-browser ignored --headed because a daemon was already running; ' +
+        'the recording would be headless. Ensure the daemon is stopped ' +
+        '(`agent-browser close`) before capture and retry.',
+    );
+  }
   t0 = Date.now();
   ab('eval', TICKER_JS);
   sleep(300); // let the first frames settle

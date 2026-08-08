@@ -85,7 +85,11 @@ const serverSchema = {
   DOCKER_WORKER_CPU_LIMIT: z.coerce.number().positive().default(2),
   DOCKER_WORKER_MEMORY_LIMIT: dockerSize().default('4g'),
   DOCKER_TASK_DAEMON_MEMORY_LIMIT: dockerSize().default('8g'),
-  DOCKER_WORKER_PIDS_LIMIT: z.coerce.number().int().positive().default(512),
+  // Headroom for browser-driving tasks: a Chrome process tree plus the
+  // agent-browser daemon and worker toolchain runs well over the old 512 cap
+  // under load. `--init` reaps zombies (see docker-sandbox-security), but the
+  // live process count still needs room. Env-overridable.
+  DOCKER_WORKER_PIDS_LIMIT: z.coerce.number().int().positive().default(2048),
   DOCKER_WORKER_DISK_LIMIT: dockerSize().default('20g'),
   DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: optInBoolean(),
   DOCKER_WORKER_LOG_MAX_SIZE: dockerSize().default('10m'),
