@@ -164,6 +164,8 @@ services:
     depends_on:
       redis:
         condition: service_started
+      minio:
+        condition: service_healthy
       db-migrate:
         condition: service_completed_successfully
     environment:

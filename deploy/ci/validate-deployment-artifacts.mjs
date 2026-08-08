@@ -409,6 +409,10 @@ assert(
 );
 const coolifyBullmq = coolify.services?.bullmq;
 assert(
+  coolify.services?.api?.depends_on?.minio?.condition === 'service_healthy',
+  'coolify: api must wait for MinIO before ensuring the artifacts bucket',
+);
+assert(
   coolifyBullmq?.networks?.includes('default'),
   'coolify: bullmq must remain on the default application network',
 );
