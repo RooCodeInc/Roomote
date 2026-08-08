@@ -58,7 +58,9 @@ this pipeline is ever committed to the repository.
 - `{ "a": "reset", "ms": ~600 }` — pull back between beats (partial by design; pass `"full": true` only for the closing shot).</action>
 <action>Keep the opening tight: one short `wait` for page load, then get moving. Dead opening seconds are trimmed automatically, but do not rely on it.</action>
 <action>Write captions as short, conversational spoken lines (they double as the narration): contractions are good, symbols and long clauses are not. 3-9 words on screen; if the spoken wording should differ from the on-screen caption, put the spoken variants in `/tmp/feature-demo/lines.json` (array, one string per caption).</action>
-<action>Selectors must be resilient: prefer ids, stable data attributes, or unique semantic tags over deep CSS chains. Verify each selector the advisor proposed against the actual page source (grep the component/template files) before writing the script — the capture fails loudly on a selector that resolves to nothing, and a wrong selector costs a full capture round.</action>
+<action>Selectors must be resilient: prefer ids, stable data attributes, or unique semantic tags over deep CSS chains. Verify them before a full capture round (the capture fails loudly on a selector that resolves to nothing), by whichever path fits the surface:
+- Repository-backed surface (the app's own UI): grep the component/template source for each proposed selector and confirm it exists.
+- External public page named by the user (no local source, and the parent must not drive the browser directly): you cannot grep it. Instead, first delegate a lightweight resolve-only brief to the `proof-runner` — ask it to open the URL and report, via `agent-browser snapshot`/`get box`, whether each proposed selector resolves and its box, returning corrected selectors where they do not. Author the script from what it confirms. (This is the same delegated browser surface capture uses, just a read-only pre-flight.)</action>
 </actions>
 </step>
 
