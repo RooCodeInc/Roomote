@@ -221,10 +221,10 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     resolveConfiguredGitHubAppSlugIfConfigured(),
     getDeploymentGitHubRoomoteMentionEnabled(),
   ]);
-  const attribution =
-    provider === 'github'
-      ? await resolveRunCommitAuthor(db, taskRun)
-      : await resolveLaunchTaskCommitAuthor(db, taskRun.taskId);
+  const attribution = await resolveRunCommitAuthor(db, taskRun, {
+    provider,
+    host: repository.host ?? payloadHost,
+  });
   const normalizedMentionBody = configuredGitHubAppSlug
     ? normalizePrBodyAttributionAppMention(
         input.body,
@@ -237,9 +237,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
       ? null
       : repository.private === true
         ? attribution.displayName
-        : provider === 'github'
-          ? attribution.publicDisplayName
-          : null;
+        : attribution.publicDisplayName;
   const rewrittenAttributionBody = rewritePrBodyAttribution(
     normalizedMentionBody,
     displayName,

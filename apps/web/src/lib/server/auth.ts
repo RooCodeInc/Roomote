@@ -6,6 +6,7 @@ import { nextCookies } from 'better-auth/next-js';
 import { genericOAuth, microsoftEntraId, slack } from 'better-auth/plugins';
 import { drizzleAdapter } from '@better-auth/drizzle-adapter';
 import { normalizeAdoLinkedAccountKey } from '@roomote/ado';
+import type { SourceControlTokenBackedProvider } from '@roomote/types';
 
 import {
   authUsers,
@@ -14,6 +15,7 @@ import {
   eq,
   inArray,
   microsoftAuthUserMappings,
+  sourceControlUserMappings,
   teamsUserMappings,
 } from '@roomote/db/server';
 import * as dbSchema from '@roomote/db/server';
@@ -91,6 +93,22 @@ type MicrosoftAuthAccountHookRow = {
   idToken?: unknown;
 };
 
+type SourceControlAuthAccountHookRow = {
+  id?: unknown;
+  userId?: unknown;
+  accountId?: unknown;
+  providerId?: unknown;
+  accessToken?: unknown;
+};
+
+type SourceControlIdentityProfile = {
+  provider: SourceControlTokenBackedProvider;
+  host: string;
+  externalAccountId: string;
+  username: string | null;
+  displayName: string | null;
+};
+
 type MicrosoftEntraIdTokenClaims = {
   oid?: unknown;
   sub?: unknown;
@@ -124,6 +142,7 @@ type BitbucketOAuthProfile = {
     };
   };
   username?: unknown;
+  nickname?: unknown;
   uuid?: unknown;
 };
 
@@ -489,6 +508,191 @@ function getAdoProfileEmail({
       : buildAdoPlaceholderEmail(accountId);
 }
 
+function getSourceControlHost(baseUrl: string): string {
+  return new URL(baseUrl).hostname.toLowerCase();
+}
+
+async function resolveSourceControlIdentityProfile({
+  provider,
+  accessToken,
+  gitlabBaseUrl,
+  giteaBaseUrl,
+  bitbucketBaseUrl,
+  adoBaseUrl,
+}: {
+  provider: SourceControlTokenBackedProvider;
+  accessToken: string;
+  gitlabBaseUrl: string;
+  giteaBaseUrl: string | null;
+  bitbucketBaseUrl: string;
+  adoBaseUrl: string;
+}): Promise<SourceControlIdentityProfile | null> {
+  const headers = { Authorization: `Bearer ${accessToken}` };
+
+  if (provider === 'gitlab') {
+    const response = await fetch(`${gitlabBaseUrl}/api/v4/user`, { headers });
+    if (!response.ok) return null;
+
+    const profile = (await response.json()) as GitLabOAuthProfile;
+    const externalAccountId = readGitLabProfileId(profile);
+    const username = readGitLabProfileString(profile, 'username');
+    if (!externalAccountId || !username) return null;
+
+    return {
+      provider,
+      host: getSourceControlHost(gitlabBaseUrl),
+      externalAccountId,
+      username,
+      displayName: readGitLabProfileString(profile, 'name'),
+    };
+  }
+
+  if (provider === 'gitea') {
+    if (!giteaBaseUrl) return null;
+    const response = await fetch(`${giteaBaseUrl}/api/v1/user`, { headers });
+    if (!response.ok) return null;
+
+    const profile = (await response.json()) as GiteaOAuthProfile;
+    const externalAccountId = readGiteaProfileId(profile);
+    const username = readGiteaProfileString(profile, 'login');
+    if (!externalAccountId || !username) return null;
+
+    return {
+      provider,
+      host: getSourceControlHost(giteaBaseUrl),
+      externalAccountId,
+      username,
+      displayName: readGiteaProfileString(profile, 'full_name'),
+    };
+  }
+
+  if (provider === 'bitbucket') {
+    const response = await fetch('https://api.bitbucket.org/2.0/user', {
+      headers,
+    });
+    if (!response.ok) return null;
+
+    const profile = (await response.json()) as BitbucketOAuthProfile;
+    const externalAccountId = readBitbucketProfileId(profile);
+    if (!externalAccountId) return null;
+
+    return {
+      provider,
+      host: getSourceControlHost(bitbucketBaseUrl),
+      externalAccountId,
+      username: readBitbucketProfileString(profile, 'username'),
+      displayName:
+        readBitbucketProfileString(profile, 'display_name') ??
+        readBitbucketProfileString(profile, 'nickname'),
+    };
+  }
+
+  const [connectionDataResponse, profileResponse] = await Promise.all([
+    fetch(
+      buildAdoGlobalApiUrl(
+        '_apis/connectionData',
+        ADO_CONNECTION_DATA_API_VERSION,
+      ),
+      {
+        headers,
+      },
+    ),
+    fetch(buildAdoGlobalApiUrl('_apis/profile/profiles/me', ADO_API_VERSION), {
+      headers,
+    }).catch(() => null),
+  ]);
+  if (!connectionDataResponse.ok) return null;
+
+  const connectionData =
+    (await connectionDataResponse.json()) as AdoConnectionData;
+  const user = connectionData.authenticatedUser;
+  const externalAccountId = user && readAdoConnectionDataUserString(user, 'id');
+  if (!user || !externalAccountId) return null;
+
+  const profile =
+    profileResponse?.ok === true
+      ? ((await profileResponse.json()) as AdoProfile)
+      : null;
+
+  return {
+    provider,
+    host: getSourceControlHost(adoBaseUrl),
+    externalAccountId,
+    // Azure DevOps exposes uniqueName as an email/UPN, not a public handle.
+    username: null,
+    displayName:
+      (profile && readAdoProfileString(profile, 'displayName')) ??
+      readAdoConnectionDataUserString(user, 'displayName') ??
+      readAdoConnectionDataUserString(user, 'providerDisplayName'),
+  };
+}
+
+async function syncSourceControlAuthUserMapping(
+  account: unknown,
+  config: {
+    gitlabBaseUrl: string;
+    giteaBaseUrl: string | null;
+    bitbucketBaseUrl: string;
+    adoBaseUrl: string;
+  },
+) {
+  const row = account as SourceControlAuthAccountHookRow | null;
+  const provider = readNonEmptyString(row?.providerId);
+  if (
+    provider !== 'gitlab' &&
+    provider !== 'gitea' &&
+    provider !== 'bitbucket' &&
+    provider !== 'ado'
+  ) {
+    return;
+  }
+
+  const authAccountId = readNonEmptyString(row?.id);
+  const userId = readNonEmptyString(row?.userId);
+  const accessToken = readNonEmptyString(row?.accessToken);
+  if (!authAccountId || !userId || !accessToken) return;
+
+  try {
+    const identity = await resolveSourceControlIdentityProfile({
+      provider,
+      accessToken,
+      ...config,
+    });
+    if (!identity) return;
+
+    const now = new Date();
+    await db
+      .insert(sourceControlUserMappings)
+      .values({
+        authAccountId,
+        userId,
+        sourceControlProvider: identity.provider,
+        host: identity.host,
+        externalAccountId: identity.externalAccountId,
+        username: identity.username,
+        displayName: identity.displayName,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: sourceControlUserMappings.authAccountId,
+        set: {
+          userId,
+          sourceControlProvider: identity.provider,
+          host: identity.host,
+          externalAccountId: identity.externalAccountId,
+          username: identity.username,
+          displayName: identity.displayName,
+          updatedAt: now,
+        },
+      });
+  } catch (error) {
+    console.error(
+      `[auth] Failed to sync ${provider} linked-account identity:`,
+      error,
+    );
+  }
+}
+
 async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
   const {
     slackClientId,
@@ -697,7 +901,7 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
               const accountId = readBitbucketProfileId(profile);
               const username = readBitbucketProfileString(profile, 'username');
 
-              if (!accountId || !username) {
+              if (!accountId) {
                 return null;
               }
 
@@ -708,12 +912,13 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
 
               return {
                 id: accountId,
-                email: buildBitbucketPlaceholderEmail(username),
+                email: buildBitbucketPlaceholderEmail(username ?? accountId),
                 emailVerified: false,
                 image: avatarHref,
                 name:
                   readBitbucketProfileString(profile, 'display_name') ??
-                  `@${username}`,
+                  readBitbucketProfileString(profile, 'nickname') ??
+                  (username ? `@${username}` : `Bitbucket user ${accountId}`),
               };
             },
           },
@@ -873,12 +1078,30 @@ async function createAuth(authProviderConfig: ResolvedAuthProviderConfig) {
       account: {
         create: {
           after: async (account) => {
-            await syncMicrosoftAuthUserMapping(account);
+            await Promise.all([
+              syncMicrosoftAuthUserMapping(account),
+              syncSourceControlAuthUserMapping(account, {
+                gitlabBaseUrl: normalizedGitLabBaseUrl,
+                giteaBaseUrl: normalizedGiteaBaseUrl,
+                bitbucketBaseUrl:
+                  normalizedBitbucketBaseUrl ?? 'https://bitbucket.org',
+                adoBaseUrl: normalizedAdoBaseUrl,
+              }),
+            ]);
           },
         },
         update: {
           after: async (account) => {
-            await syncMicrosoftAuthUserMapping(account);
+            await Promise.all([
+              syncMicrosoftAuthUserMapping(account),
+              syncSourceControlAuthUserMapping(account, {
+                gitlabBaseUrl: normalizedGitLabBaseUrl,
+                giteaBaseUrl: normalizedGiteaBaseUrl,
+                bitbucketBaseUrl:
+                  normalizedBitbucketBaseUrl ?? 'https://bitbucket.org',
+                adoBaseUrl: normalizedAdoBaseUrl,
+              }),
+            ]);
           },
         },
         delete: {

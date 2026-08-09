@@ -334,3 +334,19 @@ export async function resolveWorkspaceSourceControlProvider(
   );
   return toSingleProvider(Object.values(repositoryProviders));
 }
+
+/** Resolve one exact repository host for attribution, or fail closed. */
+export async function resolveWorkspaceSourceControlHost(
+  dbOrTx: DatabaseOrTransaction,
+  workspace: TaskWorkspace,
+): Promise<string | undefined> {
+  const rows = await resolveWorkspaceRepositoryRows(dbOrTx, workspace);
+  if (!rows) {
+    return undefined;
+  }
+
+  const hosts = [...new Set(rows.map((row) => row.host).filter(Boolean))];
+  return hosts.length === 1 && rows.every((row) => row.host === hosts[0])
+    ? (hosts[0] ?? undefined)
+    : undefined;
+}

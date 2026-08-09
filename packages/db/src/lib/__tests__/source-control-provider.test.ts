@@ -2,6 +2,7 @@
 import type { DatabaseOrTransaction } from '../../db';
 import {
   resolveWorkspaceRepositoryProviders,
+  resolveWorkspaceSourceControlHost,
   resolveWorkspaceSourceControlProvider,
   workspaceAllowsPrivateAttribution,
   workspaceUsesOnlySourceControlProvider,
@@ -512,5 +513,49 @@ describe('workspaceAllowsPrivateAttribution', () => {
         'github',
       ),
     ).resolves.toBe(false);
+  });
+
+  it('resolves one exact host for a single-provider workspace', async () => {
+    mockRows = [
+      {
+        fullName: 'group/api',
+        host: 'gitlab.example.com',
+        sourceControlProvider: 'gitlab',
+      },
+      {
+        fullName: 'group/web',
+        host: 'gitlab.example.com',
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+
+    await expect(
+      resolveWorkspaceSourceControlHost(dbOrTx, {
+        type: 'repository_set',
+        repositories: ['group/api', 'group/web'],
+      }),
+    ).resolves.toBe('gitlab.example.com');
+  });
+
+  it('does not resolve attribution identity across multiple hosts', async () => {
+    mockRows = [
+      {
+        fullName: 'group/api',
+        host: 'gitlab-a.example.com',
+        sourceControlProvider: 'gitlab',
+      },
+      {
+        fullName: 'group/web',
+        host: 'gitlab-b.example.com',
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+
+    await expect(
+      resolveWorkspaceSourceControlHost(dbOrTx, {
+        type: 'repository_set',
+        repositories: ['group/api', 'group/web'],
+      }),
+    ).resolves.toBeUndefined();
   });
 });
