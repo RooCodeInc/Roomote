@@ -1,6 +1,15 @@
 import { OffthreadVideo, staticFile, useCurrentFrame } from 'remotion';
 import timeline from '../props/timeline.json';
+import narration from '../props/narration.json';
 import type { CaptionStyle } from './presets';
+
+type WordTiming = { text: string; start: number; end: number };
+
+type NarrationClip = {
+  startSeconds: number;
+  durationSeconds: number;
+  words?: WordTiming[] | null;
+};
 
 export const FPS = timeline.fps;
 export const DEMO_SECONDS = timeline.durationSeconds;
@@ -184,6 +193,14 @@ export const DemoStage: React.FC<{
         const fadeOut = clamp((cap.end - t) / 0.25, 0, 1);
         const opacity = Math.min(fadeIn, fadeOut);
         if (opacity <= 0) return null;
+
+        // Spoken-word highlight: captions and narration clips are 1:1 in
+        // order, and word times are relative to the clip's start. Without
+        // word timings (captions-only mode) the caption renders plain.
+        const clip = (narration.clips as NarrationClip[])[i];
+        const words = clip?.words ?? null;
+        const tInClip = clip ? t - clip.startSeconds : 0;
+
         return (
           <div
             key={i}
@@ -215,7 +232,30 @@ export const DemoStage: React.FC<{
                 backdropFilter: 'blur(6px)',
               }}
             >
-              {cap.text}
+              {words
+                ? words.map((word, wi) => {
+                    const spoken = tInClip >= word.start;
+                    const active = spoken && tInClip < word.end + 0.08;
+                    return (
+                      <span
+                        key={wi}
+                        style={{
+                          color: active
+                            ? '#fff'
+                            : spoken
+                              ? 'rgba(255,255,255,0.92)'
+                              : 'rgba(255,255,255,0.45)',
+                          textShadow: active
+                            ? '0 0 14px rgba(255,255,255,0.55)'
+                            : 'none',
+                        }}
+                      >
+                        {word.text}
+                        {wi < words.length - 1 ? ' ' : ''}
+                      </span>
+                    );
+                  })
+                : cap.text}
             </div>
           </div>
         );

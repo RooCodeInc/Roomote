@@ -108,15 +108,24 @@ function parseNarrationLines(body: NarrationBody): string[] | null {
   return lines;
 }
 
+type ElevenLabsAlignment = {
+  characters: string[];
+  character_start_times_seconds: number[];
+  character_end_times_seconds: number[];
+};
+
 async function synthesizeLine(options: {
   apiKey: string;
   voiceId: string;
   text: string;
-}): Promise<Buffer> {
+}): Promise<{ audioBase64: string; alignment: ElevenLabsAlignment | null }> {
+  // The with-timestamps variant returns character-level alignment alongside
+  // the audio, which callers roll up into word timings (spoken-word caption
+  // highlighting).
   const response = await fetch(
     `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(
       options.voiceId,
-    )}?output_format=mp3_44100_128`,
+    )}/with-timestamps?output_format=mp3_44100_128`,
     {
       method: 'POST',
       headers: {
@@ -142,7 +151,19 @@ async function synthesizeLine(options: {
     );
   }
 
-  return Buffer.from(await response.arrayBuffer());
+  const payload = (await response.json()) as {
+    audio_base64?: string;
+    alignment?: ElevenLabsAlignment | null;
+  };
+
+  if (!payload.audio_base64) {
+    throw new Error('ElevenLabs TTS response did not include audio');
+  }
+
+  return {
+    audioBase64: payload.audio_base64,
+    alignment: payload.alignment ?? null,
+  };
 }
 
 export const tts = new Hono<{ Variables: Variables }>();
@@ -207,15 +228,16 @@ tts.post('/narration', async (c) => {
     );
   }
 
-  const clips: { audioBase64: string }[] = [];
+  const clips: {
+    audioBase64: string;
+    alignment: ElevenLabsAlignment | null;
+  }[] = [];
 
   // Sequential on purpose: ElevenLabs enforces per-key concurrency limits,
   // and a narration is a handful of short lines.
   for (const text of lines) {
     try {
-      const audio = await synthesizeLine({ apiKey, voiceId, text });
-
-      clips.push({ audioBase64: audio.toString('base64') });
+      clips.push(await synthesizeLine({ apiKey, voiceId, text }));
     } catch (error) {
       logHandlerError('ttsNarration', error);
       return c.json({ error: 'Narration synthesis failed' }, 502);

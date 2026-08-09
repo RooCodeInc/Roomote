@@ -130,9 +130,21 @@ describe('POST /tts/narration', () => {
     expect(response.status).toBe(413);
   });
 
-  it('synthesizes each line through ElevenLabs with the server-held key', async () => {
+  it('synthesizes each line with timestamps through the server-held key', async () => {
+    const alignment = {
+      characters: ['H', 'i'],
+      character_start_times_seconds: [0, 0.2],
+      character_end_times_seconds: [0.2, 0.4],
+    };
     const fetchMock = vi.fn(
-      async () => new Response(Buffer.from('mp3-bytes'), { status: 200 }),
+      async () =>
+        new Response(
+          JSON.stringify({
+            audio_base64: Buffer.from('mp3-bytes').toString('base64'),
+            alignment,
+          }),
+          { status: 200 },
+        ),
     );
     globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
 
@@ -143,13 +155,15 @@ describe('POST /tts/narration', () => {
     expect(response.status).toBe(200);
 
     const payload = (await response.json()) as {
-      clips: { audioBase64: string }[];
+      clips: { audioBase64: string; alignment: typeof alignment | null }[];
     };
 
     expect(payload.clips).toHaveLength(2);
     expect(
       Buffer.from(payload.clips[0]!.audioBase64, 'base64').toString(),
     ).toBe('mp3-bytes');
+    // Character alignment passes through for spoken-word caption highlighting.
+    expect(payload.clips[0]!.alignment).toEqual(alignment);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
@@ -160,6 +174,7 @@ describe('POST /tts/narration', () => {
 
     expect(url).toContain('https://api.elevenlabs.io/v1/text-to-speech/');
     expect(url).toContain('voice-1');
+    expect(url).toContain('/with-timestamps');
 
     const headers = init.headers as Record<string, string>;
 
