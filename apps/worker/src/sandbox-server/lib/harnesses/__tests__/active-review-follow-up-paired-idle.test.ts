@@ -191,26 +191,42 @@ function createFixture() {
   });
 
   const onExit = vi.fn();
+  const onTaskUpdate = vi.fn();
   const manager = new HarnessManager({
     harness,
     keepaliveMs: 60_000,
     runId: 100,
     taskId: 'task-100',
     logger: { ...createLogger(), log: vi.fn() },
-    callbacks: { onExit },
+    callbacks: { onExit, onTaskUpdate },
   });
 
   const taskEvents: TaskEvent[] = [];
   harness.subscribe((event) => taskEvents.push(event));
 
-  return { client, harness, manager, onExit, submittedPrompts, taskEvents };
+  return {
+    client,
+    harness,
+    manager,
+    onExit,
+    onTaskUpdate,
+    submittedPrompts,
+    taskEvents,
+  };
 }
 
 describe('active PR review follow-up lifecycle (paired session.status idle + session.idle)', () => {
   it('defers run completion across the paired idle until the drained re-review turn has run', async () => {
     const fixture = createFixture();
-    const { client, harness, manager, onExit, submittedPrompts, taskEvents } =
-      fixture;
+    const {
+      client,
+      harness,
+      manager,
+      onExit,
+      onTaskUpdate,
+      submittedPrompts,
+      taskEvents,
+    } = fixture;
 
     try {
       await connectHarness(harness, client);
@@ -283,6 +299,11 @@ describe('active PR review follow-up lifecycle (paired session.status idle + ses
           (event) => event.eventName === TaskEventName.TaskCompleted,
         ),
       ).toHaveLength(2);
+      expect(
+        onTaskUpdate.mock.calls.filter(
+          ([update]) => update.status === 'completed',
+        ),
+      ).toHaveLength(1);
     } finally {
       manager.dispose();
       harness.dispose();
