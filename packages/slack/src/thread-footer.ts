@@ -2,7 +2,6 @@ import {
   buildThreadReplyFooterText,
   buildThreadReplyPrUrl,
   resolveThreadReplyFooterContext,
-  resolveThreadReplyLinkedPr,
   resolveThreadReplyLinkedPrs,
   resolveThreadReplyLivePreviewUrl,
   type ThreadReplyFooterContext,
@@ -19,7 +18,6 @@ export interface SlackThreadFooterContext extends ThreadReplyFooterContext {
 
 export {
   buildThreadReplyPrUrl as buildSlackThreadReplyPrUrl,
-  resolveThreadReplyLinkedPr as resolveSlackThreadLinkedPr,
   resolveThreadReplyLinkedPrs as resolveSlackThreadLinkedPrs,
   resolveThreadReplyLivePreviewUrl as resolveSlackThreadLivePreviewUrl,
 };
@@ -44,14 +42,12 @@ export async function resolveSlackThreadFooterContext(params: {
 
 export function buildSlackThreadFooterText(params: {
   taskUrl: string;
-  linkedPr: SlackThreadLinkedPr | null;
   linkedPrs?: SlackThreadLinkedPr[];
   livePreviewUrl?: string | null;
   explicitMentionRequired: boolean;
 }): string {
   return buildThreadReplyFooterText({
     taskUrl: params.taskUrl,
-    linkedPr: params.linkedPr,
     linkedPrs: params.linkedPrs,
     livePreviewUrl: params.livePreviewUrl,
     explicitMentionRequired: params.explicitMentionRequired,
@@ -72,7 +68,6 @@ export async function getSlackThreadFooterText(params: {
 
   return buildSlackThreadFooterText({
     taskUrl: params.taskUrl,
-    linkedPr: context.linkedPr,
     linkedPrs: params.linkedPrs ?? context.linkedPrs,
     livePreviewUrl: context.livePreviewUrl,
     explicitMentionRequired: context.explicitMentionRequired,

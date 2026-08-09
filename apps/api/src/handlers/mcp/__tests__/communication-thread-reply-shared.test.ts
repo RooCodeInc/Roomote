@@ -49,7 +49,6 @@ describe('deliverManagedThreadReplyFooter', () => {
     withThreadReplyFooterLockMock.mockImplementation(async ({ fn }) => fn());
     setThreadReplyFooterRecordMock.mockResolvedValue(undefined);
     resolveThreadReplyFooterContextMock.mockResolvedValue({
-      linkedPr: null,
       linkedPrs: [],
       livePreviewUrl: null,
     });
@@ -182,7 +181,6 @@ describe('buildCommunicationThreadReplyFooterText', () => {
       { prNumber: 2, prUrl: 'https://github.com/roomote/api/pull/2' },
     ];
     resolveThreadReplyFooterContextMock.mockResolvedValue({
-      linkedPr: linkedPrs[0],
       linkedPrs,
       livePreviewUrl: null,
     });

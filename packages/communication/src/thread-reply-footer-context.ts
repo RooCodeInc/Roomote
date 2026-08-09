@@ -24,7 +24,6 @@ const TERMINAL_LINKED_TASK_PR_STATUSES = new Set<PullRequestStatus>([
 ]);
 
 export interface ThreadReplyFooterContext {
-  linkedPr: ThreadReplyLinkedPr | null;
   linkedPrs: ThreadReplyLinkedPr[];
   livePreviewUrl: string | null;
 }
@@ -36,7 +35,7 @@ export function buildThreadReplyPrUrl(params: {
   return `https://github.com/${params.repository}/pull/${params.prNumber}`;
 }
 
-export async function resolveThreadReplyLinkedPr(params: {
+async function resolveThreadReplyLinkedPr(params: {
   taskId: string | null | undefined;
   prRepo: string | null | undefined;
   prNumber: number | null | undefined;
@@ -216,7 +215,6 @@ export async function resolveThreadReplyFooterContext(params: {
   ]);
 
   return {
-    linkedPr: linkedPrs[0] ?? null,
     linkedPrs,
     livePreviewUrl,
   };

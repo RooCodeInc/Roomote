@@ -291,7 +291,6 @@ export type ThreadReplyLinkedPr = {
 
 export function buildThreadReplyFooterText({
   taskUrl,
-  linkedPr,
   linkedPrs,
   livePreviewUrl,
   explicitMentionRequired = false,
@@ -299,7 +298,6 @@ export function buildThreadReplyFooterText({
   formatFooterText = (text) => `_${text}_`,
 }: {
   taskUrl: string;
-  linkedPr?: ThreadReplyLinkedPr | null;
   linkedPrs?: ThreadReplyLinkedPr[];
   livePreviewUrl?: string | null;
   explicitMentionRequired?: boolean;
@@ -314,11 +312,7 @@ export function buildThreadReplyFooterText({
     : null;
   const webAppLink = formatLink('web app', taskUrl);
 
-  const activePullRequests = linkedPrs?.length
-    ? linkedPrs
-    : linkedPr
-      ? [linkedPr]
-      : [];
+  const activePullRequests = linkedPrs ?? [];
 
   if (activePullRequests.length > 0) {
     const prLinks = activePullRequests.map((pr) =>

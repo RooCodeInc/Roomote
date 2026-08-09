@@ -11,16 +11,10 @@ const AUTOMATION_ROOT_ACTIONS_BLOCK_ID =
 export function buildAutomationRootFooterBlocks(params: {
   automationLabel: string;
   taskUrl?: string | null;
-  linkedPrUrl?: string | null;
   linkedPrUrls?: string[];
 }): SlackBlock[] {
   const actionElements: Record<string, unknown>[] = [];
-
-  const linkedPrUrls = params.linkedPrUrls?.length
-    ? params.linkedPrUrls
-    : params.linkedPrUrl
-      ? [params.linkedPrUrl]
-      : [];
+  const linkedPrUrls = params.linkedPrUrls ?? [];
 
   // Leave room for the task button in Slack's 25-element actions-block limit.
   for (const [index, linkedPrUrl] of linkedPrUrls.slice(0, 24).entries()) {
