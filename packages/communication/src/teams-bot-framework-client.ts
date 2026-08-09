@@ -383,18 +383,6 @@ export class TeamsBotFrameworkClient {
       );
     }
 
-    const contentLengthHeader = response.headers.get('content-length');
-
-    if (contentLengthHeader) {
-      const contentLength = Number.parseInt(contentLengthHeader, 10);
-
-      if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-        throw new Error(
-          `Teams attachment download exceeded max size of ${maxBytes} bytes (content-length: ${contentLength})`,
-        );
-      }
-    }
-
     const bytes = Buffer.from(
       await readBoundedResponseBody(
         response,

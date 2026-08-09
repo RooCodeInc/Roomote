@@ -8,6 +8,7 @@ import {
   transcribeAudioAttachment,
 } from '@roomote/cloud-agents/server';
 import type { DiscordAttachment } from '@roomote/communication/discord-event';
+import { readBoundedResponseBody } from '@roomote/communication/bounded-response-body';
 import {
   isDiscordImageAttachment,
   isDiscordAudioAttachment,
@@ -44,42 +45,6 @@ function validatedDiscordAttachmentUrl(rawUrl: string): URL {
   return url;
 }
 
-async function readBoundedBody(
-  response: Response,
-  maxBytes: number,
-): Promise<Uint8Array> {
-  const declaredLength = Number(response.headers.get('content-length'));
-  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-    throw new Error(`Discord attachment exceeds ${maxBytes} bytes.`);
-  }
-  if (!response.body) {
-    return new Uint8Array();
-  }
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let totalBytes = 0;
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      totalBytes += value.byteLength;
-      if (totalBytes > maxBytes) {
-        throw new Error(`Discord attachment exceeds ${maxBytes} bytes.`);
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const output = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    output.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return output;
-}
-
 async function downloadAttachment(input: {
   attachment: DiscordAttachment;
   maxBytes: number;
@@ -99,8 +64,13 @@ async function downloadAttachment(input: {
       `Discord attachment download failed with HTTP ${response.status}.`,
     );
   }
+  const errorMessage = `Discord attachment exceeds ${input.maxBytes} bytes.`;
   return {
-    bytes: await readBoundedBody(response, input.maxBytes),
+    bytes: await readBoundedResponseBody(
+      response,
+      input.maxBytes,
+      errorMessage,
+    ),
     ...(response.headers.get('content-type')
       ? { contentType: response.headers.get('content-type')! }
       : {}),

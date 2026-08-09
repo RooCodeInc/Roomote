@@ -3,19 +3,29 @@ export async function readBoundedResponseBody(
   maxBytes: number,
   errorMessage: string,
 ): Promise<Uint8Array> {
+  const declaredLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new Error(errorMessage);
+  }
   if (!response.body) return new Uint8Array();
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let totalBytes = 0;
+  let complete = false;
   try {
     while (true) {
       const { value, done } = await reader.read();
-      if (done) break;
+      if (done) {
+        complete = true;
+        break;
+      }
       totalBytes += value.byteLength;
       if (totalBytes > maxBytes) throw new Error(errorMessage);
       chunks.push(value);
     }
   } finally {
+    if (!complete) await reader.cancel().catch(() => undefined);
     reader.releaseLock();
   }
   const bytes = new Uint8Array(totalBytes);
