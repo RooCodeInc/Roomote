@@ -48,6 +48,7 @@ This repository is open source. Treat GitHub and other public surfaces as fully 
 - Treat absolute home-directory skill paths such as `/home/roomote/.agents/skills/...` as activated or installed runtime copies, not as the checked-in source of truth for repository changes.
 - Treat workflow prompts and instructions as a first-class control surface. When agent behavior is off, debug prompt clarity before defaulting to code enforcement.
 - `apps/docs/` is the public product documentation site (published at `https://docs.roomote.dev`) and should be kept in sync with user-facing product changes.
+- Keep equivalent functionality in sync across supported source-control, communication, and sandbox providers whenever applicable. Do not intentionally make provider-specific exceptions unless the user explicitly requests one.
 - **Schema N-1 rollback guarantee:** Roomote must always be able to roll application code back one release against the current database. Do not drop tables or columns that the previous release still reads or writes in the same release that removes the feature. Stop using the columns in app code first, keep them in `packages/db` with an explicit N-1 comment, and drop them only after the next release is the supported rollback target. See `packages/db/AGENTS.md` for the package-local rules.
 
 ## Slack message formatting
