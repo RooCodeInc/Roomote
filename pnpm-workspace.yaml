@@ -8,7 +8,4 @@ minimumReleaseAgeExclude:
   - jose
   # Allow the patched releases while they finish maturing.
   - brace-expansion
-  - dompurify
-  - mermaid
-  - nanoid
 blockExoticSubdeps: true
