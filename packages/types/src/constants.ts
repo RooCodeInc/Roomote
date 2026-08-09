@@ -223,6 +223,31 @@ export function normalizePrBodyAttributionAppMention(
 }
 
 /**
+ * Rewrite the leading Roomote PR provenance sentence while preserving its
+ * task/conversation links and follow-up instructions.
+ */
+export function rewritePrBodyAttribution(
+  body: string,
+  displayName: string | null,
+): string {
+  const firstNewline = body.indexOf('\n');
+  const firstLine = firstNewline === -1 ? body : body.slice(0, firstNewline);
+  const remainder = firstNewline === -1 ? '' : body.slice(firstNewline);
+  const match = matchPrBodyAttributionLine(firstLine);
+
+  if (!match) {
+    return body;
+  }
+
+  const normalizedDisplayName = displayName?.trim().replace(/[\r\n]+/g, ' ');
+  const provenance = normalizedDisplayName
+    ? `> Opened on behalf of ${normalizedDisplayName}. `
+    : '> Created by Roomote. ';
+
+  return `${provenance}${match.instruction}${remainder}`;
+}
+
+/**
  * Hosted-product GitHub App slugs Roomote always treats as its own bots.
  * Custom deployments still add their configured slug via helpers below.
  */

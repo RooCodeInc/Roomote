@@ -3,6 +3,7 @@ import {
   getRoomoteManagedGitHubLogins,
   matchesRoomoteGitHubLogin,
   normalizePrBodyAttributionAppMention,
+  rewritePrBodyAttribution,
 } from '../constants';
 
 describe('Roomote GitHub bot identity helpers', () => {
@@ -118,6 +119,23 @@ describe('Roomote GitHub bot identity helpers', () => {
         normalizePrBodyAttributionAppMention(body, 'roomote-roomote'),
       ).toBe(
         '> Created by Roomote from an unlinked Slack user. Follow up by mentioning @roomote-roomote or in the web UI.',
+      );
+    });
+  });
+
+  describe('rewritePrBodyAttribution', () => {
+    const body =
+      '> Opened on behalf of Private Name. [View the task](https://example.com/task/1) or mention @roomote for follow-up asks.\n\n## What changed\n\nDone.';
+
+    it('uses a public handle without changing the attribution tail', () => {
+      expect(rewritePrBodyAttribution(body, '@octocat')).toBe(
+        '> Opened on behalf of @octocat. [View the task](https://example.com/task/1) or mention @roomote for follow-up asks.\n\n## What changed\n\nDone.',
+      );
+    });
+
+    it('uses generic Roomote provenance when no public identity exists', () => {
+      expect(rewritePrBodyAttribution(body, null)).toBe(
+        '> Created by Roomote. [View the task](https://example.com/task/1) or mention @roomote for follow-up asks.\n\n## What changed\n\nDone.',
       );
     });
   });

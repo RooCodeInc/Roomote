@@ -37,6 +37,7 @@ export type RepositoryRow = {
   externalRepoId: string | null;
   fullName: string;
   htmlUrl: string;
+  private?: boolean;
 };
 
 export function resolveSourceControlProviderForRepositoryFromPayload(
@@ -130,6 +131,7 @@ export async function resolveRepositoryRow({
       externalRepoId: true,
       fullName: true,
       htmlUrl: true,
+      private: true,
     },
   });
 

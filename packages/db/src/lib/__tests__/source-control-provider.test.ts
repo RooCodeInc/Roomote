@@ -3,6 +3,8 @@ import type { DatabaseOrTransaction } from '../../db';
 import {
   resolveWorkspaceRepositoryProviders,
   resolveWorkspaceSourceControlProvider,
+  workspaceAllowsPrivateAttribution,
+  workspaceUsesOnlySourceControlProvider,
 } from '../source-control-provider';
 
 const mockWhere = vi.fn();
@@ -11,6 +13,7 @@ let mockRows: Array<{
   fullName: string;
   host: string | null;
   isActive?: boolean;
+  private?: boolean;
   sourceControlProvider: 'github' | 'gitlab' | 'gitea' | 'ado' | 'bitbucket';
 }> = [];
 let mockEnvironmentRepositories: string[] = [];
@@ -295,5 +298,97 @@ describe('resolveWorkspaceSourceControlProvider', () => {
       expect.stringContaining('Omitting ambiguous repository group/project'),
     );
     warn.mockRestore();
+  });
+});
+
+describe('workspaceAllowsPrivateAttribution', () => {
+  beforeEach(() => {
+    mockRows = [];
+    mockEnvironmentRepositories = [];
+  });
+
+  it('allows account names only when every selected repository is private', async () => {
+    mockRows = [
+      {
+        fullName: 'octo/api',
+        host: 'github.com',
+        private: true,
+        sourceControlProvider: 'github',
+      },
+      {
+        fullName: 'octo/web',
+        host: 'github.com',
+        private: true,
+        sourceControlProvider: 'github',
+      },
+    ];
+
+    await expect(
+      workspaceAllowsPrivateAttribution(dbOrTx, {
+        type: 'repository_set',
+        repositories: ['octo/api', 'octo/web'],
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it('uses public-safe attribution for mixed-visibility workspaces', async () => {
+    mockRows = [
+      {
+        fullName: 'octo/private',
+        host: 'github.com',
+        private: true,
+        sourceControlProvider: 'github',
+      },
+      {
+        fullName: 'octo/public',
+        host: 'github.com',
+        private: false,
+        sourceControlProvider: 'github',
+      },
+    ];
+
+    await expect(
+      workspaceAllowsPrivateAttribution(dbOrTx, {
+        type: 'repository_set',
+        repositories: ['octo/private', 'octo/public'],
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('uses public-safe attribution when a repository cannot be resolved', async () => {
+    await expect(
+      workspaceAllowsPrivateAttribution(dbOrTx, {
+        type: 'repository',
+        repo: 'octo/missing',
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('requires every repository to match before using a provider handle', async () => {
+    mockRows = [
+      {
+        fullName: 'octo/api',
+        host: 'github.com',
+        private: true,
+        sourceControlProvider: 'github',
+      },
+      {
+        fullName: 'group/web',
+        host: 'gitlab.com',
+        private: false,
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+
+    await expect(
+      workspaceUsesOnlySourceControlProvider(
+        dbOrTx,
+        {
+          type: 'repository_set',
+          repositories: ['octo/api', 'group/web'],
+        },
+        'github',
+      ),
+    ).resolves.toBe(false);
   });
 });

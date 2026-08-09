@@ -33,6 +33,7 @@ const teamSlackPermalink = buildSlackThreadPermalink({
 const matchedUserAttribution: ResolvedTaskCommitAuthor = {
   kind: 'user',
   displayName: 'Jane Doe',
+  publicDisplayName: null,
   githubLogin: null,
   prAssigneeLogin: null,
   gitAuthor: {

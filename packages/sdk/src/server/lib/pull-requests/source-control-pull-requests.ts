@@ -21,6 +21,7 @@ import {
   buildPullRequestUrl,
   getSourceControlProviderLabel,
   normalizePrBodyAttributionAppMention,
+  rewritePrBodyAttribution,
   prActions,
   sourceControlProviderSchema,
   type PrAction,
@@ -218,22 +219,32 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     resolveConfiguredGitHubAppSlugIfConfigured(),
     getDeploymentGitHubRoomoteMentionEnabled(),
   ]);
-  const inputWithNormalizedAttribution: SourceControlPullRequestMutationInput =
-    configuredGitHubAppSlug
-      ? {
-          ...input,
-          body: normalizePrBodyAttributionAppMention(
-            input.body,
-            configuredGitHubAppSlug,
-            roomoteMentionEnabled,
-          ),
-        }
-      : input;
-
-  const liveGitHubAttribution =
+  const attribution =
     provider === 'github'
       ? await resolveRunCommitAuthor(db, taskRun)
-      : undefined;
+      : await resolveLaunchTaskCommitAuthor(db, taskRun.taskId);
+  const normalizedMentionBody = configuredGitHubAppSlug
+    ? normalizePrBodyAttributionAppMention(
+        input.body,
+        configuredGitHubAppSlug,
+        roomoteMentionEnabled,
+      )
+    : input.body;
+  const displayName =
+    attribution.kind === 'roomote'
+      ? null
+      : repository.private === true
+        ? attribution.displayName
+        : provider === 'github'
+          ? attribution.publicDisplayName
+          : null;
+  const inputWithNormalizedAttribution: SourceControlPullRequestMutationInput =
+    {
+      ...input,
+      body: rewritePrBodyAttribution(normalizedMentionBody, displayName),
+    };
+
+  const liveGitHubAttribution = provider === 'github' ? attribution : undefined;
   const liveGitHubAssigneePlan = liveGitHubAttribution
     ? await resolveLiveGitHubAssigneePlan({
         taskRun,
@@ -256,7 +267,6 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
           repository,
           provider,
           createDraft,
-          attribution: liveGitHubAttribution,
           staleLaunchAssignee: liveGitHubAssigneePlan?.staleLaunchAssignee,
         });
       case 'gitlab':
@@ -415,14 +425,12 @@ async function createOrUpdateGitHubPullRequest({
   repository,
   provider,
   createDraft,
-  attribution,
   staleLaunchAssignee,
 }: {
   input: SourceControlPullRequestMutationInput;
   repository: RepositoryRow;
   provider: 'github';
   createDraft: boolean;
-  attribution?: ResolvedTaskCommitAuthor;
   staleLaunchAssignee?: string;
 }): Promise<SourceControlPullRequestMutationResult> {
   if (!repository.installationId) {
@@ -474,6 +482,7 @@ async function createOrUpdateGitHubPullRequest({
       body: preserveExistingPullRequestAttribution(
         input.body,
         pullRequest.body,
+        repository.private === true,
       ),
     });
     pullRequest = data;
@@ -484,7 +493,7 @@ async function createOrUpdateGitHubPullRequest({
       owner,
       repo,
       title: input.title,
-      body: replaceCreatedPullRequestAttribution(input.body, attribution),
+      body: input.body,
       head: input.sourceBranch,
       base: targetBranch,
       draft: createDraft,
@@ -541,27 +550,20 @@ async function createOrUpdateGitHubPullRequest({
   };
 }
 
-function replaceCreatedPullRequestAttribution(
-  body: string,
-  attribution: ResolvedTaskCommitAuthor | undefined,
-): string {
-  if (!attribution) {
-    return body;
-  }
-
-  return body.replace(
-    /^(> Opened on behalf of ).+?(\. (?:Follow up by|\[View the task\]))/mu,
-    `$1${attribution.displayName}$2`,
-  );
-}
-
 function preserveExistingPullRequestAttribution(
   body: string,
   existingBody: string | null | undefined,
+  repositoryIsPrivate: boolean,
 ): string {
   const openerLine = existingBody?.match(/^> Opened on behalf of .+$/mu)?.[0];
+  const safePublicOpener = openerLine?.startsWith('> Opened on behalf of @');
   return openerLine
-    ? body.replace(/^> Opened on behalf of .+$/mu, openerLine)
+    ? repositoryIsPrivate || safePublicOpener
+      ? body.replace(
+          /^(?:> Opened on behalf of .+|> Created by Roomote\..*)$/mu,
+          openerLine,
+        )
+      : body
     : body;
 }
 

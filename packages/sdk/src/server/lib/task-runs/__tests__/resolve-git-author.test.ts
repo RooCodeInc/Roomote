@@ -1,10 +1,12 @@
 import {
   db,
   githubUserMappings,
+  repositoryFactory,
   taskFactory,
+  type TaskRun,
   userFactory,
 } from '@roomote/db/server';
-import { PRODUCT_NAME } from '@roomote/types';
+import { ALL_REPOSITORIES, PRODUCT_NAME } from '@roomote/types';
 
 import { resolveGitAuthor } from '../dequeue-helpers';
 
@@ -12,6 +14,22 @@ let githubUserIdSeed = Date.now() * 1000;
 function uniqueGitHubUserId(): number {
   githubUserIdSeed += 1;
   return githubUserIdSeed;
+}
+
+function runContext(
+  taskId: string,
+  actingUserId: string | null,
+  repo = 'Roomote/example-app',
+) {
+  return {
+    id: 1,
+    taskId,
+    actingUserId,
+    payload: {
+      repo,
+      sourceControlProvider: 'github',
+    } as TaskRun['payload'],
+  };
 }
 
 /**
@@ -23,7 +41,7 @@ describe('resolveGitAuthor', () => {
     const task = await taskFactory.create({});
 
     const result = await db.transaction(async (tx) =>
-      resolveGitAuthor(tx, { id: 1, taskId: task.id, actingUserId: null }),
+      resolveGitAuthor(tx, runContext(task.id, null)),
     );
 
     expect(result).toEqual({
@@ -38,7 +56,7 @@ describe('resolveGitAuthor', () => {
     });
 
     const result = await db.transaction(async (tx) =>
-      resolveGitAuthor(tx, { id: 1, taskId: task.id, actingUserId: null }),
+      resolveGitAuthor(tx, runContext(task.id, null)),
     );
 
     expect(result).toEqual({
@@ -47,7 +65,7 @@ describe('resolveGitAuthor', () => {
     });
   });
 
-  it('resolves a user commit author to their noreply email via the GitHub mapping', async () => {
+  it('uses the linked handle for an unknown-visibility GitHub workspace', async () => {
     const user = await userFactory.create({ name: 'Mona Lisa' });
     const githubUserId = uniqueGitHubUserId();
 
@@ -64,12 +82,94 @@ describe('resolveGitAuthor', () => {
     });
 
     const result = await db.transaction(async (tx) =>
-      resolveGitAuthor(tx, { id: 1, taskId: task.id, actingUserId: user.id }),
+      resolveGitAuthor(tx, runContext(task.id, user.id)),
+    );
+
+    expect(result).toEqual({
+      name: '@octocat',
+      email: `${githubUserId}+octocat@users.noreply.github.com`,
+    });
+  });
+
+  it('keeps the account name for a known private workspace', async () => {
+    const user = await userFactory.create({ name: 'Mona Lisa' });
+    const githubUserId = uniqueGitHubUserId();
+    const repository = await repositoryFactory.create({
+      fullName: `octo/private-${githubUserId}`,
+      linkedByUserId: user.id,
+      private: true,
+      sourceControlProvider: 'gitlab',
+    });
+    await db.insert(githubUserMappings).values({
+      userId: user.id,
+      githubLogin: 'octocat',
+      githubUserId,
+    });
+    const task = await taskFactory.create({
+      initiatorUserId: user.id,
+      commitAuthorKind: 'user',
+      commitAuthorUserId: user.id,
+    });
+
+    const result = await db.transaction(async (tx) =>
+      resolveGitAuthor(tx, {
+        ...runContext(task.id, user.id, repository.fullName),
+        payload: {
+          repo: repository.fullName,
+          sourceControlProvider: 'gitlab',
+        } as TaskRun['payload'],
+      }),
     );
 
     expect(result).toEqual({
       name: 'Mona Lisa',
       email: `${githubUserId}+octocat@users.noreply.github.com`,
+    });
+  });
+
+  it('uses Roomote for a public mixed-provider workspace', async () => {
+    const user = await userFactory.create({ name: 'Mona Lisa' });
+    const githubUserId = uniqueGitHubUserId();
+    const privateRepository = await repositoryFactory.create({
+      fullName: `group/private-${githubUserId}`,
+      linkedByUserId: user.id,
+      private: true,
+      sourceControlProvider: 'gitea',
+    });
+    const publicRepository = await repositoryFactory.create({
+      fullName: `group/public-${githubUserId}`,
+      linkedByUserId: user.id,
+      private: false,
+      sourceControlProvider: 'gitlab',
+    });
+    await db.insert(githubUserMappings).values({
+      userId: user.id,
+      githubLogin: 'octocat',
+      githubUserId,
+    });
+    const task = await taskFactory.create({
+      initiatorUserId: user.id,
+      commitAuthorKind: 'user',
+      commitAuthorUserId: user.id,
+    });
+
+    const result = await db.transaction(async (tx) =>
+      resolveGitAuthor(tx, {
+        ...runContext(task.id, user.id),
+        payload: {
+          repo: ALL_REPOSITORIES,
+          selectedRepositories: [
+            privateRepository.fullName,
+            publicRepository.fullName,
+          ],
+          sourceControlProvider: 'github',
+        } as TaskRun['payload'],
+      }),
+    );
+
+    expect(result).toEqual({
+      name: PRODUCT_NAME,
+      email: 'roomote@roomote.dev',
     });
   });
 
@@ -83,7 +183,7 @@ describe('resolveGitAuthor', () => {
     });
 
     const result = await db.transaction(async (tx) =>
-      resolveGitAuthor(tx, { id: 1, taskId: task.id, actingUserId: user.id }),
+      resolveGitAuthor(tx, runContext(task.id, user.id)),
     );
 
     expect(result).toEqual({
@@ -101,7 +201,7 @@ describe('resolveGitAuthor', () => {
     });
 
     const result = await db.transaction(async (tx) =>
-      resolveGitAuthor(tx, { id: 1, taskId: task.id, actingUserId: null }),
+      resolveGitAuthor(tx, runContext(task.id, null)),
     );
 
     expect(result).toEqual({
@@ -118,7 +218,7 @@ describe('resolveGitAuthor', () => {
     });
 
     const result = await db.transaction(async (tx) =>
-      resolveGitAuthor(tx, { id: 1, taskId: task.id, actingUserId: null }),
+      resolveGitAuthor(tx, runContext(task.id, null)),
     );
 
     expect(result).toEqual({
@@ -135,7 +235,7 @@ describe('resolveGitAuthor', () => {
     });
 
     const result = await db.transaction(async (tx) =>
-      resolveGitAuthor(tx, { id: 1, taskId: task.id, actingUserId: null }),
+      resolveGitAuthor(tx, runContext(task.id, null)),
     );
 
     expect(result).toEqual({
@@ -146,11 +246,7 @@ describe('resolveGitAuthor', () => {
 
   it('does not require a task lookup when the run has no acting user', async () => {
     const result = await db.transaction(async (tx) =>
-      resolveGitAuthor(tx, {
-        id: 1,
-        taskId: 'missing-task-id',
-        actingUserId: null,
-      }),
+      resolveGitAuthor(tx, runContext('missing-task-id', null)),
     );
 
     expect(result).toEqual({
@@ -174,15 +270,11 @@ describe('resolveGitAuthor', () => {
     });
 
     const result = await db.transaction(async (tx) =>
-      resolveGitAuthor(tx, {
-        id: 1,
-        taskId: task.id,
-        actingUserId: participant.id,
-      }),
+      resolveGitAuthor(tx, runContext(task.id, participant.id)),
     );
 
     expect(result).toEqual({
-      name: 'Participant',
+      name: '@participant',
       email: `${githubUserId}+participant@users.noreply.github.com`,
     });
   });
@@ -198,11 +290,7 @@ describe('resolveGitAuthor', () => {
     });
 
     const result = await db.transaction(async (tx) =>
-      resolveGitAuthor(tx, {
-        id: 1,
-        taskId: task.id,
-        actingUserId: participant.id,
-      }),
+      resolveGitAuthor(tx, runContext(task.id, participant.id)),
     );
 
     expect(result).toEqual({

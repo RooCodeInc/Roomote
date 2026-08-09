@@ -24,6 +24,7 @@ const exactSlackPermalink =
 const matchedSlackAttribution: ResolvedTaskCommitAuthor = {
   kind: 'user',
   displayName: 'Jane Doe',
+  publicDisplayName: null,
   githubLogin: null,
   prAssigneeLogin: null,
   gitAuthor: {
