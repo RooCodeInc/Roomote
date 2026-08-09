@@ -295,7 +295,8 @@ export async function resolveTaskCommitAuthor(
 export function resolvePublicGitAuthor(
   attribution: ResolvedTaskCommitAuthor,
 ): ResolvedGitAuthor {
-  return attribution.publicDisplayName
+  return attribution.publicDisplayName &&
+    attribution.gitAuthor.email !== ROOMOTE_GIT_AUTHOR.email
     ? { ...attribution.gitAuthor, name: attribution.publicDisplayName }
     : ROOMOTE_GIT_AUTHOR;
 }

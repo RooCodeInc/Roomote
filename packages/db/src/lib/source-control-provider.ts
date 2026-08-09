@@ -48,8 +48,13 @@ function selectRepositoryRows(
     const matches = rowsByFullName.get(fullName) ?? [];
     const activeMatches = matches.filter((row) => row.isActive === true);
     const candidates = activeMatches.length > 0 ? activeMatches : matches;
-    const hostMatches = sourceControlHost
+    const exactHostMatches = sourceControlHost
       ? candidates.filter((row) => row.host === sourceControlHost)
+      : [];
+    const hostMatches = sourceControlHost
+      ? exactHostMatches.length > 0
+        ? exactHostMatches
+        : candidates.filter((row) => row.host === null)
       : candidates;
 
     if (hostMatches.length !== 1) {
@@ -81,8 +86,13 @@ function toRepositoryProviderMap(
     const matches = rowsByFullName.get(fullName) ?? [];
     const activeMatches = matches.filter((row) => row.isActive === true);
     const candidates = activeMatches.length > 0 ? activeMatches : matches;
-    const hostMatches = sourceControlHost
+    const exactHostMatches = sourceControlHost
       ? candidates.filter((row) => row.host === sourceControlHost)
+      : [];
+    const hostMatches = sourceControlHost
+      ? exactHostMatches.length > 0
+        ? exactHostMatches
+        : candidates.filter((row) => row.host === null)
       : candidates;
 
     if (candidates.length > 1 && hostMatches.length !== 1) {

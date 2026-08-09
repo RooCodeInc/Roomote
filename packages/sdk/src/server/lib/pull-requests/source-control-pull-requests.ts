@@ -20,7 +20,10 @@ import {
 import {
   buildPullRequestUrl,
   getSourceControlProviderLabel,
+  findPrBodyAttributionLine,
+  hasMarkedPrBodyAttribution,
   normalizePrBodyAttributionAppMention,
+  preservePrBodyAttribution,
   rewritePrBodyAttribution,
   prActions,
   sourceControlProviderSchema,
@@ -238,10 +241,21 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
         : provider === 'github'
           ? attribution.publicDisplayName
           : null;
+  const rewrittenAttributionBody = rewritePrBodyAttribution(
+    normalizedMentionBody,
+    displayName,
+  );
   const inputWithNormalizedAttribution: SourceControlPullRequestMutationInput =
     {
       ...input,
-      body: rewritePrBodyAttribution(normalizedMentionBody, displayName),
+      body:
+        repository.private !== true &&
+        !hasMarkedPrBodyAttribution(normalizedMentionBody)
+          ? scrubUnmarkedPublicAttribution(
+              rewrittenAttributionBody,
+              displayName,
+            )
+          : rewrittenAttributionBody,
     };
 
   const liveGitHubAttribution = provider === 'github' ? attribution : undefined;
@@ -555,9 +569,11 @@ function preserveExistingPullRequestAttribution(
   existingBody: string | null | undefined,
   repositoryIsPrivate: boolean,
 ): string {
-  const openerLine = existingBody?.match(/^> Opened on behalf of .+$/mu)?.[0];
+  const openerLine = existingBody
+    ? findPrBodyAttributionLine(existingBody)
+    : null;
   const publicHandle = openerLine?.match(
-    /^> Opened on behalf of @([^\s.]+)\. /u,
+    /^> Opened on behalf of @([^\s.]+)\.(?: |$)/u,
   )?.[1];
   const safePublicOpener =
     publicHandle !== undefined &&
@@ -567,15 +583,25 @@ function preserveExistingPullRequestAttribution(
   }
 
   if (repositoryIsPrivate) {
-    return body.replace(
-      /^(?:> Opened on behalf of .+|> Created by Roomote\..*)$/mu,
-      openerLine,
-    );
+    return preservePrBodyAttribution(body, existingBody ?? '');
   }
 
   return safePublicOpener
     ? rewritePrBodyAttribution(body, `@${publicHandle}`)
     : body;
+}
+
+function scrubUnmarkedPublicAttribution(
+  body: string,
+  displayName: string | null,
+): string {
+  const provenance = displayName
+    ? `> Opened on behalf of ${displayName}.`
+    : '> Created by Roomote.';
+  return body.replace(
+    /^[ \t]*>[ \t]*(?:Opened on behalf of|Created by Roomote).*$/gmu,
+    () => provenance,
+  );
 }
 
 async function createOrUpdateGitLabMergeRequest({

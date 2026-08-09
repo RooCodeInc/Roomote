@@ -6,6 +6,7 @@ import {
   buildTelegramMessagePermalink,
   buildDiscordMessagePermalink,
   getGitHubFollowUpMention,
+  formatPrBodyAttribution,
   resolveTaskWorkspace,
 } from '@roomote/types';
 import {
@@ -273,12 +274,15 @@ function buildPrBodyAttributionLine({
       : defaultFollowUpInstruction;
 
   if (attribution.kind === 'roomote') {
-    return `> Created by Roomote. ${instruction}`;
+    return formatPrBodyAttribution('Created by Roomote.', instruction);
   }
 
   const safeUserName = escapeValue(attribution.displayName || PRODUCT_NAME);
 
-  return `> Opened on behalf of ${safeUserName}. ${instruction}`;
+  return formatPrBodyAttribution(
+    `Opened on behalf of ${safeUserName}.`,
+    instruction,
+  );
 }
 export function getWorkspaceInstructions(
   repoFullNames?: string[],

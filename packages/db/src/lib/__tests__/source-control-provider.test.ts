@@ -249,6 +249,47 @@ describe('resolveWorkspaceSourceControlProvider', () => {
     ).resolves.toEqual({});
   });
 
+  it('falls back to a legacy null-host repository row', async () => {
+    mockRows = [
+      {
+        fullName: 'group/project',
+        host: null,
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+
+    await expect(
+      resolveWorkspaceRepositoryProviders(dbOrTx, {
+        type: 'repository',
+        repo: 'group/project',
+        sourceControlHost: 'gitlab.example.com',
+      }),
+    ).resolves.toEqual({ 'group/project': 'gitlab' });
+  });
+
+  it('prefers an exact host match over a legacy null-host row', async () => {
+    mockRows = [
+      {
+        fullName: 'group/project',
+        host: null,
+        sourceControlProvider: 'github',
+      },
+      {
+        fullName: 'group/project',
+        host: 'gitlab.example.com',
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+
+    await expect(
+      resolveWorkspaceRepositoryProviders(dbOrTx, {
+        type: 'repository',
+        repo: 'group/project',
+        sourceControlHost: 'gitlab.example.com',
+      }),
+    ).resolves.toEqual({ 'group/project': 'gitlab' });
+  });
+
   it('prefers active rows over stale inactive rows with the same name', async () => {
     mockRows = [
       {
@@ -397,6 +438,31 @@ describe('workspaceAllowsPrivateAttribution', () => {
         type: 'repository',
         repo: 'group/project',
         sourceControlHost: 'git.example.com',
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('uses legacy null-host visibility only when no exact host exists', async () => {
+    mockRows = [
+      {
+        fullName: 'group/project',
+        host: null,
+        private: true,
+        sourceControlProvider: 'gitlab',
+      },
+      {
+        fullName: 'group/project',
+        host: 'gitlab.example.com',
+        private: false,
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+
+    await expect(
+      workspaceAllowsPrivateAttribution(dbOrTx, {
+        type: 'repository',
+        repo: 'group/project',
+        sourceControlHost: 'gitlab.example.com',
       }),
     ).resolves.toBe(false);
   });

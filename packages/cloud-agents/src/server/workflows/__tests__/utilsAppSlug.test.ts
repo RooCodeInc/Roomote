@@ -16,6 +16,10 @@ import {
   setGitHubRoomoteMentionSettingCache,
   type Schemas,
 } from '@roomote/github';
+import {
+  PR_BODY_ATTRIBUTION_END_MARKER,
+  PR_BODY_ATTRIBUTION_START_MARKER,
+} from '@roomote/types';
 
 import { DEFAULT_ROOMOTE_COMMIT_AUTHOR } from '../../commit-author';
 import {
@@ -73,6 +77,8 @@ describe('getPrBodyAttributionLine', () => {
 
     expect(line).toContain('@roomote');
     expect(line).not.toContain('@octomote');
+    expect(line).toContain(PR_BODY_ATTRIBUTION_START_MARKER);
+    expect(line).toContain(PR_BODY_ATTRIBUTION_END_MARKER);
   });
 
   it('mentions @roomote with a database-configured app slug', () => {
