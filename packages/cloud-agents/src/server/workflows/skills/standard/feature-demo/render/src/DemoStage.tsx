@@ -256,15 +256,23 @@ export const DemoStage: React.FC<{
           );
         })}
 
-        <div
-          style={{
-            position: 'absolute',
-            left: cursor.x * BASE_W,
-            top: cursor.y * BASE_H,
-          }}
-        >
-          <Cursor invScale={invScale} />
-        </div>
+        {/* The capture parks the cursor just outside the window (y just past
+            1) until its first real move, so a demo does not open with a
+            pointer sitting in the middle of the page. The cursor is a
+            sibling of the clipped video, so drawing it there would paint it
+            onto the backdrop; skip it entirely while it is out of frame. It
+            slides in from the edge as the first move interpolates. */}
+        {cursor.x >= 0 && cursor.x <= 1 && cursor.y >= 0 && cursor.y <= 1 ? (
+          <div
+            style={{
+              position: 'absolute',
+              left: cursor.x * BASE_W,
+              top: cursor.y * BASE_H,
+            }}
+          >
+            <Cursor invScale={invScale} />
+          </div>
+        ) : null}
       </div>
       </div>
 
