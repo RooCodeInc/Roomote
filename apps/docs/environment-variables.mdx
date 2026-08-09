@@ -221,7 +221,7 @@ as per-task auth tokens or workspace paths.
 
 | Env var                              | Required          | Used for                                                                                                                                 |
 | ------------------------------------ | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `DEFAULT_COMPUTE_PROVIDER`           | Optional          | Runtime default sandbox provider when no admin default is saved. Supported values are `docker`, `modal`, `e2b`, `daytona`, `azure`, and the Roomote Cloud-only `roomote`. |
+| `DEFAULT_COMPUTE_PROVIDER`           | Optional          | Runtime default sandbox provider when no admin default is saved. Supported values are `docker`, `modal`, `e2b`, `daytona`, `blaxel`, `azure`, and the Roomote Cloud-only `roomote`. |
 | `EXCLUDED_COMPUTE_PROVIDERS`         | Optional          | Comma-separated provider IDs to hide or exclude from default selection.                                                                  |
 | `DOCKER_WORKER_IMAGE`                | Optional          | Worker image used by Docker. In production, prefer an immutable registry-qualified tag.                                                  |
 | `ROOMOTE_WORKER_IMAGE_REPO`          | Optional          | Registry repository used to derive the worker image from `RELEASE_VERSION` when `DOCKER_WORKER_IMAGE` is unset.                          |
