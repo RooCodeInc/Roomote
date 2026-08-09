@@ -25,6 +25,7 @@ const TERMINAL_LINKED_TASK_PR_STATUSES = new Set<PullRequestStatus>([
 
 export interface ThreadReplyFooterContext {
   linkedPr: ThreadReplyLinkedPr | null;
+  linkedPrs: ThreadReplyLinkedPr[];
   livePreviewUrl: string | null;
 }
 
@@ -209,13 +210,14 @@ export async function resolveThreadReplyFooterContext(params: {
   prRepo: string | null | undefined;
   prNumber: number | null | undefined;
 }): Promise<ThreadReplyFooterContext> {
-  const [linkedPr, livePreviewUrl] = await Promise.all([
-    resolveThreadReplyLinkedPr(params),
+  const [linkedPrs, livePreviewUrl] = await Promise.all([
+    resolveThreadReplyLinkedPrs(params),
     resolveThreadReplyLivePreviewUrl(params.taskId),
   ]);
 
   return {
-    linkedPr,
+    linkedPr: linkedPrs[0] ?? null,
+    linkedPrs,
     livePreviewUrl,
   };
 }

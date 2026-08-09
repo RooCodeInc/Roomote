@@ -15,7 +15,6 @@ export type SlackThreadLinkedPr = ThreadReplyLinkedPr;
 
 export interface SlackThreadFooterContext extends ThreadReplyFooterContext {
   explicitMentionRequired: boolean;
-  linkedPrs?: SlackThreadLinkedPr[];
 }
 
 export {
@@ -32,15 +31,13 @@ export async function resolveSlackThreadFooterContext(params: {
   channelId: string;
   threadTs: string;
 }): Promise<SlackThreadFooterContext> {
-  const [context, linkedPrs, explicitMentionRequired] = await Promise.all([
+  const [context, explicitMentionRequired] = await Promise.all([
     resolveThreadReplyFooterContext(params),
-    resolveThreadReplyLinkedPrs(params),
     isSlackThreadExplicitMentionRequired(params.channelId, params.threadTs),
   ]);
 
   return {
     ...context,
-    linkedPrs,
     explicitMentionRequired,
   };
 }
