@@ -562,13 +562,19 @@ function preserveExistingPullRequestAttribution(
   const safePublicOpener =
     publicHandle !== undefined &&
     /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/u.test(publicHandle);
-  return openerLine
-    ? repositoryIsPrivate || safePublicOpener
-      ? body.replace(
-          /^(?:> Opened on behalf of .+|> Created by Roomote\..*)$/mu,
-          openerLine,
-        )
-      : body
+  if (!openerLine) {
+    return body;
+  }
+
+  if (repositoryIsPrivate) {
+    return body.replace(
+      /^(?:> Opened on behalf of .+|> Created by Roomote\..*)$/mu,
+      openerLine,
+    );
+  }
+
+  return safePublicOpener
+    ? rewritePrBodyAttribution(body, `@${publicHandle}`)
     : body;
 }
 
