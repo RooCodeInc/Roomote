@@ -41,5 +41,7 @@ export const PRESETS: Record<Preset['id'], Preset> = {
   },
 };
 
+// Roomote brand lime (--background-new: oklch(0.911 0.185 117.691) in the
+// web app theme, ≈ #c9f24d) with a subtle radial falloff for depth.
 export const BACKDROP =
-  'radial-gradient(120% 120% at 20% 0%, #23305c 0%, #141726 55%, #0d0f18 100%)';
+  'radial-gradient(120% 120% at 20% 0%, #d7f875 0%, #c9f24d 55%, #a9d33c 100%)';
