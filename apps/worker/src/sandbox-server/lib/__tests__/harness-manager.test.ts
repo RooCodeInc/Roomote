@@ -2051,6 +2051,63 @@ describe('HarnessManager touchKeepalive', () => {
     }
   });
 
+  it('finalizes each completed turn once when duplicate terminal events arrive', () => {
+    const onExit = vi.fn();
+    const onTaskUpdate = vi.fn();
+    const { harness, manager } = createManager({ onExit, onTaskUpdate });
+    const completionEvent = {
+      eventName: TaskEventName.TaskCompleted,
+      payload: [
+        'task-duplicate-completion',
+        {
+          totalTokensIn: 0,
+          totalTokensOut: 0,
+          totalCost: 0,
+          contextTokens: 0,
+        },
+        {},
+        { isSubtask: false },
+      ],
+    } as TaskEvent;
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskStarted,
+        payload: ['task-duplicate-completion'],
+      } as TaskEvent);
+
+      harness.emitTaskEvent(completionEvent);
+      harness.emitTaskEvent(completionEvent);
+
+      expect(onExit).toHaveBeenCalledTimes(1);
+      expect(
+        onTaskUpdate.mock.calls.filter(
+          ([update]) => update.status === 'completed',
+        ),
+      ).toHaveLength(1);
+
+      expect(
+        manager.sendFollowUpPrompt({ prompt: 'run a real follow-up turn' }),
+      ).toBe(true);
+      expect(manager.getStatus().phase).toBe('running');
+
+      harness.emitTaskEvent(completionEvent);
+      harness.emitTaskEvent(completionEvent);
+
+      expect(onExit).toHaveBeenCalledTimes(2);
+      expect(
+        onTaskUpdate.mock.calls.filter(
+          ([update]) => update.status === 'completed',
+        ),
+      ).toHaveLength(2);
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
   it('is a no-op when in running phase', () => {
     const { harness, manager } = createManager();
 

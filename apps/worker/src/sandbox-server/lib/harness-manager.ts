@@ -1392,6 +1392,16 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
 
   private onTaskCompleted(payload: TaskEventCompletedPayload): void {
     if (payload[0] === this.state.sessionId) {
+      if (
+        this.state.taskFinishedAt !== undefined &&
+        !isActiveTaskPhase(this.phase)
+      ) {
+        this.logger.info(
+          `[HarnessManager] Ignoring duplicate task completion for settled task ${payload[0]} (phase=${this.phase})`,
+        );
+        return;
+      }
+
       this.logger.info(
         `[HarnessManager] Task completed: ${payload[0]} (phase=${this.phase}, queuedRuntimePrompts=${this.runtimeQueuedMessagesCount}, deferredSettlement=${this.deferredTurnSettlement ?? 'none'})`,
       );
