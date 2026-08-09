@@ -231,6 +231,24 @@ describe('resolveWorkspaceSourceControlProvider', () => {
     ).resolves.toEqual({ 'group/project': 'gitea' });
   });
 
+  it('rejects a single repository row from a different host', async () => {
+    mockRows = [
+      {
+        fullName: 'group/project',
+        host: 'gitlab.example.com',
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+
+    await expect(
+      resolveWorkspaceRepositoryProviders(dbOrTx, {
+        type: 'repository',
+        repo: 'group/project',
+        sourceControlHost: 'git.example.com',
+      }),
+    ).resolves.toEqual({});
+  });
+
   it('prefers active rows over stale inactive rows with the same name', async () => {
     mockRows = [
       {
@@ -360,6 +378,25 @@ describe('workspaceAllowsPrivateAttribution', () => {
       workspaceAllowsPrivateAttribution(dbOrTx, {
         type: 'repository',
         repo: 'octo/missing',
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('uses public-safe attribution when the selected host does not match', async () => {
+    mockRows = [
+      {
+        fullName: 'group/project',
+        host: 'gitlab.example.com',
+        private: true,
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+
+    await expect(
+      workspaceAllowsPrivateAttribution(dbOrTx, {
+        type: 'repository',
+        repo: 'group/project',
+        sourceControlHost: 'git.example.com',
       }),
     ).resolves.toBe(false);
   });

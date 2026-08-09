@@ -556,7 +556,12 @@ function preserveExistingPullRequestAttribution(
   repositoryIsPrivate: boolean,
 ): string {
   const openerLine = existingBody?.match(/^> Opened on behalf of .+$/mu)?.[0];
-  const safePublicOpener = openerLine?.startsWith('> Opened on behalf of @');
+  const publicHandle = openerLine?.match(
+    /^> Opened on behalf of @([^\s.]+)\. /u,
+  )?.[1];
+  const safePublicOpener =
+    publicHandle !== undefined &&
+    /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/u.test(publicHandle);
   return openerLine
     ? repositoryIsPrivate || safePublicOpener
       ? body.replace(

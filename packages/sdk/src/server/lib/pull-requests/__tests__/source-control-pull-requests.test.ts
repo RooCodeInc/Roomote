@@ -1134,6 +1134,95 @@ describe('optional targetBranch', () => {
     );
   });
 
+  it.each(['@Jane Doe', '@jane@example.com'])(
+    'does not preserve invalid legacy public attribution %s',
+    async (legacyAttribution) => {
+      const existing = {
+        number: 11,
+        node_id: 'node-11',
+        html_url: 'https://github.com/acme/web/pull/11',
+        title: 'Old title',
+        draft: false,
+        base: { ref: 'develop' },
+        body: `> Opened on behalf of ${legacyAttribution}. Follow up by mentioning @roomote.`,
+      };
+      const octokit = makeOctokit({
+        list: [existing],
+        updated: { ...existing, title: '[Feature] X' },
+      });
+      mockRepositoriesFindFirst.mockResolvedValue({
+        installationId: 555,
+        externalRepoId: null,
+        fullName: 'acme/web',
+        htmlUrl: 'https://github.com/acme/web',
+        private: false,
+      });
+      mockResolveRunCommitAuthor.mockResolvedValue({
+        kind: 'user',
+        displayName: 'Private Name',
+        publicDisplayName: '@participant',
+        prAssigneeLogin: null,
+      });
+
+      await createOrUpdateSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({ repo: 'acme/web' }),
+        input: {
+          ...baseInput,
+          body: '> Opened on behalf of Private Name. Follow up by mentioning @roomote.',
+        },
+      });
+
+      expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: '> Opened on behalf of @participant. Follow up by mentioning @roomote.',
+        }),
+      );
+    },
+  );
+
+  it('preserves a valid handle in existing public attribution', async () => {
+    const existing = {
+      number: 11,
+      node_id: 'node-11',
+      html_url: 'https://github.com/acme/web/pull/11',
+      title: 'Old title',
+      draft: false,
+      base: { ref: 'develop' },
+      body: '> Opened on behalf of @launch-owner. Follow up by mentioning @roomote.',
+    };
+    const octokit = makeOctokit({
+      list: [existing],
+      updated: { ...existing, title: '[Feature] X' },
+    });
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 555,
+      externalRepoId: null,
+      fullName: 'acme/web',
+      htmlUrl: 'https://github.com/acme/web',
+      private: false,
+    });
+    mockResolveRunCommitAuthor.mockResolvedValue({
+      kind: 'user',
+      displayName: 'Private Name',
+      publicDisplayName: '@participant',
+      prAssigneeLogin: null,
+    });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: {
+        ...baseInput,
+        body: '> Opened on behalf of Private Name. Follow up by mentioning @roomote.',
+      },
+    });
+
+    expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: '> Opened on behalf of @launch-owner. Follow up by mentioning @roomote.',
+      }),
+    );
+  });
+
   it('removes the stale launch-owner assignment when updating a pull request', async () => {
     const existing = {
       number: 11,

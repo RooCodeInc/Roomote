@@ -48,10 +48,9 @@ function selectRepositoryRows(
     const matches = rowsByFullName.get(fullName) ?? [];
     const activeMatches = matches.filter((row) => row.isActive === true);
     const candidates = activeMatches.length > 0 ? activeMatches : matches;
-    const hostMatches =
-      candidates.length > 1 && sourceControlHost
-        ? candidates.filter((row) => row.host === sourceControlHost)
-        : candidates;
+    const hostMatches = sourceControlHost
+      ? candidates.filter((row) => row.host === sourceControlHost)
+      : candidates;
 
     if (hostMatches.length !== 1) {
       return null;
@@ -82,10 +81,9 @@ function toRepositoryProviderMap(
     const matches = rowsByFullName.get(fullName) ?? [];
     const activeMatches = matches.filter((row) => row.isActive === true);
     const candidates = activeMatches.length > 0 ? activeMatches : matches;
-    const hostMatches =
-      candidates.length > 1 && sourceControlHost
-        ? candidates.filter((row) => row.host === sourceControlHost)
-        : candidates;
+    const hostMatches = sourceControlHost
+      ? candidates.filter((row) => row.host === sourceControlHost)
+      : candidates;
 
     if (candidates.length > 1 && hostMatches.length !== 1) {
       console.warn(
