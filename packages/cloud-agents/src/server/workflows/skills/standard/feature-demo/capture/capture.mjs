@@ -125,6 +125,9 @@ const timeline = {
   cursorKeys: [{ t: 0, v: { x: 0.5, y: 1.1 } }],
   clicks: [],
   captions: [],
+  // Optional declarative caption styling from the demo script (position,
+  // accent, pill, sizeScale); the renderer merges it over preset defaults.
+  ...(script.captionStyle ? { captionStyle: script.captionStyle } : {}),
 };
 
 let cur = { scale: 1, focal: { x: 0.5, y: 0.5 } };

@@ -11,6 +11,16 @@ type NarrationClip = {
   words?: WordTiming[] | null;
 };
 
+// Declarative caption styling the demo script may set (merged over the
+// preset defaults): where the caption sits, the active-word accent color,
+// whether the pill background renders, and a font-size multiplier.
+type CaptionStyleOverride = {
+  position?: 'top' | 'bottom';
+  accent?: string;
+  pill?: boolean;
+  sizeScale?: number;
+};
+
 export const FPS = timeline.fps;
 export const DEMO_SECONDS = timeline.durationSeconds;
 
@@ -80,14 +90,34 @@ export const DemoStage: React.FC<{
   const frame = useCurrentFrame();
   const t = frame / FPS;
 
+  const capStyle = ((timeline as { captionStyle?: CaptionStyleOverride })
+    .captionStyle ?? {}) as CaptionStyleOverride;
+  const capAtTop = capStyle.position === 'top';
+  const capFontSize = caption.fontSize * (capStyle.sizeScale ?? 1);
+
+  // Captions live in a reserved band on the backdrop (below the window by
+  // default) so they never overlay the recorded content — the window is
+  // inset anyway, so the space is already paid for. The band fits two
+  // caption lines plus the pill padding and the caption's edge offset.
+  const hasCaptions = timeline.captions.length > 0;
+  const captionBand = hasCaptions
+    ? Math.round(caption.bottom + capFontSize * 2 * 1.25 + 28 + 24)
+    : 0;
+
+  // The stage is the canvas minus the caption band; the window lays out and
+  // zooms strictly within it.
+  const stageTop = capAtTop ? captionBand : 0;
+  const stageH = canvasH - captionBand;
+
   const SHOT_W = timeline.video.width;
   const SHOT_H = timeline.video.height;
+  const usableH = captionBand > 0 ? stageH - pad : canvasH - 2 * pad;
   const BASE_W = Math.round(
-    Math.min(canvasW - 2 * pad, ((canvasH - 2 * pad) * SHOT_W) / SHOT_H),
+    Math.min(canvasW - 2 * pad, (usableH * SHOT_W) / SHOT_H),
   );
   const BASE_H = Math.round((BASE_W * SHOT_H) / SHOT_W);
   const WIN_X = (canvasW - BASE_W) / 2;
-  const WIN_Y = (canvasH - BASE_H) / 2;
+  const WIN_Y = stageTop + (stageH - BASE_H) / 2;
 
   const S = baseScale + (lerpNum(timeline.scaleKeys, t) - 1);
   const focal = lerpVec(timeline.focalKeys, t);
@@ -97,33 +127,50 @@ export const DemoStage: React.FC<{
   const focal0y = WIN_Y + focal.y * BASE_H;
   const k = clamp((S - 1) / 1.1, 0, 1) * centerPull;
   const desiredTx = (canvasW / 2 - focal0x) * k;
-  const desiredTy = (canvasH / 2 - focal0y) * k;
-  // The edge-clamp keeps the backdrop from showing behind the window — but
-  // only makes sense when the scaled window is larger than the canvas on that
-  // axis (16:9 presets). For a vertical band the window is smaller than the
-  // canvas, so there is nothing to clamp: keep it centered instead of letting
-  // the clamp shove it into a corner.
-  const txMax = WIN_X + focal.x * BASE_W * (S - 1);
-  const txMin = canvasW - WIN_X - focal.x * BASE_W - BASE_W * (1 - focal.x) * S;
-  const tyMax = WIN_Y + focal.y * BASE_H * (S - 1);
-  const tyMin = canvasH - WIN_Y - focal.y * BASE_H - BASE_H * (1 - focal.y) * S;
+  const desiredTy = (stageTop + stageH / 2 - focal0y) * k;
+  // Edge-clamp: while zoomed, the scaled window must keep covering the whole
+  // stage so no backdrop shows through — and must stay OUT of the caption
+  // band. With transform-origin at the focal point, the scaled window spans
+  //   left  = WIN_X + Tx - focal.x * BASE_W * (S - 1)
+  //   top   = WIN_Y + Ty - focal.y * BASE_H * (S - 1)
+  // so covering [0, canvasW] x [stageTop, stageTop + stageH] bounds T:
+  const txMax = focal.x * BASE_W * (S - 1) - WIN_X;
+  const txMin = canvasW - WIN_X + focal.x * BASE_W * (S - 1) - BASE_W * S;
+  const tyMax = stageTop - WIN_Y + focal.y * BASE_H * (S - 1);
+  const tyMin =
+    stageTop + stageH - WIN_Y + focal.y * BASE_H * (S - 1) - BASE_H * S;
+  // Only clamp an axis when the scaled window exceeds the stage on it; a
+  // smaller-than-stage window (vertical band preset) stays centered instead
+  // of being shoved into a corner.
   const Tx =
     BASE_W * S >= canvasW
       ? clamp(desiredTx, Math.min(txMin, txMax), Math.max(txMin, txMax))
       : desiredTx;
   const Ty =
-    BASE_H * S >= canvasH
+    BASE_H * S >= stageH
       ? clamp(desiredTy, Math.min(tyMin, tyMax), Math.max(tyMin, tyMax))
       : desiredTy;
   const invScale = 1 / S;
 
   return (
     <>
+      {/* Stage clip: while zoomed, the scaled window necessarily extends
+          past the stage rect; clipping here keeps the caption band clean. */}
+      <div
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: stageTop,
+          width: canvasW,
+          height: stageH,
+          overflow: 'hidden',
+        }}
+      >
       <div
         style={{
           position: 'absolute',
           left: WIN_X,
-          top: WIN_Y,
+          top: WIN_Y - stageTop,
           width: BASE_W,
           height: BASE_H,
           transform: `translate(${Tx}px, ${Ty}px) scale(${S})`,
@@ -187,12 +234,18 @@ export const DemoStage: React.FC<{
           <Cursor invScale={invScale} />
         </div>
       </div>
+      </div>
 
       {timeline.captions.map((cap, i) => {
         const fadeIn = clamp((t - cap.start) / 0.25, 0, 1);
         const fadeOut = clamp((cap.end - t) / 0.25, 0, 1);
         const opacity = Math.min(fadeIn, fadeOut);
         if (opacity <= 0) return null;
+
+        const atTop = capAtTop;
+        const accent = capStyle.accent ?? '#fff';
+        const pill = capStyle.pill !== false;
+        const fontSize = capFontSize;
 
         // Spoken-word highlight: captions and narration clips are 1:1 in
         // order, and word times are relative to the clip's start. Without
@@ -208,28 +261,35 @@ export const DemoStage: React.FC<{
               position: 'absolute',
               left: 0,
               right: 0,
-              bottom: caption.bottom,
+              ...(atTop ? { top: caption.bottom } : { bottom: caption.bottom }),
               display: 'flex',
               justifyContent: 'center',
               opacity,
-              transform: `translateY(${(1 - fadeIn) * 12}px)`,
+              transform: `translateY(${(1 - fadeIn) * (atTop ? -12 : 12)}px)`,
             }}
           >
             <div
               style={{
                 fontFamily:
                   'SF Pro Display, -apple-system, Segoe UI, Roboto, sans-serif',
-                fontSize: caption.fontSize,
+                fontSize,
                 fontWeight: 600,
                 color: '#fff',
                 maxWidth: `${caption.maxWidthPct}%`,
                 textAlign: 'center',
                 lineHeight: 1.25,
-                background: 'rgba(15,17,24,0.72)',
-                border: '1px solid rgba(255,255,255,0.08)',
-                padding: '14px 26px',
-                borderRadius: 14,
-                backdropFilter: 'blur(6px)',
+                ...(pill
+                  ? {
+                      background: 'rgba(15,17,24,0.72)',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      padding: '14px 26px',
+                      borderRadius: 14,
+                      backdropFilter: 'blur(6px)',
+                    }
+                  : {
+                      textShadow:
+                        '0 2px 10px rgba(0,0,0,0.85), 0 0 2px rgba(0,0,0,0.9)',
+                    }),
               }}
             >
               {words
@@ -241,13 +301,13 @@ export const DemoStage: React.FC<{
                         key={wi}
                         style={{
                           color: active
-                            ? '#fff'
+                            ? accent
                             : spoken
                               ? 'rgba(255,255,255,0.92)'
                               : 'rgba(255,255,255,0.45)',
                           textShadow: active
-                            ? '0 0 14px rgba(255,255,255,0.55)'
-                            : 'none',
+                            ? `0 0 14px ${accent}`
+                            : undefined,
                         }}
                       >
                         {word.text}
