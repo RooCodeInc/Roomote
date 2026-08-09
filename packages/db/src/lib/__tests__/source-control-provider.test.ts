@@ -249,7 +249,7 @@ describe('resolveWorkspaceSourceControlProvider', () => {
     ).resolves.toEqual({});
   });
 
-  it('falls back to a legacy null-host repository row', async () => {
+  it('does not use a legacy null-host row for a stamped host', async () => {
     mockRows = [
       {
         fullName: 'group/project',
@@ -264,7 +264,7 @@ describe('resolveWorkspaceSourceControlProvider', () => {
         repo: 'group/project',
         sourceControlHost: 'gitlab.example.com',
       }),
-    ).resolves.toEqual({ 'group/project': 'gitlab' });
+    ).resolves.toEqual({});
   });
 
   it('prefers an exact host match over a legacy null-host row', async () => {
@@ -438,6 +438,25 @@ describe('workspaceAllowsPrivateAttribution', () => {
         type: 'repository',
         repo: 'group/project',
         sourceControlHost: 'git.example.com',
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('uses public-safe attribution for a legacy null-host row', async () => {
+    mockRows = [
+      {
+        fullName: 'group/project',
+        host: null,
+        private: true,
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+
+    await expect(
+      workspaceAllowsPrivateAttribution(dbOrTx, {
+        type: 'repository',
+        repo: 'group/project',
+        sourceControlHost: 'gitlab.example.com',
       }),
     ).resolves.toBe(false);
   });
