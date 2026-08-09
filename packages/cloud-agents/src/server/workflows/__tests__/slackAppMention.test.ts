@@ -384,7 +384,7 @@ describe('slackAppMention', () => {
     });
 
     expect(result.harnessInstructions).toContain(
-      `prepend \`> Opened on behalf of Jane Doe. Follow up by mentioning @roomote, in [the web UI](https://example.com/task/123), or in [Slack](${teamSpecificAppSlackPermalink}).\` at the top of the PR body file before creating or refreshing the pull request`,
+      `prepend \`> <!-- roomote:pr-attribution:start -->Opened on behalf of Jane Doe.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote, in [the web UI](https://example.com/task/123), or in [Slack](${teamSpecificAppSlackPermalink}).\` at the top of the PR body file before creating or refreshing the pull request`,
     );
   });
 
@@ -410,7 +410,7 @@ describe('slackAppMention', () => {
     });
 
     expect(result.harnessInstructions).toContain(
-      `prepend \`> Opened on behalf of Jane Doe. Follow up by mentioning @roomote, in [the web UI](https://example.com/task/123), or in [Slack](${exactSlackPermalink}).\` at the top of the PR body file before creating or refreshing the pull request`,
+      `prepend \`> <!-- roomote:pr-attribution:start -->Opened on behalf of Jane Doe.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote, in [the web UI](https://example.com/task/123), or in [Slack](${exactSlackPermalink}).\` at the top of the PR body file before creating or refreshing the pull request`,
     );
   });
 
@@ -434,7 +434,7 @@ describe('slackAppMention', () => {
     });
 
     expect(result.harnessInstructions).toContain(
-      `prepend \`> Opened on behalf of Jane Doe. Follow up by mentioning @roomote, in [the web UI](https://example.com/task/123), or in [Slack](${teamSpecificAppSlackPermalink}).\` at the top of the PR body file before creating or refreshing the pull request`,
+      `prepend \`> <!-- roomote:pr-attribution:start -->Opened on behalf of Jane Doe.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote, in [the web UI](https://example.com/task/123), or in [Slack](${teamSpecificAppSlackPermalink}).\` at the top of the PR body file before creating or refreshing the pull request`,
     );
   });
 
