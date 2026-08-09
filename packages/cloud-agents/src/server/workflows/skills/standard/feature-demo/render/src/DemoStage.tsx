@@ -119,7 +119,20 @@ export const DemoStage: React.FC<{
   const WIN_X = (canvasW - BASE_W) / 2;
   const WIN_Y = stageTop + (stageH - BASE_H) / 2;
 
-  const S = baseScale + (lerpNum(timeline.scaleKeys, t) - 1);
+  const sRaw = baseScale + (lerpNum(timeline.scaleKeys, t) - 1);
+  // Coverage floor: the caption band shrinks the window, so a scripted zoom
+  // (e.g. the default 1.5x) can crop the window vertically without covering
+  // the canvas width — backdrop gutters on both sides. Whenever the scale
+  // passes the vertical-cropping threshold, smoothly floor the effective
+  // scale at full-width coverage: the view is always either a floating
+  // uncropped window or a full-bleed zoom, never a cropped hybrid.
+  const sCrop = stageH / BASE_H; // where vertical cropping begins
+  // Overshoot coverage by a hair: at exactly canvasW / BASE_W, floating-point
+  // rounding can leave BASE_W * S one ulp short of canvasW, which skips the
+  // edge clamp below and lets the raw center-pull expose a side gutter.
+  const sCover = canvasW / BASE_W + 0.002; // horizontal coverage, plus slack
+  const floorP = clamp((sRaw - sCrop) / 0.15, 0, 1);
+  const S = sRaw + Math.max(0, sCover - sRaw) * floorP;
   const focal = lerpVec(timeline.focalKeys, t);
   const cursor = lerpVec(timeline.cursorKeys, t);
 
@@ -143,17 +156,34 @@ export const DemoStage: React.FC<{
   // smaller-than-stage window (vertical band preset) stays centered instead
   // of being shoved into a corner.
   const Tx =
-    BASE_W * S >= canvasW
+    BASE_W * S >= canvasW - 0.5
       ? clamp(desiredTx, Math.min(txMin, txMax), Math.max(txMin, txMax))
       : desiredTx;
   const Ty =
-    BASE_H * S >= stageH
+    BASE_H * S >= stageH - 0.5
       ? clamp(desiredTy, Math.min(tyMin, tyMax), Math.max(tyMin, tyMax))
       : desiredTy;
   const invScale = 1 / S;
 
   return (
     <>
+      {/* The window's drop shadow lives OUTSIDE the stage clip (an outer
+          box-shadow paints only beyond the border-box, so this transparent
+          proxy adds nothing else): clipped inside the stage it shears into a
+          hard line at the stage edge, visible on a light backdrop. */}
+      <div
+        style={{
+          position: 'absolute',
+          left: WIN_X,
+          top: WIN_Y,
+          width: BASE_W,
+          height: BASE_H,
+          transform: `translate(${Tx}px, ${Ty}px) scale(${S})`,
+          transformOrigin: `${focal.x * 100}% ${focal.y * 100}%`,
+          borderRadius: 16,
+          boxShadow: '0 40px 90px rgba(0,0,0,0.4)',
+        }}
+      />
       {/* Stage clip: while zoomed, the scaled window necessarily extends
           past the stage rect; clipping here keeps the caption band clean. */}
       <div
@@ -184,7 +214,6 @@ export const DemoStage: React.FC<{
             borderRadius: 16,
             overflow: 'hidden',
             border: '1px solid rgba(255,255,255,0.09)',
-            boxShadow: '0 40px 90px rgba(0,0,0,0.55)',
           }}
         >
           <OffthreadVideo
