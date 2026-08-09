@@ -49,7 +49,7 @@ describe('deliverManagedThreadReplyFooter', () => {
     withThreadReplyFooterLockMock.mockImplementation(async ({ fn }) => fn());
     setThreadReplyFooterRecordMock.mockResolvedValue(undefined);
     resolveThreadReplyFooterContextMock.mockResolvedValue({
-      linkedPr: null,
+      linkedPrs: [],
       livePreviewUrl: null,
     });
   });
@@ -175,6 +175,31 @@ describe('deliverManagedThreadReplyFooter', () => {
 });
 
 describe('buildCommunicationThreadReplyFooterText', () => {
+  it('passes every active pull request to non-Slack footers', async () => {
+    const linkedPrs = [
+      { prNumber: 3, prUrl: 'https://github.com/roomote/app/pull/3' },
+      { prNumber: 2, prUrl: 'https://github.com/roomote/api/pull/2' },
+    ];
+    resolveThreadReplyFooterContextMock.mockResolvedValue({
+      linkedPrs,
+      livePreviewUrl: null,
+    });
+    buildThreadReplyFooterTextMock.mockReturnValue('Footer');
+
+    await buildCommunicationThreadReplyFooterText({
+      provider: 'telegram',
+      taskRun: {
+        id: 42,
+        taskId: 'task-1',
+        payload: {},
+      },
+    });
+
+    expect(buildThreadReplyFooterTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({ linkedPrs }),
+    );
+  });
+
   it('uses subtext for Discord footers', async () => {
     buildThreadReplyFooterTextMock.mockImplementation(({ formatFooterText }) =>
       formatFooterText('Footer'),

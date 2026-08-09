@@ -80,7 +80,7 @@ vi.mock('@roomote/communication', () => ({
   chunkDiscordMessage: (text: string) =>
     text.length <= 2_000 ? [text] : text.split('\n\n'),
   resolveThreadReplyFooterContext: vi.fn().mockResolvedValue({
-    linkedPr: null,
+    linkedPrs: [],
     livePreviewUrl: null,
   }),
   setThreadReplyFooterRecord: vi.fn(),
@@ -118,12 +118,6 @@ vi.mock('@roomote/sdk/server', () => ({
         }
       : null;
   }),
-}));
-
-vi.mock('@roomote/slack', () => ({
-  resolveSlackThreadLinkedPr: vi.fn(),
-  resolveSlackThreadLinkedPrs: vi.fn(),
-  resolveSlackThreadLivePreviewUrl: vi.fn(),
 }));
 
 vi.mock('../chat-reply-helpers.js', () => ({
@@ -639,7 +633,7 @@ describe('maybeSendCommunicationThreadReply (Telegram)', () => {
     getLatestInboundMessageIdMock.mockResolvedValue(null);
     postMessageMock.mockResolvedValue({ messageId: '999' });
     sendChatActionMock.mockResolvedValue(undefined);
-    // Skip the footer path by returning null footer (resolveSlackThreadLinkedPr mocked)
+    // Skip the footer path by returning a null footer.
   });
 
   it('prefers the latest inbound message id over the launch message id', async () => {

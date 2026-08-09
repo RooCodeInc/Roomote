@@ -51,7 +51,7 @@ describe('thread-reply-footer-ops', () => {
     mockGetFooterTs.mockResolvedValue('111.000');
     mockSetFooterTs.mockResolvedValue(undefined);
     mockResolveFooterContext.mockResolvedValue({
-      linkedPr: { prNumber: 7, prUrl: 'https://github.com/o/r/pull/7' },
+      linkedPrs: [{ prNumber: 7, prUrl: 'https://github.com/o/r/pull/7' }],
       livePreviewUrl: null,
       explicitMentionRequired: false,
     });
@@ -127,7 +127,7 @@ describe('thread-reply-footer-ops', () => {
     );
     expect(mockBuildFooterText).toHaveBeenCalledWith(
       expect.objectContaining({
-        linkedPr: { prNumber: 7, prUrl: 'https://github.com/o/r/pull/7' },
+        linkedPrs: [{ prNumber: 7, prUrl: 'https://github.com/o/r/pull/7' }],
       }),
     );
     expect(slack.updateMessage).toHaveBeenCalledWith(
@@ -157,7 +157,7 @@ describe('thread-reply-footer-ops', () => {
 
     expect(mockBuildFooterText).toHaveBeenCalledWith(
       expect.objectContaining({
-        linkedPr: null,
+        linkedPrs: [],
         livePreviewUrl: null,
       }),
     );

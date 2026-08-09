@@ -149,7 +149,6 @@ async function buildLateBoundSlackRootFooterText(params: {
 
   return buildSlackThreadFooterText({
     taskUrl: params.taskUrl,
-    linkedPr: linkedPrs[0] ?? null,
     linkedPrs,
     livePreviewUrl,
     explicitMentionRequired: false,

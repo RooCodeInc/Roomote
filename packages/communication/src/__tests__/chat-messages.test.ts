@@ -249,10 +249,12 @@ describe('chat message copy builders', () => {
     expect(
       buildThreadReplyFooterText({
         taskUrl: 'https://roomote.dev/task/123',
-        linkedPr: {
-          prNumber: 7,
-          prUrl: 'https://github.com/org/repo/pull/7',
-        },
+        linkedPrs: [
+          {
+            prNumber: 7,
+            prUrl: 'https://github.com/org/repo/pull/7',
+          },
+        ],
         livePreviewUrl: 'https://preview.roomote.dev',
       }),
     ).toBe(
