@@ -2,17 +2,24 @@
 // cursorless WebM, and emits the timeline the Remotion renderer consumes.
 // Runs inside the worker sandbox (agent-browser + ffmpeg present).
 //
-// The key idea: the runner performs the real interactions AND logs, for the
-// same clock, where the (synthetic) cursor is, when clicks land, and the
-// resolved rect of each target. Effects and capture come from one script, so
-// a zoom can never drift from the element it is zooming to.
+// Two ideas make the output polished:
+// 1. The runner performs the real interactions AND logs, for the same clock,
+//    where the (synthetic) cursor is, when clicks land, and the resolved
+//    rect of each target — so a zoom can never drift from its element.
+// 2. The NARRATIVE drives the visuals: each captioned beat holds for as long
+//    as its line takes to speak (the real clip duration when narration was
+//    synthesized before capture; an estimated speaking time for the caption
+//    text otherwise), and the runner stamps each clip's start at the moment
+//    its zoom actually lands. Nothing needs retiming afterwards.
 //
 // Usage: SCRIPT=/path/to/demo-script.json OUT_DIR=/tmp/feature-demo/work \
 //          node capture.mjs
-// See SKILL.md for the demo-script schema.
+// Reads narration.json (written by build-narration.mjs before capture) from
+// the script's directory when present. See SKILL.md for the schema.
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 const AB = process.env.AGENT_BROWSER_BIN || 'agent-browser';
 const OUT_DIR = process.env.OUT_DIR || '/tmp/feature-demo/work';
@@ -33,17 +40,47 @@ if (!script.url || !Array.isArray(script.beats)) {
 
 const VIEWPORT = script.viewport || { w: 1280, h: 800 };
 
+// Narration manifest (pre-capture synthesis). Optional: without it the demo
+// is captions-only and lines are paced by estimated speaking time.
+const NARRATION_PATH =
+  process.env.NARRATION || `${dirname(SCRIPT_PATH)}/narration.json`;
+const narration = existsSync(NARRATION_PATH)
+  ? JSON.parse(readFileSync(NARRATION_PATH, 'utf8'))
+  : null;
+
+const captionedBeatCount = script.beats.filter((b) => b.caption).length;
+
+if (narration && narration.clips.length !== captionedBeatCount) {
+  console.error(
+    `narration.json has ${narration.clips.length} clips but the script has ` +
+      `${captionedBeatCount} captioned beats; they must match 1:1 in order.`,
+  );
+  process.exit(1);
+}
+
+// The voice starts just before its zoom lands, then speaks over the hold.
+const VOICE_LEAD = 0.4;
+// Breathing room after a line ends before the next beat's motion begins.
+const LINE_GAP = 0.35;
+
+// Estimated speaking time for captions-only pacing: ~2.8 words/second,
+// clamped so terse labels still get a beat and long lines don't stall.
+function estimateSpokenSeconds(text) {
+  const words = String(text).trim().split(/\s+/).length;
+  return Math.min(6, Math.max(1.8, words / 2.8));
+}
+
 // Between focus beats the camera pulls back only partially; pogo-ing to full
 // wide between every zoom reads as jumpy. The final reset goes fully wide.
 const GLIDE_SCALE = 1.18;
 
-// Record headed by default. GPU-backed canvases (games, 3D, WebGL/WebGPU)
-// never present to the headless compositor, which starves the screencast and
-// collapses a long interaction into a sub-second clip — agent-browser's own
-// docs prescribe `--headed` for exactly this, and on displayless Linux it
-// auto-starts a private Xvfb (present in the worker image). Harmless on
-// ordinary pages. Set HEADED=0 to force headless.
-const HEADED = process.env.HEADED !== '0';
+// Headless by default: with the frame ticker it records deterministically at
+// wall-clock rate on ordinary pages. Headed mode (auto-Xvfb) exists for
+// GPU-backed canvases (games, 3D, WebGL/WebGPU) that never present to the
+// headless compositor — opt in per demo with `"headed": true` in the script
+// (or HEADED=1). Note: current agent-browser headed recording can wedge the
+// daemon on longer sessions; use it only when the surface requires it.
+const HEADED = script.headed === true || process.env.HEADED === '1';
 
 const ab = (...args) =>
   execFileSync(AB, HEADED ? ['--headed', ...args] : args, {
@@ -106,6 +143,10 @@ const timeline = {
 };
 
 let cur = { scale: 1, focal: { x: 0.5, y: 0.5 } };
+// Narrative pacing state: which line is next, and when the previous one
+// finishes, so consecutive lines never overlap even if beats land early.
+let lineIndex = 0;
+let prevLineEnd = 0;
 // Track the cursor so motion can be bracketed by a hold key: the renderer
 // eases between consecutive keys, so without a hold at motion start the
 // synthetic cursor would drift toward the next target through every wait,
@@ -119,12 +160,13 @@ const pushCursorMove = (startT, endT, target) => {
   curCursor = target;
 };
 
-// The recorder captures via CDP screencast, which only emits frames when the
-// page visually changes — and stamps them without wall-clock gaps. On a
-// statically-rendered surface (games between state changes, idle dashboards)
-// a long session collapses into a sub-second video. Injecting an
-// imperceptible 2px corner dot that re-paints every animation frame keeps
-// compositor damage — and therefore frames — flowing at wall-clock rate.
+// HEADLESS fallback only: headless capture emits frames only on visual
+// damage and stamps them without wall-clock gaps, so a static surface
+// collapses into a sub-second video; an imperceptible 2px dot re-painting
+// every animation frame keeps frames flowing. Headed recording (the
+// default) presents at wall-clock rate on its own — verified on a fully
+// static page — and skips the ticker, whose constant rAF invalidation can
+// starve the daemon's own page commands during long headed recordings.
 const TICKER_JS =
   '(function(){var d=document.createElement("div");' +
   'd.style.cssText="position:fixed;left:0;bottom:0;width:2px;height:2px;' +
@@ -161,7 +203,9 @@ async function run() {
     );
   }
   t0 = Date.now();
-  ab('eval', TICKER_JS);
+  if (!HEADED) {
+    ab('eval', TICKER_JS);
+  }
   sleep(300); // let the first frames settle
 
   for (const beat of script.beats) {
@@ -193,18 +237,39 @@ async function run() {
       pushScale(end, beat.scale ?? 1.5);
       pushFocal(end, c);
       pushCursorMove(start, end, c);
-      if (beat.caption) {
-        timeline.captions.push({
-          start: start + 0.15,
-          end: end + (beat.holdMs ?? 900) / 1000,
-          text: beat.caption,
-          // When the zoom LANDS — narration schedules against this, not the
-          // caption fade-in (which begins with the glide, ~moveMs earlier).
-          anchor: end,
-        });
-      }
       cur = { scale: beat.scale ?? 1.5, focal: c };
-      sleep(beat.holdMs ?? 900);
+
+      if (beat.caption) {
+        // The narrative drives the hold: the line starts just before the
+        // zoom lands and the beat holds until it has been fully spoken,
+        // plus breathing room. Script holdMs acts as a minimum only.
+        const lineSeconds = narration
+          ? narration.clips[lineIndex].durationSeconds
+          : estimateSpokenSeconds(beat.caption);
+        const lineStart =
+          Math.round(Math.max(0.1, prevLineEnd + 0.1, end - VOICE_LEAD) * 1000) /
+          1000;
+        const lineEnd = lineStart + lineSeconds;
+        prevLineEnd = lineEnd;
+
+        timeline.captions.push({
+          start: lineStart,
+          end: Math.round((lineEnd + 0.25) * 1000) / 1000,
+          text: beat.caption,
+        });
+        if (narration) {
+          narration.clips[lineIndex].startSeconds = lineStart;
+        }
+        lineIndex += 1;
+
+        const holdSeconds = Math.max(
+          (beat.holdMs ?? 900) / 1000,
+          lineEnd + LINE_GAP - now(),
+        );
+        sleep(holdSeconds * 1000);
+      } else {
+        sleep(beat.holdMs ?? 900);
+      }
       continue;
     }
 
@@ -313,10 +378,19 @@ async function run() {
   );
 
   writeFileSync(`${OUT_DIR}/timeline.json`, JSON.stringify(timeline, null, 2));
+  if (narration) {
+    // Clip start times are now stamped at the moments their zooms landed;
+    // this manifest plus the vo/ mp3s next to the script is everything the
+    // renderer needs.
+    writeFileSync(
+      `${OUT_DIR}/narration.json`,
+      JSON.stringify(narration, null, 2),
+    );
+  }
   console.log(
     `captured: duration=${timeline.durationSeconds.toFixed(2)}s ` +
       `clicks=${timeline.clicks.length} captions=${timeline.captions.length} ` +
-      `cursorKeys=${timeline.cursorKeys.length}`,
+      `pacing=${narration ? 'narrated' : 'captions-only (estimated)'}`,
   );
 }
 

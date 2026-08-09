@@ -15,14 +15,18 @@ change — that is `capture-visual-proof`.
 </role>
 
 <architecture>
-One demo script drives everything. The capture runner performs the real
-browser interactions AND records, on the same clock, where the cursor is,
-when clicks land, and the resolved rectangle of every focused element. The
-renderer consumes that timeline, so a zoom can never drift from the element
-it targets.
+The narrative drives the visuals. The demo is planned as a spoken story
+first; narration is synthesized (or, captions-only, each line's speaking
+time is estimated) BEFORE capture, and the capture runner conducts the
+browser to it — each beat holds for exactly as long as its line takes to
+speak, and clip start times are stamped at the moment each zoom lands. The
+runner also logs, on the same clock, where the cursor is, when clicks land,
+and the resolved rectangle of every focused element, so a zoom can never
+drift from its element and nothing needs retiming afterwards.
 
-Pipeline: author script → capture (browser, delegated) → narrate (optional)
-→ fit timing → render → verify → upload.
+Pipeline: plan the narrative → author script → narrate → capture (browser,
+delegated, paced to the narrative) → trim opening → render → verify →
+upload.
 
 The bundled `render/` project is a **reference template**, not a fixed
 pipeline stage: copy it to the work dir and adapt the copy freely (branding,
@@ -65,32 +69,33 @@ this pipeline is ever committed to the repository.
 </step>
 
 <step number="3">
-<name>Capture (delegated browser work)</name>
+<name>Narrate first (the narrative drives the visuals)</name>
 <actions>
-<action>Stage the capture runner where the delegated runtime can see it — home-directory paths do not survive the delegation boundary, so always copy first:
-
-`mkdir -p /tmp/feature-demo && cp "$HOME/.agents/skills/feature-demo/capture/capture.mjs" /tmp/feature-demo/capture.mjs`</action>
-<action>Browser automation is the proof-runner subagent's exclusive surface — do not load `agent-browser` or run the capture yourself. Delegate with the Task tool to `proof-runner`, telling it the script path (`/tmp/feature-demo/demo-script.json`), the output dir (`/tmp/feature-demo/work`), and the staged runner path (`/tmp/feature-demo/capture.mjs`), and to report the runner's printed summary plus `ls -la /tmp/feature-demo/work`. The staged runner is proof-runner's one sanctioned script exception — an agent-browser orchestrator that shells the `agent-browser` CLI for every browser action — and its own instructions define the exact integrity-verified command it must use to execute it. Do not dictate the `node` invocation yourself; the proof-runner owns that.</action>
-<action>If the harness has no proof-runner registered, report a blocker (`proof runtime unavailable`) instead of driving the browser from this skill.</action>
-<action>Expected outputs: `/tmp/feature-demo/work/recording.mp4` and `/tmp/feature-demo/work/timeline.json`. Verify both exist and that `ffprobe` reports a duration close to the timeline's `durationSeconds` (the runner itself fails loudly when the recording is much shorter than the interaction). One retry on failure; then report blocked with the runner's error.</action>
-<action>The runner records headed by default (`agent-browser --headed`, auto-Xvfb in the sandbox) so GPU-backed canvases (games, 3D, WebGL/WebGPU) present frames instead of stalling the screencast. `--headed` only applies when agent-browser launches a fresh daemon, so the runner stops any existing daemon (`agent-browser close`) before recording and hard-fails if `record start` reports `--headed ignored: daemon already running` — do not let an earlier browser step (inspection, etc.) leave a headless daemon up. If that error fires, ensure nothing else is driving agent-browser and retry.</action>
-<action>If a recording still comes back much shorter than the interaction, the runner fails loudly: for a WebGL/WebGPU-heavy surface, a first retry is warranted, and if it persists report `webgl surface stalls headless recording` naming the surface (some WebGPU capture paths remain unsupported upstream even headed). If `record stop` itself reports an ffmpeg error, the sandbox is likely a stale snapshot with an outdated runtime ffmpeg (`stale sandbox runtime`).</action>
+<action>Synthesize the narration BEFORE capture: `SCRIPT=/tmp/feature-demo/demo-script.json node "$HOME/.agents/skills/feature-demo/scripts/build-narration.mjs"` (add `LINES=/tmp/feature-demo/lines.json` if spoken lines differ from captions). This posts the lines to the Roomote control plane, which holds the TTS credentials — no provider key exists in this sandbox, and you must never ask for one. It writes `/tmp/feature-demo/vo/*.mp3` and `/tmp/feature-demo/narration.json` with each line's measured duration; during capture, each beat then holds exactly as long as its line takes to speak, and clip start times are stamped as the zooms land. No retiming happens afterwards.</action>
+<action>Exit code 3 means narration is not configured on this deployment: proceed captions-only — capture paces each captioned beat from the caption's estimated speaking time instead, so the demo still reads at narrative pace. Mention in the final report that voice-over is available if an admin connects ElevenLabs under Settings → Integrations.</action>
 </actions>
 </step>
 
 <step number="4">
-<name>Narration (optional, degrades cleanly)</name>
+<name>Capture (delegated browser work)</name>
 <actions>
-<action>Run `WORK_DIR=/tmp/feature-demo/work node "$HOME/.agents/skills/feature-demo/scripts/build-narration.mjs"` (add `LINES=/tmp/feature-demo/lines.json` if spoken lines differ from captions). This posts the caption text to the Roomote control plane, which holds the TTS credentials — no provider key exists in this sandbox, and you must never ask for one.</action>
-<action>Exit code 3 means narration is not configured on this deployment: proceed captions-only, and mention in the final report that narration is available if an admin sets `R_ELEVENLABS_API_KEY` + `R_ELEVENLABS_VOICE_ID`.</action>
+<action>Stage the capture runner where the delegated runtime can see it — home-directory paths do not survive the delegation boundary, so always copy first:
+
+`mkdir -p /tmp/feature-demo && cp "$HOME/.agents/skills/feature-demo/capture/capture.mjs" /tmp/feature-demo/capture.mjs`
+
+The runner also reads `/tmp/feature-demo/narration.json` (written in step 3) on its own; captions-only runs simply will not have one.</action>
+<action>Browser automation is the proof-runner subagent's exclusive surface — do not load `agent-browser` or run the capture yourself. Delegate with the Task tool to `proof-runner`, telling it the script path (`/tmp/feature-demo/demo-script.json`), the output dir (`/tmp/feature-demo/work`), and the staged runner path (`/tmp/feature-demo/capture.mjs`), and to report the runner's printed summary plus `ls -la /tmp/feature-demo/work`. The staged runner is proof-runner's one sanctioned script exception — an agent-browser orchestrator that shells the `agent-browser` CLI for every browser action — and its own instructions define the exact integrity-verified command it must use to execute it. Do not dictate the `node` invocation yourself; the proof-runner owns that.</action>
+<action>If the harness has no proof-runner registered, report a blocker (`proof runtime unavailable`) instead of driving the browser from this skill.</action>
+<action>Expected outputs: `/tmp/feature-demo/work/recording.mp4` and `/tmp/feature-demo/work/timeline.json`. Verify both exist and that `ffprobe` reports a duration close to the timeline's `durationSeconds` (the runner itself fails loudly when the recording is much shorter than the interaction). One retry on failure; then report blocked with the runner's error.</action>
+<action>The runner records headless by default with an imperceptible frame ticker, which is deterministic and captures at wall-clock rate on ordinary pages. For GPU-backed canvases (games, 3D, WebGL/WebGPU) — which never present frames to the headless compositor — set `"headed": true` at the top level of the demo script: the runner then records through `agent-browser --headed` (auto-Xvfb in the sandbox), stops any existing daemon first so the flag actually applies, and hard-fails if `record start` reports `--headed ignored: daemon already running`. Headed recording on the current agent-browser can wedge the daemon on longer sessions, so use it only when the surface requires it and keep headed demos short.</action>
+<action>If a recording comes back much shorter than the interaction, the runner fails loudly: for a WebGL/WebGPU-heavy surface, retry once with `"headed": true` if the first attempt was headless, and if it still fails report `webgl surface stalls recording` naming the surface. If `record stop` itself reports an ffmpeg error, the sandbox is likely a stale snapshot with an outdated runtime ffmpeg (`stale sandbox runtime`).</action>
 </actions>
 </step>
 
 <step number="5">
-<name>Fit timing</name>
+<name>Trim the opening</name>
 <actions>
-<action>Run `WORK_DIR=/tmp/feature-demo/work node "$HOME/.agents/skills/feature-demo/scripts/fit-timing.mjs"`. It trims the dead opening, optionally paces the voice-over (pitch-preserving atempo), solves a video playback rate so each spoken line starts just before its zoom lands, and rewrites caption windows to match the audio. Captions-only demos still get the opening trim.</action>
-<action>Check its printed schedule: no line should start before the previous one ends. If lines overlap or the rate hits the 0.75 floor, the narration is too long for the motion — shorten the lines or add holds to the script and recapture.</action>
+<action>Run `WORK_DIR=/tmp/feature-demo/work node "$HOME/.agents/skills/feature-demo/scripts/fit-timing.mjs"`. Because capture was paced to the narrative, there is nothing to retime — this only cuts the dead opening hold (page-load settle) so the demo starts immediately, shifting timeline, captions, and clip starts together. Check its printed line schedule for sanity.</action>
 </actions>
 </step>
 
@@ -101,7 +106,7 @@ this pipeline is ever committed to the repository.
 - `cp -R "$HOME/.agents/skills/feature-demo/render" /tmp/feature-demo/render`
 - `cp /tmp/feature-demo/work/timeline.json /tmp/feature-demo/work/narration.json /tmp/feature-demo/render/props/` (skip narration.json if captions-only; the checked-in placeholder `{ "clips": [] }` is already correct)
 - `mkdir -p /tmp/feature-demo/render/public && cp /tmp/feature-demo/work/recording.mp4 /tmp/feature-demo/render/public/`
-- `cp -R /tmp/feature-demo/work/vo /tmp/feature-demo/render/public/vo` (narrated demos only)</action>
+- `cp -R /tmp/feature-demo/vo /tmp/feature-demo/render/public/vo` (narrated demos only; the mp3s were written next to the script in step 3)</action>
 <action>Adapt the copied composition when the default look does not fit the request — different backdrop, caption treatment, brand colors, an extra preset, a layout change. Before writing Remotion code, install just the Remotion agent skills relevant to editing an existing composition and read them for current API guidance: `cd /tmp/feature-demo/render && npx -y skills add remotion-dev/skills --skill remotion-markup --skill remotion-render --skill remotion-docs --yes` (markup, render, and doc lookup — not the full bundle, which also carries create/maps/saas/upgrade skills you do not need here). Preserve the pieces that encode hard-won correctness unless you have a reason not to: the zoom transform with its counter-scaled cursor, the edge-clamp guard (only clamp an axis when the scaled window exceeds the canvas), and the timeline-driven keyframe interpolation.</action>
 <action>Provide the dependencies. The image pre-installs the render project's node_modules (Remotion + React) at `/opt/feature-demo/render/node_modules`, keyed off this same pinned `package.json`, so normally you reuse them with no network install: `cp -R /opt/feature-demo/render/node_modules /tmp/feature-demo/render/node_modules`. Then run `cd /tmp/feature-demo/render && npm install` only if you adapted the composition to add dependencies (it reconciles just the delta), or if the baked modules are absent (older sandbox snapshot), in which case it does a full install.</action>
 <action>Render with the image's baked headless shell:

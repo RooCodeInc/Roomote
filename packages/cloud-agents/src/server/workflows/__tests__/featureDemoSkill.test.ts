@@ -110,18 +110,19 @@ describe('feature-demo skill', () => {
     );
   });
 
-  it('records headed so GPU-backed canvases do not stall the screencast', () => {
+  it('records headless by default with a per-script headed opt-in for GPU surfaces', () => {
     const captureRunner = fs.readFileSync(
       path.join(skillDirPath, 'capture/capture.mjs'),
       'utf8',
     );
 
-    // Default headed with an explicit opt-out; the flag rides every command.
+    // Headless + frame ticker is the deterministic default; headed exists
+    // for WebGL/3D surfaces that never present to the headless compositor.
     expect(captureRunner).toContain(
-      "const HEADED = process.env.HEADED !== '0'",
+      "const HEADED = script.headed === true || process.env.HEADED === '1'",
     );
     expect(captureRunner).toContain("HEADED ? ['--headed', ...args] : args");
-    expect(skillContent).toContain('records headed by default');
+    expect(skillContent).toContain('"headed": true');
   });
 
   it('frames the render project as an adaptable reference template', () => {
