@@ -110,6 +110,29 @@ describe('feature-demo skill', () => {
     );
   });
 
+  it('scrolls by default and reserves zooming for interactions', () => {
+    const captureRunner = fs.readFileSync(
+      path.join(skillDirPath, 'capture/capture.mjs'),
+      'utf8',
+    );
+
+    // `show` (scroll + narrate, camera wide) is the default narrated move;
+    // `focus` zooms exist only as the wind-up for a real click/type.
+    expect(captureRunner).toContain("beat.a === 'show'");
+    expect(skillContent).toContain('THE DEFAULT NARRATED MOVE');
+    expect(skillContent).toContain('MOVES BY SCROLLING');
+    expect(skillContent).toContain(
+      'ONLY as the wind-up for an interaction the story actually performs',
+    );
+  });
+
+  it('asks the advisor for a flowing narration, not sparse labels', () => {
+    expect(skillContent).toContain('write the NARRATION FIRST');
+    expect(skillContent).toContain(
+      'sparse label-style narration makes a hollow video',
+    );
+  });
+
   it('records headless by default with a per-script headed opt-in for GPU surfaces', () => {
     const captureRunner = fs.readFileSync(
       path.join(skillDirPath, 'capture/capture.mjs'),

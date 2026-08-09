@@ -64,10 +64,10 @@ const VOICE_LEAD = 0.4;
 const LINE_GAP = 0.35;
 
 // Estimated speaking time for captions-only pacing: ~2.8 words/second,
-// clamped so terse labels still get a beat and long lines don't stall.
+// clamped so terse lines still get a beat and very long ones don't stall.
 function estimateSpokenSeconds(text) {
   const words = String(text).trim().split(/\s+/).length;
-  return Math.min(6, Math.max(1.8, words / 2.8));
+  return Math.min(10, Math.max(1.8, words / 2.8));
 }
 
 // Between focus beats the camera pulls back only partially; pogo-ing to full
@@ -206,6 +206,42 @@ async function run() {
     if (beat.a === 'scrollTo') {
       ab('scrollintoview', beat.sel);
       sleep(beat.ms ?? 650); // let the scroll settle (shows in the recording)
+      continue;
+    }
+
+    if (beat.a === 'show') {
+      // The default narrated move: scroll the subject into view and speak
+      // over it with the camera wide. No zoom, no cursor glide — zooming is
+      // reserved for active interaction (focus before click/type).
+      ab('scrollintoview', beat.sel);
+      sleep(beat.settleMs ?? 600); // scroll settles on screen
+      const settled = now();
+
+      if (beat.caption) {
+        const lineSeconds = narration
+          ? narration.clips[lineIndex].durationSeconds
+          : estimateSpokenSeconds(beat.caption);
+        const lineStart =
+          Math.round(Math.max(0.1, prevLineEnd + 0.1, settled - 0.15) * 1000) /
+          1000;
+        const lineEnd = lineStart + lineSeconds;
+        prevLineEnd = lineEnd;
+
+        timeline.captions.push({
+          start: lineStart,
+          end: Math.round((lineEnd + 0.25) * 1000) / 1000,
+          text: beat.caption,
+        });
+        if (narration) {
+          narration.clips[lineIndex].startSeconds = lineStart;
+        }
+        lineIndex += 1;
+
+        const holdSeconds = Math.max(0.5, lineEnd + LINE_GAP - now());
+        sleep(holdSeconds * 1000);
+      } else {
+        sleep(beat.holdMs ?? 900);
+      }
       continue;
     }
 

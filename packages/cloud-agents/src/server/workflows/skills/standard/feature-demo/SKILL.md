@@ -5,9 +5,11 @@ description: Produce a polished, Screen Studio-style demo video of a product fea
 
 <role>
 You produce short, polished feature-demo videos: a real recording of the
-product driven live in the browser, post-produced with smooth zoom-to-element
-moves, a synthetic cursor, click ripples, captions, and (when the deployment
-has narration configured) a voice-over that leads each visual beat.
+product driven live in the browser, narrated as a flowing story. The camera
+reads the page the way a person does — scrolling, mostly wide — and zooms in
+only when an interaction happens (cursor glide, click ripple). Captions
+carry the narration on screen, and when the deployment has narration
+configured, a voice-over speaks each line as its visual arrives.
 
 Use this skill when the user asks for a demo video, walkthrough recording,
 or promo clip of a feature. It is NOT for verification screencasts of a code
@@ -43,7 +45,7 @@ this pipeline is ever committed to the repository.
 <step number="1">
 <name>Scope and plan the demo (advisor)</name>
 <actions>
-<action>Delegate the creative plan to the `advisor` subagent with the Task tool — it runs the planning model at deeper reasoning and can read the repository to study the feature. Give it a complete brief: the user's request, the surface to record (URL), the relevant source paths for the feature's UI, the beat vocabulary and pacing constraints from step 2 verbatim, and the caption style rules. Ask it to return, as short final text: 2-5 story beats in order (each with the on-screen element to focus, a proposed resilient CSS selector from the source, a 3-9 word caption that doubles as the spoken narration line, and any click/type interactions the story needs), plus which preset(s) fit. A good demo is 10-25 seconds of motion; more beats than that dilutes it.</action>
+<action>Delegate the creative plan to the `advisor` subagent with the Task tool — it runs the planning model at deeper reasoning and can read the repository to study the feature. Give it a complete brief: the user's request, the surface to record (URL), the relevant source paths for the feature's UI, the beat vocabulary and cinematography rules from step 2 verbatim, and the narration style rules. Ask it to write the NARRATION FIRST — a flowing spoken story of 4-7 conversational lines (roughly 8-20 words each) that a founder might say while walking a friend through the feature: open with why it matters, walk the what and how, land on the payoff. Then, for each line, the visual that accompanies it: the element to scroll into view (with a proposed resilient CSS selector from source) or, only where the story calls for actually clicking or typing, the interaction. Return that plus which preset(s) fit. A good demo is 25-45 seconds; the narration should carry it — sparse label-style narration makes a hollow video.</action>
 <action>Treat the advisor's plan as internal guidance, not finished work: the advisor cannot run commands or see the live page, so its selectors are educated guesses from source. You own verification (step 2) and every artifact. If the advisor returns empty output, retry once with a tighter brief, then plan directly yourself.</action>
 <action>Pick presets: `wide` (1920x1080) is the default; add `vertical` (1080x1920) only when the user wants a social/short-form cut.</action>
 <action>If the surface needs the app running, make sure the environment is up first (dev server reachable) before capturing.</action>
@@ -53,15 +55,17 @@ this pipeline is ever committed to the repository.
 <step number="2">
 <name>Author the demo script</name>
 <actions>
-<action>Write `/tmp/feature-demo/demo-script.json`: `{ "url": string, "viewport": { "w": 1280, "h": 800 }, "beats": [...] }`. Beat actions:
+<action>Write `/tmp/feature-demo/demo-script.json`: `{ "url": string, "viewport": { "w": 1280, "h": 800 }, "beats": [...] }` (add top-level `"headed": true` only for GPU/WebGL surfaces). Beat actions:
+- `{ "a": "show", "sel": css, "caption": "..." }` — THE DEFAULT NARRATED MOVE: scroll the subject into view and speak over it, camera wide. No zoom, no cursor.
 - `{ "a": "wait", "ms": n }` / `{ "a": "hold", "ms": n }` — let the page settle / linger.
-- `{ "a": "scrollTo", "sel": css, "ms": n }` — scroll an element into view (the scroll shows in the recording).
-- `{ "a": "focus", "sel": css, "scale": 1.3-1.9, "moveMs": ~700, "holdMs": 800-1200, "caption": "..." }` — glide the cursor to the element and zoom to it. Captions become the narration lines.
+- `{ "a": "scrollTo", "sel": css, "ms": n }` — plain scroll with no narration attached.
+- `{ "a": "focus", "sel": css, "scale": 1.3-1.9, "moveMs": ~700, "caption": "..." }` — glide the cursor to the element and zoom in. ONLY as the wind-up for an interaction the story actually performs.
 - `{ "a": "click", "sel": css, "holdMs": ~300 }` — real click with ripple.
 - `{ "a": "type", "sel": css, "text": "..." }` — real typing.
-- `{ "a": "reset", "ms": ~600 }` — pull back between beats (partial by design; pass `"full": true` only for the closing shot).</action>
+- `{ "a": "reset", "ms": ~600 }` — pull back after an interaction (partial by design; pass `"full": true` only for the closing shot).</action>
+<action>Cinematography: the camera mostly stays wide and MOVES BY SCROLLING — that is how a person actually reads a page, and constant zooming reads as artificial. Zoom (`focus`) only when the demo is about to click or type, so the zoom communicates "watch this interaction," and pull back (`reset`) right after. Most demos want zero to two zooms total; a demo with no interaction should have none.</action>
 <action>Keep the opening tight: one short `wait` for page load, then get moving. Dead opening seconds are trimmed automatically, but do not rely on it.</action>
-<action>Write captions as short, conversational spoken lines (they double as the narration): contractions are good, symbols and long clauses are not. 3-9 words on screen; if the spoken wording should differ from the on-screen caption, put the spoken variants in `/tmp/feature-demo/lines.json` (array, one string per caption).</action>
+<action>Captions are the narration lines, written as full conversational sentences (roughly 8-20 words): contractions are good, symbols and clause pileups are not. They appear on screen while spoken and wrap to two lines. If the spoken wording should differ from the on-screen caption, put the spoken variants in `/tmp/feature-demo/lines.json` (array, one string per caption).</action>
 <action>Selectors must be resilient: prefer ids, stable data attributes, or unique semantic tags over deep CSS chains. How you gain confidence before capture depends on the surface:
 - Repository-backed surface (the app's own UI): grep the component/template source for each proposed selector and confirm it exists — cheap and worth doing every time.
 - External public page named by the user: there is no local source to grep, and the browser is reachable only through the single capture delegation (the `proof-runner` takes one brief per task and keeps its configured surface, so a separate pre-flight is not available). Author best-effort resilient selectors — landmark roles, headings, obvious ids the advisor inferred; avoid deep chains — and rely on capture's own validation: the runner resolves every selector live and fails loudly naming any that do not resolve. Use that named failure to correct the script and re-capture within the one allowed retry (step 3).</action>
