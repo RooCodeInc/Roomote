@@ -509,7 +509,7 @@ function getAdoProfileEmail({
 }
 
 function getSourceControlHost(baseUrl: string): string {
-  return new URL(baseUrl).hostname.toLowerCase();
+  return new URL(baseUrl).host.toLowerCase();
 }
 
 async function resolveSourceControlIdentityProfile({
