@@ -69,6 +69,11 @@ export function standardTask({
   discordGuildId,
   discordChannelId,
   discordMessageId,
+  sourceProvider,
+  sourceChannelId,
+  sourceThreadId,
+  sourceMessageId,
+  reportToSourceOnSettle,
   linkedWorkItems,
   interactiveMode = false,
   requestFormat = 'plain',
@@ -114,6 +119,11 @@ export function standardTask({
   discordGuildId?: string;
   discordChannelId?: string;
   discordMessageId?: string;
+  sourceProvider?: string;
+  sourceChannelId?: string;
+  sourceThreadId?: string;
+  sourceMessageId?: string;
+  reportToSourceOnSettle?: boolean;
   linkedWorkItems?: LinkedWorkItem[];
   interactiveMode?: boolean;
   requestFormat?: 'plain' | 'structured';
@@ -322,6 +332,32 @@ ${buildGitHubMessageInstructions()}`
     <rule>If a workflow or packaged skill distinguishes web dashboard tasks from other surfaces, treat this run as a web dashboard task.</rule>
     <rule>When a secure web-task flow exists for the current step, prefer that flow over asking the user to paste secrets into chat or make local-only task edits.</rule>
   </task_surface_context>`;
+  const sourceContext =
+    sourceProvider && (sourceChannelId || sourceThreadId || sourceMessageId)
+      ? `
+  <task_source_context>
+    <source>${sourceProvider}</source>${
+      sourceChannelId
+        ? `
+    <channel_id>${escapeTaskContextText(sourceChannelId)}</channel_id>`
+        : ''
+    }${
+      sourceThreadId
+        ? `
+    <thread_id>${escapeTaskContextText(sourceThreadId)}</thread_id>`
+        : ''
+    }${
+      sourceMessageId
+        ? `
+    <message_id>${escapeTaskContextText(sourceMessageId)}</message_id>`
+        : ''
+    }${
+      reportToSourceOnSettle
+        ? '\n    <completion_report>Send one final report to this source conversation when the task finishes.</completion_report>'
+        : ''
+    }
+  </task_source_context>`
+      : '';
   const sourceControlContext = sourceControlProvider
     ? `
   <source_control_context>
@@ -375,6 +411,7 @@ ${buildGitHubMessageInstructions()}`
   </task_context>
 
   ${taskSurfaceContext}
+  ${sourceContext}
   ${sourceControlContext}
   ${codeReviewSelfReviewCloseoutContext}
 

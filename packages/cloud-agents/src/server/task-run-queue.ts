@@ -33,6 +33,7 @@ import {
   resolveTaskRuntimePolicy,
   resolveTaskWorkspace,
   resolveComputeProviderTarget,
+  populateCommunicationMetadata,
   sourceControlProviderSchema,
   TASK_TIMEOUT_MS,
   isManagedDeploymentReadOnly,
@@ -1320,6 +1321,33 @@ export async function enqueueTask(
   return enqueueFreshLaunch(input as FreshTaskLaunch, options);
 }
 
+async function inheritSourceCommunicationMetadata(
+  task: FreshTask,
+): Promise<void> {
+  const sourceRunId = task.sourceRunId;
+  if (!sourceRunId) return;
+
+  const sourceRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, sourceRunId),
+    columns: { payload: true },
+    with: {
+      task: {
+        columns: { slackChannelId: true, slackThreadTs: true },
+      },
+    },
+  });
+
+  if (!sourceRun) return;
+
+  populateCommunicationMetadata(task.payload as Record<string, unknown>, {
+    sourcePayload: sourceRun.payload,
+    channelId: sourceRun.task?.slackChannelId,
+    threadId: sourceRun.task?.slackThreadTs,
+  });
+  (task.payload as Record<string, unknown>).communicationContextInherited =
+    true;
+}
+
 async function enqueueFreshLaunch(
   input: FreshTaskLaunch,
   options: EnqueueTaskOptions,
@@ -1329,6 +1357,10 @@ async function enqueueFreshLaunch(
   const linkedUserId = getTaskInitiatorLinkedUserId(initiator);
 
   await assertUserIsNotDeleted(linkedUserId);
+
+  // Child launches inherit the provider-neutral origin coordinates so the
+  // agent can see where the parent conversation started.
+  await inheritSourceCommunicationMetadata(task);
 
   if (PR_LINKAGE_REQUIRED_WORKFLOWS.has(workflow) && !input.prLinkage) {
     throw new Error(

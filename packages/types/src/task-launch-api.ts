@@ -132,6 +132,11 @@ export const taskLaunchRequestSchema = z.object({
    * polling. Standard launches only.
    */
   notifyOnSettle: z.boolean().optional(),
+  /**
+   * When true and the launch has communication origin metadata, instruct the
+   * child agent to send one final report to that source conversation.
+   */
+  reportToSource: z.boolean().optional(),
 });
 
 export type TaskLaunchRequest = z.infer<typeof taskLaunchRequestSchema>;

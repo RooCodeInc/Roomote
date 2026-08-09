@@ -325,7 +325,7 @@ describe('launchTask', () => {
     expect(enqueuedTask.task.payload.notifySourceRunOnSettle).toBeUndefined();
   });
 
-  it('does not stamp the launching run for run-token launches without notifyOnSettle', async () => {
+  it('stamps the launching run for every standard run-token launch', async () => {
     mockEnqueueTask.mockResolvedValue({ id: 104, taskId: 'task-plain-child' });
 
     const runAuth = {
@@ -352,8 +352,38 @@ describe('launchTask', () => {
         payload: { notifySourceRunOnSettle?: boolean };
       };
     };
-    expect(enqueuedTask.task.sourceRunId).toBeUndefined();
+    expect(enqueuedTask.task.sourceRunId).toBe(556);
     expect(enqueuedTask.task.payload.notifySourceRunOnSettle).toBeUndefined();
+  });
+
+  it('stamps source reporting only when requested by a standard run-token launch', async () => {
+    mockEnqueueTask.mockResolvedValue({ id: 105, taskId: 'task-report' });
+
+    const runAuth = {
+      runId: 557,
+      userId: 'user-1',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    } as RunTokenContext;
+
+    const app = createApp(runAuth);
+    const response = await app.request(
+      new Request('http://localhost/tasks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: 'Investigate this',
+          reportToSource: true,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const enqueuedTask = mockEnqueueTask.mock.calls[0]?.[0] as {
+      task: { payload: { reportToSourceOnSettle?: boolean } };
+    };
+    expect(enqueuedTask.task.payload.reportToSourceOnSettle).toBe(true);
   });
 
   it('allows selected repositories that span multiple providers', async () => {

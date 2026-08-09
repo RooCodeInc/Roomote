@@ -279,11 +279,19 @@ export async function generatePrompt({
       const communicationProvider = getCommunicationProviderFromTaskPayload(
         taskSpec.payload,
       );
+      const inheritedCommunicationContext =
+        taskSpec.payload.communicationContextInherited === true;
+      const activeSlackChannel = inheritedCommunicationContext
+        ? null
+        : slackChannel;
+      const activeCommunicationProvider = inheritedCommunicationContext
+        ? null
+        : communicationProvider;
       const nonSlackChatProvider =
-        communicationProvider === 'teams' ||
-        communicationProvider === 'telegram' ||
-        communicationProvider === 'discord'
-          ? communicationProvider
+        activeCommunicationProvider === 'teams' ||
+        activeCommunicationProvider === 'telegram' ||
+        activeCommunicationProvider === 'discord'
+          ? activeCommunicationProvider
           : null;
       const slackThreadTs =
         getSlackThreadTsFromTaskPayload(taskSpec.payload) ??
@@ -313,8 +321,8 @@ export async function generatePrompt({
         repo: taskSpec.payload.repo,
         repoFullNames: await getWorkspaceRepositoryFullNames(taskSpec),
         taskSurface: resolveStandardTaskSurface({
-          hasSlackChannel: Boolean(slackChannel),
-          communicationProvider,
+          hasSlackChannel: Boolean(activeSlackChannel),
+          communicationProvider: activeCommunicationProvider,
           taskSurface: taskRow?.surface,
         }),
         conflictResolverLabel: enabledConflictResolverLabel,
@@ -322,7 +330,7 @@ export async function generatePrompt({
         attribution: commitAuthor,
         slackTeamDomain:
           getSlackTeamDomainFromTaskPayload(taskSpec.payload) ?? undefined,
-        slackChannel: slackChannel ?? undefined,
+        slackChannel: activeSlackChannel ?? undefined,
         slackThreadTs: slackThreadTs ?? undefined,
         telegramChatId:
           nonSlackChatProvider === 'telegram'
@@ -365,6 +373,13 @@ export async function generatePrompt({
           nonSlackChatProvider === 'discord'
             ? (communicationMessageId ?? undefined)
             : undefined,
+        sourceProvider:
+          communicationProvider ?? (slackChannel ? 'slack' : undefined),
+        sourceChannelId: communicationChannelId ?? undefined,
+        sourceThreadId: communicationThreadId ?? undefined,
+        sourceMessageId: communicationMessageId ?? undefined,
+        reportToSourceOnSettle:
+          taskSpec.payload.reportToSourceOnSettle === true,
         interactiveMode: taskSpec.payload.bootstrap?.interactiveMode,
         requestFormat,
         linkedWorkItems: taskSpec.payload.linkedWorkItems,
@@ -377,7 +392,7 @@ export async function generatePrompt({
         prAction,
       });
 
-      if (slackChannel && slackThreadTs) {
+      if (!inheritedCommunicationContext && slackChannel && slackThreadTs) {
         const slackInstructions = buildSlackMessageInstructions({
           includeRequestUserInputGuidance: true,
         });
@@ -386,7 +401,7 @@ export async function generatePrompt({
           : slackInstructions;
       }
 
-      if (nonSlackChatProvider) {
+      if (!inheritedCommunicationContext && nonSlackChatProvider) {
         const chatInstructions =
           nonSlackChatProvider === 'teams'
             ? buildTeamsMessageInstructions()

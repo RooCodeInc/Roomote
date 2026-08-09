@@ -285,22 +285,28 @@ export async function launchTask(
       userId: auth.userId,
     });
 
-    // A settle notification needs a durable pointer back to the launching
-    // run, so the opt-in only takes effect on run-token launches.
+    // Run-token launches retain their parent pointer so child tasks can inherit
+    // source conversation metadata. Settle notifications remain opt-in.
     const notifySourceRunOnSettle =
       requestedType === 'standard' &&
       body.notifyOnSettle === true &&
       'runId' in auth.authContext;
+    const reportToSourceOnSettle =
+      requestedType === 'standard' &&
+      body.reportToSource === true &&
+      'runId' in auth.authContext;
+    const shouldLinkToSourceRun =
+      'runId' in auth.authContext &&
+      (requestedType === 'standard' ||
+        requestedType === 'environment-definition');
+    const sourceRunId =
+      'runId' in auth.authContext ? auth.authContext.runId : undefined;
 
     const taskBase = {
       harness: harnessSelection.harness ?? body.harness,
       computeProvider: body.computeProvider,
       requestedWorkKindDecision,
-      ...((requestedType === 'environment-definition' ||
-        notifySourceRunOnSettle) &&
-      'runId' in auth.authContext
-        ? { sourceRunId: auth.authContext.runId }
-        : {}),
+      ...(shouldLinkToSourceRun ? { sourceRunId } : {}),
     };
 
     const task: StandardTask | SuggestedTasksTask =
@@ -323,6 +329,9 @@ export async function launchTask(
                 requestedType === 'standard' ? body.bootstrap : undefined,
               ...(notifySourceRunOnSettle
                 ? { notifySourceRunOnSettle: true }
+                : {}),
+              ...(reportToSourceOnSettle
+                ? { reportToSourceOnSettle: true }
                 : {}),
             },
           };
