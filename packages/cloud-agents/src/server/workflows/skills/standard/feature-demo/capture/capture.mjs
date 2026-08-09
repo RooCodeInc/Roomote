@@ -71,11 +71,12 @@ function estimateSpokenSeconds(text) {
 }
 
 // Between focus beats the camera pulls back only partially; pogo-ing to full
-// wide between every zoom reads as jumpy. Kept below the renderer's
-// vertical-cropping threshold so glides render as a floating (uncropped)
-// window rather than triggering the full-bleed coverage floor. The final
+// wide between every zoom reads as jumpy. Kept well below the renderer's
+// cap on zoom (the largest scale that keeps the whole window on the stage,
+// about 1.16 for a wide demo with captions) so a following focus beat still
+// reads as a distinct push-in rather than matching the glide. The final
 // reset goes fully wide.
-const GLIDE_SCALE = 1.12;
+const GLIDE_SCALE = 1.06;
 
 // Headless by default: with the frame ticker it records deterministically at
 // wall-clock rate on ordinary pages. Headed mode (auto-Xvfb) exists for

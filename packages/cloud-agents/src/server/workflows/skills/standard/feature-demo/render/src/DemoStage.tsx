@@ -120,19 +120,25 @@ export const DemoStage: React.FC<{
   const WIN_Y = stageTop + (stageH - BASE_H) / 2;
 
   const sRaw = baseScale + (lerpNum(timeline.scaleKeys, t) - 1);
-  // Coverage floor: the caption band shrinks the window, so a scripted zoom
-  // (e.g. the default 1.5x) can crop the window vertically without covering
-  // the canvas width — backdrop gutters on both sides. Whenever the scale
-  // passes the vertical-cropping threshold, smoothly floor the effective
-  // scale at full-width coverage: the view is always either a floating
-  // uncropped window or a full-bleed zoom, never a cropped hybrid.
-  const sCrop = stageH / BASE_H; // where vertical cropping begins
-  // Overshoot coverage by a hair: at exactly canvasW / BASE_W, floating-point
-  // rounding can leave BASE_W * S one ulp short of canvasW, which skips the
-  // edge clamp below and lets the raw center-pull expose a side gutter.
-  const sCover = canvasW / BASE_W + 0.002; // horizontal coverage, plus slack
-  const floorP = clamp((sRaw - sCrop) / 0.15, 0, 1);
-  const S = sRaw + Math.max(0, sCover - sRaw) * floorP;
+  // Two scales bound how far a zoom can grow cleanly: sCrop is where the
+  // window starts spilling out of the stage (top and bottom go flush), and
+  // sCover is where it finally reaches the canvas edges. Between them the
+  // window is cropped AND narrower than the canvas, so backdrop shows down
+  // one side — the state a zoom would otherwise animate through.
+  // The 8px inset keeps a sliver of backdrop above and below even at full
+  // zoom, so the window reads as a card that grew rather than one wedged
+  // against the stage edges — and keeps the clamp crossover off the exact
+  // equality, where floating point is fragile.
+  const sCrop = (stageH - 8) / BASE_H;
+  const sCover = canvasW / BASE_W;
+  // In the wide preset the stage is far wider than the recording's own
+  // aspect (more so with a caption band reserved), so sCrop lands well below
+  // sCover and that in-between state cannot be skipped by any continuous
+  // zoom — a full-bleed punch-in is simply not reachable cleanly. Cap the
+  // zoom at a whole window there. Where coverage comes first instead (the
+  // tall vertical preset, where the window covers the width at 1.2x and does
+  // not crop until 2.58x) nothing is capped and full-bleed still works.
+  const S = sCover > sCrop ? Math.min(sRaw, sCrop) : sRaw;
   const focal = lerpVec(timeline.focalKeys, t);
   const cursor = lerpVec(timeline.cursorKeys, t);
 
@@ -147,22 +153,19 @@ export const DemoStage: React.FC<{
   //   left  = WIN_X + Tx - focal.x * BASE_W * (S - 1)
   //   top   = WIN_Y + Ty - focal.y * BASE_H * (S - 1)
   // so covering [0, canvasW] x [stageTop, stageTop + stageH] bounds T:
-  const txMax = focal.x * BASE_W * (S - 1) - WIN_X;
-  const txMin = canvasW - WIN_X + focal.x * BASE_W * (S - 1) - BASE_W * S;
-  const tyMax = stageTop - WIN_Y + focal.y * BASE_H * (S - 1);
-  const tyMin =
+  const txA = focal.x * BASE_W * (S - 1) - WIN_X;
+  const txB = canvasW - WIN_X + focal.x * BASE_W * (S - 1) - BASE_W * S;
+  const tyA = stageTop - WIN_Y + focal.y * BASE_H * (S - 1);
+  const tyB =
     stageTop + stageH - WIN_Y + focal.y * BASE_H * (S - 1) - BASE_H * S;
-  // Only clamp an axis when the scaled window exceeds the stage on it; a
-  // smaller-than-stage window (vertical band preset) stays centered instead
-  // of being shoved into a corner.
-  const Tx =
-    BASE_W * S >= canvasW - 0.5
-      ? clamp(desiredTx, Math.min(txMin, txMax), Math.max(txMin, txMax))
-      : desiredTx;
-  const Ty =
-    BASE_H * S >= stageH - 0.5
-      ? clamp(desiredTy, Math.min(tyMin, tyMax), Math.max(tyMin, tyMax))
-      : desiredTy;
+  // The same pair of bounds says "keep covering the stage" when the scaled
+  // window is bigger than it and "stay inside the stage" when it is smaller
+  // — the two just swap order — so clamping to their min/max is right in
+  // both regimes, and the two agree exactly at the crossover. Unconditional
+  // is what keeps a nearly-stage-height window from drifting off the stage
+  // (or into the caption band) on the center pull.
+  const Tx = clamp(desiredTx, Math.min(txA, txB), Math.max(txA, txB));
+  const Ty = clamp(desiredTy, Math.min(tyA, tyB), Math.max(tyA, tyB));
   const invScale = 1 / S;
 
   return (
