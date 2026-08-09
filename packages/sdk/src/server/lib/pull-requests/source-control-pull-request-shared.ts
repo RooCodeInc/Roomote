@@ -37,6 +37,7 @@ export type RepositoryRow = {
   externalRepoId: string | null;
   fullName: string;
   htmlUrl: string;
+  private?: boolean;
 };
 
 export function resolveSourceControlProviderForRepositoryFromPayload(
@@ -96,10 +97,7 @@ export function resolveSourceControlHostForRepositoryFromPayload(
  * optionally narrowed by source-control instance host.
  *
  * When `host` is provided (typically from the task payload's
- * `sourceControlHost`), rows whose `host` matches exactly are preferred;
- * when none match, rows with a NULL host still qualify so legacy rows
- * written before the host backfill keep resolving (mirroring the scoping in
- * `upsertSourceControlPullRequestFactFromWebhook`).
+ * `sourceControlHost`), only rows whose `host` matches exactly qualify.
  *
  * Without a `host`, a (provider, fullName) identity active on more than one
  * row is an error rather than an arbitrary pick: same-name repositories on
@@ -130,15 +128,12 @@ export async function resolveRepositoryRow({
       externalRepoId: true,
       fullName: true,
       htmlUrl: true,
+      private: true,
     },
   });
 
   if (host !== undefined) {
-    const exactMatches = rows.filter((row) => row.host === host);
-    const candidates =
-      exactMatches.length > 0
-        ? exactMatches
-        : rows.filter((row) => row.host === null);
+    const candidates = rows.filter((row) => row.host === host);
 
     if (candidates.length === 0) {
       throw new Error(

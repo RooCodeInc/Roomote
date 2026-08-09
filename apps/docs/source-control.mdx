@@ -40,6 +40,23 @@ After setup, verify that Roomote can:
 - clone the repository inside a task sandbox
 - push a branch or open a reviewable change when the task finishes
 
+## Attribution on pull requests and commits
+
+Roomote keeps human-readable attribution inside private repositories. For
+public repositories, it uses the task participant's linked source-control
+username when one is available. If Roomote cannot resolve a linked username,
+the pull request or merge request says only that it was created by Roomote.
+
+Roomote never derives public attribution from an account email address. Commit
+emails use the source-control provider's `noreply` identity when available, or
+the Roomote identity otherwise. A workspace containing any public or
+unresolved repository uses the public-safe identity for all new commits because
+Git author configuration applies across the workspace.
+
+Changing a repository from private to public does not rewrite existing Git
+history. Roomote sanitizes a legacy named attribution line the next time it
+updates an open public pull request.
+
 ## Pull request review comments
 
 When **Review Code** finds an issue on a changed line, Roomote posts the finding

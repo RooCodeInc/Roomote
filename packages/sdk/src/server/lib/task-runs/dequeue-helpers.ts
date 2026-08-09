@@ -22,6 +22,8 @@ import {
   markTaskStartParallelCountEndedAt,
   resolveSandboxModelRuntimeEnv,
   resolveWorkspaceSourceControlProvider,
+  workspaceAllowsPrivateAttribution,
+  workspaceUsesOnlySourceControlProvider,
   stringifyDecryptedEnvVarValue,
   syncTaskStateFromRuns,
   eq,
@@ -35,7 +37,9 @@ import { createTaskRunBitbucketCredentials } from '@roomote/bitbucket';
 import { createTaskRunGiteaCredentials } from '@roomote/gitea';
 import { createTaskRunAdoCredentials } from '@roomote/ado';
 import {
+  DEFAULT_ROOMOTE_COMMIT_AUTHOR,
   releaseTaskRun,
+  resolvePublicGitAuthor,
   resolveRunCommitAuthor,
 } from '@roomote/cloud-agents/server';
 
@@ -758,9 +762,32 @@ export function reportBootstrapFailure({
 
 export async function resolveGitAuthor(
   tx: DbTx,
-  taskRun: Pick<TaskRun, 'id' | 'taskId' | 'actingUserId'>,
+  taskRun: Pick<TaskRun, 'id' | 'taskId' | 'actingUserId' | 'payload'>,
 ): Promise<GitAuthor> {
   const commitAuthor = await resolveRunCommitAuthor(tx, taskRun);
 
-  return commitAuthor.gitAuthor;
+  if (commitAuthor.kind === 'roomote') {
+    return commitAuthor.gitAuthor;
+  }
+
+  const workspace = resolveTaskWorkspace(taskRun.payload);
+  if (await workspaceAllowsPrivateAttribution(tx, workspace)) {
+    return commitAuthor.gitAuthor;
+  }
+
+  const usesOnlyGitHub = await workspaceUsesOnlySourceControlProvider(
+    tx,
+    workspace,
+    'github',
+  );
+  const provider = await resolveWorkspaceSourceControlProvider(tx, workspace);
+  const singleUnknownGitHubRepository =
+    workspace.type === 'repository' &&
+    !provider &&
+    resolveSourceControlProviderFromPayload(taskRun.payload) === 'github';
+  if (!usesOnlyGitHub && !singleUnknownGitHubRepository) {
+    return DEFAULT_ROOMOTE_COMMIT_AUTHOR.gitAuthor;
+  }
+
+  return resolvePublicGitAuthor(commitAuthor);
 }

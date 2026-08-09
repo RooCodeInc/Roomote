@@ -20,7 +20,10 @@ import {
 import {
   buildPullRequestUrl,
   getSourceControlProviderLabel,
+  findPrBodyAttributionLine,
   normalizePrBodyAttributionAppMention,
+  preservePrBodyAttribution,
+  rewritePrBodyAttribution,
   prActions,
   sourceControlProviderSchema,
   type PrAction,
@@ -218,22 +221,42 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     resolveConfiguredGitHubAppSlugIfConfigured(),
     getDeploymentGitHubRoomoteMentionEnabled(),
   ]);
-  const inputWithNormalizedAttribution: SourceControlPullRequestMutationInput =
-    configuredGitHubAppSlug
-      ? {
-          ...input,
-          body: normalizePrBodyAttributionAppMention(
-            input.body,
-            configuredGitHubAppSlug,
-            roomoteMentionEnabled,
-          ),
-        }
-      : input;
-
-  const liveGitHubAttribution =
+  const attribution =
     provider === 'github'
       ? await resolveRunCommitAuthor(db, taskRun)
-      : undefined;
+      : await resolveLaunchTaskCommitAuthor(db, taskRun.taskId);
+  const normalizedMentionBody = configuredGitHubAppSlug
+    ? normalizePrBodyAttributionAppMention(
+        input.body,
+        configuredGitHubAppSlug,
+        roomoteMentionEnabled,
+      )
+    : input.body;
+  const displayName =
+    attribution.kind === 'roomote'
+      ? null
+      : repository.private === true
+        ? attribution.displayName
+        : provider === 'github'
+          ? attribution.publicDisplayName
+          : null;
+  const rewrittenAttributionBody = rewritePrBodyAttribution(
+    normalizedMentionBody,
+    displayName,
+  );
+  const inputWithNormalizedAttribution: SourceControlPullRequestMutationInput =
+    {
+      ...input,
+      body:
+        repository.private !== true
+          ? scrubUnmarkedPublicAttribution(
+              rewrittenAttributionBody,
+              displayName,
+            )
+          : rewrittenAttributionBody,
+    };
+
+  const liveGitHubAttribution = provider === 'github' ? attribution : undefined;
   const liveGitHubAssigneePlan = liveGitHubAttribution
     ? await resolveLiveGitHubAssigneePlan({
         taskRun,
@@ -256,7 +279,6 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
           repository,
           provider,
           createDraft,
-          attribution: liveGitHubAttribution,
           staleLaunchAssignee: liveGitHubAssigneePlan?.staleLaunchAssignee,
         });
       case 'gitlab':
@@ -415,14 +437,12 @@ async function createOrUpdateGitHubPullRequest({
   repository,
   provider,
   createDraft,
-  attribution,
   staleLaunchAssignee,
 }: {
   input: SourceControlPullRequestMutationInput;
   repository: RepositoryRow;
   provider: 'github';
   createDraft: boolean;
-  attribution?: ResolvedTaskCommitAuthor;
   staleLaunchAssignee?: string;
 }): Promise<SourceControlPullRequestMutationResult> {
   if (!repository.installationId) {
@@ -474,6 +494,7 @@ async function createOrUpdateGitHubPullRequest({
       body: preserveExistingPullRequestAttribution(
         input.body,
         pullRequest.body,
+        repository.private === true,
       ),
     });
     pullRequest = data;
@@ -484,7 +505,7 @@ async function createOrUpdateGitHubPullRequest({
       owner,
       repo,
       title: input.title,
-      body: replaceCreatedPullRequestAttribution(input.body, attribution),
+      body: input.body,
       head: input.sourceBranch,
       base: targetBranch,
       draft: createDraft,
@@ -541,28 +562,44 @@ async function createOrUpdateGitHubPullRequest({
   };
 }
 
-function replaceCreatedPullRequestAttribution(
-  body: string,
-  attribution: ResolvedTaskCommitAuthor | undefined,
-): string {
-  if (!attribution) {
-    return body;
-  }
-
-  return body.replace(
-    /^(> Opened on behalf of ).+?(\. (?:Follow up by|\[View the task\]))/mu,
-    `$1${attribution.displayName}$2`,
-  );
-}
-
 function preserveExistingPullRequestAttribution(
   body: string,
   existingBody: string | null | undefined,
+  repositoryIsPrivate: boolean,
 ): string {
-  const openerLine = existingBody?.match(/^> Opened on behalf of .+$/mu)?.[0];
-  return openerLine
-    ? body.replace(/^> Opened on behalf of .+$/mu, openerLine)
+  const openerLine = existingBody
+    ? findPrBodyAttributionLine(existingBody)
+    : null;
+  const publicHandle = openerLine?.match(
+    /^> Opened on behalf of @([^\s.]+)\.(?: |$)/u,
+  )?.[1];
+  const safePublicOpener =
+    publicHandle !== undefined &&
+    /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/u.test(publicHandle);
+  if (!openerLine) {
+    return body;
+  }
+
+  if (repositoryIsPrivate) {
+    return preservePrBodyAttribution(body, existingBody ?? '');
+  }
+
+  return safePublicOpener
+    ? rewritePrBodyAttribution(body, `@${publicHandle}`)
     : body;
+}
+
+function scrubUnmarkedPublicAttribution(
+  body: string,
+  displayName: string | null,
+): string {
+  const provenance = displayName
+    ? `> Opened on behalf of ${displayName}.`
+    : '> Created by Roomote.';
+  return body.replace(
+    /^[ \t]*>[ \t]*(?:Opened on behalf of|Created by Roomote).*$/gmu,
+    () => provenance,
+  );
 }
 
 async function createOrUpdateGitLabMergeRequest({

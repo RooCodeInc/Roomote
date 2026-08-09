@@ -24,6 +24,7 @@ import { buildGitHubMessageInstructions } from '../github-message-instructions';
 const DEFAULT_ATTRIBUTION: ResolvedTaskCommitAuthor = {
   kind: 'roomote',
   displayName: PRODUCT_NAME,
+  publicDisplayName: null,
   githubLogin: null,
   prAssigneeLogin: null,
   gitAuthor: {
