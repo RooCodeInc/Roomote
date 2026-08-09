@@ -17,7 +17,7 @@
 // Reads narration.json (written by build-narration.mjs before capture) from
 // the script's directory when present. See SKILL.md for the schema.
 
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { dirname } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
@@ -88,21 +88,6 @@ const ab = (...args) =>
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-// Same invocation, but returns combined stdout+stderr so warnings that
-// agent-browser writes to stderr (e.g. the "--headed ignored" notice) can be
-// inspected. Throws on a non-zero exit like execFileSync would.
-const abCapture = (...args) => {
-  const res = spawnSync(AB, HEADED ? ['--headed', ...args] : args, {
-    encoding: 'utf8',
-  });
-  if (res.error) throw res.error;
-  const out = `${res.stdout ?? ''}${res.stderr ?? ''}`;
-  if (res.status !== 0) {
-    throw new Error(`agent-browser ${args.join(' ')} failed: ${out}`);
-  }
-  return out;
-};
-
 const sleep = (ms) => execFileSync('sleep', [String(ms / 1000)]);
 
 let t0 = 0;
@@ -160,13 +145,12 @@ const pushCursorMove = (startT, endT, target) => {
   curCursor = target;
 };
 
-// HEADLESS fallback only: headless capture emits frames only on visual
+// Headless (default) only: headless capture emits frames only on visual
 // damage and stamps them without wall-clock gaps, so a static surface
 // collapses into a sub-second video; an imperceptible 2px dot re-painting
-// every animation frame keeps frames flowing. Headed recording (the
-// default) presents at wall-clock rate on its own — verified on a fully
-// static page — and skips the ticker, whose constant rAF invalidation can
-// starve the daemon's own page commands during long headed recordings.
+// every animation frame keeps frames flowing at wall-clock rate. Headed
+// mode presents at wall-clock rate on its own — verified on a fully static
+// page — and skips the ticker.
 const TICKER_JS =
   '(function(){var d=document.createElement("div");' +
   'd.style.cssText="position:fixed;left:0;bottom:0;width:2px;height:2px;' +
@@ -190,17 +174,22 @@ async function run() {
     // no active daemon is fine
   }
   ab('set', 'viewport', String(VIEWPORT.w), String(VIEWPORT.h));
+  ab('record', 'start', `${OUT_DIR}/raw.webm`, script.url);
 
-  const startOut = abCapture('record', 'start', `${OUT_DIR}/raw.webm`, script.url);
-  // If the daemon survived the close and swallowed our launch options, the
-  // recording would silently be headless — fail loudly instead of producing
-  // a stalled clip on a GPU-backed surface.
-  if (HEADED && /--headed ignored|daemon already running/i.test(startOut)) {
-    throw new Error(
-      'agent-browser ignored --headed because a daemon was already running; ' +
-        'the recording would be headless. Ensure the daemon is stopped ' +
-        '(`agent-browser close`) before capture and retry.',
-    );
+  // Verify the browser's actual mode positively rather than parsing daemon
+  // warnings (the wrapper's cookie seeding or our own viewport call may have
+  // launched the daemon first, which makes "--headed ignored" ambiguous).
+  // Headless Chrome self-identifies in its user agent.
+  if (HEADED) {
+    const ua = ab('eval', 'navigator.userAgent');
+    if (/HeadlessChrome/i.test(ua)) {
+      throw new Error(
+        'headed capture was requested but the browser is running headless ' +
+          '(HeadlessChrome user agent) — an earlier browser step likely ' +
+          'launched a headless daemon. Run `agent-browser close`, ensure ' +
+          'nothing else drives the browser, and retry.',
+      );
+    }
   }
   t0 = Date.now();
   if (!HEADED) {

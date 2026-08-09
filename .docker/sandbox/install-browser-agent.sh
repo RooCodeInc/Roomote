@@ -501,12 +501,21 @@ seed_preview_cookies() {
   mkdir -p "$CACHE_ROOT"
   resolve_cli_paths
 
+  # Seeding may be what launches the daemon, and the daemon's headed/headless
+  # mode is fixed at launch — so seed in the SAME mode the wrapped command
+  # requested, or a headless seed daemon would make a later `--headed` command
+  # a silent no-op.
+  local seed_headed=false
+  if [ "${AGENT_BROWSER_WANT_HEADED:-0}" = 1 ]; then
+    seed_headed=true
+  fi
+
   for url in "${preview_urls[@]}"; do
     if [ -n "$bypass_value" ]; then
-      AGENT_BROWSER_HEADED=false "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_PREFIX_ARGS[@]}" cookies set "$header_name" "$bypass_value" --url "$url" --secure --sameSite Lax >/dev/null
+      AGENT_BROWSER_HEADED="$seed_headed" "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_PREFIX_ARGS[@]}" cookies set "$header_name" "$bypass_value" --url "$url" --secure --sameSite Lax >/dev/null
     fi
 
-    AGENT_BROWSER_HEADED=false "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_PREFIX_ARGS[@]}" cookies set "$HIDE_PREVIEW_WIDGET_COOKIE" "1" --url "$url" --secure --sameSite Lax >/dev/null
+    AGENT_BROWSER_HEADED="$seed_headed" "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_PREFIX_ARGS[@]}" cookies set "$HIDE_PREVIEW_WIDGET_COOKIE" "1" --url "$url" --secure --sameSite Lax >/dev/null
   done
 
   : > "$cache_file"
