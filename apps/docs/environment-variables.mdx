@@ -378,12 +378,7 @@ apply semantics.
 
 | Env var                                  | Required         | Used for                                                                              |
 | ---------------------------------------- | ---------------- | ------------------------------------------------------------------------------------- |
-| `SENTRY_DSN`                             | Optional         | Shared Sentry DSN fallback for Node services that do not have a service-specific DSN. |
-| `NEXT_PUBLIC_SENTRY_DSN`                 | Optional         | Browser and Next.js web Sentry DSN.                                                   |
-| `API_SENTRY_DSN`                         | Optional         | API service Sentry DSN. Falls back to `SENTRY_DSN`.                                   |
-| `CONTROLLER_SENTRY_DSN`                  | Optional         | Controller service Sentry DSN. Falls back to `SENTRY_DSN`.                            |
-| `BULLMQ_SENTRY_DSN`                      | Optional         | BullMQ service Sentry DSN. Falls back to `SENTRY_DSN`.                                |
-| `WORKER_SENTRY_DSN`                      | Optional         | Worker service Sentry DSN. Falls back to `SENTRY_DSN`.                                |
+| `SENTRY_DSN`                             | Optional         | Sentry DSN for Roomote server services and task workers.                              |
 | `API_DEBUG_LOGS`                         | Optional         | Set to `true` or `1` to enable extra API logs.                                        |
 | `API_EXTERNAL_REQUEST_TIMEOUT_MS`        | Optional         | Default external request timeout. Defaults to 10 seconds.                             |
 | `API_SLOW_REQUEST_THRESHOLD_MS`          | Optional         | Threshold for slow API request logging. Defaults to 5 seconds.                        |
@@ -393,10 +388,10 @@ apply semantics.
 | `GITHUB_SHA`                             | Release metadata | Commit SHA fallback for monitoring release metadata.                                  |
 | `VERCEL_GIT_COMMIT_SHA`                  | Release metadata | Vercel commit SHA fallback for monitoring release metadata.                           |
 
-For Compose deployments, add the DSNs to the deployment environment file and
-recreate the affected services. `SENTRY_DSN` configures the API, controller,
-BullMQ, and task workers unless a matching service-specific DSN overrides it.
-The web service uses `NEXT_PUBLIC_SENTRY_DSN` separately.
+For Compose deployments, add `SENTRY_DSN` to the deployment environment file
+and recreate the app services. This reports server-side web, API, controller,
+BullMQ, and task-worker errors. Browser-bundle error reporting is not configured
+at container runtime in published self-hosted images.
 
 ### Local development and deploy helpers
 

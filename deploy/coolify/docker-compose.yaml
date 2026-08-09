@@ -173,7 +173,6 @@ services:
       SERVICE_FQDN_API_3001: ''
       <<: *roomote-shared-env
       SENTRY_DSN: ${SENTRY_DSN:-}
-      API_SENTRY_DSN: ${API_SENTRY_DSN:-}
       PORT: 3001
     healthcheck:
       test:
@@ -197,7 +196,7 @@ services:
       # This is the app origin users open in the browser.
       SERVICE_FQDN_WEB_3000: ''
       <<: *roomote-shared-env
-      NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
       PORT: 3000
     healthcheck:
       test:
@@ -230,8 +229,6 @@ services:
     environment:
       <<: *roomote-shared-env
       SENTRY_DSN: ${SENTRY_DSN:-}
-      CONTROLLER_SENTRY_DSN: ${CONTROLLER_SENTRY_DSN:-}
-      WORKER_SENTRY_DSN: ${WORKER_SENTRY_DSN:-}
       DOCKER_HOST: tcp://docker-proxy:2375
       # The worker release archive is baked into the app image; the
       # controller reads the worker release version from the VERSION file inside
@@ -278,7 +275,6 @@ services:
     environment:
       <<: *roomote-shared-env
       SENTRY_DSN: ${SENTRY_DSN:-}
-      BULLMQ_SENTRY_DSN: ${BULLMQ_SENTRY_DSN:-}
       PORT: 3002
       DOCKER_HOST: tcp://docker-proxy:2375
       DOCKER_WORKER_RELEASE_PATH: /roomote/releases/worker-current.tar.gz

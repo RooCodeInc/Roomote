@@ -2,4 +2,4 @@
 '@roomote/web': patch
 ---
 
-Let self-hosted deployments send control-plane and task-worker errors to operator-configured Sentry projects.
+Let self-hosted deployments send server-service and task-worker errors to an operator-configured Sentry project.

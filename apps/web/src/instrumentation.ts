@@ -2,6 +2,7 @@ import * as Sentry from '@sentry/nextjs';
 
 import {
   isWebSentryEnabled,
+  resolveWebSentryDsn,
   resolveWebSentryEnvironment,
   resolveWebSentryRelease,
 } from '@/lib/sentry-config';
@@ -34,11 +35,12 @@ export async function register() {
 
   const environment = resolveWebSentryEnvironment();
   const release = resolveWebSentryRelease();
+  const dsn = resolveWebSentryDsn();
 
   if (process.env.NEXT_RUNTIME === 'nodejs') {
     // Node.js Sentry configuration.
     Sentry.init({
-      dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+      dsn,
       enabled: isWebSentryEnabled(),
       environment,
       release,
@@ -59,7 +61,7 @@ export async function register() {
     // Edge Sentry configuration.
     // Note: User context is set in layouts via setSentryUserContext().
     Sentry.init({
-      dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+      dsn,
       enabled: isWebSentryEnabled(),
       environment,
       release,

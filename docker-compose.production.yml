@@ -131,7 +131,7 @@ services:
   web:
     environment:
       <<: *roomote-production-env
-      NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
+      SENTRY_DSN: ${SENTRY_DSN:-}
     ports: !reset []
     healthcheck:
       test:
@@ -148,7 +148,6 @@ services:
     environment:
       <<: *roomote-production-env
       SENTRY_DSN: ${SENTRY_DSN:-}
-      API_SENTRY_DSN: ${API_SENTRY_DSN:-}
     ports: !reset []
     healthcheck:
       test:
@@ -165,8 +164,6 @@ services:
     environment:
       <<: *roomote-production-env
       SENTRY_DSN: ${SENTRY_DSN:-}
-      CONTROLLER_SENTRY_DSN: ${CONTROLLER_SENTRY_DSN:-}
-      WORKER_SENTRY_DSN: ${WORKER_SENTRY_DSN:-}
     healthcheck:
       test:
         [
@@ -182,7 +179,6 @@ services:
     environment:
       <<: *roomote-production-env
       SENTRY_DSN: ${SENTRY_DSN:-}
-      BULLMQ_SENTRY_DSN: ${BULLMQ_SENTRY_DSN:-}
     ports: !reset []
     healthcheck:
       test:
