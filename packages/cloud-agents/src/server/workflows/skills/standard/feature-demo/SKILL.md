@@ -117,7 +117,7 @@ The runner also reads `/tmp/feature-demo/narration.json` (written in step 3) on 
 
 `npx remotion render src/index.ts Demo-wide out/demo-wide.mp4 --browser-executable="${REMOTION_HEADLESS_SHELL_PATH:-/opt/remotion/headless-shell}" --log=error`
 
-If that binary does not exist (older sandbox snapshot), run `npx remotion browser ensure` once and render without the flag. Repeat for `Demo-vertical` when the vertical preset was requested.</action>
+Run this with a GENEROUS command timeout (10 minutes) on the first attempt: a narrative-length cut is 750+ frames rendering in software on a small container, which routinely exceeds the default two-minute command window — a timeout there is wasted work, not a render failure. If the binary does not exist (older sandbox snapshot), run `npx remotion browser ensure` once and render without the flag. Repeat for `Demo-vertical` when the vertical preset was requested.</action>
 </actions>
 </step>
 
