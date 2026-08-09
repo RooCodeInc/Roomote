@@ -45,6 +45,7 @@ x-roomote-app-image: &roomote-app-image ghcr.io/roocodeinc/roomote-app:develop
 # the same generated value in each service of this resource.
 x-roomote-shared-env: &roomote-shared-env
   R_APP_ENV: production
+  APP_ENV: production
   ROOMOTE_DOCKER_LOAD_ENV_FILE: 'false'
   R_AUTO_GENERATE_KEYS: 'true'
   ENCRYPTION_KEY: ${SERVICE_BASE64_64_ENCRYPTIONKEY}
@@ -171,6 +172,8 @@ services:
       # api domain must be publicly reachable over HTTPS.
       SERVICE_FQDN_API_3001: ''
       <<: *roomote-shared-env
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      API_SENTRY_DSN: ${API_SENTRY_DSN:-}
       PORT: 3001
     healthcheck:
       test:
@@ -194,6 +197,7 @@ services:
       # This is the app origin users open in the browser.
       SERVICE_FQDN_WEB_3000: ''
       <<: *roomote-shared-env
+      NEXT_PUBLIC_SENTRY_DSN: ${NEXT_PUBLIC_SENTRY_DSN:-}
       PORT: 3000
     healthcheck:
       test:
@@ -225,6 +229,9 @@ services:
     networks: [default, docker-api]
     environment:
       <<: *roomote-shared-env
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      CONTROLLER_SENTRY_DSN: ${CONTROLLER_SENTRY_DSN:-}
+      WORKER_SENTRY_DSN: ${WORKER_SENTRY_DSN:-}
       DOCKER_HOST: tcp://docker-proxy:2375
       # The worker release archive is baked into the app image; the
       # controller reads the worker release version from the VERSION file inside
@@ -270,6 +277,8 @@ services:
         condition: service_started
     environment:
       <<: *roomote-shared-env
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      BULLMQ_SENTRY_DSN: ${BULLMQ_SENTRY_DSN:-}
       PORT: 3002
       DOCKER_HOST: tcp://docker-proxy:2375
       DOCKER_WORKER_RELEASE_PATH: /roomote/releases/worker-current.tar.gz

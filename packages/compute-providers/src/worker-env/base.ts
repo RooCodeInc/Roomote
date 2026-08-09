@@ -18,6 +18,8 @@ const BLOCKED_WORKER_ENV_KEYS = new Set([
   'DASHBOARD_PASSWORD',
   'SETUP_TOKEN',
   'MODAL_TOKEN_SECRET',
+  'SENTRY_DSN',
+  'WORKER_SENTRY_DSN',
   ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
 ]);
 
@@ -122,6 +124,13 @@ function buildOperatorModelProviderEnv(): Record<string, string> {
   return env;
 }
 
+function buildWorkerMonitoringEnv(): Record<string, string> {
+  const sentryDsn =
+    process.env.WORKER_SENTRY_DSN?.trim() || process.env.SENTRY_DSN?.trim();
+
+  return sentryDsn ? { WORKER_SENTRY_DSN: sentryDsn } : {};
+}
+
 export function buildBaseWorkerEnv({
   authToken,
   sandboxExpiresAtMs,
@@ -174,6 +183,7 @@ export function buildBaseWorkerEnv({
     ...(process.env.PREVIEW_AUTH_COOKIE_NAME && {
       PREVIEW_AUTH_COOKIE_NAME: process.env.PREVIEW_AUTH_COOKIE_NAME,
     }),
+    ...buildWorkerMonitoringEnv(),
     ...buildOperatorModelProviderEnv(),
     ...filterWorkerExtraEnv(extraEnv),
   };

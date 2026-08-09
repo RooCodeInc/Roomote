@@ -30,6 +30,8 @@ describe('buildBaseWorkerEnv', () => {
     delete process.env.R_MODEL_ENV_KEYS;
     delete process.env.GOOGLE_APPLICATION_CREDENTIALS;
     delete process.env.MISTRAL_API_KEY;
+    delete process.env.SENTRY_DSN;
+    delete process.env.WORKER_SENTRY_DSN;
   });
 
   afterEach(() => {
@@ -78,6 +80,47 @@ describe('buildBaseWorkerEnv', () => {
 
     expect(env.JOB_AUTH_PRIVATE_KEY).toBeUndefined();
     expect(env.JOB_AUTH_PUBLIC_KEY).toBe('job-public-key');
+  });
+
+  it('forwards the shared Sentry DSN to the worker-specific configuration', () => {
+    process.env.SENTRY_DSN = ' https://shared.example/1 ';
+
+    const env = buildBaseWorkerEnv({
+      authToken: 'auth-token',
+      extraEnv: {},
+    });
+
+    expect(env.SENTRY_DSN).toBeUndefined();
+    expect(env.WORKER_SENTRY_DSN).toBe('https://shared.example/1');
+  });
+
+  it('prefers the worker-specific Sentry DSN', () => {
+    process.env.SENTRY_DSN = 'https://shared.example/1';
+    process.env.WORKER_SENTRY_DSN = ' https://worker.example/1 ';
+
+    const env = buildBaseWorkerEnv({
+      authToken: 'auth-token',
+      extraEnv: {
+        SENTRY_DSN: 'https://extra-shared.example/1',
+        WORKER_SENTRY_DSN: 'https://extra-worker.example/1',
+      },
+    });
+
+    expect(env.SENTRY_DSN).toBeUndefined();
+    expect(env.WORKER_SENTRY_DSN).toBe('https://worker.example/1');
+  });
+
+  it('does not accept Sentry configuration from caller-provided extra env', () => {
+    const env = buildBaseWorkerEnv({
+      authToken: 'auth-token',
+      extraEnv: {
+        SENTRY_DSN: 'https://extra-shared.example/1',
+        WORKER_SENTRY_DSN: 'https://extra-worker.example/1',
+      },
+    });
+
+    expect(env.SENTRY_DSN).toBeUndefined();
+    expect(env.WORKER_SENTRY_DSN).toBeUndefined();
   });
 
   it('blocks job auth private keys from caller-provided extra env', () => {

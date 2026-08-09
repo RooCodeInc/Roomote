@@ -393,6 +393,11 @@ apply semantics.
 | `GITHUB_SHA`                             | Release metadata | Commit SHA fallback for monitoring release metadata.                                  |
 | `VERCEL_GIT_COMMIT_SHA`                  | Release metadata | Vercel commit SHA fallback for monitoring release metadata.                           |
 
+For Compose deployments, add the DSNs to the deployment environment file and
+recreate the affected services. `SENTRY_DSN` configures the API, controller,
+BullMQ, and task workers unless a matching service-specific DSN overrides it.
+The web service uses `NEXT_PUBLIC_SENTRY_DSN` separately.
+
 ### Local development and deploy helpers
 
 | Env var                        | Required                    | Used for                                                                                  |
