@@ -1037,6 +1037,48 @@ describe('optional targetBranch', () => {
     );
   });
 
+  it('scrubs duplicated unmarked attribution in an otherwise marked public body', async () => {
+    const octokit = makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 555,
+      externalRepoId: null,
+      fullName: 'acme/web',
+      htmlUrl: 'https://github.com/acme/web',
+      private: false,
+    });
+    mockResolveRunCommitAuthor.mockResolvedValue({
+      kind: 'user',
+      displayName: 'Private Name',
+      publicDisplayName: '@participant',
+      prAssigneeLogin: null,
+    });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+        body: `${attributionBody('Opened on behalf of Private Name.')}\n\n> Opened on behalf of Duplicated Private Name.`,
+      },
+    });
+
+    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: `${attributionBody('Opened on behalf of @participant.')}\n\n> Opened on behalf of @participant.`,
+      }),
+    );
+  });
+
   it('uses generic provenance in a public GitHub pull request without a linked handle', async () => {
     const octokit = makeOctokit({
       list: [],

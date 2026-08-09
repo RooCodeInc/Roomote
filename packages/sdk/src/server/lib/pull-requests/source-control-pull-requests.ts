@@ -21,7 +21,6 @@ import {
   buildPullRequestUrl,
   getSourceControlProviderLabel,
   findPrBodyAttributionLine,
-  hasMarkedPrBodyAttribution,
   normalizePrBodyAttributionAppMention,
   preservePrBodyAttribution,
   rewritePrBodyAttribution,
@@ -249,8 +248,7 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     {
       ...input,
       body:
-        repository.private !== true &&
-        !hasMarkedPrBodyAttribution(normalizedMentionBody)
+        repository.private !== true
           ? scrubUnmarkedPublicAttribution(
               rewrittenAttributionBody,
               displayName,

@@ -137,10 +137,6 @@ export function findPrBodyAttributionLine(body: string): string | null {
   return markers ? `> ${body.slice(markers.start, markers.end)}` : null;
 }
 
-export function hasMarkedPrBodyAttribution(body: string): boolean {
-  return findPrBodyAttributionMarkers(body) !== null;
-}
-
 export function preservePrBodyAttribution(
   body: string,
   existingBody: string,
