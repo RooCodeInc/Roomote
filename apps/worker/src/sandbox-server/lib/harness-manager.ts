@@ -226,6 +226,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
   private deferredTurnSettlement: DeferredTurnSettlement | null = null;
   private terminalProviderErrorPending = false;
   private completionDecisionPending = false;
+  private completionDecisionSequence = 0;
   private continuationStartPending = false;
   private fallbackCompletionSequence = 0;
   private pendingCompletionId: string | null = null;
@@ -937,12 +938,25 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     }
 
     this.completionDecisionPending = true;
+    const decisionSequence = ++this.completionDecisionSequence;
     const sessionId = this.state.sessionId;
     const completionId =
       this.pendingCompletionId ??
       `${sessionId ?? 'unknown'}:fallback:${++this.fallbackCompletionSequence}`;
     void decide(completionId)
       .then(async (disposition) => {
+        if (decisionSequence !== this.completionDecisionSequence) {
+          if (typeof disposition === 'object') {
+            try {
+              await disposition.onRejected?.();
+            } catch (error) {
+              this.logger.warn(
+                `[HarnessManager] Stale continuation cleanup failed: ${formatCallbackError(error)}`,
+              );
+            }
+          }
+          return;
+        }
         this.completionDecisionPending = false;
         if (
           this.state.sessionId !== sessionId ||
@@ -994,6 +1008,12 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
         this.finalizeTaskCompletionNow();
       })
       .catch((error) => {
+        if (decisionSequence !== this.completionDecisionSequence) {
+          this.logger.warn(
+            `[HarnessManager] Stale pre-completion decision failed: ${formatCallbackError(error)}`,
+          );
+          return;
+        }
         this.completionDecisionPending = false;
         this.continuationStartPending = false;
         this.logger.warn(
@@ -1195,6 +1215,10 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     }
 
     if (event.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt) {
+      if (this.completionDecisionPending) {
+        this.completionDecisionPending = false;
+        this.completionDecisionSequence += 1;
+      }
       this.continuationStartPending = false;
       // A user prompt entering the session means a turn is starting — a
       // drained queue follow-up, a steered replay, or a question answer.

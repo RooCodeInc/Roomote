@@ -2274,6 +2274,104 @@ describe('HarnessManager touchKeepalive', () => {
     }
   });
 
+  it('invalidates a delayed goal decision when a manual prompt completes', async () => {
+    let resolveGoalDecision:
+      | ((decision: {
+          disposition: 'continue';
+          prompt: { prompt: string };
+          onRejected: () => Promise<void>;
+        }) => void)
+      | undefined;
+    const onRejected = vi.fn().mockResolvedValue(undefined);
+    const onExit = vi.fn();
+    const onBeforeTaskCompletion = vi.fn(async (completionId: string) => {
+      if (completionId === 'goal-completion') {
+        return new Promise<{
+          disposition: 'continue';
+          prompt: { prompt: string };
+          onRejected: () => Promise<void>;
+        }>((resolve) => {
+          resolveGoalDecision = resolve;
+        });
+      }
+      return Promise.resolve('finalize' as const);
+    });
+    const { harness, manager } = createManager({
+      onBeforeTaskCompletion,
+      onExit,
+    });
+    const completion = (completionId: string) =>
+      ({
+        eventName: TaskEventName.TaskCompleted,
+        payload: [
+          'task-goal-manual-prompt',
+          {
+            totalTokensIn: 0,
+            totalTokensOut: 0,
+            totalCost: 0,
+            contextTokens: 0,
+          },
+          {},
+          { isSubtask: false, completionId },
+        ],
+      }) as TaskEvent;
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskStarted,
+        payload: ['task-goal-manual-prompt'],
+      } as TaskEvent);
+      harness.emitTaskEvent(completion('goal-completion'));
+      await vi.waitFor(() => {
+        expect(onBeforeTaskCompletion).toHaveBeenCalledTimes(1);
+      });
+
+      harness.emitRuntimeOutput({
+        id: 'manual-follow-up',
+        ts: 10,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        kind: 'text',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'manual follow-up' }],
+        metadata: { sessionId: 'task-goal-manual-prompt', sequence: 2 },
+        payload: {
+          sessionId: 'task-goal-manual-prompt',
+          text: 'manual follow-up',
+        },
+      } as AcpMessage);
+      harness.emitTaskEvent(completion('manual-completion'));
+
+      await vi.waitFor(() => {
+        expect(onBeforeTaskCompletion).toHaveBeenCalledTimes(2);
+        expect(onExit).toHaveBeenCalledTimes(1);
+      });
+      resolveGoalDecision?.({
+        disposition: 'continue',
+        prompt: { prompt: 'stale automatic continuation' },
+        onRejected,
+      });
+      await vi.waitFor(() => {
+        expect(onRejected).toHaveBeenCalledTimes(1);
+      });
+
+      expect(onBeforeTaskCompletion.mock.calls).toEqual([
+        ['goal-completion'],
+        ['manual-completion'],
+      ]);
+      expect(
+        harness.sentCommands.filter(
+          (command) => command.commandName === TaskCommandName.SendMessage,
+        ),
+      ).toHaveLength(0);
+      expect(manager.getStatus().phase).toBe('waiting_for_prompt');
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
   it('uses normal idle finalization when the completion hook declines', async () => {
     const onBeforeTaskCompletion = vi.fn(async () => 'finalize' as const);
     const onExit = vi.fn();
