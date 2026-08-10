@@ -1,8 +1,13 @@
 import { Queue } from 'bullmq';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
 import type { TaskRun } from '@roomote/db/server';
-import { and, db, eq, taskPullRequests } from '@roomote/db/server';
+import {
+  getPrReviewAggregateDelivery,
+  persistPrReviewEventAndFanOut,
+  type PersistPrReviewEventInput,
+} from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
 import {
   type CommunicationProvider,
@@ -65,6 +70,7 @@ export const prReviewActivityEventSchema = z.object({
 export type PrReviewActivityEvent = z.infer<typeof prReviewActivityEventSchema>;
 
 export const prReviewNotificationRequestSchema = z.object({
+  aggregateId: z.string().uuid().optional(),
   taskId: z.string(),
   repository: z.string(),
   prNumber: z.number().int().positive(),
@@ -86,6 +92,7 @@ type PrReviewNotificationTarget = {
 };
 
 export const enqueuePrReviewNotificationInputSchema = z.object({
+  eventKey: z.string().min(1).optional(),
   repository: z.string(),
   prNumber: z.number().int().positive(),
   prUrl: z.string(),
@@ -96,6 +103,24 @@ export const enqueuePrReviewNotificationInputSchema = z.object({
 export type EnqueuePrReviewNotificationInput = z.infer<
   typeof enqueuePrReviewNotificationInputSchema
 >;
+
+function buildPrReviewEventKey(
+  input: EnqueuePrReviewNotificationInput,
+): string {
+  if (input.eventKey) {
+    return input.eventKey;
+  }
+
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        repository: input.repository,
+        prNumber: input.prNumber,
+        event: input.event,
+      }),
+    )
+    .digest('hex');
+}
 
 type EnqueuePrReviewNotificationResult = {
   notifiedTaskCount: number;
@@ -269,6 +294,35 @@ export async function schedulePrReviewNotificationJob({
   }
 }
 
+export async function schedulePrReviewAggregateDelivery(
+  aggregateId: string,
+  delayMs = 0,
+): Promise<void> {
+  const loaded = await getPrReviewAggregateDelivery(aggregateId);
+  if (!loaded) {
+    return;
+  }
+  const aggregate = loaded.aggregate;
+  const minuteBucket = Math.floor((Date.now() + delayMs) / 60_000);
+
+  await getPrReviewNotificationQueue().add(
+    'notify-pr-review-aggregate',
+    {
+      aggregateId,
+      taskId: aggregate.taskId,
+      repository: aggregate.repository,
+      prNumber: aggregate.prNumber,
+      prUrl: aggregate.prUrl,
+      deferrals: 0,
+      sourceControlProvider: aggregate.sourceControlProvider,
+    },
+    {
+      delay: delayMs,
+      jobId: `pr-review-aggregate-${aggregateId}-${minuteBucket}`,
+    },
+  );
+}
+
 /**
  * Appends a pending review-activity event for the task and returns whether
  * this call claimed responsibility for scheduling the notification job.
@@ -382,20 +436,21 @@ export async function enqueuePrReviewNotification(
   input: EnqueuePrReviewNotificationInput,
 ): Promise<EnqueuePrReviewNotificationResult> {
   const parsedInput = enqueuePrReviewNotificationInputSchema.parse(input);
-
-  const prTaskLinks = await db.query.taskPullRequests.findMany({
-    where: and(
-      eq(
-        taskPullRequests.sourceControlProvider,
-        parsedInput.sourceControlProvider ?? 'github',
-      ),
-      eq(taskPullRequests.repository, parsedInput.repository),
-      eq(taskPullRequests.prNumber, parsedInput.prNumber),
-    ),
-    columns: { taskId: true },
+  const sourceControlProvider =
+    parsedInput.sourceControlProvider ?? ('github' as const);
+  const durable = await persistPrReviewEventAndFanOut({
+    sourceControlProvider,
+    eventKey: buildPrReviewEventKey(parsedInput),
+    repository: parsedInput.repository,
+    prNumber: parsedInput.prNumber,
+    prUrl: parsedInput.prUrl,
+    reviewHeadSha: parsedInput.event.reviewHeadSha,
+    kind: parsedInput.event.kind,
+    authorLogin: parsedInput.event.authorLogin,
+    roomoteAuthored: parsedInput.event.roomoteAuthored,
+    payload: parsedInput.event as PersistPrReviewEventInput['payload'],
   });
-
-  const taskIds = Array.from(new Set(prTaskLinks.map((link) => link.taskId)));
+  const taskIds = durable.taskIds;
 
   if (taskIds.length === 0) {
     return { notifiedTaskCount: 0, reason: 'no_linked_tasks' };
@@ -403,7 +458,7 @@ export async function enqueuePrReviewNotification(
 
   let notifiedTaskCount = 0;
 
-  for (const taskId of taskIds) {
+  for (const [index, taskId] of taskIds.entries()) {
     const immediate =
       parsedInput.event.kind === 'review_summary' &&
       parsedInput.event.roomoteAuthored === true;
@@ -425,6 +480,9 @@ export async function enqueuePrReviewNotification(
           'notify-pr-review-activity',
           {
             ...target,
+            ...(durable.aggregateIds[index]
+              ? { aggregateId: durable.aggregateIds[index] }
+              : {}),
             prUrl: parsedInput.prUrl,
             deferrals: 0,
             immediate,

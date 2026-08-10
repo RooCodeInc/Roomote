@@ -610,6 +610,15 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     );
   }
 
+  async updateMessage(input: {
+    channelId: string;
+    messageId: string;
+    text: string;
+    buttons?: CommunicationMessageButton[][];
+  }): Promise<void> {
+    await this.editMessage(input);
+  }
+
   async deleteMessage(input: {
     channelId: string;
     messageId: string;

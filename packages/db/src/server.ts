@@ -69,6 +69,7 @@ export * from './lib/subscription-provider-usage';
 export * from './lib/provider-credit-balance';
 export * from './lib/preview-runtime-config';
 export * from './lib/out-of-band-task-messages';
+export * from './lib/pr-review-notifications';
 export * from './lib/record-task-kickoff-message';
 export * from './lib/slack-runtime-credentials';
 export * from './lib/teams-runtime-credentials';
@@ -120,6 +121,11 @@ export {
   taskStartParallelCountsRelations,
   taskMessages,
   taskMessagesRelations,
+  prReviewEvents,
+  prReviewAggregates,
+  prReviewAggregateEvents,
+  prReviewNotificationDeliveries,
+  prReviewFixClaims,
   llmUsageEvents,
   llmUsageEventsRelations,
   taskSlackReplyDetails,
@@ -208,5 +214,8 @@ export type {
   SuggestionType,
   ManagerMcpSetupNotificationReason,
   EnvironmentConfigVersionSource,
+  PrReviewEventKind,
+  PrReviewNotificationDestination,
+  PrReviewNotificationDeliveryState,
 } from './schema';
 export type { AutomationWorkItemDisposition } from '@roomote/types';

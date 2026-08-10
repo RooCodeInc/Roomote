@@ -17,6 +17,7 @@ import {
   MANAGER_MCP_SETUP_NO_THANKS_ACTION_ID,
   PR_REVIEW_ACTION_AUTO_ACTION_ID,
   PR_REVIEW_ACTION_DISMISS_ACTION_ID,
+  PR_REVIEW_ACTION_FIX_ALL_ACTION_ID,
   PR_REVIEW_ACTION_YES_ACTION_ID,
   SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_CONFIGURE_ACTION_ID,
   SUGGESTED_TASKS_ONBOARDING_FOLLOWUP_IGNORE_ACTION_ID,
@@ -29,6 +30,7 @@ import { and, db, eq, slackInstallations } from '@roomote/db/server';
 import {
   handleSlackPrReviewActionAuto,
   handleSlackPrReviewActionDismiss,
+  handleSlackPrReviewActionFixAll,
   handleSlackPrReviewActionYes,
 } from './pr-review-action.js';
 import { handleTaskCancellation } from './task-cancellation.js';
@@ -221,6 +223,9 @@ export async function handleSlackInteractivePayload(
       break;
     case actionId === PR_REVIEW_ACTION_YES_ACTION_ID:
       await handleSlackPrReviewActionYes(interactivePayload);
+      break;
+    case actionId === PR_REVIEW_ACTION_FIX_ALL_ACTION_ID:
+      await handleSlackPrReviewActionFixAll(interactivePayload);
       break;
     case actionId === PR_REVIEW_ACTION_AUTO_ACTION_ID:
       await handleSlackPrReviewActionAuto(interactivePayload);

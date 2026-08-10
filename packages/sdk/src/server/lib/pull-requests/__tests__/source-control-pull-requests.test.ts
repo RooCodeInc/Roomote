@@ -117,6 +117,8 @@ vi.mock('@roomote/db/server', () => ({
     mockGetDeploymentPrAction(...args),
   resolveTelegramRuntimeCredentials: (...args: unknown[]) =>
     mockResolveTelegramRuntimeCredentials(...args),
+  replayRecentPrReviewEventsForAssociation: vi.fn(async () => []),
+  recordTaskRunLifecycleEvent: vi.fn(async () => undefined),
   db: {
     query: {
       repositories: {

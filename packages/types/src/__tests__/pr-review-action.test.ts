@@ -7,7 +7,7 @@ describe('pr review action callback data', () => {
   it('round-trips every choice through provider callback data', () => {
     const nonce = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
 
-    for (const choice of ['yes', 'auto', 'dismiss'] as const) {
+    for (const choice of ['yes', 'fix_all', 'auto', 'dismiss'] as const) {
       const data = buildPrReviewActionCallbackData(choice, nonce);
 
       expect(parsePrReviewActionCallbackData(data)).toEqual({ choice, nonce });

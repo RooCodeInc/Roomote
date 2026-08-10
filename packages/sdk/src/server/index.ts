@@ -206,6 +206,7 @@ export {
   requeuePendingPrReviewActivity,
   resolvePrReviewNotificationRoute,
   schedulePrReviewNotificationJob,
+  schedulePrReviewAggregateDelivery,
   type EnqueuePrReviewNotificationInput,
   type PrReviewActivityEvent,
   type PrReviewNotificationRequest,

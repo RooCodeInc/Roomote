@@ -14,6 +14,7 @@ export enum ScheduledJobName {
   WebhookCleanup = 'WebhookCleanup',
   StandbyRetention = 'StandbyRetention',
   CustomAutomations = 'custom_automations',
+  PrReviewNotificationRepair = 'PrReviewNotificationRepair',
 }
 
 /**

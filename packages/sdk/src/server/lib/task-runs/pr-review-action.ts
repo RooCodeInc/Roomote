@@ -1,4 +1,10 @@
-import { and, db, eq, taskPullRequests } from '@roomote/db/server';
+import {
+  and,
+  claimDurablePrReviewAction,
+  db,
+  eq,
+  taskPullRequests,
+} from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
 
 /** Conversation providers that can render PR review action buttons. */
@@ -137,26 +143,61 @@ export async function claimPendingPrReviewAction(
   nonce: string,
 ): Promise<PendingPrReviewAction | null> {
   const redis = getRedis();
-  const raw = await redis.eval(
-    CLAIM_PR_REVIEW_ACTION_LUA,
-    1,
-    getPrReviewActionKey(nonce),
-  );
+  const durableClaim = await claimDurablePrReviewAction(nonce);
+  const raw = await redis
+    .eval(CLAIM_PR_REVIEW_ACTION_LUA, 1, getPrReviewActionKey(nonce))
+    .catch((error) => {
+      if (!durableClaim) {
+        throw error;
+      }
+      return null;
+    });
+
+  if (durableClaim?.outcome === 'already_handled') {
+    return null;
+  }
+
+  const durable =
+    durableClaim?.outcome === 'claimed' ? durableClaim.action : null;
 
   if (typeof raw !== 'string') {
-    return null;
+    return durable ? { nonce, ...durable } : null;
   }
 
   try {
     const pending = JSON.parse(raw) as PendingPrReviewAction;
+    const latest = durable ? { ...pending, ...durable, nonce } : pending;
 
+    await redis
+      .srem(getPrReviewActionThreadKey(latest), nonce)
+      .catch(() => undefined);
+
+    return latest;
+  } catch {
+    return durable ? { nonce, ...durable } : null;
+  }
+}
+
+/** Removes a superseded Redis action offer after an evolving notification
+ * rotates to a new durable nonce. This is best-effort because Postgres remains
+ * authoritative for current action state. */
+export async function discardPendingPrReviewAction(
+  nonce: string,
+): Promise<void> {
+  const redis = getRedis();
+  const raw = await redis
+    .eval(CLAIM_PR_REVIEW_ACTION_LUA, 1, getPrReviewActionKey(nonce))
+    .catch(() => null);
+  if (typeof raw !== 'string') {
+    return;
+  }
+  try {
+    const pending = JSON.parse(raw) as PendingPrReviewAction;
     await redis
       .srem(getPrReviewActionThreadKey(pending), nonce)
       .catch(() => undefined);
-
-    return pending;
   } catch {
-    return null;
+    // The key is already gone; a malformed stale value needs no further work.
   }
 }
 

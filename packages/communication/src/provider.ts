@@ -59,6 +59,15 @@ export type CommunicationPostMessageResult = {
   threadId?: string;
 };
 
+export type CommunicationUpdateMessageInput = {
+  channelId: string;
+  messageId: string;
+  text: string;
+  serviceUrl?: string;
+  textFormat?: 'plain' | 'markdown' | 'xml';
+  buttons?: CommunicationMessageButton[][];
+};
+
 export type CommunicationThreadLookupResult = {
   provider: CommunicationProvider;
   channelId: string;
@@ -87,6 +96,7 @@ export type CommunicationReactionResult = {
 
 export type CommunicationOperation =
   | 'postMessage'
+  | 'updateMessage'
   | 'fetchThreadMessages'
   | 'fetchChannelMessages'
   | 'addReaction';
@@ -116,6 +126,7 @@ export interface CommunicationProviderAdapter {
   postMessage(
     input: CommunicationPostMessageInput,
   ): Promise<CommunicationPostMessageResult>;
+  updateMessage?(input: CommunicationUpdateMessageInput): Promise<void>;
   fetchThreadMessages?(input: {
     channelId: string;
     messageId: string;

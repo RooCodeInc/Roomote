@@ -1,6 +1,8 @@
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   and,
+  acquirePrReviewFixClaim,
+  attachRunToPrReviewFixClaim,
   db,
   desc,
   eq,
@@ -8,6 +10,7 @@ import {
   setTrustedRunActingUser,
   taskRuns,
   tasks,
+  releasePrReviewFixClaim,
 } from '@roomote/db/server';
 import { queueCommunicationMessage } from '@roomote/communication';
 import { withContention } from '@roomote/redis';
@@ -36,6 +39,7 @@ import type { PrReviewActionProvider } from './pr-review-action';
 export type PrReviewFollowUpDispatchResult =
   | { outcome: 'queued'; runId: number }
   | { outcome: 'resumed'; runId: number }
+  | { outcome: 'already_running'; runId: number | null }
   | { outcome: 'unavailable' };
 
 /**
@@ -46,6 +50,10 @@ export type PrReviewFollowUpDispatchResult =
  * auto-handle path, which dispatches with no user interaction at all.
  */
 export async function dispatchPrReviewFollowUp(input: {
+  taskId: string;
+  repository: string;
+  prNumber: number;
+  action?: 'fix_review' | 'fix_all' | 'auto';
   provider: PrReviewActionProvider;
   channelId: string;
   threadId: string | null;
@@ -55,11 +63,33 @@ export async function dispatchPrReviewFollowUp(input: {
   /** Provider-native user id shown in the transcript; falls back to actingUserId. */
   providerUserId?: string;
 }): Promise<PrReviewFollowUpDispatchResult> {
-  if (input.provider === 'slack') {
-    return dispatchSlackFollowUp(input);
+  const claim = await acquirePrReviewFixClaim({
+    taskId: input.taskId,
+    sourceControlProvider: 'github',
+    repository: input.repository,
+    prNumber: input.prNumber,
+    action: input.action ?? 'fix_review',
+    actingUserId: input.actingUserId,
+  });
+  if (!claim.acquired) {
+    return { outcome: 'already_running', runId: claim.runId };
   }
 
-  return dispatchCommunicationFollowUp(input);
+  try {
+    const result =
+      input.provider === 'slack'
+        ? await dispatchSlackFollowUp(input)
+        : await dispatchCommunicationFollowUp(input);
+    if (result.outcome === 'queued' || result.outcome === 'resumed') {
+      await attachRunToPrReviewFixClaim(claim.claimId, result.runId);
+    } else {
+      await releasePrReviewFixClaim(claim.claimId);
+    }
+    return result;
+  } catch (error) {
+    await releasePrReviewFixClaim(claim.claimId).catch(() => undefined);
+    throw error;
+  }
 }
 
 async function dispatchSlackFollowUp(input: {

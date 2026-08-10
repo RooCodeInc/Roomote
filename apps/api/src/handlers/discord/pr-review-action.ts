@@ -92,10 +92,22 @@ export async function handleDiscordPrReviewActionCallback(input: {
     }
 
     const dispatched = await dispatchPrReviewFollowUp({
+      taskId: pending.taskId,
+      repository: pending.repository,
+      prNumber: pending.prNumber,
+      action:
+        input.choice === 'auto'
+          ? 'auto'
+          : input.choice === 'fix_all'
+            ? 'fix_all'
+            : 'fix_review',
       provider: 'discord',
       channelId: pending.channelId,
       threadId: pending.threadId,
-      followUpPrompt: pending.followUpPrompt,
+      followUpPrompt:
+        input.choice === 'fix_all'
+          ? `Fix all unresolved review threads, failed checks, and merge conflicts on ${pending.repository}#${pending.prNumber}. Re-read the live pull request state before changing code.`
+          : pending.followUpPrompt,
       actingUserId: mappedUserId!,
       providerUserId: user?.id,
     });
@@ -105,6 +117,15 @@ export async function handleDiscordPrReviewActionCallback(input: {
         input.choice === 'auto'
           ? "I'll resolve future feedback on this PR, but this task can no longer be resumed for the current feedback. Reply here to start fresh."
           : 'This task can no longer be resumed. Reply here to start fresh.',
+      );
+      return;
+    }
+
+    if (dispatched.outcome === 'already_running') {
+      await replyToOffer(
+        dispatched.runId
+          ? `Review feedback is already being handled by run ${dispatched.runId}.`
+          : 'Review feedback is already being handled by this task.',
       );
       return;
     }

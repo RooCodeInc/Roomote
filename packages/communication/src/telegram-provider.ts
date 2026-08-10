@@ -397,6 +397,16 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     throw lastError ?? new Error('Telegram editMessageText failed.');
   }
 
+  async updateMessage(input: {
+    channelId: string;
+    messageId: string;
+    text: string;
+    textFormat?: 'plain' | 'markdown';
+    buttons?: CommunicationMessageButton[][];
+  }): Promise<void> {
+    await this.editMessageText(input);
+  }
+
   /** Replace or remove the inline keyboard on an existing message. */
   async editMessageReplyMarkup(input: {
     channelId: string;

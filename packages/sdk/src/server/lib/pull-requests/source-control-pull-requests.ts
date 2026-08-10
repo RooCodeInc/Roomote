@@ -18,6 +18,8 @@ import {
   tasks,
   taskRuns,
   getDeploymentPrAction,
+  recordTaskRunLifecycleEvent,
+  replayRecentPrReviewEventsForAssociation,
   taskPullRequests,
   type TaskRun,
 } from '@roomote/db/server';
@@ -56,6 +58,7 @@ import {
   stripAdoBranchRef,
 } from './source-control-pull-request-branch-lookup';
 import { requestSourceControlJson as requestJson } from './source-control-pull-request-http';
+import { schedulePrReviewAggregateDelivery } from '../task-runs/pr-review-notification';
 import {
   resolveAdoProviderContext,
   resolveBitbucketProviderContext,
@@ -391,11 +394,37 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     }
   })();
 
-  await persistSourceControlPullRequestAssociation({
+  const association = await persistSourceControlPullRequestAssociation({
     taskRun,
     result,
     repository,
   });
+
+  if (!association.persisted) {
+    result.warnings.push(
+      `The pull request was created, but Roomote could not link it to this task after three attempts. Review notifications may not return to this task.`,
+    );
+  } else {
+    const aggregateIds = await replayRecentPrReviewEventsForAssociation({
+      taskId: taskRun.taskId,
+      sourceControlProvider: repository.sourceControlProvider,
+      repository: result.repositoryFullName,
+      prNumber: result.number,
+    }).catch((error) => {
+      result.warnings.push(
+        `Roomote linked the pull request but could not replay review events received during creation: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return [];
+    });
+
+    await Promise.all(
+      aggregateIds.map((aggregateId) =>
+        schedulePrReviewAggregateDelivery(aggregateId).catch(() => undefined),
+      ),
+    );
+  }
 
   return result;
 }
@@ -463,48 +492,70 @@ async function persistSourceControlPullRequestAssociation({
   taskRun: TaskRun;
   result: SourceControlPullRequestMutationResult;
   repository: RepositoryRow;
-}): Promise<void> {
+}): Promise<{ persisted: boolean }> {
   if (!taskRun.taskId) {
-    return;
+    return { persisted: false };
   }
 
   const status = result.draft ? 'draft' : 'open';
 
-  try {
-    await db
-      .insert(taskPullRequests)
-      .values({
-        taskId: taskRun.taskId,
-        sourceControlProvider: repository.sourceControlProvider,
-        host: repository.host,
-        repositoryId: repository.id,
-        prUrl: result.url,
-        prNumber: result.number,
-        prTitle: result.title,
-        repository: result.repositoryFullName,
-        status,
-        createdByRoomote: result.action === 'created',
-        prBaseRef: result.targetBranch,
-      })
-      .onConflictDoUpdate({
-        target: [taskPullRequests.taskId, taskPullRequests.prUrl],
-        set: {
+  let lastError: unknown;
+  for (const delayMs of [0, 100, 500]) {
+    if (delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+    try {
+      await db
+        .insert(taskPullRequests)
+        .values({
+          taskId: taskRun.taskId,
           sourceControlProvider: repository.sourceControlProvider,
           host: repository.host,
           repositoryId: repository.id,
+          prUrl: result.url,
+          prNumber: result.number,
           prTitle: result.title,
+          repository: result.repositoryFullName,
           status,
+          createdByRoomote: result.action === 'created',
           prBaseRef: result.targetBranch,
-          updatedAt: new Date(),
-        },
-      });
-  } catch (error) {
-    console.warn(
-      `[persistSourceControlPullRequestAssociation] Failed to associate ${result.repositoryFullName}#${result.number} with task ${taskRun.taskId}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
+        })
+        .onConflictDoUpdate({
+          target: [taskPullRequests.taskId, taskPullRequests.prUrl],
+          set: {
+            sourceControlProvider: repository.sourceControlProvider,
+            host: repository.host,
+            repositoryId: repository.id,
+            prTitle: result.title,
+            status,
+            prBaseRef: result.targetBranch,
+            updatedAt: new Date(),
+          },
+        });
+      return { persisted: true };
+    } catch (error) {
+      lastError = error;
+    }
   }
+
+  console.warn(
+    `[persistSourceControlPullRequestAssociation] Failed to associate ${result.repositoryFullName}#${result.number} with task ${taskRun.taskId}: ${
+      lastError instanceof Error ? lastError.message : String(lastError)
+    }`,
+  );
+  await recordTaskRunLifecycleEvent(db, {
+    runId: taskRun.id,
+    taskId: taskRun.taskId,
+    eventType: 'decision',
+    message: `Failed to persist pull request association after three attempts.`,
+    details: {
+      reason: 'pull_request_association_failed',
+      repository: result.repositoryFullName,
+      prNumber: result.number,
+      error: lastError instanceof Error ? lastError.message : String(lastError),
+    },
+  }).catch(() => undefined);
+  return { persisted: false };
 }
 
 async function createOrUpdateGitHubPullRequest({

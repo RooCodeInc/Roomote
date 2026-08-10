@@ -30,6 +30,7 @@ import {
   db,
   inArray,
   repositories,
+  prReviewEvents,
   repositoryFactory,
   runFactory,
   taskFactory,
@@ -43,8 +44,14 @@ const createdTaskIds: string[] = [];
 const createdUserIds: string[] = [];
 const createdRepositoryIds: string[] = [];
 const createdWebhookIds: string[] = [];
+const createdReviewEventIds: string[] = [];
 
 afterAll(async () => {
+  if (createdReviewEventIds.length > 0) {
+    await db
+      .delete(prReviewEvents)
+      .where(inArray(prReviewEvents.id, createdReviewEventIds));
+  }
   if (createdWebhookIds.length > 0) {
     await db.delete(webhooks).where(inArray(webhooks.id, createdWebhookIds));
   }
@@ -63,6 +70,40 @@ afterAll(async () => {
   if (createdUserIds.length > 0) {
     await db.delete(users).where(inArray(users.id, createdUserIds));
   }
+});
+
+describe('PR review event inbox', () => {
+  it('deduplicates provider event keys', async () => {
+    const eventKey = `review-${randomUUID()}`;
+    const [created] = await db
+      .insert(prReviewEvents)
+      .values({
+        sourceControlProvider: 'github',
+        eventKey,
+        repository: 'owner/repo',
+        prNumber: 42,
+        prUrl: 'https://github.com/owner/repo/pull/42',
+        kind: 'review',
+        authorLogin: 'reviewer',
+        payload: { kind: 'review', authorLogin: 'reviewer' },
+      })
+      .returning({ id: prReviewEvents.id });
+    if (created) createdReviewEventIds.push(created.id);
+
+    await expectConstraintViolation(
+      db.insert(prReviewEvents).values({
+        sourceControlProvider: 'github',
+        eventKey,
+        repository: 'owner/repo',
+        prNumber: 42,
+        prUrl: 'https://github.com/owner/repo/pull/42',
+        kind: 'review',
+        authorLogin: 'reviewer',
+        payload: { kind: 'review', authorLogin: 'reviewer' },
+      }),
+      'pr_review_events_provider_event_key_unique',
+    );
+  });
 });
 
 async function createTask(overrides: Parameters<typeof taskFactory.create>[0]) {

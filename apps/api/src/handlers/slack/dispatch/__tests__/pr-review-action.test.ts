@@ -127,14 +127,20 @@ describe('handleSlackPrReviewActionYes', () => {
 
     expect(claimPendingMock).toHaveBeenCalledWith('nonce-1');
     expect(enableAutoHandleMock).not.toHaveBeenCalled();
-    expect(dispatchFollowUpMock).toHaveBeenCalledWith({
-      provider: 'slack',
-      channelId: 'C123',
-      threadId: '111.222',
-      followUpPrompt: pendingAction.followUpPrompt,
-      actingUserId: 'user-1',
-      providerUserId: 'U1',
-    });
+    expect(dispatchFollowUpMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: pendingAction.taskId,
+        repository: pendingAction.repository,
+        prNumber: pendingAction.prNumber,
+        action: 'fix_review',
+        provider: 'slack',
+        channelId: 'C123',
+        threadId: '111.222',
+        followUpPrompt: pendingAction.followUpPrompt,
+        actingUserId: 'user-1',
+        providerUserId: 'U1',
+      }),
+    );
     expect(updateMessageMock).toHaveBeenCalledWith({
       channel: 'C123',
       ts: '333.444',

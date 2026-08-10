@@ -16,6 +16,10 @@ const {
   mockStickyFooterPost,
   mockSetPendingPrReviewAction,
   mockDispatchFollowUp,
+  mockGetAggregateDelivery,
+  mockMarkDeliveriesEligible,
+  mockUpdateAggregateTriage,
+  mockUpdateDelivery,
 } = vi.hoisted(() => ({
   mockFindFirstTaskRun: vi.fn(),
   mockFindFirstTaskPullRequest: vi.fn(),
@@ -32,6 +36,10 @@ const {
   mockStickyFooterPost: vi.fn(),
   mockSetPendingPrReviewAction: vi.fn(),
   mockDispatchFollowUp: vi.fn(),
+  mockGetAggregateDelivery: vi.fn(),
+  mockMarkDeliveriesEligible: vi.fn(),
+  mockUpdateAggregateTriage: vi.fn(),
+  mockUpdateDelivery: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -53,6 +61,16 @@ vi.mock('@roomote/db/server', () => ({
   and: vi.fn(() => 'and-condition'),
   eq: vi.fn(() => 'eq-condition'),
   desc: vi.fn(() => 'desc-order'),
+  getPrReviewAggregateDelivery: (...args: unknown[]) =>
+    mockGetAggregateDelivery(...args),
+  markPrReviewDeliveriesEligible: (...args: unknown[]) =>
+    mockMarkDeliveriesEligible(...args),
+  updatePrReviewAggregateTriage: (...args: unknown[]) =>
+    mockUpdateAggregateTriage(...args),
+  updatePrReviewDelivery: (...args: unknown[]) => mockUpdateDelivery(...args),
+  PR_REVIEW_DELIVERY_ALERT_AFTER_MS: 15 * 60_000,
+  PR_REVIEW_DELIVERY_MAX_ATTEMPTS: 5,
+  PR_REVIEW_DELIVERY_RETRY_DELAYS_MS: [0, 60_000, 300_000, 900_000, 1_800_000],
   taskRuns: { taskId: 'taskId', createdAt: 'createdAt' },
   taskPullRequests: {
     taskId: 'taskId',
@@ -78,6 +96,7 @@ vi.mock('@roomote/sdk/server', () => ({
   PR_REVIEW_NOTIFICATION_DEFER_MS: 5000,
   PR_REVIEW_NOTIFICATION_MAX_DEFERRALS: 3,
   prReviewNotificationRequestSchema: z.object({
+    aggregateId: z.string().optional(),
     taskId: z.string(),
     repository: z.string(),
     prNumber: z.number(),
@@ -102,6 +121,12 @@ vi.mock('@roomote/sdk/server', () => ({
   setPendingPrReviewAction: mockSetPendingPrReviewAction,
   dispatchPrReviewFollowUp: mockDispatchFollowUp,
   attachPendingPrReviewActionMessage: vi.fn(),
+  discardPendingPrReviewAction: vi.fn(),
+  prReviewActivityEventSchema: z.object({
+    kind: z.string(),
+    authorLogin: z.string(),
+  }),
+  recordTaskMessageEnvelope: vi.fn(),
 }));
 
 import type { Job } from 'bullmq';
@@ -156,6 +181,8 @@ describe('prReviewNotificationJob', () => {
       text: 'formatted-message',
     });
     mockRecordDelivery.mockResolvedValue(undefined);
+    mockUpdateAggregateTriage.mockResolvedValue(true);
+    mockUpdateDelivery.mockResolvedValue(undefined);
     mockStickyFooterPost.mockResolvedValue('999.888');
     mockPostMessage.mockResolvedValue({
       provider: 'slack',
@@ -213,6 +240,95 @@ describe('prReviewNotificationJob', () => {
     expect(mockSchedule).not.toHaveBeenCalled();
   });
 
+  it('keeps durable aggregate delivery waiting while the owner turn is executing', async () => {
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 1,
+      taskId: 'task-1',
+      payload: {},
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      workerHeartbeatAt: new Date(),
+    });
+    mockGetAggregateDelivery.mockResolvedValue({
+      aggregate: {
+        id: 'aggregate-1',
+        taskId: 'task-1',
+        repository: 'owner/repo',
+        prNumber: 42,
+        prUrl: 'https://github.com/owner/repo/pull/42',
+        sourceControlProvider: 'github',
+        reviewHeadSha: 'abc',
+        version: 1,
+        events,
+      },
+      deliveries: [],
+    });
+
+    await prReviewNotificationJob(
+      makeJob({ aggregateId: 'aggregate-1' }) as never,
+    );
+
+    expect(mockMarkDeliveriesEligible).not.toHaveBeenCalled();
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
+  });
+
+  it('marks a message-id-less provider response unknown instead of retrying the initial post', async () => {
+    const aggregate = {
+      id: 'aggregate-1',
+      taskId: 'task-1',
+      repository: 'owner/repo',
+      prNumber: 42,
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      sourceControlProvider: 'github',
+      reviewHeadSha: 'abc',
+      version: 1,
+      events,
+      createdAt: new Date(),
+    };
+    const deliveries = [
+      {
+        destination: 'task_history',
+        state: 'delivered',
+        aggregateVersion: 1,
+        attemptCount: 1,
+      },
+      {
+        destination: 'chat',
+        state: 'pending',
+        aggregateVersion: 0,
+        attemptCount: 0,
+        eligibleAt: new Date(),
+        alertEmittedAt: null,
+        chatMessageId: null,
+      },
+    ];
+    mockGetAggregateDelivery.mockResolvedValue({ aggregate, deliveries });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+      },
+      text: 'formatted-message',
+    });
+    mockDiscordPostMessage.mockResolvedValue(undefined);
+
+    await prReviewNotificationJob(
+      makeJob({ aggregateId: 'aggregate-1' }) as never,
+    );
+
+    expect(mockUpdateDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aggregateId: 'aggregate-1',
+        destination: 'chat',
+        state: 'unknown',
+        nextAttemptAt: null,
+        alertEmittedAt: expect.any(Date),
+      }),
+    );
+  });
+
   it('posts Yes/Dismiss action buttons and stores the pending offer when the triage produced a follow-up', async () => {
     mockPrepareDelivery.mockResolvedValue({
       post: true,
@@ -266,6 +382,7 @@ describe('prReviewNotificationJob', () => {
     };
     expect(actionsBlock.elements.map((element) => element.action_id)).toEqual([
       'pr_review_action_yes',
+      'pr_review_action_fix_all',
       'pr_review_action_auto',
       'pr_review_action_dismiss',
     ]);
@@ -374,13 +491,19 @@ describe('prReviewNotificationJob', () => {
 
     await prReviewNotificationJob(makeJob() as never);
 
-    expect(mockDispatchFollowUp).toHaveBeenCalledWith({
-      provider: 'slack',
-      channelId: 'C123',
-      threadId: '111.222',
-      followUpPrompt: 'Address the review feedback on owner/repo#42.',
-      actingUserId: 'user-9',
-    });
+    expect(mockDispatchFollowUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 'task-1',
+        repository: 'owner/repo',
+        prNumber: 42,
+        action: 'auto',
+        provider: 'slack',
+        channelId: 'C123',
+        threadId: '111.222',
+        followUpPrompt: 'Address the review feedback on owner/repo#42.',
+        actingUserId: 'user-9',
+      }),
+    );
     // Informational line, no offer buttons, no pending record.
     expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
     const postedCall = mockStickyFooterPost.mock.calls[0]?.[0];

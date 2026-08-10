@@ -225,6 +225,27 @@
       "when": 1786304891262,
       "tag": "0031_lumpy_cerebro",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1786391261082,
+      "tag": "0032_aromatic_sunspot",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1786392249862,
+      "tag": "0033_jazzy_wonder_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1786393463350,
+      "tag": "0034_furry_polaris",
+      "breakpoints": true
     }
   ]
 }

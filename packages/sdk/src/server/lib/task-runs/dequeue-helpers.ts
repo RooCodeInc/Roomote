@@ -27,6 +27,7 @@ import {
   workspaceUsesOnlySourceControlProvider,
   stringifyDecryptedEnvVarValue,
   syncTaskStateFromRuns,
+  releasePrReviewFixClaimsForRun,
   eq,
   sql,
 } from '@roomote/db/server';
@@ -372,6 +373,7 @@ export async function cancelAndReleaseTaskRun(
   }
 
   await notifyCanceledTaskRunOnSettle(taskRun, errorMessage);
+  await releasePrReviewFixClaimsForRun(taskRun.id).catch(() => undefined);
 }
 
 /**

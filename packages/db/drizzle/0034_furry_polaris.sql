@@ -1,0 +1,2 @@
+ALTER TABLE "pr_review_fix_claims" DROP CONSTRAINT "pr_review_fix_claims_task_pr_unique";--> statement-breakpoint
+ALTER TABLE "pr_review_fix_claims" ADD CONSTRAINT "pr_review_fix_claims_pr_unique" UNIQUE("source_control_provider","repository","pr_number");

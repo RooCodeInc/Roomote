@@ -4,6 +4,7 @@ const mockRedisDel = vi.fn();
 const mockQueueAdd = vi.fn();
 const mockMultiExec = vi.fn();
 const mockResolveSlackTaskRunRouting = vi.fn();
+const mockPersistPrReviewEventAndFanOut = vi.fn();
 const multiCalls: Array<{ command: string; args: unknown[] }> = [];
 
 function createMultiMock() {
@@ -29,6 +30,8 @@ vi.mock('@roomote/db/server', async () => {
 
   return {
     ...actual,
+    persistPrReviewEventAndFanOut: (...args: unknown[]) =>
+      mockPersistPrReviewEventAndFanOut(...args),
     db: {
       query: {
         taskPullRequests: {
@@ -74,6 +77,13 @@ describe('enqueuePrReviewNotification', () => {
     multiCalls.length = 0;
 
     mockFindManyTaskPullRequests.mockResolvedValue([{ taskId: 'task-1' }]);
+    mockPersistPrReviewEventAndFanOut.mockImplementation(async () => ({
+      eventId: 'event-1',
+      taskIds: (await mockFindManyTaskPullRequests()).map(
+        (row: { taskId: string }) => row.taskId,
+      ),
+      aggregateIds: [],
+    }));
     mockRedisSet.mockResolvedValue('OK');
     mockRedisDel.mockResolvedValue(1);
     mockQueueAdd.mockResolvedValue(undefined);

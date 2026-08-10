@@ -1,6 +1,7 @@
 import type { SlackBlock } from '@roomote/types';
 
 export const PR_REVIEW_ACTION_YES_ACTION_ID = 'pr_review_action_yes';
+export const PR_REVIEW_ACTION_FIX_ALL_ACTION_ID = 'pr_review_action_fix_all';
 export const PR_REVIEW_ACTION_AUTO_ACTION_ID = 'pr_review_action_auto';
 export const PR_REVIEW_ACTION_DISMISS_ACTION_ID = 'pr_review_action_dismiss';
 
@@ -63,6 +64,16 @@ export function buildSlackPrReviewActionBlocks(params: {
           text: {
             type: 'plain_text',
             text: 'Resolve these issues',
+            emoji: true,
+          },
+          value,
+        },
+        {
+          type: 'button',
+          action_id: PR_REVIEW_ACTION_FIX_ALL_ACTION_ID,
+          text: {
+            type: 'plain_text',
+            text: 'Fix all PR feedback',
             emoji: true,
           },
           value,

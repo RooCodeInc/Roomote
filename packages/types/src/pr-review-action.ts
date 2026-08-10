@@ -5,11 +5,12 @@
  * Kept dependency-free so webhook dispatchers can parse without loading
  * server-side modules.
  */
-export type PrReviewActionChoice = 'yes' | 'auto' | 'dismiss';
+export type PrReviewActionChoice = 'yes' | 'fix_all' | 'auto' | 'dismiss';
 
 const PR_REVIEW_CALLBACK_PREFIX = 'prr:';
 const CALLBACK_CHOICE_CODES: Record<PrReviewActionChoice, string> = {
   yes: 'y',
+  fix_all: 'f',
   auto: 'a',
   dismiss: 'd',
 };
@@ -28,7 +29,7 @@ export function parsePrReviewActionCallbackData(
     return null;
   }
 
-  const match = data.match(/^prr:([yad]):([A-Za-z0-9-]{8,40})$/);
+  const match = data.match(/^prr:([yfad]):([A-Za-z0-9-]{8,40})$/);
 
   if (!match) {
     return null;

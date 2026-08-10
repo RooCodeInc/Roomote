@@ -39,6 +39,7 @@ import {
   isNotNull,
   tasks,
   resolveDiscordRuntimeCredentials,
+  releasePrReviewFixClaimsForRun,
 } from '@roomote/db/server';
 import {
   buildTerminalReviewStatus,
@@ -252,6 +253,16 @@ export const finishRun = async ({
     { ...run, error: sanitizedError ?? run.error },
     status,
     run.task.title,
+  );
+
+  // A review-fix claim only protects one executing turn. Idle and every
+  // terminal outcome make later review actions eligible again.
+  await releasePrReviewFixClaimsForRun(run.id).catch((error) =>
+    console.warn(
+      `[finishRun] Failed to release PR review fix claim for run ${run.id}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    ),
   );
 
   // Anonymous analytics (no-op unless enabled): terminal task outcome with

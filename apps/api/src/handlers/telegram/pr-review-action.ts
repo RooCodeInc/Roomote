@@ -85,10 +85,22 @@ export async function handleTelegramPrReviewActionCallback(params: {
     }
 
     const dispatched = await dispatchPrReviewFollowUp({
+      taskId: pending.taskId,
+      repository: pending.repository,
+      prNumber: pending.prNumber,
+      action:
+        choice === 'auto'
+          ? 'auto'
+          : choice === 'fix_all'
+            ? 'fix_all'
+            : 'fix_review',
       provider: 'telegram',
       channelId: pending.channelId,
       threadId: pending.threadId,
-      followUpPrompt: pending.followUpPrompt,
+      followUpPrompt:
+        choice === 'fix_all'
+          ? `Fix all unresolved review threads, failed checks, and merge conflicts on ${pending.repository}#${pending.prNumber}. Re-read the live pull request state before changing code.`
+          : pending.followUpPrompt,
       actingUserId: senderUserId!,
       providerUserId: query.from?.id ? String(query.from.id) : undefined,
     });
@@ -114,6 +126,16 @@ export async function handleTelegramPrReviewActionCallback(params: {
       if (choice !== 'auto') {
         return;
       }
+    }
+
+    if (dispatched.outcome === 'already_running') {
+      await answerTelegramCallbackQueryBestEffort({
+        callbackQueryId: query.id,
+        text: dispatched.runId
+          ? `Already being handled by run ${dispatched.runId}.`
+          : 'Already being handled by this task.',
+      });
+      return;
     }
 
     await answerTelegramCallbackQueryBestEffort({

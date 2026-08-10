@@ -30,6 +30,7 @@ import {
   licenseUsageSyncJob,
   webhookCleanupJob,
   standbyRetentionJob,
+  prReviewNotificationRepairJob,
 } from './scheduled-jobs';
 
 const QUEUE_NAME = 'scheduled-jobs';
@@ -92,6 +93,10 @@ async function createJobs(queue: Queue): Promise<void> {
     ScheduledJobName.StandbyRetention,
     { every: 5 * 60 * 1000 }, // Every 5 minutes.
   );
+
+  await queue.upsertJobScheduler(ScheduledJobName.PrReviewNotificationRepair, {
+    every: 60 * 1000,
+  });
 
   await queue.upsertJobScheduler(
     ScheduledJobName.RefreshSnapshots,
@@ -216,6 +221,8 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       return webhookCleanupJob();
     case ScheduledJobName.StandbyRetention:
       return standbyRetentionJob();
+    case ScheduledJobName.PrReviewNotificationRepair:
+      return prReviewNotificationRepairJob();
     case ScheduledJobName.CustomAutomations:
       await customAutomationsJob();
       return;

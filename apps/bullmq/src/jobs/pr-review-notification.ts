@@ -8,9 +8,16 @@ import {
   db,
   desc,
   eq,
+  getPrReviewAggregateDelivery,
+  markPrReviewDeliveriesEligible,
+  PR_REVIEW_DELIVERY_ALERT_AFTER_MS,
+  PR_REVIEW_DELIVERY_MAX_ATTEMPTS,
+  PR_REVIEW_DELIVERY_RETRY_DELAYS_MS,
   slackInstallations,
   taskPullRequests,
   taskRuns,
+  updatePrReviewAggregateTriage,
+  updatePrReviewDelivery,
 } from '@roomote/db/server';
 import {
   PR_REVIEW_NOTIFICATION_DEFER_MS,
@@ -21,9 +28,12 @@ import {
   type PrReviewNotificationRoute,
   consumePendingPrReviewActivity,
   dispatchPrReviewFollowUp,
+  discardPendingPrReviewAction,
   preparePrReviewNotificationDelivery,
+  prReviewActivityEventSchema,
   prReviewNotificationRequestSchema,
   recordPrReviewNotificationDeliveryBestEffort,
+  recordTaskMessageEnvelope,
   requeuePendingPrReviewActivity,
   schedulePrReviewNotificationJob,
   setPendingPrReviewAction,
@@ -35,7 +45,10 @@ import {
 } from '@roomote/slack';
 import {
   buildPrReviewActionCallbackData,
+  ACP_ENVELOPE_EVENT_TYPES,
   isTaskExecutingTurn,
+  PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
+  ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
   WORKER_HEARTBEAT_STALE_MS,
 } from '@roomote/types';
 
@@ -102,12 +115,16 @@ async function postPrReviewNotification({
   route,
   text,
   action,
+  captureProviderMessageId = false,
+  aggregateId,
 }: {
   taskId: string;
   route: PrReviewNotificationRoute;
   text: string;
   /** When set (button-capable routes only), post the action buttons. */
   action?: PrReviewNotificationAction;
+  captureProviderMessageId?: boolean;
+  aggregateId?: string;
 }): Promise<string | null> {
   // Stored before posting: an orphaned record just expires, while a posted
   // message without a record would leave dead buttons.
@@ -125,6 +142,15 @@ async function postPrReviewNotification({
       threadId: route.threadId ?? null,
       followUpPrompt: action.followUpPrompt,
     });
+    if (aggregateId) {
+      await updatePrReviewDelivery({
+        aggregateId,
+        destination: 'chat',
+        state: 'sending',
+        actionNonce: nonce,
+        actionHandledAt: null,
+      });
+    }
   }
 
   if (route.provider === 'slack') {
@@ -201,7 +227,496 @@ async function postPrReviewNotification({
     await attachPendingPrReviewActionMessage(nonce, posted.messageId);
   }
 
-  return null;
+  return captureProviderMessageId ? (posted?.messageId ?? null) : null;
+}
+
+function buildPrReviewActionButtons(
+  action: PrReviewNotificationAction,
+  nonce: string,
+) {
+  return [
+    [
+      {
+        text: 'Fix this review',
+        callbackData: buildPrReviewActionCallbackData('yes', nonce),
+      },
+      {
+        text: 'Fix all PR feedback',
+        callbackData: buildPrReviewActionCallbackData('fix_all', nonce),
+      },
+      {
+        text: 'Auto-fix future feedback',
+        callbackData: buildPrReviewActionCallbackData('auto', nonce),
+      },
+      {
+        text: 'Dismiss',
+        callbackData: buildPrReviewActionCallbackData('dismiss', nonce),
+      },
+    ],
+  ];
+}
+
+async function updatePostedPrReviewNotification(input: {
+  aggregateId: string;
+  taskId: string;
+  route: PrReviewNotificationRoute;
+  messageId: string;
+  text: string;
+  action?: PrReviewNotificationAction;
+  previousActionNonce?: string | null;
+}): Promise<void> {
+  const nonce = input.action ? randomUUID() : null;
+
+  if (input.previousActionNonce && input.previousActionNonce !== nonce) {
+    await discardPendingPrReviewAction(input.previousActionNonce);
+  }
+
+  if (input.action && nonce && isButtonRouteProvider(input.route.provider)) {
+    await setPendingPrReviewAction({
+      nonce,
+      provider: input.route.provider,
+      taskId: input.taskId,
+      repository: input.action.repository,
+      prNumber: input.action.prNumber,
+      prUrl: input.action.prUrl,
+      channelId: input.route.channelId,
+      threadId: input.route.threadId ?? null,
+      followUpPrompt: input.action.followUpPrompt,
+    });
+    await updatePrReviewDelivery({
+      aggregateId: input.aggregateId,
+      destination: 'chat',
+      state: 'sending',
+      actionNonce: nonce,
+      actionHandledAt: null,
+    });
+  }
+
+  if (input.route.provider === 'slack') {
+    const installation = await db.query.slackInstallations.findFirst({
+      where: eq(slackInstallations.isActive, true),
+      columns: { botAccessToken: true },
+    });
+    if (!installation?.botAccessToken) {
+      throw new Error('Slack is not connected.');
+    }
+    const slack = new SlackNotifier(installation.botAccessToken);
+    const updated = await slack.updateMessage({
+      channel: input.route.channelId,
+      ts: input.messageId,
+      message: {
+        text: input.text,
+        ...(input.action && nonce
+          ? {
+              blocks: buildSlackPrReviewActionBlocks({
+                text: input.action.summaryText,
+                question: input.action.question,
+                nonce,
+              }),
+            }
+          : {}),
+      },
+    });
+    if (!updated) {
+      throw new Error('Slack message update failed.');
+    }
+  } else {
+    const adapter = await getCommunicationProviderAdapter(input.route.provider);
+    if (!adapter?.updateMessage) {
+      throw new Error(
+        `${input.route.provider} message updates are unavailable.`,
+      );
+    }
+    await adapter.updateMessage({
+      channelId: input.route.channelId,
+      messageId: input.messageId,
+      text: input.text,
+      ...('serviceUrl' in input.route
+        ? { serviceUrl: input.route.serviceUrl }
+        : {}),
+      textFormat: 'markdown',
+      ...(input.action && nonce && isButtonRouteProvider(input.route.provider)
+        ? { buttons: buildPrReviewActionButtons(input.action, nonce) }
+        : {}),
+    });
+  }
+
+  if (nonce) {
+    await attachPendingPrReviewActionMessage(nonce, input.messageId);
+  }
+}
+
+function getAggregateTaskMessageTs(input: {
+  createdAt: Date;
+  aggregateId: string;
+}): number {
+  const suffix = Number.parseInt(
+    input.aggregateId.replaceAll('-', '').slice(-3),
+    16,
+  );
+  return (
+    input.createdAt.getTime() * 1000 + (Number.isFinite(suffix) ? suffix : 0)
+  );
+}
+
+function getNextDeliveryFailure(input: {
+  attemptCount: number;
+  now: Date;
+  eligibleAt: Date;
+}): {
+  state: 'failed' | 'dead_letter';
+  attemptCount: number;
+  nextAttemptAt: Date | null;
+} {
+  const attemptCount = input.attemptCount + 1;
+  if (attemptCount >= PR_REVIEW_DELIVERY_MAX_ATTEMPTS) {
+    return { state: 'dead_letter', attemptCount, nextAttemptAt: null };
+  }
+  const delay = PR_REVIEW_DELIVERY_RETRY_DELAYS_MS[attemptCount] ?? 0;
+  const absoluteDeadline = input.eligibleAt.getTime() + delay;
+  return {
+    state: 'failed',
+    attemptCount,
+    nextAttemptAt: new Date(
+      Math.max(input.now.getTime() + 1_000, absoluteDeadline),
+    ),
+  };
+}
+
+async function deliverDurablePrReviewNotification(
+  data: PrReviewNotificationRequest & { aggregateId: string },
+): Promise<void> {
+  const loaded = await getPrReviewAggregateDelivery(data.aggregateId);
+  if (!loaded) {
+    return;
+  }
+  const { aggregate } = loaded;
+  const latestJob = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.taskId, aggregate.taskId),
+    orderBy: [desc(taskRuns.createdAt)],
+  });
+  if (!latestJob) {
+    return;
+  }
+
+  const isExecuting = isTaskExecutingTurn(
+    latestJob.status,
+    latestJob.taskPhase,
+  );
+  const staleHeartbeat =
+    latestJob.workerHeartbeatAt != null &&
+    Date.now() - latestJob.workerHeartbeatAt.getTime() >=
+      WORKER_HEARTBEAT_STALE_MS;
+  if (isExecuting && !staleHeartbeat) {
+    return;
+  }
+
+  const prLink = await db.query.taskPullRequests.findFirst({
+    where: and(
+      eq(taskPullRequests.taskId, aggregate.taskId),
+      eq(
+        taskPullRequests.sourceControlProvider,
+        aggregate.sourceControlProvider,
+      ),
+      eq(taskPullRequests.repository, aggregate.repository),
+      eq(taskPullRequests.prNumber, aggregate.prNumber),
+    ),
+    columns: { status: true, autoHandleFeedbackByUserId: true },
+  });
+  if (prLink?.status === 'merged' || prLink?.status === 'closed') {
+    await Promise.all([
+      updatePrReviewDelivery({
+        aggregateId: aggregate.id,
+        destination: 'task_history',
+        state: 'skipped',
+      }),
+      updatePrReviewDelivery({
+        aggregateId: aggregate.id,
+        destination: 'chat',
+        state: 'skipped',
+      }),
+    ]);
+    return;
+  }
+
+  await markPrReviewDeliveriesEligible(aggregate.id);
+  const refreshed = await getPrReviewAggregateDelivery(aggregate.id);
+  if (!refreshed) return;
+  const events = refreshed.aggregate.events
+    .map((event) => prReviewActivityEventSchema.safeParse(event))
+    .filter((result) => result.success)
+    .map((result) => result.data);
+  if (events.length === 0) return;
+
+  const request: PrReviewNotificationRequest = {
+    taskId: aggregate.taskId,
+    repository: aggregate.repository,
+    prNumber: aggregate.prNumber,
+    prUrl: aggregate.prUrl,
+    deferrals: 0,
+    sourceControlProvider: aggregate.sourceControlProvider,
+  };
+  const prepared = await preparePrReviewNotificationDelivery({
+    taskRun: latestJob,
+    request,
+    events,
+  });
+  if (!prepared.post) {
+    await Promise.all([
+      updatePrReviewDelivery({
+        aggregateId: aggregate.id,
+        destination: 'task_history',
+        state: 'skipped',
+      }),
+      updatePrReviewDelivery({
+        aggregateId: aggregate.id,
+        destination: 'chat',
+        state: 'skipped',
+      }),
+    ]);
+    return;
+  }
+
+  const triageStored = await updatePrReviewAggregateTriage({
+    aggregateId: aggregate.id,
+    expectedVersion: aggregate.version,
+    summary: prepared.text,
+    followUpQuestion: prepared.followUpQuestion,
+    followUpPrompt: prepared.followUpPrompt,
+  });
+  if (!triageStored) {
+    return;
+  }
+
+  const followUp =
+    prepared.followUpQuestion && prepared.followUpPrompt
+      ? {
+          question: prepared.followUpQuestion,
+          prompt: prepared.followUpPrompt,
+        }
+      : null;
+  const text = followUp
+    ? `${prepared.text}\n${followUp.question}`
+    : prepared.text;
+  const action = followUp
+    ? {
+        summaryText: prepared.text,
+        question: followUp.question,
+        followUpPrompt: followUp.prompt,
+        repository: aggregate.repository,
+        prNumber: aggregate.prNumber,
+        prUrl: aggregate.prUrl,
+      }
+    : undefined;
+
+  const current = await getPrReviewAggregateDelivery(aggregate.id);
+  if (!current) return;
+  const now = new Date();
+  for (const delivery of current.deliveries) {
+    if (
+      delivery.state === 'delivered' &&
+      delivery.aggregateVersion >= aggregate.version
+    ) {
+      continue;
+    }
+    if (
+      delivery.destination === 'chat' &&
+      delivery.state === 'sending' &&
+      !delivery.chatMessageId
+    ) {
+      console.error(
+        `[PrReviewNotification] Initial chat delivery outcome is unknown for task ${aggregate.taskId} ${aggregate.repository}#${aggregate.prNumber}`,
+      );
+      await updatePrReviewDelivery({
+        aggregateId: aggregate.id,
+        destination: 'chat',
+        state: 'unknown',
+        nextAttemptAt: null,
+        lastError: 'Initial provider send did not reach a durable result.',
+        alertEmittedAt: now,
+      });
+      continue;
+    }
+    if (
+      delivery.eligibleAt &&
+      !delivery.alertEmittedAt &&
+      now.getTime() - delivery.eligibleAt.getTime() >=
+        PR_REVIEW_DELIVERY_ALERT_AFTER_MS
+    ) {
+      console.error(
+        `[PrReviewNotification] Delivery SLO breached for task ${aggregate.taskId} ${aggregate.repository}#${aggregate.prNumber} destination=${delivery.destination}`,
+      );
+      await updatePrReviewDelivery({
+        aggregateId: aggregate.id,
+        destination: delivery.destination,
+        state: delivery.state,
+        alertEmittedAt: now,
+      });
+    }
+
+    if (delivery.destination === 'task_history') {
+      try {
+        await recordTaskMessageEnvelope({
+          runId: latestJob.id,
+          taskId: aggregate.taskId,
+          envelope: {
+            ts: getAggregateTaskMessageTs({
+              createdAt: aggregate.createdAt,
+              aggregateId: aggregate.id,
+            }),
+            eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+            role: 'assistant',
+            protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+            contentBlocks: [{ type: 'text', text }],
+            metadata: {
+              source: PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
+              visibleInTranscript: true,
+            },
+            payload: {
+              text,
+              source: PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
+            },
+            visibleInTranscript: true,
+          },
+        });
+        await updatePrReviewDelivery({
+          aggregateId: aggregate.id,
+          destination: 'task_history',
+          state: 'delivered',
+          aggregateVersion: aggregate.version,
+          attemptCount: delivery.attemptCount + 1,
+          nextAttemptAt: null,
+          lastError: null,
+          deliveredAt: now,
+        });
+      } catch (error) {
+        const failure = getNextDeliveryFailure({
+          attemptCount: delivery.attemptCount,
+          now,
+          eligibleAt: delivery.eligibleAt ?? now,
+        });
+        await updatePrReviewDelivery({
+          aggregateId: aggregate.id,
+          destination: 'task_history',
+          ...failure,
+          lastError: error instanceof Error ? error.message : String(error),
+        });
+      }
+      continue;
+    }
+
+    if (!prepared.route) {
+      await updatePrReviewDelivery({
+        aggregateId: aggregate.id,
+        destination: 'chat',
+        state: 'skipped',
+        aggregateVersion: aggregate.version,
+      });
+      continue;
+    }
+
+    if (delivery.chatMessageId) {
+      try {
+        await updatePostedPrReviewNotification({
+          aggregateId: aggregate.id,
+          taskId: aggregate.taskId,
+          route: prepared.route,
+          messageId: delivery.chatMessageId,
+          text,
+          action:
+            action && isButtonRouteProvider(prepared.route.provider)
+              ? action
+              : undefined,
+          previousActionNonce: delivery.actionNonce,
+        });
+        await updatePrReviewDelivery({
+          aggregateId: aggregate.id,
+          destination: 'chat',
+          state: 'delivered',
+          aggregateVersion: aggregate.version,
+          attemptCount: delivery.attemptCount + 1,
+          nextAttemptAt: null,
+          lastError: null,
+          deliveredAt: now,
+        });
+      } catch (error) {
+        const failure = getNextDeliveryFailure({
+          attemptCount: delivery.attemptCount,
+          now,
+          eligibleAt: delivery.eligibleAt ?? now,
+        });
+        await updatePrReviewDelivery({
+          aggregateId: aggregate.id,
+          destination: 'chat',
+          ...failure,
+          lastError: error instanceof Error ? error.message : String(error),
+        });
+      }
+      continue;
+    }
+
+    await updatePrReviewDelivery({
+      aggregateId: aggregate.id,
+      destination: 'chat',
+      state: 'sending',
+      attemptCount: delivery.attemptCount + 1,
+      chatProvider: prepared.route.provider,
+      chatChannelId: prepared.route.channelId,
+      chatThreadId: prepared.route.threadId ?? null,
+      chatServiceUrl:
+        'serviceUrl' in prepared.route ? prepared.route.serviceUrl : null,
+    });
+    try {
+      const messageId = await postPrReviewNotification({
+        taskId: aggregate.taskId,
+        route: prepared.route,
+        text,
+        action:
+          action && isButtonRouteProvider(prepared.route.provider)
+            ? action
+            : undefined,
+        captureProviderMessageId: true,
+        aggregateId: aggregate.id,
+      });
+      if (!messageId) {
+        await updatePrReviewDelivery({
+          aggregateId: aggregate.id,
+          destination: 'chat',
+          state: 'unknown',
+          nextAttemptAt: null,
+          lastError: 'Provider response did not include a message id.',
+          alertEmittedAt: now,
+        });
+        continue;
+      }
+      await updatePrReviewDelivery({
+        aggregateId: aggregate.id,
+        destination: 'chat',
+        state: 'delivered',
+        aggregateVersion: aggregate.version,
+        attemptCount: delivery.attemptCount + 1,
+        nextAttemptAt: null,
+        lastError: null,
+        chatMessageId: messageId,
+        deliveredAt: now,
+      });
+    } catch (error) {
+      // The provider may have accepted the post before the response was lost.
+      // At-most-once policy: never retry an ambiguous initial send.
+      console.error(
+        `[PrReviewNotification] Ambiguous initial chat delivery for task ${aggregate.taskId} ${aggregate.repository}#${aggregate.prNumber}`,
+        error,
+      );
+      await updatePrReviewDelivery({
+        aggregateId: aggregate.id,
+        destination: 'chat',
+        state: 'unknown',
+        nextAttemptAt: null,
+        lastError: error instanceof Error ? error.message : String(error),
+        alertEmittedAt: now,
+      });
+    }
+  }
 }
 
 /**
@@ -221,6 +736,13 @@ export const prReviewNotificationJob = async (
   }
 
   const data = parsed.data;
+  if (data.aggregateId) {
+    await deliverDurablePrReviewNotification({
+      ...data,
+      aggregateId: data.aggregateId,
+    });
+    return;
+  }
   const target = {
     taskId: data.taskId,
     repository: data.repository,
@@ -344,6 +866,10 @@ export const prReviewNotificationJob = async (
       isButtonRouteProvider(delivery.route.provider)
     ) {
       const dispatched = await dispatchPrReviewFollowUp({
+        taskId: data.taskId,
+        repository: data.repository,
+        prNumber: data.prNumber,
+        action: 'auto',
         provider: delivery.route.provider,
         channelId: delivery.route.channelId,
         threadId: delivery.route.threadId ?? null,

@@ -70,6 +70,7 @@ import type {
   TrackedMessageKind,
   McpConnectionRole,
   SourceControlProvider,
+  CommunicationProvider,
   TaskModelSettings,
   TaskRunErrorCode,
   UserRole,
@@ -1381,6 +1382,217 @@ export const taskMessagesRelations = relations(taskMessages, ({ one }) => ({
     references: [tasks.id],
   }),
 }));
+
+/**
+ * Durable PR review-event intake and notification delivery state.
+ *
+ * Provider events are persisted before task association lookup so review
+ * webhooks cannot race PR linkage. Aggregates maintain one evolving review
+ * message per task/PR/head SHA, while destination rows track task-history and
+ * chat delivery independently.
+ */
+
+export type PrReviewEventKind = 'review' | 'review_comment' | 'review_summary';
+
+export type PrReviewNotificationDestination = 'task_history' | 'chat';
+
+export type PrReviewNotificationDeliveryState =
+  | 'waiting_for_idle'
+  | 'pending'
+  | 'sending'
+  | 'delivered'
+  | 'failed'
+  | 'unknown'
+  | 'skipped'
+  | 'dead_letter';
+
+export const prReviewEvents = pgTable(
+  'pr_review_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sourceControlProvider: text('source_control_provider')
+      .notNull()
+      .$type<SourceControlProvider>(),
+    eventKey: text('event_key').notNull(),
+    repository: text('repository').notNull(),
+    prNumber: integer('pr_number').notNull(),
+    prUrl: text('pr_url').notNull(),
+    reviewHeadSha: text('review_head_sha').notNull().default('unknown'),
+    kind: text('kind').notNull().$type<PrReviewEventKind>(),
+    authorLogin: text('author_login').notNull(),
+    roomoteAuthored: boolean('roomote_authored').notNull().default(false),
+    payload: jsonb('payload').notNull().$type<Record<string, unknown>>(),
+    receivedAt: timestamp('received_at').notNull().defaultNow(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('pr_review_events_provider_event_key_unique').on(
+      table.sourceControlProvider,
+      table.eventKey,
+    ),
+    index('pr_review_events_pr_received_idx').on(
+      table.sourceControlProvider,
+      table.repository,
+      table.prNumber,
+      table.receivedAt,
+    ),
+    check(
+      'pr_review_events_kind_check',
+      sql`${table.kind} in ('review', 'review_comment', 'review_summary')`,
+    ),
+  ],
+);
+
+export const prReviewAggregates = pgTable(
+  'pr_review_aggregates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    sourceControlProvider: text('source_control_provider')
+      .notNull()
+      .$type<SourceControlProvider>(),
+    repository: text('repository').notNull(),
+    prNumber: integer('pr_number').notNull(),
+    prUrl: text('pr_url').notNull(),
+    reviewHeadSha: text('review_head_sha').notNull().default('unknown'),
+    version: integer('version').notNull().default(1),
+    events: jsonb('events')
+      .notNull()
+      .default([])
+      .$type<Record<string, unknown>[]>(),
+    summary: text('summary'),
+    followUpQuestion: text('follow_up_question'),
+    followUpPrompt: text('follow_up_prompt'),
+    dismissedVersion: integer('dismissed_version'),
+    latestEventAt: timestamp('latest_event_at').notNull().defaultNow(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('pr_review_aggregates_task_pr_head_unique').on(
+      table.taskId,
+      table.sourceControlProvider,
+      table.repository,
+      table.prNumber,
+      table.reviewHeadSha,
+    ),
+    index('pr_review_aggregates_pr_idx').on(
+      table.sourceControlProvider,
+      table.repository,
+      table.prNumber,
+    ),
+  ],
+);
+
+export const prReviewAggregateEvents = pgTable(
+  'pr_review_aggregate_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    aggregateId: uuid('aggregate_id')
+      .notNull()
+      .references(() => prReviewAggregates.id, { onDelete: 'cascade' }),
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => prReviewEvents.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('pr_review_aggregate_events_aggregate_event_unique').on(
+      table.aggregateId,
+      table.eventId,
+    ),
+    index('pr_review_aggregate_events_event_idx').on(table.eventId),
+  ],
+);
+
+export const prReviewNotificationDeliveries = pgTable(
+  'pr_review_notification_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    aggregateId: uuid('aggregate_id')
+      .notNull()
+      .references(() => prReviewAggregates.id, { onDelete: 'cascade' }),
+    destination: text('destination')
+      .notNull()
+      .$type<PrReviewNotificationDestination>(),
+    state: text('state')
+      .notNull()
+      .default('waiting_for_idle')
+      .$type<PrReviewNotificationDeliveryState>(),
+    aggregateVersion: integer('aggregate_version').notNull().default(0),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    eligibleAt: timestamp('eligible_at'),
+    nextAttemptAt: timestamp('next_attempt_at'),
+    alertEmittedAt: timestamp('alert_emitted_at'),
+    lastError: text('last_error'),
+    chatProvider: text('chat_provider').$type<CommunicationProvider>(),
+    chatChannelId: text('chat_channel_id'),
+    chatThreadId: text('chat_thread_id'),
+    chatServiceUrl: text('chat_service_url'),
+    chatMessageId: text('chat_message_id'),
+    actionNonce: text('action_nonce'),
+    actionHandledAt: timestamp('action_handled_at'),
+    taskMessageId: uuid('task_message_id').references(() => taskMessages.id, {
+      onDelete: 'set null',
+    }),
+    deliveredAt: timestamp('delivered_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('pr_review_notification_deliveries_aggregate_dest_unique').on(
+      table.aggregateId,
+      table.destination,
+    ),
+    index('pr_review_notification_deliveries_due_idx').on(
+      table.state,
+      table.nextAttemptAt,
+    ),
+    check(
+      'pr_review_notification_deliveries_destination_check',
+      sql`${table.destination} in ('task_history', 'chat')`,
+    ),
+    check(
+      'pr_review_notification_deliveries_state_check',
+      sql`${table.state} in ('waiting_for_idle', 'pending', 'sending', 'delivered', 'failed', 'unknown', 'skipped', 'dead_letter')`,
+    ),
+  ],
+);
+
+export const prReviewFixClaims = pgTable(
+  'pr_review_fix_claims',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    sourceControlProvider: text('source_control_provider')
+      .notNull()
+      .$type<SourceControlProvider>(),
+    repository: text('repository').notNull(),
+    prNumber: integer('pr_number').notNull(),
+    aggregateId: uuid('aggregate_id').references(() => prReviewAggregates.id, {
+      onDelete: 'set null',
+    }),
+    runId: integer('run_id').references(() => taskRuns.id, {
+      onDelete: 'set null',
+    }),
+    action: text('action').notNull(),
+    actingUserId: text('acting_user_id').references(() => users.id),
+    acquiredAt: timestamp('acquired_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('pr_review_fix_claims_pr_unique').on(
+      table.sourceControlProvider,
+      table.repository,
+      table.prNumber,
+    ),
+    index('pr_review_fix_claims_run_idx').on(table.runId),
+  ],
+);
 
 /**
  * llm_usage_events

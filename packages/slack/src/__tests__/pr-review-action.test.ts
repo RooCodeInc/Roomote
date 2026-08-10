@@ -16,6 +16,7 @@ describe('PR review action blocks', () => {
     expect(actions).toMatchObject({
       elements: [
         { action_id: 'pr_review_action_yes' },
+        { action_id: 'pr_review_action_fix_all' },
         { action_id: 'pr_review_action_auto' },
         { action_id: 'pr_review_action_dismiss' },
       ],

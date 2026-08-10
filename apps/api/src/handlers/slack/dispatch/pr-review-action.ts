@@ -101,9 +101,11 @@ async function resolveLinkedUserId(
 async function handleAcceptedPrReviewAction({
   payload,
   enableAutoHandle,
+  fixAll = false,
 }: {
   payload: SlackInteractivePayload;
   enableAutoHandle: boolean;
+  fixAll?: boolean;
 }): Promise<void> {
   const nonce = parseNonce(payload);
 
@@ -139,6 +141,7 @@ async function handleAcceptedPrReviewAction({
       pending,
       userId,
       enableAutoHandle,
+      fixAll,
     });
   } catch (error) {
     apiLogger.error(
@@ -158,11 +161,13 @@ async function dispatchAcceptedPrReviewAction({
   pending,
   userId,
   enableAutoHandle,
+  fixAll = false,
 }: {
   payload: SlackInteractivePayload;
   pending: PendingPrReviewAction;
   userId: string;
   enableAutoHandle: boolean;
+  fixAll?: boolean;
 }): Promise<void> {
   if (enableAutoHandle) {
     await enableAutoHandlePrReviewFeedback({
@@ -174,10 +179,16 @@ async function dispatchAcceptedPrReviewAction({
   }
 
   const dispatched = await dispatchPrReviewFollowUp({
+    taskId: pending.taskId,
+    repository: pending.repository,
+    prNumber: pending.prNumber,
+    action: enableAutoHandle ? 'auto' : fixAll ? 'fix_all' : 'fix_review',
     provider: 'slack',
     channelId: pending.channelId,
     threadId: pending.threadId,
-    followUpPrompt: pending.followUpPrompt,
+    followUpPrompt: fixAll
+      ? `Fix all unresolved review threads, failed checks, and merge conflicts on ${pending.repository}#${pending.prNumber}. Re-read the live pull request state before changing code.`
+      : pending.followUpPrompt,
     actingUserId: userId,
     providerUserId: payload.user.id,
   });
@@ -193,6 +204,16 @@ async function dispatchAcceptedPrReviewAction({
     if (!enableAutoHandle) {
       return;
     }
+  }
+
+  if (dispatched.outcome === 'already_running') {
+    await respondEphemeral(
+      payload,
+      dispatched.runId
+        ? `Review feedback is already being handled by run ${dispatched.runId}.`
+        : 'Review feedback is already being handled by this task.',
+    );
+    return;
   }
 
   const resolution = enableAutoHandle
@@ -212,6 +233,16 @@ export async function handleSlackPrReviewActionYes(
   payload: SlackInteractivePayload,
 ): Promise<void> {
   await handleAcceptedPrReviewAction({ payload, enableAutoHandle: false });
+}
+
+export async function handleSlackPrReviewActionFixAll(
+  payload: SlackInteractivePayload,
+): Promise<void> {
+  await handleAcceptedPrReviewAction({
+    payload,
+    enableAutoHandle: false,
+    fixAll: true,
+  });
 }
 
 /**
