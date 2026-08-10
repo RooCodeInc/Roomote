@@ -38,6 +38,18 @@ describe('getSlackReplyContext', () => {
       channel: 'C123',
     });
   });
+
+  it('does not activate inherited Slack source context', () => {
+    expect(
+      getSlackReplyContext({
+        payload: {
+          channel: 'C123',
+          thread_ts: '111.222',
+          communicationContextInherited: true,
+        },
+      }),
+    ).toBeNull();
+  });
 });
 
 describe('getCommunicationReplyContext', () => {

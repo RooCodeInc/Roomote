@@ -57,18 +57,25 @@ type StandardTaskSurface = NonNullable<
 
 /**
  * Resolve the standard-task surface for harness context and delivery
- * instructions. Chat payload bindings take priority; otherwise use the task
- * row's launch surface so GitHub/GitLab/etc. mentions get the right rules.
+ * instructions. Inherited communication context is informational and remains
+ * web-originated. Otherwise, chat payload bindings take priority before the
+ * task row's launch surface supplies GitHub/GitLab/etc. rules.
  */
 export function resolveStandardTaskSurface({
   hasSlackChannel,
   communicationProvider,
   taskSurface,
+  communicationContextInherited = false,
 }: {
   hasSlackChannel: boolean;
   communicationProvider?: string | null;
   taskSurface?: TaskSurface | null;
+  communicationContextInherited?: boolean;
 }): StandardTaskSurface {
+  if (communicationContextInherited) {
+    return 'web';
+  }
+
   if (hasSlackChannel) {
     return 'slack';
   }
@@ -324,6 +331,7 @@ export async function generatePrompt({
           hasSlackChannel: Boolean(activeSlackChannel),
           communicationProvider: activeCommunicationProvider,
           taskSurface: taskRow?.surface,
+          communicationContextInherited: inheritedCommunicationContext,
         }),
         conflictResolverLabel: enabledConflictResolverLabel,
         taskRunUrl,
