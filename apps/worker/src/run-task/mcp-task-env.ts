@@ -47,6 +47,16 @@ export function getSlackReplyContext(taskRun: {
 export function getCommunicationReplyContext(taskRun: {
   payload: unknown;
 }): CommunicationReplyContext | null {
+  if (
+    taskRun.payload &&
+    typeof taskRun.payload === 'object' &&
+    !Array.isArray(taskRun.payload) &&
+    (taskRun.payload as Record<string, unknown>)
+      .communicationContextInherited === true
+  ) {
+    return null;
+  }
+
   const provider = getCommunicationProviderFromTaskPayload(taskRun.payload);
   const channelId = getCommunicationChannelFromTaskPayload(taskRun.payload);
   const threadId = getCommunicationThreadIdFromTaskPayload(taskRun.payload);
