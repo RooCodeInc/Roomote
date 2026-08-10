@@ -4547,17 +4547,6 @@ export class OpenCodeServerHarness
       return;
     }
 
-    const questions = rawQuestions
-      .map(normalizeOpenCodeQuestion)
-      .filter(
-        (question): question is AcpRequestUserInputQuestion =>
-          question !== null,
-      );
-
-    if (questions.length === 0) {
-      return;
-    }
-
     const requestId = buildAcpRequestUserInputRequestId({
       sessionId,
       turnId,
@@ -4568,11 +4557,42 @@ export class OpenCodeServerHarness
       return;
     }
 
-    this.nativeQuestionRequestIds.set(requestId, nativeRequestId);
+    const existing = this.pendingUserInputRequests.get(requestId);
+    const existingIsPlaceholder =
+      existing?.questions.length === 1 &&
+      existing.questions[0]?.id === 'response';
+    const questions = rawQuestions
+      .map((rawQuestion, index) => {
+        const question = normalizeOpenCodeQuestion(rawQuestion, index);
+        const rawQuestionRecord = asRecord(rawQuestion);
+        const hasNativeId = Boolean(
+          asString(rawQuestionRecord?.id) ??
+          asString(rawQuestionRecord?.name) ??
+          asString(rawQuestionRecord?.key),
+        );
+        const existingQuestion = existing?.questions[index];
 
-    if (this.pendingUserInputRequests.has(requestId)) {
+        if (
+          question &&
+          existingQuestion &&
+          !existingIsPlaceholder &&
+          !hasNativeId
+        ) {
+          return { ...question, id: existingQuestion.id };
+        }
+
+        return question;
+      })
+      .filter(
+        (question): question is AcpRequestUserInputQuestion =>
+          question !== null,
+      );
+
+    if (questions.length === 0) {
       return;
     }
+
+    this.nativeQuestionRequestIds.set(requestId, nativeRequestId);
 
     const request = {
       requestId,
@@ -4582,6 +4602,11 @@ export class OpenCodeServerHarness
       questions,
       status: 'pending' as const,
     };
+
+    if (existing && areOpenCodeQuestionRequestsEqual(existing, request)) {
+      return;
+    }
+
     const pendingRequest = {
       ...request,
       ts: this.runtimeEvents.nextTs(),

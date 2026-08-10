@@ -3630,6 +3630,115 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
+  it('replaces a placeholder question tool request with native structured questions', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Ask for input.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'question_part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_question',
+            type: 'tool',
+            callID: 'question_call_1',
+            tool: 'question',
+            state: { status: 'running', title: 'Ask user' },
+          },
+        },
+      });
+
+      expect(harness.getPendingUserInputRequests()[0]?.questions).toEqual([
+        expect.objectContaining({
+          id: 'response',
+          question: 'Ask user',
+        }),
+      ]);
+
+      await client.emit({
+        type: 'question.asked',
+        properties: {
+          id: 'que_structured',
+          sessionID: 'ses_1',
+          questions: [
+            {
+              header: 'Color',
+              question: 'Which color should I use?',
+              options: [{ label: 'Blue', description: 'Use blue.' }],
+            },
+            {
+              header: 'Layout',
+              question: 'Which layout should I use?',
+              options: [{ label: 'Compact', description: 'Use less space.' }],
+            },
+          ],
+          tool: {
+            messageID: 'msg_question',
+            callID: 'question_call_1',
+          },
+        },
+      });
+
+      const pendingRequest = harness.getPendingUserInputRequests()[0]!;
+      expect(pendingRequest.questions).toEqual([
+        expect.objectContaining({
+          id: 'question-1',
+          header: 'Color',
+          question: 'Which color should I use?',
+          options: [{ label: 'Blue', description: 'Use blue.' }],
+        }),
+        expect.objectContaining({
+          id: 'question-2',
+          header: 'Layout',
+          question: 'Which layout should I use?',
+          options: [{ label: 'Compact', description: 'Use less space.' }],
+        }),
+      ]);
+      expect(
+        persistedEnvelopes.filter(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+        ),
+      ).toHaveLength(2);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.AnswerUserInputRequest,
+        data: {
+          requestId: pendingRequest.requestId,
+          answers: {
+            'question-1': { answers: ['Blue'] },
+            'question-2': { answers: ['Compact'] },
+          },
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.replyQuestion).toHaveBeenCalledWith({
+          requestId: 'que_structured',
+          answers: [['Blue'], ['Compact']],
+          signal: expect.any(AbortSignal),
+        });
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('abandons the pending question when a steer aborts and replays the turn', async () => {
     const { client, harness } = createHarness();
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
