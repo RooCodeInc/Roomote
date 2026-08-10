@@ -8,6 +8,7 @@ import {
   isLinkedReviewResultsMessage,
   normalizeTranscriptUserText,
   parseLinkedReviewResults,
+  parseAcpRequestUserInputAnswerReply,
   parseAcpRequestUserInputReply,
   resolveAcpTranscriptVisibility,
   resolveAcpRequestUserInputAnswer,
@@ -713,12 +714,26 @@ describe('request_user_input reply parsing', () => {
   });
 
   it('accepts custom answers when the question allows other', () => {
+    const question = { ...fixedChoiceQuestion, isOther: true };
+
+    expect(resolveAcpRequestUserInputAnswer(question, 'Go')).toBe('Go');
+
     expect(
-      resolveAcpRequestUserInputAnswer(
-        { ...fixedChoiceQuestion, isOther: true },
-        'Go',
+      parseAcpRequestUserInputAnswerReply(
+        [question],
+        "I don't want retries for 24 hours; retry a fixed number of times instead.",
       ),
-    ).toBe('Go');
+    ).toEqual({
+      resolution: 'submitted',
+      answers: {
+        language: {
+          answers: [
+            "I don't want retries for 24 hours; retry a fixed number of times instead.",
+          ],
+        },
+      },
+      usedFreeTextOptionFallback: true,
+    });
   });
 
   it('parses more than three ordered answers for multi-question prompts', () => {
