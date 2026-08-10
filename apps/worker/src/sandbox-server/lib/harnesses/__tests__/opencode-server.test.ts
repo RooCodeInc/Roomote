@@ -3962,13 +3962,6 @@ describe('OpenCodeServerHarness', () => {
 
   it('does not recreate a resolved OpenCode question from a late tool update', async () => {
     const client = new FakeOpenCodeServerClient();
-    let resolveAbort: (value: boolean) => void = () => undefined;
-    client.abort.mockImplementationOnce(
-      () =>
-        new Promise<boolean>((resolve) => {
-          resolveAbort = resolve;
-        }),
-    );
     const { harness } = createHarness(client);
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
 
@@ -4015,6 +4008,24 @@ describe('OpenCodeServerHarness', () => {
         type: 'message.part.updated',
         properties: { part },
       });
+      await client.emit({
+        type: 'question.asked',
+        properties: {
+          id: 'que_resolved',
+          sessionID: 'ses_1',
+          questions: [
+            {
+              header: 'Choice',
+              question: 'Choose an option.',
+              options: [{ label: 'Continue', description: '' }],
+            },
+          ],
+          tool: {
+            messageID: 'msg_question_resolved',
+            callID: 'question_call_resolved',
+          },
+        },
+      });
 
       const requestId = harness.getPendingUserInputRequests()[0]!.requestId;
       const requestEnvelopeCount = persistedEnvelopes.filter(
@@ -4033,9 +4044,14 @@ describe('OpenCodeServerHarness', () => {
       ).toBe(true);
 
       await vi.waitFor(() => {
-        expect(client.abort).toHaveBeenCalledTimes(1);
+        expect(client.replyQuestion).toHaveBeenCalledWith({
+          requestId: 'que_resolved',
+          answers: [['Continue']],
+          signal: expect.any(AbortSignal),
+        });
         expect(harness.getPendingUserInputRequests()).toEqual([]);
       });
+      expect(client.abort).not.toHaveBeenCalled();
 
       await client.emit({
         type: 'message.part.updated',
@@ -4049,9 +4065,7 @@ describe('OpenCodeServerHarness', () => {
             envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
         ),
       ).toHaveLength(requestEnvelopeCount);
-      resolveAbort(true);
     } finally {
-      resolveAbort(true);
       harness.dispose();
     }
   });

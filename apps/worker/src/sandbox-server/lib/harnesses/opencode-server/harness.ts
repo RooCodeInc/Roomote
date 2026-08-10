@@ -4563,6 +4563,11 @@ export class OpenCodeServerHarness
       turnId,
       callId,
     });
+
+    if (this.resolvedUserInputRequestIds.has(requestId)) {
+      return;
+    }
+
     this.nativeQuestionRequestIds.set(requestId, nativeRequestId);
 
     if (this.pendingUserInputRequests.has(requestId)) {
