@@ -70,6 +70,7 @@ const provider = {
   createDirectMessage: mocks.createDirectMessage,
   postMessage: mocks.postMessage,
   addReaction: mocks.addReaction,
+  // oxlint-disable-next-line typescript/no-explicit-any
 } as any;
 
 const MONITORED_CHANNEL_ID = '400000000000000001';
@@ -110,6 +111,7 @@ function gatewayEvent(payload: Record<string, unknown>): DiscordGatewayEvent {
     eventType: 'MESSAGE_CREATE',
     payload,
     receivedAt: '2026-07-17T15:00:00.000Z',
+    // oxlint-disable-next-line typescript/no-explicit-any
   } as any;
 }
 
@@ -138,6 +140,7 @@ async function runHandler(input: {
   const payload = input.payload ?? messagePayload();
   return maybeHandleDiscordChannelAutoStart({
     event: gatewayEvent(payload),
+    // oxlint-disable-next-line typescript/no-explicit-any
     message: payload as any,
     channel: input.channel ?? guildChannel(),
     provider,
