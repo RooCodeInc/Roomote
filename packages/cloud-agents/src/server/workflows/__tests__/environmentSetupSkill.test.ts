@@ -274,7 +274,13 @@ describe('environment-setup guidance', () => {
       'Re-read .roomote/setup-status.json every 10-15 seconds while it is still running, rather than sleeping for several minutes at a time.',
     );
     expect(skillContent).toContain(
-      "If any setup command failed, report each failing command's name and exit code from .roomote/setup-status.json plus the relevant error lines from .roomote/setup-logs/.",
+      'Once setup reaches a terminal state, run diagnose_environment exactly once.',
+    );
+    expect(skillContent).toContain(
+      'Report every failing or non-pass stable check ID and its evidence verbatim from the diagnostic report.',
+    );
+    expect(skillContent).toContain(
+      'Resolve every non-pass check that is within environment-setup scope before persisting',
     );
     expect(skillContent).toContain(
       'the platform delivers a `Spawned task update` message into this session when the verification task settles',

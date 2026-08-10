@@ -38,6 +38,7 @@ import { handleGetTaskComputeLogs } from './task-compute-logs.js';
 import { handleCancelTask } from './cancel-task.js';
 import { handleSendMessage } from './send-message.js';
 import { handleListEnvironments } from './list-environments.js';
+import { handleDiagnoseEnvironment } from './diagnose-environment.js';
 import {
   handleCreateEnvironment,
   handleRecordVerification,
@@ -78,6 +79,23 @@ export const roomoteMcpServer = new McpServer({
   name: 'roomote-mcp-server',
   version: '1.0.0',
 });
+
+roomoteMcpServer.registerTool(
+  'diagnose_environment',
+  {
+    title: 'Diagnose Environment',
+    description:
+      'Run structured environment health diagnostics (setup commands, detached services, docker projects, ports, preview reachability, tool versions). Use when verifying an environment or investigating setup/startup failures.',
+    inputSchema: {},
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
+  },
+  async (): Promise<ToolResult> => handleDiagnoseEnvironment(),
+);
 
 let hasSubmittedAutomationSlackSummary = false;
 const manageArtifactsUploadTypeSchema = z.enum(['general', 'visual-proof']);

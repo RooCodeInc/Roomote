@@ -131,6 +131,21 @@ describe('roomote MCP tool descriptions', () => {
     vi.unstubAllGlobals();
   });
 
+  it('registers structured environment diagnostics as read-only', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(registeredTools, 'diagnose_environment');
+
+    expect(tool.config.description).toBe(
+      'Run structured environment health diagnostics (setup commands, detached services, docker projects, ports, preview reachability, tool versions). Use when verifying an environment or investigating setup/startup failures.',
+    );
+    expect(tool.config.annotations).toEqual({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    });
+  });
+
   it('documents every built-in custom automation schedule preset', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const automationsTool = getRegisteredTool(

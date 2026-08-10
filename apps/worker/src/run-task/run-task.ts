@@ -76,6 +76,7 @@ import {
   seedRuntimeHomeMiseGlobalConfig,
 } from './agent-home';
 import { installZeroCli } from '../commands/setup/agent-clis';
+import { buildDoctorEnvironmentContext } from '../doctor/environment-context';
 
 import { createHarness } from './create-harness';
 import { createActorScopedMcpRefresher } from './actor-scoped-mcp-refresh';
@@ -984,6 +985,14 @@ export const runTask = async ({
       slackReplyContext,
       communicationReplyContext,
     });
+    mcpTaskEnv.ROOMOTE_DOCTOR_ENVIRONMENT_CONTEXT = JSON.stringify(
+      buildDoctorEnvironmentContext({
+        environmentConfig,
+        workspacePath,
+        repoPaths,
+        envVars: unsanitizedEnv,
+      }),
+    );
     if (mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE) {
       runtimeEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE =
         mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE;
