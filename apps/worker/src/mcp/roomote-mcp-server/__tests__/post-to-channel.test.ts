@@ -116,31 +116,66 @@ describe('handlePostToChannel', () => {
     });
   });
 
-  it('rejects direct-message IDs', async () => {
-    const dmResult = await handlePostToChannel(
+  it('accepts direct-message IDs', async () => {
+    vi.mocked(postToChannel).mockResolvedValue({
+      messageTs: '111.222',
+      channelId: 'D123ABC456',
+    });
+
+    await handlePostToChannel(
       { taskId: 'task-1', channel: 'D123ABC456', text: 'hello' },
       artifactConfig,
       roomoteConfig,
     );
 
-    expect(JSON.parse(dmResult.content[0]!.text)).toEqual({
-      success: false,
-      error:
-        'direct message IDs are not supported; use a Slack channel ID or channel name instead',
+    expect(postToChannel).toHaveBeenCalledWith(roomoteConfig, {
+      channel: 'D123ABC456',
+      text: 'hello',
     });
   });
 
-  it('rejects lowercase direct-message IDs', async () => {
-    const dmResult = await handlePostToChannel(
+  it('normalizes lowercase direct-message IDs', async () => {
+    vi.mocked(postToChannel).mockResolvedValue({
+      messageTs: '111.222',
+      channelId: 'D123ABC456',
+    });
+
+    await handlePostToChannel(
       { taskId: 'task-1', channel: 'd123abc456', text: 'hello' },
       artifactConfig,
       roomoteConfig,
     );
 
-    expect(JSON.parse(dmResult.content[0]!.text)).toEqual({
-      success: false,
-      error:
-        'direct message IDs are not supported; use a Slack channel ID or channel name instead',
+    expect(postToChannel).toHaveBeenCalledWith(roomoteConfig, {
+      channel: 'D123ABC456',
+      text: 'hello',
+    });
+  });
+
+  it('accepts Slack user IDs and mentions for direct messages', async () => {
+    vi.mocked(postToChannel).mockResolvedValue({
+      messageTs: '111.222',
+      channelId: 'D123ABC456',
+    });
+
+    await handlePostToChannel(
+      { taskId: 'task-1', channel: 'U123ABC456', text: 'hello' },
+      artifactConfig,
+      roomoteConfig,
+    );
+    await handlePostToChannel(
+      { taskId: 'task-1', channel: '<@U123ABC456|person>', text: 'hello' },
+      artifactConfig,
+      roomoteConfig,
+    );
+
+    expect(postToChannel).toHaveBeenNthCalledWith(1, roomoteConfig, {
+      channel: 'U123ABC456',
+      text: 'hello',
+    });
+    expect(postToChannel).toHaveBeenNthCalledWith(2, roomoteConfig, {
+      channel: 'U123ABC456',
+      text: 'hello',
     });
   });
 

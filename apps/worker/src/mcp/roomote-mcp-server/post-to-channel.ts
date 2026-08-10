@@ -11,12 +11,12 @@ import { catchError, errorResult, successResult } from './tool-result.js';
 import type { ArtifactConfig, RoomoteConfig, ToolResult } from './types.js';
 
 const CHANNEL_TARGET_ERROR =
-  'channel must be a Slack channel ID, channel name, or Slack channel mention like C123ABC456, #eng, eng, or <#C123ABC456>';
-const DIRECT_MESSAGE_ERROR =
-  'direct message IDs are not supported; use a Slack channel ID or channel name instead';
+  'channel must be a Slack channel ID/name/mention, DM ID, or Slack user ID/mention';
 const SLACK_CHANNEL_ID_REGEX = /^[CG][A-Z0-9]{8,}$/i;
 const SLACK_DIRECT_MESSAGE_ID_REGEX = /^D[A-Z0-9]{8,}$/i;
+const SLACK_USER_ID_REGEX = /^U[A-Z0-9]{8,}$/i;
 const SLACK_CHANNEL_MENTION_REGEX = /^<#([A-Z0-9]{9,})(?:\|[^>]+)?>$/i;
+const SLACK_USER_MENTION_REGEX = /^<@([A-Z0-9]{9,})(?:\|[^>]+)?>$/i;
 
 function normalizeSlackChannelTarget(
   channel: string,
@@ -27,13 +27,18 @@ function normalizeSlackChannelTarget(
   }
 
   const mentionMatch = trimmedChannel.match(SLACK_CHANNEL_MENTION_REGEX);
-  const channelId = (mentionMatch?.[1] ?? trimmedChannel).toUpperCase();
+  const userMentionMatch = trimmedChannel.match(SLACK_USER_MENTION_REGEX);
+  const channelId = (
+    mentionMatch?.[1] ??
+    userMentionMatch?.[1] ??
+    trimmedChannel
+  ).toUpperCase();
 
-  if (SLACK_DIRECT_MESSAGE_ID_REGEX.test(channelId)) {
-    return { error: DIRECT_MESSAGE_ERROR };
-  }
-
-  if (SLACK_CHANNEL_ID_REGEX.test(channelId)) {
+  if (
+    SLACK_CHANNEL_ID_REGEX.test(channelId) ||
+    SLACK_DIRECT_MESSAGE_ID_REGEX.test(channelId) ||
+    SLACK_USER_ID_REGEX.test(channelId)
+  ) {
     return { value: channelId };
   }
 

@@ -7,6 +7,8 @@ const {
   postMessageMock,
   resolveChannelIdMock,
   isAppInChannelMock,
+  getDirectMessageUserIdMock,
+  openConversationMock,
   getCommunicationProviderAdapterMock,
   slackAdapterPostMessageMock,
   buildSignedArtifactRawUrlMock,
@@ -15,6 +17,8 @@ const {
   postMessageMock: vi.fn(),
   resolveChannelIdMock: vi.fn(),
   isAppInChannelMock: vi.fn(),
+  getDirectMessageUserIdMock: vi.fn(),
+  openConversationMock: vi.fn(),
   getCommunicationProviderAdapterMock: vi.fn(),
   slackAdapterPostMessageMock: vi.fn(),
   buildSignedArtifactRawUrlMock: vi.fn(),
@@ -27,12 +31,17 @@ vi.mock('@roomote/db/server', () => ({
       taskRuns: { findFirst: vi.fn() },
       tasks: { findFirst: vi.fn() },
       slackInstallations: { findFirst: vi.fn() },
+      slackUserMappings: { findFirst: vi.fn() },
       taskArtifacts: { findMany: vi.fn() },
     },
   },
   taskRuns: { id: 'id' },
   tasks: { id: 'id' },
   slackInstallations: { orgId: 'orgId', isActive: 'isActive' },
+  slackUserMappings: {
+    slackUserId: 'slackUserId',
+    slackTeamId: 'slackTeamId',
+  },
   taskArtifacts: { id: 'id' },
   eq: vi.fn(),
   desc: vi.fn(),
@@ -47,6 +56,8 @@ vi.mock('@roomote/slack', () => ({
       postMessage = postMessageMock;
       resolveChannelId = resolveChannelIdMock;
       isAppInChannel = isAppInChannelMock;
+      getDirectMessageUserId = getDirectMessageUserIdMock;
+      openConversation = openConversationMock;
     },
   ),
   getSlackThreadReplyFooterMessageTs: vi.fn(),
@@ -80,7 +91,7 @@ vi.mock('@roomote/redis', () => ({
   })),
 }));
 
-import { db } from '@roomote/db/server';
+import { db, eq } from '@roomote/db/server';
 import { mcpAuthMiddleware } from '../middleware';
 import { slackMcp } from '../slack';
 
@@ -126,12 +137,14 @@ function mockTaskRun(
     orgId: string;
     actingUserId: string | null;
     taskId: string;
+    payload: Record<string, unknown>;
   }> = {},
 ) {
   return {
     id: 42,
     actingUserId: 'user-1',
     taskId: 'task-1',
+    payload: {},
     ...overrides,
   };
 }
@@ -155,6 +168,11 @@ describe('slack channel post MCP endpoint', () => {
     postMessageMock.mockResolvedValue('999.888');
     resolveChannelIdMock.mockResolvedValue('C123');
     isAppInChannelMock.mockResolvedValue(true);
+    getDirectMessageUserIdMock.mockResolvedValue('U123ABC456');
+    openConversationMock.mockResolvedValue('D123ABC456');
+    vi.mocked(db.query.slackUserMappings.findFirst).mockResolvedValue({
+      userId: 'linked-user',
+    } as never);
     slackAdapterPostMessageMock.mockImplementation(
       async (input: {
         channelId: string;
@@ -194,8 +212,11 @@ describe('slack channel post MCP endpoint', () => {
     );
     getCommunicationProviderAdapterMock.mockResolvedValue({
       provider: 'slack',
+      teamId: 'T123ABC456',
       resolveChannelId: resolveChannelIdMock,
       isAppInChannel: isAppInChannelMock,
+      getDirectMessageUserId: getDirectMessageUserIdMock,
+      openConversation: openConversationMock,
       postMessage: slackAdapterPostMessageMock,
     });
   });
@@ -236,7 +257,7 @@ describe('slack channel post MCP endpoint', () => {
     );
   });
 
-  it('rejects direct-message IDs', async () => {
+  it('posts to a DM when its recipient has a linked Roomote account', async () => {
     vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockTaskRun() as never,
     );
@@ -247,13 +268,15 @@ describe('slack channel post MCP endpoint', () => {
     });
     const body = (await response.json()) as JsonBody;
 
-    expect(response.status).toBe(400);
-    expect(body.error).toBe(
-      'direct message IDs are not supported; use a Slack channel ID or channel name instead',
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ messageTs: '999.888', channelId: 'D123ABC456' });
+    expect(getDirectMessageUserIdMock).toHaveBeenCalledWith('D123ABC456');
+    expect(postMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'D123ABC456', text: 'hello' }),
     );
   });
 
-  it('rejects lowercase direct-message IDs', async () => {
+  it('normalizes lowercase direct-message IDs', async () => {
     vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockTaskRun() as never,
     );
@@ -264,10 +287,91 @@ describe('slack channel post MCP endpoint', () => {
     });
     const body = (await response.json()) as JsonBody;
 
-    expect(response.status).toBe(400);
-    expect(body.error).toBe(
-      'direct message IDs are not supported; use a Slack channel ID or channel name instead',
+    expect(response.status).toBe(200);
+    expect(body.channelId).toBe('D123ABC456');
+    expect(getDirectMessageUserIdMock).toHaveBeenCalledWith('D123ABC456');
+  });
+
+  it('rejects a DM ID that is unavailable in the task workspace', async () => {
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun({ payload: { slackTeamId: 'T123ABC456' } }) as never,
     );
+    getDirectMessageUserIdMock.mockResolvedValueOnce(null);
+
+    const response = await postChannelMessage(runToken, {
+      channel: 'D999ABC456',
+      text: 'hello',
+    });
+    const body = (await response.json()) as JsonBody;
+
+    expect(response.status).toBe(404);
+    expect(body.error).toBe(
+      'Slack DM recipient is not available for this workspace',
+    );
+    expect(db.query.slackUserMappings.findFirst).not.toHaveBeenCalled();
+    expect(postMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('opens a DM for a linked Slack user ID or mention', async () => {
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
+    );
+
+    const userIdResponse = await postChannelMessage(runToken, {
+      channel: 'U123ABC456',
+      text: 'hello',
+    });
+    const mentionResponse = await postChannelMessage(runToken, {
+      channel: '<@U123ABC456|person>',
+      text: 'hello again',
+    });
+
+    expect(userIdResponse.status).toBe(200);
+    expect(mentionResponse.status).toBe(200);
+    expect(openConversationMock).toHaveBeenNthCalledWith(1, 'U123ABC456');
+    expect(openConversationMock).toHaveBeenNthCalledWith(2, 'U123ABC456');
+  });
+
+  it('rejects DM recipients not linked in the selected workspace', async () => {
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
+    );
+    vi.mocked(db.query.slackUserMappings.findFirst).mockResolvedValue(
+      undefined,
+    );
+
+    const response = await postChannelMessage(runToken, {
+      channel: 'U999ABC456',
+      text: 'hello',
+    });
+    const body = (await response.json()) as JsonBody;
+
+    expect(response.status).toBe(403);
+    expect(body.error).toBe(
+      'Slack DM recipient must have a linked Roomote account in this workspace',
+    );
+    expect(openConversationMock).not.toHaveBeenCalled();
+    expect(postMessageMock).not.toHaveBeenCalled();
+    expect(eq).toHaveBeenCalledWith('slackUserId', 'U999ABC456');
+    expect(eq).toHaveBeenCalledWith('slackTeamId', 'T123ABC456');
+  });
+
+  it('selects the Slack installation from the task workspace', async () => {
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun({
+        payload: { slackTeamId: 'T123ABC456' },
+      }) as never,
+    );
+
+    const response = await postChannelMessage(runToken, {
+      channel: 'U123ABC456',
+      text: 'hello',
+    });
+
+    expect(response.status).toBe(200);
+    expect(getCommunicationProviderAdapterMock).toHaveBeenCalledWith('slack', {
+      slackTeamId: 'T123ABC456',
+    });
   });
 
   it('accepts raw channel IDs', async () => {
