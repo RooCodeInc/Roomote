@@ -33,6 +33,7 @@ import {
   resolveTaskRuntimePolicy,
   resolveTaskWorkspace,
   resolveComputeProviderTarget,
+  populateCommunicationMetadata,
   sourceControlProviderSchema,
   TASK_TIMEOUT_MS,
   isManagedDeploymentReadOnly,
@@ -1320,6 +1321,47 @@ export async function enqueueTask(
   return enqueueFreshLaunch(input as FreshTaskLaunch, options);
 }
 
+async function inheritSourceCommunicationMetadata(
+  task: FreshTask,
+): Promise<void> {
+  const sourceRunId = task.communicationContextSourceRunId;
+  if (!sourceRunId) return;
+
+  const sourceRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, sourceRunId),
+    columns: { payload: true },
+    with: {
+      task: {
+        columns: { slackChannelId: true, slackThreadTs: true },
+      },
+    },
+  });
+
+  if (!sourceRun) return;
+
+  const payload = task.payload as Record<string, unknown>;
+
+  // A launch that carries its own live context stays a live chat turn.
+  if (payload.communicationProvider != null) return;
+
+  populateCommunicationMetadata(payload, {
+    sourcePayload: sourceRun.payload,
+    channelId: sourceRun.task?.slackChannelId,
+    threadId: sourceRun.task?.slackThreadTs,
+  });
+
+  // Slack parents keep their coordinates in task columns rather than
+  // provider-neutral payload fields, so the provider needs stamping here.
+  if (payload.communicationProvider == null && sourceRun.task?.slackChannelId) {
+    payload.communicationProvider = 'slack';
+  }
+
+  // Only flag payloads that actually gained coordinates from the parent.
+  if (payload.communicationProvider != null) {
+    payload.communicationContextInherited = true;
+  }
+}
+
 async function enqueueFreshLaunch(
   input: FreshTaskLaunch,
   options: EnqueueTaskOptions,
@@ -1329,6 +1371,10 @@ async function enqueueFreshLaunch(
   const linkedUserId = getTaskInitiatorLinkedUserId(initiator);
 
   await assertUserIsNotDeleted(linkedUserId);
+
+  // Child launches inherit the provider-neutral origin coordinates so the
+  // agent can see where the parent conversation started.
+  await inheritSourceCommunicationMetadata(task);
 
   if (PR_LINKAGE_REQUIRED_WORKFLOWS.has(workflow) && !input.prLinkage) {
     throw new Error(
