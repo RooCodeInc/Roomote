@@ -30,6 +30,12 @@ type PrReviewSummaryWebhookPayload =
 
 const SUMMARY_NOTIFIED_TTL_SECONDS = 30 * 24 * 60 * 60;
 const MAX_SUMMARY_LENGTH = 300;
+const DELETE_IF_VALUE_MATCHES_SCRIPT = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+`;
 
 function getCompletedReviewKey({
   repository,
@@ -309,23 +315,43 @@ async function enqueuePrReviewSummaryNotificationOnce(
   // errors lets a later created/edited delivery of the same terminal summary
   // retry instead of being suppressed for the TTL.
   try {
-    const result = await enqueuePrReviewNotification(notification.input);
-
-    if (result.notifiedTaskCount === 0) {
-      await redis.del(notification.dedupKey).catch(() => undefined);
-      return;
-    }
-
     if (completedReviewKey) {
       await redis.set(
         completedReviewKey,
-        '1',
+        notification.dedupKey,
         'EX',
         SUMMARY_NOTIFIED_TTL_SECONDS,
       );
     }
+
+    const result = await enqueuePrReviewNotification(notification.input);
+
+    if (result.notifiedTaskCount === 0) {
+      await redis.del(notification.dedupKey).catch(() => undefined);
+      if (completedReviewKey) {
+        await redis
+          .eval(
+            DELETE_IF_VALUE_MATCHES_SCRIPT,
+            1,
+            completedReviewKey,
+            notification.dedupKey,
+          )
+          .catch(() => undefined);
+      }
+      return;
+    }
   } catch (error) {
     await redis.del(notification.dedupKey).catch(() => undefined);
+    if (completedReviewKey) {
+      await redis
+        .eval(
+          DELETE_IF_VALUE_MATCHES_SCRIPT,
+          1,
+          completedReviewKey,
+          notification.dedupKey,
+        )
+        .catch(() => undefined);
+    }
     throw error;
   }
 }

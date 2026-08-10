@@ -5,6 +5,7 @@ const {
   mockRedisGet,
   mockRedisSet,
   mockRedisDel,
+  mockRedisEval,
 } = vi.hoisted(() => ({
   mockEnqueuePrReviewNotification: vi.fn().mockResolvedValue({
     notifiedTaskCount: 1,
@@ -12,6 +13,7 @@ const {
   mockRedisGet: vi.fn(),
   mockRedisSet: vi.fn(),
   mockRedisDel: vi.fn(),
+  mockRedisEval: vi.fn(),
 }));
 
 vi.mock('@roomote/env', async (importOriginal) => {
@@ -34,6 +36,7 @@ vi.mock('@roomote/redis', () => ({
     get: (...args: unknown[]) => mockRedisGet(...args),
     set: (...args: unknown[]) => mockRedisSet(...args),
     del: (...args: unknown[]) => mockRedisDel(...args),
+    eval: (...args: unknown[]) => mockRedisEval(...args),
   }),
 }));
 
@@ -583,6 +586,8 @@ describe('queuePrReviewSummaryNotification', () => {
     mockRedisSet.mockResolvedValue('OK');
     mockRedisDel.mockReset();
     mockRedisDel.mockResolvedValue(1);
+    mockRedisEval.mockReset();
+    mockRedisEval.mockResolvedValue(1);
   });
 
   it('enqueues the summary notification once per review pass', async () => {
@@ -606,11 +611,26 @@ describe('queuePrReviewSummaryNotification', () => {
       expect.stringContaining(
         `review-completed:owner%2Frepo#42:${reviewHeadSha}`,
       ),
-      '1',
+      expect.stringContaining('summary-notified'),
       'EX',
       expect.any(Number),
     );
+    const completedMarkerCall = mockRedisSet.mock.calls.find(([key]) =>
+      String(key).includes('review-completed'),
+    );
+    expect(completedMarkerCall).toBeDefined();
+    expect(completedMarkerCall?.[0]).toBe(
+      `pr-review-notification:review-completed:owner%2Frepo#42:${reviewHeadSha}`,
+    );
+    expect(
+      mockRedisSet.mock.invocationCallOrder.find(
+        (_, index) => mockRedisSet.mock.calls[index] === completedMarkerCall,
+      ),
+    ).toBeLessThan(
+      mockEnqueuePrReviewNotification.mock.invocationCallOrder[0]!,
+    );
     expect(mockRedisDel).not.toHaveBeenCalled();
+    expect(mockRedisEval).not.toHaveBeenCalled();
   });
 
   it('releases the dedup claim when the notification was a no-op', async () => {
@@ -626,11 +646,11 @@ describe('queuePrReviewSummaryNotification', () => {
         expect.stringContaining('summary-notified'),
       ),
     );
-    expect(mockRedisSet).not.toHaveBeenCalledWith(
+    expect(mockRedisEval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('GET', KEYS[1]) == ARGV[1]"),
+      1,
       expect.stringContaining('review-completed'),
-      expect.anything(),
-      expect.anything(),
-      expect.anything(),
+      expect.stringContaining('summary-notified'),
     );
   });
 
@@ -644,11 +664,11 @@ describe('queuePrReviewSummaryNotification', () => {
         expect.stringContaining('summary-notified'),
       ),
     );
-    expect(mockRedisSet).not.toHaveBeenCalledWith(
+    expect(mockRedisEval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('GET', KEYS[1]) == ARGV[1]"),
+      1,
       expect.stringContaining('review-completed'),
-      expect.anything(),
-      expect.anything(),
-      expect.anything(),
+      expect.stringContaining('summary-notified'),
     );
   });
 
