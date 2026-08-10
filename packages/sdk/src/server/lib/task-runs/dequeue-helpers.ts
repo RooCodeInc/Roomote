@@ -552,7 +552,7 @@ async function createProviderToken(
           provider,
         })),
         source: 'app',
-        expiresAt: null,
+        expiresAt: credentials.expiresAt,
       };
     }
     case 'ado': {
@@ -568,7 +568,7 @@ async function createProviderToken(
           provider,
         })),
         source: 'app',
-        expiresAt: null,
+        expiresAt: credentials.expiresAt,
       };
     }
   }

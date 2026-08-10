@@ -48,6 +48,17 @@ const OAUTH_ACCESS_TOKEN_REFRESH_SKEW_MS = 10 * 60 * 1000;
 
 /** GitLab's default access-token lifetime, used when none is reported. */
 const DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS = 7200;
+const GITLAB_OAUTH_REQUEST_TIMEOUT_MS = 15_000;
+
+type GitLabOAuthErrorResponse = {
+  error?: string;
+};
+
+function isDefinitiveOAuthError(error: string | undefined): boolean {
+  return ['invalid_grant', 'invalid_client', 'unauthorized_client'].includes(
+    error ?? '',
+  );
+}
 
 /** Expiry fields for a freshly issued access token, in the instance's own terms. */
 function accessTokenLifetime(token: GitLabOAuthTokenResponse): {
@@ -206,6 +217,7 @@ export async function exchangeGitLabOAuthCode(input: {
   code: string;
   redirectUri: string;
   fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
 }): Promise<GitLabOAuthConnection> {
   const response = await (input.fetchImpl ?? fetch)(
     tokenEndpoint(input.baseUrl),
@@ -222,6 +234,9 @@ export async function exchangeGitLabOAuthCode(input: {
         grant_type: 'authorization_code',
         redirect_uri: input.redirectUri,
       }),
+      signal: AbortSignal.timeout(
+        input.requestTimeoutMs ?? GITLAB_OAUTH_REQUEST_TIMEOUT_MS,
+      ),
     },
   );
   if (!response.ok)
@@ -269,6 +284,7 @@ export async function exchangeGitLabOAuthCode(input: {
 export async function resolveGitLabOAuthAccessTokenWithMetadata(options?: {
   fetchImpl?: typeof fetch;
   forceRefresh?: boolean;
+  requestTimeoutMs?: number;
 }): Promise<GitLabOAuthAccessToken | null> {
   if (deletionPromise) {
     await deletionPromise;
@@ -304,29 +320,40 @@ export async function resolveGitLabOAuthAccessTokenWithMetadata(options?: {
           refresh_token: connection.refreshToken,
           grant_type: 'refresh_token',
         }),
+        signal: AbortSignal.timeout(
+          options?.requestTimeoutMs ?? GITLAB_OAUTH_REQUEST_TIMEOUT_MS,
+        ),
       },
     );
     if (!response.ok) {
       if (generation !== connectionGeneration) return null;
-      // Another replica may have already rotated the tokens. Only a connection
-      // that actually changed proves that; re-reading our own unchanged
-      // connection would mask a real invalid_grant and re-enter this refresh on
-      // every later call. Require the same headroom as a normal resolve so we
-      // never hand back a token that dies before the next refresh tick.
-      const latest = await readConnection();
-      if (
-        latest?.status === 'active' &&
-        latest.accessToken !== connection.accessToken &&
-        Date.parse(latest.expiresAt) > Date.now() + refreshSkewMsFor(latest)
-      ) {
-        return toAccessTokenResult(latest.accessToken, latest.expiresAt);
+
+      const oauthError = await response
+        .clone()
+        .json()
+        .then((body) => (body as GitLabOAuthErrorResponse).error)
+        .catch(() => undefined);
+
+      if (isDefinitiveOAuthError(oauthError)) {
+        const latest = await readConnection();
+        if (
+          latest?.status === 'active' &&
+          latest.accessToken !== connection.accessToken &&
+          Date.parse(latest.expiresAt) > Date.now() + refreshSkewMsFor(latest)
+        ) {
+          return toAccessTokenResult(latest.accessToken, latest.expiresAt);
+        }
+        await writeConnection({
+          ...(latest ?? connection),
+          status: 'reauthorization_required',
+        });
+        throw new Error(
+          'GitLab OAuth authorization has expired and must be renewed.',
+        );
       }
-      await writeConnection({
-        ...(latest ?? connection),
-        status: 'reauthorization_required',
-      });
+
       throw new Error(
-        'GitLab OAuth authorization has expired and must be renewed.',
+        `GitLab OAuth refresh failed: ${response.status} ${response.statusText}`,
       );
     }
     const token = (await response.json()) as GitLabOAuthTokenResponse;
@@ -352,6 +379,7 @@ export async function resolveGitLabOAuthAccessTokenWithMetadata(options?: {
 export async function resolveGitLabOAuthAccessToken(options?: {
   fetchImpl?: typeof fetch;
   forceRefresh?: boolean;
+  requestTimeoutMs?: number;
 }): Promise<string | null> {
   const result = await resolveGitLabOAuthAccessTokenWithMetadata(options);
   return result?.accessToken ?? null;

@@ -183,9 +183,11 @@ describe('createSourceControlTokenForTaskRun', () => {
           originBaseUrl: 'https://dev.azure.com',
         },
       ],
+      expiresAt: new Date('2026-08-10T14:00:00.000Z'),
     });
     mockCreateTaskRunBitbucketCredentials.mockResolvedValue({
       credentials: [],
+      expiresAt: new Date('2026-08-10T13:00:00.000Z'),
     });
   });
 
@@ -409,7 +411,7 @@ describe('createSourceControlTokenForTaskRun', () => {
         },
       ],
       source: 'app',
-      expiresAt: null,
+      expiresAt: new Date('2026-08-10T14:00:00.000Z'),
     });
     expect(mockCreateTaskRunWorkerGitHubToken).not.toHaveBeenCalled();
     expect(mockCreateTaskRunAdoCredentials).toHaveBeenCalledWith(
@@ -420,6 +422,24 @@ describe('createSourceControlTokenForTaskRun', () => {
         }),
       }),
     );
+  });
+
+  it('creates Bitbucket token metadata with its OAuth expiry', async () => {
+    const result = await createSourceControlTokenForTaskRun(
+      makeTaskRun({
+        repo: 'group/project',
+        description: 'Work on Bitbucket',
+        sourceControlProvider: 'bitbucket',
+      }),
+      '[test]',
+      { maxRetries: 1 },
+    );
+
+    expect(result).toMatchObject({
+      provider: 'bitbucket',
+      envVar: 'BITBUCKET_OAUTH',
+      expiresAt: new Date('2026-08-10T13:00:00.000Z'),
+    });
   });
 
   it('resolves the provider via the shared resolver when the payload is unstamped', async () => {

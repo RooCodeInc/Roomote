@@ -90,9 +90,15 @@ export async function refreshGitHubTokenWithMetadata(
   // soonest *known* expiry, so the default cadence stays the upper bound.
   const expiryDrivenRefreshAtMs = tokenResult.expiresAt
     ? Math.max(
-        now + MIN_SOURCE_CONTROL_TOKEN_REFRESH_DELAY_MS,
-        tokenResult.expiresAt.getTime() -
-          refreshBufferMs(tokenResult.expiresAt, now),
+        now,
+        Math.min(
+          tokenResult.expiresAt.getTime(),
+          Math.max(
+            now + MIN_SOURCE_CONTROL_TOKEN_REFRESH_DELAY_MS,
+            tokenResult.expiresAt.getTime() -
+              refreshBufferMs(tokenResult.expiresAt, now),
+          ),
+        ),
       )
     : Number.POSITIVE_INFINITY;
   const nextRefreshAtMs = Math.min(

@@ -4,6 +4,7 @@ import {
   db,
   eq,
   resolveDeploymentEnvVar,
+  sql,
 } from '@roomote/db/server';
 
 export const DEFAULT_ADO_BASE_URL = 'https://dev.azure.com';
@@ -14,8 +15,18 @@ const ADO_ENTRA_TOKEN_SCOPE = 'https://app.vssps.visualstudio.com/.default';
 const ADO_ENTRA_RESOURCE_SCOPE =
   '499b84ac-1321-427f-aa17-267ca6975798/.default';
 const ADO_ENTRA_TOKEN_EXPIRY_SKEW_MS = 60_000;
+const ADO_TOKEN_ENDPOINT_TIMEOUT_MS = 15_000;
 
 type AdoAuthMode = 'pat' | 'entra' | 'delegated';
+
+type AdoAccessToken = {
+  token: string;
+  expiresAt: Date | null;
+};
+
+type OAuthErrorResponse = {
+  error?: string;
+};
 
 let cachedAdoEntraToken: { token: string; expiresAt: number } | null = null;
 let cachedAdoDelegatedToken: {
@@ -91,8 +102,24 @@ class AdoTokenAcquisitionError extends Error {
   }
 }
 
-function isDefinitiveTokenEndpointStatus(status: number): boolean {
-  return status === 400 || status === 401;
+async function isDefinitiveTokenEndpointFailure(
+  response: Response,
+): Promise<boolean> {
+  if (response.status === 401) {
+    return true;
+  }
+  if (response.status !== 400) {
+    return false;
+  }
+
+  const error = await response
+    .clone()
+    .json()
+    .then((body) => (body as OAuthErrorResponse).error)
+    .catch(() => undefined);
+  return ['invalid_client', 'invalid_grant', 'unauthorized_client'].includes(
+    error ?? '',
+  );
 }
 
 async function requestAdoEntraClientCredentialsToken({
@@ -119,16 +146,14 @@ async function requestAdoEntraClientCredentialsToken({
         scope: ADO_ENTRA_TOKEN_SCOPE,
         grant_type: 'client_credentials',
       }),
-      ...(timeoutMs === undefined
-        ? {}
-        : { signal: AbortSignal.timeout(timeoutMs) }),
+      signal: AbortSignal.timeout(timeoutMs ?? ADO_TOKEN_ENDPOINT_TIMEOUT_MS),
     },
   );
 
   if (!response.ok) {
     throw new AdoTokenAcquisitionError(
       `Azure DevOps Microsoft Entra token request failed: ${response.status} ${response.statusText}`,
-      isDefinitiveTokenEndpointStatus(response.status),
+      await isDefinitiveTokenEndpointFailure(response),
     );
   }
 
@@ -152,7 +177,7 @@ async function requestAdoEntraClientCredentialsToken({
   };
 }
 
-export async function resolveAdoToken(): Promise<string | null> {
+export async function resolveAdoTokenWithMetadata(): Promise<AdoAccessToken | null> {
   const authMode = await resolveDeploymentEnvVar('ADO_AUTH_MODE');
   if (authMode === 'delegated') {
     return resolveAdoDelegatedToken();
@@ -160,7 +185,7 @@ export async function resolveAdoToken(): Promise<string | null> {
 
   const pat = await resolveDeploymentEnvVar('ADO_TOKEN');
   if (pat?.trim() && authMode !== 'entra') {
-    return pat;
+    return { token: pat, expiresAt: null };
   }
 
   const clientId = await resolveDeploymentEnvVar('ADO_CLIENT_ID');
@@ -177,7 +202,10 @@ export async function resolveAdoToken(): Promise<string | null> {
     cachedAdoEntraToken &&
     cachedAdoEntraToken.expiresAt > Date.now() + ADO_ENTRA_TOKEN_EXPIRY_SKEW_MS
   ) {
-    return cachedAdoEntraToken.token;
+    return {
+      token: cachedAdoEntraToken.token,
+      expiresAt: new Date(cachedAdoEntraToken.expiresAt),
+    };
   }
 
   const { token, expiresIn } = await requestAdoEntraClientCredentialsToken({
@@ -191,7 +219,11 @@ export async function resolveAdoToken(): Promise<string | null> {
     expiresAt: Date.now() + expiresIn * 1000,
   };
 
-  return token;
+  return { token, expiresAt: new Date(cachedAdoEntraToken.expiresAt) };
+}
+
+export async function resolveAdoToken(): Promise<string | null> {
+  return (await resolveAdoTokenWithMetadata())?.token ?? null;
 }
 
 async function resolveAdoDelegatedToken(overrides?: {
@@ -201,7 +233,7 @@ async function resolveAdoDelegatedToken(overrides?: {
   tenantId?: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
-}): Promise<string | null> {
+}): Promise<AdoAccessToken | null> {
   const linkedAccountId =
     overrides?.linkedAccountId ??
     (await resolveDeploymentEnvVar('ADO_LINKED_ACCOUNT_ID'));
@@ -219,117 +251,126 @@ async function resolveAdoDelegatedToken(overrides?: {
     return null;
   }
 
-  const account = await db.query.authAccounts.findFirst({
-    where: and(
-      eq(authAccounts.providerId, 'ado'),
-      eq(authAccounts.accountId, linkedAccountId.trim()),
-    ),
-    columns: {
-      id: true,
-      accountId: true,
-      accessToken: true,
-      refreshToken: true,
-      accessTokenExpiresAt: true,
-    },
-  });
-
-  if (!account?.accessToken) {
-    return null;
-  }
-
-  const expiresAt = account.accessTokenExpiresAt?.getTime() ?? 0;
   if (
-    expiresAt > Date.now() + ADO_ENTRA_TOKEN_EXPIRY_SKEW_MS &&
-    cachedAdoDelegatedToken?.accountId === account.accountId &&
+    cachedAdoDelegatedToken?.accountId === linkedAccountId.trim() &&
     cachedAdoDelegatedToken.expiresAt >
       Date.now() + ADO_ENTRA_TOKEN_EXPIRY_SKEW_MS
   ) {
-    return cachedAdoDelegatedToken.token;
+    return {
+      token: cachedAdoDelegatedToken.token,
+      expiresAt: new Date(cachedAdoDelegatedToken.expiresAt),
+    };
   }
 
-  if (expiresAt > Date.now() + ADO_ENTRA_TOKEN_EXPIRY_SKEW_MS) {
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtextextended(${`ado:${linkedAccountId.trim()}`}, 0))`,
+    );
+    const account = await tx.query.authAccounts.findFirst({
+      where: and(
+        eq(authAccounts.providerId, 'ado'),
+        eq(authAccounts.accountId, linkedAccountId.trim()),
+      ),
+      columns: {
+        id: true,
+        accountId: true,
+        accessToken: true,
+        refreshToken: true,
+        accessTokenExpiresAt: true,
+      },
+    });
+
+    if (!account?.accessToken) {
+      return null;
+    }
+
+    const expiresAt = account.accessTokenExpiresAt?.getTime() ?? 0;
+
+    if (expiresAt > Date.now() + ADO_ENTRA_TOKEN_EXPIRY_SKEW_MS) {
+      cachedAdoDelegatedToken = {
+        accountId: account.accountId,
+        token: account.accessToken,
+        expiresAt,
+      };
+      return { token: account.accessToken, expiresAt: new Date(expiresAt) };
+    }
+
+    if (
+      !account.refreshToken ||
+      !clientId?.trim() ||
+      !clientSecret?.trim() ||
+      !tenantId?.trim()
+    ) {
+      throw new AdoTokenAcquisitionError(
+        'Azure DevOps delegated connection needs to be reconnected. Open Settings and connect with Microsoft again.',
+        true,
+      );
+    }
+
+    const response = await (overrides?.fetchImpl ?? fetch)(
+      `https://login.microsoftonline.com/${encodeURIComponent(tenantId.trim())}/oauth2/v2.0/token`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          client_id: clientId.trim(),
+          client_secret: clientSecret.trim(),
+          refresh_token: account.refreshToken,
+          scope: ADO_ENTRA_RESOURCE_SCOPE,
+        }),
+        signal: AbortSignal.timeout(
+          overrides?.timeoutMs ?? ADO_TOKEN_ENDPOINT_TIMEOUT_MS,
+        ),
+      },
+    );
+
+    if (!response.ok) {
+      throw new AdoTokenAcquisitionError(
+        `Azure DevOps delegated token refresh failed: ${response.status} ${response.statusText}`,
+        await isDefinitiveTokenEndpointFailure(response),
+      );
+    }
+
+    const payload = (await response.json()) as {
+      access_token?: unknown;
+      refresh_token?: unknown;
+      expires_in?: unknown;
+    };
+    const accessToken =
+      typeof payload.access_token === 'string' ? payload.access_token : null;
+    if (!accessToken) {
+      throw new Error(
+        'Azure DevOps delegated token response did not include an access token.',
+      );
+    }
+
+    const nextExpiresAt =
+      Date.now() +
+      (typeof payload.expires_in === 'number' ? payload.expires_in : 3600) *
+        1000;
+    const nextRefreshToken =
+      typeof payload.refresh_token === 'string'
+        ? payload.refresh_token
+        : account.refreshToken;
+
+    await tx
+      .update(authAccounts)
+      .set({
+        accessToken,
+        refreshToken: nextRefreshToken,
+        accessTokenExpiresAt: new Date(nextExpiresAt),
+        updatedAt: new Date(),
+      })
+      .where(eq(authAccounts.id, account.id));
+
     cachedAdoDelegatedToken = {
       accountId: account.accountId,
-      token: account.accessToken,
-      expiresAt,
+      token: accessToken,
+      expiresAt: nextExpiresAt,
     };
-    return account.accessToken;
-  }
-
-  if (
-    !account.refreshToken ||
-    !clientId?.trim() ||
-    !clientSecret?.trim() ||
-    !tenantId?.trim()
-  ) {
-    throw new AdoTokenAcquisitionError(
-      'Azure DevOps delegated connection needs to be reconnected. Open Settings and connect with Microsoft again.',
-      true,
-    );
-  }
-
-  const response = await (overrides?.fetchImpl ?? fetch)(
-    `https://login.microsoftonline.com/${encodeURIComponent(tenantId.trim())}/oauth2/v2.0/token`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        client_id: clientId.trim(),
-        client_secret: clientSecret.trim(),
-        refresh_token: account.refreshToken,
-        scope: ADO_ENTRA_RESOURCE_SCOPE,
-      }),
-      ...(overrides?.timeoutMs === undefined
-        ? {}
-        : { signal: AbortSignal.timeout(overrides.timeoutMs) }),
-    },
-  );
-
-  if (!response.ok) {
-    throw new AdoTokenAcquisitionError(
-      `Azure DevOps delegated token refresh failed: ${response.status} ${response.statusText}`,
-      isDefinitiveTokenEndpointStatus(response.status),
-    );
-  }
-
-  const payload = (await response.json()) as {
-    access_token?: unknown;
-    refresh_token?: unknown;
-    expires_in?: unknown;
-  };
-  const accessToken =
-    typeof payload.access_token === 'string' ? payload.access_token : null;
-  if (!accessToken) {
-    throw new Error(
-      'Azure DevOps delegated token response did not include an access token.',
-    );
-  }
-
-  const nextExpiresAt =
-    Date.now() +
-    (typeof payload.expires_in === 'number' ? payload.expires_in : 3600) * 1000;
-  const nextRefreshToken =
-    typeof payload.refresh_token === 'string'
-      ? payload.refresh_token
-      : account.refreshToken;
-
-  await db
-    .update(authAccounts)
-    .set({
-      accessToken,
-      refreshToken: nextRefreshToken,
-      accessTokenExpiresAt: new Date(nextExpiresAt),
-      updatedAt: new Date(),
-    })
-    .where(eq(authAccounts.id, account.id));
-
-  cachedAdoDelegatedToken = {
-    accountId: account.accountId,
-    token: accessToken,
-    expiresAt: nextExpiresAt,
-  };
-  return accessToken;
+    return { token: accessToken, expiresAt: new Date(nextExpiresAt) };
+  });
 }
 
 export function clearAdoEntraTokenCache(): void {
@@ -635,14 +676,17 @@ export async function validateAdoDelegatedCredentials({
   let token: string | null;
 
   try {
-    token = await resolveAdoDelegatedToken({
-      linkedAccountId,
-      clientId,
-      clientSecret,
-      tenantId,
-      fetchImpl,
-      timeoutMs,
-    });
+    token =
+      (
+        await resolveAdoDelegatedToken({
+          linkedAccountId,
+          clientId,
+          clientSecret,
+          tenantId,
+          fetchImpl,
+          timeoutMs,
+        })
+      )?.token ?? null;
   } catch (error) {
     if (error instanceof AdoTokenAcquisitionError && error.definitive) {
       return { status: 'invalid', error: error.message };

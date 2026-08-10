@@ -39,6 +39,12 @@ type GiteaOAuthErrorResponse = {
   error?: string;
 };
 
+function isDefinitiveOAuthError(error: string | undefined): boolean {
+  return ['invalid_grant', 'invalid_client', 'unauthorized_client'].includes(
+    error ?? '',
+  );
+}
+
 let refreshPromise: Promise<string | null> | null = null;
 let deletionPromise: Promise<void> | null = null;
 let connectionGeneration = 0;
@@ -134,6 +140,7 @@ export async function exchangeGiteaOAuthCode(input: {
   code: string;
   redirectUri: string;
   fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
 }): Promise<GiteaOAuthConnection> {
   const response = await (input.fetchImpl ?? fetch)(
     tokenEndpoint(input.baseUrl),
@@ -150,6 +157,9 @@ export async function exchangeGiteaOAuthCode(input: {
         grant_type: 'authorization_code',
         redirect_uri: input.redirectUri,
       }),
+      signal: AbortSignal.timeout(
+        input.requestTimeoutMs ?? GITEA_OAUTH_REQUEST_TIMEOUT_MS,
+      ),
     },
   );
   if (!response.ok) {
@@ -244,9 +254,18 @@ export async function resolveGiteaOAuthAccessToken(options?: {
         .then((body) => (body as GiteaOAuthErrorResponse).error)
         .catch(() => undefined);
 
-      if (oauthError === 'invalid_grant') {
+      if (isDefinitiveOAuthError(oauthError)) {
+        const latest = await readConnection();
+        if (
+          latest?.status === 'active' &&
+          latest.accessToken !== connection.accessToken &&
+          Date.parse(latest.expiresAt) > Date.now() + 60_000
+        ) {
+          cachedAccessToken = latest.accessToken;
+          return latest.accessToken;
+        }
         await writeConnection({
-          ...connection,
+          ...(latest ?? connection),
           status: 'reauthorization_required',
         });
         throw new Error(

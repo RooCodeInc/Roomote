@@ -21,7 +21,7 @@ vi.mock('@roomote/db/server', () => ({
         findFirst: (...args: unknown[]) => mockTaskRunsFindFirst(...args),
       },
     },
-    update: (...args: unknown[]) => mockUpdate(...args),
+    update: mockUpdate,
   },
   taskRuns: { id: 'taskRuns.id' },
   eq: vi.fn(),
@@ -63,7 +63,7 @@ describe('refreshGitHubTokenWithMetadata', () => {
     const result = await refreshGitHubTokenWithMetadata({} as never, 123);
 
     expect(result.expiresAt).toBe('2026-08-10T12:10:00.000Z');
-    expect(result.nextRefreshAt).toBe('2026-08-10T12:05:00.000Z');
+    expect(result.nextRefreshAt).toBe('2026-08-10T12:07:30.000Z');
   });
 
   it('schedules app-backed GitLab credentials before their OAuth expiry', async () => {
@@ -111,6 +111,21 @@ describe('refreshGitHubTokenWithMetadata', () => {
     const result = await refreshGitHubTokenWithMetadata({} as never, 123);
 
     expect(result.nextRefreshAt).toBe('2026-08-10T12:03:45.000Z');
+  });
+
+  it('never schedules a known sub-minute expiry after the token expires', async () => {
+    mockCreateSourceControlTokenForTaskRun.mockResolvedValue({
+      provider: 'gitlab',
+      token: 'oauth_access_token',
+      envVar: 'GITLAB_TOKEN',
+      envVars: {},
+      source: 'app',
+      expiresAt: new Date('2026-08-10T12:00:30.000Z'),
+    });
+
+    const result = await refreshGitHubTokenWithMetadata({} as never, 123);
+
+    expect(result.nextRefreshAt).toBe('2026-08-10T12:00:30.000Z');
   });
 
   it('keeps the default interval for credentials without an expiry', async () => {
