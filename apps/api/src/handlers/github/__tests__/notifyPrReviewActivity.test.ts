@@ -29,6 +29,16 @@ vi.mock('@roomote/env', async (importOriginal) => {
 
 vi.mock('@roomote/sdk/server', () => ({
   enqueuePrReviewNotification: mockEnqueuePrReviewNotification,
+  getPrReviewCompletedMarkerKey: ({
+    repository,
+    prNumber,
+    reviewHeadSha,
+  }: {
+    repository: string;
+    prNumber: number;
+    reviewHeadSha: string;
+  }) =>
+    `pr-review-notification:review-completed:${encodeURIComponent(repository)}#${prNumber}:${reviewHeadSha}`,
 }));
 
 vi.mock('@roomote/redis', () => ({

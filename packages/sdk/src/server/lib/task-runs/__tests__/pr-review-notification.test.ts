@@ -1,5 +1,6 @@
 const mockFindManyTaskPullRequests = vi.fn();
 const mockRedisSet = vi.fn();
+const mockRedisGet = vi.fn();
 const mockRedisDel = vi.fn();
 const mockQueueAdd = vi.fn();
 const mockMultiExec = vi.fn();
@@ -42,6 +43,7 @@ vi.mock('@roomote/db/server', async () => {
 
 vi.mock('@roomote/redis', () => ({
   getRedis: () => ({
+    get: (...args: unknown[]) => mockRedisGet(...args),
     set: (...args: unknown[]) => mockRedisSet(...args),
     del: (...args: unknown[]) => mockRedisDel(...args),
     multi: () => createMultiMock(),
@@ -76,6 +78,7 @@ describe('enqueuePrReviewNotification', () => {
     mockFindManyTaskPullRequests.mockResolvedValue([{ taskId: 'task-1' }]);
     mockRedisSet.mockResolvedValue('OK');
     mockRedisDel.mockResolvedValue(1);
+    mockRedisGet.mockResolvedValue(null);
     mockQueueAdd.mockResolvedValue(undefined);
     mockMultiExec.mockResolvedValue([]);
   });
@@ -375,6 +378,7 @@ describe('consumePendingPrReviewActivity', () => {
     vi.clearAllMocks();
     multiCalls.length = 0;
     mockRedisDel.mockResolvedValue(1);
+    mockRedisGet.mockResolvedValue(null);
   });
 
   it('drains and parses pending events, ignoring malformed entries', async () => {
@@ -398,6 +402,58 @@ describe('consumePendingPrReviewActivity', () => {
 
     expect(events).toEqual([{ kind: 'review_comment', authorLogin: 'bob' }]);
     expect(mockRedisDel).toHaveBeenCalled();
+  });
+
+  it('drops completed Roomote inline activity while preserving summaries and human feedback', async () => {
+    mockRedisGet.mockResolvedValue('summary-notified');
+    mockMultiExec.mockResolvedValue([
+      [
+        null,
+        [
+          JSON.stringify({
+            kind: 'review_comment',
+            authorLogin: 'roomote[bot]',
+            roomoteAuthored: true,
+            reviewHeadSha: 'abc123',
+          }),
+          JSON.stringify({
+            kind: 'review_comment',
+            authorLogin: 'alice',
+            reviewHeadSha: 'abc123',
+          }),
+          JSON.stringify({
+            kind: 'review_summary',
+            authorLogin: 'roomote[bot]',
+            roomoteAuthored: true,
+            reviewHeadSha: 'abc123',
+          }),
+        ],
+      ],
+      [null, 1],
+    ]);
+
+    const events = await consumePendingPrReviewActivity({
+      taskId: 'task-1',
+      repository: 'owner/repo',
+      prNumber: 42,
+    });
+
+    expect(mockRedisGet).toHaveBeenCalledWith(
+      'pr-review-notification:review-completed:owner%2Frepo#42:abc123',
+    );
+    expect(events).toEqual([
+      {
+        kind: 'review_comment',
+        authorLogin: 'alice',
+        reviewHeadSha: 'abc123',
+      },
+      {
+        kind: 'review_summary',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+        reviewHeadSha: 'abc123',
+      },
+    ]);
   });
 });
 

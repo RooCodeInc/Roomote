@@ -158,6 +158,18 @@ function buildScheduledMarkerKey(target: PrReviewNotificationTarget): string {
   return `pr-review-notification:scheduled:${buildTargetKeySuffix(target)}`;
 }
 
+export function getPrReviewCompletedMarkerKey({
+  repository,
+  prNumber,
+  reviewHeadSha,
+}: {
+  repository: string;
+  prNumber: number;
+  reviewHeadSha: string;
+}): string {
+  return `pr-review-notification:review-completed:${encodeURIComponent(repository)}#${prNumber}:${reviewHeadSha}`;
+}
+
 /**
  * Returns whether the given run carries originating-conversation context for
  * any supported communication provider. The Slack thread binding lives on the
@@ -340,7 +352,42 @@ export async function consumePendingPrReviewActivity(
     }
   }
 
-  return events;
+  const roomoteHeadShas = Array.from(
+    new Set(
+      events.flatMap((event) =>
+        event.kind !== 'review_summary' &&
+        event.roomoteAuthored &&
+        event.reviewHeadSha
+          ? [event.reviewHeadSha]
+          : [],
+      ),
+    ),
+  );
+  const completedHeadShas = new Set<string>();
+
+  await Promise.all(
+    roomoteHeadShas.map(async (reviewHeadSha) => {
+      const completed = await redis.get(
+        getPrReviewCompletedMarkerKey({
+          repository: target.repository,
+          prNumber: target.prNumber,
+          reviewHeadSha,
+        }),
+      );
+
+      if (completed) {
+        completedHeadShas.add(reviewHeadSha);
+      }
+    }),
+  );
+
+  return events.filter(
+    (event) =>
+      event.kind === 'review_summary' ||
+      !event.roomoteAuthored ||
+      !event.reviewHeadSha ||
+      !completedHeadShas.has(event.reviewHeadSha),
+  );
 }
 
 /**

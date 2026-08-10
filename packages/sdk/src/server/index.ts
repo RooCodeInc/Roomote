@@ -200,6 +200,7 @@ export {
   enqueuePrReviewNotification,
   enqueuePrReviewNotificationInputSchema,
   formatPrReviewActivityMessage,
+  getPrReviewCompletedMarkerKey,
   hasPrReviewNotificationThreadContext,
   prReviewActivityEventSchema,
   prReviewNotificationRequestSchema,

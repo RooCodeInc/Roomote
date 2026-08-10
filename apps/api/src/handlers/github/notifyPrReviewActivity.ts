@@ -9,6 +9,7 @@ import { Schemas as GitHubSchemas } from '@roomote/github';
 import { getRedis } from '@roomote/redis';
 import {
   enqueuePrReviewNotification,
+  getPrReviewCompletedMarkerKey,
   type EnqueuePrReviewNotificationInput,
 } from '@roomote/sdk/server';
 
@@ -36,18 +37,6 @@ if redis.call('GET', KEYS[1]) == ARGV[1] then
 end
 return 0
 `;
-
-function getCompletedReviewKey({
-  repository,
-  prNumber,
-  reviewHeadSha,
-}: {
-  repository: string;
-  prNumber: number;
-  reviewHeadSha: string;
-}): string {
-  return `pr-review-notification:review-completed:${encodeURIComponent(repository)}#${prNumber}:${reviewHeadSha}`;
-}
 
 /**
  * Classifies a non-mention PR review webhook event into a review-activity
@@ -292,7 +281,7 @@ async function enqueuePrReviewSummaryNotificationOnce(
   const redis = getRedis();
   const reviewHeadSha = notification.input.event.reviewHeadSha;
   const completedReviewKey = reviewHeadSha
-    ? getCompletedReviewKey({
+    ? getPrReviewCompletedMarkerKey({
         repository: notification.input.repository,
         prNumber: notification.input.prNumber,
         reviewHeadSha,
@@ -406,7 +395,7 @@ async function enqueuePrReviewActivityNotification(
 ): Promise<void> {
   if (input.event.roomoteAuthored && input.event.reviewHeadSha) {
     const completed = await getRedis().get(
-      getCompletedReviewKey({
+      getPrReviewCompletedMarkerKey({
         repository: input.repository,
         prNumber: input.prNumber,
         reviewHeadSha: input.event.reviewHeadSha,
