@@ -301,6 +301,13 @@ export async function launchTask(
       'runId' in auth.authContext
         ? { sourceRunId: auth.authContext.runId }
         : {}),
+      // Run-token launches carry the parent pointer for read-only
+      // source-context inheritance, without widening sourceRunId semantics.
+      ...('runId' in auth.authContext &&
+      (requestedType === 'standard' ||
+        requestedType === 'environment-definition')
+        ? { communicationContextSourceRunId: auth.authContext.runId }
+        : {}),
     };
 
     const task: StandardTask | SuggestedTasksTask =
