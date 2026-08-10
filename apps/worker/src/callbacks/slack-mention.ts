@@ -10,6 +10,7 @@ import {
 import {
   SlackNotifier,
   buildSlackAnsweredRequestUserInputBlocks,
+  buildSlackCancelledRequestUserInputBlocks,
   buildSlackRequestUserInputBlocks,
   buildStartedBlocks,
   convertMarkdownToSlack,
@@ -449,11 +450,26 @@ async function handleRequestUserInputResponse(
 
   const currentQuestion =
     getSlackRequestUserInputCurrentQuestion(pendingRequest);
-  const answer = currentQuestion
-    ? event.response.answers[currentQuestion.question.id]?.answers[0]
-    : undefined;
 
-  if (!currentQuestion || !answer) {
+  if (!currentQuestion) {
+    return;
+  }
+
+  const answer =
+    event.response.answers[currentQuestion.question.id]?.answers[0];
+  const blocks =
+    event.response.resolution === 'cancelled'
+      ? buildSlackCancelledRequestUserInputBlocks({
+          question: currentQuestion.question,
+        })
+      : answer
+        ? buildSlackAnsweredRequestUserInputBlocks({
+            question: currentQuestion.question,
+            answer,
+          })
+        : null;
+
+  if (!blocks) {
     return;
   }
 
@@ -463,10 +479,7 @@ async function handleRequestUserInputResponse(
       channel,
       ts: pendingRequest.promptMessageTs,
       message: {
-        blocks: buildSlackAnsweredRequestUserInputBlocks({
-          question: currentQuestion.question,
-          answer,
-        }),
+        blocks,
       },
     });
   } catch (error) {
@@ -476,7 +489,7 @@ async function handleRequestUserInputResponse(
       taskRun.id,
     );
     console.error(
-      `Failed to update answered Slack request_user_input prompt: ${error instanceof Error ? error.message : String(error)}`,
+      `Failed to update resolved Slack request_user_input prompt: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }

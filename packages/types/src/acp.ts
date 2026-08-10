@@ -659,12 +659,38 @@ export function parseAcpRequestUserInputReply(
   };
 }
 
+const CONVERSATIONAL_REQUEST_USER_INPUT_REPLY_PATTERNS = [
+  /^(?:what(?:['’]?s)?|why|how|when|where|who|which)\b/u,
+  /^(?:can|could|would|will|do|does|did|should|may|might)\s+(?:you|we|i|it|this|that|there|they)\b/u,
+  /^(?:please\s+)?(?:explain|clarify|compare|describe|recommend)\b/u,
+  /^(?:please\s+)?(?:tell|show|give)\s+me\b/u,
+  /^(?:please\s+)?help\s+me(?:\s+understand)?\b/u,
+  /^(?:i\s+)?(?:need|want)\s+(?:(?:some|a|an|more)\s+)*(?:context|information|details|explanation|recommendation|comparison)\b/u,
+  /^i(?:'m| am) curious\b/u,
+  /^i wonder\b/u,
+  /^(?:hmm+|hm+|not sure|i(?:'m| am) not sure)\b/u,
+];
+
+function isClearlyConversationalRequestUserInputReply(
+  responseText: string,
+): boolean {
+  return responseText
+    .toLocaleLowerCase()
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .some((line) =>
+      CONVERSATIONAL_REQUEST_USER_INPUT_REPLY_PATTERNS.some((pattern) =>
+        pattern.test(line),
+      ),
+    );
+}
+
 /**
- * Parse a reply as an answer to pending questions, treating replies that only
- * "matched" an options question through the isOther free-text fallback as
- * non-answers. Such replies are usually conversational interjections (a side
- * question, an objection, steering); callers should deliver them to the agent
- * as a normal message instead of consuming the pending question with them.
+ * Parse a reply as an answer to pending questions. Declarative custom answers
+ * are accepted for isOther questions, while clear requests for explanation or
+ * more context remain conversational so callers can deliver them to the agent
+ * without consuming the pending question.
  */
 export function parseAcpRequestUserInputAnswerReply(
   questions: AcpRequestUserInputQuestion[],
@@ -682,7 +708,8 @@ export function parseAcpRequestUserInputAnswerReply(
 
   if (
     parsed.resolution === 'submitted' &&
-    parsed.usedFreeTextOptionFallback === true
+    parsed.usedFreeTextOptionFallback === true &&
+    isClearlyConversationalRequestUserInputReply(responseText)
   ) {
     return null;
   }

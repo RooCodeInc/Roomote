@@ -1,5 +1,6 @@
 import {
   buildSlackAnsweredRequestUserInputBlocks,
+  buildSlackCancelledRequestUserInputBlocks,
   buildSlackRequestUserInputBlocks,
 } from '../request-user-input-blocks';
 
@@ -125,6 +126,28 @@ describe('buildSlackAnsweredRequestUserInputBlocks', () => {
       {
         type: 'markdown',
         text: 'Which stack should we use?\n\n**Picked:** Use Go instead',
+      },
+    ]);
+    expect(JSON.stringify(blocks)).not.toContain('button');
+  });
+});
+
+describe('buildSlackCancelledRequestUserInputBlocks', () => {
+  it('renders cancellation without interactive controls', () => {
+    const blocks = buildSlackCancelledRequestUserInputBlocks({
+      question: {
+        id: 'stack',
+        header: 'Stack',
+        question: 'Which stack should we use?',
+        isOther: true,
+        isSecret: false,
+      },
+    });
+
+    expect(blocks).toEqual([
+      {
+        type: 'markdown',
+        text: 'Which stack should we use?\n\n**Cancelled.**',
       },
     ]);
     expect(JSON.stringify(blocks)).not.toContain('button');

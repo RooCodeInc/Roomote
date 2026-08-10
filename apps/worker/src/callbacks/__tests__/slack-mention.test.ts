@@ -1,6 +1,7 @@
 const {
   mockBuildSlackRequestUserInputBlocks,
   mockBuildSlackAnsweredRequestUserInputBlocks,
+  mockBuildSlackCancelledRequestUserInputBlocks,
   mockBuildRequestUserInputTaskUrl,
   mockBuildStartedBlocks,
   mockClearPendingSlackRequestUserInput,
@@ -27,6 +28,12 @@ const {
     {
       type: 'markdown',
       text: 'answered request_user_input blocks',
+    },
+  ]),
+  mockBuildSlackCancelledRequestUserInputBlocks: vi.fn(() => [
+    {
+      type: 'markdown',
+      text: 'cancelled request_user_input blocks',
     },
   ]),
   mockBuildRequestUserInputTaskUrl: vi
@@ -101,6 +108,8 @@ vi.mock('@roomote/slack/client', () => ({
   buildSlackRequestUserInputBlocks: mockBuildSlackRequestUserInputBlocks,
   buildSlackAnsweredRequestUserInputBlocks:
     mockBuildSlackAnsweredRequestUserInputBlocks,
+  buildSlackCancelledRequestUserInputBlocks:
+    mockBuildSlackCancelledRequestUserInputBlocks,
   buildStartedBlocks: mockBuildStartedBlocks,
   convertMarkdownToSlack: vi.fn((text: string) => text),
   getSlackRequestUserInputCurrentQuestion: vi.fn((request) => ({
@@ -983,6 +992,64 @@ describe('slackMentionCallbacks', () => {
           {
             type: 'markdown',
             text: 'answered request_user_input blocks',
+          },
+        ],
+      },
+    });
+  });
+
+  it('removes interactive controls when request_user_input is cancelled', async () => {
+    const taskRun = createTaskRun();
+    mockClearPendingSlackRequestUserInput.mockResolvedValueOnce({
+      requestId: 'rui:session:turn:call',
+      runId: 123,
+      taskId: 'task_123',
+      questions: [
+        {
+          id: 'language',
+          header: 'Language',
+          question: 'Which language should I use?',
+          isOther: true,
+          isSecret: false,
+          options: [],
+        },
+      ],
+      promptMessageTs: 'prompt-ts',
+      currentQuestionIndex: 0,
+      answers: {},
+      status: 'submitted',
+      createdAt: Date.now(),
+    });
+
+    await slackMentionCallbacks.onMessage?.(
+      taskRun,
+      'task_123',
+      {
+        type: 'request_user_input_response',
+        response: {
+          requestId: 'rui:session:turn:call',
+          sessionId: 'session_1',
+          turnId: 'turn_1',
+          callId: 'call_1',
+          answers: {},
+          resolution: 'cancelled',
+        },
+        ts: 1001,
+      },
+      {},
+    );
+
+    expect(mockBuildSlackCancelledRequestUserInputBlocks).toHaveBeenCalledWith({
+      question: expect.objectContaining({ id: 'language' }),
+    });
+    expect(mockUpdateMessage).toHaveBeenCalledWith({
+      channel: 'C123',
+      ts: 'prompt-ts',
+      message: {
+        blocks: [
+          {
+            type: 'markdown',
+            text: 'cancelled request_user_input blocks',
           },
         ],
       },

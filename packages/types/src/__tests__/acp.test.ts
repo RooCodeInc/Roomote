@@ -8,6 +8,7 @@ import {
   isLinkedReviewResultsMessage,
   normalizeTranscriptUserText,
   parseLinkedReviewResults,
+  parseAcpRequestUserInputAnswerReply,
   parseAcpRequestUserInputReply,
   resolveAcpTranscriptVisibility,
   resolveAcpRequestUserInputAnswer,
@@ -713,12 +714,58 @@ describe('request_user_input reply parsing', () => {
   });
 
   it('accepts custom answers when the question allows other', () => {
+    const question = { ...fixedChoiceQuestion, isOther: true };
+
+    expect(resolveAcpRequestUserInputAnswer(question, 'Go')).toBe('Go');
+
     expect(
-      resolveAcpRequestUserInputAnswer(
-        { ...fixedChoiceQuestion, isOther: true },
-        'Go',
+      parseAcpRequestUserInputAnswerReply([question], 'Use Go instead'),
+    ).toEqual({
+      resolution: 'submitted',
+      answers: {
+        language: { answers: ['Use Go instead'] },
+      },
+      usedFreeTextOptionFallback: true,
+    });
+
+    expect(
+      parseAcpRequestUserInputAnswerReply(
+        [question],
+        "I don't want retries for 24 hours; use a fixed limit instead.",
       ),
-    ).toBe('Go');
+    ).toMatchObject({
+      resolution: 'submitted',
+      answers: {
+        language: {
+          answers: [
+            "I don't want retries for 24 hours; use a fixed limit instead.",
+          ],
+        },
+      },
+    });
+  });
+
+  it('keeps requests for explanation conversational without relying on punctuation', () => {
+    const question = { ...fixedChoiceQuestion, isOther: true };
+
+    expect(
+      parseAcpRequestUserInputAnswerReply(
+        [question],
+        'Whats the difference in practice?',
+      ),
+    ).toBeNull();
+    expect(
+      parseAcpRequestUserInputAnswerReply(
+        [question],
+        'Can you explain the tradeoffs in more detail',
+      ),
+    ).toBeNull();
+    expect(
+      parseAcpRequestUserInputAnswerReply(
+        [question],
+        'I need more context before deciding',
+      ),
+    ).toBeNull();
   });
 
   it('parses more than three ordered answers for multi-question prompts', () => {

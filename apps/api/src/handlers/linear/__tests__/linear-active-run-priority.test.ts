@@ -387,7 +387,7 @@ describe('CLO-1133: active task run takes priority over routing confirmation and
 
     const payload = makePayload({
       agentActivity: {
-        content: { body: '2' },
+        content: { body: 'Use Go instead' },
       },
     });
     const { rawBody, headers } = createSignedRequest(payload);
@@ -408,7 +408,7 @@ describe('CLO-1133: active task run takes priority over routing confirmation and
         userId: 'user-1',
         answers: {
           language: {
-            answers: ['Rust'],
+            answers: ['Use Go instead'],
           },
         },
       }),
@@ -472,7 +472,7 @@ describe('CLO-1133: active task run takes priority over routing confirmation and
     // must reach the agent as a normal message, keeping the question pending.
     const payload = makePayload({
       agentActivity: {
-        content: { body: 'whats the difference in practice?' },
+        content: { body: 'Can you explain the tradeoffs in more detail' },
       },
     });
     const { rawBody, headers } = createSignedRequest(payload);
