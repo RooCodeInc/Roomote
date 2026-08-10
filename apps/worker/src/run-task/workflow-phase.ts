@@ -26,7 +26,7 @@ function getWorkflowPhaseForRequestedWorkKind(
 ): string | null {
   switch (requestedWorkKind) {
     case 'question':
-      return 'investigate-and-report';
+      return 'explore-and-act';
     case 'plan':
     case 'unknown':
       return 'plan-repo-implementation';

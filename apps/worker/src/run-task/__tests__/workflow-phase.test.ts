@@ -10,7 +10,7 @@ describe('workflow phase selection', () => {
         prompt: 'Check the logs and tell me whether retries stopped',
         requestedWorkKind: 'question',
       }),
-    ).toBe('investigate-and-report');
+    ).toBe('explore-and-act');
   });
 
   it('routes unknown requested work kind into the planning workflow', () => {

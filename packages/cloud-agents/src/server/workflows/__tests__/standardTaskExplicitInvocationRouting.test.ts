@@ -27,17 +27,32 @@ describe('Standard Task explicit invocation routing', () => {
     );
   });
 
-  it('separates general investigation from repository explanation', () => {
+  it('separates general non-repository work from repository explanation', () => {
     const { harnessInstructions } = standardTask({
       description: 'Check the logs and tell me whether the retries stopped',
       repo: 'Roomote/example-app',
     });
 
     expect(harnessInstructions).toContain(
-      '`investigate-and-report` for read-only investigation across connected systems, telemetry, documents, messages, web sources, files, or mixed evidence',
+      '`explore-and-act` for ordinary non-repository questions, investigations, and exact user-requested actions across connected systems, documents, messages, web sources, and other available resources',
     );
     expect(harnessInstructions).toContain(
       '`explain-repo-code` for questions specifically about source behavior, architecture, code location, or implementation rationale',
+    );
+  });
+
+  it('reserves implementation routing for repository and workspace work', () => {
+    const { harnessInstructions } = standardTask({
+      description:
+        'Acknowledge the incident in our connected monitoring system',
+      repo: 'Roomote/example-app',
+    });
+
+    expect(harnessInstructions).toContain(
+      '`implement-changes` for repository or workspace implementation, fixes, file edits, commands, validation, and delivery',
+    );
+    expect(harnessInstructions).toContain(
+      'route connected-system questions and actions to `explore-and-act`',
     );
   });
 
@@ -59,20 +74,20 @@ describe('Standard Task explicit invocation routing', () => {
     );
   });
 
-  it('uses implementation straightforwardness as the ambiguous-routing tiebreaker and otherwise defaults to plan', () => {
+  it('routes mixed requests by target and otherwise defaults to plan', () => {
     const { harnessInstructions } = standardTask({
       description: 'Maybe adjust the agent routing behavior if needed',
       repo: 'Roomote/example-app',
     });
 
     expect(harnessInstructions).toContain(
-      'When the request is mixed or ambiguous, use implementation straightforwardness as the tiebreaker:',
+      'When the request is mixed or ambiguous, route repository or workspace execution to `implement-changes`',
     );
     expect(harnessInstructions).toContain(
-      'route to `implement-changes` when the likely implementation path is narrow, conventional, and low-decision',
+      'route connected-system questions and actions to `explore-and-act`',
     );
     expect(harnessInstructions).toContain(
-      'If the request remains ambiguous after that straightforwardness check, default the initial route to `plan-repo-implementation`.',
+      'If the request remains ambiguous after applying those routing rules, default the initial route to `plan-repo-implementation`.',
     );
   });
 

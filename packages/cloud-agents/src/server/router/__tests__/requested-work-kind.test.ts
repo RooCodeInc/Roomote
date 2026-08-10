@@ -80,6 +80,13 @@ describe('requested work kind classification', () => {
         timeoutMs: 5_000,
       }),
     );
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: expect.stringContaining(
+          'connected-system action asks that do not require repository or workspace changes',
+        ),
+      }),
+    );
   });
 
   it('nulls classifier confidence when it is out of range', async () => {
