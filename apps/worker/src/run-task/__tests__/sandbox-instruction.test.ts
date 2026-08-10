@@ -394,7 +394,7 @@ describe('buildSandboxInstruction', () => {
     expect(instruction).not.toContain('Configured external preview URLs:');
   });
 
-  it('omits non-proxied hosts from the configured preview URL list', () => {
+  it('uses dedicated preview URLs for non-proxied hosts', () => {
     const instruction = buildSandboxInstruction(
       false,
       {
@@ -420,6 +420,7 @@ describe('buildSandboxInstruction', () => {
       {
         envVars: {
           ROOMOTE_WEB_HOST: 'https://sandbox-raw-host.modal.host',
+          ROOMOTE_WEB_PREVIEW_URL: 'https://task-123-web.preview.roomote.run',
           ROOMOTE_API_HOST: 'https://task-123-api.preview.roomote.run',
         },
       },
@@ -429,7 +430,9 @@ describe('buildSandboxInstruction', () => {
     expect(instruction).toContain(
       '- API: https://task-123-api.preview.roomote.run/trpc',
     );
+    expect(instruction).toContain(
+      '- WEB (primary): https://task-123-web.preview.roomote.run/auth/dev-login',
+    );
     expect(instruction).not.toContain('https://sandbox-raw-host.modal.host');
-    expect(instruction).not.toContain('- WEB (primary):');
   });
 });

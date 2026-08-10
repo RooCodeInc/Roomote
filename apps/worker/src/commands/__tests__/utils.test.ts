@@ -168,6 +168,29 @@ describe('injectEnvVars', () => {
     expect(envVars.ROOMOTE_WEB_HOST).toBe(
       'https://task-123-web.preview.octomote.run',
     );
+    expect(envVars.ROOMOTE_WEB_PREVIEW_URL).toBe(
+      'https://task-123-web.preview.octomote.run',
+    );
+  });
+
+  it('keeps direct hosts while exposing preview-proxy URLs for unproxied ports', async () => {
+    const envVars: Record<string, string> = {};
+    const taskRun = {
+      taskId: 'task-123',
+      machineDomains: {
+        WEB: 'https://sandbox-web.modal.host',
+      },
+      proxyPorts: {},
+    } as unknown as TaskRun;
+
+    await injectEnvVars(envVars, taskRun, {
+      previewProxyBaseUrl: 'https://preview.octomote.run',
+    });
+
+    expect(envVars.ROOMOTE_WEB_HOST).toBe('https://sandbox-web.modal.host');
+    expect(envVars.ROOMOTE_WEB_PREVIEW_URL).toBe(
+      'https://task-123-web.preview.octomote.run',
+    );
   });
 
   describe('PREVIEW_DOMAINS derivation', () => {

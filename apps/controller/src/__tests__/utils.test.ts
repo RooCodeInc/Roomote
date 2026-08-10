@@ -465,7 +465,7 @@ describe('shouldEnableAuthBypassForTaskRun', () => {
     ).toBe(false);
   });
 
-  it('does not generate a bypass for ordinary unproxied preview ports', () => {
+  it('generates a bypass for authenticated unproxied preview entrypoints', () => {
     expect(
       shouldEnableAuthBypassForTaskRun({
         environmentConfig: mockEnvironmentConfig({
@@ -476,7 +476,7 @@ describe('shouldEnableAuthBypassForTaskRun', () => {
           { name: 'WEB', port: 3000, proxied: false },
         ],
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 });
 

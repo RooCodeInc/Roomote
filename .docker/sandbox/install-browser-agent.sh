@@ -441,10 +441,10 @@ collect_preview_urls() {
   local name value
   while IFS='=' read -r name value; do
     case "$name" in
-      ROOMOTE_EDITOR_HOST|ROOMOTE_SANDBOX_SERVER_HOST)
+      ROOMOTE_EDITOR_HOST|ROOMOTE_SANDBOX_SERVER_HOST|ROOMOTE_EDITOR_PREVIEW_URL|ROOMOTE_SANDBOX_SERVER_PREVIEW_URL)
         continue
         ;;
-      ROOMOTE_*_HOST)
+      ROOMOTE_*_HOST|ROOMOTE_*_PREVIEW_URL)
         case "$value" in
           http://*|https://*)
             printf '%s\n' "$value"

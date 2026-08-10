@@ -137,18 +137,18 @@ function getConfiguredPreviewUrls(
 
   return environmentConfig.ports
     .map((port) => {
-      if (port.proxied === false) {
-        return null;
-      }
-
-      const host = envVars[`ROOMOTE_${port.name.toUpperCase()}_HOST`];
+      const name = port.name.toUpperCase();
+      const previewUrl = envVars[`ROOMOTE_${name}_PREVIEW_URL`];
+      const host =
+        previewUrl ??
+        (port.proxied === false ? undefined : envVars[`ROOMOTE_${name}_HOST`]);
 
       if (!host) {
         return null;
       }
 
       return {
-        name: port.name.toUpperCase(),
+        name,
         url: appendInitialPath(host, port.initial_path),
         primary: Boolean(port.primary),
       };
@@ -239,7 +239,7 @@ export function buildSandboxInstruction(
 
       if (options?.envVars?.ROOMOTE_AUTH_BYPASS_VALUE) {
         lines.push(
-          'These external preview URLs are also reachable from this sandbox. The installed `agent-browser` wrapper automatically applies the task-scoped preview authentication cookie before `open`, `goto`, or `navigate`, so use the external URL when you need to validate public-proxy, redirect, cookie, or hostname-dependent behavior. Never print, log, or share the bypass credential.',
+          'These external preview URLs are also reachable from this sandbox. The installed `agent-browser` wrapper automatically applies the task-scoped preview authentication cookie before `open`, `goto`, or `navigate`. Use the corresponding `ROOMOTE_<NAME>_PREVIEW_URL` when available and append the route you need to test; use the listed external URL otherwise. Use an external URL when you need to validate public-proxy, redirect, cookie, or hostname-dependent behavior. Never print, log, or share the bypass credential.',
         );
       }
     }
