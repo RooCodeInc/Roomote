@@ -34,44 +34,44 @@ type GitLabOAuthTokenResponse = {
 
 export type GitLabOAuthAccessToken = {
   accessToken: string;
-  expiresAt: Date;
+  /** Null when the stored expiry is unreadable; callers keep their default cadence. */
+  expiresAt: Date | null;
 };
 
 /** Proactive OAuth refresh window (~2h access tokens). */
 const OAUTH_ACCESS_TOKEN_REFRESH_SKEW_MS = 10 * 60 * 1000;
 
-/** PAT/project/deploy prefixes. OAuth access tokens have no gl* prefix. */
-const GITLAB_STATIC_TOKEN_PREFIX = /^(glpat-|glptt-|gldt-|glsoat-)/i;
-
 let refreshPromise: Promise<GitLabOAuthAccessToken | null> | null = null;
 let deletionPromise: Promise<void> | null = null;
 let connectionGeneration = 0;
 let cachedAccessToken: string | null = null;
-let cachedAccessTokenExpiresAt: Date | null = null;
+// A rotate leaves in-flight callers holding the token they resolved a moment
+// ago. Keep it so those calls still pick the Bearer header.
+let previousAccessToken: string | null = null;
 
-function rememberAccessToken(accessToken: string, expiresAt: Date): void {
+function rememberAccessToken(accessToken: string): void {
+  if (cachedAccessToken && cachedAccessToken !== accessToken) {
+    previousAccessToken = cachedAccessToken;
+  }
   cachedAccessToken = accessToken;
-  cachedAccessTokenExpiresAt = expiresAt;
 }
 
 function clearCachedAccessToken(): void {
   cachedAccessToken = null;
-  cachedAccessTokenExpiresAt = null;
+  previousAccessToken = null;
 }
 
-function parseConnectionExpiresAt(expiresAt: string): Date {
+function parseConnectionExpiresAt(expiresAt: string): Date | null {
   const parsed = Date.parse(expiresAt);
-  return Number.isNaN(parsed) ? new Date(0) : new Date(parsed);
+  return Number.isNaN(parsed) ? null : new Date(parsed);
 }
 
 function toAccessTokenResult(
   accessToken: string,
-  expiresAt: string | Date,
+  expiresAt: string,
 ): GitLabOAuthAccessToken {
-  const resolvedExpiresAt =
-    expiresAt instanceof Date ? expiresAt : parseConnectionExpiresAt(expiresAt);
-  rememberAccessToken(accessToken, resolvedExpiresAt);
-  return { accessToken, expiresAt: resolvedExpiresAt };
+  rememberAccessToken(accessToken);
+  return { accessToken, expiresAt: parseConnectionExpiresAt(expiresAt) };
 }
 
 function tokenEndpoint(baseUrl: string): string {
@@ -228,10 +228,7 @@ export async function exchangeGitLabOAuthCode(input: {
     // Token exchange is still valid when the identity lookup is temporarily unavailable.
   }
   await writeConnection(connection);
-  rememberAccessToken(
-    connection.accessToken,
-    parseConnectionExpiresAt(connection.expiresAt),
-  );
+  rememberAccessToken(connection.accessToken);
   return connection;
 }
 
@@ -279,12 +276,17 @@ export async function resolveGitLabOAuthAccessTokenWithMetadata(options?: {
     );
     if (!response.ok) {
       if (generation !== connectionGeneration) return null;
-      // Another replica may have already rotated the tokens. Prefer a still
-      // valid access token over marking reauthorization_required.
+      // Another replica may have already rotated the tokens. Only a connection
+      // that actually changed proves that; re-reading our own unchanged
+      // connection would mask a real invalid_grant and re-enter this refresh on
+      // every later call. Require the same headroom as a normal resolve so we
+      // never hand back a token that dies before the next refresh tick.
       const latest = await readConnection();
       if (
         latest?.status === 'active' &&
-        Date.parse(latest.expiresAt) > Date.now()
+        latest.accessToken !== connection.accessToken &&
+        Date.parse(latest.expiresAt) >
+          Date.now() + OAUTH_ACCESS_TOKEN_REFRESH_SKEW_MS
       ) {
         return toAccessTokenResult(latest.accessToken, latest.expiresAt);
       }
@@ -326,22 +328,16 @@ export async function resolveGitLabOAuthAccessToken(options?: {
   return result?.accessToken ?? null;
 }
 
-/** Bearer (OAuth) vs PRIVATE-TOKEN (static gl* tokens). */
+/**
+ * Bearer (OAuth) vs PRIVATE-TOKEN. Only tokens this process actually minted
+ * qualify: guessing from prefixes misclassifies deploy tokens, CI job tokens,
+ * and self-managed instances with a customised PAT prefix.
+ */
 export function isGitLabOAuthAccessToken(token: string): boolean {
   if (!token) {
     return false;
   }
-  if (token === cachedAccessToken) {
-    return true;
-  }
-  if (GITLAB_STATIC_TOKEN_PREFIX.test(token)) {
-    return false;
-  }
-  return cachedAccessToken !== null;
-}
-
-export function getCachedGitLabOAuthAccessTokenExpiresAt(): Date | null {
-  return cachedAccessTokenExpiresAt;
+  return token === cachedAccessToken || token === previousAccessToken;
 }
 
 export async function markGitLabOAuthReauthorizationRequired(): Promise<void> {

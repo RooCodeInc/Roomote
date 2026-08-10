@@ -77,6 +77,30 @@ describe('refreshGitHubTokenWithMetadata', () => {
     expect(result.expiresAt).toBe(expiresAt.toISOString());
   });
 
+  it('never schedules past the default cadence for a long-lived expiry', async () => {
+    // Multi-provider runs merge to the soonest *known* expiry, but a GitHub
+    // installation token reports no expiry and still dies after ~1h. Expiry
+    // may only pull the refresh earlier, never push it out.
+    const before = Date.now();
+    mockCreateSourceControlTokenForTaskRun.mockResolvedValue({
+      provider: 'github',
+      token: 'ghs_app_token',
+      envVar: 'GH_TOKEN',
+      envVars: { GH_TOKEN: 'ghs_app_token' },
+      source: 'app',
+      expiresAt: new Date(before + 2 * 60 * 60 * 1000),
+    });
+
+    const result = await refreshGitHubTokenWithMetadata(
+      { type: 'run', runId: 42 } as never,
+      42,
+    );
+
+    expect(Date.parse(result.nextRefreshAt)).toBeLessThanOrEqual(
+      before + 45 * 60 * 1000,
+    );
+  });
+
   it('keeps the default cadence when expiry is unknown', async () => {
     const before = Date.now();
     mockCreateSourceControlTokenForTaskRun.mockResolvedValue({

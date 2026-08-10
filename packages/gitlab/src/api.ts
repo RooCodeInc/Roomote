@@ -1197,11 +1197,10 @@ export async function createTaskRunScopedGitLabTokens(
   /** OAuth access-token expiry for the worker refresh loop, if known. */
   expiresAt: Date | null;
 }> {
-  const oauthToken = await resolveGitLabOAuthAccessTokenWithMetadata({
-    fetchImpl: options?.fetchImpl,
-  });
-  const deploymentToken =
-    oauthToken?.accessToken ?? (await resolveGitLabToken());
+  // `options.fetchImpl` is the GitLab *API* fetch used to mint project tokens
+  // below, so it is deliberately not forwarded to the OAuth token endpoint.
+  const oauthToken = await resolveGitLabOAuthAccessTokenWithMetadata();
+  const deploymentToken = oauthToken?.accessToken;
 
   if (!deploymentToken?.trim()) {
     throw new Error(
