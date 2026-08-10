@@ -335,7 +335,43 @@ describe('github webhook router', () => {
     expect(response.status).toBe(200);
     expect(mockHandleGitHubIssueComment).toHaveBeenCalledWith(payload);
     expect(mockHandlePrComment).not.toHaveBeenCalled();
+    expect(mockQueuePrReviewActivityNotification).not.toHaveBeenCalled();
     expect(mockQueuePrReviewSummaryNotification).not.toHaveBeenCalled();
+  });
+
+  it('routes top-level PR comments through feedback aggregation and mention handling', async () => {
+    const payload = {
+      action: 'created',
+      installation: { id: 1 },
+      repository: { id: 10, full_name: 'test-org/test-repo' },
+      issue: {
+        number: 42,
+        pull_request: {
+          html_url: 'https://github.com/test-org/test-repo/pull/42',
+        },
+      },
+      comment: {
+        id: 7,
+        body: 'Could this error path preserve the original cause?',
+        user: { login: 'alice' },
+      },
+      sender: { login: 'alice' },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-pr-comment-1',
+        'x-github-event': 'issue_comment',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockQueuePrReviewActivityNotification).toHaveBeenCalledWith(payload);
+    expect(mockQueuePrReviewSummaryNotification).toHaveBeenCalledWith(payload);
+    expect(mockHandlePrComment).toHaveBeenCalledWith(payload);
   });
 
   it('routes opened issues with body mentions through handleGitHubIssueComment', async () => {

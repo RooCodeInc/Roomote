@@ -1,20 +1,12 @@
 // pnpm --filter @roomote/api test src/handlers/github/__tests__/notifyPrReviewActivity.test.ts
 
-const {
-  mockEnqueuePrReviewNotification,
-  mockRedisGet,
-  mockRedisSet,
-  mockRedisDel,
-  mockRedisEval,
-} = vi.hoisted(() => ({
-  mockEnqueuePrReviewNotification: vi.fn().mockResolvedValue({
-    notifiedTaskCount: 1,
-  }),
-  mockRedisGet: vi.fn(),
-  mockRedisSet: vi.fn(),
-  mockRedisDel: vi.fn(),
-  mockRedisEval: vi.fn(),
-}));
+const { mockEnqueuePrReviewNotification, mockStartPrReviewNotificationCycle } =
+  vi.hoisted(() => ({
+    mockEnqueuePrReviewNotification: vi.fn().mockResolvedValue({
+      notifiedTaskCount: 1,
+    }),
+    mockStartPrReviewNotificationCycle: vi.fn().mockResolvedValue(undefined),
+  }));
 
 vi.mock('@roomote/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/env')>();
@@ -29,25 +21,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
 
 vi.mock('@roomote/sdk/server', () => ({
   enqueuePrReviewNotification: mockEnqueuePrReviewNotification,
-  getPrReviewCompletedMarkerKey: ({
-    repository,
-    prNumber,
-    reviewHeadSha,
-  }: {
-    repository: string;
-    prNumber: number;
-    reviewHeadSha: string;
-  }) =>
-    `pr-review-notification:review-completed:${encodeURIComponent(repository)}#${prNumber}:${reviewHeadSha}`,
-}));
-
-vi.mock('@roomote/redis', () => ({
-  getRedis: () => ({
-    get: (...args: unknown[]) => mockRedisGet(...args),
-    set: (...args: unknown[]) => mockRedisSet(...args),
-    del: (...args: unknown[]) => mockRedisDel(...args),
-    eval: (...args: unknown[]) => mockRedisEval(...args),
-  }),
+  startPrReviewNotificationCycle: mockStartPrReviewNotificationCycle,
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -93,7 +67,7 @@ import {
   queuePrReviewSummaryNotification,
 } from '../notifyPrReviewActivity';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/* oxlint-disable typescript/no-explicit-any */
 
 const repository = { full_name: 'owner/repo' };
 const pullRequest = {
@@ -101,6 +75,8 @@ const pullRequest = {
   html_url: 'https://github.com/owner/repo/pull/42',
 };
 const reviewHeadSha = 'f0c89ce4';
+const createdAt = '2026-08-10T19:30:00.000Z';
+const observedAt = Date.parse(createdAt);
 
 function reviewPayload(review: {
   body?: string | null;
@@ -111,9 +87,11 @@ function reviewPayload(review: {
     repository,
     pull_request: pullRequest,
     review: {
+      id: 1000,
       body: review.body ?? null,
       commit_id: reviewHeadSha,
       state: review.state ?? 'approved',
+      submitted_at: createdAt,
       html_url: 'https://github.com/owner/repo/pull/42#pullrequestreview-1000',
       user: review.login === null ? null : { login: review.login ?? 'alice' },
     },
@@ -129,10 +107,40 @@ function reviewCommentPayload(comment: {
     repository,
     pull_request: pullRequest,
     comment: {
+      id: 2000,
       body: comment.body ?? 'Looks off to me',
       commit_id: reviewHeadSha,
+      created_at: createdAt,
       in_reply_to_id: comment.inReplyToId,
+      pull_request_review_id: 1000,
       html_url: 'https://github.com/owner/repo/pull/42#discussion_r2000',
+      user: comment.login === null ? null : { login: comment.login ?? 'alice' },
+    },
+  };
+}
+
+function issueCommentPayload(
+  comment: {
+    body?: string;
+    login?: string | null;
+    isPr?: boolean;
+  } = {},
+): any {
+  return {
+    repository,
+    issue: {
+      number: 42,
+      html_url: 'https://github.com/owner/repo/pull/42',
+      pull_request:
+        comment.isPr === false
+          ? undefined
+          : { html_url: 'https://github.com/owner/repo/pull/42' },
+    },
+    comment: {
+      id: 3000,
+      body: comment.body ?? 'Could we simplify this?',
+      created_at: createdAt,
+      html_url: 'https://github.com/owner/repo/pull/42#issuecomment-3000',
       user: comment.login === null ? null : { login: comment.login ?? 'alice' },
     },
   };
@@ -153,8 +161,10 @@ describe('buildPrReviewActivityNotificationInput', () => {
         kind: 'review',
         authorLogin: 'alice',
         reviewHeadSha,
+        batchId: 'github-review:1000',
         reviewState: 'changes_requested',
         url: 'https://github.com/owner/repo/pull/42#pullrequestreview-1000',
+        observedAt,
       },
     });
   });
@@ -205,9 +215,49 @@ describe('buildPrReviewActivityNotificationInput', () => {
         kind: 'review_comment',
         authorLogin: 'bob',
         reviewHeadSha,
+        batchId: 'github-review:1000',
         url: 'https://github.com/owner/repo/pull/42#discussion_r2000',
+        observedAt,
       },
     });
+  });
+
+  it('builds an issue_comment event for a human top-level PR comment', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(issueCommentPayload()),
+    ).toEqual({
+      repository: 'owner/repo',
+      prNumber: 42,
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      sourceControlProvider: 'github',
+      event: {
+        kind: 'issue_comment',
+        authorLogin: 'alice',
+        url: 'https://github.com/owner/repo/pull/42#issuecomment-3000',
+        observedAt,
+      },
+    });
+  });
+
+  it('skips top-level PR comments handled by the mention flow', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        issueCommentPayload({ body: '@roomote please fix this' }),
+      ),
+    ).toBeNull();
+  });
+
+  it('skips Roomote-authored and non-PR issue comments', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        issueCommentPayload({ login: 'roomote[bot]' }),
+      ),
+    ).toBeNull();
+    expect(
+      buildPrReviewActivityNotificationInput(
+        issueCommentPayload({ isPr: false }),
+      ),
+    ).toBeNull();
   });
 
   it('keeps new review threads authored by Roomote (e.g. PR review findings)', () => {
@@ -257,8 +307,6 @@ describe('queuePrReviewActivityNotification', () => {
     mockEnqueuePrReviewNotification.mockResolvedValue({
       notifiedTaskCount: 1,
     });
-    mockRedisGet.mockReset();
-    mockRedisGet.mockResolvedValue(null);
   });
 
   it('enqueues qualifying events', () => {
@@ -273,8 +321,10 @@ describe('queuePrReviewActivityNotification', () => {
         kind: 'review',
         authorLogin: 'alice',
         reviewHeadSha,
+        batchId: 'github-review:1000',
         reviewState: 'approved',
         url: 'https://github.com/owner/repo/pull/42#pullrequestreview-1000',
+        observedAt,
       },
     });
   });
@@ -287,23 +337,7 @@ describe('queuePrReviewActivityNotification', () => {
     expect(mockEnqueuePrReviewNotification).not.toHaveBeenCalled();
   });
 
-  it('skips Roomote-authored activity after the same review pass completed', async () => {
-    mockRedisGet.mockResolvedValue('1');
-
-    queuePrReviewActivityNotification(
-      reviewCommentPayload({ login: 'roomote[bot]' }),
-    );
-
-    await vi.waitFor(() => expect(mockRedisGet).toHaveBeenCalled());
-    expect(mockRedisGet).toHaveBeenCalledWith(
-      expect.stringContaining(
-        `review-completed:owner%2Frepo#42:${reviewHeadSha}`,
-      ),
-    );
-    expect(mockEnqueuePrReviewNotification).not.toHaveBeenCalled();
-  });
-
-  it('keeps Roomote-authored activity when the review pass has no completion marker', async () => {
+  it('passes Roomote-authored activity to the shared coordinator', async () => {
     queuePrReviewActivityNotification(
       reviewCommentPayload({ login: 'roomote[bot]' }),
     );
@@ -311,17 +345,6 @@ describe('queuePrReviewActivityNotification', () => {
     await vi.waitFor(() =>
       expect(mockEnqueuePrReviewNotification).toHaveBeenCalled(),
     );
-  });
-
-  it('keeps human activity after a Roomote review pass completed', async () => {
-    mockRedisGet.mockResolvedValue('1');
-
-    queuePrReviewActivityNotification(reviewCommentPayload({ login: 'alice' }));
-
-    await vi.waitFor(() =>
-      expect(mockEnqueuePrReviewNotification).toHaveBeenCalled(),
-    );
-    expect(mockRedisGet).not.toHaveBeenCalled();
   });
 
   it('swallows enqueue failures', async () => {
@@ -380,6 +403,7 @@ function summaryPayload({
   commentId = 99,
   isPr = true,
   previousBody,
+  updatedAt = createdAt,
 }: {
   body?: string;
   login?: string | null;
@@ -387,6 +411,7 @@ function summaryPayload({
   isPr?: boolean;
   /** When set, models an issue_comment.edited payload with changes.body.from. */
   previousBody?: string | null;
+  updatedAt?: string;
 } = {}): any {
   return {
     repository,
@@ -400,6 +425,8 @@ function summaryPayload({
     comment: {
       id: commentId,
       body,
+      created_at: createdAt,
+      updated_at: updatedAt,
       html_url: `https://github.com/owner/repo/pull/42#issuecomment-${commentId}`,
       user: login === null ? null : { login },
     },
@@ -433,11 +460,10 @@ describe('buildPrReviewSummaryNotification', () => {
         reviewHeadSha,
         summary: '1 minor doc note; no blocking issues.',
         url: 'https://github.com/owner/repo/pull/42#issuecomment-99',
+        observedAt,
         roomoteAuthored: true,
       },
     });
-    expect(notification?.dedupKey).toContain('99');
-    expect(notification?.dedupKey).toContain('f0c89ce4');
   });
 
   it('notifies when an edit flips in-progress status to a terminal review result', () => {
@@ -592,134 +618,87 @@ describe('queuePrReviewSummaryNotification', () => {
   beforeEach(() => {
     mockEnqueuePrReviewNotification.mockClear();
     mockEnqueuePrReviewNotification.mockResolvedValue({ notifiedTaskCount: 1 });
-    mockRedisSet.mockReset();
-    mockRedisSet.mockResolvedValue('OK');
-    mockRedisDel.mockReset();
-    mockRedisDel.mockResolvedValue(1);
-    mockRedisEval.mockReset();
-    mockRedisEval.mockResolvedValue(1);
+    mockStartPrReviewNotificationCycle.mockClear();
+    mockStartPrReviewNotificationCycle.mockResolvedValue(undefined);
   });
 
-  it('enqueues the summary notification once per review pass', async () => {
-    queuePrReviewSummaryNotification(summaryPayload());
+  it('opens an explicit cycle when the Roomote summary enters in-progress state', async () => {
+    queuePrReviewSummaryNotification(
+      summaryPayload({ body: IN_PROGRESS_SUMMARY_BODY }),
+    );
+
+    await vi.waitFor(() =>
+      expect(mockStartPrReviewNotificationCycle).toHaveBeenCalledWith({
+        repository: 'owner/repo',
+        prNumber: 42,
+        reviewHeadSha,
+        cycleId: `github-summary:99:${createdAt}`,
+        observedAt,
+      }),
+    );
+    expect(mockEnqueuePrReviewNotification).not.toHaveBeenCalled();
+  });
+
+  it('enqueues the terminal summary through the shared coordinator', async () => {
+    queuePrReviewSummaryNotification(
+      summaryPayload({
+        body: TERMINAL_SUMMARY_BODY,
+        previousBody: IN_PROGRESS_SUMMARY_BODY,
+      }),
+    );
 
     await vi.waitFor(() =>
       expect(mockEnqueuePrReviewNotification).toHaveBeenCalledWith(
         expect.objectContaining({
-          event: expect.objectContaining({ kind: 'review_summary' }),
+          event: expect.objectContaining({
+            kind: 'review_summary',
+            reviewHeadSha,
+            observedAt,
+          }),
         }),
       ),
     );
-    expect(mockRedisSet).toHaveBeenCalledWith(
-      expect.stringContaining('summary-notified'),
-      '1',
-      'EX',
-      expect.any(Number),
-      'NX',
-    );
-    expect(mockRedisSet).toHaveBeenCalledWith(
-      expect.stringContaining(
-        `review-completed:owner%2Frepo#42:${reviewHeadSha}`,
-      ),
-      expect.stringContaining('summary-notified'),
-      'EX',
-      expect.any(Number),
-    );
-    const completedMarkerCall = mockRedisSet.mock.calls.find(([key]) =>
-      String(key).includes('review-completed'),
-    );
-    expect(completedMarkerCall).toBeDefined();
-    expect(completedMarkerCall?.[0]).toBe(
-      `pr-review-notification:review-completed:owner%2Frepo#42:${reviewHeadSha}`,
-    );
-    expect(
-      mockRedisSet.mock.invocationCallOrder.find(
-        (_, index) => mockRedisSet.mock.calls[index] === completedMarkerCall,
-      ),
-    ).toBeLessThan(
-      mockEnqueuePrReviewNotification.mock.invocationCallOrder[0]!,
-    );
-    expect(mockRedisDel).not.toHaveBeenCalled();
-    expect(mockRedisEval).not.toHaveBeenCalled();
   });
 
-  it('suppresses Roomote inline activity while the summary enqueue is still pending', async () => {
-    let resolveSummaryEnqueue!: (value: { notifiedTaskCount: number }) => void;
-    mockEnqueuePrReviewNotification.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          resolveSummaryEnqueue = resolve;
-        }),
+  it('opens a distinct cycle when the same SHA is reviewed again', async () => {
+    const nextUpdatedAt = '2026-08-10T20:30:00.000Z';
+
+    await queuePrReviewSummaryNotification(
+      summaryPayload({ body: IN_PROGRESS_SUMMARY_BODY }),
+    );
+    await queuePrReviewSummaryNotification(
+      summaryPayload({
+        body: IN_PROGRESS_SUMMARY_BODY,
+        previousBody: TERMINAL_SUMMARY_BODY,
+        updatedAt: nextUpdatedAt,
+      }),
     );
 
-    queuePrReviewSummaryNotification(summaryPayload());
-
-    await vi.waitFor(() =>
-      expect(mockRedisSet).toHaveBeenCalledWith(
-        expect.stringContaining('review-completed'),
-        expect.stringContaining('summary-notified'),
-        'EX',
-        expect.any(Number),
-      ),
-    );
-    mockRedisGet.mockResolvedValue('summary-notified');
-
-    queuePrReviewActivityNotification(
-      reviewCommentPayload({ login: 'roomote[bot]' }),
-    );
-
-    await vi.waitFor(() => expect(mockRedisGet).toHaveBeenCalled());
-    expect(mockEnqueuePrReviewNotification).toHaveBeenCalledTimes(1);
-
-    resolveSummaryEnqueue({ notifiedTaskCount: 1 });
-  });
-
-  it('releases the dedup claim when the notification was a no-op', async () => {
-    mockEnqueuePrReviewNotification.mockResolvedValue({
-      notifiedTaskCount: 0,
-      reason: 'no_thread_context',
+    expect(mockStartPrReviewNotificationCycle).toHaveBeenNthCalledWith(1, {
+      repository: 'owner/repo',
+      prNumber: 42,
+      reviewHeadSha,
+      cycleId: `github-summary:99:${createdAt}`,
+      observedAt,
     });
-
-    queuePrReviewSummaryNotification(summaryPayload());
-
-    await vi.waitFor(() =>
-      expect(mockRedisDel).toHaveBeenCalledWith(
-        expect.stringContaining('summary-notified'),
-      ),
-    );
-    expect(mockRedisEval).toHaveBeenCalledWith(
-      expect.stringContaining("redis.call('GET', KEYS[1]) == ARGV[1]"),
-      1,
-      expect.stringContaining('review-completed'),
-      expect.stringContaining('summary-notified'),
-    );
+    expect(mockStartPrReviewNotificationCycle).toHaveBeenNthCalledWith(2, {
+      repository: 'owner/repo',
+      prNumber: 42,
+      reviewHeadSha,
+      cycleId: `github-summary:99:${nextUpdatedAt}`,
+      observedAt: Date.parse(nextUpdatedAt),
+    });
   });
 
-  it('releases the dedup claim when enqueueing fails', async () => {
-    mockEnqueuePrReviewNotification.mockRejectedValue(new Error('redis down'));
-
-    queuePrReviewSummaryNotification(summaryPayload());
-
-    await vi.waitFor(() =>
-      expect(mockRedisDel).toHaveBeenCalledWith(
-        expect.stringContaining('summary-notified'),
-      ),
+  it('does not reopen a cycle for an in-progress to in-progress edit', () => {
+    queuePrReviewSummaryNotification(
+      summaryPayload({
+        body: IN_PROGRESS_SUMMARY_BODY,
+        previousBody: IN_PROGRESS_SUMMARY_BODY,
+      }),
     );
-    expect(mockRedisEval).toHaveBeenCalledWith(
-      expect.stringContaining("redis.call('GET', KEYS[1]) == ARGV[1]"),
-      1,
-      expect.stringContaining('review-completed'),
-      expect.stringContaining('summary-notified'),
-    );
-  });
 
-  it('does not re-enqueue when the dedup key is already claimed', async () => {
-    mockRedisSet.mockResolvedValue(null);
-
-    queuePrReviewSummaryNotification(summaryPayload());
-
-    await vi.waitFor(() => expect(mockRedisSet).toHaveBeenCalled());
-    expect(mockEnqueuePrReviewNotification).not.toHaveBeenCalled();
+    expect(mockStartPrReviewNotificationCycle).not.toHaveBeenCalled();
   });
 
   it('does nothing for non-summary comments', () => {
@@ -727,7 +706,7 @@ describe('queuePrReviewSummaryNotification', () => {
       summaryPayload({ body: 'Just a regular comment' }),
     );
 
-    expect(mockRedisSet).not.toHaveBeenCalled();
+    expect(mockStartPrReviewNotificationCycle).not.toHaveBeenCalled();
     expect(mockEnqueuePrReviewNotification).not.toHaveBeenCalled();
   });
 });

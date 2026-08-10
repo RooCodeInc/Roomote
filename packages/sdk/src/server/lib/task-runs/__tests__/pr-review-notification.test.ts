@@ -2,6 +2,7 @@ const mockFindManyTaskPullRequests = vi.fn();
 const mockRedisSet = vi.fn();
 const mockRedisGet = vi.fn();
 const mockRedisDel = vi.fn();
+const mockRedisEval = vi.fn();
 const mockQueueAdd = vi.fn();
 const mockMultiExec = vi.fn();
 const mockResolveSlackTaskRunRouting = vi.fn();
@@ -46,6 +47,7 @@ vi.mock('@roomote/redis', () => ({
     get: (...args: unknown[]) => mockRedisGet(...args),
     set: (...args: unknown[]) => mockRedisSet(...args),
     del: (...args: unknown[]) => mockRedisDel(...args),
+    eval: (...args: unknown[]) => mockRedisEval(...args),
     multi: () => createMultiMock(),
   }),
 }));
@@ -63,11 +65,13 @@ vi.mock('../slack-task-run-routing', () => ({
 
 import {
   PR_REVIEW_NOTIFICATION_DEBOUNCE_MS,
+  PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS,
   consumePendingPrReviewActivity,
   enqueuePrReviewNotification,
   formatPrReviewActivityMessage,
   hasPrReviewNotificationThreadContext,
   resolvePrReviewNotificationRoute,
+  startPrReviewNotificationCycle,
 } from '../pr-review-notification';
 
 describe('enqueuePrReviewNotification', () => {
@@ -79,6 +83,7 @@ describe('enqueuePrReviewNotification', () => {
     mockRedisSet.mockResolvedValue('OK');
     mockRedisDel.mockResolvedValue(1);
     mockRedisGet.mockResolvedValue(null);
+    mockRedisEval.mockResolvedValue(1);
     mockQueueAdd.mockResolvedValue(undefined);
     mockMultiExec.mockResolvedValue([]);
   });
@@ -116,6 +121,7 @@ describe('enqueuePrReviewNotification', () => {
         prUrl: 'https://github.com/owner/repo/pull/42',
         deferrals: 0,
         immediate: false,
+        batchKind: 'human',
       },
       { delay: PR_REVIEW_NOTIFICATION_DEBOUNCE_MS },
     );
@@ -146,6 +152,7 @@ describe('enqueuePrReviewNotification', () => {
         prUrl: 'https://github.com/owner/repo/pull/42',
         deferrals: 0,
         immediate: false,
+        batchKind: 'human',
       },
       { delay: PR_REVIEW_NOTIFICATION_DEBOUNCE_MS },
     );
@@ -178,18 +185,38 @@ describe('enqueuePrReviewNotification', () => {
     expect(result).toEqual({ notifiedTaskCount: 1 });
     expect(mockQueueAdd).toHaveBeenCalledWith(
       'notify-pr-review-activity',
-      expect.objectContaining({ immediate: false }),
-      { delay: PR_REVIEW_NOTIFICATION_DEBOUNCE_MS },
+      expect.objectContaining({
+        immediate: false,
+        batchKind: 'roomote',
+      }),
+      { delay: PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS },
     );
   });
 
-  it('keeps immediate self-review activity separate from ordinary activity', async () => {
-    await enqueuePrReviewNotification(baseInput);
+  it('keeps a Roomote cycle in one pending batch and promotes its summary immediately', async () => {
+    mockRedisGet.mockResolvedValue(
+      JSON.stringify({
+        cycleId: 'cycle-1',
+        phase: 'open',
+        observedAt: 100,
+      }),
+    );
+
+    await enqueuePrReviewNotification({
+      ...baseInput,
+      event: {
+        kind: 'review_comment',
+        authorLogin: 'roomote[bot]',
+        reviewHeadSha: 'abc123',
+        roomoteAuthored: true,
+      },
+    });
     await enqueuePrReviewNotification({
       ...baseInput,
       event: {
         kind: 'review_summary',
         authorLogin: 'roomote[bot]',
+        reviewHeadSha: 'abc123',
         roomoteAuthored: true,
       },
     });
@@ -199,14 +226,23 @@ describe('enqueuePrReviewNotification', () => {
       .map((call) => String(call.args[0]));
     const markerKeys = mockRedisSet.mock.calls.map((call) => String(call[0]));
 
-    expect(pendingKeys).toEqual([
-      expect.not.stringContaining(':immediate'),
-      expect.stringContaining(':immediate'),
-    ]);
+    expect(pendingKeys).toHaveLength(2);
+    expect(pendingKeys[0]).toBe(pendingKeys[1]);
+    expect(pendingKeys[0]).toContain(':roomote:cycle-1');
     expect(markerKeys).toEqual([
-      expect.not.stringContaining(':immediate'),
+      expect.stringContaining(':delayed'),
       expect.stringContaining(':immediate'),
     ]);
+    expect(mockRedisEval).toHaveBeenCalledWith(
+      expect.stringContaining('decoded.cycleId ~= ARGV[1]'),
+      2,
+      expect.stringContaining('review-cycle:'),
+      expect.stringContaining('review-cycle-completed'),
+      'cycle-1',
+      expect.any(Number),
+      expect.stringContaining('completed'),
+      expect.any(Number),
+    );
   });
 
   it('does not schedule a second job while one is already pending', async () => {
@@ -226,6 +262,176 @@ describe('enqueuePrReviewNotification', () => {
       'queue down',
     );
     expect(mockRedisDel).toHaveBeenCalled();
+  });
+
+  it('suppresses late Roomote activity for a completed cycle', async () => {
+    mockRedisGet.mockResolvedValue(
+      JSON.stringify({
+        cycleId: 'cycle-1',
+        phase: 'completed',
+        observedAt: 200,
+      }),
+    );
+
+    const result = await enqueuePrReviewNotification({
+      ...baseInput,
+      event: {
+        kind: 'review_comment',
+        authorLogin: 'roomote[bot]',
+        reviewHeadSha: 'abc123',
+        roomoteAuthored: true,
+      },
+    });
+
+    expect(result).toEqual({
+      notifiedTaskCount: 0,
+      reason: 'review_cycle_completed',
+    });
+    expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it('fails open when optional cycle lookup fails for Roomote activity', async () => {
+    mockRedisGet.mockRejectedValue(new Error('redis read failed'));
+
+    await expect(
+      enqueuePrReviewNotification({
+        ...baseInput,
+        event: {
+          kind: 'review_comment',
+          authorLogin: 'roomote[bot]',
+          reviewHeadSha: 'abc123',
+          roomoteAuthored: true,
+        },
+      }),
+    ).resolves.toEqual({ notifiedTaskCount: 1 });
+    expect(mockQueueAdd).toHaveBeenCalled();
+  });
+
+  it('rolls back cycle completion if summary queueing fails', async () => {
+    mockRedisGet.mockResolvedValue(
+      JSON.stringify({
+        cycleId: 'cycle-1',
+        phase: 'open',
+        observedAt: 100,
+      }),
+    );
+    mockQueueAdd.mockRejectedValue(new Error('queue down'));
+
+    await expect(
+      enqueuePrReviewNotification({
+        ...baseInput,
+        event: {
+          kind: 'review_summary',
+          authorLogin: 'roomote[bot]',
+          reviewHeadSha: 'abc123',
+          roomoteAuthored: true,
+        },
+      }),
+    ).rejects.toThrow('queue down');
+
+    expect(mockRedisDel).toHaveBeenCalledWith(
+      expect.stringContaining('review-cycle-completed'),
+    );
+    expect(mockRedisEval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('GET', KEYS[1]) == ARGV[1]"),
+      1,
+      expect.stringContaining('review-cycle:'),
+      expect.stringContaining('completed'),
+      expect.stringContaining('open'),
+      expect.any(Number),
+    );
+  });
+
+  it('does not let a stale summary complete a newer review cycle', async () => {
+    mockRedisGet.mockResolvedValue(
+      JSON.stringify({
+        cycleId: 'cycle-2',
+        phase: 'open',
+        observedAt: 300,
+      }),
+    );
+
+    const result = await enqueuePrReviewNotification({
+      ...baseInput,
+      event: {
+        kind: 'review_summary',
+        authorLogin: 'roomote[bot]',
+        reviewHeadSha: 'abc123',
+        observedAt: 200,
+        roomoteAuthored: true,
+      },
+    });
+
+    expect(result).toEqual({
+      notifiedTaskCount: 0,
+      reason: 'stale_review_cycle',
+    });
+    expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it('does not overwrite a review cycle that advances during summary completion', async () => {
+    mockRedisGet.mockResolvedValue(
+      JSON.stringify({
+        cycleId: 'cycle-1',
+        phase: 'open',
+        observedAt: 100,
+      }),
+    );
+    mockRedisEval.mockResolvedValue(0);
+
+    const result = await enqueuePrReviewNotification({
+      ...baseInput,
+      event: {
+        kind: 'review_summary',
+        authorLogin: 'roomote[bot]',
+        reviewHeadSha: 'abc123',
+        observedAt: 200,
+        roomoteAuthored: true,
+      },
+    });
+
+    expect(result).toEqual({
+      notifiedTaskCount: 0,
+      reason: 'stale_review_cycle',
+    });
+    expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+});
+
+describe('startPrReviewNotificationCycle', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRedisEval.mockResolvedValue(1);
+  });
+
+  it('records ordered, explicit cycles so the same SHA can be reviewed again', async () => {
+    await startPrReviewNotificationCycle({
+      repository: 'owner/repo',
+      prNumber: 42,
+      reviewHeadSha: 'abc123',
+      cycleId: 'cycle-1',
+      observedAt: 100,
+    });
+    await startPrReviewNotificationCycle({
+      repository: 'owner/repo',
+      prNumber: 42,
+      reviewHeadSha: 'abc123',
+      cycleId: 'cycle-2',
+      observedAt: 200,
+    });
+
+    expect(mockRedisEval).toHaveBeenLastCalledWith(
+      expect.stringContaining('tonumber(decoded.observedAt)'),
+      1,
+      'pr-review-notification:review-cycle:owner%2Frepo#42:abc123',
+      JSON.stringify({
+        cycleId: 'cycle-2',
+        phase: 'open',
+        observedAt: 200,
+      }),
+      200,
+      expect.any(Number),
+    );
   });
 });
 
@@ -415,6 +621,7 @@ describe('consumePendingPrReviewActivity', () => {
             authorLogin: 'roomote[bot]',
             roomoteAuthored: true,
             reviewHeadSha: 'abc123',
+            batchId: 'cycle-1',
           }),
           JSON.stringify({
             kind: 'review_comment',
@@ -439,7 +646,7 @@ describe('consumePendingPrReviewActivity', () => {
     });
 
     expect(mockRedisGet).toHaveBeenCalledWith(
-      'pr-review-notification:review-completed:owner%2Frepo#42:abc123',
+      'pr-review-notification:review-cycle-completed:owner%2Frepo#42:cycle-1',
     );
     expect(events).toEqual([
       {
@@ -463,6 +670,7 @@ describe('consumePendingPrReviewActivity', () => {
         authorLogin: 'roomote[bot]',
         roomoteAuthored: true,
         reviewHeadSha: 'abc123',
+        batchId: 'cycle-1',
       },
       {
         kind: 'review_comment',
