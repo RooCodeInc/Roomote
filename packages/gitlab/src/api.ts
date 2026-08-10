@@ -18,6 +18,7 @@ import {
   resolveDeploymentEnvVar,
 } from '@roomote/db/server';
 import {
+  getCachedGitLabOAuthAccessTokenExpiresAt,
   isGitLabOAuthAccessToken,
   resolveGitLabOAuthAccessToken,
 } from './oauth';
@@ -1193,6 +1194,12 @@ export async function createTaskRunScopedGitLabTokens(
   credentials: GitLabScopedProjectTokenCredential[];
   proxyCredentials: GitLabScopedProjectTokenCredential[];
   artifactsPatch: Record<string, GitLabScopedProjectTokenDescriptor[]>;
+  /**
+   * When set, the worker refresh loop schedules the next mint before this
+   * instant (with a small buffer). OAuth access tokens expire in ~2h; without
+   * this the fixed 45m cadence can leave a dead token in the sandbox.
+   */
+  expiresAt: Date | null;
 }> {
   const deploymentToken = await resolveGitLabToken();
 
@@ -1206,6 +1213,9 @@ export async function createTaskRunScopedGitLabTokens(
   const apiBaseUrl = options?.apiBaseUrl ?? buildGitLabApiBaseUrl(baseUrl);
   const host = hostFromBaseUrl(baseUrl);
   const repositoriesList = await resolveGitLabRepositoryRowsForTaskRun(taskRun);
+  const oauthExpiresAt = isGitLabOAuthAccessToken(deploymentToken)
+    ? getCachedGitLabOAuthAccessTokenExpiresAt()
+    : null;
 
   // OAuth grants are deployment-scoped and already carry the repository
   // permissions needed by the worker. Do not attempt to mint GitLab project
@@ -1224,6 +1234,7 @@ export async function createTaskRunScopedGitLabTokens(
       artifactsPatch: {
         [GITLAB_SCOPED_PROJECT_TOKENS_ARTIFACT_KEY]: [],
       },
+      expiresAt: oauthExpiresAt,
     };
   }
 
@@ -1316,6 +1327,7 @@ export async function createTaskRunScopedGitLabTokens(
         artifactsPatch: {
           [GITLAB_SCOPED_PROJECT_TOKENS_ARTIFACT_KEY]: [],
         },
+        expiresAt: null,
       };
     }
 
@@ -1328,6 +1340,9 @@ export async function createTaskRunScopedGitLabTokens(
     artifactsPatch: {
       [GITLAB_SCOPED_PROJECT_TOKENS_ARTIFACT_KEY]: nextDescriptors,
     },
+    // Scoped project tokens are rotated on every mint/refresh; the fixed
+    // worker cadence is enough for their day-long TTL.
+    expiresAt: null,
   };
 }
 

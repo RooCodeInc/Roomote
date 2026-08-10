@@ -1,10 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockTaskRunsFindFirst, mockCreateSourceControlTokenForTaskRun } =
-  vi.hoisted(() => ({
-    mockTaskRunsFindFirst: vi.fn(),
-    mockCreateSourceControlTokenForTaskRun: vi.fn(),
-  }));
+const {
+  mockTaskRunsFindFirst,
+  mockUpdate,
+  mockCreateSourceControlTokenForTaskRun,
+} = vi.hoisted(() => ({
+  mockTaskRunsFindFirst: vi.fn(),
+  mockUpdate: vi.fn(() => ({
+    set: vi.fn(() => ({
+      where: vi.fn(async () => undefined),
+    })),
+  })),
+  mockCreateSourceControlTokenForTaskRun: vi.fn(),
+}));
 
 vi.mock('@roomote/db/server', () => ({
   db: {
@@ -13,6 +21,7 @@ vi.mock('@roomote/db/server', () => ({
         findFirst: (...args: unknown[]) => mockTaskRunsFindFirst(...args),
       },
     },
+    update: (...args: unknown[]) => mockUpdate(...args),
   },
   taskRuns: { id: 'taskRuns.id' },
   eq: vi.fn(),
@@ -55,6 +64,23 @@ describe('refreshGitHubTokenWithMetadata', () => {
 
     expect(result.expiresAt).toBe('2026-08-10T12:10:00.000Z');
     expect(result.nextRefreshAt).toBe('2026-08-10T12:05:00.000Z');
+  });
+
+  it('schedules app-backed GitLab credentials before their OAuth expiry', async () => {
+    mockCreateSourceControlTokenForTaskRun.mockResolvedValue({
+      provider: 'gitlab',
+      token: '',
+      envVar: 'GITLAB_TOKEN',
+      envVars: {},
+      gitProxyCredentials: [],
+      source: 'app',
+      expiresAt: new Date('2026-08-10T12:30:00.000Z'),
+    });
+
+    const result = await refreshGitHubTokenWithMetadata({} as never, 123);
+
+    expect(result.expiresAt).toBe('2026-08-10T12:30:00.000Z');
+    expect(result.nextRefreshAt).toBe('2026-08-10T12:25:00.000Z');
   });
 
   it('keeps the default interval for credentials without an expiry', async () => {
