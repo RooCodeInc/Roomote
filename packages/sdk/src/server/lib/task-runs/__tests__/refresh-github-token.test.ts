@@ -1,0 +1,74 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { mockTaskRunsFindFirst, mockCreateSourceControlTokenForTaskRun } =
+  vi.hoisted(() => ({
+    mockTaskRunsFindFirst: vi.fn(),
+    mockCreateSourceControlTokenForTaskRun: vi.fn(),
+  }));
+
+vi.mock('@roomote/db/server', () => ({
+  db: {
+    query: {
+      taskRuns: {
+        findFirst: (...args: unknown[]) => mockTaskRunsFindFirst(...args),
+      },
+    },
+  },
+  taskRuns: { id: 'taskRuns.id' },
+  eq: vi.fn(),
+}));
+
+vi.mock('../dequeue-helpers', () => ({
+  createSourceControlTokenForTaskRun: (...args: unknown[]) =>
+    mockCreateSourceControlTokenForTaskRun(...args),
+}));
+
+import { refreshGitHubTokenWithMetadata } from '../refresh-github-token';
+
+describe('refreshGitHubTokenWithMetadata', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-10T12:00:00.000Z'));
+    mockTaskRunsFindFirst.mockResolvedValue({
+      id: 123,
+      artifacts: null,
+    });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('schedules app-backed Gitea credentials before their OAuth expiry', async () => {
+    mockCreateSourceControlTokenForTaskRun.mockResolvedValue({
+      provider: 'gitea',
+      token: '',
+      envVar: 'GITEA_TOKEN',
+      envVars: {},
+      gitProxyCredentials: [],
+      source: 'app',
+      expiresAt: new Date('2026-08-10T12:10:00.000Z'),
+    });
+
+    const result = await refreshGitHubTokenWithMetadata({} as never, 123);
+
+    expect(result.expiresAt).toBe('2026-08-10T12:10:00.000Z');
+    expect(result.nextRefreshAt).toBe('2026-08-10T12:05:00.000Z');
+  });
+
+  it('keeps the default interval for credentials without an expiry', async () => {
+    mockCreateSourceControlTokenForTaskRun.mockResolvedValue({
+      provider: 'github',
+      token: 'github-token',
+      envVar: 'GH_TOKEN',
+      envVars: { GH_TOKEN: 'github-token' },
+      source: 'app',
+      expiresAt: null,
+    });
+
+    const result = await refreshGitHubTokenWithMetadata({} as never, 123);
+
+    expect(result.nextRefreshAt).toBe('2026-08-10T12:45:00.000Z');
+  });
+});

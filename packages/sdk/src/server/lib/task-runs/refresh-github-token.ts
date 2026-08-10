@@ -9,9 +9,9 @@ import { db, taskRuns, eq } from '@roomote/db/server';
 
 import { createSourceControlTokenForTaskRun } from './dequeue-helpers';
 
-const DEFAULT_GITHUB_TOKEN_REFRESH_INTERVAL_MS = 45 * 60 * 1000;
-const USER_GITHUB_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
-const MIN_GITHUB_TOKEN_REFRESH_DELAY_MS = 60 * 1000;
+const DEFAULT_SOURCE_CONTROL_TOKEN_REFRESH_INTERVAL_MS = 45 * 60 * 1000;
+const SOURCE_CONTROL_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
+const MIN_SOURCE_CONTROL_TOKEN_REFRESH_DELAY_MS = 60 * 1000;
 
 /**
  * Generate a fresh source-control token for a task run within the caller's
@@ -71,13 +71,13 @@ export async function refreshGitHubTokenWithMetadata(
 
   const now = Date.now();
 
-  const nextRefreshAtMs =
-    tokenResult.source === 'user' && tokenResult.expiresAt
-      ? Math.max(
-          now + MIN_GITHUB_TOKEN_REFRESH_DELAY_MS,
-          tokenResult.expiresAt.getTime() - USER_GITHUB_TOKEN_REFRESH_BUFFER_MS,
-        )
-      : now + DEFAULT_GITHUB_TOKEN_REFRESH_INTERVAL_MS;
+  const nextRefreshAtMs = tokenResult.expiresAt
+    ? Math.max(
+        now + MIN_SOURCE_CONTROL_TOKEN_REFRESH_DELAY_MS,
+        tokenResult.expiresAt.getTime() -
+          SOURCE_CONTROL_TOKEN_REFRESH_BUFFER_MS,
+      )
+    : now + DEFAULT_SOURCE_CONTROL_TOKEN_REFRESH_INTERVAL_MS;
 
   return {
     token: tokenResult.token,

@@ -170,6 +170,7 @@ describe('createSourceControlTokenForTaskRun', () => {
           originBaseUrl: 'https://git.example.com',
         },
       ],
+      expiresAt: new Date('2026-08-10T15:00:00.000Z'),
     });
     mockCreateTaskRunAdoCredentials.mockResolvedValue({
       credentials: [
@@ -324,7 +325,7 @@ describe('createSourceControlTokenForTaskRun', () => {
         },
       ],
       source: 'app',
-      expiresAt: null,
+      expiresAt: new Date('2026-08-10T15:00:00.000Z'),
     });
     expect(mockCreateTaskRunWorkerGitHubToken).not.toHaveBeenCalled();
     expect(mockCreateTaskRunGiteaCredentials).toHaveBeenCalledWith(
@@ -449,6 +450,24 @@ describe('createSourceControlTokenForTaskRun', () => {
     ).toBeLessThan(
       mockCreateTaskRunScopedGitLabTokens.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it('keeps the earliest expiry when merging multiple providers', async () => {
+    const result = await createSourceControlTokenForTaskRun(
+      makeTaskRun({
+        repo: 'owner/repo',
+        sourceControlProvider: 'github',
+        repositoryProviders: {
+          'owner/repo': 'github',
+          'group/project': 'gitea',
+        },
+        description: 'Work across GitHub and Gitea',
+      } as TaskRun['payload']),
+      '[test]',
+      { maxRetries: 1 },
+    );
+
+    expect(result?.expiresAt).toEqual(new Date('2026-08-10T15:00:00.000Z'));
   });
 
   it('retries only the failing provider and returns no partial token', async () => {
