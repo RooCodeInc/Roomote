@@ -536,7 +536,7 @@ async function createProviderToken(
           provider,
         })),
         source: 'app',
-        expiresAt: null,
+        expiresAt: credentials.expiresAt,
       };
     }
     case 'bitbucket': {
@@ -599,6 +599,12 @@ function mergeProviderTokens(
         ...(merged.artifactsPatch ?? {}),
         ...(token.artifactsPatch ?? {}),
       },
+      expiresAt:
+        merged.expiresAt && token.expiresAt
+          ? new Date(
+              Math.min(merged.expiresAt.getTime(), token.expiresAt.getTime()),
+            )
+          : (merged.expiresAt ?? token.expiresAt),
     }),
     primaryToken,
   );

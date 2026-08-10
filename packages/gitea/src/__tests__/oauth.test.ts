@@ -166,4 +166,100 @@ describe('Gitea deployment OAuth', () => {
     expect(writeMock).not.toHaveBeenCalled();
     expect(deleteWhereMock).toHaveBeenCalledOnce();
   });
+
+  it('keeps the connection active when refresh fails transiently', async () => {
+    findFirstMock.mockResolvedValue({ value: 'encrypted-connection' });
+    decryptMock.mockResolvedValue({
+      baseUrl: 'https://gitea.example',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      accountId: '42',
+      username: 'roomote',
+      accessToken: 'expired-access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: new Date(0).toISOString(),
+      scopes: ['read:user'],
+      status: 'active',
+    });
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        Response.json(
+          { error: 'temporarily_unavailable' },
+          { status: 503, statusText: 'Service Unavailable' },
+        ),
+      );
+
+    await expect(resolveGiteaOAuthAccessToken({ fetchImpl })).rejects.toThrow(
+      'Gitea OAuth refresh failed: 503 Service Unavailable',
+    );
+    expect(writeMock).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://gitea.example/login/oauth/access_token',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it('keeps the connection active when the refresh request times out', async () => {
+    findFirstMock.mockResolvedValue({ value: 'encrypted-connection' });
+    decryptMock.mockResolvedValue({
+      baseUrl: 'https://gitea.example',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      accountId: '42',
+      username: 'roomote',
+      accessToken: 'expired-access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: new Date(0).toISOString(),
+      scopes: ['read:user'],
+      status: 'active',
+    });
+    const fetchImpl = vi.fn<typeof fetch>(
+      (_input, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            'abort',
+            () => reject(init.signal?.reason),
+            { once: true },
+          );
+        }),
+    );
+
+    await expect(
+      resolveGiteaOAuthAccessToken({
+        fetchImpl,
+        requestTimeoutMs: 10,
+      }),
+    ).rejects.toThrow();
+    expect(writeMock).not.toHaveBeenCalled();
+  });
+
+  it('requires reauthorization when Gitea rejects the refresh grant', async () => {
+    findFirstMock.mockResolvedValue({ value: 'encrypted-connection' });
+    decryptMock.mockResolvedValue({
+      baseUrl: 'https://gitea.example',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      accountId: '42',
+      username: 'roomote',
+      accessToken: 'expired-access-token',
+      refreshToken: 'refresh-token',
+      expiresAt: new Date(0).toISOString(),
+      scopes: ['read:user'],
+      status: 'active',
+    });
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        Response.json(
+          { error: 'invalid_grant' },
+          { status: 400, statusText: 'Bad Request' },
+        ),
+      );
+
+    await expect(resolveGiteaOAuthAccessToken({ fetchImpl })).rejects.toThrow(
+      'Gitea OAuth authorization has expired and must be renewed.',
+    );
+    expect(writeMock).toHaveBeenCalledOnce();
+  });
 });
