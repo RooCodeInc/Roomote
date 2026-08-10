@@ -1126,7 +1126,52 @@ describe('optional targetBranch', () => {
     );
   });
 
-  it('scrubs an unmarked public attribution line without parsing the name', async () => {
+  it.each(['Slack', 'Discord', 'Telegram', 'Teams'])(
+    'scrubs an unmarked public name while preserving %s follow-up instructions',
+    async (surface) => {
+      const octokit = makeOctokit({
+        list: [],
+        created: {
+          number: 13,
+          node_id: 'node-13',
+          html_url: 'https://github.com/acme/web/pull/13',
+          title: '[Feature] X',
+          draft: true,
+          base: { ref: 'develop' },
+        },
+      });
+      mockRepositoriesFindFirst.mockResolvedValue({
+        installationId: 555,
+        externalRepoId: null,
+        fullName: 'acme/web',
+        htmlUrl: 'https://github.com/acme/web',
+        private: false,
+      });
+      mockResolveRunCommitAuthor.mockResolvedValue({
+        kind: 'user',
+        displayName: 'Jane R. Doe',
+        publicDisplayName: '@participant',
+        prAssigneeLogin: null,
+      });
+
+      await createOrUpdateSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({ repo: 'acme/web' }),
+        input: {
+          ...baseInput,
+          targetBranch: 'develop',
+          body: `Preamble\n> Opened on behalf of Jane R. Doe. Follow up by mentioning @roomote, in [the web UI](https://example.com/task/1), or in [${surface}](https://example.com/conversation/1).\n\nDone.`,
+        },
+      });
+
+      expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: `Preamble\n> Opened on behalf of @participant. Follow up by mentioning @roomote, in [the web UI](https://example.com/task/1), or in [${surface}](https://example.com/conversation/1).\n\nDone.`,
+        }),
+      );
+    },
+  );
+
+  it('preserves the safe follow-up instruction for a web-launched task', async () => {
     const octokit = makeOctokit({
       list: [],
       created: {
@@ -1147,7 +1192,49 @@ describe('optional targetBranch', () => {
     });
     mockResolveRunCommitAuthor.mockResolvedValue({
       kind: 'user',
-      displayName: 'Jane R. Doe',
+      displayName: 'Private Name',
+      publicDisplayName: '@participant',
+      prAssigneeLogin: null,
+    });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+        body: '> Opened on behalf of Private Name. [View the task](https://example.com/task/1) or mention @roomote for follow-up asks.',
+      },
+    });
+
+    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: '> Opened on behalf of @participant. [View the task](https://example.com/task/1) or mention @roomote for follow-up asks.',
+      }),
+    );
+  });
+
+  it('drops arbitrary text after an unmarked public attribution line', async () => {
+    const octokit = makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 555,
+      externalRepoId: null,
+      fullName: 'acme/web',
+      htmlUrl: 'https://github.com/acme/web',
+      private: false,
+    });
+    mockResolveRunCommitAuthor.mockResolvedValue({
+      kind: 'user',
+      displayName: 'Private Name',
       publicDisplayName: null,
       prAssigneeLogin: null,
     });
@@ -1157,13 +1244,13 @@ describe('optional targetBranch', () => {
       input: {
         ...baseInput,
         targetBranch: 'develop',
-        body: 'Preamble\n> Opened on behalf of Jane R. Doe. Follow up by mentioning @roomote.\n\nDone.',
+        body: '> Opened on behalf of Private Name. Contact Private Name directly.\n\nDone.',
       },
     });
 
     expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: 'Preamble\n> Created by Roomote.\n\nDone.',
+        body: '> Created by Roomote.\n\nDone.',
       }),
     );
   });

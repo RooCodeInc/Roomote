@@ -596,8 +596,24 @@ function scrubUnmarkedPublicAttribution(
     : '> Created by Roomote.';
   return body.replace(
     /^[ \t]*>[ \t]*(?:Opened on behalf of|Created by Roomote).*$/gmu,
-    () => provenance,
+    (line) => {
+      const instruction = findSafeUnmarkedFollowUpInstruction(line);
+      return instruction ? `${provenance} ${instruction}` : provenance;
+    },
   );
+}
+
+const FOLLOW_UP_MENTION_PATTERN = '@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?';
+const FOLLOW_UP_DESTINATION_LINK_PATTERN =
+  '\\[(?:the web UI|Slack|Discord|Telegram|Teams)\\]\\(https:\\/\\/[^\\s)]+\\)';
+const VIEW_TASK_LINK_PATTERN = '\\[View the task\\]\\(https:\\/\\/[^\\s)]+\\)';
+const SAFE_UNMARKED_FOLLOW_UP_INSTRUCTION_PATTERN = new RegExp(
+  `((?:Follow up by mentioning ${FOLLOW_UP_MENTION_PATTERN}(?:\\.| or in ${FOLLOW_UP_DESTINATION_LINK_PATTERN}\\.|, in ${FOLLOW_UP_DESTINATION_LINK_PATTERN}, or in ${FOLLOW_UP_DESTINATION_LINK_PATTERN}\\.)|${VIEW_TASK_LINK_PATTERN} or mention ${FOLLOW_UP_MENTION_PATTERN} for follow-up asks\\.|mention ${FOLLOW_UP_MENTION_PATTERN} for follow-up asks\\.))$`,
+  'u',
+);
+
+function findSafeUnmarkedFollowUpInstruction(line: string): string | null {
+  return line.match(SAFE_UNMARKED_FOLLOW_UP_INSTRUCTION_PATTERN)?.[1] ?? null;
 }
 
 async function createOrUpdateGitLabMergeRequest({
