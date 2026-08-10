@@ -89,6 +89,7 @@ export const PR_BODY_ATTRIBUTION_START_MARKER =
   '<!-- roomote:pr-attribution:start -->';
 export const PR_BODY_ATTRIBUTION_END_MARKER =
   '<!-- roomote:pr-attribution:end -->';
+const PR_BODY_ATTRIBUTION_INLINE_PREFIX = '&#8203;';
 
 type PrBodyAttributionMarkerMatch = {
   start: number;
@@ -112,7 +113,9 @@ function findPrBodyAttributionMarkers(
   }
 
   const lineStart = body.lastIndexOf('\n', startMarker - 1) + 1;
-  if (!/^[ \t]*>[ \t]*$/u.test(body.slice(lineStart, startMarker))) {
+  if (
+    !/^[ \t]*>[ \t]*(?:&#8203;)?$/u.test(body.slice(lineStart, startMarker))
+  ) {
     return null;
   }
 
@@ -129,7 +132,9 @@ export function formatPrBodyAttribution(
   provenance: string,
   instruction: string,
 ): string {
-  return `> ${PR_BODY_ATTRIBUTION_START_MARKER}${provenance}${PR_BODY_ATTRIBUTION_END_MARKER} ${instruction}`;
+  // Leading with an entity keeps the marker inline. A comment immediately
+  // after the blockquote marker starts a raw HTML block in CommonMark/GFM.
+  return `> ${PR_BODY_ATTRIBUTION_INLINE_PREFIX}${PR_BODY_ATTRIBUTION_START_MARKER}${provenance}${PR_BODY_ATTRIBUTION_END_MARKER} ${instruction}`;
 }
 
 export function findPrBodyAttributionLine(body: string): string | null {

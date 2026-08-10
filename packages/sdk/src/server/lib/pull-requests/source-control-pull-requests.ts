@@ -19,6 +19,7 @@ import {
 } from '@roomote/db/server';
 import {
   buildPullRequestUrl,
+  getGitHubFollowUpMention,
   getSourceControlProviderLabel,
   findPrBodyAttributionLine,
   normalizePrBodyAttributionAppMention,
@@ -28,7 +29,10 @@ import {
   sourceControlProviderSchema,
   type PrAction,
   type SourceControlProvider,
+  parseDiscordMessagePermalink,
+  parseSlackMessagePermalink,
 } from '@roomote/types';
+import { Env } from '@roomote/env';
 import { z } from 'zod';
 import {
   adoPullRequestSchema,
@@ -250,6 +254,19 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
           ? scrubUnmarkedPublicAttribution(
               rewrittenAttributionBody,
               displayName,
+              {
+                allowedMentions: new Set([
+                  '@roomote',
+                  configuredGitHubAppSlug
+                    ? getGitHubFollowUpMention(
+                        configuredGitHubAppSlug,
+                        roomoteMentionEnabled,
+                      )
+                    : '@roomote',
+                ]),
+                taskId: taskRun.taskId,
+                payloadKind: taskRun.payloadKind,
+              },
             )
           : rewrittenAttributionBody,
     };
@@ -590,6 +607,11 @@ function preserveExistingPullRequestAttribution(
 function scrubUnmarkedPublicAttribution(
   body: string,
   displayName: string | null,
+  context: {
+    allowedMentions: ReadonlySet<string>;
+    taskId: string;
+    payloadKind: string;
+  },
 ): string {
   const provenance = displayName
     ? `> Opened on behalf of ${displayName}.`
@@ -597,7 +619,7 @@ function scrubUnmarkedPublicAttribution(
   return body.replace(
     /^[ \t]*>[ \t]*(?:Opened on behalf of|Created by Roomote).*$/gmu,
     (line) => {
-      const instruction = findSafeUnmarkedFollowUpInstruction(line);
+      const instruction = findSafeUnmarkedFollowUpInstruction(line, context);
       return instruction ? `${provenance} ${instruction}` : provenance;
     },
   );
@@ -611,9 +633,100 @@ const SAFE_UNMARKED_FOLLOW_UP_INSTRUCTION_PATTERN = new RegExp(
   `((?:Follow up by mentioning ${FOLLOW_UP_MENTION_PATTERN}(?:\\.| or in ${FOLLOW_UP_DESTINATION_LINK_PATTERN}\\.|, in ${FOLLOW_UP_DESTINATION_LINK_PATTERN}, or in ${FOLLOW_UP_DESTINATION_LINK_PATTERN}\\.)|${VIEW_TASK_LINK_PATTERN} or mention ${FOLLOW_UP_MENTION_PATTERN} for follow-up asks\\.|mention ${FOLLOW_UP_MENTION_PATTERN} for follow-up asks\\.))$`,
   'u',
 );
+const FOLLOW_UP_LINK_PATTERN = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/gu;
 
-function findSafeUnmarkedFollowUpInstruction(line: string): string | null {
-  return line.match(SAFE_UNMARKED_FOLLOW_UP_INSTRUCTION_PATTERN)?.[1] ?? null;
+function isTrustedWebTaskUrl(
+  url: URL,
+  taskId: string,
+  payloadKind: string,
+): boolean {
+  const trustedOrigins = new Set(
+    [Env.R_APP_URL, Env.R_PUBLIC_URL]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => new URL(value).origin),
+  );
+  if (!trustedOrigins.has(url.origin) || url.pathname !== `/task/${taskId}`) {
+    return false;
+  }
+
+  if (!url.search) {
+    return true;
+  }
+
+  return (
+    url.searchParams.size === 3 &&
+    url.searchParams.get('utm_source') === 'github-comment' &&
+    url.searchParams.get('utm_medium') === 'link' &&
+    url.searchParams.get('utm_campaign') === payloadKind
+  );
+}
+
+function isTrustedFollowUpLink(
+  label: string,
+  rawUrl: string,
+  taskId: string,
+  payloadKind: string,
+): boolean {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+
+  if (label === 'the web UI' || label === 'View the task') {
+    return isTrustedWebTaskUrl(url, taskId, payloadKind);
+  }
+  if (label === 'Slack') {
+    return parseSlackMessagePermalink(rawUrl) !== null;
+  }
+  if (label === 'Discord') {
+    return parseDiscordMessagePermalink(rawUrl) !== null;
+  }
+  if (label === 'Telegram') {
+    return (
+      url.hostname === 't.me' && /^\/c\/\d+\/(?:\d+\/)?\d+$/u.test(url.pathname)
+    );
+  }
+  if (label === 'Teams') {
+    return (
+      url.hostname === 'teams.microsoft.com' &&
+      /^\/l\/(?:message|app)\//u.test(url.pathname)
+    );
+  }
+
+  return false;
+}
+
+function findSafeUnmarkedFollowUpInstruction(
+  line: string,
+  context: {
+    allowedMentions: ReadonlySet<string>;
+    taskId: string;
+    payloadKind: string;
+  },
+): string | null {
+  const instruction = line.match(
+    SAFE_UNMARKED_FOLLOW_UP_INSTRUCTION_PATTERN,
+  )?.[1];
+  const mention = instruction?.match(
+    /\bmention(?:ing)? (@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)/u,
+  )?.[1];
+  if (!instruction || !mention || !context.allowedMentions.has(mention)) {
+    return null;
+  }
+
+  const links = [...instruction.matchAll(FOLLOW_UP_LINK_PATTERN)];
+  return links.every((match) =>
+    isTrustedFollowUpLink(
+      match[1] ?? '',
+      match[2] ?? '',
+      context.taskId,
+      context.payloadKind,
+    ),
+  )
+    ? instruction
+    : null;
 }
 
 async function createOrUpdateGitLabMergeRequest({
