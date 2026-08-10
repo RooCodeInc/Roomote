@@ -448,6 +448,29 @@ describe('createSourceControlTokenForTaskRun', () => {
   });
 
   it('mints the stamped primary provider first and merges aggregate metadata', async () => {
+    const gitlabExpiresAt = new Date(Date.now() + 90 * 60 * 1000);
+    mockCreateTaskRunScopedGitLabTokens.mockResolvedValue({
+      credentials: [
+        {
+          host: 'gitlab.com',
+          repositoryFullName: 'group/project',
+          username: 'oauth2',
+          token: 'glptt_scoped_token',
+        },
+      ],
+      proxyCredentials: [],
+      artifactsPatch: {
+        gitlabScopedProjectTokens: [
+          {
+            repositoryFullName: 'group/project',
+            projectId: '101',
+            tokenId: 202,
+          },
+        ],
+      },
+      expiresAt: gitlabExpiresAt,
+    });
+
     const taskRun = makeTaskRun({
       repo: 'group/project',
       selectedRepositories: ['owner/repo', 'group/project'],
@@ -478,7 +501,8 @@ describe('createSourceControlTokenForTaskRun', () => {
       ],
       gitProxyCredentials: [],
       source: 'app',
-      expiresAt: null,
+      // GitHub has null expiry; keep GitLab OAuth expiry for the refresh loop.
+      expiresAt: gitlabExpiresAt,
       artifactsPatch: {
         gitlabScopedProjectTokens: [
           {

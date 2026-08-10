@@ -279,8 +279,17 @@ export async function resolveGitLabOAuthAccessTokenWithMetadata(options?: {
     );
     if (!response.ok) {
       if (generation !== connectionGeneration) return null;
+      // Another replica may have already rotated the tokens. Prefer a still
+      // valid access token over marking reauthorization_required.
+      const latest = await readConnection();
+      if (
+        latest?.status === 'active' &&
+        Date.parse(latest.expiresAt) > Date.now()
+      ) {
+        return toAccessTokenResult(latest.accessToken, latest.expiresAt);
+      }
       await writeConnection({
-        ...connection,
+        ...(latest ?? connection),
         status: 'reauthorization_required',
       });
       throw new Error(

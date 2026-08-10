@@ -8,15 +8,15 @@ const {
   mockRepositoriesFindMany,
   mockEnvironmentsFindFirst,
   mockGitLabOAuthAccessToken,
+  mockGitLabOAuthAccessTokenWithMetadata,
   mockIsGitLabOAuthAccessToken,
-  mockGetCachedGitLabOAuthAccessTokenExpiresAt,
 } = vi.hoisted(() => ({
   mockEnvironmentVariablesFindMany: vi.fn(),
   mockRepositoriesFindMany: vi.fn(),
   mockEnvironmentsFindFirst: vi.fn(),
   mockGitLabOAuthAccessToken: vi.fn(),
+  mockGitLabOAuthAccessTokenWithMetadata: vi.fn(),
   mockIsGitLabOAuthAccessToken: vi.fn((_token?: string) => false),
-  mockGetCachedGitLabOAuthAccessTokenExpiresAt: vi.fn((): Date | null => null),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -70,8 +70,8 @@ vi.mock('../oauth', () => ({
   isGitLabOAuthAccessToken: (token: string) =>
     mockIsGitLabOAuthAccessToken(token),
   resolveGitLabOAuthAccessToken: () => mockGitLabOAuthAccessToken(),
-  getCachedGitLabOAuthAccessTokenExpiresAt: () =>
-    mockGetCachedGitLabOAuthAccessTokenExpiresAt(),
+  resolveGitLabOAuthAccessTokenWithMetadata: () =>
+    mockGitLabOAuthAccessTokenWithMetadata(),
 }));
 
 import {
@@ -463,8 +463,11 @@ describe('createTaskRunScopedGitLabTokens', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGitLabOAuthAccessToken.mockResolvedValue('oauth_access_token');
+    mockGitLabOAuthAccessTokenWithMetadata.mockResolvedValue({
+      accessToken: 'oauth_access_token',
+      expiresAt: new Date(Date.now() + 90 * 60 * 1000),
+    });
     mockIsGitLabOAuthAccessToken.mockReturnValue(false);
-    mockGetCachedGitLabOAuthAccessTokenExpiresAt.mockReturnValue(null);
     delete process.env.GITLAB_BASE_URL;
     mockEnvironmentVariablesFindMany.mockResolvedValue([]);
     mockEnvironmentsFindFirst.mockResolvedValue(null);
@@ -882,7 +885,10 @@ describe('createTaskRunScopedGitLabTokens', () => {
   it('routes OAuth access tokens through the proxy and surfaces their expiry', async () => {
     const expiresAt = new Date(Date.now() + 90 * 60 * 1000);
     mockIsGitLabOAuthAccessToken.mockReturnValue(true);
-    mockGetCachedGitLabOAuthAccessTokenExpiresAt.mockReturnValue(expiresAt);
+    mockGitLabOAuthAccessTokenWithMetadata.mockResolvedValue({
+      accessToken: 'oauth_access_token',
+      expiresAt,
+    });
 
     const fetchMock = vi.fn<typeof fetch>();
     const result = await createTaskRunScopedGitLabTokens(
