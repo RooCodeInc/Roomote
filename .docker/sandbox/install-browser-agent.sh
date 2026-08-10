@@ -475,6 +475,7 @@ seed_preview_cookies() {
   local session_hash
   local cache_file
   local url
+  local -a cookie_security_args
 
   cache_key="$(printf '%s\0' "$AGENT_BROWSER_SESSION_VALUE" "$header_name" "$bypass_value" "${AGENT_BROWSER_PREFIX_ARGS[*]}" "${preview_urls[@]}" | sha256sum | awk '{print $1}')"
   session_hash="$(hash_value "$AGENT_BROWSER_SESSION_VALUE")"
@@ -488,11 +489,16 @@ seed_preview_cookies() {
   resolve_cli_paths
 
   for url in "${preview_urls[@]}"; do
+    cookie_security_args=()
+    case "$url" in
+      https://*) cookie_security_args+=(--secure) ;;
+    esac
+
     if [ -n "$bypass_value" ]; then
-      AGENT_BROWSER_HEADED=false "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_PREFIX_ARGS[@]}" cookies set "$header_name" "$bypass_value" --url "$url" --secure --sameSite Lax >/dev/null
+      AGENT_BROWSER_HEADED=false "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_PREFIX_ARGS[@]}" cookies set "$header_name" "$bypass_value" --url "$url" "${cookie_security_args[@]}" --sameSite Lax >/dev/null
     fi
 
-    AGENT_BROWSER_HEADED=false "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_PREFIX_ARGS[@]}" cookies set "$HIDE_PREVIEW_WIDGET_COOKIE" "1" --url "$url" --secure --sameSite Lax >/dev/null
+    AGENT_BROWSER_HEADED=false "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_PREFIX_ARGS[@]}" cookies set "$HIDE_PREVIEW_WIDGET_COOKIE" "1" --url "$url" "${cookie_security_args[@]}" --sameSite Lax >/dev/null
   done
 
   : > "$cache_file"
