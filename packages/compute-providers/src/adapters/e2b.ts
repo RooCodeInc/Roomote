@@ -74,7 +74,9 @@ export class E2bClient implements ComputeProviderClient {
   public readonly capabilities: ComputeProviderCapabilities =
     E2B_CAPABILITIES_VALUE;
 
-  private static readonly sandboxCache = new LRUCache<string, E2bSandbox>({
+  // Per-instance so cached sandbox handles die with the client that created
+  // them and never outlive its credentials (see ModalClient.sandboxCache).
+  private readonly sandboxCache = new LRUCache<string, E2bSandbox>({
     max: 100,
     ttl: E2B_SANDBOX_CACHE_TTL_MS,
   });
@@ -117,7 +119,7 @@ export class E2bClient implements ComputeProviderClient {
   ): Promise<E2bSandbox> {
     throwIfAborted(signal);
 
-    const cached = E2bClient.sandboxCache.get(sandboxId);
+    const cached = this.sandboxCache.get(sandboxId);
 
     if (cached) {
       return cached;
@@ -130,11 +132,11 @@ export class E2bClient implements ComputeProviderClient {
         abortMessage: `Connecting to E2B sandbox ${sandboxId} was aborted`,
       });
 
-      E2bClient.sandboxCache.set(sandboxId, sandbox);
+      this.sandboxCache.set(sandboxId, sandbox);
 
       return sandbox;
     } catch (error) {
-      E2bClient.sandboxCache.delete(sandboxId);
+      this.sandboxCache.delete(sandboxId);
 
       console.error(
         `[E2bClient] Failed to connect to sandbox "${sandboxId}" ${JSON.stringify(
@@ -245,7 +247,7 @@ export class E2bClient implements ComputeProviderClient {
     }
 
     try {
-      E2bClient.sandboxCache.set(sandbox.sandboxId, sandbox);
+      this.sandboxCache.set(sandbox.sandboxId, sandbox);
 
       const domains = resolvePortDomains(sandbox, input.ports);
 
@@ -661,7 +663,7 @@ export class E2bClient implements ComputeProviderClient {
     }
 
     try {
-      E2bClient.sandboxCache.set(sandbox.sandboxId, sandbox);
+      this.sandboxCache.set(sandbox.sandboxId, sandbox);
 
       const domains = resolvePortDomains(sandbox, input.ports);
 
@@ -783,7 +785,7 @@ export class E2bClient implements ComputeProviderClient {
   }
 
   private invalidateSandboxCache(instanceId: string): void {
-    E2bClient.sandboxCache.delete(instanceId);
+    this.sandboxCache.delete(instanceId);
   }
 
   private async cleanupSandboxAfterFailure(
