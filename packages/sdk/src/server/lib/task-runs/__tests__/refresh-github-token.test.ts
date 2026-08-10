@@ -101,6 +101,35 @@ describe('refreshGitHubTokenWithMetadata', () => {
     );
   });
 
+  it('scales the refresh buffer to a token that lives less than the buffer', async () => {
+    // A 5-minute token minus the fixed 5-minute buffer lands on the 1-minute
+    // floor, re-minting for most of its life. Cap the buffer at a quarter of
+    // the remaining life so the schedule stays proportionate.
+    const before = Date.now();
+    mockCreateSourceControlTokenForTaskRun.mockResolvedValue({
+      provider: 'gitlab',
+      token: 'oauth_access_token',
+      envVar: 'GITLAB_TOKEN',
+      envVars: {},
+      source: 'app',
+      expiresAt: new Date(before + 5 * 60 * 1000),
+    });
+
+    const result = await refreshGitHubTokenWithMetadata(
+      { type: 'run', runId: 42 } as never,
+      42,
+    );
+
+    // Quarter-life of 5m is 75s, so the refresh lands ~3m45s out, not at the
+    // 60-second floor.
+    expect(Date.parse(result.nextRefreshAt)).toBeGreaterThan(
+      before + 3 * 60 * 1000,
+    );
+    expect(Date.parse(result.nextRefreshAt)).toBeLessThan(
+      before + 4 * 60 * 1000,
+    );
+  });
+
   it('keeps the default cadence when expiry is unknown', async () => {
     const before = Date.now();
     mockCreateSourceControlTokenForTaskRun.mockResolvedValue({
