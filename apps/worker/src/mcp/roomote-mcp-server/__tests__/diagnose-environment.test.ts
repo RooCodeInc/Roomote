@@ -189,4 +189,37 @@ describe('diagnoseEnvironment', () => {
       { cwd: '/workspace/owner/repo/deploy' },
     );
   });
+
+  it('preserves query strings and fragments from the configured initial path', async () => {
+    const fetch = vi.fn(async () => ({
+      status: 200,
+    })) as unknown as typeof globalThis.fetch;
+    const report = await diagnoseEnvironment({
+      workspacePath,
+      context: emptyContext({
+        ports: [
+          {
+            name: 'WEB',
+            port: 3000,
+            initialPath: '/?path=/story/example#anchor',
+            previewUrl: 'https://preview.example.test',
+          },
+        ],
+      }),
+      dependencies: dependencies({ fetch }),
+    });
+
+    expect(findCheck(report, 'port.WEB.loopback').status).toBe('pass');
+    expect(findCheck(report, 'port.WEB.preview').status).toBe('pass');
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      'http://127.0.0.1:3000/?path=/story/example#anchor',
+      expect.any(Object),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      'https://preview.example.test/?path=/story/example#anchor',
+      expect.any(Object),
+    );
+  });
 });

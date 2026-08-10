@@ -4,6 +4,7 @@ import * as path from 'node:path';
 
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import {
+  appendInitialPath,
   createDoctorReport,
   getDockerProjectLogFilePath,
   toComposeProjectName,
@@ -533,13 +534,6 @@ async function diagnoseServices(
       };
     }),
   );
-}
-
-function appendInitialPath(base: string, initialPath?: string) {
-  if (!initialPath) return base;
-  const url = new URL(base);
-  url.pathname = initialPath;
-  return url.toString();
 }
 
 function safeDisplayUrl(rawUrl: string) {

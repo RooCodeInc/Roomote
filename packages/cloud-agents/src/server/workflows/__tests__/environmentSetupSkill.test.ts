@@ -280,7 +280,12 @@ describe('environment-setup guidance', () => {
       'Report every failing or non-pass stable check ID and its evidence verbatim from the diagnostic report.',
     );
     expect(skillContent).toContain(
-      'Resolve every non-pass check that is within environment-setup scope before persisting',
+      'do not run `diagnose_environment` before persistence because it cannot inspect the drafted definition.',
+    );
+    expect(
+      skillContent.indexOf('run diagnose_environment exactly once'),
+    ).toBeGreaterThan(
+      skillContent.indexOf('After environment persistence succeeds'),
     );
     expect(skillContent).toContain(
       'the platform delivers a `Spawned task update` message into this session when the verification task settles',
