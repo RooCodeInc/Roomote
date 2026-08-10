@@ -225,6 +225,13 @@
       "when": 1786304891262,
       "tag": "0031_lumpy_cerebro",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1786389658020,
+      "tag": "0032_silly_leopardon",
+      "breakpoints": true
     }
   ]
 }

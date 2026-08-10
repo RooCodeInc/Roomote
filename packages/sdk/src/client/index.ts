@@ -99,6 +99,8 @@ const RETRYABLE_WORKER_TRPC_MUTATION_PATHS = new Map<
   WorkerQueryRetryOptions
 >([
   ['taskRuns.recordMessageEnvelope', {}],
+  ['taskRuns.claimGoalContinuation', {}],
+  ['taskRuns.releaseGoalContinuation', {}],
   ['taskRuns.dequeue', WORKER_STARTUP_MUTATION_RETRY_OPTIONS],
   ['taskRuns.resume', WORKER_STARTUP_MUTATION_RETRY_OPTIONS],
 ]);

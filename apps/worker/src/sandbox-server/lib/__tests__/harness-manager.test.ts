@@ -2051,6 +2051,129 @@ describe('HarnessManager touchKeepalive', () => {
     }
   });
 
+  it('continues before idle finalization when the completion hook requests it', async () => {
+    const claimedCompletionIds = new Set<string>();
+    const onBeforeTaskCompletion = vi.fn(async (completionId: string) => {
+      if (claimedCompletionIds.has(completionId)) {
+        return 'ignore' as const;
+      }
+      claimedCompletionIds.add(completionId);
+      return 'continue' as const;
+    });
+    const onExit = vi.fn();
+    const { harness, manager } = createManager({
+      onBeforeTaskCompletion,
+      onExit,
+    });
+    const completionEvent = {
+      eventName: TaskEventName.TaskCompleted,
+      payload: [
+        'task-goal-continuation',
+        {
+          totalTokensIn: 0,
+          totalTokensOut: 0,
+          totalCost: 0,
+          contextTokens: 0,
+        },
+        {},
+        { isSubtask: false, completionId: 'completion-1' },
+      ],
+    } as TaskEvent;
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskStarted,
+        payload: ['task-goal-continuation'],
+      } as TaskEvent);
+
+      harness.emitTaskEvent(completionEvent);
+      harness.emitTaskEvent(completionEvent);
+      await vi.waitFor(() => {
+        expect(onBeforeTaskCompletion).toHaveBeenCalledTimes(1);
+      });
+      await Promise.resolve();
+
+      expect(onExit).not.toHaveBeenCalled();
+      expect(manager.getStatus().phase).toBe('running');
+
+      harness.emitRuntimeOutput({
+        id: 'task-goal-continuation:prompt-2',
+        ts: 10,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        kind: 'text',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'hidden continuation' }],
+        metadata: { sessionId: 'task-goal-continuation', sequence: 2 },
+        payload: {
+          sessionId: 'task-goal-continuation',
+          text: 'hidden continuation',
+        },
+      } as AcpMessage);
+      harness.emitTaskEvent(completionEvent);
+      await vi.waitFor(() => {
+        expect(onBeforeTaskCompletion).toHaveBeenCalledTimes(2);
+      });
+      await Promise.resolve();
+      expect(onBeforeTaskCompletion).toHaveBeenLastCalledWith('completion-1');
+      expect(onExit).not.toHaveBeenCalled();
+
+      harness.emitTaskEvent({
+        ...completionEvent,
+        payload: [
+          ...completionEvent.payload.slice(0, 3),
+          { isSubtask: false, completionId: 'completion-2' },
+        ],
+      } as TaskEvent);
+      await vi.waitFor(() => {
+        expect(onBeforeTaskCompletion).toHaveBeenCalledTimes(3);
+      });
+      expect(onBeforeTaskCompletion).toHaveBeenLastCalledWith('completion-2');
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('uses normal idle finalization when the completion hook declines', async () => {
+    const onBeforeTaskCompletion = vi.fn(async () => 'finalize' as const);
+    const onExit = vi.fn();
+    const { harness, manager } = createManager({
+      onBeforeTaskCompletion,
+      onExit,
+    });
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskStarted,
+        payload: ['task-goal-finished'],
+      } as TaskEvent);
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskCompleted,
+        payload: [
+          'task-goal-finished',
+          {
+            totalTokensIn: 0,
+            totalTokensOut: 0,
+            totalCost: 0,
+            contextTokens: 0,
+          },
+          {},
+          { isSubtask: false },
+        ],
+      } as TaskEvent);
+
+      await vi.waitFor(() => expect(onExit).toHaveBeenCalledTimes(1));
+      expect(manager.getStatus().phase).toBe('waiting_for_prompt');
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
   it('finalizes each completed turn once when duplicate terminal events arrive', () => {
     const onExit = vi.fn();
     const onTaskUpdate = vi.fn();

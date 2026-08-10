@@ -11,6 +11,7 @@ import {
   type RunLaunchClass,
   type SourceControlProvider,
   type TaskInitiator,
+  type TaskGoalInput,
   type TaskSurface,
   type TaskTrigger,
   type TaskVisibility,
@@ -963,6 +964,7 @@ type FreshTask = Exclude<
  */
 export type FreshTaskLaunch = {
   task: FreshTask;
+  goal?: TaskGoalInput;
   /** Explicit user-facing title. Locked against all LLM title generation. */
   title?: string;
   initiator: TaskInitiator;
@@ -1485,6 +1487,9 @@ async function enqueueFreshLaunch(
           ? { llmTitleCheckpoint: LLM_TITLE_LOCKED_CHECKPOINT }
           : {}),
         prompt: initialPrompt,
+        goalObjective: input.goal?.objective ?? null,
+        goalStatus: input.goal ? 'active' : null,
+        goalMaxContinuations: input.goal?.maxContinuations ?? null,
         requestedWorkKind: requestedWorkKindDecision.kind,
         requestedWorkKindSource: requestedWorkKindDecision.source,
         requestedWorkKindConfidence: requestedWorkKindDecision.confidence,

@@ -121,6 +121,25 @@ export const updateEnvironmentSetup = (
   options: AppRouterInput['taskRuns']['updateEnvironmentSetup'],
 ) => client.taskRuns.updateEnvironmentSetup.mutate(options);
 
+export const getGoal = (options: AppRouterInput['taskRuns']['getGoal']) =>
+  client.taskRuns.getGoal.query(options);
+
+export const markGoalComplete = (
+  options: AppRouterInput['taskRuns']['markGoalComplete'],
+) => client.taskRuns.markGoalComplete.mutate(options);
+
+export const markGoalBlocked = (
+  options: AppRouterInput['taskRuns']['markGoalBlocked'],
+) => client.taskRuns.markGoalBlocked.mutate(options);
+
+export const claimGoalContinuation = (
+  options: AppRouterInput['taskRuns']['claimGoalContinuation'],
+) => client.taskRuns.claimGoalContinuation.mutate(options);
+
+export const releaseGoalContinuation = (
+  options: AppRouterInput['taskRuns']['releaseGoalContinuation'],
+) => client.taskRuns.releaseGoalContinuation.mutate(options);
+
 /**
  * Reconcile the worker's local actor state against the server-authoritative
  * `task_runs.actingUserId` before delivering a turn.

@@ -124,6 +124,9 @@ export interface HarnessManagerCallbacks {
     taskId?: string;
     status?: string;
   }) => Promise<void>;
+  onBeforeTaskCompletion?: (
+    completionId: string,
+  ) => Promise<'continue' | 'finalize' | 'ignore'>;
 }
 
 interface HarnessManagerConfig {
@@ -194,6 +197,10 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
   private runtimeQueuedMessagesCount = 0;
   private deferredTurnSettlement: DeferredTurnSettlement | null = null;
   private terminalProviderErrorPending = false;
+  private completionDecisionPending = false;
+  private continuationStartPending = false;
+  private fallbackCompletionSequence = 0;
+  private pendingCompletionId: string | null = null;
 
   /** Last task state event received for the parent task. */
   private lastTaskStateEvent: TaskStateEvent | null = null;
@@ -538,6 +545,10 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     this.state.cancelTriggeredAt = undefined;
     this.state.lastErrorMessage = undefined;
     this.terminalProviderErrorPending = false;
+    this.completionDecisionPending = false;
+    this.continuationStartPending = false;
+    this.fallbackCompletionSequence = 0;
+    this.pendingCompletionId = null;
 
     // Keep stopped-task resume as an inert handoff until the caller sends or
     // resumes work explicitly.
@@ -887,7 +898,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     });
   }
 
-  private finalizeTaskCompletion(): void {
+  private finalizeTaskCompletionNow(): void {
     this.deferredTurnSettlement = null;
     this.state.taskFinishedAt = Date.now();
 
@@ -897,6 +908,56 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
 
     this.invokeOnExit();
     this.invokeOnTaskUpdate({ status: 'completed' });
+  }
+
+  private finalizeTaskCompletion(): void {
+    const decide = this.callbacks.onBeforeTaskCompletion;
+    if (!decide) {
+      this.finalizeTaskCompletionNow();
+      return;
+    }
+    if (this.completionDecisionPending || this.continuationStartPending) {
+      return;
+    }
+
+    this.completionDecisionPending = true;
+    const sessionId = this.state.sessionId;
+    const completionId =
+      this.pendingCompletionId ??
+      `${sessionId ?? 'unknown'}:fallback:${++this.fallbackCompletionSequence}`;
+    void decide(completionId)
+      .then((disposition) => {
+        this.completionDecisionPending = false;
+        if (
+          this.state.sessionId !== sessionId ||
+          this.phase === 'shutting_down' ||
+          this.phase === 'stopped' ||
+          this.state.cancelTriggeredAt
+        ) {
+          return;
+        }
+        if (disposition === 'continue') {
+          this.continuationStartPending = true;
+          this.clearTurnSettlementState();
+          if (this.phase !== 'running') {
+            this.setPhase('running');
+          }
+          return;
+        }
+        if (disposition === 'ignore') {
+          return;
+        }
+        this.finalizeTaskCompletionNow();
+      })
+      .catch((error) => {
+        this.completionDecisionPending = false;
+        this.logger.warn(
+          `[HarnessManager] Pre-completion decision failed: ${formatCallbackError(error)}`,
+        );
+        if (this.phase !== 'shutting_down' && this.phase !== 'stopped') {
+          this.finalizeTaskCompletionNow();
+        }
+      });
   }
 
   private setPhase(phase: TaskPhase): void {
@@ -1089,6 +1150,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     }
 
     if (event.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt) {
+      this.continuationStartPending = false;
       // A user prompt entering the session means a turn is starting — a
       // drained queue follow-up, a steered replay, or a question answer.
       // Those paths do not go through startNewTask/sendFollowUpPrompt, so
@@ -1332,6 +1394,10 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
       return;
     }
 
+    if (taskId === this.state.sessionId) {
+      this.continuationStartPending = false;
+    }
+
     if (!this.state.sessionId) {
       this.state.sessionId = taskId;
       this.invokeOnStart(taskId);
@@ -1392,6 +1458,13 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
 
   private onTaskCompleted(payload: TaskEventCompletedPayload): void {
     if (payload[0] === this.state.sessionId) {
+      if (this.completionDecisionPending || this.continuationStartPending) {
+        this.logger.info(
+          `[HarnessManager] Ignoring duplicate task completion while continuation settlement is pending for ${payload[0]}`,
+        );
+        return;
+      }
+      this.pendingCompletionId = payload[3]?.completionId ?? null;
       if (
         this.state.taskFinishedAt !== undefined &&
         !isActiveTaskPhase(this.phase)
