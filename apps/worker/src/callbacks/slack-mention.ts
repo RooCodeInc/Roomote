@@ -9,9 +9,11 @@ import {
 } from '@roomote/types';
 import {
   SlackNotifier,
+  buildSlackAnsweredRequestUserInputBlocks,
   buildSlackRequestUserInputBlocks,
   buildStartedBlocks,
   convertMarkdownToSlack,
+  getSlackRequestUserInputCurrentQuestion,
 } from '@roomote/slack/client';
 import { type TaskRun, sdk } from '@roomote/sdk/client';
 
@@ -420,10 +422,11 @@ async function handleRequestUserInputResponse(
   taskRun: TaskRun,
   event: CallbackEvent & { type: 'request_user_input_response' },
 ) {
-  try {
-    const { thread_ts: threadTs } = getSlackConversation(taskRun);
+  const { channel, thread_ts: threadTs } = getSlackConversation(taskRun);
+  let pendingRequest;
 
-    await sdk.taskRuns.clearPendingSlackRequestUserInput({
+  try {
+    pendingRequest = await sdk.taskRuns.clearPendingSlackRequestUserInput({
       runId: taskRun.id,
       threadId: threadTs,
       requestId: event.response.requestId,
@@ -436,6 +439,44 @@ async function handleRequestUserInputResponse(
     );
     console.error(
       `Failed to clear Slack request_user_input state: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return;
+  }
+
+  if (!pendingRequest?.promptMessageTs) {
+    return;
+  }
+
+  const currentQuestion =
+    getSlackRequestUserInputCurrentQuestion(pendingRequest);
+  const answer = currentQuestion
+    ? event.response.answers[currentQuestion.question.id]?.answers[0]
+    : undefined;
+
+  if (!currentQuestion || !answer) {
+    return;
+  }
+
+  try {
+    const slack = await getSlackNotifier();
+    await slack.updateMessage({
+      channel,
+      ts: pendingRequest.promptMessageTs,
+      message: {
+        blocks: buildSlackAnsweredRequestUserInputBlocks({
+          question: currentQuestion.question,
+          answer,
+        }),
+      },
+    });
+  } catch (error) {
+    reportSlackCallbackError(
+      error,
+      'slackMentionCallbacks.handleRequestUserInputResponse.updatePrompt',
+      taskRun.id,
+    );
+    console.error(
+      `Failed to update answered Slack request_user_input prompt: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }

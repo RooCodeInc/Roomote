@@ -1,5 +1,6 @@
 const {
   mockBuildSlackRequestUserInputBlocks,
+  mockBuildSlackAnsweredRequestUserInputBlocks,
   mockBuildRequestUserInputTaskUrl,
   mockBuildStartedBlocks,
   mockClearPendingSlackRequestUserInput,
@@ -22,6 +23,12 @@ const {
       text: 'native request_user_input blocks',
     },
   ]),
+  mockBuildSlackAnsweredRequestUserInputBlocks: vi.fn(() => [
+    {
+      type: 'markdown',
+      text: 'answered request_user_input blocks',
+    },
+  ]),
   mockBuildRequestUserInputTaskUrl: vi
     .fn()
     .mockReturnValue(
@@ -33,7 +40,7 @@ const {
       text: 'started blocks',
     },
   ]),
-  mockClearPendingSlackRequestUserInput: vi.fn().mockResolvedValue(true),
+  mockClearPendingSlackRequestUserInput: vi.fn().mockResolvedValue(null),
   mockAddReaction: vi.fn().mockResolvedValue(true),
   mockEnqueueSlackPrInactivityCheck: vi
     .fn()
@@ -92,8 +99,14 @@ vi.mock('@roomote/slack/client', () => ({
     postMessage = mockPostMessage;
   },
   buildSlackRequestUserInputBlocks: mockBuildSlackRequestUserInputBlocks,
+  buildSlackAnsweredRequestUserInputBlocks:
+    mockBuildSlackAnsweredRequestUserInputBlocks,
   buildStartedBlocks: mockBuildStartedBlocks,
   convertMarkdownToSlack: vi.fn((text: string) => text),
+  getSlackRequestUserInputCurrentQuestion: vi.fn((request) => ({
+    question: request.questions[request.currentQuestionIndex ?? 0],
+    questionIndex: request.currentQuestionIndex ?? 0,
+  })),
 }));
 
 vi.mock('../request-user-input', () => ({
@@ -912,6 +925,26 @@ describe('slackMentionCallbacks', () => {
 
   it('clears pending request_user_input state on response events', async () => {
     const taskRun = createTaskRun();
+    mockClearPendingSlackRequestUserInput.mockResolvedValueOnce({
+      requestId: 'rui:session:turn:call',
+      runId: 123,
+      taskId: 'task_123',
+      questions: [
+        {
+          id: 'language',
+          header: 'Language',
+          question: 'Which language should I use?',
+          isOther: true,
+          isSecret: false,
+          options: [],
+        },
+      ],
+      promptMessageTs: 'prompt-ts',
+      currentQuestionIndex: 0,
+      answers: {},
+      status: 'submitted',
+      createdAt: Date.now(),
+    });
 
     await slackMentionCallbacks.onMessage?.(
       taskRun,
@@ -942,6 +975,18 @@ describe('slackMentionCallbacks', () => {
         requestId: 'rui:session:turn:call',
       },
     );
+    expect(mockUpdateMessage).toHaveBeenCalledWith({
+      channel: 'C123',
+      ts: 'prompt-ts',
+      message: {
+        blocks: [
+          {
+            type: 'markdown',
+            text: 'answered request_user_input blocks',
+          },
+        ],
+      },
+    });
   });
 
   it('swallows onExit cleanup failures', async () => {

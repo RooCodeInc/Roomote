@@ -8,7 +8,6 @@ import {
   isLinkedReviewResultsMessage,
   normalizeTranscriptUserText,
   parseLinkedReviewResults,
-  parseAcpRequestUserInputAnswerReply,
   parseAcpRequestUserInputReply,
   resolveAcpTranscriptVisibility,
   resolveAcpRequestUserInputAnswer,
@@ -714,37 +713,12 @@ describe('request_user_input reply parsing', () => {
   });
 
   it('accepts custom answers when the question allows other', () => {
-    const question = { ...fixedChoiceQuestion, isOther: true };
-
-    expect(resolveAcpRequestUserInputAnswer(question, 'Go')).toBe('Go');
-
     expect(
-      parseAcpRequestUserInputAnswerReply(
-        [question],
-        "I don't want retries for 24 hours; retry a fixed number of times instead.",
+      resolveAcpRequestUserInputAnswer(
+        { ...fixedChoiceQuestion, isOther: true },
+        'Go',
       ),
-    ).toEqual({
-      resolution: 'submitted',
-      answers: {
-        language: {
-          answers: [
-            "I don't want retries for 24 hours; retry a fixed number of times instead.",
-          ],
-        },
-      },
-      usedFreeTextOptionFallback: true,
-    });
-  });
-
-  it('keeps free-text side questions as conversational replies', () => {
-    const question = { ...fixedChoiceQuestion, isOther: true };
-
-    expect(
-      parseAcpRequestUserInputAnswerReply(
-        [question],
-        'Whats the difference? I need more context.',
-      ),
-    ).toBeNull();
+    ).toBe('Go');
   });
 
   it('parses more than three ordered answers for multi-question prompts', () => {

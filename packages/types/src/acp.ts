@@ -659,6 +659,13 @@ export function parseAcpRequestUserInputReply(
   };
 }
 
+/**
+ * Parse a reply as an answer to pending questions, treating replies that only
+ * "matched" an options question through the isOther free-text fallback as
+ * non-answers. Such replies are usually conversational interjections (a side
+ * question, an objection, steering); callers should deliver them to the agent
+ * as a normal message instead of consuming the pending question with them.
+ */
 export function parseAcpRequestUserInputAnswerReply(
   questions: AcpRequestUserInputQuestion[],
   responseText: string,
@@ -669,13 +676,14 @@ export function parseAcpRequestUserInputAnswerReply(
 
   const parsed = parseAcpRequestUserInputReply({ questions }, responseText);
 
+  if (!parsed) {
+    return null;
+  }
+
   if (
-    parsed?.resolution === 'submitted' &&
-    parsed.usedFreeTextOptionFallback === true &&
-    /[?\u00bf\u061f\uff1f]/u.test(responseText)
+    parsed.resolution === 'submitted' &&
+    parsed.usedFreeTextOptionFallback === true
   ) {
-    // Unmatched question text is ambiguous, so keep it conversational rather
-    // than irreversibly submitting it as the custom answer.
     return null;
   }
 

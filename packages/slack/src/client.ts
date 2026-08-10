@@ -10,6 +10,7 @@ export {
   buildTaskFailedBlocks,
 } from './started-message-blocks';
 export {
+  buildSlackAnsweredRequestUserInputBlocks,
   buildSlackRequestUserInputBlocks,
   buildSlackRequestUserInputButtonValue,
   buildSlackRequestUserInputReplyHint,

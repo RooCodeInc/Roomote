@@ -1,4 +1,7 @@
-import { buildSlackRequestUserInputBlocks } from '../request-user-input-blocks';
+import {
+  buildSlackAnsweredRequestUserInputBlocks,
+  buildSlackRequestUserInputBlocks,
+} from '../request-user-input-blocks';
 
 describe('buildSlackRequestUserInputBlocks', () => {
   it('renders the current question in a followup-style layout', () => {
@@ -102,5 +105,28 @@ describe('buildSlackRequestUserInputBlocks', () => {
     ).not.toContain('(Recommended)');
     expect(JSON.stringify(blocks)).not.toContain('cancel to skip');
     expect(JSON.stringify(blocks)).not.toContain('Say `cancel`');
+  });
+});
+
+describe('buildSlackAnsweredRequestUserInputBlocks', () => {
+  it('renders the selected answer without interactive controls', () => {
+    const blocks = buildSlackAnsweredRequestUserInputBlocks({
+      question: {
+        id: 'stack',
+        header: 'Stack',
+        question: 'Which stack should we use?',
+        isOther: true,
+        isSecret: false,
+      },
+      answer: 'Use Go instead',
+    });
+
+    expect(blocks).toEqual([
+      {
+        type: 'markdown',
+        text: 'Which stack should we use?\n\n**Picked:** Use Go instead',
+      },
+    ]);
+    expect(JSON.stringify(blocks)).not.toContain('button');
   });
 });
