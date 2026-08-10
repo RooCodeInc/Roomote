@@ -4472,6 +4472,10 @@ export class OpenCodeServerHarness
       return;
     }
 
+    if (this.resolvedUserInputRequestIds.has(request.requestId)) {
+      return;
+    }
+
     const existing = this.pendingUserInputRequests.get(request.requestId);
 
     if (existing && areOpenCodeQuestionRequestsEqual(existing, request)) {

@@ -4008,6 +4008,102 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
+  it('does not recreate a resolved OpenCode question from a late tool update', async () => {
+    const client = new FakeOpenCodeServerClient();
+    let resolveAbort: (value: boolean) => void = () => undefined;
+    client.abort.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveAbort = resolve;
+        }),
+    );
+    const { harness } = createHarness(client);
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Ask for input.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      const part = {
+        id: 'question_part_resolved',
+        sessionID: 'ses_1',
+        messageID: 'msg_question_resolved',
+        type: 'tool',
+        callID: 'question_call_resolved',
+        tool: 'question',
+        state: {
+          status: 'running',
+          input: {
+            questions: [
+              {
+                id: 'choice',
+                question: 'Choose an option.',
+                options: [{ label: 'Continue' }],
+              },
+            ],
+          },
+        },
+      };
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: { part },
+      });
+
+      const requestId = harness.getPendingUserInputRequests()[0]!.requestId;
+      const requestEnvelopeCount = persistedEnvelopes.filter(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+      ).length;
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.AnswerUserInputRequest,
+          data: {
+            requestId,
+            answers: { choice: { answers: ['Continue'] } },
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.abort).toHaveBeenCalledTimes(1);
+        expect(harness.getPendingUserInputRequests()).toEqual([]);
+      });
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: { part },
+      });
+
+      expect(harness.getPendingUserInputRequests()).toEqual([]);
+      expect(
+        persistedEnvelopes.filter(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+        ),
+      ).toHaveLength(requestEnvelopeCount);
+      resolveAbort(true);
+    } finally {
+      resolveAbort(true);
+      harness.dispose();
+    }
+  });
+
   it('records cancelled OpenCode question responses when answers are empty', async () => {
     const { client, harness } = createHarness();
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
