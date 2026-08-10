@@ -4517,6 +4517,17 @@ export class OpenCodeServerHarness
       return;
     }
 
+    const input = asRecord(toolPart.state?.input);
+    const hasStructuredQuestions =
+      Array.isArray(input?.questions) || Array.isArray(input?.prompts);
+
+    if (
+      this.nativeQuestionRequestIds.has(request.requestId) &&
+      !hasStructuredQuestions
+    ) {
+      return;
+    }
+
     const existing = this.pendingUserInputRequests.get(request.requestId);
 
     if (existing && areOpenCodeQuestionRequestsEqual(existing, request)) {
