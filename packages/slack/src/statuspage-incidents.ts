@@ -1,8 +1,6 @@
 import { Env } from '@roomote/env';
 import { getRedis } from '@roomote/redis';
 
-const STATUSPAGE_URL =
-  'https://roomote.statuspage.io/api/v2/incidents/unresolved.json';
 const CACHE_KEY = 'statuspage:incidents:unresolved';
 const NEGATIVE_CACHE_KEY = `${CACHE_KEY}:empty`;
 const REFRESH_LOCK_KEY = `${CACHE_KEY}:refresh`;
@@ -85,9 +83,7 @@ export function selectStatuspageIncident(
 }
 
 export function isStatuspageIncidentsEnabled(): boolean {
-  // Roomote Cloud enables this explicitly through its deployment configuration.
-  // Do not couple the rollout to the deployment's telemetry instance identifier.
-  return Boolean(Env.STATUSPAGE_INCIDENTS_ENABLED_INSTANCE_ID);
+  return Boolean(Env.R_STATUSPAGE_INCIDENTS_URL);
 }
 
 export function buildStatuspageSlackWarning(
@@ -111,15 +107,16 @@ function parseCachedIncident(value: string | null): CachedIncident | null {
   }
 }
 
-async function fetchIncident(): Promise<StatuspageIncident | null> {
-  const response = await fetch(STATUSPAGE_URL);
+async function fetchIncident(url: string): Promise<StatuspageIncident | null> {
+  const response = await fetch(url);
   if (!response.ok) throw new Error(`Statuspage returned ${response.status}`);
   const body = (await response.json()) as { incidents?: unknown[] };
   return selectStatuspageIncident(body.incidents ?? []);
 }
 
 export async function getStatuspageIncident(): Promise<StatuspageIncident | null> {
-  if (!isStatuspageIncidentsEnabled()) return null;
+  const incidentsUrl = Env.R_STATUSPAGE_INCIDENTS_URL;
+  if (!incidentsUrl) return null;
 
   try {
     const redis = getRedis();
@@ -140,7 +137,7 @@ export async function getStatuspageIncident(): Promise<StatuspageIncident | null
     if (!acquiredLock) return cached?.incident ?? null;
 
     try {
-      const incident = await fetchIncident();
+      const incident = await fetchIncident(incidentsUrl);
       if (!incident) {
         await redis.del(CACHE_KEY);
         await redis.set(
