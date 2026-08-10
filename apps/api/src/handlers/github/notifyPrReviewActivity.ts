@@ -31,6 +31,18 @@ type PrReviewSummaryWebhookPayload =
 const SUMMARY_NOTIFIED_TTL_SECONDS = 30 * 24 * 60 * 60;
 const MAX_SUMMARY_LENGTH = 300;
 
+function getCompletedReviewKey({
+  repository,
+  prNumber,
+  reviewHeadSha,
+}: {
+  repository: string;
+  prNumber: number;
+  reviewHeadSha: string;
+}): string {
+  return `pr-review-notification:review-completed:${encodeURIComponent(repository)}#${prNumber}:${reviewHeadSha}`;
+}
+
 /**
  * Classifies a non-mention PR review webhook event into a review-activity
  * notification input for the owning task's originating conversation (Slack,
@@ -272,6 +284,14 @@ async function enqueuePrReviewSummaryNotificationOnce(
   notification: PrReviewSummaryNotification,
 ): Promise<void> {
   const redis = getRedis();
+  const reviewHeadSha = notification.input.event.reviewHeadSha;
+  const completedReviewKey = reviewHeadSha
+    ? getCompletedReviewKey({
+        repository: notification.input.repository,
+        prNumber: notification.input.prNumber,
+        reviewHeadSha,
+      })
+    : null;
   const claim = await redis.set(
     notification.dedupKey,
     '1',
@@ -293,6 +313,16 @@ async function enqueuePrReviewSummaryNotificationOnce(
 
     if (result.notifiedTaskCount === 0) {
       await redis.del(notification.dedupKey).catch(() => undefined);
+      return;
+    }
+
+    if (completedReviewKey) {
+      await redis.set(
+        completedReviewKey,
+        '1',
+        'EX',
+        SUMMARY_NOTIFIED_TTL_SECONDS,
+      );
     }
   } catch (error) {
     await redis.del(notification.dedupKey).catch(() => undefined);
@@ -336,11 +366,31 @@ export function queuePrReviewActivityNotification(
     return;
   }
 
-  enqueuePrReviewNotification(input).catch((error) =>
+  enqueuePrReviewActivityNotification(input).catch((error) =>
     console.warn(
       `[queuePrReviewActivityNotification] Failed to enqueue review notification for ${input.repository}#${input.prNumber}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     ),
   );
+}
+
+async function enqueuePrReviewActivityNotification(
+  input: EnqueuePrReviewNotificationInput,
+): Promise<void> {
+  if (input.event.roomoteAuthored && input.event.reviewHeadSha) {
+    const completed = await getRedis().get(
+      getCompletedReviewKey({
+        repository: input.repository,
+        prNumber: input.prNumber,
+        reviewHeadSha: input.event.reviewHeadSha,
+      }),
+    );
+
+    if (completed) {
+      return;
+    }
+  }
+
+  await enqueuePrReviewNotification(input);
 }

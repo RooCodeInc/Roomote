@@ -1,13 +1,18 @@
 // pnpm --filter @roomote/api test src/handlers/github/__tests__/notifyPrReviewActivity.test.ts
 
-const { mockEnqueuePrReviewNotification, mockRedisSet, mockRedisDel } =
-  vi.hoisted(() => ({
-    mockEnqueuePrReviewNotification: vi.fn().mockResolvedValue({
-      notifiedTaskCount: 1,
-    }),
-    mockRedisSet: vi.fn(),
-    mockRedisDel: vi.fn(),
-  }));
+const {
+  mockEnqueuePrReviewNotification,
+  mockRedisGet,
+  mockRedisSet,
+  mockRedisDel,
+} = vi.hoisted(() => ({
+  mockEnqueuePrReviewNotification: vi.fn().mockResolvedValue({
+    notifiedTaskCount: 1,
+  }),
+  mockRedisGet: vi.fn(),
+  mockRedisSet: vi.fn(),
+  mockRedisDel: vi.fn(),
+}));
 
 vi.mock('@roomote/env', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@roomote/env')>();
@@ -26,6 +31,7 @@ vi.mock('@roomote/sdk/server', () => ({
 
 vi.mock('@roomote/redis', () => ({
   getRedis: () => ({
+    get: (...args: unknown[]) => mockRedisGet(...args),
     set: (...args: unknown[]) => mockRedisSet(...args),
     del: (...args: unknown[]) => mockRedisDel(...args),
   }),
@@ -238,6 +244,8 @@ describe('queuePrReviewActivityNotification', () => {
     mockEnqueuePrReviewNotification.mockResolvedValue({
       notifiedTaskCount: 1,
     });
+    mockRedisGet.mockReset();
+    mockRedisGet.mockResolvedValue(null);
   });
 
   it('enqueues qualifying events', () => {
@@ -264,6 +272,43 @@ describe('queuePrReviewActivityNotification', () => {
     );
 
     expect(mockEnqueuePrReviewNotification).not.toHaveBeenCalled();
+  });
+
+  it('skips Roomote-authored activity after the same review pass completed', async () => {
+    mockRedisGet.mockResolvedValue('1');
+
+    queuePrReviewActivityNotification(
+      reviewCommentPayload({ login: 'roomote[bot]' }),
+    );
+
+    await vi.waitFor(() => expect(mockRedisGet).toHaveBeenCalled());
+    expect(mockRedisGet).toHaveBeenCalledWith(
+      expect.stringContaining(
+        `review-completed:owner%2Frepo#42:${reviewHeadSha}`,
+      ),
+    );
+    expect(mockEnqueuePrReviewNotification).not.toHaveBeenCalled();
+  });
+
+  it('keeps Roomote-authored activity when the review pass has no completion marker', async () => {
+    queuePrReviewActivityNotification(
+      reviewCommentPayload({ login: 'roomote[bot]' }),
+    );
+
+    await vi.waitFor(() =>
+      expect(mockEnqueuePrReviewNotification).toHaveBeenCalled(),
+    );
+  });
+
+  it('keeps human activity after a Roomote review pass completed', async () => {
+    mockRedisGet.mockResolvedValue('1');
+
+    queuePrReviewActivityNotification(reviewCommentPayload({ login: 'alice' }));
+
+    await vi.waitFor(() =>
+      expect(mockEnqueuePrReviewNotification).toHaveBeenCalled(),
+    );
+    expect(mockRedisGet).not.toHaveBeenCalled();
   });
 
   it('swallows enqueue failures', async () => {
@@ -557,6 +602,14 @@ describe('queuePrReviewSummaryNotification', () => {
       expect.any(Number),
       'NX',
     );
+    expect(mockRedisSet).toHaveBeenCalledWith(
+      expect.stringContaining(
+        `review-completed:owner%2Frepo#42:${reviewHeadSha}`,
+      ),
+      '1',
+      'EX',
+      expect.any(Number),
+    );
     expect(mockRedisDel).not.toHaveBeenCalled();
   });
 
@@ -573,6 +626,12 @@ describe('queuePrReviewSummaryNotification', () => {
         expect.stringContaining('summary-notified'),
       ),
     );
+    expect(mockRedisSet).not.toHaveBeenCalledWith(
+      expect.stringContaining('review-completed'),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+    );
   });
 
   it('releases the dedup claim when enqueueing fails', async () => {
@@ -584,6 +643,12 @@ describe('queuePrReviewSummaryNotification', () => {
       expect(mockRedisDel).toHaveBeenCalledWith(
         expect.stringContaining('summary-notified'),
       ),
+    );
+    expect(mockRedisSet).not.toHaveBeenCalledWith(
+      expect.stringContaining('review-completed'),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
     );
   });
 
