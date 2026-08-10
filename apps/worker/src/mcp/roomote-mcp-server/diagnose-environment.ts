@@ -786,7 +786,7 @@ function diagnoseEnvContract(
   };
 }
 
-export function parseDoctorEnvironmentContext(raw: string | undefined) {
+function parseDoctorEnvironmentContext(raw: string | undefined) {
   if (!raw)
     return doctorEnvironmentContextSchema.parse({
       ports: [],
@@ -835,7 +835,7 @@ export async function diagnoseEnvironment(options: {
   });
 }
 
-export function formatDoctorReport(report: DoctorReport): string {
+function formatDoctorReport(report: DoctorReport): string {
   const lines = [
     '# Environment diagnostics',
     '',
