@@ -532,9 +532,22 @@ export async function consumePendingPrReviewActivity(
     ),
   );
   const completedBatchIds = new Set<string>();
+  const roomoteHeadShas = Array.from(
+    new Set(
+      events.flatMap((event) =>
+        event.kind !== 'review_summary' &&
+        event.roomoteAuthored &&
+        event.reviewHeadSha &&
+        event.observedAt !== undefined
+          ? [event.reviewHeadSha]
+          : [],
+      ),
+    ),
+  );
+  const completedHeadObservedAt = new Map<string, number>();
 
-  await Promise.all(
-    roomoteBatchIds.map(async (cycleId) => {
+  await Promise.all([
+    ...roomoteBatchIds.map(async (cycleId) => {
       let completed: string | null;
 
       try {
@@ -554,15 +567,42 @@ export async function consumePendingPrReviewActivity(
         completedBatchIds.add(cycleId);
       }
     }),
-  );
+    ...roomoteHeadShas.map(async (reviewHeadSha) => {
+      try {
+        const cycle = await readPrReviewCycleState({
+          repository: target.repository,
+          prNumber: target.prNumber,
+          reviewHeadSha,
+        });
 
-  return events.filter(
-    (event) =>
-      event.kind === 'review_summary' ||
-      !event.roomoteAuthored ||
-      !event.batchId ||
-      !completedBatchIds.has(event.batchId),
-  );
+        if (cycle.state?.phase === 'completed') {
+          completedHeadObservedAt.set(reviewHeadSha, cycle.state.observedAt);
+        }
+      } catch {
+        // The pending list is already drained; fail open so feedback is not lost.
+      }
+    }),
+  ]);
+
+  return events.filter((event) => {
+    if (event.kind === 'review_summary' || !event.roomoteAuthored) {
+      return true;
+    }
+
+    if (event.batchId && completedBatchIds.has(event.batchId)) {
+      return false;
+    }
+
+    const completedAt = event.reviewHeadSha
+      ? completedHeadObservedAt.get(event.reviewHeadSha)
+      : undefined;
+
+    return (
+      completedAt === undefined ||
+      event.observedAt === undefined ||
+      event.observedAt > completedAt
+    );
+  });
 }
 
 /**

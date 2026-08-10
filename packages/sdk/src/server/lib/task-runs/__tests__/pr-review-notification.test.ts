@@ -692,6 +692,58 @@ describe('consumePendingPrReviewActivity', () => {
       }),
     ).resolves.toEqual(pendingEvents);
   });
+
+  it('suppresses a pre-cycle inline batch after a different summary cycle completes', async () => {
+    const newerSameHeadEvent = {
+      kind: 'review_comment',
+      authorLogin: 'roomote[bot]',
+      roomoteAuthored: true,
+      reviewHeadSha: 'abc123',
+      batchId: 'github-review:456',
+      observedAt: 300,
+    } as const;
+    mockRedisGet.mockImplementation((key: string) => {
+      if (key.includes('review-cycle-completed')) {
+        return null;
+      }
+
+      return JSON.stringify({
+        cycleId: 'github-summary:99:200',
+        phase: 'completed',
+        observedAt: 200,
+      });
+    });
+    mockMultiExec.mockResolvedValue([
+      [
+        null,
+        [
+          JSON.stringify({
+            kind: 'review_comment',
+            authorLogin: 'roomote[bot]',
+            roomoteAuthored: true,
+            reviewHeadSha: 'abc123',
+            batchId: 'github-review:123',
+            observedAt: 100,
+          }),
+          JSON.stringify(newerSameHeadEvent),
+        ],
+      ],
+      [null, 1],
+    ]);
+
+    const events = await consumePendingPrReviewActivity({
+      taskId: 'task-1',
+      repository: 'owner/repo',
+      prNumber: 42,
+      batchKind: 'roomote',
+      batchId: 'github-review:123',
+    });
+
+    expect(mockRedisGet).toHaveBeenCalledWith(
+      'pr-review-notification:review-cycle:owner%2Frepo#42:abc123',
+    );
+    expect(events).toEqual([newerSameHeadEvent]);
+  });
 });
 
 describe('formatPrReviewActivityMessage', () => {
