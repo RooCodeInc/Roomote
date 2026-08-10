@@ -757,27 +757,21 @@ describe('request_user_input reply parsing', () => {
     });
   });
 
-  it('keeps requests for explanation conversational without relying on punctuation', () => {
+  it('accepts requests for explanation as custom answers', () => {
     const question = { ...fixedChoiceQuestion, isOther: true };
 
-    expect(
-      parseAcpRequestUserInputAnswerReply(
-        [question],
-        'Whats the difference in practice?',
-      ),
-    ).toBeNull();
-    expect(
-      parseAcpRequestUserInputAnswerReply(
-        [question],
-        'Can you explain the tradeoffs in more detail',
-      ),
-    ).toBeNull();
-    expect(
-      parseAcpRequestUserInputAnswerReply(
-        [question],
-        'I need more context before deciding',
-      ),
-    ).toBeNull();
+    for (const answer of [
+      'Whats the difference in practice?',
+      'Can you explain the tradeoffs in more detail',
+      'I need more context before deciding',
+    ]) {
+      expect(
+        parseAcpRequestUserInputAnswerReply([question], answer),
+      ).toMatchObject({
+        resolution: 'submitted',
+        answers: { language: { answers: [answer] } },
+      });
+    }
   });
 
   it('parses more than three ordered answers for multi-question prompts', () => {

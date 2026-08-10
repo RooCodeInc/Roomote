@@ -122,4 +122,38 @@ describe('OpenCodeServerClient timeouts', () => {
       expect.stringContaining('label=createSession'),
     );
   });
+
+  it('replies to and rejects native OpenCode questions', async () => {
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        new Response(JSON.stringify(true), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new OpenCodeServerClient({
+      baseUrl: 'http://127.0.0.1:4096',
+      workspacePath: '/sandbox/repos',
+      logger: createLogger() as never,
+    });
+
+    await client.replyQuestion({
+      requestId: 'que_1',
+      answers: [['Custom answer']],
+    });
+    await client.rejectQuestion({ requestId: 'que_2' });
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      '/question/que_1/reply?directory=%2Fsandbox%2Frepos',
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: 'POST',
+      body: JSON.stringify({ answers: [['Custom answer']] }),
+    });
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain(
+      '/question/que_2/reject?directory=%2Fsandbox%2Frepos',
+    );
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: 'POST' });
+  });
 });
