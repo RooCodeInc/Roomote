@@ -88,6 +88,19 @@ describe('getCommunicationReplyContext', () => {
       threadId: 'thread-1',
     });
   });
+
+  it('does not activate inherited provider-neutral source context', () => {
+    expect(
+      getCommunicationReplyContext({
+        payload: {
+          communicationProvider: 'teams',
+          communicationChannelId: '19:source-conversation@thread.v2',
+          communicationThreadId: 'source-activity',
+          communicationContextInherited: true,
+        },
+      }),
+    ).toBeNull();
+  });
 });
 
 describe('buildMcpTaskEnv', () => {
