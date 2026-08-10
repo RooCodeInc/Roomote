@@ -10,6 +10,7 @@ import {
 
 import {
   buildEnvironmentDefinitionFingerprint,
+  buildEnvironmentPreviewRepairPrompt,
   buildSetupEnvironmentTaskTitle,
   buildUpdateEnvironmentDefinitionPrompt,
   findMatchingDefinedEnvironment,
@@ -156,6 +157,19 @@ describe('environment definition helpers', () => {
     );
     expect(prompt).toContain('action "update" and environmentId "env-123"');
     expect(prompt).toContain('name: Roomote App');
+  });
+
+  it('directs preview repair tasks through the public preview URL', () => {
+    const prompt = buildEnvironmentPreviewRepairPrompt({
+      environmentId: 'env-123',
+      environmentName: 'Roomote App',
+      config,
+    });
+
+    expect(prompt).toContain('ROOMOTE_<PORT_NAME>_PREVIEW_URL');
+    expect(prompt).toContain(
+      'falling back to `ROOMOTE_<PORT_NAME>_HOST` only when the preview URL variable is unavailable',
+    );
   });
 
   it('finds a created environment that matches the repository set after the task started', () => {
