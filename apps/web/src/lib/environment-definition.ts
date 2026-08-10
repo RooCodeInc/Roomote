@@ -142,14 +142,14 @@ export function buildEnvironmentPreviewRepairPrompt(input: {
 }): string {
   return `Fix live previews for the ${PRODUCT_NAME} environment "${input.environmentName}" (id ${input.environmentId}).
 
-Live previews are configured for this environment, but the user reports the preview does not load or work correctly behind the preview proxy. You are running inside the environment, so its commands and services have already started, and each configured port's public preview origin is available in the sandbox as \`ROOMOTE_<PORT_NAME>_PREVIEW_URL\`. For compatibility with older runtimes where that variable is unavailable, fall back to \`ROOMOTE_<PORT_NAME>_HOST\`.
+Live previews are configured for this environment, but the user reports the preview does not load or work correctly behind the preview proxy. You are running inside the environment, so its commands and services have already started, and each configured port's public preview origin is available in the sandbox as \`ROOMOTE_<PORT_NAME>_PREVIEW_URL\`.
 
 Current environment YAML:
 \`\`\`yaml
 ${configToYaml(input.config).trim()}
 \`\`\`
 
-1. Reproduce: check each configured port's surface on localhost, then through its public preview origin from \`ROOMOTE_<PORT_NAME>_PREVIEW_URL\` (falling back to \`ROOMOTE_<PORT_NAME>_HOST\` only when the preview URL variable is unavailable). Compare the two to isolate proxy-specific failures.
+1. Reproduce: check each configured port's surface on localhost, then through its public preview origin from \`ROOMOTE_<PORT_NAME>_PREVIEW_URL\`. Compare the two to isolate proxy-specific failures.
 2. Diagnose the common causes: dev servers that reject unknown hosts (allowed-hosts or host-header checks) or listen only on a loopback interface, hardcoded localhost or 127.0.0.1 origins in client code or API calls, CORS failures on cross-origin API requests, response headers that block framing (\`X-Frame-Options\`, \`Content-Security-Policy\` \`frame-ancestors\`), and websocket or HMR endpoints that bypass the proxy.
 3. Fix the root cause:
    - For environment-definition problems (commands, env vars, port settings, services, docker projects), update the environment using the ${PRODUCT_NAME} MCP tool \`manage_environments\` with \`action: "update"\` and \`environmentId: "${input.environmentId}"\`. Keep every other environment setting unchanged.

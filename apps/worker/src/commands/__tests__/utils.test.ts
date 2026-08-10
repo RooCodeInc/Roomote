@@ -193,6 +193,25 @@ describe('injectEnvVars', () => {
     );
   });
 
+  it('does not expose a preview URL for the retired editor identity', async () => {
+    const envVars: Record<string, string> = {
+      ROOMOTE_EDITOR_PREVIEW_URL: 'https://stale-editor.example.com',
+    };
+    const taskRun = {
+      taskId: 'task-123',
+      machineDomains: {
+        EDITOR: 'https://sandbox-editor.modal.host',
+      },
+      proxyPorts: {},
+    } as unknown as TaskRun;
+
+    await injectEnvVars(envVars, taskRun, {
+      previewProxyBaseUrl: 'https://preview.octomote.run',
+    });
+
+    expect(envVars.ROOMOTE_EDITOR_PREVIEW_URL).toBeUndefined();
+  });
+
   describe('PREVIEW_DOMAINS derivation', () => {
     it('derives PREVIEW_DOMAINS from the preview-proxy base URL hostname', async () => {
       const envVars: Record<string, string> = {};

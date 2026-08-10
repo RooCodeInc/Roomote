@@ -212,7 +212,11 @@ export async function injectEnvVars(
       // Keep *_HOST pointing at the direct machine domain for unproxied ports,
       // while also exposing the authenticated shareable URL that agents and
       // browser tooling must use to exercise the preview entrypoint itself.
-      envVars[previewUrlEnvVarName] = previewUrl;
+      if (name === CODE_SERVER_NAMED_PORT.name) {
+        delete envVars[previewUrlEnvVarName];
+      } else {
+        envVars[previewUrlEnvVarName] = previewUrl;
+      }
 
       if (isProxied) {
         envVars[envVarName] = previewUrl;
