@@ -66,7 +66,18 @@ function buildSlackButtonActionsBlock(
 export class SlackCommunicationProvider implements CommunicationProviderAdapter {
   readonly provider = 'slack' as const;
 
-  constructor(private readonly slack: SlackNotifier) {}
+  constructor(
+    private readonly slack: SlackNotifier,
+    readonly teamId?: string,
+  ) {}
+
+  openConversation(userId: string): Promise<string | null> {
+    return this.slack.openConversation(userId);
+  }
+
+  getDirectMessageUserId(channelId: string): Promise<string | null> {
+    return this.slack.getDirectMessageUserId(channelId);
+  }
 
   resolveChannelId(channel: string): Promise<string | null> {
     return this.slack.resolveChannelId(channel);

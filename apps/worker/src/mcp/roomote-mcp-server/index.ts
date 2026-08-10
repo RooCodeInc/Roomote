@@ -1522,12 +1522,14 @@ if (shouldRegisterChannelPostTool()) {
       description:
         `${postSurface}-visible: posts a new standalone message into a ${postSurface} channel the Roomote app can access. ` +
         'Use this only when the current user explicitly asks you to post a separate update message rather than replying in the ongoing exchange; prefer send_chat_reply for normal replies. ' +
-        'Pass a channel ID (Slack also accepts a channel name or mention). Cross-channel posts are subject to provider-specific authorization and target support. ' +
+        'Pass a channel ID (Slack also accepts a channel name or mention, DM ID, or linked Slack user ID/mention). Cross-channel posts and DMs are subject to provider-specific authorization and target support. ' +
         'The message text renders as Markdown. Lead with the answer or takeaway, use short paragraphs, and put each list item on its own line.',
       inputSchema: {
         channel: z
           .string()
-          .describe(`${postSurface} channel ID the Roomote app can access`),
+          .describe(
+            `${postSurface} channel ID the Roomote app can access; Slack also accepts a linked user ID or mention for DMs`,
+          ),
         threadTs: z
           .string()
           .optional()

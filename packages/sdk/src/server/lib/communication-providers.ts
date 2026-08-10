@@ -4,7 +4,7 @@ import type {
   TeamsCommunicationProvider,
   TelegramCommunicationProvider,
 } from '@roomote/communication';
-import { db, eq, slackInstallations } from '@roomote/db/server';
+import { and, db, eq, slackInstallations } from '@roomote/db/server';
 import { SlackCommunicationProvider, SlackNotifier } from '@roomote/slack';
 import type { CommunicationProvider } from '@roomote/types';
 
@@ -24,10 +24,17 @@ export type RuntimeCommunicationProviderAdapter = CommunicationProviderAdapter &
  * Builds a `SlackCommunicationProvider` from the deployment's active Slack
  * installation, or `null` when Slack is not connected.
  */
-async function createSlackCommunicationProviderFromInstallation(): Promise<SlackCommunicationProvider | null> {
+async function createSlackCommunicationProviderFromInstallation(
+  slackTeamId?: string | null,
+): Promise<SlackCommunicationProvider | null> {
   const installation = await db.query.slackInstallations.findFirst({
-    where: eq(slackInstallations.isActive, true),
-    columns: { botAccessToken: true },
+    where: slackTeamId
+      ? and(
+          eq(slackInstallations.isActive, true),
+          eq(slackInstallations.teamId, slackTeamId),
+        )
+      : eq(slackInstallations.isActive, true),
+    columns: { botAccessToken: true, teamId: true },
   });
 
   if (!installation?.botAccessToken) {
@@ -36,6 +43,7 @@ async function createSlackCommunicationProviderFromInstallation(): Promise<Slack
 
   return new SlackCommunicationProvider(
     new SlackNotifier(installation.botAccessToken),
+    installation.teamId,
   );
 }
 
@@ -46,10 +54,13 @@ async function createSlackCommunicationProviderFromInstallation(): Promise<Slack
  */
 export async function getCommunicationProviderAdapter(
   provider: CommunicationProvider,
+  options: { slackTeamId?: string | null } = {},
 ): Promise<RuntimeCommunicationProviderAdapter | null> {
   switch (provider) {
     case 'slack':
-      return createSlackCommunicationProviderFromInstallation();
+      return createSlackCommunicationProviderFromInstallation(
+        options.slackTeamId,
+      );
     case 'teams':
       return createTeamsCommunicationProviderFromRuntimeCredentials();
     case 'telegram':

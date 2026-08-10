@@ -139,7 +139,9 @@ describe('sendCommunicationChannelPost', () => {
       parsedBody: { channel: '#eng', text: 'hello', images: [] },
     });
 
-    expect(getCommunicationProviderAdapterMock).toHaveBeenCalledWith('slack');
+    expect(getCommunicationProviderAdapterMock).toHaveBeenCalledWith('slack', {
+      slackTeamId: null,
+    });
     expect(slackResolveChannelIdMock).toHaveBeenCalledWith('#eng');
     expect(slackPostMessageMock).toHaveBeenCalledWith({
       channelId: 'C123',
