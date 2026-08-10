@@ -625,15 +625,118 @@ function scrubUnmarkedPublicAttribution(
   );
 }
 
-const FOLLOW_UP_MENTION_PATTERN = '@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?';
-const FOLLOW_UP_DESTINATION_LINK_PATTERN =
-  '\\[(?:the web UI|Slack|Discord|Telegram|Teams)\\]\\(https:\\/\\/[^\\s)]+\\)';
-const VIEW_TASK_LINK_PATTERN = '\\[View the task\\]\\(https:\\/\\/[^\\s)]+\\)';
-const SAFE_UNMARKED_FOLLOW_UP_INSTRUCTION_PATTERN = new RegExp(
-  `((?:Follow up by mentioning ${FOLLOW_UP_MENTION_PATTERN}(?:\\.| or in ${FOLLOW_UP_DESTINATION_LINK_PATTERN}\\.|, in ${FOLLOW_UP_DESTINATION_LINK_PATTERN}, or in ${FOLLOW_UP_DESTINATION_LINK_PATTERN}\\.)|${VIEW_TASK_LINK_PATTERN} or mention ${FOLLOW_UP_MENTION_PATTERN} for follow-up asks\\.|mention ${FOLLOW_UP_MENTION_PATTERN} for follow-up asks\\.))$`,
-  'u',
-);
-const FOLLOW_UP_LINK_PATTERN = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/gu;
+const CHAT_FOLLOW_UP_LABELS = new Set([
+  'Slack',
+  'Discord',
+  'Telegram',
+  'Teams',
+]);
+
+type FollowUpLink = {
+  label: string;
+  rawUrl: string;
+  start: number;
+  end: number;
+};
+
+function parseFollowUpLinks(instruction: string): FollowUpLink[] | null {
+  const links: FollowUpLink[] = [];
+  let cursor = 0;
+
+  while (cursor < instruction.length) {
+    const start = instruction.indexOf('[', cursor);
+    if (start === -1) {
+      break;
+    }
+    const separator = instruction.indexOf('](', start + 1);
+    const end = separator === -1 ? -1 : instruction.indexOf(')', separator + 2);
+    if (separator === -1 || end === -1) {
+      return null;
+    }
+
+    const label = instruction.slice(start + 1, separator);
+    const rawUrl = instruction.slice(separator + 2, end);
+    if (!label || !rawUrl || rawUrl.includes('(')) {
+      return null;
+    }
+
+    links.push({ label, rawUrl, start, end: end + 1 });
+    cursor = end + 1;
+  }
+
+  return links;
+}
+
+function normalizeFollowUpLinks(
+  instruction: string,
+  links: FollowUpLink[],
+): string {
+  let normalized = '';
+  let cursor = 0;
+  for (const link of links) {
+    normalized += `${instruction.slice(cursor, link.start)}<${link.label}>`;
+    cursor = link.end;
+  }
+  return normalized + instruction.slice(cursor);
+}
+
+function readFollowUpMention(instruction: string): string | null {
+  const markers = ['mentioning @', 'mention @'];
+  const marker = markers.find((candidate) => instruction.includes(candidate));
+  if (!marker) {
+    return null;
+  }
+
+  const start = instruction.indexOf(marker) + marker.length - 1;
+  let end = start + 1;
+  while (end < instruction.length) {
+    const char = instruction[end] ?? '';
+    const code = char.charCodeAt(0);
+    const isAlphaNumeric =
+      (code >= 48 && code <= 57) ||
+      (code >= 65 && code <= 90) ||
+      (code >= 97 && code <= 122);
+    if (!isAlphaNumeric && char !== '-') {
+      break;
+    }
+    end += 1;
+  }
+
+  return end > start + 1 ? instruction.slice(start, end) : null;
+}
+
+function hasKnownFollowUpGrammar(
+  instruction: string,
+  mention: string,
+  links: FollowUpLink[],
+): boolean {
+  const normalized = normalizeFollowUpLinks(instruction, links);
+  if (links.length === 0) {
+    return (
+      normalized === `Follow up by mentioning ${mention}.` ||
+      normalized === `mention ${mention} for follow-up asks.`
+    );
+  }
+  if (links.length === 1) {
+    const label = links[0]?.label;
+    return label === 'View the task'
+      ? normalized ===
+          `<View the task> or mention ${mention} for follow-up asks.`
+      : (label === 'the web UI' || CHAT_FOLLOW_UP_LABELS.has(label ?? '')) &&
+          normalized === `Follow up by mentioning ${mention} or in <${label}>.`;
+  }
+  if (links.length === 2) {
+    const chatLabel = links[1]?.label ?? '';
+    return (
+      links[0]?.label === 'the web UI' &&
+      CHAT_FOLLOW_UP_LABELS.has(chatLabel) &&
+      normalized ===
+        `Follow up by mentioning ${mention}, in <the web UI>, or in <${chatLabel}>.`
+    );
+  }
+
+  return false;
+}
 
 function isTrustedWebTaskUrl(
   url: URL,
@@ -706,21 +809,31 @@ function findSafeUnmarkedFollowUpInstruction(
     payloadKind: string;
   },
 ): string | null {
-  const instruction = line.match(
-    SAFE_UNMARKED_FOLLOW_UP_INSTRUCTION_PATTERN,
-  )?.[1];
-  const mention = instruction?.match(
-    /\bmention(?:ing)? (@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)/u,
-  )?.[1];
-  if (!instruction || !mention || !context.allowedMentions.has(mention)) {
+  const starts = [
+    line.indexOf('Follow up by mentioning '),
+    line.indexOf('[View the task]('),
+    line.indexOf('mention @'),
+  ].filter((index) => index >= 0);
+  if (starts.length === 0) {
     return null;
   }
 
-  const links = [...instruction.matchAll(FOLLOW_UP_LINK_PATTERN)];
-  return links.every((match) =>
+  const instruction = line.slice(Math.min(...starts)).trim();
+  const mention = readFollowUpMention(instruction);
+  const links = parseFollowUpLinks(instruction);
+  if (
+    !mention ||
+    !links ||
+    !context.allowedMentions.has(mention) ||
+    !hasKnownFollowUpGrammar(instruction, mention, links)
+  ) {
+    return null;
+  }
+
+  return links.every((link) =>
     isTrustedFollowUpLink(
-      match[1] ?? '',
-      match[2] ?? '',
+      link.label,
+      link.rawUrl,
       context.taskId,
       context.payloadKind,
     ),
