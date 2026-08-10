@@ -574,6 +574,16 @@ async function createProviderToken(
   }
 }
 
+function earliestExpiry(left: Date | null, right: Date | null): Date | null {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+  return left.getTime() <= right.getTime() ? left : right;
+}
+
 function mergeProviderTokens(
   tokens: SourceControlRuntimeToken[],
 ): SourceControlRuntimeToken {
@@ -599,6 +609,9 @@ function mergeProviderTokens(
         ...(merged.artifactsPatch ?? {}),
         ...(token.artifactsPatch ?? {}),
       },
+      // Keep the soonest known expiry so multi-provider runs still refresh
+      // short-lived credentials (e.g. GitLab OAuth) on time.
+      expiresAt: earliestExpiry(merged.expiresAt, token.expiresAt),
     }),
     primaryToken,
   );

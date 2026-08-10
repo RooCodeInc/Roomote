@@ -18,9 +18,9 @@ import {
   resolveDeploymentEnvVar,
 } from '@roomote/db/server';
 import {
-  getCachedGitLabOAuthAccessTokenExpiresAt,
   isGitLabOAuthAccessToken,
   resolveGitLabOAuthAccessToken,
+  resolveGitLabOAuthAccessTokenWithMetadata,
 } from './oauth';
 
 export * from './ci';
@@ -1197,7 +1197,11 @@ export async function createTaskRunScopedGitLabTokens(
   /** OAuth access-token expiry for the worker refresh loop, if known. */
   expiresAt: Date | null;
 }> {
-  const deploymentToken = await resolveGitLabToken();
+  const oauthToken = await resolveGitLabOAuthAccessTokenWithMetadata({
+    fetchImpl: options?.fetchImpl,
+  });
+  const deploymentToken =
+    oauthToken?.accessToken ?? (await resolveGitLabToken());
 
   if (!deploymentToken?.trim()) {
     throw new Error(
@@ -1209,9 +1213,6 @@ export async function createTaskRunScopedGitLabTokens(
   const apiBaseUrl = options?.apiBaseUrl ?? buildGitLabApiBaseUrl(baseUrl);
   const host = hostFromBaseUrl(baseUrl);
   const repositoriesList = await resolveGitLabRepositoryRowsForTaskRun(taskRun);
-  const oauthExpiresAt = isGitLabOAuthAccessToken(deploymentToken)
-    ? getCachedGitLabOAuthAccessTokenExpiresAt()
-    : null;
 
   // OAuth grants are deployment-scoped and already carry the repository
   // permissions needed by the worker. Do not attempt to mint GitLab project
@@ -1230,7 +1231,7 @@ export async function createTaskRunScopedGitLabTokens(
       artifactsPatch: {
         [GITLAB_SCOPED_PROJECT_TOKENS_ARTIFACT_KEY]: [],
       },
-      expiresAt: oauthExpiresAt,
+      expiresAt: oauthToken?.expiresAt ?? null,
     };
   }
 

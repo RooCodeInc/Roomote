@@ -102,6 +102,50 @@ describe('GitLab deployment OAuth', () => {
     expect(isGitLabOAuthAccessToken('gitlab-access-token')).toBe(false);
   });
 
+  it('uses a still-valid token when concurrent refresh fails', async () => {
+    const stillValidUntil = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    executeMock.mockResolvedValue([{ value: 'encrypted-connection' }]);
+    decryptMock
+      .mockResolvedValueOnce({
+        baseUrl: 'https://gitlab.example',
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        accountId: '42',
+        username: 'roomote',
+        accessToken: 'stale-access-token',
+        refreshToken: 'stale-refresh-token',
+        expiresAt: new Date(0).toISOString(),
+        scopes: ['api'],
+        status: 'active',
+      })
+      .mockResolvedValueOnce({
+        baseUrl: 'https://gitlab.example',
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        accountId: '42',
+        username: 'roomote',
+        accessToken: 'peer-refreshed-access-token',
+        refreshToken: 'peer-refreshed-refresh-token',
+        expiresAt: stillValidUntil,
+        scopes: ['api'],
+        status: 'active',
+      });
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'invalid_grant' }), {
+        status: 400,
+        statusText: 'Bad Request',
+      }),
+    );
+
+    await expect(
+      resolveGitLabOAuthAccessToken({
+        fetchImpl: fetchImpl as typeof fetch,
+        forceRefresh: true,
+      }),
+    ).resolves.toBe('peer-refreshed-access-token');
+    expect(writeMock).not.toHaveBeenCalled();
+  });
+
   it('proactively refreshes OAuth access tokens inside the 10-minute skew window', async () => {
     executeMock.mockResolvedValue([{ value: 'encrypted-connection' }]);
     decryptMock.mockResolvedValue({
