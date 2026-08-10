@@ -661,7 +661,9 @@ export function parseAcpRequestUserInputReply(
 
 const CONVERSATIONAL_REQUEST_USER_INPUT_REPLY_PATTERNS = [
   /^(?:what(?:['’]?s)?|why|how|when|where|who|which)\b/u,
-  /^(?:can|could|would|will|do|does|did|should|may|might)\s+(?:you|we|i|it|this|that|there|they)\b/u,
+  /^(?:can|could|would|will|do|does|did|should|may|might)\s+(?:you|we|i|it|this|that|there|they)\s+(?:please\s+)?(?:explain|clarify|compare|describe|recommend|expand|elaborate)\b/u,
+  /^(?:can|could|would|will|do|does|did|should|may|might)\s+(?:you|we|i|it|this|that|there|they)\s+(?:please\s+)?(?:tell|show|give)\s+(?:me|us)\b/u,
+  /^(?:can|could|would|will|do|does|did|should|may|might)\s+(?:you|we|i|it|this|that|there|they)\s+(?:please\s+)?help\s+(?:me|us)(?:\s+(?:understand|decide))?\b/u,
   /^(?:please\s+)?(?:explain|clarify|compare|describe|recommend)\b/u,
   /^(?:please\s+)?(?:tell|show|give)\s+me\b/u,
   /^(?:please\s+)?help\s+me(?:\s+understand)?\b/u,

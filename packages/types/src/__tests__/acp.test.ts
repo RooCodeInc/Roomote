@@ -731,6 +731,18 @@ describe('request_user_input reply parsing', () => {
     expect(
       parseAcpRequestUserInputAnswerReply(
         [question],
+        'Could you use Go instead?',
+      ),
+    ).toMatchObject({
+      resolution: 'submitted',
+      answers: {
+        language: { answers: ['Could you use Go instead?'] },
+      },
+    });
+
+    expect(
+      parseAcpRequestUserInputAnswerReply(
+        [question],
         "I don't want retries for 24 hours; use a fixed limit instead.",
       ),
     ).toMatchObject({
