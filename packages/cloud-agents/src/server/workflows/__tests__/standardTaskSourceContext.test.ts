@@ -17,8 +17,8 @@ describe('standardTask source context', () => {
     expect(harnessInstructions).toContain('<channel_id>C123</channel_id>');
     expect(harnessInstructions).toContain('<thread_id>123.456</thread_id>');
     expect(harnessInstructions).toContain('<message_id>123.789</message_id>');
-    expect(harnessInstructions).toContain(
-      'When an instruction says to report back to the source thread, it means this originating conversation.',
+    expect(harnessInstructions).not.toContain(
+      'report back to the source thread',
     );
   });
 

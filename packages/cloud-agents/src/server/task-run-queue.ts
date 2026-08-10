@@ -1324,7 +1324,7 @@ export async function enqueueTask(
 async function inheritSourceCommunicationMetadata(
   task: FreshTask,
 ): Promise<void> {
-  const sourceRunId = task.sourceRunId;
+  const sourceRunId = task.communicationContextSourceRunId;
   if (!sourceRunId) return;
 
   const sourceRun = await db.query.taskRuns.findFirst({
@@ -1339,13 +1339,27 @@ async function inheritSourceCommunicationMetadata(
 
   if (!sourceRun) return;
 
-  populateCommunicationMetadata(task.payload as Record<string, unknown>, {
+  const payload = task.payload as Record<string, unknown>;
+
+  // A launch that carries its own live context stays a live chat turn.
+  if (payload.communicationProvider != null) return;
+
+  populateCommunicationMetadata(payload, {
     sourcePayload: sourceRun.payload,
     channelId: sourceRun.task?.slackChannelId,
     threadId: sourceRun.task?.slackThreadTs,
   });
-  (task.payload as Record<string, unknown>).communicationContextInherited =
-    true;
+
+  // Slack parents keep their coordinates in task columns rather than
+  // provider-neutral payload fields, so the provider needs stamping here.
+  if (payload.communicationProvider == null && sourceRun.task?.slackChannelId) {
+    payload.communicationProvider = 'slack';
+  }
+
+  // Only flag payloads that actually gained coordinates from the parent.
+  if (payload.communicationProvider != null) {
+    payload.communicationContextInherited = true;
+  }
 }
 
 async function enqueueFreshLaunch(

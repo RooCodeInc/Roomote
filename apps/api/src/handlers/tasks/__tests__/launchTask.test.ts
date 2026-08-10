@@ -325,7 +325,7 @@ describe('launchTask', () => {
     expect(enqueuedTask.task.payload.notifySourceRunOnSettle).toBeUndefined();
   });
 
-  it('stamps the launching run for every standard run-token launch', async () => {
+  it('carries the parent pointer for context inheritance without stamping sourceRunId', async () => {
     mockEnqueueTask.mockResolvedValue({ id: 104, taskId: 'task-plain-child' });
 
     const runAuth = {
@@ -349,10 +349,12 @@ describe('launchTask', () => {
     const enqueuedTask = mockEnqueueTask.mock.calls[0]?.[0] as {
       task: {
         sourceRunId?: number;
+        communicationContextSourceRunId?: number;
         payload: { notifySourceRunOnSettle?: boolean };
       };
     };
-    expect(enqueuedTask.task.sourceRunId).toBe(556);
+    expect(enqueuedTask.task.sourceRunId).toBeUndefined();
+    expect(enqueuedTask.task.communicationContextSourceRunId).toBe(556);
     expect(enqueuedTask.task.payload.notifySourceRunOnSettle).toBeUndefined();
   });
 

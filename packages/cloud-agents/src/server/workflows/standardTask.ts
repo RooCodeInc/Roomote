@@ -334,7 +334,7 @@ ${buildGitHubMessageInstructions()}`
     sourceProvider && (sourceChannelId || sourceThreadId || sourceMessageId)
       ? `
   <task_source_context>
-    <source>${sourceProvider}</source>${
+    <source>${escapeTaskContextText(sourceProvider)}</source>${
       sourceChannelId
         ? `
     <channel_id>${escapeTaskContextText(sourceChannelId)}</channel_id>`
@@ -350,7 +350,6 @@ ${buildGitHubMessageInstructions()}`
     <message_id>${escapeTaskContextText(sourceMessageId)}</message_id>`
         : ''
     }
-    <rule>When an instruction says to report back to the source thread, it means this originating conversation.</rule>
   </task_source_context>`
       : '';
   const sourceControlContext = sourceControlProvider

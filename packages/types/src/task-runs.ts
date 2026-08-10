@@ -775,6 +775,14 @@ const sharedTaskSchema = z.object({
   // Resume-from-snapshot fields (set at insert time for atomic duplicate detection):
   sourceSnapshotId: z.string().nullish(),
   sourceRunId: z.number().nullish(),
+
+  /**
+   * Run whose provider-neutral communication coordinates should be copied
+   * into this task's payload at enqueue time, as read-only source context.
+   * Transient enqueue input; independent of `sourceRunId` so relaunch
+   * lineage, settle notifications, and activation metrics are unaffected.
+   */
+  communicationContextSourceRunId: z.number().nullish(),
 });
 
 export const linkedWorkItemProviderSchema = z.enum([
@@ -1661,41 +1669,67 @@ export function populateCommunicationMetadata(
   );
   if (provider) payload.communicationProvider = provider;
 
+  // Empty-string options count as "not provided" and fall back to the
+  // source payload, matching the historical snapshot-resume semantics.
+  const fromOptionOrSource = (
+    option: string | null | undefined,
+    sourceValue: string | null,
+  ): string | null => {
+    if (typeof option === 'string' && hasNonEmptyValue(option)) {
+      return option;
+    }
+    return sourceValue;
+  };
+
   const values = [
     [
       'communicationTeamId',
-      options.teamId ??
+      fromOptionOrSource(
+        options.teamId,
         getCommunicationTeamIdFromTaskPayload(options.sourcePayload),
+      ),
     ],
     [
       'communicationGuildId',
-      options.guildId ??
+      fromOptionOrSource(
+        options.guildId,
         getCommunicationGuildIdFromTaskPayload(options.sourcePayload),
+      ),
     ],
     [
       'communicationTeamDomain',
-      options.teamDomain ??
+      fromOptionOrSource(
+        options.teamDomain,
         getCommunicationTeamDomainFromTaskPayload(options.sourcePayload),
+      ),
     ],
     [
       'communicationServiceUrl',
-      options.serviceUrl ??
+      fromOptionOrSource(
+        options.serviceUrl,
         getCommunicationServiceUrlFromTaskPayload(options.sourcePayload),
+      ),
     ],
     [
       'communicationChannelId',
-      options.channelId ??
+      fromOptionOrSource(
+        options.channelId,
         getCommunicationChannelFromTaskPayload(options.sourcePayload),
+      ),
     ],
     [
       'communicationThreadId',
-      options.threadId ??
+      fromOptionOrSource(
+        options.threadId,
         getCommunicationThreadIdFromTaskPayload(options.sourcePayload),
+      ),
     ],
     [
       'communicationMessageId',
-      options.messageId ??
+      fromOptionOrSource(
+        options.messageId,
         getCommunicationMessageIdFromTaskPayload(options.sourcePayload),
+      ),
     ],
   ] as const;
 

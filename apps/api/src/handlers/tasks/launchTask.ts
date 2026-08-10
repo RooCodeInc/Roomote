@@ -285,24 +285,29 @@ export async function launchTask(
       userId: auth.userId,
     });
 
-    // Run-token launches retain their parent pointer so child tasks can inherit
-    // source conversation metadata. Settle notifications remain opt-in.
+    // A settle notification needs a durable pointer back to the launching
+    // run, so the opt-in only takes effect on run-token launches.
     const notifySourceRunOnSettle =
       requestedType === 'standard' &&
       body.notifyOnSettle === true &&
       'runId' in auth.authContext;
-    const shouldLinkToSourceRun =
-      'runId' in auth.authContext &&
-      (requestedType === 'standard' ||
-        requestedType === 'environment-definition');
-    const sourceRunId =
-      'runId' in auth.authContext ? auth.authContext.runId : undefined;
 
     const taskBase = {
       harness: harnessSelection.harness ?? body.harness,
       computeProvider: body.computeProvider,
       requestedWorkKindDecision,
-      ...(shouldLinkToSourceRun ? { sourceRunId } : {}),
+      ...((requestedType === 'environment-definition' ||
+        notifySourceRunOnSettle) &&
+      'runId' in auth.authContext
+        ? { sourceRunId: auth.authContext.runId }
+        : {}),
+      // Run-token launches carry the parent pointer for read-only
+      // source-context inheritance, without widening sourceRunId semantics.
+      ...('runId' in auth.authContext &&
+      (requestedType === 'standard' ||
+        requestedType === 'environment-definition')
+        ? { communicationContextSourceRunId: auth.authContext.runId }
+        : {}),
     };
 
     const task: StandardTask | SuggestedTasksTask =

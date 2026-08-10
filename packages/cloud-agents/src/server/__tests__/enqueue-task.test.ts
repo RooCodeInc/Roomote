@@ -666,7 +666,7 @@ describe('enqueueTask initiator stamping', () => {
         ...standardTaskInput({
           payload: { repo: 'acme/widgets', description: 'Child work' },
         }),
-        sourceRunId: parentRun.id,
+        communicationContextSourceRunId: parentRun.id,
       },
       initiator: { kind: 'user', userId },
       workflow: 'standard',
@@ -678,7 +678,58 @@ describe('enqueueTask initiator stamping', () => {
       communicationProvider: 'slack',
       communicationChannelId: 'C123',
       communicationThreadId: '123.456',
+      communicationContextInherited: true,
     });
+    expect(childRun.sourceRunId).toBeNull();
+  });
+
+  it('keeps a launch with its own live communication context untouched', async () => {
+    const userId = await createUser();
+    const parentRun = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'slack',
+      trigger: 'message',
+      channels: { slackChannelId: 'C123', slackThreadTs: '123.456' },
+      task: standardTaskInput({
+        payload: {
+          repo: 'acme/widgets',
+          description: 'Parent work',
+          communicationProvider: 'slack',
+          communicationChannelId: 'C123',
+          communicationThreadId: '123.456',
+        },
+      }),
+    });
+
+    const childRun = await launchFresh({
+      task: {
+        ...standardTaskInput({
+          payload: {
+            repo: 'acme/widgets',
+            description: 'Child work',
+            communicationProvider: 'teams',
+            communicationChannelId: '19:live@thread.v2',
+            communicationThreadId: 'live-activity',
+          },
+        }),
+        communicationContextSourceRunId: parentRun.id,
+      },
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    expect(childRun.payload).toMatchObject({
+      communicationProvider: 'teams',
+      communicationChannelId: '19:live@thread.v2',
+      communicationThreadId: 'live-activity',
+    });
+    expect(
+      (childRun.payload as Record<string, unknown>)
+        .communicationContextInherited,
+    ).toBeUndefined();
   });
 
   it('persists an unlinked external actor with actor context and external commit author', async () => {
