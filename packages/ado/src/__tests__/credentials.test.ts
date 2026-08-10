@@ -173,6 +173,27 @@ describe('Azure DevOps credentials', () => {
     );
   });
 
+  it('revalidates the linked account on every delegated token resolve', async () => {
+    delete process.env.ADO_TOKEN;
+    process.env.ADO_AUTH_MODE = 'delegated';
+    process.env.ADO_LINKED_ACCOUNT_ID = 'ado-user@example.com';
+    mockAuthAccountsFindFirst.mockResolvedValue({
+      id: 'account-1',
+      accountId: 'ado-user@example.com',
+      accessToken: 'header.payload.signature',
+      refreshToken: 'refresh-token',
+      accessTokenExpiresAt: new Date(Date.now() + 3_600_000),
+    });
+
+    await expect(resolveAdoToken()).resolves.toBe('header.payload.signature');
+
+    mockAuthAccountsFindFirst.mockResolvedValue(null);
+
+    await expect(resolveAdoToken()).resolves.toBeNull();
+    expect(mockAuthAccountsFindFirst).toHaveBeenCalledTimes(2);
+    expect(mockTransactionExecute).toHaveBeenCalledTimes(2);
+  });
+
   it('validates Azure DevOps tokens against the repository listing the sync uses', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

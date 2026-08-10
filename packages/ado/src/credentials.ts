@@ -29,12 +29,6 @@ type OAuthErrorResponse = {
 };
 
 let cachedAdoEntraToken: { token: string; expiresAt: number } | null = null;
-let cachedAdoDelegatedToken: {
-  accountId: string;
-  token: string;
-  expiresAt: number;
-} | null = null;
-
 export type AdoTokenValidationResult =
   | { status: 'valid' }
   | { status: 'invalid'; error: string }
@@ -251,17 +245,6 @@ async function resolveAdoDelegatedToken(overrides?: {
     return null;
   }
 
-  if (
-    cachedAdoDelegatedToken?.accountId === linkedAccountId.trim() &&
-    cachedAdoDelegatedToken.expiresAt >
-      Date.now() + ADO_ENTRA_TOKEN_EXPIRY_SKEW_MS
-  ) {
-    return {
-      token: cachedAdoDelegatedToken.token,
-      expiresAt: new Date(cachedAdoDelegatedToken.expiresAt),
-    };
-  }
-
   return db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtextextended(${`ado:${linkedAccountId.trim()}`}, 0))`,
@@ -287,11 +270,6 @@ async function resolveAdoDelegatedToken(overrides?: {
     const expiresAt = account.accessTokenExpiresAt?.getTime() ?? 0;
 
     if (expiresAt > Date.now() + ADO_ENTRA_TOKEN_EXPIRY_SKEW_MS) {
-      cachedAdoDelegatedToken = {
-        accountId: account.accountId,
-        token: account.accessToken,
-        expiresAt,
-      };
       return { token: account.accessToken, expiresAt: new Date(expiresAt) };
     }
 
@@ -364,18 +342,12 @@ async function resolveAdoDelegatedToken(overrides?: {
       })
       .where(eq(authAccounts.id, account.id));
 
-    cachedAdoDelegatedToken = {
-      accountId: account.accountId,
-      token: accessToken,
-      expiresAt: nextExpiresAt,
-    };
     return { token: accessToken, expiresAt: new Date(nextExpiresAt) };
   });
 }
 
 export function clearAdoEntraTokenCache(): void {
   cachedAdoEntraToken = null;
-  cachedAdoDelegatedToken = null;
 }
 
 export function buildAdoBasicAuthHeader(token: string): string {
