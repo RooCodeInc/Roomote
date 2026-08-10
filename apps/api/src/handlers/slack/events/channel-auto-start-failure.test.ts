@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   processAttachments: vi.fn(),
   recordInboundMessage: vi.fn(),
   postRoutingDebug: vi.fn(),
+  automationLaunchIdentity: vi.fn(),
   logWarn: vi.fn(),
 }));
 
@@ -60,6 +61,10 @@ vi.mock('../helpers/attachments.js', () => ({
   processSlackAttachments: mocks.processAttachments,
 }));
 
+vi.mock('../helpers/launch-identity.js', () => ({
+  getSlackAutomationLaunchIdentity: mocks.automationLaunchIdentity,
+}));
+
 vi.mock('../helpers/channel-auto-start-routing-debug.js', () => ({
   postChannelAutoStartRoutingDebug: mocks.postRoutingDebug,
 }));
@@ -88,10 +93,13 @@ const event = {
   ts: '111.000',
 } as never;
 
-async function runHandler(launchCriteria?: string) {
+async function runHandler(
+  launchCriteria?: string,
+  { isBotAuthored = false }: { isBotAuthored?: boolean } = {},
+) {
   return processSlackChannelAutoStartTask({
     event,
-    isBotAuthored: false,
+    isBotAuthored,
     slackInstallation: { teamId: 'T123', botUserId: 'UBOT' } as never,
     slack: slack as never,
     userMapping: {
@@ -127,6 +135,10 @@ describe('Slack channel auto-start failures', () => {
     });
     mocks.recordInboundMessage.mockResolvedValue(undefined);
     mocks.postRoutingDebug.mockResolvedValue(undefined);
+    mocks.automationLaunchIdentity.mockResolvedValue({
+      launchUserId: 'installer-1',
+      slackUserId: 'UBOT',
+    });
     postMessage.mockResolvedValue({ ts: 'reply-1' });
     vi.mocked(slack.addReaction).mockResolvedValue(undefined);
     vi.mocked(slack.getChannelName).mockResolvedValue('forge');
@@ -224,6 +236,37 @@ describe('Slack channel auto-start failures', () => {
       text: FAILURE_MESSAGE,
       blocks: [{ type: 'markdown', text: FAILURE_MESSAGE }],
     });
+    errorSpy.mockRestore();
+  });
+
+  it('stays silent when the classifier fails on a bot-authored message', async () => {
+    mocks.evaluateGate.mockResolvedValue({
+      shouldLaunch: false,
+      skipReason: 'classifier_error',
+      debug: { llmDecision: 'error', reason: 'provider unavailable' },
+    });
+
+    await expect(
+      runHandler('Only actionable requests', { isBotAuthored: true }),
+    ).resolves.toBe(true);
+    await flushBackgroundWork();
+
+    expect(postMessage).not.toHaveBeenCalled();
+    expect(mocks.startTask).not.toHaveBeenCalled();
+  });
+
+  it('stays silent when task startup throws for a bot-authored message', async () => {
+    const errorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+    mocks.startTask.mockRejectedValue(new Error('task queue unavailable'));
+
+    await expect(runHandler(undefined, { isBotAuthored: true })).resolves.toBe(
+      true,
+    );
+    await flushBackgroundWork();
+
+    expect(postMessage).not.toHaveBeenCalled();
     errorSpy.mockRestore();
   });
 });

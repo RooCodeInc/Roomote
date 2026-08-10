@@ -701,7 +701,16 @@ async function postSlackChannelAutoStartFailureBestEffort(input: {
   slack: SlackNotifier;
   channelId: string;
   threadId: string;
+  isBotAuthored: boolean;
 }): Promise<void> {
+  // Bot-authored messages are typically automated feeds; a "please try
+  // again" reply is addressed to nobody, and a sustained classifier or
+  // startup outage would otherwise reply to every feed message. Failures on
+  // bot messages stay log-only, like before launch-failure replies existed.
+  if (input.isBotAuthored) {
+    return;
+  }
+
   await input.slack
     .postMessage({
       channel: input.channelId,
@@ -844,11 +853,15 @@ export async function processSlackChannelAutoStartTask(params: {
           // Release the routing lock like other no-launch outcomes so a
           // manual @roomote mention in this thread is not blocked for the
           // remainder of the lock TTL.
+          // `rate_limited` stays silent on purpose: a capped channel is
+          // already at its launch budget, and per-message replies there would
+          // only add noise on top of an intentional throttle.
           if (gateResult.skipReason === 'classifier_error') {
             await postSlackChannelAutoStartFailureBestEffort({
               slack,
               channelId: event.channel,
               threadId,
+              isBotAuthored,
             });
           }
           await redis.del(routingLockKey).catch(() => {});
@@ -1039,6 +1052,7 @@ export async function processSlackChannelAutoStartTask(params: {
         slack,
         channelId: event.channel,
         threadId,
+        isBotAuthored,
       });
     }
   })();

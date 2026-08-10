@@ -497,6 +497,53 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
     });
   });
 
+  it('stays silent when the classifier fails on a bot-authored message', async () => {
+    mocks.getBackgroundAgentSettings.mockResolvedValue(
+      settingsWith([
+        {
+          channelId: MONITORED_CHANNEL_ID,
+          launchCriteria: 'Only launch on new incidents.',
+        },
+      ]),
+    );
+    mocks.evaluateGate.mockResolvedValue({
+      shouldLaunch: false,
+      skipReason: 'classifier_error',
+      debug: { llmDecision: 'error', reason: 'provider unavailable' },
+    });
+
+    await expect(
+      runHandler({
+        payload: messagePayload({
+          author: { id: 'alert-bot', username: 'alerts', bot: true },
+        }),
+      }),
+    ).resolves.toBe(true);
+    await flushBackgroundWork();
+
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('stays silent when task startup throws for a bot-authored message', async () => {
+    mocks.startNewTask.mockRejectedValue(new Error('task queue unavailable'));
+
+    await expect(
+      runHandler({
+        payload: messagePayload({
+          author: { id: 'alert-bot', username: 'alerts', bot: true },
+        }),
+      }),
+    ).resolves.toBe(true);
+    await flushBackgroundWork();
+
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    // The routing lock is still released so a redelivery can re-evaluate.
+    expect(mocks.redis.del).toHaveBeenCalledWith(
+      'discord:routing-lock:message-1',
+    );
+  });
+
   it('dedupes concurrent deliveries via the routing lock', async () => {
     mocks.redis.set.mockResolvedValue(null); // lock already held
 

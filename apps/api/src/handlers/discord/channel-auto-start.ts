@@ -59,7 +59,16 @@ async function sendLaunchFailureBestEffort(input: {
   provider: DiscordCommunicationProvider;
   channelId: string;
   messageId: string;
+  isBotAuthored: boolean;
 }): Promise<void> {
+  // Bot-authored messages are typically automated feeds; a "please try
+  // again" reply is addressed to nobody, and a sustained classifier or
+  // startup outage would otherwise reply to every feed message. Failures on
+  // bot messages stay log-only, like before launch-failure replies existed.
+  if (input.isBotAuthored) {
+    return;
+  }
+
   await input.provider
     .postMessage({
       channelId: input.channelId,
@@ -336,11 +345,15 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
         });
 
         if (!gateResult.shouldLaunch) {
+          // `rate_limited` stays silent on purpose: a capped channel is
+          // already at its launch budget, and per-message replies there would
+          // only add noise on top of an intentional throttle.
           if (gateResult.skipReason === 'classifier_error') {
             await sendLaunchFailureBestEffort({
               provider,
               channelId: channel.channelId,
               messageId: message.id,
+              isBotAuthored,
             });
           }
           await releaseRoutingLock();
@@ -414,6 +427,7 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
         provider,
         channelId: channel.channelId,
         messageId: message.id,
+        isBotAuthored,
       });
       await releaseRoutingLock();
     }
