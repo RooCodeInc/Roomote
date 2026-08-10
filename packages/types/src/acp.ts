@@ -667,7 +667,19 @@ export function parseAcpRequestUserInputAnswerReply(
     return null;
   }
 
-  return parseAcpRequestUserInputReply({ questions }, responseText);
+  const parsed = parseAcpRequestUserInputReply({ questions }, responseText);
+
+  if (
+    parsed?.resolution === 'submitted' &&
+    parsed.usedFreeTextOptionFallback === true &&
+    /[?\u00bf\u061f\uff1f]/u.test(responseText)
+  ) {
+    // Unmatched question text is ambiguous, so keep it conversational rather
+    // than irreversibly submitting it as the custom answer.
+    return null;
+  }
+
+  return parsed;
 }
 
 export type AcpMessageKind =

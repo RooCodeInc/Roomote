@@ -349,7 +349,7 @@ describe('CLO-1133: active task run takes priority over routing confirmation and
     expect(routeTask).not.toHaveBeenCalled();
   });
 
-  it('queues request_user_input answers for active task runs instead of plain follow-up prompts', async () => {
+  it('queues declarative custom answers for active task runs instead of plain follow-up prompts', async () => {
     setupDbMocks();
 
     vi.mocked(findActiveLinearTaskRun).mockResolvedValue({
@@ -387,7 +387,7 @@ describe('CLO-1133: active task run takes priority over routing confirmation and
 
     const payload = makePayload({
       agentActivity: {
-        content: { body: '2' },
+        content: { body: 'Use Go instead' },
       },
     });
     const { rawBody, headers } = createSignedRequest(payload);
@@ -408,7 +408,7 @@ describe('CLO-1133: active task run takes priority over routing confirmation and
         userId: 'user-1',
         answers: {
           language: {
-            answers: ['Rust'],
+            answers: ['Use Go instead'],
           },
         },
       }),

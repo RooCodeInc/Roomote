@@ -736,6 +736,17 @@ describe('request_user_input reply parsing', () => {
     });
   });
 
+  it('keeps free-text side questions as conversational replies', () => {
+    const question = { ...fixedChoiceQuestion, isOther: true };
+
+    expect(
+      parseAcpRequestUserInputAnswerReply(
+        [question],
+        'Whats the difference? I need more context.',
+      ),
+    ).toBeNull();
+  });
+
   it('parses more than three ordered answers for multi-question prompts', () => {
     const questions: AcpRequestUserInputQuestion[] = [
       fixedChoiceQuestion,
