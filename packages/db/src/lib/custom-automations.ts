@@ -1,6 +1,7 @@
 import { and, asc, count, eq, isNull, lt, or } from 'drizzle-orm';
 
 import {
+  ALL_REPOSITORIES,
   isConfiguredAutomationTarget,
   isScheduleOnlyBackgroundAutomationFrequency,
   type CustomAutomationScheduleMode,
@@ -183,12 +184,15 @@ export async function createCustomAutomation(
     );
   }
 
-  const environment = await client.query.environments.findFirst({
-    columns: { id: true },
-    where: eq(environments.id, input.environmentId),
-  });
+  const allRepositories = input.environmentId === ALL_REPOSITORIES;
+  const environment = allRepositories
+    ? null
+    : await client.query.environments.findFirst({
+        columns: { id: true },
+        where: eq(environments.id, input.environmentId),
+      });
 
-  if (!environment) {
+  if (!allRepositories && !environment) {
     throw new Error('Selected environment was not found.');
   }
 
@@ -201,7 +205,8 @@ export async function createCustomAutomation(
       scheduleMode: input.scheduleMode,
       cronExpression,
       model,
-      environmentId: input.environmentId,
+      environmentId: allRepositories ? null : input.environmentId,
+      allRepositories,
       target: input.target,
       createdByUserId: input.createdByUserId ?? null,
     })
@@ -226,12 +231,15 @@ export async function updateCustomAutomation(
     throw new Error('Custom automation was not found.');
   }
 
-  const environment = await client.query.environments.findFirst({
-    columns: { id: true },
-    where: eq(environments.id, input.environmentId),
-  });
+  const allRepositories = input.environmentId === ALL_REPOSITORIES;
+  const environment = allRepositories
+    ? null
+    : await client.query.environments.findFirst({
+        columns: { id: true },
+        where: eq(environments.id, input.environmentId),
+      });
 
-  if (!environment) {
+  if (!allRepositories && !environment) {
     throw new Error('Selected environment was not found.');
   }
 
@@ -244,7 +252,8 @@ export async function updateCustomAutomation(
       scheduleMode: input.scheduleMode,
       cronExpression,
       model,
-      environmentId: input.environmentId,
+      environmentId: allRepositories ? null : input.environmentId,
+      allRepositories,
       target: input.target,
       updatedAt: new Date(),
     })

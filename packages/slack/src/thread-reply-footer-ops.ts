@@ -218,7 +218,7 @@ export async function postSlackThreadMessageWithStickyFooter(params: {
   const replyOnly = params.footerStyle === 'reply-only';
   const footerText = buildSlackThreadFooterText({
     taskUrl,
-    linkedPr: replyOnly ? null : footerContext.linkedPr,
+    linkedPrs: replyOnly ? [] : footerContext.linkedPrs,
     livePreviewUrl: replyOnly ? null : footerContext.livePreviewUrl,
     explicitMentionRequired: footerContext.explicitMentionRequired,
   });

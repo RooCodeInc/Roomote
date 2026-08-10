@@ -85,96 +85,74 @@ export function getGitHubFollowUpMention(
   return roomoteMentionEnabled ? '@roomote' : getGitHubAppMention(slug);
 }
 
-/**
- * Leading Roomote PR provenance blockquote:
- * `> Created by Roomote. ...` or `> Opened on behalf of <name>. ...`
- * (including the historical "from an unlinked ..." attribution form).
- *
- * Parsed with linear string scans so untrusted PR bodies cannot trigger
- * polynomial regular-expression matching.
- */
-function matchPrBodyAttributionLine(
-  firstLine: string,
-): { prefix: string; instruction: string } | null {
-  if (!firstLine.startsWith('>')) {
+export const PR_BODY_ATTRIBUTION_START_MARKER =
+  '<!-- roomote:pr-attribution:start -->';
+export const PR_BODY_ATTRIBUTION_END_MARKER =
+  '<!-- roomote:pr-attribution:end -->';
+const PR_BODY_ATTRIBUTION_INLINE_PREFIX = '&#8203;';
+
+type PrBodyAttributionMarkerMatch = {
+  start: number;
+  end: number;
+  lineStart: number;
+  lineEnd: number;
+};
+
+function findPrBodyAttributionMarkers(
+  body: string,
+): PrBodyAttributionMarkerMatch | null {
+  const startMarker = body.indexOf(PR_BODY_ATTRIBUTION_START_MARKER);
+  if (startMarker === -1) {
     return null;
   }
 
-  let index = 1;
-  while (
-    index < firstLine.length &&
-    (firstLine.charCodeAt(index) === 32 /* space */ ||
-      firstLine.charCodeAt(index) === 9) /* tab */
+  const start = startMarker + PR_BODY_ATTRIBUTION_START_MARKER.length;
+  const end = body.indexOf(PR_BODY_ATTRIBUTION_END_MARKER, start);
+  if (end === -1 || body.slice(start, end).includes('\n')) {
+    return null;
+  }
+
+  const lineStart = body.lastIndexOf('\n', startMarker - 1) + 1;
+  if (
+    !/^[ \t]*>[ \t]*(?:&#8203;)?$/u.test(body.slice(lineStart, startMarker))
   ) {
-    index += 1;
+    return null;
   }
 
-  const contentStart = index;
-  const content = firstLine.slice(contentStart);
+  return {
+    start,
+    end,
+    lineStart,
+    lineEnd:
+      body.indexOf('\n', end) === -1 ? body.length : body.indexOf('\n', end),
+  };
+}
 
-  const createdByPrefix = 'Created by Roomote';
-  if (content.startsWith(createdByPrefix)) {
-    let sentenceEnd = createdByPrefix.length;
+export function formatPrBodyAttribution(
+  provenance: string,
+  instruction: string,
+): string {
+  // Leading with an entity keeps the marker inline. A comment immediately
+  // after the blockquote marker starts a raw HTML block in CommonMark/GFM.
+  return `> ${PR_BODY_ATTRIBUTION_INLINE_PREFIX}${PR_BODY_ATTRIBUTION_START_MARKER}${provenance}${PR_BODY_ATTRIBUTION_END_MARKER} ${instruction}`;
+}
 
-    if (content.startsWith(' from an unlinked ', sentenceEnd)) {
-      sentenceEnd += ' from an unlinked '.length;
-      while (
-        sentenceEnd < content.length &&
-        content.charCodeAt(sentenceEnd) !== 46 /* . */
-      ) {
-        sentenceEnd += 1;
-      }
-    }
+export function findPrBodyAttributionLine(body: string): string | null {
+  const markers = findPrBodyAttributionMarkers(body);
+  return markers ? `> ${body.slice(markers.start, markers.end)}` : null;
+}
 
-    if (content.charCodeAt(sentenceEnd) !== 46 /* . */) {
-      return null;
-    }
-
-    sentenceEnd += 1;
-    while (
-      sentenceEnd < content.length &&
-      (content.charCodeAt(sentenceEnd) === 32 ||
-        content.charCodeAt(sentenceEnd) === 9)
-    ) {
-      sentenceEnd += 1;
-    }
-
-    return {
-      prefix: firstLine.slice(0, contentStart + sentenceEnd),
-      instruction: content.slice(sentenceEnd),
-    };
+export function preservePrBodyAttribution(
+  body: string,
+  existingBody: string,
+): string {
+  const current = findPrBodyAttributionMarkers(body);
+  const existing = findPrBodyAttributionMarkers(existingBody);
+  if (!current || !existing) {
+    return body;
   }
 
-  const openedPrefix = 'Opened on behalf of ';
-  if (content.startsWith(openedPrefix)) {
-    let sentenceEnd = openedPrefix.length;
-    while (
-      sentenceEnd < content.length &&
-      content.charCodeAt(sentenceEnd) !== 46 /* . */
-    ) {
-      sentenceEnd += 1;
-    }
-
-    if (content.charCodeAt(sentenceEnd) !== 46 /* . */) {
-      return null;
-    }
-
-    sentenceEnd += 1;
-    while (
-      sentenceEnd < content.length &&
-      (content.charCodeAt(sentenceEnd) === 32 ||
-        content.charCodeAt(sentenceEnd) === 9)
-    ) {
-      sentenceEnd += 1;
-    }
-
-    return {
-      prefix: firstLine.slice(0, contentStart + sentenceEnd),
-      instruction: content.slice(sentenceEnd),
-    };
-  }
-
-  return null;
+  return `${body.slice(0, current.start)}${existingBody.slice(existing.start, existing.end)}${body.slice(current.end)}`;
 }
 
 /**
@@ -182,8 +160,8 @@ function matchPrBodyAttributionLine(
  * the deployment's current follow-up handle: the configured GitHub App slug,
  * or the shorter `@roomote` alias when that setting is enabled.
  *
- * Only the leading attribution blockquote is rewritten; other body text that
- * happens to mention `@roomote` is left unchanged.
+ * Only the marker-containing line is rewritten; other body text that happens
+ * to mention `@roomote` is left unchanged.
  */
 export function normalizePrBodyAttributionAppMention(
   body: string,
@@ -200,26 +178,43 @@ export function normalizePrBodyAttributionAppMention(
     normalizedSlug,
     roomoteMentionEnabled,
   );
-  const firstNewline = body.indexOf('\n');
-  const firstLine = firstNewline === -1 ? body : body.slice(0, firstNewline);
-  const remainder = firstNewline === -1 ? '' : body.slice(firstNewline);
-  const match = matchPrBodyAttributionLine(firstLine);
-
-  if (!match) {
+  const markers = findPrBodyAttributionMarkers(body);
+  if (!markers) {
     return body;
   }
 
-  const { prefix, instruction } = match;
-  const rewrittenInstruction = instruction.replace(
+  const line = body.slice(markers.lineStart, markers.lineEnd);
+  const rewrittenLine = line.replace(
     /(mention(?:ing)?\s+)@([A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)/g,
     `$1${mention}`,
   );
 
-  if (rewrittenInstruction === instruction) {
+  if (rewrittenLine === line) {
     return body;
   }
 
-  return `${prefix}${rewrittenInstruction}${remainder}`;
+  return `${body.slice(0, markers.lineStart)}${rewrittenLine}${body.slice(markers.lineEnd)}`;
+}
+
+/**
+ * Rewrite only the server-owned provenance text between attribution markers.
+ * Unmarked bodies are deliberately left alone.
+ */
+export function rewritePrBodyAttribution(
+  body: string,
+  displayName: string | null,
+): string {
+  const markers = findPrBodyAttributionMarkers(body);
+  if (!markers) {
+    return body;
+  }
+
+  const normalizedDisplayName = displayName?.trim().replace(/[\r\n]+/g, ' ');
+  const provenance = normalizedDisplayName
+    ? `Opened on behalf of ${normalizedDisplayName}.`
+    : 'Created by Roomote.';
+
+  return `${body.slice(0, markers.start)}${provenance}${body.slice(markers.end)}`;
 }
 
 /**

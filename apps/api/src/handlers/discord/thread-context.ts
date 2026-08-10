@@ -1,5 +1,8 @@
 import { appendAttachmentTextsToPromptText } from '@roomote/cloud-agents';
-import type { DiscordAttachment } from '@roomote/communication/discord-event';
+import {
+  isDiscordAudioAttachment,
+  type DiscordAttachment,
+} from '@roomote/communication/discord-event';
 import type { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import {
   wrapCommunicationMessage,
@@ -459,7 +462,12 @@ export async function buildDiscordContinuationPrompt(input: {
 
   const historyAttachments = toDiscordAttachmentsFromHistory(claimedMessages);
   const processedAttachments = historyAttachments.length
-    ? await processDiscordAttachments(historyAttachments)
+    ? historyAttachments.some(isDiscordAudioAttachment)
+      ? await processDiscordAttachments(historyAttachments, {
+          userId: input.queuedMessage.userId,
+          userTextContext: input.queuedMessage.text,
+        })
+      : await processDiscordAttachments(historyAttachments)
     : { images: [], attachmentTexts: [], warnings: [] };
   for (const warning of processedAttachments.warnings) {
     console.warn(`[discord] Follow-up thread attachment warning: ${warning}`);

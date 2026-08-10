@@ -162,6 +162,27 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
+  it('directs agents to discover enabled models before setting an override', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const automationsTool = getRegisteredTool(
+      registeredTools,
+      'manage_custom_automations',
+    );
+
+    expect(automationsTool.config.description).toContain(
+      'Use list_models before setting a model override',
+    );
+    expect(getInputSchemaField(automationsTool, 'model').description).toContain(
+      'Call list_models first and pass an exact returned model ID',
+    );
+    expect(automationsTool.config.description).toContain(
+      'Model IDs encode the inference route',
+    );
+    expect(automationsTool.config.description).toContain(
+      'openai/... uses the deployment OpenAI route, including a connected ChatGPT subscription',
+    );
+  });
+
   it('maps conversational automation intent to launchable suggested tasks', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const automationsTool = getRegisteredTool(
@@ -478,9 +499,16 @@ describe('roomote MCP tool descriptions', () => {
       ) as z.ZodArray<z.ZodObject<z.ZodRawShape>>
     ).element;
 
-    expect(Object.keys(suggestionItem.shape)).toEqual(['title', 'brief']);
+    expect(Object.keys(suggestionItem.shape)).toEqual([
+      'title',
+      'brief',
+      'targetRepositoryFullName',
+    ]);
     expect(getInputSchemaField(replyTool, 'suggestions').description).toContain(
       'when the automation prompt explicitly asks for task suggestions',
+    );
+    expect(getInputSchemaField(replyTool, 'suggestions').description).toContain(
+      'For org-wide runs, include the concrete targetRepositoryFullName',
     );
   });
 

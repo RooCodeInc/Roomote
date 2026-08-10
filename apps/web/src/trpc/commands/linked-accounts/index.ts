@@ -4,6 +4,7 @@ import {
   githubUserMappings,
   slackInstallations,
   slackUserMappings,
+  sourceControlUserMappings,
   telegramUserMappings,
   discordUserMappings,
   resolveDiscordRuntimeCredentials,
@@ -42,6 +43,25 @@ function formatBitbucketLinkedAccountDisplayName(accountId: string) {
 
 function formatAdoLinkedAccountDisplayName(accountId: string) {
   return `Azure DevOps user ${accountId}`;
+}
+
+async function getSourceControlLinkedAccountIdentity(authAccountId: string) {
+  return db.query.sourceControlUserMappings.findFirst({
+    where: eq(sourceControlUserMappings.authAccountId, authAccountId),
+    columns: {
+      username: true,
+      displayName: true,
+    },
+  });
+}
+
+function formatSourceControlLinkedAccountIdentity(
+  identity: { username: string | null; displayName: string | null } | undefined,
+  fallback: string,
+) {
+  return identity?.username
+    ? `@${identity.username}`
+    : identity?.displayName || fallback;
 }
 
 function decodeJwtPayload(
@@ -108,16 +128,23 @@ export async function getLinkedGitLabAccountCommand(auth: UserAuthSuccess) {
     ),
     orderBy: [desc(authAccounts.updatedAt)],
     columns: {
+      id: true,
       accountId: true,
     },
   });
+  const identity = account
+    ? await getSourceControlLinkedAccountIdentity(account.id)
+    : undefined;
 
   return {
     configured: Boolean(config.gitlabClientId && config.gitlabClientSecret),
     account: account
       ? {
           accountId: account.accountId,
-          displayName: formatGitLabLinkedAccountDisplayName(account.accountId),
+          displayName: formatSourceControlLinkedAccountIdentity(
+            identity,
+            formatGitLabLinkedAccountDisplayName(account.accountId),
+          ),
         }
       : null,
   };
@@ -132,9 +159,13 @@ export async function getLinkedGiteaAccountCommand(auth: UserAuthSuccess) {
     ),
     orderBy: [desc(authAccounts.updatedAt)],
     columns: {
+      id: true,
       accountId: true,
     },
   });
+  const identity = account
+    ? await getSourceControlLinkedAccountIdentity(account.id)
+    : undefined;
 
   return {
     configured: Boolean(
@@ -143,7 +174,10 @@ export async function getLinkedGiteaAccountCommand(auth: UserAuthSuccess) {
     account: account
       ? {
           accountId: account.accountId,
-          displayName: formatGiteaLinkedAccountDisplayName(account.accountId),
+          displayName: formatSourceControlLinkedAccountIdentity(
+            identity,
+            formatGiteaLinkedAccountDisplayName(account.accountId),
+          ),
         }
       : null,
   };
@@ -158,9 +192,13 @@ export async function getLinkedBitbucketAccountCommand(auth: UserAuthSuccess) {
     ),
     orderBy: [desc(authAccounts.updatedAt)],
     columns: {
+      id: true,
       accountId: true,
     },
   });
+  const identity = account
+    ? await getSourceControlLinkedAccountIdentity(account.id)
+    : undefined;
 
   return {
     configured: Boolean(
@@ -169,8 +207,9 @@ export async function getLinkedBitbucketAccountCommand(auth: UserAuthSuccess) {
     account: account
       ? {
           accountId: account.accountId,
-          displayName: formatBitbucketLinkedAccountDisplayName(
-            account.accountId,
+          displayName: formatSourceControlLinkedAccountIdentity(
+            identity,
+            formatBitbucketLinkedAccountDisplayName(account.accountId),
           ),
         }
       : null,
@@ -186,9 +225,13 @@ export async function getLinkedAdoAccountCommand(auth: UserAuthSuccess) {
     ),
     orderBy: [desc(authAccounts.updatedAt)],
     columns: {
+      id: true,
       accountId: true,
     },
   });
+  const identity = account
+    ? await getSourceControlLinkedAccountIdentity(account.id)
+    : undefined;
 
   return {
     configured: Boolean(
@@ -197,7 +240,10 @@ export async function getLinkedAdoAccountCommand(auth: UserAuthSuccess) {
     account: account
       ? {
           accountId: account.accountId,
-          displayName: formatAdoLinkedAccountDisplayName(account.accountId),
+          displayName: formatSourceControlLinkedAccountIdentity(
+            identity,
+            formatAdoLinkedAccountDisplayName(account.accountId),
+          ),
         }
       : null,
   };

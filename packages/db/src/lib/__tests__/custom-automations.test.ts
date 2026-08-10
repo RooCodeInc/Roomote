@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { ALL_REPOSITORIES } from '@roomote/types';
 
 import {
   createCustomAutomation,
@@ -19,6 +20,22 @@ import {
 } from '../../server';
 
 describe('custom automations helpers', () => {
+  it('persists an explicit all-repositories workspace target', async () => {
+    const created = await createCustomAutomation({
+      name: `Org-wide digest ${Date.now()}`,
+      prompt: 'Summarize actionable work across the organization.',
+      enabled: true,
+      scheduleMode: 'daily',
+      environmentId: ALL_REPOSITORIES,
+      target: {},
+    });
+
+    expect(created.environmentId).toBeNull();
+    expect(created.allRepositories).toBe(true);
+
+    await deleteCustomAutomation(created.id);
+  });
+
   it('creates, lists, updates, and deletes a custom automation', async () => {
     const [environment] = await db
       .insert(environments)

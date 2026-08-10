@@ -5,6 +5,7 @@ import { z } from 'zod';
 
 const {
   createOpencodeClientMock,
+  configProvidersMock,
   createServerMock,
   execFileMock,
   execFileSyncMock,
@@ -14,6 +15,7 @@ const {
   sessionPromptMock,
 } = vi.hoisted(() => ({
   createOpencodeClientMock: vi.fn(),
+  configProvidersMock: vi.fn(),
   createServerMock: vi.fn(),
   execFileMock: vi.fn(),
   execFileSyncMock: vi.fn(),
@@ -120,6 +122,9 @@ describe('resolveOpenCodeSmallModel', () => {
     spawnMock.mockImplementation(() => createSpawnedServer());
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('ok'));
     createOpencodeClientMock.mockReturnValue({
+      config: {
+        providers: configProvidersMock,
+      },
       session: {
         create: sessionCreateMock,
         prompt: sessionPromptMock,
@@ -127,6 +132,10 @@ describe('resolveOpenCodeSmallModel', () => {
     });
     sessionCreateMock.mockResolvedValue({
       data: { id: 'session-1' },
+      error: undefined,
+    });
+    configProvidersMock.mockResolvedValue({
+      data: { providers: [], default: {} },
       error: undefined,
     });
   });
@@ -530,6 +539,131 @@ describe('resolveOpenCodeSmallModel', () => {
     );
     // Plain-text calls never send a structured-output format.
     expect(sessionPromptMock.mock.calls[0]?.[0]).not.toHaveProperty('format');
+  });
+
+  it('uses an audio-capable configured model for native file prompts', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+      R_SMALL_MODEL: 'openrouter/google/gemini-3.6-flash',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'openai/gpt-5.6-terra': {
+                capabilities: {
+                  input: { audio: false },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-3.6-flash': {
+                capabilities: {
+                  input: { audio: true },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: { error: null },
+        parts: [{ type: 'text', text: 'Deploy the fix.' }],
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+    const result = await generateTrackedNonTaskText({
+      surface: NON_TASK_INFERENCE_SURFACES.chatAudioTranscription,
+      prompt: 'Transcribe the audio.',
+      requiredInputModality: 'audio',
+      files: [
+        {
+          mime: 'audio/mp4',
+          filename: 'clip.m4a',
+          url: 'data:audio/mp4;base64,YXVkaW8=',
+        },
+      ],
+    });
+
+    expect(result).toBe('Deploy the fix.');
+    expect(configProvidersMock).toHaveBeenCalledWith({
+      directory: expect.stringContaining('roomote-non-task-'),
+    });
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: {
+          providerID: 'openrouter',
+          modelID: 'google/gemini-3.6-flash',
+        },
+        parts: [
+          { type: 'text', text: 'Transcribe the audio.' },
+          {
+            type: 'file',
+            mime: 'audio/mp4',
+            filename: 'clip.m4a',
+            url: 'data:audio/mp4;base64,YXVkaW8=',
+          },
+        ],
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('rejects native file prompts when configured models lack the modality', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'openai/gpt-5.6-terra': {
+                capabilities: {
+                  input: { audio: false },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+
+    const {
+      generateTrackedNonTaskText,
+      NonTaskInputModalityUnsupportedError,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskText({
+        surface: NON_TASK_INFERENCE_SURFACES.chatAudioTranscription,
+        prompt: 'Transcribe the audio.',
+        requiredInputModality: 'audio',
+      }),
+    ).rejects.toBeInstanceOf(NonTaskInputModalityUnsupportedError);
+    expect(sessionPromptMock).not.toHaveBeenCalled();
   });
 
   it('rejects when the plain SDK prompt reports a message error', async () => {

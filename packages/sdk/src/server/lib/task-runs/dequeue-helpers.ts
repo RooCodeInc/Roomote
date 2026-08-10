@@ -22,6 +22,9 @@ import {
   markTaskStartParallelCountEndedAt,
   resolveSandboxModelRuntimeEnv,
   resolveWorkspaceSourceControlProvider,
+  resolveWorkspaceSourceControlHost,
+  workspaceAllowsPrivateAttribution,
+  workspaceUsesOnlySourceControlProvider,
   stringifyDecryptedEnvVarValue,
   syncTaskStateFromRuns,
   eq,
@@ -35,7 +38,9 @@ import { createTaskRunBitbucketCredentials } from '@roomote/bitbucket';
 import { createTaskRunGiteaCredentials } from '@roomote/gitea';
 import { createTaskRunAdoCredentials } from '@roomote/ado';
 import {
+  DEFAULT_ROOMOTE_COMMIT_AUTHOR,
   releaseTaskRun,
+  resolvePublicGitAuthor,
   resolveRunCommitAuthor,
 } from '@roomote/cloud-agents/server';
 
@@ -514,7 +519,7 @@ async function createProviderToken(
           }),
         ),
         source: 'app',
-        expiresAt: null,
+        expiresAt: scopedTokens.expiresAt,
         artifactsPatch: scopedTokens.artifactsPatch,
       };
     }
@@ -531,7 +536,7 @@ async function createProviderToken(
           provider,
         })),
         source: 'app',
-        expiresAt: null,
+        expiresAt: credentials.expiresAt,
       };
     }
     case 'bitbucket': {
@@ -547,7 +552,7 @@ async function createProviderToken(
           provider,
         })),
         source: 'app',
-        expiresAt: null,
+        expiresAt: credentials.expiresAt,
       };
     }
     case 'ado': {
@@ -563,10 +568,20 @@ async function createProviderToken(
           provider,
         })),
         source: 'app',
-        expiresAt: null,
+        expiresAt: credentials.expiresAt,
       };
     }
   }
+}
+
+function earliestExpiry(left: Date | null, right: Date | null): Date | null {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+  return left.getTime() <= right.getTime() ? left : right;
 }
 
 function mergeProviderTokens(
@@ -594,6 +609,9 @@ function mergeProviderTokens(
         ...(merged.artifactsPatch ?? {}),
         ...(token.artifactsPatch ?? {}),
       },
+      // Keep the soonest known expiry so multi-provider runs still refresh
+      // short-lived credentials (e.g. GitLab OAuth) on time.
+      expiresAt: earliestExpiry(merged.expiresAt, token.expiresAt),
     }),
     primaryToken,
   );
@@ -758,9 +776,37 @@ export function reportBootstrapFailure({
 
 export async function resolveGitAuthor(
   tx: DbTx,
-  taskRun: Pick<TaskRun, 'id' | 'taskId' | 'actingUserId'>,
+  taskRun: Pick<TaskRun, 'id' | 'taskId' | 'actingUserId' | 'payload'>,
 ): Promise<GitAuthor> {
-  const commitAuthor = await resolveRunCommitAuthor(tx, taskRun);
+  const workspace = resolveTaskWorkspace(taskRun.payload);
+  const [provider, host] = await Promise.all([
+    resolveWorkspaceSourceControlProvider(tx, workspace),
+    resolveWorkspaceSourceControlHost(tx, workspace),
+  ]);
+  const commitAuthor = await resolveRunCommitAuthor(
+    tx,
+    taskRun,
+    provider ? { provider, host } : undefined,
+  );
 
-  return commitAuthor.gitAuthor;
+  if (commitAuthor.kind === 'roomote') {
+    return commitAuthor.gitAuthor;
+  }
+
+  if (await workspaceAllowsPrivateAttribution(tx, workspace)) {
+    return commitAuthor.gitAuthor;
+  }
+
+  const usesOnlyResolvedProvider = provider
+    ? await workspaceUsesOnlySourceControlProvider(tx, workspace, provider)
+    : false;
+  const singleUnknownGitHubRepository =
+    workspace.type === 'repository' &&
+    !provider &&
+    resolveSourceControlProviderFromPayload(taskRun.payload) === 'github';
+  if (!usesOnlyResolvedProvider && !singleUnknownGitHubRepository) {
+    return DEFAULT_ROOMOTE_COMMIT_AUTHOR.gitAuthor;
+  }
+
+  return resolvePublicGitAuthor(commitAuthor);
 }

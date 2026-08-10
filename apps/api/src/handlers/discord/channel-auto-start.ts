@@ -2,6 +2,7 @@ import {
   discordEventToQueuedCommunicationMessage,
   getDiscordMessageAttachments,
   getDiscordMessageContent,
+  isDiscordAudioAttachment,
   isDiscordBotMentioned,
   type DiscordGatewayEvent,
   type DiscordMessage,
@@ -23,7 +24,10 @@ import {
 
 import { apiLogger } from '../../logging.js';
 import { checkAutoStartChannelCache } from '../shared/auto-start-cache.js';
-import { evaluateChannelLaunchGate } from '../shared/channel-launch-gate.js';
+import {
+  CHANNEL_AUTO_START_FAILURE_MESSAGE,
+  evaluateChannelLaunchGate,
+} from '../shared/channel-launch-gate.js';
 import {
   buildDiscordChannelAutoStartLinkMessage,
   claimAccountLinkDmSlot,
@@ -50,6 +54,33 @@ const CHANNEL_AUTO_START_MESSAGE_TYPES = new Set([0, 19]);
 
 const DISCORD_ROUTING_LOCK_PREFIX = 'discord:routing-lock:';
 const ROUTING_LOCK_TTL_SECONDS = 60;
+
+async function sendLaunchFailureBestEffort(input: {
+  provider: DiscordCommunicationProvider;
+  channelId: string;
+  messageId: string;
+  isBotAuthored: boolean;
+}): Promise<void> {
+  // Bot-authored messages are typically automated feeds; a "please try
+  // again" reply is addressed to nobody, and a sustained classifier or
+  // startup outage would otherwise reply to every feed message. Failures on
+  // bot messages stay log-only, like before launch-failure replies existed.
+  if (input.isBotAuthored) {
+    return;
+  }
+
+  await input.provider
+    .postMessage({
+      channelId: input.channelId,
+      replyToMessageId: input.messageId,
+      text: CHANNEL_AUTO_START_FAILURE_MESSAGE,
+    })
+    .catch((error) => {
+      apiLogger.warn(
+        `[DiscordChannelAutoStart] Failed to post launch failure for ${input.channelId}:${input.messageId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+}
 
 /**
  * Discord has no ephemeral channel messages, so the "connect your account"
@@ -241,7 +272,12 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
 
   const messageAttachments = getDiscordMessageAttachments(message);
   const processedAttachments = messageAttachments.length
-    ? await processDiscordAttachments(messageAttachments)
+    ? messageAttachments.some(isDiscordAudioAttachment)
+      ? await processDiscordAttachments(messageAttachments, {
+          ...(queuedMessageUserId ? { userId: queuedMessageUserId } : {}),
+          userTextContext: message.content,
+        })
+      : await processDiscordAttachments(messageAttachments)
     : { images: [], attachmentTexts: [], warnings: [] };
   for (const warning of processedAttachments.warnings) {
     apiLogger.warn(`[DiscordChannelAutoStart] Attachment warning: ${warning}`);
@@ -309,7 +345,17 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
         });
 
         if (!gateResult.shouldLaunch) {
-          // Silent to the channel by design; the gate logged its reason.
+          // `rate_limited` stays silent on purpose: a capped channel is
+          // already at its launch budget, and per-message replies there would
+          // only add noise on top of an intentional throttle.
+          if (gateResult.skipReason === 'classifier_error') {
+            await sendLaunchFailureBestEffort({
+              provider,
+              channelId: channel.channelId,
+              messageId: message.id,
+              isBotAuthored,
+            });
+          }
           await releaseRoutingLock();
           return;
         }
@@ -377,6 +423,12 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
       apiLogger.error(
         `[DiscordChannelAutoStart] Failed to launch for ${logContext}: ${error instanceof Error ? error.message : String(error)}`,
       );
+      await sendLaunchFailureBestEffort({
+        provider,
+        channelId: channel.channelId,
+        messageId: message.id,
+        isBotAuthored,
+      });
       await releaseRoutingLock();
     }
   })();

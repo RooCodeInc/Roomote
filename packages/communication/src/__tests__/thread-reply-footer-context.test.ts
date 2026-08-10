@@ -2,11 +2,13 @@ import { describe, expect, it, beforeEach, vi } from 'vitest';
 
 const {
   findFirstMock,
+  findManyMock,
   taskRunFindFirstMock,
   environmentFindFirstMock,
   resolveEffectivePreviewRuntimeConfigMock,
 } = vi.hoisted(() => ({
   findFirstMock: vi.fn(),
+  findManyMock: vi.fn(),
   taskRunFindFirstMock: vi.fn(),
   environmentFindFirstMock: vi.fn(),
   resolveEffectivePreviewRuntimeConfigMock: vi.fn(),
@@ -17,6 +19,7 @@ vi.mock('@roomote/db/server', () => ({
     query: {
       taskPullRequests: {
         findFirst: findFirstMock,
+        findMany: findManyMock,
       },
       taskRuns: {
         findFirst: taskRunFindFirstMock,
@@ -50,7 +53,7 @@ vi.mock('@roomote/env', () => ({
 import {
   buildThreadReplyPrUrl,
   resolveThreadReplyFooterContext,
-  resolveThreadReplyLinkedPr,
+  resolveThreadReplyLinkedPrs,
 } from '../thread-reply-footer-context';
 
 function mockEnvironmentBackedTaskRun(params?: {
@@ -66,6 +69,7 @@ describe('thread reply footer context', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     findFirstMock.mockResolvedValue(null);
+    findManyMock.mockResolvedValue([]);
     taskRunFindFirstMock.mockResolvedValue(null);
     environmentFindFirstMock.mockResolvedValue(null);
     resolveEffectivePreviewRuntimeConfigMock.mockResolvedValue({
@@ -81,37 +85,41 @@ describe('thread reply footer context', () => {
     ).toBe('https://github.com/roomote/app/pull/42');
   });
 
-  it('prefers the linked task PR and suppresses terminal linked PRs', async () => {
-    findFirstMock.mockResolvedValueOnce({
-      prUrl: 'https://github.com/roomote/app/pull/4321',
-      prNumber: 4321,
-      status: 'open',
-    });
+  it('returns every active linked task PR', async () => {
+    findManyMock.mockResolvedValue([
+      {
+        prUrl: 'https://github.com/roomote/app/pull/3',
+        prNumber: 3,
+        status: 'open',
+      },
+      {
+        prUrl: 'https://github.com/roomote/api/pull/2',
+        prNumber: 2,
+        status: 'draft',
+      },
+      {
+        prUrl: 'https://github.com/roomote/docs/pull/1',
+        prNumber: 1,
+        status: 'merged',
+      },
+    ]);
 
     await expect(
-      resolveThreadReplyLinkedPr({
+      resolveThreadReplyLinkedPrs({
         taskId: 'task-1',
-        prRepo: 'roomote/app',
-        prNumber: 1234,
+        prRepo: null,
+        prNumber: null,
       }),
-    ).resolves.toEqual({
-      prNumber: 4321,
-      prUrl: 'https://github.com/roomote/app/pull/4321',
-    });
-
-    findFirstMock.mockResolvedValueOnce({
-      prUrl: 'https://github.com/roomote/app/pull/4321',
-      prNumber: 4321,
-      status: 'merged',
-    });
-
-    await expect(
-      resolveThreadReplyLinkedPr({
-        taskId: 'task-1',
-        prRepo: 'roomote/app',
-        prNumber: 1234,
-      }),
-    ).resolves.toBeNull();
+    ).resolves.toEqual([
+      {
+        prNumber: 3,
+        prUrl: 'https://github.com/roomote/app/pull/3',
+      },
+      {
+        prNumber: 2,
+        prUrl: 'https://github.com/roomote/api/pull/2',
+      },
+    ]);
   });
 
   it('falls back to the task-run PR and live preview context', async () => {
@@ -129,10 +137,12 @@ describe('thread reply footer context', () => {
         prNumber: 1234,
       }),
     ).resolves.toEqual({
-      linkedPr: {
-        prNumber: 1234,
-        prUrl: 'https://github.com/roomote/app/pull/1234',
-      },
+      linkedPrs: [
+        {
+          prNumber: 1234,
+          prUrl: 'https://github.com/roomote/app/pull/1234',
+        },
+      ],
       livePreviewUrl: 'https://task-1-web.preview.example.com/auth/dev-login',
     });
   });
@@ -157,7 +167,7 @@ describe('thread reply footer context', () => {
         prNumber: null,
       }),
     ).resolves.toEqual({
-      linkedPr: null,
+      linkedPrs: [],
       livePreviewUrl: null,
     });
   });

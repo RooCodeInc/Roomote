@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   getTeamsActivityCommunicationMetadata,
+  getTeamsActivityAudioAttachments,
   getTeamsActivityImageAttachments,
   getTeamsConversationMessageIdSuffix,
   isTeamsBotAuthoredActivity,
@@ -172,6 +173,97 @@ describe('Teams activity helpers', () => {
     }
 
     expect(teamsActivityToQueuedCommunicationMessage(parsed.data)).toBeNull();
+  });
+
+  it('accepts audio-only activities and resolves their download metadata', () => {
+    const parsed = parseTeamsActivity({
+      type: 'message',
+      id: 'activity-audio',
+      conversation: { id: 'a:personal-conversation' },
+      attachments: [
+        {
+          contentType: 'audio/mpeg',
+          contentUrl: 'https://smba.trafficmanager.net/audio/clip.mp3',
+          name: 'clip.mp3',
+        },
+      ],
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(getTeamsActivityAudioAttachments(parsed.data!)).toEqual([
+      {
+        contentType: 'audio/mpeg',
+        contentUrl: 'https://smba.trafficmanager.net/audio/clip.mp3',
+        name: 'clip.mp3',
+      },
+    ]);
+    expect(
+      teamsActivityToQueuedCommunicationMessage(parsed.data!),
+    ).toMatchObject({ text: 'Audio attachment' });
+  });
+
+  it('does not classify explicitly typed video attachments as audio', () => {
+    const parsed = parseTeamsActivity({
+      type: 'message',
+      id: 'activity-video',
+      conversation: { id: 'a:personal-conversation' },
+      attachments: [
+        {
+          contentType: 'video/mp4',
+          contentUrl: 'https://smba.trafficmanager.net/video/clip.mp4',
+          name: 'clip.mp4',
+        },
+      ],
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(getTeamsActivityAudioAttachments(parsed.data!)).toEqual([]);
+  });
+
+  it('extracts audio from Teams file-download wrapper metadata', () => {
+    const parsed = parseTeamsActivity({
+      type: 'message',
+      id: 'activity-audio-wrapper',
+      conversation: { id: 'a:personal-conversation' },
+      attachments: [
+        {
+          contentType: 'application/vnd.microsoft.teams.file.download.info',
+          content: {
+            downloadUrl: 'https://files.example.test/voice-note',
+            fileType: 'mp3',
+          },
+        },
+        {
+          contentType: 'application/vnd.microsoft.teams.file.download.info',
+          content: {
+            contentType: 'audio/ogg',
+            downloadUrl: 'https://files.example.test/recording',
+          },
+          name: 'recording.ogg',
+        },
+        {
+          contentType: 'application/vnd.microsoft.teams.file.download.info',
+          content: {
+            contentType: 'video/mp4',
+            downloadUrl: 'https://files.example.test/video',
+          },
+          name: 'video.mp4',
+        },
+      ],
+    });
+
+    expect(parsed.success).toBe(true);
+    expect(getTeamsActivityAudioAttachments(parsed.data!)).toEqual([
+      {
+        contentUrl: 'https://files.example.test/voice-note',
+        name: 'attachment.mp3',
+      },
+      {
+        contentType: 'audio/ogg',
+        contentUrl: 'https://files.example.test/recording',
+        name: 'recording.ogg',
+      },
+    ]);
   });
 
   it('strips Teams mention markup from message text', () => {

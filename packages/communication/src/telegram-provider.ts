@@ -8,6 +8,7 @@ import type {
   CommunicationThreadLookupResult,
 } from './provider';
 import { UnsupportedCommunicationOperationError } from './provider';
+import { readBoundedResponseBody } from './bounded-response-body';
 import { getTelegramApiBaseUrl } from './telegram-api-base-url';
 import {
   TELEGRAM_MAX_MESSAGE_LENGTH,
@@ -555,10 +556,11 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
     if (!response.ok) {
       throw new Error(`Telegram downloadFile failed (${response.status}).`);
     }
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength > maxBytes) {
-      throw new Error(`Telegram file exceeds the ${maxBytes} byte limit.`);
-    }
+    const bytes = await readBoundedResponseBody(
+      response,
+      maxBytes,
+      `Telegram file exceeds the ${maxBytes} byte limit.`,
+    );
     return {
       bytes,
       filePath: file.file_path,

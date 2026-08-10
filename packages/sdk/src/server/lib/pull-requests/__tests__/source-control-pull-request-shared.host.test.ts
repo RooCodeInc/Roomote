@@ -76,11 +76,10 @@ describe('resolveRepositoryRow host scoping', () => {
     ).resolves.toEqual(exactRow);
   });
 
-  it('falls back to a legacy null-host row when no row matches the host exactly', async () => {
-    const legacyRow = repositoryRow({ id: 'repo-legacy', host: null });
+  it('rejects a legacy null-host row when no row matches the host exactly', async () => {
     mockRepositoriesFindMany.mockResolvedValue([
       repositoryRow({ id: 'repo-other-host', host: 'gitlab.other.example' }),
-      legacyRow,
+      repositoryRow({ id: 'repo-legacy', host: null }),
     ]);
 
     await expect(
@@ -89,7 +88,9 @@ describe('resolveRepositoryRow host scoping', () => {
         repositoryFullName: 'acme/backend',
         host: 'gitlab.example.com',
       }),
-    ).resolves.toEqual(legacyRow);
+    ).rejects.toThrow(
+      'GitLab repository not found or inactive on gitlab.example.com: acme/backend',
+    );
   });
 
   it('reports the host in the not-found error when no row qualifies for it', async () => {
@@ -108,10 +109,10 @@ describe('resolveRepositoryRow host scoping', () => {
     );
   });
 
-  it('rejects multiple candidates within the chosen host tier', async () => {
+  it('rejects multiple exact matches within the chosen host', async () => {
     mockRepositoriesFindMany.mockResolvedValue([
-      repositoryRow({ id: 'repo-legacy-1', host: null }),
-      repositoryRow({ id: 'repo-legacy-2', host: null }),
+      repositoryRow({ id: 'repo-exact-1', host: 'gitlab.example.com' }),
+      repositoryRow({ id: 'repo-exact-2', host: 'gitlab.example.com' }),
     ]);
 
     await expect(

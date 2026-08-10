@@ -60,7 +60,9 @@ export class DaytonaClient implements ComputeProviderClient {
   public readonly capabilities: ComputeProviderCapabilities =
     DAYTONA_CAPABILITIES_VALUE;
 
-  private static readonly sandboxCache = new LRUCache<string, DaytonaSandbox>({
+  // Per-instance so cached sandbox handles die with the client that created
+  // them and never outlive its credentials (see ModalClient.sandboxCache).
+  private readonly sandboxCache = new LRUCache<string, DaytonaSandbox>({
     max: 100,
     ttl: DAYTONA_SANDBOX_CACHE_TTL_MS,
   });
@@ -105,7 +107,7 @@ export class DaytonaClient implements ComputeProviderClient {
   ): Promise<DaytonaSandbox> {
     throwIfAborted(signal);
 
-    const cached = DaytonaClient.sandboxCache.get(sandboxId);
+    const cached = this.sandboxCache.get(sandboxId);
 
     if (cached) {
       return cached;
@@ -118,11 +120,11 @@ export class DaytonaClient implements ComputeProviderClient {
         abortMessage: `Fetching Daytona sandbox ${sandboxId} was aborted`,
       });
 
-      DaytonaClient.sandboxCache.set(sandboxId, sandbox);
+      this.sandboxCache.set(sandboxId, sandbox);
 
       return sandbox;
     } catch (error) {
-      DaytonaClient.sandboxCache.delete(sandboxId);
+      this.sandboxCache.delete(sandboxId);
 
       console.error(
         `[DaytonaClient] Failed to fetch sandbox "${sandboxId}" ${JSON.stringify(
@@ -166,7 +168,7 @@ export class DaytonaClient implements ComputeProviderClient {
         abortMessage: `Fetching Daytona sandbox ${input.instanceId} was aborted`,
       });
 
-      DaytonaClient.sandboxCache.set(input.instanceId, sandbox);
+      this.sandboxCache.set(input.instanceId, sandbox);
 
       return { status: mapSandboxState(sandbox.state) };
     } catch (error) {
@@ -235,7 +237,7 @@ export class DaytonaClient implements ComputeProviderClient {
     }
 
     try {
-      DaytonaClient.sandboxCache.set(sandbox.id, sandbox);
+      this.sandboxCache.set(sandbox.id, sandbox);
 
       const domains = await this.resolvePreviewDomains(
         sandbox,
@@ -691,7 +693,7 @@ export class DaytonaClient implements ComputeProviderClient {
     }
 
     try {
-      DaytonaClient.sandboxCache.set(sandbox.id, sandbox);
+      this.sandboxCache.set(sandbox.id, sandbox);
 
       const domains = await this.resolvePreviewDomains(
         sandbox,
@@ -783,7 +785,7 @@ export class DaytonaClient implements ComputeProviderClient {
   }
 
   private invalidateSandboxCache(instanceId: string): void {
-    DaytonaClient.sandboxCache.delete(instanceId);
+    this.sandboxCache.delete(instanceId);
   }
 
   private async cleanupSandboxAfterFailure(

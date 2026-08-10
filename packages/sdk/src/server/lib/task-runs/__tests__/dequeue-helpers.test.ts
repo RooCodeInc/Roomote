@@ -159,6 +159,7 @@ describe('createSourceControlTokenForTaskRun', () => {
           },
         ],
       },
+      expiresAt: null,
     });
     mockCreateTaskRunGiteaCredentials.mockResolvedValue({
       credentials: [
@@ -170,6 +171,7 @@ describe('createSourceControlTokenForTaskRun', () => {
           originBaseUrl: 'https://git.example.com',
         },
       ],
+      expiresAt: new Date('2026-08-10T15:00:00.000Z'),
     });
     mockCreateTaskRunAdoCredentials.mockResolvedValue({
       credentials: [
@@ -181,9 +183,11 @@ describe('createSourceControlTokenForTaskRun', () => {
           originBaseUrl: 'https://dev.azure.com',
         },
       ],
+      expiresAt: new Date('2026-08-10T14:00:00.000Z'),
     });
     mockCreateTaskRunBitbucketCredentials.mockResolvedValue({
       credentials: [],
+      expiresAt: new Date('2026-08-10T13:00:00.000Z'),
     });
   });
 
@@ -269,6 +273,7 @@ describe('createSourceControlTokenForTaskRun', () => {
       artifactsPatch: {
         gitlabScopedProjectTokens: [],
       },
+      expiresAt: null,
     });
 
     const result = await createSourceControlTokenForTaskRun(
@@ -292,6 +297,48 @@ describe('createSourceControlTokenForTaskRun', () => {
           repositoryFullName: 'group/project',
           username: 'oauth2',
           token: 'glpat_deployment_token',
+        },
+      ],
+    });
+  });
+
+  it('threads GitLab OAuth access-token expiry into runtime token metadata', async () => {
+    const expiresAt = new Date(Date.now() + 90 * 60 * 1000);
+    mockCreateTaskRunScopedGitLabTokens.mockResolvedValue({
+      credentials: [],
+      proxyCredentials: [
+        {
+          host: 'gitlab.com',
+          repositoryFullName: 'group/project',
+          username: 'oauth2',
+          token: 'oauth_access_token',
+          originBaseUrl: 'https://gitlab.com',
+        },
+      ],
+      artifactsPatch: {
+        gitlabScopedProjectTokens: [],
+      },
+      expiresAt,
+    });
+
+    const result = await createSourceControlTokenForTaskRun(
+      makeTaskRun({
+        repo: 'group/project',
+        description: 'Work on GitLab',
+        sourceControlProvider: 'gitlab',
+      }),
+      '[test]',
+      { maxRetries: 1 },
+    );
+
+    expect(result).toMatchObject({
+      provider: 'gitlab',
+      source: 'app',
+      expiresAt,
+      gitProxyCredentials: [
+        {
+          provider: 'gitlab',
+          token: 'oauth_access_token',
         },
       ],
     });
@@ -324,7 +371,7 @@ describe('createSourceControlTokenForTaskRun', () => {
         },
       ],
       source: 'app',
-      expiresAt: null,
+      expiresAt: new Date('2026-08-10T15:00:00.000Z'),
     });
     expect(mockCreateTaskRunWorkerGitHubToken).not.toHaveBeenCalled();
     expect(mockCreateTaskRunGiteaCredentials).toHaveBeenCalledWith(
@@ -364,7 +411,7 @@ describe('createSourceControlTokenForTaskRun', () => {
         },
       ],
       source: 'app',
-      expiresAt: null,
+      expiresAt: new Date('2026-08-10T14:00:00.000Z'),
     });
     expect(mockCreateTaskRunWorkerGitHubToken).not.toHaveBeenCalled();
     expect(mockCreateTaskRunAdoCredentials).toHaveBeenCalledWith(
@@ -375,6 +422,24 @@ describe('createSourceControlTokenForTaskRun', () => {
         }),
       }),
     );
+  });
+
+  it('creates Bitbucket token metadata with its OAuth expiry', async () => {
+    const result = await createSourceControlTokenForTaskRun(
+      makeTaskRun({
+        repo: 'group/project',
+        description: 'Work on Bitbucket',
+        sourceControlProvider: 'bitbucket',
+      }),
+      '[test]',
+      { maxRetries: 1 },
+    );
+
+    expect(result).toMatchObject({
+      provider: 'bitbucket',
+      envVar: 'BITBUCKET_OAUTH',
+      expiresAt: new Date('2026-08-10T13:00:00.000Z'),
+    });
   });
 
   it('resolves the provider via the shared resolver when the payload is unstamped', async () => {
@@ -403,6 +468,29 @@ describe('createSourceControlTokenForTaskRun', () => {
   });
 
   it('mints the stamped primary provider first and merges aggregate metadata', async () => {
+    const gitlabExpiresAt = new Date(Date.now() + 90 * 60 * 1000);
+    mockCreateTaskRunScopedGitLabTokens.mockResolvedValue({
+      credentials: [
+        {
+          host: 'gitlab.com',
+          repositoryFullName: 'group/project',
+          username: 'oauth2',
+          token: 'glptt_scoped_token',
+        },
+      ],
+      proxyCredentials: [],
+      artifactsPatch: {
+        gitlabScopedProjectTokens: [
+          {
+            repositoryFullName: 'group/project',
+            projectId: '101',
+            tokenId: 202,
+          },
+        ],
+      },
+      expiresAt: gitlabExpiresAt,
+    });
+
     const taskRun = makeTaskRun({
       repo: 'group/project',
       selectedRepositories: ['owner/repo', 'group/project'],
@@ -433,7 +521,8 @@ describe('createSourceControlTokenForTaskRun', () => {
       ],
       gitProxyCredentials: [],
       source: 'app',
-      expiresAt: null,
+      // GitHub has null expiry; keep GitLab OAuth expiry for the refresh loop.
+      expiresAt: gitlabExpiresAt,
       artifactsPatch: {
         gitlabScopedProjectTokens: [
           {
@@ -449,6 +538,24 @@ describe('createSourceControlTokenForTaskRun', () => {
     ).toBeLessThan(
       mockCreateTaskRunScopedGitLabTokens.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it('keeps the earliest expiry when merging multiple providers', async () => {
+    const result = await createSourceControlTokenForTaskRun(
+      makeTaskRun({
+        repo: 'owner/repo',
+        sourceControlProvider: 'github',
+        repositoryProviders: {
+          'owner/repo': 'github',
+          'group/project': 'gitea',
+        },
+        description: 'Work across GitHub and Gitea',
+      } as TaskRun['payload']),
+      '[test]',
+      { maxRetries: 1 },
+    );
+
+    expect(result?.expiresAt).toEqual(new Date('2026-08-10T15:00:00.000Z'));
   });
 
   it('retries only the failing provider and returns no partial token', async () => {

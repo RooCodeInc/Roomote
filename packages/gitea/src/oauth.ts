@@ -11,6 +11,7 @@ const DEFAULT_SCOPES = [
   'write:issue',
   'read:organization',
 ] as const;
+const GITEA_OAUTH_REQUEST_TIMEOUT_MS = 15_000;
 
 export type GiteaOAuthConnectionStatus = 'active' | 'reauthorization_required';
 
@@ -33,6 +34,16 @@ type GiteaOAuthTokenResponse = {
   expires_in?: number;
   scope?: string;
 };
+
+type GiteaOAuthErrorResponse = {
+  error?: string;
+};
+
+function isDefinitiveOAuthError(error: string | undefined): boolean {
+  return ['invalid_grant', 'invalid_client', 'unauthorized_client'].includes(
+    error ?? '',
+  );
+}
 
 let refreshPromise: Promise<string | null> | null = null;
 let deletionPromise: Promise<void> | null = null;
@@ -129,6 +140,7 @@ export async function exchangeGiteaOAuthCode(input: {
   code: string;
   redirectUri: string;
   fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
 }): Promise<GiteaOAuthConnection> {
   const response = await (input.fetchImpl ?? fetch)(
     tokenEndpoint(input.baseUrl),
@@ -145,6 +157,9 @@ export async function exchangeGiteaOAuthCode(input: {
         grant_type: 'authorization_code',
         redirect_uri: input.redirectUri,
       }),
+      signal: AbortSignal.timeout(
+        input.requestTimeoutMs ?? GITEA_OAUTH_REQUEST_TIMEOUT_MS,
+      ),
     },
   );
   if (!response.ok) {
@@ -188,6 +203,7 @@ export async function exchangeGiteaOAuthCode(input: {
 export async function resolveGiteaOAuthAccessToken(options?: {
   fetchImpl?: typeof fetch;
   forceRefresh?: boolean;
+  requestTimeoutMs?: number;
 }): Promise<string | null> {
   if (deletionPromise) {
     await deletionPromise;
@@ -224,16 +240,41 @@ export async function resolveGiteaOAuthAccessToken(options?: {
           refresh_token: connection.refreshToken,
           grant_type: 'refresh_token',
         }),
+        signal: AbortSignal.timeout(
+          options?.requestTimeoutMs ?? GITEA_OAUTH_REQUEST_TIMEOUT_MS,
+        ),
       },
     );
     if (!response.ok) {
       if (generation !== connectionGeneration) return null;
-      await writeConnection({
-        ...connection,
-        status: 'reauthorization_required',
-      });
+
+      const oauthError = await response
+        .clone()
+        .json()
+        .then((body) => (body as GiteaOAuthErrorResponse).error)
+        .catch(() => undefined);
+
+      if (isDefinitiveOAuthError(oauthError)) {
+        const latest = await readConnection();
+        if (
+          latest?.status === 'active' &&
+          latest.accessToken !== connection.accessToken &&
+          Date.parse(latest.expiresAt) > Date.now() + 60_000
+        ) {
+          cachedAccessToken = latest.accessToken;
+          return latest.accessToken;
+        }
+        await writeConnection({
+          ...(latest ?? connection),
+          status: 'reauthorization_required',
+        });
+        throw new Error(
+          'Gitea OAuth authorization has expired and must be renewed.',
+        );
+      }
+
       throw new Error(
-        'Gitea OAuth authorization has expired and must be renewed.',
+        `Gitea OAuth refresh failed: ${response.status} ${response.statusText}`,
       );
     }
     const token = (await response.json()) as GiteaOAuthTokenResponse;

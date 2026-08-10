@@ -12,7 +12,10 @@ import {
   TeamsBotFrameworkClient,
   type TeamsBotFrameworkClientOptions,
 } from './teams-bot-framework-client';
-import type { TeamsActivityImageAttachment } from './teams-activity';
+import type {
+  TeamsActivityAudioAttachment,
+  TeamsActivityImageAttachment,
+} from './teams-activity';
 import { normalizePromptImageMimeType } from './teams-image-mime';
 import { TeamsGraphClient, type TeamsGraphMessage } from './teams-graph-client';
 
@@ -324,6 +327,20 @@ export class TeamsCommunicationProvider implements CommunicationProviderAdapter 
     }
 
     return images;
+  }
+
+  async downloadAudioAttachment(
+    attachment: TeamsActivityAudioAttachment,
+    options?: { serviceUrl?: string; maxBytes?: number },
+  ): Promise<{ bytes: Buffer; contentType?: string }> {
+    const trustedHosts = options?.serviceUrl
+      ? [new URL(options.serviceUrl).hostname]
+      : [];
+    return this.client.downloadAttachment({
+      contentUrl: attachment.contentUrl,
+      trustedHosts,
+      ...(options?.maxBytes ? { maxBytes: options.maxBytes } : {}),
+    });
   }
 
   async fetchMessageImageDataUrls(input: {

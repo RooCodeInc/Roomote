@@ -63,7 +63,7 @@ import {
   releaseCustomAutomationLaunchClaim,
   tryClaimCustomAutomationLaunch,
 } from '@roomote/db/server';
-import { TaskPayloadKind } from '@roomote/types';
+import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 import { findUserDirectMessageDestination } from '../../lib/user-direct-message';
 
 import {
@@ -84,6 +84,7 @@ const automation = {
   enabled: true,
   scheduleMode: 'daily',
   environmentId: '22222222-2222-2222-2222-222222222222',
+  allRepositories: false,
   target: {
     provider: 'slack',
     targetKind: 'slack_channel',
@@ -178,6 +179,35 @@ describe('customAutomationsJob', () => {
         lastLaunchedTaskId: 'task_abc',
         launchClaimedAt: expect.any(Date),
       }),
+    );
+  });
+
+  it('launches all-repositories automations without a named environment', async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        environmentId: null,
+        allRepositories: true,
+      } as never,
+    ]);
+
+    const result = await customAutomationsJob();
+
+    expect(result.launchedTaskId).toBe('task_abc');
+    expect(db.query.environments.findFirst).not.toHaveBeenCalled();
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({ repo: ALL_REPOSITORIES }),
+        }),
+      }),
+    );
+    const enqueued = vi.mocked(enqueueTask).mock.calls[0]?.[0] as {
+      task: { payload: Record<string, unknown> & { description: string } };
+    };
+    expect(enqueued.task.payload).not.toHaveProperty('environmentId');
+    expect(enqueued.task.payload.description).toContain(
+      'must include the concrete `targetRepositoryFullName`',
     );
   });
 

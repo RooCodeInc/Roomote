@@ -73,6 +73,7 @@ export type NonTaskInferenceTrackingInput = {
 };
 
 export const NON_TASK_INFERENCE_SURFACES = {
+  chatAudioTranscription: 'chat_audio_transcription',
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
   fastAgentOnboardingSuggestions: 'fast_agent_onboarding_suggestions',
   fastAgentQuestionAnswering: 'fast_agent_question_answering',
@@ -88,7 +89,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
   taskTitleGeneration: 'task_title_generation',
 } as const;
 
-export interface GenerateTrackedNonTaskTextParams extends NonTaskInferenceTrackingInput {
+interface GenerateTrackedNonTaskBaseParams extends NonTaskInferenceTrackingInput {
   prompt: string;
   system?: string;
   model?: string;
@@ -96,9 +97,29 @@ export interface GenerateTrackedNonTaskTextParams extends NonTaskInferenceTracki
   timeoutMs?: number;
 }
 
+export interface GenerateTrackedNonTaskTextParams extends GenerateTrackedNonTaskBaseParams {
+  files?: NonTaskPromptFile[];
+  requiredInputModality?: NonTaskInputModality;
+}
+
+export type NonTaskInputModality = 'audio' | 'image' | 'video' | 'pdf';
+
+export type NonTaskPromptFile = {
+  mime: string;
+  filename?: string;
+  url: string;
+};
+
+export class NonTaskInputModalityUnsupportedError extends Error {
+  constructor(public readonly modality: NonTaskInputModality) {
+    super(`No configured model supports ${modality} input and text output.`);
+    this.name = 'NonTaskInputModalityUnsupportedError';
+  }
+}
+
 export interface GenerateTrackedNonTaskObjectParams<
   TSchema extends z.ZodTypeAny,
-> extends GenerateTrackedNonTaskTextParams {
+> extends GenerateTrackedNonTaskBaseParams {
   schema: TSchema;
 }
 
@@ -282,8 +303,82 @@ type NonTaskSdkPromptOptions = {
     schema: Record<string, unknown>;
     retryCount: number;
   };
-  parts: Array<{ type: 'text'; text: string }>;
+  parts: Array<
+    | { type: 'text'; text: string }
+    | {
+        type: 'file';
+        mime: string;
+        filename?: string;
+        url: string;
+      }
+  >;
 };
+
+async function resolveModelForInputModality(
+  params: GenerateTrackedNonTaskTextParams,
+  runtime: {
+    model: string;
+    resolvedModelRuntimeEnv: Partial<Record<string, string>>;
+  },
+): Promise<string> {
+  const modality = params.requiredInputModality;
+  if (!modality) {
+    return runtime.model;
+  }
+
+  const candidates = [
+    params.model,
+    runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
+    runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
+    runtime.resolvedModelRuntimeEnv.R_MODEL,
+    runtime.model,
+  ].filter(
+    (candidate, index, values): candidate is string =>
+      Boolean(candidate) && values.indexOf(candidate) === index,
+  );
+  const timeoutMs = params.timeoutMs ?? 120_000;
+  const server = await leaseOpenCodeSdkServer({
+    env: runtime.resolvedModelRuntimeEnv,
+    startTimeoutMs: Math.min(
+      timeoutMs,
+      DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS,
+    ),
+  });
+
+  try {
+    const client = createOpencodeClient({
+      baseUrl: server.url,
+      fetch: openCodeSdkFetch,
+    });
+    const directory = resolveNonTaskSessionDirectory();
+    const result = await client.config.providers({ directory });
+
+    if (result.error || !result.data) {
+      throw new Error(
+        `OpenCode provider capability lookup failed: ${formatOpenCodeSdkError(result.error)}`,
+      );
+    }
+
+    for (const candidate of candidates) {
+      const { providerID, modelID } = splitOpenCodeModelId(candidate);
+      const provider = result.data.providers.find(
+        (item) => item.id === providerID,
+      );
+      const model = provider?.models[modelID];
+
+      if (
+        model?.capabilities.input[modality] &&
+        model.capabilities.output.text
+      ) {
+        return candidate;
+      }
+    }
+  } finally {
+    server.release();
+  }
+
+  throw new NonTaskInputModalityUnsupportedError(modality);
+}
 
 /**
  * Shared OpenCode SDK plumbing for non-task inference: leases a managed SDK
@@ -293,7 +388,7 @@ type NonTaskSdkPromptOptions = {
  * duplicating the boilerplate or the terminal-scraping apparatus it replaced.
  */
 async function runNonTaskSdkPrompt(
-  params: GenerateTrackedNonTaskTextParams,
+  params: GenerateTrackedNonTaskBaseParams,
   runtime: {
     model: string;
     resolvedModelRuntimeEnv: Partial<Record<string, string>>;
@@ -370,19 +465,30 @@ export async function generateTrackedNonTaskText(
   params: GenerateTrackedNonTaskTextParams,
 ): Promise<string> {
   const runtime = await resolveNonTaskModelRuntime(params.model);
+  const model = await resolveModelForInputModality(params, runtime);
 
-  const data = await runNonTaskSdkPrompt(params, runtime, {
-    system: params.system,
-    parts: [
-      {
-        type: 'text',
-        text: buildOpenCodePrompt({
-          prompt: params.prompt,
-          maxOutputTokens: params.maxOutputTokens,
-        }),
-      },
-    ],
-  });
+  const data = await runNonTaskSdkPrompt(
+    params,
+    { ...runtime, model },
+    {
+      system: params.system,
+      parts: [
+        {
+          type: 'text',
+          text: buildOpenCodePrompt({
+            prompt: params.prompt,
+            maxOutputTokens: params.maxOutputTokens,
+          }),
+        },
+        ...(params.files ?? []).map((file) => ({
+          type: 'file' as const,
+          mime: file.mime,
+          ...(file.filename ? { filename: file.filename } : {}),
+          url: file.url,
+        })),
+      ],
+    },
+  );
 
   if (data.info.error) {
     throw new Error(

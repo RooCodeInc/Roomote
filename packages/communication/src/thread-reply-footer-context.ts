@@ -24,7 +24,7 @@ const TERMINAL_LINKED_TASK_PR_STATUSES = new Set<PullRequestStatus>([
 ]);
 
 export interface ThreadReplyFooterContext {
-  linkedPr: ThreadReplyLinkedPr | null;
+  linkedPrs: ThreadReplyLinkedPr[];
   livePreviewUrl: string | null;
 }
 
@@ -35,7 +35,7 @@ export function buildThreadReplyPrUrl(params: {
   return `https://github.com/${params.repository}/pull/${params.prNumber}`;
 }
 
-export async function resolveThreadReplyLinkedPr(params: {
+async function resolveThreadReplyLinkedPr(params: {
   taskId: string | null | undefined;
   prRepo: string | null | undefined;
   prNumber: number | null | undefined;
@@ -86,6 +86,42 @@ export async function resolveThreadReplyLinkedPr(params: {
   }
 
   return null;
+}
+
+export async function resolveThreadReplyLinkedPrs(params: {
+  taskId: string | null | undefined;
+  prRepo: string | null | undefined;
+  prNumber: number | null | undefined;
+}): Promise<ThreadReplyLinkedPr[]> {
+  const linkedTaskPrs = params.taskId
+    ? await db.query.taskPullRequests.findMany({
+        columns: {
+          prUrl: true,
+          prNumber: true,
+          status: true,
+        },
+        where: eq(taskPullRequests.taskId, params.taskId),
+        orderBy: (table, { desc }) => [
+          desc(table.detectedAt),
+          desc(table.createdAt),
+        ],
+      })
+    : [];
+
+  const activeTaskPrs = linkedTaskPrs.flatMap((pr) =>
+    pr.status && TERMINAL_LINKED_TASK_PR_STATUSES.has(pr.status)
+      ? []
+      : typeof pr.prNumber === 'number' && typeof pr.prUrl === 'string'
+        ? [{ prNumber: pr.prNumber, prUrl: pr.prUrl }]
+        : [],
+  );
+
+  if (activeTaskPrs.length > 0) {
+    return activeTaskPrs;
+  }
+
+  const fallbackPr = await resolveThreadReplyLinkedPr(params);
+  return fallbackPr ? [fallbackPr] : [];
 }
 
 /**
@@ -173,13 +209,13 @@ export async function resolveThreadReplyFooterContext(params: {
   prRepo: string | null | undefined;
   prNumber: number | null | undefined;
 }): Promise<ThreadReplyFooterContext> {
-  const [linkedPr, livePreviewUrl] = await Promise.all([
-    resolveThreadReplyLinkedPr(params),
+  const [linkedPrs, livePreviewUrl] = await Promise.all([
+    resolveThreadReplyLinkedPrs(params),
     resolveThreadReplyLivePreviewUrl(params.taskId),
   ]);
 
   return {
-    linkedPr,
+    linkedPrs,
     livePreviewUrl,
   };
 }

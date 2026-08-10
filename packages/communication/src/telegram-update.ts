@@ -62,6 +62,27 @@ const telegramDocumentSchema = z
   })
   .passthrough();
 
+const telegramAudioSchema = z
+  .object({
+    file_id: z.string(),
+    file_unique_id: z.string(),
+    duration: z.number().int(),
+    file_name: z.string().optional(),
+    mime_type: z.string().optional(),
+    file_size: z.number().int().optional(),
+  })
+  .passthrough();
+
+const telegramVoiceSchema = z
+  .object({
+    file_id: z.string(),
+    file_unique_id: z.string(),
+    duration: z.number().int(),
+    mime_type: z.string().optional(),
+    file_size: z.number().int().optional(),
+  })
+  .passthrough();
+
 const telegramMessageSchema = z
   .object({
     message_id: z.number().int(),
@@ -71,6 +92,8 @@ const telegramMessageSchema = z
     caption: z.string().optional(),
     photo: z.array(telegramPhotoSizeSchema).optional(),
     document: telegramDocumentSchema.optional(),
+    audio: telegramAudioSchema.optional(),
+    voice: telegramVoiceSchema.optional(),
     from: telegramUserSchema.optional(),
     chat: telegramChatSchema,
     entities: z.array(telegramMessageEntitySchema).optional(),
@@ -487,7 +510,9 @@ export function isTelegramTaskEntryUpdate(
     (message.text ||
       message.caption ||
       message.photo?.length ||
-      message.document) &&
+      message.document ||
+      message.audio ||
+      message.voice) &&
     (isTelegramPrivateChat(message) ||
       isTelegramBotMentioned(message, options)),
   );
@@ -626,7 +651,11 @@ export function telegramUpdateToQueuedCommunicationMessage(
       ? 'Image attachment'
       : message.document
         ? `Document attachment${message.document.file_name ? `: ${message.document.file_name}` : ''}`
-        : '';
+        : message.audio
+          ? `Audio attachment${message.audio.file_name ? `: ${message.audio.file_name}` : ''}`
+          : message.voice
+            ? 'Audio attachment: voice message'
+            : '';
 
   if (!text) {
     return null;

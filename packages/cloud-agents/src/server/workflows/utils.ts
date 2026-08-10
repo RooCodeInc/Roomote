@@ -6,6 +6,7 @@ import {
   buildTelegramMessagePermalink,
   buildDiscordMessagePermalink,
   getGitHubFollowUpMention,
+  formatPrBodyAttribution,
   resolveTaskWorkspace,
 } from '@roomote/types';
 import {
@@ -60,6 +61,7 @@ export function getPrBodyAttributionLine({
   discordChannelId,
   discordMessageId,
   githubAppSlug = getEffectiveGitHubAppSlug(),
+  roomoteMentionEnabled = isGitHubRoomoteMentionEnabled(),
   escapeDoubleQuotes = false,
 }: {
   attribution: ResolvedTaskCommitAuthor;
@@ -93,6 +95,7 @@ export function getPrBodyAttributionLine({
   discordChannelId?: string;
   discordMessageId?: string;
   githubAppSlug?: string | null;
+  roomoteMentionEnabled?: boolean;
   escapeDoubleQuotes?: boolean;
 }) {
   if (
@@ -129,6 +132,7 @@ export function getPrBodyAttributionLine({
     discordChannelId,
     discordMessageId,
     githubAppSlug,
+    roomoteMentionEnabled,
     escapeDoubleQuotes,
   });
 }
@@ -154,6 +158,7 @@ function buildPrBodyAttributionLine({
   discordChannelId,
   discordMessageId,
   githubAppSlug,
+  roomoteMentionEnabled,
   escapeDoubleQuotes = false,
 }: {
   attribution: ResolvedTaskCommitAuthor;
@@ -187,6 +192,7 @@ function buildPrBodyAttributionLine({
   discordChannelId?: string;
   discordMessageId?: string;
   githubAppSlug?: string | null;
+  roomoteMentionEnabled: boolean;
   escapeDoubleQuotes?: boolean;
 }) {
   const escapeValue = (value: string) =>
@@ -207,7 +213,7 @@ function buildPrBodyAttributionLine({
     : undefined;
   const appMention = getGitHubFollowUpMention(
     githubAppSlug?.trim() || DEFAULT_R_GITHUB_APP_SLUG,
-    isGitHubRoomoteMentionEnabled(),
+    roomoteMentionEnabled,
   );
   const isChatSurface =
     taskSurface === 'slack' ||
@@ -273,12 +279,15 @@ function buildPrBodyAttributionLine({
       : defaultFollowUpInstruction;
 
   if (attribution.kind === 'roomote') {
-    return `> Created by Roomote. ${instruction}`;
+    return formatPrBodyAttribution('Created by Roomote.', instruction);
   }
 
   const safeUserName = escapeValue(attribution.displayName || PRODUCT_NAME);
 
-  return `> Opened on behalf of ${safeUserName}. ${instruction}`;
+  return formatPrBodyAttribution(
+    `Opened on behalf of ${safeUserName}.`,
+    instruction,
+  );
 }
 export function getWorkspaceInstructions(
   repoFullNames?: string[],

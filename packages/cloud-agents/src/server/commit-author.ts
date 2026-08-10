@@ -1,14 +1,16 @@
 import {
   type CommitAuthorKind,
+  type SourceControlProvider,
   type TaskInitiator,
-  getUserDisplayName,
   PRODUCT_NAME,
 } from '@roomote/types';
 import {
   type DatabaseOrTransaction,
+  and,
   desc,
   eq,
   githubUserMappings,
+  sourceControlUserMappings,
   tasks,
   users,
 } from '@roomote/db/server';
@@ -69,6 +71,8 @@ export type ResolvedTaskCommitAuthor = {
   kind: CommitAuthorKind;
   /** Human-readable display name; PRODUCT_NAME for roomote authorship. */
   displayName: string;
+  /** Source-control handle safe to publish, including its leading `@`. */
+  publicDisplayName: string | null;
   githubLogin: string | null;
   prAssigneeLogin: string | null;
   gitAuthor: ResolvedGitAuthor;
@@ -77,6 +81,7 @@ export type ResolvedTaskCommitAuthor = {
 export const DEFAULT_ROOMOTE_COMMIT_AUTHOR: ResolvedTaskCommitAuthor = {
   kind: 'roomote',
   displayName: PRODUCT_NAME,
+  publicDisplayName: null,
   githubLogin: null,
   prAssigneeLogin: null,
   gitAuthor: ROOMOTE_GIT_AUTHOR,
@@ -212,7 +217,6 @@ export async function resolveTaskCommitAuthor(
       columns: {
         id: true,
         name: true,
-        email: true,
       },
     });
 
@@ -224,14 +228,14 @@ export async function resolveTaskCommitAuthor(
       githubIdentity.githubLogin ??
       normalizeNullableString(task.commitAuthorLogin);
     const displayName =
-      normalizeNullableString(getUserDisplayName(user)) ??
-      githubLogin ??
-      PRODUCT_NAME;
+      normalizeNullableString(user?.name) ?? githubLogin ?? PRODUCT_NAME;
+    const publicDisplayName = githubLogin ? `@${githubLogin}` : null;
 
     if (!githubIdentity.githubLogin || !githubIdentity.githubUserId) {
       return {
         kind: 'user',
         displayName,
+        publicDisplayName,
         githubLogin,
         prAssigneeLogin: null,
         gitAuthor: ROOMOTE_GIT_AUTHOR,
@@ -241,6 +245,7 @@ export async function resolveTaskCommitAuthor(
     return {
       kind: 'user',
       displayName,
+      publicDisplayName,
       githubLogin,
       prAssigneeLogin: githubIdentity.githubLogin,
       gitAuthor: {
@@ -257,11 +262,13 @@ export async function resolveTaskCommitAuthor(
       normalizeNullableString(task.actorDisplayName) ??
       githubLogin ??
       PRODUCT_NAME;
+    const publicDisplayName = githubLogin ? `@${githubLogin}` : null;
 
     if (!githubLogin || !externalId) {
       return {
         kind: 'external',
         displayName,
+        publicDisplayName,
         githubLogin,
         prAssigneeLogin,
         gitAuthor: ROOMOTE_GIT_AUTHOR,
@@ -271,6 +278,7 @@ export async function resolveTaskCommitAuthor(
     return {
       kind: 'external',
       displayName,
+      publicDisplayName,
       githubLogin,
       prAssigneeLogin,
       gitAuthor: {
@@ -286,6 +294,16 @@ export async function resolveTaskCommitAuthor(
   };
 }
 
+/** Use the provider noreply identity only when its public handle is available. */
+export function resolvePublicGitAuthor(
+  attribution: ResolvedTaskCommitAuthor,
+): ResolvedGitAuthor {
+  return attribution.publicDisplayName &&
+    attribution.gitAuthor.email !== ROOMOTE_GIT_AUTHOR.email
+    ? { ...attribution.gitAuthor, name: attribution.publicDisplayName }
+    : ROOMOTE_GIT_AUTHOR;
+}
+
 /**
  * Resolves attribution for a live run. A linked participant owns their turns;
  * all ownerless or unlinked runs use the Roomote app identity.
@@ -293,8 +311,66 @@ export async function resolveTaskCommitAuthor(
 export async function resolveRunCommitAuthor(
   tx: DatabaseOrTransaction,
   run: { taskId: string; actingUserId: string | null },
+  sourceControl?: {
+    provider: SourceControlProvider;
+    host?: string;
+  },
 ): Promise<ResolvedTaskCommitAuthor> {
   if (run.actingUserId) {
+    if (sourceControl && sourceControl.provider !== 'github') {
+      const user = await tx.query.users.findFirst({
+        where: eq(users.id, run.actingUserId),
+        columns: { id: true, name: true },
+      });
+      if (!user) {
+        return DEFAULT_ROOMOTE_COMMIT_AUTHOR;
+      }
+
+      const mapping = sourceControl.host
+        ? await tx.query.sourceControlUserMappings.findFirst({
+            where: and(
+              eq(sourceControlUserMappings.userId, run.actingUserId),
+              eq(
+                sourceControlUserMappings.sourceControlProvider,
+                sourceControl.provider,
+              ),
+              eq(sourceControlUserMappings.host, sourceControl.host),
+            ),
+            orderBy: [desc(sourceControlUserMappings.updatedAt)],
+            columns: {
+              externalAccountId: true,
+              username: true,
+              displayName: true,
+            },
+          })
+        : null;
+      const username = normalizeNullableString(mapping?.username);
+      const displayName =
+        normalizeNullableString(user.name) ??
+        normalizeNullableString(mapping?.displayName) ??
+        username ??
+        PRODUCT_NAME;
+      const commitEmail =
+        sourceControl.provider === 'gitlab' &&
+        sourceControl.host === 'gitlab.com' &&
+        mapping?.externalAccountId &&
+        username
+          ? `${mapping.externalAccountId}-${username}@users.noreply.gitlab.com`
+          : ROOMOTE_GIT_AUTHOR.email;
+
+      return {
+        kind: 'user',
+        displayName,
+        publicDisplayName: username ? `@${username}` : null,
+        githubLogin: null,
+        prAssigneeLogin: null,
+        gitAuthor: {
+          name: displayName,
+          email: commitEmail,
+        },
+      };
+    }
+
     const [user, githubIdentity] = await Promise.all([
       tx.query.users.findFirst({
         where: eq(users.id, run.actingUserId),

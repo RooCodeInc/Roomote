@@ -141,38 +141,23 @@ function getDestroyInstanceSentryMessage(
   }
 }
 
-async function createSleepCheckClient(provider: ComputeProvider) {
+function buildSleepCheckClient(
+  provider: ComputeProvider,
+  envFallback: Partial<Record<string, string>>,
+) {
   switch (provider) {
     case 'modal':
-      return createComputeProviderClient({
-        provider: 'modal',
-        envFallback: await resolveComputeProviderEnvValues('modal'),
-      });
+      return createComputeProviderClient({ provider: 'modal', envFallback });
     case 'roomote':
-      return createComputeProviderClient({
-        provider: 'roomote',
-        envFallback: await resolveComputeProviderEnvValues('roomote'),
-      });
+      return createComputeProviderClient({ provider: 'roomote', envFallback });
     case 'daytona':
-      return createComputeProviderClient({
-        provider: 'daytona',
-        envFallback: await resolveComputeProviderEnvValues('daytona'),
-      });
+      return createComputeProviderClient({ provider: 'daytona', envFallback });
     case 'e2b':
-      return createComputeProviderClient({
-        provider: 'e2b',
-        envFallback: await resolveComputeProviderEnvValues('e2b'),
-      });
+      return createComputeProviderClient({ provider: 'e2b', envFallback });
     case 'blaxel':
-      return createComputeProviderClient({
-        provider: 'blaxel',
-        envFallback: await resolveComputeProviderEnvValues('blaxel'),
-      });
+      return createComputeProviderClient({ provider: 'blaxel', envFallback });
     case 'azure':
-      return createComputeProviderClient({
-        provider: 'azure',
-        envFallback: await resolveComputeProviderEnvValues('azure'),
-      });
+      return createComputeProviderClient({ provider: 'azure', envFallback });
     case 'docker':
       return createComputeProviderClient({ provider: 'docker' });
     default:
@@ -180,6 +165,52 @@ async function createSleepCheckClient(provider: ComputeProvider) {
         `Sleep check has no compute client for provider "${provider}"`,
       );
   }
+}
+
+interface CachedSleepCheckClient {
+  client: ReturnType<typeof buildSleepCheckClient>;
+  fingerprint: string;
+}
+
+// Reuse one client per provider across scheduler ticks. Building a fresh SDK
+// client every minute retained each client's connection state (pinned via the
+// adapters' static sandbox caches) on deployments that always have active
+// runs, leaking ~1.5 MB/min until the bullmq service hit its heap cap. The
+// fingerprint rebuilds the client when the deployment's provider credentials
+// change.
+const sleepCheckClientCache = new Map<
+  ComputeProvider,
+  CachedSleepCheckClient
+>();
+
+/** Test-only: drop cached clients so mocks do not leak across tests. */
+export function clearSleepCheckClientCache(): void {
+  sleepCheckClientCache.clear();
+}
+
+function fingerprintEnvValues(values: Partial<Record<string, string>>): string {
+  return JSON.stringify(
+    Object.entries(values)
+      .filter(([, value]) => value !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+  );
+}
+
+async function getSleepCheckClient(provider: ComputeProvider) {
+  const envValues =
+    provider === 'docker'
+      ? {}
+      : await resolveComputeProviderEnvValues(provider);
+  const fingerprint = fingerprintEnvValues(envValues);
+  const cached = sleepCheckClientCache.get(provider);
+
+  if (cached && cached.fingerprint === fingerprint) {
+    return cached.client;
+  }
+
+  const client = buildSleepCheckClient(provider, envValues);
+  sleepCheckClientCache.set(provider, { client, fingerprint });
+  return client;
 }
 
 /**
@@ -291,7 +322,7 @@ export const sleepCheckJob = async () => {
   const candidateJobsByMachineId = new Map<string, SleepCheckCandidateSet>();
   const providerClients = new Map<
     ComputeProvider,
-    Awaited<ReturnType<typeof createSleepCheckClient>>
+    Awaited<ReturnType<typeof getSleepCheckClient>>
   >();
 
   await mergeSleepCheckCandidates(candidateJobsByMachineId, dueJobs, 'dueJob', {
@@ -358,7 +389,7 @@ export const sleepCheckJob = async () => {
     let client = providerClients.get(provider);
 
     if (!client) {
-      client = await createSleepCheckClient(provider);
+      client = await getSleepCheckClient(provider);
       providerClients.set(provider, client);
     }
 
@@ -809,7 +840,7 @@ export async function sleepTaskRunNow(runId: number): Promise<void> {
     return;
   }
 
-  const client = await createSleepCheckClient(job.vendor);
+  const client = await getSleepCheckClient(job.vendor);
   const { status } = await client.getInstanceStatus({
     instanceId: job.machineId,
   });

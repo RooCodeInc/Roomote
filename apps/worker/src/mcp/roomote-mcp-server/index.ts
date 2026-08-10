@@ -98,10 +98,11 @@ roomoteMcpServer.registerTool(
   {
     title: 'Manage Custom Automations',
     description:
-      'Admin-only management of deployment custom automations. List existing automations, resolve a cron or natural-language schedule, create or update an automation, delete an automation by exact ID, or run an enabled automation now. When the user asks an automation to DM them, set their preferred connected targetProvider and targetMode to direct_message; no targetChannelId is needed. Natural-language schedules are converted to validated five-field cron in the deployment scheduling timezone. When a user asks an automation to offer help, suggest tasks, make follow-ups actionable or launchable, or turn findings or action items into tasks, encode that intent in product language by instructing the automation to post concrete actions as launchable suggested tasks alongside its report. Do not expose runtime tool names or parameter syntax in the stored prompt. A request only to summarize or list action items is not suggested-task intent. Only promise launchable suggested tasks when the automation has both a configured chat report destination and a repository or environment for executable work; otherwise keep actions as report text and explain the missing capability. After successfully creating an automation in response to a conversational request, ask the user whether they want to run it now to test it.',
+      'Admin-only management of deployment custom automations. List existing automations or enabled task models, resolve a cron or natural-language schedule, create or update an automation, delete an automation by exact ID, or run an enabled automation now. Use list_models before setting a model override; create and update accept only exact model IDs returned by that action. Model IDs encode the inference route: for example, openrouter/... targets OpenRouter, while openai/... uses the deployment OpenAI route, including a connected ChatGPT subscription when configured. When the user asks an automation to DM them, set their preferred connected targetProvider and targetMode to direct_message; no targetChannelId is needed. Natural-language schedules are converted to validated five-field cron in the deployment scheduling timezone. When a user asks an automation to offer help, suggest tasks, make follow-ups actionable or launchable, or turn findings or action items into tasks, encode that intent in product language by instructing the automation to post concrete actions as launchable suggested tasks alongside its report. Do not expose runtime tool names or parameter syntax in the stored prompt. A request only to summarize or list action items is not suggested-task intent. Only promise launchable suggested tasks when the automation has both a configured chat report destination and a repository or environment for executable work; otherwise keep actions as report text and explain the missing capability. After successfully creating an automation in response to a conversational request, ask the user whether they want to run it now to test it.',
     inputSchema: {
       action: z.enum([
         'list',
+        'list_models',
         'resolve_schedule',
         'create',
         'update',
@@ -130,7 +131,7 @@ roomoteMcpServer.registerTool(
         .string()
         .nullable()
         .describe(
-          'Optional provider/model launch override (for example "anthropic/claude-sonnet-5"). Omit to keep the deployment default; pass null on update to clear an existing override.',
+          'Optional provider/model launch override. Call list_models first and pass an exact returned model ID. The ID prefix selects the configured inference route; openai/... includes connected ChatGPT subscription routing. Omit to keep the deployment default; pass null on update to clear an existing override.',
         )
         .optional(),
       environmentId: z.string().optional(),
@@ -1269,6 +1270,11 @@ if (shouldRegisterSlackThreadReplyTool()) {
         brief: boundedNonEmptyStringSchema(2000).describe(
           'Non-empty suggestion brief of at most 2,000 characters.',
         ),
+        targetRepositoryFullName: nonEmptyStringSchema
+          .optional()
+          .describe(
+            'Repository full name for org-wide runs. Required when the task workspace covers all repositories.',
+          ),
       });
   const chatReplyMarkdownGuidance =
     chatReplySurfaceLabel === 'Slack'
@@ -1337,7 +1343,7 @@ if (shouldRegisterSlackThreadReplyTool()) {
                 .describe(
                   usesPinnedSuggestionContract
                     ? `Optional list of 1 to 10 independent actions to post inside the originating ${chatReplySurfaceLabel} conversation when the automation prompt explicitly asks for task suggestions. This scheduled suggestion workflow must include its verified target repository and may include implementation metadata used when the task is started.`
-                    : `Optional list of 1 to 10 independent actions to post inside the originating ${chatReplySurfaceLabel} conversation when the automation prompt explicitly asks for task suggestions. Use only for high-confidence tasks not explicitly identified in the conversation as already underway. Each suggestion contains only the title and description shown to users; Roomote routes the task when it is started.`,
+                    : `Optional list of 1 to 10 independent actions to post inside the originating ${chatReplySurfaceLabel} conversation when the automation prompt explicitly asks for task suggestions. Use only for high-confidence tasks not explicitly identified in the conversation as already underway. For org-wide runs, include the concrete targetRepositoryFullName so Roomote can route the task to the appropriate environment when it is started.`,
                 ),
             }
           : {}),

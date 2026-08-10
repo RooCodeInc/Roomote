@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { AuthTokenContext } from '@roomote/types';
+import { ALL_REPOSITORIES } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 import type { McpAuth } from '../../mcp/middleware';
@@ -16,6 +17,7 @@ const {
   mockUpdateCustomAutomation,
   mockGetCustomAutomationById,
   mockListCustomAutomations,
+  mockGetDeploymentTaskModelOptions,
   mockDeleteCustomAutomation,
   mockListConnectedCommunicationProviders,
   mockResolveCustomAutomationSchedule,
@@ -28,6 +30,7 @@ const {
   mockUpdateCustomAutomation: vi.fn(),
   mockGetCustomAutomationById: vi.fn(),
   mockListCustomAutomations: vi.fn(),
+  mockGetDeploymentTaskModelOptions: vi.fn(),
   mockDeleteCustomAutomation: vi.fn(),
   mockListConnectedCommunicationProviders: vi.fn(),
   mockResolveCustomAutomationSchedule: vi.fn(),
@@ -46,6 +49,7 @@ vi.mock('@roomote/db/server', () => ({
   deleteCustomAutomation: mockDeleteCustomAutomation,
   getCustomAutomationById: mockGetCustomAutomationById,
   listCustomAutomations: mockListCustomAutomations,
+  getDeploymentTaskModelOptions: mockGetDeploymentTaskModelOptions,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -64,6 +68,18 @@ vi.mock('../../mcp/proxy-utils', () => ({
 }));
 
 const ENVIRONMENT_ID = '00000000-0000-0000-0000-000000000001';
+const ENABLED_MODELS = [
+  {
+    id: 'openai/gpt-5.6-luna',
+    displayName: 'GPT 5.6 Luna',
+    family: 'GPT',
+  },
+  {
+    id: 'openrouter/openai/gpt-5.6-luna',
+    displayName: 'GPT 5.6 Luna',
+    family: 'GPT',
+  },
+];
 
 function createApp() {
   const app = new Hono<{ Variables: Variables & { mcpAuth: McpAuth } }>();
@@ -117,9 +133,90 @@ describe('custom-automations MCP routes', () => {
     mockResolveActingUserIdOrNull.mockResolvedValue('admin-1');
     mockUsersFindFirst.mockResolvedValue({ id: 'admin-1' });
     mockListConnectedCommunicationProviders.mockResolvedValue(['slack']);
+    mockGetDeploymentTaskModelOptions.mockResolvedValue({
+      models: ENABLED_MODELS,
+      defaultModelId: 'openai/gpt-5.6-luna',
+    });
+  });
+
+  it('lists the deployment models available for automation overrides', async () => {
+    const { app } = createApp();
+
+    const res = await app.request('/custom-automations/models');
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toEqual({
+      models: ENABLED_MODELS,
+      defaultModelId: 'openai/gpt-5.6-luna',
+    });
   });
 
   describe('POST / (create)', () => {
+    it('rejects a model that is not enabled for new tasks', async () => {
+      const { app } = createApp();
+
+      const res = await postCreate(
+        app,
+        createBody({ model: 'requesty/openai/gpt-5.6-luna' }),
+      );
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toEqual({
+        error:
+          'Model "requesty/openai/gpt-5.6-luna" is not enabled for new tasks.',
+      });
+      expect(mockCreateCustomAutomation).not.toHaveBeenCalled();
+    });
+
+    it.each(['openai/gpt-5.6-luna', 'openrouter/openai/gpt-5.6-luna'])(
+      'accepts the exact enabled model ID %s',
+      async (model) => {
+        const { app } = createApp();
+        mockResolveCustomAutomationSchedule.mockResolvedValue({
+          status: 'resolved',
+          scheduleMode: 'daily',
+          cronExpression: null,
+          resolution: null,
+        });
+        mockCreateCustomAutomation.mockResolvedValue({ id: 'automation-1' });
+
+        const res = await postCreate(app, createBody({ model }));
+
+        expect(res.status).toBe(201);
+        expect(mockCreateCustomAutomation).toHaveBeenCalledWith(
+          expect.objectContaining({ model }),
+        );
+      },
+    );
+
+    it('accepts the all-repositories workspace target', async () => {
+      const { app } = createApp();
+      mockResolveCustomAutomationSchedule.mockResolvedValue({
+        status: 'resolved',
+        scheduleMode: 'daily',
+        cronExpression: null,
+        resolution: null,
+      });
+      mockCreateCustomAutomation.mockResolvedValue({
+        id: 'automation-1',
+        environmentId: null,
+        allRepositories: true,
+      });
+
+      const res = await postCreate(
+        app,
+        createBody({ environmentId: ALL_REPOSITORIES }),
+      );
+
+      expect(res.status).toBe(201);
+      expect(mockCreateCustomAutomation).toHaveBeenCalledWith(
+        expect.objectContaining({ environmentId: ALL_REPOSITORIES }),
+      );
+      await expect(res.json()).resolves.toMatchObject({
+        automation: { environmentId: ALL_REPOSITORIES },
+      });
+    });
+
     it('tracks creation with only the destination provider', async () => {
       const { app } = createApp();
       mockResolveCustomAutomationSchedule.mockResolvedValue({
@@ -343,6 +440,49 @@ describe('custom-automations MCP routes', () => {
       environmentId: ENVIRONMENT_ID,
       target: {},
     };
+
+    it('rejects an unavailable model before updating', async () => {
+      const { app } = createApp();
+      mockGetCustomAutomationById.mockResolvedValue(existing);
+
+      const res = await app.request('/custom-automations/automation-1', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ model: 'requesty/openai/gpt-5.6-luna' }),
+      });
+
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toEqual({
+        error:
+          'Model "requesty/openai/gpt-5.6-luna" is not enabled for new tasks.',
+      });
+      expect(mockUpdateCustomAutomation).not.toHaveBeenCalled();
+    });
+
+    it('switches an existing automation to all repositories', async () => {
+      const { app } = createApp();
+      mockGetCustomAutomationById.mockResolvedValue(existing);
+      mockUpdateCustomAutomation.mockResolvedValue({
+        ...existing,
+        environmentId: null,
+        allRepositories: true,
+      });
+
+      const res = await app.request('/custom-automations/automation-1', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ environmentId: ALL_REPOSITORIES }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(mockUpdateCustomAutomation).toHaveBeenCalledWith(
+        'automation-1',
+        expect.objectContaining({ environmentId: ALL_REPOSITORIES }),
+      );
+      await expect(res.json()).resolves.toMatchObject({
+        automation: { environmentId: ALL_REPOSITORIES },
+      });
+    });
 
     it('preserves a DM-me target without treating its user reference as a channel', async () => {
       const { app } = createApp();

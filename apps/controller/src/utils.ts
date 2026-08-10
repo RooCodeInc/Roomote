@@ -44,10 +44,6 @@ function requiresPreviewAuth(
   return port.unauthenticated !== true;
 }
 
-function configuredPreviewPortNeedsAuthBypass(port: NamedPort): boolean {
-  return requiresPreviewAuth(port) && port.proxied !== false;
-}
-
 async function isPreviewRuntimeReady(): Promise<boolean> {
   const previewRuntimeConfig = await resolveEffectivePreviewRuntimeConfig({
     runtimeEnv: process.env,
@@ -75,7 +71,10 @@ export function shouldEnableAuthBypassForTaskRun({
       continue;
     }
 
-    if (configuredPreviewPortNeedsAuthBypass(configuredPort)) {
+    // Unproxied ports still enter through the authenticated preview URL before
+    // the preview proxy redirects to the direct machine domain. Agents need a
+    // task-scoped bypass credential for that entrypoint too.
+    if (requiresPreviewAuth(configuredPort)) {
       return true;
     }
   }

@@ -199,16 +199,27 @@ export async function injectEnvVars(
   if (identity && identity.taskId && previewProxyBaseUrl) {
     for (const [name, domain] of Object.entries(identity.machineDomains)) {
       const envVarName = `ROOMOTE_${name}_HOST`;
+      const previewUrlEnvVarName = `ROOMOTE_${name}_PREVIEW_URL`;
       const isProxied =
         name === CODE_SERVER_NAMED_PORT.name || name in identity.proxyPorts;
+      const previewUrl = buildPreviewProxyUrl(
+        identity.taskId,
+        portNameToSlug(name),
+        previewProxyBaseUrl,
+        previewProxySubdomainSuffix,
+      );
+
+      // Keep *_HOST pointing at the direct machine domain for unproxied ports,
+      // while also exposing the authenticated shareable URL that agents and
+      // browser tooling must use to exercise the preview entrypoint itself.
+      if (name === CODE_SERVER_NAMED_PORT.name) {
+        delete envVars[previewUrlEnvVarName];
+      } else {
+        envVars[previewUrlEnvVarName] = previewUrl;
+      }
 
       if (isProxied) {
-        envVars[envVarName] = buildPreviewProxyUrl(
-          identity.taskId,
-          portNameToSlug(name),
-          previewProxyBaseUrl,
-          previewProxySubdomainSuffix,
-        );
+        envVars[envVarName] = previewUrl;
       } else {
         envVars[envVarName] = domain;
       }

@@ -26,6 +26,51 @@ function binaryResponse(body: ArrayBuffer, contentType: string): Response {
 }
 
 describe('TeamsCommunicationProvider', () => {
+  it('downloads bounded audio with Bot Framework credentials kept in headers', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          access_token: 'bot-token',
+          expires_in: 3600,
+          token_type: 'Bearer',
+        }),
+      )
+      .mockResolvedValueOnce(
+        binaryResponse(Uint8Array.from([1, 2, 3]).buffer, 'audio/mpeg'),
+      );
+    const provider = new TeamsCommunicationProvider({
+      appId: 'bot-app-id',
+      appPassword: 'bot-secret',
+      tokenEndpoint: 'https://login.example.test/token',
+      fetch: fetchMock as typeof fetch,
+    });
+
+    const result = await provider.downloadAudioAttachment(
+      {
+        contentUrl: 'https://smba.trafficmanager.net/amer/audio/clip.mp3',
+        contentType: 'audio/mpeg',
+        name: 'clip.mp3',
+      },
+      {
+        serviceUrl: 'https://smba.trafficmanager.net/amer/',
+        maxBytes: 20 * 1024 * 1024,
+      },
+    );
+
+    expect(result).toEqual({
+      bytes: Buffer.from([1, 2, 3]),
+      contentType: 'audio/mpeg',
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://smba.trafficmanager.net/amer/audio/clip.mp3',
+      expect.objectContaining({
+        headers: { authorization: 'Bearer bot-token' },
+      }),
+    );
+  });
+
   it('sends Teams messages through the Bot Framework connector API', async () => {
     const fetchMock = vi
       .fn()

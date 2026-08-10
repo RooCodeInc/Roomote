@@ -9,6 +9,7 @@ import { errorResult } from './tool-result.js';
 type ManageCustomAutomationsParams = {
   action:
     | 'list'
+    | 'list_models'
     | 'resolve_schedule'
     | 'create'
     | 'update'
@@ -35,7 +36,9 @@ export async function handleManageCustomAutomations(
   let method = 'GET';
   let body: Record<string, unknown> | undefined;
 
-  if (params.action === 'resolve_schedule') {
+  if (params.action === 'list_models') {
+    path += '/models';
+  } else if (params.action === 'resolve_schedule') {
     if (!params.schedule) return errorResult('schedule is required');
     path += '/resolve-schedule';
     method = 'POST';

@@ -15,6 +15,7 @@ import {
   type AutomationRunNowResult,
 } from '@roomote/sdk/server';
 import {
+  ALL_REPOSITORIES,
   isScheduleOnlyBackgroundAutomationFrequency,
   type AutomationTarget,
   type BackgroundAutomationProvider,
@@ -85,7 +86,7 @@ function toListItem(
     scheduleMode,
     cronExpression: row.cronExpression,
     model: row.model,
-    environmentId: row.environmentId,
+    environmentId: row.allRepositories ? ALL_REPOSITORIES : row.environmentId,
     target: row.target,
     lastRunAt: row.lastRunAt,
     lastSucceededAt: row.lastSucceededAt,

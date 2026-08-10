@@ -1,3 +1,5 @@
+import { readBoundedResponseBody } from './bounded-response-body';
+
 export type FetchLike = typeof fetch;
 
 export type TeamsBotFrameworkClientOptions = {
@@ -393,13 +395,13 @@ export class TeamsBotFrameworkClient {
       }
     }
 
-    const bytes = Buffer.from(await response.arrayBuffer());
-
-    if (bytes.length > maxBytes) {
-      throw new Error(
-        `Teams attachment download exceeded max size of ${maxBytes} bytes (received: ${bytes.length})`,
-      );
-    }
+    const bytes = Buffer.from(
+      await readBoundedResponseBody(
+        response,
+        maxBytes,
+        `Teams attachment download exceeded max size of ${maxBytes} bytes`,
+      ),
+    );
 
     const contentType =
       response.headers.get('content-type')?.split(';')[0]?.trim() || undefined;

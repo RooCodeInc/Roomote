@@ -1,6 +1,10 @@
 import { Hono } from 'hono';
 
-import { type RunTokenContext, TaskPayloadKind } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  type RunTokenContext,
+  TaskPayloadKind,
+} from '@roomote/types';
 
 import type { Variables } from '../../../types';
 import { mcpAuthMiddleware } from '../../mcp/middleware';
@@ -16,6 +20,7 @@ const {
   mockDeploymentSettingsFindFirst,
   mockSlackInstallationFindFirst,
   mockEnvironmentFindFirst,
+  mockFindEnvironmentForRepo,
   mockPostMessage,
   insertedWorkItemValues,
   insertedTrackedMessageValues,
@@ -25,6 +30,7 @@ const {
   mockDeploymentSettingsFindFirst: vi.fn(),
   mockSlackInstallationFindFirst: vi.fn(),
   mockEnvironmentFindFirst: vi.fn(),
+  mockFindEnvironmentForRepo: vi.fn(),
   mockPostMessage: vi.fn(),
   insertedWorkItemValues: [] as Record<string, unknown>[],
   insertedTrackedMessageValues: [] as Record<string, unknown>[],
@@ -32,11 +38,16 @@ const {
 
 // Mutable so a test can simulate "Slack installed but no channel resolves".
 let slackInstallationChannelRows: unknown[] = [{ channelId: 'C-FALLBACK' }];
+let repositoryRows: Array<{
+  id: string;
+  fullName: string;
+  isActive?: boolean;
+}> = [{ id: 'repo-1', fullName: 'acme/app' }];
 
 function makeSelectResult(name: string): unknown[] {
   switch (name) {
     case 'repositories':
-      return [{ id: 'repo-1', fullName: 'acme/app' }];
+      return repositoryRows;
     case 'slackInstallations':
       return [{ id: 'inst-1', botAccessToken: 'xoxb-test', teamId: 'T1' }];
     case 'slackInstallationChannels':
@@ -61,12 +72,18 @@ function makeSelectResult(name: string): unknown[] {
 
 function createSelectBuilder() {
   let tableName = '';
+  let filtersActiveRepositories = false;
   const builder = {
     from(table: { _name?: string }) {
       tableName = table?._name ?? '';
       return builder;
     },
-    where() {
+    where(condition?: { type?: string; args?: unknown[] }) {
+      filtersActiveRepositories =
+        tableName === 'repositories' &&
+        (condition?.type === 'and' ||
+          (condition?.type === 'eq' &&
+            condition.args?.includes(true) === true));
       return builder;
     },
     orderBy() {
@@ -79,7 +96,17 @@ function createSelectBuilder() {
       resolve: (rows: unknown[]) => T,
       reject?: (error: unknown) => T,
     ): Promise<T> {
-      return Promise.resolve(makeSelectResult(tableName)).then(resolve, reject);
+      const rows = makeSelectResult(tableName);
+      const filteredRows = filtersActiveRepositories
+        ? rows.filter(
+            (row) =>
+              !row ||
+              typeof row !== 'object' ||
+              !('isActive' in row) ||
+              row.isActive !== false,
+          )
+        : rows;
+      return Promise.resolve(filteredRows).then(resolve, reject);
     },
   };
   return builder;
@@ -143,6 +170,10 @@ vi.mock('@roomote/slack', () => ({
 
 vi.mock('@roomote/communication/chat-messages', () => ({
   SETUP_SUGGESTIONS_THREAD_INTRO_TEXT: 'intro',
+}));
+
+vi.mock('@roomote/cloud-agents/server', () => ({
+  findEnvironmentForRepo: mockFindEnvironmentForRepo,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -310,10 +341,12 @@ describe('submitTaskSuggestions', () => {
     mockDeploymentSettingsFindFirst.mockReset();
     mockSlackInstallationFindFirst.mockReset();
     mockEnvironmentFindFirst.mockReset();
+    mockFindEnvironmentForRepo.mockReset();
     mockPostMessage.mockReset();
     insertedWorkItemValues.length = 0;
     insertedTrackedMessageValues.length = 0;
     slackInstallationChannelRows = [{ channelId: 'C-FALLBACK' }];
+    repositoryRows = [{ id: 'repo-1', fullName: 'acme/app' }];
     vi.mocked(getAutomationRuntime).mockResolvedValue({
       slackChannelId: 'C-AUTO',
     } as unknown as Awaited<ReturnType<typeof getAutomationRuntime>>);
@@ -329,6 +362,7 @@ describe('submitTaskSuggestions', () => {
       botAccessToken: 'xoxb-test',
     });
     mockEnvironmentFindFirst.mockResolvedValue(null);
+    mockFindEnvironmentForRepo.mockResolvedValue(undefined);
     mockTaskRunFindFirst.mockResolvedValue({
       id: 1,
       payloadKind: TaskPayloadKind.Scan,
@@ -521,6 +555,186 @@ describe('submitTaskSuggestions', () => {
     });
     expect(mockPostMessage).toHaveBeenCalledTimes(1);
   });
+
+  it('pins org-wide current-thread suggestions to a concrete repository', async () => {
+    repositoryRows = [
+      { id: 'repo-1', fullName: 'acme/app' },
+      { id: 'repo-2', fullName: 'acme/api' },
+    ];
+    mockFindEnvironmentForRepo.mockResolvedValue(
+      '10b031ec-b728-4d8f-a9a0-1ed4aa500511',
+    );
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 1,
+      payloadKind: TaskPayloadKind.StandardTask,
+      actingUserId: 'user-1',
+      payload: { repo: ALL_REPOSITORIES },
+    });
+    mockTaskFindFirst.mockResolvedValue({
+      initiatorUserId: 'user-1',
+      initiatorAutomation: 'custom_automation',
+      slackChannelId: 'C123',
+      slackThreadTs: '111.222',
+    });
+    const app = createApp({
+      runId: 1,
+      userId: 'user-1',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    });
+
+    const response = await app.request(
+      new Request('http://localhost/tasks/task-1/task_suggestions', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          delivery: 'current_thread',
+          submissionKey: 'org-wide-reply',
+          suggestions: [
+            {
+              title: 'Fix the parser',
+              brief: 'Nil access is crashing the parser.',
+              targetRepositoryFullName: 'Acme/App',
+            },
+          ],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(insertedWorkItemValues[0]).toMatchObject({
+      targetRepositoryFullName: 'acme/app',
+      targetEnvironmentId: '10b031ec-b728-4d8f-a9a0-1ed4aa500511',
+      repositoryIds: ['repo-1'],
+    });
+    expect(mockFindEnvironmentForRepo).toHaveBeenCalledWith('acme/app');
+    expect(insertedTrackedMessageValues[0]?.metadata).not.toHaveProperty(
+      'launchRouting',
+    );
+  });
+
+  it.each([
+    {
+      description: 'standard suggestions without a target repository',
+      payloadKind: TaskPayloadKind.StandardTask,
+      targetRepositoryFullName: undefined,
+      expectedError:
+        'targetRepositoryFullName is required for org-wide current-thread suggestions',
+    },
+    {
+      description: 'scan suggestions without a target repository',
+      payloadKind: TaskPayloadKind.Scan,
+      targetRepositoryFullName: undefined,
+      expectedError:
+        'targetRepositoryFullName is required for org-wide current-thread suggestions',
+    },
+    {
+      description: 'standard suggestions with an unknown target repository',
+      payloadKind: TaskPayloadKind.StandardTask,
+      targetRepositoryFullName: 'wrong/repository',
+      expectedError:
+        'targetRepositoryFullName "wrong/repository" is not an active repository in this org-wide task',
+    },
+    {
+      description: 'scan suggestions with an unknown target repository',
+      payloadKind: TaskPayloadKind.Scan,
+      targetRepositoryFullName: 'wrong/repository',
+      expectedError:
+        'targetRepositoryFullName "wrong/repository" is not an active repository in this org-wide task',
+    },
+    {
+      description: 'standard suggestions with an inactive target repository',
+      payloadKind: TaskPayloadKind.StandardTask,
+      targetRepositoryFullName: 'acme/inactive',
+      selectedRepositories: ['acme/inactive'],
+      repositoryRowsOverride: [
+        {
+          id: 'repo-inactive',
+          fullName: 'acme/inactive',
+          isActive: false,
+        },
+      ],
+      expectedError:
+        'targetRepositoryFullName "acme/inactive" is not an active repository in this org-wide task',
+    },
+    {
+      description: 'scan suggestions with an inactive target repository',
+      payloadKind: TaskPayloadKind.Scan,
+      targetRepositoryFullName: 'acme/inactive',
+      selectedRepositories: ['acme/inactive'],
+      repositoryRowsOverride: [
+        {
+          id: 'repo-inactive',
+          fullName: 'acme/inactive',
+          isActive: false,
+        },
+      ],
+      expectedError:
+        'targetRepositoryFullName "acme/inactive" is not an active repository in this org-wide task',
+    },
+  ])(
+    'rejects org-wide current-thread $description',
+    async ({
+      payloadKind,
+      targetRepositoryFullName,
+      selectedRepositories,
+      repositoryRowsOverride,
+      expectedError,
+    }) => {
+      if (repositoryRowsOverride) {
+        repositoryRows = repositoryRowsOverride;
+      }
+      mockTaskRunFindFirst.mockResolvedValue({
+        id: 1,
+        payloadKind,
+        actingUserId: 'user-1',
+        payload: {
+          repo: ALL_REPOSITORIES,
+          ...(selectedRepositories ? { selectedRepositories } : {}),
+        },
+      });
+      mockTaskFindFirst.mockResolvedValue({
+        initiatorUserId: 'user-1',
+        initiatorAutomation: 'custom_automation',
+        slackChannelId: 'C123',
+        slackThreadTs: '111.222',
+      });
+      const app = createApp({
+        runId: 1,
+        userId: 'user-1',
+        principal: 'user',
+        tokenType: 'run',
+        version: 1,
+      });
+
+      const response = await app.request(
+        new Request('http://localhost/tasks/task-1/task_suggestions', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            delivery: 'current_thread',
+            submissionKey: 'org-wide-reply',
+            suggestions: [
+              {
+                title: 'Fix the parser',
+                brief: 'Nil access is crashing the parser.',
+                ...(targetRepositoryFullName
+                  ? { targetRepositoryFullName }
+                  : {}),
+              },
+            ],
+          }),
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        error: expectedError,
+      });
+      expect(insertedWorkItemValues).toHaveLength(0);
+    },
+  );
 
   it('persists later reply suggestion batches independently', async () => {
     mockTaskRunFindFirst.mockResolvedValue({

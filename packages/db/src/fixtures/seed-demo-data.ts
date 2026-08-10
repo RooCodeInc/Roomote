@@ -10,6 +10,7 @@ import {
   githubInstallations,
   repositories,
   tasks,
+  taskPullRequests,
   users,
 } from '../schema';
 import { db } from '../db';
@@ -65,6 +66,33 @@ export const demoSeedTasks = [
     state: 'active',
     taskRunStatus: RunStatus.Running,
     repositoryFullName: 'roomote-demo/demo-api',
+  },
+] as const;
+
+export const demoSeedPullRequests = [
+  {
+    taskId: 'demo-seed-task-fix-login',
+    repository: 'roomote-demo/demo-web',
+    prNumber: 101,
+    prUrl: 'https://github.com/roomote-demo/demo-web/pull/101',
+    prTitle: 'Fix expired-session redirect handling',
+    status: 'open',
+  },
+  {
+    taskId: 'demo-seed-task-add-webhooks',
+    repository: 'roomote-demo/demo-api',
+    prNumber: 201,
+    prUrl: 'https://github.com/roomote-demo/demo-api/pull/201',
+    prTitle: 'Add webhook retry policy',
+    status: 'draft',
+  },
+  {
+    taskId: 'demo-seed-task-add-webhooks',
+    repository: 'roomote-demo/demo-web',
+    prNumber: 202,
+    prUrl: 'https://github.com/roomote-demo/demo-web/pull/202',
+    prTitle: 'Show webhook retry status',
+    status: 'open',
   },
 ] as const;
 
@@ -238,6 +266,32 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
     }
 
     record(`task run for ${task.id}`, !existingTaskRun);
+  }
+
+  // A single-PR task and a split task keep the seeded dashboard useful for
+  // exercising task-level PR presentation without requiring remote GitHub data.
+  for (const pullRequest of demoSeedPullRequests) {
+    const existingPullRequest = await db.query.taskPullRequests.findFirst({
+      where: and(
+        eq(taskPullRequests.taskId, pullRequest.taskId),
+        eq(taskPullRequests.prUrl, pullRequest.prUrl),
+      ),
+    });
+
+    if (!existingPullRequest) {
+      await db.insert(taskPullRequests).values({
+        taskId: pullRequest.taskId,
+        sourceControlProvider: 'github',
+        host: 'github.com',
+        prUrl: pullRequest.prUrl,
+        prNumber: pullRequest.prNumber,
+        prTitle: pullRequest.prTitle,
+        repository: pullRequest.repository,
+        status: pullRequest.status,
+      });
+    }
+
+    record(`pull request ${pullRequest.prUrl}`, !existingPullRequest);
   }
 
   return summary;

@@ -98,9 +98,14 @@ describe('install-browser-agent.sh', () => {
       'HIDE_PREVIEW_WIDGET_COOKIE="roomote_hide_preview_widget"',
     );
     expect(script).toContain('ROOMOTE_AUTH_BYPASS_VALUE');
+    expect(script).toContain('ROOMOTE_*_PREVIEW_URL');
+    expect(script).not.toContain('ROOMOTE_EDITOR_PREVIEW_URL');
     expect(script).toContain('open|goto|navigate');
     expect(script).toContain('cookies set "$header_name" "$bypass_value"');
     expect(script).toContain('cookies set "$HIDE_PREVIEW_WIDGET_COOKIE" "1"');
+    expect(script).toContain('https://*) cookie_security_args+=(--secure)');
+    expect(script).toContain('"${cookie_security_args[@]}" --sameSite Lax');
+    expect(script).not.toContain('--url "$url" --secure');
     expect(script).toContain(
       'export AGENT_BROWSER_EXECUTABLE_PATH="${AGENT_BROWSER_EXECUTABLE_PATH:-/opt/agent-browser/chrome}"',
     );

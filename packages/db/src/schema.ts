@@ -368,6 +368,62 @@ export const authAccounts = pgTable(
 );
 
 /**
+ * Provider-verified identities for non-GitHub source-control account links.
+ * OAuth credentials remain owned by auth_accounts; this table stores only
+ * profile fields that are safe to use for account display and attribution.
+ */
+export const sourceControlUserMappings = pgTable(
+  'source_control_user_mappings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    authAccountId: text('auth_account_id')
+      .notNull()
+      .references(() => authAccounts.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => authUsers.id, { onDelete: 'cascade' }),
+    sourceControlProvider: text('source_control_provider')
+      .notNull()
+      .$type<SourceControlProvider>(),
+    host: text('host').notNull(),
+    externalAccountId: text('external_account_id').notNull(),
+    username: text('username'),
+    displayName: text('display_name'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('source_control_user_mappings_auth_account_unique').on(
+      table.authAccountId,
+    ),
+    index('source_control_user_mappings_user_provider_host_idx').on(
+      table.userId,
+      table.sourceControlProvider,
+      table.host,
+    ),
+    uniqueIndex('source_control_user_mappings_provider_identity_unique').on(
+      table.sourceControlProvider,
+      table.host,
+      table.externalAccountId,
+    ),
+  ],
+);
+
+export const sourceControlUserMappingsRelations = relations(
+  sourceControlUserMappings,
+  ({ one }) => ({
+    authAccount: one(authAccounts, {
+      fields: [sourceControlUserMappings.authAccountId],
+      references: [authAccounts.id],
+    }),
+    user: one(authUsers, {
+      fields: [sourceControlUserMappings.userId],
+      references: [authUsers.id],
+    }),
+  }),
+);
+
+/**
  * microsoft_auth_user_mappings
  */
 
@@ -2733,6 +2789,7 @@ export const customAutomations = pgTable(
     environmentId: uuid('environment_id').references(() => environments.id, {
       onDelete: 'set null',
     }),
+    allRepositories: boolean('all_repositories').notNull().default(false),
     target: jsonb('target')
       .notNull()
       .default(sql`'{}'::jsonb`)

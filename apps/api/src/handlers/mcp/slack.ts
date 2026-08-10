@@ -29,7 +29,7 @@ import {
   getSlackThreadReplyFooterMessageTs,
   removeSlackThreadReplyFooter,
   resolveSlackThreadFooterContext,
-  resolveSlackThreadLinkedPr,
+  resolveSlackThreadLinkedPrs,
   resolveSlackThreadLivePreviewUrl,
   setLatestSlackBotReply,
   setSlackThreadReplyFooterMessageTs,
@@ -138,8 +138,8 @@ async function buildLateBoundSlackRootFooterText(params: {
   // The explicit-mention marker is per-thread, so a brand-new root message
   // can never carry it; only the linked PR and live preview need resolving
   // here. PR metadata lives in taskPullRequests and is resolved by task id.
-  const [linkedPr, livePreviewUrl] = await Promise.all([
-    resolveSlackThreadLinkedPr({
+  const [linkedPrs, livePreviewUrl] = await Promise.all([
+    resolveSlackThreadLinkedPrs({
       taskId: params.taskId,
       prRepo: null,
       prNumber: null,
@@ -149,7 +149,7 @@ async function buildLateBoundSlackRootFooterText(params: {
 
   return buildSlackThreadFooterText({
     taskUrl: params.taskUrl,
-    linkedPr,
+    linkedPrs,
     livePreviewUrl,
     explicitMentionRequired: false,
   });
@@ -177,7 +177,7 @@ async function buildLateBoundAutomationRootFooterBlocks(params: {
   const automationLabel =
     getTriggerableBackgroundAutomationDescriptorByKey(workItem.automationKey)
       ?.label ?? workItem.automationKey.replaceAll('_', ' ');
-  const linkedPr = await resolveSlackThreadLinkedPr({
+  const linkedPrs = await resolveSlackThreadLinkedPrs({
     taskId: params.taskId,
     prRepo: null,
     prNumber: null,
@@ -185,7 +185,7 @@ async function buildLateBoundAutomationRootFooterBlocks(params: {
   return buildAutomationRootFooterBlocks({
     automationLabel,
     taskUrl: params.taskUrl,
-    linkedPrUrl: linkedPr?.prUrl ?? null,
+    linkedPrUrls: linkedPrs.map((pr) => pr.prUrl),
   });
 }
 
@@ -200,7 +200,7 @@ async function buildLateBoundCustomAutomationRootFooterBlocks(params: {
     return null;
   }
 
-  const linkedPr = await resolveSlackThreadLinkedPr({
+  const linkedPrs = await resolveSlackThreadLinkedPrs({
     taskId: params.taskId,
     prRepo: null,
     prNumber: null,
@@ -208,7 +208,7 @@ async function buildLateBoundCustomAutomationRootFooterBlocks(params: {
   return buildAutomationRootFooterBlocks({
     automationLabel: automation.name,
     taskUrl: params.taskUrl,
-    linkedPrUrl: linkedPr?.prUrl ?? null,
+    linkedPrUrls: linkedPrs.map((pr) => pr.prUrl),
   });
 }
 

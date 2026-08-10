@@ -78,6 +78,7 @@ export function buildPrReviewActivityNotificationInput(
       event: {
         kind: 'review',
         authorLogin,
+        ...(review.commit_id ? { reviewHeadSha: review.commit_id } : {}),
         reviewState: review.state,
         ...(review.html_url ? { url: review.html_url } : {}),
         ...(GitHubSchemas.isRoomoteGitHubLogin(authorLogin)
@@ -110,6 +111,7 @@ export function buildPrReviewActivityNotificationInput(
     event: {
       kind: 'review_comment',
       authorLogin,
+      ...(comment.commit_id ? { reviewHeadSha: comment.commit_id } : {}),
       ...(comment.html_url ? { url: comment.html_url } : {}),
       ...(GitHubSchemas.isRoomoteGitHubLogin(authorLogin)
         ? { roomoteAuthored: true }
@@ -254,6 +256,7 @@ export function buildPrReviewSummaryNotification(
       event: {
         kind: 'review_summary',
         authorLogin,
+        ...(markerSha ? { reviewHeadSha: markerSha } : {}),
         summary,
         ...(comment.html_url ? { url: comment.html_url } : {}),
         roomoteAuthored: true,
