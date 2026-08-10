@@ -1,9 +1,8 @@
+import { createHash } from 'node:crypto';
+
 import { Env } from '@roomote/env';
 import { getRedis } from '@roomote/redis';
 
-const CACHE_KEY = 'statuspage:incidents:unresolved';
-const NEGATIVE_CACHE_KEY = `${CACHE_KEY}:empty`;
-const REFRESH_LOCK_KEY = `${CACHE_KEY}:refresh`;
 const FRESH_FOR_MS = 5 * 60 * 1000;
 const STALE_FOR_SECONDS = 24 * 60 * 60;
 const NEGATIVE_CACHE_FOR_SECONDS = 60;
@@ -24,6 +23,16 @@ export interface StatuspageIncident {
 interface CachedIncident {
   incident: StatuspageIncident;
   fetchedAt: number;
+}
+
+function incidentCacheKeys(url: string) {
+  const feedScope = createHash('sha256').update(url).digest('hex');
+  const cacheKey = `statuspage:incidents:${feedScope}:unresolved`;
+  return {
+    cacheKey,
+    negativeCacheKey: `${cacheKey}:empty`,
+    refreshLockKey: `${cacheKey}:refresh`,
+  };
 }
 
 const impactRank: Record<StatuspageImpact, number> = {
@@ -120,15 +129,17 @@ export async function getStatuspageIncident(): Promise<StatuspageIncident | null
 
   try {
     const redis = getRedis();
-    const cached = parseCachedIncident(await redis.get(CACHE_KEY));
+    const { cacheKey, negativeCacheKey, refreshLockKey } =
+      incidentCacheKeys(incidentsUrl);
+    const cached = parseCachedIncident(await redis.get(cacheKey));
     if (cached && Date.now() - cached.fetchedAt < FRESH_FOR_MS) {
       return cached.incident;
     }
 
-    if (await redis.get(NEGATIVE_CACHE_KEY)) return cached?.incident ?? null;
+    if (await redis.get(negativeCacheKey)) return cached?.incident ?? null;
 
     const acquiredLock = await redis.set(
-      REFRESH_LOCK_KEY,
+      refreshLockKey,
       '1',
       'EX',
       REFRESH_LOCK_FOR_SECONDS,
@@ -139,9 +150,9 @@ export async function getStatuspageIncident(): Promise<StatuspageIncident | null
     try {
       const incident = await fetchIncident(incidentsUrl);
       if (!incident) {
-        await redis.del(CACHE_KEY);
+        await redis.del(cacheKey);
         await redis.set(
-          NEGATIVE_CACHE_KEY,
+          negativeCacheKey,
           '1',
           'EX',
           NEGATIVE_CACHE_FOR_SECONDS,
@@ -150,12 +161,12 @@ export async function getStatuspageIncident(): Promise<StatuspageIncident | null
       }
 
       await redis.set(
-        CACHE_KEY,
+        cacheKey,
         JSON.stringify({ incident, fetchedAt: Date.now() }),
         'EX',
         STALE_FOR_SECONDS,
       );
-      await redis.del(NEGATIVE_CACHE_KEY);
+      await redis.del(negativeCacheKey);
       return incident;
     } catch (error) {
       console.warn(
@@ -163,7 +174,7 @@ export async function getStatuspageIncident(): Promise<StatuspageIncident | null
       );
       return cached?.incident ?? null;
     } finally {
-      await redis.del(REFRESH_LOCK_KEY).catch(() => undefined);
+      await redis.del(refreshLockKey).catch(() => undefined);
     }
   } catch (error) {
     console.warn(
