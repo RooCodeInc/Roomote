@@ -8,6 +8,19 @@ import {
 } from '../constants';
 
 describe('Roomote GitHub bot identity helpers', () => {
+  describe('formatPrBodyAttribution', () => {
+    it('keeps marker comments inline so the instruction renders as Markdown', () => {
+      expect(
+        formatPrBodyAttribution(
+          'Opened on behalf of @octocat.',
+          'Follow up in [the web UI](https://example.com/task/1).',
+        ),
+      ).toBe(
+        '> &#8203;<!-- roomote:pr-attribution:start -->Opened on behalf of @octocat.<!-- roomote:pr-attribution:end --> Follow up in [the web UI](https://example.com/task/1).',
+      );
+    });
+  });
+
   describe('getRoomoteGitHubAppSlugs', () => {
     it('always includes hosted-product slugs and a custom configured slug', () => {
       expect(getRoomoteGitHubAppSlugs().sort()).toEqual(
@@ -178,6 +191,15 @@ describe('Roomote GitHub bot identity helpers', () => {
 
       expect(rewritePrBodyAttribution(marked, null)).toBe(
         `Preamble\n${formatPrBodyAttribution('Created by Roomote.', instruction)}`,
+      );
+    });
+
+    it('continues to rewrite legacy line-leading markers', () => {
+      const legacy =
+        '> <!-- roomote:pr-attribution:start -->Opened on behalf of Private Name.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote.';
+
+      expect(rewritePrBodyAttribution(legacy, '@octocat')).toBe(
+        '> <!-- roomote:pr-attribution:start -->Opened on behalf of @octocat.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote.',
       );
     });
 

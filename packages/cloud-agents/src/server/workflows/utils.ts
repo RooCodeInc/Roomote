@@ -61,6 +61,7 @@ export function getPrBodyAttributionLine({
   discordChannelId,
   discordMessageId,
   githubAppSlug = getEffectiveGitHubAppSlug(),
+  roomoteMentionEnabled = isGitHubRoomoteMentionEnabled(),
   escapeDoubleQuotes = false,
 }: {
   attribution: ResolvedTaskCommitAuthor;
@@ -94,6 +95,7 @@ export function getPrBodyAttributionLine({
   discordChannelId?: string;
   discordMessageId?: string;
   githubAppSlug?: string | null;
+  roomoteMentionEnabled?: boolean;
   escapeDoubleQuotes?: boolean;
 }) {
   if (
@@ -130,6 +132,7 @@ export function getPrBodyAttributionLine({
     discordChannelId,
     discordMessageId,
     githubAppSlug,
+    roomoteMentionEnabled,
     escapeDoubleQuotes,
   });
 }
@@ -155,6 +158,7 @@ function buildPrBodyAttributionLine({
   discordChannelId,
   discordMessageId,
   githubAppSlug,
+  roomoteMentionEnabled,
   escapeDoubleQuotes = false,
 }: {
   attribution: ResolvedTaskCommitAuthor;
@@ -188,6 +192,7 @@ function buildPrBodyAttributionLine({
   discordChannelId?: string;
   discordMessageId?: string;
   githubAppSlug?: string | null;
+  roomoteMentionEnabled: boolean;
   escapeDoubleQuotes?: boolean;
 }) {
   const escapeValue = (value: string) =>
@@ -208,7 +213,7 @@ function buildPrBodyAttributionLine({
     : undefined;
   const appMention = getGitHubFollowUpMention(
     githubAppSlug?.trim() || DEFAULT_R_GITHUB_APP_SLUG,
-    isGitHubRoomoteMentionEnabled(),
+    roomoteMentionEnabled,
   );
   const isChatSurface =
     taskSurface === 'slack' ||

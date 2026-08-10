@@ -22,6 +22,9 @@ const {
   mockResolveAdoBaseUrl,
   mockBuildAdoOrganizationApiBaseUrl,
   mockResolveConfiguredGitHubAppSlugIfConfigured,
+  mockResolveTelegramRuntimeCredentials,
+  mockGetPrBodyAttributionLine,
+  mockTasksFindFirst,
   mockResolveLaunchTaskCommitAuthor,
   mockResolveRunCommitAuthor,
 } = vi.hoisted(() => ({
@@ -39,11 +42,22 @@ const {
   mockResolveAdoBaseUrl: vi.fn(),
   mockBuildAdoOrganizationApiBaseUrl: vi.fn(),
   mockResolveConfiguredGitHubAppSlugIfConfigured: vi.fn(),
+  mockResolveTelegramRuntimeCredentials: vi.fn(),
+  mockGetPrBodyAttributionLine: vi.fn(),
+  mockTasksFindFirst: vi.fn(),
   mockResolveLaunchTaskCommitAuthor: vi.fn(),
   mockResolveRunCommitAuthor: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
+  DEFAULT_ROOMOTE_COMMIT_AUTHOR: {
+    kind: 'roomote',
+    displayName: 'Roomote',
+    publicDisplayName: null,
+    prAssigneeLogin: null,
+  },
+  getPrBodyAttributionLine: (...args: unknown[]) =>
+    mockGetPrBodyAttributionLine(...args),
   resolveLaunchTaskCommitAuthor: (...args: unknown[]) =>
     mockResolveLaunchTaskCommitAuthor(...args),
   resolveRunCommitAuthor: (...args: unknown[]) =>
@@ -52,6 +66,13 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
 vi.mock('@roomote/auth', () => ({
   createGitHubToken: (...args: unknown[]) => mockCreateGitHubToken(...args),
+}));
+
+vi.mock('@roomote/env', () => ({
+  Env: {
+    R_APP_URL: 'https://example.com',
+    R_PUBLIC_URL: undefined,
+  },
 }));
 
 vi.mock('@roomote/github', () => ({
@@ -94,6 +115,8 @@ vi.mock('@roomote/db/server', () => ({
     mockGetDeploymentGitHubRoomoteMentionEnabled(...args),
   getDeploymentPrAction: (...args: unknown[]) =>
     mockGetDeploymentPrAction(...args),
+  resolveTelegramRuntimeCredentials: (...args: unknown[]) =>
+    mockResolveTelegramRuntimeCredentials(...args),
   db: {
     query: {
       repositories: {
@@ -106,6 +129,9 @@ vi.mock('@roomote/db/server', () => ({
       },
       environments: {
         findFirst: (...args: unknown[]) => mockEnvironmentsFindFirst(...args),
+      },
+      tasks: {
+        findFirst: (...args: unknown[]) => mockTasksFindFirst(...args),
       },
     },
     insert: () => ({
@@ -131,6 +157,9 @@ vi.mock('@roomote/db/server', () => ({
   taskRuns: {
     id: 'taskRuns.id',
     taskId: 'taskRuns.taskId',
+  },
+  tasks: {
+    id: 'tasks.id',
   },
   taskPullRequests: {
     taskId: 'taskPullRequests.taskId',
@@ -177,6 +206,26 @@ function attributionBody(
 ): string {
   return formatPrBodyAttribution(provenance, instruction);
 }
+
+beforeEach(() => {
+  mockGetDeploymentGitHubRoomoteMentionEnabled.mockResolvedValue(true);
+  mockResolveTelegramRuntimeCredentials.mockResolvedValue({
+    botUsername: 'roomote_bot',
+  });
+  mockGetPrBodyAttributionLine.mockImplementation(
+    ({ attribution }: { attribution: { kind: string; displayName: string } }) =>
+      attributionBody(
+        attribution.kind === 'roomote'
+          ? 'Created by Roomote.'
+          : `Opened on behalf of ${attribution.displayName}.`,
+      ),
+  );
+  mockTasksFindFirst.mockResolvedValue({
+    surface: 'web',
+    slackChannelId: null,
+    slackThreadTs: null,
+  });
+});
 
 describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
   beforeEach(() => {
@@ -356,7 +405,7 @@ describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
         }),
         body: JSON.stringify({
           title: '[Fix] Provider neutral PRs',
-          description: 'Body',
+          description: `${attributionBody('Created by Roomote.')}\n\nBody`,
         }),
       }),
     );
@@ -466,7 +515,7 @@ describe('platform-managed draft state', () => {
     mockResolveConfiguredGitHubAppSlugIfConfigured.mockResolvedValue(
       'roomote-roomote',
     );
-    const octokit = makeOctokit({
+    makeOctokit({
       created: {
         number: 12,
         node_id: 'node-12',
@@ -487,12 +536,10 @@ describe('platform-managed draft state', () => {
       },
     });
 
-    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+    expect(mockGetPrBodyAttributionLine).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: `${attributionBody(
-          'Created by Roomote.',
-          'Follow up by mentioning @roomote or in [the web UI](https://example.com/task/1).',
-        )}\n\n## What changed\n\nDone.`,
+        githubAppSlug: 'roomote-roomote',
+        roomoteMentionEnabled: true,
       }),
     );
   });
@@ -502,7 +549,7 @@ describe('platform-managed draft state', () => {
       'roomote-roomote',
     );
     mockGetDeploymentGitHubRoomoteMentionEnabled.mockResolvedValue(false);
-    const octokit = makeOctokit({
+    makeOctokit({
       created: {
         number: 12,
         node_id: 'node-12',
@@ -523,21 +570,19 @@ describe('platform-managed draft state', () => {
       },
     });
 
-    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+    expect(mockGetPrBodyAttributionLine).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: attributionBody(
-          'Created by Roomote.',
-          'Follow up by mentioning @roomote-roomote or in [the web UI](https://example.com/task/1).',
-        ),
+        githubAppSlug: 'roomote-roomote',
+        roomoteMentionEnabled: false,
       }),
     );
   });
 
-  it('does not downgrade a correct custom-slug attribution when no slug is configured', async () => {
+  it('generates canonical attribution when the input has a stale custom slug', async () => {
     mockResolveConfiguredGitHubAppSlugIfConfigured.mockResolvedValue(null);
     const preservedBody =
       '> Created by Roomote. Follow up by mentioning @roomote-roomote or in [the web UI](https://example.com/task/1).\n\n## What changed\n\nDone.';
-    const octokit = makeOctokit({
+    makeOctokit({
       created: {
         number: 13,
         node_id: 'node-13',
@@ -555,9 +600,10 @@ describe('platform-managed draft state', () => {
       },
     });
 
-    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+    expect(mockGetPrBodyAttributionLine).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: preservedBody,
+        githubAppSlug: null,
+        roomoteMentionEnabled: true,
       }),
     );
   });
@@ -1042,7 +1088,7 @@ describe('optional targetBranch', () => {
     );
   });
 
-  it('scrubs duplicated unmarked attribution in an otherwise marked public body', async () => {
+  it('replaces only the leading attribution opener', async () => {
     const octokit = makeOctokit({
       list: [],
       created: {
@@ -1079,7 +1125,7 @@ describe('optional targetBranch', () => {
 
     expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: `${attributionBody('Opened on behalf of @participant.')}\n\n> Opened on behalf of @participant.`,
+        body: `${attributionBody('Opened on behalf of @participant.')}\n\n> Opened on behalf of Duplicated Private Name.`,
       }),
     );
   });
@@ -1126,7 +1172,178 @@ describe('optional targetBranch', () => {
     );
   });
 
-  it('scrubs an unmarked public attribution line without parsing the name', async () => {
+  it.each([
+    [
+      'Slack',
+      'slack',
+      {
+        repo: 'acme/web',
+        communicationProvider: 'slack',
+        teamDomain: 'roomote',
+        channel: 'C0BDXC7FWBY',
+        thread_ts: '1786320056.401979',
+      },
+      {
+        taskSurface: 'slack',
+        slackTeamDomain: 'roomote',
+        slackChannel: 'C0BDXC7FWBY',
+        slackThreadTs: '1786320056.401979',
+      },
+    ],
+    [
+      'Discord',
+      'discord',
+      {
+        repo: 'acme/web',
+        communicationProvider: 'discord',
+        communicationGuildId: '123',
+        communicationChannelId: '456',
+        communicationMessageId: '789',
+      },
+      {
+        taskSurface: 'discord',
+        discordGuildId: '123',
+        discordChannelId: '456',
+        discordMessageId: '789',
+      },
+    ],
+    [
+      'Telegram',
+      'telegram',
+      {
+        repo: 'acme/web',
+        communicationProvider: 'telegram',
+        communicationChannelId: '123',
+        communicationThreadId: '456',
+        communicationMessageId: '789',
+      },
+      {
+        taskSurface: 'telegram',
+        telegramChatId: '123',
+        telegramThreadId: '456',
+        telegramMessageId: '789',
+        telegramBotUsername: 'roomote_bot',
+      },
+    ],
+    [
+      'Teams',
+      'teams',
+      {
+        repo: 'acme/web',
+        communicationProvider: 'teams',
+        communicationChannelId: 'conversation-1',
+        communicationMessageId: 'message-1',
+        teamsTenantId: 'tenant-1',
+      },
+      {
+        taskSurface: 'teams',
+        teamsConversationId: 'conversation-1',
+        teamsMessageId: 'message-1',
+        teamsTenantId: 'tenant-1',
+      },
+    ],
+  ] as const)(
+    'passes structured %s metadata to the canonical attribution builder',
+    async (_label, surface, payload, expectedMetadata) => {
+      const octokit = makeOctokit({
+        list: [],
+        created: {
+          number: 13,
+          node_id: 'node-13',
+          html_url: 'https://github.com/acme/web/pull/13',
+          title: '[Feature] X',
+          draft: true,
+          base: { ref: 'develop' },
+        },
+      });
+      mockRepositoriesFindFirst.mockResolvedValue({
+        installationId: 555,
+        externalRepoId: null,
+        fullName: 'acme/web',
+        htmlUrl: 'https://github.com/acme/web',
+        private: false,
+      });
+      mockResolveRunCommitAuthor.mockResolvedValue({
+        kind: 'user',
+        displayName: 'Jane R. Doe',
+        publicDisplayName: '@participant',
+        prAssigneeLogin: null,
+      });
+      mockTasksFindFirst.mockResolvedValue({
+        surface,
+        slackChannelId: null,
+        slackThreadTs: null,
+      });
+
+      await createOrUpdateSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun(payload),
+        input: {
+          ...baseInput,
+          targetBranch: 'develop',
+          body: '> Opened on behalf of Jane R. Doe. Follow up by mentioning @roomote.\n\nDone.',
+        },
+      });
+
+      expect(mockGetPrBodyAttributionLine).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ...expectedMetadata,
+          taskUrl:
+            'https://example.com/task/task-123?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
+        }),
+      );
+      expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: `${attributionBody('Opened on behalf of @participant.')}\n\nDone.`,
+        }),
+      );
+    },
+  );
+
+  it('passes canonical web metadata instead of parsing the input opener', async () => {
+    makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 555,
+      externalRepoId: null,
+      fullName: 'acme/web',
+      htmlUrl: 'https://github.com/acme/web',
+      private: false,
+    });
+    mockResolveRunCommitAuthor.mockResolvedValue({
+      kind: 'user',
+      displayName: 'Private Name',
+      publicDisplayName: '@participant',
+      prAssigneeLogin: null,
+    });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+        body: '> Opened on behalf of Private Name. [View the task](https://example.com/task/task-123) or mention @roomote for follow-up asks.',
+      },
+    });
+
+    expect(mockGetPrBodyAttributionLine).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskSurface: 'web',
+        taskUrl:
+          'https://example.com/task/task-123?utm_source=github-comment&utm_medium=link&utm_campaign=standard',
+      }),
+    );
+  });
+
+  it('prepends canonical attribution without changing non-opener body content', async () => {
     const octokit = makeOctokit({
       list: [],
       created: {
@@ -1147,7 +1364,49 @@ describe('optional targetBranch', () => {
     });
     mockResolveRunCommitAuthor.mockResolvedValue({
       kind: 'user',
-      displayName: 'Jane R. Doe',
+      displayName: 'Private Name',
+      publicDisplayName: '@participant',
+      prAssigneeLogin: null,
+    });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: {
+        ...baseInput,
+        targetBranch: 'develop',
+        body: '## What changed\n\nDone.',
+      },
+    });
+
+    expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: `${attributionBody('Opened on behalf of @participant.')}\n\n## What changed\n\nDone.`,
+      }),
+    );
+  });
+
+  it('replaces a leading opener without parsing its follow-up text', async () => {
+    const octokit = makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 555,
+      externalRepoId: null,
+      fullName: 'acme/web',
+      htmlUrl: 'https://github.com/acme/web',
+      private: false,
+    });
+    mockResolveRunCommitAuthor.mockResolvedValue({
+      kind: 'user',
+      displayName: 'Private Name',
       publicDisplayName: null,
       prAssigneeLogin: null,
     });
@@ -1157,18 +1416,18 @@ describe('optional targetBranch', () => {
       input: {
         ...baseInput,
         targetBranch: 'develop',
-        body: 'Preamble\n> Opened on behalf of Jane R. Doe. Follow up by mentioning @roomote.\n\nDone.',
+        body: '> Opened on behalf of Private Name. Follow up by mentioning @roomote or in [the web UI](https://example.invalid/task/task-123).\n\nDone.',
       },
     });
 
     expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: 'Preamble\n> Created by Roomote.\n\nDone.',
+        body: `${attributionBody('Created by Roomote.')}\n\nDone.`,
       }),
     );
   });
 
-  it('preserves replacement tokens literally in a private marked opener', async () => {
+  it('uses fresh canonical attribution when updating a private pull request', async () => {
     const existing = {
       number: 11,
       node_id: 'node-11',
@@ -1197,7 +1456,7 @@ describe('optional targetBranch', () => {
 
     expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: attributionBody('Opened on behalf of Launch $& Owner.'),
+        body: attributionBody('Opened on behalf of Participant.'),
       }),
     );
   });
@@ -1245,7 +1504,7 @@ describe('optional targetBranch', () => {
     );
   });
 
-  it('preserves a valid marked handle in existing public attribution', async () => {
+  it('uses the current linked handle when updating a public pull request', async () => {
     const existing = {
       number: 11,
       node_id: 'node-11',
@@ -1283,7 +1542,7 @@ describe('optional targetBranch', () => {
 
     expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: attributionBody('Opened on behalf of @launch-owner.'),
+        body: attributionBody('Opened on behalf of @participant.'),
       }),
     );
   });
