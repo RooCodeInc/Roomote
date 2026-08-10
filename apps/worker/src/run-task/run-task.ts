@@ -1326,7 +1326,7 @@ export const runTask = async ({
                     continuationId: completionId,
                   });
                 }
-                await recordWorkerRuntimeEvent({
+                const continuationEvent = {
                   eventType: 'decision',
                   message: `Goal continuation ${sent ? 'started' : 'could not start'} for task run #${taskRun.id}.`,
                   details: {
@@ -1335,8 +1335,14 @@ export const runTask = async ({
                     continuation: claim.goal.continuationsUsed,
                     maxContinuations: claim.goal.maxContinuations,
                   },
-                });
-                return sent ? ('continue' as const) : ('finalize' as const);
+                } as const;
+                if (sent) {
+                  void recordWorkerRuntimeEvent(continuationEvent);
+                  return 'continue' as const;
+                }
+
+                await recordWorkerRuntimeEvent(continuationEvent);
+                return 'finalize' as const;
               },
             }
           : {}),
