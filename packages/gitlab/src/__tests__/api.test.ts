@@ -8,11 +8,17 @@ const {
   mockRepositoriesFindMany,
   mockEnvironmentsFindFirst,
   mockGitLabOAuthAccessToken,
+  mockIsGitLabOAuthAccessToken,
+  mockGetCachedGitLabOAuthAccessTokenExpiresAt,
 } = vi.hoisted(() => ({
   mockEnvironmentVariablesFindMany: vi.fn(),
   mockRepositoriesFindMany: vi.fn(),
   mockEnvironmentsFindFirst: vi.fn(),
   mockGitLabOAuthAccessToken: vi.fn(),
+  mockIsGitLabOAuthAccessToken: vi.fn((_token?: string) => false),
+  mockGetCachedGitLabOAuthAccessTokenExpiresAt: vi.fn(
+    (): Date | null => null,
+  ),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -63,8 +69,11 @@ vi.mock('@roomote/db/encryption', () => ({
 }));
 
 vi.mock('../oauth', () => ({
-  isGitLabOAuthAccessToken: () => false,
+  isGitLabOAuthAccessToken: (token: string) =>
+    mockIsGitLabOAuthAccessToken(token),
   resolveGitLabOAuthAccessToken: () => mockGitLabOAuthAccessToken(),
+  getCachedGitLabOAuthAccessTokenExpiresAt: () =>
+    mockGetCachedGitLabOAuthAccessTokenExpiresAt(),
 }));
 
 import {
@@ -456,6 +465,8 @@ describe('createTaskRunScopedGitLabTokens', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGitLabOAuthAccessToken.mockResolvedValue('oauth_access_token');
+    mockIsGitLabOAuthAccessToken.mockReturnValue(false);
+    mockGetCachedGitLabOAuthAccessTokenExpiresAt.mockReturnValue(null);
     delete process.env.GITLAB_BASE_URL;
     mockEnvironmentVariablesFindMany.mockResolvedValue([]);
     mockEnvironmentsFindFirst.mockResolvedValue(null);
@@ -516,6 +527,7 @@ describe('createTaskRunScopedGitLabTokens', () => {
           },
         ],
       },
+      expiresAt: null,
     });
     expect(fetchMock).toHaveBeenCalledWith(
       'https://gitlab.com/api/v4/projects/42/access_tokens',
@@ -869,6 +881,40 @@ describe('createTaskRunScopedGitLabTokens', () => {
     );
   });
 
+  it('routes OAuth access tokens through the proxy and surfaces their expiry', async () => {
+    const expiresAt = new Date(Date.now() + 90 * 60 * 1000);
+    mockIsGitLabOAuthAccessToken.mockReturnValue(true);
+    mockGetCachedGitLabOAuthAccessTokenExpiresAt.mockReturnValue(expiresAt);
+
+    const fetchMock = vi.fn<typeof fetch>();
+    const result = await createTaskRunScopedGitLabTokens(
+      makeTaskRun({
+        repo: 'group/project',
+        description: 'Work on GitLab',
+        sourceControlProvider: 'gitlab',
+      }),
+      { fetchImpl: fetchMock },
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      credentials: [],
+      proxyCredentials: [
+        {
+          host: 'gitlab.com',
+          originBaseUrl: 'https://gitlab.com',
+          repositoryFullName: 'group/project',
+          username: 'oauth2',
+          token: 'oauth_access_token',
+        },
+      ],
+      artifactsPatch: {
+        gitlabScopedProjectTokens: [],
+      },
+      expiresAt,
+    });
+  });
+
   it('falls back to deployment-token proxy credentials when the token cannot mint project access tokens', async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ error: 'permission denied' }), {
@@ -900,6 +946,7 @@ describe('createTaskRunScopedGitLabTokens', () => {
       artifactsPatch: {
         gitlabScopedProjectTokens: [],
       },
+      expiresAt: null,
     });
   });
 

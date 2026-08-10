@@ -32,10 +32,54 @@ type GitLabOAuthTokenResponse = {
   scope?: string;
 };
 
-let refreshPromise: Promise<string | null> | null = null;
+export type GitLabOAuthAccessToken = {
+  accessToken: string;
+  expiresAt: Date;
+};
+
+// Refresh before the access token is within this window so long-running
+// worker jobs can pick up a fresh token before git operations start failing.
+// GitLab access tokens typically last ~2 hours; 10 minutes leaves headroom
+// for the worker's refresh tick and network latency.
+const OAUTH_ACCESS_TOKEN_REFRESH_SKEW_MS = 10 * 60 * 1000;
+
+// Personal/project/group/deploy tokens use known prefixes. OAuth access
+// tokens do not, so prefix detection stays reliable after a rotate when the
+// previous access token no longer equals the in-memory cache.
+const GITLAB_STATIC_TOKEN_PREFIX = /^(glpat-|glptt-|gldt-|glsoat-)/i;
+
+let refreshPromise: Promise<GitLabOAuthAccessToken | null> | null = null;
 let deletionPromise: Promise<void> | null = null;
 let connectionGeneration = 0;
 let cachedAccessToken: string | null = null;
+let cachedAccessTokenExpiresAt: Date | null = null;
+
+function rememberAccessToken(accessToken: string, expiresAt: Date): void {
+  cachedAccessToken = accessToken;
+  cachedAccessTokenExpiresAt = expiresAt;
+}
+
+function clearCachedAccessToken(): void {
+  cachedAccessToken = null;
+  cachedAccessTokenExpiresAt = null;
+}
+
+function parseConnectionExpiresAt(expiresAt: string): Date {
+  const parsed = Date.parse(expiresAt);
+  return Number.isNaN(parsed) ? new Date(0) : new Date(parsed);
+}
+
+function toAccessTokenResult(
+  accessToken: string,
+  expiresAt: string | Date,
+): GitLabOAuthAccessToken {
+  const resolvedExpiresAt =
+    expiresAt instanceof Date
+      ? expiresAt
+      : parseConnectionExpiresAt(expiresAt);
+  rememberAccessToken(accessToken, resolvedExpiresAt);
+  return { accessToken, expiresAt: resolvedExpiresAt };
+}
 
 function tokenEndpoint(baseUrl: string): string {
   return new URL('oauth/token', `${baseUrl.replace(/\/$/, '')}/`).toString();
@@ -116,7 +160,7 @@ export async function deleteGitLabOAuthConnection(): Promise<void> {
         .delete(deploymentSecrets)
         .where(eq(deploymentSecrets.name, SECRET_NAME));
       refreshPromise = null;
-      cachedAccessToken = null;
+      clearCachedAccessToken();
     })();
   }
 
@@ -191,14 +235,22 @@ export async function exchangeGitLabOAuthCode(input: {
     // Token exchange is still valid when the identity lookup is temporarily unavailable.
   }
   await writeConnection(connection);
-  cachedAccessToken = connection.accessToken;
+  rememberAccessToken(
+    connection.accessToken,
+    parseConnectionExpiresAt(connection.expiresAt),
+  );
   return connection;
 }
 
-export async function resolveGitLabOAuthAccessToken(options?: {
+/**
+ * Resolve a usable GitLab OAuth access token, refreshing when it is missing or
+ * inside the proactive refresh window. Returns expiry so callers (worker token
+ * mint, refresh loop) can schedule the next rotation before the token dies.
+ */
+export async function resolveGitLabOAuthAccessTokenWithMetadata(options?: {
   fetchImpl?: typeof fetch;
   forceRefresh?: boolean;
-}): Promise<string | null> {
+}): Promise<GitLabOAuthAccessToken | null> {
   if (deletionPromise) {
     await deletionPromise;
     return null;
@@ -212,10 +264,10 @@ export async function resolveGitLabOAuthAccessToken(options?: {
   if (!connection || connection.status !== 'active') return null;
   if (
     !options?.forceRefresh &&
-    Date.parse(connection.expiresAt) > Date.now() + 60_000
+    Date.parse(connection.expiresAt) >
+      Date.now() + OAUTH_ACCESS_TOKEN_REFRESH_SKEW_MS
   ) {
-    cachedAccessToken = connection.accessToken;
-    return connection.accessToken;
+    return toAccessTokenResult(connection.accessToken, connection.expiresAt);
   }
   if (refreshPromise) return refreshPromise;
 
@@ -259,8 +311,7 @@ export async function resolveGitLabOAuthAccessToken(options?: {
     };
     if (generation !== connectionGeneration) return null;
     await writeConnection(next);
-    cachedAccessToken = next.accessToken;
-    return next.accessToken;
+    return toAccessTokenResult(next.accessToken, next.expiresAt);
   })();
   try {
     return await refreshPromise;
@@ -269,8 +320,36 @@ export async function resolveGitLabOAuthAccessToken(options?: {
   }
 }
 
+export async function resolveGitLabOAuthAccessToken(options?: {
+  fetchImpl?: typeof fetch;
+  forceRefresh?: boolean;
+}): Promise<string | null> {
+  const result = await resolveGitLabOAuthAccessTokenWithMetadata(options);
+  return result?.accessToken ?? null;
+}
+
+/**
+ * True when `token` should be sent as an OAuth Bearer credential (not a
+ * PRIVATE-TOKEN personal/project token). Matches the current cache, and also
+ * treats non-prefixed tokens as OAuth while a session is active so a just
+ * rotated prior access token still uses the correct header mid-flight.
+ */
 export function isGitLabOAuthAccessToken(token: string): boolean {
-  return token === cachedAccessToken;
+  if (!token) {
+    return false;
+  }
+  if (token === cachedAccessToken) {
+    return true;
+  }
+  if (GITLAB_STATIC_TOKEN_PREFIX.test(token)) {
+    return false;
+  }
+  return cachedAccessToken !== null;
+}
+
+/** Expiry of the last resolved OAuth access token, if any. */
+export function getCachedGitLabOAuthAccessTokenExpiresAt(): Date | null {
+  return cachedAccessTokenExpiresAt;
 }
 
 export async function markGitLabOAuthReauthorizationRequired(): Promise<void> {

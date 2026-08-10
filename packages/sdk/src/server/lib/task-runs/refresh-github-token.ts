@@ -71,13 +71,17 @@ export async function refreshGitHubTokenWithMetadata(
 
   const now = Date.now();
 
-  const nextRefreshAtMs =
-    tokenResult.source === 'user' && tokenResult.expiresAt
-      ? Math.max(
-          now + MIN_GITHUB_TOKEN_REFRESH_DELAY_MS,
-          tokenResult.expiresAt.getTime() - USER_GITHUB_TOKEN_REFRESH_BUFFER_MS,
-        )
-      : now + DEFAULT_GITHUB_TOKEN_REFRESH_INTERVAL_MS;
+  // Prefer token expiry whenever we know it. GitLab OAuth access tokens are
+  // "app" source but only live ~2 hours; the old user-only branch left them on
+  // the fixed 45m cadence and could keep a dead token in the sandbox for a
+  // stretch after expiry. Fall back to the default interval when expiry is
+  // unknown (GitHub app installation tokens, day-long scoped PATs, etc.).
+  const nextRefreshAtMs = tokenResult.expiresAt
+    ? Math.max(
+        now + MIN_GITHUB_TOKEN_REFRESH_DELAY_MS,
+        tokenResult.expiresAt.getTime() - USER_GITHUB_TOKEN_REFRESH_BUFFER_MS,
+      )
+    : now + DEFAULT_GITHUB_TOKEN_REFRESH_INTERVAL_MS;
 
   return {
     token: tokenResult.token,

@@ -102,6 +102,41 @@ describe('GitLab deployment OAuth', () => {
     expect(isGitLabOAuthAccessToken('gitlab-access-token')).toBe(false);
   });
 
+  it('proactively refreshes OAuth access tokens inside the 10-minute skew window', async () => {
+    executeMock.mockResolvedValue([{ value: 'encrypted-connection' }]);
+    decryptMock.mockResolvedValue({
+      baseUrl: 'https://gitlab.example',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      accountId: '42',
+      username: 'roomote',
+      accessToken: 'near-expiry-access-token',
+      refreshToken: 'refresh-token',
+      // Still valid, but inside the proactive refresh skew.
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      scopes: ['api'],
+      status: 'active',
+    });
+    const fetchImpl = vi.fn().mockResolvedValue(
+      Response.json({
+        access_token: 'proactively-refreshed-token',
+        refresh_token: 'new-refresh-token',
+        expires_in: 7200,
+      }),
+    );
+
+    const token = await resolveGitLabOAuthAccessToken({
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    expect(token).toBe('proactively-refreshed-token');
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(isGitLabOAuthAccessToken('proactively-refreshed-token')).toBe(true);
+    // Prior access token is still treated as OAuth for mid-flight API calls.
+    expect(isGitLabOAuthAccessToken('near-expiry-access-token')).toBe(true);
+    expect(isGitLabOAuthAccessToken('glpat-personal-token')).toBe(false);
+  });
+
   it('waits for an in-flight refresh and prevents it from recreating the connection', async () => {
     executeMock.mockResolvedValue([{ value: 'encrypted-connection' }]);
     decryptMock.mockResolvedValue({
