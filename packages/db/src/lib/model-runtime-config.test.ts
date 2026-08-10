@@ -988,4 +988,92 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       expect(env).not.toHaveProperty('LITELLM_BASE_URL');
     });
   });
+
+  describe('switchable models', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      mockDecryptSecrets.mockImplementation(async (value) => value);
+      mockEnvironmentVariablesFindMany.mockResolvedValue([]);
+      mockResolveGitHubCopilotOpenCodeAuthContent.mockResolvedValue(null);
+      mockResolveOpenCodeAuthContent.mockResolvedValue(null);
+      mockIsChatGptSubscriptionFastModeEnabled.mockResolvedValue(false);
+      mockGetFreshXaiAccessToken.mockResolvedValue(null);
+    });
+
+    it('advertises enabled catalog models whose credentials the sandbox can reach', async () => {
+      mockDeploymentSettingsFindFirst.mockResolvedValue({
+        runtimeModelConfig: { roomoteModel: 'anthropic/claude-sonnet-4' },
+        taskModelSettings: {
+          models: [
+            {
+              id: 'anthropic/claude-sonnet-4',
+              displayName: 'Sonnet',
+              family: 'Sonnet',
+            },
+            {
+              id: 'openrouter/openai/gpt-5.4',
+              displayName: 'GPT',
+              family: 'GPT',
+            },
+            { id: 'xai/grok-5', displayName: 'Grok', family: 'Grok' },
+          ],
+          allowedModelIds: [
+            'anthropic/claude-sonnet-4',
+            'openrouter/openai/gpt-5.4',
+            'xai/grok-5',
+          ],
+          defaultModelId: 'anthropic/claude-sonnet-4',
+        },
+      });
+
+      const env = await resolveSandboxModelRuntimeEnv({
+        runtimeEnv: {},
+        deploymentEnvVars: {
+          ANTHROPIC_API_KEY: 'sk-anthropic',
+          OPENROUTER_API_KEY: 'sk-openrouter',
+        },
+      });
+
+      const switchable = env.R_SWITCHABLE_MODELS?.split(',') ?? [];
+
+      expect(switchable).toContain('anthropic/claude-sonnet-4');
+      expect(switchable).toContain('openrouter/openai/gpt-5.4');
+      // No xAI key and no connected subscription, so offering the model would
+      // produce an auth failure on switch.
+      expect(switchable).not.toContain('xai/grok-5');
+    });
+
+    it('always includes the configured role model', async () => {
+      mockDeploymentSettingsFindFirst.mockResolvedValue({
+        runtimeModelConfig: { roomoteModel: 'anthropic/claude-sonnet-4' },
+        taskModelSettings: {
+          models: [],
+          allowedModelIds: [],
+          defaultModelId: 'anthropic/claude-sonnet-4',
+        },
+      });
+
+      const env = await resolveSandboxModelRuntimeEnv({
+        runtimeEnv: {},
+        deploymentEnvVars: { ANTHROPIC_API_KEY: 'sk-anthropic' },
+      });
+
+      expect(env.R_SWITCHABLE_MODELS).toBe('anthropic/claude-sonnet-4');
+    });
+
+    it('omits the switchable list from control-plane inference env', async () => {
+      mockDeploymentSettingsFindFirst.mockResolvedValue({
+        runtimeModelConfig: { roomoteModel: 'anthropic/claude-sonnet-4' },
+        taskModelSettings: null,
+      });
+
+      const env = await resolveEffectiveModelRuntimeEnv({
+        runtimeEnv: {},
+        deploymentEnvVars: { ANTHROPIC_API_KEY: 'sk-anthropic' },
+      });
+
+      // Routing, titles, and summaries never switch models mid-run.
+      expect(env).not.toHaveProperty('R_SWITCHABLE_MODELS');
+    });
+  });
 });

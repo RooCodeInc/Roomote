@@ -27,6 +27,7 @@ import {
   TERMINAL_PROVIDER_ERROR_SAY,
   type CancelTaskAttribution,
   type Harness,
+  type SwitchModelReason,
 } from './harness';
 
 /**
@@ -52,6 +53,7 @@ const HarnessCommand = {
   ReorderQueuedMessage: 'ReorderQueuedMessage',
   CancelTask: 'CancelTask',
   CloseTask: 'CloseTask',
+  SwitchModel: 'SwitchModel',
 } as const;
 
 /**
@@ -301,6 +303,51 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     }
 
     return success;
+  }
+
+  /**
+   * Report the model applied to new turns plus the models this run can switch
+   * to. Used by the switch procedure to validate a request before dispatching
+   * and by the UI to show the live model rather than the launch-time one.
+   */
+  getModelState(): {
+    activeModel: string | null;
+    launchModel: string | null;
+    switchableModels: string[];
+  } {
+    return {
+      activeModel: this.harness.getActiveModel?.() ?? null,
+      launchModel: this.harness.getLaunchModel?.() ?? null,
+      switchableModels: this.harness.getSwitchableModels?.() ?? [],
+    };
+  }
+
+  /**
+   * Change the model used for subsequent turns. An in-flight turn is left to
+   * finish on the previous model; the next prompt carries the new one.
+   */
+  switchModel(options: {
+    model: string;
+    reason: SwitchModelReason;
+    userId?: string;
+    userName?: string;
+  }): boolean {
+    if (this.phase === 'shutting_down') {
+      this.logger.warn(
+        '[HarnessManager#switchModel] Refusing model switch while shutting down',
+      );
+      return false;
+    }
+
+    return this.sendHarnessCommand({
+      commandName: HarnessCommand.SwitchModel,
+      data: {
+        model: options.model,
+        reason: options.reason,
+        ...(options.userId ? { userId: options.userId } : {}),
+        ...(options.userName ? { userName: options.userName } : {}),
+      },
+    });
   }
 
   answerUserInputRequest(options: {

@@ -233,6 +233,55 @@ describe('createHarness', () => {
     expect(getHarnessModelOverrideMock).toHaveBeenCalledTimes(1);
   });
 
+  it('seeds a reconnected harness with a mid-run model switch', async () => {
+    startOpenCodeServerHarnessMock.mockImplementation(async () => ({
+      harness: createConnectedHarness(),
+      subprocess: createPendingSubprocess(),
+    }));
+
+    const result = await createHarness({
+      harnessType: 'opencode-server',
+      workspacePath: '/tmp/workspace',
+      runtimeEnv: { OPENAI_API_KEY: 'sk-test-openai' },
+      harnessSessionId: undefined,
+      cancelSignal: new AbortController().signal,
+      integrations: {} as never,
+      mcpTaskEnv: {},
+      taskRun: {
+        id: 9,
+        taskId: 'task-9',
+        payload: {
+          harnessModelOverrides: {
+            'opencode-server': 'provider-id/launch-model',
+          },
+        },
+      } as never,
+      callbacks: {} as never,
+      context: {} as never,
+      logger: createLogger(),
+    });
+
+    expect(startOpenCodeServerHarnessMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ modelOverride: 'provider-id/launch-model' }),
+    );
+
+    // The harness reports an accepted switch through this callback.
+    const firstCallOptions = startOpenCodeServerHarnessMock.mock
+      .calls[0]?.[0] as { onModelSwitched?: (model: string) => void };
+    expect(firstCallOptions.onModelSwitched).toBeTypeOf('function');
+    firstCallOptions.onModelSwitched?.('provider-id/switched-model');
+
+    await result.harness.requestReconnect?.({ reason: 'test' });
+
+    // A reconnect regenerates the config from scratch, so the switched model
+    // has to replace the launch-time override or the run silently reverts.
+    expect(startOpenCodeServerHarnessMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ modelOverride: 'provider-id/switched-model' }),
+    );
+  });
+
   it('starts opencode-server with its model override and generated prompt inputs', async () => {
     const subprocess = createPendingSubprocess();
 

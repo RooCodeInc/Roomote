@@ -7,6 +7,7 @@ import {
   parseInferenceGatewayKeys,
   parseModelProviderEnvKeys,
   RunStatus,
+  SWITCHABLE_MODELS_ENV_VAR_NAME,
   buildSourceControlTokenMetadata,
   getSourceControlProviderLabel,
   normalizeSourceControlProvider,
@@ -208,6 +209,7 @@ const MODEL_RUNTIME_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
+  SWITCHABLE_MODELS_ENV_VAR_NAME,
 ]);
 
 function withLegacySnapshotModelEnvAliases(

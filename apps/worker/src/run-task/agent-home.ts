@@ -34,7 +34,9 @@ import {
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
   parseInferenceGatewayKeys,
+  parseSwitchableModelIds,
   renderManualSkillMarkdown,
+  SWITCHABLE_MODELS_ENV_VAR_NAME,
   resolveOpenRouterVariantModelAlias,
   OPENCODE_ARCHITECT_AGENT,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
@@ -519,6 +521,18 @@ interface GenerateOpenCodeConfigResult {
   configContent: string;
   openCodeConfigDir: string;
   model?: string;
+  /**
+   * Models the generated config can resolve, so the harness can bound
+   * mid-run `SwitchModel` requests to what will actually work.
+   */
+  switchableModels: string[];
+  /**
+   * True when the generated `architect` agent pins its own planning model.
+   * A deliberate role model should survive an operator model switch, while an
+   * unpinned architect inherits the (now stale) top-level model and must be
+   * moved explicitly.
+   */
+  architectModelIsPinned: boolean;
 }
 
 export interface OpenCodeRemoteMcpServerConfig {
@@ -1731,6 +1745,10 @@ function resolveModelBackedOpenCodeConfig(
     );
   }
 
+  // Provider entries, base URLs, gateway rebasing, and per-model reasoning
+  // options are only materialized for models listed here. Include the models a
+  // running task may switch to so a mid-run `SwitchModel` resolves against the
+  // generated config instead of an absent provider.
   const configuredModelIds = [
     effectiveCodingModel,
     model,
@@ -1739,6 +1757,10 @@ function resolveModelBackedOpenCodeConfig(
     codeReviewModel,
     exploreModel,
     planningModel,
+    ...parseSwitchableModelIds(runtimeEnv[SWITCHABLE_MODELS_ENV_VAR_NAME]).map(
+      (modelId) =>
+        applyImplicitLiteLlmModelPrefix(modelId, isLiteLlmConfigured),
+    ),
   ];
   const providerModelConfig = chatGptFastMode
     ? mergeOpenCodeChatGptFastModeOptions(
@@ -2034,7 +2056,52 @@ export function generateOpenCodeConfig({
     configContent: `${JSON.stringify(config, null, 2)}\n`,
     openCodeConfigDir,
     model: promptModel,
+    switchableModels: resolveSwitchableModelIds(
+      runtimeEnv,
+      // The effective top-level model, which already folds in any per-task
+      // override. `promptModel` is only set when an override was supplied.
+      typeof operatorConfig.model === 'string'
+        ? operatorConfig.model
+        : promptModel,
+    ),
+    architectModelIsPinned:
+      typeof asRecord(operatorAgent[OPENCODE_ARCHITECT_AGENT]).model ===
+      'string',
   };
+}
+
+/**
+ * The models a running task may switch to: the control-plane advertised set
+ * plus the model this run is currently on, so a switch can always be reverted.
+ * Empty when the control plane advertised nothing, which leaves the harness
+ * unbounded and preserves behavior for older control planes.
+ */
+function resolveSwitchableModelIds(
+  runtimeEnv: Record<string, string>,
+  activeModel: string | undefined,
+): string[] {
+  const advertised = parseSwitchableModelIds(
+    runtimeEnv[SWITCHABLE_MODELS_ENV_VAR_NAME],
+  );
+
+  if (advertised.length === 0) {
+    return [];
+  }
+
+  const isLiteLlmConfigured = isConfiguredEnvValue(runtimeEnv.LITELLM_BASE_URL);
+
+  return [
+    ...new Set(
+      [
+        ...advertised.map((modelId) =>
+          toBedrockMantleRuntimeModelId(
+            applyImplicitLiteLlmModelPrefix(modelId, isLiteLlmConfigured),
+          ),
+        ),
+        ...(activeModel ? [activeModel] : []),
+      ].filter((modelId) => !isTaskModelIdDisabled(modelId)),
+    ),
+  ];
 }
 
 /**

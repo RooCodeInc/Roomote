@@ -44,6 +44,11 @@ interface StartOpenCodeServerHarnessOptions {
     message: string;
     details?: Record<string, unknown>;
   }) => void;
+  /**
+   * Invoked when a mid-run `SwitchModel` is accepted, so the caller can seed a
+   * replacement harness with the switched model after a reconnect.
+   */
+  onModelSwitched?: (model: string) => void;
   beforeQueuedPrompt?: (input: { userId?: string }) => Promise<void | {
     shouldReconnect: boolean;
     shouldBlockPrompt?: boolean;
@@ -200,19 +205,21 @@ export async function startOpenCodeServerHarness({
   developerInstructionsContent,
   onUnexpectedExit,
   onDiagnostic,
+  onModelSwitched,
   beforeQueuedPrompt,
 }: StartOpenCodeServerHarnessOptions): Promise<StartOpenCodeServerHarnessResult> {
   const log = createPrefixedLogger(logger, '[opencode-server]');
   const port = await getAvailableLocalPort();
-  const { commandEnv, model } = await prepareOpenCodeCommandEnv({
-    runtimeEnv,
-    workspacePath,
-    mcpServers,
-    model: modelOverride,
-    reasoningEffortOverride,
-    developerInstructionsContent,
-    logger,
-  });
+  const { commandEnv, model, switchableModels, architectModelIsPinned } =
+    await prepareOpenCodeCommandEnv({
+      runtimeEnv,
+      workspacePath,
+      mcpServers,
+      model: modelOverride,
+      reasoningEffortOverride,
+      developerInstructionsContent,
+      logger,
+    });
   const resolved = resolveOpenCodeCommand(
     [
       'serve',
@@ -364,6 +371,9 @@ export async function startOpenCodeServerHarness({
       commandEnv,
       initialSessionId,
       model,
+      switchableModels,
+      architectModelIsPinned,
+      onModelSwitched,
       stopHookReminderStallTimeoutMs: parseTimeoutMs(
         process.env.ROOMOTE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS,
       ),

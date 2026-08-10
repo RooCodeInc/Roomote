@@ -125,6 +125,11 @@ describe('getRuntimeState procedure', () => {
         }),
       ],
       currentWorkflowPhase: 'review-code',
+      modelState: {
+        activeModel: null,
+        launchModel: null,
+        switchableModels: [],
+      },
       pendingEnvVarRequest: {
         key: 'env-var-request-1',
         ts: 789,
@@ -214,6 +219,8 @@ describe('getRuntimeState procedure', () => {
     expect(result.currentWorkflowPhase).toBeNull();
     expect(result.pendingEnvVarRequest).toBeNull();
     expect(result.queuedMessages).toEqual([]);
+    // A disconnected harness has no live model to report.
+    expect(result.modelState).toBeNull();
     expect(result.status.phase).toBe('idle');
     expect(getPendingUserInputRequests).not.toHaveBeenCalled();
     expect(getPendingEnvVarRequest).not.toHaveBeenCalled();

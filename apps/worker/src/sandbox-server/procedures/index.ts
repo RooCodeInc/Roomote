@@ -11,6 +11,7 @@ export { reorderQueuedMessage } from './reorderQueuedMessage';
 export { cancelTask } from './cancelTask';
 export { deleteQueuedPrompt } from './deleteQueuedPrompt';
 export { answerUserInputRequest } from './answerUserInputRequest';
+export { switchModel } from './switchModel';
 export { touchKeepalive } from './touchKeepalive';
 export { reloadDeploymentEnvVars } from './reloadDeploymentEnvVars';
 export { scrubSnapshotSecrets } from './scrubSnapshotSecrets';

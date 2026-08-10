@@ -27,6 +27,15 @@ export const getRuntimeState = publicProcedure.query(({ ctx }) => {
     pendingEnvVarRequest: ctx.harness.isConnected
       ? (ctx.harness.getPendingEnvVarRequest?.() ?? null)
       : null,
+    // Model state so the UI can show what is serving turns now rather than
+    // the launch-time model, and offer only switches that will work.
+    modelState: ctx.harness.isConnected
+      ? {
+          activeModel: ctx.harness.getActiveModel?.() ?? null,
+          launchModel: ctx.harness.getLaunchModel?.() ?? null,
+          switchableModels: ctx.harness.getSwitchableModels?.() ?? [],
+        }
+      : null,
     queuedMessages: ctx.harness.isConnected
       ? (ctx.harness.getQueuedMessages?.() ?? []).filter(
           (message) =>

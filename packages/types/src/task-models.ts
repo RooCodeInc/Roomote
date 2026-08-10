@@ -582,3 +582,31 @@ export function resolveRequestedTaskModelIdFromText(options: {
 
   return highestVersionMatch?.id;
 }
+
+/**
+ * Runtime env var carrying the comma-separated model IDs a running task may
+ * switch to without regenerating its OpenCode config. The control plane only
+ * lists models whose provider credentials the sandbox can already reach, so
+ * the worker can treat membership as authoritative.
+ */
+export const SWITCHABLE_MODELS_ENV_VAR_NAME = 'R_SWITCHABLE_MODELS';
+
+/**
+ * Upper bound on the advertised switchable set. A very large enabled catalog
+ * should not bloat every task's runtime env and generated provider config.
+ */
+export const MAX_SWITCHABLE_MODEL_IDS = 100;
+
+/** Parse the comma-separated `R_SWITCHABLE_MODELS` value into a list. */
+export function parseSwitchableModelIds(
+  value: string | undefined | null,
+): string[] {
+  return [
+    ...new Set(
+      (value ?? '')
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0),
+    ),
+  ];
+}

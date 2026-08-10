@@ -108,6 +108,7 @@ function createHarness(
     providerErrorMaxDelayMs?: number;
     mcpServerNames?: string[];
     model?: string;
+    switchableModels?: string[];
   } = {},
 ) {
   const harness = new OpenCodeServerHarness({
@@ -128,6 +129,7 @@ function createHarness(
     providerErrorBaseDelayMs: options.providerErrorBaseDelayMs,
     providerErrorMaxDelayMs: options.providerErrorMaxDelayMs,
     mcpServerNames: options.mcpServerNames,
+    switchableModels: options.switchableModels,
     beforeQueuedPrompt: options.beforeQueuedPrompt,
   });
 

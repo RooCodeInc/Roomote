@@ -59,11 +59,21 @@ export interface SandboxPendingEnvVarRequest {
   variables: TaskEnvVarRequestVariable[];
 }
 
+export interface SandboxModelState {
+  /** Model serving new turns; differs from `launchModel` after a switch. */
+  activeModel: string | null;
+  launchModel: string | null;
+  /** Models this run can switch to without a harness restart. */
+  switchableModels: string[];
+}
+
 export interface SandboxRuntimeState {
   status: TaskStatusEvent;
   pendingUserInputRequests: SandboxPendingUserInputRequest[];
   currentWorkflowPhase: string | null;
   pendingEnvVarRequest: SandboxPendingEnvVarRequest | null;
+  /** Null while the harness is disconnected. */
+  modelState: SandboxModelState | null;
   queuedMessages: SandboxQueuedMessage[];
 }
 
@@ -166,6 +176,21 @@ export interface SandboxAnswerUserInputRequestInput {
   userName?: string;
 }
 
+export interface SandboxSwitchModelInput {
+  /** Target model in `provider/model` form. */
+  model: string;
+  /** Display name of the operator requesting the switch. */
+  userName?: string;
+}
+
+export interface SandboxSwitchModelResult {
+  success: boolean;
+  /** Model that will serve subsequent turns. */
+  activeModel: string | null;
+  /** False when the requested model was already active. */
+  changed: boolean;
+}
+
 export interface SandboxCancelTaskInput {
   /**
    * Attribution for an explicit user stop; makes the harness leave a visible
@@ -250,6 +275,10 @@ export interface SandboxServerRpcClient {
     answerUserInputRequest: SandboxMutation<
       SandboxAnswerUserInputRequestInput,
       SandboxSuccessResult
+    >;
+    switchModel: SandboxMutation<
+      SandboxSwitchModelInput,
+      SandboxSwitchModelResult
     >;
     sandboxStream: SandboxSubscription<undefined, SandboxStreamEvent>;
     cancelTask: SandboxMutation<

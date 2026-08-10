@@ -97,6 +97,12 @@ export async function createHarness({
     logger,
   });
 
+  // A mid-run `SwitchModel` only mutates harness memory, but a reconnect
+  // respawns the harness from scratch. Hold the accepted model here so the
+  // replacement harness resumes on the switched model instead of silently
+  // reverting to the launch-time override.
+  let switchedModelOverride: string | undefined;
+
   const spawnHarness = async (options?: {
     initialSessionId?: string;
   }): Promise<{ harness: Harness; subprocess: ResultPromise }> => {
@@ -107,12 +113,13 @@ export async function createHarness({
       operatorEnvVars,
       deploymentMcpServers,
     );
-    const modelOverride = taskRun.payload?.harnessModelOverrides
+    const launchModelOverride = taskRun.payload?.harnessModelOverrides
       ? getHarnessModelOverride(
           taskRun.payload.harnessModelOverrides,
           harnessType,
         )
       : undefined;
+    const modelOverride = switchedModelOverride ?? launchModelOverride;
     // Per-task reasoning effort stamped at launch (or set explicitly via the
     // public API). Applied to the effective coding model, which per-role env
     // levels do not cover when a launch-time model override is in play.
@@ -135,6 +142,9 @@ export async function createHarness({
         : undefined,
       ...(modelOverride ? { modelOverride } : {}),
       ...(reasoningEffortOverride ? { reasoningEffortOverride } : {}),
+      onModelSwitched: (model: string) => {
+        switchedModelOverride = model;
+      },
     };
 
     return await startOpenCodeServerHarness({

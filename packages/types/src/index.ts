@@ -50,6 +50,7 @@ export * from './mcp-response-parsing';
 export * from './mcp-tool-policy';
 export * from './managed-access';
 export * from './mcp-service-detection';
+export * from './model-switch-notice';
 export * from './platform-issue-reports';
 export * from './preview-proxy';
 export * from './primitives';

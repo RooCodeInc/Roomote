@@ -988,6 +988,117 @@ describe('generateOpenCodeConfig provider support', () => {
       'Failed to remove disabled Google Vertex credentials before starting OpenCode',
     );
   });
+
+  it('materializes provider config for models the run can switch to', () => {
+    const baseRuntimeEnv = () => ({
+      R_MODEL: 'openrouter/anthropic/claude-opus-5',
+      OPENROUTER_API_KEY: 'openrouter-key',
+      OPENAI_COMPATIBLE_BASE_URL: 'https://proxy.example.com/v1',
+      OPENAI_COMPATIBLE_API_KEY: 'compat-key',
+    });
+
+    // OpenAI-compatible providers only get a config entry for models the
+    // generator was told about, so without the switchable set a mid-run switch
+    // would resolve to a provider OpenCode never saw.
+    const withoutSwitchable = JSON.parse(
+      generateOpenCodeConfig({
+        homeDir: createHomeDir(),
+        runtimeEnv: baseRuntimeEnv(),
+      }).configContent,
+    ) as { provider: Record<string, { models?: Record<string, unknown> }> };
+
+    expect(withoutSwitchable.provider['openai-compatible']).toBeUndefined();
+
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        ...baseRuntimeEnv(),
+        R_SWITCHABLE_MODELS:
+          'openrouter/anthropic/claude-opus-5,openai-compatible/gpt-4o',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<string, { models?: Record<string, unknown> }>;
+    };
+
+    expect(config.provider['openai-compatible']?.models).toHaveProperty(
+      'gpt-4o',
+    );
+    expect(result.switchableModels).toEqual([
+      'openrouter/anthropic/claude-opus-5',
+      'openai-compatible/gpt-4o',
+    ]);
+  });
+
+  it('always includes the launch model in the switchable set', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/anthropic/claude-opus-5',
+        OPENROUTER_API_KEY: 'openrouter-key',
+        R_SWITCHABLE_MODELS: 'anthropic/claude-opus-5',
+      },
+    });
+
+    expect(result.switchableModels).toContain(
+      'openrouter/anthropic/claude-opus-5',
+    );
+  });
+
+  it('leaves the switchable set empty when the control plane advertises none', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/anthropic/claude-opus-5',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+    });
+
+    // An empty set leaves the harness unbounded, preserving behavior for
+    // control planes that predate R_SWITCHABLE_MODELS.
+    expect(result.switchableModels).toEqual([]);
+  });
+
+  it('reports whether the architect agent pins its own planning model', () => {
+    const withPlanningModel = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/anthropic/claude-opus-5',
+        R_PLANNING_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+    });
+
+    expect(withPlanningModel.architectModelIsPinned).toBe(true);
+
+    const withoutPlanningModel = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/anthropic/claude-opus-5',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+    });
+
+    // Unpinned architect turns inherit the config's top-level model, so a
+    // mid-run switch has to move them explicitly.
+    expect(withoutPlanningModel.architectModelIsPinned).toBe(false);
+  });
+
+  it('drops disabled providers from the switchable set', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/anthropic/claude-opus-5',
+        OPENROUTER_API_KEY: 'openrouter-key',
+        R_SWITCHABLE_MODELS:
+          'anthropic/claude-opus-5,mistral/mistral-large-latest',
+      },
+    });
+
+    expect(result.switchableModels).not.toContain(
+      'mistral/mistral-large-latest',
+    );
+  });
 });
 
 describe('rematerializeOpenCodeCredentialFiles', () => {

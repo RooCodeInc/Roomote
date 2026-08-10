@@ -13,12 +13,15 @@ import {
   INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   INFERENCE_GATEWAY_XAI_ENV_VAR_NAME,
+  GITHUB_COPILOT_OPENCODE_PROVIDER_ID,
   isConfiguredEnvValue,
   isInferenceGatewayCoveredEnvVar,
+  MAX_SWITCHABLE_MODEL_IDS,
   normalizeDeploymentModelConfig,
   normalizeOptionalReasoningEffort,
   parseModelProviderEnvKeys,
   resolveSetupModelProviderIdFromModel,
+  SWITCHABLE_MODELS_ENV_VAR_NAME,
   XAI_OPENCODE_PROVIDER_ID,
   type TaskModelOption,
 } from '@roomote/types';
@@ -498,6 +501,67 @@ async function resolveModelRuntimeEnv(
       ? [...gatewayServedKeyNames, 'XAI_API_KEY']
       : gatewayServedKeyNames;
 
+  // Models a task sandbox may switch to without regenerating its OpenCode
+  // config. Membership requires credentials the sandbox can actually reach —
+  // either served by the inference gateway or already materialized as a raw
+  // key — so switching never offers a model that would fail at the provider.
+  //
+  // This deliberately does not widen the sandbox secret surface: deployments
+  // only gain switchable models for providers whose keys are already being
+  // shipped (role models, or an explicit R_MODEL_ENV_KEYS list).
+  //
+  // Control-plane inference (routing, titles, summaries) has no notion of
+  // switching, so the list is sandbox-only.
+  const effectiveGatewayServedKeyNameSet = new Set(
+    effectiveGatewayServedKeyNames,
+  );
+  const isProviderCredentialReachable = (providerId: string): boolean => {
+    if (
+      providerId === CHATGPT_OPENCODE_PROVIDER_ID &&
+      injectedOpenCodeAuthContent != null
+    ) {
+      return true;
+    }
+
+    if (
+      providerId === GITHUB_COPILOT_OPENCODE_PROVIDER_ID &&
+      githubCopilotAuthContent != null
+    ) {
+      return true;
+    }
+
+    if (providerId === XAI_OPENCODE_PROVIDER_ID && xaiAccessToken != null) {
+      return true;
+    }
+
+    return getModelProviderEnvKeyCandidates({ providerId }).some(
+      (envVarName) =>
+        effectiveGatewayServedKeyNameSet.has(envVarName) ||
+        resolvedProviderKeyValues[envVarName] !== undefined,
+    );
+  };
+  const switchableModelIds = inferenceGateway
+    ? [
+        ...new Set(
+          [
+            // Role models are always switchable: their credentials are shipped
+            // by definition, and a switch must be able to return to the model
+            // the run started on.
+            ...resolvedRoleModels.flatMap((modelId) =>
+              modelId ? [modelId] : [],
+            ),
+            ...enabledCatalogModels.map((model) => model.id),
+          ].filter((modelId) => {
+            const providerId = resolveSetupModelProviderIdFromModel(modelId);
+
+            return providerId
+              ? isProviderCredentialReachable(providerId)
+              : false;
+          }),
+        ),
+      ].slice(0, MAX_SWITCHABLE_MODEL_IDS)
+    : [];
+
   return {
     ...(resolvedRoomoteModel && { R_MODEL: resolvedRoomoteModel }),
     ...(resolvedRoomoteSmallModel && {
@@ -539,6 +603,9 @@ async function resolveModelRuntimeEnv(
     }),
     ...(providerKeyNames.length > 0 && {
       R_MODEL_ENV_KEYS: providerKeyNames.join(','),
+    }),
+    ...(switchableModelIds.length > 0 && {
+      [SWITCHABLE_MODELS_ENV_VAR_NAME]: switchableModelIds.join(','),
     }),
     ...resolvedProviderKeyValues,
     ...xaiApiKeyFromOAuth,

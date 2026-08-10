@@ -12,6 +12,8 @@ import {
   buildAcpRequestUserInputRequestId,
   formatRequestUserInputResponseText,
   parseAcpFlattenedMcpToolName,
+  formatModelSwitchNoticeText,
+  MODEL_SWITCH_NOTICE_PAYLOAD_KEY,
   OPENCODE_ARCHITECT_AGENT,
   OPENCODE_BUILD_AGENT,
   PROVIDER_RETRY_NOTICE_PAYLOAD_KEY,
@@ -27,6 +29,7 @@ import type {
   AcpRequestUserInputQuestion,
   AcpRequestUserInputResponsePayload,
   AcpTurnCompletedEvent,
+  ModelSwitchNotice,
   ProviderRetryNotice,
   TaskEvent,
 } from '@roomote/types';
@@ -43,6 +46,8 @@ import type {
   QueuedPromptMessageSnapshot,
   SendMessageCommand,
   StartNewTaskCommand,
+  SwitchModelCommand,
+  SwitchModelReason,
   TaskCommand,
 } from '../../harness';
 import {
@@ -113,6 +118,22 @@ interface OpenCodeServerHarnessOptions {
   commandEnv?: Record<string, string>;
   initialSessionId?: string;
   model?: string;
+  /**
+   * Models the generated OpenCode config can resolve without regenerating
+   * `opencode.json`. Used to bound `SwitchModel` requests.
+   */
+  switchableModels?: string[];
+  /**
+   * True when the generated `architect` agent pins its own planning model, so
+   * an operator model switch should leave planning turns on that role model.
+   */
+  architectModelIsPinned?: boolean;
+  /**
+   * Notifies the run when a `SwitchModel` is accepted. A reconnect respawns the
+   * harness, so the caller must retain the switched model to seed the
+   * replacement instead of reverting to the launch-time override.
+   */
+  onModelSwitched?: (model: string) => void;
   eventStreamReadyTimeoutMs?: number;
   executeToolProgressInitialDelayMs?: number;
   executeToolProgressIntervalMs?: number;
@@ -1514,7 +1535,32 @@ export class OpenCodeServerHarness
   private readonly workspacePath: string;
   private readonly normalizedWorkspacePath: string;
   private readonly logger: OpenCodeServerHarnessOptions['logger'];
-  private readonly model: OpenCodeModelSelection | undefined;
+  /**
+   * Model this harness was started with. Kept alongside `activeModel` so a
+   * mid-run switch can always report what it changed away from, and so
+   * architect prompts know whether the config's agent-level model is still
+   * the correct one to defer to.
+   */
+  private readonly launchModel: OpenCodeModelSelection | undefined;
+  /** Model applied to the next prompt. Mutated by `SwitchModel`. */
+  private activeModel: OpenCodeModelSelection | undefined;
+  /**
+   * Models the generated OpenCode config can already resolve. A switch to
+   * anything outside this set needs a harness restart to regenerate
+   * `opencode.json`, so it is rejected here rather than failing at the
+   * provider.
+   */
+  private readonly switchableModelIds: ReadonlySet<string>;
+  /**
+   * Whether the generated config pins a planning model on the architect agent.
+   * Determines whether an operator switch should leave planning turns alone.
+   */
+  private readonly architectModelIsPinned: boolean;
+  private readonly onModelSwitched:
+    | OpenCodeServerHarnessOptions['onModelSwitched']
+    | undefined;
+  /** Reason for the most recent applied switch, if any. */
+  private lastSwitchReason: SwitchModelReason | null = null;
   private readonly beforeQueuedPrompt:
     | OpenCodeServerHarnessOptions['beforeQueuedPrompt']
     | undefined;
@@ -1658,9 +1704,17 @@ export class OpenCodeServerHarness
     // first use rather than trusting it blindly.
     this.resumedSessionPendingValidation =
       options.initialSessionId !== undefined;
-    this.model = options.model
+    this.launchModel = options.model
       ? resolveOpenCodeModelSelection(options.model)
       : undefined;
+    this.activeModel = this.launchModel;
+    this.switchableModelIds = new Set(
+      (options.switchableModels ?? [])
+        .map((modelId) => modelId.trim())
+        .filter((modelId) => modelId.length > 0),
+    );
+    this.architectModelIsPinned = options.architectModelIsPinned === true;
+    this.onModelSwitched = options.onModelSwitched;
     this.commandEnv = options.commandEnv
       ? { ...options.commandEnv }
       : undefined;
@@ -1830,6 +1884,18 @@ export class OpenCodeServerHarness
 
   get isConnected(): boolean {
     return this.connected && !this.disposed;
+  }
+
+  getActiveModel(): string | null {
+    return this.activeModel?.qualifiedModel ?? null;
+  }
+
+  getLaunchModel(): string | null {
+    return this.launchModel?.qualifiedModel ?? null;
+  }
+
+  getSwitchableModels(): string[] {
+    return [...this.switchableModelIds];
   }
 
   get supportsNativeTurnSteering(): boolean {
@@ -2115,7 +2181,136 @@ export class OpenCodeServerHarness
       case TaskCommandName.AnswerUserInputRequest:
         await this.handleAnswerUserInputRequest(command);
         return;
+      case TaskCommandName.SwitchModel:
+        this.handleSwitchModel(command);
+        return;
     }
+  }
+
+  /**
+   * Surface a rejected command through the standard `commandError` channel.
+   * The manager only escalates `StartNewTask` failures, so this logs and
+   * notifies without tearing the run down — callers get the authoritative
+   * rejection from the sandbox procedure's own validation.
+   */
+  private emitCommandError(command: TaskCommand, message: string): void {
+    this.logger.warn(
+      `OpenCode command rejected command=${command.commandName}: ${message}`,
+    );
+    this.emit('commandError', { command, error: new Error(message) });
+  }
+
+  /** True once a mid-run switch moved off the launch-time model. */
+  private hasSwitchedModel(): boolean {
+    return (
+      this.activeModel?.qualifiedModel !== this.launchModel?.qualifiedModel
+    );
+  }
+
+  /**
+   * Whether an architect (planning) turn should be forced onto the active
+   * model instead of the config's agent-level model.
+   *
+   * A configured planning model is a deliberate role choice and should survive
+   * an operator switching the task's main model — the same way vision, explore,
+   * and code-review role models do. A failover is different: its whole point is
+   * that the previous provider is unusable, so planning has to move too. When
+   * no planning model is pinned, the architect inherits the config's top-level
+   * model, which is stale after any switch and must be overridden.
+   */
+  private shouldOverrideArchitectModel(): boolean {
+    if (!this.hasSwitchedModel()) {
+      return false;
+    }
+
+    return !this.architectModelIsPinned || this.lastSwitchReason === 'failover';
+  }
+
+  /**
+   * Replace the model used for subsequent prompts. An in-flight turn is left
+   * alone: interrupting it would discard partial work, and the next prompt
+   * picks the new model up anyway.
+   */
+  private handleSwitchModel(command: SwitchModelCommand): void {
+    const requested = command.data.model.trim();
+
+    let selection: OpenCodeModelSelection;
+
+    try {
+      selection = resolveOpenCodeModelSelection(requested);
+    } catch (error) {
+      this.emitCommandError(
+        command,
+        error instanceof Error ? error.message : String(error),
+      );
+      return;
+    }
+
+    // The generated `opencode.json` only carries provider entries for models
+    // known at startup, and a reconnect regenerates it from the same set.
+    // Accepting anything outside that set would either resolve to a missing
+    // provider or silently revert on the next reconnect, so require an
+    // explicit match — including when no set was advertised at all.
+    if (!this.switchableModelIds.has(selection.qualifiedModel)) {
+      this.emitCommandError(
+        command,
+        this.switchableModelIds.size === 0
+          ? 'This task run did not advertise any switchable models.'
+          : `Model "${selection.qualifiedModel}" is not available to this task run.`,
+      );
+      return;
+    }
+
+    if (this.activeModel?.qualifiedModel === selection.qualifiedModel) {
+      this.logger.info(
+        `OpenCode model switch skipped; already active model=${selection.qualifiedModel}`,
+      );
+      return;
+    }
+
+    const previousModel = this.activeModel?.qualifiedModel;
+    this.activeModel = selection;
+    this.lastSwitchReason = command.data.reason;
+    // Survive a reconnect: the replacement harness is spawned from run-task,
+    // which otherwise only knows the launch-time model override.
+    this.onModelSwitched?.(selection.qualifiedModel);
+
+    this.logger.info(
+      `OpenCode active model switched reason=${command.data.reason} from=${
+        previousModel ?? 'none'
+      } to=${selection.qualifiedModel}`,
+    );
+
+    const notice: ModelSwitchNotice = {
+      reason: command.data.reason,
+      toModel: selection.qualifiedModel,
+      ...(previousModel ? { fromModel: previousModel } : {}),
+      ...(command.data.userName ? { requestedBy: command.data.userName } : {}),
+    };
+
+    this.emitModelSwitchNotice(notice);
+  }
+
+  private emitModelSwitchNotice(notice: ModelSwitchNotice): void {
+    const sessionId = this.sessionId;
+
+    if (!sessionId) {
+      // No session yet means no transcript to annotate; the switch still
+      // applies to the first prompt.
+      return;
+    }
+
+    this.runtimeEvents.assistantMessage({
+      sessionId,
+      messageId: ['model-switch', notice.reason, String(Date.now())].join('-'),
+      text: formatModelSwitchNoticeText(notice),
+      metadata: {
+        [MODEL_SWITCH_NOTICE_PAYLOAD_KEY]: notice,
+      },
+      payload: {
+        [MODEL_SWITCH_NOTICE_PAYLOAD_KEY]: notice,
+      },
+    });
   }
 
   private async handleStartNewTask(
@@ -3400,7 +3595,7 @@ export class OpenCodeServerHarness
         workspacePath: this.workspacePath,
         homeDir: this.commandEnv?.HOME ?? null,
         mcpServerNames: this.knownMcpServerNames,
-        model: this.model?.qualifiedModel ?? null,
+        model: this.activeModel?.qualifiedModel ?? null,
         elapsedMs: input.elapsedMs,
         timeoutMs: input.timeoutMs,
         error: input.message,
@@ -3592,12 +3787,20 @@ export class OpenCodeServerHarness
     this.submittedUserMessageIds.add(messageID);
     this.messageRoleById.set(messageID, 'user');
     const agent = this.resolvePromptAgent();
-    // Architect-agent prompts omit the request-level model so the agent-level
-    // planning model from the generated OpenCode config applies; without a
-    // configured planning model OpenCode falls back to the config's top-level
-    // model, which already reflects any per-task override.
+    // Architect-agent prompts normally omit the request-level model so the
+    // agent-level planning model from the generated OpenCode config applies;
+    // without a configured planning model OpenCode falls back to the config's
+    // top-level model, which already reflects any per-task override.
+    //
+    // After a mid-run switch that deferral can be wrong, because the
+    // agent-level model is baked into `opencode.json` at startup and cannot be
+    // rewritten. Send the request-level model instead — OpenCode resolves
+    // `input.model ?? agent.model ?? currentModel`, so it overrides the
+    // agent-level entry.
     const shouldSendRequestModel = Boolean(
-      this.model && agent !== OPENCODE_ARCHITECT_AGENT,
+      this.activeModel &&
+      (agent !== OPENCODE_ARCHITECT_AGENT ||
+        this.shouldOverrideArchitectModel()),
     );
     try {
       await this.client.promptAsync({
@@ -3605,11 +3808,11 @@ export class OpenCodeServerHarness
         signal: this.eventAbortController.signal,
         request: {
           messageID,
-          ...(shouldSendRequestModel && this.model
+          ...(shouldSendRequestModel && this.activeModel
             ? {
                 model: {
-                  providerID: this.model.providerID,
-                  modelID: this.model.modelID,
+                  providerID: this.activeModel.providerID,
+                  modelID: this.activeModel.modelID,
                 },
               }
             : {}),

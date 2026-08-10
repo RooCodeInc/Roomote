@@ -209,7 +209,12 @@ export async function prepareOpenCodeCommandEnv(options: {
   reasoningEffortOverride?: ReasoningEffort;
   developerInstructionsContent?: string;
   logger: HarnessLogger;
-}): Promise<{ commandEnv: Record<string, string>; model?: string }> {
+}): Promise<{
+  commandEnv: Record<string, string>;
+  model?: string;
+  switchableModels: string[];
+  architectModelIsPinned: boolean;
+}> {
   const commandEnv = normalizeOpenCodeRuntimeEnv(options.runtimeEnv);
   const parsedMcpServers = Object.fromEntries(
     Object.entries(options.mcpServers ?? {}).flatMap(([name, config]) => {
@@ -231,7 +236,13 @@ export async function prepareOpenCodeCommandEnv(options: {
     throw new Error('OpenCode command environment did not resolve HOME.');
   }
 
-  const { configContent, openCodeConfigDir, model } = generateOpenCodeConfig({
+  const {
+    configContent,
+    openCodeConfigDir,
+    model,
+    switchableModels,
+    architectModelIsPinned,
+  } = generateOpenCodeConfig({
     homeDir,
     runtimeEnv: commandEnv,
     developerInstructionsContent: options.developerInstructionsContent,
@@ -292,7 +303,7 @@ export async function prepareOpenCodeCommandEnv(options: {
     } model=${model ?? 'roomote-model-default'} pluginSeedVersion=${pluginSeedVersion}`,
   );
 
-  return { commandEnv, model };
+  return { commandEnv, model, switchableModels, architectModelIsPinned };
 }
 
 function quoteForBash(value: string): string {

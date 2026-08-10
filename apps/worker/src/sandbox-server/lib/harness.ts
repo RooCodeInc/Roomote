@@ -28,6 +28,7 @@ export const TaskCommandName = {
   PrioritizeQueuedMessage: 'PrioritizeQueuedMessage',
   ReorderQueuedMessage: 'ReorderQueuedMessage',
   AnswerUserInputRequest: 'AnswerUserInputRequest',
+  SwitchModel: 'SwitchModel',
 } as const;
 
 export type TaskCommandName =
@@ -166,6 +167,33 @@ export interface ResumeTaskCommand {
   data: string;
 }
 
+/**
+ * Why the active model changed. `user` switches are explicit operator
+ * actions; `failover` is reserved for automatic provider fallback so the
+ * transcript can distinguish a deliberate change from a recovery.
+ */
+export type SwitchModelReason = 'user' | 'failover';
+
+/**
+ * Replace the model used for subsequent turns on the running task.
+ *
+ * `next_turn` mutates the harness's active model in place: an in-flight turn
+ * finishes on the previous model and the next prompt carries the new one. It
+ * only works for models the generated OpenCode config can already resolve
+ * (see `R_SWITCHABLE_MODELS`), which is why the sandbox procedure validates
+ * against that set before dispatching.
+ */
+export interface SwitchModelCommand {
+  commandName: typeof TaskCommandName.SwitchModel;
+  data: {
+    /** Target model in `provider/model` form. */
+    model: string;
+    reason: SwitchModelReason;
+    userId?: string;
+    userName?: string;
+  };
+}
+
 export type TaskCommand =
   | StartNewTaskCommand
   | SendMessageCommand
@@ -176,7 +204,8 @@ export type TaskCommand =
   | AnswerUserInputRequestCommand
   | CancelTaskCommand
   | CloseTaskCommand
-  | ResumeTaskCommand;
+  | ResumeTaskCommand
+  | SwitchModelCommand;
 
 export function extractQueuedMessageId(command: TaskCommand): string | null {
   const data = (command as { data?: { id?: string } }).data;
@@ -386,6 +415,21 @@ export interface Harness extends EventEmitter<HarnessEvents> {
    * harness tracks that state.
    */
   getCurrentWorkflowPhase?(): string | null;
+
+  /**
+   * Return the model currently applied to new prompts, when the harness
+   * tracks a model. Differs from the launch model after a `SwitchModel`.
+   */
+  getActiveModel?(): string | null;
+
+  /** Return the model this harness was started with, when it tracks one. */
+  getLaunchModel?(): string | null;
+
+  /**
+   * Return the models this harness can switch to without a restart, i.e. the
+   * models the generated runtime config can already resolve.
+   */
+  getSwitchableModels?(): string[];
 
   /**
    * Return the full queued follow-up snapshot needed to restore the prompt
