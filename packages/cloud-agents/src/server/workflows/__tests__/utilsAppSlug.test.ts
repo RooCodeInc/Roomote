@@ -129,4 +129,16 @@ describe('getPrBodyAttributionLine', () => {
     expect(line).toContain('@acme');
     expect(line).not.toContain('@roomote');
   });
+
+  it('accepts an explicit app slug and mention setting at write time', () => {
+    const line = getPrBodyAttributionLine({
+      attribution: DEFAULT_ROOMOTE_COMMIT_AUTHOR,
+      taskUrl: 'https://app.roomote.dev/tasks/123',
+      githubAppSlug: 'acme',
+      roomoteMentionEnabled: false,
+    });
+
+    expect(line).toContain('@acme');
+    expect(line).not.toContain('@roomote');
+  });
 });

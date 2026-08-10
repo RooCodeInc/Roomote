@@ -1,5 +1,7 @@
 import { createGitHubToken } from '@roomote/auth';
 import {
+  DEFAULT_ROOMOTE_COMMIT_AUTHOR,
+  getPrBodyAttributionLine,
   type ResolvedTaskCommitAuthor,
   resolveLaunchTaskCommitAuthor,
   resolveRunCommitAuthor,
@@ -12,6 +14,8 @@ import {
   db,
   eq,
   getDeploymentGitHubRoomoteMentionEnabled,
+  resolveTelegramRuntimeCredentials,
+  tasks,
   taskRuns,
   getDeploymentPrAction,
   taskPullRequests,
@@ -19,18 +23,23 @@ import {
 } from '@roomote/db/server';
 import {
   buildPullRequestUrl,
-  getGitHubFollowUpMention,
   getSourceControlProviderLabel,
   findPrBodyAttributionLine,
-  normalizePrBodyAttributionAppMention,
-  preservePrBodyAttribution,
-  rewritePrBodyAttribution,
+  getCommunicationProviderFromTaskPayload,
+  getCommunicationGuildIdFromTaskPayload,
+  getCommunicationTenantIdFromTaskPayload,
+  getCommunicationChannelFromTaskPayload,
+  getCommunicationThreadIdFromTaskPayload,
+  getCommunicationMessageIdFromTaskPayload,
+  getSlackChannelFromTaskPayload,
+  getSlackTeamIdFromTaskPayload,
+  getSlackTeamDomainFromTaskPayload,
+  getSlackThreadTsFromTaskPayload,
+  getSlackConversationUrlFromTaskPayload,
   prActions,
   sourceControlProviderSchema,
   type PrAction,
   type SourceControlProvider,
-  parseDiscordMessagePermalink,
-  parseSlackMessagePermalink,
 } from '@roomote/types';
 import { Env } from '@roomote/env';
 import { z } from 'zod';
@@ -229,46 +238,97 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     provider,
     host: repository.host ?? payloadHost,
   });
-  const normalizedMentionBody = configuredGitHubAppSlug
-    ? normalizePrBodyAttributionAppMention(
-        input.body,
-        configuredGitHubAppSlug,
-        roomoteMentionEnabled,
-      )
-    : input.body;
   const displayName =
     attribution.kind === 'roomote'
       ? null
       : repository.private === true
         ? attribution.displayName
         : attribution.publicDisplayName;
-  const rewrittenAttributionBody = rewritePrBodyAttribution(
-    normalizedMentionBody,
-    displayName,
+  const task = await db.query.tasks.findFirst({
+    where: eq(tasks.id, taskRun.taskId),
+    columns: {
+      surface: true,
+      slackChannelId: true,
+      slackThreadTs: true,
+    },
+  });
+  const communicationProvider = getCommunicationProviderFromTaskPayload(
+    taskRun.payload,
   );
+  const telegramBotUsername =
+    communicationProvider === 'telegram'
+      ? (await resolveTelegramRuntimeCredentials()).botUsername
+      : null;
+  const canonicalAttribution = displayName
+    ? { ...attribution, displayName }
+    : DEFAULT_ROOMOTE_COMMIT_AUTHOR;
+  const attributionLine = getPrBodyAttributionLine({
+    attribution: canonicalAttribution,
+    taskUrl: buildPrAttributionTaskUrl(taskRun),
+    taskSurface:
+      task?.surface === 'system' || task?.surface === 'api'
+        ? 'web'
+        : (task?.surface ?? communicationProvider ?? 'web'),
+    slackTeamDomain:
+      getSlackTeamDomainFromTaskPayload(taskRun.payload) ?? undefined,
+    slackTeamId: getSlackTeamIdFromTaskPayload(taskRun.payload) ?? undefined,
+    slackConversationUrl:
+      getSlackConversationUrlFromTaskPayload(taskRun.payload) ?? undefined,
+    slackChannel:
+      getSlackChannelFromTaskPayload(taskRun.payload) ??
+      task?.slackChannelId ??
+      undefined,
+    slackThreadTs:
+      getSlackThreadTsFromTaskPayload(taskRun.payload) ??
+      task?.slackThreadTs ??
+      undefined,
+    telegramChatId:
+      communicationProvider === 'telegram'
+        ? (getCommunicationChannelFromTaskPayload(taskRun.payload) ?? undefined)
+        : undefined,
+    telegramThreadId:
+      communicationProvider === 'telegram'
+        ? (getCommunicationThreadIdFromTaskPayload(taskRun.payload) ??
+          undefined)
+        : undefined,
+    telegramMessageId:
+      communicationProvider === 'telegram'
+        ? (getCommunicationMessageIdFromTaskPayload(taskRun.payload) ??
+          undefined)
+        : undefined,
+    telegramBotUsername: telegramBotUsername ?? undefined,
+    teamsConversationId:
+      communicationProvider === 'teams'
+        ? (getCommunicationChannelFromTaskPayload(taskRun.payload) ?? undefined)
+        : undefined,
+    teamsMessageId:
+      communicationProvider === 'teams'
+        ? (getCommunicationMessageIdFromTaskPayload(taskRun.payload) ??
+          undefined)
+        : undefined,
+    teamsTenantId:
+      getCommunicationTenantIdFromTaskPayload(taskRun.payload) ?? undefined,
+    teamsBotAppId: Env.R_TEAMS_BOT_APP_ID,
+    discordGuildId:
+      getCommunicationGuildIdFromTaskPayload(taskRun.payload) ?? undefined,
+    discordChannelId:
+      communicationProvider === 'discord'
+        ? (getCommunicationChannelFromTaskPayload(taskRun.payload) ?? undefined)
+        : undefined,
+    discordMessageId:
+      communicationProvider === 'discord'
+        ? (getCommunicationMessageIdFromTaskPayload(taskRun.payload) ??
+          undefined)
+        : undefined,
+    githubAppSlug: configuredGitHubAppSlug,
+    roomoteMentionEnabled,
+  });
   const inputWithNormalizedAttribution: SourceControlPullRequestMutationInput =
     {
       ...input,
-      body:
-        repository.private !== true
-          ? scrubUnmarkedPublicAttribution(
-              rewrittenAttributionBody,
-              displayName,
-              {
-                allowedMentions: new Set([
-                  '@roomote',
-                  configuredGitHubAppSlug
-                    ? getGitHubFollowUpMention(
-                        configuredGitHubAppSlug,
-                        roomoteMentionEnabled,
-                      )
-                    : '@roomote',
-                ]),
-                taskId: taskRun.taskId,
-                payloadKind: taskRun.payloadKind,
-              },
-            )
-          : rewrittenAttributionBody,
+      body: attributionLine
+        ? prependCanonicalPrAttribution(input.body, attributionLine)
+        : input.body,
     };
 
   const liveGitHubAttribution = provider === 'github' ? attribution : undefined;
@@ -506,11 +566,7 @@ async function createOrUpdateGitHubPullRequest({
       repo,
       pull_number: pullRequest.number,
       title: input.title,
-      body: preserveExistingPullRequestAttribution(
-        input.body,
-        pullRequest.body,
-        repository.private === true,
-      ),
+      body: input.body,
     });
     pullRequest = data;
   } else {
@@ -577,269 +633,33 @@ async function createOrUpdateGitHubPullRequest({
   };
 }
 
-function preserveExistingPullRequestAttribution(
-  body: string,
-  existingBody: string | null | undefined,
-  repositoryIsPrivate: boolean,
-): string {
-  const openerLine = existingBody
-    ? findPrBodyAttributionLine(existingBody)
-    : null;
-  const publicHandle = openerLine?.match(
-    /^> Opened on behalf of @([^\s.]+)\.(?: |$)/u,
-  )?.[1];
-  const safePublicOpener =
-    publicHandle !== undefined &&
-    /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/u.test(publicHandle);
-  if (!openerLine) {
-    return body;
-  }
-
-  if (repositoryIsPrivate) {
-    return preservePrBodyAttribution(body, existingBody ?? '');
-  }
-
-  return safePublicOpener
-    ? rewritePrBodyAttribution(body, `@${publicHandle}`)
-    : body;
+function buildPrAttributionTaskUrl(taskRun: TaskRun): string {
+  const url = new URL(`/task/${taskRun.taskId}`, Env.R_APP_URL);
+  url.searchParams.set('utm_source', 'github-comment');
+  url.searchParams.set('utm_medium', 'link');
+  url.searchParams.set('utm_campaign', taskRun.payloadKind);
+  return url.toString();
 }
 
-function scrubUnmarkedPublicAttribution(
-  body: string,
-  displayName: string | null,
-  context: {
-    allowedMentions: ReadonlySet<string>;
-    taskId: string;
-    payloadKind: string;
-  },
-): string {
-  const provenance = displayName
-    ? `> Opened on behalf of ${displayName}.`
-    : '> Created by Roomote.';
-  return body.replace(
-    /^[ \t]*>[ \t]*(?:Opened on behalf of|Created by Roomote).*$/gmu,
-    (line) => {
-      const instruction = findSafeUnmarkedFollowUpInstruction(line, context);
-      return instruction ? `${provenance} ${instruction}` : provenance;
-    },
+function prependCanonicalPrAttribution(body: string, line: string): string {
+  const firstLineEnd = body.indexOf('\n');
+  const firstLine = body.slice(
+    0,
+    firstLineEnd === -1 ? body.length : firstLineEnd,
   );
-}
-
-const CHAT_FOLLOW_UP_LABELS = new Set([
-  'Slack',
-  'Discord',
-  'Telegram',
-  'Teams',
-]);
-
-type FollowUpLink = {
-  label: string;
-  rawUrl: string;
-  start: number;
-  end: number;
-};
-
-function parseFollowUpLinks(instruction: string): FollowUpLink[] | null {
-  const links: FollowUpLink[] = [];
-  let cursor = 0;
-
-  while (cursor < instruction.length) {
-    const start = instruction.indexOf('[', cursor);
-    if (start === -1) {
-      break;
-    }
-    const separator = instruction.indexOf('](', start + 1);
-    const end = separator === -1 ? -1 : instruction.indexOf(')', separator + 2);
-    if (separator === -1 || end === -1) {
-      return null;
-    }
-
-    const label = instruction.slice(start + 1, separator);
-    const rawUrl = instruction.slice(separator + 2, end);
-    if (!label || !rawUrl || rawUrl.includes('(')) {
-      return null;
-    }
-
-    links.push({ label, rawUrl, start, end: end + 1 });
-    cursor = end + 1;
-  }
-
-  return links;
-}
-
-function normalizeFollowUpLinks(
-  instruction: string,
-  links: FollowUpLink[],
-): string {
-  let normalized = '';
-  let cursor = 0;
-  for (const link of links) {
-    normalized += `${instruction.slice(cursor, link.start)}<${link.label}>`;
-    cursor = link.end;
-  }
-  return normalized + instruction.slice(cursor);
-}
-
-function readFollowUpMention(instruction: string): string | null {
-  const markers = ['mentioning @', 'mention @'];
-  const marker = markers.find((candidate) => instruction.includes(candidate));
-  if (!marker) {
-    return null;
-  }
-
-  const start = instruction.indexOf(marker) + marker.length - 1;
-  let end = start + 1;
-  while (end < instruction.length) {
-    const char = instruction[end] ?? '';
-    const code = char.charCodeAt(0);
-    const isAlphaNumeric =
-      (code >= 48 && code <= 57) ||
-      (code >= 65 && code <= 90) ||
-      (code >= 97 && code <= 122);
-    if (!isAlphaNumeric && char !== '-') {
-      break;
-    }
-    end += 1;
-  }
-
-  return end > start + 1 ? instruction.slice(start, end) : null;
-}
-
-function hasKnownFollowUpGrammar(
-  instruction: string,
-  mention: string,
-  links: FollowUpLink[],
-): boolean {
-  const normalized = normalizeFollowUpLinks(instruction, links);
-  if (links.length === 0) {
-    return (
-      normalized === `Follow up by mentioning ${mention}.` ||
-      normalized === `mention ${mention} for follow-up asks.`
+  const normalizedFirstLine = firstLine.trimStart();
+  const hasLeadingAttribution =
+    findPrBodyAttributionLine(firstLine) !== null ||
+    /^> (?:Opened on behalf of .+\.|Created by Roomote\.) (?:Follow up by mentioning @|\[View the task\]\().+$/u.test(
+      normalizedFirstLine,
     );
-  }
-  if (links.length === 1) {
-    const label = links[0]?.label;
-    return label === 'View the task'
-      ? normalized ===
-          `<View the task> or mention ${mention} for follow-up asks.`
-      : (label === 'the web UI' || CHAT_FOLLOW_UP_LABELS.has(label ?? '')) &&
-          normalized === `Follow up by mentioning ${mention} or in <${label}>.`;
-  }
-  if (links.length === 2) {
-    const chatLabel = links[1]?.label ?? '';
-    return (
-      links[0]?.label === 'the web UI' &&
-      CHAT_FOLLOW_UP_LABELS.has(chatLabel) &&
-      normalized ===
-        `Follow up by mentioning ${mention}, in <the web UI>, or in <${chatLabel}>.`
-    );
-  }
+  const remainingBody = hasLeadingAttribution
+    ? body
+        .slice(firstLineEnd === -1 ? body.length : firstLineEnd + 1)
+        .trimStart()
+    : body.trimStart();
 
-  return false;
-}
-
-function isTrustedWebTaskUrl(
-  url: URL,
-  taskId: string,
-  payloadKind: string,
-): boolean {
-  const trustedOrigins = new Set(
-    [Env.R_APP_URL, Env.R_PUBLIC_URL]
-      .filter((value): value is string => Boolean(value))
-      .map((value) => new URL(value).origin),
-  );
-  if (!trustedOrigins.has(url.origin) || url.pathname !== `/task/${taskId}`) {
-    return false;
-  }
-
-  if (!url.search) {
-    return true;
-  }
-
-  return (
-    url.searchParams.size === 3 &&
-    url.searchParams.get('utm_source') === 'github-comment' &&
-    url.searchParams.get('utm_medium') === 'link' &&
-    url.searchParams.get('utm_campaign') === payloadKind
-  );
-}
-
-function isTrustedFollowUpLink(
-  label: string,
-  rawUrl: string,
-  taskId: string,
-  payloadKind: string,
-): boolean {
-  let url: URL;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    return false;
-  }
-
-  if (label === 'the web UI' || label === 'View the task') {
-    return isTrustedWebTaskUrl(url, taskId, payloadKind);
-  }
-  if (label === 'Slack') {
-    return parseSlackMessagePermalink(rawUrl) !== null;
-  }
-  if (label === 'Discord') {
-    return parseDiscordMessagePermalink(rawUrl) !== null;
-  }
-  if (label === 'Telegram') {
-    return (
-      url.hostname === 't.me' && /^\/c\/\d+\/(?:\d+\/)?\d+$/u.test(url.pathname)
-    );
-  }
-  if (label === 'Teams') {
-    return (
-      url.hostname === 'teams.microsoft.com' &&
-      /^\/l\/(?:message|app)\//u.test(url.pathname)
-    );
-  }
-
-  return false;
-}
-
-function findSafeUnmarkedFollowUpInstruction(
-  line: string,
-  context: {
-    allowedMentions: ReadonlySet<string>;
-    taskId: string;
-    payloadKind: string;
-  },
-): string | null {
-  const starts = [
-    line.indexOf('Follow up by mentioning '),
-    line.indexOf('[View the task]('),
-    line.indexOf('mention @'),
-  ].filter((index) => index >= 0);
-  if (starts.length === 0) {
-    return null;
-  }
-
-  const instruction = line.slice(Math.min(...starts)).trim();
-  const mention = readFollowUpMention(instruction);
-  const links = parseFollowUpLinks(instruction);
-  if (
-    !mention ||
-    !links ||
-    !context.allowedMentions.has(mention) ||
-    !hasKnownFollowUpGrammar(instruction, mention, links)
-  ) {
-    return null;
-  }
-
-  return links.every((link) =>
-    isTrustedFollowUpLink(
-      link.label,
-      link.rawUrl,
-      context.taskId,
-      context.payloadKind,
-    ),
-  )
-    ? instruction
-    : null;
+  return remainingBody ? `${line}\n\n${remainingBody}` : line;
 }
 
 async function createOrUpdateGitLabMergeRequest({
