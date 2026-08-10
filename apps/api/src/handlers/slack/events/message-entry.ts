@@ -70,7 +70,10 @@ import {
 } from '../helpers/conversation-log.js';
 import { getSlackAutomationLaunchIdentity } from '../helpers/launch-identity.js';
 import { checkAutoStartChannelCache } from '../../shared/auto-start-cache.js';
-import { evaluateChannelLaunchGate } from '../../shared/channel-launch-gate.js';
+import {
+  CHANNEL_AUTO_START_FAILURE_MESSAGE,
+  evaluateChannelLaunchGate,
+} from '../../shared/channel-launch-gate.js';
 import type { SlackWebhookContext } from '../context.js';
 import {
   enrichSlackMessageEvent,
@@ -694,7 +697,50 @@ async function maybeRecordTrackedAutomationThreadReply(params: {
   });
 }
 
-async function processSlackChannelAutoStartTask(params: {
+async function postSlackChannelAutoStartFailureBestEffort(input: {
+  slack: SlackNotifier;
+  channelId: string;
+  threadId: string;
+  isBotAuthored: boolean;
+}): Promise<void> {
+  // Bot-authored messages are typically automated feeds; a "please try
+  // again" reply is addressed to nobody, and a sustained classifier or
+  // startup outage would otherwise reply to every feed message. Failures on
+  // bot messages stay log-only, like before launch-failure replies existed.
+  if (input.isBotAuthored) {
+    return;
+  }
+
+  await input.slack
+    .postMessage({
+      channel: input.channelId,
+      thread_ts: input.threadId,
+      text: CHANNEL_AUTO_START_FAILURE_MESSAGE,
+      blocks: [
+        {
+          type: 'markdown',
+          text: CHANNEL_AUTO_START_FAILURE_MESSAGE,
+        },
+      ],
+    })
+    .catch((error) => {
+      apiLogger.warn(
+        `[SlackWebhook] Failed to post configured channel auto-start launch failure for ${input.channelId}:${input.threadId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+}
+
+async function postChannelAutoStartRoutingDebugBestEffort(
+  input: Parameters<typeof postChannelAutoStartRoutingDebug>[0],
+): Promise<void> {
+  await postChannelAutoStartRoutingDebug(input).catch((error) => {
+    apiLogger.warn(
+      `[SlackWebhook] Failed to post configured channel auto-start routing debug for ${input.sourceChannelId}:${input.threadId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  });
+}
+
+export async function processSlackChannelAutoStartTask(params: {
   event: ChannelAutoStartMessageEvent;
   isBotAuthored: boolean;
   slackInstallation: SlackInstallation;
@@ -792,7 +838,7 @@ async function processSlackChannelAutoStartTask(params: {
         channelAutoStartDebug = gateResult.debug;
 
         if (!gateResult.shouldLaunch) {
-          await postChannelAutoStartRoutingDebug({
+          await postChannelAutoStartRoutingDebugBestEffort({
             slack,
             sourceChannelId: event.channel,
             sourceChannelName,
@@ -807,6 +853,17 @@ async function processSlackChannelAutoStartTask(params: {
           // Release the routing lock like other no-launch outcomes so a
           // manual @roomote mention in this thread is not blocked for the
           // remainder of the lock TTL.
+          // `rate_limited` stays silent on purpose: a capped channel is
+          // already at its launch budget, and per-message replies there would
+          // only add noise on top of an intentional throttle.
+          if (gateResult.skipReason === 'classifier_error') {
+            await postSlackChannelAutoStartFailureBestEffort({
+              slack,
+              channelId: event.channel,
+              threadId,
+              isBotAuthored,
+            });
+          }
           await redis.del(routingLockKey).catch(() => {});
           return;
         }
@@ -887,7 +944,7 @@ async function processSlackChannelAutoStartTask(params: {
 
       if (result.status === 'started') {
         if (channelAutoStartDebug) {
-          await postChannelAutoStartRoutingDebug({
+          await postChannelAutoStartRoutingDebugBestEffort({
             slack,
             sourceChannelId: event.channel,
             sourceChannelName,
@@ -922,7 +979,7 @@ async function processSlackChannelAutoStartTask(params: {
       });
 
       if (channelAutoStartDebug) {
-        await postChannelAutoStartRoutingDebug({
+        await postChannelAutoStartRoutingDebugBestEffort({
           slack,
           sourceChannelId: event.channel,
           sourceChannelName,
@@ -972,7 +1029,7 @@ async function processSlackChannelAutoStartTask(params: {
         error instanceof Error ? error.message : String(error);
 
       if (channelAutoStartDebug) {
-        await postChannelAutoStartRoutingDebug({
+        await postChannelAutoStartRoutingDebugBestEffort({
           slack,
           sourceChannelId: event.channel,
           sourceChannelName,
@@ -991,6 +1048,12 @@ async function processSlackChannelAutoStartTask(params: {
         `❌ Configured channel auto-start failed for thread ${threadId}:`,
         errorMessage,
       );
+      await postSlackChannelAutoStartFailureBestEffort({
+        slack,
+        channelId: event.channel,
+        threadId,
+        isBotAuthored,
+      });
     }
   })();
 
