@@ -136,6 +136,63 @@ describe('GitLab deployment OAuth', () => {
     await deleteGitLabOAuthConnection();
   });
 
+  it('scales the proactive refresh window to a short instance token lifetime', async () => {
+    // Self-managed instances can configure a much shorter OAuth TTL than
+    // GitLab's ~2h default. A fixed 10m skew would then exceed the whole
+    // lifetime and refresh on every single resolve.
+    executeMock.mockResolvedValue([{ value: 'encrypted-connection' }]);
+    decryptMock.mockResolvedValue({
+      baseUrl: 'https://gitlab.example',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      accountId: '42',
+      username: 'roomote',
+      accessToken: 'short-lived-access-token',
+      refreshToken: 'refresh-token',
+      expiresInSeconds: 300,
+      // 4 of its 5 minutes left: well inside a fixed 10m skew, but nowhere
+      // near the quarter-life mark for a 5m token.
+      expiresAt: new Date(Date.now() + 4 * 60 * 1000).toISOString(),
+      scopes: ['api'],
+      status: 'active',
+    });
+    const fetchImpl = vi.fn();
+
+    await expect(
+      resolveGitLabOAuthAccessToken({ fetchImpl: fetchImpl as typeof fetch }),
+    ).resolves.toBe('short-lived-access-token');
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('still refreshes a short-lived token once it passes its quarter-life mark', async () => {
+    executeMock.mockResolvedValue([{ value: 'encrypted-connection' }]);
+    decryptMock.mockResolvedValue({
+      baseUrl: 'https://gitlab.example',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      accountId: '42',
+      username: 'roomote',
+      accessToken: 'short-lived-access-token',
+      refreshToken: 'refresh-token',
+      expiresInSeconds: 300,
+      expiresAt: new Date(Date.now() + 60 * 1000).toISOString(),
+      scopes: ['api'],
+      status: 'active',
+    });
+    const fetchImpl = vi.fn().mockResolvedValue(
+      Response.json({
+        access_token: 'short-lived-refreshed-token',
+        refresh_token: 'new-refresh-token',
+        expires_in: 300,
+      }),
+    );
+
+    await expect(
+      resolveGitLabOAuthAccessToken({ fetchImpl: fetchImpl as typeof fetch }),
+    ).resolves.toBe('short-lived-refreshed-token');
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
   it('marks reauthorization required when a failed refresh was not preempted', async () => {
     // The connection re-read after the failure is unchanged, so no peer
     // rotated the tokens and the refusal is a genuine invalid_grant.

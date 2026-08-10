@@ -98,6 +98,21 @@ describe('refreshGitHubTokenWithMetadata', () => {
     expect(result.nextRefreshAt).toBe('2026-08-10T12:45:00.000Z');
   });
 
+  it('scales the refresh buffer to a token that lives less than the buffer', async () => {
+    mockCreateSourceControlTokenForTaskRun.mockResolvedValue({
+      provider: 'gitlab',
+      token: 'oauth_access_token',
+      envVar: 'GITLAB_TOKEN',
+      envVars: {},
+      source: 'app',
+      expiresAt: new Date('2026-08-10T12:05:00.000Z'),
+    });
+
+    const result = await refreshGitHubTokenWithMetadata({} as never, 123);
+
+    expect(result.nextRefreshAt).toBe('2026-08-10T12:03:45.000Z');
+  });
+
   it('keeps the default interval for credentials without an expiry', async () => {
     mockCreateSourceControlTokenForTaskRun.mockResolvedValue({
       provider: 'github',

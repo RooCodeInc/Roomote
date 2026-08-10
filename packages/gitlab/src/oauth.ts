@@ -20,6 +20,11 @@ export type GitLabOAuthConnection = {
   accessToken: string;
   refreshToken: string;
   expiresAt: string;
+  /**
+   * Access-token lifetime reported by the instance. Absent on connections
+   * written before adaptive refresh, which fall back to the default skew.
+   */
+  expiresInSeconds?: number;
   scopes: string[];
   status: GitLabOAuthConnectionStatus;
 };
@@ -38,8 +43,38 @@ export type GitLabOAuthAccessToken = {
   expiresAt: Date | null;
 };
 
-/** Proactive OAuth refresh window (~2h access tokens). */
+/** Proactive OAuth refresh window for GitLab's default ~2h access tokens. */
 const OAUTH_ACCESS_TOKEN_REFRESH_SKEW_MS = 10 * 60 * 1000;
+
+/** GitLab's default access-token lifetime, used when none is reported. */
+const DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS = 7200;
+
+/** Expiry fields for a freshly issued access token, in the instance's own terms. */
+function accessTokenLifetime(token: GitLabOAuthTokenResponse): {
+  expiresAt: string;
+  expiresInSeconds: number;
+} {
+  const expiresInSeconds =
+    token.expires_in ?? DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS;
+
+  return {
+    expiresAt: new Date(Date.now() + expiresInSeconds * 1000).toISOString(),
+    expiresInSeconds,
+  };
+}
+
+/**
+ * Self-managed instances can configure a much shorter OAuth lifetime than the
+ * ~2h default. A fixed skew wider than the lifetime itself would refresh on
+ * every resolve, so cap it at a quarter of the token's life.
+ */
+function refreshSkewMsFor(connection: GitLabOAuthConnection): number {
+  const lifetimeMs = (connection.expiresInSeconds ?? 0) * 1000;
+
+  return lifetimeMs > 0
+    ? Math.min(OAUTH_ACCESS_TOKEN_REFRESH_SKEW_MS, lifetimeMs / 4)
+    : OAUTH_ACCESS_TOKEN_REFRESH_SKEW_MS;
+}
 
 let refreshPromise: Promise<GitLabOAuthAccessToken | null> | null = null;
 let deletionPromise: Promise<void> | null = null;
@@ -205,9 +240,7 @@ export async function exchangeGitLabOAuthCode(input: {
     username: '',
     accessToken: token.access_token,
     refreshToken: token.refresh_token,
-    expiresAt: new Date(
-      Date.now() + (token.expires_in ?? 7200) * 1000,
-    ).toISOString(),
+    ...accessTokenLifetime(token),
     scopes: token.scope?.split(/\s+/).filter(Boolean) ?? [...DEFAULT_SCOPES],
     status: 'active',
   };
@@ -250,8 +283,7 @@ export async function resolveGitLabOAuthAccessTokenWithMetadata(options?: {
   if (!connection || connection.status !== 'active') return null;
   if (
     !options?.forceRefresh &&
-    Date.parse(connection.expiresAt) >
-      Date.now() + OAUTH_ACCESS_TOKEN_REFRESH_SKEW_MS
+    Date.parse(connection.expiresAt) > Date.now() + refreshSkewMsFor(connection)
   ) {
     return toAccessTokenResult(connection.accessToken, connection.expiresAt);
   }
@@ -285,8 +317,7 @@ export async function resolveGitLabOAuthAccessTokenWithMetadata(options?: {
       if (
         latest?.status === 'active' &&
         latest.accessToken !== connection.accessToken &&
-        Date.parse(latest.expiresAt) >
-          Date.now() + OAUTH_ACCESS_TOKEN_REFRESH_SKEW_MS
+        Date.parse(latest.expiresAt) > Date.now() + refreshSkewMsFor(latest)
       ) {
         return toAccessTokenResult(latest.accessToken, latest.expiresAt);
       }
@@ -303,9 +334,7 @@ export async function resolveGitLabOAuthAccessTokenWithMetadata(options?: {
       ...connection,
       accessToken: token.access_token,
       refreshToken: token.refresh_token ?? connection.refreshToken,
-      expiresAt: new Date(
-        Date.now() + (token.expires_in ?? 7200) * 1000,
-      ).toISOString(),
+      ...accessTokenLifetime(token),
       scopes: token.scope?.split(/\s+/).filter(Boolean) ?? connection.scopes,
       status: 'active' as const,
     };
