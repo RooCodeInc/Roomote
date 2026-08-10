@@ -28,7 +28,7 @@ export const PR_REVIEW_NOTIFICATION_DEBOUNCE_MS = 1 * 60 * 1000;
  * completes. Keep them as a fallback instead of presenting them as a second
  * notification while the review is still running.
  */
-export const PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS = 30 * 60 * 1000;
+export const PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS = 15 * 60 * 1000;
 
 /**
  * Delay before re-checking an owner task that is still actively running when
