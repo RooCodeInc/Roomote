@@ -727,8 +727,9 @@ export const environmentConfigSchema = z
     oidc: environmentOidcSchema.optional(),
     /**
      * Named preview ports for human-facing application URLs.
-     * Each port gets a preview-proxy URL and a corresponding `ROOMOTE_<NAME>_HOST`
-     * environment variable inside the sandbox.
+     * Each port gets an authenticated shareable URL in
+     * `ROOMOTE_<NAME>_PREVIEW_URL`. `ROOMOTE_<NAME>_HOST` points to that same
+     * URL for proxied ports and to the direct machine URL for unproxied ports.
      */
     ports: z
       .array(namedPortSchema)

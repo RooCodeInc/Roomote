@@ -137,18 +137,18 @@ function getConfiguredPreviewUrls(
 
   return environmentConfig.ports
     .map((port) => {
-      if (port.proxied === false) {
-        return null;
-      }
-
-      const host = envVars[`ROOMOTE_${port.name.toUpperCase()}_HOST`];
+      const name = port.name.toUpperCase();
+      const previewUrl = envVars[`ROOMOTE_${name}_PREVIEW_URL`];
+      const host =
+        previewUrl ??
+        (port.proxied === false ? undefined : envVars[`ROOMOTE_${name}_HOST`]);
 
       if (!host) {
         return null;
       }
 
       return {
-        name: port.name.toUpperCase(),
+        name,
         url: appendInitialPath(host, port.initial_path),
         primary: Boolean(port.primary),
       };
@@ -236,6 +236,12 @@ export function buildSandboxInstruction(
       lines.push(
         'Use these shareable preview URLs when referring to external previews in replies or proof. Do not share raw machine hosts instead.',
       );
+
+      if (options?.envVars?.ROOMOTE_AUTH_BYPASS_VALUE) {
+        lines.push(
+          'These external preview URLs are also reachable from this sandbox. The installed `agent-browser` wrapper automatically applies the task-scoped preview authentication cookie before `open`, `goto`, or `navigate`. Use the corresponding `ROOMOTE_<NAME>_PREVIEW_URL` when available and append the route you need to test; use the listed external URL otherwise. Use an external URL when you need to validate public-proxy, redirect, cookie, or hostname-dependent behavior. Never print, log, or share the bypass credential.',
+        );
+      }
     }
   }
 
@@ -243,7 +249,7 @@ export function buildSandboxInstruction(
     lines.push(
       '',
       'This environment exposes a sandbox-local browser surface for delegated visual proof.',
-      "Use the exact hostname and port from the environment configuration's local browser URL for proof capture. Preserve `localhost` versus `127.0.0.1` exactly as configured, and treat configured external preview URLs as shareable links only.",
+      "Use the exact hostname and port from the environment configuration's local browser URL for proof capture, preserving `localhost` versus `127.0.0.1` exactly as configured. Use configured external preview URLs only when the public proxy or hostname itself is part of what you need to validate.",
     );
   }
 

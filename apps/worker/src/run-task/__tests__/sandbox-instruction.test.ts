@@ -210,6 +210,7 @@ describe('buildSandboxInstruction', () => {
     const instruction = buildSandboxInstruction(true, environmentConfig, {
       envVars: {
         ROOMOTE_WEB_HOST: 'https://task-123-web.preview.roomote.run',
+        ROOMOTE_AUTH_BYPASS_VALUE: 'runtime-only-bypass',
       },
     });
 
@@ -224,13 +225,14 @@ describe('buildSandboxInstruction', () => {
       'This environment exposes a sandbox-local browser surface for delegated visual proof.',
     );
     expect(instruction).toContain(
-      "Use the exact hostname and port from the environment configuration's local browser URL for proof capture. Preserve `localhost` versus `127.0.0.1` exactly as configured, and treat configured external preview URLs as shareable links only.",
+      "Use the exact hostname and port from the environment configuration's local browser URL for proof capture, preserving `localhost` versus `127.0.0.1` exactly as configured. Use configured external preview URLs only when the public proxy or hostname itself is part of what you need to validate.",
     );
     expect(instruction).not.toContain('super-secret-value');
     expect(instruction).not.toContain('API_KEY');
     expect(instruction).not.toContain('agentInstructions');
     expect(instruction).not.toContain('ROOT_SECRET');
     expect(instruction).not.toContain('top-secret-bypass');
+    expect(instruction).not.toContain('runtime-only-bypass');
     expect(instruction).toContain('http://127.0.0.1:3000/auth/dev-login');
     expect(instruction).toContain('Configured external preview URLs:');
     expect(instruction).toContain(
@@ -238,6 +240,12 @@ describe('buildSandboxInstruction', () => {
     );
     expect(instruction).toContain(
       'Use these shareable preview URLs when referring to external previews in replies or proof. Do not share raw machine hosts instead.',
+    );
+    expect(instruction).toContain(
+      'The installed `agent-browser` wrapper automatically applies the task-scoped preview authentication cookie before `open`, `goto`, or `navigate`',
+    );
+    expect(instruction).toContain(
+      'Never print, log, or share the bypass credential.',
     );
   });
 
@@ -251,7 +259,7 @@ describe('buildSandboxInstruction', () => {
     const browserSurfaceLine =
       'This environment exposes a sandbox-local browser surface for delegated visual proof.';
     const localhostProofLine =
-      "Use the exact hostname and port from the environment configuration's local browser URL for proof capture. Preserve `localhost` versus `127.0.0.1` exactly as configured, and treat configured external preview URLs as shareable links only.";
+      "Use the exact hostname and port from the environment configuration's local browser URL for proof capture, preserving `localhost` versus `127.0.0.1` exactly as configured. Use configured external preview URLs only when the public proxy or hostname itself is part of what you need to validate.";
 
     expect(renderedInstruction).toContain(browserSurfaceLine);
     expect(renderedInstruction).toContain(localhostProofLine);
@@ -386,7 +394,7 @@ describe('buildSandboxInstruction', () => {
     expect(instruction).not.toContain('Configured external preview URLs:');
   });
 
-  it('omits non-proxied hosts from the configured preview URL list', () => {
+  it('uses dedicated preview URLs for non-proxied hosts', () => {
     const instruction = buildSandboxInstruction(
       false,
       {
@@ -412,6 +420,7 @@ describe('buildSandboxInstruction', () => {
       {
         envVars: {
           ROOMOTE_WEB_HOST: 'https://sandbox-raw-host.modal.host',
+          ROOMOTE_WEB_PREVIEW_URL: 'https://task-123-web.preview.roomote.run',
           ROOMOTE_API_HOST: 'https://task-123-api.preview.roomote.run',
         },
       },
@@ -421,7 +430,9 @@ describe('buildSandboxInstruction', () => {
     expect(instruction).toContain(
       '- API: https://task-123-api.preview.roomote.run/trpc',
     );
+    expect(instruction).toContain(
+      '- WEB (primary): https://task-123-web.preview.roomote.run/auth/dev-login',
+    );
     expect(instruction).not.toContain('https://sandbox-raw-host.modal.host');
-    expect(instruction).not.toContain('- WEB (primary):');
   });
 });
