@@ -519,8 +519,6 @@ async function createProviderToken(
           }),
         ),
         source: 'app',
-        // OAuth access tokens expire (~2h). Surface expiry so the worker
-        // refresh loop rotates them before git/proxy auth starts failing.
         expiresAt: scopedTokens.expiresAt,
         artifactsPatch: scopedTokens.artifactsPatch,
       };

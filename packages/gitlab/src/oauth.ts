@@ -37,15 +37,10 @@ export type GitLabOAuthAccessToken = {
   expiresAt: Date;
 };
 
-// Refresh before the access token is within this window so long-running
-// worker jobs can pick up a fresh token before git operations start failing.
-// GitLab access tokens typically last ~2 hours; 10 minutes leaves headroom
-// for the worker's refresh tick and network latency.
+/** Proactive OAuth refresh window (~2h access tokens). */
 const OAUTH_ACCESS_TOKEN_REFRESH_SKEW_MS = 10 * 60 * 1000;
 
-// Personal/project/group/deploy tokens use known prefixes. OAuth access
-// tokens do not, so prefix detection stays reliable after a rotate when the
-// previous access token no longer equals the in-memory cache.
+/** PAT/project/deploy prefixes. OAuth access tokens have no gl* prefix. */
 const GITLAB_STATIC_TOKEN_PREFIX = /^(glpat-|glptt-|gldt-|glsoat-)/i;
 
 let refreshPromise: Promise<GitLabOAuthAccessToken | null> | null = null;
@@ -240,11 +235,7 @@ export async function exchangeGitLabOAuthCode(input: {
   return connection;
 }
 
-/**
- * Resolve a usable GitLab OAuth access token, refreshing when it is missing or
- * inside the proactive refresh window. Returns expiry so callers (worker token
- * mint, refresh loop) can schedule the next rotation before the token dies.
- */
+/** Resolve OAuth access token + expiry, refreshing inside the skew window. */
 export async function resolveGitLabOAuthAccessTokenWithMetadata(options?: {
   fetchImpl?: typeof fetch;
   forceRefresh?: boolean;
@@ -326,12 +317,7 @@ export async function resolveGitLabOAuthAccessToken(options?: {
   return result?.accessToken ?? null;
 }
 
-/**
- * True when `token` should be sent as an OAuth Bearer credential (not a
- * PRIVATE-TOKEN personal/project token). Matches the current cache, and also
- * treats non-prefixed tokens as OAuth while a session is active so a just
- * rotated prior access token still uses the correct header mid-flight.
- */
+/** Bearer (OAuth) vs PRIVATE-TOKEN (static gl* tokens). */
 export function isGitLabOAuthAccessToken(token: string): boolean {
   if (!token) {
     return false;
@@ -345,7 +331,6 @@ export function isGitLabOAuthAccessToken(token: string): boolean {
   return cachedAccessToken !== null;
 }
 
-/** Expiry of the last resolved OAuth access token, if any. */
 export function getCachedGitLabOAuthAccessTokenExpiresAt(): Date | null {
   return cachedAccessTokenExpiresAt;
 }

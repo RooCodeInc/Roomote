@@ -112,7 +112,6 @@ describe('GitLab deployment OAuth', () => {
       username: 'roomote',
       accessToken: 'near-expiry-access-token',
       refreshToken: 'refresh-token',
-      // Still valid, but inside the proactive refresh skew.
       expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
       scopes: ['api'],
       status: 'active',
@@ -132,7 +131,6 @@ describe('GitLab deployment OAuth', () => {
     expect(token).toBe('proactively-refreshed-token');
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(isGitLabOAuthAccessToken('proactively-refreshed-token')).toBe(true);
-    // Prior access token is still treated as OAuth for mid-flight API calls.
     expect(isGitLabOAuthAccessToken('near-expiry-access-token')).toBe(true);
     expect(isGitLabOAuthAccessToken('glpat-personal-token')).toBe(false);
   });
