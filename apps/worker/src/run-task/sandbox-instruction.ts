@@ -236,6 +236,12 @@ export function buildSandboxInstruction(
       lines.push(
         'Use these shareable preview URLs when referring to external previews in replies or proof. Do not share raw machine hosts instead.',
       );
+
+      if (options?.envVars?.ROOMOTE_AUTH_BYPASS_VALUE) {
+        lines.push(
+          'These external preview URLs are also reachable from this sandbox. The installed `agent-browser` wrapper automatically applies the task-scoped preview authentication cookie before `open`, `goto`, or `navigate`, so use the external URL when you need to validate public-proxy, redirect, cookie, or hostname-dependent behavior. Never print, log, or share the bypass credential.',
+        );
+      }
     }
   }
 
@@ -243,7 +249,7 @@ export function buildSandboxInstruction(
     lines.push(
       '',
       'This environment exposes a sandbox-local browser surface for delegated visual proof.',
-      "Use the exact hostname and port from the environment configuration's local browser URL for proof capture. Preserve `localhost` versus `127.0.0.1` exactly as configured, and treat configured external preview URLs as shareable links only.",
+      "Use the exact hostname and port from the environment configuration's local browser URL for proof capture, preserving `localhost` versus `127.0.0.1` exactly as configured. Use configured external preview URLs only when the public proxy or hostname itself is part of what you need to validate.",
     );
   }
 
