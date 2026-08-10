@@ -71,13 +71,21 @@ export async function refreshGitHubTokenWithMetadata(
 
   const now = Date.now();
 
-  const nextRefreshAtMs = tokenResult.expiresAt
+  // A known expiry may only pull the refresh earlier, never push it out. Not
+  // every short-lived credential reports one: GitHub installation tokens die
+  // after ~1h with `expiresAt: null`, and a multi-provider run merges to the
+  // soonest *known* expiry, so the default cadence stays the upper bound.
+  const expiryDrivenRefreshAtMs = tokenResult.expiresAt
     ? Math.max(
         now + MIN_SOURCE_CONTROL_TOKEN_REFRESH_DELAY_MS,
         tokenResult.expiresAt.getTime() -
           SOURCE_CONTROL_TOKEN_REFRESH_BUFFER_MS,
       )
-    : now + DEFAULT_SOURCE_CONTROL_TOKEN_REFRESH_INTERVAL_MS;
+    : Number.POSITIVE_INFINITY;
+  const nextRefreshAtMs = Math.min(
+    now + DEFAULT_SOURCE_CONTROL_TOKEN_REFRESH_INTERVAL_MS,
+    expiryDrivenRefreshAtMs,
+  );
 
   return {
     token: tokenResult.token,

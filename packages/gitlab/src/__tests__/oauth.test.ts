@@ -7,6 +7,7 @@ const {
   insertMock,
   writeMock,
   decryptMock,
+  encryptMock,
 } = vi.hoisted(() => {
   const deleteWhereMock = vi.fn(async () => undefined);
   const writeMock = vi.fn(async () => undefined);
@@ -21,6 +22,7 @@ const {
     })),
     writeMock,
     decryptMock: vi.fn(),
+    encryptMock: vi.fn(() => 'encrypted-connection'),
   };
 });
 
@@ -33,7 +35,7 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/db/encryption', () => ({
   decryptSecrets: decryptMock,
-  encryptJSON: vi.fn(() => 'encrypted-connection'),
+  encryptJSON: encryptMock,
 }));
 
 import {
@@ -100,6 +102,113 @@ describe('GitLab deployment OAuth', () => {
 
     expect(deleteWhereMock).toHaveBeenCalledOnce();
     expect(isGitLabOAuthAccessToken('gitlab-access-token')).toBe(false);
+  });
+
+  it('does not classify unrelated tokens as OAuth while a session is active', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          access_token: 'session-access-token',
+          refresh_token: 'session-refresh-token',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ id: 42, username: 'roomote' }),
+      });
+    await exchangeGitLabOAuthCode({
+      baseUrl: 'https://gitlab.example',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      code: 'code',
+      redirectUri: 'https://roomote.example/callback',
+      fetchImpl,
+    });
+
+    expect(isGitLabOAuthAccessToken('session-access-token')).toBe(true);
+    // Self-managed instances can customise the PAT prefix, and deploy/CI job
+    // tokens carry none, so an unrecognised token must not become a Bearer.
+    expect(isGitLabOAuthAccessToken('acme-pat-abc123')).toBe(false);
+    expect(isGitLabOAuthAccessToken('glpat-personal-token')).toBe(false);
+
+    await deleteGitLabOAuthConnection();
+  });
+
+  it('marks reauthorization required when a failed refresh was not preempted', async () => {
+    // The connection re-read after the failure is unchanged, so no peer
+    // rotated the tokens and the refusal is a genuine invalid_grant.
+    executeMock.mockResolvedValue([{ value: 'encrypted-connection' }]);
+    decryptMock.mockResolvedValue({
+      baseUrl: 'https://gitlab.example',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      accountId: '42',
+      username: 'roomote',
+      accessToken: 'revoked-access-token',
+      refreshToken: 'revoked-refresh-token',
+      // Inside the proactive skew but not yet expired.
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      scopes: ['api'],
+      status: 'active',
+    });
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'invalid_grant' }), {
+        status: 400,
+        statusText: 'Bad Request',
+      }),
+    );
+
+    await expect(
+      resolveGitLabOAuthAccessToken({ fetchImpl: fetchImpl as typeof fetch }),
+    ).rejects.toThrow(/must be renewed/);
+    expect(encryptMock).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'reauthorization_required' }),
+    );
+  });
+
+  it('ignores a peer rotation that is already inside the refresh window', async () => {
+    executeMock.mockResolvedValue([{ value: 'encrypted-connection' }]);
+    decryptMock
+      .mockResolvedValueOnce({
+        baseUrl: 'https://gitlab.example',
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        accountId: '42',
+        username: 'roomote',
+        accessToken: 'stale-access-token',
+        refreshToken: 'stale-refresh-token',
+        expiresAt: new Date(0).toISOString(),
+        scopes: ['api'],
+        status: 'active',
+      })
+      .mockResolvedValueOnce({
+        baseUrl: 'https://gitlab.example',
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        accountId: '42',
+        username: 'roomote',
+        accessToken: 'peer-refreshed-access-token',
+        refreshToken: 'peer-refreshed-refresh-token',
+        // Changed, but dies before the worker could refresh again.
+        expiresAt: new Date(Date.now() + 30 * 1000).toISOString(),
+        scopes: ['api'],
+        status: 'active',
+      });
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'invalid_grant' }), {
+        status: 400,
+        statusText: 'Bad Request',
+      }),
+    );
+
+    await expect(
+      resolveGitLabOAuthAccessToken({
+        fetchImpl: fetchImpl as typeof fetch,
+        forceRefresh: true,
+      }),
+    ).rejects.toThrow(/must be renewed/);
   });
 
   it('uses a still-valid token when concurrent refresh fails', async () => {
@@ -175,8 +284,52 @@ describe('GitLab deployment OAuth', () => {
     expect(token).toBe('proactively-refreshed-token');
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(isGitLabOAuthAccessToken('proactively-refreshed-token')).toBe(true);
-    expect(isGitLabOAuthAccessToken('near-expiry-access-token')).toBe(true);
+  });
+
+  it('keeps the just-rotated token classified as OAuth for in-flight callers', async () => {
+    executeMock.mockResolvedValue([{ value: 'encrypted-connection' }]);
+    const connection = {
+      baseUrl: 'https://gitlab.example',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      accountId: '42',
+      username: 'roomote',
+      accessToken: 'rotating-access-token',
+      refreshToken: 'refresh-token',
+      scopes: ['api'],
+      status: 'active',
+    };
+    decryptMock
+      .mockResolvedValueOnce({
+        ...connection,
+        expiresAt: new Date(Date.now() + 90 * 60 * 1000).toISOString(),
+      })
+      .mockResolvedValueOnce({
+        ...connection,
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      });
+
+    // A caller resolves and holds this token...
+    await expect(resolveGitLabOAuthAccessToken()).resolves.toBe(
+      'rotating-access-token',
+    );
+    // ...while a later resolve rotates it out from under them.
+    await expect(
+      resolveGitLabOAuthAccessToken({
+        fetchImpl: vi.fn().mockResolvedValue(
+          Response.json({
+            access_token: 'rotated-access-token',
+            refresh_token: 'new-refresh-token',
+            expires_in: 7200,
+          }),
+        ) as typeof fetch,
+      }),
+    ).resolves.toBe('rotated-access-token');
+
+    expect(isGitLabOAuthAccessToken('rotated-access-token')).toBe(true);
+    expect(isGitLabOAuthAccessToken('rotating-access-token')).toBe(true);
     expect(isGitLabOAuthAccessToken('glpat-personal-token')).toBe(false);
+    expect(isGitLabOAuthAccessToken('acme-pat-abc123')).toBe(false);
   });
 
   it('waits for an in-flight refresh and prevents it from recreating the connection', async () => {

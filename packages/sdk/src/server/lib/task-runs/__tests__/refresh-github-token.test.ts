@@ -83,6 +83,21 @@ describe('refreshGitHubTokenWithMetadata', () => {
     expect(result.nextRefreshAt).toBe('2026-08-10T12:25:00.000Z');
   });
 
+  it('never schedules past the default cadence for a long-lived expiry', async () => {
+    mockCreateSourceControlTokenForTaskRun.mockResolvedValue({
+      provider: 'github',
+      token: 'ghs_app_token',
+      envVar: 'GH_TOKEN',
+      envVars: { GH_TOKEN: 'ghs_app_token' },
+      source: 'app',
+      expiresAt: new Date('2026-08-10T14:00:00.000Z'),
+    });
+
+    const result = await refreshGitHubTokenWithMetadata({} as never, 123);
+
+    expect(result.nextRefreshAt).toBe('2026-08-10T12:45:00.000Z');
+  });
+
   it('keeps the default interval for credentials without an expiry', async () => {
     mockCreateSourceControlTokenForTaskRun.mockResolvedValue({
       provider: 'github',
