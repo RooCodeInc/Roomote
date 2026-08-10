@@ -65,7 +65,6 @@ vi.mock('../slack-task-run-routing', () => ({
 
 import {
   PR_REVIEW_NOTIFICATION_DEBOUNCE_MS,
-  PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS,
   consumePendingPrReviewActivity,
   enqueuePrReviewNotification,
   formatPrReviewActivityMessage,
@@ -189,7 +188,7 @@ describe('enqueuePrReviewNotification', () => {
         immediate: false,
         batchKind: 'roomote',
       }),
-      { delay: PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS },
+      { delay: 15 * 60 * 1000 },
     );
   });
 
