@@ -633,6 +633,37 @@ describe('queuePrReviewSummaryNotification', () => {
     expect(mockRedisEval).not.toHaveBeenCalled();
   });
 
+  it('suppresses Roomote inline activity while the summary enqueue is still pending', async () => {
+    let resolveSummaryEnqueue!: (value: { notifiedTaskCount: number }) => void;
+    mockEnqueuePrReviewNotification.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveSummaryEnqueue = resolve;
+        }),
+    );
+
+    queuePrReviewSummaryNotification(summaryPayload());
+
+    await vi.waitFor(() =>
+      expect(mockRedisSet).toHaveBeenCalledWith(
+        expect.stringContaining('review-completed'),
+        expect.stringContaining('summary-notified'),
+        'EX',
+        expect.any(Number),
+      ),
+    );
+    mockRedisGet.mockResolvedValue('summary-notified');
+
+    queuePrReviewActivityNotification(
+      reviewCommentPayload({ login: 'roomote[bot]' }),
+    );
+
+    await vi.waitFor(() => expect(mockRedisGet).toHaveBeenCalled());
+    expect(mockEnqueuePrReviewNotification).toHaveBeenCalledTimes(1);
+
+    resolveSummaryEnqueue({ notifiedTaskCount: 1 });
+  });
+
   it('releases the dedup claim when the notification was a no-op', async () => {
     mockEnqueuePrReviewNotification.mockResolvedValue({
       notifiedTaskCount: 0,
