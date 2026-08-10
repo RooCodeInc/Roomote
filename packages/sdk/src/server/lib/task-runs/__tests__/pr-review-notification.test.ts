@@ -455,6 +455,35 @@ describe('consumePendingPrReviewActivity', () => {
       },
     ]);
   });
+
+  it('preserves drained events when completion marker lookup fails', async () => {
+    const pendingEvents = [
+      {
+        kind: 'review_comment',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+        reviewHeadSha: 'abc123',
+      },
+      {
+        kind: 'review_comment',
+        authorLogin: 'alice',
+        reviewHeadSha: 'abc123',
+      },
+    ];
+    mockRedisGet.mockRejectedValue(new Error('redis read failed'));
+    mockMultiExec.mockResolvedValue([
+      [null, pendingEvents.map((event) => JSON.stringify(event))],
+      [null, 1],
+    ]);
+
+    await expect(
+      consumePendingPrReviewActivity({
+        taskId: 'task-1',
+        repository: 'owner/repo',
+        prNumber: 42,
+      }),
+    ).resolves.toEqual(pendingEvents);
+  });
 });
 
 describe('formatPrReviewActivityMessage', () => {

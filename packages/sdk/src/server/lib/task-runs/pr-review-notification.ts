@@ -367,13 +367,20 @@ export async function consumePendingPrReviewActivity(
 
   await Promise.all(
     roomoteHeadShas.map(async (reviewHeadSha) => {
-      const completed = await redis.get(
-        getPrReviewCompletedMarkerKey({
-          repository: target.repository,
-          prNumber: target.prNumber,
-          reviewHeadSha,
-        }),
-      );
+      let completed: string | null;
+
+      try {
+        completed = await redis.get(
+          getPrReviewCompletedMarkerKey({
+            repository: target.repository,
+            prNumber: target.prNumber,
+            reviewHeadSha,
+          }),
+        );
+      } catch {
+        // The pending list is already drained; fail open so feedback is not lost.
+        return;
+      }
 
       if (completed) {
         completedHeadShas.add(reviewHeadSha);
