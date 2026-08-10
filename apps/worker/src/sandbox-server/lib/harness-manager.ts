@@ -129,7 +129,7 @@ export interface HarnessManagerCallbacks {
   ) => Promise<HarnessManagerCompletionDecision>;
 }
 
-export interface HarnessFollowUpPromptOptions {
+interface HarnessFollowUpPromptOptions {
   prompt: string;
   images?: string[];
   workflowPhase?: string;
