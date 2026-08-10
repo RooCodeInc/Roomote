@@ -234,9 +234,10 @@ describe('enqueuePrReviewNotification', () => {
     ]);
     expect(mockRedisEval).toHaveBeenCalledWith(
       expect.stringContaining('decoded.cycleId ~= ARGV[1]'),
-      2,
+      3,
       expect.stringContaining('review-cycle:'),
       expect.stringContaining('review-cycle-completed'),
+      expect.stringContaining('review-cycle-latest-completed'),
       'cycle-1',
       expect.any(Number),
       expect.stringContaining('completed'),
@@ -387,6 +388,14 @@ describe('enqueuePrReviewNotification', () => {
       expect.stringContaining("redis.call('GET', KEYS[1]) == ARGV[1]"),
       1,
       expect.stringContaining('review-cycle:'),
+      expect.stringContaining('completed'),
+      expect.stringContaining('open'),
+      expect.any(Number),
+    );
+    expect(mockRedisEval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('GET', KEYS[1]) == ARGV[1]"),
+      1,
+      expect.stringContaining('review-cycle-latest-completed'),
       expect.stringContaining('completed'),
       expect.stringContaining('open'),
       expect.any(Number),
@@ -744,7 +753,7 @@ describe('consumePendingPrReviewActivity', () => {
     ).resolves.toEqual(pendingEvents);
   });
 
-  it('suppresses a pre-cycle inline batch after a different summary cycle completes', async () => {
+  it('suppresses a pre-cycle inline batch after a newer same-SHA cycle starts', async () => {
     const newerSameHeadEvent = {
       kind: 'review_comment',
       authorLogin: 'roomote[bot]',
@@ -791,7 +800,7 @@ describe('consumePendingPrReviewActivity', () => {
     });
 
     expect(mockRedisGet).toHaveBeenCalledWith(
-      'pr-review-notification:review-cycle:owner%2Frepo#42:abc123',
+      'pr-review-notification:review-cycle-latest-completed:owner%2Frepo#42:abc123',
     );
     expect(events).toEqual([newerSameHeadEvent]);
   });

@@ -71,6 +71,7 @@ if current then
 end
 redis.call('SET', KEYS[2], '1', 'EX', ARGV[4])
 redis.call('SET', KEYS[1], ARGV[3], 'EX', ARGV[4])
+redis.call('SET', KEYS[3], ARGV[3], 'EX', ARGV[4])
 return 1
 `;
 const RESTORE_REVIEW_CYCLE_IF_VALUE_MATCHES_SCRIPT = `
@@ -274,6 +275,18 @@ export function getPrReviewCompletedCycleKey({
   cycleId: string;
 }): string {
   return `pr-review-notification:review-cycle-completed:${encodeURIComponent(repository)}#${prNumber}:${encodeURIComponent(cycleId)}`;
+}
+
+function getPrReviewLatestCompletedCycleKey({
+  repository,
+  prNumber,
+  reviewHeadSha,
+}: {
+  repository: string;
+  prNumber: number;
+  reviewHeadSha: string;
+}): string {
+  return `pr-review-notification:review-cycle-latest-completed:${encodeURIComponent(repository)}#${prNumber}:${reviewHeadSha}`;
 }
 
 async function readPrReviewCycleState({
@@ -569,14 +582,19 @@ export async function consumePendingPrReviewActivity(
     }),
     ...roomoteHeadShas.map(async (reviewHeadSha) => {
       try {
-        const cycle = await readPrReviewCycleState({
-          repository: target.repository,
-          prNumber: target.prNumber,
-          reviewHeadSha,
-        });
+        const raw = await redis.get(
+          getPrReviewLatestCompletedCycleKey({
+            repository: target.repository,
+            prNumber: target.prNumber,
+            reviewHeadSha,
+          }),
+        );
+        const parsed = raw
+          ? prReviewCycleStateSchema.safeParse(JSON.parse(raw))
+          : null;
 
-        if (cycle.state?.phase === 'completed') {
-          completedHeadObservedAt.set(reviewHeadSha, cycle.state.observedAt);
+        if (parsed?.success && parsed.data.phase === 'completed') {
+          completedHeadObservedAt.set(reviewHeadSha, parsed.data.observedAt);
         }
       } catch {
         // The pending list is already drained; fail open so feedback is not lost.
@@ -671,13 +689,17 @@ export async function enqueuePrReviewNotification(
   let previousCycleRaw: string | null = null;
   let completedCycleKey: string | null = null;
   let completedCycleValue: string | null = null;
+  let latestCompletedCycleKey: string | null = null;
+  let previousLatestCompletedRaw: string | null = null;
 
   if (isRoomoteEvent && event.reviewHeadSha) {
+    const reviewHeadSha = event.reviewHeadSha;
+
     try {
       const cycle = await readPrReviewCycleState({
         repository: parsedInput.repository,
         prNumber: parsedInput.prNumber,
-        reviewHeadSha: event.reviewHeadSha,
+        reviewHeadSha,
       });
 
       if (!isRoomoteSummary && cycle.state?.phase === 'completed') {
@@ -725,12 +747,21 @@ export async function enqueuePrReviewNotification(
         });
         completedCycleValue = completedState;
         previousCycleRaw = cycle.raw;
+        latestCompletedCycleKey = getPrReviewLatestCompletedCycleKey({
+          repository: parsedInput.repository,
+          prNumber: parsedInput.prNumber,
+          reviewHeadSha,
+        });
+        previousLatestCompletedRaw = await getRedis().get(
+          latestCompletedCycleKey,
+        );
 
         const completed = await getRedis().eval(
           COMPLETE_REVIEW_CYCLE_SCRIPT,
-          2,
+          3,
           cycle.key,
           completedCycleKey,
+          latestCompletedCycleKey,
           cycleId,
           event.observedAt ?? Date.now(),
           completedState,
@@ -802,7 +833,12 @@ export async function enqueuePrReviewNotification(
       notifiedTaskCount += 1;
     }
   } catch (error) {
-    if (completedCycleKey && completedCycleValue && event.reviewHeadSha) {
+    if (
+      completedCycleKey &&
+      completedCycleValue &&
+      latestCompletedCycleKey &&
+      event.reviewHeadSha
+    ) {
       const cycleStateKey = getPrReviewCycleStateKey({
         repository: parsedInput.repository,
         prNumber: parsedInput.prNumber,
@@ -818,6 +854,16 @@ export async function enqueuePrReviewNotification(
           cycleStateKey,
           completedCycleValue,
           previousCycleRaw ?? '',
+          REVIEW_CYCLE_TTL_SECONDS,
+        )
+        .catch(() => undefined);
+      await getRedis()
+        .eval(
+          RESTORE_REVIEW_CYCLE_IF_VALUE_MATCHES_SCRIPT,
+          1,
+          latestCompletedCycleKey,
+          completedCycleValue,
+          previousLatestCompletedRaw ?? '',
           REVIEW_CYCLE_TTL_SECONDS,
         )
         .catch(() => undefined);
