@@ -71,11 +71,6 @@ describe('ModalClient', () => {
 
   afterEach(() => {
     vi.useRealTimers();
-    (
-      ModalClient as unknown as {
-        sandboxCache: { clear: () => void };
-      }
-    ).sandboxCache.clear();
   });
 
   it('does not mutate the caller config object', () => {

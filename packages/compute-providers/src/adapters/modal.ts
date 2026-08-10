@@ -73,7 +73,11 @@ const MODAL_SNAPSHOT_TIMEOUT_MS = 20 * 60_000;
 export class ModalClient implements ComputeProviderClient {
   public readonly vendor: ComputeProvider;
 
-  private static readonly sandboxCache = new LRUCache<string, Sandbox>({
+  // Per-instance so cached Sandbox handles die with the client that created
+  // them: a static cache pinned every past client's SDK graph (a steady heap
+  // leak under per-tick construction) and kept serving handles built with
+  // rotated-out credentials after a client rebuild.
+  private readonly sandboxCache = new LRUCache<string, Sandbox>({
     max: 100,
     ttl: MODAL_SANDBOX_CACHE_TTL_MS,
   });
@@ -206,7 +210,7 @@ export class ModalClient implements ComputeProviderClient {
   ): Promise<Sandbox> {
     throwIfAborted(signal);
 
-    const cached = ModalClient.sandboxCache.get(sandboxId);
+    const cached = this.sandboxCache.get(sandboxId);
 
     if (cached) {
       return cached;
@@ -221,11 +225,11 @@ export class ModalClient implements ComputeProviderClient {
         abortMessage: `Fetching Modal sandbox ${sandboxId} was aborted`,
       });
 
-      ModalClient.sandboxCache.set(sandboxId, sandbox);
+      this.sandboxCache.set(sandboxId, sandbox);
 
       return sandbox;
     } catch (error) {
-      ModalClient.sandboxCache.delete(sandboxId);
+      this.sandboxCache.delete(sandboxId);
 
       console.error(
         `[ModalClient] Failed to fetch sandbox "${sandboxId}" ${JSON.stringify({
@@ -495,7 +499,7 @@ export class ModalClient implements ComputeProviderClient {
 
     try {
       await this.applySandboxTags(sandbox, input.tags);
-      ModalClient.sandboxCache.set(sandbox.sandboxId, sandbox);
+      this.sandboxCache.set(sandbox.sandboxId, sandbox);
       const domains = await this.resolveTunnelDomains(
         sandbox,
         input.ports,
@@ -1072,7 +1076,7 @@ export class ModalClient implements ComputeProviderClient {
 
     try {
       await this.applySandboxTags(sandbox, input.tags);
-      ModalClient.sandboxCache.set(sandbox.sandboxId, sandbox);
+      this.sandboxCache.set(sandbox.sandboxId, sandbox);
       const domains = await this.resolveTunnelDomains(
         sandbox,
         input.ports,
@@ -1161,7 +1165,7 @@ export class ModalClient implements ComputeProviderClient {
   }
 
   private invalidateSandboxCache(instanceId: string): void {
-    ModalClient.sandboxCache.delete(instanceId);
+    this.sandboxCache.delete(instanceId);
   }
 
   private async cleanupSandboxAfterFailure(
