@@ -519,7 +519,7 @@ async function createProviderToken(
           }),
         ),
         source: 'app',
-        expiresAt: null,
+        expiresAt: scopedTokens.expiresAt,
         artifactsPatch: scopedTokens.artifactsPatch,
       };
     }
@@ -552,7 +552,7 @@ async function createProviderToken(
           provider,
         })),
         source: 'app',
-        expiresAt: null,
+        expiresAt: credentials.expiresAt,
       };
     }
     case 'ado': {
@@ -568,10 +568,20 @@ async function createProviderToken(
           provider,
         })),
         source: 'app',
-        expiresAt: null,
+        expiresAt: credentials.expiresAt,
       };
     }
   }
+}
+
+function earliestExpiry(left: Date | null, right: Date | null): Date | null {
+  if (!left) {
+    return right;
+  }
+  if (!right) {
+    return left;
+  }
+  return left.getTime() <= right.getTime() ? left : right;
 }
 
 function mergeProviderTokens(
@@ -599,12 +609,9 @@ function mergeProviderTokens(
         ...(merged.artifactsPatch ?? {}),
         ...(token.artifactsPatch ?? {}),
       },
-      expiresAt:
-        merged.expiresAt && token.expiresAt
-          ? new Date(
-              Math.min(merged.expiresAt.getTime(), token.expiresAt.getTime()),
-            )
-          : (merged.expiresAt ?? token.expiresAt),
+      // Keep the soonest known expiry so multi-provider runs still refresh
+      // short-lived credentials (e.g. GitLab OAuth) on time.
+      expiresAt: earliestExpiry(merged.expiresAt, token.expiresAt),
     }),
     primaryToken,
   );

@@ -32,6 +32,7 @@ import {
   resolveAdoBaseUrl,
   resolveAdoOrganization,
   resolveAdoToken,
+  resolveAdoTokenWithMetadata,
   resolveAdoUsername,
   stripTrailingSlashes,
 } from './credentials';
@@ -1662,8 +1663,12 @@ export async function createTaskRunAdoCredentials(
   },
 ): Promise<{
   credentials: AdoRepositoryCredential[];
+  expiresAt: Date | null;
 }> {
-  const deploymentToken = options?.token ?? (await resolveAdoToken());
+  const resolvedToken = options?.token
+    ? { token: options.token, expiresAt: null }
+    : await resolveAdoTokenWithMetadata();
+  const deploymentToken = resolvedToken?.token;
 
   if (!deploymentToken?.trim()) {
     throw new Error(
@@ -1693,5 +1698,6 @@ export async function createTaskRunAdoCredentials(
         originBaseUrl: baseUrl,
       }),
     ),
+    expiresAt: resolvedToken?.expiresAt ?? null,
   };
 }

@@ -14,6 +14,19 @@ const SOURCE_CONTROL_TOKEN_REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const MIN_SOURCE_CONTROL_TOKEN_REFRESH_DELAY_MS = 60 * 1000;
 
 /**
+ * Reserve time to re-mint before expiry. A self-managed provider can issue
+ * tokens that live for less than the fixed buffer, so cap it at a quarter of
+ * the token's remaining life rather than scheduling straight into the floor.
+ */
+function refreshBufferMs(expiresAt: Date, now: number): number {
+  const remainingMs = expiresAt.getTime() - now;
+
+  return remainingMs > 0
+    ? Math.min(SOURCE_CONTROL_TOKEN_REFRESH_BUFFER_MS, remainingMs / 4)
+    : SOURCE_CONTROL_TOKEN_REFRESH_BUFFER_MS;
+}
+
+/**
  * Generate a fresh source-control token for a task run within the caller's
  * scope. The exported name stays GitHub-specific for existing SDK callers.
  */
@@ -71,13 +84,27 @@ export async function refreshGitHubTokenWithMetadata(
 
   const now = Date.now();
 
-  const nextRefreshAtMs = tokenResult.expiresAt
+  // A known expiry may only pull the refresh earlier, never push it out. Not
+  // every short-lived credential reports one: GitHub installation tokens die
+  // after ~1h with `expiresAt: null`, and a multi-provider run merges to the
+  // soonest *known* expiry, so the default cadence stays the upper bound.
+  const expiryDrivenRefreshAtMs = tokenResult.expiresAt
     ? Math.max(
-        now + MIN_SOURCE_CONTROL_TOKEN_REFRESH_DELAY_MS,
-        tokenResult.expiresAt.getTime() -
-          SOURCE_CONTROL_TOKEN_REFRESH_BUFFER_MS,
+        now,
+        Math.min(
+          tokenResult.expiresAt.getTime(),
+          Math.max(
+            now + MIN_SOURCE_CONTROL_TOKEN_REFRESH_DELAY_MS,
+            tokenResult.expiresAt.getTime() -
+              refreshBufferMs(tokenResult.expiresAt, now),
+          ),
+        ),
       )
-    : now + DEFAULT_SOURCE_CONTROL_TOKEN_REFRESH_INTERVAL_MS;
+    : Number.POSITIVE_INFINITY;
+  const nextRefreshAtMs = Math.min(
+    now + DEFAULT_SOURCE_CONTROL_TOKEN_REFRESH_INTERVAL_MS,
+    expiryDrivenRefreshAtMs,
+  );
 
   return {
     token: tokenResult.token,

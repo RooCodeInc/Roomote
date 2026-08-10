@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const {
   mockAuthAccountsFindFirst,
   mockAuthAccountsUpdate,
+  mockTransactionExecute,
   mockResolveDeploymentEnvVar,
 } = vi.hoisted(() => ({
   mockAuthAccountsFindFirst: vi.fn(),
   mockAuthAccountsUpdate: vi.fn(),
+  mockTransactionExecute: vi.fn(),
   mockResolveDeploymentEnvVar: vi.fn(async (name: string) => {
     const value = process.env[name]?.trim();
     return value || null;
@@ -21,6 +23,17 @@ vi.mock('@roomote/db/server', () => ({
       },
     },
     update: (...args: unknown[]) => mockAuthAccountsUpdate(...args),
+    transaction: async (callback: (tx: unknown) => unknown) =>
+      callback({
+        execute: (...args: unknown[]) => mockTransactionExecute(...args),
+        query: {
+          authAccounts: {
+            findFirst: (...args: unknown[]) =>
+              mockAuthAccountsFindFirst(...args),
+          },
+        },
+        update: (...args: unknown[]) => mockAuthAccountsUpdate(...args),
+      }),
   },
   authAccounts: {
     id: 'authAccounts.id',
@@ -30,6 +43,7 @@ vi.mock('@roomote/db/server', () => ({
   and: vi.fn((...conditions: unknown[]) => ({ type: 'and', conditions })),
   eq: vi.fn((left: unknown, right: unknown) => ({ type: 'eq', left, right })),
   resolveDeploymentEnvVar: mockResolveDeploymentEnvVar,
+  sql: vi.fn(),
 }));
 
 import {
@@ -37,6 +51,7 @@ import {
   clearAdoEntraTokenCache,
   describeAdoApiError,
   resolveAdoToken,
+  resolveAdoTokenWithMetadata,
   validateAdoDelegatedCredentials,
   validateAdoEntraCredentials,
   validateAdoToken,
@@ -103,12 +118,24 @@ describe('Azure DevOps credentials', () => {
       ),
     );
 
-    const first = await resolveAdoToken();
+    const first = await resolveAdoTokenWithMetadata();
     const second = await resolveAdoToken();
 
-    expect(first).toBe('header.payload.signature');
-    expect(second).toBe(first);
+    expect(first?.token).toBe('header.payload.signature');
+    expect(first?.expiresAt).toBeInstanceOf(Date);
+    expect(second).toBe(first?.token);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it('returns no expiry metadata for static PAT credentials', async () => {
+    await expect(resolveAdoTokenWithMetadata()).resolves.toEqual({
+      token: 'ado_deployment_token',
+      expiresAt: null,
+    });
   });
 
   it('refreshes and persists an Azure DevOps delegated token', async () => {
@@ -139,6 +166,32 @@ describe('Azure DevOps credentials', () => {
     await expect(resolveAdoToken()).resolves.toBe('new.header.signature');
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(mockAuthAccountsUpdate).toHaveBeenCalledTimes(1);
+    expect(mockTransactionExecute).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
+  it('revalidates the linked account on every delegated token resolve', async () => {
+    delete process.env.ADO_TOKEN;
+    process.env.ADO_AUTH_MODE = 'delegated';
+    process.env.ADO_LINKED_ACCOUNT_ID = 'ado-user@example.com';
+    mockAuthAccountsFindFirst.mockResolvedValue({
+      id: 'account-1',
+      accountId: 'ado-user@example.com',
+      accessToken: 'header.payload.signature',
+      refreshToken: 'refresh-token',
+      accessTokenExpiresAt: new Date(Date.now() + 3_600_000),
+    });
+
+    await expect(resolveAdoToken()).resolves.toBe('header.payload.signature');
+
+    mockAuthAccountsFindFirst.mockResolvedValue(null);
+
+    await expect(resolveAdoToken()).resolves.toBeNull();
+    expect(mockAuthAccountsFindFirst).toHaveBeenCalledTimes(2);
+    expect(mockTransactionExecute).toHaveBeenCalledTimes(2);
   });
 
   it('validates Azure DevOps tokens against the repository listing the sync uses', async () => {
@@ -263,6 +316,19 @@ describe('Azure DevOps credentials', () => {
     });
     expect(outage.status).toBe('unknown');
 
+    const ambiguousBadRequest = await validateAdoEntraCredentials({
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      tenantId: 'tenant-id',
+      organization: 'acme',
+      fetchImpl: vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          Response.json({ error: 'temporarily_unavailable' }, { status: 400 }),
+        ),
+    });
+    expect(ambiguousBadRequest.status).toBe('unknown');
+
     const network = await validateAdoEntraCredentials({
       clientId: 'client-id',
       clientSecret: 'client-secret',
@@ -292,7 +358,9 @@ describe('Azure DevOps credentials', () => {
       organization: 'acme',
       fetchImpl: vi
         .fn<typeof fetch>()
-        .mockResolvedValue(new Response('{}', { status: 400 })),
+        .mockResolvedValue(
+          Response.json({ error: 'invalid_grant' }, { status: 400 }),
+        ),
     });
     expect(refused).toEqual({
       status: 'invalid',
