@@ -126,8 +126,32 @@ export interface HarnessManagerCallbacks {
   }) => Promise<void>;
   onBeforeTaskCompletion?: (
     completionId: string,
-  ) => Promise<'continue' | 'finalize' | 'ignore'>;
+  ) => Promise<HarnessManagerCompletionDecision>;
 }
+
+export interface HarnessFollowUpPromptOptions {
+  prompt: string;
+  images?: string[];
+  workflowPhase?: string;
+  autoSteerWhenQueued?: boolean;
+  queueOnly?: boolean;
+  visibleInTranscript?: boolean;
+  source?: string;
+  userId?: string;
+  userName?: string;
+  userImageUrl?: string;
+  clientMessageId?: string;
+}
+
+export type HarnessManagerCompletionDecision =
+  | 'finalize'
+  | 'ignore'
+  | {
+      disposition: 'continue';
+      prompt: HarnessFollowUpPromptOptions;
+      onAccepted?: () => void;
+      onRejected?: () => Promise<void>;
+    };
 
 interface HarnessManagerConfig {
   harness: Harness;
@@ -144,6 +168,10 @@ interface HarnessManagerConfig {
 
 function formatCallbackError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isStoppingPhase(phase: TaskPhase): boolean {
+  return phase === 'shutting_down' || phase === 'stopped';
 }
 
 type MessageTaskEvent = Extract<
@@ -235,19 +263,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
    * to running phase. Clears completion timestamps so the keepalive timer
    * doesn't fire prematurely.
    */
-  sendFollowUpPrompt(options: {
-    prompt: string;
-    images?: string[];
-    workflowPhase?: string;
-    autoSteerWhenQueued?: boolean;
-    queueOnly?: boolean;
-    visibleInTranscript?: boolean;
-    source?: string;
-    userId?: string;
-    userName?: string;
-    userImageUrl?: string;
-    clientMessageId?: string;
-  }): boolean {
+  sendFollowUpPrompt(options: HarnessFollowUpPromptOptions): boolean {
     if (this.phase === 'shutting_down') {
       this.logger.warn(
         '[HarnessManager#sendFollowUpPrompt] Refusing follow-up while shutting down',
@@ -926,7 +942,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
       this.pendingCompletionId ??
       `${sessionId ?? 'unknown'}:fallback:${++this.fallbackCompletionSequence}`;
     void decide(completionId)
-      .then((disposition) => {
+      .then(async (disposition) => {
         this.completionDecisionPending = false;
         if (
           this.state.sessionId !== sessionId ||
@@ -936,11 +952,39 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
         ) {
           return;
         }
-        if (disposition === 'continue') {
+        if (typeof disposition === 'object') {
           this.continuationStartPending = true;
           this.clearTurnSettlementState();
           if (this.phase !== 'running') {
             this.setPhase('running');
+          }
+
+          const sent = this.sendFollowUpPrompt(disposition.prompt);
+          if (sent) {
+            try {
+              disposition.onAccepted?.();
+            } catch (error) {
+              this.logger.warn(
+                `[HarnessManager] Continuation acceptance callback failed: ${formatCallbackError(error)}`,
+              );
+            }
+            return;
+          }
+
+          try {
+            await disposition.onRejected?.();
+          } catch (error) {
+            this.logger.warn(
+              `[HarnessManager] Continuation rejection callback failed: ${formatCallbackError(error)}`,
+            );
+          }
+          this.continuationStartPending = false;
+          if (
+            this.state.sessionId === sessionId &&
+            !isStoppingPhase(this.phase) &&
+            !this.state.cancelTriggeredAt
+          ) {
+            this.finalizeTaskCompletionNow();
           }
           return;
         }
@@ -951,6 +995,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
       })
       .catch((error) => {
         this.completionDecisionPending = false;
+        this.continuationStartPending = false;
         this.logger.warn(
           `[HarnessManager] Pre-completion decision failed: ${formatCallbackError(error)}`,
         );

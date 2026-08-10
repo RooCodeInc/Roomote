@@ -100,13 +100,7 @@ vi.mock('node:fs', () => ({
 type FakeHarnessManager = EventEmitter & {
   currentIsConnected: boolean;
   currentSleepAt: number | null;
-  callbacks?: {
-    onStart?: (taskId: string) => Promise<void>;
-    onExit?: () => Promise<void>;
-    onBeforeTaskCompletion?: (
-      completionId: string,
-    ) => Promise<'continue' | 'finalize' | 'ignore'>;
-  };
+  callbacks?: HarnessManagerCallbacks;
   getStatus: ReturnType<typeof vi.fn>;
   resumeTask: ReturnType<typeof vi.fn>;
   sendFollowUpPrompt: ReturnType<typeof vi.fn>;
@@ -181,13 +175,7 @@ vi.mock('../../sandbox-server', () => ({
   HarnessManager: class FakeHarnessManager extends EventEmitter {
     currentIsConnected = true;
     currentSleepAt: number | null = null;
-    callbacks?: {
-      onStart?: (taskId: string) => Promise<void>;
-      onExit?: () => Promise<void>;
-      onBeforeTaskCompletion?: (
-        completionId: string,
-      ) => Promise<'continue' | 'finalize' | 'ignore'>;
-    };
+    callbacks?: HarnessManagerCallbacks;
     getStatus = vi.fn(() => ({
       isConnected: this.currentIsConnected,
       phase: 'running',
@@ -200,15 +188,7 @@ vi.mock('../../sandbox-server', () => ({
     cancelTask = vi.fn();
     dispose = vi.fn();
 
-    constructor(config?: {
-      callbacks?: {
-        onStart?: (taskId: string) => Promise<void>;
-        onExit?: () => Promise<void>;
-        onBeforeTaskCompletion?: (
-          completionId: string,
-        ) => Promise<'continue' | 'finalize' | 'ignore'>;
-      };
-    }) {
+    constructor(config?: { callbacks?: HarnessManagerCallbacks }) {
       super();
       this.callbacks = config?.callbacks;
       harnessManagerInstances.push(this as FakeHarnessManager);
@@ -284,6 +264,7 @@ vi.mock('../actor-mismatch-notice', () => ({
 
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
+import type { HarnessManagerCallbacks } from '../../sandbox-server/lib/harness-manager';
 import { getDefaultKeepaliveMs } from '../completion';
 import { runTask } from '../run-task';
 import type { EnvironmentSetupSettledOutcome } from '../types';
@@ -2543,7 +2524,7 @@ describe('runTask', () => {
     );
   });
 
-  it('accepts a goal continuation before diagnostic persistence settles', async () => {
+  it('returns a goal continuation plan without dispatching it', async () => {
     await runTask({
       taskRun: {
         id: 407,
@@ -2587,26 +2568,18 @@ describe('runTask', () => {
       } as never,
     });
 
-    let resolveRecordEvent: (() => void) | undefined;
-    taskRunsRecordEventMock.mockImplementationOnce(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveRecordEvent = resolve;
-        }),
-    );
     const manager = harnessManagerInstances[0]!;
     const decision =
       manager.callbacks?.onBeforeTaskCompletion?.('completion-race');
 
-    await expect(decision).resolves.toBe('continue');
-    expect(manager.sendFollowUpPrompt).toHaveBeenCalledWith(
-      expect.objectContaining({
+    await expect(decision).resolves.toMatchObject({
+      disposition: 'continue',
+      prompt: {
         source: 'goal-continuation',
         clientMessageId: 'goal-continuation:completion-race',
-      }),
-    );
-    expect(resolveRecordEvent).toBeDefined();
-    resolveRecordEvent?.();
+      },
+    });
+    expect(manager.sendFollowUpPrompt).not.toHaveBeenCalled();
   });
 
   describe('background environment setup settled notices', () => {

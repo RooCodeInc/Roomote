@@ -1313,21 +1313,8 @@ export const runTask = async ({
                   return 'finalize' as const;
                 }
 
-                const sent =
-                  harnessManager?.sendFollowUpPrompt({
-                    prompt: buildTaskGoalContinuationPrompt(claim.goal),
-                    visibleInTranscript: false,
-                    source: 'goal-continuation',
-                    clientMessageId: `goal-continuation:${completionId}`,
-                  }) ?? false;
-                if (!sent) {
-                  await sdk.taskRuns.releaseGoalContinuation({
-                    runId: taskRun.id,
-                    continuationId: completionId,
-                  });
-                }
-                const continuationEvent = {
-                  eventType: 'decision',
+                const continuationEvent = (sent: boolean) => ({
+                  eventType: 'decision' as const,
                   message: `Goal continuation ${sent ? 'started' : 'could not start'} for task run #${taskRun.id}.`,
                   details: {
                     reason: 'goal_continuation',
@@ -1335,14 +1322,26 @@ export const runTask = async ({
                     continuation: claim.goal.continuationsUsed,
                     maxContinuations: claim.goal.maxContinuations,
                   },
-                } as const;
-                if (sent) {
-                  void recordWorkerRuntimeEvent(continuationEvent);
-                  return 'continue' as const;
-                }
-
-                await recordWorkerRuntimeEvent(continuationEvent);
-                return 'finalize' as const;
+                });
+                return {
+                  disposition: 'continue' as const,
+                  prompt: {
+                    prompt: buildTaskGoalContinuationPrompt(claim.goal),
+                    visibleInTranscript: false,
+                    source: 'goal-continuation',
+                    clientMessageId: `goal-continuation:${completionId}`,
+                  },
+                  onAccepted: () => {
+                    void recordWorkerRuntimeEvent(continuationEvent(true));
+                  },
+                  onRejected: async () => {
+                    await sdk.taskRuns.releaseGoalContinuation({
+                      runId: taskRun.id,
+                      continuationId: completionId,
+                    });
+                    await recordWorkerRuntimeEvent(continuationEvent(false));
+                  },
+                };
               },
             }
           : {}),

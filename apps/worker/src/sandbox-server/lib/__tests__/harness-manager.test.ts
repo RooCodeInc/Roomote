@@ -31,6 +31,8 @@ vi.mock('../../../monitoring/sentry', () => ({
 
 class FakeHarness extends EventEmitter<HarnessEvents> implements Harness {
   sentCommands: TaskCommand[] = [];
+  onSendCommand?: (command: TaskCommand) => void;
+  sendCommandResult = true;
   pendingUserInputRequests: Array<Record<string, unknown>> = [];
   queuedMessageSnapshots: Array<{
     id: string;
@@ -81,7 +83,10 @@ class FakeHarness extends EventEmitter<HarnessEvents> implements Harness {
 
   sendCommand(command: TaskCommand): boolean {
     this.sentCommands.push(command);
-    return true;
+    if (this.sendCommandResult) {
+      this.onSendCommand?.(command);
+    }
+    return this.sendCommandResult;
   }
 
   get isConnected(): boolean {
@@ -2058,7 +2063,10 @@ describe('HarnessManager touchKeepalive', () => {
         return 'ignore' as const;
       }
       claimedCompletionIds.add(completionId);
-      return 'continue' as const;
+      return {
+        disposition: 'continue' as const,
+        prompt: { prompt: 'hidden continuation' },
+      };
     });
     const onExit = vi.fn();
     const { harness, manager } = createManager({
@@ -2130,6 +2138,136 @@ describe('HarnessManager touchKeepalive', () => {
         expect(onBeforeTaskCompletion).toHaveBeenCalledTimes(3);
       });
       expect(onBeforeTaskCompletion).toHaveBeenLastCalledWith('completion-2');
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('marks continuation pending before dispatch can synchronously start and finish it', async () => {
+    const onExit = vi.fn();
+    const onBeforeTaskCompletion = vi.fn(async (completionId: string) =>
+      completionId === 'completion-1'
+        ? {
+            disposition: 'continue' as const,
+            prompt: {
+              prompt: 'hidden continuation',
+              clientMessageId: 'goal-continuation:completion-1',
+            },
+          }
+        : ('finalize' as const),
+    );
+    const { harness, manager } = createManager({
+      onBeforeTaskCompletion,
+      onExit,
+    });
+    const completion = (completionId: string) =>
+      ({
+        eventName: TaskEventName.TaskCompleted,
+        payload: [
+          'task-goal-dispatch-race',
+          {
+            totalTokensIn: 0,
+            totalTokensOut: 0,
+            totalCost: 0,
+            contextTokens: 0,
+          },
+          {},
+          { isSubtask: false, completionId },
+        ],
+      }) as TaskEvent;
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskStarted,
+        payload: ['task-goal-dispatch-race'],
+      } as TaskEvent);
+      harness.onSendCommand = (command) => {
+        if (command.commandName !== TaskCommandName.SendMessage) {
+          return;
+        }
+        harness.emitRuntimeOutput({
+          id: 'goal-continuation:completion-1',
+          ts: 10,
+          eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          kind: 'text',
+          role: 'user',
+          contentBlocks: [{ type: 'text', text: 'hidden continuation' }],
+          metadata: {
+            sessionId: 'task-goal-dispatch-race',
+            sequence: 2,
+          },
+          payload: {
+            sessionId: 'task-goal-dispatch-race',
+            text: 'hidden continuation',
+          },
+        } as AcpMessage);
+        harness.emitTaskEvent(completion('completion-2'));
+      };
+
+      harness.emitTaskEvent(completion('completion-1'));
+
+      await vi.waitFor(() => {
+        expect(onBeforeTaskCompletion).toHaveBeenCalledTimes(2);
+        expect(onExit).toHaveBeenCalledTimes(1);
+      });
+      expect(onBeforeTaskCompletion.mock.calls).toEqual([
+        ['completion-1'],
+        ['completion-2'],
+      ]);
+      expect(manager.getStatus().phase).toBe('waiting_for_prompt');
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
+  it('runs continuation rejection cleanup before finalizing', async () => {
+    const onRejected = vi.fn().mockResolvedValue(undefined);
+    const onExit = vi.fn();
+    const { harness, manager } = createManager({
+      onBeforeTaskCompletion: vi.fn(async () => ({
+        disposition: 'continue' as const,
+        prompt: { prompt: 'hidden continuation' },
+        onRejected,
+      })),
+      onExit,
+    });
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskStarted,
+        payload: ['task-goal-rejected-dispatch'],
+      } as TaskEvent);
+      harness.sendCommandResult = false;
+
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskCompleted,
+        payload: [
+          'task-goal-rejected-dispatch',
+          {
+            totalTokensIn: 0,
+            totalTokensOut: 0,
+            totalCost: 0,
+            contextTokens: 0,
+          },
+          {},
+          { isSubtask: false, completionId: 'completion-rejected' },
+        ],
+      } as TaskEvent);
+
+      await vi.waitFor(() => {
+        expect(onRejected).toHaveBeenCalledTimes(1);
+        expect(onExit).toHaveBeenCalledTimes(1);
+      });
+      expect(onRejected.mock.invocationCallOrder[0]).toBeLessThan(
+        onExit.mock.invocationCallOrder[0]!,
+      );
+      expect(manager.getStatus().phase).toBe('waiting_for_prompt');
     } finally {
       manager.dispose();
       harness.dispose();
