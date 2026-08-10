@@ -1,13 +1,16 @@
 import {
   type CommitAuthorKind,
+  type SourceControlProvider,
   type TaskInitiator,
   PRODUCT_NAME,
 } from '@roomote/types';
 import {
   type DatabaseOrTransaction,
+  and,
   desc,
   eq,
   githubUserMappings,
+  sourceControlUserMappings,
   tasks,
   users,
 } from '@roomote/db/server';
@@ -308,8 +311,66 @@ export function resolvePublicGitAuthor(
 export async function resolveRunCommitAuthor(
   tx: DatabaseOrTransaction,
   run: { taskId: string; actingUserId: string | null },
+  sourceControl?: {
+    provider: SourceControlProvider;
+    host?: string;
+  },
 ): Promise<ResolvedTaskCommitAuthor> {
   if (run.actingUserId) {
+    if (sourceControl && sourceControl.provider !== 'github') {
+      const user = await tx.query.users.findFirst({
+        where: eq(users.id, run.actingUserId),
+        columns: { id: true, name: true },
+      });
+      if (!user) {
+        return DEFAULT_ROOMOTE_COMMIT_AUTHOR;
+      }
+
+      const mapping = sourceControl.host
+        ? await tx.query.sourceControlUserMappings.findFirst({
+            where: and(
+              eq(sourceControlUserMappings.userId, run.actingUserId),
+              eq(
+                sourceControlUserMappings.sourceControlProvider,
+                sourceControl.provider,
+              ),
+              eq(sourceControlUserMappings.host, sourceControl.host),
+            ),
+            orderBy: [desc(sourceControlUserMappings.updatedAt)],
+            columns: {
+              externalAccountId: true,
+              username: true,
+              displayName: true,
+            },
+          })
+        : null;
+      const username = normalizeNullableString(mapping?.username);
+      const displayName =
+        normalizeNullableString(user.name) ??
+        normalizeNullableString(mapping?.displayName) ??
+        username ??
+        PRODUCT_NAME;
+      const commitEmail =
+        sourceControl.provider === 'gitlab' &&
+        sourceControl.host === 'gitlab.com' &&
+        mapping?.externalAccountId &&
+        username
+          ? `${mapping.externalAccountId}-${username}@users.noreply.gitlab.com`
+          : ROOMOTE_GIT_AUTHOR.email;
+
+      return {
+        kind: 'user',
+        displayName,
+        publicDisplayName: username ? `@${username}` : null,
+        githubLogin: null,
+        prAssigneeLogin: null,
+        gitAuthor: {
+          name: displayName,
+          email: commitEmail,
+        },
+      };
+    }
+
     const [user, githubIdentity] = await Promise.all([
       tx.query.users.findFirst({
         where: eq(users.id, run.actingUserId),

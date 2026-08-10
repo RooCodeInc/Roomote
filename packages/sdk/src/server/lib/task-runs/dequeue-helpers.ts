@@ -22,6 +22,7 @@ import {
   markTaskStartParallelCountEndedAt,
   resolveSandboxModelRuntimeEnv,
   resolveWorkspaceSourceControlProvider,
+  resolveWorkspaceSourceControlHost,
   workspaceAllowsPrivateAttribution,
   workspaceUsesOnlySourceControlProvider,
   stringifyDecryptedEnvVarValue,
@@ -764,28 +765,33 @@ export async function resolveGitAuthor(
   tx: DbTx,
   taskRun: Pick<TaskRun, 'id' | 'taskId' | 'actingUserId' | 'payload'>,
 ): Promise<GitAuthor> {
-  const commitAuthor = await resolveRunCommitAuthor(tx, taskRun);
+  const workspace = resolveTaskWorkspace(taskRun.payload);
+  const [provider, host] = await Promise.all([
+    resolveWorkspaceSourceControlProvider(tx, workspace),
+    resolveWorkspaceSourceControlHost(tx, workspace),
+  ]);
+  const commitAuthor = await resolveRunCommitAuthor(
+    tx,
+    taskRun,
+    provider ? { provider, host } : undefined,
+  );
 
   if (commitAuthor.kind === 'roomote') {
     return commitAuthor.gitAuthor;
   }
 
-  const workspace = resolveTaskWorkspace(taskRun.payload);
   if (await workspaceAllowsPrivateAttribution(tx, workspace)) {
     return commitAuthor.gitAuthor;
   }
 
-  const usesOnlyGitHub = await workspaceUsesOnlySourceControlProvider(
-    tx,
-    workspace,
-    'github',
-  );
-  const provider = await resolveWorkspaceSourceControlProvider(tx, workspace);
+  const usesOnlyResolvedProvider = provider
+    ? await workspaceUsesOnlySourceControlProvider(tx, workspace, provider)
+    : false;
   const singleUnknownGitHubRepository =
     workspace.type === 'repository' &&
     !provider &&
     resolveSourceControlProviderFromPayload(taskRun.payload) === 'github';
-  if (!usesOnlyGitHub && !singleUnknownGitHubRepository) {
+  if (!usesOnlyResolvedProvider && !singleUnknownGitHubRepository) {
     return DEFAULT_ROOMOTE_COMMIT_AUTHOR.gitAuthor;
   }
 

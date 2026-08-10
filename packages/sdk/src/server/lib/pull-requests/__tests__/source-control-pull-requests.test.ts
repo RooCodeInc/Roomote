@@ -208,19 +208,20 @@ describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
     );
   });
 
-  it('creates a GitLab merge request in a GitHub-primary mixed task', async () => {
+  it('creates a GitLab merge request with the linked public handle', async () => {
     mockGetDeploymentPrAction.mockResolvedValue('create');
     mockRepositoriesFindFirst.mockResolvedValue({
       installationId: null,
       externalRepoId: '101',
       fullName: 'acme/backend',
+      host: 'gitlab.com',
       htmlUrl: 'https://gitlab.com/acme/backend',
       private: false,
     });
-    mockResolveLaunchTaskCommitAuthor.mockResolvedValue({
+    mockResolveRunCommitAuthor.mockResolvedValue({
       kind: 'user',
       displayName: 'Private Name',
-      publicDisplayName: '@github-login',
+      publicDisplayName: '@gitlab-user',
       prAssigneeLogin: null,
     });
     const fetchImpl = vi
@@ -237,10 +238,9 @@ describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
 
     const result = await createOrUpdateSourceControlPullRequestForTaskRun({
       taskRun: makeTaskRun({
-        repo: 'acme/frontend',
-        selectedRepositories: ['acme/frontend', 'acme/backend'],
-        sourceControlProvider: 'github',
-        repositoryProviders: { 'acme/backend': 'gitlab' },
+        repo: 'acme/backend',
+        sourceControlProvider: 'gitlab',
+        sourceControlHost: 'gitlab.com',
       } as unknown as TaskRun['payload']),
       input: {
         action: 'create_or_update_pull_request',
@@ -287,10 +287,15 @@ describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
           target_branch: 'develop',
           remove_source_branch: false,
           title: '[Feature] Provider neutral PRs',
-          description: attributionBody('Created by Roomote.'),
+          description: attributionBody('Opened on behalf of @gitlab-user.'),
           labels: 'roomote',
         }),
       }),
+    );
+    expect(mockResolveRunCommitAuthor).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ actingUserId: 'user-123' }),
+      { provider: 'gitlab', host: 'gitlab.com' },
     );
   });
 
