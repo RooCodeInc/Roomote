@@ -291,10 +291,6 @@ export async function launchTask(
       requestedType === 'standard' &&
       body.notifyOnSettle === true &&
       'runId' in auth.authContext;
-    const reportToSourceOnSettle =
-      requestedType === 'standard' &&
-      body.reportToSource === true &&
-      'runId' in auth.authContext;
     const shouldLinkToSourceRun =
       'runId' in auth.authContext &&
       (requestedType === 'standard' ||
@@ -329,9 +325,6 @@ export async function launchTask(
                 requestedType === 'standard' ? body.bootstrap : undefined,
               ...(notifySourceRunOnSettle
                 ? { notifySourceRunOnSettle: true }
-                : {}),
-              ...(reportToSourceOnSettle
-                ? { reportToSourceOnSettle: true }
                 : {}),
             },
           };

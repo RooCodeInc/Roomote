@@ -378,8 +378,6 @@ export async function generatePrompt({
         sourceChannelId: communicationChannelId ?? undefined,
         sourceThreadId: communicationThreadId ?? undefined,
         sourceMessageId: communicationMessageId ?? undefined,
-        reportToSourceOnSettle:
-          taskSpec.payload.reportToSourceOnSettle === true,
         interactiveMode: taskSpec.payload.bootstrap?.interactiveMode,
         requestFormat,
         linkedWorkItems: taskSpec.payload.linkedWorkItems,

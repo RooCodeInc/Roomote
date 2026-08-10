@@ -73,7 +73,6 @@ export function standardTask({
   sourceChannelId,
   sourceThreadId,
   sourceMessageId,
-  reportToSourceOnSettle,
   linkedWorkItems,
   interactiveMode = false,
   requestFormat = 'plain',
@@ -123,7 +122,6 @@ export function standardTask({
   sourceChannelId?: string;
   sourceThreadId?: string;
   sourceMessageId?: string;
-  reportToSourceOnSettle?: boolean;
   linkedWorkItems?: LinkedWorkItem[];
   interactiveMode?: boolean;
   requestFormat?: 'plain' | 'structured';
@@ -351,11 +349,8 @@ ${buildGitHubMessageInstructions()}`
         ? `
     <message_id>${escapeTaskContextText(sourceMessageId)}</message_id>`
         : ''
-    }${
-      reportToSourceOnSettle
-        ? '\n    <completion_report>Send one final report to this source conversation when the task finishes.</completion_report>'
-        : ''
     }
+    <rule>When an instruction says to report back to the source thread, it means this originating conversation.</rule>
   </task_source_context>`
       : '';
   const sourceControlContext = sourceControlProvider

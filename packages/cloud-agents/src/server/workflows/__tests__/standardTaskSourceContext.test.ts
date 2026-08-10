@@ -10,7 +10,6 @@ describe('standardTask source context', () => {
       sourceChannelId: 'C123',
       sourceThreadId: '123.456',
       sourceMessageId: '123.789',
-      reportToSourceOnSettle: true,
     });
 
     expect(harnessInstructions).toContain('<task_source_context>');
@@ -19,7 +18,7 @@ describe('standardTask source context', () => {
     expect(harnessInstructions).toContain('<thread_id>123.456</thread_id>');
     expect(harnessInstructions).toContain('<message_id>123.789</message_id>');
     expect(harnessInstructions).toContain(
-      'Send one final report to this source conversation when the task finishes.',
+      'When an instruction says to report back to the source thread, it means this originating conversation.',
     );
   });
 

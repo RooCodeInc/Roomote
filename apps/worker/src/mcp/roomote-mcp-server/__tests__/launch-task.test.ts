@@ -128,30 +128,4 @@ describe('handleLaunchTask', () => {
       type: 'standard',
     });
   });
-
-  it('passes through the optional source-conversation report instruction', async () => {
-    vi.mocked(tasksApiClient.launchTask).mockResolvedValueOnce({
-      success: true,
-      runId: 43,
-      taskId: 'task-report',
-    });
-
-    await handleLaunchTask(
-      {
-        prompt: 'Run this and report back to the source thread',
-        environmentId: '10b031ec-b728-4d8f-a9a0-1ed4aa500511',
-        reportToSource: true,
-      },
-      config,
-    );
-
-    expect(vi.mocked(tasksApiClient.launchTask)).toHaveBeenCalledWith(config, {
-      prompt: 'Run this and report back to the source thread',
-      repo: ALL_REPOSITORIES,
-      branch: undefined,
-      environmentId: '10b031ec-b728-4d8f-a9a0-1ed4aa500511',
-      type: 'standard',
-      reportToSource: true,
-    });
-  });
 });

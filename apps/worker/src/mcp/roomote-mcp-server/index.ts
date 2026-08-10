@@ -546,7 +546,6 @@ const manageTasksToolDescription =
   'Use action "get_compute_logs" to fetch all compute logs for a task, including per-job command output for compute providers that support output lookup when the job has both a machine id and sandbox command id (requires taskId). ' +
   'Use action "get_messages" to retrieve the latest message history for a task (requires taskId, returns newest first). ' +
   `Use action "launch" to create and start a new task against an environment using ${PRODUCT_NAME}'s default standard workflow (requires prompt and environmentId). ` +
-  'When the user asks for a final report in the source conversation, set reportToSource to true. ' +
   'Use action "cancel" to cancel an active task (requires taskId). ' +
   'Use action "send_message" to send a follow-up message to a running task (requires taskId and message).';
 
@@ -624,12 +623,6 @@ const manageTasksInputSchema = {
     .optional()
     .describe(
       'For launch: when true, the platform sends a message into THIS task session when the launched task settles (completes, fails, is canceled, or goes idle), so you can wait for that notification instead of polling get_summary.',
-    ),
-  reportToSource: z
-    .boolean()
-    .optional()
-    .describe(
-      'For launch: when true, instruct the child task to send one final report to the source communication thread when it finishes.',
     ),
 } satisfies Record<string, z.ZodTypeAny>;
 
@@ -717,7 +710,6 @@ roomoteMcpServer.registerTool(
             branch: params.branch,
             environmentId,
             notifyOnSettle: params.notifyOnSettle,
-            reportToSource: params.reportToSource,
           },
           config,
         );

@@ -1258,8 +1258,6 @@ const delegatedTaskPayloadSchema = sharedTaskPayloadSchema.extend({
    * `notifyOnSettle`; read by the run-finalization path.
    */
   notifySourceRunOnSettle: z.boolean().optional(),
-  /** Instruct the agent to report its final result to the source conversation. */
-  reportToSourceOnSettle: z.boolean().optional(),
 });
 
 export function getNotifySourceRunOnSettleFromPayload(
