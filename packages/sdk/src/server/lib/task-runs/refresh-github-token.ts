@@ -74,7 +74,8 @@ export async function refreshGitHubTokenWithMetadata(
   const nextRefreshAtMs = tokenResult.expiresAt
     ? Math.max(
         now + MIN_SOURCE_CONTROL_TOKEN_REFRESH_DELAY_MS,
-        tokenResult.expiresAt.getTime() - SOURCE_CONTROL_TOKEN_REFRESH_BUFFER_MS,
+        tokenResult.expiresAt.getTime() -
+          SOURCE_CONTROL_TOKEN_REFRESH_BUFFER_MS,
       )
     : now + DEFAULT_SOURCE_CONTROL_TOKEN_REFRESH_INTERVAL_MS;
 

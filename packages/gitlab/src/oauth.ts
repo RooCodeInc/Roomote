@@ -69,9 +69,7 @@ function toAccessTokenResult(
   expiresAt: string | Date,
 ): GitLabOAuthAccessToken {
   const resolvedExpiresAt =
-    expiresAt instanceof Date
-      ? expiresAt
-      : parseConnectionExpiresAt(expiresAt);
+    expiresAt instanceof Date ? expiresAt : parseConnectionExpiresAt(expiresAt);
   rememberAccessToken(accessToken, resolvedExpiresAt);
   return { accessToken, expiresAt: resolvedExpiresAt };
 }

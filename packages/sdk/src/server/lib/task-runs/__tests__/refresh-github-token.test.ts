@@ -1,18 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const {
-  mockFindFirst,
-  mockUpdate,
-  mockCreateSourceControlTokenForTaskRun,
-} = vi.hoisted(() => ({
-  mockFindFirst: vi.fn() as ReturnType<typeof vi.fn>,
-  mockUpdate: vi.fn(() => ({
-    set: vi.fn(() => ({
-      where: vi.fn(async () => undefined),
-    })),
-  })) as ReturnType<typeof vi.fn>,
-  mockCreateSourceControlTokenForTaskRun: vi.fn() as ReturnType<typeof vi.fn>,
-}));
+const { mockFindFirst, mockUpdate, mockCreateSourceControlTokenForTaskRun } =
+  vi.hoisted(() => ({
+    mockFindFirst: vi.fn() as ReturnType<typeof vi.fn>,
+    mockUpdate: vi.fn(() => ({
+      set: vi.fn(() => ({
+        where: vi.fn(async () => undefined),
+      })),
+    })) as ReturnType<typeof vi.fn>,
+    mockCreateSourceControlTokenForTaskRun: vi.fn() as ReturnType<typeof vi.fn>,
+  }));
 
 vi.mock('@roomote/db/server', () => ({
   db: {
