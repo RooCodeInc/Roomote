@@ -290,6 +290,58 @@ describe('enqueuePrReviewNotification', () => {
     expect(mockQueueAdd).not.toHaveBeenCalled();
   });
 
+  it('keeps newer same-SHA activity in its own batch through enqueue and drain', async () => {
+    const completedCycle = JSON.stringify({
+      cycleId: 'cycle-1',
+      phase: 'completed',
+      observedAt: 200,
+    });
+    mockRedisGet.mockResolvedValue(completedCycle);
+
+    const result = await enqueuePrReviewNotification({
+      ...baseInput,
+      event: {
+        kind: 'review_comment',
+        authorLogin: 'roomote[bot]',
+        reviewHeadSha: 'abc123',
+        batchId: 'github-review:456',
+        observedAt: 300,
+        roomoteAuthored: true,
+      },
+    });
+
+    expect(result).toEqual({ notifiedTaskCount: 1 });
+    const rpushCall = multiCalls.find((call) => call.command === 'rpush');
+    expect(rpushCall?.args[0]).toContain(':roomote:github-review%3A456');
+
+    mockRedisGet.mockImplementation((key: string) =>
+      key.includes('review-cycle-completed') ? null : completedCycle,
+    );
+    mockMultiExec.mockResolvedValue([
+      [null, [rpushCall?.args[1]]],
+      [null, 1],
+    ]);
+
+    await expect(
+      consumePendingPrReviewActivity({
+        taskId: 'task-1',
+        repository: 'owner/repo',
+        prNumber: 42,
+        batchKind: 'roomote',
+        batchId: 'github-review:456',
+      }),
+    ).resolves.toEqual([
+      {
+        kind: 'review_comment',
+        authorLogin: 'roomote[bot]',
+        reviewHeadSha: 'abc123',
+        batchId: 'github-review:456',
+        observedAt: 300,
+        roomoteAuthored: true,
+      },
+    ]);
+  });
+
   it('fails open when optional cycle lookup fails for Roomote activity', async () => {
     mockRedisGet.mockRejectedValue(new Error('redis read failed'));
 

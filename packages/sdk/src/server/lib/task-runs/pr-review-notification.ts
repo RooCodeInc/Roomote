@@ -681,10 +681,15 @@ export async function enqueuePrReviewNotification(
       });
 
       if (!isRoomoteSummary && cycle.state?.phase === 'completed') {
-        return {
-          notifiedTaskCount: 0,
-          reason: 'review_cycle_completed',
-        };
+        if (
+          event.observedAt === undefined ||
+          event.observedAt <= cycle.state.observedAt
+        ) {
+          return {
+            notifiedTaskCount: 0,
+            reason: 'review_cycle_completed',
+          };
+        }
       }
 
       if (
@@ -700,7 +705,11 @@ export async function enqueuePrReviewNotification(
       }
 
       const cycleId =
-        cycle.state?.cycleId ?? event.batchId ?? `head:${event.reviewHeadSha}`;
+        cycle.state?.phase === 'completed'
+          ? (event.batchId ?? `head:${event.reviewHeadSha}`)
+          : (cycle.state?.cycleId ??
+            event.batchId ??
+            `head:${event.reviewHeadSha}`);
       event = { ...event, batchId: cycleId };
 
       if (isRoomoteSummary) {
