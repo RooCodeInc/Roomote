@@ -39,7 +39,10 @@ vi.mock('@roomote/sdk/server', () => ({
   findDiscordMappedUserId: mocks.findMappedUserId,
 }));
 
-vi.mock('../../shared/channel-launch-gate.js', () => ({
+vi.mock('../../shared/channel-launch-gate.js', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('../../shared/channel-launch-gate.js')
+  >()),
   evaluateChannelLaunchGate: mocks.evaluateGate,
 }));
 
@@ -67,10 +70,11 @@ const provider = {
   createDirectMessage: mocks.createDirectMessage,
   postMessage: mocks.postMessage,
   addReaction: mocks.addReaction,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
 } as any;
 
 const MONITORED_CHANNEL_ID = '400000000000000001';
+const FAILURE_MESSAGE =
+  "Sorry, Roomote couldn't start this task. Please try again in a moment.";
 
 function guildChannel(
   overrides: Partial<DiscordChannelContext> = {},
@@ -106,7 +110,6 @@ function gatewayEvent(payload: Record<string, unknown>): DiscordGatewayEvent {
     eventType: 'MESSAGE_CREATE',
     payload,
     receivedAt: '2026-07-17T15:00:00.000Z',
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
 }
 
@@ -135,7 +138,6 @@ async function runHandler(input: {
   const payload = input.payload ?? messagePayload();
   return maybeHandleDiscordChannelAutoStart({
     event: gatewayEvent(payload),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     message: payload as any,
     channel: input.channel ?? guildChannel(),
     provider,
@@ -446,10 +448,50 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
     );
     expect(mocks.startNewTask).not.toHaveBeenCalled();
     expect(mocks.addReaction).not.toHaveBeenCalled();
+    expect(mocks.postMessage).not.toHaveBeenCalled();
     // The routing lock is released so a redelivery can re-evaluate.
     expect(mocks.redis.del).toHaveBeenCalledWith(
       'discord:routing-lock:message-1',
     );
+  });
+
+  it('replies when the launch classifier fails', async () => {
+    mocks.getBackgroundAgentSettings.mockResolvedValue(
+      settingsWith([
+        {
+          channelId: MONITORED_CHANNEL_ID,
+          launchCriteria: 'Only launch on new incidents.',
+        },
+      ]),
+    );
+    mocks.evaluateGate.mockResolvedValue({
+      shouldLaunch: false,
+      skipReason: 'classifier_error',
+      debug: { llmDecision: 'error', reason: 'provider unavailable' },
+    });
+
+    await expect(runHandler({})).resolves.toBe(true);
+    await flushBackgroundWork();
+
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+    expect(mocks.postMessage).toHaveBeenCalledWith({
+      channelId: MONITORED_CHANNEL_ID,
+      replyToMessageId: 'message-1',
+      text: FAILURE_MESSAGE,
+    });
+  });
+
+  it('replies when task startup throws', async () => {
+    mocks.startNewTask.mockRejectedValue(new Error('task queue unavailable'));
+
+    await expect(runHandler({})).resolves.toBe(true);
+    await flushBackgroundWork();
+
+    expect(mocks.postMessage).toHaveBeenCalledWith({
+      channelId: MONITORED_CHANNEL_ID,
+      replyToMessageId: 'message-1',
+      text: FAILURE_MESSAGE,
+    });
   });
 
   it('dedupes concurrent deliveries via the routing lock', async () => {

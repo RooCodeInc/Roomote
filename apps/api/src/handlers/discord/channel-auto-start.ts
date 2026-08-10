@@ -24,7 +24,10 @@ import {
 
 import { apiLogger } from '../../logging.js';
 import { checkAutoStartChannelCache } from '../shared/auto-start-cache.js';
-import { evaluateChannelLaunchGate } from '../shared/channel-launch-gate.js';
+import {
+  CHANNEL_AUTO_START_FAILURE_MESSAGE,
+  evaluateChannelLaunchGate,
+} from '../shared/channel-launch-gate.js';
 import {
   buildDiscordChannelAutoStartLinkMessage,
   claimAccountLinkDmSlot,
@@ -51,6 +54,24 @@ const CHANNEL_AUTO_START_MESSAGE_TYPES = new Set([0, 19]);
 
 const DISCORD_ROUTING_LOCK_PREFIX = 'discord:routing-lock:';
 const ROUTING_LOCK_TTL_SECONDS = 60;
+
+async function sendLaunchFailureBestEffort(input: {
+  provider: DiscordCommunicationProvider;
+  channelId: string;
+  messageId: string;
+}): Promise<void> {
+  await input.provider
+    .postMessage({
+      channelId: input.channelId,
+      replyToMessageId: input.messageId,
+      text: CHANNEL_AUTO_START_FAILURE_MESSAGE,
+    })
+    .catch((error) => {
+      apiLogger.warn(
+        `[DiscordChannelAutoStart] Failed to post launch failure for ${input.channelId}:${input.messageId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+}
 
 /**
  * Discord has no ephemeral channel messages, so the "connect your account"
@@ -315,7 +336,13 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
         });
 
         if (!gateResult.shouldLaunch) {
-          // Silent to the channel by design; the gate logged its reason.
+          if (gateResult.skipReason === 'classifier_error') {
+            await sendLaunchFailureBestEffort({
+              provider,
+              channelId: channel.channelId,
+              messageId: message.id,
+            });
+          }
           await releaseRoutingLock();
           return;
         }
@@ -383,6 +410,11 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
       apiLogger.error(
         `[DiscordChannelAutoStart] Failed to launch for ${logContext}: ${error instanceof Error ? error.message : String(error)}`,
       );
+      await sendLaunchFailureBestEffort({
+        provider,
+        channelId: channel.channelId,
+        messageId: message.id,
+      });
       await releaseRoutingLock();
     }
   })();

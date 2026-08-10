@@ -13,6 +13,9 @@ import { apiLogger } from '../../logging.js';
 /** Chat providers with a channel auto-start consume path. */
 type ChannelAutoStartProvider = 'slack' | 'discord';
 
+export const CHANNEL_AUTO_START_FAILURE_MESSAGE =
+  "Sorry, Roomote couldn't start this task. Please try again in a moment.";
+
 const LAUNCH_RATE_LIMIT_PER_HOUR = 25;
 const LAUNCH_RATE_WINDOW_SECONDS = 60 * 60;
 
