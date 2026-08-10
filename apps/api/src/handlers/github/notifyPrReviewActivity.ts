@@ -6,10 +6,11 @@ import {
   isReviewInProgressStatusLine,
 } from '@roomote/cloud-agents/server';
 import { Schemas as GitHubSchemas } from '@roomote/github';
-import { getRedis } from '@roomote/redis';
 import {
   enqueuePrReviewNotification,
+  startPrReviewNotificationCycle,
   type EnqueuePrReviewNotificationInput,
+  type StartPrReviewNotificationCycleInput,
 } from '@roomote/sdk/server';
 
 import { isMention } from './isMention';
@@ -21,6 +22,7 @@ import type {
 } from './types';
 
 type PrReviewActivityWebhookPayload =
+  | WebhookIssueCommentCreated
   | WebhookPullRequestReviewSubmitted
   | WebhookPullRequestCommentCreated;
 
@@ -28,8 +30,13 @@ type PrReviewSummaryWebhookPayload =
   | WebhookIssueCommentCreated
   | WebhookIssueCommentEdited;
 
-const SUMMARY_NOTIFIED_TTL_SECONDS = 30 * 24 * 60 * 60;
 const MAX_SUMMARY_LENGTH = 300;
+
+function getObservedAt(value: string | null | undefined): number {
+  const parsed = value ? Date.parse(value) : Number.NaN;
+
+  return Number.isFinite(parsed) ? parsed : Date.now();
+}
 
 /**
  * Classifies a non-mention PR review webhook event into a review-activity
@@ -50,6 +57,37 @@ const MAX_SUMMARY_LENGTH = 300;
 export function buildPrReviewActivityNotificationInput(
   eventPayload: PrReviewActivityWebhookPayload,
 ): EnqueuePrReviewNotificationInput | null {
+  if ('issue' in eventPayload) {
+    if (!eventPayload.issue.pull_request) {
+      return null;
+    }
+
+    const comment = eventPayload.comment;
+    const authorLogin = comment.user?.login;
+
+    if (
+      !authorLogin ||
+      GitHubSchemas.isRoomoteGitHubLogin(authorLogin) ||
+      isMention({ body: comment.body ?? '', user: { login: authorLogin } })
+    ) {
+      return null;
+    }
+
+    return {
+      repository: eventPayload.repository.full_name,
+      prNumber: eventPayload.issue.number,
+      prUrl:
+        eventPayload.issue.pull_request.html_url ?? eventPayload.issue.html_url,
+      sourceControlProvider: 'github',
+      event: {
+        kind: 'issue_comment',
+        authorLogin,
+        ...(comment.html_url ? { url: comment.html_url } : {}),
+        observedAt: getObservedAt(comment.created_at),
+      },
+    };
+  }
+
   const base = {
     repository: eventPayload.repository.full_name,
     prNumber: eventPayload.pull_request.number,
@@ -79,8 +117,12 @@ export function buildPrReviewActivityNotificationInput(
         kind: 'review',
         authorLogin,
         ...(review.commit_id ? { reviewHeadSha: review.commit_id } : {}),
+        batchId: `github-review:${review.id}`,
         reviewState: review.state,
         ...(review.html_url ? { url: review.html_url } : {}),
+        ...(review.submitted_at
+          ? { observedAt: getObservedAt(review.submitted_at) }
+          : {}),
         ...(GitHubSchemas.isRoomoteGitHubLogin(authorLogin)
           ? { roomoteAuthored: true }
           : {}),
@@ -112,7 +154,11 @@ export function buildPrReviewActivityNotificationInput(
       kind: 'review_comment',
       authorLogin,
       ...(comment.commit_id ? { reviewHeadSha: comment.commit_id } : {}),
+      ...(comment.pull_request_review_id
+        ? { batchId: `github-review:${comment.pull_request_review_id}` }
+        : {}),
       ...(comment.html_url ? { url: comment.html_url } : {}),
+      observedAt: getObservedAt(comment.created_at),
       ...(GitHubSchemas.isRoomoteGitHubLogin(authorLogin)
         ? { roomoteAuthored: true }
         : {}),
@@ -147,10 +193,11 @@ function getReviewSummaryMarkerSha(body: string): string | null {
 
 type PrReviewSummaryNotification = {
   input: EnqueuePrReviewNotificationInput;
-  /** Deduplication key so repeated edits of the same terminal summary (for
-   * example a PR fixer checking off items) only notify once per review pass. */
-  dedupKey: string;
 };
+
+type PrReviewSummaryLifecycle =
+  | { kind: 'started'; input: StartPrReviewNotificationCycleInput }
+  | { kind: 'completed'; notification: PrReviewSummaryNotification };
 
 function getReviewStatusFirstLine(body: string): string | null {
   const statusContent = getMarkedSection({
@@ -182,9 +229,9 @@ function getReviewStatusFirstLine(body: string): string | null {
  * events with an already-terminal body still notify so legacy/crash paths that
  * post a terminal summary directly keep working.
  */
-export function buildPrReviewSummaryNotification(
+function buildPrReviewSummaryLifecycle(
   eventPayload: PrReviewSummaryWebhookPayload,
-): PrReviewSummaryNotification | null {
+): PrReviewSummaryLifecycle | null {
   if (!eventPayload.issue.pull_request) {
     return null;
   }
@@ -213,27 +260,45 @@ export function buildPrReviewSummaryNotification(
   }
 
   const firstStatusLine = statusContent.split('\n')[0] ?? '';
+  const currentInProgress = isReviewInProgressStatusLine(firstStatusLine);
+  const previousBody =
+    'changes' in eventPayload ? eventPayload.changes.body?.from : undefined;
+  const previousStatusLine =
+    typeof previousBody === 'string'
+      ? getReviewStatusFirstLine(previousBody)
+      : null;
+  const previousInProgress =
+    previousStatusLine !== null &&
+    isReviewInProgressStatusLine(previousStatusLine);
+  const markerSha = getReviewSummaryMarkerSha(body);
+  const observedAt = getObservedAt(comment.updated_at ?? comment.created_at);
 
-  if (isReviewInProgressStatusLine(firstStatusLine)) {
-    return null;
+  if (currentInProgress) {
+    if (!markerSha || previousInProgress) {
+      return null;
+    }
+
+    return {
+      kind: 'started',
+      input: {
+        repository: eventPayload.repository.full_name,
+        prNumber: eventPayload.issue.number,
+        reviewHeadSha: markerSha,
+        cycleId: `github-summary:${comment.id}:${comment.updated_at ?? comment.created_at}`,
+        observedAt,
+      },
+    };
   }
 
   // Edited events: require an in-progress → terminal status transition so
   // bookkeeping edits of an already-finished summary do not look like a new
   // review pass. `changes` is only present on issue_comment.edited payloads.
   if ('changes' in eventPayload) {
-    const previousBody = eventPayload.changes.body?.from;
-
     if (typeof previousBody !== 'string') {
       return null;
     }
 
-    const previousStatusLine = getReviewStatusFirstLine(previousBody);
-
-    if (
-      previousStatusLine === null ||
-      !isReviewInProgressStatusLine(previousStatusLine)
-    ) {
+    if (!previousInProgress) {
       return null;
     }
   }
@@ -244,78 +309,63 @@ export function buildPrReviewSummaryNotification(
     return null;
   }
 
-  const markerSha = getReviewSummaryMarkerSha(body);
-
   return {
-    input: {
-      repository: eventPayload.repository.full_name,
-      prNumber: eventPayload.issue.number,
-      prUrl:
-        eventPayload.issue.pull_request.html_url ?? eventPayload.issue.html_url,
-      sourceControlProvider: 'github',
-      event: {
-        kind: 'review_summary',
-        authorLogin,
-        ...(markerSha ? { reviewHeadSha: markerSha } : {}),
-        summary,
-        ...(comment.html_url ? { url: comment.html_url } : {}),
-        roomoteAuthored: true,
+    kind: 'completed',
+    notification: {
+      input: {
+        repository: eventPayload.repository.full_name,
+        prNumber: eventPayload.issue.number,
+        prUrl:
+          eventPayload.issue.pull_request.html_url ??
+          eventPayload.issue.html_url,
+        sourceControlProvider: 'github',
+        event: {
+          kind: 'review_summary',
+          authorLogin,
+          ...(markerSha ? { reviewHeadSha: markerSha } : {}),
+          summary,
+          ...(comment.html_url ? { url: comment.html_url } : {}),
+          observedAt,
+          roomoteAuthored: true,
+        },
       },
     },
-    dedupKey: `pr-review-notification:summary-notified:${encodeURIComponent(
-      eventPayload.repository.full_name,
-    )}#${eventPayload.issue.number}:${comment.id}:${markerSha ?? 'no-sha'}`,
   };
 }
 
-async function enqueuePrReviewSummaryNotificationOnce(
-  notification: PrReviewSummaryNotification,
-): Promise<void> {
-  const redis = getRedis();
-  const claim = await redis.set(
-    notification.dedupKey,
-    '1',
-    'EX',
-    SUMMARY_NOTIFIED_TTL_SECONDS,
-    'NX',
-  );
+export function buildPrReviewSummaryNotification(
+  eventPayload: PrReviewSummaryWebhookPayload,
+): PrReviewSummaryNotification | null {
+  const lifecycle = buildPrReviewSummaryLifecycle(eventPayload);
 
-  if (claim !== 'OK') {
-    return;
-  }
-
-  // Keep the claim only when something was actually scheduled. Releasing it
-  // on no-op results (PR not linked to a conversation-backed task yet) or on
-  // errors lets a later created/edited delivery of the same terminal summary
-  // retry instead of being suppressed for the TTL.
-  try {
-    const result = await enqueuePrReviewNotification(notification.input);
-
-    if (result.notifiedTaskCount === 0) {
-      await redis.del(notification.dedupKey).catch(() => undefined);
-    }
-  } catch (error) {
-    await redis.del(notification.dedupKey).catch(() => undefined);
-    throw error;
-  }
+  return lifecycle?.kind === 'completed' ? lifecycle.notification : null;
 }
 
 /**
  * Fire-and-forget notification scheduling for Roomote review-summary comments
  * on task-linked pull requests. Logs errors but never throws.
  */
-export function queuePrReviewSummaryNotification(
+export async function queuePrReviewSummaryNotification(
   eventPayload: PrReviewSummaryWebhookPayload,
-): void {
-  const notification = buildPrReviewSummaryNotification(eventPayload);
+): Promise<void> {
+  const lifecycle = buildPrReviewSummaryLifecycle(eventPayload);
 
-  if (!notification) {
+  if (!lifecycle) {
     return;
   }
 
-  enqueuePrReviewSummaryNotificationOnce(notification).catch((error) =>
+  const operation =
+    lifecycle.kind === 'started'
+      ? startPrReviewNotificationCycle(lifecycle.input)
+      : enqueuePrReviewNotification(lifecycle.notification.input);
+  const reference =
+    lifecycle.kind === 'started'
+      ? lifecycle.input
+      : lifecycle.notification.input;
+
+  await operation.catch((error) =>
     console.warn(
-      `[queuePrReviewSummaryNotification] Failed to enqueue review-summary notification for ${notification.input.repository}#${notification.input.prNumber}: ${
+      `[queuePrReviewSummaryNotification] Failed to record review-summary lifecycle for ${reference.repository}#${reference.prNumber}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     ),
@@ -327,16 +377,16 @@ export function queuePrReviewSummaryNotification(
  * task-linked pull requests. Logs errors but never throws, so it cannot
  * affect the mention-handling webhook flow.
  */
-export function queuePrReviewActivityNotification(
+export async function queuePrReviewActivityNotification(
   eventPayload: PrReviewActivityWebhookPayload,
-): void {
+): Promise<void> {
   const input = buildPrReviewActivityNotificationInput(eventPayload);
 
   if (!input) {
     return;
   }
 
-  enqueuePrReviewNotification(input).catch((error) =>
+  await enqueuePrReviewNotification(input).catch((error) =>
     console.warn(
       `[queuePrReviewActivityNotification] Failed to enqueue review notification for ${input.repository}#${input.prNumber}: ${
         error instanceof Error ? error.message : String(error)
