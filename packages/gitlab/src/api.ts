@@ -1194,11 +1194,7 @@ export async function createTaskRunScopedGitLabTokens(
   credentials: GitLabScopedProjectTokenCredential[];
   proxyCredentials: GitLabScopedProjectTokenCredential[];
   artifactsPatch: Record<string, GitLabScopedProjectTokenDescriptor[]>;
-  /**
-   * When set, the worker refresh loop schedules the next mint before this
-   * instant (with a small buffer). OAuth access tokens expire in ~2h; without
-   * this the fixed 45m cadence can leave a dead token in the sandbox.
-   */
+  /** OAuth access-token expiry for the worker refresh loop, if known. */
   expiresAt: Date | null;
 }> {
   const deploymentToken = await resolveGitLabToken();
@@ -1340,8 +1336,6 @@ export async function createTaskRunScopedGitLabTokens(
     artifactsPatch: {
       [GITLAB_SCOPED_PROJECT_TOKENS_ARTIFACT_KEY]: nextDescriptors,
     },
-    // Scoped project tokens are rotated on every mint/refresh; the fixed
-    // worker cadence is enough for their day-long TTL.
     expiresAt: null,
   };
 }

@@ -69,7 +69,6 @@ describe('refreshGitHubTokenWithMetadata', () => {
     );
 
     const nextRefreshAtMs = Date.parse(result.nextRefreshAt);
-    // 5-minute buffer before expiry, not the fixed 45-minute cadence.
     expect(nextRefreshAtMs).toBeGreaterThan(Date.now());
     expect(nextRefreshAtMs).toBeLessThanOrEqual(
       expiresAt.getTime() - 4 * 60 * 1000,
@@ -98,7 +97,6 @@ describe('refreshGitHubTokenWithMetadata', () => {
     );
 
     const nextRefreshAtMs = Date.parse(result.nextRefreshAt);
-    // Default interval is 45 minutes.
     expect(nextRefreshAtMs).toBeGreaterThanOrEqual(before + 44 * 60 * 1000);
     expect(nextRefreshAtMs).toBeLessThanOrEqual(before + 46 * 60 * 1000);
   });
