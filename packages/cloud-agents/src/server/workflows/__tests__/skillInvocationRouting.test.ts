@@ -65,6 +65,23 @@ describe('packaged skill invocation routing', () => {
     ).toBe(true);
   });
 
+  it('ships the general investigation workflow for initial routing', () => {
+    expect(
+      isRecognizedInitialSkillInvocation({
+        skillName: 'investigate-and-report',
+      }),
+    ).toBe(true);
+
+    const investigationSkill = readPackagedSkill('investigate-and-report');
+
+    expect(investigationSkill).toContain('name: investigate-and-report');
+    expect(investigationSkill).toContain('Stay read-only by default');
+    expect(investigationSkill).toContain(
+      'Do not assume repository inspection is relevant',
+    );
+    expect(investigationSkill).not.toContain('read the applicable repo-local');
+  });
+
   it('recognizes packaged automation skills regardless of repository', () => {
     for (const skillName of automationSkillNames) {
       expect(

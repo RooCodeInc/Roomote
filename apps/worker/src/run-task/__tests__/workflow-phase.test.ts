@@ -4,6 +4,15 @@ import {
 } from '../workflow-phase';
 
 describe('workflow phase selection', () => {
+  it('routes read-only questions into the general investigation workflow', () => {
+    expect(
+      getInitialWorkflowPhase({
+        prompt: 'Check the logs and tell me whether retries stopped',
+        requestedWorkKind: 'question',
+      }),
+    ).toBe('investigate-and-report');
+  });
+
   it('routes unknown requested work kind into the planning workflow', () => {
     expect(
       getInitialWorkflowPhase({

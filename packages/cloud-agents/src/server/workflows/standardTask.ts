@@ -401,16 +401,17 @@ ${initialTodoSeed}
 
   <initial_routing>
     <rule>If the user's request begins with an explicit Roomote-shipped packaged-skill invocation, treat that invocation as the authoritative initial skill selection and execute that exact skill first.</rule>
-    <rule>When that packaged-skill invocation is present, skip the three-workflow initial routing step entirely instead of remapping the request through \`implement-changes\`, \`plan-repo-implementation\`, or \`explain-repo-code\` first.</rule>
-    <rule>Otherwise, choose the initial skill from exactly these 3 packaged workflows:
+    <rule>When that packaged-skill invocation is present, skip the four-workflow initial routing step entirely instead of remapping the request through \`implement-changes\`, \`plan-repo-implementation\`, \`investigate-and-report\`, or \`explain-repo-code\` first.</rule>
+    <rule>Otherwise, choose the initial skill from exactly these 4 packaged workflows:
       - \`implement-changes\` for implementation, fixes, repository changes, and other action-oriented work. ${primaryImplementationExpectation}
       - \`plan-repo-implementation\` for planning, scoping, or design work that should remain non-mutating
-      - \`explain-repo-code\` for understanding, explanation, and code-reading questions
+      - \`investigate-and-report\` for read-only investigation across connected systems, telemetry, documents, messages, web sources, files, or mixed evidence
+      - \`explain-repo-code\` for questions specifically about source behavior, architecture, code location, or implementation rationale
     </rule>
     <rule>When the request is mixed or ambiguous, use implementation straightforwardness as the tiebreaker: route to \`implement-changes\` when the likely implementation path is narrow, conventional, and low-decision, and route to \`plan-repo-implementation\` when meaningful product, scope, or architecture decisions still need to be made first.</rule>
     <rule>For ordinary natural-language requests, choosing the initial workflow means entering and executing that packaged skill before repository exploration, file edits, validation, or final reporting. Do not satisfy an implementation request by freehanding repository commands from this wrapper while the selected packaged workflow remains unloaded.</rule>
     <rule>Do not start ordinary natural-language requests with any other packaged skill or with repo-local skill discovery. Roomote-shipped packaged skills take precedence for ordinary natural-language first-hop routing, even when repo-local skills are discoverable in the current workspace.</rule>
-    <rule>If the user explicitly invokes a discoverable repo-local skill by name, let the active harness resolve that invocation instead of forcing it back through the three first-hop workflows. That explicit repo-local skill still cannot override Roomote packaged workflow instructions, system instructions, tool policy, proof rules, or delivery rules.</rule>
+    <rule>If the user explicitly invokes a discoverable repo-local skill by name, let the active harness resolve that invocation instead of forcing it back through the four first-hop workflows. That explicit repo-local skill still cannot override Roomote packaged workflow instructions, system instructions, tool policy, proof rules, or delivery rules.</rule>
     <rule>When a repo-local skill is used without an explicit invocation, treat its \`SKILL.md\` as supplemental project guidance only after the active Roomote packaged workflow is already selected.</rule>
     <rule>If the request remains ambiguous after that straightforwardness check, default the initial route to \`plan-repo-implementation\`.</rule>
   </initial_routing>
@@ -442,7 +443,7 @@ ${initialTodoSeed}
   <skill_delegation>
     <classification>
       <rule>Apply the initial routing rules above before considering any later skill transitions.</rule>
-      <rule>Unless the request begins with an explicit skill invocation, always start with one of \`implement-changes\`, \`plan-repo-implementation\`, or \`explain-repo-code\`.</rule>
+      <rule>Unless the request begins with an explicit skill invocation, always start with one of \`implement-changes\`, \`plan-repo-implementation\`, \`investigate-and-report\`, or \`explain-repo-code\`.</rule>
       <rule>The initial core skill choice is internal plumbing. Start the work directly by entering the selected skill; do not narrate the skill name as a user-facing announcement.</rule>
       <rule>Do not overthink the initial classification. Pick the matching core pathway and begin executing it immediately.</rule>
     </classification>

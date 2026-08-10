@@ -3,7 +3,7 @@ import { PACKAGED_AUTOMATION_SKILL_INVOCATIONS } from '../skillInvocationRouting
 import { buildStructuredTaskRequest } from '../utils';
 
 describe('Standard Task explicit invocation routing', () => {
-  it('skips the three-workflow initial routing step when the request already starts with a packaged-skill invocation', () => {
+  it('skips the four-workflow initial routing step when the request already starts with a packaged-skill invocation', () => {
     const { prompt, harnessInstructions } = standardTask({
       description:
         '$review-code\n\n<active_appendix_path>review-github-pr</active_appendix_path>',
@@ -17,13 +17,27 @@ describe('Standard Task explicit invocation routing', () => {
       "If the user's request begins with an explicit Roomote-shipped packaged-skill invocation, treat that invocation as the authoritative initial skill selection and execute that exact skill first.",
     );
     expect(harnessInstructions).toContain(
-      'skip the three-workflow initial routing step entirely',
+      'skip the four-workflow initial routing step entirely',
     );
     expect(harnessInstructions).toContain(
       'Roomote-shipped packaged skills take precedence for ordinary natural-language first-hop routing, even when repo-local skills are discoverable in the current workspace.',
     );
     expect(harnessInstructions).toContain(
-      'If the user explicitly invokes a discoverable repo-local skill by name, let the active harness resolve that invocation instead of forcing it back through the three first-hop workflows.',
+      'If the user explicitly invokes a discoverable repo-local skill by name, let the active harness resolve that invocation instead of forcing it back through the four first-hop workflows.',
+    );
+  });
+
+  it('separates general investigation from repository explanation', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Check the logs and tell me whether the retries stopped',
+      repo: 'Roomote/example-app',
+    });
+
+    expect(harnessInstructions).toContain(
+      '`investigate-and-report` for read-only investigation across connected systems, telemetry, documents, messages, web sources, files, or mixed evidence',
+    );
+    expect(harnessInstructions).toContain(
+      '`explain-repo-code` for questions specifically about source behavior, architecture, code location, or implementation rationale',
     );
   });
 
@@ -225,7 +239,7 @@ describe('Standard Task explicit invocation routing', () => {
       true,
     );
     expect(harnessInstructions).toContain(
-      'If the user explicitly invokes a discoverable repo-local skill by name, let the active harness resolve that invocation instead of forcing it back through the three first-hop workflows.',
+      'If the user explicitly invokes a discoverable repo-local skill by name, let the active harness resolve that invocation instead of forcing it back through the four first-hop workflows.',
     );
   });
 
