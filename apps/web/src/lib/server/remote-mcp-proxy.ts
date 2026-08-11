@@ -35,6 +35,17 @@ function sanitizeRequestHeaders(headers: Headers): Headers {
   return nextHeaders;
 }
 
+export function sanitizeProxiedResponseHeaders(headers: Headers): Headers {
+  const nextHeaders = removeHopByHopHeaders(headers);
+
+  // fetch() transparently decompresses upstream responses while retaining the
+  // original content-encoding header. Forwarding that stale header makes the
+  // client try to decompress an already-decoded response body.
+  nextHeaders.delete('content-encoding');
+
+  return nextHeaders;
+}
+
 export async function proxyRemoteMcpRequest(
   request: NextRequest,
   endpoint: 'mcp' | 'metadata',
@@ -64,6 +75,6 @@ export async function proxyRemoteMcpRequest(
   return new NextResponse(response.body, {
     status: response.status,
     statusText: response.statusText,
-    headers: removeHopByHopHeaders(response.headers),
+    headers: sanitizeProxiedResponseHeaders(response.headers),
   });
 }
