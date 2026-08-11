@@ -4,13 +4,13 @@ import {
 } from '../workflow-phase';
 
 describe('workflow phase selection', () => {
-  it('routes read-only questions into the general investigation workflow', () => {
+  it('leaves questions unpinned so rendered prompt routing can classify their source', () => {
     expect(
       getInitialWorkflowPhase({
-        prompt: 'Check the logs and tell me whether retries stopped',
+        prompt: 'Where is retry logic implemented?',
         requestedWorkKind: 'question',
       }),
-    ).toBe('explore-and-act');
+    ).toBeNull();
   });
 
   it('routes unknown requested work kind into the planning workflow', () => {

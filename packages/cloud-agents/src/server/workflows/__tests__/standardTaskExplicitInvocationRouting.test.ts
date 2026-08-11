@@ -41,6 +41,20 @@ describe('Standard Task explicit invocation routing', () => {
     );
   });
 
+  it('renders source-question routing to the repository explanation workflow', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Where is retry logic implemented?',
+      repo: 'Roomote/example-app',
+    });
+
+    expect(harnessInstructions).toContain(
+      'route source behavior, architecture, code-location, and implementation-rationale questions to `explain-repo-code`',
+    );
+    expect(harnessInstructions).toContain(
+      'route connected-system questions and actions to `explore-and-act`',
+    );
+  });
+
   it('reserves implementation routing for repository and workspace work', () => {
     const { harnessInstructions } = standardTask({
       description:
