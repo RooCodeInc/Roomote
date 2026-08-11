@@ -87,4 +87,30 @@ describe('doctor guidance', () => {
       'do not claim an external issue was filed, opened, or created',
     );
   });
+
+  it('requires end-to-end preview verification beyond document status', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      'Preview verification is an end-to-end browser journey, not a document-status check.',
+    );
+    expect(skillContent).toContain(
+      'inspect browser console errors, uncaught page errors, and failed or blocked network requests',
+    );
+    expect(skillContent).toContain(
+      'A successful navigation or HTTP 2xx/3xx response is insufficient',
+    );
+    expect(skillContent).toContain(
+      'journey-critical stylesheets, scripts, fonts, fetch/XHR calls, and WebSockets',
+    );
+    expect(skillContent).toContain(
+      'Do not fail an otherwise successful journey solely because optional analytics, telemetry, favicon, development-only HMR, or another non-critical request failed.',
+    );
+    expect(skillContent).toContain(
+      'never include cookies, authorization or bypass headers, request or response bodies, or URL query values in the report',
+    );
+    expect(skillContent).toContain(
+      'instead of treating successful document navigation as sufficient',
+    );
+  });
 });
