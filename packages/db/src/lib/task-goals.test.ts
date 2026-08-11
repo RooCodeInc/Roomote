@@ -173,6 +173,90 @@ describe('task goals', () => {
     });
   });
 
+  it('rejects terminal mutations while goal activation is pending', async () => {
+    const task = await taskFactory.create({
+      goalObjective: 'Original objective',
+      goalStatus: 'active',
+      goalMaxContinuations: 3,
+    });
+    const run = await runFactory.create({ taskId: task.id });
+    const activation = await prepareTaskGoalActivation({
+      taskId: task.id,
+      goal: {
+        objective: 'Replacement objective',
+        maxContinuations: 5,
+      },
+    });
+
+    await expect(
+      markTaskGoalForRun({ runId: run.id, status: 'complete' }),
+    ).resolves.toMatchObject({
+      updated: false,
+      reason: 'activation_pending',
+    });
+    await expect(
+      markTaskGoalForRun({
+        runId: run.id,
+        status: 'blocked',
+        reason: 'Stale blocker',
+      }),
+    ).resolves.toMatchObject({
+      updated: false,
+      reason: 'activation_pending',
+    });
+    await expect(activation!.commit()).resolves.toMatchObject({
+      objective: 'Replacement objective',
+      status: 'active',
+    });
+  });
+
+  it('rejects a stale completion that crosses a goal replacement', async () => {
+    const task = await taskFactory.create({
+      goalObjective: 'Original objective',
+      goalStatus: 'active',
+      goalMaxContinuations: 3,
+      goalLastContinuationId: 'goal-generation:original',
+    });
+    const run = await runFactory.create({ taskId: task.id });
+
+    let completion: Promise<TaskGoalMutationResult> | undefined;
+    await db.transaction(async (tx) => {
+      await tx
+        .select()
+        .from(tasks)
+        .where(eq(tasks.id, task.id))
+        .limit(1)
+        .for('update');
+
+      completion = markTaskGoalForRun({
+        runId: run.id,
+        status: 'complete',
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      await tx
+        .update(tasks)
+        .set({
+          goalObjective: 'Replacement objective',
+          goalStatus: 'active',
+          goalMaxContinuations: 5,
+          goalContinuationsUsed: 0,
+          goalLastContinuationId: 'goal-activation:replacement',
+          updatedAt: new Date(),
+        })
+        .where(eq(tasks.id, task.id));
+    });
+
+    await expect(completion!).resolves.toMatchObject({
+      updated: false,
+      reason: 'not_active',
+    });
+    await expect(getTaskGoalForRun(run.id)).resolves.toMatchObject({
+      objective: 'Replacement objective',
+      status: 'active',
+    });
+  });
+
   it('claims bounded continuations and marks the goal budget limited', async () => {
     const task = await taskFactory.create({
       goalObjective: 'Finish the long-running task',

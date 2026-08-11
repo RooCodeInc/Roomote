@@ -21,7 +21,8 @@ export type TaskGoalMutationResult =
         | 'not_active'
         | 'budget_exhausted'
         | 'already_claimed'
-        | 'blocker_pending';
+        | 'blocker_pending'
+        | 'activation_pending';
       goal: TaskGoal | null;
     };
 
@@ -224,6 +225,13 @@ export async function markTaskGoalForRun(
           goal: toTaskGoal(task),
         };
       }
+      if (hasPendingGoalActivation(task)) {
+        return {
+          updated: false,
+          reason: 'activation_pending',
+          goal: toTaskGoal(task),
+        };
+      }
 
       const reason = input.reason.trim();
       const sameTurn =
@@ -281,6 +289,13 @@ export async function markTaskGoalForRun(
   if (!task) {
     return { updated: false, reason: 'missing', goal: null };
   }
+  if (hasPendingGoalActivation(task)) {
+    return {
+      updated: false,
+      reason: 'activation_pending',
+      goal: toTaskGoal(task),
+    };
+  }
 
   const [updated] = await db
     .update(tasks)
@@ -293,7 +308,13 @@ export async function markTaskGoalForRun(
       goalBlockerLastContinuationUsed: null,
       updatedAt: new Date(),
     })
-    .where(and(eq(tasks.id, task.id), eq(tasks.goalStatus, 'active')))
+    .where(
+      and(
+        eq(tasks.id, task.id),
+        eq(tasks.goalStatus, 'active'),
+        goalGenerationFilter(task.goalLastContinuationId),
+      ),
+    )
     .returning();
 
   if (updated) {
