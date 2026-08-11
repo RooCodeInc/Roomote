@@ -44,7 +44,7 @@ Return exactly one kind:
 
 Classify the user's initial ask only. Do not infer later lifecycle behavior.
 When the ask is mixed or ambiguous, use implementation straightforwardness as the tiebreaker:
-- choose implement when any part of the request asks to modify repository or workspace state, run commands, validate changes, or deliver code, even when another part asks for external investigation
+- choose implement when any part of the request asks to modify repository or workspace state, run commands in the repository or workspace, validate changes, or deliver code, even when another part asks for external investigation
 - choose implement when the likely repository or workspace implementation path is narrow, conventional, and low-decision
 - choose plan when the work likely requires meaningful product, scope, or architecture decisions before implementation
 - choose unknown only when the request remains too contradictory or underspecified to judge that tiebreaker reliably
@@ -52,6 +52,7 @@ Examples:
 - "Check Better Stack and fix the failure" is implement
 - "Inspect Sentry, then patch the crash" is implement
 - "Check Better Stack and tell me what failed" is question
+- "Run a Sentry query and report the results" is question
 Confidence should be a number from 0 to 1 when you can estimate it.
 `.trim();
 

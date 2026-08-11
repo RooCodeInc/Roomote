@@ -90,7 +90,7 @@ describe('requested work kind classification', () => {
     expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
       expect.objectContaining({
         system: expect.stringContaining(
-          'choose implement when any part of the request asks to modify repository or workspace state, run commands, validate changes, or deliver code, even when another part asks for external investigation',
+          'choose implement when any part of the request asks to modify repository or workspace state, run commands in the repository or workspace, validate changes, or deliver code, even when another part asks for external investigation',
         ),
       }),
     );
@@ -112,6 +112,13 @@ describe('requested work kind classification', () => {
       expect.objectContaining({
         system: expect.stringContaining(
           '"Check Better Stack and tell me what failed" is question',
+        ),
+      }),
+    );
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: expect.stringContaining(
+          '"Run a Sentry query and report the results" is question',
         ),
       }),
     );
