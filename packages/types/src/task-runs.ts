@@ -138,6 +138,7 @@ export const taskGoalInputSchema = z.object({
 export type TaskGoalInput = z.infer<typeof taskGoalInputSchema>;
 
 export type TaskGoal = TaskGoalInput & {
+  generation: string | null;
   status: TaskGoalStatus;
   continuationsUsed: number;
   blockedReason: string | null;

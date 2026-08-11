@@ -2104,6 +2104,9 @@ export const runTask = async ({
           ? { workflowPhase: initialWorkflowPhase }
           : {}),
         visibleInTranscript: false,
+        ...(task?.goal?.status === 'active'
+          ? { goalGeneration: task.goal.generation }
+          : {}),
       });
     } else {
       // Session mode: initialize without prompt.

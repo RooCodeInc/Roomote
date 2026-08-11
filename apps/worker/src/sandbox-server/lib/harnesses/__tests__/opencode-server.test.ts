@@ -424,6 +424,51 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
+  it('adds trusted goal generation context without changing the visible prompt', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Finish the replacement goal.',
+            goalGeneration: 'goal-generation:replacement',
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+      expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
+        request: {
+          parts: [
+            {
+              type: 'text',
+              text: expect.stringContaining('goal-generation:replacement'),
+            },
+          ],
+        },
+      });
+      expect(
+        persistedEnvelopes.find(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        )?.payload.text,
+      ).toBe('Finish the replacement goal.');
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('records inference usage for completed child-session (subagent) assistant messages', async () => {
     const { client, harness } = createHarness();
     const inferenceUsageEvents: HarnessInferenceUsageEvent[] = [];

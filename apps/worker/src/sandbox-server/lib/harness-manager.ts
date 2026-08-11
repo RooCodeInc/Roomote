@@ -141,6 +141,7 @@ interface HarnessFollowUpPromptOptions {
   userName?: string;
   userImageUrl?: string;
   clientMessageId?: string;
+  goalGeneration?: string | null;
 }
 
 export type HarnessManagerCompletionDecision =
@@ -288,6 +289,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
         userName: options.userName,
         userImageUrl: options.userImageUrl,
         clientMessageId: options.clientMessageId,
+        goalGeneration: options.goalGeneration,
       },
     });
 
@@ -401,6 +403,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
         userName: queuedMessage.userName,
         userImageUrl: queuedMessage.userImageUrl,
         clientMessageId: queuedMessage.clientMessageId,
+        goalGeneration: queuedMessage.goalGeneration,
       });
     }
 
@@ -459,6 +462,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     images?: string[];
     workflowPhase?: string;
     visibleInTranscript?: boolean;
+    goalGeneration?: string | null;
   }): void {
     this.logger.info('[HarnessManager#startNewTask] Starting new task');
     this.executeStartNewTask(options);
@@ -498,6 +502,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     userName?: string;
     userImageUrl?: string;
     clientMessageId?: string;
+    goalGeneration?: string | null;
   }): boolean {
     // If a task is currently running, cancel and close it first.
     if (this.state.sessionId && this.phase === 'running') {
@@ -1591,6 +1596,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     userName?: string;
     userImageUrl?: string;
     clientMessageId?: string;
+    goalGeneration?: string | null;
   }): void {
     this.resetState();
     this.setPhase('running');
@@ -1617,6 +1623,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
         userImageUrl: options.userImageUrl,
         taskId: options.taskId,
         clientMessageId: options.clientMessageId,
+        goalGeneration: options.goalGeneration,
       },
     });
   }

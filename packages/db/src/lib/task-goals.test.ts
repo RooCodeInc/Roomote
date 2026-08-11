@@ -189,7 +189,11 @@ describe('task goals', () => {
     });
 
     await expect(
-      markTaskGoalForRun({ runId: run.id, status: 'complete' }),
+      markTaskGoalForRun({
+        runId: run.id,
+        generation: null,
+        status: 'complete',
+      }),
     ).resolves.toMatchObject({
       updated: false,
       reason: 'activation_pending',
@@ -197,6 +201,7 @@ describe('task goals', () => {
     await expect(
       markTaskGoalForRun({
         runId: run.id,
+        generation: null,
         status: 'blocked',
         reason: 'Stale blocker',
       }),
@@ -230,6 +235,7 @@ describe('task goals', () => {
 
       completion = markTaskGoalForRun({
         runId: run.id,
+        generation: 'goal-generation:original',
         status: 'complete',
       });
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -253,6 +259,51 @@ describe('task goals', () => {
     });
     await expect(getTaskGoalForRun(run.id)).resolves.toMatchObject({
       objective: 'Replacement objective',
+      status: 'active',
+    });
+  });
+
+  it('rejects outgoing terminal mutations after replacement activation commits', async () => {
+    const task = await taskFactory.create({
+      goalObjective: 'Original objective',
+      goalStatus: 'active',
+      goalMaxContinuations: 3,
+      goalLastContinuationId: 'goal-generation:original',
+    });
+    const run = await runFactory.create({ taskId: task.id });
+    const activation = await prepareTaskGoalActivation({
+      taskId: task.id,
+      goal: {
+        objective: 'Replacement objective',
+        maxContinuations: 5,
+      },
+    });
+    await activation!.commit();
+
+    await expect(
+      markTaskGoalForRun({
+        runId: run.id,
+        generation: 'goal-generation:original',
+        status: 'complete',
+      }),
+    ).resolves.toMatchObject({
+      updated: false,
+      reason: 'generation_mismatch',
+    });
+    await expect(
+      markTaskGoalForRun({
+        runId: run.id,
+        generation: 'goal-generation:original',
+        status: 'blocked',
+        reason: 'Stale blocker',
+      }),
+    ).resolves.toMatchObject({
+      updated: false,
+      reason: 'generation_mismatch',
+    });
+    await expect(getTaskGoalForRun(run.id)).resolves.toMatchObject({
+      objective: 'Replacement objective',
+      generation: activation!.generation,
       status: 'active',
     });
   });
@@ -416,8 +467,15 @@ describe('task goals', () => {
     });
     const run = await runFactory.create({ taskId: task.id });
 
-    const observe = (reason: string) =>
-      markTaskGoalForRun({ runId: run.id, status: 'blocked', reason });
+    const observe = async (reason: string) => {
+      const goal = await getTaskGoalForRun(run.id);
+      return markTaskGoalForRun({
+        runId: run.id,
+        generation: goal!.generation,
+        status: 'blocked',
+        reason,
+      });
+    };
     const continueTurn = (continuationId: string) =>
       claimTaskGoalContinuationForRun({ runId: run.id, continuationId });
 
@@ -455,6 +513,7 @@ describe('task goals', () => {
 
     await markTaskGoalForRun({
       runId: run.id,
+      generation: null,
       status: 'blocked',
       reason: 'Missing credential',
     });
@@ -468,6 +527,7 @@ describe('task goals', () => {
     });
     const restarted = await markTaskGoalForRun({
       runId: run.id,
+      generation: 'unreported-turn',
       status: 'blocked',
       reason: 'Missing credential',
     });
@@ -491,10 +551,12 @@ describe('task goals', () => {
 
     const completed = await markTaskGoalForRun({
       runId: run.id,
+      generation: null,
       status: 'complete',
     });
     const duplicate = await markTaskGoalForRun({
       runId: run.id,
+      generation: null,
       status: 'complete',
     });
 

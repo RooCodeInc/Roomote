@@ -383,20 +383,29 @@ export const taskRunsRouter = router({
     ({ input }) => getTaskGoalForRun(input.runId),
   ),
   markGoalComplete: runTokenOnlyScoped(
-    z.object({ runId: z.number() }),
+    z.object({
+      runId: z.number(),
+      generation: z.string().max(200).nullable(),
+    }),
     'runId',
   ).mutation(({ input }) =>
-    markTaskGoalForRun({ runId: input.runId, status: 'complete' }),
+    markTaskGoalForRun({
+      runId: input.runId,
+      generation: input.generation,
+      status: 'complete',
+    }),
   ),
   markGoalBlocked: runTokenOnlyScoped(
     z.object({
       runId: z.number(),
+      generation: z.string().max(200).nullable(),
       reason: z.string().trim().min(1).max(2_000),
     }),
     'runId',
   ).mutation(({ input }) =>
     markTaskGoalForRun({
       runId: input.runId,
+      generation: input.generation,
       status: 'blocked',
       reason: input.reason,
     }),

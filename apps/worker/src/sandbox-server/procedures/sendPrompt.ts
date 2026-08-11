@@ -45,6 +45,7 @@ const sendPromptInputSchema = z
      * is not reachable from arbitrary clients.
      */
     visibleInTranscript: z.boolean().optional(),
+    goalGeneration: z.string().max(200).nullable().optional(),
   })
   .superRefine((data, ctx) => {
     const hasPrompt =
@@ -155,6 +156,7 @@ export const sendPrompt = publicProcedure
           userName: input.userName,
           userImageUrl: input.userImageUrl,
           visibleInTranscript: input.visibleInTranscript,
+          goalGeneration: input.goalGeneration,
         });
 
         if (!success) {
@@ -217,6 +219,7 @@ export const sendPrompt = publicProcedure
         userImageUrl: input.userImageUrl,
         clientMessageId: input.clientMessageId,
         visibleInTranscript: input.visibleInTranscript,
+        goalGeneration: input.goalGeneration,
       });
 
       if (!success) {

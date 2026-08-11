@@ -320,6 +320,7 @@ describe('runTask', () => {
       updated: true,
       goal: {
         objective: 'Complete the goal',
+        generation: 'goal-generation:continuation',
         status: 'active',
         maxContinuations: 5,
         continuationsUsed: 1,
@@ -2565,6 +2566,7 @@ describe('runTask', () => {
     await expect(decision).resolves.toMatchObject({
       disposition: 'continue',
       prompt: {
+        prompt: expect.stringContaining('goal-generation:continuation'),
         source: 'goal-continuation',
         clientMessageId: 'goal-continuation:completion-race',
       },

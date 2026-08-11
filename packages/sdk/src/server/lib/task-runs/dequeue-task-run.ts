@@ -75,6 +75,7 @@ export function buildDequeuedTaskContext(task: Task): DequeuedTaskContext {
       task.goalMaxContinuations !== null
         ? {
             objective: task.goalObjective,
+            generation: task.goalLastContinuationId,
             status: task.goalStatus,
             maxContinuations: task.goalMaxContinuations,
             continuationsUsed: task.goalContinuationsUsed,

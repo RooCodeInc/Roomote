@@ -635,6 +635,14 @@ roomoteMcpServer.registerTool(
       'Read or finish the current task goal. Use get to inspect it. Use complete only after the full objective is verified. Use blocked only when progress cannot continue without user input or an external state change. The agent cannot create, replace, pause, resume, or clear goals.',
     inputSchema: {
       action: z.enum(['get', 'complete', 'blocked']),
+      generation: z
+        .string()
+        .max(200)
+        .nullable()
+        .optional()
+        .describe(
+          'Required for complete and blocked. Pass the exact generation assigned in the current turn goal instructions.',
+        ),
       reason: z
         .string()
         .max(2_000)

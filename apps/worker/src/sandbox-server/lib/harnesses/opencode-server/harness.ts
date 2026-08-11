@@ -190,6 +190,7 @@ interface PromptInput {
   userName?: string;
   userImageUrl?: string;
   clientMessageId?: string;
+  goalGeneration?: string | null;
 }
 
 interface FinalizedAssistantTurn {
@@ -2207,6 +2208,9 @@ export class OpenCodeServerHarness
             ...(command.data.userImageUrl
               ? { userImageUrl: command.data.userImageUrl }
               : {}),
+            ...(command.data.goalGeneration
+              ? { goalGeneration: command.data.goalGeneration }
+              : {}),
           });
           return;
         } catch (error) {
@@ -2229,6 +2233,7 @@ export class OpenCodeServerHarness
         userName: command.data.userName,
         userImageUrl: command.data.userImageUrl,
         clientMessageId: command.data.clientMessageId,
+        goalGeneration: command.data.goalGeneration,
       });
 
       if (command.data.autoSteerWhenQueued) {
@@ -3627,9 +3632,13 @@ export class OpenCodeServerHarness
       }
     }
 
-    const promptText = addVisualDelegationReminder
+    const visiblePromptText = addVisualDelegationReminder
       ? withVisualDelegationReminder(prompt.text, visualImagePaths)
       : prompt.text;
+    const promptText =
+      prompt.goalGeneration !== undefined
+        ? `${visiblePromptText}\n\n<goal_generation>\nThis turn is assigned goal generation ${JSON.stringify(prompt.goalGeneration)}. Pass that exact value as generation to every manage_goal complete or blocked call. Never substitute a generation read by another turn.\n</goal_generation>`
+        : visiblePromptText;
 
     this.inFlight = true;
     this.finalizedAssistantTurn = null;
@@ -5153,6 +5162,7 @@ export class OpenCodeServerHarness
       userName: next.userName,
       userImageUrl: next.userImageUrl,
       clientMessageId: next.clientMessageId,
+      goalGeneration: next.goalGeneration,
     });
   }
 

@@ -76,14 +76,20 @@ export async function startTaskGoalCommand(
   }
 
   try {
-    await sendSandboxPromptCommand(auth, {
-      taskId: input.taskId,
-      prompt: input.goal.objective,
-      source: 'web',
-      clientMessageId: input.clientMessageId,
-      userImageUrl: input.userImageUrl,
-      autoSteerWhenQueued: true,
-    });
+    await sendSandboxPromptCommand(
+      auth,
+      {
+        taskId: input.taskId,
+        prompt: input.goal.objective,
+        source: 'web',
+        clientMessageId: input.clientMessageId,
+        userImageUrl: input.userImageUrl,
+        autoSteerWhenQueued: true,
+      },
+      {
+        goalGeneration: activation.generation,
+      },
+    );
   } catch (error) {
     try {
       await activation.rollback();

@@ -22,7 +22,8 @@ export type TaskGoalMutationResult =
         | 'budget_exhausted'
         | 'already_claimed'
         | 'blocker_pending'
-        | 'activation_pending';
+        | 'activation_pending'
+        | 'generation_mismatch';
       goal: TaskGoal | null;
     };
 
@@ -37,6 +38,7 @@ function toTaskGoal(task: typeof tasks.$inferSelect): TaskGoal | null {
 
   return {
     objective: task.goalObjective,
+    generation: task.goalLastContinuationId,
     status: task.goalStatus,
     maxContinuations: task.goalMaxContinuations,
     continuationsUsed: task.goalContinuationsUsed,
@@ -106,6 +108,7 @@ export async function prepareTaskGoalActivation(input: {
   taskId: string;
   goal: TaskGoalInput;
 }): Promise<{
+  generation: string;
   commit: () => Promise<TaskGoal | null>;
   rollback: () => Promise<boolean>;
 } | null> {
@@ -156,6 +159,7 @@ export async function prepareTaskGoalActivation(input: {
   );
 
   return {
+    generation: generationId,
     commit: async () => {
       const [updated] = await db
         .update(tasks)
@@ -197,6 +201,7 @@ export async function prepareTaskGoalActivation(input: {
 export async function markTaskGoalForRun(
   input: {
     runId: number;
+    generation: string | null;
   } & (
     | { status: Extract<TaskGoalStatus, 'complete'> }
     | {
@@ -232,6 +237,13 @@ export async function markTaskGoalForRun(
           goal: toTaskGoal(task),
         };
       }
+      if (task.goalLastContinuationId !== input.generation) {
+        return {
+          updated: false,
+          reason: 'generation_mismatch',
+          goal: toTaskGoal(task),
+        };
+      }
 
       const reason = input.reason.trim();
       const sameTurn =
@@ -263,7 +275,13 @@ export async function markTaskGoalForRun(
                 updatedAt: new Date(),
               },
         )
-        .where(and(eq(tasks.id, task.id), eq(tasks.goalStatus, 'active')))
+        .where(
+          and(
+            eq(tasks.id, task.id),
+            eq(tasks.goalStatus, 'active'),
+            goalGenerationFilter(input.generation),
+          ),
+        )
         .returning();
 
       if (!updated) {
@@ -296,6 +314,13 @@ export async function markTaskGoalForRun(
       goal: toTaskGoal(task),
     };
   }
+  if (task.goalLastContinuationId !== input.generation) {
+    return {
+      updated: false,
+      reason: 'generation_mismatch',
+      goal: toTaskGoal(task),
+    };
+  }
 
   const [updated] = await db
     .update(tasks)
@@ -312,7 +337,7 @@ export async function markTaskGoalForRun(
       and(
         eq(tasks.id, task.id),
         eq(tasks.goalStatus, 'active'),
-        goalGenerationFilter(task.goalLastContinuationId),
+        goalGenerationFilter(input.generation),
       ),
     )
     .returning();

@@ -12,6 +12,7 @@ function createCaller(options?: {
     images?: string[];
     workflowPhase?: string;
     autoSteerWhenQueued?: boolean;
+    goalGeneration?: string | null;
     userId?: string;
   }) => boolean;
   status?: {
@@ -113,6 +114,22 @@ describe('sendPrompt procedure', () => {
       expect.objectContaining({
         prompt: 'review the newest commits next',
         queueOnly: true,
+      }),
+    );
+  });
+
+  it('forwards trusted goal generation context to the harness', async () => {
+    const { caller, sendFollowUpPrompt } = createCaller();
+
+    await caller.commands.sendPrompt({
+      prompt: 'finish the replacement goal',
+      goalGeneration: 'goal-generation:replacement',
+    });
+
+    expect(sendFollowUpPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'finish the replacement goal',
+        goalGeneration: 'goal-generation:replacement',
       }),
     );
   });

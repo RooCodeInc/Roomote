@@ -32,6 +32,7 @@ export interface PendingSteerPickup {
   userId?: string;
   userName?: string;
   userImageUrl?: string;
+  goalGeneration?: string | null;
 }
 
 export function formatOpenCodeTurnStallErrorText(

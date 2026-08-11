@@ -45,6 +45,7 @@ export interface StartNewTaskCommand {
     userName?: string;
     userImageUrl?: string;
     clientMessageId?: string;
+    goalGeneration?: string | null;
     configuration?: Record<string, unknown>;
     newTab?: boolean;
   };
@@ -64,6 +65,7 @@ export interface SendMessageCommand {
     userName?: string;
     userImageUrl?: string;
     clientMessageId?: string;
+    goalGeneration?: string | null;
   };
 }
 
@@ -78,6 +80,7 @@ export interface QueuedPromptMessageSnapshot {
   userName?: string;
   userImageUrl?: string;
   clientMessageId?: string;
+  goalGeneration?: string | null;
   timestamp: number;
 }
 

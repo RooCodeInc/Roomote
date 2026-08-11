@@ -242,6 +242,7 @@ export async function saveDraftPromptCommand(
 export async function sendSandboxPromptCommand(
   auth: UserAuthSuccess,
   input: z.input<typeof sendSandboxPromptInputSchema>,
+  trustedContext?: { goalGeneration?: string },
 ) {
   const parsed = sendSandboxPromptInputSchema.parse(input);
   const { taskRun } = await getResolvedSandboxTaskRunByTaskId(auth, {
@@ -348,6 +349,7 @@ export async function sendSandboxPromptCommand(
       autoSteerWhenQueued: requiresActorHandoff
         ? true
         : parsed.autoSteerWhenQueued,
+      goalGeneration: trustedContext?.goalGeneration,
     });
 
     if (

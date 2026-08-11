@@ -157,6 +157,7 @@ describe('startTaskGoalCommand', () => {
     });
     mockGoalCommit.mockResolvedValue({
       objective: 'Ship the release',
+      generation: 'goal-generation:replacement',
       status: 'active',
       maxContinuations: 5,
       continuationsUsed: 0,
@@ -165,6 +166,7 @@ describe('startTaskGoalCommand', () => {
     });
     mockGoalRollback.mockResolvedValue(true);
     mockPrepareTaskGoalActivation.mockResolvedValue({
+      generation: 'goal-generation:replacement',
       commit: mockGoalCommit,
       rollback: mockGoalRollback,
     });
@@ -190,14 +192,18 @@ describe('startTaskGoalCommand', () => {
       taskId: 'task-123',
       goal: { objective: 'Ship the release', maxContinuations: 5 },
     });
-    expect(mockSendSandboxPrompt).toHaveBeenCalledWith(auth, {
-      taskId: 'task-123',
-      prompt: 'Ship the release',
-      source: 'web',
-      clientMessageId: 'message-1',
-      userImageUrl: undefined,
-      autoSteerWhenQueued: true,
-    });
+    expect(mockSendSandboxPrompt).toHaveBeenCalledWith(
+      auth,
+      {
+        taskId: 'task-123',
+        prompt: 'Ship the release',
+        source: 'web',
+        clientMessageId: 'message-1',
+        userImageUrl: undefined,
+        autoSteerWhenQueued: true,
+      },
+      { goalGeneration: 'goal-generation:replacement' },
+    );
     expect(mockGoalCommit).toHaveBeenCalledOnce();
     expect(mockGoalRollback).not.toHaveBeenCalled();
   });
