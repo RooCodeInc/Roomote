@@ -25,6 +25,7 @@ import {
   sourceControlProviderSchema,
   sourceControlTokenBackedProviderSchema,
   standardTaskSchema,
+  taskGoalInputSchema,
   taskModelMetadataSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
 } from '@roomote/types';
@@ -102,6 +103,7 @@ import {
   routeHomeTaskCommand,
   createStandardTaskRunCommand,
   cancelTaskRunCommand,
+  enableTaskGoalCommand,
   retryFailedTaskStartCommand,
 } from '../commands/task-runs';
 import {
@@ -957,6 +959,17 @@ export const appRouter = createRouter({
   }),
 
   taskRuns: createRouter({
+    enableGoal: protectedProcedure
+      .input(
+        z.object({
+          taskId: z.string(),
+          goal: taskGoalInputSchema,
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        enableTaskGoalCommand(auth, input),
+      ),
+
     routeHomeTask: protectedProcedure
       .input(
         z.object({

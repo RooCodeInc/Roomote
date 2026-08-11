@@ -2524,7 +2524,7 @@ describe('runTask', () => {
     );
   });
 
-  it('returns a goal continuation plan without dispatching it', async () => {
+  it('continues a goal enabled after the runtime starts', async () => {
     await runTask({
       taskRun: {
         id: 407,
@@ -2533,16 +2533,6 @@ describe('runTask', () => {
         harness: 'opencode-server',
         payload: {},
         result: null,
-      } as never,
-      task: {
-        goal: {
-          objective: 'Complete the long-running goal',
-          status: 'active',
-          maxContinuations: 5,
-          continuationsUsed: 0,
-          blockedReason: null,
-          completedAt: null,
-        },
       } as never,
       envVars: {},
       workspacePath: '/tmp/workspace',

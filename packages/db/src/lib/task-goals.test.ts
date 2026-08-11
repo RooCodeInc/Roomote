@@ -2,12 +2,40 @@ import { runFactory } from '../fixtures/factories/run.factory';
 import { taskFactory } from '../fixtures/factories/task.factory';
 import {
   claimTaskGoalContinuationForRun,
+  enableTaskGoal,
   getTaskGoalForRun,
   markTaskGoalForRun,
   releaseTaskGoalContinuationForRun,
 } from './task-goals';
 
 describe('task goals', () => {
+  it('enables and resets Goal Mode for an existing task', async () => {
+    const task = await taskFactory.create({
+      goalObjective: 'Old objective',
+      goalStatus: 'blocked',
+      goalMaxContinuations: 2,
+      goalContinuationsUsed: 2,
+      goalBlockedReason: 'Old blocker',
+      goalContinuationIds: ['old-turn'],
+    });
+
+    await expect(
+      enableTaskGoal({
+        taskId: task.id,
+        goal: {
+          objective: 'Finish the new objective',
+          maxContinuations: 4,
+        },
+      }),
+    ).resolves.toMatchObject({
+      objective: 'Finish the new objective',
+      status: 'active',
+      maxContinuations: 4,
+      continuationsUsed: 0,
+      blockedReason: null,
+    });
+  });
+
   it('claims bounded continuations and marks the goal budget limited', async () => {
     const task = await taskFactory.create({
       goalObjective: 'Finish the long-running task',

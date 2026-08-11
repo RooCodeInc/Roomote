@@ -1287,64 +1287,63 @@ export const runTask = async ({
       taskId: taskRun.taskId,
       logger,
       callbacks: {
-        ...(task?.goal
-          ? {
-              onBeforeTaskCompletion: async (completionId: string) => {
-                if (taskCancellation.signal.aborted) {
-                  return 'finalize' as const;
-                }
+        onBeforeTaskCompletion: async (completionId: string) => {
+          if (taskCancellation.signal.aborted) {
+            return 'finalize' as const;
+          }
 
-                const claim = await sdk.taskRuns.claimGoalContinuation({
-                  runId: taskRun.id,
-                  continuationId: completionId,
-                });
-                if (!claim.updated) {
-                  if (claim.reason === 'already_claimed') {
-                    return 'ignore' as const;
-                  }
-                  await recordWorkerRuntimeEvent({
-                    eventType: 'decision',
-                    message: `Goal continuation stopped for task run #${taskRun.id}.`,
-                    details: {
-                      reason: claim.reason,
-                      goalStatus: claim.goal?.status ?? null,
-                    },
-                  });
-                  return 'finalize' as const;
-                }
-
-                const continuationEvent = (sent: boolean) => ({
-                  eventType: 'decision' as const,
-                  message: `Goal continuation ${sent ? 'started' : 'could not start'} for task run #${taskRun.id}.`,
-                  details: {
-                    reason: 'goal_continuation',
-                    delivered: sent,
-                    continuation: claim.goal.continuationsUsed,
-                    maxContinuations: claim.goal.maxContinuations,
-                  },
-                });
-                return {
-                  disposition: 'continue' as const,
-                  prompt: {
-                    prompt: buildTaskGoalContinuationPrompt(claim.goal),
-                    visibleInTranscript: false,
-                    source: 'goal-continuation',
-                    clientMessageId: `goal-continuation:${completionId}`,
-                  },
-                  onAccepted: () => {
-                    void recordWorkerRuntimeEvent(continuationEvent(true));
-                  },
-                  onRejected: async () => {
-                    await sdk.taskRuns.releaseGoalContinuation({
-                      runId: taskRun.id,
-                      continuationId: completionId,
-                    });
-                    await recordWorkerRuntimeEvent(continuationEvent(false));
-                  },
-                };
-              },
+          const claim = await sdk.taskRuns.claimGoalContinuation({
+            runId: taskRun.id,
+            continuationId: completionId,
+          });
+          if (!claim.updated) {
+            if (claim.reason === 'already_claimed') {
+              return 'ignore' as const;
             }
-          : {}),
+            if (!claim.goal) {
+              return 'finalize' as const;
+            }
+            await recordWorkerRuntimeEvent({
+              eventType: 'decision',
+              message: `Goal continuation stopped for task run #${taskRun.id}.`,
+              details: {
+                reason: claim.reason,
+                goalStatus: claim.goal?.status ?? null,
+              },
+            });
+            return 'finalize' as const;
+          }
+
+          const continuationEvent = (sent: boolean) => ({
+            eventType: 'decision' as const,
+            message: `Goal continuation ${sent ? 'started' : 'could not start'} for task run #${taskRun.id}.`,
+            details: {
+              reason: 'goal_continuation',
+              delivered: sent,
+              continuation: claim.goal.continuationsUsed,
+              maxContinuations: claim.goal.maxContinuations,
+            },
+          });
+          return {
+            disposition: 'continue' as const,
+            prompt: {
+              prompt: buildTaskGoalContinuationPrompt(claim.goal),
+              visibleInTranscript: false,
+              source: 'goal-continuation',
+              clientMessageId: `goal-continuation:${completionId}`,
+            },
+            onAccepted: () => {
+              void recordWorkerRuntimeEvent(continuationEvent(true));
+            },
+            onRejected: async () => {
+              await sdk.taskRuns.releaseGoalContinuation({
+                runId: taskRun.id,
+                continuationId: completionId,
+              });
+              await recordWorkerRuntimeEvent(continuationEvent(false));
+            },
+          };
+        },
         onStart: async (taskId: string) => {
           try {
             await sdk.taskRuns.setHarnessSessionId({

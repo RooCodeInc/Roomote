@@ -7,12 +7,16 @@ const {
   mockGetRepositories,
   mockDbWhere,
   mockDbSelect,
+  mockEnableTaskGoal,
+  mockResolveTaskByIdAccess,
   mockResolveWorkspaceProvider,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
   mockGetRepositories: vi.fn(),
   mockDbWhere: vi.fn(),
   mockDbSelect: vi.fn(),
+  mockEnableTaskGoal: vi.fn(),
+  mockResolveTaskByIdAccess: vi.fn(),
   mockResolveWorkspaceProvider: vi.fn(),
 }));
 
@@ -41,6 +45,7 @@ vi.mock('@roomote/db/server', () => ({
     select: (...args: unknown[]) => mockDbSelect(...args),
   },
   desc: vi.fn((value: unknown) => ({ type: 'desc', value })),
+  enableTaskGoal: (...args: unknown[]) => mockEnableTaskGoal(...args),
   eq: vi.fn((left: unknown, right: unknown) => ({ type: 'eq', left, right })),
   environmentRepositoryMappings: {
     environmentId: 'environment_repository_mappings.environment_id',
@@ -94,7 +99,12 @@ vi.mock('@/lib/task-utils', () => ({
   humanizeFilename: (value: string) => value,
 }));
 
-import { createStandardTaskRunCommand } from './index';
+vi.mock('../tasks/by-id', () => ({
+  resolveTaskByIdAccessCommand: (...args: unknown[]) =>
+    mockResolveTaskByIdAccess(...args),
+}));
+
+import { createStandardTaskRunCommand, enableTaskGoalCommand } from './index';
 
 const auth = {
   success: true,
@@ -125,6 +135,56 @@ function mockSuccessfulEnqueue() {
     taskId: 'task-123',
   });
 }
+
+describe('enableTaskGoalCommand', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockResolveTaskByIdAccess.mockResolvedValue({
+      kind: 'resolved',
+      task: { id: 'task-123' },
+    });
+    mockEnableTaskGoal.mockResolvedValue({
+      objective: 'Ship the release',
+      status: 'active',
+      maxContinuations: 5,
+      continuationsUsed: 0,
+      blockedReason: null,
+      completedAt: null,
+    });
+  });
+
+  it('enables Goal Mode after resolving authenticated task access', async () => {
+    await expect(
+      enableTaskGoalCommand(auth, {
+        taskId: 'task-123',
+        goal: { objective: 'Ship the release', maxContinuations: 5 },
+      }),
+    ).resolves.toMatchObject({
+      success: true,
+      goal: { objective: 'Ship the release', status: 'active' },
+    });
+
+    expect(mockResolveTaskByIdAccess).toHaveBeenCalledWith(auth, {
+      taskId: 'task-123',
+    });
+    expect(mockEnableTaskGoal).toHaveBeenCalledWith({
+      taskId: 'task-123',
+      goal: { objective: 'Ship the release', maxContinuations: 5 },
+    });
+  });
+
+  it('does not enable Goal Mode when the task is unavailable', async () => {
+    mockResolveTaskByIdAccess.mockResolvedValue({ kind: 'not-found' });
+
+    await expect(
+      enableTaskGoalCommand(auth, {
+        taskId: 'missing-task',
+        goal: { objective: 'Ship the release', maxContinuations: 5 },
+      }),
+    ).resolves.toEqual({ success: false, error: 'Task not found' });
+    expect(mockEnableTaskGoal).not.toHaveBeenCalled();
+  });
+});
 
 describe('createStandardTaskRunCommand', () => {
   beforeEach(() => {

@@ -23,6 +23,7 @@ import {
   and,
   db,
   desc,
+  enableTaskGoal,
   eq,
   inArray,
   markTaskStartParallelCountEndedAt,
@@ -39,10 +40,38 @@ import {
   resolveSelectedRepositorySourceControlProvider,
 } from '@/lib/server/source-control-provider';
 import { humanizeFilename } from '@/lib/task-utils';
+import { resolveTaskByIdAccessCommand } from '../tasks/by-id';
 
 export type CreateTaskRunResult =
   | { success: true; id: number; taskId: string }
   | { success: false; error: string };
+
+export async function enableTaskGoalCommand(
+  auth: UserAuthSuccess,
+  input: {
+    taskId: string;
+    goal: { objective: string; maxContinuations: number };
+  },
+): Promise<
+  | {
+      success: true;
+      goal: NonNullable<Awaited<ReturnType<typeof enableTaskGoal>>>;
+    }
+  | { success: false; error: string }
+> {
+  const taskAccess = await resolveTaskByIdAccessCommand(auth, {
+    taskId: input.taskId,
+  });
+
+  if (taskAccess.kind !== 'resolved') {
+    return { success: false, error: 'Task not found' };
+  }
+
+  const goal = await enableTaskGoal(input);
+  return goal
+    ? { success: true, goal }
+    : { success: false, error: 'Task not found' };
+}
 
 type CreateStandardTaskRunInput = {
   harness?: LaunchCodingHarness;

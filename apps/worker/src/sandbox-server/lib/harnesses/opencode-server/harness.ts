@@ -10,7 +10,6 @@ import {
   asRecord,
   asString,
   buildAcpRequestUserInputRequestId,
-  formatRequestUserInputResponseText,
   parseAcpFlattenedMcpToolName,
   OPENCODE_ARCHITECT_AGENT,
   OPENCODE_BUILD_AGENT,
@@ -1119,20 +1118,6 @@ function formatOpenCodeSessionErrorText(error: unknown): string {
   return 'The session ended with an unknown provider error.';
 }
 
-function formatOpenCodeUserInputResponsePrompt(options: {
-  request: HarnessPendingUserInputRequest;
-  answers: AcpRequestUserInputAnswers;
-  resolution: AcpRequestUserInputResponsePayload['resolution'];
-}): string {
-  return [
-    `The user responded to structured input request ${options.request.requestId}. Continue using these answers:`,
-    formatRequestUserInputResponseText(options.request, {
-      resolution: options.resolution,
-      answers: options.answers,
-    }),
-  ].join('\n\n');
-}
-
 function normalizeOpenCodeToolStatus(
   status: string | undefined,
 ): AcpToolStatus {
@@ -1559,6 +1544,7 @@ export class OpenCodeServerHarness
     string,
     HarnessPendingUserInputRequest
   >();
+  private readonly nativeQuestionRequestIds = new Map<string, string>();
   // Request ids that have already been answered or abandoned. A late answer
   // (e.g. a web POST opened before a steer abandoned the question) for one
   // of these must be rejected rather than fabricated into the replayed turn.
@@ -1629,13 +1615,6 @@ export class OpenCodeServerHarness
   private rejectEventStreamReady: ((error: unknown) => void) | undefined;
   private finalizedAssistantTurn: FinalizedAssistantTurn | null = null;
   private suppressNextReplayAbortError = false;
-  // Queue id of an answered user-input replay awaiting delivery. While that
-  // exact prompt is still queued, an idle transition must drain it instead of
-  // running Slack closeout enforcement. Keyed by id (ids are never reused) so
-  // the suppression expires the moment the replay is dequeued and can never
-  // leak onto a later, unrelated queued prompt.
-  private queuedUserInputReplayPromptId: string | null = null;
-  private ignoreNextUserInputReplaySessionIdle = false;
   private replayAbortErrorSuppressionTimeout:
     | ReturnType<typeof setTimeout>
     | undefined;
@@ -2125,8 +2104,6 @@ export class OpenCodeServerHarness
     this.clearProviderErrorRecoveryState();
     this.clearAllExecuteToolProgress();
     this.stopHookReminderCount = 0;
-    this.queuedUserInputReplayPromptId = null;
-    this.ignoreNextUserInputReplaySessionIdle = false;
     this.ignoreNextStopHookSessionIdle = false;
     this.ignoreNextQueuedDrainSessionIdle = false;
     this.currentWorkflowPhase = command.data.workflowPhase ?? null;
@@ -2301,6 +2278,7 @@ export class OpenCodeServerHarness
       this.clearQueuedPromptRetryTimer();
       this.clearProviderErrorRecoveryState();
       this.pendingUserInputRequests.clear();
+      this.nativeQuestionRequestIds.clear();
       this.clearAllExecuteToolProgress();
       return;
     }
@@ -2353,6 +2331,7 @@ export class OpenCodeServerHarness
         this.recordResolvedUserInputRequest(pending.requestId);
       }
       this.pendingUserInputRequests.clear();
+      this.nativeQuestionRequestIds.clear();
     }
     this.clearAllExecuteToolProgress();
 
@@ -3113,6 +3092,7 @@ export class OpenCodeServerHarness
         this.recordResolvedUserInputRequest(pending.requestId);
       }
       this.pendingUserInputRequests.clear();
+      this.nativeQuestionRequestIds.clear();
     }
 
     const sessionId = this.sessionId;
@@ -3163,55 +3143,118 @@ export class OpenCodeServerHarness
       return;
     }
 
-    this.pendingUserInputRequests.delete(command.data.requestId);
-    this.recordResolvedUserInputRequest(command.data.requestId);
+    const nativeRequestId = await this.resolveNativeQuestionRequestId(pending);
+
+    if (!nativeRequestId) {
+      throw new Error(
+        `OpenCode question not found for requestId=${command.data.requestId}`,
+      );
+    }
+
+    if (!(await this.prepareUserInputAnswer(command.data.userId))) {
+      return;
+    }
+
     const resolution = getRequestUserInputResponseResolution(
       command.data.answers,
     );
+
+    if (resolution === 'submitted') {
+      const orderedQuestionIds =
+        pending.questions.length > 0
+          ? pending.questions.map((question) => question.id)
+          : Object.keys(command.data.answers);
+      await this.client.replyQuestion({
+        requestId: nativeRequestId,
+        answers: orderedQuestionIds.map(
+          (questionId) => command.data.answers[questionId]?.answers ?? [],
+        ),
+        signal: this.eventAbortController.signal,
+      });
+    } else {
+      await this.client.rejectQuestion({
+        requestId: nativeRequestId,
+        signal: this.eventAbortController.signal,
+      });
+    }
+
+    this.pendingUserInputRequests.delete(command.data.requestId);
+    this.nativeQuestionRequestIds.delete(command.data.requestId);
+    this.recordResolvedUserInputRequest(command.data.requestId);
     this.runtimeEvents.requestUserInputResponse({
       request: pending,
       answers: command.data.answers,
       resolution,
     });
+  }
 
-    const responseText = formatOpenCodeUserInputResponsePrompt({
-      request: pending,
-      answers: command.data.answers,
-      resolution,
-    });
+  private async resolveNativeQuestionRequestId(
+    pending: HarnessPendingUserInputRequest,
+  ): Promise<string | null> {
+    const known = this.nativeQuestionRequestIds.get(pending.requestId);
 
-    if (this.inFlight || this.providerErrorRecoveryQueuedPromptId !== null) {
-      const queuedId = this.prompts.enqueue({
-        text: responseText,
-        visibleInTranscript: false,
-        userId: command.data.userId,
-      });
-      this.prompts.prioritize(queuedId);
-      this.queuedUserInputReplayPromptId = queuedId;
-
-      if (this.providerErrorRecoveryQueuedPromptId !== null) {
-        this.frontloadProviderErrorRecoveryIfQueued();
-        return;
-      }
-
-      await this.interruptForQueuedReplay();
-      return;
+    if (known) {
+      return known;
     }
 
-    const sessionId = await this.ensureSession(responseText);
-    this.runtimeEvents.userPrompt({
-      sessionId,
-      text: responseText,
-      visibleInTranscript: false,
-      source: 'request_user_input_response',
-      userId: command.data.userId,
-    });
-    await this.submitPrompt({
-      text: responseText,
-      visibleInTranscript: false,
-      source: 'request_user_input_response',
-      userId: command.data.userId,
-    });
+    const questions = await this.client.questions(
+      this.eventAbortController.signal,
+    );
+    const matching = questions.find(
+      (question) =>
+        question.sessionID === pending.sessionId &&
+        question.tool?.messageID === pending.turnId &&
+        question.tool.callID === pending.callId,
+    );
+
+    if (!matching) {
+      return null;
+    }
+
+    this.nativeQuestionRequestIds.set(pending.requestId, matching.id);
+    return matching.id;
+  }
+
+  private async prepareUserInputAnswer(userId?: string): Promise<boolean> {
+    if (!this.beforeQueuedPrompt) {
+      return true;
+    }
+
+    const result = await this.beforeQueuedPrompt({ userId });
+
+    if (!result) {
+      return true;
+    }
+
+    if (result.shouldSkipPrompt) {
+      this.logger.warn(
+        `OpenCode question answer skipped before delivery reason=${
+          result.reason ?? 'unknown'
+        }`,
+      );
+      return false;
+    }
+
+    if (result.shouldBlockPrompt) {
+      throw new Error(
+        result.reason ??
+          'OpenCode question answer delivery is temporarily blocked',
+      );
+    }
+
+    if (result.shouldReconnect) {
+      this.emit('restartRequested', {
+        reason:
+          result.reason ?? 'OpenCode question answer requested MCP reconnect',
+        sessionId: this.sessionId,
+      });
+      throw new Error(
+        result.reason ??
+          'OpenCode question answer requires MCP reconnect before delivery',
+      );
+    }
+
+    return true;
   }
 
   private recordResolvedUserInputRequest(requestId: string): void {
@@ -3383,6 +3426,7 @@ export class OpenCodeServerHarness
     this.clearQueuedPromptRetryTimer();
     this.clearProviderErrorRecoveryState();
     this.pendingUserInputRequests.clear();
+    this.nativeQuestionRequestIds.clear();
     this.clearAllExecuteToolProgress();
     this.runtimeEvents.taskStarted(sessionId);
     this.runtimeEvents.taskAborted(sessionId);
@@ -3687,6 +3731,9 @@ export class OpenCodeServerHarness
       case 'message.updated':
         await this.handleMessageUpdated(payload);
         return;
+      case 'question.asked':
+        this.handleQuestionAsked(payload);
+        return;
     }
   }
 
@@ -3755,7 +3802,6 @@ export class OpenCodeServerHarness
       // Retry transitions prove the session is alive, but not that the turn's
       // loop advanced. Keep the stall watchdog armed during transient backoff.
       this.ignoreNextProviderRecoverySessionIdle = false;
-      this.ignoreNextUserInputReplaySessionIdle = false;
       this.ignoreNextStopHookSessionIdle = false;
       this.ignoreNextQueuedDrainSessionIdle = false;
       this.inFlight = true;
@@ -3768,7 +3814,6 @@ export class OpenCodeServerHarness
       // If OpenCode omitted the paired session.idle event, do not let a stale
       // guard consume the retry's eventual idle transition.
       this.ignoreNextProviderRecoverySessionIdle = false;
-      this.ignoreNextUserInputReplaySessionIdle = false;
       this.ignoreNextStopHookSessionIdle = false;
       this.ignoreNextQueuedDrainSessionIdle = false;
       this.inFlight = true;
@@ -3850,11 +3895,6 @@ export class OpenCodeServerHarness
 
     if (this.ignoreNextProviderRecoverySessionIdle) {
       this.ignoreNextProviderRecoverySessionIdle = false;
-      return;
-    }
-
-    if (this.ignoreNextUserInputReplaySessionIdle) {
-      this.ignoreNextUserInputReplaySessionIdle = false;
       return;
     }
 
@@ -3957,6 +3997,7 @@ export class OpenCodeServerHarness
       this.clearQueuedPromptRetryTimer();
       this.clearProviderErrorRecoveryState();
       this.pendingUserInputRequests.clear();
+      this.nativeQuestionRequestIds.clear();
       this.clearAllExecuteToolProgress();
       this.runtimeEvents.taskAborted(sessionId);
     }
@@ -4472,6 +4513,21 @@ export class OpenCodeServerHarness
       return;
     }
 
+    if (this.resolvedUserInputRequestIds.has(request.requestId)) {
+      return;
+    }
+
+    const input = asRecord(toolPart.state?.input);
+    const hasStructuredQuestions =
+      Array.isArray(input?.questions) || Array.isArray(input?.prompts);
+
+    if (
+      this.nativeQuestionRequestIds.has(request.requestId) &&
+      !hasStructuredQuestions
+    ) {
+      return;
+    }
+
     const existing = this.pendingUserInputRequests.get(request.requestId);
 
     if (existing && areOpenCodeQuestionRequestsEqual(existing, request)) {
@@ -4484,6 +4540,89 @@ export class OpenCodeServerHarness
     };
 
     this.pendingUserInputRequests.set(request.requestId, pendingRequest);
+    this.runtimeEvents.requestUserInput(pendingRequest);
+  }
+
+  private handleQuestionAsked(payload: OpenCodeEventPayload): void {
+    const properties = asRecord(payload.properties);
+    const nativeRequestId = asString(properties?.id);
+    const sessionId = asString(properties?.sessionID);
+    const tool = asRecord(properties?.tool);
+    const turnId = asString(tool?.messageID);
+    const callId = asString(tool?.callID);
+    const rawQuestions = Array.isArray(properties?.questions)
+      ? properties.questions
+      : [];
+
+    if (!nativeRequestId || !sessionId || !turnId || !callId) {
+      return;
+    }
+
+    const requestId = buildAcpRequestUserInputRequestId({
+      sessionId,
+      turnId,
+      callId,
+    });
+
+    if (this.resolvedUserInputRequestIds.has(requestId)) {
+      return;
+    }
+
+    const existing = this.pendingUserInputRequests.get(requestId);
+    const existingIsPlaceholder =
+      existing?.questions.length === 1 &&
+      existing.questions[0]?.id === 'response';
+    const questions = rawQuestions
+      .map((rawQuestion, index) => {
+        const question = normalizeOpenCodeQuestion(rawQuestion, index);
+        const rawQuestionRecord = asRecord(rawQuestion);
+        const hasNativeId = Boolean(
+          asString(rawQuestionRecord?.id) ??
+          asString(rawQuestionRecord?.name) ??
+          asString(rawQuestionRecord?.key),
+        );
+        const existingQuestion = existing?.questions[index];
+
+        if (
+          question &&
+          existingQuestion &&
+          !existingIsPlaceholder &&
+          !hasNativeId
+        ) {
+          return { ...question, id: existingQuestion.id };
+        }
+
+        return question;
+      })
+      .filter(
+        (question): question is AcpRequestUserInputQuestion =>
+          question !== null,
+      );
+
+    if (questions.length === 0) {
+      return;
+    }
+
+    this.nativeQuestionRequestIds.set(requestId, nativeRequestId);
+
+    const request = {
+      requestId,
+      sessionId,
+      turnId,
+      callId,
+      questions,
+      status: 'pending' as const,
+    };
+
+    if (existing && areOpenCodeQuestionRequestsEqual(existing, request)) {
+      return;
+    }
+
+    const pendingRequest = {
+      ...request,
+      ts: this.runtimeEvents.nextTs(),
+    };
+    this.pendingUserInputRequests.set(requestId, pendingRequest);
     this.runtimeEvents.requestUserInput(pendingRequest);
   }
 
@@ -4615,18 +4754,7 @@ export class OpenCodeServerHarness
     this.lastOpenCodeRetryStatusMessage = null;
     this.clearAllExecuteToolProgress({ keepBackgroundWatchdogs: true });
 
-    // A blocked question answer queues an abort-and-replay prompt. Its abort
-    // can emit session.status(idle)/session.idle before the answer is
-    // submitted, so defer closeout enforcement while that exact prompt is
-    // still queued. The suppression self-expires once the replay is dequeued;
-    // it never carries over to later, unrelated queued prompts.
-    const skipStopHookForQueuedReplay =
-      this.queuedUserInputReplayPromptId !== null &&
-      this.prompts.has(this.queuedUserInputReplayPromptId);
-    this.ignoreNextUserInputReplaySessionIdle =
-      skipStopHookForQueuedReplay && source === 'session_status';
-
-    if (sessionId && !skipStopHookForQueuedReplay) {
+    if (sessionId) {
       const stopDecision = this.evaluateSlackStopHook(sessionId);
 
       if (stopDecision.blocked) {
@@ -4691,13 +4819,8 @@ export class OpenCodeServerHarness
     // If the drain submitted a queued prompt on the status-sourced entry,
     // inFlight is re-armed and the paired session.idle for the turn that just
     // ended would complete the drained turn immediately (second taskCompleted,
-    // empty queue, premature run finalization). Swallow that exact idle. The
-    // replay guard set above already covers the queued-replay drain.
-    if (
-      source === 'session_status' &&
-      this.inFlight &&
-      !this.ignoreNextUserInputReplaySessionIdle
-    ) {
+    // empty queue, premature run finalization). Swallow that exact idle.
+    if (source === 'session_status' && this.inFlight) {
       this.ignoreNextQueuedDrainSessionIdle = true;
     }
   }

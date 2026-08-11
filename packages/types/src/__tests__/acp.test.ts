@@ -8,6 +8,7 @@ import {
   isLinkedReviewResultsMessage,
   normalizeTranscriptUserText,
   parseLinkedReviewResults,
+  parseAcpRequestUserInputAnswerReply,
   parseAcpRequestUserInputReply,
   resolveAcpTranscriptVisibility,
   resolveAcpRequestUserInputAnswer,
@@ -713,12 +714,64 @@ describe('request_user_input reply parsing', () => {
   });
 
   it('accepts custom answers when the question allows other', () => {
+    const question = { ...fixedChoiceQuestion, isOther: true };
+
+    expect(resolveAcpRequestUserInputAnswer(question, 'Go')).toBe('Go');
+
     expect(
-      resolveAcpRequestUserInputAnswer(
-        { ...fixedChoiceQuestion, isOther: true },
-        'Go',
+      parseAcpRequestUserInputAnswerReply([question], 'Use Go instead'),
+    ).toEqual({
+      resolution: 'submitted',
+      answers: {
+        language: { answers: ['Use Go instead'] },
+      },
+      usedFreeTextOptionFallback: true,
+    });
+
+    expect(
+      parseAcpRequestUserInputAnswerReply(
+        [question],
+        'Could you use Go instead?',
       ),
-    ).toBe('Go');
+    ).toMatchObject({
+      resolution: 'submitted',
+      answers: {
+        language: { answers: ['Could you use Go instead?'] },
+      },
+    });
+
+    expect(
+      parseAcpRequestUserInputAnswerReply(
+        [question],
+        "I don't want retries for 24 hours; use a fixed limit instead.",
+      ),
+    ).toMatchObject({
+      resolution: 'submitted',
+      answers: {
+        language: {
+          answers: [
+            "I don't want retries for 24 hours; use a fixed limit instead.",
+          ],
+        },
+      },
+    });
+  });
+
+  it('accepts requests for explanation as custom answers', () => {
+    const question = { ...fixedChoiceQuestion, isOther: true };
+
+    for (const answer of [
+      'Whats the difference in practice?',
+      'Can you explain the tradeoffs in more detail',
+      'I need more context before deciding',
+    ]) {
+      expect(
+        parseAcpRequestUserInputAnswerReply([question], answer),
+      ).toMatchObject({
+        resolution: 'submitted',
+        answers: { language: { answers: [answer] } },
+      });
+    }
   });
 
   it('parses more than three ordered answers for multi-question prompts', () => {

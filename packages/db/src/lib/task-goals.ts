@@ -1,4 +1,4 @@
-import type { TaskGoal, TaskGoalStatus } from '@roomote/types';
+import type { TaskGoal, TaskGoalInput, TaskGoalStatus } from '@roomote/types';
 import { and, eq, inArray, isNotNull, lt, sql } from 'drizzle-orm';
 
 import { db } from '../db';
@@ -52,6 +52,32 @@ export async function getTaskGoalForRun(
 ): Promise<TaskGoal | null> {
   const task = await getTaskForRun(runId);
   return task ? toTaskGoal(task) : null;
+}
+
+export async function enableTaskGoal(input: {
+  taskId: string;
+  goal: TaskGoalInput;
+}): Promise<TaskGoal | null> {
+  const [updated] = await db
+    .update(tasks)
+    .set({
+      goalObjective: input.goal.objective,
+      goalStatus: 'active',
+      goalMaxContinuations: input.goal.maxContinuations,
+      goalContinuationsUsed: 0,
+      goalBlockedReason: null,
+      goalCompletedAt: null,
+      goalLastContinuationId: null,
+      goalContinuationIds: [],
+      goalBlockerCandidateReason: null,
+      goalBlockerCandidateCount: 0,
+      goalBlockerLastContinuationUsed: null,
+      updatedAt: new Date(),
+    })
+    .where(eq(tasks.id, input.taskId))
+    .returning();
+
+  return updated ? toTaskGoal(updated) : null;
 }
 
 export async function markTaskGoalForRun(
@@ -178,10 +204,11 @@ export async function claimTaskGoalContinuationForRun(input: {
   if (!task) {
     return { updated: false, reason: 'missing', goal: null };
   }
-  if (
-    task.goalStatus === 'active' &&
-    task.goalContinuationIds.includes(continuationId)
-  ) {
+  const existingGoal = toTaskGoal(task);
+  if (task.goalStatus !== 'active' || !existingGoal) {
+    return { updated: false, reason: 'not_active', goal: existingGoal };
+  }
+  if (task.goalContinuationIds.includes(continuationId)) {
     return {
       updated: false,
       reason: 'already_claimed',

@@ -805,6 +805,14 @@ const sharedTaskSchema = z.object({
   // Resume-from-snapshot fields (set at insert time for atomic duplicate detection):
   sourceSnapshotId: z.string().nullish(),
   sourceRunId: z.number().nullish(),
+
+  /**
+   * Run whose provider-neutral communication coordinates should be copied
+   * into this task's payload at enqueue time, as read-only source context.
+   * Transient enqueue input; independent of `sourceRunId` so relaunch
+   * lineage, settle notifications, and activation metrics are unaffected.
+   */
+  communicationContextSourceRunId: z.number().nullish(),
 });
 
 export const linkedWorkItemProviderSchema = z.enum([
@@ -981,6 +989,8 @@ const sharedTaskPayloadSchema = z.object({
   communicationChannelId: z.string().optional(),
   communicationThreadId: z.string().optional(),
   communicationMessageId: z.string().optional(),
+  /** True when communication coordinates were inherited from a parent run. */
+  communicationContextInherited: z.boolean().optional(),
   /** Provider event that caused this fresh launch; used for idempotent retries. */
   communicationSourceEventId: z.string().optional(),
   /**
@@ -1671,6 +1681,93 @@ export function getCommunicationMessageIdFromTaskPayload(
   );
 }
 
+export function populateCommunicationMetadata(
+  payload: Record<string, unknown>,
+  options: {
+    sourcePayload?: unknown;
+    teamId?: string | null;
+    guildId?: string | null;
+    teamDomain?: string | null;
+    serviceUrl?: string | null;
+    channelId?: string | null;
+    threadId?: string | null;
+    messageId?: string | null;
+  } = {},
+): void {
+  const provider = getCommunicationProviderFromTaskPayload(
+    options.sourcePayload,
+  );
+  if (provider) payload.communicationProvider = provider;
+
+  // Empty-string options count as "not provided" and fall back to the
+  // source payload, matching the historical snapshot-resume semantics.
+  const fromOptionOrSource = (
+    option: string | null | undefined,
+    sourceValue: string | null,
+  ): string | null => {
+    if (typeof option === 'string' && hasNonEmptyValue(option)) {
+      return option;
+    }
+    return sourceValue;
+  };
+
+  const values = [
+    [
+      'communicationTeamId',
+      fromOptionOrSource(
+        options.teamId,
+        getCommunicationTeamIdFromTaskPayload(options.sourcePayload),
+      ),
+    ],
+    [
+      'communicationGuildId',
+      fromOptionOrSource(
+        options.guildId,
+        getCommunicationGuildIdFromTaskPayload(options.sourcePayload),
+      ),
+    ],
+    [
+      'communicationTeamDomain',
+      fromOptionOrSource(
+        options.teamDomain,
+        getCommunicationTeamDomainFromTaskPayload(options.sourcePayload),
+      ),
+    ],
+    [
+      'communicationServiceUrl',
+      fromOptionOrSource(
+        options.serviceUrl,
+        getCommunicationServiceUrlFromTaskPayload(options.sourcePayload),
+      ),
+    ],
+    [
+      'communicationChannelId',
+      fromOptionOrSource(
+        options.channelId,
+        getCommunicationChannelFromTaskPayload(options.sourcePayload),
+      ),
+    ],
+    [
+      'communicationThreadId',
+      fromOptionOrSource(
+        options.threadId,
+        getCommunicationThreadIdFromTaskPayload(options.sourcePayload),
+      ),
+    ],
+    [
+      'communicationMessageId',
+      fromOptionOrSource(
+        options.messageId,
+        getCommunicationMessageIdFromTaskPayload(options.sourcePayload),
+      ),
+    ],
+  ] as const;
+
+  for (const [key, value] of values) {
+    if (hasNonEmptyValue(value ?? undefined)) payload[key] = value;
+  }
+}
+
 /**
  * Discord channel + message that intake (👀) and terminal platform reactions
  * target. Prefer the dedicated reaction fields (always real message ids) over
@@ -1854,77 +1951,8 @@ export function populateSnapshotResumeCommunicationMetadata(
     messageId?: string | null;
   } = {},
 ): void {
-  const provider =
-    options.provider ??
-    getCommunicationProviderFromTaskPayload(options.sourcePayload);
-
-  if (provider) {
-    payload.communicationProvider = provider;
-  }
-
-  const teamId =
-    (hasNonEmptyValue(options.teamId ?? undefined) ? options.teamId : null) ??
-    getCommunicationTeamIdFromTaskPayload(options.sourcePayload);
-
-  if (teamId) {
-    payload.communicationTeamId = teamId;
-  }
-
-  const guildId =
-    (hasNonEmptyValue(options.guildId ?? undefined) ? options.guildId : null) ??
-    getCommunicationGuildIdFromTaskPayload(options.sourcePayload);
-
-  if (guildId) {
-    payload.communicationGuildId = guildId;
-  }
-
-  const teamDomain =
-    (hasNonEmptyValue(options.teamDomain ?? undefined)
-      ? options.teamDomain
-      : null) ??
-    getCommunicationTeamDomainFromTaskPayload(options.sourcePayload);
-
-  if (teamDomain) {
-    payload.communicationTeamDomain = teamDomain;
-  }
-
-  const serviceUrl =
-    (hasNonEmptyValue(options.serviceUrl ?? undefined)
-      ? options.serviceUrl
-      : null) ??
-    getCommunicationServiceUrlFromTaskPayload(options.sourcePayload);
-
-  if (serviceUrl) {
-    payload.communicationServiceUrl = serviceUrl;
-  }
-
-  const channelId =
-    (hasNonEmptyValue(options.channelId ?? undefined)
-      ? options.channelId
-      : null) ?? getCommunicationChannelFromTaskPayload(options.sourcePayload);
-
-  if (channelId) {
-    payload.communicationChannelId = channelId;
-  }
-
-  const threadId =
-    (hasNonEmptyValue(options.threadId ?? undefined)
-      ? options.threadId
-      : null) ?? getCommunicationThreadIdFromTaskPayload(options.sourcePayload);
-
-  if (threadId) {
-    payload.communicationThreadId = threadId;
-  }
-
-  const messageId =
-    (hasNonEmptyValue(options.messageId ?? undefined)
-      ? options.messageId
-      : null) ??
-    getCommunicationMessageIdFromTaskPayload(options.sourcePayload);
-
-  if (messageId) {
-    payload.communicationMessageId = messageId;
-  }
+  populateCommunicationMetadata(payload, options);
+  if (options.provider) payload.communicationProvider = options.provider;
 }
 
 /**

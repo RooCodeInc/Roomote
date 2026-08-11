@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
+import { PACKAGED_SKILL_INVOCATIONS } from '@roomote/cloud-agents';
 
 import {
   Command,
@@ -22,15 +23,14 @@ interface CommandSearchProps {
 interface SlashCommand {
   name: string;
   description?: string;
-  source: 'global' | 'project' | 'built-in';
 }
 
 const AVAILABLE_COMMANDS: SlashCommand[] = [
   {
     name: '/goal',
     description: 'Keep working toward an objective across multiple turns',
-    source: 'built-in',
   },
+  ...PACKAGED_SKILL_INVOCATIONS.map((name) => ({ name: `/${name}` })),
 ];
 
 export const CommandSearch = ({

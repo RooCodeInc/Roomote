@@ -4,6 +4,7 @@ import type {
   OpenCodeGlobalEvent,
   OpenCodePromptPart,
   OpenCodePromptRequest,
+  OpenCodeQuestionRequest,
   OpenCodeSession,
   OpenCodeSessionMessage,
 } from './types';
@@ -328,6 +329,43 @@ export class OpenCodeServerClient {
         body: {},
         signal: options.signal,
         label: 'abort',
+      },
+    );
+  }
+
+  async questions(signal?: AbortSignal): Promise<OpenCodeQuestionRequest[]> {
+    return await this.request('/question', {
+      signal,
+      label: 'questions',
+    });
+  }
+
+  async replyQuestion(options: {
+    requestId: string;
+    answers: string[][];
+    signal?: AbortSignal;
+  }): Promise<boolean> {
+    return await this.request(
+      `/question/${encodeURIComponent(options.requestId)}/reply`,
+      {
+        method: 'POST',
+        body: { answers: options.answers },
+        signal: options.signal,
+        label: 'replyQuestion',
+      },
+    );
+  }
+
+  async rejectQuestion(options: {
+    requestId: string;
+    signal?: AbortSignal;
+  }): Promise<boolean> {
+    return await this.request(
+      `/question/${encodeURIComponent(options.requestId)}/reject`,
+      {
+        method: 'POST',
+        signal: options.signal,
+        label: 'rejectQuestion',
       },
     );
   }

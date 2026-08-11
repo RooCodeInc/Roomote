@@ -407,6 +407,10 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       async (message: PromptInputMessage) => {
         const text = message.text.trim();
         const hasAttachments = (message.files?.length ?? 0) > 0;
+        const goalCommandMatch = /^\/goal(?:\s+([\s\S]*))?$/i.exec(text);
+        const goalObjective = goalCommandMatch
+          ? (goalCommandMatch[1] ?? '').trim()
+          : null;
         // Keyed off the live pending request rather than the task phase:
         // the phase can report running while the turn is still blocked on
         // the question, and a message here must answer it, not steer.
@@ -420,6 +424,19 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           !taskRun?.taskId ||
           sending
         ) {
+          return;
+        }
+
+        if (
+          !shouldAnswerPendingFreeText &&
+          goalObjective !== null &&
+          (!goalObjective || hasAttachments)
+        ) {
+          toast.error(
+            hasAttachments
+              ? 'Goal Mode does not support attachments.'
+              : 'Describe the goal after /goal.',
+          );
           return;
         }
 
@@ -442,8 +459,19 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
             return;
           }
 
+          if (goalObjective !== null) {
+            const enabled = await trpcClient.taskRuns.enableGoal.mutate({
+              taskId: taskRun.taskId,
+              goal: { objective: goalObjective },
+            });
+
+            if (!enabled.success) {
+              throw new Error(enabled.error);
+            }
+          }
+
           const preparedPrompt = await preparePromptAttachments({
-            text,
+            text: goalObjective ?? text,
             attachments: message.files,
           });
 
@@ -468,6 +496,10 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
             userImageUrl,
             autoSteerWhenQueued: true,
           });
+
+          if (goalObjective !== null) {
+            toast.success('Goal Mode enabled');
+          }
 
           handleMessageSent();
         } catch (err) {

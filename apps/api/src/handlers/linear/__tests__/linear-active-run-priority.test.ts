@@ -387,7 +387,7 @@ describe('CLO-1133: active task run takes priority over routing confirmation and
 
     const payload = makePayload({
       agentActivity: {
-        content: { body: '2' },
+        content: { body: 'Could you use Go instead?' },
       },
     });
     const { rawBody, headers } = createSignedRequest(payload);
@@ -408,7 +408,7 @@ describe('CLO-1133: active task run takes priority over routing confirmation and
         userId: 'user-1',
         answers: {
           language: {
-            answers: ['Rust'],
+            answers: ['Could you use Go instead?'],
           },
         },
       }),
@@ -432,7 +432,7 @@ describe('CLO-1133: active task run takes priority over routing confirmation and
     expect(queueLinearMessage).not.toHaveBeenCalled();
   });
 
-  it('forwards conversational replies to the agent instead of consuming the pending question', async () => {
+  it('submits conversationally worded free text as the custom answer', async () => {
     setupDbMocks();
 
     vi.mocked(findActiveLinearTaskRun).mockResolvedValue({
@@ -468,11 +468,9 @@ describe('CLO-1133: active task run takes priority over routing confirmation and
       ],
     });
 
-    // A side question only "matches" via the isOther free-text fallback and
-    // must reach the agent as a normal message, keeping the question pending.
     const payload = makePayload({
       agentActivity: {
-        content: { body: 'whats the difference in practice?' },
+        content: { body: 'Can you explain the tradeoffs in more detail' },
       },
     });
     const { rawBody, headers } = createSignedRequest(payload);
@@ -486,14 +484,22 @@ describe('CLO-1133: active task run takes priority over routing confirmation and
     const response = await app.request(req);
     expect(response.status).toBe(200);
 
-    expect(queueLinearRequestUserInputAnswer).not.toHaveBeenCalled();
-    expect(markPendingLinearRequestUserInputSubmitted).not.toHaveBeenCalled();
-    expect(queueLinearMessage).toHaveBeenCalledWith(
+    expect(queueLinearRequestUserInputAnswer).toHaveBeenCalledWith(
       42,
-      'session-1',
-      expect.objectContaining({ type: 'AgentSessionEvent' }),
-      'user-1',
+      expect.objectContaining({
+        requestId: 'rui:session:turn:call',
+        answers: {
+          language: {
+            answers: ['Can you explain the tradeoffs in more detail'],
+          },
+        },
+      }),
     );
+    expect(markPendingLinearRequestUserInputSubmitted).toHaveBeenCalledWith(
+      'session-1',
+      'rui:session:turn:call',
+    );
+    expect(queueLinearMessage).not.toHaveBeenCalled();
   });
 
   it('delivers free-text reply to active task run even when a pending elicitation selection exists', async () => {

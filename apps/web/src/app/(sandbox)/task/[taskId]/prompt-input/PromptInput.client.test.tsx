@@ -25,8 +25,10 @@ const {
   removeOptimisticMessageMock,
   removeOptimisticQueuedMessageMock,
   sandboxSendPromptMutateMock,
+  taskRunEnableGoalMutateMock,
   taskRunCancelMutateMock,
   toastErrorMock,
+  toastSuccessMock,
   toggleVoiceDictationMock,
   useMutationMock,
   useOptionalPendingUserInputRequestStateMock,
@@ -60,8 +62,10 @@ const {
   removeOptimisticMessageMock: vi.fn(),
   removeOptimisticQueuedMessageMock: vi.fn(),
   sandboxSendPromptMutateMock: vi.fn(),
+  taskRunEnableGoalMutateMock: vi.fn(),
   taskRunCancelMutateMock: vi.fn(),
   toastErrorMock: vi.fn(),
+  toastSuccessMock: vi.fn(),
   toggleVoiceDictationMock: vi.fn(),
   useMutationMock: vi.fn(),
   useOptionalPendingUserInputRequestStateMock: vi.fn(),
@@ -102,6 +106,7 @@ vi.mock('@/trpc/client', () => ({
 vi.mock('sonner', () => ({
   toast: {
     error: toastErrorMock,
+    success: toastSuccessMock,
   },
 }));
 
@@ -331,6 +336,7 @@ describe('PromptInput', () => {
       },
     });
     sandboxSendPromptMutateMock.mockResolvedValue({ success: true });
+    taskRunEnableGoalMutateMock.mockResolvedValue({ success: true });
     taskRunCancelMutateMock.mockResolvedValue({ success: true });
     preparePromptAttachmentsMock.mockImplementation(async (input) => ({
       text: input.text,
@@ -342,6 +348,9 @@ describe('PromptInput', () => {
         },
       },
       taskRuns: {
+        enableGoal: {
+          mutate: taskRunEnableGoalMutateMock,
+        },
         cancel: {
           mutate: taskRunCancelMutateMock,
         },
@@ -383,6 +392,29 @@ describe('PromptInput', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Connecting...');
     expect(screen.getByPlaceholderText(/Message agent/i)).toBeDisabled();
     expect(screen.queryByText('Task status')).not.toBeInTheDocument();
+  });
+
+  it('opens command search when a slash is typed at the start of the prompt', () => {
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: true,
+      connectionError: false,
+      reconnect: vi.fn(),
+    });
+    const onCommandSearchOpen = vi.fn();
+
+    render(
+      <PromptInput
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={onCommandSearchOpen}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText(/Message agent/i), {
+      target: { value: '/', selectionStart: 1 },
+    });
+
+    expect(onCommandSearchOpen).toHaveBeenCalledWith(1);
   });
 
   it('cancels through the web API when the sandbox client is disconnected', async () => {
@@ -704,6 +736,33 @@ describe('PromptInput', () => {
     });
   });
 
+  it('replaces the triggering slash when inserting a selected command', () => {
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: true,
+      connectionError: false,
+      reconnect: vi.fn(),
+    });
+    const promptInputRef = createRef<PromptInputHandle>();
+
+    render(
+      <PromptInput
+        ref={promptInputRef}
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText(/Message agent/i);
+    fireEvent.change(textarea, { target: { value: '/rest' } });
+
+    act(() => {
+      promptInputRef.current?.insertCommand('/implement-changes', 1);
+    });
+
+    expect(textarea).toHaveValue('/implement-changes rest');
+  });
+
   it('sends web prompts through the web tRPC cost gate before the sandbox', async () => {
     const directSandboxSendPromptMock = vi.fn();
 
@@ -755,6 +814,86 @@ describe('PromptInput', () => {
     expect(queryClientSetQueryDataMock).toHaveBeenCalledTimes(1);
 
     expect(directSandboxSendPromptMock).not.toHaveBeenCalled();
+  });
+
+  it('enables Goal Mode and sends only the objective to the agent', async () => {
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: true,
+      connectionError: false,
+      reconnect: vi.fn(),
+    });
+    useSandboxClientMock.mockReturnValue({
+      commands: {
+        sendPrompt: { mutate: vi.fn() },
+        touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
+      },
+    });
+
+    render(
+      <PromptInput
+        taskRun={createTaskRun(43, { taskId: 'task-goal' })}
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText(/Message agent/i);
+    fireEvent.change(textarea, {
+      target: { value: '/goal ship the release' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(taskRunEnableGoalMutateMock).toHaveBeenCalledWith({
+        taskId: 'task-goal',
+        goal: { objective: 'ship the release' },
+      });
+    });
+    expect(sandboxSendPromptMutateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 'task-goal',
+        prompt: 'ship the release',
+      }),
+    );
+    expect(sandboxSendPromptMutateMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: expect.stringContaining('/goal') }),
+    );
+    expect(toastSuccessMock).toHaveBeenCalledWith('Goal Mode enabled');
+  });
+
+  it('requires an objective for the Goal Mode command', () => {
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: true,
+      connectionError: false,
+      reconnect: vi.fn(),
+    });
+    useSandboxClientMock.mockReturnValue({
+      commands: {
+        sendPrompt: { mutate: vi.fn() },
+        touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
+      },
+    });
+
+    render(
+      <PromptInput
+        taskRun={createTaskRun(44, { taskId: 'task-goal' })}
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText(/Message agent/i), {
+      target: { value: '/goal' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    expect(toastErrorMock).toHaveBeenCalledWith(
+      'Describe the goal after /goal.',
+    );
+    expect(taskRunEnableGoalMutateMock).not.toHaveBeenCalled();
+    expect(sandboxSendPromptMutateMock).not.toHaveBeenCalled();
   });
 
   it('preserves prompt images through the shared optimistic transcript submission path', async () => {

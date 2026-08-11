@@ -30,9 +30,22 @@ const RESERVED_COMMUNICATION_MCP_ENV_KEYS = [
   'ROOMOTE_COMMUNICATION_THREAD_ID',
 ] as const;
 
+function hasInheritedCommunicationContext(payload: unknown): boolean {
+  return (
+    Boolean(payload) &&
+    typeof payload === 'object' &&
+    !Array.isArray(payload) &&
+    (payload as Record<string, unknown>).communicationContextInherited === true
+  );
+}
+
 export function getSlackReplyContext(taskRun: {
   payload: unknown;
 }): SlackReplyContext | null {
+  if (hasInheritedCommunicationContext(taskRun.payload)) {
+    return null;
+  }
+
   const channel = getSlackChannelFromTaskPayload(taskRun.payload);
   const threadTs =
     getSlackThreadTsFromTaskPayload(taskRun.payload) ?? undefined;
@@ -47,6 +60,10 @@ export function getSlackReplyContext(taskRun: {
 export function getCommunicationReplyContext(taskRun: {
   payload: unknown;
 }): CommunicationReplyContext | null {
+  if (hasInheritedCommunicationContext(taskRun.payload)) {
+    return null;
+  }
+
   const provider = getCommunicationProviderFromTaskPayload(taskRun.payload);
   const channelId = getCommunicationChannelFromTaskPayload(taskRun.payload);
   const threadId = getCommunicationThreadIdFromTaskPayload(taskRun.payload);

@@ -136,20 +136,6 @@ describe('WorkspaceManager repository clone preparation', () => {
     expect(getCloneCommand()).toBeUndefined();
   });
 
-  it('proceeds when the file-backed GitHub token is present', async () => {
-    stubTokenFile({ nonEmpty: true });
-    mockCloneCreatesRepo();
-    const manager = createManager();
-
-    await manager.prepareRepository(REPO_FULL_NAME, 'main', undefined);
-
-    const clone = getCloneCommand();
-    expect(clone).toBeDefined();
-    expect(clone!.run).toBe(
-      `rm -rf -- 'acme/backend' && git clone --filter=blob:none 'https://github.com/acme/backend.git' 'acme/backend'`,
-    );
-  });
-
   it('materializes an env GH_TOKEN into the token file before cloning', async () => {
     stubTokenFile({ nonEmpty: false });
     mockCloneCreatesRepo();

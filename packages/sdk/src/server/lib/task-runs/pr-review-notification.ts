@@ -24,6 +24,13 @@ export const PR_REVIEW_NOTIFICATION_QUEUE_NAME = 'pr-review-notification-jobs';
 export const PR_REVIEW_NOTIFICATION_DEBOUNCE_MS = 1 * 60 * 1000;
 
 /**
+ * Roomote's own inline findings are provisional until its review summary
+ * completes. Keep them as a fallback instead of presenting them as a second
+ * notification while the review is still running.
+ */
+export const PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS = 15 * 60 * 1000;
+
+/**
  * Delay before re-checking an owner task that is still actively running when
  * the notification job fires. The notification is intentionally held until
  * the task goes idle.
@@ -42,18 +49,72 @@ export const PR_REVIEW_NOTIFICATION_MAX_DEFERRALS = 288;
 
 const PENDING_EVENTS_TTL_SECONDS = 24 * 60 * 60;
 const SCHEDULED_MARKER_TTL_BUFFER_SECONDS = 15 * 60;
+const REVIEW_CYCLE_TTL_SECONDS = 30 * 24 * 60 * 60;
+const SET_REVIEW_CYCLE_IF_NEWER_SCRIPT = `
+local current = redis.call('GET', KEYS[1])
+if current then
+  local decoded = cjson.decode(current)
+  if tonumber(decoded.observedAt) > tonumber(ARGV[2]) then
+    return 0
+  end
+end
+redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[3])
+return 1
+`;
+const COMPLETE_REVIEW_CYCLE_SCRIPT = `
+local current = redis.call('GET', KEYS[1])
+if current then
+  local decoded = cjson.decode(current)
+  if decoded.cycleId ~= ARGV[1] or tonumber(decoded.observedAt) > tonumber(ARGV[2]) then
+    return 0
+  end
+end
+redis.call('SET', KEYS[2], '1', 'EX', ARGV[4])
+redis.call('SET', KEYS[1], ARGV[3], 'EX', ARGV[4])
+redis.call('SET', KEYS[3], ARGV[3], 'EX', ARGV[4])
+return 1
+`;
+const RESTORE_REVIEW_CYCLE_IF_VALUE_MATCHES_SCRIPT = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  if ARGV[2] == '' then
+    return redis.call('DEL', KEYS[1])
+  end
+  redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+  return 1
+end
+return 0
+`;
+
+const prReviewNotificationBatchKindSchema = z.enum(['human', 'roomote']);
+
+const prReviewCycleStateSchema = z.object({
+  cycleId: z.string(),
+  phase: z.enum(['open', 'completed']),
+  observedAt: z.number(),
+});
+
+type PrReviewCycleState = z.infer<typeof prReviewCycleStateSchema>;
 
 export const prReviewActivityEventSchema = z.object({
-  kind: z.enum(['review', 'review_comment', 'review_summary']),
+  kind: z.enum(['issue_comment', 'review', 'review_comment', 'review_summary']),
   authorLogin: z.string(),
-  /** Commit SHA reviewed by this event, used to coalesce one review pass. */
+  /** Commit SHA reviewed by this event. */
   reviewHeadSha: z.string().optional(),
+  /**
+   * Stable feedback-batch identity. Human review events use GitHub's review
+   * id; Roomote events use the explicit lifecycle opened by its in-progress
+   * summary comment. This prevents separate passes on the same SHA from being
+   * conflated.
+   */
+  batchId: z.string().optional(),
   /** GitHub review state for `review` events, e.g. `approved`. */
   reviewState: z.string().optional(),
   /** Short human-readable summary text for `review_summary` events. */
   summary: z.string().optional(),
   /** HTML URL of the review or comment the event describes, when known. */
   url: z.string().optional(),
+  /** Provider event time used to order review lifecycle transitions. */
+  observedAt: z.number().int().nonnegative().optional(),
   /**
    * True when the event was authored by Roomote's own GitHub identity (for
    * example results of the agent's own automated PR review), so the
@@ -71,6 +132,8 @@ export const prReviewNotificationRequestSchema = z.object({
   prUrl: z.string(),
   deferrals: z.number().int().min(0).default(0),
   immediate: z.boolean().optional(),
+  batchKind: prReviewNotificationBatchKindSchema.optional(),
+  batchId: z.string().optional(),
   sourceControlProvider: sourceControlProviderSchema.optional(),
 });
 
@@ -83,7 +146,21 @@ type PrReviewNotificationTarget = {
   repository: string;
   prNumber: number;
   immediate?: boolean;
+  batchKind?: z.infer<typeof prReviewNotificationBatchKindSchema>;
+  batchId?: string;
 };
+
+export const startPrReviewNotificationCycleInputSchema = z.object({
+  repository: z.string(),
+  prNumber: z.number().int().positive(),
+  reviewHeadSha: z.string(),
+  cycleId: z.string(),
+  observedAt: z.number().int().nonnegative(),
+});
+
+export type StartPrReviewNotificationCycleInput = z.infer<
+  typeof startPrReviewNotificationCycleInputSchema
+>;
 
 export const enqueuePrReviewNotificationInputSchema = z.object({
   repository: z.string(),
@@ -145,17 +222,123 @@ function buildTargetKeySuffix({
   taskId,
   repository,
   prNumber,
+  batchKind = 'human',
+  batchId,
+}: PrReviewNotificationTarget): string {
+  return `${encodeURIComponent(taskId)}:${encodeURIComponent(repository)}#${prNumber}:${batchKind}${batchId ? `:${encodeURIComponent(batchId)}` : ''}`;
+}
+
+function buildLegacyTargetKeySuffix({
+  taskId,
+  repository,
+  prNumber,
   immediate = false,
 }: PrReviewNotificationTarget): string {
   return `${encodeURIComponent(taskId)}:${encodeURIComponent(repository)}#${prNumber}${immediate ? ':immediate' : ''}`;
 }
 
 function buildPendingEventsKey(target: PrReviewNotificationTarget): string {
+  if (target.batchKind === undefined) {
+    return `pr-review-notification:pending:${buildLegacyTargetKeySuffix(target)}`;
+  }
+
   return `pr-review-notification:pending:${buildTargetKeySuffix(target)}`;
 }
 
 function buildScheduledMarkerKey(target: PrReviewNotificationTarget): string {
-  return `pr-review-notification:scheduled:${buildTargetKeySuffix(target)}`;
+  if (target.batchKind === undefined) {
+    return `pr-review-notification:scheduled:${buildLegacyTargetKeySuffix(target)}`;
+  }
+
+  return `pr-review-notification:scheduled:${buildTargetKeySuffix(target)}:${target.immediate ? 'immediate' : 'delayed'}`;
+}
+
+function getPrReviewCycleStateKey({
+  repository,
+  prNumber,
+  reviewHeadSha,
+}: {
+  repository: string;
+  prNumber: number;
+  reviewHeadSha: string;
+}): string {
+  return `pr-review-notification:review-cycle:${encodeURIComponent(repository)}#${prNumber}:${reviewHeadSha}`;
+}
+
+export function getPrReviewCompletedCycleKey({
+  repository,
+  prNumber,
+  cycleId,
+}: {
+  repository: string;
+  prNumber: number;
+  cycleId: string;
+}): string {
+  return `pr-review-notification:review-cycle-completed:${encodeURIComponent(repository)}#${prNumber}:${encodeURIComponent(cycleId)}`;
+}
+
+function getPrReviewLatestCompletedCycleKey({
+  repository,
+  prNumber,
+  reviewHeadSha,
+}: {
+  repository: string;
+  prNumber: number;
+  reviewHeadSha: string;
+}): string {
+  return `pr-review-notification:review-cycle-latest-completed:${encodeURIComponent(repository)}#${prNumber}:${reviewHeadSha}`;
+}
+
+async function readPrReviewCycleState({
+  repository,
+  prNumber,
+  reviewHeadSha,
+}: {
+  repository: string;
+  prNumber: number;
+  reviewHeadSha: string;
+}): Promise<{
+  key: string;
+  raw: string | null;
+  state: PrReviewCycleState | null;
+}> {
+  const key = getPrReviewCycleStateKey({
+    repository,
+    prNumber,
+    reviewHeadSha,
+  });
+  const raw = await getRedis().get(key);
+  const parsed = raw
+    ? prReviewCycleStateSchema.safeParse(JSON.parse(raw))
+    : null;
+
+  return {
+    key,
+    raw,
+    state: parsed?.success ? parsed.data : null,
+  };
+}
+
+/** Records the start of a concrete Roomote review pass. */
+export async function startPrReviewNotificationCycle(
+  input: StartPrReviewNotificationCycleInput,
+): Promise<void> {
+  const parsed = startPrReviewNotificationCycleInputSchema.parse(input);
+  const key = getPrReviewCycleStateKey(parsed);
+  const value = JSON.stringify({
+    cycleId: parsed.cycleId,
+    phase: 'open',
+    observedAt: parsed.observedAt,
+  } satisfies PrReviewCycleState);
+
+  await getRedis().eval(
+    SET_REVIEW_CYCLE_IF_NEWER_SCRIPT,
+    1,
+    key,
+    value,
+    parsed.observedAt,
+    REVIEW_CYCLE_TTL_SECONDS,
+  );
 }
 
 /**
@@ -276,9 +459,11 @@ export async function schedulePrReviewNotificationJob({
 async function appendPendingEventAndClaimSchedule({
   target,
   event,
+  delayMs,
 }: {
   target: PrReviewNotificationTarget;
   event: PrReviewActivityEvent;
+  delayMs: number;
 }): Promise<boolean> {
   const redis = getRedis();
   const pendingKey = buildPendingEventsKey(target);
@@ -290,7 +475,8 @@ async function appendPendingEventAndClaimSchedule({
     .expire(pendingKey, PENDING_EVENTS_TTL_SECONDS)
     .exec();
 
-  const markerTtlSeconds = SCHEDULED_MARKER_TTL_BUFFER_SECONDS;
+  const markerTtlSeconds =
+    Math.ceil(delayMs / 1000) + SCHEDULED_MARKER_TTL_BUFFER_SECONDS;
 
   const claim = await redis.set(markerKey, '1', 'EX', markerTtlSeconds, 'NX');
 
@@ -306,9 +492,16 @@ export async function consumePendingPrReviewActivity(
 ): Promise<PrReviewActivityEvent[]> {
   const redis = getRedis();
   const pendingKey = buildPendingEventsKey(target);
-  const markerKey = buildScheduledMarkerKey(target);
+  const delayedMarkerKey = buildScheduledMarkerKey({
+    ...target,
+    immediate: false,
+  });
+  const immediateMarkerKey = buildScheduledMarkerKey({
+    ...target,
+    immediate: true,
+  });
 
-  await redis.del(markerKey).catch(() => undefined);
+  await redis.del(delayedMarkerKey, immediateMarkerKey).catch(() => undefined);
 
   const results = await redis
     .multi()
@@ -340,7 +533,94 @@ export async function consumePendingPrReviewActivity(
     }
   }
 
-  return events;
+  const roomoteBatchIds = Array.from(
+    new Set(
+      events.flatMap((event) =>
+        event.kind !== 'review_summary' &&
+        event.roomoteAuthored &&
+        event.batchId
+          ? [event.batchId]
+          : [],
+      ),
+    ),
+  );
+  const completedBatchIds = new Set<string>();
+  const roomoteHeadShas = Array.from(
+    new Set(
+      events.flatMap((event) =>
+        event.kind !== 'review_summary' &&
+        event.roomoteAuthored &&
+        event.reviewHeadSha &&
+        event.observedAt !== undefined
+          ? [event.reviewHeadSha]
+          : [],
+      ),
+    ),
+  );
+  const completedHeadObservedAt = new Map<string, number>();
+
+  await Promise.all([
+    ...roomoteBatchIds.map(async (cycleId) => {
+      let completed: string | null;
+
+      try {
+        completed = await redis.get(
+          getPrReviewCompletedCycleKey({
+            repository: target.repository,
+            prNumber: target.prNumber,
+            cycleId,
+          }),
+        );
+      } catch {
+        // The pending list is already drained; fail open so feedback is not lost.
+        return;
+      }
+
+      if (completed) {
+        completedBatchIds.add(cycleId);
+      }
+    }),
+    ...roomoteHeadShas.map(async (reviewHeadSha) => {
+      try {
+        const raw = await redis.get(
+          getPrReviewLatestCompletedCycleKey({
+            repository: target.repository,
+            prNumber: target.prNumber,
+            reviewHeadSha,
+          }),
+        );
+        const parsed = raw
+          ? prReviewCycleStateSchema.safeParse(JSON.parse(raw))
+          : null;
+
+        if (parsed?.success && parsed.data.phase === 'completed') {
+          completedHeadObservedAt.set(reviewHeadSha, parsed.data.observedAt);
+        }
+      } catch {
+        // The pending list is already drained; fail open so feedback is not lost.
+      }
+    }),
+  ]);
+
+  return events.filter((event) => {
+    if (event.kind === 'review_summary' || !event.roomoteAuthored) {
+      return true;
+    }
+
+    if (event.batchId && completedBatchIds.has(event.batchId)) {
+      return false;
+    }
+
+    const completedAt = event.reviewHeadSha
+      ? completedHeadObservedAt.get(event.reviewHeadSha)
+      : undefined;
+
+    return (
+      completedAt === undefined ||
+      event.observedAt === undefined ||
+      event.observedAt > completedAt
+    );
+  });
 }
 
 /**
@@ -371,10 +651,11 @@ export async function requeuePendingPrReviewActivity({
 /**
  * Records PR review activity (submitted reviews and review comments) for the
  * tasks that own the pull request, and schedules a notification job per task.
- * Terminal Roomote self-review summaries use an independent immediate queue so
- * ordinary review activity cannot hold the completed result behind the debounce
- * window. Chat delivery still needs an originating conversation route, but
- * web-only tasks are enqueued too so the summary can land in task history.
+ * Human feedback and Roomote review cycles use separate batches. A Roomote
+ * summary promotes its cycle immediately, while inline findings remain a
+ * delayed fallback if no summary arrives. Chat delivery still needs an
+ * originating conversation route, but web-only tasks are enqueued too so the
+ * summary can land in task history.
  * The notification is informational only: it tells the user about the review
  * feedback once the task is idle. No agent turn is started.
  */
@@ -401,45 +682,194 @@ export async function enqueuePrReviewNotification(
     return { notifiedTaskCount: 0, reason: 'no_linked_tasks' };
   }
 
-  let notifiedTaskCount = 0;
+  const isRoomoteEvent = parsedInput.event.roomoteAuthored === true;
+  const isRoomoteSummary =
+    isRoomoteEvent && parsedInput.event.kind === 'review_summary';
+  let event = parsedInput.event;
+  let previousCycleRaw: string | null = null;
+  let completedCycleKey: string | null = null;
+  let completedCycleValue: string | null = null;
+  let latestCompletedCycleKey: string | null = null;
+  let previousLatestCompletedRaw: string | null = null;
 
-  for (const taskId of taskIds) {
-    const immediate =
-      parsedInput.event.kind === 'review_summary' &&
-      parsedInput.event.roomoteAuthored === true;
-    const target = {
-      taskId,
-      repository: parsedInput.repository,
-      prNumber: parsedInput.prNumber,
-      immediate,
-    };
+  if (isRoomoteEvent && event.reviewHeadSha) {
+    const reviewHeadSha = event.reviewHeadSha;
 
-    const claimed = await appendPendingEventAndClaimSchedule({
-      target,
-      event: parsedInput.event,
-    });
+    try {
+      const cycle = await readPrReviewCycleState({
+        repository: parsedInput.repository,
+        prNumber: parsedInput.prNumber,
+        reviewHeadSha,
+      });
 
-    if (claimed) {
-      try {
-        await getPrReviewNotificationQueue().add(
-          'notify-pr-review-activity',
-          {
-            ...target,
-            prUrl: parsedInput.prUrl,
-            deferrals: 0,
-            immediate,
-            sourceControlProvider: parsedInput.sourceControlProvider,
-          },
-          { delay: immediate ? 0 : PR_REVIEW_NOTIFICATION_DEBOUNCE_MS },
+      if (!isRoomoteSummary && cycle.state?.phase === 'completed') {
+        if (
+          event.observedAt === undefined ||
+          event.observedAt <= cycle.state.observedAt
+        ) {
+          return {
+            notifiedTaskCount: 0,
+            reason: 'review_cycle_completed',
+          };
+        }
+      }
+
+      if (
+        isRoomoteSummary &&
+        cycle.state &&
+        event.observedAt !== undefined &&
+        cycle.state.observedAt > event.observedAt
+      ) {
+        return {
+          notifiedTaskCount: 0,
+          reason: 'stale_review_cycle',
+        };
+      }
+
+      const cycleId =
+        cycle.state?.phase === 'completed'
+          ? (event.batchId ?? `head:${event.reviewHeadSha}`)
+          : (cycle.state?.cycleId ??
+            event.batchId ??
+            `head:${event.reviewHeadSha}`);
+      event = { ...event, batchId: cycleId };
+
+      if (isRoomoteSummary) {
+        const completedState = JSON.stringify({
+          cycleId,
+          phase: 'completed',
+          observedAt: event.observedAt ?? Date.now(),
+        } satisfies PrReviewCycleState);
+        completedCycleKey = getPrReviewCompletedCycleKey({
+          repository: parsedInput.repository,
+          prNumber: parsedInput.prNumber,
+          cycleId,
+        });
+        completedCycleValue = completedState;
+        previousCycleRaw = cycle.raw;
+        latestCompletedCycleKey = getPrReviewLatestCompletedCycleKey({
+          repository: parsedInput.repository,
+          prNumber: parsedInput.prNumber,
+          reviewHeadSha,
+        });
+        previousLatestCompletedRaw = await getRedis().get(
+          latestCompletedCycleKey,
         );
-      } catch (error) {
-        const redis = getRedis();
-        await redis.del(buildScheduledMarkerKey(target)).catch(() => undefined);
+
+        const completed = await getRedis().eval(
+          COMPLETE_REVIEW_CYCLE_SCRIPT,
+          3,
+          cycle.key,
+          completedCycleKey,
+          latestCompletedCycleKey,
+          cycleId,
+          event.observedAt ?? Date.now(),
+          completedState,
+          REVIEW_CYCLE_TTL_SECONDS,
+        );
+
+        if (completed !== 1) {
+          return {
+            notifiedTaskCount: 0,
+            reason: 'stale_review_cycle',
+          };
+        }
+      }
+    } catch (error) {
+      // Completion lookups are an optimization. Fail open so transient Redis
+      // reads never discard review feedback.
+      if (isRoomoteSummary) {
         throw error;
       }
     }
+  }
 
-    notifiedTaskCount += 1;
+  let notifiedTaskCount = 0;
+  const notificationDelayMs = isRoomoteSummary
+    ? 0
+    : isRoomoteEvent
+      ? PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS
+      : PR_REVIEW_NOTIFICATION_DEBOUNCE_MS;
+
+  try {
+    for (const taskId of taskIds) {
+      const immediate = isRoomoteSummary;
+      const target = {
+        taskId,
+        repository: parsedInput.repository,
+        prNumber: parsedInput.prNumber,
+        immediate,
+        batchKind: isRoomoteEvent ? ('roomote' as const) : ('human' as const),
+        ...(event.batchId ? { batchId: event.batchId } : {}),
+      };
+
+      const claimed = await appendPendingEventAndClaimSchedule({
+        target,
+        event,
+        delayMs: notificationDelayMs,
+      });
+
+      if (claimed) {
+        try {
+          await getPrReviewNotificationQueue().add(
+            'notify-pr-review-activity',
+            {
+              ...target,
+              prUrl: parsedInput.prUrl,
+              deferrals: 0,
+              immediate,
+              sourceControlProvider: parsedInput.sourceControlProvider,
+            },
+            { delay: notificationDelayMs },
+          );
+        } catch (error) {
+          await getRedis()
+            .del(buildScheduledMarkerKey(target))
+            .catch(() => undefined);
+          throw error;
+        }
+      }
+
+      notifiedTaskCount += 1;
+    }
+  } catch (error) {
+    if (
+      completedCycleKey &&
+      completedCycleValue &&
+      latestCompletedCycleKey &&
+      event.reviewHeadSha
+    ) {
+      const cycleStateKey = getPrReviewCycleStateKey({
+        repository: parsedInput.repository,
+        prNumber: parsedInput.prNumber,
+        reviewHeadSha: event.reviewHeadSha,
+      });
+      await getRedis()
+        .del(completedCycleKey)
+        .catch(() => undefined);
+      await getRedis()
+        .eval(
+          RESTORE_REVIEW_CYCLE_IF_VALUE_MATCHES_SCRIPT,
+          1,
+          cycleStateKey,
+          completedCycleValue,
+          previousCycleRaw ?? '',
+          REVIEW_CYCLE_TTL_SECONDS,
+        )
+        .catch(() => undefined);
+      await getRedis()
+        .eval(
+          RESTORE_REVIEW_CYCLE_IF_VALUE_MATCHES_SCRIPT,
+          1,
+          latestCompletedCycleKey,
+          completedCycleValue,
+          previousLatestCompletedRaw ?? '',
+          REVIEW_CYCLE_TTL_SECONDS,
+        )
+        .catch(() => undefined);
+    }
+
+    throw error;
   }
 
   return { notifiedTaskCount };

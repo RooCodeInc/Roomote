@@ -1,8 +1,10 @@
 import type { CommunicationPostMessageInput } from '@roomote/communication';
+import { and, db, eq, slackUserMappings } from '@roomote/db/server';
 import {
   getCommunicationChannelFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
   getCommunicationServiceUrlFromTaskPayload,
+  getCommunicationTeamIdFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
   type CommunicationProvider,
 } from '@roomote/types';
@@ -39,6 +41,10 @@ type ResolvedChannelPostTarget = Pick<
   CommunicationPostMessageInput,
   'channelId' | 'threadId' | 'replyToMessageId' | 'serviceUrl'
 >;
+
+const SLACK_DM_ID_REGEX = /^D[A-Z0-9]{8,}$/i;
+const SLACK_USER_ID_REGEX = /^[UW][A-Z0-9]{8,}$/i;
+const SLACK_USER_MENTION_REGEX = /^<@([UW][A-Z0-9]{8,})(?:\|[^>]+)?>$/i;
 
 const PROVIDER_UNAVAILABLE_ERRORS: Record<
   CommunicationProvider,
@@ -82,6 +88,64 @@ async function resolveSlackTarget(params: {
   provider: Extract<RuntimeCommunicationProviderAdapter, { provider: 'slack' }>;
   parsedBody: ParsedChannelPostBody;
 }): Promise<ResolvedChannelPostTarget> {
+  const rawTarget = params.parsedBody.channel.trim();
+  const userMention = rawTarget.match(SLACK_USER_MENTION_REGEX);
+  const directMessageId = SLACK_DM_ID_REGEX.test(rawTarget)
+    ? rawTarget.toUpperCase()
+    : null;
+  let slackUserId = userMention?.[1]?.toUpperCase() ?? null;
+  if (!slackUserId && SLACK_USER_ID_REGEX.test(rawTarget)) {
+    slackUserId = rawTarget.toUpperCase();
+  }
+
+  if (directMessageId || slackUserId) {
+    if (!params.provider.teamId) {
+      throw new McpProxyError(
+        404,
+        'No active Slack installation found for this task workspace',
+      );
+    }
+
+    if (directMessageId) {
+      slackUserId =
+        await params.provider.getDirectMessageUserId(directMessageId);
+    }
+
+    if (!slackUserId) {
+      throw new McpProxyError(
+        404,
+        'Slack DM recipient is not available for this workspace',
+      );
+    }
+
+    const linkedUser = await db.query.slackUserMappings.findFirst({
+      columns: { userId: true },
+      where: and(
+        eq(slackUserMappings.slackUserId, slackUserId),
+        eq(slackUserMappings.slackTeamId, params.provider.teamId),
+      ),
+    });
+    if (!linkedUser) {
+      throw new McpProxyError(
+        403,
+        'Slack DM recipient must have a linked Roomote account in this workspace',
+      );
+    }
+
+    const channelId =
+      directMessageId ?? (await params.provider.openConversation(slackUserId));
+    if (!channelId) {
+      throw new McpProxyError(502, 'Could not open Slack direct message');
+    }
+
+    return {
+      channelId,
+      ...(params.parsedBody.threadTs
+        ? { threadId: params.parsedBody.threadTs }
+        : {}),
+    };
+  }
+
   const channelTarget = normalizeSlackChannelTarget(params.parsedBody.channel);
   if (!channelTarget) {
     throw new McpProxyError(400, 'channel is required');
@@ -300,7 +364,12 @@ export async function sendCommunicationChannelPost(params: {
 }): Promise<Response> {
   const providerName =
     getCommunicationProviderFromTaskPayload(params.taskRun.payload) ?? 'slack';
-  const provider = await getCommunicationProviderAdapter(providerName);
+  const provider = await getCommunicationProviderAdapter(providerName, {
+    slackTeamId:
+      providerName === 'slack'
+        ? getCommunicationTeamIdFromTaskPayload(params.taskRun.payload)
+        : undefined,
+  });
 
   if (!provider) {
     const unavailable = PROVIDER_UNAVAILABLE_ERRORS[providerName];
