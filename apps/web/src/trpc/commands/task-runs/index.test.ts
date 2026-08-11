@@ -7,17 +7,23 @@ const {
   mockGetRepositories,
   mockDbWhere,
   mockDbSelect,
-  mockEnableTaskGoal,
+  mockGoalCommit,
+  mockGoalRollback,
+  mockPrepareTaskGoalActivation,
   mockResolveTaskByIdAccess,
   mockResolveWorkspaceProvider,
+  mockSendSandboxPrompt,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
   mockGetRepositories: vi.fn(),
   mockDbWhere: vi.fn(),
   mockDbSelect: vi.fn(),
-  mockEnableTaskGoal: vi.fn(),
+  mockGoalCommit: vi.fn(),
+  mockGoalRollback: vi.fn(),
+  mockPrepareTaskGoalActivation: vi.fn(),
   mockResolveTaskByIdAccess: vi.fn(),
   mockResolveWorkspaceProvider: vi.fn(),
+  mockSendSandboxPrompt: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -45,7 +51,6 @@ vi.mock('@roomote/db/server', () => ({
     select: (...args: unknown[]) => mockDbSelect(...args),
   },
   desc: vi.fn((value: unknown) => ({ type: 'desc', value })),
-  enableTaskGoal: (...args: unknown[]) => mockEnableTaskGoal(...args),
   eq: vi.fn((left: unknown, right: unknown) => ({ type: 'eq', left, right })),
   environmentRepositoryMappings: {
     environmentId: 'environment_repository_mappings.environment_id',
@@ -57,6 +62,8 @@ vi.mock('@roomote/db/server', () => ({
     right,
   })),
   markTaskStartParallelCountEndedAt: vi.fn(),
+  prepareTaskGoalActivation: (...args: unknown[]) =>
+    mockPrepareTaskGoalActivation(...args),
   resolveWorkspaceRepositoryProviders: (...args: unknown[]) =>
     mockResolveWorkspaceProvider(...args),
   repositories: {
@@ -104,7 +111,12 @@ vi.mock('../tasks/by-id', () => ({
     mockResolveTaskByIdAccess(...args),
 }));
 
-import { createStandardTaskRunCommand, enableTaskGoalCommand } from './index';
+vi.mock('../sandbox-session', () => ({
+  sendSandboxPromptCommand: (...args: unknown[]) =>
+    mockSendSandboxPrompt(...args),
+}));
+
+import { createStandardTaskRunCommand, startTaskGoalCommand } from './index';
 
 const auth = {
   success: true,
@@ -136,14 +148,14 @@ function mockSuccessfulEnqueue() {
   });
 }
 
-describe('enableTaskGoalCommand', () => {
+describe('startTaskGoalCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockResolveTaskByIdAccess.mockResolvedValue({
       kind: 'resolved',
       task: { id: 'task-123' },
     });
-    mockEnableTaskGoal.mockResolvedValue({
+    mockGoalCommit.mockResolvedValue({
       objective: 'Ship the release',
       status: 'active',
       maxContinuations: 5,
@@ -151,13 +163,20 @@ describe('enableTaskGoalCommand', () => {
       blockedReason: null,
       completedAt: null,
     });
+    mockGoalRollback.mockResolvedValue(true);
+    mockPrepareTaskGoalActivation.mockResolvedValue({
+      commit: mockGoalCommit,
+      rollback: mockGoalRollback,
+    });
+    mockSendSandboxPrompt.mockResolvedValue({ success: true });
   });
 
-  it('enables Goal Mode after resolving authenticated task access', async () => {
+  it('activates Goal Mode only after prompt delivery succeeds', async () => {
     await expect(
-      enableTaskGoalCommand(auth, {
+      startTaskGoalCommand(auth, {
         taskId: 'task-123',
         goal: { objective: 'Ship the release', maxContinuations: 5 },
+        clientMessageId: 'message-1',
       }),
     ).resolves.toMatchObject({
       success: true,
@@ -167,22 +186,47 @@ describe('enableTaskGoalCommand', () => {
     expect(mockResolveTaskByIdAccess).toHaveBeenCalledWith(auth, {
       taskId: 'task-123',
     });
-    expect(mockEnableTaskGoal).toHaveBeenCalledWith({
+    expect(mockPrepareTaskGoalActivation).toHaveBeenCalledWith({
       taskId: 'task-123',
       goal: { objective: 'Ship the release', maxContinuations: 5 },
     });
+    expect(mockSendSandboxPrompt).toHaveBeenCalledWith(auth, {
+      taskId: 'task-123',
+      prompt: 'Ship the release',
+      source: 'web',
+      clientMessageId: 'message-1',
+      userImageUrl: undefined,
+      autoSteerWhenQueued: true,
+    });
+    expect(mockGoalCommit).toHaveBeenCalledOnce();
+    expect(mockGoalRollback).not.toHaveBeenCalled();
   });
 
   it('does not enable Goal Mode when the task is unavailable', async () => {
     mockResolveTaskByIdAccess.mockResolvedValue({ kind: 'not-found' });
 
     await expect(
-      enableTaskGoalCommand(auth, {
+      startTaskGoalCommand(auth, {
         taskId: 'missing-task',
         goal: { objective: 'Ship the release', maxContinuations: 5 },
       }),
     ).resolves.toEqual({ success: false, error: 'Task not found' });
-    expect(mockEnableTaskGoal).not.toHaveBeenCalled();
+    expect(mockPrepareTaskGoalActivation).not.toHaveBeenCalled();
+  });
+
+  it('rolls back the pending goal when prompt delivery fails', async () => {
+    const deliveryError = new Error('Sandbox unavailable');
+    mockSendSandboxPrompt.mockRejectedValue(deliveryError);
+
+    await expect(
+      startTaskGoalCommand(auth, {
+        taskId: 'task-123',
+        goal: { objective: 'Ship the release', maxContinuations: 5 },
+      }),
+    ).rejects.toBe(deliveryError);
+
+    expect(mockGoalCommit).not.toHaveBeenCalled();
+    expect(mockGoalRollback).toHaveBeenCalledOnce();
   });
 });
 

@@ -25,7 +25,7 @@ const {
   removeOptimisticMessageMock,
   removeOptimisticQueuedMessageMock,
   sandboxSendPromptMutateMock,
-  taskRunEnableGoalMutateMock,
+  taskRunStartGoalMutateMock,
   taskRunCancelMutateMock,
   toastErrorMock,
   toastSuccessMock,
@@ -62,7 +62,7 @@ const {
   removeOptimisticMessageMock: vi.fn(),
   removeOptimisticQueuedMessageMock: vi.fn(),
   sandboxSendPromptMutateMock: vi.fn(),
-  taskRunEnableGoalMutateMock: vi.fn(),
+  taskRunStartGoalMutateMock: vi.fn(),
   taskRunCancelMutateMock: vi.fn(),
   toastErrorMock: vi.fn(),
   toastSuccessMock: vi.fn(),
@@ -336,7 +336,7 @@ describe('PromptInput', () => {
       },
     });
     sandboxSendPromptMutateMock.mockResolvedValue({ success: true });
-    taskRunEnableGoalMutateMock.mockResolvedValue({ success: true });
+    taskRunStartGoalMutateMock.mockResolvedValue({ success: true });
     taskRunCancelMutateMock.mockResolvedValue({ success: true });
     preparePromptAttachmentsMock.mockImplementation(async (input) => ({
       text: input.text,
@@ -348,8 +348,8 @@ describe('PromptInput', () => {
         },
       },
       taskRuns: {
-        enableGoal: {
-          mutate: taskRunEnableGoalMutateMock,
+        startGoal: {
+          mutate: taskRunStartGoalMutateMock,
         },
         cancel: {
           mutate: taskRunCancelMutateMock,
@@ -845,20 +845,14 @@ describe('PromptInput', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(taskRunEnableGoalMutateMock).toHaveBeenCalledWith({
+      expect(taskRunStartGoalMutateMock).toHaveBeenCalledWith({
         taskId: 'task-goal',
         goal: { objective: 'ship the release' },
+        clientMessageId: expect.any(String),
+        userImageUrl: undefined,
       });
     });
-    expect(sandboxSendPromptMutateMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        taskId: 'task-goal',
-        prompt: 'ship the release',
-      }),
-    );
-    expect(sandboxSendPromptMutateMock).not.toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: expect.stringContaining('/goal') }),
-    );
+    expect(sandboxSendPromptMutateMock).not.toHaveBeenCalled();
     expect(toastSuccessMock).toHaveBeenCalledWith('Goal Mode enabled');
   });
 
@@ -892,7 +886,7 @@ describe('PromptInput', () => {
     expect(toastErrorMock).toHaveBeenCalledWith(
       'Describe the goal after /goal.',
     );
-    expect(taskRunEnableGoalMutateMock).not.toHaveBeenCalled();
+    expect(taskRunStartGoalMutateMock).not.toHaveBeenCalled();
     expect(sandboxSendPromptMutateMock).not.toHaveBeenCalled();
   });
 

@@ -1,5 +1,7 @@
+import { randomUUID } from 'node:crypto';
+
 import type { TaskGoal, TaskGoalInput, TaskGoalStatus } from '@roomote/types';
-import { and, eq, inArray, isNotNull, lt, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
 
 import { db } from '../db';
 import { taskRuns, tasks } from '../schema';
@@ -54,30 +56,99 @@ export async function getTaskGoalForRun(
   return task ? toTaskGoal(task) : null;
 }
 
-export async function enableTaskGoal(input: {
+export async function prepareTaskGoalActivation(input: {
   taskId: string;
   goal: TaskGoalInput;
-}): Promise<TaskGoal | null> {
-  const [updated] = await db
-    .update(tasks)
-    .set({
-      goalObjective: input.goal.objective,
-      goalStatus: 'active',
-      goalMaxContinuations: input.goal.maxContinuations,
-      goalContinuationsUsed: 0,
-      goalBlockedReason: null,
-      goalCompletedAt: null,
-      goalLastContinuationId: null,
-      goalContinuationIds: [],
-      goalBlockerCandidateReason: null,
-      goalBlockerCandidateCount: 0,
-      goalBlockerLastContinuationUsed: null,
-      updatedAt: new Date(),
-    })
-    .where(eq(tasks.id, input.taskId))
-    .returning();
+}): Promise<{
+  commit: () => Promise<TaskGoal | null>;
+  rollback: () => Promise<boolean>;
+} | null> {
+  const activationId = `goal-activation:${randomUUID()}`;
+  const previous = await db.transaction(async (tx) => {
+    const [task] = await tx
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, input.taskId))
+      .limit(1)
+      .for('update');
+    if (
+      !task ||
+      (task.goalStatus === null &&
+        task.goalLastContinuationId?.startsWith('goal-activation:'))
+    ) {
+      return null;
+    }
 
-  return updated ? toTaskGoal(updated) : null;
+    const [prepared] = await tx
+      .update(tasks)
+      .set({
+        goalObjective: input.goal.objective,
+        goalStatus: null,
+        goalMaxContinuations: input.goal.maxContinuations,
+        goalContinuationsUsed: 0,
+        goalBlockedReason: null,
+        goalCompletedAt: null,
+        goalLastContinuationId: activationId,
+        goalContinuationIds: [],
+        goalBlockerCandidateReason: null,
+        goalBlockerCandidateCount: 0,
+        goalBlockerLastContinuationUsed: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(tasks.id, input.taskId))
+      .returning({ id: tasks.id });
+
+    return prepared ? task : null;
+  });
+
+  if (!previous) {
+    return null;
+  }
+
+  const pendingFilter = and(
+    eq(tasks.id, input.taskId),
+    isNull(tasks.goalStatus),
+    eq(tasks.goalLastContinuationId, activationId),
+  );
+
+  return {
+    commit: async () => {
+      const [updated] = await db
+        .update(tasks)
+        .set({
+          goalStatus: 'active',
+          goalLastContinuationId: null,
+          updatedAt: new Date(),
+        })
+        .where(pendingFilter)
+        .returning();
+
+      return updated ? toTaskGoal(updated) : null;
+    },
+    rollback: async () => {
+      const [restored] = await db
+        .update(tasks)
+        .set({
+          goalObjective: previous.goalObjective,
+          goalStatus: previous.goalStatus,
+          goalMaxContinuations: previous.goalMaxContinuations,
+          goalContinuationsUsed: previous.goalContinuationsUsed,
+          goalBlockedReason: previous.goalBlockedReason,
+          goalCompletedAt: previous.goalCompletedAt,
+          goalLastContinuationId: previous.goalLastContinuationId,
+          goalContinuationIds: previous.goalContinuationIds,
+          goalBlockerCandidateReason: previous.goalBlockerCandidateReason,
+          goalBlockerCandidateCount: previous.goalBlockerCandidateCount,
+          goalBlockerLastContinuationUsed:
+            previous.goalBlockerLastContinuationUsed,
+          updatedAt: new Date(),
+        })
+        .where(pendingFilter)
+        .returning({ id: tasks.id });
+
+      return Boolean(restored);
+    },
+  };
 }
 
 export async function markTaskGoalForRun(

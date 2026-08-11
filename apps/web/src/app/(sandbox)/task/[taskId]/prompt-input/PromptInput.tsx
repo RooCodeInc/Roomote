@@ -459,17 +459,6 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
             return;
           }
 
-          if (goalObjective !== null) {
-            const enabled = await trpcClient.taskRuns.enableGoal.mutate({
-              taskId: taskRun.taskId,
-              goal: { objective: goalObjective },
-            });
-
-            if (!enabled.success) {
-              throw new Error(enabled.error);
-            }
-          }
-
           const preparedPrompt = await preparePromptAttachments({
             text: goalObjective ?? text,
             attachments: message.files,
@@ -487,15 +476,28 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           });
           optimisticClientMessageId = clientMessageId;
 
-          await trpcClient.sandboxSession.sendPrompt.mutate({
-            taskId: taskRun.taskId,
-            prompt: preparedPrompt.text,
-            images: preparedPrompt.images,
-            source: 'web',
-            clientMessageId,
-            userImageUrl,
-            autoSteerWhenQueued: true,
-          });
+          if (goalObjective !== null) {
+            const started = await trpcClient.taskRuns.startGoal.mutate({
+              taskId: taskRun.taskId,
+              goal: { objective: goalObjective },
+              clientMessageId,
+              userImageUrl,
+            });
+
+            if (!started.success) {
+              throw new Error(started.error);
+            }
+          } else {
+            await trpcClient.sandboxSession.sendPrompt.mutate({
+              taskId: taskRun.taskId,
+              prompt: preparedPrompt.text,
+              images: preparedPrompt.images,
+              source: 'web',
+              clientMessageId,
+              userImageUrl,
+              autoSteerWhenQueued: true,
+            });
+          }
 
           if (goalObjective !== null) {
             toast.success('Goal Mode enabled');

@@ -2,14 +2,14 @@ import { runFactory } from '../fixtures/factories/run.factory';
 import { taskFactory } from '../fixtures/factories/task.factory';
 import {
   claimTaskGoalContinuationForRun,
-  enableTaskGoal,
   getTaskGoalForRun,
   markTaskGoalForRun,
+  prepareTaskGoalActivation,
   releaseTaskGoalContinuationForRun,
 } from './task-goals';
 
 describe('task goals', () => {
-  it('enables and resets Goal Mode for an existing task', async () => {
+  it('activates Goal Mode only after delivery is committed', async () => {
     const task = await taskFactory.create({
       goalObjective: 'Old objective',
       goalStatus: 'blocked',
@@ -18,21 +18,65 @@ describe('task goals', () => {
       goalBlockedReason: 'Old blocker',
       goalContinuationIds: ['old-turn'],
     });
+    const run = await runFactory.create({ taskId: task.id });
 
+    const activation = await prepareTaskGoalActivation({
+      taskId: task.id,
+      goal: {
+        objective: 'Finish the new objective',
+        maxContinuations: 4,
+      },
+    });
+
+    expect(activation).not.toBeNull();
     await expect(
-      enableTaskGoal({
+      prepareTaskGoalActivation({
         taskId: task.id,
         goal: {
-          objective: 'Finish the new objective',
+          objective: 'Concurrent objective',
           maxContinuations: 4,
         },
       }),
-    ).resolves.toMatchObject({
+    ).resolves.toBeNull();
+    await expect(getTaskGoalForRun(run.id)).resolves.toBeNull();
+    await expect(
+      claimTaskGoalContinuationForRun({
+        runId: run.id,
+        continuationId: 'pending-turn',
+      }),
+    ).resolves.toMatchObject({ updated: false, reason: 'not_active' });
+    await expect(activation!.commit()).resolves.toMatchObject({
       objective: 'Finish the new objective',
       status: 'active',
       maxContinuations: 4,
       continuationsUsed: 0,
       blockedReason: null,
+    });
+  });
+
+  it('restores the previous goal when delivery fails', async () => {
+    const task = await taskFactory.create({
+      goalObjective: 'Keep the existing objective',
+      goalStatus: 'active',
+      goalMaxContinuations: 3,
+      goalContinuationsUsed: 1,
+      goalContinuationIds: ['existing-turn'],
+    });
+    const run = await runFactory.create({ taskId: task.id });
+    const activation = await prepareTaskGoalActivation({
+      taskId: task.id,
+      goal: {
+        objective: 'Replacement objective',
+        maxContinuations: 5,
+      },
+    });
+
+    await expect(activation!.rollback()).resolves.toBe(true);
+    await expect(getTaskGoalForRun(run.id)).resolves.toMatchObject({
+      objective: 'Keep the existing objective',
+      status: 'active',
+      maxContinuations: 3,
+      continuationsUsed: 1,
     });
   });
 
