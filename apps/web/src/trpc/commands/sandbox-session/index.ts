@@ -10,6 +10,7 @@ import {
   isExitedRunStatus,
   resolveSourceControlProviderFromPayload,
   taskToolDispatchPayloadSchema,
+  type TaskGoal,
 } from '@roomote/types';
 import { createRunToken } from '@roomote/auth';
 import {
@@ -242,7 +243,7 @@ export async function saveDraftPromptCommand(
 export async function sendSandboxPromptCommand(
   auth: UserAuthSuccess,
   input: z.input<typeof sendSandboxPromptInputSchema>,
-  trustedContext?: { goalGeneration?: string },
+  trustedContext?: { goalContext?: TaskGoal },
 ) {
   const parsed = sendSandboxPromptInputSchema.parse(input);
   const { taskRun } = await getResolvedSandboxTaskRunByTaskId(auth, {
@@ -349,7 +350,7 @@ export async function sendSandboxPromptCommand(
       autoSteerWhenQueued: requiresActorHandoff
         ? true
         : parsed.autoSteerWhenQueued,
-      goalGeneration: trustedContext?.goalGeneration,
+      goalContext: trustedContext?.goalContext,
     });
 
     if (

@@ -1328,6 +1328,7 @@ export const runTask = async ({
             disposition: 'continue' as const,
             prompt: {
               prompt: buildTaskGoalContinuationPrompt(claim.goal),
+              goalContext: claim.goal,
               visibleInTranscript: false,
               source: 'goal-continuation',
               clientMessageId: `goal-continuation:${completionId}`,
@@ -2104,9 +2105,7 @@ export const runTask = async ({
           ? { workflowPhase: initialWorkflowPhase }
           : {}),
         visibleInTranscript: false,
-        ...(task?.goal?.status === 'active'
-          ? { goalGeneration: task.goal.generation }
-          : {}),
+        ...(task?.goal?.status === 'active' ? { goalContext: task.goal } : {}),
       });
     } else {
       // Session mode: initialize without prompt.

@@ -87,7 +87,14 @@ export async function startTaskGoalCommand(
         autoSteerWhenQueued: true,
       },
       {
-        goalGeneration: activation.generation,
+        goalContext: {
+          ...input.goal,
+          generation: activation.generation,
+          status: 'active',
+          continuationsUsed: 0,
+          blockedReason: null,
+          completedAt: null,
+        },
       },
     );
   } catch (error) {

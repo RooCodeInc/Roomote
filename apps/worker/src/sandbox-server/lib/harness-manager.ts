@@ -9,6 +9,7 @@ import type {
   TaskEventMessagePayload,
   TaskEventStartedPayload,
   TaskPhase,
+  TaskGoal,
   TaskStateEvent,
 } from '@roomote/types';
 
@@ -141,7 +142,7 @@ interface HarnessFollowUpPromptOptions {
   userName?: string;
   userImageUrl?: string;
   clientMessageId?: string;
-  goalGeneration?: string | null;
+  goalContext?: TaskGoal;
 }
 
 export type HarnessManagerCompletionDecision =
@@ -289,7 +290,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
         userName: options.userName,
         userImageUrl: options.userImageUrl,
         clientMessageId: options.clientMessageId,
-        goalGeneration: options.goalGeneration,
+        goalContext: options.goalContext,
       },
     });
 
@@ -403,7 +404,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
         userName: queuedMessage.userName,
         userImageUrl: queuedMessage.userImageUrl,
         clientMessageId: queuedMessage.clientMessageId,
-        goalGeneration: queuedMessage.goalGeneration,
+        goalContext: queuedMessage.goalContext,
       });
     }
 
@@ -462,7 +463,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     images?: string[];
     workflowPhase?: string;
     visibleInTranscript?: boolean;
-    goalGeneration?: string | null;
+    goalContext?: TaskGoal;
   }): void {
     this.logger.info('[HarnessManager#startNewTask] Starting new task');
     this.executeStartNewTask(options);
@@ -502,7 +503,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     userName?: string;
     userImageUrl?: string;
     clientMessageId?: string;
-    goalGeneration?: string | null;
+    goalContext?: TaskGoal;
   }): boolean {
     // If a task is currently running, cancel and close it first.
     if (this.state.sessionId && this.phase === 'running') {
@@ -1596,7 +1597,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     userName?: string;
     userImageUrl?: string;
     clientMessageId?: string;
-    goalGeneration?: string | null;
+    goalContext?: TaskGoal;
   }): void {
     this.resetState();
     this.setPhase('running');
@@ -1623,7 +1624,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
         userImageUrl: options.userImageUrl,
         taskId: options.taskId,
         clientMessageId: options.clientMessageId,
-        goalGeneration: options.goalGeneration,
+        goalContext: options.goalContext,
       },
     });
   }

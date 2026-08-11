@@ -2566,7 +2566,10 @@ describe('runTask', () => {
     await expect(decision).resolves.toMatchObject({
       disposition: 'continue',
       prompt: {
-        prompt: expect.stringContaining('goal-generation:continuation'),
+        goalContext: expect.objectContaining({
+          objective: 'Complete the goal',
+          generation: 'goal-generation:continuation',
+        }),
         source: 'goal-continuation',
         clientMessageId: 'goal-continuation:completion-race',
       },

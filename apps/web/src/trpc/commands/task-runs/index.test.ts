@@ -202,7 +202,17 @@ describe('startTaskGoalCommand', () => {
         userImageUrl: undefined,
         autoSteerWhenQueued: true,
       },
-      { goalGeneration: 'goal-generation:replacement' },
+      {
+        goalContext: {
+          objective: 'Ship the release',
+          generation: 'goal-generation:replacement',
+          status: 'active',
+          maxContinuations: 5,
+          continuationsUsed: 0,
+          blockedReason: null,
+          completedAt: null,
+        },
+      },
     );
     expect(mockGoalCommit).toHaveBeenCalledOnce();
     expect(mockGoalRollback).not.toHaveBeenCalled();

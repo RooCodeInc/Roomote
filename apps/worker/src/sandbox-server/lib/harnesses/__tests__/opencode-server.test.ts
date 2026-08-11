@@ -439,7 +439,15 @@ describe('OpenCodeServerHarness', () => {
           commandName: TaskCommandName.StartNewTask,
           data: {
             text: 'Finish the replacement goal.',
-            goalGeneration: 'goal-generation:replacement',
+            goalContext: {
+              objective: 'Finish the replacement goal.',
+              generation: 'goal-generation:replacement',
+              status: 'active',
+              maxContinuations: 5,
+              continuationsUsed: 0,
+              blockedReason: null,
+              completedAt: null,
+            },
             visibleInTranscript: true,
           },
         }),
