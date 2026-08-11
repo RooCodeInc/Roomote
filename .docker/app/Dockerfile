@@ -66,6 +66,7 @@ COPY packages/linear/package.json ./packages/linear/
 COPY packages/redis/package.json ./packages/redis/
 COPY packages/sdk/package.json ./packages/sdk/
 COPY packages/slack/package.json ./packages/slack/
+COPY packages/source-control-oauth/package.json ./packages/source-control-oauth/
 COPY packages/telemetry/package.json ./packages/telemetry/
 COPY packages/types/package.json ./packages/types/
 COPY apps/api/package.json ./apps/api/
