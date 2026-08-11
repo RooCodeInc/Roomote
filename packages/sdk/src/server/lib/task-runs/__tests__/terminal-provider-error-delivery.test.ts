@@ -1,13 +1,23 @@
-const { mockCreateDiscordProvider, mockDiscordPostMessage } = vi.hoisted(
-  () => ({
+const { mockCreateDiscordProvider, mockDiscordPostMessage, mockRedisSet } =
+  vi.hoisted(() => ({
     mockCreateDiscordProvider: vi.fn(),
     mockDiscordPostMessage: vi.fn(),
-  }),
-);
+    mockRedisSet: vi.fn(),
+  }));
 
 vi.mock('../../discord-communication', () => ({
   createDiscordCommunicationProviderFromRuntimeCredentials:
     mockCreateDiscordProvider,
+}));
+
+// This test covers the envelope -> notifier -> provider wiring, so keep the
+// duplicate-suppression claim in-memory. A live Redis roundtrip here would make
+// the assertion depend on connection latency rather than on the wiring.
+vi.mock('@roomote/redis', () => ({
+  getRedis: () => ({
+    set: mockRedisSet,
+    del: vi.fn().mockResolvedValue(1),
+  }),
 }));
 
 import { db, taskFactory, taskRuns } from '@roomote/db/server';
@@ -102,6 +112,8 @@ describe('terminal provider error thread delivery wiring', () => {
     process.env.R_APP_URL = 'https://app.example.com';
     mockCreateDiscordProvider.mockReset();
     mockDiscordPostMessage.mockReset();
+    mockRedisSet.mockReset();
+    mockRedisSet.mockResolvedValue('OK');
     mockCreateDiscordProvider.mockResolvedValue({
       postMessage: mockDiscordPostMessage,
     });
@@ -123,9 +135,11 @@ describe('terminal provider error thread delivery wiring', () => {
     });
 
     // Delivery is scheduled off the message write, so let the fire-and-forget
-    // notifier settle before asserting.
-    await vi.waitFor(() =>
-      expect(mockDiscordPostMessage).toHaveBeenCalledTimes(1),
+    // notifier settle before asserting. The timeout is generous because the
+    // notifier still performs a real task-run read.
+    await vi.waitFor(
+      () => expect(mockDiscordPostMessage).toHaveBeenCalledTimes(1),
+      { timeout: 10_000, interval: 25 },
     );
 
     const [post] = mockDiscordPostMessage.mock.calls[0] ?? [];
