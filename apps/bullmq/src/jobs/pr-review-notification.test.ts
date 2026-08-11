@@ -13,8 +13,11 @@ const {
   mockTeamsPostMessage,
   mockTelegramPostMessage,
   mockDiscordPostMessage,
+  mockDiscordUpdateMessage,
+  mockGetCommunicationProviderAdapter,
   mockStickyFooterPost,
   mockSetPendingPrReviewAction,
+  mockDiscardPendingPrReviewAction,
   mockDispatchFollowUp,
   mockGetAggregateDelivery,
   mockMarkDeliveriesEligible,
@@ -33,8 +36,11 @@ const {
   mockTeamsPostMessage: vi.fn(),
   mockTelegramPostMessage: vi.fn(),
   mockDiscordPostMessage: vi.fn(),
+  mockDiscordUpdateMessage: vi.fn(),
+  mockGetCommunicationProviderAdapter: vi.fn(),
   mockStickyFooterPost: vi.fn(),
   mockSetPendingPrReviewAction: vi.fn(),
+  mockDiscardPendingPrReviewAction: vi.fn(),
   mockDispatchFollowUp: vi.fn(),
   mockGetAggregateDelivery: vi.fn(),
   mockMarkDeliveriesEligible: vi.fn(),
@@ -109,21 +115,14 @@ vi.mock('@roomote/sdk/server', () => ({
   consumePendingPrReviewActivity: mockConsumePending,
   requeuePendingPrReviewActivity: mockRequeuePending,
   schedulePrReviewNotificationJob: mockSchedule,
-  getCommunicationProviderAdapter: vi.fn(
-    async (provider: 'slack' | 'teams' | 'telegram' | 'discord') =>
-      ({
-        slack: { postMessage: mockPostMessage },
-        teams: { postMessage: mockTeamsPostMessage },
-        telegram: { postMessage: mockTelegramPostMessage },
-        discord: { postMessage: mockDiscordPostMessage },
-      })[provider],
-  ),
+  getCommunicationProviderAdapter: (...args: unknown[]) =>
+    mockGetCommunicationProviderAdapter(...args),
   preparePrReviewNotificationDelivery: mockPrepareDelivery,
   recordPrReviewNotificationDeliveryBestEffort: mockRecordDelivery,
   setPendingPrReviewAction: mockSetPendingPrReviewAction,
   dispatchPrReviewFollowUp: mockDispatchFollowUp,
   attachPendingPrReviewActionMessage: vi.fn(),
-  discardPendingPrReviewAction: vi.fn(),
+  discardPendingPrReviewAction: mockDiscardPendingPrReviewAction,
   prReviewActivityEventSchema: z.object({
     kind: z.string(),
     authorLogin: z.string(),
@@ -185,6 +184,19 @@ describe('prReviewNotificationJob', () => {
     mockRecordDelivery.mockResolvedValue(undefined);
     mockUpdateAggregateTriage.mockResolvedValue(true);
     mockUpdateDelivery.mockResolvedValue(undefined);
+    mockDiscardPendingPrReviewAction.mockResolvedValue(undefined);
+    mockGetCommunicationProviderAdapter.mockImplementation(
+      async (provider: 'slack' | 'teams' | 'telegram' | 'discord') =>
+        ({
+          slack: { postMessage: mockPostMessage },
+          teams: { postMessage: mockTeamsPostMessage },
+          telegram: { postMessage: mockTelegramPostMessage },
+          discord: {
+            postMessage: mockDiscordPostMessage,
+            updateMessage: mockDiscordUpdateMessage,
+          },
+        })[provider],
+    );
     mockStickyFooterPost.mockResolvedValue('999.888');
     mockPostMessage.mockResolvedValue({
       provider: 'slack',
@@ -202,6 +214,13 @@ describe('prReviewNotificationJob', () => {
       channelId: '12345',
       messageId: '901',
     });
+    mockDiscordPostMessage.mockResolvedValue({
+      provider: 'discord',
+      channelId: 'channel-1',
+      messageId: 'message-1',
+      threadId: 'thread-1',
+    });
+    mockDiscordUpdateMessage.mockResolvedValue(undefined);
   });
 
   it('posts the aggregated notification to the originating Slack thread when the task is idle', async () => {
@@ -331,6 +350,135 @@ describe('prReviewNotificationJob', () => {
     );
   });
 
+  it('retries initial delivery when the communication transport is unavailable', async () => {
+    const aggregate = {
+      id: 'aggregate-1',
+      taskId: 'task-1',
+      repository: 'owner/repo',
+      prNumber: 42,
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      sourceControlProvider: 'github',
+      reviewHeadSha: 'abc',
+      version: 1,
+      events,
+      createdAt: new Date(),
+    };
+    const deliveries = [
+      {
+        destination: 'task_history',
+        state: 'delivered',
+        aggregateVersion: 1,
+        attemptCount: 1,
+      },
+      {
+        destination: 'chat',
+        state: 'pending',
+        aggregateVersion: 0,
+        attemptCount: 0,
+        eligibleAt: new Date(),
+        alertEmittedAt: null,
+        chatMessageId: null,
+      },
+    ];
+    mockGetAggregateDelivery.mockResolvedValue({ aggregate, deliveries });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+      },
+      text: 'formatted-message',
+    });
+    mockGetCommunicationProviderAdapter.mockResolvedValue(null);
+
+    await prReviewNotificationJob(
+      makeJob({ aggregateId: 'aggregate-1' }) as never,
+    );
+
+    expect(mockDiscordPostMessage).not.toHaveBeenCalled();
+    expect(mockUpdateDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aggregateId: 'aggregate-1',
+        destination: 'chat',
+        state: 'failed',
+        attemptCount: 1,
+        nextAttemptAt: expect.any(Date),
+        lastError: 'discord is not connected.',
+      }),
+    );
+  });
+
+  it('keeps the previous action claim when a provider edit fails', async () => {
+    const aggregate = {
+      id: 'aggregate-1',
+      taskId: 'task-1',
+      repository: 'owner/repo',
+      prNumber: 42,
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      sourceControlProvider: 'github',
+      reviewHeadSha: 'abc',
+      version: 2,
+      events,
+      createdAt: new Date(),
+    };
+    const deliveries = [
+      {
+        destination: 'task_history',
+        state: 'delivered',
+        aggregateVersion: 2,
+        attemptCount: 1,
+      },
+      {
+        destination: 'chat',
+        state: 'delivered',
+        aggregateVersion: 1,
+        attemptCount: 1,
+        eligibleAt: new Date(),
+        alertEmittedAt: null,
+        chatMessageId: 'message-1',
+        actionNonce: 'previous-nonce',
+      },
+    ];
+    mockGetAggregateDelivery.mockResolvedValue({ aggregate, deliveries });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+      },
+      text: 'updated-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockDiscordUpdateMessage.mockRejectedValue(new Error('edit failed'));
+
+    await prReviewNotificationJob(
+      makeJob({ aggregateId: 'aggregate-1' }) as never,
+    );
+
+    expect(mockDiscardPendingPrReviewAction).toHaveBeenCalledTimes(1);
+    expect(mockDiscardPendingPrReviewAction).not.toHaveBeenCalledWith(
+      'previous-nonce',
+    );
+    expect(mockUpdateDelivery).toHaveBeenCalledWith({
+      aggregateId: 'aggregate-1',
+      destination: 'chat',
+      state: 'sending',
+      actionNonce: 'previous-nonce',
+      actionHandledAt: null,
+    });
+    expect(mockUpdateDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aggregateId: 'aggregate-1',
+        destination: 'chat',
+        state: 'failed',
+        lastError: 'edit failed',
+      }),
+    );
+  });
+
   it('posts Yes/Dismiss action buttons and stores the pending offer when the triage produced a follow-up', async () => {
     mockPrepareDelivery.mockResolvedValue({
       post: true,
@@ -431,11 +579,57 @@ describe('prReviewNotificationJob', () => {
         buttons: [
           [
             expect.objectContaining({
-              text: 'Resolve these issues',
+              text: 'Fix this review',
               callbackData: `prr:y:${storedNonce}`,
             }),
             expect.objectContaining({
-              text: 'Auto-resolve on this PR',
+              text: 'Fix all PR feedback',
+              callbackData: `prr:f:${storedNonce}`,
+            }),
+            expect.objectContaining({
+              text: 'Auto-fix future feedback',
+              callbackData: `prr:a:${storedNonce}`,
+            }),
+            expect.objectContaining({
+              text: 'Dismiss',
+              callbackData: `prr:d:${storedNonce}`,
+            }),
+          ],
+        ],
+      }),
+    );
+  });
+
+  it('includes the fix-all action in initial Discord notification buttons', async () => {
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+      },
+      text: 'formatted-message',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    const storedNonce = mockSetPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
+    expect(mockDiscordPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        buttons: [
+          [
+            expect.objectContaining({
+              text: 'Fix this review',
+              callbackData: `prr:y:${storedNonce}`,
+            }),
+            expect.objectContaining({
+              text: 'Fix all PR feedback',
+              callbackData: `prr:f:${storedNonce}`,
+            }),
+            expect.objectContaining({
+              text: 'Auto-fix future feedback',
               callbackData: `prr:a:${storedNonce}`,
             }),
             expect.objectContaining({

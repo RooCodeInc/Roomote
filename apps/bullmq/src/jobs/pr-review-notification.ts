@@ -104,6 +104,8 @@ type PrReviewNotificationAction = {
 const BUTTON_ROUTE_PROVIDERS = ['slack', 'discord', 'telegram'] as const;
 type ButtonRouteProvider = (typeof BUTTON_ROUTE_PROVIDERS)[number];
 
+class PrReviewTransportUnavailableError extends Error {}
+
 function isButtonRouteProvider(
   provider: PrReviewNotificationRoute['provider'],
 ): provider is ButtonRouteProvider {
@@ -126,6 +128,40 @@ async function postPrReviewNotification({
   captureProviderMessageId?: boolean;
   aggregateId?: string;
 }): Promise<string | null> {
+  let slack: SlackNotifier | null = null;
+  let adapter: Awaited<ReturnType<typeof getCommunicationProviderAdapter>> =
+    null;
+
+  try {
+    if (route.provider === 'slack') {
+      const slackInstallation = await db.query.slackInstallations.findFirst({
+        where: eq(slackInstallations.isActive, true),
+        columns: { botAccessToken: true },
+      });
+
+      if (!slackInstallation?.botAccessToken) {
+        throw new PrReviewTransportUnavailableError('Slack is not connected.');
+      }
+
+      slack = new SlackNotifier(slackInstallation.botAccessToken);
+    } else {
+      adapter = await getCommunicationProviderAdapter(route.provider);
+
+      if (!adapter) {
+        throw new PrReviewTransportUnavailableError(
+          `${route.provider} is not connected.`,
+        );
+      }
+    }
+  } catch (error) {
+    if (error instanceof PrReviewTransportUnavailableError) {
+      throw error;
+    }
+    throw new PrReviewTransportUnavailableError(
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+
   // Stored before posting: an orphaned record just expires, while a posted
   // message without a record would leave dead buttons.
   const nonce = action ? randomUUID() : null;
@@ -154,17 +190,9 @@ async function postPrReviewNotification({
   }
 
   if (route.provider === 'slack') {
-    const slackInstallation = await db.query.slackInstallations.findFirst({
-      where: eq(slackInstallations.isActive, true),
-      columns: { botAccessToken: true },
-    });
-
-    if (!slackInstallation?.botAccessToken) {
-      console.warn('[PrReviewNotification] Slack is not connected, skipping');
-      return null;
+    if (!slack) {
+      throw new PrReviewTransportUnavailableError('Slack is not connected.');
     }
-
-    const slack = new SlackNotifier(slackInstallation.botAccessToken);
 
     const messageTs = await postSlackThreadMessageWithStickyFooter({
       slack,
@@ -191,34 +219,16 @@ async function postPrReviewNotification({
     return messageTs;
   }
 
-  const adapter = await getCommunicationProviderAdapter(route.provider);
-
   if (!adapter) {
-    console.warn(
-      `[PrReviewNotification] ${route.provider} is not connected, skipping`,
+    throw new PrReviewTransportUnavailableError(
+      `${route.provider} is not connected.`,
     );
-    return null;
   }
 
   const postInput = buildPrReviewNotificationPostInput(route, text);
 
   if (action && nonce && isButtonRouteProvider(route.provider)) {
-    postInput.buttons = [
-      [
-        {
-          text: 'Resolve these issues',
-          callbackData: buildPrReviewActionCallbackData('yes', nonce),
-        },
-        {
-          text: 'Auto-resolve on this PR',
-          callbackData: buildPrReviewActionCallbackData('auto', nonce),
-        },
-        {
-          text: 'Dismiss',
-          callbackData: buildPrReviewActionCallbackData('dismiss', nonce),
-        },
-      ],
-    ];
+    postInput.buttons = buildPrReviewActionButtons(action, nonce);
   }
 
   const posted = await adapter.postMessage(postInput);
@@ -267,10 +277,6 @@ async function updatePostedPrReviewNotification(input: {
 }): Promise<void> {
   const nonce = input.action ? randomUUID() : null;
 
-  if (input.previousActionNonce && input.previousActionNonce !== nonce) {
-    await discardPendingPrReviewAction(input.previousActionNonce);
-  }
-
   if (input.action && nonce && isButtonRouteProvider(input.route.provider)) {
     await setPendingPrReviewAction({
       nonce,
@@ -292,57 +298,76 @@ async function updatePostedPrReviewNotification(input: {
     });
   }
 
-  if (input.route.provider === 'slack') {
-    const installation = await db.query.slackInstallations.findFirst({
-      where: eq(slackInstallations.isActive, true),
-      columns: { botAccessToken: true },
-    });
-    if (!installation?.botAccessToken) {
-      throw new Error('Slack is not connected.');
-    }
-    const slack = new SlackNotifier(installation.botAccessToken);
-    const updated = await slack.updateMessage({
-      channel: input.route.channelId,
-      ts: input.messageId,
-      message: {
-        text: input.text,
-        ...(input.action && nonce
-          ? {
-              blocks: buildSlackPrReviewActionBlocks({
-                text: input.action.summaryText,
-                question: input.action.question,
-                nonce,
-              }),
-            }
-          : {}),
-      },
-    });
-    if (!updated) {
-      throw new Error('Slack message update failed.');
-    }
-  } else {
-    const adapter = await getCommunicationProviderAdapter(input.route.provider);
-    if (!adapter?.updateMessage) {
-      throw new Error(
-        `${input.route.provider} message updates are unavailable.`,
+  try {
+    if (input.route.provider === 'slack') {
+      const installation = await db.query.slackInstallations.findFirst({
+        where: eq(slackInstallations.isActive, true),
+        columns: { botAccessToken: true },
+      });
+      if (!installation?.botAccessToken) {
+        throw new Error('Slack is not connected.');
+      }
+      const slack = new SlackNotifier(installation.botAccessToken);
+      const updated = await slack.updateMessage({
+        channel: input.route.channelId,
+        ts: input.messageId,
+        message: {
+          text: input.text,
+          ...(input.action && nonce
+            ? {
+                blocks: buildSlackPrReviewActionBlocks({
+                  text: input.action.summaryText,
+                  question: input.action.question,
+                  nonce,
+                }),
+              }
+            : {}),
+        },
+      });
+      if (!updated) {
+        throw new Error('Slack message update failed.');
+      }
+    } else {
+      const adapter = await getCommunicationProviderAdapter(
+        input.route.provider,
       );
+      if (!adapter?.updateMessage) {
+        throw new Error(
+          `${input.route.provider} message updates are unavailable.`,
+        );
+      }
+      await adapter.updateMessage({
+        channelId: input.route.channelId,
+        messageId: input.messageId,
+        text: input.text,
+        ...('serviceUrl' in input.route
+          ? { serviceUrl: input.route.serviceUrl }
+          : {}),
+        textFormat: 'markdown',
+        ...(input.action && nonce && isButtonRouteProvider(input.route.provider)
+          ? { buttons: buildPrReviewActionButtons(input.action, nonce) }
+          : {}),
+      });
     }
-    await adapter.updateMessage({
-      channelId: input.route.channelId,
-      messageId: input.messageId,
-      text: input.text,
-      ...('serviceUrl' in input.route
-        ? { serviceUrl: input.route.serviceUrl }
-        : {}),
-      textFormat: 'markdown',
-      ...(input.action && nonce && isButtonRouteProvider(input.route.provider)
-        ? { buttons: buildPrReviewActionButtons(input.action, nonce) }
-        : {}),
-    });
+  } catch (error) {
+    if (nonce) {
+      await discardPendingPrReviewAction(nonce).catch(() => undefined);
+      await updatePrReviewDelivery({
+        aggregateId: input.aggregateId,
+        destination: 'chat',
+        state: 'sending',
+        actionNonce: input.previousActionNonce ?? null,
+        actionHandledAt: null,
+      });
+    }
+    throw error;
   }
 
   if (nonce) {
     await attachPendingPrReviewActionMessage(nonce, input.messageId);
+  }
+  if (input.previousActionNonce && input.previousActionNonce !== nonce) {
+    await discardPendingPrReviewAction(input.previousActionNonce);
   }
 }
 
@@ -701,6 +726,20 @@ async function deliverDurablePrReviewNotification(
         deliveredAt: now,
       });
     } catch (error) {
+      if (error instanceof PrReviewTransportUnavailableError) {
+        const failure = getNextDeliveryFailure({
+          attemptCount: delivery.attemptCount,
+          now,
+          eligibleAt: delivery.eligibleAt ?? now,
+        });
+        await updatePrReviewDelivery({
+          aggregateId: aggregate.id,
+          destination: 'chat',
+          ...failure,
+          lastError: error.message,
+        });
+        continue;
+      }
       // The provider may have accepted the post before the response was lost.
       // At-most-once policy: never retry an ambiguous initial send.
       console.error(
