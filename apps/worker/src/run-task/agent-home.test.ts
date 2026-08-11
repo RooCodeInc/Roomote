@@ -680,7 +680,7 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
-  it('marks only the configured OpenAI-compatible vision model as image-capable', () => {
+  it('marks only the configured OpenAI-compatible vision model as attachment-capable', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
       runtimeEnv: {
@@ -702,7 +702,7 @@ describe('generateOpenCodeConfig provider support', () => {
       name: 'vision-model',
       attachment: true,
       modalities: {
-        input: ['text', 'image'],
+        input: ['text', 'image', 'video'],
         output: ['text'],
       },
     });
@@ -731,7 +731,7 @@ describe('generateOpenCodeConfig provider support', () => {
     ).toMatchObject({
       attachment: true,
       modalities: {
-        input: ['text', 'image'],
+        input: ['text', 'image', 'video'],
         output: ['text'],
       },
     });
