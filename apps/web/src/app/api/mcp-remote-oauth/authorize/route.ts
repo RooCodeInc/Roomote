@@ -23,7 +23,7 @@ const authorizeSchema = z.object({
   state: z.string().min(1),
   code_challenge: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
   code_challenge_method: z.literal('S256'),
-  resource: z.string().url(),
+  resource: z.string().url().optional(),
   scope: z.string().optional(),
 });
 
@@ -288,11 +288,12 @@ async function handleAuthorize(request: NextRequest, approved: boolean) {
   const expectedResource = getRoomoteMcpResourceUrl(
     env.R_PUBLIC_URL ?? env.R_APP_URL,
   );
+  const resource = input.resource ?? expectedResource;
   const scopes = (input.scope ?? ROOMOTE_MCP_SCOPE)
     .split(/\s+/)
     .filter(Boolean);
   if (
-    input.resource !== expectedResource ||
+    resource !== expectedResource ||
     scopes.length !== 1 ||
     scopes[0] !== ROOMOTE_MCP_SCOPE
   ) {
@@ -348,7 +349,7 @@ async function handleAuthorize(request: NextRequest, approved: boolean) {
     clientId: input.client_id,
     redirectUri: input.redirect_uri,
     codeChallenge: input.code_challenge,
-    resource: input.resource,
+    resource,
     scopes,
   });
   const redirect = new URL(input.redirect_uri);

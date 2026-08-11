@@ -85,6 +85,46 @@ describe('POST /api/mcp-remote-oauth/register', () => {
     });
   });
 
+  it('registers Cursor with its desktop, web, and loopback callbacks', async () => {
+    const redirectUris = [
+      'cursor://anysphere.cursor-mcp/oauth/callback',
+      'https://www.cursor.com/agents/mcp/oauth/callback',
+      'http://localhost:8787/callback',
+    ];
+    mockRegisterClient.mockResolvedValue({
+      clientId: '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
+      clientName: 'Cursor',
+      redirectUris,
+      grantTypes: ['authorization_code', 'refresh_token'],
+    });
+
+    const response = await POST(
+      new NextRequest('https://roomote.example/api/mcp-remote-oauth/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          client_name: 'Cursor',
+          redirect_uris: redirectUris,
+          token_endpoint_auth_method: 'none',
+          grant_types: ['authorization_code', 'refresh_token'],
+          response_types: ['code'],
+          logo_uri: 'https://cursor.example/logo.svg',
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({
+      client_name: 'Cursor',
+      redirect_uris: redirectUris,
+    });
+    expect(mockRegisterClient).toHaveBeenCalledWith({
+      clientName: 'Cursor',
+      redirectUris,
+      grantTypes: ['authorization_code', 'refresh_token'],
+    });
+  });
+
   it('rejects a non-loopback HTTP callback', async () => {
     const response = await POST(
       registrationRequest('http://client.example/callback'),
