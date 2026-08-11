@@ -31,6 +31,12 @@ const ENV_VARS_END = `# END ${PRODUCT_NAME} environment variables`;
 const VALID_ENV_VAR_NAME = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 
 /**
+ * Characters Vite treats as reserved in __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS.
+ * A single occurrence makes Vite skip the entire variable.
+ */
+const VITE_UNSAFE_ALLOWED_HOST_CHARS = /["'\\]/;
+
+/**
  * Returns true when `name` is a safe POSIX environment variable name.
  * Rejects names containing shell metacharacters that could lead to command
  * injection when interpolated into a shell export statement.
@@ -195,6 +201,8 @@ export async function injectEnvVars(
   const previewProxySubdomainSuffix =
     options?.previewProxySubdomainSuffix ??
     process.env.PREVIEW_PROXY_SUBDOMAIN_SUFFIX;
+  const previewHostnames: string[] = [];
+  const machineHostnames: string[] = [];
 
   if (identity && identity.taskId && previewProxyBaseUrl) {
     for (const [name, domain] of Object.entries(identity.machineDomains)) {
@@ -216,6 +224,17 @@ export async function injectEnvVars(
         delete envVars[previewUrlEnvVarName];
       } else {
         envVars[previewUrlEnvVarName] = previewUrl;
+        previewHostnames.push(new URL(previewUrl).hostname);
+
+        // Requests that arrive through the preview proxy reach the dev server
+        // with the sandbox's own host (http-proxy rewrites Host when it changes
+        // origin), and unproxied ports are browsed at that host directly.
+        try {
+          machineHostnames.push(new URL(domain).hostname);
+        } catch {
+          // Providers that report a bare host rather than a URL have nothing
+          // extra to allowlist beyond the preview hostname above.
+        }
       }
 
       if (isProxied) {
@@ -227,6 +246,28 @@ export async function injectEnvVars(
   } else if (identity) {
     for (const [name, domain] of Object.entries(identity.machineDomains)) {
       envVars[`ROOMOTE_${name}_HOST`] = domain;
+    }
+  }
+
+  // Vite rejects requests and HMR WebSocket upgrades whose Host header is not
+  // in `server.allowedHosts` (Astro, Nuxt and SvelteKit inherit this). Two
+  // different hosts reach a sandbox dev server: the sandbox's own host on plain
+  // HTTP, because the preview proxy changes origin, and the public preview host
+  // on upgrades, because the auth-proxy rewrites Host there. Allowlisting only
+  // the first is why previews render but HMR dies with a 400. Vite reads this
+  // variable when it resolves config and appends it to allowedHosts, so setting
+  // both fixes HMR without every repo hardcoding a preview domain of its own.
+  // Pin exact hostnames rather than a wildcard suffix, and let an explicit
+  // deployment-provided value win.
+  if (!envVars.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS) {
+    // Vite discards the whole list when it contains quoting metacharacters;
+    // hostnames never do, so drop anything malformed instead of losing the rest.
+    const allowedHosts = [
+      ...new Set([...previewHostnames, ...machineHostnames]),
+    ].filter((hostname) => !VITE_UNSAFE_ALLOWED_HOST_CHARS.test(hostname));
+
+    if (allowedHosts.length > 0) {
+      envVars.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS = allowedHosts.join(',');
     }
   }
 
