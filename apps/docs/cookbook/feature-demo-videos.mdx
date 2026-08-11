@@ -1,0 +1,62 @@
+---
+title: Record feature demo videos
+description: Ask Roomote for a polished, narrated demo video of a feature, recorded live with zooms, captions, and an optional voice-over.
+contributor: Matt Rubens
+contributor_url: https://github.com/mrubens
+contributor_company: Roomote
+contributor_company_url: https://roomote.dev
+---
+
+## Overview
+
+Shipping a feature usually ends with someone screen-recording a shaky
+walkthrough. Roomote can produce that video for you: it drives the product in
+its sandbox browser, records a clean clip, and post-produces it with smooth
+zoom-to-element moves, a synthetic cursor, click ripples, and captions. With
+narration configured, the demo gets a voice-over that leads each visual beat.
+
+- **Trigger**: Ask in a task
+- **Setup time**: None for captioned demos; 5 minutes for narration
+- **Requires**: Nothing extra; admin access for narration
+- **Serves**: Engineers, Product, Marketing
+
+## Ingredients
+
+- Any task where the feature is reachable: a running dev environment or a
+  public page
+- Optional: an [ElevenLabs](https://elevenlabs.io) API key and voice ID for
+  narration
+
+## Steps
+
+1. In a task, ask for a demo, for example: `Make a demo video of the new
+   custom MCP servers settings page` or invoke `$feature-demo` directly.
+2. Roomote plans the story beats, records the interaction live, and renders a
+   16:9 video (ask for a vertical cut for short-form if you want one).
+3. The finished video is uploaded as a task artifact and linked in the reply
+   (and embedded under `## Screencasts` when the task opens a PR).
+
+## Narration
+
+Captioned demos work out of the box. For a voice-over in your own (cloned)
+voice, a deployment admin connects ElevenLabs under **Settings →
+Integrations → ElevenLabs** with:
+
+- an ElevenLabs API key, scoped to **text-to-speech only** with a credit cap
+  (sufficient and recommended), and
+- the voice ID to narrate with.
+
+The key is encrypted at rest and stays on the Roomote control plane: task
+sandboxes send narration text to an authenticated Roomote endpoint and
+receive audio back, so the provider credential never enters a sandbox and
+agents get no ElevenLabs tools. (Operators self-hosting can alternatively set
+the `R_ELEVENLABS_API_KEY` and `R_ELEVENLABS_VOICE_ID` environment variables;
+the integration takes precedence when both are present.)
+
+## Tips
+
+- Narration lines come from the on-screen captions; ask for wording changes
+  the way you would edit copy ("make the second line more casual").
+- The narrative drives the pacing: each shot holds for as long as its line
+  takes to speak, voiced or not.
+- Keep demos to 2-5 beats. Two shorter videos beat one long one.

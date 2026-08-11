@@ -13,6 +13,8 @@ export { useAsanaConnection } from './useAsanaConnection';
 export { useSaveAsanaConnection } from './useSaveAsanaConnection';
 export { useGranolaConnection } from './useGranolaConnection';
 export { useSaveGranolaConnection } from './useSaveGranolaConnection';
+export { useElevenLabsConnection } from './useElevenLabsConnection';
+export { useSaveElevenLabsConnection } from './useSaveElevenLabsConnection';
 export { useSaveGrafanaConnection } from './useSaveGrafanaConnection';
 export { useSaveSnowflakeConnection } from './useSaveSnowflakeConnection';
 export { useSnowflakeConnection } from './useSnowflakeConnection';

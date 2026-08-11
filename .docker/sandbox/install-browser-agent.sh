@@ -9,7 +9,7 @@ set -euo pipefail
 #   1. Worker image builds (Dockerfiles) to prebake browser automation.
 #   2. Worker setup compatibility fallbacks on older Linux images.
 
-AGENT_BROWSER_VERSION="${AGENT_BROWSER_VERSION:-0.27.0}"
+AGENT_BROWSER_VERSION="${AGENT_BROWSER_VERSION:-0.33.2}"
 AGENT_BROWSER_INSTALL_ROOT="${AGENT_BROWSER_INSTALL_ROOT:-/opt/agent-browser}"
 AGENT_BROWSER_EXECUTABLE_PATH="${AGENT_BROWSER_EXECUTABLE_PATH:-${AGENT_BROWSER_INSTALL_ROOT}/chrome}"
 AGENT_BROWSER_SAVED_CLI_PATH="${AGENT_BROWSER_SAVED_CLI_PATH:-${AGENT_BROWSER_INSTALL_ROOT}/.cli-path}"

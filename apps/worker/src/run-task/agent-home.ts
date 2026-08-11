@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -1304,15 +1305,47 @@ function createArchitectAgentConfig(options: {
   };
 }
 
+/**
+ * Digest of the activated feature-demo capture runner, pinned into the
+ * proof-runner prompt so its sanctioned /tmp staging path (writable by any
+ * parent flow) cannot be used to smuggle a different script into the
+ * runner's browser sanction. Undefined (skill absent/unreadable) omits the
+ * sanction entirely.
+ */
+function resolveFeatureDemoCaptureRunnerDigest(
+  homeDir: string,
+): string | undefined {
+  const runnerPath = path.join(
+    homeDir,
+    '.agents',
+    'skills',
+    'feature-demo',
+    'capture',
+    'capture.mjs',
+  );
+
+  try {
+    return createHash('sha256')
+      .update(fs.readFileSync(runnerPath))
+      .digest('hex');
+  } catch {
+    return undefined;
+  }
+}
+
 function createProofRunnerAgentConfig(
   browserTarget: string,
+  featureDemoCaptureRunnerSha256: string | undefined,
 ): Record<string, unknown> {
   return {
     description:
       'Delegated browser proof runner that captures and uploads screenshot and screencast proof from the sandbox-local browser surface.',
     mode: 'subagent',
     hidden: true,
-    prompt: createProofRunnerAgentPrompt(browserTarget),
+    prompt: createProofRunnerAgentPrompt(
+      browserTarget,
+      featureDemoCaptureRunnerSha256,
+    ),
     permission: {
       read: 'allow',
       list: 'allow',
@@ -1960,7 +1993,10 @@ export function generateOpenCodeConfig({
 
   if (proofBrowserTarget) {
     operatorAgent[ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME] =
-      createProofRunnerAgentConfig(proofBrowserTarget);
+      createProofRunnerAgentConfig(
+        proofBrowserTarget,
+        resolveFeatureDemoCaptureRunnerDigest(homeDir),
+      );
 
     const proofRunnerInstructionsPath = path.join(
       openCodeConfigDir,

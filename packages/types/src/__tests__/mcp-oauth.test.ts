@@ -5,6 +5,7 @@ import {
   getMcpIntegrationDefaultDisabledTools,
   getMcpIntegrationOauthScopeMode,
   getMcpIntegrationOauthScopes,
+  isMcpConnectionElevenLabsConfig,
   LINEAR_APP_OAUTH_SCOPES,
   MONDAY_MCP_READ_ONLY_OAUTH_SCOPES,
   RESEND_DEFAULT_DISABLED_TOOL_NAMES,
@@ -74,6 +75,43 @@ describe('Granola API key connection', () => {
     expect(getMcpIntegrationConnectionScope('granola')).toBe('deployment');
     expect(getMcpIntegrationOauthScopeMode('granola')).toBeUndefined();
     expect(getMcpIntegrationDefaultDisabledTools('granola')).toEqual([]);
+  });
+});
+
+describe('ElevenLabs credential-only integration', () => {
+  it('is a deployment-scoped credential_only entry with no MCP url', () => {
+    expect(getMcpIntegration('elevenlabs')).toMatchObject({
+      name: 'ElevenLabs',
+      connectionScope: 'deployment',
+      connectionMode: 'admin_configured',
+      serverMode: 'credential_only',
+    });
+    expect(getMcpIntegration('elevenlabs')?.url).toBeUndefined();
+    expect(getMcpIntegrationDefaultDisabledTools('elevenlabs')).toEqual([]);
+  });
+
+  it('recognizes a valid stored ElevenLabs config and rejects others', () => {
+    expect(
+      isMcpConnectionElevenLabsConfig({
+        type: 'elevenlabs',
+        encryptedApiKey: 'enc',
+        voiceId: 'v1',
+      }),
+    ).toBe(true);
+    // Missing voiceId, wrong type, and empty configs must not pass.
+    expect(
+      isMcpConnectionElevenLabsConfig({
+        type: 'elevenlabs',
+        encryptedApiKey: 'enc',
+      } as never),
+    ).toBe(false);
+    expect(
+      isMcpConnectionElevenLabsConfig({
+        type: 'granola',
+        encryptedApiKey: 'x',
+      }),
+    ).toBe(false);
+    expect(isMcpConnectionElevenLabsConfig({})).toBe(false);
   });
 });
 

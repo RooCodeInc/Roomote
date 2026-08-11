@@ -85,7 +85,11 @@ const serverSchema = {
   DOCKER_WORKER_CPU_LIMIT: z.coerce.number().positive().default(2),
   DOCKER_WORKER_MEMORY_LIMIT: dockerSize().default('4g'),
   DOCKER_TASK_DAEMON_MEMORY_LIMIT: dockerSize().default('8g'),
-  DOCKER_WORKER_PIDS_LIMIT: z.coerce.number().int().positive().default(512),
+  // Headroom for browser-driving tasks: a Chrome process tree plus the
+  // agent-browser daemon and worker toolchain runs well over the old 512 cap
+  // under load. `--init` reaps zombies (see docker-sandbox-security), but the
+  // live process count still needs room. Env-overridable.
+  DOCKER_WORKER_PIDS_LIMIT: z.coerce.number().int().positive().default(2048),
   DOCKER_WORKER_DISK_LIMIT: dockerSize().default('20g'),
   DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: optInBoolean(),
   DOCKER_WORKER_LOG_MAX_SIZE: dockerSize().default('10m'),
@@ -131,6 +135,12 @@ const serverSchema = {
   // private networks; a CIDR list rather than a boolean so opening one
   // internal host does not re-expose every adjacent service.
   R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS: z.string().min(1).optional(),
+  // ElevenLabs credentials for the narration TTS endpoint. The key stays on
+  // the control plane; task sandboxes reach TTS only through /api/tts with
+  // their run-scoped token (see apps/api/src/handlers/tts). Unset means the
+  // feature is off and the endpoint 404s.
+  R_ELEVENLABS_API_KEY: z.string().min(1).optional(),
+  R_ELEVENLABS_VOICE_ID: z.string().min(1).optional(),
   R_INTERCOM_APP_ID: z.string().min(1).optional(),
   R_POSTHOG_PROJECT_KEY: z.string().min(1).optional(),
   R_POSTHOG_HOST: z.string().url().optional(),
@@ -449,6 +459,8 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_INSTANCE_ID',
   'R_STATUSPAGE_INCIDENTS_URL',
   'R_CUSTOM_MCP_ALLOWED_PRIVATE_CIDRS',
+  'R_ELEVENLABS_API_KEY',
+  'R_ELEVENLABS_VOICE_ID',
   'R_INTERCOM_APP_ID',
   'R_POSTHOG_PROJECT_KEY',
   'R_POSTHOG_HOST',

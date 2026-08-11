@@ -25,6 +25,7 @@
     ".env.*",
     ".qdrant",
     "packages/cloud-agents/src/server/workflows/skills/standard/agent-browser",
+    "packages/cloud-agents/src/server/workflows/skills/standard/feature-demo",
     ".vscode",
     ".git",
     "**/*.{md,mdx,yml,yaml,html,htm,toml,svg,graphql,gql}"

@@ -367,6 +367,12 @@ export function buildDockerWorkerResourceArgs(
   limits: DockerWorkerResourceLimits,
 ): string[] {
   return [
+    // Run an init process (tini) as PID 1 so orphaned child processes are
+    // reaped. Browser-driving tasks (agent-browser daemon restarts) leak
+    // Chrome process trees whose defunct children otherwise accumulate until
+    // they exhaust --pids-limit, after which fresh Chrome launches fail with
+    // `pthread_create: Resource temporarily unavailable`.
+    '--init',
     '--cpus',
     String(limits.cpuLimit),
     '--memory',
@@ -393,6 +399,8 @@ export function buildDockerTaskDaemonResourceArgs(
   limits: DockerWorkerResourceLimits,
 ): string[] {
   return [
+    // Reap orphaned children (see buildDockerWorkerResourceArgs).
+    '--init',
     '--cpus',
     String(limits.cpuLimit),
     '--memory',

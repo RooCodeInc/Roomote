@@ -25,11 +25,13 @@ import {
   useDisconnectMcp,
   useGrafanaConnection,
   useGranolaConnection,
+  useElevenLabsConnection,
   useDeploymentMcpEnablements,
   useMcpOauthReadiness,
   useSaveAsanaConnection,
   useSaveGrafanaConnection,
   useSaveGranolaConnection,
+  useSaveElevenLabsConnection,
   useSaveSnowflakeConnection,
   useSaveVercelConnection,
   useSetDeploymentMcpEnabled,
@@ -48,6 +50,7 @@ import {
   saveAsanaConnectionSchema,
   saveGrafanaConnectionSchema,
   saveGranolaConnectionSchema,
+  saveElevenLabsConnectionSchema,
   saveSnowflakeConnectionSchema,
   saveVercelConnectionSchema,
 } from '@/types';
@@ -89,6 +92,8 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to inspect dashboards, alert rules, live alert state, annotations, and data sources.',
   granola:
     'Roomote will use one deployment-wide Granola connection to browse meeting notes, transcripts, decisions, and action items.',
+  elevenlabs:
+    'Roomote will use one deployment-wide ElevenLabs connection to narrate feature-demo videos. The key stays on the control plane; agents get no ElevenLabs tools.',
   github:
     'Roomote will be able to inspect PRs, issues, and repository context.',
   jira: 'Roomote will be able to inspect Jira issues, workflows, and JQL search results.',
@@ -173,6 +178,16 @@ type GranolaFormState = {
   apiKey: string;
 };
 
+type ElevenLabsFormState = {
+  apiKey: string;
+  voiceId: string;
+};
+
+type ElevenLabsConnectionData = {
+  authStatus?: 'pending' | 'authenticated' | 'error' | null;
+  voiceId?: string;
+};
+
 type GrafanaFormState = {
   baseUrl: string;
   serviceAccountToken: string;
@@ -212,6 +227,26 @@ function buildEmptyAsanaForm(): AsanaFormState {
 function buildEmptyGranolaForm(): GranolaFormState {
   return {
     apiKey: '',
+  };
+}
+
+function buildEmptyElevenLabsForm(): ElevenLabsFormState {
+  return {
+    apiKey: '',
+    voiceId: '',
+  };
+}
+
+function buildElevenLabsForm(
+  connection: ElevenLabsConnectionData | null | undefined,
+): ElevenLabsFormState {
+  if (!connection) {
+    return buildEmptyElevenLabsForm();
+  }
+
+  return {
+    apiKey: '',
+    voiceId: connection.voiceId ?? '',
   };
 }
 
@@ -288,6 +323,21 @@ function getGranolaFieldErrors(
 
   return {
     apiKey: fieldErrors.apiKey,
+  };
+}
+
+function getElevenLabsFieldErrors(
+  result: ReturnType<typeof saveElevenLabsConnectionSchema.safeParse>,
+): Partial<Record<keyof ElevenLabsFormState, string[]>> {
+  if (result.success) {
+    return {};
+  }
+
+  const fieldErrors = result.error.flatten().fieldErrors;
+
+  return {
+    apiKey: fieldErrors.apiKey,
+    voiceId: fieldErrors.voiceId,
   };
 }
 
@@ -411,7 +461,10 @@ function buildAdminConfiguredIntegrationItem({
           }
         : undefined,
     secondaryAction:
-      canManageTools && enabled && integration.serverMode !== 'native'
+      canManageTools &&
+      enabled &&
+      integration.serverMode !== 'native' &&
+      integration.serverMode !== 'credential_only'
         ? {
             label: 'Manage tools',
             ariaLabel: `Manage ${integration.name} tools`,
@@ -808,6 +861,82 @@ function GranolaConnectionFields({
   );
 }
 
+function ElevenLabsConnectionFields({
+  form,
+  fieldErrors,
+  formError,
+  allowBlankApiKey,
+  onFieldChange,
+}: {
+  form: ElevenLabsFormState;
+  fieldErrors: Partial<Record<keyof ElevenLabsFormState, string[]>>;
+  formError: string | null;
+  allowBlankApiKey: boolean;
+  onFieldChange: (field: keyof ElevenLabsFormState, value: string) => void;
+}) {
+  const fieldClassName =
+    'mt-2 w-full border-border/70 bg-background data-[invalid=true]:border-destructive';
+
+  return (
+    <>
+      <div className="space-y-2">
+        <Label htmlFor="elevenlabs-api-key">ElevenLabs API Key</Label>
+        <Input
+          id="elevenlabs-api-key"
+          type="password"
+          placeholder="Enter your ElevenLabs API key"
+          value={form.apiKey}
+          onChange={(event) => onFieldChange('apiKey', event.target.value)}
+          data-invalid={fieldErrors.apiKey ? 'true' : undefined}
+          className={fieldClassName}
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          data-1p-ignore
+        />
+        <p className="text-sm text-muted-foreground">
+          We recommend a key scoped to text-to-speech only, with a credit limit.
+          The key is used exclusively by this deployment&apos;s control plane to
+          narrate feature-demo videos; it is never sent to agents or task
+          sandboxes.
+        </p>
+        {allowBlankApiKey ? (
+          <p className="text-sm text-muted-foreground">
+            Leave blank to keep the existing API key.
+          </p>
+        ) : null}
+        {fieldErrors.apiKey ? (
+          <p className="text-sm text-destructive">{fieldErrors.apiKey[0]}</p>
+        ) : null}
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="elevenlabs-voice-id">Voice ID</Label>
+        <Input
+          id="elevenlabs-voice-id"
+          placeholder="e.g. 21m00Tcm4TlvDq8ikWAM"
+          value={form.voiceId}
+          onChange={(event) => onFieldChange('voiceId', event.target.value)}
+          data-invalid={fieldErrors.voiceId ? 'true' : undefined}
+          className={fieldClassName}
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+        />
+        <p className="text-sm text-muted-foreground">
+          The ElevenLabs voice used for narration. Find voice IDs in the
+          ElevenLabs voice library.
+        </p>
+        {fieldErrors.voiceId ? (
+          <p className="text-sm text-destructive">{fieldErrors.voiceId[0]}</p>
+        ) : null}
+      </div>
+      {formError ? (
+        <p className="text-sm text-destructive">{formError}</p>
+      ) : null}
+    </>
+  );
+}
+
 function GrafanaConnectionFields({
   form,
   fieldErrors,
@@ -1007,6 +1136,16 @@ export function Integrations() {
   const [granolaForm, setGranolaForm] = useState<GranolaFormState>(
     buildEmptyGranolaForm(),
   );
+  const [isElevenLabsDialogOpen, setIsElevenLabsDialogOpen] = useState(false);
+  const [elevenLabsForm, setElevenLabsForm] = useState<ElevenLabsFormState>(
+    buildEmptyElevenLabsForm(),
+  );
+  const [elevenLabsFieldErrors, setElevenLabsFieldErrors] = useState<
+    Partial<Record<keyof ElevenLabsFormState, string[]>>
+  >({});
+  const [elevenLabsFormError, setElevenLabsFormError] = useState<string | null>(
+    null,
+  );
   const [granolaFieldErrors, setGranolaFieldErrors] = useState<
     Partial<Record<keyof GranolaFormState, string[]>>
   >({});
@@ -1065,6 +1204,7 @@ export function Integrations() {
   const saveAsanaConnection = useSaveAsanaConnection();
   const saveGrafanaConnection = useSaveGrafanaConnection();
   const saveGranolaConnection = useSaveGranolaConnection();
+  const saveElevenLabsConnection = useSaveElevenLabsConnection();
   const saveSnowflakeConnection = useSaveSnowflakeConnection();
   const saveVercelConnection = useSaveVercelConnection();
   const asanaConnectionSummary = useMemo(() => {
@@ -1090,6 +1230,18 @@ export function Integrations() {
     granolaConnectionSummary?.authStatus === 'authenticated';
   const granolaConnection = useGranolaConnection(
     isAdmin && (isGranolaConnected || isGranolaDialogOpen),
+  );
+  const elevenLabsConnectionSummary = useMemo(() => {
+    const connection = (userMcpConnections.data ?? []).find(
+      (entry) => entry.mcpId === 'elevenlabs',
+    );
+
+    return connection;
+  }, [userMcpConnections.data]);
+  const isElevenLabsConnected =
+    elevenLabsConnectionSummary?.authStatus === 'authenticated';
+  const elevenLabsConnection = useElevenLabsConnection(
+    isAdmin && (isElevenLabsConnected || isElevenLabsDialogOpen),
   );
   const grafanaConnectionSummary = useMemo(() => {
     const connection = (userMcpConnections.data ?? []).find(
@@ -1157,6 +1309,44 @@ export function Integrations() {
     setGranolaFormError(null);
     setGranolaForm(buildEmptyGranolaForm());
   }, [granolaConnection.isPending, isGranolaConnected, isGranolaDialogOpen]);
+
+  useEffect(() => {
+    if (!isElevenLabsDialogOpen) {
+      return;
+    }
+
+    if (elevenLabsConnection.isPending && isElevenLabsConnected) {
+      return;
+    }
+
+    setElevenLabsFieldErrors({});
+    setElevenLabsFormError(null);
+    setElevenLabsForm(buildElevenLabsForm(elevenLabsConnection.data));
+  }, [
+    elevenLabsConnection.data,
+    elevenLabsConnection.isPending,
+    isElevenLabsConnected,
+    isElevenLabsDialogOpen,
+  ]);
+
+  useEffect(() => {
+    if (!isElevenLabsDialogOpen) {
+      return;
+    }
+
+    if (elevenLabsConnection.isPending && isElevenLabsConnected) {
+      return;
+    }
+
+    setElevenLabsFieldErrors({});
+    setElevenLabsFormError(null);
+    setElevenLabsForm(buildElevenLabsForm(elevenLabsConnection.data));
+  }, [
+    elevenLabsConnection.data,
+    elevenLabsConnection.isPending,
+    isElevenLabsConnected,
+    isElevenLabsDialogOpen,
+  ]);
 
   useEffect(() => {
     if (!isSnowflakeDialogOpen) {
@@ -1392,6 +1582,27 @@ export function Integrations() {
             });
           }
 
+          if (integration.id === 'elevenlabs') {
+            return buildAdminConfiguredIntegrationItem({
+              integration,
+              connection: userConnectionMap.get(integration.id),
+              orgEnabled: orgEnablementMap.get(integration.id) ?? false,
+              highlightedIntegrationId,
+              savePending: saveElevenLabsConnection.isPending,
+              disconnectPending: disconnectMcp.isPending,
+              disconnectingMcpId: disconnectMcp.variables?.mcpId,
+              dialogOpen: isElevenLabsDialogOpen,
+              connectionPending: elevenLabsConnection.isPending,
+              canConfigure: isAdmin,
+              // Credential-only: no agent tools to manage.
+              canManageTools: false,
+              openDialog: () => setIsElevenLabsDialogOpen(true),
+              openToolDialog: () => openMcpToolDialog(integration),
+              disconnectIntegration: () =>
+                disconnectAdminConfiguredIntegration(integration),
+            });
+          }
+
           if (integration.id === 'snowflake') {
             return buildAdminConfiguredIntegrationItem({
               integration,
@@ -1497,6 +1708,7 @@ export function Integrations() {
               isAdmin &&
               enabled &&
               integration.serverMode !== 'native' &&
+              integration.serverMode !== 'credential_only' &&
               (!isDeploymentScoped || isConnected)
                 ? {
                     label: 'Manage tools',
@@ -1592,6 +1804,7 @@ export function Integrations() {
     disconnectMcp,
     grafanaConnection.isPending,
     granolaConnection.isPending,
+    elevenLabsConnection.isPending,
     linearInstallation.data,
     linearInstallation.isPending,
     linearOauthSetup.isPending,
@@ -1601,10 +1814,12 @@ export function Integrations() {
     isAdmin,
     isGrafanaDialogOpen,
     isGranolaDialogOpen,
+    isElevenLabsDialogOpen,
     isLinearOauthSetupOpen,
     saveAsanaConnection.isPending,
     saveGrafanaConnection.isPending,
     saveGranolaConnection.isPending,
+    saveElevenLabsConnection.isPending,
     saveVercelConnection.isPending,
     deploymentEnablements.data,
     pathname,
@@ -1721,6 +1936,21 @@ export function Integrations() {
     setGranolaFormError(null);
   };
 
+  const handleElevenLabsFieldChange = (
+    field: keyof ElevenLabsFormState,
+    value: string,
+  ) => {
+    setElevenLabsForm((current) => ({ ...current, [field]: value }));
+    setElevenLabsFieldErrors((current) => {
+      if (!current[field]) {
+        return current;
+      }
+
+      return { ...current, [field]: undefined };
+    });
+    setElevenLabsFormError(null);
+  };
+
   const handleGrafanaFieldChange = (
     field: keyof GrafanaFormState,
     value: string,
@@ -1775,6 +2005,19 @@ export function Integrations() {
     }
 
     setGranolaForm(buildEmptyGranolaForm());
+  };
+
+  const handleElevenLabsDialogOpenChange = (open: boolean) => {
+    setIsElevenLabsDialogOpen(open);
+
+    setElevenLabsFieldErrors({});
+    setElevenLabsFormError(null);
+
+    if (!open) {
+      return;
+    }
+
+    setElevenLabsForm(buildElevenLabsForm(elevenLabsConnection.data));
   };
 
   const handleSnowflakeDialogOpenChange = (open: boolean) => {
@@ -1890,6 +2133,43 @@ export function Integrations() {
       },
       onError: (error) => {
         setGranolaFormError(error.message);
+      },
+    });
+  };
+
+  const handleElevenLabsSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const parsed = saveElevenLabsConnectionSchema.safeParse({
+      apiKey: elevenLabsForm.apiKey,
+      voiceId: elevenLabsForm.voiceId,
+    });
+    if (!parsed.success) {
+      setElevenLabsFieldErrors(getElevenLabsFieldErrors(parsed));
+      return;
+    }
+
+    if (!isElevenLabsConnected && parsed.data.apiKey.length === 0) {
+      setElevenLabsFieldErrors({
+        apiKey: ['API key is required'],
+      });
+      return;
+    }
+
+    setElevenLabsFieldErrors({});
+    setElevenLabsFormError(null);
+
+    saveElevenLabsConnection.mutate(parsed.data, {
+      onSuccess: () => {
+        toast.success(
+          isElevenLabsConnected
+            ? 'ElevenLabs connection updated for this deployment.'
+            : 'ElevenLabs connected for this deployment.',
+        );
+        handleElevenLabsDialogOpenChange(false);
+      },
+      onError: (error) => {
+        setElevenLabsFormError(error.message);
       },
     });
   };
@@ -2104,6 +2384,30 @@ export function Integrations() {
           formError={granolaFormError}
           allowBlankApiKey={isGranolaConnected}
           onFieldChange={handleGranolaFieldChange}
+        />
+      </AdminConfiguredIntegrationDialog>
+      <AdminConfiguredIntegrationDialog
+        integrationName="ElevenLabs"
+        open={isElevenLabsDialogOpen}
+        onOpenChange={handleElevenLabsDialogOpenChange}
+        isEditing={isElevenLabsConnected}
+        isPending={saveElevenLabsConnection.isPending}
+        isLoading={isElevenLabsConnected && elevenLabsConnection.isPending}
+        description={
+          <>
+            Store an ElevenLabs API key and voice ID for this deployment. The
+            key stays encrypted server-side and is used only by the control
+            plane to narrate feature-demo videos.
+          </>
+        }
+        onSubmit={handleElevenLabsSubmit}
+      >
+        <ElevenLabsConnectionFields
+          form={elevenLabsForm}
+          fieldErrors={elevenLabsFieldErrors}
+          formError={elevenLabsFormError}
+          allowBlankApiKey={isElevenLabsConnected}
+          onFieldChange={handleElevenLabsFieldChange}
         />
       </AdminConfiguredIntegrationDialog>
       <AdminConfiguredIntegrationDialog
