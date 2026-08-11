@@ -52,11 +52,19 @@ function buildModelBackedOpenCodeConfigContent(
     rawSmallModel && !isTaskModelIdDisabled(rawSmallModel)
       ? collectOpenRouterVariantModelAlias(variantAliases, rawSmallModel)
       : undefined;
+  const rawVisionModel = env.R_VISION_MODEL?.trim();
+  const visionModel =
+    rawVisionModel && !isTaskModelIdDisabled(rawVisionModel)
+      ? collectOpenRouterVariantModelAlias(variantAliases, rawVisionModel)
+      : undefined;
   const modelReasoningEffort = normalizeOptionalReasoningEffort(
     env.R_MODEL_REASONING_EFFORT?.trim(),
   );
   const smallModelReasoningEffort = normalizeOptionalReasoningEffort(
     env.R_SMALL_MODEL_REASONING_EFFORT?.trim(),
+  );
+  const visionModelReasoningEffort = normalizeOptionalReasoningEffort(
+    env.R_VISION_MODEL_REASONING_EFFORT?.trim(),
   );
 
   // Reasoning levels are configured per default-model role, so they are only
@@ -80,17 +88,31 @@ function buildModelBackedOpenCodeConfigContent(
     );
   }
 
+  if (
+    visionModel &&
+    visionModelReasoningEffort &&
+    visionModel !== model &&
+    visionModel !== smallModel
+  ) {
+    providerReasoningConfig = mergeOpenCodeModelReasoningOptions(
+      providerReasoningConfig,
+      visionModel,
+      visionModelReasoningEffort,
+    );
+  }
+
   const providerModelConfig =
     env[CHATGPT_FAST_MODE_ENV_VAR_NAME]?.trim() === '1'
       ? mergeOpenCodeChatGptFastModeOptions(providerReasoningConfig, [
           model,
           smallModel,
+          visionModel,
         ])
       : providerReasoningConfig;
   const providerConfig = mergeOpenAiCompatibleProviderConfig(
     mergeOpenRouterVariantAliasModels(providerModelConfig, variantAliases),
     env,
-    [model, smallModel],
+    [model, smallModel, visionModel],
   );
 
   return JSON.stringify({
@@ -213,7 +235,11 @@ export function buildOpenCodeCliEnv(
     NO_COLOR: process.env.NO_COLOR ?? '1',
   };
 
-  for (const modelEnvVarName of ['R_MODEL', 'R_SMALL_MODEL'] as const) {
+  for (const modelEnvVarName of [
+    'R_MODEL',
+    'R_SMALL_MODEL',
+    'R_VISION_MODEL',
+  ] as const) {
     const modelId = env[modelEnvVarName]?.trim();
 
     if (modelId && isTaskModelIdDisabled(modelId)) {

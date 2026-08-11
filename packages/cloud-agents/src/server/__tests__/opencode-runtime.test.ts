@@ -17,8 +17,10 @@ describe('buildOpenCodeCliEnv', () => {
     'OPENCODE_CONFIG_CONTENT',
     'R_MODEL',
     'R_SMALL_MODEL',
+    'R_VISION_MODEL',
     'R_MODEL_REASONING_EFFORT',
     'R_SMALL_MODEL_REASONING_EFFORT',
+    'R_VISION_MODEL_REASONING_EFFORT',
     'R_CHATGPT_FAST_MODE',
     'LITELLM_BASE_URL',
     'LITELLM_API_KEY',
@@ -82,6 +84,35 @@ describe('buildOpenCodeCliEnv', () => {
           models: {
             'qwen3.6:35b-unsloth': { name: 'qwen3.6:35b-unsloth' },
             coding: { name: 'coding' },
+          },
+        },
+      },
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+    });
+  });
+
+  it('registers a distinct vision model with its configured provider', () => {
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+      R_SMALL_MODEL: 'openrouter/google/gemini-3.6-flash',
+      R_VISION_MODEL: 'litellm/gemini-3.6-pro',
+      LITELLM_BASE_URL: 'https://litellm.example.com/v1',
+      LITELLM_API_KEY: 'secret',
+    });
+
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
+      model: 'openrouter/openai/gpt-5.6-terra',
+      small_model: 'openrouter/google/gemini-3.6-flash',
+      provider: {
+        litellm: {
+          npm: '@ai-sdk/openai-compatible',
+          name: 'LiteLLM',
+          options: {
+            baseURL: 'https://litellm.example.com/v1',
+            apiKey: '{env:LITELLM_API_KEY}',
+          },
+          models: {
+            'gemini-3.6-pro': { name: 'gemini-3.6-pro' },
           },
         },
       },
