@@ -83,6 +83,29 @@ end
 return 1
 `;
 
+const CLEAR_PENDING_REQUEST_USER_INPUT_SCRIPT = `
+local rawRequest = redis.call('GET', KEYS[1])
+if not rawRequest then
+  return nil
+end
+
+local ok, pendingRequest = pcall(cjson.decode, rawRequest)
+if not ok then
+  return nil
+end
+
+if ARGV[1] ~= '' and pendingRequest['requestId'] ~= ARGV[1] then
+  return nil
+end
+
+if ARGV[2] ~= '' and tostring(pendingRequest['runId']) ~= ARGV[2] then
+  return nil
+end
+
+redis.call('DEL', KEYS[1])
+return rawRequest
+`;
+
 const SET_PENDING_REQUEST_USER_INPUT_PROMPT_TS_SCRIPT = `
 local rawRequest = redis.call('GET', KEYS[1])
 if not rawRequest then
@@ -176,16 +199,10 @@ export async function setPendingSlackRequestUserInput(
   );
 }
 
-export async function getPendingSlackRequestUserInput(
+function parsePendingSlackRequestUserInput(
+  rawValue: string,
   threadId: string,
-): Promise<PendingSlackRequestUserInput | null> {
-  const redis = getRedis();
-  const rawValue = await redis.get(getPendingRequestKey(threadId));
-
-  if (!rawValue) {
-    return null;
-  }
-
+): PendingSlackRequestUserInput | null {
   try {
     const parsed = JSON.parse(rawValue) as Record<string, unknown>;
     const requestId =
@@ -237,21 +254,33 @@ export async function getPendingSlackRequestUserInput(
   }
 }
 
+export async function getPendingSlackRequestUserInput(
+  threadId: string,
+): Promise<PendingSlackRequestUserInput | null> {
+  const redis = getRedis();
+  const rawValue = await redis.get(getPendingRequestKey(threadId));
+
+  return rawValue
+    ? parsePendingSlackRequestUserInput(rawValue, threadId)
+    : null;
+}
+
 export async function clearPendingSlackRequestUserInput(
   threadId: string,
-  options?: { requestId?: string },
-): Promise<boolean> {
-  if (options?.requestId) {
-    const existing = await getPendingSlackRequestUserInput(threadId);
-
-    if (!existing || existing.requestId !== options.requestId) {
-      return false;
-    }
-  }
-
+  options?: { requestId?: string; runId?: number },
+): Promise<PendingSlackRequestUserInput | null> {
   const redis = getRedis();
-  const deleted = await redis.del(getPendingRequestKey(threadId));
-  return deleted > 0;
+  const rawValue = await redis.eval(
+    CLEAR_PENDING_REQUEST_USER_INPUT_SCRIPT,
+    1,
+    getPendingRequestKey(threadId),
+    options?.requestId ?? '',
+    options?.runId === undefined ? '' : String(options.runId),
+  );
+
+  return typeof rawValue === 'string'
+    ? parsePendingSlackRequestUserInput(rawValue, threadId)
+    : null;
 }
 
 export async function markPendingSlackRequestUserInputSubmitted(

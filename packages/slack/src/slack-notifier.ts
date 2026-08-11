@@ -819,6 +819,37 @@ export class SlackNotifier {
     }
   }
 
+  /** Returns the Slack user in a one-to-one DM, or null for other channels. */
+  public async getDirectMessageUserId(
+    channelId: string,
+  ): Promise<string | null> {
+    try {
+      const params = new URLSearchParams({ channel: channelId });
+      const response = await slackFetch(
+        `${buildSlackApiUrl('conversations.info')}?${params.toString()}`,
+        {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+        },
+      );
+
+      if (!response.ok) return null;
+
+      const result = (await response.json()) as {
+        ok: boolean;
+        channel?: { is_im?: boolean; user?: string };
+      };
+      return result.ok && result.channel?.is_im === true
+        ? (result.channel.user ?? null)
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
   private async sendMessage(
     endpoint: 'chat.postMessage' | 'chat.postEphemeral',
     message: SlackMessage & { user?: string },

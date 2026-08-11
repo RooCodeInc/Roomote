@@ -21,8 +21,35 @@ const { redisLists, redisMock, redisStrings } = vi.hoisted(() => {
     del: vi.fn(async (key: string) => deleteKey(key)),
     eval: vi.fn(
       async (_script: string, keyCount: number, ...args: unknown[]) => {
+        if (keyCount === 1) {
+          const [pendingKey, requestId, runId] = args as [
+            string,
+            string,
+            string,
+          ];
+          const rawRequest = strings.get(pendingKey);
+
+          if (!rawRequest) {
+            return null;
+          }
+
+          const pendingRequest = JSON.parse(rawRequest) as Record<
+            string,
+            unknown
+          >;
+          if (
+            (requestId !== '' && pendingRequest.requestId !== requestId) ||
+            (runId !== '' && String(pendingRequest.runId) !== runId)
+          ) {
+            return null;
+          }
+
+          strings.delete(pendingKey);
+          return rawRequest;
+        }
+
         if (keyCount !== 2) {
-          return 0;
+          return null;
         }
 
         const [
@@ -124,6 +151,41 @@ describe('request_user_input Redis helpers', () => {
     await clearPendingSlackRequestUserInput('thread-1', {
       requestId: 'rui:session:turn:call',
     });
+  });
+
+  it('returns the cleared prompt only for the matching run', async () => {
+    await setPendingSlackRequestUserInput('thread-1', {
+      requestId: 'rui:session:turn:call',
+      runId: 42,
+      taskId: 'task-1',
+      questions: [],
+      promptMessageTs: 'prompt-ts',
+    });
+
+    await expect(
+      clearPendingSlackRequestUserInput('thread-1', {
+        requestId: 'rui:session:turn:call',
+        runId: 99,
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      getPendingSlackRequestUserInput('thread-1'),
+    ).resolves.not.toBeNull();
+
+    await expect(
+      clearPendingSlackRequestUserInput('thread-1', {
+        requestId: 'rui:session:turn:call',
+        runId: 42,
+      }),
+    ).resolves.toMatchObject({
+      requestId: 'rui:session:turn:call',
+      runId: 42,
+      promptMessageTs: 'prompt-ts',
+    });
+    await expect(
+      getPendingSlackRequestUserInput('thread-1'),
+    ).resolves.toBeNull();
+    expect(redisMock.del).not.toHaveBeenCalled();
   });
 
   it('atomically claims a final Slack prompt answer so concurrent structured replies enqueue once', async () => {

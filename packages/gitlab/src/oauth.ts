@@ -2,6 +2,12 @@ import { randomBytes } from 'node:crypto';
 
 import { db, deploymentSecrets, eq, sql } from '@roomote/db/server';
 import { decryptSecrets, encryptJSON } from '@roomote/db/encryption';
+import {
+  OAuthRefreshError,
+  createOAuthRefreshCoordinator,
+  isDefinitiveOAuthErrorCode,
+  readOAuthErrorCode,
+} from '@roomote/source-control-oauth';
 
 const SECRET_NAME = 'gitlab_deployment_oauth_connection';
 // GitLab OAuth applications use `api` for repository read/write access.
@@ -50,16 +56,6 @@ const OAUTH_ACCESS_TOKEN_REFRESH_SKEW_MS = 10 * 60 * 1000;
 const DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS = 7200;
 const GITLAB_OAUTH_REQUEST_TIMEOUT_MS = 15_000;
 
-type GitLabOAuthErrorResponse = {
-  error?: string;
-};
-
-function isDefinitiveOAuthError(error: string | undefined): boolean {
-  return ['invalid_grant', 'invalid_client', 'unauthorized_client'].includes(
-    error ?? '',
-  );
-}
-
 /** Expiry fields for a freshly issued access token, in the instance's own terms. */
 function accessTokenLifetime(token: GitLabOAuthTokenResponse): {
   expiresAt: string;
@@ -87,26 +83,6 @@ function refreshSkewMsFor(connection: GitLabOAuthConnection): number {
     : OAUTH_ACCESS_TOKEN_REFRESH_SKEW_MS;
 }
 
-let refreshPromise: Promise<GitLabOAuthAccessToken | null> | null = null;
-let deletionPromise: Promise<void> | null = null;
-let connectionGeneration = 0;
-let cachedAccessToken: string | null = null;
-// A rotate leaves in-flight callers holding the token they resolved a moment
-// ago. Keep it so those calls still pick the Bearer header.
-let previousAccessToken: string | null = null;
-
-function rememberAccessToken(accessToken: string): void {
-  if (cachedAccessToken && cachedAccessToken !== accessToken) {
-    previousAccessToken = cachedAccessToken;
-  }
-  cachedAccessToken = accessToken;
-}
-
-function clearCachedAccessToken(): void {
-  cachedAccessToken = null;
-  previousAccessToken = null;
-}
-
 function parseConnectionExpiresAt(expiresAt: string): Date | null {
   const parsed = Date.parse(expiresAt);
   return Number.isNaN(parsed) ? null : new Date(parsed);
@@ -116,7 +92,6 @@ function toAccessTokenResult(
   accessToken: string,
   expiresAt: string,
 ): GitLabOAuthAccessToken {
-  rememberAccessToken(accessToken);
   return { accessToken, expiresAt: parseConnectionExpiresAt(expiresAt) };
 }
 
@@ -185,29 +160,39 @@ async function writeConnection(
     });
 }
 
+type GitLabOAuthRefreshOptions = {
+  fetchImpl?: typeof fetch;
+  forceRefresh?: boolean;
+  requestTimeoutMs?: number;
+};
+
+const refreshCoordinator = createOAuthRefreshCoordinator<
+  GitLabOAuthConnection,
+  GitLabOAuthAccessToken,
+  GitLabOAuthRefreshOptions
+>({
+  readConnection,
+  writeConnection,
+  deleteConnection: async () => {
+    await db
+      .delete(deploymentSecrets)
+      .where(eq(deploymentSecrets.name, SECRET_NAME));
+  },
+  isFresh: (connection) =>
+    Date.parse(connection.expiresAt) >
+    Date.now() + refreshSkewMsFor(connection),
+  refresh: refreshGitLabOAuthConnection,
+  toResult: (connection) =>
+    toAccessTokenResult(connection.accessToken, connection.expiresAt),
+  retainPreviousAccessToken: true,
+});
+
 export async function getGitLabOAuthConnection(): Promise<GitLabOAuthConnection | null> {
   return readConnection();
 }
 
 export async function deleteGitLabOAuthConnection(): Promise<void> {
-  if (!deletionPromise) {
-    connectionGeneration += 1;
-    const inFlightRefresh = refreshPromise;
-    deletionPromise = (async () => {
-      await inFlightRefresh?.catch(() => undefined);
-      await db
-        .delete(deploymentSecrets)
-        .where(eq(deploymentSecrets.name, SECRET_NAME));
-      refreshPromise = null;
-      clearCachedAccessToken();
-    })();
-  }
-
-  try {
-    await deletionPromise;
-  } finally {
-    deletionPromise = null;
-  }
+  await refreshCoordinator.delete();
 }
 
 export async function exchangeGitLabOAuthCode(input: {
@@ -276,104 +261,59 @@ export async function exchangeGitLabOAuthCode(input: {
     // Token exchange is still valid when the identity lookup is temporarily unavailable.
   }
   await writeConnection(connection);
-  rememberAccessToken(connection.accessToken);
+  refreshCoordinator.remember(connection);
   return connection;
 }
 
-/** Resolve OAuth access token + expiry, refreshing inside the skew window. */
-export async function resolveGitLabOAuthAccessTokenWithMetadata(options?: {
-  fetchImpl?: typeof fetch;
-  forceRefresh?: boolean;
-  requestTimeoutMs?: number;
-}): Promise<GitLabOAuthAccessToken | null> {
-  if (deletionPromise) {
-    await deletionPromise;
-    return null;
-  }
-  const generation = connectionGeneration;
-  const connection = await readConnection();
-  if (generation !== connectionGeneration || deletionPromise) {
-    await deletionPromise;
-    return null;
-  }
-  if (!connection || connection.status !== 'active') return null;
-  if (
-    !options?.forceRefresh &&
-    Date.parse(connection.expiresAt) > Date.now() + refreshSkewMsFor(connection)
-  ) {
-    return toAccessTokenResult(connection.accessToken, connection.expiresAt);
-  }
-  if (refreshPromise) return refreshPromise;
-
-  refreshPromise = (async () => {
-    const response = await (options?.fetchImpl ?? fetch)(
-      tokenEndpoint(connection.baseUrl),
-      {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          client_id: connection.clientId,
-          client_secret: connection.clientSecret,
-          refresh_token: connection.refreshToken,
-          grant_type: 'refresh_token',
-        }),
-        signal: AbortSignal.timeout(
-          options?.requestTimeoutMs ?? GITLAB_OAUTH_REQUEST_TIMEOUT_MS,
-        ),
+async function refreshGitLabOAuthConnection(
+  connection: GitLabOAuthConnection,
+  options: GitLabOAuthRefreshOptions | undefined,
+): Promise<GitLabOAuthConnection> {
+  const response = await (options?.fetchImpl ?? fetch)(
+    tokenEndpoint(connection.baseUrl),
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
+      body: new URLSearchParams({
+        client_id: connection.clientId,
+        client_secret: connection.clientSecret,
+        refresh_token: connection.refreshToken,
+        grant_type: 'refresh_token',
+      }),
+      signal: AbortSignal.timeout(
+        options?.requestTimeoutMs ?? GITLAB_OAUTH_REQUEST_TIMEOUT_MS,
+      ),
+    },
+  );
+  if (!response.ok) {
+    const oauthError = await readOAuthErrorCode(response);
+    const definitive = isDefinitiveOAuthErrorCode(oauthError);
+    throw new OAuthRefreshError(
+      definitive
+        ? 'GitLab OAuth authorization has expired and must be renewed.'
+        : `GitLab OAuth refresh failed: ${response.status} ${response.statusText}`,
+      definitive,
     );
-    if (!response.ok) {
-      if (generation !== connectionGeneration) return null;
-
-      const oauthError = await response
-        .clone()
-        .json()
-        .then((body) => (body as GitLabOAuthErrorResponse).error)
-        .catch(() => undefined);
-
-      if (isDefinitiveOAuthError(oauthError)) {
-        const latest = await readConnection();
-        if (
-          latest?.status === 'active' &&
-          latest.accessToken !== connection.accessToken &&
-          Date.parse(latest.expiresAt) > Date.now() + refreshSkewMsFor(latest)
-        ) {
-          return toAccessTokenResult(latest.accessToken, latest.expiresAt);
-        }
-        await writeConnection({
-          ...(latest ?? connection),
-          status: 'reauthorization_required',
-        });
-        throw new Error(
-          'GitLab OAuth authorization has expired and must be renewed.',
-        );
-      }
-
-      throw new Error(
-        `GitLab OAuth refresh failed: ${response.status} ${response.statusText}`,
-      );
-    }
-    const token = (await response.json()) as GitLabOAuthTokenResponse;
-    const next = {
-      ...connection,
-      accessToken: token.access_token,
-      refreshToken: token.refresh_token ?? connection.refreshToken,
-      ...accessTokenLifetime(token),
-      scopes: token.scope?.split(/\s+/).filter(Boolean) ?? connection.scopes,
-      status: 'active' as const,
-    };
-    if (generation !== connectionGeneration) return null;
-    await writeConnection(next);
-    return toAccessTokenResult(next.accessToken, next.expiresAt);
-  })();
-  try {
-    return await refreshPromise;
-  } finally {
-    refreshPromise = null;
   }
+  const token = (await response.json()) as GitLabOAuthTokenResponse;
+  return {
+    ...connection,
+    accessToken: token.access_token,
+    refreshToken: token.refresh_token ?? connection.refreshToken,
+    ...accessTokenLifetime(token),
+    scopes: token.scope?.split(/\s+/).filter(Boolean) ?? connection.scopes,
+    status: 'active',
+  };
+}
+
+/** Resolve OAuth access token + expiry, refreshing inside the skew window. */
+export async function resolveGitLabOAuthAccessTokenWithMetadata(
+  options?: GitLabOAuthRefreshOptions,
+): Promise<GitLabOAuthAccessToken | null> {
+  return refreshCoordinator.resolve(options);
 }
 
 export async function resolveGitLabOAuthAccessToken(options?: {
@@ -391,10 +331,7 @@ export async function resolveGitLabOAuthAccessToken(options?: {
  * and self-managed instances with a customised PAT prefix.
  */
 export function isGitLabOAuthAccessToken(token: string): boolean {
-  if (!token) {
-    return false;
-  }
-  return token === cachedAccessToken || token === previousAccessToken;
+  return refreshCoordinator.isAccessToken(token);
 }
 
 export async function markGitLabOAuthReauthorizationRequired(): Promise<void> {

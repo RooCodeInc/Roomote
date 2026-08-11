@@ -103,6 +103,8 @@ vi.mock('@roomote/sdk/server', () => ({
     prUrl: z.string(),
     deferrals: z.number().default(0),
     immediate: z.boolean().optional(),
+    batchKind: z.enum(['human', 'roomote']).optional(),
+    batchId: z.string().optional(),
   }),
   consumePendingPrReviewActivity: mockConsumePending,
   requeuePendingPrReviewActivity: mockRequeuePending,
@@ -550,13 +552,21 @@ describe('prReviewNotificationJob', () => {
     expect(postedCall.blocks).toBeUndefined();
   });
 
-  it('consumes immediate self-review activity from its independent queue', async () => {
-    await prReviewNotificationJob(makeJob({ immediate: true }) as never);
+  it('consumes an immediately promoted Roomote review cycle', async () => {
+    await prReviewNotificationJob(
+      makeJob({
+        immediate: true,
+        batchKind: 'roomote',
+        batchId: 'cycle-1',
+      }) as never,
+    );
 
     expect(mockConsumePending).toHaveBeenCalledWith({
       taskId: 'task-1',
       repository: 'owner/repo',
       prNumber: 42,
+      batchKind: 'roomote',
+      batchId: 'cycle-1',
       immediate: true,
     });
   });
@@ -851,7 +861,11 @@ describe('prReviewNotificationJob', () => {
 
     expect(mockPostMessage).not.toHaveBeenCalled();
     expect(mockRequeuePending).toHaveBeenCalledWith({
-      target: { taskId: 'task-1', repository: 'owner/repo', prNumber: 42 },
+      target: {
+        taskId: 'task-1',
+        repository: 'owner/repo',
+        prNumber: 42,
+      },
       events,
     });
   });
@@ -864,7 +878,11 @@ describe('prReviewNotificationJob', () => {
     );
 
     expect(mockRequeuePending).toHaveBeenCalledWith({
-      target: { taskId: 'task-1', repository: 'owner/repo', prNumber: 42 },
+      target: {
+        taskId: 'task-1',
+        repository: 'owner/repo',
+        prNumber: 42,
+      },
       events,
     });
   });

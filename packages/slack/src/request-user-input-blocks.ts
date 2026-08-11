@@ -96,6 +96,17 @@ export function buildSlackAnsweredRequestUserInputBlocks(params: {
   ];
 }
 
+export function buildSlackCancelledRequestUserInputBlocks(params: {
+  question: AcpRequestUserInputQuestion;
+}): SlackBlock[] {
+  return [
+    {
+      type: 'markdown',
+      text: `${params.question.question}\n\n**Cancelled.**`,
+    },
+  ];
+}
+
 export function buildSlackRequestUserInputBlocks(
   state: SlackRequestUserInputPromptState & { footerText?: string },
 ): SlackBlock[] {

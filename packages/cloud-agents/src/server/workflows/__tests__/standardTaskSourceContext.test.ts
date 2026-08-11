@@ -31,4 +31,23 @@ describe('standardTask source context', () => {
 
     expect(harnessInstructions).not.toContain('<task_source_context>');
   });
+
+  it('keeps informational Slack source context separate from the web surface', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Do the work',
+      repo: 'RooCodeInc/Roomote',
+      taskSurface: 'web',
+      sourceProvider: 'slack',
+      sourceChannelId: 'C123',
+      sourceThreadId: '123.456',
+    });
+
+    expect(harnessInstructions).toContain(
+      'This StandardTask run was launched from the Roomote web task UI.',
+    );
+    expect(harnessInstructions).toContain('<source>slack</source>');
+    expect(harnessInstructions).not.toContain(
+      'This run was launched from a Slack conversation surface',
+    );
+  });
 });

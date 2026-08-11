@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
+import { PACKAGED_SKILL_INVOCATIONS } from '@roomote/cloud-agents';
 
 import {
   Command,
@@ -20,13 +21,11 @@ interface CommandSearchProps {
 
 interface SlashCommand {
   name: string;
-  description?: string;
-  source: 'global' | 'project' | 'built-in';
 }
 
-// Kept in place for runtime slash commands. The sandbox server does not expose
-// command discovery yet, so the dialog currently renders an empty state.
-const AVAILABLE_COMMANDS: SlashCommand[] = [];
+const AVAILABLE_COMMANDS: SlashCommand[] = PACKAGED_SKILL_INVOCATIONS.map(
+  (name) => ({ name: `/${name}` }),
+);
 
 export const CommandSearch = ({
   open,
@@ -42,10 +41,8 @@ export const CommandSearch = ({
 
     const normalizedQuery = query.toLowerCase();
 
-    return AVAILABLE_COMMANDS.filter(
-      (command) =>
-        command.name.toLowerCase().includes(normalizedQuery) ||
-        command.description?.toLowerCase().includes(normalizedQuery),
+    return AVAILABLE_COMMANDS.filter((command) =>
+      command.name.toLowerCase().includes(normalizedQuery),
     );
   }, [query]);
 
@@ -85,8 +82,7 @@ export const CommandSearch = ({
           <CommandList>
             {filteredCommands.length === 0 ? (
               <div className="text-muted-foreground py-6 px-4 text-center text-sm">
-                Slash commands will appear here once runtime command listing is
-                implemented.
+                No skills found.
               </div>
             ) : (
               filteredCommands.map((command) => (
@@ -99,11 +95,6 @@ export const CommandSearch = ({
                     <span className="truncate font-mono text-[0.8rem]">
                       {command.name}
                     </span>
-                    {command.description && (
-                      <span className="truncate text-xs opacity-70">
-                        {command.description}
-                      </span>
-                    )}
                   </span>
                 </CommandItem>
               ))

@@ -729,10 +729,10 @@ export const taskRunsRouter = router({
     }),
     'runId',
   ).mutation(async ({ input }) =>
-    clearPendingSlackRequestUserInput(
-      input.threadId,
-      input.requestId ? { requestId: input.requestId } : undefined,
-    ),
+    clearPendingSlackRequestUserInput(input.threadId, {
+      requestId: input.requestId,
+      runId: input.runId,
+    }),
   ),
   getSlackRequestUserInputAnswers: runScoped(
     z.object({ runId: z.number() }),
