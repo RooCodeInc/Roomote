@@ -41,8 +41,8 @@ export const PRESETS: Record<Preset['id'], Preset> = {
   },
 };
 
-// Neutral graphite with a soft radial falloff. Deliberately unbranded: the
-// recorded product is the subject, and a dark neutral keeps both light app
-// chrome and the caption pill legible without competing for attention.
+// Light graphite with a soft radial falloff. Deliberately unbranded: the
+// recorded product is the subject. Light enough that the window's drop
+// shadow does the separating, while the dark caption pill still reads.
 export const BACKDROP =
-  'radial-gradient(120% 120% at 20% 0%, #3a3f47 0%, #23262c 55%, #16181c 100%)';
+  'radial-gradient(120% 120% at 20% 0%, #eceef1 0%, #d9dde2 55%, #c3c8d0 100%)';
