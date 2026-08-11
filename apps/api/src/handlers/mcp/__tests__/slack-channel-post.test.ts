@@ -332,6 +332,26 @@ describe('slack channel post MCP endpoint', () => {
     expect(openConversationMock).toHaveBeenNthCalledWith(2, 'U123ABC456');
   });
 
+  it('opens a DM for a linked Enterprise Grid user ID or mention', async () => {
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockTaskRun() as never,
+    );
+
+    const userIdResponse = await postChannelMessage(runToken, {
+      channel: 'W123ABC456',
+      text: 'hello',
+    });
+    const mentionResponse = await postChannelMessage(runToken, {
+      channel: '<@W123ABC456|person>',
+      text: 'hello again',
+    });
+
+    expect(userIdResponse.status).toBe(200);
+    expect(mentionResponse.status).toBe(200);
+    expect(openConversationMock).toHaveBeenNthCalledWith(1, 'W123ABC456');
+    expect(openConversationMock).toHaveBeenNthCalledWith(2, 'W123ABC456');
+  });
+
   it('rejects DM recipients not linked in the selected workspace', async () => {
     vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockTaskRun() as never,

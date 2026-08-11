@@ -43,8 +43,8 @@ type ResolvedChannelPostTarget = Pick<
 >;
 
 const SLACK_DM_ID_REGEX = /^D[A-Z0-9]{8,}$/i;
-const SLACK_USER_ID_REGEX = /^U[A-Z0-9]{8,}$/i;
-const SLACK_USER_MENTION_REGEX = /^<@([A-Z0-9]{9,})(?:\|[^>]+)?>$/i;
+const SLACK_USER_ID_REGEX = /^[UW][A-Z0-9]{8,}$/i;
+const SLACK_USER_MENTION_REGEX = /^<@([UW][A-Z0-9]{8,})(?:\|[^>]+)?>$/i;
 
 const PROVIDER_UNAVAILABLE_ERRORS: Record<
   CommunicationProvider,

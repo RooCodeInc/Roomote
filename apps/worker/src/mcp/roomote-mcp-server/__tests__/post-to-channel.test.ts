@@ -179,6 +179,33 @@ describe('handlePostToChannel', () => {
     });
   });
 
+  it('accepts Enterprise Grid user IDs and mentions for direct messages', async () => {
+    vi.mocked(postToChannel).mockResolvedValue({
+      messageTs: '111.222',
+      channelId: 'D123ABC456',
+    });
+
+    await handlePostToChannel(
+      { taskId: 'task-1', channel: 'W123ABC456', text: 'hello' },
+      artifactConfig,
+      roomoteConfig,
+    );
+    await handlePostToChannel(
+      { taskId: 'task-1', channel: '<@W123ABC456|person>', text: 'hello' },
+      artifactConfig,
+      roomoteConfig,
+    );
+
+    expect(postToChannel).toHaveBeenNthCalledWith(1, roomoteConfig, {
+      channel: 'W123ABC456',
+      text: 'hello',
+    });
+    expect(postToChannel).toHaveBeenNthCalledWith(2, roomoteConfig, {
+      channel: 'W123ABC456',
+      text: 'hello',
+    });
+  });
+
   it('rejects calls without text or images', async () => {
     const result = await handlePostToChannel(
       { taskId: 'task-1', channel: '#eng' },

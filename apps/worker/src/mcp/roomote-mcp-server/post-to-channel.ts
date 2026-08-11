@@ -14,9 +14,9 @@ const CHANNEL_TARGET_ERROR =
   'channel must be a Slack channel ID/name/mention, DM ID, or Slack user ID/mention';
 const SLACK_CHANNEL_ID_REGEX = /^[CG][A-Z0-9]{8,}$/i;
 const SLACK_DIRECT_MESSAGE_ID_REGEX = /^D[A-Z0-9]{8,}$/i;
-const SLACK_USER_ID_REGEX = /^U[A-Z0-9]{8,}$/i;
+const SLACK_USER_ID_REGEX = /^[UW][A-Z0-9]{8,}$/i;
 const SLACK_CHANNEL_MENTION_REGEX = /^<#([A-Z0-9]{9,})(?:\|[^>]+)?>$/i;
-const SLACK_USER_MENTION_REGEX = /^<@([A-Z0-9]{9,})(?:\|[^>]+)?>$/i;
+const SLACK_USER_MENTION_REGEX = /^<@([UW][A-Z0-9]{8,})(?:\|[^>]+)?>$/i;
 
 function normalizeSlackChannelTarget(
   channel: string,
