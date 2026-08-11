@@ -108,6 +108,8 @@ describe('YamlEnvironmentEditor', () => {
         initialYamlContent={configToYaml(currentConfig)}
         onSave={onSave}
         onCancel={() => {}}
+        activeTab="yaml"
+        onActiveTabChange={() => {}}
       />,
     );
 
@@ -127,6 +129,8 @@ describe('YamlEnvironmentEditor', () => {
         initialYamlContent={configToYaml(historicalConfig)}
         onSave={onSave}
         onCancel={() => {}}
+        activeTab="yaml"
+        onActiveTabChange={() => {}}
       />,
     );
 
