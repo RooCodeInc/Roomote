@@ -126,6 +126,8 @@ describe('feature-demo skill', () => {
     );
     expect(skillContent).not.toContain('{ "a": "focus"');
     expect(skillContent).not.toContain('{ "a": "reset"');
+    expect(captureRunner).toContain('const moveStart = now();');
+    expect(captureRunner).toContain('pushCursorMove(moveStart, moveEnd, c);');
   });
 
   it('asks the advisor for a flowing narration, not sparse labels', () => {

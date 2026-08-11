@@ -60,7 +60,7 @@ this pipeline is ever committed to the repository.
 - `{ "a": "wait", "ms": n }` / `{ "a": "hold", "ms": n }` — let the page settle / linger.
 - `{ "a": "scrollTo", "sel": css, "ms": n }` — plain scroll with no narration attached.
 - `{ "a": "click", "sel": css, "holdMs": ~300 }` — real click with ripple.
-- `{ "a": "type", "sel": css, "text": "..." }` — real typing.</action>
+- `{ "a": "type", "sel": css, "text": "...", "moveMs": ~450 }` — glide the cursor to the field at a fixed camera scale, then type.</action>
 <action>Cinematography: keep the camera at a fixed scale for the entire demo and MOVE BY SCROLLING — that is how a person actually reads a page. Never author `focus` or `reset` beats and never add zoom, push-in, crop, or scale animations around clicks, typing, or narration. Use cursor movement and click ripples to draw attention to interactions without changing the framing.</action>
 <action>Keep the opening tight: one short `wait` for page load, then get moving. Dead opening seconds are trimmed automatically, but do not rely on it.</action>
 <action>Captions ARE the narration, verbatim — what the viewer reads is exactly what the voice says, and narrated demos highlight each word as it is spoken. Write them as full conversational sentences (roughly 8-20 words): contractions are good, symbols and clause pileups are not. They appear on screen while spoken and wrap to two lines.</action>

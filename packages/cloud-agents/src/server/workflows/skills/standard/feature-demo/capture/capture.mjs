@@ -188,8 +188,8 @@ async function run() {
 
     if (beat.a === 'show') {
       // The default narrated move: scroll the subject into view and speak
-      // over it with the camera wide. No zoom, no cursor glide — zooming is
-      // reserved for active interaction (focus before click/type).
+      // over it with the camera wide. No cursor glide is needed for a
+      // non-interactive beat.
       ab('scrollintoview', beat.sel);
       sleep(beat.settleMs ?? 600); // scroll settles on screen
       const settled = now();
@@ -279,8 +279,8 @@ async function run() {
       const c = centerNorm(rect(beat.sel));
       const t = now();
       timeline.clicks.push({ t, at: c });
-      // Usually the cursor is already here from a preceding focus; when it
-      // is not, give it a short bracketed hop instead of a slow drift.
+      // Give the pointer a short bracketed hop when it is not already on the
+      // target, keeping the camera fixed while preserving the interaction cue.
       if (curCursor.x !== c.x || curCursor.y !== c.y) {
         pushCursorMove(Math.max(0, t - 0.25), t, c);
       }
@@ -290,6 +290,17 @@ async function run() {
     }
 
     if (beat.a === 'type') {
+      const c = centerNorm(rect(beat.sel));
+      const moveStart = now();
+      ab(
+        'mouse',
+        'move',
+        String((c.x * VIEWPORT.w) | 0),
+        String((c.y * VIEWPORT.h) | 0),
+      );
+      sleep(beat.moveMs ?? 450);
+      const moveEnd = now();
+      pushCursorMove(moveStart, moveEnd, c);
       ab('type', beat.sel, beat.text);
       continue;
     }
