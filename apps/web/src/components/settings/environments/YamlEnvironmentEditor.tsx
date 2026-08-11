@@ -4,6 +4,7 @@ import {
   useState,
   useCallback,
   useEffect,
+  useMemo,
   forwardRef,
   useImperativeHandle,
 } from 'react';
@@ -13,6 +14,7 @@ import {
   AlertTriangle,
   Check,
   FileCode,
+  FileDiffIcon,
   Eye,
   Settings2,
 } from '@/components/system';
@@ -35,6 +37,7 @@ import {
 } from '@/components/system';
 import { cn } from '@/lib/utils';
 
+import { EnvironmentDiffMergeView } from './EnvironmentDiffMergeView';
 import { EnvironmentPreviewContent } from './EnvironmentPreview';
 import { useRepositories } from '@/hooks/source-control';
 import { configToYaml } from './yaml-utils';
@@ -153,6 +156,8 @@ export interface YamlEnvironmentEditorHandle {
   save: () => Promise<void>;
 }
 
+export type YamlEditorTab = 'editor' | 'yaml' | 'diff' | 'preview';
+
 interface YamlEnvironmentEditorProps {
   initialConfig?: EnvironmentConfig;
   initialYamlContent?: string;
@@ -165,6 +170,16 @@ interface YamlEnvironmentEditorProps {
   mode: 'create' | 'edit';
   hideActions?: boolean;
   warnings?: string[];
+  /**
+   * Optionally lift the active sub-tab to the parent so it survives a
+   * version-select remount (the parent bumps a `key` on this component to
+   * reset editor state, which would otherwise reset the tab too).
+   */
+  activeTab?: YamlEditorTab;
+  onActiveTabChange?: (tab: YamlEditorTab) => void;
+  /** Diff tab pane labels; see EnvironmentDiffMergeView for defaults. */
+  diffOriginalLabel?: string;
+  diffModifiedLabel?: string;
 }
 
 export const YamlEnvironmentEditor = forwardRef<
@@ -181,14 +196,21 @@ export const YamlEnvironmentEditor = forwardRef<
     mode,
     hideActions = false,
     warnings: externalWarnings,
+    activeTab: controlledActiveTab,
+    onActiveTabChange,
+    diffOriginalLabel,
+    diffModifiedLabel,
   },
   ref,
 ) {
   const [yamlContent, setYamlContent] = useState('');
   const [validation, setValidation] = useState<ValidationResult | null>(null);
-  const [activeTab, setActiveTab] = useState<'editor' | 'yaml' | 'preview'>(
+  const [internalActiveTab, setInternalActiveTab] = useState<YamlEditorTab>(
     mode === 'edit' ? 'editor' : 'yaml',
   );
+  const activeTab = controlledActiveTab ?? internalActiveTab;
+  const setActiveTab = onActiveTabChange ?? setInternalActiveTab;
+
   const [editorConfig, setEditorConfig] = useState<EnvironmentConfig | null>(
     initialConfig ?? null,
   );
@@ -262,10 +284,10 @@ export const YamlEnvironmentEditor = forwardRef<
           setActiveTab('yaml');
         }
       } else {
-        setActiveTab('yaml');
+        setActiveTab(tab === 'diff' ? 'diff' : 'yaml');
       }
     },
-    [validate],
+    [validate, setActiveTab],
   );
 
   const handleSave = useCallback(async () => {
@@ -283,7 +305,7 @@ export const YamlEnvironmentEditor = forwardRef<
     if (!saveResult.success) {
       setSaveError(saveResult.error || 'Failed to save environment');
     }
-  }, [validate, onSave]);
+  }, [validate, onSave, setActiveTab]);
 
   const handleYamlChange = useCallback(
     (value: string) => {
@@ -331,7 +353,16 @@ export const YamlEnvironmentEditor = forwardRef<
     setHasUserEdited(false);
     setValidation(null);
     setSaveError(null);
-    setActiveTab('yaml');
+
+    // Keep the Editor/Preview tabs in sync too, in case one of them is
+    // already active when a different version loads.
+    try {
+      const parsed = YAML.parse(initialYamlContent);
+      const result = environmentConfigSchema.safeParse(parsed);
+      setEditorConfig(result.success ? result.data : null);
+    } catch {
+      setEditorConfig(null);
+    }
   }, [initialYamlContent]);
 
   // Only reset content from the stored environment config if the user hasn't
@@ -353,6 +384,14 @@ export const YamlEnvironmentEditor = forwardRef<
     save: handleSave,
   }));
 
+  // Baseline for the Diff tab: the last saved configuration, compared
+  // against whatever's currently in the editor (an in-progress draft, or a
+  // loaded past version).
+  const savedYaml = useMemo(
+    () => (initialConfig ? configToYaml(initialConfig) : ''),
+    [initialConfig],
+  );
+
   return (
     <div className="space-y-4">
       <Tabs value={activeTab} onValueChange={handleTabChange}>
@@ -369,6 +408,12 @@ export const YamlEnvironmentEditor = forwardRef<
               <FileCode className="size-4" />
               Yaml
             </TabsTrigger>
+            {mode === 'edit' ? (
+              <TabsTrigger value="diff">
+                <FileDiffIcon className="size-4" />
+                Diff
+              </TabsTrigger>
+            ) : null}
             <TabsTrigger value="preview">
               <Eye className="size-4" />
               Preview
@@ -451,6 +496,20 @@ export const YamlEnvironmentEditor = forwardRef<
             </div>
           )}
         </TabsContent>
+
+        {/* Diff Tab */}
+        {mode === 'edit' ? (
+          <TabsContent value="diff" className="space-y-4">
+            <EnvironmentDiffMergeView
+              original={savedYaml}
+              modified={yamlContent}
+              onModifiedChange={handleYamlChange}
+              originalLabel={diffOriginalLabel}
+              modifiedLabel={diffModifiedLabel}
+              className="min-h-75 h-[calc(var(--effective-viewport-height)-40rem)]"
+            />
+          </TabsContent>
+        ) : null}
 
         {/* Preview Tab */}
         <TabsContent value="preview">
