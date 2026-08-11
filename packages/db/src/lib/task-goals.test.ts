@@ -308,6 +308,33 @@ describe('task goals', () => {
     });
   });
 
+  it('accepts an assigned same-goal generation after a continuation advances', async () => {
+    const task = await taskFactory.create({
+      goalObjective: 'Finish the current objective',
+      goalStatus: 'active',
+      goalMaxContinuations: 3,
+      goalLastContinuationId: 'goal-generation:initial',
+      goalContinuationIds: ['goal-generation:initial'],
+    });
+    const run = await runFactory.create({ taskId: task.id });
+
+    await claimTaskGoalContinuationForRun({
+      runId: run.id,
+      continuationId: 'continuation-turn',
+    });
+
+    await expect(
+      markTaskGoalForRun({
+        runId: run.id,
+        generation: 'goal-generation:initial',
+        status: 'complete',
+      }),
+    ).resolves.toMatchObject({
+      updated: true,
+      goal: { status: 'complete' },
+    });
+  });
+
   it('claims bounded continuations and marks the goal budget limited', async () => {
     const task = await taskFactory.create({
       goalObjective: 'Finish the long-running task',

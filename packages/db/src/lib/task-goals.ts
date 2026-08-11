@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import type { TaskGoal, TaskGoalInput, TaskGoalStatus } from '@roomote/types';
-import { and, eq, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 
 import { db } from '../db';
 import { taskRuns, tasks } from '../schema';
@@ -76,6 +76,25 @@ function goalGenerationFilter(generation: string | null) {
   return generation === null
     ? isNull(tasks.goalLastContinuationId)
     : eq(tasks.goalLastContinuationId, generation);
+}
+
+function assignedGoalGenerationFilter(generation: string | null) {
+  return generation === null
+    ? isNull(tasks.goalLastContinuationId)
+    : or(
+        eq(tasks.goalLastContinuationId, generation),
+        sql`${generation} = ANY(${tasks.goalContinuationIds})`,
+      );
+}
+
+function hasAssignedGoalGeneration(
+  task: typeof tasks.$inferSelect,
+  generation: string | null,
+): boolean {
+  return (
+    task.goalLastContinuationId === generation ||
+    (generation !== null && task.goalContinuationIds.includes(generation))
+  );
 }
 
 async function waitForGoalActivation(
@@ -165,6 +184,7 @@ export async function prepareTaskGoalActivation(input: {
         .update(tasks)
         .set({
           goalLastContinuationId: generationId,
+          goalContinuationIds: [generationId],
           updatedAt: new Date(),
         })
         .where(pendingFilter)
@@ -237,7 +257,7 @@ export async function markTaskGoalForRun(
           goal: toTaskGoal(task),
         };
       }
-      if (task.goalLastContinuationId !== input.generation) {
+      if (!hasAssignedGoalGeneration(task, input.generation)) {
         return {
           updated: false,
           reason: 'generation_mismatch',
@@ -279,7 +299,7 @@ export async function markTaskGoalForRun(
           and(
             eq(tasks.id, task.id),
             eq(tasks.goalStatus, 'active'),
-            goalGenerationFilter(input.generation),
+            assignedGoalGenerationFilter(input.generation),
           ),
         )
         .returning();
@@ -314,7 +334,7 @@ export async function markTaskGoalForRun(
       goal: toTaskGoal(task),
     };
   }
-  if (task.goalLastContinuationId !== input.generation) {
+  if (!hasAssignedGoalGeneration(task, input.generation)) {
     return {
       updated: false,
       reason: 'generation_mismatch',
@@ -337,7 +357,7 @@ export async function markTaskGoalForRun(
       and(
         eq(tasks.id, task.id),
         eq(tasks.goalStatus, 'active'),
-        goalGenerationFilter(input.generation),
+        assignedGoalGenerationFilter(input.generation),
       ),
     )
     .returning();

@@ -1489,6 +1489,9 @@ async function enqueueFreshLaunch(
   }
 
   const initialPrompt = getInitialTaskPrompt(task) ?? null;
+  const initialGoalGeneration = input.goal
+    ? `goal-generation:${randomUUID()}`
+    : null;
   const externalGithubIdentity = {
     githubLogin: 'githubLogin' in task ? task.githubLogin : null,
     githubUserId: 'githubUserId' in task ? task.githubUserId : null,
@@ -1536,9 +1539,10 @@ async function enqueueFreshLaunch(
         goalObjective: input.goal?.objective ?? null,
         goalStatus: input.goal ? 'active' : null,
         goalMaxContinuations: input.goal?.maxContinuations ?? null,
-        goalLastContinuationId: input.goal
-          ? `goal-generation:${randomUUID()}`
-          : null,
+        goalLastContinuationId: initialGoalGeneration,
+        goalContinuationIds: initialGoalGeneration
+          ? [initialGoalGeneration]
+          : [],
         requestedWorkKind: requestedWorkKindDecision.kind,
         requestedWorkKindSource: requestedWorkKindDecision.source,
         requestedWorkKindConfidence: requestedWorkKindDecision.confidence,
