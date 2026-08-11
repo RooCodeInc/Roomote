@@ -205,19 +205,16 @@ export async function isRemoteMcpRegistrationAllowed(
   const clientHash = createHash('sha256')
     .update(clientIdentifier)
     .digest('hex');
-  const [clientCount, globalCount] = await Promise.all([
-    incrementRegistrationBucket(
-      `${REGISTRATION_RATE_KEY_PREFIX}client:${clientHash}:${window}`,
-    ),
-    incrementRegistrationBucket(
-      `${REGISTRATION_RATE_KEY_PREFIX}global:${window}`,
-    ),
-  ]);
-
-  return (
-    clientCount <= REGISTRATION_RATE_LIMIT_PER_CLIENT &&
-    globalCount <= REGISTRATION_RATE_LIMIT_GLOBAL
+  const globalCount = await incrementRegistrationBucket(
+    `${REGISTRATION_RATE_KEY_PREFIX}global:${window}`,
   );
+  if (globalCount > REGISTRATION_RATE_LIMIT_GLOBAL) return false;
+
+  const clientCount = await incrementRegistrationBucket(
+    `${REGISTRATION_RATE_KEY_PREFIX}client:${clientHash}:${window}`,
+  );
+
+  return clientCount <= REGISTRATION_RATE_LIMIT_PER_CLIENT;
 }
 
 export function verifyPkceChallenge(

@@ -155,6 +155,20 @@ describe('remote MCP OAuth state', () => {
     expect(allowed[20]).toBe(false);
   });
 
+  it('does not allocate client buckets after the global limit is full', async () => {
+    for (let index = 0; index < 1_000; index += 1) {
+      await expect(
+        isRemoteMcpRegistrationAllowed(`client-${index}`),
+      ).resolves.toBe(true);
+    }
+    const keyCountAtLimit = redisState.size;
+
+    await expect(
+      isRemoteMcpRegistrationAllowed('overflow-client'),
+    ).resolves.toBe(false);
+    expect(redisState.size).toBe(keyCountAtLimit);
+  });
+
   it('verifies S256 PKCE challenges', () => {
     expect(
       verifyPkceChallenge(
