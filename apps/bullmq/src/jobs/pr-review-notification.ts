@@ -177,6 +177,7 @@ async function postPrReviewNotification({
       channelId: route.channelId,
       threadId: route.threadId ?? null,
       followUpPrompt: action.followUpPrompt,
+      durableBacked: Boolean(aggregateId),
     });
     if (aggregateId) {
       await updatePrReviewDelivery({
@@ -288,6 +289,7 @@ async function updatePostedPrReviewNotification(input: {
       channelId: input.route.channelId,
       threadId: input.route.threadId ?? null,
       followUpPrompt: input.action.followUpPrompt,
+      durableBacked: true,
     });
     await updatePrReviewDelivery({
       aggregateId: input.aggregateId,
@@ -670,7 +672,10 @@ async function deliverDurablePrReviewNotification(
             action && isButtonRouteProvider(prepared.route.provider)
               ? action
               : undefined,
-          previousActionNonce: delivery.actionNonce,
+          previousActionNonce:
+            delivery.previousActionNonce && !delivery.previousActionRetiredAt
+              ? delivery.previousActionNonce
+              : delivery.actionNonce,
         });
         await updatePrReviewDelivery({
           aggregateId: aggregate.id,

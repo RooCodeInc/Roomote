@@ -22,6 +22,7 @@ describe('PR review action state', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockClaimDurable.mockResolvedValue(null);
+    mockSrem.mockResolvedValue(1);
   });
 
   it('uses the durable action when Redis is unavailable', async () => {
@@ -61,6 +62,39 @@ describe('PR review action state', () => {
     await expect(
       claimPendingPrReviewAction('retired-nonce'),
     ).resolves.toBeNull();
+  });
+
+  it('does not let Redis resurrect a durable-backed nonce missing from Postgres', async () => {
+    mockClaimDurable.mockResolvedValue(null);
+    mockEval.mockResolvedValue(
+      JSON.stringify({
+        nonce: 'superseded-nonce',
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+        durableBacked: true,
+      }),
+    );
+
+    await expect(
+      claimPendingPrReviewAction('superseded-nonce'),
+    ).resolves.toBeNull();
+  });
+
+  it('keeps legacy Redis-only action offers claimable', async () => {
+    mockClaimDurable.mockResolvedValue(null);
+    mockEval.mockResolvedValue(
+      JSON.stringify({
+        nonce: 'legacy-nonce',
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+      }),
+    );
+
+    await expect(
+      claimPendingPrReviewAction('legacy-nonce'),
+    ).resolves.toMatchObject({ nonce: 'legacy-nonce' });
   });
 
   it('removes a superseded nonce from Redis and its thread index', async () => {

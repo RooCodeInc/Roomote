@@ -40,6 +40,8 @@ export interface PendingPrReviewAction {
    * summary.
    */
   followUpPrompt: string;
+  /** New durable notifications require a matching Postgres claim. */
+  durableBacked?: boolean;
   /**
    * Provider-native id of the posted notification message (Slack ts, Discord
    * or Telegram message id), attached after posting so the offer can be
@@ -166,6 +168,9 @@ export async function claimPendingPrReviewAction(
 
   try {
     const pending = JSON.parse(raw) as PendingPrReviewAction;
+    if (pending.durableBacked && !durable) {
+      return null;
+    }
     const latest = durable ? { ...pending, ...durable, nonce } : pending;
 
     await redis

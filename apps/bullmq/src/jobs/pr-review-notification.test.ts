@@ -462,6 +462,10 @@ describe('prReviewNotificationJob', () => {
     expect(mockDiscardPendingPrReviewAction).not.toHaveBeenCalledWith(
       'previous-nonce',
     );
+    const stagedNonce = mockUpdateDelivery.mock.calls.find(
+      ([input]) => input.previousActionNonce === 'previous-nonce',
+    )?.[0]?.actionNonce;
+    expect(stagedNonce).toEqual(expect.any(String));
     expect(mockUpdateDelivery).toHaveBeenCalledWith({
       aggregateId: 'aggregate-1',
       destination: 'chat',
@@ -483,6 +487,11 @@ describe('prReviewNotificationJob', () => {
     mockDiscardPendingPrReviewAction.mockClear();
     mockUpdateDelivery.mockClear();
     mockDiscordUpdateMessage.mockResolvedValue(undefined);
+    Object.assign(deliveries[1]!, {
+      actionNonce: stagedNonce,
+      previousActionNonce: 'previous-nonce',
+      previousActionRetiredAt: null,
+    });
 
     await prReviewNotificationJob(
       makeJob({ aggregateId: 'aggregate-1' }) as never,
