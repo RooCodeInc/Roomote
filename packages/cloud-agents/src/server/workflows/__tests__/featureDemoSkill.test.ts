@@ -110,20 +110,22 @@ describe('feature-demo skill', () => {
     );
   });
 
-  it('scrolls by default and reserves zooming for interactions', () => {
+  it('keeps fixed framing while scrolling through interactions', () => {
     const captureRunner = fs.readFileSync(
       path.join(skillDirPath, 'capture/capture.mjs'),
       'utf8',
     );
 
-    // `show` (scroll + narrate, camera wide) is the default narrated move;
-    // `focus` zooms exist only as the wind-up for a real click/type.
+    // The runner still supports the stable timeline schema, but the skill only
+    // authors fixed-scale beats and uses scrolling and cursor effects instead.
     expect(captureRunner).toContain("beat.a === 'show'");
     expect(skillContent).toContain('THE DEFAULT NARRATED MOVE');
-    expect(skillContent).toContain('MOVES BY SCROLLING');
+    expect(skillContent).toContain('MOVE BY SCROLLING');
     expect(skillContent).toContain(
-      'ONLY as the wind-up for an interaction the story actually performs',
+      'keep the camera at a fixed scale for the entire demo',
     );
+    expect(skillContent).not.toContain('{ "a": "focus"');
+    expect(skillContent).not.toContain('{ "a": "reset"');
   });
 
   it('asks the advisor for a flowing narration, not sparse labels', () => {
