@@ -101,6 +101,9 @@ describe('Standard Task explicit invocation routing', () => {
       'route connected-system questions and actions to `explore-and-act`',
     );
     expect(harnessInstructions).toContain(
+      'Mutation intent wins: if any part of the request asks to modify repository or workspace state, run commands, validate changes, or deliver code, route to `implement-changes` even when another part asks for external investigation.',
+    );
+    expect(harnessInstructions).toContain(
       'If the request remains ambiguous after applying those routing rules, default the initial route to `plan-repo-implementation`.',
     );
   });

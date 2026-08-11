@@ -87,6 +87,34 @@ describe('requested work kind classification', () => {
         ),
       }),
     );
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: expect.stringContaining(
+          'choose implement when any part of the request asks to modify repository or workspace state, run commands, validate changes, or deliver code, even when another part asks for external investigation',
+        ),
+      }),
+    );
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: expect.stringContaining(
+          '"Check Better Stack and fix the failure" is implement',
+        ),
+      }),
+    );
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: expect.stringContaining(
+          '"Inspect Sentry, then patch the crash" is implement',
+        ),
+      }),
+    );
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        system: expect.stringContaining(
+          '"Check Better Stack and tell me what failed" is question',
+        ),
+      }),
+    );
   });
 
   it('nulls classifier confidence when it is out of range', async () => {
