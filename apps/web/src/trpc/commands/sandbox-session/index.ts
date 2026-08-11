@@ -26,6 +26,7 @@ import {
   eq,
   inArray,
   isNotNull,
+  getTaskGoalForRun,
   not,
   resolveEffectivePreviewRuntimeConfig,
   taskMessages,
@@ -249,6 +250,12 @@ export async function sendSandboxPromptCommand(
   const { taskRun } = await getResolvedSandboxTaskRunByTaskId(auth, {
     taskId: parsed.taskId,
   });
+  const currentGoal = trustedContext?.goalContext
+    ? null
+    : await getTaskGoalForRun(taskRun.id);
+  const goalContext =
+    trustedContext?.goalContext ??
+    (currentGoal?.status === 'active' ? currentGoal : undefined);
 
   if (!taskRun.sandboxServerUrl) {
     throw new TRPCError({
@@ -350,7 +357,7 @@ export async function sendSandboxPromptCommand(
       autoSteerWhenQueued: requiresActorHandoff
         ? true
         : parsed.autoSteerWhenQueued,
-      goalContext: trustedContext?.goalContext,
+      goalContext,
     });
 
     if (

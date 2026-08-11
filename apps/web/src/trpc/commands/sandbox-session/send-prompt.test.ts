@@ -314,6 +314,42 @@ describe('sendSandboxPromptCommand', () => {
     );
   });
 
+  it('attaches the active goal context to an ordinary web follow-up', async () => {
+    const user = await userFactory.create({ name: 'DB User' });
+    const task = await taskFactory.create({
+      initiatorUserId: user.id,
+      goalObjective: 'Finish the active objective',
+      goalStatus: 'active',
+      goalMaxContinuations: 5,
+      goalContinuationsUsed: 2,
+      goalLastContinuationId: 'goal-generation:current',
+    });
+
+    await runFactory.create({
+      actingUserId: user.id,
+      taskId: task.id,
+      status: RunStatus.Running,
+      sandboxServerUrl: 'http://sandbox.example.test',
+      result: {},
+    });
+
+    await sendSandboxPromptCommand(buildMockAuth({ userId: user.id }), {
+      taskId: task.id,
+      prompt: 'Verify the final requirement.',
+      source: 'web',
+    });
+
+    expect(mockSendPromptMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        goalContext: expect.objectContaining({
+          objective: 'Finish the active objective',
+          generation: 'goal-generation:current',
+          continuationsUsed: 2,
+        }),
+      }),
+    );
+  });
+
   it('falls back to the authenticated email when the user name is blank', async () => {
     const user = await userFactory.create({
       name: 'Casey Example',
