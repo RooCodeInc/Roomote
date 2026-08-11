@@ -409,7 +409,7 @@ describe('prReviewNotificationJob', () => {
     );
   });
 
-  it('keeps the previous action claim when a provider edit fails', async () => {
+  it('keeps the previous action claim until a provider edit succeeds', async () => {
     const aggregate = {
       id: 'aggregate-1',
       taskId: 'task-1',
@@ -476,6 +476,28 @@ describe('prReviewNotificationJob', () => {
         destination: 'chat',
         state: 'failed',
         lastError: 'edit failed',
+      }),
+    );
+
+    mockDiscardPendingPrReviewAction.mockClear();
+    mockUpdateDelivery.mockClear();
+    mockDiscordUpdateMessage.mockResolvedValue(undefined);
+
+    await prReviewNotificationJob(
+      makeJob({ aggregateId: 'aggregate-1' }) as never,
+    );
+
+    expect(mockDiscardPendingPrReviewAction).toHaveBeenCalledWith(
+      'previous-nonce',
+    );
+    expect(mockUpdateDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aggregateId: 'aggregate-1',
+        destination: 'chat',
+        state: 'sending',
+        actionNonce: expect.any(String),
+        previousActionNonce: null,
+        actionHandledAt: null,
       }),
     );
   });
