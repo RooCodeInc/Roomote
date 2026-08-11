@@ -1392,7 +1392,11 @@ export const taskMessagesRelations = relations(taskMessages, ({ one }) => ({
  * chat delivery independently.
  */
 
-export type PrReviewEventKind = 'review' | 'review_comment' | 'review_summary';
+export type PrReviewEventKind =
+  | 'issue_comment'
+  | 'review'
+  | 'review_comment'
+  | 'review_summary';
 
 export type PrReviewNotificationDestination = 'task_history' | 'chat';
 
