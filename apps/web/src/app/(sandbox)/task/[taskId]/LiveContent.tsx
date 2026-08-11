@@ -158,13 +158,7 @@ function LiveContentInner({
 
   const handleCommandSearchOpen = useCallback(
     (insertPosition?: number) => {
-      // Slash command discovery is not implemented yet, so keep the
-      // slash-triggered path disabled while preserving explicit menu open.
-      if (typeof insertPosition === 'number') {
-        return;
-      }
-
-      commandInsertPositionRef.current = null;
+      commandInsertPositionRef.current = insertPosition ?? null;
       setCommandSearchOpen(true);
     },
     [setCommandSearchOpen],
