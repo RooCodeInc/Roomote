@@ -92,9 +92,17 @@ describe('GET /api/mcp-remote-oauth/authorize', () => {
     expect(response.headers.get('content-type')).toContain('text/html');
     expect(html).toContain('Authorize Claude Code?');
     expect(html).toContain('Allow access');
+    expect(html).toContain('/logos/roomote-wordmark.svg');
+    expect(html).toContain(
+      'This gives Claude Code access to Roomote using your account.',
+    );
+    expect(html).toContain('Claude Code will be able to:');
     expect(html).toContain('name="consent_token" value="consent-token"');
     expect(response.headers.get('content-security-policy')).toContain(
       "form-action 'self' https://client.example",
+    );
+    expect(response.headers.get('content-security-policy')).toContain(
+      "img-src 'self'",
     );
     expect(mockCreateConsentToken).toHaveBeenCalledWith({
       userId: 'user-1',

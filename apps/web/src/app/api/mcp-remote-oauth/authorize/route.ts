@@ -62,20 +62,193 @@ function consentResponse(options: {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Authorize ${clientName}</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "DM Sans", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #000;
+        background: #fff;
+      }
+
+      * { box-sizing: border-box; }
+
+      body { margin: 0; min-width: 320px; }
+
+      .frame {
+        min-height: 100vh;
+        padding: 8px;
+        background: #fff;
+      }
+
+      .surface {
+        min-height: calc(100vh - 16px);
+        display: flex;
+        overflow: hidden;
+        border-radius: 24px;
+        background: #d9f52b;
+        background: oklch(0.9 0.18 120);
+      }
+
+      .column {
+        position: relative;
+        width: 100%;
+        max-width: 768px;
+        min-height: calc(100vh - 16px);
+        margin: 0 auto;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 40px 24px 48px 48px;
+      }
+
+      .column::before {
+        content: "";
+        position: absolute;
+        inset: 0 auto 0 0;
+        border-left: 2px dotted #000;
+      }
+
+      .wordmark {
+        width: auto;
+        height: 56px;
+        align-self: flex-start;
+        margin: 0 0 32px;
+      }
+
+      .content { width: 100%; max-width: 640px; }
+
+      .eyebrow {
+        margin: 0 0 8px;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(30px, 5vw, 40px);
+        line-height: 1.05;
+        letter-spacing: -0.05em;
+      }
+
+      .description {
+        max-width: 580px;
+        margin: 16px 0 0;
+        font-size: 17px;
+        line-height: 1.55;
+      }
+
+      .permissions {
+        max-width: 580px;
+        margin: 24px 0;
+        padding: 18px 20px;
+        border: 1px solid rgba(0, 0, 0, 0.35);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.35);
+      }
+
+      .permissions p {
+        margin: 0 0 10px;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .permissions ul {
+        margin: 0;
+        padding-left: 20px;
+        font-size: 14px;
+        line-height: 1.65;
+      }
+
+      .return-to {
+        max-width: 580px;
+        margin: 0 0 24px;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .return-to strong {
+        overflow-wrap: anywhere;
+        font-weight: 700;
+      }
+
+      form { max-width: 384px; }
+
+      button {
+        width: 100%;
+        height: 40px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px 16px;
+        border: 0;
+        border-radius: 8px;
+        background: #000;
+        color: #fff;
+        font: inherit;
+        font-size: 17px;
+        font-weight: 700;
+        cursor: pointer;
+        transition: background-color 150ms ease, color 150ms ease, opacity 150ms ease;
+      }
+
+      button:hover { background: rgba(0, 0, 0, 0.8); color: #d9f52b; }
+      button:active { opacity: 0.8; }
+      button:focus-visible { outline: 2px solid #000; outline-offset: 3px; }
+
+      .trust-note {
+        max-width: 384px;
+        margin: 10px 0 0;
+        color: rgba(0, 0, 0, 0.65);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      @media (max-width: 767px) {
+        .column {
+          min-height: auto;
+          justify-content: flex-start;
+          padding: 32px 16px 40px;
+        }
+
+        .column::before { display: none; }
+        .wordmark { height: 48px; margin-bottom: 40px; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        button { transition: none; }
+      }
+    </style>
   </head>
-  <body style="margin:0;background:#f6f5f1;color:#171713;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
-    <main style="min-height:100vh;display:grid;place-items:center;padding:24px;box-sizing:border-box;">
-      <section style="width:min(100%,520px);background:#fff;border:1px solid #deddd6;border-radius:18px;padding:32px;box-sizing:border-box;box-shadow:0 18px 50px rgba(23,23,19,.08);">
-        <p style="margin:0 0 12px;color:#68675f;font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;">Roomote MCP</p>
-        <h1 style="margin:0 0 14px;font-size:28px;line-height:1.15;">Authorize ${clientName}?</h1>
-        <p style="margin:0 0 22px;color:#55544e;font-size:16px;line-height:1.55;">This client will act as your signed-in Roomote member. It can read task and chat context, launch or cancel tasks, and send follow-up messages.</p>
-        <div style="margin:0 0 24px;padding:14px 16px;background:#f6f5f1;border-radius:12px;color:#55544e;font-size:14px;line-height:1.45;">After approval, Roomote returns you to <strong style="color:#171713;">${callbackHost}</strong>.</div>
-        <form method="post" action="${action}">
-          <input type="hidden" name="consent_token" value="${consentToken}">
-          <button type="submit" style="width:100%;border:0;border-radius:10px;background:#171713;color:#fff;padding:13px 18px;font:inherit;font-weight:700;cursor:pointer;">Allow access</button>
-        </form>
-      </section>
-    </main>
+  <body>
+    <div class="frame">
+      <main class="surface">
+        <div class="column">
+          <img class="wordmark" src="/logos/roomote-wordmark.svg" alt="Roomote">
+          <section class="content" aria-labelledby="consent-title">
+            <p class="eyebrow">MCP access request</p>
+            <h1 id="consent-title">Authorize ${clientName}?</h1>
+            <p class="description">This gives ${clientName} access to Roomote using your account.</p>
+            <div class="permissions">
+              <p>${clientName} will be able to:</p>
+              <ul>
+                <li>Read your task and chat context</li>
+                <li>Launch and cancel tasks</li>
+                <li>Send follow-up messages</li>
+              </ul>
+            </div>
+            <p class="return-to">After approval, you’ll return to <strong>${callbackHost}</strong>.</p>
+            <form method="post" action="${action}">
+              <input type="hidden" name="consent_token" value="${consentToken}">
+              <button type="submit"><span>Allow access</span><span aria-hidden="true">&rarr;</span></button>
+            </form>
+            <p class="trust-note">Only continue if you trust this application.</p>
+          </section>
+        </div>
+      </main>
+    </div>
   </body>
 </html>`,
     {
@@ -83,7 +256,7 @@ function consentResponse(options: {
       headers: {
         'Cache-Control': 'no-store',
         'Content-Type': 'text/html; charset=utf-8',
-        'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${callbackUrl.origin}; base-uri 'none'; frame-ancestors 'none'`,
+        'Content-Security-Policy': `default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self' ${callbackUrl.origin}; base-uri 'none'; frame-ancestors 'none'`,
         'X-Frame-Options': 'DENY',
       },
     },
