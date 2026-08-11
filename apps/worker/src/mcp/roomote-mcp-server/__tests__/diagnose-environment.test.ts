@@ -133,6 +133,107 @@ describe('diagnoseEnvironment', () => {
     expect(JSON.stringify(report)).not.toContain('user:secret');
   });
 
+  it('matches detached commands to the combined PM2 log configured by Roomote', async () => {
+    const runCommand = vi.fn(async (command: string) => {
+      if (command === 'pm2') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            {
+              name: 'roomote-start-app',
+              pm2_env: {
+                status: 'online',
+                restart_time: 0,
+                unstable_restarts: 0,
+                pm_log_path: '/workspace/dev.log',
+                pm_out_log_path: '/home/roomote/.pm2/logs/start-app-out.log',
+                pm_err_log_path: '/home/roomote/.pm2/logs/start-app-error.log',
+              },
+            },
+          ]),
+          stderr: '',
+        };
+      }
+
+      return { exitCode: 0, stdout: '', stderr: '' };
+    });
+    const report = await diagnoseEnvironment({
+      workspacePath,
+      context: emptyContext(),
+      dependencies: dependencies({
+        readSetupStatus: () => ({
+          version: 1,
+          state: 'completed',
+          startedAt: now.toISOString(),
+          finishedAt: now.toISOString(),
+          commands: [
+            {
+              repository: 'owner/repo',
+              name: 'Start app',
+              state: 'started_detached',
+              detached: true,
+              logFile: 'dev.log',
+            },
+          ],
+          warnings: [],
+        }),
+        runCommand,
+      }),
+    });
+
+    expect(findCheck(report, 'setup.detached_health')).toMatchObject({
+      status: 'pass',
+      summary: '1 detached process is online',
+    });
+  });
+
+  it('distinguishes working-tree changes that appeared after setup began', async () => {
+    const runCommand = vi.fn(async (command: string) => {
+      if (command === 'git') {
+        return {
+          exitCode: 0,
+          stdout: ' M package.json\n?? pnpm-lock.yaml\n',
+          stderr: '',
+        };
+      }
+
+      return { exitCode: 0, stdout: '', stderr: '' };
+    });
+    const report = await diagnoseEnvironment({
+      workspacePath,
+      context: emptyContext(),
+      dependencies: dependencies({
+        readSetupStatus: () => ({
+          version: 1,
+          state: 'completed',
+          startedAt: now.toISOString(),
+          finishedAt: now.toISOString(),
+          commands: [],
+          warnings: [],
+          repositoryBaselines: [
+            {
+              repository: 'owner/repo',
+              path: 'owner/repo',
+              changes: [],
+            },
+          ],
+        }),
+        runCommand,
+      }),
+    });
+
+    expect(findCheck(report, 'setup.repository_changes')).toMatchObject({
+      status: 'warn',
+      summary: '1/1 repository working tree changed after setup began',
+    });
+    expect(findCheck(report, 'setup.repository_changes').details).toContain(
+      'M package.json',
+    );
+    expect(findCheck(report, 'setup.repository_changes').details).toContain(
+      '?? pnpm-lock.yaml',
+    );
+  });
+
   it('reports declared and resolved versions when tooling mismatches', async () => {
     const runCommand = vi.fn(async (command: string, args: string[]) => {
       if (command === 'mise' && args.join(' ') === 'current nodejs') {

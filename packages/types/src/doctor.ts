@@ -17,7 +17,7 @@ export const environmentObservationSeveritySchema = z.enum([
 export const environmentObservationCheckIdSchema = z
   .string()
   .regex(
-    /^(?:context\.available|setup\.commands(?:\.[a-z0-9._-]+)?|setup\.detached_health|docker\.projects|service\.[a-zA-Z0-9_-]+|port\.[a-zA-Z][a-zA-Z0-9_]*\.(?:loopback|preview)|tooling\.versions|env\.contract)$/u,
+    /^(?:context\.available|setup\.commands(?:\.[a-z0-9._-]+)?|setup\.detached_health|setup\.repository_changes|docker\.projects|service\.[a-zA-Z0-9_-]+|port\.[a-zA-Z][a-zA-Z0-9_]*\.(?:loopback|preview)|tooling\.versions|env\.contract)$/u,
     'Environment observation check ID must use a supported stable namespace',
   );
 

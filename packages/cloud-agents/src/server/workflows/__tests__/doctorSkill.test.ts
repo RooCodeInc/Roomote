@@ -28,6 +28,9 @@ describe('doctor guidance', () => {
       'Always run a goal-specific independent check before declaring the environment healthy',
     );
     expect(skillContent).toContain(
+      'Treat `setup.repository_changes` as a provenance boundary',
+    );
+    expect(skillContent).toContain(
       'call `complete_doctor_report` with that full report as the final workflow action',
     );
   });

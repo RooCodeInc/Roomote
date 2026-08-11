@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -98,6 +99,24 @@ describe('EnvironmentSetupStatusWriter', () => {
         state: 'pending',
         detached: true,
       }),
+    ]);
+  });
+
+  it('captures secret-safe repository status before setup commands begin', () => {
+    const repositoryPath = path.join(workspacePath, 'owner', 'repo');
+    fs.mkdirSync(repositoryPath, { recursive: true });
+    execFileSync('git', ['init'], { cwd: repositoryPath, stdio: 'ignore' });
+    fs.writeFileSync(path.join(repositoryPath, 'preexisting.txt'), 'before');
+
+    const writer = new EnvironmentSetupStatusWriter(workspacePath);
+    writer.initialize(REPOSITORIES, { 'owner/repo': repositoryPath });
+
+    expect(readStatus().repositoryBaselines).toEqual([
+      {
+        repository: 'owner/repo',
+        path: 'owner/repo',
+        changes: ['?? preexisting.txt'],
+      },
     ]);
   });
 

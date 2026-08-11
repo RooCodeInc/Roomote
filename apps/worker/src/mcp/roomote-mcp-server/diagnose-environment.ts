@@ -255,12 +255,122 @@ async function diagnoseSetupCommands(
   return { checks, status };
 }
 
+function resolveWorkspaceChildPath(
+  workspacePath: string,
+  relativePath: string,
+): string | null {
+  const resolved = path.resolve(workspacePath, relativePath);
+  const relative = path.relative(workspacePath, resolved);
+  return relative.startsWith('..') || path.isAbsolute(relative)
+    ? null
+    : resolved;
+}
+
+function summarizeStatusEntries(entries: string[]): string {
+  const displayed = entries.slice(0, 25);
+  const remainder = entries.length - displayed.length;
+  return `${displayed.join(', ')}${remainder > 0 ? `, and ${remainder} more` : ''}`;
+}
+
+async function diagnoseRepositoryChanges(
+  workspacePath: string,
+  setupStatus: EnvironmentSetupStatus | null,
+  dependencies: DiagnoseEnvironmentDependencies,
+): Promise<EnvironmentObservationCheck | undefined> {
+  const baselines = setupStatus?.repositoryBaselines;
+  if (!baselines) return undefined;
+
+  const timestamp = observedAt(dependencies);
+  if (baselines.length === 0) {
+    return {
+      id: 'setup.repository_changes',
+      category: 'setup',
+      title: 'Repository working-tree provenance',
+      status: 'pass',
+      severity: 'info',
+      summary: 'No setup repository baselines were required',
+      observedAt: timestamp,
+    };
+  }
+
+  let status: EnvironmentObservationStatus = 'pass';
+  let changedRepositories = 0;
+  const details: string[] = [];
+  for (const baseline of baselines) {
+    const repositoryPath = resolveWorkspaceChildPath(
+      workspacePath,
+      baseline.path,
+    );
+    if (!repositoryPath) {
+      status = 'unknown';
+      details.push(`${baseline.repository}: invalid repository path`);
+      continue;
+    }
+
+    const result = await dependencies.runCommand(
+      'git',
+      ['status', '--porcelain=v1', '--untracked-files=all'],
+      { cwd: repositoryPath },
+    );
+    if (result.exitCode !== 0) {
+      status = 'unknown';
+      details.push(`${baseline.repository}: current git status unavailable`);
+      continue;
+    }
+
+    const current = result.stdout.split(/\r?\n/u).filter(Boolean);
+    const before = new Set(baseline.changes);
+    const after = new Set(current);
+    const appeared = current.filter((entry) => !before.has(entry));
+    const disappeared = baseline.changes.filter((entry) => !after.has(entry));
+
+    if (appeared.length === 0 && disappeared.length === 0) {
+      details.push(`${baseline.repository}: unchanged from pre-setup state`);
+      continue;
+    }
+
+    changedRepositories += 1;
+    if (status === 'pass') status = 'warn';
+    if (appeared.length > 0) {
+      details.push(
+        `${baseline.repository}: appeared since setup began: ${summarizeStatusEntries(appeared)}`,
+      );
+    }
+    if (disappeared.length > 0) {
+      details.push(
+        `${baseline.repository}: no longer present since setup began: ${summarizeStatusEntries(disappeared)}`,
+      );
+    }
+  }
+
+  return {
+    id: 'setup.repository_changes',
+    category: 'setup',
+    title: 'Repository working-tree provenance',
+    status,
+    severity: status === 'pass' ? 'info' : 'minor',
+    summary:
+      status === 'unknown'
+        ? 'One or more repository working-tree comparisons were unavailable'
+        : changedRepositories === 0
+          ? 'Repository working trees are unchanged from their pre-setup state'
+          : `${changedRepositories}/${baselines.length} repository working tree${baselines.length === 1 ? '' : 's'} changed after setup began`,
+    details: sanitizeEvidence(details.join('\n')),
+    remediationHint:
+      changedRepositories > 0
+        ? 'Review setup commands and runtime startup behavior; prefer idempotent setup that leaves repository source unchanged.'
+        : undefined,
+    observedAt: timestamp,
+  };
+}
+
 type Pm2Process = {
   name?: string;
   pm2_env?: {
     status?: string;
     restart_time?: number;
     unstable_restarts?: number;
+    pm_log_path?: string;
     pm_out_log_path?: string;
     pm_err_log_path?: string;
   };
@@ -335,6 +445,7 @@ async function diagnoseDetachedHealth(
     const process = expectedLog
       ? processes.find((candidate) =>
           [
+            candidate.pm2_env?.pm_log_path,
             candidate.pm2_env?.pm_out_log_path,
             candidate.pm2_env?.pm_err_log_path,
           ].includes(expectedLog),
@@ -391,7 +502,7 @@ async function diagnoseDetachedHealth(
       status === 'fail' ? 'major' : status === 'warn' ? 'minor' : 'info',
     summary:
       status === 'pass'
-        ? `${detached.length} detached process${detached.length === 1 ? '' : 'es'} are online`
+        ? `${detached.length} detached process${detached.length === 1 ? ' is' : 'es are'} online`
         : 'One or more detached commands launched but are not healthy',
     details: sanitizeEvidence(details.join('\n')),
     remediationHint:
@@ -871,6 +982,12 @@ export async function diagnoseEnvironment(options: {
     ...(options.contextCheck ? [options.contextCheck] : []),
     ...setup.checks,
   ];
+  const repositoryChanges = await diagnoseRepositoryChanges(
+    options.workspacePath,
+    setup.status,
+    dependencies,
+  );
+  if (repositoryChanges) checks.push(repositoryChanges);
   checks.push(
     await diagnoseDetachedHealth(
       options.workspacePath,
