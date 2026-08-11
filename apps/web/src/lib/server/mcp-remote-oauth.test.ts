@@ -14,7 +14,7 @@ vi.mock('@roomote/redis', () => ({
       const keys = args.slice(0, keyCount);
       const values = args.slice(keyCount);
       const key = keys[0]!;
-      if (script.includes("redis.call('SET', KEYS[1]")) {
+      if (script.includes("redis.call('ZCARD', KEYS[2])")) {
         const indexKey = keys[1]!;
         const [clientJson, , expiresAt, clientId, maxClients, now] = values;
         const clients = redisSortedSets.get(indexKey) ?? new Map();
@@ -25,6 +25,63 @@ vi.mock('@roomote/redis', () => ({
         redisState.set(key, clientJson!);
         clients.set(clientId!, Number(expiresAt));
         redisSortedSets.set(indexKey, clients);
+        return 1;
+      }
+
+      if (script.includes('local previous =')) {
+        const [refreshPrefix, sessionJson, marker] = values;
+        const previous = redisState.get(key);
+        if (previous) {
+          const decoded = JSON.parse(previous) as { currentTokenHash: string };
+          redisState.delete(`${refreshPrefix}${decoded.currentTokenHash}`);
+        }
+        redisState.set(key, sessionJson!);
+        redisState.set(keys[1]!, marker!);
+        return 1;
+      }
+
+      if (script.includes("return {'reuse'}")) {
+        const [rotatedMarker, activeMarker, expected, next, refreshPrefix] =
+          values;
+        const marker = redisState.get(key);
+        if (marker === rotatedMarker) {
+          const session = redisState.get(keys[2]!);
+          if (session) {
+            const decoded = JSON.parse(session) as {
+              currentTokenHash: string;
+            };
+            redisState.delete(`${refreshPrefix}${decoded.currentTokenHash}`);
+          }
+          redisState.delete(keys[2]!);
+          return ['reuse'];
+        }
+        if (marker !== activeMarker || redisState.get(keys[2]!) !== expected) {
+          return ['invalid'];
+        }
+        redisState.set(key, rotatedMarker!);
+        redisState.set(keys[1]!, activeMarker!);
+        redisState.set(keys[2]!, next!);
+        return ['ok'];
+      }
+
+      if (script.includes('decoded.clientId')) {
+        const [clientId, refreshPrefix, activeMarker, tokenHash] = values;
+        if (redisState.get(key) !== activeMarker) return 0;
+        const session = redisState.get(keys[1]!);
+        if (!session) return 0;
+        const decoded = JSON.parse(session) as {
+          clientId: string;
+          currentTokenHash: string;
+        };
+        if (
+          decoded.clientId !== clientId ||
+          decoded.currentTokenHash !== tokenHash
+        ) {
+          return 0;
+        }
+        redisState.delete(`${refreshPrefix}${decoded.currentTokenHash}`);
+        redisState.delete(key);
+        redisState.delete(keys[1]!);
         return 1;
       }
 
@@ -94,11 +151,15 @@ import {
   consumeRemoteMcpConsentToken,
   createRemoteMcpAuthorizationCode,
   createRemoteMcpConsentToken,
+  createRemoteMcpRefreshSession,
   getRemoteMcpAuthorizationCode,
+  getRemoteMcpRefreshSession,
   isAllowedOAuthRedirectUri,
   isRemoteMcpRegistrationAllowed,
   promoteRemoteMcpOAuthClient,
   registerRemoteMcpOAuthClient,
+  revokeRemoteMcpRefreshSession,
+  rotateRemoteMcpRefreshToken,
   verifyPkceChallenge,
 } from './mcp-remote-oauth';
 
@@ -129,6 +190,7 @@ describe('remote MCP OAuth state', () => {
     expect(client).toMatchObject({
       clientName: 'Test client',
       redirectUris: ['https://client.example/callback'],
+      grantTypes: ['authorization_code'],
     });
     await expect(
       promoteRemoteMcpOAuthClient(client.clientId, 'user-1'),
@@ -199,6 +261,63 @@ describe('remote MCP OAuth state', () => {
     await expect(consumeRemoteMcpConsentToken(token, binding)).resolves.toBe(
       false,
     );
+  });
+
+  it('rotates refresh tokens and revokes the session on reuse', async () => {
+    const refreshToken = await createRemoteMcpRefreshSession({
+      userId: 'user-1',
+      clientId: 'client-1',
+      resource: 'https://roomote.example/mcp',
+      scopes: ['mcp:roomote'],
+    });
+    const session = await getRemoteMcpRefreshSession(refreshToken);
+    expect(session).toMatchObject({ userId: 'user-1', clientId: 'client-1' });
+
+    const rotation = await rotateRemoteMcpRefreshToken(refreshToken, session!);
+    expect(rotation.status).toBe('ok');
+    if (rotation.status !== 'ok') throw new Error('expected refresh rotation');
+    await expect(
+      getRemoteMcpRefreshSession(rotation.refreshToken),
+    ).resolves.toMatchObject({ userId: 'user-1' });
+
+    await expect(
+      rotateRemoteMcpRefreshToken(refreshToken, session!),
+    ).resolves.toEqual({ status: 'reuse' });
+    await expect(
+      getRemoteMcpRefreshSession(rotation.refreshToken),
+    ).resolves.toBeNull();
+  });
+
+  it('revokes a refresh session by client ID', async () => {
+    const refreshToken = await createRemoteMcpRefreshSession({
+      userId: 'user-1',
+      clientId: 'client-1',
+      resource: 'https://roomote.example/mcp',
+      scopes: ['mcp:roomote'],
+    });
+
+    await revokeRemoteMcpRefreshSession(refreshToken, 'client-1');
+
+    await expect(getRemoteMcpRefreshSession(refreshToken)).resolves.toBeNull();
+  });
+
+  it('does not revoke a refresh session with a forged token secret', async () => {
+    const refreshToken = await createRemoteMcpRefreshSession({
+      userId: 'user-1',
+      clientId: 'client-1',
+      resource: 'https://roomote.example/mcp',
+      scopes: ['mcp:roomote'],
+    });
+    const [sessionId] = refreshToken.split('.');
+
+    await revokeRemoteMcpRefreshSession(
+      `${sessionId}.${'a'.repeat(43)}`,
+      'client-1',
+    );
+
+    await expect(
+      getRemoteMcpRefreshSession(refreshToken),
+    ).resolves.toMatchObject({ userId: 'user-1', clientId: 'client-1' });
   });
 
   it('bounds registrations per client and globally', async () => {

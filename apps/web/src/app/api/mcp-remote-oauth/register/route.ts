@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
   const registrationFingerprint = JSON.stringify({
     clientName: parsed.data.client_name,
     redirectUris: parsed.data.redirect_uris,
+    grantTypes: parsed.data.grant_types,
   });
   try {
     if (!(await isRemoteMcpRegistrationAllowed(registrationFingerprint))) {
@@ -68,6 +69,7 @@ export async function POST(request: NextRequest) {
     client = await registerRemoteMcpOAuthClient({
       clientName: parsed.data.client_name,
       redirectUris: parsed.data.redirect_uris,
+      grantTypes: parsed.data.grant_types,
     });
   } catch {
     return NextResponse.json(
@@ -82,7 +84,7 @@ export async function POST(request: NextRequest) {
       client_name: client.clientName,
       redirect_uris: client.redirectUris,
       token_endpoint_auth_method: 'none',
-      grant_types: ['authorization_code'],
+      grant_types: client.grantTypes,
       response_types: ['code'],
     },
     { status: 201, headers: { 'Cache-Control': 'no-store' } },

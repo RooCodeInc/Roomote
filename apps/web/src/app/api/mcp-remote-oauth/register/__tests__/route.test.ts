@@ -43,6 +43,7 @@ describe('POST /api/mcp-remote-oauth/register', () => {
       clientId: '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
       clientName: 'Test client',
       redirectUris: ['https://client.example/callback'],
+      grantTypes: ['authorization_code'],
     });
 
     const response = await POST(
@@ -58,6 +59,7 @@ describe('POST /api/mcp-remote-oauth/register', () => {
       JSON.stringify({
         clientName: 'Test client',
         redirectUris: ['https://client.example/callback'],
+        grantTypes: ['authorization_code'],
       }),
     );
   });
@@ -67,6 +69,7 @@ describe('POST /api/mcp-remote-oauth/register', () => {
       clientId: '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
       clientName: 'Test client',
       redirectUris: ['http://localhost:54545/callback'],
+      grantTypes: ['authorization_code', 'refresh_token'],
     });
 
     const response = await POST(
@@ -78,7 +81,7 @@ describe('POST /api/mcp-remote-oauth/register', () => {
 
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toMatchObject({
-      grant_types: ['authorization_code'],
+      grant_types: ['authorization_code', 'refresh_token'],
     });
   });
 

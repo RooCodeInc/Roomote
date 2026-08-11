@@ -4,6 +4,7 @@ import { getRedis } from '@roomote/redis';
 
 const PENDING_CLIENT_TTL_SECONDS = 60 * 60;
 const ACTIVE_CLIENT_TTL_SECONDS = 30 * 24 * 60 * 60;
+const REFRESH_SESSION_TTL_SECONDS = ACTIVE_CLIENT_TTL_SECONDS;
 const AUTHORIZATION_CODE_TTL_SECONDS = 5 * 60;
 const CONSENT_TOKEN_TTL_SECONDS = 10 * 60;
 const REGISTRATION_RATE_LIMIT_WINDOW_SECONDS = 60 * 60;
@@ -19,6 +20,8 @@ const REGISTRATION_RATE_KEY_PREFIX = 'mcp-remote-oauth:registration-rate:';
 const REGISTERED_CLIENTS_KEY = 'mcp-remote-oauth:registered-clients';
 const ACTIVE_CLIENTS_KEY = 'mcp-remote-oauth:active-clients';
 const ACTIVE_CLIENTS_USER_KEY_PREFIX = 'mcp-remote-oauth:active-clients:user:';
+const REFRESH_SESSION_KEY_PREFIX = 'mcp-remote-oauth:session:';
+const REFRESH_TOKEN_KEY_PREFIX = 'mcp-remote-oauth:refresh:';
 
 const CONSUME_CODE_LUA = `
 local value = redis.call('GET', KEYS[1])
@@ -77,10 +80,65 @@ redis.call('EXPIRE', KEYS[4], ARGV[1])
 return 1
 `;
 
+const CREATE_REFRESH_SESSION_LUA = `
+local previous = redis.call('GET', KEYS[1])
+if previous then
+  local decoded = cjson.decode(previous)
+  redis.call('DEL', ARGV[1] .. decoded.currentTokenHash)
+end
+redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[4])
+redis.call('SET', KEYS[2], ARGV[3], 'EX', ARGV[4])
+return 1
+`;
+
+const ROTATE_REFRESH_TOKEN_LUA = `
+local marker = redis.call('GET', KEYS[1])
+if marker == ARGV[1] then
+  local session = redis.call('GET', KEYS[3])
+  if session then
+    local decoded = cjson.decode(session)
+    redis.call('DEL', ARGV[5] .. decoded.currentTokenHash)
+  end
+  redis.call('DEL', KEYS[3])
+  return {'reuse'}
+end
+if marker ~= ARGV[2] then
+  return {'invalid'}
+end
+local session = redis.call('GET', KEYS[3])
+if not session or session ~= ARGV[3] then
+  return {'invalid'}
+end
+redis.call('SET', KEYS[1], ARGV[1], 'KEEPTTL')
+redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[6])
+redis.call('SET', KEYS[3], ARGV[4], 'EX', ARGV[6])
+return {'ok'}
+`;
+
+const REVOKE_REFRESH_SESSION_LUA = `
+local marker = redis.call('GET', KEYS[1])
+if marker ~= ARGV[3] then
+  return 0
+end
+local session = redis.call('GET', KEYS[2])
+if not session then
+  return 0
+end
+local decoded = cjson.decode(session)
+if decoded.clientId ~= ARGV[1] or decoded.currentTokenHash ~= ARGV[4] then
+  return 0
+end
+redis.call('DEL', ARGV[2] .. decoded.currentTokenHash)
+redis.call('DEL', KEYS[1])
+redis.call('DEL', KEYS[2])
+return 1
+`;
+
 type RemoteMcpOAuthClient = {
   clientId: string;
   clientName?: string;
   redirectUris: string[];
+  grantTypes: ('authorization_code' | 'refresh_token')[];
 };
 
 type RemoteMcpAuthorizationCode = {
@@ -97,6 +155,16 @@ type RemoteMcpConsentBinding = {
   requestTarget: string;
 };
 
+type RemoteMcpRefreshSession = {
+  sessionId: string;
+  userId: string;
+  clientId: string;
+  resource: string;
+  scopes: string[];
+  currentTokenHash: string;
+  expiresAt: number;
+};
+
 function clientKey(clientId: string): string {
   return `${CLIENT_KEY_PREFIX}${clientId}`;
 }
@@ -107,6 +175,35 @@ function codeKey(code: string): string {
 
 function consentKey(token: string): string {
   return `${CONSENT_KEY_PREFIX}${token}`;
+}
+
+function refreshSessionId(userId: string, clientId: string): string {
+  return createHash('sha256').update(`${userId}\0${clientId}`).digest('hex');
+}
+
+function refreshSessionKey(sessionId: string): string {
+  return `${REFRESH_SESSION_KEY_PREFIX}${sessionId}`;
+}
+
+function refreshTokenHash(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+function refreshTokenKey(tokenHash: string): string {
+  return `${REFRESH_TOKEN_KEY_PREFIX}${tokenHash}`;
+}
+
+function createRefreshToken(sessionId: string): string {
+  return `${sessionId}.${randomBytes(32).toString('base64url')}`;
+}
+
+function parseRefreshToken(token: string): string | null {
+  const separator = token.indexOf('.');
+  const sessionId = token.slice(0, separator);
+  const secret = token.slice(separator + 1);
+  return /^[a-f0-9]{64}$/.test(sessionId) && secret.length >= 32
+    ? sessionId
+    : null;
 }
 
 export function isAllowedOAuthRedirectUri(value: string): boolean {
@@ -128,11 +225,13 @@ export function isAllowedOAuthRedirectUri(value: string): boolean {
 export async function registerRemoteMcpOAuthClient(input: {
   clientName?: string;
   redirectUris: string[];
+  grantTypes?: ('authorization_code' | 'refresh_token')[];
 }): Promise<RemoteMcpOAuthClient> {
   const client: RemoteMcpOAuthClient = {
     clientId: randomUUID(),
     ...(input.clientName ? { clientName: input.clientName } : {}),
     redirectUris: input.redirectUris,
+    grantTypes: input.grantTypes ?? ['authorization_code'],
   };
 
   const now = Math.floor(Date.now() / 1000);
@@ -181,7 +280,17 @@ export async function getRemoteMcpOAuthClient(
   clientId: string,
 ): Promise<RemoteMcpOAuthClient | null> {
   const value = await getRedis().get(clientKey(clientId));
-  return value ? (JSON.parse(value) as RemoteMcpOAuthClient) : null;
+  if (!value) return null;
+  const client = JSON.parse(value) as Omit<
+    RemoteMcpOAuthClient,
+    'grantTypes'
+  > & {
+    grantTypes?: RemoteMcpOAuthClient['grantTypes'];
+  };
+  return {
+    ...client,
+    grantTypes: client.grantTypes ?? ['authorization_code'],
+  };
 }
 
 export async function createRemoteMcpAuthorizationCode(
@@ -243,6 +352,107 @@ export async function consumeRemoteMcpConsentToken(
     JSON.stringify(expected),
   );
   return typeof value === 'string';
+}
+
+export async function createRemoteMcpRefreshSession(value: {
+  userId: string;
+  clientId: string;
+  resource: string;
+  scopes: string[];
+}): Promise<string> {
+  const sessionId = refreshSessionId(value.userId, value.clientId);
+  const refreshToken = createRefreshToken(sessionId);
+  const tokenHash = refreshTokenHash(refreshToken);
+  const now = Math.floor(Date.now() / 1000);
+  const session: RemoteMcpRefreshSession = {
+    sessionId,
+    ...value,
+    currentTokenHash: tokenHash,
+    expiresAt: now + REFRESH_SESSION_TTL_SECONDS,
+  };
+  await getRedis().eval(
+    CREATE_REFRESH_SESSION_LUA,
+    2,
+    refreshSessionKey(sessionId),
+    refreshTokenKey(tokenHash),
+    REFRESH_TOKEN_KEY_PREFIX,
+    JSON.stringify(session),
+    `active:${sessionId}`,
+    String(REFRESH_SESSION_TTL_SECONDS),
+  );
+  return refreshToken;
+}
+
+export async function getRemoteMcpRefreshSession(
+  refreshToken: string,
+): Promise<RemoteMcpRefreshSession | null> {
+  const sessionId = parseRefreshToken(refreshToken);
+  if (!sessionId) return null;
+  const tokenHash = refreshTokenHash(refreshToken);
+  const redis = getRedis();
+  const [marker, value] = await Promise.all([
+    redis.get(refreshTokenKey(tokenHash)),
+    redis.get(refreshSessionKey(sessionId)),
+  ]);
+  if (marker !== `active:${sessionId}` || !value) return null;
+  const session = JSON.parse(value) as RemoteMcpRefreshSession;
+  return session.currentTokenHash === tokenHash ? session : null;
+}
+
+export async function rotateRemoteMcpRefreshToken(
+  refreshToken: string,
+  expected: RemoteMcpRefreshSession,
+): Promise<
+  { status: 'ok'; refreshToken: string } | { status: 'invalid' | 'reuse' }
+> {
+  const sessionId = parseRefreshToken(refreshToken);
+  if (!sessionId || sessionId !== expected.sessionId) {
+    return { status: 'invalid' };
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const ttl = expected.expiresAt - now;
+  if (ttl <= 0) return { status: 'invalid' };
+
+  const nextRefreshToken = createRefreshToken(sessionId);
+  const nextTokenHash = refreshTokenHash(nextRefreshToken);
+  const nextSession = { ...expected, currentTokenHash: nextTokenHash };
+  const oldTokenHash = refreshTokenHash(refreshToken);
+  const result = (await getRedis().eval(
+    ROTATE_REFRESH_TOKEN_LUA,
+    3,
+    refreshTokenKey(oldTokenHash),
+    refreshTokenKey(nextTokenHash),
+    refreshSessionKey(sessionId),
+    `rotated:${sessionId}`,
+    `active:${sessionId}`,
+    JSON.stringify(expected),
+    JSON.stringify(nextSession),
+    REFRESH_TOKEN_KEY_PREFIX,
+    String(ttl),
+  )) as string[];
+  if (result[0] !== 'ok') {
+    return { status: result[0] === 'reuse' ? 'reuse' : 'invalid' };
+  }
+  return { status: 'ok', refreshToken: nextRefreshToken };
+}
+
+export async function revokeRemoteMcpRefreshSession(
+  refreshToken: string,
+  clientId: string,
+): Promise<void> {
+  const sessionId = parseRefreshToken(refreshToken);
+  if (!sessionId) return;
+  const tokenHash = refreshTokenHash(refreshToken);
+  await getRedis().eval(
+    REVOKE_REFRESH_SESSION_LUA,
+    2,
+    refreshTokenKey(tokenHash),
+    refreshSessionKey(sessionId),
+    clientId,
+    REFRESH_TOKEN_KEY_PREFIX,
+    `active:${sessionId}`,
+    tokenHash,
+  );
 }
 
 export async function isRemoteMcpRegistrationAllowed(

@@ -44,8 +44,9 @@ to its registered callback after the user explicitly approves access. The
 client must support OAuth authorization code flow with S256 PKCE and dynamic
 client registration.
 
-Roomote currently issues a one-hour access token without a refresh token. When
-it expires, the client starts the browser authorization flow again.
+Roomote issues one-hour access tokens and rotates an opaque refresh token for
+up to 30 days. The client returns to browser authorization when that session
+expires or is revoked.
 
 ## Integration boundary
 
