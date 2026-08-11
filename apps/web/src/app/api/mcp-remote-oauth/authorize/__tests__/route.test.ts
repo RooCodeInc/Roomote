@@ -44,7 +44,7 @@ function authorizeRequest(options?: {
   url.searchParams.set('state', 'client-state');
   url.searchParams.set('code_challenge', 'a'.repeat(43));
   url.searchParams.set('code_challenge_method', 'S256');
-  url.searchParams.set('resource', 'https://api.example.com/mcp');
+  url.searchParams.set('resource', 'https://roomote.example/mcp');
   url.searchParams.set('scope', 'mcp:roomote');
   if (!options?.approved) return new NextRequest(url);
 
@@ -119,7 +119,7 @@ describe('GET /api/mcp-remote-oauth/authorize', () => {
       clientId,
       redirectUri,
       codeChallenge: 'a'.repeat(43),
-      resource: 'https://api.example.com/mcp',
+      resource: 'https://roomote.example/mcp',
       scopes: ['mcp:roomote'],
     });
     expect(mockConsumeConsentToken).toHaveBeenCalledWith('consent-token', {

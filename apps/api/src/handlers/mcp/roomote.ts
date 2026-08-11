@@ -120,7 +120,7 @@ async function resolveRoomoteMcpAuth(
   if (
     authContext.tokenType === 'mcp' &&
     [
-      getRoomoteMcpResourceUrl(Env.TRPC_URL),
+      getRoomoteMcpResourceUrl(Env.R_PUBLIC_URL ?? Env.R_APP_URL),
       ...(options.allowLegacyAudience
         ? [getLegacyRoomoteMcpResourceUrl(Env.TRPC_URL)]
         : []),

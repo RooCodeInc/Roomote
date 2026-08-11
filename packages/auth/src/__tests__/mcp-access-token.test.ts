@@ -28,6 +28,9 @@ vi.mock('../client-runtime', () => ({
 
 import {
   createMcpAccessToken,
+  getLegacyRoomoteMcpResourceUrl,
+  getRoomoteMcpProtectedResourceMetadataUrl,
+  getRoomoteMcpResourceUrl,
   ROOMOTE_MCP_SCOPE,
   validateMcpAccessToken,
 } from '../mcp-access-token';
@@ -80,5 +83,19 @@ describe('MCP access tokens', () => {
       resource,
       scopes: [ROOMOTE_MCP_SCOPE],
     });
+  });
+
+  it('preserves a single-origin API proxy prefix in MCP URLs', () => {
+    const apiBaseUrl = 'https://roomote.example/_roomote-api';
+
+    expect(getRoomoteMcpResourceUrl(apiBaseUrl)).toBe(
+      'https://roomote.example/_roomote-api/mcp',
+    );
+    expect(getLegacyRoomoteMcpResourceUrl(apiBaseUrl)).toBe(
+      'https://roomote.example/_roomote-api/api/mcp-routing/roomote',
+    );
+    expect(getRoomoteMcpProtectedResourceMetadataUrl(apiBaseUrl)).toBe(
+      'https://roomote.example/_roomote-api/.well-known/oauth-protected-resource/mcp',
+    );
   });
 });

@@ -112,7 +112,9 @@ async function handleAuthorize(request: NextRequest, approved: boolean) {
     );
   }
 
-  const expectedResource = getRoomoteMcpResourceUrl(env.TRPC_URL);
+  const expectedResource = getRoomoteMcpResourceUrl(
+    env.R_PUBLIC_URL ?? env.R_APP_URL,
+  );
   const scopes = (input.scope ?? ROOMOTE_MCP_SCOPE)
     .split(/\s+/)
     .filter(Boolean);

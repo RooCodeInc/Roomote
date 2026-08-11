@@ -26,9 +26,11 @@ export {
   DEFAULT_MCP_ACCESS_TOKEN_TIMEOUT_MS,
   ROOMOTE_MCP_LEGACY_PATH,
   ROOMOTE_MCP_PATH,
+  ROOMOTE_MCP_PROTECTED_RESOURCE_METADATA_PATH,
   ROOMOTE_MCP_SCOPE,
   createMcpAccessToken,
   getLegacyRoomoteMcpResourceUrl,
+  getRoomoteMcpProtectedResourceMetadataUrl,
   getRoomoteMcpResourceUrl,
   validateMcpAccessToken,
 } from './mcp-access-token';

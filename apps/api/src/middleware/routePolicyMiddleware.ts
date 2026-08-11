@@ -5,6 +5,8 @@ import { createMiddleware } from 'hono/factory';
 
 import type { McpAccessTokenContext, RunTokenContext } from '@roomote/types';
 import { getRedis } from '@roomote/redis';
+import { getRoomoteMcpProtectedResourceMetadataUrl } from '@roomote/auth';
+import { Env } from '@roomote/env';
 
 import type { Variables } from '../types';
 import {
@@ -107,13 +109,9 @@ function rejectionResponse(
     (rule.name === 'roomote-mcp' || rule.name === 'roomote-public-mcp') &&
     rejection.status === 401
   ) {
-    const resourceMetadata = new URL(
-      '/.well-known/oauth-protected-resource/mcp',
-      c.req.url,
-    );
     c.header(
       'WWW-Authenticate',
-      `Bearer resource_metadata="${resourceMetadata.toString()}"`,
+      `Bearer resource_metadata="${getRoomoteMcpProtectedResourceMetadataUrl(Env.R_PUBLIC_URL ?? Env.R_APP_URL)}"`,
     );
   }
 

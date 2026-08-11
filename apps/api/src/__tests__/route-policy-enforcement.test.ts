@@ -1,5 +1,9 @@
 import type { Context, Next } from 'hono';
-import { getRoomoteMcpResourceUrl } from '@roomote/auth';
+import {
+  getLegacyRoomoteMcpResourceUrl,
+  getRoomoteMcpProtectedResourceMetadataUrl,
+  getRoomoteMcpResourceUrl,
+} from '@roomote/auth';
 import { Env } from '@roomote/env';
 
 import type { Variables } from '../types';
@@ -81,7 +85,9 @@ vi.mock('../middleware', async (importOriginal) => {
           c.set('authContext', {
             tokenType: 'mcp',
             userId: 'user-123',
-            resource: getRoomoteMcpResourceUrl(Env.TRPC_URL),
+            resource: getRoomoteMcpResourceUrl(
+              Env.R_PUBLIC_URL ?? Env.R_APP_URL,
+            ),
             scopes: ['mcp:roomote'],
             version: 1,
           } as Variables['authContext']);
@@ -101,10 +107,7 @@ vi.mock('../middleware', async (importOriginal) => {
           c.set('authContext', {
             tokenType: 'mcp',
             userId: 'user-123',
-            resource: new URL(
-              '/api/mcp-routing/roomote',
-              Env.TRPC_URL,
-            ).toString(),
+            resource: getLegacyRoomoteMcpResourceUrl(Env.TRPC_URL),
             scopes: ['mcp:roomote'],
             version: 1,
           } as Variables['authContext']);
@@ -156,7 +159,7 @@ describe('route policy enforcement', () => {
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toMatchObject({
-        resource: expect.stringMatching(/\/mcp$/),
+        resource: getRoomoteMcpResourceUrl(Env.R_PUBLIC_URL ?? Env.R_APP_URL),
         authorization_servers: [expect.any(String)],
         bearer_methods_supported: ['header'],
         scopes_supported: ['mcp:roomote'],
@@ -223,7 +226,7 @@ describe('route policy enforcement', () => {
 
       expect(mcpRoutingResponse.status).toBe(401);
       expect(mcpRoutingResponse.headers.get('www-authenticate')).toBe(
-        'Bearer resource_metadata="http://localhost/.well-known/oauth-protected-resource/mcp"',
+        `Bearer resource_metadata="${getRoomoteMcpProtectedResourceMetadataUrl(Env.R_PUBLIC_URL ?? Env.R_APP_URL)}"`,
       );
       await expect(mcpRoutingResponse.json()).resolves.toEqual(
         jsonRpcUnauthorized,

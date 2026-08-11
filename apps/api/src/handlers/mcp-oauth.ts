@@ -1,12 +1,14 @@
 import { Hono, type Context } from 'hono';
 
-import { getRoomoteMcpResourceUrl, ROOMOTE_MCP_SCOPE } from '@roomote/auth';
+import {
+  getRoomoteMcpResourceUrl,
+  ROOMOTE_MCP_PROTECTED_RESOURCE_METADATA_PATH,
+  ROOMOTE_MCP_SCOPE,
+} from '@roomote/auth';
 import { Env } from '@roomote/env';
 
 import type { Variables } from '../types';
 
-const ROOMOTE_MCP_PROTECTED_RESOURCE_METADATA_PATH =
-  '/.well-known/oauth-protected-resource/mcp';
 const LEGACY_ROOMOTE_MCP_PROTECTED_RESOURCE_METADATA_PATH =
   '/.well-known/oauth-protected-resource/api/mcp-routing/roomote';
 
@@ -19,7 +21,7 @@ const protectedResourceMetadataHandler = (
 
   c.header('Cache-Control', 'public, max-age=3600');
   return c.json({
-    resource: getRoomoteMcpResourceUrl(Env.TRPC_URL),
+    resource: getRoomoteMcpResourceUrl(authorizationServer),
     authorization_servers: [new URL(authorizationServer).origin],
     bearer_methods_supported: ['header'],
     scopes_supported: [ROOMOTE_MCP_SCOPE],

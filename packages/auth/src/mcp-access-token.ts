@@ -21,14 +21,33 @@ const ISSUER = 'rcc';
 export const ROOMOTE_MCP_SCOPE = 'mcp:roomote';
 export const ROOMOTE_MCP_PATH = '/mcp';
 export const ROOMOTE_MCP_LEGACY_PATH = '/api/mcp-routing/roomote';
+export const ROOMOTE_MCP_PROTECTED_RESOURCE_METADATA_PATH =
+  '/.well-known/oauth-protected-resource/mcp';
 export const DEFAULT_MCP_ACCESS_TOKEN_TIMEOUT_MS = 60 * 60 * 1000;
 
+function appendPathToBaseUrl(baseUrl: string, path: string): string {
+  const url = new URL(baseUrl);
+  url.pathname = `${url.pathname.replace(/\/$/, '')}${path}`;
+  url.search = '';
+  url.hash = '';
+  return url.toString();
+}
+
 export function getRoomoteMcpResourceUrl(apiBaseUrl: string): string {
-  return new URL(ROOMOTE_MCP_PATH, apiBaseUrl).toString();
+  return appendPathToBaseUrl(apiBaseUrl, ROOMOTE_MCP_PATH);
 }
 
 export function getLegacyRoomoteMcpResourceUrl(apiBaseUrl: string): string {
-  return new URL(ROOMOTE_MCP_LEGACY_PATH, apiBaseUrl).toString();
+  return appendPathToBaseUrl(apiBaseUrl, ROOMOTE_MCP_LEGACY_PATH);
+}
+
+export function getRoomoteMcpProtectedResourceMetadataUrl(
+  apiBaseUrl: string,
+): string {
+  return appendPathToBaseUrl(
+    apiBaseUrl,
+    ROOMOTE_MCP_PROTECTED_RESOURCE_METADATA_PATH,
+  );
 }
 
 const createMcpAccessTokenOptionsSchema = z.object({

@@ -10,13 +10,9 @@ manually creating or copying an API token.
 
 ## Prerequisites
 
-Before connecting a client:
-
-- `TRPC_URL` must be a browser-reachable HTTPS API origin
-- `R_PUBLIC_URL`, or `R_APP_URL` when no public URL is set, must be a
-  browser-reachable HTTPS web origin
-- both origins must be able to reach the same Redis deployment and use the
-  same Roomote signing keys
+Before connecting a client, `R_PUBLIC_URL`, or `R_APP_URL` when no public URL
+is set, must be a browser-reachable HTTPS origin. The web and API services must
+also share Redis and the same Roomote signing keys.
 
 Loopback HTTP callback URLs are accepted for desktop clients. Other client
 callback URLs must use HTTPS.
@@ -26,13 +22,19 @@ callback URLs must use HTTPS.
 Configure the MCP client with this server URL:
 
 ```text
-<TRPC_URL>/mcp
+<ROOMOTE_URL>/mcp
+```
+
+For example, if Roomote is available at `https://roomote.example`, use:
+
+```text
+https://roomote.example/mcp
 ```
 
 For Claude Code, add it at user scope and start the browser login:
 
 ```bash
-claude mcp add --transport http roomote --scope user <TRPC_URL>/mcp
+claude mcp add --transport http roomote --scope user <ROOMOTE_URL>/mcp
 claude mcp login roomote
 ```
 
