@@ -1,8 +1,10 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { Streamdown } from 'streamdown';
+import type { SandboxModelState } from '@roomote/sdk/sandbox-router';
+import { toast } from 'sonner';
 
 import {
   type ComputeProvider,
@@ -38,6 +40,11 @@ import {
   DollarSign,
   Globe,
   Slack,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Terminal,
 } from '@/components/system';
 import { PullRequestBadge, WorkspaceBadge } from '@/components/sandbox';
@@ -46,6 +53,8 @@ import { streamdownCodeMermaidCjkPlugins } from '@/components/ai-elements/stream
 import {
   type SessionTaskRun,
   type SessionTask,
+  useSandboxClient,
+  useSandboxConnected,
   useSandboxMessages,
   useTaskSummary,
 } from '../hooks';
@@ -227,7 +236,12 @@ export function TaskInfoPanel({
   harness,
   onClose,
 }: TaskInfoPanelProps) {
+  const client = useSandboxClient();
+  const connected = useSandboxConnected();
   const { messages } = useSandboxMessages();
+  const [modelState, setModelState] = useState<SandboxModelState | null>(null);
+  const [isSwitchingModel, setIsSwitchingModel] = useState(false);
+  const modelOperationIdRef = useRef(0);
   const {
     enabled: summaryEnabled,
     summary,
@@ -236,6 +250,35 @@ export function TaskInfoPanel({
     isSummaryStale,
     regenerateSummary,
   } = useTaskSummary(task.id, { enabled: active });
+
+  useEffect(() => {
+    const operationId = ++modelOperationIdRef.current;
+
+    if (!active || !connected || !client) {
+      setModelState(null);
+      setIsSwitchingModel(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    void client.commands.getRuntimeState
+      .query()
+      .then((runtimeState) => {
+        if (!cancelled && modelOperationIdRef.current === operationId) {
+          setModelState(runtimeState.modelState);
+        }
+      })
+      .catch(() => {
+        if (!cancelled && modelOperationIdRef.current === operationId) {
+          setModelState(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [active, client, connected]);
 
   const taskRunError = getTaskRunDisplayError(taskRun);
   const startedFrom = getStartedFrom(task, taskRun);
@@ -249,21 +292,22 @@ export function TaskInfoPanel({
     ? SANDBOX_PROVIDER_LABELS[taskRun.vendor]
     : 'Unknown';
   const taskModelReasoningEffort = taskRun.payload?.reasoningEffort;
+  const displayedModel = modelState?.activeModel ?? task.model;
   const inferenceProviderId =
     task.modelProvider && task.modelProvider !== 'opencode'
       ? task.modelProvider
-      : task.model
-        ? getTaskModelProviderId(task.model)
+      : displayedModel
+        ? getTaskModelProviderId(displayedModel)
         : null;
   const inferenceProviderLabel =
-    inferenceProviderId && task.model?.includes('/')
+    inferenceProviderId && displayedModel?.includes('/')
       ? getModelProviderLabel(inferenceProviderId)
       : null;
-  const taskModelLabel = task.model
+  const taskModelLabel = displayedModel
     ? [
         inferenceProviderLabel
-          ? `${getTaskModelDisplayName(task.model)} via ${inferenceProviderLabel}`
-          : getTaskModelDisplayName(task.model),
+          ? `${getTaskModelDisplayName(displayedModel)} via ${inferenceProviderLabel}`
+          : getTaskModelDisplayName(displayedModel),
         taskModelReasoningEffort
           ? getReasoningEffortLabel(taskModelReasoningEffort)
           : null,
@@ -271,6 +315,61 @@ export function TaskInfoPanel({
         .filter(Boolean)
         .join(' • ')
     : null;
+  const canSwitchModel =
+    connected &&
+    client !== null &&
+    modelState?.activeModel !== null &&
+    (modelState?.switchableModels.length ?? 0) > 1;
+  const activeModel = modelState?.activeModel ?? undefined;
+  const switchableModels = modelState?.switchableModels ?? [];
+
+  const handleModelChange = async (model: string) => {
+    if (
+      !client ||
+      !modelState?.activeModel ||
+      model === modelState.activeModel
+    ) {
+      return;
+    }
+
+    setIsSwitchingModel(true);
+    const operationId = ++modelOperationIdRef.current;
+
+    try {
+      const result = await client.commands.switchModel.mutate({ model });
+
+      if (modelOperationIdRef.current !== operationId) {
+        return;
+      }
+
+      setModelState((current) =>
+        current
+          ? {
+              ...current,
+              activeModel: result.activeModel,
+            }
+          : current,
+      );
+
+      if (result.changed) {
+        toast.success(
+          `Model switched to ${getTaskModelDisplayName(result.activeModel ?? model)}.`,
+        );
+      }
+    } catch (error) {
+      if (modelOperationIdRef.current !== operationId) {
+        return;
+      }
+
+      toast.error(
+        error instanceof Error ? error.message : 'Failed to switch model.',
+      );
+    } finally {
+      if (modelOperationIdRef.current === operationId) {
+        setIsSwitchingModel(false);
+      }
+    }
+  };
   const inferenceCostLabel = formatInferenceCost(
     task.inferenceUsage?.costMicroUsd,
   );
@@ -385,10 +484,34 @@ export function TaskInfoPanel({
                     Model
                   </td>
                   <td className="py-1">
-                    <span className="inline-flex items-center gap-1.5">
-                      <Brain className="size-3.5 shrink-0 text-muted-foreground" />
-                      <span className="truncate">{taskModelLabel}</span>
-                    </span>
+                    {canSwitchModel ? (
+                      <Select
+                        value={activeModel}
+                        onValueChange={(model) => void handleModelChange(model)}
+                        disabled={isSwitchingModel}
+                      >
+                        <SelectTrigger
+                          size="sm"
+                          className="w-full min-w-48"
+                          aria-label="Active model"
+                        >
+                          <Brain className="text-muted-foreground" />
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {switchableModels.map((model) => (
+                            <SelectItem key={model} value={model}>
+                              {getTaskModelDisplayName(model)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5">
+                        <Brain className="size-3.5 shrink-0 text-muted-foreground" />
+                        <span className="truncate">{taskModelLabel}</span>
+                      </span>
+                    )}
                   </td>
                 </tr>
               )}

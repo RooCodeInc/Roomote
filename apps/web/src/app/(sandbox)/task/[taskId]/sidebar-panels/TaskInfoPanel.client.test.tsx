@@ -1,16 +1,78 @@
 import type { ReactNode } from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { TaskPayloadKind } from '@roomote/types';
 
-const { useSandboxMessagesMock, useTaskSummaryMock } = vi.hoisted(() => ({
+const {
+  getRuntimeStateMock,
+  switchModelMock,
+  toastErrorMock,
+  toastSuccessMock,
+  useSandboxClientMock,
+  useSandboxConnectedMock,
+  useSandboxMessagesMock,
+  useTaskSummaryMock,
+} = vi.hoisted(() => ({
+  getRuntimeStateMock: vi.fn(),
+  switchModelMock: vi.fn(),
+  toastErrorMock: vi.fn(),
+  toastSuccessMock: vi.fn(),
+  useSandboxClientMock: vi.fn(),
+  useSandboxConnectedMock: vi.fn(),
   useSandboxMessagesMock: vi.fn(),
   useTaskSummaryMock: vi.fn(),
 }));
 
+vi.mock('sonner', () => ({
+  toast: {
+    error: toastErrorMock,
+    success: toastSuccessMock,
+  },
+}));
+
 vi.mock('../hooks', () => ({
+  useSandboxClient: useSandboxClientMock,
+  useSandboxConnected: useSandboxConnectedMock,
   useSandboxMessages: useSandboxMessagesMock,
   useTaskSummary: useTaskSummaryMock,
 }));
+
+vi.mock('@/components/system', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/system')>();
+
+  return {
+    ...actual,
+    Select: ({
+      children,
+      disabled,
+      onValueChange,
+      value,
+    }: {
+      children: ReactNode;
+      disabled?: boolean;
+      onValueChange: (value: string) => void;
+      value?: string;
+    }) => (
+      <select
+        aria-label="Active model"
+        disabled={disabled}
+        value={value}
+        onChange={(event) => onValueChange(event.target.value)}
+      >
+        {children}
+      </select>
+    ),
+    SelectTrigger: () => null,
+    SelectValue: () => null,
+    SelectContent: ({ children }: { children: ReactNode }) => <>{children}</>,
+    SelectItem: ({
+      children,
+      value,
+    }: {
+      children: ReactNode;
+      value: string;
+    }) => <option value={value}>{children}</option>,
+  };
+});
 
 vi.mock('streamdown', () => ({
   Streamdown: ({ children }: { children: ReactNode }) => <div>{children}</div>,
@@ -80,6 +142,8 @@ const baseTaskRun = {
 describe('TaskInfoPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useSandboxConnectedMock.mockReturnValue(false);
+    useSandboxClientMock.mockReturnValue(null);
     useSandboxMessagesMock.mockReturnValue({
       messages: [],
       protocol: 'roomote_runtime',
@@ -254,6 +318,184 @@ describe('TaskInfoPanel', () => {
     expect(
       screen.getByText('GPT 5.6 Terra via OpenRouter').closest('span'),
     ).toHaveClass('truncate');
+  });
+
+  it('switches between models supported by the connected runtime', async () => {
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxClientMock.mockReturnValue({
+      commands: {
+        getRuntimeState: { query: getRuntimeStateMock },
+        switchModel: { mutate: switchModelMock },
+      },
+    });
+    getRuntimeStateMock.mockResolvedValue({
+      modelState: {
+        activeModel: 'openrouter/openai/gpt-5.6-terra',
+        launchModel: 'openrouter/openai/gpt-5.6-terra',
+        switchableModels: [
+          'openrouter/openai/gpt-5.6-terra',
+          'openai/gpt-5.6-sol',
+        ],
+      },
+    });
+    switchModelMock.mockResolvedValue({
+      success: true,
+      activeModel: 'openai/gpt-5.6-sol',
+      changed: true,
+    });
+
+    render(
+      <TaskInfoPanel
+        active={true}
+        task={baseTask as never}
+        taskRun={baseTaskRun as never}
+        harness="opencode-server"
+        onClose={vi.fn()}
+      />,
+    );
+
+    const selector = await screen.findByRole('combobox', {
+      name: 'Active model',
+    });
+    fireEvent.change(selector, { target: { value: 'openai/gpt-5.6-sol' } });
+
+    await waitFor(() => {
+      expect(switchModelMock).toHaveBeenCalledWith({
+        model: 'openai/gpt-5.6-sol',
+      });
+    });
+    await waitFor(() => expect(selector).toHaveValue('openai/gpt-5.6-sol'));
+    expect(toastSuccessMock).toHaveBeenCalledWith(
+      'Model switched to openai/gpt-5.6-sol.',
+    );
+  });
+
+  it('re-enables the selector and keeps the active model after a failed switch', async () => {
+    let rejectSwitch: (error: Error) => void = () => {};
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxClientMock.mockReturnValue({
+      commands: {
+        getRuntimeState: { query: getRuntimeStateMock },
+        switchModel: { mutate: switchModelMock },
+      },
+    });
+    getRuntimeStateMock.mockResolvedValue({
+      modelState: {
+        activeModel: 'openrouter/openai/gpt-5.6-terra',
+        launchModel: 'openrouter/openai/gpt-5.6-terra',
+        switchableModels: [
+          'openrouter/openai/gpt-5.6-terra',
+          'openai/gpt-5.6-sol',
+        ],
+      },
+    });
+    switchModelMock.mockReturnValue(
+      new Promise((_, reject) => {
+        rejectSwitch = reject;
+      }),
+    );
+
+    render(
+      <TaskInfoPanel
+        active={true}
+        task={baseTask as never}
+        taskRun={baseTaskRun as never}
+        harness="opencode-server"
+        onClose={vi.fn()}
+      />,
+    );
+
+    const selector = await screen.findByRole('combobox', {
+      name: 'Active model',
+    });
+    fireEvent.change(selector, { target: { value: 'openai/gpt-5.6-sol' } });
+    expect(selector).toBeDisabled();
+
+    rejectSwitch(new Error('Model unavailable'));
+
+    await waitFor(() => expect(selector).not.toBeDisabled());
+    expect(selector).toHaveValue('openrouter/openai/gpt-5.6-terra');
+    expect(toastErrorMock).toHaveBeenCalledWith('Model unavailable');
+  });
+
+  it('does not report a server-confirmed no-op as a model switch', async () => {
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxClientMock.mockReturnValue({
+      commands: {
+        getRuntimeState: { query: getRuntimeStateMock },
+        switchModel: { mutate: switchModelMock },
+      },
+    });
+    getRuntimeStateMock.mockResolvedValue({
+      modelState: {
+        activeModel: 'openrouter/openai/gpt-5.6-terra',
+        launchModel: 'openrouter/openai/gpt-5.6-terra',
+        switchableModels: [
+          'openrouter/openai/gpt-5.6-terra',
+          'openai/gpt-5.6-sol',
+        ],
+      },
+    });
+    switchModelMock.mockResolvedValue({
+      success: true,
+      activeModel: 'openrouter/openai/gpt-5.6-terra',
+      changed: false,
+    });
+
+    render(
+      <TaskInfoPanel
+        active={true}
+        task={baseTask as never}
+        taskRun={baseTaskRun as never}
+        harness="opencode-server"
+        onClose={vi.fn()}
+      />,
+    );
+
+    const selector = await screen.findByRole('combobox', {
+      name: 'Active model',
+    });
+    fireEvent.change(selector, { target: { value: 'openai/gpt-5.6-sol' } });
+
+    await waitFor(() =>
+      expect(selector).toHaveValue('openrouter/openai/gpt-5.6-terra'),
+    );
+    expect(toastSuccessMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the model read-only when the runtime has no alternate model', async () => {
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxClientMock.mockReturnValue({
+      commands: {
+        getRuntimeState: { query: getRuntimeStateMock },
+        switchModel: { mutate: switchModelMock },
+      },
+    });
+    getRuntimeStateMock.mockResolvedValue({
+      modelState: {
+        activeModel: 'openrouter/openai/gpt-5.6-terra',
+        launchModel: 'openrouter/openai/gpt-5.6-terra',
+        switchableModels: ['openrouter/openai/gpt-5.6-terra'],
+      },
+    });
+
+    render(
+      <TaskInfoPanel
+        active={true}
+        task={baseTask as never}
+        taskRun={baseTaskRun as never}
+        harness="opencode-server"
+        onClose={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(getRuntimeStateMock).toHaveBeenCalled());
+    expect(
+      screen.queryByRole('combobox', { name: 'Active model' }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText('GPT 5.6 Terra via OpenRouter'),
+    ).toBeInTheDocument();
   });
 
   it('shows the task model thinking level when available', () => {
