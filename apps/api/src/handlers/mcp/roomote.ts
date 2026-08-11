@@ -109,6 +109,18 @@ async function resolveRoomoteMcpAuth(
     };
   }
 
+  if (
+    authContext.tokenType === 'mcp' &&
+    authContext.resource ===
+      new URL('/api/mcp-routing/roomote', Env.TRPC_URL).toString() &&
+    authContext.scopes.includes('mcp:roomote')
+  ) {
+    return {
+      userId: authContext.userId,
+      tokenType: 'auth',
+    };
+  }
+
   throw new McpProxyError(
     403,
     `${PRODUCT_NAME} MCP requires a user-scoped auth token or task run token`,

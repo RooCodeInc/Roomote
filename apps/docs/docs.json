@@ -135,6 +135,7 @@
         "pages": [
           "integrations/index",
           "integrations/custom-mcp-servers",
+          "integrations/remote-roomote-mcp",
           "integrations/asana",
           "integrations/better-stack",
           "integrations/braintrust",
