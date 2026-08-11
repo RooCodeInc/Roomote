@@ -4737,10 +4737,20 @@ export class OpenCodeServerHarness
       return;
     }
 
+    const sessionId = this.sessionId;
+
+    if (sessionId && (await this.hasUnsettledToolWork(sessionId))) {
+      // OpenCode can emit an idle transition while a command is still running.
+      // Keep the turn active so consumers do not start the sleep countdown.
+      this.logger.info(
+        `Ignoring stale OpenCode idle event while the session still has unsettled tool work source=${source} sessionId=${sessionId}`,
+      );
+      return;
+    }
+
     const finalized =
       (await this.finalizeLatestAssistantMessage()) ??
       this.finalizedAssistantTurn;
-    const sessionId = this.sessionId;
 
     this.inFlight = false;
     this.finalizedAssistantTurn = null;
@@ -4768,21 +4778,6 @@ export class OpenCodeServerHarness
             `OpenCode Slack closeout hook still blocked after ${MAX_OPENCODE_STOP_HOOK_REMINDERS} reminders; completing the turn without a Slack closeout reason=${reason}`,
           );
         } else {
-          if (await this.hasUnsettledToolWork(sessionId)) {
-            // The idle that triggered enforcement was stale: the session
-            // still has a tool call pending/running or an assistant message
-            // streaming. A reminder submitted now lands mid-work and reads
-            // as an instruction to drop that work, so defer to the next
-            // genuine idle. Restore inFlight so that idle passes the entry
-            // guard, and arm the fail-safe in case it never arrives.
-            this.logger.info(
-              `OpenCode Slack closeout reminder deferred: the session still has unsettled tool work sessionId=${sessionId}`,
-            );
-            this.inFlight = true;
-            this.armStopHookReminderStall(sessionId);
-            return;
-          }
-
           this.stopHookReminderCount += 1;
           this.logger.info(
             `OpenCode Slack closeout reminder submitted count=${this.stopHookReminderCount} source=${source} sessionId=${sessionId}`,
@@ -4960,13 +4955,18 @@ export class OpenCodeServerHarness
   /**
    * Whether the session's recent messages show work still in progress: a tool
    * part in pending/running state, or the newest assistant message not yet
-   * completed. Used to keep the closeout reminder from being injected into a
-   * session whose idle signal was stale, where the reminder would land
-   * mid-work and supersede the in-flight tool call. Verification failures return false
-   * (proceed with the reminder) so a transient fetch error cannot silently
-   * stall closeout enforcement.
+   * completed. Used to reject stale idle signals so the task remains active
+   * until the current tool call and assistant turn actually settle.
    */
   private async hasUnsettledToolWork(sessionId: string): Promise<boolean> {
+    if (
+      [...this.activeExecuteToolProgress.values()].some(
+        (progress) => progress.sessionId === sessionId,
+      )
+    ) {
+      return true;
+    }
+
     let messages: OpenCodeSessionMessage[];
 
     try {
@@ -4977,11 +4977,11 @@ export class OpenCodeServerHarness
       });
     } catch (error) {
       this.logger.warn(
-        `OpenCode closeout quiescence check failed; proceeding with the reminder sessionId=${sessionId}: ${
+        `OpenCode idle quiescence check failed; keeping the turn active sessionId=${sessionId}: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      return false;
+      return true;
     }
 
     const latestAssistantMessage = [...messages]
