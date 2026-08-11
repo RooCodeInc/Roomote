@@ -84,6 +84,12 @@ describe('packaged skill invocation routing', () => {
     expect(generalSkill).toContain(
       'Do not assume repository inspection is relevant',
     );
+    expect(generalSkill).toContain(
+      'repository or workspace file edits or commands, validation of repository changes, or code delivery',
+    );
+    expect(generalSkill).not.toContain(
+      'file edits, commands, validation, or delivery',
+    );
     expect(generalSkill).not.toContain('read the applicable repo-local');
   });
 
