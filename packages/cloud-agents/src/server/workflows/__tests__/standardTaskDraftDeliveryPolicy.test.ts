@@ -23,6 +23,37 @@ describe('Standard Task draft delivery policy', () => {
     );
   });
 
+  it('requires confirmed draft PR delivery before a repository-changing run succeeds', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Implement and validate a repository change',
+      repo: 'Roomote/example-app',
+      taskRunUrl: 'https://example.com/task/123',
+    });
+    const thisFilePath = fileURLToPath(import.meta.url);
+    const thisDirPath = path.dirname(thisFilePath);
+    const skillPath = path.resolve(
+      thisDirPath,
+      '../skills/standard/create-draft-pr/SKILL.md',
+    );
+    const skillContent = fs.readFileSync(skillPath, 'utf8');
+
+    expect(harnessInstructions).toContain(
+      '<default_mode>autonomous</default_mode>',
+    );
+    expect(harnessInstructions).toContain(
+      'After validation and self-review, the next required action for repository-changing work is delegated delivery, not final reporting.',
+    );
+    expect(harnessInstructions).toContain(
+      'the active `implement-changes` workflow stays responsible for the run until the required delivery result is known and must finish through the delegated `create-draft-pr` skill',
+    );
+    expect(skillContent).toContain(
+      'Collect the pull request number and URL returned by each successful `mcp__roomote__manage_source_control` result, and treat that tool result as the live pull request reference instead of treating the final message as proof that the pull request exists.',
+    );
+    expect(skillContent).toContain(
+      'Every changed repository now has a corresponding created or refreshed draft pull request confirmed by a `mcp__roomote__manage_source_control` result',
+    );
+  });
+
   it('keeps ready-for-review delivery when the configured action is create', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement behavior change',

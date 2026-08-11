@@ -45,6 +45,28 @@ describe('Standard Task explicit invocation routing', () => {
     );
   });
 
+  it('keeps the three required first-hop workflows in the routing contract', () => {
+    const { harnessInstructions } = standardTask({
+      description:
+        'Handle this repository request with the appropriate workflow',
+      repo: 'Roomote/example-app',
+      taskRunUrl: 'https://example.com/task/123',
+    });
+
+    expect(harnessInstructions).toContain(
+      '`implement-changes` for implementation, fixes, repository changes, and other action-oriented work.',
+    );
+    expect(harnessInstructions).toContain(
+      '`plan-repo-implementation` for planning, scoping, or design work that should remain non-mutating',
+    );
+    expect(harnessInstructions).toContain(
+      '`explain-repo-code` for understanding, explanation, and code-reading questions',
+    );
+    expect(harnessInstructions).toContain(
+      'Unless the request begins with an explicit skill invocation, always start with one of `implement-changes`, `plan-repo-implementation`, or `explain-repo-code`.',
+    );
+  });
+
   it('uses implementation straightforwardness as the ambiguous-routing tiebreaker and otherwise defaults to plan', () => {
     const { harnessInstructions } = standardTask({
       description: 'Maybe adjust the agent routing behavior if needed',
