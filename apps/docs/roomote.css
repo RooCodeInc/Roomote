@@ -93,6 +93,15 @@ nav a[href='https://roomote.dev'] svg,
   vertical-align: middle;
 }
 
+/* Keep integration marks in their original silhouette instead of clipping them. */
+.integration-logo,
+img[src^='https://api.iconify.design/simple-icons:'],
+img[src^='https://unpkg.com/@lobehub/icons-static-svg@'],
+img[src*='/logo/integrations/'],
+img[src*='/favicon.svg'] {
+  border-radius: 0;
+}
+
 .integration-name [data-rmiz],
 .integration-name [data-rmiz-content] {
   display: inline-flex !important;
@@ -121,5 +130,9 @@ nav a[href='https://roomote.dev'] svg,
 }
 
 .dark img[src*='/logo/integrations/'] {
+  filter: invert(1);
+}
+
+.dark img[src*='/favicon.svg'] {
   filter: invert(1);
 }
