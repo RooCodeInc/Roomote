@@ -1,6 +1,7 @@
 /**
  * Normalized usage/quota data for subscription-style inference providers
- * (ChatGPT subscription, GitHub Copilot, Kimi for Coding, Z.AI quotas),
+ * (ChatGPT subscription, GitHub Copilot, Kimi for Coding, OpenCode Go, Z.AI
+ * quotas),
  * displayed in the Models settings page.
  *
  * None of the upstream usage endpoints below are officially documented; each
@@ -15,6 +16,7 @@ export type SubscriptionUsageProviderId =
   | 'chatgpt'
   | 'github-copilot'
   | 'kimi-for-coding'
+  | 'opencode-go'
   | 'xai-subscription'
   | 'zai'
   | 'zai-coding-plan';
@@ -26,6 +28,7 @@ export type SubscriptionUsageProviderId =
  */
 export const API_KEY_SUBSCRIPTION_USAGE_PROVIDER_IDS = [
   'kimi-for-coding',
+  'opencode-go',
   'zai',
   'zai-coding-plan',
 ] as const satisfies readonly SubscriptionUsageProviderId[];
@@ -88,6 +91,9 @@ export const KIMI_FOR_CODING_USAGE_ENDPOINTS = [
   'https://api.kimi.com/coding/v1/usages',
   'https://api.kimi.com/coding/v1/usage',
 ] as const;
+
+/** OpenCode Go usage endpoint for rolling, weekly, and monthly quotas. */
+export const OPENCODE_GO_USAGE_ENDPOINT = 'https://opencode.ai/zen/go/v1/usage';
 
 /**
  * Unofficial Grok CLI session proxy used for SuperGrok / Premium+ billing

@@ -3,6 +3,10 @@ import { type SubscriptionProviderUsage } from '@roomote/types';
 import { fetchChatGptUsage } from './subscription-provider-usage/chatgpt';
 import { fetchGitHubCopilotUsage } from './subscription-provider-usage/github-copilot';
 import { fetchKimiForCodingUsage } from './subscription-provider-usage/kimi';
+import {
+  fetchOpenCodeGoUsage,
+  parseOpenCodeGoUsage,
+} from './subscription-provider-usage/opencode-go';
 import { type UsageFetchOptions } from './subscription-provider-usage/shared';
 import {
   fetchXaiSubscriptionUsage,
@@ -18,9 +22,11 @@ export {
   fetchChatGptUsage,
   fetchGitHubCopilotUsage,
   fetchKimiForCodingUsage,
+  fetchOpenCodeGoUsage,
   fetchXaiSubscriptionUsage,
   fetchZaiCodingPlanUsage,
   fetchZaiUsage,
+  parseOpenCodeGoUsage,
   parseXaiSubscriptionUsage,
   parseZaiQuotaUsage,
 };
@@ -29,6 +35,7 @@ const usageProviders = [
   fetchChatGptUsage,
   fetchGitHubCopilotUsage,
   fetchKimiForCodingUsage,
+  fetchOpenCodeGoUsage,
   fetchXaiSubscriptionUsage,
   fetchZaiUsage,
   fetchZaiCodingPlanUsage,

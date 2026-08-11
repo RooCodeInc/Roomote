@@ -167,6 +167,7 @@ function buildProviderSetup(
     xaiSubscriptionConnected?: boolean;
     xaiApiKeyConnected?: boolean;
     zaiSavedKey?: boolean;
+    openCodeGoSavedKey?: boolean;
     includeMultiCredentialProviders?: boolean;
     bedrockSavedKey?: boolean;
     bedrockRegion?: string;
@@ -216,6 +217,21 @@ function buildProviderSetup(
           savedApiKeySatisfied: overrides.anthropicSavedKey ?? false,
           additionalEnvValues: {} satisfies Record<string, string>,
         },
+        ...(overrides.openCodeGoSavedKey !== undefined
+          ? [
+              {
+                id: 'opencode-go' as SetupModelProviderId,
+                label: 'OpenCode Go',
+                envVarName: 'OPENCODE_GO_API_KEY',
+                defaultRoomoteModel: 'opencode-go/glm-5.2',
+                authKind: 'api-key' as const,
+                suggestedTaskModels: [],
+                runtimeApiKeySatisfied: false,
+                savedApiKeySatisfied: overrides.openCodeGoSavedKey,
+                additionalEnvValues: {} satisfies Record<string, string>,
+              },
+            ]
+          : []),
         {
           id: 'xai' as SetupModelProviderId,
           label: 'xAI',
@@ -558,6 +574,30 @@ describe('InferenceProviderSection', () => {
     expect(
       screen.getByRole('progressbar', { name: 'Weekly limit usage' }),
     ).toHaveAttribute('aria-valuenow', '4');
+  });
+
+  it('shows usage windows under a connected OpenCode Go row', () => {
+    providerSetupData.current = buildProviderSetup({
+      openCodeGoSavedKey: true,
+    });
+    subscriptionUsageData.current = [
+      {
+        providerId: 'opencode-go',
+        windows: [
+          { label: 'Rolling limit', usedPercent: 12 },
+          { label: 'Weekly limit', usedPercent: 8 },
+          { label: 'Monthly limit', usedPercent: 35 },
+        ],
+        fetchedAt: new Date().toISOString(),
+      },
+    ];
+
+    renderInferenceProviderSection();
+
+    expect(screen.getByText('OpenCode Go')).toBeInTheDocument();
+    expect(screen.getByText('Rolling limit: 12% used')).toBeInTheDocument();
+    expect(screen.getByText('Weekly limit: 8% used')).toBeInTheDocument();
+    expect(screen.getByText('Monthly limit: 35% used')).toBeInTheDocument();
   });
 
   it('omits the usage line when no usage data is available or the row errored', () => {
