@@ -190,9 +190,10 @@ A few provider-specific behaviors to know:
   feed) can start tasks too. Use launch criteria to keep noisy feeds in
   check — for example, only launching on new or worsening alerts.
 
-If Roomote cannot classify a human-authored message or cannot start its task,
-it replies in the source thread. Failures for bot and webhook messages stay
-silent to avoid flooding automated feeds.
+If Roomote cannot determine whether to start a task or encounters an unexpected
+startup error, it notifies human users but stays silent for bot and webhook
+messages. In Slack, specific issues such as unavailable or read-only access can
+still receive a status reply.
 
 Start with a low-risk channel first. Auto-response can feel noisy if the
 channel mixes casual discussion with requests that should become Roomote
