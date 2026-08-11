@@ -133,19 +133,20 @@ describe('feature-demo skill', () => {
     );
   });
 
-  it('records headless by default with a per-script headed opt-in for GPU surfaces', () => {
+  it('records headless only, and reports GPU surfaces as unrecordable', () => {
     const captureRunner = fs.readFileSync(
       path.join(skillDirPath, 'capture/capture.mjs'),
       'utf8',
     );
 
-    // Headless + frame ticker is the deterministic default; headed exists
-    // for WebGL/3D surfaces that never present to the headless compositor.
-    expect(captureRunner).toContain(
-      "const HEADED = script.headed === true || process.env.HEADED === '1'",
-    );
-    expect(captureRunner).toContain("HEADED ? ['--headed', ...args] : args");
-    expect(skillContent).toContain('"headed": true');
+    // Headless + frame ticker is the whole capture story. A headed path
+    // existed for WebGL/3D surfaces but wedged the agent-browser daemon on
+    // exactly the longer sessions a narrated demo produces, so those
+    // surfaces are now reported as unrecordable by the honest-state gate.
+    expect(captureRunner).not.toMatch(/--headed|script\.headed/);
+    expect(skillContent).not.toMatch(/"headed":\s*true/);
+    expect(captureRunner).toContain("ab('eval', TICKER_JS)");
+    expect(captureRunner).toContain('cannot be recorded here');
   });
 
   it('frames the render project as an adaptable reference template', () => {

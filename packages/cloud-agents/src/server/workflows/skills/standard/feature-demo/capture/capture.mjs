@@ -78,16 +78,8 @@ function estimateSpokenSeconds(text) {
 // reset goes fully wide.
 const GLIDE_SCALE = 1.06;
 
-// Headless by default: with the frame ticker it records deterministically at
-// wall-clock rate on ordinary pages. Headed mode (auto-Xvfb) exists for
-// GPU-backed canvases (games, 3D, WebGL/WebGPU) that never present to the
-// headless compositor — opt in per demo with `"headed": true` in the script
-// (or HEADED=1). Note: current agent-browser headed recording can wedge the
-// daemon on longer sessions; use it only when the surface requires it.
-const HEADED = script.headed === true || process.env.HEADED === '1';
-
 const ab = (...args) =>
-  execFileSync(AB, HEADED ? ['--headed', ...args] : args, {
+  execFileSync(AB, args, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -152,12 +144,10 @@ const pushCursorMove = (startT, endT, target) => {
   curCursor = target;
 };
 
-// Headless (default) only: headless capture emits frames only on visual
-// damage and stamps them without wall-clock gaps, so a static surface
-// collapses into a sub-second video; an imperceptible 2px dot re-painting
-// every animation frame keeps frames flowing at wall-clock rate. Headed
-// mode presents at wall-clock rate on its own — verified on a fully static
-// page — and skips the ticker.
+// Headless capture emits frames only on visual damage and stamps them
+// without wall-clock gaps, so a static surface collapses into a sub-second
+// video; an imperceptible 2px dot re-painting every animation frame keeps
+// frames flowing at wall-clock rate.
 const TICKER_JS =
   '(function(){var d=document.createElement("div");' +
   'd.style.cssText="position:fixed;left:0;bottom:0;width:2px;height:2px;' +
@@ -168,13 +158,10 @@ const TICKER_JS =
 
 async function run() {
   mkdirSync(OUT_DIR, { recursive: true });
-  // Fully stop any existing agent-browser daemon before recording. `--headed`
-  // (and other launch options) only take effect when the daemon launches the
-  // browser; against an already-running daemon agent-browser prints
-  // "--headed ignored: daemon already running" and records headless. `close`
+  // Fully stop any existing agent-browser daemon before recording. `close`
   // (alias quit/exit) tears the daemon down; `close --all` alone only clears
-  // sessions. This also gives `record start` a clean slate so the beats and
-  // the recorder share one page.
+  // sessions. This gives `record start` a clean slate so the beats and the
+  // recorder share one page.
   try {
     ab('close');
   } catch {
@@ -183,25 +170,8 @@ async function run() {
   ab('set', 'viewport', String(VIEWPORT.w), String(VIEWPORT.h));
   ab('record', 'start', `${OUT_DIR}/raw.webm`, script.url);
 
-  // Verify the browser's actual mode positively rather than parsing daemon
-  // warnings (the wrapper's cookie seeding or our own viewport call may have
-  // launched the daemon first, which makes "--headed ignored" ambiguous).
-  // Headless Chrome self-identifies in its user agent.
-  if (HEADED) {
-    const ua = ab('eval', 'navigator.userAgent');
-    if (/HeadlessChrome/i.test(ua)) {
-      throw new Error(
-        'headed capture was requested but the browser is running headless ' +
-          '(HeadlessChrome user agent) — an earlier browser step likely ' +
-          'launched a headless daemon. Run `agent-browser close`, ensure ' +
-          'nothing else drives the browser, and retry.',
-      );
-    }
-  }
   t0 = Date.now();
-  if (!HEADED) {
-    ab('eval', TICKER_JS);
-  }
+  ab('eval', TICKER_JS);
   sleep(300); // let the first frames settle
 
   for (const beat of script.beats) {
@@ -385,9 +355,12 @@ async function run() {
     throw new Error(
       `recording is ${recordedSeconds}s but the interaction ran ` +
         `${timeline.durationSeconds.toFixed(2)}s — screencast frames were ` +
-        `sparse or the recorder stalled. If \`record stop\` also reported an ` +
-        `ffmpeg error, the sandbox runtime is likely a stale snapshot with ` +
-        `an outdated ffmpeg. Report this as a blocker; do not render.`,
+        `sparse or the recorder stalled. A GPU-backed surface (WebGL/WebGPU, ` +
+        `3D, games) does not present frames to the headless compositor and ` +
+        `cannot be recorded here; report the surface as unrecordable. If ` +
+        `\`record stop\` also reported an ffmpeg error, the sandbox runtime ` +
+        `is likely a stale snapshot with an outdated ffmpeg. Either way this ` +
+        `is a blocker; do not render.`,
     );
   }
 

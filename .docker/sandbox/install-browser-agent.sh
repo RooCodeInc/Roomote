@@ -374,35 +374,21 @@ collect_cli_browser_args() {
   local i=0
   AGENT_BROWSER_EXEC_ARGS=()
   AGENT_BROWSER_FORWARD_ARGS=()
-  # Default headless; a caller may opt a single invocation into headed mode
-  # (e.g. the feature-demo capture runner, so GPU-backed canvases present to
-  # the compositor). On displayless Linux agent-browser auto-starts Xvfb.
-  AGENT_BROWSER_WANT_HEADED=0
 
   while [ "$i" -lt "${#args[@]}" ]; do
     local arg="${args[$i]}"
 
     case "$arg" in
       --headed)
-        AGENT_BROWSER_WANT_HEADED=1
-        AGENT_BROWSER_FORWARD_ARGS+=("$arg")
         if [ "$i" -lt $(( ${#args[@]} - 1 )) ]; then
           case "${args[$((i + 1))]}" in
             true|false)
               i=$((i + 1))
-              [ "${args[$i]}" = false ] && AGENT_BROWSER_WANT_HEADED=0
-              AGENT_BROWSER_FORWARD_ARGS+=("${args[$i]}")
               ;;
           esac
         fi
         ;;
-      --headed=false)
-        AGENT_BROWSER_WANT_HEADED=0
-        AGENT_BROWSER_FORWARD_ARGS+=("$arg")
-        ;;
       --headed=*)
-        AGENT_BROWSER_WANT_HEADED=1
-        AGENT_BROWSER_FORWARD_ARGS+=("$arg")
         ;;
       --args)
         AGENT_BROWSER_FORWARD_ARGS+=("$arg")
@@ -502,15 +488,6 @@ seed_preview_cookies() {
   mkdir -p "$CACHE_ROOT"
   resolve_cli_paths
 
-  # Seeding may be what launches the daemon, and the daemon's headed/headless
-  # mode is fixed at launch — so seed in the SAME mode the wrapped command
-  # requested, or a headless seed daemon would make a later `--headed` command
-  # a silent no-op.
-  local seed_headed=false
-  if [ "${AGENT_BROWSER_WANT_HEADED:-0}" = 1 ]; then
-    seed_headed=true
-  fi
-
   for url in "${preview_urls[@]}"; do
     cookie_security_args=()
     case "$url" in
@@ -518,10 +495,10 @@ seed_preview_cookies() {
     esac
 
     if [ -n "$bypass_value" ]; then
-      AGENT_BROWSER_HEADED="$seed_headed" "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_PREFIX_ARGS[@]}" cookies set "$header_name" "$bypass_value" --url "$url" "${cookie_security_args[@]}" --sameSite Lax >/dev/null
+      AGENT_BROWSER_HEADED=false "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_PREFIX_ARGS[@]}" cookies set "$header_name" "$bypass_value" --url "$url" "${cookie_security_args[@]}" --sameSite Lax >/dev/null
     fi
 
-    AGENT_BROWSER_HEADED="$seed_headed" "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_PREFIX_ARGS[@]}" cookies set "$HIDE_PREVIEW_WIDGET_COOKIE" "1" --url "$url" "${cookie_security_args[@]}" --sameSite Lax >/dev/null
+    AGENT_BROWSER_HEADED=false "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_PREFIX_ARGS[@]}" cookies set "$HIDE_PREVIEW_WIDGET_COOKIE" "1" --url "$url" "${cookie_security_args[@]}" --sameSite Lax >/dev/null
   done
 
   : > "$cache_file"
@@ -541,14 +518,7 @@ if should_clear_seed_cache; then
 fi
 
 resolve_cli_paths
-# Preview-cookie seeding above always runs headless (inline env). The task
-# command itself honors an explicit --headed opt-in; everything else stays
-# headless as before.
-if [ "${AGENT_BROWSER_WANT_HEADED:-0}" = 1 ]; then
-  export AGENT_BROWSER_HEADED=true
-else
-  export AGENT_BROWSER_HEADED=false
-fi
+export AGENT_BROWSER_HEADED=false
 exec "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_FORWARD_ARGS[@]}"
 EOF_WRAPPER
 }
