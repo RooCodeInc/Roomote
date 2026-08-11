@@ -72,6 +72,31 @@ describe('handleLaunchTask', () => {
     expect(parsed.taskId).toBe('task-standard');
   });
 
+  it('treats a blank optional branch as unset', async () => {
+    vi.mocked(tasksApiClient.launchTask).mockResolvedValueOnce({
+      success: true,
+      runId: 101,
+      taskId: 'task-without-branch',
+    });
+
+    await handleLaunchTask(
+      {
+        prompt: 'Verify this environment',
+        branch: '   ',
+        environmentId: '10b031ec-b728-4d8f-a9a0-1ed4aa500511',
+      },
+      config,
+    );
+
+    expect(tasksApiClient.launchTask).toHaveBeenCalledWith(config, {
+      branch: undefined,
+      environmentId: '10b031ec-b728-4d8f-a9a0-1ed4aa500511',
+      prompt: 'Verify this environment',
+      repo: ALL_REPOSITORIES,
+      type: 'standard',
+    });
+  });
+
   it('should return error when API returns success=false', async () => {
     vi.mocked(tasksApiClient.launchTask).mockResolvedValueOnce({
       success: false,

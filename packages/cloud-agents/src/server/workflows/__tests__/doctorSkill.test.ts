@@ -40,7 +40,10 @@ describe('doctor guidance', () => {
     const skillContent = readSkillContent();
 
     expect(skillContent).toContain(
-      'Its prompt must not invoke Doctor or another packaged skill, delegate another task, repair anything, update the environment, edit repository files, create commits, or open a pull request.',
+      'Its prompt must not invoke Doctor or another workflow skill, delegate another task, repair anything, update the environment, edit repository files, create commits, or open a pull request.',
+    );
+    expect(skillContent).toContain(
+      'It may use an installed operational skill when needed to operate an applicable tool',
     );
     expect(skillContent).toContain('Doctor is read-only by default.');
     expect(skillContent).toContain(
@@ -106,6 +109,12 @@ describe('doctor guidance', () => {
     );
     expect(skillContent).toContain(
       'Do not claim `healthy` or `repaired` unless the latest fresh task explicitly completed the requested journey',
+    );
+    expect(skillContent).toContain(
+      'allow one polling interval for the pending settle notification before returning the final Doctor outcome',
+    );
+    expect(skillContent).toContain(
+      'do not repeat an outcome already reported',
     );
   });
 

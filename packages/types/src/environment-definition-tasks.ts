@@ -123,7 +123,7 @@ export function buildEnvironmentVerificationPrompt(input: {
 }): string {
   return `Verify whether the persisted ${PRODUCT_NAME} environment "${input.environmentName}" (id ${input.environmentId}) is ready. This task is the current authorized environment-verification attempt.
 
-This is a read-only verification task. Do not invoke Doctor or another packaged skill, launch another task, repair or update the environment, edit repository files, create commits, or open a pull request.
+This is a read-only verification task. Do not invoke Doctor or another workflow skill, launch another task, repair or update the environment, edit repository files, create commits, or open a pull request. You may use an installed operational skill when needed to operate an applicable tool.
 
 When .roomote/setup-status.json exists, wait for it to reach a terminal state before deciding readiness; preparing the environment can take 5 minutes or more. Determine the intended developer workflow from the repository's own instructions and the available environment. Verify that workflow directly and report the exact attempted steps plus relevant secret-safe errors. Do not assume that a service, port, HTTP endpoint, browser preview, test suite, container, or long-running process exists. Report success only when the applicable workflow actually completes.
 

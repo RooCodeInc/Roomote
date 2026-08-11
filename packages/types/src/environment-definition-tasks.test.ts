@@ -38,7 +38,7 @@ describe('buildEnvironmentVerificationPrompt', () => {
       'This task is the current authorized environment-verification attempt.',
     );
     expect(prompt).toContain(
-      'Do not invoke Doctor or another packaged skill, launch another task, repair or update the environment',
+      'Do not invoke Doctor or another workflow skill, launch another task, repair or update the environment',
     );
     expect(prompt).toContain(
       'Do not assume that a service, port, HTTP endpoint, browser preview, test suite, container, or long-running process exists.',

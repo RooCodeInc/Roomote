@@ -269,7 +269,7 @@ describe('environment-setup guidance', () => {
     );
     expect(skillContent).toContain('a concrete read-only verification prompt');
     expect(skillContent).toContain(
-      'It must not invoke Doctor or another packaged skill, launch another task, repair the environment, edit repository files',
+      'It must not invoke Doctor or another workflow skill, launch another task, repair the environment, edit repository files',
     );
     expect(skillContent).toContain(
       'or assume that a service, port, HTTP endpoint, browser preview, test suite, container, or long-running process exists.',
