@@ -418,6 +418,39 @@ describe('task goals', () => {
     });
   });
 
+  it('keeps a released generation assigned after another continuation advances', async () => {
+    const task = await taskFactory.create({
+      goalObjective: 'Retry and finish the goal',
+      goalStatus: 'active',
+      goalMaxContinuations: 3,
+      goalLastContinuationId: 'goal-generation:initial',
+      goalContinuationIds: ['goal-generation:initial'],
+    });
+    const run = await runFactory.create({ taskId: task.id });
+
+    await claimTaskGoalContinuationForRun({
+      runId: run.id,
+      continuationId: 'failed-delivery',
+    });
+    await releaseTaskGoalContinuationForRun({
+      runId: run.id,
+      continuationId: 'failed-delivery',
+    });
+    const releasedGoal = await getTaskGoalForRun(run.id);
+    await claimTaskGoalContinuationForRun({
+      runId: run.id,
+      continuationId: 'next-continuation',
+    });
+
+    await expect(
+      markTaskGoalForRun({
+        runId: run.id,
+        generation: releasedGoal!.generation,
+        status: 'complete',
+      }),
+    ).resolves.toMatchObject({ updated: true });
+  });
+
   it('reopens a budget-limited goal when final continuation delivery fails', async () => {
     const task = await taskFactory.create({
       goalObjective: 'Recover the final continuation budget',

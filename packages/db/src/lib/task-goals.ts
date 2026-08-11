@@ -490,14 +490,15 @@ export async function releaseTaskGoalContinuationForRun(input: {
   if (!task) {
     return false;
   }
+  const releasedGeneration = `${GOAL_GENERATION_PREFIX}${randomUUID()}`;
 
   const [released] = await db
     .update(tasks)
     .set({
       goalStatus: 'active',
       goalContinuationsUsed: sql`GREATEST(${tasks.goalContinuationsUsed} - 1, 0)`,
-      goalLastContinuationId: `${GOAL_GENERATION_PREFIX}${randomUUID()}`,
-      goalContinuationIds: sql`array_remove(${tasks.goalContinuationIds}, ${input.continuationId})`,
+      goalLastContinuationId: releasedGeneration,
+      goalContinuationIds: sql`array_append(array_remove(${tasks.goalContinuationIds}, ${input.continuationId}), ${releasedGeneration})`,
       updatedAt: new Date(),
     })
     .where(
