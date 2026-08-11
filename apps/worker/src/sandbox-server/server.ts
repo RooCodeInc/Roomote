@@ -22,6 +22,7 @@ import type { HarnessManager } from './lib/harness-manager';
 import { TerminalManager } from './lib/terminal-manager';
 
 import { appRouter } from './routers';
+import type { WorkspaceTransitionState } from './trpc';
 
 function getBearerToken(request: Request): string | undefined {
   const authHeader = request.headers.get('Authorization');
@@ -148,6 +149,9 @@ export function createServer({
    */
   validateToken: (token: string) => Promise<AuthTokenContext | RunTokenContext>;
 }) {
+  const workspaceTransitionState: WorkspaceTransitionState = {
+    requested: false,
+  };
   const baseContext = (auth: AuthTokenContext | RunTokenContext | null) => ({
     workingDirectory,
     harnessLogger,
@@ -161,6 +165,7 @@ export function createServer({
     workerEnv,
     taskRuntime,
     prepareActorScopedTurn,
+    workspaceTransitionState,
   });
 
   const app = new Hono();

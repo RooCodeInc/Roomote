@@ -70,4 +70,23 @@ describe('buildWorkspaceConfig', () => {
       },
     });
   });
+
+  it('uses a pinned config without refetching the environment', async () => {
+    const environmentConfig = {
+      name: 'Pinned App',
+      repositories: [{ repository: 'Roomote/pinned-app' }],
+    };
+
+    await expect(
+      buildWorkspaceConfig({
+        environmentId: 'env_123',
+        environmentConfig,
+      }),
+    ).resolves.toMatchObject({
+      type: 'environment',
+      environmentId: 'env_123',
+      environmentConfig,
+    });
+    expect(findEnvironmentMock).not.toHaveBeenCalled();
+  });
 });

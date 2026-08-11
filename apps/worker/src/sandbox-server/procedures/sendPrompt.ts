@@ -93,7 +93,7 @@ const sendPromptInputSchema = z
 export const sendPrompt = publicProcedure
   .input(sendPromptInputSchema)
   .mutation(async ({ input, ctx }) => {
-    if (ctx.workspaceTransitionRequested) {
+    if (ctx.workspaceTransitionState?.requested) {
       throw new TRPCError({
         code: 'PRECONDITION_FAILED',
         message:

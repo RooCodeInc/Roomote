@@ -38,7 +38,17 @@ export async function resume(runId: number): Promise<boolean> {
       sourceEnvironmentId: environmentId,
       sourceRepo: repo,
       sourceSelectedRepositories: selectedRepositories,
-    }) => buildWorkspaceConfig({ environmentId, repo, selectedRepositories }),
+      taskRun,
+    }) =>
+      buildWorkspaceConfig({
+        environmentId,
+        environmentConfig:
+          taskRun.resolvedWorkspaceSpec?.environmentId === environmentId
+            ? taskRun.resolvedWorkspaceSpec?.config
+            : undefined,
+        repo,
+        selectedRepositories,
+      }),
     runFn: async ({
       jobContext,
       userEnvVars,

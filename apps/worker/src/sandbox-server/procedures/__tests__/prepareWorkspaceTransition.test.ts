@@ -1,7 +1,12 @@
 import { appRouter } from '../../routers';
 import type { Context } from '../../trpc';
 
-function context(phase: 'idle' | 'running'): Context {
+function context(
+  phase: 'idle' | 'running',
+  workspaceTransitionState: NonNullable<Context['workspaceTransitionState']> = {
+    requested: false,
+  },
+): Context {
   return {
     workingDirectory: '/workspace',
     auth: null,
@@ -9,6 +14,7 @@ function context(phase: 'idle' | 'running'): Context {
     harnessManager: {
       getStatus: () => ({ phase }),
     } as Context['harnessManager'],
+    workspaceTransitionState,
   };
 }
 
@@ -23,10 +29,13 @@ describe('prepareWorkspaceTransition', () => {
         phase: 'idle',
       },
     );
-    expect(ctx.workspaceTransitionRequested).toBe(true);
+    expect(ctx.workspaceTransitionState?.requested).toBe(true);
 
-    await caller.commands.abortWorkspaceTransition();
-    expect(ctx.workspaceTransitionRequested).toBe(false);
+    const nextRequestContext = context('idle', ctx.workspaceTransitionState);
+    await appRouter
+      .createCaller(nextRequestContext)
+      .commands.abortWorkspaceTransition();
+    expect(ctx.workspaceTransitionState?.requested).toBe(false);
   });
 
   it('does not leave a fence when an agent turn is active', async () => {
@@ -36,6 +45,6 @@ describe('prepareWorkspaceTransition', () => {
       .commands.prepareWorkspaceTransition();
 
     expect(result).toEqual({ ready: false, phase: 'running' });
-    expect(ctx.workspaceTransitionRequested).toBe(false);
+    expect(ctx.workspaceTransitionState?.requested).toBe(false);
   });
 });

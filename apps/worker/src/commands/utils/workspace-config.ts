@@ -19,12 +19,14 @@ export async function findRuntimeEnvironmentConfig(
 
 export async function buildWorkspaceConfig({
   environmentId,
+  environmentConfig: pinnedEnvironmentConfig,
   repo,
   branch,
   sha,
   selectedRepositories,
 }: {
   environmentId?: string;
+  environmentConfig?: EnvironmentConfig;
   repo?: string;
   branch?: string;
   sha?: string;
@@ -39,9 +41,9 @@ export async function buildWorkspaceConfig({
   });
 
   if (workspace.type === 'environment') {
-    const environmentConfig = await findRuntimeEnvironmentConfig(
-      workspace.environmentId,
-    );
+    const environmentConfig =
+      pinnedEnvironmentConfig ??
+      (await findRuntimeEnvironmentConfig(workspace.environmentId));
 
     if (!environmentConfig) {
       throw new Error(`Environment not found: ${workspace.environmentId}`);
