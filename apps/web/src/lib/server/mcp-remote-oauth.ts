@@ -219,13 +219,20 @@ function parseRefreshToken(token: string): string | null {
 export function isAllowedOAuthRedirectUri(value: string): boolean {
   try {
     const url = new URL(value);
+    const isCursorDesktopCallback =
+      url.protocol === 'cursor:' &&
+      url.hostname === 'anysphere.cursor-mcp' &&
+      url.port === '' &&
+      url.pathname === '/oauth/callback' &&
+      url.search === '';
     return (
       url.hash === '' &&
       url.username === '' &&
       url.password === '' &&
       (url.protocol === 'https:' ||
         (url.protocol === 'http:' &&
-          (url.hostname === '127.0.0.1' || url.hostname === 'localhost')))
+          (url.hostname === '127.0.0.1' || url.hostname === 'localhost')) ||
+        isCursorDesktopCallback)
     );
   } catch {
     return false;

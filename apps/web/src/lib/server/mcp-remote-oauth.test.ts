@@ -178,14 +178,20 @@ describe('remote MCP OAuth state', () => {
     redisSortedSets.clear();
   });
 
-  it('accepts HTTPS and loopback redirects only', () => {
+  it('accepts HTTPS, loopback, and the Cursor desktop callback', () => {
     expect(isAllowedOAuthRedirectUri('https://client.example/callback')).toBe(
       true,
     );
     expect(isAllowedOAuthRedirectUri('http://127.0.0.1:43110/callback')).toBe(
       true,
     );
+    expect(
+      isAllowedOAuthRedirectUri('cursor://anysphere.cursor-mcp/oauth/callback'),
+    ).toBe(true);
     expect(isAllowedOAuthRedirectUri('http://client.example/callback')).toBe(
+      false,
+    );
+    expect(isAllowedOAuthRedirectUri('cursor://other-client/callback')).toBe(
       false,
     );
   });

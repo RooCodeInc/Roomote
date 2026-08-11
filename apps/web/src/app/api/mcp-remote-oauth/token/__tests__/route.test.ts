@@ -50,8 +50,11 @@ const verifier =
 const challenge = createHash('sha256').update(verifier).digest('base64url');
 const resource = 'https://api.example.com/mcp';
 
-function tokenRequest(overrides: Record<string, string> = {}) {
-  const body = new URLSearchParams({
+function tokenRequest(
+  overrides: Record<string, string> = {},
+  options?: { omitResource?: boolean },
+) {
+  const values: Record<string, string> = {
     grant_type: 'authorization_code',
     code: 'authorization-code',
     client_id: '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
@@ -59,7 +62,9 @@ function tokenRequest(overrides: Record<string, string> = {}) {
     code_verifier: verifier,
     resource,
     ...overrides,
-  });
+  };
+  if (options?.omitResource) delete values.resource;
+  const body = new URLSearchParams(values);
   return new NextRequest('https://roomote.example/api/mcp-remote-oauth/token', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -67,14 +72,19 @@ function tokenRequest(overrides: Record<string, string> = {}) {
   });
 }
 
-function refreshRequest(overrides: Record<string, string> = {}) {
-  const body = new URLSearchParams({
+function refreshRequest(
+  overrides: Record<string, string> = {},
+  options?: { omitResource?: boolean },
+) {
+  const values: Record<string, string> = {
     grant_type: 'refresh_token',
     refresh_token: 'session.refresh-token',
     client_id: '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
     resource,
     ...overrides,
-  });
+  };
+  if (options?.omitResource) delete values.resource;
+  const body = new URLSearchParams(values);
   return new NextRequest('https://roomote.example/api/mcp-remote-oauth/token', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -153,6 +163,15 @@ describe('POST /api/mcp-remote-oauth/token', () => {
     });
   });
 
+  it('uses the authorization resource when the token request omits it', async () => {
+    const response = await POST(tokenRequest({}, { omitResource: true }));
+
+    expect(response.status).toBe(200);
+    expect(mockCreateToken).toHaveBeenCalledWith(
+      expect.objectContaining({ resource }),
+    );
+  });
+
   it('rotates a refresh token and issues a new access token', async () => {
     const response = await POST(refreshRequest());
 
@@ -167,6 +186,15 @@ describe('POST /api/mcp-remote-oauth/token', () => {
     expect(mockRotateRefreshToken).toHaveBeenCalledWith(
       'session.refresh-token',
       expect.objectContaining({ userId: 'user-1' }),
+    );
+  });
+
+  it('uses the session resource when a refresh request omits it', async () => {
+    const response = await POST(refreshRequest({}, { omitResource: true }));
+
+    expect(response.status).toBe(200);
+    expect(mockCreateToken).toHaveBeenCalledWith(
+      expect.objectContaining({ resource }),
     );
   });
 

@@ -36,6 +36,7 @@ const redirectUri = 'https://client.example/callback';
 function authorizeRequest(options?: {
   approved?: boolean;
   consentToken?: string;
+  resource?: string | null;
 }) {
   const url = new URL('https://roomote.example/api/mcp-remote-oauth/authorize');
   url.searchParams.set('response_type', 'code');
@@ -44,7 +45,12 @@ function authorizeRequest(options?: {
   url.searchParams.set('state', 'client-state');
   url.searchParams.set('code_challenge', 'a'.repeat(43));
   url.searchParams.set('code_challenge_method', 'S256');
-  url.searchParams.set('resource', 'https://roomote.example/mcp');
+  if (options?.resource !== null) {
+    url.searchParams.set(
+      'resource',
+      options?.resource ?? 'https://roomote.example/mcp',
+    );
+  }
   url.searchParams.set('scope', 'mcp:roomote');
   if (!options?.approved) return new NextRequest(url);
 
@@ -140,6 +146,24 @@ describe('GET /api/mcp-remote-oauth/authorize', () => {
         '/api/mcp-remote-oauth/authorize?',
       ),
     });
+  });
+
+  it('defaults an omitted resource to the Roomote MCP endpoint', async () => {
+    mockAuthorize.mockResolvedValue({ success: true, userId: 'user-1' });
+    mockCreateCode.mockResolvedValue('authorization-code');
+
+    const response = await POST(
+      authorizeRequest({
+        approved: true,
+        consentToken: 'consent-token',
+        resource: null,
+      }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(mockCreateCode).toHaveBeenCalledWith(
+      expect.objectContaining({ resource: 'https://roomote.example/mcp' }),
+    );
   });
 
   it('rejects approval POSTs without the one-time consent token', async () => {

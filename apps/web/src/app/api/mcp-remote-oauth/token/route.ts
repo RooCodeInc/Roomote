@@ -28,13 +28,13 @@ const tokenSchema = z.discriminatedUnion('grant_type', [
     client_id: z.string().uuid(),
     redirect_uri: z.string().url(),
     code_verifier: z.string().regex(/^[A-Za-z0-9._~-]{43,128}$/),
-    resource: z.string().url(),
+    resource: z.string().url().optional(),
   }),
   z.object({
     grant_type: z.literal('refresh_token'),
     refresh_token: z.string().min(1),
     client_id: z.string().uuid(),
-    resource: z.string().url(),
+    resource: z.string().url().optional(),
     scope: z.string().optional(),
   }),
 ]);
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
       !client ||
       !client.grantTypes.includes('refresh_token') ||
       session.clientId !== input.client_id ||
-      session.resource !== input.resource ||
+      (input.resource !== undefined && session.resource !== input.resource) ||
       session.scopes.length !== 1 ||
       session.scopes[0] !== ROOMOTE_MCP_SCOPE ||
       (input.scope !== undefined && input.scope !== ROOMOTE_MCP_SCOPE)
@@ -116,7 +116,8 @@ export async function POST(request: NextRequest) {
     !client ||
     authorization.clientId !== input.client_id ||
     authorization.redirectUri !== input.redirect_uri ||
-    input.resource !== authorization.resource ||
+    (input.resource !== undefined &&
+      input.resource !== authorization.resource) ||
     authorization.scopes.length !== 1 ||
     authorization.scopes[0] !== ROOMOTE_MCP_SCOPE ||
     !verifyPkceChallenge(input.code_verifier, authorization.codeChallenge)
