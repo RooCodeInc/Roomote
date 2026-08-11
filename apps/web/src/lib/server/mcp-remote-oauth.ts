@@ -22,6 +22,7 @@ const ACTIVE_CLIENTS_KEY = 'mcp-remote-oauth:active-clients';
 const ACTIVE_CLIENTS_USER_KEY_PREFIX = 'mcp-remote-oauth:active-clients:user:';
 const REFRESH_SESSION_KEY_PREFIX = 'mcp-remote-oauth:session:';
 const REFRESH_TOKEN_KEY_PREFIX = 'mcp-remote-oauth:refresh:';
+const REFRESH_CLIENT_SESSION_KEY_PREFIX = 'mcp-remote-oauth:client-session:';
 
 const CONSUME_CODE_LUA = `
 local value = redis.call('GET', KEYS[1])
@@ -81,13 +82,19 @@ return 1
 `;
 
 const CREATE_REFRESH_SESSION_LUA = `
-local previous = redis.call('GET', KEYS[1])
-if previous then
-  local decoded = cjson.decode(previous)
-  redis.call('DEL', ARGV[1] .. decoded.currentTokenHash)
+local previousSessionId = redis.call('GET', KEYS[3])
+if previousSessionId then
+  local previousSessionKey = ARGV[1] .. previousSessionId
+  local previous = redis.call('GET', previousSessionKey)
+  if previous then
+    local decoded = cjson.decode(previous)
+    redis.call('DEL', ARGV[2] .. decoded.currentTokenHash)
+  end
+  redis.call('DEL', previousSessionKey)
 end
-redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[4])
-redis.call('SET', KEYS[2], ARGV[3], 'EX', ARGV[4])
+redis.call('SET', KEYS[1], ARGV[3], 'EX', ARGV[6])
+redis.call('SET', KEYS[2], ARGV[4], 'EX', ARGV[6])
+redis.call('SET', KEYS[3], ARGV[5], 'EX', ARGV[6])
 return 1
 `;
 
@@ -177,8 +184,11 @@ function consentKey(token: string): string {
   return `${CONSENT_KEY_PREFIX}${token}`;
 }
 
-function refreshSessionId(userId: string, clientId: string): string {
-  return createHash('sha256').update(`${userId}\0${clientId}`).digest('hex');
+function refreshClientSessionKey(userId: string, clientId: string): string {
+  const clientHash = createHash('sha256')
+    .update(`${userId}\0${clientId}`)
+    .digest('hex');
+  return `${REFRESH_CLIENT_SESSION_KEY_PREFIX}${clientHash}`;
 }
 
 function refreshSessionKey(sessionId: string): string {
@@ -360,7 +370,7 @@ export async function createRemoteMcpRefreshSession(value: {
   resource: string;
   scopes: string[];
 }): Promise<string> {
-  const sessionId = refreshSessionId(value.userId, value.clientId);
+  const sessionId = randomBytes(32).toString('hex');
   const refreshToken = createRefreshToken(sessionId);
   const tokenHash = refreshTokenHash(refreshToken);
   const now = Math.floor(Date.now() / 1000);
@@ -372,12 +382,15 @@ export async function createRemoteMcpRefreshSession(value: {
   };
   await getRedis().eval(
     CREATE_REFRESH_SESSION_LUA,
-    2,
+    3,
     refreshSessionKey(sessionId),
     refreshTokenKey(tokenHash),
+    refreshClientSessionKey(value.userId, value.clientId),
+    REFRESH_SESSION_KEY_PREFIX,
     REFRESH_TOKEN_KEY_PREFIX,
     JSON.stringify(session),
     `active:${sessionId}`,
+    sessionId,
     String(REFRESH_SESSION_TTL_SECONDS),
   );
   return refreshToken;

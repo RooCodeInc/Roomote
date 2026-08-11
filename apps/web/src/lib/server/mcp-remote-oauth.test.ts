@@ -28,15 +28,24 @@ vi.mock('@roomote/redis', () => ({
         return 1;
       }
 
-      if (script.includes('local previous =')) {
-        const [refreshPrefix, sessionJson, marker] = values;
-        const previous = redisState.get(key);
-        if (previous) {
-          const decoded = JSON.parse(previous) as { currentTokenHash: string };
-          redisState.delete(`${refreshPrefix}${decoded.currentTokenHash}`);
+      if (script.includes('local previousSessionId =')) {
+        const [sessionPrefix, refreshPrefix, sessionJson, marker, sessionId] =
+          values;
+        const previousSessionId = redisState.get(keys[2]!);
+        if (previousSessionId) {
+          const previousSessionKey = `${sessionPrefix}${previousSessionId}`;
+          const previous = redisState.get(previousSessionKey);
+          if (previous) {
+            const decoded = JSON.parse(previous) as {
+              currentTokenHash: string;
+            };
+            redisState.delete(`${refreshPrefix}${decoded.currentTokenHash}`);
+          }
+          redisState.delete(previousSessionKey);
         }
         redisState.set(key, sessionJson!);
         redisState.set(keys[1]!, marker!);
+        redisState.set(keys[2]!, sessionId!);
         return 1;
       }
 
@@ -286,6 +295,44 @@ describe('remote MCP OAuth state', () => {
     await expect(
       getRemoteMcpRefreshSession(rotation.refreshToken),
     ).resolves.toBeNull();
+  });
+
+  it('isolates a replacement authorization from old-family replay', async () => {
+    const previousToken = await createRemoteMcpRefreshSession({
+      userId: 'user-1',
+      clientId: 'client-1',
+      resource: 'https://roomote.example/mcp',
+      scopes: ['mcp:roomote'],
+    });
+    const previousSession = await getRemoteMcpRefreshSession(previousToken);
+    const previousRotation = await rotateRemoteMcpRefreshToken(
+      previousToken,
+      previousSession!,
+    );
+    expect(previousRotation.status).toBe('ok');
+
+    const replacementToken = await createRemoteMcpRefreshSession({
+      userId: 'user-1',
+      clientId: 'client-1',
+      resource: 'https://roomote.example/mcp',
+      scopes: ['mcp:roomote'],
+    });
+    const replacementSession =
+      await getRemoteMcpRefreshSession(replacementToken);
+    expect(replacementSession?.sessionId).not.toBe(previousSession?.sessionId);
+    if (previousRotation.status !== 'ok') {
+      throw new Error('expected previous refresh rotation');
+    }
+    await expect(
+      getRemoteMcpRefreshSession(previousRotation.refreshToken),
+    ).resolves.toBeNull();
+
+    await expect(
+      rotateRemoteMcpRefreshToken(previousToken, previousSession!),
+    ).resolves.toEqual({ status: 'reuse' });
+    await expect(getRemoteMcpRefreshSession(replacementToken)).resolves.toEqual(
+      replacementSession,
+    );
   });
 
   it('revokes a refresh session by client ID', async () => {
