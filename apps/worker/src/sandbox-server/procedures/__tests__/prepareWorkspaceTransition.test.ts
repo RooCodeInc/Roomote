@@ -32,6 +32,14 @@ describe('prepareWorkspaceTransition', () => {
     expect(ctx.workspaceTransitionState?.requested).toBe(true);
 
     const nextRequestContext = context('idle', ctx.workspaceTransitionState);
+    await expect(
+      appRouter
+        .createCaller(nextRequestContext)
+        .commands.sendPrompt({ prompt: 'arrived after Git inspection' }),
+    ).rejects.toThrow(
+      'This task is changing workspaces; the prompt was not delivered.',
+    );
+
     await appRouter
       .createCaller(nextRequestContext)
       .commands.abortWorkspaceTransition();
