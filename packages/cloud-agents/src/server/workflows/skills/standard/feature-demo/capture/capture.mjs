@@ -280,7 +280,7 @@ async function run() {
       const t = now();
       timeline.clicks.push({ t, at: c });
       // Give the pointer a short bracketed hop when it is not already on the
-      // target, keeping the camera fixed while preserving the interaction cue.
+      // target while preserving the interaction cue.
       if (curCursor.x !== c.x || curCursor.y !== c.y) {
         pushCursorMove(Math.max(0, t - 0.25), t, c);
       }

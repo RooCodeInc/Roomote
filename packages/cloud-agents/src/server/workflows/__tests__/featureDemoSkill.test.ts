@@ -110,19 +110,19 @@ describe('feature-demo skill', () => {
     );
   });
 
-  it('keeps fixed framing while scrolling through interactions', () => {
+  it('uses scrolling and pointer cues for interactions', () => {
     const captureRunner = fs.readFileSync(
       path.join(skillDirPath, 'capture/capture.mjs'),
       'utf8',
     );
 
-    // The runner still supports the stable timeline schema, but the skill only
-    // authors fixed-scale beats and uses scrolling and cursor effects instead.
+    // The skill only authors its documented beat vocabulary and uses scrolling
+    // and cursor effects to guide attention.
     expect(captureRunner).toContain("beat.a === 'show'");
     expect(skillContent).toContain('THE DEFAULT NARRATED MOVE');
     expect(skillContent).toContain('MOVE BY SCROLLING');
     expect(skillContent).toContain(
-      'keep the camera at a fixed scale for the entire demo',
+      'author scripts using only the beat actions listed above',
     );
     expect(skillContent).not.toContain('{ "a": "focus"');
     expect(skillContent).not.toContain('{ "a": "reset"');
