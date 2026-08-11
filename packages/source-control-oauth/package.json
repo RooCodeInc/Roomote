@@ -1,5 +1,5 @@
 {
-  "name": "@roomote/gitea",
+  "name": "@roomote/source-control-oauth",
   "version": "0.0.3",
   "private": true,
   "type": "module",
@@ -10,14 +10,8 @@
     "lint": "eslint src --ext=ts --max-warnings=0",
     "check-types": "tsc --noEmit",
     "check-types:fast": "tsgo --noEmit",
-    "test": "dotenvx run -f ../../.env.test -- vitest",
+    "test": "vitest",
     "clean": "rimraf .turbo"
-  },
-  "dependencies": {
-    "@roomote/db": "workspace:^",
-    "@roomote/source-control-oauth": "workspace:^",
-    "@roomote/types": "workspace:^",
-    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@roomote/config-eslint": "workspace:^",
