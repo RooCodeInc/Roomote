@@ -1540,9 +1540,7 @@ async function enqueueFreshLaunch(
         goalStatus: input.goal ? 'active' : null,
         goalMaxContinuations: input.goal?.maxContinuations ?? null,
         goalLastContinuationId: initialGoalGeneration,
-        goalContinuationIds: initialGoalGeneration
-          ? [initialGoalGeneration]
-          : [],
+        goalGenerationIds: initialGoalGeneration ? [initialGoalGeneration] : [],
         requestedWorkKind: requestedWorkKindDecision.kind,
         requestedWorkKindSource: requestedWorkKindDecision.source,
         requestedWorkKindConfidence: requestedWorkKindDecision.confidence,

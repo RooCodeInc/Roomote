@@ -314,7 +314,7 @@ describe('task goals', () => {
       goalStatus: 'active',
       goalMaxContinuations: 3,
       goalLastContinuationId: 'goal-generation:initial',
-      goalContinuationIds: ['goal-generation:initial'],
+      goalGenerationIds: ['goal-generation:initial'],
     });
     const run = await runFactory.create({ taskId: task.id });
 
@@ -418,13 +418,13 @@ describe('task goals', () => {
     });
   });
 
-  it('keeps a released generation assigned after another continuation advances', async () => {
+  it('keeps claimed and released generations assigned after another continuation advances', async () => {
     const task = await taskFactory.create({
       goalObjective: 'Retry and finish the goal',
       goalStatus: 'active',
       goalMaxContinuations: 3,
       goalLastContinuationId: 'goal-generation:initial',
-      goalContinuationIds: ['goal-generation:initial'],
+      goalGenerationIds: ['goal-generation:initial'],
     });
     const run = await runFactory.create({ taskId: task.id });
 
@@ -441,11 +441,22 @@ describe('task goals', () => {
       runId: run.id,
       continuationId: 'next-continuation',
     });
+    const [stored] = await db
+      .select({ goalGenerationIds: tasks.goalGenerationIds })
+      .from(tasks)
+      .where(eq(tasks.id, task.id));
+    expect(stored?.goalGenerationIds).toEqual(
+      expect.arrayContaining([
+        'failed-delivery',
+        releasedGoal!.generation,
+        'next-continuation',
+      ]),
+    );
 
     await expect(
       markTaskGoalForRun({
         runId: run.id,
-        generation: releasedGoal!.generation,
+        generation: 'failed-delivery',
         status: 'complete',
       }),
     ).resolves.toMatchObject({ updated: true });

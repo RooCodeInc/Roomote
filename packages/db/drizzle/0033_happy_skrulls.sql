@@ -1,0 +1,1 @@
+ALTER TABLE "tasks" ADD COLUMN "goal_generation_ids" text[] DEFAULT '{}'::text[] NOT NULL;

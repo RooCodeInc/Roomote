@@ -83,7 +83,7 @@ function assignedGoalGenerationFilter(generation: string | null) {
     ? isNull(tasks.goalLastContinuationId)
     : or(
         eq(tasks.goalLastContinuationId, generation),
-        sql`${generation} = ANY(${tasks.goalContinuationIds})`,
+        sql`${generation} = ANY(${tasks.goalGenerationIds})`,
       );
 }
 
@@ -93,7 +93,7 @@ function hasAssignedGoalGeneration(
 ): boolean {
   return (
     task.goalLastContinuationId === generation ||
-    (generation !== null && task.goalContinuationIds.includes(generation))
+    (generation !== null && task.goalGenerationIds.includes(generation))
   );
 }
 
@@ -156,6 +156,7 @@ export async function prepareTaskGoalActivation(input: {
         goalCompletedAt: null,
         goalLastContinuationId: activationId,
         goalContinuationIds: [],
+        goalGenerationIds: [],
         goalBlockerCandidateReason: null,
         goalBlockerCandidateCount: 0,
         goalBlockerLastContinuationUsed: null,
@@ -184,7 +185,7 @@ export async function prepareTaskGoalActivation(input: {
         .update(tasks)
         .set({
           goalLastContinuationId: generationId,
-          goalContinuationIds: [generationId],
+          goalGenerationIds: [generationId],
           updatedAt: new Date(),
         })
         .where(pendingFilter)
@@ -204,6 +205,7 @@ export async function prepareTaskGoalActivation(input: {
           goalCompletedAt: previous.goalCompletedAt,
           goalLastContinuationId: previous.goalLastContinuationId,
           goalContinuationIds: previous.goalContinuationIds,
+          goalGenerationIds: previous.goalGenerationIds,
           goalBlockerCandidateReason: previous.goalBlockerCandidateReason,
           goalBlockerCandidateCount: previous.goalBlockerCandidateCount,
           goalBlockerLastContinuationUsed:
@@ -412,6 +414,7 @@ export async function claimTaskGoalContinuationForRun(input: {
       goalContinuationsUsed: sql`${tasks.goalContinuationsUsed} + 1`,
       goalLastContinuationId: continuationId,
       goalContinuationIds: sql`array_append(${tasks.goalContinuationIds}, ${continuationId})`,
+      goalGenerationIds: sql`array_append(${tasks.goalGenerationIds}, ${continuationId})`,
       goalBlockerCandidateReason: sql`CASE WHEN ${tasks.goalBlockerLastContinuationUsed} = ${tasks.goalContinuationsUsed} THEN ${tasks.goalBlockerCandidateReason} ELSE NULL END`,
       goalBlockerCandidateCount: sql`CASE WHEN ${tasks.goalBlockerLastContinuationUsed} = ${tasks.goalContinuationsUsed} THEN ${tasks.goalBlockerCandidateCount} ELSE 0 END`,
       goalBlockerLastContinuationUsed: sql`CASE WHEN ${tasks.goalBlockerLastContinuationUsed} = ${tasks.goalContinuationsUsed} THEN ${tasks.goalBlockerLastContinuationUsed} ELSE NULL END`,
@@ -498,7 +501,8 @@ export async function releaseTaskGoalContinuationForRun(input: {
       goalStatus: 'active',
       goalContinuationsUsed: sql`GREATEST(${tasks.goalContinuationsUsed} - 1, 0)`,
       goalLastContinuationId: releasedGeneration,
-      goalContinuationIds: sql`array_append(array_remove(${tasks.goalContinuationIds}, ${input.continuationId}), ${releasedGeneration})`,
+      goalContinuationIds: sql`array_remove(${tasks.goalContinuationIds}, ${input.continuationId})`,
+      goalGenerationIds: sql`array_append(${tasks.goalGenerationIds}, ${releasedGeneration})`,
       updatedAt: new Date(),
     })
     .where(

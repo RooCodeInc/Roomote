@@ -702,6 +702,10 @@ export const tasks = pgTable(
       .array()
       .notNull()
       .default(sql`'{}'::text[]`),
+    goalGenerationIds: text('goal_generation_ids')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
     goalBlockerCandidateReason: text('goal_blocker_candidate_reason'),
     goalBlockerCandidateCount: integer('goal_blocker_candidate_count')
       .notNull()
