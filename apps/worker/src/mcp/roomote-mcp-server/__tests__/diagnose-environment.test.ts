@@ -44,6 +44,7 @@ function dependencies(
       stderr: '',
     })),
     fetch: vi.fn(),
+    fetchViaDockerHost: vi.fn(),
     checkTcpPort: vi.fn(async () => true),
     ...overrides,
   };
@@ -364,6 +365,7 @@ describe('diagnoseEnvironment', () => {
         }
         return { status: 200 };
       }) as unknown as typeof globalThis.fetch;
+      const fetchViaDockerHost = vi.fn(async () => ({ status: 200 }));
       const report = await diagnoseEnvironment({
         workspacePath,
         context: emptyContext({
@@ -376,7 +378,7 @@ describe('diagnoseEnvironment', () => {
             },
           ],
         }),
-        dependencies: dependencies({ fetch }),
+        dependencies: dependencies({ fetch, fetchViaDockerHost }),
       });
 
       expect(findCheck(report, 'port.WEB.preview')).toMatchObject({
@@ -384,12 +386,10 @@ describe('diagnoseEnvironment', () => {
         summary:
           'http://task-web.roopreview.localhost:18181/ returned HTTP 200 (2xx)',
       });
-      expect(fetch).toHaveBeenNthCalledWith(
-        3,
-        'http://host.docker.internal:18181/',
+      expect(fetchViaDockerHost).toHaveBeenCalledWith(
+        'http://task-web.roopreview.localhost:18181/',
         expect.objectContaining({
           headers: {
-            Host: 'task-web.roopreview.localhost:18181',
             'x-bypass-roomote-auth': 'test-bypass-value',
           },
         }),

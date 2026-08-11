@@ -1,4 +1,7 @@
+import * as dns from 'node:dns';
 import * as fs from 'node:fs/promises';
+import * as http from 'node:http';
+import * as https from 'node:https';
 import * as net from 'node:net';
 import * as path from 'node:path';
 
@@ -47,6 +50,10 @@ export interface DiagnoseEnvironmentDependencies {
     options: { cwd: string },
   ) => Promise<CommandResult>;
   fetch: typeof fetch;
+  fetchViaDockerHost: (
+    url: string,
+    options: { headers?: Record<string, string>; signal: AbortSignal },
+  ) => Promise<{ status: number }>;
   checkTcpPort: (port: number) => Promise<boolean>;
 }
 
@@ -69,6 +76,27 @@ const defaultDependencies: DiagnoseEnvironmentDependencies = {
     };
   },
   fetch: globalThis.fetch,
+  fetchViaDockerHost: (rawUrl, options) =>
+    new Promise((resolve, reject) => {
+      const url = new URL(rawUrl);
+      const transport = url.protocol === 'https:' ? https : http;
+      const request = transport.request(
+        url,
+        {
+          method: 'GET',
+          headers: options.headers,
+          signal: options.signal,
+          lookup: (_hostname, lookupOptions, callback) =>
+            dns.lookup('host.docker.internal', lookupOptions, callback),
+        },
+        (response) => {
+          response.resume();
+          resolve({ status: response.statusCode ?? 0 });
+        },
+      );
+      request.once('error', reject);
+      request.end();
+    }),
   checkTcpPort: (port) =>
     new Promise((resolve) => {
       const socket = net.createConnection({ host: '127.0.0.1', port });
@@ -676,20 +704,24 @@ async function checkHttpEndpoint(options: {
   url: string;
   displayUrl?: string;
   headers?: Record<string, string>;
-  connectionFallback?: {
-    url: string;
-    headers?: Record<string, string>;
-  };
+  useDockerHost?: boolean;
+  fallbackViaDockerHost?: boolean;
   dependencies: DiagnoseEnvironmentDependencies;
 }): Promise<EnvironmentObservationCheck> {
   const startedAt = options.dependencies.now().getTime();
   const timestamp = observedAt(options.dependencies);
   try {
-    const response = await options.dependencies.fetch(options.url, {
-      redirect: 'manual',
-      headers: options.headers,
-      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
-    });
+    const signal = AbortSignal.timeout(HTTP_TIMEOUT_MS);
+    const response = options.useDockerHost
+      ? await options.dependencies.fetchViaDockerHost(options.url, {
+          headers: options.headers,
+          signal,
+        })
+      : await options.dependencies.fetch(options.url, {
+          redirect: 'manual',
+          headers: options.headers,
+          signal,
+        });
     const durationMs = Math.max(
       0,
       options.dependencies.now().getTime() - startedAt,
@@ -711,13 +743,12 @@ async function checkHttpEndpoint(options: {
       durationMs,
     };
   } catch (error) {
-    if (options.connectionFallback) {
-      const { connectionFallback, ...retryOptions } = options;
+    if (options.fallbackViaDockerHost && !options.useDockerHost) {
       return checkHttpEndpoint({
-        ...retryOptions,
-        url: connectionFallback.url,
+        ...options,
         displayUrl: options.displayUrl ?? options.url,
-        headers: connectionFallback.headers,
+        useDockerHost: true,
+        fallbackViaDockerHost: false,
       });
     }
 
@@ -736,24 +767,12 @@ async function checkHttpEndpoint(options: {
   }
 }
 
-function getLocalDockerPreviewFallback(
-  rawUrl: string,
-  headers: Record<string, string>,
-): { url: string; headers: Record<string, string> } | undefined {
+function shouldFallbackViaDockerHost(rawUrl: string): boolean {
   try {
     const url = new URL(rawUrl);
-    if (url.protocol !== 'http:' || !url.hostname.endsWith('.localhost')) {
-      return undefined;
-    }
-
-    const originalHost = url.host;
-    url.hostname = 'host.docker.internal';
-    return {
-      url: url.toString(),
-      headers: { ...headers, Host: originalHost },
-    };
+    return url.hostname.endsWith('.localhost');
   } catch {
-    return undefined;
+    return false;
   }
 }
 
@@ -803,7 +822,7 @@ async function diagnosePorts(
         title: `${port.name} preview`,
         url: previewUrl,
         ...(Object.keys(headers).length > 0 ? { headers } : {}),
-        connectionFallback: getLocalDockerPreviewFallback(previewUrl, headers),
+        fallbackViaDockerHost: shouldFallbackViaDockerHost(previewUrl),
         dependencies,
       }),
     );
