@@ -49,6 +49,26 @@ describe('doctor guidance', () => {
     expect(skillContent).toContain(
       'If the user explicitly requested repair and ownership is `repository`, transition to `implement-changes`',
     );
+    expect(skillContent).toContain(
+      'does not authorize filing or sending a platform report',
+    );
+    expect(skillContent).toContain(
+      'Do not call `report_platform_issue`, create an issue, or claim that a report was filed unless the user explicitly requested that write.',
+    );
+  });
+
+  it('requires an exact named environment and evidence-based branch selection', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      'Cross-check that exact ID and name against an immediate `list_environments` result.',
+    );
+    expect(skillContent).toContain(
+      'The `__all_repositories__` organization-wide target is not a named environment and is never a fallback',
+    );
+    expect(skillContent).toContain(
+      "resolve the repository's current or default branch from task or repository evidence and retry once; never guess a branch name.",
+    );
   });
 
   it('derives generic goals without assuming a workload technology', () => {

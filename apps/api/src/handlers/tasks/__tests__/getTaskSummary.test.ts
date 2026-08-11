@@ -174,6 +174,30 @@ describe('getTaskSummary', () => {
     expect(mockEnvironmentFindFirst).toHaveBeenCalledTimes(1);
   });
 
+  it('includes the linked environment from a standard task run payload', async () => {
+    mockGetLatestTaskRunsByTaskIds.mockResolvedValueOnce({
+      'task-1': {
+        id: 101,
+        taskId: 'task-1',
+        status: 'running',
+        taskPhase: null,
+        error: null,
+        payload: { environmentId: 'env-123' },
+      },
+    });
+
+    const response = await createApp(authContext).request(
+      'http://localhost/tasks/task-1/summary',
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      linkedEnvironmentId: 'env-123',
+      linkedEnvironmentName: 'Onboarding Sandbox',
+    });
+    expect(mockEnvironmentFindFirst).toHaveBeenCalledTimes(1);
+  });
+
   it('returns null linked environment fields when the latest job has no linked environment', async () => {
     mockGetLatestTaskRunsByTaskIds.mockResolvedValueOnce({
       'task-1': {

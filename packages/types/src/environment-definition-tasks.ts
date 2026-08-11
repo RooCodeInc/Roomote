@@ -44,6 +44,29 @@ export function getEnvironmentDefinitionIdFromPayload(
   return trimmed.length > 0 ? trimmed : null;
 }
 
+/**
+ * Return the environment linked to any task-run payload. Standard tasks use
+ * `environmentId`; environment-definition workflows retain their historical
+ * payload keys.
+ */
+export function getLinkedEnvironmentIdFromPayload(
+  payload: unknown,
+): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+
+  const environmentId = (payload as Record<string, unknown>).environmentId;
+  if (typeof environmentId === 'string') {
+    const trimmed = environmentId.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
+  }
+
+  return getEnvironmentDefinitionIdFromPayload(payload);
+}
+
 export function normalizeRepositorySelection(
   repositories: RepositoryReference[],
 ): string[] {

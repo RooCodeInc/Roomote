@@ -1,4 +1,30 @@
-import { buildEnvironmentVerificationPrompt } from './environment-definition-tasks';
+import {
+  buildEnvironmentVerificationPrompt,
+  getLinkedEnvironmentIdFromPayload,
+} from './environment-definition-tasks';
+
+describe('getLinkedEnvironmentIdFromPayload', () => {
+  it('reads a standard task environment id', () => {
+    expect(
+      getLinkedEnvironmentIdFromPayload({ environmentId: 'environment-123' }),
+    ).toBe('environment-123');
+  });
+
+  it('falls back to environment-definition workflow payload keys', () => {
+    expect(
+      getLinkedEnvironmentIdFromPayload({
+        environmentDefinitionId: 'definition-123',
+      }),
+    ).toBe('definition-123');
+  });
+
+  it('rejects empty and non-object values', () => {
+    expect(getLinkedEnvironmentIdFromPayload({ environmentId: '  ' })).toBe(
+      null,
+    );
+    expect(getLinkedEnvironmentIdFromPayload(null)).toBe(null);
+  });
+});
 
 describe('buildEnvironmentVerificationPrompt', () => {
   it('creates a direct read-only verification task without invoking Doctor', () => {
