@@ -127,6 +127,14 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     },
     policy: 'public',
   },
+  {
+    name: 'roomote-mcp-oauth-protected-resource-metadata-canonical',
+    match: {
+      type: 'exact',
+      path: '/.well-known/oauth-protected-resource/mcp',
+    },
+    policy: 'public',
+  },
 
   // Sandbox OIDC discovery documents consumed by external verifiers.
   {
@@ -247,6 +255,12 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
 
   // Router-facing MCP endpoints: accept user auth tokens (LLM router
   // gathering context before a run exists) and task run tokens.
+  {
+    name: 'roomote-public-mcp',
+    match: { type: 'exact', path: '/mcp' },
+    policy: 'roomote-mcp',
+    errorFormat: 'json-rpc',
+  },
   {
     name: 'roomote-mcp',
     match: { type: 'exact', path: '/api/mcp-routing/roomote' },

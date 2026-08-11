@@ -7,10 +7,21 @@ vi.mock('@roomote/redis', () => ({
       return 'OK';
     },
     get: async (key: string) => redisState.get(key) ?? null,
-    getdel: async (key: string) => {
-      const value = redisState.get(key) ?? null;
-      redisState.delete(key);
-      return value;
+    eval: async (
+      script: string,
+      _keyCount: number,
+      key: string,
+      arg: string,
+    ) => {
+      if (script.includes("redis.call('GET'")) {
+        const value = redisState.get(key) ?? null;
+        if (value === arg) redisState.delete(key);
+        return value === arg ? value : null;
+      }
+
+      const count = Number(redisState.get(key) ?? '0') + 1;
+      redisState.set(key, String(count));
+      return count;
     },
   }),
 }));
@@ -18,7 +29,9 @@ vi.mock('@roomote/redis', () => ({
 import {
   consumeRemoteMcpAuthorizationCode,
   createRemoteMcpAuthorizationCode,
+  getRemoteMcpAuthorizationCode,
   isAllowedOAuthRedirectUri,
+  isRemoteMcpRegistrationAllowed,
   registerRemoteMcpOAuthClient,
   verifyPkceChallenge,
 } from './mcp-remote-oauth';
@@ -56,15 +69,49 @@ describe('remote MCP OAuth state', () => {
       clientId: 'client-1',
       redirectUri: 'https://client.example/callback',
       codeChallenge: 'challenge',
-      resource: 'https://api.example.com/api/mcp-routing/roomote',
+      resource: 'https://api.example.com/mcp',
       scopes: ['mcp:roomote'],
     };
     const code = await createRemoteMcpAuthorizationCode(value);
 
-    await expect(consumeRemoteMcpAuthorizationCode(code)).resolves.toEqual(
-      value,
+    await expect(getRemoteMcpAuthorizationCode(code)).resolves.toEqual(value);
+    await expect(consumeRemoteMcpAuthorizationCode(code, value)).resolves.toBe(
+      true,
     );
-    await expect(consumeRemoteMcpAuthorizationCode(code)).resolves.toBeNull();
+    await expect(consumeRemoteMcpAuthorizationCode(code, value)).resolves.toBe(
+      false,
+    );
+  });
+
+  it('does not consume a code when the expected binding differs', async () => {
+    const value = {
+      userId: 'user-1',
+      clientId: 'client-1',
+      redirectUri: 'https://client.example/callback',
+      codeChallenge: 'challenge',
+      resource: 'https://api.example.com/mcp',
+      scopes: ['mcp:roomote'],
+    };
+    const code = await createRemoteMcpAuthorizationCode(value);
+
+    await expect(
+      consumeRemoteMcpAuthorizationCode(code, {
+        ...value,
+        codeChallenge: 'wrong-challenge',
+      }),
+    ).resolves.toBe(false);
+    await expect(getRemoteMcpAuthorizationCode(code)).resolves.toEqual(value);
+  });
+
+  it('bounds registrations per client and globally', async () => {
+    const allowed = await Promise.all(
+      Array.from({ length: 21 }, () =>
+        isRemoteMcpRegistrationAllowed('203.0.113.5'),
+      ),
+    );
+
+    expect(allowed.slice(0, 20).every(Boolean)).toBe(true);
+    expect(allowed[20]).toBe(false);
   });
 
   it('verifies S256 PKCE challenges', () => {

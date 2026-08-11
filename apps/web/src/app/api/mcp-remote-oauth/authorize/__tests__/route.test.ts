@@ -18,7 +18,7 @@ vi.mock('@/lib/server/mcp-remote-oauth', () => ({
   createRemoteMcpAuthorizationCode: mockCreateCode,
 }));
 
-import { GET } from '../route';
+import { GET, POST } from '../route';
 
 const clientId = '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568';
 const redirectUri = 'https://client.example/callback';
@@ -31,10 +31,7 @@ function authorizeRequest() {
   url.searchParams.set('state', 'client-state');
   url.searchParams.set('code_challenge', 'a'.repeat(43));
   url.searchParams.set('code_challenge_method', 'S256');
-  url.searchParams.set(
-    'resource',
-    'https://api.example.com/api/mcp-routing/roomote',
-  );
+  url.searchParams.set('resource', 'https://api.example.com/mcp');
   url.searchParams.set('scope', 'mcp:roomote');
   return new NextRequest(url);
 }
@@ -44,6 +41,7 @@ describe('GET /api/mcp-remote-oauth/authorize', () => {
     vi.clearAllMocks();
     mockGetClient.mockResolvedValue({
       clientId,
+      clientName: 'Claude Code',
       redirectUris: [redirectUri],
     });
   });
@@ -62,11 +60,24 @@ describe('GET /api/mcp-remote-oauth/authorize', () => {
     expect(mockCreateCode).not.toHaveBeenCalled();
   });
 
-  it('issues a resource-bound code for the signed-in user', async () => {
+  it('requires explicit approval before issuing a code', async () => {
+    mockAuthorize.mockResolvedValue({ success: true, userId: 'user-1' });
+
+    const response = await GET(authorizeRequest());
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/html');
+    expect(html).toContain('Authorize Claude Code?');
+    expect(html).toContain('Allow access');
+    expect(mockCreateCode).not.toHaveBeenCalled();
+  });
+
+  it('issues a resource-bound code after approval', async () => {
     mockAuthorize.mockResolvedValue({ success: true, userId: 'user-1' });
     mockCreateCode.mockResolvedValue('authorization-code');
 
-    const response = await GET(authorizeRequest());
+    const response = await POST(authorizeRequest());
     const location = new URL(response.headers.get('location')!);
 
     expect(location.toString()).toBe(
@@ -77,7 +88,7 @@ describe('GET /api/mcp-remote-oauth/authorize', () => {
       clientId,
       redirectUri,
       codeChallenge: 'a'.repeat(43),
-      resource: 'https://api.example.com/api/mcp-routing/roomote',
+      resource: 'https://api.example.com/mcp',
       scopes: ['mcp:roomote'],
     });
   });

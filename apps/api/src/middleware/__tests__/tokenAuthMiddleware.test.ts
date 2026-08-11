@@ -90,13 +90,13 @@ describe('tokenAuthMiddleware token extraction', () => {
     const mcpContext = {
       tokenType: 'mcp',
       userId: 'user-1',
-      resource: 'https://api.example.com/api/mcp-routing/roomote',
+      resource: 'https://api.example.com/mcp',
       scopes: ['mcp:roomote'],
       version: 1,
     };
     mockValidateMcpAccessToken.mockResolvedValue(mcpContext);
 
-    const authContext = await requestAuthContext('/api/mcp-routing/roomote', {
+    const authContext = await requestAuthContext('/mcp', {
       authorization: 'Bearer valid-mcp-token',
     });
 

@@ -4,8 +4,29 @@ import { getRedis } from '@roomote/redis';
 
 const CLIENT_TTL_SECONDS = 30 * 24 * 60 * 60;
 const AUTHORIZATION_CODE_TTL_SECONDS = 5 * 60;
+const REGISTRATION_RATE_LIMIT_WINDOW_SECONDS = 60 * 60;
+const REGISTRATION_RATE_LIMIT_PER_CLIENT = 20;
+const REGISTRATION_RATE_LIMIT_GLOBAL = 1_000;
 const CLIENT_KEY_PREFIX = 'mcp-remote-oauth:client:';
 const CODE_KEY_PREFIX = 'mcp-remote-oauth:code:';
+const REGISTRATION_RATE_KEY_PREFIX = 'mcp-remote-oauth:registration-rate:';
+
+const CONSUME_CODE_LUA = `
+local value = redis.call('GET', KEYS[1])
+if value == ARGV[1] then
+  redis.call('DEL', KEYS[1])
+  return value
+end
+return false
+`;
+
+const RATE_LIMIT_INCREMENT_LUA = `
+local current = redis.call('INCR', KEYS[1])
+if current == 1 then
+  redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+return current
+`;
 
 type RemoteMcpOAuthClient = {
   clientId: string;
@@ -86,11 +107,57 @@ export async function createRemoteMcpAuthorizationCode(
   return code;
 }
 
-export async function consumeRemoteMcpAuthorizationCode(
+export async function getRemoteMcpAuthorizationCode(
   code: string,
 ): Promise<RemoteMcpAuthorizationCode | null> {
-  const value = await getRedis().getdel(codeKey(code));
+  const value = await getRedis().get(codeKey(code));
   return value ? (JSON.parse(value) as RemoteMcpAuthorizationCode) : null;
+}
+
+export async function consumeRemoteMcpAuthorizationCode(
+  code: string,
+  expected: RemoteMcpAuthorizationCode,
+): Promise<boolean> {
+  const value = await getRedis().eval(
+    CONSUME_CODE_LUA,
+    1,
+    codeKey(code),
+    JSON.stringify(expected),
+  );
+  return typeof value === 'string';
+}
+
+async function incrementRegistrationBucket(key: string): Promise<number> {
+  return getRedis().eval(
+    RATE_LIMIT_INCREMENT_LUA,
+    1,
+    key,
+    String(REGISTRATION_RATE_LIMIT_WINDOW_SECONDS),
+  ) as Promise<number>;
+}
+
+export async function isRemoteMcpRegistrationAllowed(
+  clientIdentifier: string,
+): Promise<boolean> {
+  const window = Math.floor(
+    Date.now() / (REGISTRATION_RATE_LIMIT_WINDOW_SECONDS * 1000),
+  );
+  const clientHash = createHash('sha256')
+    .update(clientIdentifier)
+    .digest('hex');
+  const [clientCount, globalCount] = await Promise.all([
+    incrementRegistrationBucket(
+      `${REGISTRATION_RATE_KEY_PREFIX}client:${clientHash}:${window}`,
+    ),
+    incrementRegistrationBucket(
+      `${REGISTRATION_RATE_KEY_PREFIX}global:${window}`,
+    ),
+  ]);
+
+  return (
+    clientCount <= REGISTRATION_RATE_LIMIT_PER_CLIENT &&
+    globalCount <= REGISTRATION_RATE_LIMIT_GLOBAL
+  );
 }
 
 export function verifyPkceChallenge(

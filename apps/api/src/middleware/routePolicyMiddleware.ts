@@ -103,9 +103,12 @@ function rejectionResponse(
   rule: RoutePolicyRule,
   rejection: RoutePolicyRejection,
 ): Response {
-  if (rule.name === 'roomote-mcp' && rejection.status === 401) {
+  if (
+    (rule.name === 'roomote-mcp' || rule.name === 'roomote-public-mcp') &&
+    rejection.status === 401
+  ) {
     const resourceMetadata = new URL(
-      '/.well-known/oauth-protected-resource/api/mcp-routing/roomote',
+      '/.well-known/oauth-protected-resource/mcp',
       c.req.url,
     );
     c.header(

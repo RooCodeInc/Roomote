@@ -19,11 +19,16 @@ import {
 
 const ISSUER = 'rcc';
 export const ROOMOTE_MCP_SCOPE = 'mcp:roomote';
-export const ROOMOTE_MCP_PATH = '/api/mcp-routing/roomote';
+export const ROOMOTE_MCP_PATH = '/mcp';
+export const ROOMOTE_MCP_LEGACY_PATH = '/api/mcp-routing/roomote';
 export const DEFAULT_MCP_ACCESS_TOKEN_TIMEOUT_MS = 60 * 60 * 1000;
 
 export function getRoomoteMcpResourceUrl(apiBaseUrl: string): string {
   return new URL(ROOMOTE_MCP_PATH, apiBaseUrl).toString();
+}
+
+export function getLegacyRoomoteMcpResourceUrl(apiBaseUrl: string): string {
+  return new URL(ROOMOTE_MCP_LEGACY_PATH, apiBaseUrl).toString();
 }
 
 const createMcpAccessTokenOptionsSchema = z.object({

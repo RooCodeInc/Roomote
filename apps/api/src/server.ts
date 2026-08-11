@@ -50,6 +50,7 @@ import {
   mcp,
   mcpRouting,
   mcpOAuthMetadata,
+  publicRoomoteMcp,
   taskRunsRouter,
   artifactsRouter,
   taskArtifactsRouter,
@@ -212,6 +213,7 @@ export function createApiApp(): ApiApp {
   app.route('/api/inference', inference);
   app.route('/api/mcp', mcp);
   app.route('/api/mcp-routing', mcpRouting);
+  app.route('/mcp', publicRoomoteMcp);
   app.route('/', mcpOAuthMetadata);
   app.route('/api/task-runs', taskRunsRouter);
   app.route('/api/artifacts', artifactsRouter);

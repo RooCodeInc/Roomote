@@ -1,12 +1,12 @@
 ---
 title: Remote Roomote MCP
 icon: plug-circle-bolt
-description: Connect an OAuth-capable MCP client to Roomote's shared context tools.
+description: Connect an OAuth-capable MCP client to Roomote's member task tools.
 ---
 
-Roomote exposes its context and environment-discovery tools as a remote MCP
-server. OAuth-capable clients can connect without manually creating or copying
-an API token.
+Roomote exposes member task management, environment discovery, and connected
+chat context as a remote MCP server. OAuth-capable clients can connect without
+manually creating or copying an API token.
 
 ## Prerequisites
 
@@ -26,13 +26,21 @@ callback URLs must use HTTPS.
 Configure the MCP client with this server URL:
 
 ```text
-<TRPC_URL>/api/mcp-routing/roomote
+<TRPC_URL>/mcp
+```
+
+For Claude Code, add it at user scope and start the browser login:
+
+```bash
+claude mcp add --transport http roomote --scope user <TRPC_URL>/mcp
+claude mcp login roomote
 ```
 
 The client discovers the OAuth authorization server automatically. Roomote
 opens the browser, asks the user to sign in when needed, and returns the client
-to its registered callback. The client must support OAuth authorization code
-flow with S256 PKCE and dynamic client registration.
+to its registered callback after the user explicitly approves access. The
+client must support OAuth authorization code flow with S256 PKCE and dynamic
+client registration.
 
 Roomote currently issues a one-hour access token without a refresh token. When
 it expires, the client starts the browser authorization flow again.
@@ -51,9 +59,11 @@ internal user and task-run credentials:
 - dynamically registered clients expire after 30 days and can register only
   HTTPS or loopback HTTP callback URLs
 
-This endpoint exposes the same Roomote context tools used for routing before a
-task starts. It does not grant a client a task-run identity or access to tools
-that require an active Roomote task.
+The endpoint acts as the signed-in member. It can inspect Roomote and connected
+chat context, search and read tasks, list launch environments, launch or cancel
+tasks, and send follow-up messages. Existing member and admin authorization
+still applies to every operation; the OAuth token does not grant a task-run or
+administrator identity.
 
 ## Troubleshooting
 

@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { NextRequest } from 'next/server';
 
-const { mockConsumeCode, mockCreateToken } = vi.hoisted(() => ({
+const { mockGetCode, mockConsumeCode, mockCreateToken } = vi.hoisted(() => ({
+  mockGetCode: vi.fn(),
   mockConsumeCode: vi.fn(),
   mockCreateToken: vi.fn(),
 }));
@@ -13,6 +14,7 @@ vi.mock('@roomote/auth', async (importOriginal) => ({
 
 vi.mock('@/lib/server/mcp-remote-oauth', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server/mcp-remote-oauth')>()),
+  getRemoteMcpAuthorizationCode: mockGetCode,
   consumeRemoteMcpAuthorizationCode: mockConsumeCode,
 }));
 
@@ -21,7 +23,7 @@ import { POST } from '../route';
 const verifier =
   'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~';
 const challenge = createHash('sha256').update(verifier).digest('base64url');
-const resource = 'https://api.example.com/api/mcp-routing/roomote';
+const resource = 'https://api.example.com/mcp';
 
 function tokenRequest(overrides: Record<string, string> = {}) {
   const body = new URLSearchParams({
@@ -43,7 +45,7 @@ function tokenRequest(overrides: Record<string, string> = {}) {
 describe('POST /api/mcp-remote-oauth/token', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockConsumeCode.mockResolvedValue({
+    mockGetCode.mockResolvedValue({
       userId: 'user-1',
       clientId: '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
       redirectUri: 'https://client.example/callback',
@@ -51,6 +53,7 @@ describe('POST /api/mcp-remote-oauth/token', () => {
       resource,
       scopes: ['mcp:roomote'],
     });
+    mockConsumeCode.mockResolvedValue(true);
     mockCreateToken.mockResolvedValue('access-token');
   });
 
@@ -71,6 +74,10 @@ describe('POST /api/mcp-remote-oauth/token', () => {
       scopes: ['mcp:roomote'],
       timeoutMs: 3_600_000,
     });
+    expect(mockConsumeCode).toHaveBeenCalledWith(
+      'authorization-code',
+      expect.objectContaining({ userId: 'user-1' }),
+    );
   });
 
   it('rejects a verifier that does not match the authorization code', async () => {
@@ -83,6 +90,7 @@ describe('POST /api/mcp-remote-oauth/token', () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: 'invalid_grant' });
+    expect(mockConsumeCode).not.toHaveBeenCalled();
     expect(mockCreateToken).not.toHaveBeenCalled();
   });
 
@@ -99,7 +107,7 @@ describe('POST /api/mcp-remote-oauth/token', () => {
     await expect(response.json()).resolves.toEqual({
       error: 'invalid_request',
     });
-    expect(mockConsumeCode).not.toHaveBeenCalled();
+    expect(mockGetCode).not.toHaveBeenCalled();
   });
 
   it('requires the token request to repeat the bound resource', async () => {
@@ -109,6 +117,6 @@ describe('POST /api/mcp-remote-oauth/token', () => {
     await expect(response.json()).resolves.toEqual({
       error: 'invalid_request',
     });
-    expect(mockConsumeCode).not.toHaveBeenCalled();
+    expect(mockGetCode).not.toHaveBeenCalled();
   });
 });

@@ -25,7 +25,67 @@ const authorizeSchema = z.object({
   scope: z.string().optional(),
 });
 
-export async function GET(request: NextRequest) {
+function escapeHtml(value: string): string {
+  return value.replace(
+    /[&<>"']/g,
+    (character) =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      })[character]!,
+  );
+}
+
+function consentResponse(options: {
+  request: NextRequest;
+  clientName?: string;
+  redirectUri: string;
+}) {
+  const action = escapeHtml(
+    `${options.request.nextUrl.pathname}${options.request.nextUrl.search}`,
+  );
+  const clientName = escapeHtml(options.clientName ?? 'An MCP client');
+  const callbackHost = escapeHtml(new URL(options.redirectUri).host);
+
+  return new NextResponse(
+    `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Authorize ${clientName}</title>
+  </head>
+  <body style="margin:0;background:#f6f5f1;color:#171713;font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+    <main style="min-height:100vh;display:grid;place-items:center;padding:24px;box-sizing:border-box;">
+      <section style="width:min(100%,520px);background:#fff;border:1px solid #deddd6;border-radius:18px;padding:32px;box-sizing:border-box;box-shadow:0 18px 50px rgba(23,23,19,.08);">
+        <p style="margin:0 0 12px;color:#68675f;font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;">Roomote MCP</p>
+        <h1 style="margin:0 0 14px;font-size:28px;line-height:1.15;">Authorize ${clientName}?</h1>
+        <p style="margin:0 0 22px;color:#55544e;font-size:16px;line-height:1.55;">This client will act as your signed-in Roomote member. It can read task and chat context, launch or cancel tasks, and send follow-up messages.</p>
+        <div style="margin:0 0 24px;padding:14px 16px;background:#f6f5f1;border-radius:12px;color:#55544e;font-size:14px;line-height:1.45;">After approval, Roomote returns you to <strong style="color:#171713;">${callbackHost}</strong>.</div>
+        <form method="post" action="${action}">
+          <button type="submit" style="width:100%;border:0;border-radius:10px;background:#171713;color:#fff;padding:13px 18px;font:inherit;font-weight:700;cursor:pointer;">Allow access</button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>`,
+    {
+      status: 200,
+      headers: {
+        'Cache-Control': 'no-store',
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Security-Policy':
+          "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        'X-Frame-Options': 'DENY',
+      },
+    },
+  );
+}
+
+async function handleAuthorize(request: NextRequest, approved: boolean) {
   const env = await bootstrapWebRuntimeEnv();
   const webUrl = getPublicAppUrl(env);
   const parsed = authorizeSchema.safeParse(
@@ -72,6 +132,14 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(signInUrl);
   }
 
+  if (!approved) {
+    return consentResponse({
+      request,
+      clientName: client.clientName,
+      redirectUri: input.redirect_uri,
+    });
+  }
+
   const code = await createRemoteMcpAuthorizationCode({
     userId: auth.userId,
     clientId: input.client_id,
@@ -84,4 +152,12 @@ export async function GET(request: NextRequest) {
   redirect.searchParams.set('code', code);
   redirect.searchParams.set('state', input.state);
   return NextResponse.redirect(redirect);
+}
+
+export function GET(request: NextRequest) {
+  return handleAuthorize(request, false);
+}
+
+export function POST(request: NextRequest) {
+  return handleAuthorize(request, true);
 }

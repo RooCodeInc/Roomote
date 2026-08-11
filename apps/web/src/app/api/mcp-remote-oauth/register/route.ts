@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import {
   isAllowedOAuthRedirectUri,
+  isRemoteMcpRegistrationAllowed,
   registerRemoteMcpOAuthClient,
 } from '@/lib/server/mcp-remote-oauth';
 
@@ -21,6 +22,25 @@ const registrationSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  const clientIdentifier =
+    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    request.headers.get('x-real-ip')?.trim() ||
+    'unknown';
+
+  try {
+    if (!(await isRemoteMcpRegistrationAllowed(clientIdentifier))) {
+      return NextResponse.json(
+        { error: 'temporarily_unavailable' },
+        { status: 429, headers: { 'Retry-After': '3600' } },
+      );
+    }
+  } catch {
+    return NextResponse.json(
+      { error: 'temporarily_unavailable' },
+      { status: 503 },
+    );
+  }
+
   let body: unknown;
   try {
     body = await request.json();

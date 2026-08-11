@@ -9,6 +9,7 @@ import {
 
 import {
   consumeRemoteMcpAuthorizationCode,
+  getRemoteMcpAuthorizationCode,
   verifyPkceChallenge,
 } from '@/lib/server/mcp-remote-oauth';
 
@@ -44,7 +45,7 @@ export async function POST(request: NextRequest) {
   }
 
   const input = parsed.data;
-  const authorization = await consumeRemoteMcpAuthorizationCode(input.code);
+  const authorization = await getRemoteMcpAuthorizationCode(input.code);
   if (
     !authorization ||
     authorization.clientId !== input.client_id ||
@@ -54,6 +55,10 @@ export async function POST(request: NextRequest) {
     authorization.scopes[0] !== ROOMOTE_MCP_SCOPE ||
     !verifyPkceChallenge(input.code_verifier, authorization.codeChallenge)
   ) {
+    return oauthError('invalid_grant');
+  }
+
+  if (!(await consumeRemoteMcpAuthorizationCode(input.code, authorization))) {
     return oauthError('invalid_grant');
   }
 

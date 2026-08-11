@@ -32,7 +32,7 @@ import {
   validateMcpAccessToken,
 } from '../mcp-access-token';
 
-const resource = 'https://api.example.com/api/mcp-routing/roomote';
+const resource = 'https://api.example.com/mcp';
 
 describe('MCP access tokens', () => {
   beforeEach(() => vi.clearAllMocks());

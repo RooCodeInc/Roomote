@@ -1,9 +1,13 @@
 import { NextRequest } from 'next/server';
 
-const mockRegisterClient = vi.hoisted(() => vi.fn());
+const { mockRegistrationAllowed, mockRegisterClient } = vi.hoisted(() => ({
+  mockRegistrationAllowed: vi.fn(),
+  mockRegisterClient: vi.fn(),
+}));
 
 vi.mock('@/lib/server/mcp-remote-oauth', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server/mcp-remote-oauth')>()),
+  isRemoteMcpRegistrationAllowed: mockRegistrationAllowed,
   registerRemoteMcpOAuthClient: mockRegisterClient,
 }));
 
@@ -25,7 +29,10 @@ function registrationRequest(redirectUri: string) {
 }
 
 describe('POST /api/mcp-remote-oauth/register', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRegistrationAllowed.mockResolvedValue(true);
+  });
 
   it('registers an HTTPS callback for a public client', async () => {
     mockRegisterClient.mockResolvedValue({
@@ -53,6 +60,21 @@ describe('POST /api/mcp-remote-oauth/register', () => {
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
       error: 'invalid_client_metadata',
+    });
+    expect(mockRegisterClient).not.toHaveBeenCalled();
+  });
+
+  it('rate limits anonymous client registration before writing Redis', async () => {
+    mockRegistrationAllowed.mockResolvedValue(false);
+
+    const response = await POST(
+      registrationRequest('https://client.example/callback'),
+    );
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get('retry-after')).toBe('3600');
+    await expect(response.json()).resolves.toEqual({
+      error: 'temporarily_unavailable',
     });
     expect(mockRegisterClient).not.toHaveBeenCalled();
   });
