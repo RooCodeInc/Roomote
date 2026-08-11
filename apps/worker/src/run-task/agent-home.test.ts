@@ -1043,6 +1043,7 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(result.switchableModels).toContain(
       'openrouter/anthropic/claude-opus-5',
     );
+    expect(result.model).toBe('openrouter/anthropic/claude-opus-5');
   });
 
   it('leaves the switchable set empty when the control plane advertises none', () => {

@@ -9,6 +9,7 @@ import {
 } from '@roomote/types';
 
 import { type Harness, startOpenCodeServerHarness } from '../sandbox-server';
+import type { SwitchModelReason } from '../sandbox-server/lib/harness';
 import {
   type IntegrationMcpOptions,
   resolveBuiltInMcpServers,
@@ -101,7 +102,10 @@ export async function createHarness({
   // respawns the harness from scratch. Hold the accepted model here so the
   // replacement harness resumes on the switched model instead of silently
   // reverting to the launch-time override.
-  let switchedModelOverride: string | undefined;
+  let launchModel: string | undefined;
+  let switchedModelState:
+    | { model: string; reason: SwitchModelReason }
+    | undefined;
 
   const spawnHarness = async (options?: {
     initialSessionId?: string;
@@ -119,7 +123,7 @@ export async function createHarness({
           harnessType,
         )
       : undefined;
-    const modelOverride = switchedModelOverride ?? launchModelOverride;
+    const modelOverride = switchedModelState?.model ?? launchModelOverride;
     // Per-task reasoning effort stamped at launch (or set explicitly via the
     // public API). Applied to the effective coding model, which per-role env
     // levels do not cover when a launch-time model override is in play.
@@ -141,13 +145,17 @@ export async function createHarness({
             await prepareQueuedPromptActorScope(userId)
         : undefined,
       ...(modelOverride ? { modelOverride } : {}),
+      ...(launchModel ? { launchModelOverride: launchModel } : {}),
+      ...(switchedModelState
+        ? { initialSwitchReason: switchedModelState.reason }
+        : {}),
       ...(reasoningEffortOverride ? { reasoningEffortOverride } : {}),
-      onModelSwitched: (model: string) => {
-        switchedModelOverride = model;
+      onModelSwitched: (model: string, reason: SwitchModelReason) => {
+        switchedModelState = { model, reason };
       },
     };
 
-    return await startOpenCodeServerHarness({
+    const spawned = await startOpenCodeServerHarness({
       ...commonOptions,
       developerInstructionsContent,
       onDiagnostic: (input) => {
@@ -182,6 +190,9 @@ export async function createHarness({
         });
       },
     });
+
+    launchModel ??= spawned.harness.getLaunchModel?.() ?? undefined;
+    return spawned;
   };
 
   const reconnectableHarness = new ReconnectableHarness({

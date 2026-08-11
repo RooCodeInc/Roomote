@@ -65,9 +65,11 @@ function createLogger() {
 function createHarness(
   options: {
     model?: string;
+    launchModel?: string;
     switchableModels?: string[];
     architectModelIsPinned?: boolean;
-    onModelSwitched?: (model: string) => void;
+    initialSwitchReason?: 'user' | 'failover';
+    onModelSwitched?: (model: string, reason: 'user' | 'failover') => void;
   } = {},
 ) {
   const client = new FakeOpenCodeServerClient();
@@ -76,11 +78,13 @@ function createHarness(
     workspacePath: '/tmp/workspace',
     logger: createLogger(),
     model: options.model ?? LAUNCH_MODEL,
+    launchModel: options.launchModel,
     switchableModels: options.switchableModels ?? [
       LAUNCH_MODEL,
       FALLBACK_MODEL,
     ],
     architectModelIsPinned: options.architectModelIsPinned,
+    initialSwitchReason: options.initialSwitchReason,
     onModelSwitched: options.onModelSwitched,
     eventStreamReadyTimeoutMs: 100,
   });
@@ -443,7 +447,7 @@ describe('OpenCodeServerHarness model switching', () => {
       });
 
       await vi.waitFor(() => {
-        expect(onModelSwitched).toHaveBeenCalledWith(FALLBACK_MODEL);
+        expect(onModelSwitched).toHaveBeenCalledWith(FALLBACK_MODEL, 'user');
       });
 
       // A reconnect respawns the harness from run-task, which otherwise only
@@ -555,6 +559,39 @@ describe('OpenCodeServerHarness model switching', () => {
         providerID: 'anthropic',
         modelID: 'claude-opus-5',
       });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('keeps a pinned planning model on the failover model after reconnect', async () => {
+    const { client, harness } = createHarness({
+      model: FALLBACK_MODEL,
+      launchModel: LAUNCH_MODEL,
+      architectModelIsPinned: true,
+      initialSwitchReason: 'failover',
+    });
+
+    try {
+      await connectHarness(harness, client);
+      await startTask(harness, client);
+      await enterPlanningWorkflow(client, 'reconnected-failover');
+
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: { text: 'Plan after reconnect.', visibleInTranscript: true },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+
+      expect(promptedModel(client, 1)).toEqual({
+        providerID: 'anthropic',
+        modelID: 'claude-opus-5',
+      });
+      expect(harness.getLaunchModel()).toBe(LAUNCH_MODEL);
+      expect(harness.getActiveModel()).toBe(FALLBACK_MODEL);
     } finally {
       harness.dispose();
     }

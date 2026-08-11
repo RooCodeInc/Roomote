@@ -2055,7 +2055,11 @@ export function generateOpenCodeConfig({
   return {
     configContent: `${JSON.stringify(config, null, 2)}\n`,
     openCodeConfigDir,
-    model: promptModel,
+    model:
+      promptModel ??
+      (model === undefined && typeof operatorConfig.model === 'string'
+        ? operatorConfig.model
+        : undefined),
     switchableModels: resolveSwitchableModelIds(
       runtimeEnv,
       // The effective top-level model, which already folds in any per-task

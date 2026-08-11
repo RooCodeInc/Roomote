@@ -48,6 +48,9 @@ class FakeHarness extends EventEmitter<HarnessEvents> implements Harness {
   readonly sentCommands: TaskCommand[] = [];
   connected = true;
   currentWorkflowPhase: string | null = null;
+  activeModel: string | null = null;
+  launchModel: string | null = null;
+  switchableModels: string[] = [];
   pendingUserInputRequests: HarnessPendingUserInputRequest[] = [];
   queuedMessageSnapshots: QueuedPromptMessageSnapshot[] = [];
   sendCommandImpl?: (command: TaskCommand) => boolean;
@@ -106,6 +109,18 @@ class FakeHarness extends EventEmitter<HarnessEvents> implements Harness {
     return this.currentWorkflowPhase;
   }
 
+  getActiveModel(): string | null {
+    return this.activeModel;
+  }
+
+  getLaunchModel(): string | null {
+    return this.launchModel;
+  }
+
+  getSwitchableModels(): string[] {
+    return this.switchableModels;
+  }
+
   dispose(): void {
     this.connected = false;
   }
@@ -122,6 +137,30 @@ function createWrappedToolResultOutput(
 }
 
 describe('ReconnectableHarness', () => {
+  it('forwards model state from the current harness', async () => {
+    const harness = new FakeHarness();
+    harness.activeModel = 'provider/active';
+    harness.launchModel = 'provider/launch';
+    harness.switchableModels = ['provider/launch', 'provider/active'];
+
+    const reconnectableHarness = new ReconnectableHarness({
+      logger: createLogger(),
+      spawnHarness: async () => ({
+        harness,
+        subprocess: createSubprocess() as never,
+      }),
+    });
+
+    await reconnectableHarness.start();
+
+    expect(reconnectableHarness.getActiveModel()).toBe('provider/active');
+    expect(reconnectableHarness.getLaunchModel()).toBe('provider/launch');
+    expect(reconnectableHarness.getSwitchableModels()).toEqual([
+      'provider/launch',
+      'provider/active',
+    ]);
+  });
+
   it('tracks pending env-var requests from persisted MCP tool results', async () => {
     const harness = new FakeHarness();
 

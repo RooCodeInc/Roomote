@@ -6,6 +6,7 @@ import { execa, type ResultPromise } from 'execa';
 import type { ReasoningEffort } from '@roomote/types';
 
 import type { HarnessLogger } from '../../../../logging';
+import type { SwitchModelReason } from '../../harness';
 
 import { createPrefixedLogger, describeUnknownError } from '../logging';
 
@@ -44,11 +45,15 @@ interface StartOpenCodeServerHarnessOptions {
     message: string;
     details?: Record<string, unknown>;
   }) => void;
+  /** Original launch model when reconnecting onto a switched active model. */
+  launchModelOverride?: string;
+  /** Most recent switch reason restored after reconnect. */
+  initialSwitchReason?: SwitchModelReason;
   /**
    * Invoked when a mid-run `SwitchModel` is accepted, so the caller can seed a
-   * replacement harness with the switched model after a reconnect.
+   * replacement harness with the switched state after a reconnect.
    */
-  onModelSwitched?: (model: string) => void;
+  onModelSwitched?: (model: string, reason: SwitchModelReason) => void;
   beforeQueuedPrompt?: (input: { userId?: string }) => Promise<void | {
     shouldReconnect: boolean;
     shouldBlockPrompt?: boolean;
@@ -205,6 +210,8 @@ export async function startOpenCodeServerHarness({
   developerInstructionsContent,
   onUnexpectedExit,
   onDiagnostic,
+  launchModelOverride,
+  initialSwitchReason,
   onModelSwitched,
   beforeQueuedPrompt,
 }: StartOpenCodeServerHarnessOptions): Promise<StartOpenCodeServerHarnessResult> {
@@ -371,8 +378,10 @@ export async function startOpenCodeServerHarness({
       commandEnv,
       initialSessionId,
       model,
+      launchModel: launchModelOverride,
       switchableModels,
       architectModelIsPinned,
+      initialSwitchReason,
       onModelSwitched,
       stopHookReminderStallTimeoutMs: parseTimeoutMs(
         process.env.ROOMOTE_STOP_HOOK_REMINDER_STALL_TIMEOUT_MS,

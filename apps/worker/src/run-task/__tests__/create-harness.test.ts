@@ -70,6 +70,7 @@ function createLogger() {
 
 function createConnectedHarness() {
   return new (class extends EventEmitter {
+    launchModel = 'provider-id/launch-model';
     subscribe() {
       return () => {};
     }
@@ -99,6 +100,9 @@ function createConnectedHarness() {
     }
     getQueuedMessageSnapshots() {
       return [];
+    }
+    getLaunchModel() {
+      return this.launchModel;
     }
     get isConnected() {
       return true;
@@ -268,9 +272,14 @@ describe('createHarness', () => {
 
     // The harness reports an accepted switch through this callback.
     const firstCallOptions = startOpenCodeServerHarnessMock.mock
-      .calls[0]?.[0] as { onModelSwitched?: (model: string) => void };
+      .calls[0]?.[0] as {
+      onModelSwitched?: (model: string, reason: 'user' | 'failover') => void;
+    };
     expect(firstCallOptions.onModelSwitched).toBeTypeOf('function');
-    firstCallOptions.onModelSwitched?.('provider-id/switched-model');
+    firstCallOptions.onModelSwitched?.(
+      'provider-id/switched-model',
+      'failover',
+    );
 
     await result.harness.requestReconnect?.({ reason: 'test' });
 
@@ -278,7 +287,11 @@ describe('createHarness', () => {
     // has to replace the launch-time override or the run silently reverts.
     expect(startOpenCodeServerHarnessMock).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ modelOverride: 'provider-id/switched-model' }),
+      expect.objectContaining({
+        modelOverride: 'provider-id/switched-model',
+        launchModelOverride: 'provider-id/launch-model',
+        initialSwitchReason: 'failover',
+      }),
     );
   });
 

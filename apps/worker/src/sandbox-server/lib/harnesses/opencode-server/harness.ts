@@ -118,6 +118,8 @@ interface OpenCodeServerHarnessOptions {
   commandEnv?: Record<string, string>;
   initialSessionId?: string;
   model?: string;
+  /** Original model for the run when `model` restores a switched model. */
+  launchModel?: string;
   /**
    * Models the generated OpenCode config can resolve without regenerating
    * `opencode.json`. Used to bound `SwitchModel` requests.
@@ -128,12 +130,14 @@ interface OpenCodeServerHarnessOptions {
    * an operator model switch should leave planning turns on that role model.
    */
   architectModelIsPinned?: boolean;
+  /** Most recent switch reason when restoring model state after reconnect. */
+  initialSwitchReason?: SwitchModelReason;
   /**
    * Notifies the run when a `SwitchModel` is accepted. A reconnect respawns the
-   * harness, so the caller must retain the switched model to seed the
-   * replacement instead of reverting to the launch-time override.
+   * harness, so the caller must retain the switched state to seed the
+   * replacement instead of reverting to the launch-time model.
    */
-  onModelSwitched?: (model: string) => void;
+  onModelSwitched?: (model: string, reason: SwitchModelReason) => void;
   eventStreamReadyTimeoutMs?: number;
   executeToolProgressInitialDelayMs?: number;
   executeToolProgressIntervalMs?: number;
@@ -1704,10 +1708,13 @@ export class OpenCodeServerHarness
     // first use rather than trusting it blindly.
     this.resumedSessionPendingValidation =
       options.initialSessionId !== undefined;
-    this.launchModel = options.model
-      ? resolveOpenCodeModelSelection(options.model)
+    const launchModel = options.launchModel ?? options.model;
+    this.launchModel = launchModel
+      ? resolveOpenCodeModelSelection(launchModel)
       : undefined;
-    this.activeModel = this.launchModel;
+    this.activeModel = options.model
+      ? resolveOpenCodeModelSelection(options.model)
+      : this.launchModel;
     this.switchableModelIds = new Set(
       (options.switchableModels ?? [])
         .map((modelId) => modelId.trim())
@@ -1715,6 +1722,7 @@ export class OpenCodeServerHarness
     );
     this.architectModelIsPinned = options.architectModelIsPinned === true;
     this.onModelSwitched = options.onModelSwitched;
+    this.lastSwitchReason = options.initialSwitchReason ?? null;
     this.commandEnv = options.commandEnv
       ? { ...options.commandEnv }
       : undefined;
@@ -2273,7 +2281,7 @@ export class OpenCodeServerHarness
     this.lastSwitchReason = command.data.reason;
     // Survive a reconnect: the replacement harness is spawned from run-task,
     // which otherwise only knows the launch-time model override.
-    this.onModelSwitched?.(selection.qualifiedModel);
+    this.onModelSwitched?.(selection.qualifiedModel, command.data.reason);
 
     this.logger.info(
       `OpenCode active model switched reason=${command.data.reason} from=${

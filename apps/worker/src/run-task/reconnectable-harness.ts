@@ -240,6 +240,18 @@ export class ReconnectableHarness
     return this.currentHarness?.getCurrentWorkflowPhase?.() ?? null;
   }
 
+  getActiveModel(): string | null {
+    return this.currentHarness?.getActiveModel?.() ?? null;
+  }
+
+  getLaunchModel(): string | null {
+    return this.currentHarness?.getLaunchModel?.() ?? null;
+  }
+
+  getSwitchableModels(): string[] {
+    return this.currentHarness?.getSwitchableModels?.() ?? [];
+  }
+
   getQueuedMessageSnapshots(): QueuedPromptMessageSnapshot[] {
     return this.currentHarness?.getQueuedMessageSnapshots?.() ?? [];
   }
