@@ -369,7 +369,7 @@ export async function claimTaskGoalContinuationForRun(input: {
   }
 
   const current = await getTaskForRun(runId);
-  let goal = current ? toTaskGoal(current) : null;
+  const goal = current ? toTaskGoal(current) : null;
   if (current?.goalContinuationIds.includes(continuationId)) {
     return {
       updated: false,
@@ -382,25 +382,37 @@ export async function claimTaskGoalContinuationForRun(input: {
     // turn must settle normally instead of consuming another goal's budget.
     return { updated: false, reason: 'not_active', goal };
   }
-  const budgetExhausted = goal?.status === 'active';
-  if (goal?.status === 'active') {
-    const [limited] = await db
-      .update(tasks)
-      .set({ goalStatus: 'budget_limited', updatedAt: new Date() })
-      .where(
-        and(
-          eq(tasks.id, current.id),
-          eq(tasks.goalStatus, 'active'),
-          goalGenerationFilter(claimedGeneration),
-        ),
-      )
-      .returning();
-    goal = limited ? toTaskGoal(limited) : goal;
+  if (goal?.status !== 'active') {
+    return { updated: false, reason: 'not_active', goal };
   }
+
+  const [limited] = await db
+    .update(tasks)
+    .set({ goalStatus: 'budget_limited', updatedAt: new Date() })
+    .where(
+      and(
+        eq(tasks.id, current.id),
+        eq(tasks.goalStatus, 'active'),
+        goalGenerationFilter(claimedGeneration),
+      ),
+    )
+    .returning();
+
+  if (!limited) {
+    // The goal changed again before it could be marked budget limited, so
+    // report its current state instead of the exhausted snapshot.
+    const latest = await getTaskForRun(runId);
+    return {
+      updated: false,
+      reason: 'not_active',
+      goal: latest ? toTaskGoal(latest) : goal,
+    };
+  }
+
   return {
     updated: false,
-    reason: budgetExhausted ? 'budget_exhausted' : 'not_active',
-    goal,
+    reason: 'budget_exhausted',
+    goal: toTaskGoal(limited),
   };
 }
 
