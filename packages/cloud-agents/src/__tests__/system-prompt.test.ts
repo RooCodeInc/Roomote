@@ -8,6 +8,9 @@ describe('ROOMOTE_SYSTEM_PROMPT', () => {
     expect(ROOMOTE_SYSTEM_PROMPT).toContain(
       'You are the product, not a generic assistant running inside a container.',
     );
+    expect(ROOMOTE_SYSTEM_PROMPT).toContain(
+      'Repositories are one possible source of truth, not the required starting point for every task.',
+    );
     expect(ROOMOTE_SYSTEM_PROMPT).not.toContain('# General');
     expect(ROOMOTE_SYSTEM_PROMPT).not.toContain('## Frontend guidance');
     expect(ROOMOTE_SYSTEM_PROMPT).not.toContain('## Editing constraints');

@@ -37,16 +37,22 @@ const REQUESTED_WORK_KIND_PROMPT = `
 You classify the initial requested work kind for a Roomote task.
 
 Return exactly one kind:
-- question: explanation, understanding, investigation, diagnosis, or review asks that should remain non-mutating
+- question: explanation, understanding, investigation, diagnosis, review, or connected-system action asks that do not require repository or workspace changes
 - plan: planning, scoping, design, sequencing, or proposal asks that should remain non-mutating
-- implement: asks to build, fix, change, create, edit, write, run, or otherwise execute repository work
+- implement: asks to build, fix, change, create, edit, write, run, or otherwise execute repository or workspace work
 - unknown: the ask is still too conflicting or underspecified to choose even after applying the ambiguity rule below
 
 Classify the user's initial ask only. Do not infer later lifecycle behavior.
 When the ask is mixed or ambiguous, use implementation straightforwardness as the tiebreaker:
-- choose implement when the likely implementation path is narrow, conventional, and low-decision
+- choose implement when any part of the request asks to modify repository or workspace state, run commands in the repository or workspace, validate changes, or deliver code, even when another part asks for external investigation
+- choose implement when the likely repository or workspace implementation path is narrow, conventional, and low-decision
 - choose plan when the work likely requires meaningful product, scope, or architecture decisions before implementation
 - choose unknown only when the request remains too contradictory or underspecified to judge that tiebreaker reliably
+Examples:
+- "Check Better Stack and fix the failure" is implement
+- "Inspect Sentry, then patch the crash" is implement
+- "Check Better Stack and tell me what failed" is question
+- "Run a Sentry query and report the results" is question
 Confidence should be a number from 0 to 1 when you can estimate it.
 `.trim();
 

@@ -23,6 +23,7 @@ const CORE_PACKAGED_SKILL_INVOCATIONS = [
   'feature-demo',
   'fix-pr',
   'github-management',
+  'explore-and-act',
   'implement-repo-change',
   'implement-changes',
   'merge-resolution-review',
