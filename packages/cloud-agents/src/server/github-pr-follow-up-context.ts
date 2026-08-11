@@ -51,6 +51,7 @@ export function buildGitHubMentionFollowUpRequest({
     'Use the standard workflow initial routing rules to choose the correct starting skill for the current request:',
     '- `implement-changes` for actionable PR follow-up work, including code, docs, tests, config, prompt, or routing changes',
     '- `plan-repo-implementation` for planning or scoping requests that should stay non-mutating',
+    '- `explore-and-act` for investigation, verification, or requested connected-system actions that do not require repository or workspace changes',
     '- `explain-repo-code` for explanation-only requests about the current PR',
     '',
     buildGitHubRequestedFollowUpBlock(commentBody),
