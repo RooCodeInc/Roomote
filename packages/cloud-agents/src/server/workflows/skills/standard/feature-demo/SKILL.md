@@ -1,13 +1,13 @@
 ---
 name: feature-demo
-description: Produce a polished, Screen Studio-style demo video of a product feature — recorded live in the sandbox browser, with smooth zooms, cursor effects, captions, and optional voice-over narration.
+description: Produce a polished demo video of a product feature — recorded live in the sandbox browser with cursor effects, captions, and optional voice-over narration.
 ---
 
 <role>
 You produce short, polished feature-demo videos: a real recording of the
-product driven live in the browser, narrated as a flowing story. The camera
-reads the page the way a person does — scrolling, mostly wide — and zooms in
-only when an interaction happens (cursor glide, click ripple). Captions
+product driven live in the browser, narrated as a flowing story. The page
+moves by scrolling, with cursor movement and click ripples showing
+interactions. Captions
 carry the narration on screen, and when the deployment has narration
 configured, a voice-over speaks each line as its visual arrives.
 
@@ -21,10 +21,10 @@ The narrative drives the visuals. The demo is planned as a spoken story
 first; narration is synthesized (or, captions-only, each line's speaking
 time is estimated) BEFORE capture, and the capture runner conducts the
 browser to it — each beat holds for exactly as long as its line takes to
-speak, and clip start times are stamped at the moment each zoom lands. The
-runner also logs, on the same clock, where the cursor is, when clicks land,
-and the resolved rectangle of every focused element, so a zoom can never
-drift from its element and nothing needs retiming afterwards.
+speak, and clip start times are stamped as each visual arrives. The runner
+also logs, on the same clock, where the cursor is, when clicks land, and the
+resolved rectangle of every interaction target, so effects stay aligned and
+nothing needs retiming afterwards.
 
 Pipeline: plan the narrative → author script → narrate → capture (browser,
 delegated, paced to the narrative) → trim opening → render → verify →
@@ -56,14 +56,12 @@ this pipeline is ever committed to the repository.
 <name>Author the demo script</name>
 <actions>
 <action>Write `/tmp/feature-demo/demo-script.json`: `{ "url": string, "viewport": { "w": 1280, "h": 800 }, "beats": [...] }`. Beat actions:
-- `{ "a": "show", "sel": css, "caption": "..." }` — THE DEFAULT NARRATED MOVE: scroll the subject into view and speak over it, camera wide. No zoom, no cursor.
+- `{ "a": "show", "sel": css, "caption": "..." }` — THE DEFAULT NARRATED MOVE: scroll the subject into view and speak over it, camera wide. No cursor.
 - `{ "a": "wait", "ms": n }` / `{ "a": "hold", "ms": n }` — let the page settle / linger.
 - `{ "a": "scrollTo", "sel": css, "ms": n }` — plain scroll with no narration attached.
-- `{ "a": "focus", "sel": css, "scale": 1.3-1.9, "moveMs": ~700, "caption": "..." }` — glide the cursor to the element and zoom in. ONLY as the wind-up for an interaction the story actually performs. The renderer caps the zoom at the largest scale that keeps the whole window on the stage (roughly 1.16 in the wide preset with captions), so the push-in is deliberately gentle no matter what you ask for; the cursor glide and the framing shift toward the target carry the moment.
 - `{ "a": "click", "sel": css, "holdMs": ~300 }` — real click with ripple.
-- `{ "a": "type", "sel": css, "text": "..." }` — real typing.
-- `{ "a": "reset", "ms": ~600 }` — pull back after an interaction (partial by design; pass `"full": true` only for the closing shot).</action>
-<action>Cinematography: the camera mostly stays wide and MOVES BY SCROLLING — that is how a person actually reads a page, and constant zooming reads as artificial. Zoom (`focus`) only when the demo is about to click or type, so the zoom communicates "watch this interaction," and pull back (`reset`) right after. Most demos want zero to two zooms total; a demo with no interaction should have none.</action>
+- `{ "a": "type", "sel": css, "text": "...", "moveMs": ~450 }` — glide the cursor to the field, then type.</action>
+<action>Cinematography: MOVE BY SCROLLING — that is how a person actually reads a page. Use cursor movement and click ripples to draw attention to interactions, and author scripts using only the beat actions listed above.</action>
 <action>Keep the opening tight: one short `wait` for page load, then get moving. Dead opening seconds are trimmed automatically, but do not rely on it.</action>
 <action>Captions ARE the narration, verbatim — what the viewer reads is exactly what the voice says, and narrated demos highlight each word as it is spoken. Write them as full conversational sentences (roughly 8-20 words): contractions are good, symbols and clause pileups are not. They appear on screen while spoken and wrap to two lines.</action>
 <action>Caption display can be tuned declaratively with a top-level `"captionStyle"` object in the demo script — `{ "position": "top"|"bottom", "accent": cssColor, "pill": boolean, "sizeScale": number }` — controlling placement, the active-word highlight color, the pill background (off = bare text with a drop shadow), and a font-size multiplier. Use it for brand-fit requests ("captions on top", "highlight in our green"); deeper caption redesigns go through the render-template adaptation path in step 6.</action>
@@ -112,7 +110,7 @@ The runner also reads `/tmp/feature-demo/narration.json` (written in step 3) on 
 - `cp /tmp/feature-demo/work/timeline.json /tmp/feature-demo/work/narration.json /tmp/feature-demo/render/props/` (skip narration.json if captions-only; the checked-in placeholder `{ "clips": [] }` is already correct)
 - `mkdir -p /tmp/feature-demo/render/public && cp /tmp/feature-demo/work/recording.mp4 /tmp/feature-demo/render/public/`
 - `cp -R /tmp/feature-demo/vo /tmp/feature-demo/render/public/vo` (narrated demos only; the mp3s were written next to the script in step 3)</action>
-<action>Adapt the copied composition when the default look does not fit the request — different backdrop, caption treatment, brand colors, an extra preset, a layout change. Before writing Remotion code, install just the Remotion agent skills relevant to editing an existing composition and read them for current API guidance: `cd /tmp/feature-demo/render && npx -y skills add remotion-dev/skills --skill remotion-markup --skill remotion-render --skill remotion-docs --yes` (markup, render, and doc lookup — not the full bundle, which also carries create/maps/saas/upgrade skills you do not need here). Preserve the pieces that encode hard-won correctness unless you have a reason not to: the zoom transform with its counter-scaled cursor, the zoom cap and edge clamps (which keep the window either wholly on the stage or fully covering it, never cropped with backdrop showing down one side), and the timeline-driven keyframe interpolation.</action>
+<action>Adapt the copied composition when the default look does not fit the request — different backdrop, caption treatment, brand colors, an extra preset, a layout change. Before writing Remotion code, install just the Remotion agent skills relevant to editing an existing composition and read them for current API guidance: `cd /tmp/feature-demo/render && npx -y skills add remotion-dev/skills --skill remotion-markup --skill remotion-render --skill remotion-docs --yes` (markup, render, and doc lookup — not the full bundle, which also carries create/maps/saas/upgrade skills you do not need here). Preserve the cursor, click ripples, captions, and timeline-driven keyframe interpolation.</action>
 <action>Provide the dependencies. The image pre-installs the render project's node_modules (Remotion + React) at `/opt/feature-demo/render/node_modules`, keyed off this same pinned `package.json`, so normally you reuse them with no network install: `cp -R /opt/feature-demo/render/node_modules /tmp/feature-demo/render/node_modules`. Then run `cd /tmp/feature-demo/render && npm install` only if you adapted the composition to add dependencies (it reconciles just the delta), or if the baked modules are absent (older sandbox snapshot), in which case it does a full install.</action>
 <action>Render with the image's baked headless shell:
 
@@ -126,7 +124,7 @@ Run this with a GENEROUS command timeout (10 minutes) on the first attempt: a na
 <name>Verify honestly</name>
 <actions>
 <action>`ffprobe` the output: sane duration, a video stream, and an audio stream when narration was generated.</action>
-<action>Extract 3-4 spread frames (`ffmpeg -ss <t> -i out/demo-wide.mp4 -frames:v 1 frame.png`) and review each whole frame: zoom landed on the right element, cursor glued to it, caption legible and correctly timed, no backdrop showing through mid-zoom, no broken page state in shot.</action>
+<action>Extract 3-4 spread frames (`ffmpeg -ss <t> -i out/demo-wide.mp4 -frames:v 1 frame.png`) and review each whole frame: cursor and click ripples align with their targets, captions are legible and correctly timed, and no broken page state appears in shot.</action>
 <action>A defect in the video is a blocker to report, not something to ship quietly. One recapture/re-render attempt; then report blocked with what failed and the frames that show it.</action>
 </actions>
 </step>
@@ -146,6 +144,7 @@ Run this with a GENEROUS command timeout (10 minutes) on the first attempt: a na
 <rule>Never load or invoke `agent-browser` (or any other browser automation) from this skill — capture is always delegated to the `proof-runner` subagent.</rule>
 <rule>Never ask for, read, or handle TTS provider keys. Narration goes through the control-plane endpoint with the run token; a 404 there means captions-only.</rule>
 <rule>All intermediate files live under `/tmp/feature-demo`. Never commit recordings, renders, node_modules, or props into the repository.</rule>
+<rule>Author demo scripts using only the beat actions listed in step 2.</rule>
 <rule>Adapt the work-dir copy of the render template, never the installed skill sources under `~/.agents/skills/feature-demo`. The timeline JSON schema is the stable contract: adaptations change how it is rendered, not what it means.</rule>
 <rule>Report blockers honestly: a missing selector, a failed render, or a visibly broken frame is a blocker with evidence, not a reason to narrow the claim or ship a degraded video silently.</rule>
 <rule>Voice, wording, and pacing choices belong to the user when they express them; defaults are: wide preset, captions as narration lines, conversational tone.</rule>
