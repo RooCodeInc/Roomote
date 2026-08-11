@@ -10,6 +10,7 @@ const {
   mockEnqueueTask,
   mockEnvironmentsFindFirst,
   mockRepositoriesFindMany,
+  mockTaskRunsFindFirst,
   mockSelectRows,
   mockResolveWorkspaceRepositoryProviders,
   mockGetMembershipRole,
@@ -17,6 +18,7 @@ const {
   mockEnqueueTask: vi.fn(),
   mockEnvironmentsFindFirst: vi.fn(),
   mockRepositoriesFindMany: vi.fn(),
+  mockTaskRunsFindFirst: vi.fn(),
   mockSelectRows: vi.fn(),
   mockResolveWorkspaceRepositoryProviders: vi.fn(),
   mockGetMembershipRole: vi.fn(),
@@ -37,6 +39,7 @@ vi.mock('@roomote/db/server', () => ({
   environments: {},
   environmentRepositoryMappings: {},
   repositories: {},
+  taskRuns: {},
   resolveWorkspaceRepositoryProviders: (...args: unknown[]) =>
     mockResolveWorkspaceRepositoryProviders(...args),
   db: {
@@ -46,6 +49,9 @@ vi.mock('@roomote/db/server', () => ({
       },
       repositories: {
         findMany: (...args: unknown[]) => mockRepositoriesFindMany(...args),
+      },
+      taskRuns: {
+        findFirst: (...args: unknown[]) => mockTaskRunsFindFirst(...args),
       },
     },
     select: () => {
@@ -90,6 +96,8 @@ describe('launchTask', () => {
     mockEnvironmentsFindFirst.mockReset();
     mockEnvironmentsFindFirst.mockResolvedValue({ id: 'env-1' });
     mockRepositoriesFindMany.mockReset();
+    mockTaskRunsFindFirst.mockReset();
+    mockTaskRunsFindFirst.mockResolvedValue(undefined);
     mockSelectRows.mockReset();
     mockSelectRows.mockReturnValue([]);
     mockResolveWorkspaceRepositoryProviders.mockReset();
@@ -297,6 +305,68 @@ describe('launchTask', () => {
     };
     expect(enqueuedTask.task.sourceRunId).toBe(555);
     expect(enqueuedTask.task.payload.notifySourceRunOnSettle).toBe(true);
+  });
+
+  it.each(['docker', 'modal'] as const)(
+    'inherits the %s source run compute provider for run-token child launches',
+    async (provider) => {
+      mockEnqueueTask.mockResolvedValue({ id: 103, taskId: 'task-child' });
+      mockTaskRunsFindFirst.mockResolvedValue({ vendor: provider });
+
+      const runAuth = {
+        runId: 555,
+        userId: 'user-1',
+        principal: 'user',
+        tokenType: 'run',
+        version: 1,
+      } as RunTokenContext;
+
+      const app = createApp(runAuth);
+      const response = await app.request(
+        new Request('http://localhost/tasks', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ prompt: 'Verify the environment' }),
+        }),
+      );
+
+      expect(response.status).toBe(200);
+      const enqueuedTask = mockEnqueueTask.mock.calls[0]?.[0] as {
+        task: { computeProvider?: string };
+      };
+      expect(enqueuedTask.task.computeProvider).toBe(provider);
+    },
+  );
+
+  it('preserves an explicit compute provider on run-token child launches', async () => {
+    mockEnqueueTask.mockResolvedValue({ id: 104, taskId: 'task-child' });
+
+    const runAuth = {
+      runId: 556,
+      userId: 'user-1',
+      principal: 'user',
+      tokenType: 'run',
+      version: 1,
+    } as RunTokenContext;
+
+    const app = createApp(runAuth);
+    const response = await app.request(
+      new Request('http://localhost/tasks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: 'Verify the environment',
+          computeProvider: 'modal',
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    const enqueuedTask = mockEnqueueTask.mock.calls[0]?.[0] as {
+      task: { computeProvider?: string };
+    };
+    expect(enqueuedTask.task.computeProvider).toBe('modal');
+    expect(mockTaskRunsFindFirst).not.toHaveBeenCalled();
   });
 
   it('ignores notifyOnSettle for user-token launches', async () => {
