@@ -51,7 +51,8 @@ function consentResponse(options: {
     `${options.request.nextUrl.pathname}${options.request.nextUrl.search}`,
   );
   const clientName = escapeHtml(options.clientName ?? 'An MCP client');
-  const callbackHost = escapeHtml(new URL(options.redirectUri).host);
+  const callbackUrl = new URL(options.redirectUri);
+  const callbackHost = escapeHtml(callbackUrl.host);
   const consentToken = escapeHtml(options.consentToken);
 
   return new NextResponse(
@@ -82,8 +83,7 @@ function consentResponse(options: {
       headers: {
         'Cache-Control': 'no-store',
         'Content-Type': 'text/html; charset=utf-8',
-        'Content-Security-Policy':
-          "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+        'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${callbackUrl.origin}; base-uri 'none'; frame-ancestors 'none'`,
         'X-Frame-Options': 'DENY',
       },
     },

@@ -93,6 +93,9 @@ describe('GET /api/mcp-remote-oauth/authorize', () => {
     expect(html).toContain('Authorize Claude Code?');
     expect(html).toContain('Allow access');
     expect(html).toContain('name="consent_token" value="consent-token"');
+    expect(response.headers.get('content-security-policy')).toContain(
+      "form-action 'self' https://client.example",
+    );
     expect(mockCreateConsentToken).toHaveBeenCalledWith({
       userId: 'user-1',
       requestTarget: expect.stringContaining(
