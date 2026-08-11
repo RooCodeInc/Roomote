@@ -6,6 +6,7 @@ import { redactSecrets } from '@roomote/communication/redact-secrets';
 import {
   appendInitialPath,
   createEnvironmentObservation,
+  DEFAULT_AUTH_BYPASS_HEADER_NAME,
   getDockerProjectLogFilePath,
   toComposeProjectName,
   type EnvironmentObservation,
@@ -673,7 +674,12 @@ async function checkHttpEndpoint(options: {
   id: string;
   title: string;
   url: string;
+  displayUrl?: string;
   headers?: Record<string, string>;
+  connectionFallback?: {
+    url: string;
+    headers?: Record<string, string>;
+  };
   dependencies: DiagnoseEnvironmentDependencies;
 }): Promise<EnvironmentObservationCheck> {
   const startedAt = options.dependencies.now().getTime();
@@ -696,7 +702,7 @@ async function checkHttpEndpoint(options: {
       title: options.title,
       status,
       severity: status === 'pass' ? 'info' : 'major',
-      summary: `${safeDisplayUrl(options.url)} returned HTTP ${response.status} (${Math.floor(response.status / 100)}xx)`,
+      summary: `${safeDisplayUrl(options.displayUrl ?? options.url)} returned HTTP ${response.status} (${Math.floor(response.status / 100)}xx)`,
       remediationHint:
         status === 'pass'
           ? undefined
@@ -705,18 +711,49 @@ async function checkHttpEndpoint(options: {
       durationMs,
     };
   } catch (error) {
+    if (options.connectionFallback) {
+      const { connectionFallback, ...retryOptions } = options;
+      return checkHttpEndpoint({
+        ...retryOptions,
+        url: connectionFallback.url,
+        displayUrl: options.displayUrl ?? options.url,
+        headers: connectionFallback.headers,
+      });
+    }
+
     return {
       id: options.id,
       category: 'ports',
       title: options.title,
       status: 'fail',
       severity: 'major',
-      summary: `${safeDisplayUrl(options.url)}: ${classifyFetchError(error)}`,
+      summary: `${safeDisplayUrl(options.displayUrl ?? options.url)}: ${classifyFetchError(error)}`,
       observedAt: timestamp,
       durationMs: Math.max(0, options.dependencies.now().getTime() - startedAt),
       remediationHint:
         'Confirm the service is listening and the preview route is available.',
     };
+  }
+}
+
+function getLocalDockerPreviewFallback(
+  rawUrl: string,
+  headers: Record<string, string>,
+): { url: string; headers: Record<string, string> } | undefined {
+  try {
+    const url = new URL(rawUrl);
+    if (url.protocol !== 'http:' || !url.hostname.endsWith('.localhost')) {
+      return undefined;
+    }
+
+    const originalHost = url.host;
+    url.hostname = 'host.docker.internal';
+    return {
+      url: url.toString(),
+      headers: { ...headers, Host: originalHost },
+    };
+  } catch {
+    return undefined;
   }
 }
 
@@ -752,16 +789,21 @@ async function diagnosePorts(
       continue;
     }
 
-    const bypassHeaderName = process.env.ROOMOTE_AUTH_BYPASS_HEADER_NAME;
     const bypassHeaderValue = process.env.ROOMOTE_AUTH_BYPASS_VALUE;
+    const bypassHeaderName =
+      process.env.ROOMOTE_AUTH_BYPASS_HEADER_NAME ??
+      DEFAULT_AUTH_BYPASS_HEADER_NAME;
+    const previewUrl = appendInitialPath(port.previewUrl, port.initialPath);
+    const headers = bypassHeaderValue
+      ? { [bypassHeaderName]: bypassHeaderValue }
+      : {};
     checks.push(
       await checkHttpEndpoint({
         id: `port.${port.name}.preview`,
         title: `${port.name} preview`,
-        url: appendInitialPath(port.previewUrl, port.initialPath),
-        ...(bypassHeaderName && bypassHeaderValue
-          ? { headers: { [bypassHeaderName]: bypassHeaderValue } }
-          : {}),
+        url: previewUrl,
+        ...(Object.keys(headers).length > 0 ? { headers } : {}),
+        connectionFallback: getLocalDockerPreviewFallback(previewUrl, headers),
         dependencies,
       }),
     );

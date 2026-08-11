@@ -345,4 +345,66 @@ describe('diagnoseEnvironment', () => {
       expect.any(Object),
     );
   });
+
+  it('reaches local Docker previews with the default bypass header', async () => {
+    const originalBypassValue = process.env.ROOMOTE_AUTH_BYPASS_VALUE;
+    const originalBypassHeaderName =
+      process.env.ROOMOTE_AUTH_BYPASS_HEADER_NAME;
+    process.env.ROOMOTE_AUTH_BYPASS_VALUE = 'test-bypass-value';
+    delete process.env.ROOMOTE_AUTH_BYPASS_HEADER_NAME;
+
+    try {
+      const fetch = vi.fn(async (url: string | URL | Request) => {
+        const parsed = new URL(String(url));
+        if (parsed.hostname === 'task-web.roopreview.localhost') {
+          const error = new TypeError('fetch failed', {
+            cause: { code: 'ECONNREFUSED' },
+          });
+          throw error;
+        }
+        return { status: 200 };
+      }) as unknown as typeof globalThis.fetch;
+      const report = await diagnoseEnvironment({
+        workspacePath,
+        context: emptyContext({
+          ports: [
+            {
+              name: 'WEB',
+              port: 3000,
+              initialPath: '/',
+              previewUrl: 'http://task-web.roopreview.localhost:18181/',
+            },
+          ],
+        }),
+        dependencies: dependencies({ fetch }),
+      });
+
+      expect(findCheck(report, 'port.WEB.preview')).toMatchObject({
+        status: 'pass',
+        summary:
+          'http://task-web.roopreview.localhost:18181/ returned HTTP 200 (2xx)',
+      });
+      expect(fetch).toHaveBeenNthCalledWith(
+        3,
+        'http://host.docker.internal:18181/',
+        expect.objectContaining({
+          headers: {
+            Host: 'task-web.roopreview.localhost:18181',
+            'x-bypass-roomote-auth': 'test-bypass-value',
+          },
+        }),
+      );
+    } finally {
+      if (originalBypassValue === undefined) {
+        delete process.env.ROOMOTE_AUTH_BYPASS_VALUE;
+      } else {
+        process.env.ROOMOTE_AUTH_BYPASS_VALUE = originalBypassValue;
+      }
+      if (originalBypassHeaderName === undefined) {
+        delete process.env.ROOMOTE_AUTH_BYPASS_HEADER_NAME;
+      } else {
+        process.env.ROOMOTE_AUTH_BYPASS_HEADER_NAME = originalBypassHeaderName;
+      }
+    }
+  });
 });

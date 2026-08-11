@@ -99,6 +99,10 @@ describe('install-browser-agent.sh', () => {
     );
     expect(script).toContain('ROOMOTE_AUTH_BYPASS_VALUE');
     expect(script).toContain('ROOMOTE_*_PREVIEW_URL');
+    expect(script).toContain('configure_local_preview_host_resolution');
+    expect(script).toContain(
+      '--host-resolver-rules=MAP *.${preview_suffix} host.docker.internal',
+    );
     expect(script).not.toContain('ROOMOTE_EDITOR_PREVIEW_URL');
     expect(script).toContain('open|goto|navigate');
     expect(script).toContain('cookies set "$header_name" "$bypass_value"');

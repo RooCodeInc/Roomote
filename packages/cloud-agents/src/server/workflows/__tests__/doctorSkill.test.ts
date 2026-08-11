@@ -72,10 +72,16 @@ describe('doctor guidance', () => {
       'never patch customer source as an unreviewed Doctor side effect',
     );
     expect(skillContent).toContain(
-      'report one concise platform issue with the failing boundary and sanitized evidence',
+      'set the outcome to `platform_issue` and report the failing boundary with sanitized evidence',
     );
     expect(skillContent).toContain(
       '`DoctorReport` is not persisted environment verification.',
+    );
+    expect(skillContent).toContain(
+      'A raw unauthenticated curl failure is not valid preview verification.',
+    );
+    expect(skillContent).toContain(
+      'do not claim an external issue was filed, opened, or created',
     );
   });
 });
