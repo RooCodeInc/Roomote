@@ -30,8 +30,15 @@ if command -v watchman &>/dev/null && watchman version &>/dev/null; then
 
   trap cleanup EXIT INT TERM
 
+  # Capture PATH so build/trigger/runtime commands can find pnpm/node/etc.
+  # `bash -lc` starts a login shell, which re-sources bash's own profile
+  # instead of inheriting this PATH (mise/nodenv setup living in the
+  # invoking shell's own dotfiles, e.g. zsh, is not picked up), so every
+  # `bash -lc` call below must re-export it explicitly.
+  CURRENT_PATH="$PATH"
+
   echo "[$SERVICE_NAME:watchman] Initial build..."
-  bash -lc "$BUILD_CMD"
+  bash -lc "export PATH='$CURRENT_PATH' && $BUILD_CMD"
 
   # Use watchman trigger for reliable file-change detection.
   # watchman-make subscriptions stall under PM2's piped stdio.
@@ -39,9 +46,6 @@ if command -v watchman &>/dev/null && watchman version &>/dev/null; then
 
   # Remove any stale trigger first
   watchman -- trigger-del "$REPO_ROOT" "$TRIGGER_NAME" >/dev/null 2>&1 || true
-
-  # Capture PATH so the trigger command can find pnpm/node/etc.
-  CURRENT_PATH="$PATH"
 
   echo "[$SERVICE_NAME:watchman] Ensuring watchman is watching $REPO_ROOT..."
   watchman watch-project "$REPO_ROOT" >/dev/null 2>&1
@@ -62,7 +66,7 @@ if command -v watchman &>/dev/null && watchman version &>/dev/null; then
 WATCHMAN_CMD
 
   echo "[$SERVICE_NAME:watchman] Starting runtime..."
-  exec bash -lc "$RUN_CMD"
+  exec bash -lc "export PATH='$CURRENT_PATH' && $RUN_CMD"
 fi
 
 if command -v inotifywait &>/dev/null; then
@@ -71,7 +75,7 @@ if command -v inotifywait &>/dev/null; then
   CURRENT_PATH="$PATH"
 
   echo "[$SERVICE_NAME:inotifywait] Initial build..."
-  bash -lc "$BUILD_CMD"
+  bash -lc "export PATH='$CURRENT_PATH' && $BUILD_CMD"
 
   echo "[$SERVICE_NAME:inotifywait] Starting runtime..."
   bash -c "export PATH='$CURRENT_PATH' && cd '$APP_DIR' && $RUN_CMD" &
