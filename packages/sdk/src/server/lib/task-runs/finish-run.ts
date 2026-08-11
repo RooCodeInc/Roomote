@@ -243,6 +243,20 @@ export const finishRun = async ({
     });
   });
 
+  // Start notifying the originating Slack thread as soon as the terminal state
+  // is durable. Run it alongside the parent-task callback so neither remote
+  // notification delays the other.
+  const slackFailureNotification =
+    status === RunStatus.Failed && task.slackThreadTs
+      ? sendSlackFailureNotification(run, channelProviderError).catch((err) => {
+          console.error(
+            `[finishRun] Failed to send Slack failure notification for run ${id}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        })
+      : Promise.resolve();
+
   // Deterministic spawned-task feedback: when this run was launched by
   // another task's run with notify-on-settle requested, deliver the outcome
   // into that launching run's session (waking it if idle) so the parent
@@ -253,6 +267,7 @@ export const finishRun = async ({
     status,
     run.task.title,
   );
+  await slackFailureNotification;
 
   // Anonymous analytics (no-op unless enabled): terminal task outcome with
   // non-identifying routing facts only.
@@ -319,20 +334,6 @@ export const finishRun = async ({
   // PR linkage and the GitHub-native identifiers live on task_pull_requests.
   if (task.workflow === 'pr_review') {
     await cleanupGithubPrReviewArtifacts(run, status);
-  }
-
-  // Slack failure notification: post a thread reply when the run failed and
-  // was triggered from Slack (the task carries a Slack thread binding).
-  if (status === RunStatus.Failed && task.slackThreadTs) {
-    try {
-      await sendSlackFailureNotification(run, channelProviderError);
-    } catch (err) {
-      console.error(
-        `[finishRun] Failed to send Slack failure notification for run ${id}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
   }
 
   // Teams failure notification: post a thread reply when the run failed and
