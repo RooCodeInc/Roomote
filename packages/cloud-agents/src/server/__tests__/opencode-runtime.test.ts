@@ -112,7 +112,14 @@ describe('buildOpenCodeCliEnv', () => {
             apiKey: '{env:LITELLM_API_KEY}',
           },
           models: {
-            'gemini-3.6-pro': { name: 'gemini-3.6-pro' },
+            'gemini-3.6-pro': {
+              name: 'gemini-3.6-pro',
+              attachment: true,
+              modalities: {
+                input: ['text', 'image', 'video'],
+                output: ['text'],
+              },
+            },
           },
         },
       },

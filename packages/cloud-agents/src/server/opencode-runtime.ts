@@ -113,6 +113,7 @@ function buildModelBackedOpenCodeConfigContent(
     mergeOpenRouterVariantAliasModels(providerModelConfig, variantAliases),
     env,
     [model, smallModel, visionModel],
+    visionModel,
   );
 
   return JSON.stringify({
