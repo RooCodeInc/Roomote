@@ -21,6 +21,10 @@ import type { HarnessManager } from './lib/harness-manager';
 
 export const DEFAULT_COMMAND_TIMEOUT = 300_000;
 
+export interface WorkspaceTransitionState {
+  requested: boolean;
+}
+
 export interface Context {
   workingDirectory: string;
   harnessLogger?: HarnessLogger;
@@ -52,6 +56,12 @@ export interface Context {
     homeDir: string;
     runtimeEnv: Record<string, string | undefined>;
   };
+
+  /**
+   * Server-scoped delivery fence held between Git inspection and terminal
+   * stop. The object is shared by every request context for this worker.
+   */
+  workspaceTransitionState?: WorkspaceTransitionState;
 
   /**
    * Refresh actor-scoped integrations before delivering the next turn.

@@ -9,6 +9,7 @@ export * from './automation-destination-fields';
 export * from './cloud-agents';
 export * from './pr-review-action';
 export * from './task-runs';
+export * from './task-workspace-transitions';
 export * from './chatgpt-subscription';
 export * from './github-copilot-subscription';
 export * from './xai-subscription';

@@ -1,7 +1,9 @@
-const { executeTaskRunMock, runTaskMock } = vi.hoisted(() => ({
-  executeTaskRunMock: vi.fn(),
-  runTaskMock: vi.fn(),
-}));
+const { buildWorkspaceConfigMock, executeTaskRunMock, runTaskMock } =
+  vi.hoisted(() => ({
+    buildWorkspaceConfigMock: vi.fn(),
+    executeTaskRunMock: vi.fn(),
+    runTaskMock: vi.fn(),
+  }));
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
@@ -14,7 +16,7 @@ vi.mock('../../run-task', () => ({
 }));
 
 vi.mock('../utils', () => ({
-  buildWorkspaceConfig: vi.fn(),
+  buildWorkspaceConfig: buildWorkspaceConfigMock,
   executeTaskRun: executeTaskRunMock,
 }));
 
@@ -55,6 +57,36 @@ describe('run', () => {
         preserveGitState: true,
       }),
     );
+  });
+
+  it('uses the persisted workspace spec when constructing the workspace', async () => {
+    const pinnedConfig = {
+      name: 'Pinned App',
+      repositories: [{ repository: 'Roomote/pinned-app' }],
+    };
+    executeTaskRunMock.mockImplementation(async ({ workspaceConfigFn }) => {
+      await workspaceConfigFn({
+        taskRun: {
+          payload: { environmentId: 'env_123' },
+          resolvedWorkspaceSpec: {
+            environmentId: 'env_123',
+            config: pinnedConfig,
+          },
+        },
+      });
+      return true;
+    });
+
+    await run({ runId: 99, setupMode: 'full' });
+
+    expect(buildWorkspaceConfigMock).toHaveBeenCalledWith({
+      environmentId: 'env_123',
+      environmentConfig: pinnedConfig,
+      repo: undefined,
+      branch: undefined,
+      sha: undefined,
+      selectedRepositories: undefined,
+    });
   });
 
   it('forwards direct-run keepalive overrides into runTask', async () => {

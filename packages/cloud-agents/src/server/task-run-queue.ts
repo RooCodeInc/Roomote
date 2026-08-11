@@ -38,6 +38,8 @@ import {
   TASK_TIMEOUT_MS,
   isManagedDeploymentReadOnly,
   isRoomoteDeploymentDisabled,
+  type ResolvedWorkspaceSpec,
+  isExitedRunStatus,
 } from '@roomote/types';
 import { Env, isRoomoteCloudEnabled } from '@roomote/env';
 import {
@@ -57,6 +59,7 @@ import {
   tasks,
   users,
   environments,
+  taskWorkspaceTransitions,
   and,
   desc,
   eq,
@@ -2063,6 +2066,192 @@ export async function enqueueTaskRelaunch(
 }
 
 /**
+ * Creates a fresh run on an existing standard task after its previous run has
+ * been terminally fenced. The target workspace is immutable and the new run
+ * deliberately starts a new harness session.
+ */
+export async function enqueueTaskWorkspaceSuccessor(
+  input: {
+    transitionId: string;
+    sourceRunId: number;
+    actingUserId: string | null;
+    workspace: ResolvedWorkspaceSpec;
+    handoffPrompt: string;
+  },
+  options: EnqueueTaskOptions = {},
+): Promise<TaskRun> {
+  await assertDeploymentIsActive();
+  await assertUserIsNotDeleted(input.actingUserId);
+
+  const sourceRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, input.sourceRunId),
+  });
+  if (!sourceRun) {
+    throw new Error(`Source run ${input.sourceRunId} was not found.`);
+  }
+  if (sourceRun.payloadKind !== TaskPayloadKind.StandardTask) {
+    throw new Error(
+      'Workspace switching currently supports standard tasks only.',
+    );
+  }
+  if (!isExitedRunStatus(sourceRun.status)) {
+    throw new Error(
+      'The source run must be stopped before creating its successor.',
+    );
+  }
+
+  const existingTask = await db.query.tasks.findFirst({
+    where: and(eq(tasks.id, sourceRun.taskId), isNull(tasks.deletedAt)),
+    columns: { id: true, workflow: true, harness: true },
+  });
+  if (!existingTask || existingTask.workflow !== 'standard') {
+    throw new Error(
+      'Workspace switching currently supports standard tasks only.',
+    );
+  }
+
+  const task = reconstructFreshTaskFromFailedRun({
+    ...sourceRun,
+    harness: sourceRun.harness ?? existingTask.harness,
+  });
+  if (task.type !== TaskPayloadKind.StandardTask) {
+    throw new Error(
+      'Workspace switching currently supports standard tasks only.',
+    );
+  }
+  task.payload.environmentId = input.workspace.environmentId;
+  task.payload.description = input.handoffPrompt;
+  task.payload.images = undefined;
+  task.payload.communicationSourceEventId = undefined;
+  // Never carry source-workspace repository or provider stamps across the
+  // security boundary. Re-resolve them exclusively from the target snapshot.
+  task.payload.repo = input.workspace.config.repositories[0]!.repository;
+  task.payload.branch = undefined;
+  task.payload.sha = undefined;
+  task.payload.selectedRepositories = undefined;
+  task.payload.repositoryProviders = undefined;
+  task.payload.sourceControlProvider = undefined;
+  task.payload.sourceControlHost = undefined;
+
+  await stampWorkspaceSourceControlProviders(task.payload, {
+    type: 'repository_set',
+    repositories: input.workspace.config.repositories.map(
+      (repository) => repository.repository,
+    ),
+  });
+
+  const primaryPort = getPrimaryPortFromConfig(input.workspace.config.ports);
+  if (primaryPort) task.payload.port = primaryPort.port;
+  const initialPaths = input.workspace.config.ports
+    ? Object.fromEntries(
+        input.workspace.config.ports
+          .filter((port) => Boolean(port.initial_path))
+          .map((port) => [port.name.toUpperCase(), port.initial_path!]),
+      )
+    : undefined;
+
+  const resolvedHarness = await resolveRequestedHarness(task);
+  const targetHarness = resolvedHarness.harness;
+  const { task: taskWithHarnessOverrides } = resolveEffectiveHarnessModelState({
+    task,
+    targetHarness,
+    isSnapshotResume: false,
+    sourceRunHarnessModelOverrides: undefined,
+    deploymentTaskModelSettings: resolvedHarness.deploymentTaskModelSettings,
+    deploymentCodeReviewModelId:
+      resolvedHarness.deploymentCodeReviewModelId ?? null,
+    deploymentCodeReviewReasoningEffort:
+      resolvedHarness.deploymentCodeReviewReasoningEffort ?? null,
+    deploymentCodingReasoningEffort:
+      resolvedHarness.deploymentCodingReasoningEffort ?? null,
+  });
+  const runtimePolicy = resolveTaskRuntimePolicy({
+    taskType: taskWithHarnessOverrides.type,
+    launchClass: options.launchClass,
+    appEnv: Env.APP_ENV ?? 'development',
+    defaultKeepaliveMs: DEFAULT_KEEPALIVE_MS,
+    delegatedKeepaliveMs: DEFAULT_DELEGATED_KEEPALIVE_MS,
+    sandboxTimeoutMs: TASK_TIMEOUT_MS,
+  });
+  const targetComputeProvider = resolveFreshTaskComputeProvider(
+    task.computeProvider,
+    await resolveDefaultComputeProvider(),
+    task.type,
+  );
+
+  const taskRun = await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT id FROM tasks WHERE id = ${existingTask.id} FOR UPDATE`,
+    );
+    const activeRun = await tx.query.taskRuns.findFirst({
+      where: and(
+        eq(taskRuns.taskId, existingTask.id),
+        inArray(taskRuns.status, [...activeRunStatuses]),
+      ),
+      columns: { id: true },
+    });
+    if (activeRun) throw new Error('The source task still has an active run.');
+
+    const transition = await tx.query.taskWorkspaceTransitions.findFirst({
+      where: and(
+        eq(taskWorkspaceTransitions.id, input.transitionId),
+        eq(taskWorkspaceTransitions.sourceRunId, sourceRun.id),
+        isNull(taskWorkspaceTransitions.targetRunId),
+      ),
+      columns: { id: true },
+    });
+    if (!transition)
+      throw new Error('Workspace transition is no longer launchable.');
+
+    const [insertedRun] = await tx
+      .insert(taskRuns)
+      .values({
+        taskId: existingTask.id,
+        kind: 'fresh',
+        sourceRunId: sourceRun.id,
+        payloadKind: taskWithHarnessOverrides.type,
+        actingUserId: input.actingUserId,
+        status: RunStatus.Pending,
+        harness: targetHarness,
+        vendor: targetComputeProvider,
+        port: task.payload.port,
+        initialPaths:
+          initialPaths && Object.keys(initialPaths).length > 0
+            ? initialPaths
+            : undefined,
+        payload: taskWithHarnessOverrides.payload,
+        prompt: input.handoffPrompt,
+        keepaliveMs: runtimePolicy.keepaliveMs,
+        environmentConfigVersionId: input.workspace.environmentConfigVersionId,
+        resolvedWorkspaceSpec: input.workspace,
+      })
+      .returning();
+    if (!insertedRun) throw new Error('Failed to create successor task run.');
+
+    await tx
+      .update(taskWorkspaceTransitions)
+      .set({
+        targetRunId: insertedRun.id,
+        status: 'target_queued',
+        updatedAt: new Date(),
+      })
+      .where(eq(taskWorkspaceTransitions.id, input.transitionId));
+    await syncTaskStateFromRuns(tx, existingTask.id);
+    return insertedRun;
+  });
+
+  await pushRunOntoQueue({
+    taskRun,
+    scope: resolveQueueScope({
+      workflow: existingTask.workflow as TaskWorkflow,
+      payloadKind: taskRun.payloadKind,
+    }),
+    options,
+  });
+  return taskRun;
+}
+
+/**
  * Resume runs execute in the source run's repositories, but resume entry
  * points rebuild the payload from scratch and may not copy the source-control
  * stamps forward. Without them, workspace preparation and token minting fall
@@ -2148,6 +2337,8 @@ async function enqueueSnapshotResume(
       payloadKind: true,
       sourceRunId: true,
       payload: true,
+      environmentConfigVersionId: true,
+      resolvedWorkspaceSpec: true,
     },
   });
 
@@ -2282,6 +2473,8 @@ async function enqueueSnapshotResume(
           payload: taskWithHarnessOverrides.payload,
           sourceSnapshotId: sourceSnapshotId ?? null,
           keepaliveMs: resolvedTaskPolicy.keepaliveMs,
+          environmentConfigVersionId: sourceRun.environmentConfigVersionId,
+          resolvedWorkspaceSpec: sourceRun.resolvedWorkspaceSpec,
         })
         .returning();
 

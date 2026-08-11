@@ -38,10 +38,15 @@ export async function run({
     workspaceConfigFn: async ({
       taskRun: {
         payload: { environmentId, repo, branch, sha, selectedRepositories },
+        resolvedWorkspaceSpec,
       },
     }) =>
       buildWorkspaceConfig({
         environmentId,
+        environmentConfig:
+          resolvedWorkspaceSpec?.environmentId === environmentId
+            ? resolvedWorkspaceSpec?.config
+            : undefined,
         repo,
         branch,
         sha,

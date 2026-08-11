@@ -941,12 +941,14 @@ async function resolveGitLabRepositoryNamesForTaskRun(
       );
     }
 
+    const effectiveConfig =
+      taskRun.resolvedWorkspaceSpec?.environmentId === environment.id
+        ? taskRun.resolvedWorkspaceSpec.config
+        : environment.config;
     return filterRepositorySelectionForGitLab(
       taskRun,
       normalizeRepositorySelection(
-        environment.config.repositories.map(
-          (repository) => repository.repository,
-        ),
+        effectiveConfig.repositories.map((repository) => repository.repository),
       ),
     );
   }

@@ -333,7 +333,13 @@ export async function getEnvironmentsCommand(
   const envs = await db
     .select()
     .from(environments)
-    .where(and(buildOwnershipFilter(), eq(environments.isEval, false)))
+    .where(
+      and(
+        buildOwnershipFilter(),
+        eq(environments.isEval, false),
+        eq(environments.isVerified, true),
+      ),
+    )
     .orderBy(desc(environments.updatedAt));
 
   const snapshotsByEnvironment = await loadEnvironmentSnapshots(envs);

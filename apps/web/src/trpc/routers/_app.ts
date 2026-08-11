@@ -26,6 +26,7 @@ import {
   sourceControlTokenBackedProviderSchema,
   standardTaskSchema,
   taskModelMetadataSchema,
+  requestTaskWorkspaceTransitionSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
 } from '@roomote/types';
 
@@ -104,6 +105,10 @@ import {
   cancelTaskRunCommand,
   retryFailedTaskStartCommand,
 } from '../commands/task-runs';
+import {
+  getTaskWorkspaceTransitionCommand,
+  requestTaskWorkspaceTransitionCommand,
+} from '../commands/task-workspace-transitions';
 import {
   exchangeSlackOAuthCodeCommand,
   connectSlackAppCommand,
@@ -1005,6 +1010,19 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         retryFailedTaskStartCommand(auth, input),
+      ),
+  }),
+
+  taskWorkspaceTransitions: createRouter({
+    current: protectedProcedure
+      .input(z.object({ taskId: z.string().min(1) }))
+      .query(({ ctx: { auth }, input }) =>
+        getTaskWorkspaceTransitionCommand(auth, input),
+      ),
+    request: protectedProcedure
+      .input(requestTaskWorkspaceTransitionSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        requestTaskWorkspaceTransitionCommand(auth, input),
       ),
   }),
 

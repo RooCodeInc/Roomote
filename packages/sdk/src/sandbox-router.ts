@@ -9,6 +9,7 @@ import type {
   TaskEnvVarRequestVariable,
   TaskStatusEvent,
   TaskToolDispatchPayload,
+  WorkspaceGitManifest,
 } from '@roomote/types';
 
 export type SandboxStreamEvent =
@@ -233,6 +234,12 @@ export interface SandboxServerRpcClient {
       SandboxHarnessLogResult
     >;
     getSetupStatus: SandboxQuery<undefined, SandboxSetupStatusResult>;
+    inspectWorkspaceGit: SandboxQuery<undefined, WorkspaceGitManifest>;
+    prepareWorkspaceTransition: SandboxMutation<
+      undefined,
+      { ready: boolean; phase: string }
+    >;
+    abortWorkspaceTransition: SandboxMutation<undefined, SandboxSuccessResult>;
     sendPrompt: SandboxMutation<SandboxSendPromptInput, SandboxSuccessResult>;
     steerTask: SandboxMutation<SandboxSteerTaskInput, SandboxSuccessResult>;
     steerQueuedMessage: SandboxMutation<

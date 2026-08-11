@@ -73,6 +73,11 @@ import type {
   TaskModelSettings,
   TaskRunErrorCode,
   UserRole,
+  ResolvedWorkspaceSpec,
+  TaskWorkspaceHandoff,
+  TaskWorkspaceTransitionInputPayload,
+  TaskWorkspaceTransitionStatus,
+  WorkspaceGitManifest,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -674,7 +679,6 @@ export const tasks = pgTable(
       .notNull()
       .default('opencode-server')
       .$type<CodingHarness>(),
-
     harnessSessionId: text('harness_session_id'), // Assigned by Harness.
 
     // Inference provider that served this task's LLM, paired with `model`.
@@ -805,6 +809,7 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   messages: many(taskMessages),
   slackReplyDetails: many(taskSlackReplyDetails),
   platformIssueReports: many(taskPlatformIssueReports),
+  workspaceTransitions: many(taskWorkspaceTransitions),
   initiatorAutomationRow: one(automations, {
     fields: [tasks.initiatorAutomation],
     references: [automations.key],
@@ -1046,6 +1051,17 @@ export const taskRuns = pgTable(
       .notNull()
       .default('opencode-server')
       .$type<CodingHarness>(),
+    // Attempt-scoped session identity. The task-level column is retained as
+    // an N-1 compatibility mirror until older application code is retired.
+    harnessSessionId: text('harness_session_id'),
+    environmentConfigVersionId: uuid(
+      'environment_config_version_id',
+    ).references((): AnyPgColumn => environmentConfigVersions.id, {
+      onDelete: 'set null',
+    }),
+    resolvedWorkspaceSpec: jsonb(
+      'resolved_workspace_spec',
+    ).$type<ResolvedWorkspaceSpec>(),
 
     status: text('status').notNull().default('pending').$type<RunStatus>(),
     // Stable ownership scope used by the controller queue. Persisting the
@@ -1169,6 +1185,7 @@ export const taskRuns = pgTable(
      */
     cancelRequestedAt: timestamp('cancel_requested_at'),
     canceledAt: timestamp('canceled_at'),
+    terminationReason: text('termination_reason'),
     launchMode: text('launch_mode').$type<ComputeProviderLaunchMode>(),
   },
   (table) => [
@@ -1195,6 +1212,9 @@ export const taskRuns = pgTable(
       ),
     index('task_runs_source_snapshot_id_idx').on(table.sourceSnapshotId),
     index('task_runs_source_run_id_idx').on(table.sourceRunId),
+    index('task_runs_environment_config_version_id_idx').on(
+      table.environmentConfigVersionId,
+    ),
     uniqueIndex('task_runs_discord_source_event_unique')
       .on(sql`(${table.payload}->>'communicationSourceEventId')`)
       .where(
@@ -1209,6 +1229,81 @@ export const taskRuns = pgTable(
     check(
       'task_runs_harness_check',
       sql`${table.harness} in ('opencode-server')`,
+    ),
+  ],
+);
+
+/** Durable, idempotent orchestration record for moving a task to a workspace. */
+export const taskWorkspaceTransitions = pgTable(
+  'task_workspace_transitions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    sourceRunId: integer('source_run_id')
+      .notNull()
+      .references(() => taskRuns.id, { onDelete: 'cascade' }),
+    targetRunId: integer('target_run_id').references(() => taskRuns.id, {
+      onDelete: 'set null',
+    }),
+    requestedByUserId: text('requested_by_user_id').references(() => users.id, {
+      onDelete: 'set null',
+    }),
+    targetEnvironmentId: uuid('target_environment_id')
+      .notNull()
+      .references(() => environments.id, { onDelete: 'restrict' }),
+    targetEnvironmentConfigVersionId: uuid(
+      'target_environment_config_version_id',
+    )
+      .notNull()
+      .references(() => environmentConfigVersions.id, { onDelete: 'restrict' }),
+    resolvedWorkspaceSpec: jsonb('resolved_workspace_spec')
+      .notNull()
+      .$type<ResolvedWorkspaceSpec>(),
+    status: text('status')
+      .notNull()
+      .default('requested')
+      .$type<TaskWorkspaceTransitionStatus>(),
+    gitManifest: jsonb('git_manifest').$type<WorkspaceGitManifest>(),
+    handoff: jsonb('handoff').$type<TaskWorkspaceHandoff>(),
+    blockedReason: text('blocked_reason'),
+    error: text('error'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+    completedAt: timestamp('completed_at'),
+  },
+  (table) => [
+    index('task_workspace_transitions_task_id_created_at_idx').on(
+      table.taskId,
+      table.createdAt,
+    ),
+    index('task_workspace_transitions_source_run_id_idx').on(table.sourceRunId),
+    index('task_workspace_transitions_target_run_id_idx').on(table.targetRunId),
+    uniqueIndex('task_workspace_transitions_one_active_per_task_idx')
+      .on(table.taskId)
+      .where(sql`${table.status} NOT IN ('succeeded', 'failed', 'canceled')`),
+  ],
+);
+
+/** Follow-ups accepted while no run is routable during a workspace switch. */
+export const taskWorkspaceTransitionInputs = pgTable(
+  'task_workspace_transition_inputs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    transitionId: uuid('transition_id')
+      .notNull()
+      .references(() => taskWorkspaceTransitions.id, { onDelete: 'cascade' }),
+    payload: jsonb('payload')
+      .notNull()
+      .$type<TaskWorkspaceTransitionInputPayload>(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    deliveredAt: timestamp('delivered_at'),
+  },
+  (table) => [
+    index('task_workspace_transition_inputs_transition_id_idx').on(
+      table.transitionId,
+      table.createdAt,
     ),
   ],
 );
@@ -1613,7 +1708,44 @@ export const taskRunsRelations = relations(taskRuns, ({ one, many }) => ({
   messages: many(taskMessages),
   inferenceUsageEvents: many(llmUsageEvents),
   platformIssueReports: many(taskPlatformIssueReports),
+  sourceWorkspaceTransitions: many(taskWorkspaceTransitions, {
+    relationName: 'workspaceTransitionSourceRun',
+  }),
+  targetWorkspaceTransitions: many(taskWorkspaceTransitions, {
+    relationName: 'workspaceTransitionTargetRun',
+  }),
 }));
+
+export const taskWorkspaceTransitionsRelations = relations(
+  taskWorkspaceTransitions,
+  ({ one, many }) => ({
+    task: one(tasks, {
+      fields: [taskWorkspaceTransitions.taskId],
+      references: [tasks.id],
+    }),
+    sourceRun: one(taskRuns, {
+      fields: [taskWorkspaceTransitions.sourceRunId],
+      references: [taskRuns.id],
+      relationName: 'workspaceTransitionSourceRun',
+    }),
+    targetRun: one(taskRuns, {
+      fields: [taskWorkspaceTransitions.targetRunId],
+      references: [taskRuns.id],
+      relationName: 'workspaceTransitionTargetRun',
+    }),
+    inputs: many(taskWorkspaceTransitionInputs),
+  }),
+);
+
+export const taskWorkspaceTransitionInputsRelations = relations(
+  taskWorkspaceTransitionInputs,
+  ({ one }) => ({
+    transition: one(taskWorkspaceTransitions, {
+      fields: [taskWorkspaceTransitionInputs.transitionId],
+      references: [taskWorkspaceTransitions.id],
+    }),
+  }),
+);
 
 /**
  * compute_provider_usage

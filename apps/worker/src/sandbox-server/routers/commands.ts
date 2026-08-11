@@ -19,6 +19,9 @@ import {
   reloadDeploymentEnvVars,
   scrubSnapshotSecrets,
   restoreScrubbedCredentials,
+  inspectWorkspaceGit,
+  prepareWorkspaceTransition,
+  abortWorkspaceTransition,
 } from '../procedures';
 
 export const commandsRouter = router({
@@ -40,4 +43,7 @@ export const commandsRouter = router({
   reloadDeploymentEnvVars,
   scrubSnapshotSecrets,
   restoreScrubbedCredentials,
+  inspectWorkspaceGit,
+  prepareWorkspaceTransition,
+  abortWorkspaceTransition,
 });

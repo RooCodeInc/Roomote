@@ -3,7 +3,12 @@
 import { memo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { Moon, MoreVertical, Trash2 } from '@/components/system';
+import {
+  ArrowLeftRight,
+  Moon,
+  MoreVertical,
+  Trash2,
+} from '@/components/system';
 import { SideNavItem } from '@/components/layout/side-nav/SideNavItem';
 
 import {
@@ -11,12 +16,15 @@ import {
   isResumableTaskPayloadKind,
   isTaskResumeCapableComputeProvider,
   runningRunStatuses,
+  TaskPayloadKind,
 } from '@roomote/types';
 
 import { useUser } from '@/hooks/useUser';
 import { useDeleteTasks } from '@/hooks/tasks';
 import { useCancelTaskRun } from '@/hooks/task-runs';
 import { useRequestTaskRunSleep } from '@/hooks/snapshots';
+import { useAvailableEnvironments } from '@/hooks/environments';
+import { useTRPCClient } from '@/trpc/client';
 
 import {
   Button,
@@ -29,6 +37,12 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from '@/components/system';
 
 import type { OverflowMenuProps } from './types';
@@ -44,6 +58,7 @@ function OverflowMenuBase({
   const { user } = useUser();
 
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showWorkspaceDialog, setShowWorkspaceDialog] = useState(false);
 
   // Task deletion is deployment-wide: any member can delete any task.
   const canShutdown = !!taskRun && !isExitedRunStatus(taskRun.status);
@@ -56,6 +71,11 @@ function OverflowMenuBase({
     !taskRun.snapshotFailedAt &&
     isResumableTaskPayloadKind(taskRun.payloadKind) &&
     isTaskResumeCapableComputeProvider(taskRun.vendor);
+  const currentEnvironmentId = taskRun?.payload?.environmentId;
+  const canSwitchWorkspace =
+    !!taskRun &&
+    canShutdown &&
+    taskRun.payloadKind === TaskPayloadKind.StandardTask;
 
   const deleteTasks = useDeleteTasks({
     onSuccess: () => {
@@ -142,6 +162,15 @@ function OverflowMenuBase({
               Sleep
             </DropdownMenuItem>
           ) : null}
+          {canSwitchWorkspace ? (
+            <DropdownMenuItem
+              onClick={() => setShowWorkspaceDialog(true)}
+              className="flex cursor-pointer items-center gap-2"
+            >
+              <ArrowLeftRight className="size-4" />
+              Change workspace
+            </DropdownMenuItem>
+          ) : null}
           <DropdownMenuItem
             variant="destructive"
             onClick={() => setShowDeleteDialog(true)}
@@ -183,8 +212,108 @@ function OverflowMenuBase({
           </div>
         </DialogContent>
       </Dialog>
+      {canSwitchWorkspace && showWorkspaceDialog ? (
+        <WorkspaceSwitchDialog
+          taskId={taskId}
+          currentEnvironmentId={currentEnvironmentId}
+          open={showWorkspaceDialog}
+          onOpenChange={setShowWorkspaceDialog}
+        />
+      ) : null}
     </>
   );
 }
 
 export const OverflowMenu = memo(OverflowMenuBase);
+
+function WorkspaceSwitchDialog({
+  taskId,
+  currentEnvironmentId,
+  open,
+  onOpenChange,
+}: {
+  taskId: string;
+  currentEnvironmentId: string | undefined;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [targetEnvironmentId, setTargetEnvironmentId] = useState('');
+  const [isSwitching, setIsSwitching] = useState(false);
+  const environments = useAvailableEnvironments();
+  const trpcClient = useTRPCClient();
+  const switchTargets = (environments.data ?? []).filter(
+    (environment) => environment.id !== currentEnvironmentId,
+  );
+
+  const handleSwitch = async () => {
+    setIsSwitching(true);
+    try {
+      const result = await trpcClient.taskWorkspaceTransitions.request.mutate({
+        taskId,
+        targetEnvironmentId,
+      });
+      if (!result.success) {
+        toast.error(result.error);
+        return;
+      }
+      if (result.noop) {
+        toast.info('This task already uses that workspace.');
+        onOpenChange(false);
+        return;
+      }
+      toast.success('Workspace switch started.');
+      onOpenChange(false);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : 'Workspace switch failed.',
+      );
+    } finally {
+      setIsSwitching(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent size="sm">
+        <DialogHeader>
+          <DialogTitle>Change workspace</DialogTitle>
+          <DialogDescription>
+            Roomote will verify that all current work is committed and pushed,
+            shut down this runtime, then continue the same task in a fresh
+            runtime and session.
+          </DialogDescription>
+        </DialogHeader>
+        <Select
+          value={targetEnvironmentId}
+          onValueChange={setTargetEnvironmentId}
+        >
+          <SelectTrigger aria-label="Target workspace" className="w-full">
+            <SelectValue placeholder="Select a verified workspace" />
+          </SelectTrigger>
+          <SelectContent>
+            {switchTargets.map((environment) => (
+              <SelectItem key={environment.id} value={environment.id}>
+                {environment.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={isSwitching}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSwitch}
+            disabled={!targetEnvironmentId || isSwitching}
+          >
+            {isSwitching ? 'Checking workspace…' : 'Continue'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

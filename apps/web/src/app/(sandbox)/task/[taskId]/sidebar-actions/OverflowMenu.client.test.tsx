@@ -111,6 +111,7 @@ vi.mock('@/components/system', () => ({
     <p>{children}</p>
   ),
   MoreVertical: () => <svg aria-hidden="true" />,
+  ArrowLeftRight: () => <svg aria-hidden="true" />,
   Moon: () => <svg aria-hidden="true" />,
   Trash2: () => <svg aria-hidden="true" />,
   Pencil: () => <svg aria-hidden="true" />,

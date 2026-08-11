@@ -33,6 +33,13 @@ export const steerTask = publicProcedure
       ),
   )
   .mutation(async ({ input, ctx }) => {
+    if (ctx.workspaceTransitionState?.requested) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message:
+          'This task is changing workspaces; the prompt was not delivered.',
+      });
+    }
     const workflowPhase = getFollowUpWorkflowPhase(input.prompt);
 
     if (!ctx.harnessManager) {

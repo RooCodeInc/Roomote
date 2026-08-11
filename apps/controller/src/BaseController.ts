@@ -20,6 +20,7 @@ import {
   type TaskRun,
   db,
   taskRuns,
+  taskWorkspaceTransitions,
   buildPendingEnvironmentSnapshotMatchForTaskRun,
   readManagedDeploymentAccess,
   recordTaskRunLifecycleEvent,
@@ -538,6 +539,20 @@ export abstract class BaseController {
           machineId: taskRun.machineId ?? null,
         },
       });
+
+      await tx
+        .update(taskWorkspaceTransitions)
+        .set({
+          status: 'succeeded',
+          completedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(taskWorkspaceTransitions.targetRunId, taskRun.id),
+            eq(taskWorkspaceTransitions.status, 'target_queued'),
+          ),
+        );
     });
 
     if (dequeueSkipped) {

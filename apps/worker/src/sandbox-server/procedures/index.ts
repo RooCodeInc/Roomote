@@ -15,9 +15,14 @@ export { touchKeepalive } from './touchKeepalive';
 export { reloadDeploymentEnvVars } from './reloadDeploymentEnvVars';
 export { scrubSnapshotSecrets } from './scrubSnapshotSecrets';
 export { restoreScrubbedCredentials } from './restoreScrubbedCredentials';
+export {
+  abortWorkspaceTransition,
+  prepareWorkspaceTransition,
+} from './prepareWorkspaceTransition';
 
 // Queries
 export { getRuntimeState } from './getRuntimeState';
 export { getHarnessLog } from './getHarnessLog';
 export { getSetupStatus } from './getSetupStatus';
 export { searchFiles } from './searchFiles';
+export { inspectWorkspaceGit } from './inspectWorkspaceGit';
