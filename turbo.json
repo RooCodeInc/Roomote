@@ -1,5 +1,9 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": [
+    ".docker/sandbox/install-browser-agent.sh",
+    "apps/worker/Dockerfile"
+  ],
   "globalPassThroughEnv": [
     "APP_ENV",
     "DATABASE_URL",
