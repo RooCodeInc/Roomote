@@ -57,17 +57,34 @@ function findCheck(observation: EnvironmentObservation, id: string) {
 }
 
 describe('diagnoseEnvironment', () => {
-  it('returns an all-pass observation for a healthy environment without optional resources', async () => {
+  it('omits adapters that do not apply to the environment', async () => {
+    const runCommand = vi.fn(async () => ({
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+    }));
+    const fetch = vi.fn();
+    const fetchViaDockerHost = vi.fn();
+    const checkTcpPort = vi.fn(async () => true);
     const observation = await diagnoseEnvironment({
       workspacePath,
       context: emptyContext(),
-      dependencies: dependencies(),
+      dependencies: dependencies({
+        runCommand,
+        fetch: fetch as unknown as typeof globalThis.fetch,
+        fetchViaDockerHost,
+        checkTcpPort,
+      }),
     });
 
     expect(observation.overallStatus).toBe('pass');
-    expect(observation.checks.every((check) => check.status === 'pass')).toBe(
-      true,
-    );
+    expect(observation.checks.map((check) => check.id)).toEqual([
+      'setup.commands',
+    ]);
+    expect(runCommand).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(fetchViaDockerHost).not.toHaveBeenCalled();
+    expect(checkTcpPort).not.toHaveBeenCalled();
   });
 
   it('cannot report healthy when runtime context is unavailable', async () => {
@@ -186,6 +203,46 @@ describe('diagnoseEnvironment', () => {
       status: 'pass',
       summary: '1 detached process is online',
     });
+    expect(
+      JSON.stringify(findCheck(report, 'setup.detached_health')),
+    ).not.toContain('PM2');
+  });
+
+  it('describes detached supervision without exposing the implementation as a workload requirement', async () => {
+    const report = await diagnoseEnvironment({
+      workspacePath,
+      context: emptyContext(),
+      dependencies: dependencies({
+        readSetupStatus: () => ({
+          version: 1,
+          state: 'completed',
+          startedAt: now.toISOString(),
+          finishedAt: now.toISOString(),
+          commands: [
+            {
+              repository: 'owner/repo',
+              name: 'Start worker',
+              state: 'started_detached',
+              detached: true,
+              logFile: 'worker.log',
+            },
+          ],
+          warnings: [],
+        }),
+        runCommand: vi.fn(async () => ({
+          exitCode: 1,
+          stdout: '',
+          stderr: 'supervisor unavailable',
+        })),
+      }),
+    });
+
+    const check = findCheck(report, 'setup.detached_health');
+    expect(check.status).toBe('fail');
+    expect(check.summary).toBe(
+      'Detached-process supervisor state could not be read',
+    );
+    expect(`${check.summary} ${check.remediationHint}`).not.toContain('PM2');
   });
 
   it('distinguishes working-tree changes that appeared after setup began', async () => {

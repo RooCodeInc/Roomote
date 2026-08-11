@@ -59,7 +59,7 @@ describe('Doctor contracts', () => {
       observation,
       assessment: {
         summary: 'The configured environment cannot finish setup.',
-        goals: ['environment_start', 'failure_ownership'],
+        goals: ['dependency_installation', 'failure_ownership'],
         owner: 'environment_configuration',
         confidence: 'high',
         evidenceCheckIds: ['setup.commands'],
@@ -90,7 +90,7 @@ describe('Doctor contracts', () => {
       observation,
       assessment: {
         summary: 'No failing probes were observed.',
-        goals: ['environment_start'],
+        goals: ['command_execution'],
         owner: 'undetermined',
         confidence: 'medium',
         evidenceCheckIds: [],
@@ -121,7 +121,7 @@ describe('Doctor contracts', () => {
       observation,
       assessment: {
         summary: 'The requested journey passed.',
-        goals: ['environment_start'],
+        goals: ['command_execution'],
         owner: 'undetermined',
         confidence: 'high',
         evidenceCheckIds: [],
@@ -184,5 +184,74 @@ describe('Doctor contracts', () => {
     expect(serialized).not.toContain(env.API_KEY);
     expect(serialized).not.toContain(env.DATABASE_URL);
     expect(serialized).toContain('[redacted]');
+  });
+
+  it('accepts extensible goals and namespaced probe IDs', () => {
+    const observation = createEnvironmentObservation(
+      [
+        {
+          id: 'runtime.background_job.consumer',
+          category: 'runtime',
+          title: 'Background consumer',
+          status: 'pass',
+          severity: 'info',
+          summary: 'The task-specific probe completed',
+          observedAt,
+        },
+      ],
+      { generatedAt: observedAt },
+    );
+
+    expect(
+      doctorReportSchema.safeParse({
+        generatedAt: observedAt,
+        observation,
+        assessment: {
+          summary: 'The requested background job completed.',
+          goals: ['background_job_processing'],
+          owner: 'undetermined',
+          confidence: 'high',
+          evidenceCheckIds: ['runtime.background_job.consumer'],
+        },
+        repair: {
+          status: 'not_needed',
+          summary: 'No repair was required.',
+        },
+        verification: {
+          status: 'passed',
+          summary: 'A representative job completed independently.',
+          evidenceCheckIds: ['runtime.background_job.consumer'],
+        },
+        outcome: 'healthy',
+      }).success,
+    ).toBe(true);
+  });
+
+  it('rejects unstable goal and probe identifiers', () => {
+    expect(
+      doctorReportSchema.safeParse({
+        generatedAt: observedAt,
+        observation: createEnvironmentObservation([], {
+          generatedAt: observedAt,
+        }),
+        assessment: {
+          summary: 'Invalid identifiers should not be accepted.',
+          goals: ['Run the app'],
+          owner: 'undetermined',
+          confidence: 'low',
+          evidenceCheckIds: ['not-namespaced'],
+        },
+        repair: {
+          status: 'not_attempted',
+          summary: 'No repair was attempted.',
+        },
+        verification: {
+          status: 'not_run',
+          summary: 'Verification did not run.',
+          evidenceCheckIds: [],
+        },
+        outcome: 'unresolved',
+      }).success,
+    ).toBe(false);
   });
 });

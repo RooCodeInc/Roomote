@@ -307,21 +307,9 @@ async function diagnoseRepositoryChanges(
   dependencies: DiagnoseEnvironmentDependencies,
 ): Promise<EnvironmentObservationCheck | undefined> {
   const baselines = setupStatus?.repositoryBaselines;
-  if (!baselines) return undefined;
+  if (!baselines || baselines.length === 0) return undefined;
 
   const timestamp = observedAt(dependencies);
-  if (baselines.length === 0) {
-    return {
-      id: 'setup.repository_changes',
-      category: 'setup',
-      title: 'Repository working-tree provenance',
-      status: 'pass',
-      severity: 'info',
-      summary: 'No setup repository baselines were required',
-      observedAt: timestamp,
-    };
-  }
-
   let status: EnvironmentObservationStatus = 'pass';
   let changedRepositories = 0;
   const details: string[] = [];
@@ -409,25 +397,14 @@ async function diagnoseDetachedHealth(
   workspacePath: string,
   setupStatus: EnvironmentSetupStatus | null,
   dependencies: DiagnoseEnvironmentDependencies,
-): Promise<EnvironmentObservationCheck> {
+): Promise<EnvironmentObservationCheck | undefined> {
   const timestamp = observedAt(dependencies);
   const detached =
     setupStatus?.commands.filter(
       (command) => command.state === 'started_detached',
     ) ?? [];
   if (detached.length === 0) {
-    return {
-      id: 'setup.detached_health',
-      category: 'setup',
-      title: 'Detached process health',
-      status: setupStatus?.state === 'running' ? 'unknown' : 'pass',
-      severity: 'info',
-      summary:
-        setupStatus?.state === 'running'
-          ? 'No detached commands have finished launching yet'
-          : 'No detached setup commands require health checks',
-      observedAt: timestamp,
-    };
+    return undefined;
   }
 
   const result = await dependencies.runCommand('pm2', ['--silent', 'jlist'], {
@@ -440,12 +417,12 @@ async function diagnoseDetachedHealth(
       title: 'Detached process health',
       status: 'fail',
       severity: 'major',
-      summary: 'PM2 process state could not be read',
+      summary: 'Detached-process supervisor state could not be read',
       ...(result.stderr || result.stdout
         ? { details: sanitizeEvidence(result.stderr || result.stdout) }
         : {}),
       remediationHint:
-        'Confirm PM2 is installed and detached commands are supervised.',
+        'Confirm the Roomote detached-process supervisor is available.',
       observedAt: timestamp,
     };
   }
@@ -460,7 +437,7 @@ async function diagnoseDetachedHealth(
       title: 'Detached process health',
       status: 'unknown',
       severity: 'minor',
-      summary: 'PM2 returned invalid process data',
+      summary: 'Detached-process supervisor returned invalid process data',
       observedAt: timestamp,
     };
   }
@@ -484,7 +461,7 @@ async function diagnoseDetachedHealth(
     if (!process) {
       status = 'fail';
       details.push(
-        `${command.name}: no PM2 process matched ${command.logFile ?? 'its configured log'}`,
+        `${command.name}: no supervised process matched ${command.logFile ?? 'its configured log'}`,
       );
       continue;
     }
@@ -518,7 +495,7 @@ async function diagnoseDetachedHealth(
       }
     }
     details.push(
-      `${command.name}: PM2 ${process.name ?? 'process'} is ${processStatus}, restarts=${restarts}${logNote}`,
+      `${command.name}: supervised process ${process.name ?? '(unnamed)'} is ${processStatus}, restarts=${restarts}${logNote}`,
     );
   }
 
@@ -537,7 +514,7 @@ async function diagnoseDetachedHealth(
     remediationHint:
       status === 'pass'
         ? undefined
-        : 'Inspect PM2 state and the configured detached-command logs.',
+        : 'Inspect the Roomote detached-process supervisor and the configured command logs.',
     observedAt: timestamp,
   };
 }
@@ -565,18 +542,10 @@ async function diagnoseDockerProjects(
   workspacePath: string,
   context: DoctorEnvironmentContext,
   dependencies: DiagnoseEnvironmentDependencies,
-): Promise<EnvironmentObservationCheck> {
+): Promise<EnvironmentObservationCheck | undefined> {
   const timestamp = observedAt(dependencies);
   if (context.dockerProjects.length === 0) {
-    return {
-      id: 'docker.projects',
-      category: 'docker',
-      title: 'Docker projects',
-      status: 'pass',
-      severity: 'info',
-      summary: 'No Docker projects are configured',
-      observedAt: timestamp,
-    };
+    return undefined;
   }
 
   const details: string[] = [];
@@ -861,18 +830,10 @@ async function resolveToolVersion(
 async function diagnoseToolVersions(
   context: DoctorEnvironmentContext,
   dependencies: DiagnoseEnvironmentDependencies,
-): Promise<EnvironmentObservationCheck> {
+): Promise<EnvironmentObservationCheck | undefined> {
   const timestamp = observedAt(dependencies);
   if (context.toolVersions.length === 0) {
-    return {
-      id: 'tooling.versions',
-      category: 'tooling',
-      title: 'Tool versions',
-      status: 'pass',
-      severity: 'info',
-      summary: 'No environment tool versions are declared',
-      observedAt: timestamp,
-    };
+    return undefined;
   }
 
   const details: string[] = [];
@@ -915,7 +876,7 @@ async function diagnoseToolVersions(
 function diagnoseEnvContract(
   context: DoctorEnvironmentContext,
   dependencies: DiagnoseEnvironmentDependencies,
-): EnvironmentObservationCheck {
+): EnvironmentObservationCheck | undefined {
   const present = new Set(context.presentEnvVarNames);
   const entries = [
     ...context.configuredEnvVars.map((entry) => ({
@@ -935,6 +896,8 @@ function diagnoseEnvContract(
       })),
     ),
   ];
+  if (entries.length === 0) return undefined;
+
   const missing = entries.filter((entry) => entry.state === 'missing');
   return {
     id: 'env.contract',
@@ -942,17 +905,10 @@ function diagnoseEnvContract(
     title: 'Environment contract',
     status: missing.length > 0 ? 'warn' : 'pass',
     severity: missing.length > 0 ? 'minor' : 'info',
-    summary:
-      entries.length === 0
-        ? 'No environment-config or service-provided variables are expected'
-        : `${entries.length - missing.length}/${entries.length} expected environment variables are configured or intentionally withheld`,
-    ...(entries.length > 0
-      ? {
-          details: entries
-            .map((entry) => `${entry.name}: ${entry.state} (${entry.source})`)
-            .join('\n'),
-        }
-      : {}),
+    summary: `${entries.length - missing.length}/${entries.length} expected environment variables are configured or intentionally withheld`,
+    details: entries
+      .map((entry) => `${entry.name}: ${entry.state} (${entry.source})`)
+      .join('\n'),
     remediationHint:
       missing.length > 0
         ? `Configure the missing variable names: ${missing.map((entry) => entry.name).join(', ')}`
@@ -1049,24 +1005,27 @@ export async function diagnoseEnvironment(options: {
     dependencies,
   );
   if (repositoryChanges) checks.push(repositoryChanges);
-  checks.push(
-    await diagnoseDetachedHealth(
-      options.workspacePath,
-      setup.status,
-      dependencies,
-    ),
+  const detachedHealth = await diagnoseDetachedHealth(
+    options.workspacePath,
+    setup.status,
+    dependencies,
   );
-  checks.push(
-    await diagnoseDockerProjects(
-      options.workspacePath,
-      options.context,
-      dependencies,
-    ),
+  if (detachedHealth) checks.push(detachedHealth);
+  const dockerProjects = await diagnoseDockerProjects(
+    options.workspacePath,
+    options.context,
+    dependencies,
   );
+  if (dockerProjects) checks.push(dockerProjects);
   checks.push(...(await diagnoseServices(options.context, dependencies)));
   checks.push(...(await diagnosePorts(options.context, dependencies)));
-  checks.push(await diagnoseToolVersions(options.context, dependencies));
-  checks.push(diagnoseEnvContract(options.context, dependencies));
+  const toolVersions = await diagnoseToolVersions(
+    options.context,
+    dependencies,
+  );
+  if (toolVersions) checks.push(toolVersions);
+  const envContract = diagnoseEnvContract(options.context, dependencies);
+  if (envContract) checks.push(envContract);
 
   return createEnvironmentObservation(checks, {
     generatedAt: observedAt(dependencies),

@@ -16,9 +16,11 @@ export const environmentObservationSeveritySchema = z.enum([
 
 export const environmentObservationCheckIdSchema = z
   .string()
+  .min(3)
+  .max(160)
   .regex(
-    /^(?:context\.available|setup\.commands(?:\.[a-z0-9._-]+)?|setup\.detached_health|setup\.repository_changes|docker\.projects|service\.[a-zA-Z0-9_-]+|port\.[a-zA-Z][a-zA-Z0-9_]*\.(?:loopback|preview)|tooling\.versions|env\.contract)$/u,
-    'Environment observation check ID must use a supported stable namespace',
+    /^[a-z][a-z0-9_-]*(?:\.[a-zA-Z0-9_-]+)+$/u,
+    'Environment observation check ID must be a stable namespaced identifier',
   );
 
 export const environmentObservationCheckSchema = z.object({
@@ -58,15 +60,19 @@ export type EnvironmentObservation = z.infer<
   typeof environmentObservationSchema
 >;
 
-export const doctorGoalSchema = z.enum([
-  'environment_start',
-  'service_start',
-  'preview_reachability',
-  'visual_proof',
-  'test_execution',
-  'performance',
-  'failure_ownership',
-]);
+/**
+ * A task-specific outcome Doctor was asked to assess. Goals are deliberately
+ * extensible: Doctor must be able to describe non-web and future workloads
+ * without forcing them into a fixed product taxonomy.
+ */
+export const doctorGoalSchema = z
+  .string()
+  .min(1)
+  .max(100)
+  .regex(
+    /^[a-z][a-z0-9_-]*$/u,
+    'Doctor goal must be a stable lowercase identifier',
+  );
 
 export const doctorFailureOwnerSchema = z.enum([
   'environment_configuration',

@@ -87,7 +87,7 @@ roomoteMcpServer.registerTool(
   {
     title: 'Diagnose Environment',
     description:
-      'Collect a secret-safe EnvironmentObservation from setup commands, detached services, docker projects, ports, preview reachability, and tool versions. This read-only evidence is not a Doctor assessment, repair authorization, or verification result.',
+      'Collect a secret-safe EnvironmentObservation using only probes applicable to the capabilities declared by the current Roomote environment and setup state. An omitted probe is not evidence of health. This read-only evidence is not a Doctor assessment, repair authorization, or verification result.',
     inputSchema: {},
     annotations: {
       readOnlyHint: true,
