@@ -1,11 +1,16 @@
+import { eq } from 'drizzle-orm';
+
+import { db } from '../db';
 import { runFactory } from '../fixtures/factories/run.factory';
 import { taskFactory } from '../fixtures/factories/task.factory';
+import { tasks } from '../schema';
 import {
   claimTaskGoalContinuationForRun,
   getTaskGoalForRun,
   markTaskGoalForRun,
   prepareTaskGoalActivation,
   releaseTaskGoalContinuationForRun,
+  type TaskGoalMutationResult,
 } from './task-goals';
 
 describe('task goals', () => {
@@ -113,6 +118,58 @@ describe('task goals', () => {
       updated: false,
       reason: 'not_active',
       goal: null,
+    });
+  });
+
+  it('rejects a stale continuation claim that crosses a goal replacement', async () => {
+    const task = await taskFactory.create({
+      goalObjective: 'Original objective',
+      goalStatus: 'active',
+      goalMaxContinuations: 3,
+    });
+    const run = await runFactory.create({ taskId: task.id });
+
+    let claim: Promise<TaskGoalMutationResult> | undefined;
+    await db.transaction(async (tx) => {
+      // Hold the task row so the in-flight claim reads the original goal but
+      // cannot run its conditional update until the replacement is written.
+      await tx
+        .select()
+        .from(tasks)
+        .where(eq(tasks.id, task.id))
+        .limit(1)
+        .for('update');
+
+      claim = claimTaskGoalContinuationForRun({
+        runId: run.id,
+        continuationId: 'stale-turn',
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // Mirrors the row a prepared and committed replacement goal leaves
+      // behind: active, unused budget, and a fresh activation generation.
+      await tx
+        .update(tasks)
+        .set({
+          goalObjective: 'Replacement objective',
+          goalStatus: 'active',
+          goalMaxContinuations: 3,
+          goalContinuationsUsed: 0,
+          goalContinuationIds: [],
+          goalLastContinuationId: 'goal-generation:replacement',
+          updatedAt: new Date(),
+        })
+        .where(eq(tasks.id, task.id));
+    });
+
+    await expect(claim!).resolves.toMatchObject({
+      updated: false,
+      reason: 'not_active',
+    });
+    await expect(getTaskGoalForRun(run.id)).resolves.toMatchObject({
+      objective: 'Replacement objective',
+      status: 'active',
+      continuationsUsed: 0,
     });
   });
 

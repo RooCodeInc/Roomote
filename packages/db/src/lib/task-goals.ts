@@ -2,13 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import type { TaskGoal, TaskGoalInput, TaskGoalStatus } from '@roomote/types';
-import { and, eq, inArray, isNotNull, lt, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
 
 import { db } from '../db';
 import { taskRuns, tasks } from '../schema';
 
 const GOAL_ACTIVATION_WAIT_MS = 35_000;
 const GOAL_ACTIVATION_POLL_MS = 50;
+const GOAL_ACTIVATION_PREFIX = 'goal-activation:';
+const GOAL_GENERATION_PREFIX = 'goal-generation:';
 
 export type TaskGoalMutationResult =
   | { updated: true; goal: TaskGoal }
@@ -56,8 +58,21 @@ async function getTaskForRun(runId: number) {
 function hasPendingGoalActivation(task: typeof tasks.$inferSelect): boolean {
   return (
     task.goalStatus === 'active' &&
-    Boolean(task.goalLastContinuationId?.startsWith('goal-activation:'))
+    Boolean(task.goalLastContinuationId?.startsWith(GOAL_ACTIVATION_PREFIX))
   );
+}
+
+/**
+ * Restricts a goal mutation to the exact goal generation the caller read.
+ *
+ * `goalLastContinuationId` advances on every activation and every claim, so an
+ * in-flight completion that read the previous goal cannot mutate a replacement
+ * goal that was activated after that read.
+ */
+function goalGenerationFilter(generation: string | null) {
+  return generation === null
+    ? isNull(tasks.goalLastContinuationId)
+    : eq(tasks.goalLastContinuationId, generation);
 }
 
 async function waitForGoalActivation(
@@ -93,7 +108,9 @@ export async function prepareTaskGoalActivation(input: {
   commit: () => Promise<TaskGoal | null>;
   rollback: () => Promise<boolean>;
 } | null> {
-  const activationId = `goal-activation:${randomUUID()}`;
+  const activationUuid = randomUUID();
+  const activationId = `${GOAL_ACTIVATION_PREFIX}${activationUuid}`;
+  const generationId = `${GOAL_GENERATION_PREFIX}${activationUuid}`;
   const previous = await db.transaction(async (tx) => {
     const [task] = await tx
       .select()
@@ -142,7 +159,7 @@ export async function prepareTaskGoalActivation(input: {
       const [updated] = await db
         .update(tasks)
         .set({
-          goalLastContinuationId: null,
+          goalLastContinuationId: generationId,
           updatedAt: new Date(),
         })
         .where(pendingFilter)
@@ -306,10 +323,7 @@ export async function claimTaskGoalContinuationForRun(input: {
     if (!task) {
       return { updated: false, reason: 'missing', goal: null };
     }
-    if (
-      task.goalLastContinuationId === activationId &&
-      hasPendingGoalActivation(task)
-    ) {
+    if (hasPendingGoalActivation(task)) {
       return { updated: false, reason: 'not_active', goal: null };
     }
   }
@@ -325,6 +339,7 @@ export async function claimTaskGoalContinuationForRun(input: {
     };
   }
 
+  const claimedGeneration = task.goalLastContinuationId;
   const [updated] = await db
     .update(tasks)
     .set({
@@ -340,6 +355,7 @@ export async function claimTaskGoalContinuationForRun(input: {
       and(
         eq(tasks.id, task.id),
         eq(tasks.goalStatus, 'active'),
+        goalGenerationFilter(claimedGeneration),
         isNotNull(tasks.goalObjective),
         isNotNull(tasks.goalMaxContinuations),
         lt(tasks.goalContinuationsUsed, tasks.goalMaxContinuations),
@@ -361,12 +377,23 @@ export async function claimTaskGoalContinuationForRun(input: {
       goal,
     };
   }
+  if (!current || current.goalLastContinuationId !== claimedGeneration) {
+    // The goal advanced or was replaced after this completion read it, so this
+    // turn must settle normally instead of consuming another goal's budget.
+    return { updated: false, reason: 'not_active', goal };
+  }
   const budgetExhausted = goal?.status === 'active';
   if (goal?.status === 'active') {
     const [limited] = await db
       .update(tasks)
       .set({ goalStatus: 'budget_limited', updatedAt: new Date() })
-      .where(and(eq(tasks.id, current!.id), eq(tasks.goalStatus, 'active')))
+      .where(
+        and(
+          eq(tasks.id, current.id),
+          eq(tasks.goalStatus, 'active'),
+          goalGenerationFilter(claimedGeneration),
+        ),
+      )
       .returning();
     goal = limited ? toTaskGoal(limited) : goal;
   }
@@ -391,7 +418,7 @@ export async function releaseTaskGoalContinuationForRun(input: {
     .set({
       goalStatus: 'active',
       goalContinuationsUsed: sql`GREATEST(${tasks.goalContinuationsUsed} - 1, 0)`,
-      goalLastContinuationId: null,
+      goalLastContinuationId: `${GOAL_GENERATION_PREFIX}${randomUUID()}`,
       goalContinuationIds: sql`array_remove(${tasks.goalContinuationIds}, ${input.continuationId})`,
       updatedAt: new Date(),
     })
