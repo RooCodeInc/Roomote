@@ -294,6 +294,10 @@ async function updatePostedPrReviewNotification(input: {
       destination: 'chat',
       state: 'sending',
       actionNonce: nonce,
+      previousActionNonce:
+        input.previousActionNonce && input.previousActionNonce !== nonce
+          ? input.previousActionNonce
+          : null,
       actionHandledAt: null,
     });
   }
@@ -357,6 +361,7 @@ async function updatePostedPrReviewNotification(input: {
         destination: 'chat',
         state: 'sending',
         actionNonce: input.previousActionNonce ?? null,
+        previousActionNonce: null,
         actionHandledAt: null,
       });
     }
@@ -365,6 +370,16 @@ async function updatePostedPrReviewNotification(input: {
 
   if (nonce) {
     await attachPendingPrReviewActionMessage(nonce, input.messageId);
+  }
+  if (nonce || input.previousActionNonce) {
+    await updatePrReviewDelivery({
+      aggregateId: input.aggregateId,
+      destination: 'chat',
+      state: 'sending',
+      actionNonce: nonce,
+      previousActionNonce: null,
+      actionHandledAt: null,
+    });
   }
   if (input.previousActionNonce && input.previousActionNonce !== nonce) {
     await discardPendingPrReviewAction(input.previousActionNonce);

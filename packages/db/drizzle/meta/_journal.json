@@ -253,6 +253,13 @@
       "when": 1786463725928,
       "tag": "0035_luxuriant_payback",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1786464068600,
+      "tag": "0036_lowly_goliath",
+      "breakpoints": true
     }
   ]
 }

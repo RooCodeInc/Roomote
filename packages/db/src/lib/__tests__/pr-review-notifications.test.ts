@@ -72,6 +72,7 @@ describe('durable PR review notification state', () => {
       .update(prReviewNotificationDeliveries)
       .set({
         actionNonce: 'durable-nonce',
+        previousActionNonce: 'previous-durable-nonce',
         chatProvider: 'slack',
         chatChannelId: 'C123',
         chatThreadId: '111.222',
@@ -85,7 +86,7 @@ describe('durable PR review notification state', () => {
       );
     const claims = await Promise.all([
       claimDurablePrReviewAction('durable-nonce'),
-      claimDurablePrReviewAction('durable-nonce'),
+      claimDurablePrReviewAction('previous-durable-nonce'),
     ]);
     expect(claims.map((claim) => claim?.outcome).sort()).toEqual([
       'already_handled',

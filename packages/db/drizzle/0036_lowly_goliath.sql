@@ -1,0 +1,1 @@
+ALTER TABLE "pr_review_notification_deliveries" ADD COLUMN "previous_action_nonce" text;

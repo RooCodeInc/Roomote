@@ -370,6 +370,7 @@ export async function updatePrReviewDelivery(input: {
   chatServiceUrl?: string | null;
   chatMessageId?: string | null;
   actionNonce?: string | null;
+  previousActionNonce?: string | null;
   actionHandledAt?: Date | null;
   taskMessageId?: string | null;
 }): Promise<void> {
@@ -411,6 +412,9 @@ export async function updatePrReviewDelivery(input: {
       ...(input.actionNonce !== undefined
         ? { actionNonce: input.actionNonce }
         : {}),
+      ...(input.previousActionNonce !== undefined
+        ? { previousActionNonce: input.previousActionNonce }
+        : {}),
       ...(input.actionHandledAt !== undefined
         ? { actionHandledAt: input.actionHandledAt }
         : {}),
@@ -448,7 +452,10 @@ export async function claimDurablePrReviewAction(nonce: string): Promise<
   const existing = await db.query.prReviewNotificationDeliveries.findFirst({
     where: and(
       eq(prReviewNotificationDeliveries.destination, 'chat'),
-      eq(prReviewNotificationDeliveries.actionNonce, nonce),
+      or(
+        eq(prReviewNotificationDeliveries.actionNonce, nonce),
+        eq(prReviewNotificationDeliveries.previousActionNonce, nonce),
+      ),
     ),
     columns: { actionHandledAt: true },
   });
@@ -464,7 +471,10 @@ export async function claimDurablePrReviewAction(nonce: string): Promise<
     .where(
       and(
         eq(prReviewNotificationDeliveries.destination, 'chat'),
-        eq(prReviewNotificationDeliveries.actionNonce, nonce),
+        or(
+          eq(prReviewNotificationDeliveries.actionNonce, nonce),
+          eq(prReviewNotificationDeliveries.previousActionNonce, nonce),
+        ),
         sql`${prReviewNotificationDeliveries.actionHandledAt} is null`,
       ),
     )
