@@ -1536,6 +1536,9 @@ async function enqueueFreshLaunch(
         goalObjective: input.goal?.objective ?? null,
         goalStatus: input.goal ? 'active' : null,
         goalMaxContinuations: input.goal?.maxContinuations ?? null,
+        goalLastContinuationId: input.goal
+          ? `goal-generation:${randomUUID()}`
+          : null,
         requestedWorkKind: requestedWorkKindDecision.kind,
         requestedWorkKindSource: requestedWorkKindDecision.source,
         requestedWorkKindConfidence: requestedWorkKindDecision.confidence,

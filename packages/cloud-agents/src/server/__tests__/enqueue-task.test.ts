@@ -227,6 +227,7 @@ describe('enqueueTask initiator stamping', () => {
       db.query.tasks.findFirst({ where: eq(tasks.id, run.taskId) }),
     ).resolves.toMatchObject({
       goalObjective: 'Ship goal mode safely',
+      goalLastContinuationId: expect.stringMatching(/^goal-generation:/),
       goalStatus: 'active',
       goalMaxContinuations: 4,
       goalContinuationsUsed: 0,
