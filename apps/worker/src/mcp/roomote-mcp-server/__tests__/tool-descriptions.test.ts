@@ -150,6 +150,23 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
+  it('keeps cadence out of generated custom automation prompts', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const automationsTool = getRegisteredTool(
+      registeredTools,
+      'manage_custom_automations',
+    );
+
+    expect(automationsTool.config.description).toContain(
+      'Keep cadence only in the schedule field; do not repeat it in the stored prompt.',
+    );
+    expect(
+      getInputSchemaField(automationsTool, 'prompt').description,
+    ).toContain(
+      'Do not include the automation cadence; keep it only in the schedule field.',
+    );
+  });
+
   it('prompts agents to offer a test run after conversational creation', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const automationsTool = getRegisteredTool(
