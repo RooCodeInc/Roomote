@@ -7,13 +7,13 @@ const AUTHORIZATION_CODE_TTL_SECONDS = 5 * 60;
 const CLIENT_KEY_PREFIX = 'mcp-remote-oauth:client:';
 const CODE_KEY_PREFIX = 'mcp-remote-oauth:code:';
 
-export type RemoteMcpOAuthClient = {
+type RemoteMcpOAuthClient = {
   clientId: string;
   clientName?: string;
   redirectUris: string[];
 };
 
-export type RemoteMcpAuthorizationCode = {
+type RemoteMcpAuthorizationCode = {
   userId: string;
   clientId: string;
   redirectUri: string;

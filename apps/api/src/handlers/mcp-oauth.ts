@@ -5,7 +5,7 @@ import { Env } from '@roomote/env';
 
 import type { Variables } from '../types';
 
-export const ROOMOTE_MCP_PROTECTED_RESOURCE_METADATA_PATH =
+const ROOMOTE_MCP_PROTECTED_RESOURCE_METADATA_PATH =
   '/.well-known/oauth-protected-resource/api/mcp-routing/roomote';
 
 export const mcpOAuthMetadata = new Hono<{ Variables: Variables }>();
