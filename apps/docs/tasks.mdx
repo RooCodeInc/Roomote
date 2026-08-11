@@ -105,6 +105,23 @@ Good follow-ups are specific:
 - Start a new task when the work is a separate objective, should use a
   different environment, or would make the current task thread too broad.
 
+## Change the workspace for an active task
+
+For an active standard task started from the web, open the task's **More
+actions** menu and choose **Change workspace**. Select another verified
+environment. Roomote keeps the same task and conversation, but starts a fresh
+runtime and agent session in the selected environment.
+
+Before shutting down the current runtime, Roomote checks every Git repository
+in its workspace. The switch is blocked if a worktree has local changes, if a
+branch has commits that have not been pushed, or if a branch has no upstream.
+Commit and push the work, then try the switch again. This gate prevents the old
+sandbox from being destroyed while it contains the only copy of a change.
+
+Environment configuration is pinned when you request the switch. Later edits
+to that environment apply to later tasks and switches, not to the successor run
+already being created.
+
 ## Before you merge or ship
 
 Before you merge changes, review the diff and the verification Roomote ran.

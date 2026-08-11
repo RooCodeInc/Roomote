@@ -228,9 +228,14 @@ export const dequeueResumeTaskRun = async (
         return { error: true, taskRun, bootstrapFailureEvent };
       }
 
-      // Resume runs share their task with the run they resume, so the
-      // harness session lives on the run's own task row.
-      const harnessSessionId = taskRun.task.harnessSessionId ?? null;
+      const sourceRun = await tx.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, sourceRunId),
+        columns: { harnessSessionId: true },
+      });
+      // New runs own their session identity. Fall back to the task mirror for
+      // runs created before attempt-scoped sessions existed (N-1 rollout).
+      const harnessSessionId =
+        sourceRun?.harnessSessionId ?? taskRun.task.harnessSessionId ?? null;
       const canResumeWithoutHarnessSession =
         isStandbyResumeCapableComputeProvider(taskRun.vendor);
 

@@ -96,12 +96,16 @@ export async function getNamedPortsForTaskRun(
   let environmentConfig: EnvironmentConfig | undefined;
 
   if (taskRun.payload.environmentId) {
+    const pinnedWorkspace = taskRun.resolvedWorkspaceSpec;
     const environment = await db.query.environments.findFirst({
       where: eq(environments.id, taskRun.payload.environmentId),
     });
 
     if (environment) {
-      environmentConfig = environment.config;
+      environmentConfig =
+        pinnedWorkspace?.environmentId === environment.id
+          ? pinnedWorkspace.config
+          : environment.config;
       const previewRuntimeReady = await isPreviewRuntimeReady();
 
       namedPorts = getNamedPortsForEnvironment({

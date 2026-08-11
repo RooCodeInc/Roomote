@@ -77,6 +77,12 @@ Add enough context for Roomote to start productively:
 Environment changes apply to new tasks. Running tasks keep the workspace they
 already started with.
 
+An environment is a versioned run template, not a permanent identity for a
+task. An active standard web task can move to another verified environment
+with **More actions > Change workspace**. Roomote pins the selected template,
+checks that current Git work is safely pushed, and continues the same task in
+a fresh runtime rather than mutating the existing sandbox.
+
 ## Edit an environment
 
 When you edit an existing environment, Roomote gives you three views of the

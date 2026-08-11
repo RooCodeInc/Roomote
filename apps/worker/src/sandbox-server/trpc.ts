@@ -53,6 +53,9 @@ export interface Context {
     runtimeEnv: Record<string, string | undefined>;
   };
 
+  /** In-memory delivery fence held between Git inspection and terminal stop. */
+  workspaceTransitionRequested?: boolean;
+
   /**
    * Refresh actor-scoped integrations before delivering the next turn.
    * Returns `false` when the turn must not be delivered (default `block`

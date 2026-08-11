@@ -184,7 +184,11 @@ export const createTaskRunGitHubToken = async (
       );
     }
 
-    const environmentRepositories = environment.config.repositories.map(
+    const effectiveConfig =
+      taskRun.resolvedWorkspaceSpec?.environmentId === environment.id
+        ? taskRun.resolvedWorkspaceSpec.config
+        : environment.config;
+    const environmentRepositories = effectiveConfig.repositories.map(
       (repository) => repository.repository,
     );
 

@@ -784,11 +784,13 @@ async function resolveBitbucketRepositoryNamesForTaskRun(
       );
     }
 
+    const effectiveConfig =
+      taskRun.resolvedWorkspaceSpec?.environmentId === environment.id
+        ? taskRun.resolvedWorkspaceSpec.config
+        : environment.config;
     return filterForBitbucket(
       normalizeRepositorySelection(
-        environment.config.repositories.map(
-          (repository) => repository.repository,
-        ),
+        effectiveConfig.repositories.map((repository) => repository.repository),
       ),
     );
   }

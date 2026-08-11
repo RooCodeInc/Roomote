@@ -93,6 +93,13 @@ const sendPromptInputSchema = z
 export const sendPrompt = publicProcedure
   .input(sendPromptInputSchema)
   .mutation(async ({ input, ctx }) => {
+    if (ctx.workspaceTransitionRequested) {
+      throw new TRPCError({
+        code: 'PRECONDITION_FAILED',
+        message:
+          'This task is changing workspaces; the prompt was not delivered.',
+      });
+    }
     const userId =
       // Deployment-principal run tokens have a null userId; treat them as no
       // acting user rather than fabricating one.
