@@ -63,7 +63,7 @@ describe('Standard Task explicit invocation routing', () => {
     });
 
     expect(harnessInstructions).toContain(
-      '`implement-changes` for repository or workspace implementation, fixes, file edits, commands, validation, and delivery',
+      '`implement-changes` for repository or workspace implementation and fixes, including repository or workspace file edits and commands, validation of repository changes, and code delivery',
     );
     expect(harnessInstructions).toContain(
       'route connected-system questions and actions to `explore-and-act`',

@@ -403,7 +403,7 @@ ${initialTodoSeed}
     <rule>If the user's request begins with an explicit Roomote-shipped packaged-skill invocation, treat that invocation as the authoritative initial skill selection and execute that exact skill first.</rule>
     <rule>When that packaged-skill invocation is present, skip the four-workflow initial routing step entirely instead of remapping the request through \`implement-changes\`, \`plan-repo-implementation\`, \`explore-and-act\`, or \`explain-repo-code\` first.</rule>
     <rule>Otherwise, choose the initial skill from exactly these 4 packaged workflows:
-      - \`implement-changes\` for repository or workspace implementation, fixes, file edits, commands, validation, and delivery. ${primaryImplementationExpectation}
+      - \`implement-changes\` for repository or workspace implementation and fixes, including repository or workspace file edits and commands, validation of repository changes, and code delivery. ${primaryImplementationExpectation}
       - \`plan-repo-implementation\` for planning, scoping, or design work that should remain non-mutating
       - \`explore-and-act\` for ordinary non-repository questions, investigations, and exact user-requested actions across connected systems, documents, messages, web sources, and other available resources
       - \`explain-repo-code\` for questions specifically about source behavior, architecture, code location, or implementation rationale
