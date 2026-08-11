@@ -56,6 +56,7 @@ import {
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
 import { withSandboxServerRpcClient } from '../auth/sandbox-server-rpc';
 import { extractShowWidgetFallbackDelivery } from './show-widget-fallback-delivery';
+import { maybeNotifySourceThreadOfTerminalProviderError } from './notify-source-thread-provider-error';
 import { syncTaskCommunicationThreadTitleBestEffort } from '../task-thread-title-sync';
 
 interface RecordTaskMessageEnvelopeInput {
@@ -896,6 +897,17 @@ export async function recordTaskMessageEnvelope(
   });
 
   void maybeHandleRequestedDeploymentEnvVars(input);
+
+  // A terminal provider error ends the model turn without ending the task, so
+  // the run settles idle and never reaches the terminal-failure notifications in
+  // `finishRun` -- and the agent cannot report it either because its own turn is
+  // already dead. Report it from the message itself so the originating chat
+  // thread is told regardless of what the task does next.
+  void maybeNotifySourceThreadOfTerminalProviderError({
+    runId,
+    taskId,
+    envelope,
+  });
 
   const detectedPrs = await detectPullRequestsFromToolResultEnvelope({
     envelope,

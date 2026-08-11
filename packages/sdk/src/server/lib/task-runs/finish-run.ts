@@ -17,7 +17,6 @@ import {
   TASK_STARTUP_FAILURE_TEXT,
 } from '@roomote/communication/chat-messages';
 import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
-import { redactSecrets } from '@roomote/communication/redact-secrets';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../telegram-communication';
 import {
@@ -75,6 +74,10 @@ import {
 } from '@roomote/slack';
 import { LinearClient } from '@roomote/linear';
 import { ensureSnapshotResumeGitHubFollowUpFallback } from './ensure-snapshot-resume-github-follow-up-fallback';
+import {
+  escapeSlackMrkdwnText,
+  formatChannelProviderError,
+} from './channel-provider-error-text';
 import { findLinearDeploymentMcpConnection } from '../mcp/linear-connections';
 import { getValidAccessToken } from '../mcp/data';
 import {
@@ -85,11 +88,6 @@ import { buildManagerSlackSettingsUrl } from '../manager-slack';
 
 const DEFAULT_LOCAL_R_APP_URL = 'http://localhost:13000';
 const DEFAULT_DEPLOYMENT_ID = 'default';
-const CHANNEL_PROVIDER_ERROR_MAX_CHARS = 300;
-const CHANNEL_PROVIDER_ERROR_PATTERN =
-  /^The provider returned an error(?: \([A-Za-z][A-Za-z0-9_-]*\))?: .+$/;
-const UNSAFE_CHANNEL_ERROR_PATTERN =
-  /\r|\n|https?:\/\/|\b(?:api[_ -]?key|token|authorization|password|secret)\s*(?:=|:)\s*\S+|\bBearer\s+\S+|\b(?:stack|traceback)\b/i;
 
 /**
  * TaskRun + its owning task, as loaded by the terminal path. Side-effect helpers
@@ -624,28 +622,6 @@ function hasReachedTaskRuntime(run: TaskRun): boolean {
     run.runtimeTaskStartedAt != null ||
     run.firstAssistantOutputAt != null
   );
-}
-
-function formatChannelProviderError(error?: string): string | undefined {
-  const message = error?.trim();
-
-  if (
-    !message ||
-    message.length > CHANNEL_PROVIDER_ERROR_MAX_CHARS ||
-    !CHANNEL_PROVIDER_ERROR_PATTERN.test(message) ||
-    UNSAFE_CHANNEL_ERROR_PATTERN.test(message)
-  ) {
-    return undefined;
-  }
-
-  return redactSecrets(message);
-}
-
-function escapeSlackMrkdwnText(text: string): string {
-  return text
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
 }
 
 /**
