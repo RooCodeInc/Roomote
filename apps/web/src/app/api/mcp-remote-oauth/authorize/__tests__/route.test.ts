@@ -114,6 +114,7 @@ describe('GET /api/mcp-remote-oauth/authorize', () => {
     );
     const location = new URL(response.headers.get('location')!);
 
+    expect(response.status).toBe(303);
     expect(location.toString()).toBe(
       'https://client.example/callback?code=authorization-code&state=client-state',
     );

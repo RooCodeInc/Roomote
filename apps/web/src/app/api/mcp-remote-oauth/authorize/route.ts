@@ -181,7 +181,7 @@ async function handleAuthorize(request: NextRequest, approved: boolean) {
   const redirect = new URL(input.redirect_uri);
   redirect.searchParams.set('code', code);
   redirect.searchParams.set('state', input.state);
-  return NextResponse.redirect(redirect);
+  return NextResponse.redirect(redirect, 303);
 }
 
 export function GET(request: NextRequest) {
