@@ -131,35 +131,13 @@ describe('roomote MCP tool descriptions', () => {
     vi.unstubAllGlobals();
   });
 
-  it('registers structured environment diagnostics as read-only', async () => {
+  it('uses existing task management instead of Doctor-specific MCP tools', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
-    const tool = getRegisteredTool(registeredTools, 'diagnose_environment');
+    const toolNames = registeredTools.map(({ name }) => name);
 
-    expect(tool.config.description).toBe(
-      'Collect a secret-safe EnvironmentObservation using only probes applicable to the capabilities declared by the current Roomote environment and setup state. An omitted probe is not evidence of health. This read-only evidence is not a Doctor assessment, repair authorization, or verification result.',
-    );
-    expect(tool.config.annotations).toEqual({
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
-    });
-  });
-
-  it('validates final Doctor reports without persisting verification', async () => {
-    const { registeredTools } = await importRoomoteMcpServer();
-    const tool = getRegisteredTool(registeredTools, 'complete_doctor_report');
-
-    expect(tool.config.description).toContain(
-      'This does not persist environment verification or mutate the environment.',
-    );
-    expect(tool.config.annotations).toEqual({
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    });
-    await expect(tool.handler?.({ outcome: 'healthy' })).rejects.toThrow();
+    expect(toolNames).toContain('manage_tasks');
+    expect(toolNames).not.toContain('diagnose_environment');
+    expect(toolNames).not.toContain('complete_doctor_report');
   });
 
   it('documents every built-in custom automation schedule preset', async () => {

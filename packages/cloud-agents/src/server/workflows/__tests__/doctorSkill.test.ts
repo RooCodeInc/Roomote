@@ -11,50 +11,103 @@ function readSkillContent() {
 }
 
 describe('doctor guidance', () => {
-  it('separates observation, assessment, repair, verification, and reporting', () => {
+  it('uses a fresh Roomote task as the end-to-end health check', () => {
     const skillContent = readSkillContent();
 
     expect(skillContent).toContain(
-      'The `diagnose_environment` tool only produces a secret-safe `EnvironmentObservation`',
+      "Use Roomote's existing task runtime as the end-to-end health check",
     );
     expect(skillContent).toContain(
-      'It is not a Doctor assessment, verification result, or repair authorization.',
+      'call `mcp__roomote__manage_tasks` with `action: "list_environments"`',
     );
     expect(skillContent).toContain(
-      'An omitted adapter is not a passing check and is not evidence that the corresponding technology or capability exists.',
+      'Call `mcp__roomote__manage_tasks` with `action: "launch"`, that `environmentId`, and `notifyOnSettle: true`.',
+    );
+    expect(skillContent).toContain(
+      'call `mcp__roomote__manage_tasks` with `action: "get_summary"` every 10-15 seconds',
+    );
+    expect(skillContent).toContain(
+      'call `mcp__roomote__manage_tasks` with `action: "get_messages"`',
+    );
+    expect(skillContent).toContain(
+      'Do not replace that end-to-end evidence with a parallel collection of technology-specific probes.',
+    );
+    expect(skillContent).not.toContain('diagnose_environment');
+    expect(skillContent).not.toContain('complete_doctor_report');
+  });
+
+  it('prevents recursive or mutating verification tasks', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      'Its prompt must not invoke Doctor or another packaged skill, delegate another task, repair anything, update the environment, edit repository files, create commits, or open a pull request.',
     );
     expect(skillContent).toContain('Doctor is read-only by default.');
     expect(skillContent).toContain(
-      'After an authorized repair completes, wait for setup to settle again and run `diagnose_environment` once more.',
+      'If the user explicitly requested repair and ownership is `environment_configuration`, transition to the packaged `environment-setup` workflow',
     );
     expect(skillContent).toContain(
-      'Always run a goal-specific independent check before declaring the environment healthy',
-    );
-    expect(skillContent).toContain(
-      'Treat `setup.repository_changes` as a provenance boundary',
-    );
-    expect(skillContent).toContain(
-      'without making the outcome unresolved solely because of that warning',
-    );
-    expect(skillContent).toContain(
-      'call `complete_doctor_report` with that full report as the final workflow action',
+      'If the user explicitly requested repair and ownership is `repository`, transition to `implement-changes`',
     );
   });
 
-  it('derives extensible goals and distinguishes failure ownership', () => {
+  it('derives generic goals without assuming a workload technology', () => {
     const skillContent = readSkillContent();
 
-    for (const goal of [
-      'command_execution',
-      'background_job_processing',
-      'preview_reachability',
-      'test_execution',
-      'artifact_build',
-      'migration_execution',
-      'performance',
-    ]) {
-      expect(skillContent).toContain(`\`${goal}\``);
-    }
+    expect(skillContent).toContain('There is no universal Doctor checklist.');
+    expect(skillContent).toContain(
+      'Do not invent a startup, service, preview, browser, port, test, build, migration, performance, clean-tree, container, process-supervisor, or database requirement.',
+    );
+    expect(skillContent).toContain(
+      'These are examples, not a closed taxonomy.',
+    );
+    expect(skillContent).toContain(
+      'The launched task must not assume the repository is a web app.',
+    );
+    expect(skillContent).toContain(
+      "discover the repository's intended developer entrypoint and prove that it starts and performs its basic documented function",
+    );
+    expect(skillContent).toContain(
+      'If the repository has no runnable application, it must say so and verify the nearest evidence-backed workflow instead of inventing an app or server.',
+    );
+    expect(skillContent).toContain(
+      'command exit and output, produced artifacts, a completed job and observable effect, migration result, protocol behavior, test result, measured operation, or a completed browser interaction',
+    );
+  });
+
+  it('requires a real result rather than inferring success from task completion', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      'A completed task state is not proof that the goal passed',
+    );
+    expect(skillContent).toContain(
+      'report `ready`, `not_ready`, or `blocked` with the exact attempted steps and secret-safe evidence',
+    );
+    expect(skillContent).toContain(
+      'Do not claim `healthy` or `repaired` unless the latest fresh task explicitly completed the requested journey',
+    );
+  });
+
+  it('keeps browser verification layered and conditional', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      'Only when the requested goal includes a Roomote browser preview',
+    );
+    expect(skillContent).toContain(
+      'the authenticated external `ROOMOTE_<NAME>_PREVIEW_URL` with the installed `agent-browser` wrapper',
+    );
+    expect(skillContent).toContain(
+      'inspect page errors, console errors, and failed or blocked journey-critical network requests',
+    );
+    expect(skillContent).toContain(
+      'document HTTP 2xx/3xx alone is insufficient',
+    );
+  });
+
+  it('classifies ownership by the durable correction boundary', () => {
+    const skillContent = readSkillContent();
 
     for (const owner of [
       'environment_configuration',
@@ -65,87 +118,26 @@ describe('doctor guidance', () => {
     ]) {
       expect(skillContent).toContain(`\`${owner}\``);
     }
-  });
-
-  it('does not assume a web or infrastructure stack', () => {
-    const skillContent = readSkillContent();
 
     expect(skillContent).toContain(
-      'Do not assume the workload is a web application or that it uses HTTP, a browser, a listening port, a long-running process, PM2, Docker, a database, a build step, or a test suite.',
-    );
-    expect(skillContent).toContain('Goals are not a universal checklist.');
-    expect(skillContent).toContain(
-      'These are conditional examples, not required stages.',
+      'Never classify ownership from a symptom or technology name alone.',
     );
     expect(skillContent).toContain(
-      'Do not require any particular supervisor, container runtime, network protocol, or user interface unless applicable evidence establishes it.',
-    );
-    expect(skillContent).toContain(
-      'process presence does not prove readiness, an open TCP port does not prove protocol correctness, HTTP success does not prove the requested behavior',
-    );
-  });
-
-  it('routes mutations through existing authorized workflows', () => {
-    const skillContent = readSkillContent();
-
-    expect(skillContent).toContain(
-      'transition to the packaged `environment-setup` workflow',
-    );
-    expect(skillContent).toContain('transition to `implement-changes`');
-    expect(skillContent).toContain(
-      'never patch customer source as an unreviewed Doctor side effect',
-    );
-    expect(skillContent).toContain(
-      'set the outcome to `platform_issue` and report the failing boundary with sanitized evidence',
-    );
-    expect(skillContent).toContain(
-      '`DoctorReport` is not persisted environment verification.',
-    );
-    expect(skillContent).toContain(
-      'A raw unauthenticated curl failure is not valid preview verification.',
-    );
-    expect(skillContent).toContain(
-      'do not claim an external issue was filed, opened, or created',
-    );
-  });
-
-  it('requires end-to-end preview verification beyond document status', () => {
-    const skillContent = readSkillContent();
-
-    expect(skillContent).toContain(
-      'verification is an end-to-end browser journey, not a document-status check.',
-    );
-    expect(skillContent).toContain(
-      'inspect browser console errors, uncaught page errors, and failed or blocked network requests',
-    );
-    expect(skillContent).toContain(
-      'a successful navigation or HTTP 2xx/3xx response is insufficient',
-    );
-    expect(skillContent).toContain(
-      'journey-critical stylesheets, scripts, fonts, fetch/XHR calls, and WebSockets',
-    );
-    expect(skillContent).toContain(
-      'Do not fail an otherwise successful browser journey solely because optional analytics, telemetry, favicon, development-only HMR, or another non-critical request failed.',
-    );
-    expect(skillContent).toContain(
-      'never include cookies, authorization or bypass headers, request or response bodies, or URL query values in the report',
-    );
-    expect(skillContent).toContain(
-      'instead of treating successful document navigation as sufficient; otherwise Doctor did not require a preview',
-    );
-  });
-
-  it('keeps host and origin repairs narrow and evidence-based', () => {
-    const skillContent = readSkillContent();
-
-    expect(skillContent).toContain(
-      'The same timeout, connection refusal, authentication failure, CORS error, or host rejection can have different owners.',
-    );
-    expect(skillContent).toContain(
-      'For CORS or allowed-host failures, identify the expected origin or host, reproduce through the actual route, and locate the rejecting boundary.',
+      'For CORS or allowed-host failures, identify the expected origin or host, reproduce it through the actual route, and locate the rejecting boundary.',
     );
     expect(skillContent).toContain(
       'Never repair an origin or host-policy failure with a wildcard, disabled host checking, reflective origin behavior, or broadly permissive CORS.',
+    );
+  });
+
+  it('requires fresh verification after repair', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      'After an authorized repair, require another task launched against the newly persisted environment and repeat the original goal.',
+    );
+    expect(skillContent).toContain(
+      "Never use the pre-repair task, the repair workflow's successful return, or the current sandbox as proof.",
     );
   });
 });

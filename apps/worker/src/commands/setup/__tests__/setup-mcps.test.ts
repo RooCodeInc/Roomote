@@ -936,7 +936,6 @@ describe('resolveBuiltInMcpServers', () => {
       ROOMOTE_CLOUD_TOKEN: 'test-cloud-token',
       R_APP_URL: 'https://api.test.com',
       ROOMOTE_WORKSPACE_PATH: '/workspace',
-      ROOMOTE_DOCTOR_ENVIRONMENT_CONTEXT: '{"ports":[]}',
       ROOMOTE_TASK_ID: 'task-123',
       ROOMOTE_AUTH_BYPASS_HEADER_NAME: 'x-bypass-roomote-auth',
       ROOMOTE_AUTH_BYPASS_VALUE: 'bypass-token',
@@ -961,7 +960,6 @@ describe('resolveBuiltInMcpServers', () => {
     expect(roomoteEnv.ROOMOTE_CLOUD_TOKEN).toBe('test-cloud-token');
     expect(roomoteEnv.R_APP_URL).toBe('https://api.test.com');
     expect(roomoteEnv.ROOMOTE_WORKSPACE_PATH).toBe('/workspace');
-    expect(roomoteEnv.ROOMOTE_DOCTOR_ENVIRONMENT_CONTEXT).toBe('{"ports":[]}');
     expect(roomoteEnv.ROOMOTE_TASK_ID).toBe('task-123');
     expect(roomoteEnv.ROOMOTE_AUTH_BYPASS_HEADER_NAME).toBe(
       'x-bypass-roomote-auth',

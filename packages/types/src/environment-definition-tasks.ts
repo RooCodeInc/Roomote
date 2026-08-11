@@ -98,11 +98,11 @@ export function buildEnvironmentVerificationPrompt(input: {
   environmentId: string;
   environmentName: string;
 }): string {
-  return `$doctor
+  return `Verify whether the persisted ${PRODUCT_NAME} environment "${input.environmentName}" (id ${input.environmentId}) is ready. This task is the current authorized environment-verification attempt.
 
-Assess whether the persisted ${PRODUCT_NAME} environment "${input.environmentName}" (id ${input.environmentId}) is ready. This task is the current authorized environment-verification attempt.
+This is a read-only verification task. Do not invoke Doctor or another packaged skill, launch another task, repair or update the environment, edit repository files, create commits, or open a pull request.
 
-Follow the Doctor workflow: wait for setup to settle, collect the baseline EnvironmentObservation, assess readiness, do not attempt repairs, and produce a DoctorReport. Use localhost or the environment's initial URL to confirm the expected service responds successfully. Preparing the environment can take 5 minutes or more, so do not decide startup is stuck while setup is still running.
+When .roomote/setup-status.json exists, wait for it to reach a terminal state before deciding readiness; preparing the environment can take 5 minutes or more. Determine the intended developer workflow from the repository's own instructions and the available environment. Verify that workflow directly and report the exact attempted steps plus relevant secret-safe errors. Do not assume that a service, port, HTTP endpoint, browser preview, test suite, container, or long-running process exists. Report success only when the applicable workflow actually completes.
 
 When you have a clear outcome, record it by calling the ${PRODUCT_NAME} MCP tool \`manage_environments\` with \`action: "record_verification"\`, \`environmentId: "${input.environmentId}"\`, and \`success: true\` when the environment looks ready or \`success: false\` with a short, user-safe \`error\` describing what failed. Do not include secrets or the full environment YAML in the error text.`;
 }

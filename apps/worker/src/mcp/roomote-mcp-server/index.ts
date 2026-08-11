@@ -13,8 +13,6 @@ import {
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
-  doctorReportObjectSchema,
-  doctorReportSchema,
   PRODUCT_NAME,
   sourceControlProviderSchema,
   taskArtifactTypeSchema,
@@ -40,7 +38,6 @@ import { handleGetTaskComputeLogs } from './task-compute-logs.js';
 import { handleCancelTask } from './cancel-task.js';
 import { handleSendMessage } from './send-message.js';
 import { handleListEnvironments } from './list-environments.js';
-import { handleDiagnoseEnvironment } from './diagnose-environment.js';
 import {
   handleCreateEnvironment,
   handleRecordVerification,
@@ -81,51 +78,6 @@ export const roomoteMcpServer = new McpServer({
   name: 'roomote-mcp-server',
   version: '1.0.0',
 });
-
-roomoteMcpServer.registerTool(
-  'diagnose_environment',
-  {
-    title: 'Diagnose Environment',
-    description:
-      'Collect a secret-safe EnvironmentObservation using only probes applicable to the capabilities declared by the current Roomote environment and setup state. An omitted probe is not evidence of health. This read-only evidence is not a Doctor assessment, repair authorization, or verification result.',
-    inputSchema: {},
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: true,
-    },
-  },
-  async (): Promise<ToolResult> => handleDiagnoseEnvironment(),
-);
-
-roomoteMcpServer.registerTool(
-  'complete_doctor_report',
-  {
-    title: 'Complete Doctor Report',
-    description:
-      'Validate and return the final DoctorReport after assessment, any authorized repair, and independent verification. This does not persist environment verification or mutate the environment.',
-    inputSchema: doctorReportObjectSchema.shape,
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-  },
-  async (input): Promise<ToolResult> => {
-    const report = doctorReportSchema.parse(input);
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `Doctor report completed with outcome: ${report.outcome}`,
-        },
-      ],
-      structuredContent: report,
-    };
-  },
-);
 
 let hasSubmittedAutomationSlackSummary = false;
 const manageArtifactsUploadTypeSchema = z.enum(['general', 'visual-proof']);

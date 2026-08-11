@@ -267,23 +267,15 @@ describe('environment-setup guidance', () => {
     expect(skillContent).toContain(
       'Then call the Roomote MCP tool `mcp__roomote__manage_tasks` with `action: "launch"`, `environmentId` set to that created or updated environment ID, `notifyOnSettle` set to `true`',
     );
+    expect(skillContent).toContain('a concrete read-only verification prompt');
     expect(skillContent).toContain(
-      'a concrete prompt beginning with the explicit packaged-skill invocation `$doctor`',
+      'It must not invoke Doctor or another packaged skill, launch another task, repair the environment, edit repository files',
     );
     expect(skillContent).toContain(
-      '$doctor Assess whether this persisted environment is ready.',
-    );
-    expect(skillContent).toContain(
-      'collect the baseline EnvironmentObservation, do not attempt repairs, and return a DoctorReport',
-    );
-    expect(skillContent).toContain(
-      'This makes Doctor, not the diagnostic tool, responsible for assessment.',
-    );
-    expect(skillContent).toContain(
-      'do not run `diagnose_environment` before persistence because it cannot inspect the drafted definition.',
+      'or assume that a service, port, HTTP endpoint, browser preview, test suite, container, or long-running process exists.',
     );
     expect(
-      skillContent.indexOf('$doctor Assess whether this persisted environment'),
+      skillContent.indexOf('a concrete read-only verification prompt'),
     ).toBeGreaterThan(
       skillContent.indexOf('After environment persistence succeeds'),
     );
