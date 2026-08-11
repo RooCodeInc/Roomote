@@ -371,6 +371,7 @@ export async function updatePrReviewDelivery(input: {
   chatMessageId?: string | null;
   actionNonce?: string | null;
   previousActionNonce?: string | null;
+  previousActionRetiredAt?: Date | null;
   actionHandledAt?: Date | null;
   taskMessageId?: string | null;
 }): Promise<void> {
@@ -415,6 +416,9 @@ export async function updatePrReviewDelivery(input: {
       ...(input.previousActionNonce !== undefined
         ? { previousActionNonce: input.previousActionNonce }
         : {}),
+      ...(input.previousActionRetiredAt !== undefined
+        ? { previousActionRetiredAt: input.previousActionRetiredAt }
+        : {}),
       ...(input.actionHandledAt !== undefined
         ? { actionHandledAt: input.actionHandledAt }
         : {}),
@@ -457,12 +461,20 @@ export async function claimDurablePrReviewAction(nonce: string): Promise<
         eq(prReviewNotificationDeliveries.previousActionNonce, nonce),
       ),
     ),
-    columns: { actionHandledAt: true },
+    columns: {
+      actionNonce: true,
+      previousActionNonce: true,
+      previousActionRetiredAt: true,
+      actionHandledAt: true,
+    },
   });
   if (!existing) {
     return null;
   }
-  if (existing.actionHandledAt) {
+  if (
+    existing.actionHandledAt ||
+    (existing.previousActionNonce === nonce && existing.previousActionRetiredAt)
+  ) {
     return { outcome: 'already_handled' };
   }
   const [claimed] = await db
@@ -473,7 +485,10 @@ export async function claimDurablePrReviewAction(nonce: string): Promise<
         eq(prReviewNotificationDeliveries.destination, 'chat'),
         or(
           eq(prReviewNotificationDeliveries.actionNonce, nonce),
-          eq(prReviewNotificationDeliveries.previousActionNonce, nonce),
+          and(
+            eq(prReviewNotificationDeliveries.previousActionNonce, nonce),
+            sql`${prReviewNotificationDeliveries.previousActionRetiredAt} is null`,
+          ),
         ),
         sql`${prReviewNotificationDeliveries.actionHandledAt} is null`,
       ),

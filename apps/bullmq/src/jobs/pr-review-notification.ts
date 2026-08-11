@@ -298,6 +298,7 @@ async function updatePostedPrReviewNotification(input: {
         input.previousActionNonce && input.previousActionNonce !== nonce
           ? input.previousActionNonce
           : null,
+      previousActionRetiredAt: null,
       actionHandledAt: null,
     });
   }
@@ -362,6 +363,7 @@ async function updatePostedPrReviewNotification(input: {
         state: 'sending',
         actionNonce: input.previousActionNonce ?? null,
         previousActionNonce: null,
+        previousActionRetiredAt: null,
         actionHandledAt: null,
       });
     }
@@ -377,7 +379,8 @@ async function updatePostedPrReviewNotification(input: {
       destination: 'chat',
       state: 'sending',
       actionNonce: nonce,
-      previousActionNonce: null,
+      previousActionNonce: input.previousActionNonce ?? null,
+      previousActionRetiredAt: input.previousActionNonce ? new Date() : null,
       actionHandledAt: null,
     });
   }

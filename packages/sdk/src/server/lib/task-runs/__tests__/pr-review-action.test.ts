@@ -47,6 +47,22 @@ describe('PR review action state', () => {
     });
   });
 
+  it('rejects a retired durable nonce even when stale Redis state remains', async () => {
+    mockClaimDurable.mockResolvedValue({ outcome: 'already_handled' });
+    mockEval.mockResolvedValue(
+      JSON.stringify({
+        nonce: 'retired-nonce',
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+      }),
+    );
+
+    await expect(
+      claimPendingPrReviewAction('retired-nonce'),
+    ).resolves.toBeNull();
+  });
+
   it('removes a superseded nonce from Redis and its thread index', async () => {
     mockEval.mockResolvedValue(
       JSON.stringify({

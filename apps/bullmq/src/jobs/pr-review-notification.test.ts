@@ -468,6 +468,7 @@ describe('prReviewNotificationJob', () => {
       state: 'sending',
       actionNonce: 'previous-nonce',
       previousActionNonce: null,
+      previousActionRetiredAt: null,
       actionHandledAt: null,
     });
     expect(mockUpdateDelivery).toHaveBeenCalledWith(
@@ -496,7 +497,8 @@ describe('prReviewNotificationJob', () => {
         destination: 'chat',
         state: 'sending',
         actionNonce: expect.any(String),
-        previousActionNonce: null,
+        previousActionNonce: 'previous-nonce',
+        previousActionRetiredAt: expect.any(Date),
         actionHandledAt: null,
       }),
     );

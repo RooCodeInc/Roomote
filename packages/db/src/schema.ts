@@ -1538,6 +1538,7 @@ export const prReviewNotificationDeliveries = pgTable(
     chatMessageId: text('chat_message_id'),
     actionNonce: text('action_nonce'),
     previousActionNonce: text('previous_action_nonce'),
+    previousActionRetiredAt: timestamp('previous_action_retired_at'),
     actionHandledAt: timestamp('action_handled_at'),
     taskMessageId: uuid('task_message_id').references(() => taskMessages.id, {
       onDelete: 'set null',

@@ -93,6 +93,25 @@ describe('durable PR review notification state', () => {
       'claimed',
     ]);
 
+    await db
+      .update(prReviewNotificationDeliveries)
+      .set({
+        actionHandledAt: null,
+        previousActionRetiredAt: new Date(),
+      })
+      .where(
+        and(
+          eq(prReviewNotificationDeliveries.aggregateId, aggregate!.id),
+          eq(prReviewNotificationDeliveries.destination, 'chat'),
+        ),
+      );
+    await expect(
+      claimDurablePrReviewAction('previous-durable-nonce'),
+    ).resolves.toEqual({ outcome: 'already_handled' });
+    await expect(claimDurablePrReviewAction('durable-nonce')).resolves.toEqual(
+      expect.objectContaining({ outcome: 'claimed' }),
+    );
+
     const now = new Date();
     await db
       .update(prReviewNotificationDeliveries)
