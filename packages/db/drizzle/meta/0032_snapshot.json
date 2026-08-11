@@ -1,5 +1,5 @@
 {
-  "id": "47a1311b-3c32-46a6-9fe4-2d1fcc2a0c40",
+  "id": "eef25c4c-2868-4a93-a430-e854fbaff27e",
   "prevId": "68ea01c5-2d2e-4389-b61a-d6dce5d50825",
   "version": "7",
   "dialect": "postgresql",
@@ -8690,6 +8690,13 @@
         },
         "goal_continuation_ids": {
           "name": "goal_continuation_ids",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::text[]"
+        },
+        "goal_generation_ids": {
+          "name": "goal_generation_ids",
           "type": "text[]",
           "primaryKey": false,
           "notNull": true,

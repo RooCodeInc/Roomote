@@ -6,6 +6,7 @@ ALTER TABLE "tasks" ADD COLUMN "goal_blocked_reason" text;--> statement-breakpoi
 ALTER TABLE "tasks" ADD COLUMN "goal_completed_at" timestamp;--> statement-breakpoint
 ALTER TABLE "tasks" ADD COLUMN "goal_last_continuation_id" text;--> statement-breakpoint
 ALTER TABLE "tasks" ADD COLUMN "goal_continuation_ids" text[] DEFAULT '{}'::text[] NOT NULL;--> statement-breakpoint
+ALTER TABLE "tasks" ADD COLUMN "goal_generation_ids" text[] DEFAULT '{}'::text[] NOT NULL;--> statement-breakpoint
 ALTER TABLE "tasks" ADD COLUMN "goal_blocker_candidate_reason" text;--> statement-breakpoint
 ALTER TABLE "tasks" ADD COLUMN "goal_blocker_candidate_count" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
 ALTER TABLE "tasks" ADD COLUMN "goal_blocker_last_continuation_used" integer;--> statement-breakpoint
