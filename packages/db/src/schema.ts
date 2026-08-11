@@ -1442,7 +1442,7 @@ export const prReviewEvents = pgTable(
     ),
     check(
       'pr_review_events_kind_check',
-      sql`${table.kind} in ('review', 'review_comment', 'review_summary')`,
+      sql`${table.kind} in ('issue_comment', 'review', 'review_comment', 'review_summary')`,
     ),
   ],
 );

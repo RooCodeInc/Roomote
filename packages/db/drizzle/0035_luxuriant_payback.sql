@@ -1,0 +1,2 @@
+ALTER TABLE "pr_review_events" DROP CONSTRAINT "pr_review_events_kind_check";--> statement-breakpoint
+ALTER TABLE "pr_review_events" ADD CONSTRAINT "pr_review_events_kind_check" CHECK ("pr_review_events"."kind" in ('issue_comment', 'review', 'review_comment', 'review_summary'));

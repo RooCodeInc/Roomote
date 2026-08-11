@@ -7,6 +7,7 @@ import {
   listPrReviewAggregateIdsNeedingDelivery,
   persistPrReviewEventAndFanOut,
   prReviewAggregates,
+  prReviewEvents,
   prReviewNotificationDeliveries,
   releasePrReviewFixClaim,
   replayRecentPrReviewEventsForAssociation,
@@ -149,6 +150,26 @@ describe('durable PR review notification state', () => {
       prNumber: 43,
     });
     expect(aggregateIds).toHaveLength(1);
+  });
+
+  it('persists top-level pull request comments', async () => {
+    await persistPrReviewEventAndFanOut({
+      sourceControlProvider: 'github',
+      eventKey: 'issue-comment:300',
+      repository: 'owner/repo',
+      prNumber: 44,
+      prUrl: 'https://github.com/owner/repo/pull/44',
+      reviewHeadSha: 'ghi789',
+      kind: 'issue_comment',
+      authorLogin: 'reviewer',
+      payload: { kind: 'issue_comment', authorLogin: 'reviewer' },
+    });
+
+    const [event] = await db
+      .select()
+      .from(prReviewEvents)
+      .where(eq(prReviewEvents.eventKey, 'issue-comment:300'));
+    expect(event?.kind).toBe('issue_comment');
   });
 
   it('serializes fix work across every task linked to a PR', async () => {
