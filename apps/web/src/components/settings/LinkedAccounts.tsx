@@ -815,6 +815,7 @@ export function LinkedAccounts() {
     githubInstallations.isPending ||
     gitlabAccount.isPending ||
     giteaAccount.isPending ||
+    bitbucketAccount.isPending ||
     adoAccount.isPending ||
     slackInstallation.isPending ||
     linearInstallation.isPending ||

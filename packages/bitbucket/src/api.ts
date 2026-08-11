@@ -19,6 +19,7 @@ import {
 import {
   getBitbucketOAuthConnection,
   resolveBitbucketOAuthAccessToken,
+  resolveBitbucketOAuthAccessTokenWithMetadata,
 } from './oauth';
 
 export * from './ci';
@@ -311,6 +312,7 @@ export type BitbucketAuthDescriptor = {
   baseUrl: string;
   apiBaseUrl: string;
   authScheme: 'basic' | 'bearer';
+  expiresAt: Date | null;
 };
 
 export async function resolveBitbucketAuth(): Promise<BitbucketAuthDescriptor> {
@@ -320,15 +322,16 @@ export async function resolveBitbucketAuth(): Promise<BitbucketAuthDescriptor> {
       'Bitbucket OAuth authorization requires reconnection. Reconnect the Bitbucket OAuth consumer in source-control settings.',
     );
   }
-  const token = await resolveBitbucketOAuthAccessToken();
+  const token = await resolveBitbucketOAuthAccessTokenWithMetadata();
   if (token && connection) {
     const baseUrl = await resolveBitbucketBaseUrl();
     return {
-      token,
+      token: token.accessToken,
       username: connection.username || 'x-token-auth',
       baseUrl,
       apiBaseUrl: buildBitbucketApiBaseUrl(baseUrl),
       authScheme: 'bearer',
+      expiresAt: token.expiresAt,
     };
   }
   throw new Error(
@@ -466,6 +469,13 @@ export async function resolveAuthIdentity({
       baseUrl: resolvedBaseUrl,
       apiBaseUrl: resolvedApiBaseUrl,
       authScheme,
+      expiresAt:
+        oauthConnection?.accessToken === resolvedToken
+          ? (() => {
+              const parsed = new Date(oauthConnection.expiresAt);
+              return Number.isNaN(parsed.getTime()) ? null : parsed;
+            })()
+          : null,
     };
   }
 
@@ -1290,6 +1300,7 @@ export async function createTaskRunBitbucketCredentials(
   },
 ): Promise<{
   credentials: BitbucketRepositoryCredential[];
+  expiresAt: Date | null;
 }> {
   const auth = await resolveAuthIdentity({
     token: options?.token,
@@ -1310,5 +1321,6 @@ export async function createTaskRunBitbucketCredentials(
       originBaseUrl: auth.baseUrl,
       authScheme: 'basic',
     })),
+    expiresAt: auth.expiresAt,
   };
 }

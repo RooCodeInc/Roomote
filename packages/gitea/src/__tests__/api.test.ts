@@ -563,7 +563,35 @@ describe('Gitea API helpers', () => {
           originBaseUrl: 'https://git.example.com',
         },
       ],
+      expiresAt: null,
     });
+  });
+
+  it('carries the matching OAuth token expiry into task credentials', async () => {
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    mockResolveGiteaOAuthAccessToken.mockResolvedValue('gitea_oauth_token');
+    mockGetGiteaOAuthConnection.mockResolvedValue({
+      baseUrl: 'https://git.example.com',
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      accountId: '42',
+      username: 'roomote-bot',
+      accessToken: 'gitea_oauth_token',
+      refreshToken: 'refresh-token',
+      expiresAt,
+      scopes: ['read:repository'],
+      status: 'active',
+    });
+
+    const result = await createTaskRunGiteaCredentials(
+      makeTaskRun({
+        repo: 'acme/backend',
+        description: 'Resume work on Gitea',
+        sourceControlProvider: 'gitea',
+      }),
+    );
+
+    expect(result.expiresAt).toEqual(new Date(expiresAt));
   });
 
   it('resolves the deployment Gitea instance host from GITEA_BASE_URL', async () => {

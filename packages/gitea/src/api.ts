@@ -1153,6 +1153,7 @@ export async function createTaskRunGiteaCredentials(
   },
 ): Promise<{
   credentials: GiteaRepositoryCredential[];
+  expiresAt: Date | null;
 }> {
   const deploymentToken = options?.token ?? (await resolveGiteaToken());
 
@@ -1161,6 +1162,10 @@ export async function createTaskRunGiteaCredentials(
       'Gitea OAuth connection is required for source control jobs.',
     );
   }
+
+  const oauthConnection = options?.token
+    ? null
+    : await getGiteaOAuthConnection();
 
   const baseUrl = options?.baseUrl ?? (await resolveGiteaBaseUrl());
 
@@ -1172,6 +1177,7 @@ export async function createTaskRunGiteaCredentials(
 
   const username =
     options?.username ??
+    oauthConnection?.username ??
     (await resolveGiteaUsername()) ??
     (
       await getGiteaAuthenticatedUser({
@@ -1182,6 +1188,9 @@ export async function createTaskRunGiteaCredentials(
     ).login;
   const host = hostFromBaseUrl(baseUrl);
   const repositoriesList = await resolveGiteaRepositoryRowsForTaskRun(taskRun);
+  const parsedExpiresAt = oauthConnection
+    ? new Date(oauthConnection.expiresAt)
+    : null;
 
   return {
     credentials: repositoriesList.map((repository) => ({
@@ -1191,5 +1200,11 @@ export async function createTaskRunGiteaCredentials(
       token: deploymentToken,
       originBaseUrl: baseUrl,
     })),
+    expiresAt:
+      oauthConnection?.accessToken === deploymentToken &&
+      parsedExpiresAt &&
+      !Number.isNaN(parsedExpiresAt.getTime())
+        ? parsedExpiresAt
+        : null,
   };
 }

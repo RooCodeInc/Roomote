@@ -385,6 +385,29 @@ describe('PromptInput', () => {
     expect(screen.queryByText('Task status')).not.toBeInTheDocument();
   });
 
+  it('opens command search when a slash is typed at the start of the prompt', () => {
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: true,
+      connectionError: false,
+      reconnect: vi.fn(),
+    });
+    const onCommandSearchOpen = vi.fn();
+
+    render(
+      <PromptInput
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={onCommandSearchOpen}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText(/Message agent/i), {
+      target: { value: '/', selectionStart: 1 },
+    });
+
+    expect(onCommandSearchOpen).toHaveBeenCalledWith(1);
+  });
+
   it('cancels through the web API when the sandbox client is disconnected', async () => {
     useSandboxTaskPhaseMock.mockReturnValue('running');
 
@@ -702,6 +725,33 @@ describe('PromptInput', () => {
       runId: 13,
       draftPrompt: '/review ',
     });
+  });
+
+  it('replaces the triggering slash when inserting a selected command', () => {
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: true,
+      connectionError: false,
+      reconnect: vi.fn(),
+    });
+    const promptInputRef = createRef<PromptInputHandle>();
+
+    render(
+      <PromptInput
+        ref={promptInputRef}
+        onFileSearchOpen={() => {}}
+        onCommandSearchOpen={() => {}}
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText(/Message agent/i);
+    fireEvent.change(textarea, { target: { value: '/rest' } });
+
+    act(() => {
+      promptInputRef.current?.insertCommand('/implement-changes', 1);
+    });
+
+    expect(textarea).toHaveValue('/implement-changes rest');
   });
 
   it('sends web prompts through the web tRPC cost gate before the sandbox', async () => {

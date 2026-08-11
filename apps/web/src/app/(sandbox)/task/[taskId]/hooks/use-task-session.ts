@@ -47,6 +47,11 @@ export interface SandboxConnectionTarget {
 export type SessionTaskRun = TaskRunDetail & {
   prRepo: string | null;
   prNumber: number | null;
+  pullRequests?: Array<{
+    repository: string;
+    prNumber: number;
+    prUrl?: string;
+  }>;
   previewProxyBaseUrl?: string;
   /** Server-derived: whether a failed start may be relaunched. */
   canRetryFailedStart?: boolean;

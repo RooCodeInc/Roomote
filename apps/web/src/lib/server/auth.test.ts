@@ -3,6 +3,8 @@ const {
   mockBetterAuth,
   mockGenericOAuth,
   mockResolveAuthProviderConfig,
+  mockSourceControlMappingValues,
+  mockSourceControlMappingUpsert,
 } = vi.hoisted(() => {
   const calls: Array<{
     config: Array<{
@@ -25,6 +27,8 @@ const {
       return { id: 'generic-oauth-plugin', options };
     }),
     mockResolveAuthProviderConfig: vi.fn(),
+    mockSourceControlMappingValues: vi.fn(),
+    mockSourceControlMappingUpsert: vi.fn(),
   };
 });
 
@@ -55,10 +59,20 @@ vi.mock('@better-auth/drizzle-adapter', () => ({
 vi.mock('@roomote/db/server', () => ({
   and: vi.fn(),
   authUsers: {},
-  db: {},
+  db: {
+    insert: vi.fn(() => ({
+      values: (values: unknown) => {
+        mockSourceControlMappingValues(values);
+        return { onConflictDoUpdate: mockSourceControlMappingUpsert };
+      },
+    })),
+  },
   eq: vi.fn(),
   inArray: vi.fn(),
   microsoftAuthUserMappings: {},
+  sourceControlUserMappings: {
+    authAccountId: 'source_control_user_mappings.authAccountId',
+  },
   teamsUserMappings: {},
 }));
 
@@ -106,6 +120,17 @@ function getAdoOAuthProvider() {
 
   if (!provider?.getUserInfo) {
     throw new Error('ADO OAuth provider was not configured');
+  }
+
+  return provider;
+}
+
+function getOAuthProvider(providerId: string) {
+  const config = genericOAuthCalls.at(-1)?.config;
+  const provider = config?.find((item) => item.providerId === providerId);
+
+  if (!provider?.getUserInfo) {
+    throw new Error(`${providerId} OAuth provider was not configured`);
   }
 
   return provider;
@@ -209,5 +234,167 @@ describe('getAuth', () => {
       id: 'ada@roomote.onmicrosoft.com',
       name: 'Ada Lovelace',
     });
+
+    const options = mockBetterAuth.mock.calls.at(-1)?.[0] as {
+      databaseHooks?: {
+        account?: {
+          create?: { after?: (account: unknown) => Promise<void> };
+        };
+      };
+    };
+    await options.databaseHooks?.account?.create?.after?.({
+      id: 'ado-auth-account-id',
+      userId: 'roomote-user-id',
+      accountId: 'ada@roomote.onmicrosoft.com',
+      providerId: 'ado',
+      accessToken: 'azure-devops-token',
+    });
+
+    expect(mockSourceControlMappingValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authAccountId: 'ado-auth-account-id',
+        sourceControlProvider: 'ado',
+        host: 'dev.azure.com',
+        externalAccountId: 'connection-user-guid',
+        username: null,
+        displayName: 'Ada Lovelace',
+      }),
+    );
+  });
+
+  it('persists a host-scoped GitLab identity after account linking', async () => {
+    mockResolveAuthProviderConfig.mockResolvedValue({
+      adoBaseUrl: undefined,
+      adoClientId: undefined,
+      adoClientSecret: undefined,
+      adoOrganization: undefined,
+      adoTenantId: undefined,
+      gitlabBaseUrl: 'https://gitlab.example.com:8443',
+      gitlabClientId: 'gitlab-client-id',
+      gitlabClientSecret: 'gitlab-client-secret',
+      microsoftClientId: undefined,
+      microsoftClientSecret: undefined,
+      microsoftTenantId: undefined,
+      signature: crypto.randomUUID(),
+      slackClientId: undefined,
+      slackClientSecret: undefined,
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          Response.json({
+            id: 42,
+            username: 'octocat',
+            name: 'Octo Cat',
+          }),
+        ),
+      ),
+    );
+
+    await getAuth();
+    expect(getOAuthProvider('gitlab')).toBeDefined();
+
+    const options = mockBetterAuth.mock.calls.at(-1)?.[0] as {
+      databaseHooks?: {
+        account?: {
+          create?: { after?: (account: unknown) => Promise<void> };
+        };
+      };
+    };
+    await options.databaseHooks?.account?.create?.after?.({
+      id: 'auth-account-id',
+      userId: 'roomote-user-id',
+      accountId: '42',
+      providerId: 'gitlab',
+      accessToken: 'gitlab-access-token',
+    });
+
+    expect(mockSourceControlMappingValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        authAccountId: 'auth-account-id',
+        userId: 'roomote-user-id',
+        sourceControlProvider: 'gitlab',
+        host: 'gitlab.example.com:8443',
+        externalAccountId: '42',
+        username: 'octocat',
+        displayName: 'Octo Cat',
+      }),
+    );
+    expect(mockSourceControlMappingUpsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: 'source_control_user_mappings.authAccountId',
+      }),
+    );
+  });
+
+  it('links Bitbucket accounts without treating a nickname as a public handle', async () => {
+    mockResolveAuthProviderConfig.mockResolvedValue({
+      adoBaseUrl: undefined,
+      adoClientId: undefined,
+      adoClientSecret: undefined,
+      adoOrganization: undefined,
+      adoTenantId: undefined,
+      bitbucketBaseUrl: 'https://bitbucket.org',
+      bitbucketClientId: 'bitbucket-client-id',
+      bitbucketClientSecret: 'bitbucket-client-secret',
+      gitlabBaseUrl: undefined,
+      gitlabClientId: undefined,
+      gitlabClientSecret: undefined,
+      microsoftClientId: undefined,
+      microsoftClientSecret: undefined,
+      microsoftTenantId: undefined,
+      signature: crypto.randomUUID(),
+      slackClientId: undefined,
+      slackClientSecret: undefined,
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() =>
+        Promise.resolve(
+          Response.json({
+            account_id: 'bitbucket-account-id',
+            nickname: 'Octo Cat',
+            display_name: 'Octo Cat',
+          }),
+        ),
+      ),
+    );
+
+    await getAuth();
+    const provider = getOAuthProvider('bitbucket');
+    await expect(
+      provider.getUserInfo?.({ accessToken: 'bitbucket-access-token' }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        id: 'bitbucket-account-id',
+        name: 'Octo Cat',
+      }),
+    );
+
+    const options = mockBetterAuth.mock.calls.at(-1)?.[0] as {
+      databaseHooks?: {
+        account?: {
+          create?: { after?: (account: unknown) => Promise<void> };
+        };
+      };
+    };
+    await options.databaseHooks?.account?.create?.after?.({
+      id: 'bitbucket-auth-account-id',
+      userId: 'roomote-user-id',
+      accountId: 'bitbucket-account-id',
+      providerId: 'bitbucket',
+      accessToken: 'bitbucket-access-token',
+    });
+
+    expect(mockSourceControlMappingValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceControlProvider: 'bitbucket',
+        host: 'bitbucket.org',
+        externalAccountId: 'bitbucket-account-id',
+        username: null,
+        displayName: 'Octo Cat',
+      }),
+    );
   });
 });

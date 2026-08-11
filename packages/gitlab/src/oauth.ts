@@ -2,6 +2,12 @@ import { randomBytes } from 'node:crypto';
 
 import { db, deploymentSecrets, eq, sql } from '@roomote/db/server';
 import { decryptSecrets, encryptJSON } from '@roomote/db/encryption';
+import {
+  OAuthRefreshError,
+  createOAuthRefreshCoordinator,
+  isDefinitiveOAuthErrorCode,
+  readOAuthErrorCode,
+} from '@roomote/source-control-oauth';
 
 const SECRET_NAME = 'gitlab_deployment_oauth_connection';
 // GitLab OAuth applications use `api` for repository read/write access.
@@ -20,6 +26,11 @@ export type GitLabOAuthConnection = {
   accessToken: string;
   refreshToken: string;
   expiresAt: string;
+  /**
+   * Access-token lifetime reported by the instance. Absent on connections
+   * written before adaptive refresh, which fall back to the default skew.
+   */
+  expiresInSeconds?: number;
   scopes: string[];
   status: GitLabOAuthConnectionStatus;
 };
@@ -32,10 +43,57 @@ type GitLabOAuthTokenResponse = {
   scope?: string;
 };
 
-let refreshPromise: Promise<string | null> | null = null;
-let deletionPromise: Promise<void> | null = null;
-let connectionGeneration = 0;
-let cachedAccessToken: string | null = null;
+export type GitLabOAuthAccessToken = {
+  accessToken: string;
+  /** Null when the stored expiry is unreadable; callers keep their default cadence. */
+  expiresAt: Date | null;
+};
+
+/** Proactive OAuth refresh window for GitLab's default ~2h access tokens. */
+const OAUTH_ACCESS_TOKEN_REFRESH_SKEW_MS = 10 * 60 * 1000;
+
+/** GitLab's default access-token lifetime, used when none is reported. */
+const DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS = 7200;
+const GITLAB_OAUTH_REQUEST_TIMEOUT_MS = 15_000;
+
+/** Expiry fields for a freshly issued access token, in the instance's own terms. */
+function accessTokenLifetime(token: GitLabOAuthTokenResponse): {
+  expiresAt: string;
+  expiresInSeconds: number;
+} {
+  const expiresInSeconds =
+    token.expires_in ?? DEFAULT_ACCESS_TOKEN_LIFETIME_SECONDS;
+
+  return {
+    expiresAt: new Date(Date.now() + expiresInSeconds * 1000).toISOString(),
+    expiresInSeconds,
+  };
+}
+
+/**
+ * Self-managed instances can configure a much shorter OAuth lifetime than the
+ * ~2h default. A fixed skew wider than the lifetime itself would refresh on
+ * every resolve, so cap it at a quarter of the token's life.
+ */
+function refreshSkewMsFor(connection: GitLabOAuthConnection): number {
+  const lifetimeMs = (connection.expiresInSeconds ?? 0) * 1000;
+
+  return lifetimeMs > 0
+    ? Math.min(OAUTH_ACCESS_TOKEN_REFRESH_SKEW_MS, lifetimeMs / 4)
+    : OAUTH_ACCESS_TOKEN_REFRESH_SKEW_MS;
+}
+
+function parseConnectionExpiresAt(expiresAt: string): Date | null {
+  const parsed = Date.parse(expiresAt);
+  return Number.isNaN(parsed) ? null : new Date(parsed);
+}
+
+function toAccessTokenResult(
+  accessToken: string,
+  expiresAt: string,
+): GitLabOAuthAccessToken {
+  return { accessToken, expiresAt: parseConnectionExpiresAt(expiresAt) };
+}
 
 function tokenEndpoint(baseUrl: string): string {
   return new URL('oauth/token', `${baseUrl.replace(/\/$/, '')}/`).toString();
@@ -102,29 +160,39 @@ async function writeConnection(
     });
 }
 
+type GitLabOAuthRefreshOptions = {
+  fetchImpl?: typeof fetch;
+  forceRefresh?: boolean;
+  requestTimeoutMs?: number;
+};
+
+const refreshCoordinator = createOAuthRefreshCoordinator<
+  GitLabOAuthConnection,
+  GitLabOAuthAccessToken,
+  GitLabOAuthRefreshOptions
+>({
+  readConnection,
+  writeConnection,
+  deleteConnection: async () => {
+    await db
+      .delete(deploymentSecrets)
+      .where(eq(deploymentSecrets.name, SECRET_NAME));
+  },
+  isFresh: (connection) =>
+    Date.parse(connection.expiresAt) >
+    Date.now() + refreshSkewMsFor(connection),
+  refresh: refreshGitLabOAuthConnection,
+  toResult: (connection) =>
+    toAccessTokenResult(connection.accessToken, connection.expiresAt),
+  retainPreviousAccessToken: true,
+});
+
 export async function getGitLabOAuthConnection(): Promise<GitLabOAuthConnection | null> {
   return readConnection();
 }
 
 export async function deleteGitLabOAuthConnection(): Promise<void> {
-  if (!deletionPromise) {
-    connectionGeneration += 1;
-    const inFlightRefresh = refreshPromise;
-    deletionPromise = (async () => {
-      await inFlightRefresh?.catch(() => undefined);
-      await db
-        .delete(deploymentSecrets)
-        .where(eq(deploymentSecrets.name, SECRET_NAME));
-      refreshPromise = null;
-      cachedAccessToken = null;
-    })();
-  }
-
-  try {
-    await deletionPromise;
-  } finally {
-    deletionPromise = null;
-  }
+  await refreshCoordinator.delete();
 }
 
 export async function exchangeGitLabOAuthCode(input: {
@@ -134,6 +202,7 @@ export async function exchangeGitLabOAuthCode(input: {
   code: string;
   redirectUri: string;
   fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
 }): Promise<GitLabOAuthConnection> {
   const response = await (input.fetchImpl ?? fetch)(
     tokenEndpoint(input.baseUrl),
@@ -150,6 +219,9 @@ export async function exchangeGitLabOAuthCode(input: {
         grant_type: 'authorization_code',
         redirect_uri: input.redirectUri,
       }),
+      signal: AbortSignal.timeout(
+        input.requestTimeoutMs ?? GITLAB_OAUTH_REQUEST_TIMEOUT_MS,
+      ),
     },
   );
   if (!response.ok)
@@ -168,9 +240,7 @@ export async function exchangeGitLabOAuthCode(input: {
     username: '',
     accessToken: token.access_token,
     refreshToken: token.refresh_token,
-    expiresAt: new Date(
-      Date.now() + (token.expires_in ?? 7200) * 1000,
-    ).toISOString(),
+    ...accessTokenLifetime(token),
     scopes: token.scope?.split(/\s+/).filter(Boolean) ?? [...DEFAULT_SCOPES],
     status: 'active',
   };
@@ -191,86 +261,77 @@ export async function exchangeGitLabOAuthCode(input: {
     // Token exchange is still valid when the identity lookup is temporarily unavailable.
   }
   await writeConnection(connection);
-  cachedAccessToken = connection.accessToken;
+  refreshCoordinator.remember(connection);
   return connection;
+}
+
+async function refreshGitLabOAuthConnection(
+  connection: GitLabOAuthConnection,
+  options: GitLabOAuthRefreshOptions | undefined,
+): Promise<GitLabOAuthConnection> {
+  const response = await (options?.fetchImpl ?? fetch)(
+    tokenEndpoint(connection.baseUrl),
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        client_id: connection.clientId,
+        client_secret: connection.clientSecret,
+        refresh_token: connection.refreshToken,
+        grant_type: 'refresh_token',
+      }),
+      signal: AbortSignal.timeout(
+        options?.requestTimeoutMs ?? GITLAB_OAUTH_REQUEST_TIMEOUT_MS,
+      ),
+    },
+  );
+  if (!response.ok) {
+    const oauthError = await readOAuthErrorCode(response);
+    const definitive = isDefinitiveOAuthErrorCode(oauthError);
+    throw new OAuthRefreshError(
+      definitive
+        ? 'GitLab OAuth authorization has expired and must be renewed.'
+        : `GitLab OAuth refresh failed: ${response.status} ${response.statusText}`,
+      definitive,
+    );
+  }
+  const token = (await response.json()) as GitLabOAuthTokenResponse;
+  return {
+    ...connection,
+    accessToken: token.access_token,
+    refreshToken: token.refresh_token ?? connection.refreshToken,
+    ...accessTokenLifetime(token),
+    scopes: token.scope?.split(/\s+/).filter(Boolean) ?? connection.scopes,
+    status: 'active',
+  };
+}
+
+/** Resolve OAuth access token + expiry, refreshing inside the skew window. */
+export async function resolveGitLabOAuthAccessTokenWithMetadata(
+  options?: GitLabOAuthRefreshOptions,
+): Promise<GitLabOAuthAccessToken | null> {
+  return refreshCoordinator.resolve(options);
 }
 
 export async function resolveGitLabOAuthAccessToken(options?: {
   fetchImpl?: typeof fetch;
   forceRefresh?: boolean;
+  requestTimeoutMs?: number;
 }): Promise<string | null> {
-  if (deletionPromise) {
-    await deletionPromise;
-    return null;
-  }
-  const generation = connectionGeneration;
-  const connection = await readConnection();
-  if (generation !== connectionGeneration || deletionPromise) {
-    await deletionPromise;
-    return null;
-  }
-  if (!connection || connection.status !== 'active') return null;
-  if (
-    !options?.forceRefresh &&
-    Date.parse(connection.expiresAt) > Date.now() + 60_000
-  ) {
-    cachedAccessToken = connection.accessToken;
-    return connection.accessToken;
-  }
-  if (refreshPromise) return refreshPromise;
-
-  refreshPromise = (async () => {
-    const response = await (options?.fetchImpl ?? fetch)(
-      tokenEndpoint(connection.baseUrl),
-      {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          client_id: connection.clientId,
-          client_secret: connection.clientSecret,
-          refresh_token: connection.refreshToken,
-          grant_type: 'refresh_token',
-        }),
-      },
-    );
-    if (!response.ok) {
-      if (generation !== connectionGeneration) return null;
-      await writeConnection({
-        ...connection,
-        status: 'reauthorization_required',
-      });
-      throw new Error(
-        'GitLab OAuth authorization has expired and must be renewed.',
-      );
-    }
-    const token = (await response.json()) as GitLabOAuthTokenResponse;
-    const next = {
-      ...connection,
-      accessToken: token.access_token,
-      refreshToken: token.refresh_token ?? connection.refreshToken,
-      expiresAt: new Date(
-        Date.now() + (token.expires_in ?? 7200) * 1000,
-      ).toISOString(),
-      scopes: token.scope?.split(/\s+/).filter(Boolean) ?? connection.scopes,
-      status: 'active' as const,
-    };
-    if (generation !== connectionGeneration) return null;
-    await writeConnection(next);
-    cachedAccessToken = next.accessToken;
-    return next.accessToken;
-  })();
-  try {
-    return await refreshPromise;
-  } finally {
-    refreshPromise = null;
-  }
+  const result = await resolveGitLabOAuthAccessTokenWithMetadata(options);
+  return result?.accessToken ?? null;
 }
 
+/**
+ * Bearer (OAuth) vs PRIVATE-TOKEN. Only tokens this process actually minted
+ * qualify: guessing from prefixes misclassifies deploy tokens, CI job tokens,
+ * and self-managed instances with a customised PAT prefix.
+ */
 export function isGitLabOAuthAccessToken(token: string): boolean {
-  return token === cachedAccessToken;
+  return refreshCoordinator.isAccessToken(token);
 }
 
 export async function markGitLabOAuthReauthorizationRequired(): Promise<void> {

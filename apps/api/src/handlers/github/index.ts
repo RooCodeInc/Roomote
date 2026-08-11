@@ -187,7 +187,10 @@ github.post('/', async (c) => {
           return handleGitHubIssueComment(payload);
         }
 
-        queuePrReviewSummaryNotification(payload);
+        await Promise.all([
+          queuePrReviewActivityNotification(payload),
+          queuePrReviewSummaryNotification(payload),
+        ]);
 
         return handlePrComment(payload);
       }),
@@ -208,7 +211,7 @@ github.post('/', async (c) => {
 
         // Roomote review summaries are posted as "review in progress" and
         // patched with the results, so the terminal content arrives here.
-        queuePrReviewSummaryNotification(payload);
+        await queuePrReviewSummaryNotification(payload);
 
         return { status: 'ok' as const };
       }),
@@ -434,7 +437,7 @@ github.post('/', async (c) => {
           };
         }
 
-        queuePrReviewActivityNotification(payload);
+        await queuePrReviewActivityNotification(payload);
 
         return handlePrComment(payload);
       }),
@@ -451,7 +454,7 @@ github.post('/', async (c) => {
             };
           }
 
-          queuePrReviewActivityNotification(payload);
+          await queuePrReviewActivityNotification(payload);
 
           return handlePrComment(payload);
         }),

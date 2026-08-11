@@ -27,6 +27,32 @@ import {
 
 const BATCH_LIMIT = 250;
 
+/**
+ * The manifest scan is a global time-range query with no repository filter,
+ * and Vitest runs this file concurrently with the other real-database suites.
+ * A fixture sharing a merge window with another suite therefore shows up in
+ * these manifests and breaks the exact-length and exact-membership assertions.
+ * Give every test a disjoint window well past the historical dates those
+ * suites use, so a scan can only ever see the rows its own test inserted.
+ */
+const SCAN_WINDOW_START_MS = Date.UTC(2099, 0, 1);
+const SCAN_WINDOW_SPAN_MS = 365 * 24 * 60 * 60 * 1000;
+let scanWindowIndex = 0;
+
+function nextScanWindow() {
+  const startMs = SCAN_WINDOW_START_MS + scanWindowIndex * SCAN_WINDOW_SPAN_MS;
+  scanWindowIndex += 1;
+
+  return {
+    /** Scan lower bound; fixtures merge strictly after it. */
+    since: new Date(startMs),
+    /** Default merge instant for fixtures in this window. */
+    mergedAt: new Date(startMs + SCAN_WINDOW_SPAN_MS / 2),
+    /** Scan upper bound enclosing the whole window. */
+    upperBound: new Date(startMs + SCAN_WINDOW_SPAN_MS),
+  };
+}
+
 const userIds: string[] = [];
 const repositoryIds: string[] = [];
 
@@ -147,7 +173,7 @@ describe('getMergedPullRequests', () => {
       provider: 'bitbucket',
     });
 
-    const mergedAt = new Date('2026-07-10T00:00:00Z');
+    const { since, mergedAt, upperBound } = nextScanWindow();
     await insertMergedFacts([
       {
         repositoryId: gitlabRepo.id,
@@ -166,8 +192,8 @@ describe('getMergedPullRequests', () => {
     ]);
 
     const batch = await getMergedPullRequests(
-      { kind: 'interval', since: new Date('2026-07-09T00:00:00Z') },
-      new Date('2026-07-11T00:00:00Z'),
+      { kind: 'interval', since },
+      upperBound,
     );
 
     // Both rows share repositoryFullName + prNumber; only the repository id
@@ -202,7 +228,7 @@ describe('getMergedPullRequests', () => {
       host: hostB,
     });
 
-    const mergedAt = new Date('2026-07-10T00:00:00Z');
+    const { since, mergedAt, upperBound } = nextScanWindow();
     await insertMergedFacts([
       {
         repositoryId: repoA.id,
@@ -221,8 +247,8 @@ describe('getMergedPullRequests', () => {
     ]);
 
     const batch = await getMergedPullRequests(
-      { kind: 'interval', since: new Date('2026-07-09T00:00:00Z') },
-      new Date('2026-07-11T00:00:00Z'),
+      { kind: 'interval', since },
+      upperBound,
     );
 
     // Same provider, same fullName, same PR number: only the host (via the
@@ -302,7 +328,7 @@ describe('getMergedPullRequests', () => {
       provider: 'bitbucket',
     });
 
-    const base = new Date('2026-07-01T00:00:00Z').getTime();
+    const base = nextScanWindow().since.getTime();
     const boundaryMergedAt = new Date(base + BATCH_LIMIT * 60_000);
 
     // Rows 1..(BATCH_LIMIT - 1) in repo A with strictly increasing merge
@@ -380,9 +406,7 @@ describe('getMergedPullRequests', () => {
       provider: 'bitbucket',
     });
 
-    // Keep this legacy-cursor fixture outside the historical windows used by
-    // the other real-database suites, which run concurrently in Vitest.
-    const mergedAt = new Date('2099-07-10T00:00:00Z');
+    const { mergedAt, upperBound } = nextScanWindow();
     await insertMergedFacts([
       {
         repositoryId: repoA.id,
@@ -408,7 +432,7 @@ describe('getMergedPullRequests', () => {
         cursor: { mergedAt: mergedAt.toISOString(), externalPullRequestId: 5 },
         cursorDate: mergedAt,
       },
-      new Date('2099-07-11T00:00:00Z'),
+      upperBound,
     );
 
     expect(manifestKeys(batch.pullRequests).sort()).toEqual([
@@ -431,7 +455,7 @@ describe('getMergedPullRequests', () => {
       provider: 'bitbucket',
     });
 
-    const mergedAt = new Date('2026-07-10T00:00:00Z');
+    const { mergedAt, upperBound } = nextScanWindow();
     await insertMergedFacts([
       {
         repositoryId: repoA.id,
@@ -473,7 +497,7 @@ describe('getMergedPullRequests', () => {
         },
         cursorDate: mergedAt,
       },
-      new Date('2026-07-11T00:00:00Z'),
+      upperBound,
     );
 
     expect(manifestKeys(batch.pullRequests)).toEqual([

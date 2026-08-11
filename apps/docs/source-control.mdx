@@ -40,6 +40,36 @@ After setup, verify that Roomote can:
 - clone the repository inside a task sandbox
 - push a branch or open a reviewable change when the task finishes
 
+## Attribution on pull requests and commits
+
+Roomote keeps human-readable attribution inside private repositories. For
+public repositories, it uses the task participant's linked source-control
+username when one is available. If Roomote cannot resolve a linked username,
+the pull request or merge request says only that it was created by Roomote.
+
+Roomote never derives public attribution from an account email address. Commit
+emails use the source-control provider's `noreply` identity when available, or
+the Roomote identity otherwise. A workspace containing any public or
+unresolved repository uses the public-safe identity for all new commits because
+Git author configuration applies across the workspace.
+
+Linked GitLab and Gitea accounts retain the username verified by that provider,
+scoped to the configured source-control host. Bitbucket does the same only when
+its profile API returns a username; a nickname is not treated as a public
+handle. Azure DevOps
+accounts retain their verified display name for Settings and private-repository
+context, but public attribution remains generic because Azure DevOps does not
+provide a stable non-email public handle. GitLab.com can also provide a verified
+`noreply` commit identity; other non-GitHub providers use Roomote as the Git
+author for public work.
+
+Existing account links pick up verified profile attribution after their OAuth
+token refreshes or after the account is linked again.
+
+Changing a repository from private to public does not rewrite existing Git
+history. Roomote sanitizes a legacy named attribution line the next time it
+updates an open public pull request.
+
 ## Pull request review comments
 
 When **Review Code** finds an issue on a changed line, Roomote posts the finding

@@ -2,6 +2,38 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.37.0 (2026-08-10)
+
+This release brings voice-driven work to every chat provider, expands organization-wide automations and source-control identity support, and improves task reliability.
+
+### Highlights
+
+- Start tasks and send follow-ups with audio or voice messages across Slack, Discord, Telegram, and Microsoft Teams.
+- Run custom automations across every active repository while routing suggested follow-up tasks to the correct environment.
+- Show verified linked identities and privacy-safe attribution across GitLab, Gitea, Bitbucket, and Azure DevOps.
+- Keep long-running tasks, pull-request reviews, authenticated previews, and chat auto-start flows working more reliably.
+
+### Minor changes
+
+- Run custom automations across all active repositories while routing each suggested follow-up task to the correct repository environment.
+- Start tasks and send follow-ups with audio or voice messages across Slack, Discord, Telegram, and Microsoft Teams, with actionable guidance when transcription is unavailable.
+- Configure deployment incident banners and Slack warnings with a Statuspage-compatible unresolved-incidents feed URL, or leave the feed disabled when no URL is set.
+- Show verified linked identities for GitLab, Gitea, Bitbucket, and Azure DevOps, and use privacy-safe provider attribution for public source-control changes.
+
+### Patch changes
+
+- Let agents open authenticated shareable previews without being redirected to sign-in, including previews that ultimately redirect to direct machine URLs.
+- Add a direct link from model settings to Roomote's model recommendations so users can compare supported choices before configuring task roles.
+- Preserve provider-neutral source context for child tasks so agents can identify the originating conversation without inheriting live reply behavior.
+- Keep pull-request attribution current and privacy-safe across public and private repositories while preserving provider-specific follow-up links. Thanks to @T4cC0re for reporting [#1184](https://github.com/RooCodeInc/Roomote/issues/1184).
+- Refresh supported source-control OAuth credentials before they expire during long-running, resumed, and mixed-provider tasks while keeping temporary provider failures retryable.
+- Keep pull-request review follow-ups running until their queued work settles, release review actions after stale workers stop, and avoid duplicate completion or action notifications.
+- Reply to human-authored Slack and Discord auto-start messages when task classification or startup fails unexpectedly instead of appearing unresponsive.
+- Restore Better Stack monitoring, incident, and telemetry inspection tools in tasks while preserving Roomote's read-only integration boundary.
+- Reuse compute-provider clients across scheduler checks to prevent memory growth and worker restarts on deployments with continuously active tasks.
+- Show every active pull request linked to a task across the web app and supported chat providers instead of displaying only one associated pull request.
+- Let agents discover enabled automation models and reject unavailable model overrides when an automation is configured instead of failing later at launch.
+
 ## 0.36.1 (2026-08-07)
 
 This release improves compatibility across MCP and Anthropic integrations, tightens automation suggestions, and refreshes Gemini recommendations.

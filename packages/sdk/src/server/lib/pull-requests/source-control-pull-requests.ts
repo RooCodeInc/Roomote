@@ -1,5 +1,7 @@
 import { createGitHubToken } from '@roomote/auth';
 import {
+  DEFAULT_ROOMOTE_COMMIT_AUTHOR,
+  getPrBodyAttributionLine,
   type ResolvedTaskCommitAuthor,
   resolveLaunchTaskCommitAuthor,
   resolveRunCommitAuthor,
@@ -12,6 +14,8 @@ import {
   db,
   eq,
   getDeploymentGitHubRoomoteMentionEnabled,
+  resolveTelegramRuntimeCredentials,
+  tasks,
   taskRuns,
   getDeploymentPrAction,
   taskPullRequests,
@@ -20,12 +24,24 @@ import {
 import {
   buildPullRequestUrl,
   getSourceControlProviderLabel,
-  normalizePrBodyAttributionAppMention,
+  findPrBodyAttributionLine,
+  getCommunicationProviderFromTaskPayload,
+  getCommunicationGuildIdFromTaskPayload,
+  getCommunicationTenantIdFromTaskPayload,
+  getCommunicationChannelFromTaskPayload,
+  getCommunicationThreadIdFromTaskPayload,
+  getCommunicationMessageIdFromTaskPayload,
+  getSlackChannelFromTaskPayload,
+  getSlackTeamIdFromTaskPayload,
+  getSlackTeamDomainFromTaskPayload,
+  getSlackThreadTsFromTaskPayload,
+  getSlackConversationUrlFromTaskPayload,
   prActions,
   sourceControlProviderSchema,
   type PrAction,
   type SourceControlProvider,
 } from '@roomote/types';
+import { Env } from '@roomote/env';
 import { z } from 'zod';
 import {
   adoPullRequestSchema,
@@ -218,22 +234,104 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     resolveConfiguredGitHubAppSlugIfConfigured(),
     getDeploymentGitHubRoomoteMentionEnabled(),
   ]);
+  const attribution = await resolveRunCommitAuthor(db, taskRun, {
+    provider,
+    host: repository.host ?? payloadHost,
+  });
+  const displayName =
+    attribution.kind === 'roomote'
+      ? null
+      : repository.private === true
+        ? attribution.displayName
+        : attribution.publicDisplayName;
+  const task = await db.query.tasks.findFirst({
+    where: eq(tasks.id, taskRun.taskId),
+    columns: {
+      surface: true,
+      slackChannelId: true,
+      slackThreadTs: true,
+    },
+  });
+  const communicationProvider = getCommunicationProviderFromTaskPayload(
+    taskRun.payload,
+  );
+  const telegramBotUsername =
+    communicationProvider === 'telegram'
+      ? (await resolveTelegramRuntimeCredentials()).botUsername
+      : null;
+  const canonicalAttribution = displayName
+    ? { ...attribution, displayName }
+    : DEFAULT_ROOMOTE_COMMIT_AUTHOR;
+  const attributionLine = getPrBodyAttributionLine({
+    attribution: canonicalAttribution,
+    taskUrl: buildPrAttributionTaskUrl(taskRun),
+    taskSurface:
+      task?.surface === 'system' || task?.surface === 'api'
+        ? 'web'
+        : (task?.surface ?? communicationProvider ?? 'web'),
+    slackTeamDomain:
+      getSlackTeamDomainFromTaskPayload(taskRun.payload) ?? undefined,
+    slackTeamId: getSlackTeamIdFromTaskPayload(taskRun.payload) ?? undefined,
+    slackConversationUrl:
+      getSlackConversationUrlFromTaskPayload(taskRun.payload) ?? undefined,
+    slackChannel:
+      getSlackChannelFromTaskPayload(taskRun.payload) ??
+      task?.slackChannelId ??
+      undefined,
+    slackThreadTs:
+      getSlackThreadTsFromTaskPayload(taskRun.payload) ??
+      task?.slackThreadTs ??
+      undefined,
+    telegramChatId:
+      communicationProvider === 'telegram'
+        ? (getCommunicationChannelFromTaskPayload(taskRun.payload) ?? undefined)
+        : undefined,
+    telegramThreadId:
+      communicationProvider === 'telegram'
+        ? (getCommunicationThreadIdFromTaskPayload(taskRun.payload) ??
+          undefined)
+        : undefined,
+    telegramMessageId:
+      communicationProvider === 'telegram'
+        ? (getCommunicationMessageIdFromTaskPayload(taskRun.payload) ??
+          undefined)
+        : undefined,
+    telegramBotUsername: telegramBotUsername ?? undefined,
+    teamsConversationId:
+      communicationProvider === 'teams'
+        ? (getCommunicationChannelFromTaskPayload(taskRun.payload) ?? undefined)
+        : undefined,
+    teamsMessageId:
+      communicationProvider === 'teams'
+        ? (getCommunicationMessageIdFromTaskPayload(taskRun.payload) ??
+          undefined)
+        : undefined,
+    teamsTenantId:
+      getCommunicationTenantIdFromTaskPayload(taskRun.payload) ?? undefined,
+    teamsBotAppId: Env.R_TEAMS_BOT_APP_ID,
+    discordGuildId:
+      getCommunicationGuildIdFromTaskPayload(taskRun.payload) ?? undefined,
+    discordChannelId:
+      communicationProvider === 'discord'
+        ? (getCommunicationChannelFromTaskPayload(taskRun.payload) ?? undefined)
+        : undefined,
+    discordMessageId:
+      communicationProvider === 'discord'
+        ? (getCommunicationMessageIdFromTaskPayload(taskRun.payload) ??
+          undefined)
+        : undefined,
+    githubAppSlug: configuredGitHubAppSlug,
+    roomoteMentionEnabled,
+  });
   const inputWithNormalizedAttribution: SourceControlPullRequestMutationInput =
-    configuredGitHubAppSlug
-      ? {
-          ...input,
-          body: normalizePrBodyAttributionAppMention(
-            input.body,
-            configuredGitHubAppSlug,
-            roomoteMentionEnabled,
-          ),
-        }
-      : input;
+    {
+      ...input,
+      body: attributionLine
+        ? prependCanonicalPrAttribution(input.body, attributionLine)
+        : input.body,
+    };
 
-  const liveGitHubAttribution =
-    provider === 'github'
-      ? await resolveRunCommitAuthor(db, taskRun)
-      : undefined;
+  const liveGitHubAttribution = provider === 'github' ? attribution : undefined;
   const liveGitHubAssigneePlan = liveGitHubAttribution
     ? await resolveLiveGitHubAssigneePlan({
         taskRun,
@@ -256,7 +354,6 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
           repository,
           provider,
           createDraft,
-          attribution: liveGitHubAttribution,
           staleLaunchAssignee: liveGitHubAssigneePlan?.staleLaunchAssignee,
         });
       case 'gitlab':
@@ -415,14 +512,12 @@ async function createOrUpdateGitHubPullRequest({
   repository,
   provider,
   createDraft,
-  attribution,
   staleLaunchAssignee,
 }: {
   input: SourceControlPullRequestMutationInput;
   repository: RepositoryRow;
   provider: 'github';
   createDraft: boolean;
-  attribution?: ResolvedTaskCommitAuthor;
   staleLaunchAssignee?: string;
 }): Promise<SourceControlPullRequestMutationResult> {
   if (!repository.installationId) {
@@ -471,10 +566,7 @@ async function createOrUpdateGitHubPullRequest({
       repo,
       pull_number: pullRequest.number,
       title: input.title,
-      body: preserveExistingPullRequestAttribution(
-        input.body,
-        pullRequest.body,
-      ),
+      body: input.body,
     });
     pullRequest = data;
   } else {
@@ -484,7 +576,7 @@ async function createOrUpdateGitHubPullRequest({
       owner,
       repo,
       title: input.title,
-      body: replaceCreatedPullRequestAttribution(input.body, attribution),
+      body: input.body,
       head: input.sourceBranch,
       base: targetBranch,
       draft: createDraft,
@@ -541,28 +633,33 @@ async function createOrUpdateGitHubPullRequest({
   };
 }
 
-function replaceCreatedPullRequestAttribution(
-  body: string,
-  attribution: ResolvedTaskCommitAuthor | undefined,
-): string {
-  if (!attribution) {
-    return body;
-  }
-
-  return body.replace(
-    /^(> Opened on behalf of ).+?(\. (?:Follow up by|\[View the task\]))/mu,
-    `$1${attribution.displayName}$2`,
-  );
+function buildPrAttributionTaskUrl(taskRun: TaskRun): string {
+  const url = new URL(`/task/${taskRun.taskId}`, Env.R_APP_URL);
+  url.searchParams.set('utm_source', 'github-comment');
+  url.searchParams.set('utm_medium', 'link');
+  url.searchParams.set('utm_campaign', taskRun.payloadKind);
+  return url.toString();
 }
 
-function preserveExistingPullRequestAttribution(
-  body: string,
-  existingBody: string | null | undefined,
-): string {
-  const openerLine = existingBody?.match(/^> Opened on behalf of .+$/mu)?.[0];
-  return openerLine
-    ? body.replace(/^> Opened on behalf of .+$/mu, openerLine)
-    : body;
+function prependCanonicalPrAttribution(body: string, line: string): string {
+  const firstLineEnd = body.indexOf('\n');
+  const firstLine = body.slice(
+    0,
+    firstLineEnd === -1 ? body.length : firstLineEnd,
+  );
+  const normalizedFirstLine = firstLine.trimStart();
+  const hasLeadingAttribution =
+    findPrBodyAttributionLine(firstLine) !== null ||
+    /^> (?:Opened on behalf of .+\.|Created by Roomote\.) (?:Follow up by mentioning @|\[View the task\]\().+$/u.test(
+      normalizedFirstLine,
+    );
+  const remainingBody = hasLeadingAttribution
+    ? body
+        .slice(firstLineEnd === -1 ? body.length : firstLineEnd + 1)
+        .trimStart()
+    : body.trimStart();
+
+  return remainingBody ? `${line}\n\n${remainingBody}` : line;
 }
 
 async function createOrUpdateGitLabMergeRequest({

@@ -57,18 +57,25 @@ type StandardTaskSurface = NonNullable<
 
 /**
  * Resolve the standard-task surface for harness context and delivery
- * instructions. Chat payload bindings take priority; otherwise use the task
- * row's launch surface so GitHub/GitLab/etc. mentions get the right rules.
+ * instructions. Inherited communication context is informational and remains
+ * web-originated. Otherwise, chat payload bindings take priority before the
+ * task row's launch surface supplies GitHub/GitLab/etc. rules.
  */
 export function resolveStandardTaskSurface({
   hasSlackChannel,
   communicationProvider,
   taskSurface,
+  communicationContextInherited = false,
 }: {
   hasSlackChannel: boolean;
   communicationProvider?: string | null;
   taskSurface?: TaskSurface | null;
+  communicationContextInherited?: boolean;
 }): StandardTaskSurface {
+  if (communicationContextInherited) {
+    return 'web';
+  }
+
   if (hasSlackChannel) {
     return 'slack';
   }
@@ -279,11 +286,19 @@ export async function generatePrompt({
       const communicationProvider = getCommunicationProviderFromTaskPayload(
         taskSpec.payload,
       );
+      const inheritedCommunicationContext =
+        taskSpec.payload.communicationContextInherited === true;
+      const activeSlackChannel = inheritedCommunicationContext
+        ? null
+        : slackChannel;
+      const activeCommunicationProvider = inheritedCommunicationContext
+        ? null
+        : communicationProvider;
       const nonSlackChatProvider =
-        communicationProvider === 'teams' ||
-        communicationProvider === 'telegram' ||
-        communicationProvider === 'discord'
-          ? communicationProvider
+        activeCommunicationProvider === 'teams' ||
+        activeCommunicationProvider === 'telegram' ||
+        activeCommunicationProvider === 'discord'
+          ? activeCommunicationProvider
           : null;
       const slackThreadTs =
         getSlackThreadTsFromTaskPayload(taskSpec.payload) ??
@@ -313,16 +328,17 @@ export async function generatePrompt({
         repo: taskSpec.payload.repo,
         repoFullNames: await getWorkspaceRepositoryFullNames(taskSpec),
         taskSurface: resolveStandardTaskSurface({
-          hasSlackChannel: Boolean(slackChannel),
-          communicationProvider,
+          hasSlackChannel: Boolean(activeSlackChannel),
+          communicationProvider: activeCommunicationProvider,
           taskSurface: taskRow?.surface,
+          communicationContextInherited: inheritedCommunicationContext,
         }),
         conflictResolverLabel: enabledConflictResolverLabel,
         taskRunUrl,
         attribution: commitAuthor,
         slackTeamDomain:
           getSlackTeamDomainFromTaskPayload(taskSpec.payload) ?? undefined,
-        slackChannel: slackChannel ?? undefined,
+        slackChannel: activeSlackChannel ?? undefined,
         slackThreadTs: slackThreadTs ?? undefined,
         telegramChatId:
           nonSlackChatProvider === 'telegram'
@@ -365,6 +381,11 @@ export async function generatePrompt({
           nonSlackChatProvider === 'discord'
             ? (communicationMessageId ?? undefined)
             : undefined,
+        sourceProvider:
+          communicationProvider ?? (slackChannel ? 'slack' : undefined),
+        sourceChannelId: communicationChannelId ?? undefined,
+        sourceThreadId: communicationThreadId ?? undefined,
+        sourceMessageId: communicationMessageId ?? undefined,
         interactiveMode: taskSpec.payload.bootstrap?.interactiveMode,
         requestFormat,
         linkedWorkItems: taskSpec.payload.linkedWorkItems,
@@ -377,7 +398,7 @@ export async function generatePrompt({
         prAction,
       });
 
-      if (slackChannel && slackThreadTs) {
+      if (!inheritedCommunicationContext && slackChannel && slackThreadTs) {
         const slackInstructions = buildSlackMessageInstructions({
           includeRequestUserInputGuidance: true,
         });
@@ -386,7 +407,7 @@ export async function generatePrompt({
           : slackInstructions;
       }
 
-      if (nonSlackChatProvider) {
+      if (!inheritedCommunicationContext && nonSlackChatProvider) {
         const chatInstructions =
           nonSlackChatProvider === 'teams'
             ? buildTeamsMessageInstructions()

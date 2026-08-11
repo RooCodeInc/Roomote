@@ -789,6 +789,21 @@ describe('LinkedAccounts settings', () => {
     expect(document.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(6);
   });
 
+  it('keeps the loading state while only the Bitbucket account is pending', () => {
+    state.deploymentEnablements = [];
+    state.gitHubInstallations = [];
+    state.linearInstallation = null;
+    state.linearAccount = null;
+    state.bitbucketAccountIsPending = true;
+
+    render(<LinkedAccounts />);
+
+    expect(
+      screen.queryByText(/No personal linked accounts/),
+    ).not.toBeInTheDocument();
+    expect(document.querySelectorAll('[data-slot="skeleton"]')).toHaveLength(6);
+  });
+
   it('does not render org-scoped MCPs in linked accounts', () => {
     state.user.isAdmin = false;
     state.deploymentEnablements = createMcpEnablements(

@@ -33,6 +33,7 @@ const teamSlackPermalink = buildSlackThreadPermalink({
 const matchedUserAttribution: ResolvedTaskCommitAuthor = {
   kind: 'user',
   displayName: 'Jane Doe',
+  publicDisplayName: null,
   githubLogin: null,
   prAssigneeLogin: null,
   gitAuthor: {
@@ -234,7 +235,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     });
 
     expect(harnessInstructions).toContain(
-      'prepend `> Opened on behalf of Jane Doe. [View the task](https://example.com/task/123) or mention @',
+      'prepend `> &#8203;<!-- roomote:pr-attribution:start -->Opened on behalf of Jane Doe.<!-- roomote:pr-attribution:end --> [View the task](https://example.com/task/123) or mention @',
     );
     expect(harnessInstructions).toContain(
       'for follow-up asks.` at the top of the PR body file before creating or refreshing the pull request',
@@ -269,7 +270,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     });
 
     expect(harnessInstructions).toContain(
-      `prepend \`> Opened on behalf of Jane Doe. Follow up by mentioning @roomote, in [the web UI](https://example.com/task/123), or in [Slack](${sharedSlackPermalink}).\` at the top of the PR body file before creating or refreshing the pull request`,
+      `prepend \`> &#8203;<!-- roomote:pr-attribution:start -->Opened on behalf of Jane Doe.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote, in [the web UI](https://example.com/task/123), or in [Slack](${sharedSlackPermalink}).\` at the top of the PR body file before creating or refreshing the pull request`,
     );
   });
 
@@ -283,7 +284,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     });
 
     expect(harnessInstructions).toContain(
-      'prepend `> Opened on behalf of Jane Doe. Follow up by mentioning @roomote or in [the web UI](https://example.com/task/123).` at the top of the PR body file before creating or refreshing the pull request',
+      'prepend `> &#8203;<!-- roomote:pr-attribution:start -->Opened on behalf of Jane Doe.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote or in [the web UI](https://example.com/task/123).` at the top of the PR body file before creating or refreshing the pull request',
     );
   });
 
@@ -299,7 +300,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     });
 
     expect(harnessInstructions).toContain(
-      `prepend \`> Opened on behalf of Jane Doe. Follow up by mentioning @roomote, in [the web UI](https://example.com/task/123), or in [Slack](${sharedSlackPermalink}).\` at the top of the PR body file before creating or refreshing the pull request`,
+      `prepend \`> &#8203;<!-- roomote:pr-attribution:start -->Opened on behalf of Jane Doe.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote, in [the web UI](https://example.com/task/123), or in [Slack](${sharedSlackPermalink}).\` at the top of the PR body file before creating or refreshing the pull request`,
     );
   });
 
@@ -316,7 +317,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     });
 
     expect(harnessInstructions).toContain(
-      `prepend \`> Opened on behalf of Jane Doe. Follow up by mentioning @roomote, in [the web UI](https://example.com/task/123), or in [Slack](${teamSlackPermalink}).\` at the top of the PR body file before creating or refreshing the pull request`,
+      `prepend \`> &#8203;<!-- roomote:pr-attribution:start -->Opened on behalf of Jane Doe.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote, in [the web UI](https://example.com/task/123), or in [Slack](${teamSlackPermalink}).\` at the top of the PR body file before creating or refreshing the pull request`,
     );
   });
 
@@ -333,7 +334,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     });
 
     expect(harnessInstructions).toContain(
-      'prepend `> Opened on behalf of Jane Doe. Follow up by mentioning @roomote, in [the web UI](https://example.com/task/123), or in [Telegram](https://t.me/c/456789/7/42).` at the top of the PR body file before creating or refreshing the pull request',
+      'prepend `> &#8203;<!-- roomote:pr-attribution:start -->Opened on behalf of Jane Doe.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote, in [the web UI](https://example.com/task/123), or in [Telegram](https://t.me/c/456789/7/42).` at the top of the PR body file before creating or refreshing the pull request',
     );
   });
 
@@ -350,7 +351,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     });
 
     expect(harnessInstructions).toContain(
-      'prepend `> Opened on behalf of Jane Doe. Follow up by mentioning @roomote, in [the web UI](https://example.com/task/123), or in [Telegram](https://t.me/roomote_bot).` at the top of the PR body file before creating or refreshing the pull request',
+      'prepend `> &#8203;<!-- roomote:pr-attribution:start -->Opened on behalf of Jane Doe.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote, in [the web UI](https://example.com/task/123), or in [Telegram](https://t.me/roomote_bot).` at the top of the PR body file before creating or refreshing the pull request',
     );
   });
 
@@ -366,7 +367,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     });
 
     expect(harnessInstructions).toContain(
-      'prepend `> Opened on behalf of Jane Doe. Follow up by mentioning @roomote or in [the web UI](https://example.com/task/123).` at the top of the PR body file before creating or refreshing the pull request',
+      'prepend `> &#8203;<!-- roomote:pr-attribution:start -->Opened on behalf of Jane Doe.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote or in [the web UI](https://example.com/task/123).` at the top of the PR body file before creating or refreshing the pull request',
     );
   });
 
@@ -383,7 +384,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     });
 
     expect(harnessInstructions).toContain(
-      'prepend `> Opened on behalf of Jane Doe. Follow up by mentioning @roomote, in [the web UI](https://example.com/task/123), or in [Teams](https://teams.microsoft.com/l/message/19%3Achannel%40thread.v2/1647012345678?tenantId=tenant-abc).` at the top of the PR body file before creating or refreshing the pull request',
+      'prepend `> &#8203;<!-- roomote:pr-attribution:start -->Opened on behalf of Jane Doe.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote, in [the web UI](https://example.com/task/123), or in [Teams](https://teams.microsoft.com/l/message/19%3Achannel%40thread.v2/1647012345678?tenantId=tenant-abc).` at the top of the PR body file before creating or refreshing the pull request',
     );
   });
 
@@ -401,7 +402,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     });
 
     expect(harnessInstructions).toContain(
-      'prepend `> Opened on behalf of Jane Doe. Follow up by mentioning @roomote, in [the web UI](https://example.com/task/123), or in [Teams](https://teams.microsoft.com/l/app/bot-app-id?tenantId=tenant-abc).` at the top of the PR body file before creating or refreshing the pull request',
+      'prepend `> &#8203;<!-- roomote:pr-attribution:start -->Opened on behalf of Jane Doe.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote, in [the web UI](https://example.com/task/123), or in [Teams](https://teams.microsoft.com/l/app/bot-app-id?tenantId=tenant-abc).` at the top of the PR body file before creating or refreshing the pull request',
     );
   });
 
@@ -417,7 +418,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     });
 
     expect(harnessInstructions).toContain(
-      'prepend `> Opened on behalf of Jane Doe. Follow up by mentioning @roomote or in [the web UI](https://example.com/task/123).` at the top of the PR body file before creating or refreshing the pull request',
+      'prepend `> &#8203;<!-- roomote:pr-attribution:start -->Opened on behalf of Jane Doe.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote or in [the web UI](https://example.com/task/123).` at the top of the PR body file before creating or refreshing the pull request',
     );
   });
 
@@ -431,7 +432,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     });
 
     expect(harnessInstructions).toContain(
-      'prepend `> Opened on behalf of Jane Doe. Follow up by mentioning @roomote or in [the web UI](https://example.com/task/123).` at the top of the PR body file before creating or refreshing the pull request',
+      'prepend `> &#8203;<!-- roomote:pr-attribution:start -->Opened on behalf of Jane Doe.<!-- roomote:pr-attribution:end --> Follow up by mentioning @roomote or in [the web UI](https://example.com/task/123).` at the top of the PR body file before creating or refreshing the pull request',
     );
   });
 
@@ -470,7 +471,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     });
 
     expect(harnessInstructions).toContain(
-      'prepend `> Opened on behalf of Jane Doe. [View the task](https://example.com/task/123) or mention @',
+      'prepend `> &#8203;<!-- roomote:pr-attribution:start -->Opened on behalf of Jane Doe.<!-- roomote:pr-attribution:end --> [View the task](https://example.com/task/123) or mention @',
     );
     expect(harnessInstructions).toContain(
       'for follow-up asks.` at the top of the PR body file before creating or refreshing the pull request',
@@ -490,7 +491,7 @@ describe('request_user_input guidance in workflow prompts', () => {
     });
 
     expect(harnessInstructions).toContain(
-      'prepend `> Created by Roomote. [View the task](https://example.com/task/123) or mention @',
+      'prepend `> &#8203;<!-- roomote:pr-attribution:start -->Created by Roomote.<!-- roomote:pr-attribution:end --> [View the task](https://example.com/task/123) or mention @',
     );
     expect(harnessInstructions).toContain(
       'for follow-up asks.` at the top of the PR body file before creating or refreshing the pull request',

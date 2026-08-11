@@ -25,8 +25,42 @@ type RepositoryProviderRow = {
   fullName: string;
   host: string | null;
   isActive?: boolean;
+  private?: boolean;
   sourceControlProvider: SourceControlProvider;
 };
+
+function selectRepositoryRows(
+  rows: RepositoryProviderRow[],
+  repositoryOrder: string[],
+  sourceControlHost?: string,
+): RepositoryProviderRow[] | null {
+  const rowsByFullName = new Map<string, RepositoryProviderRow[]>();
+
+  for (const row of rows) {
+    const matches = rowsByFullName.get(row.fullName) ?? [];
+    matches.push(row);
+    rowsByFullName.set(row.fullName, matches);
+  }
+
+  const selected: RepositoryProviderRow[] = [];
+
+  for (const fullName of [...new Set(repositoryOrder)]) {
+    const matches = rowsByFullName.get(fullName) ?? [];
+    const activeMatches = matches.filter((row) => row.isActive === true);
+    const candidates = activeMatches.length > 0 ? activeMatches : matches;
+    const hostMatches = sourceControlHost
+      ? candidates.filter((row) => row.host === sourceControlHost)
+      : candidates;
+
+    if (hostMatches.length !== 1) {
+      return null;
+    }
+
+    selected.push(hostMatches[0]!);
+  }
+
+  return selected.length > 0 ? selected : null;
+}
 
 function toRepositoryProviderMap(
   rows: RepositoryProviderRow[],
@@ -47,10 +81,9 @@ function toRepositoryProviderMap(
     const matches = rowsByFullName.get(fullName) ?? [];
     const activeMatches = matches.filter((row) => row.isActive === true);
     const candidates = activeMatches.length > 0 ? activeMatches : matches;
-    const hostMatches =
-      candidates.length > 1 && sourceControlHost
-        ? candidates.filter((row) => row.host === sourceControlHost)
-        : candidates;
+    const hostMatches = sourceControlHost
+      ? candidates.filter((row) => row.host === sourceControlHost)
+      : candidates;
 
     if (candidates.length > 1 && hostMatches.length !== 1) {
       console.warn(
@@ -177,6 +210,110 @@ export async function resolveWorkspaceRepositoryProviders(
   }
 }
 
+async function resolveWorkspaceRepositoryRows(
+  dbOrTx: DatabaseOrTransaction,
+  workspace: TaskWorkspace,
+): Promise<RepositoryProviderRow[] | null> {
+  if (workspace.type === 'environment') {
+    const environment = await dbOrTx.query.environments.findFirst({
+      where: eq(environments.id, workspace.environmentId),
+      columns: { config: true },
+    });
+    if (!environment) {
+      return null;
+    }
+
+    const rows = await dbOrTx
+      .select({
+        fullName: repositories.fullName,
+        host: repositories.host,
+        isActive: repositories.isActive,
+        private: repositories.private,
+        sourceControlProvider: repositories.sourceControlProvider,
+      })
+      .from(environmentRepositoryMappings)
+      .innerJoin(
+        repositories,
+        eq(environmentRepositoryMappings.repositoryId, repositories.id),
+      )
+      .where(
+        and(
+          eq(
+            environmentRepositoryMappings.environmentId,
+            workspace.environmentId,
+          ),
+          eq(repositories.isActive, true),
+        ),
+      );
+    const selected = selectRepositoryRows(
+      rows,
+      environment.config.repositories.map(
+        (repository) => repository.repository,
+      ),
+    );
+    return selected;
+  }
+
+  if (workspace.type === 'all_repositories') {
+    const rows = await dbOrTx
+      .select({
+        fullName: repositories.fullName,
+        host: repositories.host,
+        isActive: repositories.isActive,
+        private: repositories.private,
+        sourceControlProvider: repositories.sourceControlProvider,
+      })
+      .from(repositories)
+      .where(eq(repositories.isActive, true));
+    return rows.length > 0 ? rows : null;
+  }
+
+  const fullNames =
+    workspace.type === 'repository' ? [workspace.repo] : workspace.repositories;
+  const rows = await dbOrTx
+    .select({
+      fullName: repositories.fullName,
+      host: repositories.host,
+      isActive: repositories.isActive,
+      private: repositories.private,
+      sourceControlProvider: repositories.sourceControlProvider,
+    })
+    .from(repositories)
+    .where(inArray(repositories.fullName, fullNames));
+  const selected = selectRepositoryRows(
+    rows,
+    fullNames,
+    workspace.sourceControlHost,
+  );
+  return selected;
+}
+
+/**
+ * Whether every repository in a workspace is known private. Missing or
+ * ambiguous repository rows return false so attribution fails toward privacy.
+ */
+export async function workspaceAllowsPrivateAttribution(
+  dbOrTx: DatabaseOrTransaction,
+  workspace: TaskWorkspace,
+): Promise<boolean> {
+  const rows = await resolveWorkspaceRepositoryRows(dbOrTx, workspace);
+  return rows?.every((repository) => repository.private === true) ?? false;
+}
+
+/** Whether every known repository can use a handle from the same provider. */
+export async function workspaceUsesOnlySourceControlProvider(
+  dbOrTx: DatabaseOrTransaction,
+  workspace: TaskWorkspace,
+  provider: SourceControlProvider,
+): Promise<boolean> {
+  const rows = await resolveWorkspaceRepositoryRows(dbOrTx, workspace);
+  return (
+    rows?.every(
+      (repository) => repository.sourceControlProvider === provider,
+    ) ?? false
+  );
+}
+
 /**
  * Resolve the single source-control provider a launch's workspace belongs to,
  * so the task payload can carry an explicit `sourceControlProvider`. Handles
@@ -196,4 +333,20 @@ export async function resolveWorkspaceSourceControlProvider(
     workspace,
   );
   return toSingleProvider(Object.values(repositoryProviders));
+}
+
+/** Resolve one exact repository host for attribution, or fail closed. */
+export async function resolveWorkspaceSourceControlHost(
+  dbOrTx: DatabaseOrTransaction,
+  workspace: TaskWorkspace,
+): Promise<string | undefined> {
+  const rows = await resolveWorkspaceRepositoryRows(dbOrTx, workspace);
+  if (!rows) {
+    return undefined;
+  }
+
+  const hosts = [...new Set(rows.map((row) => row.host).filter(Boolean))];
+  return hosts.length === 1 && rows.every((row) => row.host === hosts[0])
+    ? (hosts[0] ?? undefined)
+    : undefined;
 }

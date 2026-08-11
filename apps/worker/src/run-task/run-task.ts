@@ -1018,8 +1018,9 @@ export const runTask = async ({
     }
 
     // Build sandbox environment context for the agent.
-    // Reads ROOMOTE_*_HOST vars from the unsanitized env so the generated
-    // environment note always sees the injected preview URLs.
+    // Reads ROOMOTE_*_HOST and ROOMOTE_*_PREVIEW_URL vars from the unsanitized
+    // env so the generated environment note always sees the injected preview
+    // URLs.
     const sandboxInstruction = buildSandboxInstruction(
       Boolean(environmentConfig?.initialUrl),
       environmentConfig,

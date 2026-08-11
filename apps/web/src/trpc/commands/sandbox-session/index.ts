@@ -504,16 +504,28 @@ type ResolvedSandboxTaskAccess = Extract<
 type SandboxTaskRunDetail = TaskRunDetail & {
   prRepo: string | null;
   prNumber: number | null;
+  pullRequests?: Array<{
+    repository: string;
+    prNumber: number;
+    prUrl?: string;
+  }>;
 };
 
 function applyResolvedTaskPullRequestFallback<T extends TaskRunDetail>(
   taskRun: T,
   taskTaskRun: ResolvedSandboxTaskAccess['task']['taskRun'],
-): T & { prRepo: string | null; prNumber: number | null } {
+): T & {
+  prRepo: string | null;
+  prNumber: number | null;
+  pullRequests: NonNullable<
+    ResolvedSandboxTaskAccess['task']['taskRun']
+  >['pullRequests'];
+} {
   return {
     ...taskRun,
     prRepo: taskTaskRun?.prRepo ?? null,
     prNumber: taskTaskRun?.prNumber ?? null,
+    pullRequests: taskTaskRun?.pullRequests ?? [],
   };
 }
 

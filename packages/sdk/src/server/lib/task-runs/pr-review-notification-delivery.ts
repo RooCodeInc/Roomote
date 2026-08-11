@@ -514,6 +514,10 @@ function describePrReviewEvent(event: PrReviewActivityEvent): string {
     return `- ${author} left an inline review comment${link}`;
   }
 
+  if (event.kind === 'issue_comment') {
+    return `- ${author} commented on the pull request${link}`;
+  }
+
   if (event.kind === 'review_summary') {
     return event.summary
       ? `- ${author} finished reviewing the PR and reported: ${event.summary}${link}`

@@ -6,10 +6,10 @@ const { getRedisMock, redis, env } = vi.hoisted(() => ({
     del: vi.fn(),
   },
   env: {
-    R_INSTANCE_ID: 'roomote-cloud',
-    STATUSPAGE_INCIDENTS_ENABLED_INSTANCE_ID: 'roomote-cloud' as
-      | string
-      | undefined,
+    R_STATUSPAGE_INCIDENTS_URL:
+      'https://roomote.statuspage.io/api/v2/incidents/unresolved.json' as
+        | string
+        | undefined,
   },
 }));
 
@@ -36,8 +36,8 @@ const criticalIncident = {
 describe('Statuspage incidents', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    env.R_INSTANCE_ID = 'roomote-cloud';
-    env.STATUSPAGE_INCIDENTS_ENABLED_INSTANCE_ID = 'roomote-cloud';
+    env.R_STATUSPAGE_INCIDENTS_URL =
+      'https://roomote.statuspage.io/api/v2/incidents/unresolved.json';
     getRedisMock.mockReturnValue(redis);
     redis.get.mockResolvedValue(null);
     redis.set.mockResolvedValue('OK');
@@ -45,7 +45,7 @@ describe('Statuspage incidents', () => {
   });
 
   it('does not touch Redis or Statuspage when the deployment gate is disabled', async () => {
-    env.STATUSPAGE_INCIDENTS_ENABLED_INSTANCE_ID = undefined;
+    env.R_STATUSPAGE_INCIDENTS_URL = undefined;
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
@@ -55,11 +55,59 @@ describe('Statuspage incidents', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('does not couple the configured rollout value to R_INSTANCE_ID', () => {
-    env.STATUSPAGE_INCIDENTS_ENABLED_INSTANCE_ID = 'roomote-cloud';
-    env.R_INSTANCE_ID = 'different-instance';
-
+  it('enables incident checks when the feed URL is configured', () => {
     expect(isStatuspageIncidentsEnabled()).toBe(true);
+  });
+
+  it('fetches incidents from the configured feed URL', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json({
+        incidents: [criticalIncident],
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(getStatuspageIncident()).resolves.toEqual(criticalIncident);
+
+    expect(fetchMock).toHaveBeenCalledWith(env.R_STATUSPAGE_INCIDENTS_URL);
+  });
+
+  it('scopes Redis keys by the configured feed URL', async () => {
+    const firstUrl = env.R_STATUSPAGE_INCIDENTS_URL!;
+    const secondUrl =
+      'https://status.example.com/api/v2/incidents/unresolved.json';
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(Response.json({ incidents: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getStatuspageIncident();
+    const firstKeys = [
+      redis.get.mock.calls[0]?.[0],
+      redis.get.mock.calls[1]?.[0],
+      redis.set.mock.calls[0]?.[0],
+    ];
+
+    redis.get.mockClear();
+    redis.set.mockClear();
+    redis.del.mockClear();
+    redis.get.mockResolvedValue(null);
+    redis.set.mockResolvedValue('OK');
+    redis.del.mockResolvedValue(1);
+    env.R_STATUSPAGE_INCIDENTS_URL = secondUrl;
+
+    await getStatuspageIncident();
+    const secondKeys = [
+      redis.get.mock.calls[0]?.[0],
+      redis.get.mock.calls[1]?.[0],
+      redis.set.mock.calls[0]?.[0],
+    ];
+
+    expect(secondKeys[0]).not.toBe(firstKeys[0]);
+    expect(secondKeys[1]).not.toBe(firstKeys[1]);
+    expect(secondKeys[2]).not.toBe(firstKeys[2]);
+    expect(fetchMock).toHaveBeenNthCalledWith(1, firstUrl);
+    expect(fetchMock).toHaveBeenNthCalledWith(2, secondUrl);
   });
 
   it('selects the highest-impact incident, then the newest incident', () => {

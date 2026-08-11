@@ -2,6 +2,12 @@ import { randomBytes } from 'node:crypto';
 
 import { db, deploymentSecrets, eq } from '@roomote/db/server';
 import { decryptSecrets, encryptJSON } from '@roomote/db/encryption';
+import {
+  OAuthRefreshError,
+  createOAuthRefreshCoordinator,
+  isDefinitiveOAuthErrorCode,
+  readOAuthErrorCode,
+} from '@roomote/source-control-oauth';
 
 const SECRET_NAME = 'gitea_deployment_oauth_connection';
 const DEFAULT_SCOPES = [
@@ -11,6 +17,7 @@ const DEFAULT_SCOPES = [
   'write:issue',
   'read:organization',
 ] as const;
+const GITEA_OAUTH_REQUEST_TIMEOUT_MS = 15_000;
 
 export type GiteaOAuthConnectionStatus = 'active' | 'reauthorization_required';
 
@@ -33,11 +40,6 @@ type GiteaOAuthTokenResponse = {
   expires_in?: number;
   scope?: string;
 };
-
-let refreshPromise: Promise<string | null> | null = null;
-let deletionPromise: Promise<void> | null = null;
-let connectionGeneration = 0;
-let cachedAccessToken: string | null = null;
 
 function tokenEndpoint(baseUrl: string): string {
   return new URL(
@@ -97,29 +99,36 @@ async function writeConnection(
     });
 }
 
+type GiteaOAuthRefreshOptions = {
+  fetchImpl?: typeof fetch;
+  forceRefresh?: boolean;
+  requestTimeoutMs?: number;
+};
+
+const refreshCoordinator = createOAuthRefreshCoordinator<
+  GiteaOAuthConnection,
+  string,
+  GiteaOAuthRefreshOptions
+>({
+  readConnection,
+  writeConnection,
+  deleteConnection: async () => {
+    await db
+      .delete(deploymentSecrets)
+      .where(eq(deploymentSecrets.name, SECRET_NAME));
+  },
+  isFresh: (connection) =>
+    Date.parse(connection.expiresAt) > Date.now() + 60_000,
+  refresh: refreshGiteaOAuthConnection,
+  toResult: (connection) => connection.accessToken,
+});
+
 export async function getGiteaOAuthConnection(): Promise<GiteaOAuthConnection | null> {
   return readConnection();
 }
 
 export async function deleteGiteaOAuthConnection(): Promise<void> {
-  if (!deletionPromise) {
-    connectionGeneration += 1;
-    const inFlightRefresh = refreshPromise;
-    deletionPromise = (async () => {
-      await inFlightRefresh?.catch(() => undefined);
-      await db
-        .delete(deploymentSecrets)
-        .where(eq(deploymentSecrets.name, SECRET_NAME));
-      refreshPromise = null;
-      cachedAccessToken = null;
-    })();
-  }
-
-  try {
-    await deletionPromise;
-  } finally {
-    deletionPromise = null;
-  }
+  await refreshCoordinator.delete();
 }
 
 export async function exchangeGiteaOAuthCode(input: {
@@ -129,6 +138,7 @@ export async function exchangeGiteaOAuthCode(input: {
   code: string;
   redirectUri: string;
   fetchImpl?: typeof fetch;
+  requestTimeoutMs?: number;
 }): Promise<GiteaOAuthConnection> {
   const response = await (input.fetchImpl ?? fetch)(
     tokenEndpoint(input.baseUrl),
@@ -145,6 +155,9 @@ export async function exchangeGiteaOAuthCode(input: {
         grant_type: 'authorization_code',
         redirect_uri: input.redirectUri,
       }),
+      signal: AbortSignal.timeout(
+        input.requestTimeoutMs ?? GITEA_OAUTH_REQUEST_TIMEOUT_MS,
+      ),
     },
   );
   if (!response.ok) {
@@ -181,86 +194,64 @@ export async function exchangeGiteaOAuthCode(input: {
     connection.username = user.login ?? '';
   }
   await writeConnection(connection);
-  cachedAccessToken = connection.accessToken;
+  refreshCoordinator.remember(connection);
   return connection;
 }
 
-export async function resolveGiteaOAuthAccessToken(options?: {
-  fetchImpl?: typeof fetch;
-  forceRefresh?: boolean;
-}): Promise<string | null> {
-  if (deletionPromise) {
-    await deletionPromise;
-    return null;
-  }
-  const generation = connectionGeneration;
-  const connection = await readConnection();
-  if (generation !== connectionGeneration || deletionPromise) {
-    await deletionPromise;
-    return null;
-  }
-  if (!connection || connection.status !== 'active') return null;
-  if (
-    !options?.forceRefresh &&
-    Date.parse(connection.expiresAt) > Date.now() + 60_000
-  ) {
-    cachedAccessToken = connection.accessToken;
-    return connection.accessToken;
-  }
-  if (refreshPromise) return refreshPromise;
-
-  refreshPromise = (async () => {
-    const response = await (options?.fetchImpl ?? fetch)(
-      tokenEndpoint(connection.baseUrl),
-      {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          client_id: connection.clientId,
-          client_secret: connection.clientSecret,
-          refresh_token: connection.refreshToken,
-          grant_type: 'refresh_token',
-        }),
+async function refreshGiteaOAuthConnection(
+  connection: GiteaOAuthConnection,
+  options: GiteaOAuthRefreshOptions | undefined,
+): Promise<GiteaOAuthConnection> {
+  const response = await (options?.fetchImpl ?? fetch)(
+    tokenEndpoint(connection.baseUrl),
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
+      body: new URLSearchParams({
+        client_id: connection.clientId,
+        client_secret: connection.clientSecret,
+        refresh_token: connection.refreshToken,
+        grant_type: 'refresh_token',
+      }),
+      signal: AbortSignal.timeout(
+        options?.requestTimeoutMs ?? GITEA_OAUTH_REQUEST_TIMEOUT_MS,
+      ),
+    },
+  );
+  if (!response.ok) {
+    const oauthError = await readOAuthErrorCode(response);
+    const definitive = isDefinitiveOAuthErrorCode(oauthError);
+    throw new OAuthRefreshError(
+      definitive
+        ? 'Gitea OAuth authorization has expired and must be renewed.'
+        : `Gitea OAuth refresh failed: ${response.status} ${response.statusText}`,
+      definitive,
     );
-    if (!response.ok) {
-      if (generation !== connectionGeneration) return null;
-      await writeConnection({
-        ...connection,
-        status: 'reauthorization_required',
-      });
-      throw new Error(
-        'Gitea OAuth authorization has expired and must be renewed.',
-      );
-    }
-    const token = (await response.json()) as GiteaOAuthTokenResponse;
-    if (!token.access_token)
-      throw new Error('Gitea OAuth refresh did not return an access token.');
-    const next = {
-      ...connection,
-      accessToken: token.access_token,
-      refreshToken: token.refresh_token ?? connection.refreshToken,
-      expiresAt: new Date(
-        Date.now() + (token.expires_in ?? 3600) * 1000,
-      ).toISOString(),
-      scopes: token.scope?.split(/\s+/).filter(Boolean) ?? connection.scopes,
-      status: 'active' as const,
-    };
-    if (generation !== connectionGeneration) return null;
-    await writeConnection(next);
-    cachedAccessToken = next.accessToken;
-    return next.accessToken;
-  })();
-  try {
-    return await refreshPromise;
-  } finally {
-    refreshPromise = null;
   }
+  const token = (await response.json()) as GiteaOAuthTokenResponse;
+  if (!token.access_token)
+    throw new Error('Gitea OAuth refresh did not return an access token.');
+  return {
+    ...connection,
+    accessToken: token.access_token,
+    refreshToken: token.refresh_token ?? connection.refreshToken,
+    expiresAt: new Date(
+      Date.now() + (token.expires_in ?? 3600) * 1000,
+    ).toISOString(),
+    scopes: token.scope?.split(/\s+/).filter(Boolean) ?? connection.scopes,
+    status: 'active',
+  };
+}
+
+export async function resolveGiteaOAuthAccessToken(
+  options?: GiteaOAuthRefreshOptions,
+): Promise<string | null> {
+  return refreshCoordinator.resolve(options);
 }
 
 export function isGiteaOAuthAccessToken(token: string): boolean {
-  return token === cachedAccessToken;
+  return refreshCoordinator.isAccessToken(token);
 }

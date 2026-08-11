@@ -19,6 +19,7 @@ import type {
 import {
   getArtifactsForTask,
   getLatestTaskPullRequestsByTaskId,
+  getTaskPullRequestsByTaskId,
 } from '@/lib/server';
 import { resolveTaskCreatorDisplay } from '@/lib/server/tasks';
 
@@ -66,19 +67,24 @@ async function getTaskByIdForCurrentOrg(
     includeArtifacts = false,
   }: { taskId: string; includeArtifacts?: boolean },
 ): Promise<TaskWithAssociations | null> {
-  const [[result], taskPullRequestsByTaskId, inferenceUsage] =
-    await Promise.all([
-      db
-        .select({ task: tasks, user: users, taskRun: taskRuns })
-        .from(tasks)
-        .leftJoin(users, eq(tasks.initiatorUserId, users.id))
-        .leftJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
-        .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt)))
-        .orderBy(desc(taskRuns.id))
-        .limit(1),
-      getLatestTaskPullRequestsByTaskId([taskId]),
-      getTaskInferenceUsageByTaskId(taskId),
-    ]);
+  const [
+    [result],
+    taskPullRequestsByTaskId,
+    allTaskPullRequestsByTaskId,
+    inferenceUsage,
+  ] = await Promise.all([
+    db
+      .select({ task: tasks, user: users, taskRun: taskRuns })
+      .from(tasks)
+      .leftJoin(users, eq(tasks.initiatorUserId, users.id))
+      .leftJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
+      .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt)))
+      .orderBy(desc(taskRuns.id))
+      .limit(1),
+    getLatestTaskPullRequestsByTaskId([taskId]),
+    getTaskPullRequestsByTaskId([taskId]),
+    getTaskInferenceUsageByTaskId(taskId),
+  ]);
 
   if (!result) {
     return null;
@@ -87,6 +93,7 @@ async function getTaskByIdForCurrentOrg(
   const { task, user, taskRun } = result;
   const creator = resolveTaskCreatorDisplay(task, user);
   const latestPullRequest = taskPullRequestsByTaskId[taskId];
+  const pullRequests = allTaskPullRequestsByTaskId[taskId] ?? [];
 
   const taskData: TaskWithAssociations = {
     ...task,
@@ -98,6 +105,7 @@ async function getTaskByIdForCurrentOrg(
           ...taskRun,
           prRepo: latestPullRequest?.repository ?? null,
           prNumber: latestPullRequest?.prNumber ?? null,
+          pullRequests,
         }
       : null,
     inferenceUsage,

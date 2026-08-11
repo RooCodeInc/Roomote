@@ -480,6 +480,8 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     description: `Enable Better Stack so this deployment can access read-only monitoring and incident context from ${PRODUCT_NAME} tasks.`,
     icon: 'betterstack',
     connectionScope: 'deployment',
+    oauthScopes: ['read'],
+    oauthScopeMode: 'read-only',
   },
   {
     id: 'railway',

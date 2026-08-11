@@ -20,6 +20,7 @@ import {
 import {
   isGitLabOAuthAccessToken,
   resolveGitLabOAuthAccessToken,
+  resolveGitLabOAuthAccessTokenWithMetadata,
 } from './oauth';
 
 export * from './ci';
@@ -1193,8 +1194,13 @@ export async function createTaskRunScopedGitLabTokens(
   credentials: GitLabScopedProjectTokenCredential[];
   proxyCredentials: GitLabScopedProjectTokenCredential[];
   artifactsPatch: Record<string, GitLabScopedProjectTokenDescriptor[]>;
+  /** OAuth access-token expiry for the worker refresh loop, if known. */
+  expiresAt: Date | null;
 }> {
-  const deploymentToken = await resolveGitLabToken();
+  // `options.fetchImpl` is the GitLab *API* fetch used to mint project tokens
+  // below, so it is deliberately not forwarded to the OAuth token endpoint.
+  const oauthToken = await resolveGitLabOAuthAccessTokenWithMetadata();
+  const deploymentToken = oauthToken?.accessToken;
 
   if (!deploymentToken?.trim()) {
     throw new Error(
@@ -1224,6 +1230,7 @@ export async function createTaskRunScopedGitLabTokens(
       artifactsPatch: {
         [GITLAB_SCOPED_PROJECT_TOKENS_ARTIFACT_KEY]: [],
       },
+      expiresAt: oauthToken?.expiresAt ?? null,
     };
   }
 
@@ -1316,6 +1323,7 @@ export async function createTaskRunScopedGitLabTokens(
         artifactsPatch: {
           [GITLAB_SCOPED_PROJECT_TOKENS_ARTIFACT_KEY]: [],
         },
+        expiresAt: null,
       };
     }
 
@@ -1328,6 +1336,7 @@ export async function createTaskRunScopedGitLabTokens(
     artifactsPatch: {
       [GITLAB_SCOPED_PROJECT_TOKENS_ARTIFACT_KEY]: nextDescriptors,
     },
+    expiresAt: null,
   };
 }
 

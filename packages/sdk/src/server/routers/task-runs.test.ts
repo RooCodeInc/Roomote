@@ -21,6 +21,7 @@ const {
   mockRecordTaskMessageEnvelope,
   mockRecordTaskInferenceUsage,
   mockClaimShowWidgetFallbackDelivery,
+  mockClearPendingSlackRequestUserInput,
   mockReleaseShowWidgetFallbackDelivery,
   mockUpdateTaskRun,
 } = vi.hoisted(() => ({
@@ -37,6 +38,7 @@ const {
   mockRecordTaskMessageEnvelope: vi.fn(),
   mockRecordTaskInferenceUsage: vi.fn(),
   mockClaimShowWidgetFallbackDelivery: vi.fn(),
+  mockClearPendingSlackRequestUserInput: vi.fn(),
   mockReleaseShowWidgetFallbackDelivery: vi.fn(),
   mockUpdateTaskRun: vi.fn(),
 }));
@@ -55,7 +57,7 @@ vi.mock('@roomote/communication/messages', () => ({
 }));
 
 vi.mock('@roomote/slack', () => ({
-  clearPendingSlackRequestUserInput: vi.fn(),
+  clearPendingSlackRequestUserInput: mockClearPendingSlackRequestUserInput,
   getSlackThreadFooterText: mockGetSlackThreadFooterText,
   getSlackStartedMessageData: vi.fn(),
   getSlackMessages: vi.fn(),
@@ -309,6 +311,36 @@ describe('taskRunsRouter queue message guards', () => {
     });
   });
 
+  it('returns the cleared Slack prompt scoped to the matching run', async () => {
+    const pendingRequest = {
+      requestId: 'rui:session:turn:call',
+      runId: 42,
+      taskId: 'task-1',
+      questions: [],
+      currentQuestionIndex: 0,
+      answers: {},
+      status: 'submitted' as const,
+      createdAt: Date.now(),
+      promptMessageTs: 'prompt-ts',
+    };
+    mockClearPendingSlackRequestUserInput.mockResolvedValueOnce(pendingRequest);
+
+    await expect(
+      createRunCaller().clearPendingSlackRequestUserInput({
+        runId: 42,
+        threadId: 'thread-1',
+        requestId: 'rui:session:turn:call',
+      }),
+    ).resolves.toEqual(pendingRequest);
+    expect(mockClearPendingSlackRequestUserInput).toHaveBeenCalledWith(
+      'thread-1',
+      {
+        requestId: 'rui:session:turn:call',
+        runId: 42,
+      },
+    );
+  });
+
   it('allows queueCommunicationMessage for the matching run token', async () => {
     await expect(
       createRunCaller().queueCommunicationMessage({
@@ -431,6 +463,7 @@ describe('taskRunsRouter queue message guards', () => {
       taskId: 'task-1',
       prRepo: null,
       prNumber: null,
+      linkedPrs: [],
       channelId: 'C123',
       threadTs: '1710000000.123',
     });

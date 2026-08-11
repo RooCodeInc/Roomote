@@ -97,6 +97,8 @@ export {
   authUsers,
   authSessions,
   authAccounts,
+  sourceControlUserMappings,
+  sourceControlUserMappingsRelations,
   microsoftAuthUserMappings,
   microsoftAuthUserMappingsRelations,
   authVerifications,

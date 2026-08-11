@@ -421,7 +421,26 @@ export function TaskInfoPanel({
                 </tr>
               )}
 
-              {taskRun.prRepo && taskRun.prNumber && (
+              {(taskRun.pullRequests?.length ?? 0) > 0 ? (
+                <tr>
+                  <td className="pr-4 py-1 align-top whitespace-nowrap">
+                    Pull Requests
+                  </td>
+                  <td className="py-1">
+                    <div className="flex max-w-72 flex-col items-start gap-2">
+                      {taskRun.pullRequests?.map((pullRequest) => (
+                        <PullRequestBadge
+                          key={`${pullRequest.repository}:${pullRequest.prNumber}`}
+                          repo={pullRequest.repository}
+                          prNumber={pullRequest.prNumber}
+                          url={pullRequest.prUrl}
+                          iconClassName="text-muted-foreground"
+                        />
+                      ))}
+                    </div>
+                  </td>
+                </tr>
+              ) : taskRun.prRepo && taskRun.prNumber ? (
                 <tr>
                   <td className="pr-4 py-1 align-top whitespace-nowrap">
                     Pull Request
@@ -434,7 +453,7 @@ export function TaskInfoPanel({
                     />
                   </td>
                 </tr>
-              )}
+              ) : null}
 
               {linkedWorkItems.length > 0 ? (
                 <tr>

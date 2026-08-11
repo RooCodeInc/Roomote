@@ -49,6 +49,20 @@ describe('monday.com OAuth', () => {
   });
 });
 
+describe('Better Stack OAuth', () => {
+  it('uses the hosted MCP with deployment-scoped read-only access', () => {
+    expect(getMcpIntegration('betterstack')).toMatchObject({
+      name: 'Better Stack',
+      url: 'https://mcp.betterstack.com',
+      oauthScopes: ['read'],
+      oauthScopeMode: 'read-only',
+    });
+    expect(getMcpIntegrationConnectionScope('betterstack')).toBe('deployment');
+    expect(getMcpIntegrationOauthScopeMode('betterstack')).toBe('read-only');
+    expect(getMcpIntegrationOauthScopes('betterstack')).toEqual(['read']);
+  });
+});
+
 describe('Granola API key connection', () => {
   it('uses a deployment-scoped native MCP with admin-managed credentials', () => {
     expect(getMcpIntegration('granola')).toMatchObject({

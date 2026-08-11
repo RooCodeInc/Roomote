@@ -183,7 +183,12 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 // Import after mocks are set up.
-import { sleepCheckJob, sleepTaskRunNow } from '../sleep-check';
+import {
+  clearSleepCheckClientCache,
+  sleepCheckJob,
+  sleepTaskRunNow,
+} from '../sleep-check';
+import { resolveComputeProviderEnvValues } from '@roomote/db/server';
 
 /**
  * Mock the sequential DB select queries in sleepCheckJob.
@@ -224,6 +229,7 @@ function mockJobQueries({
 describe('sleepTaskRunNow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearSleepCheckClientCache();
     transactionFn.mockImplementation(async (callback) =>
       callback({ update: updateFn }),
     );
@@ -312,6 +318,7 @@ describe('sleepCheckJob', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    clearSleepCheckClientCache();
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -715,6 +722,71 @@ describe('sleepCheckJob', () => {
         triggerPath: 'due_sleep',
       }),
     );
+  });
+
+  it('reuses the provider client across scheduler runs', async () => {
+    const mockJob = {
+      id: 6626,
+      machineId: 'modal-reuse',
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      vendor: 'modal',
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+    };
+
+    mockGetInstanceStatus.mockResolvedValue({
+      status: 'running',
+      timeoutRemainingMs: 5 * 60 * 60 * 1_000,
+    });
+    returningFn.mockResolvedValue([{ id: 6626 }]);
+    mockCreateSnapshot.mockResolvedValue(true);
+
+    mockJobQueries({ dueJobs: [mockJob] });
+    await sleepCheckJob();
+    mockJobQueries({ dueJobs: [mockJob] });
+    await sleepCheckJob();
+
+    expect(mockGetInstanceStatus).toHaveBeenCalledTimes(2);
+    expect(mockCreateComputeProviderClient).toHaveBeenCalledTimes(1);
+  });
+
+  it('rebuilds the provider client when provider credentials change', async () => {
+    const mockJob = {
+      id: 6627,
+      machineId: 'modal-rotate',
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      vendor: 'modal',
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+    };
+
+    mockGetInstanceStatus.mockResolvedValue({
+      status: 'running',
+      timeoutRemainingMs: 5 * 60 * 60 * 1_000,
+    });
+    returningFn.mockResolvedValue([{ id: 6627 }]);
+    mockCreateSnapshot.mockResolvedValue(true);
+
+    mockJobQueries({ dueJobs: [mockJob] });
+    await sleepCheckJob();
+
+    vi.mocked(resolveComputeProviderEnvValues).mockResolvedValueOnce({
+      MODAL_TOKEN_ID: 'rotated',
+    });
+    mockJobQueries({ dueJobs: [mockJob] });
+    await sleepCheckJob();
+
+    expect(mockCreateComputeProviderClient).toHaveBeenCalledTimes(2);
+    expect(mockCreateComputeProviderClient).toHaveBeenLastCalledWith({
+      provider: 'modal',
+      envFallback: { MODAL_TOKEN_ID: 'rotated' },
+    });
   });
 
   it('retains due Blaxel jobs on standby without creating a snapshot', async () => {

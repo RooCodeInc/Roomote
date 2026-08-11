@@ -84,6 +84,8 @@ vi.mock('@roomote/sdk/server', () => ({
     prUrl: z.string(),
     deferrals: z.number().default(0),
     immediate: z.boolean().optional(),
+    batchKind: z.enum(['human', 'roomote']).optional(),
+    batchId: z.string().optional(),
   }),
   consumePendingPrReviewActivity: mockConsumePending,
   requeuePendingPrReviewActivity: mockRequeuePending,
@@ -427,13 +429,21 @@ describe('prReviewNotificationJob', () => {
     expect(postedCall.blocks).toBeUndefined();
   });
 
-  it('consumes immediate self-review activity from its independent queue', async () => {
-    await prReviewNotificationJob(makeJob({ immediate: true }) as never);
+  it('consumes an immediately promoted Roomote review cycle', async () => {
+    await prReviewNotificationJob(
+      makeJob({
+        immediate: true,
+        batchKind: 'roomote',
+        batchId: 'cycle-1',
+      }) as never,
+    );
 
     expect(mockConsumePending).toHaveBeenCalledWith({
       taskId: 'task-1',
       repository: 'owner/repo',
       prNumber: 42,
+      batchKind: 'roomote',
+      batchId: 'cycle-1',
       immediate: true,
     });
   });
@@ -577,6 +587,64 @@ describe('prReviewNotificationJob', () => {
     expect(mockStickyFooterPost).toHaveBeenCalled();
   });
 
+  it('releases deferred feedback exactly once after a live worker heartbeat becomes stale', async () => {
+    const liveRun = {
+      id: 1,
+      payload: { channel: 'C123' },
+      slackThreadTs: '111.222',
+      sourceRunId: null,
+      status: RunStatus.Idle,
+      taskPhase: 'running',
+      workerHeartbeatAt: new Date(),
+    };
+    const deadRun = {
+      ...liveRun,
+      workerHeartbeatAt: new Date(Date.now() - WORKER_HEARTBEAT_STALE_MS - 1),
+    };
+    mockFindFirstTaskRun.mockResolvedValue(deadRun);
+    mockFindFirstTaskRun.mockResolvedValueOnce(liveRun);
+    mockConsumePending.mockResolvedValueOnce(events).mockResolvedValueOnce([]);
+
+    await prReviewNotificationJob(makeJob() as never);
+    await prReviewNotificationJob(makeJob({ deferrals: 1 }) as never);
+    await prReviewNotificationJob(makeJob({ deferrals: 1 }) as never);
+
+    expect(mockSchedule).toHaveBeenCalledTimes(1);
+    expect(mockConsumePending).toHaveBeenCalledTimes(2);
+    expect(mockPrepareDelivery).toHaveBeenCalledTimes(1);
+    expect(mockStickyFooterPost).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps feedback deferred across a worker restart until the replacement run settles', async () => {
+    const replacementRun = {
+      id: 2,
+      payload: { channel: 'C123' },
+      slackThreadTs: '111.222',
+      sourceRunId: 1,
+      status: RunStatus.Running,
+      taskPhase: 'running',
+      workerHeartbeatAt: new Date(),
+    };
+    mockFindFirstTaskRun
+      .mockResolvedValueOnce(replacementRun)
+      .mockResolvedValueOnce({
+        ...replacementRun,
+        status: RunStatus.Idle,
+        taskPhase: 'waiting_for_prompt',
+      });
+
+    await prReviewNotificationJob(makeJob() as never);
+    await prReviewNotificationJob(makeJob({ deferrals: 1 }) as never);
+
+    expect(mockSchedule).toHaveBeenCalledTimes(1);
+    expect(mockConsumePending).toHaveBeenCalledTimes(1);
+    expect(mockPrepareDelivery).toHaveBeenCalledTimes(1);
+    expect(mockStickyFooterPost).toHaveBeenCalledTimes(1);
+    expect(mockRecordDelivery).toHaveBeenCalledWith(
+      expect.objectContaining({ runId: 2, taskId: 'task-1' }),
+    );
+  });
+
   it('drops at the deferral cap when an idle running phase has a fresh heartbeat', async () => {
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
@@ -670,7 +738,11 @@ describe('prReviewNotificationJob', () => {
 
     expect(mockPostMessage).not.toHaveBeenCalled();
     expect(mockRequeuePending).toHaveBeenCalledWith({
-      target: { taskId: 'task-1', repository: 'owner/repo', prNumber: 42 },
+      target: {
+        taskId: 'task-1',
+        repository: 'owner/repo',
+        prNumber: 42,
+      },
       events,
     });
   });
@@ -683,7 +755,11 @@ describe('prReviewNotificationJob', () => {
     );
 
     expect(mockRequeuePending).toHaveBeenCalledWith({
-      target: { taskId: 'task-1', repository: 'owner/repo', prNumber: 42 },
+      target: {
+        taskId: 'task-1',
+        repository: 'owner/repo',
+        prNumber: 42,
+      },
       events,
     });
   });

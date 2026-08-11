@@ -2,7 +2,10 @@
 import type { DatabaseOrTransaction } from '../../db';
 import {
   resolveWorkspaceRepositoryProviders,
+  resolveWorkspaceSourceControlHost,
   resolveWorkspaceSourceControlProvider,
+  workspaceAllowsPrivateAttribution,
+  workspaceUsesOnlySourceControlProvider,
 } from '../source-control-provider';
 
 const mockWhere = vi.fn();
@@ -11,6 +14,7 @@ let mockRows: Array<{
   fullName: string;
   host: string | null;
   isActive?: boolean;
+  private?: boolean;
   sourceControlProvider: 'github' | 'gitlab' | 'gitea' | 'ado' | 'bitbucket';
 }> = [];
 let mockEnvironmentRepositories: string[] = [];
@@ -228,6 +232,65 @@ describe('resolveWorkspaceSourceControlProvider', () => {
     ).resolves.toEqual({ 'group/project': 'gitea' });
   });
 
+  it('rejects a single repository row from a different host', async () => {
+    mockRows = [
+      {
+        fullName: 'group/project',
+        host: 'gitlab.example.com',
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+
+    await expect(
+      resolveWorkspaceRepositoryProviders(dbOrTx, {
+        type: 'repository',
+        repo: 'group/project',
+        sourceControlHost: 'git.example.com',
+      }),
+    ).resolves.toEqual({});
+  });
+
+  it('does not use a legacy null-host row for a stamped host', async () => {
+    mockRows = [
+      {
+        fullName: 'group/project',
+        host: null,
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+
+    await expect(
+      resolveWorkspaceRepositoryProviders(dbOrTx, {
+        type: 'repository',
+        repo: 'group/project',
+        sourceControlHost: 'gitlab.example.com',
+      }),
+    ).resolves.toEqual({});
+  });
+
+  it('prefers an exact host match over a legacy null-host row', async () => {
+    mockRows = [
+      {
+        fullName: 'group/project',
+        host: null,
+        sourceControlProvider: 'github',
+      },
+      {
+        fullName: 'group/project',
+        host: 'gitlab.example.com',
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+
+    await expect(
+      resolveWorkspaceRepositoryProviders(dbOrTx, {
+        type: 'repository',
+        repo: 'group/project',
+        sourceControlHost: 'gitlab.example.com',
+      }),
+    ).resolves.toEqual({ 'group/project': 'gitlab' });
+  });
+
   it('prefers active rows over stale inactive rows with the same name', async () => {
     mockRows = [
       {
@@ -295,5 +358,204 @@ describe('resolveWorkspaceSourceControlProvider', () => {
       expect.stringContaining('Omitting ambiguous repository group/project'),
     );
     warn.mockRestore();
+  });
+});
+
+describe('workspaceAllowsPrivateAttribution', () => {
+  beforeEach(() => {
+    mockRows = [];
+    mockEnvironmentRepositories = [];
+  });
+
+  it('allows account names only when every selected repository is private', async () => {
+    mockRows = [
+      {
+        fullName: 'octo/api',
+        host: 'github.com',
+        private: true,
+        sourceControlProvider: 'github',
+      },
+      {
+        fullName: 'octo/web',
+        host: 'github.com',
+        private: true,
+        sourceControlProvider: 'github',
+      },
+    ];
+
+    await expect(
+      workspaceAllowsPrivateAttribution(dbOrTx, {
+        type: 'repository_set',
+        repositories: ['octo/api', 'octo/web'],
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it('uses public-safe attribution for mixed-visibility workspaces', async () => {
+    mockRows = [
+      {
+        fullName: 'octo/private',
+        host: 'github.com',
+        private: true,
+        sourceControlProvider: 'github',
+      },
+      {
+        fullName: 'octo/public',
+        host: 'github.com',
+        private: false,
+        sourceControlProvider: 'github',
+      },
+    ];
+
+    await expect(
+      workspaceAllowsPrivateAttribution(dbOrTx, {
+        type: 'repository_set',
+        repositories: ['octo/private', 'octo/public'],
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('uses public-safe attribution when a repository cannot be resolved', async () => {
+    await expect(
+      workspaceAllowsPrivateAttribution(dbOrTx, {
+        type: 'repository',
+        repo: 'octo/missing',
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('uses public-safe attribution when the selected host does not match', async () => {
+    mockRows = [
+      {
+        fullName: 'group/project',
+        host: 'gitlab.example.com',
+        private: true,
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+
+    await expect(
+      workspaceAllowsPrivateAttribution(dbOrTx, {
+        type: 'repository',
+        repo: 'group/project',
+        sourceControlHost: 'git.example.com',
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('uses public-safe attribution for a legacy null-host row', async () => {
+    mockRows = [
+      {
+        fullName: 'group/project',
+        host: null,
+        private: true,
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+
+    await expect(
+      workspaceAllowsPrivateAttribution(dbOrTx, {
+        type: 'repository',
+        repo: 'group/project',
+        sourceControlHost: 'gitlab.example.com',
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('uses legacy null-host visibility only when no exact host exists', async () => {
+    mockRows = [
+      {
+        fullName: 'group/project',
+        host: null,
+        private: true,
+        sourceControlProvider: 'gitlab',
+      },
+      {
+        fullName: 'group/project',
+        host: 'gitlab.example.com',
+        private: false,
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+
+    await expect(
+      workspaceAllowsPrivateAttribution(dbOrTx, {
+        type: 'repository',
+        repo: 'group/project',
+        sourceControlHost: 'gitlab.example.com',
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it('requires every repository to match before using a provider handle', async () => {
+    mockRows = [
+      {
+        fullName: 'octo/api',
+        host: 'github.com',
+        private: true,
+        sourceControlProvider: 'github',
+      },
+      {
+        fullName: 'group/web',
+        host: 'gitlab.com',
+        private: false,
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+
+    await expect(
+      workspaceUsesOnlySourceControlProvider(
+        dbOrTx,
+        {
+          type: 'repository_set',
+          repositories: ['octo/api', 'group/web'],
+        },
+        'github',
+      ),
+    ).resolves.toBe(false);
+  });
+
+  it('resolves one exact host for a single-provider workspace', async () => {
+    mockRows = [
+      {
+        fullName: 'group/api',
+        host: 'gitlab.example.com',
+        sourceControlProvider: 'gitlab',
+      },
+      {
+        fullName: 'group/web',
+        host: 'gitlab.example.com',
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+
+    await expect(
+      resolveWorkspaceSourceControlHost(dbOrTx, {
+        type: 'repository_set',
+        repositories: ['group/api', 'group/web'],
+      }),
+    ).resolves.toBe('gitlab.example.com');
+  });
+
+  it('does not resolve attribution identity across multiple hosts', async () => {
+    mockRows = [
+      {
+        fullName: 'group/api',
+        host: 'gitlab-a.example.com',
+        sourceControlProvider: 'gitlab',
+      },
+      {
+        fullName: 'group/web',
+        host: 'gitlab-b.example.com',
+        sourceControlProvider: 'gitlab',
+      },
+    ];
+
+    await expect(
+      resolveWorkspaceSourceControlHost(dbOrTx, {
+        type: 'repository_set',
+        repositories: ['group/api', 'group/web'],
+      }),
+    ).resolves.toBeUndefined();
   });
 });

@@ -31,6 +31,17 @@ describe('resolveStandardTaskSurface', () => {
     ).toBe('github');
   });
 
+  it('keeps inherited communication context on the web surface', () => {
+    expect(
+      resolveStandardTaskSurface({
+        hasSlackChannel: true,
+        communicationProvider: 'slack',
+        taskSurface: 'slack',
+        communicationContextInherited: true,
+      }),
+    ).toBe('web');
+  });
+
   it('falls back to web for api/system/missing launch surfaces', () => {
     expect(
       resolveStandardTaskSurface({

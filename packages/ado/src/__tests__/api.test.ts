@@ -38,6 +38,17 @@ vi.mock('@roomote/db/server', () => ({
     select: vi.fn(),
     insert: vi.fn(),
     update: (...args: unknown[]) => mockAuthAccountsUpdate(...args),
+    transaction: async (callback: (tx: unknown) => unknown) =>
+      callback({
+        execute: vi.fn(),
+        query: {
+          authAccounts: {
+            findFirst: (...args: unknown[]) =>
+              mockAuthAccountsFindFirst(...args),
+          },
+        },
+        update: (...args: unknown[]) => mockAuthAccountsUpdate(...args),
+      }),
   },
   environments: {
     id: 'environments.id',
@@ -67,6 +78,7 @@ vi.mock('@roomote/db/server', () => ({
     const value = process.env[name]?.trim();
     return value || null;
   }),
+  sql: vi.fn(),
 }));
 
 vi.mock('@roomote/db/encryption', () => ({
@@ -550,7 +562,9 @@ describe('Azure DevOps API helpers', () => {
       baseUrl: 'https://dev.azure.com',
       fetchImpl: vi
         .fn<typeof fetch>()
-        .mockResolvedValue(new Response('{}', { status: 400 })),
+        .mockResolvedValue(
+          Response.json({ error: 'invalid_grant' }, { status: 400 }),
+        ),
     });
     expect(refused).toEqual({
       status: 'invalid',
@@ -815,6 +829,7 @@ describe('Azure DevOps API helpers', () => {
           originBaseUrl: 'https://dev.azure.com',
         },
       ],
+      expiresAt: null,
     });
     expect(mockRepositoriesFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -853,6 +868,7 @@ describe('Azure DevOps API helpers', () => {
           originBaseUrl: 'https://ado.example.com/tfs',
         },
       ],
+      expiresAt: null,
     });
   });
 
