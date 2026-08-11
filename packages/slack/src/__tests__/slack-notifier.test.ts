@@ -51,6 +51,40 @@ describe('SlackNotifier', () => {
     process.env.SLACK_API_BASE_URL = originalBaseUrl;
   });
 
+  describe('getDirectMessageUserId', () => {
+    it('returns the user for a one-to-one direct message', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          channel: { id: 'D123ABC456', is_im: true, user: 'U123ABC456' },
+        }),
+      });
+
+      await expect(notifier.getDirectMessageUserId('D123ABC456')).resolves.toBe(
+        'U123ABC456',
+      );
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledWith(
+        'https://slack.com/api/conversations.info?channel=D123ABC456',
+        expect.objectContaining({ method: 'GET' }),
+      );
+    });
+
+    it('returns null when the target is not a one-to-one direct message', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          ok: true,
+          channel: { id: 'C123ABC456', is_im: false },
+        }),
+      });
+
+      await expect(
+        notifier.getDirectMessageUserId('C123ABC456'),
+      ).resolves.toBeNull();
+    });
+  });
+
   describe('postMessage', () => {
     it('sends a chat.postMessage request and returns the message ts on success', async () => {
       getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
