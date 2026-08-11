@@ -1,8 +1,14 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "globalDependencies": [
+    ".docker/app/Dockerfile",
     ".docker/sandbox/install-browser-agent.sh",
-    "apps/worker/Dockerfile"
+    ".docker/sandbox/install-worker.sh",
+    ".roomote/environments/roomote.yaml",
+    "apps/worker/Dockerfile",
+    "apps/worker/package.json",
+    "ecosystem.config.js",
+    "scripts/build-worker-release.sh"
   ],
   "globalPassThroughEnv": [
     "APP_ENV",
