@@ -2,15 +2,21 @@ import { Hono } from 'hono';
 
 import type { Variables } from '../../types';
 
-const { mockValidateRunToken, mockValidateAuthToken, mockFindDeployment } =
-  vi.hoisted(() => ({
-    mockValidateRunToken: vi.fn(),
-    mockValidateAuthToken: vi.fn(),
-    mockFindDeployment: vi.fn(),
-  }));
+const {
+  mockValidateRunToken,
+  mockValidateMcpAccessToken,
+  mockValidateAuthToken,
+  mockFindDeployment,
+} = vi.hoisted(() => ({
+  mockValidateRunToken: vi.fn(),
+  mockValidateMcpAccessToken: vi.fn(),
+  mockValidateAuthToken: vi.fn(),
+  mockFindDeployment: vi.fn(),
+}));
 
 vi.mock('@roomote/auth', () => ({
   validateRunToken: mockValidateRunToken,
+  validateMcpAccessToken: mockValidateMcpAccessToken,
   validateAuthToken: mockValidateAuthToken,
 }));
 
@@ -69,6 +75,7 @@ describe('tokenAuthMiddleware token extraction', () => {
       return RUN_TOKEN_CONTEXT;
     });
     mockValidateAuthToken.mockRejectedValue(new Error('invalid token'));
+    mockValidateMcpAccessToken.mockRejectedValue(new Error('invalid token'));
   });
 
   it('accepts a bearer token on any path', async () => {
@@ -77,6 +84,24 @@ describe('tokenAuthMiddleware token extraction', () => {
     });
 
     expect(authContext).toEqual(RUN_TOKEN_CONTEXT);
+  });
+
+  it('attaches a browser-issued MCP token for route-level authorization', async () => {
+    const mcpContext = {
+      tokenType: 'mcp',
+      userId: 'user-1',
+      resource: 'https://api.example.com/mcp',
+      scopes: ['mcp:roomote'],
+      version: 1,
+    };
+    mockValidateMcpAccessToken.mockResolvedValue(mcpContext);
+
+    const authContext = await requestAuthContext('/mcp', {
+      authorization: 'Bearer valid-mcp-token',
+    });
+
+    expect(authContext).toEqual(mcpContext);
+    expect(mockValidateAuthToken).not.toHaveBeenCalled();
   });
 
   it('accepts the run token from x-api-key on the inference gateway', async () => {

@@ -1,4 +1,8 @@
-import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
+import type {
+  AuthTokenContext,
+  McpAccessTokenContext,
+  RunTokenContext,
+} from '@roomote/types';
 
 export type WebhookResponse = {
   status: 'ok' | 'error';
@@ -13,6 +17,10 @@ export type CiE2eAuthContext = {
 };
 
 export type Variables = {
-  authContext: AuthTokenContext | RunTokenContext | undefined;
+  authContext:
+    | AuthTokenContext
+    | McpAccessTokenContext
+    | RunTokenContext
+    | undefined;
   ciE2eAuth: CiE2eAuthContext | undefined;
 };

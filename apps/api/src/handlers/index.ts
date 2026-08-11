@@ -22,6 +22,8 @@ export { trpc } from './trpc';
 // mcp
 export { mcp } from './mcp';
 export { mcpRouting } from './mcp/routing';
+export { mcpOAuthMetadata } from './mcp-oauth';
+export { publicRoomoteMcp } from './mcp/roomote';
 
 // inference gateway
 export { inference } from './inference';

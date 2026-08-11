@@ -1,0 +1,78 @@
+---
+title: Roomote MCP
+icon: plug-circle-bolt
+description: Connect an OAuth-capable MCP client to Roomote's member task tools.
+---
+
+Roomote exposes member task management, environment discovery, and connected
+chat context as a remote MCP server. OAuth-capable clients can connect without
+manually creating or copying an API token.
+
+## Prerequisites
+
+Before connecting a client, `R_PUBLIC_URL`, or `R_APP_URL` when no public URL
+is set, must be a browser-reachable HTTPS origin. The web and API services must
+also share Redis and the same Roomote signing keys.
+
+Loopback HTTP callback URLs are accepted for desktop clients. Other client
+callback URLs must use HTTPS.
+
+## Connect a client
+
+Configure the MCP client with this server URL:
+
+```text
+<ROOMOTE_URL>/mcp
+```
+
+For example, if Roomote is available at `https://roomote.example`, use:
+
+```text
+https://roomote.example/mcp
+```
+
+For Claude Code, add it at user scope and start the browser login:
+
+```bash
+claude mcp add --transport http roomote --scope user <ROOMOTE_URL>/mcp
+claude mcp login roomote
+```
+
+The client discovers the OAuth authorization server automatically. Roomote
+opens the browser, asks the user to sign in when needed, and returns the client
+to its registered callback after the user explicitly approves access. The
+client must support OAuth authorization code flow with S256 PKCE and dynamic
+client registration.
+
+Roomote issues one-hour access tokens and rotates an opaque refresh token for
+up to 30 days. The client returns to browser authorization when that session
+expires or is revoked.
+
+## Integration boundary
+
+The browser-issued credential is intentionally narrower than Roomote's
+internal user and task-run credentials:
+
+- it is valid only for the advertised Roomote MCP resource URL
+- it grants only the `mcp:roomote` scope
+- it cannot authenticate tRPC, task, artifact, inference, integration proxy,
+  or other MCP endpoints
+- authorization codes are single-use, expire after five minutes, and are
+  bound to the client ID, redirect URI, resource, and PKCE challenge
+- anonymous client registrations must complete OAuth within one hour; clients
+  that complete the exchange remain registered for 30 days and can use only
+  HTTPS or loopback HTTP callback URLs
+
+The endpoint acts as the signed-in member. It can inspect Roomote and connected
+chat context, search and read tasks, list launch environments, launch or cancel
+tasks, and send follow-up messages. Existing member and admin authorization
+still applies to every operation; the OAuth token does not grant a task-run or
+administrator identity.
+
+## Troubleshooting
+
+If the client does not open a browser, verify that it follows the
+`WWW-Authenticate` protected-resource metadata link returned by the MCP
+endpoint. If the browser opens but authorization fails, confirm that the
+client sends the exact resource URL above in both authorization and token
+requests and uses the `mcp:roomote` scope.

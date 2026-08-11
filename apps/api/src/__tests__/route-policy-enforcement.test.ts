@@ -1,4 +1,10 @@
 import type { Context, Next } from 'hono';
+import {
+  getLegacyRoomoteMcpResourceUrl,
+  getRoomoteMcpProtectedResourceMetadataUrl,
+  getRoomoteMcpResourceUrl,
+} from '@roomote/auth';
+import { Env } from '@roomote/env';
 
 import type { Variables } from '../types';
 
@@ -75,6 +81,38 @@ vi.mock('../middleware', async (importOriginal) => {
           } as Variables['authContext']);
         }
 
+        if (authHeader === 'Bearer test-mcp-token') {
+          c.set('authContext', {
+            tokenType: 'mcp',
+            userId: 'user-123',
+            resource: getRoomoteMcpResourceUrl(
+              Env.R_PUBLIC_URL ?? Env.R_APP_URL,
+            ),
+            scopes: ['mcp:roomote'],
+            version: 1,
+          } as Variables['authContext']);
+        }
+
+        if (authHeader === 'Bearer test-wrong-mcp-token') {
+          c.set('authContext', {
+            tokenType: 'mcp',
+            userId: 'user-123',
+            resource: 'https://wrong.example/mcp',
+            scopes: ['mcp:roomote'],
+            version: 1,
+          } as Variables['authContext']);
+        }
+
+        if (authHeader === 'Bearer test-legacy-mcp-token') {
+          c.set('authContext', {
+            tokenType: 'mcp',
+            userId: 'user-123',
+            resource: getLegacyRoomoteMcpResourceUrl(Env.TRPC_URL),
+            scopes: ['mcp:roomote'],
+            version: 1,
+          } as Variables['authContext']);
+        }
+
         await next();
       },
   };
@@ -110,6 +148,22 @@ describe('route policy enforcement', () => {
 
       expect(response.status).toBe(404);
       await expect(response.json()).resolves.toEqual({ error: 'not_found' });
+    });
+  });
+
+  describe('Roomote MCP OAuth discovery', () => {
+    it('publishes protected-resource metadata without authentication', async () => {
+      const response = await createApiApp().request(
+        'http://localhost/.well-known/oauth-protected-resource/mcp',
+      );
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toMatchObject({
+        resource: getRoomoteMcpResourceUrl(Env.R_PUBLIC_URL ?? Env.R_APP_URL),
+        authorization_servers: [expect.any(String)],
+        bearer_methods_supported: ['header'],
+        scopes_supported: ['mcp:roomote'],
+      });
     });
   });
 
@@ -166,13 +220,124 @@ describe('route policy enforcement', () => {
       await expect(mcpResponse.json()).resolves.toEqual(jsonRpcUnauthorized);
 
       const mcpRoutingResponse = await createApiApp().request(
-        'http://localhost/api/mcp-routing/roomote',
+        'http://localhost/mcp',
         { method: 'POST', body: '{}' },
       );
 
       expect(mcpRoutingResponse.status).toBe(401);
+      expect(mcpRoutingResponse.headers.get('www-authenticate')).toBe(
+        `Bearer resource_metadata="${getRoomoteMcpProtectedResourceMetadataUrl(Env.R_PUBLIC_URL ?? Env.R_APP_URL)}"`,
+      );
       await expect(mcpRoutingResponse.json()).resolves.toEqual(
         jsonRpcUnauthorized,
+      );
+    });
+
+    it('rejects MCP OAuth tokens outside the Roomote MCP resource', async () => {
+      const response = await createApiApp().request(
+        'http://localhost/api/task-runs/123/logs',
+        { headers: { authorization: 'Bearer test-mcp-token' } },
+      );
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toEqual({
+        error: 'mcp_token_not_allowed',
+      });
+    });
+
+    it('rejects an MCP token whose audience does not match the configured resource', async () => {
+      const response = await createApiApp().request('http://localhost/mcp', {
+        method: 'POST',
+        headers: { authorization: 'Bearer test-wrong-mcp-token' },
+        body: '{}',
+      });
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { message: expect.stringContaining('requires a user-scoped') },
+      });
+    });
+
+    it('rejects a legacy-audience token at the broad public MCP endpoint', async () => {
+      const response = await createApiApp().request('http://localhost/mcp', {
+        method: 'POST',
+        headers: { authorization: 'Bearer test-legacy-mcp-token' },
+        body: '{}',
+      });
+
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        error: { message: expect.stringContaining('requires a user-scoped') },
+      });
+    });
+
+    it('exposes member task tools only on the public /mcp endpoint', async () => {
+      const request = {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer test-mcp-token',
+          accept: 'application/json, text/event-stream',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/list',
+          params: {},
+        }),
+      };
+      const publicResponse = await createApiApp().request(
+        'http://localhost/mcp',
+        request,
+      );
+      const publicBody = (await publicResponse.json()) as {
+        result?: { tools?: Array<{ name: string }> };
+      };
+      expect(publicResponse.status).toBe(200);
+      expect(publicBody.result?.tools?.map((tool) => tool.name)).toContain(
+        'manage_tasks',
+      );
+
+      const callResponse = await createApiApp().request(
+        'http://localhost/mcp',
+        {
+          ...request,
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 2,
+            method: 'tools/call',
+            params: {
+              name: 'manage_tasks',
+              arguments: { action: 'list_environments' },
+            },
+          }),
+        },
+      );
+      const callBody = (await callResponse.json()) as {
+        result?: { isError?: boolean; structuredContent?: unknown };
+      };
+      expect(callResponse.status).toBe(200);
+      expect(callBody.result?.isError).not.toBe(true);
+      expect(callBody.result?.structuredContent).toMatchObject({
+        environments: expect.any(Array),
+      });
+
+      const legacyResponse = await createApiApp().request(
+        'http://localhost/api/mcp-routing/roomote',
+        {
+          ...request,
+          headers: {
+            ...request.headers,
+            authorization: 'Bearer test-user-token',
+          },
+        },
+      );
+      const legacyBody = (await legacyResponse.json()) as {
+        result?: { tools?: Array<{ name: string }> };
+      };
+      expect(legacyResponse.status).toBe(200);
+      expect(legacyBody.result?.tools?.map((tool) => tool.name)).not.toContain(
+        'manage_tasks',
       );
     });
 
@@ -397,6 +562,14 @@ describe('route policy enforcement', () => {
       version: 1,
     } as Variables['authContext'];
 
+    const mcpToken = {
+      tokenType: 'mcp',
+      userId: 'user-123',
+      resource: 'https://api.example.com/mcp',
+      scopes: ['mcp:roomote'],
+      version: 1,
+    } as Variables['authContext'];
+
     it('user policy admits only user tokens', () => {
       expect(evaluateRoutePolicy('user', userToken)).toBeUndefined();
       expect(evaluateRoutePolicy('user', runToken)).toEqual({
@@ -424,7 +597,21 @@ describe('route policy enforcement', () => {
     it('authenticated policy admits both token types', () => {
       expect(evaluateRoutePolicy('authenticated', userToken)).toBeUndefined();
       expect(evaluateRoutePolicy('authenticated', runToken)).toBeUndefined();
+      expect(evaluateRoutePolicy('authenticated', mcpToken)).toEqual({
+        status: 403,
+        body: { error: 'mcp_token_not_allowed' },
+      });
       expect(evaluateRoutePolicy('authenticated', undefined)).toEqual({
+        status: 401,
+        body: { error: 'authentication_required' },
+      });
+    });
+
+    it('roomote-mcp policy admits internal and scoped MCP tokens', () => {
+      expect(evaluateRoutePolicy('roomote-mcp', userToken)).toBeUndefined();
+      expect(evaluateRoutePolicy('roomote-mcp', runToken)).toBeUndefined();
+      expect(evaluateRoutePolicy('roomote-mcp', mcpToken)).toBeUndefined();
+      expect(evaluateRoutePolicy('roomote-mcp', undefined)).toEqual({
         status: 401,
         body: { error: 'authentication_required' },
       });

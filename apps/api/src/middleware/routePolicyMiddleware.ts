@@ -3,8 +3,10 @@ import { createHash } from 'node:crypto';
 import type { Context } from 'hono';
 import { createMiddleware } from 'hono/factory';
 
-import type { RunTokenContext } from '@roomote/types';
+import type { McpAccessTokenContext, RunTokenContext } from '@roomote/types';
 import { getRedis } from '@roomote/redis';
+import { getRoomoteMcpProtectedResourceMetadataUrl } from '@roomote/auth';
+import { Env } from '@roomote/env';
 
 import type { Variables } from '../types';
 import {
@@ -40,6 +42,12 @@ function isRunTokenContext(
   return Boolean(auth && 'runId' in auth);
 }
 
+function isMcpTokenContext(
+  auth: Variables['authContext'],
+): auth is McpAccessTokenContext {
+  return auth?.tokenType === 'mcp';
+}
+
 /**
  * Pure policy evaluation: given a route's declared policy class and the
  * request's validated auth context, decide whether the request may proceed.
@@ -64,12 +72,20 @@ export function evaluateRoutePolicy(
       if (!authContext) {
         return { status: 401, body: { error: 'authentication_required' } };
       }
+      if (isMcpTokenContext(authContext)) {
+        return { status: 403, body: { error: 'mcp_token_not_allowed' } };
+      }
+      return undefined;
+    case 'roomote-mcp':
+      if (!authContext) {
+        return { status: 401, body: { error: 'authentication_required' } };
+      }
       return undefined;
     case 'user':
       if (!authContext) {
         return { status: 401, body: { error: 'authentication_required' } };
       }
-      if (isRunTokenContext(authContext)) {
+      if (authContext.tokenType !== 'auth') {
         return { status: 403, body: { error: 'user_token_required' } };
       }
       return undefined;
@@ -89,6 +105,16 @@ function rejectionResponse(
   rule: RoutePolicyRule,
   rejection: RoutePolicyRejection,
 ): Response {
+  if (
+    (rule.name === 'roomote-mcp' || rule.name === 'roomote-public-mcp') &&
+    rejection.status === 401
+  ) {
+    c.header(
+      'WWW-Authenticate',
+      `Bearer resource_metadata="${getRoomoteMcpProtectedResourceMetadataUrl(Env.R_PUBLIC_URL ?? Env.R_APP_URL)}"`,
+    );
+  }
+
   if (rule.errorFormat === 'json-rpc') {
     // Match the JSON-RPC error envelope the MCP handlers emit themselves
     // (see `handlers/mcp/proxy-utils.ts`) so Streamable HTTP clients that

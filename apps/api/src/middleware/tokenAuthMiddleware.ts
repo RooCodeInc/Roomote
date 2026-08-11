@@ -1,7 +1,11 @@
 import type { Context, Next } from 'hono';
 import { createMiddleware } from 'hono/factory';
 
-import { validateRunToken, validateAuthToken } from '@roomote/auth';
+import {
+  validateAuthToken,
+  validateMcpAccessToken,
+  validateRunToken,
+} from '@roomote/auth';
 import { db, deploymentSettings, eq, users } from '@roomote/db/server';
 import { isRoomoteDeploymentDisabled } from '@roomote/types';
 
@@ -71,23 +75,43 @@ export const tokenAuthMiddleware = () =>
         return;
       }
 
+      let userScopedAuth:
+        | Awaited<ReturnType<typeof validateMcpAccessToken>>
+        | Awaited<ReturnType<typeof validateAuthToken>>
+        | undefined;
+
       try {
-        const authContext = await validateAuthToken(token);
-        if (await deploymentAllowsTokenAuth()) {
+        userScopedAuth = await validateMcpAccessToken(token);
+      } catch {
+        // Not an MCP OAuth token, try the internal user auth token below.
+      }
+
+      try {
+        userScopedAuth ??= await validateAuthToken(token);
+      } catch (error) {
+        if (!userScopedAuth) {
+          console.error(
+            `Failed to validate token: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+
+      if (userScopedAuth && (await deploymentAllowsTokenAuth())) {
+        try {
           const user = await db.query.users.findFirst({
-            where: eq(users.id, authContext.userId),
+            where: eq(users.id, userScopedAuth.userId),
             columns: { id: true, deletedAt: true },
           });
 
           // Removed users keep no standing access: their API tokens die with them.
           if (user && user.deletedAt == null) {
-            c.set('authContext', authContext);
+            c.set('authContext', userScopedAuth);
           }
+        } catch (error) {
+          console.error(
+            `Failed to resolve token user: ${error instanceof Error ? error.message : String(error)}`,
+          );
         }
-      } catch (error) {
-        console.error(
-          `Failed to validate token: ${error instanceof Error ? error.message : String(error)}`,
-        );
       }
     }
 
