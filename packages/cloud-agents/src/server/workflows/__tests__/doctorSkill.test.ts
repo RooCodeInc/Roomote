@@ -31,6 +31,9 @@ describe('doctor guidance', () => {
       'Treat `setup.repository_changes` as a provenance boundary',
     );
     expect(skillContent).toContain(
+      'without making the outcome unresolved solely because of that warning',
+    );
+    expect(skillContent).toContain(
       'call `complete_doctor_report` with that full report as the final workflow action',
     );
   });
