@@ -17,7 +17,12 @@ const registrationSchema = z.object({
     .max(5)
     .refine((values) => values.every(isAllowedOAuthRedirectUri)),
   token_endpoint_auth_method: z.literal('none').optional(),
-  grant_types: z.array(z.literal('authorization_code')).optional(),
+  grant_types: z
+    .array(z.enum(['authorization_code', 'refresh_token']))
+    .min(1)
+    .max(2)
+    .refine((values) => values.includes('authorization_code'))
+    .optional(),
   response_types: z.array(z.literal('code')).optional(),
 });
 

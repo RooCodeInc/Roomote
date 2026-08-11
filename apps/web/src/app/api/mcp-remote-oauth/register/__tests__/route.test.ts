@@ -13,7 +13,10 @@ vi.mock('@/lib/server/mcp-remote-oauth', async (importOriginal) => ({
 
 import { POST } from '../route';
 
-function registrationRequest(redirectUri: string) {
+function registrationRequest(
+  redirectUri: string,
+  grantTypes: string[] = ['authorization_code'],
+) {
   return new NextRequest(
     'https://roomote.example/api/mcp-remote-oauth/register',
     {
@@ -23,6 +26,7 @@ function registrationRequest(redirectUri: string) {
         client_name: 'Test client',
         redirect_uris: [redirectUri],
         token_endpoint_auth_method: 'none',
+        grant_types: grantTypes,
       }),
     },
   );
@@ -56,6 +60,26 @@ describe('POST /api/mcp-remote-oauth/register', () => {
         redirectUris: ['https://client.example/callback'],
       }),
     );
+  });
+
+  it('accepts clients that advertise refresh-token fallback support', async () => {
+    mockRegisterClient.mockResolvedValue({
+      clientId: '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
+      clientName: 'Test client',
+      redirectUris: ['http://localhost:54545/callback'],
+    });
+
+    const response = await POST(
+      registrationRequest('http://localhost:54545/callback', [
+        'authorization_code',
+        'refresh_token',
+      ]),
+    );
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({
+      grant_types: ['authorization_code'],
+    });
   });
 
   it('rejects a non-loopback HTTP callback', async () => {
