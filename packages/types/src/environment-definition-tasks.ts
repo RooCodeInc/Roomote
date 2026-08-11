@@ -98,9 +98,11 @@ export function buildEnvironmentVerificationPrompt(input: {
   environmentId: string;
   environmentName: string;
 }): string {
-  return `Verify that the ${PRODUCT_NAME} environment "${input.environmentName}" (id ${input.environmentId}) is running correctly.
+  return `$doctor
 
-Use localhost or the environment's initial URL to confirm the expected service responds successfully, and confirm there are no obvious startup failures blocking basic use. Preparing the environment can take 5 minutes or more, so be patient before deciding startup is stuck.
+Assess whether the persisted ${PRODUCT_NAME} environment "${input.environmentName}" (id ${input.environmentId}) is ready. This task is the current authorized environment-verification attempt.
+
+Follow the Doctor workflow: wait for setup to settle, collect the baseline EnvironmentObservation, assess readiness, do not attempt repairs, and produce a DoctorReport. Use localhost or the environment's initial URL to confirm the expected service responds successfully. Preparing the environment can take 5 minutes or more, so do not decide startup is stuck while setup is still running.
 
 When you have a clear outcome, record it by calling the ${PRODUCT_NAME} MCP tool \`manage_environments\` with \`action: "record_verification"\`, \`environmentId: "${input.environmentId}"\`, and \`success: true\` when the environment looks ready or \`success: false\` with a short, user-safe \`error\` describing what failed. Do not include secrets or the full environment YAML in the error text.`;
 }

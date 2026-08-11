@@ -136,7 +136,7 @@ describe('roomote MCP tool descriptions', () => {
     const tool = getRegisteredTool(registeredTools, 'diagnose_environment');
 
     expect(tool.config.description).toBe(
-      'Run structured environment health diagnostics (setup commands, detached services, docker projects, ports, preview reachability, tool versions). Use when verifying an environment or investigating setup/startup failures.',
+      'Collect a secret-safe EnvironmentObservation from setup commands, detached services, docker projects, ports, preview reachability, and tool versions. This read-only evidence is not a Doctor assessment, repair authorization, or verification result.',
     );
     expect(tool.config.annotations).toEqual({
       readOnlyHint: true,
@@ -144,6 +144,22 @@ describe('roomote MCP tool descriptions', () => {
       idempotentHint: true,
       openWorldHint: true,
     });
+  });
+
+  it('validates final Doctor reports without persisting verification', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const tool = getRegisteredTool(registeredTools, 'complete_doctor_report');
+
+    expect(tool.config.description).toContain(
+      'This does not persist environment verification or mutate the environment.',
+    );
+    expect(tool.config.annotations).toEqual({
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    });
+    await expect(tool.handler?.({ outcome: 'healthy' })).rejects.toThrow();
   });
 
   it('documents every built-in custom automation schedule preset', async () => {

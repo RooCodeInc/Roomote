@@ -5,12 +5,12 @@ import * as path from 'node:path';
 import { redactSecrets } from '@roomote/communication/redact-secrets';
 import {
   appendInitialPath,
-  createDoctorReport,
+  createEnvironmentObservation,
   getDockerProjectLogFilePath,
   toComposeProjectName,
-  type DoctorCheck,
-  type DoctorCheckStatus,
-  type DoctorReport,
+  type EnvironmentObservation,
+  type EnvironmentObservationCheck,
+  type EnvironmentObservationStatus,
 } from '@roomote/types';
 import { execa } from 'execa';
 
@@ -163,7 +163,10 @@ function getRuntimeSensitiveValues(): string[] {
 async function diagnoseSetupCommands(
   workspacePath: string,
   dependencies: DiagnoseEnvironmentDependencies,
-): Promise<{ checks: DoctorCheck[]; status: EnvironmentSetupStatus | null }> {
+): Promise<{
+  checks: EnvironmentObservationCheck[];
+  status: EnvironmentSetupStatus | null;
+}> {
   const status = dependencies.readSetupStatus(workspacePath);
   const timestamp = observedAt(dependencies);
   if (!status) {
@@ -187,7 +190,7 @@ async function diagnoseSetupCommands(
   const failedCommands = status.commands.filter(
     (command) => command.state === 'failed',
   );
-  const checks: DoctorCheck[] = [];
+  const checks: EnvironmentObservationCheck[] = [];
   for (const [index, command] of failedCommands.entries()) {
     const logTail = await readEvidenceTail(
       workspacePath,
@@ -216,7 +219,7 @@ async function diagnoseSetupCommands(
     });
   }
 
-  let summaryStatus: DoctorCheckStatus = 'pass';
+  let summaryStatus: EnvironmentObservationStatus = 'pass';
   if (failedCommands.length > 0 || status.state === 'failed') {
     summaryStatus = 'fail';
   } else if (status.state === 'running') {
@@ -267,7 +270,7 @@ async function diagnoseDetachedHealth(
   workspacePath: string,
   setupStatus: EnvironmentSetupStatus | null,
   dependencies: DiagnoseEnvironmentDependencies,
-): Promise<DoctorCheck> {
+): Promise<EnvironmentObservationCheck> {
   const timestamp = observedAt(dependencies);
   const detached =
     setupStatus?.commands.filter(
@@ -323,7 +326,7 @@ async function diagnoseDetachedHealth(
     };
   }
 
-  let status: DoctorCheckStatus = 'pass';
+  let status: EnvironmentObservationStatus = 'pass';
   const details: string[] = [];
   for (const command of detached) {
     const expectedLog = command.logFile
@@ -422,7 +425,7 @@ async function diagnoseDockerProjects(
   workspacePath: string,
   context: DoctorEnvironmentContext,
   dependencies: DiagnoseEnvironmentDependencies,
-): Promise<DoctorCheck> {
+): Promise<EnvironmentObservationCheck> {
   const timestamp = observedAt(dependencies);
   if (context.dockerProjects.length === 0) {
     return {
@@ -437,7 +440,7 @@ async function diagnoseDockerProjects(
   }
 
   const details: string[] = [];
-  let status: DoctorCheckStatus = 'pass';
+  let status: EnvironmentObservationStatus = 'pass';
   await dependencies.runCommand(
     'docker',
     ['compose', 'ls', '--format', 'json'],
@@ -469,7 +472,7 @@ async function diagnoseDockerProjects(
     const failed =
       result.exitCode !== 0 || processes.length === 0 || unhealthy.length > 0;
     if (failed) {
-      const projectStatus: DoctorCheckStatus = project.required
+      const projectStatus: EnvironmentObservationStatus = project.required
         ? 'fail'
         : 'warn';
       if (projectStatus === 'fail' || status === 'pass') status = projectStatus;
@@ -509,30 +512,36 @@ async function diagnoseDockerProjects(
 async function diagnoseServices(
   context: DoctorEnvironmentContext,
   dependencies: DiagnoseEnvironmentDependencies,
-): Promise<DoctorCheck[]> {
+): Promise<EnvironmentObservationCheck[]> {
   return Promise.all(
-    context.services.map(async (service): Promise<DoctorCheck> => {
-      const timestamp = observedAt(dependencies);
-      const healthy =
-        service.name === 'aws'
-          ? (await dependencies.runCommand('aws', ['--version'], { cwd: '/' }))
-              .exitCode === 0
-          : service.port > 0 && (await dependencies.checkTcpPort(service.port));
-      return {
-        id: `service.${service.name}`,
-        category: 'services',
-        title: `${service.name} service`,
-        status: healthy ? 'pass' : 'fail',
-        severity: healthy ? 'info' : 'major',
-        summary: healthy
-          ? `${service.name} is reachable${service.port > 0 ? ` on 127.0.0.1:${service.port}` : ''}`
-          : `${service.name} is not reachable${service.port > 0 ? ` on 127.0.0.1:${service.port}` : ''}`,
-        remediationHint: healthy
-          ? undefined
-          : 'Restart the configured service and inspect its startup output.',
-        observedAt: timestamp,
-      };
-    }),
+    context.services.map(
+      async (service): Promise<EnvironmentObservationCheck> => {
+        const timestamp = observedAt(dependencies);
+        const healthy =
+          service.name === 'aws'
+            ? (
+                await dependencies.runCommand('aws', ['--version'], {
+                  cwd: '/',
+                })
+              ).exitCode === 0
+            : service.port > 0 &&
+              (await dependencies.checkTcpPort(service.port));
+        return {
+          id: `service.${service.name}`,
+          category: 'services',
+          title: `${service.name} service`,
+          status: healthy ? 'pass' : 'fail',
+          severity: healthy ? 'info' : 'major',
+          summary: healthy
+            ? `${service.name} is reachable${service.port > 0 ? ` on 127.0.0.1:${service.port}` : ''}`
+            : `${service.name} is not reachable${service.port > 0 ? ` on 127.0.0.1:${service.port}` : ''}`,
+          remediationHint: healthy
+            ? undefined
+            : 'Restart the configured service and inspect its startup output.',
+          observedAt: timestamp,
+        };
+      },
+    ),
   );
 }
 
@@ -555,7 +564,7 @@ async function checkHttpEndpoint(options: {
   url: string;
   headers?: Record<string, string>;
   dependencies: DiagnoseEnvironmentDependencies;
-}): Promise<DoctorCheck> {
+}): Promise<EnvironmentObservationCheck> {
   const startedAt = options.dependencies.now().getTime();
   const timestamp = observedAt(options.dependencies);
   try {
@@ -603,8 +612,8 @@ async function checkHttpEndpoint(options: {
 async function diagnosePorts(
   context: DoctorEnvironmentContext,
   dependencies: DiagnoseEnvironmentDependencies,
-): Promise<DoctorCheck[]> {
-  const checks: DoctorCheck[] = [];
+): Promise<EnvironmentObservationCheck[]> {
+  const checks: EnvironmentObservationCheck[] = [];
   for (const port of context.ports) {
     const loopbackUrl = appendInitialPath(
       `http://127.0.0.1:${port.port}`,
@@ -680,7 +689,7 @@ async function resolveToolVersion(
 async function diagnoseToolVersions(
   context: DoctorEnvironmentContext,
   dependencies: DiagnoseEnvironmentDependencies,
-): Promise<DoctorCheck> {
+): Promise<EnvironmentObservationCheck> {
   const timestamp = observedAt(dependencies);
   if (context.toolVersions.length === 0) {
     return {
@@ -695,7 +704,7 @@ async function diagnoseToolVersions(
   }
 
   const details: string[] = [];
-  let status: DoctorCheckStatus = 'pass';
+  let status: EnvironmentObservationStatus = 'pass';
   for (const declaration of context.toolVersions) {
     const actualVersion = await resolveToolVersion(
       declaration.tool,
@@ -734,7 +743,7 @@ async function diagnoseToolVersions(
 function diagnoseEnvContract(
   context: DoctorEnvironmentContext,
   dependencies: DiagnoseEnvironmentDependencies,
-): DoctorCheck {
+): EnvironmentObservationCheck {
   const present = new Set(context.presentEnvVarNames);
   const entries = [
     ...context.configuredEnvVars.map((entry) => ({
@@ -780,30 +789,88 @@ function diagnoseEnvContract(
   };
 }
 
-function parseDoctorEnvironmentContext(raw: string | undefined) {
-  if (!raw)
-    return doctorEnvironmentContextSchema.parse({
-      ports: [],
-      services: [],
-      dockerProjects: [],
-      toolVersions: [],
-      configuredEnvVars: [],
-      presentEnvVarNames: [],
-    });
-  return doctorEnvironmentContextSchema.parse(JSON.parse(raw) as unknown);
+function emptyEnvironmentContext(): DoctorEnvironmentContext {
+  return {
+    ports: [],
+    services: [],
+    dockerProjects: [],
+    toolVersions: [],
+    configuredEnvVars: [],
+    presentEnvVarNames: [],
+  };
+}
+
+function parseDoctorEnvironmentContext(raw: string | undefined): {
+  context: DoctorEnvironmentContext;
+  check: EnvironmentObservationCheck;
+} {
+  const observedAt = new Date().toISOString();
+  if (!raw) {
+    return {
+      context: emptyEnvironmentContext(),
+      check: {
+        id: 'context.available',
+        category: 'context',
+        title: 'Environment context',
+        status: 'unknown',
+        severity: 'critical',
+        summary: 'Environment context is unavailable',
+        remediationHint:
+          'Run Doctor in a persisted Roomote environment with runtime context',
+        observedAt,
+      },
+    };
+  }
+
+  try {
+    return {
+      context: doctorEnvironmentContextSchema.parse(JSON.parse(raw) as unknown),
+      check: {
+        id: 'context.available',
+        category: 'context',
+        title: 'Environment context',
+        status: 'pass',
+        severity: 'info',
+        summary: 'Environment context is available',
+        observedAt,
+      },
+    };
+  } catch (error) {
+    return {
+      context: emptyEnvironmentContext(),
+      check: {
+        id: 'context.available',
+        category: 'context',
+        title: 'Environment context',
+        status: 'unknown',
+        severity: 'critical',
+        summary: 'Environment context is invalid',
+        details: sanitizeEvidence(
+          error instanceof Error ? error.message : String(error),
+        ),
+        remediationHint:
+          'Run Doctor in a persisted Roomote environment with valid runtime context',
+        observedAt,
+      },
+    };
+  }
 }
 
 export async function diagnoseEnvironment(options: {
   workspacePath: string;
   context: DoctorEnvironmentContext;
+  contextCheck?: EnvironmentObservationCheck;
   dependencies?: Partial<DiagnoseEnvironmentDependencies>;
-}): Promise<DoctorReport> {
+}): Promise<EnvironmentObservation> {
   const dependencies = { ...defaultDependencies, ...options.dependencies };
   const setup = await diagnoseSetupCommands(
     options.workspacePath,
     dependencies,
   );
-  const checks: DoctorCheck[] = [...setup.checks];
+  const checks: EnvironmentObservationCheck[] = [
+    ...(options.contextCheck ? [options.contextCheck] : []),
+    ...setup.checks,
+  ];
   checks.push(
     await diagnoseDetachedHealth(
       options.workspacePath,
@@ -823,21 +890,24 @@ export async function diagnoseEnvironment(options: {
   checks.push(await diagnoseToolVersions(options.context, dependencies));
   checks.push(diagnoseEnvContract(options.context, dependencies));
 
-  return createDoctorReport(checks, {
+  return createEnvironmentObservation(checks, {
     generatedAt: observedAt(dependencies),
     sensitiveValues: getRuntimeSensitiveValues(),
   });
 }
 
-function formatDoctorReport(report: DoctorReport): string {
+function formatEnvironmentObservation(
+  observation: EnvironmentObservation,
+): string {
   const lines = [
     '# Environment diagnostics',
     '',
-    `Overall status: **${report.overallStatus.toUpperCase()}**`,
-    `Generated: ${report.generatedAt}`,
+    `Overall probe status: **${observation.overallStatus.toUpperCase()}**`,
+    `Generated: ${observation.generatedAt}`,
+    'This observation is evidence for Doctor assessment; it is not a verification result or repair authorization.',
     '',
   ];
-  for (const check of report.checks) {
+  for (const check of observation.checks) {
     lines.push(
       `- **${check.status.toUpperCase()}** \`${check.id}\` - ${check.summary}`,
     );
@@ -863,13 +933,19 @@ export async function handleDiagnoseEnvironment(): Promise<ToolResult> {
   }
 
   try {
-    const context = parseDoctorEnvironmentContext(
+    const parsedContext = parseDoctorEnvironmentContext(
       process.env.ROOMOTE_DOCTOR_ENVIRONMENT_CONTEXT,
     );
-    const report = await diagnoseEnvironment({ workspacePath, context });
+    const observation = await diagnoseEnvironment({
+      workspacePath,
+      context: parsedContext.context,
+      contextCheck: parsedContext.check,
+    });
     return {
-      content: [{ type: 'text', text: formatDoctorReport(report) }],
-      structuredContent: report,
+      content: [
+        { type: 'text', text: formatEnvironmentObservation(observation) },
+      ],
+      structuredContent: observation,
     };
   } catch (error) {
     return {

@@ -268,22 +268,22 @@ describe('environment-setup guidance', () => {
       'Then call the Roomote MCP tool `mcp__roomote__manage_tasks` with `action: "launch"`, `environmentId` set to that created or updated environment ID, `notifyOnSettle` set to `true`',
     );
     expect(skillContent).toContain(
-      'First read .roomote/setup-status.json in the workspace root: while its state is "running", environment setup commands are still executing in the background',
+      'a concrete prompt beginning with the explicit packaged-skill invocation `$doctor`',
     );
     expect(skillContent).toContain(
-      'Re-read .roomote/setup-status.json every 10-15 seconds while it is still running, rather than sleeping for several minutes at a time.',
+      '$doctor Assess whether this persisted environment is ready.',
     );
     expect(skillContent).toContain(
-      'Once setup reaches a terminal state, run diagnose_environment exactly once.',
+      'collect the baseline EnvironmentObservation, do not attempt repairs, and return a DoctorReport',
     );
     expect(skillContent).toContain(
-      'Report every failing or non-pass stable check ID and its evidence verbatim from the diagnostic report.',
+      'This makes Doctor, not the diagnostic tool, responsible for assessment.',
     );
     expect(skillContent).toContain(
       'do not run `diagnose_environment` before persistence because it cannot inspect the drafted definition.',
     );
     expect(
-      skillContent.indexOf('run diagnose_environment exactly once'),
+      skillContent.indexOf('$doctor Assess whether this persisted environment'),
     ).toBeGreaterThan(
       skillContent.indexOf('After environment persistence succeeds'),
     );

@@ -13,6 +13,8 @@ import {
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
+  doctorReportObjectSchema,
+  doctorReportSchema,
   PRODUCT_NAME,
   sourceControlProviderSchema,
   taskArtifactTypeSchema,
@@ -85,7 +87,7 @@ roomoteMcpServer.registerTool(
   {
     title: 'Diagnose Environment',
     description:
-      'Run structured environment health diagnostics (setup commands, detached services, docker projects, ports, preview reachability, tool versions). Use when verifying an environment or investigating setup/startup failures.',
+      'Collect a secret-safe EnvironmentObservation from setup commands, detached services, docker projects, ports, preview reachability, and tool versions. This read-only evidence is not a Doctor assessment, repair authorization, or verification result.',
     inputSchema: {},
     annotations: {
       readOnlyHint: true,
@@ -95,6 +97,34 @@ roomoteMcpServer.registerTool(
     },
   },
   async (): Promise<ToolResult> => handleDiagnoseEnvironment(),
+);
+
+roomoteMcpServer.registerTool(
+  'complete_doctor_report',
+  {
+    title: 'Complete Doctor Report',
+    description:
+      'Validate and return the final DoctorReport after assessment, any authorized repair, and independent verification. This does not persist environment verification or mutate the environment.',
+    inputSchema: doctorReportObjectSchema.shape,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async (input): Promise<ToolResult> => {
+    const report = doctorReportSchema.parse(input);
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `Doctor report completed with outcome: ${report.outcome}`,
+        },
+      ],
+      structuredContent: report,
+    };
+  },
 );
 
 let hasSubmittedAutomationSlackSummary = false;

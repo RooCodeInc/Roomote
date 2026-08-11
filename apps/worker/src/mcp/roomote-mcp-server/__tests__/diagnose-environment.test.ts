@@ -1,4 +1,4 @@
-import type { DoctorReport } from '@roomote/types';
+import type { EnvironmentObservation } from '@roomote/types';
 
 import type { DoctorEnvironmentContext } from '../../../doctor/environment-context.js';
 import {
@@ -49,22 +49,44 @@ function dependencies(
   };
 }
 
-function findCheck(report: DoctorReport, id: string) {
-  const check = report.checks.find((candidate) => candidate.id === id);
+function findCheck(observation: EnvironmentObservation, id: string) {
+  const check = observation.checks.find((candidate) => candidate.id === id);
   expect(check).toBeDefined();
   return check!;
 }
 
 describe('diagnoseEnvironment', () => {
-  it('returns an all-pass report for a healthy environment without optional resources', async () => {
-    const report = await diagnoseEnvironment({
+  it('returns an all-pass observation for a healthy environment without optional resources', async () => {
+    const observation = await diagnoseEnvironment({
       workspacePath,
       context: emptyContext(),
       dependencies: dependencies(),
     });
 
-    expect(report.overallStatus).toBe('pass');
-    expect(report.checks.every((check) => check.status === 'pass')).toBe(true);
+    expect(observation.overallStatus).toBe('pass');
+    expect(observation.checks.every((check) => check.status === 'pass')).toBe(
+      true,
+    );
+  });
+
+  it('cannot report healthy when runtime context is unavailable', async () => {
+    const observation = await diagnoseEnvironment({
+      workspacePath,
+      context: emptyContext(),
+      contextCheck: {
+        id: 'context.available',
+        category: 'context',
+        title: 'Environment context',
+        status: 'unknown',
+        severity: 'critical',
+        summary: 'Environment context is unavailable',
+        observedAt: now.toISOString(),
+      },
+      dependencies: dependencies(),
+    });
+
+    expect(observation.overallStatus).toBe('unknown');
+    expect(findCheck(observation, 'context.available').status).toBe('unknown');
   });
 
   it('reports a failed setup command with redacted log evidence', async () => {
