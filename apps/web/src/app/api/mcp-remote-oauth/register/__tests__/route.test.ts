@@ -78,4 +78,29 @@ describe('POST /api/mcp-remote-oauth/register', () => {
     });
     expect(mockRegisterClient).not.toHaveBeenCalled();
   });
+
+  it('returns a temporary error when the registered-client cap is full', async () => {
+    mockRegisterClient.mockRejectedValue(new Error('capacity reached'));
+
+    const response = await POST(
+      registrationRequest('https://client.example/callback'),
+    );
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: 'temporarily_unavailable',
+    });
+  });
+
+  it('rejects oversized redirect URI values before storing a client', async () => {
+    const response = await POST(
+      registrationRequest(`https://client.example/${'a'.repeat(2_100)}`),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'invalid_client_metadata',
+    });
+    expect(mockRegisterClient).not.toHaveBeenCalled();
+  });
 });

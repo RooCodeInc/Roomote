@@ -8,6 +8,8 @@ import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
 import {
   createRemoteMcpAuthorizationCode,
+  createRemoteMcpConsentToken,
+  consumeRemoteMcpConsentToken,
   getRemoteMcpOAuthClient,
 } from '@/lib/server/mcp-remote-oauth';
 
@@ -42,6 +44,7 @@ function escapeHtml(value: string): string {
 function consentResponse(options: {
   request: NextRequest;
   clientName?: string;
+  consentToken: string;
   redirectUri: string;
 }) {
   const action = escapeHtml(
@@ -49,6 +52,7 @@ function consentResponse(options: {
   );
   const clientName = escapeHtml(options.clientName ?? 'An MCP client');
   const callbackHost = escapeHtml(new URL(options.redirectUri).host);
+  const consentToken = escapeHtml(options.consentToken);
 
   return new NextResponse(
     `<!doctype html>
@@ -66,6 +70,7 @@ function consentResponse(options: {
         <p style="margin:0 0 22px;color:#55544e;font-size:16px;line-height:1.55;">This client will act as your signed-in Roomote member. It can read task and chat context, launch or cancel tasks, and send follow-up messages.</p>
         <div style="margin:0 0 24px;padding:14px 16px;background:#f6f5f1;border-radius:12px;color:#55544e;font-size:14px;line-height:1.45;">After approval, Roomote returns you to <strong style="color:#171713;">${callbackHost}</strong>.</div>
         <form method="post" action="${action}">
+          <input type="hidden" name="consent_token" value="${consentToken}">
           <button type="submit" style="width:100%;border:0;border-radius:10px;background:#171713;color:#fff;padding:13px 18px;font:inherit;font-weight:700;cursor:pointer;">Allow access</button>
         </form>
       </section>
@@ -132,12 +137,35 @@ async function handleAuthorize(request: NextRequest, approved: boolean) {
     return NextResponse.redirect(signInUrl);
   }
 
+  const consentBinding = {
+    userId: auth.userId,
+    requestTarget: `${request.nextUrl.pathname}${request.nextUrl.search}`,
+  };
+
   if (!approved) {
+    const consentToken = await createRemoteMcpConsentToken(consentBinding);
     return consentResponse({
       request,
       clientName: client.clientName,
+      consentToken,
       redirectUri: input.redirect_uri,
     });
+  }
+
+  let consentToken: FormDataEntryValue | null;
+  try {
+    consentToken = (await request.formData()).get('consent_token');
+  } catch {
+    consentToken = null;
+  }
+  if (
+    typeof consentToken !== 'string' ||
+    !(await consumeRemoteMcpConsentToken(consentToken, consentBinding))
+  ) {
+    return NextResponse.json(
+      { error: 'invalid_request' },
+      { status: 400, headers: { 'Cache-Control': 'no-store' } },
+    );
   }
 
   const code = await createRemoteMcpAuthorizationCode({

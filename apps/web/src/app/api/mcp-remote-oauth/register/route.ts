@@ -12,9 +12,9 @@ export const runtime = 'nodejs';
 const registrationSchema = z.object({
   client_name: z.string().trim().min(1).max(200).optional(),
   redirect_uris: z
-    .array(z.string())
+    .array(z.string().max(1_024))
     .min(1)
-    .max(10)
+    .max(5)
     .refine((values) => values.every(isAllowedOAuthRedirectUri)),
   token_endpoint_auth_method: z.literal('none').optional(),
   grant_types: z.array(z.literal('authorization_code')).optional(),
@@ -59,10 +59,18 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const client = await registerRemoteMcpOAuthClient({
-    clientName: parsed.data.client_name,
-    redirectUris: parsed.data.redirect_uris,
-  });
+  let client;
+  try {
+    client = await registerRemoteMcpOAuthClient({
+      clientName: parsed.data.client_name,
+      redirectUris: parsed.data.redirect_uris,
+    });
+  } catch {
+    return NextResponse.json(
+      { error: 'temporarily_unavailable' },
+      { status: 503 },
+    );
+  }
 
   return NextResponse.json(
     {

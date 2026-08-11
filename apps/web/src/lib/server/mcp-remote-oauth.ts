@@ -4,12 +4,16 @@ import { getRedis } from '@roomote/redis';
 
 const CLIENT_TTL_SECONDS = 30 * 24 * 60 * 60;
 const AUTHORIZATION_CODE_TTL_SECONDS = 5 * 60;
+const CONSENT_TOKEN_TTL_SECONDS = 10 * 60;
 const REGISTRATION_RATE_LIMIT_WINDOW_SECONDS = 60 * 60;
 const REGISTRATION_RATE_LIMIT_PER_CLIENT = 20;
 const REGISTRATION_RATE_LIMIT_GLOBAL = 1_000;
+const MAX_REGISTERED_CLIENTS = 1_000;
 const CLIENT_KEY_PREFIX = 'mcp-remote-oauth:client:';
 const CODE_KEY_PREFIX = 'mcp-remote-oauth:code:';
+const CONSENT_KEY_PREFIX = 'mcp-remote-oauth:consent:';
 const REGISTRATION_RATE_KEY_PREFIX = 'mcp-remote-oauth:registration-rate:';
+const REGISTERED_CLIENTS_KEY = 'mcp-remote-oauth:registered-clients';
 
 const CONSUME_CODE_LUA = `
 local value = redis.call('GET', KEYS[1])
@@ -28,6 +32,16 @@ end
 return current
 `;
 
+const REGISTER_CLIENT_LUA = `
+redis.call('ZREMRANGEBYSCORE', KEYS[2], '-inf', ARGV[6])
+if redis.call('ZCARD', KEYS[2]) >= tonumber(ARGV[5]) then
+  return 0
+end
+redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+redis.call('ZADD', KEYS[2], ARGV[3], ARGV[4])
+return 1
+`;
+
 type RemoteMcpOAuthClient = {
   clientId: string;
   clientName?: string;
@@ -43,12 +57,21 @@ type RemoteMcpAuthorizationCode = {
   scopes: string[];
 };
 
+type RemoteMcpConsentBinding = {
+  userId: string;
+  requestTarget: string;
+};
+
 function clientKey(clientId: string): string {
   return `${CLIENT_KEY_PREFIX}${clientId}`;
 }
 
 function codeKey(code: string): string {
   return `${CODE_KEY_PREFIX}${code}`;
+}
+
+function consentKey(token: string): string {
+  return `${CONSENT_KEY_PREFIX}${token}`;
 }
 
 export function isAllowedOAuthRedirectUri(value: string): boolean {
@@ -77,12 +100,22 @@ export async function registerRemoteMcpOAuthClient(input: {
     redirectUris: input.redirectUris,
   };
 
-  await getRedis().set(
+  const now = Math.floor(Date.now() / 1000);
+  const stored = await getRedis().eval(
+    REGISTER_CLIENT_LUA,
+    2,
     clientKey(client.clientId),
+    REGISTERED_CLIENTS_KEY,
     JSON.stringify(client),
-    'EX',
-    CLIENT_TTL_SECONDS,
+    String(CLIENT_TTL_SECONDS),
+    String(now + CLIENT_TTL_SECONDS),
+    client.clientId,
+    String(MAX_REGISTERED_CLIENTS),
+    String(now),
   );
+  if (stored !== 1) {
+    throw new Error('Remote MCP client registration capacity reached');
+  }
   return client;
 }
 
@@ -107,6 +140,20 @@ export async function createRemoteMcpAuthorizationCode(
   return code;
 }
 
+export async function createRemoteMcpConsentToken(
+  value: RemoteMcpConsentBinding,
+): Promise<string> {
+  const token = randomBytes(32).toString('base64url');
+  await getRedis().set(
+    consentKey(token),
+    JSON.stringify(value),
+    'EX',
+    CONSENT_TOKEN_TTL_SECONDS,
+    'NX',
+  );
+  return token;
+}
+
 export async function getRemoteMcpAuthorizationCode(
   code: string,
 ): Promise<RemoteMcpAuthorizationCode | null> {
@@ -122,6 +169,19 @@ export async function consumeRemoteMcpAuthorizationCode(
     CONSUME_CODE_LUA,
     1,
     codeKey(code),
+    JSON.stringify(expected),
+  );
+  return typeof value === 'string';
+}
+
+export async function consumeRemoteMcpConsentToken(
+  token: string,
+  expected: RemoteMcpConsentBinding,
+): Promise<boolean> {
+  const value = await getRedis().eval(
+    CONSUME_CODE_LUA,
+    1,
+    consentKey(token),
     JSON.stringify(expected),
   );
   return typeof value === 'string';

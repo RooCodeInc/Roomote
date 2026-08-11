@@ -1,4 +1,7 @@
 const redisState = vi.hoisted(() => new Map<string, string>());
+const redisSortedSets = vi.hoisted(
+  () => new Map<string, Map<string, number>>(),
+);
 
 vi.mock('@roomote/redis', () => ({
   getRedis: () => ({
@@ -7,16 +10,28 @@ vi.mock('@roomote/redis', () => ({
       return 'OK';
     },
     get: async (key: string) => redisState.get(key) ?? null,
-    eval: async (
-      script: string,
-      _keyCount: number,
-      key: string,
-      arg: string,
-    ) => {
+    eval: async (script: string, keyCount: number, ...args: string[]) => {
+      const keys = args.slice(0, keyCount);
+      const values = args.slice(keyCount);
+      const key = keys[0]!;
+      if (script.includes("redis.call('ZREMRANGEBYSCORE'")) {
+        const indexKey = keys[1]!;
+        const [clientJson, , expiresAt, clientId, maxClients, now] = values;
+        const clients = redisSortedSets.get(indexKey) ?? new Map();
+        for (const [id, expiry] of clients) {
+          if (expiry <= Number(now)) clients.delete(id);
+        }
+        if (clients.size >= Number(maxClients)) return 0;
+        redisState.set(key, clientJson!);
+        clients.set(clientId!, Number(expiresAt));
+        redisSortedSets.set(indexKey, clients);
+        return 1;
+      }
+
       if (script.includes("redis.call('GET'")) {
         const value = redisState.get(key) ?? null;
-        if (value === arg) redisState.delete(key);
-        return value === arg ? value : null;
+        if (value === values[0]) redisState.delete(key);
+        return value === values[0] ? value : null;
       }
 
       const count = Number(redisState.get(key) ?? '0') + 1;
@@ -28,7 +43,9 @@ vi.mock('@roomote/redis', () => ({
 
 import {
   consumeRemoteMcpAuthorizationCode,
+  consumeRemoteMcpConsentToken,
   createRemoteMcpAuthorizationCode,
+  createRemoteMcpConsentToken,
   getRemoteMcpAuthorizationCode,
   isAllowedOAuthRedirectUri,
   isRemoteMcpRegistrationAllowed,
@@ -37,7 +54,10 @@ import {
 } from './mcp-remote-oauth';
 
 describe('remote MCP OAuth state', () => {
-  beforeEach(() => redisState.clear());
+  beforeEach(() => {
+    redisState.clear();
+    redisSortedSets.clear();
+  });
 
   it('accepts HTTPS and loopback redirects only', () => {
     expect(isAllowedOAuthRedirectUri('https://client.example/callback')).toBe(
@@ -101,6 +121,27 @@ describe('remote MCP OAuth state', () => {
       }),
     ).resolves.toBe(false);
     await expect(getRemoteMcpAuthorizationCode(code)).resolves.toEqual(value);
+  });
+
+  it('binds consent approval to the user and authorization request', async () => {
+    const binding = {
+      userId: 'user-1',
+      requestTarget: '/api/mcp-remote-oauth/authorize?client_id=client-1',
+    };
+    const token = await createRemoteMcpConsentToken(binding);
+
+    await expect(
+      consumeRemoteMcpConsentToken(token, {
+        ...binding,
+        userId: 'attacker',
+      }),
+    ).resolves.toBe(false);
+    await expect(consumeRemoteMcpConsentToken(token, binding)).resolves.toBe(
+      true,
+    );
+    await expect(consumeRemoteMcpConsentToken(token, binding)).resolves.toBe(
+      false,
+    );
   });
 
   it('bounds registrations per client and globally', async () => {
