@@ -14,7 +14,7 @@ vi.mock('@roomote/redis', () => ({
       const keys = args.slice(0, keyCount);
       const values = args.slice(keyCount);
       const key = keys[0]!;
-      if (script.includes("redis.call('ZREMRANGEBYSCORE'")) {
+      if (script.includes("redis.call('SET', KEYS[1]")) {
         const indexKey = keys[1]!;
         const [clientJson, , expiresAt, clientId, maxClients, now] = values;
         const clients = redisSortedSets.get(indexKey) ?? new Map();
@@ -25,6 +25,54 @@ vi.mock('@roomote/redis', () => ({
         redisState.set(key, clientJson!);
         clients.set(clientId!, Number(expiresAt));
         redisSortedSets.set(indexKey, clients);
+        return 1;
+      }
+
+      if (script.includes('local client = tonumber')) {
+        const globalKey = keys[1]!;
+        const [, clientLimit, globalLimit] = values;
+        const clientCount = Number(redisState.get(key) ?? '0');
+        const globalCount = Number(redisState.get(globalKey) ?? '0');
+        if (
+          clientCount >= Number(clientLimit) ||
+          globalCount >= Number(globalLimit)
+        ) {
+          return 0;
+        }
+        redisState.set(key, String(clientCount + 1));
+        redisState.set(globalKey, String(globalCount + 1));
+        return 1;
+      }
+
+      if (script.includes("redis.call('ZREM'")) {
+        const indexKey = keys[1]!;
+        const globalIndexKey = keys[2]!;
+        const userIndexKey = keys[3]!;
+        const clientId = values[1]!;
+        const now = Number(values[2]);
+        const expiresAt = Number(values[3]);
+        const globalLimit = Number(values[4]);
+        const userLimit = Number(values[5]);
+        const globalClients = redisSortedSets.get(globalIndexKey) ?? new Map();
+        const userClients = redisSortedSets.get(userIndexKey) ?? new Map();
+        for (const [id, expiry] of globalClients) {
+          if (expiry <= now) globalClients.delete(id);
+        }
+        for (const [id, expiry] of userClients) {
+          if (expiry <= now) userClients.delete(id);
+        }
+        if (!globalClients.has(clientId) && globalClients.size >= globalLimit) {
+          return 0;
+        }
+        if (!userClients.has(clientId) && userClients.size >= userLimit) {
+          return 0;
+        }
+        if (!redisState.has(key)) return 0;
+        redisSortedSets.get(indexKey)?.delete(clientId);
+        globalClients.set(clientId, expiresAt);
+        redisSortedSets.set(globalIndexKey, globalClients);
+        userClients.set(clientId, expiresAt);
+        redisSortedSets.set(userIndexKey, userClients);
         return 1;
       }
 
@@ -49,6 +97,7 @@ import {
   getRemoteMcpAuthorizationCode,
   isAllowedOAuthRedirectUri,
   isRemoteMcpRegistrationAllowed,
+  promoteRemoteMcpOAuthClient,
   registerRemoteMcpOAuthClient,
   verifyPkceChallenge,
 } from './mcp-remote-oauth';
@@ -81,6 +130,14 @@ describe('remote MCP OAuth state', () => {
       clientName: 'Test client',
       redirectUris: ['https://client.example/callback'],
     });
+    await expect(
+      promoteRemoteMcpOAuthClient(client.clientId, 'user-1'),
+    ).resolves.toBe(true);
+    expect(
+      [...redisSortedSets.entries()].find(([key]) =>
+        key.includes('registered-clients'),
+      )?.[1].size,
+    ).toBe(0);
   });
 
   it('consumes authorization codes once', async () => {
@@ -145,18 +202,20 @@ describe('remote MCP OAuth state', () => {
   });
 
   it('bounds registrations per client and globally', async () => {
-    const allowed = await Promise.all(
-      Array.from({ length: 21 }, () =>
-        isRemoteMcpRegistrationAllowed('203.0.113.5'),
-      ),
-    );
+    const allowed = [];
+    for (let index = 0; index < 21; index += 1) {
+      allowed.push(await isRemoteMcpRegistrationAllowed('same-client'));
+    }
 
     expect(allowed.slice(0, 20).every(Boolean)).toBe(true);
     expect(allowed[20]).toBe(false);
+    expect(
+      [...redisState.entries()].find(([key]) => key.includes(':global:'))?.[1],
+    ).toBe('20');
   });
 
   it('does not allocate client buckets after the global limit is full', async () => {
-    for (let index = 0; index < 1_000; index += 1) {
+    for (let index = 0; index < 100; index += 1) {
       await expect(
         isRemoteMcpRegistrationAllowed(`client-${index}`),
       ).resolves.toBe(true);
@@ -167,6 +226,24 @@ describe('remote MCP OAuth state', () => {
       isRemoteMcpRegistrationAllowed('overflow-client'),
     ).resolves.toBe(false);
     expect(redisState.size).toBe(keyCountAtLimit);
+  });
+
+  it('caps promoted clients per signed-in user', async () => {
+    for (let index = 0; index < 50; index += 1) {
+      const client = await registerRemoteMcpOAuthClient({
+        redirectUris: [`https://client-${index}.example/callback`],
+      });
+      await expect(
+        promoteRemoteMcpOAuthClient(client.clientId, 'user-1'),
+      ).resolves.toBe(true);
+    }
+    const overflowClient = await registerRemoteMcpOAuthClient({
+      redirectUris: ['https://overflow.example/callback'],
+    });
+
+    await expect(
+      promoteRemoteMcpOAuthClient(overflowClient.clientId, 'user-1'),
+    ).resolves.toBe(false);
   });
 
   it('verifies S256 PKCE challenges', () => {

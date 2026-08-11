@@ -2,18 +2,23 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 import { getRedis } from '@roomote/redis';
 
-const CLIENT_TTL_SECONDS = 30 * 24 * 60 * 60;
+const PENDING_CLIENT_TTL_SECONDS = 60 * 60;
+const ACTIVE_CLIENT_TTL_SECONDS = 30 * 24 * 60 * 60;
 const AUTHORIZATION_CODE_TTL_SECONDS = 5 * 60;
 const CONSENT_TOKEN_TTL_SECONDS = 10 * 60;
 const REGISTRATION_RATE_LIMIT_WINDOW_SECONDS = 60 * 60;
 const REGISTRATION_RATE_LIMIT_PER_CLIENT = 20;
-const REGISTRATION_RATE_LIMIT_GLOBAL = 1_000;
-const MAX_REGISTERED_CLIENTS = 1_000;
+const REGISTRATION_RATE_LIMIT_GLOBAL = 100;
+const MAX_REGISTERED_CLIENTS = 250;
+const MAX_ACTIVE_CLIENTS_PER_USER = 50;
+const MAX_ACTIVE_CLIENTS_GLOBAL = 10_000;
 const CLIENT_KEY_PREFIX = 'mcp-remote-oauth:client:';
 const CODE_KEY_PREFIX = 'mcp-remote-oauth:code:';
 const CONSENT_KEY_PREFIX = 'mcp-remote-oauth:consent:';
 const REGISTRATION_RATE_KEY_PREFIX = 'mcp-remote-oauth:registration-rate:';
 const REGISTERED_CLIENTS_KEY = 'mcp-remote-oauth:registered-clients';
+const ACTIVE_CLIENTS_KEY = 'mcp-remote-oauth:active-clients';
+const ACTIVE_CLIENTS_USER_KEY_PREFIX = 'mcp-remote-oauth:active-clients:user:';
 
 const CONSUME_CODE_LUA = `
 local value = redis.call('GET', KEYS[1])
@@ -24,12 +29,21 @@ end
 return false
 `;
 
-const RATE_LIMIT_INCREMENT_LUA = `
-local current = redis.call('INCR', KEYS[1])
-if current == 1 then
+const ADMIT_REGISTRATION_LUA = `
+local client = tonumber(redis.call('GET', KEYS[1]) or '0')
+local global = tonumber(redis.call('GET', KEYS[2]) or '0')
+if client >= tonumber(ARGV[2]) or global >= tonumber(ARGV[3]) then
+  return 0
+end
+client = redis.call('INCR', KEYS[1])
+global = redis.call('INCR', KEYS[2])
+if client == 1 then
   redis.call('EXPIRE', KEYS[1], ARGV[1])
 end
-return current
+if global == 1 then
+  redis.call('EXPIRE', KEYS[2], ARGV[1])
+end
+return 1
 `;
 
 const REGISTER_CLIENT_LUA = `
@@ -39,6 +53,27 @@ if redis.call('ZCARD', KEYS[2]) >= tonumber(ARGV[5]) then
 end
 redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
 redis.call('ZADD', KEYS[2], ARGV[3], ARGV[4])
+return 1
+`;
+
+const PROMOTE_CLIENT_LUA = `
+redis.call('ZREMRANGEBYSCORE', KEYS[3], '-inf', ARGV[3])
+redis.call('ZREMRANGEBYSCORE', KEYS[4], '-inf', ARGV[3])
+local globalMember = redis.call('ZSCORE', KEYS[3], ARGV[2])
+local userMember = redis.call('ZSCORE', KEYS[4], ARGV[2])
+if not globalMember and redis.call('ZCARD', KEYS[3]) >= tonumber(ARGV[5]) then
+  return 0
+end
+if not userMember and redis.call('ZCARD', KEYS[4]) >= tonumber(ARGV[6]) then
+  return 0
+end
+if redis.call('EXPIRE', KEYS[1], ARGV[1]) == 0 then
+  return 0
+end
+redis.call('ZREM', KEYS[2], ARGV[2])
+redis.call('ZADD', KEYS[3], ARGV[4], ARGV[2])
+redis.call('ZADD', KEYS[4], ARGV[4], ARGV[2])
+redis.call('EXPIRE', KEYS[4], ARGV[1])
 return 1
 `;
 
@@ -107,8 +142,8 @@ export async function registerRemoteMcpOAuthClient(input: {
     clientKey(client.clientId),
     REGISTERED_CLIENTS_KEY,
     JSON.stringify(client),
-    String(CLIENT_TTL_SECONDS),
-    String(now + CLIENT_TTL_SECONDS),
+    String(PENDING_CLIENT_TTL_SECONDS),
+    String(now + PENDING_CLIENT_TTL_SECONDS),
     client.clientId,
     String(MAX_REGISTERED_CLIENTS),
     String(now),
@@ -117,6 +152,29 @@ export async function registerRemoteMcpOAuthClient(input: {
     throw new Error('Remote MCP client registration capacity reached');
   }
   return client;
+}
+
+export async function promoteRemoteMcpOAuthClient(
+  clientId: string,
+  userId: string,
+): Promise<boolean> {
+  const now = Math.floor(Date.now() / 1000);
+  const userHash = createHash('sha256').update(userId).digest('hex');
+  const promoted = await getRedis().eval(
+    PROMOTE_CLIENT_LUA,
+    4,
+    clientKey(clientId),
+    REGISTERED_CLIENTS_KEY,
+    ACTIVE_CLIENTS_KEY,
+    `${ACTIVE_CLIENTS_USER_KEY_PREFIX}${userHash}`,
+    String(ACTIVE_CLIENT_TTL_SECONDS),
+    clientId,
+    String(now),
+    String(now + ACTIVE_CLIENT_TTL_SECONDS),
+    String(MAX_ACTIVE_CLIENTS_GLOBAL),
+    String(MAX_ACTIVE_CLIENTS_PER_USER),
+  );
+  return promoted === 1;
 }
 
 export async function getRemoteMcpOAuthClient(
@@ -187,34 +245,25 @@ export async function consumeRemoteMcpConsentToken(
   return typeof value === 'string';
 }
 
-async function incrementRegistrationBucket(key: string): Promise<number> {
-  return getRedis().eval(
-    RATE_LIMIT_INCREMENT_LUA,
-    1,
-    key,
-    String(REGISTRATION_RATE_LIMIT_WINDOW_SECONDS),
-  ) as Promise<number>;
-}
-
 export async function isRemoteMcpRegistrationAllowed(
-  clientIdentifier: string,
+  registrationFingerprint: string,
 ): Promise<boolean> {
   const window = Math.floor(
     Date.now() / (REGISTRATION_RATE_LIMIT_WINDOW_SECONDS * 1000),
   );
   const clientHash = createHash('sha256')
-    .update(clientIdentifier)
+    .update(registrationFingerprint)
     .digest('hex');
-  const globalCount = await incrementRegistrationBucket(
-    `${REGISTRATION_RATE_KEY_PREFIX}global:${window}`,
-  );
-  if (globalCount > REGISTRATION_RATE_LIMIT_GLOBAL) return false;
-
-  const clientCount = await incrementRegistrationBucket(
+  const admitted = await getRedis().eval(
+    ADMIT_REGISTRATION_LUA,
+    2,
     `${REGISTRATION_RATE_KEY_PREFIX}client:${clientHash}:${window}`,
+    `${REGISTRATION_RATE_KEY_PREFIX}global:${window}`,
+    String(REGISTRATION_RATE_LIMIT_WINDOW_SECONDS),
+    String(REGISTRATION_RATE_LIMIT_PER_CLIENT),
+    String(REGISTRATION_RATE_LIMIT_GLOBAL),
   );
-
-  return clientCount <= REGISTRATION_RATE_LIMIT_PER_CLIENT;
+  return admitted === 1;
 }
 
 export function verifyPkceChallenge(

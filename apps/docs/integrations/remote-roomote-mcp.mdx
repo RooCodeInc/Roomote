@@ -56,7 +56,8 @@ internal user and task-run credentials:
   or other MCP endpoints
 - authorization codes are single-use, expire after five minutes, and are
   bound to the client ID, redirect URI, resource, and PKCE challenge
-- dynamically registered clients expire after 30 days and can register only
+- anonymous client registrations must complete OAuth within one hour; clients
+  that complete the exchange remain registered for 30 days and can use only
   HTTPS or loopback HTTP callback URLs
 
 The endpoint acts as the signed-in member. It can inspect Roomote and connected

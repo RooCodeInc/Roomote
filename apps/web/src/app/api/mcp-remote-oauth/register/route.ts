@@ -22,25 +22,6 @@ const registrationSchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const clientIdentifier =
-    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    request.headers.get('x-real-ip')?.trim() ||
-    'unknown';
-
-  try {
-    if (!(await isRemoteMcpRegistrationAllowed(clientIdentifier))) {
-      return NextResponse.json(
-        { error: 'temporarily_unavailable' },
-        { status: 429, headers: { 'Retry-After': '3600' } },
-      );
-    }
-  } catch {
-    return NextResponse.json(
-      { error: 'temporarily_unavailable' },
-      { status: 503 },
-    );
-  }
-
   let body: unknown;
   try {
     body = await request.json();
@@ -56,6 +37,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { error: 'invalid_client_metadata' },
       { status: 400 },
+    );
+  }
+
+  const registrationFingerprint = JSON.stringify({
+    clientName: parsed.data.client_name,
+    redirectUris: parsed.data.redirect_uris,
+  });
+  try {
+    if (!(await isRemoteMcpRegistrationAllowed(registrationFingerprint))) {
+      return NextResponse.json(
+        { error: 'temporarily_unavailable' },
+        { status: 429, headers: { 'Retry-After': '3600' } },
+      );
+    }
+  } catch {
+    return NextResponse.json(
+      { error: 'temporarily_unavailable' },
+      { status: 503 },
     );
   }
 

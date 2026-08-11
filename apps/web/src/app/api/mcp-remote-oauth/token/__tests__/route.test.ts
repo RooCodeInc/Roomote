@@ -1,11 +1,13 @@
 import { createHash } from 'node:crypto';
 import { NextRequest } from 'next/server';
 
-const { mockGetCode, mockConsumeCode, mockCreateToken } = vi.hoisted(() => ({
-  mockGetCode: vi.fn(),
-  mockConsumeCode: vi.fn(),
-  mockCreateToken: vi.fn(),
-}));
+const { mockGetCode, mockConsumeCode, mockPromoteClient, mockCreateToken } =
+  vi.hoisted(() => ({
+    mockGetCode: vi.fn(),
+    mockConsumeCode: vi.fn(),
+    mockPromoteClient: vi.fn(),
+    mockCreateToken: vi.fn(),
+  }));
 
 vi.mock('@roomote/auth', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/auth')>()),
@@ -16,6 +18,7 @@ vi.mock('@/lib/server/mcp-remote-oauth', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/server/mcp-remote-oauth')>()),
   getRemoteMcpAuthorizationCode: mockGetCode,
   consumeRemoteMcpAuthorizationCode: mockConsumeCode,
+  promoteRemoteMcpOAuthClient: mockPromoteClient,
 }));
 
 import { POST } from '../route';
@@ -54,6 +57,7 @@ describe('POST /api/mcp-remote-oauth/token', () => {
       scopes: ['mcp:roomote'],
     });
     mockConsumeCode.mockResolvedValue(true);
+    mockPromoteClient.mockResolvedValue(true);
     mockCreateToken.mockResolvedValue('access-token');
   });
 
@@ -78,6 +82,10 @@ describe('POST /api/mcp-remote-oauth/token', () => {
       'authorization-code',
       expect.objectContaining({ userId: 'user-1' }),
     );
+    expect(mockPromoteClient).toHaveBeenCalledWith(
+      '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
+      'user-1',
+    );
   });
 
   it('rejects a verifier that does not match the authorization code', async () => {
@@ -87,6 +95,17 @@ describe('POST /api/mcp-remote-oauth/token', () => {
           'zyxwvutsrqponmlkjihgfedcbaABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~',
       }),
     );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: 'invalid_grant' });
+    expect(mockConsumeCode).not.toHaveBeenCalled();
+    expect(mockCreateToken).not.toHaveBeenCalled();
+  });
+
+  it('rejects an exchange when its pending client registration expired', async () => {
+    mockPromoteClient.mockResolvedValue(false);
+
+    const response = await POST(tokenRequest());
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({ error: 'invalid_grant' });

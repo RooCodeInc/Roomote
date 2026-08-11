@@ -50,6 +50,12 @@ describe('POST /api/mcp-remote-oauth/register', () => {
       client_id: '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
       token_endpoint_auth_method: 'none',
     });
+    expect(mockRegistrationAllowed).toHaveBeenCalledWith(
+      JSON.stringify({
+        clientName: 'Test client',
+        redirectUris: ['https://client.example/callback'],
+      }),
+    );
   });
 
   it('rejects a non-loopback HTTP callback', async () => {
@@ -62,6 +68,7 @@ describe('POST /api/mcp-remote-oauth/register', () => {
       error: 'invalid_client_metadata',
     });
     expect(mockRegisterClient).not.toHaveBeenCalled();
+    expect(mockRegistrationAllowed).not.toHaveBeenCalled();
   });
 
   it('rate limits anonymous client registration before writing Redis', async () => {
