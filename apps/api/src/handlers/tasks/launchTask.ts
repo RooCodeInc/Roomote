@@ -13,11 +13,13 @@ import {
   inArray,
   repositories,
   resolveWorkspaceRepositoryProviders,
+  taskRuns,
 } from '@roomote/db/server';
 import {
   ADMIN_REQUIRED_LAUNCH_TYPES,
   ALL_REPOSITORIES,
   buildTaskTypePromptAndWorkspacePayload,
+  type ComputeProvider,
   getEnvironmentRepositoryInstallationError,
   type StandardTask,
   type SuggestedTasksTask,
@@ -123,6 +125,25 @@ async function resolveLaunchSourceControlProvider({
   }
 
   return undefined;
+}
+
+async function resolveLaunchComputeProvider({
+  requestedProvider,
+  auth,
+}: {
+  requestedProvider: ComputeProvider | undefined;
+  auth: McpAuth;
+}): Promise<ComputeProvider | undefined> {
+  if (requestedProvider || !('runId' in auth.authContext)) {
+    return requestedProvider;
+  }
+
+  const sourceRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, auth.authContext.runId),
+    columns: { vendor: true },
+  });
+
+  return sourceRun?.vendor ?? undefined;
 }
 
 /**
@@ -284,6 +305,10 @@ export async function launchTask(
         requestedType === 'standard' ? body.bootstrap?.skill : undefined,
       userId: auth.userId,
     });
+    const computeProvider = await resolveLaunchComputeProvider({
+      requestedProvider: body.computeProvider,
+      auth,
+    });
 
     // A settle notification needs a durable pointer back to the launching
     // run, so the opt-in only takes effect on run-token launches.
@@ -294,7 +319,7 @@ export async function launchTask(
 
     const taskBase = {
       harness: harnessSelection.harness ?? body.harness,
-      computeProvider: body.computeProvider,
+      computeProvider,
       requestedWorkKindDecision,
       ...((requestedType === 'environment-definition' ||
         notifySourceRunOnSettle) &&
