@@ -1,10 +1,14 @@
 import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import type { TaskGoal, TaskGoalInput, TaskGoalStatus } from '@roomote/types';
-import { and, eq, inArray, isNotNull, isNull, lt, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, lt, sql } from 'drizzle-orm';
 
 import { db } from '../db';
 import { taskRuns, tasks } from '../schema';
+
+const GOAL_ACTIVATION_WAIT_MS = 35_000;
+const GOAL_ACTIVATION_POLL_MS = 50;
 
 export type TaskGoalMutationResult =
   | { updated: true; goal: TaskGoal }
@@ -49,6 +53,32 @@ async function getTaskForRun(runId: number) {
   return row?.task;
 }
 
+function hasPendingGoalActivation(task: typeof tasks.$inferSelect): boolean {
+  return (
+    task.goalStatus === 'active' &&
+    Boolean(task.goalLastContinuationId?.startsWith('goal-activation:'))
+  );
+}
+
+async function waitForGoalActivation(
+  runId: number,
+  activationId: string,
+): Promise<typeof tasks.$inferSelect | undefined> {
+  const deadline = Date.now() + GOAL_ACTIVATION_WAIT_MS;
+  let task = await getTaskForRun(runId);
+
+  while (
+    task?.goalLastContinuationId === activationId &&
+    hasPendingGoalActivation(task) &&
+    Date.now() < deadline
+  ) {
+    await delay(GOAL_ACTIVATION_POLL_MS);
+    task = await getTaskForRun(runId);
+  }
+
+  return task;
+}
+
 export async function getTaskGoalForRun(
   runId: number,
 ): Promise<TaskGoal | null> {
@@ -71,11 +101,7 @@ export async function prepareTaskGoalActivation(input: {
       .where(eq(tasks.id, input.taskId))
       .limit(1)
       .for('update');
-    if (
-      !task ||
-      (task.goalStatus === null &&
-        task.goalLastContinuationId?.startsWith('goal-activation:'))
-    ) {
+    if (!task || hasPendingGoalActivation(task)) {
       return null;
     }
 
@@ -83,7 +109,7 @@ export async function prepareTaskGoalActivation(input: {
       .update(tasks)
       .set({
         goalObjective: input.goal.objective,
-        goalStatus: null,
+        goalStatus: 'active',
         goalMaxContinuations: input.goal.maxContinuations,
         goalContinuationsUsed: 0,
         goalBlockedReason: null,
@@ -107,7 +133,7 @@ export async function prepareTaskGoalActivation(input: {
 
   const pendingFilter = and(
     eq(tasks.id, input.taskId),
-    isNull(tasks.goalStatus),
+    eq(tasks.goalStatus, 'active'),
     eq(tasks.goalLastContinuationId, activationId),
   );
 
@@ -116,7 +142,6 @@ export async function prepareTaskGoalActivation(input: {
       const [updated] = await db
         .update(tasks)
         .set({
-          goalStatus: 'active',
           goalLastContinuationId: null,
           updatedAt: new Date(),
         })
@@ -271,9 +296,22 @@ export async function claimTaskGoalContinuationForRun(input: {
   continuationId: string;
 }): Promise<TaskGoalMutationResult> {
   const { runId, continuationId } = input;
-  const task = await getTaskForRun(runId);
+  let task = await getTaskForRun(runId);
   if (!task) {
     return { updated: false, reason: 'missing', goal: null };
+  }
+  if (hasPendingGoalActivation(task)) {
+    const activationId = task.goalLastContinuationId!;
+    task = await waitForGoalActivation(runId, activationId);
+    if (!task) {
+      return { updated: false, reason: 'missing', goal: null };
+    }
+    if (
+      task.goalLastContinuationId === activationId &&
+      hasPendingGoalActivation(task)
+    ) {
+      return { updated: false, reason: 'not_active', goal: null };
+    }
   }
   const existingGoal = toTaskGoal(task);
   if (task.goalStatus !== 'active' || !existingGoal) {

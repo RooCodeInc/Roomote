@@ -9,7 +9,7 @@ import {
 } from './task-goals';
 
 describe('task goals', () => {
-  it('activates Goal Mode only after delivery is committed', async () => {
+  it('holds a fast completion until goal delivery is committed', async () => {
     const task = await taskFactory.create({
       goalObjective: 'Old objective',
       goalStatus: 'blocked',
@@ -38,19 +38,30 @@ describe('task goals', () => {
         },
       }),
     ).resolves.toBeNull();
-    await expect(getTaskGoalForRun(run.id)).resolves.toBeNull();
-    await expect(
-      claimTaskGoalContinuationForRun({
-        runId: run.id,
-        continuationId: 'pending-turn',
-      }),
-    ).resolves.toMatchObject({ updated: false, reason: 'not_active' });
+    await expect(getTaskGoalForRun(run.id)).resolves.toMatchObject({
+      objective: 'Finish the new objective',
+      status: 'active',
+    });
+    let claimSettled = false;
+    const claim = claimTaskGoalContinuationForRun({
+      runId: run.id,
+      continuationId: 'pending-turn',
+    }).finally(() => {
+      claimSettled = true;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(claimSettled).toBe(false);
     await expect(activation!.commit()).resolves.toMatchObject({
       objective: 'Finish the new objective',
       status: 'active',
       maxContinuations: 4,
       continuationsUsed: 0,
       blockedReason: null,
+    });
+    await expect(claim).resolves.toMatchObject({
+      updated: true,
+      goal: { continuationsUsed: 1 },
     });
   });
 
@@ -77,6 +88,31 @@ describe('task goals', () => {
       status: 'active',
       maxContinuations: 3,
       continuationsUsed: 1,
+    });
+  });
+
+  it('stops a waiting completion when first-time goal delivery fails', async () => {
+    const task = await taskFactory.create();
+    const run = await runFactory.create({ taskId: task.id });
+    const activation = await prepareTaskGoalActivation({
+      taskId: task.id,
+      goal: {
+        objective: 'Objective that cannot be delivered',
+        maxContinuations: 5,
+      },
+    });
+    const claim = claimTaskGoalContinuationForRun({
+      runId: run.id,
+      continuationId: 'failed-delivery-turn',
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await activation!.rollback();
+
+    await expect(claim).resolves.toMatchObject({
+      updated: false,
+      reason: 'not_active',
+      goal: null,
     });
   });
 
