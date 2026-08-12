@@ -491,16 +491,9 @@ github.post('/', async (c) => {
     );
 
     webhooks.on('workflow_run.completed', ({ id, name, payload }) =>
-      recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        if (isRepoSkipped(payload.repository.full_name)) {
-          return {
-            status: 'ok' as const,
-            message: `Skipping workflow_run webhook for ${payload.repository.full_name}`,
-          };
-        }
-
-        return handleWorkflowRunCompleted(payload);
-      }),
+      recordWebhook(id, `${name}.${payload.action}`, payload, () =>
+        handleWorkflowRunCompleted(payload),
+      ),
     );
 
     webhooks.on('pull_request.closed', ({ id, name, payload }) =>

@@ -12,6 +12,7 @@ const {
   mockHandlePrReopen,
   mockHandlePrSynchronize,
   mockHandlePushConflictCheck,
+  mockHandleWorkflowRunCompleted,
   mockIsRepoSkipped,
   mockQueuePrReviewActivityNotification,
   mockQueuePrReviewSummaryNotification,
@@ -45,6 +46,7 @@ const {
   mockHandlePrReopen: vi.fn(),
   mockHandlePrSynchronize: vi.fn(),
   mockHandlePushConflictCheck: vi.fn(),
+  mockHandleWorkflowRunCompleted: vi.fn(),
   mockIsRepoSkipped: vi.fn(),
   mockQueuePrReviewActivityNotification: vi.fn(),
   mockQueuePrReviewSummaryNotification: vi.fn(),
@@ -168,7 +170,7 @@ vi.mock('../handlePushConflictCheck', () => ({
 }));
 
 vi.mock('../handleWorkflowRunCompleted', () => ({
-  handleWorkflowRunCompleted: vi.fn(async () => ({ status: 'ok' as const })),
+  handleWorkflowRunCompleted: mockHandleWorkflowRunCompleted,
 }));
 
 vi.mock('../recordWebhook', () => ({
@@ -198,6 +200,7 @@ describe('github webhook router', () => {
     mockHandlePrReopen.mockReset();
     mockHandlePrSynchronize.mockReset();
     mockHandlePushConflictCheck.mockReset();
+    mockHandleWorkflowRunCompleted.mockReset();
     mockIsRepoSkipped.mockReset();
     mockQueuePrReviewActivityNotification.mockReset();
     mockQueuePrReviewSummaryNotification.mockReset();
@@ -220,6 +223,7 @@ describe('github webhook router', () => {
     mockHandlePrComment.mockResolvedValue({ status: 'ok' });
     mockHandleGitHubIssueComment.mockResolvedValue({ status: 'ok' });
     mockHandleGitHubIssueFixer.mockResolvedValue({ status: 'ok' });
+    mockHandleWorkflowRunCompleted.mockResolvedValue({ status: 'ok' });
     mockRecordWebhook.mockImplementation(
       async (
         _deliveryId: string,
@@ -469,6 +473,41 @@ describe('github webhook router', () => {
       expect(mockHandlePrComment).not.toHaveBeenCalled();
     },
   );
+
+  it('routes completed workflow runs for skipped repositories to CI failure handling', async () => {
+    mockIsRepoSkipped.mockReturnValue(true);
+    const payload = {
+      action: 'completed',
+      installation: { id: 1 },
+      repository: {
+        id: 10,
+        full_name: 'test-org/test-repo',
+        default_branch: 'main',
+      },
+      workflow_run: {
+        id: 99,
+        conclusion: 'failure',
+        head_branch: 'main',
+        head_sha: 'abc123',
+        html_url: 'https://github.com/test-org/test-repo/actions/runs/99',
+        event: 'push',
+      },
+      sender: { login: 'github-actions[bot]' },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-skipped-workflow-run',
+        'x-github-event': 'workflow_run',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockHandleWorkflowRunCompleted).toHaveBeenCalledWith(payload);
+  });
 
   it('routes opened issues with body mentions through handleGitHubIssueComment', async () => {
     const payload = {
