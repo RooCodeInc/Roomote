@@ -6,7 +6,7 @@ import {
   ALL_REPOSITORIES,
   type WorkspaceRoutingSettings,
 } from '@roomote/types';
-import { GitBranch, Pencil, Plus, Trash2 } from '@/components/system';
+import { GitBranch, Pencil, Trash2 } from '@/components/system';
 import {
   Button,
   Input,
@@ -53,32 +53,16 @@ export function EnvironmentRoutingOverview() {
   };
 
   return (
-    <Section
-      icon={GitBranch}
-      title="Routing Rules"
-      action={
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={rules.length >= 20}
-          onClick={() => {
-            setDraftRule(EMPTY_RULE);
-            setEditingIndex(null);
-          }}
-        >
-          <Plus />
-          Add Rule
-        </Button>
-      }
-    >
+    <Section icon={GitBranch} title="Routing Rules">
       <p className="text-sm text-muted-foreground">
         Routing rules help Roomote agents pick the right environment or broad
-        workspace.
+        workspace. Describe when Roomote should choose a specific environment;
+        the router prioritizes matching rules unless the user explicitly
+        overrides them.
       </p>
 
-      <div className="rounded-md border border-border">
-        <div className="grid gap-3 border-b border-border p-4 sm:grid-cols-[1fr_16rem_auto]">
+      <div>
+        <div className="grid gap-3 py-4 sm:grid-cols-[1fr_16rem_auto]">
           <Input
             value={draftRule.description}
             placeholder="Description..."
@@ -97,57 +81,73 @@ export function EnvironmentRoutingOverview() {
               setDraftRule((current) => ({ ...current, target }))
             }
           />
-          <Button
-            type="button"
-            size="sm"
-            disabled={
-              updateSettings.isPending ||
-              !draftRule.description.trim() ||
-              !draftRule.target
-            }
-            onClick={async () => {
-              try {
-                const normalizedRule = {
-                  ...draftRule,
-                  description: draftRule.description.trim(),
-                };
-                const nextRules =
-                  editingIndex === null
-                    ? [...rules, normalizedRule]
-                    : rules.map((rule, index) =>
-                        index === editingIndex ? normalizedRule : rule,
-                      );
-                await saveRules(nextRules);
-                setDraftRule(EMPTY_RULE);
-                setEditingIndex(null);
-              } catch {
-                toast.error(
-                  editingIndex === null
-                    ? 'Failed to add routing rule'
-                    : 'Failed to update routing rule',
-                );
+          <div className="flex gap-2">
+            {editingIndex !== null && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={updateSettings.isPending}
+                onClick={() => {
+                  setDraftRule(EMPTY_RULE);
+                  setEditingIndex(null);
+                }}
+              >
+                Cancel
+              </Button>
+            )}
+            <Button
+              type="button"
+              size="sm"
+              disabled={
+                updateSettings.isPending ||
+                !draftRule.description.trim() ||
+                !draftRule.target
               }
-            }}
-          >
-            {editingIndex === null ? 'Add Rule' : 'Save Rule'}
-          </Button>
+              onClick={async () => {
+                try {
+                  const normalizedRule = {
+                    ...draftRule,
+                    description: draftRule.description.trim(),
+                  };
+                  const nextRules =
+                    editingIndex === null
+                      ? [...rules, normalizedRule]
+                      : rules.map((rule, index) =>
+                          index === editingIndex ? normalizedRule : rule,
+                        );
+                  await saveRules(nextRules);
+                  setDraftRule(EMPTY_RULE);
+                  setEditingIndex(null);
+                } catch {
+                  toast.error(
+                    editingIndex === null
+                      ? 'Failed to add routing rule'
+                      : 'Failed to update routing rule',
+                  );
+                }
+              }}
+            >
+              {editingIndex === null ? 'Add Rule' : 'Save Rule'}
+            </Button>
+          </div>
         </div>
 
-        <div className="grid grid-cols-[1fr_16rem_4rem] gap-3 border-b border-border px-4 py-2 text-xs font-medium text-muted-foreground max-sm:hidden">
+        <div className="grid grid-cols-[1fr_16rem_4rem] gap-3 py-2 text-xs font-medium text-muted-foreground max-sm:hidden">
           <span>Description</span>
           <span>Target</span>
           <span />
         </div>
 
         {rules.length === 0 ? (
-          <p className="p-4 text-sm text-muted-foreground">
+          <p className="py-4 text-sm text-muted-foreground">
             No routing rules configured.
           </p>
         ) : (
           rules.map((rule, index) => (
             <div
               key={`${rule.description}-${rule.target}-${index}`}
-              className="grid gap-3 border-b border-border p-4 last:border-b-0 sm:grid-cols-[1fr_16rem_4rem] sm:items-center"
+              className="grid gap-3 py-4 sm:grid-cols-[1fr_16rem_4rem] sm:items-center"
             >
               <span className="text-sm">{rule.description}</span>
               <span className="text-sm text-muted-foreground">
