@@ -115,34 +115,37 @@ async function listDiscordChannels(
     provider && linkedDiscordUserId
       ? (
           await Promise.all(
-            installations.flatMap((installation) =>
-              installation.channels.map(async (channel) => {
+            installations.map(async (installation) => {
+              const supportedChannels = installation.channels.filter(
+                (channel) => DISCORD_CHANNEL_KINDS[channel.channelType],
+              );
+              const accessibleChannelIds = new Set(
+                await provider.listPublicAccessibleChannelIds({
+                  guildId: installation.guildId,
+                  userId: linkedDiscordUserId,
+                  channelIds: supportedChannels.map(
+                    (channel) => channel.channelId,
+                  ),
+                }),
+              );
+              return supportedChannels.flatMap((channel) => {
                 const kind = DISCORD_CHANNEL_KINDS[channel.channelType];
-                if (!kind) return null;
-                const [isPublic, canAccess] = await Promise.all([
-                  provider.isChannelPublic({
-                    guildId: installation.guildId,
-                    channelId: channel.channelId,
-                  }),
-                  provider.canUserAccessChannel({
-                    guildId: installation.guildId,
-                    channelId: channel.channelId,
-                    userId: linkedDiscordUserId,
-                  }),
-                ]);
-                if (isPublic !== true || canAccess !== true) return null;
-                return {
-                  id: channel.channelId,
-                  name: channel.channelName ?? channel.channelId,
-                  kind,
-                  workspaceId: installation.guildId,
-                  workspaceName: installation.guildName ?? undefined,
-                  parentId: channel.parentId ?? undefined,
-                };
-              }),
-            ),
+                return kind && accessibleChannelIds.has(channel.channelId)
+                  ? [
+                      {
+                        id: channel.channelId,
+                        name: channel.channelName ?? channel.channelId,
+                        kind,
+                        workspaceId: installation.guildId,
+                        workspaceName: installation.guildName ?? undefined,
+                        parentId: channel.parentId ?? undefined,
+                      },
+                    ]
+                  : [];
+              });
+            }),
           )
-        ).filter((channel) => channel !== null)
+        ).flat()
       : [];
 
   return {

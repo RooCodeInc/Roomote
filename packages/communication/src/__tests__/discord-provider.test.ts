@@ -408,6 +408,55 @@ describe('DiscordCommunicationProvider', () => {
     ).resolves.toBe(true);
   });
 
+  it('bulk checks public user-accessible channels with one guild snapshot', async () => {
+    const { server, provider } = createHarness();
+    const publicChannelId = '400000000000000001';
+    const privateChannelId = '400000000000000002';
+    const viewChannel = String(1n << 10n);
+    server.addChannel({
+      id: publicChannelId,
+      guild_id: server.guildId,
+      name: 'public',
+      type: 0,
+      permission_overwrites: [
+        {
+          id: server.guildId,
+          type: 0,
+          allow: viewChannel,
+          deny: '0',
+        },
+      ],
+    });
+    server.addChannel({
+      id: privateChannelId,
+      guild_id: server.guildId,
+      name: 'staff-only',
+      type: 0,
+      permission_overwrites: [
+        {
+          id: server.guildId,
+          type: 0,
+          allow: '0',
+          deny: viewChannel,
+        },
+        {
+          id: 'role-roomote',
+          type: 0,
+          allow: viewChannel,
+          deny: '0',
+        },
+      ],
+    });
+
+    await expect(
+      provider.listPublicAccessibleChannelIds({
+        guildId: server.guildId,
+        userId: server.bot.id,
+        channelIds: [publicChannelId, privateChannelId],
+      }),
+    ).resolves.toEqual([publicChannelId]);
+  });
+
   it('applies the everyone overwrite separately from member role overwrites', async () => {
     const { server, provider } = createHarness();
     const channelId = '400000000000000001';

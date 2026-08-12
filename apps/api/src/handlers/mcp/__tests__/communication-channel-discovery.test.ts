@@ -5,8 +5,7 @@ const {
   findTeamsInstallationsMock,
   getCommunicationProviderAdapterMock,
   createDiscordProviderMock,
-  canDiscordUserAccessChannelMock,
-  isDiscordChannelPublicMock,
+  listPublicAccessibleChannelIdsMock,
   listPublicChannelsMock,
 } = vi.hoisted(() => ({
   findDiscordInstallationsMock: vi.fn(),
@@ -15,8 +14,7 @@ const {
   findTeamsInstallationsMock: vi.fn(),
   getCommunicationProviderAdapterMock: vi.fn(),
   createDiscordProviderMock: vi.fn(),
-  canDiscordUserAccessChannelMock: vi.fn(),
-  isDiscordChannelPublicMock: vi.fn(),
+  listPublicAccessibleChannelIdsMock: vi.fn(),
   listPublicChannelsMock: vi.fn(),
 }));
 
@@ -58,11 +56,11 @@ describe('listCommunicationChannels', () => {
     findDiscordUserMappingMock.mockResolvedValue(null);
     getCommunicationProviderAdapterMock.mockResolvedValue(null);
     createDiscordProviderMock.mockResolvedValue({
-      canUserAccessChannel: canDiscordUserAccessChannelMock,
-      isChannelPublic: isDiscordChannelPublicMock,
+      listPublicAccessibleChannelIds: listPublicAccessibleChannelIdsMock,
     });
-    canDiscordUserAccessChannelMock.mockResolvedValue(true);
-    isDiscordChannelPublicMock.mockResolvedValue(true);
+    listPublicAccessibleChannelIdsMock.mockImplementation(
+      async ({ channelIds }: { channelIds: string[] }) => channelIds,
+    );
     listPublicChannelsMock.mockResolvedValue([]);
   });
 
