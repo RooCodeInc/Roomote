@@ -142,6 +142,20 @@ vi.mock('@roomote/redis', () => ({
         return 1;
       }
 
+      if (script.includes('if marker ~= ARGV[1]')) {
+        const [rotatedMarker, refreshPrefix] = values;
+        if (redisState.get(key) !== rotatedMarker) return 0;
+        const session = redisState.get(keys[1]!);
+        if (session) {
+          const decoded = JSON.parse(session) as {
+            currentTokenHash: string;
+          };
+          redisState.delete(`${refreshPrefix}${decoded.currentTokenHash}`);
+        }
+        redisState.delete(keys[1]!);
+        return 1;
+      }
+
       if (script.includes("redis.call('GET'")) {
         const value = redisState.get(key) ?? null;
         if (value === values[0]) redisState.delete(key);
@@ -168,6 +182,7 @@ import {
   promoteRemoteMcpOAuthClient,
   registerRemoteMcpOAuthClient,
   revokeRemoteMcpRefreshSession,
+  revokeRemoteMcpRefreshSessionOnReplay,
   rotateRemoteMcpRefreshToken,
   verifyPkceChallenge,
 } from './mcp-remote-oauth';
@@ -339,6 +354,59 @@ describe('remote MCP OAuth state', () => {
     await expect(getRemoteMcpRefreshSession(replacementToken)).resolves.toEqual(
       replacementSession,
     );
+  });
+
+  it('revokes the whole family when a rotated token is replayed', async () => {
+    const refreshToken = await createRemoteMcpRefreshSession({
+      userId: 'user-1',
+      clientId: 'client-1',
+      resource: 'https://roomote.example/mcp',
+      scopes: ['mcp:roomote'],
+    });
+    const session = await getRemoteMcpRefreshSession(refreshToken);
+    const rotation = await rotateRemoteMcpRefreshToken(refreshToken, session!);
+    if (rotation.status !== 'ok') throw new Error('expected refresh rotation');
+
+    // The rotated token is no longer a valid session, but its replay must
+    // still kill the family: the current token dies with it.
+    await expect(getRemoteMcpRefreshSession(refreshToken)).resolves.toBeNull();
+    await expect(
+      revokeRemoteMcpRefreshSessionOnReplay(refreshToken),
+    ).resolves.toBe(true);
+    await expect(
+      getRemoteMcpRefreshSession(rotation.refreshToken),
+    ).resolves.toBeNull();
+
+    // The rotated marker persists, so repeat replays keep reporting the
+    // replay signal (the family is already dead; there is nothing left to
+    // revoke).
+    await expect(
+      revokeRemoteMcpRefreshSessionOnReplay(refreshToken),
+    ).resolves.toBe(true);
+  });
+
+  it('does not revoke a family for its current token or unknown tokens', async () => {
+    const refreshToken = await createRemoteMcpRefreshSession({
+      userId: 'user-1',
+      clientId: 'client-1',
+      resource: 'https://roomote.example/mcp',
+      scopes: ['mcp:roomote'],
+    });
+
+    await expect(
+      revokeRemoteMcpRefreshSessionOnReplay(refreshToken),
+    ).resolves.toBe(false);
+    await expect(
+      revokeRemoteMcpRefreshSessionOnReplay(
+        `${'b'.repeat(64)}.${'c'.repeat(43)}`,
+      ),
+    ).resolves.toBe(false);
+    await expect(
+      revokeRemoteMcpRefreshSessionOnReplay('not-a-token'),
+    ).resolves.toBe(false);
+    await expect(
+      getRemoteMcpRefreshSession(refreshToken),
+    ).resolves.toMatchObject({ userId: 'user-1', clientId: 'client-1' });
   });
 
   it('revokes a refresh session by client ID', async () => {

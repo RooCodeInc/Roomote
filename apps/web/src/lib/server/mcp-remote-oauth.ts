@@ -122,6 +122,20 @@ redis.call('SET', KEYS[3], ARGV[4], 'EX', ARGV[6])
 return {'ok'}
 `;
 
+const REVOKE_SESSION_ON_REPLAY_LUA = `
+local marker = redis.call('GET', KEYS[1])
+if marker ~= ARGV[1] then
+  return 0
+end
+local session = redis.call('GET', KEYS[2])
+if session then
+  local decoded = cjson.decode(session)
+  redis.call('DEL', ARGV[2] .. decoded.currentTokenHash)
+end
+redis.call('DEL', KEYS[2])
+return 1
+`;
+
 const REVOKE_REFRESH_SESSION_LUA = `
 local marker = redis.call('GET', KEYS[1])
 if marker ~= ARGV[3] then
@@ -473,6 +487,31 @@ export async function revokeRemoteMcpRefreshSession(
     `active:${sessionId}`,
     tokenHash,
   );
+}
+
+/**
+ * Replay of an already-rotated refresh token revokes the whole session family
+ * (OAuth 2.0 Security BCP): the session and its current token are deleted, so
+ * every descendant token dies with them. Only tokens carrying the `rotated:`
+ * marker left behind by a successful rotation trigger this; unknown or expired
+ * tokens are ignored so random garbage cannot kill a live family. Returns true
+ * when a replay was detected and the family was revoked.
+ */
+export async function revokeRemoteMcpRefreshSessionOnReplay(
+  refreshToken: string,
+): Promise<boolean> {
+  const sessionId = parseRefreshToken(refreshToken);
+  if (!sessionId) return false;
+  const tokenHash = refreshTokenHash(refreshToken);
+  const revoked = await getRedis().eval(
+    REVOKE_SESSION_ON_REPLAY_LUA,
+    2,
+    refreshTokenKey(tokenHash),
+    refreshSessionKey(sessionId),
+    `rotated:${sessionId}`,
+    REFRESH_TOKEN_KEY_PREFIX,
+  );
+  return revoked === 1;
 }
 
 export async function isRemoteMcpRegistrationAllowed(
