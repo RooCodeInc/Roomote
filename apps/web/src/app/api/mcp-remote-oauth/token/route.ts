@@ -14,6 +14,7 @@ import {
   getRemoteMcpOAuthClient,
   getRemoteMcpRefreshSession,
   promoteRemoteMcpOAuthClient,
+  revokeRemoteMcpRefreshSessionOnReplay,
   rotateRemoteMcpRefreshToken,
   verifyPkceChallenge,
 } from '@/lib/server/mcp-remote-oauth';
@@ -80,8 +81,15 @@ export async function POST(request: NextRequest) {
       getRemoteMcpRefreshSession(input.refresh_token),
       getRemoteMcpOAuthClient(input.client_id),
     ]);
+    if (!session) {
+      // The presented token is not the family's current token. If it is an
+      // already-rotated token, its replay revokes the entire session family
+      // per the OAuth 2.0 Security BCP (refresh token rotation with reuse
+      // detection); unknown or expired tokens are ignored.
+      await revokeRemoteMcpRefreshSessionOnReplay(input.refresh_token);
+      return oauthError('invalid_grant');
+    }
     if (
-      !session ||
       !client ||
       !client.grantTypes.includes('refresh_token') ||
       session.clientId !== input.client_id ||
