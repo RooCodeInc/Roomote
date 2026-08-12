@@ -1,14 +1,16 @@
 ---
 name: changeset-release-pr
-description: 'Prepare the next Roomote release PR: review what merged to develop, fill missing release notes, confirm patch/minor/major when unspecified, run the product version script, and open the final version-and-changelog PR. Use when asked to prep, cut, or write notes for a release.'
+description: 'Prepare the next Roomote release PR: review what merged to develop, fill missing release notes, ensure meaningful user-facing features are documented, confirm patch/minor/major when unspecified, run the product version script, and open the final release PR. Use when asked to prep, cut, or write notes for a release.'
 ---
 
 # Changeset Release PR
 
 Use this skill to prepare the single release PR that cuts the next Roomote
 version. The deliverable is a normal PR against `develop` containing the root
-version bump, final `CHANGELOG.md` entry, and deletion of every consumed pending
-changeset. Merging it makes CI open the frozen Promote PR to `main`.
+version bump, final `CHANGELOG.md` entry, any public documentation updates needed
+for the release's meaningful user-facing features, and deletion of every
+consumed pending changeset. Merging it makes CI open the frozen Promote PR to
+`main`.
 
 ## How releases work here
 
@@ -102,7 +104,9 @@ find .changeset -maxdepth 1 -type f -name '*.md' ! -iname 'README.md' -print
 ```
 
 Read every pending file. A change already covered by a pending changeset must
-not receive a duplicate note.
+not receive a duplicate note. Keep it in the complete release-change inventory
+for the documentation audit; subtracting a changeset only removes the need to
+author another changelog note.
 
 ### 5. Classify the remaining changes
 
@@ -112,7 +116,37 @@ not receive a duplicate note.
   refactors, and dependency bumps with no visible effect. They ship without a
   changelog bullet.
 
-### 6. Confirm the bump level
+### 6. Audit public documentation coverage
+
+For every included change in the complete release inventory, including changes
+already covered by pending changesets, decide whether it is a **meaningful
+user-facing feature** that users or operators need documentation to discover,
+configure, or use successfully. This normally includes new capabilities,
+supported providers or integrations, configuration options, permissions or
+prerequisites, and material workflow changes. Small visible fixes, minor polish,
+and implementation details generally need a changelog note but not a docs
+update.
+
+For each meaningful feature:
+
+- identify the relevant public page or pages under `apps/docs`; read the
+  applicable `apps/docs/AGENTS.md` instructions before editing
+- compare the shipped behavior and PR context with the current docs; do not
+  assume that a feature PR updated docs merely because it has a changeset
+- update missing, stale, or incomplete guidance in the release branch, including
+  setup steps, prerequisites, permissions, expected behavior, and navigation
+  entries when needed
+- keep docs practical and user-facing; do not copy changelog prose or add
+  internal implementation details just to mention the feature
+- record a feature-to-docs coverage checklist for the release PR body, linking
+  each meaningful feature to its updated or already-current docs page
+
+If no included change meets this threshold, explicitly record that the docs
+audit found no release-blocking documentation updates. Do not use that outcome
+without reviewing every included change, including those with existing pending
+changesets.
+
+### 7. Confirm the bump level
 
 If the user specified patch, minor, or major, use it. Otherwise ask and include
 a recommendation based on the actual changes:
@@ -126,7 +160,7 @@ single product version. If an existing pending changeset is higher than the
 user's choice, say that the higher bump will win. Individual notes may carry
 different levels and are grouped by level in the changelog.
 
-### 7. Author missing changesets locally
+### 8. Author missing changesets locally
 
 Create one `.changeset/<descriptive-slug>.md` file per logical release note:
 
@@ -158,7 +192,7 @@ One concise, user-facing summary of the change.
 - These newly authored files are temporary release inputs. `pnpm run version`
   consumes them before the release branch is committed.
 
-### 8. Generate and verify the release
+### 9. Generate and verify the release
 
 Start from the current `origin/develop` tip. If `develop` advances before the
 release PR merges, rebuild the release artifacts from the new tip and repeat the
@@ -199,21 +233,27 @@ Then verify:
   `### Highlights` list suitable for in-app display
 - every pending changeset was consumed and `.changeset/README.md` remains
 - workspace package versions did not change
-- the diff contains only release artifacts: root `package.json`,
-  `CHANGELOG.md`, and deletions of changesets that already existed on the base
-  branch. Locally created missing changesets normally leave no final diff because
-  they are created and consumed in the same working tree.
+- every meaningful user-facing feature has an accurate public docs destination,
+  with any required `apps/docs` updates and navigation changes included
+- the diff contains only release artifacts and required public docs updates:
+  root `package.json`, `CHANGELOG.md`, relevant files under `apps/docs`, and
+  deletions of changesets that already existed on the base branch. Locally
+  created missing changesets normally leave no final diff because they are
+  created and consumed in the same working tree.
 
 Run the release-script tests and the repository's appropriate static checks
-before opening the PR.
+before opening the PR. When `apps/docs` changed, also run
+`mise exec -- pnpm --filter @roomote/docs check`.
 
-### 9. Open the release PR
+### 10. Open the release PR
 
 Commit the generated release artifacts on a feature branch and open a PR against
 `develop` titled **Release Roomote X.Y.Z**. The PR body should include:
 
 - the previous and next product versions
 - the final changelog bullets grouped by bump level
+- the feature-to-docs coverage checklist, including required updates or an
+  explicit no-updates-needed result
 - validation performed
 - a note that squash-merging the PR cuts the release and automatically opens
   the frozen **Promote vX.Y.Z to production** PR against `main`
@@ -238,6 +278,9 @@ Commit the generated release artifacts on a feature branch and open a PR against
   decide.
 - Do not duplicate existing pending notes or pad the changelog with internal
   noise.
+- Do not release a meaningful user-facing feature with missing or stale public
+  docs; update `apps/docs` as part of the release PR when the original feature
+  work did not keep it current.
 - Do not multi-package-attribute changesets; always emit one
   `'@roomote/web': <level>` line.
 - Use the actual version produced by `scripts/release/lib.mjs`; do not guess
