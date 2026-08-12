@@ -77,8 +77,8 @@ export function EnvironmentRoutingOverview() {
         workspace.
       </p>
 
-      <div className="rounded-md border border-border">
-        <div className="grid gap-3 border-b border-border p-4 sm:grid-cols-[1fr_16rem_auto]">
+      <div>
+        <div className="grid gap-3 p-4 sm:grid-cols-[1fr_16rem_auto]">
           <Input
             value={draftRule.description}
             placeholder="Description..."
@@ -133,7 +133,7 @@ export function EnvironmentRoutingOverview() {
           </Button>
         </div>
 
-        <div className="grid grid-cols-[1fr_16rem_4rem] gap-3 border-b border-border px-4 py-2 text-xs font-medium text-muted-foreground max-sm:hidden">
+        <div className="grid grid-cols-[1fr_16rem_4rem] gap-3 px-4 py-2 text-xs font-medium text-muted-foreground max-sm:hidden">
           <span>Description</span>
           <span>Target</span>
           <span />
@@ -147,7 +147,7 @@ export function EnvironmentRoutingOverview() {
           rules.map((rule, index) => (
             <div
               key={`${rule.description}-${rule.target}-${index}`}
-              className="grid gap-3 border-b border-border p-4 last:border-b-0 sm:grid-cols-[1fr_16rem_4rem] sm:items-center"
+              className="grid gap-3 p-4 sm:grid-cols-[1fr_16rem_4rem] sm:items-center"
             >
               <span className="text-sm">{rule.description}</span>
               <span className="text-sm text-muted-foreground">
