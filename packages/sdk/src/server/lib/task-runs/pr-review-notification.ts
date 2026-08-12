@@ -6,11 +6,14 @@ import {
   buildPrReviewEventKey,
   claimDuePrReviewDeliveries,
   completePrReviewDeliveries,
+  db,
   deferPrReviewDeliveries,
+  eq,
   persistPrReviewEvent,
   recordPrReviewCycleState,
   releasePrReviewDeliveries,
   renewPrReviewDeliveryClaim,
+  slackInstallations,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
 import {
@@ -162,7 +165,12 @@ type PrReviewNotificationRoutingRun = Pick<
 >;
 
 export type PrReviewNotificationRoute =
-  | { provider: 'slack'; channelId: string; threadId: string }
+  | {
+      provider: 'slack';
+      slackTeamId: string;
+      channelId: string;
+      threadId: string;
+    }
   | {
       provider: 'teams';
       channelId: string;
@@ -333,13 +341,40 @@ export async function resolvePrReviewNotificationRoute(
     };
   }
 
-  const { channel, threadTs } = await resolveSlackTaskRunRouting(job);
+  const {
+    channel,
+    teamId: resolvedTeamId,
+    threadTs,
+  } = await resolveSlackTaskRunRouting(job);
 
   if (!channel || !threadTs) {
     return null;
   }
 
-  return { provider: 'slack', channelId: channel, threadId: threadTs };
+  let slackTeamId = resolvedTeamId;
+
+  if (!slackTeamId) {
+    const installations = await db.query.slackInstallations.findMany({
+      where: eq(slackInstallations.isActive, true),
+      columns: { teamId: true },
+      limit: 2,
+    });
+
+    if (installations.length !== 1) {
+      return null;
+    }
+
+    slackTeamId = installations[0]?.teamId ?? null;
+  }
+
+  return slackTeamId
+    ? {
+        provider: 'slack',
+        slackTeamId,
+        channelId: channel,
+        threadId: threadTs,
+      }
+    : null;
 }
 
 /** Moves an owned database delivery back to pending with a later due time. */

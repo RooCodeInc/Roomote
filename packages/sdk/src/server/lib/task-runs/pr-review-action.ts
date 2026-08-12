@@ -1,4 +1,10 @@
-import { and, db, eq, taskPullRequests } from '@roomote/db/server';
+import {
+  and,
+  db,
+  eq,
+  slackInstallations,
+  taskPullRequests,
+} from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
 
 /** Conversation providers that can render PR review action buttons. */
@@ -18,6 +24,8 @@ const PR_REVIEW_ACTION_TTL_SECONDS = 7 * 24 * 60 * 60;
 export interface PendingPrReviewAction {
   nonce: string;
   provider: PrReviewActionProvider;
+  /** Slack workspace identity. Absent only on legacy pending records. */
+  slackTeamId?: string;
   taskId: string;
   repository: string;
   prNumber: number;
@@ -47,6 +55,13 @@ export interface PendingPrReviewAction {
 const CLAIM_PR_REVIEW_ACTION_LUA = `
 local val = redis.call('get', KEYS[1])
 if not val then return nil end
+if ARGV[1] ~= '' then
+  local pending = cjson.decode(val)
+  if pending.provider == 'slack' then
+    if pending.slackTeamId and pending.slackTeamId ~= ARGV[1] then return nil end
+    if not pending.slackTeamId and ARGV[2] ~= '1' then return nil end
+  end
+end
 redis.call('del', KEYS[1])
 return val
 `;
@@ -88,10 +103,15 @@ function getPrReviewActionKey(nonce: string): string {
 // reply in the thread can retire all of them at once.
 function getPrReviewActionThreadKey(input: {
   provider: PrReviewActionProvider;
+  slackTeamId?: string;
   channelId: string;
   threadId: string | null;
 }): string {
-  return `${PR_REVIEW_ACTION_PREFIX}thread:${input.provider}:${input.channelId}:${input.threadId ?? '-'}`;
+  if (input.provider !== 'slack' || !input.slackTeamId) {
+    return `${PR_REVIEW_ACTION_PREFIX}thread:${input.provider}:${input.channelId}:${input.threadId ?? '-'}`;
+  }
+
+  return `${PR_REVIEW_ACTION_PREFIX}thread:${input.provider}:${input.slackTeamId}:${input.channelId}:${input.threadId ?? '-'}`;
 }
 
 export async function setPendingPrReviewAction(
@@ -135,12 +155,35 @@ export async function attachPendingPrReviewActionMessage(
 
 export async function claimPendingPrReviewAction(
   nonce: string,
+  options: { expectedSlackTeamId?: string } = {},
 ): Promise<PendingPrReviewAction | null> {
   const redis = getRedis();
+  let allowLegacySlackRecord = false;
+
+  if (options.expectedSlackTeamId) {
+    const rawPending = await redis.get(getPrReviewActionKey(nonce));
+
+    try {
+      const pending = rawPending
+        ? (JSON.parse(rawPending) as PendingPrReviewAction)
+        : null;
+
+      if (pending?.provider === 'slack' && !pending.slackTeamId) {
+        allowLegacySlackRecord = await isOnlyActiveSlackWorkspace(
+          options.expectedSlackTeamId,
+        );
+      }
+    } catch {
+      return null;
+    }
+  }
+
   const raw = await redis.eval(
     CLAIM_PR_REVIEW_ACTION_LUA,
     1,
     getPrReviewActionKey(nonce),
+    options.expectedSlackTeamId ?? '',
+    allowLegacySlackRecord ? '1' : '0',
   );
 
   if (typeof raw !== 'string') {
@@ -160,6 +203,16 @@ export async function claimPendingPrReviewAction(
   }
 }
 
+async function isOnlyActiveSlackWorkspace(teamId: string): Promise<boolean> {
+  const installations = await db.query.slackInstallations.findMany({
+    where: eq(slackInstallations.isActive, true),
+    columns: { teamId: true },
+    limit: 2,
+  });
+
+  return installations.length === 1 && installations[0]?.teamId === teamId;
+}
+
 /**
  * Claims every pending offer bound to a conversation — used when a typed
  * reply lands in the thread, which supersedes the offers: the person chose
@@ -168,29 +221,43 @@ export async function claimPendingPrReviewAction(
  */
 export async function claimPendingPrReviewActionsForThread(input: {
   provider: PrReviewActionProvider;
+  slackTeamId?: string;
   channelId: string;
   threadId: string | null;
 }): Promise<PendingPrReviewAction[]> {
   const redis = getRedis();
-  const threadKey = getPrReviewActionThreadKey(input);
-  const rawClaims = await redis.eval(
-    CLAIM_PR_REVIEW_ACTIONS_FOR_THREAD_LUA,
-    1,
-    threadKey,
-    PR_REVIEW_ACTION_PREFIX,
-  );
+  const threadKeys = [getPrReviewActionThreadKey(input)];
+
+  if (
+    input.provider === 'slack' &&
+    input.slackTeamId &&
+    (await isOnlyActiveSlackWorkspace(input.slackTeamId))
+  ) {
+    threadKeys.push(
+      getPrReviewActionThreadKey({ ...input, slackTeamId: undefined }),
+    );
+  }
 
   const claimed: PendingPrReviewAction[] = [];
 
-  for (const raw of Array.isArray(rawClaims) ? rawClaims : []) {
-    if (typeof raw !== 'string') {
-      continue;
-    }
+  for (const threadKey of threadKeys) {
+    const rawClaims = await redis.eval(
+      CLAIM_PR_REVIEW_ACTIONS_FOR_THREAD_LUA,
+      1,
+      threadKey,
+      PR_REVIEW_ACTION_PREFIX,
+    );
 
-    try {
-      claimed.push(JSON.parse(raw) as PendingPrReviewAction);
-    } catch {
-      // Malformed record; skip.
+    for (const raw of Array.isArray(rawClaims) ? rawClaims : []) {
+      if (typeof raw !== 'string') {
+        continue;
+      }
+
+      try {
+        claimed.push(JSON.parse(raw) as PendingPrReviewAction);
+      } catch {
+        // Malformed record; skip.
+      }
     }
   }
 

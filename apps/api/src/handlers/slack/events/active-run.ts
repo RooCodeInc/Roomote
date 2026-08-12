@@ -385,6 +385,7 @@ export async function processActiveRunMessage(
   slack: SlackNotifier,
   userId: string,
   activeRun: ActiveSlackTaskRun,
+  slackTeamId: string,
   botUserId?: string,
   prefetchedThreadMessages?: SlackThreadMessage[],
 ): Promise<void> {
@@ -437,6 +438,7 @@ export async function processActiveRunMessage(
           slack,
           channel: event.channel,
           threadTs: threadId,
+          slackTeamId,
           botUserId,
           startedMessageRunId: activeRun.id,
           logContext: `active task run ${activeRun.id} in ${event.channel}:${threadId}`,
@@ -534,6 +536,7 @@ export async function processActiveRunMessage(
       // A typed reply supersedes any pending PR review offers in the thread.
       retireSlackPrReviewOffersBestEffort({
         slack,
+        slackTeamId,
         channelId: event.channel,
         threadTs: threadId,
       });

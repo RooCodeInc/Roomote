@@ -962,7 +962,12 @@ describe('recordPrReviewNotificationDeliveryBestEffort', () => {
     await recordPrReviewNotificationDeliveryBestEffort({
       runId: 1,
       taskId: 'task-1',
-      route: { provider: 'slack', channelId: 'C123', threadId: '111.222' },
+      route: {
+        provider: 'slack',
+        slackTeamId: 'T123',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
       text: 'formatted-message',
       messageTs: '999.888',
     });
@@ -996,7 +1001,12 @@ describe('recordPrReviewNotificationDeliveryBestEffort', () => {
     await recordPrReviewNotificationDeliveryBestEffort({
       runId: 1,
       taskId: 'task-1',
-      route: { provider: 'slack', channelId: 'C123', threadId: '111.222' },
+      route: {
+        provider: 'slack',
+        slackTeamId: 'T123',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
       text: 'formatted-message',
     });
 

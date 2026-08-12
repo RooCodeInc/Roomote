@@ -11,6 +11,7 @@ import {
   clearLatestUserMessage,
   collectAndProcessThreadImages,
   getSlackResumeLockKey,
+  getSlackTaskRunWorkspacePredicate,
   getPromptReadyThreadMessages,
   getLatestSlackBotReply,
   queueSlackMessage,
@@ -51,6 +52,7 @@ export async function processSnapshotResume(
   userId: string | null,
   ackEmoji: string,
   completionEmoji: string,
+  slackTeamId: string,
   botUserId?: string,
 ): Promise<boolean> {
   const deliveryTs = event.deliveryTs ?? event.ts;
@@ -75,6 +77,7 @@ export async function processSnapshotResume(
         slack,
         channel: event.channel,
         threadTs: threadId,
+        slackTeamId,
         botUserId,
         startedMessageRunId: completedRun.id,
         logContext,
@@ -172,6 +175,7 @@ export async function processSnapshotResume(
     const directPayload = { ...payloadBase };
     populateSnapshotResumeSlackMetadata(directPayload, {
       sourcePayload: completedPayload,
+      teamId: slackTeamId,
       channel: event.channel,
       threadTs: threadId,
     });
@@ -215,6 +219,7 @@ export async function processSnapshotResume(
               and(
                 eq(tasks.slackThreadTs, threadId),
                 eq(taskRuns.taskId, completedRun.taskId),
+                getSlackTaskRunWorkspacePredicate(slackTeamId),
                 eq(taskRuns.kind, 'resume'),
                 gt(taskRuns.createdAt, new Date(Date.now() - 60_000)),
               ),
@@ -236,6 +241,7 @@ export async function processSnapshotResume(
     // A typed reply supersedes any pending PR review offers in the thread.
     retireSlackPrReviewOffersBestEffort({
       slack,
+      slackTeamId,
       channelId: event.channel,
       threadTs: threadId,
     });

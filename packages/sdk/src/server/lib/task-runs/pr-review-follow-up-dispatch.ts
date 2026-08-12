@@ -16,6 +16,7 @@ import {
   findActiveSlackTaskRun,
   findCompletedSlackTaskRunWithSnapshot,
   getSlackResumeLockKey,
+  getSlackTaskRunWorkspacePredicate,
   queueSlackMessage,
   resolveSlackReactionNames,
 } from '@roomote/slack';
@@ -56,6 +57,11 @@ export async function dispatchPrReviewFollowUp(input: {
   actingUserId: string;
   /** Provider-native user id shown in the transcript; falls back to actingUserId. */
   providerUserId?: string;
+  /**
+   * Workspace identity for modern Slack runs. Verified legacy offers can omit
+   * it because their immutable task binding is the routing authority.
+   */
+  slackTeamId?: string;
 }): Promise<PrReviewFollowUpDispatchResult> {
   if (input.provider === 'slack') {
     return dispatchSlackFollowUp(input);
@@ -71,6 +77,7 @@ async function dispatchSlackFollowUp(input: {
   followUpPrompt: string;
   actingUserId: string;
   providerUserId?: string;
+  slackTeamId?: string;
 }): Promise<PrReviewFollowUpDispatchResult> {
   const threadTs = input.threadId;
 
@@ -84,7 +91,10 @@ async function dispatchSlackFollowUp(input: {
     userId: input.actingUserId,
     ts: new Date().toISOString(),
   };
-  const activeRun = await findActiveSlackTaskRun(threadTs, input.taskId);
+  const lookupScope = input.slackTeamId
+    ? { taskId: input.taskId, slackTeamId: input.slackTeamId }
+    : { taskId: input.taskId };
+  const activeRun = await findActiveSlackTaskRun(threadTs, lookupScope);
 
   if (activeRun) {
     await setTrustedRunActingUser({
@@ -98,7 +108,7 @@ async function dispatchSlackFollowUp(input: {
 
   const completedRun = await findCompletedSlackTaskRunWithSnapshot(
     threadTs,
-    input.taskId,
+    lookupScope,
   );
 
   if (!completedRun?.snapshotId) {
@@ -131,6 +141,7 @@ async function dispatchSlackFollowUp(input: {
 
   populateSnapshotResumeSlackMetadata(resumePayload, {
     sourcePayload: completedPayload,
+    teamId: input.slackTeamId,
     channel: input.channelId,
     threadTs,
   });
@@ -169,6 +180,9 @@ async function dispatchSlackFollowUp(input: {
             and(
               eq(tasks.slackThreadTs, threadTs),
               eq(taskRuns.taskId, input.taskId),
+              ...(input.slackTeamId
+                ? [getSlackTaskRunWorkspacePredicate(input.slackTeamId)]
+                : []),
               eq(taskRuns.kind, 'resume'),
               gt(taskRuns.createdAt, new Date(Date.now() - 60_000)),
             ),

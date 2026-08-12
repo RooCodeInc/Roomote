@@ -13,6 +13,7 @@ export async function getPromptReadyThreadMessages({
   slack,
   channel,
   threadTs,
+  slackTeamId,
   botUserId,
   startedMessageRunId,
   logContext,
@@ -21,6 +22,7 @@ export async function getPromptReadyThreadMessages({
   slack: Pick<SlackNotifier, 'fetchThreadMessages' | 'normalizeIncomingText'>;
   channel: string;
   threadTs: string;
+  slackTeamId: string;
   botUserId?: string;
   startedMessageRunId?: number | null;
   logContext?: string;
@@ -42,7 +44,7 @@ export async function getPromptReadyThreadMessages({
           }),
     startedMessageRunId != null
       ? getSlackStartedMessageTs(startedMessageRunId)
-      : findActiveSlackTaskRun(threadTs).then((activeRun) =>
+      : findActiveSlackTaskRun(threadTs, { slackTeamId }).then((activeRun) =>
           activeRun ? getSlackStartedMessageTs(activeRun.id) : null,
         ),
   ]);
