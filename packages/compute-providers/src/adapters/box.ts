@@ -72,11 +72,13 @@ const PENDING_MACHINE_STATES = new Set([
   'box_starting',
   'machine_not_running',
 ]);
-// Commands sent while a box is provisioning are refused with a retryable 409
-// carrying one of these codes (per the Box platform guide).
-const PROVISIONING_CONFLICT_CODES = new Set([
+// 409s refused-without-effect that resolve on their own: commands sent while
+// a box is provisioning (per the Box platform guide), and forks requested
+// while the source named snapshot is still saving.
+const RETRYABLE_CONFLICT_CODES = new Set([
   'box_starting',
   'machine_not_running',
+  'snapshot_not_ready',
 ]);
 const VALID_MACHINE_TYPES = new Set(['small', 'default', 'large']);
 
@@ -100,6 +102,7 @@ interface BoxApiNamedSnapshot {
 }
 
 const SNAPSHOT_PENDING_STATES = new Set([
+  'saving',
   'creating',
   'pending',
   'in_progress',
@@ -681,7 +684,7 @@ export class BoxClient implements ComputeProviderClient {
       if (
         response.status === 409 &&
         errorCode !== undefined &&
-        PROVISIONING_CONFLICT_CODES.has(errorCode)
+        RETRYABLE_CONFLICT_CODES.has(errorCode)
       ) {
         provisioningDeadline ??= Date.now() + this.readinessTimeoutMs();
         if (Date.now() < provisioningDeadline) {

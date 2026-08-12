@@ -568,6 +568,7 @@ describe('BoxClient Public API v1', () => {
   it('creates a named snapshot, persists the id, then force-stops the box', async () => {
     // The generated name is random; make the list response echo it back.
     let capturedName = '';
+    let listCalls = 0;
     const fetchImpl = vi
       .fn<typeof fetch>()
       .mockImplementation(async (url, init) => {
@@ -578,8 +579,18 @@ describe('BoxClient Public API v1', () => {
           return new Response(null, { status: 202 });
         }
         if (path.endsWith('/named-snapshots')) {
+          // First list shows the snapshot mid-save, second shows it done.
+          listCalls += 1;
           return jsonResponse({
-            snapshots: [{ name: capturedName, status: 'ready' }],
+            ok: true,
+            type: 'snapshot.named.list',
+            snapshots: [
+              {
+                name: capturedName,
+                status: listCalls === 1 ? 'saving' : 'ready',
+                sourceBoxId: 'box-1',
+              },
+            ],
           });
         }
         if (path.endsWith('/stop')) return new Response(null, { status: 202 });
@@ -640,6 +651,23 @@ describe('BoxClient Public API v1', () => {
     await expect(
       client.createSnapshot({ instanceId: 'box-1' }),
     ).rejects.toThrow('entered failed while waiting for completion');
+  });
+
+  it('retries a fork refused because the snapshot is still saving', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ code: 'snapshot_not_ready' }, 409))
+      .mockResolvedValueOnce(jsonResponse({ id: 'box-fork', state: 'ready' }));
+    const client = new BoxClient({
+      apiKey: 'key',
+      pollIntervalMs: 0,
+      fetchImpl,
+    });
+
+    await expect(
+      client.resumeFromSnapshot({ sourceSnapshotId: 'roomote-snap-slow' }),
+    ).resolves.toMatchObject({ instanceId: 'box-fork' });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it('forks a template via POST /boxes with from and keeps lifecycle fields', async () => {
