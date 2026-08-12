@@ -481,6 +481,11 @@ export async function lookupSlackChannelMessages(options: {
 }): Promise<SlackChannelMessagesPayload> {
   const oldestBoundary = normalizeSlackTimeBoundary(options.oldest, 'oldest');
   const latestBoundary = normalizeSlackTimeBoundary(options.latest, 'latest');
+  const channel =
+    options.channel ??
+    (options.taskRun
+      ? getSlackReplyTarget(options.taskRun)?.channel
+      : undefined);
 
   if (
     oldestBoundary &&
@@ -491,7 +496,7 @@ export async function lookupSlackChannelMessages(options: {
   }
 
   const { channelId, slack } = await resolveSlackLookupChannel({
-    channel: options.channel,
+    channel,
     taskRun: options.taskRun,
     actingSlackMembershipUserId: options.actingSlackMembershipUserId,
     missingChannelError:

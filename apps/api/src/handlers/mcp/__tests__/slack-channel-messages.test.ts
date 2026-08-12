@@ -265,6 +265,7 @@ describe('slack channel messages MCP endpoint', () => {
   });
 
   it('uses the originating Slack channel when channel is omitted', async () => {
+    resolveChannelIdMock.mockResolvedValue('C123');
     fetchChannelMessagesMock.mockResolvedValue([
       {
         ts: '1711929600.000000',
@@ -286,8 +287,10 @@ describe('slack channel messages MCP endpoint', () => {
       channel: 'C123',
       oldest: '1711929600.000000',
     });
-    expect(resolveChannelIdMock).not.toHaveBeenCalled();
-    expect(isPublicChannelMock).not.toHaveBeenCalled();
+    expect(resolveChannelIdMock).toHaveBeenCalledWith('#c123');
+    expect(isAppInChannelMock).toHaveBeenCalledWith('C123');
+    expect(isPublicChannelMock).toHaveBeenCalledWith('C123');
+    expect(isUserInChannelMock).not.toHaveBeenCalled();
   });
 
   it('rejects reversed time bounds', async () => {
@@ -416,6 +419,26 @@ describe('slack channel messages MCP endpoint', () => {
     expect(body.error).toBe(
       'Linked Slack user is not a member of channel #eng.',
     );
+    expect(fetchChannelMessagesMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects private originating channels when the acting Slack user is not a member', async () => {
+    resolveChannelIdMock.mockResolvedValue('C123');
+    isPublicChannelMock.mockResolvedValue(false);
+    isUserInChannelMock.mockResolvedValue(false);
+
+    const response = await postChannelMessages(runToken, {});
+    const body = (await response.json()) as JsonBody;
+
+    expect(response.status).toBe(403);
+    expect(body.error).toBe(
+      'Linked Slack user is not a member of channel #c123.',
+    );
+    expect(isAppInChannelMock).toHaveBeenCalledWith('C123');
+    expect(isUserInChannelMock).toHaveBeenCalledWith({
+      channelId: 'C123',
+      userId: 'UACTOR',
+    });
     expect(fetchChannelMessagesMock).not.toHaveBeenCalled();
   });
 
