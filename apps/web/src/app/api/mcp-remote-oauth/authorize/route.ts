@@ -52,13 +52,7 @@ function consentResponse(options: {
   );
   const clientName = escapeHtml(options.clientName ?? 'An MCP client');
   const callbackUrl = new URL(options.redirectUri);
-  const callbackHost = escapeHtml(callbackUrl.host);
-  const callbackDestination =
-    callbackUrl.protocol === 'codex:'
-      ? 'the Codex app'
-      : callbackUrl.protocol === 'cursor:'
-        ? 'Cursor'
-        : callbackHost;
+  const callbackDestination = escapeHtml(options.redirectUri);
   const callbackFormActionSource =
     callbackUrl.protocol === 'http:' || callbackUrl.protocol === 'https:'
       ? callbackUrl.origin
@@ -178,7 +172,7 @@ function consentResponse(options: {
         line-height: 1.5;
       }
 
-      .return-to strong {
+      .return-to code {
         overflow-wrap: anywhere;
         font-weight: 700;
       }
@@ -249,7 +243,7 @@ function consentResponse(options: {
                 <li>Send follow-up messages</li>
               </ul>
             </div>
-            <p class="return-to">After approval, you’ll return to <strong>${callbackDestination}</strong>.</p>
+            <p class="return-to">After approval, Roomote will send the authorization result to <code>${callbackDestination}</code>.</p>
             <form method="post" action="${action}">
               <input type="hidden" name="consent_token" value="${consentToken}">
               <button type="submit"><span>Allow access</span><span aria-hidden="true">&rarr;</span></button>

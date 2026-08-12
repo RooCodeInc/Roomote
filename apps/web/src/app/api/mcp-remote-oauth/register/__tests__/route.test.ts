@@ -134,11 +134,11 @@ describe('POST /api/mcp-remote-oauth/register', () => {
     });
   });
 
-  it('registers the exact Codex Desktop connector callback', async () => {
-    const redirectUri = 'codex://connector/oauth_callback';
+  it('registers a native app callback without a vendor allowlist', async () => {
+    const redirectUri = 'example-app:/oauth/callback';
     mockRegisterClient.mockResolvedValue({
       clientId: '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
-      clientName: 'Codex',
+      clientName: 'Example App',
       redirectUris: [redirectUri],
       grantTypes: ['authorization_code', 'refresh_token'],
     });
@@ -148,7 +148,7 @@ describe('POST /api/mcp-remote-oauth/register', () => {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          client_name: 'Codex',
+          client_name: 'Example App',
           redirect_uris: [redirectUri],
           token_endpoint_auth_method: 'none',
           grant_types: ['authorization_code', 'refresh_token'],
@@ -159,11 +159,11 @@ describe('POST /api/mcp-remote-oauth/register', () => {
 
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toMatchObject({
-      client_name: 'Codex',
+      client_name: 'Example App',
       redirect_uris: [redirectUri],
     });
     expect(mockRegisterClient).toHaveBeenCalledWith({
-      clientName: 'Codex',
+      clientName: 'Example App',
       redirectUris: [redirectUri],
       grantTypes: ['authorization_code', 'refresh_token'],
     });

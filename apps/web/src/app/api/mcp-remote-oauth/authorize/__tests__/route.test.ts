@@ -165,7 +165,7 @@ describe('GET /api/mcp-remote-oauth/authorize', () => {
     const html = await consentResponse.text();
 
     expect(html).toContain(
-      'After approval, you’ll return to <strong>the Codex app</strong>.',
+      'Roomote will send the authorization result to <code>codex://connector/oauth_callback</code>.',
     );
     expect(consentResponse.headers.get('content-security-policy')).toContain(
       "form-action 'self' codex:",
@@ -204,7 +204,7 @@ describe('GET /api/mcp-remote-oauth/authorize', () => {
     const html = await consentResponse.text();
 
     expect(html).toContain(
-      'After approval, you’ll return to <strong>Cursor</strong>.',
+      'Roomote will send the authorization result to <code>cursor://anysphere.cursor-mcp/oauth/callback</code>.',
     );
     expect(consentResponse.headers.get('content-security-policy')).toContain(
       "form-action 'self' cursor:",
@@ -243,7 +243,7 @@ describe('GET /api/mcp-remote-oauth/authorize', () => {
     const html = await consentResponse.text();
 
     expect(html).toContain(
-      'After approval, you’ll return to <strong>localhost:54545</strong>.',
+      'Roomote will send the authorization result to <code>http://localhost:54545/callback</code>.',
     );
     expect(consentResponse.headers.get('content-security-policy')).toContain(
       "form-action 'self' http://localhost:54545",
@@ -264,6 +264,26 @@ describe('GET /api/mcp-remote-oauth/authorize', () => {
     expect(mockCreateCode).toHaveBeenCalledWith(
       expect.objectContaining({ redirectUri: claudeRedirectUri }),
     );
+  });
+
+  it('rejects a callback that does not exactly match the registered URI', async () => {
+    mockGetClient.mockResolvedValue({
+      clientId,
+      clientName: 'Example App',
+      redirectUris: ['example-app:/oauth/callback'],
+    });
+
+    const response = await GET(
+      authorizeRequest({ redirectUri: 'example-app:/oauth/other' }),
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'invalid_request',
+    });
+    expect(mockAuthorize).not.toHaveBeenCalled();
+    expect(mockCreateConsentToken).not.toHaveBeenCalled();
+    expect(mockCreateCode).not.toHaveBeenCalled();
   });
 
   it('defaults an omitted resource to the Roomote MCP endpoint', async () => {

@@ -230,32 +230,83 @@ function parseRefreshToken(token: string): string | null {
     : null;
 }
 
+const NON_NATIVE_APP_REDIRECT_SCHEMES = new Set([
+  'about:',
+  'blob:',
+  'chrome:',
+  'chrome-extension:',
+  'data:',
+  'file:',
+  'filesystem:',
+  'ftp:',
+  'http:',
+  'https:',
+  'intent:',
+  'javascript:',
+  'ldap:',
+  'ldaps:',
+  'mailto:',
+  'news:',
+  'nntp:',
+  'resource:',
+  'sftp:',
+  'smb:',
+  'ssh:',
+  'tel:',
+  'telnet:',
+  'vbscript:',
+  'ws:',
+  'wss:',
+]);
+
+function isLoopbackHostname(hostname: string): boolean {
+  return (
+    hostname === 'localhost' ||
+    hostname === '[::1]' ||
+    /^127(?:\.\d{1,3}){3}$/.test(hostname)
+  );
+}
+
+function hasUnsafeOAuthRedirectUriCharacters(value: string): boolean {
+  for (const character of value) {
+    const code = character.charCodeAt(0);
+    if (code <= 0x20 || (code >= 0x7f && code <= 0x9f) || character === '\\') {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isNativeAppOAuthRedirectUri(url: URL): boolean {
+  // Native MCP clients use RFC 8252 private-use schemes to resume the app
+  // after browser authorization. Treat them as a class instead of coupling
+  // the authorization server to individual client callback URLs.
+  return (
+    !NON_NATIVE_APP_REDIRECT_SCHEMES.has(url.protocol) &&
+    url.protocol.length > 2 &&
+    url.protocol.length <= 65 &&
+    /^[a-z][a-z0-9+.-]*:$/.test(url.protocol) &&
+    url.port === '' &&
+    url.pathname.startsWith('/') &&
+    url.pathname !== '/'
+  );
+}
+
 export function isAllowedOAuthRedirectUri(value: string): boolean {
   try {
+    if (hasUnsafeOAuthRedirectUriCharacters(value)) {
+      return false;
+    }
     const url = new URL(value);
     const isLoopbackCallback =
-      url.protocol === 'http:' &&
-      (url.hostname === '127.0.0.1' || url.hostname === 'localhost');
-    const isCursorDesktopCallback =
-      url.protocol === 'cursor:' &&
-      url.hostname === 'anysphere.cursor-mcp' &&
-      url.port === '' &&
-      url.pathname === '/oauth/callback' &&
-      url.search === '';
-    const isCodexDesktopCallback =
-      url.protocol === 'codex:' &&
-      url.hostname === 'connector' &&
-      url.port === '' &&
-      url.pathname === '/oauth_callback' &&
-      url.search === '';
+      url.protocol === 'http:' && isLoopbackHostname(url.hostname);
     return (
       url.hash === '' &&
       url.username === '' &&
       url.password === '' &&
       (url.protocol === 'https:' ||
         isLoopbackCallback ||
-        isCursorDesktopCallback ||
-        isCodexDesktopCallback)
+        isNativeAppOAuthRedirectUri(url))
     );
   } catch {
     return false;

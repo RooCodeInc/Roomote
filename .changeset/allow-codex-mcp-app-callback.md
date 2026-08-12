@@ -2,4 +2,4 @@
 '@roomote/web': patch
 ---
 
-Support and document the OAuth callbacks requested by Claude Code, Codex, and Cursor, including the Codex Desktop connector app link.
+Validate MCP OAuth callbacks by callback class instead of client-specific URLs, supporting secure hosted, loopback, and native app callbacks.

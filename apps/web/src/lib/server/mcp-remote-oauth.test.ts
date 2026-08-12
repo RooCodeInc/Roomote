@@ -196,30 +196,63 @@ describe('remote MCP OAuth state', () => {
   it.each([
     ['Claude Code loopback', 'http://localhost:43110/callback'],
     ['Claude Code IPv4 loopback', 'http://127.0.0.1:43110/callback'],
+    ['IPv4 loopback range', 'http://127.42.10.9:43110/callback'],
+    ['IPv6 loopback', 'http://[::1]:43110/callback'],
     ['Cursor desktop app', 'cursor://anysphere.cursor-mcp/oauth/callback'],
     [
       'Cursor hosted callback',
       'https://www.cursor.com/agents/mcp/oauth/callback',
     ],
     ['Cursor loopback', 'http://localhost:8787/callback'],
+    ['another Cursor app route', 'cursor://other-client/callback'],
     ['Codex desktop app', 'codex://connector/oauth_callback'],
     ['Codex loopback', 'http://127.0.0.1:1455/callback'],
+    [
+      'RFC 8252 private-use app callback',
+      'com.example.app:/oauth2redirect/roomote',
+    ],
+    ['vendor-independent native app callback', 'example-app:/oauth/callback'],
+    [
+      'native app callback with registered query state',
+      'example-app:/oauth/callback?connection=roomote',
+    ],
   ])('accepts the %s callback', (_client, redirectUri) => {
     expect(isAllowedOAuthRedirectUri(redirectUri)).toBe(true);
   });
 
-  it('rejects unsafe or unrecognized callbacks', () => {
+  it('rejects unsafe or malformed callbacks', () => {
     expect(isAllowedOAuthRedirectUri('http://client.example/callback')).toBe(
       false,
     );
-    expect(isAllowedOAuthRedirectUri('cursor://other-client/callback')).toBe(
+    expect(isAllowedOAuthRedirectUri('http://0.0.0.0:43110/callback')).toBe(
       false,
     );
-    expect(isAllowedOAuthRedirectUri('codex://threads/new')).toBe(false);
+    expect(isAllowedOAuthRedirectUri('http://[::2]:43110/callback')).toBe(
+      false,
+    );
+    expect(isAllowedOAuthRedirectUri('example-app:callback')).toBe(false);
+    expect(isAllowedOAuthRedirectUri('example-app:/')).toBe(false);
+    expect(isAllowedOAuthRedirectUri('file:///tmp/oauth-callback')).toBe(false);
+    expect(isAllowedOAuthRedirectUri('javascript:/oauth/callback')).toBe(false);
+    expect(isAllowedOAuthRedirectUri('data:/oauth/callback')).toBe(false);
+    expect(isAllowedOAuthRedirectUri('mailto:/oauth/callback')).toBe(false);
+    expect(isAllowedOAuthRedirectUri('ssh:/oauth/callback')).toBe(false);
+    expect(isAllowedOAuthRedirectUri('c:/oauth/callback')).toBe(false);
     expect(
       isAllowedOAuthRedirectUri(
-        'codex://connector/oauth_callback?return_to=threads/new',
+        String.raw`https:\\client.example\oauth\callback`,
       ),
+    ).toBe(false);
+    expect(
+      isAllowedOAuthRedirectUri(' https://client.example/oauth/callback'),
+    ).toBe(false);
+    expect(
+      isAllowedOAuthRedirectUri(
+        'example-app://user@example.com/oauth/callback',
+      ),
+    ).toBe(false);
+    expect(
+      isAllowedOAuthRedirectUri('example-app:/oauth/callback#fragment'),
     ).toBe(false);
   });
 
