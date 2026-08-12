@@ -16,9 +16,9 @@ Use Box when:
   template, or snapshot during Roomote setup
 - retaining the same stopped task sandbox for a follow-up is sufficient
 
-Box does not support Roomote environment snapshots. A retained Box can resume
-the task that created it, but it cannot be reused as an environment snapshot
-for unrelated tasks.
+Box supports Roomote environment snapshots through named snapshots (template
+boxes); see [Environment snapshots](#environment-snapshots) below. A retained
+Box can also resume the task that created it directly.
 
 ## Configuration
 
@@ -91,5 +91,6 @@ one task's machine; it is not a Roomote environment snapshot.
   deployment.
 - **A follow-up starts a new sandbox.** Check the standby count and age limits.
   Roomote may no longer retain the previous Box as the task's resume target.
-- **No environment snapshot appears.** This is expected. Box does not support
-  Roomote environment snapshots.
+- **An environment snapshot fails to save.** Box accounts allow at most 10
+  named snapshots; delete stale `roomote-snap-*` templates from the Box
+  dashboard and re-run the snapshot.

@@ -57,10 +57,11 @@ const PORT_AUTH_COOKIE = '_port_auth';
 /**
  * Box private-hosted domains carry their access token as a `_token` query
  * param, which the hosting gate exchanges for a `_port_auth` cookie. A proxy
- * target must not keep the token in the URL (it would corrupt path joining
- * and the gate answers tokenized requests with a redirect), so strip it and
- * authenticate the upstream request with the cookie instead. Targets without
- * a `_token` query pass through untouched.
+ * target can never carry a query string — http-proxy joins `target.path`
+ * with `req.url`, so any query would end up embedded mid-path upstream — so
+ * strip the whole query, turning `_token` into the auth cookie. Machine
+ * domains are origins (plus an optional base path); no other query params
+ * are expected, and any stray ones are dropped rather than mangled.
  */
 export function splitUpstreamAuth(target: string): {
   target: string;
@@ -73,13 +74,11 @@ export function splitUpstreamAuth(target: string): {
     return { target };
   }
   const token = url.searchParams.get('_token');
-  if (!token) return { target };
-  url.searchParams.delete('_token');
-  const search = url.searchParams.toString();
+  if (!token && !url.search) return { target };
   const pathname = url.pathname === '/' ? '' : url.pathname;
   return {
-    target: `${url.origin}${pathname}${search ? `?${search}` : ''}`,
-    authCookie: `${PORT_AUTH_COOKIE}=${token}`,
+    target: `${url.origin}${pathname}`,
+    ...(token ? { authCookie: `${PORT_AUTH_COOKIE}=${token}` } : {}),
   };
 }
 

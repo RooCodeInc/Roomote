@@ -473,10 +473,11 @@ describe('BoxClient Public API v1', () => {
     expect(error.metadata.errorMessage.length).toBeLessThanOrEqual(301);
   });
 
-  it('retries provisioning 409s on mutations until the box comes up', async () => {
+  it('retries provisioning refusals (400 and 409 forms) until the box comes up', async () => {
     const fetchImpl = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(jsonResponse({ code: 'machine_not_running' }, 409))
+      // Early provisioning surfaces machine_not_running as a 400.
+      .mockResolvedValueOnce(jsonResponse({ code: 'machine_not_running' }, 400))
       .mockResolvedValueOnce(jsonResponse({ code: 'box_starting' }, 409))
       .mockResolvedValueOnce(
         jsonResponse({ processId: 42, status: 'running' }),

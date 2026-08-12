@@ -72,14 +72,16 @@ const PENDING_MACHINE_STATES = new Set([
   'box_starting',
   'machine_not_running',
 ]);
-// 409s refused-without-effect that resolve on their own: commands sent while
-// a box is provisioning (per the Box platform guide), and forks requested
-// while the source named snapshot is still saving.
+// Refused-without-effect errors that resolve on their own: commands sent
+// while a box is provisioning (surfaced as 409, or 400 for
+// machine_not_running early in provisioning, per the Box platform guide),
+// and forks requested while the source named snapshot is still saving.
 const RETRYABLE_CONFLICT_CODES = new Set([
   'box_starting',
   'machine_not_running',
   'snapshot_not_ready',
 ]);
+const RETRYABLE_CONFLICT_STATUSES = new Set([400, 409]);
 const VALID_MACHINE_TYPES = new Set(['small', 'default', 'large']);
 
 type BoxMachineType = NonNullable<BoxConfig['machineType']>;
@@ -682,7 +684,7 @@ export class BoxClient implements ComputeProviderClient {
       // rejected the request without acting on it. Poll until the box comes
       // up, bounded by the same budget as explicit readiness waits.
       if (
-        response.status === 409 &&
+        RETRYABLE_CONFLICT_STATUSES.has(response.status) &&
         errorCode !== undefined &&
         RETRYABLE_CONFLICT_CODES.has(errorCode)
       ) {

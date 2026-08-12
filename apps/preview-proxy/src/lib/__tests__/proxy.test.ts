@@ -1,12 +1,18 @@
 import { splitUpstreamAuth } from '../proxy';
 
 describe('splitUpstreamAuth', () => {
-  it('passes through targets without a token', () => {
+  it('passes through query-less targets untouched', () => {
     expect(splitUpstreamAuth('https://sandbox.modal.host')).toEqual({
       target: 'https://sandbox.modal.host',
     });
+    expect(splitUpstreamAuth('http://localhost:3000/base')).toEqual({
+      target: 'http://localhost:3000/base',
+    });
+  });
+
+  it('drops stray query params so http-proxy path joining stays valid', () => {
     expect(splitUpstreamAuth('http://localhost:3000/base?x=1')).toEqual({
-      target: 'http://localhost:3000/base?x=1',
+      target: 'http://localhost:3000/base',
     });
   });
 
@@ -19,11 +25,11 @@ describe('splitUpstreamAuth', () => {
     });
   });
 
-  it('preserves path and other query params when stripping the token', () => {
+  it('preserves the base path but drops every query param when stripping the token', () => {
     expect(
       splitUpstreamAuth('https://box.on.test/base?_token=abc&keep=1'),
     ).toEqual({
-      target: 'https://box.on.test/base?keep=1',
+      target: 'https://box.on.test/base',
       authCookie: '_port_auth=abc',
     });
   });
