@@ -6,13 +6,18 @@ const mockRunCommand = vi.fn();
 const mockCleanupModalInstance = vi.fn();
 const mockRecordMutation = vi.fn();
 const mockCreateComputeProviderClient = vi.fn((_arg?: unknown) => ({
+  capabilities: {
+    supportsCommandOutputLookup: false,
+  },
   runCommand: mockRunCommand,
 }));
 const mockCreateComputeProviderMutationEventRecorder = vi.fn(
   () => mockRecordMutation,
 );
 const mockUpdateWhere = vi.fn().mockResolvedValue(undefined);
-const mockUpdateSet = vi.fn(() => ({ where: mockUpdateWhere }));
+const mockUpdateSet = vi.fn((_values: Record<string, unknown>) => ({
+  where: mockUpdateWhere,
+}));
 const mockDbUpdate = vi.fn(() => ({ set: mockUpdateSet }));
 const mockFindTask = vi.fn();
 const mockUpdateTaskRunMachine = vi.fn();
@@ -328,6 +333,51 @@ describe('spawnModalWorker', () => {
         onMutation: expect.any(Function),
       }),
     );
+  });
+
+  it('records that command output lookup is unsupported when Modal returns no detached command ID', async () => {
+    mockRunCommand.mockResolvedValue({
+      exitCode: null,
+      commandId: undefined,
+    });
+
+    await expect(
+      spawnModalWorker(
+        mockTaskRun({
+          payloadKind: TaskPayloadKind.StandardTask,
+          payload: { repo: 'test/repo', environmentId: 'env_1' },
+        }),
+        'auth_token',
+        {
+          deploymentSlug: 'roomote',
+          modalTokenId: 'token-id',
+          modalTokenSecret: 'token-secret',
+          modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+          modalVmMemoryMiB: 8192,
+          modalTimeoutMs: 60_000,
+        },
+      ),
+    ).resolves.toEqual({ machineId: 'modal-machine-123' });
+
+    expect(mockRecordMutation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: 'run_command',
+        eventType: 'completed',
+        instanceId: 'modal-machine-123',
+        details: expect.objectContaining({
+          detached: true,
+          phase: 'launch_worker',
+          commandId: null,
+          commandOutputLookupSupported: false,
+          exitCode: null,
+        }),
+      }),
+    );
+    expect(
+      mockUpdateSet.mock.calls.some(([values]) =>
+        Object.hasOwn(values, 'sandboxCmdId'),
+      ),
+    ).toBe(false);
   });
 
   it('cleans up when a detached worker exits with code zero during launch', async () => {

@@ -530,15 +530,11 @@ export async function spawnModalWorker(
         detached: true,
         phase: 'launch_worker',
         commandId: result.commandId ?? null,
+        commandOutputLookupSupported:
+          computeClient.capabilities.supportsCommandOutputLookup,
         exitCode: result.exitCode,
       }),
     });
-
-    if (!result.commandId) {
-      console.warn(
-        `[spawnModalWorker] Missing command ID for detached "worker ${command}" on task run #${taskRun.id}; startup log streaming is reduced for modal v1`,
-      );
-    }
 
     if (result.commandId) {
       await db
