@@ -370,6 +370,9 @@ describe('SlackNotifier', () => {
         'https://slack.com/api/chat.update',
         expect.objectContaining({
           method: 'POST',
+          headers: expect.objectContaining({
+            'Content-Type': 'application/json; charset=utf-8',
+          }),
           body: JSON.stringify({
             channel: 'C123',
             ts: '123.000',
@@ -419,7 +422,8 @@ describe('SlackNotifier', () => {
       expect(result).toBe(true);
     });
 
-    it('returns false when Slack chat.update returns ok: false', async () => {
+    it('classifies authorization failures without retrying or logging message content', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({ ok: false, error: 'invalid_auth' }),
@@ -432,13 +436,151 @@ describe('SlackNotifier', () => {
       });
 
       expect(result).toBe(false);
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[updateMessage] Slack chat.update rejected reason=authorization code=invalid_auth channel=C123 ts=123.000 retryable=false',
+      );
+      expect(errorSpy.mock.calls.flat().join(' ')).not.toContain(
+        'updated text',
+      );
     });
 
-    it('returns false when Slack chat.update HTTP request fails', async () => {
+    it.each([
+      ['message_not_found', 'stale_target', 'warn'],
+      ['cant_update_message', 'ownership', 'error'],
+    ] as const)(
+      'classifies %s as %s without retrying',
+      async (code, reason, logMethod) => {
+        const logSpy = vi
+          .spyOn(console, logMethod)
+          .mockImplementation(() => {});
+        getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ ok: false, error: code }),
+        });
+
+        const result = await notifier.updateMessage({
+          channel: 'C123',
+          ts: '123.000',
+          message: { text: 'updated text' },
+        });
+
+        expect(result).toBe(false);
+        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(1);
+        expect(logSpy).toHaveBeenCalledWith(
+          `[updateMessage] Slack chat.update rejected reason=${reason} code=${code} channel=C123 ts=123.000 retryable=false`,
+        );
+      },
+    );
+
+    it('retries a transient Slack race and succeeds', async () => {
+      vi.useFakeTimers();
+
+      try {
+        getGlobalWithFetch().fetch = vi
+          .fn()
+          .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({ ok: false, error: 'edit_conflict' }),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({ ok: true }),
+          });
+
+        const resultPromise = notifier.updateMessage({
+          channel: 'C123',
+          ts: '123.000',
+          message: { text: 'updated text' },
+        });
+
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(250);
+
+        await expect(resultPromise).resolves.toBe(true);
+        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('honors Retry-After for rate-limited updates', async () => {
+      vi.useFakeTimers();
+
+      try {
+        getGlobalWithFetch().fetch = vi
+          .fn()
+          .mockResolvedValueOnce({
+            ok: false,
+            status: 429,
+            statusText: 'Too Many Requests',
+            headers: {
+              get: (name: string) => (name === 'Retry-After' ? '1.5' : null),
+            },
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({ ok: true }),
+          });
+
+        const resultPromise = notifier.updateMessage({
+          channel: 'C123',
+          ts: '123.000',
+          message: { text: 'updated text' },
+        });
+
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(1500);
+
+        await expect(resultPromise).resolves.toBe(true);
+        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('caps excessive Retry-After waits', async () => {
+      vi.useFakeTimers();
+
+      try {
+        getGlobalWithFetch().fetch = vi
+          .fn()
+          .mockResolvedValueOnce({
+            ok: false,
+            status: 429,
+            statusText: 'Too Many Requests',
+            headers: {
+              get: (name: string) => (name === 'Retry-After' ? '60' : null),
+            },
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: async () => ({ ok: true }),
+          });
+
+        const resultPromise = notifier.updateMessage({
+          channel: 'C123',
+          ts: '123.000',
+          message: { text: 'updated text' },
+        });
+
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(5000);
+
+        await expect(resultPromise).resolves.toBe(true);
+        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('classifies non-retryable HTTP failures', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
         ok: false,
-        status: 503,
-        statusText: 'Service Unavailable',
+        status: 400,
+        statusText: 'Bad Request',
+        headers: { get: () => null },
       });
 
       const result = await notifier.updateMessage({
@@ -448,6 +590,61 @@ describe('SlackNotifier', () => {
       });
 
       expect(result).toBe(false);
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(1);
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[updateMessage] Slack chat.update failed reason=request status=400 channel=C123 ts=123.000 retryable=false',
+      );
+    });
+
+    it('retries thrown transport failures before returning false', async () => {
+      vi.useFakeTimers();
+
+      try {
+        getGlobalWithFetch().fetch = vi
+          .fn()
+          .mockRejectedValue(new Error('network unavailable'));
+
+        const resultPromise = notifier.updateMessage({
+          channel: 'C123',
+          ts: '123.000',
+          message: { text: 'updated text' },
+        });
+
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(750);
+
+        await expect(resultPromise).resolves.toBe(false);
+        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(3);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('retries an HTTP service failure before returning false', async () => {
+      vi.useFakeTimers();
+
+      try {
+        getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
+          ok: false,
+          status: 503,
+          statusText: 'Service Unavailable',
+          headers: { get: () => null },
+        });
+
+        const resultPromise = notifier.updateMessage({
+          channel: 'C123',
+          ts: '123.000',
+          message: { text: 'updated text' },
+        });
+
+        await Promise.resolve();
+        await vi.advanceTimersByTimeAsync(750);
+
+        await expect(resultPromise).resolves.toBe(false);
+        expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(3);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
