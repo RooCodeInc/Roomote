@@ -36,12 +36,13 @@ const redirectUri = 'https://client.example/callback';
 function authorizeRequest(options?: {
   approved?: boolean;
   consentToken?: string;
+  redirectUri?: string;
   resource?: string | null;
 }) {
   const url = new URL('https://roomote.example/api/mcp-remote-oauth/authorize');
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('client_id', clientId);
-  url.searchParams.set('redirect_uri', redirectUri);
+  url.searchParams.set('redirect_uri', options?.redirectUri ?? redirectUri);
   url.searchParams.set('state', 'client-state');
   url.searchParams.set('code_challenge', 'a'.repeat(43));
   url.searchParams.set('code_challenge_method', 'S256');
@@ -146,6 +147,45 @@ describe('GET /api/mcp-remote-oauth/authorize', () => {
         '/api/mcp-remote-oauth/authorize?',
       ),
     });
+  });
+
+  it('returns Codex Desktop clients through their requested app callback', async () => {
+    const codexRedirectUri = 'codex://connector/oauth_callback';
+    mockAuthorize.mockResolvedValue({ success: true, userId: 'user-1' });
+    mockGetClient.mockResolvedValue({
+      clientId,
+      clientName: 'Codex',
+      redirectUris: [codexRedirectUri],
+    });
+    mockCreateCode.mockResolvedValue('authorization-code');
+
+    const consentResponse = await GET(
+      authorizeRequest({ redirectUri: codexRedirectUri }),
+    );
+    const html = await consentResponse.text();
+
+    expect(html).toContain(
+      'After approval, you’ll return to <strong>the Codex app</strong>.',
+    );
+    expect(consentResponse.headers.get('content-security-policy')).toContain(
+      "form-action 'self' codex:",
+    );
+
+    const response = await POST(
+      authorizeRequest({
+        approved: true,
+        consentToken: 'consent-token',
+        redirectUri: codexRedirectUri,
+      }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe(
+      'codex://connector/oauth_callback?code=authorization-code&state=client-state',
+    );
+    expect(mockCreateCode).toHaveBeenCalledWith(
+      expect.objectContaining({ redirectUri: codexRedirectUri }),
+    );
   });
 
   it('defaults an omitted resource to the Roomote MCP endpoint', async () => {

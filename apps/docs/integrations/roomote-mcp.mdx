@@ -94,6 +94,12 @@ codex mcp login roomote
 
 The Codex CLI and IDE extension share this MCP configuration.
 
+Codex Desktop can request its registered
+`codex://connector/oauth_callback` app link during OAuth. Roomote accepts that
+exact callback so the browser can return the authorization result to the
+originating Codex connection flow. The CLI and IDE extension may instead use a
+loopback HTTP callback.
+
 ### Cursor
 
 Add Roomote to `~/.cursor/mcp.json` to use it in every project, or to

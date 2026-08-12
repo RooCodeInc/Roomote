@@ -193,7 +193,7 @@ describe('remote MCP OAuth state', () => {
     redisSortedSets.clear();
   });
 
-  it('accepts HTTPS, loopback, and the Cursor desktop callback', () => {
+  it('accepts HTTPS, loopback, and exact desktop app callbacks', () => {
     expect(isAllowedOAuthRedirectUri('https://client.example/callback')).toBe(
       true,
     );
@@ -203,12 +203,21 @@ describe('remote MCP OAuth state', () => {
     expect(
       isAllowedOAuthRedirectUri('cursor://anysphere.cursor-mcp/oauth/callback'),
     ).toBe(true);
+    expect(isAllowedOAuthRedirectUri('codex://connector/oauth_callback')).toBe(
+      true,
+    );
     expect(isAllowedOAuthRedirectUri('http://client.example/callback')).toBe(
       false,
     );
     expect(isAllowedOAuthRedirectUri('cursor://other-client/callback')).toBe(
       false,
     );
+    expect(isAllowedOAuthRedirectUri('codex://threads/new')).toBe(false);
+    expect(
+      isAllowedOAuthRedirectUri(
+        'codex://connector/oauth_callback?return_to=threads/new',
+      ),
+    ).toBe(false);
   });
 
   it('stores registered client redirect URIs', async () => {

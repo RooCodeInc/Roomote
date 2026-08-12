@@ -53,6 +53,12 @@ function consentResponse(options: {
   const clientName = escapeHtml(options.clientName ?? 'An MCP client');
   const callbackUrl = new URL(options.redirectUri);
   const callbackHost = escapeHtml(callbackUrl.host);
+  const callbackDestination =
+    callbackUrl.protocol === 'codex:' ? 'the Codex app' : callbackHost;
+  const callbackFormActionSource =
+    callbackUrl.protocol === 'http:' || callbackUrl.protocol === 'https:'
+      ? callbackUrl.origin
+      : callbackUrl.protocol;
   const consentToken = escapeHtml(options.consentToken);
 
   return new NextResponse(
@@ -239,7 +245,7 @@ function consentResponse(options: {
                 <li>Send follow-up messages</li>
               </ul>
             </div>
-            <p class="return-to">After approval, you’ll return to <strong>${callbackHost}</strong>.</p>
+            <p class="return-to">After approval, you’ll return to <strong>${callbackDestination}</strong>.</p>
             <form method="post" action="${action}">
               <input type="hidden" name="consent_token" value="${consentToken}">
               <button type="submit"><span>Allow access</span><span aria-hidden="true">&rarr;</span></button>
@@ -256,7 +262,7 @@ function consentResponse(options: {
       headers: {
         'Cache-Control': 'no-store',
         'Content-Type': 'text/html; charset=utf-8',
-        'Content-Security-Policy': `default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self' ${callbackUrl.origin}; base-uri 'none'; frame-ancestors 'none'`,
+        'Content-Security-Policy': `default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; form-action 'self' ${callbackFormActionSource}; base-uri 'none'; frame-ancestors 'none'`,
         'X-Frame-Options': 'DENY',
       },
     },

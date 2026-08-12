@@ -125,6 +125,41 @@ describe('POST /api/mcp-remote-oauth/register', () => {
     });
   });
 
+  it('registers the exact Codex Desktop connector callback', async () => {
+    const redirectUri = 'codex://connector/oauth_callback';
+    mockRegisterClient.mockResolvedValue({
+      clientId: '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
+      clientName: 'Codex',
+      redirectUris: [redirectUri],
+      grantTypes: ['authorization_code', 'refresh_token'],
+    });
+
+    const response = await POST(
+      new NextRequest('https://roomote.example/api/mcp-remote-oauth/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          client_name: 'Codex',
+          redirect_uris: [redirectUri],
+          token_endpoint_auth_method: 'none',
+          grant_types: ['authorization_code', 'refresh_token'],
+          response_types: ['code'],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({
+      client_name: 'Codex',
+      redirect_uris: [redirectUri],
+    });
+    expect(mockRegisterClient).toHaveBeenCalledWith({
+      clientName: 'Codex',
+      redirectUris: [redirectUri],
+      grantTypes: ['authorization_code', 'refresh_token'],
+    });
+  });
+
   it('rejects a non-loopback HTTP callback', async () => {
     const response = await POST(
       registrationRequest('http://client.example/callback'),

@@ -239,6 +239,12 @@ export function isAllowedOAuthRedirectUri(value: string): boolean {
       url.port === '' &&
       url.pathname === '/oauth/callback' &&
       url.search === '';
+    const isCodexDesktopCallback =
+      url.protocol === 'codex:' &&
+      url.hostname === 'connector' &&
+      url.port === '' &&
+      url.pathname === '/oauth_callback' &&
+      url.search === '';
     return (
       url.hash === '' &&
       url.username === '' &&
@@ -246,7 +252,8 @@ export function isAllowedOAuthRedirectUri(value: string): boolean {
       (url.protocol === 'https:' ||
         (url.protocol === 'http:' &&
           (url.hostname === '127.0.0.1' || url.hostname === 'localhost')) ||
-        isCursorDesktopCallback)
+        isCursorDesktopCallback ||
+        isCodexDesktopCallback)
     );
   } catch {
     return false;
