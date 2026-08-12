@@ -98,6 +98,38 @@ describe('doctor guidance', () => {
     );
   });
 
+  it('recovers the failed capability before using general readiness', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      'When the request is broad or symptom-only, such as "the environment is not working," recover the failed capability from that context task before falling back to general readiness.',
+    );
+    expect(skillContent).toContain(
+      'Establish the context task before resolving omitted details.',
+    );
+    expect(skillContent).toContain(
+      'Use an exact Roomote task ID or URL supplied by the user; otherwise read only `ROOMOTE_TASK_ID` from the current runtime and use the current task.',
+    );
+    expect(skillContent).toContain(
+      'When failure-context recovery is required, call `mcp__roomote__manage_tasks` with `action: "get_summary"` and `action: "get_messages"` for the context task.',
+    );
+    expect(skillContent).toContain(
+      'identify the last concrete attempted journey, any surfaced setup or runtime failure, and the user-visible symptom',
+    );
+    expect(skillContent).toContain(
+      'Use recovered context only to choose what the fresh task must reproduce.',
+    );
+    expect(skillContent).toContain(
+      "Do not accept a previous task's diagnosis, ownership classification, apparent success, or suggested repair as proof.",
+    );
+    expect(skillContent).toContain(
+      'If no concrete capability can be recovered, use the general environment-readiness fallback below and state in the final report exactly what that fallback did and did not prove.',
+    );
+    expect(skillContent).toContain(
+      'Only when no concrete failed capability was requested or recovered, use the general environment-readiness fallback',
+    );
+  });
+
   it('requires a real result rather than inferring success from task completion', () => {
     const skillContent = readSkillContent();
 
