@@ -1353,7 +1353,9 @@ function isSandboxStatusLookupUnavailableError(error: unknown): boolean {
         ? (error as { message: string }).message
         : undefined;
 
-  return status === 400 && message?.includes('Status code 400 is not ok') === true;
+  return (
+    status === 400 && message?.includes('Status code 400 is not ok') === true
+  );
 }
 
 function formatError(error: unknown): {
