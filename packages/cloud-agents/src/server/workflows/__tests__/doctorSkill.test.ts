@@ -111,10 +111,13 @@ describe('doctor guidance', () => {
       'Do not claim `healthy` or `repaired` unless the latest fresh task explicitly completed the requested journey',
     );
     expect(skillContent).toContain(
-      'allow one polling interval for the pending settle notification before returning the final Doctor outcome',
+      'Do not return the final Doctor outcome merely because polling finds a settled summary or the child has posted its result.',
     );
     expect(skillContent).toContain(
-      'do not repeat an outcome already reported',
+      'Only if the notification is still absent 60 seconds after polling first observes a settled task may the polled result become the fallback completion signal.',
+    );
+    expect(skillContent).toContain(
+      'Never emit a second user-facing outcome or confirmation for the same verification task.',
     );
   });
 
