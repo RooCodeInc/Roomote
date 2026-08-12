@@ -129,6 +129,28 @@ const boxNorm = (r) => ({
   h: r.h / VIEWPORT.h,
 });
 
+// Tight content rect for annotation anchors. Block elements (headings,
+// paragraphs) report full-column boxes with dead space past the text; a
+// Range over the contents hugs what the viewer actually reads. Falls back
+// to the element box for empty/replaced elements.
+function tightRect(sel) {
+  const selB64 = Buffer.from(String(sel), 'utf8').toString('base64');
+  if (!/^[A-Za-z0-9+/=]*$/.test(selB64)) {
+    throw new Error(`unencodable selector: ${sel}`);
+  }
+  const js =
+    `(function(){var e=document.querySelector(atob("${selB64}"));` +
+    `if(!e)return null;var r=e.getBoundingClientRect();` +
+    `try{var g=document.createRange();g.selectNodeContents(e);` +
+    `var t=g.getBoundingClientRect();` +
+    `if(t&&t.width>1&&t.height>1)r=t;}catch(_){}` +
+    `return{x:r.x,y:r.y,w:r.width,h:r.height};})()`;
+  const out = ab('eval', js).trim();
+  const r = JSON.parse(out);
+  if (!r) throw new Error(`element not found: ${sel}`);
+  return r;
+}
+
 const timeline = {
   video: { path: 'recording.mp4', width: VIEWPORT.w, height: VIEWPORT.h },
   fps: 30,
@@ -210,7 +232,9 @@ async function run() {
       // `note` rides the beat: a highlight box (plus optional label chip)
       // anchored to the beat's own element, shown for the beat's caption
       // window. One per beat — it is a clarity device, not a diagram.
-      const noteBox = beat.note ? boxNorm(rect(beat.note.sel ?? beat.sel)) : null;
+      const noteBox = beat.note
+        ? boxNorm(tightRect(beat.note.sel ?? beat.sel))
+        : null;
       const pushNote = (start, end) => {
         if (!noteBox) return;
         timeline.annotations.push({
@@ -218,7 +242,7 @@ async function run() {
           end: Math.round(end * 1000) / 1000,
           box: noteBox,
           ...(beat.note.text ? { text: beat.note.text } : {}),
-          style: beat.note.style ?? 'callout',
+          style: beat.note.style ?? 'spotlight',
         });
       };
 

@@ -57,6 +57,7 @@ this pipeline is ever committed to the repository.
 <actions>
 <action>Write `/tmp/feature-demo/demo-script.json`: `{ "url": string, "viewport": { "w": 1280, "h": 800 }, "beats": [...] }`. Beat actions:
 - `{ "a": "show", "sel": css, "caption": "..." }` — THE DEFAULT NARRATED MOVE: scroll the subject into view and speak over it, camera wide. No cursor.
+- A `show` beat may carry ONE `"note"` — `{ "sel": css?, "text": "..."?, "style": "spotlight"|"box"|"callout"? }` — an attention cue anchored to a real element for exactly that beat's caption window. Default `spotlight` dims the rest of the page and leaves the target bright, with `text` as a small label on the dimmed area; use it when the narration names one thing the viewer should find (`note.sel` may point at a more specific element than the beat scrolls to, e.g. the command block under a heading). `box`/`callout` draw an accent outline instead — busier on dense pages, so prefer spotlight. At most one note per beat, and most beats want none: it is a clarity device, not decoration.
 - `{ "a": "wait", "ms": n }` / `{ "a": "hold", "ms": n }` — let the page settle / linger.
 - `{ "a": "scrollTo", "sel": css, "ms": n }` — plain scroll with no narration attached.
 - `{ "a": "click", "sel": css, "holdMs": ~300 }` — real click with ripple.
