@@ -104,7 +104,13 @@ case "$service" in
     # HOSTNAME env is the container id, so pin it to all interfaces.
     export HOSTNAME=0.0.0.0
     export PORT="${PORT:-3000}"
-    apply_node_heap_cap 768
+    # web serves whole-task tRPC payloads (messageEnvelopes/runEvents load a
+    # task's full history in one response), and the task page re-requests them
+    # while polling, so its heap ceiling must absorb several such responses at
+    # once — 768 was GC-thrashed to death by a single task page (2026-08-12).
+    # On memory-constrained hosts apply_node_heap_cap still clamps this to 75%
+    # of the container limit, so only boxes with more than ~5.3GB see 4096.
+    apply_node_heap_cap 4096
     cd /roomote/apps/web
     exec /roomote/.docker/run-with-dotenvx.sh node server.js "$@"
     ;;
