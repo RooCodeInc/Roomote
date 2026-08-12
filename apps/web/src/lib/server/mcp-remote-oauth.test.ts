@@ -193,19 +193,22 @@ describe('remote MCP OAuth state', () => {
     redisSortedSets.clear();
   });
 
-  it('accepts HTTPS, loopback, and exact desktop app callbacks', () => {
-    expect(isAllowedOAuthRedirectUri('https://client.example/callback')).toBe(
-      true,
-    );
-    expect(isAllowedOAuthRedirectUri('http://127.0.0.1:43110/callback')).toBe(
-      true,
-    );
-    expect(
-      isAllowedOAuthRedirectUri('cursor://anysphere.cursor-mcp/oauth/callback'),
-    ).toBe(true);
-    expect(isAllowedOAuthRedirectUri('codex://connector/oauth_callback')).toBe(
-      true,
-    );
+  it.each([
+    ['Claude Code loopback', 'http://localhost:43110/callback'],
+    ['Claude Code IPv4 loopback', 'http://127.0.0.1:43110/callback'],
+    ['Cursor desktop app', 'cursor://anysphere.cursor-mcp/oauth/callback'],
+    [
+      'Cursor hosted callback',
+      'https://www.cursor.com/agents/mcp/oauth/callback',
+    ],
+    ['Cursor loopback', 'http://localhost:8787/callback'],
+    ['Codex desktop app', 'codex://connector/oauth_callback'],
+    ['Codex loopback', 'http://127.0.0.1:1455/callback'],
+  ])('accepts the %s callback', (_client, redirectUri) => {
+    expect(isAllowedOAuthRedirectUri(redirectUri)).toBe(true);
+  });
+
+  it('rejects unsafe or unrecognized callbacks', () => {
     expect(isAllowedOAuthRedirectUri('http://client.example/callback')).toBe(
       false,
     );

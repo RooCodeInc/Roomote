@@ -54,7 +54,11 @@ function consentResponse(options: {
   const callbackUrl = new URL(options.redirectUri);
   const callbackHost = escapeHtml(callbackUrl.host);
   const callbackDestination =
-    callbackUrl.protocol === 'codex:' ? 'the Codex app' : callbackHost;
+    callbackUrl.protocol === 'codex:'
+      ? 'the Codex app'
+      : callbackUrl.protocol === 'cursor:'
+        ? 'Cursor'
+        : callbackHost;
   const callbackFormActionSource =
     callbackUrl.protocol === 'http:' || callbackUrl.protocol === 'https:'
       ? callbackUrl.origin

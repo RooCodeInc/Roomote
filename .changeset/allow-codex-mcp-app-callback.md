@@ -2,4 +2,4 @@
 '@roomote/web': patch
 ---
 
-Allow Codex Desktop to register its connector OAuth callback so Roomote can return browser authorization to the originating app connection flow.
+Support and document the OAuth callbacks requested by Claude Code, Codex, and Cursor, including the Codex Desktop connector app link.

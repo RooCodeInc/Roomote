@@ -188,6 +188,84 @@ describe('GET /api/mcp-remote-oauth/authorize', () => {
     );
   });
 
+  it('returns Cursor through its requested app callback', async () => {
+    const cursorRedirectUri = 'cursor://anysphere.cursor-mcp/oauth/callback';
+    mockAuthorize.mockResolvedValue({ success: true, userId: 'user-1' });
+    mockGetClient.mockResolvedValue({
+      clientId,
+      clientName: 'Cursor',
+      redirectUris: [cursorRedirectUri],
+    });
+    mockCreateCode.mockResolvedValue('authorization-code');
+
+    const consentResponse = await GET(
+      authorizeRequest({ redirectUri: cursorRedirectUri }),
+    );
+    const html = await consentResponse.text();
+
+    expect(html).toContain(
+      'After approval, you’ll return to <strong>Cursor</strong>.',
+    );
+    expect(consentResponse.headers.get('content-security-policy')).toContain(
+      "form-action 'self' cursor:",
+    );
+
+    const response = await POST(
+      authorizeRequest({
+        approved: true,
+        consentToken: 'consent-token',
+        redirectUri: cursorRedirectUri,
+      }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe(
+      'cursor://anysphere.cursor-mcp/oauth/callback?code=authorization-code&state=client-state',
+    );
+    expect(mockCreateCode).toHaveBeenCalledWith(
+      expect.objectContaining({ redirectUri: cursorRedirectUri }),
+    );
+  });
+
+  it('returns Claude Code through its requested loopback callback', async () => {
+    const claudeRedirectUri = 'http://localhost:54545/callback';
+    mockAuthorize.mockResolvedValue({ success: true, userId: 'user-1' });
+    mockGetClient.mockResolvedValue({
+      clientId,
+      clientName: 'Claude Code',
+      redirectUris: [claudeRedirectUri],
+    });
+    mockCreateCode.mockResolvedValue('authorization-code');
+
+    const consentResponse = await GET(
+      authorizeRequest({ redirectUri: claudeRedirectUri }),
+    );
+    const html = await consentResponse.text();
+
+    expect(html).toContain(
+      'After approval, you’ll return to <strong>localhost:54545</strong>.',
+    );
+    expect(consentResponse.headers.get('content-security-policy')).toContain(
+      "form-action 'self' http://localhost:54545",
+    );
+
+    const response = await POST(
+      authorizeRequest({
+        approved: true,
+        consentToken: 'consent-token',
+        redirectUri: claudeRedirectUri,
+      }),
+    );
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get('location')).toBe(
+      'http://localhost:54545/callback?code=authorization-code&state=client-state',
+    );
+    expect(mockCreateCode).toHaveBeenCalledWith(
+      expect.objectContaining({ redirectUri: claudeRedirectUri }),
+    );
+  });
+
   it('defaults an omitted resource to the Roomote MCP endpoint', async () => {
     mockAuthorize.mockResolvedValue({ success: true, userId: 'user-1' });
     mockCreateCode.mockResolvedValue('authorization-code');

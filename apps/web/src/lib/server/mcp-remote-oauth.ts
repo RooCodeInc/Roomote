@@ -233,6 +233,9 @@ function parseRefreshToken(token: string): string | null {
 export function isAllowedOAuthRedirectUri(value: string): boolean {
   try {
     const url = new URL(value);
+    const isLoopbackCallback =
+      url.protocol === 'http:' &&
+      (url.hostname === '127.0.0.1' || url.hostname === 'localhost');
     const isCursorDesktopCallback =
       url.protocol === 'cursor:' &&
       url.hostname === 'anysphere.cursor-mcp' &&
@@ -250,8 +253,7 @@ export function isAllowedOAuthRedirectUri(value: string): boolean {
       url.username === '' &&
       url.password === '' &&
       (url.protocol === 'https:' ||
-        (url.protocol === 'http:' &&
-          (url.hostname === '127.0.0.1' || url.hostname === 'localhost')) ||
+        isLoopbackCallback ||
         isCursorDesktopCallback ||
         isCodexDesktopCallback)
     );

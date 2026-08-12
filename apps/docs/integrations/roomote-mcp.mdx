@@ -83,6 +83,10 @@ claude mcp login roomote
 You can also open `/mcp` inside Claude Code to manage the connection and sign
 in.
 
+Claude Code requests a temporary `http://localhost:<port>/callback` URL for the
+browser to return the authorization result to the running CLI. Roomote accepts
+both `localhost` and `127.0.0.1` loopback callbacks with client-selected ports.
+
 ### Codex
 
 Add the streamable HTTP server, then authenticate it:
@@ -118,13 +122,22 @@ Add Roomote to `~/.cursor/mcp.json` to use it in every project, or to
 Open **Customize** in Cursor, find Roomote under MCP servers, and complete the
 browser sign-in.
 
+Cursor can request its registered
+`cursor://anysphere.cursor-mcp/oauth/callback` app link, its hosted HTTPS
+callback, or a loopback HTTP callback. Roomote accepts each form and returns the
+authorization result to the exact callback Cursor registered.
+
 In each client, Roomote opens a browser so you can sign in and approve the
-connection. You do not need to create or copy an API token.
+connection. During OAuth dynamic client registration, the client sends Roomote
+its callback URL in `redirect_uris`. Roomote validates and saves that URL, then
+only sends the result to the same registered URL after approval. You do not
+need to create or copy an API token.
 
 <Note>
   On a self-hosted deployment, the configured `R_PUBLIC_URL` (or `R_APP_URL`)
   must be a browser-reachable HTTPS address. Desktop clients may use a loopback
-  HTTP callback.
+  HTTP callback. Roomote supports the callback forms described above for all
+  three documented clients.
 </Note>
 
 ## Access and safety
