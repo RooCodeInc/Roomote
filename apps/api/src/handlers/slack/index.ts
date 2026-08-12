@@ -26,9 +26,6 @@ import {
 } from './helpers/event-normalization.js';
 import type { SlackWebhookBody } from './types.js';
 import { verifySlackRequest } from './verifySlackRequest.js';
-import { lookupSlackUserMapping } from './helpers/user-mapping.js';
-import { startAutoRoutedSlackTask } from '@roomote/slack';
-import { parseGoalCommand } from '@roomote/communication/goal-command';
 
 export const slack = new Hono();
 
@@ -92,58 +89,6 @@ slack.post('/', async (c) => {
       });
 
       return c.json({ ok: true });
-    }
-
-    if (formData.get('command') === '/goal') {
-      const teamId = formData.get('team_id');
-      const slackUserId = formData.get('user_id');
-      const channel = formData.get('channel_id');
-      const parsedGoal = parseGoalCommand(
-        `/goal ${formData.get('text') ?? ''}`,
-      );
-      if (!teamId || !slackUserId || !channel || !parsedGoal?.goal) {
-        return c.json({
-          response_type: 'ephemeral',
-          text: 'Send an objective after the command — for example, `/goal ship the release`.',
-        });
-      }
-
-      const [slackInstallation] = await db
-        .select()
-        .from(slackInstallations)
-        .where(eq(slackInstallations.teamId, teamId))
-        .limit(1);
-      const { activeMapping } = await lookupSlackUserMapping({
-        slackUserId,
-        teamId,
-      });
-      if (!slackInstallation || !activeMapping) {
-        return c.json({
-          response_type: 'ephemeral',
-          text: 'Link this Slack account to Roomote before starting Goal Mode.',
-        });
-      }
-
-      void startAutoRoutedSlackTask({
-        slackInstallation,
-        slack: new SlackNotifier(slackInstallation.botAccessToken),
-        initiator: { kind: 'user', userId: activeMapping.userId },
-        trigger: 'message',
-        launchUserId: activeMapping.userId,
-        slackUserId,
-        persistedSlackUserId: slackUserId,
-        channel,
-        prompt: `/goal ${parsedGoal.objective}`,
-      }).catch((error) => {
-        apiLogger.error(
-          `[slack] Failed to handle /goal command: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      });
-
-      return c.json({
-        response_type: 'ephemeral',
-        text: 'Starting Goal Mode…',
-      });
     }
   }
 
