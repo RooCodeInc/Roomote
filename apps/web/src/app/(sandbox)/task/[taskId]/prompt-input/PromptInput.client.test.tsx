@@ -417,6 +417,51 @@ describe('PromptInput', () => {
     expect(onCommandSearchOpen).toHaveBeenCalledWith(1);
   });
 
+  it('does not open search for @ or slashes typed after the first character', () => {
+    useSandboxConnectedMock.mockReturnValue(true);
+    useSandboxConnectionStatusMock.mockReturnValue({
+      connected: true,
+      connectionError: false,
+      reconnect: vi.fn(),
+    });
+    const onFileSearchOpen = vi.fn();
+    const onCommandSearchOpen = vi.fn();
+
+    render(
+      <PromptInput
+        onFileSearchOpen={onFileSearchOpen}
+        onCommandSearchOpen={onCommandSearchOpen}
+      />,
+    );
+
+    const textarea = screen.getByPlaceholderText(/Message agent/i);
+
+    fireEvent.change(textarea, {
+      target: { value: '@', selectionStart: 1 },
+    });
+    fireEvent.change(textarea, {
+      target: { value: 'run /goal', selectionStart: 5 },
+    });
+
+    expect(onFileSearchOpen).not.toHaveBeenCalled();
+    expect(onCommandSearchOpen).not.toHaveBeenCalled();
+  });
+
+  it('keeps file search available from the context menu', () => {
+    const onFileSearchOpen = vi.fn();
+
+    render(
+      <PromptInput
+        onFileSearchOpen={onFileSearchOpen}
+        onCommandSearchOpen={() => {}}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Context' }));
+
+    expect(onFileSearchOpen).toHaveBeenCalledWith();
+  });
+
   it('cancels through the web API when the sandbox client is disconnected', async () => {
     useSandboxTaskPhaseMock.mockReturnValue('running');
 
