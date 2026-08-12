@@ -61,23 +61,49 @@ describe('environment-setup guidance', () => {
     );
   });
 
-  it('requests known-required environment variables proactively', () => {
+  it('requests only setup-required environment variables proactively', () => {
     const skillContent = readSkillContent();
 
     expect(skillContent).toContain(
-      'When repository evidence makes required environment keys clear but values are unavailable, request them immediately instead of waiting for a command to fail',
+      'Classify discovered environment keys before requesting them.',
     );
     expect(skillContent).toContain(
-      'As soon as repository evidence or early validation makes it clear that specific environment variables or secrets will be required and values are unavailable, request them immediately instead of waiting for a later failure.',
+      'Do not request credentials merely because they appear in an example file, production configuration, optional integration, or broader startup path.',
     );
     expect(skillContent).toContain(
-      'When required environment variables or secrets are known but unavailable in a web dashboard task or Slack-started setup task, use `request_environment_variables` and never ask the user to paste secret values into the conversation.',
+      'When setup-required environment variables or secrets are known but unavailable in a web dashboard task or Slack-started setup task, use `request_environment_variables` and never ask the user to paste secret values into the conversation.',
     );
     expect(skillContent).toContain(
       'still send a concise `send_chat_reply` message with `purpose` set to `progress` naming the required keys and what they unblock',
     );
     expect(skillContent).toContain(
       'do not add the secure `/setup` link yourself because the platform automatically accompanies that request with a standardized secure-entry link reply',
+    );
+  });
+
+  it('allows backend environments to complete from install and test validation', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      'For backend services and libraries without a required human-facing localhost surface, successful install and canonical test execution may be sufficient validation.',
+    );
+    expect(skillContent).toContain(
+      'Missing credentials for deferred optional capabilities do not block creation.',
+    );
+    expect(skillContent).toContain(
+      'successful install and canonical tests may be sufficient only when omitted credentials affect optional integrations or external runtime capabilities rather than a required local runtime',
+    );
+    expect(skillContent).toContain(
+      'For a backend service or library persisted from install and canonical test validation without a selected localhost surface, instead instruct the task to confirm setup completed cleanly and run the canonical tests',
+    );
+    expect(skillContent).toContain(
+      'do not require an HTTP service or initial URL that the environment does not claim to provide.',
+    );
+    expect(skillContent).toContain(
+      'If the selected validation path includes starting an HTTP API or another non-browser service, verify localhost reachability using loopback addresses only.',
+    );
+    expect(skillContent).toContain(
+      'Skip service startup and reachability when the backend or library qualifies for install-plus-canonical-test validation under step 13a',
     );
   });
 
@@ -324,7 +350,7 @@ describe('environment-setup guidance', () => {
       'Always derive a best-effort environment definition that is ready to work once required environment variables are supplied.',
     );
     expect(skillContent).toContain(
-      'The final environment definition is best-effort and should be runnable once required environment variables are provided.',
+      'The final environment definition is best-effort and should support the validated local coding path; credentials for optional integrations or external runtime capabilities may remain deferred.',
     );
     expect(skillContent).toContain('repositories:');
     expect(skillContent).not.toContain('workspace manifest');
