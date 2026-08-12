@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 type ListedServer = {
@@ -176,6 +182,11 @@ function renderHarness() {
 }
 
 describe('useCustomMcpServers', () => {
+  afterEach(async () => {
+    cleanup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     state.availability = { enabled: true };
