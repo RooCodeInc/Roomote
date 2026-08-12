@@ -41,6 +41,7 @@ const AUTH_PROVIDER_DOC_PATHS: Record<string, string> = {
 
 const COMPUTE_PROVIDER_DOC_PATHS: Record<string, string> = {
   blaxel: 'providers/compute/blaxel',
+  box: 'providers/compute/box',
   daytona: 'providers/compute/daytona',
   docker: 'providers/compute/docker',
   e2b: 'providers/compute/e2b',

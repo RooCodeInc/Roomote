@@ -65,7 +65,7 @@ const serverSchema = {
   R_APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   DEFAULT_COMPUTE_PROVIDER: z
-    .enum(['modal', 'docker', 'daytona', 'e2b', 'roomote', 'azure'])
+    .enum(['modal', 'docker', 'daytona', 'e2b', 'box', 'roomote', 'azure'])
     .default('docker'),
   EXCLUDED_COMPUTE_PROVIDERS: z.string().optional(),
   DOCKER_WORKER_IMAGE: z
@@ -107,6 +107,8 @@ const serverSchema = {
     .positive()
     .max(168)
     .default(168),
+  BOX_STANDBY_MAX_COUNT: z.coerce.number().int().nonnegative().optional(),
+  BOX_STANDBY_MAX_AGE_HOURS: z.coerce.number().positive().optional(),
   R_PUBLIC_URL: z.string().url().optional(),
   R_APP_URL: z.string().min(1),
   // Anonymous telemetry + version checks (Ping service).
@@ -279,6 +281,10 @@ const serverSchema = {
   BL_WORKSPACE: z.string().optional(),
   BLAXEL_IMAGE: z.string().optional(),
   BLAXEL_REGION: z.string().optional(),
+  BOX_API_KEY: z.string().min(1).optional(),
+  BOX_API_BASE_URL: z.string().url().optional(),
+  BOX_MACHINE_TYPE: z.enum(['small', 'default', 'large']).optional(),
+  BOX_TIMEOUT_MS: z.coerce.number().int().positive().optional(),
   E2B_DOMAIN: z.string().optional(),
   E2B_TEMPLATE_ID: z.string().optional(),
   AZURE_SUBSCRIPTION_ID: z.string().optional(),
@@ -526,6 +532,12 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'BL_WORKSPACE',
   'BLAXEL_IMAGE',
   'BLAXEL_REGION',
+  'BOX_API_KEY',
+  'BOX_API_BASE_URL',
+  'BOX_MACHINE_TYPE',
+  'BOX_TIMEOUT_MS',
+  'BOX_STANDBY_MAX_COUNT',
+  'BOX_STANDBY_MAX_AGE_HOURS',
   'E2B_DOMAIN',
   'E2B_TEMPLATE_ID',
   'E2B_MAX_SANDBOX_TIMEOUT_MS',

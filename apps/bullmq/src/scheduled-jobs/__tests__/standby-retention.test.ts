@@ -6,17 +6,14 @@ const {
   mockEnterStandby,
   mockDestroyInstance,
   mockResolveComputeProviderEnvValues,
-  selectResultsQueue,
+  selectResults,
   selectFn,
   updateFn,
 } = vi.hoisted(() => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- suppressed for oxlint; ESLint's own rule is offloaded and reports this directive as unused, which is a false positive
   type AnyMock = Mock<(...args: any[]) => any>;
 
-  // Each db.select(...) call consumes one entry; entries resolve in call
-  // order. getCandidates chains .orderBy(...), the other queries await the
-  // where-result directly, so both shapes must resolve to the same rows.
-  const selectResultsQueue: { current: unknown[][] } = { current: [] };
+  const selectResults: { current: Record<string, unknown[]> } = { current: {} };
 
   const makeQueryResult = (rows: unknown[]) => {
     const result = Promise.resolve(rows);
@@ -25,11 +22,33 @@ const {
     return result;
   };
 
-  const whereFn: AnyMock = vi.fn(() =>
-    makeQueryResult(selectResultsQueue.current.shift() ?? []),
-  );
-  const fromFn: AnyMock = vi.fn(() => ({ where: whereFn }));
-  const selectFn: AnyMock = vi.fn(() => ({ from: fromFn }));
+  const findProvider = (expression: unknown): string | undefined => {
+    if (!expression || typeof expression !== 'object') return undefined;
+    const node = expression as {
+      kind?: string;
+      column?: string;
+      value?: string;
+      clauses?: unknown[];
+    };
+    if (node.kind === 'eq' && node.column === 'vendor') return node.value;
+    return node.clauses?.map(findProvider).find(Boolean);
+  };
+  const selectFn: AnyMock = vi.fn((selection: Record<string, unknown>) => ({
+    from: vi.fn(() => ({
+      where: vi.fn((expression: unknown) => {
+        const provider = findProvider(expression);
+        const kind =
+          'runId' in selection
+            ? 'candidates'
+            : 'machineId' in selection
+              ? 'inUse'
+              : 'protected';
+        return makeQueryResult(
+          selectResults.current[`${provider}:${kind}`] ?? [],
+        );
+      }),
+    })),
+  }));
 
   const updateWhereFn: AnyMock = vi.fn(() => Promise.resolve([]));
   const setFn: AnyMock = vi.fn(() => ({ where: updateWhereFn }));
@@ -41,7 +60,7 @@ const {
     mockEnterStandby: vi.fn() as AnyMock,
     mockDestroyInstance: vi.fn() as AnyMock,
     mockResolveComputeProviderEnvValues: vi.fn() as AnyMock,
-    selectResultsQueue,
+    selectResults,
     selectFn,
     updateFn,
   };
@@ -62,9 +81,13 @@ vi.mock('@roomote/db/server', () => ({
     snapshotCreatedAt: 'snapshotCreatedAt',
     sourceSnapshotId: 'sourceSnapshotId',
   },
-  and: vi.fn(),
+  and: vi.fn((...clauses: unknown[]) => ({ kind: 'and', clauses })),
   desc: vi.fn(),
-  eq: vi.fn(),
+  eq: vi.fn((column: string, value: string) => ({
+    kind: 'eq',
+    column,
+    value,
+  })),
   inArray: vi.fn(),
   isNotNull: vi.fn(),
   or: vi.fn(),
@@ -79,31 +102,32 @@ vi.mock('@roomote/compute-providers', () => ({
 import { standbyRetentionJob } from '../standby-retention';
 
 /**
- * standbyRetentionJob iterates docker, blaxel, azure. Each provider's
- * eviction pass runs two selects (candidates, protected handles); azure
- * additionally runs the orphan re-suspend pass (candidates, protected
- * handles, in-use handles). Queue entries in consumption order.
+ * Configure provider-specific query results without depending on the order of
+ * the concurrent retention passes.
  */
 function queueSelectResults({
+  boxReSuspendCandidates = [],
+  boxReSuspendProtected = [],
+  boxReSuspendInUse = [],
   azureReSuspendCandidates = [],
   azureReSuspendProtected = [],
   azureReSuspendInUse = [],
 }: {
+  boxReSuspendCandidates?: unknown[];
+  boxReSuspendProtected?: unknown[];
+  boxReSuspendInUse?: unknown[];
   azureReSuspendCandidates?: unknown[];
   azureReSuspendProtected?: unknown[];
   azureReSuspendInUse?: unknown[];
 }) {
-  selectResultsQueue.current = [
-    [], // docker eviction candidates
-    [], // docker eviction protected
-    [], // blaxel eviction candidates
-    [], // blaxel eviction protected
-    [], // azure eviction candidates
-    [], // azure eviction protected
-    azureReSuspendCandidates,
-    azureReSuspendProtected,
-    azureReSuspendInUse,
-  ];
+  selectResults.current = {
+    'box:candidates': boxReSuspendCandidates,
+    'box:protected': boxReSuspendProtected,
+    'box:inUse': boxReSuspendInUse,
+    'azure:candidates': azureReSuspendCandidates,
+    'azure:protected': azureReSuspendProtected,
+    'azure:inUse': azureReSuspendInUse,
+  };
 }
 
 describe('standbyRetentionJob orphan re-suspend', () => {
@@ -112,7 +136,7 @@ describe('standbyRetentionJob orphan re-suspend', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    selectResultsQueue.current = [];
+    selectResults.current = {};
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
@@ -152,6 +176,39 @@ describe('standbyRetentionJob orphan re-suspend', () => {
     expect(mockEnterStandby).toHaveBeenCalledWith({ instanceId: 'sb-1' });
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining('re-suspended orphaned azure standby sb-1'),
+    );
+  });
+
+  it('constructs a Box client and re-suspends an orphaned Box standby', async () => {
+    mockResolveComputeProviderEnvValues.mockImplementation((provider) =>
+      Promise.resolve(provider === 'box' ? { BOX_API_KEY: 'box-key' } : {}),
+    );
+    queueSelectResults({
+      boxReSuspendCandidates: [
+        {
+          runId: 33,
+          taskId: 'task-box',
+          provider: 'box',
+          handle: 'box-standby',
+          createdAt: new Date(),
+        },
+      ],
+    });
+
+    await standbyRetentionJob();
+
+    expect(mockCreateComputeProviderClient).toHaveBeenCalledWith({
+      provider: 'box',
+      envFallback: { BOX_API_KEY: 'box-key' },
+    });
+    expect(mockGetInstanceStatus).toHaveBeenCalledWith({
+      instanceId: 'box-standby',
+    });
+    expect(mockEnterStandby).toHaveBeenCalledWith({
+      instanceId: 'box-standby',
+    });
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.stringContaining('re-suspended orphaned box standby box-standby'),
     );
   });
 

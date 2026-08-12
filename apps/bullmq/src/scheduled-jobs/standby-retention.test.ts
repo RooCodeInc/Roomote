@@ -56,6 +56,10 @@ describe('resolveStandbyRetentionPolicy', () => {
       maxCount: 25,
       maxAgeMs: 168 * 60 * 60 * 1_000,
     });
+    expect(resolveStandbyRetentionPolicy('box', {})).toEqual({
+      maxCount: 25,
+      maxAgeMs: 168 * 60 * 60 * 1_000,
+    });
   });
 
   it('applies saved or runtime provider overrides', () => {
@@ -65,6 +69,12 @@ describe('resolveStandbyRetentionPolicy', () => {
         DOCKER_STANDBY_MAX_AGE_HOURS: '12',
       }),
     ).toEqual({ maxCount: 3, maxAgeMs: 12 * 60 * 60 * 1_000 });
+    expect(
+      resolveStandbyRetentionPolicy('box', {
+        BOX_STANDBY_MAX_COUNT: '4',
+        BOX_STANDBY_MAX_AGE_HOURS: '48',
+      }),
+    ).toEqual({ maxCount: 4, maxAgeMs: 48 * 60 * 60 * 1_000 });
   });
 
   it('falls back safely for invalid values', () => {

@@ -28,6 +28,7 @@ WORKER_RELEASE_ARCHIVE="${WORKER_RELEASE_ARCHIVE_PATH:-/sandbox/worker.tar.gz}"
 WORKER_DIR="/sandbox/worker"
 WORKER_RELEASE_TAG_FILE="$WORKER_DIR/WORKER_RELEASE_TAG"
 NODE_PTY_VERSION_FILE="$WORKER_DIR/NODE_PTY_VERSION"
+PM2_VERSION_FILE="$WORKER_DIR/PM2_VERSION"
 DATA_DIR="/sandbox"
 INSTALL_WORKER_START_MS="$(date +%s%3N)"
 INSTALL_WORKER_PHASE_NAMES=()
@@ -192,7 +193,22 @@ throw new Error(`node-pty version metadata not found for ${resolvedEntry}`);
 }
 
 ensure_data_dir() {
-  [ ! -d "$DATA_DIR" ] && (mkdir -p "$DATA_DIR" || sudo mkdir -p "$DATA_DIR")
+  if [ ! -d "$DATA_DIR" ]; then
+    mkdir -p "$DATA_DIR" 2>/dev/null || sudo -n mkdir -p "$DATA_DIR"
+  fi
+
+  # Provider-managed images ship a writable $DATA_DIR; bring-your-own images
+  # (for example Box) may have it root-owned, so reclaim it when possible.
+  if [ ! -w "$DATA_DIR" ] &&
+    command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    echo "Making $DATA_DIR writable for $(id -un)"
+    sudo -n chown "$(id -u):$(id -g)" "$DATA_DIR"
+  fi
+
+  if [ ! -w "$DATA_DIR" ]; then
+    echo "Error: $DATA_DIR is not writable and non-interactive sudo is unavailable"
+    return 1
+  fi
 }
 
 install_from_release_archive() {
@@ -204,10 +220,10 @@ install_from_release_archive() {
     # Clear contents instead of removing directory (may be a mount point).
     rm -rf "$WORKER_DIR"/* "$WORKER_DIR"/.[!.]* 2>/dev/null || true
   else
-    mkdir -p "$WORKER_DIR"
+    mkdir -p "$WORKER_DIR" || return 1
   fi
 
-  tar -xzf "$archive_path" --strip-components=1 -C "$WORKER_DIR"
+  tar -xzf "$archive_path" --strip-components=1 -C "$WORKER_DIR" || return 1
 
   if [ -n "${WORKER_RELEASE_TAG:-}" ]; then
     printf "%s\n" "$WORKER_RELEASE_TAG" > "$WORKER_RELEASE_TAG_FILE"
@@ -223,15 +239,20 @@ install_from_release_archive() {
 }
 
 install_worker() {
-  ensure_data_dir
+  ensure_data_dir || return 1
 
   if [ -f "$WORKER_RELEASE_ARCHIVE" ]; then
-    install_from_release_archive "$WORKER_RELEASE_ARCHIVE"
+    install_from_release_archive "$WORKER_RELEASE_ARCHIVE" || return 1
   elif [ -f "$WORKER_DIR/dist/worker.js" ]; then
     echo "Worker already installed (v$(get_installed_version))"
   else
     echo "Error: No worker release archive found and worker not installed"
     echo "The controller should have uploaded the worker release archive."
+    return 1
+  fi
+
+  if [ ! -f "$WORKER_DIR/dist/worker.js" ]; then
+    echo "Error: worker install finished but $WORKER_DIR/dist/worker.js is missing"
     return 1
   fi
 }
@@ -295,7 +316,7 @@ ensure_node_pty() {
     fi
   fi
 
-  ensure_data_dir
+  ensure_data_dir || return 1
 
   if [ -n "$expected_version" ]; then
     package_spec="${package_spec}@${expected_version}"
@@ -316,6 +337,82 @@ ensure_node_pty() {
   echo "node-pty ${installed_version} installed and validated for $WORKER_DIR/dist/worker.js"
 }
 
-run_phase "worker_install" install_worker
-run_phase "worker_cli_install" install_worker_cli
-run_phase "node_pty_install" ensure_node_pty
+# The worker's detached process manager requires pm2. Worker Docker images
+# bundle it at /usr/local/bin/pm2; bring-your-own images (for example Box)
+# ship without it. Install into a dedicated prefix: --no-save packages in the
+# shared $DATA_DIR prefix get pruned by later npm installs there (the worker
+# installs its own runtime deps into $DATA_DIR), which silently broke the
+# launcher wrapper. Validate by executing, not by file existence, so a
+# surviving wrapper with a missing target gets repaired on the next install.
+pm2_works() {
+  "$1" --version >/dev/null 2>&1
+}
+
+get_expected_pm2_version() {
+  if [ -f "$PM2_VERSION_FILE" ]; then
+    cat "$PM2_VERSION_FILE"
+  else
+    echo ""
+  fi
+}
+
+ensure_pm2() {
+  if [ -x "/usr/local/bin/pm2" ] && pm2_works /usr/local/bin/pm2; then
+    echo "pm2 already available"
+    return 0
+  fi
+  if command -v pm2 >/dev/null 2>&1 && pm2_works "$(command -v pm2)"; then
+    echo "pm2 already available"
+    return 0
+  fi
+
+  echo "pm2 missing or broken; installing..."
+  ensure_data_dir || return 1
+  local pm2_prefix="$DATA_DIR/roomote-pm2"
+  local package_spec="pm2"
+  local expected_version
+  expected_version="$(get_expected_pm2_version)"
+  if [ -n "$expected_version" ]; then
+    package_spec="pm2@${expected_version}"
+  fi
+  mkdir -p "$pm2_prefix" || return 1
+  npm install --prefix "$pm2_prefix" --no-save --no-package-lock "$package_spec" || return 1
+
+  local pm2_entry="$pm2_prefix/node_modules/pm2/bin/pm2"
+  if [ ! -f "$pm2_entry" ]; then
+    echo "Error: pm2 install completed but $pm2_entry is missing"
+    return 1
+  fi
+
+  local cli_path="/usr/local/bin/pm2"
+  local cli_contents="#!/bin/bash
+exec node $pm2_entry \"\$@\""
+
+  if [ -w "/usr/local/bin" ]; then
+    printf "%s\n" "$cli_contents" > "$cli_path"
+    chmod +x "$cli_path"
+  elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    printf "%s\n" "$cli_contents" | sudo -n tee "$cli_path" > /dev/null
+    sudo -n chmod +x "$cli_path"
+  else
+    mkdir -p "$HOME/.local/bin"
+    cli_path="$HOME/.local/bin/pm2"
+    printf "%s\n" "$cli_contents" > "$cli_path"
+    chmod +x "$cli_path"
+  fi
+
+  if ! pm2_works "$cli_path"; then
+    echo "Error: pm2 installed at $cli_path but failed to run"
+    return 1
+  fi
+
+  echo "pm2 installed at $cli_path"
+}
+
+# Fail fast per phase: the script's exit code must reflect the first failing
+# phase, not the last phase, and callers invoke this via `bash <script>` so
+# the shebang's -e does not apply.
+run_phase "worker_install" install_worker || exit "$?"
+run_phase "worker_cli_install" install_worker_cli || exit "$?"
+run_phase "node_pty_install" ensure_node_pty || exit "$?"
+run_phase "pm2_install" ensure_pm2 || exit "$?"

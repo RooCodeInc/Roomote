@@ -76,6 +76,7 @@ export function resolveConfiguredComputeProviderResources(input: {
     case 'daytona':
     case 'e2b':
     case 'blaxel':
+    case 'box':
     case 'azure':
       return {
         configuredVcpus: null,

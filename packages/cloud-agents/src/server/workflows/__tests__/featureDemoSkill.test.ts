@@ -1,5 +1,7 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { PACKAGED_SKILL_INVOCATIONS } from '../../../packaged-skill-invocations';
@@ -128,6 +130,36 @@ describe('feature-demo skill', () => {
     expect(skillContent).not.toContain('{ "a": "reset"');
     expect(captureRunner).toContain('const moveStart = now();');
     expect(captureRunner).toContain('pushCursorMove(moveStart, moveEnd, c);');
+  });
+
+  it.each(['focus', 'reset'])('rejects the unsupported %s action', (action) => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'feature-demo-'));
+    const scriptPath = path.join(tempDir, 'demo-script.json');
+    fs.writeFileSync(
+      scriptPath,
+      JSON.stringify({ url: 'https://example.com', beats: [{ a: action }] }),
+    );
+
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [path.join(skillDirPath, 'capture/capture.mjs')],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            SCRIPT: scriptPath,
+            AGENT_BROWSER_BIN: 'must-not-run-agent-browser',
+          },
+        },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(`unknown beat action: ${action}`);
+      expect(result.stderr).not.toContain('must-not-run-agent-browser');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it('asks the advisor for a flowing narration, not sparse labels', () => {

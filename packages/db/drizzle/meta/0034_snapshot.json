@@ -1,6 +1,6 @@
 {
-  "id": "2d66238e-6a34-458e-87d3-ca8de2b672b7",
-  "prevId": "eef25c4c-2868-4a93-a430-e854fbaff27e",
+  "id": "559179b4-d43e-438b-abb9-90e015782ad2",
+  "prevId": "2d66238e-6a34-458e-87d3-ca8de2b672b7",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1417,6 +1417,12 @@
         },
         "task_model_settings": {
           "name": "task_model_settings",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "workspace_routing_settings": {
+          "name": "workspace_routing_settings",
           "type": "jsonb",
           "primaryKey": false,
           "notNull": false

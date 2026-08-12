@@ -4,4 +4,5 @@ export { DockerClient } from './docker';
 export { DaytonaClient } from './daytona';
 export { E2bClient } from './e2b';
 export { BlaxelClient } from './blaxel';
+export { BoxClient } from './box';
 export { AzureClient } from './azure';

@@ -12,6 +12,7 @@ import type {
   ComputeProviderFactoryOptions,
   AzureConfig,
   BlaxelConfig,
+  BoxConfig,
   DaytonaConfig,
   E2bConfig,
   ModalConfig,
@@ -24,6 +25,7 @@ import {
   DaytonaClient,
   E2bClient,
   BlaxelClient,
+  BoxClient,
   AzureClient,
 } from './adapters';
 
@@ -356,6 +358,31 @@ export function createComputeProviderClient(
       return new BlaxelClient(config);
     }
 
+    case 'box': {
+      const apiKey = options.config?.apiKey ?? envValue('BOX_API_KEY');
+      const boxApiBaseUrl =
+        options.config?.boxApiBaseUrl ?? envValue('BOX_API_BASE_URL');
+      const timeoutMs = parsePositiveNumber(envValue('BOX_TIMEOUT_MS'));
+      const machineType = parseBoxMachineType(envValue('BOX_MACHINE_TYPE'));
+
+      assertDefined(apiKey, 'Missing BOX_API_KEY');
+
+      const config: BoxConfig = {
+        ...(options.config ?? {}),
+        apiKey,
+        ...(options.config?.boxApiBaseUrl === undefined && boxApiBaseUrl
+          ? { boxApiBaseUrl }
+          : {}),
+        ...(options.config?.timeoutMs === undefined && timeoutMs !== undefined
+          ? { timeoutMs }
+          : {}),
+        ...(options.config?.machineType === undefined && machineType
+          ? { machineType }
+          : {}),
+      };
+      return new BoxClient(config);
+    }
+
     case 'azure': {
       const subscriptionId =
         options.config?.subscriptionId ?? envValue('AZURE_SUBSCRIPTION_ID');
@@ -448,4 +475,23 @@ export function createComputeProviderClient(
       throw new Error(`Unsupported provider: ${String(_exhaustive)}`);
     }
   }
+}
+
+function parsePositiveNumber(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error('BOX_TIMEOUT_MS must be a positive number');
+  }
+  return parsed;
+}
+
+function parseBoxMachineType(
+  value: string | undefined,
+): BoxConfig['machineType'] {
+  if (value === undefined) return undefined;
+  if (value === 'small' || value === 'default' || value === 'large') {
+    return value;
+  }
+  throw new Error('BOX_MACHINE_TYPE must be one of: small, default, large');
 }

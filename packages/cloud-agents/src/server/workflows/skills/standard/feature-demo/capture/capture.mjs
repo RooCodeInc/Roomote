@@ -4,13 +4,12 @@
 //
 // Two ideas make the output polished:
 // 1. The runner performs the real interactions AND logs, for the same clock,
-//    where the (synthetic) cursor is, when clicks land, and the resolved
-//    rect of each target — so a zoom can never drift from its element.
+//    where the (synthetic) cursor is and when clicks land.
 // 2. The NARRATIVE drives the visuals: each captioned beat holds for as long
 //    as its line takes to speak (the real clip duration when narration was
 //    synthesized before capture; an estimated speaking time for the caption
-//    text otherwise), and the runner stamps each clip's start at the moment
-//    its zoom actually lands. Nothing needs retiming afterwards.
+//    text otherwise), and the runner stamps each clip's start as its visual
+//    settles. Nothing needs retiming afterwards.
 //
 // Usage: SCRIPT=/path/to/demo-script.json OUT_DIR=/tmp/feature-demo/work \
 //          node capture.mjs
@@ -38,6 +37,23 @@ if (!script.url || !Array.isArray(script.beats)) {
   process.exit(1);
 }
 
+const SUPPORTED_ACTIONS = new Set([
+  'show',
+  'wait',
+  'hold',
+  'scrollTo',
+  'click',
+  'type',
+]);
+const unsupportedBeat = script.beats.find(
+  (beat) => !SUPPORTED_ACTIONS.has(beat.a),
+);
+
+if (unsupportedBeat) {
+  console.error(`unknown beat action: ${unsupportedBeat.a}`);
+  process.exit(1);
+}
+
 const VIEWPORT = script.viewport || { w: 1280, h: 800 };
 
 // Narration manifest (pre-capture synthesis). Optional: without it the demo
@@ -58,8 +74,6 @@ if (narration && narration.clips.length !== captionedBeatCount) {
   process.exit(1);
 }
 
-// The voice starts just before its zoom lands, then speaks over the hold.
-const VOICE_LEAD = 0.4;
 // Breathing room after a line ends before the next beat's motion begins.
 const LINE_GAP = 0.35;
 
@@ -69,14 +83,6 @@ function estimateSpokenSeconds(text) {
   const words = String(text).trim().split(/\s+/).length;
   return Math.min(10, Math.max(1.8, words / 2.8));
 }
-
-// Between focus beats the camera pulls back only partially; pogo-ing to full
-// wide between every zoom reads as jumpy. Kept well below the renderer's
-// cap on zoom (the largest scale that keeps the whole window on the stage,
-// about 1.16 for a wide demo with captions) so a following focus beat still
-// reads as a distinct push-in rather than matching the glide. The final
-// reset goes fully wide.
-const GLIDE_SCALE = 1.06;
 
 const ab = (...args) =>
   execFileSync(AB, args, {
@@ -116,8 +122,6 @@ const timeline = {
   video: { path: 'recording.mp4', width: VIEWPORT.w, height: VIEWPORT.h },
   fps: 30,
   durationSeconds: 0,
-  scaleKeys: [{ t: 0, v: 1 }],
-  focalKeys: [{ t: 0, v: { x: 0.5, y: 0.5 } }],
   cursorKeys: [{ t: 0, v: { x: 0.5, y: 1.1 } }],
   clicks: [],
   captions: [],
@@ -126,7 +130,6 @@ const timeline = {
   ...(script.captionStyle ? { captionStyle: script.captionStyle } : {}),
 };
 
-let cur = { scale: 1, focal: { x: 0.5, y: 0.5 } };
 // Narrative pacing state: which line is next, and when the previous one
 // finishes, so consecutive lines never overlap even if beats land early.
 let lineIndex = 0;
@@ -136,8 +139,6 @@ let prevLineEnd = 0;
 // synthetic cursor would drift toward the next target through every wait,
 // hold, and scroll in between while the real mouse is stationary.
 let curCursor = { x: 0.5, y: 1.1 };
-const pushScale = (t, v) => timeline.scaleKeys.push({ t, v });
-const pushFocal = (t, v) => timeline.focalKeys.push({ t, v });
 const pushCursorMove = (startT, endT, target) => {
   timeline.cursorKeys.push({ t: startT, v: curCursor });
   timeline.cursorKeys.push({ t: endT, v: target });
@@ -222,59 +223,6 @@ async function run() {
       continue;
     }
 
-    if (beat.a === 'focus') {
-      const c = centerNorm(rect(beat.sel));
-      const start = now();
-      pushScale(start, cur.scale);
-      pushFocal(start, cur.focal);
-      // Real hover so the app's hover state shows under the synthetic cursor.
-      ab(
-        'mouse',
-        'move',
-        String((c.x * VIEWPORT.w) | 0),
-        String((c.y * VIEWPORT.h) | 0),
-      );
-      sleep(beat.moveMs ?? 700); // pace the glide for the eased cursor
-      const end = now();
-      pushScale(end, beat.scale ?? 1.5);
-      pushFocal(end, c);
-      pushCursorMove(start, end, c);
-      cur = { scale: beat.scale ?? 1.5, focal: c };
-
-      if (beat.caption) {
-        // The narrative drives the hold: the line starts just before the
-        // zoom lands and the beat holds until it has been fully spoken,
-        // plus breathing room. Script holdMs acts as a minimum only.
-        const lineSeconds = narration
-          ? narration.clips[lineIndex].durationSeconds
-          : estimateSpokenSeconds(beat.caption);
-        const lineStart =
-          Math.round(Math.max(0.1, prevLineEnd + 0.1, end - VOICE_LEAD) * 1000) /
-          1000;
-        const lineEnd = lineStart + lineSeconds;
-        prevLineEnd = lineEnd;
-
-        timeline.captions.push({
-          start: lineStart,
-          end: Math.round((lineEnd + 0.25) * 1000) / 1000,
-          text: beat.caption,
-        });
-        if (narration) {
-          narration.clips[lineIndex].startSeconds = lineStart;
-        }
-        lineIndex += 1;
-
-        const holdSeconds = Math.max(
-          (beat.holdMs ?? 900) / 1000,
-          lineEnd + LINE_GAP - now(),
-        );
-        sleep(holdSeconds * 1000);
-      } else {
-        sleep(beat.holdMs ?? 900);
-      }
-      continue;
-    }
-
     if (beat.a === 'click') {
       const c = centerNorm(rect(beat.sel));
       const t = now();
@@ -305,33 +253,7 @@ async function run() {
       continue;
     }
 
-    if (beat.a === 'reset') {
-      // Partial pull-back keeps the camera alive between beats; `full: true`
-      // (or the closing reset) returns to wide.
-      const target = beat.full ? 1 : GLIDE_SCALE;
-      const start = now();
-      pushScale(start, cur.scale);
-      pushFocal(start, cur.focal);
-      sleep(beat.ms ?? 600);
-      const end = now();
-      pushScale(end, target);
-      pushFocal(end, { x: 0.5, y: 0.5 });
-      cur = { scale: target, focal: { x: 0.5, y: 0.5 } };
-      continue;
-    }
-
     throw new Error(`unknown beat action: ${beat.a}`);
-  }
-
-  // Close on a full wide shot even when the script forgot a final reset.
-  if (cur.scale !== 1) {
-    const start = now();
-    pushScale(start, cur.scale);
-    pushFocal(start, cur.focal);
-    sleep(600);
-    const end = now();
-    pushScale(end, 1);
-    pushFocal(end, { x: 0.5, y: 0.5 });
   }
 
   timeline.durationSeconds = now();
@@ -395,7 +317,7 @@ async function run() {
 
   writeFileSync(`${OUT_DIR}/timeline.json`, JSON.stringify(timeline, null, 2));
   if (narration) {
-    // Clip start times are now stamped at the moments their zooms landed;
+    // Clip start times are now stamped at the moments their visuals settled;
     // this manifest plus the vo/ mp3s next to the script is everything the
     // renderer needs.
     writeFileSync(
