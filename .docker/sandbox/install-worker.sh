@@ -338,19 +338,32 @@ ensure_node_pty() {
 
 # The worker's detached process manager requires pm2. Worker Docker images
 # bundle it at /usr/local/bin/pm2; bring-your-own images (for example Box)
-# ship without it, so install it next to node-pty and expose a launcher on
-# the path the worker resolves first.
+# ship without it. Install into a dedicated prefix: --no-save packages in the
+# shared $DATA_DIR prefix get pruned by later npm installs there (the worker
+# installs its own runtime deps into $DATA_DIR), which silently broke the
+# launcher wrapper. Validate by executing, not by file existence, so a
+# surviving wrapper with a missing target gets repaired on the next install.
+pm2_works() {
+  "$1" --version >/dev/null 2>&1
+}
+
 ensure_pm2() {
-  if [ -x "/usr/local/bin/pm2" ] || command -v pm2 >/dev/null 2>&1; then
+  if [ -x "/usr/local/bin/pm2" ] && pm2_works /usr/local/bin/pm2; then
+    echo "pm2 already available"
+    return 0
+  fi
+  if command -v pm2 >/dev/null 2>&1 && pm2_works "$(command -v pm2)"; then
     echo "pm2 already available"
     return 0
   fi
 
-  echo "pm2 missing; installing..."
+  echo "pm2 missing or broken; installing..."
   ensure_data_dir || return 1
-  npm install --prefix "$DATA_DIR" --no-save --no-package-lock pm2 || return 1
+  local pm2_prefix="$DATA_DIR/roomote-pm2"
+  mkdir -p "$pm2_prefix" || return 1
+  npm install --prefix "$pm2_prefix" --no-save --no-package-lock pm2 || return 1
 
-  local pm2_entry="$DATA_DIR/node_modules/pm2/bin/pm2"
+  local pm2_entry="$pm2_prefix/node_modules/pm2/bin/pm2"
   if [ ! -f "$pm2_entry" ]; then
     echo "Error: pm2 install completed but $pm2_entry is missing"
     return 1
@@ -371,6 +384,11 @@ exec node $pm2_entry \"\$@\""
     cli_path="$HOME/.local/bin/pm2"
     printf "%s\n" "$cli_contents" > "$cli_path"
     chmod +x "$cli_path"
+  fi
+
+  if ! pm2_works "$cli_path"; then
+    echo "Error: pm2 installed at $cli_path but failed to run"
+    return 1
   fi
 
   echo "pm2 installed at $cli_path"
