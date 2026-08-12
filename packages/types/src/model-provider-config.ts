@@ -344,7 +344,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-luna': 'vercel/openai/gpt-5.6-luna',
       'gemini-3-6-flash': 'vercel/google/gemini-3.6-flash',
       'deepseek-v4-flash-0731': 'vercel/deepseek/deepseek-v4-flash-0731',
-      'deepseek-v4-pro': 'vercel/deepseek/deepseek-v4-pro',
+      'deepseek-v4-pro-0813': 'vercel/deepseek/deepseek-v4-pro-0813',
       'glm-5-2': 'vercel/zai/glm-5.2',
       'kimi-k3': 'vercel/moonshotai/kimi-k3',
       'kimi-k2-7-code': 'vercel/moonshotai/kimi-k2.7-code',
@@ -399,7 +399,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
       'deepseek-v4-flash-0731': 'baseten/deepseek-ai/DeepSeek-V4-Flash-0731',
-      'deepseek-v4-pro': 'baseten/deepseek-ai/DeepSeek-V4-Pro',
+      'deepseek-v4-pro-0813': 'baseten/deepseek-ai/DeepSeek-V4-Pro',
       'glm-5-2': 'baseten/zai-org/GLM-5.2',
       'kimi-k3': 'baseten/moonshotai/Kimi-K3',
       'kimi-k2-7-code': 'baseten/moonshotai/Kimi-K2.7-Code',
@@ -415,7 +415,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'togetherai/deepseek-ai/DeepSeek-V4-Pro',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
-      'deepseek-v4-pro': 'togetherai/deepseek-ai/DeepSeek-V4-Pro',
+      'deepseek-v4-pro-0813': 'togetherai/deepseek-ai/DeepSeek-V4-Pro',
       'glm-5-2': 'togetherai/zai-org/GLM-5.2',
       'kimi-k3': 'togetherai/moonshotai/Kimi-K3',
       'kimi-k2-7-code': 'togetherai/moonshotai/Kimi-K2.7-Code',
@@ -593,7 +593,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gemini-3-6-flash': 'opencode/gemini-3.6-flash',
       // Zen serves the dated Flash release under this stable model alias.
       'deepseek-v4-flash-0731': 'opencode/deepseek-v4-flash',
-      'deepseek-v4-pro': 'opencode/deepseek-v4-pro',
+      'deepseek-v4-pro-0813': 'opencode/deepseek-v4-pro',
       'glm-5-2': 'opencode/glm-5.2',
       'kimi-k3': 'opencode/kimi-k3',
       'kimi-k2-7-code': 'opencode/kimi-k2.7-code',
@@ -627,7 +627,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     // recommendation list are suggested here.
     suggestedTaskModels: mapRecommendedTaskModels({
       'deepseek-v4-flash-0731': 'opencode-go/deepseek-v4-flash',
-      'deepseek-v4-pro': 'opencode-go/deepseek-v4-pro',
+      'deepseek-v4-pro-0813': 'opencode-go/deepseek-v4-pro',
       'glm-5-2': 'opencode-go/glm-5.2',
       'gpt-5-6-luna': 'opencode-go/gpt-5.6-luna',
       'grok-4-6': 'opencode-go/grok-4.6',
