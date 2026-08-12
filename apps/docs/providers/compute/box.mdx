@@ -36,7 +36,8 @@ Optional settings:
 BOX_API_BASE_URL=https://...
 # small, default, or large
 BOX_MACHINE_TYPE=default
-# Active sandbox timeout in milliseconds
+# Active sandbox timeout in milliseconds. Defaults to 2 hours, the Box
+# free-trial maximum; paid accounts can set a higher value.
 BOX_TIMEOUT_MS=...
 # Standby retention policy; 0 disables retained task sandboxes
 BOX_STANDBY_MAX_COUNT=...

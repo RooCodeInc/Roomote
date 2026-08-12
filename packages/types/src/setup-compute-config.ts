@@ -558,7 +558,8 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
         category: 'infrastructure',
         advanced: true,
         input: { type: 'number', min: 1, step: 1 },
-        helpText: 'Leave blank to use the Box service default.',
+        helpText:
+          'Defaults to 2 hours, the free-trial maximum. Paid Box accounts can set a higher value.',
       },
       {
         envVarName: 'BOX_STANDBY_MAX_COUNT',

@@ -261,7 +261,7 @@ as per-task auth tokens or workspace paths.
 | `BOX_API_KEY`                        | Box               | Box API key. Can also be saved from **Settings > Sandboxes**.                                                                             |
 | `BOX_API_BASE_URL`                   | Optional          | Box-compatible API base URL override.                                                                                                    |
 | `BOX_MACHINE_TYPE`                   | Optional          | Box machine type override: `small`, `default`, or `large`.                                                                               |
-| `BOX_TIMEOUT_MS`                     | Optional          | Active Box sandbox timeout in milliseconds.                                                                                              |
+| `BOX_TIMEOUT_MS`                     | Optional          | Active Box sandbox timeout in milliseconds. Defaults to 2 hours (the Box free-trial maximum).                                            |
 | `BOX_STANDBY_MAX_COUNT`              | Optional          | Maximum stopped Box task sandboxes retained for resume; `0` disables retention.                                                         |
 | `BOX_STANDBY_MAX_AGE_HOURS`          | Optional          | Maximum age in hours of a retained Box task sandbox.                                                                                     |
 | `AZURE_SUBSCRIPTION_ID`              | Azure             | Azure subscription ID hosting the sandbox group. Can also be saved from **Settings > Sandboxes**.                                          |

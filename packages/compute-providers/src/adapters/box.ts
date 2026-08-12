@@ -38,6 +38,14 @@ import type {
 } from '../types';
 
 export const DEFAULT_BOX_API_BASE_URL = 'https://ascii.dev/api/box/v1';
+/**
+ * Default box TTL when BOX_TIMEOUT_MS is not configured. Free-trial Box
+ * accounts reject creates with ttlSeconds above 2 hours
+ * (`trial_auto_stop_required`), so default to the largest value that works
+ * everywhere; paid accounts can raise it via BOX_TIMEOUT_MS. The worker
+ * snapshots to standby just before this deadline, so tasks resume cleanly.
+ */
+export const DEFAULT_BOX_TIMEOUT_MS = 2 * 60 * 60 * 1_000;
 export const BOX_CREATE_METADATA_KEYS = {
   ttlSeconds: 'box.ttlSeconds',
   type: 'box.type',

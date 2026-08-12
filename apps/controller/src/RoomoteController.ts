@@ -13,6 +13,8 @@ import {
   resolveComputeProviderEnvValues,
 } from '@roomote/db/server';
 
+import { DEFAULT_BOX_TIMEOUT_MS } from '@roomote/compute-providers';
+
 import { BaseController } from './BaseController';
 import {
   cleanupStaleDockerSandboxes,
@@ -315,10 +317,12 @@ export class RoomoteController extends BaseController {
         }
 
         const configuredTimeoutMs = Number(resolvedEnv.BOX_TIMEOUT_MS);
-        const boxTimeoutMs =
+        const boxTimeoutMs = Math.min(
+          timeoutMs,
           Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0
-            ? Math.min(timeoutMs, configuredTimeoutMs)
-            : timeoutMs;
+            ? configuredTimeoutMs
+            : DEFAULT_BOX_TIMEOUT_MS,
+        );
         const machineType = resolvedEnv.BOX_MACHINE_TYPE;
 
         await spawnBoxWorker(taskRun, authToken, {
