@@ -2,8 +2,6 @@
   "video": { "path": "recording.mp4", "width": 1280, "height": 800 },
   "fps": 30,
   "durationSeconds": 1,
-  "scaleKeys": [{ "t": 0, "v": 1 }],
-  "focalKeys": [{ "t": 0, "v": { "x": 0.5, "y": 0.5 } }],
   "cursorKeys": [{ "t": 0, "v": { "x": 0.5, "y": 1.1 } }],
   "clicks": [],
   "captions": []
