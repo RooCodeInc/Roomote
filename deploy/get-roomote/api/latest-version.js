@@ -1,4 +1,4 @@
-const { REPO, githubHeaders } = require('./_github');
+const { REPO, fetchGitHub } = require('./_github');
 
 // Newest-first by numeric version parts; a plain release outranks a
 // pre-release suffix on the same version (v1.2.3 > v1.2.3-rc1). GitHub's
@@ -19,25 +19,21 @@ function compareTagsDesc(a, b) {
 // resolve_latest_version fallback order in deploy/install.sh: the latest
 // GitHub release first, then the newest v* tag.
 module.exports = async (req, res) => {
-  const headers = { ...githubHeaders(), accept: 'application/vnd.github+json' };
+  const headers = { accept: 'application/vnd.github+json' };
   let tag = '';
 
-  const release = await fetch(
+  const release = await fetchGitHub(
     `https://api.github.com/repos/${REPO}/releases/latest`,
-    {
-      headers,
-    },
+    headers,
   );
   if (release.ok) {
     tag = (await release.json()).tag_name || '';
   }
 
   if (!tag) {
-    const tags = await fetch(
+    const tags = await fetchGitHub(
       `https://api.github.com/repos/${REPO}/tags?per_page=100`,
-      {
-        headers,
-      },
+      headers,
     );
     if (tags.ok) {
       tag =

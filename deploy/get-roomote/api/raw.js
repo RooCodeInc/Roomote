@@ -1,8 +1,6 @@
 const { fetchRawFile, sendTextFile } = require('./_github');
 
-// Only the files the installer and the roomote host CLI fetch are proxied,
-// so a (still private) source repo does not become readable path-by-path
-// through this endpoint.
+// Only proxy the deployment files used by the installer and roomote host CLI.
 const ALLOWED_PATHS = new Set([
   'deploy/install.sh',
   'deploy/compose/docker-compose.prod.yml',
