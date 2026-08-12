@@ -25,6 +25,7 @@ export type IntegrationItem = {
   description: string;
   icon: ReactNode;
   enabled: boolean;
+  connected?: boolean;
   configured?: boolean;
   needsConfiguration?: boolean;
   isMcpBased: boolean;
@@ -229,11 +230,15 @@ export function IntegrationSection({
 }
 
 export function splitIntegrationItems<
-  T extends { enabled: boolean; configured?: boolean },
+  T extends { enabled: boolean; connected?: boolean; configured?: boolean },
 >(items: T[]) {
   return {
-    installed: items.filter((item) => item.enabled),
-    configured: items.filter((item) => !item.enabled && item.configured),
-    available: items.filter((item) => !item.enabled && !item.configured),
+    installed: items.filter((item) => item.connected ?? item.enabled),
+    configured: items.filter(
+      (item) => !(item.connected ?? item.enabled) && item.configured,
+    ),
+    available: items.filter(
+      (item) => !(item.connected ?? item.enabled) && !item.configured,
+    ),
   };
 }
