@@ -69,6 +69,12 @@ export type SaveVercelConnectionInput = z.infer<
   typeof saveVercelConnectionSchema
 >;
 
+export const saveXConnectionSchema = z.object({
+  bearerToken: z.string().transform((value) => value.trim()),
+});
+
+export type SaveXConnectionInput = z.infer<typeof saveXConnectionSchema>;
+
 export const saveGrafanaConnectionSchema = z.object({
   baseUrl: z
     .string()

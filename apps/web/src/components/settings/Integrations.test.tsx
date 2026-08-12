@@ -50,6 +50,9 @@ const state = vi.hoisted(() => ({
     authStatus?: string | null;
     defaultTeamIdOrSlug?: string;
   },
+  xConnection: null as null | {
+    authStatus?: string | null;
+  },
   isAdmin: true,
   snowflakeConnection: null as null | {
     authStatus?: string | null;
@@ -103,6 +106,7 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     saveGrafanaConnection: vi.fn(),
     saveSnowflakeConnection: vi.fn(),
     saveVercelConnection: vi.fn(),
+    saveXConnection: vi.fn(),
     saveLinearOauthSetup: vi.fn(),
     removeLinearOauthSetup: vi.fn(),
   },
@@ -289,6 +293,14 @@ vi.mock('@/hooks/mcp-connections', () => ({
   }),
   useVercelConnection: () => ({
     data: state.vercelConnection,
+    isPending: false,
+  }),
+  useSaveXConnection: () => ({
+    isPending: false,
+    mutate: mutations.saveXConnection,
+  }),
+  useXConnection: () => ({
+    data: state.xConnection,
     isPending: false,
   }),
 }));
@@ -479,6 +491,7 @@ describe('Integrations settings', () => {
     state.granolaConnection = null;
     state.grafanaConnection = null;
     state.vercelConnection = null;
+    state.xConnection = null;
     state.isAdmin = true;
     state.snowflakeConnection = null;
     state.searchParams = '';
@@ -850,6 +863,7 @@ describe('Integrations settings', () => {
       'Supabase',
       'Supermemory',
       'Vercel',
+      'X',
       'Zero',
     ]);
     expect(
@@ -1406,9 +1420,12 @@ describe('Integrations settings', () => {
     expect(accessTokenInput.tagName).toBe('INPUT');
     expect(
       screen.getByText(
-        'Works with both Personal Access Tokens and Service Account tokens. Generate a PAT in Asana at https://app.asana.com/0/my-apps.',
+        /Works with both Personal Access Tokens and Service Account tokens/,
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'app.asana.com/0/my-apps' }),
+    ).toHaveAttribute('href', 'https://app.asana.com/0/my-apps');
   });
 
   it('opens the Grafana credential dialog from the integrations page', () => {
@@ -1762,6 +1779,65 @@ describe('Integrations settings', () => {
     expect(
       screen.getByLabelText('Default Team ID or Slug (optional)'),
     ).toHaveValue('team_123');
+    expect(
+      screen.getByText('Leave blank to keep the existing token.'),
+    ).toBeInTheDocument();
+  });
+
+  it('submits an X bearer token from the dialog', () => {
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configure X' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Connect X' }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'console.x.com' })).toHaveAttribute(
+      'href',
+      'https://console.x.com/',
+    );
+
+    fireEvent.change(screen.getByLabelText('X App-only Bearer Token'), {
+      target: { value: 'AAAA-x-app-only-token' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect X' }));
+
+    expect(mutations.saveXConnection).toHaveBeenCalledWith(
+      {
+        bearerToken: 'AAAA-x-app-only-token',
+      },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+  });
+
+  it('shows X connected controls and supports editing', () => {
+    state.deploymentEnablements = [{ mcpId: 'x', enabled: true }];
+    state.userConnections = [
+      {
+        mcpId: 'x',
+        authStatus: 'authenticated',
+      },
+    ];
+    state.xConnection = {
+      authStatus: 'authenticated',
+    };
+
+    render(<Integrations />);
+
+    expect(
+      screen.getByRole('button', { name: 'Edit X connection' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Disconnect X' }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit X connection' }));
+
+    expect(screen.getByRole('heading', { name: 'Edit X' })).toBeInTheDocument();
+    expect(screen.getByLabelText('X App-only Bearer Token')).toHaveValue('');
     expect(
       screen.getByText('Leave blank to keep the existing token.'),
     ).toBeInTheDocument();

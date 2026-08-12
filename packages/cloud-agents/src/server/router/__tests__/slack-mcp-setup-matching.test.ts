@@ -54,6 +54,32 @@ describe('matchSlackMcpSetupService', () => {
     });
   });
 
+  describe('x', () => {
+    it.each([
+      'https://x.com/roomote/status/1234567890123456789',
+      'https://www.x.com/someone/status/42',
+      'https://twitter.com/roomote/status/1234567890123456789',
+      'https://x.com/search?q=roomote',
+      'https://x.com/explore',
+      'https://x.com/i/lists/123456',
+      'https://x.com/i/communities/98765',
+    ])('matches the X app surface %s', (url) => {
+      expect(matchServiceIdForUrl(url)).toBe('x');
+    });
+
+    it.each([
+      'https://x.com/',
+      'https://x.com/roomote',
+      'https://x.com/tos',
+      'https://developer.x.com/en/docs/x-api',
+      'https://docs.x.com/tools/mcp',
+      'https://api.x.com/mcp',
+      'https://twitter.com/home',
+    ])('does not match the non-content X page %s', (url) => {
+      expect(matchServiceIdForUrl(url)).toBeNull();
+    });
+  });
+
   describe('other services stay unaffected', () => {
     it.each([
       ['https://linear.app/acme/issue/OPS-123', 'linear'],

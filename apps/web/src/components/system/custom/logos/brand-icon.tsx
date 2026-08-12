@@ -28,6 +28,7 @@ import {
   siSupabase,
   siTelegram,
   siVercel,
+  siX,
   type SimpleIcon,
 } from 'simple-icons';
 
@@ -65,6 +66,7 @@ const SIMPLE_ICONS: Record<string, SimpleIcon> = {
   telegram: siTelegram,
   sentry: siSentry,
   vercel: siVercel,
+  x: siX,
 };
 
 function NeonIcon({

@@ -21,4 +21,6 @@ export { useSnowflakeConnection } from './useSnowflakeConnection';
 export { useGrafanaConnection } from './useGrafanaConnection';
 export { useSaveVercelConnection } from './useSaveVercelConnection';
 export { useVercelConnection } from './useVercelConnection';
+export { useSaveXConnection } from './useSaveXConnection';
+export { useXConnection } from './useXConnection';
 export { useSetDisabledMcpTools } from './useSetDisabledMcpTools';

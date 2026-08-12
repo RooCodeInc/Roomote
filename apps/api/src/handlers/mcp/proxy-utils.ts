@@ -459,6 +459,65 @@ function filterToolsListPayload(
   };
 }
 
+/**
+ * Extract the single JSON-RPC response carried by an SSE-framed MCP reply.
+ *
+ * Streamable HTTP MCP servers may answer a POST request with
+ * `content-type: text/event-stream`, delivering the JSON-RPC response as one
+ * `data:` frame (optionally preceded by `notifications/progress` frames, which
+ * carry no `id`). This returns the frame whose `id` matches the request and
+ * that carries a `result` or `error`, so progress notifications are skipped.
+ * Returns `null` when no matching response frame is present.
+ */
+function extractSseJsonRpcResponse(
+  bodyText: string,
+  expectedId: JsonRpcRequestId,
+): unknown | null {
+  for (const chunk of bodyText.split(/\r?\n\r?\n/)) {
+    const dataText = chunk
+      .split(/\r?\n/)
+      .flatMap((line) =>
+        line.startsWith('data:')
+          ? [line.slice('data:'.length).trimStart()]
+          : [],
+      )
+      .join('\n')
+      .trim();
+
+    if (dataText.length === 0) {
+      continue;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(dataText);
+    } catch {
+      continue;
+    }
+
+    if (!parsed || typeof parsed !== 'object') {
+      continue;
+    }
+
+    const message = parsed as {
+      id?: unknown;
+      result?: unknown;
+      error?: unknown;
+    };
+    const hasResponsePayload = 'result' in message || 'error' in message;
+    const idMatches =
+      expectedId === null
+        ? message.id === undefined || message.id === null
+        : message.id === expectedId;
+
+    if (hasResponsePayload && idMatches) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
 class RequestBodyTooLargeError extends Error {
   constructor(readonly observedBytes: number) {
     super('Request body exceeds the configured limit');
@@ -916,6 +975,42 @@ export function createMcpProxy(config: McpProxyConfig) {
           status: upstreamResponse.status,
           headers: buildProxyResponseHeaders(upstreamResponse.headers),
         });
+      }
+
+      // Some Streamable HTTP MCP servers (e.g. X) answer a POST request with an
+      // SSE stream that carries the single JSON-RPC response as one `data:`
+      // frame, then close. Not every MCP client consumes an SSE-framed reply to
+      // a POST — OpenCode, for one, hangs until its request timeout and cancels
+      // the call even though the upstream already returned the result in
+      // milliseconds. Normalize such single-response SSE replies to a plain
+      // JSON body (the same shape tools/list replies are re-serialized into
+      // above) so every client can read them. Requests without an id are
+      // notifications with no response, and non-single-frame streams that carry
+      // no matching response fall through to the raw stream unchanged.
+      if (
+        method === 'POST' &&
+        upstreamResponse.ok &&
+        contentType?.includes('text/event-stream') &&
+        getJsonRpcRequestId(parsedBody) !== null &&
+        !Array.isArray(parsedBody)
+      ) {
+        try {
+          const response = extractSseJsonRpcResponse(
+            await upstreamResponse.clone().text(),
+            getJsonRpcRequestId(parsedBody),
+          );
+          if (response) {
+            const headers = buildProxyResponseHeaders(upstreamResponse.headers);
+            headers.set('content-type', 'application/json');
+
+            return new Response(JSON.stringify(response), {
+              status: upstreamResponse.status,
+              headers,
+            });
+          }
+        } catch {
+          // Fall through to streaming the raw upstream response.
+        }
       }
 
       return new Response(

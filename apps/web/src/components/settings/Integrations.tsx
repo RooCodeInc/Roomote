@@ -34,10 +34,12 @@ import {
   useSaveElevenLabsConnection,
   useSaveSnowflakeConnection,
   useSaveVercelConnection,
+  useSaveXConnection,
   useSetDeploymentMcpEnabled,
   useSnowflakeConnection,
   useUserMcpConnections,
   useVercelConnection,
+  useXConnection,
 } from '@/hooks/mcp-connections';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import {
@@ -53,6 +55,7 @@ import {
   saveElevenLabsConnectionSchema,
   saveSnowflakeConnectionSchema,
   saveVercelConnectionSchema,
+  saveXConnectionSchema,
 } from '@/types';
 
 import {
@@ -119,6 +122,7 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to save shared memories and recall context from earlier tasks.',
   vercel:
     'Roomote will be able to inspect Vercel teams, projects, deployments, logs, and domain availability.',
+  x: 'Roomote will be able to search public X posts and look up users, trends, and news. The app-only token is read-only; posting and other account actions stay unavailable.',
   zero: 'Roomote will be able to authenticate the workspace Zero connection so agents can discover and pay for external capabilities.',
 };
 
@@ -198,6 +202,10 @@ type VercelFormState = {
   defaultTeamIdOrSlug: string;
 };
 
+type XFormState = {
+  bearerToken: string;
+};
+
 type VercelConnectionData = {
   authStatus?: 'pending' | 'authenticated' | 'error' | null;
   defaultTeamIdOrSlug?: string;
@@ -261,6 +269,26 @@ function buildEmptyVercelForm(): VercelFormState {
   return {
     accessToken: '',
     defaultTeamIdOrSlug: '',
+  };
+}
+
+function buildEmptyXForm(): XFormState {
+  return {
+    bearerToken: '',
+  };
+}
+
+function getXFieldErrors(
+  result: ReturnType<typeof saveXConnectionSchema.safeParse>,
+): Partial<Record<keyof XFormState, string[]>> {
+  if (result.success) {
+    return {};
+  }
+
+  const fieldErrors = result.error.flatten().fieldErrors;
+
+  return {
+    bearerToken: fieldErrors.bearerToken,
   };
 }
 
@@ -782,7 +810,16 @@ function AsanaConnectionFields({
         />
         <p className="text-sm text-muted-foreground">
           Works with both Personal Access Tokens and Service Account tokens.
-          Generate a PAT in Asana at https://app.asana.com/0/my-apps.
+          Generate a PAT in Asana at{' '}
+          <a
+            href="https://app.asana.com/0/my-apps"
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary underline hover:no-underline"
+          >
+            app.asana.com/0/my-apps
+          </a>
+          .
         </p>
         {allowBlankToken ? (
           <p className="text-sm text-muted-foreground">
@@ -792,6 +829,71 @@ function AsanaConnectionFields({
         {fieldErrors.accessToken ? (
           <p className="text-sm text-destructive">
             {fieldErrors.accessToken[0]}
+          </p>
+        ) : null}
+      </div>
+      {formError ? (
+        <p className="text-sm text-destructive">{formError}</p>
+      ) : null}
+    </>
+  );
+}
+
+function XConnectionFields({
+  form,
+  fieldErrors,
+  formError,
+  allowBlankToken,
+  onFieldChange,
+}: {
+  form: XFormState;
+  fieldErrors: Partial<Record<keyof XFormState, string[]>>;
+  formError: string | null;
+  allowBlankToken: boolean;
+  onFieldChange: (field: keyof XFormState, value: string) => void;
+}) {
+  const fieldClassName =
+    'mt-2 w-full border-border/70 bg-background data-[invalid=true]:border-destructive';
+
+  return (
+    <>
+      <div className="space-y-2">
+        <Label htmlFor="x-bearer-token">X App-only Bearer Token</Label>
+        <Input
+          id="x-bearer-token"
+          type="password"
+          placeholder="AAAAAAAAAAAAAAAAAAAAA..."
+          value={form.bearerToken}
+          onChange={(event) => onFieldChange('bearerToken', event.target.value)}
+          data-invalid={fieldErrors.bearerToken ? 'true' : undefined}
+          className={fieldClassName}
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          data-1p-ignore
+        />
+        <p className="text-sm text-muted-foreground">
+          Generate it at{' '}
+          <a
+            href="https://console.x.com/"
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary underline hover:no-underline"
+          >
+            console.x.com
+          </a>{' '}
+          under Apps, in your app&apos;s Keys and tokens tab. App-only bearer
+          tokens give read-only access to public X data; posting and other
+          account actions stay unavailable. Access depends on your X API plan.
+        </p>
+        {allowBlankToken ? (
+          <p className="text-sm text-muted-foreground">
+            Leave blank to keep the existing token.
+          </p>
+        ) : null}
+        {fieldErrors.bearerToken ? (
+          <p className="text-sm text-destructive">
+            {fieldErrors.bearerToken[0]}
           </p>
         ) : null}
       </div>
@@ -1176,6 +1278,12 @@ export function Integrations() {
     Partial<Record<keyof VercelFormState, string[]>>
   >({});
   const [vercelFormError, setVercelFormError] = useState<string | null>(null);
+  const [isXDialogOpen, setIsXDialogOpen] = useState(false);
+  const [xForm, setXForm] = useState<XFormState>(buildEmptyXForm());
+  const [xFieldErrors, setXFieldErrors] = useState<
+    Partial<Record<keyof XFormState, string[]>>
+  >({});
+  const [xFormError, setXFormError] = useState<string | null>(null);
   const [toolDialogState, setToolDialogState] = useState<{
     mcpId: string;
     integrationName: string;
@@ -1207,6 +1315,7 @@ export function Integrations() {
   const saveElevenLabsConnection = useSaveElevenLabsConnection();
   const saveSnowflakeConnection = useSaveSnowflakeConnection();
   const saveVercelConnection = useSaveVercelConnection();
+  const saveXConnection = useSaveXConnection();
   const asanaConnectionSummary = useMemo(() => {
     const connection = (userMcpConnections.data ?? []).find(
       (entry) => entry.mcpId === 'asana',
@@ -1278,6 +1387,17 @@ export function Integrations() {
     vercelConnectionSummary?.authStatus === 'authenticated';
   const vercelConnection = useVercelConnection(
     isAdmin && (isVercelConnected || isVercelDialogOpen),
+  );
+  const xConnectionSummary = useMemo(() => {
+    const connection = (userMcpConnections.data ?? []).find(
+      (entry) => entry.mcpId === 'x',
+    );
+
+    return connection;
+  }, [userMcpConnections.data]);
+  const isXConnected = xConnectionSummary?.authStatus === 'authenticated';
+  const xConnection = useXConnection(
+    isAdmin && (isXConnected || isXDialogOpen),
   );
   const allowsBlankSnowflakePrivateKey =
     snowflakeConnection.data?.authMethod === 'key_pair';
@@ -1404,6 +1524,20 @@ export function Integrations() {
     vercelConnection.data,
     vercelConnection.isPending,
   ]);
+
+  useEffect(() => {
+    if (!isXDialogOpen) {
+      return;
+    }
+
+    if (xConnection.isPending && isXConnected) {
+      return;
+    }
+
+    setXFieldErrors({});
+    setXFormError(null);
+    setXForm(buildEmptyXForm());
+  }, [isXConnected, isXDialogOpen, xConnection.isPending]);
 
   const items = useMemo<IntegrationItem[]>(() => {
     const visibleMcpIntegrations = MCP_INTEGRATIONS;
@@ -1663,6 +1797,26 @@ export function Integrations() {
             });
           }
 
+          if (integration.id === 'x') {
+            return buildAdminConfiguredIntegrationItem({
+              integration,
+              connection: userConnectionMap.get(integration.id),
+              orgEnabled: orgEnablementMap.get(integration.id) ?? false,
+              highlightedIntegrationId,
+              savePending: saveXConnection.isPending,
+              disconnectPending: disconnectMcp.isPending,
+              disconnectingMcpId: disconnectMcp.variables?.mcpId,
+              dialogOpen: isXDialogOpen,
+              connectionPending: xConnection.isPending,
+              canConfigure: isAdmin,
+              canManageTools: isAdmin,
+              openDialog: () => setIsXDialogOpen(true),
+              openToolDialog: () => openMcpToolDialog(integration),
+              disconnectIntegration: () =>
+                disconnectAdminConfiguredIntegration(integration),
+            });
+          }
+
           const enabled = orgEnablementMap.get(integration.id) ?? false;
           const isDeploymentScoped =
             isDeploymentScopedMcpIntegration(integration);
@@ -1831,6 +1985,9 @@ export function Integrations() {
     isSnowflakeDialogOpen,
     vercelConnection.isPending,
     isVercelDialogOpen,
+    saveXConnection.isPending,
+    xConnection.isPending,
+    isXDialogOpen,
     highlightedIntegrationId,
     userMcpConnections.data,
   ]);
@@ -1979,6 +2136,67 @@ export function Integrations() {
       return { ...current, [field]: undefined };
     });
     setVercelFormError(null);
+  };
+
+  const handleXFieldChange = (field: keyof XFormState, value: string) => {
+    setXForm((current) => ({ ...current, [field]: value }));
+    setXFieldErrors((current) => {
+      if (!current[field]) {
+        return current;
+      }
+
+      return { ...current, [field]: undefined };
+    });
+    setXFormError(null);
+  };
+
+  const handleXDialogOpenChange = (open: boolean) => {
+    setIsXDialogOpen(open);
+
+    setXFieldErrors({});
+    setXFormError(null);
+
+    if (!open) {
+      return;
+    }
+
+    setXForm(buildEmptyXForm());
+  };
+
+  const handleXSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const parsed = saveXConnectionSchema.safeParse({
+      bearerToken: xForm.bearerToken,
+    });
+    if (!parsed.success) {
+      setXFieldErrors(getXFieldErrors(parsed));
+      return;
+    }
+
+    if (!isXConnected && parsed.data.bearerToken.length === 0) {
+      setXFieldErrors({
+        bearerToken: ['Bearer token is required'],
+      });
+      return;
+    }
+
+    setXFieldErrors({});
+    setXFormError(null);
+
+    saveXConnection.mutate(parsed.data, {
+      onSuccess: () => {
+        toast.success(
+          isXConnected
+            ? 'X connection updated for this deployment.'
+            : 'X connected for this deployment.',
+        );
+        handleXDialogOpenChange(false);
+      },
+      onError: (error) => {
+        setXFormError(error.message);
+      },
+    });
   };
 
   const handleAsanaDialogOpenChange = (open: boolean) => {
@@ -2477,6 +2695,29 @@ export function Integrations() {
           formError={vercelFormError}
           allowBlankToken={isVercelConnected}
           onFieldChange={handleVercelFieldChange}
+        />
+      </AdminConfiguredIntegrationDialog>
+      <AdminConfiguredIntegrationDialog
+        integrationName="X"
+        open={isXDialogOpen}
+        onOpenChange={handleXDialogOpenChange}
+        isEditing={isXConnected}
+        isPending={saveXConnection.isPending}
+        isLoading={isXConnected && xConnection.isPending}
+        description={
+          <>
+            Store the workspace X app-only bearer token for read-only Roomote
+            tasks. Secrets stay encrypted server-side.
+          </>
+        }
+        onSubmit={handleXSubmit}
+      >
+        <XConnectionFields
+          form={xForm}
+          fieldErrors={xFieldErrors}
+          formError={xFormError}
+          allowBlankToken={isXConnected}
+          onFieldChange={handleXFieldChange}
         />
       </AdminConfiguredIntegrationDialog>
       <DeepLinkEnableDialog

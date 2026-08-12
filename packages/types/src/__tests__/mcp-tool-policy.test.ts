@@ -32,6 +32,59 @@ describe('Better Stack MCP tool policy', () => {
   });
 });
 
+describe('X MCP tool policy', () => {
+  it('matches the snake_case tool names the hosted X server advertises', () => {
+    const allowedToolNames = getAllowedIntegrationMcpToolNames('x');
+
+    // The hosted X MCP server names tools in snake_case, not the camelCase
+    // OpenAPI operationIds. These are real names observed from tools/list.
+    expect(allowedToolNames).toEqual(
+      expect.arrayContaining([
+        'search_posts_all',
+        'search_posts_recent',
+        'get_posts_by_id',
+        'get_users_by_username',
+        'search_users',
+        'get_trends_by_woeid',
+        'get_news',
+      ]),
+    );
+    // Guard against a regression back to camelCase operationIds, which would
+    // silently filter out every upstream tool.
+    expect(allowedToolNames).not.toContain('searchPostsAll');
+    expect(allowedToolNames).not.toContain('getUsersByUsername');
+  });
+
+  it('excludes mutating and user-context tools the server also exposes', () => {
+    const allowedToolNames = getAllowedIntegrationMcpToolNames('x');
+
+    for (const excluded of [
+      'create_users_bookmark',
+      'delete_users_bookmark',
+      'get_users_bookmarks',
+      'get_users_mentions',
+      'get_users_timeline',
+    ]) {
+      expect(allowedToolNames).not.toContain(excluded);
+    }
+
+    expect(
+      filterMcpToolDefinitions(
+        [
+          { name: 'search_posts_all' },
+          { name: 'get_users_by_username' },
+          { name: 'create_users_bookmark' },
+          { name: 'get_users_timeline' },
+        ],
+        { allowedToolNames },
+      ),
+    ).toEqual([
+      { name: 'search_posts_all' },
+      { name: 'get_users_by_username' },
+    ]);
+  });
+});
+
 describe('monday.com MCP tool policy', () => {
   it('allows documented inspection tools and excludes mutating escape hatches', () => {
     const allowedToolNames = getAllowedIntegrationMcpToolNames('monday');

@@ -66,6 +66,7 @@ const SLACK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Your team will be able to launch and continue tasks from Slack threads.',
   vercel:
     'Roomote will be able to inspect Vercel teams, projects, deployments, logs, and domain availability.',
+  x: 'Roomote will be able to search public X posts and look up users, trends, and news through a read-only app token.',
   zero: 'Roomote will be able to authenticate the workspace Zero connection so agents can discover and pay for external capabilities.',
 };
 
