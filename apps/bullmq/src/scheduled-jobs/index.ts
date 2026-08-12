@@ -6,3 +6,4 @@ export { instancePingJob } from './instance-ping';
 export { licenseUsageSyncJob } from './license-usage-sync';
 export { webhookCleanupJob } from './webhook-cleanup';
 export { standbyRetentionJob } from './standby-retention';
+export { prReviewNotificationRepairJob } from './pr-review-notification-repair';

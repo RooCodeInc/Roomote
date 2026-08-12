@@ -208,6 +208,7 @@ export {
   requeuePendingPrReviewActivity,
   resolvePrReviewNotificationRoute,
   schedulePrReviewNotificationJob,
+  repairPendingPrReviewNotificationJobs,
   startPrReviewNotificationCycle,
   startPrReviewNotificationCycleInputSchema,
   type EnqueuePrReviewNotificationInput,

@@ -3,6 +3,8 @@ const mockRedisSet = vi.fn();
 const mockRedisGet = vi.fn();
 const mockRedisDel = vi.fn();
 const mockRedisEval = vi.fn();
+const mockRedisZrangebyscore = vi.fn();
+const mockRedisZrem = vi.fn();
 const mockQueueAdd = vi.fn();
 const mockMultiExec = vi.fn();
 const mockResolveSlackTaskRunRouting = vi.fn();
@@ -11,7 +13,15 @@ const multiCalls: Array<{ command: string; args: unknown[] }> = [];
 function createMultiMock() {
   const multi: Record<string, unknown> = {};
 
-  for (const command of ['rpush', 'expire', 'lrange', 'del']) {
+  for (const command of [
+    'rpush',
+    'expire',
+    'lrange',
+    'del',
+    'set',
+    'zadd',
+    'zrem',
+  ]) {
     multi[command] = (...args: unknown[]) => {
       multiCalls.push({ command, args });
       return multi;
@@ -48,6 +58,8 @@ vi.mock('@roomote/redis', () => ({
     set: (...args: unknown[]) => mockRedisSet(...args),
     del: (...args: unknown[]) => mockRedisDel(...args),
     eval: (...args: unknown[]) => mockRedisEval(...args),
+    zrangebyscore: (...args: unknown[]) => mockRedisZrangebyscore(...args),
+    zrem: (...args: unknown[]) => mockRedisZrem(...args),
     multi: () => createMultiMock(),
   }),
 }));
@@ -70,7 +82,9 @@ import {
   formatPrReviewActivityMessage,
   hasPrReviewNotificationThreadContext,
   resolvePrReviewNotificationRoute,
+  repairPendingPrReviewNotificationJobs,
   startPrReviewNotificationCycle,
+  schedulePrReviewNotificationJob,
 } from '../pr-review-notification';
 
 describe('enqueuePrReviewNotification', () => {
@@ -83,6 +97,8 @@ describe('enqueuePrReviewNotification', () => {
     mockRedisDel.mockResolvedValue(1);
     mockRedisGet.mockResolvedValue(null);
     mockRedisEval.mockResolvedValue(1);
+    mockRedisZrangebyscore.mockResolvedValue([]);
+    mockRedisZrem.mockResolvedValue(1);
     mockQueueAdd.mockResolvedValue(undefined);
     mockMultiExec.mockResolvedValue([]);
   });
@@ -264,6 +280,83 @@ describe('enqueuePrReviewNotification', () => {
     expect(mockRedisDel).toHaveBeenCalled();
   });
 
+  it('repairs a single pending event after its notification job fails to enqueue', async () => {
+    mockQueueAdd
+      .mockRejectedValueOnce(new Error('queue down'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(enqueuePrReviewNotification(baseInput)).rejects.toThrow(
+      'queue down',
+    );
+
+    const pendingWrites = multiCalls.filter((call) => call.command === 'rpush');
+    const recoveryWrite = multiCalls.find(
+      (call) =>
+        call.command === 'set' && String(call.args[0]).includes('repair'),
+    );
+    const recoveryMember = multiCalls.find((call) => call.command === 'zadd')
+      ?.args[3];
+
+    expect(pendingWrites).toHaveLength(1);
+    expect(mockQueueAdd).toHaveBeenCalledTimes(1);
+    expect(recoveryWrite).toBeDefined();
+    expect(recoveryMember).toEqual(expect.any(String));
+
+    mockRedisZrangebyscore.mockResolvedValue([recoveryMember]);
+    mockRedisGet.mockImplementation((key: string) =>
+      key === recoveryWrite?.args[0] ? recoveryWrite.args[1] : null,
+    );
+
+    await repairPendingPrReviewNotificationJobs();
+
+    expect(mockQueueAdd).toHaveBeenCalledTimes(2);
+    expect(pendingWrites).toHaveLength(1);
+  });
+
+  it('repairs a deferred notification after its replacement job fails to enqueue', async () => {
+    mockQueueAdd
+      .mockRejectedValueOnce(new Error('queue down'))
+      .mockResolvedValueOnce(undefined);
+
+    const request = {
+      taskId: 'task-1',
+      repository: 'owner/repo',
+      prNumber: 42,
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      deferrals: 1,
+    };
+
+    await expect(
+      schedulePrReviewNotificationJob({
+        request,
+        delayMs: PR_REVIEW_NOTIFICATION_DEBOUNCE_MS,
+      }),
+    ).rejects.toThrow('queue down');
+
+    const recoveryWrite = multiCalls.find(
+      (call) =>
+        call.command === 'set' && String(call.args[0]).includes('repair'),
+    );
+    const recoveryMember = multiCalls.find((call) => call.command === 'zadd')
+      ?.args[2];
+
+    expect(recoveryWrite).toBeDefined();
+    expect(recoveryMember).toEqual(expect.any(String));
+
+    mockRedisZrangebyscore.mockResolvedValue([recoveryMember]);
+    mockRedisGet.mockImplementation((key: string) =>
+      key === recoveryWrite?.args[0] ? recoveryWrite.args[1] : null,
+    );
+
+    await repairPendingPrReviewNotificationJobs();
+
+    expect(mockQueueAdd).toHaveBeenCalledTimes(2);
+    expect(mockQueueAdd).toHaveBeenLastCalledWith(
+      'notify-pr-review-activity',
+      request,
+    );
+  });
+
   it('suppresses late Roomote activity for a completed cycle', async () => {
     mockRedisGet.mockResolvedValue(
       JSON.stringify({
@@ -359,7 +452,7 @@ describe('enqueuePrReviewNotification', () => {
     expect(mockQueueAdd).toHaveBeenCalled();
   });
 
-  it('rolls back cycle completion if summary queueing fails', async () => {
+  it('keeps cycle completion while a failed summary enqueue awaits repair', async () => {
     mockRedisGet.mockResolvedValue(
       JSON.stringify({
         cycleId: 'cycle-1',
@@ -381,24 +474,16 @@ describe('enqueuePrReviewNotification', () => {
       }),
     ).rejects.toThrow('queue down');
 
-    expect(mockRedisDel).toHaveBeenCalledWith(
+    expect(mockRedisDel).not.toHaveBeenCalledWith(
       expect.stringContaining('review-cycle-completed'),
     );
-    expect(mockRedisEval).toHaveBeenCalledWith(
+    expect(mockRedisEval).not.toHaveBeenCalledWith(
       expect.stringContaining("redis.call('GET', KEYS[1]) == ARGV[1]"),
-      1,
-      expect.stringContaining('review-cycle:'),
-      expect.stringContaining('completed'),
-      expect.stringContaining('open'),
-      expect.any(Number),
-    );
-    expect(mockRedisEval).toHaveBeenCalledWith(
-      expect.stringContaining("redis.call('GET', KEYS[1]) == ARGV[1]"),
-      1,
-      expect.stringContaining('review-cycle-latest-completed'),
-      expect.stringContaining('completed'),
-      expect.stringContaining('open'),
-      expect.any(Number),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
     );
   });
 

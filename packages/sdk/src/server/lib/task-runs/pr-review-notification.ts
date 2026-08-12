@@ -49,6 +49,8 @@ export const PR_REVIEW_NOTIFICATION_MAX_DEFERRALS = 288;
 
 const PENDING_EVENTS_TTL_SECONDS = 24 * 60 * 60;
 const SCHEDULED_MARKER_TTL_BUFFER_SECONDS = 15 * 60;
+const PR_REVIEW_NOTIFICATION_REPAIR_INDEX_KEY = 'pr-review-notification:repair';
+const PR_REVIEW_NOTIFICATION_REPAIR_BATCH_SIZE = 100;
 const REVIEW_CYCLE_TTL_SECONDS = 30 * 24 * 60 * 60;
 const SET_REVIEW_CYCLE_IF_NEWER_SCRIPT = `
 local current = redis.call('GET', KEYS[1])
@@ -74,17 +76,6 @@ redis.call('SET', KEYS[1], ARGV[3], 'EX', ARGV[4])
 redis.call('SET', KEYS[3], ARGV[3], 'EX', ARGV[4])
 return 1
 `;
-const RESTORE_REVIEW_CYCLE_IF_VALUE_MATCHES_SCRIPT = `
-if redis.call('GET', KEYS[1]) == ARGV[1] then
-  if ARGV[2] == '' then
-    return redis.call('DEL', KEYS[1])
-  end
-  redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
-  return 1
-end
-return 0
-`;
-
 const prReviewNotificationBatchKindSchema = z.enum(['human', 'roomote']);
 
 const prReviewCycleStateSchema = z.object({
@@ -251,6 +242,25 @@ function buildScheduledMarkerKey(target: PrReviewNotificationTarget): string {
   }
 
   return `pr-review-notification:scheduled:${buildTargetKeySuffix(target)}:${target.immediate ? 'immediate' : 'delayed'}`;
+}
+
+function buildRepairPayloadKey(target: PrReviewNotificationTarget): string {
+  return `pr-review-notification:repair-payload:${buildRepairMember(target)}`;
+}
+
+function buildRepairMember(target: PrReviewNotificationTarget): string {
+  return `${buildTargetKeySuffix(target)}:${target.immediate ? 'immediate' : 'delayed'}`;
+}
+
+async function clearPrReviewNotificationRepair(
+  target: PrReviewNotificationTarget,
+): Promise<void> {
+  const redis = getRedis();
+  await redis
+    .multi()
+    .del(buildRepairPayloadKey(target))
+    .zrem(PR_REVIEW_NOTIFICATION_REPAIR_INDEX_KEY, buildRepairMember(target))
+    .exec();
 }
 
 function getPrReviewCycleStateKey({
@@ -438,7 +448,21 @@ export async function schedulePrReviewNotificationJob({
   const markerTtlSeconds =
     Math.ceil(delayMs / 1000) + SCHEDULED_MARKER_TTL_BUFFER_SECONDS;
 
-  await redis.set(markerKey, '1', 'EX', markerTtlSeconds);
+  await redis
+    .multi()
+    .set(
+      buildRepairPayloadKey(request),
+      JSON.stringify(request),
+      'EX',
+      PENDING_EVENTS_TTL_SECONDS,
+    )
+    .zadd(
+      PR_REVIEW_NOTIFICATION_REPAIR_INDEX_KEY,
+      Date.now() + delayMs,
+      buildRepairMember(request),
+    )
+    .set(markerKey, '1', 'EX', markerTtlSeconds)
+    .exec();
 
   try {
     await getPrReviewNotificationQueue().add(
@@ -446,6 +470,7 @@ export async function schedulePrReviewNotificationJob({
       request,
       { delay: delayMs },
     );
+    await clearPrReviewNotificationRepair(request).catch(() => undefined);
   } catch (error) {
     await redis.del(markerKey).catch(() => undefined);
     throw error;
@@ -457,22 +482,37 @@ export async function schedulePrReviewNotificationJob({
  * this call claimed responsibility for scheduling the notification job.
  */
 async function appendPendingEventAndClaimSchedule({
-  target,
+  request,
   event,
   delayMs,
 }: {
-  target: PrReviewNotificationTarget;
+  request: PrReviewNotificationRequest;
   event: PrReviewActivityEvent;
   delayMs: number;
 }): Promise<boolean> {
   const redis = getRedis();
-  const pendingKey = buildPendingEventsKey(target);
-  const markerKey = buildScheduledMarkerKey(target);
+  const pendingKey = buildPendingEventsKey(request);
+  const markerKey = buildScheduledMarkerKey(request);
+  const repairPayloadKey = buildRepairPayloadKey(request);
+  const repairMember = buildRepairMember(request);
 
   await redis
     .multi()
     .rpush(pendingKey, JSON.stringify(event))
     .expire(pendingKey, PENDING_EVENTS_TTL_SECONDS)
+    .set(
+      repairPayloadKey,
+      JSON.stringify(request),
+      'EX',
+      PENDING_EVENTS_TTL_SECONDS,
+      'NX',
+    )
+    .zadd(
+      PR_REVIEW_NOTIFICATION_REPAIR_INDEX_KEY,
+      'NX',
+      Date.now() + delayMs,
+      repairMember,
+    )
     .exec();
 
   const markerTtlSeconds =
@@ -481,6 +521,76 @@ async function appendPendingEventAndClaimSchedule({
   const claim = await redis.set(markerKey, '1', 'EX', markerTtlSeconds, 'NX');
 
   return claim === 'OK';
+}
+
+/**
+ * Re-enqueues pending review notifications whose original Queue.add call did
+ * not complete. The scheduled marker preserves the normal concurrency dedupe.
+ */
+export async function repairPendingPrReviewNotificationJobs(): Promise<void> {
+  const redis = getRedis();
+  const members = await redis.zrangebyscore(
+    PR_REVIEW_NOTIFICATION_REPAIR_INDEX_KEY,
+    '-inf',
+    Date.now(),
+    'LIMIT',
+    0,
+    PR_REVIEW_NOTIFICATION_REPAIR_BATCH_SIZE,
+  );
+
+  for (const member of members) {
+    const rawRequest = await redis.get(
+      `pr-review-notification:repair-payload:${member}`,
+    );
+    let parsedRequest: ReturnType<
+      typeof prReviewNotificationRequestSchema.safeParse
+    > | null = null;
+
+    if (rawRequest) {
+      try {
+        parsedRequest = prReviewNotificationRequestSchema.safeParse(
+          JSON.parse(rawRequest),
+        );
+      } catch {
+        // Stale recovery metadata must not block later pending notifications.
+      }
+    }
+
+    if (!parsedRequest?.success) {
+      await redis
+        .zrem(PR_REVIEW_NOTIFICATION_REPAIR_INDEX_KEY, member)
+        .catch(() => undefined);
+      continue;
+    }
+
+    const request = parsedRequest.data;
+    const markerKey = buildScheduledMarkerKey(request);
+    const markerTtlSeconds = SCHEDULED_MARKER_TTL_BUFFER_SECONDS;
+    const claimed = await redis.set(
+      markerKey,
+      '1',
+      'EX',
+      markerTtlSeconds,
+      'NX',
+    );
+
+    if (claimed !== 'OK') {
+      continue;
+    }
+
+    try {
+      await getPrReviewNotificationQueue().add(
+        'notify-pr-review-activity',
+        request,
+      );
+      await clearPrReviewNotificationRepair(request).catch(() => undefined);
+    } catch (error) {
+      await redis.del(markerKey).catch(() => undefined);
+      console.warn(
+        `[repairPendingPrReviewNotificationJobs] Failed to enqueue pending review notification for ${request.repository}#${request.prNumber}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
 }
 
 /**
@@ -686,11 +796,6 @@ export async function enqueuePrReviewNotification(
   const isRoomoteSummary =
     isRoomoteEvent && parsedInput.event.kind === 'review_summary';
   let event = parsedInput.event;
-  let previousCycleRaw: string | null = null;
-  let completedCycleKey: string | null = null;
-  let completedCycleValue: string | null = null;
-  let latestCompletedCycleKey: string | null = null;
-  let previousLatestCompletedRaw: string | null = null;
 
   if (isRoomoteEvent && event.reviewHeadSha) {
     const reviewHeadSha = event.reviewHeadSha;
@@ -740,22 +845,16 @@ export async function enqueuePrReviewNotification(
           phase: 'completed',
           observedAt: event.observedAt ?? Date.now(),
         } satisfies PrReviewCycleState);
-        completedCycleKey = getPrReviewCompletedCycleKey({
+        const completedCycleKey = getPrReviewCompletedCycleKey({
           repository: parsedInput.repository,
           prNumber: parsedInput.prNumber,
           cycleId,
         });
-        completedCycleValue = completedState;
-        previousCycleRaw = cycle.raw;
-        latestCompletedCycleKey = getPrReviewLatestCompletedCycleKey({
+        const latestCompletedCycleKey = getPrReviewLatestCompletedCycleKey({
           repository: parsedInput.repository,
           prNumber: parsedInput.prNumber,
           reviewHeadSha,
         });
-        previousLatestCompletedRaw = await getRedis().get(
-          latestCompletedCycleKey,
-        );
-
         const completed = await getRedis().eval(
           COMPLETE_REVIEW_CYCLE_SCRIPT,
           3,
@@ -803,8 +902,15 @@ export async function enqueuePrReviewNotification(
         ...(event.batchId ? { batchId: event.batchId } : {}),
       };
 
+      const request = {
+        ...target,
+        prUrl: parsedInput.prUrl,
+        deferrals: 0,
+        immediate,
+        sourceControlProvider: parsedInput.sourceControlProvider,
+      };
       const claimed = await appendPendingEventAndClaimSchedule({
-        target,
+        request,
         event,
         delayMs: notificationDelayMs,
       });
@@ -813,15 +919,10 @@ export async function enqueuePrReviewNotification(
         try {
           await getPrReviewNotificationQueue().add(
             'notify-pr-review-activity',
-            {
-              ...target,
-              prUrl: parsedInput.prUrl,
-              deferrals: 0,
-              immediate,
-              sourceControlProvider: parsedInput.sourceControlProvider,
-            },
+            request,
             { delay: notificationDelayMs },
           );
+          await clearPrReviewNotificationRepair(target).catch(() => undefined);
         } catch (error) {
           await getRedis()
             .del(buildScheduledMarkerKey(target))
@@ -833,42 +934,6 @@ export async function enqueuePrReviewNotification(
       notifiedTaskCount += 1;
     }
   } catch (error) {
-    if (
-      completedCycleKey &&
-      completedCycleValue &&
-      latestCompletedCycleKey &&
-      event.reviewHeadSha
-    ) {
-      const cycleStateKey = getPrReviewCycleStateKey({
-        repository: parsedInput.repository,
-        prNumber: parsedInput.prNumber,
-        reviewHeadSha: event.reviewHeadSha,
-      });
-      await getRedis()
-        .del(completedCycleKey)
-        .catch(() => undefined);
-      await getRedis()
-        .eval(
-          RESTORE_REVIEW_CYCLE_IF_VALUE_MATCHES_SCRIPT,
-          1,
-          cycleStateKey,
-          completedCycleValue,
-          previousCycleRaw ?? '',
-          REVIEW_CYCLE_TTL_SECONDS,
-        )
-        .catch(() => undefined);
-      await getRedis()
-        .eval(
-          RESTORE_REVIEW_CYCLE_IF_VALUE_MATCHES_SCRIPT,
-          1,
-          latestCompletedCycleKey,
-          completedCycleValue,
-          previousLatestCompletedRaw ?? '',
-          REVIEW_CYCLE_TTL_SECONDS,
-        )
-        .catch(() => undefined);
-    }
-
     throw error;
   }
 
