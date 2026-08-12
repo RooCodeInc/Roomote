@@ -755,12 +755,22 @@ describe('Integrations settings', () => {
       { id: 'sentry', name: 'Sentry', enabled: false },
       { id: 'linear', name: 'Linear', enabled: true },
       { id: 'notion', name: 'Notion', enabled: false, configured: true },
+      {
+        id: 'custom-oauth',
+        name: 'Custom OAuth',
+        enabled: true,
+        connected: false,
+        configured: true,
+      },
       { id: 'asana', name: 'Asana', enabled: false },
     ]);
     const grouped = splitIntegrationItems(sorted);
 
     expect(grouped.installed.map((item) => item.name)).toEqual(['Linear']);
-    expect(grouped.configured.map((item) => item.name)).toEqual(['Notion']);
+    expect(grouped.configured.map((item) => item.name)).toEqual([
+      'Custom OAuth',
+      'Notion',
+    ]);
     expect(grouped.available.map((item) => item.name)).toEqual([
       'Asana',
       'Sentry',
