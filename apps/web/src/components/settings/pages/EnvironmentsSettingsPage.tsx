@@ -2,7 +2,10 @@
 
 import { SettingsShell } from '@/components/settings/SettingsShell';
 import { EnvVars } from '@/components/settings/EnvVars';
-import { Environments } from '@/components/settings/environments';
+import {
+  Environments,
+  EnvironmentRoutingOverview,
+} from '@/components/settings/environments';
 import { DOCS_ENVIRONMENT_DEFINITION_URL } from '@/lib/docs';
 
 export function EnvironmentsSettingsPage() {
@@ -22,6 +25,7 @@ export function EnvironmentsSettingsPage() {
           .
         </p>
         <Environments />
+        <EnvironmentRoutingOverview />
         <EnvVars />
       </div>
     </SettingsShell>

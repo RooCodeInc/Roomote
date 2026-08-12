@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useTRPC } from '@/trpc/client';
 import { useRealtimePolling } from '@/hooks/useRealtimePolling';
@@ -61,6 +61,24 @@ export function useEnvironment(id: string | undefined) {
         enabled: !!id,
       },
     ),
+  );
+}
+
+export function useWorkspaceRoutingSettings() {
+  const trpc = useTRPC();
+  return useQuery(trpc.environments.routingSettings.queryOptions());
+}
+
+export function useUpdateWorkspaceRoutingSettings() {
+  const trpc = useTRPC();
+  const queryClient = useQueryClient();
+  return useMutation(
+    trpc.environments.updateRoutingSettings.mutationOptions({
+      onSuccess: () =>
+        queryClient.invalidateQueries({
+          queryKey: trpc.environments.routingSettings.queryKey(),
+        }),
+    }),
   );
 }
 
