@@ -21,12 +21,14 @@ import { slackDebug } from './logging';
  *
  * Matches by the tasks.slackThreadTs channel binding, which is stable within
  * a single Slack thread (1:N thread-to-task; latest run wins).
+ * Callers with an immutable task binding can pass taskId to scope the lookup.
  *
  * Returns the run row needed to construct a SnapshotResume launch, or null
  * if no suitable run exists.
  */
 export async function findCompletedSlackTaskRunWithSnapshot(
   slackThreadTs: string,
+  taskId?: string,
 ) {
   slackDebug(
     `[findCompletedSlackTaskRunWithSnapshot] Searching for completed task run with snapshot for thread ${slackThreadTs}`,
@@ -51,6 +53,7 @@ export async function findCompletedSlackTaskRunWithSnapshot(
     .where(
       and(
         eq(tasks.slackThreadTs, slackThreadTs),
+        ...(taskId ? [eq(taskRuns.taskId, taskId)] : []),
         inArray(taskRuns.status, [RunStatus.Completed, RunStatus.Idle]),
         isNotNull(taskRuns.snapshotId),
         isNull(taskRuns.snapshotFailedAt),

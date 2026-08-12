@@ -80,4 +80,17 @@ describe('findActiveSlackTaskRun', () => {
     expect(result).toMatchObject({ id: 42, taskId: 'task-42' });
     expect(whereMock).toHaveBeenCalledTimes(1);
   });
+
+  it('adds a task predicate only when the caller supplies an immutable task binding', async () => {
+    await findActiveSlackTaskRun('111.000', 'task-1');
+
+    expect(whereMock).toHaveBeenNthCalledWith(1, {
+      and: [
+        { eq: ['tasks.slackThreadTs', '111.000'] },
+        { eq: ['taskRuns.taskId', 'task-1'] },
+        { inArray: ['taskRuns.status', [...activeRunStatuses]] },
+        { isNull: 'taskRuns.canceledAt' },
+      ],
+    });
+  });
 });

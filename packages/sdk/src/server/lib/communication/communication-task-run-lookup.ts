@@ -22,6 +22,7 @@ type CommunicationConversationRef = {
   provider: CommunicationProvider;
   channelId: string;
   threadId?: string;
+  taskId?: string;
 };
 
 const ACTIVE_SELECTION = {
@@ -81,6 +82,7 @@ export async function findActiveCommunicationTaskRun(
         providerMatch,
         conversationMatch,
         threadMatch,
+        ...(input.taskId ? [eq(taskRuns.taskId, input.taskId)] : []),
         inArray(taskRuns.status, [...activeRunStatuses]),
         isNull(taskRuns.canceledAt),
       ),
@@ -104,6 +106,7 @@ export async function findCompletedCommunicationTaskRunWithSnapshot(
         providerMatch,
         conversationMatch,
         threadMatch,
+        ...(input.taskId ? [eq(taskRuns.taskId, input.taskId)] : []),
         inArray(taskRuns.status, [RunStatus.Completed]),
         isNull(taskRuns.canceledAt),
         sql`${taskRuns.snapshotId} IS NOT NULL`,

@@ -10,6 +10,7 @@ import {
   appendSlackVideoDescriptionsToText,
   clearLatestUserMessage,
   collectAndProcessThreadImages,
+  getSlackResumeLockKey,
   getPromptReadyThreadMessages,
   getLatestSlackBotReply,
   queueSlackMessage,
@@ -35,6 +36,7 @@ import { getIsSlackDiverged } from '../helpers/thread-sync.js';
 
 type CompletedSlackTaskRun = {
   id: number;
+  taskId: string;
   actingUserId: string | null;
   snapshotId: string | null;
   payload: unknown;
@@ -176,7 +178,7 @@ export async function processSnapshotResume(
     restoreSnapshotResumeVisiblePromptFields(directPayload, completedPayload);
 
     const { value: resumeRunId } = await withContention<number>(
-      `slack:resume-lock:${threadId}`,
+      getSlackResumeLockKey(threadId, completedRun.taskId),
       {
         ttlSeconds: 30,
         poll: { intervalMs: 500, maxAttempts: 10 },
@@ -212,6 +214,7 @@ export async function processSnapshotResume(
             .where(
               and(
                 eq(tasks.slackThreadTs, threadId),
+                eq(taskRuns.taskId, completedRun.taskId),
                 eq(taskRuns.kind, 'resume'),
                 gt(taskRuns.createdAt, new Date(Date.now() - 60_000)),
               ),

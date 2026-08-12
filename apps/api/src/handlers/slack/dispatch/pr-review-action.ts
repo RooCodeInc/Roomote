@@ -175,6 +175,7 @@ async function dispatchAcceptedPrReviewAction({
 
   const dispatched = await dispatchPrReviewFollowUp({
     provider: 'slack',
+    taskId: pending.taskId,
     channelId: pending.channelId,
     threadId: pending.threadId,
     followUpPrompt: pending.followUpPrompt,

@@ -385,6 +385,7 @@ export const prReviewNotificationJob = async (
     ) {
       const dispatched = await dispatchPrReviewFollowUp({
         provider: delivery.route.provider,
+        taskId: data.taskId,
         channelId: delivery.route.channelId,
         threadId: delivery.route.threadId ?? null,
         followUpPrompt: followUp.prompt,

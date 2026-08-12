@@ -93,6 +93,7 @@ export async function handleDiscordPrReviewActionCallback(input: {
 
     const dispatched = await dispatchPrReviewFollowUp({
       provider: 'discord',
+      taskId: pending.taskId,
       channelId: pending.channelId,
       threadId: pending.threadId,
       followUpPrompt: pending.followUpPrompt,

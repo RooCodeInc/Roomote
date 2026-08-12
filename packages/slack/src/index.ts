@@ -20,6 +20,7 @@ export * from './slack-api-base-url';
 export * from './slack-api-fetch';
 export * from './slack-channel-info-cache';
 export * from './slack-messages';
+export * from './slack-resume-lock';
 export * from './post-message-delivery';
 export * from './slack-notifier';
 export * from './slack-system-messages';

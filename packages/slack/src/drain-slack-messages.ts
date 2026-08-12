@@ -9,9 +9,9 @@ import { enqueueTask } from '@roomote/cloud-agents/server';
 import { getRedis } from '@roomote/redis';
 
 import { getSlackMessages, prependSlackMessages } from './slack-messages';
+import { getSlackResumeLockKey } from './slack-resume-lock';
 
 const SLACK_MESSAGE_QUEUE_PREFIX = 'slack:messages:';
-const RESUME_LOCK_PREFIX = 'slack:resume-lock:';
 const RESUME_LOCK_TTL_SECONDS = 30;
 
 /**
@@ -21,6 +21,7 @@ const RESUME_LOCK_TTL_SECONDS = 30;
  */
 export interface SlackDrainSourceRun {
   id: number;
+  taskId: string;
   /** Slack thread binding from the run's task row (tasks.slackThreadTs). */
   slackThreadTs: string | null;
   snapshotId: string | null;
@@ -90,7 +91,7 @@ export async function drainSlackMessagesToResumeRun(
   // both code paths from creating duplicate resume task runs for the same thread.
   const redis = getRedis();
   const threadTs = sourceRun.slackThreadTs;
-  const lockKey = `${RESUME_LOCK_PREFIX}${threadTs}`;
+  const lockKey = getSlackResumeLockKey(threadTs, sourceRun.taskId);
   const acquired = await redis.set(
     lockKey,
     '1',

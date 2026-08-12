@@ -71,6 +71,15 @@ describe('handleDiscordPrReviewActionCallback', () => {
       }),
     );
     expect(mocks.reply.mock.calls[0]?.[0]).not.toHaveProperty('buttons');
+    expect(mocks.dispatchFollowUp).toHaveBeenCalledWith({
+      provider: 'discord',
+      taskId: 'task-1',
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      followUpPrompt: 'Address the feedback.',
+      actingUserId: 'user-1',
+      providerUserId: 'discord-user-1',
+    });
   });
 
   it('keeps the feedback visible when the offer was already claimed', async () => {
