@@ -7,6 +7,7 @@ const DEFAULT_POSTHOG_HOST = 'https://us.i.posthog.com';
 
 type PostHogOptions = {
   api_host: string;
+  defaults: '2026-05-30';
   disable_session_recording: boolean;
   session_recording: {
     maskAllInputs: boolean;
@@ -79,6 +80,7 @@ export function CloudAnalyticsProvider({
         posthogProjectKey,
         {
           api_host: resolvedPosthogHost,
+          defaults: '2026-05-30',
           disable_session_recording: false,
           session_recording: { maskAllInputs: true },
         },
