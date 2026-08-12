@@ -83,6 +83,10 @@ claude mcp login roomote
 You can also open `/mcp` inside Claude Code to manage the connection and sign
 in.
 
+Claude Code requests a temporary loopback URL for the browser to return the
+authorization result to the running CLI. Roomote accepts localhost, IPv4, and
+IPv6 loopback callbacks with client-selected ports.
+
 ### Codex
 
 Add the streamable HTTP server, then authenticate it:
@@ -93,6 +97,10 @@ codex mcp login roomote
 ```
 
 The Codex CLI and IDE extension share this MCP configuration.
+
+Codex Desktop can request a native app link during OAuth so the browser returns
+the authorization result to the originating connection flow. The CLI and IDE
+extension may instead use a loopback HTTP callback.
 
 ### Cursor
 
@@ -112,13 +120,27 @@ Add Roomote to `~/.cursor/mcp.json` to use it in every project, or to
 Open **Customize** in Cursor, find Roomote under MCP servers, and complete the
 browser sign-in.
 
+Cursor can request a native app link, a hosted HTTPS callback, or a loopback
+HTTP callback. Roomote accepts each form and returns the authorization result
+to the exact callback Cursor registered.
+
 In each client, Roomote opens a browser so you can sign in and approve the
-connection. You do not need to create or copy an API token.
+connection. During OAuth dynamic client registration, the client sends Roomote
+its callback URL in `redirect_uris`. Roomote validates and saves that URL, then
+only sends the result to the same registered URL after approval. You do not
+need to create or copy an API token.
+
+Roomote validates callbacks by callback class instead of maintaining a list of
+client-specific URLs: HTTPS for hosted clients, HTTP only on loopback
+interfaces for local clients, and non-browser private URI schemes for native
+apps. Unsafe browser, file, and network schemes are rejected. The approval page
+shows the exact registered callback before Roomote redirects to it.
 
 <Note>
   On a self-hosted deployment, the configured `R_PUBLIC_URL` (or `R_APP_URL`)
   must be a browser-reachable HTTPS address. Desktop clients may use a loopback
-  HTTP callback.
+  HTTP callback. Roomote supports the callback forms described above for all
+  three documented clients.
 </Note>
 
 ## Access and safety

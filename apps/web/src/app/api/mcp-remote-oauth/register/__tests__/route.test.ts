@@ -16,6 +16,7 @@ import { POST } from '../route';
 function registrationRequest(
   redirectUri: string,
   grantTypes: string[] = ['authorization_code'],
+  clientName = 'Test client',
 ) {
   return new NextRequest(
     'https://roomote.example/api/mcp-remote-oauth/register',
@@ -23,7 +24,7 @@ function registrationRequest(
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        client_name: 'Test client',
+        client_name: clientName,
         redirect_uris: [redirectUri],
         token_endpoint_auth_method: 'none',
         grant_types: grantTypes,
@@ -64,24 +65,32 @@ describe('POST /api/mcp-remote-oauth/register', () => {
     );
   });
 
-  it('accepts clients that advertise refresh-token fallback support', async () => {
+  it('registers Claude Code with its loopback callback', async () => {
     mockRegisterClient.mockResolvedValue({
       clientId: '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
-      clientName: 'Test client',
+      clientName: 'Claude Code',
       redirectUris: ['http://localhost:54545/callback'],
       grantTypes: ['authorization_code', 'refresh_token'],
     });
 
     const response = await POST(
-      registrationRequest('http://localhost:54545/callback', [
-        'authorization_code',
-        'refresh_token',
-      ]),
+      registrationRequest(
+        'http://localhost:54545/callback',
+        ['authorization_code', 'refresh_token'],
+        'Claude Code',
+      ),
     );
 
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toMatchObject({
+      client_name: 'Claude Code',
+      redirect_uris: ['http://localhost:54545/callback'],
       grant_types: ['authorization_code', 'refresh_token'],
+    });
+    expect(mockRegisterClient).toHaveBeenCalledWith({
+      clientName: 'Claude Code',
+      redirectUris: ['http://localhost:54545/callback'],
+      grantTypes: ['authorization_code', 'refresh_token'],
     });
   });
 
@@ -121,6 +130,41 @@ describe('POST /api/mcp-remote-oauth/register', () => {
     expect(mockRegisterClient).toHaveBeenCalledWith({
       clientName: 'Cursor',
       redirectUris,
+      grantTypes: ['authorization_code', 'refresh_token'],
+    });
+  });
+
+  it('registers a native app callback without a vendor allowlist', async () => {
+    const redirectUri = 'example-app:/oauth/callback';
+    mockRegisterClient.mockResolvedValue({
+      clientId: '2a871f7c-9fac-4b4a-a7d3-cd3f4a329568',
+      clientName: 'Example App',
+      redirectUris: [redirectUri],
+      grantTypes: ['authorization_code', 'refresh_token'],
+    });
+
+    const response = await POST(
+      new NextRequest('https://roomote.example/api/mcp-remote-oauth/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          client_name: 'Example App',
+          redirect_uris: [redirectUri],
+          token_endpoint_auth_method: 'none',
+          grant_types: ['authorization_code', 'refresh_token'],
+          response_types: ['code'],
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({
+      client_name: 'Example App',
+      redirect_uris: [redirectUri],
+    });
+    expect(mockRegisterClient).toHaveBeenCalledWith({
+      clientName: 'Example App',
+      redirectUris: [redirectUri],
       grantTypes: ['authorization_code', 'refresh_token'],
     });
   });
