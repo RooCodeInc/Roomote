@@ -841,6 +841,48 @@ describe('sleepCheckJob', () => {
     );
   });
 
+  it('retains due Box jobs on standby using the Box client', async () => {
+    const mockJob = {
+      id: 6628,
+      machineId: 'box-standby',
+      sandboxCmdId: 'worker-command-2',
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      vendor: 'box',
+      taskId: 'task-box-1',
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+    };
+
+    mockJobQueries({ dueJobs: [mockJob] });
+    mockGetInstanceStatus.mockResolvedValue({
+      status: 'running',
+      timeoutRemainingMs: 5 * 60 * 60 * 1_000,
+    });
+    mockEnterStandby.mockResolvedValue({ resumeHandle: 'box-standby' });
+    returningFn.mockResolvedValue([{ id: 6628 }]);
+
+    await sleepCheckJob();
+
+    expect(mockCreateComputeProviderClient).toHaveBeenCalledWith({
+      provider: 'box',
+      envFallback: {},
+    });
+    expect(mockEnterStandby).toHaveBeenCalledWith({
+      instanceId: 'box-standby',
+      commandId: 'worker-command-2',
+    });
+    expect(mockCreateSnapshot).not.toHaveBeenCalled();
+    expect(setFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshotId: 'box-standby',
+        status: RunStatus.Completed,
+      }),
+    );
+  });
+
   it('retains due Docker jobs as stopped-container standby', async () => {
     const mockJob = {
       id: 6627,

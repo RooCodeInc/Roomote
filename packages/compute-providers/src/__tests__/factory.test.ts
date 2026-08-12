@@ -8,6 +8,7 @@ const {
   daytonaClientMock,
   e2bClientMock,
   blaxelClientMock,
+  boxClientMock,
   azureClientMock,
   dockerCapabilities,
   daytonaCapabilities,
@@ -20,6 +21,7 @@ const {
   daytonaClientMock: vi.fn(),
   e2bClientMock: vi.fn(),
   blaxelClientMock: vi.fn(),
+  boxClientMock: vi.fn(),
   azureClientMock: vi.fn(),
   dockerCapabilities: {
     snapshots: false,
@@ -50,6 +52,7 @@ vi.mock('../adapters', () => ({
   DaytonaClient: daytonaClientMock,
   E2bClient: e2bClientMock,
   BlaxelClient: blaxelClientMock,
+  BoxClient: boxClientMock,
   AzureClient: azureClientMock,
   DOCKER_CAPABILITIES: dockerCapabilities,
   DAYTONA_CAPABILITIES: daytonaCapabilities,
@@ -671,5 +674,50 @@ describe('createComputeProviderClient', () => {
         },
       }),
     ).toThrow('Missing BLAXEL_IMAGE');
+  });
+
+  it('resolves Box bearer configuration from env', () => {
+    createComputeProviderClient({
+      provider: 'box',
+      envFallback: {
+        BOX_API_KEY: 'box-key',
+        BOX_API_BASE_URL: 'https://box.example.test/v1',
+        BOX_TIMEOUT_MS: '3600000',
+        BOX_MACHINE_TYPE: 'large',
+      },
+    });
+
+    expect(boxClientMock).toHaveBeenCalledWith({
+      apiKey: 'box-key',
+      boxApiBaseUrl: 'https://box.example.test/v1',
+      timeoutMs: 3600000,
+      machineType: 'large',
+    });
+  });
+
+  it('requires only Box API credentials and uses the adapter default base URL', () => {
+    expect(() =>
+      createComputeProviderClient({ provider: 'box', envFallback: {} }),
+    ).toThrow('Missing BOX_API_KEY');
+    createComputeProviderClient({
+      provider: 'box',
+      envFallback: { BOX_API_KEY: 'box-key' },
+    });
+    expect(boxClientMock).toHaveBeenLastCalledWith({ apiKey: 'box-key' });
+  });
+
+  it('rejects invalid Box timeout and machine type env values', () => {
+    expect(() =>
+      createComputeProviderClient({
+        provider: 'box',
+        envFallback: { BOX_API_KEY: 'key', BOX_TIMEOUT_MS: '0' },
+      }),
+    ).toThrow('BOX_TIMEOUT_MS must be a positive number');
+    expect(() =>
+      createComputeProviderClient({
+        provider: 'box',
+        envFallback: { BOX_API_KEY: 'key', BOX_MACHINE_TYPE: 'performance' },
+      }),
+    ).toThrow('BOX_MACHINE_TYPE must be one of: small, default, large');
   });
 });

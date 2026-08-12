@@ -162,6 +162,10 @@ export function StepComputeConfig({
   // live in the advanced section instead of the primary credentials step.
   const isHostedProvider =
     selectedProvider !== undefined && selectedProvider.provider !== 'docker';
+  // Box receives the packaged worker release when a task starts; unlike the
+  // image-backed hosted providers, setup does not build or require an artifact.
+  const requiresHostedWorkerImage =
+    isHostedProvider && selectedProvider?.provider !== 'box';
   const workerImage = computeSetup.workerImage;
   const workerImageValue = values[SHARED_WORKER_IMAGE_ENV_VAR]?.trim() ?? '';
   // Local tags (e.g. roomote-worker:local) satisfy Docker but not hosted
@@ -170,9 +174,10 @@ export function StepComputeConfig({
     deriveModalBaseImageRefDefault(workerImageValue) !== null;
   const hostedWorkerImageReady =
     workerImage.hostedReady || submittedHostedWorkerImageReady;
-  const missingHostedWorkerImage = isHostedProvider && !hostedWorkerImageReady;
+  const missingHostedWorkerImage =
+    requiresHostedWorkerImage && !hostedWorkerImageReady;
   const canEditAdvancedWorkerImage =
-    isHostedProvider && !workerImage.runtimeSatisfied;
+    requiresHostedWorkerImage && !workerImage.runtimeSatisfied;
   const shouldRenderAdvancedWorkerImage =
     canEditAdvancedWorkerImage &&
     (missingHostedWorkerImage || advancedExpanded);
@@ -183,10 +188,10 @@ export function StepComputeConfig({
     ? getComputeCredentialsHint(selectedProvider.provider)
     : null;
 
-  // Hosted providers need a pullable (registry-qualified) worker image. A bare
-  // process-env local tag must not enable Save — Modal/E2B/Daytona derive or
-  // provision from that image server-side, not from form base-image fields.
-  const hostedRequirementMet = !isHostedProvider || hostedWorkerImageReady;
+  // Image-backed hosted providers need a pullable worker image. A bare local
+  // tag must not enable Save; Box is release-bootstrapped and skips this gate.
+  const hostedRequirementMet =
+    !requiresHostedWorkerImage || hostedWorkerImageReady;
 
   const credentialsMet = credentialFields.every(
     (field) =>
@@ -206,7 +211,7 @@ export function StepComputeConfig({
         field.runtimeSatisfied ||
         field.savedSatisfied,
     ) &&
-    (!isHostedProvider ||
+    (!requiresHostedWorkerImage ||
       workerImage.hostedReady ||
       (selectedProvider?.fields
         .filter(
@@ -348,7 +353,11 @@ export function StepComputeConfig({
                       ),
                     )}
                   </p>
-                ) : null}
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {selectedProvider.description}
+                  </p>
+                )}
               </>
             ) : (
               <p className="font-semibold">
@@ -372,7 +381,7 @@ export function StepComputeConfig({
                 </div>
               ) : null}
 
-              {isHostedProvider && workerImage.hostedReady ? (
+              {requiresHostedWorkerImage && workerImage.hostedReady ? (
                 <div className="flex items-start gap-2 text-muted-foreground mt-4">
                   <Check className="inline size-4 mt-0.5 shrink-0 text-foreground" />
                   <p className="text-sm">

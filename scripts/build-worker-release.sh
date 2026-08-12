@@ -112,6 +112,15 @@ NODE_PTY_VERSION="$(
   node -e 'const pkg=require("./apps/worker/package.json"); const raw=pkg.dependencies?.["node-pty"]; if (typeof raw !== "string") { throw new Error("apps/worker/package.json is missing dependencies.node-pty"); } const normalized=raw.replace(/^[^0-9]*/, ""); if (!normalized) { throw new Error(`Unable to normalize node-pty version from ${raw}`); } process.stdout.write(normalized);'
 )"
 
+# The worker image's Dockerfile ARG is the source of truth for the pm2
+# version; ship it in the release so bring-your-own-image bootstraps
+# (install-worker.sh) install the same pin instead of drifting to latest.
+PM2_VERSION="$(sed -n 's/^ARG PM2_VERSION=//p' apps/worker/Dockerfile | head -1)"
+if [ -z "$PM2_VERSION" ]; then
+  echo "Error: ARG PM2_VERSION not found in apps/worker/Dockerfile"
+  exit 1
+fi
+
 # Build
 pnpm --filter @roomote/worker build
 [ -f "apps/worker/dist/worker.js" ] || { echo "Build failed"; exit 1; }
@@ -152,6 +161,7 @@ find "$TAG/dist" -type f -name '*.map' -delete
 echo "$VERSION" > "$TAG/VERSION"
 echo "${GITHUB_SHA:-$(git rev-parse HEAD 2>/dev/null || echo unknown)}" > "$TAG/COMMIT"
 echo "$NODE_PTY_VERSION" > "$TAG/NODE_PTY_VERSION"
+echo "$PM2_VERSION" > "$TAG/PM2_VERSION"
 
 # Strip macOS xattrs if needed
 command -v xattr &>/dev/null && xattr -cr "$TAG" 2>/dev/null || true

@@ -56,7 +56,10 @@ instead. For a managed PaaS with no server of your own, see
 - A model provider API key, for example OpenRouter (entered in the setup
   wizard, not at deploy time). When using hosted sandboxes instead of the
   Docker socket, also a [Modal](https://modal.com), [E2B](https://e2b.dev),
-  or [Daytona](https://daytona.io) account.
+  [Daytona](https://daytona.io), [Blaxel](https://blaxel.ai),
+  [Box](https://box.computer), or
+  [Azure Container Apps](https://azure.microsoft.com/products/container-apps)
+  account.
 
 ## Image access
 
@@ -161,7 +164,8 @@ the same server. Two things matter in this mode:
 To use hosted sandboxes instead (no socket access, task execution bills
 through the provider):
 
-1. Set `DEFAULT_COMPUTE_PROVIDER=modal` (or `e2b` / `daytona`) and add
+1. Set `DEFAULT_COMPUTE_PROVIDER` to `modal`, `e2b`, `daytona`, `blaxel`,
+   `box`, or `azure`, and add
    `EXCLUDED_COMPUTE_PROVIDERS=docker` to the shared env block.
 2. Remove the `/var/run/docker.sock` volume from the controller service.
 3. Keep `DOCKER_WORKER_RELEASE_PATH` — the controller uploads the baked-in

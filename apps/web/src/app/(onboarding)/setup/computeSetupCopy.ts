@@ -40,6 +40,14 @@ const COMPUTE_CREDENTIALS_HINTS: Partial<
     },
     ' and copy your workspace name from the console URL.',
   ],
+  box: [
+    'Create an API key from the ',
+    {
+      label: 'Box dashboard',
+      href: 'https://box.ascii.dev/box/dashboard',
+    },
+    '.',
+  ],
 };
 
 export function getComputeCredentialsHint(

@@ -62,7 +62,9 @@ other PaaS-shaped paths, see [deploy/railway](../railway/README.md) and
 - A Fly.io account and [`flyctl`](https://fly.io/docs/flyctl/install/)
   logged in (`fly auth login`).
 - A hosted sandbox account: [Modal](https://modal.com) (default),
-  [E2B](https://e2b.dev), or [Daytona](https://daytona.io).
+  [E2B](https://e2b.dev), [Daytona](https://daytona.io),
+  [Blaxel](https://blaxel.ai), [Box](https://box.computer), or
+  [Azure Container Apps](https://azure.microsoft.com/products/container-apps).
 - A model provider API key, for example OpenRouter (entered in the setup
   wizard, not at deploy time).
 
@@ -330,7 +332,7 @@ previews.<your-domain>` and `fly certs add -a <app>-previews
   reproducible from `fly.toml` plus the secrets.
 - **Costs** split four ways: Fly bills the Machines and Managed Postgres,
   Upstash and Tigris bill usage through Fly, task execution bills through
-  your sandbox provider (Modal/E2B/Daytona), and model usage bills through
+  your hosted sandbox provider, and model usage bills through
   your model provider.
 
 ## Maintaining the template

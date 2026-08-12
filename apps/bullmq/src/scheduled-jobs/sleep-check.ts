@@ -156,6 +156,8 @@ function buildSleepCheckClient(
       return createComputeProviderClient({ provider: 'e2b', envFallback });
     case 'blaxel':
       return createComputeProviderClient({ provider: 'blaxel', envFallback });
+    case 'box':
+      return createComputeProviderClient({ provider: 'box', envFallback });
     case 'azure':
       return createComputeProviderClient({ provider: 'azure', envFallback });
     case 'docker':

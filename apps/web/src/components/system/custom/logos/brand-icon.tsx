@@ -140,6 +140,34 @@ function BlaxelIcon({
   );
 }
 
+function BoxSandboxIcon({
+  name,
+  className,
+  isDecorative,
+}: {
+  name: string;
+  className?: string;
+  isDecorative: boolean;
+}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      role={isDecorative ? undefined : 'img'}
+      aria-hidden={isDecorative || undefined}
+      aria-label={isDecorative ? undefined : name}
+      focusable="false"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z" />
+      <path d="m4.5 7.8 7.5 4.3 7.5-4.3M12 12.1V21" />
+    </svg>
+  );
+}
+
 function SupermemoryIcon({
   name,
   className,
@@ -600,6 +628,16 @@ export function BrandIcon({ icon, name, className }: BrandIconProps) {
   if (icon === 'blaxel') {
     return (
       <BlaxelIcon
+        name={name}
+        className={className}
+        isDecorative={isDecorative}
+      />
+    );
+  }
+
+  if (icon === 'box-sandbox') {
+    return (
+      <BoxSandboxIcon
         name={name}
         className={className}
         isDecorative={isDecorative}
