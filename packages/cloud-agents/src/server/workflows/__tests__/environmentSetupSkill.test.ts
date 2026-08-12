@@ -269,6 +269,9 @@ describe('environment-setup guidance', () => {
     );
     expect(skillContent).toContain('a concrete read-only verification prompt');
     expect(skillContent).toContain(
+      'finish with exactly one explicit result: `ready`, `not_ready`, or `blocked`',
+    );
+    expect(skillContent).toContain(
       'It must not invoke Doctor or another workflow skill, launch another task, repair the environment, edit repository files',
     );
     expect(skillContent).toContain(
@@ -307,10 +310,19 @@ describe('environment-setup guidance', () => {
       'If the monitored summary reaches `Ready`, `Idle`, or `Needs input`, do not keep polling that same state indefinitely.',
     );
     expect(skillContent).toContain(
-      'If those latest task messages clearly report that the environment looks ready, treat that as a successful spawned-task run and report the observed success directly.',
+      'If those latest task messages explicitly report `ready` and contain evidence that the requested developer workflow completed, treat that as a successful spawned-task run and report the observed success directly.',
     );
     expect(skillContent).toContain(
-      'If the monitored summary reaches `Completed` without a surfaced startup or runtime failure, treat that as a successful spawned-task run and report that observed outcome directly instead of asking the user to confirm it manually.',
+      'A `Completed`, `Ready`, or `Idle` task state is not proof that verification passed.',
+    );
+    expect(skillContent).toContain(
+      'Treat explicit `not_ready` or `blocked` results as verification failures or blockers even when setup and task execution completed cleanly.',
+    );
+    expect(skillContent).toContain(
+      'use `success: true` only for the explicit evidence-backed `ready` criterion above',
+    );
+    expect(skillContent).toContain(
+      'use `success: false` with a short, user-safe `error` message for `not_ready`, `blocked`',
     );
     expect(skillContent).toContain(
       'When the spawned verification task reveals a fixable setup or environment-definition error, try to fix it yourself, rerun any affected local validation, recreate or update the environment with the revised YAML, launch a fresh verification task, and repeat the monitoring process instead of stopping after the first failure.',
