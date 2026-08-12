@@ -79,6 +79,8 @@ import {
 } from './source-control-pull-request-shared';
 
 const ADO_API_VERSION = '7.1';
+const PR_ASSOCIATION_MAX_ATTEMPTS = 3;
+const PR_ASSOCIATION_RETRY_DELAY_MS = 100;
 
 export const sourceControlPullRequestMutationInputSchema = z.object({
   action: z.literal('create_or_update_pull_request'),
@@ -452,8 +454,8 @@ async function resolveEffectivePrAction(taskRun: TaskRun): Promise<PrAction> {
  * delivery path used to create this association by parsing `gh pr create`
  * tool output from the transcript; the server-side mutation path knows the
  * pull request authoritatively for every provider, so it persists the
- * association directly. Association failures must not fail the mutation the
- * agent already performed.
+ * association directly. Transient association failures are retried, but must
+ * not fail the provider mutation the agent already performed.
  */
 async function persistSourceControlPullRequestAssociation({
   taskRun,
@@ -470,40 +472,50 @@ async function persistSourceControlPullRequestAssociation({
 
   const status = result.draft ? 'draft' : 'open';
 
-  try {
-    await db
-      .insert(taskPullRequests)
-      .values({
-        taskId: taskRun.taskId,
-        sourceControlProvider: repository.sourceControlProvider,
-        host: repository.host,
-        repositoryId: repository.id,
-        prUrl: result.url,
-        prNumber: result.number,
-        prTitle: result.title,
-        repository: result.repositoryFullName,
-        status,
-        createdByRoomote: result.action === 'created',
-        prBaseRef: result.targetBranch,
-      })
-      .onConflictDoUpdate({
-        target: [taskPullRequests.taskId, taskPullRequests.prUrl],
-        set: {
+  for (let attempt = 1; attempt <= PR_ASSOCIATION_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      await db
+        .insert(taskPullRequests)
+        .values({
+          taskId: taskRun.taskId,
           sourceControlProvider: repository.sourceControlProvider,
           host: repository.host,
           repositoryId: repository.id,
+          prUrl: result.url,
+          prNumber: result.number,
           prTitle: result.title,
+          repository: result.repositoryFullName,
           status,
+          createdByRoomote: result.action === 'created',
           prBaseRef: result.targetBranch,
-          updatedAt: new Date(),
-        },
-      });
-  } catch (error) {
-    console.warn(
-      `[persistSourceControlPullRequestAssociation] Failed to associate ${result.repositoryFullName}#${result.number} with task ${taskRun.taskId}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
+        })
+        .onConflictDoUpdate({
+          target: [taskPullRequests.taskId, taskPullRequests.prUrl],
+          set: {
+            sourceControlProvider: repository.sourceControlProvider,
+            host: repository.host,
+            repositoryId: repository.id,
+            prTitle: result.title,
+            status,
+            prBaseRef: result.targetBranch,
+            updatedAt: new Date(),
+          },
+        });
+      return;
+    } catch (error) {
+      if (attempt < PR_ASSOCIATION_MAX_ATTEMPTS) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, PR_ASSOCIATION_RETRY_DELAY_MS),
+        );
+        continue;
+      }
+
+      console.warn(
+        `[persistSourceControlPullRequestAssociation] Failed to associate ${result.repositoryFullName}#${result.number} with task ${taskRun.taskId} after ${attempt} attempts: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 }
 

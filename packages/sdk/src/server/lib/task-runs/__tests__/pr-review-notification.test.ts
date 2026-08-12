@@ -98,13 +98,26 @@ describe('enqueuePrReviewNotification', () => {
     },
   };
 
-  it('returns no_linked_tasks when no task links the PR', async () => {
+  it('retries task association lookup before returning no_linked_tasks', async () => {
     mockFindManyTaskPullRequests.mockResolvedValue([]);
 
     const result = await enqueuePrReviewNotification(baseInput);
 
     expect(result).toEqual({ notifiedTaskCount: 0, reason: 'no_linked_tasks' });
+    expect(mockFindManyTaskPullRequests).toHaveBeenCalledTimes(4);
     expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it('retains feedback when association persistence finishes after the webhook arrives', async () => {
+    mockFindManyTaskPullRequests
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ taskId: 'task-1' }]);
+
+    const result = await enqueuePrReviewNotification(baseInput);
+
+    expect(result).toEqual({ notifiedTaskCount: 1 });
+    expect(mockFindManyTaskPullRequests).toHaveBeenCalledTimes(2);
+    expect(mockQueueAdd).toHaveBeenCalledTimes(1);
   });
 
   it('debounces ordinary notifications for web-only tasks without an originating conversation', async () => {

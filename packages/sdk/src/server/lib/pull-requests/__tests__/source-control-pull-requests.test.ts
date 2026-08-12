@@ -230,6 +230,8 @@ beforeEach(() => {
 describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockTaskPullRequestUpsert.mockReset();
+    mockTaskPullRequestUpsert.mockResolvedValue(undefined);
     mockGetDeploymentGitHubRoomoteMentionEnabled.mockResolvedValue(true);
     mockResolveConfiguredGitHubAppSlugIfConfigured.mockResolvedValue(null);
     mockResolveRunCommitAuthor.mockResolvedValue({
@@ -509,6 +511,57 @@ describe('platform-managed draft state', () => {
     expect(octokit.graphql).not.toHaveBeenCalled();
     expect(result.draft).toBe(true);
     expect(result.warnings).toEqual([]);
+  });
+
+  it('retries association persistence after the provider mutation succeeds', async () => {
+    makeOctokit({
+      created: {
+        number: 9,
+        node_id: 'node-9',
+        html_url: 'https://github.com/acme/web/pull/9',
+        title: '[Feature] X',
+        draft: true,
+      },
+    });
+    mockTaskPullRequestUpsert
+      .mockRejectedValueOnce(new Error('database unavailable'))
+      .mockResolvedValueOnce(undefined);
+
+    const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: { ...githubInput },
+    });
+
+    expect(result).toMatchObject({ action: 'created', number: 9 });
+    expect(mockTaskPullRequestUpsert).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps provider success after bounded association retries are exhausted', async () => {
+    makeOctokit({
+      created: {
+        number: 9,
+        node_id: 'node-9',
+        html_url: 'https://github.com/acme/web/pull/9',
+        title: '[Feature] X',
+        draft: true,
+      },
+    });
+    mockTaskPullRequestUpsert.mockRejectedValue(
+      new Error('database unavailable'),
+    );
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: { ...githubInput },
+    });
+
+    expect(result).toMatchObject({ action: 'created', number: 9 });
+    expect(mockTaskPullRequestUpsert).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('after 3 attempts'),
+    );
+    warn.mockRestore();
   });
 
   it('uses the @roomote shorthand in attribution when enabled', async () => {
