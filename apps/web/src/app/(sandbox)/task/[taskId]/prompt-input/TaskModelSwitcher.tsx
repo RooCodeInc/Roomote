@@ -312,7 +312,7 @@ export function TaskModelSwitcher({
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-muted-foreground h-7 gap-1 px-1 text-xs"
+                className="text-muted-foreground h-7 justify-start gap-1 px-0 text-xs hover:bg-transparent"
               >
                 <ChevronDown
                   className={`size-3 transition-transform ${showAllRoles ? '' : '-rotate-90'}`}
