@@ -120,18 +120,13 @@ export function TaskModelSwitcher({
       }),
     });
 
+  // Success is silent: the picker shows the new value and the popover's
+  // "Applies from the next message" hint carries the semantics. Only
+  // failures interrupt.
   const updateModelSelection = useMutation(
     trpc.sandboxSession.updateTaskModelSelection.mutationOptions({
-      onSuccess: (result) => {
+      onSuccess: () => {
         void invalidateSession();
-
-        if (result.application === 'restarted') {
-          toast.success('Model settings updated');
-        } else if (result.application === 'deferred') {
-          toast.success('Model settings updated for the next message');
-        } else {
-          toast.success('Model settings saved for when the task resumes');
-        }
       },
       onError: (error, variables) => {
         setLocalSelections((current) => {
@@ -145,8 +140,8 @@ export function TaskModelSwitcher({
     }),
   );
 
-  // Toast-free twin of `updateModelSelection` for the reset loop, which
-  // reports a single outcome after the last role clears.
+  // Handler-free twin of `updateModelSelection` for the reset loop, whose
+  // catch block owns error reporting for the whole batch.
   const resetModelSelection = useMutation(
     trpc.sandboxSession.updateTaskModelSelection.mutationOptions(),
   );
@@ -207,9 +202,8 @@ export function TaskModelSwitcher({
 
   // Reset clears roles sequentially: firing the per-role mutations
   // concurrently would race their payload read-modify-writes (the server
-  // also row-locks, but sequencing keeps the toasts to one and the sandbox
-  // restarts collapsed), and each role only needs a call when it actually
-  // holds an override.
+  // also row-locks, but sequencing keeps the sandbox restarts collapsed),
+  // and each role only needs a call when it actually holds an override.
   const handleReset = async () => {
     const rolesToClear: SwitcherRole[] = [
       'coding',
@@ -227,25 +221,13 @@ export function TaskModelSwitcher({
     );
 
     try {
-      let application: string = 'offline';
-
       for (const role of rolesToClear) {
-        const result = await resetModelSelection.mutateAsync({
+        await resetModelSelection.mutateAsync({
           taskId: taskRun.taskId,
           role,
           model: null,
           reasoningEffort: null,
         });
-
-        application = result.application;
-      }
-
-      if (application === 'restarted') {
-        toast.success('Model settings reset');
-      } else if (application === 'deferred') {
-        toast.success('Model settings reset for the next message');
-      } else {
-        toast.success('Model settings reset for when the task resumes');
       }
     } catch (error) {
       setLocalSelections({});
