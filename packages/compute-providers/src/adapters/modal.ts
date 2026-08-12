@@ -383,7 +383,10 @@ export class ModalClient implements ComputeProviderClient {
         input.signal,
       );
     } catch (error) {
-      if (isSandboxUnavailableError(error)) {
+      if (
+        isSandboxUnavailableError(error) ||
+        isSandboxStatusLookupUnavailableError(error)
+      ) {
         this.invalidateSandboxCache(input.instanceId);
         return { status: 'stopped' };
       }
@@ -1329,6 +1332,28 @@ function isSandboxUnavailableError(error: unknown): boolean {
     message.includes('terminated') ||
     message.includes('cancelled')
   );
+}
+
+function isSandboxStatusLookupUnavailableError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+
+  const record = error as {
+    status?: unknown;
+    statusCode?: unknown;
+    response?: { status?: unknown };
+  };
+
+  const status = record.status ?? record.statusCode ?? record.response?.status;
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof (error as { message?: unknown }).message === 'string'
+        ? (error as { message: string }).message
+        : undefined;
+
+  return status === 400 && message?.includes('Status code 400 is not ok') === true;
 }
 
 function formatError(error: unknown): {
