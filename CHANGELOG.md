@@ -4,7 +4,7 @@ This file tracks product releases for Roomote (single monorepo version). Automat
 
 ## 0.38.0 (2026-08-12)
 
-This release adds Goal Mode for long-running work, remote MCP access for coding clients, custom routing rules, and richer connected actions and diagnostics.
+This release adds `/goal` mode for long-running work, a Roomote MCP, custom routing rules, and the ability to generate demo videos.
 
 ### Highlights
 
