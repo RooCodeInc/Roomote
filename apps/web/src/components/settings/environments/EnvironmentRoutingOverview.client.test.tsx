@@ -45,4 +45,22 @@ describe('EnvironmentRoutingOverview', () => {
     );
     expect(screen.getByRole('button', { name: 'Save Rule' })).toBeEnabled();
   });
+
+  it('cancels an edit without persisting changes', () => {
+    render(<EnvironmentRoutingOverview />);
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Edit Messages from hospital-bugs belong here.',
+      }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(mutateAsync).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Rule description')).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Add Rule' })).toBeDisabled();
+    expect(
+      screen.queryByRole('button', { name: 'Cancel' }),
+    ).not.toBeInTheDocument();
+  });
 });

@@ -81,40 +81,56 @@ export function EnvironmentRoutingOverview() {
               setDraftRule((current) => ({ ...current, target }))
             }
           />
-          <Button
-            type="button"
-            size="sm"
-            disabled={
-              updateSettings.isPending ||
-              !draftRule.description.trim() ||
-              !draftRule.target
-            }
-            onClick={async () => {
-              try {
-                const normalizedRule = {
-                  ...draftRule,
-                  description: draftRule.description.trim(),
-                };
-                const nextRules =
-                  editingIndex === null
-                    ? [...rules, normalizedRule]
-                    : rules.map((rule, index) =>
-                        index === editingIndex ? normalizedRule : rule,
-                      );
-                await saveRules(nextRules);
-                setDraftRule(EMPTY_RULE);
-                setEditingIndex(null);
-              } catch {
-                toast.error(
-                  editingIndex === null
-                    ? 'Failed to add routing rule'
-                    : 'Failed to update routing rule',
-                );
+          <div className="flex gap-2">
+            {editingIndex !== null && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={updateSettings.isPending}
+                onClick={() => {
+                  setDraftRule(EMPTY_RULE);
+                  setEditingIndex(null);
+                }}
+              >
+                Cancel
+              </Button>
+            )}
+            <Button
+              type="button"
+              size="sm"
+              disabled={
+                updateSettings.isPending ||
+                !draftRule.description.trim() ||
+                !draftRule.target
               }
-            }}
-          >
-            {editingIndex === null ? 'Add Rule' : 'Save Rule'}
-          </Button>
+              onClick={async () => {
+                try {
+                  const normalizedRule = {
+                    ...draftRule,
+                    description: draftRule.description.trim(),
+                  };
+                  const nextRules =
+                    editingIndex === null
+                      ? [...rules, normalizedRule]
+                      : rules.map((rule, index) =>
+                          index === editingIndex ? normalizedRule : rule,
+                        );
+                  await saveRules(nextRules);
+                  setDraftRule(EMPTY_RULE);
+                  setEditingIndex(null);
+                } catch {
+                  toast.error(
+                    editingIndex === null
+                      ? 'Failed to add routing rule'
+                      : 'Failed to update routing rule',
+                  );
+                }
+              }}
+            >
+              {editingIndex === null ? 'Add Rule' : 'Save Rule'}
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-[1fr_16rem_4rem] gap-3 py-2 text-xs font-medium text-muted-foreground max-sm:hidden">
