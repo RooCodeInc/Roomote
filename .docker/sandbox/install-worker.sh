@@ -336,9 +336,50 @@ ensure_node_pty() {
   echo "node-pty ${installed_version} installed and validated for $WORKER_DIR/dist/worker.js"
 }
 
+# The worker's detached process manager requires pm2. Worker Docker images
+# bundle it at /usr/local/bin/pm2; bring-your-own images (for example Box)
+# ship without it, so install it next to node-pty and expose a launcher on
+# the path the worker resolves first.
+ensure_pm2() {
+  if [ -x "/usr/local/bin/pm2" ] || command -v pm2 >/dev/null 2>&1; then
+    echo "pm2 already available"
+    return 0
+  fi
+
+  echo "pm2 missing; installing..."
+  ensure_data_dir || return 1
+  npm install --prefix "$DATA_DIR" --no-save --no-package-lock pm2 || return 1
+
+  local pm2_entry="$DATA_DIR/node_modules/pm2/bin/pm2"
+  if [ ! -f "$pm2_entry" ]; then
+    echo "Error: pm2 install completed but $pm2_entry is missing"
+    return 1
+  fi
+
+  local cli_path="/usr/local/bin/pm2"
+  local cli_contents="#!/bin/bash
+exec node $pm2_entry \"\$@\""
+
+  if [ -w "/usr/local/bin" ]; then
+    printf "%s\n" "$cli_contents" > "$cli_path"
+    chmod +x "$cli_path"
+  elif command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    printf "%s\n" "$cli_contents" | sudo -n tee "$cli_path" > /dev/null
+    sudo -n chmod +x "$cli_path"
+  else
+    mkdir -p "$HOME/.local/bin"
+    cli_path="$HOME/.local/bin/pm2"
+    printf "%s\n" "$cli_contents" > "$cli_path"
+    chmod +x "$cli_path"
+  fi
+
+  echo "pm2 installed at $cli_path"
+}
+
 # Fail fast per phase: the script's exit code must reflect the first failing
 # phase, not the last phase, and callers invoke this via `bash <script>` so
 # the shebang's -e does not apply.
 run_phase "worker_install" install_worker || exit "$?"
 run_phase "worker_cli_install" install_worker_cli || exit "$?"
 run_phase "node_pty_install" ensure_node_pty || exit "$?"
+run_phase "pm2_install" ensure_pm2 || exit "$?"
