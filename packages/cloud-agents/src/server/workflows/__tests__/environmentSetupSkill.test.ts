@@ -325,6 +325,18 @@ describe('environment-setup guidance', () => {
       'use `success: false` with a short, user-safe `error` message for `not_ready`, `blocked`',
     );
     expect(skillContent).toContain(
+      'The final response reports that the environment is ready only when the follow-up verification task explicitly reports `ready` with evidence',
+    );
+    expect(skillContent).toContain(
+      '`Completed`, `Ready`, or `Idle` task state without that explicit result is insufficient.',
+    );
+    expect(skillContent).toContain(
+      'Treat it as success only when those messages explicitly report `ready` with evidence that the requested developer workflow completed',
+    );
+    expect(skillContent).toContain(
+      '`success: true` only for an explicit evidence-backed `ready` result',
+    );
+    expect(skillContent).toContain(
       'When the spawned verification task reveals a fixable setup or environment-definition error, try to fix it yourself, rerun any affected local validation, recreate or update the environment with the revised YAML, launch a fresh verification task, and repeat the monitoring process instead of stopping after the first failure.',
     );
     expect(skillContent).toContain(
