@@ -76,6 +76,19 @@ redis.call('SET', KEYS[1], ARGV[3], 'EX', ARGV[4])
 redis.call('SET', KEYS[3], ARGV[3], 'EX', ARGV[4])
 return 1
 `;
+const CONSUME_PENDING_REVIEW_ACTIVITY_SCRIPT = `
+local events = redis.call('LRANGE', KEYS[1], 0, -1)
+redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4], KEYS[5])
+redis.call('ZREM', KEYS[6], ARGV[1], ARGV[2])
+return events
+`;
+const CLAIM_PENDING_REVIEW_SCHEDULE_SCRIPT = `
+if redis.call('EXISTS', KEYS[1]) == 0 or redis.call('ZSCORE', KEYS[2], ARGV[1]) == false then
+  return 0
+end
+local claimed = redis.call('SET', KEYS[3], '1', 'EX', ARGV[2], 'NX')
+return claimed and 1 or 0
+`;
 const prReviewNotificationBatchKindSchema = z.enum(['human', 'roomote']);
 
 const prReviewCycleStateSchema = z.object({
@@ -249,6 +262,10 @@ function buildRepairPayloadKey(target: PrReviewNotificationTarget): string {
 }
 
 function buildRepairMember(target: PrReviewNotificationTarget): string {
+  if (target.batchKind === undefined) {
+    return `legacy:${buildLegacyTargetKeySuffix(target)}`;
+  }
+
   return `${buildTargetKeySuffix(target)}:${target.immediate ? 'immediate' : 'delayed'}`;
 }
 
@@ -518,9 +535,17 @@ async function appendPendingEventAndClaimSchedule({
   const markerTtlSeconds =
     Math.ceil(delayMs / 1000) + SCHEDULED_MARKER_TTL_BUFFER_SECONDS;
 
-  const claim = await redis.set(markerKey, '1', 'EX', markerTtlSeconds, 'NX');
+  const claim = await redis.eval(
+    CLAIM_PENDING_REVIEW_SCHEDULE_SCRIPT,
+    3,
+    pendingKey,
+    PR_REVIEW_NOTIFICATION_REPAIR_INDEX_KEY,
+    markerKey,
+    repairMember,
+    markerTtlSeconds,
+  );
 
-  return claim === 'OK';
+  return claim === 1;
 }
 
 /**
@@ -564,17 +589,20 @@ export async function repairPendingPrReviewNotificationJobs(): Promise<void> {
     }
 
     const request = parsedRequest.data;
+    const pendingKey = buildPendingEventsKey(request);
     const markerKey = buildScheduledMarkerKey(request);
     const markerTtlSeconds = SCHEDULED_MARKER_TTL_BUFFER_SECONDS;
-    const claimed = await redis.set(
+    const claimed = await redis.eval(
+      CLAIM_PENDING_REVIEW_SCHEDULE_SCRIPT,
+      3,
+      pendingKey,
+      PR_REVIEW_NOTIFICATION_REPAIR_INDEX_KEY,
       markerKey,
-      '1',
-      'EX',
+      member,
       markerTtlSeconds,
-      'NX',
     );
 
-    if (claimed !== 'OK') {
+    if (claimed !== 1) {
       continue;
     }
 
@@ -610,16 +638,20 @@ export async function consumePendingPrReviewActivity(
     ...target,
     immediate: true,
   });
-
-  await redis.del(delayedMarkerKey, immediateMarkerKey).catch(() => undefined);
-
-  const results = await redis
-    .multi()
-    .lrange(pendingKey, 0, -1)
-    .del(pendingKey)
-    .exec();
-
-  const rawEvents = results?.[0]?.[1];
+  const delayedTarget = { ...target, immediate: false };
+  const immediateTarget = { ...target, immediate: true };
+  const rawEvents = await redis.eval(
+    CONSUME_PENDING_REVIEW_ACTIVITY_SCRIPT,
+    6,
+    pendingKey,
+    delayedMarkerKey,
+    immediateMarkerKey,
+    buildRepairPayloadKey(delayedTarget),
+    buildRepairPayloadKey(immediateTarget),
+    PR_REVIEW_NOTIFICATION_REPAIR_INDEX_KEY,
+    buildRepairMember(delayedTarget),
+    buildRepairMember(immediateTarget),
+  );
 
   if (!Array.isArray(rawEvents)) {
     return [];

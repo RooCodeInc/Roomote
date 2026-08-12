@@ -239,7 +239,11 @@ describe('enqueuePrReviewNotification', () => {
     const pendingKeys = multiCalls
       .filter((call) => call.command === 'rpush')
       .map((call) => String(call.args[0]));
-    const markerKeys = mockRedisSet.mock.calls.map((call) => String(call[0]));
+    const markerKeys = mockRedisEval.mock.calls
+      .filter((call) =>
+        String(call[0]).includes("redis.call('ZSCORE', KEYS[2], ARGV[1])"),
+      )
+      .map((call) => String(call[4]));
 
     expect(pendingKeys).toHaveLength(2);
     expect(pendingKeys[0]).toBe(pendingKeys[1]);
@@ -262,7 +266,9 @@ describe('enqueuePrReviewNotification', () => {
   });
 
   it('does not schedule a second job while one is already pending', async () => {
-    mockRedisSet.mockResolvedValue(null);
+    mockRedisEval.mockImplementation((script: string) =>
+      script.includes("redis.call('ZSCORE', KEYS[2], ARGV[1])") ? 0 : 1,
+    );
 
     const result = await enqueuePrReviewNotification(baseInput);
 
@@ -357,6 +363,135 @@ describe('enqueuePrReviewNotification', () => {
     );
   });
 
+  it('clears repair state when the original job consumes a multi-event batch', async () => {
+    let scheduleClaims = 0;
+    mockRedisEval.mockImplementation((script: string) => {
+      if (script.includes("redis.call('ZSCORE', KEYS[2], ARGV[1])")) {
+        scheduleClaims += 1;
+        return scheduleClaims === 1 ? 1 : 0;
+      }
+
+      return 1;
+    });
+
+    await enqueuePrReviewNotification(baseInput);
+    await enqueuePrReviewNotification({
+      ...baseInput,
+      event: {
+        kind: 'review_comment',
+        authorLogin: 'bob',
+      },
+    });
+
+    expect(mockQueueAdd).toHaveBeenCalledTimes(1);
+
+    const repairWrite = multiCalls
+      .filter(
+        (call) =>
+          call.command === 'set' && String(call.args[0]).includes('repair'),
+      )
+      .at(-1);
+    const repairMember = multiCalls
+      .filter((call) => call.command === 'zadd')
+      .at(-1)?.args[3];
+    const dueRepairMembers = new Set([String(repairMember)]);
+
+    mockRedisEval.mockImplementation((script: string) => {
+      if (script.includes("redis.call('LRANGE', KEYS[1], 0, -1)")) {
+        dueRepairMembers.clear();
+        return [
+          JSON.stringify(baseInput.event),
+          JSON.stringify({ kind: 'review_comment', authorLogin: 'bob' }),
+        ];
+      }
+
+      if (script.includes("redis.call('ZSCORE', KEYS[2], ARGV[1])")) {
+        return dueRepairMembers.size > 0 ? 1 : 0;
+      }
+
+      return 1;
+    });
+    mockRedisZrangebyscore.mockImplementation(() => [...dueRepairMembers]);
+    mockRedisGet.mockImplementation((key: string) =>
+      key === repairWrite?.args[0] ? repairWrite.args[1] : null,
+    );
+
+    await expect(
+      consumePendingPrReviewActivity({
+        taskId: 'task-1',
+        repository: 'owner/repo',
+        prNumber: 42,
+        batchKind: 'human',
+      }),
+    ).resolves.toHaveLength(2);
+    await repairPendingPrReviewNotificationJobs();
+
+    expect(mockQueueAdd).toHaveBeenCalledTimes(1);
+    expect(mockRedisEval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('ZREM', KEYS[6], ARGV[1], ARGV[2])"),
+      6,
+      expect.stringContaining('pr-review-notification:pending:'),
+      expect.stringContaining(':delayed'),
+      expect.stringContaining(':immediate'),
+      expect.stringContaining('repair-payload'),
+      expect.stringContaining('repair-payload'),
+      'pr-review-notification:repair',
+      expect.stringContaining(':delayed'),
+      expect.stringContaining(':immediate'),
+    );
+  });
+
+  it('does not let a stale repair scan enqueue after the batch is consumed', async () => {
+    const repairMember = 'task-1:owner%2Frepo#42:human:delayed';
+    const request = {
+      taskId: 'task-1',
+      repository: 'owner/repo',
+      prNumber: 42,
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      deferrals: 0,
+      batchKind: 'human' as const,
+    };
+
+    mockRedisZrangebyscore.mockResolvedValue([repairMember]);
+    mockRedisGet.mockResolvedValue(JSON.stringify(request));
+    mockRedisEval.mockImplementation((script: string) =>
+      script.includes("redis.call('ZSCORE', KEYS[2], ARGV[1])") ? 0 : 1,
+    );
+
+    await repairPendingPrReviewNotificationJobs();
+
+    expect(mockQueueAdd).not.toHaveBeenCalled();
+    expect(mockRedisEval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('ZSCORE', KEYS[2], ARGV[1])"),
+      3,
+      expect.stringContaining('pr-review-notification:pending:'),
+      'pr-review-notification:repair',
+      expect.stringContaining('pr-review-notification:scheduled:'),
+      repairMember,
+      expect.any(Number),
+    );
+  });
+
+  it('keeps legacy consume cleanup separate from new human repair state', async () => {
+    mockRedisEval.mockResolvedValue([]);
+
+    await consumePendingPrReviewActivity({
+      taskId: 'task-1',
+      repository: 'owner/repo',
+      prNumber: 42,
+    });
+
+    const consumeCall = mockRedisEval.mock.calls.find((call) =>
+      String(call[0]).includes("redis.call('LRANGE', KEYS[1], 0, -1)"),
+    );
+
+    expect(consumeCall?.slice(-2)).toEqual([
+      'legacy:task-1:owner%2Frepo#42',
+      'legacy:task-1:owner%2Frepo#42:immediate',
+    ]);
+    expect(consumeCall).not.toContain('task-1:owner%2Frepo#42:human:delayed');
+  });
+
   it('suppresses late Roomote activity for a completed cycle', async () => {
     mockRedisGet.mockResolvedValue(
       JSON.stringify({
@@ -410,10 +545,7 @@ describe('enqueuePrReviewNotification', () => {
     mockRedisGet.mockImplementation((key: string) =>
       key.includes('review-cycle-completed') ? null : completedCycle,
     );
-    mockMultiExec.mockResolvedValue([
-      [null, [rpushCall?.args[1]]],
-      [null, 1],
-    ]);
+    mockRedisEval.mockResolvedValue([rpushCall?.args[1]]);
 
     await expect(
       consumePendingPrReviewActivity({
@@ -730,19 +862,14 @@ describe('consumePendingPrReviewActivity', () => {
     multiCalls.length = 0;
     mockRedisDel.mockResolvedValue(1);
     mockRedisGet.mockResolvedValue(null);
+    mockRedisEval.mockResolvedValue([]);
   });
 
   it('drains and parses pending events, ignoring malformed entries', async () => {
-    mockMultiExec.mockResolvedValue([
-      [
-        null,
-        [
-          JSON.stringify({ kind: 'review_comment', authorLogin: 'bob' }),
-          'not-json',
-          JSON.stringify({ unexpected: true }),
-        ],
-      ],
-      [null, 1],
+    mockRedisEval.mockResolvedValue([
+      JSON.stringify({ kind: 'review_comment', authorLogin: 'bob' }),
+      'not-json',
+      JSON.stringify({ unexpected: true }),
     ]);
 
     const events = await consumePendingPrReviewActivity({
@@ -752,36 +879,41 @@ describe('consumePendingPrReviewActivity', () => {
     });
 
     expect(events).toEqual([{ kind: 'review_comment', authorLogin: 'bob' }]);
-    expect(mockRedisDel).toHaveBeenCalled();
+    expect(mockRedisEval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('LRANGE', KEYS[1], 0, -1)"),
+      6,
+      expect.any(String),
+      expect.any(String),
+      expect.any(String),
+      expect.any(String),
+      expect.any(String),
+      'pr-review-notification:repair',
+      expect.any(String),
+      expect.any(String),
+    );
   });
 
   it('drops completed Roomote inline activity while preserving summaries and human feedback', async () => {
     mockRedisGet.mockResolvedValue('summary-notified');
-    mockMultiExec.mockResolvedValue([
-      [
-        null,
-        [
-          JSON.stringify({
-            kind: 'review_comment',
-            authorLogin: 'roomote[bot]',
-            roomoteAuthored: true,
-            reviewHeadSha: 'abc123',
-            batchId: 'cycle-1',
-          }),
-          JSON.stringify({
-            kind: 'review_comment',
-            authorLogin: 'alice',
-            reviewHeadSha: 'abc123',
-          }),
-          JSON.stringify({
-            kind: 'review_summary',
-            authorLogin: 'roomote[bot]',
-            roomoteAuthored: true,
-            reviewHeadSha: 'abc123',
-          }),
-        ],
-      ],
-      [null, 1],
+    mockRedisEval.mockResolvedValue([
+      JSON.stringify({
+        kind: 'review_comment',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+        reviewHeadSha: 'abc123',
+        batchId: 'cycle-1',
+      }),
+      JSON.stringify({
+        kind: 'review_comment',
+        authorLogin: 'alice',
+        reviewHeadSha: 'abc123',
+      }),
+      JSON.stringify({
+        kind: 'review_summary',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+        reviewHeadSha: 'abc123',
+      }),
     ]);
 
     const events = await consumePendingPrReviewActivity({
@@ -824,10 +956,9 @@ describe('consumePendingPrReviewActivity', () => {
       },
     ];
     mockRedisGet.mockRejectedValue(new Error('redis read failed'));
-    mockMultiExec.mockResolvedValue([
-      [null, pendingEvents.map((event) => JSON.stringify(event))],
-      [null, 1],
-    ]);
+    mockRedisEval.mockResolvedValue(
+      pendingEvents.map((event) => JSON.stringify(event)),
+    );
 
     await expect(
       consumePendingPrReviewActivity({
@@ -858,22 +989,16 @@ describe('consumePendingPrReviewActivity', () => {
         observedAt: 200,
       });
     });
-    mockMultiExec.mockResolvedValue([
-      [
-        null,
-        [
-          JSON.stringify({
-            kind: 'review_comment',
-            authorLogin: 'roomote[bot]',
-            roomoteAuthored: true,
-            reviewHeadSha: 'abc123',
-            batchId: 'github-review:123',
-            observedAt: 100,
-          }),
-          JSON.stringify(newerSameHeadEvent),
-        ],
-      ],
-      [null, 1],
+    mockRedisEval.mockResolvedValue([
+      JSON.stringify({
+        kind: 'review_comment',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+        reviewHeadSha: 'abc123',
+        batchId: 'github-review:123',
+        observedAt: 100,
+      }),
+      JSON.stringify(newerSameHeadEvent),
     ]);
 
     const events = await consumePendingPrReviewActivity({
