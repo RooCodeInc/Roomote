@@ -37,7 +37,7 @@ type CommunicationPlatformChannels = {
   limitation?: string;
 };
 
-export type CommunicationChannelsPayload = {
+type CommunicationChannelsPayload = {
   channelCount: number;
   platforms: CommunicationPlatformChannels[];
 };
