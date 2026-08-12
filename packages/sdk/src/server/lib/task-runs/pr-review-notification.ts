@@ -50,6 +50,8 @@ export const PR_REVIEW_NOTIFICATION_MAX_DEFERRALS = 288;
 const PENDING_EVENTS_TTL_SECONDS = 24 * 60 * 60;
 const SCHEDULED_MARKER_TTL_BUFFER_SECONDS = 15 * 60;
 const REVIEW_CYCLE_TTL_SECONDS = 30 * 24 * 60 * 60;
+const PR_ASSOCIATION_LOOKUP_MAX_ATTEMPTS = 4;
+const PR_ASSOCIATION_LOOKUP_RETRY_DELAY_MS = 250;
 const SET_REVIEW_CYCLE_IF_NEWER_SCRIPT = `
 local current = redis.call('GET', KEYS[1])
 if current then
@@ -664,17 +666,36 @@ export async function enqueuePrReviewNotification(
 ): Promise<EnqueuePrReviewNotificationResult> {
   const parsedInput = enqueuePrReviewNotificationInputSchema.parse(input);
 
-  const prTaskLinks = await db.query.taskPullRequests.findMany({
-    where: and(
-      eq(
-        taskPullRequests.sourceControlProvider,
-        parsedInput.sourceControlProvider ?? 'github',
+  let prTaskLinks: Array<{ taskId: string }> = [];
+
+  for (
+    let attempt = 1;
+    attempt <= PR_ASSOCIATION_LOOKUP_MAX_ATTEMPTS;
+    attempt += 1
+  ) {
+    prTaskLinks = await db.query.taskPullRequests.findMany({
+      where: and(
+        eq(
+          taskPullRequests.sourceControlProvider,
+          parsedInput.sourceControlProvider ?? 'github',
+        ),
+        eq(taskPullRequests.repository, parsedInput.repository),
+        eq(taskPullRequests.prNumber, parsedInput.prNumber),
       ),
-      eq(taskPullRequests.repository, parsedInput.repository),
-      eq(taskPullRequests.prNumber, parsedInput.prNumber),
-    ),
-    columns: { taskId: true },
-  });
+      columns: { taskId: true },
+    });
+
+    if (
+      prTaskLinks.length > 0 ||
+      attempt === PR_ASSOCIATION_LOOKUP_MAX_ATTEMPTS
+    ) {
+      break;
+    }
+
+    await new Promise((resolve) =>
+      setTimeout(resolve, PR_ASSOCIATION_LOOKUP_RETRY_DELAY_MS),
+    );
+  }
 
   const taskIds = Array.from(new Set(prTaskLinks.map((link) => link.taskId)));
 

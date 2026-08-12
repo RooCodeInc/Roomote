@@ -98,13 +98,18 @@ describe('enqueuePrReviewNotification', () => {
     },
   };
 
-  it('returns no_linked_tasks when no task links the PR', async () => {
+  it('returns no_linked_tasks after a bounded lookup when no task links the PR', async () => {
+    vi.useFakeTimers();
     mockFindManyTaskPullRequests.mockResolvedValue([]);
 
-    const result = await enqueuePrReviewNotification(baseInput);
+    const resultPromise = enqueuePrReviewNotification(baseInput);
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
 
     expect(result).toEqual({ notifiedTaskCount: 0, reason: 'no_linked_tasks' });
+    expect(mockFindManyTaskPullRequests).toHaveBeenCalledTimes(4);
     expect(mockQueueAdd).not.toHaveBeenCalled();
+    vi.useRealTimers();
   });
 
   it('debounces ordinary notifications for web-only tasks without an originating conversation', async () => {

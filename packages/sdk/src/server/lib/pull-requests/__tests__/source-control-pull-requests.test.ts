@@ -110,6 +110,20 @@ const { mockTaskPullRequestUpsert, mockTaskRunAssociationUpdate } = vi.hoisted(
   }),
 );
 
+const {
+  mockFindManyTaskPullRequests,
+  mockRedisSet,
+  mockRedisMultiExec,
+  mockQueueAdd,
+  redisMultiCalls,
+} = vi.hoisted(() => ({
+  mockFindManyTaskPullRequests: vi.fn(),
+  mockRedisSet: vi.fn(),
+  mockRedisMultiExec: vi.fn(),
+  mockQueueAdd: vi.fn(),
+  redisMultiCalls: [] as Array<{ command: string; args: unknown[] }>,
+}));
+
 vi.mock('@roomote/db/server', () => ({
   getDeploymentGitHubRoomoteMentionEnabled: (...args: unknown[]) =>
     mockGetDeploymentGitHubRoomoteMentionEnabled(...args),
@@ -132,6 +146,9 @@ vi.mock('@roomote/db/server', () => ({
       },
       tasks: {
         findFirst: (...args: unknown[]) => mockTasksFindFirst(...args),
+      },
+      taskPullRequests: {
+        findMany: (...args: unknown[]) => mockFindManyTaskPullRequests(...args),
       },
     },
     insert: () => ({
@@ -177,7 +194,31 @@ vi.mock('@roomote/db/server', () => ({
   eq: vi.fn((left: unknown, right: unknown) => ({ type: 'eq', left, right })),
 }));
 
+vi.mock('@roomote/redis', () => ({
+  getRedis: () => ({
+    set: (...args: unknown[]) => mockRedisSet(...args),
+    multi: () => {
+      const multi: Record<string, unknown> = {};
+      for (const command of ['rpush', 'expire']) {
+        multi[command] = (...args: unknown[]) => {
+          redisMultiCalls.push({ command, args });
+          return multi;
+        };
+      }
+      multi.exec = (...args: unknown[]) => mockRedisMultiExec(...args);
+      return multi;
+    },
+  }),
+}));
+
+vi.mock('bullmq', () => ({
+  Queue: class MockQueue {
+    add = (...args: unknown[]) => mockQueueAdd(...args);
+  },
+}));
+
 import { createOrUpdateSourceControlPullRequestForTaskRun } from '../source-control-pull-requests';
+import { enqueuePrReviewNotification } from '../../task-runs/pr-review-notification';
 
 function makeTaskRun(payload: TaskRun['payload']): TaskRun {
   return {
@@ -795,6 +836,12 @@ describe('platform-managed draft state', () => {
 describe('optional targetBranch', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    redisMultiCalls.length = 0;
+    mockTaskPullRequestUpsert.mockResolvedValue(undefined);
+    mockFindManyTaskPullRequests.mockResolvedValue([]);
+    mockRedisSet.mockResolvedValue('OK');
+    mockRedisMultiExec.mockResolvedValue([]);
+    mockQueueAdd.mockResolvedValue(undefined);
     mockResolveConfiguredGitHubAppSlugIfConfigured.mockResolvedValue(null);
     mockResolveRunCommitAuthor.mockResolvedValue({
       kind: 'roomote',
@@ -906,6 +953,129 @@ describe('optional targetBranch', () => {
     expect(mockTaskPullRequestUpsert).toHaveBeenCalledWith(
       expect.objectContaining({ prBaseRef: 'develop' }),
     );
+  });
+
+  it('surfaces an association write failure after the bounded retry budget', async () => {
+    vi.useFakeTimers();
+    makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+    mockTaskPullRequestUpsert.mockRejectedValue(
+      new Error('association unavailable'),
+    );
+
+    const resultPromise = createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: { ...baseInput, targetBranch: 'develop' },
+    });
+    const rejection = expect(resultPromise).rejects.toThrow(
+      'association unavailable',
+    );
+    await vi.runAllTimersAsync();
+
+    await rejection;
+    expect(mockTaskPullRequestUpsert).toHaveBeenCalledTimes(3);
+    vi.useRealTimers();
+  });
+
+  it('recovers from a transient association write failure', async () => {
+    vi.useFakeTimers();
+    makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+    mockTaskPullRequestUpsert
+      .mockRejectedValueOnce(new Error('association unavailable'))
+      .mockResolvedValueOnce(undefined);
+
+    const resultPromise = createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: { ...baseInput, targetBranch: 'develop' },
+    });
+    await vi.runAllTimersAsync();
+
+    await expect(resultPromise).resolves.toMatchObject({
+      action: 'created',
+      number: 13,
+    });
+    expect(mockTaskPullRequestUpsert).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+
+  it('schedules one review notification when the association commits during persistence', async () => {
+    vi.useFakeTimers();
+    let finishAssociation: () => void;
+    const associationCanCommit = new Promise<void>((resolve) => {
+      finishAssociation = resolve;
+    });
+    let associationVisible = false;
+    mockTaskPullRequestUpsert.mockImplementationOnce(async () => {
+      await associationCanCommit;
+      associationVisible = true;
+    });
+    mockFindManyTaskPullRequests.mockImplementation(async () =>
+      associationVisible ? [{ taskId: 'task-123' }] : [],
+    );
+    makeOctokit({
+      list: [],
+      created: {
+        number: 13,
+        node_id: 'node-13',
+        html_url: 'https://github.com/acme/web/pull/13',
+        title: '[Feature] X',
+        draft: true,
+        base: { ref: 'develop' },
+      },
+    });
+
+    const mutationPromise = createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: { ...baseInput, targetBranch: 'develop' },
+    });
+    await vi.waitFor(() => {
+      expect(mockTaskPullRequestUpsert).toHaveBeenCalledTimes(1);
+    });
+
+    const notificationPromise = enqueuePrReviewNotification({
+      repository: 'acme/web',
+      prNumber: 13,
+      prUrl: 'https://github.com/acme/web/pull/13',
+      event: {
+        kind: 'review',
+        authorLogin: 'reviewer',
+        reviewState: 'changes_requested',
+      },
+    });
+    await vi.waitFor(() => {
+      expect(mockFindManyTaskPullRequests).toHaveBeenCalledTimes(1);
+    });
+    finishAssociation!();
+    await mutationPromise;
+    await vi.runAllTimersAsync();
+
+    await expect(notificationPromise).resolves.toEqual({
+      notifiedTaskCount: 1,
+    });
+    expect(mockQueueAdd).toHaveBeenCalledTimes(1);
+    expect(
+      redisMultiCalls.filter((call) => call.command === 'rpush'),
+    ).toHaveLength(1);
+    vi.useRealTimers();
   });
 
   it('scopes the lookup by base and updates without retargeting when targetBranch is explicit', async () => {
