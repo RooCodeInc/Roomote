@@ -317,6 +317,12 @@ describe('setup mode behavior', () => {
   });
 
   it('runs environment repository commands best-effort for standard environment setup', async () => {
+    const repoPaths = { 'owner/repo': '/tmp/workspace/owner/repo' };
+    mockInitializeWorkspaceRepositories.mockResolvedValueOnce({
+      workspacePath: '/tmp/workspace',
+      environment: { repoPaths },
+    });
+
     await setup({
       mode: 'full',
       workspace: environmentWorkspaceOptions,
@@ -330,11 +336,18 @@ describe('setup mode behavior', () => {
       userEnvVars: undefined,
       preparedWorkspace: {
         workspacePath: '/tmp/workspace',
+        environment: { repoPaths },
       },
       continueRepositoryCommandFailures: true,
       setupStatusWriter: expect.anything(),
       recordPhase: undefined,
     });
+    expect(
+      mockEnvironmentSetupStatusWriter.mock.results[0]?.value.initialize,
+    ).toHaveBeenCalledWith(
+      environmentWorkspaceOptions.workspace.environmentConfig.repositories,
+      repoPaths,
+    );
   });
 
   it('keeps environment repository commands fatal for snapshot creation setup', async () => {

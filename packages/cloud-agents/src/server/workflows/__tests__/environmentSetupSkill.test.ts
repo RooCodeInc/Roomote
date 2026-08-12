@@ -267,14 +267,20 @@ describe('environment-setup guidance', () => {
     expect(skillContent).toContain(
       'Then call the Roomote MCP tool `mcp__roomote__manage_tasks` with `action: "launch"`, `environmentId` set to that created or updated environment ID, `notifyOnSettle` set to `true`',
     );
+    expect(skillContent).toContain('a concrete read-only verification prompt');
     expect(skillContent).toContain(
-      'First read .roomote/setup-status.json in the workspace root: while its state is "running", environment setup commands are still executing in the background',
+      'finish with exactly one explicit result: `ready`, `not_ready`, or `blocked`',
     );
     expect(skillContent).toContain(
-      'Re-read .roomote/setup-status.json every 10-15 seconds while it is still running, rather than sleeping for several minutes at a time.',
+      'It must not invoke Doctor or another workflow skill, launch another task, repair the environment, edit repository files',
     );
     expect(skillContent).toContain(
-      "If any setup command failed, report each failing command's name and exit code from .roomote/setup-status.json plus the relevant error lines from .roomote/setup-logs/.",
+      'or assume that a service, port, HTTP endpoint, browser preview, test suite, container, or long-running process exists.',
+    );
+    expect(
+      skillContent.indexOf('a concrete read-only verification prompt'),
+    ).toBeGreaterThan(
+      skillContent.indexOf('After environment persistence succeeds'),
     );
     expect(skillContent).toContain(
       'the platform delivers a `Spawned task update` message into this session when the verification task settles',
@@ -304,10 +310,31 @@ describe('environment-setup guidance', () => {
       'If the monitored summary reaches `Ready`, `Idle`, or `Needs input`, do not keep polling that same state indefinitely.',
     );
     expect(skillContent).toContain(
-      'If those latest task messages clearly report that the environment looks ready, treat that as a successful spawned-task run and report the observed success directly.',
+      'If those latest task messages explicitly report `ready` and contain evidence that the requested developer workflow completed, treat that as a successful spawned-task run and report the observed success directly.',
     );
     expect(skillContent).toContain(
-      'If the monitored summary reaches `Completed` without a surfaced startup or runtime failure, treat that as a successful spawned-task run and report that observed outcome directly instead of asking the user to confirm it manually.',
+      'A `Completed`, `Ready`, or `Idle` task state is not proof that verification passed.',
+    );
+    expect(skillContent).toContain(
+      'Treat explicit `not_ready` or `blocked` results as verification failures or blockers even when setup and task execution completed cleanly.',
+    );
+    expect(skillContent).toContain(
+      'use `success: true` only for the explicit evidence-backed `ready` criterion above',
+    );
+    expect(skillContent).toContain(
+      'use `success: false` with a short, user-safe `error` message for `not_ready`, `blocked`',
+    );
+    expect(skillContent).toContain(
+      'The final response reports that the environment is ready only when the follow-up verification task explicitly reports `ready` with evidence',
+    );
+    expect(skillContent).toContain(
+      '`Completed`, `Ready`, or `Idle` task state without that explicit result is insufficient.',
+    );
+    expect(skillContent).toContain(
+      'Treat it as success only when those messages explicitly report `ready` with evidence that the requested developer workflow completed',
+    );
+    expect(skillContent).toContain(
+      '`success: true` only for an explicit evidence-backed `ready` result',
     );
     expect(skillContent).toContain(
       'When the spawned verification task reveals a fixable setup or environment-definition error, try to fix it yourself, rerun any affected local validation, recreate or update the environment with the revised YAML, launch a fresh verification task, and repeat the monitoring process instead of stopping after the first failure.',

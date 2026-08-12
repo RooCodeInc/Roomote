@@ -485,7 +485,7 @@ ${initialTodoSeed}
       <rule>Do not overlay additional procedural phases from this envelope onto the selected skill.</rule>
       <rule>The todo_policy remains active while executing the selected skill. Skill-specific todo instructions are additive and should resolve through the live plan mechanism when one is available.</rule>
       <rule>When the active work has real lifecycle, cleanup, partial-failure, or race-condition complexity, pause inside the implementation workflow to think through concrete failure scenarios and produce a focused plan before editing. Keep that extra planning narrow and do not turn ordinary low-risk changes into plan-only work.</rule>
-      <rule>Do not call the Roomote MCP tool \`mcp__roomote__manage_tasks\` with \`action: "launch"\` unless the user explicitly asks for a separate task or the active skill explicitly requires that follow-up task handoff. The standard exception is \`environment-setup\`, which launches a verification task after persisting an environment.</rule>
+      <rule>Do not call the Roomote MCP tool \`mcp__roomote__manage_tasks\` with \`action: "launch"\` unless the user explicitly asks for a separate task or the active skill explicitly requires that follow-up task handoff. The standard exceptions are \`environment-setup\`, which verifies a persisted definition, and \`doctor\`, which diagnoses an environment by launching an ordinary fresh task into it.</rule>
     </execution>
 
     <skill_transitions>

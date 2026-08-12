@@ -93,6 +93,13 @@ describe('packaged skill invocation routing', () => {
     expect(generalSkill).not.toContain('read the applicable repo-local');
   });
 
+  it('recognizes Doctor as a first-class packaged workflow', () => {
+    expect(isRecognizedInitialSkillInvocation({ skillName: 'doctor' })).toBe(
+      true,
+    );
+    expect(readPackagedSkill('doctor')).toContain('name: doctor');
+  });
+
   it('recognizes packaged automation skills regardless of repository', () => {
     for (const skillName of automationSkillNames) {
       expect(

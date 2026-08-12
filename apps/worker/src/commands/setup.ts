@@ -405,7 +405,10 @@ async function runSetup({
       const setupStatusWriter = new EnvironmentSetupStatusWriter(
         initializeRepositoriesResult.workspacePath,
       );
-      setupStatusWriter.initialize(workspace.environmentConfig.repositories);
+      setupStatusWriter.initialize(
+        workspace.environmentConfig.repositories,
+        initializeRepositoriesResult.environment?.repoPaths,
+      );
 
       if (!backgroundEnvironmentSetup) {
         const warnings =

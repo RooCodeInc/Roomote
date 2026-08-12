@@ -9,7 +9,7 @@ describe('Standard Task task-launch policy', () => {
     });
 
     expect(harnessInstructions).toContain(
-      'Do not call the Roomote MCP tool `mcp__roomote__manage_tasks` with `action: "launch"` unless the user explicitly asks for a separate task or the active skill explicitly requires that follow-up task handoff. The standard exception is `environment-setup`, which launches a verification task after persisting an environment.',
+      'Do not call the Roomote MCP tool `mcp__roomote__manage_tasks` with `action: "launch"` unless the user explicitly asks for a separate task or the active skill explicitly requires that follow-up task handoff. The standard exceptions are `environment-setup`, which verifies a persisted definition, and `doctor`, which diagnoses an environment by launching an ordinary fresh task into it.',
     );
   });
 });

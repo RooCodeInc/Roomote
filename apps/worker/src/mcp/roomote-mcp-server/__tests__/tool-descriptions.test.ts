@@ -131,6 +131,15 @@ describe('roomote MCP tool descriptions', () => {
     vi.unstubAllGlobals();
   });
 
+  it('uses existing task management instead of Doctor-specific MCP tools', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const toolNames = registeredTools.map(({ name }) => name);
+
+    expect(toolNames).toContain('manage_tasks');
+    expect(toolNames).not.toContain('diagnose_environment');
+    expect(toolNames).not.toContain('complete_doctor_report');
+  });
+
   it('documents every built-in custom automation schedule preset', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const automationsTool = getRegisteredTool(
