@@ -84,6 +84,7 @@ describe('MockTelegramServer', () => {
     expect(server.getState().botCommands).toEqual([
       { command: 'start', description: 'Show welcome and command help' },
       { command: 'new', description: 'Start a fresh task' },
+      { command: 'goal', description: 'Set a goal for the active task' },
     ]);
   });
 
