@@ -398,7 +398,7 @@ describe('BoxClient Public API v1', () => {
         {
           code: 'denied',
           requestId: 'request-from-body',
-          message: 'token=server-secret',
+          message: 'insufficient permission',
         },
         401,
       ),
@@ -417,7 +417,54 @@ describe('BoxClient Public API v1', () => {
       },
     });
     expect(JSON.stringify(error)).not.toContain('client-secret');
-    expect(error.message).not.toContain('server-secret');
+  });
+
+  it('surfaces the error-body code and message in the thrown message', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse(
+        {
+          ok: false,
+          type: 'box.error',
+          status: 400,
+          code: 'trial_auto_stop_required',
+          message:
+            'Free-trial Boxes can auto-stop after at most 2 hours. Choose 2 hours or less.',
+        },
+        400,
+      ),
+    );
+    const client = new BoxClient({ apiKey: 'client-secret', fetchImpl });
+
+    const error = await client.listInstances({}).catch((value) => value);
+    expect(error).toBeInstanceOf(BoxApiError);
+    expect(error.message).toBe(
+      'Box API GET /boxes failed with status 400 (trial_auto_stop_required): ' +
+        'Free-trial Boxes can auto-stop after at most 2 hours. Choose 2 hours or less.',
+    );
+  });
+
+  it('falls back to the nested error object and redacts the API key', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse(
+        {
+          ok: false,
+          error: {
+            code: 'unauthorized',
+            message: `bad bearer token client-secret; try again with ${'x'.repeat(400)}`,
+          },
+        },
+        401,
+      ),
+    );
+    const client = new BoxClient({ apiKey: 'client-secret', fetchImpl });
+
+    const error = await client.listInstances({}).catch((value) => value);
+    expect(error).toBeInstanceOf(BoxApiError);
+    expect(error.metadata.errorCode).toBe('unauthorized');
+    expect(error.message).toContain('(unauthorized): bad bearer token');
+    expect(error.message).not.toContain('client-secret');
+    expect(error.message).toContain('[redacted]');
+    expect(error.metadata.errorMessage.length).toBeLessThanOrEqual(301);
   });
 
   it('rejects snapshot operations', async () => {

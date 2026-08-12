@@ -90,12 +90,15 @@ export interface BoxApiErrorMetadata {
   status: number;
   requestId?: string;
   errorCode?: string;
+  errorMessage?: string;
 }
 
 export class BoxApiError extends Error {
   public constructor(public readonly metadata: BoxApiErrorMetadata) {
     super(
-      `Box API ${metadata.method} ${metadata.path} failed with status ${metadata.status}`,
+      `Box API ${metadata.method} ${metadata.path} failed with status ${metadata.status}` +
+        (metadata.errorCode ? ` (${metadata.errorCode})` : '') +
+        (metadata.errorMessage ? `: ${metadata.errorMessage}` : ''),
     );
     this.name = 'BoxApiError';
   }
@@ -560,6 +563,8 @@ export class BoxClient implements ComputeProviderClient {
 
       const errorPayload = await readErrorPayload(response);
       const headerRequestId = response.headers.get('x-request-id');
+      const errorCode = readErrorPayloadField(errorPayload, 'code');
+      const errorMessage = readErrorPayloadField(errorPayload, 'message');
       throw new BoxApiError({
         method,
         path,
@@ -569,8 +574,14 @@ export class BoxClient implements ComputeProviderClient {
           : typeof errorPayload?.requestId === 'string'
             ? { requestId: errorPayload.requestId }
             : {}),
-        ...(typeof errorPayload?.code === 'string'
-          ? { errorCode: errorPayload.code }
+        ...(errorCode ? { errorCode } : {}),
+        ...(errorMessage
+          ? {
+              errorMessage: sanitizeErrorMessage(
+                errorMessage,
+                this.config.apiKey,
+              ),
+            }
           : {}),
       });
     }
@@ -794,6 +805,30 @@ function retryDelayMs(response: Response, attempt: number): number {
     return Math.min(retryAfter * 1_000, 10_000);
   }
   return Math.min(250 * 2 ** (attempt - 1), 2_000);
+}
+
+const ERROR_MESSAGE_MAX_LENGTH = 300;
+
+/** Reads `field` from the payload, falling back to the nested `error` object. */
+function readErrorPayloadField(
+  payload: Record<string, unknown> | undefined,
+  field: 'code' | 'message',
+): string | undefined {
+  const direct = payload?.[field];
+  if (typeof direct === 'string' && direct) return direct;
+  const nested = payload?.error;
+  if (!nested || typeof nested !== 'object') return undefined;
+  const value = (nested as Record<string, unknown>)[field];
+  return typeof value === 'string' && value ? value : undefined;
+}
+
+// Server error text is echoed into task UI and logs; never let it carry our
+// bearer token, and cap it so a huge body cannot bloat stored events.
+function sanitizeErrorMessage(message: string, apiKey: string): string {
+  const redacted = apiKey ? message.replaceAll(apiKey, '[redacted]') : message;
+  return redacted.length > ERROR_MESSAGE_MAX_LENGTH
+    ? `${redacted.slice(0, ERROR_MESSAGE_MAX_LENGTH)}…`
+    : redacted;
 }
 
 async function readErrorPayload(
