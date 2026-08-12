@@ -421,6 +421,69 @@ describe('Slack deleted-mention suppression', () => {
     );
   });
 
+  it('includes existing replies when a task starts from the thread root', async () => {
+    fetchThreadMessagesMock.mockResolvedValue([
+      {
+        user: 'U123',
+        text: '<@BOT> investigate this',
+        ts: '111.222',
+      },
+      {
+        user: 'U456',
+        text: '<@BOT> use the failure details in this reply',
+        ts: '111.333',
+      },
+    ]);
+    const slack = new SlackNotifier('xoxb-test');
+
+    await showTaskConfiguration({
+      event: {
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        text: '<@BOT> investigate this',
+        ts: '111.222',
+      },
+      slackInstallation: {
+        teamId: 'T123',
+        botUserId: 'BOT',
+      } as never,
+      userMapping: {
+        userId: 'user_1',
+      } as never,
+      slack: slack as never,
+    });
+
+    expect(fetchThreadMessagesMock).toHaveBeenCalledWith({
+      channel: 'C123',
+      threadTs: '111.222',
+    });
+    expect(buildSlackRoutingContextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadMessages: [
+          { user: 'U123', text: '<@BOT> investigate this' },
+          {
+            user: 'U456',
+            text: '<@BOT> use the failure details in this reply',
+          },
+        ],
+      }),
+    );
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            threadMessages: [
+              expect.objectContaining({ ts: '111.222' }),
+              expect.objectContaining({ ts: '111.333' }),
+            ],
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
   it('filters eval environments out of the workspace picker query', async () => {
     const slack = new SlackNotifier('xoxb-test');
 

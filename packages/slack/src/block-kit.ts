@@ -942,29 +942,28 @@ export async function showTaskConfiguration({
           });
         }
 
-        // Fetch thread messages for context if this is a reply in a thread
+        // A top-level mention can already have replies by the time routing
+        // finishes, so always read the conversation thread before launch.
         let threadMessages: SlackThreadMessage[] | undefined;
 
-        if (event.thread_ts) {
-          try {
-            console.log(
-              `[LLM Router] Fetching thread messages for routing context (channel: ${event.channel}, thread_ts: ${threadId})`,
-            );
+        try {
+          console.log(
+            `[LLM Router] Fetching thread messages for routing context (channel: ${event.channel}, thread_ts: ${threadId})`,
+          );
 
-            const splitMessages = await getPromptReadyThreadMessages({
-              slack,
-              channel: event.channel,
-              threadTs: threadId,
-              botUserId: slackInstallation.botUserId,
-            });
-            threadMessages = splitMessages.contextMessages;
-            latestOwnBotReply = splitMessages.latestOwnBotReply;
-          } catch (error) {
-            console.warn(
-              `[LLM Router] Failed to fetch thread messages for routing: ${error instanceof Error ? error.message : String(error)}`,
-            );
-            // Continue without thread context
-          }
+          const splitMessages = await getPromptReadyThreadMessages({
+            slack,
+            channel: event.channel,
+            threadTs: threadId,
+            botUserId: slackInstallation.botUserId,
+          });
+          threadMessages = splitMessages.contextMessages;
+          latestOwnBotReply = splitMessages.latestOwnBotReply;
+        } catch (error) {
+          console.warn(
+            `[LLM Router] Failed to fetch thread messages for routing: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          // Continue without thread context
         }
         routingThreadMessages = threadMessages;
 
