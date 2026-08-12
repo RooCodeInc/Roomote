@@ -83,6 +83,7 @@ import {
   DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_DELAY_MS,
   formatOpenCodeProviderErrorRetryNoticeText,
   getOpenCodeProviderErrorRecovery,
+  isOpenCodeContextOverflowError,
   isOpenCodeTerminalProviderError,
   resolveOpenCodeProviderErrorRetryDelayMs,
   summarizeOpenCodeProviderError,
@@ -1588,6 +1589,7 @@ export class OpenCodeServerHarness
   private lastOpenCodeRetryStatusMessage: string | null = null;
   private providerErrorRecoveryQueuedPromptId: string | null = null;
   private providerErrorRecoveryRetryAtMs: number | null = null;
+  private pendingContextOverflowError: unknown | null = null;
   private ignoreNextProviderRecoverySessionIdle = false;
   private currentWorkflowPhase: string | null = null;
   // Most recent packaged workflow skill loaded by the primary session's agent
@@ -3734,6 +3736,10 @@ export class OpenCodeServerHarness
       case 'session.error':
         await this.handleSessionError(payload);
         return;
+      case 'session.compacted':
+        this.pendingContextOverflowError = null;
+        this.stallWatchdogs.noteActivity();
+        return;
       case 'message.part.updated':
         this.handleMessagePartUpdated(payload);
         return;
@@ -3835,6 +3841,10 @@ export class OpenCodeServerHarness
     }
 
     if (statusType === 'idle') {
+      if (await this.failPendingContextOverflow()) {
+        return;
+      }
+
       if (await this.drainProviderErrorRecoveryAfterIdle('session_status')) {
         return;
       }
@@ -3902,6 +3912,10 @@ export class OpenCodeServerHarness
       this.sessionId = sessionId;
     }
 
+    if (await this.failPendingContextOverflow()) {
+      return;
+    }
+
     if (this.ignoreNextProviderRecoverySessionIdle) {
       this.ignoreNextProviderRecoverySessionIdle = false;
       return;
@@ -3933,6 +3947,19 @@ export class OpenCodeServerHarness
       asString(properties?.sessionId) ??
       this.sessionId;
     const error = properties?.error;
+
+    if (isOpenCodeContextOverflowError(error)) {
+      if (this.pendingContextOverflowError === null) {
+        // OpenCode emits the overflow before compacting and replaying the
+        // rejected turn. Keep the task alive; a second overflow or an idle
+        // before session.compacted means compaction could not recover it.
+        this.pendingContextOverflowError = error;
+        this.inFlight = true;
+        this.stallWatchdogs.noteActivity();
+        this.stallWatchdogs.ensureTurnStallArmed();
+        return;
+      }
+    }
 
     if (
       isOpenCodeMessageAbortedError(error) &&
@@ -4013,6 +4040,20 @@ export class OpenCodeServerHarness
 
     await this.cleanupVisualAttachmentDirectories();
     this.inFlight = false;
+  }
+
+  private async failPendingContextOverflow(): Promise<boolean> {
+    const error = this.pendingContextOverflowError;
+
+    if (error === null) {
+      return false;
+    }
+
+    await this.handleSessionError({
+      type: 'session.error',
+      properties: { sessionID: this.sessionId, error },
+    });
+    return true;
   }
 
   /**
@@ -4195,6 +4236,7 @@ export class OpenCodeServerHarness
     this.lastOpenCodeRetryStatusMessage = null;
     this.providerErrorRecoveryQueuedPromptId = null;
     this.providerErrorRecoveryRetryAtMs = null;
+    this.pendingContextOverflowError = null;
     this.ignoreNextProviderRecoverySessionIdle = false;
   }
 
@@ -4761,6 +4803,7 @@ export class OpenCodeServerHarness
     this.providerErrorRecoveryCounts.provider_error = 0;
     this.openCodeInternalRetryCount = 0;
     this.lastOpenCodeRetryStatusMessage = null;
+    this.pendingContextOverflowError = null;
     this.clearAllExecuteToolProgress({ keepBackgroundWatchdogs: true });
 
     if (sessionId) {
