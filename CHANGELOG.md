@@ -10,8 +10,8 @@ This release adds `/goal` mode for long-running work, a Roomote MCP, custom rout
 
 - Keep long-running work moving toward a defined objective with bounded Goal Mode continuations.
 - Connect OAuth-capable coding clients to Roomote through one stable remote MCP URL.
-- Route work with custom workspace rules and connect X as a built-in integration.
-- Diagnose environment health with the new Doctor workflow and produce polished feature-demo videos.
+- Route work to the right environment with custom workspace rules.
+- Generate polished demo videos from live browser journeys with captions and optional narration.
 
 ### Minor changes
 
