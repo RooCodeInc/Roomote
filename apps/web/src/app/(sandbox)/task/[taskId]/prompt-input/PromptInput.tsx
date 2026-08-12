@@ -640,7 +640,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       wasRecordingRef.current = voiceDictation.isRecording;
     }, [voiceDictation.isRecording, focusTextarea]);
 
-    const placeholder = placeholderProp ?? 'Message agent - / for commands';
+    const placeholder = placeholderProp ?? 'Message agent, / for commands';
     const showConnectingStatus =
       !connected && !connectionError && !hasTransportError;
 
