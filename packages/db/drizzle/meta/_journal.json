@@ -232,6 +232,13 @@
       "when": 1786492507982,
       "tag": "0032_bright_arachne",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1786498216869,
+      "tag": "0033_striped_boomerang",
+      "breakpoints": true
     }
   ]
 }
