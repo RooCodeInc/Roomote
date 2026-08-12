@@ -2,16 +2,22 @@ import { Queue, QueueEvents, Worker } from 'bullmq';
 
 import {
   PR_REVIEW_NOTIFICATION_QUEUE_NAME,
-  type PrReviewNotificationRequest,
+  type PrReviewNotificationQueueRequest,
 } from '@roomote/sdk/server';
 
 import { prReviewNotificationJob } from './jobs/pr-review-notification';
 import { getRedis } from './redis';
 
+function formatJobTarget(data: PrReviewNotificationQueueRequest): string {
+  const target = 'input' in data ? data.input : data;
+
+  return `${target.repository}#${target.prNumber}`;
+}
+
 export function startPrReviewNotificationQueue() {
   const connection = getRedis();
 
-  const queue = new Queue<PrReviewNotificationRequest, void, string>(
+  const queue = new Queue<PrReviewNotificationQueueRequest, void, string>(
     PR_REVIEW_NOTIFICATION_QUEUE_NAME,
     {
       connection,
@@ -24,7 +30,7 @@ export function startPrReviewNotificationQueue() {
     },
   );
 
-  const worker = new Worker<PrReviewNotificationRequest, void, string>(
+  const worker = new Worker<PrReviewNotificationQueueRequest, void, string>(
     PR_REVIEW_NOTIFICATION_QUEUE_NAME,
     prReviewNotificationJob,
     { connection, concurrency: 5, autorun: true },
@@ -32,7 +38,9 @@ export function startPrReviewNotificationQueue() {
 
   worker.on('failed', (job, err) =>
     console.error(
-      `[PrReviewNotificationQueue] job ${job?.id} failed for ${job?.data.repository}#${job?.data.prNumber}:`,
+      `[PrReviewNotificationQueue] job ${job?.id} failed for ${
+        job?.data ? formatJobTarget(job.data) : 'unknown pull request'
+      }:`,
       err.message,
     ),
   );

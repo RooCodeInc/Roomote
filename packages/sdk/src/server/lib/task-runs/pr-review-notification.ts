@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { Queue } from 'bullmq';
 import { z } from 'zod';
 
@@ -50,8 +52,9 @@ export const PR_REVIEW_NOTIFICATION_MAX_DEFERRALS = 288;
 const PENDING_EVENTS_TTL_SECONDS = 24 * 60 * 60;
 const SCHEDULED_MARKER_TTL_BUFFER_SECONDS = 15 * 60;
 const REVIEW_CYCLE_TTL_SECONDS = 30 * 24 * 60 * 60;
-const PR_ASSOCIATION_LOOKUP_MAX_ATTEMPTS = 4;
-const PR_ASSOCIATION_LOOKUP_RETRY_DELAY_MS = 100;
+export const PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS = [
+  1_000, 5_000, 30_000, 120_000, 300_000,
+] as const;
 const SET_REVIEW_CYCLE_IF_NEWER_SCRIPT = `
 local current = redis.call('GET', KEYS[1])
 if current then
@@ -176,6 +179,29 @@ export type EnqueuePrReviewNotificationInput = z.infer<
   typeof enqueuePrReviewNotificationInputSchema
 >;
 
+export const prReviewAssociationReplayRequestSchema = z.object({
+  kind: z.literal('association_replay'),
+  input: enqueuePrReviewNotificationInputSchema,
+  attempt: z
+    .number()
+    .int()
+    .min(1)
+    .max(PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS.length),
+});
+
+export type PrReviewAssociationReplayRequest = z.infer<
+  typeof prReviewAssociationReplayRequestSchema
+>;
+
+export const prReviewNotificationQueueRequestSchema = z.union([
+  prReviewAssociationReplayRequestSchema,
+  prReviewNotificationRequestSchema,
+]);
+
+export type PrReviewNotificationQueueRequest = z.infer<
+  typeof prReviewNotificationQueueRequestSchema
+>;
+
 type EnqueuePrReviewNotificationResult = {
   notifiedTaskCount: number;
   reason?: string;
@@ -197,13 +223,14 @@ export type PrReviewNotificationRoute =
   | { provider: 'telegram'; channelId: string; threadId: string | null }
   | { provider: 'discord'; channelId: string; threadId: string | null };
 
-let prReviewNotificationQueue: Queue<PrReviewNotificationRequest> | null = null;
+let prReviewNotificationQueue: Queue<PrReviewNotificationQueueRequest> | null =
+  null;
 
-function getPrReviewNotificationQueue(): Queue<PrReviewNotificationRequest> {
+function getPrReviewNotificationQueue(): Queue<PrReviewNotificationQueueRequest> {
   if (!prReviewNotificationQueue) {
     const redis = getRedis();
 
-    prReviewNotificationQueue = new Queue<PrReviewNotificationRequest>(
+    prReviewNotificationQueue = new Queue<PrReviewNotificationQueueRequest>(
       PR_REVIEW_NOTIFICATION_QUEUE_NAME,
       {
         connection: redis,
@@ -666,40 +693,60 @@ export async function enqueuePrReviewNotification(
 ): Promise<EnqueuePrReviewNotificationResult> {
   const parsedInput = enqueuePrReviewNotificationInputSchema.parse(input);
 
-  let prTaskLinks: Array<{ taskId: string }> = [];
+  return enqueuePrReviewNotificationAttempt(parsedInput, 0);
+}
 
-  for (
-    let attempt = 1;
-    attempt <= PR_ASSOCIATION_LOOKUP_MAX_ATTEMPTS;
-    attempt += 1
-  ) {
-    prTaskLinks = await db.query.taskPullRequests.findMany({
-      where: and(
-        eq(
-          taskPullRequests.sourceControlProvider,
-          parsedInput.sourceControlProvider ?? 'github',
-        ),
-        eq(taskPullRequests.repository, parsedInput.repository),
-        eq(taskPullRequests.prNumber, parsedInput.prNumber),
+export async function replayPrReviewNotificationAssociation(
+  request: PrReviewAssociationReplayRequest,
+): Promise<EnqueuePrReviewNotificationResult> {
+  const parsed = prReviewAssociationReplayRequestSchema.parse(request);
+
+  return enqueuePrReviewNotificationAttempt(parsed.input, parsed.attempt);
+}
+
+async function enqueuePrReviewNotificationAttempt(
+  parsedInput: EnqueuePrReviewNotificationInput,
+  associationReplayAttempt: number,
+): Promise<EnqueuePrReviewNotificationResult> {
+  const prTaskLinks = await db.query.taskPullRequests.findMany({
+    where: and(
+      eq(
+        taskPullRequests.sourceControlProvider,
+        parsedInput.sourceControlProvider ?? 'github',
       ),
-      columns: { taskId: true },
-    });
-
-    if (
-      prTaskLinks.length > 0 ||
-      attempt === PR_ASSOCIATION_LOOKUP_MAX_ATTEMPTS
-    ) {
-      break;
-    }
-
-    await new Promise((resolve) =>
-      setTimeout(resolve, PR_ASSOCIATION_LOOKUP_RETRY_DELAY_MS),
-    );
-  }
+      eq(taskPullRequests.repository, parsedInput.repository),
+      eq(taskPullRequests.prNumber, parsedInput.prNumber),
+    ),
+    columns: { taskId: true },
+  });
 
   const taskIds = Array.from(new Set(prTaskLinks.map((link) => link.taskId)));
 
   if (taskIds.length === 0) {
+    const nextAttempt = associationReplayAttempt + 1;
+    const delayMs = PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS[nextAttempt - 1];
+
+    if (delayMs !== undefined) {
+      const replayRequest = {
+        kind: 'association_replay' as const,
+        input: parsedInput,
+        attempt: nextAttempt,
+      };
+      const eventHash = createHash('sha256')
+        .update(JSON.stringify(parsedInput))
+        .digest('hex')
+        .slice(0, 24);
+
+      await getPrReviewNotificationQueue().add(
+        'replay-pr-review-association',
+        replayRequest,
+        {
+          delay: delayMs,
+          jobId: `association-replay-${eventHash}-${nextAttempt}`,
+        },
+      );
+    }
+
     return { notifiedTaskCount: 0, reason: 'no_linked_tasks' };
   }
 

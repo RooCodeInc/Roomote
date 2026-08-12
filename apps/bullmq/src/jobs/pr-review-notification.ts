@@ -18,13 +18,16 @@ import {
   attachPendingPrReviewActionMessage,
   getCommunicationProviderAdapter,
   type PrReviewNotificationRequest,
+  type PrReviewNotificationQueueRequest,
   type PrReviewNotificationRoute,
   consumePendingPrReviewActivity,
   dispatchPrReviewFollowUp,
   preparePrReviewNotificationDelivery,
   prReviewNotificationRequestSchema,
+  prReviewAssociationReplayRequestSchema,
   recordPrReviewNotificationDeliveryBestEffort,
   requeuePendingPrReviewActivity,
+  replayPrReviewNotificationAssociation,
   schedulePrReviewNotificationJob,
   setPendingPrReviewAction,
 } from '@roomote/sdk/server';
@@ -39,7 +42,11 @@ import {
   WORKER_HEARTBEAT_STALE_MS,
 } from '@roomote/types';
 
-type PrReviewNotificationJob = Job<PrReviewNotificationRequest, void, string>;
+type PrReviewNotificationJob = Job<
+  PrReviewNotificationQueueRequest,
+  void,
+  string
+>;
 
 function buildPrReviewNotificationPostInput(
   route: PrReviewNotificationRoute,
@@ -212,6 +219,13 @@ async function postPrReviewNotification({
 export const prReviewNotificationJob = async (
   job: PrReviewNotificationJob,
 ): Promise<void> => {
+  const replay = prReviewAssociationReplayRequestSchema.safeParse(job.data);
+
+  if (replay.success) {
+    await replayPrReviewNotificationAssociation(replay.data);
+    return;
+  }
+
   const parsed = prReviewNotificationRequestSchema.safeParse(job.data);
 
   if (!parsed.success) {

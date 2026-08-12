@@ -393,13 +393,15 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     }
   })();
 
-  await persistSourceControlPullRequestAssociation({
+  const associationWarning = await persistSourceControlPullRequestAssociation({
     taskRun,
     result,
     repository,
   });
 
-  return result;
+  return associationWarning
+    ? { ...result, warnings: [...result.warnings, associationWarning] }
+    : result;
 }
 
 async function resolveLiveGitHubAssigneePlan({
@@ -465,9 +467,9 @@ async function persistSourceControlPullRequestAssociation({
   taskRun: TaskRun;
   result: SourceControlPullRequestMutationResult;
   repository: RepositoryRow;
-}): Promise<void> {
+}): Promise<string | null> {
   if (!taskRun.taskId) {
-    return;
+    return null;
   }
 
   const status = result.draft ? 'draft' : 'open';
@@ -501,7 +503,7 @@ async function persistSourceControlPullRequestAssociation({
             updatedAt: new Date(),
           },
         });
-      return;
+      return null;
     } catch (error) {
       if (attempt < PR_ASSOCIATION_MAX_ATTEMPTS) {
         await new Promise((resolve) =>
@@ -515,8 +517,11 @@ async function persistSourceControlPullRequestAssociation({
           error instanceof Error ? error.message : String(error)
         }`,
       );
+      return `The pull request was ${result.action}, but Roomote could not link it to this task after ${attempt} attempts. Review feedback may not reach the task until create_or_update_pull_request is retried.`;
     }
   }
+
+  return null;
 }
 
 async function createOrUpdateGitHubPullRequest({

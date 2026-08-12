@@ -16,6 +16,7 @@ const {
   mockStickyFooterPost,
   mockSetPendingPrReviewAction,
   mockDispatchFollowUp,
+  mockReplayAssociation,
 } = vi.hoisted(() => ({
   mockFindFirstTaskRun: vi.fn(),
   mockFindFirstTaskPullRequest: vi.fn(),
@@ -32,6 +33,7 @@ const {
   mockStickyFooterPost: vi.fn(),
   mockSetPendingPrReviewAction: vi.fn(),
   mockDispatchFollowUp: vi.fn(),
+  mockReplayAssociation: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -87,8 +89,19 @@ vi.mock('@roomote/sdk/server', () => ({
     batchKind: z.enum(['human', 'roomote']).optional(),
     batchId: z.string().optional(),
   }),
+  prReviewAssociationReplayRequestSchema: z.object({
+    kind: z.literal('association_replay'),
+    input: z.object({
+      repository: z.string(),
+      prNumber: z.number(),
+      prUrl: z.string(),
+      event: z.object({ kind: z.string(), authorLogin: z.string() }),
+    }),
+    attempt: z.number(),
+  }),
   consumePendingPrReviewActivity: mockConsumePending,
   requeuePendingPrReviewActivity: mockRequeuePending,
+  replayPrReviewNotificationAssociation: mockReplayAssociation,
   schedulePrReviewNotificationJob: mockSchedule,
   getCommunicationProviderAdapter: vi.fn(
     async (provider: 'slack' | 'teams' | 'telegram' | 'discord') =>
@@ -175,6 +188,24 @@ describe('prReviewNotificationJob', () => {
       channelId: '12345',
       messageId: '901',
     });
+  });
+
+  it('dispatches association replay jobs without entering delivery', async () => {
+    const replay = {
+      kind: 'association_replay',
+      input: {
+        repository: 'owner/repo',
+        prNumber: 42,
+        prUrl: 'https://github.com/owner/repo/pull/42',
+        event: { kind: 'review', authorLogin: 'alice' },
+      },
+      attempt: 2,
+    };
+
+    await prReviewNotificationJob({ data: replay } as never);
+
+    expect(mockReplayAssociation).toHaveBeenCalledWith(replay);
+    expect(mockFindFirstTaskRun).not.toHaveBeenCalled();
   });
 
   it('posts the aggregated notification to the originating Slack thread when the task is idle', async () => {

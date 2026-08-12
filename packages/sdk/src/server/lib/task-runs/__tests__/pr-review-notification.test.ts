@@ -65,11 +65,13 @@ vi.mock('../slack-task-run-routing', () => ({
 
 import {
   PR_REVIEW_NOTIFICATION_DEBOUNCE_MS,
+  PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS,
   consumePendingPrReviewActivity,
   enqueuePrReviewNotification,
   formatPrReviewActivityMessage,
   hasPrReviewNotificationThreadContext,
   resolvePrReviewNotificationRoute,
+  replayPrReviewNotificationAssociation,
   startPrReviewNotificationCycle,
 } from '../pr-review-notification';
 
@@ -98,26 +100,68 @@ describe('enqueuePrReviewNotification', () => {
     },
   };
 
-  it('retries task association lookup before returning no_linked_tasks', async () => {
+  it('schedules a delayed association replay before returning no_linked_tasks', async () => {
     mockFindManyTaskPullRequests.mockResolvedValue([]);
 
     const result = await enqueuePrReviewNotification(baseInput);
 
     expect(result).toEqual({ notifiedTaskCount: 0, reason: 'no_linked_tasks' });
-    expect(mockFindManyTaskPullRequests).toHaveBeenCalledTimes(4);
-    expect(mockQueueAdd).not.toHaveBeenCalled();
+    expect(mockFindManyTaskPullRequests).toHaveBeenCalledTimes(1);
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      'replay-pr-review-association',
+      { kind: 'association_replay', input: baseInput, attempt: 1 },
+      {
+        delay: PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS[0],
+        jobId: expect.stringMatching(/^association-replay-[a-f0-9]{24}-1$/),
+      },
+    );
   });
 
-  it('retains feedback when association persistence finishes after the webhook arrives', async () => {
+  it('retains feedback when association persistence finishes before replay', async () => {
     mockFindManyTaskPullRequests
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ taskId: 'task-1' }]);
 
-    const result = await enqueuePrReviewNotification(baseInput);
+    await enqueuePrReviewNotification(baseInput);
+    mockQueueAdd.mockClear();
+    const result = await replayPrReviewNotificationAssociation({
+      kind: 'association_replay',
+      input: baseInput,
+      attempt: 1,
+    });
 
     expect(result).toEqual({ notifiedTaskCount: 1 });
     expect(mockFindManyTaskPullRequests).toHaveBeenCalledTimes(2);
     expect(mockQueueAdd).toHaveBeenCalledTimes(1);
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      'notify-pr-review-activity',
+      expect.objectContaining({ taskId: 'task-1' }),
+      { delay: PR_REVIEW_NOTIFICATION_DEBOUNCE_MS },
+    );
+  });
+
+  it('uses a stable replay job id to deduplicate duplicate webhook delivery', async () => {
+    mockFindManyTaskPullRequests.mockResolvedValue([]);
+
+    await enqueuePrReviewNotification(baseInput);
+    await enqueuePrReviewNotification(baseInput);
+
+    const firstOptions = mockQueueAdd.mock.calls[0]?.[2];
+    const secondOptions = mockQueueAdd.mock.calls[1]?.[2];
+    expect(firstOptions?.jobId).toBe(secondOptions?.jobId);
+  });
+
+  it('stops replaying after the final association boundary', async () => {
+    mockFindManyTaskPullRequests.mockResolvedValue([]);
+
+    const result = await replayPrReviewNotificationAssociation({
+      kind: 'association_replay',
+      input: baseInput,
+      attempt: PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS.length,
+    });
+
+    expect(result).toEqual({ notifiedTaskCount: 0, reason: 'no_linked_tasks' });
+    expect(mockQueueAdd).not.toHaveBeenCalled();
   });
 
   it('debounces ordinary notifications for web-only tasks without an originating conversation', async () => {

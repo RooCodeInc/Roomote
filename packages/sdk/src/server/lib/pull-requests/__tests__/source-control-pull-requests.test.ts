@@ -208,6 +208,8 @@ function attributionBody(
 }
 
 beforeEach(() => {
+  mockTaskPullRequestUpsert.mockReset();
+  mockTaskPullRequestUpsert.mockResolvedValue(undefined);
   mockGetDeploymentGitHubRoomoteMentionEnabled.mockResolvedValue(true);
   mockResolveTelegramRuntimeCredentials.mockResolvedValue({
     botUsername: 'roomote_bot',
@@ -230,8 +232,6 @@ beforeEach(() => {
 describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockTaskPullRequestUpsert.mockReset();
-    mockTaskPullRequestUpsert.mockResolvedValue(undefined);
     mockGetDeploymentGitHubRoomoteMentionEnabled.mockResolvedValue(true);
     mockResolveConfiguredGitHubAppSlugIfConfigured.mockResolvedValue(null);
     mockResolveRunCommitAuthor.mockResolvedValue({
@@ -558,6 +558,11 @@ describe('platform-managed draft state', () => {
 
     expect(result).toMatchObject({ action: 'created', number: 9 });
     expect(mockTaskPullRequestUpsert).toHaveBeenCalledTimes(3);
+    expect(result.warnings).toEqual([
+      expect.stringContaining(
+        'could not link it to this task after 3 attempts',
+      ),
+    ]);
     expect(warn).toHaveBeenCalledWith(
       expect.stringContaining('after 3 attempts'),
     );
