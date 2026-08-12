@@ -1602,7 +1602,7 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
   }): bigint {
     const everyoneRole = input.roles.find((role) => role.id === input.guildId);
     if (!everyoneRole) return 0n;
-    let value = BigInt(everyoneRole.permissions);
+    const value = BigInt(everyoneRole.permissions);
     if ((value & DISCORD_PERMISSION_BITS.administrator) !== 0n) {
       return Object.values(DISCORD_PERMISSION_BITS).reduce(
         (result, bit) => result | bit,
