@@ -2,6 +2,7 @@ import { buildApiHeaders, fetchWithTimeout } from './api-client.js';
 import { ChatDeliveryError } from './chat-delivery-error.js';
 import type {
   CommunicationChannelMessagesResponse,
+  CommunicationChannelsResponse,
   CommunicationMessageContextResponse,
   RoomoteConfig,
   ChannelPostResponse,
@@ -203,6 +204,17 @@ export async function getChatMessageContext(
     'message_context',
     input,
     'Failed to look up chat message context',
+  );
+}
+
+export async function listChatChannels(
+  config: RoomoteConfig,
+): Promise<CommunicationChannelsResponse> {
+  return postToCommunicationLookupEndpoint<CommunicationChannelsResponse>(
+    config,
+    'channels',
+    {},
+    'Failed to list chat channels',
   );
 }
 
