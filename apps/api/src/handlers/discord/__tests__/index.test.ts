@@ -327,7 +327,7 @@ describe('Discord Gateway event handler', () => {
         deliver,
       }: {
         objective: string;
-        deliver: Function;
+        deliver: (goal: Record<string, unknown>) => Promise<unknown>;
       }) => {
         const goal = {
           objective,

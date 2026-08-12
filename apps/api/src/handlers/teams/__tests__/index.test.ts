@@ -381,7 +381,7 @@ describe('Teams webhook handler', () => {
         deliver,
       }: {
         objective: string;
-        deliver: Function;
+        deliver: (goal: Record<string, unknown>) => Promise<unknown>;
       }) => {
         const goal = {
           objective,
