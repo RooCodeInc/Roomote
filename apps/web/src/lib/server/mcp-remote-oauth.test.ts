@@ -220,6 +220,16 @@ describe('remote MCP OAuth state', () => {
     expect(isAllowedOAuthRedirectUri(redirectUri)).toBe(true);
   });
 
+  it.each([
+    ['Chromium', 'chrome-extension://extension-id/oauth/callback'],
+    ['Firefox', 'moz-extension://extension-id/oauth/callback'],
+    ['Safari', 'safari-web-extension://extension-id/oauth/callback'],
+    ['legacy Edge', 'ms-browser-extension://extension-id/oauth/callback'],
+    ['generic', 'extension:/oauth/callback'],
+  ])('rejects the %s browser-extension callback', (_browser, redirectUri) => {
+    expect(isAllowedOAuthRedirectUri(redirectUri)).toBe(false);
+  });
+
   it('rejects unsafe or malformed callbacks', () => {
     expect(isAllowedOAuthRedirectUri('http://client.example/callback')).toBe(
       false,

@@ -234,7 +234,6 @@ const NON_NATIVE_APP_REDIRECT_SCHEMES = new Set([
   'about:',
   'blob:',
   'chrome:',
-  'chrome-extension:',
   'data:',
   'file:',
   'filesystem:',
@@ -277,12 +276,17 @@ function hasUnsafeOAuthRedirectUriCharacters(value: string): boolean {
   return false;
 }
 
+function isBrowserExtensionScheme(protocol: string): boolean {
+  return protocol === 'extension:' || protocol.endsWith('-extension:');
+}
+
 function isNativeAppOAuthRedirectUri(url: URL): boolean {
   // Native MCP clients use RFC 8252 private-use schemes to resume the app
   // after browser authorization. Treat them as a class instead of coupling
   // the authorization server to individual client callback URLs.
   return (
     !NON_NATIVE_APP_REDIRECT_SCHEMES.has(url.protocol) &&
+    !isBrowserExtensionScheme(url.protocol) &&
     url.protocol.length > 2 &&
     url.protocol.length <= 65 &&
     /^[a-z][a-z0-9+.-]*:$/.test(url.protocol) &&
