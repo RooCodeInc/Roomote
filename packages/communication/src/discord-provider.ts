@@ -1343,6 +1343,46 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     }
   }
 
+  /** Returns whether the guild's @everyone role can view the channel. */
+  async isChannelPublic(input: {
+    guildId: string;
+    channelId: string;
+  }): Promise<boolean | null> {
+    try {
+      const [roles, channel] = await Promise.all([
+        this.request<Array<{ id: string; permissions: string }>>(
+          'GET',
+          `/guilds/${input.guildId}/roles`,
+          undefined,
+          { retryNetworkErrors: true, retryServerErrors: true },
+        ),
+        this.request<DiscordApiChannel>(
+          'GET',
+          `/channels/${input.channelId}`,
+          undefined,
+          { retryNetworkErrors: true, retryServerErrors: true },
+        ),
+      ]);
+      const everyoneRole = roles.find((role) => role.id === input.guildId);
+      if (!everyoneRole) return null;
+
+      let value = BigInt(everyoneRole.permissions);
+      if ((value & DISCORD_PERMISSION_BITS.administrator) !== 0n) return true;
+      value = this.applyOverwrite(
+        value,
+        (channel.permission_overwrites ?? []).find(
+          (overwrite) => overwrite.id === input.guildId,
+        ),
+      );
+      return (value & DISCORD_PERMISSION_BITS.view_channel) !== 0n;
+    } catch (error) {
+      if (error instanceof DiscordApiError) {
+        if (error.status === 403 || error.status === 404) return false;
+      }
+      return null;
+    }
+  }
+
   async editChannel(input: {
     channelId: string;
     name?: string;

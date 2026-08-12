@@ -76,9 +76,12 @@ async function listSlackChannels(
         const visibleChannels = (
           await Promise.all(
             (
-              await slack.listAccessibleChannels()
+              await slack.listPublicChannels()
             )
-              .filter((channel) => channel.isMember === true)
+              .filter(
+                (channel) =>
+                  channel.isMember === true && channel.isPrivate === false,
+              )
               .map(async (channel) => {
                 if (!linkedUser) return null;
                 return (await slack.isUserInChannel({
@@ -144,12 +147,18 @@ async function listDiscordChannels(
               installation.channels.map(async (channel) => {
                 const kind = DISCORD_CHANNEL_KINDS[channel.channelType];
                 if (!kind) return null;
-                const canAccess = await provider.canUserAccessChannel({
-                  guildId: installation.guildId,
-                  channelId: channel.channelId,
-                  userId: linkedDiscordUserId,
-                });
-                if (canAccess !== true) return null;
+                const [isPublic, canAccess] = await Promise.all([
+                  provider.isChannelPublic({
+                    guildId: installation.guildId,
+                    channelId: channel.channelId,
+                  }),
+                  provider.canUserAccessChannel({
+                    guildId: installation.guildId,
+                    channelId: channel.channelId,
+                    userId: linkedDiscordUserId,
+                  }),
+                ]);
+                if (isPublic !== true || canAccess !== true) return null;
                 return {
                   id: channel.channelId,
                   name: channel.channelName ?? channel.channelId,

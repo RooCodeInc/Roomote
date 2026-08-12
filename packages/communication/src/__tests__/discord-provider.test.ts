@@ -352,6 +352,62 @@ describe('DiscordCommunicationProvider', () => {
     ).resolves.toBe(false);
   });
 
+  it('checks public visibility using the everyone role overwrite', async () => {
+    const { server, provider } = createHarness();
+    const channelId = '400000000000000001';
+    const viewChannel = String(1n << 10n);
+    server.addChannel({
+      id: channelId,
+      guild_id: server.guildId,
+      name: 'public',
+      type: 0,
+      permission_overwrites: [
+        {
+          id: server.guildId,
+          type: 0,
+          allow: viewChannel,
+          deny: '0',
+        },
+      ],
+    });
+
+    await expect(
+      provider.isChannelPublic({ guildId: server.guildId, channelId }),
+    ).resolves.toBe(true);
+
+    server.addChannel({
+      id: channelId,
+      guild_id: server.guildId,
+      name: 'staff-only',
+      type: 0,
+      permission_overwrites: [
+        {
+          id: server.guildId,
+          type: 0,
+          allow: '0',
+          deny: viewChannel,
+        },
+        {
+          id: 'role-roomote',
+          type: 0,
+          allow: viewChannel,
+          deny: '0',
+        },
+      ],
+    });
+
+    await expect(
+      provider.isChannelPublic({ guildId: server.guildId, channelId }),
+    ).resolves.toBe(false);
+    await expect(
+      provider.canUserAccessChannel({
+        guildId: server.guildId,
+        channelId,
+        userId: server.bot.id,
+      }),
+    ).resolves.toBe(true);
+  });
+
   it('applies the everyone overwrite separately from member role overwrites', async () => {
     const { server, provider } = createHarness();
     const channelId = '400000000000000001';

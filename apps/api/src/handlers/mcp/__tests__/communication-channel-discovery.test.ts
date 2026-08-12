@@ -7,7 +7,8 @@ const {
   getCommunicationProviderAdapterMock,
   createDiscordProviderMock,
   canDiscordUserAccessChannelMock,
-  listAccessibleChannelsMock,
+  isDiscordChannelPublicMock,
+  listPublicChannelsMock,
   isSlackUserInChannelMock,
 } = vi.hoisted(() => ({
   findDiscordInstallationsMock: vi.fn(),
@@ -18,7 +19,8 @@ const {
   getCommunicationProviderAdapterMock: vi.fn(),
   createDiscordProviderMock: vi.fn(),
   canDiscordUserAccessChannelMock: vi.fn(),
-  listAccessibleChannelsMock: vi.fn(),
+  isDiscordChannelPublicMock: vi.fn(),
+  listPublicChannelsMock: vi.fn(),
   isSlackUserInChannelMock: vi.fn(),
 }));
 
@@ -48,7 +50,7 @@ vi.mock('@roomote/sdk/server', () => ({
 
 vi.mock('@roomote/slack', () => ({
   SlackNotifier: class {
-    listAccessibleChannels = listAccessibleChannelsMock;
+    listPublicChannels = listPublicChannelsMock;
     isUserInChannel = isSlackUserInChannelMock;
   },
 }));
@@ -66,9 +68,11 @@ describe('listCommunicationChannels', () => {
     getCommunicationProviderAdapterMock.mockResolvedValue(null);
     createDiscordProviderMock.mockResolvedValue({
       canUserAccessChannel: canDiscordUserAccessChannelMock,
+      isChannelPublic: isDiscordChannelPublicMock,
     });
     canDiscordUserAccessChannelMock.mockResolvedValue(true);
-    listAccessibleChannelsMock.mockResolvedValue([]);
+    isDiscordChannelPublicMock.mockResolvedValue(true);
+    listPublicChannelsMock.mockResolvedValue([]);
     isSlackUserInChannelMock.mockResolvedValue(true);
   });
 
@@ -77,7 +81,7 @@ describe('listCommunicationChannels', () => {
       { botAccessToken: 'token', teamId: 'T1', teamName: 'Acme' },
     ]);
     findSlackUserMappingMock.mockResolvedValue({ slackUserId: 'U1' });
-    listAccessibleChannelsMock.mockResolvedValue([
+    listPublicChannelsMock.mockResolvedValue([
       {
         id: 'C1',
         name: 'engineering',
@@ -89,12 +93,6 @@ describe('listCommunicationChannels', () => {
         name: 'not-joined',
         isPrivate: false,
         isMember: false,
-      },
-      {
-        id: 'C3',
-        name: 'private-engineering',
-        isPrivate: true,
-        isMember: true,
       },
     ]);
     findDiscordInstallationsMock.mockResolvedValue([
@@ -138,7 +136,7 @@ describe('listCommunicationChannels', () => {
     await expect(
       listCommunicationChannels({ actingUserId: 'user-1' }),
     ).resolves.toEqual({
-      channelCount: 4,
+      channelCount: 3,
       platforms: [
         {
           provider: 'slack',
@@ -150,13 +148,6 @@ describe('listCommunicationChannels', () => {
               id: 'C1',
               name: 'engineering',
               kind: 'public',
-              workspaceId: 'T1',
-              workspaceName: 'Acme',
-            },
-            {
-              id: 'C3',
-              name: 'private-engineering',
-              kind: 'private',
               workspaceId: 'T1',
               workspaceName: 'Acme',
             },
@@ -211,7 +202,7 @@ describe('listCommunicationChannels', () => {
     findSlackInstallationsMock.mockResolvedValue([
       { botAccessToken: 'token', teamId: 'T1', teamName: 'Acme' },
     ]);
-    listAccessibleChannelsMock.mockResolvedValue([
+    listPublicChannelsMock.mockResolvedValue([
       {
         id: 'C1',
         name: 'public-room',
