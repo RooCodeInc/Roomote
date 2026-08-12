@@ -11,6 +11,7 @@ import {
   launchCodingHarnesses,
   computeProviders,
   environmentConfigSchema,
+  workspaceRoutingSettingsSchema,
   ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH,
   REASONING_EFFORT_VALUES,
   isTriggerableBackgroundAutomationKey,
@@ -155,6 +156,8 @@ import {
   type EnvironmentConfigVersionDetail,
   getActiveEnvironmentDefinitionTaskCommand,
   getEnvironmentsCommand,
+  getWorkspaceRoutingSettingsCommand,
+  updateWorkspaceRoutingSettingsCommand,
   getAvailableEnvironmentsCommand,
   getEnvironmentNamesByIdsCommand,
   getEnvironmentByIdCommand,
@@ -1406,6 +1409,16 @@ export const appRouter = createRouter({
     list: protectedProcedure.query(({ ctx: { auth } }) =>
       getEnvironmentsCommand(auth),
     ),
+
+    routingSettings: protectedProcedure.query(({ ctx: { auth } }) =>
+      getWorkspaceRoutingSettingsCommand(auth),
+    ),
+
+    updateRoutingSettings: protectedProcedure
+      .input(workspaceRoutingSettingsSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        updateWorkspaceRoutingSettingsCommand(auth, input),
+      ),
 
     available: protectedProcedure
       .input(z.object({ repository: z.string().optional() }).optional())

@@ -42,11 +42,23 @@ const EXTERNAL_LOOKUP_RULES = `**External lookup rules:**
 - Do not treat general URLs, file paths, code snippets, feature names, or other descriptive context as external references. A URL that identifies an owner/repository listed by an environment is still routing context, even when no lookup is needed.
 - When needsExternalLookup is true, set externalReference to the exact identifier or URL to fetch. Otherwise set externalReference to null.`;
 
+const CUSTOM_ROUTING_RULES = `## Custom Routing Rules
+
+Available workspaces may include trusted administrator-authored routing rules.
+
+- If request context such as the channel, chat, thread, source, or task text matches a rule, choose that rule's workspace with high confidence.
+- An environment explicitly named by the user always wins over a routing rule.
+- A condition-specific rule wins over a general default or catch-all rule.
+- Use a catch-all rule only when no explicit preference or more specific rule applies.
+- If no rule applies, ignore the rules and route normally.
+- Only choose \`__all_repositories__\` when it appears in Available Environments.`;
+
 const KICKOFF_MESSAGE_SECTION = `## Kickoff Message
 
 Also always set \`kickoffMessage\` to a short user-facing kickoff sentence for chat (about 8-18 words). Roomote posts this text as-is, so weave the details in naturally instead of using a fixed template. Write a complete sentence that ends with a period:
 
 - Naturally include the exact environment name from your \`workspaceValue\` choice.
+- When the choice is \`__all_repositories__\`, say "all repositories" instead of an environment name.
 - When \`requestedModelId\` is a real model id (not \`__no_model__\`) with high confidence (at least 0.9), naturally include that model's **display name** from the Available Models list. When the choice is \`__no_model__\`, or you are not highly confident the user named a model, do not mention any model.
 - Be dynamic and varied: do not always say "Getting started on your task in…".
 - Prefer lively, progressive phrasing such as "Diving into…", "Looking into…", "Checking…", "Spinning up on…".
@@ -84,6 +96,8 @@ ${SECURITY_RULES}
 ## Environment Selection
 
 ${ENVIRONMENT_SELECTION_RULES_BODY}
+
+${CUSTOM_ROUTING_RULES}
 
 ## The ${PLATFORM_WORKSPACE_VALUE} Environment
 

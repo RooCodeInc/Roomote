@@ -35,6 +35,7 @@ describe('router helpers', () => {
       name: 'Full Stack',
       description: 'Complete development environment',
       repositoryNames: ['acme/frontend', 'acme/backend'],
+      routingRules: ['Messages from the engineering channel belong here.'],
     },
   ];
 
@@ -58,6 +59,32 @@ describe('router helpers', () => {
     expect(prompt).toContain(
       '- Full Stack (repositories: acme/frontend, acme/backend)\n  Complete development environment',
     );
+    expect(prompt).toContain(
+      'Routing rules:\n  - Messages from the engineering channel belong here.',
+    );
+  });
+
+  it('renders all repositories routing rules when configured', () => {
+    const prompt = buildContextPrompt(
+      createContext({
+        allRepositoriesRoutingRules: ['Dependency updates belong everywhere.'],
+      }),
+    );
+
+    expect(prompt).toContain('- __all_repositories__ (all repositories)');
+    expect(prompt).toContain('Dependency updates belong everywhere.');
+  });
+
+  it('maps the all repositories workspace', () => {
+    expect(
+      mapWorkspace(
+        '__all_repositories__',
+        createContext({
+          allRepositoriesRoutingRules: ['Route broad changes here.'],
+        }),
+      ),
+    ).toEqual({ type: 'all_repositories' });
+    expect(mapWorkspace('__all_repositories__', createContext())).toBeNull();
   });
 
   it('can omit the platform workspace from the available environments list', () => {
@@ -73,6 +100,7 @@ describe('router helpers', () => {
     const prompt = buildWorkspaceRoutingPrompt();
 
     expect(prompt).toContain('You are a workspace routing assistant');
+    expect(prompt).toContain('## Custom Routing Rules');
     expect(prompt).toContain('forwarded to a task run');
     expect(prompt).toContain(`## The ${PLATFORM_WORKSPACE_VALUE} Environment`);
     expect(prompt).toContain('"What can you do?" → __platform__');

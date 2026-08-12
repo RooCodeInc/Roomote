@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { ALL_REPOSITORIES } from '@roomote/types';
 import type { RoutingContext, RoutingWorkspace } from './types';
 
 const WORKSPACE_SELECTION_PREFIX = /^(workspace|environment)\s*:\s*/i;
@@ -38,7 +39,11 @@ const confidenceField = z
  * choose the workspace dimension.
  */
 export const workspaceResponseSchema = z.object({
-  workspaceValue: z.string().describe('Name of the chosen environment.'),
+  workspaceValue: z
+    .string()
+    .describe(
+      'Name of the chosen environment or an available workspace value.',
+    ),
   reasoning: z
     .string()
     .describe('Brief explanation of your workspace decision'),
@@ -94,6 +99,15 @@ export function mapWorkspace(
   value: string,
   context: RoutingContext,
 ): RoutingWorkspace | null {
+  const normalizedSelection = normalizeWorkspaceSelectionValue(value);
+  if (
+    context.allRepositoriesRoutingRules?.length &&
+    (normalizedSelection === ALL_REPOSITORIES ||
+      normalizedSelection.toLowerCase() === 'all repositories')
+  ) {
+    return { type: 'all_repositories' };
+  }
+
   const exactMatch = context.availableEnvironments.find(
     (candidate) => candidate.name.toLowerCase() === value.trim().toLowerCase(),
   );
@@ -106,7 +120,6 @@ export function mapWorkspace(
     };
   }
 
-  const normalizedSelection = normalizeWorkspaceSelectionValue(value);
   const normalizedValue = normalizeEnvironmentName(normalizedSelection);
   const normalizedMatch = context.availableEnvironments.find(
     (candidate) => normalizeEnvironmentName(candidate.name) === normalizedValue,

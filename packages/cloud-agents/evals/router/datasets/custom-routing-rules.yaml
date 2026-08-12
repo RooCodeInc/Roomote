@@ -1,0 +1,78 @@
+- description: "custom rule routes Slack channel to environment"
+  vars:
+    context: |
+      **Task Description**:
+      Fix the broken form.
+
+      **Source**: Slack
+      **Channel**: hospital-bugs
+
+      **Available Environments**:
+      - Hospital app (repositories: acme/hospital)
+        Routing rules:
+        - Messages sent in the hospital-bugs Slack channel belong here.
+      - Billing app (repositories: acme/billing)
+    expectedWorkspaceValue: "Hospital app"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:isValidRoutingJson
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:workspaceValueMatchesExpected
+
+- description: "explicit environment overrides custom rule"
+  vars:
+    context: |
+      **Task Description**:
+      Use Billing app to fix the broken form.
+
+      **Source**: Slack
+      **Channel**: hospital-bugs
+
+      **Available Environments**:
+      - Hospital app (repositories: acme/hospital)
+        Routing rules:
+        - Messages sent in the hospital-bugs Slack channel belong here.
+      - Billing app (repositories: acme/billing)
+    expectedWorkspaceValue: "Billing app"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:workspaceValueMatchesExpected
+
+- description: "specific rule beats catch-all default"
+  vars:
+    context: |
+      **Task Description**:
+      Fix the broken form.
+
+      **Source**: Slack
+      **Channel**: hospital-bugs
+
+      **Available Environments**:
+      - Hospital app (repositories: acme/hospital)
+        Routing rules:
+        - Messages sent in the hospital-bugs Slack channel belong here.
+      - General app (repositories: acme/general)
+        Routing rules:
+        - Default choice for Slack messages when no other environment clearly fits.
+    expectedWorkspaceValue: "Hospital app"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:workspaceValueMatchesExpected
+
+- description: "all repositories custom rule"
+  vars:
+    context: |
+      **Task Description**:
+      Update dependencies everywhere.
+
+      **Source**: Slack
+
+      **Available Environments**:
+      - Hospital app (repositories: acme/hospital)
+      - __all_repositories__ (all repositories)
+        Routing rules:
+        - Dependency updates across every product belong in all repositories.
+    expectedWorkspaceValue: "__all_repositories__"
+  assert:
+    - type: javascript
+      value: file://assertions/routing-assertions.ts:workspaceValueMatchesExpected

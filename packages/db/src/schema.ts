@@ -72,6 +72,7 @@ import type {
   McpConnectionRole,
   SourceControlProvider,
   TaskModelSettings,
+  WorkspaceRoutingSettings,
   TaskRunErrorCode,
   UserRole,
 } from '@roomote/types';
@@ -160,6 +161,9 @@ export const deploymentSettings = pgTable('deployment_settings', {
   id: text('id').notNull().primaryKey().default('default'),
   metadata: jsonb('metadata').notNull().default({}),
   taskModelSettings: jsonb('task_model_settings').$type<TaskModelSettings>(),
+  workspaceRoutingSettings: jsonb(
+    'workspace_routing_settings',
+  ).$type<WorkspaceRoutingSettings>(),
   routerDebugProvider: text('router_debug_provider'),
   routerDebugChannelId: text('router_debug_channel_id'),
   routerDebugDisabled: boolean('router_debug_disabled')

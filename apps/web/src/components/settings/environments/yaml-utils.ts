@@ -26,6 +26,10 @@ export function configToYaml(config: EnvironmentConfig): string {
     cleanConfig.agentInstructions = config.agentInstructions;
   }
 
+  if (config.routingRules && config.routingRules.length > 0) {
+    cleanConfig.routingRules = config.routingRules;
+  }
+
   if (config.tool_versions && Object.keys(config.tool_versions).length > 0) {
     cleanConfig.tool_versions = config.tool_versions;
   }

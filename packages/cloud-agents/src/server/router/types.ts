@@ -49,6 +49,7 @@ export interface RoutingContext {
    * available for this routing context.
    */
   taskModelSettings?: TaskModelSettings | null;
+  allRepositoriesRoutingRules?: string[];
   routingActor?: {
     userId: string;
     apiBaseUrl?: string;
@@ -159,6 +160,7 @@ export interface RoutableEnvironment {
   name: string;
   description?: string;
   repositoryNames: string[];
+  routingRules?: string[];
 }
 
 export type RoutingWorkspace =

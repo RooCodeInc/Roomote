@@ -288,6 +288,16 @@ export function Environments() {
                     </div>
 
                     <CollapsibleContent className="space-y-2 pt-1 border-l-2 mb-2 pl-3">
+                      {env.config.routingRules?.length ? (
+                        <div className="space-y-1 pb-3 text-sm">
+                          <p className="font-medium">Routing rules</p>
+                          <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+                            {env.config.routingRules.map((rule) => (
+                              <li key={rule}>{rule}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
                       <div className="space-y-2 pb-2">
                         <div className="space-y-0">
                           {visibleSnapshotProviders.map((provider) => {

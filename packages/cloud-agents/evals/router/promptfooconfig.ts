@@ -48,6 +48,7 @@ const config = {
     'file://datasets/edge-cases.yaml',
     'file://datasets/adversarial.yaml',
     'file://datasets/partial-corrections.yaml',
+    'file://datasets/custom-routing-rules.yaml',
   ],
 
   outputPath: './results/eval-results.json',

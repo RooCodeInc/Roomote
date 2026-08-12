@@ -432,6 +432,33 @@ commands:
 });
 
 describe('environmentConfigSchema', () => {
+  describe('routingRules', () => {
+    it('normalizes routing rules', () => {
+      const result = environmentConfigSchema.safeParse({
+        name: 'Env',
+        repositories: [{ repository: 'owner/repo' }],
+        routingRules: ['  Messages from hospital-bugs belong here.  '],
+      });
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data.routingRules).toEqual([
+          'Messages from hospital-bugs belong here.',
+        ]);
+      }
+    });
+
+    it('rejects empty routing rules', () => {
+      const result = environmentConfigSchema.safeParse({
+        name: 'Env',
+        repositories: [{ repository: 'owner/repo' }],
+        routingRules: ['   '],
+      });
+
+      expect(result.success).toBe(false);
+    });
+  });
+
   it('keeps legacy duplicate repository entries parseable on read', () => {
     const result = environmentConfigSchema.safeParse({
       name: 'Env',

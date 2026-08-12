@@ -5,6 +5,18 @@ import type { EnvironmentConfig } from '@roomote/types';
 import { configToYaml } from './yaml-utils';
 
 describe('configToYaml', () => {
+  it('preserves routing rules when serializing environment config', () => {
+    const yaml = configToYaml({
+      name: 'Hospital app',
+      repositories: [{ repository: 'owner/repo' }],
+      routingRules: ['Messages from hospital-bugs belong here.'],
+    });
+
+    expect(YAML.parse(yaml).routingRules).toEqual([
+      'Messages from hospital-bugs belong here.',
+    ]);
+  });
+
   it('omits the deprecated desktop flag when serializing environment config', () => {
     const config: EnvironmentConfig = {
       name: 'Desktop Env',
