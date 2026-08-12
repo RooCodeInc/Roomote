@@ -2,6 +2,7 @@ import type { ResultPromise } from 'execa';
 
 import { type DequeuedTaskRun, sdk } from '@roomote/sdk/client';
 import {
+  buildTaskModelRoleOverrideEnv,
   getHarnessModelOverride,
   isReasoningEffort,
   type EnvironmentMcpServers,
@@ -48,7 +49,10 @@ interface CreateHarnessOptions {
   callbacks: RunTaskCallbacks;
   context: RunTaskContext;
   logger: HarnessLogger;
-  prepareQueuedPromptActorScope?: (targetUserId?: string) => Promise<{
+  prepareQueuedPromptActorScope?: (
+    targetUserId?: string,
+    delivery?: { kind: 'queuedPrompt' | 'userInputAnswer' },
+  ) => Promise<{
     shouldReconnect: boolean;
     shouldBlockPrompt?: boolean;
     shouldSkipPrompt?: boolean;
@@ -121,17 +125,31 @@ export async function createHarness({
     )
       ? taskRun.payload.reasoningEffort
       : undefined;
+    // Read at every spawn (not just the first) so a config-update restart
+    // regenerates the OpenCode config from the task's current overrides.
+    const modelRoleOverrideEnv = buildTaskModelRoleOverrideEnv(
+      taskRun.payload?.modelRoleOverrides,
+    );
+    const spawnRuntimeEnv =
+      Object.keys(modelRoleOverrideEnv).length > 0
+        ? { ...harnessCommandEnv, ...modelRoleOverrideEnv }
+        : harnessCommandEnv;
 
     const commonOptions = {
       workspacePath,
-      runtimeEnv: harnessCommandEnv,
+      runtimeEnv: spawnRuntimeEnv,
       cancelSignal,
       logger,
       mcpServers: resolvedMcps,
       initialSessionId: options?.initialSessionId ?? harnessSessionId,
       beforeQueuedPrompt: prepareQueuedPromptActorScope
-        ? async ({ userId }: { userId?: string }) =>
-            await prepareQueuedPromptActorScope(userId)
+        ? async ({
+            userId,
+            kind,
+          }: {
+            userId?: string;
+            kind: 'queuedPrompt' | 'userInputAnswer';
+          }) => await prepareQueuedPromptActorScope(userId, { kind })
         : undefined,
       ...(modelOverride ? { modelOverride } : {}),
       ...(reasoningEffortOverride ? { reasoningEffortOverride } : {}),

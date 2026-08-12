@@ -239,6 +239,23 @@ A practical starting point:
 If a model does not support reasoning controls, Roomote hides or ignores the
 reasoning selector for that role.
 
+## Per-task model switching
+
+Deployment settings define the defaults, but each task can override them from
+the web task view. The model chip in the message composer shows the task's
+current coding model and reasoning level; open it to switch the coding model,
+or expand **All roles** to override the planning, code review, explore,
+helper, or vision role for that task only.
+
+Changes apply from the next message: a turn that is already running finishes
+on the old settings, and the next turn (including its sub-agents) uses the new
+ones. Overrides persist for the life of the task, including snapshot resumes,
+and **Reset to defaults** returns every role to the deployment configuration.
+
+You can also just ask the agent — for example "switch to Fable 5 with max
+reasoning for the rest of this task". The agent applies the same change
+through its task-management tool, subject to the same allowed-models list.
+
 ## Choosing models
 
 Start by choosing for reliability, then optimize for cost and speed once tasks

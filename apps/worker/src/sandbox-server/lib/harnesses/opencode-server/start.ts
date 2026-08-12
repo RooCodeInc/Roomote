@@ -44,7 +44,10 @@ interface StartOpenCodeServerHarnessOptions {
     message: string;
     details?: Record<string, unknown>;
   }) => void;
-  beforeQueuedPrompt?: (input: { userId?: string }) => Promise<void | {
+  beforeQueuedPrompt?: (input: {
+    userId?: string;
+    kind: 'queuedPrompt' | 'userInputAnswer';
+  }) => Promise<void | {
     shouldReconnect: boolean;
     shouldBlockPrompt?: boolean;
     shouldSkipPrompt?: boolean;

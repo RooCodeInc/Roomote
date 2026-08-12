@@ -10,6 +10,7 @@ export { ROOMOTE_COMPACT_PROMPT } from '../compact-prompt';
 
 export * from './cloud-agent-workflow';
 export * from './task-url';
+export * from './task-model-selection';
 export * from './task-run-queue';
 export * from './commit-author';
 export { getPrBodyAttributionLine } from './workflows/utils';

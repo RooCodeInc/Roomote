@@ -190,6 +190,16 @@ export interface SandboxSuccessResult {
   success: true;
 }
 
+export interface SandboxApplyTaskModelSettingsResult {
+  success: true;
+  /**
+   * How the live harness took the persisted model settings: restarted now
+   * (idle), deferred to the next queued-prompt delivery, or unavailable
+   * because the harness is shutting down.
+   */
+  application: 'restarted' | 'deferred' | 'unavailable';
+}
+
 export interface SandboxSubscriptionObserver<TData> {
   onStarted?: () => void;
   onData?: (data: TData) => void;
@@ -261,6 +271,10 @@ export interface SandboxServerRpcClient {
     >;
     touchKeepalive: SandboxMutation<undefined, SandboxSuccessResult>;
     reloadDeploymentEnvVars: SandboxMutation<undefined, SandboxSuccessResult>;
+    applyTaskModelSettings: SandboxMutation<
+      undefined,
+      SandboxApplyTaskModelSettingsResult
+    >;
     scrubSnapshotSecrets: SandboxMutation<undefined, SandboxSuccessResult>;
     restoreScrubbedCredentials: SandboxMutation<
       undefined,

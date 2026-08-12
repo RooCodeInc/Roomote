@@ -21,6 +21,7 @@ import type {
   LaunchTaskResponse,
   CancelTaskResponse,
   StopTaskResponse,
+  UpdateTaskModelSelectionResponse,
   SendMessageResponse,
   ListEnvironmentsResponse,
   CreateEnvironmentResponse,
@@ -195,6 +196,30 @@ export async function cancelTask(
     `/api/mcp/tasks/${encodeURIComponent(taskId)}/cancel`,
     { method: 'POST' },
     'Failed to cancel task',
+  );
+}
+
+/**
+ * Update one model role for a task via the platform API.
+ */
+export async function updateTaskModelSelection(
+  config: RoomoteConfig,
+  taskId: string,
+  params: {
+    role: string;
+    model?: string | null;
+    reasoningEffort?: string | null;
+  },
+): Promise<UpdateTaskModelSelectionResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/${encodeURIComponent(taskId)}/model_selection`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to update task model selection',
   );
 }
 

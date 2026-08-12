@@ -17,6 +17,7 @@ import {
   cancelTask,
   touchKeepalive,
   reloadDeploymentEnvVars,
+  applyTaskModelSettings,
   scrubSnapshotSecrets,
   restoreScrubbedCredentials,
 } from '../procedures';
@@ -38,6 +39,7 @@ export const commandsRouter = router({
   cancelTask,
   touchKeepalive,
   reloadDeploymentEnvVars,
+  applyTaskModelSettings,
   scrubSnapshotSecrets,
   restoreScrubbedCredentials,
 });

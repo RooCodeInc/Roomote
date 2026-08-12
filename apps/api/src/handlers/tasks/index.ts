@@ -15,6 +15,7 @@ import { submitMcpRecommendations } from './submitMcpRecommendations';
 import { getTaskComputeLogs } from './getTaskComputeLogs';
 import { describeVideo } from './describeVideo';
 import { manageSourceControl } from './manageSourceControl';
+import { updateTaskModelSelection } from './updateModelSelection';
 
 export const tasksRouter = new Hono<{ Variables: Variables }>();
 
@@ -29,6 +30,7 @@ tasksRouter.post('/:taskId/send_message', sendMessage);
 tasksRouter.post('/:taskId/steer_message', steerMessage);
 tasksRouter.post('/:taskId/describe_video', describeVideo);
 tasksRouter.post('/:taskId/source_control', manageSourceControl);
+tasksRouter.post('/:taskId/model_selection', updateTaskModelSelection);
 tasksRouter.post('/:taskId/automation_work_items', submitAutomationWorkItems);
 tasksRouter.post('/:taskId/task_suggestions', submitTaskSuggestions);
 tasksRouter.post('/:taskId/mcp_recommendations', submitMcpRecommendations);

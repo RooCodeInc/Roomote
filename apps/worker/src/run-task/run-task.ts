@@ -1140,7 +1140,63 @@ export const runTask = async ({
         refreshActorScopedIntegrations,
       });
 
-    const prepareQueuedPromptActorScope = async (targetUserId?: string) => {
+    // Set when the task's model settings changed while a restart was unsafe
+    // (active turn or pending user-input request). Consumed by the next
+    // queued-prompt delivery: the prompt is restored, the harness restarts
+    // with a regenerated OpenCode config, and the prompt replays on the new
+    // models. User-input answers never consume it — a reconnect there fails
+    // the answer delivery instead of replaying it.
+    let pendingTaskModelSettingsRestart = false;
+
+    const applyTaskModelSettingsUpdate = async (): Promise<{
+      application: 'restarted' | 'deferred' | 'unavailable';
+    }> => {
+      const freshRun = await sdk.taskRuns.findFirstById(taskRun.id);
+
+      if (freshRun?.payload && typeof freshRun.payload === 'object') {
+        // createHarness closed over this taskRun object and re-reads its
+        // payload at every harness spawn, so refreshing it here is what a
+        // restart (or crash reconnect) applies.
+        taskRun.payload = freshRun.payload;
+      }
+
+      const phase = harnessManager?.getStatus().phase ?? 'idle';
+
+      if (phase === 'shutting_down' || phase === 'stopped') {
+        // Too late to apply live; the persisted payload applies on resume.
+        return { application: 'unavailable' };
+      }
+
+      if (
+        phase === 'running' ||
+        phase === 'waiting_for_user_input' ||
+        !harness.requestReconnect
+      ) {
+        pendingTaskModelSettingsRestart = true;
+        return { application: 'deferred' };
+      }
+
+      await harness.requestReconnect({
+        reason: 'Task model settings updated',
+      });
+      return { application: 'restarted' };
+    };
+
+    const prepareQueuedPromptActorScope = async (
+      targetUserId?: string,
+      delivery?: { kind: 'queuedPrompt' | 'userInputAnswer' },
+    ) => {
+      if (
+        pendingTaskModelSettingsRestart &&
+        delivery?.kind !== 'userInputAnswer'
+      ) {
+        pendingTaskModelSettingsRestart = false;
+        return {
+          shouldReconnect: true,
+          reason: 'Applying updated task model settings before the next turn',
+        };
+      }
+
       if (!targetUserId) {
         return {
           shouldReconnect: false,
@@ -1971,6 +2027,7 @@ export const runTask = async ({
       taskRuntime: { homeDir, runtimeEnv },
       allowTerminal: runtimeEnv.ROOMOTE_TASK_TERMINAL === 'true',
       prepareActorScopedTurn,
+      applyTaskModelSettingsUpdate,
       validateToken,
     });
 

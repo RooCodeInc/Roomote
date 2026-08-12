@@ -32,6 +32,8 @@ import {
   Loader2,
   RefreshCcw,
   Avatar,
+  Badge,
+  BasicTooltip,
   Button,
   CopyIconButton,
   Calendar,
@@ -390,6 +392,11 @@ export function TaskInfoPanel({
                     <span className="inline-flex items-center gap-1.5">
                       <Brain className="size-3.5 shrink-0 text-muted-foreground" />
                       <span className="truncate">{taskModelLabel}</span>
+                      {taskRun.payload?.modelRoleOverrides && (
+                        <BasicTooltip content="Some model roles are customized for this task">
+                          <Badge variant="secondary">Customized</Badge>
+                        </BasicTooltip>
+                      )}
                     </span>
                   </td>
                 </tr>

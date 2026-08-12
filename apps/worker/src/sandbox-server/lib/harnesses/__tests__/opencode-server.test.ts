@@ -3805,6 +3805,7 @@ describe('OpenCodeServerHarness', () => {
       });
       expect(beforeQueuedPrompt).toHaveBeenCalledWith({
         userId: 'answer-user-1',
+        kind: 'userInputAnswer',
       });
       expect(client.abort).not.toHaveBeenCalled();
       expect(client.promptAsync).toHaveBeenCalledTimes(1);
