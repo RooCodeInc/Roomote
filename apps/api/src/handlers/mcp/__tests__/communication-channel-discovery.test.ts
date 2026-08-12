@@ -2,26 +2,22 @@ const {
   findDiscordInstallationsMock,
   findDiscordUserMappingMock,
   findSlackInstallationsMock,
-  findSlackUserMappingMock,
   findTeamsInstallationsMock,
   getCommunicationProviderAdapterMock,
   createDiscordProviderMock,
   canDiscordUserAccessChannelMock,
   isDiscordChannelPublicMock,
   listPublicChannelsMock,
-  isSlackUserInChannelMock,
 } = vi.hoisted(() => ({
   findDiscordInstallationsMock: vi.fn(),
   findDiscordUserMappingMock: vi.fn(),
   findSlackInstallationsMock: vi.fn(),
-  findSlackUserMappingMock: vi.fn(),
   findTeamsInstallationsMock: vi.fn(),
   getCommunicationProviderAdapterMock: vi.fn(),
   createDiscordProviderMock: vi.fn(),
   canDiscordUserAccessChannelMock: vi.fn(),
   isDiscordChannelPublicMock: vi.fn(),
   listPublicChannelsMock: vi.fn(),
-  isSlackUserInChannelMock: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -30,15 +26,12 @@ vi.mock('@roomote/db/server', () => ({
       discordInstallations: { findMany: findDiscordInstallationsMock },
       discordUserMappings: { findFirst: findDiscordUserMappingMock },
       slackInstallations: { findMany: findSlackInstallationsMock },
-      slackUserMappings: { findFirst: findSlackUserMappingMock },
       teamsInstallations: { findMany: findTeamsInstallationsMock },
     },
   },
   discordInstallationChannels: { isAvailable: 'isAvailable' },
   discordUserMappings: { userId: 'userId' },
   eq: vi.fn(() => 'condition'),
-  and: vi.fn(() => 'condition'),
-  slackUserMappings: { userId: 'userId', slackTeamId: 'slackTeamId' },
   teamsInstallations: { isActive: 'isActive' },
 }));
 
@@ -51,7 +44,6 @@ vi.mock('@roomote/sdk/server', () => ({
 vi.mock('@roomote/slack', () => ({
   SlackNotifier: class {
     listPublicChannels = listPublicChannelsMock;
-    isUserInChannel = isSlackUserInChannelMock;
   },
 }));
 
@@ -64,7 +56,6 @@ describe('listCommunicationChannels', () => {
     findTeamsInstallationsMock.mockResolvedValue([]);
     findDiscordInstallationsMock.mockResolvedValue([]);
     findDiscordUserMappingMock.mockResolvedValue(null);
-    findSlackUserMappingMock.mockResolvedValue(null);
     getCommunicationProviderAdapterMock.mockResolvedValue(null);
     createDiscordProviderMock.mockResolvedValue({
       canUserAccessChannel: canDiscordUserAccessChannelMock,
@@ -73,14 +64,12 @@ describe('listCommunicationChannels', () => {
     canDiscordUserAccessChannelMock.mockResolvedValue(true);
     isDiscordChannelPublicMock.mockResolvedValue(true);
     listPublicChannelsMock.mockResolvedValue([]);
-    isSlackUserInChannelMock.mockResolvedValue(true);
   });
 
   it('normalizes discoverable channels and excludes Slack channels the app has not joined', async () => {
     findSlackInstallationsMock.mockResolvedValue([
       { botAccessToken: 'token', teamId: 'T1', teamName: 'Acme' },
     ]);
-    findSlackUserMappingMock.mockResolvedValue({ slackUserId: 'U1' });
     listPublicChannelsMock.mockResolvedValue([
       {
         id: 'C1',
@@ -198,7 +187,7 @@ describe('listCommunicationChannels', () => {
     });
   });
 
-  it('does not reveal Slack or Discord channels without linked accounts', async () => {
+  it('returns app-joined public Slack channels without a linked account', async () => {
     findSlackInstallationsMock.mockResolvedValue([
       { botAccessToken: 'token', teamId: 'T1', teamName: 'Acme' },
     ]);
@@ -233,10 +222,10 @@ describe('listCommunicationChannels', () => {
 
     const result = await listCommunicationChannels({ actingUserId: 'user-1' });
 
-    expect(result.channelCount).toBe(0);
+    expect(result.channelCount).toBe(1);
     expect(
       result.platforms.find(({ provider }) => provider === 'slack'),
-    ).toMatchObject({ channels: [] });
+    ).toMatchObject({ channels: [{ id: 'C1', name: 'public-room' }] });
     expect(
       result.platforms.find(({ provider }) => provider === 'discord'),
     ).toMatchObject({ channels: [] });

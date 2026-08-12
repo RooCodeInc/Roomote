@@ -1,10 +1,8 @@
 import {
-  and,
   db,
   discordInstallationChannels,
   discordUserMappings,
   eq,
-  slackUserMappings,
   teamsInstallations,
 } from '@roomote/db/server';
 import { SlackNotifier } from '@roomote/slack';
@@ -50,7 +48,7 @@ const DISCORD_CHANNEL_KINDS: Record<number, string> = {
 };
 
 async function listSlackChannels(
-  actingUserId: string | null,
+  _actingUserId: string | null,
 ): Promise<CommunicationPlatformChannels> {
   const installations = await db.query.slackInstallations.findMany({
     columns: {
@@ -64,35 +62,9 @@ async function listSlackChannels(
     await Promise.all(
       installations.map(async (installation) => {
         const slack = new SlackNotifier(installation.botAccessToken);
-        const linkedUser = actingUserId
-          ? await db.query.slackUserMappings.findFirst({
-              columns: { slackUserId: true },
-              where: and(
-                eq(slackUserMappings.userId, actingUserId),
-                eq(slackUserMappings.slackTeamId, installation.teamId),
-              ),
-            })
-          : null;
-        const visibleChannels = (
-          await Promise.all(
-            (
-              await slack.listPublicChannels()
-            )
-              .filter(
-                (channel) =>
-                  channel.isMember === true && channel.isPrivate === false,
-              )
-              .map(async (channel) => {
-                if (!linkedUser) return null;
-                return (await slack.isUserInChannel({
-                  channelId: channel.id,
-                  userId: linkedUser.slackUserId,
-                })) === true
-                  ? channel
-                  : null;
-              }),
-          )
-        ).filter((channel) => channel !== null);
+        const visibleChannels = (await slack.listPublicChannels()).filter(
+          (channel) => channel.isMember === true && channel.isPrivate === false,
+        );
 
         return visibleChannels.map((channel) => ({
           id: channel.id,
