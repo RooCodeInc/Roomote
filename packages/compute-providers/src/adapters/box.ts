@@ -120,9 +120,9 @@ export class BoxClient implements ComputeProviderClient {
     ) {
       throw new Error('Box machineType must be one of: small, default, large');
     }
-    this.apiBaseUrl = (
-      config.boxApiBaseUrl ?? DEFAULT_BOX_API_BASE_URL
-    ).replace(/\/+$/, '');
+    this.apiBaseUrl = trimTrailingSlashes(
+      config.boxApiBaseUrl ?? DEFAULT_BOX_API_BASE_URL,
+    );
     this.fetchImpl = config.fetchImpl ?? globalThis.fetch;
   }
 
@@ -575,6 +575,12 @@ export class BoxClient implements ComputeProviderClient {
       });
     }
   }
+}
+
+function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) end -= 1;
+  return value.slice(0, end);
 }
 
 function boxPath(instanceId: string): string {

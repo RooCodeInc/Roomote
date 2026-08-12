@@ -65,7 +65,7 @@ const serverSchema = {
   R_APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   APP_ENV: z.enum(['development', 'preview', 'production']).optional(),
   DEFAULT_COMPUTE_PROVIDER: z
-    .enum(['modal', 'docker', 'daytona', 'e2b', 'roomote', 'azure'])
+    .enum(['modal', 'docker', 'daytona', 'e2b', 'box', 'roomote', 'azure'])
     .default('docker'),
   EXCLUDED_COMPUTE_PROVIDERS: z.string().optional(),
   DOCKER_WORKER_IMAGE: z

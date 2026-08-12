@@ -376,6 +376,15 @@ describe('Env', () => {
     expect(env.DEFAULT_COMPUTE_PROVIDER).toBe('modal');
   });
 
+  it('accepts Box as the default compute provider', () => {
+    const env = createRoomoteEnv({
+      ...process.env,
+      DEFAULT_COMPUTE_PROVIDER: 'box',
+    });
+
+    expect(env.DEFAULT_COMPUTE_PROVIDER).toBe('box');
+  });
+
   it('accepts explicit model config overrides', () => {
     const env = createRoomoteEnv({
       ...process.env,
