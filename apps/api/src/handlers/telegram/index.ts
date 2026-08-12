@@ -18,6 +18,7 @@ import {
   getTelegramUpdateMessage,
   getTelegramUpdateMessageReaction,
   getTelegramNewTaskCommand,
+  getTelegramGoalCommand,
   isTelegramImplicitTopicCreatedMessage,
   isTelegramPrivateChat,
   isTelegramStartCommand,
@@ -26,6 +27,11 @@ import {
   parseTelegramUpdate,
   telegramUpdateToQueuedCommunicationMessage,
 } from '@roomote/communication/telegram-update';
+import { activateTaskGoal } from '@roomote/communication/task-goal';
+import {
+  getTaskGoalActivationMessage,
+  withTaskGoalContext,
+} from '@roomote/communication/task-goal-command';
 
 import { apiLogger } from '../../logging.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
@@ -60,6 +66,7 @@ const TELEGRAM_COMMAND_HELP = [
   '*Available commands*',
   '`/start` — show this welcome message.',
   '`/new <request>` — start a fresh task instead of resuming the previous one; when topics are available, it opens a new topic.',
+  '`/goal <objective>` — keep the active task working toward an objective.',
 ].join('\n');
 
 const TELEGRAM_WELCOME_MESSAGE = [
@@ -400,8 +407,11 @@ telegram.post('/', async (c) => {
   const newTaskCommand = getTelegramNewTaskCommand(update, {
     botUsername: botUsername ?? undefined,
   });
+  const goalCommand = getTelegramGoalCommand(update, {
+    botUsername: botUsername ?? undefined,
+  });
 
-  if (!queuedMessage && !newTaskCommand) {
+  if (!queuedMessage && !newTaskCommand && !goalCommand) {
     return c.json({ ok: true, ignored: 'unsupported_update' });
   }
 
@@ -480,6 +490,33 @@ telegram.post('/', async (c) => {
       return c.json({ ok: true, ignored: 'unsupported_update' });
     }
 
+    if (goalCommand) {
+      const result = await activateTaskGoal({
+        taskId: activeRun.taskId,
+        objective: goalCommand.objective,
+        deliver: async (goal) => {
+          await syncActingUserForInboundMessage({
+            logContext: 'telegram.activeRunMessage.goal',
+            runId: activeRun.id,
+            senderUserId: queuedMessage.userId,
+          });
+          await queueCommunicationMessage(
+            'telegram',
+            activeRun.id,
+            withTaskGoalContext(queuedMessage, goal),
+          );
+        },
+      });
+      await postTelegramMessageBestEffort({
+        chatId: metadata.communicationChannelId,
+        threadId: metadata.communicationThreadId,
+        replyToMessageId: metadata.communicationMessageId,
+        text: getTaskGoalActivationMessage(result),
+        textFormat: 'markdown',
+      });
+      return c.json({ ok: true, queued: result.success, runId: activeRun.id });
+    }
+
     // Prefer structured request_user_input answers over plain¡ follow-ups.
     if (queuedMessage.userId && queuedMessage.text?.trim()) {
       const { tryHandleTelegramRequestUserInputMessage } =
@@ -541,6 +578,21 @@ telegram.post('/', async (c) => {
     );
 
     return c.json({ ok: true, queued: true, runId: activeRun.id });
+  }
+
+  if (goalCommand) {
+    await postTelegramMessageBestEffort({
+      chatId: metadata.communicationChannelId,
+      threadId: metadata.communicationThreadId,
+      replyToMessageId: metadata.communicationMessageId,
+      text: 'Use `/goal` in a chat with an active task.',
+      textFormat: 'markdown',
+    });
+    return c.json({
+      ok: true,
+      queued: false,
+      reason: 'goal_requires_active_task',
+    });
   }
 
   if (newTaskCommand && !newTaskCommand.text) {

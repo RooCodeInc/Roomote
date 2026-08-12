@@ -10,6 +10,7 @@ import type {
 import { UnsupportedCommunicationOperationError } from './provider';
 import { readBoundedResponseBody } from './bounded-response-body';
 import { getTelegramApiBaseUrl } from './telegram-api-base-url';
+import { GOAL_COMMAND_NAME } from './task-goal-command';
 import {
   TELEGRAM_MAX_MESSAGE_LENGTH,
   chunkTelegramMarkdown,
@@ -527,6 +528,10 @@ export class TelegramCommunicationProvider implements CommunicationProviderAdapt
       commands: [
         { command: 'start', description: 'Show welcome and command help' },
         { command: 'new', description: 'Start a fresh task' },
+        {
+          command: GOAL_COMMAND_NAME,
+          description: 'Set a goal for the active task',
+        },
       ],
     });
   }

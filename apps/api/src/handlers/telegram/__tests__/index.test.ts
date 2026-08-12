@@ -40,6 +40,7 @@ const {
   usersFindFirstMock,
   telegramMappingsFindFirstMock,
   appendAccountLinkHelpTextMock,
+  activateGoalMock,
 } = vi.hoisted(() => ({
   addReactionMock: vi.fn(),
   answerCallbackQueryMock: vi.fn(),
@@ -84,6 +85,7 @@ const {
   usersFindFirstMock: vi.fn(),
   telegramMappingsFindFirstMock: vi.fn(),
   appendAccountLinkHelpTextMock: vi.fn(async (message: string) => message),
+  activateGoalMock: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -244,6 +246,13 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('@roomote/communication/messages', () => ({
   queueCommunicationMessage: queueCommunicationMessageMock,
   setLatestInboundMessageId: setLatestInboundMessageIdMock,
+}));
+
+vi.mock('@roomote/communication/task-goal', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('@roomote/communication/task-goal')
+  >()),
+  activateTaskGoal: activateGoalMock,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -417,6 +426,27 @@ describe('Telegram webhook handler', () => {
     });
     updateReturningMock.mockResolvedValue([]);
     queueCommunicationMessageMock.mockResolvedValue(undefined);
+    activateGoalMock.mockImplementation(
+      async ({
+        objective,
+        deliver,
+      }: {
+        objective: string;
+        deliver: Function;
+      }) => {
+        const goal = {
+          objective,
+          maxContinuations: 5,
+          generation: 'goal-generation:test',
+          status: 'active',
+          continuationsUsed: 0,
+          blockedReason: null,
+          completedAt: null,
+        };
+        await deliver(goal);
+        return { success: true, goal };
+      },
+    );
     buildTelegramRoutingContextMock.mockResolvedValue({ context: true });
     classifyFollowUpMock.mockResolvedValue({
       intent: 'correct',
@@ -744,6 +774,43 @@ describe('Telegram webhook handler', () => {
       runId: 77,
       userId: 'launch-owner-1',
     });
+  });
+
+  it('activates /goal on an active task and queues only the objective', async () => {
+    mockTelegramLinkedSender();
+    taskRunsFindFirstMock.mockResolvedValueOnce({
+      id: 77,
+      status: 'running',
+      machineId: 'machine-1',
+      taskId: 'task-1',
+      payload: {},
+    });
+
+    const response = await postTelegramUpdate(
+      createTelegramUpdate({
+        message: {
+          text: '/goal ship the release',
+          entities: [{ type: 'bot_command', offset: 0, length: 5 }],
+        },
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      queued: true,
+      runId: 77,
+    });
+    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+      'telegram',
+      77,
+      expect.objectContaining({
+        text: 'ship the release',
+        formattedPrompt: 'ship the release',
+        goalContext: expect.objectContaining({
+          generation: 'goal-generation:test',
+        }),
+      }),
+    );
   });
 
   it('queues a captioned photo as an active-run follow-up', async () => {

@@ -286,6 +286,38 @@ describe('Discord Gateway event normalization', () => {
     });
   });
 
+  it('normalizes /goal slash interactions', () => {
+    const event = parse({
+      op: 0,
+      t: 'INTERACTION_CREATE',
+      s: 2,
+      d: {
+        id: 'interaction-goal',
+        application_id: 'application-1',
+        type: 2,
+        token: 'interaction-token',
+        channel_id: 'channel-1',
+        user: { id: 'user-1', username: 'matt' },
+        data: {
+          name: 'goal',
+          type: 1,
+          options: [
+            { name: 'objective', type: 3, value: 'Ship Discord support' },
+          ],
+        },
+      },
+    });
+
+    expect(getDiscordInteractionCommand(event)).toEqual({
+      name: 'goal',
+      objective: 'Ship Discord support',
+    });
+    expect(discordEventToQueuedCommunicationMessage(event)).toMatchObject({
+      text: '/goal Ship Discord support',
+      ts: 'interaction-goal',
+    });
+  });
+
   it('does not queue bot-authored messages or non-task commands', () => {
     const botEvent = parse({
       op: 0,

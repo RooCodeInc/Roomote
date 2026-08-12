@@ -18,6 +18,12 @@ import {
   teamsActivityToQueuedCommunicationMessage,
 } from '@roomote/communication/teams-activity';
 import { queueCommunicationMessage } from '@roomote/communication/messages';
+import { activateTaskGoal } from '@roomote/communication/task-goal';
+import {
+  getTaskGoalActivationMessage,
+  parseGoalCommand,
+  withTaskGoalContext,
+} from '@roomote/communication/task-goal-command';
 import {
   buildAccountLinkPromptText,
   buildAccountLinkThreadReplyText,
@@ -2230,6 +2236,28 @@ teams.post('/', async (c) => {
     runId: activeRun.id,
     senderUserId: mappedUserId,
   });
+
+  const goalCommand = parseGoalCommand(queuedMessage.text);
+  if (goalCommand) {
+    const result = await activateTaskGoal({
+      taskId: activeRun.taskId,
+      objective: goalCommand.objective,
+      deliver: async (goal) => {
+        await queueCommunicationMessage(
+          'teams',
+          activeRun.id,
+          withTaskGoalContext(queuedMessage, goal),
+        );
+      },
+    });
+    await postTeamsMessageBestEffort({
+      conversationId: metadata.communicationChannelId,
+      threadId: metadata.communicationThreadId,
+      serviceUrl: metadata.communicationServiceUrl,
+      text: getTaskGoalActivationMessage(result),
+    });
+    return c.json({ ok: true, queued: result.success, runId: activeRun.id });
+  }
 
   if (mappedUserId && queuedMessage.text?.trim()) {
     const { tryHandleTeamsRequestUserInputMessage } =

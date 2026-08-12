@@ -251,6 +251,7 @@ export function createSlackMessageInterval({
             // The delivered sender always equals the server-side acting user.
             userId: msgPrep.effectiveUserId ?? undefined,
             clientMessageId: getSlackClientMessageId(msg),
+            goalContext: msg.goalContext,
           });
 
           logger.log(

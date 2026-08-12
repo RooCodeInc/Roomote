@@ -31,6 +31,11 @@ import {
   stripLeadingSlackProductMention,
 } from '@roomote/cloud-agents';
 import { setTrustedRunActingUserOnSuccess } from '@roomote/db/server';
+import { activateTaskGoal } from '@roomote/communication/task-goal';
+import {
+  getTaskGoalActivationMessage,
+  parseGoalCommand,
+} from '@roomote/communication/task-goal-command';
 
 import { apiLogger } from '../../../logging.js';
 import { retireSlackPrReviewOffersBestEffort } from '../pr-review-retire.js';
@@ -431,21 +436,59 @@ export async function processActiveRunMessage(
       }
     }
 
-    const [promptReadyThreadMessages, normalizedMessageText, trackedBotReply] =
-      await Promise.all([
-        getPromptReadyThreadMessages({
-          slack,
-          channel: event.channel,
-          threadTs: threadId,
-          botUserId,
-          startedMessageRunId: activeRun.id,
-          logContext: `active task run ${activeRun.id} in ${event.channel}:${threadId}`,
-          prefetchedMessages: prefetchedThreadMessages,
-        }),
-        slack.normalizeIncomingText(stripLeadingRawSlackMention(event.text)),
-        getLatestSlackBotReply(event.channel, threadId),
-      ]);
+    const normalizedMessageText = await slack.normalizeIncomingText(
+      stripLeadingRawSlackMention(event.text),
+    );
     const messageText = stripLeadingSlackProductMention(normalizedMessageText);
+    const goalCommand = parseGoalCommand(messageText);
+
+    if (goalCommand && activeRun.taskId) {
+      const result = await activateTaskGoal({
+        taskId: activeRun.taskId,
+        objective: goalCommand.objective,
+        deliver: async (goal) => {
+          await syncActingUserForInboundMessage({
+            logContext: 'slack.processActiveRunMessage.goal',
+            runId: activeRun.id,
+            senderUserId: userId,
+          });
+          await queueSlackMessage(activeRun.id, {
+            text: goal.objective,
+            user: event.user,
+            userId,
+            ts: event.ts,
+            formattedPrompt: goal.objective,
+            goalContext: goal,
+          });
+        },
+      });
+
+      await slack.postMessage({
+        channel: event.channel,
+        thread_ts: threadId,
+        blocks: [
+          {
+            type: 'markdown',
+            text: getTaskGoalActivationMessage(result),
+          },
+        ],
+      });
+      deliveryTracker.track(event.ts);
+      return;
+    }
+
+    const [promptReadyThreadMessages, trackedBotReply] = await Promise.all([
+      getPromptReadyThreadMessages({
+        slack,
+        channel: event.channel,
+        threadTs: threadId,
+        botUserId,
+        startedMessageRunId: activeRun.id,
+        logContext: `active task run ${activeRun.id} in ${event.channel}:${threadId}`,
+        prefetchedMessages: prefetchedThreadMessages,
+      }),
+      getLatestSlackBotReply(event.channel, threadId),
+    ]);
     const currentMessageFiles = resolveCurrentSlackMessageFiles({
       currentMessageTs: deliveryTs,
       eventFiles: event.files,

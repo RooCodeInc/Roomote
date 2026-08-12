@@ -20,6 +20,7 @@ import {
   routeTask,
 } from '@roomote/cloud-agents/server';
 import { captureTaskSettled } from '@roomote/telemetry/server';
+import { activateTaskGoal } from '@roomote/communication/task-goal';
 import {
   and,
   db,
@@ -27,7 +28,6 @@ import {
   eq,
   inArray,
   markTaskStartParallelCountEndedAt,
-  prepareTaskGoalActivation,
   slackInstallations,
   taskRuns,
   tasks,
@@ -67,52 +67,31 @@ export async function startTaskGoalCommand(
     return { success: false, error: 'Task not found' };
   }
 
-  const activation = await prepareTaskGoalActivation({
+  const result = await activateTaskGoal({
     taskId: input.taskId,
-    goal: input.goal,
-  });
-  if (!activation) {
-    return { success: false, error: 'Goal Mode activation is already pending' };
-  }
-
-  try {
-    await sendSandboxPromptCommand(
-      auth,
-      {
-        taskId: input.taskId,
-        prompt: input.goal.objective,
-        source: 'web',
-        clientMessageId: input.clientMessageId,
-        userImageUrl: input.userImageUrl,
-        autoSteerWhenQueued: true,
-      },
-      {
-        goalContext: {
-          ...input.goal,
-          generation: activation.generation,
-          status: 'active',
-          continuationsUsed: 0,
-          blockedReason: null,
-          completedAt: null,
+    objective: input.goal.objective,
+    maxContinuations: input.goal.maxContinuations,
+    deliver: async (goal) => {
+      await sendSandboxPromptCommand(
+        auth,
+        {
+          taskId: input.taskId,
+          prompt: input.goal.objective,
+          source: 'web',
+          clientMessageId: input.clientMessageId,
+          userImageUrl: input.userImageUrl,
+          autoSteerWhenQueued: true,
         },
-      },
-    );
-  } catch (error) {
-    try {
-      await activation.rollback();
-    } catch (rollbackError) {
-      console.error('Failed to roll back Goal Mode activation:', rollbackError);
-    }
-    throw error;
-  }
+        { goalContext: goal },
+      );
+    },
+  });
 
-  const goal = await activation.commit();
-  if (!goal) {
-    await activation.rollback();
+  if (!result.success) {
     return { success: false, error: 'Goal Mode activation was superseded' };
   }
 
-  return { success: true, goal };
+  return { success: true, goal: result.goal };
 }
 
 type CreateStandardTaskRunInput = {

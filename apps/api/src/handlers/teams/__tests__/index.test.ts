@@ -39,6 +39,7 @@ const {
   claimPendingOutOfBandMock,
   releaseClaimedOutOfBandMock,
   callViaEmojiConfigMock,
+  activateGoalMock,
 } = vi.hoisted(() => ({
   authAccountsFindFirstMock: vi.fn(),
   authAccountsFindManyMock: vi.fn(),
@@ -97,6 +98,7 @@ const {
   claimPendingOutOfBandMock: vi.fn(),
   releaseClaimedOutOfBandMock: vi.fn(),
   callViaEmojiConfigMock: vi.fn(),
+  activateGoalMock: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -253,6 +255,13 @@ vi.mock('@roomote/communication/messages', () => ({
   queueCommunicationMessage: queueCommunicationMessageMock,
 }));
 
+vi.mock('@roomote/communication/task-goal', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('@roomote/communication/task-goal')
+  >()),
+  activateTaskGoal: activateGoalMock,
+}));
+
 vi.mock('@roomote/communication/teams-provider', () => ({
   TeamsCommunicationProvider: vi.fn().mockImplementation(function () {
     return {
@@ -366,6 +375,27 @@ describe('Teams webhook handler', () => {
       payload: {},
     });
     queueCommunicationMessageMock.mockResolvedValue(undefined);
+    activateGoalMock.mockImplementation(
+      async ({
+        objective,
+        deliver,
+      }: {
+        objective: string;
+        deliver: Function;
+      }) => {
+        const goal = {
+          objective,
+          maxContinuations: 5,
+          generation: 'goal-generation:test',
+          status: 'active',
+          continuationsUsed: 0,
+          blockedReason: null,
+          completedAt: null,
+        };
+        await deliver(goal);
+        return { success: true, goal };
+      },
+    );
     claimPendingOutOfBandMock.mockResolvedValue([]);
     releaseClaimedOutOfBandMock.mockResolvedValue(undefined);
     buildTeamsRoutingContextMock.mockResolvedValue({ context: true });
@@ -691,6 +721,42 @@ describe('Teams webhook handler', () => {
       channel: '19:conversation@thread.v2;messageid=activity-root',
       threadTs: 'activity-root',
     });
+  });
+
+  it('activates /goal on an active task and queues only the objective', async () => {
+    teamsUserMappingFindFirstMock.mockResolvedValueOnce({
+      userId: 'mapped-user-1',
+    });
+    const response = await createApp().request('/teams', {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer bot-framework-token',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        createTeamsActivity({
+          id: 'activity-goal',
+          text: '<at>Roomote</at> /goal ship the release',
+        }),
+      ),
+    });
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      queued: true,
+      runId: 77,
+    });
+    expect(queueCommunicationMessageMock).toHaveBeenCalledWith(
+      'teams',
+      77,
+      expect.objectContaining({
+        text: 'ship the release',
+        formattedPrompt: 'ship the release',
+        goalContext: expect.objectContaining({
+          generation: 'goal-generation:test',
+        }),
+      }),
+    );
   });
 
   it('ignores bot-authored Teams message activities before queueing or launching', async () => {
