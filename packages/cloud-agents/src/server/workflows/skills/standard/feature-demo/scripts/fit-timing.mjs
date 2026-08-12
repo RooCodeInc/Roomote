@@ -1,8 +1,8 @@
 // Post-capture trim. With narration synthesized BEFORE capture, the runner
 // paces every beat to its line and stamps clip starts as they land, so no
 // retiming is needed here — the only remaining job is cutting the dead
-// opening hold (page-load settle) so the demo starts immediately. All key,
-// caption, and clip times shift together with the video's startFrom.
+// opening hold (page-load settle) so the demo starts immediately. Cursor,
+// caption, click, and clip times shift together with the video's startFrom.
 //
 // Usage: WORK_DIR=/tmp/feature-demo/work node fit-timing.mjs
 
@@ -20,10 +20,10 @@ const narration = existsSync(narrationPath)
   : null;
 
 // The first visible action is the earlier of the first caption/line start
-// and the first motion key after t=0.
+// and the first cursor motion key after t=0.
 const firstMotion = Math.min(
   ...timeline.captions.map((c) => c.start),
-  ...timeline.scaleKeys.filter((k) => k.t > 0).map((k) => k.t),
+  ...timeline.cursorKeys.filter((k) => k.t > 0).map((k) => k.t),
   Number.POSITIVE_INFINITY,
 );
 const trim =
@@ -51,8 +51,6 @@ function shiftKeys(keys) {
 }
 
 if (trim > 0) {
-  timeline.scaleKeys = shiftKeys(timeline.scaleKeys);
-  timeline.focalKeys = shiftKeys(timeline.focalKeys);
   timeline.cursorKeys = shiftKeys(timeline.cursorKeys);
   timeline.clicks = timeline.clicks
     .filter((c) => c.t >= trim)

@@ -30,16 +30,6 @@ const smooth = (t: number) => t * t * (3 - 2 * t);
 const clamp = (v: number, lo: number, hi: number) =>
   Math.max(lo, Math.min(hi, v));
 
-function lerpNum(keys: { t: number; v: number }[], t: number): number {
-  if (t <= keys[0].t) return keys[0].v;
-  for (let i = 0; i < keys.length - 1; i++) {
-    const a = keys[i];
-    const b = keys[i + 1];
-    if (t >= a.t && t <= b.t)
-      return a.v + (b.v - a.v) * smooth((t - a.t) / Math.max(b.t - a.t, 1e-6));
-  }
-  return keys[keys.length - 1].v;
-}
 function lerpVec(keys: { t: number; v: Vec }[], t: number): Vec {
   if (t <= keys[0].t) return keys[0].v;
   for (let i = 0; i < keys.length - 1; i++) {
@@ -77,7 +67,7 @@ const Cursor: React.FC<{ invScale: number }> = ({ invScale }) => (
 );
 
 // The polished demo "window": recorded video on a rounded panel, with the
-// zoom/cursor/ripple/caption effects driven by the captured timeline. Laid
+// cursor/ripple/caption effects driven by the captured timeline. Laid
 // out for whatever canvas size the preset asks for.
 export const DemoStage: React.FC<{
   canvasW: number;
@@ -119,8 +109,7 @@ export const DemoStage: React.FC<{
   const WIN_X = (canvasW - BASE_W) / 2;
   const WIN_Y = stageTop + (stageH - BASE_H) / 2;
 
-  const sRaw = baseScale + (lerpNum(timeline.scaleKeys, t) - 1);
-  // Two scales bound how far a zoom can grow cleanly: sCrop is where the
+  // Two scales bound how far the preset can grow cleanly: sCrop is where the
   // window starts spilling out of the stage (top and bottom go flush), and
   // sCover is where it finally reaches the canvas edges. Between them the
   // window is cropped AND narrower than the canvas, so backdrop shows down
@@ -138,8 +127,8 @@ export const DemoStage: React.FC<{
   // zoom at a whole window there. Where coverage comes first instead (the
   // tall vertical preset, where the window covers the width at 1.2x and does
   // not crop until 2.58x) nothing is capped and full-bleed still works.
-  const S = sCover > sCrop ? Math.min(sRaw, sCrop) : sRaw;
-  const focal = lerpVec(timeline.focalKeys, t);
+  const S = sCover > sCrop ? Math.min(baseScale, sCrop) : baseScale;
+  const focal = { x: 0.5, y: 0.5 };
   const cursor = lerpVec(timeline.cursorKeys, t);
 
   const focal0x = WIN_X + focal.x * BASE_W;
