@@ -983,6 +983,7 @@ describe('enqueueTask snapshot resume', () => {
       .set({
         payload: {
           ...(freshRun.payload as Record<string, unknown>),
+          reasoningEffort: 'xhigh',
           modelRoleOverrides: {
             planning: { model: 'openrouter/test/planner' },
             explore: { reasoningEffort: 'low' },
@@ -1006,6 +1007,7 @@ describe('enqueueTask snapshot resume', () => {
     );
 
     const resumePayload = resumeRun.payload as {
+      reasoningEffort?: string;
       modelRoleOverrides?: Record<string, unknown>;
     };
 
@@ -1013,6 +1015,9 @@ describe('enqueueTask snapshot resume', () => {
       planning: { model: 'openrouter/test/planner' },
       explore: { reasoningEffort: 'low' },
     });
+    // The explicit coding level must survive the resume; without central
+    // inheritance the enqueue would re-stamp the deployment default.
+    expect(resumePayload.reasoningEffort).toBe('xhigh');
   });
 
   it('keeps concurrent role updates intact via the run-row lock', async () => {

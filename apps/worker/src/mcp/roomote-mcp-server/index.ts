@@ -552,7 +552,7 @@ const manageTasksToolDescription =
   `Use action "launch" to create and start a new task against an environment using ${PRODUCT_NAME}'s default standard workflow (requires prompt and environmentId). ` +
   'Use action "cancel" to cancel an active task (requires taskId). ' +
   'Use action "send_message" to send a follow-up message to a running task (requires taskId and message). ' +
-  'Use action "update_models" ONLY when the user explicitly asks to change the model or reasoning level for a task (requires role; taskId defaults to the current task). Pass the desired model id and/or reasoningEffort; omit both to reset the role to the deployment default. Changes apply from the next turn, so a change to the current task does not affect the turn that is already running.';
+  'Use action "update_models" ONLY when the user explicitly asks to change the model or reasoning level for a task (requires role; taskId defaults to the current task). Pass the desired model id and/or reasoningEffort; omit both to reset the role to the deployment default. Users usually phrase both together: in "switch to Luna Max" or "use GPT 5.4 medium", the trailing low/medium/high/extra high/max word is the reasoningEffort and the rest names the model — set BOTH fields in one call. Changes apply from the next turn, so a change to the current task does not affect the turn that is already running.';
 
 const manageTasksInputSchema = {
   action: z
@@ -640,7 +640,7 @@ const manageTasksInputSchema = {
     .enum(['low', 'medium', 'high', 'xhigh', 'max'])
     .optional()
     .describe(
-      'For update_models: desired reasoning level for the role. Omit to use the deployment default level.',
+      'For update_models: desired reasoning level for the role ("extra high" maps to xhigh). A level qualifier trailing a model name ("Luna Max", "Sonnet high") is this field, not part of the model id — pass it here alongside the model. Omit to use the deployment default level.',
     ),
   notifyOnSettle: z
     .boolean()
