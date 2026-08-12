@@ -374,6 +374,102 @@ describe('github webhook router', () => {
     expect(mockHandlePrComment).toHaveBeenCalledWith(payload);
   });
 
+  it('notifies linked tasks about PR comments in skipped repositories without handling mentions', async () => {
+    mockIsRepoSkipped.mockReturnValue(true);
+    const payload = {
+      action: 'created',
+      installation: { id: 1 },
+      repository: { id: 10, full_name: 'test-org/test-repo' },
+      issue: {
+        number: 42,
+        pull_request: {
+          html_url: 'https://github.com/test-org/test-repo/pull/42',
+        },
+      },
+      comment: {
+        id: 7,
+        body: 'Could this error path preserve the original cause?',
+        user: { login: 'alice' },
+      },
+      sender: { login: 'alice' },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-skipped-pr-comment',
+        'x-github-event': 'issue_comment',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockQueuePrReviewActivityNotification).toHaveBeenCalledWith(payload);
+    expect(mockQueuePrReviewSummaryNotification).toHaveBeenCalledWith(payload);
+    expect(mockHandlePrComment).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      event: 'pull_request_review',
+      action: 'submitted',
+      delivery: 'delivery-skipped-review',
+      activity: {
+        pull_request: { number: 42 },
+        review: {
+          body: 'Please preserve the original cause',
+          state: 'changes_requested',
+          user: { login: 'alice' },
+        },
+      },
+    },
+    {
+      event: 'pull_request_review_comment',
+      action: 'created',
+      delivery: 'delivery-skipped-inline-comment',
+      activity: {
+        pull_request: { number: 42 },
+        comment: {
+          id: 8,
+          body: 'Please preserve the original cause',
+          user: { login: 'alice' },
+        },
+      },
+    },
+  ])(
+    'notifies linked tasks for $event callbacks in skipped repositories without handling mentions',
+    async ({ event, action, delivery, activity }) => {
+      mockIsRepoSkipped.mockReturnValue(true);
+      const payload = {
+        action,
+        installation: { id: 1 },
+        repository: { id: 10, full_name: 'test-org/test-repo' },
+        ...activity,
+        sender: { login: 'alice' },
+      };
+
+      const response = await app.request(
+        'http://localhost/api/webhooks/github',
+        {
+          method: 'POST',
+          headers: {
+            'x-github-delivery': delivery,
+            'x-github-event': event,
+            'x-hub-signature-256': 'sha256=test',
+          },
+          body: JSON.stringify(payload),
+        },
+      );
+
+      expect(response.status).toBe(200);
+      expect(mockQueuePrReviewActivityNotification).toHaveBeenCalledWith(
+        payload,
+      );
+      expect(mockHandlePrComment).not.toHaveBeenCalled();
+    },
+  );
+
   it('routes opened issues with body mentions through handleGitHubIssueComment', async () => {
     const payload = {
       action: 'opened',
@@ -437,6 +533,41 @@ describe('github webhook router', () => {
       method: 'POST',
       headers: {
         'x-github-delivery': 'delivery-2',
+        'x-github-event': 'issue_comment',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockQueuePrReviewSummaryNotification).toHaveBeenCalledWith(payload);
+    expect(mockHandlePrComment).not.toHaveBeenCalled();
+  });
+
+  it('notifies linked tasks about edited review summaries in skipped repositories', async () => {
+    mockIsRepoSkipped.mockReturnValue(true);
+    const payload = {
+      action: 'edited',
+      installation: { id: 1 },
+      repository: { id: 10, full_name: 'test-org/test-repo' },
+      issue: {
+        number: 42,
+        pull_request: {
+          html_url: 'https://github.com/test-org/test-repo/pull/42',
+        },
+      },
+      comment: {
+        id: 7,
+        body: '<!-- roomote-review-summary sha=abc -->',
+        user: { login: 'roomote[bot]' },
+      },
+      sender: { login: 'roomote[bot]' },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-skipped-review-summary',
         'x-github-event': 'issue_comment',
         'x-hub-signature-256': 'sha256=test',
       },
