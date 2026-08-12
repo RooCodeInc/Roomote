@@ -1567,42 +1567,36 @@ export async function handleTaskConfiguration(
 
     const images = originalEvent.processedImages || [];
 
-    // Fetch thread messages for context if this is a reply in a thread.
-    // This provides the AI with the full conversation history, enabling better
-    // context-aware responses. If fetching fails, we continue without thread context
-    // as this is a non-critical enhancement.
+    // A top-level mention can already have replies by the time the user makes
+    // a manual selection, so always read the conversation thread before launch.
     let threadMessages:
       | Awaited<ReturnType<typeof slack.fetchThreadMessages>>
       | undefined;
     let latestOwnBotReply:
       | { ts: string; text: string; displayName: string }
       | undefined;
-    if (originalEvent.thread_ts) {
-      try {
-        console.log(
-          `📋 Fetching thread messages for context (channel: ${originalEvent.channel}, thread_ts: ${threadId})`,
-        );
-        const splitMessages = await getPromptReadyThreadMessages({
-          slack: slack!,
-          channel: originalEvent.channel,
-          threadTs: threadId,
-          botUserId: slackInstallation.botUserId,
-        });
-        threadMessages = splitMessages.contextMessages;
-        latestOwnBotReply = splitMessages.latestOwnBotReply;
+    try {
+      console.log(
+        `📋 Fetching thread messages for context (channel: ${originalEvent.channel}, thread_ts: ${threadId})`,
+      );
+      const splitMessages = await getPromptReadyThreadMessages({
+        slack: slack!,
+        channel: originalEvent.channel,
+        threadTs: threadId,
+        botUserId: slackInstallation.botUserId,
+      });
+      threadMessages = splitMessages.contextMessages;
+      latestOwnBotReply = splitMessages.latestOwnBotReply;
 
-        console.log(
-          `📋 Fetched ${threadMessages.length} thread messages for context`,
-        );
-      } catch (error) {
-        console.error(
-          `⚠️ Failed to fetch thread messages: ${error instanceof Error ? error.message : String(error)}`,
-        );
+      console.log(
+        `📋 Fetched ${threadMessages.length} thread messages for context`,
+      );
+    } catch (error) {
+      console.error(
+        `⚠️ Failed to fetch thread messages: ${error instanceof Error ? error.message : String(error)}`,
+      );
 
-        // Continue without thread context - non-critical error
-      }
-    } else {
-      console.log('ℹ️ No thread context available (not a thread reply)');
+      // Continue without thread context - non-critical error
     }
 
     const agentName = AGENT_DISPLAY_NAME;

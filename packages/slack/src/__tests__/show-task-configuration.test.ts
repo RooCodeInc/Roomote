@@ -199,6 +199,7 @@ vi.mock('../slack-notifier', () => ({
 
 import { SlackNotifier } from '../slack-notifier';
 import {
+  handleTaskConfiguration,
   handleRoutingRejectNo,
   handleSlackRoutingCorrection,
   showTaskConfiguration,
@@ -469,6 +470,84 @@ describe('Slack deleted-mention suppression', () => {
         ],
       }),
     );
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            threadMessages: [
+              expect.objectContaining({ ts: '111.222' }),
+              expect.objectContaining({ ts: '111.333' }),
+            ],
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('includes root-thread replies after manual workspace selection', async () => {
+    const originalEvent = {
+      type: 'app_mention',
+      channel: 'C123',
+      user: 'U123',
+      text: '<@BOT> investigate this',
+      ts: '111.222',
+    };
+    evalMock.mockResolvedValueOnce(JSON.stringify(originalEvent));
+    selectLimitMock
+      .mockResolvedValueOnce([
+        {
+          teamId: 'T123',
+          teamDomain: 'acme',
+          botUserId: 'BOT',
+          botAccessToken: 'xoxb-test',
+        },
+      ])
+      .mockResolvedValueOnce([{ userId: 'user_1' }]);
+    fetchThreadMessagesMock.mockResolvedValue([
+      { ...originalEvent },
+      {
+        type: 'message',
+        user: 'U456',
+        text: '<@BOT> use the failure details in this reply',
+        ts: '111.333',
+      },
+    ]);
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+
+    try {
+      await handleTaskConfiguration({
+        type: 'block_actions',
+        team: { id: 'T123', domain: 'acme' },
+        user: { id: 'U123', name: 'alice' },
+        channel: { id: 'C123', name: 'engineering' },
+        message: { ts: '999.000', thread_ts: '111.222' },
+        actions: [],
+        state: {
+          values: {
+            workspace_selection: {
+              workspace_selection: {
+                type: 'static_select',
+                selected_option: {
+                  text: { text: 'App' },
+                  value: 'env:env_1',
+                },
+              },
+            },
+          },
+        },
+        response_url: 'https://slack.test/response',
+        trigger_id: 'trigger-1',
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    expect(fetchThreadMessagesMock).toHaveBeenCalledWith({
+      channel: 'C123',
+      threadTs: '111.222',
+    });
     expect(enqueueTaskMock).toHaveBeenCalledWith(
       expect.objectContaining({
         task: expect.objectContaining({
