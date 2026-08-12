@@ -93,11 +93,30 @@ local inputs = redis.call('LRANGE', KEYS[1], 0, -1)
 redis.call('DEL', KEYS[1], KEYS[2])
 return inputs
 `;
+const CLAIM_ORPHAN_REPLAY_SCRIPT = `
+if redis.call('LLEN', KEYS[1]) == 0 then
+  return 0
+end
+redis.call('SET', KEYS[2], ARGV[1] .. ':0', 'EX', ARGV[2])
+return 1
+`;
+const GET_OR_RECLAIM_ORPHAN_REPLAY_SCRIPT = `
+local marker = redis.call('GET', KEYS[2])
+if marker then
+  return marker
+end
+if redis.call('LLEN', KEYS[1]) == 0 then
+  return false
+end
+marker = ARGV[1] .. ':0'
+redis.call('SET', KEYS[2], marker, 'EX', ARGV[2])
+return marker
+`;
 const FINISH_OR_ROTATE_ORPHAN_REPLAY_SCRIPT = `
--- delete a quiet orphan chain or rotate activity appended during final lookup
+-- release a quiet chain or rotate activity appended during final lookup
 local marker = redis.call('GET', KEYS[2])
 if marker == ARGV[1] then
-  redis.call('DEL', KEYS[1], KEYS[2])
+  redis.call('DEL', KEYS[2])
   return 0
 end
 if marker and string.sub(marker, 1, string.len(ARGV[2]) + 1) == ARGV[2] .. ':' then
@@ -106,17 +125,20 @@ if marker and string.sub(marker, 1, string.len(ARGV[2]) + 1) == ARGV[2] .. ':' t
 end
 return 0
 `;
-const RELEASE_OR_ROTATE_ORPHAN_REPLAY_SCRIPT = `
+const RELEASE_ORPHAN_REPLAY_SCRIPT = `
 local marker = redis.call('GET', KEYS[1])
-if marker == ARGV[1] then
-  redis.call('DEL', KEYS[1])
-  return 0
-end
-if marker and string.sub(marker, 1, string.len(ARGV[2]) + 1) == ARGV[2] .. ':' then
-  redis.call('SET', KEYS[1], ARGV[3] .. ':0', 'EX', ARGV[4])
-  return 1
+if marker and string.sub(marker, 1, string.len(ARGV[1]) + 1) == ARGV[1] .. ':' then
+  return redis.call('DEL', KEYS[1])
 end
 return 0
+`;
+const REQUEUE_AND_CLAIM_ORPHAN_REPLAY_SCRIPT = `
+for index = 1, #ARGV - 2 do
+  redis.call('RPUSH', KEYS[1], ARGV[index])
+end
+redis.call('EXPIRE', KEYS[1], ARGV[#ARGV])
+redis.call('SET', KEYS[2], ARGV[#ARGV - 1] .. ':0', 'EX', ARGV[#ARGV])
+return 1
 `;
 const COMPLETE_REVIEW_CYCLE_SCRIPT = `
 local current = redis.call('GET', KEYS[1])
@@ -311,7 +333,9 @@ function buildTargetKeySuffix({
   batchKind = 'human',
   batchId,
 }: PrReviewNotificationTarget): string {
-  return `${sourceControlProvider}:${encodeURIComponent(taskId)}:${encodeURIComponent(repository)}#${prNumber}:${batchKind}${batchId ? `:${encodeURIComponent(batchId)}` : ''}`;
+  const providerPrefix =
+    sourceControlProvider === 'github' ? '' : `${sourceControlProvider}:`;
+  return `${providerPrefix}${encodeURIComponent(taskId)}:${encodeURIComponent(repository)}#${prNumber}:${batchKind}${batchId ? `:${encodeURIComponent(batchId)}` : ''}`;
 }
 
 function buildLegacyTargetKeySuffix({
@@ -321,7 +345,9 @@ function buildLegacyTargetKeySuffix({
   sourceControlProvider = 'github',
   immediate = false,
 }: PrReviewNotificationTarget): string {
-  return `${sourceControlProvider}:${encodeURIComponent(taskId)}:${encodeURIComponent(repository)}#${prNumber}${immediate ? ':immediate' : ''}`;
+  const providerPrefix =
+    sourceControlProvider === 'github' ? '' : `${sourceControlProvider}:`;
+  return `${providerPrefix}${encodeURIComponent(taskId)}:${encodeURIComponent(repository)}#${prNumber}${immediate ? ':immediate' : ''}`;
 }
 
 function buildPendingEventsKey(target: PrReviewNotificationTarget): string {
@@ -376,6 +402,64 @@ async function scheduleOrphanAssociationReplay({
       jobId: `association-replay-${chainId}-${attempt}`,
     },
   );
+}
+
+async function releaseOrphanReplay(
+  target: PrReviewAssociationTarget,
+  chainId: string,
+): Promise<void> {
+  await getRedis()
+    .eval(
+      RELEASE_ORPHAN_REPLAY_SCRIPT,
+      1,
+      buildOrphanReplayMarkerKey(target),
+      chainId,
+    )
+    .catch(() => undefined);
+}
+
+async function scheduleClaimedOrphanReplay({
+  target,
+  chainId,
+}: {
+  target: PrReviewAssociationTarget;
+  chainId: string;
+}): Promise<void> {
+  try {
+    await scheduleOrphanAssociationReplay({ target, chainId, attempt: 1 });
+  } catch (error) {
+    await releaseOrphanReplay(target, chainId);
+    throw error;
+  }
+}
+
+/** Claims retained orphan activity after an association becomes observable. */
+export async function wakePrReviewNotificationAssociation(
+  target: PrReviewAssociationTarget,
+): Promise<boolean> {
+  const parsedTarget = {
+    sourceControlProvider: sourceControlProviderSchema.parse(
+      target.sourceControlProvider,
+    ),
+    repository: target.repository,
+    prNumber: target.prNumber,
+  };
+  const chainId = randomUUID();
+  const claimed = await getRedis().eval(
+    CLAIM_ORPHAN_REPLAY_SCRIPT,
+    2,
+    buildOrphanActivityKey(parsedTarget),
+    buildOrphanReplayMarkerKey(parsedTarget),
+    chainId,
+    ORPHAN_ACTIVITY_TTL_SECONDS,
+  );
+
+  if (claimed !== 1) {
+    return false;
+  }
+
+  await scheduleClaimedOrphanReplay({ target: parsedTarget, chainId });
+  return true;
 }
 
 async function appendOrphanActivityAndClaimReplay({
@@ -447,21 +531,14 @@ async function requeueOrphanActivity({
     return;
   }
 
-  await getRedis()
-    .multi()
-    .rpush(
-      buildOrphanActivityKey(target),
-      ...inputs.map((input) => JSON.stringify(input)),
-    )
-    .expire(buildOrphanActivityKey(target), ORPHAN_ACTIVITY_TTL_SECONDS)
-    .exec();
-
-  await getRedis().set(
+  await getRedis().eval(
+    REQUEUE_AND_CLAIM_ORPHAN_REPLAY_SCRIPT,
+    2,
+    buildOrphanActivityKey(target),
     buildOrphanReplayMarkerKey(target),
-    `${chainId}:0`,
-    'EX',
+    ...inputs.map((input) => JSON.stringify(input)),
+    chainId,
     ORPHAN_ACTIVITY_TTL_SECONDS,
-    'NX',
   );
 }
 
@@ -888,9 +965,19 @@ export async function replayPrReviewNotificationAssociation(
     repository: parsed.repository,
     prNumber: parsed.prNumber,
   };
-  const activeMarker = await getRedis().get(buildOrphanReplayMarkerKey(target));
+  const activeMarker = await getRedis().eval(
+    GET_OR_RECLAIM_ORPHAN_REPLAY_SCRIPT,
+    2,
+    buildOrphanActivityKey(target),
+    buildOrphanReplayMarkerKey(target),
+    parsed.chainId,
+    ORPHAN_ACTIVITY_TTL_SECONDS,
+  );
 
-  if (!activeMarker?.startsWith(`${parsed.chainId}:`)) {
+  if (
+    typeof activeMarker !== 'string' ||
+    !activeMarker.startsWith(`${parsed.chainId}:`)
+  ) {
     return { notifiedTaskCount: 0, reason: 'stale_association_replay' };
   }
 
@@ -919,11 +1006,7 @@ export async function replayPrReviewNotificationAssociation(
       );
 
       if (rotated === 1) {
-        await scheduleOrphanAssociationReplay({
-          target,
-          chainId: nextChainId,
-          attempt: 1,
-        });
+        await scheduleClaimedOrphanReplay({ target, chainId: nextChainId });
       }
     }
 
@@ -952,18 +1035,18 @@ export async function replayPrReviewNotificationAssociation(
         inputs: inputs.slice(index),
       });
 
-      if (nextAttempt <= PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS.length) {
+      try {
         await scheduleOrphanAssociationReplay({
           target,
           chainId: requeueChainId,
-          attempt: nextAttempt,
+          attempt:
+            nextAttempt <= PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS.length
+              ? nextAttempt
+              : 1,
         });
-      } else {
-        await scheduleOrphanAssociationReplay({
-          target,
-          chainId: requeueChainId,
-          attempt: 1,
-        });
+      } catch (scheduleError) {
+        await releaseOrphanReplay(target, requeueChainId);
+        throw scheduleError;
       }
 
       throw error;
@@ -997,27 +1080,8 @@ async function enqueuePrReviewNotificationAttempt(
           attempt: 1,
         });
       } catch (error) {
-        const nextChainId = randomUUID();
-        const rotated = await getRedis()
-          .eval(
-            RELEASE_OR_ROTATE_ORPHAN_REPLAY_SCRIPT,
-            1,
-            buildOrphanReplayMarkerKey(target),
-            `${chainId}:1`,
-            chainId,
-            nextChainId,
-            ORPHAN_ACTIVITY_TTL_SECONDS,
-          )
-          .catch(() => 0);
-
-        if (rotated === 1) {
-          await scheduleOrphanAssociationReplay({
-            target,
-            chainId: nextChainId,
-            attempt: 1,
-          });
-        }
-
+        await releaseOrphanReplay(target, chainId);
+        await wakePrReviewNotificationAssociation(target).catch(() => false);
         throw error;
       }
     }
@@ -1025,6 +1089,7 @@ async function enqueuePrReviewNotificationAttempt(
     return { notifiedTaskCount: 0, reason: 'no_linked_tasks' };
   }
 
+  await wakePrReviewNotificationAssociation(target);
   return enqueueLinkedPrReviewNotification(parsedInput, prTaskLinks);
 }
 

@@ -27,6 +27,7 @@ const {
   mockTasksFindFirst,
   mockResolveLaunchTaskCommitAuthor,
   mockResolveRunCommitAuthor,
+  mockWakePrReviewNotificationAssociation,
 } = vi.hoisted(() => ({
   mockCreateGitHubToken: vi.fn(),
   mockGetDeploymentPrAction: vi.fn(),
@@ -47,6 +48,12 @@ const {
   mockTasksFindFirst: vi.fn(),
   mockResolveLaunchTaskCommitAuthor: vi.fn(),
   mockResolveRunCommitAuthor: vi.fn(),
+  mockWakePrReviewNotificationAssociation: vi.fn(),
+}));
+
+vi.mock('../../task-runs/pr-review-notification', () => ({
+  wakePrReviewNotificationAssociation: (...args: unknown[]) =>
+    mockWakePrReviewNotificationAssociation(...args),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -210,6 +217,7 @@ function attributionBody(
 beforeEach(() => {
   mockTaskPullRequestUpsert.mockReset();
   mockTaskPullRequestUpsert.mockResolvedValue(undefined);
+  mockWakePrReviewNotificationAssociation.mockResolvedValue(false);
   mockGetDeploymentGitHubRoomoteMentionEnabled.mockResolvedValue(true);
   mockResolveTelegramRuntimeCredentials.mockResolvedValue({
     botUsername: 'roomote_bot',
@@ -534,6 +542,57 @@ describe('platform-managed draft state', () => {
 
     expect(result).toMatchObject({ action: 'created', number: 9 });
     expect(mockTaskPullRequestUpsert).toHaveBeenCalledTimes(2);
+  });
+
+  it('wakes retained review activity after association persistence commits', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      id: 1,
+      sourceControlProvider: 'github',
+      installationId: 123,
+      fullName: 'owner/repo',
+      host: 'github.com',
+      htmlUrl: 'https://github.com/owner/repo',
+      private: false,
+    });
+    mockCreateGitHubToken.mockResolvedValue('token');
+    mockGetOctokit.mockReturnValue({
+      rest: {
+        pulls: {
+          list: vi.fn().mockResolvedValue({ data: [] }),
+          create: vi.fn().mockResolvedValue({
+            data: {
+              number: 42,
+              node_id: 'PR_42',
+              html_url: 'https://github.com/owner/repo/pull/42',
+              title: '[Fix] Preserve reviews',
+              draft: true,
+              base: { ref: 'develop' },
+            },
+          }),
+        },
+        issues: { addAssignees: vi.fn(), addLabels: vi.fn() },
+      },
+    });
+
+    await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'owner/repo' } as TaskRun['payload']),
+      input: {
+        action: 'create_or_update_pull_request',
+        repositoryFullName: 'owner/repo',
+        sourceBranch: 'fix/reviews',
+        targetBranch: 'develop',
+        title: '[Fix] Preserve reviews',
+        body: 'body',
+        labels: [],
+        assignees: [],
+      },
+    });
+
+    expect(mockWakePrReviewNotificationAssociation).toHaveBeenCalledWith({
+      sourceControlProvider: 'github',
+      repository: 'owner/repo',
+      prNumber: 42,
+    });
   });
 
   it('keeps provider success after bounded association retries are exhausted', async () => {

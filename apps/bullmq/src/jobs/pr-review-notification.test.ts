@@ -88,6 +88,7 @@ vi.mock('@roomote/sdk/server', () => ({
     immediate: z.boolean().optional(),
     batchKind: z.enum(['human', 'roomote']).optional(),
     batchId: z.string().optional(),
+    sourceControlProvider: z.string().optional(),
   }),
   prReviewAssociationReplayRequestSchema: z.object({
     kind: z.literal('association_replay'),
@@ -202,6 +203,16 @@ describe('prReviewNotificationJob', () => {
 
     expect(mockReplayAssociation).toHaveBeenCalledWith(replay);
     expect(mockFindFirstTaskRun).not.toHaveBeenCalled();
+  });
+
+  it('drains non-default provider pending activity from its provider key', async () => {
+    await prReviewNotificationJob(
+      makeJob({ sourceControlProvider: 'gitlab' }) as never,
+    );
+
+    expect(mockConsumePending).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceControlProvider: 'gitlab' }),
+    );
   });
 
   it('posts the aggregated notification to the originating Slack thread when the task is idle', async () => {
@@ -469,6 +480,7 @@ describe('prReviewNotificationJob', () => {
       taskId: 'task-1',
       repository: 'owner/repo',
       prNumber: 42,
+      sourceControlProvider: 'github',
       batchKind: 'roomote',
       batchId: 'cycle-1',
       immediate: true,
@@ -769,6 +781,7 @@ describe('prReviewNotificationJob', () => {
         taskId: 'task-1',
         repository: 'owner/repo',
         prNumber: 42,
+        sourceControlProvider: 'github',
       },
       events,
     });
@@ -786,6 +799,7 @@ describe('prReviewNotificationJob', () => {
         taskId: 'task-1',
         repository: 'owner/repo',
         prNumber: 42,
+        sourceControlProvider: 'github',
       },
       events,
     });

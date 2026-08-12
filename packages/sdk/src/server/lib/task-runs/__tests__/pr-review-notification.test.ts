@@ -76,6 +76,7 @@ import {
   resolvePrReviewNotificationRoute,
   replayPrReviewNotificationAssociation,
   startPrReviewNotificationCycle,
+  wakePrReviewNotificationAssociation,
 } from '../pr-review-notification';
 
 describe('enqueuePrReviewNotification', () => {
@@ -90,6 +91,9 @@ describe('enqueuePrReviewNotification', () => {
     mockRedisDel.mockResolvedValue(1);
     mockRedisGet.mockResolvedValue(null);
     mockRedisEval.mockImplementation((script: string, ...args: unknown[]) => {
+      if (script.includes("marker = ARGV[1] .. ':0'")) {
+        return mockRedisGet(...args);
+      }
       if (script.includes("redis.call('RPUSH', KEYS[1], ARGV[2])")) {
         const claimed = orphanRevision === 0 ? 1 : 0;
         orphanRevision += 1;
@@ -97,7 +101,15 @@ describe('enqueuePrReviewNotification', () => {
         return Promise.resolve([`${orphanChainId}:${orphanRevision}`, claimed]);
       }
 
-      if (script.includes('FINISH_OR_ROTATE_ORPHAN_REPLAY_SCRIPT')) {
+      if (script.includes('release a quiet chain')) {
+        return Promise.resolve(0);
+      }
+
+      if (script.includes("marker = ARGV[1] .. ':0'")) {
+        return mockRedisGet(...args);
+      }
+
+      if (script.includes("redis.call('LLEN', KEYS[1])")) {
         return Promise.resolve(0);
       }
 
@@ -139,6 +151,104 @@ describe('enqueuePrReviewNotification', () => {
         delay: PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS[0],
         jobId: expect.stringMatching(/^association-replay-[a-f0-9-]+-1$/),
       },
+    );
+  });
+
+  it('atomically claims retained activity and schedules attempt 1 on association commit', async () => {
+    mockRedisEval.mockResolvedValueOnce(1);
+
+    await expect(
+      wakePrReviewNotificationAssociation({
+        sourceControlProvider: 'github',
+        repository: 'owner/repo',
+        prNumber: 42,
+      }),
+    ).resolves.toBe(true);
+
+    expect(mockRedisEval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('LLEN', KEYS[1])"),
+      2,
+      'pr-review-notification:orphan:github:owner%2Frepo#42',
+      'pr-review-notification:orphan-replay:github:owner%2Frepo#42',
+      expect.any(String),
+      900,
+    );
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      'replay-pr-review-association',
+      expect.objectContaining({ attempt: 1 }),
+      expect.objectContaining({
+        delay: PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS[0],
+      }),
+    );
+  });
+
+  it('lets association commit wake the list after final replay releases it', async () => {
+    mockFindManyTaskPullRequests.mockResolvedValue([]);
+    mockRedisEval
+      .mockResolvedValueOnce(`${replayChainId}:1`)
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(1);
+
+    await replayPrReviewNotificationAssociation({
+      kind: 'association_replay',
+      sourceControlProvider: 'github',
+      repository: 'owner/repo',
+      prNumber: 42,
+      chainId: replayChainId,
+      attempt: PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS.length,
+    });
+    await wakePrReviewNotificationAssociation({
+      sourceControlProvider: 'github',
+      repository: 'owner/repo',
+      prNumber: 42,
+    });
+
+    expect(mockQueueAdd).toHaveBeenCalledTimes(1);
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      'replay-pr-review-association',
+      expect.objectContaining({ attempt: 1 }),
+      expect.any(Object),
+    );
+  });
+
+  it('preserves legacy GitHub pending and scheduled key identity', async () => {
+    await enqueuePrReviewNotification(baseInput);
+
+    expect(multiCalls).toContainEqual({
+      command: 'rpush',
+      args: [
+        'pr-review-notification:pending:task-1:owner%2Frepo#42:human',
+        expect.any(String),
+      ],
+    });
+    expect(mockRedisSet).toHaveBeenCalledWith(
+      'pr-review-notification:scheduled:task-1:owner%2Frepo#42:human:delayed',
+      '1',
+      'EX',
+      expect.any(Number),
+      'NX',
+    );
+  });
+
+  it('namespaces non-default provider pending and scheduled keys', async () => {
+    await enqueuePrReviewNotification({
+      ...baseInput,
+      sourceControlProvider: 'gitlab',
+    });
+
+    expect(multiCalls).toContainEqual({
+      command: 'rpush',
+      args: [
+        'pr-review-notification:pending:gitlab:task-1:owner%2Frepo#42:human',
+        expect.any(String),
+      ],
+    });
+    expect(mockRedisSet).toHaveBeenCalledWith(
+      'pr-review-notification:scheduled:gitlab:task-1:owner%2Frepo#42:human:delayed',
+      '1',
+      'EX',
+      expect.any(Number),
+      'NX',
     );
   });
 
@@ -186,6 +296,9 @@ describe('enqueuePrReviewNotification', () => {
     mockQueueAdd.mockClear();
     multiCalls.length = 0;
     mockRedisEval.mockImplementation((script: string, ...args: unknown[]) => {
+      if (script.includes("marker = ARGV[1] .. ':0'")) {
+        return Promise.resolve(`${replayChainId}:1`);
+      }
       if (script.includes("redis.call('RPUSH', KEYS[1], ARGV[2])")) {
         return Promise.resolve([`${String(args[3])}:1`, 1]);
       }
@@ -235,10 +348,52 @@ describe('enqueuePrReviewNotification', () => {
     );
   });
 
-  it('stops replaying after the final association boundary', async () => {
+  it('drains retained orphan activity exactly once after association wake', async () => {
+    mockFindManyTaskPullRequests.mockResolvedValue([{ taskId: 'task-1' }]);
+    let replayClaimed = true;
+    mockRedisEval.mockImplementation((script: string) => {
+      if (script.includes("marker = ARGV[1] .. ':0'")) {
+        if (!replayClaimed) {
+          return Promise.resolve(null);
+        }
+        replayClaimed = false;
+        return Promise.resolve(`${replayChainId}:0`);
+      }
+      if (script.includes("redis.call('LRANGE', KEYS[1], 0, -1)")) {
+        return Promise.resolve([JSON.stringify(baseInput)]);
+      }
+      return Promise.resolve(1);
+    });
+
+    const request = {
+      kind: 'association_replay' as const,
+      sourceControlProvider: 'github' as const,
+      repository: 'owner/repo',
+      prNumber: 42,
+      chainId: replayChainId,
+      attempt: 1,
+    };
+
+    expect(await replayPrReviewNotificationAssociation(request)).toEqual({
+      notifiedTaskCount: 1,
+    });
+    expect(await replayPrReviewNotificationAssociation(request)).toEqual({
+      notifiedTaskCount: 0,
+      reason: 'stale_association_replay',
+    });
+    expect(
+      mockQueueAdd.mock.calls.filter(
+        ([name]) => name === 'notify-pr-review-activity',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('releases only the expected marker after all five attempts', async () => {
     mockFindManyTaskPullRequests.mockResolvedValue([]);
     mockRedisGet.mockResolvedValue(`${replayChainId}:1`);
-    mockRedisEval.mockResolvedValue(0);
+    mockRedisEval
+      .mockResolvedValueOnce(`${replayChainId}:1`)
+      .mockResolvedValueOnce(0);
 
     const result = await replayPrReviewNotificationAssociation({
       kind: 'association_replay',
@@ -252,7 +407,7 @@ describe('enqueuePrReviewNotification', () => {
     expect(result).toEqual({ notifiedTaskCount: 0, reason: 'no_linked_tasks' });
     expect(mockQueueAdd).not.toHaveBeenCalled();
     expect(mockRedisEval).toHaveBeenCalledWith(
-      expect.stringContaining('delete a quiet orphan chain'),
+      expect.stringContaining('release a quiet chain'),
       2,
       'pr-review-notification:orphan:github:owner%2Frepo#42',
       'pr-review-notification:orphan-replay:github:owner%2Frepo#42',
@@ -263,10 +418,145 @@ describe('enqueuePrReviewNotification', () => {
     );
   });
 
+  it('releases the initial claim when its replay job cannot be queued', async () => {
+    mockFindManyTaskPullRequests.mockResolvedValue([]);
+    mockQueueAdd.mockRejectedValueOnce(new Error('queue down'));
+
+    await expect(enqueuePrReviewNotification(baseInput)).rejects.toThrow(
+      'queue down',
+    );
+
+    expect(mockRedisEval).toHaveBeenCalledWith(
+      expect.stringContaining("redis.call('GET', KEYS[1])"),
+      1,
+      'pr-review-notification:orphan-replay:github:owner%2Frepo#42',
+      expect.any(String),
+    );
+  });
+
+  it('reclaims an initial enqueue failure after a concurrent append changes the marker', async () => {
+    mockFindManyTaskPullRequests.mockResolvedValue([]);
+    mockQueueAdd
+      .mockRejectedValueOnce(new Error('queue down'))
+      .mockResolvedValueOnce(undefined);
+    mockRedisEval.mockImplementation((script: string, ...args: unknown[]) => {
+      if (script.includes("redis.call('RPUSH', KEYS[1], ARGV[2])")) {
+        return Promise.resolve([`${String(args[3])}:1`, 1]);
+      }
+      if (script.includes("redis.call('LLEN', KEYS[1])")) {
+        return Promise.resolve(1);
+      }
+      return Promise.resolve(0);
+    });
+
+    await expect(enqueuePrReviewNotification(baseInput)).rejects.toThrow(
+      'queue down',
+    );
+
+    expect(mockQueueAdd).toHaveBeenCalledTimes(2);
+    expect(mockQueueAdd).toHaveBeenLastCalledWith(
+      'replay-pr-review-association',
+      expect.objectContaining({ attempt: 1 }),
+      expect.objectContaining({
+        delay: PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS[0],
+      }),
+    );
+  });
+
+  it('releases a terminal rotation when its wake job cannot be queued', async () => {
+    mockFindManyTaskPullRequests.mockResolvedValue([]);
+    mockRedisGet.mockResolvedValue(`${replayChainId}:2`);
+    mockRedisEval.mockImplementation((script: string) =>
+      Promise.resolve(
+        script.includes("marker = ARGV[1] .. ':0'") ? `${replayChainId}:2` : 1,
+      ),
+    );
+    mockQueueAdd.mockRejectedValueOnce(new Error('queue down'));
+
+    await expect(
+      replayPrReviewNotificationAssociation({
+        kind: 'association_replay',
+        sourceControlProvider: 'github',
+        repository: 'owner/repo',
+        prNumber: 42,
+        chainId: replayChainId,
+        attempt: PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS.length,
+      }),
+    ).rejects.toThrow('queue down');
+
+    expect(mockRedisEval).toHaveBeenLastCalledWith(
+      expect.stringContaining("redis.call('GET', KEYS[1])"),
+      1,
+      'pr-review-notification:orphan-replay:github:owner%2Frepo#42',
+      expect.any(String),
+    );
+  });
+
+  it('releases exhausted-delivery ownership when requeue scheduling fails', async () => {
+    mockFindManyTaskPullRequests.mockResolvedValue([{ taskId: 'task-1' }]);
+    mockRedisGet.mockResolvedValue(`${replayChainId}:1`);
+    mockRedisEval.mockImplementation((script: string) => {
+      if (script.includes("marker = ARGV[1] .. ':0'")) {
+        return Promise.resolve(`${replayChainId}:1`);
+      }
+      if (script.includes("redis.call('LRANGE', KEYS[1], 0, -1)")) {
+        return Promise.resolve([JSON.stringify(baseInput)]);
+      }
+      return Promise.resolve(1);
+    });
+    mockQueueAdd
+      .mockRejectedValueOnce(new Error('delivery queue down'))
+      .mockRejectedValueOnce(new Error('replay queue down'));
+
+    await expect(
+      replayPrReviewNotificationAssociation({
+        kind: 'association_replay',
+        sourceControlProvider: 'github',
+        repository: 'owner/repo',
+        prNumber: 42,
+        chainId: replayChainId,
+        attempt: PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS.length,
+      }),
+    ).rejects.toThrow('replay queue down');
+
+    expect(mockRedisEval).toHaveBeenLastCalledWith(
+      expect.stringContaining("redis.call('GET', KEYS[1])"),
+      1,
+      'pr-review-notification:orphan-replay:github:owner%2Frepo#42',
+      expect.any(String),
+    );
+  });
+
+  it('lets a failed replay job retry reclaim its retained list', async () => {
+    mockFindManyTaskPullRequests.mockResolvedValue([{ taskId: 'task-1' }]);
+    mockRedisEval.mockImplementation((script: string) => {
+      if (script.includes("marker = ARGV[1] .. ':0'")) {
+        return Promise.resolve(`${replayChainId}:0`);
+      }
+      if (script.includes("redis.call('LRANGE', KEYS[1], 0, -1)")) {
+        return Promise.resolve([JSON.stringify(baseInput)]);
+      }
+      return Promise.resolve(1);
+    });
+
+    const result = await replayPrReviewNotificationAssociation({
+      kind: 'association_replay',
+      sourceControlProvider: 'github',
+      repository: 'owner/repo',
+      prNumber: 42,
+      chainId: replayChainId,
+      attempt: 1,
+    });
+
+    expect(result).toEqual({ notifiedTaskCount: 1 });
+  });
+
   it('rotates activity appended during the final lookup into one fresh bounded chain', async () => {
     mockFindManyTaskPullRequests.mockResolvedValue([]);
     mockRedisGet.mockResolvedValue(`${replayChainId}:1`);
-    mockRedisEval.mockResolvedValue(1);
+    mockRedisEval
+      .mockResolvedValueOnce(`${replayChainId}:1`)
+      .mockResolvedValueOnce(1);
 
     const result = await replayPrReviewNotificationAssociation({
       kind: 'association_replay',

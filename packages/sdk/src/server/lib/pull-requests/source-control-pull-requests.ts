@@ -77,6 +77,7 @@ import {
   type FetchImpl,
   type RepositoryRow,
 } from './source-control-pull-request-shared';
+import { wakePrReviewNotificationAssociation } from '../task-runs/pr-review-notification';
 
 const ADO_API_VERSION = '7.1';
 const PR_ASSOCIATION_MAX_ATTEMPTS = 3;
@@ -503,6 +504,17 @@ async function persistSourceControlPullRequestAssociation({
             updatedAt: new Date(),
           },
         });
+      try {
+        await wakePrReviewNotificationAssociation({
+          sourceControlProvider: repository.sourceControlProvider,
+          repository: result.repositoryFullName,
+          prNumber: result.number,
+        });
+      } catch (error) {
+        console.warn(
+          `[persistSourceControlPullRequestAssociation] Linked ${result.repositoryFullName}#${result.number}, but could not wake retained review activity: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       return null;
     } catch (error) {
       if (attempt < PR_ASSOCIATION_MAX_ATTEMPTS) {
