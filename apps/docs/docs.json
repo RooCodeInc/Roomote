@@ -156,6 +156,7 @@
           "integrations/supabase",
           "integrations/supermemory",
           "integrations/vercel",
+          "integrations/x",
           "integrations/zero"
         ]
       },

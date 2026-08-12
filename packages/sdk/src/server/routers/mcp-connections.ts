@@ -31,6 +31,7 @@ import {
   isMcpConnectionOAuthConfig,
   isMcpConnectionSnowflakeConfig,
   isMcpConnectionVercelConfig,
+  isMcpConnectionXConfig,
   isDeploymentScopedMcpIntegration,
   CUSTOM_MCP_PROXY_PATH_PREFIX,
   customMcpConnectionId,
@@ -492,7 +493,8 @@ async function buildCuratedMcpServerConfigs(ctx: {
         isMcpConnectionAsanaConfig(authConfig) ||
         isMcpConnectionGranolaConfig(authConfig) ||
         isMcpConnectionVercelConfig(authConfig) ||
-        isMcpConnectionGrafanaConfig(authConfig)
+        isMcpConnectionGrafanaConfig(authConfig) ||
+        isMcpConnectionXConfig(authConfig)
       ) {
         servers[connection.mcpId] = {
           url: buildProxyUrl(connection.mcpId, requestOrigin),

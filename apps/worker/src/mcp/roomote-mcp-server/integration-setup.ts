@@ -143,6 +143,14 @@ Vercel uses an admin-managed access token:
 
 The admin can also save an optional default team ID or slug so project and deployment tools stay scoped to the shared workspace by default. Once connected, I can inspect teams, projects, deployments, logs, and domain availability during tasks.
 
+# X
+
+X uses an admin-managed app-only bearer token:
+1. A deployment operator enables X from Settings > Integrations.
+2. That operator connects X once for the deployment with an app-only bearer token from the X Developer Console (https://console.x.com/, under Apps, in the app's Keys and tokens tab).
+
+Once connected, I can search public posts, look up users and their posts, and read trends, news, lists, Spaces, and community context. App-only tokens are read-only public data: posting, bookmarks, DMs, and other account actions are not available, and access depends on the deployment's X API plan.
+
 # Supermemory
 
 Supermemory uses OAuth:

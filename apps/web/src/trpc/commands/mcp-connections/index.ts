@@ -22,6 +22,7 @@ import {
   isMcpConnectionGrafanaConfig,
   isMcpConnectionSnowflakeConfig,
   isMcpConnectionVercelConfig,
+  isMcpConnectionXConfig,
   isSelfServeMcpIntegration,
   isMcpToolAllowed,
   isDeploymentScopedMcpIntegration,
@@ -31,7 +32,7 @@ import {
   type McpToolsListJsonRpcPayload,
   parseMcpJsonRpcPayload,
 } from '@roomote/types';
-import { encrypt } from '@roomote/db/encryption';
+import { decrypt, encrypt } from '@roomote/db/encryption';
 import { getValidAccessToken } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
@@ -47,6 +48,7 @@ import type {
   SaveGrafanaConnectionInput,
   SaveSnowflakeConnectionInput,
   SaveVercelConnectionInput,
+  SaveXConnectionInput,
 } from '@/types';
 
 type LegacySnowflakePasswordInput = Omit<
@@ -187,6 +189,33 @@ async function getVisibleMcpConnectionForToolCatalog(
   return connection;
 }
 
+/**
+ * Resolve the bearer credential used to list an upstream integration's tool
+ * catalog. Admin-configured upstream integrations (X) store a static
+ * encrypted bearer token; everything else resolves OAuth tokens.
+ */
+async function resolveUpstreamCatalogAccessToken(
+  connectionId: string,
+  integrationUrl: string,
+): Promise<string | null> {
+  const connection = await db.query.mcpConnections.findFirst({
+    where: eq(mcpConnections.id, connectionId),
+    columns: {
+      authConfig: true,
+    },
+  });
+
+  if (isMcpConnectionXConfig(connection?.authConfig)) {
+    const bearerToken = decrypt(
+      connection.authConfig.encryptedBearerToken,
+    ).trim();
+
+    return bearerToken.length > 0 ? bearerToken : null;
+  }
+
+  return (await getValidAccessToken(connectionId, integrationUrl)) ?? null;
+}
+
 async function fetchUpstreamMcpTools(input: {
   id: string;
   mcpId: string;
@@ -205,7 +234,10 @@ async function fetchUpstreamMcpTools(input: {
     );
   }
 
-  const accessToken = await getValidAccessToken(input.id, integrationUrl);
+  const accessToken = await resolveUpstreamCatalogAccessToken(
+    input.id,
+    integrationUrl,
+  );
   if (!accessToken) {
     throw new Error(
       `${resolvedIntegration.name} needs to be reconnected before tools can be managed.`,
@@ -802,6 +834,26 @@ export async function getElevenLabsConnectionCommand(auth: UserAuthSuccess) {
   };
 }
 
+export async function getXConnectionCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+
+  const connection = await db.query.mcpConnections.findFirst({
+    where: and(eq(mcpConnections.mcpId, 'x'), isNull(mcpConnections.userId)),
+    columns: {
+      authConfig: true,
+      authStatus: true,
+    },
+  });
+
+  if (!connection || !isMcpConnectionXConfig(connection.authConfig)) {
+    return null;
+  }
+
+  return {
+    authStatus: connection.authStatus,
+  };
+}
+
 export async function getVercelConnectionCommand(
   auth: UserAuthSuccess,
 ): Promise<VercelConnectionData | null> {
@@ -1240,6 +1292,85 @@ export async function saveElevenLabsConnectionCommand(
     .insert(deploymentMcpEnablements)
     .values({
       mcpId: 'elevenlabs',
+      enabled: true,
+      enabledByUserId: auth.userId,
+    })
+    .onConflictDoUpdate({
+      target: [deploymentMcpEnablements.mcpId],
+      set: {
+        enabled: true,
+        enabledByUserId: auth.userId,
+        updatedAt: new Date(),
+      },
+    });
+
+  return {
+    authStatus: 'authenticated' as const,
+  };
+}
+
+export async function saveXConnectionCommand(
+  auth: UserAuthSuccess,
+  input: SaveXConnectionInput,
+) {
+  assertAdmin(auth);
+  assertCuratedIntegrationsEnabled();
+
+  const existingConnection = await db.query.mcpConnections.findFirst({
+    where: and(eq(mcpConnections.mcpId, 'x'), isNull(mcpConnections.userId)),
+    columns: {
+      authConfig: true,
+    },
+  });
+
+  const existingConfig = isMcpConnectionXConfig(existingConnection?.authConfig)
+    ? existingConnection.authConfig
+    : null;
+  const nextEncryptedBearerToken =
+    input.bearerToken.length > 0
+      ? encrypt(input.bearerToken)
+      : existingConfig?.encryptedBearerToken;
+
+  if (!nextEncryptedBearerToken) {
+    throw new Error(
+      'X bearer token is required when no X token is already stored.',
+    );
+  }
+
+  const authConfig = {
+    type: 'x' as const,
+    encryptedBearerToken: nextEncryptedBearerToken,
+  };
+
+  await db
+    .insert(mcpConnections)
+    .values({
+      userId: null,
+      mcpId: 'x',
+      connectionRole: 'default',
+      authConfig,
+      enabled: true,
+      authStatus: 'authenticated',
+    })
+    .onConflictDoUpdate({
+      target: [
+        mcpConnections.userId,
+        mcpConnections.mcpId,
+        mcpConnections.connectionRole,
+      ],
+      set: {
+        connectionRole: 'default',
+        authConfig,
+        enabled: true,
+        authStatus: 'authenticated',
+        updatedAt: new Date(),
+      },
+    });
+
+  await db
+    .insert(deploymentMcpEnablements)
+    .values({
+      mcpId: 'x',
       enabled: true,
       enabledByUserId: auth.userId,
     })

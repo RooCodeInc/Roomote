@@ -149,6 +149,20 @@ export interface McpConnectionElevenLabsConfig {
 }
 
 /**
+ * Deployment-scoped X connection config stored in mcpConnections.authConfig.
+ *
+ * Holds an X API app-only bearer token that the integration proxy forwards to
+ * X's hosted MCP server. App-only tokens are read-only by construction: X
+ * requires user-context OAuth for every mutating endpoint, which this
+ * integration deliberately does not support. The token is expected to be
+ * encrypted before persistence.
+ */
+export interface McpConnectionXConfig {
+  type: 'x';
+  encryptedBearerToken: string;
+}
+
+/**
  * Organization-scoped Vercel connection config stored in mcpConnections.authConfig.
  *
  * The bearer token is expected to be encrypted before persistence.
@@ -186,6 +200,7 @@ export type McpConnectionAuthConfig =
   | McpConnectionElevenLabsConfig
   | McpConnectionVercelConfig
   | McpConnectionGrafanaConfig
+  | McpConnectionXConfig
   | Record<string, never>;
 
 export type McpConnectionRole =
@@ -566,6 +581,18 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     ].join('\n'),
   },
   {
+    id: 'x',
+    name: 'X',
+    url: 'https://api.x.com/mcp',
+    description: `Connect X so your agents can search posts, look up users, and pull trends and news into ${PRODUCT_NAME} tasks`,
+    icon: 'x',
+    connectionScope: 'deployment',
+    connectionMode: 'admin_configured',
+    serverMode: 'upstream_proxy',
+    instructions:
+      'Use X to search public posts, look up users and their posts, and pull trends, news, lists, Spaces, and community context. The connection uses an app-only bearer token, so it is read-only public data: posting, bookmarks, DMs, and other user-context tools are not available.',
+  },
+  {
     id: 'zero',
     name: 'Zero',
     url: 'https://mcp.zero.xyz',
@@ -903,6 +930,19 @@ export function isMcpConnectionVercelConfig(
     typeof authConfig === 'object' &&
     'type' in authConfig &&
     authConfig.type === 'vercel',
+  );
+}
+
+export function isMcpConnectionXConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionXConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'x' &&
+    'encryptedBearerToken' in authConfig &&
+    typeof authConfig.encryptedBearerToken === 'string',
   );
 }
 

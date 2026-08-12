@@ -172,6 +172,13 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
       'Configure once per deployment with a text-to-speech-scoped key',
     ],
   },
+  x: {
+    capabilities: [
+      'Search public X posts and pull post context into tasks',
+      'Look up users, their posts, and follower context',
+      'Read trends, news, lists, Spaces, and community data (read-only)',
+    ],
+  },
   supermemory: {
     capabilities: [
       'Save important decisions and context as shared memories during tasks',

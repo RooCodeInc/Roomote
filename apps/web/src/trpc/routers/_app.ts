@@ -45,6 +45,7 @@ import {
   saveGrafanaConnectionSchema,
   saveSnowflakeConnectionSchema,
   saveVercelConnectionSchema,
+  saveXConnectionSchema,
   timePeriodFilterSchema,
   PERSONAL_COLOR_THEMES,
 } from '@/types';
@@ -209,6 +210,7 @@ import {
   getGrafanaConnectionCommand,
   getSnowflakeConnectionCommand,
   getVercelConnectionCommand,
+  getXConnectionCommand,
   listDeploymentMcpIntegrationToolsCommand,
   saveAsanaConnectionCommand,
   saveGranolaConnectionCommand,
@@ -216,6 +218,7 @@ import {
   saveGrafanaConnectionCommand,
   saveSnowflakeConnectionCommand,
   saveVercelConnectionCommand,
+  saveXConnectionCommand,
   setDeploymentDisabledMcpIntegrationToolsCommand,
   connectMcpCommand,
   disconnectMcpCommand,
@@ -1736,6 +1739,10 @@ export const appRouter = createRouter({
       getVercelConnectionCommand(auth),
     ),
 
+    xConnection: protectedProcedure.query(({ ctx: { auth } }) =>
+      getXConnectionCommand(auth),
+    ),
+
     listTools: protectedProcedure
       .input(z.object({ mcpId: z.string() }))
       .query(({ ctx: { auth }, input }) =>
@@ -1812,6 +1819,12 @@ export const appRouter = createRouter({
       .input(saveVercelConnectionSchema)
       .mutation(({ ctx: { auth }, input }) =>
         saveVercelConnectionCommand(auth, input),
+      ),
+
+    saveXConnection: protectedProcedure
+      .input(saveXConnectionSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        saveXConnectionCommand(auth, input),
       ),
   }),
 

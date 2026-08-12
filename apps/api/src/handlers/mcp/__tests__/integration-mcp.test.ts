@@ -9,11 +9,13 @@ const {
   mockFindConnection,
   mockFindEnablement,
   mockGetValidAccessToken,
+  mockDecrypt,
 } = vi.hoisted(() => ({
   mockFindTaskRun: vi.fn(),
   mockFindConnection: vi.fn(),
   mockFindEnablement: vi.fn(),
   mockGetValidAccessToken: vi.fn(),
+  mockDecrypt: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -41,6 +43,10 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/sdk/server', () => ({
   getValidAccessToken: mockGetValidAccessToken,
+}));
+
+vi.mock('@roomote/db/encryption', () => ({
+  decrypt: mockDecrypt,
 }));
 
 import { createIntegrationMcpProxy } from '../integration-mcp';
@@ -71,6 +77,15 @@ function createToolsListRequest(id: number) {
     id,
     method: 'tools/list',
     params: {},
+  };
+}
+
+function createToolCallRequest(id: number, name: string) {
+  return {
+    jsonrpc: '2.0',
+    id,
+    method: 'tools/call',
+    params: { name, arguments: {} },
   };
 }
 
@@ -196,6 +211,180 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
 
     expect(response.status).toBe(200);
     expect(mockFindConnection).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards the decrypted admin-configured X bearer token upstream', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({
+      id: 'conn-x',
+      userId: null,
+      authConfig: { type: 'x', encryptedBearerToken: 'encrypted-token' },
+    });
+    mockDecrypt.mockReturnValue('x-app-only-token');
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await postMcp(
+      createApp('x', createRunToken()),
+      createInitializeRequest(1),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockDecrypt).toHaveBeenCalledWith('encrypted-token');
+    expect(mockGetValidAccessToken).not.toHaveBeenCalled();
+
+    const upstreamHeaders = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(upstreamHeaders.get('authorization')).toBe(
+      'Bearer x-app-only-token',
+    );
+  });
+
+  it('rejects an X connection whose stored bearer token is empty', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({
+      id: 'conn-x',
+      userId: null,
+      authConfig: { type: 'x', encryptedBearerToken: 'encrypted-token' },
+    });
+    mockDecrypt.mockReturnValue('   ');
+
+    const response = await postMcp(
+      createApp('x', createRunToken()),
+      createInitializeRequest(1),
+    );
+    const body = (await response.json()) as JsonRpcErrorBody;
+
+    expect(response.status).toBe(404);
+    expect(body.error.message).toContain('valid credentials');
+  });
+
+  it('normalizes an SSE-framed tool-call reply into a JSON response', async () => {
+    // X's hosted MCP server answers tool calls with an SSE stream carrying the
+    // single JSON-RPC response as one `data:` frame. The proxy must re-serialize
+    // it to application/json so clients that do not consume SSE-framed POST
+    // replies (e.g. OpenCode) receive the result instead of hanging.
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({
+      id: 'conn-x',
+      userId: null,
+      authConfig: { type: 'x', encryptedBearerToken: 'encrypted-token' },
+    });
+    mockDecrypt.mockReturnValue('x-app-only-token');
+
+    const sseBody =
+      'event: message\n' +
+      'data: {"jsonrpc":"2.0","id":7,"result":{"content":[{"type":"text","text":"{\\"data\\":[]}"}]}}\n\n';
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(sseBody, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp('x', createRunToken()),
+      createToolCallRequest(7, 'get_users_posts'),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('application/json');
+    const body = (await response.json()) as {
+      jsonrpc: string;
+      id: number;
+      result: { content: Array<{ type: string }> };
+    };
+    expect(body.jsonrpc).toBe('2.0');
+    expect(body.id).toBe(7);
+    expect(body.result.content[0]?.type).toBe('text');
+  });
+
+  it('ignores SSE progress frames and returns the id-matched response', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({
+      id: 'conn-x',
+      userId: null,
+      authConfig: { type: 'x', encryptedBearerToken: 'encrypted-token' },
+    });
+    mockDecrypt.mockReturnValue('x-app-only-token');
+
+    const sseBody =
+      'event: message\n' +
+      'data: {"jsonrpc":"2.0","method":"notifications/progress","params":{"progress":1}}\n\n' +
+      'event: message\n' +
+      'data: {"jsonrpc":"2.0","id":9,"result":{"ok":true}}\n\n';
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(sseBody, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp('x', createRunToken()),
+      createToolCallRequest(9, 'search_posts_all'),
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      id: number;
+      result: { ok: boolean };
+    };
+    expect(body.id).toBe(9);
+    expect(body.result.ok).toBe(true);
+  });
+
+  it('returns the SSE tool-call result without waiting for the stream to close', async () => {
+    // A Streamable HTTP server may keep the SSE connection open after
+    // delivering the matching response (to emit further notifications). The
+    // proxy must return the moment the id-matched frame arrives rather than
+    // block on stream closure, which would reintroduce the client-side hang.
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({
+      id: 'conn-x',
+      userId: null,
+      authConfig: { type: 'x', encryptedBearerToken: 'encrypted-token' },
+    });
+    mockDecrypt.mockReturnValue('x-app-only-token');
+
+    let cancelled = false;
+    const neverClosingSseBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            'event: message\n' +
+              'data: {"jsonrpc":"2.0","id":11,"result":{"ok":true}}\n\n',
+          ),
+        );
+        // Deliberately never call controller.close(): simulate a server that
+        // holds the SSE channel open after responding.
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(neverClosingSseBody, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp('x', createRunToken()),
+      createToolCallRequest(11, 'get_users_posts'),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('application/json');
+    const body = (await response.json()) as {
+      id: number;
+      result: { ok: boolean };
+    };
+    expect(body.id).toBe(11);
+    expect(body.result.ok).toBe(true);
+    expect(cancelled).toBe(true);
   });
 
   it('strips Resend tool schema patterns for Azure-compatible tool calls', async () => {
