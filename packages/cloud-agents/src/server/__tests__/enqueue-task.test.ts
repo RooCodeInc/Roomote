@@ -58,6 +58,7 @@ import {
   type FreshTaskLaunch,
 } from '../task-run-queue';
 import { LLM_TITLE_LOCKED_CHECKPOINT } from '../llm-task-title';
+import { applyTaskModelSelectionToRun } from '../task-model-selection';
 
 const createdTaskIds: string[] = [];
 const createdUserIds: string[] = [];
@@ -1011,6 +1012,49 @@ describe('enqueueTask snapshot resume', () => {
     expect(resumePayload.modelRoleOverrides).toEqual({
       planning: { model: 'openrouter/test/planner' },
       explore: { reasoningEffort: 'low' },
+    });
+  });
+
+  it('keeps concurrent role updates intact via the run-row lock', async () => {
+    const userId = await createUser();
+
+    const freshRun = await launchFresh({
+      task: standardTaskInput(),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    // The UI's reset fan-out and the agent's update_models call can hit the
+    // same run at once; each does a payload read-modify-write, so without
+    // the FOR UPDATE lock one write silently overwrites the other.
+    await Promise.all([
+      applyTaskModelSelectionToRun({
+        runId: freshRun.id,
+        role: 'helper',
+        model: null,
+        reasoningEffort: 'high',
+      }),
+      applyTaskModelSelectionToRun({
+        runId: freshRun.id,
+        role: 'vision',
+        model: null,
+        reasoningEffort: 'low',
+      }),
+    ]);
+
+    const run = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, freshRun.id),
+      columns: { payload: true },
+    });
+    const payload = run?.payload as {
+      modelRoleOverrides?: Record<string, unknown>;
+    };
+
+    expect(payload.modelRoleOverrides).toEqual({
+      helper: { reasoningEffort: 'high' },
+      vision: { reasoningEffort: 'low' },
     });
   });
 

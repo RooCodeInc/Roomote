@@ -5,11 +5,13 @@ import {
   TaskModelSelectionError,
   applyTaskModelSelectionToRun,
 } from '@roomote/cloud-agents/server';
+import { db, eq, taskRuns } from '@roomote/db/server';
 import { withSandboxServerRpcClient } from '@roomote/sdk/server';
 import { REASONING_EFFORT_VALUES, isExitedRunStatus } from '@roomote/types';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
+import { isRunTokenContext } from '../mcp/proxy-utils';
 import { findLatestTaskRun } from './helpers';
 import { logHandlerError } from '../utils';
 
@@ -35,14 +37,54 @@ const updateModelSelectionBodySchema = z.object({
  * model switcher). Persists the selection on the task's latest run and asks
  * the live sandbox to apply it; from a running turn the change applies at
  * the next turn boundary.
+ *
+ * A sandbox run token must be bound to the target task: unlike the read and
+ * lifecycle actions on this router, this mutates persistent task state and
+ * force-restarts the harness, so one sandbox must not be able to point it at
+ * another task (mirrors `manageSourceControl`). User-token contexts carry
+ * the same authority as the web mutation and pass through.
  */
 export async function updateTaskModelSelection(
   c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,
 ): Promise<Response> {
+  const auth = c.get('mcpAuth');
   const taskId = c.req.param('taskId');
 
   if (!taskId?.trim()) {
     return c.json({ error: 'taskId is required' }, 400);
+  }
+
+  if (isRunTokenContext(auth.authContext)) {
+    const tokenRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, auth.authContext.runId),
+      columns: { taskId: true },
+    });
+
+    if (!tokenRun) {
+      return c.json(
+        { success: false, error: 'Task run not found for this token' },
+        404,
+      );
+    }
+
+    if (tokenRun.taskId !== taskId) {
+      return c.json(
+        {
+          success: false,
+          error: 'Task run token does not match the requested task',
+        },
+        403,
+      );
+    }
+  } else if (!auth.userId) {
+    return c.json(
+      {
+        success: false,
+        error:
+          'Model selection updates require a task run token or user context',
+      },
+      403,
+    );
   }
 
   const parsedBody = updateModelSelectionBodySchema.safeParse(

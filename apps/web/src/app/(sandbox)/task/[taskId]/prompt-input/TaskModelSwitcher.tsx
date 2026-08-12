@@ -145,6 +145,12 @@ export function TaskModelSwitcher({
     }),
   );
 
+  // Toast-free twin of `updateModelSelection` for the reset loop, which
+  // reports a single outcome after the last role clears.
+  const resetModelSelection = useMutation(
+    trpc.sandboxSession.updateTaskModelSelection.mutationOptions(),
+  );
+
   const applyRoleSelection = (role: SwitcherRole, selection: RoleSelection) => {
     setLocalSelections((current) => ({ ...current, [role]: selection }));
     updateModelSelection.mutate({
@@ -197,15 +203,60 @@ export function TaskModelSwitcher({
     ? displayModelName(effectiveCodingModel)
     : 'Model';
 
-  const handleReset = () => {
-    applyRoleSelection('coding', { model: null, reasoningEffort: null });
+  const [resetting, setResetting] = useState(false);
 
-    for (const { role } of OVERRIDE_ROLE_ROWS) {
-      const selection = resolveRoleSelection(role);
+  // Reset clears roles sequentially: firing the per-role mutations
+  // concurrently would race their payload read-modify-writes (the server
+  // also row-locks, but sequencing keeps the toasts to one and the sandbox
+  // restarts collapsed), and each role only needs a call when it actually
+  // holds an override.
+  const handleReset = async () => {
+    const rolesToClear: SwitcherRole[] = [
+      'coding',
+      ...OVERRIDE_ROLE_ROWS.filter(({ role }) => {
+        const selection = resolveRoleSelection(role);
 
-      if (selection.model !== null || selection.reasoningEffort !== null) {
-        applyRoleSelection(role, { model: null, reasoningEffort: null });
+        return selection.model !== null || selection.reasoningEffort !== null;
+      }).map(({ role }) => role),
+    ];
+    const cleared: RoleSelection = { model: null, reasoningEffort: null };
+
+    setResetting(true);
+    setLocalSelections(
+      Object.fromEntries(rolesToClear.map((role) => [role, cleared])),
+    );
+
+    try {
+      let application: string = 'offline';
+
+      for (const role of rolesToClear) {
+        const result = await resetModelSelection.mutateAsync({
+          taskId: taskRun.taskId,
+          role,
+          model: null,
+          reasoningEffort: null,
+        });
+
+        application = result.application;
       }
+
+      if (application === 'restarted') {
+        toast.success('Model settings reset');
+      } else if (application === 'deferred') {
+        toast.success('Model settings reset for the next message');
+      } else {
+        toast.success('Model settings reset for when the task resumes');
+      }
+    } catch (error) {
+      setLocalSelections({});
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Failed to reset the model settings',
+      );
+    } finally {
+      setResetting(false);
+      void invalidateSession();
     }
   };
 
@@ -359,10 +410,10 @@ export function TaskModelSwitcher({
               variant="ghost"
               size="sm"
               className="h-7 px-2 text-xs"
-              onClick={handleReset}
-              disabled={disabled}
+              onClick={() => void handleReset()}
+              disabled={disabled || resetting}
             >
-              Reset to defaults
+              {resetting ? 'Resetting…' : 'Reset to defaults'}
             </Button>
           </div>
         </div>

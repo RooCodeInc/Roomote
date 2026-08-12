@@ -105,10 +105,19 @@ export async function applyTaskModelSelectionToRun(options: {
   }
 
   return await db.transaction(async (tx) => {
-    const run = await tx.query.taskRuns.findFirst({
-      where: eq(taskRuns.id, options.runId),
-      columns: { id: true, taskId: true, payload: true },
-    });
+    // Lock the run row for the read-modify-write below: concurrent role
+    // updates (the UI's reset fan-out, or the web mutation racing the
+    // agent's update_models call) would otherwise each derive the next
+    // payload from the same snapshot and silently drop each other's writes.
+    const [run] = await tx
+      .select({
+        id: taskRuns.id,
+        taskId: taskRuns.taskId,
+        payload: taskRuns.payload,
+      })
+      .from(taskRuns)
+      .where(eq(taskRuns.id, options.runId))
+      .for('update');
 
     if (!run) {
       throw new TaskModelSelectionError(
