@@ -56,7 +56,9 @@ export function EnvironmentRoutingOverview() {
     <Section icon={GitBranch} title="Routing Rules">
       <p className="text-sm text-muted-foreground">
         Routing rules help Roomote agents pick the right environment or broad
-        workspace.
+        workspace. Describe when Roomote should choose a specific environment;
+        the router prioritizes matching rules unless the user explicitly
+        overrides them.
       </p>
 
       <div>
