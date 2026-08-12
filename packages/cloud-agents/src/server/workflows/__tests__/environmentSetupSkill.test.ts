@@ -99,6 +99,12 @@ describe('environment-setup guidance', () => {
     expect(skillContent).toContain(
       'do not require an HTTP service or initial URL that the environment does not claim to provide.',
     );
+    expect(skillContent).toContain(
+      'If the selected validation path includes starting an HTTP API or another non-browser service, verify localhost reachability using loopback addresses only.',
+    );
+    expect(skillContent).toContain(
+      'Skip service startup and reachability when the backend or library qualifies for install-plus-canonical-test validation under step 13a',
+    );
   });
 
   it('bootstraps empty repositories with a minimal initial commit only', () => {
