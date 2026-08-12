@@ -6,7 +6,7 @@ import {
   ALL_REPOSITORIES,
   type WorkspaceRoutingSettings,
 } from '@roomote/types';
-import { GitBranch, Pencil, Plus, Trash2 } from '@/components/system';
+import { GitBranch, Pencil, Trash2 } from '@/components/system';
 import {
   Button,
   Input,
@@ -53,25 +53,7 @@ export function EnvironmentRoutingOverview() {
   };
 
   return (
-    <Section
-      icon={GitBranch}
-      title="Routing Rules"
-      action={
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={rules.length >= 20}
-          onClick={() => {
-            setDraftRule(EMPTY_RULE);
-            setEditingIndex(null);
-          }}
-        >
-          <Plus />
-          Add Rule
-        </Button>
-      }
-    >
+    <Section icon={GitBranch} title="Routing Rules">
       <p className="text-sm text-muted-foreground">
         Routing rules help Roomote agents pick the right environment or broad
         workspace.
