@@ -7,6 +7,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
+  CHAT_CHANNELS_TOOL,
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
@@ -52,6 +53,7 @@ import {
 } from './chat-reply-satisfaction.js';
 import { handlePostToChannel } from './post-to-channel.js';
 import { handleGetChatChannelMessages } from './get-chat-channel-messages.js';
+import { handleListChatChannels } from './list-chat-channels.js';
 import { handleGetChatMessageContext } from './get-chat-message-context.js';
 import { handleAddReactionToSlackMessage } from './add-reaction-to-slack-message.js';
 import { handleSendChatReactionEmoji } from './send-chat-reaction-emoji.js';
@@ -1173,6 +1175,29 @@ if (shouldRegisterAutomationWorkItemsTool()) {
     },
   });
 }
+
+roomoteMcpServer.registerTool(
+  CHAT_CHANNELS_TOOL.name,
+  {
+    title: CHAT_CHANNELS_TOOL.title,
+    description: CHAT_CHANNELS_TOOL.description,
+    inputSchema: {},
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async (): Promise<ToolResult> => {
+    const roomoteConfig = getRoomoteConfig();
+    if (!roomoteConfig) {
+      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+    }
+
+    return handleListChatChannels(roomoteConfig);
+  },
+);
 
 roomoteMcpServer.registerTool(
   CHAT_CHANNEL_MESSAGES_TOOL.name,

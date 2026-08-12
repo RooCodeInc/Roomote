@@ -663,6 +663,36 @@ describe('roomote MCP tool descriptions', () => {
     expect(latestField.description).toContain('message snowflake');
   });
 
+  it('registers and forwards the provider-neutral channel listing tool', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ channelCount: 0, platforms: [] }),
+      }),
+    );
+
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_CLOUD_TOKEN: 'run-token',
+      ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
+    });
+    const listTool = getRegisteredTool(registeredTools, 'list_chat_channels');
+
+    expect(listTool.config.description).toBe(
+      'List the communication channels Roomote is connected to or can currently discover, grouped by platform. Returns channel IDs and platform-specific workspace context so another chat tool can target the right channel. Some platforms do not support channel enumeration and report that limitation explicitly.',
+    );
+    expect(listTool.handler).toBeDefined();
+    await listTool.handler?.({});
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://platform.example.com/api/mcp/communication/channels',
+      expect.objectContaining({
+        method: 'POST',
+        body: '{}',
+      }),
+    );
+  });
+
   it('forwards generic thread lookups to the communication API', async () => {
     vi.stubGlobal(
       'fetch',
