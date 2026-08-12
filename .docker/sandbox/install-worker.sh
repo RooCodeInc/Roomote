@@ -28,6 +28,7 @@ WORKER_RELEASE_ARCHIVE="${WORKER_RELEASE_ARCHIVE_PATH:-/sandbox/worker.tar.gz}"
 WORKER_DIR="/sandbox/worker"
 WORKER_RELEASE_TAG_FILE="$WORKER_DIR/WORKER_RELEASE_TAG"
 NODE_PTY_VERSION_FILE="$WORKER_DIR/NODE_PTY_VERSION"
+PM2_VERSION_FILE="$WORKER_DIR/PM2_VERSION"
 DATA_DIR="/sandbox"
 INSTALL_WORKER_START_MS="$(date +%s%3N)"
 INSTALL_WORKER_PHASE_NAMES=()
@@ -347,6 +348,14 @@ pm2_works() {
   "$1" --version >/dev/null 2>&1
 }
 
+get_expected_pm2_version() {
+  if [ -f "$PM2_VERSION_FILE" ]; then
+    cat "$PM2_VERSION_FILE"
+  else
+    echo ""
+  fi
+}
+
 ensure_pm2() {
   if [ -x "/usr/local/bin/pm2" ] && pm2_works /usr/local/bin/pm2; then
     echo "pm2 already available"
@@ -360,8 +369,14 @@ ensure_pm2() {
   echo "pm2 missing or broken; installing..."
   ensure_data_dir || return 1
   local pm2_prefix="$DATA_DIR/roomote-pm2"
+  local package_spec="pm2"
+  local expected_version
+  expected_version="$(get_expected_pm2_version)"
+  if [ -n "$expected_version" ]; then
+    package_spec="pm2@${expected_version}"
+  fi
   mkdir -p "$pm2_prefix" || return 1
-  npm install --prefix "$pm2_prefix" --no-save --no-package-lock pm2 || return 1
+  npm install --prefix "$pm2_prefix" --no-save --no-package-lock "$package_spec" || return 1
 
   local pm2_entry="$pm2_prefix/node_modules/pm2/bin/pm2"
   if [ ! -f "$pm2_entry" ]; then
