@@ -645,7 +645,7 @@ describe('prReviewNotificationJob', () => {
     );
   });
 
-  it('drops at the deferral cap when an idle running phase has a fresh heartbeat', async () => {
+  it('delivers at the deferral cap when an idle running phase has a fresh heartbeat', async () => {
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
       payload: {},
@@ -660,11 +660,12 @@ describe('prReviewNotificationJob', () => {
 
     expect(mockSchedule).not.toHaveBeenCalled();
     expect(mockConsumePending).toHaveBeenCalled();
-    expect(mockPrepareDelivery).not.toHaveBeenCalled();
-    expect(mockStickyFooterPost).not.toHaveBeenCalled();
+    expect(mockPrepareDelivery).toHaveBeenCalled();
+    expect(mockStickyFooterPost).toHaveBeenCalledTimes(1);
+    expect(mockRecordDelivery).toHaveBeenCalledTimes(1);
   });
 
-  it('drops pending activity without posting when the deferral cap is reached while still running', async () => {
+  it('delivers pending activity exactly once when the deferral cap is reached while still running', async () => {
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
       payload: {},
@@ -674,12 +675,16 @@ describe('prReviewNotificationJob', () => {
       taskPhase: 'running',
     });
 
+    mockConsumePending.mockResolvedValueOnce(events).mockResolvedValueOnce([]);
+
+    await prReviewNotificationJob(makeJob({ deferrals: 3 }) as never);
     await prReviewNotificationJob(makeJob({ deferrals: 3 }) as never);
 
     expect(mockSchedule).not.toHaveBeenCalled();
-    expect(mockConsumePending).toHaveBeenCalled();
-    expect(mockPrepareDelivery).not.toHaveBeenCalled();
-    expect(mockPostMessage).not.toHaveBeenCalled();
+    expect(mockConsumePending).toHaveBeenCalledTimes(2);
+    expect(mockPrepareDelivery).toHaveBeenCalledTimes(1);
+    expect(mockStickyFooterPost).toHaveBeenCalledTimes(1);
+    expect(mockRecordDelivery).toHaveBeenCalledTimes(1);
   });
 
   it('skips (and drains) when the PR is already merged', async () => {

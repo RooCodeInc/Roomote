@@ -266,10 +266,8 @@ export const prReviewNotificationJob = async (
     }
 
     console.warn(
-      `[PrReviewNotification] Task ${data.taskId} never went idle after ${data.deferrals} deferrals, dropping pending review activity for ${data.repository}#${data.prNumber}`,
+      `[PrReviewNotification] Task ${data.taskId} never went idle after ${data.deferrals} deferrals; delivering pending review activity for ${data.repository}#${data.prNumber}`,
     );
-    await consumePendingPrReviewActivity(target);
-    return;
   }
 
   if (isExecutingTurn && isWorkerHeartbeatStale) {
