@@ -46,6 +46,7 @@ const DISCORD_CHANNEL_KINDS: Record<number, string> = {
   0: 'text',
   5: 'announcement',
   15: 'forum',
+  16: 'forum',
 };
 
 async function listSlackChannels(

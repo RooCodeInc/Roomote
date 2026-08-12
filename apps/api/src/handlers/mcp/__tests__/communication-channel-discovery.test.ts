@@ -114,6 +114,12 @@ describe('listCommunicationChannels', () => {
             channelType: 2,
             parentId: null,
           },
+          {
+            channelId: 'D3',
+            channelName: 'media',
+            channelType: 16,
+            parentId: 'category-1',
+          },
         ],
       },
     ]);
@@ -132,7 +138,7 @@ describe('listCommunicationChannels', () => {
     await expect(
       listCommunicationChannels({ actingUserId: 'user-1' }),
     ).resolves.toEqual({
-      channelCount: 3,
+      channelCount: 4,
       platforms: [
         {
           provider: 'slack',
@@ -186,6 +192,14 @@ describe('listCommunicationChannels', () => {
               kind: 'text',
               workspaceId: 'G1',
               workspaceName: 'Builders',
+            },
+            {
+              id: 'D3',
+              name: 'media',
+              kind: 'forum',
+              workspaceId: 'G1',
+              workspaceName: 'Builders',
+              parentId: 'category-1',
             },
           ],
         },
