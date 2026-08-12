@@ -890,51 +890,47 @@ export async function enqueuePrReviewNotification(
       ? PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS
       : PR_REVIEW_NOTIFICATION_DEBOUNCE_MS;
 
-  try {
-    for (const taskId of taskIds) {
-      const immediate = isRoomoteSummary;
-      const target = {
-        taskId,
-        repository: parsedInput.repository,
-        prNumber: parsedInput.prNumber,
-        immediate,
-        batchKind: isRoomoteEvent ? ('roomote' as const) : ('human' as const),
-        ...(event.batchId ? { batchId: event.batchId } : {}),
-      };
+  for (const taskId of taskIds) {
+    const immediate = isRoomoteSummary;
+    const target = {
+      taskId,
+      repository: parsedInput.repository,
+      prNumber: parsedInput.prNumber,
+      immediate,
+      batchKind: isRoomoteEvent ? ('roomote' as const) : ('human' as const),
+      ...(event.batchId ? { batchId: event.batchId } : {}),
+    };
 
-      const request = {
-        ...target,
-        prUrl: parsedInput.prUrl,
-        deferrals: 0,
-        immediate,
-        sourceControlProvider: parsedInput.sourceControlProvider,
-      };
-      const claimed = await appendPendingEventAndClaimSchedule({
-        request,
-        event,
-        delayMs: notificationDelayMs,
-      });
+    const request = {
+      ...target,
+      prUrl: parsedInput.prUrl,
+      deferrals: 0,
+      immediate,
+      sourceControlProvider: parsedInput.sourceControlProvider,
+    };
+    const claimed = await appendPendingEventAndClaimSchedule({
+      request,
+      event,
+      delayMs: notificationDelayMs,
+    });
 
-      if (claimed) {
-        try {
-          await getPrReviewNotificationQueue().add(
-            'notify-pr-review-activity',
-            request,
-            { delay: notificationDelayMs },
-          );
-          await clearPrReviewNotificationRepair(target).catch(() => undefined);
-        } catch (error) {
-          await getRedis()
-            .del(buildScheduledMarkerKey(target))
-            .catch(() => undefined);
-          throw error;
-        }
+    if (claimed) {
+      try {
+        await getPrReviewNotificationQueue().add(
+          'notify-pr-review-activity',
+          request,
+          { delay: notificationDelayMs },
+        );
+        await clearPrReviewNotificationRepair(target).catch(() => undefined);
+      } catch (error) {
+        await getRedis()
+          .del(buildScheduledMarkerKey(target))
+          .catch(() => undefined);
+        throw error;
       }
-
-      notifiedTaskCount += 1;
     }
-  } catch (error) {
-    throw error;
+
+    notifiedTaskCount += 1;
   }
 
   return { notifiedTaskCount };
