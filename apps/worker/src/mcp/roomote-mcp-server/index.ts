@@ -65,6 +65,7 @@ import { errorResult } from './tool-result.js';
 import { taskSuggestionResultHasSubmittedSuggestions } from './automation-slack-summary-state.js';
 import { registerAutomationWorkItemsTool } from './automation-work-items-tool.js';
 import { handleManageCustomAutomations } from './custom-automations.js';
+import { handleManageGoal } from './goal.js';
 
 export {
   taskSuggestionResultHasSubmittedSuggestions,
@@ -625,6 +626,38 @@ const manageTasksInputSchema = {
       'For launch: when true, the platform sends a message into THIS task session when the launched task settles (completes, fails, is canceled, or goes idle), so you can wait for that notification instead of polling get_summary.',
     ),
 } satisfies Record<string, z.ZodTypeAny>;
+
+roomoteMcpServer.registerTool(
+  'manage_goal',
+  {
+    title: 'Manage Goal',
+    description:
+      'Read or finish the current task goal. Use get to inspect it. Use complete only after the full objective is verified. Use blocked only when progress cannot continue without user input or an external state change. The agent cannot create, replace, pause, resume, or clear goals.',
+    inputSchema: {
+      action: z.enum(['get', 'complete', 'blocked']),
+      generation: z
+        .string()
+        .max(200)
+        .nullable()
+        .optional()
+        .describe(
+          'Required for complete and blocked. Pass the exact generation assigned in the current turn goal instructions.',
+        ),
+      reason: z
+        .string()
+        .max(2_000)
+        .optional()
+        .describe('Required for blocked; explain the concrete blocker.'),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async (params): Promise<ToolResult> => handleManageGoal(params),
+);
 
 roomoteMcpServer.registerTool(
   'manage_tasks',

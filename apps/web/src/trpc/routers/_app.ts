@@ -25,6 +25,7 @@ import {
   sourceControlProviderSchema,
   sourceControlTokenBackedProviderSchema,
   standardTaskSchema,
+  taskGoalInputSchema,
   taskModelMetadataSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
 } from '@roomote/types';
@@ -104,6 +105,7 @@ import {
   createStandardTaskRunCommand,
   cancelTaskRunCommand,
   retryFailedTaskStartCommand,
+  startTaskGoalCommand,
 } from '../commands/task-runs';
 import {
   exchangeSlackOAuthCodeCommand,
@@ -960,6 +962,19 @@ export const appRouter = createRouter({
   }),
 
   taskRuns: createRouter({
+    startGoal: protectedProcedure
+      .input(
+        z.object({
+          taskId: z.string(),
+          goal: taskGoalInputSchema,
+          clientMessageId: z.string().optional(),
+          userImageUrl: z.string().optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        startTaskGoalCommand(auth, input),
+      ),
+
     routeHomeTask: protectedProcedure
       .input(
         z.object({

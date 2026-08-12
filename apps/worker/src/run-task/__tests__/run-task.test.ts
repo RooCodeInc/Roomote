@@ -5,7 +5,9 @@ const {
   awaitSubprocessMock,
   buildSandboxInstructionMock,
   taskRunsDoneMock,
+  taskRunsClaimGoalContinuationMock,
   taskRunsRecordEventMock,
+  taskRunsReleaseGoalContinuationMock,
   taskRunsStampMilestoneMock,
   taskRunsSyncActingUserIdMock,
   taskRunsSetHarnessSessionIdMock,
@@ -37,7 +39,9 @@ const {
   awaitSubprocessMock: vi.fn().mockResolvedValue(undefined),
   buildSandboxInstructionMock: vi.fn(() => undefined),
   taskRunsDoneMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsClaimGoalContinuationMock: vi.fn(),
   taskRunsRecordEventMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsReleaseGoalContinuationMock: vi.fn().mockResolvedValue(true),
   taskRunsStampMilestoneMock: vi.fn().mockResolvedValue(undefined),
   taskRunsSyncActingUserIdMock: vi
     .fn()
@@ -96,10 +100,7 @@ vi.mock('node:fs', () => ({
 type FakeHarnessManager = EventEmitter & {
   currentIsConnected: boolean;
   currentSleepAt: number | null;
-  callbacks?: {
-    onStart?: (taskId: string) => Promise<void>;
-    onExit?: () => Promise<void>;
-  };
+  callbacks?: HarnessManagerCallbacks;
   getStatus: ReturnType<typeof vi.fn>;
   resumeTask: ReturnType<typeof vi.fn>;
   sendFollowUpPrompt: ReturnType<typeof vi.fn>;
@@ -144,7 +145,9 @@ vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     taskRuns: {
       done: taskRunsDoneMock,
+      claimGoalContinuation: taskRunsClaimGoalContinuationMock,
       recordEvent: taskRunsRecordEventMock,
+      releaseGoalContinuation: taskRunsReleaseGoalContinuationMock,
       stampMilestone: taskRunsStampMilestoneMock,
       setHarnessSessionId: taskRunsSetHarnessSessionIdMock,
       syncActingUserId: taskRunsSyncActingUserIdMock,
@@ -172,10 +175,7 @@ vi.mock('../../sandbox-server', () => ({
   HarnessManager: class FakeHarnessManager extends EventEmitter {
     currentIsConnected = true;
     currentSleepAt: number | null = null;
-    callbacks?: {
-      onStart?: (taskId: string) => Promise<void>;
-      onExit?: () => Promise<void>;
-    };
+    callbacks?: HarnessManagerCallbacks;
     getStatus = vi.fn(() => ({
       isConnected: this.currentIsConnected,
       phase: 'running',
@@ -188,12 +188,7 @@ vi.mock('../../sandbox-server', () => ({
     cancelTask = vi.fn();
     dispose = vi.fn();
 
-    constructor(config?: {
-      callbacks?: {
-        onStart?: (taskId: string) => Promise<void>;
-        onExit?: () => Promise<void>;
-      };
-    }) {
+    constructor(config?: { callbacks?: HarnessManagerCallbacks }) {
       super();
       this.callbacks = config?.callbacks;
       harnessManagerInstances.push(this as FakeHarnessManager);
@@ -269,6 +264,7 @@ vi.mock('../actor-mismatch-notice', () => ({
 
 import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
+import type { HarnessManagerCallbacks } from '../../sandbox-server/lib/harness-manager';
 import { getDefaultKeepaliveMs } from '../completion';
 import { runTask } from '../run-task';
 import type { EnvironmentSetupSettledOutcome } from '../types';
@@ -319,6 +315,21 @@ describe('runTask', () => {
     });
     taskRunsStampMilestoneMock.mockReset();
     taskRunsStampMilestoneMock.mockResolvedValue(undefined);
+    taskRunsClaimGoalContinuationMock.mockReset();
+    taskRunsClaimGoalContinuationMock.mockResolvedValue({
+      updated: true,
+      goal: {
+        objective: 'Complete the goal',
+        generation: 'goal-generation:continuation',
+        status: 'active',
+        maxContinuations: 5,
+        continuationsUsed: 1,
+        blockedReason: null,
+        completedAt: null,
+      },
+    });
+    taskRunsReleaseGoalContinuationMock.mockReset();
+    taskRunsReleaseGoalContinuationMock.mockResolvedValue(true);
     taskRunsSyncActingUserIdMock.mockReset();
     taskRunsSyncActingUserIdMock.mockImplementation(
       async ({ newUserId }: { newUserId: string }) => ({
@@ -2512,6 +2523,58 @@ describe('runTask', () => {
         codingHarness: 'opencode-server',
       }),
     );
+  });
+
+  it('continues a goal enabled after the runtime starts', async () => {
+    await runTask({
+      taskRun: {
+        id: 407,
+        taskId: 'task-407',
+        payloadKind: TaskPayloadKind.StandardTask,
+        harness: 'opencode-server',
+        payload: {},
+        result: null,
+      } as never,
+      envVars: {},
+      workspacePath: '/tmp/workspace',
+      prompt: 'do work',
+      harnessInstructions: undefined,
+      agentInstructions: undefined,
+      environmentConfig: undefined,
+      callbacks: {},
+      context: {},
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      } as never,
+      workerEnv: {
+        buildUserFacingEnv: vi.fn(() => ({})),
+        roomoteAppUrl: 'http://localhost:3000',
+        trpcUrl: 'http://localhost:3001',
+        authToken: 'auth-token',
+        appEnv: 'test',
+        setRuntimeEnv: vi.fn(),
+      } as never,
+    });
+
+    const manager = harnessManagerInstances[0]!;
+    const decision =
+      manager.callbacks?.onBeforeTaskCompletion?.('completion-race');
+
+    await expect(decision).resolves.toMatchObject({
+      disposition: 'continue',
+      prompt: {
+        goalContext: expect.objectContaining({
+          objective: 'Complete the goal',
+          generation: 'goal-generation:continuation',
+        }),
+        source: 'goal-continuation',
+        clientMessageId: 'goal-continuation:completion-race',
+      },
+    });
+    expect(manager.sendFollowUpPrompt).not.toHaveBeenCalled();
   });
 
   describe('background environment setup settled notices', () => {

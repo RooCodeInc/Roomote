@@ -23,6 +23,7 @@ import type {
   TaskTrigger,
   TaskVisibility,
   TaskState,
+  TaskGoalStatus,
   TaskInitiatorKind,
   CommitAuthorKind,
   RunKind,
@@ -688,6 +689,30 @@ export const tasks = pgTable(
     model: text('model').notNull(),
     // Initial task prompt. Per-attempt/resume prompts stay on runs.
     prompt: text('prompt'),
+    goalObjective: text('goal_objective'),
+    goalStatus: text('goal_status').$type<TaskGoalStatus>(),
+    goalMaxContinuations: integer('goal_max_continuations'),
+    goalContinuationsUsed: integer('goal_continuations_used')
+      .notNull()
+      .default(0),
+    goalBlockedReason: text('goal_blocked_reason'),
+    goalCompletedAt: timestamp('goal_completed_at'),
+    goalLastContinuationId: text('goal_last_continuation_id'),
+    goalContinuationIds: text('goal_continuation_ids')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    goalGenerationIds: text('goal_generation_ids')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    goalBlockerCandidateReason: text('goal_blocker_candidate_reason'),
+    goalBlockerCandidateCount: integer('goal_blocker_candidate_count')
+      .notNull()
+      .default(0),
+    goalBlockerLastContinuationUsed: integer(
+      'goal_blocker_last_continuation_used',
+    ),
     /**
      * Draft prompt text the user was composing when the sandbox went to
      * sleep. Saved periodically while typing so it can be restored after
@@ -764,6 +789,18 @@ export const tasks = pgTable(
     check(
       'tasks_state_check',
       sql`${table.state} in ('active', 'completed', 'failed', 'canceled')`,
+    ),
+    check(
+      'tasks_goal_status_check',
+      sql`${table.goalStatus} IS NULL OR ${table.goalStatus} in ('active', 'complete', 'blocked', 'budget_limited')`,
+    ),
+    check(
+      'tasks_goal_continuations_check',
+      sql`${table.goalContinuationsUsed} >= 0 AND (${table.goalMaxContinuations} IS NULL OR ${table.goalMaxContinuations} > 0)`,
+    ),
+    check(
+      'tasks_goal_blocker_candidate_count_check',
+      sql`${table.goalBlockerCandidateCount} >= 0`,
     ),
     check('tasks_harness_check', sql`${table.harness} in ('opencode-server')`),
     check(

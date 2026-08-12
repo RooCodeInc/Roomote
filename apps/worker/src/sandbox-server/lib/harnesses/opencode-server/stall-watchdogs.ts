@@ -32,6 +32,7 @@ export interface PendingSteerPickup {
   userId?: string;
   userName?: string;
   userImageUrl?: string;
+  goalContext?: import('@roomote/types').TaskGoal;
 }
 
 export function formatOpenCodeTurnStallErrorText(

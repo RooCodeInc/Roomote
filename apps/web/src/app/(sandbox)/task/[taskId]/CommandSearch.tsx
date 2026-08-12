@@ -10,6 +10,7 @@ import {
   CommandList,
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogTitle,
 } from '@/components/system';
 
@@ -21,11 +22,16 @@ interface CommandSearchProps {
 
 interface SlashCommand {
   name: string;
+  description?: string;
 }
 
-const AVAILABLE_COMMANDS: SlashCommand[] = PACKAGED_SKILL_INVOCATIONS.map(
-  (name) => ({ name: `/${name}` }),
-);
+const AVAILABLE_COMMANDS: SlashCommand[] = [
+  {
+    name: '/goal',
+    description: 'Keep working toward an objective across multiple turns',
+  },
+  ...PACKAGED_SKILL_INVOCATIONS.map((name) => ({ name: `/${name}` })),
+];
 
 export const CommandSearch = ({
   open,
@@ -41,8 +47,10 @@ export const CommandSearch = ({
 
     const normalizedQuery = query.toLowerCase();
 
-    return AVAILABLE_COMMANDS.filter((command) =>
-      command.name.toLowerCase().includes(normalizedQuery),
+    return AVAILABLE_COMMANDS.filter(
+      (command) =>
+        command.name.toLowerCase().includes(normalizedQuery) ||
+        command.description?.toLowerCase().includes(normalizedQuery),
     );
   }, [query]);
 
@@ -73,6 +81,9 @@ export const CommandSearch = ({
         showCloseButton={false}
       >
         <DialogTitle className="sr-only">Commands</DialogTitle>
+        <DialogDescription className="sr-only">
+          Search for a command to add to your message.
+        </DialogDescription>
         <Command shouldFilter={false}>
           <CommandInput
             placeholder="Search commands..."
@@ -82,7 +93,7 @@ export const CommandSearch = ({
           <CommandList>
             {filteredCommands.length === 0 ? (
               <div className="text-muted-foreground py-6 px-4 text-center text-sm">
-                No skills found.
+                No commands found.
               </div>
             ) : (
               filteredCommands.map((command) => (
@@ -95,6 +106,11 @@ export const CommandSearch = ({
                     <span className="truncate font-mono text-[0.8rem]">
                       {command.name}
                     </span>
+                    {command.description && (
+                      <span className="truncate text-xs opacity-70">
+                        {command.description}
+                      </span>
+                    )}
                   </span>
                 </CommandItem>
               ))
