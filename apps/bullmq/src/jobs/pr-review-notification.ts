@@ -17,7 +17,6 @@ import {
   PR_REVIEW_NOTIFICATION_MAX_DEFERRALS,
   attachPendingPrReviewActionMessage,
   getCommunicationProviderAdapter,
-  type PrReviewNotificationRequest,
   type PrReviewNotificationQueueRequest,
   type PrReviewNotificationRoute,
   consumePendingPrReviewActivity,
