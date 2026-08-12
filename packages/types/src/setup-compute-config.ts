@@ -518,8 +518,8 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
     provider: 'box',
     label: 'Box',
     description:
-      'Hosted task sandboxes with API-key setup, private previews, Docker projects, and same-sandbox task resume.',
-    supportsSnapshots: false,
+      'Hosted task sandboxes with API-key setup, private previews, Docker projects, environment snapshots, and same-sandbox task resume.',
+    supportsSnapshots: true,
     fields: [
       {
         envVarName: 'BOX_API_KEY',

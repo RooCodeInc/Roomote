@@ -335,7 +335,7 @@ describe('buildSetupComputeStatus', () => {
     );
 
     expect(box).toMatchObject({
-      supportsSnapshots: false,
+      supportsSnapshots: true,
       runtimeConfigSatisfied: true,
       configSatisfied: true,
       infrastructureSatisfied: true,

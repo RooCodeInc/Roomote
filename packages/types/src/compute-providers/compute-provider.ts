@@ -29,6 +29,7 @@ export const snapshotCapableComputeProviders = [
   'daytona',
   'roomote',
   'azure',
+  'box',
 ] as const satisfies readonly ComputeProvider[];
 
 /**

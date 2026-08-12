@@ -565,13 +565,114 @@ describe('BoxClient Public API v1', () => {
     ]);
   });
 
-  it('rejects snapshot operations', async () => {
-    const client = new BoxClient({ apiKey: 'key' });
+  it('creates a named snapshot, persists the id, then force-stops the box', async () => {
+    // The generated name is random; make the list response echo it back.
+    let capturedName = '';
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async (url, init) => {
+        const path = String(url);
+        if (path.endsWith('/named-snapshots') && init?.method === 'POST') {
+          capturedName = (JSON.parse(String(init.body)) as { name: string })
+            .name;
+          return new Response(null, { status: 202 });
+        }
+        if (path.endsWith('/named-snapshots')) {
+          return jsonResponse({
+            snapshots: [{ name: capturedName, status: 'ready' }],
+          });
+        }
+        if (path.endsWith('/stop')) return new Response(null, { status: 202 });
+        return jsonResponse({ id: 'box-1', state: 'archived' });
+      });
+    const client = new BoxClient({
+      apiKey: 'key',
+      pollIntervalMs: 0,
+      fetchImpl,
+    });
+
+    const events: string[] = [];
+    const result = await client.createSnapshot({
+      instanceId: 'box-1',
+      onSnapshotCreated: async (id) => {
+        events.push(`persisted:${id}`);
+      },
+    });
+
+    expect(result.snapshotId).toBe(capturedName);
+    expect(result.snapshotId.startsWith('roomote-snap-')).toBe(true);
+    expect(events).toEqual([`persisted:${capturedName}`]);
+
+    const createCall = fetchImpl.mock.calls.find(
+      ([url, init]) =>
+        String(url).endsWith('/named-snapshots') && init?.method === 'POST',
+    );
+    expect(JSON.parse(String(createCall?.[1]?.body))).toEqual({
+      boxId: 'box-1',
+      name: capturedName,
+    });
+    const stopCall = fetchImpl.mock.calls.find(([url]) =>
+      String(url).endsWith('/stop'),
+    );
+    expect(JSON.parse(String(stopCall?.[1]?.body))).toEqual({ force: true });
+  });
+
+  it('fails createSnapshot when the named snapshot reports failure', async () => {
+    let capturedName = '';
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockImplementation(async (url, init) => {
+        if (init?.method === 'POST') {
+          capturedName = (JSON.parse(String(init.body)) as { name: string })
+            .name;
+          return new Response(null, { status: 202 });
+        }
+        return jsonResponse({
+          snapshots: [{ name: capturedName, status: 'failed' }],
+        });
+      });
+    const client = new BoxClient({
+      apiKey: 'key',
+      pollIntervalMs: 0,
+      fetchImpl,
+    });
+
     await expect(
       client.createSnapshot({ instanceId: 'box-1' }),
-    ).rejects.toThrow('does not support operation: createSnapshot');
-    await expect(
-      client.resumeFromSnapshot({ sourceSnapshotId: 'snap-1' }),
-    ).rejects.toThrow('does not support operation: resumeFromSnapshot');
+    ).rejects.toThrow('entered failed while waiting for completion');
+  });
+
+  it('forks a template via POST /boxes with from and keeps lifecycle fields', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ id: 'box-fork', state: 'ready' }));
+    const client = new BoxClient({
+      apiKey: 'key',
+      timeoutMs: 60_000,
+      machineType: 'small',
+      fetchImpl,
+    });
+
+    const created = await client.resumeFromSnapshot({
+      sourceSnapshotId: 'roomote-snap-abc123',
+    });
+
+    expect(created).toMatchObject({
+      instanceId: 'box-fork',
+      sourceSnapshotId: 'roomote-snap-abc123',
+      status: 'running',
+    });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      `${DEFAULT_BOX_API_BASE_URL}/boxes`,
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          noEnv: true,
+          ttlSeconds: 60,
+          type: 'small',
+          from: 'roomote-snap-abc123',
+        }),
+      }),
+    );
   });
 });

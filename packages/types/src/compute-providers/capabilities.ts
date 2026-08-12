@@ -93,7 +93,8 @@ export const BOX_CAPABILITIES: ComputeProviderCapabilities = {
   supportsCommandExecution: true,
   supportsCommandOutputStreaming: true,
   supportsCommandOutputLookup: true,
-  supportsSnapshots: false,
+  // Named snapshots (template boxes): fork-on-deploy via POST /boxes {from}.
+  supportsSnapshots: true,
   supportsStandbyResume: true,
   supportsResume: true,
   supportsFileWrite: true,

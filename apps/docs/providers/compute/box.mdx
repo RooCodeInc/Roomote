@@ -60,6 +60,17 @@ as its cleanup fallback for canceled, failed, and retention-expired
 tasks. Those archived Boxes remain in the provider account until permanent
 deletion is available.
 
+## Environment snapshots
+
+Roomote environment snapshots map to Box named snapshots (template boxes):
+snapshotting an environment saves a `roomote-snap-*` template, and tasks that
+start from the snapshot fork it into a fresh Box in seconds instead of
+re-running environment setup. Box accounts are limited to 10 named snapshots,
+so delete stale `roomote-snap-*` templates from the Box dashboard when
+re-snapshotting environments repeatedly. Free-trial accounts also cap
+concurrent boxes (2 at the time of writing), which bounds how many tasks can
+run at once.
+
 `BOX_STANDBY_MAX_COUNT` and `BOX_STANDBY_MAX_AGE_HOURS` bound how many stopped
 task sandboxes Roomote retains and for how long. This standby behavior preserves
 one task's machine; it is not a Roomote environment snapshot.

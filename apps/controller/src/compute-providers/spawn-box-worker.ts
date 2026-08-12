@@ -12,6 +12,7 @@ import {
 } from '@roomote/db/server';
 import { stampTaskRunMilestone } from '@roomote/sdk/server';
 import {
+  BOX_SNAPSHOT_NAME_PREFIX,
   buildBoxWorkerEnv,
   buildComputeProviderMutationDetails,
   createBoxMachine,
@@ -58,6 +59,32 @@ export function resolveBoxMachineType(
   return resolved;
 }
 
+function getWorkerLaunchCommand(
+  taskRun: TaskRun,
+): 'snapshot' | 'resume' | 'run' {
+  return taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment
+    ? 'snapshot'
+    : taskRun.payloadKind === TaskPayloadKind.SnapshotResume
+      ? 'resume'
+      : 'run';
+}
+
+function getWorkerLaunchArgs(taskRun: TaskRun, machineId: string): string[] {
+  const command = getWorkerLaunchCommand(taskRun);
+
+  return taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment
+    ? [
+        'snapshot',
+        '--task-run-id',
+        taskRun.id.toString(),
+        '--environment-id',
+        taskRun.payload.environmentId ?? '',
+        '--sandbox-id',
+        machineId,
+      ]
+    : [command, taskRun.id.toString()];
+}
+
 export async function spawnBoxWorker(
   taskRun: TaskRun,
   authToken: string,
@@ -70,28 +97,47 @@ export async function spawnBoxWorker(
     deploymentSlug?: string;
   },
 ): Promise<{ machineId: string; sandboxCmdId?: string }> {
-  if (taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
-    throw new NonRetryableSpawnError(
-      'Box does not support Roomote environment snapshots',
-    );
+  const { namedPorts, environmentSnapshotId, environmentConfig } =
+    await getNamedPortsForTaskRun(taskRun);
+
+  let launchOptions:
+    | { launchMode: 'fresh' }
+    | { launchMode: 'environment_snapshot'; sourceSnapshotId: string }
+    | { launchMode: 'task_snapshot'; sourceSnapshotId: string }
+    | { launchMode: 'task_standby'; resumeHandle: string };
+
+  if (taskRun.payloadKind === TaskPayloadKind.SnapshotResume) {
+    const snapshotId = taskRun.sourceSnapshotId;
+    if (!snapshotId) {
+      throw new NonRetryableSpawnError(
+        `SnapshotResume task run #${taskRun.id} missing sourceSnapshotId`,
+      );
+    }
+    // A resume id is usually the archived box itself (standby); a
+    // roomote-snap- name is a template to fork instead.
+    launchOptions = snapshotId.startsWith(BOX_SNAPSHOT_NAME_PREFIX)
+      ? { launchMode: 'task_snapshot', sourceSnapshotId: snapshotId }
+      : { launchMode: 'task_standby', resumeHandle: snapshotId };
+  } else if (taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
+    // Environment snapshot runs prepare the sandbox fresh, then the worker
+    // requests the named snapshot.
+    launchOptions = { launchMode: 'fresh' };
+  } else {
+    const snapshotId =
+      taskRun.sourceSnapshotId ?? environmentSnapshotId ?? undefined;
+    launchOptions = snapshotId
+      ? { launchMode: 'environment_snapshot', sourceSnapshotId: snapshotId }
+      : { launchMode: 'fresh' };
   }
 
-  const launchOptions =
-    taskRun.payloadKind === TaskPayloadKind.SnapshotResume
-      ? taskRun.sourceSnapshotId
-        ? ({
-            launchMode: 'task_standby',
-            resumeHandle: taskRun.sourceSnapshotId,
-          } as const)
-        : (() => {
-            throw new NonRetryableSpawnError(
-              `SnapshotResume task run #${taskRun.id} missing sourceSnapshotId`,
-            );
-          })()
-      : ({ launchMode: 'fresh' } as const);
-
-  const { namedPorts, environmentConfig } =
-    await getNamedPortsForTaskRun(taskRun);
+  if (
+    taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment &&
+    !taskRun.payload.environmentId
+  ) {
+    throw new NonRetryableSpawnError(
+      `SnapshotEnvironment task run #${taskRun.id} missing environmentId in payload`,
+    );
+  }
   const sandboxResources = await resolveTaskSandboxMemoryMiB(
     taskRun,
     environmentConfig,
@@ -114,7 +160,11 @@ export async function spawnBoxWorker(
   const mutationContext = {
     launchMode: launchOptions.launchMode,
     sourceSnapshotId:
-      'resumeHandle' in launchOptions ? launchOptions.resumeHandle : null,
+      'resumeHandle' in launchOptions
+        ? launchOptions.resumeHandle
+        : 'sourceSnapshotId' in launchOptions
+          ? launchOptions.sourceSnapshotId
+          : null,
     ports: namedPorts.map(({ port }) => port),
   };
   const recordMutation = createComputeProviderMutationEventRecorder(
@@ -183,13 +233,14 @@ export async function spawnBoxWorker(
         context:
           launchOptions.launchMode === 'task_standby'
             ? 'Standby-resumed Box launch'
-            : 'Fresh Box launch',
+            : launchOptions.launchMode === 'environment_snapshot' ||
+                launchOptions.launchMode === 'task_snapshot'
+              ? 'Template-forked Box launch'
+              : 'Fresh Box launch',
       });
     }
 
-    const workerCommand =
-      taskRun.payloadKind === TaskPayloadKind.SnapshotResume ? 'resume' : 'run';
-    const args = [workerCommand, taskRun.id.toString()];
+    const args = getWorkerLaunchArgs(taskRun, machine.machineId);
     await recordMutation({
       provider: 'box',
       operation: 'run_command',

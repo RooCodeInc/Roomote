@@ -25,6 +25,7 @@ type BoxLifecycleClient = Pick<
   | 'vendor'
   | 'createInstance'
   | 'resumeFromStandby'
+  | 'resumeFromSnapshot'
   | 'writeFiles'
   | 'runCommand'
   | 'getInstanceDomains'
@@ -55,8 +56,22 @@ export interface BoxMachine {
 }
 
 export type BoxLaunchOptions =
-  | { launchMode: 'fresh'; resumeHandle?: undefined }
-  | { launchMode: 'task_standby'; resumeHandle: string };
+  | {
+      launchMode: 'fresh';
+      resumeHandle?: undefined;
+      sourceSnapshotId?: undefined;
+    }
+  | {
+      launchMode: 'task_standby';
+      resumeHandle: string;
+      sourceSnapshotId?: undefined;
+    }
+  | {
+      /** Fork a named snapshot (template box) into a fresh box. */
+      launchMode: 'environment_snapshot' | 'task_snapshot';
+      sourceSnapshotId: string;
+      resumeHandle?: undefined;
+    };
 
 export type CreateBoxMachineParams = CreateBoxMachineOptions & BoxLaunchOptions;
 
@@ -67,8 +82,16 @@ export async function createBoxMachine(
   const proxyPorts =
     options.proxyPorts ?? generateProxyPorts(options.namedPorts);
   const ports = getExposedPorts(options.namedPorts, proxyPorts);
+  const forkSnapshotId =
+    options.launchMode === 'environment_snapshot' ||
+    options.launchMode === 'task_snapshot'
+      ? options.sourceSnapshotId
+      : undefined;
+  // Fresh boxes need the full worker install; forks restore a template that
+  // already holds one but still get refreshed so the shipped worker matches
+  // the current runtime protocol. Standby resumes reuse the same box as-is.
   const release =
-    options.launchMode === 'fresh'
+    options.launchMode !== 'task_standby'
       ? options.localTarballPath
         ? loadLocalWorkerReleaseWithVersion(options.localTarballPath)
         : await getWorkerRelease()
@@ -91,17 +114,28 @@ export async function createBoxMachine(
 
   const operation = options.resumeHandle
     ? 'resume_from_standby'
-    : 'create_instance';
+    : forkSnapshotId
+      ? 'resume_from_snapshot'
+      : 'create_instance';
+  const operationLabel = options.resumeHandle
+    ? 'resumeFromStandby'
+    : forkSnapshotId
+      ? 'resumeFromSnapshot'
+      : 'createInstance';
+  const mutationSourceSnapshotId =
+    options.resumeHandle ?? forkSnapshotId ?? null;
   await options.onMutation?.({
     provider: 'box',
     operation,
     eventType: 'started',
     message: options.resumeHandle
       ? `Calling resumeFromStandby for Box ${options.resumeHandle}.`
-      : 'Calling createInstance for Box.',
+      : forkSnapshotId
+        ? `Calling resumeFromSnapshot for Box from template ${forkSnapshotId}.`
+        : 'Calling createInstance for Box.',
     details: {
       launchMode: options.launchMode as ComputeProviderLaunchMode,
-      sourceSnapshotId: options.resumeHandle ?? null,
+      sourceSnapshotId: mutationSourceSnapshotId,
       ports,
     },
   });
@@ -114,6 +148,15 @@ export async function createBoxMachine(
       }
       created = await computeClient.resumeFromStandby({
         resumeHandle: options.resumeHandle,
+        signal: options.signal,
+      });
+    } else if (forkSnapshotId) {
+      created = await computeClient.resumeFromSnapshot({
+        sourceSnapshotId: forkSnapshotId,
+        idempotencyKey: options.idempotencyKey,
+        metadata: release
+          ? { workerReleaseTag: `worker-v${release.version}` }
+          : undefined,
         signal: options.signal,
       });
     } else {
@@ -130,10 +173,10 @@ export async function createBoxMachine(
       operation,
       eventType: 'completed',
       instanceId: created.instanceId,
-      message: `${options.resumeHandle ? 'resumeFromStandby' : 'createInstance'} completed for Box ${created.instanceId}.`,
+      message: `${operationLabel} completed for Box ${created.instanceId}.`,
       details: {
         launchMode: options.launchMode as ComputeProviderLaunchMode,
-        sourceSnapshotId: options.resumeHandle ?? null,
+        sourceSnapshotId: mutationSourceSnapshotId,
         ports,
       },
     });
@@ -142,10 +185,10 @@ export async function createBoxMachine(
       provider: 'box',
       operation,
       eventType: 'failed',
-      message: `${options.resumeHandle ? 'resumeFromStandby' : 'createInstance'} failed for Box.`,
+      message: `${operationLabel} failed for Box.`,
       details: {
         launchMode: options.launchMode as ComputeProviderLaunchMode,
-        sourceSnapshotId: options.resumeHandle ?? null,
+        sourceSnapshotId: mutationSourceSnapshotId,
         ports,
         error: serializeError(error).message,
       },
@@ -214,10 +257,11 @@ export async function createBoxMachine(
     throw error;
   }
 
+  const sourceSnapshotId = options.resumeHandle ?? forkSnapshotId;
   return {
     machineId: created.instanceId,
     proxyPorts,
-    ...(options.resumeHandle ? { sourceSnapshotId: options.resumeHandle } : {}),
+    ...(sourceSnapshotId ? { sourceSnapshotId } : {}),
     domain: (port) => {
       const domain = domains?.[String(port)];
       if (!domain) {

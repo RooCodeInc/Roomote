@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import {
   BOX_CAPABILITIES as BOX_CAPABILITIES_VALUE,
@@ -6,7 +6,6 @@ import {
   type ComputeProvider,
 } from '@roomote/types';
 
-import { UnsupportedComputeProviderOperationError } from '../errors';
 import { sleepWithSignal, throwIfAborted } from '../modal/abort';
 import type {
   BoxConfig,
@@ -53,6 +52,13 @@ export const BOX_CREATE_METADATA_KEYS = {
 } as const;
 
 const BOXES_PATH = '/boxes';
+const NAMED_SNAPSHOTS_PATH = '/named-snapshots';
+/**
+ * Prefix for Box named snapshots (templates) Roomote creates. Spawn code
+ * relies on it to tell a template name apart from a `bx_` box id when a
+ * SnapshotResume payload carries either.
+ */
+export const BOX_SNAPSHOT_NAME_PREFIX = 'roomote-snap-';
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_READINESS_TIMEOUT_MS = 5 * 60_000;
 const READ_RETRY_ATTEMPTS = 3;
@@ -86,6 +92,20 @@ interface BoxApiMachine {
 interface BoxApiCommandStart {
   processId?: number;
 }
+
+interface BoxApiNamedSnapshot {
+  name?: string;
+  boxId?: string;
+  status?: string;
+}
+
+const SNAPSHOT_PENDING_STATES = new Set([
+  'creating',
+  'pending',
+  'in_progress',
+  'queued',
+]);
+const SNAPSHOT_FAILED_STATES = new Set(['failed', 'error']);
 
 interface BoxApiCommandResult {
   processId?: number;
@@ -176,9 +196,21 @@ export class BoxClient implements ComputeProviderClient {
   public async createInstance(
     input: CreateInstanceInput,
   ): Promise<CreatedInstance> {
+    return this.launchInstance(input);
+  }
+
+  private async launchInstance(
+    input: CreateInstanceInput,
+    fromSnapshotName?: string,
+  ): Promise<CreatedInstance> {
     throwIfAborted(input.signal);
     const lifecycle = resolveLifecycleOptions(this.config, input.metadata);
-    const body = buildLifecycleBody(lifecycle);
+    const body = {
+      ...buildLifecycleBody(lifecycle),
+      // Deploy from a named snapshot (template). The fork does not inherit
+      // the source's lifetime, so the explicit ttlSeconds above still rules.
+      ...(fromSnapshotName ? { from: fromSnapshotName } : {}),
+    };
 
     // Public API v1 has no create idempotency primitive. Never retry this POST:
     // an abort can leave an unknown server-side result. Deterministic renaming
@@ -376,18 +408,69 @@ export class BoxClient implements ComputeProviderClient {
   }
 
   public async createSnapshot(
-    _input: CreateSnapshotInput,
+    input: CreateSnapshotInput,
   ): Promise<CreateSnapshotResult> {
-    throw new UnsupportedComputeProviderOperationError('box', 'createSnapshot');
+    throwIfAborted(input.signal);
+    const snapshotId = deriveBoxSnapshotName(input.instanceId);
+
+    await this.request('POST', NAMED_SNAPSHOTS_PATH, {
+      body: { boxId: input.instanceId, name: snapshotId },
+      signal: input.signal,
+    });
+    await this.waitForNamedSnapshot(snapshotId, input.signal);
+
+    // Persist before stopping the source: the template name is the only
+    // handle to the snapshot once the box is archived.
+    await input.onSnapshotCreated?.(snapshotId);
+
+    // Match the shared snapshot-destroys-sandbox contract. The named
+    // snapshot is the durable artifact, so discard the box's own tail state.
+    await this.stopAndWaitForArchive(input.instanceId, {
+      signal: input.signal,
+      force: true,
+    });
+
+    return { snapshotId };
   }
 
   public async resumeFromSnapshot(
-    _input: ResumeInstanceInput,
+    input: ResumeInstanceInput,
   ): Promise<CreatedInstance> {
-    throw new UnsupportedComputeProviderOperationError(
-      'box',
-      'resumeFromSnapshot',
-    );
+    const created = await this.launchInstance(input, input.sourceSnapshotId);
+    return { ...created, sourceSnapshotId: input.sourceSnapshotId };
+  }
+
+  private async waitForNamedSnapshot(
+    name: string,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const deadline = Date.now() + this.readinessTimeoutMs();
+    while (true) {
+      const response = await this.request<
+        | BoxApiNamedSnapshot[]
+        | { snapshots?: BoxApiNamedSnapshot[] }
+        | undefined
+      >('GET', NAMED_SNAPSHOTS_PATH, { signal, retryRead: true });
+      const snapshots = Array.isArray(response)
+        ? response
+        : (response?.snapshots ?? []);
+      const snapshot = snapshots.find((entry) => entry.name === name);
+      const status = snapshot?.status?.toLowerCase();
+
+      if (status && SNAPSHOT_FAILED_STATES.has(status)) {
+        throw new Error(
+          `Box named snapshot ${name} entered ${status} while waiting for completion`,
+        );
+      }
+      // Listed without an in-progress status means the template is usable.
+      if (snapshot && (!status || !SNAPSHOT_PENDING_STATES.has(status))) {
+        return;
+      }
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for Box named snapshot ${name}`);
+      }
+      await sleepWithSignal(this.pollIntervalMs(), signal);
+    }
   }
 
   private async monitorDetachedCommand(
@@ -908,4 +991,13 @@ function isBoxNotFound(error: unknown): boolean {
 export function deriveBoxMachineName(idempotencyKey: string): string {
   const digest = createHash('sha256').update(idempotencyKey).digest('hex');
   return `roomote-${digest.slice(0, 32)}`;
+}
+
+// Named-snapshot names are account-global, so make every capture unique; the
+// name doubles as the Roomote snapshot id.
+function deriveBoxSnapshotName(instanceId: string): string {
+  const digest = createHash('sha256')
+    .update(`${instanceId}:${Date.now()}:${randomUUID()}`)
+    .digest('hex');
+  return `${BOX_SNAPSHOT_NAME_PREFIX}${digest.slice(0, 16)}`;
 }

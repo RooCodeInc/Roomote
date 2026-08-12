@@ -22,7 +22,7 @@ describe('compute provider capabilities', () => {
     ).toBe(true);
   });
 
-  it('classifies Box as standby-resumable without snapshots', () => {
+  it('classifies Box as standby-resumable with template snapshots', () => {
     expect(getComputeProviderCapabilities('box')).toMatchObject({
       supportsCreateInstance: true,
       supportsDestroyInstance: true,
@@ -33,11 +33,11 @@ describe('compute provider capabilities', () => {
       supportsStandbyResume: true,
       supportsResume: true,
       supportsDockerProjects: true,
-      supportsSnapshots: false,
+      supportsSnapshots: true,
     });
     expect(standbyResumeCapableComputeProviders).toContain('box');
     expect(sleepCheckManagedComputeProviders).toContain('box');
-    expect(snapshotCapableComputeProviders).not.toContain('box');
+    expect(snapshotCapableComputeProviders).toContain('box');
     expect(getWorkerComputeProviderLabel('box')).toBe('box');
     expect(
       resolveConfiguredComputeProviderResources({ provider: 'box' }),

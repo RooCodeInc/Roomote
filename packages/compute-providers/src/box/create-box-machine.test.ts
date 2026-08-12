@@ -51,6 +51,7 @@ describe('createBoxMachine', () => {
         vendor: 'box',
         createInstance,
         resumeFromStandby: vi.fn(),
+        resumeFromSnapshot: vi.fn(),
         writeFiles,
         runCommand,
         getInstanceDomains,
@@ -84,6 +85,60 @@ describe('createBoxMachine', () => {
     expect(machine.domain(3000)).toBe('https://private.box.test');
   });
 
+  it('forks a template for environment_snapshot launches and refreshes the worker', async () => {
+    mockGetWorkerRelease.mockResolvedValue({
+      archive: Buffer.from('worker'),
+      tag: 'worker-vtest',
+      version: 'test',
+    });
+    const createInstance = vi.fn();
+    const resumeFromSnapshot = vi.fn().mockResolvedValue({
+      instanceId: 'box-fork',
+      sourceSnapshotId: 'roomote-snap-abc',
+    });
+    const writeFiles = vi.fn().mockResolvedValue(undefined);
+    const runCommand = vi.fn().mockResolvedValue({ exitCode: 0 });
+    const getInstanceDomains = vi.fn().mockResolvedValue({
+      domains: { '3000': 'https://fork.box.test' },
+    });
+
+    const machine = await createBoxMachine({
+      boxApiKey: 'key',
+      launchMode: 'environment_snapshot',
+      sourceSnapshotId: 'roomote-snap-abc',
+      idempotencyKey: 'task:456',
+      namedPorts: [{ name: 'web', port: 3000, proxied: false }],
+      computeClient: {
+        vendor: 'box',
+        createInstance,
+        resumeFromStandby: vi.fn(),
+        resumeFromSnapshot,
+        writeFiles,
+        runCommand,
+        getInstanceDomains,
+        destroyInstance: vi.fn(),
+        enterStandby: vi.fn(),
+      },
+    });
+
+    expect(createInstance).not.toHaveBeenCalled();
+    expect(resumeFromSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceSnapshotId: 'roomote-snap-abc',
+        idempotencyKey: 'task:456',
+      }),
+    );
+    // Forks still refresh the shipped worker runtime.
+    expect(runCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cmd: 'bash',
+        args: ['/tmp/roomote-bootstrap/install-worker.sh'],
+      }),
+    );
+    expect(machine.sourceSnapshotId).toBe('roomote-snap-abc');
+    expect(machine.domain(3000)).toBe('https://fork.box.test');
+  });
+
   it('resumes task standby without reinstalling the worker release', async () => {
     const resumeFromStandby = vi.fn().mockResolvedValue({
       instanceId: 'box-standby',
@@ -101,6 +156,7 @@ describe('createBoxMachine', () => {
         vendor: 'box',
         createInstance: vi.fn(),
         resumeFromStandby,
+        resumeFromSnapshot: vi.fn(),
         writeFiles,
         runCommand,
         getInstanceDomains: vi.fn(),
@@ -138,6 +194,7 @@ describe('createBoxMachine', () => {
           vendor: 'box',
           createInstance: vi.fn().mockResolvedValue({ instanceId: 'box-1' }),
           resumeFromStandby: vi.fn(),
+          resumeFromSnapshot: vi.fn(),
           writeFiles: vi.fn().mockRejectedValue(new Error('upload failed')),
           runCommand: vi.fn(),
           getInstanceDomains: vi.fn(),
@@ -172,6 +229,7 @@ describe('createBoxMachine', () => {
           vendor: 'box',
           createInstance: vi.fn().mockResolvedValue({ instanceId: 'box-1' }),
           resumeFromStandby: vi.fn(),
+          resumeFromSnapshot: vi.fn(),
           writeFiles,
           runCommand: vi.fn(),
           getInstanceDomains: vi.fn(),
@@ -201,6 +259,7 @@ describe('createBoxMachine', () => {
           vendor: 'box',
           createInstance: vi.fn().mockResolvedValue({ instanceId: 'box-1' }),
           resumeFromStandby: vi.fn(),
+          resumeFromSnapshot: vi.fn(),
           writeFiles: vi.fn(),
           runCommand: vi.fn().mockResolvedValue({ exitCode: 0 }),
           getInstanceDomains: vi
@@ -232,6 +291,7 @@ describe('createBoxMachine', () => {
           resumeFromStandby: vi
             .fn()
             .mockResolvedValue({ instanceId: 'box-standby' }),
+          resumeFromSnapshot: vi.fn(),
           writeFiles: vi.fn(),
           runCommand: vi.fn(),
           getInstanceDomains: vi

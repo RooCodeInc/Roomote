@@ -189,17 +189,70 @@ describe('spawnBoxWorker', () => {
     expect(() => resolveBoxMachineType(16_385)).toThrow(NonRetryableSpawnError);
   });
 
-  it('rejects environment snapshot runs before provisioning a Box', async () => {
-    await expect(
-      spawnBoxWorker(
-        taskRun({ payloadKind: TaskPayloadKind.SnapshotEnvironment }),
-        'auth-token',
-        config,
-      ),
-    ).rejects.toThrow('Box does not support Roomote environment snapshots');
+  it('runs environment snapshot jobs fresh with the worker snapshot command', async () => {
+    await spawnBoxWorker(
+      taskRun({ payloadKind: TaskPayloadKind.SnapshotEnvironment }),
+      'auth-token',
+      config,
+    );
 
-    expect(mockCreateBoxMachine).not.toHaveBeenCalled();
-    expect(mockCreateComputeProviderClient).not.toHaveBeenCalled();
+    expect(mockCreateBoxMachine).toHaveBeenCalledWith(
+      expect.objectContaining({ launchMode: 'fresh' }),
+    );
+    expect(mockRunCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        args: [
+          'snapshot',
+          '--task-run-id',
+          '321',
+          '--environment-id',
+          'env-1',
+          '--sandbox-id',
+          'box-1',
+        ],
+      }),
+    );
+  });
+
+  it('forks the environment template for standard runs with a snapshot', async () => {
+    mockGetNamedPortsForTaskRun.mockResolvedValue({
+      namedPorts: [{ name: 'web', port: 3000, proxied: false }],
+      environmentConfig: { ports: [{ name: 'web', port: 3000 }] },
+      environmentSnapshotId: 'roomote-snap-env1',
+    });
+
+    await spawnBoxWorker(taskRun(), 'auth-token', config);
+
+    expect(mockCreateBoxMachine).toHaveBeenCalledWith(
+      expect.objectContaining({
+        launchMode: 'environment_snapshot',
+        sourceSnapshotId: 'roomote-snap-env1',
+      }),
+    );
+    expect(mockRunCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ args: ['run', '321'] }),
+    );
+  });
+
+  it('forks a template on resume when the id is a named snapshot', async () => {
+    await spawnBoxWorker(
+      taskRun({
+        payloadKind: TaskPayloadKind.SnapshotResume,
+        sourceSnapshotId: 'roomote-snap-task9',
+      }),
+      'auth-token',
+      config,
+    );
+
+    expect(mockCreateBoxMachine).toHaveBeenCalledWith(
+      expect.objectContaining({
+        launchMode: 'task_snapshot',
+        sourceSnapshotId: 'roomote-snap-task9',
+      }),
+    );
+    expect(mockRunCommand).toHaveBeenCalledWith(
+      expect.objectContaining({ args: ['resume', '321'] }),
+    );
   });
 
   it('re-archives a resumed Box when launching its worker fails', async () => {
