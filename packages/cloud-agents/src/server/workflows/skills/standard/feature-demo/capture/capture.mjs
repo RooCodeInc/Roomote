@@ -118,6 +118,17 @@ const centerNorm = (r) => ({
   y: (r.y + r.h / 2) / VIEWPORT.h,
 });
 
+// Full normalized bounding box — the anchor for annotations. Resolved AFTER
+// the beat's scroll settles, because rects are viewport-relative: an anchor
+// is only valid for the scroll position it was measured at, which is why
+// annotations live strictly inside their beat's window.
+const boxNorm = (r) => ({
+  x: r.x / VIEWPORT.w,
+  y: r.y / VIEWPORT.h,
+  w: r.w / VIEWPORT.w,
+  h: r.h / VIEWPORT.h,
+});
+
 const timeline = {
   video: { path: 'recording.mp4', width: VIEWPORT.w, height: VIEWPORT.h },
   fps: 30,
@@ -125,6 +136,7 @@ const timeline = {
   cursorKeys: [{ t: 0, v: { x: 0.5, y: 1.1 } }],
   clicks: [],
   captions: [],
+  annotations: [],
   // Optional declarative caption styling from the demo script (position,
   // accent, pill, sizeScale); the renderer merges it over preset defaults.
   ...(script.captionStyle ? { captionStyle: script.captionStyle } : {}),
@@ -195,6 +207,21 @@ async function run() {
       sleep(beat.settleMs ?? 600); // scroll settles on screen
       const settled = now();
 
+      // `note` rides the beat: a highlight box (plus optional label chip)
+      // anchored to the beat's own element, shown for the beat's caption
+      // window. One per beat — it is a clarity device, not a diagram.
+      const noteBox = beat.note ? boxNorm(rect(beat.note.sel ?? beat.sel)) : null;
+      const pushNote = (start, end) => {
+        if (!noteBox) return;
+        timeline.annotations.push({
+          start: Math.round(start * 1000) / 1000,
+          end: Math.round(end * 1000) / 1000,
+          box: noteBox,
+          ...(beat.note.text ? { text: beat.note.text } : {}),
+          style: beat.note.style ?? 'callout',
+        });
+      };
+
       if (beat.caption) {
         const lineSeconds = narration
           ? narration.clips[lineIndex].durationSeconds
@@ -215,10 +242,16 @@ async function run() {
         }
         lineIndex += 1;
 
+        // The note breathes with the caption: appears a beat after the line
+        // starts (the voice names the subject, then the box lands on it).
+        pushNote(lineStart + 0.35, lineEnd + 0.25);
+
         const holdSeconds = Math.max(0.5, lineEnd + LINE_GAP - now());
         sleep(holdSeconds * 1000);
       } else {
-        sleep(beat.holdMs ?? 900);
+        const holdMs = beat.holdMs ?? 900;
+        pushNote(settled + 0.15, settled + holdMs / 1000 + 0.6);
+        sleep(holdMs);
       }
       continue;
     }
