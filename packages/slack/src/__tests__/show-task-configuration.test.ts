@@ -945,7 +945,7 @@ describe('Slack deleted-mention suppression', () => {
     },
   );
 
-  it('starts immediately when all repositories is the only fallback workspace option', async () => {
+  it('starts immediately when all repositories are the only fallback workspace option', async () => {
     environmentsFindManyMock.mockResolvedValue([]);
     routeTaskMock.mockResolvedValueOnce({
       status: 'fallback',
