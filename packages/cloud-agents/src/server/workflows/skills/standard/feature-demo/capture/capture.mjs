@@ -274,7 +274,10 @@ async function run() {
         sleep(holdSeconds * 1000);
       } else {
         const holdMs = beat.holdMs ?? 900;
-        pushNote(settled + 0.15, settled + holdMs / 1000 + 0.6);
+        // End AT the hold boundary: the next beat may scroll immediately,
+        // and the anchor is only valid for this scroll position. The
+        // renderer's 0.35s fade-out completes inside the hold.
+        pushNote(settled + 0.15, settled + holdMs / 1000);
         sleep(holdMs);
       }
       continue;
