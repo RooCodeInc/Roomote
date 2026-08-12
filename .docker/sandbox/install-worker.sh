@@ -192,7 +192,22 @@ throw new Error(`node-pty version metadata not found for ${resolvedEntry}`);
 }
 
 ensure_data_dir() {
-  [ ! -d "$DATA_DIR" ] && (mkdir -p "$DATA_DIR" || sudo mkdir -p "$DATA_DIR")
+  if [ ! -d "$DATA_DIR" ]; then
+    mkdir -p "$DATA_DIR" 2>/dev/null || sudo -n mkdir -p "$DATA_DIR"
+  fi
+
+  # Provider-managed images ship a writable $DATA_DIR; bring-your-own images
+  # (for example Box) may have it root-owned, so reclaim it when possible.
+  if [ ! -w "$DATA_DIR" ] &&
+    command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    echo "Making $DATA_DIR writable for $(id -un)"
+    sudo -n chown "$(id -u):$(id -g)" "$DATA_DIR"
+  fi
+
+  if [ ! -w "$DATA_DIR" ]; then
+    echo "Error: $DATA_DIR is not writable and non-interactive sudo is unavailable"
+    return 1
+  fi
 }
 
 install_from_release_archive() {
@@ -204,10 +219,10 @@ install_from_release_archive() {
     # Clear contents instead of removing directory (may be a mount point).
     rm -rf "$WORKER_DIR"/* "$WORKER_DIR"/.[!.]* 2>/dev/null || true
   else
-    mkdir -p "$WORKER_DIR"
+    mkdir -p "$WORKER_DIR" || return 1
   fi
 
-  tar -xzf "$archive_path" --strip-components=1 -C "$WORKER_DIR"
+  tar -xzf "$archive_path" --strip-components=1 -C "$WORKER_DIR" || return 1
 
   if [ -n "${WORKER_RELEASE_TAG:-}" ]; then
     printf "%s\n" "$WORKER_RELEASE_TAG" > "$WORKER_RELEASE_TAG_FILE"
@@ -223,15 +238,20 @@ install_from_release_archive() {
 }
 
 install_worker() {
-  ensure_data_dir
+  ensure_data_dir || return 1
 
   if [ -f "$WORKER_RELEASE_ARCHIVE" ]; then
-    install_from_release_archive "$WORKER_RELEASE_ARCHIVE"
+    install_from_release_archive "$WORKER_RELEASE_ARCHIVE" || return 1
   elif [ -f "$WORKER_DIR/dist/worker.js" ]; then
     echo "Worker already installed (v$(get_installed_version))"
   else
     echo "Error: No worker release archive found and worker not installed"
     echo "The controller should have uploaded the worker release archive."
+    return 1
+  fi
+
+  if [ ! -f "$WORKER_DIR/dist/worker.js" ]; then
+    echo "Error: worker install finished but $WORKER_DIR/dist/worker.js is missing"
     return 1
   fi
 }
@@ -295,7 +315,7 @@ ensure_node_pty() {
     fi
   fi
 
-  ensure_data_dir
+  ensure_data_dir || return 1
 
   if [ -n "$expected_version" ]; then
     package_spec="${package_spec}@${expected_version}"
@@ -316,6 +336,9 @@ ensure_node_pty() {
   echo "node-pty ${installed_version} installed and validated for $WORKER_DIR/dist/worker.js"
 }
 
-run_phase "worker_install" install_worker
-run_phase "worker_cli_install" install_worker_cli
-run_phase "node_pty_install" ensure_node_pty
+# Fail fast per phase: the script's exit code must reflect the first failing
+# phase, not the last phase, and callers invoke this via `bash <script>` so
+# the shebang's -e does not apply.
+run_phase "worker_install" install_worker || exit "$?"
+run_phase "worker_cli_install" install_worker_cli || exit "$?"
+run_phase "node_pty_install" ensure_node_pty || exit "$?"

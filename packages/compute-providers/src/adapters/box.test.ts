@@ -301,6 +301,12 @@ describe('BoxClient Public API v1', () => {
     expect(
       fetchImpl.mock.calls.some(([url]) => String(url).endsWith('/archive')),
     ).toBe(false);
+
+    // Standby preserves the snapshot; destroy discards with force.
+    const stopBodies = fetchImpl.mock.calls
+      .filter(([url]) => String(url).endsWith('/stop'))
+      .map(([, init]) => (init?.body ? JSON.parse(String(init.body)) : null));
+    expect(stopBodies).toEqual([null, { force: true }]);
   });
 
   it('treats a 404 while polling archive status as already cleaned up', async () => {
@@ -465,6 +471,63 @@ describe('BoxClient Public API v1', () => {
     expect(error.message).not.toContain('client-secret');
     expect(error.message).toContain('[redacted]');
     expect(error.metadata.errorMessage.length).toBeLessThanOrEqual(301);
+  });
+
+  it('retries provisioning 409s on mutations until the box comes up', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ code: 'machine_not_running' }, 409))
+      .mockResolvedValueOnce(jsonResponse({ code: 'box_starting' }, 409))
+      .mockResolvedValueOnce(
+        jsonResponse({ processId: 42, status: 'running' }),
+      );
+    const client = new BoxClient({
+      apiKey: 'key',
+      pollIntervalMs: 0,
+      fetchImpl,
+    });
+
+    const result = await client.runCommand({
+      instanceId: 'box-1',
+      cmd: 'echo',
+      args: ['hi'],
+      detached: true,
+    });
+    expect(result.commandId).toBe('42');
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(
+      fetchImpl.mock.calls.every(
+        ([url]) => url === `${DEFAULT_BOX_API_BASE_URL}/boxes/box-1/commands`,
+      ),
+    ).toBe(true);
+  });
+
+  it('does not retry non-provisioning 409s', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse({ code: 'conflict' }, 409));
+    const client = new BoxClient({
+      apiKey: 'key',
+      pollIntervalMs: 0,
+      fetchImpl,
+    });
+
+    await expect(
+      client.runCommand({ instanceId: 'box-1', cmd: 'echo' }),
+    ).rejects.toThrow('failed with status 409 (conflict)');
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it('maps provisioning-phase states to pending', async () => {
+    for (const state of ['box_starting', 'machine_not_running']) {
+      const fetchImpl = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(jsonResponse({ id: 'box-1', state }));
+      const client = new BoxClient({ apiKey: 'key', fetchImpl });
+      await expect(
+        client.getInstanceStatus({ instanceId: 'box-1' }),
+      ).resolves.toMatchObject({ status: 'pending' });
+    }
   });
 
   it('rejects snapshot operations', async () => {

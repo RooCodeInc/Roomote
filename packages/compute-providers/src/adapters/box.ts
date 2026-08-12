@@ -54,6 +54,14 @@ const PENDING_MACHINE_STATES = new Set([
   'provisioned',
   'cloning',
   'init',
+  'box_starting',
+  'machine_not_running',
+]);
+// Commands sent while a box is provisioning are refused with a retryable 409
+// carrying one of these codes (per the Box platform guide).
+const PROVISIONING_CONFLICT_CODES = new Set([
+  'box_starting',
+  'machine_not_running',
 ]);
 const VALID_MACHINE_TYPES = new Set(['small', 'default', 'large']);
 
@@ -202,7 +210,9 @@ export class BoxClient implements ComputeProviderClient {
     } catch (error) {
       // Once create returns an ID, every later failure has a known cleanup
       // target, including failures after deterministic rename.
-      await this.stopAndWaitForArchive(knownInstanceId).catch(() => {});
+      await this.stopAndWaitForArchive(knownInstanceId, {
+        force: true,
+      }).catch(() => {});
       throw error;
     }
   }
@@ -212,14 +222,19 @@ export class BoxClient implements ComputeProviderClient {
   ): Promise<DestroyInstanceResult> {
     // Public API v1 currently exposes stop, not hard delete. Stop archives the
     // box and pauses billing, but does not permanently erase retained state.
-    await this.stopAndWaitForArchive(input.instanceId, input.signal);
+    await this.stopAndWaitForArchive(input.instanceId, {
+      signal: input.signal,
+      force: true,
+    });
     return {};
   }
 
   public async enterStandby(
     input: EnterStandbyInput,
   ): Promise<EnterStandbyResult> {
-    await this.stopAndWaitForArchive(input.instanceId, input.signal);
+    await this.stopAndWaitForArchive(input.instanceId, {
+      signal: input.signal,
+    });
     return { resumeHandle: input.instanceId };
   }
 
@@ -427,10 +442,17 @@ export class BoxClient implements ComputeProviderClient {
 
   private async stopAndWaitForArchive(
     instanceId: string,
-    signal?: AbortSignal,
+    options: { signal?: AbortSignal; force?: boolean } = {},
   ): Promise<void> {
+    const { signal, force } = options;
     try {
-      await this.request('POST', `${boxPath(instanceId)}/stop`, { signal });
+      // Stop refuses when the pre-stop snapshot fails; `force` stops anyway
+      // and discards writes since the last snapshot. Only discard paths
+      // (destroy) pass it — standby needs the snapshot to resume from.
+      await this.request('POST', `${boxPath(instanceId)}/stop`, {
+        signal,
+        ...(force ? { body: { force: true } } : {}),
+      });
     } catch (error) {
       if (isBoxNotFound(error)) return;
       throw error;
@@ -512,6 +534,7 @@ export class BoxClient implements ComputeProviderClient {
     } = {},
   ): Promise<T> {
     let attempt = 0;
+    let provisioningDeadline: number | undefined;
     while (true) {
       throwIfAborted(options.signal);
       let response: Response;
@@ -551,6 +574,24 @@ export class BoxClient implements ComputeProviderClient {
         }
       }
 
+      const errorPayload = await readErrorPayload(response);
+      const errorCode = readErrorPayloadField(errorPayload, 'code');
+
+      // Provisioning refusals are safe to retry for any method: the API
+      // rejected the request without acting on it. Poll until the box comes
+      // up, bounded by the same budget as explicit readiness waits.
+      if (
+        response.status === 409 &&
+        errorCode !== undefined &&
+        PROVISIONING_CONFLICT_CODES.has(errorCode)
+      ) {
+        provisioningDeadline ??= Date.now() + this.readinessTimeoutMs();
+        if (Date.now() < provisioningDeadline) {
+          await sleepWithSignal(this.pollIntervalMs(), options.signal);
+          continue;
+        }
+      }
+
       attempt += 1;
       if (
         options.retryRead &&
@@ -561,9 +602,7 @@ export class BoxClient implements ComputeProviderClient {
         continue;
       }
 
-      const errorPayload = await readErrorPayload(response);
       const headerRequestId = response.headers.get('x-request-id');
-      const errorCode = readErrorPayloadField(errorPayload, 'code');
       const errorMessage = readErrorPayloadField(errorPayload, 'message');
       throw new BoxApiError({
         method,
