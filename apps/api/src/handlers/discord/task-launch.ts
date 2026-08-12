@@ -2,6 +2,7 @@ import {
   ALL_REPOSITORIES,
   TaskPayloadKind,
   type QueuedCommunicationMessage,
+  type TaskGoalInput,
   type TaskInitiator,
   type TaskSpec,
 } from '@roomote/types';
@@ -361,6 +362,7 @@ export async function launchDiscordTask(input: {
   metadata: DiscordEventCommunicationMetadata;
   channel: DiscordChannelContext;
   workspace: DiscordWorkspaceSelection;
+  goal?: TaskGoalInput;
   /** `/new` in an existing task thread creates a sibling, never a second run in-place. */
   forceNewThread?: boolean;
   /**
@@ -493,6 +495,7 @@ export async function launchDiscordTask(input: {
       workflow: 'standard',
       surface: 'discord',
       trigger: 'message',
+      ...(input.goal ? { goal: input.goal } : {}),
     },
     {
       // Automation initiators derive the 'automation' launch class; forcing

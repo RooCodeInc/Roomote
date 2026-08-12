@@ -29,6 +29,10 @@ describe('TelegramCommunicationProvider', () => {
       commands: [
         { command: 'start', description: 'Show welcome and command help' },
         { command: 'new', description: 'Start a fresh task' },
+        {
+          command: 'goal',
+          description: 'Keep working toward an objective across turns',
+        },
       ],
     });
   });

@@ -3,7 +3,7 @@ import type {
   TelegramUpdateCommunicationMetadata,
 } from '@roomote/communication/telegram-update';
 import { Env } from '@roomote/env';
-import { ALL_REPOSITORIES } from '@roomote/types';
+import { ALL_REPOSITORIES, type TaskGoalInput } from '@roomote/types';
 import {
   buildTelegramRoutingContext,
   getTaskUrl,
@@ -81,6 +81,7 @@ export async function startNewTelegramTask(input: {
   /** Start a new task topic even when the command came from an older topic. */
   forceNewTopic?: boolean;
   workspaceOverride?: TelegramWorkspaceSelection;
+  goal?: TaskGoalInput;
 }) {
   const needsPrivateTopicCapability =
     input.message.chat.type.toLowerCase() === 'private' &&
@@ -173,6 +174,7 @@ export async function startNewTelegramTask(input: {
     metadata: input.metadata,
     workspace,
     createTopicForTask,
+    goal: input.goal ?? input.queuedMessage.goal,
   });
 
   return {

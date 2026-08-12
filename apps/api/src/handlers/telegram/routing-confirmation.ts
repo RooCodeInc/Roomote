@@ -518,6 +518,7 @@ async function launchPendingTelegramRoute(input: {
   await launchTelegramTask({
     launchOwnerUserId: input.pending.launchOwnerUserId,
     queuedMessage: input.pending.queuedMessage,
+    goal: input.pending.queuedMessage.goal,
     metadata: input.pending.metadata,
     workspace,
     createTopicForTask: input.pending.createTopicForTask,

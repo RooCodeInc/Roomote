@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { taskGoalInputSchema, taskGoalSchema } from './task-goal';
+
 export const communicationProviders = [
   'slack',
   'teams',
@@ -85,6 +87,8 @@ export const queuedCommunicationMessageSchema = z.object({
   threadTs: z.string().optional(),
   images: z.array(z.string()).optional(),
   formattedPrompt: z.string().optional(),
+  goalContext: taskGoalSchema.optional(),
+  goal: taskGoalInputSchema.optional(),
   turnPolicy: z
     .object({
       reactionsAllowed: z.boolean().optional(),

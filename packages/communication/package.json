@@ -9,6 +9,7 @@
     "./discord-event": "./src/discord-event.ts",
     "./discord-provider": "./src/discord-provider.ts",
     "./discord-request-user-input": "./src/discord-request-user-input.ts",
+    "./goal-command": "./src/goal-command.ts",
     "./messages": "./src/messages.ts",
     "./mock-discord-server": "./src/mock-discord-server.ts",
     "./provider": "./src/provider.ts",

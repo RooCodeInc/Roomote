@@ -14,6 +14,7 @@ import {
   RunStatus,
   TaskPayloadKind,
   type QueuedCommunicationMessage,
+  type TaskGoal,
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
   isCommunicationProvider,
@@ -1596,6 +1597,7 @@ export const runTask = async ({
       workflowPhase?: string;
       source?: string;
       clientMessageId?: string;
+      goalContext?: TaskGoal;
       userId?: string;
     }) => {
       if (deferredResumePromptRetryTimer) {

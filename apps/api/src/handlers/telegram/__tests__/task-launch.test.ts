@@ -57,6 +57,36 @@ describe('Telegram task topic launch', () => {
     rememberTelegramImplicitTopicMock.mockResolvedValue(undefined);
   });
 
+  it('passes Goal Mode into a fresh launch', async () => {
+    await launchTelegramTask({
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'telegram',
+        text: 'ship the release',
+        user: 'Ada',
+        userId: 'user-1',
+        ts: '1',
+        channel: '10',
+      },
+      metadata: {
+        communicationProvider: 'telegram',
+        communicationChannelId: '10',
+      },
+      workspace: {
+        repoForPayload: 'acme/repo',
+        workspaceDisplayName: 'repo',
+      },
+      goal: { objective: 'ship the release', maxContinuations: 5 },
+    });
+
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        goal: { objective: 'ship the release', maxContinuations: 5 },
+      }),
+      expect.anything(),
+    );
+  });
+
   it('uses a newly created topic as the task conversation', async () => {
     createTelegramForumTopicBestEffortMock.mockResolvedValue({
       threadId: '77',

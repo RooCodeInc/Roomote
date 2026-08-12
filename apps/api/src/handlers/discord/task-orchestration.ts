@@ -15,6 +15,7 @@ import {
   ALL_REPOSITORIES,
   type QueuedCommunicationMessage,
   type TaskInitiator,
+  type TaskGoalInput,
 } from '@roomote/types';
 
 import type { DiscordEventCommunicationMetadata } from '@roomote/communication/discord-event';
@@ -83,6 +84,7 @@ export async function startNewDiscordTask(input: {
   /** Absent only for automation-owned channel auto-start launches. */
   launchOwnerUserId?: string;
   queuedMessage: QueuedCommunicationMessage;
+  goal?: TaskGoalInput;
   metadata: DiscordEventCommunicationMetadata;
   channel: DiscordChannelContext;
   interaction?: {
@@ -366,6 +368,7 @@ export async function startNewDiscordTask(input: {
       channel: input.channel,
       workspace,
       forceNewThread: input.forceNewThread,
+      goal: input.goal ?? input.queuedMessage.goal,
       ...(kickoffMessage ? { kickoffMessage } : {}),
       ...(input.intakeAckPinned ? { intakeAckPinned: true } : {}),
     });

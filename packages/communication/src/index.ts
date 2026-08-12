@@ -2,6 +2,7 @@ export * from './chat-messages';
 export * from './discord-event';
 export * from './discord-provider';
 export * from './discord-request-user-input';
+export * from './goal-command';
 export * from './messages';
 export * from './provider';
 export * from './reaction-emoji';

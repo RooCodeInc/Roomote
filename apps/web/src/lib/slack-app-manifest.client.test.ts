@@ -77,6 +77,19 @@ describe('Slack app manifest builder', () => {
     });
   });
 
+  it('registers the Goal Mode slash command', () => {
+    const manifest = buildSlackAppManifest({
+      publicOrigin: 'https://roomote.example.com',
+    });
+
+    expect(manifest.features.slash_commands).toEqual([
+      expect.objectContaining({
+        command: '/goal',
+        url: 'https://roomote.example.com/api/webhooks/slack',
+      }),
+    ]);
+  });
+
   it('includes Slack OAuth callback URLs from the deployment origin', () => {
     const manifest = buildSlackAppManifest({
       publicOrigin: 'https://roomote.example.com/',

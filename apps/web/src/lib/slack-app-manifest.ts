@@ -68,6 +68,15 @@ export function buildSlackAppManifest({
         display_name: appName,
         always_online: true,
       },
+      slash_commands: [
+        {
+          command: '/goal',
+          description: 'Keep working toward an objective across multiple turns',
+          usage_hint: '<objective>',
+          should_escape: false,
+          url: webhookUrl,
+        },
+      ],
     },
     oauth_config: {
       redirect_urls: [

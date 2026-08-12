@@ -31,6 +31,8 @@ import {
   stripLeadingSlackProductMention,
 } from '@roomote/cloud-agents';
 import { setTrustedRunActingUserOnSuccess } from '@roomote/db/server';
+import { parseGoalCommand } from '@roomote/communication/goal-command';
+import { activateCommunicationGoal } from '@roomote/sdk/server/communication';
 
 import { apiLogger } from '../../../logging.js';
 import { retireSlackPrReviewOffersBestEffort } from '../pr-review-retire.js';
@@ -446,6 +448,15 @@ export async function processActiveRunMessage(
         getLatestSlackBotReply(event.channel, threadId),
       ]);
     const messageText = stripLeadingSlackProductMention(normalizedMessageText);
+    const goalCommand = parseGoalCommand(messageText);
+    if (goalCommand && !goalCommand.goal) {
+      await slack.postMessage({
+        channel: event.channel,
+        thread_ts: threadId,
+        text: 'Send an objective after the command — for example, `/goal ship the release`.',
+      });
+      return;
+    }
     const currentMessageFiles = resolveCurrentSlackMessageFiles({
       currentMessageTs: deliveryTs,
       eventFiles: event.files,
@@ -521,15 +532,40 @@ export async function processActiveRunMessage(
         runId: activeRun.id,
         senderUserId: userId,
       });
-      await queueSlackMessage(activeRun.id, {
-        text: messageTextWithVideoDescriptions,
+      const queuedGoalText = goalCommand?.goal
+        ? goalCommand.objective
+        : messageTextWithVideoDescriptions;
+      const queuedMessage = {
+        text: queuedGoalText,
         user: event.user,
         userId,
         ts: event.ts,
         images: allImages.length > 0 ? allImages : undefined,
-        formattedPrompt,
+        formattedPrompt: goalCommand?.goal ? undefined : formattedPrompt,
         turnPolicy,
-      });
+      };
+      if (goalCommand?.goal && activeRun.taskId) {
+        const activated = await activateCommunicationGoal({
+          taskId: activeRun.taskId,
+          goal: goalCommand.goal,
+          deliver: async (goalContext) => {
+            await queueSlackMessage(activeRun.id, {
+              ...queuedMessage,
+              goalContext,
+            });
+          },
+        });
+        if (!activated.success) {
+          await slack.postMessage({
+            channel: event.channel,
+            thread_ts: threadId,
+            text: 'Goal Mode could not be enabled because another activation is already in progress. Try again in a moment.',
+          });
+          return;
+        }
+      } else {
+        await queueSlackMessage(activeRun.id, queuedMessage);
+      }
       await clearLatestUserMessage(activeRun.id);
       // A typed reply supersedes any pending PR review offers in the thread.
       retireSlackPrReviewOffersBestEffort({

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   getTelegramNewTaskCommand,
+  getTelegramGoalCommand,
   getTelegramUpdateCallbackQuery,
   getTelegramUpdateCommunicationMetadata,
   getTelegramUpdateMessageReaction,
@@ -698,6 +699,28 @@ describe('Telegram update helpers', () => {
           parse(buildUpdate('just a regular message', 'private')),
         ),
       ).toBeNull();
+    });
+  });
+
+  describe('getTelegramGoalCommand', () => {
+    it('parses a private-chat goal command', () => {
+      const parsed = parseTelegramUpdate({
+        update_id: 700,
+        message: {
+          message_id: 701,
+          date: 1,
+          chat: { id: 1, type: 'private' },
+          text: '/goal ship the release',
+          entities: [{ type: 'bot_command', offset: 0, length: 5 }],
+        },
+      });
+      expect(parsed.success).toBe(true);
+      if (!parsed.success) return;
+
+      expect(getTelegramGoalCommand(parsed.data)).toEqual({
+        objective: 'ship the release',
+        goal: { objective: 'ship the release', maxContinuations: 5 },
+      });
     });
   });
 });
