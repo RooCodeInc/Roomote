@@ -334,6 +334,59 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     expect(body.result.ok).toBe(true);
   });
 
+  it('returns the SSE tool-call result without waiting for the stream to close', async () => {
+    // A Streamable HTTP server may keep the SSE connection open after
+    // delivering the matching response (to emit further notifications). The
+    // proxy must return the moment the id-matched frame arrives rather than
+    // block on stream closure, which would reintroduce the client-side hang.
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({
+      id: 'conn-x',
+      userId: null,
+      authConfig: { type: 'x', encryptedBearerToken: 'encrypted-token' },
+    });
+    mockDecrypt.mockReturnValue('x-app-only-token');
+
+    let cancelled = false;
+    const neverClosingSseBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            'event: message\n' +
+              'data: {"jsonrpc":"2.0","id":11,"result":{"ok":true}}\n\n',
+          ),
+        );
+        // Deliberately never call controller.close(): simulate a server that
+        // holds the SSE channel open after responding.
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(neverClosingSseBody, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp('x', createRunToken()),
+      createToolCallRequest(11, 'get_users_posts'),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('application/json');
+    const body = (await response.json()) as {
+      id: number;
+      result: { ok: boolean };
+    };
+    expect(body.id).toBe(11);
+    expect(body.result.ok).toBe(true);
+    expect(cancelled).toBe(true);
+  });
+
   it('strips Resend tool schema patterns for Azure-compatible tool calls', async () => {
     mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
     mockFindConnection.mockResolvedValue({ id: 'conn-1', userId: null });
