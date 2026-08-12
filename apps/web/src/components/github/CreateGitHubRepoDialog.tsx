@@ -225,7 +225,7 @@ export function CreateGitHubRepoDialog({
         <DialogHeader>
           <DialogTitle>Create environment from new repo</DialogTitle>
           <DialogDescription>
-            Create the repo on Github first, and Roomote will pick it up here.
+            Create the repo on GitHub first, and Roomote will pick it up here.
           </DialogDescription>
         </DialogHeader>
 
@@ -248,7 +248,7 @@ export function CreateGitHubRepoDialog({
             <div className="space-y-2 pl-6 mb-4">
               <div className="flex gap-2 items-center">
                 <p className="text-sm text-muted-foreground grow">
-                  Please create it now on Github and come back here when done.
+                  Please create it now on GitHub and come back here when done.
                 </p>
                 <Button asChild size="sm">
                   <a href={newRepoUrl} target="_blank" rel="noreferrer">

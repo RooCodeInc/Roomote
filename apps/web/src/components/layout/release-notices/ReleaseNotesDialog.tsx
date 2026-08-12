@@ -66,7 +66,7 @@ function ReleaseNotesBody({
     return (
       <p className="text-sm text-muted-foreground">
         Release notes for {toReleaseTag(version)} are unavailable right now. You
-        can view the details on Github.
+        can view the details on GitHub.
       </p>
     );
   }
