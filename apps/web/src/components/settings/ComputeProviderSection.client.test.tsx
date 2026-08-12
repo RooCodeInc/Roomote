@@ -168,6 +168,49 @@ describe('ComputeProviderSection provisioning states', () => {
 });
 
 describe('ComputeProviderSection advanced settings', () => {
+  const boxProvider: ComputeProviderStatus = {
+    provider: 'box',
+    label: 'Box',
+    description:
+      'Hosted task sandboxes with API-key setup, private previews, Docker projects, and same-sandbox task resume.',
+    supportsSnapshots: false,
+    fields: [
+      {
+        envVarName: 'BOX_API_KEY',
+        label: 'Box API Key',
+        secret: true,
+        category: 'credential',
+        runtimeSatisfied: false,
+        savedSatisfied: true,
+        defaultSatisfied: false,
+        setupProvisionable: false,
+      },
+      {
+        envVarName: 'BOX_MACHINE_TYPE',
+        label: 'Machine type',
+        required: false,
+        category: 'infrastructure',
+        advanced: true,
+        input: {
+          type: 'select',
+          options: [
+            { value: 'small', label: 'Small' },
+            { value: 'default', label: 'Default' },
+            { value: 'large', label: 'Large' },
+          ],
+        },
+        runtimeSatisfied: false,
+        savedSatisfied: false,
+        defaultSatisfied: false,
+        setupProvisionable: false,
+      },
+    ],
+    runtimeConfigSatisfied: false,
+    savedConfigSatisfied: true,
+    configSatisfied: true,
+    infrastructureSatisfied: true,
+  };
+
   const azureProvider: ComputeProviderStatus = {
     provider: 'azure',
     label: 'Azure Container Apps',
@@ -284,6 +327,17 @@ describe('ComputeProviderSection advanced settings', () => {
     expect(
       screen.getByText(/user-assigned managed identity/),
     ).toBeInTheDocument();
+  });
+
+  it('shows Box machine type choices', () => {
+    renderSection(null, boxProvider);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced settings' }));
+    fireEvent.click(screen.getByRole('combobox', { name: 'Machine type' }));
+
+    expect(screen.getByRole('option', { name: 'Small' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Default' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Large' })).toBeInTheDocument();
   });
 
   it('keeps provider overrides collapsed until requested and saves edits', () => {

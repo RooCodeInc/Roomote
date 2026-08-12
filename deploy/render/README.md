@@ -64,7 +64,9 @@ other PaaS paths, see [deploy/railway](../railway/README.md) and
   tier has no background workers, persistent disks, or pre-deploy
   commands).
 - A hosted sandbox account: [Modal](https://modal.com) (default),
-  [E2B](https://e2b.dev), or [Daytona](https://daytona.io).
+  [E2B](https://e2b.dev), [Daytona](https://daytona.io),
+  [Blaxel](https://blaxel.ai), [Box](https://box.computer), or
+  [Azure Container Apps](https://azure.microsoft.com/products/container-apps).
 - A model provider API key, for example OpenRouter (entered in the setup
   wizard, not at deploy time).
 
@@ -365,7 +367,7 @@ Live previews need a wildcard domain, which requires a domain you control:
 - **Costs** split three ways: Render hosts the control plane (web, api,
   controller, bullmq, Postgres, Key Value, MinIO — all on paid instance
   types), while task execution bills through your sandbox provider
-  (Modal/E2B/Daytona) and model usage bills through your model provider.
+  and model usage bills through your model provider.
   Upgrade individual instance types from the dashboard as usage grows.
 
 ## Maintaining the template

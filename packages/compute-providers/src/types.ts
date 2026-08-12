@@ -433,6 +433,23 @@ export interface BlaxelConfig {
   standbyTtlMs?: number;
 }
 
+export interface BoxConfig {
+  /** Box API bearer token (`BOX_API_KEY`). */
+  apiKey: string;
+  /** Box Public API v1 base URL (`BOX_API_BASE_URL`). */
+  boxApiBaseUrl?: string;
+  /** Active lifetime in milliseconds, converted to API ttlSeconds. */
+  timeoutMs?: number;
+  /** Box machine type (`BOX_MACHINE_TYPE`). */
+  machineType?: 'small' | 'default' | 'large';
+  /** Maximum time to wait for create/resume readiness. */
+  readinessTimeoutMs?: number;
+  /** Poll interval for machine and detached-command state. */
+  pollIntervalMs?: number;
+  /** Test seam; defaults to global fetch. */
+  fetchImpl?: typeof fetch;
+}
+
 export type ComputeProviderFactoryOptions = (
   | {
       provider: 'modal';
@@ -462,6 +479,10 @@ export type ComputeProviderFactoryOptions = (
   | {
       provider: 'blaxel';
       config?: BlaxelConfig;
+    }
+  | {
+      provider: 'box';
+      config?: BoxConfig;
     }
   | {
       provider: 'azure';

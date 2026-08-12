@@ -26,6 +26,9 @@ describe('SetupDocs', () => {
     expect(getSetupDocsPath('compute-config', { computeProvider: 'e2b' })).toBe(
       'providers/compute/e2b',
     );
+    expect(getSetupDocsPath('compute-config', { computeProvider: 'box' })).toBe(
+      'providers/compute/box',
+    );
     expect(getSetupDocsPath('env-vars', { modelProvider: 'vllm' })).toBe(
       'providers/inference/vllm',
     );

@@ -1,0 +1,83 @@
+---
+title: Box
+icon: 'cube'
+description: Run Roomote tasks in Box-hosted sandboxes.
+---
+
+Box is a hosted sandbox provider for running Roomote tasks away from the
+Roomote server.
+
+## When to use Box
+
+Use Box when:
+
+- task work should run on provider-managed machines
+- you want API-key-only setup without building a provider-side worker image,
+  template, or snapshot during Roomote setup
+- retaining the same stopped task sandbox for a follow-up is sufficient
+
+Box does not support Roomote environment snapshots. A retained Box can resume
+the task that created it, but it cannot be reused as an environment snapshot
+for unrelated tasks.
+
+## Configuration
+
+Add Box from **Settings > Sandboxes**, or provide:
+
+```sh
+DEFAULT_COMPUTE_PROVIDER=box
+BOX_API_KEY=...
+```
+
+Optional settings:
+
+```sh
+# Custom Box-compatible API endpoint
+BOX_API_BASE_URL=https://...
+# small, default, or large
+BOX_MACHINE_TYPE=default
+# Active sandbox timeout in milliseconds
+BOX_TIMEOUT_MS=...
+# Standby retention policy; 0 disables retained task sandboxes
+BOX_STANDBY_MAX_COUNT=...
+BOX_STANDBY_MAX_AGE_HOURS=...
+```
+
+These optional values are also available under **Settings > Sandboxes > Box >
+Advanced settings**. Process environment variables take precedence and appear
+as locked values in Settings.
+
+Roomote does not provision a worker artifact in your Box account during setup.
+Saving a valid API key is enough to configure the provider.
+
+## Cleanup and resume behavior
+
+Roomote stops and archives a Box when retaining it for task resume. This takes a
+filesystem snapshot, pauses billing, and preserves the Box for a later resume.
+Box's permanent-delete API is being reworked, so Roomote also uses stop/archive
+as its cleanup fallback for canceled, failed, and retention-expired
+tasks. Those archived Boxes remain in the provider account until permanent
+deletion is available.
+
+`BOX_STANDBY_MAX_COUNT` and `BOX_STANDBY_MAX_AGE_HOURS` bound how many stopped
+task sandboxes Roomote retains and for how long. This standby behavior preserves
+one task's machine; it is not a Roomote environment snapshot.
+
+## Verify setup
+
+1. Save the Box API key.
+2. Select Box as the default sandbox provider.
+3. Start a small task and confirm logs reach the task view.
+4. Send a follow-up while the task sandbox is retained and confirm it resumes.
+
+## Common issues
+
+- **Authentication fails.** Confirm `BOX_API_KEY` is active and belongs to the
+  expected Box account.
+- **The API cannot be reached.** Remove `BOX_API_BASE_URL` to use the provider
+  default, or verify the custom endpoint is reachable from the Roomote
+  deployment.
+- **A follow-up starts a new sandbox.** Check the standby count and age limits.
+  Roomote may no longer retain the previous Box as the task's resume target.
+- **No environment snapshot appears.** This is expected. Box does not support
+  Roomote environment snapshots.

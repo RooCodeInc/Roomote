@@ -12,6 +12,7 @@ export const computeProviders = [
   'daytona',
   'e2b',
   'blaxel',
+  'box',
   'roomote',
   'azure',
 ] as const;
@@ -38,6 +39,7 @@ export const snapshotCapableComputeProviders = [
 export const standbyResumeCapableComputeProviders = [
   'docker',
   'blaxel',
+  'box',
   'azure',
 ] as const satisfies readonly ComputeProvider[];
 
@@ -50,6 +52,7 @@ export const sleepCheckManagedComputeProviders = [
   ...snapshotCapableComputeProviders,
   'docker',
   'blaxel',
+  'box',
 ] as const satisfies readonly ComputeProvider[];
 
 export const isComputeProvider = (
@@ -144,6 +147,11 @@ export const BLAXEL_WORKER_RUNTIME_PATHS: RuntimePathsWithoutEnvironment =
     ...SANDBOX_WORKER_RUNTIME_PATHS,
   });
 
+export const BOX_WORKER_RUNTIME_PATHS: RuntimePathsWithoutEnvironment =
+  Object.freeze({
+    ...SANDBOX_WORKER_RUNTIME_PATHS,
+  });
+
 /**
  * Azure Container Apps sandboxes boot from a disk image baked from the same
  * worker OCI image as the other hosted providers, so they share the Vercel
@@ -169,6 +177,7 @@ const RUNTIME_PATHS_BY_ENVIRONMENT: Record<
   daytona: DAYTONA_WORKER_RUNTIME_PATHS,
   e2b: E2B_WORKER_RUNTIME_PATHS,
   blaxel: BLAXEL_WORKER_RUNTIME_PATHS,
+  box: BOX_WORKER_RUNTIME_PATHS,
   roomote: MODAL_WORKER_RUNTIME_PATHS,
   azure: AZURE_WORKER_RUNTIME_PATHS,
   local: LOCAL_WORKER_RUNTIME_PATHS,

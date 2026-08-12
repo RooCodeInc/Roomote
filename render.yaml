@@ -37,7 +37,8 @@
 #   the generated `MINIO_ROOT_PASSWORD` and the app services mirror it into
 #   `S3_SECRET_ACCESS_KEY` with a `fromService` reference.
 # - Render has no Docker socket, so task execution must use a hosted
-#   sandbox provider (modal by default; e2b and daytona also work).
+#   sandbox provider (modal by default; e2b, daytona, blaxel, box, and azure
+#   also work).
 #   EXCLUDED_COMPUTE_PROVIDERS=docker hides the unusable provider.
 # - Zero deploy-time inputs. Modal tokens and model provider keys are
 #   entered in the /setup wizard after first boot and stored encrypted in

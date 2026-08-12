@@ -515,6 +515,71 @@ export const SETUP_COMPUTE_PROVIDER_CATALOG = [
     ],
   },
   {
+    provider: 'box',
+    label: 'Box',
+    description:
+      'Hosted task sandboxes with API-key setup, private previews, Docker projects, and same-sandbox task resume.',
+    supportsSnapshots: false,
+    fields: [
+      {
+        envVarName: 'BOX_API_KEY',
+        label: 'Box API Key',
+        secret: true,
+        category: 'credential',
+      },
+      {
+        envVarName: 'BOX_API_BASE_URL',
+        label: 'Box API Base URL',
+        required: false,
+        category: 'infrastructure',
+        advanced: true,
+        helpText: 'Leave blank to use the Box service default.',
+      },
+      {
+        envVarName: 'BOX_MACHINE_TYPE',
+        label: 'Machine type',
+        required: false,
+        category: 'infrastructure',
+        advanced: true,
+        input: {
+          type: 'select',
+          options: [
+            { value: 'small', label: 'Small' },
+            { value: 'default', label: 'Default' },
+            { value: 'large', label: 'Large' },
+          ],
+          placeholder: 'Provider default',
+        },
+      },
+      {
+        envVarName: 'BOX_TIMEOUT_MS',
+        label: 'Active timeout (milliseconds)',
+        required: false,
+        category: 'infrastructure',
+        advanced: true,
+        input: { type: 'number', min: 1, step: 1 },
+        helpText: 'Leave blank to use the Box service default.',
+      },
+      {
+        envVarName: 'BOX_STANDBY_MAX_COUNT',
+        label: 'Maximum retained tasks',
+        required: false,
+        category: 'infrastructure',
+        advanced: true,
+        input: { type: 'number', min: 0, step: 1 },
+        helpText: 'Set to 0 to disable standby retention.',
+      },
+      {
+        envVarName: 'BOX_STANDBY_MAX_AGE_HOURS',
+        label: 'Retention period (hours)',
+        required: false,
+        category: 'infrastructure',
+        advanced: true,
+        input: { type: 'number', min: 1 },
+      },
+    ],
+  },
+  {
     provider: 'azure',
     label: 'Azure Container Apps',
     description:

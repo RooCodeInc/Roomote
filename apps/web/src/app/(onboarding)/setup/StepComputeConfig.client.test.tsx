@@ -263,6 +263,53 @@ describe('StepComputeConfig', () => {
     ).toBeDisabled();
   });
 
+  it('configures Box without requiring or provisioning a worker image', () => {
+    const box = {
+      ...buildHostedProvider('box'),
+      provider: 'box' as const,
+      label: 'Box',
+      comment: 'Preview',
+      description:
+        'Hosted task sandboxes with API-key setup, private previews, Docker projects, and same-sandbox task resume.',
+      supportsSnapshots: false,
+      fields: [
+        {
+          envVarName: 'BOX_API_KEY',
+          label: 'Box API Key',
+          secret: true,
+          category: 'credential' as const,
+          runtimeSatisfied: false,
+          savedSatisfied: true,
+          defaultSatisfied: false,
+          setupProvisionable: false,
+        },
+      ],
+      configSatisfied: true,
+      infrastructureSatisfied: true,
+    };
+
+    render(
+      <StepComputeConfig
+        computeSetup={buildComputeSetup({
+          workerImage: {
+            envVarName: 'DOCKER_WORKER_IMAGE',
+            label: 'Worker Image',
+            runtimeSatisfied: false,
+            savedSatisfied: false,
+            hostedImageRef: null,
+            hostedReady: false,
+          },
+          providers: [box],
+        })}
+        selectedProviderId="box"
+        onContinue={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('Roomote worker image')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /continue/i })).toBeEnabled();
+  });
+
   it('continues onboarding while a Blaxel image build runs in the background', async () => {
     mockSetupStatus.current = {
       setupNewState: {

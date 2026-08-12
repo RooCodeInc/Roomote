@@ -42,7 +42,10 @@ function buildProvider({
   return {
     provider,
     label,
-    description: `${label} description`,
+    description:
+      provider === 'box'
+        ? 'Hosted task sandboxes with API-key setup, private previews, Docker projects, and same-sandbox task resume.'
+        : `${label} description`,
     supportsSnapshots: provider !== 'docker',
     comment:
       provider === 'modal' || provider === 'e2b' ? 'Recommended' : undefined,
@@ -102,6 +105,14 @@ describe('StepComputeProvider', () => {
           label: 'Daytona',
           infrastructureSatisfied: false,
         }),
+        {
+          ...buildProvider({
+            provider: 'box',
+            label: 'Box',
+            infrastructureSatisfied: true,
+          }),
+          supportsSnapshots: false,
+        },
         buildProvider({
           provider: 'docker',
           label: 'Local Docker',
@@ -117,6 +128,7 @@ describe('StepComputeProvider', () => {
     expect(screen.getByRole('button', { name: /modal/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /e2b/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /daytona/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^box$/i })).toBeTruthy();
     expect(screen.getByRole('button', { name: /local docker/i })).toBeTruthy();
   });
 

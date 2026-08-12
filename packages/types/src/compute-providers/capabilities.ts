@@ -87,6 +87,19 @@ export const BLAXEL_CAPABILITIES: ComputeProviderCapabilities = {
   supportsDockerProjects: true,
 };
 
+export const BOX_CAPABILITIES: ComputeProviderCapabilities = {
+  supportsCreateInstance: true,
+  supportsDestroyInstance: true,
+  supportsCommandExecution: true,
+  supportsCommandOutputStreaming: true,
+  supportsCommandOutputLookup: true,
+  supportsSnapshots: false,
+  supportsStandbyResume: true,
+  supportsResume: true,
+  supportsFileWrite: true,
+  supportsDockerProjects: true,
+};
+
 export const AZURE_CAPABILITIES: ComputeProviderCapabilities = {
   supportsCreateInstance: true,
   supportsDestroyInstance: true,
@@ -120,6 +133,8 @@ export function getComputeProviderCapabilities(
       return E2B_CAPABILITIES;
     case 'blaxel':
       return BLAXEL_CAPABILITIES;
+    case 'box':
+      return BOX_CAPABILITIES;
     case 'azure':
       return AZURE_CAPABILITIES;
     default: {

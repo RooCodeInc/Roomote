@@ -7,6 +7,7 @@ import {
   deriveWorkerImageFromReleaseVersion,
   getDefaultAvailableComputeProvider,
   getComputeFieldValidationError,
+  getSetupComputeProvider,
   isAutoProvisionedComputeArtifactField,
   isComputeCredentialField,
   isComputeInfrastructureField,
@@ -224,6 +225,13 @@ describe('buildSetupComputeStatus', () => {
       'BLAXEL_STANDBY_MAX_COUNT',
       'BLAXEL_STANDBY_MAX_AGE_HOURS',
     ]);
+    expect(infrastructureByProvider.box).toEqual([
+      'BOX_API_BASE_URL',
+      'BOX_MACHINE_TYPE',
+      'BOX_TIMEOUT_MS',
+      'BOX_STANDBY_MAX_COUNT',
+      'BOX_STANDBY_MAX_AGE_HOURS',
+    ]);
     expect(infrastructureByProvider.docker).toEqual([
       'DOCKER_STANDBY_MAX_COUNT',
       'DOCKER_STANDBY_MAX_AGE_HOURS',
@@ -306,6 +314,7 @@ describe('buildSetupComputeStatus', () => {
       'e2b',
       'daytona',
       'blaxel',
+      'box',
       'azure',
       'docker',
     ]);
@@ -314,6 +323,26 @@ describe('buildSetupComputeStatus', () => {
     ).toBe(false);
     // The shared worker image is not hosted-ready with no configuration.
     expect(status.workerImage.hostedReady).toBe(false);
+  });
+
+  it('configures Box from its API key without provisioning a worker artifact', () => {
+    const status = buildSetupComputeStatus({
+      runtimeEnv: { BOX_API_KEY: 'box-key' },
+      persistedComputeConfig: { defaultProvider: 'box' },
+    });
+    const box = status.providers.find(
+      (provider) => provider.provider === 'box',
+    );
+
+    expect(box).toMatchObject({
+      supportsSnapshots: false,
+      runtimeConfigSatisfied: true,
+      configSatisfied: true,
+      infrastructureSatisfied: true,
+    });
+    expect(box?.fields.some(isAutoProvisionedComputeArtifactField)).toBe(false);
+    expect(box?.fields.every((field) => !field.setupProvisionable)).toBe(true);
+    expect(box?.description).toMatch(/same-sandbox task resume/i);
   });
 
   it('reports the shared worker image status', () => {
@@ -684,6 +713,9 @@ describe('buildSetupComputeStatus', () => {
       // Blaxel can build its sandbox image from the registry-qualified worker
       // image during setup, just like E2B and Daytona provision artifacts.
       blaxel: true,
+      // Box needs only its API key and never provisions a setup-time worker
+      // artifact, so infrastructure is always available.
+      box: true,
       // Azure bakes its sandbox disk image from the worker image during setup,
       // the same provisioning story as Daytona/E2B.
       azure: true,
@@ -718,6 +750,7 @@ describe('buildSetupComputeStatus', () => {
       daytona: false,
       e2b: false,
       blaxel: false,
+      box: true,
       azure: false,
       docker: true,
       roomote: false,
@@ -744,6 +777,7 @@ describe('buildSetupComputeStatus', () => {
       e2b: true,
       roomote: false,
       blaxel: false,
+      box: true,
       azure: false,
       docker: true,
     });
@@ -773,6 +807,19 @@ describe('getComputeFieldValidationError', () => {
     );
     expect(getComputeFieldValidationError(field, '1.5')).toBe(
       'Retention period (hours) must be a whole number.',
+    );
+  });
+
+  it('accepts only supported Box machine types', () => {
+    const machineType = getSetupComputeProvider('box').fields.find(
+      (candidate) => candidate.envVarName === 'BOX_MACHINE_TYPE',
+    )!;
+
+    expect(getComputeFieldValidationError(machineType, 'small')).toBeNull();
+    expect(getComputeFieldValidationError(machineType, 'default')).toBeNull();
+    expect(getComputeFieldValidationError(machineType, 'large')).toBeNull();
+    expect(getComputeFieldValidationError(machineType, 'xlarge')).toBe(
+      'Machine type must be one of: small, default, large.',
     );
   });
 });
@@ -1001,7 +1048,15 @@ describe('getDefaultAvailableComputeProvider', () => {
   it('falls back to docker when every provider is excluded', () => {
     expect(
       getDefaultAvailableComputeProvider(
-        new Set(['docker', 'modal', 'daytona', 'e2b', 'blaxel', 'azure']),
+        new Set([
+          'docker',
+          'modal',
+          'daytona',
+          'e2b',
+          'blaxel',
+          'box',
+          'azure',
+        ]),
       ),
     ).toBe('docker');
   });

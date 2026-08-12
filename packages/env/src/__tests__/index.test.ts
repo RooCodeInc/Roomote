@@ -127,6 +127,12 @@ describe('Env', () => {
       expect(env.DOCKER_STANDBY_MAX_AGE_HOURS).toBe(24);
       expect(env.BLAXEL_STANDBY_MAX_COUNT).toBe(25);
       expect(env.BLAXEL_STANDBY_MAX_AGE_HOURS).toBe(168);
+      expect(env.BOX_API_KEY).toBeUndefined();
+      expect(env.BOX_API_BASE_URL).toBeUndefined();
+      expect(env.BOX_MACHINE_TYPE).toBeUndefined();
+      expect(env.BOX_TIMEOUT_MS).toBeUndefined();
+      expect(env.BOX_STANDBY_MAX_COUNT).toBeUndefined();
+      expect(env.BOX_STANDBY_MAX_AGE_HOURS).toBeUndefined();
       expect(env.R_MODEL).toBeUndefined();
       expect(env.R_SMALL_MODEL).toBeUndefined();
       expect(env.R_VISION_MODEL).toBeUndefined();
@@ -266,6 +272,32 @@ describe('Env', () => {
         process.env.SKIP_ENV_VALIDATION = previousSkipEnvValidation;
       }
     }
+  });
+
+  it('parses Box sandbox provider configuration', () => {
+    const runtimeEnv = { ...process.env };
+    delete runtimeEnv.SKIP_ENV_VALIDATION;
+
+    const env = createRoomoteEnv({
+      ...runtimeEnv,
+      BOX_API_KEY: 'box-key',
+      BOX_API_BASE_URL: 'https://api.box.example.com',
+      BOX_MACHINE_TYPE: 'large',
+      BOX_TIMEOUT_MS: '900000',
+      BOX_STANDBY_MAX_COUNT: '12',
+      BOX_STANDBY_MAX_AGE_HOURS: '48',
+    });
+
+    expect(env.BOX_API_KEY).toBe('box-key');
+    expect(env.BOX_API_BASE_URL).toBe('https://api.box.example.com');
+    expect(env.BOX_MACHINE_TYPE).toBe('large');
+    expect(env.BOX_TIMEOUT_MS).toBe(900_000);
+    expect(env.BOX_STANDBY_MAX_COUNT).toBe(12);
+    expect(env.BOX_STANDBY_MAX_AGE_HOURS).toBe(48);
+
+    expect(() =>
+      createRoomoteEnv({ ...runtimeEnv, BOX_MACHINE_TYPE: 'xlarge' }),
+    ).toThrow();
   });
 
   it('derives DOCKER_WORKER_IMAGE from the baked release version', () => {

@@ -61,7 +61,9 @@ Compose paths in [SELF_HOSTING.md](../../SELF_HOSTING.md) instead.
 
 - A Railway account.
 - A hosted sandbox account: [Modal](https://modal.com) (default),
-  [E2B](https://e2b.dev), or [Daytona](https://daytona.io).
+  [E2B](https://e2b.dev), [Daytona](https://daytona.io),
+  [Blaxel](https://blaxel.ai), [Box](https://box.computer), or
+  [Azure Container Apps](https://azure.microsoft.com/products/container-apps).
 - A model provider API key, for example OpenRouter (entered in the setup
   wizard, not at deploy time).
 
@@ -414,7 +416,7 @@ domain, which requires a domain you control:
   from config.
 - **Costs** split three ways: Railway hosts the control plane (web, api, preview-proxy,
   controller, bullmq, Postgres, Redis, MinIO), while task execution bills
-  through your sandbox provider (Modal/E2B/Daytona) and model usage bills
+  through your hosted sandbox provider and model usage bills
   through your model provider.
 - **Node memory is capped by default.** Railway bills memory on usage, and
   an uncapped Node process lets collectable garbage accumulate for hours

@@ -52,6 +52,7 @@ const BRAND_ICON_BY_PROVIDER: Record<ComputeProvider, string> = {
   daytona: 'daytona',
   e2b: 'e2b',
   blaxel: 'blaxel',
+  box: 'box-sandbox',
   azure: 'azure',
   roomote: 'roomote',
 };
@@ -431,6 +432,11 @@ export function ComputeProviderSection({
                 Default
               </Badge>
             )}
+            {provider.comment ? (
+              <Badge variant="secondary" className="ml-2">
+                {provider.comment}
+              </Badge>
+            ) : null}
           </>
         }
       >

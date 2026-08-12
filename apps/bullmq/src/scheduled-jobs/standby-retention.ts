@@ -14,11 +14,11 @@ import { activeRunStatuses, type RunStatus } from '@roomote/types';
 
 const LOG_PREFIX = '[standbyRetention]';
 const MS_PER_HOUR = 60 * 60 * 1_000;
-const STANDBY_PROVIDERS = ['docker', 'blaxel', 'azure'] as const;
+const STANDBY_PROVIDERS = ['docker', 'blaxel', 'box', 'azure'] as const;
 
 // Providers whose retained handles are live instances that can (and must) be
 // re-suspended when found Running with no managing run.
-const RE_SUSPEND_PROVIDERS: readonly StandbyProvider[] = ['azure'];
+const RE_SUSPEND_PROVIDERS: readonly StandbyProvider[] = ['box', 'azure'];
 
 type StandbyProvider = (typeof STANDBY_PROVIDERS)[number];
 
@@ -47,6 +47,7 @@ export function selectStandbyEvictions(
 const DEFAULT_POLICY = {
   docker: { maxCount: 10, maxAgeHours: 24 },
   blaxel: { maxCount: 25, maxAgeHours: 168 },
+  box: { maxCount: 25, maxAgeHours: 168 },
   // Suspended ACA sandboxes cost almost nothing, so azure retention is generous.
   azure: { maxCount: 50, maxAgeHours: 720 },
 } as const;
@@ -70,12 +71,7 @@ export function resolveStandbyRetentionPolicy(
   maxCount: number;
   maxAgeMs: number;
 } {
-  const prefix =
-    provider === 'docker'
-      ? 'DOCKER'
-      : provider === 'azure'
-        ? 'AZURE'
-        : 'BLAXEL';
+  const prefix = provider.toUpperCase();
   const defaults = DEFAULT_POLICY[provider];
   const maxCount = parsePolicyInteger(
     env[`${prefix}_STANDBY_MAX_COUNT`],
@@ -103,6 +99,13 @@ async function createClient(provider: StandbyProvider) {
     return createComputeProviderClient({
       provider: 'azure',
       envFallback: await resolveComputeProviderEnvValues('azure'),
+    });
+  }
+
+  if (provider === 'box') {
+    return createComputeProviderClient({
+      provider: 'box',
+      envFallback: await resolveComputeProviderEnvValues('box'),
     });
   }
 

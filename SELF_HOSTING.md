@@ -745,6 +745,12 @@ BL_WORKSPACE=...
 # Optional prebuilt Blaxel image override
 BLAXEL_IMAGE=sandbox/roomote-worker:<version>
 
+# Box (preview; no setup-time worker artifact and no environment snapshots)
+DEFAULT_COMPUTE_PROVIDER=box
+BOX_API_KEY=...
+# Optional: BOX_API_BASE_URL, BOX_MACHINE_TYPE (small/default/large),
+# BOX_TIMEOUT_MS, BOX_STANDBY_MAX_COUNT, BOX_STANDBY_MAX_AGE_HOURS
+
 # Azure Container Apps (preview)
 DEFAULT_COMPUTE_PROVIDER=azure
 AZURE_SUBSCRIPTION_ID=...
