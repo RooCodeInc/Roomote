@@ -255,10 +255,8 @@ describe('slack reaction add MCP endpoint', () => {
     });
     expect(resolveChannelIdMock).toHaveBeenCalledWith('C123ABC456');
     expect(isAppInChannelMock).toHaveBeenCalledWith('C123ABC456');
-    expect(isUserInChannelMock).toHaveBeenCalledWith({
-      channelId: 'C123ABC456',
-      userId: 'UACTOR',
-    });
+    expect(isPublicChannelMock).toHaveBeenCalledWith('C123ABC456');
+    expect(isUserInChannelMock).not.toHaveBeenCalled();
     expect(addReactionMock).toHaveBeenCalledWith({
       channel: 'C123ABC456',
       timestamp: '111.222',
@@ -287,7 +285,7 @@ describe('slack reaction add MCP endpoint', () => {
     expect(body.error).toBe('Slack app is not a member of channel #eng.');
   });
 
-  it('rejects explicit reaction adds when the acting user has no linked Slack account', async () => {
+  it('allows public reaction adds when the acting user has no linked Slack account', async () => {
     vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockTaskRun() as never,
     );
@@ -306,14 +304,13 @@ describe('slack reaction add MCP endpoint', () => {
     });
     const body = (await response.json()) as JsonBody;
 
-    expect(response.status).toBe(403);
-    expect(body.error).toBe(
-      'Explicit Slack access requires the acting user to have a linked Slack account.',
-    );
-    expect(addReactionMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(body.channelId).toBe('C123');
+    expect(isUserInChannelMock).not.toHaveBeenCalled();
+    expect(addReactionMock).toHaveBeenCalled();
   });
 
-  it('rejects explicit reaction adds when the acting Slack user is not in the channel', async () => {
+  it('allows public reaction adds when the acting Slack user is not in the channel', async () => {
     vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockTaskRun() as never,
     );
@@ -330,11 +327,10 @@ describe('slack reaction add MCP endpoint', () => {
     });
     const body = (await response.json()) as JsonBody;
 
-    expect(response.status).toBe(403);
-    expect(body.error).toBe(
-      'Linked Slack user is not a member of channel #eng.',
-    );
-    expect(addReactionMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(body.channelId).toBe('C123');
+    expect(isUserInChannelMock).not.toHaveBeenCalled();
+    expect(addReactionMock).toHaveBeenCalled();
   });
 
   it('rejects bot-context explicit reaction adds for private channels', async () => {

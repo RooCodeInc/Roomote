@@ -256,10 +256,7 @@ describe('slack channel messages MCP endpoint', () => {
     expect(resolveChannelIdMock).toHaveBeenCalledWith('#eng');
     expect(isAppInChannelMock).toHaveBeenCalledWith('CENG');
     expect(isPublicChannelMock).toHaveBeenCalledWith('CENG');
-    expect(isUserInChannelMock).toHaveBeenCalledWith({
-      channelId: 'CENG',
-      userId: 'UACTOR',
-    });
+    expect(isUserInChannelMock).not.toHaveBeenCalled();
     expect(fetchChannelMessagesMock).toHaveBeenCalledWith({
       channel: 'CENG',
       oldest: '1775001600.000000',
@@ -268,6 +265,7 @@ describe('slack channel messages MCP endpoint', () => {
   });
 
   it('uses the originating Slack channel when channel is omitted', async () => {
+    resolveChannelIdMock.mockResolvedValue('C123');
     fetchChannelMessagesMock.mockResolvedValue([
       {
         ts: '1711929600.000000',
@@ -289,8 +287,10 @@ describe('slack channel messages MCP endpoint', () => {
       channel: 'C123',
       oldest: '1711929600.000000',
     });
-    expect(resolveChannelIdMock).not.toHaveBeenCalled();
+    expect(resolveChannelIdMock).toHaveBeenCalledWith('#c123');
+    expect(isAppInChannelMock).toHaveBeenCalledWith('C123');
     expect(isPublicChannelMock).toHaveBeenCalledWith('C123');
+    expect(isUserInChannelMock).not.toHaveBeenCalled();
   });
 
   it('rejects reversed time bounds', async () => {
@@ -305,7 +305,7 @@ describe('slack channel messages MCP endpoint', () => {
     expect(fetchChannelMessagesMock).not.toHaveBeenCalled();
   });
 
-  it('rejects explicit channel lookup when the acting Slack user is not in the channel', async () => {
+  it('allows public channel lookup when the acting Slack user is not in the channel', async () => {
     vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
       mockSlackTaskRun({
         type: 'standard',
@@ -313,6 +313,101 @@ describe('slack channel messages MCP endpoint', () => {
         payload: {},
       }) as never,
     );
+    isUserInChannelMock.mockResolvedValue(false);
+    fetchChannelMessagesMock.mockResolvedValue([]);
+
+    const response = await postChannelMessages(runToken, {
+      channel: 'eng',
+    });
+    const body = (await response.json()) as JsonBody;
+
+    expect(response.status).toBe(200);
+    expect(body.channelId).toBe('CENG');
+    expect(isUserInChannelMock).not.toHaveBeenCalled();
+    expect(fetchChannelMessagesMock).toHaveBeenCalledWith({ channel: 'CENG' });
+  });
+
+  it('allows public channel lookup when the acting user has no linked Slack account', async () => {
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockSlackTaskRun({
+        type: 'standard',
+        slackThreadTs: null,
+        payload: {},
+      }) as never,
+    );
+    vi.mocked(db.query.slackUserMappings.findFirst).mockResolvedValue(
+      null as never,
+    );
+    fetchChannelMessagesMock.mockResolvedValue([]);
+
+    const response = await postChannelMessages(runToken, {
+      channel: 'eng',
+    });
+    const body = (await response.json()) as JsonBody;
+
+    expect(response.status).toBe(200);
+    expect(body.channelId).toBe('CENG');
+    expect(isPublicChannelMock).toHaveBeenCalledWith('CENG');
+    expect(isUserInChannelMock).not.toHaveBeenCalled();
+    expect(fetchChannelMessagesMock).toHaveBeenCalledWith({ channel: 'CENG' });
+  });
+
+  it('rejects public channel lookup when the Slack app is not a member', async () => {
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockSlackTaskRun({
+        type: 'standard',
+        slackThreadTs: null,
+        payload: {},
+      }) as never,
+    );
+    isAppInChannelMock.mockResolvedValue(false);
+
+    const response = await postChannelMessages(runToken, {
+      channel: 'eng',
+    });
+    const body = (await response.json()) as JsonBody;
+
+    expect(response.status).toBe(403);
+    expect(body.error).toBe('Slack app is not a member of channel #eng.');
+    expect(isPublicChannelMock).not.toHaveBeenCalled();
+    expect(isUserInChannelMock).not.toHaveBeenCalled();
+    expect(fetchChannelMessagesMock).not.toHaveBeenCalled();
+  });
+
+  it('allows private channel lookup when the acting Slack user is a member', async () => {
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockSlackTaskRun({
+        type: 'standard',
+        slackThreadTs: null,
+        payload: {},
+      }) as never,
+    );
+    isPublicChannelMock.mockResolvedValue(false);
+    fetchChannelMessagesMock.mockResolvedValue([]);
+
+    const response = await postChannelMessages(runToken, {
+      channel: 'eng',
+    });
+    const body = (await response.json()) as JsonBody;
+
+    expect(response.status).toBe(200);
+    expect(body.channelId).toBe('CENG');
+    expect(isUserInChannelMock).toHaveBeenCalledWith({
+      channelId: 'CENG',
+      userId: 'UACTOR',
+    });
+    expect(fetchChannelMessagesMock).toHaveBeenCalledWith({ channel: 'CENG' });
+  });
+
+  it('rejects private channel lookup when the acting Slack user is not a member', async () => {
+    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
+      mockSlackTaskRun({
+        type: 'standard',
+        slackThreadTs: null,
+        payload: {},
+      }) as never,
+    );
+    isPublicChannelMock.mockResolvedValue(false);
     isUserInChannelMock.mockResolvedValue(false);
 
     const response = await postChannelMessages(runToken, {
@@ -327,70 +422,23 @@ describe('slack channel messages MCP endpoint', () => {
     expect(fetchChannelMessagesMock).not.toHaveBeenCalled();
   });
 
-  it('rejects explicit channel lookup when the acting user has no linked Slack account before checking visibility', async () => {
-    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
-      mockSlackTaskRun({
-        type: 'standard',
-        slackThreadTs: null,
-        payload: {},
-      }) as never,
-    );
-    vi.mocked(db.query.slackUserMappings.findFirst).mockResolvedValue(
-      null as never,
-    );
+  it('rejects private originating channels when the acting Slack user is not a member', async () => {
+    resolveChannelIdMock.mockResolvedValue('C123');
     isPublicChannelMock.mockResolvedValue(false);
+    isUserInChannelMock.mockResolvedValue(false);
 
-    const response = await postChannelMessages(runToken, {
-      channel: 'eng',
-    });
+    const response = await postChannelMessages(runToken, {});
     const body = (await response.json()) as JsonBody;
 
     expect(response.status).toBe(403);
     expect(body.error).toBe(
-      'Explicit Slack access requires the acting user to have a linked Slack account.',
+      'Linked Slack user is not a member of channel #c123.',
     );
-    expect(isPublicChannelMock).not.toHaveBeenCalled();
-    expect(fetchChannelMessagesMock).not.toHaveBeenCalled();
-  });
-
-  it('rejects explicit channel lookup for private channels', async () => {
-    vi.mocked(db.query.taskRuns.findFirst).mockResolvedValue(
-      mockSlackTaskRun({
-        type: 'standard',
-        slackThreadTs: null,
-        payload: {},
-      }) as never,
-    );
-    isPublicChannelMock.mockResolvedValue(false);
-
-    const response = await postChannelMessages(runToken, {
-      channel: 'eng',
-    });
-    const body = (await response.json()) as JsonBody;
-
-    expect(response.status).toBe(403);
-    expect(body.error).toBe(
-      'Slack channel message lookup is limited to public channels the app has joined.',
-    );
+    expect(isAppInChannelMock).toHaveBeenCalledWith('C123');
     expect(isUserInChannelMock).toHaveBeenCalledWith({
-      channelId: 'CENG',
+      channelId: 'C123',
       userId: 'UACTOR',
     });
-    expect(fetchChannelMessagesMock).not.toHaveBeenCalled();
-  });
-
-  it('rejects private originating Slack channels when channel is omitted', async () => {
-    isPublicChannelMock.mockResolvedValue(false);
-
-    const response = await postChannelMessages(runToken, {
-      oldest: '1711929600.000000',
-    });
-    const body = (await response.json()) as JsonBody;
-
-    expect(response.status).toBe(403);
-    expect(body.error).toBe(
-      'Slack channel message lookup is limited to public channels the app has joined.',
-    );
     expect(fetchChannelMessagesMock).not.toHaveBeenCalled();
   });
 
