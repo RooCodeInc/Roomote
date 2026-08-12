@@ -24,6 +24,11 @@ import {
   PRODUCT_NAME,
 } from '@roomote/types';
 import { Env, getDefaultDocsUrl } from '@roomote/env';
+import {
+  getLegacyRoomoteMcpResourceUrl,
+  getRoomoteMcpResourceUrl,
+  ROOMOTE_MCP_SCOPE,
+} from '@roomote/auth';
 import { z } from 'zod';
 
 import type { Variables } from '../../types';
@@ -42,6 +47,8 @@ import {
   type CommunicationLookupTaskRun,
 } from './communication-message-lookup';
 import { requireCommunicationLookupTaskRun } from './communication-lookup-run-context';
+import type { McpAuth } from './middleware';
+import { registerRoomoteMemberTools } from './roomote-member-tools';
 
 const ROOMOTE_MCP_SERVER_INFO = {
   name: 'roomote-router-mcp',
@@ -84,6 +91,7 @@ function getConfigRepositories(configValue: unknown): Array<{
 
 async function resolveRoomoteMcpAuth(
   authContext: Variables['authContext'],
+  options: { allowLegacyAudience: boolean },
 ): Promise<McpAuthContext> {
   if (!authContext) {
     throw new McpProxyError(
@@ -103,6 +111,22 @@ async function resolveRoomoteMcpAuth(
   }
 
   if (isUserToken(authContext)) {
+    return {
+      userId: authContext.userId,
+      tokenType: 'auth',
+    };
+  }
+
+  if (
+    authContext.tokenType === 'mcp' &&
+    [
+      getRoomoteMcpResourceUrl(Env.R_PUBLIC_URL ?? Env.R_APP_URL),
+      ...(options.allowLegacyAudience
+        ? [getLegacyRoomoteMcpResourceUrl(Env.TRPC_URL)]
+        : []),
+    ].includes(authContext.resource) &&
+    authContext.scopes.includes(ROOMOTE_MCP_SCOPE)
+  ) {
     return {
       userId: authContext.userId,
       tokenType: 'auth',
@@ -346,10 +370,15 @@ function createRoomoteTransport() {
 function createRoomoteMcpServer(
   auth: McpAuthContext,
   actingUserId: string | null,
+  memberAuth?: McpAuth,
 ) {
   const server = new McpServer(ROOMOTE_MCP_SERVER_INFO, {
     instructions: `Use get_about_me for Roomote platform, integration, and getting-started context. Use ${CHAT_MESSAGE_CONTEXT_TOOL.name} for surrounding context from the task communication channel or a referenced Slack/Discord message. Use ${CHAT_CHANNEL_MESSAGES_TOOL.name} for readable history from the task communication channel or an explicitly linked channel.`,
   });
+
+  if (memberAuth) {
+    registerRoomoteMemberTools(server, memberAuth);
+  }
 
   server.registerTool(
     'get_about_me',
@@ -477,49 +506,80 @@ function createRoomoteMcpServer(
   return server;
 }
 
-export const roomoteMcp = new Hono<{ Variables: Variables }>();
+function createRoomoteMcpRouter(options: {
+  memberTools: boolean;
+  allowLegacyAudience: boolean;
+}) {
+  const router = new Hono<{ Variables: Variables }>();
 
-roomoteMcp.on(['POST', 'GET', 'DELETE'], '/', async (c) => {
-  const transport = createRoomoteTransport();
+  router.on(['POST', 'GET', 'DELETE'], '/', async (c) => {
+    const transport = createRoomoteTransport();
 
-  try {
-    const auth = await resolveRoomoteMcpAuth(c.get('authContext'));
-    // Null means the job runs as the deployment service principal; the
-    // Roomote MCP tools are informational and operate on deployment-scoped
-    // data, so they support that case.
-    const actingUserId = await resolveActingUserIdOrNull(auth);
-    const server = createRoomoteMcpServer(auth, actingUserId);
+    try {
+      const rawAuth = c.get('authContext');
+      const auth = await resolveRoomoteMcpAuth(rawAuth, options);
+      // Null means the job runs as the deployment service principal; the
+      // context tools are informational and support that case. Member tools
+      // are only mounted on the public endpoint and retain the resolved user.
+      const actingUserId = await resolveActingUserIdOrNull(auth);
+      const memberAuth =
+        options.memberTools && rawAuth
+          ? {
+              userId: actingUserId ?? undefined,
+              authContext:
+                rawAuth.tokenType === 'mcp'
+                  ? {
+                      userId: rawAuth.userId,
+                      tokenType: 'auth' as const,
+                      version: rawAuth.version,
+                    }
+                  : rawAuth,
+            }
+          : undefined;
+      const server = createRoomoteMcpServer(auth, actingUserId, memberAuth);
 
-    await server.connect(transport);
-    return await transport.handleRequest(c.req.raw);
-  } catch (error) {
-    if (error instanceof McpProxyError) {
+      await server.connect(transport);
+      return await transport.handleRequest(c.req.raw);
+    } catch (error) {
+      if (error instanceof McpProxyError) {
+        return Response.json(
+          {
+            jsonrpc: '2.0',
+            id: null,
+            error: {
+              code: -32000,
+              message: error.message,
+            },
+          },
+          { status: error.httpStatus },
+        );
+      }
+
       return Response.json(
         {
           jsonrpc: '2.0',
           id: null,
           error: {
-            code: -32000,
-            message: error.message,
+            code: -32603,
+            message:
+              error instanceof Error
+                ? error.message
+                : 'Unknown Roomote MCP error',
           },
         },
-        { status: error.httpStatus },
+        { status: 500 },
       );
     }
+  });
 
-    return Response.json(
-      {
-        jsonrpc: '2.0',
-        id: null,
-        error: {
-          code: -32603,
-          message:
-            error instanceof Error
-              ? error.message
-              : 'Unknown Roomote MCP error',
-        },
-      },
-      { status: 500 },
-    );
-  }
+  return router;
+}
+
+export const roomoteMcp = createRoomoteMcpRouter({
+  memberTools: false,
+  allowLegacyAudience: true,
+});
+export const publicRoomoteMcp = createRoomoteMcpRouter({
+  memberTools: true,
+  allowLegacyAudience: false,
 });

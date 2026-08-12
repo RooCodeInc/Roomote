@@ -19,6 +19,7 @@
     "apps/docs/**",
     "apps/marketing/**",
     "packages/cloud-agents/src/server/workflows/skills/standard/agent-browser/**",
+    "packages/cloud-agents/src/server/workflows/skills/standard/feature-demo/**",
     "apps/codex-acp/target/**",
     "**/next-env.d.ts",
     "deploy/**"

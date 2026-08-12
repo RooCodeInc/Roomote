@@ -100,6 +100,17 @@ export const INSTANCE_SECRET_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Media-generation provider credentials. Task sandboxes reach these providers
+ * only through control-plane endpoints (e.g. /api/tts) that inject the key
+ * server-side, so the raw values must never enter a sandbox. The voice/model
+ * ids are not secrets, but a task never needs them either.
+ */
+export const MEDIA_PROVIDER_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
+  'R_ELEVENLABS_API_KEY',
+  'R_ELEVENLABS_VOICE_ID',
+]);
+
+/**
  * Declarative environment provisioning inputs, managed through the deployment
  * environment. Not secrets per se, but they are control-plane configuration
  * (the inline YAML may carry per-environment env values) and a task never
@@ -134,6 +145,7 @@ export const CONTROL_PLANE_ENV_VAR_NAMES: ReadonlySet<string> = new Set<string>(
     ...INTEGRATION_BOT_SECRET_ENV_VAR_NAMES,
     ...PROVIDER_IDENTIFIER_ENV_VAR_NAMES,
     ...INSTANCE_SECRET_ENV_VAR_NAMES,
+    ...MEDIA_PROVIDER_ENV_VAR_NAMES,
     ...DECLARATIVE_ENVIRONMENT_ENV_VAR_NAMES,
     ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   ],

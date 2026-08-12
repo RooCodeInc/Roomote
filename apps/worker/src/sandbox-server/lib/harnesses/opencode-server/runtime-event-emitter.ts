@@ -599,6 +599,7 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
     taskId: string,
     tokenUsage: Record<string, unknown> | undefined,
   ): void {
+    const completionId = `${taskId}:${this.nextTs()}`;
     this.emitTaskEvent({
       eventName: TaskEventName.TaskCompleted,
       payload: [
@@ -612,7 +613,7 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
           contextTokens: Number(tokenUsage?.contextTokens ?? 0),
         },
         {},
-        { isSubtask: false },
+        { isSubtask: false, completionId },
       ],
     });
   }

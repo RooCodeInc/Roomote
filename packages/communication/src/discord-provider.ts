@@ -1343,6 +1343,105 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     }
   }
 
+  /** Returns whether the guild's @everyone role can view the channel. */
+  async isChannelPublic(input: {
+    guildId: string;
+    channelId: string;
+  }): Promise<boolean | null> {
+    try {
+      const [roles, channel] = await Promise.all([
+        this.request<Array<{ id: string; permissions: string }>>(
+          'GET',
+          `/guilds/${input.guildId}/roles`,
+          undefined,
+          { retryNetworkErrors: true, retryServerErrors: true },
+        ),
+        this.request<DiscordApiChannel>(
+          'GET',
+          `/channels/${input.channelId}`,
+          undefined,
+          { retryNetworkErrors: true, retryServerErrors: true },
+        ),
+      ]);
+      const everyoneRole = roles.find((role) => role.id === input.guildId);
+      if (!everyoneRole) return null;
+
+      let value = BigInt(everyoneRole.permissions);
+      if ((value & DISCORD_PERMISSION_BITS.administrator) !== 0n) return true;
+      value = this.applyOverwrite(
+        value,
+        (channel.permission_overwrites ?? []).find(
+          (overwrite) => overwrite.id === input.guildId,
+        ),
+      );
+      return (value & DISCORD_PERMISSION_BITS.view_channel) !== 0n;
+    } catch (error) {
+      if (error instanceof DiscordApiError) {
+        if (error.status === 403 || error.status === 404) return false;
+      }
+      return null;
+    }
+  }
+
+  /**
+   * Returns cached destination ids that are both public and visible to a user,
+   * using one member, roles, and guild-channels snapshot for the whole guild.
+   */
+  async listPublicAccessibleChannelIds(input: {
+    guildId: string;
+    userId: string;
+    channelIds: string[];
+  }): Promise<string[]> {
+    if (input.channelIds.length === 0) return [];
+
+    try {
+      const [member, roles, channels] = await Promise.all([
+        this.request<{ roles?: string[] }>(
+          'GET',
+          `/guilds/${input.guildId}/members/${input.userId}`,
+          undefined,
+          { retryNetworkErrors: true, retryServerErrors: true },
+        ),
+        this.request<Array<{ id: string; permissions: string }>>(
+          'GET',
+          `/guilds/${input.guildId}/roles`,
+          undefined,
+          { retryNetworkErrors: true, retryServerErrors: true },
+        ),
+        this.request<DiscordApiChannel[]>(
+          'GET',
+          `/guilds/${input.guildId}/channels`,
+          undefined,
+          { retryNetworkErrors: true, retryServerErrors: true },
+        ),
+      ]);
+      const requestedIds = new Set(input.channelIds);
+      const memberRoleIds = new Set([input.guildId, ...(member.roles ?? [])]);
+
+      return channels.flatMap((channel) => {
+        if (!requestedIds.has(channel.id)) return [];
+        const publicPermissions = this.resolveEveryoneChannelPermissions({
+          guildId: input.guildId,
+          roles,
+          channel,
+        });
+        const userPermissions = this.resolveMemberChannelPermissions({
+          guildId: input.guildId,
+          userId: input.userId,
+          memberRoleIds,
+          roles,
+          channel,
+        });
+        return (publicPermissions & DISCORD_PERMISSION_BITS.view_channel) !==
+          0n && (userPermissions & DISCORD_PERMISSION_BITS.view_channel) !== 0n
+          ? [channel.id]
+          : [];
+      });
+    } catch {
+      return [];
+    }
+  }
+
   async editChannel(input: {
     channelId: string;
     name?: string;
@@ -1484,21 +1583,62 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
       ),
     ]);
 
-    const memberRoleIds = new Set([input.guildId, ...(member.roles ?? [])]);
-    let value = roles.reduce(
-      (result, role) =>
-        memberRoleIds.has(role.id) ? result | BigInt(role.permissions) : result,
-      0n,
-    );
+    return {
+      channel,
+      value: this.resolveMemberChannelPermissions({
+        guildId: input.guildId,
+        userId: input.userId,
+        memberRoleIds: new Set([input.guildId, ...(member.roles ?? [])]),
+        roles,
+        channel,
+      }),
+    };
+  }
+
+  private resolveEveryoneChannelPermissions(input: {
+    guildId: string;
+    roles: Array<{ id: string; permissions: string }>;
+    channel: DiscordApiChannel;
+  }): bigint {
+    const everyoneRole = input.roles.find((role) => role.id === input.guildId);
+    if (!everyoneRole) return 0n;
+    const value = BigInt(everyoneRole.permissions);
     if ((value & DISCORD_PERMISSION_BITS.administrator) !== 0n) {
-      value = Object.values(DISCORD_PERMISSION_BITS).reduce(
+      return Object.values(DISCORD_PERMISSION_BITS).reduce(
         (result, bit) => result | bit,
         value,
       );
-      return { channel, value };
+    }
+    return this.applyOverwrite(
+      value,
+      (input.channel.permission_overwrites ?? []).find(
+        (overwrite) => overwrite.id === input.guildId,
+      ),
+    );
+  }
+
+  private resolveMemberChannelPermissions(input: {
+    guildId: string;
+    userId: string;
+    memberRoleIds: Set<string>;
+    roles: Array<{ id: string; permissions: string }>;
+    channel: DiscordApiChannel;
+  }): bigint {
+    let value = input.roles.reduce(
+      (result, role) =>
+        input.memberRoleIds.has(role.id)
+          ? result | BigInt(role.permissions)
+          : result,
+      0n,
+    );
+    if ((value & DISCORD_PERMISSION_BITS.administrator) !== 0n) {
+      return Object.values(DISCORD_PERMISSION_BITS).reduce(
+        (result, bit) => result | bit,
+        value,
+      );
     }
 
-    const overwrites = channel.permission_overwrites ?? [];
+    const overwrites = input.channel.permission_overwrites ?? [];
     value = this.applyOverwrite(
       value,
       overwrites.find((overwrite) => overwrite.id === input.guildId),
@@ -1507,25 +1647,24 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
       (overwrite) =>
         overwrite.type === 0 &&
         overwrite.id !== input.guildId &&
-        memberRoleIds.has(overwrite.id),
+        input.memberRoleIds.has(overwrite.id),
     );
-    const roleDeny = roleOverwrites.reduce(
-      (result, overwrite) => result | BigInt(overwrite.deny),
-      0n,
-    );
-    const roleAllow = roleOverwrites.reduce(
-      (result, overwrite) => result | BigInt(overwrite.allow),
-      0n,
-    );
-    value = (value & ~roleDeny) | roleAllow;
-    value = this.applyOverwrite(
+    value =
+      (value &
+        ~roleOverwrites.reduce(
+          (result, overwrite) => result | BigInt(overwrite.deny),
+          0n,
+        )) |
+      roleOverwrites.reduce(
+        (result, overwrite) => result | BigInt(overwrite.allow),
+        0n,
+      );
+    return this.applyOverwrite(
       value,
       overwrites.find(
         (overwrite) => overwrite.type === 1 && overwrite.id === input.userId,
       ),
     );
-
-    return { channel, value };
   }
 
   private applyOverwrite(

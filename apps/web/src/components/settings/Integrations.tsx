@@ -25,17 +25,21 @@ import {
   useDisconnectMcp,
   useGrafanaConnection,
   useGranolaConnection,
+  useElevenLabsConnection,
   useDeploymentMcpEnablements,
   useMcpOauthReadiness,
   useSaveAsanaConnection,
   useSaveGrafanaConnection,
   useSaveGranolaConnection,
+  useSaveElevenLabsConnection,
   useSaveSnowflakeConnection,
   useSaveVercelConnection,
+  useSaveXConnection,
   useSetDeploymentMcpEnabled,
   useSnowflakeConnection,
   useUserMcpConnections,
   useVercelConnection,
+  useXConnection,
 } from '@/hooks/mcp-connections';
 import { useAuthorizedUser } from '@/hooks/useUser';
 import {
@@ -48,8 +52,10 @@ import {
   saveAsanaConnectionSchema,
   saveGrafanaConnectionSchema,
   saveGranolaConnectionSchema,
+  saveElevenLabsConnectionSchema,
   saveSnowflakeConnectionSchema,
   saveVercelConnectionSchema,
+  saveXConnectionSchema,
 } from '@/types';
 
 import {
@@ -89,6 +95,8 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to inspect dashboards, alert rules, live alert state, annotations, and data sources.',
   granola:
     'Roomote will use one deployment-wide Granola connection to browse meeting notes, transcripts, decisions, and action items.',
+  elevenlabs:
+    'Roomote will use one deployment-wide ElevenLabs connection to narrate feature-demo videos. The key stays on the control plane; agents get no ElevenLabs tools.',
   github:
     'Roomote will be able to inspect PRs, issues, and repository context.',
   jira: 'Roomote will be able to inspect Jira issues, workflows, and JQL search results.',
@@ -114,6 +122,7 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to save shared memories and recall context from earlier tasks.',
   vercel:
     'Roomote will be able to inspect Vercel teams, projects, deployments, logs, and domain availability.',
+  x: 'Roomote will be able to search public X posts and look up users, trends, and news. The app-only token is read-only; posting and other account actions stay unavailable.',
   zero: 'Roomote will be able to authenticate the workspace Zero connection so agents can discover and pay for external capabilities.',
 };
 
@@ -173,6 +182,16 @@ type GranolaFormState = {
   apiKey: string;
 };
 
+type ElevenLabsFormState = {
+  apiKey: string;
+  voiceId: string;
+};
+
+type ElevenLabsConnectionData = {
+  authStatus?: 'pending' | 'authenticated' | 'error' | null;
+  voiceId?: string;
+};
+
 type GrafanaFormState = {
   baseUrl: string;
   serviceAccountToken: string;
@@ -181,6 +200,10 @@ type GrafanaFormState = {
 type VercelFormState = {
   accessToken: string;
   defaultTeamIdOrSlug: string;
+};
+
+type XFormState = {
+  bearerToken: string;
 };
 
 type VercelConnectionData = {
@@ -215,6 +238,26 @@ function buildEmptyGranolaForm(): GranolaFormState {
   };
 }
 
+function buildEmptyElevenLabsForm(): ElevenLabsFormState {
+  return {
+    apiKey: '',
+    voiceId: '',
+  };
+}
+
+function buildElevenLabsForm(
+  connection: ElevenLabsConnectionData | null | undefined,
+): ElevenLabsFormState {
+  if (!connection) {
+    return buildEmptyElevenLabsForm();
+  }
+
+  return {
+    apiKey: '',
+    voiceId: connection.voiceId ?? '',
+  };
+}
+
 function buildEmptyGrafanaForm(): GrafanaFormState {
   return {
     baseUrl: '',
@@ -226,6 +269,26 @@ function buildEmptyVercelForm(): VercelFormState {
   return {
     accessToken: '',
     defaultTeamIdOrSlug: '',
+  };
+}
+
+function buildEmptyXForm(): XFormState {
+  return {
+    bearerToken: '',
+  };
+}
+
+function getXFieldErrors(
+  result: ReturnType<typeof saveXConnectionSchema.safeParse>,
+): Partial<Record<keyof XFormState, string[]>> {
+  if (result.success) {
+    return {};
+  }
+
+  const fieldErrors = result.error.flatten().fieldErrors;
+
+  return {
+    bearerToken: fieldErrors.bearerToken,
   };
 }
 
@@ -288,6 +351,21 @@ function getGranolaFieldErrors(
 
   return {
     apiKey: fieldErrors.apiKey,
+  };
+}
+
+function getElevenLabsFieldErrors(
+  result: ReturnType<typeof saveElevenLabsConnectionSchema.safeParse>,
+): Partial<Record<keyof ElevenLabsFormState, string[]>> {
+  if (result.success) {
+    return {};
+  }
+
+  const fieldErrors = result.error.flatten().fieldErrors;
+
+  return {
+    apiKey: fieldErrors.apiKey,
+    voiceId: fieldErrors.voiceId,
   };
 }
 
@@ -411,7 +489,10 @@ function buildAdminConfiguredIntegrationItem({
           }
         : undefined,
     secondaryAction:
-      canManageTools && enabled && integration.serverMode !== 'native'
+      canManageTools &&
+      enabled &&
+      integration.serverMode !== 'native' &&
+      integration.serverMode !== 'credential_only'
         ? {
             label: 'Manage tools',
             ariaLabel: `Manage ${integration.name} tools`,
@@ -729,7 +810,16 @@ function AsanaConnectionFields({
         />
         <p className="text-sm text-muted-foreground">
           Works with both Personal Access Tokens and Service Account tokens.
-          Generate a PAT in Asana at https://app.asana.com/0/my-apps.
+          Generate a PAT in Asana at{' '}
+          <a
+            href="https://app.asana.com/0/my-apps"
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary underline hover:no-underline"
+          >
+            app.asana.com/0/my-apps
+          </a>
+          .
         </p>
         {allowBlankToken ? (
           <p className="text-sm text-muted-foreground">
@@ -739,6 +829,71 @@ function AsanaConnectionFields({
         {fieldErrors.accessToken ? (
           <p className="text-sm text-destructive">
             {fieldErrors.accessToken[0]}
+          </p>
+        ) : null}
+      </div>
+      {formError ? (
+        <p className="text-sm text-destructive">{formError}</p>
+      ) : null}
+    </>
+  );
+}
+
+function XConnectionFields({
+  form,
+  fieldErrors,
+  formError,
+  allowBlankToken,
+  onFieldChange,
+}: {
+  form: XFormState;
+  fieldErrors: Partial<Record<keyof XFormState, string[]>>;
+  formError: string | null;
+  allowBlankToken: boolean;
+  onFieldChange: (field: keyof XFormState, value: string) => void;
+}) {
+  const fieldClassName =
+    'mt-2 w-full border-border/70 bg-background data-[invalid=true]:border-destructive';
+
+  return (
+    <>
+      <div className="space-y-2">
+        <Label htmlFor="x-bearer-token">X App-only Bearer Token</Label>
+        <Input
+          id="x-bearer-token"
+          type="password"
+          placeholder="AAAAAAAAAAAAAAAAAAAAA..."
+          value={form.bearerToken}
+          onChange={(event) => onFieldChange('bearerToken', event.target.value)}
+          data-invalid={fieldErrors.bearerToken ? 'true' : undefined}
+          className={fieldClassName}
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          data-1p-ignore
+        />
+        <p className="text-sm text-muted-foreground">
+          Generate it at{' '}
+          <a
+            href="https://console.x.com/"
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary underline hover:no-underline"
+          >
+            console.x.com
+          </a>{' '}
+          under Apps, in your app&apos;s Keys and tokens tab. App-only bearer
+          tokens give read-only access to public X data; posting and other
+          account actions stay unavailable. Access depends on your X API plan.
+        </p>
+        {allowBlankToken ? (
+          <p className="text-sm text-muted-foreground">
+            Leave blank to keep the existing token.
+          </p>
+        ) : null}
+        {fieldErrors.bearerToken ? (
+          <p className="text-sm text-destructive">
+            {fieldErrors.bearerToken[0]}
           </p>
         ) : null}
       </div>
@@ -799,6 +954,82 @@ function GranolaConnectionFields({
         ) : null}
         {fieldErrors.apiKey ? (
           <p className="text-sm text-destructive">{fieldErrors.apiKey[0]}</p>
+        ) : null}
+      </div>
+      {formError ? (
+        <p className="text-sm text-destructive">{formError}</p>
+      ) : null}
+    </>
+  );
+}
+
+function ElevenLabsConnectionFields({
+  form,
+  fieldErrors,
+  formError,
+  allowBlankApiKey,
+  onFieldChange,
+}: {
+  form: ElevenLabsFormState;
+  fieldErrors: Partial<Record<keyof ElevenLabsFormState, string[]>>;
+  formError: string | null;
+  allowBlankApiKey: boolean;
+  onFieldChange: (field: keyof ElevenLabsFormState, value: string) => void;
+}) {
+  const fieldClassName =
+    'mt-2 w-full border-border/70 bg-background data-[invalid=true]:border-destructive';
+
+  return (
+    <>
+      <div className="space-y-2">
+        <Label htmlFor="elevenlabs-api-key">ElevenLabs API Key</Label>
+        <Input
+          id="elevenlabs-api-key"
+          type="password"
+          placeholder="Enter your ElevenLabs API key"
+          value={form.apiKey}
+          onChange={(event) => onFieldChange('apiKey', event.target.value)}
+          data-invalid={fieldErrors.apiKey ? 'true' : undefined}
+          className={fieldClassName}
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          data-1p-ignore
+        />
+        <p className="text-sm text-muted-foreground">
+          We recommend a key scoped to text-to-speech only, with a credit limit.
+          The key is used exclusively by this deployment&apos;s control plane to
+          narrate feature-demo videos; it is never sent to agents or task
+          sandboxes.
+        </p>
+        {allowBlankApiKey ? (
+          <p className="text-sm text-muted-foreground">
+            Leave blank to keep the existing API key.
+          </p>
+        ) : null}
+        {fieldErrors.apiKey ? (
+          <p className="text-sm text-destructive">{fieldErrors.apiKey[0]}</p>
+        ) : null}
+      </div>
+      <div className="space-y-2">
+        <Label htmlFor="elevenlabs-voice-id">Voice ID</Label>
+        <Input
+          id="elevenlabs-voice-id"
+          placeholder="e.g. 21m00Tcm4TlvDq8ikWAM"
+          value={form.voiceId}
+          onChange={(event) => onFieldChange('voiceId', event.target.value)}
+          data-invalid={fieldErrors.voiceId ? 'true' : undefined}
+          className={fieldClassName}
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+        />
+        <p className="text-sm text-muted-foreground">
+          The ElevenLabs voice used for narration. Find voice IDs in the
+          ElevenLabs voice library.
+        </p>
+        {fieldErrors.voiceId ? (
+          <p className="text-sm text-destructive">{fieldErrors.voiceId[0]}</p>
         ) : null}
       </div>
       {formError ? (
@@ -1007,6 +1238,16 @@ export function Integrations() {
   const [granolaForm, setGranolaForm] = useState<GranolaFormState>(
     buildEmptyGranolaForm(),
   );
+  const [isElevenLabsDialogOpen, setIsElevenLabsDialogOpen] = useState(false);
+  const [elevenLabsForm, setElevenLabsForm] = useState<ElevenLabsFormState>(
+    buildEmptyElevenLabsForm(),
+  );
+  const [elevenLabsFieldErrors, setElevenLabsFieldErrors] = useState<
+    Partial<Record<keyof ElevenLabsFormState, string[]>>
+  >({});
+  const [elevenLabsFormError, setElevenLabsFormError] = useState<string | null>(
+    null,
+  );
   const [granolaFieldErrors, setGranolaFieldErrors] = useState<
     Partial<Record<keyof GranolaFormState, string[]>>
   >({});
@@ -1037,6 +1278,12 @@ export function Integrations() {
     Partial<Record<keyof VercelFormState, string[]>>
   >({});
   const [vercelFormError, setVercelFormError] = useState<string | null>(null);
+  const [isXDialogOpen, setIsXDialogOpen] = useState(false);
+  const [xForm, setXForm] = useState<XFormState>(buildEmptyXForm());
+  const [xFieldErrors, setXFieldErrors] = useState<
+    Partial<Record<keyof XFormState, string[]>>
+  >({});
+  const [xFormError, setXFormError] = useState<string | null>(null);
   const [toolDialogState, setToolDialogState] = useState<{
     mcpId: string;
     integrationName: string;
@@ -1065,8 +1312,10 @@ export function Integrations() {
   const saveAsanaConnection = useSaveAsanaConnection();
   const saveGrafanaConnection = useSaveGrafanaConnection();
   const saveGranolaConnection = useSaveGranolaConnection();
+  const saveElevenLabsConnection = useSaveElevenLabsConnection();
   const saveSnowflakeConnection = useSaveSnowflakeConnection();
   const saveVercelConnection = useSaveVercelConnection();
+  const saveXConnection = useSaveXConnection();
   const asanaConnectionSummary = useMemo(() => {
     const connection = (userMcpConnections.data ?? []).find(
       (entry) => entry.mcpId === 'asana',
@@ -1090,6 +1339,18 @@ export function Integrations() {
     granolaConnectionSummary?.authStatus === 'authenticated';
   const granolaConnection = useGranolaConnection(
     isAdmin && (isGranolaConnected || isGranolaDialogOpen),
+  );
+  const elevenLabsConnectionSummary = useMemo(() => {
+    const connection = (userMcpConnections.data ?? []).find(
+      (entry) => entry.mcpId === 'elevenlabs',
+    );
+
+    return connection;
+  }, [userMcpConnections.data]);
+  const isElevenLabsConnected =
+    elevenLabsConnectionSummary?.authStatus === 'authenticated';
+  const elevenLabsConnection = useElevenLabsConnection(
+    isAdmin && (isElevenLabsConnected || isElevenLabsDialogOpen),
   );
   const grafanaConnectionSummary = useMemo(() => {
     const connection = (userMcpConnections.data ?? []).find(
@@ -1127,6 +1388,17 @@ export function Integrations() {
   const vercelConnection = useVercelConnection(
     isAdmin && (isVercelConnected || isVercelDialogOpen),
   );
+  const xConnectionSummary = useMemo(() => {
+    const connection = (userMcpConnections.data ?? []).find(
+      (entry) => entry.mcpId === 'x',
+    );
+
+    return connection;
+  }, [userMcpConnections.data]);
+  const isXConnected = xConnectionSummary?.authStatus === 'authenticated';
+  const xConnection = useXConnection(
+    isAdmin && (isXConnected || isXDialogOpen),
+  );
   const allowsBlankSnowflakePrivateKey =
     snowflakeConnection.data?.authMethod === 'key_pair';
 
@@ -1157,6 +1429,44 @@ export function Integrations() {
     setGranolaFormError(null);
     setGranolaForm(buildEmptyGranolaForm());
   }, [granolaConnection.isPending, isGranolaConnected, isGranolaDialogOpen]);
+
+  useEffect(() => {
+    if (!isElevenLabsDialogOpen) {
+      return;
+    }
+
+    if (elevenLabsConnection.isPending && isElevenLabsConnected) {
+      return;
+    }
+
+    setElevenLabsFieldErrors({});
+    setElevenLabsFormError(null);
+    setElevenLabsForm(buildElevenLabsForm(elevenLabsConnection.data));
+  }, [
+    elevenLabsConnection.data,
+    elevenLabsConnection.isPending,
+    isElevenLabsConnected,
+    isElevenLabsDialogOpen,
+  ]);
+
+  useEffect(() => {
+    if (!isElevenLabsDialogOpen) {
+      return;
+    }
+
+    if (elevenLabsConnection.isPending && isElevenLabsConnected) {
+      return;
+    }
+
+    setElevenLabsFieldErrors({});
+    setElevenLabsFormError(null);
+    setElevenLabsForm(buildElevenLabsForm(elevenLabsConnection.data));
+  }, [
+    elevenLabsConnection.data,
+    elevenLabsConnection.isPending,
+    isElevenLabsConnected,
+    isElevenLabsDialogOpen,
+  ]);
 
   useEffect(() => {
     if (!isSnowflakeDialogOpen) {
@@ -1214,6 +1524,20 @@ export function Integrations() {
     vercelConnection.data,
     vercelConnection.isPending,
   ]);
+
+  useEffect(() => {
+    if (!isXDialogOpen) {
+      return;
+    }
+
+    if (xConnection.isPending && isXConnected) {
+      return;
+    }
+
+    setXFieldErrors({});
+    setXFormError(null);
+    setXForm(buildEmptyXForm());
+  }, [isXConnected, isXDialogOpen, xConnection.isPending]);
 
   const items = useMemo<IntegrationItem[]>(() => {
     const visibleMcpIntegrations = MCP_INTEGRATIONS;
@@ -1392,6 +1716,27 @@ export function Integrations() {
             });
           }
 
+          if (integration.id === 'elevenlabs') {
+            return buildAdminConfiguredIntegrationItem({
+              integration,
+              connection: userConnectionMap.get(integration.id),
+              orgEnabled: orgEnablementMap.get(integration.id) ?? false,
+              highlightedIntegrationId,
+              savePending: saveElevenLabsConnection.isPending,
+              disconnectPending: disconnectMcp.isPending,
+              disconnectingMcpId: disconnectMcp.variables?.mcpId,
+              dialogOpen: isElevenLabsDialogOpen,
+              connectionPending: elevenLabsConnection.isPending,
+              canConfigure: isAdmin,
+              // Credential-only: no agent tools to manage.
+              canManageTools: false,
+              openDialog: () => setIsElevenLabsDialogOpen(true),
+              openToolDialog: () => openMcpToolDialog(integration),
+              disconnectIntegration: () =>
+                disconnectAdminConfiguredIntegration(integration),
+            });
+          }
+
           if (integration.id === 'snowflake') {
             return buildAdminConfiguredIntegrationItem({
               integration,
@@ -1452,6 +1797,26 @@ export function Integrations() {
             });
           }
 
+          if (integration.id === 'x') {
+            return buildAdminConfiguredIntegrationItem({
+              integration,
+              connection: userConnectionMap.get(integration.id),
+              orgEnabled: orgEnablementMap.get(integration.id) ?? false,
+              highlightedIntegrationId,
+              savePending: saveXConnection.isPending,
+              disconnectPending: disconnectMcp.isPending,
+              disconnectingMcpId: disconnectMcp.variables?.mcpId,
+              dialogOpen: isXDialogOpen,
+              connectionPending: xConnection.isPending,
+              canConfigure: isAdmin,
+              canManageTools: isAdmin,
+              openDialog: () => setIsXDialogOpen(true),
+              openToolDialog: () => openMcpToolDialog(integration),
+              disconnectIntegration: () =>
+                disconnectAdminConfiguredIntegration(integration),
+            });
+          }
+
           const enabled = orgEnablementMap.get(integration.id) ?? false;
           const isDeploymentScoped =
             isDeploymentScopedMcpIntegration(integration);
@@ -1497,6 +1862,7 @@ export function Integrations() {
               isAdmin &&
               enabled &&
               integration.serverMode !== 'native' &&
+              integration.serverMode !== 'credential_only' &&
               (!isDeploymentScoped || isConnected)
                 ? {
                     label: 'Manage tools',
@@ -1592,6 +1958,7 @@ export function Integrations() {
     disconnectMcp,
     grafanaConnection.isPending,
     granolaConnection.isPending,
+    elevenLabsConnection.isPending,
     linearInstallation.data,
     linearInstallation.isPending,
     linearOauthSetup.isPending,
@@ -1601,10 +1968,12 @@ export function Integrations() {
     isAdmin,
     isGrafanaDialogOpen,
     isGranolaDialogOpen,
+    isElevenLabsDialogOpen,
     isLinearOauthSetupOpen,
     saveAsanaConnection.isPending,
     saveGrafanaConnection.isPending,
     saveGranolaConnection.isPending,
+    saveElevenLabsConnection.isPending,
     saveVercelConnection.isPending,
     deploymentEnablements.data,
     pathname,
@@ -1616,6 +1985,9 @@ export function Integrations() {
     isSnowflakeDialogOpen,
     vercelConnection.isPending,
     isVercelDialogOpen,
+    saveXConnection.isPending,
+    xConnection.isPending,
+    isXDialogOpen,
     highlightedIntegrationId,
     userMcpConnections.data,
   ]);
@@ -1721,6 +2093,21 @@ export function Integrations() {
     setGranolaFormError(null);
   };
 
+  const handleElevenLabsFieldChange = (
+    field: keyof ElevenLabsFormState,
+    value: string,
+  ) => {
+    setElevenLabsForm((current) => ({ ...current, [field]: value }));
+    setElevenLabsFieldErrors((current) => {
+      if (!current[field]) {
+        return current;
+      }
+
+      return { ...current, [field]: undefined };
+    });
+    setElevenLabsFormError(null);
+  };
+
   const handleGrafanaFieldChange = (
     field: keyof GrafanaFormState,
     value: string,
@@ -1751,6 +2138,67 @@ export function Integrations() {
     setVercelFormError(null);
   };
 
+  const handleXFieldChange = (field: keyof XFormState, value: string) => {
+    setXForm((current) => ({ ...current, [field]: value }));
+    setXFieldErrors((current) => {
+      if (!current[field]) {
+        return current;
+      }
+
+      return { ...current, [field]: undefined };
+    });
+    setXFormError(null);
+  };
+
+  const handleXDialogOpenChange = (open: boolean) => {
+    setIsXDialogOpen(open);
+
+    setXFieldErrors({});
+    setXFormError(null);
+
+    if (!open) {
+      return;
+    }
+
+    setXForm(buildEmptyXForm());
+  };
+
+  const handleXSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const parsed = saveXConnectionSchema.safeParse({
+      bearerToken: xForm.bearerToken,
+    });
+    if (!parsed.success) {
+      setXFieldErrors(getXFieldErrors(parsed));
+      return;
+    }
+
+    if (!isXConnected && parsed.data.bearerToken.length === 0) {
+      setXFieldErrors({
+        bearerToken: ['Bearer token is required'],
+      });
+      return;
+    }
+
+    setXFieldErrors({});
+    setXFormError(null);
+
+    saveXConnection.mutate(parsed.data, {
+      onSuccess: () => {
+        toast.success(
+          isXConnected
+            ? 'X connection updated for this deployment.'
+            : 'X connected for this deployment.',
+        );
+        handleXDialogOpenChange(false);
+      },
+      onError: (error) => {
+        setXFormError(error.message);
+      },
+    });
+  };
+
   const handleAsanaDialogOpenChange = (open: boolean) => {
     setIsAsanaDialogOpen(open);
 
@@ -1775,6 +2223,19 @@ export function Integrations() {
     }
 
     setGranolaForm(buildEmptyGranolaForm());
+  };
+
+  const handleElevenLabsDialogOpenChange = (open: boolean) => {
+    setIsElevenLabsDialogOpen(open);
+
+    setElevenLabsFieldErrors({});
+    setElevenLabsFormError(null);
+
+    if (!open) {
+      return;
+    }
+
+    setElevenLabsForm(buildElevenLabsForm(elevenLabsConnection.data));
   };
 
   const handleSnowflakeDialogOpenChange = (open: boolean) => {
@@ -1890,6 +2351,43 @@ export function Integrations() {
       },
       onError: (error) => {
         setGranolaFormError(error.message);
+      },
+    });
+  };
+
+  const handleElevenLabsSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const parsed = saveElevenLabsConnectionSchema.safeParse({
+      apiKey: elevenLabsForm.apiKey,
+      voiceId: elevenLabsForm.voiceId,
+    });
+    if (!parsed.success) {
+      setElevenLabsFieldErrors(getElevenLabsFieldErrors(parsed));
+      return;
+    }
+
+    if (!isElevenLabsConnected && parsed.data.apiKey.length === 0) {
+      setElevenLabsFieldErrors({
+        apiKey: ['API key is required'],
+      });
+      return;
+    }
+
+    setElevenLabsFieldErrors({});
+    setElevenLabsFormError(null);
+
+    saveElevenLabsConnection.mutate(parsed.data, {
+      onSuccess: () => {
+        toast.success(
+          isElevenLabsConnected
+            ? 'ElevenLabs connection updated for this deployment.'
+            : 'ElevenLabs connected for this deployment.',
+        );
+        handleElevenLabsDialogOpenChange(false);
+      },
+      onError: (error) => {
+        setElevenLabsFormError(error.message);
       },
     });
   };
@@ -2107,6 +2605,30 @@ export function Integrations() {
         />
       </AdminConfiguredIntegrationDialog>
       <AdminConfiguredIntegrationDialog
+        integrationName="ElevenLabs"
+        open={isElevenLabsDialogOpen}
+        onOpenChange={handleElevenLabsDialogOpenChange}
+        isEditing={isElevenLabsConnected}
+        isPending={saveElevenLabsConnection.isPending}
+        isLoading={isElevenLabsConnected && elevenLabsConnection.isPending}
+        description={
+          <>
+            Store an ElevenLabs API key and voice ID for this deployment. The
+            key stays encrypted server-side and is used only by the control
+            plane to narrate feature-demo videos.
+          </>
+        }
+        onSubmit={handleElevenLabsSubmit}
+      >
+        <ElevenLabsConnectionFields
+          form={elevenLabsForm}
+          fieldErrors={elevenLabsFieldErrors}
+          formError={elevenLabsFormError}
+          allowBlankApiKey={isElevenLabsConnected}
+          onFieldChange={handleElevenLabsFieldChange}
+        />
+      </AdminConfiguredIntegrationDialog>
+      <AdminConfiguredIntegrationDialog
         integrationName="Snowflake"
         open={isSnowflakeDialogOpen}
         onOpenChange={handleSnowflakeDialogOpenChange}
@@ -2173,6 +2695,29 @@ export function Integrations() {
           formError={vercelFormError}
           allowBlankToken={isVercelConnected}
           onFieldChange={handleVercelFieldChange}
+        />
+      </AdminConfiguredIntegrationDialog>
+      <AdminConfiguredIntegrationDialog
+        integrationName="X"
+        open={isXDialogOpen}
+        onOpenChange={handleXDialogOpenChange}
+        isEditing={isXConnected}
+        isPending={saveXConnection.isPending}
+        isLoading={isXConnected && xConnection.isPending}
+        description={
+          <>
+            Store the workspace X app-only bearer token for read-only Roomote
+            tasks. Secrets stay encrypted server-side.
+          </>
+        }
+        onSubmit={handleXSubmit}
+      >
+        <XConnectionFields
+          form={xForm}
+          fieldErrors={xFieldErrors}
+          formError={xFormError}
+          allowBlankToken={isXConnected}
+          onFieldChange={handleXFieldChange}
         />
       </AdminConfiguredIntegrationDialog>
       <DeepLinkEnableDialog

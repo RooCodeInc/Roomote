@@ -7,13 +7,23 @@ const {
   mockGetRepositories,
   mockDbWhere,
   mockDbSelect,
+  mockGoalCommit,
+  mockGoalRollback,
+  mockPrepareTaskGoalActivation,
+  mockResolveTaskByIdAccess,
   mockResolveWorkspaceProvider,
+  mockSendSandboxPrompt,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
   mockGetRepositories: vi.fn(),
   mockDbWhere: vi.fn(),
   mockDbSelect: vi.fn(),
+  mockGoalCommit: vi.fn(),
+  mockGoalRollback: vi.fn(),
+  mockPrepareTaskGoalActivation: vi.fn(),
+  mockResolveTaskByIdAccess: vi.fn(),
   mockResolveWorkspaceProvider: vi.fn(),
+  mockSendSandboxPrompt: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -52,6 +62,8 @@ vi.mock('@roomote/db/server', () => ({
     right,
   })),
   markTaskStartParallelCountEndedAt: vi.fn(),
+  prepareTaskGoalActivation: (...args: unknown[]) =>
+    mockPrepareTaskGoalActivation(...args),
   resolveWorkspaceRepositoryProviders: (...args: unknown[]) =>
     mockResolveWorkspaceProvider(...args),
   repositories: {
@@ -94,7 +106,17 @@ vi.mock('@/lib/task-utils', () => ({
   humanizeFilename: (value: string) => value,
 }));
 
-import { createStandardTaskRunCommand } from './index';
+vi.mock('../tasks/by-id', () => ({
+  resolveTaskByIdAccessCommand: (...args: unknown[]) =>
+    mockResolveTaskByIdAccess(...args),
+}));
+
+vi.mock('../sandbox-session', () => ({
+  sendSandboxPromptCommand: (...args: unknown[]) =>
+    mockSendSandboxPrompt(...args),
+}));
+
+import { createStandardTaskRunCommand, startTaskGoalCommand } from './index';
 
 const auth = {
   success: true,
@@ -125,6 +147,104 @@ function mockSuccessfulEnqueue() {
     taskId: 'task-123',
   });
 }
+
+describe('startTaskGoalCommand', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockResolveTaskByIdAccess.mockResolvedValue({
+      kind: 'resolved',
+      task: { id: 'task-123' },
+    });
+    mockGoalCommit.mockResolvedValue({
+      objective: 'Ship the release',
+      generation: 'goal-generation:replacement',
+      status: 'active',
+      maxContinuations: 5,
+      continuationsUsed: 0,
+      blockedReason: null,
+      completedAt: null,
+    });
+    mockGoalRollback.mockResolvedValue(true);
+    mockPrepareTaskGoalActivation.mockResolvedValue({
+      generation: 'goal-generation:replacement',
+      commit: mockGoalCommit,
+      rollback: mockGoalRollback,
+    });
+    mockSendSandboxPrompt.mockResolvedValue({ success: true });
+  });
+
+  it('activates Goal Mode only after prompt delivery succeeds', async () => {
+    await expect(
+      startTaskGoalCommand(auth, {
+        taskId: 'task-123',
+        goal: { objective: 'Ship the release', maxContinuations: 5 },
+        clientMessageId: 'message-1',
+      }),
+    ).resolves.toMatchObject({
+      success: true,
+      goal: { objective: 'Ship the release', status: 'active' },
+    });
+
+    expect(mockResolveTaskByIdAccess).toHaveBeenCalledWith(auth, {
+      taskId: 'task-123',
+    });
+    expect(mockPrepareTaskGoalActivation).toHaveBeenCalledWith({
+      taskId: 'task-123',
+      goal: { objective: 'Ship the release', maxContinuations: 5 },
+    });
+    expect(mockSendSandboxPrompt).toHaveBeenCalledWith(
+      auth,
+      {
+        taskId: 'task-123',
+        prompt: 'Ship the release',
+        source: 'web',
+        clientMessageId: 'message-1',
+        userImageUrl: undefined,
+        autoSteerWhenQueued: true,
+      },
+      {
+        goalContext: {
+          objective: 'Ship the release',
+          generation: 'goal-generation:replacement',
+          status: 'active',
+          maxContinuations: 5,
+          continuationsUsed: 0,
+          blockedReason: null,
+          completedAt: null,
+        },
+      },
+    );
+    expect(mockGoalCommit).toHaveBeenCalledOnce();
+    expect(mockGoalRollback).not.toHaveBeenCalled();
+  });
+
+  it('does not enable Goal Mode when the task is unavailable', async () => {
+    mockResolveTaskByIdAccess.mockResolvedValue({ kind: 'not-found' });
+
+    await expect(
+      startTaskGoalCommand(auth, {
+        taskId: 'missing-task',
+        goal: { objective: 'Ship the release', maxContinuations: 5 },
+      }),
+    ).resolves.toEqual({ success: false, error: 'Task not found' });
+    expect(mockPrepareTaskGoalActivation).not.toHaveBeenCalled();
+  });
+
+  it('rolls back the pending goal when prompt delivery fails', async () => {
+    const deliveryError = new Error('Sandbox unavailable');
+    mockSendSandboxPrompt.mockRejectedValue(deliveryError);
+
+    await expect(
+      startTaskGoalCommand(auth, {
+        taskId: 'task-123',
+        goal: { objective: 'Ship the release', maxContinuations: 5 },
+      }),
+    ).rejects.toBe(deliveryError);
+
+    expect(mockGoalCommit).not.toHaveBeenCalled();
+    expect(mockGoalRollback).toHaveBeenCalledOnce();
+  });
+});
 
 describe('createStandardTaskRunCommand', () => {
   beforeEach(() => {

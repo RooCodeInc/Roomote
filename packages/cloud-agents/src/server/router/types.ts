@@ -2,6 +2,7 @@ import type {
   RequestedWorkKindDecision,
   TaskModelOption,
   TaskModelSettings,
+  WorkspaceRoutingSettings,
 } from '@roomote/types';
 
 /** Time to wait before auto-accepting a routed workspace suggestion. */
@@ -49,6 +50,7 @@ export interface RoutingContext {
    * available for this routing context.
    */
   taskModelSettings?: TaskModelSettings | null;
+  routingRules?: WorkspaceRoutingSettings['rules'];
   routingActor?: {
     userId: string;
     apiBaseUrl?: string;

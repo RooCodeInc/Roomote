@@ -4,6 +4,7 @@ import {
   createEnvironmentConfigVersionSnapshot,
   db,
   environmentConfigVersions,
+  deploymentSettings,
   environments,
   environmentRepositoryMappings,
   taskRuns,
@@ -38,6 +39,8 @@ import {
   type ComputeProvider,
   type EnvironmentConfig,
   environmentConfigSchema,
+  workspaceRoutingSettingsSchema,
+  type WorkspaceRoutingSettings,
   getAmbiguousEnvironmentRepositoryError,
   getDuplicateEnvironmentRepositoryConfigError,
   getEnvironmentRepositoryInstallationError,
@@ -351,6 +354,41 @@ export async function getEnvironmentsCommand(
       activeVerificationTaskIds,
     ),
   );
+}
+
+export async function getWorkspaceRoutingSettingsCommand(
+  auth: UserAuthSuccess,
+): Promise<WorkspaceRoutingSettings> {
+  assertAdmin(auth);
+  const [settings] = await db
+    .select({
+      workspaceRoutingSettings: deploymentSettings.workspaceRoutingSettings,
+    })
+    .from(deploymentSettings)
+    .where(eq(deploymentSettings.id, 'default'))
+    .limit(1);
+
+  return workspaceRoutingSettingsSchema.parse(
+    settings?.workspaceRoutingSettings ?? { rules: [] },
+  );
+}
+
+export async function updateWorkspaceRoutingSettingsCommand(
+  auth: UserAuthSuccess,
+  input: WorkspaceRoutingSettings,
+): Promise<WorkspaceRoutingSettings> {
+  assertAdmin(auth);
+  const settings = workspaceRoutingSettingsSchema.parse(input);
+
+  await db
+    .insert(deploymentSettings)
+    .values({ id: 'default', workspaceRoutingSettings: settings })
+    .onConflictDoUpdate({
+      target: deploymentSettings.id,
+      set: { workspaceRoutingSettings: settings },
+    });
+
+  return settings;
 }
 
 /** Member workspace selection intentionally exposes no configuration or state. */

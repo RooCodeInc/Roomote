@@ -65,6 +65,41 @@ describe('packaged skill invocation routing', () => {
     ).toBe(true);
   });
 
+  it('ships the general exploration and action workflow for initial routing', () => {
+    expect(
+      isRecognizedInitialSkillInvocation({
+        skillName: 'explore-and-act',
+      }),
+    ).toBe(true);
+
+    const generalSkill = readPackagedSkill('explore-and-act');
+
+    expect(generalSkill).toContain('name: explore-and-act');
+    expect(generalSkill).toContain(
+      'Perform an external side effect only when the user named the exact action and target',
+    );
+    expect(generalSkill).toContain(
+      'those narrower rules override this general workflow',
+    );
+    expect(generalSkill).toContain(
+      'Do not assume repository inspection is relevant',
+    );
+    expect(generalSkill).toContain(
+      'repository or workspace file edits or commands, validation of repository changes, or code delivery',
+    );
+    expect(generalSkill).not.toContain(
+      'file edits, commands, validation, or delivery',
+    );
+    expect(generalSkill).not.toContain('read the applicable repo-local');
+  });
+
+  it('recognizes Doctor as a first-class packaged workflow', () => {
+    expect(isRecognizedInitialSkillInvocation({ skillName: 'doctor' })).toBe(
+      true,
+    );
+    expect(readPackagedSkill('doctor')).toContain('name: doctor');
+  });
+
   it('recognizes packaged automation skills regardless of repository', () => {
     for (const skillName of automationSkillNames) {
       expect(

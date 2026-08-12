@@ -8,6 +8,7 @@ import type {
   GitDiffResponse,
   TaskEnvVarRequestVariable,
   TaskStatusEvent,
+  TaskGoal,
   TaskToolDispatchPayload,
 } from '@roomote/types';
 
@@ -132,6 +133,8 @@ export interface SandboxSendPromptInput {
   queueOnly?: boolean;
   /** Hide the prompt from the user-facing transcript (platform machinery). */
   visibleInTranscript?: boolean;
+  /** Trusted per-turn goal context appended only to the model prompt. */
+  goalContext?: TaskGoal;
 }
 
 export interface SandboxSteerTaskInput {

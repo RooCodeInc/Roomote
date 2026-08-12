@@ -24,7 +24,7 @@ Four PaaS-shaped paths run the same published images with
 `R_AUTO_GENERATE_KEYS=true` instead of installer-generated keypairs:
 
 - [`railway/`](railway/README.md) — managed Railway deployment with managed
-  Postgres/Redis and hosted sandboxes (Modal/E2B/Daytona) instead of the
+  Postgres/Redis and hosted sandboxes instead of the
   Docker socket.
 - [`render/`](render/README.md) — managed Render deployment from the
   Blueprint at the repository root ([`render.yaml`](../render.yaml)), with

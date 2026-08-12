@@ -1,0 +1,207 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
+const skillPath = path.resolve(
+  import.meta.dirname,
+  '../skills/standard/doctor/SKILL.md',
+);
+
+function readSkillContent() {
+  return fs.readFileSync(skillPath, 'utf8');
+}
+
+describe('doctor guidance', () => {
+  it('uses a fresh Roomote task as the end-to-end health check', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      "Use Roomote's existing task runtime as the end-to-end health check",
+    );
+    expect(skillContent).toContain(
+      'call `mcp__roomote__manage_tasks` with `action: "list_environments"`',
+    );
+    expect(skillContent).toContain(
+      'Call `mcp__roomote__manage_tasks` with `action: "launch"`, that `environmentId`, and `notifyOnSettle: true`.',
+    );
+    expect(skillContent).toContain(
+      'call `mcp__roomote__manage_tasks` with `action: "get_summary"` every 10-15 seconds',
+    );
+    expect(skillContent).toContain(
+      'call `mcp__roomote__manage_tasks` with `action: "get_messages"`',
+    );
+    expect(skillContent).toContain(
+      'Do not replace that end-to-end evidence with a parallel collection of technology-specific probes.',
+    );
+    expect(skillContent).not.toContain('diagnose_environment');
+    expect(skillContent).not.toContain('complete_doctor_report');
+  });
+
+  it('prevents recursive or mutating verification tasks', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      'Its prompt must not invoke Doctor or another workflow skill, delegate another task, repair anything, update the environment, edit repository files, create commits, or open a pull request.',
+    );
+    expect(skillContent).toContain(
+      'It may use an installed operational skill when needed to operate an applicable tool',
+    );
+    expect(skillContent).toContain('Doctor is read-only by default.');
+    expect(skillContent).toContain(
+      'If the user explicitly requested repair and ownership is `environment_configuration`, transition to the packaged `environment-setup` workflow',
+    );
+    expect(skillContent).toContain(
+      'If the user explicitly requested repair and ownership is `repository`, transition to `implement-changes`',
+    );
+    expect(skillContent).toContain(
+      'does not authorize filing or sending a platform report',
+    );
+    expect(skillContent).toContain(
+      'Do not call `report_platform_issue`, create an issue, or claim that a report was filed unless the user explicitly requested that write.',
+    );
+  });
+
+  it('requires an exact named environment and evidence-based branch selection', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      'Cross-check that exact ID and name against an immediate `list_environments` result.',
+    );
+    expect(skillContent).toContain(
+      'The `__all_repositories__` organization-wide target is not a named environment and is never a fallback',
+    );
+    expect(skillContent).toContain(
+      "resolve the repository's current or default branch from task or repository evidence and retry once; never guess a branch name.",
+    );
+  });
+
+  it('derives generic goals without assuming a workload technology', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain('There is no universal Doctor checklist.');
+    expect(skillContent).toContain(
+      'Do not invent a startup, service, preview, browser, port, test, build, migration, performance, clean-tree, container, process-supervisor, or database requirement.',
+    );
+    expect(skillContent).toContain(
+      'These are examples, not a closed taxonomy.',
+    );
+    expect(skillContent).toContain(
+      'The launched task must not assume the repository is a web app.',
+    );
+    expect(skillContent).toContain(
+      "discover the repository's intended developer entrypoint and prove that it starts and performs its basic documented function",
+    );
+    expect(skillContent).toContain(
+      'If the repository has no runnable application, it must say so and verify the nearest evidence-backed workflow instead of inventing an app or server.',
+    );
+    expect(skillContent).toContain(
+      'command exit and output, produced artifacts, a completed job and observable effect, migration result, protocol behavior, test result, measured operation, or a completed browser interaction',
+    );
+  });
+
+  it('recovers the failed capability before using general readiness', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      'When the request is broad or symptom-only, such as "the environment is not working," recover the failed capability from that context task before falling back to general readiness.',
+    );
+    expect(skillContent).toContain(
+      'Establish the context task before resolving omitted details.',
+    );
+    expect(skillContent).toContain(
+      'Use an exact Roomote task ID or URL supplied by the user; otherwise read only `ROOMOTE_TASK_ID` from the current runtime and use the current task.',
+    );
+    expect(skillContent).toContain(
+      'When failure-context recovery is required, call `mcp__roomote__manage_tasks` with `action: "get_summary"` and `action: "get_messages"` for the context task.',
+    );
+    expect(skillContent).toContain(
+      'identify the last concrete attempted journey, any surfaced setup or runtime failure, and the user-visible symptom',
+    );
+    expect(skillContent).toContain(
+      'Use recovered context only to choose what the fresh task must reproduce.',
+    );
+    expect(skillContent).toContain(
+      "Do not accept a previous task's diagnosis, ownership classification, apparent success, or suggested repair as proof.",
+    );
+    expect(skillContent).toContain(
+      'If no concrete capability can be recovered, use the general environment-readiness fallback below and state in the final report exactly what that fallback did and did not prove.',
+    );
+    expect(skillContent).toContain(
+      'Only when no concrete failed capability was requested or recovered, use the general environment-readiness fallback',
+    );
+  });
+
+  it('requires a real result rather than inferring success from task completion', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      'A completed task state is not proof that the goal passed',
+    );
+    expect(skillContent).toContain(
+      'report `ready`, `not_ready`, or `blocked` with the exact attempted steps and secret-safe evidence',
+    );
+    expect(skillContent).toContain(
+      'Do not claim `healthy` or `repaired` unless the latest fresh task explicitly completed the requested journey',
+    );
+    expect(skillContent).toContain(
+      'Do not return the final Doctor outcome merely because polling finds a settled summary or the child has posted its result.',
+    );
+    expect(skillContent).toContain(
+      'Only if the notification is still absent 60 seconds after polling first observes a settled task may the polled result become the fallback completion signal.',
+    );
+    expect(skillContent).toContain(
+      'Never emit a second user-facing outcome or confirmation for the same verification task.',
+    );
+  });
+
+  it('keeps browser verification layered and conditional', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      'Only when the requested goal includes a Roomote browser preview',
+    );
+    expect(skillContent).toContain(
+      'the authenticated external `ROOMOTE_<NAME>_PREVIEW_URL` with the installed `agent-browser` wrapper',
+    );
+    expect(skillContent).toContain(
+      'inspect page errors, console errors, and failed or blocked journey-critical network requests',
+    );
+    expect(skillContent).toContain(
+      'document HTTP 2xx/3xx alone is insufficient',
+    );
+  });
+
+  it('classifies ownership by the durable correction boundary', () => {
+    const skillContent = readSkillContent();
+
+    for (const owner of [
+      'environment_configuration',
+      'repository',
+      'roomote_platform',
+      'external_dependency',
+      'undetermined',
+    ]) {
+      expect(skillContent).toContain(`\`${owner}\``);
+    }
+
+    expect(skillContent).toContain(
+      'Never classify ownership from a symptom or technology name alone.',
+    );
+    expect(skillContent).toContain(
+      'For CORS or allowed-host failures, identify the expected origin or host, reproduce it through the actual route, and locate the rejecting boundary.',
+    );
+    expect(skillContent).toContain(
+      'Never repair an origin or host-policy failure with a wildcard, disabled host checking, reflective origin behavior, or broadly permissive CORS.',
+    );
+  });
+
+  it('requires fresh verification after repair', () => {
+    const skillContent = readSkillContent();
+
+    expect(skillContent).toContain(
+      'After an authorized repair, require another task launched against the newly persisted environment and repeat the original goal.',
+    );
+    expect(skillContent).toContain(
+      "Never use the pre-repair task, the repair workflow's successful return, or the current sandbox as proof.",
+    );
+  });
+});

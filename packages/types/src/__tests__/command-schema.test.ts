@@ -9,6 +9,37 @@ import {
   getDuplicateEnvironmentRepositoryConfigError,
   getMissingEnvironmentRepositoryError,
 } from '../environment-config';
+import { workspaceRoutingSettingsSchema } from '../workspace-routing';
+
+describe('workspaceRoutingSettingsSchema', () => {
+  it('normalizes centralized routing rules', () => {
+    expect(
+      workspaceRoutingSettingsSchema.parse({
+        rules: [
+          {
+            description: '  Messages from hospital-bugs belong here.  ',
+            target: 'env-1',
+          },
+        ],
+      }),
+    ).toEqual({
+      rules: [
+        {
+          description: 'Messages from hospital-bugs belong here.',
+          target: 'env-1',
+        },
+      ],
+    });
+  });
+
+  it('rejects empty descriptions and targets', () => {
+    expect(
+      workspaceRoutingSettingsSchema.safeParse({
+        rules: [{ description: ' ', target: '' }],
+      }).success,
+    ).toBe(false);
+  });
+});
 
 describe('getMissingEnvironmentRepositoryError', () => {
   it('reports configured repositories that do not exactly match linked rows', () => {

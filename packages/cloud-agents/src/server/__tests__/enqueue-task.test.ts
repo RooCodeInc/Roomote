@@ -210,6 +210,31 @@ afterAll(async () => {
 });
 
 describe('enqueueTask initiator stamping', () => {
+  it('persists an optional task goal on a fresh launch', async () => {
+    const userId = await createUser();
+    const run = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+      goal: {
+        objective: 'Ship goal mode safely',
+        maxContinuations: 4,
+      },
+    });
+
+    await expect(
+      db.query.tasks.findFirst({ where: eq(tasks.id, run.taskId) }),
+    ).resolves.toMatchObject({
+      goalObjective: 'Ship goal mode safely',
+      goalLastContinuationId: expect.stringMatching(/^goal-generation:/),
+      goalGenerationIds: [expect.stringMatching(/^goal-generation:/)],
+      goalStatus: 'active',
+      goalMaxContinuations: 4,
+      goalContinuationsUsed: 0,
+    });
+  });
+
   it('blocks fresh launches when managed access is read-only', async () => {
     const priorSettings = await db.query.deploymentSettings.findFirst({
       where: eq(deploymentSettings.id, 'default'),

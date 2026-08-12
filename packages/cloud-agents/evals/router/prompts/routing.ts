@@ -41,6 +41,7 @@ interface PromptVars {
   repositories?: (string | Repository)[];
   environments?: Environment[];
   extraModels?: ExtraModel[];
+  routingRules?: Array<{ description: string; target: string }>;
 }
 
 interface PromptInput {
@@ -73,9 +74,10 @@ function formatEnvironments(envs?: Environment[]): string {
     const repoList = e.repositoryNames
       ? ` (repositories: ${e.repositoryNames.join(', ')})`
       : '';
-    return e.description
+    const base = e.description
       ? `- ${e.name}${repoList}\n  ${e.description}`
       : `- ${e.name}${repoList}`;
+    return base;
   });
   return `**Available Environments**:\n${lines.join('\n')}`;
 }
@@ -112,6 +114,12 @@ function buildContext(vars: PromptVars): string {
     parts.push(envs);
   }
 
+  if (vars.routingRules?.length) {
+    parts.push(
+      `**Routing Rules**:\n${vars.routingRules.map((rule) => `- ${rule.description} → ${rule.target}`).join('\n')}`,
+    );
+  }
+
   return parts.join('\n\n');
 }
 
@@ -146,7 +154,7 @@ const OUTPUT_FORMAT_SECTION = `## Output Format
 
 Respond with a single JSON object containing exactly these fields:
 
-- "workspaceValue" (string): Name of the chosen environment.
+- "workspaceValue" (string): Name of the chosen environment or an available workspace value.
 - "reasoning" (string): Brief explanation of your workspace decision.
 - "confidence" (number): Confidence in the workspace choice from 0 to 1.
 - "kickoffMessage" (string): Required short user-facing kickoff sentence (about 8-18 words) that ends with a period. Naturally include the chosen environment name, and naturally include the model display name when requestedModelId is a real model. Vary wording; no "Getting started on your task in…" boilerplate every time. No emojis, markdown, quotes, or mentions. Always provide a non-empty value for real routed tasks.

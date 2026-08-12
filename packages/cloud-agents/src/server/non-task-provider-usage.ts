@@ -74,6 +74,7 @@ export type NonTaskInferenceTrackingInput = {
 
 export const NON_TASK_INFERENCE_SURFACES = {
   chatAudioTranscription: 'chat_audio_transcription',
+  chatVideoDescription: 'chat_video_description',
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
   fastAgentOnboardingSuggestions: 'fast_agent_onboarding_suggestions',
   fastAgentQuestionAnswering: 'fast_agent_question_answering',
@@ -326,10 +327,19 @@ async function resolveModelForInputModality(
     return runtime.model;
   }
 
+  const modalityModels =
+    modality === 'image' || modality === 'video'
+      ? [
+          runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
+          runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
+        ]
+      : [
+          runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
+          runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
+        ];
   const candidates = [
     params.model,
-    runtime.resolvedModelRuntimeEnv.R_SMALL_MODEL,
-    runtime.resolvedModelRuntimeEnv.R_VISION_MODEL,
+    ...modalityModels,
     runtime.resolvedModelRuntimeEnv.R_MODEL,
     runtime.model,
   ].filter(

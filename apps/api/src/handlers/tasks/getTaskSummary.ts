@@ -1,7 +1,7 @@
 import type { Context } from 'hono';
 
 import { and, db, environments, eq, tasks } from '@roomote/db/server';
-import { getEnvironmentDefinitionIdFromPayload } from '@roomote/types';
+import { getLinkedEnvironmentIdFromPayload } from '@roomote/types';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
@@ -40,7 +40,7 @@ export async function getTaskSummary(
 
     const latestRuns = await getLatestTaskRunsByTaskIds([task.id]);
     const latestRun = latestRuns[task.id] ?? null;
-    const linkedEnvironmentId = getEnvironmentDefinitionIdFromPayload(
+    const linkedEnvironmentId = getLinkedEnvironmentIdFromPayload(
       latestRun?.payload,
     );
     const linkedEnvironment = linkedEnvironmentId

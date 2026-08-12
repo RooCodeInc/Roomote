@@ -44,6 +44,29 @@ export function getEnvironmentDefinitionIdFromPayload(
   return trimmed.length > 0 ? trimmed : null;
 }
 
+/**
+ * Return the environment linked to any task-run payload. Standard tasks use
+ * `environmentId`; environment-definition workflows retain their historical
+ * payload keys.
+ */
+export function getLinkedEnvironmentIdFromPayload(
+  payload: unknown,
+): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+
+  const environmentId = (payload as Record<string, unknown>).environmentId;
+  if (typeof environmentId === 'string') {
+    const trimmed = environmentId.trim();
+    if (trimmed.length > 0) {
+      return trimmed;
+    }
+  }
+
+  return getEnvironmentDefinitionIdFromPayload(payload);
+}
+
 export function normalizeRepositorySelection(
   repositories: RepositoryReference[],
 ): string[] {
@@ -98,9 +121,11 @@ export function buildEnvironmentVerificationPrompt(input: {
   environmentId: string;
   environmentName: string;
 }): string {
-  return `Verify that the ${PRODUCT_NAME} environment "${input.environmentName}" (id ${input.environmentId}) is running correctly.
+  return `Verify whether the persisted ${PRODUCT_NAME} environment "${input.environmentName}" (id ${input.environmentId}) is ready. This task is the current authorized environment-verification attempt.
 
-Use localhost or the environment's initial URL to confirm the expected service responds successfully, and confirm there are no obvious startup failures blocking basic use. Preparing the environment can take 5 minutes or more, so be patient before deciding startup is stuck.
+This is a read-only verification task. Do not invoke Doctor or another workflow skill, launch another task, repair or update the environment, edit repository files, create commits, or open a pull request. You may use an installed operational skill when needed to operate an applicable tool.
+
+When .roomote/setup-status.json exists, wait for it to reach a terminal state before deciding readiness; preparing the environment can take 5 minutes or more. Determine the intended developer workflow from the repository's own instructions and the available environment. Verify that workflow directly and report the exact attempted steps plus relevant secret-safe errors. Do not assume that a service, port, HTTP endpoint, browser preview, test suite, container, or long-running process exists. Report success only when the applicable workflow actually completes.
 
 When you have a clear outcome, record it by calling the ${PRODUCT_NAME} MCP tool \`manage_environments\` with \`action: "record_verification"\`, \`environmentId: "${input.environmentId}"\`, and \`success: true\` when the environment looks ready or \`success: false\` with a short, user-safe \`error\` describing what failed. Do not include secrets or the full environment YAML in the error text.`;
 }

@@ -4,6 +4,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { Variables } from '../../types';
 
 import { loadCommunicationLookupTaskRun } from './communication-lookup-run-context';
+import { listCommunicationChannels } from './communication-channel-discovery';
 import {
   lookupCommunicationChannelMessages,
   lookupCommunicationMessageContext,
@@ -69,6 +70,25 @@ function parseChannelMessagesRequestBody(body: unknown): {
 export const communicationMcp = new Hono<{
   Variables: CommunicationMcpVariables;
 }>();
+
+communicationMcp.post('/channels', async (c) => {
+  const { authContext } = c.get('mcpAuth');
+  if (!isRunTokenContext(authContext)) {
+    return c.json(
+      { error: 'Communication lookup is only available for task run tokens' },
+      403,
+    );
+  }
+
+  const taskRun = await loadCommunicationLookupTaskRun(authContext.runId);
+  if (!taskRun) {
+    return c.json({ error: 'Task run not found for this MCP token' }, 404);
+  }
+
+  return c.json(
+    await listCommunicationChannels({ actingUserId: taskRun.actingUserId }),
+  );
+});
 
 communicationMcp.post('/message_context', async (c) => {
   const { authContext } = c.get('mcpAuth');

@@ -416,6 +416,15 @@ export const TASK_STARTUP_FAILURE_TEXT =
 export const TASK_RUNTIME_FAILURE_TEXT =
   "I ran into a hiccup while working on this task. This is usually temporary -- try again and I'll give it another shot.";
 
+/**
+ * Posted into the originating chat thread when the model provider fails hard
+ * enough to end the current turn. The task itself stays alive and resumable,
+ * so this copy reports the interruption and invites a follow-up instead of
+ * announcing a dead task.
+ */
+export const TASK_TURN_PROVIDER_ERROR_TEXT =
+  "I hit a provider error and had to stop partway through this turn. The task is still here -- reply and I'll pick it back up.";
+
 export function buildPullRequestStatusNotificationText({
   prTitle,
   prUrl,

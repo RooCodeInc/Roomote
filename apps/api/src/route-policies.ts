@@ -32,6 +32,7 @@ export type RoutePolicyClass =
   | 'user'
   | 'task-token'
   | 'authenticated'
+  | 'roomote-mcp'
   | 'admin';
 
 /**
@@ -116,6 +117,22 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
   {
     name: 'health-controller',
     match: { type: 'prefix', path: '/health/controller' },
+    policy: 'public',
+  },
+  {
+    name: 'roomote-mcp-oauth-protected-resource-metadata',
+    match: {
+      type: 'exact',
+      path: '/.well-known/oauth-protected-resource/api/mcp-routing/roomote',
+    },
+    policy: 'public',
+  },
+  {
+    name: 'roomote-mcp-oauth-protected-resource-metadata-canonical',
+    match: {
+      type: 'exact',
+      path: '/.well-known/oauth-protected-resource/mcp',
+    },
     policy: 'public',
   },
 
@@ -236,8 +253,38 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     policy: 'task-token',
   },
 
+  // Narration text-to-speech for task sandboxes: the ElevenLabs key is
+  // injected server-side and never enters the sandbox. The client-keyed
+  // limit is a global ceiling (server-to-server callers share one bucket)
+  // sized far above legitimate use — a demo narrates a handful of lines
+  // once — to blunt credit-drain from a leaked run token.
+  {
+    name: 'tts',
+    match: { type: 'prefix', path: '/api/tts' },
+    policy: 'task-token',
+    rateLimits: [
+      {
+        keySource: 'client',
+        limit: 60,
+        windowSeconds: 60,
+      },
+    ],
+  },
+
   // Router-facing MCP endpoints: accept user auth tokens (LLM router
   // gathering context before a run exists) and task run tokens.
+  {
+    name: 'roomote-public-mcp',
+    match: { type: 'exact', path: '/mcp' },
+    policy: 'roomote-mcp',
+    errorFormat: 'json-rpc',
+  },
+  {
+    name: 'roomote-mcp',
+    match: { type: 'exact', path: '/api/mcp-routing/roomote' },
+    policy: 'roomote-mcp',
+    errorFormat: 'json-rpc',
+  },
   {
     name: 'mcp-routing',
     match: { type: 'prefix', path: '/api/mcp-routing' },

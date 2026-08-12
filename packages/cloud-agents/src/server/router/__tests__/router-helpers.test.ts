@@ -60,6 +60,39 @@ describe('router helpers', () => {
     );
   });
 
+  it('renders all repositories routing rules when configured', () => {
+    const prompt = buildContextPrompt(
+      createContext({
+        routingRules: [
+          {
+            description: 'Dependency updates belong everywhere.',
+            target: '__all_repositories__',
+          },
+        ],
+      }),
+    );
+
+    expect(prompt).toContain('- __all_repositories__ (all repositories)');
+    expect(prompt).toContain('Dependency updates belong everywhere.');
+  });
+
+  it('maps the all repositories workspace', () => {
+    expect(
+      mapWorkspace(
+        '__all_repositories__',
+        createContext({
+          routingRules: [
+            {
+              description: 'Route broad changes here.',
+              target: '__all_repositories__',
+            },
+          ],
+        }),
+      ),
+    ).toEqual({ type: 'all_repositories' });
+    expect(mapWorkspace('__all_repositories__', createContext())).toBeNull();
+  });
+
   it('can omit the platform workspace from the available environments list', () => {
     const prompt = buildContextPrompt(createContext(), {
       includePlatformWorkspace: false,
@@ -73,6 +106,7 @@ describe('router helpers', () => {
     const prompt = buildWorkspaceRoutingPrompt();
 
     expect(prompt).toContain('You are a workspace routing assistant');
+    expect(prompt).toContain('## Custom Routing Rules');
     expect(prompt).toContain('forwarded to a task run');
     expect(prompt).toContain(`## The ${PLATFORM_WORKSPACE_VALUE} Environment`);
     expect(prompt).toContain('"What can you do?" → __platform__');

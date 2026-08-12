@@ -407,6 +407,10 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       async (message: PromptInputMessage) => {
         const text = message.text.trim();
         const hasAttachments = (message.files?.length ?? 0) > 0;
+        const goalCommandMatch = /^\/goal(?:\s+([\s\S]*))?$/i.exec(text);
+        const goalObjective = goalCommandMatch
+          ? (goalCommandMatch[1] ?? '').trim()
+          : null;
         // Keyed off the live pending request rather than the task phase:
         // the phase can report running while the turn is still blocked on
         // the question, and a message here must answer it, not steer.
@@ -420,6 +424,19 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           !taskRun?.taskId ||
           sending
         ) {
+          return;
+        }
+
+        if (
+          !shouldAnswerPendingFreeText &&
+          goalObjective !== null &&
+          (!goalObjective || hasAttachments)
+        ) {
+          toast.error(
+            hasAttachments
+              ? 'Goal Mode does not support attachments.'
+              : 'Describe the goal after /goal.',
+          );
           return;
         }
 
@@ -443,7 +460,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           }
 
           const preparedPrompt = await preparePromptAttachments({
-            text,
+            text: goalObjective ?? text,
             attachments: message.files,
           });
 
@@ -459,15 +476,32 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           });
           optimisticClientMessageId = clientMessageId;
 
-          await trpcClient.sandboxSession.sendPrompt.mutate({
-            taskId: taskRun.taskId,
-            prompt: preparedPrompt.text,
-            images: preparedPrompt.images,
-            source: 'web',
-            clientMessageId,
-            userImageUrl,
-            autoSteerWhenQueued: true,
-          });
+          if (goalObjective !== null) {
+            const started = await trpcClient.taskRuns.startGoal.mutate({
+              taskId: taskRun.taskId,
+              goal: { objective: goalObjective },
+              clientMessageId,
+              userImageUrl,
+            });
+
+            if (!started.success) {
+              throw new Error(started.error);
+            }
+          } else {
+            await trpcClient.sandboxSession.sendPrompt.mutate({
+              taskId: taskRun.taskId,
+              prompt: preparedPrompt.text,
+              images: preparedPrompt.images,
+              source: 'web',
+              clientMessageId,
+              userImageUrl,
+              autoSteerWhenQueued: true,
+            });
+          }
+
+          if (goalObjective !== null) {
+            toast.success('Goal Mode enabled');
+          }
 
           handleMessageSent();
         } catch (err) {
@@ -512,25 +546,12 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
 
         handlePromptChange(value);
 
-        // Detect a newly typed "@" — the character just before the cursor.
-        if (
-          cursor > 0 &&
-          value[cursor - 1] === '@' &&
-          // Only trigger when the "@" is preceded by whitespace or is the
-          // first character, so we don't fire inside email addresses etc.
-          (cursor === 1 || /\s/.test(value[cursor - 2]!))
-        ) {
-          // Pass cursor position (right after the "@") so the selected
-          // file path will be inserted there.
-          onFileSearchOpen(cursor);
-        }
-
         // Detect a newly typed "/" at the very start of the message.
         if (cursor === 1 && value[0] === '/') {
           onCommandSearchOpen(cursor);
         }
       },
-      [handlePromptChange, onFileSearchOpen, onCommandSearchOpen],
+      [handlePromptChange, onCommandSearchOpen],
     );
 
     const voiceDictation = useVoiceDictation({
@@ -619,8 +640,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
       wasRecordingRef.current = voiceDictation.isRecording;
     }, [voiceDictation.isRecording, focusTextarea]);
 
-    const placeholder =
-      placeholderProp ?? 'Message agent - @ to add context, / for commands';
+    const placeholder = placeholderProp ?? 'Message agent, / for commands';
     const showConnectingStatus =
       !connected && !connectionError && !hasTransportError;
 

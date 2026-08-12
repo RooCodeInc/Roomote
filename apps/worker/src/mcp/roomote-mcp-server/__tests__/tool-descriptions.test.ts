@@ -131,6 +131,15 @@ describe('roomote MCP tool descriptions', () => {
     vi.unstubAllGlobals();
   });
 
+  it('uses existing task management instead of Doctor-specific MCP tools', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const toolNames = registeredTools.map(({ name }) => name);
+
+    expect(toolNames).toContain('manage_tasks');
+    expect(toolNames).not.toContain('diagnose_environment');
+    expect(toolNames).not.toContain('complete_doctor_report');
+  });
+
   it('documents every built-in custom automation schedule preset', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const automationsTool = getRegisteredTool(
@@ -147,6 +156,23 @@ describe('roomote MCP tool descriptions', () => {
     );
     expect(scheduleDescription).toContain(
       'Prefer a built-in preset when it matches the requested cadence.',
+    );
+  });
+
+  it('keeps cadence out of generated custom automation prompts', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const automationsTool = getRegisteredTool(
+      registeredTools,
+      'manage_custom_automations',
+    );
+
+    expect(automationsTool.config.description).toContain(
+      'Keep cadence only in the schedule field; do not repeat it in the stored prompt.',
+    );
+    expect(
+      getInputSchemaField(automationsTool, 'prompt').description,
+    ).toContain(
+      'Do not include the automation cadence; keep it only in the schedule field.',
     );
   });
 
@@ -646,6 +672,36 @@ describe('roomote MCP tool descriptions', () => {
     expect(latestField.description).toContain('message snowflake');
   });
 
+  it('registers and forwards the provider-neutral channel listing tool', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ channelCount: 0, platforms: [] }),
+      }),
+    );
+
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_CLOUD_TOKEN: 'run-token',
+      ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
+    });
+    const listTool = getRegisteredTool(registeredTools, 'list_chat_channels');
+
+    expect(listTool.config.description).toBe(
+      'List the communication channels Roomote is connected to or can currently discover, grouped by platform. Returns channel IDs and platform-specific workspace context so another chat tool can target the right channel. Some platforms do not support channel enumeration and report that limitation explicitly.',
+    );
+    expect(listTool.handler).toBeDefined();
+    await listTool.handler?.({});
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://platform.example.com/api/mcp/communication/channels',
+      expect.objectContaining({
+        method: 'POST',
+        body: '{}',
+      }),
+    );
+  });
+
   it('forwards generic thread lookups to the communication API', async () => {
     vi.stubGlobal(
       'fetch',
@@ -759,16 +815,20 @@ describe('roomote MCP tool descriptions', () => {
       ROOMOTE_SLACK_CHANNEL: 'C123',
     });
     const postTool = getRegisteredTool(registeredTools, 'post_to_channel');
+    const channelField = getInputSchemaField(postTool, 'channel');
     const textField = getInputSchemaField(postTool, 'text');
 
     expect(textField.description).toBe(
       'Markdown text to post. Lead with the answer or takeaway.',
     );
     expect(postTool.config.description).toBe(
-      'Slack-visible: posts a new standalone message into a Slack channel the Roomote app can access. Use this only when the current user explicitly asks you to post a separate update message rather than replying in the ongoing exchange; prefer send_chat_reply for normal replies. Pass a channel ID (Slack also accepts a channel name or mention). Cross-channel posts are subject to provider-specific authorization and target support. The message text renders as Markdown. Lead with the answer or takeaway, use short paragraphs, and put each list item on its own line.',
+      'Slack-visible: posts a new standalone message into a Slack channel the Roomote app can access. Use this only when the current user explicitly asks you to post a separate update message rather than replying in the ongoing exchange; prefer send_chat_reply for normal replies. Pass a channel ID (Slack also accepts a channel name or mention, DM ID, or linked Slack user ID/mention). Cross-channel posts and DMs are subject to provider-specific authorization and target support. The message text renders as Markdown. Lead with the answer or takeaway, use short paragraphs, and put each list item on its own line.',
     );
     expect(postTool.config.description).not.toContain(
       '<slack_modern_markdown>',
+    );
+    expect(channelField.description).toBe(
+      'Slack channel ID the Roomote app can access; Slack also accepts a linked user ID or mention for DMs',
     );
     expect(textField.description).not.toContain(
       'Keep simple updates simple instead of forcing structure.',

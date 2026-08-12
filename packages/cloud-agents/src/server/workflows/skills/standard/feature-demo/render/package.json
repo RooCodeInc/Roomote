@@ -1,0 +1,12 @@
+{
+  "name": "feature-demo-render",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Remotion composition for Roomote feature-demo videos. Copied to a sandbox work dir at demo time; not a workspace package.",
+  "dependencies": {
+    "@remotion/cli": "4.0.507",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "4.0.507"
+  }
+}

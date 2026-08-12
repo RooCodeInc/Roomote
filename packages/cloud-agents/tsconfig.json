@@ -4,5 +4,11 @@
     "types": ["node", "vitest/globals"]
   },
   "include": ["src", "evals"],
-  "exclude": ["node_modules"]
+  // The feature-demo skill bundles a standalone Remotion render project that
+  // is copied into a sandbox work dir at demo time; it is not part of this
+  // package's program (JSX, remotion deps).
+  "exclude": [
+    "node_modules",
+    "src/server/workflows/skills/standard/feature-demo/render"
+  ]
 }

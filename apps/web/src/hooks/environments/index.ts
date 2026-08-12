@@ -2,6 +2,8 @@ export {
   useAvailableEnvironments,
   useEnvironments,
   useEnvironment,
+  useWorkspaceRoutingSettings,
+  useUpdateWorkspaceRoutingSettings,
 } from './useEnvironments';
 export {
   useCreateEnvironment,

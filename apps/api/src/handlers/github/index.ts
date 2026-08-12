@@ -176,18 +176,28 @@ github.post('/', async (c) => {
 
     webhooks.on('issue_comment.created', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        if (isRepoSkipped(payload.repository.full_name)) {
-          return {
-            status: 'ok' as const,
-            message: `Skipping comment webhook for ${payload.repository.full_name}`,
-          };
-        }
-
         if (!payload.issue.pull_request) {
+          if (isRepoSkipped(payload.repository.full_name)) {
+            return {
+              status: 'ok' as const,
+              message: `Skipping comment webhook for ${payload.repository.full_name}`,
+            };
+          }
+
           return handleGitHubIssueComment(payload);
         }
 
-        queuePrReviewSummaryNotification(payload);
+        await Promise.all([
+          queuePrReviewActivityNotification(payload),
+          queuePrReviewSummaryNotification(payload),
+        ]);
+
+        if (isRepoSkipped(payload.repository.full_name)) {
+          return {
+            status: 'ok' as const,
+            message: `Skipping automated comment handling for ${payload.repository.full_name}`,
+          };
+        }
 
         return handlePrComment(payload);
       }),
@@ -195,20 +205,13 @@ github.post('/', async (c) => {
 
     webhooks.on('issue_comment.edited', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        if (isRepoSkipped(payload.repository.full_name)) {
-          return {
-            status: 'ok' as const,
-            message: `Skipping comment webhook for ${payload.repository.full_name}`,
-          };
-        }
-
         if (!payload.issue.pull_request) {
           return { status: 'ok' as const, message: 'not_a_pr_comment' };
         }
 
         // Roomote review summaries are posted as "review in progress" and
         // patched with the results, so the terminal content arrives here.
-        queuePrReviewSummaryNotification(payload);
+        await queuePrReviewSummaryNotification(payload);
 
         return { status: 'ok' as const };
       }),
@@ -427,14 +430,14 @@ github.post('/', async (c) => {
 
     webhooks.on('pull_request_review.submitted', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
+        await queuePrReviewActivityNotification(payload);
+
         if (isRepoSkipped(payload.repository.full_name)) {
           return {
             status: 'ok' as const,
-            message: `Skipping review webhook for ${payload.repository.full_name}`,
+            message: `Skipping automated review handling for ${payload.repository.full_name}`,
           };
         }
-
-        queuePrReviewActivityNotification(payload);
 
         return handlePrComment(payload);
       }),
@@ -444,14 +447,14 @@ github.post('/', async (c) => {
       'pull_request_review_comment.created',
       ({ id, name, payload }) =>
         recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
+          await queuePrReviewActivityNotification(payload);
+
           if (isRepoSkipped(payload.repository.full_name)) {
             return {
               status: 'ok' as const,
-              message: `Skipping comment webhook for ${payload.repository.full_name}`,
+              message: `Skipping automated comment handling for ${payload.repository.full_name}`,
             };
           }
-
-          queuePrReviewActivityNotification(payload);
 
           return handlePrComment(payload);
         }),

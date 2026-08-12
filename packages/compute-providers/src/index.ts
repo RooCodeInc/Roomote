@@ -17,5 +17,7 @@ export * from './adapters/e2b';
 export * from './e2b';
 export * from './adapters/blaxel';
 export * from './blaxel';
+export * from './adapters/box';
+export * from './box';
 export * from './adapters/azure';
 export * from './azure';

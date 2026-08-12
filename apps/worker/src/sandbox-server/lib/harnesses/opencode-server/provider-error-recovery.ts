@@ -126,6 +126,10 @@ function hasErrorName(values: unknown[], names: Set<string>): boolean {
   });
 }
 
+export function isOpenCodeContextOverflowError(error: unknown): boolean {
+  return hasErrorName(collectProviderErrorValues(error), TERMINAL_ERROR_NAMES);
+}
+
 function isExplicitlyTerminal(values: unknown[]): boolean {
   if (values.some((value) => asRecord(value)?.isRetryable === false)) {
     return true;

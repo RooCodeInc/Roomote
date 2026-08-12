@@ -158,6 +158,53 @@ const MONDAY_READ_ONLY_TOOL_NAMES = [
   'get_type_details',
 ] as const;
 
+/**
+ * X's hosted MCP server exposes a curated subset of X API v2 operations, one
+ * tool per operation, named in snake_case (e.g. `search_posts_all`, not the
+ * camelCase `searchPostsAll` operationId). This allowlist keeps the read-only,
+ * public-data subset that works with an app-only bearer token; mutating
+ * operations and user-context surfaces (posting, bookmarks, DMs, mentions,
+ * timelines) are excluded. The exact set the server advertises varies with the
+ * connected X API plan, so this lists every read-only public-data tool we
+ * expect across plans; names the server does not advertise simply never match.
+ */
+const X_READ_ONLY_TOOL_NAMES = [
+  'search_posts_recent',
+  'search_posts_all',
+  'get_posts_counts_recent',
+  'get_posts_counts_all',
+  'get_posts_by_id',
+  'get_posts_by_ids',
+  'get_posts_quoted_posts',
+  'get_posts_reposted_by',
+  'get_posts_reposts',
+  'get_posts_liking_users',
+  'get_users_by_id',
+  'get_users_by_ids',
+  'get_users_by_username',
+  'get_users_by_usernames',
+  'search_users',
+  'get_users_posts',
+  'get_users_followers',
+  'get_users_following',
+  'get_users_liked_posts',
+  'get_users_owned_lists',
+  'get_trends_by_woeid',
+  'get_news',
+  'search_news',
+  'get_lists_by_id',
+  'get_lists_posts',
+  'get_lists_members',
+  'get_lists_followers',
+  'get_spaces_by_id',
+  'get_spaces_by_ids',
+  'get_spaces_posts',
+  'search_spaces',
+  'get_communities_by_id',
+  'search_communities',
+  'get_usage',
+] as const;
+
 const INTEGRATION_MCP_ALLOWED_TOOL_NAMES: Readonly<
   Partial<Record<string, readonly string[]>>
 > = {
@@ -168,6 +215,7 @@ const INTEGRATION_MCP_ALLOWED_TOOL_NAMES: Readonly<
   pylon: PYLON_READ_ONLY_TOOL_NAMES,
   railway: RAILWAY_READ_ONLY_TOOL_NAMES,
   sentry: SENTRY_READ_ONLY_TOOL_NAMES,
+  x: X_READ_ONLY_TOOL_NAMES,
 };
 
 export type McpToolPolicy = {

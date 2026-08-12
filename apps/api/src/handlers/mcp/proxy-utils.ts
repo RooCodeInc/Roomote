@@ -459,6 +459,112 @@ function filterToolsListPayload(
   };
 }
 
+/**
+ * Parse a single SSE event chunk and return the JSON-RPC response it carries
+ * when that response matches the request `id` (and holds a `result`/`error`).
+ * `notifications/progress` frames carry no `id` and are skipped. Returns `null`
+ * when the event is not the matching response.
+ */
+function parseSseEventJsonRpcResponse(
+  eventChunk: string,
+  expectedId: JsonRpcRequestId,
+): unknown | null {
+  const dataText = eventChunk
+    .split(/\r?\n/)
+    .flatMap((line) =>
+      line.startsWith('data:') ? [line.slice('data:'.length).trimStart()] : [],
+    )
+    .join('\n')
+    .trim();
+
+  if (dataText.length === 0) {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(dataText);
+  } catch {
+    return null;
+  }
+
+  if (!parsed || typeof parsed !== 'object') {
+    return null;
+  }
+
+  const message = parsed as {
+    id?: unknown;
+    result?: unknown;
+    error?: unknown;
+  };
+  const hasResponsePayload = 'result' in message || 'error' in message;
+  const idMatches =
+    expectedId === null
+      ? message.id === undefined || message.id === null
+      : message.id === expectedId;
+
+  return hasResponsePayload && idMatches ? parsed : null;
+}
+
+/**
+ * Read an SSE-framed MCP reply incrementally and resolve with the JSON-RPC
+ * response whose `id` matches the request as soon as that frame arrives —
+ * without waiting for the stream to close.
+ *
+ * Streamable HTTP MCP servers may answer a POST request with
+ * `content-type: text/event-stream`, delivering the JSON-RPC response as one
+ * `data:` frame (optionally preceded by `notifications/progress` frames). The
+ * spec allows the server to keep that SSE connection open after the response
+ * to emit further messages, so waiting for closure could hang the caller. This
+ * returns the matching response frame the moment it is seen and cancels the
+ * reader. Returns `null` if the stream ends before a matching response frame
+ * appears.
+ */
+async function readMatchingSseJsonRpcResponse(
+  body: ReadableStream<Uint8Array>,
+  expectedId: JsonRpcRequestId,
+): Promise<unknown | null> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+
+      if (value) {
+        buffer += decoder.decode(value, { stream: true });
+
+        for (;;) {
+          const boundary = /\r?\n\r?\n/.exec(buffer);
+          if (!boundary) {
+            break;
+          }
+
+          const eventChunk = buffer.slice(0, boundary.index);
+          buffer = buffer.slice(boundary.index + boundary[0].length);
+
+          const match = parseSseEventJsonRpcResponse(eventChunk, expectedId);
+          if (match !== null) {
+            return match;
+          }
+        }
+      }
+
+      if (done) {
+        buffer += decoder.decode();
+        return parseSseEventJsonRpcResponse(buffer, expectedId);
+      }
+    }
+  } finally {
+    // Fire-and-forget: awaiting cancel() on a teed branch can block until the
+    // other branch drains, which would defeat the early return.
+    reader.cancel().catch(() => {
+      // Ignore cancel failures on an already-settled reader.
+    });
+  }
+}
+
 class RequestBodyTooLargeError extends Error {
   constructor(readonly observedBytes: number) {
     super('Request body exceeds the configured limit');
@@ -916,6 +1022,51 @@ export function createMcpProxy(config: McpProxyConfig) {
           status: upstreamResponse.status,
           headers: buildProxyResponseHeaders(upstreamResponse.headers),
         });
+      }
+
+      // Some Streamable HTTP MCP servers (e.g. X) answer a POST request with an
+      // SSE stream that carries the single JSON-RPC response as one `data:`
+      // frame. Not every MCP client consumes an SSE-framed reply to a POST —
+      // OpenCode, for one, hangs until its request timeout and cancels the call
+      // even though the upstream already returned the result in milliseconds.
+      // Normalize such single-response SSE replies to a plain JSON body (the
+      // same shape tools/list replies are re-serialized into above) so every
+      // client can read them. The reply is read incrementally and returned the
+      // moment the id-matched response frame arrives, so a server that keeps
+      // the SSE connection open after responding does not stall the proxy.
+      // Requests without an id are notifications with no response, and streams
+      // that end without a matching response fall through to the raw stream.
+      const sseResponseBody =
+        method === 'POST' &&
+        upstreamResponse.ok &&
+        contentType?.includes('text/event-stream') &&
+        getJsonRpcRequestId(parsedBody) !== null &&
+        !Array.isArray(parsedBody)
+          ? upstreamResponse.clone().body
+          : null;
+
+      if (sseResponseBody) {
+        try {
+          const response = await readMatchingSseJsonRpcResponse(
+            sseResponseBody,
+            getJsonRpcRequestId(parsedBody),
+          );
+          if (response) {
+            // The raw upstream body is no longer needed; cancel it to release
+            // the upstream connection instead of leaving it open.
+            upstreamResponse.body?.cancel().catch(() => {});
+
+            const headers = buildProxyResponseHeaders(upstreamResponse.headers);
+            headers.set('content-type', 'application/json');
+
+            return new Response(JSON.stringify(response), {
+              status: upstreamResponse.status,
+              headers,
+            });
+          }
+        } catch {
+          // Fall through to streaming the raw upstream response.
+        }
       }
 
       return new Response(

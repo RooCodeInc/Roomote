@@ -11,6 +11,7 @@ import {
   type RunLaunchClass,
   type SourceControlProvider,
   type TaskInitiator,
+  type TaskGoalInput,
   type TaskSurface,
   type TaskTrigger,
   type TaskVisibility,
@@ -964,6 +965,7 @@ type FreshTask = Exclude<
  */
 export type FreshTaskLaunch = {
   task: FreshTask;
+  goal?: TaskGoalInput;
   /** Explicit user-facing title. Locked against all LLM title generation. */
   title?: string;
   initiator: TaskInitiator;
@@ -1487,6 +1489,9 @@ async function enqueueFreshLaunch(
   }
 
   const initialPrompt = getInitialTaskPrompt(task) ?? null;
+  const initialGoalGeneration = input.goal
+    ? `goal-generation:${randomUUID()}`
+    : null;
   const externalGithubIdentity = {
     githubLogin: 'githubLogin' in task ? task.githubLogin : null,
     githubUserId: 'githubUserId' in task ? task.githubUserId : null,
@@ -1531,6 +1536,11 @@ async function enqueueFreshLaunch(
           ? { llmTitleCheckpoint: LLM_TITLE_LOCKED_CHECKPOINT }
           : {}),
         prompt: initialPrompt,
+        goalObjective: input.goal?.objective ?? null,
+        goalStatus: input.goal ? 'active' : null,
+        goalMaxContinuations: input.goal?.maxContinuations ?? null,
+        goalLastContinuationId: initialGoalGeneration,
+        goalGenerationIds: initialGoalGeneration ? [initialGoalGeneration] : [],
         requestedWorkKind: requestedWorkKindDecision.kind,
         requestedWorkKindSource: requestedWorkKindDecision.source,
         requestedWorkKindConfidence: requestedWorkKindDecision.confidence,

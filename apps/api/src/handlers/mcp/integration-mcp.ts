@@ -6,10 +6,12 @@ import {
   mcpConnections,
   deploymentMcpEnablements,
 } from '@roomote/db/server';
+import { decrypt } from '@roomote/db/encryption';
 import { getValidAccessToken } from '@roomote/sdk/server';
 import {
   getMcpIntegrationUpstreamUrl,
   getMcpIntegrationConnectionScope,
+  isMcpConnectionXConfig,
   type McpIntegration,
 } from '@roomote/types';
 
@@ -20,7 +22,7 @@ import {
   resolveActingUserIdOrNull,
 } from './proxy-utils';
 
-async function resolveOAuthAccessToken(
+async function resolveUpstreamAccessToken(
   mcpId: string,
   mcpUrl: string,
   userId: string | null,
@@ -54,6 +56,18 @@ async function resolveOAuthAccessToken(
   if (!connection) {
     return {
       accessToken: null,
+    };
+  }
+
+  // Admin-configured upstream integrations store a static bearer token
+  // instead of OAuth tokens; the proxy forwards it as-is.
+  if (isMcpConnectionXConfig(connection.authConfig)) {
+    const bearerToken = decrypt(
+      connection.authConfig.encryptedBearerToken,
+    ).trim();
+
+    return {
+      accessToken: bearerToken.length > 0 ? bearerToken : null,
     };
   }
 
@@ -116,7 +130,7 @@ export function createIntegrationMcpProxy(
       let accessToken: string | null;
       let disabledToolNames: string[] | null = null;
       try {
-        const resolvedConnection = await resolveOAuthAccessToken(
+        const resolvedConnection = await resolveUpstreamAccessToken(
           integration.id,
           upstreamUrl,
           actingUserId,
@@ -132,7 +146,7 @@ export function createIntegrationMcpProxy(
 
         throw new McpProxyError(
           500,
-          `Failed to resolve ${integration.name} OAuth token: ${
+          `Failed to resolve ${integration.name} credentials: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
@@ -142,8 +156,8 @@ export function createIntegrationMcpProxy(
         throw new McpProxyError(
           404,
           getMcpIntegrationConnectionScope(integration) === 'deployment'
-            ? `No active ${integration.name} connection with valid OAuth tokens found for this workspace`
-            : `No active ${integration.name} connection with valid OAuth tokens found for this user`,
+            ? `No active ${integration.name} connection with valid credentials found for this workspace`
+            : `No active ${integration.name} connection with valid credentials found for this user`,
         );
       }
 

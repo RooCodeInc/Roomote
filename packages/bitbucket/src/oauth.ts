@@ -2,6 +2,12 @@ import { randomBytes } from 'node:crypto';
 
 import { db, deploymentSecrets, eq, sql } from '@roomote/db/server';
 import { decryptSecrets, encryptJSON } from '@roomote/db/encryption';
+import {
+  OAuthRefreshError,
+  createOAuthRefreshCoordinator,
+  isDefinitiveOAuthErrorCode,
+  readOAuthErrorCode,
+} from '@roomote/source-control-oauth';
 
 import { BITBUCKET_OAUTH_CALLBACK_PATH } from './constants';
 
@@ -43,25 +49,10 @@ type BitbucketOAuthTokenResponse = {
   scopes?: string;
 };
 
-type BitbucketOAuthErrorResponse = {
-  error?: string;
-};
-
-function isDefinitiveOAuthError(error: string | undefined): boolean {
-  return ['invalid_grant', 'invalid_client', 'unauthorized_client'].includes(
-    error ?? '',
-  );
-}
-
 export type BitbucketOAuthAccessToken = {
   accessToken: string;
   expiresAt: Date | null;
 };
-
-let refreshPromise: Promise<BitbucketOAuthAccessToken | null> | null = null;
-let deletionPromise: Promise<void> | null = null;
-let connectionGeneration = 0;
-let cachedAccessToken: string | null = null;
 
 export function getBitbucketOAuthScopes(): readonly string[] {
   return DEFAULT_SCOPES;
@@ -114,40 +105,47 @@ async function writeConnection(connection: BitbucketOAuthConnection) {
     });
 }
 
+type BitbucketOAuthRefreshOptions = {
+  fetchImpl?: typeof fetch;
+  forceRefresh?: boolean;
+  requestTimeoutMs?: number;
+};
+
+const refreshCoordinator = createOAuthRefreshCoordinator<
+  BitbucketOAuthConnection,
+  BitbucketOAuthAccessToken,
+  BitbucketOAuthRefreshOptions
+>({
+  readConnection,
+  writeConnection,
+  deleteConnection: async () => {
+    await db
+      .delete(deploymentSecrets)
+      .where(eq(deploymentSecrets.name, SECRET_NAME));
+  },
+  isFresh: (connection) =>
+    Date.parse(connection.expiresAt) > Date.now() + 60_000,
+  refresh: refreshBitbucketOAuthConnection,
+  toResult: (connection) =>
+    toAccessTokenResult(connection.accessToken, connection.expiresAt),
+});
+
 export async function getBitbucketOAuthConnection() {
   return readConnection();
 }
 
 export async function deleteBitbucketOAuthConnection(): Promise<void> {
-  if (!deletionPromise) {
-    connectionGeneration += 1;
-    const inFlightRefresh = refreshPromise;
-    deletionPromise = (async () => {
-      await inFlightRefresh?.catch(() => undefined);
-      await db
-        .delete(deploymentSecrets)
-        .where(eq(deploymentSecrets.name, SECRET_NAME));
-      refreshPromise = null;
-      cachedAccessToken = null;
-    })();
-  }
-
-  try {
-    await deletionPromise;
-  } finally {
-    deletionPromise = null;
-  }
+  await refreshCoordinator.delete();
 }
 
 export function isBitbucketOAuthAccessToken(token: string): boolean {
-  return token === cachedAccessToken;
+  return refreshCoordinator.isAccessToken(token);
 }
 
 function toAccessTokenResult(
   accessToken: string,
   expiresAt: string,
 ): BitbucketOAuthAccessToken {
-  cachedAccessToken = accessToken;
   const parsedExpiresAt = new Date(expiresAt);
   return {
     accessToken,
@@ -225,102 +223,57 @@ export async function exchangeBitbucketOAuthCode(input: {
     // The token exchange remains valid if the identity lookup is temporarily unavailable.
   }
   await writeConnection(connection);
-  cachedAccessToken = connection.accessToken;
+  refreshCoordinator.remember(connection);
   return connection;
 }
 
-export async function resolveBitbucketOAuthAccessTokenWithMetadata(options?: {
-  fetchImpl?: typeof fetch;
-  forceRefresh?: boolean;
-  requestTimeoutMs?: number;
-}): Promise<BitbucketOAuthAccessToken | null> {
-  if (deletionPromise) {
-    await deletionPromise;
-    return null;
-  }
-  const generation = connectionGeneration;
-  const connection = await readConnection();
-  if (generation !== connectionGeneration || deletionPromise) {
-    await deletionPromise;
-    return null;
-  }
-  if (!connection || connection.status !== 'active') return null;
-  if (
-    !options?.forceRefresh &&
-    Date.parse(connection.expiresAt) > Date.now() + 60_000
-  ) {
-    return toAccessTokenResult(connection.accessToken, connection.expiresAt);
-  }
-  if (refreshPromise) return refreshPromise;
-  refreshPromise = (async () => {
-    const response = await (options?.fetchImpl ?? fetch)(
-      'https://bitbucket.org/site/oauth2/access_token',
-      {
-        method: 'POST',
-        headers: {
-          Accept: 'application/json',
-          Authorization: `Basic ${Buffer.from(`${connection.clientId}:${connection.clientSecret}`).toString('base64')}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          grant_type: 'refresh_token',
-          refresh_token: connection.refreshToken,
-        }),
-        signal: AbortSignal.timeout(
-          options?.requestTimeoutMs ?? BITBUCKET_OAUTH_REQUEST_TIMEOUT_MS,
-        ),
+async function refreshBitbucketOAuthConnection(
+  connection: BitbucketOAuthConnection,
+  options: BitbucketOAuthRefreshOptions | undefined,
+): Promise<BitbucketOAuthConnection> {
+  const response = await (options?.fetchImpl ?? fetch)(
+    'https://bitbucket.org/site/oauth2/access_token',
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Basic ${Buffer.from(`${connection.clientId}:${connection.clientSecret}`).toString('base64')}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
       },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: connection.refreshToken,
+      }),
+      signal: AbortSignal.timeout(
+        options?.requestTimeoutMs ?? BITBUCKET_OAUTH_REQUEST_TIMEOUT_MS,
+      ),
+    },
+  );
+  if (!response.ok) {
+    const oauthError = await readOAuthErrorCode(response);
+    throw new OAuthRefreshError(
+      `Bitbucket OAuth refresh failed: ${response.status} ${response.statusText}`,
+      isDefinitiveOAuthErrorCode(oauthError),
     );
-    if (!response.ok) {
-      if (generation !== connectionGeneration) return null;
-      const oauthError = await response
-        .clone()
-        .json()
-        .then((body) => (body as BitbucketOAuthErrorResponse).error)
-        .catch(() => undefined);
-
-      if (isDefinitiveOAuthError(oauthError)) {
-        const latest = await readConnection();
-        if (
-          latest?.status === 'active' &&
-          latest.accessToken !== connection.accessToken &&
-          Date.parse(latest.expiresAt) > Date.now() + 60_000
-        ) {
-          return toAccessTokenResult(latest.accessToken, latest.expiresAt);
-        }
-        await writeConnection({
-          ...(latest ?? connection),
-          status: 'reauthorization_required',
-        });
-      }
-
-      throw new Error(
-        `Bitbucket OAuth refresh failed: ${response.status} ${response.statusText}`,
-      );
-    }
-    const token = (await response.json()) as BitbucketOAuthTokenResponse;
-    if (!token.access_token)
-      throw new Error(
-        'Bitbucket OAuth refresh did not return an access token.',
-      );
-    const next = {
-      ...connection,
-      accessToken: token.access_token,
-      refreshToken: token.refresh_token ?? connection.refreshToken,
-      expiresAt: new Date(
-        Date.now() + (token.expires_in ?? 3600) * 1000,
-      ).toISOString(),
-      status: 'active' as const,
-    };
-    if (generation !== connectionGeneration) return null;
-    await writeConnection(next);
-    return toAccessTokenResult(next.accessToken, next.expiresAt);
-  })();
-  try {
-    return await refreshPromise;
-  } finally {
-    refreshPromise = null;
   }
+  const token = (await response.json()) as BitbucketOAuthTokenResponse;
+  if (!token.access_token)
+    throw new Error('Bitbucket OAuth refresh did not return an access token.');
+  return {
+    ...connection,
+    accessToken: token.access_token,
+    refreshToken: token.refresh_token ?? connection.refreshToken,
+    expiresAt: new Date(
+      Date.now() + (token.expires_in ?? 3600) * 1000,
+    ).toISOString(),
+    status: 'active',
+  };
+}
+
+export async function resolveBitbucketOAuthAccessTokenWithMetadata(
+  options?: BitbucketOAuthRefreshOptions,
+): Promise<BitbucketOAuthAccessToken | null> {
+  return refreshCoordinator.resolve(options);
 }
 
 export async function resolveBitbucketOAuthAccessToken(options?: {

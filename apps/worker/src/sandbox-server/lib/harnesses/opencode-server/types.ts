@@ -125,6 +125,22 @@ export interface OpenCodePromptRequest {
   parts: OpenCodePromptPart[];
 }
 
+export interface OpenCodeQuestionRequest {
+  id: string;
+  sessionID: string;
+  questions: Array<{
+    question: string;
+    header: string;
+    options: Array<{ label: string; description: string }>;
+    multiple?: boolean;
+    custom?: boolean;
+  }>;
+  tool?: {
+    messageID: string;
+    callID: string;
+  };
+}
+
 export interface OpenCodeGlobalEvent {
   directory?: string;
   payload?: OpenCodeEventPayload;

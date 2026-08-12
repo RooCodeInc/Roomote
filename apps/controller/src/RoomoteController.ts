@@ -13,6 +13,8 @@ import {
   resolveComputeProviderEnvValues,
 } from '@roomote/db/server';
 
+import { DEFAULT_BOX_TIMEOUT_MS } from '@roomote/compute-providers';
+
 import { BaseController } from './BaseController';
 import {
   cleanupStaleDockerSandboxes,
@@ -21,6 +23,7 @@ import {
   DOCKER_SPAWN_TIMEOUT_MS,
   spawnE2bWorker,
   spawnBlaxelWorker,
+  spawnBoxWorker,
   spawnAzureWorker,
   spawnModalWorker,
 } from './compute-providers';
@@ -303,6 +306,36 @@ export class RoomoteController extends BaseController {
           blaxelImage,
           blaxelRegion: resolvedEnv.BLAXEL_REGION,
           blaxelTimeoutMs: timeoutMs,
+          localTarballPath: this.localWorkerReleasePath,
+        });
+        return;
+      }
+      case 'box': {
+        const boxApiKey = resolvedEnv.BOX_API_KEY;
+        if (!boxApiKey) {
+          throw new Error('BOX_API_KEY is required to spawn Box workers');
+        }
+
+        const configuredTimeoutMs = Number(resolvedEnv.BOX_TIMEOUT_MS);
+        const boxTimeoutMs = Math.min(
+          timeoutMs,
+          Number.isFinite(configuredTimeoutMs) && configuredTimeoutMs > 0
+            ? configuredTimeoutMs
+            : DEFAULT_BOX_TIMEOUT_MS,
+        );
+        const machineType = resolvedEnv.BOX_MACHINE_TYPE;
+
+        await spawnBoxWorker(taskRun, authToken, {
+          deploymentSlug,
+          boxApiKey,
+          boxApiBaseUrl: resolvedEnv.BOX_API_BASE_URL,
+          boxMachineType:
+            machineType === 'small' ||
+            machineType === 'default' ||
+            machineType === 'large'
+              ? machineType
+              : undefined,
+          boxTimeoutMs,
           localTarballPath: this.localWorkerReleasePath,
         });
         return;

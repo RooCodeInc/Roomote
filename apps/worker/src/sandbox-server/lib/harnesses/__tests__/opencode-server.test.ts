@@ -48,6 +48,9 @@ class FakeOpenCodeServerClient {
   messages = vi.fn(async () => [] as OpenCodeSessionMessage[]);
   message = vi.fn<() => Promise<OpenCodeSessionMessage>>();
   abort = vi.fn(async () => true);
+  questions = vi.fn(async () => []);
+  replyQuestion = vi.fn(async () => true);
+  rejectQuestion = vi.fn(async () => true);
   get sessionCreateTimeoutMsValue(): number {
     return 90_000;
   }
@@ -416,6 +419,59 @@ describe('OpenCodeServerHarness', () => {
           messageCompletedAt: new Date(1),
         },
       ]);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('adds trusted goal generation context without changing the visible prompt', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: {
+            text: 'Finish the replacement goal.',
+            goalContext: {
+              objective: 'Finish the replacement goal.',
+              generation: 'goal-generation:replacement',
+              status: 'active',
+              maxContinuations: 5,
+              continuationsUsed: 0,
+              blockedReason: null,
+              completedAt: null,
+            },
+            visibleInTranscript: true,
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+      expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
+        request: {
+          parts: [
+            {
+              type: 'text',
+              text: expect.stringContaining('goal-generation:replacement'),
+            },
+          ],
+        },
+      });
+      expect(
+        persistedEnvelopes.find(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        )?.payload.text,
+      ).toBe('Finish the replacement goal.');
     } finally {
       harness.dispose();
     }
@@ -1661,124 +1717,58 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('drains an answered question replay before evaluating the stop guard', async () => {
-    const tempDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'roomote-opencode-stop-guard-replay-'),
-    );
-    const stateFilePath = path.join(tempDir, 'slack-state.json');
-    const stopHookPath = path.join(tempDir, 'stop-hook.cjs');
-
-    fs.writeFileSync(
-      stateFilePath,
-      JSON.stringify({
-        currentTurnMessageTs: '111.222',
-        currentTurnStartedAtMs: Date.now() - 1_000,
-        tool: 'request_user_input',
-      }),
-      'utf8',
-    );
-    fs.writeFileSync(stopHookPath, SLACK_STOP_HOOK_SCRIPT, 'utf8');
-
-    const client = new FakeOpenCodeServerClient();
-    let resolveAbort: (value: boolean) => void = () => undefined;
-    client.abort.mockImplementationOnce(
-      () =>
-        new Promise<boolean>((resolve) => {
-          resolveAbort = resolve;
-        }),
-    );
-    const { harness } = createHarness(client, {
-      commandEnv: {
-        ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE: stateFilePath,
-        ROOMOTE_OPENCODE_SLACK_STOP_HOOK_SCRIPT: stopHookPath,
-      },
-    });
+  it('resumes an answered question without aborting or replaying the turn', async () => {
+    const { client, harness } = createHarness();
 
     try {
       await connectHarness(harness, client);
-
-      expect(
-        harness.sendCommand({
-          commandName: TaskCommandName.StartNewTask,
-          data: { text: 'Ask for input.', visibleInTranscript: true },
-        }),
-      ).toBe(true);
-
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Ask for input.', visibleInTranscript: true },
+      });
       await vi.waitFor(() => {
         expect(client.promptAsync).toHaveBeenCalledTimes(1);
       });
 
       await client.emit({
-        type: 'message.part.updated',
+        type: 'question.asked',
         properties: {
-          part: {
-            id: 'question_part_1',
-            sessionID: 'ses_1',
-            messageID: 'msg_question',
-            type: 'tool',
-            callID: 'question_call_1',
-            tool: 'question',
-            state: {
-              status: 'running',
-              input: {
-                questions: [
-                  {
-                    id: 'color',
-                    header: 'Color',
-                    question: 'Which color should I use?',
-                    options: [{ label: 'Blue', description: 'Use blue.' }],
-                  },
-                ],
-              },
-              title: 'Ask user',
-            },
-          },
-        },
-      });
-
-      const pendingRequest = harness.getPendingUserInputRequests()[0];
-      expect(
-        harness.sendCommand({
-          commandName: TaskCommandName.AnswerUserInputRequest,
-          data: {
-            requestId: pendingRequest!.requestId,
-            answers: { color: { answers: ['Blue'] } },
-          },
-        }),
-      ).toBe(true);
-
-      await vi.waitFor(() => {
-        expect(client.abort).toHaveBeenCalledTimes(1);
-      });
-
-      await client.emit({
-        type: 'session.status',
-        properties: {
+          id: 'que_1',
           sessionID: 'ses_1',
-          status: { type: 'idle' },
+          questions: [
+            {
+              header: 'Color',
+              question: 'Which color should I use?',
+              options: [{ label: 'Blue', description: 'Use blue.' }],
+            },
+          ],
+          tool: {
+            messageID: 'msg_question',
+            callID: 'question_call_1',
+          },
+        },
+      });
+
+      const pendingRequest = harness.getPendingUserInputRequests()[0]!;
+      harness.sendCommand({
+        commandName: TaskCommandName.AnswerUserInputRequest,
+        data: {
+          requestId: pendingRequest.requestId,
+          answers: { 'question-1': { answers: ['Blue'] } },
         },
       });
 
       await vi.waitFor(() => {
-        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+        expect(client.replyQuestion).toHaveBeenCalledWith({
+          requestId: 'que_1',
+          answers: [['Blue']],
+          signal: expect.any(AbortSignal),
+        });
       });
-      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
-        sessionId: 'ses_1',
-        request: {
-          parts: [{ type: 'text', text: expect.stringContaining('Blue') }],
-        },
-      });
-
-      await client.emit({
-        type: 'session.idle',
-        properties: { sessionID: 'ses_1' },
-      });
-      expect(client.promptAsync).toHaveBeenCalledTimes(2);
-
-      resolveAbort(true);
+      expect(client.abort).not.toHaveBeenCalled();
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
     } finally {
       harness.dispose();
-      fs.rmSync(tempDir, { recursive: true, force: true });
     }
   });
 
@@ -1858,7 +1848,7 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('does not leak replay suppression onto later queued prompts once the replay is delivered', async () => {
+  it('still applies closeout enforcement after a native question answer', async () => {
     const tempDir = fs.mkdtempSync(
       path.join(os.tmpdir(), 'roomote-opencode-stop-guard-replay-leak-'),
     );
@@ -1924,6 +1914,24 @@ describe('OpenCodeServerHarness', () => {
           },
         },
       });
+      await client.emit({
+        type: 'question.asked',
+        properties: {
+          id: 'que_1',
+          sessionID: 'ses_1',
+          questions: [
+            {
+              header: 'Color',
+              question: 'Which color should I use?',
+              options: [{ label: 'Blue', description: 'Use blue.' }],
+            },
+          ],
+          tool: {
+            messageID: 'msg_question',
+            callID: 'question_call_1',
+          },
+        },
+      });
 
       const pendingRequest = harness.getPendingUserInputRequests()[0];
       expect(
@@ -1936,18 +1944,14 @@ describe('OpenCodeServerHarness', () => {
         }),
       ).toBe(true);
 
-      // The abort resolves immediately, so the interrupt path submits the
-      // replay itself without any idle transition in between. The suppression
-      // window must close with that delivery.
       await vi.waitFor(() => {
-        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+        expect(client.replyQuestion).toHaveBeenCalledWith({
+          requestId: 'que_1',
+          answers: [['Blue']],
+          signal: expect.any(AbortSignal),
+        });
       });
-      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
-        sessionId: 'ses_1',
-        request: {
-          parts: [{ type: 'text', text: expect.stringContaining('Blue') }],
-        },
-      });
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
 
       expect(
         harness.sendCommand({
@@ -1966,9 +1970,9 @@ describe('OpenCodeServerHarness', () => {
       });
 
       await vi.waitFor(() => {
-        expect(client.promptAsync).toHaveBeenCalledTimes(3);
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
       });
-      expect(client.promptAsync.mock.calls[2]?.[0]).toMatchObject({
+      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
         sessionId: 'ses_1',
         request: {
           parts: [
@@ -2438,6 +2442,150 @@ describe('OpenCodeServerHarness', () => {
         ),
       ).toBe(true);
       expect(harness.getQueuedMessages()).toEqual([]);
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('lets OpenCode compact and recover after a context overflow', async () => {
+    const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Start work.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: {
+            name: 'ContextOverflowError',
+            data: { message: 'Input exceeds context window of this model' },
+          },
+        },
+      });
+
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
+
+      await client.emit({
+        type: 'session.compacted',
+        properties: { sessionID: 'ses_1' },
+      });
+      await client.emit({
+        type: 'session.status',
+        properties: { sessionID: 'ses_1', status: { type: 'busy' } },
+      });
+      client.messages.mockResolvedValueOnce([createFinalAssistantMessage()]);
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(false);
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskCompleted,
+        ),
+      ).toBe(true);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('aborts when context overflow reaches idle before compaction succeeds', async () => {
+    const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Start work.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'session.error',
+        properties: {
+          sessionID: 'ses_1',
+          error: {
+            name: 'ContextOverflowError',
+            data: { message: 'Input exceeds context window of this model' },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      expect(
+        taskEvents.some(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toBe(true);
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('aborts when compaction also overflows', async () => {
+    const { client, harness } = createHarness();
+    const taskEvents: TaskEvent[] = [];
+    const overflowError = {
+      name: 'ContextOverflowError',
+      data: { message: 'Input exceeds context window of this model' },
+    };
+
+    harness.subscribe((event) => taskEvents.push(event));
+
+    try {
+      await connectHarness(harness, client);
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Start work.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'session.error',
+        properties: { sessionID: 'ses_1', error: overflowError },
+      });
+      await client.emit({
+        type: 'session.error',
+        properties: { sessionID: 'ses_1', error: overflowError },
+      });
+
+      expect(
+        taskEvents.filter(
+          (event) => event.eventName === TaskEventName.TaskAborted,
+        ),
+      ).toHaveLength(1);
       expect(client.promptAsync).toHaveBeenCalledTimes(1);
     } finally {
       harness.dispose();
@@ -3523,7 +3671,7 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
-  it('records OpenCode question tool requests and delivers answers as a follow-up prompt', async () => {
+  it('records OpenCode question tool requests and replies through the native question API', async () => {
     const beforeQueuedPrompt = vi.fn(async () => undefined);
     const { client, harness } = createHarness(undefined, {
       beforeQueuedPrompt,
@@ -3580,6 +3728,24 @@ describe('OpenCodeServerHarness', () => {
           },
         },
       });
+      await client.emit({
+        type: 'question.asked',
+        properties: {
+          id: 'que_1',
+          sessionID: 'ses_1',
+          questions: [
+            {
+              header: 'Color',
+              question: 'Which color should I use?',
+              options: [{ label: 'Blue', description: 'Use blue.' }],
+            },
+          ],
+          tool: {
+            messageID: 'msg_question',
+            callID: 'question_call_1',
+          },
+        },
+      });
 
       const pendingRequest = harness.getPendingUserInputRequests()[0];
       expect(pendingRequest).toMatchObject({
@@ -3619,19 +3785,11 @@ describe('OpenCodeServerHarness', () => {
       ).toBe(true);
 
       await vi.waitFor(() => {
-        expect(client.abort).toHaveBeenCalledTimes(1);
-        expect(client.promptAsync).toHaveBeenCalledTimes(2);
-      });
-
-      await client.emit({
-        type: 'session.error',
-        properties: {
-          sessionID: 'ses_1',
-          error: {
-            name: 'MessageAbortedError',
-            data: { message: 'Aborted' },
-          },
-        },
+        expect(client.replyQuestion).toHaveBeenCalledWith({
+          requestId: 'que_1',
+          answers: [['Blue']],
+          signal: expect.any(AbortSignal),
+        });
       });
 
       expect(harness.getPendingUserInputRequests()).toEqual([]);
@@ -3648,17 +3806,8 @@ describe('OpenCodeServerHarness', () => {
       expect(beforeQueuedPrompt).toHaveBeenCalledWith({
         userId: 'answer-user-1',
       });
-      expect(client.promptAsync.mock.calls[1]?.[0]).toMatchObject({
-        sessionId: 'ses_1',
-        request: {
-          parts: [
-            {
-              type: 'text',
-              text: expect.stringContaining('Blue'),
-            },
-          ],
-        },
-      });
+      expect(client.abort).not.toHaveBeenCalled();
+      expect(client.promptAsync).toHaveBeenCalledTimes(1);
       expect(
         taskEvents.some(
           (event) => event.eventName === TaskEventName.TaskAborted,
@@ -3673,6 +3822,201 @@ describe('OpenCodeServerHarness', () => {
             ),
         ),
       ).toBe(false);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('replaces a placeholder question tool request with native structured questions', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Ask for input.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'question_part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_question',
+            type: 'tool',
+            callID: 'question_call_1',
+            tool: 'question',
+            state: { status: 'running', title: 'Ask user' },
+          },
+        },
+      });
+
+      expect(harness.getPendingUserInputRequests()[0]?.questions).toEqual([
+        expect.objectContaining({
+          id: 'response',
+          question: 'Ask user',
+        }),
+      ]);
+
+      await client.emit({
+        type: 'question.asked',
+        properties: {
+          id: 'que_structured',
+          sessionID: 'ses_1',
+          questions: [
+            {
+              header: 'Color',
+              question: 'Which color should I use?',
+              options: [{ label: 'Blue', description: 'Use blue.' }],
+            },
+            {
+              header: 'Layout',
+              question: 'Which layout should I use?',
+              options: [{ label: 'Compact', description: 'Use less space.' }],
+            },
+          ],
+          tool: {
+            messageID: 'msg_question',
+            callID: 'question_call_1',
+          },
+        },
+      });
+
+      const pendingRequest = harness.getPendingUserInputRequests()[0]!;
+      expect(pendingRequest.questions).toEqual([
+        expect.objectContaining({
+          id: 'question-1',
+          header: 'Color',
+          question: 'Which color should I use?',
+          options: [{ label: 'Blue', description: 'Use blue.' }],
+        }),
+        expect.objectContaining({
+          id: 'question-2',
+          header: 'Layout',
+          question: 'Which layout should I use?',
+          options: [{ label: 'Compact', description: 'Use less space.' }],
+        }),
+      ]);
+      expect(
+        persistedEnvelopes.filter(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+        ),
+      ).toHaveLength(2);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.AnswerUserInputRequest,
+        data: {
+          requestId: pendingRequest.requestId,
+          answers: {
+            'question-1': { answers: ['Blue'] },
+            'question-2': { answers: ['Compact'] },
+          },
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.replyQuestion).toHaveBeenCalledWith({
+          requestId: 'que_structured',
+          answers: [['Blue'], ['Compact']],
+          signal: expect.any(AbortSignal),
+        });
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('does not replace native structured questions with a late tool placeholder', async () => {
+    const { client, harness } = createHarness();
+
+    try {
+      await connectHarness(harness, client);
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Ask for input.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      await client.emit({
+        type: 'question.asked',
+        properties: {
+          id: 'que_structured',
+          sessionID: 'ses_1',
+          questions: [
+            {
+              header: 'Color',
+              question: 'Which color should I use?',
+              options: [{ label: 'Blue', description: 'Use blue.' }],
+            },
+            {
+              header: 'Layout',
+              question: 'Which layout should I use?',
+              options: [{ label: 'Compact', description: 'Use less space.' }],
+            },
+          ],
+          tool: {
+            messageID: 'msg_question',
+            callID: 'question_call_1',
+          },
+        },
+      });
+      await client.emit({
+        type: 'message.part.updated',
+        properties: {
+          part: {
+            id: 'question_part_1',
+            sessionID: 'ses_1',
+            messageID: 'msg_question',
+            type: 'tool',
+            callID: 'question_call_1',
+            tool: 'question',
+            state: { status: 'running', title: 'Ask user' },
+          },
+        },
+      });
+
+      const pendingRequest = harness.getPendingUserInputRequests()[0]!;
+      expect(pendingRequest.questions).toEqual([
+        expect.objectContaining({
+          id: 'question-1',
+          question: 'Which color should I use?',
+        }),
+        expect.objectContaining({
+          id: 'question-2',
+          question: 'Which layout should I use?',
+        }),
+      ]);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.AnswerUserInputRequest,
+        data: {
+          requestId: pendingRequest.requestId,
+          answers: {
+            'question-1': { answers: ['Blue'] },
+            'question-2': { answers: ['Compact'] },
+          },
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.replyQuestion).toHaveBeenCalledWith({
+          requestId: 'que_structured',
+          answers: [['Blue'], ['Compact']],
+          signal: expect.any(AbortSignal),
+        });
+      });
     } finally {
       harness.dispose();
     }
@@ -4008,6 +4352,116 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
+  it('does not recreate a resolved OpenCode question from a late tool update', async () => {
+    const client = new FakeOpenCodeServerClient();
+    const { harness } = createHarness(client);
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.StartNewTask,
+          data: { text: 'Ask for input.', visibleInTranscript: true },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      const part = {
+        id: 'question_part_resolved',
+        sessionID: 'ses_1',
+        messageID: 'msg_question_resolved',
+        type: 'tool',
+        callID: 'question_call_resolved',
+        tool: 'question',
+        state: {
+          status: 'running',
+          input: {
+            questions: [
+              {
+                id: 'choice',
+                question: 'Choose an option.',
+                options: [{ label: 'Continue' }],
+              },
+            ],
+          },
+        },
+      };
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: { part },
+      });
+      await client.emit({
+        type: 'question.asked',
+        properties: {
+          id: 'que_resolved',
+          sessionID: 'ses_1',
+          questions: [
+            {
+              header: 'Choice',
+              question: 'Choose an option.',
+              options: [{ label: 'Continue', description: '' }],
+            },
+          ],
+          tool: {
+            messageID: 'msg_question_resolved',
+            callID: 'question_call_resolved',
+          },
+        },
+      });
+
+      const requestId = harness.getPendingUserInputRequests()[0]!.requestId;
+      const requestEnvelopeCount = persistedEnvelopes.filter(
+        (envelope) =>
+          envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+      ).length;
+
+      expect(
+        harness.sendCommand({
+          commandName: TaskCommandName.AnswerUserInputRequest,
+          data: {
+            requestId,
+            answers: { choice: { answers: ['Continue'] } },
+          },
+        }),
+      ).toBe(true);
+
+      await vi.waitFor(() => {
+        expect(client.replyQuestion).toHaveBeenCalledWith({
+          requestId: 'que_resolved',
+          answers: [['Continue']],
+          signal: expect.any(AbortSignal),
+        });
+        expect(harness.getPendingUserInputRequests()).toEqual([]);
+      });
+      expect(client.abort).not.toHaveBeenCalled();
+
+      await client.emit({
+        type: 'message.part.updated',
+        properties: { part },
+      });
+
+      expect(harness.getPendingUserInputRequests()).toEqual([]);
+      expect(
+        persistedEnvelopes.filter(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.RequestUserInput,
+        ),
+      ).toHaveLength(requestEnvelopeCount);
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('records cancelled OpenCode question responses when answers are empty', async () => {
     const { client, harness } = createHarness();
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
@@ -4059,6 +4513,24 @@ describe('OpenCodeServerHarness', () => {
           },
         },
       });
+      await client.emit({
+        type: 'question.asked',
+        properties: {
+          id: 'que_cancel',
+          sessionID: 'ses_1',
+          questions: [
+            {
+              header: 'Color',
+              question: 'Which color should I use?',
+              options: [],
+            },
+          ],
+          tool: {
+            messageID: 'msg_question',
+            callID: 'question_call_1',
+          },
+        },
+      });
 
       const pendingRequest = harness.getPendingUserInputRequests()[0];
       expect(pendingRequest).toBeDefined();
@@ -4076,8 +4548,12 @@ describe('OpenCodeServerHarness', () => {
       ).toBe(true);
 
       await vi.waitFor(() => {
-        expect(client.abort).toHaveBeenCalledTimes(1);
+        expect(client.rejectQuestion).toHaveBeenCalledWith({
+          requestId: 'que_cancel',
+          signal: expect.any(AbortSignal),
+        });
       });
+      expect(client.abort).not.toHaveBeenCalled();
 
       const responseEnvelope = persistedEnvelopes.find(
         (envelope) =>

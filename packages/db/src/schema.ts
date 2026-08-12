@@ -23,6 +23,7 @@ import type {
   TaskTrigger,
   TaskVisibility,
   TaskState,
+  TaskGoalStatus,
   TaskInitiatorKind,
   CommitAuthorKind,
   RunKind,
@@ -71,6 +72,7 @@ import type {
   McpConnectionRole,
   SourceControlProvider,
   TaskModelSettings,
+  WorkspaceRoutingSettings,
   TaskRunErrorCode,
   UserRole,
 } from '@roomote/types';
@@ -159,6 +161,9 @@ export const deploymentSettings = pgTable('deployment_settings', {
   id: text('id').notNull().primaryKey().default('default'),
   metadata: jsonb('metadata').notNull().default({}),
   taskModelSettings: jsonb('task_model_settings').$type<TaskModelSettings>(),
+  workspaceRoutingSettings: jsonb(
+    'workspace_routing_settings',
+  ).$type<WorkspaceRoutingSettings>(),
   routerDebugProvider: text('router_debug_provider'),
   routerDebugChannelId: text('router_debug_channel_id'),
   routerDebugDisabled: boolean('router_debug_disabled')
@@ -688,6 +693,30 @@ export const tasks = pgTable(
     model: text('model').notNull(),
     // Initial task prompt. Per-attempt/resume prompts stay on runs.
     prompt: text('prompt'),
+    goalObjective: text('goal_objective'),
+    goalStatus: text('goal_status').$type<TaskGoalStatus>(),
+    goalMaxContinuations: integer('goal_max_continuations'),
+    goalContinuationsUsed: integer('goal_continuations_used')
+      .notNull()
+      .default(0),
+    goalBlockedReason: text('goal_blocked_reason'),
+    goalCompletedAt: timestamp('goal_completed_at'),
+    goalLastContinuationId: text('goal_last_continuation_id'),
+    goalContinuationIds: text('goal_continuation_ids')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    goalGenerationIds: text('goal_generation_ids')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    goalBlockerCandidateReason: text('goal_blocker_candidate_reason'),
+    goalBlockerCandidateCount: integer('goal_blocker_candidate_count')
+      .notNull()
+      .default(0),
+    goalBlockerLastContinuationUsed: integer(
+      'goal_blocker_last_continuation_used',
+    ),
     /**
      * Draft prompt text the user was composing when the sandbox went to
      * sleep. Saved periodically while typing so it can be restored after
@@ -764,6 +793,18 @@ export const tasks = pgTable(
     check(
       'tasks_state_check',
       sql`${table.state} in ('active', 'completed', 'failed', 'canceled')`,
+    ),
+    check(
+      'tasks_goal_status_check',
+      sql`${table.goalStatus} IS NULL OR ${table.goalStatus} in ('active', 'complete', 'blocked', 'budget_limited')`,
+    ),
+    check(
+      'tasks_goal_continuations_check',
+      sql`${table.goalContinuationsUsed} >= 0 AND (${table.goalMaxContinuations} IS NULL OR ${table.goalMaxContinuations} > 0)`,
+    ),
+    check(
+      'tasks_goal_blocker_candidate_count_check',
+      sql`${table.goalBlockerCandidateCount} >= 0`,
     ),
     check('tasks_harness_check', sql`${table.harness} in ('opencode-server')`),
     check(
@@ -1181,17 +1222,17 @@ export const taskRuns = pgTable(
     index('task_runs_sleep_check_due_v2_idx')
       .using('btree', table.sleepAt, table.createdAt, table.vendor)
       .where(
-        sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepAt} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote', 'azure')`,
+        sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepAt} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'box', 'roomote', 'azure')`,
       ),
     index('task_runs_sleep_check_stale_worker_v2_idx')
       .using('btree', table.workerHeartbeatAt, table.createdAt, table.vendor)
       .where(
-        sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.workerHeartbeatAt} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote', 'azure')`,
+        sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.workerHeartbeatAt} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'box', 'roomote', 'azure')`,
       ),
     index('task_runs_sleep_check_active_v2_idx')
       .using('btree', table.vendor, table.createdAt.desc())
       .where(
-        sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'roomote', 'azure')`,
+        sql`${table.status} IN ('running', 'idle') AND ${table.machineId} IS NOT NULL AND ${table.sleepRequestedAt} IS NULL AND ${table.snapshotId} IS NULL AND ${table.snapshotRequestedAt} IS NULL AND ${table.vendor} IN ('modal', 'daytona', 'e2b', 'docker', 'blaxel', 'box', 'roomote', 'azure')`,
       ),
     index('task_runs_source_snapshot_id_idx').on(table.sourceSnapshotId),
     index('task_runs_source_run_id_idx').on(table.sourceRunId),

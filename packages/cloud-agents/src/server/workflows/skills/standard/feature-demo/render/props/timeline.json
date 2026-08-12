@@ -1,0 +1,8 @@
+{
+  "video": { "path": "recording.mp4", "width": 1280, "height": 800 },
+  "fps": 30,
+  "durationSeconds": 1,
+  "cursorKeys": [{ "t": 0, "v": { "x": 0.5, "y": 1.1 } }],
+  "clicks": [],
+  "captions": []
+}

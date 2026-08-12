@@ -3,7 +3,7 @@ import { PACKAGED_AUTOMATION_SKILL_INVOCATIONS } from '../skillInvocationRouting
 import { buildStructuredTaskRequest } from '../utils';
 
 describe('Standard Task explicit invocation routing', () => {
-  it('skips the three-workflow initial routing step when the request already starts with a packaged-skill invocation', () => {
+  it('skips the four-workflow initial routing step when the request already starts with a packaged-skill invocation', () => {
     const { prompt, harnessInstructions } = standardTask({
       description:
         '$review-code\n\n<active_appendix_path>review-github-pr</active_appendix_path>',
@@ -17,13 +17,56 @@ describe('Standard Task explicit invocation routing', () => {
       "If the user's request begins with an explicit Roomote-shipped packaged-skill invocation, treat that invocation as the authoritative initial skill selection and execute that exact skill first.",
     );
     expect(harnessInstructions).toContain(
-      'skip the three-workflow initial routing step entirely',
+      'skip the four-workflow initial routing step entirely',
     );
     expect(harnessInstructions).toContain(
       'Roomote-shipped packaged skills take precedence for ordinary natural-language first-hop routing, even when repo-local skills are discoverable in the current workspace.',
     );
     expect(harnessInstructions).toContain(
-      'If the user explicitly invokes a discoverable repo-local skill by name, let the active harness resolve that invocation instead of forcing it back through the three first-hop workflows.',
+      'If the user explicitly invokes a discoverable repo-local skill by name, let the active harness resolve that invocation instead of forcing it back through the four first-hop workflows.',
+    );
+  });
+
+  it('separates general non-repository work from repository explanation', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Check the logs and tell me whether the retries stopped',
+      repo: 'Roomote/example-app',
+    });
+
+    expect(harnessInstructions).toContain(
+      '`explore-and-act` for ordinary non-repository questions, investigations, and exact user-requested actions across connected systems, documents, messages, web sources, and other available resources',
+    );
+    expect(harnessInstructions).toContain(
+      '`explain-repo-code` for questions specifically about source behavior, architecture, code location, or implementation rationale',
+    );
+  });
+
+  it('renders source-question routing to the repository explanation workflow', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Where is retry logic implemented?',
+      repo: 'Roomote/example-app',
+    });
+
+    expect(harnessInstructions).toContain(
+      'route source behavior, architecture, code-location, and implementation-rationale questions to `explain-repo-code`',
+    );
+    expect(harnessInstructions).toContain(
+      'route connected-system questions and actions to `explore-and-act`',
+    );
+  });
+
+  it('reserves implementation routing for repository and workspace work', () => {
+    const { harnessInstructions } = standardTask({
+      description:
+        'Acknowledge the incident in our connected monitoring system',
+      repo: 'Roomote/example-app',
+    });
+
+    expect(harnessInstructions).toContain(
+      '`implement-changes` for repository or workspace implementation and fixes, including repository or workspace file edits and commands, validation of repository changes, and code delivery',
+    );
+    expect(harnessInstructions).toContain(
+      'route connected-system questions and actions to `explore-and-act`',
     );
   });
 
@@ -45,20 +88,23 @@ describe('Standard Task explicit invocation routing', () => {
     );
   });
 
-  it('uses implementation straightforwardness as the ambiguous-routing tiebreaker and otherwise defaults to plan', () => {
+  it('routes mixed requests by target and otherwise defaults to plan', () => {
     const { harnessInstructions } = standardTask({
       description: 'Maybe adjust the agent routing behavior if needed',
       repo: 'Roomote/example-app',
     });
 
     expect(harnessInstructions).toContain(
-      'When the request is mixed or ambiguous, use implementation straightforwardness as the tiebreaker:',
+      'When the request is mixed or ambiguous, route repository or workspace execution to `implement-changes`',
     );
     expect(harnessInstructions).toContain(
-      'route to `implement-changes` when the likely implementation path is narrow, conventional, and low-decision',
+      'route connected-system questions and actions to `explore-and-act`',
     );
     expect(harnessInstructions).toContain(
-      'If the request remains ambiguous after that straightforwardness check, default the initial route to `plan-repo-implementation`.',
+      'Mutation intent wins: if any part of the request asks to modify repository or workspace state, run commands in the repository or workspace, validate changes, or deliver code, route to `implement-changes` even when another part asks for external investigation.',
+    );
+    expect(harnessInstructions).toContain(
+      'If the request remains ambiguous after applying those routing rules, default the initial route to `plan-repo-implementation`.',
     );
   });
 
@@ -225,7 +271,7 @@ describe('Standard Task explicit invocation routing', () => {
       true,
     );
     expect(harnessInstructions).toContain(
-      'If the user explicitly invokes a discoverable repo-local skill by name, let the active harness resolve that invocation instead of forcing it back through the three first-hop workflows.',
+      'If the user explicitly invokes a discoverable repo-local skill by name, let the active harness resolve that invocation instead of forcing it back through the four first-hop workflows.',
     );
   });
 

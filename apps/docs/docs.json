@@ -122,6 +122,7 @@
               "compute",
               "providers/compute/azure",
               "providers/compute/blaxel",
+              "providers/compute/box",
               "providers/compute/daytona",
               "providers/compute/docker",
               "providers/compute/e2b",
@@ -135,6 +136,7 @@
         "pages": [
           "integrations/index",
           "integrations/custom-mcp-servers",
+          "integrations/roomote-mcp",
           "integrations/asana",
           "integrations/better-stack",
           "integrations/braintrust",
@@ -154,6 +156,7 @@
           "integrations/supabase",
           "integrations/supermemory",
           "integrations/vercel",
+          "integrations/x",
           "integrations/zero"
         ]
       },

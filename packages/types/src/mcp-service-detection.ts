@@ -80,6 +80,15 @@ const VERCEL_PROJECT_TAB_PATH_REGEX = new RegExp(
 const ZERO_APP_PATH_REGEX = /^\/(?:c|browse|profile)(?:\/|$)/;
 const HOMEPAGE_PATH_REGEX = /^\/$/;
 
+// X app surfaces that signal "this task is about X content": post permalinks
+// (/<username>/status/<id>), search/explore, and /i/ product paths (lists,
+// communities, spaces). Bare profile URLs are one path segment and would
+// swallow unrelated x.com pages, so they deliberately do not match. Matched
+// against a lowercased pathname.
+const X_POST_PATH_REGEX = /^\/[a-z0-9_]{1,15}\/status\/\d+/;
+const X_APP_PATH_REGEX =
+  /^\/(?:search|explore)(?:\/|$)|^\/i\/(?:lists|communities|spaces)\//;
+
 export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
   {
     id: 'asana',
@@ -272,6 +281,24 @@ export const SLACK_MCP_SETUP_SERVICES: SlackMcpSetupServiceDefinition[] = [
     name: 'Supermemory',
     availabilityKind: 'curated_oauth',
     hostSuffixes: ['app.supermemory.ai', 'console.supermemory.ai'],
+    deploymentSettingsPath: '/settings/integrations',
+    userSettingsPath: '/settings/personal',
+  },
+  {
+    id: 'x',
+    name: 'X',
+    availabilityKind: 'admin_configured',
+    hostSuffixes: ['x.com', 'twitter.com'],
+    hostRules: [
+      {
+        hostSuffix: 'x.com',
+        pathRegexes: [X_POST_PATH_REGEX, X_APP_PATH_REGEX],
+      },
+      {
+        hostSuffix: 'twitter.com',
+        pathRegexes: [X_POST_PATH_REGEX, X_APP_PATH_REGEX],
+      },
+    ],
     deploymentSettingsPath: '/settings/integrations',
     userSettingsPath: '/settings/personal',
   },

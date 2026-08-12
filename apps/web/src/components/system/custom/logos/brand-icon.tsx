@@ -4,6 +4,7 @@ import {
   siAsana,
   siBetterstack,
   siBraintrust,
+  siElevenlabs,
   siDependabot,
   siDatadog,
   siDiscord,
@@ -27,6 +28,7 @@ import {
   siSupabase,
   siTelegram,
   siVercel,
+  siX,
   type SimpleIcon,
 } from 'simple-icons';
 
@@ -40,6 +42,7 @@ const SIMPLE_ICONS: Record<string, SimpleIcon> = {
   asana: siAsana,
   betterstack: siBetterstack,
   braintrust: siBraintrust,
+  elevenlabs: siElevenlabs,
   dependabot: siDependabot,
   datadog: siDatadog,
   discord: siDiscord,
@@ -63,6 +66,7 @@ const SIMPLE_ICONS: Record<string, SimpleIcon> = {
   telegram: siTelegram,
   sentry: siSentry,
   vercel: siVercel,
+  x: siX,
 };
 
 function NeonIcon({
@@ -134,6 +138,34 @@ function BlaxelIcon({
       className={className}
     >
       <path d="M5 3h8.2a5.2 5.2 0 0 1 3.9 8.64A5.1 5.1 0 0 1 14 21H5V3Zm4 3v4h4a2 2 0 1 0 0-4H9Zm0 7v5h4.7a2.5 2.5 0 0 0 0-5H9Z" />
+    </svg>
+  );
+}
+
+function BoxSandboxIcon({
+  name,
+  className,
+  isDecorative,
+}: {
+  name: string;
+  className?: string;
+  isDecorative: boolean;
+}) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      role={isDecorative ? undefined : 'img'}
+      aria-hidden={isDecorative || undefined}
+      aria-label={isDecorative ? undefined : name}
+      focusable="false"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+    >
+      <path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z" />
+      <path d="m4.5 7.8 7.5 4.3 7.5-4.3M12 12.1V21" />
     </svg>
   );
 }
@@ -598,6 +630,16 @@ export function BrandIcon({ icon, name, className }: BrandIconProps) {
   if (icon === 'blaxel') {
     return (
       <BlaxelIcon
+        name={name}
+        className={className}
+        isDecorative={isDecorative}
+      />
+    );
+  }
+
+  if (icon === 'box-sandbox') {
+    return (
+      <BoxSandboxIcon
         name={name}
         className={className}
         isDecorative={isDecorative}

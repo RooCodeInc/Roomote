@@ -2,9 +2,13 @@ import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
 import {
   and,
+  claimTaskGoalContinuationForRun,
   db,
   eq,
+  getTaskGoalForRun,
   isNotNull,
+  markTaskGoalForRun,
+  releaseTaskGoalContinuationForRun,
   slackInstallations,
   taskPullRequests,
 } from '@roomote/db/server';
@@ -15,6 +19,7 @@ import {
   TASK_TRIGGERS,
   TASK_VISIBILITIES,
   TASK_WORKFLOWS,
+  taskGoalInputSchema,
   TaskPayloadKind,
   runEventSources,
   runEventTypes,
@@ -222,6 +227,7 @@ const freshEnqueueInputSchema = z.object({
   visibility: z.enum(TASK_VISIBILITIES).optional(),
   channels: taskChannelBindingsSchema.optional(),
   prLinkage: taskPrLinkageSchema.optional(),
+  goal: taskGoalInputSchema.optional(),
 });
 
 /**
@@ -373,6 +379,45 @@ export const taskRunsRouter = router({
       completedAt: completedAt ?? undefined,
     }),
   ),
+  getGoal: runTokenOnlyScoped(z.object({ runId: z.number() }), 'runId').query(
+    ({ input }) => getTaskGoalForRun(input.runId),
+  ),
+  markGoalComplete: runTokenOnlyScoped(
+    z.object({
+      runId: z.number(),
+      generation: z.string().max(200).nullable(),
+    }),
+    'runId',
+  ).mutation(({ input }) =>
+    markTaskGoalForRun({
+      runId: input.runId,
+      generation: input.generation,
+      status: 'complete',
+    }),
+  ),
+  markGoalBlocked: runTokenOnlyScoped(
+    z.object({
+      runId: z.number(),
+      generation: z.string().max(200).nullable(),
+      reason: z.string().trim().min(1).max(2_000),
+    }),
+    'runId',
+  ).mutation(({ input }) =>
+    markTaskGoalForRun({
+      runId: input.runId,
+      generation: input.generation,
+      status: 'blocked',
+      reason: input.reason,
+    }),
+  ),
+  claimGoalContinuation: runTokenOnlyScoped(
+    z.object({ runId: z.number(), continuationId: z.string().min(1).max(200) }),
+    'runId',
+  ).mutation(({ input }) => claimTaskGoalContinuationForRun(input)),
+  releaseGoalContinuation: runTokenOnlyScoped(
+    z.object({ runId: z.number(), continuationId: z.string().min(1).max(200) }),
+    'runId',
+  ).mutation(({ input }) => releaseTaskGoalContinuationForRun(input)),
   enqueue: userOnlyProcedure
     .input(enqueueTaskInputSchema)
     .mutation(async ({ input }) => {
@@ -729,10 +774,10 @@ export const taskRunsRouter = router({
     }),
     'runId',
   ).mutation(async ({ input }) =>
-    clearPendingSlackRequestUserInput(
-      input.threadId,
-      input.requestId ? { requestId: input.requestId } : undefined,
-    ),
+    clearPendingSlackRequestUserInput(input.threadId, {
+      requestId: input.requestId,
+      runId: input.runId,
+    }),
   ),
   getSlackRequestUserInputAnswers: runScoped(
     z.object({ runId: z.number() }),

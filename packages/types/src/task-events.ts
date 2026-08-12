@@ -44,6 +44,7 @@ export type TaskToolUsage = Record<string, TaskToolUsageEntry>;
 
 export interface TaskCompletionMetadata {
   isSubtask: boolean;
+  completionId?: string;
 }
 
 export type TaskEventStartedPayload = [taskId: string];

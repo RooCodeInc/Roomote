@@ -2,6 +2,41 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.38.0 (2026-08-12)
+
+This release adds `/goal` mode for long-running work, a Roomote MCP, custom routing rules, and the ability to generate demo videos.
+
+### Highlights
+
+- Keep long-running work moving toward a defined objective with bounded Goal Mode continuations.
+- Connect OAuth-capable coding clients to Roomote through one stable remote MCP URL.
+- Route work to the right environment with custom workspace rules.
+- Generate polished demo videos from live browser journeys with captions and optional narration.
+
+### Minor changes
+
+- Let tasks discover available public communication channels and send explicitly requested Slack direct messages to linked Roomote users while preserving workspace and recipient authorization.
+- Answer non-repository questions and perform explicitly requested connected-system actions through the new exploration and action workflow, without forcing unrelated source-code work.
+- Diagnose environment startup and application-health problems with the Doctor workflow, which verifies a fresh task journey, identifies ownership, and rechecks authorized repairs.
+- Produce polished feature-demo videos from live browser journeys with guided pointer effects, captions, optional narration, and reusable rendering controls.
+- Keep long-running web tasks moving toward a defined objective with bounded Goal Mode continuations, generation-safe completion controls, and `/goal` support in the task composer.
+- Show OpenCode Go rolling, weekly, and monthly usage in model settings so operators can monitor subscription capacity without leaving Roomote.
+- Connect OAuth-capable clients such as Claude Code, Codex, Cursor, and VS Code to Roomote member tools through one stable remote MCP URL, with browser consent, compatible client registration, and securely rotated credentials.
+- Configure custom workspace routing rules that send new work to the right environment based on natural-language criteria, with a simplified settings layout for reviewing the active rules. Thanks to @MaximeLaurenty for reporting [#1221](https://github.com/RooCodeInc/Roomote/issues/1221).
+- Connect X (Twitter) as a built-in integration from Settings, with guided configuration and Roomote-managed access to the integration's tools.
+
+### Patch changes
+
+- Keep custom automation prompts focused on the work to perform instead of repeating cadence that is already stored in the automation schedule.
+- Run Roomote task environments on Box as a built-in compute provider, with setup support, secure worker configuration, and the same provider capability model used by existing sandboxes.
+- Keep OAuth-based custom MCP integrations in the configured state until authentication completes instead of showing them as connected prematurely.
+- Revoke the entire remote MCP OAuth refresh-token family when an already-rotated refresh token is replayed, per the OAuth 2.0 Security BCP. Previously the replay was rejected but the rest of the token family stayed valid, so a stolen-token signal never disabled the remaining tokens.
+- Recommend Grok 4.6 for newly configured xAI task roles, avoid unnecessary environment credential prompts, and clarify when Modal command output cannot be resumed by ID.
+- Deliver pull-request feedback reliably without duplicate review notifications, including for repositories excluded from automatic GitHub task creation.
+- Report provider errors that end a task turn back into the originating Slack, Discord, Telegram, or Teams thread instead of leaving the conversation silent.
+- Keep task input flows usable by restoring slash-command autocomplete, preventing file search from opening on `@`, removing answered Slack elicitation buttons, and ensuring resolved input requests do not reappear.
+- Keep task runtimes reliable by recovering through OpenCode context compaction, preserving the parent's compute provider for delegated child tasks, and using the configured vision model to describe supported videos.
+
 ## 0.37.0 (2026-08-10)
 
 This release brings voice-driven work to every chat provider, expands organization-wide automations and source-control identity support, and improves task reliability.

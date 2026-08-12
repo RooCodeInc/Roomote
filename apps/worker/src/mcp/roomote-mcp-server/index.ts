@@ -7,6 +7,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import {
   ALL_REPOSITORIES,
+  CHAT_CHANNELS_TOOL,
   CHAT_CHANNEL_MESSAGES_TOOL,
   CHAT_MESSAGE_CONTEXT_TOOL,
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_FREQUENCIES,
@@ -52,6 +53,7 @@ import {
 } from './chat-reply-satisfaction.js';
 import { handlePostToChannel } from './post-to-channel.js';
 import { handleGetChatChannelMessages } from './get-chat-channel-messages.js';
+import { handleListChatChannels } from './list-chat-channels.js';
 import { handleGetChatMessageContext } from './get-chat-message-context.js';
 import { handleAddReactionToSlackMessage } from './add-reaction-to-slack-message.js';
 import { handleSendChatReactionEmoji } from './send-chat-reaction-emoji.js';
@@ -65,6 +67,7 @@ import { errorResult } from './tool-result.js';
 import { taskSuggestionResultHasSubmittedSuggestions } from './automation-slack-summary-state.js';
 import { registerAutomationWorkItemsTool } from './automation-work-items-tool.js';
 import { handleManageCustomAutomations } from './custom-automations.js';
+import { handleManageGoal } from './goal.js';
 
 export {
   taskSuggestionResultHasSubmittedSuggestions,
@@ -98,7 +101,7 @@ roomoteMcpServer.registerTool(
   {
     title: 'Manage Custom Automations',
     description:
-      'Admin-only management of deployment custom automations. List existing automations or enabled task models, resolve a cron or natural-language schedule, create or update an automation, delete an automation by exact ID, or run an enabled automation now. Use list_models before setting a model override; create and update accept only exact model IDs returned by that action. Model IDs encode the inference route: for example, openrouter/... targets OpenRouter, while openai/... uses the deployment OpenAI route, including a connected ChatGPT subscription when configured. When the user asks an automation to DM them, set their preferred connected targetProvider and targetMode to direct_message; no targetChannelId is needed. Natural-language schedules are converted to validated five-field cron in the deployment scheduling timezone. When a user asks an automation to offer help, suggest tasks, make follow-ups actionable or launchable, or turn findings or action items into tasks, encode that intent in product language by instructing the automation to post concrete actions as launchable suggested tasks alongside its report. Do not expose runtime tool names or parameter syntax in the stored prompt. A request only to summarize or list action items is not suggested-task intent. Only promise launchable suggested tasks when the automation has both a configured chat report destination and a repository or environment for executable work; otherwise keep actions as report text and explain the missing capability. After successfully creating an automation in response to a conversational request, ask the user whether they want to run it now to test it.',
+      'Admin-only management of deployment custom automations. List existing automations or enabled task models, resolve a cron or natural-language schedule, create or update an automation, delete an automation by exact ID, or run an enabled automation now. Use list_models before setting a model override; create and update accept only exact model IDs returned by that action. Model IDs encode the inference route: for example, openrouter/... targets OpenRouter, while openai/... uses the deployment OpenAI route, including a connected ChatGPT subscription when configured. When the user asks an automation to DM them, set their preferred connected targetProvider and targetMode to direct_message; no targetChannelId is needed. Natural-language schedules are converted to validated five-field cron in the deployment scheduling timezone. Keep cadence only in the schedule field; do not repeat it in the stored prompt. When a user asks an automation to offer help, suggest tasks, make follow-ups actionable or launchable, or turn findings or action items into tasks, encode that intent in product language by instructing the automation to post concrete actions as launchable suggested tasks alongside its report. Do not expose runtime tool names or parameter syntax in the stored prompt. A request only to summarize or list action items is not suggested-task intent. Only promise launchable suggested tasks when the automation has both a configured chat report destination and a repository or environment for executable work; otherwise keep actions as report text and explain the missing capability. After successfully creating an automation in response to a conversational request, ask the user whether they want to run it now to test it.',
     inputSchema: {
       action: z.enum([
         'list',
@@ -118,7 +121,7 @@ roomoteMcpServer.registerTool(
         .string()
         .optional()
         .describe(
-          'Automation instructions written in product language. When the user intends actionable or launchable follow-up tasks and the automation has both a chat report destination and an executable workspace, instruct it to post qualifying actions as launchable suggested tasks alongside the report; otherwise keep actions as report text. Do not mention internal tool names or parameters.',
+          'Automation instructions written in product language. Do not include the automation cadence; keep it only in the schedule field. When the user intends actionable or launchable follow-up tasks and the automation has both a chat report destination and an executable workspace, instruct it to post qualifying actions as launchable suggested tasks alongside the report; otherwise keep actions as report text. Do not mention internal tool names or parameters.',
         ),
       enabled: z.boolean().optional(),
       schedule: z
@@ -625,6 +628,38 @@ const manageTasksInputSchema = {
       'For launch: when true, the platform sends a message into THIS task session when the launched task settles (completes, fails, is canceled, or goes idle), so you can wait for that notification instead of polling get_summary.',
     ),
 } satisfies Record<string, z.ZodTypeAny>;
+
+roomoteMcpServer.registerTool(
+  'manage_goal',
+  {
+    title: 'Manage Goal',
+    description:
+      'Read or finish the current task goal. Use get to inspect it. Use complete only after the full objective is verified. Use blocked only when progress cannot continue without user input or an external state change. The agent cannot create, replace, pause, resume, or clear goals.',
+    inputSchema: {
+      action: z.enum(['get', 'complete', 'blocked']),
+      generation: z
+        .string()
+        .max(200)
+        .nullable()
+        .optional()
+        .describe(
+          'Required for complete and blocked. Pass the exact generation assigned in the current turn goal instructions.',
+        ),
+      reason: z
+        .string()
+        .max(2_000)
+        .optional()
+        .describe('Required for blocked; explain the concrete blocker.'),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async (params): Promise<ToolResult> => handleManageGoal(params),
+);
 
 roomoteMcpServer.registerTool(
   'manage_tasks',
@@ -1142,6 +1177,29 @@ if (shouldRegisterAutomationWorkItemsTool()) {
 }
 
 roomoteMcpServer.registerTool(
+  CHAT_CHANNELS_TOOL.name,
+  {
+    title: CHAT_CHANNELS_TOOL.title,
+    description: CHAT_CHANNELS_TOOL.description,
+    inputSchema: {},
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async (): Promise<ToolResult> => {
+    const roomoteConfig = getRoomoteConfig();
+    if (!roomoteConfig) {
+      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+    }
+
+    return handleListChatChannels(roomoteConfig);
+  },
+);
+
+roomoteMcpServer.registerTool(
   CHAT_CHANNEL_MESSAGES_TOOL.name,
   {
     title: CHAT_CHANNEL_MESSAGES_TOOL.title,
@@ -1522,12 +1580,14 @@ if (shouldRegisterChannelPostTool()) {
       description:
         `${postSurface}-visible: posts a new standalone message into a ${postSurface} channel the Roomote app can access. ` +
         'Use this only when the current user explicitly asks you to post a separate update message rather than replying in the ongoing exchange; prefer send_chat_reply for normal replies. ' +
-        'Pass a channel ID (Slack also accepts a channel name or mention). Cross-channel posts are subject to provider-specific authorization and target support. ' +
+        'Pass a channel ID (Slack also accepts a channel name or mention, DM ID, or linked Slack user ID/mention). Cross-channel posts and DMs are subject to provider-specific authorization and target support. ' +
         'The message text renders as Markdown. Lead with the answer or takeaway, use short paragraphs, and put each list item on its own line.',
       inputSchema: {
         channel: z
           .string()
-          .describe(`${postSurface} channel ID the Roomote app can access`),
+          .describe(
+            `${postSurface} channel ID the Roomote app can access; Slack also accepts a linked user ID or mention for DMs`,
+          ),
         threadTs: z
           .string()
           .optional()

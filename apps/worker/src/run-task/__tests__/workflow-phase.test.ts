@@ -4,6 +4,15 @@ import {
 } from '../workflow-phase';
 
 describe('workflow phase selection', () => {
+  it('leaves questions unpinned so rendered prompt routing can classify their source', () => {
+    expect(
+      getInitialWorkflowPhase({
+        prompt: 'Where is retry logic implemented?',
+        requestedWorkKind: 'question',
+      }),
+    ).toBeNull();
+  });
+
   it('routes unknown requested work kind into the planning workflow', () => {
     expect(
       getInitialWorkflowPhase({

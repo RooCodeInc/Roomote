@@ -102,6 +102,10 @@ import {
   getInitialWorkflowPhase,
 } from './workflow-phase';
 import { wrapCommunicationMessage } from './communication-message-prompt';
+import {
+  buildTaskGoalContinuationPrompt,
+  buildTaskGoalInstructions,
+} from './task-goal';
 
 function formatEnvironmentInstructions(
   instructions?: string,
@@ -739,6 +743,7 @@ export const runTask = async ({
       ROOMOTE_WORKSPACE_PATH: workspacePath,
       ROOMOTE_CLOUD_TOKEN: workerEnv.authToken,
       ROOMOTE_TASK_ID: taskRun.taskId,
+      ROOMOTE_TASK_RUN_ID: String(taskRun.id),
       AGENT_BROWSER_SESSION: taskRun.taskId,
       ROOMOTE_TASK_TYPE: taskRun.payloadKind,
       ROOMOTE_AUTOMATION_TASK:
@@ -1041,7 +1046,12 @@ export const runTask = async ({
     // OpenCode consumes Roomote's identity, workflow, and runtime guidance
     // through its developer-instructions layer.
     const harnessDeveloperInstructions =
-      [ROOMOTE_SYSTEM_PROMPT, harnessInstructions, environmentInstructions]
+      [
+        ROOMOTE_SYSTEM_PROMPT,
+        harnessInstructions,
+        buildTaskGoalInstructions(task?.goal ?? null),
+        environmentInstructions,
+      ]
         .filter((value): value is string => Boolean(value))
         .join('\n\n') || undefined;
 
@@ -1277,6 +1287,64 @@ export const runTask = async ({
       taskId: taskRun.taskId,
       logger,
       callbacks: {
+        onBeforeTaskCompletion: async (completionId: string) => {
+          if (taskCancellation.signal.aborted) {
+            return 'finalize' as const;
+          }
+
+          const claim = await sdk.taskRuns.claimGoalContinuation({
+            runId: taskRun.id,
+            continuationId: completionId,
+          });
+          if (!claim.updated) {
+            if (claim.reason === 'already_claimed') {
+              return 'ignore' as const;
+            }
+            if (!claim.goal) {
+              return 'finalize' as const;
+            }
+            await recordWorkerRuntimeEvent({
+              eventType: 'decision',
+              message: `Goal continuation stopped for task run #${taskRun.id}.`,
+              details: {
+                reason: claim.reason,
+                goalStatus: claim.goal?.status ?? null,
+              },
+            });
+            return 'finalize' as const;
+          }
+
+          const continuationEvent = (sent: boolean) => ({
+            eventType: 'decision' as const,
+            message: `Goal continuation ${sent ? 'started' : 'could not start'} for task run #${taskRun.id}.`,
+            details: {
+              reason: 'goal_continuation',
+              delivered: sent,
+              continuation: claim.goal.continuationsUsed,
+              maxContinuations: claim.goal.maxContinuations,
+            },
+          });
+          return {
+            disposition: 'continue' as const,
+            prompt: {
+              prompt: buildTaskGoalContinuationPrompt(claim.goal),
+              goalContext: claim.goal,
+              visibleInTranscript: false,
+              source: 'goal-continuation',
+              clientMessageId: `goal-continuation:${completionId}`,
+            },
+            onAccepted: () => {
+              void recordWorkerRuntimeEvent(continuationEvent(true));
+            },
+            onRejected: async () => {
+              await sdk.taskRuns.releaseGoalContinuation({
+                runId: taskRun.id,
+                continuationId: completionId,
+              });
+              await recordWorkerRuntimeEvent(continuationEvent(false));
+            },
+          };
+        },
         onStart: async (taskId: string) => {
           try {
             await sdk.taskRuns.setHarnessSessionId({
@@ -2037,6 +2105,7 @@ export const runTask = async ({
           ? { workflowPhase: initialWorkflowPhase }
           : {}),
         visibleInTranscript: false,
+        ...(task?.goal?.status === 'active' ? { goalContext: task.goal } : {}),
       });
     } else {
       // Session mode: initialize without prompt.

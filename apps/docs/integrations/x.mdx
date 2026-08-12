@@ -1,0 +1,36 @@
+---
+title: X
+description: Let Roomote search public X posts and look up users, trends, and news during a task.
+icon: 'https://api.iconify.design/simple-icons:x.svg?color=currentColor'
+---
+
+Connect X when Roomote needs public X context: what people are saying about a
+launch, a thread someone pasted into Slack, an account's recent posts, or
+what's trending.
+
+## When to use it
+
+- Pull a pasted X post or thread into task context without leaving the thread
+- Search recent public posts while investigating feedback, sentiment, or an
+  incident
+- Look up accounts, their posts, and follower context during research tasks
+- Read trends, news, lists, Spaces, and community data
+
+## How setup works
+
+Admins connect X from **Settings > Integrations** with an app-only bearer
+token from the [X Developer Console](https://console.x.com/): go to **Apps**,
+open your app, then generate the Bearer Token from its **Keys and tokens**
+tab. One deployment-wide connection covers every task.
+
+What the token can read depends on your X API plan: recent post search is
+broadly available, while full-archive search and some other endpoints require
+higher tiers.
+
+## What to expect
+
+The X integration is read-only public data by design. App-only bearer tokens
+cannot act as a user, so posting, bookmarks, DMs, and other account actions
+are not available, and Roomote additionally restricts the tool list to
+read-only operations. If a task needs an unavailable X capability, Roomote
+will say so rather than attempt it.

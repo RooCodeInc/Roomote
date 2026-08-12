@@ -134,6 +134,35 @@ export interface McpConnectionGranolaConfig {
 }
 
 /**
+ * Deployment-scoped ElevenLabs connection config stored in
+ * mcpConnections.authConfig.
+ *
+ * Credential-only: consumed by the control-plane narration TTS endpoint
+ * (/api/tts) and deliberately excluded from agent MCP config delivery — the
+ * key never reaches a task sandbox. The API key is expected to be encrypted
+ * before persistence; the voice id is plain configuration.
+ */
+export interface McpConnectionElevenLabsConfig {
+  type: 'elevenlabs';
+  encryptedApiKey: string;
+  voiceId: string;
+}
+
+/**
+ * Deployment-scoped X connection config stored in mcpConnections.authConfig.
+ *
+ * Holds an X API app-only bearer token that the integration proxy forwards to
+ * X's hosted MCP server. App-only tokens are read-only by construction: X
+ * requires user-context OAuth for every mutating endpoint, which this
+ * integration deliberately does not support. The token is expected to be
+ * encrypted before persistence.
+ */
+export interface McpConnectionXConfig {
+  type: 'x';
+  encryptedBearerToken: string;
+}
+
+/**
  * Organization-scoped Vercel connection config stored in mcpConnections.authConfig.
  *
  * The bearer token is expected to be encrypted before persistence.
@@ -168,8 +197,10 @@ export type McpConnectionAuthConfig =
   | McpConnectionSnowflakeConfig
   | McpConnectionAsanaConfig
   | McpConnectionGranolaConfig
+  | McpConnectionElevenLabsConfig
   | McpConnectionVercelConfig
   | McpConnectionGrafanaConfig
+  | McpConnectionXConfig
   | Record<string, never>;
 
 export type McpConnectionRole =
@@ -244,7 +275,18 @@ export type LinkedAccountSetup = {
 
 export type McpIntegrationOauthScopeMode = 'all' | 'read-only';
 export type McpIntegrationConnectionMode = 'oauth' | 'admin_configured';
-export type McpIntegrationServerMode = 'upstream_proxy' | 'native';
+/**
+ * - `upstream_proxy`: tools come from a remote MCP server reached through the
+ *   Roomote proxy.
+ * - `native`: tools come from a Roomote-implemented MCP handler.
+ * - `credential_only`: the integration stores admin-configured credentials
+ *   consumed by control-plane features; it exposes no MCP tools to agents
+ *   and is never delivered to task sandboxes.
+ */
+export type McpIntegrationServerMode =
+  | 'upstream_proxy'
+  | 'native'
+  | 'credential_only';
 
 export type McpIntegrationOAuthClientEnv = {
   clientIdEnv: string;
@@ -504,6 +546,15 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
       'Use Granola to browse and read meeting notes, transcripts, folders, decisions, and action items through the deployment API key. The built-in tools are read-only.',
   },
   {
+    id: 'elevenlabs',
+    name: 'ElevenLabs',
+    description: `Connect ElevenLabs so ${PRODUCT_NAME} can narrate feature-demo videos with your voice. The API key stays on the control plane; agents get no ElevenLabs tools and the key never enters a task sandbox`,
+    icon: 'elevenlabs',
+    connectionScope: 'deployment',
+    connectionMode: 'admin_configured',
+    serverMode: 'credential_only',
+  },
+  {
     id: 'supermemory',
     name: 'Supermemory',
     url: 'https://mcp.supermemory.ai/mcp',
@@ -528,6 +579,18 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
       '',
       'Never save task status or progress notes, code snippets or file contents, secrets or credentials, private one-task details, or anything easily rederivable from the repository. Do not dump transcripts or large blobs.',
     ].join('\n'),
+  },
+  {
+    id: 'x',
+    name: 'X',
+    url: 'https://api.x.com/mcp',
+    description: `Connect X so your agents can search posts, look up users, and pull trends and news into ${PRODUCT_NAME} tasks`,
+    icon: 'x',
+    connectionScope: 'deployment',
+    connectionMode: 'admin_configured',
+    serverMode: 'upstream_proxy',
+    instructions:
+      'Use X to search public posts, look up users and their posts, and pull trends, news, lists, Spaces, and community context. The connection uses an app-only bearer token, so it is read-only public data: posting, bookmarks, DMs, and other user-context tools are not available.',
   },
   {
     id: 'zero',
@@ -636,6 +699,26 @@ export function isNativeMcpIntegration(
       : integrationOrId;
 
   return integration?.serverMode === 'native';
+}
+
+/**
+ * Credential-only integrations store admin-configured credentials for
+ * control-plane features and expose no MCP tools to agents, so they get no
+ * proxy route and are never delivered to task sandboxes.
+ */
+export function isCredentialOnlyMcpIntegration(
+  integrationOrId: McpIntegration | string | undefined,
+): boolean {
+  if (!integrationOrId) {
+    return false;
+  }
+
+  const integration =
+    typeof integrationOrId === 'string'
+      ? getMcpIntegration(integrationOrId)
+      : integrationOrId;
+
+  return integration?.serverMode === 'credential_only';
 }
 
 export function getMcpIntegrationUpstreamUrl(
@@ -824,6 +907,21 @@ export function isMcpConnectionGranolaConfig(
   );
 }
 
+export function isMcpConnectionElevenLabsConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionElevenLabsConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'elevenlabs' &&
+    'encryptedApiKey' in authConfig &&
+    typeof authConfig.encryptedApiKey === 'string' &&
+    'voiceId' in authConfig &&
+    typeof authConfig.voiceId === 'string',
+  );
+}
+
 export function isMcpConnectionVercelConfig(
   authConfig: McpConnectionAuthConfig | null | undefined,
 ): authConfig is McpConnectionVercelConfig {
@@ -832,6 +930,19 @@ export function isMcpConnectionVercelConfig(
     typeof authConfig === 'object' &&
     'type' in authConfig &&
     authConfig.type === 'vercel',
+  );
+}
+
+export function isMcpConnectionXConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionXConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'x' &&
+    'encryptedBearerToken' in authConfig &&
+    typeof authConfig.encryptedBearerToken === 'string',
   );
 }
 

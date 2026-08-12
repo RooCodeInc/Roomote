@@ -47,8 +47,11 @@ import {
   discord,
   cloudDeploymentAccess,
   inference,
+  tts,
   mcp,
   mcpRouting,
+  mcpOAuthMetadata,
+  publicRoomoteMcp,
   taskRunsRouter,
   artifactsRouter,
   taskArtifactsRouter,
@@ -209,8 +212,11 @@ export function createApiApp(): ApiApp {
   app.route('/api/internal/discord', discord);
   app.route('/api/internal/cloud', cloudDeploymentAccess);
   app.route('/api/inference', inference);
+  app.route('/api/tts', tts);
   app.route('/api/mcp', mcp);
   app.route('/api/mcp-routing', mcpRouting);
+  app.route('/mcp', publicRoomoteMcp);
+  app.route('/', mcpOAuthMetadata);
   app.route('/api/task-runs', taskRunsRouter);
   app.route('/api/artifacts', artifactsRouter);
   app.route('/api/tasks', taskArtifactsRouter);

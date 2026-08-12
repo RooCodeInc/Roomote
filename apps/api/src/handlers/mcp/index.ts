@@ -4,7 +4,11 @@ import {
   areCuratedIntegrationsDisabled,
   isCustomMcpDisabled,
 } from '@roomote/env';
-import { isNativeMcpIntegration, MCP_INTEGRATIONS } from '@roomote/types';
+import {
+  isCredentialOnlyMcpIntegration,
+  isNativeMcpIntegration,
+  MCP_INTEGRATIONS,
+} from '@roomote/types';
 
 import type { Variables } from '../../types';
 
@@ -66,7 +70,9 @@ mcp.route('/vercel', vercelMcp);
 
 for (const integration of MCP_INTEGRATIONS.filter(
   (candidate) =>
-    !isNativeMcpIntegration(candidate) && candidate.id !== 'linear',
+    !isNativeMcpIntegration(candidate) &&
+    !isCredentialOnlyMcpIntegration(candidate) &&
+    candidate.id !== 'linear',
 )) {
   mcp.route(
     `/${integration.id}`,

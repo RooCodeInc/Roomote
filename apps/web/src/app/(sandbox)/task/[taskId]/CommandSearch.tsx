@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
+import { PACKAGED_SKILL_INVOCATIONS } from '@roomote/cloud-agents';
 
 import {
   Command,
@@ -9,6 +10,7 @@ import {
   CommandList,
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogTitle,
 } from '@/components/system';
 
@@ -21,12 +23,15 @@ interface CommandSearchProps {
 interface SlashCommand {
   name: string;
   description?: string;
-  source: 'global' | 'project' | 'built-in';
 }
 
-// Kept in place for runtime slash commands. The sandbox server does not expose
-// command discovery yet, so the dialog currently renders an empty state.
-const AVAILABLE_COMMANDS: SlashCommand[] = [];
+const AVAILABLE_COMMANDS: SlashCommand[] = [
+  {
+    name: '/goal',
+    description: 'Keep working toward an objective across multiple turns',
+  },
+  ...PACKAGED_SKILL_INVOCATIONS.map((name) => ({ name: `/${name}` })),
+];
 
 export const CommandSearch = ({
   open,
@@ -76,6 +81,9 @@ export const CommandSearch = ({
         showCloseButton={false}
       >
         <DialogTitle className="sr-only">Commands</DialogTitle>
+        <DialogDescription className="sr-only">
+          Search for a command to add to your message.
+        </DialogDescription>
         <Command shouldFilter={false}>
           <CommandInput
             placeholder="Search commands..."
@@ -85,8 +93,7 @@ export const CommandSearch = ({
           <CommandList>
             {filteredCommands.length === 0 ? (
               <div className="text-muted-foreground py-6 px-4 text-center text-sm">
-                Slash commands will appear here once runtime command listing is
-                implemented.
+                No commands found.
               </div>
             ) : (
               filteredCommands.map((command) => (

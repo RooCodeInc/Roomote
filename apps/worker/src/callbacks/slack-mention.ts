@@ -9,9 +9,12 @@ import {
 } from '@roomote/types';
 import {
   SlackNotifier,
+  buildSlackAnsweredRequestUserInputBlocks,
+  buildSlackCancelledRequestUserInputBlocks,
   buildSlackRequestUserInputBlocks,
   buildStartedBlocks,
   convertMarkdownToSlack,
+  getSlackRequestUserInputCurrentQuestion,
 } from '@roomote/slack/client';
 import { type TaskRun, sdk } from '@roomote/sdk/client';
 
@@ -420,10 +423,11 @@ async function handleRequestUserInputResponse(
   taskRun: TaskRun,
   event: CallbackEvent & { type: 'request_user_input_response' },
 ) {
-  try {
-    const { thread_ts: threadTs } = getSlackConversation(taskRun);
+  const { channel, thread_ts: threadTs } = getSlackConversation(taskRun);
+  let pendingRequest;
 
-    await sdk.taskRuns.clearPendingSlackRequestUserInput({
+  try {
+    pendingRequest = await sdk.taskRuns.clearPendingSlackRequestUserInput({
       runId: taskRun.id,
       threadId: threadTs,
       requestId: event.response.requestId,
@@ -436,6 +440,56 @@ async function handleRequestUserInputResponse(
     );
     console.error(
       `Failed to clear Slack request_user_input state: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return;
+  }
+
+  if (!pendingRequest?.promptMessageTs) {
+    return;
+  }
+
+  const currentQuestion =
+    getSlackRequestUserInputCurrentQuestion(pendingRequest);
+
+  if (!currentQuestion) {
+    return;
+  }
+
+  const answer =
+    event.response.answers[currentQuestion.question.id]?.answers[0];
+  const blocks =
+    event.response.resolution === 'cancelled'
+      ? buildSlackCancelledRequestUserInputBlocks({
+          question: currentQuestion.question,
+        })
+      : answer
+        ? buildSlackAnsweredRequestUserInputBlocks({
+            question: currentQuestion.question,
+            answer,
+          })
+        : null;
+
+  if (!blocks) {
+    return;
+  }
+
+  try {
+    const slack = await getSlackNotifier();
+    await slack.updateMessage({
+      channel,
+      ts: pendingRequest.promptMessageTs,
+      message: {
+        blocks,
+      },
+    });
+  } catch (error) {
+    reportSlackCallbackError(
+      error,
+      'slackMentionCallbacks.handleRequestUserInputResponse.updatePrompt',
+      taskRun.id,
+    );
+    console.error(
+      `Failed to update resolved Slack request_user_input prompt: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 }

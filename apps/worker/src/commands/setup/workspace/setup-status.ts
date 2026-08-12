@@ -9,6 +9,7 @@
  * `<workspace>/.roomote/setup-logs/<repository>/<command>.log`.
  */
 
+import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -40,6 +41,14 @@ export interface EnvironmentSetupCommandStatus {
   finishedAt?: string;
 }
 
+export interface EnvironmentSetupRepositoryBaseline {
+  repository: string;
+  /** Workspace-relative repository path. */
+  path: string;
+  /** Secret-safe `git status --porcelain=v1` entries present before setup. */
+  changes: string[];
+}
+
 export type EnvironmentSetupOverallState =
   | 'running'
   | 'completed'
@@ -53,6 +62,8 @@ export interface EnvironmentSetupStatus {
   finishedAt?: string;
   commands: EnvironmentSetupCommandStatus[];
   warnings: string[];
+  /** Working-tree state captured before repository setup commands begin. */
+  repositoryBaselines?: EnvironmentSetupRepositoryBaseline[];
 }
 
 function commandKey(repository: string, commandName: string): string {
@@ -66,6 +77,25 @@ function slugify(value: string): string {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-+|-+$/g, '') || 'command'
   );
+}
+
+function readGitStatus(repositoryPath: string): string[] | null {
+  try {
+    return execFileSync(
+      'git',
+      ['status', '--porcelain=v1', '--untracked-files=all'],
+      {
+        cwd: repositoryPath,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 10_000,
+      },
+    )
+      .split(/\r?\n/u)
+      .filter(Boolean);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -102,7 +132,28 @@ export class EnvironmentSetupStatusWriter {
    * order) and write the initial `running` status file. Call this before the
    * agent can start so a missing file never means "setup is in progress".
    */
-  initialize(repositories: EnvironmentRepositoryConfig[]): void {
+  initialize(
+    repositories: EnvironmentRepositoryConfig[],
+    repoPaths?: Record<string, string>,
+  ): void {
+    if (repoPaths) {
+      this.status.repositoryBaselines = repositories.flatMap((repoConfig) => {
+        const repositoryPath = repoPaths[repoConfig.repository];
+        if (!repositoryPath) return [];
+
+        const changes = readGitStatus(repositoryPath);
+        if (!changes) return [];
+
+        return [
+          {
+            repository: repoConfig.repository,
+            path: path.relative(this.workspacePath, repositoryPath) || '.',
+            changes,
+          },
+        ];
+      });
+    }
+
     for (const repoConfig of repositories) {
       for (const command of repoConfig.commands ?? []) {
         const key = commandKey(repoConfig.repository, command.name);
@@ -424,6 +475,31 @@ function parseEnvironmentSetupStatus(
 
   if (typeof value.finishedAt === 'string') {
     status.finishedAt = value.finishedAt;
+  }
+
+  if (value.repositoryBaselines !== undefined) {
+    if (!Array.isArray(value.repositoryBaselines)) {
+      return null;
+    }
+
+    const repositoryBaselines: EnvironmentSetupRepositoryBaseline[] = [];
+    for (const baseline of value.repositoryBaselines) {
+      if (
+        !isObject(baseline) ||
+        typeof baseline.repository !== 'string' ||
+        typeof baseline.path !== 'string' ||
+        !Array.isArray(baseline.changes) ||
+        !baseline.changes.every((change) => typeof change === 'string')
+      ) {
+        return null;
+      }
+      repositoryBaselines.push({
+        repository: baseline.repository,
+        path: baseline.path,
+        changes: baseline.changes,
+      });
+    }
+    status.repositoryBaselines = repositoryBaselines;
   }
 
   return status;

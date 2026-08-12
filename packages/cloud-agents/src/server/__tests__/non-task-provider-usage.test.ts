@@ -622,6 +622,80 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
+  it('prefers the configured vision model for video prompts', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+      R_SMALL_MODEL: 'openrouter/google/gemini-3.6-flash',
+      R_VISION_MODEL: 'openrouter/google/gemini-3.6-pro',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'openai/gpt-5.6-terra': {
+                capabilities: {
+                  input: { video: false },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-3.6-flash': {
+                capabilities: {
+                  input: { video: true },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-3.6-pro': {
+                capabilities: {
+                  input: { video: true },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: { error: null },
+        parts: [{ type: 'text', text: 'The save request fails.' }],
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+    await generateTrackedNonTaskText({
+      surface: NON_TASK_INFERENCE_SURFACES.chatVideoDescription,
+      prompt: 'Describe the video.',
+      requiredInputModality: 'video',
+      files: [
+        {
+          mime: 'video/mp4',
+          url: 'data:video/mp4;base64,dmlkZW8=',
+        },
+      ],
+    });
+
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: {
+          providerID: 'openrouter',
+          modelID: 'google/gemini-3.6-pro',
+        },
+      }),
+      expect.anything(),
+    );
+  });
+
   it('rejects native file prompts when configured models lack the modality', async () => {
     process.env = {
       ...originalEnv,

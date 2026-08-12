@@ -8,6 +8,7 @@ const {
   mockSpawnE2bWorker,
   mockSpawnModalWorker,
   mockSpawnBlaxelWorker,
+  mockSpawnBoxWorker,
 } = vi.hoisted(() => ({
   mockEnv: {
     MODAL_TOKEN_ID: 'modal-token-id',
@@ -30,7 +31,7 @@ const {
     DOCKER_WORKER_CPU_LIMIT: 2,
     DOCKER_WORKER_MEMORY_LIMIT: '4g',
     DOCKER_TASK_DAEMON_MEMORY_LIMIT: '8g',
-    DOCKER_WORKER_PIDS_LIMIT: 512,
+    DOCKER_WORKER_PIDS_LIMIT: 2048,
     DOCKER_WORKER_DISK_LIMIT: '20g',
     DOCKER_WORKER_ALLOW_UNBOUNDED_DISK: false,
     DOCKER_WORKER_LOG_MAX_SIZE: '10m',
@@ -48,6 +49,10 @@ const {
     BL_WORKSPACE: 'roomote',
     BLAXEL_IMAGE: 'ghcr.io/roomote/worker:test',
     BLAXEL_REGION: 'us-pdx-1',
+    BOX_API_KEY: 'box-key',
+    BOX_API_BASE_URL: 'https://api.box.test',
+    BOX_MACHINE_TYPE: 'large',
+    BOX_TIMEOUT_MS: 30_000,
   } as Record<string, string | number | boolean | undefined>,
   mockFindOrg: vi.fn(),
   mockSpawnDaytonaWorker: vi.fn(),
@@ -55,6 +60,7 @@ const {
   mockSpawnE2bWorker: vi.fn(),
   mockSpawnModalWorker: vi.fn(),
   mockSpawnBlaxelWorker: vi.fn(),
+  mockSpawnBoxWorker: vi.fn(),
 }));
 
 const { mockFinishRun } = vi.hoisted(() => ({
@@ -107,6 +113,7 @@ vi.mock('../compute-providers', () => ({
   spawnE2bWorker: (...args: unknown[]) => mockSpawnE2bWorker(...args),
   spawnModalWorker: (...args: unknown[]) => mockSpawnModalWorker(...args),
   spawnBlaxelWorker: (...args: unknown[]) => mockSpawnBlaxelWorker(...args),
+  spawnBoxWorker: (...args: unknown[]) => mockSpawnBoxWorker(...args),
 }));
 
 import { RoomoteController } from '../RoomoteController';
@@ -132,7 +139,7 @@ describe('RoomoteController', () => {
     mockEnv.DOCKER_WORKER_CPU_LIMIT = 2;
     mockEnv.DOCKER_WORKER_MEMORY_LIMIT = '4g';
     mockEnv.DOCKER_TASK_DAEMON_MEMORY_LIMIT = '8g';
-    mockEnv.DOCKER_WORKER_PIDS_LIMIT = 512;
+    mockEnv.DOCKER_WORKER_PIDS_LIMIT = 2048;
     mockEnv.DOCKER_WORKER_DISK_LIMIT = '20g';
     mockEnv.DOCKER_WORKER_ALLOW_UNBOUNDED_DISK = false;
     mockEnv.DOCKER_WORKER_LOG_MAX_SIZE = '10m';
@@ -150,6 +157,10 @@ describe('RoomoteController', () => {
     mockEnv.BL_WORKSPACE = 'roomote';
     mockEnv.BLAXEL_IMAGE = 'ghcr.io/roomote/worker:test';
     mockEnv.BLAXEL_REGION = 'us-pdx-1';
+    mockEnv.BOX_API_KEY = 'box-key';
+    mockEnv.BOX_API_BASE_URL = 'https://api.box.test';
+    mockEnv.BOX_MACHINE_TYPE = 'large';
+    mockEnv.BOX_TIMEOUT_MS = 30_000;
     mockSpawnDockerWorker.mockResolvedValue({ containerId: 'worker-47' });
   });
 
@@ -195,7 +206,7 @@ describe('RoomoteController', () => {
         cpuLimit: 2,
         memoryLimit: '4g',
         taskDaemonMemoryLimit: '8g',
-        pidsLimit: 512,
+        pidsLimit: 2048,
         diskLimit: '20g',
         allowUnboundedDisk: false,
         logMaxSize: '10m',
@@ -439,6 +450,66 @@ describe('RoomoteController', () => {
         deploymentSlug: 'roomote',
       }),
     );
+  });
+
+  it('spawns Box workers with configured limits when Box is selected', async () => {
+    const controller = new RoomoteController('production');
+    await (
+      controller as unknown as {
+        spawnFreshWorker: (
+          taskRun: TaskRun,
+          authToken: string,
+          deploymentSlug: string,
+          timeoutMs: number,
+          provider: 'box',
+        ) => Promise<void>;
+      }
+    ).spawnFreshWorker(
+      { id: 55, payload: { environmentId: 'env_123' } } as TaskRun,
+      'auth-token',
+      'roomote',
+      60_000,
+      'box',
+    );
+
+    expect(mockSpawnBoxWorker).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 55 }),
+      'auth-token',
+      expect.objectContaining({
+        boxApiKey: 'box-key',
+        boxApiBaseUrl: 'https://api.box.test',
+        boxMachineType: 'large',
+        boxTimeoutMs: 30_000,
+        deploymentSlug: 'roomote',
+      }),
+    );
+  });
+
+  it('requires Box credentials only when spawning a Box worker', async () => {
+    mockEnv.BOX_API_KEY = undefined;
+    const controller = new RoomoteController('development');
+
+    await expect(
+      (
+        controller as unknown as {
+          spawnFreshWorker: (
+            taskRun: TaskRun,
+            authToken: string,
+            deploymentSlug: string,
+            timeoutMs: number,
+            provider: 'box',
+          ) => Promise<void>;
+        }
+      ).spawnFreshWorker(
+        { id: 56, payload: { environmentId: 'env_123' } } as TaskRun,
+        'auth-token',
+        'roomote',
+        60_000,
+        'box',
+      ),
+    ).rejects.toThrow('BOX_API_KEY is required to spawn Box workers');
+
+    expect(mockSpawnBoxWorker).not.toHaveBeenCalled();
   });
 
   it('rejects partial Modal private registry config on startup', () => {

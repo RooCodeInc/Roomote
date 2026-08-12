@@ -75,9 +75,41 @@ export interface UserAuthTokenContext {
 export type AuthTokenContext = UserAuthTokenContext;
 
 export const isUserToken = (
-  token: AuthTokenContext | undefined,
-): token is UserAuthTokenContext =>
-  typeof token === 'object' && 'userId' in token;
+  token: { tokenType: string } | undefined,
+): token is UserAuthTokenContext => token?.tokenType === 'auth';
+
+/**
+ * Browser-issued OAuth token for the public Roomote MCP resource.
+ *
+ * This is deliberately distinct from the internal user auth token so an MCP
+ * client cannot use its bearer credential against the rest of the API.
+ */
+export const mcpAccessTokenPayloadSchema = z.object({
+  iss: z.string().min(1, 'Issuer (iss) is required'),
+  sub: z.string().min(1, 'Subject (sub) is required'),
+  aud: z.string().url('Audience (aud) must be a URL'),
+  exp: z.number().int().positive('Expiration (exp) must be a positive integer'),
+  iat: z.number().int().positive('Issued at (iat) must be a positive integer'),
+  nbf: z.number().int().positive('Not before (nbf) must be a positive integer'),
+  v: z.literal(1, { errorMap: () => ({ message: 'Version must be 1' }) }),
+  r: z.object({
+    u: z.string().min(1, 'User ID is required'),
+    t: z.literal('mcp', {
+      errorMap: () => ({ message: 'Token type must be "mcp"' }),
+    }),
+    s: z.array(z.string().min(1)).min(1, 'At least one scope is required'),
+  }),
+});
+
+export type McpAccessTokenPayload = z.infer<typeof mcpAccessTokenPayloadSchema>;
+
+export interface McpAccessTokenContext {
+  userId: string;
+  tokenType: 'mcp';
+  version: number;
+  resource: string;
+  scopes: string[];
+}
 
 /**
  * PreviewTokenPayload

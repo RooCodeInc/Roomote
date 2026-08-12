@@ -9,7 +9,7 @@ set -euo pipefail
 #   1. Worker image builds (Dockerfiles) to prebake browser automation.
 #   2. Worker setup compatibility fallbacks on older Linux images.
 
-AGENT_BROWSER_VERSION="${AGENT_BROWSER_VERSION:-0.27.0}"
+AGENT_BROWSER_VERSION="${AGENT_BROWSER_VERSION:-0.33.2}"
 AGENT_BROWSER_INSTALL_ROOT="${AGENT_BROWSER_INSTALL_ROOT:-/opt/agent-browser}"
 AGENT_BROWSER_EXECUTABLE_PATH="${AGENT_BROWSER_EXECUTABLE_PATH:-${AGENT_BROWSER_INSTALL_ROOT}/chrome}"
 AGENT_BROWSER_SAVED_CLI_PATH="${AGENT_BROWSER_SAVED_CLI_PATH:-${AGENT_BROWSER_INSTALL_ROOT}/.cli-path}"
@@ -455,6 +455,43 @@ collect_preview_urls() {
   done < <(env | LC_ALL=C sort)
 }
 
+configure_local_preview_host_resolution() {
+  if ! command -v getent >/dev/null 2>&1 ||
+    ! getent ahostsv4 host.docker.internal >/dev/null 2>&1; then
+    return 0
+  fi
+
+  # A *.localhost preview URL resolves back into the sandbox. Local Docker
+  # publishes the preview proxy on the host, so keep the public hostname (and
+  # therefore its Host header, cookies, and TLS name) while routing it through
+  # Docker's host gateway. There is one deployment-wide preview base domain,
+  # so the first matching URL provides the shared suffix for every named port.
+  local preview_url preview_host preview_suffix resolver_arg
+  preview_url="$(collect_preview_urls | grep -E '^https?://[^/]+\.localhost([:/]|$)' | head -n 1 || true)"
+  if [ -z "$preview_url" ]; then
+    return 0
+  fi
+
+  preview_host="${preview_url#*://}"
+  preview_host="${preview_host%%/*}"
+  preview_host="${preview_host%%:*}"
+  preview_suffix="${preview_host#*.}"
+  if [ "$preview_suffix" = "$preview_host" ] || [ "$preview_suffix" = "localhost" ]; then
+    return 0
+  fi
+
+  if [[ "${AGENT_BROWSER_ARGS:-}" == *"--host-resolver-rules="* ]]; then
+    return 0
+  fi
+
+  resolver_arg="--host-resolver-rules=MAP *.${preview_suffix} host.docker.internal"
+  if [ -n "${AGENT_BROWSER_ARGS:-}" ]; then
+    export AGENT_BROWSER_ARGS="${AGENT_BROWSER_ARGS}"$'\n'"${resolver_arg}"
+  else
+    export AGENT_BROWSER_ARGS="${resolver_arg}"
+  fi
+}
+
 clear_seed_cache() {
   local session_hash
   session_hash="$(hash_value "$AGENT_BROWSER_SESSION_VALUE")"
@@ -508,6 +545,7 @@ export AGENT_BROWSER_EXECUTABLE_PATH="${AGENT_BROWSER_EXECUTABLE_PATH:-/opt/agen
 
 collect_cli_browser_args "$@"
 parse_cli_context "${AGENT_BROWSER_EXEC_ARGS[@]}"
+configure_local_preview_host_resolution
 
 if should_seed_preview_cookies; then
   seed_preview_cookies

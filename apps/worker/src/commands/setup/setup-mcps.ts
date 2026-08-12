@@ -3,6 +3,7 @@ import * as path from 'node:path';
 import {
   CUSTOM_MCP_PROXY_PATH_PREFIX,
   getMcpIntegrationUpstreamUrl,
+  isCredentialOnlyMcpIntegration,
   isReservedRuntimeMcpEnvVarName,
   isRoomoteNamespacedEnvVarName,
   MCP_INTEGRATIONS,
@@ -170,7 +171,11 @@ function resolveConfigValues(
 function buildIntegrationProxyMap(): Map<string, IntegrationProxyConfig> {
   const integrationConfigs: IntegrationProxyConfig[] = [];
 
-  for (const integration of MCP_INTEGRATIONS) {
+  // Credential-only integrations have no MCP server and are never delivered
+  // to sandboxes, so they get no proxy-path entry.
+  for (const integration of MCP_INTEGRATIONS.filter(
+    (candidate) => !isCredentialOnlyMcpIntegration(candidate),
+  )) {
     const upstreamUrl = getMcpIntegrationUpstreamUrl(integration);
     const upstream = upstreamUrl ? parseUrl(upstreamUrl) : null;
 

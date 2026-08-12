@@ -37,6 +37,11 @@ describe('build-worker-release.sh', () => {
       path.join(tempRepoRoot, 'apps/worker/package.json'),
       JSON.stringify({ dependencies: { 'node-pty': '^1.0.0' } }),
     );
+    // The script reads the pm2 pin from the worker Dockerfile's ARG.
+    fs.writeFileSync(
+      path.join(tempRepoRoot, 'apps/worker/Dockerfile'),
+      'ARG PM2_VERSION=7.0.1\n',
+    );
     fs.writeFileSync(
       path.join(fakeBinDir, 'pnpm'),
       `#!/bin/bash

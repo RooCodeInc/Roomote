@@ -5,6 +5,7 @@ import {
   type ComputeProvider,
   type LaunchCodingHarness,
   type StandardTask,
+  type TaskGoal,
   RunStatus,
   TaskPayloadKind,
   isExitedRunStatus,
@@ -26,6 +27,7 @@ import {
   eq,
   inArray,
   markTaskStartParallelCountEndedAt,
+  prepareTaskGoalActivation,
   slackInstallations,
   taskRuns,
   tasks,
@@ -39,10 +41,79 @@ import {
   resolveSelectedRepositorySourceControlProvider,
 } from '@/lib/server/source-control-provider';
 import { humanizeFilename } from '@/lib/task-utils';
+import { sendSandboxPromptCommand } from '../sandbox-session';
+import { resolveTaskByIdAccessCommand } from '../tasks/by-id';
 
 export type CreateTaskRunResult =
   | { success: true; id: number; taskId: string }
   | { success: false; error: string };
+
+export async function startTaskGoalCommand(
+  auth: UserAuthSuccess,
+  input: {
+    taskId: string;
+    goal: { objective: string; maxContinuations: number };
+    clientMessageId?: string;
+    userImageUrl?: string;
+  },
+): Promise<
+  { success: true; goal: TaskGoal } | { success: false; error: string }
+> {
+  const taskAccess = await resolveTaskByIdAccessCommand(auth, {
+    taskId: input.taskId,
+  });
+
+  if (taskAccess.kind !== 'resolved') {
+    return { success: false, error: 'Task not found' };
+  }
+
+  const activation = await prepareTaskGoalActivation({
+    taskId: input.taskId,
+    goal: input.goal,
+  });
+  if (!activation) {
+    return { success: false, error: 'Goal Mode activation is already pending' };
+  }
+
+  try {
+    await sendSandboxPromptCommand(
+      auth,
+      {
+        taskId: input.taskId,
+        prompt: input.goal.objective,
+        source: 'web',
+        clientMessageId: input.clientMessageId,
+        userImageUrl: input.userImageUrl,
+        autoSteerWhenQueued: true,
+      },
+      {
+        goalContext: {
+          ...input.goal,
+          generation: activation.generation,
+          status: 'active',
+          continuationsUsed: 0,
+          blockedReason: null,
+          completedAt: null,
+        },
+      },
+    );
+  } catch (error) {
+    try {
+      await activation.rollback();
+    } catch (rollbackError) {
+      console.error('Failed to roll back Goal Mode activation:', rollbackError);
+    }
+    throw error;
+  }
+
+  const goal = await activation.commit();
+  if (!goal) {
+    await activation.rollback();
+    return { success: false, error: 'Goal Mode activation was superseded' };
+  }
+
+  return { success: true, goal };
+}
 
 type CreateStandardTaskRunInput = {
   harness?: LaunchCodingHarness;

@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 type ListedServer = {
@@ -154,6 +160,7 @@ function Harness() {
             <span data-testid="utility">{item.utilityAction?.label}</span>
             <span data-testid="configured">{String(item.configured)}</span>
             <span data-testid="item-enabled">{String(item.enabled)}</span>
+            <span data-testid="item-connected">{String(item.connected)}</span>
           </li>
         ))}
       </ul>
@@ -175,6 +182,11 @@ function renderHarness() {
 }
 
 describe('useCustomMcpServers', () => {
+  afterEach(async () => {
+    cleanup();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     state.availability = { enabled: true };
@@ -233,6 +245,7 @@ describe('useCustomMcpServers', () => {
 
     expect(await screen.findByTestId('secondary')).toHaveTextContent('Connect');
     expect(screen.getByTestId('status')).toHaveTextContent('Not connected yet');
+    expect(screen.getByTestId('item-connected')).toHaveTextContent('false');
   });
 
   it('surfaces a reconnect prompt when a refresh was rejected', async () => {

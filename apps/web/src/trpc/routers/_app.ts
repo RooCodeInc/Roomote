@@ -11,6 +11,7 @@ import {
   launchCodingHarnesses,
   computeProviders,
   environmentConfigSchema,
+  workspaceRoutingSettingsSchema,
   ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH,
   REASONING_EFFORT_VALUES,
   isTriggerableBackgroundAutomationKey,
@@ -25,6 +26,7 @@ import {
   sourceControlProviderSchema,
   sourceControlTokenBackedProviderSchema,
   standardTaskSchema,
+  taskGoalInputSchema,
   taskModelMetadataSchema,
   type ScheduleOnlyBackgroundAutomationFrequencyField,
 } from '@roomote/types';
@@ -39,9 +41,11 @@ import {
   filterSchema,
   saveAsanaConnectionSchema,
   saveGranolaConnectionSchema,
+  saveElevenLabsConnectionSchema,
   saveGrafanaConnectionSchema,
   saveSnowflakeConnectionSchema,
   saveVercelConnectionSchema,
+  saveXConnectionSchema,
   timePeriodFilterSchema,
   PERSONAL_COLOR_THEMES,
 } from '@/types';
@@ -103,6 +107,7 @@ import {
   createStandardTaskRunCommand,
   cancelTaskRunCommand,
   retryFailedTaskStartCommand,
+  startTaskGoalCommand,
 } from '../commands/task-runs';
 import {
   exchangeSlackOAuthCodeCommand,
@@ -152,6 +157,8 @@ import {
   type EnvironmentConfigVersionDetail,
   getActiveEnvironmentDefinitionTaskCommand,
   getEnvironmentsCommand,
+  getWorkspaceRoutingSettingsCommand,
+  updateWorkspaceRoutingSettingsCommand,
   getAvailableEnvironmentsCommand,
   getEnvironmentNamesByIdsCommand,
   getEnvironmentByIdCommand,
@@ -199,15 +206,19 @@ import {
   getUserMcpConnectionsCommand,
   getAsanaConnectionCommand,
   getGranolaConnectionCommand,
+  getElevenLabsConnectionCommand,
   getGrafanaConnectionCommand,
   getSnowflakeConnectionCommand,
   getVercelConnectionCommand,
+  getXConnectionCommand,
   listDeploymentMcpIntegrationToolsCommand,
   saveAsanaConnectionCommand,
   saveGranolaConnectionCommand,
+  saveElevenLabsConnectionCommand,
   saveGrafanaConnectionCommand,
   saveSnowflakeConnectionCommand,
   saveVercelConnectionCommand,
+  saveXConnectionCommand,
   setDeploymentDisabledMcpIntegrationToolsCommand,
   connectMcpCommand,
   disconnectMcpCommand,
@@ -957,6 +968,19 @@ export const appRouter = createRouter({
   }),
 
   taskRuns: createRouter({
+    startGoal: protectedProcedure
+      .input(
+        z.object({
+          taskId: z.string(),
+          goal: taskGoalInputSchema,
+          clientMessageId: z.string().optional(),
+          userImageUrl: z.string().optional(),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        startTaskGoalCommand(auth, input),
+      ),
+
     routeHomeTask: protectedProcedure
       .input(
         z.object({
@@ -1389,6 +1413,16 @@ export const appRouter = createRouter({
       getEnvironmentsCommand(auth),
     ),
 
+    routingSettings: protectedProcedure.query(({ ctx: { auth } }) =>
+      getWorkspaceRoutingSettingsCommand(auth),
+    ),
+
+    updateRoutingSettings: protectedProcedure
+      .input(workspaceRoutingSettingsSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        updateWorkspaceRoutingSettingsCommand(auth, input),
+      ),
+
     available: protectedProcedure
       .input(z.object({ repository: z.string().optional() }).optional())
       .query(({ ctx: { auth }, input }) =>
@@ -1693,12 +1727,20 @@ export const appRouter = createRouter({
       getGranolaConnectionCommand(auth),
     ),
 
+    elevenLabsConnection: protectedProcedure.query(({ ctx: { auth } }) =>
+      getElevenLabsConnectionCommand(auth),
+    ),
+
     grafanaConnection: protectedProcedure.query(({ ctx: { auth } }) =>
       getGrafanaConnectionCommand(auth),
     ),
 
     vercelConnection: protectedProcedure.query(({ ctx: { auth } }) =>
       getVercelConnectionCommand(auth),
+    ),
+
+    xConnection: protectedProcedure.query(({ ctx: { auth } }) =>
+      getXConnectionCommand(auth),
     ),
 
     listTools: protectedProcedure
@@ -1761,6 +1803,12 @@ export const appRouter = createRouter({
         saveGranolaConnectionCommand(auth, input),
       ),
 
+    saveElevenLabsConnection: protectedProcedure
+      .input(saveElevenLabsConnectionSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        saveElevenLabsConnectionCommand(auth, input),
+      ),
+
     saveGrafanaConnection: protectedProcedure
       .input(saveGrafanaConnectionSchema)
       .mutation(({ ctx: { auth }, input }) =>
@@ -1771,6 +1819,12 @@ export const appRouter = createRouter({
       .input(saveVercelConnectionSchema)
       .mutation(({ ctx: { auth }, input }) =>
         saveVercelConnectionCommand(auth, input),
+      ),
+
+    saveXConnection: protectedProcedure
+      .input(saveXConnectionSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        saveXConnectionCommand(auth, input),
       ),
   }),
 

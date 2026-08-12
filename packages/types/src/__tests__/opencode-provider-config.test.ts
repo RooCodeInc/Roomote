@@ -59,4 +59,32 @@ describe('mergeOpenAiCompatibleProviderConfig', () => {
       },
     });
   });
+
+  it('marks the configured vision model as image and video capable', () => {
+    expect(
+      mergeOpenAiCompatibleProviderConfig(
+        {},
+        {
+          LITELLM_BASE_URL: 'https://litellm.example.com/v1',
+          LITELLM_API_KEY: 'secret',
+        },
+        ['litellm/text-model', 'litellm/vision-model'],
+        'litellm/vision-model',
+      ),
+    ).toMatchObject({
+      litellm: {
+        models: {
+          'text-model': { name: 'text-model' },
+          'vision-model': {
+            name: 'vision-model',
+            attachment: true,
+            modalities: {
+              input: ['text', 'image', 'video'],
+              output: ['text'],
+            },
+          },
+        },
+      },
+    });
+  });
 });

@@ -11,6 +11,13 @@ export const communicationProviderSchema = z.enum(communicationProviders);
 
 export type CommunicationProvider = z.infer<typeof communicationProviderSchema>;
 
+export const CHAT_CHANNELS_TOOL = {
+  name: 'list_chat_channels',
+  title: 'List Chat Channels',
+  description:
+    'List the communication channels Roomote is connected to or can currently discover, grouped by platform. Returns channel IDs and platform-specific workspace context so another chat tool can target the right channel. Some platforms do not support channel enumeration and report that limitation explicitly.',
+} as const;
+
 export const CHAT_MESSAGE_CONTEXT_TOOL = {
   name: 'get_chat_message_context',
   title: 'Get Chat Message Context',

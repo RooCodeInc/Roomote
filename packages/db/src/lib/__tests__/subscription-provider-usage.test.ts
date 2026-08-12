@@ -21,10 +21,12 @@ import {
   fetchChatGptUsage,
   fetchGitHubCopilotUsage,
   fetchKimiForCodingUsage,
+  fetchOpenCodeGoUsage,
   fetchXaiSubscriptionUsage,
   fetchZaiCodingPlanUsage,
   fetchZaiUsage,
   getSubscriptionProviderUsage,
+  parseOpenCodeGoUsage,
   parseXaiSubscriptionUsage,
   parseZaiQuotaUsage,
 } from '../subscription-provider-usage';
@@ -423,6 +425,80 @@ describe('getSubscriptionProviderUsage', () => {
 
     expect(usage).toHaveLength(1);
     expect(usage[0]).toMatchObject({ providerId: 'kimi-for-coding' });
+  });
+});
+
+describe('fetchOpenCodeGoUsage', () => {
+  it('normalizes rolling, weekly, and monthly usage windows', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse({
+        usage: {
+          rolling: { percent: 12, resetsAt: '2026-08-12T01:00:00.000Z' },
+          weekly: { percent: 8, resetsAt: '2026-08-17T00:00:00.000Z' },
+          monthly: { percent: 35, resetsAt: '2026-09-01T00:00:00.000Z' },
+        },
+      }),
+    );
+
+    const usage = await fetchOpenCodeGoUsage({
+      fetchImpl,
+      runtimeEnv: { OPENCODE_GO_API_KEY: 'opencode-go-test' },
+    });
+
+    expect(usage).toMatchObject({
+      providerId: 'opencode-go',
+      windows: [
+        {
+          label: 'Rolling limit',
+          usedPercent: 12,
+          resetsAt: '2026-08-12T01:00:00.000Z',
+        },
+        {
+          label: 'Weekly limit',
+          usedPercent: 8,
+          resetsAt: '2026-08-17T00:00:00.000Z',
+        },
+        {
+          label: 'Monthly limit',
+          usedPercent: 35,
+          resetsAt: '2026-09-01T00:00:00.000Z',
+        },
+      ],
+    });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'https://opencode.ai/zen/go/v1/usage',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: 'Bearer opencode-go-test',
+        }),
+      }),
+    );
+  });
+
+  it('omits unavailable or unrecognized usage', async () => {
+    const executor = {
+      query: {
+        environmentVariables: { findMany: vi.fn().mockResolvedValue([]) },
+      },
+    } as never;
+    const fetchImpl = vi.fn();
+
+    await expect(
+      fetchOpenCodeGoUsage({ executor, fetchImpl, runtimeEnv: {} }),
+    ).resolves.toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(parseOpenCodeGoUsage({ usage: { rolling: {} } })).toEqual([]);
+  });
+
+  it('soft-fails when the usage endpoint rejects the credential', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({}, 403));
+
+    await expect(
+      fetchOpenCodeGoUsage({
+        fetchImpl,
+        runtimeEnv: { OPENCODE_GO_API_KEY: 'invalid-opencode-go-key' },
+      }),
+    ).resolves.toBeNull();
   });
 });
 

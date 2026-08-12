@@ -14,10 +14,11 @@ export async function handleLaunchTask(
   config: RoomoteConfig,
 ): Promise<ToolResult> {
   try {
+    const branch = params.branch?.trim() || undefined;
     const result = await launchTask(config, {
       prompt: params.prompt,
       repo: ALL_REPOSITORIES,
-      branch: params.branch,
+      branch,
       environmentId:
         params.environmentId === ALL_REPOSITORIES
           ? undefined

@@ -812,6 +812,7 @@ export function useCustomMcpServers(): {
           </Badge>
         ),
         enabled: server.enabled,
+        connected: server.enabled && !needsConnection,
         // Custom servers are always deployment-defined, so a disabled one
         // belongs with "Configured" rather than the catalog's "Available".
         configured: true,

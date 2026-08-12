@@ -225,6 +225,8 @@ export const prReviewNotificationJob = async (
     taskId: data.taskId,
     repository: data.repository,
     prNumber: data.prNumber,
+    ...(data.batchKind ? { batchKind: data.batchKind } : {}),
+    ...(data.batchId ? { batchId: data.batchId } : {}),
     ...(data.immediate ? { immediate: true } : {}),
   };
 

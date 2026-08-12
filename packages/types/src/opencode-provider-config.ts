@@ -222,7 +222,7 @@ export function mergeOpenAiCompatibleProviderConfig(
                   ? {
                       attachment: true,
                       modalities: {
-                        input: ['text', 'image'],
+                        input: ['text', 'image', 'video'],
                         output: ['text'],
                       },
                     }

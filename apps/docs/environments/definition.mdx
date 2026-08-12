@@ -302,9 +302,12 @@ sandbox runtime.
 ## Ports
 
 `ports` declares the human-facing application URLs Roomote should expose as
-[live previews](/environments#make-verification-possible). Each named port gets
-a preview URL and a corresponding `ROOMOTE_<NAME>_HOST` environment variable
-inside the sandbox.
+[live previews](/environments#make-verification-possible). Inside the sandbox,
+each named port gets a shareable `ROOMOTE_<NAME>_PREVIEW_URL`, protected by
+preview authentication unless `unauthenticated` is enabled.
+`ROOMOTE_<NAME>_HOST` points to that preview URL for proxied ports and to the
+direct machine host for unproxied ports. Agents and browser tooling should use
+`ROOMOTE_<NAME>_PREVIEW_URL` to test the preview entrypoint.
 
 | Field               | Type    | Required | Notes                                                                                                                                  |
 | ------------------- | ------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------- |
@@ -372,6 +375,17 @@ agentInstructions: |
 
 Avoid vague instructions like "be careful" or "use best practices." If a
 repository has a known trap, state it plainly.
+
+## Routing rules
+
+Admins can configure natural-language routing rules from **Settings →
+Environments**. Each rule maps a description, such as “Messages sent in the
+hospital-bugs Slack channel,” to an environment or the broad **All repositories**
+workspace.
+
+Rules are guidance rather than exact string matchers. An environment explicitly
+named in a request takes precedence, and a specific rule takes precedence over a
+catch-all default.
 
 ## MCP servers
 

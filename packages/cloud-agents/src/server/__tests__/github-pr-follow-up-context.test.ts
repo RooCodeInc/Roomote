@@ -19,6 +19,9 @@ describe('github PR follow-up context helpers', () => {
       'If the triggering comment is only gratitude or other non-actionable conversation, reply briefly on GitHub if useful and conclude with a no-op result instead of inventing follow-up work.',
     );
     expect(prompt).toContain(
+      '`explore-and-act` for investigation, verification, or requested connected-system actions that do not require repository or workspace changes',
+    );
+    expect(prompt).toContain(
       '<requested-follow-up>\n@roomote thanks for the update\n</requested-follow-up>',
     );
     expect(prompt).toContain(

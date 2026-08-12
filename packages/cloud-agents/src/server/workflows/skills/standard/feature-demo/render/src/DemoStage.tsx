@@ -1,0 +1,354 @@
+import { OffthreadVideo, staticFile, useCurrentFrame } from 'remotion';
+import timeline from '../props/timeline.json';
+import narration from '../props/narration.json';
+import type { CaptionStyle } from './presets';
+
+type WordTiming = { text: string; start: number; end: number };
+
+type NarrationClip = {
+  startSeconds: number;
+  durationSeconds: number;
+  words?: WordTiming[] | null;
+};
+
+// Declarative caption styling the demo script may set (merged over the
+// preset defaults): where the caption sits, the active-word accent color,
+// whether the pill background renders, and a font-size multiplier.
+type CaptionStyleOverride = {
+  position?: 'top' | 'bottom';
+  accent?: string;
+  pill?: boolean;
+  sizeScale?: number;
+};
+
+export const FPS = timeline.fps;
+export const DEMO_SECONDS = timeline.durationSeconds;
+
+type Vec = { x: number; y: number };
+
+const smooth = (t: number) => t * t * (3 - 2 * t);
+const clamp = (v: number, lo: number, hi: number) =>
+  Math.max(lo, Math.min(hi, v));
+
+function lerpVec(keys: { t: number; v: Vec }[], t: number): Vec {
+  if (t <= keys[0].t) return keys[0].v;
+  for (let i = 0; i < keys.length - 1; i++) {
+    const a = keys[i];
+    const b = keys[i + 1];
+    if (t >= a.t && t <= b.t) {
+      const p = smooth((t - a.t) / Math.max(b.t - a.t, 1e-6));
+      return { x: a.v.x + (b.v.x - a.v.x) * p, y: a.v.y + (b.v.y - a.v.y) * p };
+    }
+  }
+  return keys[keys.length - 1].v;
+}
+
+const Cursor: React.FC<{ invScale: number }> = ({ invScale }) => (
+  <div
+    style={{
+      position: 'absolute',
+      left: 0,
+      top: 0,
+      transform: `scale(${invScale})`,
+      transformOrigin: '0 0',
+      filter: 'drop-shadow(0 3px 6px rgba(0,0,0,0.45))',
+    }}
+  >
+    <svg width={34} height={34} viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 2 L4 20 L9 15 L12.5 22.5 L15.5 21 L12 13.5 L19 13.5 Z"
+        fill="#fff"
+        stroke="#1a1a1a"
+        strokeWidth={1.4}
+        strokeLinejoin="round"
+      />
+    </svg>
+  </div>
+);
+
+// The polished demo "window": recorded video on a rounded panel, with the
+// cursor/ripple/caption effects driven by the captured timeline. Laid
+// out for whatever canvas size the preset asks for.
+export const DemoStage: React.FC<{
+  canvasW: number;
+  canvasH: number;
+  pad: number;
+  caption: CaptionStyle;
+  centerPull: number;
+  baseScale: number;
+}> = ({ canvasW, canvasH, pad, caption, centerPull, baseScale }) => {
+  const frame = useCurrentFrame();
+  const t = frame / FPS;
+
+  const capStyle = ((timeline as { captionStyle?: CaptionStyleOverride })
+    .captionStyle ?? {}) as CaptionStyleOverride;
+  const capAtTop = capStyle.position === 'top';
+  const capFontSize = caption.fontSize * (capStyle.sizeScale ?? 1);
+
+  // Captions live in a reserved band on the backdrop (below the window by
+  // default) so they never overlay the recorded content — the window is
+  // inset anyway, so the space is already paid for. The band fits two
+  // caption lines plus the pill padding and the caption's edge offset.
+  const hasCaptions = timeline.captions.length > 0;
+  const captionBand = hasCaptions
+    ? Math.round(caption.bottom + capFontSize * 2 * 1.25 + 28 + 24)
+    : 0;
+
+  // The stage is the canvas minus the caption band; the window lays out and
+  // zooms strictly within it.
+  const stageTop = capAtTop ? captionBand : 0;
+  const stageH = canvasH - captionBand;
+
+  const SHOT_W = timeline.video.width;
+  const SHOT_H = timeline.video.height;
+  const usableH = captionBand > 0 ? stageH - pad : canvasH - 2 * pad;
+  const BASE_W = Math.round(
+    Math.min(canvasW - 2 * pad, (usableH * SHOT_W) / SHOT_H),
+  );
+  const BASE_H = Math.round((BASE_W * SHOT_H) / SHOT_W);
+  const WIN_X = (canvasW - BASE_W) / 2;
+  const WIN_Y = stageTop + (stageH - BASE_H) / 2;
+
+  // Two scales bound how far the preset can grow cleanly: sCrop is where the
+  // window starts spilling out of the stage (top and bottom go flush), and
+  // sCover is where it finally reaches the canvas edges. Between them the
+  // window is cropped AND narrower than the canvas, so backdrop shows down
+  // one side — the state a zoom would otherwise animate through.
+  // The 8px inset keeps a sliver of backdrop above and below even at full
+  // zoom, so the window reads as a card that grew rather than one wedged
+  // against the stage edges — and keeps the clamp crossover off the exact
+  // equality, where floating point is fragile.
+  const sCrop = (stageH - 8) / BASE_H;
+  const sCover = canvasW / BASE_W;
+  // In the wide preset the stage is far wider than the recording's own
+  // aspect (more so with a caption band reserved), so sCrop lands well below
+  // sCover and that in-between state cannot be skipped by any continuous
+  // zoom — a full-bleed punch-in is simply not reachable cleanly. Cap the
+  // zoom at a whole window there. Where coverage comes first instead (the
+  // tall vertical preset, where the window covers the width at 1.2x and does
+  // not crop until 2.58x) nothing is capped and full-bleed still works.
+  const S = sCover > sCrop ? Math.min(baseScale, sCrop) : baseScale;
+  const focal = { x: 0.5, y: 0.5 };
+  const cursor = lerpVec(timeline.cursorKeys, t);
+
+  const focal0x = WIN_X + focal.x * BASE_W;
+  const focal0y = WIN_Y + focal.y * BASE_H;
+  const k = clamp((S - 1) / 1.1, 0, 1) * centerPull;
+  const desiredTx = (canvasW / 2 - focal0x) * k;
+  const desiredTy = (stageTop + stageH / 2 - focal0y) * k;
+  // Edge-clamp: while zoomed, the scaled window must keep covering the whole
+  // stage so no backdrop shows through — and must stay OUT of the caption
+  // band. With transform-origin at the focal point, the scaled window spans
+  //   left  = WIN_X + Tx - focal.x * BASE_W * (S - 1)
+  //   top   = WIN_Y + Ty - focal.y * BASE_H * (S - 1)
+  // so covering [0, canvasW] x [stageTop, stageTop + stageH] bounds T:
+  const txA = focal.x * BASE_W * (S - 1) - WIN_X;
+  const txB = canvasW - WIN_X + focal.x * BASE_W * (S - 1) - BASE_W * S;
+  const tyA = stageTop - WIN_Y + focal.y * BASE_H * (S - 1);
+  const tyB =
+    stageTop + stageH - WIN_Y + focal.y * BASE_H * (S - 1) - BASE_H * S;
+  // The same pair of bounds says "keep covering the stage" when the scaled
+  // window is bigger than it and "stay inside the stage" when it is smaller
+  // — the two just swap order — so clamping to their min/max is right in
+  // both regimes, and the two agree exactly at the crossover. Unconditional
+  // is what keeps a nearly-stage-height window from drifting off the stage
+  // (or into the caption band) on the center pull.
+  const Tx = clamp(desiredTx, Math.min(txA, txB), Math.max(txA, txB));
+  const Ty = clamp(desiredTy, Math.min(tyA, tyB), Math.max(tyA, tyB));
+  const invScale = 1 / S;
+
+  return (
+    <>
+      {/* The window's drop shadow lives OUTSIDE the stage clip (an outer
+          box-shadow paints only beyond the border-box, so this transparent
+          proxy adds nothing else): clipped inside the stage it shears into a
+          hard line at the stage edge, visible on a light backdrop. */}
+      <div
+        style={{
+          position: 'absolute',
+          left: WIN_X,
+          top: WIN_Y,
+          width: BASE_W,
+          height: BASE_H,
+          transform: `translate(${Tx}px, ${Ty}px) scale(${S})`,
+          transformOrigin: `${focal.x * 100}% ${focal.y * 100}%`,
+          borderRadius: 16,
+          boxShadow: '0 40px 90px rgba(0,0,0,0.4)',
+        }}
+      />
+      {/* Stage clip: while zoomed, the scaled window necessarily extends
+          past the stage rect; clipping here keeps the caption band clean. */}
+      <div
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: stageTop,
+          width: canvasW,
+          height: stageH,
+          overflow: 'hidden',
+        }}
+      >
+      <div
+        style={{
+          position: 'absolute',
+          left: WIN_X,
+          top: WIN_Y - stageTop,
+          width: BASE_W,
+          height: BASE_H,
+          transform: `translate(${Tx}px, ${Ty}px) scale(${S})`,
+          transformOrigin: `${focal.x * 100}% ${focal.y * 100}%`,
+        }}
+      >
+        <div
+          style={{
+            width: BASE_W,
+            height: BASE_H,
+            borderRadius: 16,
+            overflow: 'hidden',
+            border: '1px solid rgba(255,255,255,0.09)',
+          }}
+        >
+          <OffthreadVideo
+            src={staticFile(timeline.video.path)}
+            startFrom={Math.round(
+              ((timeline.video as { startFromSeconds?: number })
+                .startFromSeconds ?? 0) * FPS,
+            )}
+            playbackRate={
+              (timeline.video as { playbackRate?: number }).playbackRate ?? 1
+            }
+            style={{ width: BASE_W, height: BASE_H, display: 'block' }}
+          />
+        </div>
+
+        {timeline.clicks.map((c, i) => {
+          const dt = t - c.t;
+          if (dt < 0 || dt > 0.6) return null;
+          const p = dt / 0.6;
+          const size = 12 + smooth(p) * 90;
+          return (
+            <div
+              key={i}
+              style={{
+                position: 'absolute',
+                left: c.at.x * BASE_W,
+                top: c.at.y * BASE_H,
+                width: size * invScale,
+                height: size * invScale,
+                marginLeft: (-size / 2) * invScale,
+                marginTop: (-size / 2) * invScale,
+                borderRadius: '50%',
+                border: `${3 * invScale}px solid rgba(201,242,77,0.9)`,
+                opacity: 1 - p,
+              }}
+            />
+          );
+        })}
+
+        {/* The capture parks the cursor just outside the window (y just past
+            1) until its first real move, so a demo does not open with a
+            pointer sitting in the middle of the page. The cursor is a
+            sibling of the clipped video, so drawing it there would paint it
+            onto the backdrop; skip it entirely while it is out of frame. It
+            slides in from the edge as the first move interpolates. */}
+        {cursor.x >= 0 && cursor.x <= 1 && cursor.y >= 0 && cursor.y <= 1 ? (
+          <div
+            style={{
+              position: 'absolute',
+              left: cursor.x * BASE_W,
+              top: cursor.y * BASE_H,
+            }}
+          >
+            <Cursor invScale={invScale} />
+          </div>
+        ) : null}
+      </div>
+      </div>
+
+      {timeline.captions.map((cap, i) => {
+        const fadeIn = clamp((t - cap.start) / 0.25, 0, 1);
+        const fadeOut = clamp((cap.end - t) / 0.25, 0, 1);
+        const opacity = Math.min(fadeIn, fadeOut);
+        if (opacity <= 0) return null;
+
+        const atTop = capAtTop;
+        const accent = capStyle.accent ?? '#fff';
+        const pill = capStyle.pill !== false;
+        const fontSize = capFontSize;
+
+        // Spoken-word highlight: captions and narration clips are 1:1 in
+        // order, and word times are relative to the clip's start. Without
+        // word timings (captions-only mode) the caption renders plain.
+        const clip = (narration.clips as NarrationClip[])[i];
+        const words = clip?.words ?? null;
+        const tInClip = clip ? t - clip.startSeconds : 0;
+
+        return (
+          <div
+            key={i}
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              ...(atTop ? { top: caption.bottom } : { bottom: caption.bottom }),
+              display: 'flex',
+              justifyContent: 'center',
+              opacity,
+              transform: `translateY(${(1 - fadeIn) * (atTop ? -12 : 12)}px)`,
+            }}
+          >
+            <div
+              style={{
+                fontFamily:
+                  'SF Pro Display, -apple-system, Segoe UI, Roboto, sans-serif',
+                fontSize,
+                fontWeight: 600,
+                color: '#fff',
+                maxWidth: `${caption.maxWidthPct}%`,
+                textAlign: 'center',
+                lineHeight: 1.25,
+                ...(pill
+                  ? {
+                      background: 'rgba(15,17,24,0.72)',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      padding: '14px 26px',
+                      borderRadius: 14,
+                      backdropFilter: 'blur(6px)',
+                    }
+                  : {
+                      textShadow:
+                        '0 2px 10px rgba(0,0,0,0.85), 0 0 2px rgba(0,0,0,0.9)',
+                    }),
+              }}
+            >
+              {words
+                ? words.map((word, wi) => {
+                    const spoken = tInClip >= word.start;
+                    const active = spoken && tInClip < word.end + 0.08;
+                    return (
+                      <span
+                        key={wi}
+                        style={{
+                          color: active
+                            ? accent
+                            : spoken
+                              ? 'rgba(255,255,255,0.92)'
+                              : 'rgba(255,255,255,0.45)',
+                          textShadow: active
+                            ? `0 0 14px ${accent}`
+                            : undefined,
+                        }}
+                      >
+                        {word.text}
+                        {wi < words.length - 1 ? ' ' : ''}
+                      </span>
+                    );
+                  })
+                : cap.text}
+            </div>
+          </div>
+        );
+      })}
+    </>
+  );
+};

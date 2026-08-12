@@ -828,6 +828,69 @@ describe('ModalClient', () => {
     });
   });
 
+  it('treats Modal status lookup 400s as stopped sandboxes', async () => {
+    sandboxFromIdMock.mockRejectedValue({
+      status: 400,
+      message: 'Status code 400 is not ok',
+    });
+
+    const client = new ModalClient({
+      tokenId: 'token-id',
+      tokenSecret: 'token-secret',
+      baseImageRef: MODAL_IMAGE_REF,
+    });
+
+    await expect(
+      client.getInstanceStatus({ instanceId: 'modal-123' }),
+    ).resolves.toEqual({ status: 'stopped' });
+  });
+
+  it('does not treat unrelated Modal status lookup 400s as stopped', async () => {
+    sandboxFromIdMock.mockRejectedValue({
+      status: 400,
+      message: 'invalid sandbox id',
+    });
+
+    const client = new ModalClient({
+      tokenId: 'token-id',
+      tokenSecret: 'token-secret',
+      baseImageRef: MODAL_IMAGE_REF,
+    });
+
+    await expect(
+      client.getInstanceStatus({ instanceId: 'modal-123' }),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: 'invalid sandbox id',
+    });
+  });
+
+  it('does not hide Modal 400s from command operations', async () => {
+    const execMock = vi.fn().mockRejectedValue({
+      status: 400,
+      message: 'invalid command',
+    });
+
+    sandboxFromIdMock.mockResolvedValue({
+      sandboxId: 'modal-123',
+      exec: execMock,
+    });
+
+    const client = new ModalClient({
+      tokenId: 'token-id',
+      tokenSecret: 'token-secret',
+      baseImageRef: MODAL_IMAGE_REF,
+    });
+
+    await expect(
+      client.runCommand({
+        instanceId: 'modal-123',
+        cmd: 'worker',
+        args: ['run', '123'],
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
   it('preserves explicit env values when injecting roomote env', async () => {
     const execMock = vi.fn().mockResolvedValue({
       stdout: { readText: vi.fn().mockResolvedValue('') },
@@ -922,8 +985,18 @@ describe('ModalClient', () => {
     expect(installBrowserAgentScript).toContain(
       'AGENT_BROWSER_FORWARD_ARGS=()',
     );
+    // The wrapper always runs headless. A per-invocation headed opt-in
+    // existed briefly for GPU-backed canvases but wedged the agent-browser
+    // daemon on long sessions, so it was removed; assert its absence so it
+    // cannot return without this contract being revisited.
     expect(installBrowserAgentScript).toContain(
       'export AGENT_BROWSER_HEADED=false',
+    );
+    expect(installBrowserAgentScript).not.toContain(
+      'export AGENT_BROWSER_HEADED=true',
+    );
+    expect(installBrowserAgentScript).not.toContain(
+      'AGENT_BROWSER_WANT_HEADED',
     );
     expect(installBrowserAgentScript).toContain(
       'exec "$AGENT_BROWSER_BIN" "${AGENT_BROWSER_FORWARD_ARGS[@]}"',
@@ -955,6 +1028,42 @@ describe('ModalClient', () => {
     expect(dockerfile).toContain(
       'sudo ln -sf "${FFPROBE_EXECUTABLE_PATH}" /usr/local/bin/ffprobe',
     );
+  });
+
+  it('expects the Remotion chrome-headless-shell to be baked into the worker runtime', () => {
+    const dockerfile = fs.readFileSync(
+      new URL('../../../../apps/worker/Dockerfile', import.meta.url),
+      'utf8',
+    );
+
+    expect(dockerfile).toContain('ARG REMOTION_VERSION=');
+    expect(dockerfile).toContain(
+      'ENV REMOTION_HEADLESS_SHELL_PATH="/opt/remotion/headless-shell"',
+    );
+    expect(dockerfile).toContain('"@remotion/cli@${REMOTION_VERSION}"');
+    expect(dockerfile).toContain('"remotion@${REMOTION_VERSION}"');
+    expect(dockerfile).toContain('npx remotion browser ensure');
+    expect(dockerfile).toContain(
+      'cp -R node_modules/.remotion/chrome-headless-shell /opt/remotion/chrome-headless-shell',
+    );
+    expect(dockerfile).toContain(
+      'ln -sf "$REMOTION_SHELL" "${REMOTION_HEADLESS_SHELL_PATH}"',
+    );
+    expect(dockerfile).toContain('/opt/remotion/.installed');
+  });
+
+  it('pre-installs the feature-demo render dependencies from the skill package.json', () => {
+    const dockerfile = fs.readFileSync(
+      new URL('../../../../apps/worker/Dockerfile', import.meta.url),
+      'utf8',
+    );
+
+    // Keyed off the skill's own pinned package.json so the baked node_modules
+    // cannot drift from what the render project expects.
+    expect(dockerfile).toContain(
+      'COPY packages/cloud-agents/src/server/workflows/skills/standard/feature-demo/render/package.json /opt/feature-demo/render/package.json',
+    );
+    expect(dockerfile).toContain('/opt/feature-demo/render/.installed');
   });
 
   it('expects PM2 to be available in the worker runtime', () => {

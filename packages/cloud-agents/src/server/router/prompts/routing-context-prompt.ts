@@ -1,6 +1,6 @@
 import type { ImagePart, ModelMessage, TextPart } from 'ai';
 
-import { getEnabledTaskModels } from '@roomote/types';
+import { ALL_REPOSITORIES, getEnabledTaskModels } from '@roomote/types';
 
 import {
   MAX_TASK_DESCRIPTION_LENGTH,
@@ -99,6 +99,23 @@ Prefer a specific environment when one is a plausible home for the work.
   prompt += `\n**Available Environments**:\n`;
   for (const env of context.availableEnvironments) {
     prompt += `- ${env.name} (repositories: ${env.repositoryNames.join(', ')})${env.description ? `\n  ${env.description}` : ''}\n`;
+  }
+  if (context.routingRules?.length) {
+    if (context.routingRules.some((rule) => rule.target === ALL_REPOSITORIES)) {
+      prompt += `- ${ALL_REPOSITORIES} (all repositories)\n`;
+    }
+    prompt += '\n**Routing Rules**:\n';
+    for (const rule of context.routingRules) {
+      const target =
+        rule.target === ALL_REPOSITORIES
+          ? ALL_REPOSITORIES
+          : context.availableEnvironments.find(
+              (environment) => environment.id === rule.target,
+            )?.name;
+      if (target) {
+        prompt += `- ${rule.description} → ${target}\n`;
+      }
+    }
   }
   if (options?.includePlatformWorkspace !== false) {
     prompt += `- ${PLATFORM_WORKSPACE_VALUE}: ${PLATFORM_WORKSPACE_DESCRIPTION}\n`;

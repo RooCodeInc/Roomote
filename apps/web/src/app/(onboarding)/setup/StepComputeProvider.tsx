@@ -21,6 +21,7 @@ const BRAND_ICON_BY_PROVIDER = {
   daytona: 'daytona',
   e2b: 'e2b',
   blaxel: 'blaxel',
+  box: 'box-sandbox',
   azure: 'azure',
   roomote: 'roomote',
 } satisfies Record<ComputeProvider, string>;
@@ -79,8 +80,8 @@ export function StepComputeProvider({
                   name=""
                   className="size-4 shrink-0"
                 />
-                <span className="font-medium grow text-left">
-                  {provider.label}
+                <span className="grow text-left">
+                  <span className="block font-medium">{provider.label}</span>
                 </span>
                 {provider.comment ? (
                   <span className="text-xs opacity-60">{provider.comment}</span>
