@@ -91,6 +91,17 @@ You can send follow-up instructions while a task is active. If a task has
 completed and Roomote has a restorable snapshot, a follow-up can resume from
 that prior workspace instead of starting over.
 
+For objectives that may need several uninterrupted turns, enter
+`/goal <objective>` in the web task prompt. Goal Mode keeps the full objective
+active and automatically continues work for up to five additional turns. It
+stops early when Roomote verifies the whole objective is complete, or reports a
+blocker after the same issue prevents progress across three consecutive turns.
+If the continuation budget runs out first, send a follow-up to decide what to
+do next.
+
+Goal Mode does not support attachments. Add any files in a normal task message
+first, then start Goal Mode with a text-only objective.
+
 Good follow-ups are specific:
 
 - "Apply the second option and add a regression test."
