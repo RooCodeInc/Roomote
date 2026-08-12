@@ -78,7 +78,7 @@ export function EnvironmentRoutingOverview() {
       </p>
 
       <div>
-        <div className="grid gap-3 p-4 sm:grid-cols-[1fr_16rem_auto]">
+        <div className="grid gap-3 py-4 sm:grid-cols-[1fr_16rem_auto]">
           <Input
             value={draftRule.description}
             placeholder="Description..."
@@ -133,21 +133,21 @@ export function EnvironmentRoutingOverview() {
           </Button>
         </div>
 
-        <div className="grid grid-cols-[1fr_16rem_4rem] gap-3 px-4 py-2 text-xs font-medium text-muted-foreground max-sm:hidden">
+        <div className="grid grid-cols-[1fr_16rem_4rem] gap-3 py-2 text-xs font-medium text-muted-foreground max-sm:hidden">
           <span>Description</span>
           <span>Target</span>
           <span />
         </div>
 
         {rules.length === 0 ? (
-          <p className="p-4 text-sm text-muted-foreground">
+          <p className="py-4 text-sm text-muted-foreground">
             No routing rules configured.
           </p>
         ) : (
           rules.map((rule, index) => (
             <div
               key={`${rule.description}-${rule.target}-${index}`}
-              className="grid gap-3 p-4 sm:grid-cols-[1fr_16rem_4rem] sm:items-center"
+              className="grid gap-3 py-4 sm:grid-cols-[1fr_16rem_4rem] sm:items-center"
             >
               <span className="text-sm">{rule.description}</span>
               <span className="text-sm text-muted-foreground">
