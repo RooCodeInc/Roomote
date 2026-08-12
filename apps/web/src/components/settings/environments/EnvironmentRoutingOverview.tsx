@@ -32,6 +32,7 @@ export function EnvironmentRoutingOverview() {
   const updateSettings = useUpdateWorkspaceRoutingSettings();
   const [rules, setRules] = useState<WorkspaceRoutingSettings['rules']>([]);
   const [draftRule, setDraftRule] = useState(EMPTY_RULE);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
   useEffect(() => {
     setRules(settings.data?.rules ?? []);
@@ -61,7 +62,10 @@ export function EnvironmentRoutingOverview() {
           variant="outline"
           size="sm"
           disabled={rules.length >= 20}
-          onClick={() => setDraftRule(EMPTY_RULE)}
+          onClick={() => {
+            setDraftRule(EMPTY_RULE);
+            setEditingIndex(null);
+          }}
         >
           <Plus />
           Add Rule
@@ -103,18 +107,29 @@ export function EnvironmentRoutingOverview() {
             }
             onClick={async () => {
               try {
-                const nextRules = [
-                  ...rules,
-                  { ...draftRule, description: draftRule.description.trim() },
-                ];
+                const normalizedRule = {
+                  ...draftRule,
+                  description: draftRule.description.trim(),
+                };
+                const nextRules =
+                  editingIndex === null
+                    ? [...rules, normalizedRule]
+                    : rules.map((rule, index) =>
+                        index === editingIndex ? normalizedRule : rule,
+                      );
                 await saveRules(nextRules);
                 setDraftRule(EMPTY_RULE);
+                setEditingIndex(null);
               } catch {
-                toast.error('Failed to add routing rule');
+                toast.error(
+                  editingIndex === null
+                    ? 'Failed to add routing rule'
+                    : 'Failed to update routing rule',
+                );
               }
             }}
           >
-            Add Rule
+            {editingIndex === null ? 'Add Rule' : 'Save Rule'}
           </Button>
         </div>
 
@@ -148,13 +163,9 @@ export function EnvironmentRoutingOverview() {
                   variant="ghost"
                   size="icon"
                   aria-label={`Edit ${rule.description}`}
-                  onClick={async () => {
-                    try {
-                      await saveRules(rules.filter((_, i) => i !== index));
-                      setDraftRule(rule);
-                    } catch {
-                      toast.error('Failed to edit routing rule');
-                    }
+                  onClick={() => {
+                    setDraftRule(rule);
+                    setEditingIndex(index);
                   }}
                 >
                   <Pencil />
