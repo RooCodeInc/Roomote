@@ -7,6 +7,9 @@ const mockQueueAdd = vi.fn();
 const mockMultiExec = vi.fn();
 const mockResolveSlackTaskRunRouting = vi.fn();
 const multiCalls: Array<{ command: string; args: unknown[] }> = [];
+const replayChainId = '00000000-0000-4000-8000-000000000001';
+let orphanChainId = replayChainId;
+let orphanRevision = 0;
 
 function createMultiMock() {
   const multi: Record<string, unknown> = {};
@@ -79,12 +82,27 @@ describe('enqueuePrReviewNotification', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     multiCalls.length = 0;
+    orphanChainId = replayChainId;
+    orphanRevision = 0;
 
     mockFindManyTaskPullRequests.mockResolvedValue([{ taskId: 'task-1' }]);
     mockRedisSet.mockResolvedValue('OK');
     mockRedisDel.mockResolvedValue(1);
     mockRedisGet.mockResolvedValue(null);
-    mockRedisEval.mockResolvedValue(1);
+    mockRedisEval.mockImplementation((script: string, ...args: unknown[]) => {
+      if (script.includes("redis.call('RPUSH', KEYS[1], ARGV[2])")) {
+        const claimed = orphanRevision === 0 ? 1 : 0;
+        orphanRevision += 1;
+        orphanChainId = claimed === 1 ? String(args[3]) : orphanChainId;
+        return Promise.resolve([`${orphanChainId}:${orphanRevision}`, claimed]);
+      }
+
+      if (script.includes('FINISH_OR_ROTATE_ORPHAN_REPLAY_SCRIPT')) {
+        return Promise.resolve(0);
+      }
+
+      return Promise.resolve(1);
+    });
     mockQueueAdd.mockResolvedValue(undefined);
     mockMultiExec.mockResolvedValue([]);
   });
@@ -109,59 +127,167 @@ describe('enqueuePrReviewNotification', () => {
     expect(mockFindManyTaskPullRequests).toHaveBeenCalledTimes(1);
     expect(mockQueueAdd).toHaveBeenCalledWith(
       'replay-pr-review-association',
-      { kind: 'association_replay', input: baseInput, attempt: 1 },
+      {
+        kind: 'association_replay',
+        sourceControlProvider: 'github',
+        repository: 'owner/repo',
+        prNumber: 42,
+        chainId: expect.any(String),
+        attempt: 1,
+      },
       {
         delay: PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS[0],
-        jobId: expect.stringMatching(/^association-replay-[a-f0-9]{24}-1$/),
+        jobId: expect.stringMatching(/^association-replay-[a-f0-9-]+-1$/),
       },
     );
   });
 
-  it('retains feedback when association persistence finishes before replay', async () => {
+  it('coalesces an unrelated PR burst into one replay chain without dropping events', async () => {
+    mockFindManyTaskPullRequests.mockResolvedValue([]);
+    mockRedisSet.mockResolvedValue(null);
+    mockRedisSet.mockResolvedValueOnce('OK');
+    mockRedisGet.mockResolvedValue(`${replayChainId}:50`);
+
+    await Promise.all(
+      Array.from({ length: 50 }, (_, index) =>
+        enqueuePrReviewNotification({
+          ...baseInput,
+          event: {
+            kind: 'review_comment',
+            authorLogin: 'reviewer',
+            batchId: `github-review:${index}`,
+            url: `https://github.com/owner/repo/pull/42#discussion-${index}`,
+          },
+        }),
+      ),
+    );
+
+    expect(mockQueueAdd).toHaveBeenCalledTimes(1);
+    expect(orphanRevision).toBe(50);
+  });
+
+  it('retains every orphan event when association persistence finishes before replay', async () => {
+    const orphanInputs = [
+      baseInput,
+      {
+        ...baseInput,
+        event: {
+          kind: 'review_comment' as const,
+          authorLogin: 'bob',
+          batchId: 'github-review:2',
+        },
+      },
+    ];
     mockFindManyTaskPullRequests
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([{ taskId: 'task-1' }]);
 
     await enqueuePrReviewNotification(baseInput);
     mockQueueAdd.mockClear();
+    multiCalls.length = 0;
+    mockRedisEval.mockImplementation((script: string, ...args: unknown[]) => {
+      if (script.includes("redis.call('RPUSH', KEYS[1], ARGV[2])")) {
+        return Promise.resolve([`${String(args[3])}:1`, 1]);
+      }
+      if (script.includes("redis.call('LRANGE', KEYS[1], 0, -1)")) {
+        return Promise.resolve(
+          orphanInputs.map((input) => JSON.stringify(input)),
+        );
+      }
+      return Promise.resolve(1);
+    });
+    mockQueueAdd.mockClear();
+    mockRedisSet.mockResolvedValue(null);
+    mockRedisSet.mockResolvedValueOnce('OK');
+    mockRedisGet.mockResolvedValue(`${replayChainId}:1`);
     const result = await replayPrReviewNotificationAssociation({
       kind: 'association_replay',
-      input: baseInput,
+      sourceControlProvider: 'github',
+      repository: 'owner/repo',
+      prNumber: 42,
+      chainId: replayChainId,
       attempt: 1,
     });
 
-    expect(result).toEqual({ notifiedTaskCount: 1 });
+    expect(result).toEqual({ notifiedTaskCount: 2 });
     expect(mockFindManyTaskPullRequests).toHaveBeenCalledTimes(2);
-    expect(mockQueueAdd).toHaveBeenCalledTimes(1);
+    expect(
+      mockQueueAdd.mock.calls.filter(
+        ([name]) => name === 'notify-pr-review-activity',
+      ),
+    ).toHaveLength(2);
     expect(mockQueueAdd).toHaveBeenCalledWith(
       'notify-pr-review-activity',
       expect.objectContaining({ taskId: 'task-1' }),
       { delay: PR_REVIEW_NOTIFICATION_DEBOUNCE_MS },
     );
-  });
-
-  it('uses a stable replay job id to deduplicate duplicate webhook delivery', async () => {
-    mockFindManyTaskPullRequests.mockResolvedValue([]);
-
-    await enqueuePrReviewNotification(baseInput);
-    await enqueuePrReviewNotification(baseInput);
-
-    const firstOptions = mockQueueAdd.mock.calls[0]?.[2];
-    const secondOptions = mockQueueAdd.mock.calls[1]?.[2];
-    expect(firstOptions?.jobId).toBe(secondOptions?.jobId);
+    const taskEventAppends = multiCalls.filter(
+      (call) =>
+        call.command === 'rpush' &&
+        String(call.args[0]).startsWith('pr-review-notification:pending:'),
+    );
+    expect(taskEventAppends).toHaveLength(2);
+    expect(taskEventAppends.map((call) => String(call.args[1]))).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('changes_requested'),
+        expect.stringContaining('github-review:2'),
+      ]),
+    );
   });
 
   it('stops replaying after the final association boundary', async () => {
     mockFindManyTaskPullRequests.mockResolvedValue([]);
+    mockRedisGet.mockResolvedValue(`${replayChainId}:1`);
+    mockRedisEval.mockResolvedValue(0);
 
     const result = await replayPrReviewNotificationAssociation({
       kind: 'association_replay',
-      input: baseInput,
+      sourceControlProvider: 'github',
+      repository: 'owner/repo',
+      prNumber: 42,
+      chainId: replayChainId,
       attempt: PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS.length,
     });
 
     expect(result).toEqual({ notifiedTaskCount: 0, reason: 'no_linked_tasks' });
     expect(mockQueueAdd).not.toHaveBeenCalled();
+    expect(mockRedisEval).toHaveBeenCalledWith(
+      expect.stringContaining('delete a quiet orphan chain'),
+      2,
+      'pr-review-notification:orphan:github:owner%2Frepo#42',
+      'pr-review-notification:orphan-replay:github:owner%2Frepo#42',
+      `${replayChainId}:1`,
+      replayChainId,
+      expect.any(String),
+      900,
+    );
+  });
+
+  it('rotates activity appended during the final lookup into one fresh bounded chain', async () => {
+    mockFindManyTaskPullRequests.mockResolvedValue([]);
+    mockRedisGet.mockResolvedValue(`${replayChainId}:1`);
+    mockRedisEval.mockResolvedValue(1);
+
+    const result = await replayPrReviewNotificationAssociation({
+      kind: 'association_replay',
+      sourceControlProvider: 'github',
+      repository: 'owner/repo',
+      prNumber: 42,
+      chainId: replayChainId,
+      attempt: PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS.length,
+    });
+
+    expect(result).toEqual({ notifiedTaskCount: 0, reason: 'no_linked_tasks' });
+    expect(mockQueueAdd).toHaveBeenCalledWith(
+      'replay-pr-review-association',
+      expect.objectContaining({
+        chainId: expect.not.stringMatching(new RegExp(replayChainId)),
+        attempt: 1,
+      }),
+      expect.objectContaining({
+        delay: PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS[0],
+      }),
+    );
   });
 
   it('debounces ordinary notifications for web-only tasks without an originating conversation', async () => {
@@ -178,6 +304,7 @@ describe('enqueuePrReviewNotification', () => {
         deferrals: 0,
         immediate: false,
         batchKind: 'human',
+        sourceControlProvider: 'github',
       },
       { delay: PR_REVIEW_NOTIFICATION_DEBOUNCE_MS },
     );
@@ -209,6 +336,7 @@ describe('enqueuePrReviewNotification', () => {
         deferrals: 0,
         immediate: false,
         batchKind: 'human',
+        sourceControlProvider: 'github',
       },
       { delay: PR_REVIEW_NOTIFICATION_DEBOUNCE_MS },
     );

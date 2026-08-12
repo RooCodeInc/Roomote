@@ -91,12 +91,10 @@ vi.mock('@roomote/sdk/server', () => ({
   }),
   prReviewAssociationReplayRequestSchema: z.object({
     kind: z.literal('association_replay'),
-    input: z.object({
-      repository: z.string(),
-      prNumber: z.number(),
-      prUrl: z.string(),
-      event: z.object({ kind: z.string(), authorLogin: z.string() }),
-    }),
+    sourceControlProvider: z.string(),
+    repository: z.string(),
+    prNumber: z.number(),
+    chainId: z.string(),
     attempt: z.number(),
   }),
   consumePendingPrReviewActivity: mockConsumePending,
@@ -193,12 +191,10 @@ describe('prReviewNotificationJob', () => {
   it('dispatches association replay jobs without entering delivery', async () => {
     const replay = {
       kind: 'association_replay',
-      input: {
-        repository: 'owner/repo',
-        prNumber: 42,
-        prUrl: 'https://github.com/owner/repo/pull/42',
-        event: { kind: 'review', authorLogin: 'alice' },
-      },
+      sourceControlProvider: 'github',
+      repository: 'owner/repo',
+      prNumber: 42,
+      chainId: '00000000-0000-4000-8000-000000000001',
       attempt: 2,
     };
 

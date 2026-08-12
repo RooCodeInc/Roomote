@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 
 import { Queue } from 'bullmq';
 import { z } from 'zod';
@@ -52,6 +52,7 @@ export const PR_REVIEW_NOTIFICATION_MAX_DEFERRALS = 288;
 const PENDING_EVENTS_TTL_SECONDS = 24 * 60 * 60;
 const SCHEDULED_MARKER_TTL_BUFFER_SECONDS = 15 * 60;
 const REVIEW_CYCLE_TTL_SECONDS = 30 * 24 * 60 * 60;
+const ORPHAN_ACTIVITY_TTL_SECONDS = 15 * 60;
 export const PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS = [
   1_000, 5_000, 30_000, 120_000, 300_000,
 ] as const;
@@ -65,6 +66,57 @@ if current then
 end
 redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[3])
 return 1
+`;
+const APPEND_ORPHAN_ACTIVITY_SCRIPT = `
+local marker = redis.call('GET', KEYS[2])
+local claimed = 0
+if not marker then
+  marker = ARGV[1] .. ':1'
+  claimed = 1
+else
+  local separator = string.match(marker, '^.*():')
+  local chainId = string.sub(marker, 1, separator - 1)
+  local revision = tonumber(string.sub(marker, separator + 1)) + 1
+  marker = chainId .. ':' .. revision
+end
+redis.call('SET', KEYS[2], marker, 'EX', ARGV[3])
+redis.call('RPUSH', KEYS[1], ARGV[2])
+redis.call('EXPIRE', KEYS[1], ARGV[3])
+return {marker, claimed}
+`;
+const CONSUME_ORPHAN_ACTIVITY_SCRIPT = `
+local marker = redis.call('GET', KEYS[2])
+if not marker or string.sub(marker, 1, string.len(ARGV[1]) + 1) ~= ARGV[1] .. ':' then
+  return {}
+end
+local inputs = redis.call('LRANGE', KEYS[1], 0, -1)
+redis.call('DEL', KEYS[1], KEYS[2])
+return inputs
+`;
+const FINISH_OR_ROTATE_ORPHAN_REPLAY_SCRIPT = `
+-- delete a quiet orphan chain or rotate activity appended during final lookup
+local marker = redis.call('GET', KEYS[2])
+if marker == ARGV[1] then
+  redis.call('DEL', KEYS[1], KEYS[2])
+  return 0
+end
+if marker and string.sub(marker, 1, string.len(ARGV[2]) + 1) == ARGV[2] .. ':' then
+  redis.call('SET', KEYS[2], ARGV[3] .. ':0', 'EX', ARGV[4])
+  return 1
+end
+return 0
+`;
+const RELEASE_OR_ROTATE_ORPHAN_REPLAY_SCRIPT = `
+local marker = redis.call('GET', KEYS[1])
+if marker == ARGV[1] then
+  redis.call('DEL', KEYS[1])
+  return 0
+end
+if marker and string.sub(marker, 1, string.len(ARGV[2]) + 1) == ARGV[2] .. ':' then
+  redis.call('SET', KEYS[1], ARGV[3] .. ':0', 'EX', ARGV[4])
+  return 1
+end
+return 0
 `;
 const COMPLETE_REVIEW_CYCLE_SCRIPT = `
 local current = redis.call('GET', KEYS[1])
@@ -150,6 +202,7 @@ type PrReviewNotificationTarget = {
   taskId: string;
   repository: string;
   prNumber: number;
+  sourceControlProvider?: z.infer<typeof sourceControlProviderSchema>;
   immediate?: boolean;
   batchKind?: z.infer<typeof prReviewNotificationBatchKindSchema>;
   batchId?: string;
@@ -181,7 +234,10 @@ export type EnqueuePrReviewNotificationInput = z.infer<
 
 export const prReviewAssociationReplayRequestSchema = z.object({
   kind: z.literal('association_replay'),
-  input: enqueuePrReviewNotificationInputSchema,
+  sourceControlProvider: sourceControlProviderSchema,
+  repository: z.string(),
+  prNumber: z.number().int().positive(),
+  chainId: z.string().uuid(),
   attempt: z
     .number()
     .int()
@@ -251,19 +307,21 @@ function buildTargetKeySuffix({
   taskId,
   repository,
   prNumber,
+  sourceControlProvider = 'github',
   batchKind = 'human',
   batchId,
 }: PrReviewNotificationTarget): string {
-  return `${encodeURIComponent(taskId)}:${encodeURIComponent(repository)}#${prNumber}:${batchKind}${batchId ? `:${encodeURIComponent(batchId)}` : ''}`;
+  return `${sourceControlProvider}:${encodeURIComponent(taskId)}:${encodeURIComponent(repository)}#${prNumber}:${batchKind}${batchId ? `:${encodeURIComponent(batchId)}` : ''}`;
 }
 
 function buildLegacyTargetKeySuffix({
   taskId,
   repository,
   prNumber,
+  sourceControlProvider = 'github',
   immediate = false,
 }: PrReviewNotificationTarget): string {
-  return `${encodeURIComponent(taskId)}:${encodeURIComponent(repository)}#${prNumber}${immediate ? ':immediate' : ''}`;
+  return `${sourceControlProvider}:${encodeURIComponent(taskId)}:${encodeURIComponent(repository)}#${prNumber}${immediate ? ':immediate' : ''}`;
 }
 
 function buildPendingEventsKey(target: PrReviewNotificationTarget): string {
@@ -280,6 +338,131 @@ function buildScheduledMarkerKey(target: PrReviewNotificationTarget): string {
   }
 
   return `pr-review-notification:scheduled:${buildTargetKeySuffix(target)}:${target.immediate ? 'immediate' : 'delayed'}`;
+}
+
+type PrReviewAssociationTarget = Pick<
+  EnqueuePrReviewNotificationInput,
+  'repository' | 'prNumber'
+> & { sourceControlProvider: z.infer<typeof sourceControlProviderSchema> };
+
+function buildOrphanActivityKey(target: PrReviewAssociationTarget): string {
+  return `pr-review-notification:orphan:${target.sourceControlProvider}:${encodeURIComponent(target.repository)}#${target.prNumber}`;
+}
+
+function buildOrphanReplayMarkerKey(target: PrReviewAssociationTarget): string {
+  return `pr-review-notification:orphan-replay:${target.sourceControlProvider}:${encodeURIComponent(target.repository)}#${target.prNumber}`;
+}
+
+async function scheduleOrphanAssociationReplay({
+  target,
+  chainId,
+  attempt,
+}: {
+  target: PrReviewAssociationTarget;
+  chainId: string;
+  attempt: number;
+}): Promise<void> {
+  const delayMs = PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS[attempt - 1];
+
+  if (delayMs === undefined) {
+    return;
+  }
+
+  await getPrReviewNotificationQueue().add(
+    'replay-pr-review-association',
+    { kind: 'association_replay' as const, ...target, chainId, attempt },
+    {
+      delay: delayMs,
+      jobId: `association-replay-${chainId}-${attempt}`,
+    },
+  );
+}
+
+async function appendOrphanActivityAndClaimReplay({
+  target,
+  input,
+}: {
+  target: PrReviewAssociationTarget;
+  input: EnqueuePrReviewNotificationInput;
+}): Promise<string | null> {
+  const redis = getRedis();
+  const chainId = randomUUID();
+  const result = await redis.eval(
+    APPEND_ORPHAN_ACTIVITY_SCRIPT,
+    2,
+    buildOrphanActivityKey(target),
+    buildOrphanReplayMarkerKey(target),
+    chainId,
+    JSON.stringify(input),
+    ORPHAN_ACTIVITY_TTL_SECONDS,
+  );
+
+  return Array.isArray(result) && result[1] === 1
+    ? (String(result[0]).split(':')[0] ?? null)
+    : null;
+}
+
+async function consumeOrphanActivity(
+  target: PrReviewAssociationTarget,
+  chainId: string,
+): Promise<EnqueuePrReviewNotificationInput[]> {
+  const rawInputs = await getRedis().eval(
+    CONSUME_ORPHAN_ACTIVITY_SCRIPT,
+    2,
+    buildOrphanActivityKey(target),
+    buildOrphanReplayMarkerKey(target),
+    chainId,
+  );
+
+  if (!Array.isArray(rawInputs)) {
+    return [];
+  }
+
+  return rawInputs.flatMap((raw) => {
+    if (typeof raw !== 'string') {
+      return [];
+    }
+
+    try {
+      const parsed = enqueuePrReviewNotificationInputSchema.safeParse(
+        JSON.parse(raw),
+      );
+      return parsed.success ? [parsed.data] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+async function requeueOrphanActivity({
+  target,
+  chainId,
+  inputs,
+}: {
+  target: PrReviewAssociationTarget;
+  chainId: string;
+  inputs: EnqueuePrReviewNotificationInput[];
+}): Promise<void> {
+  if (inputs.length === 0) {
+    return;
+  }
+
+  await getRedis()
+    .multi()
+    .rpush(
+      buildOrphanActivityKey(target),
+      ...inputs.map((input) => JSON.stringify(input)),
+    )
+    .expire(buildOrphanActivityKey(target), ORPHAN_ACTIVITY_TTL_SECONDS)
+    .exec();
+
+  await getRedis().set(
+    buildOrphanReplayMarkerKey(target),
+    `${chainId}:0`,
+    'EX',
+    ORPHAN_ACTIVITY_TTL_SECONDS,
+    'NX',
+  );
 }
 
 function getPrReviewCycleStateKey({
@@ -693,62 +876,176 @@ export async function enqueuePrReviewNotification(
 ): Promise<EnqueuePrReviewNotificationResult> {
   const parsedInput = enqueuePrReviewNotificationInputSchema.parse(input);
 
-  return enqueuePrReviewNotificationAttempt(parsedInput, 0);
+  return enqueuePrReviewNotificationAttempt(parsedInput);
 }
 
 export async function replayPrReviewNotificationAssociation(
   request: PrReviewAssociationReplayRequest,
 ): Promise<EnqueuePrReviewNotificationResult> {
   const parsed = prReviewAssociationReplayRequestSchema.parse(request);
+  const target = {
+    sourceControlProvider: parsed.sourceControlProvider,
+    repository: parsed.repository,
+    prNumber: parsed.prNumber,
+  };
+  const activeMarker = await getRedis().get(buildOrphanReplayMarkerKey(target));
 
-  return enqueuePrReviewNotificationAttempt(parsed.input, parsed.attempt);
-}
+  if (!activeMarker?.startsWith(`${parsed.chainId}:`)) {
+    return { notifiedTaskCount: 0, reason: 'stale_association_replay' };
+  }
 
-async function enqueuePrReviewNotificationAttempt(
-  parsedInput: EnqueuePrReviewNotificationInput,
-  associationReplayAttempt: number,
-): Promise<EnqueuePrReviewNotificationResult> {
-  const prTaskLinks = await db.query.taskPullRequests.findMany({
-    where: and(
-      eq(
-        taskPullRequests.sourceControlProvider,
-        parsedInput.sourceControlProvider ?? 'github',
-      ),
-      eq(taskPullRequests.repository, parsedInput.repository),
-      eq(taskPullRequests.prNumber, parsedInput.prNumber),
-    ),
-    columns: { taskId: true },
-  });
+  const prTaskLinks = await findPrReviewTaskLinks(target);
 
-  const taskIds = Array.from(new Set(prTaskLinks.map((link) => link.taskId)));
+  if (prTaskLinks.length === 0) {
+    const nextAttempt = parsed.attempt + 1;
 
-  if (taskIds.length === 0) {
-    const nextAttempt = associationReplayAttempt + 1;
-    const delayMs = PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS[nextAttempt - 1];
-
-    if (delayMs !== undefined) {
-      const replayRequest = {
-        kind: 'association_replay' as const,
-        input: parsedInput,
+    if (nextAttempt <= PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS.length) {
+      await scheduleOrphanAssociationReplay({
+        target,
+        chainId: parsed.chainId,
         attempt: nextAttempt,
-      };
-      const eventHash = createHash('sha256')
-        .update(JSON.stringify(parsedInput))
-        .digest('hex')
-        .slice(0, 24);
-
-      await getPrReviewNotificationQueue().add(
-        'replay-pr-review-association',
-        replayRequest,
-        {
-          delay: delayMs,
-          jobId: `association-replay-${eventHash}-${nextAttempt}`,
-        },
+      });
+    } else {
+      const nextChainId = randomUUID();
+      const rotated = await getRedis().eval(
+        FINISH_OR_ROTATE_ORPHAN_REPLAY_SCRIPT,
+        2,
+        buildOrphanActivityKey(target),
+        buildOrphanReplayMarkerKey(target),
+        activeMarker,
+        parsed.chainId,
+        nextChainId,
+        ORPHAN_ACTIVITY_TTL_SECONDS,
       );
+
+      if (rotated === 1) {
+        await scheduleOrphanAssociationReplay({
+          target,
+          chainId: nextChainId,
+          attempt: 1,
+        });
+      }
     }
 
     return { notifiedTaskCount: 0, reason: 'no_linked_tasks' };
   }
+
+  const inputs = await consumeOrphanActivity(target, parsed.chainId);
+  let notifiedTaskCount = 0;
+
+  for (const [index, input] of inputs.entries()) {
+    try {
+      const result = await enqueueLinkedPrReviewNotification(
+        input,
+        prTaskLinks,
+      );
+      notifiedTaskCount += result.notifiedTaskCount;
+    } catch (error) {
+      const nextAttempt = parsed.attempt + 1;
+      const requeueChainId =
+        nextAttempt <= PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS.length
+          ? parsed.chainId
+          : randomUUID();
+      await requeueOrphanActivity({
+        target,
+        chainId: requeueChainId,
+        inputs: inputs.slice(index),
+      });
+
+      if (nextAttempt <= PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS.length) {
+        await scheduleOrphanAssociationReplay({
+          target,
+          chainId: requeueChainId,
+          attempt: nextAttempt,
+        });
+      } else {
+        await scheduleOrphanAssociationReplay({
+          target,
+          chainId: requeueChainId,
+          attempt: 1,
+        });
+      }
+
+      throw error;
+    }
+  }
+
+  return { notifiedTaskCount };
+}
+
+async function enqueuePrReviewNotificationAttempt(
+  parsedInput: EnqueuePrReviewNotificationInput,
+): Promise<EnqueuePrReviewNotificationResult> {
+  const target = {
+    sourceControlProvider: parsedInput.sourceControlProvider ?? 'github',
+    repository: parsedInput.repository,
+    prNumber: parsedInput.prNumber,
+  };
+  const prTaskLinks = await findPrReviewTaskLinks(target);
+
+  if (prTaskLinks.length === 0) {
+    const chainId = await appendOrphanActivityAndClaimReplay({
+      target,
+      input: parsedInput,
+    });
+
+    if (chainId) {
+      try {
+        await scheduleOrphanAssociationReplay({
+          target,
+          chainId,
+          attempt: 1,
+        });
+      } catch (error) {
+        const nextChainId = randomUUID();
+        const rotated = await getRedis()
+          .eval(
+            RELEASE_OR_ROTATE_ORPHAN_REPLAY_SCRIPT,
+            1,
+            buildOrphanReplayMarkerKey(target),
+            `${chainId}:1`,
+            chainId,
+            nextChainId,
+            ORPHAN_ACTIVITY_TTL_SECONDS,
+          )
+          .catch(() => 0);
+
+        if (rotated === 1) {
+          await scheduleOrphanAssociationReplay({
+            target,
+            chainId: nextChainId,
+            attempt: 1,
+          });
+        }
+
+        throw error;
+      }
+    }
+
+    return { notifiedTaskCount: 0, reason: 'no_linked_tasks' };
+  }
+
+  return enqueueLinkedPrReviewNotification(parsedInput, prTaskLinks);
+}
+
+async function findPrReviewTaskLinks(
+  target: PrReviewAssociationTarget,
+): Promise<Array<{ taskId: string }>> {
+  return db.query.taskPullRequests.findMany({
+    where: and(
+      eq(taskPullRequests.sourceControlProvider, target.sourceControlProvider),
+      eq(taskPullRequests.repository, target.repository),
+      eq(taskPullRequests.prNumber, target.prNumber),
+    ),
+    columns: { taskId: true },
+  });
+}
+
+async function enqueueLinkedPrReviewNotification(
+  parsedInput: EnqueuePrReviewNotificationInput,
+  prTaskLinks: Array<{ taskId: string }>,
+): Promise<EnqueuePrReviewNotificationResult> {
+  const taskIds = Array.from(new Set(prTaskLinks.map((link) => link.taskId)));
 
   const isRoomoteEvent = parsedInput.event.roomoteAuthored === true;
   const isRoomoteSummary =
@@ -866,6 +1163,8 @@ async function enqueuePrReviewNotificationAttempt(
         taskId,
         repository: parsedInput.repository,
         prNumber: parsedInput.prNumber,
+        sourceControlProvider:
+          parsedInput.sourceControlProvider ?? ('github' as const),
         immediate,
         batchKind: isRoomoteEvent ? ('roomote' as const) : ('human' as const),
         ...(event.batchId ? { batchId: event.batchId } : {}),
@@ -886,7 +1185,7 @@ async function enqueuePrReviewNotificationAttempt(
               prUrl: parsedInput.prUrl,
               deferrals: 0,
               immediate,
-              sourceControlProvider: parsedInput.sourceControlProvider,
+              sourceControlProvider: target.sourceControlProvider,
             },
             { delay: notificationDelayMs },
           );

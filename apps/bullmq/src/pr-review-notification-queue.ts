@@ -9,9 +9,7 @@ import { prReviewNotificationJob } from './jobs/pr-review-notification';
 import { getRedis } from './redis';
 
 function formatJobTarget(data: PrReviewNotificationQueueRequest): string {
-  const target = 'input' in data ? data.input : data;
-
-  return `${target.repository}#${target.prNumber}`;
+  return `${data.repository}#${data.prNumber}`;
 }
 
 export function startPrReviewNotificationQueue() {
