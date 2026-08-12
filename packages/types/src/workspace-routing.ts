@@ -13,8 +13,13 @@ export const workspaceRoutingRulesSchema = z
   .array(workspaceRoutingRuleSchema)
   .max(MAX_WORKSPACE_ROUTING_RULES);
 
+export const workspaceRoutingEntrySchema = z.object({
+  description: workspaceRoutingRuleSchema,
+  target: z.string().trim().min(1),
+});
+
 export const workspaceRoutingSettingsSchema = z.object({
-  allRepositoriesRoutingRules: workspaceRoutingRulesSchema.default([]),
+  rules: z.array(workspaceRoutingEntrySchema).max(MAX_WORKSPACE_ROUTING_RULES),
 });
 
 export type WorkspaceRoutingSettings = z.infer<

@@ -9,9 +9,10 @@
 
       **Available Environments**:
       - Hospital app (repositories: acme/hospital)
-        Routing rules:
-        - Messages sent in the hospital-bugs Slack channel belong here.
       - Billing app (repositories: acme/billing)
+
+      **Routing Rules**:
+      - Messages sent in the hospital-bugs Slack channel belong here. → Hospital app
     expectedWorkspaceValue: "Hospital app"
   assert:
     - type: javascript
@@ -30,9 +31,10 @@
 
       **Available Environments**:
       - Hospital app (repositories: acme/hospital)
-        Routing rules:
-        - Messages sent in the hospital-bugs Slack channel belong here.
       - Billing app (repositories: acme/billing)
+
+      **Routing Rules**:
+      - Messages sent in the hospital-bugs Slack channel belong here. → Hospital app
     expectedWorkspaceValue: "Billing app"
   assert:
     - type: javascript
@@ -49,11 +51,11 @@
 
       **Available Environments**:
       - Hospital app (repositories: acme/hospital)
-        Routing rules:
-        - Messages sent in the hospital-bugs Slack channel belong here.
       - General app (repositories: acme/general)
-        Routing rules:
-        - Default choice for Slack messages when no other environment clearly fits.
+
+      **Routing Rules**:
+      - Messages sent in the hospital-bugs Slack channel belong here. → Hospital app
+      - Default choice for Slack messages when no other environment clearly fits. → General app
     expectedWorkspaceValue: "Hospital app"
   assert:
     - type: javascript
@@ -70,8 +72,9 @@
       **Available Environments**:
       - Hospital app (repositories: acme/hospital)
       - __all_repositories__ (all repositories)
-        Routing rules:
-        - Dependency updates across every product belong in all repositories.
+
+      **Routing Rules**:
+      - Dependency updates across every product belong in all repositories. → __all_repositories__
     expectedWorkspaceValue: "__all_repositories__"
   assert:
     - type: javascript

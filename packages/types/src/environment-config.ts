@@ -4,7 +4,6 @@ import { z } from 'zod';
 import { PRODUCT_NAME } from './constants';
 import { gitBranchNameSchema } from './git-ref';
 import { collectReservedEnvReferences } from './reserved-mcp-env-vars';
-import { workspaceRoutingRulesSchema } from './workspace-routing';
 
 /**
  * Command
@@ -694,13 +693,6 @@ export const environmentConfigSchema = z
      * @example "This is a monorepo. The frontend is in packages/web and the API is in packages/api."
      */
     agentInstructions: z.string().max(10000).optional(),
-    /**
-     * Natural-language guidance for routing tasks into this environment.
-     * Rules can refer to request context such as a Slack channel or product
-     * area. More specific rules should be preferred over catch-all defaults.
-     * @example ['Messages sent in the hospital-bugs Slack channel belong here.']
-     */
-    routingRules: workspaceRoutingRulesSchema.optional(),
     repositories: z.array(environmentRepositoryConfigSchema).min(1),
     /**
      * Tool versions to install via mise at the shared workspace root.

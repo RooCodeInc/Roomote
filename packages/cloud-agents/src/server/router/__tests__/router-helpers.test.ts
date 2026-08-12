@@ -35,7 +35,6 @@ describe('router helpers', () => {
       name: 'Full Stack',
       description: 'Complete development environment',
       repositoryNames: ['acme/frontend', 'acme/backend'],
-      routingRules: ['Messages from the engineering channel belong here.'],
     },
   ];
 
@@ -59,15 +58,17 @@ describe('router helpers', () => {
     expect(prompt).toContain(
       '- Full Stack (repositories: acme/frontend, acme/backend)\n  Complete development environment',
     );
-    expect(prompt).toContain(
-      'Routing rules:\n  - Messages from the engineering channel belong here.',
-    );
   });
 
   it('renders all repositories routing rules when configured', () => {
     const prompt = buildContextPrompt(
       createContext({
-        allRepositoriesRoutingRules: ['Dependency updates belong everywhere.'],
+        routingRules: [
+          {
+            description: 'Dependency updates belong everywhere.',
+            target: '__all_repositories__',
+          },
+        ],
       }),
     );
 
@@ -80,7 +81,12 @@ describe('router helpers', () => {
       mapWorkspace(
         '__all_repositories__',
         createContext({
-          allRepositoriesRoutingRules: ['Route broad changes here.'],
+          routingRules: [
+            {
+              description: 'Route broad changes here.',
+              target: '__all_repositories__',
+            },
+          ],
         }),
       ),
     ).toEqual({ type: 'all_repositories' });

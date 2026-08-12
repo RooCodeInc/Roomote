@@ -166,16 +166,6 @@ export function EnvironmentPreviewContent({
         </PreviewSection>
       ) : null}
 
-      {config.routingRules?.length ? (
-        <PreviewSection icon={GitBranch} title="Routing Rules">
-          <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-            {config.routingRules.map((rule) => (
-              <li key={rule}>{rule}</li>
-            ))}
-          </ul>
-        </PreviewSection>
-      ) : null}
-
       {advancedItems.length > 0 ? (
         <PreviewSection icon={Settings2} title="Advanced">
           <div className="space-y-4">{advancedItems}</div>

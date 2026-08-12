@@ -9,6 +9,37 @@ import {
   getDuplicateEnvironmentRepositoryConfigError,
   getMissingEnvironmentRepositoryError,
 } from '../environment-config';
+import { workspaceRoutingSettingsSchema } from '../workspace-routing';
+
+describe('workspaceRoutingSettingsSchema', () => {
+  it('normalizes centralized routing rules', () => {
+    expect(
+      workspaceRoutingSettingsSchema.parse({
+        rules: [
+          {
+            description: '  Messages from hospital-bugs belong here.  ',
+            target: 'env-1',
+          },
+        ],
+      }),
+    ).toEqual({
+      rules: [
+        {
+          description: 'Messages from hospital-bugs belong here.',
+          target: 'env-1',
+        },
+      ],
+    });
+  });
+
+  it('rejects empty descriptions and targets', () => {
+    expect(
+      workspaceRoutingSettingsSchema.safeParse({
+        rules: [{ description: ' ', target: '' }],
+      }).success,
+    ).toBe(false);
+  });
+});
 
 describe('getMissingEnvironmentRepositoryError', () => {
   it('reports configured repositories that do not exactly match linked rows', () => {
@@ -432,33 +463,6 @@ commands:
 });
 
 describe('environmentConfigSchema', () => {
-  describe('routingRules', () => {
-    it('normalizes routing rules', () => {
-      const result = environmentConfigSchema.safeParse({
-        name: 'Env',
-        repositories: [{ repository: 'owner/repo' }],
-        routingRules: ['  Messages from hospital-bugs belong here.  '],
-      });
-
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data.routingRules).toEqual([
-          'Messages from hospital-bugs belong here.',
-        ]);
-      }
-    });
-
-    it('rejects empty routing rules', () => {
-      const result = environmentConfigSchema.safeParse({
-        name: 'Env',
-        repositories: [{ repository: 'owner/repo' }],
-        routingRules: ['   '],
-      });
-
-      expect(result.success).toBe(false);
-    });
-  });
-
   it('keeps legacy duplicate repository entries parseable on read', () => {
     const result = environmentConfigSchema.safeParse({
       name: 'Env',

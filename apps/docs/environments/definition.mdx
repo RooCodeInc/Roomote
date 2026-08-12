@@ -147,7 +147,6 @@ agentInstructions: |
 | `repositories`            | list              | yes      | At least one repository. See [Repositories](#repositories).                                                               |
 | `initialUrl`              | string            | no       | Absolute URL or `about:blank` that the preview surface opens first.                                                       |
 | `agentInstructions`       | string            | no       | Guidance attached to every task, up to 10,000 characters.                                                                 |
-| `routingRules`            | list              | no       | Natural-language rules that help route requests into this environment. Up to 20 rules of 500 characters each.             |
 | `tool_versions`           | map               | no       | Tools installed at the shared workspace root via mise.                                                                    |
 | `env`                     | map               | no       | Workspace environment variables available to every task.                                                                  |
 | `services`                | list              | no       | Managed services to start. See [Services](#services).                                                                     |
@@ -379,21 +378,14 @@ repository has a known trap, state it plainly.
 
 ## Routing rules
 
-`routingRules` helps Roomote choose this environment for automatically routed
-tasks. Rules can refer to request context such as a Slack channel, product area,
-or task type:
+Admins can configure natural-language routing rules from **Settings →
+Environments**. Each rule maps a description, such as “Messages sent in the
+hospital-bugs Slack channel,” to an environment or the broad **All repositories**
+workspace.
 
-```yaml
-routingRules:
-  - Messages sent in the hospital-bugs Slack channel belong here.
-  - Default choice for Slack messages when no other environment clearly fits.
-```
-
-Rules are natural-language guidance rather than exact string matchers. An
-environment explicitly named in a request takes precedence, and a specific rule
-takes precedence over a catch-all default. Admins can review repository coverage
-and configure rules for the broad **All repositories** workspace from
-**Settings → Environments**.
+Rules are guidance rather than exact string matchers. An environment explicitly
+named in a request takes precedence, and a specific rule takes precedence over a
+catch-all default.
 
 ## MCP servers
 

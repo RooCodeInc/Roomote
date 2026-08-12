@@ -99,17 +99,22 @@ Prefer a specific environment when one is a plausible home for the work.
   prompt += `\n**Available Environments**:\n`;
   for (const env of context.availableEnvironments) {
     prompt += `- ${env.name} (repositories: ${env.repositoryNames.join(', ')})${env.description ? `\n  ${env.description}` : ''}\n`;
-    if (env.routingRules?.length) {
-      prompt += '  Routing rules:\n';
-      for (const rule of env.routingRules) {
-        prompt += `  - ${rule}\n`;
-      }
-    }
   }
-  if (context.allRepositoriesRoutingRules?.length) {
-    prompt += `- ${ALL_REPOSITORIES} (all repositories)\n  Routing rules:\n`;
-    for (const rule of context.allRepositoriesRoutingRules) {
-      prompt += `  - ${rule}\n`;
+  if (context.routingRules?.length) {
+    if (context.routingRules.some((rule) => rule.target === ALL_REPOSITORIES)) {
+      prompt += `- ${ALL_REPOSITORIES} (all repositories)\n`;
+    }
+    prompt += '\n**Routing Rules**:\n';
+    for (const rule of context.routingRules) {
+      const target =
+        rule.target === ALL_REPOSITORIES
+          ? ALL_REPOSITORIES
+          : context.availableEnvironments.find(
+              (environment) => environment.id === rule.target,
+            )?.name;
+      if (target) {
+        prompt += `- ${rule.description} → ${target}\n`;
+      }
     }
   }
   if (options?.includePlatformWorkspace !== false) {

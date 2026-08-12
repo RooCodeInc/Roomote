@@ -35,7 +35,6 @@ import { KeyValueListEditor } from './KeyValueListEditor';
 import { DockerProjectListEditor } from './DockerProjectListEditor';
 import { PortListEditor } from './PortListEditor';
 import { RepositoryEditor } from './RepositoryEditor';
-import { RoutingRulesEditor } from './RoutingRulesEditor';
 import { FieldShell, SectionShell } from './VisualEnvironmentEditor.layout';
 import {
   getServiceName,
@@ -457,29 +456,6 @@ export function VisualEnvironmentEditor({
           />
         </SectionShell>
       ) : null}
-
-      <SectionShell
-        icon={GitBranch}
-        title="Routing Rules"
-        defaultOpen={Boolean(config.routingRules?.length)}
-      >
-        <p className="mb-4 text-sm text-muted-foreground">
-          Tell the router when tasks belong in this environment. Specific rules
-          take precedence over catch-all defaults.
-        </p>
-        <RoutingRulesEditor
-          rules={config.routingRules ?? []}
-          onChange={(rules) =>
-            onChange(
-              updateEnvironmentConfig(config, (draft) => {
-                const normalized = rules.map((rule) => rule.slice(0, 500));
-                if (normalized.length > 0) draft.routingRules = normalized;
-                else delete draft.routingRules;
-              }),
-            )
-          }
-        />
-      </SectionShell>
 
       <SectionShell
         icon={MessageSquareText}

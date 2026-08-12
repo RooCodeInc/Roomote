@@ -369,7 +369,7 @@ export async function getWorkspaceRoutingSettingsCommand(
     .limit(1);
 
   return workspaceRoutingSettingsSchema.parse(
-    settings?.workspaceRoutingSettings ?? {},
+    settings?.workspaceRoutingSettings ?? { rules: [] },
   );
 }
 

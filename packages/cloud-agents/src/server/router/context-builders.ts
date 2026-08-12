@@ -31,8 +31,7 @@ async function fetchDeploymentRoutingSettings() {
 
   return {
     taskModelSettings: deployment?.taskModelSettings ?? null,
-    allRepositoriesRoutingRules:
-      deployment?.workspaceRoutingSettings?.allRepositoriesRoutingRules ?? [],
+    routingRules: deployment?.workspaceRoutingSettings?.rules ?? [],
   };
 }
 
@@ -331,7 +330,6 @@ export async function getAvailableEnvironments(): Promise<
       id: environments.id,
       name: environments.name,
       description: environments.description,
-      config: environments.config,
     })
     .from(environments)
     .where(eq(environments.isEval, false));
@@ -356,7 +354,6 @@ export async function getAvailableEnvironments(): Promise<
       name: env.name,
       description: env.description ?? undefined,
       repositoryNames: mappings.map((m) => m.repoName),
-      routingRules: env.config.routingRules,
     });
   }
 

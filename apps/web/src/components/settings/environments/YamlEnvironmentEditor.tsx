@@ -51,11 +51,6 @@ function getDefaultYamlTemplate(repositoryNames: string[] = []) {
 name: My Environment
 description: A brief description of this environment.
 
-# Optional: Natural-language rules that help route tasks into this environment.
-# routingRules:
-#   - Messages sent in the hospital-bugs Slack channel belong here.
-#   - Default choice for Slack messages when no other environment clearly fits.
-
 # Optional: Instructions for LLM agents working in this environment.
 # These are delivered through the startup environment-instructions block to provide environment-specific context.
 # agentInstructions: |

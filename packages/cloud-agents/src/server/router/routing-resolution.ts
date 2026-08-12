@@ -101,7 +101,7 @@ export function mapWorkspace(
 ): RoutingWorkspace | null {
   const normalizedSelection = normalizeWorkspaceSelectionValue(value);
   if (
-    context.allRepositoriesRoutingRules?.length &&
+    context.routingRules?.some((rule) => rule.target === ALL_REPOSITORIES) &&
     (normalizedSelection === ALL_REPOSITORIES ||
       normalizedSelection.toLowerCase() === 'all repositories')
   ) {

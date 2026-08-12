@@ -27,7 +27,6 @@ interface Environment {
   name: string;
   description?: string;
   repositoryNames?: string[];
-  routingRules?: string[];
 }
 
 interface ExtraModel {
@@ -42,7 +41,7 @@ interface PromptVars {
   repositories?: (string | Repository)[];
   environments?: Environment[];
   extraModels?: ExtraModel[];
-  allRepositoriesRoutingRules?: string[];
+  routingRules?: Array<{ description: string; target: string }>;
 }
 
 interface PromptInput {
@@ -78,9 +77,7 @@ function formatEnvironments(envs?: Environment[]): string {
     const base = e.description
       ? `- ${e.name}${repoList}\n  ${e.description}`
       : `- ${e.name}${repoList}`;
-    return e.routingRules?.length
-      ? `${base}\n  Routing rules:\n${e.routingRules.map((rule) => `  - ${rule}`).join('\n')}`
-      : base;
+    return base;
   });
   return `**Available Environments**:\n${lines.join('\n')}`;
 }
@@ -117,9 +114,9 @@ function buildContext(vars: PromptVars): string {
     parts.push(envs);
   }
 
-  if (vars.allRepositoriesRoutingRules?.length) {
+  if (vars.routingRules?.length) {
     parts.push(
-      `**Available Environments**:\n- __all_repositories__ (all repositories)\n  Routing rules:\n${vars.allRepositoriesRoutingRules.map((rule) => `  - ${rule}`).join('\n')}`,
+      `**Routing Rules**:\n${vars.routingRules.map((rule) => `- ${rule.description} → ${rule.target}`).join('\n')}`,
     );
   }
 
