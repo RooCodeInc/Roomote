@@ -193,6 +193,7 @@ export async function resolveVerifiedSlackChannel(options: {
   slack: SlackNotifier;
   slackTeamId: string;
   actingSlackMembershipUserId?: string | null;
+  allowPublicChannelWithoutUserMembership?: boolean;
   requirePublicChannel?: boolean;
   publicChannelErrorMessage?: string;
 }): Promise<string> {
@@ -227,6 +228,22 @@ export async function resolveVerifiedSlackChannel(options: {
       502,
       `Could not verify Slack access for channel ${channelTarget.value}.`,
     );
+  }
+
+  if (options.allowPublicChannelWithoutUserMembership) {
+    const isPublicChannel =
+      await options.slack.isPublicChannel(resolvedChannelId);
+
+    if (isPublicChannel === true) {
+      return resolvedChannelId;
+    }
+
+    if (isPublicChannel === null) {
+      throw new McpProxyError(
+        502,
+        `Could not verify whether channel ${channelTarget.value} is public.`,
+      );
+    }
   }
 
   if (!options.actingSlackMembershipUserId) {
@@ -315,6 +332,7 @@ async function resolveSlackLookupChannel(options: {
   missingChannelError: string;
   missingLinkedAccountErrorMessage?: string;
   unlinkedUserPublicChannelErrorMessage?: string;
+  allowPublicChannelWithoutUserMembership?: boolean;
   requirePublicChannel?: boolean;
   publicChannelErrorMessage?: string;
 }): Promise<{ channelId: string; slack: SlackNotifier }> {
@@ -354,6 +372,8 @@ async function resolveSlackLookupChannel(options: {
         slack,
         slackTeamId: slackInstallation.teamId,
         actingSlackMembershipUserId,
+        allowPublicChannelWithoutUserMembership:
+          options.allowPublicChannelWithoutUserMembership,
         requirePublicChannel: options.requirePublicChannel,
         publicChannelErrorMessage: options.publicChannelErrorMessage,
       });
@@ -468,6 +488,7 @@ export async function lookupSlackThread(options: {
       'Explicit Slack thread lookup requires the acting user to have a linked Slack account.',
     unlinkedUserPublicChannelErrorMessage:
       'Explicit Slack thread lookup without a linked acting Slack user is limited to public channels the app has joined.',
+    allowPublicChannelWithoutUserMembership: true,
   });
 
   const message = await slack.getMessage({
@@ -540,9 +561,7 @@ export async function lookupSlackChannelMessages(options: {
     actingSlackMembershipUserId: options.actingSlackMembershipUserId,
     missingChannelError:
       'channel is required when Slack channel message lookup is not running from a Slack-originated job',
-    requirePublicChannel: true,
-    publicChannelErrorMessage:
-      'Slack channel message lookup is limited to public channels the app has joined.',
+    allowPublicChannelWithoutUserMembership: true,
   });
 
   let messages: SlackThreadMessage[];
