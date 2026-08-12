@@ -828,6 +828,69 @@ describe('ModalClient', () => {
     });
   });
 
+  it('treats Modal status lookup 400s as stopped sandboxes', async () => {
+    sandboxFromIdMock.mockRejectedValue({
+      status: 400,
+      message: 'Status code 400 is not ok',
+    });
+
+    const client = new ModalClient({
+      tokenId: 'token-id',
+      tokenSecret: 'token-secret',
+      baseImageRef: MODAL_IMAGE_REF,
+    });
+
+    await expect(
+      client.getInstanceStatus({ instanceId: 'modal-123' }),
+    ).resolves.toEqual({ status: 'stopped' });
+  });
+
+  it('does not treat unrelated Modal status lookup 400s as stopped', async () => {
+    sandboxFromIdMock.mockRejectedValue({
+      status: 400,
+      message: 'invalid sandbox id',
+    });
+
+    const client = new ModalClient({
+      tokenId: 'token-id',
+      tokenSecret: 'token-secret',
+      baseImageRef: MODAL_IMAGE_REF,
+    });
+
+    await expect(
+      client.getInstanceStatus({ instanceId: 'modal-123' }),
+    ).rejects.toMatchObject({
+      status: 400,
+      message: 'invalid sandbox id',
+    });
+  });
+
+  it('does not hide Modal 400s from command operations', async () => {
+    const execMock = vi.fn().mockRejectedValue({
+      status: 400,
+      message: 'invalid command',
+    });
+
+    sandboxFromIdMock.mockResolvedValue({
+      sandboxId: 'modal-123',
+      exec: execMock,
+    });
+
+    const client = new ModalClient({
+      tokenId: 'token-id',
+      tokenSecret: 'token-secret',
+      baseImageRef: MODAL_IMAGE_REF,
+    });
+
+    await expect(
+      client.runCommand({
+        instanceId: 'modal-123',
+        cmd: 'worker',
+        args: ['run', '123'],
+      }),
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
   it('preserves explicit env values when injecting roomote env', async () => {
     const execMock = vi.fn().mockResolvedValue({
       stdout: { readText: vi.fn().mockResolvedValue('') },
