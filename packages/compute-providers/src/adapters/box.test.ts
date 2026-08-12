@@ -530,6 +530,41 @@ describe('BoxClient Public API v1', () => {
     }
   });
 
+  it('hosts the sandbox server publicly with a bare-origin URL and app ports privately', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          stdout: 'Hosted at https://box-4200.on.test/\n',
+          stderr: '',
+          exitCode: 0,
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          stdout: 'Hosted at https://box-3000.on.test/?_token=secret\n',
+          stderr: '',
+          exitCode: 0,
+        }),
+      );
+    const client = new BoxClient({ apiKey: 'key', fetchImpl });
+
+    await expect(
+      client.getInstanceDomains({ instanceId: 'box-1', ports: [4200, 3000] }),
+    ).resolves.toEqual({
+      domains: {
+        '4200': 'https://box-4200.on.test',
+        '3000': 'https://box-3000.on.test?_token=secret',
+      },
+    });
+    expect(
+      fetchImpl.mock.calls.map(([, init]) => JSON.parse(String(init?.body))),
+    ).toEqual([
+      { command: `'host' '4200' '--public'` },
+      { command: `'host' '3000' '--private'` },
+    ]);
+  });
+
   it('rejects snapshot operations', async () => {
     const client = new BoxClient({ apiKey: 'key' });
     await expect(

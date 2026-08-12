@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import {
   BOX_CAPABILITIES as BOX_CAPABILITIES_VALUE,
+  SANDBOX_SERVER_PORT,
   type ComputeProvider,
 } from '@roomote/types';
 
@@ -424,18 +425,24 @@ export class BoxClient implements ComputeProviderClient {
   ): Promise<Record<string, string>> {
     const domains: Record<string, string> = {};
     for (const port of ports) {
+      // The private-hosting gate rejects credential-less CORS preflights, so
+      // browsers can never reach a private port cross-origin. The sandbox
+      // server enforces its own bearer auth (same trust model as the other
+      // providers' publicly reachable domains), so host it ungated. User app
+      // ports stay behind the token gate.
+      const isSandboxServer = port === SANDBOX_SERVER_PORT;
       const result = await this.runCommand({
         instanceId,
         cmd: 'host',
-        args: [String(port), '--private'],
+        args: [String(port), isSandboxServer ? '--public' : '--private'],
         signal,
       });
       if (result.exitCode !== 0) {
         throw new Error(
-          `Box private hosting failed for port ${port} with exit code ${result.exitCode ?? 'unknown'}`,
+          `Box hosting failed for port ${port} with exit code ${result.exitCode ?? 'unknown'}`,
         );
       }
-      domains[String(port)] = parsePrivateUrl(result.stdout ?? '');
+      domains[String(port)] = parseHostedUrl(result.stdout ?? '');
     }
     return domains;
   }
@@ -828,14 +835,17 @@ function isTerminalCommand(command: BoxApiCommandResult): boolean {
   return status === 'exited' || status === 'lost';
 }
 
-function parsePrivateUrl(output: string): string {
+function parseHostedUrl(output: string): string {
   const match = output.match(/https:\/\/[^\s"']+/);
-  if (!match) throw new Error('Box private hosting command returned no URL');
+  if (!match) throw new Error('Box hosting command returned no URL');
   const url = new URL(match[0]);
   if (url.protocol !== 'https:') {
-    throw new Error('Box private hosting command returned a non-HTTPS URL');
+    throw new Error('Box hosting command returned a non-HTTPS URL');
   }
-  return url.toString();
+  // Downstream consumers append paths (`${domain}/trpc`), so a bare-origin
+  // URL must not keep the trailing slash URL normalization adds.
+  const pathname = url.pathname === '/' ? '' : url.pathname;
+  return `${url.origin}${pathname}${url.search}`;
 }
 
 function retryDelayMs(response: Response, attempt: number): number {
