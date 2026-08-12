@@ -721,8 +721,8 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       [
         { id: 'openai/gpt-5.6-terra', displayName: 'GPT 5.6 Terra' },
         {
-          id: 'openrouter/x-ai/grok-4.5',
-          displayName: 'Grok 4.5',
+          id: 'openrouter/x-ai/grok-4.6',
+          displayName: 'Grok 4.6',
         },
         {
           id: 'openrouter/anthropic/claude-sonnet-5',
@@ -739,7 +739,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(groups[0]).toMatchObject({
       label: 'OpenRouter',
       items: [
-        { id: 'openrouter/x-ai/grok-4.5' },
+        { id: 'openrouter/x-ai/grok-4.6' },
         { id: 'openrouter/anthropic/claude-sonnet-5' },
       ],
     });
@@ -779,7 +779,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/deepseek-v4-flash-0731',
       'requesty/glm-5.2',
       'requesty/kimi-k3',
-      'requesty/grok-4.5',
+      'requesty/grok-4.6',
     ]);
   });
 
@@ -993,7 +993,7 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       buildRecommendedDeploymentModelConfig(getSetupModelProvider('xai')),
     ).toEqual({
       ...createEmptyDeploymentModelConfig(),
-      roomoteModel: 'xai/grok-4.5',
+      roomoteModel: 'xai/grok-4.6',
     });
   });
 
