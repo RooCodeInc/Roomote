@@ -36,6 +36,7 @@ import { handleGetTaskMessages } from './task-messages.js';
 import { handleGetTaskSummary } from './task-summary.js';
 import { handleGetTaskComputeLogs } from './task-compute-logs.js';
 import { handleCancelTask } from './cancel-task.js';
+import { handleUpdateTaskModels } from './update-task-models.js';
 import { handleSendMessage } from './send-message.js';
 import { handleListEnvironments } from './list-environments.js';
 import {
@@ -550,7 +551,8 @@ const manageTasksToolDescription =
   'Use action "get_messages" to retrieve the latest message history for a task (requires taskId, returns newest first). ' +
   `Use action "launch" to create and start a new task against an environment using ${PRODUCT_NAME}'s default standard workflow (requires prompt and environmentId). ` +
   'Use action "cancel" to cancel an active task (requires taskId). ' +
-  'Use action "send_message" to send a follow-up message to a running task (requires taskId and message).';
+  'Use action "send_message" to send a follow-up message to a running task (requires taskId and message). ' +
+  'Use action "update_models" ONLY when the user explicitly asks to change the model or reasoning level for a task (requires role; taskId defaults to the current task). Pass the desired model id and/or reasoningEffort; omit both to reset the role to the deployment default. Changes apply from the next turn, so a change to the current task does not affect the turn that is already running.';
 
 const manageTasksInputSchema = {
   action: z
@@ -562,6 +564,7 @@ const manageTasksInputSchema = {
       'launch',
       'cancel',
       'send_message',
+      'update_models',
       'list_environments',
     ])
     .describe(
@@ -621,6 +624,24 @@ const manageTasksInputSchema = {
         'Call "list_environments" immediately before launching and copy one of the returned environmentId values.',
     ),
   branch: z.string().optional().describe('Branch to use (for launch)'),
+  role: z
+    .enum(['coding', 'helper', 'vision', 'codeReview', 'explore', 'planning'])
+    .optional()
+    .describe(
+      'Model role to change (required for update_models). "coding" is the main agent; the others cover sub-agent roles.',
+    ),
+  model: z
+    .string()
+    .optional()
+    .describe(
+      'For update_models: desired model id in provider/model format (must be enabled for the deployment). Omit to keep the deployment default model for the role.',
+    ),
+  reasoningEffort: z
+    .enum(['low', 'medium', 'high', 'xhigh', 'max'])
+    .optional()
+    .describe(
+      'For update_models: desired reasoning level for the role. Omit to use the deployment default level.',
+    ),
   notifyOnSettle: z
     .boolean()
     .optional()
@@ -754,6 +775,26 @@ roomoteMcpServer.registerTool(
           return errorResult('taskId is required for cancel');
         }
         return handleCancelTask({ taskId: params.taskId }, config);
+      }
+      case 'update_models': {
+        const taskId = params.taskId?.trim() || process.env.ROOMOTE_TASK_ID;
+        if (!taskId) {
+          return errorResult(
+            'taskId is required for update_models (provide it or set ROOMOTE_TASK_ID)',
+          );
+        }
+        if (!params.role) {
+          return errorResult('role is required for update_models');
+        }
+        return handleUpdateTaskModels(
+          {
+            taskId,
+            role: params.role,
+            model: params.model ?? null,
+            reasoningEffort: params.reasoningEffort ?? null,
+          },
+          config,
+        );
       }
       case 'send_message': {
         if (!params.taskId?.trim()) {

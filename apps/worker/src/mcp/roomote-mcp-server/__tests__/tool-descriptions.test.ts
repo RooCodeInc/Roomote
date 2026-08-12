@@ -278,6 +278,7 @@ describe('roomote MCP tool descriptions', () => {
       'launch',
       'cancel',
       'send_message',
+      'update_models',
       'list_environments',
     ]);
     expect(taskIdField.description).toBe(

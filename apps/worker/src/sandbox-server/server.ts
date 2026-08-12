@@ -102,6 +102,7 @@ export function createServer({
   codingHarness,
   taskRuntime,
   prepareActorScopedTurn,
+  applyTaskModelSettingsUpdate,
 }: {
   /** Port to listen on. */
   port: number;
@@ -142,6 +143,13 @@ export function createServer({
     },
   ) => Promise<PrepareActorScopedTurnResult>;
   /**
+   * Re-read the run's persisted model settings and apply them to the live
+   * harness (restart now, or defer to the next turn boundary).
+   */
+  applyTaskModelSettingsUpdate?: () => Promise<{
+    application: 'restarted' | 'deferred' | 'unavailable';
+  }>;
+  /**
    * Token validator.
    * For tRPC: reads `Authorization: Bearer <token>` header.
    * For WebSocket: reads `connectionParams.token`.
@@ -161,6 +169,7 @@ export function createServer({
     workerEnv,
     taskRuntime,
     prepareActorScopedTurn,
+    applyTaskModelSettingsUpdate,
   });
 
   const app = new Hono();

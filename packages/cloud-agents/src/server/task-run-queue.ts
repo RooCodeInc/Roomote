@@ -2186,11 +2186,24 @@ async function enqueueSnapshotResume(
 
   const sourceJobHarness = sourceRun.harness;
   const sourceJobVendor = resolveComputeProviderTarget(sourceRun.vendor);
-  const sourceRunHarnessModelOverrides = (
-    sourceRun.payload as {
-      harnessModelOverrides?: import('@roomote/types').HarnessModelOverrides;
-    }
-  )?.harnessModelOverrides;
+  const sourceRunPayloadModelState = sourceRun.payload as {
+    harnessModelOverrides?: import('@roomote/types').HarnessModelOverrides;
+    modelRoleOverrides?: import('@roomote/types').TaskModelRoleOverrides;
+  } | null;
+  const sourceRunHarnessModelOverrides =
+    sourceRunPayloadModelState?.harnessModelOverrides;
+
+  // Per-role model overrides ride the same inheritance: every resume
+  // re-stamps them onto its own payload, so reading the immediate source run
+  // is enough to carry them through arbitrarily long resume chains.
+  if (
+    !task.payload.modelRoleOverrides &&
+    sourceRunPayloadModelState?.modelRoleOverrides
+  ) {
+    task.payload.modelRoleOverrides =
+      sourceRunPayloadModelState.modelRoleOverrides;
+  }
+
   let sourceTaskType = sourceRun.payloadKind;
   let parentRunId = sourceRun.sourceRunId;
 

@@ -13,6 +13,7 @@ export { deleteQueuedPrompt } from './deleteQueuedPrompt';
 export { answerUserInputRequest } from './answerUserInputRequest';
 export { touchKeepalive } from './touchKeepalive';
 export { reloadDeploymentEnvVars } from './reloadDeploymentEnvVars';
+export { applyTaskModelSettings } from './applyTaskModelSettings';
 export { scrubSnapshotSecrets } from './scrubSnapshotSecrets';
 export { restoreScrubbedCredentials } from './restoreScrubbedCredentials';
 

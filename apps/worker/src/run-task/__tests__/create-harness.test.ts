@@ -233,6 +233,81 @@ describe('createHarness', () => {
     expect(getHarnessModelOverrideMock).toHaveBeenCalledTimes(1);
   });
 
+  it('overlays per-task model role overrides onto the spawn env and re-reads them on respawn', async () => {
+    const firstHarness = createConnectedHarness();
+    const secondHarness = createConnectedHarness();
+
+    startOpenCodeServerHarnessMock
+      .mockResolvedValueOnce({
+        harness: firstHarness,
+        subprocess: createPendingSubprocess(),
+      })
+      .mockResolvedValueOnce({
+        harness: secondHarness,
+        subprocess: createPendingSubprocess(),
+      });
+
+    const taskRun = {
+      id: 7,
+      taskId: 'task-7',
+      payload: {
+        modelRoleOverrides: {
+          planning: {
+            model: 'openrouter/test/planner',
+            reasoningEffort: 'max',
+          },
+          explore: { reasoningEffort: 'low' },
+        },
+      },
+    };
+
+    await createHarness({
+      harnessType: 'opencode-server',
+      workspacePath: '/tmp/workspace',
+      runtimeEnv: {
+        OPENAI_API_KEY: 'sk-test-openai',
+      },
+      harnessSessionId: undefined,
+      cancelSignal: new AbortController().signal,
+      integrations: {} as never,
+      mcpTaskEnv: {},
+      taskRun: taskRun as never,
+      callbacks: {} as never,
+      context: {} as never,
+      logger: createLogger(),
+    });
+
+    expect(startOpenCodeServerHarnessMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtimeEnv: {
+          OPENAI_API_KEY: 'sk-test-openai',
+          R_PLANNING_MODEL: 'openrouter/test/planner',
+          R_PLANNING_MODEL_REASONING_EFFORT: 'max',
+          R_EXPLORE_MODEL_REASONING_EFFORT: 'low',
+        },
+      }),
+    );
+
+    // A live model-settings update mutates the shared payload and restarts
+    // the harness; the respawn must pick up the current overrides.
+    taskRun.payload.modelRoleOverrides = {
+      planning: { model: 'openrouter/test/other-planner' },
+    } as never;
+    firstHarness.emit('disconnected');
+
+    await vi.waitFor(() =>
+      expect(startOpenCodeServerHarnessMock).toHaveBeenCalledTimes(2),
+    );
+    expect(startOpenCodeServerHarnessMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        runtimeEnv: {
+          OPENAI_API_KEY: 'sk-test-openai',
+          R_PLANNING_MODEL: 'openrouter/test/other-planner',
+        },
+      }),
+    );
+  });
+
   it('starts opencode-server with its model override and generated prompt inputs', async () => {
     const subprocess = createPendingSubprocess();
 
@@ -314,15 +389,23 @@ describe('createHarness', () => {
 
     const startOptions = startOpenCodeServerHarnessMock.mock.calls[0]?.[0] as
       | {
-          beforeQueuedPrompt?: (input: { userId?: string }) => Promise<unknown>;
+          beforeQueuedPrompt?: (input: {
+            userId?: string;
+            kind: 'queuedPrompt' | 'userInputAnswer';
+          }) => Promise<unknown>;
         }
       | undefined;
 
     expect(startOptions?.beforeQueuedPrompt).toBeTypeOf('function');
     await expect(
-      startOptions?.beforeQueuedPrompt?.({ userId: 'user-2' }),
+      startOptions?.beforeQueuedPrompt?.({
+        userId: 'user-2',
+        kind: 'queuedPrompt',
+      }),
     ).resolves.toBeUndefined();
-    expect(beforeQueuedPrompt).toHaveBeenCalledWith('user-2');
+    expect(beforeQueuedPrompt).toHaveBeenCalledWith('user-2', {
+      kind: 'queuedPrompt',
+    });
   });
 
   it('stamps harnessStartedAt once the harness subprocess is alive', async () => {

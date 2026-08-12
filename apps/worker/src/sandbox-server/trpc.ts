@@ -67,6 +67,15 @@ export interface Context {
       onMismatch?: ActorMismatchPolicy;
     },
   ) => Promise<PrepareActorScopedTurnResult>;
+
+  /**
+   * Re-read the run's persisted model settings and apply them to the live
+   * harness: restart immediately when no turn is active, otherwise defer to
+   * the next queued-prompt delivery.
+   */
+  applyTaskModelSettingsUpdate?: () => Promise<{
+    application: 'restarted' | 'deferred' | 'unavailable';
+  }>;
 }
 
 const t = initTRPC.context<Context>().create({ transformer: superjson });

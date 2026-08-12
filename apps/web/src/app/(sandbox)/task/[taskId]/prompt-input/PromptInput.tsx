@@ -57,6 +57,7 @@ import { useOptimisticPromptSubmission } from './useOptimisticPromptSubmission';
 import { AttachmentsDisplay } from './AttachmentsDisplay';
 import { ContextUsage } from './ContextUsage';
 import { SubmitWithAttachments } from './SubmitWithAttachments';
+import { TaskModelSwitcher } from './TaskModelSwitcher';
 import { TaskStatus } from './TaskStatus';
 
 const DRAFT_SAVE_DEBOUNCE_MS = 1_000;
@@ -748,6 +749,9 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
                 shouldShowTaskToolsActions(taskRun.payloadKind) && (
                   <TaskToolsButton taskRun={taskRun} />
                 )}
+              {taskRun && taskRun.harness === 'opencode-server' && (
+                <TaskModelSwitcher taskRun={taskRun} disabled={readOnly} />
+              )}
             </PromptInputTools>
             <div className="flex items-center gap-2">
               {showConnectingStatus && (

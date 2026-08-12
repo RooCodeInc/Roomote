@@ -1,7 +1,10 @@
 import {
   isReasoningEffort,
   REASONING_EFFORT_VALUES,
+  TASK_MODEL_OVERRIDE_ROLES,
   type ReasoningEffort,
+  type TaskModelOverrideRole,
+  type TaskModelRoleOverrides,
 } from './task-runs';
 import {
   OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS,
@@ -1101,6 +1104,72 @@ export const DEFAULT_MODEL_ROLE_REASONING_EFFORTS = {
   explore: 'low',
   planning: 'high',
 } as const satisfies Record<TaskModelRole, ReasoningEffort>;
+
+/**
+ * Runtime env var names carrying each overridable non-coding role's model and
+ * reasoning level into the sandbox. Must stay in sync with the env bag
+ * emitted by `resolveModelRuntimeEnv` in packages/db and consumed by the
+ * worker's OpenCode config generation.
+ */
+export const TASK_MODEL_OVERRIDE_ROLE_ENV_VARS = {
+  helper: {
+    model: 'R_SMALL_MODEL',
+    reasoningEffort: 'R_SMALL_MODEL_REASONING_EFFORT',
+  },
+  vision: {
+    model: 'R_VISION_MODEL',
+    reasoningEffort: 'R_VISION_MODEL_REASONING_EFFORT',
+  },
+  codeReview: {
+    model: 'R_CODE_REVIEW_MODEL',
+    reasoningEffort: 'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
+  },
+  explore: {
+    model: 'R_EXPLORE_MODEL',
+    reasoningEffort: 'R_EXPLORE_MODEL_REASONING_EFFORT',
+  },
+  planning: {
+    model: 'R_PLANNING_MODEL',
+    reasoningEffort: 'R_PLANNING_MODEL_REASONING_EFFORT',
+  },
+} as const satisfies Record<
+  TaskModelOverrideRole,
+  { model: string; reasoningEffort: string }
+>;
+
+/**
+ * Materializes a task's per-role overrides into the runtime env var overlay
+ * the worker applies on top of the deployment role env vars at harness spawn.
+ */
+export function buildTaskModelRoleOverrideEnv(
+  overrides: TaskModelRoleOverrides | null | undefined,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  if (!overrides) {
+    return env;
+  }
+
+  for (const role of TASK_MODEL_OVERRIDE_ROLES) {
+    const override = overrides[role];
+
+    if (!override) {
+      continue;
+    }
+
+    const envVarNames = TASK_MODEL_OVERRIDE_ROLE_ENV_VARS[role];
+
+    if (override.model?.trim()) {
+      env[envVarNames.model] = override.model.trim();
+    }
+
+    if (override.reasoningEffort) {
+      env[envVarNames.reasoningEffort] = override.reasoningEffort;
+    }
+  }
+
+  return env;
+}
 
 const DEFAULT_RECOMMENDED_PRESET_ID = 'default';
 

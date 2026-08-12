@@ -240,6 +240,13 @@ export interface CancelTaskResponse {
   error?: string;
 }
 
+export interface UpdateTaskModelSelectionResponse {
+  success: boolean;
+  /** How the live sandbox took the change; absent on failure. */
+  application?: 'restarted' | 'deferred' | 'unavailable' | 'offline';
+  error?: string;
+}
+
 export interface SubmitTaskSuggestionsResponse {
   success: boolean;
   suggestionCount?: number;

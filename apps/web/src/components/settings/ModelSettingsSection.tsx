@@ -52,17 +52,16 @@ import {
 } from '@/components/system';
 import type { LucideIcon } from '@/components/system';
 import { Section } from '@/components/settings';
+import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
 import { formatMetadataSummary } from './model-metadata';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
-  REASONING_EFFORT_OPTIONS,
   XAI_SUBSCRIPTION_PROVIDER_ID,
   buildRecommendedDeploymentModelConfig,
   getRecommendedModelPresets,
   groupModelsByDisplayProvider,
   getSetupModelProvider,
-  normalizeOptionalReasoningEffort,
 } from '@roomote/types';
 import type {
   DisplayModelProviderGroup,
@@ -252,43 +251,6 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
     allowSameAsCoding: true,
   },
 ];
-function ReasoningEffortSelect({
-  value,
-  defaultEffort,
-  onChange,
-  disabled,
-  ariaLabel,
-}: {
-  value: ReasoningEffort | null;
-  defaultEffort: ReasoningEffort;
-  onChange: (value: ReasoningEffort | null) => void;
-  disabled?: boolean;
-  ariaLabel: string;
-}) {
-  return (
-    <Select
-      value={value ?? defaultEffort}
-      onValueChange={(nextValue) =>
-        onChange(normalizeOptionalReasoningEffort(nextValue))
-      }
-      disabled={disabled}
-    >
-      <SelectTrigger className="w-36 shrink-0" aria-label={ariaLabel}>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent align="end">
-        <SelectGroup>
-          <SelectLabel className="mt-0">Reasoning Level</SelectLabel>
-          {REASONING_EFFORT_OPTIONS.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectGroup>
-      </SelectContent>
-    </Select>
-  );
-}
 
 function TaskModelRoleEditor({
   config,

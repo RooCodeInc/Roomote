@@ -371,6 +371,52 @@ export async function getTaskModelSettingsCommand(
   };
 }
 
+type TaskModelRoleDefault = {
+  effectiveModelId: string | null;
+  reasoningEffort: ReasoningEffort | null;
+};
+
+/**
+ * The deployment's effective per-role models and reasoning levels for
+ * non-admin surfaces (the in-task model switcher labels its "Default"
+ * options with these). Exposes only the resolved ids/levels — no env
+ * management state or provider credentials.
+ */
+export async function getTaskModelRoleDefaultsCommand(
+  _auth: UserAuthSuccess,
+): Promise<{
+  defaultModelId: string;
+  roles: Record<
+    'coding' | 'helper' | 'vision' | 'codeReview' | 'explore' | 'planning',
+    TaskModelRoleDefault
+  >;
+}> {
+  const [settings, persistedRuntimeModelConfig] = await Promise.all([
+    getDeploymentTaskModelSettings(),
+    getDeploymentRuntimeModelConfig(),
+  ]);
+  const runtimeModels = resolveRuntimeModelStatus({
+    settingsDefaultModelId: settings.defaultModelId,
+    persisted: persistedRuntimeModelConfig,
+  });
+  const pick = (status: RuntimeModelFieldStatus): TaskModelRoleDefault => ({
+    effectiveModelId: status.effectiveModelId,
+    reasoningEffort: status.reasoningEffort,
+  });
+
+  return {
+    defaultModelId: settings.defaultModelId,
+    roles: {
+      coding: pick(runtimeModels.codingModel),
+      helper: pick(runtimeModels.helperModel),
+      vision: pick(runtimeModels.visionModel),
+      codeReview: pick(runtimeModels.codeReviewModel),
+      explore: pick(runtimeModels.exploreModel),
+      planning: pick(runtimeModels.planningModel),
+    },
+  };
+}
+
 async function getDeploymentSetupNewState(
   executor: DatabaseOrTransaction = db,
 ) {

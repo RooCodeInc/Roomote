@@ -964,6 +964,56 @@ describe('enqueueTask snapshot resume', () => {
     });
   });
 
+  it('inherits per-task model role overrides from the source run payload', async () => {
+    const userId = await createUser();
+
+    const freshRun = await launchFresh({
+      task: standardTaskInput(),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    // Simulate a mid-task model change persisted by the task UI: the
+    // overrides live on the run payload, not the launch spec.
+    await db
+      .update(taskRuns)
+      .set({
+        payload: {
+          ...(freshRun.payload as Record<string, unknown>),
+          modelRoleOverrides: {
+            planning: { model: 'openrouter/test/planner' },
+            explore: { reasoningEffort: 'low' },
+          },
+        } as typeof freshRun.payload,
+      })
+      .where(eq(taskRuns.id, freshRun.id));
+
+    const resumeTask: SnapshotResumeTask = {
+      type: TaskPayloadKind.SnapshotResume,
+      payload: {
+        repo: 'acme/widgets',
+        sourceSnapshotId: 'snap-models-1',
+        sourceRunId: freshRun.id,
+      },
+    } as SnapshotResumeTask;
+
+    const resumeRun = await enqueueTask(
+      { task: resumeTask, actingUserId: userId },
+      { enqueue: false },
+    );
+
+    const resumePayload = resumeRun.payload as {
+      modelRoleOverrides?: Record<string, unknown>;
+    };
+
+    expect(resumePayload.modelRoleOverrides).toEqual({
+      planning: { model: 'openrouter/test/planner' },
+      explore: { reasoningEffort: 'low' },
+    });
+  });
+
   it('walks the resume chain for stamps when the source run predates inheritance', async () => {
     const userId = await createUser();
 
