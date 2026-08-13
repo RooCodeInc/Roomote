@@ -348,6 +348,12 @@ export const taskModelRoleOverrideSchema = z.object({
   model: openCodeModelOverrideSchema.optional(),
   /** Reasoning level for the role; unset keeps the deployment level. */
   reasoningEffort: z.enum(REASONING_EFFORT_VALUES).optional(),
+  /**
+   * Explicitly clears the deployment role level instead of inheriting it,
+   * for overrides onto models without configurable reasoning. Only
+   * meaningful when `reasoningEffort` is unset.
+   */
+  clearReasoningEffort: z.boolean().optional(),
 });
 
 export type TaskModelRoleOverride = z.infer<typeof taskModelRoleOverrideSchema>;

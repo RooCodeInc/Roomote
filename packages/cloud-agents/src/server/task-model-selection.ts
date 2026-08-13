@@ -241,9 +241,16 @@ export async function applyTaskModelSelectionToRun(options: {
             )
           : candidateEffort
         : undefined;
+      // A level dropped by the clamp means the pinned model has no
+      // configurable reasoning; mark the override so the spawn env clears
+      // the deployment role level instead of inheriting it.
+      const clearReasoningEffort = Boolean(
+        candidateEffort && !overrideEffort && overrideModelId,
+      );
       const entry = {
         ...(requestedModelId ? { model: requestedModelId } : {}),
         ...(overrideEffort ? { reasoningEffort: overrideEffort } : {}),
+        ...(clearReasoningEffort ? { clearReasoningEffort: true } : {}),
       };
 
       if (Object.keys(entry).length > 0) {
