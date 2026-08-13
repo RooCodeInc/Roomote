@@ -127,7 +127,7 @@ describe('postRouterDebugMessage', () => {
     vi.restoreAllMocks();
   });
 
-  it('includes the routed task model and selection source in debug channel messages', async () => {
+  it('includes routed environment details in debug channel messages', async () => {
     await postRouterDebugMessage({
       source: 'Slack C123',
       sourceLink:
@@ -141,12 +141,6 @@ describe('postRouterDebugMessage', () => {
         needsExternalLookup: false,
         confidence: 0.97,
         workspaceRemapped: false,
-        selectedTaskModel: {
-          id: 'openrouter/openai/gpt-5.4',
-          displayName: 'GPT 5.4',
-          source: 'preference',
-          confidence: 0.96,
-        },
       },
     });
 
@@ -179,14 +173,6 @@ describe('postRouterDebugMessage', () => {
               ),
             }),
           }),
-          expect.objectContaining({
-            type: 'section',
-            text: expect.objectContaining({
-              text: expect.stringContaining(
-                '• *Model:* GPT 5.4 `openrouter/openai/gpt-5.4` — user preference, confidence 0.96',
-              ),
-            }),
-          }),
         ]),
       }),
     );
@@ -215,18 +201,6 @@ describe('postRouterDebugMessage', () => {
         needsExternalLookup: true,
         confidence: 0.97,
         workspaceRemapped: true,
-        selectedTaskModel: {
-          id: 'openrouter/openai/gpt-5.4',
-          displayName: 'GPT 5.4',
-          source: 'preference',
-          confidence: 0.96,
-          rejectedPick: {
-            id: 'openrouter/anthropic/claude-opus-4.8',
-            displayName: 'Claude Opus 4.8',
-            confidence: 0.55,
-            reason: 'below_threshold',
-          },
-        },
       },
     });
 
@@ -240,12 +214,6 @@ describe('postRouterDebugMessage', () => {
     );
     const text = discordPostMessageMock.mock.calls[0]?.[0]?.text as string;
     expect(text).toContain('Environment: App — confidence 0.97');
-    expect(text).toContain(
-      'Model: GPT 5.4 `openrouter/openai/gpt-5.4` — user preference, confidence 0.96',
-    );
-    expect(text).toContain(
-      'Rejected model pick: Claude Opus 4.8 `openrouter/anthropic/claude-opus-4.8` — confidence 0.55 (below threshold)',
-    );
     expect(text).toContain('Environment remapped:');
     expect(text).toContain('Duration: 420ms');
     expect(text).toContain('Tools: `search_workspaces`');
@@ -271,132 +239,6 @@ describe('postRouterDebugMessage', () => {
       expect.objectContaining({
         channelId: '19:conversation',
         serviceUrl: 'https://smba.trafficmanager.net/amer',
-      }),
-    );
-  });
-
-  it('includes a rejected low-confidence model pick in debug channel messages', async () => {
-    await postRouterDebugMessage({
-      source: 'Slack C123',
-      taskDescription: 'Delete the Google Drive integration.',
-      selectedWorkspace: { name: 'App', type: 'environment' },
-      reasoning: 'App is the best fit.',
-      routingDebug: {
-        phase: 'direct',
-        toolsUsed: [],
-        needsExternalLookup: false,
-        confidence: 0.97,
-        workspaceRemapped: false,
-        selectedTaskModel: {
-          id: 'openrouter/z-ai/glm-5.2',
-          displayName: 'GLM 5.2',
-          source: 'default',
-          rejectedPick: {
-            id: 'openrouter/anthropic/claude-opus-4.8',
-            displayName: 'Claude Opus 4.8',
-            confidence: 0.55,
-            reason: 'below_threshold',
-          },
-        },
-      },
-    });
-
-    expect(chatPostMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: 'CDEBUG',
-        blocks: expect.arrayContaining([
-          expect.objectContaining({
-            type: 'section',
-            text: expect.objectContaining({
-              text: expect.stringContaining(
-                '• *Model:* GLM 5.2 `openrouter/z-ai/glm-5.2` — default',
-              ),
-            }),
-          }),
-          expect.objectContaining({
-            type: 'section',
-            text: expect.objectContaining({
-              text: expect.stringContaining(
-                '*Rejected model pick:* Claude Opus 4.8 `openrouter/anthropic/claude-opus-4.8` — confidence 0.55 (below threshold)',
-              ),
-            }),
-          }),
-        ]),
-      }),
-    );
-  });
-
-  it('reports an explicit no-model choice with its confidence on the model line', async () => {
-    await postRouterDebugMessage({
-      source: 'Slack C123',
-      taskDescription: 'Delete the Google Drive integration.',
-      selectedWorkspace: { name: 'App', type: 'environment' },
-      reasoning: 'App is the best fit.',
-      routingDebug: {
-        phase: 'direct',
-        toolsUsed: [],
-        needsExternalLookup: false,
-        confidence: 0.97,
-        workspaceRemapped: false,
-        selectedTaskModel: {
-          id: 'openrouter/z-ai/glm-5.2',
-          displayName: 'GLM 5.2',
-          source: 'default',
-          noModelChoice: { confidence: 0.98 },
-        },
-      },
-    });
-
-    expect(chatPostMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: 'CDEBUG',
-        blocks: expect.arrayContaining([
-          expect.objectContaining({
-            type: 'section',
-            text: expect.objectContaining({
-              text: expect.stringContaining(
-                '• *Model:* GLM 5.2 `openrouter/z-ai/glm-5.2` — default (router choice: no model mentioned, confidence: 0.98)',
-              ),
-            }),
-          }),
-        ]),
-      }),
-    );
-  });
-
-  it('reports when the router did not report a model choice', async () => {
-    await postRouterDebugMessage({
-      source: 'Slack C123',
-      taskDescription: 'Fix the login flow.',
-      selectedWorkspace: { name: 'App', type: 'environment' },
-      reasoning: 'App is the best fit.',
-      routingDebug: {
-        phase: 'direct',
-        toolsUsed: [],
-        needsExternalLookup: false,
-        confidence: 0.97,
-        workspaceRemapped: false,
-        selectedTaskModel: {
-          id: 'openrouter/z-ai/glm-5.2',
-          displayName: 'GLM 5.2',
-          source: 'default',
-        },
-      },
-    });
-
-    expect(chatPostMessageMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        channel: 'CDEBUG',
-        blocks: expect.arrayContaining([
-          expect.objectContaining({
-            type: 'section',
-            text: expect.objectContaining({
-              text: expect.stringContaining(
-                '• *Model:* GLM 5.2 `openrouter/z-ai/glm-5.2` — default (router model choice: not reported)',
-              ),
-            }),
-          }),
-        ]),
       }),
     );
   });

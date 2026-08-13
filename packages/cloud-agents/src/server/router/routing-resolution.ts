@@ -6,14 +6,6 @@ import type { RoutingContext, RoutingWorkspace } from './types';
 const WORKSPACE_SELECTION_PREFIX = /^(workspace|environment)\s*:\s*/i;
 const WORKSPACE_SELECTION_WRAPPERS = /^[`"'([{]+|[`"')\]}]+$/g;
 
-/**
- * Sentinel model id the router LLM must return when the user did not name a
- * model. Forcing an explicit "no model mentioned" choice instead of a nullable
- * field makes small routing models less likely to autofill a hallucinated
- * model preference.
- */
-export const NO_MODEL_MENTIONED_VALUE = '__no_model__';
-
 const needsExternalLookupField = z
   .boolean()
   .describe(
@@ -52,28 +44,12 @@ export const workspaceResponseSchema = z.object({
     .string()
     .nullable()
     .describe(
-      'Short user-facing kickoff sentence posted in chat (about 8-18 words) that ends with a period. Naturally include the exact chosen environment name, and when requestedModelId is a real model also naturally include that model display name from the Available Models list. Vary the wording; do not always use "Getting started on your task in…". No emojis, markdown, quotes, or mentions. Always provide a non-empty value for real routed tasks.',
+      'Short user-facing kickoff sentence posted in chat (about 8-18 words) that ends with a period. Naturally include the exact chosen environment name. Vary the wording; do not always use "Getting started on your task in…". No emojis, markdown, quotes, or mentions. Always provide a non-empty value for real routed tasks.',
     )
     .optional()
     .default(null),
   needsExternalLookup: needsExternalLookupField.optional().default(false),
   externalReference: externalReferenceField.optional().default(null),
-  requestedModelId: z
-    .string()
-    .nullable()
-    .describe(
-      `The model ID the user explicitly requested, chosen from the Available Models list, or the literal "${NO_MODEL_MENTIONED_VALUE}" when the user does not name a model. Always make this an explicit choice: pick a listed model id only when the user expresses a model preference, and pick "${NO_MODEL_MENTIONED_VALUE}" otherwise.`,
-    )
-    .optional()
-    .default(null),
-  modelConfidence: z
-    .number()
-    .nullable()
-    .describe(
-      `Confidence from 0 to 1 in your requestedModelId choice. Always provide a number. When requestedModelId is a model id, this is your confidence that the user explicitly requested that model; picks below 0.9 are ignored. When requestedModelId is "${NO_MODEL_MENTIONED_VALUE}", this is your confidence that the user did not request a model.`,
-    )
-    .optional()
-    .default(null),
 });
 
 /**

@@ -79,19 +79,6 @@ function formatToolsUsed(toolsUsed: string[]): string {
   return visibleTools.join(', ');
 }
 
-function formatModelSource(source: string): string {
-  switch (source) {
-    case 'preference':
-      return 'user preference';
-    case 'preserved':
-      return 'preserved';
-    case 'default':
-      return 'default';
-    default:
-      return source;
-  }
-}
-
 function formatSummaryFields(
   fields: Array<{ label: string; value: string | undefined }>,
 ): string {
@@ -101,53 +88,7 @@ function formatSummaryFields(
     .join('\n');
 }
 
-function formatSelectedTaskModel(
-  selectedTaskModel: NonNullable<RoutingDebugInfo['selectedTaskModel']>,
-): string {
-  let routerChoiceText: string | null = null;
-
-  if (selectedTaskModel.source !== 'preference') {
-    if (selectedTaskModel.noModelChoice) {
-      const noModelConfidence = selectedTaskModel.noModelChoice.confidence;
-      routerChoiceText =
-        noModelConfidence != null
-          ? `(router choice: no model mentioned, confidence: ${String(noModelConfidence)})`
-          : '(router choice: no model mentioned)';
-    } else if (!selectedTaskModel.rejectedPick) {
-      routerChoiceText = '(router model choice: not reported)';
-    }
-  }
-
-  const modelDetails = [formatModelSource(selectedTaskModel.source)];
-
-  if (selectedTaskModel.confidence != null) {
-    modelDetails.push(`confidence ${String(selectedTaskModel.confidence)}`);
-  }
-
-  const modelValue = `${selectedTaskModel.displayName} \`${selectedTaskModel.id}\` — ${modelDetails.join(', ')}`;
-  return routerChoiceText ? `${modelValue} ${routerChoiceText}` : modelValue;
-}
-
-function formatRejectedModelPick(
-  rejectedPick: NonNullable<
-    NonNullable<RoutingDebugInfo['selectedTaskModel']>['rejectedPick']
-  >,
-): string {
-  const confidenceText =
-    rejectedPick.confidence != null
-      ? String(rejectedPick.confidence)
-      : 'not provided';
-  const reasonText =
-    rejectedPick.reason === 'not_allowed'
-      ? 'not in allow-list'
-      : 'below threshold';
-
-  return `${truncate(rejectedPick.displayName, 80)} \`${truncate(rejectedPick.id, 80)}\` — confidence ${confidenceText} (${reasonText})`;
-}
-
 function formatPlainRouterDebugMessage(params: RouterDebugParams): string {
-  const selectedTaskModel = params.routingDebug?.selectedTaskModel;
-  const rejectedPick = selectedTaskModel?.rejectedPick;
   const visibleToolsUsed = params.routingDebug
     ? getVisibleToolsUsed(params.routingDebug.toolsUsed)
     : [];
@@ -162,14 +103,8 @@ function formatPlainRouterDebugMessage(params: RouterDebugParams): string {
     `Source: ${source}`,
     `Environment: ${environment}`,
     params.userRoute ? `User override: ${params.userRoute}` : null,
-    selectedTaskModel
-      ? `Model: ${formatSelectedTaskModel(selectedTaskModel)}`
-      : null,
     `Message:\n${truncate(params.taskDescription, 500) || '(empty)'}`,
     `Why this route:\n${truncate(params.reasoning, 2500) || '(none)'}`,
-    rejectedPick
-      ? `Rejected model pick: ${formatRejectedModelPick(rejectedPick)}`
-      : null,
     params.routingDebug?.workspaceRemapped
       ? 'Environment remapped: Suggested environment was unavailable, so the final route fell back to the resolved selection above.'
       : null,
@@ -481,10 +416,6 @@ export async function postRouterDebugMessage(
         ? `${environmentName} — confidence ${String(params.routingDebug.confidence)}`
         : environmentName;
 
-    const modelValue = params.routingDebug?.selectedTaskModel
-      ? formatSelectedTaskModel(params.routingDebug.selectedTaskModel)
-      : undefined;
-
     const blocks: RouterDebugBlocks = [
       {
         type: 'section',
@@ -503,7 +434,6 @@ export async function postRouterDebugMessage(
               label: 'User override',
               value: params.userRoute,
             },
-            { label: 'Model', value: modelValue },
           ]),
         },
       },
@@ -524,18 +454,6 @@ export async function postRouterDebugMessage(
         text: `*Why this route*\n${quote(reasoning)}`,
       },
     });
-
-    const rejectedPick = params.routingDebug?.selectedTaskModel?.rejectedPick;
-
-    if (rejectedPick) {
-      blocks.push({
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: `*Rejected model pick:* ${formatRejectedModelPick(rejectedPick)}`,
-        },
-      });
-    }
 
     if (params.routingDebug?.workspaceRemapped) {
       blocks.push({

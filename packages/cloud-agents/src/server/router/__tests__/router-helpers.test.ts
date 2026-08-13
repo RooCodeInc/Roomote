@@ -122,68 +122,11 @@ describe('router helpers', () => {
     );
   });
 
-  it('includes model selection rules in the routing prompt', () => {
-    const prompt = buildWorkspaceRoutingPrompt();
-
-    expect(prompt).toContain('## Model Selection');
-    expect(prompt).toContain('requestedModelId');
-    expect(prompt).toContain('Available Models');
-  });
-
-  it('renders the enabled model catalog in the context prompt', () => {
-    const prompt = buildContextPrompt(
-      createContext({
-        taskModelSettings: {
-          models: [
-            {
-              id: 'openrouter/z-ai/glm-5.2',
-              displayName: 'GLM 5.2',
-              family: 'GLM',
-            },
-            {
-              id: 'openrouter/anthropic/claude-opus-4.8',
-              displayName: 'Opus 4.8',
-              family: 'Opus',
-            },
-          ],
-          allowedModelIds: [
-            'openrouter/z-ai/glm-5.2',
-            'openrouter/anthropic/claude-opus-4.8',
-          ],
-          defaultModelId: 'openrouter/z-ai/glm-5.2',
-        },
-      }),
+  it('keeps model selection out of workspace routing', () => {
+    expect(buildWorkspaceRoutingPrompt()).not.toContain('Model Selection');
+    expect(buildContextPrompt(createContext())).not.toContain(
+      '**Available Models**:',
     );
-
-    expect(prompt).toContain('**Available Models**:');
-    expect(prompt).toContain('- GLM 5.2 [id: openrouter/z-ai/glm-5.2]');
-    expect(prompt).toContain(
-      '- Opus 4.8 [id: openrouter/anthropic/claude-opus-4.8]',
-    );
-    expect(prompt).toContain('- No model mentioned [id: __no_model__]');
-  });
-
-  it('renders the default model catalog when settings are null', () => {
-    const prompt = buildContextPrompt(
-      createContext({
-        taskModelSettings: null,
-      }),
-    );
-
-    expect(prompt).toContain('**Available Models**:');
-    expect(prompt).toContain(
-      '- Claude Sonnet 5 [id: openrouter/anthropic/claude-sonnet-5]',
-    );
-    expect(prompt).toContain(
-      '- GPT 5.6 Terra [id: openrouter/openai/gpt-5.6-terra]',
-    );
-    expect(prompt).toContain('- No model mentioned [id: __no_model__]');
-  });
-
-  it('omits the available models section when no settings are provided', () => {
-    const prompt = buildContextPrompt(createContext());
-
-    expect(prompt).not.toContain('**Available Models**:');
   });
 
   it('maps environments by exact or normalized name', () => {
@@ -214,8 +157,6 @@ describe('router helpers', () => {
       kickoffMessage: null,
       needsExternalLookup: false,
       externalReference: null,
-      requestedModelId: null,
-      modelConfidence: null,
     });
   });
 

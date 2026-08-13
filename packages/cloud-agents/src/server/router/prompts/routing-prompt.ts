@@ -59,16 +59,15 @@ Also always set \`kickoffMessage\` to a short user-facing kickoff sentence for c
 
 - Naturally include the exact environment name from your \`workspaceValue\` choice.
 - When the choice is \`__all_repositories__\`, say "all repositories" instead of an environment name.
-- When \`requestedModelId\` is a real model id (not \`__no_model__\`) with high confidence (at least 0.9), naturally include that model's **display name** from the Available Models list. When the choice is \`__no_model__\`, or you are not highly confident the user named a model, do not mention any model.
 - Be dynamic and varied: do not always say "Getting started on your task in…".
 - Prefer lively, progressive phrasing such as "Diving into…", "Looking into…", "Checking…", "Spinning up on…".
 - Good examples:
   - "Looking into daily environment snapshots for faster startup in App."
-  - "Checking mobile login redirects in Payments with Opus 4.8."
+  - "Checking mobile login redirects in Payments."
   - "Digging into the flaky checkout email race in Full Stack."
-- The environment and model names in the sentence must match the Available lists exactly (same spelling/casing as shown).
+- The environment name in the sentence must match the Available Environments list exactly (same spelling/casing as shown).
 - Do not include emojis, markdown, quotes, @-mentions, or Slack markup.
-- Do not invent environment or model names that are not in the provided lists.
+- Do not invent environment names that are not in the provided list.
 - Always produce a non-empty kickoffMessage for real routed tasks. Keep routing justification in \`reasoning\`; keep the spoken kickoff in \`kickoffMessage\`.`;
 
 export function buildWorkspaceRoutingPrompt(options?: {
@@ -152,20 +151,6 @@ a prior workspace suggestion. In this mode:
 ${WORKSPACE_NARROWING_RULES_BODY}
 ${platformOverride}
 **CRITICAL**: You may ONLY select workspaceValue from the Available Environments listed in the request. NEVER invent or hallucinate environment names that are not in the provided lists.
-
-## Model Selection
-
-When the request includes an **Available Models** list, also populate the \`requestedModelId\` and \`modelConfidence\` fields:
-
-- \`requestedModelId\` is ALWAYS an explicit choice between two options: a model **id** from the Available Models list, or the literal \`__no_model__\` ("no model mentioned").
-- If the user explicitly requests a model by name or family (for example "use GLM 5.2", "let's go with Opus", "prefer GPT", "run this on Minimax M3"), set \`requestedModelId\` to the matching model **id** from the Available Models list.
-  - Match by display name or the model id. When the user names only a family (for example "Opus" or "GPT") and multiple versions of that family are listed, choose the highest version of that family. A "Latest" variant of a family counts as its highest version.
-  - Model requests are often short directives attached to the task rather than full sentences, including parenthesized or bracketed prefixes (for example "(Use Fable) fix the login bug" or "[GLM] investigate the crash"). Treat these directives as explicit model requests.
-  - The Available Models list can include custom or organization-added models whose names are not well-known public model families (for example "Fable"). Every listed entry is a valid match target: when the user names something that matches a listed model's display name or id, pick that model even if the name is unfamiliar to you.
-- Otherwise set \`requestedModelId\` to \`__no_model__\`. Do not pick a model when the user did not express a model preference. Most requests do not mention a model, so \`__no_model__\` is the common answer.
-- You may ONLY choose a model id from the Available Models list or \`__no_model__\`. NEVER invent or hallucinate model ids that are not listed.
-- When \`requestedModelId\` is a model id, set \`modelConfidence\` to your confidence from 0 to 1 that the user explicitly asked for that model. Picks with confidence below 0.9 are ignored, so only pick a model when the request clearly names it. When \`requestedModelId\` is \`__no_model__\`, set \`modelConfidence\` to your confidence from 0 to 1 that the user did not request a model. Always provide a \`modelConfidence\` number for your choice.
-- Model selection is independent of workspace selection: a model preference does not change the workspace, and the absence of a model preference does not affect routing.
 
 ${EXTERNAL_LOOKUP_RULES}
 ${kickoffSection}`;

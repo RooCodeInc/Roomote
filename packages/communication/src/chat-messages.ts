@@ -96,49 +96,6 @@ export function buildRoutingConfirmationText({
 }
 
 /**
- * Returns a model display name for chat acknowledgements only when the router
- * treated the pick as an explicit user preference. Default / preserved models
- * stay out of the "getting started" copy.
- */
-export function getUserRequestedModelDisplayName(
-  model?: {
-    displayName?: string | null;
-    source?: string | null;
-  } | null,
-): string | undefined {
-  if (model?.source !== 'preference') {
-    return undefined;
-  }
-
-  const displayName = model.displayName?.trim();
-  return displayName || undefined;
-}
-
-/**
- * Resolves the user-facing model display name for routing state that can carry
- * either a freshly routed model selection or a previous correction prefill.
- * When a new model selection is present, only preference-sourced names are kept
- * so display names cannot outlive a later default/preserved `modelId`.
- */
-export function resolveUserFacingModelDisplayName({
-  model,
-  previousDisplayName,
-}: {
-  model?: {
-    displayName?: string | null;
-    source?: string | null;
-  } | null;
-  previousDisplayName?: string | null;
-}): string | undefined {
-  if (model) {
-    return getUserRequestedModelDisplayName(model);
-  }
-
-  const previous = previousDisplayName?.trim();
-  return previous || undefined;
-}
-
-/**
  * Legacy started-message prefix used by the static kickoff template.
  * Dynamic LLM kickoffs are free-form and are detected via stored message ts
  * and/or Follow/Cancel action blocks instead of a shared prefix.

@@ -24,13 +24,11 @@ async function fetchDeploymentRoutingSettings() {
   const deployment = await db.query.deploymentSettings.findFirst({
     where: eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID),
     columns: {
-      taskModelSettings: true,
       workspaceRoutingSettings: true,
     },
   });
 
   return {
-    taskModelSettings: deployment?.taskModelSettings ?? null,
     routingRules: deployment?.workspaceRoutingSettings?.rules ?? [],
   };
 }

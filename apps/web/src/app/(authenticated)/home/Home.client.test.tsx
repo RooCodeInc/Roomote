@@ -272,40 +272,6 @@ const routedEnvironmentSuggestion: RoutingDecision = {
   },
 };
 
-const routedEnvironmentSuggestionWithModel: RoutingDecision = {
-  status: 'routed',
-  result: {
-    workspace: {
-      type: 'environment',
-      id: 'env-routed',
-      name: 'Routed Workspace',
-    },
-    model: {
-      id: 'openrouter/z-ai/glm-5.2',
-      displayName: 'GLM 5.2',
-      source: 'preference',
-    },
-    reasoning: 'Best match',
-  },
-};
-
-const routedEnvironmentSuggestionWithDefaultModel: RoutingDecision = {
-  status: 'routed',
-  result: {
-    workspace: {
-      type: 'environment',
-      id: 'env-routed',
-      name: 'Routed Workspace',
-    },
-    model: {
-      id: 'openrouter/openai/gpt-5.4',
-      displayName: 'GPT 5.4',
-      source: 'default',
-    },
-    reasoning: 'Best match',
-  },
-};
-
 describe('Home', () => {
   beforeEach(() => {
     currentSearchParams = '';
@@ -555,32 +521,8 @@ describe('Home', () => {
     );
   });
 
-  it('uses the routed model for auto-routed launches', async () => {
-    mockRouteHomeTask.mockResolvedValue(routedEnvironmentSuggestionWithModel);
-
-    render(<Home initialPlaceholderIndex={0} />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
-
-    await waitFor(() => {
-      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
-        expect.objectContaining({
-          model: 'openrouter/z-ai/glm-5.2',
-          payload: expect.objectContaining({
-            repo: ALL_REPOSITORIES,
-            environmentId: 'env-routed',
-            description: 'Test prompt',
-            blank: false,
-          }),
-        }),
-      );
-    });
-  });
-
-  it('preserves the picker model for auto-routed launches when routing only returns the default model', async () => {
-    mockRouteHomeTask.mockResolvedValue(
-      routedEnvironmentSuggestionWithDefaultModel,
-    );
+  it('preserves the picker model for auto-routed launches', async () => {
+    mockRouteHomeTask.mockResolvedValue(routedEnvironmentSuggestion);
 
     render(<Home initialPlaceholderIndex={0} />);
 

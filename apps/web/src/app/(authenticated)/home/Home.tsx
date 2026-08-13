@@ -548,11 +548,6 @@ export function Home({
       }
 
       setRoutingState('launching');
-      const routedModelId =
-        routedResult.result.model?.source === 'preference'
-          ? routedResult.result.model.id
-          : undefined;
-
       const didLaunch = await launchTask({
         repo: ALL_REPOSITORIES,
         branch: submission.branch,
@@ -562,7 +557,6 @@ export function Home({
             : undefined,
         description: submission.description,
         images: submission.images,
-        modelId: routedModelId,
         blank: submission.blank,
       });
 

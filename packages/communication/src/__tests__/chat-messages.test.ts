@@ -15,8 +15,6 @@ import {
   buildTaskStartingText,
   buildThreadReplyFooterText,
   formatMarkdownLink,
-  getUserRequestedModelDisplayName,
-  resolveUserFacingModelDisplayName,
 } from '../chat-messages';
 
 describe('chat message copy builders', () => {
@@ -137,57 +135,6 @@ describe('chat message copy builders', () => {
         kickoffMessage: 'Digging into the flaky checkout race in Full Stack',
       }),
     ).toBe('Digging into the flaky checkout race in Full Stack');
-  });
-
-  it('only returns model names the router treated as an explicit preference', () => {
-    expect(
-      getUserRequestedModelDisplayName({
-        displayName: 'Grok 4.5',
-        source: 'default',
-      }),
-    ).toBeUndefined();
-
-    expect(
-      getUserRequestedModelDisplayName({
-        displayName: 'Claude Opus 4.8',
-        source: 'preserved',
-      }),
-    ).toBeUndefined();
-
-    expect(
-      getUserRequestedModelDisplayName({
-        displayName: 'Anthropic Claude Fable 5',
-        source: 'preference',
-      }),
-    ).toBe('Anthropic Claude Fable 5');
-  });
-
-  it('clears previous preference names once a non-preference model is resolved', () => {
-    expect(
-      resolveUserFacingModelDisplayName({
-        model: {
-          displayName: 'Grok 4.5',
-          source: 'default',
-        },
-        previousDisplayName: 'Anthropic Claude Fable 5',
-      }),
-    ).toBeUndefined();
-
-    expect(
-      resolveUserFacingModelDisplayName({
-        model: {
-          displayName: 'Anthropic Claude Fable 5',
-          source: 'preference',
-        },
-        previousDisplayName: 'Claude Opus 4.8',
-      }),
-    ).toBe('Anthropic Claude Fable 5');
-
-    expect(
-      resolveUserFacingModelDisplayName({
-        previousDisplayName: 'Anthropic Claude Fable 5',
-      }),
-    ).toBe('Anthropic Claude Fable 5');
   });
 
   it('builds queue count, launch, and snapshot resume acknowledgements', () => {

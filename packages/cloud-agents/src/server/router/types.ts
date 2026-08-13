@@ -1,7 +1,5 @@
 import type {
   RequestedWorkKindDecision,
-  TaskModelOption,
-  TaskModelSettings,
   WorkspaceRoutingSettings,
 } from '@roomote/types';
 
@@ -40,16 +38,6 @@ export interface RoutingContext {
   routingModel?: string;
   source: RoutingSource;
   availableEnvironments: RoutableEnvironment[];
-  /**
-   * Deployment task-model settings. When present, the enabled model catalog is
-   * exposed to the routing prompt so the LLM can pick a requested model, and
-   * the router resolves the final model from that pick (or the deployment
-   * default) instead of parsing the task text in code.
-   * `null` means the deployment settings row is missing and the built-in
-   * default catalog should be used; `undefined` means model selection is not
-   * available for this routing context.
-   */
-  taskModelSettings?: TaskModelSettings | null;
   routingRules?: WorkspaceRoutingSettings['rules'];
   routingActor?: {
     userId: string;
@@ -58,39 +46,6 @@ export interface RoutingContext {
   previousSuggestion?: {
     workspaceValue: string | null;
     workspaceDisplayName: string;
-    modelId?: string | null;
-    modelDisplayName?: string | null;
-  };
-}
-
-export interface RoutingTaskModelSelection extends Pick<
-  TaskModelOption,
-  'id' | 'displayName'
-> {
-  source: 'default' | 'preference' | 'preserved';
-  /**
-   * The router LLM's self-reported confidence that the user explicitly
-   * requested this model. Only set when `source` is `'preference'`.
-   */
-  confidence?: number | null;
-  /**
-   * Present when the router LLM explicitly chose "no model mentioned"
-   * (`__no_model__`). Carries its self-reported confidence in that choice so
-   * router debug output can report the model decision on every routing.
-   */
-  noModelChoice?: {
-    confidence: number | null;
-  };
-  /**
-   * Present when the router LLM picked a model but the pick was demoted:
-   * either its confidence was missing or below the preference threshold, or
-   * the picked id was not in the deployment allow-list.
-   */
-  rejectedPick?: {
-    id: string;
-    displayName: string;
-    confidence: number | null;
-    reason: 'below_threshold' | 'not_allowed';
   };
 }
 
@@ -175,7 +130,6 @@ export interface RoutingDebugInfo {
   needsExternalLookup: boolean | null;
   confidence?: number | null;
   workspaceRemapped?: boolean;
-  selectedTaskModel?: RoutingTaskModelSelection;
 }
 
 /**
@@ -199,12 +153,11 @@ export function getRoutingAutoConfirmDelayMs(
 
 export interface RoutingResult {
   workspace: RoutingWorkspace;
-  model?: RoutingTaskModelSelection;
   reasoning: string;
   /**
    * Full short user-facing kickoff sentence generated with the routing decision.
-   * Should naturally include the chosen environment (and model override when
-   * the user requested one). Surfaces may post this directly when valid.
+   * Should naturally include the chosen environment. Surfaces may post this
+   * directly when valid.
    */
   kickoffMessage?: string;
   requestedWorkKindDecision?: RequestedWorkKindDecision;
@@ -267,8 +220,6 @@ export interface WorkspaceResponse {
   kickoffMessage?: string | null;
   needsExternalLookup: boolean;
   externalReference: string | null;
-  requestedModelId?: string | null;
-  modelConfidence?: number | null;
 }
 
 export type FollowUpIntent = 'confirm' | 'cancel' | 'correct';
