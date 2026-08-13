@@ -38,18 +38,28 @@ describe('buildDetachedWorkerExitError', () => {
     expect(error.details).toEqual({ commandId: null, exitCode: 7 });
   });
 
-  it('redacts secret-looking env assignments echoed by the shell', () => {
+  it('redacts every env assignment echoed by the shell, including quoted tokens and names without secret suffixes', () => {
     const error = buildDetachedWorkerExitError('run', {
       exitCode: 126,
       stderr:
-        "bash: env AUTH_TOKEN=abc123 SOME_API_KEY='s3cret value' worker run 5: Argument list too long",
+        'bash: env AUTH_TOKEN=abc123 ' +
+        "'ROOMOTE_AUTH_BYPASS_VALUE=byp 4ss' " +
+        '"SANDBOX_EXPIRES_AT_MS=17 55 06" ' +
+        "SOME_API_KEY='s3cret value' " +
+        'worker run 5: Argument list too long (exit=126)',
     });
 
     expect(error.message).toContain('AUTH_TOKEN=<redacted>');
+    expect(error.message).toContain("'ROOMOTE_AUTH_BYPASS_VALUE=<redacted>'");
+    expect(error.message).toContain('"SANDBOX_EXPIRES_AT_MS=<redacted>"');
     expect(error.message).toContain('SOME_API_KEY=<redacted>');
     expect(error.message).not.toContain('abc123');
+    expect(error.message).not.toContain('byp 4ss');
+    expect(error.message).not.toContain('17 55 06');
     expect(error.message).not.toContain('s3cret');
     expect(error.details.stderr).not.toContain('abc123');
+    // Lowercase diagnostic text is not env-shaped and stays readable.
+    expect(error.message).toContain('(exit=126)');
   });
 
   it('truncates oversized output to keep run errors readable', () => {
