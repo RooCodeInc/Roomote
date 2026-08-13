@@ -3,7 +3,10 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
-import type { ComputeProvider } from '@roomote/types';
+import {
+  snapshotCapableComputeProviders,
+  type ComputeProvider,
+} from '@roomote/types';
 import {
   Plus,
   Trash2,
@@ -31,7 +34,7 @@ import {
   useCreateEnvironmentSnapshot,
   useClearEnvironmentSnapshot,
 } from '@/hooks/snapshots';
-import { useComputeProviderConfigured } from '@/hooks/compute';
+import { useConfiguredComputeProviders } from '@/hooks/compute';
 import { useRepositories } from '@/hooks/source-control';
 import { useAuthorizedUser } from '@/hooks/useUser';
 
@@ -75,14 +78,10 @@ export function Environments() {
   const retryVerification = useRetryEnvironmentVerification();
   const createEnvironmentSnapshot = useCreateEnvironmentSnapshot();
   const clearEnvironmentSnapshot = useClearEnvironmentSnapshot();
-  const modalConfigured = useComputeProviderConfigured('modal');
-  const e2bConfigured = useComputeProviderConfigured('e2b');
-  const roomoteConfigured = useComputeProviderConfigured('roomote');
-  const configuredSnapshotProviders = [
-    modalConfigured ? 'modal' : null,
-    e2bConfigured ? 'e2b' : null,
-    roomoteConfigured ? 'roomote' : null,
-  ].filter((provider): provider is ComputeProvider => provider !== null);
+  const configuredComputeProviders = useConfiguredComputeProviders();
+  const configuredSnapshotProviders = snapshotCapableComputeProviders.filter(
+    (provider) => configuredComputeProviders.includes(provider),
+  );
 
   if (environments.isPending || repositories.isPending) {
     return (
@@ -138,11 +137,11 @@ export function Environments() {
               // after that provider is removed from the deployment.
               const visibleSnapshotProviders = [
                 ...configuredSnapshotProviders,
-                ...(['modal', 'e2b', 'roomote'] as const).filter((provider) => {
+                ...snapshotCapableComputeProviders.filter((provider) => {
                   const snapshot = getEnvironmentSnapshot(env, provider);
                   return (
                     !configuredSnapshotProviders.includes(provider) &&
-                    Boolean(snapshot?.snapshotId)
+                    Boolean(snapshot?.snapshotId || snapshot?.snapshotStatus)
                   );
                 }),
               ];
@@ -330,7 +329,11 @@ export function Environments() {
                                   </span>
                                 )}
                                 <div className="flex items-center gap-1">
-                                  {snapshot?.snapshotStatus === 'ready' ? (
+                                  {snapshot?.snapshotStatus === 'ready' ||
+                                  (!configuredSnapshotProviders.includes(
+                                    provider,
+                                  ) &&
+                                    snapshot?.snapshotStatus) ? (
                                     <Popover>
                                       <PopoverTrigger asChild>
                                         <Button

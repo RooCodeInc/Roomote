@@ -123,8 +123,7 @@ vi.mock('@/hooks/environments', () => ({
 }));
 
 vi.mock('@/hooks/compute', () => ({
-  useComputeProviderConfigured: (provider: string) =>
-    state.configuredProviders.includes(provider),
+  useConfiguredComputeProviders: () => state.configuredProviders,
 }));
 
 vi.mock('@/hooks/snapshots', () => ({
@@ -521,6 +520,18 @@ describe('Environments', () => {
     expect(screen.getByTitle('Create e2b snapshot')).toBeInTheDocument();
   });
 
+  it('shows snapshot controls for all configured snapshot-capable providers', () => {
+    state.configuredProviders = ['modal', 'daytona', 'box', 'azure'];
+    render(<Environments />);
+
+    fireEvent.click(screen.getByTitle('Toggle environment details'));
+
+    expect(screen.getByTitle('Refresh modal snapshot')).toBeInTheDocument();
+    expect(screen.getByTitle('Create daytona snapshot')).toBeInTheDocument();
+    expect(screen.getByTitle('Create box snapshot')).toBeInTheDocument();
+    expect(screen.getByTitle('Create azure snapshot')).toBeInTheDocument();
+  });
+
   it('hides roomote snapshot controls when the provider is not configured', () => {
     render(<Environments />);
 
@@ -559,6 +570,35 @@ describe('Environments', () => {
     ).not.toBeInTheDocument();
     expect(screen.getByTitle('Clear roomote snapshot')).toBeInTheDocument();
   });
+
+  it.each(['failed', 'pending'] as const)(
+    'keeps an unconfigured %s snapshot visible and clearable',
+    (snapshotStatus) => {
+      state.environments[0]!.snapshots.roomote = {
+        provider: 'roomote',
+        snapshotId: null,
+        snapshotStatus,
+        snapshotCreatedAt: null,
+        snapshotExpiresAt: null,
+      };
+
+      render(<Environments />);
+
+      fireEvent.click(screen.getByTitle('Toggle environment details'));
+
+      expect(
+        screen.getByText(
+          snapshotStatus === 'failed' ? 'Failed' : 'Snapshotting...',
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getByTitle('Clear roomote snapshot')).toBeInTheDocument();
+      expect(
+        screen.queryByTitle(
+          `${snapshotStatus === 'failed' ? 'Retry' : 'Refresh'} roomote snapshot`,
+        ),
+      ).not.toBeInTheDocument();
+    },
+  );
 
   it('preserves the provider override for an existing non-default snapshot', async () => {
     render(<Environments />);
