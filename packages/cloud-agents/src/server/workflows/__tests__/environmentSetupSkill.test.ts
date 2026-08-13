@@ -316,7 +316,7 @@ describe('environment-setup guidance', () => {
       'A `Completed`, `Ready`, or `Idle` task state is not proof that verification passed.',
     );
     expect(skillContent).toContain(
-      'Treat explicit `not_ready` or `blocked` results as verification failures or blockers even when setup and task execution completed cleanly.',
+      'Treat explicit `not_ready` or `blocked` results as verification failures or blockers even when setup and task execution completed cleanly, except that a `not_ready` justified solely by clearly pre-existing repository test failures with setup itself completing cleanly should be re-evaluated against the classification above',
     );
     expect(skillContent).toContain(
       'use `success: true` only for the explicit evidence-backed `ready` criterion above',
@@ -447,6 +447,25 @@ describe('environment-setup guidance', () => {
       'a single bounded blocking shell command (for example one `timeout`-wrapped poll loop in one tool call) rather than many separate short `sleep` calls across turns',
     );
     expect(skillContent).not.toContain('every 10-15 seconds');
+  });
+
+  it('lets verification pass on clearly pre-existing repository test failures', () => {
+    const skillContent = readSkillContent();
+    expect(skillContent).toContain(
+      'The prompt must also tell the task how to classify test failures',
+    );
+    expect(skillContent).toContain(
+      'report `not_ready` for failures that point to a setup or environment-definition problem',
+    );
+    expect(skillContent).toContain(
+      'report `ready` and list those failures explicitly as pre-existing',
+    );
+    expect(skillContent).toContain(
+      'A `ready` result that names clearly pre-existing repository test failures is still a verification success for the environment',
+    );
+    expect(skillContent).toContain(
+      'instead of letting them permanently block environment verification',
+    );
   });
 
   it('forbids finishing with a persisted but unverified environment revision', () => {
