@@ -810,6 +810,68 @@ describe('Slack deleted-mention suppression', () => {
     );
   });
 
+  it('includes root-thread replies when skipped routing starts the only workspace immediately', async () => {
+    environmentsFindManyMock.mockResolvedValue([]);
+    fetchThreadMessagesMock.mockResolvedValue([
+      {
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        text: '<@BOT> investigate this',
+        ts: '111.222',
+      },
+      {
+        type: 'message',
+        user: 'U456',
+        text: '<@BOT> use these failure details too',
+        ts: '111.333',
+      },
+    ]);
+    const slack = new SlackNotifier('xoxb-test');
+
+    const result = await showTaskConfiguration({
+      event: {
+        type: 'app_mention',
+        channel: 'C123',
+        user: 'U123',
+        text: '<@BOT> investigate this',
+        ts: '111.222',
+      },
+      slackInstallation: {
+        teamId: 'T123',
+        botUserId: 'BOT',
+      } as never,
+      userMapping: {
+        userId: 'user_1',
+      } as never,
+      slack: slack as never,
+      skipRouting: true,
+    });
+
+    expect(result).toEqual({
+      routingUsed: false,
+      threadId: '111.222',
+      startedImmediately: true,
+    });
+    expect(fetchThreadMessagesMock).toHaveBeenCalledWith({
+      channel: 'C123',
+      threadTs: '111.222',
+    });
+    expect(enqueueTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            threadMessages: [
+              expect.objectContaining({ ts: '111.222' }),
+              expect.objectContaining({ ts: '111.333' }),
+            ],
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+  });
+
   it('warns in the picker and posts fallback diagnostics when routing fails with an exception', async () => {
     routeTaskMock.mockResolvedValueOnce({
       status: 'fallback',

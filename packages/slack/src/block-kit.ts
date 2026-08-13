@@ -1333,7 +1333,7 @@ export async function showTaskConfiguration({
         let fallbackThreadMessages = routingThreadMessages;
         let fallbackLatestOwnBotReply = latestOwnBotReply;
 
-        if (!fallbackThreadMessages && event.thread_ts) {
+        if (!fallbackThreadMessages) {
           try {
             const splitMessages = await getPromptReadyThreadMessages({
               slack,
