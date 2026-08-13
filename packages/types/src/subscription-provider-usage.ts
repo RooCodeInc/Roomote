@@ -103,8 +103,9 @@ export const OPENCODE_GO_USAGE_ENDPOINT = 'https://opencode.ai/zen/go/v1/usage';
  * The proxy strips `creditUsagePercent` / `productUsage` unless the request
  * carries the Grok CLI identity fingerprint below. A bare Bearer request
  * still returns 200 with period metadata, so callers must send these
- * headers or the Settings usage bar silently disappears. Do not add
- * `x-grok-client-version`: a pinned version 426s once Grok CLI moves on.
+ * headers or the Settings usage bar silently disappears. Billing also
+ * forwards `x-userid` from `/v1/user`. Do not add `x-grok-client-version`:
+ * a pinned version 426s once Grok CLI moves on.
  */
 export const XAI_CLI_CHAT_PROXY_BASE_URL = 'https://cli-chat-proxy.grok.com';
 export const XAI_USAGE_USER_ENDPOINT = `${XAI_CLI_CHAT_PROXY_BASE_URL}/v1/user`;

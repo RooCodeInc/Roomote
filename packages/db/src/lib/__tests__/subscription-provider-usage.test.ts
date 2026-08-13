@@ -709,6 +709,10 @@ describe('fetchXaiSubscriptionUsage', () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           authorization: 'Bearer xai-access',
+          'X-XAI-Token-Auth': 'xai-grok-cli',
+          'x-grok-client-identifier': 'grok-shell',
+          'x-grok-client-mode': 'billing',
+          'x-userid': 'user-1',
         }),
       }),
     );
@@ -750,6 +754,7 @@ describe('fetchXaiSubscriptionUsage', () => {
     expect(userHeaders).not.toHaveProperty('X-XAI-Token-Auth');
     expect(userHeaders).not.toHaveProperty('x-grok-client-identifier');
     expect(userHeaders).not.toHaveProperty('x-grok-client-mode');
+    expect(userHeaders).not.toHaveProperty('x-userid');
     expect(fetchImpl).toHaveBeenNthCalledWith(
       2,
       'https://cli-chat-proxy.grok.com/v1/billing?format=credits',
@@ -759,6 +764,7 @@ describe('fetchXaiSubscriptionUsage', () => {
           'X-XAI-Token-Auth': 'xai-grok-cli',
           'x-grok-client-identifier': 'grok-shell',
           'x-grok-client-mode': 'billing',
+          'x-userid': 'user-1',
         }),
       }),
     );
