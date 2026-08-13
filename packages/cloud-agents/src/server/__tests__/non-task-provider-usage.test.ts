@@ -992,6 +992,68 @@ describe('resolveOpenCodeSmallModel', () => {
       expect(result.success || result.message).not.toContain(providerError);
     },
   );
+
+  // Real provider rejections arrive as structured `{name, data: {message,
+  // statusCode, responseBody}}` assistant errors whose wording varies too
+  // much for keyword matching — Anthropic says "API key is invalid.",
+  // Bedrock Mantle says "Invalid bearer token". The status code decides.
+  it.each([
+    {
+      providerMessage: 'API key is invalid.',
+      statusCode: 401,
+      reason: 'invalid_credentials',
+      retryable: false,
+    },
+    {
+      providerMessage: 'Invalid bearer token',
+      statusCode: 403,
+      reason: 'invalid_credentials',
+      retryable: false,
+    },
+    {
+      providerMessage: 'upgrade your plan',
+      statusCode: 402,
+      reason: 'insufficient_credits',
+      retryable: false,
+    },
+    {
+      providerMessage: 'slow down',
+      statusCode: 429,
+      reason: 'rate_limited',
+      retryable: true,
+    },
+  ])(
+    'classifies a structured status-$statusCode provider error as $reason',
+    async ({ providerMessage, statusCode, reason, retryable }) => {
+      process.env = { ...originalEnv };
+      sessionPromptMock.mockResolvedValue({
+        data: {
+          info: {
+            error: {
+              name: 'APIError',
+              data: {
+                message: providerMessage,
+                statusCode,
+                responseBody: `{"type":"error","error":{"message":"${providerMessage}"}}`,
+              },
+            },
+          },
+          parts: [],
+        },
+        error: undefined,
+      });
+
+      const { validateNonTaskInference } =
+        await import('../non-task-provider-usage.js');
+      const result = await validateNonTaskInference({
+        model: 'anthropic/claude-sonnet-5',
+        runtimeEnv: { ANTHROPIC_API_KEY: 'candidate-key' },
+      });
+
+      expect(result).toMatchObject({ success: false, reason, retryable });
+      expect(result.success || result.message).not.toContain(providerMessage);
+    },
+  );
 });
 
 describe('createOpenCodeSdkFetch', () => {

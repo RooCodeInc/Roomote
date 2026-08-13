@@ -637,7 +637,25 @@ function classifyNonTaskInferenceValidationError(
   Extract<NonTaskInferenceValidationResult, { success: false }>,
   'message' | 'reason' | 'retryable'
 > {
-  const detail = formatOpenCodeSdkError(error).toLowerCase();
+  // OpenCode surfaces provider rejections as `{name, data: {message,
+  // statusCode, responseBody}}`. The status code is authoritative when
+  // present — provider wording varies too much for substring matching to be
+  // the primary signal (Anthropic says "API key is invalid.", which no
+  // keyword list reliably catches).
+  const record =
+    error && typeof error === 'object'
+      ? (error as Record<string, unknown>)
+      : undefined;
+  const data =
+    record?.data && typeof record.data === 'object'
+      ? (record.data as Record<string, unknown>)
+      : undefined;
+  const statusCode =
+    typeof data?.statusCode === 'number' ? data.statusCode : undefined;
+  const responseBody =
+    typeof data?.responseBody === 'string' ? data.responseBody : '';
+  const detail =
+    `${formatOpenCodeSdkError(error)} ${responseBody}`.toLowerCase();
 
   // Failures inside Roomote's own validation helper (the managed OpenCode
   // server) must not read as provider failures — the candidate credentials
@@ -651,6 +669,39 @@ function classifyNonTaskInferenceValidationError(
       message:
         'Roomote could not run its validation helper. Try again, or check the server logs.',
       reason: 'provider_error',
+      retryable: true,
+    };
+  }
+
+  if (statusCode === 401 || statusCode === 403) {
+    return {
+      message: 'The inference provider rejected these credentials.',
+      reason: 'invalid_credentials',
+      retryable: false,
+    };
+  }
+
+  if (statusCode === 402) {
+    return {
+      message:
+        'The inference provider account does not have enough credits or quota.',
+      reason: 'insufficient_credits',
+      retryable: false,
+    };
+  }
+
+  if (statusCode === 404) {
+    return {
+      message: 'The selected model is unavailable with these credentials.',
+      reason: 'model_unavailable',
+      retryable: false,
+    };
+  }
+
+  if (statusCode === 429) {
+    return {
+      message: 'The inference provider is rate limiting requests. Try again.',
+      reason: 'rate_limited',
       retryable: true,
     };
   }
@@ -858,12 +909,22 @@ export async function validateNonTaskInference(params: {
       model,
     };
   } catch (error) {
+    const classified = classifyNonTaskInferenceValidationError(error);
+
+    // The sanitized result hides the provider detail from the UI on purpose;
+    // keep the raw detail in the server log so misclassifications and
+    // non-blocking failures stay diagnosable.
+    console.warn(
+      `[validateNonTaskInference] ${model} failed (${classified.reason}): ${formatOpenCodeSdkError(error)}` +
+        (process.env.DEBUG_VALIDATE ? ` RAW=${JSON.stringify(error)}` : ''),
+    );
+
     return {
       success: false,
       checkedAt,
       latencyMs: Date.now() - startedAt,
       model,
-      ...classifyNonTaskInferenceValidationError(error),
+      ...classified,
     };
   }
 }
