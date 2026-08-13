@@ -457,14 +457,29 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     );
 
     expect(geminiFlashByProvider).toEqual([
-      {
-        providerId: 'openrouter',
-        modelId: 'openrouter/google/gemini-3.6-flash',
-      },
       { providerId: 'vercel', modelId: 'vercel/google/gemini-3.6-flash' },
       { providerId: 'requesty', modelId: 'requesty/gemini-3.6-flash' },
       { providerId: 'opencode', modelId: 'opencode/gemini-3.6-flash' },
-      { providerId: 'google', modelId: 'google/gemini-3.6-flash' },
+    ]);
+  });
+
+  it('recommends Gemini 3.7 Flash only from providers that support it', () => {
+    const geminiFlashByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+      (provider) => {
+        const model = provider.suggestedTaskModels.find(
+          (suggestion) => suggestion.displayName === 'Gemini 3.7 Flash',
+        );
+
+        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+      },
+    );
+
+    expect(geminiFlashByProvider).toEqual([
+      {
+        providerId: 'openrouter',
+        modelId: 'openrouter/google/gemini-3.7-flash',
+      },
+      { providerId: 'google', modelId: 'google/gemini-3.7-flash' },
     ]);
   });
 
@@ -592,7 +607,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(googleProvider).toMatchObject({
       label: 'Google Gemini',
       envVarName: 'GEMINI_API_KEY',
-      defaultRoomoteModel: 'google/gemini-3.6-flash',
+      defaultRoomoteModel: 'google/gemini-3.7-flash',
     });
   });
 
@@ -1041,9 +1056,28 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       buildRecommendedDeploymentModelConfig(getSetupModelProvider('google')),
     ).toEqual({
       ...createEmptyDeploymentModelConfig(),
-      roomoteModel: 'google/gemini-3.6-flash',
+      roomoteModel: 'google/gemini-3.7-flash',
     });
   });
+
+  it.each([
+    ['balanced', DEFAULT_TASK_MODEL_ID],
+    ['quick-turnaround', 'openrouter/google/gemini-3.7-flash'],
+  ])(
+    'recommends Gemini 3.7 Flash in the %s OpenRouter preset',
+    (presetId, codingModel) => {
+      expect(
+        buildRecommendedDeploymentModelConfig(
+          getSetupModelProvider('openrouter'),
+          presetId,
+        ),
+      ).toMatchObject({
+        roomoteModel: codingModel,
+        roomoteSmallModel: 'openrouter/google/gemini-3.7-flash',
+        roomoteExploreModel: 'openrouter/google/gemini-3.7-flash',
+      });
+    },
+  );
 
   it('recommends Kimi K3 for Moonshot vision, code review, and planning', () => {
     expect(

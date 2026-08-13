@@ -286,7 +286,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
         roles: {
           coding: { modelId: DEFAULT_TASK_MODEL_ID, reasoningEffort: 'medium' },
           helper: {
-            modelId: 'openrouter/google/gemini-3.6-flash',
+            modelId: 'openrouter/google/gemini-3.7-flash',
             reasoningEffort: 'low',
           },
           codeReview: {
@@ -294,7 +294,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'medium',
           },
           explore: {
-            modelId: 'openrouter/google/gemini-3.6-flash',
+            modelId: 'openrouter/google/gemini-3.7-flash',
             reasoningEffort: 'low',
           },
           planning: {
@@ -308,11 +308,11 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
         label: 'Quick turnaround',
         roles: {
           coding: {
-            modelId: 'openrouter/google/gemini-3.6-flash',
+            modelId: 'openrouter/google/gemini-3.7-flash',
             reasoningEffort: 'low',
           },
           helper: {
-            modelId: 'openrouter/google/gemini-3.6-flash',
+            modelId: 'openrouter/google/gemini-3.7-flash',
             reasoningEffort: 'low',
           },
           codeReview: {
@@ -320,7 +320,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'medium',
           },
           explore: {
-            modelId: 'openrouter/google/gemini-3.6-flash',
+            modelId: 'openrouter/google/gemini-3.7-flash',
             reasoningEffort: 'low',
           },
           planning: {
@@ -694,10 +694,10 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: 'google',
     label: 'Google Gemini',
     envVarName: 'GEMINI_API_KEY',
-    defaultRoomoteModel: 'google/gemini-3.6-flash',
+    defaultRoomoteModel: 'google/gemini-3.7-flash',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
-      'gemini-3-6-flash': 'google/gemini-3.6-flash',
+      'gemini-3-7-flash': 'google/gemini-3.7-flash',
     }),
     // All non-coding roles follow the Flash coding default.
   },
