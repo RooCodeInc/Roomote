@@ -289,7 +289,7 @@ describe('environment-setup guidance', () => {
       'Treat that message as the primary completion signal',
     );
     expect(skillContent).toContain(
-      'While waiting for that settle notification, check the verification task every 10-15 seconds with the Roomote MCP tool `mcp__roomote__manage_tasks` using `action: "get_summary"` and the returned `taskId` as a fallback signal.',
+      'While waiting for that settle notification, treat the notification as the primary completion signal and check the verification task only as a fallback with the Roomote MCP tool `mcp__roomote__manage_tasks` using `action: "get_summary"` and the returned `taskId`. Space fallback checks roughly 60-90 seconds apart using one blocking `sleep` per wait',
     );
     expect(skillContent).toContain(
       'treat `failed` or `completed with warnings` as direct evidence that specific setup commands failed even when the verification task has not described the failure yet',
@@ -304,7 +304,7 @@ describe('environment-setup guidance', () => {
       'Narrate concise, plain-language progress updates while the follow-up check runs',
     );
     expect(skillContent).toContain(
-      'Preparing the environment can take several minutes, so do not stop monitoring just because startup is taking a long time; keep checks frequent enough that a completed setup or completed verification is noticed promptly.',
+      'Preparing the environment can take several minutes, so do not stop monitoring just because startup is taking a long time; the settle notification guarantees prompt awareness of completion',
     );
     expect(skillContent).toContain(
       'If the monitored summary reaches `Ready`, `Idle`, or `Needs input`, do not keep polling that same state indefinitely.',
@@ -404,5 +404,64 @@ describe('environment-setup guidance', () => {
       'Do not expose the spawned verification task link in the user-facing response.',
     );
     expect(skillContent).not.toContain('[Open verification task](https://...)');
+  });
+
+  it('requires installing missing toolchains in the validation sandbox instead of skipping validation', () => {
+    const skillContent = readSkillContent();
+    expect(skillContent).toContain(
+      'installing it in the current sandbox is part of validation, not a blocker',
+    );
+    expect(skillContent).toContain(
+      'A missing toolchain is never a valid reason to skip running a command or to persist commands that were not executed in this sandbox.',
+    );
+    expect(skillContent).toContain(
+      'Never persist a config whose commands were skipped because a toolchain was missing from the sandbox.',
+    );
+    expect(skillContent).toContain(
+      'A missing toolchain in the validation sandbox does not qualify as such a blocker; it must be installed and the commands run.',
+    );
+  });
+
+  it('treats setup runtime as a per-task cost and keeps dependency scope lean', () => {
+    const skillContent = readSkillContent();
+    expect(skillContent).toContain(
+      'Record the approximate wall-clock duration of every setup command you run.',
+    );
+    expect(skillContent).toContain(
+      'Prefer the smallest dependency scope that supports coding plus the canonical test suite',
+    );
+    expect(skillContent).toContain(
+      "Do not install an ecosystem's full optional dependency graph",
+    );
+    expect(skillContent).toContain(
+      'report the expected setup duration in the final handoff when it exceeds a few minutes',
+    );
+  });
+
+  it('requires efficient waiting instead of tight polling loops', () => {
+    const skillContent = readSkillContent();
+    expect(skillContent).toContain(
+      'Space fallback checks roughly 60-90 seconds apart using one blocking `sleep` per wait',
+    );
+    expect(skillContent).toContain(
+      'a single bounded blocking shell command (for example one `timeout`-wrapped poll loop in one tool call) rather than many separate short `sleep` calls across turns',
+    );
+    expect(skillContent).not.toContain('every 10-15 seconds');
+  });
+
+  it('forbids finishing with a persisted but unverified environment revision', () => {
+    const skillContent = readSkillContent();
+    expect(skillContent).toContain(
+      'Never finish with a persisted runtime-affecting revision that no verification task has exercised.',
+    );
+    expect(skillContent).toContain(
+      'the retry budget bounds repair attempts, not the confirmation of changes you already applied',
+    );
+    expect(skillContent).toContain(
+      'If you cannot verify a proposed fix at all, do not persist it',
+    );
+    expect(skillContent).toContain(
+      'no run ends with an applied-but-unverified fix',
+    );
   });
 });
