@@ -1702,6 +1702,8 @@ export async function saveSetupNewModelConfigCommand(
             ],
             allowedModelIds: [...current.allowedModelIds, model.id],
             defaultModelId: model.id,
+            // Keep the catalog sync's baseline/deletion memory intact.
+            catalogSyncedModelIds: current.catalogSyncedModelIds,
           });
         })()
       : null;

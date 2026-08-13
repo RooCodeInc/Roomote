@@ -2,4 +2,4 @@
 '@roomote/web': minor
 ---
 
-Let Grok subscription and xAI API users switch among current Grok chat models, including newly released ones, without waiting for a Roomote catalog update.
+Automatically pick up Grok chat models that xAI releases after connecting the Grok subscription or an xAI API key, without waiting for a Roomote catalog update. Models you disable or remove stay that way.

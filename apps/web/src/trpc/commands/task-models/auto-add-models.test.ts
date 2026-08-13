@@ -47,7 +47,7 @@ describe('buildAutoAddedTaskModelSettings', () => {
     );
   });
 
-  it('seeds Grok 4.6 as the default and Grok 4.5 as a switchable option', () => {
+  it('seeds only Grok 4.6 for a fresh Grok subscription connect', () => {
     const result = buildAutoAddedTaskModelSettings({
       provider: XAI_SUBSCRIPTION,
       persistedTaskModelSettings: null,
@@ -55,12 +55,10 @@ describe('buildAutoAddedTaskModelSettings', () => {
     });
 
     expect(result).not.toBeNull();
-    expect(result!.taskModelSettings.models?.map((model) => model.id)).toEqual(
-      expect.arrayContaining(['xai/grok-4.6', 'xai/grok-4.5']),
-    );
-    expect(result!.taskModelSettings.allowedModelIds).toEqual(
-      expect.arrayContaining(['xai/grok-4.6', 'xai/grok-4.5']),
-    );
+    expect(result!.taskModelSettings.models?.map((model) => model.id)).toEqual([
+      'xai/grok-4.6',
+    ]);
+    expect(result!.taskModelSettings.allowedModelIds).toEqual(['xai/grok-4.6']);
     expect(result!.taskModelSettings.defaultModelId).toBe('xai/grok-4.6');
   });
 
@@ -106,6 +104,75 @@ describe('buildAutoAddedTaskModelSettings', () => {
         connectedProviderIds: new Set(['anthropic']),
       }),
     ).toBeNull();
+  });
+
+  it('does not resurrect removed Bedrock models when the key is re-saved', () => {
+    // amazon-bedrock serves `bedrock-mantle/` model ids: the guard must
+    // match on the model-id prefix derived from the provider's own models.
+    expect(
+      buildAutoAddedTaskModelSettings({
+        provider: getSetupModelProvider('amazon-bedrock'),
+        persistedTaskModelSettings: {
+          models: [
+            {
+              id: 'bedrock-mantle/anthropic.claude-sonnet-5',
+              displayName: 'Claude Sonnet 5',
+              family: 'Sonnet',
+            },
+          ],
+          allowedModelIds: ['bedrock-mantle/anthropic.claude-sonnet-5'],
+          defaultModelId: 'bedrock-mantle/anthropic.claude-sonnet-5',
+        },
+        connectedProviderIds: new Set(['amazon-bedrock', 'bedrock-mantle']),
+      }),
+    ).toBeNull();
+  });
+
+  it('does not resurrect a removed Grok model when the subscription re-authenticates', () => {
+    // xai-subscription serves `xai/` model ids: the "provider already has
+    // models" guard must match on the model-id prefix, not the catalog id.
+    expect(
+      buildAutoAddedTaskModelSettings({
+        provider: XAI_SUBSCRIPTION,
+        persistedTaskModelSettings: {
+          models: [
+            {
+              id: 'xai/grok-4.6',
+              displayName: 'Grok 4.6',
+              family: 'Grok',
+            },
+          ],
+          allowedModelIds: ['xai/grok-4.6'],
+          defaultModelId: 'xai/grok-4.6',
+        },
+        connectedProviderIds: new Set(['xai-subscription', 'xai']),
+      }),
+    ).toBeNull();
+  });
+
+  it('carries the catalog sync deletion memory through an auto-add', () => {
+    const result = buildAutoAddedTaskModelSettings({
+      provider: ANTHROPIC,
+      persistedTaskModelSettings: {
+        models: [
+          {
+            id: 'xai/grok-4.6',
+            displayName: 'Grok 4.6',
+            family: 'Grok',
+          },
+        ],
+        allowedModelIds: ['xai/grok-4.6'],
+        defaultModelId: 'xai/grok-4.6',
+        catalogSyncedModelIds: ['xai/grok-4.6', 'xai/grok-4.5'],
+      },
+      connectedProviderIds: new Set(['anthropic', 'xai']),
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.taskModelSettings.catalogSyncedModelIds).toEqual([
+      'xai/grok-4.6',
+      'xai/grok-4.5',
+    ]);
   });
 
   it('returns null when connecting OpenRouter on a fresh deployment (defaults already cover it)', () => {
@@ -300,7 +367,7 @@ describe('appendRecommendedTaskModels', () => {
     expect(result.every((model) => model.id.startsWith('openai/'))).toBe(true);
   });
 
-  it('appends both Grok 4.6 and Grok 4.5 for a connected Grok subscription', () => {
+  it('appends the recommended Grok models for a connected Grok subscription', () => {
     const result = appendRecommendedTaskModels({
       models: [],
       connectedProviderIds: new Set(['xai-subscription']),

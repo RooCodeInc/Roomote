@@ -856,7 +856,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(getSetupProviderTaskModelPrefix('anthropic')).toBe('anthropic');
   });
 
-  it('lets xAI API and Grok subscription switch between Grok 4.6 and Grok 4.5', () => {
+  it('recommends only Grok 4.6 for xAI API and Grok subscription', () => {
     for (const providerId of ['xai', 'xai-subscription'] as const) {
       const provider = SETUP_MODEL_PROVIDER_CATALOG.find(
         (entry) => entry.id === providerId,
@@ -865,11 +865,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       expect(provider?.defaultRoomoteModel).toBe('xai/grok-4.6');
       expect(provider?.suggestedTaskModels.map((model) => model.id)).toEqual([
         'xai/grok-4.6',
-        'xai/grok-4.5',
       ]);
       expect(
         provider?.suggestedTaskModels.map((model) => model.displayName),
-      ).toEqual(['Grok 4.6', 'Grok 4.5']);
+      ).toEqual(['Grok 4.6']);
     }
   });
 

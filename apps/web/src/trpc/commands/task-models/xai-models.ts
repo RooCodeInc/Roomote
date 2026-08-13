@@ -8,6 +8,7 @@ import {
   buildTaskModelOption,
   normalizeTaskModelId,
   normalizeTaskModelSettings,
+  type TaskModelOption,
 } from '@roomote/types';
 
 import { getPersistedEnvironmentVariableNames } from '../environment-variables';
@@ -18,15 +19,12 @@ import {
 } from './models-dev';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
-const MODEL_METADATA_FETCH_TIMEOUT_MS = 10_000;
+// Shorter than the Settings metadata-refresh timeout: this fetch sits on the
+// launch-options page load, so a slow models.dev must not stall it for long.
+const XAI_SYNC_CATALOG_FETCH_TIMEOUT_MS = 3_000;
 
-/**
- * Adds newly published Grok chat models to the deployment catalog and
- * enables them. Existing rows are left as-is so an operator who disabled a
- * model does not see it turned back on. No-ops when xAI is not connected or
- * the live catalog cannot be fetched.
- */
-export async function syncConnectedXaiTaskModels(): Promise<number> {
+/** True when the xAI API key or the Grok subscription is connected. */
+export async function isXaiTaskProviderConnected(): Promise<boolean> {
   const [xaiSubscriptionConnected, persistedEnvVarNames] = await Promise.all([
     isXaiSubscriptionConnected(),
     getPersistedEnvironmentVariableNames(),
@@ -38,87 +36,184 @@ export async function syncConnectedXaiTaskModels(): Promise<number> {
     xaiSubscriptionConnected,
   });
 
-  if (
-    !connectedProviderIds.has('xai') &&
-    !connectedProviderIds.has('xai-subscription')
-  ) {
-    return 0;
-  }
-
-  const catalog = await fetchModelsDevCatalog(
-    AbortSignal.timeout(MODEL_METADATA_FETCH_TIMEOUT_MS),
+  return (
+    connectedProviderIds.has('xai') ||
+    connectedProviderIds.has('xai-subscription')
   );
+}
 
-  if (!catalog) {
-    return 0;
-  }
+/**
+ * Diffs the live Grok chat catalog against a persisted model list. The very
+ * first sync only records the current catalog as a baseline
+ * (`catalogSyncedModelIds`): connecting xAI must seed the recommended models,
+ * not flood the list with the whole Grok back-catalog. Later syncs add only
+ * models published after that baseline. Every catalog id stays recorded, so
+ * a model the operator deletes is never re-added.
+ */
+export function collectXaiCatalogModelUpdates(options: {
+  xaiModels: ReadonlyArray<{
+    id: string;
+    displayName: string;
+    family: string;
+  }>;
+  models: readonly TaskModelOption[];
+  syncedModelIds: readonly string[] | undefined;
+}): {
+  addedModels: TaskModelOption[];
+  syncedModelIds: string[];
+  changed: boolean;
+} {
+  const existingModelIds = new Set(options.models.map((model) => model.id));
+  const previouslySyncedIds =
+    options.syncedModelIds === undefined
+      ? null
+      : new Set(options.syncedModelIds.map(normalizeTaskModelId));
+  const syncedIds = new Set(previouslySyncedIds ?? []);
+  const addedModels: TaskModelOption[] = [];
 
-  const xaiModels = listXaiChatModelsFromCatalog(catalog);
+  for (const model of options.xaiModels) {
+    const modelId = normalizeTaskModelId(model.id);
+    syncedIds.add(modelId);
 
-  if (xaiModels.length === 0) {
-    return 0;
-  }
-
-  return db.transaction(async (tx) => {
-    // Lock the row for this read-modify-write. launchOptions calls this on
-    // page load; without the lock a concurrent Settings save can commit
-    // between select and upsert and then get overwritten by this snapshot.
-    const [persisted] = await tx
-      .select({ taskModelSettings: deploymentSettings.taskModelSettings })
-      .from(deploymentSettings)
-      .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID))
-      .limit(1)
-      .for('update');
-    const current = normalizeTaskModelSettings(
-      persisted?.taskModelSettings ?? null,
-    );
-    const modelsById = new Map(
-      (current.models ?? []).map((model) => [model.id, model]),
-    );
-    const addedIds: string[] = [];
-
-    for (const model of xaiModels) {
-      const modelId = normalizeTaskModelId(model.id);
-
-      if (modelsById.has(modelId)) {
-        continue;
-      }
-
-      modelsById.set(
-        modelId,
-        buildTaskModelOption({
-          id: modelId,
-          displayName: model.displayName,
-          family: model.family,
-        }),
-      );
-      addedIds.push(modelId);
+    if (
+      previouslySyncedIds === null ||
+      existingModelIds.has(modelId) ||
+      previouslySyncedIds.has(modelId)
+    ) {
+      continue;
     }
 
-    if (addedIds.length === 0) {
+    existingModelIds.add(modelId);
+    addedModels.push(
+      buildTaskModelOption({
+        id: modelId,
+        displayName: model.displayName,
+        family: model.family,
+      }),
+    );
+  }
+
+  return {
+    addedModels,
+    syncedModelIds: [...syncedIds],
+    changed:
+      addedModels.length > 0 ||
+      syncedIds.size !== (previouslySyncedIds?.size ?? 0),
+  };
+}
+
+/**
+ * Adds Grok chat models published after the deployment's sync baseline to
+ * the catalog and enables them, so a new Grok release reaches the task
+ * switcher without an admin visit. The first sync only records the baseline
+ * (the back-catalog is not pulled in); models the operator disabled stay
+ * disabled, and models the operator deleted stay deleted
+ * (`catalogSyncedModelIds` remembers every id the catalog has offered).
+ * No-ops when xAI is not connected, the live catalog cannot be fetched, or
+ * the deployment has never persisted model settings — the raw null value is
+ * the "still on implicit defaults" sentinel and seeding is the
+ * provider-connect flow's job. Never throws: callers include the
+ * launch-options page load and the OAuth connect flow, which must not fail
+ * because this opportunistic sync did.
+ */
+export async function syncConnectedXaiTaskModels(): Promise<number> {
+  try {
+    if (!(await isXaiTaskProviderConnected())) {
       return 0;
     }
 
-    const taskModelSettings = normalizeTaskModelSettings({
-      ...current,
-      models: [...modelsById.values()],
-      allowedModelIds: [...new Set([...current.allowedModelIds, ...addedIds])],
-    });
+    const catalog = await fetchModelsDevCatalog(
+      AbortSignal.timeout(XAI_SYNC_CATALOG_FETCH_TIMEOUT_MS),
+    );
 
-    await tx
-      .insert(deploymentSettings)
-      .values({
-        id: DEFAULT_DEPLOYMENT_ID,
-        taskModelSettings,
-      })
-      .onConflictDoUpdate({
-        target: deploymentSettings.id,
-        set: {
-          taskModelSettings,
-          updatedAt: new Date(),
-        },
+    if (!catalog) {
+      return 0;
+    }
+
+    const xaiModels = listXaiChatModelsFromCatalog(catalog);
+
+    if (xaiModels.length === 0) {
+      return 0;
+    }
+
+    // Unlocked pre-check so the steady state (nothing new in the catalog)
+    // never takes the row lock that Settings saves contend on.
+    const [preview] = await db
+      .select({ taskModelSettings: deploymentSettings.taskModelSettings })
+      .from(deploymentSettings)
+      .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID))
+      .limit(1);
+
+    if (preview?.taskModelSettings == null) {
+      return 0;
+    }
+
+    const previewSettings = normalizeTaskModelSettings(
+      preview.taskModelSettings,
+    );
+
+    if (
+      !collectXaiCatalogModelUpdates({
+        xaiModels,
+        models: previewSettings.models ?? [],
+        syncedModelIds: previewSettings.catalogSyncedModelIds,
+      }).changed
+    ) {
+      return 0;
+    }
+
+    return await db.transaction(async (tx) => {
+      // Re-read under a row lock for the read-modify-write: without it a
+      // concurrent Settings save can commit between select and update and
+      // then get overwritten by this snapshot.
+      const [persisted] = await tx
+        .select({ taskModelSettings: deploymentSettings.taskModelSettings })
+        .from(deploymentSettings)
+        .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID))
+        .limit(1)
+        .for('update');
+
+      if (persisted?.taskModelSettings == null) {
+        return 0;
+      }
+
+      const current = normalizeTaskModelSettings(persisted.taskModelSettings);
+      const updates = collectXaiCatalogModelUpdates({
+        xaiModels,
+        models: current.models ?? [],
+        syncedModelIds: current.catalogSyncedModelIds,
       });
 
-    return addedIds.length;
-  });
+      if (!updates.changed) {
+        return 0;
+      }
+
+      const taskModelSettings = normalizeTaskModelSettings({
+        ...current,
+        models: [...(current.models ?? []), ...updates.addedModels],
+        allowedModelIds: [
+          ...new Set([
+            ...current.allowedModelIds,
+            ...updates.addedModels.map((model) => model.id),
+          ]),
+        ],
+        catalogSyncedModelIds: updates.syncedModelIds,
+      });
+
+      await tx
+        .update(deploymentSettings)
+        .set({
+          taskModelSettings,
+          updatedAt: new Date(),
+        })
+        .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID));
+
+      return updates.addedModels.length;
+    });
+  } catch (error) {
+    console.error('Failed to sync Grok chat models from the live catalog:', {
+      error,
+    });
+    return 0;
+  }
 }

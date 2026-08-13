@@ -83,7 +83,11 @@ import {
   type LocalTaskModelProviderId,
   type TaskModelLookupResult,
 } from './local-provider-discovery';
-import { syncConnectedXaiTaskModels } from './xai-models';
+import {
+  collectXaiCatalogModelUpdates,
+  isXaiTaskProviderConnected,
+  syncConnectedXaiTaskModels,
+} from './xai-models';
 import type { UserAuthSuccess } from '@/types';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
@@ -974,6 +978,9 @@ function removeTaskModelsForProvider({
     defaultModelId: removedModelIds.has(settings.defaultModelId)
       ? (allowedModelIds[0] ?? models[0]?.id ?? '')
       : settings.defaultModelId,
+    // Removing one provider's models must not wipe the catalog sync's
+    // baseline/deletion memory for the others.
+    catalogSyncedModelIds: settings.catalogSyncedModelIds,
   });
 
   const nextRuntimeModelConfig: DeploymentModelConfig = {
@@ -1360,12 +1367,6 @@ export async function updateTaskModelSettingsCommand(
     };
   }
 
-  const taskModelSettings = normalizeTaskModelSettings({
-    models,
-    allowedModelIds,
-    defaultModelId: normalizedDefaultModelId,
-  });
-
   const persistedRuntimeModelConfig = await getDeploymentRuntimeModelConfig();
   const nextRuntimeModelConfig: DeploymentModelConfig = {
     roomoteModel: codingManagedByEnv
@@ -1410,22 +1411,43 @@ export async function updateTaskModelSettingsCommand(
       : normalizeOptionalReasoningEffort(input.planningModelReasoningEffort),
   };
 
-  await db
-    .insert(deploymentSettings)
-    .values({
-      id: DEFAULT_DEPLOYMENT_ID,
-      taskModelSettings,
-      runtimeModelConfig: nextRuntimeModelConfig,
-      updatedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: deploymentSettings.id,
-      set: {
+  await db.transaction(async (tx) => {
+    // Lock the row for the read-modify-write: the admin save payload carries
+    // only models/allowed/default, and the catalog sync's deletion memory
+    // must be carried forward from the locked row so a concurrent sync
+    // commit is not clobbered by a stale snapshot.
+    const [persisted] = await tx
+      .select({ taskModelSettings: deploymentSettings.taskModelSettings })
+      .from(deploymentSettings)
+      .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID))
+      .limit(1)
+      .for('update');
+    const taskModelSettings = normalizeTaskModelSettings({
+      models,
+      allowedModelIds,
+      defaultModelId: normalizedDefaultModelId,
+      catalogSyncedModelIds: normalizeTaskModelSettings(
+        persisted?.taskModelSettings ?? null,
+      ).catalogSyncedModelIds,
+    });
+
+    await tx
+      .insert(deploymentSettings)
+      .values({
+        id: DEFAULT_DEPLOYMENT_ID,
         taskModelSettings,
         runtimeModelConfig: nextRuntimeModelConfig,
         updatedAt: new Date(),
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: deploymentSettings.id,
+        set: {
+          taskModelSettings,
+          runtimeModelConfig: nextRuntimeModelConfig,
+          updatedAt: new Date(),
+        },
+      });
+  });
 
   return {
     success: true,
@@ -1815,38 +1837,18 @@ export async function refreshTaskModelMetadataCommand(
     };
   }
 
-  const xaiSubscriptionConnected = await isXaiSubscriptionConnected();
-  const persistedEnvVarNames = await getPersistedEnvironmentVariableNames();
-  const connectedProviderIds = collectConnectedTaskModelProviderIds({
-    runtimeEnv: process.env,
-    persistedEnvVarNames,
-    chatgptConnected: false,
-    xaiSubscriptionConnected,
-  });
+  let catalogSyncedModelIds = persistedSettings.catalogSyncedModelIds;
 
-  if (
-    connectedProviderIds.has('xai') ||
-    connectedProviderIds.has('xai-subscription')
-  ) {
-    const currentModelIds = new Set(currentModels.map((model) => model.id));
+  if (await isXaiTaskProviderConnected()) {
+    const updates = collectXaiCatalogModelUpdates({
+      xaiModels: listXaiChatModelsFromCatalog(catalog),
+      models: currentModels,
+      syncedModelIds: catalogSyncedModelIds,
+    });
 
-    for (const model of listXaiChatModelsFromCatalog(catalog)) {
-      const modelId = normalizeTaskModelId(model.id);
-
-      if (currentModelIds.has(modelId)) {
-        continue;
-      }
-
-      currentModels.push(
-        buildTaskModelOption({
-          id: modelId,
-          displayName: model.displayName,
-          family: model.family,
-        }),
-      );
-      currentModelIds.add(modelId);
-      allowedModelIds.push(modelId);
-    }
+    currentModels.push(...updates.addedModels);
+    allowedModelIds.push(...updates.addedModels.map((model) => model.id));
+    catalogSyncedModelIds = updates.syncedModelIds;
   }
 
   const refreshedAt = new Date().toISOString();
@@ -1872,6 +1874,7 @@ export async function refreshTaskModelMetadataCommand(
     models: refreshedModels,
     allowedModelIds,
     defaultModelId,
+    catalogSyncedModelIds,
   });
 
   await db

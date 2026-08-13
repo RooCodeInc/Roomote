@@ -7,10 +7,15 @@ import {
 const MODELS_DEV_CATALOG_URL = 'https://models.dev/catalog.json';
 const BEDROCK_MANTLE_PROVIDER_PREFIX = 'bedrock-mantle/';
 const MODELS_DEV_CATALOG_CACHE_TTL_MS = 5 * 60 * 1_000;
+// Failures are cached briefly so a models.dev outage does not make every
+// request that wants the catalog (e.g. the launch-options page load) block on
+// its own doomed fetch until the timeout.
+const MODELS_DEV_CATALOG_FAILURE_TTL_MS = 60 * 1_000;
 
 let cachedModelsDevCatalog:
   | { catalog: ModelsDevCatalog; expiresAt: number }
   | undefined;
+let modelsDevCatalogFailureExpiresAt = 0;
 
 type ModelsDevModalities = {
   input?: string[];
@@ -161,9 +166,19 @@ export async function fetchModelsDevCatalog(
     return cachedCatalog.catalog;
   }
 
+  if (!options?.forceRefresh && modelsDevCatalogFailureExpiresAt > Date.now()) {
+    return null;
+  }
+
+  const recordFailure = () => {
+    modelsDevCatalogFailureExpiresAt =
+      Date.now() + MODELS_DEV_CATALOG_FAILURE_TTL_MS;
+  };
+
   try {
     const response = await fetch(MODELS_DEV_CATALOG_URL, { signal });
     if (!response.ok) {
+      recordFailure();
       return null;
     }
     const payload = (await response.json()) as ModelsDevCatalogJson;
@@ -189,8 +204,20 @@ export async function fetchModelsDevCatalog(
       catalog,
       expiresAt: Date.now() + MODELS_DEV_CATALOG_CACHE_TTL_MS,
     };
+    modelsDevCatalogFailureExpiresAt = 0;
     return catalog;
-  } catch {
+  } catch (error) {
+    // A caller-side abort or timeout is not a service failure: the catalog
+    // sync fetches with a short budget, and its aborts must not blank the
+    // cache for interactive callers that allow a longer wait.
+    if (
+      !(
+        error instanceof Error &&
+        (error.name === 'AbortError' || error.name === 'TimeoutError')
+      )
+    ) {
+      recordFailure();
+    }
     return null;
   }
 }
@@ -335,12 +362,10 @@ function isXaiChatModelEntry(entry: ModelsDevModelEntry): boolean {
     return false;
   }
 
-  const outputs = entry.modalities?.output;
-  if (!outputs || outputs.length === 0) {
-    return true;
-  }
-
-  return outputs.includes('text');
+  // Entries with no declared output modalities are skipped rather than
+  // assumed chat-capable: a freshly published image/video/embedding model
+  // whose catalog data is still sparse must not be auto-enabled.
+  return entry.modalities?.output?.includes('text') ?? false;
 }
 
 export function suggestModelsFromCatalog(options: {

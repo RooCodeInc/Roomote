@@ -22,10 +22,13 @@ XAI_API_KEY=...
 ```
 
 Roomote exposes Grok models with the `xai/` prefix. Connecting xAI seeds
-**Grok 4.6** as the default coding model and lists every current Grok chat
-model from the live provider catalog, so newer Grok releases are switchable
-without a Roomote update. If both xAI API and a Grok subscription are
-connected, Roomote prefers the subscription for `xai/` models.
+**Grok 4.6** as the default coding model, and Grok chat models released after
+the connection appear automatically, without a Roomote update. Models you
+disable or remove stay that way. Deployments configured only through the
+`XAI_API_KEY` environment variable start picking up new models once model
+settings are first saved in **Settings > Models**. If both xAI API and a Grok
+subscription are connected, Roomote prefers the subscription for `xai/`
+models.
 
 ## Cost behavior
 

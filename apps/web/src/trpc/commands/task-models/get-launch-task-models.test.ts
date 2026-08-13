@@ -46,9 +46,13 @@ vi.mock('../environment-variables', () => ({
   upsertDeploymentEnvironmentVariables: vi.fn(),
 }));
 
-vi.mock('./xai-models', () => ({
-  syncConnectedXaiTaskModels: mockSyncConnectedXaiTaskModels,
-}));
+vi.mock('./xai-models', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./xai-models')>();
+  return {
+    ...actual,
+    syncConnectedXaiTaskModels: mockSyncConnectedXaiTaskModels,
+  };
+});
 
 import { getLaunchTaskModelsCommand } from './index';
 

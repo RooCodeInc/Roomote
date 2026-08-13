@@ -401,6 +401,51 @@ describe('fetchModelsDevCatalog', () => {
     const result = await fetchModelsDevCatalog(controller.signal);
     expect(result).toBeNull();
   });
+
+  it('negatively caches service failures but not caller aborts', async () => {
+    const okResponse = () =>
+      new Response(JSON.stringify({ providers: {} }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.useFakeTimers();
+
+    try {
+      // A caller-side timeout abort (the sync's short fetch budget) must not
+      // arm the failure TTL...
+      fetchMock.mockRejectedValueOnce(
+        new DOMException('aborted', 'TimeoutError'),
+      );
+      await expect(
+        fetchModelsDevCatalog(undefined, { forceRefresh: true }),
+      ).resolves.toBeNull();
+
+      // ...so the very next plain call still fetches and succeeds.
+      fetchMock.mockResolvedValueOnce(okResponse());
+      await expect(fetchModelsDevCatalog()).resolves.not.toBeNull();
+
+      // Expire the success cache; a real network failure arms the TTL.
+      vi.setSystemTime(Date.now() + 6 * 60 * 1_000);
+      fetchMock.mockRejectedValueOnce(new TypeError('fetch failed'));
+      await expect(fetchModelsDevCatalog()).resolves.toBeNull();
+
+      // While armed, plain calls short-circuit without fetching.
+      fetchMock.mockClear();
+      await expect(fetchModelsDevCatalog()).resolves.toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      // forceRefresh bypasses the TTL, and a success clears it.
+      fetchMock.mockResolvedValue(okResponse());
+      await expect(
+        fetchModelsDevCatalog(undefined, { forceRefresh: true }),
+      ).resolves.not.toBeNull();
+      await expect(fetchModelsDevCatalog()).resolves.not.toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('suggestModelsFromCatalog', () => {
@@ -456,6 +501,13 @@ describe('listXaiChatModelsFromCatalog', () => {
               name: 'Grok Old',
               status: 'deprecated',
               modalities: { output: ['text'] },
+            },
+            'grok-unlabeled': {
+              name: 'Grok Unlabeled',
+            },
+            'grok-empty-modalities': {
+              name: 'Grok Empty Modalities',
+              modalities: {},
             },
           },
         },
