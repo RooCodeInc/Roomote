@@ -701,13 +701,17 @@ export async function saveTaskModelProviderCommand(
     // UIs resubmit unchanged fields (connection names, keys echoed back
     // from saved state), so gate the probe on what the save would actually
     // alter, not on non-empty form fields.
-    const { values, changedValues, clearedPersistedEnvVarNames } =
-      await collectCandidateProviderCredentials({
-        provider,
-        apiKey: input.apiKey,
-        additionalEnvValues: suppliedAdditionalEnvValues,
-        action: 'save it',
-      });
+    const {
+      values,
+      clearedEnvVarNames,
+      changedValues,
+      clearedPersistedEnvVarNames,
+    } = await collectCandidateProviderCredentials({
+      provider,
+      apiKey: input.apiKey,
+      additionalEnvValues: suppliedAdditionalEnvValues,
+      action: 'save it',
+    });
 
     if (changedValues.length > 0 || clearedPersistedEnvVarNames.length > 0) {
       const candidateValueByName = new Map(
@@ -721,8 +725,12 @@ export async function saveTaskModelProviderCommand(
         baseUrl: provider.envVarName
           ? candidateValueByName.get(provider.envVarName)
           : undefined,
+        // A cleared key probes as `null` so the resolver cannot fall back
+        // to the persisted value the transaction is about to delete.
         apiKey: secretField
-          ? candidateValueByName.get(secretField.envVarName)
+          ? clearedEnvVarNames.includes(secretField.envVarName)
+            ? null
+            : candidateValueByName.get(secretField.envVarName)
           : undefined,
       });
 
