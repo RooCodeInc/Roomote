@@ -1067,6 +1067,10 @@ export async function deleteTaskModelProviderCommand(
 }
 
 export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
+  // Persist newly listed Grok chat models so the switcher does not wait for
+  // an admin Settings refresh.
+  await syncConnectedXaiTaskModels();
+
   const [
     settings,
     chatgptConnected,
