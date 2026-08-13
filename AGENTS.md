@@ -51,6 +51,12 @@ This repository is open source. Treat GitHub and other public surfaces as fully 
 - Keep equivalent functionality in sync across supported source-control, communication, and sandbox providers whenever applicable. Do not intentionally make provider-specific exceptions unless the user explicitly requests one.
 - **Schema N-1 rollback guarantee:** Roomote must always be able to roll application code back one release against the current database. Do not drop tables or columns that the previous release still reads or writes in the same release that removes the feature. Stop using the columns in app code first, keep them in `packages/db` with an explicit N-1 comment, and drop them only after the next release is the supported rollback target. See `packages/db/AGENTS.md` for the package-local rules.
 
+## Pull requests
+
+- Always open new pull requests as drafts (`gh pr create --draft`). Do not mark a PR ready for review unless the user explicitly asks.
+- Leave merging to the user. Do not enable auto-merge.
+- Do not convert an already-ready PR back to draft unless the user asks.
+
 ## Slack message formatting
 
 - Present LLM / agent narrative output in Slack as `markdown` blocks (`{ type: 'markdown', text }`) with standard markdown (`[label](url)`, `**bold**`, lists, tables, code fences) whenever possible. Do not convert that body text into legacy mrkdwn (`*bold*`, `<url|label>`) before posting a `markdown` block.
