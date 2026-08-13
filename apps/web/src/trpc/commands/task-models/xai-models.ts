@@ -60,11 +60,15 @@ export async function syncConnectedXaiTaskModels(): Promise<number> {
   }
 
   return db.transaction(async (tx) => {
+    // Lock the row for this read-modify-write. launchOptions calls this on
+    // page load; without the lock a concurrent Settings save can commit
+    // between select and upsert and then get overwritten by this snapshot.
     const [persisted] = await tx
       .select({ taskModelSettings: deploymentSettings.taskModelSettings })
       .from(deploymentSettings)
       .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID))
-      .limit(1);
+      .limit(1)
+      .for('update');
     const current = normalizeTaskModelSettings(
       persisted?.taskModelSettings ?? null,
     );

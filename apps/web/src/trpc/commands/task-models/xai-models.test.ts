@@ -88,21 +88,23 @@ describe('syncConnectedXaiTaskModels', () => {
           select: vi.fn(() => ({
             from: vi.fn(() => ({
               where: vi.fn(() => ({
-                limit: vi.fn(async () => [
-                  {
-                    taskModelSettings: {
-                      models: [
-                        {
-                          id: 'xai/grok-4.6',
-                          displayName: 'Grok 4.6',
-                          family: 'Grok',
-                        },
-                      ],
-                      allowedModelIds: ['xai/grok-4.6'],
-                      defaultModelId: 'xai/grok-4.6',
+                limit: vi.fn(() => ({
+                  for: vi.fn(async () => [
+                    {
+                      taskModelSettings: {
+                        models: [
+                          {
+                            id: 'xai/grok-4.6',
+                            displayName: 'Grok 4.6',
+                            family: 'Grok',
+                          },
+                        ],
+                        allowedModelIds: ['xai/grok-4.6'],
+                        defaultModelId: 'xai/grok-4.6',
+                      },
                     },
-                  },
-                ]),
+                  ]),
+                })),
               })),
             })),
           })),
@@ -164,26 +166,28 @@ describe('syncConnectedXaiTaskModels', () => {
           select: vi.fn(() => ({
             from: vi.fn(() => ({
               where: vi.fn(() => ({
-                limit: vi.fn(async () => [
-                  {
-                    taskModelSettings: {
-                      models: [
-                        {
-                          id: 'xai/grok-4.6',
-                          displayName: 'Grok 4.6',
-                          family: 'Grok',
-                        },
-                        {
-                          id: 'xai/grok-4.5',
-                          displayName: 'Grok 4.5',
-                          family: 'Grok',
-                        },
-                      ],
-                      allowedModelIds: ['xai/grok-4.6'],
-                      defaultModelId: 'xai/grok-4.6',
+                limit: vi.fn(() => ({
+                  for: vi.fn(async () => [
+                    {
+                      taskModelSettings: {
+                        models: [
+                          {
+                            id: 'xai/grok-4.6',
+                            displayName: 'Grok 4.6',
+                            family: 'Grok',
+                          },
+                          {
+                            id: 'xai/grok-4.5',
+                            displayName: 'Grok 4.5',
+                            family: 'Grok',
+                          },
+                        ],
+                        allowedModelIds: ['xai/grok-4.6'],
+                        defaultModelId: 'xai/grok-4.6',
+                      },
                     },
-                  },
-                ]),
+                  ]),
+                })),
               })),
             })),
           })),
@@ -193,5 +197,85 @@ describe('syncConnectedXaiTaskModels', () => {
 
     await expect(syncConnectedXaiTaskModels()).resolves.toBe(0);
     expect(txInsertValues).not.toHaveBeenCalled();
+  });
+
+  it('merges new Grok models onto the locked settings row, not a stale unlocked snapshot', async () => {
+    mockIsXaiSubscriptionConnected.mockResolvedValue(true);
+    mockFetchModelsDevCatalog.mockResolvedValue({
+      models: {},
+      providers: {
+        xai: {
+          models: {
+            'grok-4.6': {
+              name: 'Grok 4.6',
+              modalities: { output: ['text'] },
+            },
+            'grok-4.7': {
+              name: 'Grok 4.7',
+              modalities: { output: ['text'] },
+            },
+          },
+        },
+      },
+      gatewayModelsByLowerSlug: {},
+    });
+
+    const lockedAfterSettingsSave = {
+      models: [
+        {
+          id: 'xai/grok-4.6',
+          displayName: 'Grok 4.6',
+          family: 'Grok',
+        },
+        {
+          id: 'xai/grok-4.5',
+          displayName: 'Grok 4.5',
+          family: 'Grok',
+        },
+      ],
+      allowedModelIds: ['xai/grok-4.5'],
+      defaultModelId: 'xai/grok-4.5',
+    };
+    const forUpdate = vi.fn(async () => [
+      { taskModelSettings: lockedAfterSettingsSave },
+    ]);
+
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          select: vi.fn(() => ({
+            from: vi.fn(() => ({
+              where: vi.fn(() => ({
+                limit: vi.fn(() => ({
+                  for: forUpdate,
+                })),
+              })),
+            })),
+          })),
+          insert: vi.fn(() => ({ values: txInsertValues })),
+        }),
+    );
+
+    await expect(syncConnectedXaiTaskModels()).resolves.toBe(1);
+
+    expect(forUpdate).toHaveBeenCalledWith('update');
+    expect(txInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskModelSettings: expect.objectContaining({
+          defaultModelId: 'xai/grok-4.5',
+          allowedModelIds: expect.arrayContaining([
+            'xai/grok-4.5',
+            'xai/grok-4.7',
+          ]),
+        }),
+      }),
+    );
+    expect(txInsertValues).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskModelSettings: expect.objectContaining({
+          allowedModelIds: expect.not.arrayContaining(['xai/grok-4.6']),
+        }),
+      }),
+    );
   });
 });
