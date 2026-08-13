@@ -975,21 +975,31 @@ describe('resolveOpenCodeSmallModel', () => {
     'sanitizes a $reason provider validation failure',
     async ({ providerError, reason, retryable }) => {
       process.env = { ...originalEnv };
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       sessionPromptMock.mockResolvedValue({
         data: undefined,
         error: { data: { message: providerError } },
       });
 
-      const { validateNonTaskInference } =
-        await import('../non-task-provider-usage.js');
-      const result = await validateNonTaskInference({
-        model: 'openrouter/openai/gpt-5.6-terra',
-        runtimeEnv: { OPENROUTER_API_KEY: 'candidate-key' },
-      });
+      try {
+        const { validateNonTaskInference } =
+          await import('../non-task-provider-usage.js');
+        const result = await validateNonTaskInference({
+          model: 'openrouter/openai/gpt-5.6-terra',
+          // The provider error above echoes this submitted key back, the
+          // way real 401 responses can.
+          runtimeEnv: { OPENROUTER_API_KEY: 'sk-secret-that-must-not-leak' },
+        });
 
-      expect(result).toMatchObject({ success: false, reason, retryable });
-      expect(result.success || result.message).not.toContain('sk-secret');
-      expect(result.success || result.message).not.toContain(providerError);
+        expect(result).toMatchObject({ success: false, reason, retryable });
+        expect(result.success || result.message).not.toContain('sk-secret');
+        expect(result.success || result.message).not.toContain(providerError);
+        // The server-side log keeps provider detail but must redact the
+        // candidate credential the provider echoed.
+        expect(warnSpy.mock.calls.flat().join(' ')).not.toContain('sk-secret');
+      } finally {
+        warnSpy.mockRestore();
+      }
     },
   );
 

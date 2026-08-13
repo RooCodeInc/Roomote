@@ -934,11 +934,18 @@ export async function validateNonTaskInference(params: {
     const classified = classifyNonTaskInferenceValidationError(error);
 
     // The sanitized result hides the provider detail from the UI on purpose;
-    // keep the raw detail in the server log so misclassifications and
-    // non-blocking failures stay diagnosable.
+    // keep the detail in the server log so misclassifications stay
+    // diagnosable. Provider rejections can echo the submitted credential
+    // ("invalid API key sk-..."), so every candidate env value is redacted
+    // from the detail before it reaches the log.
+    let detail = formatOpenCodeSdkError(error);
+    for (const value of Object.values(params.runtimeEnv)) {
+      if (value && value.length >= 4) {
+        detail = detail.split(value).join('[redacted]');
+      }
+    }
     console.warn(
-      `[validateNonTaskInference] ${model} failed (${classified.reason}): ${formatOpenCodeSdkError(error)}` +
-        (process.env.DEBUG_VALIDATE ? ` RAW=${JSON.stringify(error)}` : ''),
+      `[validateNonTaskInference] ${model} failed (${classified.reason}): ${detail}`,
     );
 
     return {
