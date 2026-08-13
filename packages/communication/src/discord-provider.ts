@@ -1227,7 +1227,7 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
               name: 'objective',
               description: 'What should the current task keep working toward?',
               required: true,
-              max_length: 10_000,
+              max_length: 6_000,
             },
           ],
         },

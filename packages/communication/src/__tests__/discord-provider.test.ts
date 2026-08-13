@@ -229,7 +229,7 @@ describe('DiscordCommunicationProvider', () => {
           expect.objectContaining({
             name: 'objective',
             required: true,
-            max_length: 10_000,
+            max_length: 6_000,
           }),
         ],
       },
