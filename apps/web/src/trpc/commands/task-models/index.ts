@@ -12,8 +12,8 @@ import {
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import {
-  CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  XAI_SUBSCRIPTION_PROVIDER_ID,
   TASK_MODEL_CATALOG,
   SETUP_MODEL_PROVIDER_CATALOG,
   buildOpenAiCompatibleProviderId,
@@ -26,6 +26,7 @@ import {
   getSetupModelProviderAdditionalEnvFields,
   getSetupModelProviderEnvVarNames,
   getSetupModelProvider,
+  getSetupProviderTaskModelPrefix,
   getTaskModelCatalog,
   getTaskModelProviderId,
   getEnabledTaskModels,
@@ -59,6 +60,7 @@ import {
 } from '../environment-variables';
 import {
   fetchModelsDevCatalog,
+  listXaiChatModelsFromCatalog,
   lookupModelMetadataFromCatalog,
   mergeMetadata,
   suggestModelsFromCatalog,
@@ -81,6 +83,11 @@ import {
   type LocalTaskModelProviderId,
   type TaskModelLookupResult,
 } from './local-provider-discovery';
+import {
+  collectXaiCatalogModelUpdates,
+  isXaiTaskProviderConnected,
+  syncConnectedXaiTaskModels,
+} from './xai-models';
 import type { UserAuthSuccess } from '@/types';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
@@ -297,6 +304,7 @@ export async function getTaskModelSettingsCommand(
   auth: UserAuthSuccess,
 ): Promise<TaskModelSettingsResult> {
   assertAdmin(auth);
+  await syncConnectedXaiTaskModels();
 
   const [
     settings,
@@ -538,7 +546,7 @@ export async function autoAddConnectedSubscriptionTaskModels(
       isXaiSubscriptionConnected(),
     ]);
 
-  return db.transaction(async (tx) => {
+  const addedRecommended = await db.transaction(async (tx) => {
     const [persistedEnvVarNames, persistedTaskModels] = await Promise.all([
       getPersistedEnvironmentVariableNames(tx),
       getPersistedRawTaskModelSettings(tx),
@@ -579,6 +587,12 @@ export async function autoAddConnectedSubscriptionTaskModels(
 
     return autoAdd.addedModels.length;
   });
+
+  if (providerId !== XAI_SUBSCRIPTION_PROVIDER_ID) {
+    return addedRecommended;
+  }
+
+  return addedRecommended + (await syncConnectedXaiTaskModels());
 }
 
 /**
@@ -899,6 +913,10 @@ export async function saveTaskModelProviderCommand(
     }
   }
 
+  if (provider.id === 'xai') {
+    addedDiscoveredModelCount += await syncConnectedXaiTaskModels();
+  }
+
   return {
     ...(await getTaskModelProviderSetupCommand(auth)),
     addedRecommendedModelCount,
@@ -960,6 +978,9 @@ function removeTaskModelsForProvider({
     defaultModelId: removedModelIds.has(settings.defaultModelId)
       ? (allowedModelIds[0] ?? models[0]?.id ?? '')
       : settings.defaultModelId,
+    // Removing one provider's models must not wipe the catalog sync's
+    // baseline/deletion memory for the others.
+    catalogSyncedModelIds: settings.catalogSyncedModelIds,
   });
 
   const nextRuntimeModelConfig: DeploymentModelConfig = {
@@ -1115,6 +1136,10 @@ export async function deleteTaskModelProviderCommand(
 }
 
 export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
+  // Persist newly listed Grok chat models so the switcher does not wait for
+  // an admin Settings refresh.
+  await syncConnectedXaiTaskModels();
+
   const [
     settings,
     chatgptConnected,
@@ -1342,12 +1367,6 @@ export async function updateTaskModelSettingsCommand(
     };
   }
 
-  const taskModelSettings = normalizeTaskModelSettings({
-    models,
-    allowedModelIds,
-    defaultModelId: normalizedDefaultModelId,
-  });
-
   const persistedRuntimeModelConfig = await getDeploymentRuntimeModelConfig();
   const nextRuntimeModelConfig: DeploymentModelConfig = {
     roomoteModel: codingManagedByEnv
@@ -1392,22 +1411,43 @@ export async function updateTaskModelSettingsCommand(
       : normalizeOptionalReasoningEffort(input.planningModelReasoningEffort),
   };
 
-  await db
-    .insert(deploymentSettings)
-    .values({
-      id: DEFAULT_DEPLOYMENT_ID,
-      taskModelSettings,
-      runtimeModelConfig: nextRuntimeModelConfig,
-      updatedAt: new Date(),
-    })
-    .onConflictDoUpdate({
-      target: deploymentSettings.id,
-      set: {
+  await db.transaction(async (tx) => {
+    // Lock the row for the read-modify-write: the admin save payload carries
+    // only models/allowed/default, and the catalog sync's deletion memory
+    // must be carried forward from the locked row so a concurrent sync
+    // commit is not clobbered by a stale snapshot.
+    const [persisted] = await tx
+      .select({ taskModelSettings: deploymentSettings.taskModelSettings })
+      .from(deploymentSettings)
+      .where(eq(deploymentSettings.id, DEFAULT_DEPLOYMENT_ID))
+      .limit(1)
+      .for('update');
+    const taskModelSettings = normalizeTaskModelSettings({
+      models,
+      allowedModelIds,
+      defaultModelId: normalizedDefaultModelId,
+      catalogSyncedModelIds: normalizeTaskModelSettings(
+        persisted?.taskModelSettings ?? null,
+      ).catalogSyncedModelIds,
+    });
+
+    await tx
+      .insert(deploymentSettings)
+      .values({
+        id: DEFAULT_DEPLOYMENT_ID,
         taskModelSettings,
         runtimeModelConfig: nextRuntimeModelConfig,
         updatedAt: new Date(),
-      },
-    });
+      })
+      .onConflictDoUpdate({
+        target: deploymentSettings.id,
+        set: {
+          taskModelSettings,
+          runtimeModelConfig: nextRuntimeModelConfig,
+          updatedAt: new Date(),
+        },
+      });
+  });
 
   return {
     success: true,
@@ -1727,10 +1767,7 @@ export async function suggestTaskModelsCommand(
     return { suggestions: [] };
   }
 
-  const providerPrefix =
-    provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID
-      ? 'openai/'
-      : `${provider.id}/`;
+  const providerPrefix = `${getSetupProviderTaskModelPrefix(provider.id)}/`;
   const providerModelId = `${providerPrefix}${query}`;
 
   if (TASK_MODEL_CATALOG.some((model) => model.id === providerModelId)) {
@@ -1745,8 +1782,7 @@ export async function suggestTaskModelsCommand(
     return { suggestions: [] };
   }
 
-  const catalogProviderId =
-    provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID ? 'openai' : provider.id;
+  const catalogProviderId = getSetupProviderTaskModelPrefix(provider.id);
 
   return {
     suggestions: suggestModelsFromCatalog({
@@ -1801,6 +1837,20 @@ export async function refreshTaskModelMetadataCommand(
     };
   }
 
+  let catalogSyncedModelIds = persistedSettings.catalogSyncedModelIds;
+
+  if (await isXaiTaskProviderConnected()) {
+    const updates = collectXaiCatalogModelUpdates({
+      xaiModels: listXaiChatModelsFromCatalog(catalog),
+      models: currentModels,
+      syncedModelIds: catalogSyncedModelIds,
+    });
+
+    currentModels.push(...updates.addedModels);
+    allowedModelIds.push(...updates.addedModels.map((model) => model.id));
+    catalogSyncedModelIds = updates.syncedModelIds;
+  }
+
   const refreshedAt = new Date().toISOString();
   const refreshedModels: TaskModelOption[] = currentModels.map((model) => {
     const lookup = lookupModelMetadataFromCatalog(catalog, model.id);
@@ -1824,6 +1874,7 @@ export async function refreshTaskModelMetadataCommand(
     models: refreshedModels,
     allowedModelIds,
     defaultModelId,
+    catalogSyncedModelIds,
   });
 
   await db

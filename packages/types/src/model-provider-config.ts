@@ -46,6 +46,25 @@ export const CHATGPT_SUBSCRIPTION_PROVIDER_ID = 'chatgpt' as const;
  */
 export const XAI_SUBSCRIPTION_PROVIDER_ID = 'xai-subscription' as const;
 
+/**
+ * Model-id prefix used when composing or looking up task models for a setup
+ * catalog provider. Subscription connect surfaces are not prefixes: ChatGPT
+ * serves `openai/`, SuperGrok serves `xai/`.
+ */
+export function getSetupProviderTaskModelPrefix(
+  providerId: SetupModelProviderId,
+): string {
+  if (providerId === CHATGPT_SUBSCRIPTION_PROVIDER_ID) {
+    return 'openai';
+  }
+
+  if (providerId === XAI_SUBSCRIPTION_PROVIDER_ID) {
+    return 'xai';
+  }
+
+  return providerId;
+}
+
 /** Roomote-specific key name for OpenCode Go, kept separate from Zen. */
 export const OPENCODE_GO_API_KEY_ENV_VAR_NAME = 'OPENCODE_GO_API_KEY' as const;
 

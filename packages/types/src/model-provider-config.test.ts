@@ -13,6 +13,7 @@ import {
   getReasoningEffortLabel,
   getRecommendedModelPresets,
   getSetupModelProvider,
+  getSetupProviderTaskModelPrefix,
   normalizeDeploymentModelConfig,
   REASONING_EFFORT_OPTIONS,
   resolveSetupModelProviderIdFromModel,
@@ -885,6 +886,29 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     );
     expect(disconnected?.runtimeApiKeySatisfied).toBe(false);
     expect(disconnected?.savedApiKeySatisfied).toBe(false);
+  });
+
+  it('maps subscription connect surfaces to their runtime model-id prefixes', () => {
+    expect(getSetupProviderTaskModelPrefix('chatgpt')).toBe('openai');
+    expect(getSetupProviderTaskModelPrefix('xai-subscription')).toBe('xai');
+    expect(getSetupProviderTaskModelPrefix('xai')).toBe('xai');
+    expect(getSetupProviderTaskModelPrefix('anthropic')).toBe('anthropic');
+  });
+
+  it('recommends only Grok 4.6 for xAI API and Grok subscription', () => {
+    for (const providerId of ['xai', 'xai-subscription'] as const) {
+      const provider = SETUP_MODEL_PROVIDER_CATALOG.find(
+        (entry) => entry.id === providerId,
+      );
+
+      expect(provider?.defaultRoomoteModel).toBe('xai/grok-4.6');
+      expect(provider?.suggestedTaskModels.map((model) => model.id)).toEqual([
+        'xai/grok-4.6',
+      ]);
+      expect(
+        provider?.suggestedTaskModels.map((model) => model.displayName),
+      ).toEqual(['Grok 4.6']);
+    }
   });
 
   it('marks xAI Grok subscription connected as its own OAuth provider without an API key', () => {

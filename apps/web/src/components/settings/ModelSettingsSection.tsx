@@ -62,6 +62,7 @@ import {
   getRecommendedModelPresets,
   groupModelsByDisplayProvider,
   getSetupModelProvider,
+  getSetupProviderTaskModelPrefix,
 } from '@roomote/types';
 import type {
   DisplayModelProviderGroup,
@@ -413,14 +414,12 @@ function UseRecommendedDefaultsAction({
   );
 }
 
-// The ChatGPT subscription provider has no model-id prefix of its own: its
-// models keep the `openai/` prefix so they are selected and billed like other
-// OpenAI models at runtime. Map it to `openai` wherever a model id is
-// composed from the selected provider.
+// Subscription connect surfaces are not model-id prefixes: ChatGPT keeps
+// `openai/`, SuperGrok keeps `xai/`.
 function getModelIdProviderPrefix(
   provider: SetupModelProviderId,
 ): SetupModelProviderId {
-  return provider === CHATGPT_SUBSCRIPTION_PROVIDER_ID ? 'openai' : provider;
+  return getSetupProviderTaskModelPrefix(provider) as SetupModelProviderId;
 }
 
 function composeNewModelId(
@@ -446,8 +445,9 @@ function composeNewModelId(
 
 function getNewModelPlaceholder(provider: SetupModelProviderId): string {
   const defaultModel = getSetupModelProvider(provider).defaultRoomoteModel;
-  const exampleSlug = defaultModel.startsWith(`${provider}/`)
-    ? defaultModel.slice(provider.length + 1)
+  const prefix = getSetupProviderTaskModelPrefix(provider);
+  const exampleSlug = defaultModel.startsWith(`${prefix}/`)
+    ? defaultModel.slice(prefix.length + 1)
     : defaultModel;
 
   return `Eg: ${exampleSlug}`;

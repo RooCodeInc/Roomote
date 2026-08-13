@@ -211,6 +211,29 @@ describe('lookupTaskModelCommand', () => {
         onConflictDoUpdate: mockUpdateDeploymentSettings,
       })),
     });
+    // Raw settings reads default to "no row persisted".
+    mockDbSelect.mockImplementation(() => ({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn(async () => []),
+        })),
+      })),
+    }));
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          select: vi.fn(() => ({
+            from: vi.fn(() => ({
+              where: vi.fn(() => ({
+                limit: vi.fn(() => ({
+                  for: vi.fn(async () => []),
+                })),
+              })),
+            })),
+          })),
+          insert: mockInsertDeploymentSettings,
+        }),
+    );
   });
 
   afterEach(() => {
@@ -523,6 +546,128 @@ describe('lookupTaskModelCommand', () => {
       'https://models.dev/catalog.json',
       expect.objectContaining({
         signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it('records a Grok catalog baseline on refresh without adding models', async () => {
+    // xAI connected via a persisted env key; settings hold only grok-4.6.
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue(['XAI_API_KEY']);
+    mockFindDeploymentSettings.mockResolvedValue({
+      taskModelSettings: {
+        models: [
+          { id: 'xai/grok-4.6', displayName: 'Grok 4.6', family: 'Grok' },
+        ],
+        allowedModelIds: ['xai/grok-4.6'],
+        defaultModelId: 'xai/grok-4.6',
+      },
+      runtimeModelConfig: null,
+    });
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          providers: {
+            xai: {
+              models: {
+                'grok-4.6': {
+                  name: 'Grok 4.6',
+                  modalities: { output: ['text'] },
+                },
+                'grok-4.7': {
+                  name: 'Grok 4.7',
+                  modalities: { output: ['text'] },
+                },
+              },
+            },
+          },
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      ),
+    );
+
+    const result = await refreshTaskModelMetadataCommand(buildMockAuth());
+
+    expect(result).toMatchObject({ success: true });
+    expect(mockUpdateDeploymentSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        set: expect.objectContaining({
+          taskModelSettings: expect.objectContaining({
+            models: [expect.objectContaining({ id: 'xai/grok-4.6' })],
+            allowedModelIds: ['xai/grok-4.6'],
+            catalogSyncedModelIds: expect.arrayContaining([
+              'xai/grok-4.6',
+              'xai/grok-4.7',
+            ]),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('carries the catalog sync deletion memory through an admin save', async () => {
+    mockGetPersistedEnvironmentVariableNames.mockResolvedValue([
+      'OPENROUTER_API_KEY',
+    ]);
+    mockDbTransaction.mockImplementation(
+      async (callback: (tx: unknown) => Promise<unknown>) =>
+        callback({
+          select: vi.fn(() => ({
+            from: vi.fn(() => ({
+              where: vi.fn(() => ({
+                limit: vi.fn(() => ({
+                  for: vi.fn(async () => [
+                    {
+                      taskModelSettings: {
+                        models: [
+                          {
+                            id: 'openrouter/z-ai/glm-5.6',
+                            displayName: 'GLM 5.6',
+                            family: 'GLM',
+                          },
+                        ],
+                        allowedModelIds: ['openrouter/z-ai/glm-5.6'],
+                        defaultModelId: 'openrouter/z-ai/glm-5.6',
+                        catalogSyncedModelIds: ['xai/grok-4.6', 'xai/grok-4.5'],
+                      },
+                    },
+                  ]),
+                })),
+              })),
+            })),
+          })),
+          insert: mockInsertDeploymentSettings,
+        }),
+    );
+
+    const result = await updateTaskModelSettingsCommand(buildMockAuth(), {
+      models: [
+        {
+          id: 'z-ai/glm-5.6',
+          displayName: 'GLM 5.6',
+          family: 'GLM',
+        },
+      ],
+      allowedModelIds: ['z-ai/glm-5.6'],
+      defaultModelId: 'z-ai/glm-5.6',
+      helperModelId: null,
+      visionModelId: null,
+      codeReviewModelId: null,
+      planningModelId: null,
+      codingModelReasoningEffort: null,
+      helperModelReasoningEffort: null,
+      visionModelReasoningEffort: null,
+      codeReviewModelReasoningEffort: null,
+      planningModelReasoningEffort: null,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    expect(mockUpdateDeploymentSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        set: expect.objectContaining({
+          taskModelSettings: expect.objectContaining({
+            catalogSyncedModelIds: ['xai/grok-4.6', 'xai/grok-4.5'],
+          }),
+        }),
       }),
     );
   });

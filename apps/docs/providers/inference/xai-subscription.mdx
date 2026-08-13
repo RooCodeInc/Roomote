@@ -14,9 +14,13 @@ Add **xAI (Grok subscription)** in **Settings > Models** and complete the xAI
 authorization flow with the account that owns the eligible plan. No API key or
 deployment environment variable is required.
 
-Subscription models keep the `xai/` prefix. When both subscription and [xAI API
-key](/providers/inference/xai) connections exist, Roomote prefers subscription
-access for those models.
+Subscription models keep the `xai/` prefix. Connecting the subscription seeds
+**Grok 4.6** as the default coding model. Grok chat models that xAI publishes
+after the connection appear in **Settings > Models** and the task model
+switcher automatically, without a Roomote update; image and video Grok models
+are omitted, and models you disable or remove stay that way. When both
+subscription and [xAI API key](/providers/inference/xai) connections exist,
+Roomote prefers subscription access for those models.
 
 ## Cost behavior
 
@@ -30,7 +34,7 @@ and billing page is authoritative.
 
 1. complete the xAI authorization flow
 2. confirm the Grok subscription shows as connected
-3. enable an `xai/...` model and assign it to a role
+3. pick a Grok chat model and assign it to a role
 4. run a small task and check the subscription usage display when available
 
 ## Common issues

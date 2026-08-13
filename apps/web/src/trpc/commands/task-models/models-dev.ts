@@ -7,10 +7,15 @@ import {
 const MODELS_DEV_CATALOG_URL = 'https://models.dev/catalog.json';
 const BEDROCK_MANTLE_PROVIDER_PREFIX = 'bedrock-mantle/';
 const MODELS_DEV_CATALOG_CACHE_TTL_MS = 5 * 60 * 1_000;
+// Failures are cached briefly so a models.dev outage does not make every
+// request that wants the catalog (e.g. the launch-options page load) block on
+// its own doomed fetch until the timeout.
+const MODELS_DEV_CATALOG_FAILURE_TTL_MS = 60 * 1_000;
 
 let cachedModelsDevCatalog:
   | { catalog: ModelsDevCatalog; expiresAt: number }
   | undefined;
+let modelsDevCatalogFailureExpiresAt = 0;
 
 type ModelsDevModalities = {
   input?: string[];
@@ -161,9 +166,19 @@ export async function fetchModelsDevCatalog(
     return cachedCatalog.catalog;
   }
 
+  if (!options?.forceRefresh && modelsDevCatalogFailureExpiresAt > Date.now()) {
+    return null;
+  }
+
+  const recordFailure = () => {
+    modelsDevCatalogFailureExpiresAt =
+      Date.now() + MODELS_DEV_CATALOG_FAILURE_TTL_MS;
+  };
+
   try {
     const response = await fetch(MODELS_DEV_CATALOG_URL, { signal });
     if (!response.ok) {
+      recordFailure();
       return null;
     }
     const payload = (await response.json()) as ModelsDevCatalogJson;
@@ -189,8 +204,20 @@ export async function fetchModelsDevCatalog(
       catalog,
       expiresAt: Date.now() + MODELS_DEV_CATALOG_CACHE_TTL_MS,
     };
+    modelsDevCatalogFailureExpiresAt = 0;
     return catalog;
-  } catch {
+  } catch (error) {
+    // A caller-side abort or timeout is not a service failure: the catalog
+    // sync fetches with a short budget, and its aborts must not blank the
+    // cache for interactive callers that allow a longer wait.
+    if (
+      !(
+        error instanceof Error &&
+        (error.name === 'AbortError' || error.name === 'TimeoutError')
+      )
+    ) {
+      recordFailure();
+    }
     return null;
   }
 }
@@ -292,6 +319,53 @@ export function mergeMetadata(
     lastRefreshedAt: base?.lastRefreshedAt ?? null,
     ...(supportsReasoning != null ? { supportsReasoning } : {}),
   };
+}
+
+/**
+ * Chat-capable Grok models from the models.dev `xai` provider. Image, video,
+ * and other non-text outputs are omitted so the task switcher only offers
+ * models Roomote can run. New Grok releases appear here without a Roomote
+ * catalog change.
+ */
+export function listXaiChatModelsFromCatalog(
+  catalog: ModelsDevCatalog,
+): Array<{ id: string; displayName: string; family: string }> {
+  const providerModels = catalog.providers.xai?.models ?? {};
+
+  return Object.entries(providerModels).flatMap(([slug, entry]) => {
+    if (!isXaiChatModelEntry(entry)) {
+      return [];
+    }
+
+    const trimmedSlug = slug.trim();
+    if (!trimmedSlug) {
+      return [];
+    }
+
+    const id = trimmedSlug.startsWith('xai/')
+      ? trimmedSlug
+      : `xai/${trimmedSlug}`;
+    const displayName = entry.name?.trim() || trimmedSlug;
+
+    return [
+      {
+        id,
+        displayName,
+        family: 'Grok',
+      },
+    ];
+  });
+}
+
+function isXaiChatModelEntry(entry: ModelsDevModelEntry): boolean {
+  if (entry.status === 'deprecated' || entry.tool_call === false) {
+    return false;
+  }
+
+  // Entries with no declared output modalities are skipped rather than
+  // assumed chat-capable: a freshly published image/video/embedding model
+  // whose catalog data is still sparse must not be auto-enabled.
+  return entry.modalities?.output?.includes('text') ?? false;
 }
 
 export function suggestModelsFromCatalog(options: {
