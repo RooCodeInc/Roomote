@@ -141,7 +141,10 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
-  it('applies per-role reasoning options to the model-backed config', () => {
+  it('strips per-role reasoning options from the restricted helper config', () => {
+    // Non-task structured output forces tool choice, which Amazon Bedrock
+    // rejects when thinking is enabled — so helper servers run without the
+    // operator's coding-harness reasoning levels on every provider.
     const env = buildOpenCodeCliEnv({
       R_MODEL: 'openrouter/openai/gpt-5.4',
       R_SMALL_MODEL: 'openrouter/z-ai/glm-5.2',
@@ -153,18 +156,45 @@ describe('buildOpenCodeCliEnv', () => {
       model: 'openrouter/openai/gpt-5.4',
       small_model: 'openrouter/z-ai/glm-5.2',
       permission: NON_TASK_TOOL_PERMISSION_DENIALS,
-      provider: {
-        openrouter: {
-          models: {
-            'openai/gpt-5.4': {
-              options: { reasoning: { effort: 'high' } },
-            },
-            'z-ai/glm-5.2': {
-              options: { reasoning: { effort: 'low' } },
+    });
+  });
+
+  it('strips Bedrock thinking config while keeping the model selection', () => {
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'amazon-bedrock/anthropic.claude-sonnet-5-v1:0',
+      R_SMALL_MODEL: 'amazon-bedrock/anthropic.claude-haiku-4-5-v1:0',
+      R_SMALL_MODEL_REASONING_EFFORT: 'medium',
+    });
+
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
+      model: 'amazon-bedrock/anthropic.claude-sonnet-5-v1:0',
+      small_model: 'amazon-bedrock/anthropic.claude-haiku-4-5-v1:0',
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+    });
+  });
+
+  it('strips thinking options from operator-supplied config content', () => {
+    const env = buildOpenCodeCliEnv({
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        model: 'anthropic/claude-sonnet-5',
+        provider: {
+          anthropic: {
+            models: {
+              'claude-sonnet-5': {
+                options: {
+                  thinking: { type: 'adaptive' },
+                  effort: 'high',
+                },
+              },
             },
           },
         },
-      },
+      }),
+    });
+
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
+      model: 'anthropic/claude-sonnet-5',
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
     });
   });
 
@@ -184,10 +214,9 @@ describe('buildOpenCodeCliEnv', () => {
         openai: {
           models: {
             'gpt-5.6-terra': {
-              options: {
-                reasoningEffort: 'high',
-                serviceTier: 'priority',
-              },
+              // reasoningEffort is stripped for helper servers; the fast-mode
+              // service tier is not a reasoning option and survives.
+              options: { serviceTier: 'priority' },
             },
             'gpt-5.6-luna': {
               options: { serviceTier: 'priority' },
@@ -212,10 +241,9 @@ describe('buildOpenCodeCliEnv', () => {
         openrouter: {
           models: {
             'z-ai/glm-5.2': {
-              options: {
-                reasoning: { effort: 'high' },
-                provider: { sort: 'throughput' },
-              },
+              // The variant's routing options survive; the reasoning option
+              // is stripped for helper servers.
+              options: { provider: { sort: 'throughput' } },
             },
           },
         },
@@ -243,7 +271,11 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
-  it('lets the coding model reasoning level win when both roles share a model', () => {
+  it('prunes the provider subtree when reasoning was its only content', () => {
+    // Role precedence for shared models is covered by the
+    // mergeOpenCodeModelReasoningOptions tests in @roomote/types; here the
+    // merged reasoning is stripped again for helper servers, so nothing of
+    // the provider subtree remains.
     const env = buildOpenCodeCliEnv({
       R_MODEL: 'openrouter/openai/gpt-5.4',
       R_SMALL_MODEL: 'openrouter/openai/gpt-5.4',
@@ -255,15 +287,6 @@ describe('buildOpenCodeCliEnv', () => {
       model: 'openrouter/openai/gpt-5.4',
       small_model: 'openrouter/openai/gpt-5.4',
       permission: NON_TASK_TOOL_PERMISSION_DENIALS,
-      provider: {
-        openrouter: {
-          models: {
-            'openai/gpt-5.4': {
-              options: { reasoning: { effort: 'high' } },
-            },
-          },
-        },
-      },
     });
   });
 

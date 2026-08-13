@@ -308,3 +308,88 @@ export function mergeOpenCodeModelReasoningOptions(
     },
   };
 }
+
+/**
+ * Every per-model `options` key that {@link buildOpenCodeModelReasoningOptions}
+ * can emit, across all providers. Kept next to the builders so a new provider
+ * shape and its strip coverage change together.
+ */
+const OPENCODE_MODEL_REASONING_OPTION_KEYS = [
+  'thinking',
+  'effort',
+  'reasoning',
+  'reasoningEffort',
+  'reasoningConfig',
+  'thinking_budget',
+] as const;
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Removes reasoning options from every `provider.<id>.models.<model>.options`
+ * entry of an OpenCode `provider` config subtree, leaving all other model
+ * options (variant routing, service tiers, modalities) untouched.
+ *
+ * Exists for calls that must never run with thinking enabled: OpenCode
+ * fulfils `format: json_schema` structured output by forcing tool choice,
+ * and Amazon Bedrock rejects thinking combined with forced tool use — so a
+ * reasoning effort configured for the coding harness would otherwise fail
+ * every structured call routed through the same model. Entries emptied by
+ * the strip are pruned so a config that only carried reasoning collapses to
+ * one without a `provider` subtree at all.
+ */
+export function stripOpenCodeModelReasoningOptions(
+  providerConfig: Record<string, unknown>,
+): Record<string, unknown> {
+  const strippedProviders: Record<string, unknown> = {};
+
+  for (const [providerID, providerEntry] of Object.entries(providerConfig)) {
+    if (!isPlainRecord(providerEntry) || !isPlainRecord(providerEntry.models)) {
+      strippedProviders[providerID] = providerEntry;
+      continue;
+    }
+
+    const strippedModels: Record<string, unknown> = {};
+
+    for (const [modelID, modelEntry] of Object.entries(providerEntry.models)) {
+      if (!isPlainRecord(modelEntry) || !isPlainRecord(modelEntry.options)) {
+        strippedModels[modelID] = modelEntry;
+        continue;
+      }
+
+      const options = { ...modelEntry.options };
+
+      for (const key of OPENCODE_MODEL_REASONING_OPTION_KEYS) {
+        delete options[key];
+      }
+
+      const stripped: Record<string, unknown> = { ...modelEntry };
+
+      if (Object.keys(options).length > 0) {
+        stripped.options = options;
+      } else {
+        delete stripped.options;
+      }
+
+      if (Object.keys(stripped).length > 0) {
+        strippedModels[modelID] = stripped;
+      }
+    }
+
+    const strippedEntry: Record<string, unknown> = { ...providerEntry };
+
+    if (Object.keys(strippedModels).length > 0) {
+      strippedEntry.models = strippedModels;
+    } else {
+      delete strippedEntry.models;
+    }
+
+    if (Object.keys(strippedEntry).length > 0) {
+      strippedProviders[providerID] = strippedEntry;
+    }
+  }
+
+  return strippedProviders;
+}

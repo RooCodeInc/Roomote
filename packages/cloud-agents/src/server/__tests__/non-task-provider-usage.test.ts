@@ -483,7 +483,9 @@ describe('resolveOpenCodeSmallModel', () => {
         prompt: 'Answer.',
       }),
     ).rejects.toThrow(
-      'OpenCode structured prompt failed: StructuredOutputError: failed to satisfy schema',
+      // The resolved provider/model id rides in the message so a router
+      // fallback log names the model without a database lookup.
+      'OpenCode structured prompt failed (model openrouter/z-ai/glm-5.2): StructuredOutputError: failed to satisfy schema',
     );
   });
 

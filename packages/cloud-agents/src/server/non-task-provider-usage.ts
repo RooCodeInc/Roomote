@@ -443,7 +443,7 @@ async function runNonTaskSdkPrompt(
 
     if (sessionResult.error || !sessionResult.data) {
       throw new Error(
-        `OpenCode structured session creation failed: ${formatOpenCodeSdkError(sessionResult.error)}`,
+        `OpenCode structured session creation failed (model ${model}): ${formatOpenCodeSdkError(sessionResult.error)}`,
       );
     }
 
@@ -459,8 +459,12 @@ async function runNonTaskSdkPrompt(
     );
 
     if (promptResult.error || !promptResult.data) {
+      // The resolved `provider/model` id rides in the message because callers
+      // (the router's fallback log among them) only know the role alias —
+      // production diagnosis of a provider-specific rejection needs the real
+      // id and provider without a database lookup.
       throw new Error(
-        `OpenCode structured prompt failed: ${formatOpenCodeSdkError(promptResult.error)}`,
+        `OpenCode structured prompt failed (model ${model}): ${formatOpenCodeSdkError(promptResult.error)}`,
       );
     }
 
@@ -557,7 +561,7 @@ async function generateTrackedNonTaskObjectWithSdk<
 
   if (data.info.error) {
     throw new Error(
-      `OpenCode structured prompt failed: ${formatOpenCodeSdkError(data.info.error)}`,
+      `OpenCode structured prompt failed (model ${resolvedRuntime.model}): ${formatOpenCodeSdkError(data.info.error)}`,
     );
   }
 
