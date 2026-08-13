@@ -291,13 +291,12 @@ describe('BoxClient Public API v1', () => {
     const controller = new AbortController();
     controller.abort();
 
-    const iterator = client
-      .streamCommandOutput({
-        instanceId: 'box-1',
-        commandId: '42',
-        signal: controller.signal,
-      })
-      [Symbol.asyncIterator]();
+    const output = client.streamCommandOutput({
+      instanceId: 'box-1',
+      commandId: '42',
+      signal: controller.signal,
+    });
+    const iterator = output[Symbol.asyncIterator]();
 
     await expect(iterator.next()).rejects.toMatchObject({
       name: 'AbortError',
