@@ -1,14 +1,13 @@
-const { createClient, getGoal, markGoalComplete, markGoalBlocked } = vi.hoisted(
-  () => ({
-    createClient: vi.fn(),
+const { createWorkerClient, getGoal, markGoalComplete, markGoalBlocked } =
+  vi.hoisted(() => ({
+    createWorkerClient: vi.fn(),
     getGoal: vi.fn(),
     markGoalComplete: vi.fn(),
     markGoalBlocked: vi.fn(),
-  }),
-);
+  }));
 
 vi.mock('@roomote/sdk/client', () => ({
-  createClient,
+  createWorkerClient,
 }));
 
 import { handleManageGoal } from '../goal';
@@ -23,7 +22,7 @@ const taskRuns = {
 describe('manage goal tool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    createClient.mockReturnValue({ taskRuns });
+    createWorkerClient.mockReturnValue({ taskRuns });
     process.env.ROOMOTE_TASK_RUN_ID = '42';
     process.env.ROOMOTE_CLOUD_TOKEN = 'run-token';
     process.env.ROOMOTE_PLATFORM_API_URL = 'https://platform.example.com';
@@ -40,11 +39,11 @@ describe('manage goal tool', () => {
 
     await handleManageGoal({ action: 'get' });
 
-    expect(createClient).toHaveBeenCalledWith({
+    expect(createWorkerClient).toHaveBeenCalledWith({
       url: 'https://platform.example.com',
       headers: expect.any(Function),
     });
-    const headers = createClient.mock.calls[0]?.[0].headers();
+    const headers = createWorkerClient.mock.calls[0]?.[0].headers();
     expect(headers).toEqual({ Authorization: 'Bearer run-token' });
   });
 
@@ -55,7 +54,7 @@ describe('manage goal tool', () => {
 
     await handleManageGoal({ action: 'get' });
 
-    const headers = createClient.mock.calls[0]?.[0].headers();
+    const headers = createWorkerClient.mock.calls[0]?.[0].headers();
     expect(headers).toEqual({
       Authorization: 'Bearer run-token',
       'x-custom-bypass': 'bypass-token',

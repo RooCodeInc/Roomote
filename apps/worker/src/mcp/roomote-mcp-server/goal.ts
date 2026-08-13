@@ -1,4 +1,4 @@
-import { createClient } from '@roomote/sdk/client';
+import { createWorkerClient } from '@roomote/sdk/client';
 import type { TaskGoal } from '@roomote/types';
 
 import { buildApiHeaders } from './api-client.js';
@@ -35,7 +35,7 @@ export async function handleManageGoal(params: {
     return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
   }
 
-  const taskRuns = createClient({
+  const taskRuns = createWorkerClient({
     url: config.platformApiUrl,
     headers: () => buildApiHeaders(config),
   }).taskRuns;
