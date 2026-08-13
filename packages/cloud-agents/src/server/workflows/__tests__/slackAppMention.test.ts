@@ -558,6 +558,46 @@ describe('slackAppMention', () => {
     );
   });
 
+  it('includes replies fetched after a thread-root mention in the initial prompt', async () => {
+    const taskSpec: SlackAppMentionTask = {
+      type: TaskPayloadKind.SlackAppMention,
+      payload: {
+        repo: 'Roomote/example-app',
+        channel: 'C123',
+        user: 'U123',
+        text: '@Roomote investigate this',
+        ts: '123.100',
+        threadMessages: [
+          {
+            type: 'message',
+            user: 'U123',
+            text: '@Roomote investigate this',
+            ts: '123.100',
+          },
+          {
+            type: 'message',
+            user: 'U456',
+            username: 'Alice Example',
+            text: '@Roomote use these failure details too',
+            ts: '123.200',
+          },
+        ],
+      },
+    };
+
+    const result = await slackAppMention({
+      taskSpec,
+      taskRunUrl: 'https://example.com/tasks/1',
+    });
+
+    expect(result.prompt).toContain(
+      '&lt;slack_thread_message ts="123.200"&gt;Alice Example: @Roomote use these failure details too&lt;/slack_thread_message&gt;',
+    );
+    expect(result.prompt).not.toContain(
+      '&lt;slack_thread_message ts="123.100"&gt;',
+    );
+  });
+
   it('documents explicit proof sharing for Slack visual proof', async () => {
     const taskSpec: SlackAppMentionTask = {
       type: TaskPayloadKind.SlackAppMention,

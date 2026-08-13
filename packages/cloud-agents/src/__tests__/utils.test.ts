@@ -334,6 +334,32 @@ describe('buildSlackThreadPromptBlocks', () => {
       latestBotReplyTs: undefined,
     });
   });
+
+  it('can include a captured thread snapshot after the triggering message', () => {
+    expect(
+      buildSlackThreadPromptBlocks({
+        threadMessages: [
+          {
+            user: 'U123',
+            text: 'triggering message',
+            ts: '123.100',
+          },
+          {
+            user: 'U456',
+            text: 'reply added while routing',
+            ts: '123.200',
+          },
+        ],
+        currentMessageTs: '123.100',
+        includeMessagesAfterCurrent: true,
+      }),
+    ).toEqual({
+      threadContext:
+        '<thread_context>\n<slack_thread_message ts="123.200">U456: reply added while routing</slack_thread_message>\n</thread_context>',
+      replyingTo: undefined,
+      latestBotReplyTs: undefined,
+    });
+  });
 });
 
 describe('formatSlackThreadContext', () => {
