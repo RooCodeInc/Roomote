@@ -37,6 +37,7 @@ export type DurablePrReviewEvent = {
   event: Record<string, unknown>;
   batchKind: 'human' | 'roomote';
   batchId: string | null;
+  automatedAuthorId?: string;
   dueAt: Date;
   observedAt: Date;
   reviewHeadSha?: string | null;
@@ -212,6 +213,118 @@ async function suppressRoomoteActivity(
     );
 }
 
+/**
+ * Resolves the open quiet-period generation for one automated reviewer.
+ * Claiming and persistence take the same advisory lock: once any delivery in
+ * a generation leaves pending state, that generation is sealed and later
+ * activity starts a distinct batch instead of revoking an in-flight claim.
+ */
+async function resolveAutomatedBatchId(
+  executor: DatabaseOrTransaction,
+  input: DurablePrReviewEvent & { automatedAuthorId: string; batchId: string },
+): Promise<string> {
+  await executor.execute(sql`
+    select pg_advisory_xact_lock(
+      hashtextextended(
+        jsonb_build_array(
+          'pr-review-automated-batch',
+          ${input.sourceControlProvider}::text,
+          ${input.repository}::text,
+          ${String(input.prNumber)}::text,
+          ${input.automatedAuthorId}::text
+        )::text,
+        0
+      )
+    )
+  `);
+
+  const [openGeneration] = await executor.execute<{
+    batch_id: string;
+  }>(sql`
+    select e.batch_id
+    from ${prReviewEvents} e
+    where e.source_control_provider = ${input.sourceControlProvider}
+      and e.repository = ${input.repository}
+      and e.pr_number = ${input.prNumber}
+      and e.batch_kind = 'human'
+      and e.superseded = false
+      and e.sealed_at is null
+      and e.event->>'automatedAuthorId' = ${input.automatedAuthorId}
+      and e.batch_id is not null
+    group by e.batch_id
+    order by max(e.created_at) desc,
+             e.batch_id desc
+    limit 1
+  `);
+
+  if (openGeneration) return openGeneration.batch_id;
+
+  const [existing] = await executor.execute<{ exists: boolean }>(sql`
+    select exists (
+      select 1
+      from ${prReviewEvents} e
+      where e.source_control_provider = ${input.sourceControlProvider}
+        and e.repository = ${input.repository}
+        and e.pr_number = ${input.prNumber}
+        and e.batch_kind = 'human'
+        and e.event->>'automatedAuthorId' = ${input.automatedAuthorId}
+    ) as exists
+  `);
+
+  if (!existing?.exists) return input.batchId;
+
+  const generation = createHash('sha256')
+    .update(input.eventKey)
+    .digest('hex')
+    .slice(0, 16);
+  return `${input.batchId}:generation:${generation}`;
+}
+
+/** Extends the trailing quiet period for one still-open generation. */
+async function coalesceAutomatedActivity(
+  executor: DatabaseOrTransaction,
+  input: Pick<
+    DurablePrReviewEvent,
+    'sourceControlProvider' | 'repository' | 'prNumber' | 'batchId' | 'dueAt'
+  >,
+): Promise<void> {
+  if (!input.batchId) return;
+  const dueAtIso = input.dueAt.toISOString();
+
+  const events = await executor
+    .update(prReviewEvents)
+    .set({
+      availableAt: sql`greatest(${prReviewEvents.availableAt}, ${dueAtIso}::timestamp)`,
+    })
+    .where(
+      and(
+        reviewReference(input),
+        eq(prReviewEvents.batchKind, 'human'),
+        eq(prReviewEvents.batchId, input.batchId),
+        eq(prReviewEvents.superseded, false),
+      ),
+    )
+    .returning({ id: prReviewEvents.id });
+
+  if (events.length === 0) return;
+
+  await executor
+    .update(prReviewEventDeliveries)
+    .set({
+      status: 'pending',
+      dueAt: sql`greatest(${prReviewEventDeliveries.dueAt}, ${dueAtIso}::timestamp)`,
+    })
+    .where(
+      and(
+        inArray(
+          prReviewEventDeliveries.eventId,
+          events.map(({ id }) => id),
+        ),
+        eq(prReviewEventDeliveries.status, 'pending'),
+      ),
+    );
+}
+
 export async function persistPrReviewEventInTransaction(
   executor: DatabaseOrTransaction,
   input: DurablePrReviewEvent,
@@ -259,7 +372,15 @@ export async function persistPrReviewEventInTransaction(
     cycle?.completedAt &&
     cycle.completedAt > input.observedAt,
   );
-  const batchId = cycle?.cycleId ?? input.batchId;
+  const automatedBatchId =
+    input.automatedAuthorId && input.batchId
+      ? await resolveAutomatedBatchId(executor, {
+          ...input,
+          automatedAuthorId: input.automatedAuthorId,
+          batchId: input.batchId,
+        })
+      : null;
+  const batchId = cycle?.cycleId ?? automatedBatchId ?? input.batchId;
   const eventPayload = batchId ? { ...input.event, batchId } : input.event;
 
   const [inserted] = await executor
@@ -321,6 +442,10 @@ export async function persistPrReviewEventInTransaction(
       cycleId,
       startedAt: cycle?.startedAt ?? new Date(0),
     });
+  }
+
+  if (inserted && input.automatedAuthorId) {
+    await coalesceAutomatedActivity(executor, { ...input, batchId });
   }
 
   if (!inserted || stored.superseded) {
@@ -480,7 +605,9 @@ export async function claimDuePrReviewDeliveries(
     }>(sql`
       with candidate_groups as (
         select d.task_id, e.source_control_provider, e.repository, e.pr_number,
-               e.batch_kind, e.batch_id, min(d.due_at) as first_due_at,
+               e.batch_kind, e.batch_id,
+               max(e.event->>'automatedAuthorId') as automated_author_id,
+               min(d.due_at) as first_due_at,
                min(d.created_at) as first_created_at
         from ${prReviewEventDeliveries} d
         join ${prReviewEvents} e on e.id = d.event_id
@@ -498,7 +625,22 @@ export async function claimDuePrReviewDeliveries(
       ), locked_groups as (
         select g.*
         from candidate_groups g
-        where pg_try_advisory_xact_lock(
+        where (
+          g.automated_author_id is null
+          or pg_try_advisory_xact_lock(
+            hashtextextended(
+              jsonb_build_array(
+                'pr-review-automated-batch',
+                g.source_control_provider,
+                g.repository,
+                g.pr_number::text,
+                g.automated_author_id
+              )::text,
+              0
+            )
+          )
+        )
+        and pg_try_advisory_xact_lock(
           hashtextextended(
             jsonb_build_array(
               'pr-review-delivery',
@@ -514,6 +656,18 @@ export async function claimDuePrReviewDeliveries(
         )
         order by g.first_due_at, g.first_created_at
         limit ${CLAIM_LIMIT}
+      ), sealed_events as (
+        update ${prReviewEvents} e
+        set sealed_at = coalesce(e.sealed_at, ${nowIso}::timestamp)
+        from locked_groups g
+        where g.automated_author_id is not null
+          and e.source_control_provider = g.source_control_provider
+          and e.repository = g.repository
+          and e.pr_number = g.pr_number
+          and e.batch_kind = g.batch_kind
+          and e.batch_id is not distinct from g.batch_id
+          and e.superseded = false
+        returning e.id
       ), updated as (
         update ${prReviewEventDeliveries} d
         set status = 'processing', lease_token = ${leaseToken}, lease_expires_at = ${leaseExpiresAtIso}::timestamp

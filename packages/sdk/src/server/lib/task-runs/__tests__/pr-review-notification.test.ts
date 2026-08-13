@@ -135,6 +135,37 @@ describe('durable PR review notification ownership', () => {
     expect(mockQueueAdd).not.toHaveBeenCalled();
   });
 
+  it('groups one external automated reviewer under a stable database batch', async () => {
+    const automatedAuthorId = 'github:9001';
+    for (const [index, kind] of [
+      'issue_comment',
+      'review',
+      'review_comment',
+    ].entries()) {
+      await enqueuePrReviewNotification({
+        ...baseInput,
+        event: {
+          kind: kind as 'issue_comment' | 'review' | 'review_comment',
+          providerEventId: `github-automated:${index}`,
+          authorLogin: 'reviewer[bot]',
+          automatedAuthorId,
+          observedAt: 100 + index,
+        },
+      });
+    }
+
+    expect(mockPersistPrReviewEvent).toHaveBeenCalledTimes(3);
+    for (const [input] of mockPersistPrReviewEvent.mock.calls) {
+      expect(input).toMatchObject({
+        batchKind: 'human',
+        batchId: `automated:${automatedAuthorId}`,
+        automatedAuthorId,
+        dueAt: new Date(1_000 + PR_REVIEW_NOTIFICATION_DEBOUNCE_MS),
+      });
+    }
+    expect(mockQueueAdd).not.toHaveBeenCalled();
+  });
+
   it('propagates persistence failure to the webhook caller', async () => {
     mockPersistPrReviewEvent.mockRejectedValue(new Error('database down'));
 

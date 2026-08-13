@@ -1,8 +1,10 @@
 import {
   claimDuePrReviewDeliveries,
+  completePrReviewDeliveries,
   createDb,
   type DatabaseOrTransaction,
   db,
+  deferPrReviewDeliveries,
   eq,
   persistPrReviewEvent,
   persistPrReviewEventInTransaction,
@@ -404,6 +406,242 @@ describe('durable PR review events', () => {
     expect(secondClaim.leaseToken).not.toBe(firstClaim.leaseToken);
     expect(await renewPrReviewDeliveryClaim(firstClaim)).toBe(false);
     expect(await renewPrReviewDeliveryClaim(secondClaim)).toBe(true);
+  });
+
+  it('atomically extends a pending automated-review generation before claim', async () => {
+    const eventDb = createDb(process.env.DATABASE_URL!);
+    const task = await taskFactory.create();
+    const repository = `owner/automated-pending-${task.id}`;
+    const firstDueAt = new Date();
+    const extendedDueAt = new Date(firstDueAt.getTime() + 60_000);
+    const eventWritten = deferred();
+    const commitEvent = deferred();
+    await associate(task.id, repository, 69);
+
+    await persistPrReviewEvent({
+      ...eventInput(repository, 69, `automated-pending-first-${task.id}`),
+      event: {
+        kind: 'review_comment',
+        authorLogin: 'reviewer[bot]',
+        automatedAuthorId: 'github:9001',
+      },
+      batchKind: 'human',
+      batchId: 'automated:github:9001',
+      automatedAuthorId: 'github:9001',
+      dueAt: firstDueAt,
+    });
+
+    const eventTransaction = eventDb.transaction(async (tx) => {
+      await persistPrReviewEventInTransaction(tx, {
+        ...eventInput(repository, 69, `automated-pending-second-${task.id}`),
+        event: {
+          kind: 'issue_comment',
+          authorLogin: 'reviewer[bot]',
+          automatedAuthorId: 'github:9001',
+        },
+        batchKind: 'human',
+        batchId: 'automated:github:9001',
+        automatedAuthorId: 'github:9001',
+        dueAt: extendedDueAt,
+      });
+      eventWritten.resolve();
+      await commitEvent.promise;
+    });
+    await eventWritten.promise;
+
+    expect(
+      (await claimDuePrReviewDeliveries(firstDueAt)).filter(
+        ({ taskId }) => taskId === task.id,
+      ),
+    ).toHaveLength(0);
+    commitEvent.resolve();
+    await eventTransaction;
+
+    expect(
+      (
+        await claimDuePrReviewDeliveries(new Date(extendedDueAt.getTime() - 1))
+      ).filter(({ taskId }) => taskId === task.id),
+    ).toHaveLength(0);
+    const [claim] = (await claimDuePrReviewDeliveries(extendedDueAt)).filter(
+      ({ taskId }) => taskId === task.id,
+    );
+    expect(claim).toMatchObject({
+      batchKind: 'human',
+      batchId: 'automated:github:9001',
+    });
+    expect(claim?.events).toHaveLength(2);
+    expect(claim?.deliveryIds).toHaveLength(2);
+  });
+
+  it('atomically seals a claimed automated-review generation', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/automated-${task.id}`;
+    const firstDueAt = new Date();
+    const extendedDueAt = new Date(firstDueAt.getTime() + 60_000);
+    const nextExtendedDueAt = new Date(firstDueAt.getTime() + 120_000);
+    const fourthDueAt = new Date(firstDueAt.getTime() + 180_000);
+    const deferredFirstDueAt = new Date(firstDueAt.getTime() + 300_000);
+    await associate(task.id, repository, 70);
+
+    await persistPrReviewEvent({
+      ...eventInput(repository, 70, `automated-first-${task.id}`),
+      event: {
+        kind: 'review_comment',
+        authorLogin: 'reviewer[bot]',
+        automatedAuthorId: 'github:9001',
+      },
+      batchKind: 'human',
+      batchId: 'automated:github:9001',
+      automatedAuthorId: 'github:9001',
+      dueAt: firstDueAt,
+    });
+    const firstClaim = (await claimDuePrReviewDeliveries(firstDueAt)).find(
+      ({ taskId }) => taskId === task.id,
+    )!;
+
+    await persistPrReviewEvent({
+      ...eventInput(repository, 70, `automated-second-${task.id}`),
+      event: {
+        kind: 'issue_comment',
+        authorLogin: 'reviewer[bot]',
+        automatedAuthorId: 'github:9001',
+      },
+      batchKind: 'human',
+      batchId: 'automated:github:9001',
+      automatedAuthorId: 'github:9001',
+      dueAt: extendedDueAt,
+    });
+    await persistPrReviewEvent({
+      ...eventInput(repository, 70, `automated-third-${task.id}`),
+      event: {
+        kind: 'review_comment',
+        authorLogin: 'reviewer[bot]',
+        automatedAuthorId: 'github:9001',
+      },
+      batchKind: 'human',
+      batchId: 'automated:github:9001',
+      automatedAuthorId: 'github:9001',
+      dueAt: nextExtendedDueAt,
+    });
+
+    await expect(renewPrReviewDeliveryClaim(firstClaim)).resolves.toBe(true);
+    const deliveries = await db
+      .select({
+        eventKey: prReviewEvents.eventKey,
+        batchId: prReviewEvents.batchId,
+        status: prReviewEventDeliveries.status,
+        dueAt: prReviewEventDeliveries.dueAt,
+      })
+      .from(prReviewEventDeliveries)
+      .innerJoin(
+        prReviewEvents,
+        eq(prReviewEvents.id, prReviewEventDeliveries.eventId),
+      )
+      .where(eq(prReviewEventDeliveries.taskId, task.id));
+    expect(deliveries).toHaveLength(3);
+    expect(deliveries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventKey: `automated-first-${task.id}`,
+          batchId: 'automated:github:9001',
+          status: 'processing',
+          dueAt: firstDueAt,
+        }),
+        expect.objectContaining({
+          eventKey: `automated-second-${task.id}`,
+          batchId: expect.stringMatching(/^automated:github:9001:generation:/),
+          status: 'pending',
+          dueAt: nextExtendedDueAt,
+        }),
+        expect.objectContaining({
+          eventKey: `automated-third-${task.id}`,
+          batchId: expect.stringMatching(/^automated:github:9001:generation:/),
+          status: 'pending',
+          dueAt: nextExtendedDueAt,
+        }),
+      ]),
+    );
+    expect(
+      new Set(
+        deliveries
+          .filter(({ status }) => status === 'pending')
+          .map(({ batchId }) => batchId),
+      ).size,
+    ).toBe(1);
+    expect(
+      (
+        await claimDuePrReviewDeliveries(
+          new Date(nextExtendedDueAt.getTime() - 1),
+        )
+      ).filter(({ taskId }) => taskId === task.id),
+    ).toHaveLength(0);
+    await deferPrReviewDeliveries(firstClaim, deferredFirstDueAt);
+    const [nextGeneration] = (
+      await claimDuePrReviewDeliveries(nextExtendedDueAt)
+    ).filter(({ taskId }) => taskId === task.id);
+    expect(nextGeneration).toMatchObject({
+      batchKind: 'human',
+      batchId: expect.stringMatching(/^automated:github:9001:generation:/),
+    });
+    expect(nextGeneration?.events).toHaveLength(2);
+    expect(nextGeneration?.deliveryIds).toHaveLength(2);
+
+    await persistPrReviewEvent({
+      ...eventInput(repository, 70, `automated-fourth-${task.id}`),
+      event: {
+        kind: 'review_comment',
+        authorLogin: 'reviewer[bot]',
+        automatedAuthorId: 'github:9001',
+      },
+      batchKind: 'human',
+      batchId: 'automated:github:9001',
+      automatedAuthorId: 'github:9001',
+      dueAt: fourthDueAt,
+    });
+
+    const generations = await db
+      .select({
+        eventKey: prReviewEvents.eventKey,
+        batchId: prReviewEvents.batchId,
+        sealedAt: prReviewEvents.sealedAt,
+        status: prReviewEventDeliveries.status,
+        dueAt: prReviewEventDeliveries.dueAt,
+      })
+      .from(prReviewEventDeliveries)
+      .innerJoin(
+        prReviewEvents,
+        eq(prReviewEvents.id, prReviewEventDeliveries.eventId),
+      )
+      .where(eq(prReviewEventDeliveries.taskId, task.id));
+    const fourth = generations.find(
+      ({ eventKey }) => eventKey === `automated-fourth-${task.id}`,
+    );
+    expect(fourth).toMatchObject({
+      status: 'pending',
+      dueAt: fourthDueAt,
+      sealedAt: null,
+    });
+    expect(fourth?.batchId).toMatch(/^automated:github:9001:generation:/);
+    expect(fourth?.batchId).not.toBe(nextGeneration?.batchId);
+    expect(
+      generations
+        .filter(({ batchId }) => batchId === 'automated:github:9001')
+        .every(
+          ({ sealedAt, status, dueAt }) =>
+            sealedAt !== null &&
+            status === 'pending' &&
+            dueAt.getTime() === deferredFirstDueAt.getTime(),
+        ),
+    ).toBe(true);
+    expect(
+      generations
+        .filter(({ batchId }) => batchId === nextGeneration?.batchId)
+        .every(
+          ({ sealedAt, status }) =>
+            sealedAt !== null && status === 'processing',
+        ),
+    ).toBe(true);
+    await completePrReviewDeliveries(nextGeneration!);
   });
 
   it('leaves a failed BullMQ wake pending for the next dispatcher', async () => {

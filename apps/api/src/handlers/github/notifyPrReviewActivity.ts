@@ -32,6 +32,14 @@ type PrReviewSummaryWebhookPayload =
 
 const MAX_SUMMARY_LENGTH = 300;
 
+function getAutomatedAuthorMetadata(
+  user: { id?: number; type?: string } | null | undefined,
+): { automatedAuthorId: string } | Record<string, never> {
+  return user?.type === 'Bot' && typeof user.id === 'number'
+    ? { automatedAuthorId: `github:${user.id}` }
+    : {};
+}
+
 function getObservedAt(value: string | null | undefined): number {
   const parsed = value ? Date.parse(value) : Number.NaN;
 
@@ -83,6 +91,7 @@ export function buildPrReviewActivityNotificationInput(
         kind: 'issue_comment',
         providerEventId: `github-issue-comment:${comment.id}`,
         authorLogin,
+        ...getAutomatedAuthorMetadata(comment.user),
         ...(comment.html_url ? { url: comment.html_url } : {}),
         observedAt: getObservedAt(comment.created_at),
       },
@@ -118,6 +127,7 @@ export function buildPrReviewActivityNotificationInput(
         kind: 'review',
         providerEventId: `github-review:${review.id}`,
         authorLogin,
+        ...getAutomatedAuthorMetadata(review.user),
         ...(review.commit_id ? { reviewHeadSha: review.commit_id } : {}),
         batchId: `github-review:${review.id}`,
         reviewState: review.state,
@@ -156,6 +166,7 @@ export function buildPrReviewActivityNotificationInput(
       kind: 'review_comment',
       providerEventId: `github-review-comment:${comment.id}`,
       authorLogin,
+      ...getAutomatedAuthorMetadata(comment.user),
       ...(comment.commit_id ? { reviewHeadSha: comment.commit_id } : {}),
       ...(comment.pull_request_review_id
         ? { batchId: `github-review:${comment.pull_request_review_id}` }
