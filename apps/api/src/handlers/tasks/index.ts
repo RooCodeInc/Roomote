@@ -16,10 +16,12 @@ import { getTaskComputeLogs } from './getTaskComputeLogs';
 import { describeVideo } from './describeVideo';
 import { manageSourceControl } from './manageSourceControl';
 import { updateTaskModelSelection } from './updateModelSelection';
+import { listTaskModels } from './listModels';
 
 export const tasksRouter = new Hono<{ Variables: Variables }>();
 
 tasksRouter.get('/', searchTasks);
+tasksRouter.get('/models', listTaskModels);
 tasksRouter.get('/:taskId/summary', getTaskSummary);
 tasksRouter.get('/:taskId/messages', getTaskMessages);
 tasksRouter.get('/:taskId/compute_logs', getTaskComputeLogs);
