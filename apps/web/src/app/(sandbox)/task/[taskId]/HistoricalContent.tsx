@@ -103,7 +103,10 @@ export function HistoricalContent({ session, footer }: HistoricalContentProps) {
       <PreviewPaneProvider>
         <ClosePreviewOnSleepEffect asleep={isAsleep} />
         <div className="flex h-full min-h-0 min-w-0 flex-1">
-          <FramedSurface surfaceClassName="flex flex-col bg-transparent @container">
+          <FramedSurface
+            frameClassName="pb-0 md:pb-2"
+            surfaceClassName="flex flex-col bg-transparent @container"
+          >
             <PreviewPaneLayout session={session}>
               <ArtifactLinkProvider session={session}>
                 <PreviewCommand

@@ -10,7 +10,10 @@ export function TaskWorkspaceSkeleton() {
       aria-label="Loading task workspace"
       className="flex h-full min-h-0 min-w-0 flex-1 bg-card"
     >
-      <FramedSurface surfaceClassName="flex flex-col bg-transparent @container">
+      <FramedSurface
+        frameClassName="pb-0 md:pb-2"
+        surfaceClassName="flex flex-col bg-transparent @container"
+      >
         <div className="flex shrink-0 items-center border-b-2 border-card px-4 py-3">
           <Skeleton className="mx-auto h-5 w-48 max-w-full" />
         </div>
