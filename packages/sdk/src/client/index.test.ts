@@ -3,11 +3,7 @@ import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
-import {
-  buildWorkerHeaders,
-  createWorkerClient,
-  createWorkerFetchWithRetry,
-} from './index';
+import { buildWorkerHeaders, createWorkerFetchWithRetry } from './index';
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -498,49 +494,5 @@ describe('createWorkerFetchWithRetry', () => {
         method: 'POST',
       }),
     ).rejects.toThrow(/returned non-JSON content-type/);
-  });
-});
-
-describe('createWorkerClient', () => {
-  it('uses configured URL and headers with the worker transport', async () => {
-    const fetchMock = vi
-      .fn<typeof fetch>()
-      .mockRejectedValueOnce(new TypeError('fetch failed'))
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify([
-            {
-              result: {
-                data: {
-                  json: null,
-                },
-              },
-            },
-          ]),
-          {
-            status: 200,
-            headers: { 'content-type': 'application/json' },
-          },
-        ),
-      );
-    vi.stubGlobal('fetch', fetchMock);
-
-    const client = createWorkerClient({
-      url: 'https://platform.example.com',
-      headers: () => ({ Authorization: 'Bearer run-token' }),
-    });
-
-    await expect(
-      client.taskRuns.getGoal.query({ runId: 42 }),
-    ).resolves.toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[0]?.[0].toString()).toContain(
-      'https://platform.example.com/trpc/taskRuns.getGoal',
-    );
-    expect(fetchMock.mock.calls[0]?.[1]?.headers).toMatchObject({
-      Authorization: 'Bearer run-token',
-    });
-
-    vi.unstubAllGlobals();
   });
 });

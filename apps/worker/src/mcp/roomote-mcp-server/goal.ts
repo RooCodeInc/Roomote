@@ -1,17 +1,14 @@
-import { createWorkerClient } from '@roomote/sdk/client';
-import type { TaskGoal } from '@roomote/types';
-
-import { buildApiHeaders } from './api-client.js';
 import { getRoomoteConfig } from './config.js';
+import { getTaskGoal, updateTaskGoal } from './tasks-api-client.js';
 import { catchError, errorResult, successResult } from './tool-result.js';
-import type { ToolResult } from './types.js';
+import type { TaskGoalWire, ToolResult } from './types.js';
 
 function currentRunId(): number | null {
   const runId = Number(process.env.ROOMOTE_TASK_RUN_ID);
   return Number.isInteger(runId) && runId > 0 ? runId : null;
 }
 
-function withoutGeneration(goal: TaskGoal | null) {
+function withoutGeneration(goal: TaskGoalWire | null) {
   if (!goal) {
     return null;
   }
@@ -35,14 +32,9 @@ export async function handleManageGoal(params: {
     return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
   }
 
-  const taskRuns = createWorkerClient({
-    url: config.platformApiUrl,
-    headers: () => buildApiHeaders(config),
-  }).taskRuns;
-
   try {
     if (params.action === 'get') {
-      const goal = await taskRuns.getGoal.query({ runId });
+      const { goal } = await getTaskGoal(config, runId);
       return successResult({ goal: withoutGeneration(goal) });
     }
 
@@ -57,12 +49,12 @@ export async function handleManageGoal(params: {
 
     const result =
       params.action === 'complete'
-        ? await taskRuns.markGoalComplete.mutate({
-            runId,
+        ? await updateTaskGoal(config, runId, {
+            action: 'complete',
             generation: params.generation,
           })
-        : await taskRuns.markGoalBlocked.mutate({
-            runId,
+        : await updateTaskGoal(config, runId, {
+            action: 'blocked',
             generation: params.generation,
             reason: params.reason!.trim(),
           });

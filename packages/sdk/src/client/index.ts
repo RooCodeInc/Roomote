@@ -350,14 +350,14 @@ export function createClient(options: CreateClientOptions = {}) {
   });
 }
 
-function createWorkerLinkOptions(options: CreateClientOptions = {}) {
-  const { url = process.env.TRPC_URL ?? 'http://localhost:3001', headers } =
-    options;
-
+function createWorkerLinkOptions() {
   return {
-    url: resolveApiUrl(url, '/trpc'),
+    url: resolveApiUrl(
+      process.env.TRPC_URL ?? 'http://localhost:3001',
+      '/trpc',
+    ),
     transformer: superjson,
-    headers: headers ?? (() => buildWorkerHeaders()),
+    headers: () => buildWorkerHeaders(),
     fetch: createWorkerFetchWithRetry(),
   };
 }
@@ -382,16 +382,12 @@ export function buildWorkerHeaders(
   return headers;
 }
 
-export function createWorkerClient(options: CreateClientOptions = {}) {
-  return createTRPCProxyClient<AppRouter>({
-    links: [httpBatchLink(createWorkerLinkOptions(options))],
-  });
-}
-
 /**
  * Pre-configured client for worker processes that use AUTH_TOKEN env var.
  */
-export const workerClient = createWorkerClient();
+export const workerClient = createTRPCProxyClient<AppRouter>({
+  links: [httpBatchLink(createWorkerLinkOptions())],
+});
 
 /**
  * Dedicated unbatched client for abort-sensitive worker mutations.
