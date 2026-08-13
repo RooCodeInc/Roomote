@@ -1272,6 +1272,12 @@ export const taskRuns = pgTable(
     keepaliveMs: integer('keepalive_ms'), // Resolved post-turn keepalive policy used to derive sleepAt.
     sleepAt: timestamp('sleep_at'), // Authoritative auto-sleep deadline used by the worker/UI/BullMQ.
     sleepRequestedAt: timestamp('sleep_requested_at'), // Set once BullMQ claims responsibility for the due sleep action.
+    waitUntil: timestamp('wait_until'), // Explicit agent-requested wake deadline after resumable sleep.
+    waitReason: text('wait_reason'), // Work the resumed turn should perform after the wait elapses.
+    waitResumedAt: timestamp('wait_resumed_at'), // Set atomically when the timed resume run is created.
+    waitResumeRunId: integer('wait_resume_run_id').references(
+      (): AnyPgColumn => taskRuns.id,
+    ),
     workerHeartbeatAt: timestamp('worker_heartbeat_at'), // Last worker process heartbeat observed for this sandbox-backed job.
     sourceSnapshotId: text('source_snapshot_id'), // Snapshot this job was resumed from.
 
@@ -1330,6 +1336,7 @@ export const taskRuns = pgTable(
     index('task_runs_acting_user_id_idx').on(table.actingUserId),
     index('task_runs_snapshot_id_idx').on(table.snapshotId),
     index('task_runs_sleep_at_idx').on(table.sleepAt),
+    index('task_runs_wait_until_idx').on(table.waitUntil),
     index('task_runs_worker_heartbeat_at_idx').on(table.workerHeartbeatAt),
     index('task_runs_sleep_check_due_v2_idx')
       .using('btree', table.sleepAt, table.createdAt, table.vendor)

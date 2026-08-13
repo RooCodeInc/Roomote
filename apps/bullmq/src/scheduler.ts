@@ -32,6 +32,7 @@ import {
   standbyRetentionJob,
   prReviewNotificationDispatchJob,
 } from './scheduled-jobs';
+import { taskWakeRecoveryJob } from './scheduled-jobs/task-wake-recovery';
 
 const QUEUE_NAME = 'scheduled-jobs';
 
@@ -88,6 +89,10 @@ async function createJobs(queue: Queue): Promise<void> {
     ScheduledJobName.SleepCheck,
     { every: 60 * 1000 }, // Every 60 seconds.
   );
+
+  await queue.upsertJobScheduler(ScheduledJobName.TaskWakeRecovery, {
+    every: 60 * 1000,
+  });
 
   await queue.upsertJobScheduler(
     ScheduledJobName.StandbyRetention,
@@ -208,6 +213,8 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       return heartbeatJob();
     case ScheduledJobName.SleepCheck:
       return sleepCheckJob();
+    case ScheduledJobName.TaskWakeRecovery:
+      return taskWakeRecoveryJob();
     case ScheduledJobName.RefreshSnapshots:
       return refreshSnapshotsJob();
     case ScheduledJobName.PullRequestAnalyticsSync:

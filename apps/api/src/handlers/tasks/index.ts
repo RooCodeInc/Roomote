@@ -18,6 +18,7 @@ import { manageSourceControl } from './manageSourceControl';
 import { updateTaskModelSelection } from './updateModelSelection';
 import { listTaskModels } from './listModels';
 import { getGoal, manageGoal } from './manageGoal';
+import { waitTask } from './waitTask';
 
 export const tasksRouter = new Hono<{ Variables: Variables }>();
 
@@ -39,3 +40,4 @@ tasksRouter.post('/:taskId/automation_work_items', submitAutomationWorkItems);
 tasksRouter.post('/:taskId/task_suggestions', submitTaskSuggestions);
 tasksRouter.post('/:taskId/mcp_recommendations', submitMcpRecommendations);
 tasksRouter.post('/runs/:runId/goal', manageGoal);
+tasksRouter.post('/runs/:runId/wait', waitTask);

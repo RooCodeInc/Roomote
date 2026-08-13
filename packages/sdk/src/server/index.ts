@@ -21,10 +21,18 @@ export { findTaskRunByRunTokenClaims } from './lib/task-runs/find-task-run';
 export { createSnapshot } from './lib/task-runs/enqueue-snapshot';
 export {
   enqueueTaskSleep,
+  scheduleTaskSleep,
   TASK_SLEEP_QUEUE_NAME,
   taskSleepRequestSchema,
   type TaskSleepRequest,
 } from './lib/task-runs/enqueue-sleep';
+export {
+  enqueueTaskWake,
+  removeTaskWake,
+  TASK_WAKE_QUEUE_NAME,
+  taskWakeRequestSchema,
+  type TaskWakeRequest,
+} from './lib/task-runs/enqueue-wake';
 export { recordComputeProviderUsage } from './lib/task-runs/record-compute-provider-usage';
 export {
   recordTaskMessageEnvelope,

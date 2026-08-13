@@ -1564,6 +1564,8 @@ export const snapshotResumeSchema = sharedTaskSchema.extend({
      * stale source-run images.
      */
     resumePromptImages: z.array(z.string()).optional(),
+    /** Marks a scheduled wake so it skips opening acknowledgement semantics. */
+    taskWaitWake: z.boolean().optional(),
     /**
      * Optional Slack follow-up messages drained from the source run while a
      * SnapshotResume request is waiting in the product queue. The resumed

@@ -13,6 +13,7 @@ export enum ScheduledJobName {
   LicenseUsageHeartbeat = 'LicenseUsageHeartbeat',
   WebhookCleanup = 'WebhookCleanup',
   StandbyRetention = 'StandbyRetention',
+  TaskWakeRecovery = 'TaskWakeRecovery',
   CustomAutomations = 'custom_automations',
   PrReviewNotificationDispatch = 'PrReviewNotificationDispatch',
 }

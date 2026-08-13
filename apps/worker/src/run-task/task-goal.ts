@@ -16,6 +16,7 @@ When trusted per-turn context includes an active task goal:
 - Each goal turn receives an assigned generation in trusted per-turn context. Pass that exact value as generation to every manage_goal complete or blocked call. Never reuse a generation from an earlier turn.
 - Call manage_goal with action "complete" and the current turn's assigned generation only when the whole objective is verified.
 - Call manage_goal with action "blocked" and the current turn's assigned generation only after the same concrete blocker prevents progress across three consecutive goal turns. Include the concrete reason.
+- If the user explicitly asks the task to wait and continue later, use wait_task instead of marking the goal blocked. The goal remains active and resumes after the wait.
 - Do not emit a terminal user-facing closeout while the goal remains active. Hidden continuation turns may follow automatically.
 </task_goal_policy>`;
 }

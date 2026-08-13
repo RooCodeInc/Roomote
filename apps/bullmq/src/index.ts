@@ -48,6 +48,7 @@ import { startSlackPrInactivityQueue } from './slack-pr-inactivity-queue';
 import { startPrReviewNotificationQueue } from './pr-review-notification-queue';
 import { startActivePrReviewFollowUpQueue } from './active-pr-review-follow-up-queue';
 import { startTaskSleepQueue } from './task-sleep-queue';
+import { startTaskWakeQueue } from './task-wake-queue';
 
 // Resolve auto-generated auth keypairs before any queue worker starts so
 // scheduled jobs that sign tokens observe the resolved keys.
@@ -114,6 +115,11 @@ const {
   worker: taskSleepWorker,
   queueEvents: taskSleepQueueEvents,
 } = startTaskSleepQueue();
+const {
+  queue: taskWakeQueue,
+  worker: taskWakeWorker,
+  queueEvents: taskWakeQueueEvents,
+} = startTaskWakeQueue();
 const {
   slackAccountLinkEducationQueue,
   slackAccountLinkEducationWorker,
@@ -333,6 +339,9 @@ async function gracefulShutdown() {
     await taskSleepWorker.close();
     await taskSleepQueueEvents.close();
     await taskSleepQueue.close();
+    await taskWakeWorker.close();
+    await taskWakeQueueEvents.close();
+    await taskWakeQueue.close();
     await slackAccountLinkEducationWorker.close();
     await slackAccountLinkEducationQueueEvents.close();
     await slackAccountLinkEducationQueue.close();

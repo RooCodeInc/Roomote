@@ -26,6 +26,12 @@ export const DEFAULT_AUTOMATION_KEEPALIVE_MS = 60 * 1_000;
 /** Default maintenance-task keepalive after completion, leaving a follow-up window long enough to absorb fixer or reviewer follow-ups before sleeping. */
 export const DEFAULT_MAINTENANCE_KEEPALIVE_MS = 5 * 60 * 1_000;
 
+/** Shorter waits would spend most of their duration snapshotting and resuming. */
+export const MIN_TASK_WAIT_MS = 10 * 60 * 1_000;
+
+/** Keep timed wakes inside the seven-day task snapshot retention window. */
+export const MAX_TASK_WAIT_MS = 6 * 24 * 60 * 60 * 1_000;
+
 export const ALL_REPOSITORIES = '__all_repositories__';
 export const HAS_PULL_REQUEST_FILTER_VALUE = '__has_pr__';
 
