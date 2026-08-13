@@ -2,32 +2,6 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
-## 0.39.0 (2026-08-13)
-
-This release adds per-task model switching and improves reliability across environment setup, snapshots, Slack conversations, helper agents, and self-hosted installation.
-
-### Highlights
-
-- Switch models and reasoning levels for individual tasks from the composer or by asking the agent, with changes applied from the next message.
-- Create environment snapshots reliably and show snapshot actions only for configured sandbox providers.
-- Keep Slack task conversations and automatic workspace routing working through timing, provider, and integration edge cases.
-- Restore the one-command self-hosted installer endpoint and add health checks for its public routes.
-
-### Minor changes
-
-- Add a per-task model switcher: a model chip in the web task composer switches the coding model and reasoning level (with per-role overrides for planning, code review, explore, helper, and vision behind "All roles"), changes apply from the next message and persist across snapshot resumes, and agents can switch their own task's models on request via the new `manage_tasks` `update_models` action.
-
-### Patch changes
-
-- Validate MCP OAuth callbacks by callback class instead of client-specific URLs, supporting secure hosted, loopback, and native app callbacks.
-- Make environment setup validate commands locally, avoid unnecessarily broad dependency installs, wait efficiently for verification, and distinguish pre-existing repository failures from environment problems.
-- Remove the unnecessary gap below the task composer on mobile while preserving the existing desktop task layout.
-- Keep automatic workspace routing and focused helper agents working when model reasoning is enabled or connected integrations expose incompatible tool schemas.
-- Restore environment snapshot creation and show snapshot actions only for sandbox providers configured on the deployment.
-- Restore the xAI Grok subscription usage bar in Models settings by sending the identity headers now required by the billing service. Thanks to @pridemusvaire for contributing this fix.
-- Restore the one-command installer endpoint by removing its dependency on a stale GitHub credential and add health checks for its public routes. Thanks to @Tepexic for reporting [#1274](https://github.com/RooCodeInc/Roomote/issues/1274).
-- Keep Slack task conversations reliable by including replies posted during task routing, retrying transient message-update failures, and allowing app-accessible public channels without requiring the acting user to join them.
-
 ## 0.38.0 (2026-08-12)
 
 This release adds `/goal` mode for long-running work, a Roomote MCP, custom routing rules, and the ability to generate demo videos.
