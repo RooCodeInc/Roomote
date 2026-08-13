@@ -243,6 +243,68 @@ describe('BoxClient Public API v1', () => {
     ).resolves.toBe('warning');
   });
 
+  it('uses the same incremental polling for detached callbacks and reports lost commands as failed', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ processId: 42 }))
+      .mockResolvedValueOnce(
+        jsonResponse({ status: 'running', stdout: 'one', stderr: '' }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          status: 'lost',
+          stdout: 'one-two',
+          stderr: 'warning',
+          exitCode: null,
+        }),
+      );
+    const client = new BoxClient({
+      apiKey: 'key',
+      pollIntervalMs: 0,
+      fetchImpl,
+    });
+    const onOutput = vi.fn();
+    let resolveExit: ((exitCode: number) => void) | undefined;
+    const exited = new Promise<number>((resolve) => {
+      resolveExit = resolve;
+    });
+
+    await client.runCommand({
+      instanceId: 'box-1',
+      cmd: 'worker',
+      detached: true,
+      onOutput,
+      onExit: ({ exitCode }) => resolveExit?.(exitCode),
+    });
+
+    await expect(exited).resolves.toBe(1);
+    expect(onOutput.mock.calls.map(([event]) => event)).toEqual([
+      { stream: 'stdout', data: 'one' },
+      { stream: 'stdout', data: '-two' },
+      { stream: 'stderr', data: 'warning' },
+    ]);
+  });
+
+  it('aborts command polling before issuing a read', async () => {
+    const fetchImpl = vi.fn<typeof fetch>();
+    const client = new BoxClient({ apiKey: 'key', fetchImpl });
+    const controller = new AbortController();
+    controller.abort();
+
+    const iterator = client
+      .streamCommandOutput({
+        instanceId: 'box-1',
+        commandId: '42',
+        signal: controller.signal,
+      })
+      [Symbol.asyncIterator]();
+
+    await expect(iterator.next()).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it('maps machine state and archiveAfter from list and status responses', async () => {
     const archiveAfter = new Date(Date.now() + 60_000).toISOString();
     const fetchImpl = vi
@@ -501,6 +563,33 @@ describe('BoxClient Public API v1', () => {
         ([url]) => url === `${DEFAULT_BOX_API_BASE_URL}/boxes/box-1/commands`,
       ),
     ).toBe(true);
+  });
+
+  it('retries transient read failures', async () => {
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ code: 'busy' }, 503))
+      .mockResolvedValueOnce(jsonResponse([{ id: 'box-1', state: 'ready' }]));
+    const client = new BoxClient({ apiKey: 'key', fetchImpl });
+
+    await expect(client.listInstances({})).resolves.toEqual([
+      expect.objectContaining({ instanceId: 'box-1', status: 'running' }),
+    ]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('aborts transient read retry backoff before another request', async () => {
+    const controller = new AbortController();
+    const fetchImpl = vi.fn<typeof fetch>().mockImplementation(async () => {
+      controller.abort();
+      return jsonResponse({ code: 'busy' }, 503);
+    });
+    const client = new BoxClient({ apiKey: 'key', fetchImpl });
+
+    await expect(
+      client.listInstances({ signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it('does not retry non-provisioning 409s', async () => {
