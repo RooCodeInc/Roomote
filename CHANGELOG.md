@@ -2,6 +2,38 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.39.0 (2026-08-13)
+
+This release expands model choice and per-task switching while improving provider setup, task reliability, pull request review delivery, snapshots, Slack conversations, and self-hosted installation.
+
+### Highlights
+
+- Discover enabled models and switch models or reasoning levels for individual tasks from the composer or by asking the agent.
+- Choose from current Gemini, DeepSeek, Grok, and GitHub Copilot models with model-appropriate defaults and reasoning controls.
+- Catch invalid inference credentials, quota, model access, and runtime wiring during setup instead of on the first task.
+- Keep pull request review feedback and action offers reliable through association, queue, task, and Slack workspace timing races.
+
+### Minor changes
+
+- Add model discovery to the task management tool so agents can list enabled model IDs beside the existing task model switch action.
+- Add Gemini 3.7 Flash, recommend DeepSeek V4 Pro 0813, and let Grok subscription and GitHub Copilot users choose from current supported chat models with model-appropriate reasoning controls.
+- Add a per-task model switcher: a model chip in the web task composer switches the coding model and reasoning level (with per-role overrides for planning, code review, explore, helper, and vision behind "All roles"), changes apply from the next message and persist across snapshot resumes, and agents can switch their own task's models on request via the new `manage_tasks` `update_models` action.
+- Automatically pick up Grok chat models that xAI releases after connecting the Grok subscription or an xAI API key, without waiting for a Roomote catalog update. Models you disable or remove stay that way. Thanks to @pridemusvaire for contributing this improvement.
+
+### Patch changes
+
+- Validate MCP OAuth callbacks by callback class instead of client-specific URLs, supporting secure hosted, loopback, and native app callbacks.
+- Keep pull request review feedback and action offers reliable through association, queue, and worker timing races; scope actions to their owning task and Slack workspace; and coalesce each automated review pass into one notification.
+- Make environment setup validate commands locally, avoid unnecessarily broad dependency installs, wait efficiently for verification, and distinguish pre-existing repository failures from environment problems.
+- Validate inference-provider credentials, model access, quota, and runtime wiring before saving setup configuration so invalid connections fail with actionable guidance instead of breaking the first task.
+- Remove the unnecessary gap below the task composer on mobile while preserving the existing desktop task layout.
+- Keep automatic workspace routing and focused helper agents working with Amazon Bedrock models, configured reasoning, and connected integrations that expose incompatible tool schemas.
+- Restore environment snapshot creation and show snapshot actions only for sandbox providers configured on the deployment.
+- Restore the xAI Grok subscription usage bar in Models settings by sending the identity headers now required by the billing service. Thanks to @pridemusvaire for contributing this fix.
+- Restore the one-command installer endpoint by removing its dependency on a stale GitHub credential and add health checks for its public routes. Thanks to @Tepexic for reporting [#1274](https://github.com/RooCodeInc/Roomote/issues/1274).
+- Keep Goal Mode controls, GitHub Copilot model routing, and sandbox sleep checks working when platform API routing, model reasoning support, or one sandbox provider is unavailable.
+- Keep Slack task conversations reliable by including replies posted during task routing, retrying transient message-update failures, and allowing app-accessible public channels without requiring the acting user to join them.
+
 ## 0.38.0 (2026-08-12)
 
 This release adds `/goal` mode for long-running work, a Roomote MCP, custom routing rules, and the ability to generate demo videos.

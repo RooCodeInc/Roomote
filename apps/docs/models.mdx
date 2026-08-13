@@ -188,6 +188,12 @@ list.
 - **Models** controls the provider/model pairs that are available, the default
   model, and specialized model roles.
 
+When you connect an inference provider in setup, Roomote tests the candidate
+credentials and selected model before saving them. Authentication, quota,
+model-access, endpoint, and timeout failures are reported during setup so you
+can correct the connection before starting a task. Providers configured through
+environment variables are validated by the deployment at startup instead.
+
 For subscription-based providers (ChatGPT, GitHub Copilot, Kimi for Coding,
 xAI Grok / SuperGrok, and Z.AI Coding Plan), the provider row also shows current
 plan usage when the provider reports it, such as remaining legacy Copilot
