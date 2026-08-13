@@ -1,6 +1,8 @@
-import { sdk } from '@roomote/sdk/client';
+import { createClient } from '@roomote/sdk/client';
 import type { TaskGoal } from '@roomote/types';
 
+import { buildApiHeaders } from './api-client.js';
+import { getRoomoteConfig } from './config.js';
 import { catchError, errorResult, successResult } from './tool-result.js';
 import type { ToolResult } from './types.js';
 
@@ -28,9 +30,19 @@ export async function handleManageGoal(params: {
     return errorResult('ROOMOTE_TASK_RUN_ID environment variable not set');
   }
 
+  const config = getRoomoteConfig();
+  if (!config) {
+    return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+  }
+
+  const taskRuns = createClient({
+    url: config.platformApiUrl,
+    headers: () => buildApiHeaders(config),
+  }).taskRuns;
+
   try {
     if (params.action === 'get') {
-      const goal = await sdk.taskRuns.getGoal({ runId });
+      const goal = await taskRuns.getGoal.query({ runId });
       return successResult({ goal: withoutGeneration(goal) });
     }
 
@@ -45,11 +57,11 @@ export async function handleManageGoal(params: {
 
     const result =
       params.action === 'complete'
-        ? await sdk.taskRuns.markGoalComplete({
+        ? await taskRuns.markGoalComplete.mutate({
             runId,
             generation: params.generation,
           })
-        : await sdk.taskRuns.markGoalBlocked({
+        : await taskRuns.markGoalBlocked.mutate({
             runId,
             generation: params.generation,
             reason: params.reason!.trim(),
