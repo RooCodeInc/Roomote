@@ -3,7 +3,7 @@ const mockQueueAdd = vi.fn();
 const mockTaskPullRequestUpsert = vi.fn();
 
 vi.hoisted(() => {
-  process.env.REDIS_URL = 'redis://localhost:16379';
+  process.env.REDIS_URL ??= 'redis://localhost:16379';
 });
 
 vi.mock('@roomote/db/server', async () => {
