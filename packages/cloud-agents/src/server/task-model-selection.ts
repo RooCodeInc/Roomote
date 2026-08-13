@@ -9,6 +9,7 @@ import {
 import {
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   TASK_MODEL_OVERRIDE_ROLES,
+  TASK_MODEL_OVERRIDE_ROLE_ENV_VARS,
   clampReasoningEffortForTaskModel,
   getDefaultTaskModelId,
   getDisplayModelProviderId,
@@ -25,6 +26,15 @@ import {
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
 const MODEL_ID_PATTERN = /^[^/\s]+\/.+$/u;
+
+/** Persisted deployment-config key holding each override role's level. */
+const ROLE_PERSISTED_REASONING_EFFORT_KEYS = {
+  helper: 'roomoteSmallModelReasoningEffort',
+  vision: 'roomoteVisionModelReasoningEffort',
+  codeReview: 'roomoteCodeReviewModelReasoningEffort',
+  explore: 'roomoteExploreModelReasoningEffort',
+  planning: 'roomotePlanningModelReasoningEffort',
+} as const satisfies Record<TaskModelOverrideRole, string>;
 
 export type TaskModelSelectionRole = 'coding' | TaskModelOverrideRole;
 
@@ -200,13 +210,36 @@ export async function applyTaskModelSelectionToRun(options: {
             (model) => model.id === overrideModelId,
           )
         : undefined;
-      const overrideEffort = options.reasoningEffort
+      // Mirror the coding branch: a model selected without an explicit level
+      // runs at the deployment role level (env wins over the persisted
+      // config). Stamping the resolved level keeps it clampable to the new
+      // model instead of silently inheriting an unsupported one.
+      const candidateEffort =
+        options.reasoningEffort ??
+        (requestedModelId
+          ? ((): ReasoningEffort => {
+              const envRoleEffort =
+                process.env[
+                  TASK_MODEL_OVERRIDE_ROLE_ENV_VARS[options.role]
+                    .reasoningEffort
+                ]?.trim();
+
+              return (
+                (isReasoningEffort(envRoleEffort)
+                  ? envRoleEffort
+                  : runtimeModelConfig[
+                      ROLE_PERSISTED_REASONING_EFFORT_KEYS[options.role]
+                    ]) ?? DEFAULT_MODEL_ROLE_REASONING_EFFORTS[options.role]
+              );
+            })()
+          : undefined);
+      const overrideEffort = candidateEffort
         ? overrideCatalogModel
           ? clampReasoningEffortForTaskModel(
-              options.reasoningEffort,
+              candidateEffort,
               overrideCatalogModel.metadata,
             )
-          : options.reasoningEffort
+          : candidateEffort
         : undefined;
       const entry = {
         ...(requestedModelId ? { model: requestedModelId } : {}),
