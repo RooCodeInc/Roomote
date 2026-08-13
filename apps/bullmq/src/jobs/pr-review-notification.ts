@@ -121,6 +121,7 @@ async function postPrReviewNotification({
     await setPendingPrReviewAction({
       nonce,
       provider: route.provider,
+      ...(route.provider === 'slack' ? { slackTeamId: route.slackTeamId } : {}),
       taskId,
       repository: action.repository,
       prNumber: action.prNumber,
@@ -133,7 +134,10 @@ async function postPrReviewNotification({
 
   if (route.provider === 'slack') {
     const slackInstallation = await db.query.slackInstallations.findFirst({
-      where: eq(slackInstallations.isActive, true),
+      where: and(
+        eq(slackInstallations.teamId, route.slackTeamId),
+        eq(slackInstallations.isActive, true),
+      ),
       columns: { botAccessToken: true },
     });
 
@@ -386,6 +390,9 @@ export const prReviewNotificationJob = async (
       const dispatched = await dispatchPrReviewFollowUp({
         provider: delivery.route.provider,
         taskId: data.taskId,
+        ...(delivery.route.provider === 'slack'
+          ? { slackTeamId: delivery.route.slackTeamId }
+          : {}),
         channelId: delivery.route.channelId,
         threadId: delivery.route.threadId ?? null,
         followUpPrompt: followUp.prompt,

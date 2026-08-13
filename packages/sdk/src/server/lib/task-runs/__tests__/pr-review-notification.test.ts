@@ -9,6 +9,7 @@ const mockRedisLrange = vi.fn();
 const mockRedisGet = vi.fn();
 const mockQueueAdd = vi.fn();
 const mockResolveSlackTaskRunRouting = vi.fn();
+const mockFindManySlackInstallations = vi.fn();
 
 vi.mock('@roomote/db/server', async () => {
   const actual =
@@ -18,6 +19,14 @@ vi.mock('@roomote/db/server', async () => {
 
   return {
     ...actual,
+    db: {
+      query: {
+        slackInstallations: {
+          findMany: (...args: unknown[]) =>
+            mockFindManySlackInstallations(...args),
+        },
+      },
+    },
     persistPrReviewEvent: (...args: unknown[]) =>
       mockPersistPrReviewEvent(...args),
     recordPrReviewCycleState: (...args: unknown[]) =>
@@ -102,6 +111,7 @@ describe('durable PR review notification ownership', () => {
     mockClaimDuePrReviewDeliveries.mockResolvedValue([]);
     mockReleasePrReviewDeliveries.mockResolvedValue(undefined);
     mockRedisLrange.mockResolvedValue([]);
+    mockFindManySlackInstallations.mockResolvedValue([{ teamId: 'T123' }]);
     mockRedisGet.mockResolvedValue(null);
     mockQueueAdd.mockResolvedValue(undefined);
   });
@@ -272,6 +282,7 @@ describe('PR review notification routing', () => {
   it('resolves Slack through the shared resolver', async () => {
     mockResolveSlackTaskRunRouting.mockResolvedValue({
       channel: 'C123',
+      teamId: 'T123',
       threadTs: '1.2',
     });
     await expect(
@@ -282,9 +293,48 @@ describe('PR review notification routing', () => {
       } as never),
     ).resolves.toEqual({
       provider: 'slack',
+      slackTeamId: 'T123',
       channelId: 'C123',
       threadId: '1.2',
     });
+  });
+
+  it('returns null when no conversation can be resolved', async () => {
+    mockResolveSlackTaskRunRouting.mockResolvedValue({
+      channel: null,
+      teamId: null,
+      threadTs: null,
+      route: { kind: 'task', webPath: null },
+    });
+
+    const route = await resolvePrReviewNotificationRoute({
+      id: 1,
+      payload: {},
+      taskId: 'task-1',
+    } as never);
+
+    expect(route).toBeNull();
+  });
+
+  it('fails closed for legacy Slack routing when multiple workspaces are active', async () => {
+    mockResolveSlackTaskRunRouting.mockResolvedValue({
+      channel: 'C123',
+      teamId: null,
+      threadTs: '1.2',
+      route: { kind: 'task', webPath: null },
+    });
+    mockFindManySlackInstallations.mockResolvedValue([
+      { teamId: 'T123' },
+      { teamId: 'T456' },
+    ]);
+
+    await expect(
+      resolvePrReviewNotificationRoute({
+        id: 1,
+        payload: { channel: 'C123' },
+        taskId: 'task-1',
+      } as never),
+    ).resolves.toBeNull();
   });
 });
 

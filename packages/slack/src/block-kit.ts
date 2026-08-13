@@ -955,6 +955,7 @@ export async function showTaskConfiguration({
             slack,
             channel: event.channel,
             threadTs: threadId,
+            slackTeamId: slackInstallation.teamId,
             botUserId: slackInstallation.botUserId,
           });
           threadMessages = splitMessages.contextMessages;
@@ -1339,6 +1340,7 @@ export async function showTaskConfiguration({
               slack,
               channel: event.channel,
               threadTs: threadId,
+              slackTeamId: slackInstallation.teamId,
               botUserId: slackInstallation.botUserId,
             });
             fallbackThreadMessages = splitMessages.contextMessages;
@@ -1583,6 +1585,7 @@ export async function handleTaskConfiguration(
         slack: slack!,
         channel: originalEvent.channel,
         threadTs: threadId,
+        slackTeamId: teamId,
         botUserId: slackInstallation.botUserId,
       });
       threadMessages = splitMessages.contextMessages;

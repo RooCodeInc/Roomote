@@ -88,6 +88,7 @@ describe('startSlackAppMentionTask', () => {
       initiator: { kind: 'user', userId: 'user_123' },
       trigger: 'message',
       channel: 'C123',
+      teamId: 'T123',
       slackUserId: 'U123',
       text: 'hello',
       ts: '111.000',
@@ -135,6 +136,7 @@ describe('startSlackAppMentionTask', () => {
       initiator: { kind: 'user', userId: 'user_123' },
       trigger: 'message',
       channel: 'C123',
+      teamId: 'T123',
       slackUserId: 'U123',
       text: 'hello again',
       ts: '111.000',
@@ -144,6 +146,9 @@ describe('startSlackAppMentionTask', () => {
         'https://acme-team.slack.com/archives/C123/p111000?thread_ts=111.000&cid=C123',
     });
 
+    expect(findActiveSlackTaskRunMock).toHaveBeenCalledWith('111.000', {
+      slackTeamId: 'T123',
+    });
     expect(dbUpdateSetMock).toHaveBeenCalledWith({
       payload: expect.objectContaining({
         values: expect.arrayContaining([
@@ -182,6 +187,7 @@ describe('startSlackAppMentionTask', () => {
       initiator: { kind: 'user', userId: 'user_123' },
       trigger: 'message',
       channel: 'C123',
+      teamId: 'T123',
       slackUserId: 'U123',
       text: 'hello again',
       ts: '111.000',

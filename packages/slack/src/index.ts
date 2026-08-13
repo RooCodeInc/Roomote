@@ -21,6 +21,7 @@ export * from './slack-api-fetch';
 export * from './slack-channel-info-cache';
 export * from './slack-messages';
 export * from './slack-resume-lock';
+export * from './slack-task-run-workspace-scope';
 export * from './post-message-delivery';
 export * from './slack-notifier';
 export * from './slack-system-messages';

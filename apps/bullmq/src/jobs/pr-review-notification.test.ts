@@ -20,6 +20,7 @@ const {
   mockIsDurable,
   mockMigrateLegacy,
   mockRenewLease,
+  mockEq,
 } = vi.hoisted(() => ({
   mockFindFirstTaskRun: vi.fn(),
   mockFindFirstTaskPullRequest: vi.fn(),
@@ -40,6 +41,7 @@ const {
   mockIsDurable: vi.fn(),
   mockMigrateLegacy: vi.fn(),
   mockRenewLease: vi.fn(),
+  mockEq: vi.fn((...args: unknown[]) => ({ eq: args })),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -59,7 +61,7 @@ vi.mock('@roomote/db/server', () => ({
     },
   },
   and: vi.fn(() => 'and-condition'),
-  eq: vi.fn(() => 'eq-condition'),
+  eq: mockEq,
   desc: vi.fn(() => 'desc-order'),
   taskRuns: { taskId: 'taskId', createdAt: 'createdAt' },
   taskPullRequests: {
@@ -67,7 +69,7 @@ vi.mock('@roomote/db/server', () => ({
     repository: 'repository',
     prNumber: 'prNumber',
   },
-  slackInstallations: { isActive: 'isActive' },
+  slackInstallations: { teamId: 'teamId', isActive: 'isActive' },
 }));
 
 vi.mock('@roomote/slack', async (importOriginal) => {
@@ -170,6 +172,7 @@ describe('prReviewNotificationJob', () => {
       post: true,
       route: {
         provider: 'slack',
+        slackTeamId: 'T123',
         channelId: 'C123',
         threadId: '111.222',
       },
@@ -247,6 +250,7 @@ describe('prReviewNotificationJob', () => {
       taskId: 'task-1',
       route: {
         provider: 'slack',
+        slackTeamId: 'T123',
         channelId: 'C123',
         threadId: '111.222',
       },
@@ -254,6 +258,36 @@ describe('prReviewNotificationJob', () => {
       messageTs: '999.888',
     });
     expect(mockSchedule).not.toHaveBeenCalled();
+  });
+
+  it('uses the originating workspace installation when identifiers collide', async () => {
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'slack',
+        slackTeamId: 'T-second',
+        channelId: 'C-shared',
+        threadId: '111.222',
+      },
+      text: 'formatted-message',
+    });
+    mockFindFirstSlackInstallation.mockResolvedValue({
+      botAccessToken: 'xoxb-second',
+    });
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockEq).toHaveBeenCalledWith('teamId', 'T-second');
+    const SlackNotifier = vi.mocked(
+      (await import('@roomote/slack')).SlackNotifier,
+    );
+    expect(SlackNotifier).toHaveBeenCalledWith('xoxb-second');
+    expect(mockStickyFooterPost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C-shared',
+        threadTs: '111.222',
+      }),
+    );
   });
 
   it('posts Yes/Dismiss action buttons and stores the pending offer when the triage produced a follow-up', async () => {

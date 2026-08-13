@@ -286,6 +286,7 @@ export async function startAutoRoutedSlackTask({
           slack,
           channel,
           threadTs: threadId,
+          slackTeamId: slackInstallation.teamId,
           botUserId: slackInstallation.botUserId,
         });
         threadMessages = splitMessages.contextMessages;
