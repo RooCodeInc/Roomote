@@ -7,6 +7,7 @@ import {
   type PermissionRuleset,
 } from '@opencode-ai/sdk/v2/client';
 import { resolveEffectiveModelRuntimeEnv } from '@roomote/db/server';
+import { rewriteCloudflareOpenCodeModelId } from '@roomote/types';
 import type { z } from 'zod';
 import zodToJsonSchema from 'zod-to-json-schema';
 
@@ -155,6 +156,7 @@ function splitOpenCodeModelId(model: string): {
   providerID: string;
   modelID: string;
 } {
+  model = rewriteCloudflareOpenCodeModelId(model);
   const separatorIndex = model.indexOf('/');
 
   if (separatorIndex <= 0 || separatorIndex === model.length - 1) {

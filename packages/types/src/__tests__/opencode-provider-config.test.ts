@@ -146,19 +146,48 @@ describe('mergeCloudflareOpenCodeProviderConfig', () => {
   });
 
   it('does not treat a complete AI Gateway config as Workers AI config', () => {
+    const workersAi = mergeCloudflareOpenCodeProviderConfig(
+      {},
+      {
+        CLOUDFLARE_AI_GATEWAY_API_TOKEN: 'token',
+        CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+        CLOUDFLARE_AI_GATEWAY_ID: 'default',
+      },
+      [
+        'cloudflare-ai-gateway/openai/gpt-5.6-terra',
+        'cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code',
+      ],
+    )['cloudflare-workers-ai'] as
+      | { options?: Record<string, unknown> }
+      | undefined;
+
+    expect(workersAi?.options?.apiKey).toBeUndefined();
+    expect(workersAi?.options?.baseURL).toBeUndefined();
+  });
+
+  it('registers rewritten AI Gateway models when the token is withheld', () => {
+    const merged = mergeCloudflareOpenCodeProviderConfig(
+      {},
+      {
+        CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+        CLOUDFLARE_AI_GATEWAY_ID: 'default',
+      },
+      ['cloudflare-ai-gateway/workers-ai/@cf/zai-org/glm-5.2'],
+    );
+
+    expect(merged['cloudflare-ai-gateway']).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      models: {
+        '@cf/zai-org/glm-5.2': { name: '@cf/zai-org/glm-5.2' },
+      },
+    });
     expect(
-      mergeCloudflareOpenCodeProviderConfig(
-        {},
-        {
-          CLOUDFLARE_AI_GATEWAY_API_TOKEN: 'token',
-          CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
-          CLOUDFLARE_AI_GATEWAY_ID: 'default',
-        },
-        [
-          'cloudflare-ai-gateway/openai/gpt-5.6-terra',
-          'cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code',
-        ],
-      )['cloudflare-workers-ai'],
+      (merged['cloudflare-ai-gateway'] as { options?: Record<string, unknown> })
+        .options?.baseURL,
+    ).toBeUndefined();
+    expect(
+      (merged['cloudflare-ai-gateway'] as { options?: Record<string, unknown> })
+        .options?.apiKey,
     ).toBeUndefined();
   });
 

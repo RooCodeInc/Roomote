@@ -302,33 +302,35 @@ export function mergeCloudflareOpenCodeProviderConfig(
       continue;
     }
 
-    const apiKey = readRequiredEnv(runtimeEnv, setupProvider.envVarName);
-    const accountId = readRequiredEnv(
-      runtimeEnv,
-      gatewayProvider.resource.envVarName,
-    );
-
-    if (
-      !apiKey ||
-      !accountId ||
-      !INFERENCE_GATEWAY_RESOURCE_PATTERN.test(accountId)
-    ) {
-      continue;
-    }
-
     const existingProvider = asRecord(merged[providerId]);
     const existingOptions = asRecord(existingProvider.options);
     const existingModels = asRecord(existingProvider.models);
     const options: Record<string, unknown> = {
       ...existingOptions,
-      baseURL: `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1`,
-      apiKey: `{env:${setupProvider.envVarName}}`,
     };
-
+    const apiKey = readRequiredEnv(runtimeEnv, setupProvider.envVarName);
+    const accountId = readRequiredEnv(
+      runtimeEnv,
+      gatewayProvider.resource.envVarName,
+    );
+    // Register rewritten models even when the token is withheld so gateway
+    // mode can select `@cf/...` ids. Attach a direct `/ai/v1` URL only when
+    // the namespaced credentials are present in this env.
     if (
-      !appendRequiredCloudflareHeaders(options, gatewayProvider, runtimeEnv)
+      apiKey &&
+      accountId &&
+      INFERENCE_GATEWAY_RESOURCE_PATTERN.test(accountId)
     ) {
-      continue;
+      options.baseURL = `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1`;
+      options.apiKey = `{env:${setupProvider.envVarName}}`;
+
+      if (
+        !appendRequiredCloudflareHeaders(options, gatewayProvider, runtimeEnv)
+      ) {
+        delete options.baseURL;
+        delete options.apiKey;
+        delete options.headers;
+      }
     }
 
     merged = {

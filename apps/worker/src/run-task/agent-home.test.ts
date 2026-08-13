@@ -405,6 +405,40 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('registers rewritten AI Gateway models when the gateway is serving the token', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'cloudflare-ai-gateway/workers-ai/@cf/zai-org/glm-5.2',
+        CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+        CLOUDFLARE_AI_GATEWAY_ID: 'default',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'CLOUDFLARE_AI_GATEWAY_API_TOKEN',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { models?: Record<string, unknown>; options?: Record<string, unknown> }
+      >;
+    };
+
+    expect(config.provider['cloudflare-ai-gateway']).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      options: {
+        baseURL:
+          'https://api.example.com/api/inference/cloudflare-ai-gateway/v1',
+        apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      },
+      models: {
+        '@cf/zai-org/glm-5.2': { name: '@cf/zai-org/glm-5.2' },
+      },
+    });
+    expect(config.provider['cloudflare-ai-gateway']?.models).not.toHaveProperty(
+      'workers-ai/@cf/zai-org/glm-5.2',
+    );
+  });
+
   it('binds Cloudflare AI Gateway to Roomote env names in direct mode', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
