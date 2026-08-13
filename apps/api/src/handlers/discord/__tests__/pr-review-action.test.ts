@@ -124,6 +124,48 @@ describe('handleDiscordPrReviewActionCallback', () => {
     );
   });
 
+  it('renders the resolution as subtext when the feedback is empty', async () => {
+    mocks.claimPending.mockResolvedValue(null);
+
+    await handleDiscordPrReviewActionCallback({
+      provider: {} as never,
+      applicationId: 'app-1',
+      interaction: {
+        id: 'interaction-1',
+        application_id: 'app-1',
+        type: 3,
+        token: 'token-1',
+        user: { id: 'discord-user-1', username: 'dan' },
+        message: {
+          id: 'message-1',
+          channel_id: 'thread-1',
+          content: '',
+          author: { id: 'bot-1', username: 'Roomote' },
+          attachments: [],
+          mentions: [],
+        },
+      },
+      interactionDeferred: true,
+      channel: {
+        channelId: 'thread-1',
+        channelName: 'Task thread',
+        channelType: 11,
+        guildId: 'guild-1',
+        parentChannelId: 'channel-1',
+        isDirectMessage: false,
+        isThread: true,
+      },
+      choice: 'yes',
+      nonce: 'nonce-1',
+    });
+
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: '-# This offer was already handled or has expired.',
+      }),
+    );
+  });
+
   it('truncates preserved feedback to fit the action resolution', async () => {
     const content = 'x'.repeat(2_000);
 

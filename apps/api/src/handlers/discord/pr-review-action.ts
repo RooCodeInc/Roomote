@@ -43,11 +43,11 @@ export async function handleDiscordPrReviewActionCallback(input: {
       text,
     });
   const replyToOffer = (resolution: string) => {
+    const formattedResolution = `-# ${resolution}`;
     const content = input.interaction.message?.content;
-    if (!content) return reply(resolution);
+    if (!content) return reply(formattedResolution);
 
     const separator = '\n\n';
-    const formattedResolution = `-# ${resolution}`;
     const availableContentLength =
       DISCORD_MAX_MESSAGE_LENGTH -
       separator.length -
