@@ -15,6 +15,7 @@ import {
 const ANTHROPIC = getSetupModelProvider('anthropic');
 const OPENROUTER = getSetupModelProvider('openrouter');
 const GOOGLE = getSetupModelProvider('google');
+const XAI_SUBSCRIPTION = getSetupModelProvider('xai-subscription');
 
 describe('buildAutoAddedTaskModelSettings', () => {
   it('seeds a fresh deployment with only the connected provider models', () => {
@@ -44,6 +45,21 @@ describe('buildAutoAddedTaskModelSettings', () => {
     expect(result!.taskModelSettings.defaultModelId).toBe(
       ANTHROPIC.defaultRoomoteModel,
     );
+  });
+
+  it('seeds only Grok 4.6 for a fresh Grok subscription connect', () => {
+    const result = buildAutoAddedTaskModelSettings({
+      provider: XAI_SUBSCRIPTION,
+      persistedTaskModelSettings: null,
+      connectedProviderIds: new Set(['xai-subscription', 'xai']),
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.taskModelSettings.models?.map((model) => model.id)).toEqual([
+      'xai/grok-4.6',
+    ]);
+    expect(result!.taskModelSettings.allowedModelIds).toEqual(['xai/grok-4.6']);
+    expect(result!.taskModelSettings.defaultModelId).toBe('xai/grok-4.6');
   });
 
   it('keeps the usable default-catalog models and effective default when another provider is also connected', () => {
@@ -88,6 +104,75 @@ describe('buildAutoAddedTaskModelSettings', () => {
         connectedProviderIds: new Set(['anthropic']),
       }),
     ).toBeNull();
+  });
+
+  it('does not resurrect removed Bedrock models when the key is re-saved', () => {
+    // amazon-bedrock serves `bedrock-mantle/` model ids: the guard must
+    // match on the model-id prefix derived from the provider's own models.
+    expect(
+      buildAutoAddedTaskModelSettings({
+        provider: getSetupModelProvider('amazon-bedrock'),
+        persistedTaskModelSettings: {
+          models: [
+            {
+              id: 'bedrock-mantle/anthropic.claude-sonnet-5',
+              displayName: 'Claude Sonnet 5',
+              family: 'Sonnet',
+            },
+          ],
+          allowedModelIds: ['bedrock-mantle/anthropic.claude-sonnet-5'],
+          defaultModelId: 'bedrock-mantle/anthropic.claude-sonnet-5',
+        },
+        connectedProviderIds: new Set(['amazon-bedrock', 'bedrock-mantle']),
+      }),
+    ).toBeNull();
+  });
+
+  it('does not resurrect a removed Grok model when the subscription re-authenticates', () => {
+    // xai-subscription serves `xai/` model ids: the "provider already has
+    // models" guard must match on the model-id prefix, not the catalog id.
+    expect(
+      buildAutoAddedTaskModelSettings({
+        provider: XAI_SUBSCRIPTION,
+        persistedTaskModelSettings: {
+          models: [
+            {
+              id: 'xai/grok-4.6',
+              displayName: 'Grok 4.6',
+              family: 'Grok',
+            },
+          ],
+          allowedModelIds: ['xai/grok-4.6'],
+          defaultModelId: 'xai/grok-4.6',
+        },
+        connectedProviderIds: new Set(['xai-subscription', 'xai']),
+      }),
+    ).toBeNull();
+  });
+
+  it('carries the catalog sync deletion memory through an auto-add', () => {
+    const result = buildAutoAddedTaskModelSettings({
+      provider: ANTHROPIC,
+      persistedTaskModelSettings: {
+        models: [
+          {
+            id: 'xai/grok-4.6',
+            displayName: 'Grok 4.6',
+            family: 'Grok',
+          },
+        ],
+        allowedModelIds: ['xai/grok-4.6'],
+        defaultModelId: 'xai/grok-4.6',
+        catalogSyncedModelIds: ['xai/grok-4.6', 'xai/grok-4.5'],
+      },
+      connectedProviderIds: new Set(['anthropic', 'xai']),
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.taskModelSettings.catalogSyncedModelIds).toEqual([
+      'xai/grok-4.6',
+      'xai/grok-4.5',
+    ]);
   });
 
   it('returns null when connecting OpenRouter on a fresh deployment (defaults already cover it)', () => {
@@ -280,6 +365,17 @@ describe('appendRecommendedTaskModels', () => {
 
     expect(result.length).toBeGreaterThan(0);
     expect(result.every((model) => model.id.startsWith('openai/'))).toBe(true);
+  });
+
+  it('appends the recommended Grok models for a connected Grok subscription', () => {
+    const result = appendRecommendedTaskModels({
+      models: [],
+      connectedProviderIds: new Set(['xai-subscription']),
+    });
+
+    expect(result.map((model) => model.id).sort()).toEqual(
+      XAI_SUBSCRIPTION.suggestedTaskModels.map((model) => model.id).sort(),
+    );
   });
 });
 

@@ -21,8 +21,10 @@ import type {
   LaunchTaskResponse,
   CancelTaskResponse,
   StopTaskResponse,
+  UpdateTaskModelSelectionResponse,
   SendMessageResponse,
   ListEnvironmentsResponse,
+  ListTaskModelsResponse,
   CreateEnvironmentResponse,
   UpdateEnvironmentResponse,
   RecordVerificationResponse,
@@ -31,6 +33,8 @@ import type {
   SourceControlPullRequestReadResponse,
   SourceControlPullRequestResponse,
   SourceControlIssueResponse,
+  TaskGoalResponse,
+  TaskGoalMutationResponse,
 } from './types.js';
 
 /**
@@ -91,6 +95,20 @@ export async function searchTasks(
 }
 
 /**
+ * List models enabled for task model selection.
+ */
+export async function listTaskModels(
+  config: RoomoteConfig,
+): Promise<ListTaskModelsResponse> {
+  return apiFetch(
+    config,
+    '/api/mcp/tasks/models',
+    {},
+    'Failed to list task models',
+  );
+}
+
+/**
  * Get a task summary via the platform API.
  */
 export async function getTaskSummary(
@@ -102,6 +120,37 @@ export async function getTaskSummary(
     `/api/mcp/tasks/${encodeURIComponent(taskId)}/summary`,
     {},
     'Failed to get task summary',
+  );
+}
+
+export async function getTaskGoal(
+  config: RoomoteConfig,
+  runId: number,
+): Promise<TaskGoalResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/runs/${runId}/goal`,
+    {},
+    'Failed to get goal',
+  );
+}
+
+export async function updateTaskGoal(
+  config: RoomoteConfig,
+  runId: number,
+  params:
+    | { action: 'complete'; generation: string | null }
+    | { action: 'blocked'; generation: string | null; reason: string },
+): Promise<TaskGoalMutationResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/runs/${runId}/goal`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to update goal',
   );
 }
 
@@ -195,6 +244,30 @@ export async function cancelTask(
     `/api/mcp/tasks/${encodeURIComponent(taskId)}/cancel`,
     { method: 'POST' },
     'Failed to cancel task',
+  );
+}
+
+/**
+ * Update one model role for a task via the platform API.
+ */
+export async function updateTaskModelSelection(
+  config: RoomoteConfig,
+  taskId: string,
+  params: {
+    role: string;
+    model?: string | null;
+    reasoningEffort?: string | null;
+  },
+): Promise<UpdateTaskModelSelectionResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/${encodeURIComponent(taskId)}/model_selection`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to update task model selection',
   );
 }
 

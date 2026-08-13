@@ -348,6 +348,7 @@ describe('slack thread lookup MCP endpoint', () => {
         payload: {},
       }) as never,
     );
+    isUserInChannelMock.mockResolvedValue(false);
     getMessageMock.mockResolvedValue({
       text: 'reply',
       ts: '111.222',
@@ -382,11 +383,8 @@ describe('slack thread lookup MCP endpoint', () => {
     expect(body.channelId).toBe('CENG');
     expect(resolveChannelIdMock).toHaveBeenCalledWith('#eng');
     expect(isAppInChannelMock).toHaveBeenCalledWith('CENG');
-    expect(isUserInChannelMock).toHaveBeenCalledWith({
-      channelId: 'CENG',
-      userId: 'UACTOR',
-    });
-    expect(isPublicChannelMock).not.toHaveBeenCalled();
+    expect(isUserInChannelMock).not.toHaveBeenCalled();
+    expect(isPublicChannelMock).toHaveBeenCalledWith('CENG');
     expect(getMessageMock).toHaveBeenCalledWith({
       channel: 'CENG',
       messageTs: '111.222',
@@ -428,6 +426,7 @@ describe('slack thread lookup MCP endpoint', () => {
     vi.mocked(db.query.slackUserMappings.findFirst).mockResolvedValue(
       null as never,
     );
+    isPublicChannelMock.mockResolvedValue(false);
 
     const response = await postThreadLookup(runToken, {
       channel: 'eng',
@@ -451,6 +450,7 @@ describe('slack thread lookup MCP endpoint', () => {
         payload: {},
       }) as never,
     );
+    isPublicChannelMock.mockResolvedValue(false);
     isUserInChannelMock.mockResolvedValue(false);
 
     const response = await postThreadLookup(runToken, {

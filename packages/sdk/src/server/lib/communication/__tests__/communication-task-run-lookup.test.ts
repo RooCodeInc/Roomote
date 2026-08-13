@@ -60,7 +60,10 @@ vi.mock('@roomote/db/server', () => {
   };
 });
 
-import { findTaskBackedAutomationReportRun } from '../communication-task-run-lookup';
+import {
+  findActiveCommunicationTaskRun,
+  findTaskBackedAutomationReportRun,
+} from '../communication-task-run-lookup';
 
 function automationRun(id: number, taskId: string) {
   return {
@@ -156,6 +159,40 @@ describe('findTaskBackedAutomationReportRun', () => {
     expect(whereConditions()).not.toContainEqual({
       left: 'trackedMessages.automationKey',
       right: 'announcer',
+    });
+  });
+});
+
+describe('findActiveCommunicationTaskRun', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    queryResults.length = 0;
+  });
+
+  it('preserves conversation-wide lookup unless an immutable task binding is supplied', async () => {
+    queryResults.push([], []);
+
+    await findActiveCommunicationTaskRun({
+      provider: 'discord',
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+    });
+    await findActiveCommunicationTaskRun({
+      provider: 'discord',
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      taskId: 'task-1',
+    });
+
+    const firstConditions = whereMock.mock.calls[0]?.[0]?.conditions ?? [];
+    const secondConditions = whereMock.mock.calls[1]?.[0]?.conditions ?? [];
+    expect(firstConditions).not.toContainEqual({
+      left: 'taskRuns.taskId',
+      right: 'task-1',
+    });
+    expect(secondConditions).toContainEqual({
+      left: 'taskRuns.taskId',
+      right: 'task-1',
     });
   });
 });

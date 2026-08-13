@@ -140,7 +140,15 @@ interface OpenCodeServerHarnessOptions {
     message: string;
     details?: Record<string, unknown>;
   }) => void;
-  beforeQueuedPrompt?: (input: { userId?: string }) => Promise<void | {
+  beforeQueuedPrompt?: (input: {
+    userId?: string;
+    /**
+     * Distinguishes deliveries that survive a reconnect (queued prompts are
+     * restored and replayed) from ones that do not (user-input answers fail
+     * with an error when the hook asks for a reconnect).
+     */
+    kind: 'queuedPrompt' | 'userInputAnswer';
+  }) => Promise<void | {
     shouldReconnect: boolean;
     shouldBlockPrompt?: boolean;
     shouldSkipPrompt?: boolean;
@@ -3228,7 +3236,10 @@ export class OpenCodeServerHarness
       return true;
     }
 
-    const result = await this.beforeQueuedPrompt({ userId });
+    const result = await this.beforeQueuedPrompt({
+      userId,
+      kind: 'userInputAnswer',
+    });
 
     if (!result) {
       return true;
@@ -5216,7 +5227,10 @@ export class OpenCodeServerHarness
       return true;
     }
 
-    const result = await this.beforeQueuedPrompt({ userId: prompt.userId });
+    const result = await this.beforeQueuedPrompt({
+      userId: prompt.userId,
+      kind: 'queuedPrompt',
+    });
 
     if (!result) {
       return true;

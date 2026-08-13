@@ -15,13 +15,18 @@ import { submitMcpRecommendations } from './submitMcpRecommendations';
 import { getTaskComputeLogs } from './getTaskComputeLogs';
 import { describeVideo } from './describeVideo';
 import { manageSourceControl } from './manageSourceControl';
+import { updateTaskModelSelection } from './updateModelSelection';
+import { listTaskModels } from './listModels';
+import { getGoal, manageGoal } from './manageGoal';
 
 export const tasksRouter = new Hono<{ Variables: Variables }>();
 
 tasksRouter.get('/', searchTasks);
+tasksRouter.get('/models', listTaskModels);
 tasksRouter.get('/:taskId/summary', getTaskSummary);
 tasksRouter.get('/:taskId/messages', getTaskMessages);
 tasksRouter.get('/:taskId/compute_logs', getTaskComputeLogs);
+tasksRouter.get('/runs/:runId/goal', getGoal);
 tasksRouter.post('/', launchTask);
 tasksRouter.post('/:taskId/cancel', cancelTask);
 tasksRouter.post('/:taskId/stop', stopTask);
@@ -29,6 +34,8 @@ tasksRouter.post('/:taskId/send_message', sendMessage);
 tasksRouter.post('/:taskId/steer_message', steerMessage);
 tasksRouter.post('/:taskId/describe_video', describeVideo);
 tasksRouter.post('/:taskId/source_control', manageSourceControl);
+tasksRouter.post('/:taskId/model_selection', updateTaskModelSelection);
 tasksRouter.post('/:taskId/automation_work_items', submitAutomationWorkItems);
 tasksRouter.post('/:taskId/task_suggestions', submitTaskSuggestions);
 tasksRouter.post('/:taskId/mcp_recommendations', submitMcpRecommendations);
+tasksRouter.post('/runs/:runId/goal', manageGoal);

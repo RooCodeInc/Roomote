@@ -453,6 +453,153 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     ]);
   });
 
+  it('paginates every GitHub review thread and every comment in a thread', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const graphql = vi
+      .fn()
+      .mockResolvedValueOnce({
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              nodes: [
+                {
+                  id: 'PRRT_first',
+                  isResolved: false,
+                  isOutdated: false,
+                  path: 'src/first.ts',
+                  line: 1,
+                  originalLine: 1,
+                  comments: {
+                    nodes: [
+                      {
+                        databaseId: 100,
+                        pullRequestReview: { databaseId: 900 },
+                        author: { login: 'reviewer[bot]' },
+                        body: 'First comment page.',
+                        createdAt: '2026-08-01T00:00:00Z',
+                        url: null,
+                      },
+                    ],
+                    pageInfo: {
+                      hasNextPage: true,
+                      endCursor: 'comment-cursor-1',
+                    },
+                  },
+                },
+              ],
+              pageInfo: { hasNextPage: true, endCursor: 'thread-cursor-1' },
+            },
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              nodes: [
+                {
+                  id: 'PRRT_second',
+                  isResolved: false,
+                  isOutdated: false,
+                  path: 'src/second.ts',
+                  line: 2,
+                  originalLine: 2,
+                  comments: {
+                    nodes: [
+                      {
+                        databaseId: 200,
+                        author: { login: 'reviewer[bot]' },
+                        body: 'Finding after the first 100 threads.',
+                        createdAt: '2026-08-01T00:00:01Z',
+                        url: null,
+                      },
+                    ],
+                    pageInfo: { hasNextPage: false, endCursor: null },
+                  },
+                },
+              ],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        node: {
+          comments: {
+            nodes: [
+              {
+                databaseId: 101,
+                author: { login: 'reviewer[bot]' },
+                body: 'Comment after the first 100 comments.',
+                createdAt: '2026-08-01T00:00:02Z',
+                url: null,
+              },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      });
+    mockGetOctokit.mockReturnValue({
+      graphql,
+      paginate: vi.fn().mockResolvedValue([]),
+      rest: {
+        pulls: { listReviewComments: vi.fn() },
+        issues: { listComments: vi.fn() },
+      },
+    });
+
+    const result = await readSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'github',
+      }),
+      input: {
+        action: 'list_pull_request_comments',
+        repositoryFullName: 'acme/backend',
+        prNumber: 55,
+        sourceControlProvider: 'github',
+      },
+    });
+
+    if (!('threads' in result)) {
+      throw new Error('Expected a comments result.');
+    }
+
+    expect(result.threads).toEqual([
+      expect.objectContaining({
+        id: 'PRRT_first',
+        comments: [
+          expect.objectContaining({ id: '100' }),
+          expect.objectContaining({ id: '101' }),
+        ],
+      }),
+      expect.objectContaining({
+        id: 'PRRT_second',
+        comments: [expect.objectContaining({ id: '200' })],
+      }),
+    ]);
+    expect(result.threads[0]?.comments[0]).toMatchObject({
+      id: '100',
+      reviewId: '900',
+    });
+    expect(graphql).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('reviewThreads(first: 100, after: $cursor)'),
+      expect.objectContaining({ cursor: 'thread-cursor-1' }),
+    );
+    expect(graphql).toHaveBeenNthCalledWith(
+      3,
+      expect.stringContaining('comments(first: 100, after: $cursor)'),
+      { threadId: 'PRRT_first', cursor: 'comment-cursor-1' },
+    );
+  });
+
   it('maps GitLab discussions into threads and issue comments', async () => {
     mockRepositoriesFindFirst.mockResolvedValue({
       installationId: null,

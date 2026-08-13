@@ -48,4 +48,33 @@ describe('buildEnvironmentVerificationPrompt', () => {
     );
     expect(prompt).toContain('`action: "record_verification"`');
   });
+
+  it('tells the task to wait with one bounded blocking command instead of short sleeps', () => {
+    const prompt = buildEnvironmentVerificationPrompt({
+      environmentId: 'environment-123',
+      environmentName: 'Example',
+    });
+
+    expect(prompt).toContain(
+      'Wait with a single bounded blocking shell command (for example one `timeout`-wrapped poll loop in one tool call) instead of many separate short sleep calls across turns',
+    );
+    expect(prompt).toContain(
+      "treat the platform's environment-setup update message as the completion signal when one arrives",
+    );
+  });
+
+  it('carves out clearly pre-existing repository test failures from readiness', () => {
+    const prompt = buildEnvironmentVerificationPrompt({
+      environmentId: 'environment-123',
+      environmentName: 'Example',
+    });
+
+    expect(prompt).toContain('Classify any test failures before deciding');
+    expect(prompt).toContain(
+      'failures that point to a setup or environment-definition problem',
+    );
+    expect(prompt).toContain(
+      'treat the environment as ready and list those failures explicitly as pre-existing',
+    );
+  });
 });

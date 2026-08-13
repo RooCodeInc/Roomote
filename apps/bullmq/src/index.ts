@@ -95,7 +95,7 @@ const { queue: discordGatewayEventsQueue, worker: discordGatewayEventsWorker } =
   startDiscordGatewayEventsQueue();
 
 const { schedulerQueue, schedulerWorker, schedulerQueueEvents } =
-  startScheduler();
+  await startScheduler();
 const {
   sandboxOidcRefreshQueue,
   sandboxOidcRefreshWorker,

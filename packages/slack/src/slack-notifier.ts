@@ -84,6 +84,39 @@ type SlackUsersListResponse = {
 
 const SLACK_USERS_LIST_LIMIT = 999;
 const MAX_SLACK_CONVERSATIONS_REPLIES_RATE_LIMIT_RETRIES = 3;
+const MAX_SLACK_UPDATE_RETRIES = 2;
+const SLACK_UPDATE_RETRY_DELAY_MS = 250;
+const MAX_SLACK_UPDATE_RATE_LIMIT_WAIT_MS = 5_000;
+
+const SLACK_UPDATE_STALE_TARGET_ERRORS = new Set([
+  'file_deleted',
+  'file_is_deleted',
+  'message_not_found',
+]);
+const SLACK_UPDATE_AUTHORIZATION_ERRORS = new Set([
+  'access_denied',
+  'account_inactive',
+  'invalid_auth',
+  'missing_scope',
+  'no_permission',
+  'not_allowed_token_type',
+  'not_authed',
+  'team_access_not_granted',
+  'token_expired',
+  'token_revoked',
+]);
+const SLACK_UPDATE_TRANSIENT_ERRORS = new Set([
+  'edit_conflict',
+  'external_channel_migrating',
+  'fatal_error',
+  'internal_error',
+  'ratelimited',
+  'request_timeout',
+  'service_unavailable',
+  'streaming_state_conflict',
+  'team_added_to_org',
+  'update_failed',
+]);
 
 const SUGGESTION_REACTION_START_NOTICE_REGEX =
   /\n\n(?:Started by <@[^>\s]+>(?: via :thumbsup:)?\.|Accepted by <@[^>\s]+>)\s*$/;
@@ -957,44 +990,101 @@ export class SlackNotifier {
     ts: string;
     message: SlackMessage;
   }): Promise<boolean> {
-    try {
-      const message = normalizeOutboundMessage({ channel, ts, ...rest });
+    const message = normalizeOutboundMessage({ channel, ts, ...rest });
 
-      const response = await slackFetch(buildSlackApiUrl('chat.update'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.token}`,
-        },
-        body: JSON.stringify(message),
-      });
+    for (let attempt = 0; attempt <= MAX_SLACK_UPDATE_RETRIES; attempt += 1) {
+      try {
+        const response = await slackFetch(buildSlackApiUrl('chat.update'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            Authorization: `Bearer ${this.token}`,
+          },
+          body: JSON.stringify(message),
+        });
 
-      if (!response.ok) {
-        console.error(
-          `[updateMessage] Slack chat.update API failed: ${response.status} ${response.statusText}`,
+        if (!response.ok) {
+          const retryable = response.status === 429 || response.status >= 500;
+          const reason =
+            response.status === 401 || response.status === 403
+              ? 'authorization'
+              : retryable
+                ? 'transport'
+                : 'request';
+
+          if (retryable && attempt < MAX_SLACK_UPDATE_RETRIES) {
+            const retryAfterMs =
+              response.status === 429
+                ? Math.min(
+                    getSlackRetryAfterMs(response.headers.get('Retry-After')),
+                    MAX_SLACK_UPDATE_RATE_LIMIT_WAIT_MS,
+                  )
+                : SLACK_UPDATE_RETRY_DELAY_MS * 2 ** attempt;
+            console.warn(
+              `[updateMessage] Slack chat.update retry reason=${reason} status=${response.status} channel=${channel ?? 'unknown'} ts=${ts} attempt=${attempt + 1}`,
+            );
+            await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
+            continue;
+          }
+
+          console.error(
+            `[updateMessage] Slack chat.update failed reason=${reason} status=${response.status} channel=${channel ?? 'unknown'} ts=${ts} retryable=${retryable}`,
+          );
+          return false;
+        }
+
+        const result: SlackResponse = await response.json();
+
+        if (result.ok) {
+          return true;
+        }
+
+        const code = result.error ?? 'unknown_error';
+        const reason = SLACK_UPDATE_STALE_TARGET_ERRORS.has(code)
+          ? 'stale_target'
+          : code === 'cant_update_message'
+            ? 'ownership'
+            : SLACK_UPDATE_AUTHORIZATION_ERRORS.has(code)
+              ? 'authorization'
+              : SLACK_UPDATE_TRANSIENT_ERRORS.has(code)
+                ? 'transient'
+                : 'request';
+        const retryable = reason === 'transient';
+
+        if (retryable && attempt < MAX_SLACK_UPDATE_RETRIES) {
+          console.warn(
+            `[updateMessage] Slack chat.update retry reason=${reason} code=${code} channel=${channel ?? 'unknown'} ts=${ts} attempt=${attempt + 1}`,
+          );
+          await new Promise((resolve) =>
+            setTimeout(resolve, SLACK_UPDATE_RETRY_DELAY_MS * 2 ** attempt),
+          );
+          continue;
+        }
+
+        const log = reason === 'stale_target' ? console.warn : console.error;
+        log(
+          `[updateMessage] Slack chat.update rejected reason=${reason} code=${code} channel=${channel ?? 'unknown'} ts=${ts} retryable=${retryable}`,
         );
+        return false;
+      } catch (error) {
+        if (attempt < MAX_SLACK_UPDATE_RETRIES) {
+          console.warn(
+            `[updateMessage] Slack chat.update retry reason=transport channel=${channel ?? 'unknown'} ts=${ts} attempt=${attempt + 1}`,
+          );
+          await new Promise((resolve) =>
+            setTimeout(resolve, SLACK_UPDATE_RETRY_DELAY_MS * 2 ** attempt),
+          );
+          continue;
+        }
 
+        console.error(
+          `[updateMessage] Slack chat.update failed reason=transport channel=${channel ?? 'unknown'} ts=${ts} retryable=true error=${error instanceof Error ? error.message : String(error)}`,
+        );
         return false;
       }
-
-      const result: SlackResponse = await response.json();
-
-      if (!result.ok) {
-        console.error(
-          `[updateMessage] Slack chat.update error: ${result.error} - ${JSON.stringify(result)} - ${JSON.stringify(message)}`,
-        );
-
-        return false;
-      }
-
-      return true;
-    } catch (error) {
-      console.error(
-        `[updateMessage] Failed to update Slack message: ${error instanceof Error ? error.message : String(error)}`,
-      );
-
-      return false;
     }
+
+    return false;
   }
 
   public async hasMessageInThread({

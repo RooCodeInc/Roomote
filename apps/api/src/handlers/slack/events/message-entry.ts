@@ -1289,6 +1289,7 @@ async function processAutomatedAppMentionTask(params: {
   };
   const followUpRoute = await resolveSlackThreadFollowUpRoute({
     threadId,
+    slackTeamId: teamId,
   });
   const followUpOutcome = await dispatchSlackThreadFollowUp<boolean>({
     route: followUpRoute,
@@ -1305,6 +1306,7 @@ async function processAutomatedAppMentionTask(params: {
         slack,
         launchIdentity.launchUserId,
         activeRun,
+        teamId,
         slackInstallation.botUserId,
       ).catch((error) => {
         console.error(
@@ -1328,6 +1330,7 @@ async function processAutomatedAppMentionTask(params: {
           null,
           ackEmoji,
           completionEmoji,
+          teamId,
           slackInstallation.botUserId,
         );
 
@@ -1596,7 +1599,7 @@ async function handleSlackEntryEvent(params: {
 
   const activeRun = skipThreadFollowupHandling
     ? null
-    : await findActiveSlackTaskRun(threadId);
+    : await findActiveSlackTaskRun(threadId, { slackTeamId: teamId });
   const shouldRecordThreadReply =
     Boolean(event.thread_ts) &&
     !skipThreadFollowupHandling &&
@@ -1621,6 +1624,7 @@ async function handleSlackEntryEvent(params: {
   if (!skipThreadFollowupHandling) {
     const followUpRoute = await resolveSlackThreadFollowUpRoute({
       threadId,
+      slackTeamId: teamId,
       prefetchedActiveRun: activeRun ?? null,
       allowCompletedResume: false,
     });
@@ -1639,6 +1643,7 @@ async function handleSlackEntryEvent(params: {
           slack,
           userMapping.userId,
           activeThreadRun,
+          teamId,
           slackInstallation.botUserId,
           prefetchedThreadMessages,
         ).catch((error) => {
@@ -1716,6 +1721,7 @@ async function handleSlackEntryEvent(params: {
 
   const followUpRoute = await resolveSlackThreadFollowUpRoute({
     threadId,
+    slackTeamId: teamId,
     prefetchedActiveRun: null,
   });
   const startFreshTaskConfiguration = async (errorLogPrefix: string) => {
@@ -1750,6 +1756,7 @@ async function handleSlackEntryEvent(params: {
         slack,
         userMapping.userId,
         activeThreadRun,
+        teamId,
         slackInstallation.botUserId,
         prefetchedThreadMessages,
       ).catch((error) => {
@@ -1772,6 +1779,7 @@ async function handleSlackEntryEvent(params: {
         userMapping.userId,
         ackEmoji,
         completionEmoji,
+        teamId,
         slackInstallation.botUserId,
       )
         .then(async (handled) => {

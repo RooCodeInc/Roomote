@@ -987,6 +987,7 @@ export function formatSlackThreadContext({
   threadMessages,
   ts,
   latestOwnBotReply,
+  includeMessagesAfterCurrent,
 }: {
   threadMessages?: Array<{
     ts: string;
@@ -997,6 +998,7 @@ export function formatSlackThreadContext({
   }>;
   ts: string;
   latestOwnBotReply?: { ts: string; text: string };
+  includeMessagesAfterCurrent?: boolean;
 }): string {
   if ((!threadMessages || threadMessages.length === 0) && !latestOwnBotReply) {
     return '';
@@ -1005,6 +1007,7 @@ export function formatSlackThreadContext({
     threadMessages: threadMessages ?? [],
     currentMessageTs: ts,
     latestOwnBotReply,
+    includeMessagesAfterCurrent,
   });
 
   return [threadContext, replyingTo].filter(Boolean).join('\n\n');

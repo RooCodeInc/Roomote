@@ -7,11 +7,16 @@ import {
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   isTaskModelIdDisabled,
+  mergeAmazonBedrockProviderConfig,
+  mergeBedrockMantleOpenAiProviderConfig,
+  mergeBedrockMantleProviderConfig,
   mergeOpenAiCompatibleProviderConfig,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenCodeChatGptFastModeOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
+  stripOpenCodeModelReasoningOptions,
+  toBedrockMantleRuntimeModelId,
   type OpenRouterVariantModelAlias,
 } from '@roomote/types';
 
@@ -44,18 +49,30 @@ function buildModelBackedOpenCodeConfigContent(
   // OpenRouter variant models (`:nitro`, `:free`, ...) are rewritten to their
   // catalog base model and mapped back to the variant through provider model
   // aliases below, because OpenCode rejects model IDs its catalog does not
-  // contain.
+  // contain. Bedrock Mantle GPT ids are rewritten onto their dedicated
+  // OpenAI-compatible provider first, mirroring the task worker — without the
+  // rewrite (and the provider registrations below) a Bedrock helper model
+  // fails with ProviderModelNotFoundError before any request is made.
   const variantAliases = new Map<string, OpenRouterVariantModelAlias>();
-  const model = collectOpenRouterVariantModelAlias(variantAliases, rawModel);
+  const model = collectOpenRouterVariantModelAlias(
+    variantAliases,
+    toBedrockMantleRuntimeModelId(rawModel),
+  );
   const rawSmallModel = env.R_SMALL_MODEL?.trim();
   const smallModel =
     rawSmallModel && !isTaskModelIdDisabled(rawSmallModel)
-      ? collectOpenRouterVariantModelAlias(variantAliases, rawSmallModel)
+      ? collectOpenRouterVariantModelAlias(
+          variantAliases,
+          toBedrockMantleRuntimeModelId(rawSmallModel),
+        )
       : undefined;
   const rawVisionModel = env.R_VISION_MODEL?.trim();
   const visionModel =
     rawVisionModel && !isTaskModelIdDisabled(rawVisionModel)
-      ? collectOpenRouterVariantModelAlias(variantAliases, rawVisionModel)
+      ? collectOpenRouterVariantModelAlias(
+          variantAliases,
+          toBedrockMantleRuntimeModelId(rawVisionModel),
+        )
       : undefined;
   const modelReasoningEffort = normalizeOptionalReasoningEffort(
     env.R_MODEL_REASONING_EFFORT?.trim(),
@@ -109,11 +126,30 @@ function buildModelBackedOpenCodeConfigContent(
           visionModel,
         ])
       : providerReasoningConfig;
-  const providerConfig = mergeOpenAiCompatibleProviderConfig(
-    mergeOpenRouterVariantAliasModels(providerModelConfig, variantAliases),
+  const configuredModelIds = [model, smallModel, visionModel];
+  // Same Bedrock provider registrations the task worker applies: OpenCode's
+  // catalog knows neither Mantle endpoint, and the native provider does not
+  // read the deployment's bearer token on its own.
+  const providerConfig = mergeAmazonBedrockProviderConfig(
+    mergeBedrockMantleProviderConfig(
+      mergeBedrockMantleOpenAiProviderConfig(
+        mergeOpenAiCompatibleProviderConfig(
+          mergeOpenRouterVariantAliasModels(
+            providerModelConfig,
+            variantAliases,
+          ),
+          env,
+          configuredModelIds,
+          visionModel,
+        ),
+        env,
+        configuredModelIds,
+      ),
+      env,
+      configuredModelIds,
+    ),
     env,
-    [model, smallModel, visionModel],
-    visionModel,
+    configuredModelIds,
   );
 
   return JSON.stringify({
@@ -219,11 +255,100 @@ function toRestrictedNonTaskConfigContent(
       }
     }
 
+    // Non-task calls must never run with thinking enabled: structured output
+    // (`format: json_schema`) forces tool choice, and Amazon Bedrock rejects
+    // thinking combined with forced tool use — a helper-model reasoning
+    // effort would fail every routing call on such deployments. Reasoning is
+    // a coding-harness setting; title/summary/routing inference never needs
+    // it, so strip it for every provider rather than special-casing Bedrock.
+    // Applied to the merged config so operator-supplied
+    // OPENCODE_CONFIG_CONTENT cannot reintroduce thinking either.
+    if (
+      restricted.provider &&
+      typeof restricted.provider === 'object' &&
+      !Array.isArray(restricted.provider)
+    ) {
+      const strippedProvider = stripOpenCodeModelReasoningOptions(
+        restricted.provider as Record<string, unknown>,
+      );
+
+      if (Object.keys(strippedProvider).length > 0) {
+        restricted.provider = strippedProvider;
+      } else {
+        delete restricted.provider;
+      }
+    }
+
     restricted.permission = NON_TASK_TOOL_PERMISSION_DENIALS;
 
     return JSON.stringify(restricted);
   } catch {
     return permissionOnly;
+  }
+}
+
+/**
+ * Merges the Bedrock provider registrations for the env's role models into an
+ * operator-supplied config content string. Malformed content is returned
+ * unchanged — `toRestrictedNonTaskConfigContent` already fails it closed.
+ */
+function mergeBedrockRegistrationsIntoConfigContent(
+  configContent: string,
+  env: NodeJS.ProcessEnv,
+): string {
+  const roleModelIds = (
+    [env.R_MODEL, env.R_SMALL_MODEL, env.R_VISION_MODEL] as const
+  )
+    .map((modelId) => modelId?.trim())
+    .filter(
+      (modelId): modelId is string =>
+        Boolean(modelId) && !isTaskModelIdDisabled(modelId!),
+    )
+    .map(toBedrockMantleRuntimeModelId);
+
+  if (roleModelIds.length === 0) {
+    return configContent;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(configContent);
+
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      return configContent;
+    }
+
+    const config = parsed as Record<string, unknown>;
+    const existingProvider =
+      config.provider &&
+      typeof config.provider === 'object' &&
+      !Array.isArray(config.provider)
+        ? (config.provider as Record<string, unknown>)
+        : {};
+    const provider = mergeAmazonBedrockProviderConfig(
+      mergeBedrockMantleProviderConfig(
+        mergeBedrockMantleOpenAiProviderConfig(
+          existingProvider,
+          env,
+          roleModelIds,
+        ),
+        env,
+        roleModelIds,
+      ),
+      env,
+      roleModelIds,
+    );
+
+    if (Object.keys(provider).length === 0) {
+      return configContent;
+    }
+
+    return JSON.stringify({ ...config, provider });
+  } catch {
+    return configContent;
   }
 }
 
@@ -254,6 +379,15 @@ export function buildOpenCodeCliEnv(
     if (modelBackedConfigContent) {
       env.OPENCODE_CONFIG_CONTENT = modelBackedConfigContent;
     }
+  } else {
+    // Operator-supplied config skips the model-backed builder, but the role
+    // models still need their Bedrock providers registered — otherwise a
+    // Bedrock helper model fails with ProviderModelNotFoundError whenever a
+    // deployment also sets OPENCODE_CONFIG_CONTENT.
+    env.OPENCODE_CONFIG_CONTENT = mergeBedrockRegistrationsIntoConfigContent(
+      env.OPENCODE_CONFIG_CONTENT,
+      env,
+    );
   }
 
   // Applied unconditionally, after any operator-supplied config content is
@@ -630,9 +764,14 @@ class OpenCodeSdkServerPool {
 
   async lease(params: {
     env?: Partial<Record<string, string>>;
+    ephemeral?: boolean;
     startTimeoutMs: number;
+    useConfiguredServer?: boolean;
   }): Promise<OpenCodeSdkServerLease> {
-    const configuredUrl = resolveConfiguredOpenCodeSdkServerUrl();
+    const configuredUrl =
+      params.useConfiguredServer === false
+        ? undefined
+        : resolveConfiguredOpenCodeSdkServerUrl();
 
     if (configuredUrl) {
       return {
@@ -647,7 +786,7 @@ class OpenCodeSdkServerPool {
     const cached = this.cache.get(cacheKey);
 
     if (cached) {
-      return this.createLease(cached);
+      return this.createLease(cached, params.ephemeral);
     }
 
     let startPromise = this.startPromises.get(cacheKey);
@@ -664,7 +803,7 @@ class OpenCodeSdkServerPool {
       this.startPromises.set(cacheKey, startPromise);
     }
 
-    return this.createLease(await startPromise);
+    return this.createLease(await startPromise, params.ephemeral);
   }
 
   private cacheStartedServer(
@@ -706,7 +845,10 @@ class OpenCodeSdkServerPool {
     server.close();
   }
 
-  private createLease(server: CachedOpenCodeSdkServer): OpenCodeSdkServerLease {
+  private createLease(
+    server: CachedOpenCodeSdkServer,
+    ephemeral = false,
+  ): OpenCodeSdkServerLease {
     server.activeLeases += 1;
 
     if (server.idleTimeout) {
@@ -725,6 +867,15 @@ class OpenCodeSdkServerPool {
 
         released = true;
         server.activeLeases = Math.max(0, server.activeLeases - 1);
+
+        // One-shot callers (credential validation) hold candidate secrets in
+        // the server env and never reuse it, so the process must die with the
+        // lease instead of idling out the TTL.
+        if (ephemeral && server.activeLeases === 0) {
+          this.close(server);
+          return;
+        }
+
         this.scheduleIdleClose(server);
       },
     };
@@ -772,7 +923,19 @@ const sharedOpenCodeSdkServerPool = new OpenCodeSdkServerPool();
 
 export function leaseOpenCodeSdkServer(params: {
   env?: Partial<Record<string, string>>;
+  /**
+   * Close the managed server as soon as the last lease is released instead
+   * of caching it for the idle TTL. For one-shot calls whose env carries
+   * candidate secrets that must not outlive the request.
+   */
+  ephemeral?: boolean;
   startTimeoutMs: number;
+  /**
+   * Whether an operator-supplied OpenCode server may serve the request.
+   * Credential validation disables this so candidate env values necessarily
+   * reach the process that performs the provider request.
+   */
+  useConfiguredServer?: boolean;
 }): Promise<OpenCodeSdkServerLease> {
   return sharedOpenCodeSdkServerPool.lease(params);
 }

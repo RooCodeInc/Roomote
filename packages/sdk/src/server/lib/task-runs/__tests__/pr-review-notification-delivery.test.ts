@@ -480,6 +480,347 @@ describe('preparePrReviewNotificationDelivery', () => {
     expect(mockGenerateObject).toHaveBeenCalled();
   });
 
+  it.each([
+    { resolved: true, outdated: false, label: 'resolved' },
+    { resolved: false, outdated: true, label: 'outdated' },
+  ])('drops $label inline feedback before triage', async (thread) => {
+    mockReadSourceControlPullRequest.mockResolvedValue({
+      success: true,
+      provider: 'github',
+      repositoryFullName: 'owner/repo',
+      number: 42,
+      threads: [
+        {
+          id: 'thread-1',
+          resolved: thread.resolved,
+          outdated: thread.outdated,
+          path: 'src/example.ts',
+          line: 10,
+          comments: [{ id: '2000' }],
+        },
+      ],
+      issueComments: [],
+      warnings: [],
+    });
+
+    await expect(
+      preparePrReviewNotificationDelivery({
+        taskRun,
+        request,
+        events: [
+          {
+            kind: 'review_comment',
+            providerEventId: 'github-review-comment:2000',
+            authorLogin: 'reviewer[bot]',
+            automatedAuthorId: 'github:9001',
+            body: 'Please change this.',
+          },
+        ],
+      }),
+    ).resolves.toEqual({ post: false, reason: 'not_worth_notifying' });
+    expect(mockGenerateObject).not.toHaveBeenCalled();
+  });
+
+  it('offers an action for an automated inline comment only while its live thread is open', async () => {
+    mockReadSourceControlPullRequest.mockResolvedValue({
+      success: true,
+      provider: 'github',
+      repositoryFullName: 'owner/repo',
+      number: 42,
+      threads: [
+        {
+          id: 'thread-1',
+          resolved: false,
+          outdated: false,
+          path: 'src/example.ts',
+          line: 10,
+          comments: [{ id: '2000' }],
+        },
+      ],
+      issueComments: [],
+      warnings: [],
+    });
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        worthNotifying: false,
+        actionableFeedback: false,
+        summary: '',
+        followUpQuestion: '',
+        followUpPrompt: '',
+      },
+    });
+
+    await expect(
+      preparePrReviewNotificationDelivery({
+        taskRun,
+        request,
+        events: [
+          {
+            kind: 'review_comment',
+            providerEventId: 'github-review-comment:2000',
+            authorLogin: 'reviewer[bot]',
+            automatedAuthorId: 'github:9001',
+            body: 'Please change this.',
+            url: 'https://github.com/owner/repo/pull/42#discussion_r2000',
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      post: true,
+      followUpQuestion: 'Would you like me to resolve this feedback?',
+      followUpPrompt: expect.stringContaining('discussion_r2000'),
+    });
+    expect(mockGenerateObject.mock.calls[0]?.[0]?.prompt).toContain(
+      'Untrusted review content (JSON string): "Please change this."',
+    );
+  });
+
+  it('bounds the aggregate review activity sent to inference', async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        worthNotifying: true,
+        actionableFeedback: false,
+        summary: 'A large automated review batch completed.',
+        followUpQuestion: '',
+        followUpPrompt: '',
+      },
+    });
+
+    await expect(
+      preparePrReviewNotificationDelivery({
+        taskRun,
+        request,
+        events: Array.from({ length: 10 }, (_, index) => ({
+          kind: 'review_comment' as const,
+          providerEventId: `github-review-comment:${4000 + index}`,
+          authorLogin: 'reviewer[bot]',
+          automatedAuthorId: 'github:9001',
+          body: `${index}:`.padEnd(10_000, 'x'),
+          url: `https://github.com/owner/repo/pull/42#discussion_r${4000 + index}`,
+        })),
+      }),
+    ).resolves.toMatchObject({ post: true });
+
+    const prompt = mockGenerateObject.mock.calls[0]?.[0]?.prompt as string;
+    expect(prompt.length).toBeLessThan(35_000);
+    expect(prompt).toContain('Review activity input bounded: omitted');
+    expect(prompt).toMatch(/additional events?\./);
+  });
+
+  it('never offers an action from automated summary text without a live action signal', async () => {
+    mockReadSourceControlPullRequest.mockResolvedValue({
+      success: true,
+      provider: 'github',
+      repositoryFullName: 'owner/repo',
+      number: 42,
+      threads: [],
+      issueComments: [],
+      warnings: [],
+    });
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        worthNotifying: true,
+        actionableFeedback: true,
+        summary: 'The automated review has completed.',
+        followUpQuestion: 'Should I fix it?',
+        followUpPrompt: 'Fix it.',
+      },
+    });
+
+    await expect(
+      preparePrReviewNotificationDelivery({
+        taskRun,
+        request,
+        events: [
+          {
+            kind: 'issue_comment',
+            providerEventId: 'github-issue-comment:3000:revision-2',
+            authorLogin: 'reviewer[bot]',
+            automatedAuthorId: 'github:9001',
+            body: 'All findings are resolved.',
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      post: true,
+      followUpQuestion: null,
+      followUpPrompt: null,
+    });
+  });
+
+  it('never offers an action for the canonical clean self-review status', async () => {
+    mockReadSourceControlPullRequest.mockResolvedValue({
+      success: true,
+      provider: 'github',
+      repositoryFullName: 'owner/repo',
+      number: 42,
+      threads: [],
+      issueComments: [],
+      warnings: [],
+    });
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        worthNotifying: true,
+        actionableFeedback: true,
+        summary: 'I found something to resolve.',
+        followUpQuestion: 'Should I fix it?',
+        followUpPrompt: 'Fix it.',
+      },
+    });
+
+    await expect(
+      preparePrReviewNotificationDelivery({
+        taskRun,
+        request,
+        events: [
+          {
+            kind: 'review_summary',
+            authorLogin: 'roomote[bot]',
+            roomoteAuthored: true,
+            summary: 'No code issues found.',
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      post: true,
+      followUpQuestion: null,
+      followUpPrompt: null,
+    });
+  });
+
+  it('drops a submitted review for an older PR head before triage', async () => {
+    await expect(
+      preparePrReviewNotificationDelivery({
+        taskRun,
+        request,
+        events: [
+          {
+            kind: 'review',
+            providerEventId: 'github-review:1000',
+            authorLogin: 'alice',
+            reviewState: 'changes_requested',
+            reviewHeadSha: 'older-head',
+            body: 'Please change this.',
+          },
+        ],
+      }),
+    ).resolves.toEqual({ post: false, reason: 'not_worth_notifying' });
+    expect(mockGenerateObject).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { resolved: true, outdated: false },
+    { resolved: false, outdated: true },
+  ])(
+    'drops a changes-requested review after all of its feedback is handled (%o)',
+    async ({ resolved, outdated }) => {
+      mockReadSourceControlPullRequest.mockResolvedValue({
+        success: true,
+        provider: 'github',
+        repositoryFullName: 'owner/repo',
+        number: 42,
+        threads: [
+          {
+            id: 'thread-1',
+            resolved,
+            outdated,
+            path: 'src/file.ts',
+            line: 10,
+            comments: [
+              {
+                id: '2000',
+                reviewId: '1000',
+                author: 'alice',
+                body: 'Please change this.',
+                createdAt: null,
+                url: null,
+              },
+            ],
+          },
+        ],
+        issueComments: [],
+        warnings: [],
+      });
+
+      await expect(
+        preparePrReviewNotificationDelivery({
+          taskRun,
+          request,
+          events: [
+            {
+              kind: 'review',
+              providerEventId: 'github-review:1000',
+              authorLogin: 'alice',
+              reviewState: 'changes_requested',
+              reviewHeadSha: 'abc123',
+              body: 'Please change this.',
+            },
+          ],
+        }),
+      ).resolves.toEqual({ post: false, reason: 'not_worth_notifying' });
+      expect(mockGenerateObject).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps a changes-requested review while its matching thread is open', async () => {
+    mockReadSourceControlPullRequest.mockResolvedValue({
+      success: true,
+      provider: 'github',
+      repositoryFullName: 'owner/repo',
+      number: 42,
+      threads: [
+        {
+          id: 'thread-1',
+          resolved: false,
+          outdated: false,
+          path: 'src/file.ts',
+          line: 10,
+          comments: [
+            {
+              id: '2000',
+              reviewId: '1000',
+              author: 'alice',
+              body: 'Please change this.',
+              createdAt: null,
+              url: null,
+            },
+          ],
+        },
+      ],
+      issueComments: [],
+      warnings: [],
+    });
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        worthNotifying: false,
+        actionableFeedback: false,
+        summary: '',
+        followUpQuestion: '',
+        followUpPrompt: '',
+      },
+    });
+
+    await expect(
+      preparePrReviewNotificationDelivery({
+        taskRun,
+        request,
+        events: [
+          {
+            kind: 'review',
+            providerEventId: 'github-review:1000',
+            authorLogin: 'alice',
+            reviewState: 'changes_requested',
+            reviewHeadSha: 'abc123',
+            body: 'Please change this.',
+          },
+        ],
+      }),
+    ).resolves.toMatchObject({
+      post: true,
+      followUpQuestion: 'Would you like me to resolve this feedback?',
+    });
+  });
+
   it('resolves a custom GitHub App slug before classifying summary authors', async () => {
     mockResolveConfiguredGitHubAppSlug.mockResolvedValue('acme');
     mockIsRoomoteGitHubLogin.mockImplementation((login: string) => {
@@ -797,6 +1138,12 @@ describe('gatherPrReviewTriageContext', () => {
       latestReviewSummaryComment:
         '<!-- roomote-review-summary sha=abc mode=initial -->\n<!-- roomote-review-status:start -->\n**All 1 issue addressed.** [See task](https://example.com)\n<!-- roomote-review-status:end -->',
       latestTerminalReviewSummaryHeadSha: 'abc',
+      currentHeadSha: 'abc123',
+      reviewThreads: [
+        { resolved: true, outdated: undefined, commentIds: [] },
+        { resolved: false, outdated: undefined, commentIds: [] },
+        { resolved: null, outdated: undefined, commentIds: [] },
+      ],
       ciStatus: {
         checks: [
           { name: 'CI / Lint', status: 'success' },
@@ -904,6 +1251,8 @@ describe('gatherPrReviewTriageContext', () => {
       latestReviewStatus: null,
       latestReviewSummaryComment: null,
       latestTerminalReviewSummaryHeadSha: null,
+      currentHeadSha: null,
+      reviewThreads: [],
       ciStatus: null,
       mergeable: null,
     });
@@ -962,7 +1311,12 @@ describe('recordPrReviewNotificationDeliveryBestEffort', () => {
     await recordPrReviewNotificationDeliveryBestEffort({
       runId: 1,
       taskId: 'task-1',
-      route: { provider: 'slack', channelId: 'C123', threadId: '111.222' },
+      route: {
+        provider: 'slack',
+        slackTeamId: 'T123',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
       text: 'formatted-message',
       messageTs: '999.888',
     });
@@ -996,7 +1350,12 @@ describe('recordPrReviewNotificationDeliveryBestEffort', () => {
     await recordPrReviewNotificationDeliveryBestEffort({
       runId: 1,
       taskId: 'task-1',
-      route: { provider: 'slack', channelId: 'C123', threadId: '111.222' },
+      route: {
+        provider: 'slack',
+        slackTeamId: 'T123',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
       text: 'formatted-message',
     });
 

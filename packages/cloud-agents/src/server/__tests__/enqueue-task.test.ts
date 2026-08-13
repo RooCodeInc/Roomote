@@ -58,6 +58,7 @@ import {
   type FreshTaskLaunch,
 } from '../task-run-queue';
 import { LLM_TITLE_LOCKED_CHECKPOINT } from '../llm-task-title';
+import { applyTaskModelSelectionToRun } from '../task-model-selection';
 
 const createdTaskIds: string[] = [];
 const createdUserIds: string[] = [];
@@ -961,6 +962,104 @@ describe('enqueueTask snapshot resume', () => {
     expect(resumePayload.repositoryProviders).toEqual({
       'roomote/Test ADO/Test ADO': 'ado',
       'group/web': 'gitlab',
+    });
+  });
+
+  it('inherits per-task model role overrides from the source run payload', async () => {
+    const userId = await createUser();
+
+    const freshRun = await launchFresh({
+      task: standardTaskInput(),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    // Simulate a mid-task model change persisted by the task UI: the
+    // overrides live on the run payload, not the launch spec.
+    await db
+      .update(taskRuns)
+      .set({
+        payload: {
+          ...(freshRun.payload as Record<string, unknown>),
+          reasoningEffort: 'xhigh',
+          modelRoleOverrides: {
+            planning: { model: 'openrouter/test/planner' },
+            explore: { reasoningEffort: 'low' },
+          },
+        } as typeof freshRun.payload,
+      })
+      .where(eq(taskRuns.id, freshRun.id));
+
+    const resumeTask: SnapshotResumeTask = {
+      type: TaskPayloadKind.SnapshotResume,
+      payload: {
+        repo: 'acme/widgets',
+        sourceSnapshotId: 'snap-models-1',
+        sourceRunId: freshRun.id,
+      },
+    } as SnapshotResumeTask;
+
+    const resumeRun = await enqueueTask(
+      { task: resumeTask, actingUserId: userId },
+      { enqueue: false },
+    );
+
+    const resumePayload = resumeRun.payload as {
+      reasoningEffort?: string;
+      modelRoleOverrides?: Record<string, unknown>;
+    };
+
+    expect(resumePayload.modelRoleOverrides).toEqual({
+      planning: { model: 'openrouter/test/planner' },
+      explore: { reasoningEffort: 'low' },
+    });
+    // The explicit coding level must survive the resume; without central
+    // inheritance the enqueue would re-stamp the deployment default.
+    expect(resumePayload.reasoningEffort).toBe('xhigh');
+  });
+
+  it('keeps concurrent role updates intact via the run-row lock', async () => {
+    const userId = await createUser();
+
+    const freshRun = await launchFresh({
+      task: standardTaskInput(),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    // The UI's reset fan-out and the agent's update_models call can hit the
+    // same run at once; each does a payload read-modify-write, so without
+    // the FOR UPDATE lock one write silently overwrites the other.
+    await Promise.all([
+      applyTaskModelSelectionToRun({
+        runId: freshRun.id,
+        role: 'helper',
+        model: null,
+        reasoningEffort: 'high',
+      }),
+      applyTaskModelSelectionToRun({
+        runId: freshRun.id,
+        role: 'vision',
+        model: null,
+        reasoningEffort: 'low',
+      }),
+    ]);
+
+    const run = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, freshRun.id),
+      columns: { payload: true },
+    });
+    const payload = run?.payload as {
+      modelRoleOverrides?: Record<string, unknown>;
+    };
+
+    expect(payload.modelRoleOverrides).toEqual({
+      helper: { reasoningEffort: 'high' },
+      vision: { reasoningEffort: 'low' },
     });
   });
 

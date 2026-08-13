@@ -326,6 +326,11 @@ export const sleepCheckJob = async () => {
     ComputeProvider,
     Awaited<ReturnType<typeof getSleepCheckClient>>
   >();
+  // Client construction can throw for providers that are not configured on
+  // this deployment (e.g. stale rows from another vendor). Cache the failure
+  // per sweep so one bad provider skips only its own candidates instead of
+  // aborting the whole job — and isn't rebuilt for every candidate.
+  const providerClientFailures = new Map<ComputeProvider, string>();
 
   await mergeSleepCheckCandidates(candidateJobsByMachineId, dueJobs, 'dueJob', {
     path: 'due_sleep',
@@ -390,9 +395,38 @@ export const sleepCheckJob = async () => {
 
     let client = providerClients.get(provider);
 
+    if (!client && !providerClientFailures.has(provider)) {
+      try {
+        client = await getSleepCheckClient(provider);
+        providerClients.set(provider, client);
+      } catch (error) {
+        providerClientFailures.set(
+          provider,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+
     if (!client) {
-      client = await getSleepCheckClient(provider);
-      providerClients.set(provider, client);
+      const clientError =
+        providerClientFailures.get(provider) ?? 'unknown error';
+
+      await recordSleepCheckEvent(
+        preferredJob,
+        'failed',
+        `Skipped ${describeSleepCheckPath(fallbackPath).toLowerCase()} for task run #${preferredJob.id} because the ${provider} compute client could not be created.`,
+        {
+          path: fallbackPath,
+          decision: 'skip_provider_client_unavailable',
+          error: clientError,
+          ...buildSleepCheckDetails(preferredJob),
+        },
+      );
+      console.error(
+        `[sleepCheck] Skipping task run #${preferredJob.id}: could not create ${provider} compute client:`,
+        clientError,
+      );
+      continue;
     }
 
     try {

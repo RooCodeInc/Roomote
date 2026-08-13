@@ -278,6 +278,8 @@ describe('roomote MCP tool descriptions', () => {
       'launch',
       'cancel',
       'send_message',
+      'list_models',
+      'update_models',
       'list_environments',
     ]);
     expect(taskIdField.description).toBe(
@@ -285,6 +287,18 @@ describe('roomote MCP tool descriptions', () => {
     );
     expect(limitField.description).toBe(
       'Positive result limit: 1 to 100 for search (default 20), or 1 to 1000 for get_messages',
+    );
+  });
+
+  it('keeps task model discovery beside task model switching', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const manageTasksTool = getRegisteredTool(registeredTools, 'manage_tasks');
+
+    expect(manageTasksTool.config.description).toContain(
+      'Use action "list_models" to list the enabled model IDs available for task model selection.',
+    );
+    expect(getInputSchemaField(manageTasksTool, 'model').description).toContain(
+      'Call list_models first and pass an exact returned model ID',
     );
   });
 

@@ -37,6 +37,7 @@ describe('Slack thread follow-up dispatch', () => {
 
     const route = await resolveSlackThreadFollowUpRoute({
       threadId: '111.000',
+      slackTeamId: 'T1',
       prefetchedActiveRun: activeRun,
       allowCompletedResume: false,
     });
@@ -44,6 +45,21 @@ describe('Slack thread follow-up dispatch', () => {
     expect(route).toEqual({ kind: 'active', activeRun });
     expect(findActiveSlackTaskRunMock).not.toHaveBeenCalled();
     expect(findCompletedSlackTaskRunWithSnapshotMock).not.toHaveBeenCalled();
+  });
+
+  it('scopes active and snapshot lookup to the Slack workspace', async () => {
+    await resolveSlackThreadFollowUpRoute({
+      threadId: '111.000',
+      slackTeamId: 'T2',
+    });
+
+    expect(findActiveSlackTaskRunMock).toHaveBeenCalledWith('111.000', {
+      slackTeamId: 'T2',
+    });
+    expect(findCompletedSlackTaskRunWithSnapshotMock).toHaveBeenCalledWith(
+      '111.000',
+      { slackTeamId: 'T2' },
+    );
   });
 
   it('falls back to a fresh launch when resume handling declines the completed task run', async () => {

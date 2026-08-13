@@ -164,7 +164,9 @@ export async function handleFollowupAnswer(payload: SlackInteractivePayload) {
       return;
     }
 
-    const activeRun = await findActiveSlackTaskRun(threadId);
+    const activeRun = await findActiveSlackTaskRun(threadId, {
+      slackTeamId: payload.team.id,
+    });
 
     if (!activeRun) {
       console.error(

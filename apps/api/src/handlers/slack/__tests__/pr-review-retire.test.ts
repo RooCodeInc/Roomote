@@ -46,6 +46,7 @@ describe('retireSlackPrReviewOffersBestEffort', () => {
 
     retireSlackPrReviewOffersBestEffort({
       slack,
+      slackTeamId: 'T1',
       channelId: 'C123',
       threadTs: '100.000',
     });
@@ -53,6 +54,7 @@ describe('retireSlackPrReviewOffersBestEffort', () => {
 
     expect(claimForThreadMock).toHaveBeenCalledWith({
       provider: 'slack',
+      slackTeamId: 'T1',
       channelId: 'C123',
       threadId: '100.000',
     });
@@ -78,6 +80,7 @@ describe('retireSlackPrReviewOffersBestEffort', () => {
 
     retireSlackPrReviewOffersBestEffort({
       slack,
+      slackTeamId: 'T1',
       channelId: 'C123',
       threadTs: '100.000',
     });
@@ -91,6 +94,7 @@ describe('retireSlackPrReviewOffersBestEffort', () => {
 
     retireSlackPrReviewOffersBestEffort({
       slack,
+      slackTeamId: 'T1',
       channelId: 'C123',
       threadTs: '100.000',
     });

@@ -36,6 +36,15 @@ in the setup wizard and from **Settings > Models**. You stay in control: you
 can disable or remove any of the added models, add more later, and reconnecting
 a provider never re-adds models you removed.
 
+When you connect or update an API-key provider, Roomote first checks the
+submitted credentials with a small live model request. If the provider rejects
+the key, or the account has no remaining credits, nothing is saved: fix the
+credential and save again. Other failures (a rate limit, a model your account
+cannot access, or a transient provider outage) never block the save.
+Self-hosted OpenAI-compatible endpoint connections are checked by listing the
+endpoint's models instead. Saving again without changing any credential skips
+the live check.
+
 ### API and gateway providers
 
 These connections use metered API billing or a provider-managed gateway:
@@ -179,6 +188,12 @@ list.
 - **Models** controls the provider/model pairs that are available, the default
   model, and specialized model roles.
 
+When you connect an inference provider in setup, Roomote tests the candidate
+credentials and selected model before saving them. Authentication, quota,
+model-access, endpoint, and timeout failures are reported during setup so you
+can correct the connection before starting a task. Providers configured through
+environment variables are validated by the deployment at startup instead.
+
 For subscription-based providers (ChatGPT, GitHub Copilot, Kimi for Coding,
 xAI Grok / SuperGrok, and Z.AI Coding Plan), the provider row also shows current
 plan usage when the provider reports it, such as remaining legacy Copilot
@@ -238,6 +253,23 @@ A practical starting point:
 
 If a model does not support reasoning controls, Roomote hides or ignores the
 reasoning selector for that role.
+
+## Per-task model switching
+
+Deployment settings define the defaults, but each task can override them from
+the web task view. The model chip in the message composer shows the task's
+current coding model and reasoning level; open it to switch the coding model,
+or expand **All roles** to override the planning, code review, explore,
+helper, or vision role for that task only.
+
+Changes apply from the next message: a turn that is already running finishes
+on the old settings, and the next turn (including its sub-agents) uses the new
+ones. Overrides persist for the life of the task, including snapshot resumes,
+and **Reset to defaults** returns every role to the deployment configuration.
+
+You can also just ask the agent — for example "switch to Fable 5 with max
+reasoning for the rest of this task". The agent applies the same change
+through its task-management tool, subject to the same allowed-models list.
 
 ## Choosing models
 

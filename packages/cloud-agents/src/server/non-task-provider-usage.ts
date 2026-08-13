@@ -7,6 +7,7 @@ import {
   type PermissionRuleset,
 } from '@opencode-ai/sdk/v2/client';
 import { resolveEffectiveModelRuntimeEnv } from '@roomote/db/server';
+import { toBedrockMantleRuntimeModelId } from '@roomote/types';
 import type { z } from 'zod';
 import zodToJsonSchema from 'zod-to-json-schema';
 
@@ -78,6 +79,7 @@ export const NON_TASK_INFERENCE_SURFACES = {
   customAutomationScheduleResolution: 'custom_automation_schedule_resolution',
   fastAgentOnboardingSuggestions: 'fast_agent_onboarding_suggestions',
   fastAgentQuestionAnswering: 'fast_agent_question_answering',
+  inferenceValidation: 'inference_validation',
   prReviewNotificationTriage: 'pr_review_notification_triage',
   routerChannelLaunchGate: 'router_channel_launch_gate',
   routerDiscordForumTag: 'router_discord_forum_tag',
@@ -89,6 +91,34 @@ export const NON_TASK_INFERENCE_SURFACES = {
   taskSummaryGeneration: 'task_summary_generation',
   taskTitleGeneration: 'task_title_generation',
 } as const;
+
+const NON_TASK_INFERENCE_VALIDATION_TIMEOUT_MS = 15_000;
+
+export type NonTaskInferenceValidationFailureReason =
+  | 'endpoint_unreachable'
+  | 'insufficient_credits'
+  | 'invalid_credentials'
+  | 'model_unavailable'
+  | 'provider_error'
+  | 'rate_limited'
+  | 'timeout';
+
+export type NonTaskInferenceValidationResult =
+  | {
+      success: true;
+      checkedAt: string;
+      latencyMs: number;
+      model: string;
+    }
+  | {
+      success: false;
+      checkedAt: string;
+      latencyMs: number;
+      message: string;
+      model: string;
+      reason: NonTaskInferenceValidationFailureReason;
+      retryable: boolean;
+    };
 
 interface GenerateTrackedNonTaskBaseParams extends NonTaskInferenceTrackingInput {
   prompt: string;
@@ -286,8 +316,19 @@ async function resolveNonTaskModelRuntime(model?: string): Promise<{
   }
 
   return {
-    model: resolvedModel,
-    resolvedModelRuntimeEnv,
+    // The prompt must address the same runtime provider id the helper
+    // server's config registered (Bedrock Mantle GPT ids run under
+    // `bedrock-mantle-openai`), mirroring the task worker's rewrite.
+    model: toBedrockMantleRuntimeModelId(resolvedModel),
+    // An explicit model rides into the server lease env as the primary role
+    // model so the config builder registers its provider — the deployment's
+    // role models may not include it, and an unregistered Bedrock (or
+    // OpenAI-compatible) id fails with ProviderModelNotFoundError before any
+    // request is made. The lease cache keys on env, so distinct explicit
+    // models get their own servers instead of colliding.
+    resolvedModelRuntimeEnv: requestedModel
+      ? { ...resolvedModelRuntimeEnv, R_MODEL: requestedModel }
+      : resolvedModelRuntimeEnv,
   };
 }
 
@@ -342,10 +383,14 @@ async function resolveModelForInputModality(
     ...modalityModels,
     runtime.resolvedModelRuntimeEnv.R_MODEL,
     runtime.model,
-  ].filter(
-    (candidate, index, values): candidate is string =>
-      Boolean(candidate) && values.indexOf(candidate) === index,
-  );
+  ]
+    .map((candidate) =>
+      candidate ? toBedrockMantleRuntimeModelId(candidate) : candidate,
+    )
+    .filter(
+      (candidate, index, values): candidate is string =>
+        Boolean(candidate) && values.indexOf(candidate) === index,
+    );
   const timeoutMs = params.timeoutMs ?? 120_000;
   const server = await leaseOpenCodeSdkServer({
     env: runtime.resolvedModelRuntimeEnv,
@@ -404,6 +449,11 @@ async function runNonTaskSdkPrompt(
     resolvedModelRuntimeEnv: Partial<Record<string, string>>;
   },
   promptOptions: NonTaskSdkPromptOptions,
+  options: {
+    ephemeral?: boolean;
+    signal?: AbortSignal;
+    useConfiguredServer?: boolean;
+  } = {},
 ): Promise<{
   info: { error?: unknown };
   parts: Array<{ type?: unknown; text?: unknown }>;
@@ -412,10 +462,12 @@ async function runNonTaskSdkPrompt(
   const timeoutMs = params.timeoutMs ?? 120_000;
   const server = await leaseOpenCodeSdkServer({
     env: resolvedModelRuntimeEnv,
+    ephemeral: options.ephemeral,
     startTimeoutMs: Math.min(
       timeoutMs,
       DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS,
     ),
+    useConfiguredServer: options.useConfiguredServer,
   });
   const abortController = new AbortController();
   const timeout = setTimeout(() => {
@@ -425,6 +477,20 @@ async function runNonTaskSdkPrompt(
       ),
     );
   }, timeoutMs);
+  const externalSignal = options.signal;
+  const abortFromExternalSignal = () => {
+    abortController.abort(
+      externalSignal?.reason ?? new Error('The prompt was aborted.'),
+    );
+  };
+
+  if (externalSignal?.aborted) {
+    abortFromExternalSignal();
+  } else {
+    externalSignal?.addEventListener('abort', abortFromExternalSignal, {
+      once: true,
+    });
+  }
 
   try {
     const client = createOpencodeClient({
@@ -443,7 +509,7 @@ async function runNonTaskSdkPrompt(
 
     if (sessionResult.error || !sessionResult.data) {
       throw new Error(
-        `OpenCode structured session creation failed: ${formatOpenCodeSdkError(sessionResult.error)}`,
+        `OpenCode structured session creation failed (model ${model}): ${formatOpenCodeSdkError(sessionResult.error)}`,
       );
     }
 
@@ -459,13 +525,18 @@ async function runNonTaskSdkPrompt(
     );
 
     if (promptResult.error || !promptResult.data) {
+      // The resolved `provider/model` id rides in the message because callers
+      // (the router's fallback log among them) only know the role alias —
+      // production diagnosis of a provider-specific rejection needs the real
+      // id and provider without a database lookup.
       throw new Error(
-        `OpenCode structured prompt failed: ${formatOpenCodeSdkError(promptResult.error)}`,
+        `OpenCode structured prompt failed (model ${model}): ${formatOpenCodeSdkError(promptResult.error)}`,
       );
     }
 
     return promptResult.data;
   } finally {
+    externalSignal?.removeEventListener('abort', abortFromExternalSignal);
     clearTimeout(timeout);
     server.release();
   }
@@ -557,7 +628,7 @@ async function generateTrackedNonTaskObjectWithSdk<
 
   if (data.info.error) {
     throw new Error(
-      `OpenCode structured prompt failed: ${formatOpenCodeSdkError(data.info.error)}`,
+      `OpenCode structured prompt failed (model ${resolvedRuntime.model}): ${formatOpenCodeSdkError(data.info.error)}`,
     );
   }
 
@@ -577,4 +648,314 @@ export async function generateTrackedNonTaskObject<
   params: GenerateTrackedNonTaskObjectParams<TSchema>,
 ): Promise<{ object: z.output<TSchema> }> {
   return generateTrackedNonTaskObjectWithSdk(params);
+}
+
+function classifyNonTaskInferenceValidationError(
+  error: unknown,
+): Pick<
+  Extract<NonTaskInferenceValidationResult, { success: false }>,
+  'message' | 'reason' | 'retryable'
+> {
+  // OpenCode surfaces provider rejections as `{name, data: {message,
+  // statusCode, responseBody}}`. The status code is authoritative when
+  // present — provider wording varies too much for substring matching to be
+  // the primary signal (Anthropic says "API key is invalid.", which no
+  // keyword list reliably catches).
+  const record =
+    error && typeof error === 'object'
+      ? (error as Record<string, unknown>)
+      : undefined;
+  const data =
+    record?.data && typeof record.data === 'object'
+      ? (record.data as Record<string, unknown>)
+      : undefined;
+  const statusCode =
+    typeof data?.statusCode === 'number' ? data.statusCode : undefined;
+  const responseBody =
+    typeof data?.responseBody === 'string' ? data.responseBody : '';
+  const detail =
+    `${formatOpenCodeSdkError(error)} ${responseBody}`.toLowerCase();
+
+  // Failures inside Roomote's own validation helper (the managed OpenCode
+  // server) must not read as provider failures — the candidate credentials
+  // were never exercised.
+  if (
+    detail.includes('opencode sdk server') ||
+    detail.includes('spawn opencode') ||
+    detail.includes('enoent')
+  ) {
+    return {
+      message:
+        'Roomote could not run its validation helper. Try again, or check the server logs.',
+      reason: 'provider_error',
+      retryable: true,
+    };
+  }
+
+  if (statusCode === 401 || statusCode === 403) {
+    return {
+      message: 'The inference provider rejected these credentials.',
+      reason: 'invalid_credentials',
+      retryable: false,
+    };
+  }
+
+  if (statusCode === 402) {
+    return {
+      message:
+        'The inference provider account does not have enough credits or quota.',
+      reason: 'insufficient_credits',
+      retryable: false,
+    };
+  }
+
+  if (statusCode === 404) {
+    return {
+      message: 'The selected model is unavailable with these credentials.',
+      reason: 'model_unavailable',
+      retryable: false,
+    };
+  }
+
+  if (statusCode === 429) {
+    return {
+      message: 'The inference provider is rate limiting requests. Try again.',
+      reason: 'rate_limited',
+      retryable: true,
+    };
+  }
+
+  if (
+    detail.includes('timed out') ||
+    detail.includes('timeout') ||
+    detail.includes('aborterror') ||
+    detail.includes('aborted')
+  ) {
+    return {
+      message: 'The inference provider did not respond in time. Try again.',
+      reason: 'timeout',
+      retryable: true,
+    };
+  }
+
+  if (
+    detail.includes('insufficient_quota') ||
+    detail.includes('insufficient quota') ||
+    detail.includes('insufficient credit') ||
+    detail.includes('payment required') ||
+    detail.includes('billing') ||
+    /\b402\b/u.test(detail)
+  ) {
+    return {
+      message:
+        'The inference provider account does not have enough credits or quota.',
+      reason: 'insufficient_credits',
+      retryable: false,
+    };
+  }
+
+  if (
+    detail.includes('unauthorized') ||
+    detail.includes('authentication') ||
+    detail.includes('invalid api key') ||
+    detail.includes('invalid_api_key') ||
+    detail.includes('incorrect api key') ||
+    detail.includes('revoked') ||
+    /\b401\b/u.test(detail)
+  ) {
+    return {
+      message: 'The inference provider rejected these credentials.',
+      reason: 'invalid_credentials',
+      retryable: false,
+    };
+  }
+
+  if (
+    detail.includes('providermodelnotfound') ||
+    detail.includes('model not found') ||
+    detail.includes('unknown model') ||
+    detail.includes('unsupported model') ||
+    detail.includes('does not have access to model') ||
+    /\b404\b/u.test(detail)
+  ) {
+    return {
+      message: 'The selected model is unavailable with these credentials.',
+      reason: 'model_unavailable',
+      retryable: false,
+    };
+  }
+
+  if (
+    detail.includes('rate limit') ||
+    detail.includes('rate_limit') ||
+    detail.includes('too many requests') ||
+    /\b429\b/u.test(detail)
+  ) {
+    return {
+      message: 'The inference provider is rate limiting requests. Try again.',
+      reason: 'rate_limited',
+      retryable: true,
+    };
+  }
+
+  if (
+    detail.includes('econnrefused') ||
+    detail.includes('econnreset') ||
+    detail.includes('enotfound') ||
+    detail.includes('fetch failed') ||
+    detail.includes('network error') ||
+    detail.includes('socket')
+  ) {
+    return {
+      message: 'Roomote could not reach the inference provider endpoint.',
+      reason: 'endpoint_unreachable',
+      retryable: true,
+    };
+  }
+
+  return {
+    message: 'The inference provider rejected the validation request.',
+    reason: 'provider_error',
+    retryable: true,
+  };
+}
+
+/**
+ * Qualifies candidate inference credentials through the same restricted
+ * OpenCode provider wiring used for control-plane model calls. This is
+ * deliberately not a Roomote task: it creates no work item or sandbox, runs
+ * in the empty non-task directory, and exposes no executable tools.
+ *
+ * Candidate env values are sent only to a managed helper process. Reusing an
+ * operator-supplied OpenCode server would validate that server's credentials
+ * instead of the submitted values, so this path explicitly bypasses it.
+ */
+export async function validateNonTaskInference(params: {
+  model: string;
+  runtimeEnv: Partial<Record<string, string>>;
+  timeoutMs?: number;
+}): Promise<NonTaskInferenceValidationResult> {
+  const startedAt = Date.now();
+  const checkedAt = new Date(startedAt).toISOString();
+  const timeoutMs =
+    params.timeoutMs ?? NON_TASK_INFERENCE_VALIDATION_TIMEOUT_MS;
+  const configuredModel = params.model.trim();
+  const model = toBedrockMantleRuntimeModelId(configuredModel);
+  const runtime = {
+    model,
+    resolvedModelRuntimeEnv: {
+      ...params.runtimeEnv,
+      R_MODEL: configuredModel,
+      // Validation must exercise the model-backed provider config the task
+      // runtime builds for this model. An operator-supplied OpenCode config
+      // predates the provider being connected and would fail the canary with
+      // ProviderModelNotFound.
+      OPENCODE_CONFIG_CONTENT: '',
+    },
+  };
+
+  try {
+    if (!configuredModel.includes('/')) {
+      throw new Error('ProviderModelNotFound: model must use provider/model');
+    }
+
+    // The prompt timeout only starts after the helper server lease. The
+    // lease is already bounded by its own start timeout, and this deadline
+    // aborts the session/prompt phase, keeping the save mutation to roughly
+    // one timeoutMs of wall clock — while always awaiting the call to
+    // completion. Returning before the call settles (a race) would let a
+    // slow-starting validation discover an invalid key after the save
+    // already went through.
+    const deadlineController = new AbortController();
+    const deadlineTimer = setTimeout(() => {
+      deadlineController.abort(
+        new Error(`Inference validation timed out after ${timeoutMs}ms.`),
+      );
+    }, timeoutMs);
+    deadlineTimer.unref();
+
+    let data;
+    try {
+      data = await runNonTaskSdkPrompt(
+        {
+          surface: NON_TASK_INFERENCE_SURFACES.inferenceValidation,
+          prompt: 'Return an object with ok set to true.',
+          timeoutMs,
+        },
+        runtime,
+        {
+          format: {
+            type: 'json_schema',
+            schema: {
+              type: 'object',
+              properties: { ok: { const: true, type: 'boolean' } },
+              required: ['ok'],
+              additionalProperties: false,
+            },
+            retryCount: 0,
+          },
+          parts: [
+            {
+              type: 'text',
+              text: 'Return an object with ok set to true.',
+            },
+          ],
+        },
+        {
+          ephemeral: true,
+          signal: deadlineController.signal,
+          useConfiguredServer: false,
+        },
+      );
+    } finally {
+      clearTimeout(deadlineTimer);
+    }
+
+    if (data.info.error) {
+      throw data.info.error;
+    }
+
+    const structured = (data.info as { structured?: unknown }).structured;
+    if (
+      !structured ||
+      typeof structured !== 'object' ||
+      (structured as { ok?: unknown }).ok !== true
+    ) {
+      throw new Error('Validation response did not contain the expected data.');
+    }
+
+    return {
+      success: true,
+      checkedAt,
+      latencyMs: Date.now() - startedAt,
+      model,
+    };
+  } catch (error) {
+    const classified = classifyNonTaskInferenceValidationError(error);
+
+    // The sanitized result hides the provider detail from the UI on purpose;
+    // keep the detail in the server log so misclassifications stay
+    // diagnosable. Provider rejections can echo the submitted credential
+    // ("invalid API key sk-..."), so every candidate env value is redacted
+    // from the detail before it reaches the log.
+    // Every non-empty value is redacted, even implausibly short ones — a
+    // noisier log line is preferable to leaking any real token.
+    let detail = formatOpenCodeSdkError(error);
+    for (const value of Object.values(params.runtimeEnv)) {
+      if (value) {
+        detail = detail.split(value).join('[redacted]');
+      }
+    }
+    console.warn(
+      `[validateNonTaskInference] ${model} failed (${classified.reason}): ${detail}`,
+    );
+
+    return {
+      success: false,
+      checkedAt,
+      latencyMs: Date.now() - startedAt,
+      model,
+      ...classified,
+    };
+  }
 }

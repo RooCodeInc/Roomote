@@ -1,5 +1,10 @@
-import { canRetryFailedStart } from '@roomote/cloud-agents/server';
 import {
+  TaskModelSelectionError,
+  applyTaskModelSelectionToRun,
+  canRetryFailedStart,
+} from '@roomote/cloud-agents/server';
+import {
+  REASONING_EFFORT_VALUES,
   RunStatus,
   TaskPayloadKind,
   activeRunStatuses,
@@ -603,6 +608,116 @@ async function getResolvedSandboxTaskRunForTaskAccess(
       canRetryFailedStart: await canRetryFailedStart(taskRun),
     },
   };
+}
+
+export const updateTaskModelSelectionInputSchema = z.object({
+  taskId: z.string(),
+  role: z.enum([
+    'coding',
+    'helper',
+    'vision',
+    'codeReview',
+    'explore',
+    'planning',
+  ]),
+  /**
+   * Desired model for the role, or null for the deployment default (for the
+   * coding role this re-stamps the deployment's default launch model).
+   */
+  model: z
+    .string()
+    .trim()
+    .min(1)
+    .regex(/^[^/\s]+\/.+$/u, 'Model must use provider/model format.')
+    .nullable(),
+  /** Desired reasoning level, or null for the deployment role level. */
+  reasoningEffort: z.enum(REASONING_EFFORT_VALUES).nullable(),
+});
+
+/**
+ * Updates one model role for a task: persists the selection on the current
+ * run's payload (the worker re-reads it at every harness spawn and snapshot
+ * resumes inherit it), then asks the live sandbox to apply it. `application`
+ * reports how the live sandbox took the change: `restarted` (idle harness
+ * restarted now), `deferred` (applies at the next message), `unavailable`
+ * (harness is shutting down), or `offline` (no live sandbox; applies on the
+ * next resume).
+ */
+export async function updateTaskModelSelectionCommand(
+  auth: UserAuthSuccess,
+  input: z.input<typeof updateTaskModelSelectionInputSchema>,
+) {
+  const parsed = updateTaskModelSelectionInputSchema.parse(input);
+  const { taskRun } = await getResolvedSandboxTaskRunByTaskId(auth, {
+    taskId: parsed.taskId,
+  });
+
+  try {
+    await applyTaskModelSelectionToRun({
+      runId: taskRun.id,
+      role: parsed.role,
+      model: parsed.model,
+      reasoningEffort: parsed.reasoningEffort,
+    });
+  } catch (error) {
+    if (error instanceof TaskModelSelectionError) {
+      throw new TRPCError({
+        code:
+          error.code === 'model_not_allowed' || error.code === 'invalid_model'
+            ? 'BAD_REQUEST'
+            : 'PRECONDITION_FAILED',
+        message: error.message,
+      });
+    }
+
+    throw error;
+  }
+
+  let application: 'restarted' | 'deferred' | 'unavailable' | 'offline' =
+    'offline';
+
+  if (taskRun.sandboxServerUrl && !isExitedRunStatus(taskRun.status)) {
+    try {
+      const authToken = await createRunToken({
+        runId: taskRun.id,
+        userId: auth.userId,
+        timeoutMs: SANDBOX_PROMPT_TOKEN_TIMEOUT_MS,
+      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(
+        () => controller.abort(),
+        SANDBOX_PROMPT_TIMEOUT_MS,
+      );
+
+      try {
+        const client = createSandboxServerRpcClient({
+          links: [
+            httpBatchLink({
+              url: `${taskRun.sandboxServerUrl}/trpc`,
+              transformer: superjson,
+              headers: () => ({ Authorization: `Bearer ${authToken}` }),
+              fetch: (url, init) =>
+                fetch(url, { ...init, signal: controller.signal }),
+            }),
+          ],
+        });
+        const result = await client.commands.applyTaskModelSettings.mutate();
+        application = result.application;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    } catch (error) {
+      // The selection is persisted; a failed live apply only means it takes
+      // effect at the next resume instead of immediately.
+      console.warn(
+        `[updateTaskModelSelection] Live apply failed for task run ${taskRun.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  return { success: true as const, application };
 }
 
 export async function takeOverBrowserControlCommand(

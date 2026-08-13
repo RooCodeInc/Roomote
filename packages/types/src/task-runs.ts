@@ -332,6 +332,44 @@ const openCodeModelOverrideSchema = z
   .min(1)
   .regex(/^[^/\s]+\/.+$/u, 'OpenCode model must use provider/model format.');
 
+/**
+ * Non-coding model roles a task can override per run. The coding role is
+ * intentionally absent: per-task coding model and reasoning selections keep
+ * flowing through `payload.harnessModelOverrides` and
+ * `payload.reasoningEffort`, which launch, resume, and display paths already
+ * understand. Keys mirror `TaskModelRole` in model-provider-config.
+ */
+export const TASK_MODEL_OVERRIDE_ROLES = [
+  'helper',
+  'vision',
+  'codeReview',
+  'explore',
+  'planning',
+] as const;
+
+export type TaskModelOverrideRole = (typeof TASK_MODEL_OVERRIDE_ROLES)[number];
+
+export const taskModelRoleOverrideSchema = z.object({
+  /** Model id in provider/model format; unset roles keep the deployment model. */
+  model: openCodeModelOverrideSchema.optional(),
+  /** Reasoning level for the role; unset keeps the deployment level. */
+  reasoningEffort: z.enum(REASONING_EFFORT_VALUES).optional(),
+});
+
+export type TaskModelRoleOverride = z.infer<typeof taskModelRoleOverrideSchema>;
+
+export const taskModelRoleOverridesSchema = z.object({
+  helper: taskModelRoleOverrideSchema.optional(),
+  vision: taskModelRoleOverrideSchema.optional(),
+  codeReview: taskModelRoleOverrideSchema.optional(),
+  explore: taskModelRoleOverrideSchema.optional(),
+  planning: taskModelRoleOverrideSchema.optional(),
+} satisfies Record<TaskModelOverrideRole, unknown>);
+
+export type TaskModelRoleOverrides = z.infer<
+  typeof taskModelRoleOverridesSchema
+>;
+
 export const SUGGESTION_CATEGORIES: readonly SuggestionCategory[] = [
   'bug',
   'security',
@@ -971,6 +1009,15 @@ const sharedTaskPayloadSchema = z.object({
       'opencode-server': openCodeModelOverrideSchema.optional(),
     })
     .optional(),
+
+  /**
+   * Per-task model and reasoning overrides for the non-coding model roles,
+   * editable from the task UI mid-run. Applied by the worker on top of the
+   * deployment role env vars at every harness spawn, so a config-update
+   * restart or snapshot resume picks up the current values. The coding role
+   * uses `harnessModelOverrides` + `reasoningEffort` above.
+   */
+  modelRoleOverrides: taskModelRoleOverridesSchema.optional(),
 
   /**
    * Optional provider-neutral work-item references that PR-delivery workflows

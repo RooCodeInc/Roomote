@@ -15,16 +15,19 @@ import { apiLogger } from '../../logging.js';
  */
 export function retireSlackPrReviewOffersBestEffort({
   slack,
+  slackTeamId,
   channelId,
   threadTs,
 }: {
   slack: SlackNotifier;
+  slackTeamId: string;
   channelId: string;
   threadTs: string;
 }): void {
   void (async () => {
     const claimed = await claimPendingPrReviewActionsForThread({
       provider: 'slack',
+      slackTeamId,
       channelId,
       threadId: threadTs,
     });

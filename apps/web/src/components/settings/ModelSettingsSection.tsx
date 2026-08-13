@@ -52,17 +52,17 @@ import {
 } from '@/components/system';
 import type { LucideIcon } from '@/components/system';
 import { Section } from '@/components/settings';
+import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
 import { formatMetadataSummary } from './model-metadata';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
-  REASONING_EFFORT_OPTIONS,
   XAI_SUBSCRIPTION_PROVIDER_ID,
   buildRecommendedDeploymentModelConfig,
   getRecommendedModelPresets,
   groupModelsByDisplayProvider,
   getSetupModelProvider,
-  normalizeOptionalReasoningEffort,
+  getSetupProviderTaskModelPrefix,
 } from '@roomote/types';
 import type {
   DisplayModelProviderGroup,
@@ -252,43 +252,6 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
     allowSameAsCoding: true,
   },
 ];
-function ReasoningEffortSelect({
-  value,
-  defaultEffort,
-  onChange,
-  disabled,
-  ariaLabel,
-}: {
-  value: ReasoningEffort | null;
-  defaultEffort: ReasoningEffort;
-  onChange: (value: ReasoningEffort | null) => void;
-  disabled?: boolean;
-  ariaLabel: string;
-}) {
-  return (
-    <Select
-      value={value ?? defaultEffort}
-      onValueChange={(nextValue) =>
-        onChange(normalizeOptionalReasoningEffort(nextValue))
-      }
-      disabled={disabled}
-    >
-      <SelectTrigger className="w-36 shrink-0" aria-label={ariaLabel}>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent align="end">
-        <SelectGroup>
-          <SelectLabel className="mt-0">Reasoning Level</SelectLabel>
-          {REASONING_EFFORT_OPTIONS.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectGroup>
-      </SelectContent>
-    </Select>
-  );
-}
 
 function TaskModelRoleEditor({
   config,
@@ -451,14 +414,12 @@ function UseRecommendedDefaultsAction({
   );
 }
 
-// The ChatGPT subscription provider has no model-id prefix of its own: its
-// models keep the `openai/` prefix so they are selected and billed like other
-// OpenAI models at runtime. Map it to `openai` wherever a model id is
-// composed from the selected provider.
+// Subscription connect surfaces are not model-id prefixes: ChatGPT keeps
+// `openai/`, SuperGrok keeps `xai/`.
 function getModelIdProviderPrefix(
   provider: SetupModelProviderId,
 ): SetupModelProviderId {
-  return provider === CHATGPT_SUBSCRIPTION_PROVIDER_ID ? 'openai' : provider;
+  return getSetupProviderTaskModelPrefix(provider) as SetupModelProviderId;
 }
 
 function composeNewModelId(
@@ -484,8 +445,9 @@ function composeNewModelId(
 
 function getNewModelPlaceholder(provider: SetupModelProviderId): string {
   const defaultModel = getSetupModelProvider(provider).defaultRoomoteModel;
-  const exampleSlug = defaultModel.startsWith(`${provider}/`)
-    ? defaultModel.slice(provider.length + 1)
+  const prefix = getSetupProviderTaskModelPrefix(provider);
+  const exampleSlug = defaultModel.startsWith(`${prefix}/`)
+    ? defaultModel.slice(prefix.length + 1)
     : defaultModel;
 
   return `Eg: ${exampleSlug}`;

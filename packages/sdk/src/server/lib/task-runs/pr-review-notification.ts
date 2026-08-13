@@ -2,7 +2,19 @@ import { Queue } from 'bullmq';
 import { z } from 'zod';
 
 import type { TaskRun } from '@roomote/db/server';
-import { and, db, eq, taskPullRequests } from '@roomote/db/server';
+import {
+  buildPrReviewEventKey,
+  claimDuePrReviewDeliveries,
+  completePrReviewDeliveries,
+  db,
+  deferPrReviewDeliveries,
+  eq,
+  persistPrReviewEvent,
+  recordPrReviewCycleState,
+  releasePrReviewDeliveries,
+  renewPrReviewDeliveryClaim,
+  slackInstallations,
+} from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
 import {
   type CommunicationProvider,
@@ -47,44 +59,6 @@ export const PR_REVIEW_NOTIFICATION_DEFER_MS = 5 * 60 * 1000;
  */
 export const PR_REVIEW_NOTIFICATION_MAX_DEFERRALS = 288;
 
-const PENDING_EVENTS_TTL_SECONDS = 24 * 60 * 60;
-const SCHEDULED_MARKER_TTL_BUFFER_SECONDS = 15 * 60;
-const REVIEW_CYCLE_TTL_SECONDS = 30 * 24 * 60 * 60;
-const SET_REVIEW_CYCLE_IF_NEWER_SCRIPT = `
-local current = redis.call('GET', KEYS[1])
-if current then
-  local decoded = cjson.decode(current)
-  if tonumber(decoded.observedAt) > tonumber(ARGV[2]) then
-    return 0
-  end
-end
-redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[3])
-return 1
-`;
-const COMPLETE_REVIEW_CYCLE_SCRIPT = `
-local current = redis.call('GET', KEYS[1])
-if current then
-  local decoded = cjson.decode(current)
-  if decoded.cycleId ~= ARGV[1] or tonumber(decoded.observedAt) > tonumber(ARGV[2]) then
-    return 0
-  end
-end
-redis.call('SET', KEYS[2], '1', 'EX', ARGV[4])
-redis.call('SET', KEYS[1], ARGV[3], 'EX', ARGV[4])
-redis.call('SET', KEYS[3], ARGV[3], 'EX', ARGV[4])
-return 1
-`;
-const RESTORE_REVIEW_CYCLE_IF_VALUE_MATCHES_SCRIPT = `
-if redis.call('GET', KEYS[1]) == ARGV[1] then
-  if ARGV[2] == '' then
-    return redis.call('DEL', KEYS[1])
-  end
-  redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
-  return 1
-end
-return 0
-`;
-
 const prReviewNotificationBatchKindSchema = z.enum(['human', 'roomote']);
 
 const prReviewCycleStateSchema = z.object({
@@ -93,11 +67,15 @@ const prReviewCycleStateSchema = z.object({
   observedAt: z.number(),
 });
 
-type PrReviewCycleState = z.infer<typeof prReviewCycleStateSchema>;
-
 export const prReviewActivityEventSchema = z.object({
   kind: z.enum(['issue_comment', 'review', 'review_comment', 'review_summary']),
   authorLogin: z.string(),
+  /** Stable provider identity for a non-Roomote automated reviewer. */
+  automatedAuthorId: z.string().optional(),
+  /** Provider ID of the parent comment when this event is a thread reply. */
+  inReplyToId: z.string().optional(),
+  /** Untrusted review text retained for notification triage. */
+  body: z.string().max(10_000).optional(),
   /** Commit SHA reviewed by this event. */
   reviewHeadSha: z.string().optional(),
   /**
@@ -121,9 +99,15 @@ export const prReviewActivityEventSchema = z.object({
    * notification can describe the feedback in the first person.
    */
   roomoteAuthored: z.boolean().optional(),
+  /** Provider-stable webhook object id used for durable ingestion dedupe. */
+  providerEventId: z.string().optional(),
 });
 
 export type PrReviewActivityEvent = z.infer<typeof prReviewActivityEventSchema>;
+
+function getAutomatedBatchId(automatedAuthorId: string): string {
+  return `automated:${automatedAuthorId}`;
+}
 
 export const prReviewNotificationRequestSchema = z.object({
   taskId: z.string(),
@@ -135,6 +119,9 @@ export const prReviewNotificationRequestSchema = z.object({
   batchKind: prReviewNotificationBatchKindSchema.optional(),
   batchId: z.string().optional(),
   sourceControlProvider: sourceControlProviderSchema.optional(),
+  deliveryIds: z.array(z.string()).optional(),
+  leaseToken: z.string().optional(),
+  events: z.array(prReviewActivityEventSchema).optional(),
 });
 
 export type PrReviewNotificationRequest = z.infer<
@@ -148,6 +135,9 @@ type PrReviewNotificationTarget = {
   immediate?: boolean;
   batchKind?: z.infer<typeof prReviewNotificationBatchKindSchema>;
   batchId?: string;
+  deliveryIds?: string[];
+  leaseToken?: string;
+  events?: PrReviewActivityEvent[];
 };
 
 export const startPrReviewNotificationCycleInputSchema = z.object({
@@ -185,7 +175,12 @@ type PrReviewNotificationRoutingRun = Pick<
 >;
 
 export type PrReviewNotificationRoute =
-  | { provider: 'slack'; channelId: string; threadId: string }
+  | {
+      provider: 'slack';
+      slackTeamId: string;
+      channelId: string;
+      threadId: string;
+    }
   | {
       provider: 'teams';
       channelId: string;
@@ -245,38 +240,6 @@ function buildPendingEventsKey(target: PrReviewNotificationTarget): string {
   return `pr-review-notification:pending:${buildTargetKeySuffix(target)}`;
 }
 
-function buildScheduledMarkerKey(target: PrReviewNotificationTarget): string {
-  if (target.batchKind === undefined) {
-    return `pr-review-notification:scheduled:${buildLegacyTargetKeySuffix(target)}`;
-  }
-
-  return `pr-review-notification:scheduled:${buildTargetKeySuffix(target)}:${target.immediate ? 'immediate' : 'delayed'}`;
-}
-
-function getPrReviewCycleStateKey({
-  repository,
-  prNumber,
-  reviewHeadSha,
-}: {
-  repository: string;
-  prNumber: number;
-  reviewHeadSha: string;
-}): string {
-  return `pr-review-notification:review-cycle:${encodeURIComponent(repository)}#${prNumber}:${reviewHeadSha}`;
-}
-
-export function getPrReviewCompletedCycleKey({
-  repository,
-  prNumber,
-  cycleId,
-}: {
-  repository: string;
-  prNumber: number;
-  cycleId: string;
-}): string {
-  return `pr-review-notification:review-cycle-completed:${encodeURIComponent(repository)}#${prNumber}:${encodeURIComponent(cycleId)}`;
-}
-
 function getPrReviewLatestCompletedCycleKey({
   repository,
   prNumber,
@@ -289,7 +252,7 @@ function getPrReviewLatestCompletedCycleKey({
   return `pr-review-notification:review-cycle-latest-completed:${encodeURIComponent(repository)}#${prNumber}:${reviewHeadSha}`;
 }
 
-async function readPrReviewCycleState({
+function getLegacyPrReviewCycleStateKey({
   repository,
   prNumber,
   reviewHeadSha,
@@ -297,26 +260,8 @@ async function readPrReviewCycleState({
   repository: string;
   prNumber: number;
   reviewHeadSha: string;
-}): Promise<{
-  key: string;
-  raw: string | null;
-  state: PrReviewCycleState | null;
-}> {
-  const key = getPrReviewCycleStateKey({
-    repository,
-    prNumber,
-    reviewHeadSha,
-  });
-  const raw = await getRedis().get(key);
-  const parsed = raw
-    ? prReviewCycleStateSchema.safeParse(JSON.parse(raw))
-    : null;
-
-  return {
-    key,
-    raw,
-    state: parsed?.success ? parsed.data : null,
-  };
+}): string {
+  return `pr-review-notification:review-cycle:${encodeURIComponent(repository)}#${prNumber}:${reviewHeadSha}`;
 }
 
 /** Records the start of a concrete Roomote review pass. */
@@ -324,21 +269,15 @@ export async function startPrReviewNotificationCycle(
   input: StartPrReviewNotificationCycleInput,
 ): Promise<void> {
   const parsed = startPrReviewNotificationCycleInputSchema.parse(input);
-  const key = getPrReviewCycleStateKey(parsed);
-  const value = JSON.stringify({
+  await recordPrReviewCycleState({
+    sourceControlProvider: 'github',
+    repository: parsed.repository,
+    prNumber: parsed.prNumber,
+    reviewHeadSha: parsed.reviewHeadSha,
     cycleId: parsed.cycleId,
     phase: 'open',
-    observedAt: parsed.observedAt,
-  } satisfies PrReviewCycleState);
-
-  await getRedis().eval(
-    SET_REVIEW_CYCLE_IF_NEWER_SCRIPT,
-    1,
-    key,
-    value,
-    parsed.observedAt,
-    REVIEW_CYCLE_TTL_SECONDS,
-  );
+    observedAt: new Date(parsed.observedAt),
+  });
 }
 
 /**
@@ -412,20 +351,43 @@ export async function resolvePrReviewNotificationRoute(
     };
   }
 
-  const { channel, threadTs } = await resolveSlackTaskRunRouting(job);
+  const {
+    channel,
+    teamId: resolvedTeamId,
+    threadTs,
+  } = await resolveSlackTaskRunRouting(job);
 
   if (!channel || !threadTs) {
     return null;
   }
 
-  return { provider: 'slack', channelId: channel, threadId: threadTs };
+  let slackTeamId = resolvedTeamId;
+
+  if (!slackTeamId) {
+    const installations = await db.query.slackInstallations.findMany({
+      where: eq(slackInstallations.isActive, true),
+      columns: { teamId: true },
+      limit: 2,
+    });
+
+    if (installations.length !== 1) {
+      return null;
+    }
+
+    slackTeamId = installations[0]?.teamId ?? null;
+  }
+
+  return slackTeamId
+    ? {
+        provider: 'slack',
+        slackTeamId,
+        channelId: channel,
+        threadId: threadTs,
+      }
+    : null;
 }
 
-/**
- * Schedules (or re-schedules) the delayed notification job. Also refreshes the
- * scheduled marker so concurrent webhook events keep appending to the pending
- * event list instead of scheduling duplicate jobs.
- */
+/** Moves an owned database delivery back to pending with a later due time. */
 export async function schedulePrReviewNotificationJob({
   request,
   delayMs,
@@ -433,219 +395,152 @@ export async function schedulePrReviewNotificationJob({
   request: PrReviewNotificationRequest;
   delayMs: number;
 }): Promise<void> {
-  const redis = getRedis();
-  const markerKey = buildScheduledMarkerKey(request);
-  const markerTtlSeconds =
-    Math.ceil(delayMs / 1000) + SCHEDULED_MARKER_TTL_BUFFER_SECONDS;
-
-  await redis.set(markerKey, '1', 'EX', markerTtlSeconds);
-
-  try {
-    await getPrReviewNotificationQueue().add(
-      'notify-pr-review-activity',
-      request,
-      { delay: delayMs },
-    );
-  } catch (error) {
-    await redis.del(markerKey).catch(() => undefined);
-    throw error;
+  if (!request.deliveryIds || !request.leaseToken) {
+    throw new Error('Cannot defer a PR review notification without a lease');
   }
+
+  await deferPrReviewDeliveries(
+    { deliveryIds: request.deliveryIds, leaseToken: request.leaseToken },
+    new Date(Date.now() + delayMs),
+  );
 }
 
-/**
- * Appends a pending review-activity event for the task and returns whether
- * this call claimed responsibility for scheduling the notification job.
- */
-async function appendPendingEventAndClaimSchedule({
-  target,
-  event,
-  delayMs,
-}: {
-  target: PrReviewNotificationTarget;
-  event: PrReviewActivityEvent;
-  delayMs: number;
-}): Promise<boolean> {
-  const redis = getRedis();
-  const pendingKey = buildPendingEventsKey(target);
-  const markerKey = buildScheduledMarkerKey(target);
-
-  await redis
-    .multi()
-    .rpush(pendingKey, JSON.stringify(event))
-    .expire(pendingKey, PENDING_EVENTS_TTL_SECONDS)
-    .exec();
-
-  const markerTtlSeconds =
-    Math.ceil(delayMs / 1000) + SCHEDULED_MARKER_TTL_BUFFER_SECONDS;
-
-  const claim = await redis.set(markerKey, '1', 'EX', markerTtlSeconds, 'NX');
-
-  return claim === 'OK';
-}
-
-/**
- * Atomically drains the pending review-activity events for the task and
- * clears the scheduled marker so later events schedule a fresh notification.
- */
 export async function consumePendingPrReviewActivity(
   target: PrReviewNotificationTarget,
 ): Promise<PrReviewActivityEvent[]> {
-  const redis = getRedis();
-  const pendingKey = buildPendingEventsKey(target);
-  const delayedMarkerKey = buildScheduledMarkerKey({
-    ...target,
-    immediate: false,
-  });
-  const immediateMarkerKey = buildScheduledMarkerKey({
-    ...target,
-    immediate: true,
-  });
-
-  await redis.del(delayedMarkerKey, immediateMarkerKey).catch(() => undefined);
-
-  const results = await redis
-    .multi()
-    .lrange(pendingKey, 0, -1)
-    .del(pendingKey)
-    .exec();
-
-  const rawEvents = results?.[0]?.[1];
-
-  if (!Array.isArray(rawEvents)) {
-    return [];
+  if (!target.deliveryIds || !target.leaseToken || !target.events) {
+    throw new Error('Cannot consume a PR review notification without a lease');
   }
 
-  const events: PrReviewActivityEvent[] = [];
-
-  for (const raw of rawEvents) {
-    if (typeof raw !== 'string') {
-      continue;
-    }
-
-    try {
-      const parsed = prReviewActivityEventSchema.safeParse(JSON.parse(raw));
-
-      if (parsed.success) {
-        events.push(parsed.data);
-      }
-    } catch {
-      // Ignore malformed entries.
-    }
-  }
-
-  const roomoteBatchIds = Array.from(
-    new Set(
-      events.flatMap((event) =>
-        event.kind !== 'review_summary' &&
-        event.roomoteAuthored &&
-        event.batchId
-          ? [event.batchId]
-          : [],
-      ),
-    ),
-  );
-  const completedBatchIds = new Set<string>();
-  const roomoteHeadShas = Array.from(
-    new Set(
-      events.flatMap((event) =>
-        event.kind !== 'review_summary' &&
-        event.roomoteAuthored &&
-        event.reviewHeadSha &&
-        event.observedAt !== undefined
-          ? [event.reviewHeadSha]
-          : [],
-      ),
-    ),
-  );
-  const completedHeadObservedAt = new Map<string, number>();
-
-  await Promise.all([
-    ...roomoteBatchIds.map(async (cycleId) => {
-      let completed: string | null;
-
-      try {
-        completed = await redis.get(
-          getPrReviewCompletedCycleKey({
-            repository: target.repository,
-            prNumber: target.prNumber,
-            cycleId,
-          }),
-        );
-      } catch {
-        // The pending list is already drained; fail open so feedback is not lost.
-        return;
-      }
-
-      if (completed) {
-        completedBatchIds.add(cycleId);
-      }
-    }),
-    ...roomoteHeadShas.map(async (reviewHeadSha) => {
-      try {
-        const raw = await redis.get(
-          getPrReviewLatestCompletedCycleKey({
-            repository: target.repository,
-            prNumber: target.prNumber,
-            reviewHeadSha,
-          }),
-        );
-        const parsed = raw
-          ? prReviewCycleStateSchema.safeParse(JSON.parse(raw))
-          : null;
-
-        if (parsed?.success && parsed.data.phase === 'completed') {
-          completedHeadObservedAt.set(reviewHeadSha, parsed.data.observedAt);
-        }
-      } catch {
-        // The pending list is already drained; fail open so feedback is not lost.
-      }
-    }),
-  ]);
-
-  return events.filter((event) => {
-    if (event.kind === 'review_summary' || !event.roomoteAuthored) {
-      return true;
-    }
-
-    if (event.batchId && completedBatchIds.has(event.batchId)) {
-      return false;
-    }
-
-    const completedAt = event.reviewHeadSha
-      ? completedHeadObservedAt.get(event.reviewHeadSha)
-      : undefined;
-
-    return (
-      completedAt === undefined ||
-      event.observedAt === undefined ||
-      event.observedAt > completedAt
-    );
-  });
+  return target.events;
 }
 
-/**
- * Requeues events that could not be delivered so a retried notification job
- * can pick them up again.
- */
 export async function requeuePendingPrReviewActivity({
   target,
-  events,
 }: {
   target: PrReviewNotificationTarget;
   events: PrReviewActivityEvent[];
 }): Promise<void> {
-  if (events.length === 0) {
-    return;
+  if (!target.deliveryIds || !target.leaseToken) {
+    throw new Error('Cannot release a PR review notification without a lease');
   }
 
-  const redis = getRedis();
-  const pendingKey = buildPendingEventsKey(target);
+  await releasePrReviewDeliveries({
+    deliveryIds: target.deliveryIds,
+    leaseToken: target.leaseToken,
+  });
+}
 
-  await redis
-    .multi()
-    .rpush(pendingKey, ...events.map((event) => JSON.stringify(event)))
-    .expire(pendingKey, PENDING_EVENTS_TTL_SECONDS)
-    .exec();
+export function isDurablePrReviewNotificationRequest(
+  request: PrReviewNotificationRequest,
+): boolean {
+  return Boolean(
+    request.deliveryIds?.length && request.leaseToken && request.events,
+  );
+}
+
+/**
+ * N-1 upgrade path for jobs queued before Postgres became authoritative.
+ * Legacy Redis is read only. Cycle state is materialized first, then each
+ * pending event is deterministically inserted into the normal database path.
+ */
+export async function migrateLegacyPrReviewNotificationRequest(
+  request: PrReviewNotificationRequest,
+): Promise<number> {
+  if (isDurablePrReviewNotificationRequest(request)) return 0;
+
+  const redis = getRedis();
+  const rawEvents = await redis.lrange(buildPendingEventsKey(request), 0, -1);
+  const events = rawEvents.flatMap((raw) => {
+    try {
+      const parsed = prReviewActivityEventSchema.safeParse(JSON.parse(raw));
+      return parsed.success ? [parsed.data] : [];
+    } catch {
+      return [];
+    }
+  });
+  const roomoteHeadShas = [
+    ...new Set(
+      events.flatMap((event) =>
+        event.roomoteAuthored && event.reviewHeadSha
+          ? [event.reviewHeadSha]
+          : [],
+      ),
+    ),
+  ];
+
+  for (const reviewHeadSha of roomoteHeadShas) {
+    const rawStates = await Promise.all([
+      redis.get(
+        getLegacyPrReviewCycleStateKey({
+          repository: request.repository,
+          prNumber: request.prNumber,
+          reviewHeadSha,
+        }),
+      ),
+      redis.get(
+        getPrReviewLatestCompletedCycleKey({
+          repository: request.repository,
+          prNumber: request.prNumber,
+          reviewHeadSha,
+        }),
+      ),
+    ]);
+    const states = rawStates.flatMap((raw) => {
+      if (!raw) return [];
+      try {
+        const parsed = prReviewCycleStateSchema.safeParse(JSON.parse(raw));
+        return parsed.success ? [parsed.data] : [];
+      } catch {
+        return [];
+      }
+    });
+    const latest = states.sort((a, b) => b.observedAt - a.observedAt)[0];
+    if (latest) {
+      await recordPrReviewCycleState({
+        sourceControlProvider: request.sourceControlProvider ?? 'github',
+        repository: request.repository,
+        prNumber: request.prNumber,
+        reviewHeadSha,
+        ...latest,
+        observedAt: new Date(latest.observedAt),
+      });
+    }
+  }
+
+  for (const event of events) {
+    const sourceControlProvider = request.sourceControlProvider ?? 'github';
+    const roomoteAuthored = event.roomoteAuthored === true;
+    const automatedAuthorId = roomoteAuthored
+      ? undefined
+      : event.automatedAuthorId;
+    await persistPrReviewEvent({
+      eventKey: buildPrReviewEventKey({
+        sourceControlProvider,
+        repository: request.repository,
+        prNumber: request.prNumber,
+        event,
+      }),
+      sourceControlProvider,
+      repository: request.repository,
+      prNumber: request.prNumber,
+      prUrl: request.prUrl,
+      event,
+      batchKind: roomoteAuthored ? 'roomote' : 'human',
+      batchId: automatedAuthorId
+        ? getAutomatedBatchId(automatedAuthorId)
+        : (event.batchId ?? request.batchId ?? null),
+      automatedAuthorId,
+      dueAt: new Date(),
+      observedAt: new Date(event.observedAt ?? Date.now()),
+      reviewHeadSha: event.reviewHeadSha ?? null,
+      roomoteAuthored,
+      isSummary: roomoteAuthored && event.kind === 'review_summary',
+    });
+  }
+
+  await dispatchDuePrReviewNotifications();
+  return events.length;
 }
 
 /**
@@ -663,216 +558,118 @@ export async function enqueuePrReviewNotification(
   input: EnqueuePrReviewNotificationInput,
 ): Promise<EnqueuePrReviewNotificationResult> {
   const parsedInput = enqueuePrReviewNotificationInputSchema.parse(input);
-
-  const prTaskLinks = await db.query.taskPullRequests.findMany({
-    where: and(
-      eq(
-        taskPullRequests.sourceControlProvider,
-        parsedInput.sourceControlProvider ?? 'github',
-      ),
-      eq(taskPullRequests.repository, parsedInput.repository),
-      eq(taskPullRequests.prNumber, parsedInput.prNumber),
-    ),
-    columns: { taskId: true },
-  });
-
-  const taskIds = Array.from(new Set(prTaskLinks.map((link) => link.taskId)));
-
-  if (taskIds.length === 0) {
-    return { notifiedTaskCount: 0, reason: 'no_linked_tasks' };
-  }
-
+  const sourceControlProvider = parsedInput.sourceControlProvider ?? 'github';
   const isRoomoteEvent = parsedInput.event.roomoteAuthored === true;
+  const automatedAuthorId = isRoomoteEvent
+    ? undefined
+    : parsedInput.event.automatedAuthorId;
   const isRoomoteSummary =
     isRoomoteEvent && parsedInput.event.kind === 'review_summary';
-  let event = parsedInput.event;
-  let previousCycleRaw: string | null = null;
-  let completedCycleKey: string | null = null;
-  let completedCycleValue: string | null = null;
-  let latestCompletedCycleKey: string | null = null;
-  let previousLatestCompletedRaw: string | null = null;
+  const event = parsedInput.event;
 
-  if (isRoomoteEvent && event.reviewHeadSha) {
-    const reviewHeadSha = event.reviewHeadSha;
-
-    try {
-      const cycle = await readPrReviewCycleState({
-        repository: parsedInput.repository,
-        prNumber: parsedInput.prNumber,
-        reviewHeadSha,
-      });
-
-      if (!isRoomoteSummary && cycle.state?.phase === 'completed') {
-        if (
-          event.observedAt === undefined ||
-          event.observedAt <= cycle.state.observedAt
-        ) {
-          return {
-            notifiedTaskCount: 0,
-            reason: 'review_cycle_completed',
-          };
-        }
-      }
-
-      if (
-        isRoomoteSummary &&
-        cycle.state &&
-        event.observedAt !== undefined &&
-        cycle.state.observedAt > event.observedAt
-      ) {
-        return {
-          notifiedTaskCount: 0,
-          reason: 'stale_review_cycle',
-        };
-      }
-
-      const cycleId =
-        cycle.state?.phase === 'completed'
-          ? (event.batchId ?? `head:${event.reviewHeadSha}`)
-          : (cycle.state?.cycleId ??
-            event.batchId ??
-            `head:${event.reviewHeadSha}`);
-      event = { ...event, batchId: cycleId };
-
-      if (isRoomoteSummary) {
-        const completedState = JSON.stringify({
-          cycleId,
-          phase: 'completed',
-          observedAt: event.observedAt ?? Date.now(),
-        } satisfies PrReviewCycleState);
-        completedCycleKey = getPrReviewCompletedCycleKey({
-          repository: parsedInput.repository,
-          prNumber: parsedInput.prNumber,
-          cycleId,
-        });
-        completedCycleValue = completedState;
-        previousCycleRaw = cycle.raw;
-        latestCompletedCycleKey = getPrReviewLatestCompletedCycleKey({
-          repository: parsedInput.repository,
-          prNumber: parsedInput.prNumber,
-          reviewHeadSha,
-        });
-        previousLatestCompletedRaw = await getRedis().get(
-          latestCompletedCycleKey,
-        );
-
-        const completed = await getRedis().eval(
-          COMPLETE_REVIEW_CYCLE_SCRIPT,
-          3,
-          cycle.key,
-          completedCycleKey,
-          latestCompletedCycleKey,
-          cycleId,
-          event.observedAt ?? Date.now(),
-          completedState,
-          REVIEW_CYCLE_TTL_SECONDS,
-        );
-
-        if (completed !== 1) {
-          return {
-            notifiedTaskCount: 0,
-            reason: 'stale_review_cycle',
-          };
-        }
-      }
-    } catch (error) {
-      // Completion lookups are an optimization. Fail open so transient Redis
-      // reads never discard review feedback.
-      if (isRoomoteSummary) {
-        throw error;
-      }
-    }
-  }
-
-  let notifiedTaskCount = 0;
   const notificationDelayMs = isRoomoteSummary
     ? 0
     : isRoomoteEvent
       ? PR_REVIEW_NOTIFICATION_ROOMOTE_FALLBACK_MS
       : PR_REVIEW_NOTIFICATION_DEBOUNCE_MS;
 
-  try {
-    for (const taskId of taskIds) {
-      const immediate = isRoomoteSummary;
-      const target = {
-        taskId,
-        repository: parsedInput.repository,
-        prNumber: parsedInput.prNumber,
-        immediate,
-        batchKind: isRoomoteEvent ? ('roomote' as const) : ('human' as const),
-        ...(event.batchId ? { batchId: event.batchId } : {}),
-      };
+  const eventRecord = prReviewActivityEventSchema.parse(event);
+  const result = await persistPrReviewEvent({
+    eventKey: buildPrReviewEventKey({
+      sourceControlProvider,
+      repository: parsedInput.repository,
+      prNumber: parsedInput.prNumber,
+      event: eventRecord,
+    }),
+    sourceControlProvider,
+    repository: parsedInput.repository,
+    prNumber: parsedInput.prNumber,
+    prUrl: parsedInput.prUrl,
+    event: eventRecord,
+    batchKind: isRoomoteEvent ? 'roomote' : 'human',
+    batchId: automatedAuthorId
+      ? getAutomatedBatchId(automatedAuthorId)
+      : (event.batchId ?? null),
+    automatedAuthorId,
+    dueAt: new Date(Date.now() + notificationDelayMs),
+    observedAt: new Date(event.observedAt ?? Date.now()),
+    reviewHeadSha: event.reviewHeadSha ?? null,
+    roomoteAuthored: isRoomoteEvent,
+    isSummary: isRoomoteSummary,
+  });
 
-      const claimed = await appendPendingEventAndClaimSchedule({
-        target,
-        event,
-        delayMs: notificationDelayMs,
-      });
-
-      if (claimed) {
-        try {
-          await getPrReviewNotificationQueue().add(
-            'notify-pr-review-activity',
-            {
-              ...target,
-              prUrl: parsedInput.prUrl,
-              deferrals: 0,
-              immediate,
-              sourceControlProvider: parsedInput.sourceControlProvider,
-            },
-            { delay: notificationDelayMs },
-          );
-        } catch (error) {
-          await getRedis()
-            .del(buildScheduledMarkerKey(target))
-            .catch(() => undefined);
-          throw error;
-        }
-      }
-
-      notifiedTaskCount += 1;
-    }
-  } catch (error) {
-    if (
-      completedCycleKey &&
-      completedCycleValue &&
-      latestCompletedCycleKey &&
-      event.reviewHeadSha
-    ) {
-      const cycleStateKey = getPrReviewCycleStateKey({
-        repository: parsedInput.repository,
-        prNumber: parsedInput.prNumber,
-        reviewHeadSha: event.reviewHeadSha,
-      });
-      await getRedis()
-        .del(completedCycleKey)
-        .catch(() => undefined);
-      await getRedis()
-        .eval(
-          RESTORE_REVIEW_CYCLE_IF_VALUE_MATCHES_SCRIPT,
-          1,
-          cycleStateKey,
-          completedCycleValue,
-          previousCycleRaw ?? '',
-          REVIEW_CYCLE_TTL_SECONDS,
-        )
-        .catch(() => undefined);
-      await getRedis()
-        .eval(
-          RESTORE_REVIEW_CYCLE_IF_VALUE_MATCHES_SCRIPT,
-          1,
-          latestCompletedCycleKey,
-          completedCycleValue,
-          previousLatestCompletedRaw ?? '',
-          REVIEW_CYCLE_TTL_SECONDS,
-        )
-        .catch(() => undefined);
-    }
-
-    throw error;
+  if (result.reason) {
+    return { notifiedTaskCount: 0, reason: result.reason };
   }
 
-  return { notifiedTaskCount };
+  if (isRoomoteSummary) {
+    await dispatchDuePrReviewNotifications().catch(() => undefined);
+  }
+
+  return result.projectedTaskCount === 0
+    ? { notifiedTaskCount: 0, reason: 'no_linked_tasks' }
+    : { notifiedTaskCount: result.projectedTaskCount };
+}
+
+/**
+ * Claims due Postgres deliveries and uses BullMQ only as a low-latency wakeup.
+ * A failed enqueue releases the lease; the next normal scheduled drain finds
+ * the same durable rows without a repair index or replay chain.
+ */
+export async function dispatchDuePrReviewNotifications(): Promise<number> {
+  const claims = await claimDuePrReviewDeliveries();
+  let enqueued = 0;
+
+  for (const claim of claims) {
+    try {
+      await getPrReviewNotificationQueue().add('notify-pr-review-activity', {
+        taskId: claim.taskId,
+        repository: claim.repository,
+        prNumber: claim.prNumber,
+        prUrl: claim.prUrl,
+        deferrals: claim.deferrals,
+        immediate: claim.batchKind === 'roomote',
+        batchKind: claim.batchKind,
+        ...(claim.batchId ? { batchId: claim.batchId } : {}),
+        sourceControlProvider: claim.sourceControlProvider,
+        deliveryIds: claim.deliveryIds,
+        leaseToken: claim.leaseToken,
+        events: claim.events.map((event) =>
+          prReviewActivityEventSchema.parse(event),
+        ),
+      });
+      enqueued += 1;
+    } catch (error) {
+      await releasePrReviewDeliveries(claim);
+      console.warn(
+        `[dispatchDuePrReviewNotifications] Failed to wake ${claim.repository}#${claim.prNumber}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  return enqueued;
+}
+
+export async function finalizePrReviewNotificationRequest(
+  request: PrReviewNotificationRequest,
+  status: 'delivered' | 'suppressed' = 'delivered',
+): Promise<void> {
+  if (request.deliveryIds && request.leaseToken) {
+    await completePrReviewDeliveries(
+      { deliveryIds: request.deliveryIds, leaseToken: request.leaseToken },
+      status,
+    );
+  }
+}
+
+export async function renewPrReviewNotificationRequestLease(
+  request: PrReviewNotificationRequest,
+): Promise<boolean> {
+  if (!request.deliveryIds || !request.leaseToken) return true;
+  return renewPrReviewDeliveryClaim({
+    deliveryIds: request.deliveryIds,
+    leaseToken: request.leaseToken,
+  });
 }
 
 function getPrReviewLinkFormatter(

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import {
   REVIEW_STATUS_END_MARKER,
   REVIEW_STATUS_START_MARKER,
@@ -23,6 +25,7 @@ import type {
 
 type PrReviewActivityWebhookPayload =
   | WebhookIssueCommentCreated
+  | WebhookIssueCommentEdited
   | WebhookPullRequestReviewSubmitted
   | WebhookPullRequestCommentCreated;
 
@@ -30,12 +33,59 @@ type PrReviewSummaryWebhookPayload =
   | WebhookIssueCommentCreated
   | WebhookIssueCommentEdited;
 
+type GitHubWebhookContext = { deliveryId?: string };
+
 const MAX_SUMMARY_LENGTH = 300;
+const MAX_REVIEW_BODY_LENGTH = 10_000;
+
+function getReviewBody(value: string | null | undefined): string | undefined {
+  const body = value?.trim();
+  return body ? body.slice(0, MAX_REVIEW_BODY_LENGTH) : undefined;
+}
+
+function getAutomatedAuthorMetadata(
+  user: { id?: number; type?: string } | null | undefined,
+): { automatedAuthorId: string } | Record<string, never> {
+  return user?.type === 'Bot' && typeof user.id === 'number'
+    ? { automatedAuthorId: `github:${user.id}` }
+    : {};
+}
 
 function getObservedAt(value: string | null | undefined): number {
   const parsed = value ? Date.parse(value) : Number.NaN;
 
   return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
+function getIssueCommentRevision(
+  eventPayload: PrReviewSummaryWebhookPayload,
+  context: GitHubWebhookContext,
+): string {
+  if (eventPayload.comment.updated_at) {
+    return eventPayload.comment.updated_at;
+  }
+
+  if ('changes' in eventPayload) {
+    if (!context.deliveryId) {
+      throw new Error(
+        'GitHub issue_comment.edited without updated_at requires a delivery id',
+      );
+    }
+
+    return `delivery:${context.deliveryId}`;
+  }
+
+  return eventPayload.comment.created_at;
+}
+
+function getTimestampLessSummaryCycleId(
+  commentId: number,
+  inProgressBody: string,
+): string {
+  const bodyFingerprint = createHash('sha256')
+    .update(inProgressBody)
+    .digest('hex');
+  return `github-summary:${commentId}:body:${bodyFingerprint}`;
 }
 
 /**
@@ -56,6 +106,7 @@ function getObservedAt(value: string | null | undefined): number {
  */
 export function buildPrReviewActivityNotificationInput(
   eventPayload: PrReviewActivityWebhookPayload,
+  context: GitHubWebhookContext = {},
 ): EnqueuePrReviewNotificationInput | null {
   if ('issue' in eventPayload) {
     if (!eventPayload.issue.pull_request) {
@@ -63,7 +114,9 @@ export function buildPrReviewActivityNotificationInput(
     }
 
     const comment = eventPayload.comment;
+    const revision = getIssueCommentRevision(eventPayload, context);
     const authorLogin = comment.user?.login;
+    const body = getReviewBody(comment.body);
 
     if (
       !authorLogin ||
@@ -81,9 +134,12 @@ export function buildPrReviewActivityNotificationInput(
       sourceControlProvider: 'github',
       event: {
         kind: 'issue_comment',
+        providerEventId: `github-issue-comment:${comment.id}:${revision}`,
         authorLogin,
+        ...getAutomatedAuthorMetadata(comment.user),
+        ...(body ? { body } : {}),
         ...(comment.html_url ? { url: comment.html_url } : {}),
-        observedAt: getObservedAt(comment.created_at),
+        observedAt: getObservedAt(comment.updated_at ?? comment.created_at),
       },
     };
   }
@@ -98,6 +154,7 @@ export function buildPrReviewActivityNotificationInput(
   if ('review' in eventPayload) {
     const review = eventPayload.review;
     const authorLogin = review.user?.login;
+    const body = getReviewBody(review.body);
 
     if (!authorLogin) {
       return null;
@@ -115,7 +172,10 @@ export function buildPrReviewActivityNotificationInput(
       ...base,
       event: {
         kind: 'review',
+        providerEventId: `github-review:${review.id}`,
         authorLogin,
+        ...getAutomatedAuthorMetadata(review.user),
+        ...(body ? { body } : {}),
         ...(review.commit_id ? { reviewHeadSha: review.commit_id } : {}),
         batchId: `github-review:${review.id}`,
         reviewState: review.state,
@@ -132,6 +192,7 @@ export function buildPrReviewActivityNotificationInput(
 
   const comment = eventPayload.comment;
   const authorLogin = comment.user?.login;
+  const body = getReviewBody(comment.body);
 
   if (!authorLogin) {
     return null;
@@ -152,7 +213,13 @@ export function buildPrReviewActivityNotificationInput(
     ...base,
     event: {
       kind: 'review_comment',
+      providerEventId: `github-review-comment:${comment.id}`,
       authorLogin,
+      ...getAutomatedAuthorMetadata(comment.user),
+      ...(comment.in_reply_to_id
+        ? { inReplyToId: String(comment.in_reply_to_id) }
+        : {}),
+      ...(body ? { body } : {}),
       ...(comment.commit_id ? { reviewHeadSha: comment.commit_id } : {}),
       ...(comment.pull_request_review_id
         ? { batchId: `github-review:${comment.pull_request_review_id}` }
@@ -231,6 +298,7 @@ function getReviewStatusFirstLine(body: string): string | null {
  */
 function buildPrReviewSummaryLifecycle(
   eventPayload: PrReviewSummaryWebhookPayload,
+  context: GitHubWebhookContext = {},
 ): PrReviewSummaryLifecycle | null {
   if (!eventPayload.issue.pull_request) {
     return null;
@@ -271,6 +339,7 @@ function buildPrReviewSummaryLifecycle(
     previousStatusLine !== null &&
     isReviewInProgressStatusLine(previousStatusLine);
   const markerSha = getReviewSummaryMarkerSha(body);
+  const revision = getIssueCommentRevision(eventPayload, context);
   const observedAt = getObservedAt(comment.updated_at ?? comment.created_at);
 
   if (currentInProgress) {
@@ -284,7 +353,9 @@ function buildPrReviewSummaryLifecycle(
         repository: eventPayload.repository.full_name,
         prNumber: eventPayload.issue.number,
         reviewHeadSha: markerSha,
-        cycleId: `github-summary:${comment.id}:${comment.updated_at ?? comment.created_at}`,
+        cycleId: comment.updated_at
+          ? `github-summary:${comment.id}:${revision}`
+          : getTimestampLessSummaryCycleId(comment.id, body),
         observedAt,
       },
     };
@@ -321,8 +392,17 @@ function buildPrReviewSummaryLifecycle(
         sourceControlProvider: 'github',
         event: {
           kind: 'review_summary',
+          providerEventId: `github-review-summary:${comment.id}:${revision}`,
           authorLogin,
           ...(markerSha ? { reviewHeadSha: markerSha } : {}),
+          ...(!comment.updated_at && typeof previousBody === 'string'
+            ? {
+                batchId: getTimestampLessSummaryCycleId(
+                  comment.id,
+                  previousBody,
+                ),
+              }
+            : {}),
           summary,
           ...(comment.html_url ? { url: comment.html_url } : {}),
           observedAt,
@@ -335,20 +415,22 @@ function buildPrReviewSummaryLifecycle(
 
 export function buildPrReviewSummaryNotification(
   eventPayload: PrReviewSummaryWebhookPayload,
+  context: GitHubWebhookContext = {},
 ): PrReviewSummaryNotification | null {
-  const lifecycle = buildPrReviewSummaryLifecycle(eventPayload);
+  const lifecycle = buildPrReviewSummaryLifecycle(eventPayload, context);
 
   return lifecycle?.kind === 'completed' ? lifecycle.notification : null;
 }
 
 /**
- * Fire-and-forget notification scheduling for Roomote review-summary comments
- * on task-linked pull requests. Logs errors but never throws.
+ * Persists Roomote review-summary lifecycle state for task-linked pull
+ * requests. Failures propagate so the webhook delivery can be retried.
  */
 export async function queuePrReviewSummaryNotification(
   eventPayload: PrReviewSummaryWebhookPayload,
+  deliveryId?: string,
 ): Promise<void> {
-  const lifecycle = buildPrReviewSummaryLifecycle(eventPayload);
+  const lifecycle = buildPrReviewSummaryLifecycle(eventPayload, { deliveryId });
 
   if (!lifecycle) {
     return;
@@ -363,34 +445,38 @@ export async function queuePrReviewSummaryNotification(
       ? lifecycle.input
       : lifecycle.notification.input;
 
-  await operation.catch((error) =>
+  await operation.catch((error) => {
     console.warn(
       `[queuePrReviewSummaryNotification] Failed to record review-summary lifecycle for ${reference.repository}#${reference.prNumber}: ${
         error instanceof Error ? error.message : String(error)
       }`,
-    ),
-  );
+    );
+    throw error;
+  });
 }
 
 /**
- * Fire-and-forget notification scheduling for PR review activity on
- * task-linked pull requests. Logs errors but never throws, so it cannot
- * affect the mention-handling webhook flow.
+ * Persists PR review activity for task-linked pull requests. Failures
+ * propagate so the webhook delivery can be retried.
  */
 export async function queuePrReviewActivityNotification(
   eventPayload: PrReviewActivityWebhookPayload,
+  deliveryId?: string,
 ): Promise<void> {
-  const input = buildPrReviewActivityNotificationInput(eventPayload);
+  const input = buildPrReviewActivityNotificationInput(eventPayload, {
+    deliveryId,
+  });
 
   if (!input) {
     return;
   }
 
-  await enqueuePrReviewNotification(input).catch((error) =>
+  await enqueuePrReviewNotification(input).catch((error) => {
     console.warn(
-      `[queuePrReviewActivityNotification] Failed to enqueue review notification for ${input.repository}#${input.prNumber}: ${
+      `[queuePrReviewActivityNotification] Failed to persist review notification for ${input.repository}#${input.prNumber}: ${
         error instanceof Error ? error.message : String(error)
       }`,
-    ),
-  );
+    );
+    throw error;
+  });
 }

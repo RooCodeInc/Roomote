@@ -197,6 +197,8 @@ import {
   sendSandboxPromptCommand,
   sendSandboxPromptInputSchema,
   takeOverBrowserControlCommand,
+  updateTaskModelSelectionCommand,
+  updateTaskModelSelectionInputSchema,
 } from '../commands/sandbox-session';
 import {
   getDeploymentMcpEnablementsCommand,
@@ -353,6 +355,7 @@ import {
   discoverProviderModelsCommand,
   getLaunchTaskModelsCommand,
   getTaskModelProviderSetupCommand,
+  getTaskModelRoleDefaultsCommand,
   getTaskModelSettingsCommand,
   lookupTaskModelCommand,
   qualifyProviderModelCommand,
@@ -2030,6 +2033,12 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         takeOverBrowserControlCommand(auth, input),
       ),
+
+    updateTaskModelSelection: protectedProcedure
+      .input(updateTaskModelSelectionInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        updateTaskModelSelectionCommand(auth, input),
+      ),
   }),
 
   filters: createRouter({
@@ -2092,6 +2101,10 @@ export const appRouter = createRouter({
   taskModels: createRouter({
     launchOptions: protectedProcedure.query(({ ctx: { auth } }) =>
       getLaunchTaskModelsCommand(auth),
+    ),
+
+    roleDefaults: protectedProcedure.query(({ ctx: { auth } }) =>
+      getTaskModelRoleDefaultsCommand(auth),
     ),
 
     get: protectedProcedure.query(({ ctx: { auth } }) =>
