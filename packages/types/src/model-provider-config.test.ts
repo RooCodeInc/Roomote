@@ -355,6 +355,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       { providerId: 'kimi-for-coding', modelId: 'kimi-for-coding/k3' },
       { providerId: 'opencode', modelId: 'opencode/kimi-k3' },
       { providerId: 'opencode-go', modelId: 'opencode-go/kimi-k3' },
+      { providerId: 'github-copilot', modelId: 'github-copilot/kimi-k3' },
     ]);
   });
 

@@ -814,6 +814,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'github-copilot/gpt-5.6-sol',
       'gpt-5-6-terra': 'github-copilot/gpt-5.6-terra',
       'gpt-5-6-luna': 'github-copilot/gpt-5.6-luna',
+      'kimi-k3': 'github-copilot/kimi-k3',
       'kimi-k2-7-code': 'github-copilot/kimi-k2.7-code',
     }),
     recommendedRoleModels: {

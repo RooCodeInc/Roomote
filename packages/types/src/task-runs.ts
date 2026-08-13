@@ -15,7 +15,10 @@ import { SANDBOX_SNAPSHOT_EXPIRY_MS } from './compute-providers/worker-runtime';
 import { prActions } from './cloud-agents';
 import { ALL_REPOSITORIES } from './constants';
 import { sourceControlProviderSchema } from './source-control';
-import { resolveTaskModelIdAlias } from './task-models';
+import {
+  REASONING_EFFORT_VALUES,
+  resolveTaskModelIdAlias,
+} from './task-models';
 
 /**
  * Task classification vocabulary.
@@ -312,19 +315,10 @@ export const RUN_LAUNCH_CLASSES = [
 
 export type RunLaunchClass = (typeof RUN_LAUNCH_CLASSES)[number];
 
-export const REASONING_EFFORT_VALUES = [
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-  'max',
-] as const;
-
-export type ReasoningEffort = (typeof REASONING_EFFORT_VALUES)[number];
-
-export function isReasoningEffort(value: unknown): value is ReasoningEffort {
-  return REASONING_EFFORT_VALUES.includes(value as ReasoningEffort);
-}
+// The reasoning-effort scale is defined in `task-models` (its metadata schema
+// needs it without an import cycle) and re-exported here for compatibility.
+export { REASONING_EFFORT_VALUES, isReasoningEffort } from './task-models';
+export type { ReasoningEffort } from './task-models';
 
 const openCodeModelOverrideSchema = z
   .string()

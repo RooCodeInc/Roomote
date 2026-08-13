@@ -86,6 +86,21 @@ export function TaskModelSwitcher({
       ),
     [launchModels?.models],
   );
+  const modelMetadataById = useMemo(
+    () =>
+      new Map(
+        (launchModels?.models ?? []).map((model) => [
+          model.id,
+          model.metadata ?? null,
+        ]),
+      ),
+    [launchModels?.models],
+  );
+  // Effort options offered for a role follow the model that role runs on.
+  const supportedEffortsForModel = (modelId: string | null | undefined) =>
+    modelId
+      ? (modelMetadataById.get(modelId)?.supportedReasoningEfforts ?? null)
+      : null;
   // Alias-provider ids (bedrock-mantle/..., subscription aliases) are not in
   // the launch catalog under their runtime id; the generic formatter is the
   // fallback for those.
@@ -304,6 +319,7 @@ export function TaskModelSwitcher({
               ariaLabel="Coding reasoning level"
               className="w-28 shrink-0"
               size="sm"
+              supportedEfforts={supportedEffortsForModel(effectiveCodingModel)}
             />
           </div>
 
@@ -376,6 +392,11 @@ export function TaskModelSwitcher({
                         ariaLabel={`${label} reasoning level`}
                         className="w-24 shrink-0"
                         size="sm"
+                        supportedEfforts={supportedEffortsForModel(
+                          selection.model ??
+                            roleDefault?.effectiveModelId ??
+                            effectiveCodingModel,
+                        )}
                       />
                     </div>
                   );

@@ -1,4 +1,5 @@
 import type { ReasoningEffort } from './task-runs';
+import { clampReasoningEffortToSupported } from './task-models';
 
 /**
  * Maps a Roomote reasoning effort to the Anthropic extended-thinking token
@@ -161,10 +162,29 @@ function buildAmazonBedrockReasoningOptions(
   return null;
 }
 
+/**
+ * Effort constraints for GitHub Copilot models that accept only a subset of
+ * the effort scale (or none at all), mirrored from Copilot's `/models`
+ * catalog. A configured effort is mapped to the nearest supported level so
+ * the request is not rejected outright; an empty list means the model takes
+ * no reasoning parameters and must receive none.
+ */
+const GITHUB_COPILOT_MODEL_EFFORT_SUPPORT: ReadonlyArray<{
+  pattern: RegExp;
+  supported: readonly ReasoningEffort[];
+}> = [
+  { pattern: /kimi-k2\.7/iu, supported: [] },
+  { pattern: /kimi-k3/iu, supported: ['low', 'high', 'max'] },
+  {
+    pattern: /claude-(?:opus|sonnet)-4\.6/iu,
+    supported: ['low', 'medium', 'high', 'max'],
+  },
+];
+
 function buildGitHubCopilotReasoningOptions(
   modelID: string,
   reasoningEffort: ReasoningEffort,
-): Record<string, unknown> {
+): Record<string, unknown> | null {
   // Copilot exposes older Claude models through its OpenAI-compatible chat
   // endpoint, where extended thinking is configured with the provider's
   // snake_case `thinking_budget` option. Newer Copilot models expose effort
@@ -178,7 +198,24 @@ function buildGitHubCopilotReasoningOptions(
     };
   }
 
-  return { reasoningEffort };
+  const constraint = GITHUB_COPILOT_MODEL_EFFORT_SUPPORT.find(({ pattern }) =>
+    pattern.test(modelID),
+  );
+
+  if (!constraint) {
+    return { reasoningEffort };
+  }
+
+  if (constraint.supported.length === 0) {
+    return null;
+  }
+
+  const clamped = clampReasoningEffortToSupported(
+    reasoningEffort,
+    constraint.supported,
+  );
+
+  return clamped ? { reasoningEffort: clamped } : null;
 }
 
 export function splitTaskModelId(
