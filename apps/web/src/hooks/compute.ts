@@ -15,14 +15,3 @@ export function useConfiguredComputeProviders(): ComputeProvider[] {
       .map((provider) => provider.provider) ?? []
   );
 }
-
-/**
- * Whether a compute provider is currently configured for task launch,
- * per the deployment's compute status. Resolves to false while the status
- * is still loading.
- */
-export function useComputeProviderConfigured(
-  provider: ComputeProvider,
-): boolean {
-  return useConfiguredComputeProviders().includes(provider);
-}
