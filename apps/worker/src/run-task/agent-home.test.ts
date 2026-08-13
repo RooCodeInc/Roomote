@@ -405,6 +405,98 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('binds Cloudflare AI Gateway to Roomote env names in direct mode', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'cloudflare-ai-gateway/openai/gpt-5.6-terra',
+        CLOUDFLARE_AI_GATEWAY_API_TOKEN: 'cf-token',
+        CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+        CLOUDFLARE_AI_GATEWAY_ID: 'my_gateway',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { npm?: string; options?: Record<string, unknown> }
+      >;
+    };
+
+    expect(config.provider['cloudflare-ai-gateway']).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      options: {
+        baseURL:
+          'https://api.cloudflare.com/client/v4/accounts/a1b2c3d4e5f6789012345678abcdef90/ai/v1',
+        apiKey: '{env:CLOUDFLARE_AI_GATEWAY_API_TOKEN}',
+        headers: { 'cf-aig-gateway-id': 'my_gateway' },
+      },
+    });
+    expect(result.configContent).not.toContain('cf-token');
+    expect(config.provider['cloudflare-workers-ai']).toBeUndefined();
+  });
+
+  it('binds Cloudflare Workers AI to Roomote env names in direct mode', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code',
+        CLOUDFLARE_WORKERS_AI_API_TOKEN: 'cf-token',
+        CLOUDFLARE_WORKERS_AI_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { npm?: string; options?: Record<string, unknown> }
+      >;
+    };
+
+    expect(config.provider['cloudflare-workers-ai']).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      options: {
+        baseURL:
+          'https://api.cloudflare.com/client/v4/accounts/a1b2c3d4e5f6789012345678abcdef90/ai/v1',
+        apiKey: '{env:CLOUDFLARE_WORKERS_AI_API_TOKEN}',
+      },
+    });
+    expect(
+      config.provider['cloudflare-workers-ai']?.options?.headers,
+    ).toBeUndefined();
+    expect(result.configContent).not.toContain('cf-token');
+    expect(config.provider['cloudflare-ai-gateway']).toBeUndefined();
+  });
+
+  it('rewrites AI Gateway workers-ai/@cf models in direct mode', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'cloudflare-ai-gateway/workers-ai/@cf/zai-org/glm-5.2',
+        CLOUDFLARE_AI_GATEWAY_API_TOKEN: 'cf-token',
+        CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+        CLOUDFLARE_AI_GATEWAY_ID: 'default',
+      },
+    });
+    const overlay = JSON.parse(result.configContent) as {
+      provider: Record<string, { models?: Record<string, unknown> }>;
+    };
+    const globalConfig = JSON.parse(
+      readFileSync(join(result.openCodeConfigDir, 'opencode.json'), 'utf8'),
+    ) as {
+      model?: string;
+      provider: Record<string, { models?: Record<string, unknown> }>;
+    };
+
+    expect(globalConfig.model).toBe(
+      'cloudflare-ai-gateway/@cf/zai-org/glm-5.2',
+    );
+    expect(overlay.provider['cloudflare-ai-gateway']?.models).toMatchObject({
+      '@cf/zai-org/glm-5.2': { name: '@cf/zai-org/glm-5.2' },
+    });
+    expect(
+      overlay.provider['cloudflare-ai-gateway']?.models,
+    ).not.toHaveProperty('workers-ai/@cf/zai-org/glm-5.2');
+  });
+
   it('rebases Azure providers onto the inference gateway without a /v1 suffix', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

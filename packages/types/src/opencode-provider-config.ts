@@ -260,9 +260,10 @@ function readRequiredEnv(
 }
 
 /**
- * Control-plane OpenCode has no Roomote inference gateway. Emit openai-compat
- * providers against Cloudflare `/ai/v1` using Roomote's namespaced env vars,
- * not models.dev's shared `CLOUDFLARE_ACCOUNT_ID`.
+ * Emit openai-compat providers against Cloudflare `/ai/v1` using Roomote's
+ * namespaced env vars, not models.dev's shared `CLOUDFLARE_ACCOUNT_ID`. Used
+ * by control-plane helpers and by direct-mode task execution when the
+ * inference gateway is absent.
  */
 export function mergeCloudflareOpenCodeProviderConfig(
   providerConfig: Record<string, unknown>,

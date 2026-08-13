@@ -373,7 +373,11 @@ describe('inference gateway key lookups', () => {
     });
     expect(provider?.requiredHeaders).toBeUndefined();
     expect(provider?.allowedPaths).toEqual(
-      expect.arrayContaining(['/v1/chat/completions', '/v1/embeddings']),
+      expect.arrayContaining([
+        '/v1/chat/completions',
+        '/v1/embeddings',
+        '/v1/responses',
+      ]),
     );
     expect(
       getInferenceGatewayProviderByEnvVarName('CLOUDFLARE_WORKERS_AI_API_TOKEN')

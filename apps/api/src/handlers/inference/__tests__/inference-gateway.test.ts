@@ -1371,6 +1371,31 @@ describe('inference gateway', () => {
     expect(headers.get('cf-aig-gateway-id')).toBeNull();
   });
 
+  it('proxies Cloudflare Workers AI responses without a gateway id', async () => {
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+        if (nameList.includes('CLOUDFLARE_WORKERS_AI_ACCOUNT_ID')) {
+          return 'a1b2c3d4e5f6789012345678abcdef90';
+        }
+        return 'provider-secret-key';
+      },
+    );
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/cloudflare-workers-ai/v1/responses',
+    );
+
+    expect(response.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      'https://api.cloudflare.com/client/v4/accounts/a1b2c3d4e5f6789012345678abcdef90/ai/v1/responses',
+    );
+    expect(new Headers(init.headers).get('cf-aig-gateway-id')).toBeNull();
+  });
+
   it('proxies Cloudflare Workers AI embeddings without a gateway id', async () => {
     mockResolveModelProviderEnvValue.mockImplementation(
       async (names: string | readonly string[]) => {

@@ -396,8 +396,11 @@ model. When unset, exploration falls back to the task's active coding model:
 R_EXPLORE_MODEL=openrouter/openai/gpt-5.6-luna
 ```
 
-The provider is the first segment of the model id. Roomote forwards these
-common provider keys into worker containers:
+The provider is the first segment of the model id. Configure these common
+provider keys on the Roomote control plane. When the inference gateway is
+enabled, API tokens stay on the control plane and sandboxes authenticate with
+a run token. Non-secret identity values such as account IDs, gateway IDs, and
+regions remain available to the task runtime:
 
 - `OPENROUTER_API_KEY`
 - `AI_GATEWAY_API_KEY` (Vercel AI Gateway, `vercel/...` models)
@@ -426,10 +429,11 @@ R_MODEL_ENV_KEYS=CUSTOM_PROVIDER_API_KEY
 CUSTOM_PROVIDER_API_KEY=...
 ```
 
-The checked-in Compose files forward the common provider keys above and the
-sample `CUSTOM_PROVIDER_API_KEY`. If you use a different custom provider key
-name in a Compose deployment, add that key to the service environment block or
-provide it through your deployment secret mechanism.
+The checked-in Compose files accept the common provider keys above and the
+sample `CUSTOM_PROVIDER_API_KEY` on the control-plane services. If you use a
+different custom provider key name in a Compose deployment, add that key to
+the service environment block or provide it through your deployment secret
+mechanism.
 
 ## Artifact Storage
 

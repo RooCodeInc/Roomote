@@ -463,7 +463,10 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
         'https://api.cloudflare.com/client/v4/accounts/{resource}/ai',
       resource: { envVarName: 'CLOUDFLARE_WORKERS_AI_ACCOUNT_ID' },
       authHeader: { name: 'authorization', scheme: 'bearer' },
-      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      allowedPaths: [
+        ...OPENAI_COMPATIBLE_INFERENCE_PATHS,
+        ...OPENAI_RESPONSES_INFERENCE_PATHS,
+      ],
       openCodeNpm: '@ai-sdk/openai-compatible',
       openCodeBaseUrlSuffix: '/v1',
     },
