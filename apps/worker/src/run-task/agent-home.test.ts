@@ -737,6 +737,58 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('isolates helper agents from unrelated MCP tool schemas', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+        R_VISION_MODEL: 'openrouter/google/gemini-3.6-flash',
+        ROOMOTE_PROOF_BROWSER_TARGET: 'http://127.0.0.1:3000',
+        OPENROUTER_API_KEY: 'openrouter-key',
+      },
+      mcpServers: [
+        {
+          type: 'remote',
+          name: 'roomote',
+          url: 'https://roomote.example.com/mcp',
+        },
+        {
+          type: 'remote',
+          name: 'pylon',
+          url: 'https://pylon.example.com/mcp',
+        },
+        {
+          type: 'local',
+          name: 'custom-tools',
+          command: 'custom-mcp',
+        },
+      ],
+    });
+    const config = JSON.parse(result.configContent) as {
+      agent: Record<string, { tools?: Record<string, boolean> }>;
+    };
+
+    for (const agentName of ['visual', 'judge', 'advisor']) {
+      expect(config.agent[agentName]?.tools).toMatchObject({
+        'roomote_*': false,
+        'pylon_*': false,
+        'custom-tools_*': false,
+      });
+    }
+
+    expect(config.agent['proof-runner']?.tools).toMatchObject({
+      'pylon_*': false,
+      'custom-tools_*': false,
+      roomote_manage_source_control: false,
+    });
+    expect(config.agent['proof-runner']?.tools).not.toHaveProperty('roomote_*');
+    expect(config.agent['proof-runner']?.tools).not.toHaveProperty(
+      'roomote_manage_artifacts',
+    );
+    expect(config.agent.general?.tools).not.toHaveProperty('pylon_*');
+    expect(config.agent.architect?.tools).toBeUndefined();
+  });
+
   it('prefixes bare LiteLLM route names when LITELLM_BASE_URL is set', () => {
     const homeDir = createHomeDir();
     const result = generateOpenCodeConfig({
