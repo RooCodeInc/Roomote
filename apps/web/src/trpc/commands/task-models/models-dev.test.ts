@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   fetchModelsDevCatalog,
+  listXaiChatModelsFromCatalog,
   lookupModelMetadataFromCatalog,
   resolveModelsDevSlug,
   suggestModelsFromCatalog,
@@ -197,6 +198,50 @@ describe('lookupModelMetadataFromCatalog', () => {
     expect(result.metadata.inputPricePerToken).toBe(5 / 1_000_000);
     expect(result.metadata.outputPricePerToken).toBe(25 / 1_000_000);
     expect(result.displayName).toBe('Claude Opus 4.7');
+  });
+
+  it('maps an empty reasoning_options list to supportsReasoning: false', () => {
+    const catalog = buildCatalog({
+      providers: {
+        'github-copilot': {
+          models: {
+            'kimi-k2.7-code': {
+              name: 'Kimi K2.7 Code',
+              reasoning: true,
+              reasoning_options: [],
+            },
+            'gpt-5.6-luna': {
+              name: 'GPT-5.6 Luna',
+              reasoning: true,
+              reasoning_options: [
+                { type: 'effort', values: ['low', 'medium', 'high'] },
+              ],
+            },
+            'claude-haiku-4.5': {
+              name: 'Claude Haiku 4.5',
+              reasoning: true,
+            },
+          },
+        },
+      },
+    });
+
+    // Reasoning happens internally but is not configurable: providers reject
+    // effort/budget parameters, so the configurable-effort surface must stay
+    // off.
+    expect(
+      lookupModelMetadataFromCatalog(catalog, 'github-copilot/kimi-k2.7-code')
+        .metadata.supportsReasoning,
+    ).toBe(false);
+    expect(
+      lookupModelMetadataFromCatalog(catalog, 'github-copilot/gpt-5.6-luna')
+        .metadata.supportsReasoning,
+    ).toBe(true);
+    // Entries predating reasoning_options keep the bare flag's meaning.
+    expect(
+      lookupModelMetadataFromCatalog(catalog, 'github-copilot/claude-haiku-4.5')
+        .metadata.supportsReasoning,
+    ).toBe(true);
   });
 
   it('resolves Bedrock Mantle metadata through the underlying model lab', () => {
@@ -400,6 +445,51 @@ describe('fetchModelsDevCatalog', () => {
     const result = await fetchModelsDevCatalog(controller.signal);
     expect(result).toBeNull();
   });
+
+  it('negatively caches service failures but not caller aborts', async () => {
+    const okResponse = () =>
+      new Response(JSON.stringify({ providers: {} }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    vi.useFakeTimers();
+
+    try {
+      // A caller-side timeout abort (the sync's short fetch budget) must not
+      // arm the failure TTL...
+      fetchMock.mockRejectedValueOnce(
+        new DOMException('aborted', 'TimeoutError'),
+      );
+      await expect(
+        fetchModelsDevCatalog(undefined, { forceRefresh: true }),
+      ).resolves.toBeNull();
+
+      // ...so the very next plain call still fetches and succeeds.
+      fetchMock.mockResolvedValueOnce(okResponse());
+      await expect(fetchModelsDevCatalog()).resolves.not.toBeNull();
+
+      // Expire the success cache; a real network failure arms the TTL.
+      vi.setSystemTime(Date.now() + 6 * 60 * 1_000);
+      fetchMock.mockRejectedValueOnce(new TypeError('fetch failed'));
+      await expect(fetchModelsDevCatalog()).resolves.toBeNull();
+
+      // While armed, plain calls short-circuit without fetching.
+      fetchMock.mockClear();
+      await expect(fetchModelsDevCatalog()).resolves.toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      // forceRefresh bypasses the TTL, and a success clears it.
+      fetchMock.mockResolvedValue(okResponse());
+      await expect(
+        fetchModelsDevCatalog(undefined, { forceRefresh: true }),
+      ).resolves.not.toBeNull();
+      await expect(fetchModelsDevCatalog()).resolves.not.toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('suggestModelsFromCatalog', () => {
@@ -421,5 +511,59 @@ describe('suggestModelsFromCatalog', () => {
         query: 'km3',
       }),
     ).toEqual([{ slug: 'moonshotai/kimi-k3', displayName: 'Kimi K3' }]);
+  });
+});
+
+describe('listXaiChatModelsFromCatalog', () => {
+  it('lists text Grok models and skips image, video, and deprecated entries', () => {
+    const catalog = buildCatalog({
+      providers: {
+        xai: {
+          models: {
+            'grok-4.6': {
+              name: 'Grok 4.6',
+              modalities: { output: ['text'] },
+            },
+            'grok-4.7': {
+              name: 'Grok 4.7',
+              modalities: { output: ['text'] },
+            },
+            'grok-4.20-multi-agent-0309': {
+              name: 'Grok 4.20 Multi-Agent',
+              tool_call: false,
+              modalities: { output: ['text'] },
+            },
+            'grok-imagine-image': {
+              name: 'Grok Imagine Image',
+              modalities: { output: ['image', 'pdf'] },
+            },
+            'grok-imagine-video': {
+              name: 'Grok Imagine Video',
+              modalities: { output: ['video'] },
+            },
+            'grok-old': {
+              name: 'Grok Old',
+              status: 'deprecated',
+              modalities: { output: ['text'] },
+            },
+            'grok-unlabeled': {
+              name: 'Grok Unlabeled',
+            },
+            'grok-empty-modalities': {
+              name: 'Grok Empty Modalities',
+              modalities: {},
+            },
+          },
+        },
+      },
+    });
+
+    expect(listXaiChatModelsFromCatalog(catalog)).toEqual([
+      { id: 'xai/grok-4.6', displayName: 'Grok 4.6', family: 'Grok' },
+      { id: 'xai/grok-4.7', displayName: 'Grok 4.7', family: 'Grok' },
+    ]);
+    expect(
+      listXaiChatModelsFromCatalog(catalog).map((model) => model.id),
+    ).not.toContain('xai/grok-4.20-multi-agent-0309');
   });
 });

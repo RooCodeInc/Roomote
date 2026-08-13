@@ -860,6 +860,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
       const drainResult = await drainSlackMessagesToResumeRun(
         {
           id: taskRun.id,
+          taskId: taskRun.taskId,
           slackThreadTs: taskChannelBindings.slackThreadTs,
           snapshotId,
           payload: taskRun.payload as Record<string, unknown>,

@@ -1036,6 +1036,118 @@ export const taskPullRequests = pgTable(
   ],
 );
 
+/**
+ * Durable normalized PR review events. Postgres owns an event before lookup or
+ * delivery; queue wakeups only reduce latency and are never authoritative.
+ */
+export const prReviewEvents = pgTable(
+  'pr_review_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    eventKey: text('event_key').notNull(),
+    sourceControlProvider: text('source_control_provider')
+      .notNull()
+      .$type<SourceControlProvider>(),
+    repository: text('repository').notNull(),
+    prNumber: integer('pr_number').notNull(),
+    prUrl: text('pr_url'),
+    event: jsonb('event').$type<Record<string, unknown>>().notNull(),
+    batchKind: text('batch_kind').notNull().$type<'human' | 'roomote'>(),
+    batchId: text('batch_id'),
+    reviewHeadSha: text('review_head_sha'),
+    /** Permanently set when an automated batch first leaves pending state. */
+    sealedAt: timestamp('sealed_at'),
+    superseded: boolean('superseded').notNull().default(false),
+    availableAt: timestamp('available_at').notNull(),
+    observedAt: timestamp('observed_at').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('pr_review_events_source_unique').on(
+      table.sourceControlProvider,
+      table.repository,
+      table.prNumber,
+      table.eventKey,
+    ),
+    index('pr_review_events_pr_idx').on(
+      table.sourceControlProvider,
+      table.repository,
+      table.prNumber,
+    ),
+    check(
+      'pr_review_events_batch_kind_check',
+      sql`${table.batchKind} in ('human', 'roomote')`,
+    ),
+  ],
+);
+
+/**
+ * One lifecycle row per concrete Roomote review pass. Multiple passes may
+ * review the same commit concurrently, so the provider-stable cycle id is
+ * part of the identity and start/completion times are retained separately.
+ */
+export const prReviewCycles = pgTable(
+  'pr_review_cycles',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sourceControlProvider: text('source_control_provider')
+      .notNull()
+      .$type<SourceControlProvider>(),
+    repository: text('repository').notNull(),
+    prNumber: integer('pr_number').notNull(),
+    reviewHeadSha: text('review_head_sha').notNull(),
+    cycleId: text('cycle_id').notNull(),
+    startedAt: timestamp('started_at').notNull(),
+    completedAt: timestamp('completed_at'),
+  },
+  (table) => [
+    uniqueIndex('pr_review_cycles_source_unique').on(
+      table.sourceControlProvider,
+      table.repository,
+      table.prNumber,
+      table.reviewHeadSha,
+      table.cycleId,
+    ),
+  ],
+);
+
+export const prReviewEventDeliveries = pgTable(
+  'pr_review_event_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => prReviewEvents.id, { onDelete: 'cascade' }),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<'pending' | 'processing' | 'delivered' | 'suppressed'>(),
+    dueAt: timestamp('due_at').notNull(),
+    deferrals: integer('deferrals').notNull().default(0),
+    leaseToken: uuid('lease_token'),
+    leaseExpiresAt: timestamp('lease_expires_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('pr_review_event_deliveries_event_task_unique').on(
+      table.eventId,
+      table.taskId,
+    ),
+    index('pr_review_event_deliveries_due_idx').on(
+      table.status,
+      table.dueAt,
+      table.leaseExpiresAt,
+    ),
+    check(
+      'pr_review_event_deliveries_status_check',
+      sql`${table.status} in ('pending', 'processing', 'delivered', 'suppressed')`,
+    ),
+  ],
+);
+
 export const taskPullRequestsRelations = relations(
   taskPullRequests,
   ({ one }) => ({

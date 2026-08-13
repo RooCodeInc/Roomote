@@ -13,6 +13,8 @@ import {
 import { RunStatus, SANDBOX_SNAPSHOT_EXPIRY_MS } from '@roomote/types';
 
 import { slackDebug } from './logging';
+import type { SlackTaskRunLookupScope } from './find-active-slack-task-run';
+import { getSlackTaskRunWorkspacePredicate } from './slack-task-run-workspace-scope';
 
 /**
  * Find the most recent completed/idle run for a Slack thread that has a
@@ -21,12 +23,15 @@ import { slackDebug } from './logging';
  *
  * Matches by the tasks.slackThreadTs channel binding, which is stable within
  * a single Slack thread (1:N thread-to-task; latest run wins).
+ * Callers can add task and workspace scope when the originating action
+ * provides those identities.
  *
  * Returns the run row needed to construct a SnapshotResume launch, or null
  * if no suitable run exists.
  */
 export async function findCompletedSlackTaskRunWithSnapshot(
   slackThreadTs: string,
+  scope: SlackTaskRunLookupScope,
 ) {
   slackDebug(
     `[findCompletedSlackTaskRunWithSnapshot] Searching for completed task run with snapshot for thread ${slackThreadTs}`,
@@ -51,6 +56,10 @@ export async function findCompletedSlackTaskRunWithSnapshot(
     .where(
       and(
         eq(tasks.slackThreadTs, slackThreadTs),
+        ...(scope.taskId ? [eq(taskRuns.taskId, scope.taskId)] : []),
+        ...(scope.slackTeamId
+          ? [getSlackTaskRunWorkspacePredicate(scope.slackTeamId)]
+          : []),
         inArray(taskRuns.status, [RunStatus.Completed, RunStatus.Idle]),
         isNotNull(taskRuns.snapshotId),
         isNull(taskRuns.snapshotFailedAt),

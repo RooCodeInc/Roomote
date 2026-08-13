@@ -46,6 +46,25 @@ export const CHATGPT_SUBSCRIPTION_PROVIDER_ID = 'chatgpt' as const;
  */
 export const XAI_SUBSCRIPTION_PROVIDER_ID = 'xai-subscription' as const;
 
+/**
+ * Model-id prefix used when composing or looking up task models for a setup
+ * catalog provider. Subscription connect surfaces are not prefixes: ChatGPT
+ * serves `openai/`, SuperGrok serves `xai/`.
+ */
+export function getSetupProviderTaskModelPrefix(
+  providerId: SetupModelProviderId,
+): string {
+  if (providerId === CHATGPT_SUBSCRIPTION_PROVIDER_ID) {
+    return 'openai';
+  }
+
+  if (providerId === XAI_SUBSCRIPTION_PROVIDER_ID) {
+    return 'xai';
+  }
+
+  return providerId;
+}
+
 /** Roomote-specific key name for OpenCode Go, kept separate from Zen. */
 export const OPENCODE_GO_API_KEY_ENV_VAR_NAME = 'OPENCODE_GO_API_KEY' as const;
 
@@ -286,7 +305,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
         roles: {
           coding: { modelId: DEFAULT_TASK_MODEL_ID, reasoningEffort: 'medium' },
           helper: {
-            modelId: 'openrouter/google/gemini-3.6-flash',
+            modelId: 'openrouter/google/gemini-3.7-flash',
             reasoningEffort: 'low',
           },
           codeReview: {
@@ -294,7 +313,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'medium',
           },
           explore: {
-            modelId: 'openrouter/google/gemini-3.6-flash',
+            modelId: 'openrouter/google/gemini-3.7-flash',
             reasoningEffort: 'low',
           },
           planning: {
@@ -308,11 +327,11 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
         label: 'Quick turnaround',
         roles: {
           coding: {
-            modelId: 'openrouter/google/gemini-3.6-flash',
+            modelId: 'openrouter/google/gemini-3.7-flash',
             reasoningEffort: 'low',
           },
           helper: {
-            modelId: 'openrouter/google/gemini-3.6-flash',
+            modelId: 'openrouter/google/gemini-3.7-flash',
             reasoningEffort: 'low',
           },
           codeReview: {
@@ -320,7 +339,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'medium',
           },
           explore: {
-            modelId: 'openrouter/google/gemini-3.6-flash',
+            modelId: 'openrouter/google/gemini-3.7-flash',
             reasoningEffort: 'low',
           },
           planning: {
@@ -345,9 +364,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'vercel/openai/gpt-5.6-sol',
       'gpt-5-6-terra': 'vercel/openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'vercel/openai/gpt-5.6-luna',
-      'gemini-3-6-flash': 'vercel/google/gemini-3.6-flash',
+      'gemini-3-7-flash': 'vercel/google/gemini-3.7-flash',
       'deepseek-v4-flash-0731': 'vercel/deepseek/deepseek-v4-flash-0731',
-      'deepseek-v4-pro': 'vercel/deepseek/deepseek-v4-pro',
+      'deepseek-v4-pro-0813': 'vercel/deepseek/deepseek-v4-pro-0813',
       'glm-5-2': 'vercel/zai/glm-5.2',
       'kimi-k3': 'vercel/moonshotai/kimi-k3',
       'kimi-k2-7-code': 'vercel/moonshotai/kimi-k2.7-code',
@@ -358,9 +377,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     // Vision is unset: the recommended coding model is multimodal, so image
     // work follows the coding model ("same as coding").
     recommendedRoleModels: {
-      helper: 'vercel/google/gemini-3.6-flash',
+      helper: 'vercel/google/gemini-3.7-flash',
       codeReview: 'vercel/anthropic/claude-sonnet-5',
-      explore: 'vercel/google/gemini-3.6-flash',
+      explore: 'vercel/google/gemini-3.7-flash',
       planning: 'vercel/anthropic/claude-opus-5',
     },
     recommendedRoleReasoningEfforts: { codeReview: 'medium' },
@@ -380,16 +399,16 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'requesty/gpt-5.6-sol@eu',
       'gpt-5-6-terra': 'requesty/gpt-5.6-terra@eu',
       'gpt-5-6-luna': 'requesty/gpt-5.6-luna@eu',
-      'gemini-3-6-flash': 'requesty/gemini-3.6-flash',
+      'gemini-3-7-flash': 'requesty/gemini-3.7-flash',
       'deepseek-v4-flash-0731': 'requesty/deepseek-v4-flash-0731',
       'glm-5-2': 'requesty/glm-5.2',
       'kimi-k3': 'requesty/kimi-k3',
       'grok-4-6': 'requesty/grok-4.6',
     }),
     recommendedRoleModels: {
-      helper: 'requesty/gemini-3.6-flash',
+      helper: 'requesty/gemini-3.7-flash',
       codeReview: 'requesty/claude-sonnet-5',
-      explore: 'requesty/gemini-3.6-flash',
+      explore: 'requesty/gemini-3.7-flash',
       planning: 'requesty/claude-opus-5',
     },
     recommendedRoleReasoningEfforts: { codeReview: 'medium' },
@@ -402,7 +421,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
       'deepseek-v4-flash-0731': 'baseten/deepseek-ai/DeepSeek-V4-Flash-0731',
-      'deepseek-v4-pro': 'baseten/deepseek-ai/DeepSeek-V4-Pro',
+      'deepseek-v4-pro-0813': 'baseten/deepseek-ai/DeepSeek-V4-Pro',
       'glm-5-2': 'baseten/zai-org/GLM-5.2',
       'kimi-k3': 'baseten/moonshotai/Kimi-K3',
       'kimi-k2-7-code': 'baseten/moonshotai/Kimi-K2.7-Code',
@@ -418,7 +437,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     defaultRoomoteModel: 'togetherai/deepseek-ai/DeepSeek-V4-Pro',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
-      'deepseek-v4-pro': 'togetherai/deepseek-ai/DeepSeek-V4-Pro',
+      'deepseek-v4-pro-0813': 'togetherai/deepseek-ai/DeepSeek-V4-Pro',
       'glm-5-2': 'togetherai/zai-org/GLM-5.2',
       'kimi-k3': 'togetherai/moonshotai/Kimi-K3',
       'kimi-k2-7-code': 'togetherai/moonshotai/Kimi-K2.7-Code',
@@ -593,10 +612,10 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'opencode/gpt-5.6-sol',
       'gpt-5-6-terra': 'opencode/gpt-5.6-terra',
       'gpt-5-6-luna': 'opencode/gpt-5.6-luna',
-      'gemini-3-6-flash': 'opencode/gemini-3.6-flash',
+      'gemini-3-7-flash': 'opencode/gemini-3.7-flash',
       // Zen serves the dated Flash release under this stable model alias.
       'deepseek-v4-flash-0731': 'opencode/deepseek-v4-flash',
-      'deepseek-v4-pro': 'opencode/deepseek-v4-pro',
+      'deepseek-v4-pro-0813': 'opencode/deepseek-v4-pro',
       'glm-5-2': 'opencode/glm-5.2',
       'kimi-k3': 'opencode/kimi-k3',
       'kimi-k2-7-code': 'opencode/kimi-k2.7-code',
@@ -607,10 +626,10 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     // so vision gets an explicit multimodal recommendation instead of the
     // usual same-as-coding fallback.
     recommendedRoleModels: {
-      helper: 'opencode/gemini-3.6-flash',
+      helper: 'opencode/gemini-3.7-flash',
       vision: 'opencode/claude-sonnet-5',
       codeReview: 'opencode/claude-sonnet-5',
-      explore: 'opencode/gemini-3.6-flash',
+      explore: 'opencode/gemini-3.7-flash',
       planning: 'opencode/claude-opus-5',
     },
     recommendedRoleReasoningEfforts: { codeReview: 'medium' },
@@ -630,7 +649,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     // recommendation list are suggested here.
     suggestedTaskModels: mapRecommendedTaskModels({
       'deepseek-v4-flash-0731': 'opencode-go/deepseek-v4-flash',
-      'deepseek-v4-pro': 'opencode-go/deepseek-v4-pro',
+      'deepseek-v4-pro-0813': 'opencode-go/deepseek-v4-pro',
       'glm-5-2': 'opencode-go/glm-5.2',
       'gpt-5-6-luna': 'opencode-go/gpt-5.6-luna',
       'grok-4-6': 'opencode-go/grok-4.6',
@@ -694,10 +713,10 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: 'google',
     label: 'Google Gemini',
     envVarName: 'GEMINI_API_KEY',
-    defaultRoomoteModel: 'google/gemini-3.6-flash',
+    defaultRoomoteModel: 'google/gemini-3.7-flash',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
-      'gemini-3-6-flash': 'google/gemini-3.6-flash',
+      'gemini-3-7-flash': 'google/gemini-3.7-flash',
     }),
     // All non-coding roles follow the Flash coding default.
   },
@@ -795,6 +814,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'github-copilot/gpt-5.6-sol',
       'gpt-5-6-terra': 'github-copilot/gpt-5.6-terra',
       'gpt-5-6-luna': 'github-copilot/gpt-5.6-luna',
+      'kimi-k3': 'github-copilot/kimi-k3',
       'kimi-k2-7-code': 'github-copilot/kimi-k2.7-code',
     }),
     recommendedRoleModels: {

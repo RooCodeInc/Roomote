@@ -202,7 +202,7 @@
       **Available Environments**:
       - Search Relevance: Search and ranking services (repos: acme/search-api, acme/ranking)
     expectedWorkspaceValue: "Search Relevance"
-    expectedRequestedModelId: "openrouter/deepseek/deepseek-v4-pro"
+    expectedRequestedModelId: "openrouter/deepseek/deepseek-v4-pro-0813"
   assert:
     - type: javascript
       value: file://assertions/routing-assertions.ts:isValidRoutingJson

@@ -26,7 +26,12 @@ vi.mock('@roomote/db/server', () => {
       canceledAt: 'taskRuns.canceledAt',
       createdAt: 'taskRuns.createdAt',
       machineId: 'taskRuns.machineId',
+      payload: 'taskRuns.payload',
       status: 'taskRuns.status',
+    },
+    slackInstallations: {
+      isActive: 'slackInstallations.isActive',
+      teamId: 'slackInstallations.teamId',
     },
     db: {
       select: vi.fn(() => queryChain),
@@ -38,6 +43,9 @@ vi.mock('@roomote/db/server', () => {
       inArray: [left, right],
     })),
     isNull: vi.fn((value: unknown) => ({ isNull: value })),
+    sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
+      sql: [strings.raw.join('?'), ...values],
+    })),
   };
 });
 
@@ -52,12 +60,17 @@ describe('findActiveSlackTaskRun', () => {
   });
 
   it('looks up the latest non-canceled run for the thread via the tasks channel binding', async () => {
-    const result = await findActiveSlackTaskRun('111.000');
+    const result = await findActiveSlackTaskRun('111.000', {
+      slackTeamId: 'T-first',
+    });
 
     expect(result).toBeNull();
     expect(whereMock).toHaveBeenNthCalledWith(1, {
       and: [
         { eq: ['tasks.slackThreadTs', '111.000'] },
+        expect.objectContaining({
+          sql: expect.arrayContaining(['T-first']),
+        }),
         { inArray: ['taskRuns.status', [...activeRunStatuses]] },
         { isNull: 'taskRuns.canceledAt' },
       ],
@@ -75,9 +88,33 @@ describe('findActiveSlackTaskRun', () => {
       },
     ]);
 
-    const result = await findActiveSlackTaskRun('111.000');
+    const result = await findActiveSlackTaskRun('111.000', {
+      slackTeamId: 'T-first',
+    });
 
     expect(result).toMatchObject({ id: 42, taskId: 'task-42' });
     expect(whereMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('enforces task and workspace identity when both are supplied', async () => {
+    await findActiveSlackTaskRun('111.000', {
+      taskId: 'task-1',
+      slackTeamId: 'T-second',
+    });
+
+    expect(whereMock).toHaveBeenNthCalledWith(1, {
+      and: [
+        { eq: ['tasks.slackThreadTs', '111.000'] },
+        { eq: ['taskRuns.taskId', 'task-1'] },
+        expect.objectContaining({
+          sql: expect.arrayContaining([
+            expect.stringContaining('SELECT count(*)'),
+            'T-second',
+          ]),
+        }),
+        { inArray: ['taskRuns.status', [...activeRunStatuses]] },
+        { isNull: 'taskRuns.canceledAt' },
+      ],
+    });
   });
 });

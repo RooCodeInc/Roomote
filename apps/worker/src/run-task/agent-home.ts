@@ -794,6 +794,19 @@ function mergeInferenceGatewayProviderConfig(
         gatewayUrl,
         copilotProvider,
       );
+      // OpenCode registers its GitHub Copilot endpoint router (GPT-5+ models
+      // must call /responses; Copilot rejects them on /chat/completions) only
+      // for providers enabled before its custom-loader pass, and a provider
+      // declared purely through config merges after that pass. Naming the run
+      // token — already present in the harness env — as the provider's env
+      // key enables the provider early so the router registers.
+      merged = {
+        ...merged,
+        'github-copilot': {
+          ...asRecord(merged['github-copilot']),
+          env: ['ROOMOTE_CLOUD_TOKEN'],
+        },
+      };
     }
   }
 

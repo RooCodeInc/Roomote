@@ -764,9 +764,14 @@ class OpenCodeSdkServerPool {
 
   async lease(params: {
     env?: Partial<Record<string, string>>;
+    ephemeral?: boolean;
     startTimeoutMs: number;
+    useConfiguredServer?: boolean;
   }): Promise<OpenCodeSdkServerLease> {
-    const configuredUrl = resolveConfiguredOpenCodeSdkServerUrl();
+    const configuredUrl =
+      params.useConfiguredServer === false
+        ? undefined
+        : resolveConfiguredOpenCodeSdkServerUrl();
 
     if (configuredUrl) {
       return {
@@ -781,7 +786,7 @@ class OpenCodeSdkServerPool {
     const cached = this.cache.get(cacheKey);
 
     if (cached) {
-      return this.createLease(cached);
+      return this.createLease(cached, params.ephemeral);
     }
 
     let startPromise = this.startPromises.get(cacheKey);
@@ -798,7 +803,7 @@ class OpenCodeSdkServerPool {
       this.startPromises.set(cacheKey, startPromise);
     }
 
-    return this.createLease(await startPromise);
+    return this.createLease(await startPromise, params.ephemeral);
   }
 
   private cacheStartedServer(
@@ -840,7 +845,10 @@ class OpenCodeSdkServerPool {
     server.close();
   }
 
-  private createLease(server: CachedOpenCodeSdkServer): OpenCodeSdkServerLease {
+  private createLease(
+    server: CachedOpenCodeSdkServer,
+    ephemeral = false,
+  ): OpenCodeSdkServerLease {
     server.activeLeases += 1;
 
     if (server.idleTimeout) {
@@ -859,6 +867,15 @@ class OpenCodeSdkServerPool {
 
         released = true;
         server.activeLeases = Math.max(0, server.activeLeases - 1);
+
+        // One-shot callers (credential validation) hold candidate secrets in
+        // the server env and never reuse it, so the process must die with the
+        // lease instead of idling out the TTL.
+        if (ephemeral && server.activeLeases === 0) {
+          this.close(server);
+          return;
+        }
+
         this.scheduleIdleClose(server);
       },
     };
@@ -906,7 +923,19 @@ const sharedOpenCodeSdkServerPool = new OpenCodeSdkServerPool();
 
 export function leaseOpenCodeSdkServer(params: {
   env?: Partial<Record<string, string>>;
+  /**
+   * Close the managed server as soon as the last lease is released instead
+   * of caching it for the idle TTL. For one-shot calls whose env carries
+   * candidate secrets that must not outlive the request.
+   */
+  ephemeral?: boolean;
   startTimeoutMs: number;
+  /**
+   * Whether an operator-supplied OpenCode server may serve the request.
+   * Credential validation disables this so candidate env values necessarily
+   * reach the process that performs the provider request.
+   */
+  useConfiguredServer?: boolean;
 }): Promise<OpenCodeSdkServerLease> {
   return sharedOpenCodeSdkServerPool.lease(params);
 }

@@ -201,6 +201,42 @@ describe('buildOpenCodeModelReasoningOptions', () => {
     ).toEqual({ reasoningEffort: 'medium' });
   });
 
+  it('maps unsupported Copilot efforts to the nearest supported level', () => {
+    // Copilot's kimi-k3 accepts low/high/max only.
+    expect(
+      buildOpenCodeModelReasoningOptions('github-copilot/kimi-k3', 'medium'),
+    ).toEqual({ reasoningEffort: 'low' });
+    expect(
+      buildOpenCodeModelReasoningOptions('github-copilot/kimi-k3', 'xhigh'),
+    ).toEqual({ reasoningEffort: 'high' });
+    expect(
+      buildOpenCodeModelReasoningOptions('github-copilot/kimi-k3', 'max'),
+    ).toEqual({ reasoningEffort: 'max' });
+    // The 4.6 Claude family has no xhigh on Copilot.
+    expect(
+      buildOpenCodeModelReasoningOptions(
+        'github-copilot/claude-sonnet-4.6',
+        'xhigh',
+      ),
+    ).toEqual({ reasoningEffort: 'high' });
+  });
+
+  it('sends no reasoning options for Copilot models without configurable reasoning', () => {
+    expect(
+      buildOpenCodeModelReasoningOptions(
+        'github-copilot/kimi-k2.7-code',
+        'medium',
+      ),
+    ).toBeNull();
+    expect(
+      mergeOpenCodeModelReasoningOptions(
+        {},
+        'github-copilot/kimi-k2.7-code',
+        'medium',
+      ),
+    ).toEqual({});
+  });
+
   it('uses the generic reasoningEffort option for other providers', () => {
     expect(buildOpenCodeModelReasoningOptions('openai/gpt-5.4', 'low')).toEqual(
       { reasoningEffort: 'low' },

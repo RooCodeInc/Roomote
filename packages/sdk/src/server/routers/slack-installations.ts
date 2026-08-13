@@ -42,6 +42,7 @@ export const slackInstallationsRouter = router({
 
     const result = await drainSlackMessagesToResumeRun({
       id: taskRun.id,
+      taskId: taskRun.taskId,
       slackThreadTs,
       snapshotId: taskRun.snapshotId,
       payload: taskRun.payload as Record<string, unknown>,

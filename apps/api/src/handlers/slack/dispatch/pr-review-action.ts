@@ -123,7 +123,9 @@ async function handleAcceptedPrReviewAction({
     return;
   }
 
-  const pending = await claimPendingPrReviewAction(nonce);
+  const pending = await claimPendingPrReviewAction(nonce, {
+    expectedSlackTeamId: payload.team.id,
+  });
 
   if (!pending) {
     await respondEphemeral(
@@ -175,6 +177,8 @@ async function dispatchAcceptedPrReviewAction({
 
   const dispatched = await dispatchPrReviewFollowUp({
     provider: 'slack',
+    taskId: pending.taskId,
+    ...(pending.slackTeamId ? { slackTeamId: pending.slackTeamId } : {}),
     channelId: pending.channelId,
     threadId: pending.threadId,
     followUpPrompt: pending.followUpPrompt,
@@ -241,7 +245,9 @@ export async function handleSlackPrReviewActionDismiss(
     return;
   }
 
-  const pending = await claimPendingPrReviewAction(nonce);
+  const pending = await claimPendingPrReviewAction(nonce, {
+    expectedSlackTeamId: payload.team.id,
+  });
 
   if (!pending) {
     await respondEphemeral(

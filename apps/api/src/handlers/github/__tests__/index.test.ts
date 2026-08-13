@@ -299,6 +299,51 @@ describe('github webhook router', () => {
     );
     expect(mockHandlePrComment).toHaveBeenCalledWith(payload);
     expect(mockQueuePrReviewActivityNotification).toHaveBeenCalledWith(payload);
+    expect(
+      mockQueuePrReviewActivityNotification.mock.invocationCallOrder[0],
+    ).toBeLessThan(mockRecordWebhook.mock.invocationCallOrder[0]!);
+  });
+
+  it('persists review activity before generic handling and returns 500 so the delivery can retry', async () => {
+    const payload = {
+      action: 'submitted',
+      installation: { id: 1 },
+      repository: { id: 10, full_name: 'test-org/test-repo' },
+      pull_request: { number: 42, title: 'Test PR' },
+      review: {
+        body: 'Please fix this race.',
+        state: 'changes_requested',
+        user: { login: 'reviewer' },
+      },
+      sender: { login: 'reviewer' },
+    };
+    const request = () =>
+      app.request('http://localhost/api/webhooks/github', {
+        method: 'POST',
+        headers: {
+          'x-github-delivery': 'delivery-retry-1',
+          'x-github-event': 'pull_request_review',
+          'x-hub-signature-256': 'sha256=test',
+        },
+        body: JSON.stringify(payload),
+      });
+    mockQueuePrReviewActivityNotification
+      .mockRejectedValueOnce(new Error('review event persistence failed'))
+      .mockResolvedValue(undefined);
+
+    expect((await request()).status).toBe(500);
+    expect(mockRecordWebhook).not.toHaveBeenCalled();
+    expect(mockHandlePrComment).not.toHaveBeenCalled();
+
+    expect((await request()).status).toBe(200);
+    expect(mockQueuePrReviewActivityNotification).toHaveBeenCalledTimes(2);
+    expect(mockRecordWebhook).toHaveBeenCalledWith(
+      'delivery-retry-1',
+      'pull_request_review.submitted',
+      payload,
+      expect.any(Function),
+    );
+    expect(mockHandlePrComment).toHaveBeenCalledTimes(1);
   });
 
   it('routes plain issue comments through handleGitHubIssueComment', async () => {
@@ -371,6 +416,12 @@ describe('github webhook router', () => {
     expect(response.status).toBe(200);
     expect(mockQueuePrReviewActivityNotification).toHaveBeenCalledWith(payload);
     expect(mockQueuePrReviewSummaryNotification).toHaveBeenCalledWith(payload);
+    expect(
+      mockQueuePrReviewActivityNotification.mock.invocationCallOrder[0],
+    ).toBeLessThan(mockRecordWebhook.mock.invocationCallOrder[0]!);
+    expect(
+      mockQueuePrReviewSummaryNotification.mock.invocationCallOrder[0],
+    ).toBeLessThan(mockRecordWebhook.mock.invocationCallOrder[0]!);
     expect(mockHandlePrComment).toHaveBeenCalledWith(payload);
   });
 
@@ -466,6 +517,9 @@ describe('github webhook router', () => {
       expect(mockQueuePrReviewActivityNotification).toHaveBeenCalledWith(
         payload,
       );
+      expect(
+        mockQueuePrReviewActivityNotification.mock.invocationCallOrder[0],
+      ).toBeLessThan(mockRecordWebhook.mock.invocationCallOrder[0]!);
       expect(mockHandlePrComment).not.toHaveBeenCalled();
     },
   );
@@ -541,6 +595,9 @@ describe('github webhook router', () => {
 
     expect(response.status).toBe(200);
     expect(mockQueuePrReviewSummaryNotification).toHaveBeenCalledWith(payload);
+    expect(
+      mockQueuePrReviewSummaryNotification.mock.invocationCallOrder[0],
+    ).toBeLessThan(mockRecordWebhook.mock.invocationCallOrder[0]!);
     expect(mockHandlePrComment).not.toHaveBeenCalled();
   });
 
