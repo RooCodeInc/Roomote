@@ -19,10 +19,10 @@ jobs:
           set -euo pipefail
 
           installer="$(curl -fsSL --retry 3 https://get.roomote.dev)"
-          grep -Fq '# Roomote self-hosted installer' <<< "$installer"
+          grep -Fq '# Roomote one-command installer' <<< "$installer"
 
           install_sh="$(curl -fsSL --retry 3 https://get.roomote.dev/install.sh)"
-          grep -Fq '# Roomote self-hosted installer' <<< "$install_sh"
+          grep -Fq '# Roomote one-command installer' <<< "$install_sh"
 
           latest="$(curl -fsSL --retry 3 https://get.roomote.dev/latest-version)"
           grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+' <<< "$latest"
