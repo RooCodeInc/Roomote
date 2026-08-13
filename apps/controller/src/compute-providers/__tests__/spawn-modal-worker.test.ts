@@ -316,10 +316,7 @@ describe('spawnModalWorker', () => {
           exitCode: 17,
           stderr: 'Unauthorized',
           stdout: 'booting worker',
-          error:
-            'Detached "worker run" exited immediately with code 17\n' +
-            'stderr: Unauthorized\n' +
-            'stdout: booting worker',
+          error: 'Detached "worker run" exited immediately with code 17',
         }),
       }),
     );
