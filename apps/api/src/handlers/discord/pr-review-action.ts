@@ -47,8 +47,11 @@ export async function handleDiscordPrReviewActionCallback(input: {
     if (!content) return reply(resolution);
 
     const separator = '\n\n';
+    const formattedResolution = `-# ${resolution}`;
     const availableContentLength =
-      DISCORD_MAX_MESSAGE_LENGTH - separator.length - resolution.length;
+      DISCORD_MAX_MESSAGE_LENGTH -
+      separator.length -
+      formattedResolution.length;
     const preservedContent =
       content.length <= availableContentLength
         ? content
@@ -56,7 +59,7 @@ export async function handleDiscordPrReviewActionCallback(input: {
           ? `${content.slice(0, availableContentLength - 3)}...`
           : content.slice(0, Math.max(availableContentLength, 0));
 
-    return reply(`${preservedContent}${separator}${resolution}`);
+    return reply(`${preservedContent}${separator}${formattedResolution}`);
   };
   const user = input.interaction.member?.user ?? input.interaction.user;
   const mappedUserId = await findDiscordMappedUserId(user?.id);
