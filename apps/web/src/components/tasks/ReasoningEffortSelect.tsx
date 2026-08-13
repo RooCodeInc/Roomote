@@ -30,6 +30,7 @@ export function ReasoningEffortSelect({
   className = 'w-36 shrink-0',
   size,
   supportedEfforts,
+  noReasoning,
 }: {
   value: ReasoningEffort | null;
   defaultEffort: ReasoningEffort;
@@ -44,6 +45,12 @@ export function ReasoningEffortSelect({
    * the control never shows a blank selection; runtime stamping clamps it.
    */
   supportedEfforts?: readonly ReasoningEffort[] | null;
+  /**
+   * The selected model has no configurable reasoning: render a disabled
+   * "None" state instead of a level, so the control reflects that no
+   * reasoning configuration is sent.
+   */
+  noReasoning?: boolean;
 }) {
   const options = REASONING_EFFORT_OPTIONS.filter(
     (option) =>
@@ -52,6 +59,17 @@ export function ReasoningEffortSelect({
       supportedEfforts.includes(option.value) ||
       option.value === (value ?? defaultEffort),
   );
+
+  if (noReasoning) {
+    return (
+      <Select disabled>
+        <SelectTrigger className={className} aria-label={ariaLabel} size={size}>
+          <SelectValue placeholder="None" />
+        </SelectTrigger>
+        <SelectContent align="end" />
+      </Select>
+    );
+  }
 
   return (
     <Select

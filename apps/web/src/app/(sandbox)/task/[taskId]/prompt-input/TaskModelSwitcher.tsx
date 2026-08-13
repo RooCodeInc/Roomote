@@ -47,6 +47,8 @@ const OVERRIDE_ROLE_ROWS: Array<{
 type RoleSelection = {
   model: string | null;
   reasoningEffort: ReasoningEffort | null;
+  /** The persisted override suppresses the deployment role level. */
+  clearReasoningEffort: boolean;
 };
 
 /**
@@ -161,8 +163,17 @@ export function TaskModelSwitcher({
     trpc.sandboxSession.updateTaskModelSelection.mutationOptions(),
   );
 
-  const applyRoleSelection = (role: SwitcherRole, selection: RoleSelection) => {
-    setLocalSelections((current) => ({ ...current, [role]: selection }));
+  // The clear marker is derived server-side from the selected model's
+  // metadata; the optimistic local entry starts without it and the payload
+  // refresh brings the persisted state back in.
+  const applyRoleSelection = (
+    role: SwitcherRole,
+    selection: Omit<RoleSelection, 'clearReasoningEffort'>,
+  ) => {
+    setLocalSelections((current) => ({
+      ...current,
+      [role]: { ...selection, clearReasoningEffort: false },
+    }));
     updateModelSelection.mutate({
       taskId: taskRun.taskId,
       role,
@@ -184,12 +195,14 @@ export function TaskModelSwitcher({
     return {
       model: override?.model ?? null,
       reasoningEffort: override?.reasoningEffort ?? null,
+      clearReasoningEffort: override?.clearReasoningEffort ?? false,
     };
   };
 
   const codingSelection: RoleSelection = localSelections.coding ?? {
     model: payloadCodingModel ?? null,
     reasoningEffort: payloadCodingEffort,
+    clearReasoningEffort: false,
   };
   const effectiveCodingModel =
     codingSelection.model ?? roleDefaults?.defaultModelId ?? null;
@@ -198,12 +211,23 @@ export function TaskModelSwitcher({
     roleDefaults?.roles.coding.reasoningEffort ??
     DEFAULT_MODEL_ROLE_REASONING_EFFORTS.coding;
 
+  // A model without configurable reasoning shows "None" instead of a level.
+  const modelHasNoReasoning = (modelId: string | null | undefined) =>
+    modelId
+      ? modelMetadataById.get(modelId)?.supportsReasoning === false
+      : false;
+  const codingNoReasoning = modelHasNoReasoning(effectiveCodingModel);
+
   const hasRoleOverrides = useMemo(
     () =>
       OVERRIDE_ROLE_ROWS.some(({ role }) => {
         const selection = resolveRoleSelection(role);
 
-        return selection.model !== null || selection.reasoningEffort !== null;
+        return (
+          selection.model !== null ||
+          selection.reasoningEffort !== null ||
+          selection.clearReasoningEffort
+        );
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [localSelections, payloadRoleOverrides],
@@ -225,10 +249,18 @@ export function TaskModelSwitcher({
       ...OVERRIDE_ROLE_ROWS.filter(({ role }) => {
         const selection = resolveRoleSelection(role);
 
-        return selection.model !== null || selection.reasoningEffort !== null;
+        return (
+          selection.model !== null ||
+          selection.reasoningEffort !== null ||
+          selection.clearReasoningEffort
+        );
       }).map(({ role }) => role),
     ];
-    const cleared: RoleSelection = { model: null, reasoningEffort: null };
+    const cleared: RoleSelection = {
+      model: null,
+      reasoningEffort: null,
+      clearReasoningEffort: false,
+    };
 
     setResetting(true);
     setLocalSelections(
@@ -268,9 +300,11 @@ export function TaskModelSwitcher({
             aria-label="Models for this task"
           >
             <span className="max-w-40 truncate">{chipLabel}</span>
-            <span className="text-muted-foreground/70">
-              {getReasoningEffortLabel(effectiveCodingEffort)}
-            </span>
+            {!codingNoReasoning && (
+              <span className="text-muted-foreground/70">
+                {getReasoningEffortLabel(effectiveCodingEffort)}
+              </span>
+            )}
             {hasRoleOverrides && (
               <span
                 className="bg-primary size-1.5 shrink-0 rounded-full"
@@ -320,6 +354,7 @@ export function TaskModelSwitcher({
               className="w-28 shrink-0"
               size="sm"
               supportedEfforts={supportedEffortsForModel(effectiveCodingModel)}
+              noReasoning={codingNoReasoning}
             />
           </div>
 
@@ -346,7 +381,15 @@ export function TaskModelSwitcher({
                     : 'same as coding';
                   const isOverridden =
                     selection.model !== null ||
-                    selection.reasoningEffort !== null;
+                    selection.reasoningEffort !== null ||
+                    selection.clearReasoningEffort;
+                  const roleModelId =
+                    selection.model ??
+                    roleDefault?.effectiveModelId ??
+                    effectiveCodingModel;
+                  const roleNoReasoning =
+                    selection.clearReasoningEffort ||
+                    modelHasNoReasoning(roleModelId);
 
                   return (
                     <div key={role} className="flex items-center gap-2">
@@ -392,11 +435,8 @@ export function TaskModelSwitcher({
                         ariaLabel={`${label} reasoning level`}
                         className="w-24 shrink-0"
                         size="sm"
-                        supportedEfforts={supportedEffortsForModel(
-                          selection.model ??
-                            roleDefault?.effectiveModelId ??
-                            effectiveCodingModel,
-                        )}
+                        supportedEfforts={supportedEffortsForModel(roleModelId)}
+                        noReasoning={roleNoReasoning}
                       />
                     </div>
                   );
