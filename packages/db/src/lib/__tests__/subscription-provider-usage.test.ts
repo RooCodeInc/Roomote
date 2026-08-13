@@ -728,8 +728,12 @@ describe('fetchXaiSubscriptionUsage', () => {
         }),
       );
 
-    await fetchXaiSubscriptionUsage({ fetchImpl });
+    const usage = await fetchXaiSubscriptionUsage({ fetchImpl });
 
+    expect(usage).toMatchObject({
+      providerId: 'xai-subscription',
+      windows: [{ label: 'Included usage', usedPercent: 27 }],
+    });
     expect(fetchImpl).toHaveBeenNthCalledWith(
       1,
       'https://cli-chat-proxy.grok.com/v1/user',
@@ -740,10 +744,12 @@ describe('fetchXaiSubscriptionUsage', () => {
         }),
       }),
     );
-    expect(
-      (fetchImpl.mock.calls[0]?.[1] as { headers: Record<string, string> })
-        .headers,
-    ).not.toHaveProperty('X-XAI-Token-Auth');
+    const userHeaders = (
+      fetchImpl.mock.calls[0]?.[1] as { headers: Record<string, string> }
+    ).headers;
+    expect(userHeaders).not.toHaveProperty('X-XAI-Token-Auth');
+    expect(userHeaders).not.toHaveProperty('x-grok-client-identifier');
+    expect(userHeaders).not.toHaveProperty('x-grok-client-mode');
     expect(fetchImpl).toHaveBeenNthCalledWith(
       2,
       'https://cli-chat-proxy.grok.com/v1/billing?format=credits',
