@@ -1,6 +1,7 @@
 import {
   CHATGPT_ACCOUNT_ID_HEADER,
   getInferenceGatewayProvider,
+  INFERENCE_GATEWAY_IDENTITY_PATTERN,
   INFERENCE_GATEWAY_RESOURCE_PATTERN,
   INFERENCE_GATEWAY_REGION_PATTERN,
   type InferenceGatewayProvider,
@@ -118,9 +119,9 @@ async function resolveRequiredForwardHeaders(
       );
     }
 
-    if (!INFERENCE_GATEWAY_RESOURCE_PATTERN.test(value)) {
+    if (!INFERENCE_GATEWAY_IDENTITY_PATTERN.test(value)) {
       throw new Error(
-        `${spec.envVarName} must be a valid resource name for ${provider.name}. Received "${value}".`,
+        `${spec.envVarName} must be a valid identity value for ${provider.name}. Received "${value}".`,
       );
     }
 

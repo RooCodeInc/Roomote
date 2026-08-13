@@ -1,6 +1,9 @@
 import { Hono } from 'hono';
 
-import { formatSingleLineLog } from '@roomote/types';
+import {
+  formatSingleLineLog,
+  rewriteCloudflareAiGatewayRequestBody,
+} from '@roomote/types';
 import { db, eq, taskRuns } from '@roomote/db/server';
 import { recordLlmUsage } from '@roomote/sdk/server';
 
@@ -379,6 +382,12 @@ inference.on(['POST', 'GET'], '/:provider/*', async (c) => {
     if (copilotRequestBodyHasVisionContent(bodyText)) {
       injectedHeaders['Copilot-Vision-Request'] = 'true';
     }
+  }
+
+  if (providerId === 'cloudflare-ai-gateway' && method === 'POST') {
+    const bodyText = await c.req.text();
+    requestBody = rewriteCloudflareAiGatewayRequestBody(bodyText);
+    useDuplexHalf = false;
   }
 
   try {

@@ -1,4 +1,12 @@
 import {
+  getInferenceGatewayProvider,
+  INFERENCE_GATEWAY_IDENTITY_PATTERN,
+  INFERENCE_GATEWAY_RESOURCE_PATTERN,
+  toCloudflareAiGatewayUpstreamModelId,
+  type InferenceGatewayProvider,
+} from './inference-gateway';
+import { getSetupModelProvider } from './model-provider-config';
+import {
   buildOpenAiCompatibleProviderInstance,
   getOpenAiCompatibleProviderInstance,
   isOpenAiCompatibleProviderId,
@@ -237,4 +245,140 @@ export function mergeOpenAiCompatibleProviderConfig(
   }
 
   return merged;
+}
+
+const CLOUDFLARE_OPENCODE_PROVIDER_IDS = [
+  'cloudflare-ai-gateway',
+  'cloudflare-workers-ai',
+] as const;
+
+function readRequiredEnv(
+  runtimeEnv: RuntimeEnv,
+  envVarName: string | undefined,
+): string | undefined {
+  return envVarName ? runtimeEnv[envVarName]?.trim() || undefined : undefined;
+}
+
+/**
+ * Control-plane OpenCode has no Roomote inference gateway. Emit openai-compat
+ * providers against Cloudflare `/ai/v1` using Roomote's namespaced env vars,
+ * not models.dev's shared `CLOUDFLARE_ACCOUNT_ID`.
+ */
+export function mergeCloudflareOpenCodeProviderConfig(
+  providerConfig: Record<string, unknown>,
+  runtimeEnv: RuntimeEnv,
+  modelIds: Array<string | undefined>,
+): Record<string, unknown> {
+  let merged = providerConfig;
+
+  for (const providerId of CLOUDFLARE_OPENCODE_PROVIDER_IDS) {
+    const gatewayProvider = getInferenceGatewayProvider(providerId);
+    const setupProvider = getSetupModelProvider(providerId);
+
+    if (!gatewayProvider?.resource || !setupProvider.envVarName) {
+      continue;
+    }
+
+    const prefix = `${providerId}/`;
+    const modelIdsForProvider = [
+      ...new Set(
+        modelIds.flatMap((modelId) => {
+          const normalized = modelId?.trim();
+          return normalized?.startsWith(prefix)
+            ? [
+                providerId === 'cloudflare-ai-gateway'
+                  ? toCloudflareAiGatewayUpstreamModelId(
+                      normalized.slice(prefix.length),
+                    )
+                  : normalized.slice(prefix.length),
+              ]
+            : [];
+        }),
+      ),
+    ];
+
+    if (modelIdsForProvider.length === 0) {
+      continue;
+    }
+
+    const apiKey = readRequiredEnv(runtimeEnv, setupProvider.envVarName);
+    const accountId = readRequiredEnv(
+      runtimeEnv,
+      gatewayProvider.resource.envVarName,
+    );
+
+    if (
+      !apiKey ||
+      !accountId ||
+      !INFERENCE_GATEWAY_RESOURCE_PATTERN.test(accountId)
+    ) {
+      continue;
+    }
+
+    const existingProvider = asRecord(merged[providerId]);
+    const existingOptions = asRecord(existingProvider.options);
+    const existingModels = asRecord(existingProvider.models);
+    const options: Record<string, unknown> = {
+      ...existingOptions,
+      baseURL: `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/v1`,
+      apiKey: `{env:${setupProvider.envVarName}}`,
+    };
+
+    if (
+      !appendRequiredCloudflareHeaders(options, gatewayProvider, runtimeEnv)
+    ) {
+      continue;
+    }
+
+    merged = {
+      ...merged,
+      [providerId]: {
+        ...existingProvider,
+        npm: gatewayProvider.openCodeNpm ?? '@ai-sdk/openai-compatible',
+        name: setupProvider.label,
+        options,
+        models: {
+          ...existingModels,
+          ...Object.fromEntries(
+            modelIdsForProvider.map((modelId) => [
+              modelId,
+              {
+                name: modelId,
+                ...asRecord(existingModels[modelId]),
+              },
+            ]),
+          ),
+        },
+      },
+    };
+  }
+
+  return merged;
+}
+
+function appendRequiredCloudflareHeaders(
+  options: Record<string, unknown>,
+  gatewayProvider: InferenceGatewayProvider,
+  runtimeEnv: RuntimeEnv,
+): boolean {
+  if (!gatewayProvider.requiredHeaders?.length) {
+    return true;
+  }
+
+  const headers = {
+    ...asRecord(options.headers),
+  };
+
+  for (const spec of gatewayProvider.requiredHeaders) {
+    const value = readRequiredEnv(runtimeEnv, spec.envVarName);
+
+    if (!value || !INFERENCE_GATEWAY_IDENTITY_PATTERN.test(value)) {
+      return false;
+    }
+
+    headers[spec.headerName] = value;
+  }
+
+  options.headers = headers;
+  return true;
 }

@@ -46,6 +46,84 @@ export const INFERENCE_GATEWAY_REGION_PATTERN =
 export const INFERENCE_GATEWAY_RESOURCE_PATTERN =
   /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/iu;
 
+/**
+ * Non-DNS identity values injected as headers (Cloudflare gateway ids).
+ * Allows underscores and up to 64 characters; rejects spaces and CR/LF.
+ */
+export const INFERENCE_GATEWAY_IDENTITY_PATTERN =
+  /^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,62}[A-Za-z0-9])?$/u;
+
+const CLOUDFLARE_WORKERS_AI_CATALOG_PREFIX = 'workers-ai/';
+
+/**
+ * models.dev stores hosted Workers AI models under a `workers-ai/` namespace
+ * on the AI Gateway provider. Cloudflare's `/ai/v1` surface expects the
+ * `@cf/...` id with that namespace removed.
+ */
+export function toCloudflareAiGatewayUpstreamModelId(modelId: string): string {
+  const trimmed = modelId.trim();
+
+  if (
+    trimmed.startsWith(CLOUDFLARE_WORKERS_AI_CATALOG_PREFIX) &&
+    trimmed
+      .slice(CLOUDFLARE_WORKERS_AI_CATALOG_PREFIX.length)
+      .startsWith('@cf/')
+  ) {
+    return trimmed.slice(CLOUDFLARE_WORKERS_AI_CATALOG_PREFIX.length);
+  }
+
+  return trimmed;
+}
+
+/** Rewrites a Roomote task model id for OpenCode / Cloudflare `/ai/v1`. */
+export function rewriteCloudflareOpenCodeModelId(modelId: string): string {
+  const prefix = 'cloudflare-ai-gateway/';
+
+  if (!modelId.startsWith(prefix)) {
+    return modelId;
+  }
+
+  return `${prefix}${toCloudflareAiGatewayUpstreamModelId(modelId.slice(prefix.length))}`;
+}
+
+/**
+ * Rewrites a JSON chat-completions body so Cloudflare `/ai/v1` receives
+ * `@cf/...` instead of models.dev's `workers-ai/@cf/...` catalog slug.
+ */
+export function rewriteCloudflareAiGatewayRequestBody(
+  bodyText: string,
+): string {
+  if (!bodyText.trim()) {
+    return bodyText;
+  }
+
+  let body: unknown;
+
+  try {
+    body = JSON.parse(bodyText);
+  } catch {
+    return bodyText;
+  }
+
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return bodyText;
+  }
+
+  const record = body as { model?: unknown };
+
+  if (typeof record.model !== 'string') {
+    return bodyText;
+  }
+
+  const rewritten = toCloudflareAiGatewayUpstreamModelId(record.model);
+
+  if (rewritten === record.model) {
+    return bodyText;
+  }
+
+  return JSON.stringify({ ...record, model: rewritten });
+}
+
 /** Default AWS region for the Bedrock Mantle Anthropic-compatible endpoint. */
 export const DEFAULT_BEDROCK_MANTLE_REGION = 'us-east-1';
 

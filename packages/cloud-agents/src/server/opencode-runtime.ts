@@ -7,7 +7,9 @@ import {
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   isTaskModelIdDisabled,
+  mergeCloudflareOpenCodeProviderConfig,
   mergeOpenAiCompatibleProviderConfig,
+  rewriteCloudflareOpenCodeModelId,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenCodeChatGptFastModeOptions,
   mergeOpenRouterVariantAliasModels,
@@ -46,16 +48,22 @@ function buildModelBackedOpenCodeConfigContent(
   // aliases below, because OpenCode rejects model IDs its catalog does not
   // contain.
   const variantAliases = new Map<string, OpenRouterVariantModelAlias>();
-  const model = collectOpenRouterVariantModelAlias(variantAliases, rawModel);
+  const model = rewriteCloudflareOpenCodeModelId(
+    collectOpenRouterVariantModelAlias(variantAliases, rawModel),
+  );
   const rawSmallModel = env.R_SMALL_MODEL?.trim();
   const smallModel =
     rawSmallModel && !isTaskModelIdDisabled(rawSmallModel)
-      ? collectOpenRouterVariantModelAlias(variantAliases, rawSmallModel)
+      ? rewriteCloudflareOpenCodeModelId(
+          collectOpenRouterVariantModelAlias(variantAliases, rawSmallModel),
+        )
       : undefined;
   const rawVisionModel = env.R_VISION_MODEL?.trim();
   const visionModel =
     rawVisionModel && !isTaskModelIdDisabled(rawVisionModel)
-      ? collectOpenRouterVariantModelAlias(variantAliases, rawVisionModel)
+      ? rewriteCloudflareOpenCodeModelId(
+          collectOpenRouterVariantModelAlias(variantAliases, rawVisionModel),
+        )
       : undefined;
   const modelReasoningEffort = normalizeOptionalReasoningEffort(
     env.R_MODEL_REASONING_EFFORT?.trim(),
@@ -109,11 +117,15 @@ function buildModelBackedOpenCodeConfigContent(
           visionModel,
         ])
       : providerReasoningConfig;
-  const providerConfig = mergeOpenAiCompatibleProviderConfig(
-    mergeOpenRouterVariantAliasModels(providerModelConfig, variantAliases),
+  const providerConfig = mergeCloudflareOpenCodeProviderConfig(
+    mergeOpenAiCompatibleProviderConfig(
+      mergeOpenRouterVariantAliasModels(providerModelConfig, variantAliases),
+      env,
+      [model, smallModel, visionModel],
+      visionModel,
+    ),
     env,
     [model, smallModel, visionModel],
-    visionModel,
   );
 
   return JSON.stringify({

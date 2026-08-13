@@ -4,10 +4,13 @@ import {
   CHATGPT_GATEWAY_PROVIDER_ID,
   getInferenceGatewayProvider,
   getInferenceGatewayProviderByEnvVarName,
+  INFERENCE_GATEWAY_IDENTITY_PATTERN,
   INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_PROVIDERS,
   isInferenceGatewayCoveredEnvVar,
   parseInferenceGatewayKeys,
+  rewriteCloudflareAiGatewayRequestBody,
+  toCloudflareAiGatewayUpstreamModelId,
 } from '../inference-gateway';
 import { getSetupModelProvider } from '../model-provider-config';
 
@@ -382,5 +385,35 @@ describe('inference gateway key lookups', () => {
         provider!,
       ),
     ).toBe('https://api.example.com/api/inference/cloudflare-workers-ai/v1');
+  });
+
+  it('accepts underscore gateway ids and rejects header-unsafe values', () => {
+    expect(INFERENCE_GATEWAY_IDENTITY_PATTERN.test('default')).toBe(true);
+    expect(INFERENCE_GATEWAY_IDENTITY_PATTERN.test('my_gateway')).toBe(true);
+    expect(INFERENCE_GATEWAY_IDENTITY_PATTERN.test('my-gateway')).toBe(true);
+    expect(INFERENCE_GATEWAY_IDENTITY_PATTERN.test('my gateway')).toBe(false);
+    expect(INFERENCE_GATEWAY_IDENTITY_PATTERN.test('gw\nid')).toBe(false);
+  });
+
+  it('strips the models.dev workers-ai namespace before /ai/v1', () => {
+    expect(
+      toCloudflareAiGatewayUpstreamModelId('workers-ai/@cf/zai-org/glm-5.2'),
+    ).toBe('@cf/zai-org/glm-5.2');
+    expect(toCloudflareAiGatewayUpstreamModelId('openai/gpt-5.6-terra')).toBe(
+      'openai/gpt-5.6-terra',
+    );
+    expect(
+      rewriteCloudflareAiGatewayRequestBody(
+        JSON.stringify({
+          model: 'workers-ai/@cf/zai-org/glm-5.2',
+          messages: [{ role: 'user', content: 'hi' }],
+        }),
+      ),
+    ).toBe(
+      JSON.stringify({
+        model: '@cf/zai-org/glm-5.2',
+        messages: [{ role: 'user', content: 'hi' }],
+      }),
+    );
   });
 });
