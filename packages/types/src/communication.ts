@@ -98,6 +98,17 @@ export const queuedCommunicationMessageSchema = z.object({
     })
     .optional(),
   contextOnly: z.boolean().optional(),
+  goalContext: z
+    .object({
+      objective: z.string(),
+      maxContinuations: z.number().int(),
+      generation: z.string().nullable(),
+      status: z.enum(['active', 'complete', 'blocked', 'budget_limited']),
+      continuationsUsed: z.number().int(),
+      blockedReason: z.string().nullable(),
+      completedAt: z.coerce.date().nullable(),
+    })
+    .optional(),
 });
 
 export type QueuedCommunicationMessage = z.infer<

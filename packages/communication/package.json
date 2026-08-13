@@ -16,6 +16,8 @@
     "./redact-secrets": "./src/redact-secrets.ts",
     "./request-user-input": "./src/request-user-input.ts",
     "./task-thread-title": "./src/task-thread-title.ts",
+    "./task-goal": "./src/task-goal.ts",
+    "./task-goal-command": "./src/task-goal-command.ts",
     "./teams-activity": "./src/teams-activity.ts",
     "./teams-bot-framework-client": "./src/teams-bot-framework-client.ts",
     "./teams-credential-validation": "./src/teams-credential-validation.ts",

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  getTelegramGoalCommand,
   getTelegramNewTaskCommand,
   getTelegramUpdateCallbackQuery,
   getTelegramUpdateCommunicationMetadata,
@@ -13,6 +14,25 @@ import {
 } from '../telegram-update';
 
 describe('Telegram update helpers', () => {
+  it('parses addressed goal commands', () => {
+    const parsed = parseTelegramUpdate({
+      update_id: 1,
+      message: {
+        message_id: 2,
+        chat: { id: 3, type: 'group' },
+        text: '/goal@roomote_bot ship the release',
+        entities: [{ type: 'bot_command', offset: 0, length: 17 }],
+      },
+    }).data!;
+
+    expect(
+      getTelegramGoalCommand(parsed, { botUsername: 'roomote_bot' }),
+    ).toEqual({ objective: 'ship the release' });
+    expect(
+      getTelegramGoalCommand(parsed, { botUsername: 'another_bot' }),
+    ).toBeNull();
+  });
+
   it('recognizes /start commands in private chats only', () => {
     const buildUpdate = (text: string, chatType = 'private') => ({
       update_id: 1,

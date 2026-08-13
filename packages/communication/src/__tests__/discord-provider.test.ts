@@ -221,6 +221,13 @@ describe('DiscordCommunicationProvider', () => {
         type: 1,
         options: [expect.objectContaining({ name: 'request', required: true })],
       },
+      {
+        name: 'goal',
+        type: 1,
+        options: [
+          expect.objectContaining({ name: 'objective', required: true }),
+        ],
+      },
       { name: 'link', type: 1 },
       { name: 'help', type: 1 },
     ]);

@@ -14,6 +14,7 @@ import {
   RunStatus,
   TaskPayloadKind,
   type QueuedCommunicationMessage,
+  type TaskGoal,
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
   isCommunicationProvider,
@@ -1749,6 +1750,7 @@ export const runTask = async ({
       userName?: string;
       userImageUrl?: string;
       clientMessageId?: string;
+      goalContext?: TaskGoal;
     }) => {
       const workflowPhase =
         options.workflowPhase ?? getFollowUpWorkflowPhase(options.prompt);

@@ -51,6 +51,7 @@ const mocks = vi.hoisted(() => ({
   buildContinuation: vi.fn(),
   releaseContinuation: vi.fn(),
   markThreadHistoryDelivered: vi.fn(),
+  activateGoal: vi.fn(),
   fetchThreadHistory: vi.fn(),
   shouldRouteUnmentioned: vi.fn(),
   enqueueGatewayEvent: vi.fn(),
@@ -130,6 +131,13 @@ vi.mock('../routing-confirmation.js', () => ({
 vi.mock('@roomote/communication/messages', () => ({
   queueCommunicationMessageOnce: mocks.queueMessage,
   setLatestInboundMessageId: mocks.setLatestInbound,
+}));
+
+vi.mock('@roomote/communication/task-goal', async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import('@roomote/communication/task-goal')
+  >()),
+  activateTaskGoal: mocks.activateGoal,
 }));
 
 vi.mock('../../tasks/acting-user-sync.js', () => ({
@@ -313,6 +321,27 @@ describe('Discord Gateway event handler', () => {
     mocks.fetchThreadHistory.mockResolvedValue([]);
     mocks.shouldRouteUnmentioned.mockResolvedValue(true);
     mocks.queueMessage.mockResolvedValue(true);
+    mocks.activateGoal.mockImplementation(
+      async ({
+        objective,
+        deliver,
+      }: {
+        objective: string;
+        deliver: (goal: Record<string, unknown>) => Promise<unknown>;
+      }) => {
+        const goal = {
+          objective,
+          maxContinuations: 5,
+          generation: 'goal-generation:test',
+          status: 'active',
+          continuationsUsed: 0,
+          blockedReason: null,
+          completedAt: null,
+        };
+        await deliver(goal);
+        return { success: true, goal };
+      },
+    );
     mocks.enqueueGatewayEvent.mockResolvedValue({ jobId: 'event-message-1' });
     mocks.callViaEmojiConfig.mockResolvedValue(null);
   });
@@ -1751,6 +1780,51 @@ describe('Discord Gateway event handler', () => {
         forceNewThread: true,
       }),
     );
+  });
+
+  it('activates /goal on an active task without injecting thread context', async () => {
+    mocks.findActiveRun.mockResolvedValue({
+      id: 23,
+      taskId: 'task-23',
+      status: 'running',
+    });
+    const interaction = {
+      id: 'interaction-goal',
+      application_id: 'app-1',
+      type: 2,
+      token: 'interaction-token',
+      channel_id: 'dm-1',
+      user: { id: 'discord-user-1', username: 'matt' },
+      data: {
+        name: 'goal',
+        type: 1,
+        options: [{ name: 'objective', type: 3, value: 'Ship the release' }],
+      },
+    };
+
+    const response = await postEvent(
+      envelope(interaction, 'INTERACTION_CREATE'),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.activateGoal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 'task-23',
+        objective: 'Ship the release',
+      }),
+    );
+    expect(mocks.queueMessage).toHaveBeenCalledWith(
+      'discord',
+      23,
+      expect.objectContaining({
+        text: 'Ship the release',
+        formattedPrompt: 'Ship the release',
+        goalContext: expect.objectContaining({
+          generation: 'goal-generation:test',
+        }),
+      }),
+    );
+    expect(mocks.buildContinuation).not.toHaveBeenCalled();
   });
 
   it('continues in the same thread when mentioned in an existing thread reply', async () => {

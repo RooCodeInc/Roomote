@@ -254,6 +254,7 @@ export function createCommunicationMessageInterval({
           // The delivered sender always equals the server-side acting user.
           userId: msgPrep.effectiveUserId ?? undefined,
           clientMessageId: getCommunicationClientMessageId(provider, message),
+          goalContext: message.goalContext,
         });
 
         if (!sent) {

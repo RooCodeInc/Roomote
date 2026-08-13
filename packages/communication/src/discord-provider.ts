@@ -8,6 +8,7 @@ import type {
   CommunicationReactionResult,
   CommunicationThreadLookupResult,
 } from './provider';
+import { GOAL_COMMAND_NAME } from './task-goal-command';
 
 export const DISCORD_MAX_MESSAGE_LENGTH = 2_000;
 const DISCORD_MAX_EMBEDS_PER_MESSAGE = 10;
@@ -1200,6 +1201,19 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
               type: 3,
               name: 'request',
               description: 'What would you like Roomote to do?',
+              required: true,
+            },
+          ],
+        },
+        {
+          name: GOAL_COMMAND_NAME,
+          description: 'Set a goal for the active Roomote task',
+          type: 1,
+          options: [
+            {
+              type: 3,
+              name: 'objective',
+              description: 'What should Roomote keep working toward?',
               required: true,
             },
           ],

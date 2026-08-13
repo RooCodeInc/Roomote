@@ -7,6 +7,8 @@ export * from './provider';
 export * from './reaction-emoji';
 export * from './request-user-input';
 export * from './task-thread-title';
+export * from './task-goal';
+export * from './task-goal-command';
 export * from './teams-activity';
 export * from './teams-bot-framework-client';
 export * from './teams-credential-validation';

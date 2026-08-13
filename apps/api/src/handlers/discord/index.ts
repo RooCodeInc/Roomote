@@ -24,6 +24,12 @@ import {
   setLatestInboundMessageId,
 } from '@roomote/communication/messages';
 import { reactionEmojiMatches } from '@roomote/communication/reaction-emoji';
+import { activateTaskGoal } from '@roomote/communication/task-goal';
+import {
+  getTaskGoalActivationMessage,
+  parseGoalCommand,
+  withTaskGoalContext,
+} from '@roomote/communication/task-goal-command';
 import { getTaskUrl } from '@roomote/cloud-agents/server';
 import {
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
@@ -154,6 +160,7 @@ const DISCORD_HELP_MESSAGE = [
   '',
   '**Available commands**',
   '`/new request:<request>` — start a fresh task.',
+  '`/goal objective:<objective>` — keep the active task working toward an objective.',
   '`/link code:<code>` — link this Discord account in a DM with me.',
   '`/help` — show this message.',
   '',
@@ -508,7 +515,7 @@ async function processDiscordGatewayEvent(
     return { ok: true, linked: true };
   }
 
-  if (command && command.name !== 'new') {
+  if (command && command.name !== 'new' && command.name !== 'goal') {
     return { ok: true, ignored: 'unsupported_command' };
   }
   if (command?.name === 'new' && !command.request) {
@@ -520,6 +527,16 @@ async function processDiscordGatewayEvent(
       text: 'Add what you want Roomote to do in the `request` field.',
     });
     return { ok: true, started: false, reason: 'missing_request' };
+  }
+  if (command?.name === 'goal' && !command.objective) {
+    await replyToDiscordEvent({
+      provider: resolved.provider,
+      applicationId: resolved.applicationId,
+      channel,
+      interaction: interactionReplyContext(event),
+      text: 'Add what Roomote should keep working toward in the `objective` field.',
+    });
+    return { ok: true, queued: false, reason: 'missing_objective' };
   }
 
   const senderUserId = await findDiscordMappedUserId(sender.id);
@@ -797,6 +814,29 @@ async function processDiscordGatewayEvent(
       senderUserId,
     });
 
+    const goalCommand = parseGoalCommand(queuedMessage.text);
+    if (goalCommand) {
+      const result = await activateTaskGoal({
+        taskId: activeRun.taskId,
+        objective: goalCommand.objective,
+        deliver: async (goal) =>
+          queueCommunicationMessageOnce(
+            'discord',
+            activeRun.id,
+            withTaskGoalContext(queuedMessage, goal),
+          ),
+      });
+      await replyToDiscordEvent({
+        provider: resolved.provider,
+        applicationId: resolved.applicationId,
+        channel,
+        ...(interaction ? { interaction: interactionReplyContext(event) } : {}),
+        ...(message?.id ? { replyToMessageId: message.id } : {}),
+        text: getTaskGoalActivationMessage(result),
+      });
+      return { ok: true, queued: result.success, runId: activeRun.id };
+    }
+
     if (message && queuedMessage) {
       const handledRequestUserInput =
         await tryHandleDiscordRequestUserInputMessage({
@@ -904,6 +944,18 @@ async function processDiscordGatewayEvent(
     // Match Slack: eyes is an intake-only platform ack. Active follow-ups are
     // already durable once queued; agents may still react when turn policy allows.
     return { ok: true, queued: true, runId: activeRun.id };
+  }
+
+  if (parseGoalCommand(queuedMessage.text)) {
+    await replyToDiscordEvent({
+      provider: resolved.provider,
+      applicationId: resolved.applicationId,
+      channel,
+      ...(interaction ? { interaction: interactionReplyContext(event) } : {}),
+      ...(message?.id ? { replyToMessageId: message.id } : {}),
+      text: 'Use `/goal` in a conversation with an active task.',
+    });
+    return { ok: true, queued: false, reason: 'goal_requires_active_task' };
   }
 
   if (completedRun) {

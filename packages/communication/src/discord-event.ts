@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { QueuedCommunicationMessage } from '@roomote/types';
+import { GOAL_COMMAND, GOAL_COMMAND_NAME } from './task-goal-command';
 
 export const discordUserSchema = z
   .object({
@@ -533,7 +534,12 @@ function findInteractionOption(
 
 export function getDiscordInteractionCommand(
   eventOrInteraction: DiscordGatewayEvent | DiscordInteraction,
-): { name: string; request?: string; code?: string } | null {
+): {
+  name: string;
+  request?: string;
+  objective?: string;
+  code?: string;
+} | null {
   const interaction = isDiscordGatewayEventValue(eventOrInteraction)
     ? getDiscordInteractionCreate(eventOrInteraction)
     : eventOrInteraction;
@@ -545,12 +551,19 @@ export function getDiscordInteractionCommand(
     'request',
   )?.value;
   const code = findInteractionOption(interaction.data.options, 'code')?.value;
+  const objective = findInteractionOption(
+    interaction.data.options,
+    'objective',
+  )?.value;
   return {
     name: interaction.data.name.toLowerCase(),
     ...(typeof request === 'string' && request.trim()
       ? { request: request.trim() }
       : {}),
     ...(typeof code === 'string' && code.trim() ? { code: code.trim() } : {}),
+    ...(typeof objective === 'string' && objective.trim()
+      ? { objective: objective.trim() }
+      : {}),
   };
 }
 
@@ -573,7 +586,8 @@ export function isDiscordTaskEntryEvent(
         isDiscordBotMentioned(message, options.botUserId))
     );
   }
-  return getDiscordInteractionCommand(event)?.name === 'new';
+  const commandName = getDiscordInteractionCommand(event)?.name;
+  return commandName === 'new' || commandName === GOAL_COMMAND_NAME;
 }
 
 function formatDiscordUser(input: {
@@ -637,11 +651,19 @@ export function discordEventToQueuedCommunicationMessage(
 
   const interaction = getDiscordInteractionCreate(event);
   const command = getDiscordInteractionCommand(event);
-  if (!interaction || command?.name !== 'new') return null;
+  if (
+    !interaction ||
+    (command?.name !== 'new' && command?.name !== GOAL_COMMAND_NAME)
+  ) {
+    return null;
+  }
   const user = getDiscordInteractionUser(interaction);
   return {
     provider: 'discord',
-    text: command.request ?? 'Start a new task',
+    text:
+      command.name === GOAL_COMMAND_NAME
+        ? `${GOAL_COMMAND} ${command.objective ?? ''}`.trim()
+        : (command.request ?? 'Start a new task'),
     user: formatDiscordUser({ user, nickname: interaction.member?.nick }),
     ...(options.userId ? { userId: options.userId } : {}),
     ts: interaction.id,
