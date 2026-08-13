@@ -1741,6 +1741,7 @@ export const runTask = async ({
         clientMessageId: options.clientMessageId,
         // Attribute the turn to the identity actor-scoped routes resolve.
         userId: deferredPromptPrep.effectiveUserId ?? undefined,
+        ...(task?.goal?.status === 'active' ? { goalContext: task.goal } : {}),
       });
 
       if (queued) {
