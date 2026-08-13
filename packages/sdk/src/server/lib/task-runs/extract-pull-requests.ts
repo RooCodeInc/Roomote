@@ -4,6 +4,7 @@ import {
   taskRuns,
   and,
   eq,
+  projectPendingPrReviewEventsForAssociation,
   repositories,
 } from '@roomote/db/server';
 import type { TaskRun } from '@roomote/db/server';
@@ -131,31 +132,39 @@ export async function persistDetectedPullRequest({
     columns: { id: true },
   });
 
-  await db
-    .insert(taskPullRequests)
-    .values({
-      taskId,
-      sourceControlProvider: 'github',
-      host: 'github.com',
-      repositoryId: linkedRepository?.id ?? null,
-      prUrl: pr.url,
-      prNumber: pr.number,
-      prTitle,
-      repository: pr.repository,
-      status,
-      prBaseRef: baseRef,
-      prBaseSha: baseSha,
-    })
-    .onConflictDoUpdate({
-      target: [taskPullRequests.taskId, taskPullRequests.prUrl],
-      set: {
+  await db.transaction(async (tx) => {
+    await tx
+      .insert(taskPullRequests)
+      .values({
+        taskId,
         sourceControlProvider: 'github',
         host: 'github.com',
-        ...(linkedRepository && { repositoryId: linkedRepository.id }),
-        ...(prTitle !== null && { prTitle }),
-        ...(status !== null && { status }),
-        ...(fetchedPrDetails && { prBaseRef: baseRef, prBaseSha: baseSha }),
-        updatedAt: new Date(),
-      },
+        repositoryId: linkedRepository?.id ?? null,
+        prUrl: pr.url,
+        prNumber: pr.number,
+        prTitle,
+        repository: pr.repository,
+        status,
+        prBaseRef: baseRef,
+        prBaseSha: baseSha,
+      })
+      .onConflictDoUpdate({
+        target: [taskPullRequests.taskId, taskPullRequests.prUrl],
+        set: {
+          sourceControlProvider: 'github',
+          host: 'github.com',
+          ...(linkedRepository && { repositoryId: linkedRepository.id }),
+          ...(prTitle !== null && { prTitle }),
+          ...(status !== null && { status }),
+          ...(fetchedPrDetails && { prBaseRef: baseRef, prBaseSha: baseSha }),
+          updatedAt: new Date(),
+        },
+      });
+    await projectPendingPrReviewEventsForAssociation(tx, {
+      taskId,
+      sourceControlProvider: 'github',
+      repository: pr.repository,
+      prNumber: pr.number,
     });
+  });
 }

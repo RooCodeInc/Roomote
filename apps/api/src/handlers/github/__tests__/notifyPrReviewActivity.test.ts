@@ -159,6 +159,7 @@ describe('buildPrReviewActivityNotificationInput', () => {
       sourceControlProvider: 'github',
       event: {
         kind: 'review',
+        providerEventId: 'github-review:1000',
         authorLogin: 'alice',
         reviewHeadSha,
         batchId: 'github-review:1000',
@@ -213,6 +214,7 @@ describe('buildPrReviewActivityNotificationInput', () => {
       sourceControlProvider: 'github',
       event: {
         kind: 'review_comment',
+        providerEventId: 'github-review-comment:2000',
         authorLogin: 'bob',
         reviewHeadSha,
         batchId: 'github-review:1000',
@@ -232,6 +234,7 @@ describe('buildPrReviewActivityNotificationInput', () => {
       sourceControlProvider: 'github',
       event: {
         kind: 'issue_comment',
+        providerEventId: 'github-issue-comment:3000',
         authorLogin: 'alice',
         url: 'https://github.com/owner/repo/pull/42#issuecomment-3000',
         observedAt,
@@ -319,6 +322,7 @@ describe('queuePrReviewActivityNotification', () => {
       sourceControlProvider: 'github',
       event: {
         kind: 'review',
+        providerEventId: 'github-review:1000',
         authorLogin: 'alice',
         reviewHeadSha,
         batchId: 'github-review:1000',
@@ -347,16 +351,12 @@ describe('queuePrReviewActivityNotification', () => {
     );
   });
 
-  it('swallows enqueue failures', async () => {
+  it('propagates persistence failures so the webhook can retry', async () => {
     mockEnqueuePrReviewNotification.mockRejectedValue(new Error('redis down'));
 
-    expect(() =>
+    await expect(
       queuePrReviewActivityNotification(reviewPayload({ state: 'approved' })),
-    ).not.toThrow();
-
-    await vi.waitFor(() =>
-      expect(mockEnqueuePrReviewNotification).toHaveBeenCalled(),
-    );
+    ).rejects.toThrow('redis down');
   });
 });
 
@@ -456,6 +456,7 @@ describe('buildPrReviewSummaryNotification', () => {
       sourceControlProvider: 'github',
       event: {
         kind: 'review_summary',
+        providerEventId: 'github-review-summary:99:2026-08-10T19:30:00.000Z',
         authorLogin: 'roomote[bot]',
         reviewHeadSha,
         summary: '1 minor doc note; no blocking issues.',

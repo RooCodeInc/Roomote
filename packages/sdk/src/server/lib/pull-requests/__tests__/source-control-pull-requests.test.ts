@@ -27,6 +27,7 @@ const {
   mockTasksFindFirst,
   mockResolveLaunchTaskCommitAuthor,
   mockResolveRunCommitAuthor,
+  mockProjectPendingPrReviewEventsForAssociation,
 } = vi.hoisted(() => ({
   mockCreateGitHubToken: vi.fn(),
   mockGetDeploymentPrAction: vi.fn(),
@@ -47,6 +48,7 @@ const {
   mockTasksFindFirst: vi.fn(),
   mockResolveLaunchTaskCommitAuthor: vi.fn(),
   mockResolveRunCommitAuthor: vi.fn(),
+  mockProjectPendingPrReviewEventsForAssociation: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -118,6 +120,15 @@ vi.mock('@roomote/db/server', () => ({
   resolveTelegramRuntimeCredentials: (...args: unknown[]) =>
     mockResolveTelegramRuntimeCredentials(...args),
   db: {
+    transaction: (callback: (tx: unknown) => unknown) =>
+      callback({
+        insert: () => ({
+          values: (values: unknown) => ({
+            onConflictDoUpdate: () =>
+              Promise.resolve(mockTaskPullRequestUpsert(values)),
+          }),
+        }),
+      }),
     query: {
       repositories: {
         // resolveRepositoryRow queries with findMany; tests queue a single
@@ -146,6 +157,8 @@ vi.mock('@roomote/db/server', () => ({
       }),
     }),
   },
+  projectPendingPrReviewEventsForAssociation: (...args: unknown[]) =>
+    mockProjectPendingPrReviewEventsForAssociation(...args),
   repositories: {
     sourceControlProvider: 'repositories.sourceControlProvider',
     fullName: 'repositories.fullName',
@@ -230,6 +243,7 @@ beforeEach(() => {
 describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockProjectPendingPrReviewEventsForAssociation.mockResolvedValue(undefined);
     mockGetDeploymentGitHubRoomoteMentionEnabled.mockResolvedValue(true);
     mockResolveConfiguredGitHubAppSlugIfConfigured.mockResolvedValue(null);
     mockResolveRunCommitAuthor.mockResolvedValue({
@@ -509,6 +523,47 @@ describe('platform-managed draft state', () => {
     expect(octokit.graphql).not.toHaveBeenCalled();
     expect(result.draft).toBe(true);
     expect(result.warnings).toEqual([]);
+  });
+
+  it('rejects an unassociated remote PR and safely associates it on retry', async () => {
+    const pullRequest = {
+      number: 19,
+      node_id: 'node-19',
+      html_url: 'https://github.com/acme/web/pull/19',
+      title: '[Feature] X',
+      draft: true,
+      base: { ref: 'main' },
+      assignees: [],
+    };
+    const octokit = makeOctokit({
+      created: pullRequest,
+      updated: pullRequest,
+    });
+    octokit.rest.pulls.list
+      .mockResolvedValueOnce({ data: [] })
+      .mockResolvedValue({ data: [pullRequest] });
+    mockProjectPendingPrReviewEventsForAssociation.mockRejectedValueOnce(
+      new Error('association transaction failed'),
+    );
+
+    await expect(
+      createOrUpdateSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({ repo: 'acme/web' }),
+        input: { ...githubInput },
+      }),
+    ).rejects.toThrow('association transaction failed');
+
+    const retry = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: { ...githubInput },
+    });
+
+    expect(octokit.rest.pulls.create).toHaveBeenCalledTimes(1);
+    expect(octokit.rest.pulls.update).toHaveBeenCalledTimes(1);
+    expect(
+      mockProjectPendingPrReviewEventsForAssociation,
+    ).toHaveBeenCalledTimes(2);
+    expect(retry).toMatchObject({ action: 'updated', number: 19 });
   });
 
   it('uses the @roomote shorthand in attribution when enabled', async () => {

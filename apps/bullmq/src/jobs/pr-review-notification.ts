@@ -21,6 +21,10 @@ import {
   type PrReviewNotificationRoute,
   consumePendingPrReviewActivity,
   dispatchPrReviewFollowUp,
+  finalizePrReviewNotificationRequest,
+  isDurablePrReviewNotificationRequest,
+  renewPrReviewNotificationRequestLease,
+  migrateLegacyPrReviewNotificationRequest,
   preparePrReviewNotificationDelivery,
   prReviewNotificationRequestSchema,
   recordPrReviewNotificationDeliveryBestEffort,
@@ -221,6 +225,20 @@ export const prReviewNotificationJob = async (
   }
 
   const data = parsed.data;
+  if (!isDurablePrReviewNotificationRequest(data)) {
+    const migrated = await migrateLegacyPrReviewNotificationRequest(data);
+    console.log(
+      `[PrReviewNotification] Migrated ${migrated} legacy events for ${data.repository}#${data.prNumber} to Postgres`,
+    );
+    return;
+  }
+
+  if (!(await renewPrReviewNotificationRequestLease(data))) {
+    console.log(
+      `[PrReviewNotification] Delivery claim for ${data.repository}#${data.prNumber} was superseded, skipping`,
+    );
+    return;
+  }
   const target = {
     taskId: data.taskId,
     repository: data.repository,
@@ -228,6 +246,9 @@ export const prReviewNotificationJob = async (
     ...(data.batchKind ? { batchKind: data.batchKind } : {}),
     ...(data.batchId ? { batchId: data.batchId } : {}),
     ...(data.immediate ? { immediate: true } : {}),
+    deliveryIds: data.deliveryIds,
+    leaseToken: data.leaseToken,
+    events: data.events,
   };
 
   const latestJob = await db.query.taskRuns.findFirst({
@@ -240,6 +261,7 @@ export const prReviewNotificationJob = async (
       `[PrReviewNotification] No run found for task ${data.taskId}, skipping`,
     );
     await consumePendingPrReviewActivity(target);
+    await finalizePrReviewNotificationRequest(data, 'suppressed');
     return;
   }
 
@@ -269,6 +291,7 @@ export const prReviewNotificationJob = async (
       `[PrReviewNotification] Task ${data.taskId} never went idle after ${data.deferrals} deferrals, dropping pending review activity for ${data.repository}#${data.prNumber}`,
     );
     await consumePendingPrReviewActivity(target);
+    await finalizePrReviewNotificationRequest(data, 'suppressed');
     return;
   }
 
@@ -296,6 +319,7 @@ export const prReviewNotificationJob = async (
       `[PrReviewNotification] PR ${data.repository}#${data.prNumber} is already ${prLink.status}, skipping notification`,
     );
     await consumePendingPrReviewActivity(target);
+    await finalizePrReviewNotificationRequest(data, 'suppressed');
     return;
   }
 
@@ -305,6 +329,7 @@ export const prReviewNotificationJob = async (
     console.log(
       `[PrReviewNotification] No pending review activity for task ${data.taskId} on ${data.repository}#${data.prNumber}, skipping`,
     );
+    await finalizePrReviewNotificationRequest(data, 'suppressed');
     return;
   }
 
@@ -318,6 +343,19 @@ export const prReviewNotificationJob = async (
     if (!delivery.post) {
       console.log(
         `[PrReviewNotification] Skipping review-feedback notification for ${data.repository}#${data.prNumber} (${delivery.reason})`,
+      );
+      await finalizePrReviewNotificationRequest(data, 'suppressed');
+      return;
+    }
+
+    // Preparing the notification may perform remote reads or model work. A
+    // Roomote summary can supersede an inline fallback during that interval,
+    // or the lease can expire. Atomically renew the still-current claim at the
+    // external side-effect boundary so a replacement worker cannot reclaim it
+    // while this worker posts.
+    if (!(await renewPrReviewNotificationRequestLease(data))) {
+      console.log(
+        `[PrReviewNotification] Delivery claim for ${data.repository}#${data.prNumber} was superseded while preparing, skipping`,
       );
       return;
     }
@@ -372,6 +410,7 @@ ${delivery.text}`;
         console.log(
           `[PrReviewNotification] Auto-dispatched review feedback for ${data.repository}#${data.prNumber} into task ${data.taskId} (${dispatched.outcome}, run ${dispatched.runId})`,
         );
+        await finalizePrReviewNotificationRequest(data);
         return;
       }
 
@@ -406,7 +445,6 @@ ${delivery.text}`;
         `[PrReviewNotification] No conversation routing for task ${data.taskId}; recording review feedback to task history only`,
       );
     }
-
     await recordPrReviewNotificationDeliveryBestEffort({
       runId: latestJob.id,
       taskId: data.taskId,
@@ -414,6 +452,7 @@ ${delivery.text}`;
       text: textWithQuestion,
       ...(messageTs ? { messageTs } : {}),
     });
+    await finalizePrReviewNotificationRequest(data);
 
     if (delivery.route) {
       console.log(
