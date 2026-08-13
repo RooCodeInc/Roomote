@@ -287,6 +287,71 @@ function toRestrictedNonTaskConfigContent(
   }
 }
 
+/**
+ * Merges the Bedrock provider registrations for the env's role models into an
+ * operator-supplied config content string. Malformed content is returned
+ * unchanged — `toRestrictedNonTaskConfigContent` already fails it closed.
+ */
+function mergeBedrockRegistrationsIntoConfigContent(
+  configContent: string,
+  env: NodeJS.ProcessEnv,
+): string {
+  const roleModelIds = (
+    [env.R_MODEL, env.R_SMALL_MODEL, env.R_VISION_MODEL] as const
+  )
+    .map((modelId) => modelId?.trim())
+    .filter(
+      (modelId): modelId is string =>
+        Boolean(modelId) && !isTaskModelIdDisabled(modelId!),
+    )
+    .map(toBedrockMantleRuntimeModelId);
+
+  if (roleModelIds.length === 0) {
+    return configContent;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(configContent);
+
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      return configContent;
+    }
+
+    const config = parsed as Record<string, unknown>;
+    const existingProvider =
+      config.provider &&
+      typeof config.provider === 'object' &&
+      !Array.isArray(config.provider)
+        ? (config.provider as Record<string, unknown>)
+        : {};
+    const provider = mergeAmazonBedrockProviderConfig(
+      mergeBedrockMantleProviderConfig(
+        mergeBedrockMantleOpenAiProviderConfig(
+          existingProvider,
+          env,
+          roleModelIds,
+        ),
+        env,
+        roleModelIds,
+      ),
+      env,
+      roleModelIds,
+    );
+
+    if (Object.keys(provider).length === 0) {
+      return configContent;
+    }
+
+    return JSON.stringify({ ...config, provider });
+  } catch {
+    return configContent;
+  }
+}
+
 export function buildOpenCodeCliEnv(
   extraEnv?: Partial<Record<string, string>>,
 ): NodeJS.ProcessEnv {
@@ -314,6 +379,15 @@ export function buildOpenCodeCliEnv(
     if (modelBackedConfigContent) {
       env.OPENCODE_CONFIG_CONTENT = modelBackedConfigContent;
     }
+  } else {
+    // Operator-supplied config skips the model-backed builder, but the role
+    // models still need their Bedrock providers registered — otherwise a
+    // Bedrock helper model fails with ProviderModelNotFoundError whenever a
+    // deployment also sets OPENCODE_CONFIG_CONTENT.
+    env.OPENCODE_CONFIG_CONTENT = mergeBedrockRegistrationsIntoConfigContent(
+      env.OPENCODE_CONFIG_CONTENT,
+      env,
+    );
   }
 
   // Applied unconditionally, after any operator-supplied config content is

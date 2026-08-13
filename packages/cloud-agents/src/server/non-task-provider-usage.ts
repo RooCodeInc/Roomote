@@ -291,7 +291,15 @@ async function resolveNonTaskModelRuntime(model?: string): Promise<{
     // server's config registered (Bedrock Mantle GPT ids run under
     // `bedrock-mantle-openai`), mirroring the task worker's rewrite.
     model: toBedrockMantleRuntimeModelId(resolvedModel),
-    resolvedModelRuntimeEnv,
+    // An explicit model rides into the server lease env as the primary role
+    // model so the config builder registers its provider — the deployment's
+    // role models may not include it, and an unregistered Bedrock (or
+    // OpenAI-compatible) id fails with ProviderModelNotFoundError before any
+    // request is made. The lease cache keys on env, so distinct explicit
+    // models get their own servers instead of colliding.
+    resolvedModelRuntimeEnv: requestedModel
+      ? { ...resolvedModelRuntimeEnv, R_MODEL: requestedModel }
+      : resolvedModelRuntimeEnv,
   };
 }
 
