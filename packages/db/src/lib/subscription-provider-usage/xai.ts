@@ -1,5 +1,6 @@
 import {
   XAI_USAGE_BILLING_ENDPOINT,
+  XAI_USAGE_CLI_IDENTITY_HEADERS,
   XAI_USAGE_USER_ENDPOINT,
   type SubscriptionProviderUsage,
   type SubscriptionUsageWindow,
@@ -198,11 +199,10 @@ export async function fetchXaiSubscriptionUsage(
       !firstNumber(identity, ['userId', 'id']))
   )
     return null;
-  const billing = await fetchJson(
-    fetchImpl,
-    XAI_USAGE_BILLING_ENDPOINT,
-    headers,
-  );
+  const billing = await fetchJson(fetchImpl, XAI_USAGE_BILLING_ENDPOINT, {
+    ...headers,
+    ...XAI_USAGE_CLI_IDENTITY_HEADERS,
+  });
   const windows = parseXaiSubscriptionUsage(billing.payload, Date.now());
   return windows.length > 0
     ? {
