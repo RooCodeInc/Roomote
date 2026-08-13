@@ -19,13 +19,17 @@ import { slackDebug } from './logging';
  * Slack thread bindings live on tasks (tasks.slackThreadTs, 1:N by design),
  * so this joins task_runs to tasks and returns the most recent non-terminal
  * run across all tasks bound to the thread ("latest task run in thread" plurality
- * semantics -- no unique-thread assumption).
+ * semantics -- no unique-thread assumption). Callers with an immutable task
+ * binding can pass taskId to keep delivery on that task.
  *
  * Slack follow-up delivery is keyed by run ID, so the webhook can queue
  * messages as soon as the run exists instead of waiting for the worker
  * machine to finish booting.
  */
-export async function findActiveSlackTaskRun(slackThreadTs: string) {
+export async function findActiveSlackTaskRun(
+  slackThreadTs: string,
+  taskId?: string,
+) {
   slackDebug(
     `[findActiveSlackTaskRun] Searching for active task run in thread ${slackThreadTs}`,
   );
@@ -37,6 +41,7 @@ export async function findActiveSlackTaskRun(slackThreadTs: string) {
     .where(
       and(
         eq(tasks.slackThreadTs, slackThreadTs),
+        ...(taskId ? [eq(taskRuns.taskId, taskId)] : []),
         inArray(taskRuns.status, [...activeRunStatuses]),
         isNull(taskRuns.canceledAt),
       ),
@@ -65,7 +70,12 @@ export async function findActiveSlackTaskRun(slackThreadTs: string) {
       })
       .from(taskRuns)
       .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
-      .where(eq(tasks.slackThreadTs, slackThreadTs))
+      .where(
+        and(
+          eq(tasks.slackThreadTs, slackThreadTs),
+          ...(taskId ? [eq(taskRuns.taskId, taskId)] : []),
+        ),
+      )
       .orderBy(desc(taskRuns.createdAt))
       .limit(1);
 

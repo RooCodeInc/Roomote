@@ -86,6 +86,7 @@ export async function handleTelegramPrReviewActionCallback(params: {
 
     const dispatched = await dispatchPrReviewFollowUp({
       provider: 'telegram',
+      taskId: pending.taskId,
       channelId: pending.channelId,
       threadId: pending.threadId,
       followUpPrompt: pending.followUpPrompt,

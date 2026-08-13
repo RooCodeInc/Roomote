@@ -129,6 +129,7 @@ describe('handleSlackPrReviewActionYes', () => {
     expect(enableAutoHandleMock).not.toHaveBeenCalled();
     expect(dispatchFollowUpMock).toHaveBeenCalledWith({
       provider: 'slack',
+      taskId: 'task-1',
       channelId: 'C123',
       threadId: '111.222',
       followUpPrompt: pendingAction.followUpPrompt,

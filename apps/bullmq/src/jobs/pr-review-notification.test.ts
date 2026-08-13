@@ -419,6 +419,7 @@ describe('prReviewNotificationJob', () => {
 
     expect(mockDispatchFollowUp).toHaveBeenCalledWith({
       provider: 'slack',
+      taskId: 'task-1',
       channelId: 'C123',
       threadId: '111.222',
       followUpPrompt: 'Address the review feedback on owner/repo#42.',

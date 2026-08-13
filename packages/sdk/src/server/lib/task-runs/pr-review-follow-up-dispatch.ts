@@ -15,6 +15,7 @@ import {
   clearLatestUserMessage,
   findActiveSlackTaskRun,
   findCompletedSlackTaskRunWithSnapshot,
+  getSlackResumeLockKey,
   queueSlackMessage,
   resolveSlackReactionNames,
 } from '@roomote/slack';
@@ -39,14 +40,15 @@ export type PrReviewFollowUpDispatchResult =
   | { outcome: 'unavailable' };
 
 /**
- * Delivers a prepared PR review follow-up instruction into the task that owns
- * the originating conversation, riding the same routing as a typed thread
- * reply: queued into the live run when one exists, otherwise waking the task
- * from its snapshot. Used by the notification button handlers and by the
- * auto-handle path, which dispatches with no user interaction at all.
+ * Delivers a prepared PR review follow-up instruction into its owning task,
+ * using the originating conversation only as a secondary routing constraint.
+ * Unlike typed thread replies, this action carries an immutable task binding:
+ * queue into that task's live run when one exists, otherwise wake that task
+ * from its snapshot. Used by button handlers and the auto-handle path.
  */
 export async function dispatchPrReviewFollowUp(input: {
   provider: PrReviewActionProvider;
+  taskId: string;
   channelId: string;
   threadId: string | null;
   followUpPrompt: string;
@@ -63,6 +65,7 @@ export async function dispatchPrReviewFollowUp(input: {
 }
 
 async function dispatchSlackFollowUp(input: {
+  taskId: string;
   channelId: string;
   threadId: string | null;
   followUpPrompt: string;
@@ -81,7 +84,7 @@ async function dispatchSlackFollowUp(input: {
     userId: input.actingUserId,
     ts: new Date().toISOString(),
   };
-  const activeRun = await findActiveSlackTaskRun(threadTs);
+  const activeRun = await findActiveSlackTaskRun(threadTs, input.taskId);
 
   if (activeRun) {
     await setTrustedRunActingUser({
@@ -93,7 +96,10 @@ async function dispatchSlackFollowUp(input: {
     return { outcome: 'queued', runId: activeRun.id };
   }
 
-  const completedRun = await findCompletedSlackTaskRunWithSnapshot(threadTs);
+  const completedRun = await findCompletedSlackTaskRunWithSnapshot(
+    threadTs,
+    input.taskId,
+  );
 
   if (!completedRun?.snapshotId) {
     return { outcome: 'unavailable' };
@@ -131,7 +137,7 @@ async function dispatchSlackFollowUp(input: {
   restoreSnapshotResumeVisiblePromptFields(resumePayload, completedPayload);
 
   const { value: resumeRunId } = await withContention<number>(
-    `slack:resume-lock:${threadTs}`,
+    getSlackResumeLockKey(threadTs, input.taskId),
     {
       ttlSeconds: 30,
       poll: { intervalMs: 500, maxAttempts: 10 },
@@ -152,8 +158,9 @@ async function dispatchSlackFollowUp(input: {
         return resumeLaunch.id;
       },
       onContended: async () => {
-        // Another resume is racing on this thread; queue onto its fresh run
-        // instead of dropping the follow-up.
+        // Another resume is racing for this task; queue onto its fresh run
+        // instead of dropping the follow-up. The task predicate prevents a
+        // sibling task in the same thread from receiving the action.
         const [recent] = await db
           .select({ id: taskRuns.id })
           .from(taskRuns)
@@ -161,6 +168,7 @@ async function dispatchSlackFollowUp(input: {
           .where(
             and(
               eq(tasks.slackThreadTs, threadTs),
+              eq(taskRuns.taskId, input.taskId),
               eq(taskRuns.kind, 'resume'),
               gt(taskRuns.createdAt, new Date(Date.now() - 60_000)),
             ),
@@ -185,6 +193,7 @@ async function dispatchSlackFollowUp(input: {
 
 async function dispatchCommunicationFollowUp(input: {
   provider: PrReviewActionProvider;
+  taskId: string;
   channelId: string;
   threadId: string | null;
   followUpPrompt: string;
@@ -194,6 +203,7 @@ async function dispatchCommunicationFollowUp(input: {
   const provider = input.provider as 'discord' | 'telegram';
   const conversation = {
     provider,
+    taskId: input.taskId,
     channelId: input.channelId,
     threadId: input.threadId ?? undefined,
   };
