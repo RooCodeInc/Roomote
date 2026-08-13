@@ -110,6 +110,14 @@ const ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME = 'advisor';
 const ROOMOTE_OPENCODE_EXPLORE_AGENT_NAME = 'explore';
 const OPENCODE_GENERAL_AGENT_NAME = 'general';
 
+const MCP_ISOLATED_AGENT_NAMES = [
+  ROOMOTE_OPENCODE_VISUAL_AGENT_NAME,
+  ROOMOTE_OPENCODE_JUDGE_AGENT_NAME,
+  ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME,
+] as const;
+
+const ROOMOTE_MCP_SERVER_NAME = 'roomote';
+
 const ROOMOTE_OPENCODE_VISUAL_MODEL_INSTRUCTIONS_FILE_NAME =
   'roomote-opencode-visual-model-instructions.md';
 
@@ -609,6 +617,32 @@ function createOpenCodeMcpConfig(
       ];
     }),
   );
+}
+
+function createMcpToolExclusions(
+  mcpServers: OpenCodeConfigMcpServer[] | undefined,
+  shouldExclude: (mcpServer: OpenCodeConfigMcpServer) => boolean = () => true,
+): Record<string, false> {
+  return Object.fromEntries(
+    (mcpServers ?? [])
+      .filter(shouldExclude)
+      .map((mcpServer) => [`${mcpServer.name}_*`, false] as const),
+  );
+}
+
+function mergeAgentToolExclusions(
+  agentConfig: unknown,
+  exclusions: Record<string, false>,
+): Record<string, unknown> {
+  const config = asRecord(agentConfig);
+
+  return {
+    ...config,
+    tools: {
+      ...asRecord(config.tools),
+      ...exclusions,
+    },
+  };
 }
 
 function writeOpenCodeManagedFiles(openCodeConfigDir: string): void {
@@ -2008,6 +2042,27 @@ export function generateOpenCodeConfig({
       'utf8',
     );
     instructions.push(proofRunnerInstructionsPath);
+  }
+
+  const mcpToolExclusions = createMcpToolExclusions(mcpServers);
+  for (const agentName of MCP_ISOLATED_AGENT_NAMES) {
+    if (operatorAgent[agentName]) {
+      operatorAgent[agentName] = mergeAgentToolExclusions(
+        operatorAgent[agentName],
+        mcpToolExclusions,
+      );
+    }
+  }
+
+  if (operatorAgent[ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME]) {
+    operatorAgent[ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME] =
+      mergeAgentToolExclusions(
+        operatorAgent[ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME],
+        createMcpToolExclusions(
+          mcpServers,
+          (mcpServer) => mcpServer.name !== ROOMOTE_MCP_SERVER_NAME,
+        ),
+      );
   }
 
   const integrationInstructionsContent =
