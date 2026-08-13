@@ -433,6 +433,45 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     expect(cancelled).toBe(true);
   });
 
+  it('preserves an uncorrelatable SSE tools/list stream without waiting for closure', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-1', userId: null });
+
+    let cancelled = false;
+    const neverClosingSseBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            'event: message\n' +
+              'data: {"jsonrpc":"2.0","id":null,"result":{"tools":[]}}\n\n',
+          ),
+        );
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(neverClosingSseBody, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(createApp('pylon', createRunToken()), {
+      jsonrpc: '2.0',
+      id: null,
+      method: 'tools/list',
+      params: {},
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/event-stream');
+    await response.body?.cancel();
+    expect(cancelled).toBe(true);
+  });
+
   it('strips Resend tool schema patterns for Azure-compatible tool calls', async () => {
     mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
     mockFindConnection.mockResolvedValue({ id: 'conn-1', userId: null });
@@ -499,7 +538,7 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     });
   });
 
-  it('normalizes tool schemas that Gemini function declarations reject', async () => {
+  it('normalizes tool input schemas that Gemini function declarations reject', async () => {
     // Pylon's search filters use `type: ["array", "null"]` unions and bare
     // array schemas; the AI SDK's Gemini conversion splits the union into
     // anyOf branches while leaving `items` outside them, and Google AI
@@ -540,6 +579,15 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
                     status: { type: ['string', 'null'] },
                   },
                 },
+                outputSchema: {
+                  type: 'object',
+                  properties: {
+                    matches: {
+                      type: ['array', 'null'],
+                      items: { type: 'string' },
+                    },
+                  },
+                },
               },
             ],
           },
@@ -560,6 +608,7 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
       result: {
         tools: Array<{
           inputSchema: { properties: Record<string, unknown> };
+          outputSchema: { properties: Record<string, unknown> };
         }>;
       };
     };
@@ -597,5 +646,11 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     });
     // Scalar unions convert cleanly downstream; leave them untouched.
     expect(properties.status).toEqual({ type: ['string', 'null'] });
+    // Output schemas do not become Gemini function declarations and must
+    // remain the upstream MCP server's unmodified contract.
+    expect(body.result.tools[0]?.outputSchema.properties.matches).toEqual({
+      type: ['array', 'null'],
+      items: { type: 'string' },
+    });
   });
 });

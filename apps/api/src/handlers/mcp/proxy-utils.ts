@@ -531,7 +531,7 @@ function normalizeToolSchemaForStrictProviders(value: unknown): unknown {
   return normalized;
 }
 
-function normalizeToolDefinitionSchemas<
+function normalizeToolDefinitionInputSchemas<
   T extends { name: string } & Record<string, unknown>,
 >(tools: T[]): T[] {
   return tools.map((tool) => {
@@ -539,11 +539,6 @@ function normalizeToolDefinitionSchemas<
     if ('inputSchema' in normalized) {
       normalized.inputSchema = normalizeToolSchemaForStrictProviders(
         normalized.inputSchema,
-      );
-    }
-    if ('outputSchema' in normalized) {
-      normalized.outputSchema = normalizeToolSchemaForStrictProviders(
-        normalized.outputSchema,
       );
     }
     return normalized as T;
@@ -587,7 +582,7 @@ function filterToolsListPayload(
       ),
   );
 
-  const filteredTools = normalizeToolDefinitionSchemas(
+  const filteredTools = normalizeToolDefinitionInputSchemas(
     filterMcpToolDefinitions(namedTools, toolPolicy),
   );
 
@@ -1108,6 +1103,13 @@ export function createMcpProxy(config: McpProxyConfig) {
 
       const elapsedMs = Date.now() - startedAt;
       const contentType = upstreamResponse.headers.get('content-type');
+      const isSseResponse =
+        contentType?.toLowerCase().includes('text/event-stream') ?? false;
+      const jsonRpcRequestId = getJsonRpcRequestId(parsedBody);
+      const canReadMatchingSseResponse =
+        isSseResponse &&
+        jsonRpcRequestId !== null &&
+        !Array.isArray(parsedBody);
 
       if (!upstreamResponse.ok) {
         console.warn(
@@ -1129,18 +1131,17 @@ export function createMcpProxy(config: McpProxyConfig) {
       if (
         method === 'POST' &&
         getJsonRpcMethod(parsedBody) === 'tools/list' &&
-        upstreamResponse.ok
+        upstreamResponse.ok &&
+        // An SSE response without a correlatable JSON-RPC id may remain open
+        // indefinitely. Preserve that stream instead of buffering it to EOF.
+        (!isSseResponse || canReadMatchingSseResponse)
       ) {
         try {
-          const requestId = getJsonRpcRequestId(parsedBody);
-          const sseBody =
-            contentType?.includes('text/event-stream') &&
-            requestId !== null &&
-            !Array.isArray(parsedBody)
-              ? upstreamResponse.clone().body
-              : null;
+          const sseBody = canReadMatchingSseResponse
+            ? upstreamResponse.clone().body
+            : null;
           const payload = sseBody
-            ? await readMatchingSseJsonRpcResponse(sseBody, requestId)
+            ? await readMatchingSseJsonRpcResponse(sseBody, jsonRpcRequestId)
             : parseMcpJsonRpcPayload(
                 await upstreamResponse.clone().text(),
                 contentType,
@@ -1194,11 +1195,7 @@ export function createMcpProxy(config: McpProxyConfig) {
       // Requests without an id are notifications with no response, and streams
       // that end without a matching response fall through to the raw stream.
       const sseResponseBody =
-        method === 'POST' &&
-        upstreamResponse.ok &&
-        contentType?.includes('text/event-stream') &&
-        getJsonRpcRequestId(parsedBody) !== null &&
-        !Array.isArray(parsedBody)
+        method === 'POST' && upstreamResponse.ok && canReadMatchingSseResponse
           ? upstreamResponse.clone().body
           : null;
 
@@ -1206,7 +1203,7 @@ export function createMcpProxy(config: McpProxyConfig) {
         try {
           const response = await readMatchingSseJsonRpcResponse(
             sseResponseBody,
-            getJsonRpcRequestId(parsedBody),
+            jsonRpcRequestId,
           );
           if (response) {
             // The raw upstream body is no longer needed; cancel it to release
