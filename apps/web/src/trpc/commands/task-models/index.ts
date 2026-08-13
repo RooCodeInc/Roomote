@@ -18,6 +18,7 @@ import {
   SETUP_MODEL_PROVIDER_CATALOG,
   buildOpenAiCompatibleProviderId,
   buildOpenAiCompatibleProviderInstance,
+  buildRecommendedDeploymentModelConfig,
   buildSetupModelStatus,
   buildTaskModelOption,
   collectSetupModelProviderCredentialValues,
@@ -68,6 +69,7 @@ import {
   buildAutoAddedTaskModelSettings,
   collectConnectedTaskModelProviderIds,
 } from './auto-add-models';
+import { assertInferenceProviderConnection } from './provider-validation';
 import {
   discoverProviderModels,
   getLocalTaskModelProviderIdFromModelId,
@@ -677,6 +679,33 @@ export async function saveTaskModelProviderCommand(
     isChatGptSubscriptionConnected(),
     isXaiSubscriptionConnected(),
   ]);
+
+  // Dynamic endpoints are qualified after model discovery because there is
+  // no model to request at connection time. Static providers can be checked
+  // before any submitted credential is persisted.
+  if (!provider.dynamicModels) {
+    const persistedEnvVarNames = await getPersistedEnvironmentVariableNames();
+    const persistedEnvVarNameSet = new Set(persistedEnvVarNames);
+    const validationCredentials = collectSetupModelProviderCredentialValues({
+      provider,
+      apiKey: input.apiKey,
+      additionalEnvValues: suppliedAdditionalEnvValues,
+      isEnvVarSatisfied: (envVarName) =>
+        persistedEnvVarNameSet.has(envVarName) ||
+        isConfiguredEnvValue(process.env[envVarName]),
+      action: 'save it',
+    });
+
+    await assertInferenceProviderConnection({
+      providerLabel: provider.label,
+      providerEnvVarNames: getSetupModelProviderEnvVarNames(provider),
+      modelId:
+        buildRecommendedDeploymentModelConfig(provider).roomoteModel ??
+        provider.defaultRoomoteModel,
+      credentialValues: validationCredentials.values,
+      clearedEnvVarNames: validationCredentials.clearedEnvVarNames,
+    });
+  }
 
   let addedRecommendedModelCount = 0;
 

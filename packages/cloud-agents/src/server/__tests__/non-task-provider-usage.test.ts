@@ -911,6 +911,87 @@ describe('resolveOpenCodeSmallModel', () => {
       expect.any(Object),
     );
   });
+  it('validates candidate credentials with a managed non-task OpenCode server', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4999',
+    };
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: { structured: { ok: true } },
+        parts: [],
+      },
+      error: undefined,
+    });
+
+    const { validateNonTaskInference } =
+      await import('../non-task-provider-usage.js');
+    const result = await validateNonTaskInference({
+      model: 'anthropic/claude-sonnet-5',
+      runtimeEnv: { ANTHROPIC_API_KEY: 'candidate-key' },
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      model: 'anthropic/claude-sonnet-5',
+    });
+    // Validation must not use the configured server, whose process may have
+    // entirely different credentials from the candidate being checked.
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(spawnMock.mock.calls[0]?.[2]?.env).toMatchObject({
+      ANTHROPIC_API_KEY: 'candidate-key',
+      R_MODEL: 'anthropic/claude-sonnet-5',
+    });
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        format: expect.objectContaining({ retryCount: 0 }),
+        model: {
+          providerID: 'anthropic',
+          modelID: 'claude-sonnet-5',
+        },
+        tools: { '*': false, StructuredOutput: true },
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it.each([
+    {
+      providerError: '401 invalid API key sk-secret-that-must-not-leak',
+      reason: 'invalid_credentials',
+      retryable: false,
+    },
+    {
+      providerError: '402 payment required: insufficient credits',
+      reason: 'insufficient_credits',
+      retryable: false,
+    },
+    {
+      providerError: '429 too many requests',
+      reason: 'rate_limited',
+      retryable: true,
+    },
+  ])(
+    'sanitizes a $reason provider validation failure',
+    async ({ providerError, reason, retryable }) => {
+      process.env = { ...originalEnv };
+      sessionPromptMock.mockResolvedValue({
+        data: undefined,
+        error: { data: { message: providerError } },
+      });
+
+      const { validateNonTaskInference } =
+        await import('../non-task-provider-usage.js');
+      const result = await validateNonTaskInference({
+        model: 'openrouter/openai/gpt-5.6-terra',
+        runtimeEnv: { OPENROUTER_API_KEY: 'candidate-key' },
+      });
+
+      expect(result).toMatchObject({ success: false, reason, retryable });
+      expect(result.success || result.message).not.toContain('sk-secret');
+      expect(result.success || result.message).not.toContain(providerError);
+    },
+  );
 });
 
 describe('createOpenCodeSdkFetch', () => {

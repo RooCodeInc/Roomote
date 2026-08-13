@@ -73,6 +73,7 @@ import {
   getComputeFieldValidationError,
   getSetupModelProvider,
   getSetupModelProviderAdditionalEnvFields,
+  getSetupModelProviderEnvVarNames,
   SETUP_MODEL_PROVIDER_CATALOG,
   buildOpenAiCompatibleProviderId,
   buildOpenAiCompatibleProviderInstance,
@@ -175,6 +176,7 @@ import {
   buildAutoAddedTaskModelSettings,
   collectConnectedTaskModelProviderIds,
 } from '../task-models/auto-add-models';
+import { assertInferenceProviderConnection } from '../task-models/provider-validation';
 import { triggerTaskSuggestionsCommand } from '../task-suggestions';
 
 type PersistedSetupNewState = ReturnType<typeof createEmptySetupNewState>;
@@ -1580,6 +1582,53 @@ export async function saveSetupNewModelConfigCommand(
     );
   }
 
+  let selectedDynamicModel = input.modelId?.trim();
+
+  // Discovery in the wizard uses the catalog id `openai-compatible/...`.
+  // After naming the connection, remap model ids onto the named provider.
+  if (
+    selectedDynamicModel?.startsWith(`${OPENAI_COMPATIBLE_PROVIDER_ID}/`) &&
+    provider.id !== OPENAI_COMPATIBLE_PROVIDER_ID &&
+    isOpenAiCompatibleProviderId(provider.id)
+  ) {
+    selectedDynamicModel = `${provider.id}/${selectedDynamicModel.slice(
+      OPENAI_COMPATIBLE_PROVIDER_ID.length + 1,
+    )}`;
+  }
+
+  if (provider.dynamicModels && !selectedDynamicModel) {
+    throw new Error(`Choose a discovered ${provider.label} model to continue.`);
+  }
+
+  const runtimeModelConfig = provider.dynamicModels
+    ? {
+        ...createEmptyDeploymentModelConfig(),
+        roomoteModel: selectedDynamicModel!,
+      }
+    : buildRecommendedDeploymentModelConfig(provider);
+
+  if (!isOauthProvider) {
+    const persistedEnvVarNames = await getPersistedEnvironmentVariableNames();
+    const persistedEnvVarNameSet = new Set(persistedEnvVarNames);
+    const validationCredentials = collectSetupModelProviderCredentialValues({
+      provider,
+      apiKey,
+      additionalEnvValues,
+      isEnvVarSatisfied: (envVarName) =>
+        persistedEnvVarNameSet.has(envVarName) ||
+        isConfiguredEnvValue(process.env[envVarName]),
+      action: 'continue',
+    });
+
+    await assertInferenceProviderConnection({
+      providerLabel: provider.label,
+      providerEnvVarNames: getSetupModelProviderEnvVarNames(provider),
+      modelId: runtimeModelConfig.roomoteModel!,
+      credentialValues: validationCredentials.values,
+      clearedEnvVarNames: validationCredentials.clearedEnvVarNames,
+    });
+  }
+
   return db.transaction(async (tx) => {
     const [currentState, persistedEnvVarNames, persistedTaskModelSettings] =
       await Promise.all([
@@ -1631,36 +1680,6 @@ export async function saveSetupNewModelConfigCommand(
       modelProvider: provider.id,
       lastInteractedByUserId: userId,
     });
-    // Connecting a provider applies its recommended per-role model defaults:
-    // the provider's default coding model plus any recommended helper,
-    // vision, code review, explore, and planning models.
-    let selectedDynamicModel = input.modelId?.trim();
-
-    // Discovery in the wizard uses the catalog id `openai-compatible/...`.
-    // After naming the connection, remap model ids onto the named premium.
-    if (
-      selectedDynamicModel?.startsWith(`${OPENAI_COMPATIBLE_PROVIDER_ID}/`) &&
-      provider.id !== OPENAI_COMPATIBLE_PROVIDER_ID &&
-      isOpenAiCompatibleProviderId(provider.id)
-    ) {
-      selectedDynamicModel = `${provider.id}/${selectedDynamicModel.slice(
-        OPENAI_COMPATIBLE_PROVIDER_ID.length + 1,
-      )}`;
-    }
-
-    if (provider.dynamicModels && !selectedDynamicModel) {
-      throw new Error(
-        `Choose a discovered ${provider.label} model to continue.`,
-      );
-    }
-
-    const runtimeModelConfig = provider.dynamicModels
-      ? {
-          ...createEmptyDeploymentModelConfig(),
-          roomoteModel: selectedDynamicModel!,
-        }
-      : buildRecommendedDeploymentModelConfig(provider);
-
     // Mirror the models settings page: connecting a provider the deployment
     // has no models for yet auto-adds its recommended models so the first
     // launch offers a usable model list.

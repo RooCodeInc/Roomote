@@ -765,8 +765,12 @@ class OpenCodeSdkServerPool {
   async lease(params: {
     env?: Partial<Record<string, string>>;
     startTimeoutMs: number;
+    useConfiguredServer?: boolean;
   }): Promise<OpenCodeSdkServerLease> {
-    const configuredUrl = resolveConfiguredOpenCodeSdkServerUrl();
+    const configuredUrl =
+      params.useConfiguredServer === false
+        ? undefined
+        : resolveConfiguredOpenCodeSdkServerUrl();
 
     if (configuredUrl) {
       return {
@@ -907,6 +911,12 @@ const sharedOpenCodeSdkServerPool = new OpenCodeSdkServerPool();
 export function leaseOpenCodeSdkServer(params: {
   env?: Partial<Record<string, string>>;
   startTimeoutMs: number;
+  /**
+   * Whether an operator-supplied OpenCode server may serve the request.
+   * Credential validation disables this so candidate env values necessarily
+   * reach the process that performs the provider request.
+   */
+  useConfiguredServer?: boolean;
 }): Promise<OpenCodeSdkServerLease> {
   return sharedOpenCodeSdkServerPool.lease(params);
 }
