@@ -938,9 +938,11 @@ export async function validateNonTaskInference(params: {
     // diagnosable. Provider rejections can echo the submitted credential
     // ("invalid API key sk-..."), so every candidate env value is redacted
     // from the detail before it reaches the log.
+    // Every non-empty value is redacted, even implausibly short ones — a
+    // noisier log line is preferable to leaking any real token.
     let detail = formatOpenCodeSdkError(error);
     for (const value of Object.values(params.runtimeEnv)) {
-      if (value && value.length >= 4) {
+      if (value) {
         detail = detail.split(value).join('[redacted]');
       }
     }
