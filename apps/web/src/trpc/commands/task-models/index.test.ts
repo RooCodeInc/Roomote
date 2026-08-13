@@ -16,6 +16,7 @@ const {
   mockIsGitHubCopilotSubscriptionConnected,
   mockIsXaiSubscriptionConnected,
   mockValidateSetupModelProviderCredentials,
+  mockCollectCandidateProviderCredentials,
 } = vi.hoisted(() => ({
   mockFindDeploymentSettings: vi.fn(),
   mockInsertDeploymentSettings: vi.fn(),
@@ -30,11 +31,13 @@ const {
   mockIsGitHubCopilotSubscriptionConnected: vi.fn(),
   mockIsXaiSubscriptionConnected: vi.fn(),
   mockValidateSetupModelProviderCredentials: vi.fn(),
+  mockCollectCandidateProviderCredentials: vi.fn(),
 }));
 
 vi.mock('./provider-validation', () => ({
   validateSetupModelProviderCredentials:
     mockValidateSetupModelProviderCredentials,
+  collectCandidateProviderCredentials: mockCollectCandidateProviderCredentials,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -154,6 +157,13 @@ describe('lookupTaskModelCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockValidateSetupModelProviderCredentials.mockResolvedValue(undefined);
+    mockCollectCandidateProviderCredentials.mockResolvedValue({
+      values: [],
+      clearedEnvVarNames: [],
+      changedValues: [],
+      clearedPersistedEnvVarNames: [],
+      persistedEnv: {},
+    });
     vi.stubGlobal('fetch', fetchMock);
     for (const name of PROVIDER_ENV_VAR_NAMES) {
       originalProviderEnvValues.set(name, process.env[name]);

@@ -449,7 +449,11 @@ async function runNonTaskSdkPrompt(
     resolvedModelRuntimeEnv: Partial<Record<string, string>>;
   },
   promptOptions: NonTaskSdkPromptOptions,
-  options: { ephemeral?: boolean; useConfiguredServer?: boolean } = {},
+  options: {
+    ephemeral?: boolean;
+    signal?: AbortSignal;
+    useConfiguredServer?: boolean;
+  } = {},
 ): Promise<{
   info: { error?: unknown };
   parts: Array<{ type?: unknown; text?: unknown }>;
@@ -473,6 +477,20 @@ async function runNonTaskSdkPrompt(
       ),
     );
   }, timeoutMs);
+  const externalSignal = options.signal;
+  const abortFromExternalSignal = () => {
+    abortController.abort(
+      externalSignal?.reason ?? new Error('The prompt was aborted.'),
+    );
+  };
+
+  if (externalSignal?.aborted) {
+    abortFromExternalSignal();
+  } else {
+    externalSignal?.addEventListener('abort', abortFromExternalSignal, {
+      once: true,
+    });
+  }
 
   try {
     const client = createOpencodeClient({
@@ -518,6 +536,7 @@ async function runNonTaskSdkPrompt(
 
     return promptResult.data;
   } finally {
+    externalSignal?.removeEventListener('abort', abortFromExternalSignal);
     clearTimeout(timeout);
     server.release();
   }
@@ -840,51 +859,54 @@ export async function validateNonTaskInference(params: {
       throw new Error('ProviderModelNotFound: model must use provider/model');
     }
 
-    // The prompt timeout only starts after the helper server lease, so race
-    // the whole call: the save mutation is bounded by one timeoutMs of wall
-    // clock rather than lease plus prompt sequentially.
-    let deadlineTimer: NodeJS.Timeout | undefined;
-    const deadline = new Promise<never>((_, reject) => {
-      deadlineTimer = setTimeout(() => {
-        reject(
-          new Error(`Inference validation timed out after ${timeoutMs}ms.`),
-        );
-      }, timeoutMs);
-      deadlineTimer.unref();
-    });
+    // The prompt timeout only starts after the helper server lease. The
+    // lease is already bounded by its own start timeout, and this deadline
+    // aborts the session/prompt phase, keeping the save mutation to roughly
+    // one timeoutMs of wall clock — while always awaiting the call to
+    // completion. Returning before the call settles (a race) would let a
+    // slow-starting validation discover an invalid key after the save
+    // already went through.
+    const deadlineController = new AbortController();
+    const deadlineTimer = setTimeout(() => {
+      deadlineController.abort(
+        new Error(`Inference validation timed out after ${timeoutMs}ms.`),
+      );
+    }, timeoutMs);
+    deadlineTimer.unref();
 
     let data;
     try {
-      data = await Promise.race([
-        runNonTaskSdkPrompt(
-          {
-            surface: NON_TASK_INFERENCE_SURFACES.inferenceValidation,
-            prompt: 'Return an object with ok set to true.',
-            timeoutMs,
-          },
-          runtime,
-          {
-            format: {
-              type: 'json_schema',
-              schema: {
-                type: 'object',
-                properties: { ok: { const: true, type: 'boolean' } },
-                required: ['ok'],
-                additionalProperties: false,
-              },
-              retryCount: 0,
+      data = await runNonTaskSdkPrompt(
+        {
+          surface: NON_TASK_INFERENCE_SURFACES.inferenceValidation,
+          prompt: 'Return an object with ok set to true.',
+          timeoutMs,
+        },
+        runtime,
+        {
+          format: {
+            type: 'json_schema',
+            schema: {
+              type: 'object',
+              properties: { ok: { const: true, type: 'boolean' } },
+              required: ['ok'],
+              additionalProperties: false,
             },
-            parts: [
-              {
-                type: 'text',
-                text: 'Return an object with ok set to true.',
-              },
-            ],
+            retryCount: 0,
           },
-          { ephemeral: true, useConfiguredServer: false },
-        ),
-        deadline,
-      ]);
+          parts: [
+            {
+              type: 'text',
+              text: 'Return an object with ok set to true.',
+            },
+          ],
+        },
+        {
+          ephemeral: true,
+          signal: deadlineController.signal,
+          useConfiguredServer: false,
+        },
+      );
     } finally {
       clearTimeout(deadlineTimer);
     }

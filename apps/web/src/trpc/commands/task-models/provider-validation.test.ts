@@ -163,6 +163,17 @@ describe('validateSetupModelProviderCredentials', () => {
     expect(mockValidateNonTaskInference).not.toHaveBeenCalled();
   });
 
+  it('skips the live check when the UI resubmits the persisted value unchanged', async () => {
+    await validateSetupModelProviderCredentials({
+      provider: getSetupModelProvider('anthropic'),
+      apiKey: 'saved-key',
+      action: 'save it',
+      modelId: 'anthropic/claude-sonnet-5',
+    });
+
+    expect(mockValidateNonTaskInference).not.toHaveBeenCalled();
+  });
+
   it('validates a submitted credential once against the persisted env', async () => {
     await validateSetupModelProviderCredentials({
       provider: getSetupModelProvider('anthropic'),

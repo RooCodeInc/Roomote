@@ -35,25 +35,37 @@ type CollectCredentialParams = Parameters<
 
 /**
  * Resolves the persisted deployment env once and collects the candidate
- * credential values a save would persist for the provider.
+ * credential values a save would persist for the provider. `changedValues`
+ * and `clearedPersistedEnvVarNames` describe what the save would actually
+ * alter: UIs routinely resubmit unchanged fields (connection names, saved
+ * keys echoed back from state), and those must not count as changes.
  */
-async function collectCandidateProviderCredentials(
+export async function collectCandidateProviderCredentials(
   params: Omit<CollectCredentialParams, 'isEnvVarSatisfied'>,
 ): Promise<
   ReturnType<typeof collectSetupModelProviderCredentialValues> & {
+    changedValues: Array<{ name: string; value: string }>;
+    clearedPersistedEnvVarNames: string[];
     persistedEnv: Record<string, string>;
   }
 > {
   const persistedEnv = await resolveEffectiveDeploymentEnvVars();
   const persistedEnvVarNameSet = new Set(Object.keys(persistedEnv));
+  const collected = collectSetupModelProviderCredentialValues({
+    ...params,
+    isEnvVarSatisfied: (envVarName) =>
+      persistedEnvVarNameSet.has(envVarName) ||
+      isConfiguredEnvValue(process.env[envVarName]),
+  });
 
   return {
-    ...collectSetupModelProviderCredentialValues({
-      ...params,
-      isEnvVarSatisfied: (envVarName) =>
-        persistedEnvVarNameSet.has(envVarName) ||
-        isConfiguredEnvValue(process.env[envVarName]),
-    }),
+    ...collected,
+    changedValues: collected.values.filter(
+      ({ name, value }) => persistedEnv[name] !== value,
+    ),
+    clearedPersistedEnvVarNames: collected.clearedEnvVarNames.filter((name) =>
+      persistedEnvVarNameSet.has(name),
+    ),
     persistedEnv,
   };
 }
@@ -125,12 +137,18 @@ export async function validateSetupModelProviderCredentials(
   },
 ): Promise<void> {
   const { modelId, ...collectParams } = params;
-  const { values, clearedEnvVarNames, persistedEnv } =
-    await collectCandidateProviderCredentials(collectParams);
+  const {
+    values,
+    clearedEnvVarNames,
+    changedValues,
+    clearedPersistedEnvVarNames,
+    persistedEnv,
+  } = await collectCandidateProviderCredentials(collectParams);
 
   // An unchanged save must not depend on the provider being reachable right
-  // now; only submitted or cleared values need qualification.
-  if (values.length === 0 && clearedEnvVarNames.length === 0) {
+  // now; only a value that differs from what is persisted, or a clear that
+  // removes a persisted value, needs qualification.
+  if (changedValues.length === 0 && clearedPersistedEnvVarNames.length === 0) {
     return;
   }
 
