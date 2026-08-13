@@ -409,6 +409,147 @@ function stripToolSchemaPatterns(value: unknown): unknown {
   );
 }
 
+/**
+ * Google AI Studio validates function declarations strictly: every ARRAY
+ * schema must carry `items`, and the AI SDK's JSON-Schema-to-Gemini
+ * conversion splits `type: ["array", "null"]` unions into `anyOf` branches
+ * while leaving `items`/`properties` at the outer level, so an upstream
+ * schema that is perfectly valid JSON Schema (Pylon's `tags` and
+ * `custom_field_filters` search filters, for example) turns into an invalid
+ * request that fails the whole task turn. Normalize the shapes that trigger
+ * this at the proxy boundary: rewrite array/object type unions into explicit
+ * `anyOf` branches with each branch keeping only its own type's keywords, and
+ * give array schemas that declare no item shape a permissive string `items`
+ * (the upstream server still validates the actual tool call).
+ */
+const ARRAY_ONLY_SCHEMA_KEYWORDS = [
+  'items',
+  'prefixItems',
+  'minItems',
+  'maxItems',
+  'uniqueItems',
+  'contains',
+  'minContains',
+  'maxContains',
+] as const;
+
+const OBJECT_ONLY_SCHEMA_KEYWORDS = [
+  'properties',
+  'required',
+  'additionalProperties',
+  'patternProperties',
+  'propertyNames',
+  'minProperties',
+  'maxProperties',
+] as const;
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function withProviderSafeArrayItems(
+  schema: Record<string, unknown>,
+): Record<string, unknown> {
+  if (schema.type !== 'array') {
+    return schema;
+  }
+
+  const items = schema.items;
+  const declaresItemShape =
+    isPlainObject(items) && Object.keys(items).length > 0;
+
+  return declaresItemShape ? schema : { ...schema, items: { type: 'string' } };
+}
+
+function normalizeToolSchemaForStrictProviders(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(normalizeToolSchemaForStrictProviders);
+  }
+
+  if (!isPlainObject(value)) {
+    return value;
+  }
+
+  const schema = Object.fromEntries(
+    Object.entries(value).map(([key, nestedValue]) => [
+      key,
+      normalizeToolSchemaForStrictProviders(nestedValue),
+    ]),
+  );
+
+  const typeValue = schema.type;
+  if (
+    !Array.isArray(typeValue) ||
+    typeValue.length === 0 ||
+    !typeValue.every((entry): entry is string => typeof entry === 'string')
+  ) {
+    return withProviderSafeArrayItems(schema);
+  }
+
+  if (typeValue.length === 1) {
+    return withProviderSafeArrayItems({ ...schema, type: typeValue[0] });
+  }
+
+  // Scalar-only unions convert cleanly; only unions carrying a composite
+  // type lose their keywords in the downstream Gemini conversion.
+  if (
+    (!typeValue.includes('array') && !typeValue.includes('object')) ||
+    'anyOf' in schema ||
+    'oneOf' in schema ||
+    'allOf' in schema
+  ) {
+    return schema;
+  }
+
+  const { type: _unionTypes, ...sharedKeywords } = schema;
+  const branches = typeValue.map((branchType) => {
+    if (branchType === 'null') {
+      return { type: 'null' };
+    }
+
+    const branch: Record<string, unknown> = {
+      ...sharedKeywords,
+      type: branchType,
+    };
+    if (branchType !== 'array') {
+      for (const keyword of ARRAY_ONLY_SCHEMA_KEYWORDS) {
+        delete branch[keyword];
+      }
+    }
+    if (branchType !== 'object') {
+      for (const keyword of OBJECT_ONLY_SCHEMA_KEYWORDS) {
+        delete branch[keyword];
+      }
+    }
+    return withProviderSafeArrayItems(branch);
+  });
+
+  const normalized: Record<string, unknown> = { anyOf: branches };
+  if (typeof sharedKeywords.description === 'string') {
+    normalized.description = sharedKeywords.description;
+  }
+  return normalized;
+}
+
+function normalizeToolDefinitionSchemas<
+  T extends { name: string } & Record<string, unknown>,
+>(tools: T[]): T[] {
+  return tools.map((tool) => {
+    const normalized: Record<string, unknown> = { ...tool };
+    if ('inputSchema' in normalized) {
+      normalized.inputSchema = normalizeToolSchemaForStrictProviders(
+        normalized.inputSchema,
+      );
+    }
+    if ('outputSchema' in normalized) {
+      normalized.outputSchema = normalizeToolSchemaForStrictProviders(
+        normalized.outputSchema,
+      );
+    }
+    return normalized as T;
+  });
+}
+
 function filterToolsListPayload(
   payload: unknown,
   toolPolicy: {
@@ -446,7 +587,9 @@ function filterToolsListPayload(
       ),
   );
 
-  const filteredTools = filterMcpToolDefinitions(namedTools, toolPolicy);
+  const filteredTools = normalizeToolDefinitionSchemas(
+    filterMcpToolDefinitions(namedTools, toolPolicy),
+  );
 
   return {
     ...payload,
@@ -981,8 +1124,9 @@ export function createMcpProxy(config: McpProxyConfig) {
         );
       }
 
+      // Every tools/list reply is rebuilt (not just restricted ones) so tool
+      // schemas can be normalized for strict model providers.
       if (
-        (hasToolRestrictions || shouldStripToolSchemaPatterns) &&
         method === 'POST' &&
         getJsonRpcMethod(parsedBody) === 'tools/list' &&
         upstreamResponse.ok

@@ -452,4 +452,104 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
       type: 'string',
     });
   });
+
+  it('normalizes tool schemas that Gemini function declarations reject', async () => {
+    // Pylon's search filters use `type: ["array", "null"]` unions and bare
+    // array schemas; the AI SDK's Gemini conversion splits the union into
+    // anyOf branches while leaving `items` outside them, and Google AI
+    // Studio then rejects the whole request ("any_of[0].items: missing
+    // field"), killing every Gemini task turn for the workspace.
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-1', userId: null });
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          result: {
+            tools: [
+              {
+                name: 'search_issues',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    tags: {
+                      type: ['array', 'null'],
+                      items: { type: 'string' },
+                      description: 'Tags to filter by',
+                    },
+                    custom_field_filters: {
+                      type: ['array', 'null'],
+                      items: {
+                        type: 'object',
+                        properties: { slug: { type: 'string' } },
+                        required: ['slug'],
+                      },
+                    },
+                    bare_list: {
+                      type: 'array',
+                      description: 'Array with no item shape',
+                    },
+                    status: { type: ['string', 'null'] },
+                  },
+                },
+              },
+            ],
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp('pylon', createRunToken()),
+      createToolsListRequest(1),
+    );
+    const body = (await response.json()) as {
+      result: {
+        tools: Array<{
+          inputSchema: { properties: Record<string, unknown> };
+        }>;
+      };
+    };
+
+    expect(response.status).toBe(200);
+    const properties = body.result.tools[0]?.inputSchema.properties ?? {};
+    expect(properties.tags).toEqual({
+      description: 'Tags to filter by',
+      anyOf: [
+        {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Tags to filter by',
+        },
+        { type: 'null' },
+      ],
+    });
+    expect(properties.custom_field_filters).toEqual({
+      anyOf: [
+        {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: { slug: { type: 'string' } },
+            required: ['slug'],
+          },
+        },
+        { type: 'null' },
+      ],
+    });
+    expect(properties.bare_list).toEqual({
+      type: 'array',
+      description: 'Array with no item shape',
+      items: { type: 'string' },
+    });
+    // Scalar unions convert cleanly downstream; leave them untouched.
+    expect(properties.status).toEqual({ type: ['string', 'null'] });
+  });
 });
