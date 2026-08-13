@@ -15,7 +15,7 @@ const {
   mockIsChatGptSubscriptionConnected,
   mockIsGitHubCopilotSubscriptionConnected,
   mockIsXaiSubscriptionConnected,
-  mockAssertInferenceProviderConnection,
+  mockValidateSetupModelProviderCredentials,
 } = vi.hoisted(() => ({
   mockFindDeploymentSettings: vi.fn(),
   mockInsertDeploymentSettings: vi.fn(),
@@ -29,11 +29,12 @@ const {
   mockIsChatGptSubscriptionConnected: vi.fn(),
   mockIsGitHubCopilotSubscriptionConnected: vi.fn(),
   mockIsXaiSubscriptionConnected: vi.fn(),
-  mockAssertInferenceProviderConnection: vi.fn(),
+  mockValidateSetupModelProviderCredentials: vi.fn(),
 }));
 
 vi.mock('./provider-validation', () => ({
-  assertInferenceProviderConnection: mockAssertInferenceProviderConnection,
+  validateSetupModelProviderCredentials:
+    mockValidateSetupModelProviderCredentials,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -152,7 +153,7 @@ describe('lookupTaskModelCommand', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAssertInferenceProviderConnection.mockResolvedValue(undefined);
+    mockValidateSetupModelProviderCredentials.mockResolvedValue(undefined);
     vi.stubGlobal('fetch', fetchMock);
     for (const name of PROVIDER_ENV_VAR_NAMES) {
       originalProviderEnvValues.set(name, process.env[name]);
@@ -1436,13 +1437,14 @@ describe('task model provider commands', () => {
       apiKey: '  sk-ant-test  ',
     });
 
-    expect(mockAssertInferenceProviderConnection).toHaveBeenCalledWith({
-      providerLabel: 'Anthropic',
-      providerEnvVarNames: ['ANTHROPIC_API_KEY'],
-      modelId: 'anthropic/claude-sonnet-5',
-      credentialValues: [{ name: 'ANTHROPIC_API_KEY', value: 'sk-ant-test' }],
-      clearedEnvVarNames: [],
-    });
+    expect(mockValidateSetupModelProviderCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: expect.objectContaining({ id: 'anthropic' }),
+        apiKey: '  sk-ant-test  ',
+        action: 'save it',
+        modelId: 'anthropic/claude-sonnet-5',
+      }),
+    );
 
     expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
       expect.anything(),
@@ -1501,7 +1503,7 @@ describe('task model provider commands', () => {
   });
 
   it('does not persist credentials when inference validation fails', async () => {
-    mockAssertInferenceProviderConnection.mockRejectedValueOnce(
+    mockValidateSetupModelProviderCredentials.mockRejectedValueOnce(
       new Error(
         'Anthropic: The inference provider rejected these credentials.',
       ),

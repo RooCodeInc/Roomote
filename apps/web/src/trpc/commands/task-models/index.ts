@@ -69,7 +69,7 @@ import {
   buildAutoAddedTaskModelSettings,
   collectConnectedTaskModelProviderIds,
 } from './auto-add-models';
-import { assertInferenceProviderConnection } from './provider-validation';
+import { validateSetupModelProviderCredentials } from './provider-validation';
 import {
   discoverProviderModels,
   getLocalTaskModelProviderIdFromModelId,
@@ -680,31 +680,41 @@ export async function saveTaskModelProviderCommand(
     isXaiSubscriptionConnected(),
   ]);
 
-  // Dynamic endpoints are qualified after model discovery because there is
-  // no model to request at connection time. Static providers can be checked
-  // before any submitted credential is persisted.
+  // Static providers can be checked with the provider's recommended model
+  // before any submitted credential is persisted. Dynamic endpoints have no
+  // model to request at connection time, so a submitted connection is
+  // qualified by listing the endpoint's models instead.
   if (!provider.dynamicModels) {
-    const persistedEnvVarNames = await getPersistedEnvironmentVariableNames();
-    const persistedEnvVarNameSet = new Set(persistedEnvVarNames);
-    const validationCredentials = collectSetupModelProviderCredentialValues({
+    await validateSetupModelProviderCredentials({
       provider,
       apiKey: input.apiKey,
       additionalEnvValues: suppliedAdditionalEnvValues,
-      isEnvVarSatisfied: (envVarName) =>
-        persistedEnvVarNameSet.has(envVarName) ||
-        isConfiguredEnvValue(process.env[envVarName]),
       action: 'save it',
-    });
-
-    await assertInferenceProviderConnection({
-      providerLabel: provider.label,
-      providerEnvVarNames: getSetupModelProviderEnvVarNames(provider),
       modelId:
         buildRecommendedDeploymentModelConfig(provider).roomoteModel ??
         provider.defaultRoomoteModel,
-      credentialValues: validationCredentials.values,
-      clearedEnvVarNames: validationCredentials.clearedEnvVarNames,
     });
+  } else if (
+    isConfiguredEnvValue(input.apiKey) ||
+    Object.values(suppliedAdditionalEnvValues ?? {}).some((value) =>
+      isConfiguredEnvValue(value),
+    )
+  ) {
+    const secretField = getSetupModelProviderAdditionalEnvFields(provider).find(
+      (field) => field.secret,
+    );
+    const probe = await discoverProviderModels({
+      provider: provider.id as LocalTaskModelProviderId,
+      baseUrl: input.apiKey?.trim() || undefined,
+      apiKey: secretField
+        ? suppliedAdditionalEnvValues?.[secretField.envVarName]?.trim() ||
+          undefined
+        : undefined,
+    });
+
+    if (probe.error) {
+      throw new Error(`${provider.label}: ${probe.error}`);
+    }
   }
 
   let addedRecommendedModelCount = 0;

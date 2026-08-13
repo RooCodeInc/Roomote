@@ -449,7 +449,7 @@ async function runNonTaskSdkPrompt(
     resolvedModelRuntimeEnv: Partial<Record<string, string>>;
   },
   promptOptions: NonTaskSdkPromptOptions,
-  options: { useConfiguredServer?: boolean } = {},
+  options: { ephemeral?: boolean; useConfiguredServer?: boolean } = {},
 ): Promise<{
   info: { error?: unknown };
   parts: Array<{ type?: unknown; text?: unknown }>;
@@ -458,6 +458,7 @@ async function runNonTaskSdkPrompt(
   const timeoutMs = params.timeoutMs ?? 120_000;
   const server = await leaseOpenCodeSdkServer({
     env: resolvedModelRuntimeEnv,
+    ephemeral: options.ephemeral,
     startTimeoutMs: Math.min(
       timeoutMs,
       DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS,
@@ -638,6 +639,22 @@ function classifyNonTaskInferenceValidationError(
 > {
   const detail = formatOpenCodeSdkError(error).toLowerCase();
 
+  // Failures inside Roomote's own validation helper (the managed OpenCode
+  // server) must not read as provider failures — the candidate credentials
+  // were never exercised.
+  if (
+    detail.includes('opencode sdk server') ||
+    detail.includes('spawn opencode') ||
+    detail.includes('enoent')
+  ) {
+    return {
+      message:
+        'Roomote could not run its validation helper. Try again, or check the server logs.',
+      reason: 'provider_error',
+      retryable: true,
+    };
+  }
+
   if (
     detail.includes('timed out') ||
     detail.includes('timeout') ||
@@ -750,6 +767,8 @@ export async function validateNonTaskInference(params: {
 }): Promise<NonTaskInferenceValidationResult> {
   const startedAt = Date.now();
   const checkedAt = new Date(startedAt).toISOString();
+  const timeoutMs =
+    params.timeoutMs ?? NON_TASK_INFERENCE_VALIDATION_TIMEOUT_MS;
   const configuredModel = params.model.trim();
   const model = toBedrockMantleRuntimeModelId(configuredModel);
   const runtime = {
@@ -757,6 +776,11 @@ export async function validateNonTaskInference(params: {
     resolvedModelRuntimeEnv: {
       ...params.runtimeEnv,
       R_MODEL: configuredModel,
+      // Validation must exercise the model-backed provider config the task
+      // runtime builds for this model. An operator-supplied OpenCode config
+      // predates the provider being connected and would fail the canary with
+      // ProviderModelNotFound.
+      OPENCODE_CONFIG_CONTENT: '',
     },
   };
 
@@ -765,33 +789,54 @@ export async function validateNonTaskInference(params: {
       throw new Error('ProviderModelNotFound: model must use provider/model');
     }
 
-    const data = await runNonTaskSdkPrompt(
-      {
-        surface: NON_TASK_INFERENCE_SURFACES.inferenceValidation,
-        prompt: 'Return an object with ok set to true.',
-        timeoutMs: params.timeoutMs ?? NON_TASK_INFERENCE_VALIDATION_TIMEOUT_MS,
-      },
-      runtime,
-      {
-        format: {
-          type: 'json_schema',
-          schema: {
-            type: 'object',
-            properties: { ok: { const: true, type: 'boolean' } },
-            required: ['ok'],
-            additionalProperties: false,
-          },
-          retryCount: 0,
-        },
-        parts: [
+    // The prompt timeout only starts after the helper server lease, so race
+    // the whole call: the save mutation is bounded by one timeoutMs of wall
+    // clock rather than lease plus prompt sequentially.
+    let deadlineTimer: NodeJS.Timeout | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      deadlineTimer = setTimeout(() => {
+        reject(
+          new Error(`Inference validation timed out after ${timeoutMs}ms.`),
+        );
+      }, timeoutMs);
+      deadlineTimer.unref();
+    });
+
+    let data;
+    try {
+      data = await Promise.race([
+        runNonTaskSdkPrompt(
           {
-            type: 'text',
-            text: 'Return an object with ok set to true.',
+            surface: NON_TASK_INFERENCE_SURFACES.inferenceValidation,
+            prompt: 'Return an object with ok set to true.',
+            timeoutMs,
           },
-        ],
-      },
-      { useConfiguredServer: false },
-    );
+          runtime,
+          {
+            format: {
+              type: 'json_schema',
+              schema: {
+                type: 'object',
+                properties: { ok: { const: true, type: 'boolean' } },
+                required: ['ok'],
+                additionalProperties: false,
+              },
+              retryCount: 0,
+            },
+            parts: [
+              {
+                type: 'text',
+                text: 'Return an object with ok set to true.',
+              },
+            ],
+          },
+          { ephemeral: true, useConfiguredServer: false },
+        ),
+        deadline,
+      ]);
+    } finally {
+      clearTimeout(deadlineTimer);
+    }
 
     if (data.info.error) {
       throw data.info.error;

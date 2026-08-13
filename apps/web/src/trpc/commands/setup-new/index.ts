@@ -73,7 +73,6 @@ import {
   getComputeFieldValidationError,
   getSetupModelProvider,
   getSetupModelProviderAdditionalEnvFields,
-  getSetupModelProviderEnvVarNames,
   SETUP_MODEL_PROVIDER_CATALOG,
   buildOpenAiCompatibleProviderId,
   buildOpenAiCompatibleProviderInstance,
@@ -176,7 +175,7 @@ import {
   buildAutoAddedTaskModelSettings,
   collectConnectedTaskModelProviderIds,
 } from '../task-models/auto-add-models';
-import { assertInferenceProviderConnection } from '../task-models/provider-validation';
+import { validateSetupModelProviderCredentials } from '../task-models/provider-validation';
 import { triggerTaskSuggestionsCommand } from '../task-suggestions';
 
 type PersistedSetupNewState = ReturnType<typeof createEmptySetupNewState>;
@@ -1608,24 +1607,12 @@ export async function saveSetupNewModelConfigCommand(
     : buildRecommendedDeploymentModelConfig(provider);
 
   if (!isOauthProvider) {
-    const persistedEnvVarNames = await getPersistedEnvironmentVariableNames();
-    const persistedEnvVarNameSet = new Set(persistedEnvVarNames);
-    const validationCredentials = collectSetupModelProviderCredentialValues({
+    await validateSetupModelProviderCredentials({
       provider,
       apiKey,
       additionalEnvValues,
-      isEnvVarSatisfied: (envVarName) =>
-        persistedEnvVarNameSet.has(envVarName) ||
-        isConfiguredEnvValue(process.env[envVarName]),
       action: 'continue',
-    });
-
-    await assertInferenceProviderConnection({
-      providerLabel: provider.label,
-      providerEnvVarNames: getSetupModelProviderEnvVarNames(provider),
       modelId: runtimeModelConfig.roomoteModel!,
-      credentialValues: validationCredentials.values,
-      clearedEnvVarNames: validationCredentials.clearedEnvVarNames,
     });
   }
 
