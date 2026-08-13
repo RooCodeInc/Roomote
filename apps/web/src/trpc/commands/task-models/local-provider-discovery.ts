@@ -40,7 +40,9 @@ export type LocalTaskModelProviderId =
 
 export type LocalProviderConnectionInput = {
   baseUrl?: string;
-  apiKey?: string;
+  /** `null` marks a key the caller is clearing: the still-persisted value
+   * must not serve as a fallback, because the save is about to delete it. */
+  apiKey?: string | null;
 };
 
 type LocalProviderConnection = {
@@ -282,12 +284,19 @@ async function resolveLocalProviderConnection(
     return null;
   }
 
+  // A cleared key still resolves from the runtime env (deleting the
+  // persisted row does not unset a process-level value), but must not fall
+  // back to the persisted value the save is about to delete.
+  const clearingApiKey = input?.apiKey === null;
+
   return {
     baseUrl,
     apiKey:
-      input?.apiKey?.trim() ||
+      (clearingApiKey ? undefined : input?.apiKey?.trim()) ||
       (envNames.apiKey ? process.env[envNames.apiKey] : null) ||
-      (envNames.apiKey ? persisted[envNames.apiKey] : null) ||
+      (envNames.apiKey && !clearingApiKey
+        ? persisted[envNames.apiKey]
+        : null) ||
       null,
   };
 }

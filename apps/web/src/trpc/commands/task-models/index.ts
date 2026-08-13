@@ -18,6 +18,7 @@ import {
   SETUP_MODEL_PROVIDER_CATALOG,
   buildOpenAiCompatibleProviderId,
   buildOpenAiCompatibleProviderInstance,
+  buildRecommendedDeploymentModelConfig,
   buildSetupModelStatus,
   buildTaskModelOption,
   collectSetupModelProviderCredentialValues,
@@ -68,6 +69,10 @@ import {
   buildAutoAddedTaskModelSettings,
   collectConnectedTaskModelProviderIds,
 } from './auto-add-models';
+import {
+  collectCandidateProviderCredentials,
+  validateSetupModelProviderCredentials,
+} from './provider-validation';
 import {
   discoverProviderModels,
   getLocalTaskModelProviderIdFromModelId,
@@ -677,6 +682,63 @@ export async function saveTaskModelProviderCommand(
     isChatGptSubscriptionConnected(),
     isXaiSubscriptionConnected(),
   ]);
+
+  // Static providers can be checked with the provider's recommended model
+  // before any submitted credential is persisted. Dynamic endpoints have no
+  // model to request at connection time, so a submitted connection is
+  // qualified by listing the endpoint's models instead.
+  if (!provider.dynamicModels) {
+    await validateSetupModelProviderCredentials({
+      provider,
+      apiKey: input.apiKey,
+      additionalEnvValues: suppliedAdditionalEnvValues,
+      action: 'save it',
+      modelId:
+        buildRecommendedDeploymentModelConfig(provider).roomoteModel ??
+        provider.defaultRoomoteModel,
+    });
+  } else {
+    // UIs resubmit unchanged fields (connection names, keys echoed back
+    // from saved state), so gate the probe on what the save would actually
+    // alter, not on non-empty form fields.
+    const {
+      values,
+      clearedEnvVarNames,
+      changedValues,
+      clearedPersistedEnvVarNames,
+    } = await collectCandidateProviderCredentials({
+      provider,
+      apiKey: input.apiKey,
+      additionalEnvValues: suppliedAdditionalEnvValues,
+      action: 'save it',
+    });
+
+    if (changedValues.length > 0 || clearedPersistedEnvVarNames.length > 0) {
+      const candidateValueByName = new Map(
+        values.map(({ name, value }) => [name, value]),
+      );
+      const secretField = getSetupModelProviderAdditionalEnvFields(
+        provider,
+      ).find((field) => field.secret);
+      const probe = await discoverProviderModels({
+        provider: provider.id as LocalTaskModelProviderId,
+        baseUrl: provider.envVarName
+          ? candidateValueByName.get(provider.envVarName)
+          : undefined,
+        // A cleared key probes as `null` so the resolver cannot fall back
+        // to the persisted value the transaction is about to delete.
+        apiKey: secretField
+          ? clearedEnvVarNames.includes(secretField.envVarName)
+            ? null
+            : candidateValueByName.get(secretField.envVarName)
+          : undefined,
+      });
+
+      if (probe.error) {
+        throw new Error(`${provider.label}: ${probe.error}`);
+      }
+    }
+  }
 
   let addedRecommendedModelCount = 0;
 

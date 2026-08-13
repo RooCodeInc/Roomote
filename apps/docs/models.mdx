@@ -36,6 +36,15 @@ in the setup wizard and from **Settings > Models**. You stay in control: you
 can disable or remove any of the added models, add more later, and reconnecting
 a provider never re-adds models you removed.
 
+When you connect or update an API-key provider, Roomote first checks the
+submitted credentials with a small live model request. If the provider rejects
+the key, or the account has no remaining credits, nothing is saved: fix the
+credential and save again. Other failures (a rate limit, a model your account
+cannot access, or a transient provider outage) never block the save.
+Self-hosted OpenAI-compatible endpoint connections are checked by listing the
+endpoint's models instead. Saving again without changing any credential skips
+the live check.
+
 ### API and gateway providers
 
 These connections use metered API billing or a provider-managed gateway:
