@@ -24,6 +24,7 @@ import type {
   UpdateTaskModelSelectionResponse,
   SendMessageResponse,
   ListEnvironmentsResponse,
+  ListTaskModelsResponse,
   CreateEnvironmentResponse,
   UpdateEnvironmentResponse,
   RecordVerificationResponse,
@@ -89,6 +90,20 @@ export async function searchTasks(
 ): Promise<TaskSearchResponse> {
   const qs = buildSearchParams(params);
   return apiFetch(config, `/api/mcp/tasks${qs}`, {}, 'Failed to search tasks');
+}
+
+/**
+ * List models enabled for task model selection.
+ */
+export async function listTaskModels(
+  config: RoomoteConfig,
+): Promise<ListTaskModelsResponse> {
+  return apiFetch(
+    config,
+    '/api/mcp/tasks/models',
+    {},
+    'Failed to list task models',
+  );
 }
 
 /**
