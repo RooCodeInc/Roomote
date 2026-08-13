@@ -42,7 +42,6 @@ const config = {
     'file://datasets/agent-selection.yaml',
     'file://datasets/workspace-selection.yaml',
     'file://datasets/explicit-preferences.yaml',
-    'file://datasets/model-routing.yaml',
     'file://datasets/linear-guidance.yaml',
     'file://datasets/github-agent-selection.yaml',
     'file://datasets/edge-cases.yaml',

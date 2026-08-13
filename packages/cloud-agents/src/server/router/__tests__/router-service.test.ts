@@ -1,5 +1,3 @@
-import { DEFAULT_TASK_MODEL_SETTINGS } from '@roomote/types';
-
 import type { RoutingContext, RoutableEnvironment } from '../types';
 import { routeTask } from '../router-service';
 
@@ -42,7 +40,6 @@ describe('routeTask', () => {
       taskDescription: 'Fix the login flow',
       source: { type: 'slack', channelName: 'engineering' },
       availableEnvironments: environments,
-      taskModelSettings: DEFAULT_TASK_MODEL_SETTINGS,
       ...overrides,
     };
   }
@@ -305,7 +302,7 @@ describe('routeTask', () => {
     });
   });
 
-  it('uses the LLM-requested model as a preference when it is enabled and confident', async () => {
+  it('routes without selecting a task model', async () => {
     mockGenerateTrackedNonTaskObject.mockResolvedValue({
       object: {
         workspaceValue: 'Full Stack',
@@ -313,8 +310,6 @@ describe('routeTask', () => {
         confidence: 0.92,
         needsExternalLookup: false,
         externalReference: null,
-        requestedModelId: 'openrouter/anthropic/claude-opus-5',
-        modelConfidence: 0.97,
       },
     });
 
@@ -325,274 +320,7 @@ describe('routeTask', () => {
       throw new Error('Expected routed result');
     }
 
-    expect(result.result.model).toEqual({
-      id: 'openrouter/anthropic/claude-opus-5',
-      displayName: 'Claude Opus 5',
-      source: 'preference',
-      confidence: 0.97,
-    });
-    expect(result.result.debug?.selectedTaskModel).toEqual(result.result.model);
-  });
-
-  it('uses the LLM-requested model against the default catalog when settings are null', async () => {
-    mockGenerateTrackedNonTaskObject.mockResolvedValue({
-      object: {
-        workspaceValue: 'Full Stack',
-        reasoning: 'Full Stack is the best fit.',
-        confidence: 0.92,
-        needsExternalLookup: false,
-        externalReference: null,
-        requestedModelId: 'openrouter/anthropic/claude-opus-5',
-        modelConfidence: 0.95,
-      },
-    });
-
-    const result = await routeTask(
-      createContext({
-        taskModelSettings: null,
-      }),
-    );
-
-    expect(result.status).toBe('routed');
-    if (result.status !== 'routed') {
-      throw new Error('Expected routed result');
-    }
-
-    expect(result.result.model).toEqual({
-      id: 'openrouter/anthropic/claude-opus-5',
-      displayName: 'Claude Opus 5',
-      source: 'preference',
-      confidence: 0.95,
-    });
-  });
-
-  it('demotes an LLM-requested model with confidence below the threshold and records the rejected pick', async () => {
-    mockGenerateTrackedNonTaskObject.mockResolvedValue({
-      object: {
-        workspaceValue: 'Full Stack',
-        reasoning: 'Full Stack is the best fit.',
-        confidence: 0.92,
-        needsExternalLookup: false,
-        externalReference: null,
-        requestedModelId: 'openrouter/anthropic/claude-opus-5',
-        modelConfidence: 0.6,
-      },
-    });
-
-    const result = await routeTask(createContext());
-
-    expect(result.status).toBe('routed');
-    if (result.status !== 'routed') {
-      throw new Error('Expected routed result');
-    }
-
-    expect(result.result.model).toEqual({
-      id: DEFAULT_TASK_MODEL_SETTINGS.defaultModelId,
-      displayName: expect.any(String),
-      source: 'default',
-      rejectedPick: {
-        id: 'openrouter/anthropic/claude-opus-5',
-        displayName: 'Claude Opus 5',
-        confidence: 0.6,
-        reason: 'below_threshold',
-      },
-    });
-    expect(result.result.debug?.selectedTaskModel).toEqual(result.result.model);
-  });
-
-  it('demotes an LLM-requested model when the model confidence is missing', async () => {
-    mockGenerateTrackedNonTaskObject.mockResolvedValue({
-      object: {
-        workspaceValue: 'Full Stack',
-        reasoning: 'Full Stack is the best fit.',
-        confidence: 0.92,
-        needsExternalLookup: false,
-        externalReference: null,
-        requestedModelId: 'openrouter/anthropic/claude-opus-5',
-      },
-    });
-
-    const result = await routeTask(createContext());
-
-    expect(result.status).toBe('routed');
-    if (result.status !== 'routed') {
-      throw new Error('Expected routed result');
-    }
-
-    expect(result.result.model).toEqual({
-      id: DEFAULT_TASK_MODEL_SETTINGS.defaultModelId,
-      displayName: expect.any(String),
-      source: 'default',
-      rejectedPick: {
-        id: 'openrouter/anthropic/claude-opus-5',
-        displayName: 'Claude Opus 5',
-        confidence: null,
-        reason: 'below_threshold',
-      },
-    });
-  });
-
-  it('treats the __no_model__ sentinel as no model preference and records its confidence', async () => {
-    mockGenerateTrackedNonTaskObject.mockResolvedValue({
-      object: {
-        workspaceValue: 'Full Stack',
-        reasoning: 'Full Stack is the best fit.',
-        confidence: 0.92,
-        needsExternalLookup: false,
-        externalReference: null,
-        requestedModelId: '__no_model__',
-        modelConfidence: 0.98,
-      },
-    });
-
-    const result = await routeTask(createContext());
-
-    expect(result.status).toBe('routed');
-    if (result.status !== 'routed') {
-      throw new Error('Expected routed result');
-    }
-
-    expect(result.result.model).toEqual({
-      id: DEFAULT_TASK_MODEL_SETTINGS.defaultModelId,
-      displayName: expect.any(String),
-      source: 'default',
-      noModelChoice: { confidence: 0.98 },
-    });
-  });
-
-  it('falls back to the deployment default when the LLM does not request a model', async () => {
-    mockGenerateTrackedNonTaskObject.mockResolvedValue({
-      object: {
-        workspaceValue: 'Full Stack',
-        reasoning: 'Full Stack is the best fit.',
-        confidence: 0.92,
-        needsExternalLookup: false,
-        externalReference: null,
-        requestedModelId: null,
-      },
-    });
-
-    const result = await routeTask(createContext());
-
-    expect(result.status).toBe('routed');
-    if (result.status !== 'routed') {
-      throw new Error('Expected routed result');
-    }
-
-    expect(result.result.model).toEqual({
-      id: DEFAULT_TASK_MODEL_SETTINGS.defaultModelId,
-      displayName: expect.any(String),
-      source: 'default',
-    });
-  });
-
-  it('preserves the previous suggestion model when correcting without a new model preference', async () => {
-    mockGenerateTrackedNonTaskObject.mockResolvedValue({
-      object: {
-        workspaceValue: 'Full Stack',
-        reasoning: 'Full Stack is the best fit.',
-        confidence: 0.92,
-        needsExternalLookup: false,
-        externalReference: null,
-        requestedModelId: null,
-      },
-    });
-
-    const result = await routeTask(
-      createContext({
-        previousSuggestion: {
-          workspaceValue: 'Full Stack',
-          workspaceDisplayName: 'Full Stack',
-          modelId: 'openrouter/anthropic/claude-opus-5',
-          modelDisplayName: 'Claude Opus 5',
-        },
-      }),
-    );
-
-    expect(result.status).toBe('routed');
-    if (result.status !== 'routed') {
-      throw new Error('Expected routed result');
-    }
-
-    expect(result.result.model).toEqual({
-      id: 'openrouter/anthropic/claude-opus-5',
-      displayName: 'Claude Opus 5',
-      source: 'preserved',
-    });
-  });
-
-  it('preserves the previous suggestion model over a low-confidence pick and records the rejected pick', async () => {
-    mockGenerateTrackedNonTaskObject.mockResolvedValue({
-      object: {
-        workspaceValue: 'Full Stack',
-        reasoning: 'Full Stack is the best fit.',
-        confidence: 0.92,
-        needsExternalLookup: false,
-        externalReference: null,
-        requestedModelId: 'openrouter/openai/gpt-5.6-terra',
-        modelConfidence: 0.4,
-      },
-    });
-
-    const result = await routeTask(
-      createContext({
-        previousSuggestion: {
-          workspaceValue: 'Full Stack',
-          workspaceDisplayName: 'Full Stack',
-          modelId: 'openrouter/anthropic/claude-opus-5',
-          modelDisplayName: 'Claude Opus 5',
-        },
-      }),
-    );
-
-    expect(result.status).toBe('routed');
-    if (result.status !== 'routed') {
-      throw new Error('Expected routed result');
-    }
-
-    expect(result.result.model).toEqual({
-      id: 'openrouter/anthropic/claude-opus-5',
-      displayName: 'Claude Opus 5',
-      source: 'preserved',
-      rejectedPick: {
-        id: 'openrouter/openai/gpt-5.6-terra',
-        displayName: 'GPT 5.6 Terra',
-        confidence: 0.4,
-        reason: 'below_threshold',
-      },
-    });
-  });
-
-  it('ignores an LLM-requested model that is not in the deployment allow-list', async () => {
-    mockGenerateTrackedNonTaskObject.mockResolvedValue({
-      object: {
-        workspaceValue: 'Full Stack',
-        reasoning: 'Full Stack is the best fit.',
-        confidence: 0.92,
-        needsExternalLookup: false,
-        externalReference: null,
-        requestedModelId: 'openrouter/unknown/disabled-model',
-        modelConfidence: 0.95,
-      },
-    });
-
-    const result = await routeTask(createContext());
-
-    expect(result.status).toBe('routed');
-    if (result.status !== 'routed') {
-      throw new Error('Expected routed result');
-    }
-
-    expect(result.result.model).toEqual({
-      id: DEFAULT_TASK_MODEL_SETTINGS.defaultModelId,
-      displayName: expect.any(String),
-      source: 'default',
-      rejectedPick: {
-        id: 'openrouter/unknown/disabled-model',
-        displayName: 'openrouter/unknown/disabled-model',
-        confidence: 0.95,
-        reason: 'not_allowed',
-      },
-    });
+    expect(result.result).not.toHaveProperty('model');
+    expect(result.result.debug).not.toHaveProperty('selectedTaskModel');
   });
 });

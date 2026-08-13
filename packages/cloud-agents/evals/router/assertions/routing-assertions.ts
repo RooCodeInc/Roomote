@@ -10,8 +10,6 @@ interface RoutingResponse {
   kickoffMessage?: string | null;
   needsExternalLookup?: boolean;
   externalReference?: string | null;
-  requestedModelId?: string | null;
-  modelConfidence?: number | null;
 }
 
 interface AssertionResult {
@@ -227,53 +225,6 @@ function reasoningContainsExpected(
 }
 
 /**
- * Asserts that requestedModelId matches the test's expectedRequestedModelId var
- * and carries a model confidence at or above the runtime preference threshold.
- * Used for model-bearing routing cases where the user expresses a model
- * preference and the router should echo back the matching model id. Picks
- * below 0.9 confidence are demoted at runtime, so a low-confidence match
- * fails this assertion too.
- */
-function requestedModelIdMatchesExpected(
-  output: string,
-  context: { vars: Record<string, string> },
-): AssertionResult {
-  const json = extractJson(output);
-  if (!json) {
-    return { pass: false, score: 0, reason: 'Invalid JSON response' };
-  }
-
-  const expected = context.vars.expectedRequestedModelId;
-  if (!expected) {
-    return {
-      pass: false,
-      score: 0,
-      reason: 'No expectedRequestedModelId in test vars',
-    };
-  }
-
-  const actual = json.requestedModelId ?? null;
-  if (actual !== expected) {
-    return {
-      pass: false,
-      score: 0,
-      reason: `requestedModelId mismatch: expected ${expected}, got ${actual}`,
-    };
-  }
-
-  const modelConfidence = json.modelConfidence;
-  const isConfident =
-    typeof modelConfidence === 'number' && modelConfidence >= 0.9;
-  return {
-    pass: isConfident,
-    score: isConfident ? 1 : 0,
-    reason: isConfident
-      ? `requestedModelId matches: ${expected} (model confidence ${modelConfidence})`
-      : `requestedModelId matches but model confidence is below the runtime threshold: got ${String(modelConfidence)}`,
-  };
-}
-
-/**
  * Asserts that kickoffMessage is present as short display text ending with a
  * single period (the router prompt contract for chat started messages).
  */
@@ -317,30 +268,6 @@ function hasValidKickoffMessage(output: string): AssertionResult {
 }
 
 /**
- * Asserts that the router did not report a model preference when the user did
- * not express one: requestedModelId must be the explicit `__no_model__`
- * sentinel (or a legacy null/empty response).
- */
-function requestedModelIdIsNull(output: string): AssertionResult {
-  const json = extractJson(output);
-  if (!json) {
-    return { pass: false, score: 0, reason: 'Invalid JSON response' };
-  }
-
-  const isNoModel =
-    json.requestedModelId == null ||
-    json.requestedModelId === '' ||
-    json.requestedModelId === '__no_model__';
-  return {
-    pass: isNoModel,
-    score: isNoModel ? 1 : 0,
-    reason: isNoModel
-      ? 'requestedModelId reports no model preference'
-      : `expected no model preference, got ${json.requestedModelId}`,
-  };
-}
-
-/**
  * Asserts that routing used the task's supplied context without requesting a
  * follow-up external lookup.
  */
@@ -368,9 +295,7 @@ export {
   reasoningContains,
   workspaceValueMatchesExpected,
   reasoningContainsExpected,
-  requestedModelIdMatchesExpected,
   hasValidKickoffMessage,
-  requestedModelIdIsNull,
   doesNotRequestExternalLookup,
   extractJson,
 };

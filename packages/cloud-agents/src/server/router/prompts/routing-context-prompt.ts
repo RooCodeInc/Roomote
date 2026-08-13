@@ -1,6 +1,6 @@
 import type { ImagePart, ModelMessage, TextPart } from 'ai';
 
-import { ALL_REPOSITORIES, getEnabledTaskModels } from '@roomote/types';
+import { ALL_REPOSITORIES } from '@roomote/types';
 
 import {
   MAX_TASK_DESCRIPTION_LENGTH,
@@ -8,7 +8,6 @@ import {
   PLATFORM_WORKSPACE_VALUE,
 } from '../types';
 import type { RoutingContext, RoutingSource } from '../types';
-import { NO_MODEL_MENTIONED_VALUE } from '../routing-resolution';
 
 const MAX_ROUTING_IMAGE_ATTACHMENTS = 3;
 const MAX_GITHUB_ROUTING_CONTEXT_CHARS = 250_000;
@@ -119,19 +118,6 @@ Prefer a specific environment when one is a plausible home for the work.
   }
   if (options?.includePlatformWorkspace !== false) {
     prompt += `- ${PLATFORM_WORKSPACE_VALUE}: ${PLATFORM_WORKSPACE_DESCRIPTION}\n`;
-  }
-
-  const enabledModels =
-    context.taskModelSettings !== undefined
-      ? getEnabledTaskModels(context.taskModelSettings)
-      : [];
-
-  if (enabledModels.length > 0) {
-    prompt += `\n**Available Models**:\n`;
-    for (const model of enabledModels) {
-      prompt += `- ${model.displayName} [id: ${model.id}]\n`;
-    }
-    prompt += `- No model mentioned [id: ${NO_MODEL_MENTIONED_VALUE}] (choose this when the user does not name a model)\n`;
   }
 
   return prompt;

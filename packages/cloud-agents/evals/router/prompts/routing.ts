@@ -6,11 +6,6 @@
  */
 
 import { buildWorkspaceRoutingPrompt } from '../../../src/server/router/prompts/routing-prompt';
-import { NO_MODEL_MENTIONED_VALUE } from '../../../src/server/router/routing-resolution';
-import {
-  DEFAULT_TASK_MODEL_SETTINGS,
-  getEnabledTaskModels,
-} from '@roomote/types';
 
 interface Agent {
   name: string;
@@ -29,18 +24,12 @@ interface Environment {
   repositoryNames?: string[];
 }
 
-interface ExtraModel {
-  displayName: string;
-  id: string;
-}
-
 interface PromptVars {
   context?: string;
   taskDescription?: string;
   agents?: Agent[];
   repositories?: (string | Repository)[];
   environments?: Environment[];
-  extraModels?: ExtraModel[];
   routingRules?: Array<{ description: string; target: string }>;
 }
 
@@ -123,29 +112,6 @@ function buildContext(vars: PromptVars): string {
   return parts.join('\n\n');
 }
 
-// Build the Available Models section from the shipped default catalog so evals
-// exercise the same model-selection surface production exposes to the router.
-// Tests can append custom deployment-added models (like the ones organizations
-// add from the settings UI) through the `extraModels` var.
-function buildAvailableModelsSection(extraModels?: ExtraModel[]): string {
-  const models: Array<{ displayName: string; id: string }> = [
-    ...getEnabledTaskModels(DEFAULT_TASK_MODEL_SETTINGS),
-    ...(extraModels ?? []),
-  ];
-
-  if (models.length === 0) {
-    return '';
-  }
-
-  const lines = models.map((m) => `- ${m.displayName} [id: ${m.id}]`);
-
-  lines.push(
-    `- No model mentioned [id: ${NO_MODEL_MENTIONED_VALUE}] (choose this when the user does not name a model)`,
-  );
-
-  return `\n**Available Models**:\n${lines.join('\n')}`;
-}
-
 // Production routes through `generateObject` with `workspaceResponseSchema`,
 // which carries the response shape and per-field descriptions. Promptfoo sends
 // the raw text prompt instead, so evals restate that response contract here to
@@ -157,17 +123,14 @@ Respond with a single JSON object containing exactly these fields:
 - "workspaceValue" (string): Name of the chosen environment or an available workspace value.
 - "reasoning" (string): Brief explanation of your workspace decision.
 - "confidence" (number): Confidence in the workspace choice from 0 to 1.
-- "kickoffMessage" (string): Required short user-facing kickoff sentence (about 8-18 words) that ends with a period. Naturally include the chosen environment name, and naturally include the model display name when requestedModelId is a real model. Vary wording; no "Getting started on your task in…" boilerplate every time. No emojis, markdown, quotes, or mentions. Always provide a non-empty value for real routed tasks.
+- "kickoffMessage" (string): Required short user-facing kickoff sentence (about 8-18 words) that ends with a period. Naturally include the chosen environment name. Vary wording; no "Getting started on your task in…" boilerplate every time. No emojis, markdown, quotes, or mentions. Always provide a non-empty value for real routed tasks.
 - "needsExternalLookup" (boolean): Whether an external reference must be fetched before routing, per the external lookup rules.
-- "externalReference" (string or null): The exact external reference to fetch when needsExternalLookup is true, otherwise null.
-- "requestedModelId" (string or null): The model id the user explicitly requested from the Available Models list, or the literal "${NO_MODEL_MENTIONED_VALUE}" when the user does not name a model.
-- "modelConfidence" (number or null): Confidence from 0 to 1 in your requestedModelId choice.`;
+- "externalReference" (string or null): The exact external reference to fetch when needsExternalLookup is true, otherwise null.`;
 
 // Export a function that receives variables and returns the prompt
 // This is the format expected by promptfoo for .js/.ts prompt files
 export default function generatePrompt({ vars }: PromptInput): string {
   const context = buildContext(vars);
-  const availableModels = buildAvailableModelsSection(vars.extraModels);
   const routingPrompt = buildWorkspaceRoutingPrompt();
 
   return `${routingPrompt}
@@ -176,5 +139,5 @@ ${OUTPUT_FORMAT_SECTION}
 
 ## Current Request
 
-${context}${availableModels ? `\n${availableModels}` : ''}`;
+${context}`;
 }

@@ -1,11 +1,6 @@
 import { z } from 'zod';
 
-import {
-  formatSingleLineLog,
-  getDefaultTaskModel,
-  getTaskModelOptionById,
-  isTaskModelIdAllowed,
-} from '@roomote/types';
+import { formatSingleLineLog } from '@roomote/types';
 import { resolveConfiguredGitHubAppSlug } from '@roomote/github';
 import type {
   FollowUpClassification,
@@ -16,7 +11,6 @@ import type {
   RoutingDecision,
   RoutingPhase,
   RoutingResult,
-  RoutingTaskModelSelection,
   WorkspaceResponse,
 } from './types';
 import { R_SMALL_MODEL_LABEL, PLATFORM_WORKSPACE_VALUE } from './types';
@@ -32,7 +26,6 @@ import {
 import { buildWorkspaceRoutingPrompt } from './prompts/routing-prompt';
 import {
   mapWorkspace,
-  NO_MODEL_MENTIONED_VALUE,
   normalizeWorkspaceSelectionValue,
   wasWorkspaceRemapped,
   workspaceResponseSchema,
@@ -113,112 +106,6 @@ function isPlatformWorkspaceSelection(value: string): boolean {
   );
 }
 
-/**
- * Minimum self-reported model confidence required before an LLM-picked
- * `requestedModelId` is honored as a user preference. Picks below this
- * threshold are demoted to the preserved/default resolution and surfaced in
- * router debug output as a rejected pick.
- */
-const MODEL_PREFERENCE_MIN_CONFIDENCE = 0.9;
-
-/**
- * Resolves the routed task model from the LLM's `requestedModelId` pick, the
- * previous correction suggestion, and the deployment default. The LLM must
- * answer with either a model id (when the user expressed a model preference)
- * or the explicit `__no_model__` sentinel, plus a `modelConfidence` score for
- * that choice. A model pick is only honored when its self-reported confidence
- * is at or above `MODEL_PREFERENCE_MIN_CONFIDENCE`; otherwise the router
- * preserves a prior correction or falls back to the deployment default. The
- * LLM's raw choice is always recorded on the returned selection — as the
- * preference confidence, an explicit `noModelChoice`, or a `rejectedPick` —
- * so router debug output can report the model decision on every routing.
- */
-function resolveRoutedTaskModel(
-  response: WorkspaceResponse,
-  context: RoutingContext,
-): RoutingTaskModelSelection | undefined {
-  const settings = context.taskModelSettings;
-
-  if (settings === undefined) {
-    return undefined;
-  }
-
-  const requestedModelId = response.requestedModelId?.trim() || null;
-  const modelConfidence =
-    typeof response.modelConfidence === 'number'
-      ? response.modelConfidence
-      : null;
-  let noModelChoice: RoutingTaskModelSelection['noModelChoice'];
-  let rejectedPick: RoutingTaskModelSelection['rejectedPick'];
-
-  if (requestedModelId === NO_MODEL_MENTIONED_VALUE) {
-    noModelChoice = { confidence: modelConfidence };
-  } else if (requestedModelId) {
-    const requestedModel = isTaskModelIdAllowed(settings, requestedModelId)
-      ? getTaskModelOptionById(requestedModelId, settings)
-      : undefined;
-
-    if (requestedModel) {
-      if (
-        modelConfidence !== null &&
-        modelConfidence >= MODEL_PREFERENCE_MIN_CONFIDENCE
-      ) {
-        return {
-          id: requestedModel.id,
-          displayName: requestedModel.displayName,
-          source: 'preference',
-          confidence: modelConfidence,
-        };
-      }
-
-      rejectedPick = {
-        id: requestedModel.id,
-        displayName: requestedModel.displayName,
-        confidence: modelConfidence,
-        reason: 'below_threshold',
-      };
-    } else {
-      rejectedPick = {
-        id: requestedModelId,
-        displayName: requestedModelId,
-        confidence: modelConfidence,
-        reason: 'not_allowed',
-      };
-    }
-  }
-
-  const llmChoiceFields = {
-    ...(noModelChoice ? { noModelChoice } : {}),
-    ...(rejectedPick ? { rejectedPick } : {}),
-  };
-
-  const previousModelId = context.previousSuggestion?.modelId?.trim() || null;
-
-  if (previousModelId && isTaskModelIdAllowed(settings, previousModelId)) {
-    const previousModel = getTaskModelOptionById(previousModelId, settings);
-
-    if (previousModel) {
-      return {
-        id: previousModel.id,
-        displayName:
-          context.previousSuggestion?.modelDisplayName ??
-          previousModel.displayName,
-        source: 'preserved',
-        ...llmChoiceFields,
-      };
-    }
-  }
-
-  const defaultModel = getDefaultTaskModel(settings);
-
-  return {
-    id: defaultModel.id,
-    displayName: defaultModel.displayName,
-    source: 'default',
-    ...llmChoiceFields,
-  };
-}
-
 function buildStandardTaskRoutingResult(
   response: WorkspaceResponse,
   context: RoutingContext,
@@ -236,7 +123,6 @@ function buildStandardTaskRoutingResult(
       status: 'routed',
       result: {
         workspace,
-        model: resolveRoutedTaskModel(response, context),
         reasoning: response.reasoning,
         ...(kickoffMessage ? { kickoffMessage } : {}),
         workspaceOnly: true,
@@ -538,12 +424,7 @@ export async function routeTask(
 
   switch (decision.status) {
     case 'routed':
-      decision.result.debug = {
-        ...debug,
-        ...(decision.result.model
-          ? { selectedTaskModel: decision.result.model }
-          : {}),
-      };
+      decision.result.debug = debug;
       console.info(
         formatSingleLineLog('[LLM Router] Routed task', {
           sourceType: context.source.type,
@@ -557,8 +438,6 @@ export async function routeTask(
             decision.result.workspace.type === 'environment'
               ? decision.result.workspace.name
               : null,
-          taskModelId: decision.result.model?.id,
-          taskModelSource: decision.result.model?.source,
           reasoning: truncateText(decision.result.reasoning, 280),
         }),
       );

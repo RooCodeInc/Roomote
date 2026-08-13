@@ -29,7 +29,6 @@ import {
   type RoutingResult,
   type SlackMcpSetupRequirement,
 } from '@roomote/cloud-agents/server';
-import { getUserRequestedModelDisplayName } from '@roomote/communication/chat-messages';
 
 import {
   mapRoutingWorkspaceToSelectionValue,
@@ -484,9 +483,6 @@ export async function startAutoRoutedSlackTask({
     // initiator becomes the run's acting user immediately so their task gets
     // integration MCP access from the first turn.
     const initiatorLinkedUserId = getTaskInitiatorLinkedUserId(initiator);
-    const userRequestedModelDisplayName = getUserRequestedModelDisplayName(
-      decision.result.model,
-    );
     let taskRun: Awaited<ReturnType<typeof startSlackAppMentionTask>>;
     try {
       taskRun = await startSlackAppMentionTask({
@@ -507,7 +503,7 @@ export async function startAutoRoutedSlackTask({
         branch,
         sha,
         harness,
-        model: model ?? decision.result.model?.id,
+        model,
         environmentId: workspace.environmentId,
         reasoningEffort,
         images: allProcessedImages.length ? allProcessedImages : undefined,
@@ -524,9 +520,6 @@ export async function startAutoRoutedSlackTask({
                 agentName: AGENT_DISPLAY_NAME,
                 initiatingSlackUserId,
                 workspaceDisplayName: workspace.workspaceDisplayName,
-                ...(userRequestedModelDisplayName
-                  ? { modelDisplayName: userRequestedModelDisplayName }
-                  : {}),
                 ...(decision.result.kickoffMessage
                   ? { kickoffMessage: decision.result.kickoffMessage }
                   : {}),
@@ -582,7 +575,6 @@ export async function startAutoRoutedSlackTask({
       initiatingSlackUserId,
       agentName: AGENT_DISPLAY_NAME,
       workspaceDisplayName: workspace.workspaceDisplayName,
-      modelDisplayName: userRequestedModelDisplayName,
       kickoffMessage: decision.result.kickoffMessage,
       workspaceType: decision.result.workspace.type,
       workspaceValue,
