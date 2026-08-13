@@ -804,7 +804,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       href: 'https://docs.github.com/en/copilot',
       linkLabel: 'GitHub Copilot docs',
     },
-    defaultRoomoteModel: 'github-copilot/claude-sonnet-5',
+    defaultRoomoteModel: 'github-copilot/gpt-5.6-luna',
     authKind: 'oauth',
     suggestedTaskModels: mapRecommendedTaskModels({
       'claude-fable-5': 'github-copilot/claude-fable-5',
@@ -817,13 +817,39 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'kimi-k3': 'github-copilot/kimi-k3',
       'kimi-k2-7-code': 'github-copilot/kimi-k2.7-code',
     }),
-    recommendedRoleModels: {
-      helper: 'github-copilot/claude-haiku-4.5',
-      codeReview: 'github-copilot/claude-sonnet-5',
-      explore: 'github-copilot/claude-haiku-4.5',
-      planning: 'github-copilot/claude-opus-5',
-    },
-    recommendedRoleReasoningEfforts: { codeReview: 'medium' },
+    recommendedPresets: [
+      {
+        id: 'default',
+        label: 'Recommended',
+        default: true,
+        roles: {
+          coding: {
+            modelId: 'github-copilot/gpt-5.6-luna',
+            reasoningEffort: 'medium',
+          },
+          helper: {
+            modelId: 'github-copilot/gpt-5.6-luna',
+            reasoningEffort: 'low',
+          },
+          vision: {
+            modelId: 'github-copilot/gpt-5.6-luna',
+            reasoningEffort: 'low',
+          },
+          codeReview: {
+            modelId: 'github-copilot/gpt-5.6-luna',
+            reasoningEffort: 'high',
+          },
+          explore: {
+            modelId: 'github-copilot/gpt-5.6-luna',
+            reasoningEffort: 'low',
+          },
+          planning: {
+            modelId: 'github-copilot/gpt-5.6-luna',
+            reasoningEffort: 'high',
+          },
+        },
+      },
+    ],
   },
   {
     id: OPENAI_COMPATIBLE_PROVIDER_ID,

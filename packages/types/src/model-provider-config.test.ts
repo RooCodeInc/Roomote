@@ -865,13 +865,13 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
 
     expect(copilotProvider).toMatchObject({
       label: 'GitHub Copilot',
-      defaultRoomoteModel: 'github-copilot/claude-sonnet-5',
+      defaultRoomoteModel: 'github-copilot/gpt-5.6-luna',
       authKind: 'oauth',
     });
     expect(copilotProvider?.envVarName).toBeUndefined();
     expect(
       copilotProvider?.suggestedTaskModels.some(
-        (suggestion) => suggestion.id === 'github-copilot/claude-sonnet-5',
+        (suggestion) => suggestion.id === 'github-copilot/gpt-5.6-luna',
       ),
     ).toBe(true);
   });
@@ -1030,12 +1030,6 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       'bedrock-mantle/anthropic.claude-sonnet-5',
       'bedrock-mantle/anthropic.claude-opus-5',
     ],
-    [
-      'github-copilot',
-      undefined,
-      'github-copilot/claude-sonnet-5',
-      'github-copilot/claude-opus-5',
-    ],
   ] as const)(
     'recommends Sonnet 5 with medium reasoning for %s code review',
     (providerId, presetId, codeReviewModel, planningModel) => {
@@ -1051,6 +1045,27 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       });
     },
   );
+
+  it('uses Luna for every GitHub Copilot role', () => {
+    expect(
+      buildRecommendedDeploymentModelConfig(
+        getSetupModelProvider('github-copilot'),
+      ),
+    ).toEqual({
+      roomoteModel: 'github-copilot/gpt-5.6-luna',
+      roomoteSmallModel: 'github-copilot/gpt-5.6-luna',
+      roomoteVisionModel: 'github-copilot/gpt-5.6-luna',
+      roomoteCodeReviewModel: 'github-copilot/gpt-5.6-luna',
+      roomoteExploreModel: 'github-copilot/gpt-5.6-luna',
+      roomotePlanningModel: 'github-copilot/gpt-5.6-luna',
+      roomoteModelReasoningEffort: 'medium',
+      roomoteSmallModelReasoningEffort: 'low',
+      roomoteVisionModelReasoningEffort: 'low',
+      roomoteCodeReviewModelReasoningEffort: 'high',
+      roomoteExploreModelReasoningEffort: 'low',
+      roomotePlanningModelReasoningEffort: 'high',
+    });
+  });
 
   it('recommends only the coding default for providers without a role mapping', () => {
     expect(
