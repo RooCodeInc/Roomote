@@ -6,6 +6,7 @@ import type {
   CommunicationProvider,
   EnvironmentConfig,
   RequestedWorkKind,
+  TaskGoal,
 } from '@roomote/types';
 import type { TaskRun, DequeuedTaskRun } from '@roomote/sdk/client';
 
@@ -293,6 +294,7 @@ export interface ListenerOptions {
     userName?: string;
     userImageUrl?: string;
     clientMessageId?: string;
+    goalContext?: TaskGoal;
   }) => boolean;
   slackReplySatisfactionStateFile?: string;
   answerUserInputRequest: (options: {

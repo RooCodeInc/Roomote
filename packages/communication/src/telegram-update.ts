@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { QueuedCommunicationMessage } from '@roomote/types';
+import { parseGoalCommand, type ParsedGoalCommand } from './goal-command';
 
 const telegramUserSchema = z
   .object({
@@ -605,6 +606,58 @@ export function getTelegramNewTaskCommand(
       command: parsed.command,
       text: normalizeWhitespace(text.slice(entity.offset + entity.length)),
     };
+  }
+
+  return null;
+}
+
+export function getTelegramGoalCommand(
+  update: TelegramUpdate,
+  options: TelegramBotMentionOptions = {},
+): ParsedGoalCommand | null {
+  const message = getTelegramUpdateMessage(update);
+  const text = message?.text;
+
+  if (!text) {
+    return null;
+  }
+
+  const botUsername = normalizeTelegramBotUsername(options.botUsername);
+  const entities = message.entities ?? [];
+  for (const entity of entities) {
+    if (entity.type !== 'bot_command') {
+      continue;
+    }
+
+    const parsed = parseTelegramBotCommand(readEntityText(text, entity));
+    if (!parsed || parsed.command !== 'goal') {
+      continue;
+    }
+    if (botUsername && parsed.botSuffix && parsed.botSuffix !== botUsername) {
+      continue;
+    }
+    if (!isLeadingBotCommand(text, entities, entity, options)) {
+      continue;
+    }
+
+    const mentionPrefix = findLeadingBotMentionBefore(
+      text,
+      entities,
+      entity.offset,
+      options,
+    );
+    if (
+      botUsername &&
+      !isTelegramPrivateChat(message) &&
+      !parsed.botSuffix &&
+      !mentionPrefix
+    ) {
+      continue;
+    }
+
+    return parseGoalCommand(
+      `/goal ${normalizeWhitespace(text.slice(entity.offset + entity.length))}`,
+    );
   }
 
   return null;

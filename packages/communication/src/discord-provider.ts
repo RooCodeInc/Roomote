@@ -1205,6 +1205,19 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
           ],
         },
         {
+          name: 'goal',
+          description: 'Keep working toward an objective across multiple turns',
+          type: 1,
+          options: [
+            {
+              type: 3,
+              name: 'request',
+              description: 'What objective should Roomote complete?',
+              required: true,
+            },
+          ],
+        },
+        {
           name: 'link',
           description: 'Link this Discord account to Roomote',
           type: 1,

@@ -648,6 +648,7 @@ async function launchPendingDiscordRoute(input: {
     provider: input.provider,
     launchOwnerUserId: input.pending.launchOwnerUserId,
     queuedMessage: input.pending.queuedMessage,
+    goal: input.pending.queuedMessage.goal,
     metadata: input.pending.metadata,
     channel: input.pending.channel,
     workspace,

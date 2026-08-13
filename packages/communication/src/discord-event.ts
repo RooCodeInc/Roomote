@@ -573,7 +573,8 @@ export function isDiscordTaskEntryEvent(
         isDiscordBotMentioned(message, options.botUserId))
     );
   }
-  return getDiscordInteractionCommand(event)?.name === 'new';
+  const commandName = getDiscordInteractionCommand(event)?.name;
+  return commandName === 'new' || commandName === 'goal';
 }
 
 function formatDiscordUser(input: {
@@ -637,7 +638,8 @@ export function discordEventToQueuedCommunicationMessage(
 
   const interaction = getDiscordInteractionCreate(event);
   const command = getDiscordInteractionCommand(event);
-  if (!interaction || command?.name !== 'new') return null;
+  if (!interaction || (command?.name !== 'new' && command?.name !== 'goal'))
+    return null;
   const user = getDiscordInteractionUser(interaction);
   return {
     provider: 'discord',

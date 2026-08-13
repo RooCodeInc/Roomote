@@ -3,6 +3,7 @@ import {
   ALL_REPOSITORIES,
   buildTelegramMessagePermalink,
   TaskPayloadKind,
+  type TaskGoalInput,
   type TaskSpec,
 } from '@roomote/types';
 import { db, environments, eq } from '@roomote/db/server';
@@ -90,6 +91,7 @@ export async function launchTelegramTask(input: {
   metadata: TelegramUpdateCommunicationMetadata;
   workspace: TelegramWorkspaceSelection;
   createTopicForTask?: boolean;
+  goal?: TaskGoalInput;
 }) {
   const topicName = buildTelegramTaskTopicName(input.queuedMessage.text);
   const createdTopic = input.createTopicForTask
@@ -140,6 +142,7 @@ export async function launchTelegramTask(input: {
       workflow: 'standard',
       surface: 'telegram',
       trigger: 'message',
+      ...(input.goal ? { goal: input.goal } : {}),
     },
     {
       launchClass: 'human',

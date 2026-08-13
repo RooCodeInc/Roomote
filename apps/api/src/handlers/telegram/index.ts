@@ -18,6 +18,7 @@ import {
   getTelegramUpdateMessage,
   getTelegramUpdateMessageReaction,
   getTelegramNewTaskCommand,
+  getTelegramGoalCommand,
   isTelegramImplicitTopicCreatedMessage,
   isTelegramPrivateChat,
   isTelegramStartCommand,
@@ -26,6 +27,8 @@ import {
   parseTelegramUpdate,
   telegramUpdateToQueuedCommunicationMessage,
 } from '@roomote/communication/telegram-update';
+import { GOAL_COMMAND_USAGE } from '@roomote/communication/goal-command';
+import { activateCommunicationGoal } from '@roomote/sdk/server/communication';
 
 import { apiLogger } from '../../logging.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
@@ -60,6 +63,7 @@ const TELEGRAM_COMMAND_HELP = [
   '*Available commands*',
   '`/start` — show this welcome message.',
   '`/new <request>` — start a fresh task instead of resuming the previous one; when topics are available, it opens a new topic.',
+  '`/goal <objective>` — keep working toward an objective across multiple turns.',
 ].join('\n');
 
 const TELEGRAM_WELCOME_MESSAGE = [
@@ -400,6 +404,26 @@ telegram.post('/', async (c) => {
   const newTaskCommand = getTelegramNewTaskCommand(update, {
     botUsername: botUsername ?? undefined,
   });
+  const goalCommand = getTelegramGoalCommand(update, {
+    botUsername: botUsername ?? undefined,
+  });
+  if (goalCommand && !goalCommand.goal) {
+    await postTelegramMessageBestEffort({
+      chatId: metadata.communicationChannelId,
+      threadId: metadata.communicationThreadId,
+      replyToMessageId: metadata.communicationMessageId,
+      text: `Send an objective after the command — for example, \`${GOAL_COMMAND_USAGE.replace('<objective>', 'ship the release')}\`.`,
+      textFormat: 'markdown',
+    });
+    return c.json({ ok: true, queued: false, repliedInline: true });
+  }
+  if (goalCommand?.goal && queuedMessage) {
+    queuedMessage = {
+      ...queuedMessage,
+      text: goalCommand.objective,
+      goal: goalCommand.goal,
+    };
+  }
 
   if (!queuedMessage && !newTaskCommand) {
     return c.json({ ok: true, ignored: 'unsupported_update' });
@@ -512,7 +536,29 @@ telegram.post('/', async (c) => {
       runId: activeRun.id,
       senderUserId: queuedMessage.userId,
     });
-    await queueCommunicationMessage('telegram', activeRun.id, queuedMessage);
+    if (goalCommand?.goal) {
+      const activated = await activateCommunicationGoal({
+        taskId: activeRun.taskId,
+        goal: goalCommand.goal,
+        deliver: async (goalContext) => {
+          await queueCommunicationMessage('telegram', activeRun.id, {
+            ...queuedMessage,
+            goalContext,
+          });
+        },
+      });
+      if (!activated.success) {
+        await postTelegramMessageBestEffort({
+          chatId: metadata.communicationChannelId,
+          threadId: metadata.communicationThreadId,
+          replyToMessageId: metadata.communicationMessageId,
+          text: 'Goal Mode could not be enabled because another activation is already in progress. Try again in a moment.',
+        });
+        return c.json({ ok: true, queued: false, repliedInline: true });
+      }
+    } else {
+      await queueCommunicationMessage('telegram', activeRun.id, queuedMessage);
+    }
     // A typed reply supersedes any pending PR review offers in the chat.
     retireTelegramPrReviewOffersBestEffort({
       chatId: conversation.chatId,

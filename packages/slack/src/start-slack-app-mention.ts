@@ -11,6 +11,7 @@ import {
   type ReasoningEffort,
   type SlackAppMentionTask,
   type TaskInitiator,
+  type TaskGoalInput,
   type TaskTrigger,
   type TaskVisibility,
   type TaskWorkflow,
@@ -155,6 +156,7 @@ export async function startSlackAppMentionTask(input: {
   webPath?: string;
   slackConversationUrl?: string;
   skipInitialActingUser?: boolean;
+  goal?: TaskGoalInput;
   /**
    * Started-message metadata callers persist themselves via
    * setSlackStartedMessageTs after the launch. Accepted here so call sites
@@ -326,6 +328,7 @@ export async function startSlackAppMentionTask(input: {
         slackChannelId: input.channel,
         slackThreadTs: input.threadTs,
       },
+      ...(input.goal ? { goal: input.goal } : {}),
     },
     input.skipInitialActingUser ? { skipInitialActingUser: true } : {},
   );

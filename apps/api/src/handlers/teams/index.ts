@@ -18,6 +18,7 @@ import {
   teamsActivityToQueuedCommunicationMessage,
 } from '@roomote/communication/teams-activity';
 import { queueCommunicationMessage } from '@roomote/communication/messages';
+import { parseGoalCommand } from '@roomote/communication/goal-command';
 import {
   buildAccountLinkPromptText,
   buildAccountLinkThreadReplyText,
@@ -26,6 +27,7 @@ import {
 } from '@roomote/communication/chat-messages';
 import type { TeamsCommunicationProvider } from '@roomote/communication/teams-provider';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '@roomote/sdk/server';
+import { activateCommunicationGoal } from '@roomote/sdk/server/communication';
 import {
   exchangeMicrosoftDelegatedGraphToken,
   extractTeamsGraphHostedContentIds,
@@ -55,6 +57,7 @@ import {
   TaskPayloadKind,
   PRODUCT_NAME,
   type QueuedCommunicationMessage,
+  type TaskGoalInput,
   isDeploymentReadOnlyError,
   populateSnapshotResumeCommunicationMetadata,
   restoreSnapshotResumeVisiblePromptFields,
@@ -1338,6 +1341,7 @@ async function startNewTeamsTask(input: {
   queuedMessage: QueuedTeamsCommunicationMessage;
   metadata: TeamsActivityCommunicationMetadata;
   workspaceOverride?: TeamsWorkspaceSelection;
+  goal?: TaskGoalInput;
 }) {
   const launchUserId = input.mappedUserId;
   const threadHistory = await fetchTeamsThreadMessagesBestEffort({
@@ -1428,6 +1432,7 @@ async function startNewTeamsTask(input: {
       workflow: 'standard',
       surface: 'teams',
       trigger: 'message',
+      ...(input.goal ? { goal: input.goal } : {}),
     },
     {
       launchClass: 'human',
@@ -1516,7 +1521,6 @@ async function resumePendingTeamsAuthToken(
     conversationId: metadata.communicationChannelId,
     threadId: metadata.communicationThreadId,
   });
-
   if (activeRun) {
     // Trusted pre-queue actor switch; see acting-user-sync.ts.
     await syncActingUserForInboundMessage({
@@ -1950,6 +1954,23 @@ teams.post('/', async (c) => {
     conversationId: metadata.communicationChannelId,
     threadId: metadata.communicationThreadId,
   });
+  const goalCommand = parseGoalCommand(queuedMessage.text);
+  if (goalCommand && !goalCommand.goal) {
+    await postTeamsMessageBestEffort({
+      conversationId: metadata.communicationChannelId,
+      threadId: metadata.communicationThreadId,
+      serviceUrl: metadata.communicationServiceUrl,
+      text: 'Send an objective after the command — for example, `/goal ship the release`.',
+    });
+    return c.json({ ok: true, queued: false, repliedInline: true });
+  }
+  if (goalCommand?.goal) {
+    queuedMessage = {
+      ...queuedMessage,
+      text: goalCommand.objective,
+      goal: goalCommand.goal,
+    };
+  }
 
   if (!activeRun) {
     if (!isTeamsTaskEntryActivity(activity)) {
@@ -2182,6 +2203,7 @@ teams.post('/', async (c) => {
         mappedUserId,
         queuedMessage,
         metadata,
+        goal: queuedMessage.goal,
       });
     } catch (error) {
       if (isDeploymentReadOnlyError(error)) {
@@ -2267,7 +2289,30 @@ teams.post('/', async (c) => {
     outOfBandClaim = attached.claim;
   }
   try {
-    await queueCommunicationMessage('teams', activeRun.id, activeFollowUp);
+    if (goalCommand?.goal) {
+      const activated = await activateCommunicationGoal({
+        taskId: activeRun.taskId,
+        goal: goalCommand.goal,
+        deliver: async (goalContext) => {
+          await queueCommunicationMessage('teams', activeRun.id, {
+            ...activeFollowUp,
+            goalContext,
+          });
+        },
+      });
+      if (!activated.success) {
+        await releaseCommunicationOutOfBandClaim(outOfBandClaim);
+        await postTeamsMessageBestEffort({
+          conversationId: metadata.communicationChannelId,
+          threadId: metadata.communicationThreadId,
+          serviceUrl: metadata.communicationServiceUrl,
+          text: 'Goal Mode could not be enabled because another activation is already in progress. Try again in a moment.',
+        });
+        return c.json({ ok: true, queued: false, repliedInline: true });
+      }
+    } else {
+      await queueCommunicationMessage('teams', activeRun.id, activeFollowUp);
+    }
   } catch (error) {
     await releaseCommunicationOutOfBandClaim(outOfBandClaim);
     throw error;

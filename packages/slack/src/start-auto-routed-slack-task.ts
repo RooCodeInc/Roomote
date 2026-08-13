@@ -19,6 +19,7 @@ import {
   stripLeadingRawSlackMention,
   stripLeadingSlackProductMention,
 } from '@roomote/cloud-agents';
+import { parseGoalCommand } from '@roomote/communication/goal-command';
 import {
   buildSlackRoutingContext,
   detectSlackMcpSetupRequirement,
@@ -251,9 +252,13 @@ export async function startAutoRoutedSlackTask({
       }
     }
 
-    const taskDescription = stripLeadingSlackProductMention(
+    const taskDescriptionWithCommand = stripLeadingSlackProductMention(
       await slack.normalizeIncomingText(stripLeadingRawSlackMention(prompt)),
     );
+    const goalCommand = parseGoalCommand(taskDescriptionWithCommand);
+    const taskDescription = goalCommand?.goal
+      ? goalCommand.objective
+      : taskDescriptionWithCommand;
     const warningText = buildStatuspageSlackWarning(
       await getStatuspageIncident(),
     );
@@ -517,6 +522,7 @@ export async function startAutoRoutedSlackTask({
         webPath,
         slackConversationUrl: slackConversationUrl ?? undefined,
         skipInitialActingUser: !initiatorLinkedUserId,
+        goal: goalCommand?.goal ?? undefined,
         ...(existingMessageTs
           ? {
               queuedStartedMessage: {

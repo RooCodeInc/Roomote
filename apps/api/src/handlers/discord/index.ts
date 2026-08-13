@@ -24,6 +24,7 @@ import {
   setLatestInboundMessageId,
 } from '@roomote/communication/messages';
 import { reactionEmojiMatches } from '@roomote/communication/reaction-emoji';
+import { parseGoalCommand } from '@roomote/communication/goal-command';
 import { getTaskUrl } from '@roomote/cloud-agents/server';
 import {
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
@@ -53,6 +54,7 @@ import {
   findTaskBackedAutomationReportRun,
   releaseCommunicationOutOfBandClaim,
   resumeCommunicationTaskFromSnapshot,
+  activateCommunicationGoal,
 } from '@roomote/sdk/server/communication';
 import { tryHandleDiscordRequestUserInputMessage } from './request-user-input.js';
 import { retireDiscordPrReviewOffersBestEffort } from './pr-review-action.js';
@@ -154,6 +156,7 @@ const DISCORD_HELP_MESSAGE = [
   '',
   '**Available commands**',
   '`/new request:<request>` — start a fresh task.',
+  '`/goal request:<objective>` — keep working toward an objective across multiple turns.',
   '`/link code:<code>` — link this Discord account in a DM with me.',
   '`/help` — show this message.',
   '',
@@ -508,16 +511,22 @@ async function processDiscordGatewayEvent(
     return { ok: true, linked: true };
   }
 
-  if (command && command.name !== 'new') {
+  if (command && command.name !== 'new' && command.name !== 'goal') {
     return { ok: true, ignored: 'unsupported_command' };
   }
-  if (command?.name === 'new' && !command.request) {
+  if (
+    (command?.name === 'new' || command?.name === 'goal') &&
+    !command.request
+  ) {
     await replyToDiscordEvent({
       provider: resolved.provider,
       applicationId: resolved.applicationId,
       channel,
       interaction: interactionReplyContext(event),
-      text: 'Add what you want Roomote to do in the `request` field.',
+      text:
+        command.name === 'goal'
+          ? 'Add the objective Roomote should complete in the `request` field.'
+          : 'Add what you want Roomote to do in the `request` field.',
     });
     return { ok: true, started: false, reason: 'missing_request' };
   }
@@ -531,6 +540,10 @@ async function processDiscordGatewayEvent(
       : {}),
   };
   const forceNewTask = command?.name === 'new';
+  const goalCommand =
+    command?.name === 'goal' && command.request
+      ? parseGoalCommand(`/goal ${command.request}`)
+      : null;
   const repliedToAutomationReport =
     !forceNewTask && message?.message_reference?.message_id
       ? await findTaskBackedAutomationReportRun({
@@ -699,17 +712,27 @@ async function processDiscordGatewayEvent(
   for (const warning of processedAttachments.warnings) {
     apiLogger.warn(`[discord] Attachment warning: ${warning}`);
   }
-  const queuedMessage = discordEventToQueuedCommunicationMessage(event, {
-    botUserId: resolved.botUserId,
-    userId: senderUserId,
-    isTaskThread: isRoomoteThread,
-    parentChannelId: channel.parentChannelId,
-    attachmentImages: processedAttachments.images,
-    attachmentText: processedAttachments.attachmentTexts,
-  });
-  if (!queuedMessage) {
+  const normalizedQueuedMessage = discordEventToQueuedCommunicationMessage(
+    event,
+    {
+      botUserId: resolved.botUserId,
+      userId: senderUserId,
+      isTaskThread: isRoomoteThread,
+      parentChannelId: channel.parentChannelId,
+      attachmentImages: processedAttachments.images,
+      attachmentText: processedAttachments.attachmentTexts,
+    },
+  );
+  if (!normalizedQueuedMessage) {
     return { ok: true, ignored: 'empty_task_entry' };
   }
+  const queuedMessage = goalCommand?.goal
+    ? {
+        ...normalizedQueuedMessage,
+        text: goalCommand.objective,
+        goal: goalCommand.goal,
+      }
+    : normalizedQueuedMessage;
 
   if (pendingRoutingReply) {
     let routingReplyAckPinned = false;
@@ -868,11 +891,24 @@ async function processDiscordGatewayEvent(
         message: messageForQueue,
       });
     try {
-      const queued = await queueCommunicationMessageOnce(
-        'discord',
-        activeRun.id,
-        messageWithOutOfBand,
-      );
+      const queueMessage = (
+        goalContext?: typeof messageWithOutOfBand.goalContext,
+      ) =>
+        queueCommunicationMessageOnce('discord', activeRun.id, {
+          ...messageWithOutOfBand,
+          ...(goalContext ? { goalContext } : {}),
+        });
+      const queued = goalCommand?.goal
+        ? await activateCommunicationGoal({
+            taskId: activeRun.taskId,
+            goal: goalCommand.goal,
+            deliver: async (goalContext) => {
+              if (!(await queueMessage(goalContext))) {
+                throw new Error('Discord goal command was already queued');
+              }
+            },
+          }).then((result) => result.success)
+        : await queueMessage();
       // A typed reply supersedes any pending PR review offers here.
       retireDiscordPrReviewOffersBestEffort({
         channelId: metadata.communicationChannelId,

@@ -14,7 +14,9 @@ import {
   isDeploymentReadOnlyError,
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
   getTaskModelDisplayName,
+  type TaskGoalInput,
 } from '@roomote/types';
+import { parseGoalCommand } from '@roomote/communication/goal-command';
 import { Env } from '@roomote/env';
 import { getRedis, REDIS_KEYS } from '@roomote/redis';
 import {
@@ -375,6 +377,7 @@ interface RoutingPrefillData {
   routingDurationMs?: number;
   userRoute?: string;
   warningText?: string;
+  goal?: TaskGoalInput;
 }
 
 interface RoutingConfirmActionValue {
@@ -1202,6 +1205,11 @@ export async function showTaskConfiguration({
         },
       });
 
+      const parsedGoal = parseGoalCommand(
+        stripLeadingSlackProductMention(
+          stripLeadingRawSlackMention(event.text),
+        ),
+      );
       const prefillData: RoutingPrefillData = {
         agentName,
         workspaceOnly,
@@ -1227,6 +1235,7 @@ export async function showTaskConfiguration({
         routingDebug: routingResult.debug,
         routingDurationMs: suggestedRoutingDurationMs,
         warningText,
+        ...(parsedGoal?.goal ? { goal: parsedGoal.goal } : {}),
       };
 
       await getRedis().set(
@@ -1959,10 +1968,14 @@ async function startImmediateSlackTask({
   const messageText = stripLeadingSlackProductMention(
     await slack.normalizeIncomingText(stripLeadingRawSlackMention(event.text)),
   );
+  const parsedGoal = parseGoalCommand(messageText);
+  const taskDescription = parsedGoal?.goal
+    ? parsedGoal.goal.objective
+    : messageText;
   const images = event.processedImages || [];
   const taskText = appendSlackVideoDescriptionsToText({
     text: appendAttachmentTextsToPromptText({
-      text: messageText,
+      text: taskDescription,
       attachmentTexts: event.processedAttachmentTexts,
     }),
     videoDescriptions: event.processedVideoDescriptions,
@@ -1995,6 +2008,7 @@ async function startImmediateSlackTask({
         channel: event.channel,
         messageTs: threadId,
       })) ?? undefined,
+    goal: parsedGoal?.goal ?? undefined,
     ...(replaceMessageTs
       ? {
           queuedStartedMessage: {
@@ -2134,10 +2148,16 @@ async function createRunFromPrefill({
       stripLeadingRawSlackMention(originalEvent.text),
     ),
   );
+  const parsedGoal = prefill.goal
+    ? { goal: prefill.goal }
+    : parseGoalCommand(messageText);
+  const taskDescription = parsedGoal?.goal
+    ? parsedGoal.goal.objective
+    : messageText;
   const images = originalEvent.processedImages || [];
   const taskText = appendSlackVideoDescriptionsToText({
     text: appendAttachmentTextsToPromptText({
-      text: messageText,
+      text: taskDescription,
       attachmentTexts: originalEvent.processedAttachmentTexts,
     }),
     videoDescriptions: originalEvent.processedVideoDescriptions,
@@ -2170,6 +2190,7 @@ async function createRunFromPrefill({
         channel: originalEvent.channel,
         messageTs: threadId,
       })) ?? undefined,
+    goal: parsedGoal?.goal ?? undefined,
     ...(prefill.confirmMessageTs
       ? {
           queuedStartedMessage: {

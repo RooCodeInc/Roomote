@@ -16,6 +16,15 @@ import { prActions } from './cloud-agents';
 import { ALL_REPOSITORIES } from './constants';
 import { sourceControlProviderSchema } from './source-control';
 import { resolveTaskModelIdAlias } from './task-models';
+export {
+  DEFAULT_TASK_GOAL_MAX_CONTINUATIONS,
+  TASK_GOAL_STATUSES,
+  taskGoalInputSchema,
+  taskGoalSchema,
+  type TaskGoal,
+  type TaskGoalInput,
+  type TaskGoalStatus,
+} from './task-goal';
 
 /**
  * Task classification vocabulary.
@@ -113,37 +122,6 @@ export const TASK_STATES = [
 ] as const;
 
 export type TaskState = (typeof TASK_STATES)[number];
-
-export const TASK_GOAL_STATUSES = [
-  'active',
-  'complete',
-  'blocked',
-  'budget_limited',
-] as const;
-
-export type TaskGoalStatus = (typeof TASK_GOAL_STATUSES)[number];
-
-export const DEFAULT_TASK_GOAL_MAX_CONTINUATIONS = 5;
-
-export const taskGoalInputSchema = z.object({
-  objective: z.string().trim().min(1).max(10_000),
-  maxContinuations: z
-    .number()
-    .int()
-    .min(1)
-    .max(20)
-    .default(DEFAULT_TASK_GOAL_MAX_CONTINUATIONS),
-});
-
-export type TaskGoalInput = z.infer<typeof taskGoalInputSchema>;
-
-export type TaskGoal = TaskGoalInput & {
-  generation: string | null;
-  status: TaskGoalStatus;
-  continuationsUsed: number;
-  blockedReason: string | null;
-  completedAt: Date | null;
-};
 
 export const RUN_KINDS = ['fresh', 'resume'] as const;
 
