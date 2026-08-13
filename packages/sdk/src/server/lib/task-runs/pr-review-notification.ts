@@ -53,6 +53,10 @@ const PENDING_EVENTS_TTL_SECONDS = 24 * 60 * 60;
 const SCHEDULED_MARKER_TTL_BUFFER_SECONDS = 15 * 60;
 const REVIEW_CYCLE_TTL_SECONDS = 30 * 24 * 60 * 60;
 const ORPHAN_ACTIVITY_TTL_SECONDS = 15 * 60;
+const ORPHAN_REPLAY_REPAIR_INDEX_KEY =
+  'pr-review-notification:orphan-replay-repair';
+const ORPHAN_REPLAY_REPAIR_BATCH_SIZE = 100;
+export const ORPHAN_REPLAY_REPAIR_DELAY_MS = 60 * 1000;
 export const PR_REVIEW_ASSOCIATION_REPLAY_DELAYS_MS = [
   1_000, 5_000, 30_000, 120_000, 300_000,
 ] as const;
@@ -138,6 +142,14 @@ for index = 1, #ARGV - 2 do
 end
 redis.call('EXPIRE', KEYS[1], ARGV[#ARGV])
 redis.call('SET', KEYS[2], ARGV[#ARGV - 1] .. ':0', 'EX', ARGV[#ARGV])
+return 1
+`;
+const CLEAR_ORPHAN_REPLAY_REPAIR_SCRIPT = `
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then
+  return 0
+end
+redis.call('DEL', KEYS[1])
+redis.call('ZREM', KEYS[2], ARGV[2])
 return 1
 `;
 const COMPLETE_REVIEW_CYCLE_SCRIPT = `
@@ -379,6 +391,66 @@ function buildOrphanReplayMarkerKey(target: PrReviewAssociationTarget): string {
   return `pr-review-notification:orphan-replay:${target.sourceControlProvider}:${encodeURIComponent(target.repository)}#${target.prNumber}`;
 }
 
+function buildOrphanReplayRepairMember(
+  target: PrReviewAssociationTarget,
+): string {
+  return `${target.sourceControlProvider}:${encodeURIComponent(target.repository)}#${target.prNumber}`;
+}
+
+function buildOrphanReplayRepairPayloadKey(
+  target: PrReviewAssociationTarget,
+): string {
+  return `pr-review-notification:orphan-replay-repair-payload:${buildOrphanReplayRepairMember(target)}`;
+}
+
+async function recordOrphanReplayRepair(
+  request: PrReviewAssociationReplayRequest,
+): Promise<string> {
+  const target = {
+    sourceControlProvider: request.sourceControlProvider,
+    repository: request.repository,
+    prNumber: request.prNumber,
+  };
+  const payload = JSON.stringify(request);
+
+  await getRedis()
+    .multi()
+    .set(
+      buildOrphanReplayRepairPayloadKey(target),
+      payload,
+      'EX',
+      ORPHAN_ACTIVITY_TTL_SECONDS,
+    )
+    .zadd(
+      ORPHAN_REPLAY_REPAIR_INDEX_KEY,
+      Date.now() + ORPHAN_REPLAY_REPAIR_DELAY_MS,
+      buildOrphanReplayRepairMember(target),
+    )
+    .exec();
+
+  return payload;
+}
+
+async function clearOrphanReplayRepair(
+  request: PrReviewAssociationReplayRequest,
+  payload: string,
+): Promise<void> {
+  const target = {
+    sourceControlProvider: request.sourceControlProvider,
+    repository: request.repository,
+    prNumber: request.prNumber,
+  };
+
+  await getRedis().eval(
+    CLEAR_ORPHAN_REPLAY_REPAIR_SCRIPT,
+    2,
+    buildOrphanReplayRepairPayloadKey(target),
+    ORPHAN_REPLAY_REPAIR_INDEX_KEY,
+    payload,
+    buildOrphanReplayRepairMember(target),
+  );
+}
+
 async function scheduleOrphanAssociationReplay({
   target,
   chainId,
@@ -394,14 +466,89 @@ async function scheduleOrphanAssociationReplay({
     return;
   }
 
+  const request = {
+    kind: 'association_replay' as const,
+    ...target,
+    chainId,
+    attempt,
+  };
+  const repairPayload = await recordOrphanReplayRepair(request);
+
   await getPrReviewNotificationQueue().add(
     'replay-pr-review-association',
-    { kind: 'association_replay' as const, ...target, chainId, attempt },
+    request,
     {
       delay: delayMs,
       jobId: `association-replay-${chainId}-${attempt}`,
     },
   );
+  await clearOrphanReplayRepair(request, repairPayload).catch(() => undefined);
+}
+
+/** Re-enqueues orphan association replays whose Queue.add did not complete. */
+export async function repairOrphanPrReviewAssociationReplays({
+  now = Date.now(),
+}: { now?: number } = {}): Promise<void> {
+  const redis = getRedis();
+  const members = await redis.zrangebyscore(
+    ORPHAN_REPLAY_REPAIR_INDEX_KEY,
+    '-inf',
+    now,
+    'LIMIT',
+    0,
+    ORPHAN_REPLAY_REPAIR_BATCH_SIZE,
+  );
+
+  for (const member of members) {
+    const payloadKey = `pr-review-notification:orphan-replay-repair-payload:${member}`;
+    const rawRequest = await redis.get(payloadKey);
+    let request: PrReviewAssociationReplayRequest | null = null;
+
+    if (rawRequest) {
+      try {
+        const parsed = prReviewAssociationReplayRequestSchema.safeParse(
+          JSON.parse(rawRequest),
+        );
+        request = parsed.success ? parsed.data : null;
+      } catch {
+        request = null;
+      }
+    }
+
+    if (!request || !rawRequest) {
+      await redis
+        .multi()
+        .del(payloadKey)
+        .zrem(ORPHAN_REPLAY_REPAIR_INDEX_KEY, member)
+        .exec();
+      continue;
+    }
+
+    const target = {
+      sourceControlProvider: request.sourceControlProvider,
+      repository: request.repository,
+      prNumber: request.prNumber,
+    };
+    if ((await redis.llen(buildOrphanActivityKey(target))) === 0) {
+      await clearOrphanReplayRepair(request, rawRequest).catch(() => undefined);
+      continue;
+    }
+
+    try {
+      await getPrReviewNotificationQueue().add(
+        'replay-pr-review-association',
+        request,
+        {
+          jobId: `association-replay-${request.chainId}-${request.attempt}`,
+        },
+      );
+      await clearOrphanReplayRepair(request, rawRequest).catch(() => undefined);
+    } catch (error) {
+      console.warn(
+        `[repairOrphanPrReviewAssociationReplays] Failed to enqueue replay for ${request.repository}#${request.prNumber}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
 }
 
 async function releaseOrphanReplay(

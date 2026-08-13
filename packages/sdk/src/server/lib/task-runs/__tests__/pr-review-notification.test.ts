@@ -14,7 +14,15 @@ let orphanRevision = 0;
 function createMultiMock() {
   const multi: Record<string, unknown> = {};
 
-  for (const command of ['rpush', 'expire', 'lrange', 'del']) {
+  for (const command of [
+    'rpush',
+    'expire',
+    'lrange',
+    'del',
+    'set',
+    'zadd',
+    'zrem',
+  ]) {
     multi[command] = (...args: unknown[]) => {
       multiCalls.push({ command, args });
       return multi;

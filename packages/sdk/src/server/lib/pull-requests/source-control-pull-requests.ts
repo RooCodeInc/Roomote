@@ -460,7 +460,7 @@ async function resolveEffectivePrAction(taskRun: TaskRun): Promise<PrAction> {
  * association directly. Transient association failures are retried, but must
  * not fail the provider mutation the agent already performed.
  */
-async function persistSourceControlPullRequestAssociation({
+export async function persistSourceControlPullRequestAssociation({
   taskRun,
   result,
   repository,
