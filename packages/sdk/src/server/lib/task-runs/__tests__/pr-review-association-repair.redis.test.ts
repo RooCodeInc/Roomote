@@ -154,4 +154,78 @@ describe('orphan PR review association repair with Redis', () => {
       ),
     ).toHaveLength(1);
   });
+
+  it.each([
+    { name: 'missing', stalePayload: null },
+    { name: 'invalid', stalePayload: '{invalid' },
+  ])(
+    'preserves a newer repair intent during $name stale cleanup and recovers it',
+    async ({ stalePayload }) => {
+      const chainId = '00000000-0000-4000-8000-000000000002';
+      const request = {
+        kind: 'association_replay' as const,
+        sourceControlProvider: 'github' as const,
+        repository,
+        prNumber,
+        chainId,
+        attempt: 1,
+      };
+      const newPayload = JSON.stringify(request);
+      const repairNow = Date.now() + ORPHAN_REPLAY_REPAIR_DELAY_MS;
+      const event = JSON.stringify({
+        repository,
+        prNumber,
+        prUrl: `https://github.com/${repository}/pull/${prNumber}`,
+        event: {
+          kind: 'review',
+          authorLogin: 'alice',
+          reviewState: 'changes_requested',
+        },
+      });
+
+      await redis.rpush(orphanKey, event);
+      await redis.set(markerKey, `${chainId}:0`);
+      if (stalePayload !== null) {
+        await redis.set(repairPayloadKey, stalePayload);
+      }
+      await redis.zadd(repairIndexKey, repairNow, repairMember);
+
+      const originalGet = redis.get.bind(redis);
+      const getSpy = vi
+        .spyOn(redis, 'get')
+        .mockImplementationOnce(async (key) => {
+          const staleValue = await originalGet(key);
+          await redis
+            .multi()
+            .set(repairPayloadKey, newPayload, 'EX', 15 * 60)
+            .zadd(repairIndexKey, repairNow, repairMember)
+            .exec();
+          return staleValue;
+        });
+
+      await repairOrphanPrReviewAssociationReplays({ now: repairNow });
+      getSpy.mockRestore();
+
+      expect(await redis.get(repairPayloadKey)).toBe(newPayload);
+      expect(await redis.zscore(repairIndexKey, repairMember)).not.toBeNull();
+
+      mockQueueAdd.mockRejectedValueOnce(new Error('queue still down'));
+      await repairOrphanPrReviewAssociationReplays({ now: repairNow });
+      expect(await redis.get(repairPayloadKey)).toBe(newPayload);
+      expect(await redis.zscore(repairIndexKey, repairMember)).not.toBeNull();
+
+      await repairOrphanPrReviewAssociationReplays({ now: repairNow });
+      expect(mockQueueAdd).toHaveBeenCalledWith(
+        'replay-pr-review-association',
+        request,
+        { jobId: `association-replay-${chainId}-1` },
+      );
+
+      mockFindManyTaskPullRequests.mockResolvedValue([{ taskId: 'task-1' }]);
+      await replayPrReviewNotificationAssociation(request);
+      expect(await redis.exists(orphanKey)).toBe(0);
+      expect(await redis.exists(repairPayloadKey)).toBe(0);
+      expect(await redis.zscore(repairIndexKey, repairMember)).toBeNull();
+    },
+  );
 });

@@ -152,6 +152,12 @@ redis.call('DEL', KEYS[1])
 redis.call('ZREM', KEYS[2], ARGV[2])
 return 1
 `;
+const CLEAR_MISSING_ORPHAN_REPLAY_REPAIR_SCRIPT = `
+if redis.call('EXISTS', KEYS[1]) ~= 0 then
+  return 0
+end
+return redis.call('ZREM', KEYS[2], ARGV[1])
+`;
 const COMPLETE_REVIEW_CYCLE_SCRIPT = `
 local current = redis.call('GET', KEYS[1])
 if current then
@@ -515,12 +521,26 @@ export async function repairOrphanPrReviewAssociationReplays({
       }
     }
 
-    if (!request || !rawRequest) {
-      await redis
-        .multi()
-        .del(payloadKey)
-        .zrem(ORPHAN_REPLAY_REPAIR_INDEX_KEY, member)
-        .exec();
+    if (!rawRequest) {
+      await redis.eval(
+        CLEAR_MISSING_ORPHAN_REPLAY_REPAIR_SCRIPT,
+        2,
+        payloadKey,
+        ORPHAN_REPLAY_REPAIR_INDEX_KEY,
+        member,
+      );
+      continue;
+    }
+
+    if (!request) {
+      await redis.eval(
+        CLEAR_ORPHAN_REPLAY_REPAIR_SCRIPT,
+        2,
+        payloadKey,
+        ORPHAN_REPLAY_REPAIR_INDEX_KEY,
+        rawRequest,
+        member,
+      );
       continue;
     }
 
