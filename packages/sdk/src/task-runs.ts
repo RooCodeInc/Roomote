@@ -121,6 +121,9 @@ export const updateEnvironmentSetup = (
   options: AppRouterInput['taskRuns']['updateEnvironmentSetup'],
 ) => client.taskRuns.updateEnvironmentSetup.mutate(options);
 
+export const getGoal = (options: AppRouterInput['taskRuns']['getGoal']) =>
+  client.taskRuns.getGoal.query(options);
+
 export const claimGoalContinuation = (
   options: AppRouterInput['taskRuns']['claimGoalContinuation'],
 ) => client.taskRuns.claimGoalContinuation.mutate(options);

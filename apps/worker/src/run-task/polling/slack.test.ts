@@ -99,7 +99,7 @@ function createListenerOptions(overrides?: {
   const logger = createLogger();
   const sendPrompt = overrides?.sendPrompt
     ? vi.fn(overrides.sendPrompt)
-    : vi.fn<ListenerOptions['sendPrompt']>(() => true);
+    : vi.fn<ListenerOptions['sendPrompt']>(async () => true);
   const answerUserInputRequest = overrides?.answerUserInputRequest
     ? vi.fn(overrides.answerUserInputRequest)
     : vi.fn<ListenerOptions['answerUserInputRequest']>(() => true);
