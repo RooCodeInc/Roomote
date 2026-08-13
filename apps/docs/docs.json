@@ -67,6 +67,8 @@
               "providers/inference/azure-openai",
               "providers/inference/baseten",
               "providers/inference/chatgpt",
+              "providers/inference/cloudflare-ai-gateway",
+              "providers/inference/cloudflare-workers-ai",
               "providers/inference/github-copilot",
               "providers/inference/google-gemini",
               "providers/inference/kimi-for-coding",

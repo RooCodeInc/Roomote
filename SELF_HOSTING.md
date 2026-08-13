@@ -401,6 +401,11 @@ common provider keys into worker containers:
 
 - `OPENROUTER_API_KEY`
 - `AI_GATEWAY_API_KEY` (Vercel AI Gateway, `vercel/...` models)
+- `CLOUDFLARE_AI_GATEWAY_API_TOKEN`, `CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID`,
+  and `CLOUDFLARE_AI_GATEWAY_ID` (Cloudflare AI Gateway,
+  `cloudflare-ai-gateway/...` models)
+- `CLOUDFLARE_WORKERS_AI_API_TOKEN` and `CLOUDFLARE_WORKERS_AI_ACCOUNT_ID`
+  (Cloudflare Workers AI, `cloudflare-workers-ai/...` models)
 - `OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY`
 - `MOONSHOT_API_KEY`

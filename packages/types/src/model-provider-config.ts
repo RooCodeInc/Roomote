@@ -426,6 +426,85 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     }),
   },
   {
+    // Provider id matches the models.dev `cloudflare-ai-gateway` provider so
+    // catalog suggestion derivation and gateway pricing lookup resolve
+    // against that multi-vendor catalog.
+    id: 'cloudflare-ai-gateway',
+    label: 'Cloudflare AI Gateway',
+    envVarName: 'CLOUDFLARE_AI_GATEWAY_API_TOKEN',
+    envVarLabel: 'API token',
+    authKind: 'api-key',
+    credentialHelp: {
+      text: 'Create a Cloudflare API token with AI Gateway access. Use the account ID and gateway ID from the Cloudflare dashboard. Connecting this provider does not connect Workers AI.',
+      href: 'https://developers.cloudflare.com/ai-gateway/get-started/',
+      linkLabel: 'Open Cloudflare AI Gateway docs',
+    },
+    additionalEnvFields: [
+      {
+        envVarName: 'CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID',
+        label: 'Account ID',
+        secret: false,
+        required: true,
+        placeholder: 'your-account-id',
+      },
+      {
+        envVarName: 'CLOUDFLARE_AI_GATEWAY_ID',
+        label: 'Gateway ID',
+        secret: false,
+        required: true,
+        placeholder: 'default',
+      },
+    ],
+    defaultRoomoteModel: 'cloudflare-ai-gateway/openai/gpt-5.6-terra',
+    suggestedTaskModels: mapRecommendedTaskModels({
+      'claude-fable-5': 'cloudflare-ai-gateway/anthropic/claude-fable-5',
+      'claude-haiku-4-5': 'cloudflare-ai-gateway/anthropic/claude-haiku-4-5',
+      'claude-opus-5': 'cloudflare-ai-gateway/anthropic/claude-opus-5',
+      'claude-sonnet-5': 'cloudflare-ai-gateway/anthropic/claude-sonnet-5',
+      'gpt-5-6-sol': 'cloudflare-ai-gateway/openai/gpt-5.6-sol',
+      'gpt-5-6-terra': 'cloudflare-ai-gateway/openai/gpt-5.6-terra',
+      'gpt-5-6-luna': 'cloudflare-ai-gateway/openai/gpt-5.6-luna',
+      'glm-5-2': 'cloudflare-ai-gateway/workers-ai/@cf/zai-org/glm-5.2',
+      'kimi-k3': 'cloudflare-ai-gateway/moonshotai/kimi-k3',
+    }),
+    recommendedRoleModels: {
+      helper: 'cloudflare-ai-gateway/openai/gpt-5.6-luna',
+      codeReview: 'cloudflare-ai-gateway/anthropic/claude-sonnet-5',
+      explore: 'cloudflare-ai-gateway/openai/gpt-5.6-luna',
+      planning: 'cloudflare-ai-gateway/anthropic/claude-opus-5',
+    },
+    recommendedRoleReasoningEfforts: { codeReview: 'medium' },
+  },
+  {
+    // Provider id matches the models.dev `cloudflare-workers-ai` provider so
+    // catalog suggestion derivation and gateway pricing lookup resolve
+    // against Cloudflare-hosted `@cf/` models.
+    id: 'cloudflare-workers-ai',
+    label: 'Cloudflare Workers AI',
+    envVarName: 'CLOUDFLARE_WORKERS_AI_API_TOKEN',
+    envVarLabel: 'API token',
+    authKind: 'api-key',
+    credentialHelp: {
+      text: 'Create a Cloudflare API token with Workers AI access. Use the account ID from the Cloudflare dashboard. A gateway ID is not required, and connecting this provider does not connect AI Gateway.',
+      href: 'https://developers.cloudflare.com/workers-ai/configuration/open-ai-compatibility/',
+      linkLabel: 'Open Cloudflare Workers AI docs',
+    },
+    additionalEnvFields: [
+      {
+        envVarName: 'CLOUDFLARE_WORKERS_AI_ACCOUNT_ID',
+        label: 'Account ID',
+        secret: false,
+        required: true,
+        placeholder: 'your-account-id',
+      },
+    ],
+    defaultRoomoteModel: 'cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code',
+    suggestedTaskModels: mapRecommendedTaskModels({
+      'glm-5-2': 'cloudflare-workers-ai/@cf/zai-org/glm-5.2',
+      'kimi-k2-7-code': 'cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code',
+    }),
+  },
+  {
     id: 'openai',
     label: 'OpenAI',
     envVarName: 'OPENAI_API_KEY',

@@ -318,4 +318,67 @@ describe('inference gateway key lookups', () => {
     expect(parseInferenceGatewayKeys('')).toEqual([]);
     expect(parseInferenceGatewayKeys(undefined)).toEqual([]);
   });
+
+  it('registers Cloudflare AI Gateway with account URL templating and a required gateway header', () => {
+    const provider = getInferenceGatewayProvider('cloudflare-ai-gateway');
+
+    expect(provider).toMatchObject({
+      envVarNames: ['CLOUDFLARE_AI_GATEWAY_API_TOKEN'],
+      upstreamBaseUrl:
+        'https://api.cloudflare.com/client/v4/accounts/{resource}/ai',
+      resource: { envVarName: 'CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID' },
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      requiredHeaders: [
+        {
+          envVarName: 'CLOUDFLARE_AI_GATEWAY_ID',
+          headerName: 'cf-aig-gateway-id',
+        },
+      ],
+      openCodeBaseUrlSuffix: '/v1',
+    });
+    expect(provider?.allowedPaths).toEqual(
+      expect.arrayContaining([
+        '/v1/chat/completions',
+        '/v1/embeddings',
+        '/v1/models',
+      ]),
+    );
+    expect(
+      getInferenceGatewayProviderByEnvVarName('CLOUDFLARE_AI_GATEWAY_API_TOKEN')
+        ?.id,
+    ).toBe('cloudflare-ai-gateway');
+    expect(
+      buildInferenceGatewayOpenCodeBaseUrl(
+        'https://api.example.com/api/inference',
+        provider!,
+      ),
+    ).toBe('https://api.example.com/api/inference/cloudflare-ai-gateway/v1');
+  });
+
+  it('registers Cloudflare Workers AI with account URL templating and no gateway id', () => {
+    const provider = getInferenceGatewayProvider('cloudflare-workers-ai');
+
+    expect(provider).toMatchObject({
+      envVarNames: ['CLOUDFLARE_WORKERS_AI_API_TOKEN'],
+      upstreamBaseUrl:
+        'https://api.cloudflare.com/client/v4/accounts/{resource}/ai',
+      resource: { envVarName: 'CLOUDFLARE_WORKERS_AI_ACCOUNT_ID' },
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      openCodeBaseUrlSuffix: '/v1',
+    });
+    expect(provider?.requiredHeaders).toBeUndefined();
+    expect(provider?.allowedPaths).toEqual(
+      expect.arrayContaining(['/v1/chat/completions', '/v1/embeddings']),
+    );
+    expect(
+      getInferenceGatewayProviderByEnvVarName('CLOUDFLARE_WORKERS_AI_API_TOKEN')
+        ?.id,
+    ).toBe('cloudflare-workers-ai');
+    expect(
+      buildInferenceGatewayOpenCodeBaseUrl(
+        'https://api.example.com/api/inference',
+        provider!,
+      ),
+    ).toBe('https://api.example.com/api/inference/cloudflare-workers-ai/v1');
+  });
 });

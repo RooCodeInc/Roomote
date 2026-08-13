@@ -160,6 +160,15 @@ export interface InferenceGatewayProvider {
   resource?: {
     envVarName: string;
   };
+  /**
+   * Extra headers resolved from deployment env vars and injected on every
+   * forwarded request. Used when a second identity value cannot fit in
+   * `{resource}` (Cloudflare AI Gateway's `cf-aig-gateway-id`).
+   */
+  requiredHeaders?: readonly {
+    envVarName: string;
+    headerName: string;
+  }[];
   /** How the upstream expects its API key when the gateway forwards. */
   authHeader?: InferenceGatewayAuthHeader;
   /** A configured upstream key is forwarded when present but is not required. */
@@ -336,6 +345,37 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       name: 'Together AI',
       envVarNames: ['TOGETHER_API_KEY'],
       upstreamBaseUrl: 'https://api.together.xyz',
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+    },
+    {
+      id: 'cloudflare-ai-gateway',
+      name: 'Cloudflare AI Gateway',
+      envVarNames: ['CLOUDFLARE_AI_GATEWAY_API_TOKEN'],
+      upstreamBaseUrl:
+        'https://api.cloudflare.com/client/v4/accounts/{resource}/ai',
+      resource: { envVarName: 'CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID' },
+      requiredHeaders: [
+        {
+          envVarName: 'CLOUDFLARE_AI_GATEWAY_ID',
+          headerName: 'cf-aig-gateway-id',
+        },
+      ],
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: [
+        ...OPENAI_COMPATIBLE_INFERENCE_PATHS,
+        ...OPENAI_RESPONSES_INFERENCE_PATHS,
+      ],
+      openCodeBaseUrlSuffix: '/v1',
+    },
+    {
+      id: 'cloudflare-workers-ai',
+      name: 'Cloudflare Workers AI',
+      envVarNames: ['CLOUDFLARE_WORKERS_AI_API_TOKEN'],
+      upstreamBaseUrl:
+        'https://api.cloudflare.com/client/v4/accounts/{resource}/ai',
+      resource: { envVarName: 'CLOUDFLARE_WORKERS_AI_ACCOUNT_ID' },
       authHeader: { name: 'authorization', scheme: 'bearer' },
       allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
       openCodeBaseUrlSuffix: '/v1',
