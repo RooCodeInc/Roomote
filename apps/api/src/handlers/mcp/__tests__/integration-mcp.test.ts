@@ -387,6 +387,52 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     expect(cancelled).toBe(true);
   });
 
+  it('normalizes an SSE tools/list result without waiting for the stream to close', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-1', userId: null });
+
+    let cancelled = false;
+    const neverClosingSseBody = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            'event: message\n' +
+              'data: {"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"search_issues","inputSchema":{"type":"object","properties":{"tags":{"type":["array","null"],"items":{"type":"string"}}}}}]}}\n\n',
+          ),
+        );
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(neverClosingSseBody, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp('pylon', createRunToken()),
+      createToolsListRequest(1),
+    );
+    const body = (await response.json()) as {
+      result: {
+        tools: Array<{
+          inputSchema: { properties: Record<string, unknown> };
+        }>;
+      };
+    };
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('application/json');
+    expect(body.result.tools[0]?.inputSchema.properties.tags).toEqual({
+      anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }],
+    });
+    expect(cancelled).toBe(true);
+  });
+
   it('strips Resend tool schema patterns for Azure-compatible tool calls', async () => {
     mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
     mockFindConnection.mockResolvedValue({ id: 'conn-1', userId: null });

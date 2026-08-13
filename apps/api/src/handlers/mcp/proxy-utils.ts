@@ -1132,10 +1132,19 @@ export function createMcpProxy(config: McpProxyConfig) {
         upstreamResponse.ok
       ) {
         try {
-          const payload = parseMcpJsonRpcPayload(
-            await upstreamResponse.clone().text(),
-            upstreamResponse.headers.get('content-type'),
-          );
+          const requestId = getJsonRpcRequestId(parsedBody);
+          const sseBody =
+            contentType?.includes('text/event-stream') &&
+            requestId !== null &&
+            !Array.isArray(parsedBody)
+              ? upstreamResponse.clone().body
+              : null;
+          const payload = sseBody
+            ? await readMatchingSseJsonRpcResponse(sseBody, requestId)
+            : parseMcpJsonRpcPayload(
+                await upstreamResponse.clone().text(),
+                contentType,
+              );
           if (!payload) {
             throw new Error('Unable to parse upstream tools/list payload');
           }
@@ -1151,6 +1160,10 @@ export function createMcpProxy(config: McpProxyConfig) {
           );
           const headers = buildProxyResponseHeaders(upstreamResponse.headers);
           headers.set('content-type', 'application/json');
+
+          if (sseBody) {
+            upstreamResponse.body?.cancel().catch(() => {});
+          }
 
           return new Response(JSON.stringify(filteredPayload), {
             status: upstreamResponse.status,
