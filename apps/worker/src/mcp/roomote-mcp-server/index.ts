@@ -39,6 +39,7 @@ import { handleCancelTask } from './cancel-task.js';
 import { handleUpdateTaskModels } from './update-task-models.js';
 import { handleSendMessage } from './send-message.js';
 import { handleListEnvironments } from './list-environments.js';
+import { handleListTaskModels } from './list-models.js';
 import {
   handleCreateEnvironment,
   handleRecordVerification,
@@ -552,6 +553,7 @@ const manageTasksToolDescription =
   `Use action "launch" to create and start a new task against an environment using ${PRODUCT_NAME}'s default standard workflow (requires prompt and environmentId). ` +
   'Use action "cancel" to cancel an active task (requires taskId). ' +
   'Use action "send_message" to send a follow-up message to a running task (requires taskId and message). ' +
+  'Use action "list_models" to list the enabled model IDs available for task model selection. Call it before "update_models" when resolving a requested model name to an exact ID. ' +
   'Use action "update_models" ONLY when the user explicitly asks to change the model or reasoning level for a task (requires role; taskId defaults to the current task). Pass the desired model id and/or reasoningEffort; omit both to reset the role to the deployment default. Users usually phrase both together: in "switch to Luna Max" or "use GPT 5.4 medium", the trailing low/medium/high/extra high/max word is the reasoningEffort and the rest names the model — set BOTH fields in one call. Changes apply from the next turn, so a change to the current task does not affect the turn that is already running.';
 
 const manageTasksInputSchema = {
@@ -564,6 +566,7 @@ const manageTasksInputSchema = {
       'launch',
       'cancel',
       'send_message',
+      'list_models',
       'update_models',
       'list_environments',
     ])
@@ -634,7 +637,7 @@ const manageTasksInputSchema = {
     .string()
     .optional()
     .describe(
-      'For update_models: desired model id in provider/model format (must be enabled for the deployment). Omit to keep the deployment default model for the role.',
+      'For update_models: desired model id in provider/model format. Call list_models first and pass an exact returned model ID. Omit to keep the deployment default model for the role.',
     ),
   reasoningEffort: z
     .enum(['low', 'medium', 'high', 'xhigh', 'max'])
@@ -795,6 +798,9 @@ roomoteMcpServer.registerTool(
           },
           config,
         );
+      }
+      case 'list_models': {
+        return handleListTaskModels(config);
       }
       case 'send_message': {
         if (!params.taskId?.trim()) {

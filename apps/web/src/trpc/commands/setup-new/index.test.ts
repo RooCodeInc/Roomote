@@ -19,6 +19,7 @@ const {
   mockGetLinkedDiscordAccount,
   mockGetTeamsIntegrationStatus,
   mockInvalidateTelegramRuntimeCredentialsCache,
+  mockValidateSetupModelProviderCredentials,
 } = vi.hoisted(() => ({
   mockValidateTeamsBotCredentials: vi.fn(async () => undefined),
   mockTxSelect: vi.fn(),
@@ -43,6 +44,14 @@ const {
   mockGetLinkedDiscordAccount: vi.fn(),
   mockGetTeamsIntegrationStatus: vi.fn(),
   mockInvalidateTelegramRuntimeCredentialsCache: vi.fn(),
+  mockValidateSetupModelProviderCredentials: vi
+    .fn()
+    .mockResolvedValue(undefined),
+}));
+
+vi.mock('../task-models/provider-validation', () => ({
+  validateSetupModelProviderCredentials:
+    mockValidateSetupModelProviderCredentials,
 }));
 
 vi.mock('@/lib/server/setup-funnel-telemetry', () => ({

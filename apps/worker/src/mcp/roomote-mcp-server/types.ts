@@ -2,6 +2,8 @@ import type {
   CommunicationProvider,
   SourceControlProvider,
   TaskArtifactType,
+  TaskModelOption,
+  TaskGoal,
 } from '@roomote/types';
 
 export interface ArtifactConfig {
@@ -18,6 +20,18 @@ export interface RoomoteConfig {
   authBypassHeaderName?: string;
   authBypassHeaderValue?: string;
 }
+
+export type TaskGoalWire = Omit<TaskGoal, 'completedAt'> & {
+  completedAt: string | null;
+};
+
+export interface TaskGoalResponse {
+  goal: TaskGoalWire | null;
+}
+
+export type TaskGoalMutationResponse =
+  | { updated: true; goal: TaskGoalWire }
+  | { updated: false; reason: string; goal: TaskGoalWire | null };
 
 export interface TaskSearchResult {
   id: string;
@@ -282,6 +296,11 @@ export interface EnvironmentInfo {
 
 export interface ListEnvironmentsResponse {
   environments: EnvironmentInfo[];
+}
+
+export interface ListTaskModelsResponse {
+  models: TaskModelOption[];
+  defaultModelId: string;
 }
 
 export interface CreateArtifactResponse {

@@ -1,6 +1,7 @@
 import {
   buildOpenCodeModelReasoningOptions,
   mergeOpenCodeModelReasoningOptions,
+  stripOpenCodeModelReasoningOptions,
 } from '../opencode-reasoning';
 
 describe('buildOpenCodeModelReasoningOptions', () => {
@@ -290,5 +291,101 @@ describe('mergeOpenCodeModelReasoningOptions', () => {
     expect(
       mergeOpenCodeModelReasoningOptions({}, 'no-provider', 'high'),
     ).toEqual({});
+  });
+});
+
+describe('stripOpenCodeModelReasoningOptions', () => {
+  it('removes every provider reasoning shape the builders can emit', () => {
+    const merged = [
+      'anthropic/claude-sonnet-5',
+      'amazon-bedrock/anthropic.claude-sonnet-5-v1:0',
+      'openrouter/z-ai/glm-5.2',
+      'litellm/coding',
+      'github-copilot/claude-3.7-sonnet-thought',
+    ].reduce<Record<string, unknown>>(
+      (config, modelId) =>
+        mergeOpenCodeModelReasoningOptions(config, modelId, 'high'),
+      {},
+    );
+
+    expect(stripOpenCodeModelReasoningOptions(merged)).toEqual({});
+  });
+
+  it('keeps non-reasoning model options and provider metadata intact', () => {
+    expect(
+      stripOpenCodeModelReasoningOptions({
+        openai: {
+          models: {
+            'gpt-5.6-terra': {
+              options: { reasoningEffort: 'high', serviceTier: 'priority' },
+            },
+          },
+        },
+        litellm: {
+          npm: '@ai-sdk/openai-compatible',
+          name: 'LiteLLM',
+          options: { baseURL: 'https://litellm.example.com/v1' },
+          models: {
+            coding: { name: 'coding' },
+          },
+        },
+      }),
+    ).toEqual({
+      openai: {
+        models: {
+          'gpt-5.6-terra': {
+            options: { serviceTier: 'priority' },
+          },
+        },
+      },
+      litellm: {
+        npm: '@ai-sdk/openai-compatible',
+        name: 'LiteLLM',
+        options: { baseURL: 'https://litellm.example.com/v1' },
+        models: {
+          coding: { name: 'coding' },
+        },
+      },
+    });
+  });
+
+  it('prunes model, models, and provider entries emptied by the strip', () => {
+    expect(
+      stripOpenCodeModelReasoningOptions({
+        anthropic: {
+          models: {
+            'claude-sonnet-5': {
+              options: { thinking: { type: 'adaptive' }, effort: 'high' },
+            },
+            'claude-haiku-4-5': {
+              name: 'claude-haiku-4-5',
+              options: { thinking: { type: 'adaptive' } },
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      anthropic: {
+        models: {
+          'claude-haiku-4-5': { name: 'claude-haiku-4-5' },
+        },
+      },
+    });
+  });
+
+  it('passes malformed provider and model entries through unchanged', () => {
+    expect(
+      stripOpenCodeModelReasoningOptions({
+        broken: 'not-an-object',
+        listShaped: ['a'],
+        noModels: { name: 'provider-without-models' },
+        oddModels: { models: { entry: 'not-an-object' } },
+      }),
+    ).toEqual({
+      broken: 'not-an-object',
+      listShaped: ['a'],
+      noModels: { name: 'provider-without-models' },
+      oddModels: { models: { entry: 'not-an-object' } },
+    });
   });
 });

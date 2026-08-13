@@ -15,6 +15,8 @@ const {
   mockIsChatGptSubscriptionConnected,
   mockIsGitHubCopilotSubscriptionConnected,
   mockIsXaiSubscriptionConnected,
+  mockValidateSetupModelProviderCredentials,
+  mockCollectCandidateProviderCredentials,
 } = vi.hoisted(() => ({
   mockFindDeploymentSettings: vi.fn(),
   mockInsertDeploymentSettings: vi.fn(),
@@ -28,6 +30,14 @@ const {
   mockIsChatGptSubscriptionConnected: vi.fn(),
   mockIsGitHubCopilotSubscriptionConnected: vi.fn(),
   mockIsXaiSubscriptionConnected: vi.fn(),
+  mockValidateSetupModelProviderCredentials: vi.fn(),
+  mockCollectCandidateProviderCredentials: vi.fn(),
+}));
+
+vi.mock('./provider-validation', () => ({
+  validateSetupModelProviderCredentials:
+    mockValidateSetupModelProviderCredentials,
+  collectCandidateProviderCredentials: mockCollectCandidateProviderCredentials,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -146,6 +156,14 @@ describe('lookupTaskModelCommand', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockValidateSetupModelProviderCredentials.mockResolvedValue(undefined);
+    mockCollectCandidateProviderCredentials.mockResolvedValue({
+      values: [],
+      clearedEnvVarNames: [],
+      changedValues: [],
+      clearedPersistedEnvVarNames: [],
+      persistedEnv: {},
+    });
     vi.stubGlobal('fetch', fetchMock);
     for (const name of PROVIDER_ENV_VAR_NAMES) {
       originalProviderEnvValues.set(name, process.env[name]);
@@ -1429,6 +1447,15 @@ describe('task model provider commands', () => {
       apiKey: '  sk-ant-test  ',
     });
 
+    expect(mockValidateSetupModelProviderCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: expect.objectContaining({ id: 'anthropic' }),
+        apiKey: '  sk-ant-test  ',
+        action: 'save it',
+        modelId: 'anthropic/claude-sonnet-5',
+      }),
+    );
+
     expect(mockUpsertDeploymentEnvironmentVariables).toHaveBeenCalledWith(
       expect.anything(),
       {
@@ -1483,6 +1510,26 @@ describe('task model provider commands', () => {
         (provider) => provider.id === 'anthropic',
       ),
     ).toMatchObject({ savedApiKeySatisfied: true });
+  });
+
+  it('does not persist credentials when inference validation fails', async () => {
+    mockValidateSetupModelProviderCredentials.mockRejectedValueOnce(
+      new Error(
+        'Anthropic: The inference provider rejected these credentials.',
+      ),
+    );
+
+    await expect(
+      saveTaskModelProviderCommand(buildMockAuth(), {
+        provider: 'anthropic',
+        apiKey: 'bad-key',
+      }),
+    ).rejects.toThrow(
+      'Anthropic: The inference provider rejected these credentials.',
+    );
+
+    expect(mockUpsertDeploymentEnvironmentVariables).not.toHaveBeenCalled();
+    expect(txInsert).not.toHaveBeenCalled();
   });
 
   it('keeps other connected providers models when seeding a fresh deployment', async () => {

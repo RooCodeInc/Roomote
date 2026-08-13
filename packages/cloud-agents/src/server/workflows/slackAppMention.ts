@@ -308,6 +308,7 @@ export async function slackAppMention({
   const threadContext = formatSlackThreadContext({
     threadMessages,
     ts,
+    includeMessagesAfterCurrent: true,
     latestOwnBotReply:
       latestOwnBotReplyText && latestOwnBotReplyTs
         ? {
