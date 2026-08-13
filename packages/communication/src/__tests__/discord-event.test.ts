@@ -314,6 +314,34 @@ describe('Discord Gateway event normalization', () => {
     expect(discordEventToQueuedCommunicationMessage(botEvent)).toBeNull();
     expect(discordEventToQueuedCommunicationMessage(help)).toBeNull();
   });
+
+  it('parses goal commands without queueing them as ordinary messages', () => {
+    const event = parse({
+      op: 0,
+      t: 'INTERACTION_CREATE',
+      d: {
+        id: 'interaction-goal',
+        application_id: 'application-1',
+        type: 2,
+        token: 'token',
+        channel_id: 'channel-1',
+        user: { id: 'user-1', username: 'matt' },
+        data: {
+          name: 'GOAL',
+          options: [
+            { name: 'objective', type: 3, value: '  Ship the release  ' },
+          ],
+        },
+      },
+    });
+
+    expect(getDiscordInteractionCommand(event)).toEqual({
+      name: 'goal',
+      objective: 'Ship the release',
+    });
+    expect(isDiscordTaskEntryEvent(event)).toBe(true);
+    expect(discordEventToQueuedCommunicationMessage(event)).toBeNull();
+  });
 });
 
 describe('component interaction envelopes', () => {

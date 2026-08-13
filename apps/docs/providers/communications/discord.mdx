@@ -24,7 +24,7 @@ does not require an inbound webhook or public callback URL.
    token, and save.
 
 Roomote reads the bot and application identity from the token and registers
-the `/new`, `/link`, and `/help` commands automatically. You do not need to
+the `/new`, `/goal`, `/link`, and `/help` commands automatically. You do not need to
 copy an application ID or bot name into Roomote.
 
 <Warning>
@@ -111,6 +111,9 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
 - send the bot a direct message
 - use `/new request:<request>` to force a fresh task instead of continuing the
   current one
+- use `/goal objective:<objective>` in an active task thread or DM to keep the
+  current task working toward that objective across multiple turns; this does
+  not create a new task
 - when Roomote asks where to run a task, use a button or reply naturally in the
   same thread or DM; `yes`, `never mind`, and `use API instead` confirm, cancel,
   or revise the pending route

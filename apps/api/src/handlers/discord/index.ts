@@ -93,6 +93,7 @@ import {
   resolveDiscordChannelContext,
 } from './task-launch.js';
 import { startNewDiscordTask } from './task-orchestration.js';
+import { startDiscordTaskGoal } from './goal-command.js';
 import {
   buildDiscordContinuationPrompt,
   fetchDiscordThreadHistoryBestEffort,
@@ -154,6 +155,7 @@ const DISCORD_HELP_MESSAGE = [
   '',
   '**Available commands**',
   '`/new request:<request>` — start a fresh task.',
+  '`/goal objective:<objective>` — enable Goal Mode for the current task.',
   '`/link code:<code>` — link this Discord account in a DM with me.',
   '`/help` — show this message.',
   '',
@@ -509,7 +511,11 @@ async function processDiscordGatewayEvent(
   }
 
   if (command && command.name !== 'new') {
-    return { ok: true, ignored: 'unsupported_command' };
+    if (command.name === 'goal') {
+      // Handled after resolving the current conversation and linked user.
+    } else {
+      return { ok: true, ignored: 'unsupported_command' };
+    }
   }
   if (command?.name === 'new' && !command.request) {
     await replyToDiscordEvent({
@@ -682,6 +688,47 @@ async function processDiscordGatewayEvent(
       : {}),
     userId: senderUserId,
   });
+
+  if (command?.name === 'goal') {
+    if (!command.objective) {
+      await replyToDiscordEvent({
+        provider: resolved.provider,
+        applicationId: resolved.applicationId,
+        channel,
+        interaction: interactionReplyContext(event),
+        text: 'Add what you want Roomote to keep working toward in the `objective` field.',
+        ephemeral: true,
+      });
+      return { ok: true, goalStarted: false, reason: 'missing_objective' };
+    }
+    if (!activeRun) {
+      await replyToDiscordEvent({
+        provider: resolved.provider,
+        applicationId: resolved.applicationId,
+        channel,
+        interaction: interactionReplyContext(event),
+        text: 'Use `/goal` in an active Roomote task thread or DM. Start a task with `/new` or mention me first.',
+        ephemeral: true,
+      });
+      return { ok: true, goalStarted: false, reason: 'no_active_task' };
+    }
+
+    const result = await startDiscordTaskGoal({
+      taskId: activeRun.taskId,
+      userId: senderUserId,
+      objective: command.objective,
+      clientMessageId: interaction?.id ?? event.eventId,
+    });
+    await replyToDiscordEvent({
+      provider: resolved.provider,
+      applicationId: resolved.applicationId,
+      channel,
+      interaction: interactionReplyContext(event),
+      text: result.success ? 'Goal Mode enabled.' : result.error,
+      ephemeral: true,
+    });
+    return { ok: true, goalStarted: result.success, runId: activeRun.id };
+  }
 
   const messageAttachments = message
     ? getDiscordMessageAttachments(message)
