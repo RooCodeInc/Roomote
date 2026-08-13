@@ -24,6 +24,8 @@ describe('buildOpenCodeCliEnv', () => {
     'R_CHATGPT_FAST_MODE',
     'LITELLM_BASE_URL',
     'LITELLM_API_KEY',
+    'AWS_REGION',
+    'AWS_BEARER_TOKEN_BEDROCK',
     'GOOGLE_APPLICATION_CREDENTIALS',
     'MISTRAL_API_KEY',
     'BASH_ENV',
@@ -159,17 +161,163 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
-  it('strips Bedrock thinking config while keeping the model selection', () => {
+  it('rewrites Mantle GPT ids and registers their OpenAI-compatible provider', () => {
+    // A helper model saved as `bedrock-mantle/openai.*` is served by Mantle's
+    // OpenAI Responses endpoint under the dedicated runtime provider — the
+    // same alignment the task worker applies. Without it, OpenCode rejects
+    // the id with ProviderModelNotFoundError.
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_SMALL_MODEL: 'bedrock-mantle/openai.gpt-5.6-luna',
+      AWS_REGION: 'us-east-1',
+    });
+
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
+      model: 'openrouter/openai/gpt-5.4',
+      small_model: 'bedrock-mantle-openai/openai.gpt-5.6-luna',
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+      provider: {
+        'bedrock-mantle-openai': {
+          npm: '@ai-sdk/openai',
+          name: 'Amazon Bedrock',
+          options: {
+            baseURL: 'https://bedrock-mantle.us-east-1.api.aws/openai/v1',
+            apiKey: '{env:AWS_BEARER_TOKEN_BEDROCK}',
+          },
+          models: {
+            'openai.gpt-5.6-luna': { name: 'openai.gpt-5.6-luna' },
+          },
+        },
+      },
+    });
+  });
+
+  it('registers the Mantle Anthropic provider for Claude Mantle helper models', () => {
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'bedrock-mantle/anthropic.claude-sonnet-5',
+      AWS_REGION: 'eu-west-1',
+    });
+
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
+      model: 'bedrock-mantle/anthropic.claude-sonnet-5',
+      small_model: 'bedrock-mantle/anthropic.claude-sonnet-5',
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+      provider: {
+        'bedrock-mantle': {
+          npm: '@ai-sdk/anthropic',
+          name: 'Amazon Bedrock',
+          options: {
+            baseURL: 'https://bedrock-mantle.eu-west-1.api.aws/anthropic/v1',
+            apiKey: '{env:AWS_BEARER_TOKEN_BEDROCK}',
+          },
+          models: {
+            'anthropic.claude-sonnet-5': {
+              name: 'anthropic.claude-sonnet-5',
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it('registers bearer-token credentials on the native Bedrock provider', () => {
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'amazon-bedrock/anthropic.claude-sonnet-5-v1:0',
+      AWS_REGION: 'us-east-1',
+    });
+
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
+      model: 'amazon-bedrock/anthropic.claude-sonnet-5-v1:0',
+      small_model: 'amazon-bedrock/anthropic.claude-sonnet-5-v1:0',
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+      provider: {
+        'amazon-bedrock': {
+          npm: '@ai-sdk/amazon-bedrock',
+          name: 'Amazon Bedrock',
+          options: { apiKey: '{env:AWS_BEARER_TOKEN_BEDROCK}' },
+          models: {
+            'anthropic.claude-sonnet-5-v1:0': {
+              name: 'anthropic.claude-sonnet-5-v1:0',
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it('strips Bedrock thinking config while keeping the provider registration', () => {
     const env = buildOpenCodeCliEnv({
       R_MODEL: 'amazon-bedrock/anthropic.claude-sonnet-5-v1:0',
       R_SMALL_MODEL: 'amazon-bedrock/anthropic.claude-haiku-4-5-v1:0',
       R_SMALL_MODEL_REASONING_EFFORT: 'medium',
+      AWS_REGION: 'us-east-1',
     });
 
     expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
       model: 'amazon-bedrock/anthropic.claude-sonnet-5-v1:0',
       small_model: 'amazon-bedrock/anthropic.claude-haiku-4-5-v1:0',
       permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+      provider: {
+        'amazon-bedrock': {
+          npm: '@ai-sdk/amazon-bedrock',
+          name: 'Amazon Bedrock',
+          options: { apiKey: '{env:AWS_BEARER_TOKEN_BEDROCK}' },
+          models: {
+            // The reasoning options are stripped; the registration survives.
+            'anthropic.claude-sonnet-5-v1:0': {
+              name: 'anthropic.claude-sonnet-5-v1:0',
+            },
+            'anthropic.claude-haiku-4-5-v1:0': {
+              name: 'anthropic.claude-haiku-4-5-v1:0',
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it('adds Bedrock registrations to operator-supplied config content', () => {
+    // Operator config skips the model-backed builder, but Bedrock role
+    // models still need their providers registered or they fail with
+    // ProviderModelNotFoundError.
+    const env = buildOpenCodeCliEnv({
+      R_MODEL: 'bedrock-mantle/openai.gpt-5.6-luna',
+      AWS_REGION: 'us-east-1',
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        model: 'litellm/coding',
+        provider: {
+          litellm: {
+            npm: '@ai-sdk/openai-compatible',
+            name: 'LiteLLM',
+            options: { baseURL: 'https://litellm.example.com/v1' },
+            models: { coding: { name: 'coding' } },
+          },
+        },
+      }),
+    });
+
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
+      model: 'litellm/coding',
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+      provider: {
+        litellm: {
+          npm: '@ai-sdk/openai-compatible',
+          name: 'LiteLLM',
+          options: { baseURL: 'https://litellm.example.com/v1' },
+          models: { coding: { name: 'coding' } },
+        },
+        'bedrock-mantle-openai': {
+          npm: '@ai-sdk/openai',
+          name: 'Amazon Bedrock',
+          options: {
+            baseURL: 'https://bedrock-mantle.us-east-1.api.aws/openai/v1',
+            apiKey: '{env:AWS_BEARER_TOKEN_BEDROCK}',
+          },
+          models: {
+            'openai.gpt-5.6-luna': { name: 'openai.gpt-5.6-luna' },
+          },
+        },
+      },
     });
   });
 

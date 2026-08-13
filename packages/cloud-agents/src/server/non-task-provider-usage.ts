@@ -7,6 +7,7 @@ import {
   type PermissionRuleset,
 } from '@opencode-ai/sdk/v2/client';
 import { resolveEffectiveModelRuntimeEnv } from '@roomote/db/server';
+import { toBedrockMantleRuntimeModelId } from '@roomote/types';
 import type { z } from 'zod';
 import zodToJsonSchema from 'zod-to-json-schema';
 
@@ -286,8 +287,19 @@ async function resolveNonTaskModelRuntime(model?: string): Promise<{
   }
 
   return {
-    model: resolvedModel,
-    resolvedModelRuntimeEnv,
+    // The prompt must address the same runtime provider id the helper
+    // server's config registered (Bedrock Mantle GPT ids run under
+    // `bedrock-mantle-openai`), mirroring the task worker's rewrite.
+    model: toBedrockMantleRuntimeModelId(resolvedModel),
+    // An explicit model rides into the server lease env as the primary role
+    // model so the config builder registers its provider — the deployment's
+    // role models may not include it, and an unregistered Bedrock (or
+    // OpenAI-compatible) id fails with ProviderModelNotFoundError before any
+    // request is made. The lease cache keys on env, so distinct explicit
+    // models get their own servers instead of colliding.
+    resolvedModelRuntimeEnv: requestedModel
+      ? { ...resolvedModelRuntimeEnv, R_MODEL: requestedModel }
+      : resolvedModelRuntimeEnv,
   };
 }
 
@@ -342,10 +354,14 @@ async function resolveModelForInputModality(
     ...modalityModels,
     runtime.resolvedModelRuntimeEnv.R_MODEL,
     runtime.model,
-  ].filter(
-    (candidate, index, values): candidate is string =>
-      Boolean(candidate) && values.indexOf(candidate) === index,
-  );
+  ]
+    .map((candidate) =>
+      candidate ? toBedrockMantleRuntimeModelId(candidate) : candidate,
+    )
+    .filter(
+      (candidate, index, values): candidate is string =>
+        Boolean(candidate) && values.indexOf(candidate) === index,
+    );
   const timeoutMs = params.timeoutMs ?? 120_000;
   const server = await leaseOpenCodeSdkServer({
     env: runtime.resolvedModelRuntimeEnv,

@@ -543,6 +543,99 @@ describe('resolveOpenCodeSmallModel', () => {
     expect(sessionPromptMock.mock.calls[0]?.[0]).not.toHaveProperty('format');
   });
 
+  it('addresses Mantle GPT helper models by their runtime provider id', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/z-ai/glm-5.2',
+      // The dashboard saves Mantle GPT helper models under `bedrock-mantle/`;
+      // the runtime provider that actually serves them (and that the helper
+      // server's config registers) is `bedrock-mantle-openai`.
+      R_SMALL_MODEL: 'bedrock-mantle/openai.gpt-5.6-luna',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: { error: null },
+        parts: [{ type: 'text', text: 'routed' }],
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+
+    await generateTrackedNonTaskText({
+      surface: NON_TASK_INFERENCE_SURFACES.routerTaskRouting,
+      prompt: 'Choose a workspace.',
+    });
+
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: {
+          providerID: 'bedrock-mantle-openai',
+          modelID: 'openai.gpt-5.6-luna',
+        },
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('registers an explicit Bedrock model on the helper server it leases', async () => {
+    process.env = {
+      ...originalEnv,
+    };
+    // The deployment's role models do not include the explicit model — its
+    // provider registration must come from the explicit model itself.
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/z-ai/glm-5.2',
+      AWS_REGION: 'us-east-1',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: { error: null },
+        parts: [{ type: 'text', text: 'ok' }],
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+
+    await generateTrackedNonTaskText({
+      surface: NON_TASK_INFERENCE_SURFACES.routerTaskRouting,
+      model: 'bedrock-mantle/openai.gpt-5.6-luna',
+      prompt: 'Choose a workspace.',
+    });
+
+    const spawnEnv = spawnMock.mock.calls[0]?.[2]?.env as
+      | NodeJS.ProcessEnv
+      | undefined;
+    const spawnedConfig = JSON.parse(
+      spawnEnv?.OPENCODE_CONFIG_CONTENT ?? '{}',
+    ) as {
+      provider?: Record<string, unknown>;
+    };
+
+    expect(spawnedConfig.provider).toMatchObject({
+      'bedrock-mantle-openai': {
+        models: {
+          'openai.gpt-5.6-luna': { name: 'openai.gpt-5.6-luna' },
+        },
+      },
+    });
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: {
+          providerID: 'bedrock-mantle-openai',
+          modelID: 'openai.gpt-5.6-luna',
+        },
+      }),
+      expect.any(Object),
+    );
+  });
+
   it('uses an audio-capable configured model for native file prompts', async () => {
     process.env = {
       ...originalEnv,

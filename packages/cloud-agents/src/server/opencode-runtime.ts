@@ -7,12 +7,16 @@ import {
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   isTaskModelIdDisabled,
+  mergeAmazonBedrockProviderConfig,
+  mergeBedrockMantleOpenAiProviderConfig,
+  mergeBedrockMantleProviderConfig,
   mergeOpenAiCompatibleProviderConfig,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenCodeChatGptFastModeOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
   stripOpenCodeModelReasoningOptions,
+  toBedrockMantleRuntimeModelId,
   type OpenRouterVariantModelAlias,
 } from '@roomote/types';
 
@@ -45,18 +49,30 @@ function buildModelBackedOpenCodeConfigContent(
   // OpenRouter variant models (`:nitro`, `:free`, ...) are rewritten to their
   // catalog base model and mapped back to the variant through provider model
   // aliases below, because OpenCode rejects model IDs its catalog does not
-  // contain.
+  // contain. Bedrock Mantle GPT ids are rewritten onto their dedicated
+  // OpenAI-compatible provider first, mirroring the task worker — without the
+  // rewrite (and the provider registrations below) a Bedrock helper model
+  // fails with ProviderModelNotFoundError before any request is made.
   const variantAliases = new Map<string, OpenRouterVariantModelAlias>();
-  const model = collectOpenRouterVariantModelAlias(variantAliases, rawModel);
+  const model = collectOpenRouterVariantModelAlias(
+    variantAliases,
+    toBedrockMantleRuntimeModelId(rawModel),
+  );
   const rawSmallModel = env.R_SMALL_MODEL?.trim();
   const smallModel =
     rawSmallModel && !isTaskModelIdDisabled(rawSmallModel)
-      ? collectOpenRouterVariantModelAlias(variantAliases, rawSmallModel)
+      ? collectOpenRouterVariantModelAlias(
+          variantAliases,
+          toBedrockMantleRuntimeModelId(rawSmallModel),
+        )
       : undefined;
   const rawVisionModel = env.R_VISION_MODEL?.trim();
   const visionModel =
     rawVisionModel && !isTaskModelIdDisabled(rawVisionModel)
-      ? collectOpenRouterVariantModelAlias(variantAliases, rawVisionModel)
+      ? collectOpenRouterVariantModelAlias(
+          variantAliases,
+          toBedrockMantleRuntimeModelId(rawVisionModel),
+        )
       : undefined;
   const modelReasoningEffort = normalizeOptionalReasoningEffort(
     env.R_MODEL_REASONING_EFFORT?.trim(),
@@ -110,11 +126,30 @@ function buildModelBackedOpenCodeConfigContent(
           visionModel,
         ])
       : providerReasoningConfig;
-  const providerConfig = mergeOpenAiCompatibleProviderConfig(
-    mergeOpenRouterVariantAliasModels(providerModelConfig, variantAliases),
+  const configuredModelIds = [model, smallModel, visionModel];
+  // Same Bedrock provider registrations the task worker applies: OpenCode's
+  // catalog knows neither Mantle endpoint, and the native provider does not
+  // read the deployment's bearer token on its own.
+  const providerConfig = mergeAmazonBedrockProviderConfig(
+    mergeBedrockMantleProviderConfig(
+      mergeBedrockMantleOpenAiProviderConfig(
+        mergeOpenAiCompatibleProviderConfig(
+          mergeOpenRouterVariantAliasModels(
+            providerModelConfig,
+            variantAliases,
+          ),
+          env,
+          configuredModelIds,
+          visionModel,
+        ),
+        env,
+        configuredModelIds,
+      ),
+      env,
+      configuredModelIds,
+    ),
     env,
-    [model, smallModel, visionModel],
-    visionModel,
+    configuredModelIds,
   );
 
   return JSON.stringify({
@@ -252,6 +287,71 @@ function toRestrictedNonTaskConfigContent(
   }
 }
 
+/**
+ * Merges the Bedrock provider registrations for the env's role models into an
+ * operator-supplied config content string. Malformed content is returned
+ * unchanged — `toRestrictedNonTaskConfigContent` already fails it closed.
+ */
+function mergeBedrockRegistrationsIntoConfigContent(
+  configContent: string,
+  env: NodeJS.ProcessEnv,
+): string {
+  const roleModelIds = (
+    [env.R_MODEL, env.R_SMALL_MODEL, env.R_VISION_MODEL] as const
+  )
+    .map((modelId) => modelId?.trim())
+    .filter(
+      (modelId): modelId is string =>
+        Boolean(modelId) && !isTaskModelIdDisabled(modelId!),
+    )
+    .map(toBedrockMantleRuntimeModelId);
+
+  if (roleModelIds.length === 0) {
+    return configContent;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(configContent);
+
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
+      return configContent;
+    }
+
+    const config = parsed as Record<string, unknown>;
+    const existingProvider =
+      config.provider &&
+      typeof config.provider === 'object' &&
+      !Array.isArray(config.provider)
+        ? (config.provider as Record<string, unknown>)
+        : {};
+    const provider = mergeAmazonBedrockProviderConfig(
+      mergeBedrockMantleProviderConfig(
+        mergeBedrockMantleOpenAiProviderConfig(
+          existingProvider,
+          env,
+          roleModelIds,
+        ),
+        env,
+        roleModelIds,
+      ),
+      env,
+      roleModelIds,
+    );
+
+    if (Object.keys(provider).length === 0) {
+      return configContent;
+    }
+
+    return JSON.stringify({ ...config, provider });
+  } catch {
+    return configContent;
+  }
+}
+
 export function buildOpenCodeCliEnv(
   extraEnv?: Partial<Record<string, string>>,
 ): NodeJS.ProcessEnv {
@@ -279,6 +379,15 @@ export function buildOpenCodeCliEnv(
     if (modelBackedConfigContent) {
       env.OPENCODE_CONFIG_CONTENT = modelBackedConfigContent;
     }
+  } else {
+    // Operator-supplied config skips the model-backed builder, but the role
+    // models still need their Bedrock providers registered — otherwise a
+    // Bedrock helper model fails with ProviderModelNotFoundError whenever a
+    // deployment also sets OPENCODE_CONFIG_CONTENT.
+    env.OPENCODE_CONFIG_CONTENT = mergeBedrockRegistrationsIntoConfigContent(
+      env.OPENCODE_CONFIG_CONTENT,
+      env,
+    );
   }
 
   // Applied unconditionally, after any operator-supplied config content is
