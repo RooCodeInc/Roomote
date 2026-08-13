@@ -48,6 +48,12 @@ The setup task is meant to produce a working environment Roomote can reuse. If
 it cannot finish, adjust the input and try again from
 **Settings > Environments**.
 
+During setup, Roomote asks only for environment variables that block the local
+install, canonical tests, selected startup path, or another capability the
+environment is meant to verify. Credentials used only by optional integrations,
+deployment workflows, production services, or other unvalidated paths remain
+deferred until a task actually needs those capabilities.
+
 ## Start from a brand-new repository
 
 You do not need an existing codebase to set up an environment. From
