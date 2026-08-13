@@ -64,8 +64,11 @@ export function collectXaiCatalogModelUpdates(options: {
   changed: boolean;
 } {
   const existingModelIds = new Set(options.models.map((model) => model.id));
+  // An empty baseline is treated as never-recorded, the same as
+  // normalizeTaskModelSettings: real baselines are always non-empty, and an
+  // empty one must not authorize adding the whole back-catalog.
   const previouslySyncedIds =
-    options.syncedModelIds === undefined
+    options.syncedModelIds === undefined || options.syncedModelIds.length === 0
       ? null
       : new Set(options.syncedModelIds.map(normalizeTaskModelId));
   const syncedIds = new Set(previouslySyncedIds ?? []);

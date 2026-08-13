@@ -249,6 +249,61 @@ describe('syncConnectedXaiTaskModels', () => {
     );
   });
 
+  it('treats an empty persisted baseline as never recorded', async () => {
+    mockIsXaiSubscriptionConnected.mockResolvedValue(true);
+    mockFetchModelsDevCatalog.mockResolvedValue({
+      models: {},
+      providers: {
+        xai: {
+          models: {
+            'grok-4.6': {
+              name: 'Grok 4.6',
+              modalities: { output: ['text'] },
+            },
+            'grok-4.3': {
+              name: 'Grok 4.3',
+              modalities: { output: ['text'] },
+            },
+          },
+        },
+      },
+      gatewayModelsByLowerSlug: {},
+    });
+
+    const persistedTaskModelSettings = {
+      models: [
+        {
+          id: 'xai/grok-4.6',
+          displayName: 'Grok 4.6',
+          family: 'Grok',
+        },
+      ],
+      allowedModelIds: ['xai/grok-4.6'],
+      defaultModelId: 'xai/grok-4.6',
+      // A persisted empty list must not count as an established baseline
+      // that would authorize pulling in the whole back-catalog.
+      catalogSyncedModelIds: [],
+    };
+
+    mockUnlockedRead([{ taskModelSettings: persistedTaskModelSettings }]);
+    mockLockedTransaction([{ taskModelSettings: persistedTaskModelSettings }]);
+
+    await expect(syncConnectedXaiTaskModels()).resolves.toBe(0);
+
+    expect(txUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskModelSettings: expect.objectContaining({
+          models: [expect.objectContaining({ id: 'xai/grok-4.6' })],
+          allowedModelIds: ['xai/grok-4.6'],
+          catalogSyncedModelIds: expect.arrayContaining([
+            'xai/grok-4.6',
+            'xai/grok-4.3',
+          ]),
+        }),
+      }),
+    );
+  });
+
   it('does not re-enable a Grok model the operator disabled', async () => {
     mockIsXaiSubscriptionConnected.mockResolvedValue(true);
     mockFetchModelsDevCatalog.mockResolvedValue({

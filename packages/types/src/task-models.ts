@@ -483,8 +483,12 @@ export function normalizeTaskModelSettings(value: unknown): TaskModelSettings {
     ? requestedDefaultModelId
     : (nextAllowedModelIds[0] ?? DEFAULT_TASK_MODEL_SETTINGS.defaultModelId);
 
+  // An empty list is collapsed to "no baseline recorded": the sync only ever
+  // records non-empty baselines (it no-ops on an empty catalog), so a
+  // persisted `[]` must not read back as an established baseline that would
+  // let the next sync add the entire back-catalog.
   const catalogSyncedModelIds =
-    parsed.success && parsed.data.catalogSyncedModelIds
+    parsed.success && parsed.data.catalogSyncedModelIds?.length
       ? [
           ...new Set(
             parsed.data.catalogSyncedModelIds.map(normalizeTaskModelId),
