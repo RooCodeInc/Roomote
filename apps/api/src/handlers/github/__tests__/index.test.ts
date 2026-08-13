@@ -298,7 +298,10 @@ describe('github webhook router', () => {
       expect.any(Function),
     );
     expect(mockHandlePrComment).toHaveBeenCalledWith(payload);
-    expect(mockQueuePrReviewActivityNotification).toHaveBeenCalledWith(payload);
+    expect(mockQueuePrReviewActivityNotification).toHaveBeenCalledWith(
+      payload,
+      'delivery-1',
+    );
     expect(
       mockQueuePrReviewActivityNotification.mock.invocationCallOrder[0],
     ).toBeLessThan(mockRecordWebhook.mock.invocationCallOrder[0]!);
@@ -414,8 +417,14 @@ describe('github webhook router', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(mockQueuePrReviewActivityNotification).toHaveBeenCalledWith(payload);
-    expect(mockQueuePrReviewSummaryNotification).toHaveBeenCalledWith(payload);
+    expect(mockQueuePrReviewActivityNotification).toHaveBeenCalledWith(
+      payload,
+      'delivery-pr-comment-1',
+    );
+    expect(mockQueuePrReviewSummaryNotification).toHaveBeenCalledWith(
+      payload,
+      'delivery-pr-comment-1',
+    );
     expect(
       mockQueuePrReviewActivityNotification.mock.invocationCallOrder[0],
     ).toBeLessThan(mockRecordWebhook.mock.invocationCallOrder[0]!);
@@ -456,8 +465,14 @@ describe('github webhook router', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(mockQueuePrReviewActivityNotification).toHaveBeenCalledWith(payload);
-    expect(mockQueuePrReviewSummaryNotification).toHaveBeenCalledWith(payload);
+    expect(mockQueuePrReviewActivityNotification).toHaveBeenCalledWith(
+      payload,
+      'delivery-skipped-pr-comment',
+    );
+    expect(mockQueuePrReviewSummaryNotification).toHaveBeenCalledWith(
+      payload,
+      'delivery-skipped-pr-comment',
+    );
     expect(mockHandlePrComment).not.toHaveBeenCalled();
   });
 
@@ -516,6 +531,7 @@ describe('github webhook router', () => {
       expect(response.status).toBe(200);
       expect(mockQueuePrReviewActivityNotification).toHaveBeenCalledWith(
         payload,
+        delivery,
       );
       expect(
         mockQueuePrReviewActivityNotification.mock.invocationCallOrder[0],
@@ -561,7 +577,7 @@ describe('github webhook router', () => {
     expect(mockHandleGitHubIssueFixer).toHaveBeenCalledWith(payload);
   });
 
-  it('routes edited PR issue comments to the review-summary notifier without starting tasks', async () => {
+  it('routes edited PR issue comments to activity and summary notification without starting tasks', async () => {
     const payload = {
       action: 'edited',
       installation: { id: 1 },
@@ -594,7 +610,14 @@ describe('github webhook router', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(mockQueuePrReviewSummaryNotification).toHaveBeenCalledWith(payload);
+    expect(mockQueuePrReviewActivityNotification).toHaveBeenCalledWith(
+      payload,
+      'delivery-2',
+    );
+    expect(mockQueuePrReviewSummaryNotification).toHaveBeenCalledWith(
+      payload,
+      'delivery-2',
+    );
     expect(
       mockQueuePrReviewSummaryNotification.mock.invocationCallOrder[0],
     ).toBeLessThan(mockRecordWebhook.mock.invocationCallOrder[0]!);
@@ -632,7 +655,14 @@ describe('github webhook router', () => {
     });
 
     expect(response.status).toBe(200);
-    expect(mockQueuePrReviewSummaryNotification).toHaveBeenCalledWith(payload);
+    expect(mockQueuePrReviewActivityNotification).toHaveBeenCalledWith(
+      payload,
+      'delivery-skipped-review-summary',
+    );
+    expect(mockQueuePrReviewSummaryNotification).toHaveBeenCalledWith(
+      payload,
+      'delivery-skipped-review-summary',
+    );
     expect(mockHandlePrComment).not.toHaveBeenCalled();
   });
 

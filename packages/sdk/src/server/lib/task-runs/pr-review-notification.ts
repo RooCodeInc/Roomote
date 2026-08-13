@@ -72,6 +72,10 @@ export const prReviewActivityEventSchema = z.object({
   authorLogin: z.string(),
   /** Stable provider identity for a non-Roomote automated reviewer. */
   automatedAuthorId: z.string().optional(),
+  /** Provider ID of the parent comment when this event is a thread reply. */
+  inReplyToId: z.string().optional(),
+  /** Untrusted review text retained for notification triage. */
+  body: z.string().max(10_000).optional(),
   /** Commit SHA reviewed by this event. */
   reviewHeadSha: z.string().optional(),
   /**

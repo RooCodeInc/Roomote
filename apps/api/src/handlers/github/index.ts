@@ -181,8 +181,8 @@ github.post('/', async (c) => {
       // operation idempotent across duplicate deliveries.
       if (payload.issue.pull_request) {
         await Promise.all([
-          queuePrReviewActivityNotification(payload),
-          queuePrReviewSummaryNotification(payload),
+          queuePrReviewActivityNotification(payload, id),
+          queuePrReviewSummaryNotification(payload, id),
         ]);
       }
 
@@ -216,9 +216,12 @@ github.post('/', async (c) => {
 
     webhooks.on('issue_comment.edited', async ({ id, name, payload }) => {
       if (payload.issue.pull_request) {
-        // Roomote review summaries are posted as "review in progress" and
-        // patched with the results, so the terminal content arrives here.
-        await queuePrReviewSummaryNotification(payload);
+        // Roomote summaries and external top-level review comments can both
+        // be edited from placeholder content into their final result.
+        await Promise.all([
+          queuePrReviewActivityNotification(payload, id),
+          queuePrReviewSummaryNotification(payload, id),
+        ]);
       }
 
       return recordWebhook(
@@ -449,7 +452,7 @@ github.post('/', async (c) => {
     webhooks.on(
       'pull_request_review.submitted',
       async ({ id, name, payload }) => {
-        await queuePrReviewActivityNotification(payload);
+        await queuePrReviewActivityNotification(payload, id);
 
         return recordWebhook(
           id,
@@ -472,7 +475,7 @@ github.post('/', async (c) => {
     webhooks.on(
       'pull_request_review_comment.created',
       async ({ id, name, payload }) => {
-        await queuePrReviewActivityNotification(payload);
+        await queuePrReviewActivityNotification(payload, id);
 
         return recordWebhook(
           id,

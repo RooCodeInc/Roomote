@@ -127,6 +127,8 @@ export type SourceControlPullRequestDetailsResult = {
 
 type SourceControlPullRequestComment = {
   id: string;
+  /** Provider review id that owns this inline comment, when exposed. */
+  reviewId?: string;
   author: string | null;
   body: string;
   createdAt: string | null;
@@ -492,39 +494,54 @@ const adoThreadListSchema = z.object({
   ),
 });
 
+const gitHubPageInfoSchema = z.object({
+  hasNextPage: z.boolean(),
+  endCursor: z.string().nullable(),
+});
+const gitHubReviewThreadCommentSchema = z.object({
+  databaseId: z.number().nullable().optional(),
+  pullRequestReview: z
+    .object({ databaseId: z.number().nullable().optional() })
+    .nullable()
+    .optional(),
+  author: z.object({ login: z.string() }).nullable().optional(),
+  body: z.string(),
+  createdAt: z.string().nullable().optional(),
+  url: z.string().nullable().optional(),
+});
+const gitHubReviewThreadSchema = z.object({
+  id: z.string(),
+  isResolved: z.boolean(),
+  isOutdated: z.boolean().nullable().optional(),
+  path: z.string().nullable().optional(),
+  line: z.number().nullable().optional(),
+  originalLine: z.number().nullable().optional(),
+  comments: z.object({
+    nodes: z.array(gitHubReviewThreadCommentSchema),
+    pageInfo: gitHubPageInfoSchema.optional(),
+  }),
+});
 const gitHubReviewThreadsQueryResponseSchema = z.object({
   repository: z
     .object({
       pullRequest: z
         .object({
           reviewThreads: z.object({
-            nodes: z.array(
-              z.object({
-                id: z.string(),
-                isResolved: z.boolean(),
-                isOutdated: z.boolean().nullable().optional(),
-                path: z.string().nullable().optional(),
-                line: z.number().nullable().optional(),
-                originalLine: z.number().nullable().optional(),
-                comments: z.object({
-                  nodes: z.array(
-                    z.object({
-                      databaseId: z.number().nullable().optional(),
-                      author: z
-                        .object({ login: z.string() })
-                        .nullable()
-                        .optional(),
-                      body: z.string(),
-                      createdAt: z.string().nullable().optional(),
-                      url: z.string().nullable().optional(),
-                    }),
-                  ),
-                }),
-              }),
-            ),
+            nodes: z.array(gitHubReviewThreadSchema),
+            pageInfo: gitHubPageInfoSchema.optional(),
           }),
         })
         .nullable(),
+    })
+    .nullable(),
+});
+const gitHubReviewThreadCommentsQueryResponseSchema = z.object({
+  node: z
+    .object({
+      comments: z.object({
+        nodes: z.array(gitHubReviewThreadCommentSchema),
+        pageInfo: gitHubPageInfoSchema,
+      }),
     })
     .nullable(),
 });
@@ -1060,11 +1077,15 @@ async function fetchGitHubReviewThreadsViaGraphql({
   repo: string;
   prNumber: number;
 }): Promise<SourceControlPullRequestCommentThread[]> {
-  const response = await octokit.graphql(
-    `query PullRequestReviewThreads($owner: String!, $name: String!, $number: Int!) {
+  const threads: z.infer<typeof gitHubReviewThreadSchema>[] = [];
+  let cursor: string | null = null;
+
+  do {
+    const response = await octokit.graphql(
+      `query PullRequestReviewThreads($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       repository(owner: $owner, name: $name) {
         pullRequest(number: $number) {
-          reviewThreads(first: 100) {
+          reviewThreads(first: 100, after: $cursor) {
             nodes {
               id
               isResolved
@@ -1072,31 +1093,92 @@ async function fetchGitHubReviewThreadsViaGraphql({
               path
               line
               originalLine
-              comments(first: 50) {
+              comments(first: 100) {
                 nodes {
                   databaseId
+                  pullRequestReview { databaseId }
                   author { login }
                   body
                   createdAt
                   url
                 }
+                pageInfo { hasNextPage endCursor }
               }
             }
+            pageInfo { hasNextPage endCursor }
           }
         }
       }
     }`,
-    { owner, name: repo, number: prNumber },
-  );
+      { owner, name: repo, number: prNumber, cursor },
+    );
 
-  const parsed = gitHubReviewThreadsQueryResponseSchema.parse(response);
-  const pullRequest = parsed.repository?.pullRequest;
+    const parsed = gitHubReviewThreadsQueryResponseSchema.parse(response);
+    const pullRequest = parsed.repository?.pullRequest;
 
-  if (!pullRequest) {
-    throw new Error('GraphQL response did not include the pull request.');
+    if (!pullRequest) {
+      throw new Error('GraphQL response did not include the pull request.');
+    }
+
+    threads.push(...pullRequest.reviewThreads.nodes);
+    cursor = pullRequest.reviewThreads.pageInfo?.hasNextPage
+      ? pullRequest.reviewThreads.pageInfo.endCursor
+      : null;
+
+    if (pullRequest.reviewThreads.pageInfo?.hasNextPage && !cursor) {
+      throw new Error('GitHub review thread pagination omitted its cursor.');
+    }
+  } while (cursor);
+
+  for (const thread of threads) {
+    let commentCursor = thread.comments.pageInfo?.hasNextPage
+      ? thread.comments.pageInfo.endCursor
+      : null;
+
+    if (thread.comments.pageInfo?.hasNextPage && !commentCursor) {
+      throw new Error('GitHub review comment pagination omitted its cursor.');
+    }
+
+    while (commentCursor) {
+      const response = await octokit.graphql(
+        `query PullRequestReviewThreadComments($threadId: ID!, $cursor: String!) {
+          node(id: $threadId) {
+            ... on PullRequestReviewThread {
+              comments(first: 100, after: $cursor) {
+                nodes {
+                  databaseId
+                  pullRequestReview { databaseId }
+                  author { login }
+                  body
+                  createdAt
+                  url
+                }
+                pageInfo { hasNextPage endCursor }
+              }
+            }
+          }
+        }`,
+        { threadId: thread.id, cursor: commentCursor },
+      );
+      const parsed =
+        gitHubReviewThreadCommentsQueryResponseSchema.parse(response);
+
+      if (!parsed.node) {
+        throw new Error('GraphQL response did not include the review thread.');
+      }
+
+      thread.comments.nodes.push(...parsed.node.comments.nodes);
+      commentCursor = parsed.node.comments.pageInfo.hasNextPage
+        ? parsed.node.comments.pageInfo.endCursor
+        : null;
+
+      if (parsed.node.comments.pageInfo.hasNextPage && !commentCursor) {
+        throw new Error('GitHub review comment pagination omitted its cursor.');
+      }
+    }
   }
 
-  return pullRequest.reviewThreads.nodes.map((thread) => ({
+  return threads.map((thread) => ({
     id: thread.id,
     resolved: thread.isResolved,
     path: thread.path ?? null,
@@ -1107,6 +1189,9 @@ async function fetchGitHubReviewThreadsViaGraphql({
     outdated: thread.isOutdated ?? null,
     comments: thread.comments.nodes.map((comment) => ({
       id: comment.databaseId != null ? String(comment.databaseId) : '',
+      ...(comment.pullRequestReview?.databaseId != null
+        ? { reviewId: String(comment.pullRequestReview.databaseId) }
+        : {}),
       author: comment.author?.login ?? null,
       body: comment.body,
       createdAt: comment.createdAt ?? null,
@@ -1119,6 +1204,7 @@ function groupGitHubReviewCommentsIntoThreads(
   reviewComments: Array<{
     id: number;
     in_reply_to_id?: number;
+    pull_request_review_id?: number | null;
     path?: string | null;
     line?: number | null;
     original_line?: number | null;
@@ -1153,6 +1239,9 @@ function groupGitHubReviewCommentsIntoThreads(
 
     thread.comments.push({
       id: String(comment.id),
+      ...(comment.pull_request_review_id != null
+        ? { reviewId: String(comment.pull_request_review_id) }
+        : {}),
       author: comment.user?.login ?? null,
       body: comment.body ?? '',
       createdAt: comment.created_at ?? null,

@@ -144,6 +144,8 @@ function issueCommentPayload(
     isPr?: boolean;
     userId?: number;
     userType?: string;
+    updatedAt?: string;
+    edited?: boolean;
   } = {},
 ): any {
   return {
@@ -160,6 +162,7 @@ function issueCommentPayload(
       id: 3000,
       body: comment.body ?? 'Could we simplify this?',
       created_at: createdAt,
+      updated_at: comment.updatedAt,
       html_url: 'https://github.com/owner/repo/pull/42#issuecomment-3000',
       user:
         comment.login === null
@@ -170,6 +173,9 @@ function issueCommentPayload(
               type: comment.userType ?? 'User',
             },
     },
+    ...(comment.edited
+      ? { changes: { body: { from: 'Previous comment body' } } }
+      : {}),
   };
 }
 
@@ -188,6 +194,7 @@ describe('buildPrReviewActivityNotificationInput', () => {
         kind: 'review',
         providerEventId: 'github-review:1000',
         authorLogin: 'alice',
+        body: 'Please fix',
         reviewHeadSha,
         batchId: 'github-review:1000',
         reviewState: 'changes_requested',
@@ -243,6 +250,7 @@ describe('buildPrReviewActivityNotificationInput', () => {
         kind: 'review_comment',
         providerEventId: 'github-review-comment:2000',
         authorLogin: 'bob',
+        body: 'Looks off to me',
         reviewHeadSha,
         batchId: 'github-review:1000',
         url: 'https://github.com/owner/repo/pull/42#discussion_r2000',
@@ -261,12 +269,54 @@ describe('buildPrReviewActivityNotificationInput', () => {
       sourceControlProvider: 'github',
       event: {
         kind: 'issue_comment',
-        providerEventId: 'github-issue-comment:3000',
+        providerEventId: `github-issue-comment:3000:${createdAt}`,
         authorLogin: 'alice',
+        body: 'Could we simplify this?',
         url: 'https://github.com/owner/repo/pull/42#issuecomment-3000',
         observedAt,
       },
     });
+  });
+
+  it('keeps edited top-level review content as a distinct revision', () => {
+    const updatedAt = '2026-08-10T20:00:00.000Z';
+    expect(
+      buildPrReviewActivityNotificationInput(
+        issueCommentPayload({ body: 'Final result', updatedAt }),
+      ),
+    ).toMatchObject({
+      event: {
+        providerEventId: `github-issue-comment:3000:${updatedAt}`,
+        body: 'Final result',
+        observedAt: Date.parse(updatedAt),
+      },
+    });
+  });
+
+  it('uses the webhook delivery as the revision when an edit omits updated_at', () => {
+    const payload = issueCommentPayload({
+      body: 'Edited without a timestamp',
+      edited: true,
+    });
+    const first = buildPrReviewActivityNotificationInput(payload, {
+      deliveryId: 'delivery-one',
+    });
+    const second = buildPrReviewActivityNotificationInput(payload, {
+      deliveryId: 'delivery-two',
+    });
+
+    expect(first?.event.providerEventId).toBe(
+      'github-issue-comment:3000:delivery:delivery-one',
+    );
+    expect(second?.event.providerEventId).toBe(
+      'github-issue-comment:3000:delivery:delivery-two',
+    );
+    expect(first?.event.providerEventId).not.toBe(
+      second?.event.providerEventId,
+    );
+    expect(() => buildPrReviewActivityNotificationInput(payload)).toThrow(
+      'requires a delivery id',
+    );
   });
 
   it('maps one external bot identity across summary and review activity', () => {
@@ -279,7 +329,7 @@ describe('buildPrReviewActivityNotificationInput', () => {
       issueCommentPayload(bot),
       reviewPayload(bot),
       reviewCommentPayload(bot),
-    ].map(buildPrReviewActivityNotificationInput);
+    ].map((payload) => buildPrReviewActivityNotificationInput(payload));
 
     expect(events).toEqual(
       Array.from({ length: 3 }, () =>
@@ -461,7 +511,7 @@ function summaryPayload({
   isPr?: boolean;
   /** When set, models an issue_comment.edited payload with changes.body.from. */
   previousBody?: string | null;
-  updatedAt?: string;
+  updatedAt?: string | null;
 } = {}): any {
   return {
     repository,
@@ -476,7 +526,7 @@ function summaryPayload({
       id: commentId,
       body,
       created_at: createdAt,
-      updated_at: updatedAt,
+      updated_at: updatedAt ?? undefined,
       html_url: `https://github.com/owner/repo/pull/42#issuecomment-${commentId}`,
       user: login === null ? null : { login },
     },
@@ -739,6 +789,38 @@ describe('queuePrReviewSummaryNotification', () => {
       cycleId: `github-summary:99:${nextUpdatedAt}`,
       observedAt: Date.parse(nextUpdatedAt),
     });
+  });
+
+  it('closes a timestamp-less summary edit against its exact open cycle', async () => {
+    await queuePrReviewSummaryNotification(
+      summaryPayload({
+        body: IN_PROGRESS_SUMMARY_BODY,
+        previousBody: TERMINAL_SUMMARY_BODY,
+        updatedAt: null,
+      }),
+      'delivery-start',
+    );
+    const openedCycle = mockStartPrReviewNotificationCycle.mock.calls[0]?.[0];
+
+    await queuePrReviewSummaryNotification(
+      summaryPayload({
+        body: TERMINAL_SUMMARY_BODY,
+        previousBody: IN_PROGRESS_SUMMARY_BODY,
+        updatedAt: null,
+      }),
+      'delivery-complete',
+    );
+
+    expect(openedCycle?.cycleId).toMatch(/^github-summary:99:body:/);
+    expect(mockEnqueuePrReviewNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          batchId: openedCycle?.cycleId,
+          providerEventId:
+            'github-review-summary:99:delivery:delivery-complete',
+        }),
+      }),
+    );
   });
 
   it('does not reopen a cycle for an in-progress to in-progress edit', () => {
