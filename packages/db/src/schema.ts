@@ -1055,6 +1055,8 @@ export const prReviewEvents = pgTable(
     batchKind: text('batch_kind').notNull().$type<'human' | 'roomote'>(),
     batchId: text('batch_id'),
     reviewHeadSha: text('review_head_sha'),
+    /** Permanently set when an automated batch first leaves pending state. */
+    sealedAt: timestamp('sealed_at'),
     superseded: boolean('superseded').notNull().default(false),
     availableAt: timestamp('available_at').notNull(),
     observedAt: timestamp('observed_at').notNull(),

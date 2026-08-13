@@ -82,6 +82,8 @@ function reviewPayload(review: {
   body?: string | null;
   state?: string;
   login?: string | null;
+  userId?: number;
+  userType?: string;
 }): any {
   return {
     repository,
@@ -93,7 +95,14 @@ function reviewPayload(review: {
       state: review.state ?? 'approved',
       submitted_at: createdAt,
       html_url: 'https://github.com/owner/repo/pull/42#pullrequestreview-1000',
-      user: review.login === null ? null : { login: review.login ?? 'alice' },
+      user:
+        review.login === null
+          ? null
+          : {
+              id: review.userId ?? 1,
+              login: review.login ?? 'alice',
+              type: review.userType ?? 'User',
+            },
     },
   };
 }
@@ -102,6 +111,8 @@ function reviewCommentPayload(comment: {
   body?: string;
   login?: string | null;
   inReplyToId?: number;
+  userId?: number;
+  userType?: string;
 }): any {
   return {
     repository,
@@ -114,7 +125,14 @@ function reviewCommentPayload(comment: {
       in_reply_to_id: comment.inReplyToId,
       pull_request_review_id: 1000,
       html_url: 'https://github.com/owner/repo/pull/42#discussion_r2000',
-      user: comment.login === null ? null : { login: comment.login ?? 'alice' },
+      user:
+        comment.login === null
+          ? null
+          : {
+              id: comment.userId ?? 1,
+              login: comment.login ?? 'alice',
+              type: comment.userType ?? 'User',
+            },
     },
   };
 }
@@ -124,6 +142,8 @@ function issueCommentPayload(
     body?: string;
     login?: string | null;
     isPr?: boolean;
+    userId?: number;
+    userType?: string;
   } = {},
 ): any {
   return {
@@ -141,7 +161,14 @@ function issueCommentPayload(
       body: comment.body ?? 'Could we simplify this?',
       created_at: createdAt,
       html_url: 'https://github.com/owner/repo/pull/42#issuecomment-3000',
-      user: comment.login === null ? null : { login: comment.login ?? 'alice' },
+      user:
+        comment.login === null
+          ? null
+          : {
+              id: comment.userId ?? 1,
+              login: comment.login ?? 'alice',
+              type: comment.userType ?? 'User',
+            },
     },
   };
 }
@@ -240,6 +267,29 @@ describe('buildPrReviewActivityNotificationInput', () => {
         observedAt,
       },
     });
+  });
+
+  it('maps one external bot identity across summary and review activity', () => {
+    const bot = {
+      login: 'reviewer[bot]',
+      userId: 9001,
+      userType: 'Bot',
+    };
+    const events = [
+      issueCommentPayload(bot),
+      reviewPayload(bot),
+      reviewCommentPayload(bot),
+    ].map(buildPrReviewActivityNotificationInput);
+
+    expect(events).toEqual(
+      Array.from({ length: 3 }, () =>
+        expect.objectContaining({
+          event: expect.objectContaining({
+            automatedAuthorId: 'github:9001',
+          }),
+        }),
+      ),
+    );
   });
 
   it('skips top-level PR comments handled by the mention flow', () => {

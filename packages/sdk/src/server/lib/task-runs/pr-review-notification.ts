@@ -70,6 +70,8 @@ const prReviewCycleStateSchema = z.object({
 export const prReviewActivityEventSchema = z.object({
   kind: z.enum(['issue_comment', 'review', 'review_comment', 'review_summary']),
   authorLogin: z.string(),
+  /** Stable provider identity for a non-Roomote automated reviewer. */
+  automatedAuthorId: z.string().optional(),
   /** Commit SHA reviewed by this event. */
   reviewHeadSha: z.string().optional(),
   /**
@@ -98,6 +100,10 @@ export const prReviewActivityEventSchema = z.object({
 });
 
 export type PrReviewActivityEvent = z.infer<typeof prReviewActivityEventSchema>;
+
+function getAutomatedBatchId(automatedAuthorId: string): string {
+  return `automated:${automatedAuthorId}`;
+}
 
 export const prReviewNotificationRequestSchema = z.object({
   taskId: z.string(),
@@ -501,6 +507,9 @@ export async function migrateLegacyPrReviewNotificationRequest(
   for (const event of events) {
     const sourceControlProvider = request.sourceControlProvider ?? 'github';
     const roomoteAuthored = event.roomoteAuthored === true;
+    const automatedAuthorId = roomoteAuthored
+      ? undefined
+      : event.automatedAuthorId;
     await persistPrReviewEvent({
       eventKey: buildPrReviewEventKey({
         sourceControlProvider,
@@ -514,7 +523,10 @@ export async function migrateLegacyPrReviewNotificationRequest(
       prUrl: request.prUrl,
       event,
       batchKind: roomoteAuthored ? 'roomote' : 'human',
-      batchId: event.batchId ?? request.batchId ?? null,
+      batchId: automatedAuthorId
+        ? getAutomatedBatchId(automatedAuthorId)
+        : (event.batchId ?? request.batchId ?? null),
+      automatedAuthorId,
       dueAt: new Date(),
       observedAt: new Date(event.observedAt ?? Date.now()),
       reviewHeadSha: event.reviewHeadSha ?? null,
@@ -544,6 +556,9 @@ export async function enqueuePrReviewNotification(
   const parsedInput = enqueuePrReviewNotificationInputSchema.parse(input);
   const sourceControlProvider = parsedInput.sourceControlProvider ?? 'github';
   const isRoomoteEvent = parsedInput.event.roomoteAuthored === true;
+  const automatedAuthorId = isRoomoteEvent
+    ? undefined
+    : parsedInput.event.automatedAuthorId;
   const isRoomoteSummary =
     isRoomoteEvent && parsedInput.event.kind === 'review_summary';
   const event = parsedInput.event;
@@ -568,7 +583,10 @@ export async function enqueuePrReviewNotification(
     prUrl: parsedInput.prUrl,
     event: eventRecord,
     batchKind: isRoomoteEvent ? 'roomote' : 'human',
-    batchId: event.batchId ?? null,
+    batchId: automatedAuthorId
+      ? getAutomatedBatchId(automatedAuthorId)
+      : (event.batchId ?? null),
+    automatedAuthorId,
     dueAt: new Date(Date.now() + notificationDelayMs),
     observedAt: new Date(event.observedAt ?? Date.now()),
     reviewHeadSha: event.reviewHeadSha ?? null,
