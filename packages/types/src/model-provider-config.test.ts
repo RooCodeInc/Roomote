@@ -445,25 +445,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     },
   );
 
-  it('recommends Gemini 3.6 Flash only from providers that support it', () => {
-    const geminiFlashByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
-      (provider) => {
-        const model = provider.suggestedTaskModels.find(
-          (suggestion) => suggestion.displayName === 'Gemini 3.6 Flash',
-        );
-
-        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-      },
-    );
-
-    expect(geminiFlashByProvider).toEqual([
-      { providerId: 'vercel', modelId: 'vercel/google/gemini-3.6-flash' },
-      { providerId: 'requesty', modelId: 'requesty/gemini-3.6-flash' },
-      { providerId: 'opencode', modelId: 'opencode/gemini-3.6-flash' },
-    ]);
-  });
-
-  it('recommends Gemini 3.7 Flash only from providers that support it', () => {
+  it('recommends Gemini 3.7 Flash from every provider that offered 3.6', () => {
     const geminiFlashByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
       (provider) => {
         const model = provider.suggestedTaskModels.find(
@@ -479,6 +461,9 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         providerId: 'openrouter',
         modelId: 'openrouter/google/gemini-3.7-flash',
       },
+      { providerId: 'vercel', modelId: 'vercel/google/gemini-3.7-flash' },
+      { providerId: 'requesty', modelId: 'requesty/gemini-3.7-flash' },
+      { providerId: 'opencode', modelId: 'opencode/gemini-3.7-flash' },
       { providerId: 'google', modelId: 'google/gemini-3.7-flash' },
     ]);
   });
@@ -813,9 +798,9 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       envVarName: 'REQUESTY_API_KEY',
       defaultRoomoteModel: 'requesty/claude-sonnet-5',
       recommendedRoleModels: {
-        helper: 'requesty/gemini-3.6-flash',
+        helper: 'requesty/gemini-3.7-flash',
         codeReview: 'requesty/claude-sonnet-5',
-        explore: 'requesty/gemini-3.6-flash',
+        explore: 'requesty/gemini-3.7-flash',
         planning: 'requesty/claude-opus-5',
       },
     });
@@ -829,7 +814,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/gpt-5.6-sol@eu',
       'requesty/gpt-5.6-terra@eu',
       'requesty/gpt-5.6-luna@eu',
-      'requesty/gemini-3.6-flash',
+      'requesty/gemini-3.7-flash',
       'requesty/deepseek-v4-flash-0731',
       'requesty/glm-5.2',
       'requesty/kimi-k3',

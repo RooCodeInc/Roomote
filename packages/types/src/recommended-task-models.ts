@@ -36,11 +36,6 @@ export const RECOMMENDED_TASK_MODELS = [
   { id: 'gpt-5-6-terra', displayName: 'GPT 5.6 Terra', family: 'GPT' },
   { id: 'gpt-5-6-luna', displayName: 'GPT 5.6 Luna', family: 'GPT' },
   {
-    id: 'gemini-3-6-flash',
-    displayName: 'Gemini 3.6 Flash',
-    family: 'Gemini',
-  },
-  {
     id: 'gemini-3-7-flash',
     displayName: 'Gemini 3.7 Flash',
     family: 'Gemini',
