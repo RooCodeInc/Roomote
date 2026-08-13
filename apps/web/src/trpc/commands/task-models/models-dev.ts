@@ -42,6 +42,7 @@ export type ModelsDevModelEntry = {
   limit?: ModelsDevLimit;
   cost?: ModelsDevCost;
   reasoning?: boolean;
+  reasoning_options?: unknown[];
   release_date?: string;
   tool_call?: boolean;
   status?: string;
@@ -143,7 +144,17 @@ function extractMetadataFromEntry(
     metadata.outputPricePerToken = outputPricePerToken;
   }
   if (typeof entry.reasoning === 'boolean') {
-    metadata.supportsReasoning = entry.reasoning;
+    // `supportsReasoning` gates the configurable reasoning-effort surface, so
+    // it must track configurability, not whether the model reasons at all: a
+    // reasoning model with an explicitly empty `reasoning_options` list (for
+    // example GitHub Copilot's kimi-k2.7-code) reasons internally but rejects
+    // effort/budget parameters outright.
+    metadata.supportsReasoning =
+      entry.reasoning &&
+      !(
+        Array.isArray(entry.reasoning_options) &&
+        entry.reasoning_options.length === 0
+      );
   }
   return { metadata, displayName };
 }

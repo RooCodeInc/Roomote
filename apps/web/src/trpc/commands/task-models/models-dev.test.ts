@@ -200,6 +200,50 @@ describe('lookupModelMetadataFromCatalog', () => {
     expect(result.displayName).toBe('Claude Opus 4.7');
   });
 
+  it('maps an empty reasoning_options list to supportsReasoning: false', () => {
+    const catalog = buildCatalog({
+      providers: {
+        'github-copilot': {
+          models: {
+            'kimi-k2.7-code': {
+              name: 'Kimi K2.7 Code',
+              reasoning: true,
+              reasoning_options: [],
+            },
+            'gpt-5.6-luna': {
+              name: 'GPT-5.6 Luna',
+              reasoning: true,
+              reasoning_options: [
+                { type: 'effort', values: ['low', 'medium', 'high'] },
+              ],
+            },
+            'claude-haiku-4.5': {
+              name: 'Claude Haiku 4.5',
+              reasoning: true,
+            },
+          },
+        },
+      },
+    });
+
+    // Reasoning happens internally but is not configurable: providers reject
+    // effort/budget parameters, so the configurable-effort surface must stay
+    // off.
+    expect(
+      lookupModelMetadataFromCatalog(catalog, 'github-copilot/kimi-k2.7-code')
+        .metadata.supportsReasoning,
+    ).toBe(false);
+    expect(
+      lookupModelMetadataFromCatalog(catalog, 'github-copilot/gpt-5.6-luna')
+        .metadata.supportsReasoning,
+    ).toBe(true);
+    // Entries predating reasoning_options keep the bare flag's meaning.
+    expect(
+      lookupModelMetadataFromCatalog(catalog, 'github-copilot/claude-haiku-4.5')
+        .metadata.supportsReasoning,
+    ).toBe(true);
+  });
+
   it('resolves Bedrock Mantle metadata through the underlying model lab', () => {
     const catalog = buildCatalog({
       models: {

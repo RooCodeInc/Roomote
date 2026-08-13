@@ -567,6 +567,12 @@ describe('generateOpenCodeConfig provider support', () => {
       baseURL: 'https://api.example.com/api/inference/github-copilot',
       apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
     });
+    // The env key enables the provider before OpenCode's custom-loader pass,
+    // which is what registers the Copilot endpoint router (GPT-5+ models must
+    // use /responses instead of /chat/completions).
+    expect(config.provider['github-copilot']).toMatchObject({
+      env: ['ROOMOTE_CLOUD_TOKEN'],
+    });
     expect(config.provider['github-copilot']).toMatchObject({
       models: {
         'claude-haiku-4.5': {
