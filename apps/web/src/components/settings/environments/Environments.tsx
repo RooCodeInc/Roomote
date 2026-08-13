@@ -75,16 +75,14 @@ export function Environments() {
   const retryVerification = useRetryEnvironmentVerification();
   const createEnvironmentSnapshot = useCreateEnvironmentSnapshot();
   const clearEnvironmentSnapshot = useClearEnvironmentSnapshot();
-  // Modal and E2B stay unconditional (existing behavior). The
-  // deployment-managed 'roomote' provider is offered only when configured,
-  // so deployments without it never see roomote snapshot controls;
-  // environments that already hold a roomote snapshot keep its controls
-  // regardless (see visibleSnapshotProviders) so stale snapshots stay
-  // manageable.
+  const modalConfigured = useComputeProviderConfigured('modal');
+  const e2bConfigured = useComputeProviderConfigured('e2b');
   const roomoteConfigured = useComputeProviderConfigured('roomote');
-  const allSnapshotProviders: ComputeProvider[] = roomoteConfigured
-    ? ['modal', 'e2b', 'roomote']
-    : ['modal', 'e2b'];
+  const configuredSnapshotProviders = [
+    modalConfigured ? 'modal' : null,
+    e2bConfigured ? 'e2b' : null,
+    roomoteConfigured ? 'roomote' : null,
+  ].filter((provider): provider is ComputeProvider => provider !== null);
 
   if (environments.isPending || repositories.isPending) {
     return (
@@ -136,15 +134,18 @@ export function Environments() {
         ) : (
           <div className="space-y-4 divide-y -mb-2">
             {environments.data.map((env) => {
-              // An existing roomote snapshot stays visible and manageable
-              // (refresh/clear) even when the provider is no longer
-              // configured.
-              const roomoteSnapshot = getEnvironmentSnapshot(env, 'roomote');
-              const visibleSnapshotProviders: ComputeProvider[] =
-                !roomoteConfigured &&
-                (roomoteSnapshot?.snapshotId || roomoteSnapshot?.snapshotStatus)
-                  ? [...allSnapshotProviders, 'roomote']
-                  : allSnapshotProviders;
+              // Keep an existing snapshot visible so it can still be cleared
+              // after that provider is removed from the deployment.
+              const visibleSnapshotProviders = [
+                ...configuredSnapshotProviders,
+                ...(['modal', 'e2b', 'roomote'] as const).filter((provider) => {
+                  const snapshot = getEnvironmentSnapshot(env, provider);
+                  return (
+                    !configuredSnapshotProviders.includes(provider) &&
+                    Boolean(snapshot?.snapshotId)
+                  );
+                }),
+              ];
               const verificationState = getEnvironmentVerificationState(env);
               const isRetryingVerification =
                 retryVerification.isPending &&
@@ -373,50 +374,54 @@ export function Environments() {
                                       </PopoverContent>
                                     </Popover>
                                   ) : null}
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-7 w-7 p-0"
-                                    onClick={async () => {
-                                      const result =
-                                        await createEnvironmentSnapshot.mutateAsync(
-                                          {
-                                            environmentId: env.id,
-                                            provider: requestedProvider,
-                                          },
-                                        );
+                                  {configuredSnapshotProviders.includes(
+                                    provider,
+                                  ) ? (
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-7 w-7 p-0"
+                                      onClick={async () => {
+                                        const result =
+                                          await createEnvironmentSnapshot.mutateAsync(
+                                            {
+                                              environmentId: env.id,
+                                              provider: requestedProvider,
+                                            },
+                                          );
 
-                                      if (result.success) {
-                                        toast.success(
-                                          `${provider[0]!.toUpperCase()}${provider.slice(1)} snapshot creation started`,
-                                        );
+                                        if (result.success) {
+                                          toast.success(
+                                            `${provider[0]!.toUpperCase()}${provider.slice(1)} snapshot creation started`,
+                                          );
+                                        }
+                                      }}
+                                      disabled={
+                                        snapshot?.snapshotStatus ===
+                                          'pending' || isCreatingSnapshot
                                       }
-                                    }}
-                                    disabled={
-                                      snapshot?.snapshotStatus === 'pending' ||
-                                      isCreatingSnapshot
-                                    }
-                                    title={
-                                      snapshot?.snapshotStatus === 'failed'
-                                        ? `Retry ${provider} snapshot`
-                                        : snapshot?.snapshotId
-                                          ? `Refresh ${provider} snapshot`
-                                          : `Create ${provider} snapshot`
-                                    }
-                                    aria-label={
-                                      snapshot?.snapshotStatus === 'failed'
-                                        ? `Retry ${provider} snapshot`
-                                        : snapshot?.snapshotId
-                                          ? `Refresh ${provider} snapshot`
-                                          : `Create ${provider} snapshot`
-                                    }
-                                  >
-                                    {isCreatingSnapshot ? (
-                                      <Loading className="text-muted-foreground" />
-                                    ) : (
-                                      <Camera className="size-4" />
-                                    )}
-                                  </Button>
+                                      title={
+                                        snapshot?.snapshotStatus === 'failed'
+                                          ? `Retry ${provider} snapshot`
+                                          : snapshot?.snapshotId
+                                            ? `Refresh ${provider} snapshot`
+                                            : `Create ${provider} snapshot`
+                                      }
+                                      aria-label={
+                                        snapshot?.snapshotStatus === 'failed'
+                                          ? `Retry ${provider} snapshot`
+                                          : snapshot?.snapshotId
+                                            ? `Refresh ${provider} snapshot`
+                                            : `Create ${provider} snapshot`
+                                      }
+                                    >
+                                      {isCreatingSnapshot ? (
+                                        <Loading className="text-muted-foreground" />
+                                      ) : (
+                                        <Camera className="size-4" />
+                                      )}
+                                    </Button>
+                                  ) : null}
                                 </div>
                               </div>
                             );
