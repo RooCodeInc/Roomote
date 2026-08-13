@@ -16,6 +16,10 @@ const {
   mockStickyFooterPost,
   mockSetPendingPrReviewAction,
   mockDispatchFollowUp,
+  mockFinalize,
+  mockIsDurable,
+  mockMigrateLegacy,
+  mockRenewLease,
 } = vi.hoisted(() => ({
   mockFindFirstTaskRun: vi.fn(),
   mockFindFirstTaskPullRequest: vi.fn(),
@@ -32,6 +36,10 @@ const {
   mockStickyFooterPost: vi.fn(),
   mockSetPendingPrReviewAction: vi.fn(),
   mockDispatchFollowUp: vi.fn(),
+  mockFinalize: vi.fn(),
+  mockIsDurable: vi.fn(),
+  mockMigrateLegacy: vi.fn(),
+  mockRenewLease: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -86,6 +94,9 @@ vi.mock('@roomote/sdk/server', () => ({
     immediate: z.boolean().optional(),
     batchKind: z.enum(['human', 'roomote']).optional(),
     batchId: z.string().optional(),
+    deliveryIds: z.array(z.string()).optional(),
+    leaseToken: z.string().optional(),
+    events: z.array(z.unknown()).optional(),
   }),
   consumePendingPrReviewActivity: mockConsumePending,
   requeuePendingPrReviewActivity: mockRequeuePending,
@@ -103,6 +114,10 @@ vi.mock('@roomote/sdk/server', () => ({
   recordPrReviewNotificationDeliveryBestEffort: mockRecordDelivery,
   setPendingPrReviewAction: mockSetPendingPrReviewAction,
   dispatchPrReviewFollowUp: mockDispatchFollowUp,
+  finalizePrReviewNotificationRequest: mockFinalize,
+  renewPrReviewNotificationRequestLease: mockRenewLease,
+  isDurablePrReviewNotificationRequest: mockIsDurable,
+  migrateLegacyPrReviewNotificationRequest: mockMigrateLegacy,
   attachPendingPrReviewActionMessage: vi.fn(),
 }));
 
@@ -130,6 +145,9 @@ const events = [{ kind: 'review_comment' as const, authorLogin: 'alice' }];
 describe('prReviewNotificationJob', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsDurable.mockReturnValue(true);
+    mockMigrateLegacy.mockResolvedValue(0);
+    mockRenewLease.mockResolvedValue(true);
 
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
@@ -175,6 +193,29 @@ describe('prReviewNotificationJob', () => {
       channelId: '12345',
       messageId: '901',
     });
+  });
+
+  it('migrates an N-1 Redis-owned job and never delivers it directly', async () => {
+    mockIsDurable.mockReturnValue(false);
+    mockMigrateLegacy.mockResolvedValue(2);
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockMigrateLegacy).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: 'task-1' }),
+    );
+    expect(mockFindFirstTaskRun).not.toHaveBeenCalled();
+    expect(mockConsumePending).not.toHaveBeenCalled();
+  });
+
+  it('does not post when a summary supersedes the claim during preparation', async () => {
+    mockRenewLease.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockPrepareDelivery).toHaveBeenCalled();
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
+    expect(mockRecordDelivery).not.toHaveBeenCalled();
   });
 
   it('posts the aggregated notification to the originating Slack thread when the task is idle', async () => {

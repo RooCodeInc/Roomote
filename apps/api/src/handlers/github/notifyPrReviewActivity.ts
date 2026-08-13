@@ -81,6 +81,7 @@ export function buildPrReviewActivityNotificationInput(
       sourceControlProvider: 'github',
       event: {
         kind: 'issue_comment',
+        providerEventId: `github-issue-comment:${comment.id}`,
         authorLogin,
         ...(comment.html_url ? { url: comment.html_url } : {}),
         observedAt: getObservedAt(comment.created_at),
@@ -115,6 +116,7 @@ export function buildPrReviewActivityNotificationInput(
       ...base,
       event: {
         kind: 'review',
+        providerEventId: `github-review:${review.id}`,
         authorLogin,
         ...(review.commit_id ? { reviewHeadSha: review.commit_id } : {}),
         batchId: `github-review:${review.id}`,
@@ -152,6 +154,7 @@ export function buildPrReviewActivityNotificationInput(
     ...base,
     event: {
       kind: 'review_comment',
+      providerEventId: `github-review-comment:${comment.id}`,
       authorLogin,
       ...(comment.commit_id ? { reviewHeadSha: comment.commit_id } : {}),
       ...(comment.pull_request_review_id
@@ -321,6 +324,7 @@ function buildPrReviewSummaryLifecycle(
         sourceControlProvider: 'github',
         event: {
           kind: 'review_summary',
+          providerEventId: `github-review-summary:${comment.id}:${comment.updated_at ?? comment.created_at}`,
           authorLogin,
           ...(markerSha ? { reviewHeadSha: markerSha } : {}),
           summary,
@@ -342,8 +346,8 @@ export function buildPrReviewSummaryNotification(
 }
 
 /**
- * Fire-and-forget notification scheduling for Roomote review-summary comments
- * on task-linked pull requests. Logs errors but never throws.
+ * Persists Roomote review-summary lifecycle state for task-linked pull
+ * requests. Failures propagate so the webhook delivery can be retried.
  */
 export async function queuePrReviewSummaryNotification(
   eventPayload: PrReviewSummaryWebhookPayload,
@@ -363,19 +367,19 @@ export async function queuePrReviewSummaryNotification(
       ? lifecycle.input
       : lifecycle.notification.input;
 
-  await operation.catch((error) =>
+  await operation.catch((error) => {
     console.warn(
       `[queuePrReviewSummaryNotification] Failed to record review-summary lifecycle for ${reference.repository}#${reference.prNumber}: ${
         error instanceof Error ? error.message : String(error)
       }`,
-    ),
-  );
+    );
+    throw error;
+  });
 }
 
 /**
- * Fire-and-forget notification scheduling for PR review activity on
- * task-linked pull requests. Logs errors but never throws, so it cannot
- * affect the mention-handling webhook flow.
+ * Persists PR review activity for task-linked pull requests. Failures
+ * propagate so the webhook delivery can be retried.
  */
 export async function queuePrReviewActivityNotification(
   eventPayload: PrReviewActivityWebhookPayload,
@@ -386,11 +390,12 @@ export async function queuePrReviewActivityNotification(
     return;
   }
 
-  await enqueuePrReviewNotification(input).catch((error) =>
+  await enqueuePrReviewNotification(input).catch((error) => {
     console.warn(
-      `[queuePrReviewActivityNotification] Failed to enqueue review notification for ${input.repository}#${input.prNumber}: ${
+      `[queuePrReviewActivityNotification] Failed to persist review notification for ${input.repository}#${input.prNumber}: ${
         error instanceof Error ? error.message : String(error)
       }`,
-    ),
-  );
+    );
+    throw error;
+  });
 }

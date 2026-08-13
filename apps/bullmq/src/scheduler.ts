@@ -30,6 +30,7 @@ import {
   licenseUsageSyncJob,
   webhookCleanupJob,
   standbyRetentionJob,
+  prReviewNotificationDispatchJob,
 } from './scheduled-jobs';
 
 const QUEUE_NAME = 'scheduled-jobs';
@@ -168,6 +169,11 @@ async function createJobs(queue: Queue): Promise<void> {
   );
 
   await queue.upsertJobScheduler(
+    ScheduledJobName.PrReviewNotificationDispatch,
+    { every: 10 * 1000 },
+  );
+
+  await queue.upsertJobScheduler(
     ScheduledJobName.LicenseUsageHeartbeat,
     { every: 24 * 60 * 60 * 1000 }, // Daily billing liveness observation.
   );
@@ -216,6 +222,8 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       return webhookCleanupJob();
     case ScheduledJobName.StandbyRetention:
       return standbyRetentionJob();
+    case ScheduledJobName.PrReviewNotificationDispatch:
+      return prReviewNotificationDispatchJob();
     case ScheduledJobName.CustomAutomations:
       await customAutomationsJob();
       return;
@@ -224,7 +232,7 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
   }
 };
 
-export function startScheduler() {
+export async function startScheduler() {
   const connection = getRedis();
 
   const queue = new Queue<unknown, void, SchedulerJobName>(QUEUE_NAME, {
@@ -239,6 +247,16 @@ export function startScheduler() {
       removeOnFail: { age: 24 * 3600 },
     },
   });
+
+  // Scheduled jobs are part of this process's readiness contract. Starting
+  // workers without them can leave durable Postgres work undiscoverable after
+  // Redis recovers, so fail startup and let the process supervisor retry.
+  try {
+    await createJobs(queue);
+  } catch (error) {
+    await queue.close().catch(() => {});
+    throw error;
+  }
 
   const worker = new Worker<unknown, void, string>(QUEUE_NAME, runJobs, {
     connection,
@@ -268,10 +286,6 @@ export function startScheduler() {
     console.error(
       `[QueueEvents#on(failed)] job ${jobId} failed: ${failedReason}`,
     ),
-  );
-
-  createJobs(queue).catch((error) =>
-    console.error('[createJobs] failed to create jobs:', error),
   );
 
   return {
