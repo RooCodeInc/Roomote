@@ -1256,6 +1256,52 @@ describe('finishRun', () => {
   });
 
   describe('Slack failure notification', () => {
+    it('notifies Slack before slower post-settlement work completes', async () => {
+      const job = makeRun(
+        {
+          payloadKind: TaskPayloadKind.SlackAppMention,
+          payload: {
+            repo: 'owner/repo',
+            channel: 'C123',
+            user: 'U456',
+            text: 'test',
+            ts: '111.222',
+          },
+        },
+        { slackChannelId: 'C123', slackThreadTs: '111.222' },
+      );
+      mockFindFirstRun.mockResolvedValue(job);
+      mockFindFirstTask.mockResolvedValue(job.task);
+      mockGetSlackStartedMessageTs.mockResolvedValue('111.333');
+      mockFindFirstSlackInstallation.mockResolvedValue({
+        id: 'slack-inst-1',
+        botAccessToken: 'xoxb-test',
+        isActive: true,
+      });
+
+      let releasePostSettlementWork: (() => void) | undefined;
+      mockNotifySourceRunOnSettle.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            releasePostSettlementWork = resolve;
+          }),
+      );
+
+      const finishing = finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'The operation was aborted due to timeout',
+      });
+
+      await vi.waitFor(() => {
+        expect(mockUpdateMessage).toHaveBeenCalled();
+      });
+      expect(mockNotifySourceRunOnSettle).toHaveBeenCalled();
+
+      releasePostSettlementWork?.();
+      await finishing;
+    });
+
     it('posts a retryable generic thread reply when a non-setup Slack job fails', async () => {
       const job = makeRun(
         {
