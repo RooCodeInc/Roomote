@@ -200,7 +200,10 @@ export default function SandboxPage() {
 
   if (sessionState === 'error') {
     return (
-      <FramedSurface surfaceClassName="flex items-center justify-center">
+      <FramedSurface
+        frameClassName="pb-0 md:pb-2"
+        surfaceClassName="flex items-center justify-center"
+      >
         <EmptyState
           icon={<TriangleAlert className="size-6" />}
           iconClassName="text-amber-500 pt-0"
@@ -213,7 +216,10 @@ export default function SandboxPage() {
 
   if (sessionState === 'not-found') {
     return (
-      <FramedSurface surfaceClassName="flex items-center justify-center">
+      <FramedSurface
+        frameClassName="pb-0 md:pb-2"
+        surfaceClassName="flex items-center justify-center"
+      >
         <EmptyState
           icon={<CircleSlash className="size-6" />}
           iconClassName="text-rose-500 pt-0"
@@ -226,7 +232,10 @@ export default function SandboxPage() {
 
   if (!taskRun) {
     return (
-      <FramedSurface surfaceClassName="flex items-center justify-center">
+      <FramedSurface
+        frameClassName="pb-0 md:pb-2"
+        surfaceClassName="flex items-center justify-center"
+      >
         <EmptyState
           icon={<TriangleAlert className="size-6" />}
           iconClassName="text-amber-500 pt-0"
