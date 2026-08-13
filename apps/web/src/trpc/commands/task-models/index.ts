@@ -12,7 +12,6 @@ import {
   type DatabaseOrTransaction,
 } from '@roomote/db/server';
 import {
-  CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
   XAI_SUBSCRIPTION_PROVIDER_ID,
   TASK_MODEL_CATALOG,
