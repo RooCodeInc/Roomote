@@ -10,7 +10,7 @@ const RETRYABLE_CONFLICT_CODES = new Set([
 const RETRYABLE_CONFLICT_STATUSES = new Set([400, 409]);
 const ERROR_MESSAGE_MAX_LENGTH = 300;
 
-export interface BoxApiErrorMetadata {
+interface BoxApiErrorMetadata {
   method: string;
   path: string;
   status: number;
