@@ -111,8 +111,10 @@ program
   )
   .requiredOption('--sandbox-id <id>', 'The current sandbox ID')
   .action(
+    // Commander derives option keys from the flag names: `--task-run-id`
+    // arrives as `taskRunId`, never `runId`.
     async (options: {
-      runId: number;
+      taskRunId: number;
       environmentId: string;
       sandboxId: string;
     }) => {
@@ -121,7 +123,11 @@ program
         await flushAndExit(1);
       }
 
-      const success = await snapshot(options);
+      const success = await snapshot({
+        runId: options.taskRunId,
+        environmentId: options.environmentId,
+        sandboxId: options.sandboxId,
+      });
       await flushAndExit(success ? 0 : 1);
     },
   );
