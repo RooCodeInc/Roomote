@@ -1,7 +1,6 @@
 import {
   buildRecommendedDeploymentModelConfig,
   buildSetupModelStatus,
-  buildTaskModelRoleOverrideEnv,
   collectSetupModelProviderCredentialValues,
   createEmptyDeploymentModelConfig,
   DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES,
@@ -1834,45 +1833,5 @@ describe('collectSetupModelProviderCredentialValues', () => {
         action: 'save it',
       }),
     ).toThrow('Enter a valid Region for Z.AI to save it.');
-  });
-});
-
-describe('buildTaskModelRoleOverrideEnv', () => {
-  it('overlays model and reasoning effort for overridden roles', () => {
-    expect(
-      buildTaskModelRoleOverrideEnv({
-        codeReview: {
-          model: 'github-copilot/kimi-k3',
-          reasoningEffort: 'high',
-        },
-      }),
-    ).toEqual({
-      R_CODE_REVIEW_MODEL: 'github-copilot/kimi-k3',
-      R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
-    });
-  });
-
-  it('clears the inherited role level for models without configurable reasoning', () => {
-    expect(
-      buildTaskModelRoleOverrideEnv({
-        planning: {
-          model: 'github-copilot/kimi-k2.7-code',
-          clearReasoningEffort: true,
-        },
-      }),
-    ).toEqual({
-      R_PLANNING_MODEL: 'github-copilot/kimi-k2.7-code',
-      R_PLANNING_MODEL_REASONING_EFFORT: '',
-    });
-  });
-
-  it('keeps model-only overrides inheriting the deployment level', () => {
-    expect(
-      buildTaskModelRoleOverrideEnv({
-        helper: { model: 'github-copilot/claude-haiku-4.5' },
-      }),
-    ).toEqual({
-      R_SMALL_MODEL: 'github-copilot/claude-haiku-4.5',
-    });
   });
 });

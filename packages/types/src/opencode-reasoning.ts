@@ -1,5 +1,4 @@
-import type { ReasoningEffort } from './task-runs';
-import { clampReasoningEffortToSupported } from './task-models';
+import { REASONING_EFFORT_VALUES, type ReasoningEffort } from './task-runs';
 
 /**
  * Maps a Roomote reasoning effort to the Anthropic extended-thinking token
@@ -180,6 +179,40 @@ const GITHUB_COPILOT_MODEL_EFFORT_SUPPORT: ReadonlyArray<{
     supported: ['low', 'medium', 'high', 'max'],
   },
 ];
+
+/**
+ * Maps an effort onto a model's supported subset of the scale: unchanged when
+ * supported, otherwise the nearest supported level below it, falling back to
+ * the lowest supported level above it.
+ */
+function clampReasoningEffortToSupported(
+  effort: ReasoningEffort,
+  supported: readonly ReasoningEffort[],
+): ReasoningEffort | undefined {
+  if (supported.includes(effort)) {
+    return effort;
+  }
+
+  const configuredIndex = REASONING_EFFORT_VALUES.indexOf(effort);
+
+  for (let index = configuredIndex - 1; index >= 0; index--) {
+    if (supported.includes(REASONING_EFFORT_VALUES[index]!)) {
+      return REASONING_EFFORT_VALUES[index];
+    }
+  }
+
+  for (
+    let index = configuredIndex + 1;
+    index < REASONING_EFFORT_VALUES.length;
+    index++
+  ) {
+    if (supported.includes(REASONING_EFFORT_VALUES[index]!)) {
+      return REASONING_EFFORT_VALUES[index];
+    }
+  }
+
+  return undefined;
+}
 
 function buildGitHubCopilotReasoningOptions(
   modelID: string,

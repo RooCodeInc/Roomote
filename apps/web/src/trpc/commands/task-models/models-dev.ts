@@ -1,8 +1,5 @@
 import {
   GATEWAY_TASK_MODEL_PROVIDER_IDS,
-  REASONING_EFFORT_VALUES,
-  isReasoningEffort,
-  type ReasoningEffort,
   type TaskModelInputType,
   type TaskModelMetadata,
 } from '@roomote/types';
@@ -119,51 +116,6 @@ type ExtractedMetadata = {
   displayName?: string;
 };
 
-/**
- * Reads the Roomote-effort subset a model accepts from its models.dev
- * `reasoning_options` effort entries, in the canonical scale order. Returns
- * null when no effort entry restricts the scale (budget-only or absent
- * options), so unrestricted models keep a clean metadata shape.
- */
-function extractSupportedReasoningEfforts(
-  reasoningOptions: unknown[] | undefined,
-): ReasoningEffort[] | null {
-  if (!Array.isArray(reasoningOptions)) {
-    return null;
-  }
-
-  const efforts = new Set<ReasoningEffort>();
-  let hasEffortEntry = false;
-
-  for (const option of reasoningOptions) {
-    if (!option || typeof option !== 'object') {
-      continue;
-    }
-
-    const typed = option as { type?: unknown; values?: unknown };
-
-    if (typed.type !== 'effort' || !Array.isArray(typed.values)) {
-      continue;
-    }
-
-    hasEffortEntry = true;
-
-    for (const value of typed.values) {
-      // Provider-specific levels outside Roomote's scale ('none', 'minimal')
-      // are not selectable in Roomote and are simply skipped.
-      if (isReasoningEffort(value)) {
-        efforts.add(value);
-      }
-    }
-  }
-
-  if (!hasEffortEntry || efforts.size === 0) {
-    return null;
-  }
-
-  return REASONING_EFFORT_VALUES.filter((effort) => efforts.has(effort));
-}
-
 function extractMetadataFromEntry(
   entry: ModelsDevModelEntry | undefined,
 ): ExtractedMetadata {
@@ -203,12 +155,6 @@ function extractMetadataFromEntry(
         Array.isArray(entry.reasoning_options) &&
         entry.reasoning_options.length === 0
       );
-  }
-  const supportedReasoningEfforts = extractSupportedReasoningEfforts(
-    entry.reasoning_options,
-  );
-  if (metadata.supportsReasoning !== false && supportedReasoningEfforts) {
-    metadata.supportedReasoningEfforts = supportedReasoningEfforts;
   }
   return { metadata, displayName };
 }
@@ -373,10 +319,6 @@ export function mergeMetadata(
   patch: Partial<TaskModelMetadata>,
 ): TaskModelMetadata {
   const supportsReasoning = patch.supportsReasoning ?? base?.supportsReasoning;
-  const supportedReasoningEfforts =
-    supportsReasoning === false
-      ? undefined
-      : (patch.supportedReasoningEfforts ?? base?.supportedReasoningEfforts);
 
   return {
     contextWindow: patch.contextWindow ?? base?.contextWindow ?? null,
@@ -387,7 +329,6 @@ export function mergeMetadata(
       patch.outputPricePerToken ?? base?.outputPricePerToken ?? null,
     lastRefreshedAt: base?.lastRefreshedAt ?? null,
     ...(supportsReasoning != null ? { supportsReasoning } : {}),
-    ...(supportedReasoningEfforts != null ? { supportedReasoningEfforts } : {}),
   };
 }
 

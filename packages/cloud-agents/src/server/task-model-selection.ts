@@ -9,8 +9,6 @@ import {
 import {
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   TASK_MODEL_OVERRIDE_ROLES,
-  TASK_MODEL_OVERRIDE_ROLE_ENV_VARS,
-  clampReasoningEffortForTaskModel,
   getDefaultTaskModelId,
   getDisplayModelProviderId,
   getTaskModelCatalog,
@@ -26,15 +24,6 @@ import {
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
 const MODEL_ID_PATTERN = /^[^/\s]+\/.+$/u;
-
-/** Persisted deployment-config key holding each override role's level. */
-const ROLE_PERSISTED_REASONING_EFFORT_KEYS = {
-  helper: 'roomoteSmallModelReasoningEffort',
-  vision: 'roomoteVisionModelReasoningEffort',
-  codeReview: 'roomoteCodeReviewModelReasoningEffort',
-  explore: 'roomoteExploreModelReasoningEffort',
-  planning: 'roomotePlanningModelReasoningEffort',
-} as const satisfies Record<TaskModelOverrideRole, string>;
 
 export type TaskModelSelectionRole = 'coding' | TaskModelOverrideRole;
 
@@ -161,37 +150,20 @@ export async function applyTaskModelSelectionToRun(options: {
         'opencode-server': effectiveModel,
       };
 
-      const candidateEffort =
-        options.reasoningEffort && supportsReasoning
-          ? options.reasoningEffort
-          : requestedModelId && supportsReasoning
-            ? // Mirror launch-time stamping: an explicitly selected model runs
-              // at the deployment coding level (env wins over the persisted
-              // config) instead of falling through to no reasoning when the
-              // role env level does not match the override model.
-              ((): ReasoningEffort => {
-                const envCodingEffort =
-                  process.env.R_MODEL_REASONING_EFFORT?.trim();
+      if (options.reasoningEffort && supportsReasoning) {
+        payload.reasoningEffort = options.reasoningEffort;
+      } else if (requestedModelId && supportsReasoning) {
+        // Mirror launch-time stamping: an explicitly selected model runs at
+        // the deployment coding level (env wins over the persisted config)
+        // instead of falling through to no reasoning when the role env level
+        // does not match the override model.
+        const envCodingEffort = process.env.R_MODEL_REASONING_EFFORT?.trim();
 
-                return (
-                  (isReasoningEffort(envCodingEffort)
-                    ? envCodingEffort
-                    : runtimeModelConfig.roomoteModelReasoningEffort) ??
-                  DEFAULT_MODEL_ROLE_REASONING_EFFORTS.coding
-                );
-              })()
-            : undefined;
-      // Fit the level to the model's accepted efforts (some models take only
-      // a subset of the scale, and providers reject unsupported values).
-      const stampedEffort = candidateEffort
-        ? clampReasoningEffortForTaskModel(
-            candidateEffort,
-            catalogModel?.metadata,
-          )
-        : undefined;
-
-      if (stampedEffort) {
-        payload.reasoningEffort = stampedEffort;
+        payload.reasoningEffort =
+          (isReasoningEffort(envCodingEffort)
+            ? envCodingEffort
+            : runtimeModelConfig.roomoteModelReasoningEffort) ??
+          DEFAULT_MODEL_ROLE_REASONING_EFFORTS.coding;
       } else {
         delete payload.reasoningEffort;
       }
@@ -201,56 +173,11 @@ export async function applyTaskModelSelectionToRun(options: {
       const overrides: TaskModelRoleOverrides = {
         ...(payload.modelRoleOverrides ?? {}),
       };
-      // Fit the level to the model the override will run on: the requested
-      // model when given, else the role's already-overridden model.
-      const overrideModelId =
-        requestedModelId ?? overrides[options.role]?.model ?? null;
-      const overrideCatalogModel = overrideModelId
-        ? getTaskModelCatalog(modelSettings).find(
-            (model) => model.id === overrideModelId,
-          )
-        : undefined;
-      // Mirror the coding branch: a model selected without an explicit level
-      // runs at the deployment role level (env wins over the persisted
-      // config). Stamping the resolved level keeps it clampable to the new
-      // model instead of silently inheriting an unsupported one.
-      const candidateEffort =
-        options.reasoningEffort ??
-        (requestedModelId
-          ? ((): ReasoningEffort => {
-              const envRoleEffort =
-                process.env[
-                  TASK_MODEL_OVERRIDE_ROLE_ENV_VARS[options.role]
-                    .reasoningEffort
-                ]?.trim();
-
-              return (
-                (isReasoningEffort(envRoleEffort)
-                  ? envRoleEffort
-                  : runtimeModelConfig[
-                      ROLE_PERSISTED_REASONING_EFFORT_KEYS[options.role]
-                    ]) ?? DEFAULT_MODEL_ROLE_REASONING_EFFORTS[options.role]
-              );
-            })()
-          : undefined);
-      const overrideEffort = candidateEffort
-        ? overrideCatalogModel
-          ? clampReasoningEffortForTaskModel(
-              candidateEffort,
-              overrideCatalogModel.metadata,
-            )
-          : candidateEffort
-        : undefined;
-      // A level dropped by the clamp means the pinned model has no
-      // configurable reasoning; mark the override so the spawn env clears
-      // the deployment role level instead of inheriting it.
-      const clearReasoningEffort = Boolean(
-        candidateEffort && !overrideEffort && overrideModelId,
-      );
       const entry = {
         ...(requestedModelId ? { model: requestedModelId } : {}),
-        ...(overrideEffort ? { reasoningEffort: overrideEffort } : {}),
-        ...(clearReasoningEffort ? { clearReasoningEffort: true } : {}),
+        ...(options.reasoningEffort
+          ? { reasoningEffort: options.reasoningEffort }
+          : {}),
       };
 
       if (Object.keys(entry).length > 0) {

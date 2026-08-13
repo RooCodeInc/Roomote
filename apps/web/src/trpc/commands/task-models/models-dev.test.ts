@@ -244,56 +244,6 @@ describe('lookupModelMetadataFromCatalog', () => {
     ).toBe(true);
   });
 
-  it('extracts the supported effort subset from reasoning_options', () => {
-    const catalog = buildCatalog({
-      providers: {
-        'github-copilot': {
-          models: {
-            'kimi-k3': {
-              name: 'Kimi K3',
-              reasoning: true,
-              reasoning_options: [
-                { type: 'effort', values: ['low', 'high', 'max'] },
-              ],
-            },
-            'gpt-5.6-luna': {
-              name: 'GPT-5.6 Luna',
-              reasoning: true,
-              reasoning_options: [
-                {
-                  type: 'effort',
-                  // 'none' is outside Roomote's scale and is skipped.
-                  values: ['none', 'low', 'medium', 'high', 'xhigh', 'max'],
-                },
-              ],
-            },
-            'claude-haiku-4.5': {
-              name: 'Claude Haiku 4.5',
-              reasoning: true,
-              // Budget-only reasoning does not restrict the effort scale.
-              reasoning_options: [
-                { type: 'budget_tokens', min: 1024, max: 32000 },
-              ],
-            },
-          },
-        },
-      },
-    });
-
-    expect(
-      lookupModelMetadataFromCatalog(catalog, 'github-copilot/kimi-k3').metadata
-        .supportedReasoningEfforts,
-    ).toEqual(['low', 'high', 'max']);
-    expect(
-      lookupModelMetadataFromCatalog(catalog, 'github-copilot/gpt-5.6-luna')
-        .metadata.supportedReasoningEfforts,
-    ).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
-    expect(
-      lookupModelMetadataFromCatalog(catalog, 'github-copilot/claude-haiku-4.5')
-        .metadata.supportedReasoningEfforts,
-    ).toBeUndefined();
-  });
-
   it('resolves Bedrock Mantle metadata through the underlying model lab', () => {
     const catalog = buildCatalog({
       models: {

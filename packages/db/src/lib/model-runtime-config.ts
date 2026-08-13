@@ -3,7 +3,6 @@ import {
   applyImplicitLiteLlmModelPrefix,
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
   CHATGPT_OPENCODE_PROVIDER_ID,
-  clampReasoningEffortForTaskModel,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   getDefaultTaskModelId,
@@ -21,7 +20,6 @@ import {
   parseModelProviderEnvKeys,
   resolveSetupModelProviderIdFromModel,
   XAI_OPENCODE_PROVIDER_ID,
-  type ReasoningEffort,
   type TaskModelOption,
 } from '@roomote/types';
 
@@ -120,7 +118,7 @@ function normalizeConfiguredValue(
 
 function normalizeConfiguredReasoningEffort(
   value: string | null | undefined,
-): ReasoningEffort | undefined {
+): string | undefined {
   return (
     normalizeOptionalReasoningEffort(normalizeConfiguredValue(value)) ??
     undefined
@@ -307,89 +305,57 @@ async function resolveModelRuntimeEnv(
 
     return catalogModel?.metadata?.supportsReasoning !== false;
   };
-  // Configured and default levels alike are fitted to what the role's model
-  // accepts: some models take only a subset of the effort scale (GitHub
-  // Copilot's kimi-k3 rejects "medium"), and a model without configurable
-  // reasoning must not receive a level at all.
-  const clampEffortForModel = (
-    effort: ReasoningEffort | undefined,
-    modelId: string | undefined,
-  ): ReasoningEffort | undefined => {
-    if (!effort || !modelId) {
-      return effort;
-    }
-
-    const catalogModel: TaskModelOption | undefined = catalogModels.find(
-      (model) => model.id === modelId,
-    );
-
-    return clampReasoningEffortForTaskModel(effort, catalogModel?.metadata);
-  };
-  const resolvedRoomoteModelReasoningEffort = clampEffortForModel(
+  const resolvedRoomoteModelReasoningEffort =
     normalizeConfiguredReasoningEffort(runtimeEnv.R_MODEL_REASONING_EFFORT) ??
-      persistedRuntimeModelConfig.roomoteModelReasoningEffort ??
-      (modelSupportsReasoning(resolvedRoomoteModel)
-        ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.coding
-        : undefined),
-    resolvedRoomoteModel,
-  );
-  const resolvedRoomoteSmallModelReasoningEffort = clampEffortForModel(
+    persistedRuntimeModelConfig.roomoteModelReasoningEffort ??
+    (modelSupportsReasoning(resolvedRoomoteModel)
+      ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.coding
+      : undefined);
+  const resolvedRoomoteSmallModelReasoningEffort =
     normalizeConfiguredReasoningEffort(
       runtimeEnv.R_SMALL_MODEL_REASONING_EFFORT,
     ) ??
-      persistedRuntimeModelConfig.roomoteSmallModelReasoningEffort ??
-      (modelSupportsReasoning(resolvedRoomoteSmallModel ?? resolvedRoomoteModel)
-        ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.helper
-        : undefined),
-    resolvedRoomoteSmallModel ?? resolvedRoomoteModel,
-  );
-  const resolvedRoomoteVisionModelReasoningEffort = clampEffortForModel(
+    persistedRuntimeModelConfig.roomoteSmallModelReasoningEffort ??
+    (modelSupportsReasoning(resolvedRoomoteSmallModel ?? resolvedRoomoteModel)
+      ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.helper
+      : undefined);
+  const resolvedRoomoteVisionModelReasoningEffort =
     normalizeConfiguredReasoningEffort(
       runtimeEnv.R_VISION_MODEL_REASONING_EFFORT,
     ) ??
-      persistedRuntimeModelConfig.roomoteVisionModelReasoningEffort ??
-      (resolvedRoomoteVisionModel &&
-      modelSupportsReasoning(resolvedRoomoteVisionModel)
-        ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.vision
-        : undefined),
-    resolvedRoomoteVisionModel ?? resolvedRoomoteModel,
-  );
-  const resolvedRoomoteCodeReviewModelReasoningEffort = clampEffortForModel(
+    persistedRuntimeModelConfig.roomoteVisionModelReasoningEffort ??
+    (resolvedRoomoteVisionModel &&
+    modelSupportsReasoning(resolvedRoomoteVisionModel)
+      ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.vision
+      : undefined);
+  const resolvedRoomoteCodeReviewModelReasoningEffort =
     normalizeConfiguredReasoningEffort(
       runtimeEnv.R_CODE_REVIEW_MODEL_REASONING_EFFORT,
     ) ??
-      persistedRuntimeModelConfig.roomoteCodeReviewModelReasoningEffort ??
-      (modelSupportsReasoning(
-        resolvedRoomoteCodeReviewModel ?? resolvedRoomoteModel,
-      )
-        ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.codeReview
-        : undefined),
-    resolvedRoomoteCodeReviewModel ?? resolvedRoomoteModel,
-  );
-  const resolvedRoomoteExploreModelReasoningEffort = clampEffortForModel(
+    persistedRuntimeModelConfig.roomoteCodeReviewModelReasoningEffort ??
+    (modelSupportsReasoning(
+      resolvedRoomoteCodeReviewModel ?? resolvedRoomoteModel,
+    )
+      ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.codeReview
+      : undefined);
+  const resolvedRoomoteExploreModelReasoningEffort =
     normalizeConfiguredReasoningEffort(
       runtimeEnv.R_EXPLORE_MODEL_REASONING_EFFORT,
     ) ??
-      persistedRuntimeModelConfig.roomoteExploreModelReasoningEffort ??
-      (modelSupportsReasoning(
-        resolvedRoomoteExploreModel ?? resolvedRoomoteModel,
-      )
-        ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.explore
-        : undefined),
-    resolvedRoomoteExploreModel ?? resolvedRoomoteModel,
-  );
-  const resolvedRoomotePlanningModelReasoningEffort = clampEffortForModel(
+    persistedRuntimeModelConfig.roomoteExploreModelReasoningEffort ??
+    (modelSupportsReasoning(resolvedRoomoteExploreModel ?? resolvedRoomoteModel)
+      ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.explore
+      : undefined);
+  const resolvedRoomotePlanningModelReasoningEffort =
     normalizeConfiguredReasoningEffort(
       runtimeEnv.R_PLANNING_MODEL_REASONING_EFFORT,
     ) ??
-      persistedRuntimeModelConfig.roomotePlanningModelReasoningEffort ??
-      (modelSupportsReasoning(
-        resolvedRoomotePlanningModel ?? resolvedRoomoteModel,
-      )
-        ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.planning
-        : undefined),
-    resolvedRoomotePlanningModel ?? resolvedRoomoteModel,
-  );
+    persistedRuntimeModelConfig.roomotePlanningModelReasoningEffort ??
+    (modelSupportsReasoning(
+      resolvedRoomotePlanningModel ?? resolvedRoomoteModel,
+    )
+      ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.planning
+      : undefined);
   const configuredRoomoteModelEnvKeys =
     normalizeConfiguredValue(runtimeEnv.R_MODEL_ENV_KEYS) ??
     normalizeConfiguredValue(persistedEnvVars.R_MODEL_ENV_KEYS);

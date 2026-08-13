@@ -260,7 +260,6 @@ function TaskModelRoleEditor({
   selectValue,
   optionGroups,
   supportsReasoning,
-  supportedEfforts,
   reasoningEffort,
   onModelChange,
   onReasoningChange,
@@ -271,7 +270,6 @@ function TaskModelRoleEditor({
   selectValue: string;
   optionGroups: DisplayModelProviderGroup<EditableRuntimeModelOption>[];
   supportsReasoning: boolean;
-  supportedEfforts: readonly ReasoningEffort[] | null;
   reasoningEffort: ReasoningEffort | null;
   onModelChange: (value: string) => void;
   onReasoningChange: (value: ReasoningEffort | null) => void;
@@ -353,7 +351,6 @@ function TaskModelRoleEditor({
               onChange={onReasoningChange}
               disabled={reasoningManagedByEnv}
               ariaLabel={config.reasoningAriaLabel}
-              supportedEfforts={supportedEfforts}
             />
           )}
         </div>
@@ -661,12 +658,7 @@ function metadataEqual(
     left.inputPricePerToken === right.inputPricePerToken &&
     left.outputPricePerToken === right.outputPricePerToken &&
     left.lastRefreshedAt === right.lastRefreshedAt &&
-    (left.supportsReasoning ?? null) === (right.supportsReasoning ?? null) &&
-    (left.supportedReasoningEfforts ?? []).length ===
-      (right.supportedReasoningEfforts ?? []).length &&
-    (left.supportedReasoningEfforts ?? []).every(
-      (effort, index) => effort === right.supportedReasoningEfforts?.[index],
-    )
+    (left.supportsReasoning ?? null) === (right.supportsReasoning ?? null)
   );
 }
 
@@ -1183,20 +1175,6 @@ export function ModelSettingsSection({
       return supportsReasoning;
     },
     {} as Record<TaskModelRole, boolean>,
-  );
-  // Effort options offered for a role follow the resolved model's accepted
-  // subset of the scale (some models take only a few levels).
-  const roleSupportedEfforts = TASK_MODEL_ROLE_ORDER.reduce(
-    (supportedEfforts, role) => {
-      const modelId = resolvedModelIds[role];
-
-      supportedEfforts[role] = modelId
-        ? (models.find((model) => model.id === modelId)?.metadata
-            ?.supportedReasoningEfforts ?? null)
-        : null;
-      return supportedEfforts;
-    },
-    {} as Record<TaskModelRole, readonly ReasoningEffort[] | null>,
   );
 
   useEffect(() => {
@@ -1754,7 +1732,6 @@ export function ModelSettingsSection({
                 selectValue={roleSelectValues[config.role]}
                 optionGroups={roleOptionGroups[config.role]}
                 supportsReasoning={roleSupportsReasoning[config.role]}
-                supportedEfforts={roleSupportedEfforts[config.role]}
                 reasoningEffort={roleDrafts[config.role].reasoningEffort}
                 onModelChange={(value) =>
                   updateRoleModel(

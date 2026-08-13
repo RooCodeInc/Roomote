@@ -1185,11 +1185,6 @@ export function buildTaskModelRoleOverrideEnv(
 
     if (override.reasoningEffort) {
       env[envVarNames.reasoningEffort] = override.reasoningEffort;
-    } else if (override.clearReasoningEffort) {
-      // An empty value overrides the deployment role level in the spawn env;
-      // the worker's effort normalization reads it as "no reasoning", which
-      // is required for override models without configurable reasoning.
-      env[envVarNames.reasoningEffort] = '';
     }
   }
 

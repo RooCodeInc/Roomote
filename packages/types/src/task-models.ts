@@ -9,26 +9,6 @@ import { isOpenAiCompatibleProviderId } from './openai-compatible-providers';
 const TASK_MODEL_ID_PATTERN = /^[^/\s]+\/.+$/u;
 
 /**
- * Roomote's reasoning-effort scale, ordered from least to most reasoning.
- * Defined here (rather than in `task-runs`) so the task-model metadata schema
- * and the effort-clamping helper below can use it without an import cycle;
- * `task-runs` re-exports it.
- */
-export const REASONING_EFFORT_VALUES = [
-  'low',
-  'medium',
-  'high',
-  'xhigh',
-  'max',
-] as const;
-
-export type ReasoningEffort = (typeof REASONING_EFFORT_VALUES)[number];
-
-export function isReasoningEffort(value: unknown): value is ReasoningEffort {
-  return REASONING_EFFORT_VALUES.includes(value as ReasoningEffort);
-}
-
-/**
  * Model providers whose slugs are addressed by their own provider prefix
  * instead of the `openrouter/` shorthand: direct labs plus non-OpenRouter
  * gateways such as Vercel AI Gateway. Bare `provider/model` slugs with one of
@@ -125,78 +105,9 @@ export const taskModelMetadataSchema = z.object({
    * list. Absent or null when the catalogs do not say either way.
    */
   supportsReasoning: z.boolean().nullable().optional(),
-  /**
-   * The subset of Roomote reasoning efforts the model accepts, sourced from
-   * models.dev `reasoning_options` effort values (some models take only a few
-   * levels, e.g. GitHub Copilot's kimi-k3 accepts low/high/max). Absent or
-   * null when the model is unrestricted or the catalog does not say.
-   */
-  supportedReasoningEfforts: z
-    .array(z.enum(REASONING_EFFORT_VALUES))
-    .nullable()
-    .optional(),
 });
 
 export type TaskModelMetadata = z.infer<typeof taskModelMetadataSchema>;
-
-/**
- * Maps a reasoning effort onto a model's supported subset of the scale: the
- * effort unchanged when supported, otherwise the nearest supported level
- * below it, falling back to the lowest supported level above it. Returns
- * `undefined` only when the supported list is empty.
- */
-export function clampReasoningEffortToSupported(
-  effort: ReasoningEffort,
-  supported: readonly ReasoningEffort[],
-): ReasoningEffort | undefined {
-  if (supported.includes(effort)) {
-    return effort;
-  }
-
-  const configuredIndex = REASONING_EFFORT_VALUES.indexOf(effort);
-
-  for (let index = configuredIndex - 1; index >= 0; index--) {
-    if (supported.includes(REASONING_EFFORT_VALUES[index]!)) {
-      return REASONING_EFFORT_VALUES[index];
-    }
-  }
-
-  for (
-    let index = configuredIndex + 1;
-    index < REASONING_EFFORT_VALUES.length;
-    index++
-  ) {
-    if (supported.includes(REASONING_EFFORT_VALUES[index]!)) {
-      return REASONING_EFFORT_VALUES[index];
-    }
-  }
-
-  return undefined;
-}
-
-/**
- * Fits a configured reasoning effort to what the model accepts: `undefined`
- * when the model has no configurable reasoning at all, the nearest supported
- * effort at or below the configured one when the exact level is unsupported
- * (falling back to the lowest supported level above it), and the effort
- * unchanged when the metadata declares no restriction.
- */
-export function clampReasoningEffortForTaskModel(
-  effort: ReasoningEffort,
-  metadata: TaskModelMetadata | null | undefined,
-): ReasoningEffort | undefined {
-  if (metadata?.supportsReasoning === false) {
-    return undefined;
-  }
-
-  const supported = metadata?.supportedReasoningEfforts;
-
-  if (!supported || supported.length === 0) {
-    return effort;
-  }
-
-  return clampReasoningEffortToSupported(effort, supported);
-}
 
 export const taskModelOptionSchema = z.object({
   id: z
