@@ -30,59 +30,15 @@ import {
   shouldEnableAuthBypassForTaskRun,
   updateTaskRunMachine,
 } from '../utils';
+import {
+  DetachedWorkerLaunchError,
+  buildDetachedWorkerExitError,
+} from './detached-worker-launch';
 import { resolveTaskSandboxMemoryMiB } from './task-sandbox-resources';
 import {
   COMPUTE_BOOTSTRAP_TIMEOUT_MS,
   COMPUTE_CREATE_INSTANCE_TIMEOUT_MS,
 } from './timeouts';
-
-const AZURE_LAUNCH_OUTPUT_TEXT_LIMIT = 500;
-
-class DetachedWorkerLaunchError extends Error {
-  public readonly details: Record<string, unknown>;
-
-  public constructor(message: string, details: Record<string, unknown>) {
-    super(message);
-    this.name = 'DetachedWorkerLaunchError';
-    this.details = details;
-  }
-}
-
-function truncateLaunchOutput(value: string | undefined): string | undefined {
-  if (!value) {
-    return undefined;
-  }
-
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-
-  return trimmed.length > AZURE_LAUNCH_OUTPUT_TEXT_LIMIT
-    ? `${trimmed.slice(0, AZURE_LAUNCH_OUTPUT_TEXT_LIMIT)}...`
-    : trimmed;
-}
-
-function buildDetachedWorkerExitError(
-  command: string,
-  result: {
-    exitCode: number | null;
-    commandId?: string;
-    stdout?: string;
-    stderr?: string;
-  },
-): DetachedWorkerLaunchError {
-  const stdout = truncateLaunchOutput(result.stdout);
-  const stderr = truncateLaunchOutput(result.stderr);
-  const message = `Detached "worker ${command}" exited immediately with code ${result.exitCode}`;
-
-  return new DetachedWorkerLaunchError(message, {
-    commandId: result.commandId ?? null,
-    exitCode: result.exitCode,
-    ...(stdout ? { stdout } : {}),
-    ...(stderr ? { stderr } : {}),
-  });
-}
 
 async function resolveAzureResumeLaunchOptions(
   snapshotId: string,
