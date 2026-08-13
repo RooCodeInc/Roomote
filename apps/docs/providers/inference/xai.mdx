@@ -21,9 +21,11 @@ Add **xAI** in **Settings > Models** and paste the key, or configure:
 XAI_API_KEY=...
 ```
 
-Roomote exposes Grok models with the `xai/` prefix. Enable the supported model
-and assign it to the coding or another role. If both xAI API and a Grok
-subscription are connected, Roomote prefers the subscription for `xai/` models.
+Roomote exposes Grok models with the `xai/` prefix. Connecting xAI seeds
+**Grok 4.6** as the default coding model and lists every current Grok chat
+model from the live provider catalog, so newer Grok releases are switchable
+without a Roomote update. If both xAI API and a Grok subscription are
+connected, Roomote prefers the subscription for `xai/` models.
 
 ## Cost behavior
 
@@ -36,7 +38,7 @@ the subscription allowance instead of API credits because it takes precedence.
 
 1. save `XAI_API_KEY`
 2. confirm xAI models appear in **Settings > Models**
-3. enable an `xai/...` model and assign it to a role
+3. pick a Grok chat model and assign it to a role
 4. run a small task and confirm usage in the xAI Console
 
 ## Common issues

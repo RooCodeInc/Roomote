@@ -14,6 +14,7 @@ import {
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  XAI_SUBSCRIPTION_PROVIDER_ID,
   TASK_MODEL_CATALOG,
   SETUP_MODEL_PROVIDER_CATALOG,
   buildOpenAiCompatibleProviderId,
@@ -58,6 +59,7 @@ import {
 } from '../environment-variables';
 import {
   fetchModelsDevCatalog,
+  listXaiChatModelsFromCatalog,
   lookupModelMetadataFromCatalog,
   mergeMetadata,
   suggestModelsFromCatalog,
@@ -76,6 +78,7 @@ import {
   type LocalTaskModelProviderId,
   type TaskModelLookupResult,
 } from './local-provider-discovery';
+import { syncConnectedXaiTaskModels } from './xai-models';
 import type { UserAuthSuccess } from '@/types';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
@@ -292,6 +295,7 @@ export async function getTaskModelSettingsCommand(
   auth: UserAuthSuccess,
 ): Promise<TaskModelSettingsResult> {
   assertAdmin(auth);
+  await syncConnectedXaiTaskModels();
 
   const [
     settings,
@@ -533,7 +537,7 @@ export async function autoAddConnectedSubscriptionTaskModels(
       isXaiSubscriptionConnected(),
     ]);
 
-  return db.transaction(async (tx) => {
+  const addedRecommended = await db.transaction(async (tx) => {
     const [persistedEnvVarNames, persistedTaskModels] = await Promise.all([
       getPersistedEnvironmentVariableNames(tx),
       getPersistedRawTaskModelSettings(tx),
@@ -574,6 +578,12 @@ export async function autoAddConnectedSubscriptionTaskModels(
 
     return autoAdd.addedModels.length;
   });
+
+  if (providerId !== XAI_SUBSCRIPTION_PROVIDER_ID) {
+    return addedRecommended;
+  }
+
+  return addedRecommended + (await syncConnectedXaiTaskModels());
 }
 
 /**
@@ -837,6 +847,10 @@ export async function saveTaskModelProviderCommand(
     }
   }
 
+  if (provider.id === 'xai') {
+    addedDiscoveredModelCount += await syncConnectedXaiTaskModels();
+  }
+
   return {
     ...(await getTaskModelProviderSetupCommand(auth)),
     addedRecommendedModelCount,
@@ -1053,6 +1067,8 @@ export async function deleteTaskModelProviderCommand(
 }
 
 export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
+  await syncConnectedXaiTaskModels();
+
   const [
     settings,
     chatgptConnected,
@@ -1684,7 +1700,11 @@ export async function suggestTaskModelsCommand(
   }
 
   const catalogProviderId =
-    provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID ? 'openai' : provider.id;
+    provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID
+      ? 'openai'
+      : provider.id === XAI_SUBSCRIPTION_PROVIDER_ID
+        ? 'xai'
+        : provider.id;
 
   return {
     suggestions: suggestModelsFromCatalog({
@@ -1737,6 +1757,40 @@ export async function refreshTaskModelMetadataCommand(
       success: false,
       error: 'Failed to fetch model metadata from models.dev.',
     };
+  }
+
+  const xaiSubscriptionConnected = await isXaiSubscriptionConnected();
+  const persistedEnvVarNames = await getPersistedEnvironmentVariableNames();
+  const connectedProviderIds = collectConnectedTaskModelProviderIds({
+    runtimeEnv: process.env,
+    persistedEnvVarNames,
+    chatgptConnected: false,
+    xaiSubscriptionConnected,
+  });
+
+  if (
+    connectedProviderIds.has('xai') ||
+    connectedProviderIds.has('xai-subscription')
+  ) {
+    const currentModelIds = new Set(currentModels.map((model) => model.id));
+
+    for (const model of listXaiChatModelsFromCatalog(catalog)) {
+      const modelId = normalizeTaskModelId(model.id);
+
+      if (currentModelIds.has(modelId)) {
+        continue;
+      }
+
+      currentModels.push(
+        buildTaskModelOption({
+          id: modelId,
+          displayName: model.displayName,
+          family: model.family,
+        }),
+      );
+      currentModelIds.add(modelId);
+      allowedModelIds.push(modelId);
+    }
   }
 
   const refreshedAt = new Date().toISOString();

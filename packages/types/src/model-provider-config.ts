@@ -715,9 +715,12 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       href: 'https://console.x.ai',
       linkLabel: 'xAI console',
     },
-    suggestedTaskModels: mapRecommendedTaskModels({
-      'grok-4-6': 'xai/grok-4.6',
-    }),
+    suggestedTaskModels: [
+      ...mapRecommendedTaskModels({
+        'grok-4-6': 'xai/grok-4.6',
+      }),
+      { id: 'xai/grok-4.5', displayName: 'Grok 4.5', family: 'Grok' },
+    ],
   },
   {
     id: 'zai',
@@ -889,9 +892,12 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     envVarName: undefined,
     defaultRoomoteModel: 'xai/grok-4.6',
     authKind: 'oauth',
-    suggestedTaskModels: mapRecommendedTaskModels({
-      'grok-4-6': 'xai/grok-4.6',
-    }),
+    suggestedTaskModels: [
+      ...mapRecommendedTaskModels({
+        'grok-4-6': 'xai/grok-4.6',
+      }),
+      { id: 'xai/grok-4.5', displayName: 'Grok 4.5', family: 'Grok' },
+    ],
   },
 ] as const satisfies readonly SetupModelProviderDescriptor[];
 

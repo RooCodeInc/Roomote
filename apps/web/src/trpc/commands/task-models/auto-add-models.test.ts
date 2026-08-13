@@ -15,6 +15,7 @@ import {
 const ANTHROPIC = getSetupModelProvider('anthropic');
 const OPENROUTER = getSetupModelProvider('openrouter');
 const GOOGLE = getSetupModelProvider('google');
+const XAI_SUBSCRIPTION = getSetupModelProvider('xai-subscription');
 
 describe('buildAutoAddedTaskModelSettings', () => {
   it('seeds a fresh deployment with only the connected provider models', () => {
@@ -44,6 +45,23 @@ describe('buildAutoAddedTaskModelSettings', () => {
     expect(result!.taskModelSettings.defaultModelId).toBe(
       ANTHROPIC.defaultRoomoteModel,
     );
+  });
+
+  it('seeds Grok 4.6 as the default and Grok 4.5 as a switchable option', () => {
+    const result = buildAutoAddedTaskModelSettings({
+      provider: XAI_SUBSCRIPTION,
+      persistedTaskModelSettings: null,
+      connectedProviderIds: new Set(['xai-subscription', 'xai']),
+    });
+
+    expect(result).not.toBeNull();
+    expect(result!.taskModelSettings.models?.map((model) => model.id)).toEqual(
+      expect.arrayContaining(['xai/grok-4.6', 'xai/grok-4.5']),
+    );
+    expect(result!.taskModelSettings.allowedModelIds).toEqual(
+      expect.arrayContaining(['xai/grok-4.6', 'xai/grok-4.5']),
+    );
+    expect(result!.taskModelSettings.defaultModelId).toBe('xai/grok-4.6');
   });
 
   it('keeps the usable default-catalog models and effective default when another provider is also connected', () => {
@@ -280,6 +298,17 @@ describe('appendRecommendedTaskModels', () => {
 
     expect(result.length).toBeGreaterThan(0);
     expect(result.every((model) => model.id.startsWith('openai/'))).toBe(true);
+  });
+
+  it('appends both Grok 4.6 and Grok 4.5 for a connected Grok subscription', () => {
+    const result = appendRecommendedTaskModels({
+      models: [],
+      connectedProviderIds: new Set(['xai-subscription']),
+    });
+
+    expect(result.map((model) => model.id).sort()).toEqual(
+      XAI_SUBSCRIPTION.suggestedTaskModels.map((model) => model.id).sort(),
+    );
   });
 });
 

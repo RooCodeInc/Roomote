@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   fetchModelsDevCatalog,
+  listXaiChatModelsFromCatalog,
   lookupModelMetadataFromCatalog,
   resolveModelsDevSlug,
   suggestModelsFromCatalog,
@@ -421,5 +422,44 @@ describe('suggestModelsFromCatalog', () => {
         query: 'km3',
       }),
     ).toEqual([{ slug: 'moonshotai/kimi-k3', displayName: 'Kimi K3' }]);
+  });
+});
+
+describe('listXaiChatModelsFromCatalog', () => {
+  it('lists text Grok models and skips image, video, and deprecated entries', () => {
+    const catalog = buildCatalog({
+      providers: {
+        xai: {
+          models: {
+            'grok-4.6': {
+              name: 'Grok 4.6',
+              modalities: { output: ['text'] },
+            },
+            'grok-4.7': {
+              name: 'Grok 4.7',
+              modalities: { output: ['text'] },
+            },
+            'grok-imagine-image': {
+              name: 'Grok Imagine Image',
+              modalities: { output: ['image', 'pdf'] },
+            },
+            'grok-imagine-video': {
+              name: 'Grok Imagine Video',
+              modalities: { output: ['video'] },
+            },
+            'grok-old': {
+              name: 'Grok Old',
+              status: 'deprecated',
+              modalities: { output: ['text'] },
+            },
+          },
+        },
+      },
+    });
+
+    expect(listXaiChatModelsFromCatalog(catalog)).toEqual([
+      { id: 'xai/grok-4.6', displayName: 'Grok 4.6', family: 'Grok' },
+      { id: 'xai/grok-4.7', displayName: 'Grok 4.7', family: 'Grok' },
+    ]);
   });
 });

@@ -848,6 +848,23 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(disconnected?.savedApiKeySatisfied).toBe(false);
   });
 
+  it('lets xAI API and Grok subscription switch between Grok 4.6 and Grok 4.5', () => {
+    for (const providerId of ['xai', 'xai-subscription'] as const) {
+      const provider = SETUP_MODEL_PROVIDER_CATALOG.find(
+        (entry) => entry.id === providerId,
+      );
+
+      expect(provider?.defaultRoomoteModel).toBe('xai/grok-4.6');
+      expect(provider?.suggestedTaskModels.map((model) => model.id)).toEqual([
+        'xai/grok-4.6',
+        'xai/grok-4.5',
+      ]);
+      expect(
+        provider?.suggestedTaskModels.map((model) => model.displayName),
+      ).toEqual(['Grok 4.6', 'Grok 4.5']);
+    }
+  });
+
   it('marks xAI Grok subscription connected as its own OAuth provider without an API key', () => {
     const status = buildSetupModelStatus({
       xaiSubscriptionConnected: true,

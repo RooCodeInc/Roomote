@@ -294,6 +294,55 @@ export function mergeMetadata(
   };
 }
 
+/**
+ * Chat-capable Grok models from the models.dev `xai` provider. Image, video,
+ * and other non-text outputs are omitted so the task switcher only offers
+ * models Roomote can run. New Grok releases appear here without a Roomote
+ * catalog change.
+ */
+export function listXaiChatModelsFromCatalog(
+  catalog: ModelsDevCatalog,
+): Array<{ id: string; displayName: string; family: string }> {
+  const providerModels = catalog.providers.xai?.models ?? {};
+
+  return Object.entries(providerModels).flatMap(([slug, entry]) => {
+    if (!isXaiChatModelEntry(entry)) {
+      return [];
+    }
+
+    const trimmedSlug = slug.trim();
+    if (!trimmedSlug) {
+      return [];
+    }
+
+    const id = trimmedSlug.startsWith('xai/')
+      ? trimmedSlug
+      : `xai/${trimmedSlug}`;
+    const displayName = entry.name?.trim() || trimmedSlug;
+
+    return [
+      {
+        id,
+        displayName,
+        family: 'Grok',
+      },
+    ];
+  });
+}
+
+function isXaiChatModelEntry(entry: ModelsDevModelEntry): boolean {
+  if (entry.status === 'deprecated') {
+    return false;
+  }
+
+  const outputs = entry.modalities?.output;
+  if (!outputs || outputs.length === 0) {
+    return true;
+  }
+
+  return outputs.includes('text');
+}
+
 export function suggestModelsFromCatalog(options: {
   catalog: ModelsDevCatalog;
   providerId: string;
