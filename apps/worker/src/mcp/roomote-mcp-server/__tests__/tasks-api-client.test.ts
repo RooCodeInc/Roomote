@@ -6,6 +6,7 @@ import {
   getTaskSummary,
   launchTask,
   cancelTask,
+  listTaskModels,
   stopTask,
   submitAutomationWorkItems,
   createEnvironment,
@@ -18,6 +19,37 @@ const config: RoomoteConfig = {
   token: 'test-token',
   platformApiUrl: 'https://test-api.example.com',
 };
+
+describe('listTaskModels', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('lists models from the task model endpoint', async () => {
+    const mockResponse = {
+      models: [
+        {
+          id: 'openai/gpt-5.6-luna',
+          displayName: 'GPT 5.6 Luna',
+          family: 'GPT',
+        },
+      ],
+      defaultModelId: 'openai/gpt-5.6-luna',
+    };
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockResponse,
+    });
+
+    await expect(listTaskModels(config)).resolves.toEqual(mockResponse);
+    expect(fetch).toHaveBeenCalledWith(
+      'https://test-api.example.com/api/mcp/tasks/models',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer test-token',
+        }),
+      }),
+    );
+  });
+});
 
 describe('searchTasks', () => {
   afterEach(() => vi.restoreAllMocks());

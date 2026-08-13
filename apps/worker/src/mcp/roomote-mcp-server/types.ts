@@ -2,6 +2,7 @@ import type {
   CommunicationProvider,
   SourceControlProvider,
   TaskArtifactType,
+  TaskModelOption,
 } from '@roomote/types';
 
 export interface ArtifactConfig {
@@ -282,6 +283,11 @@ export interface EnvironmentInfo {
 
 export interface ListEnvironmentsResponse {
   environments: EnvironmentInfo[];
+}
+
+export interface ListTaskModelsResponse {
+  models: TaskModelOption[];
+  defaultModelId: string;
 }
 
 export interface CreateArtifactResponse {
