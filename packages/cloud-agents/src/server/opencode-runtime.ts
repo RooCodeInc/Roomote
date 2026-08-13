@@ -12,6 +12,7 @@ import {
   mergeOpenCodeChatGptFastModeOptions,
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
+  stripOpenCodeModelReasoningOptions,
   type OpenRouterVariantModelAlias,
 } from '@roomote/types';
 
@@ -216,6 +217,30 @@ function toRestrictedNonTaskConfigContent(
     for (const key of NON_TASK_CONFIG_ALLOWED_KEYS) {
       if (config[key] !== undefined) {
         restricted[key] = config[key];
+      }
+    }
+
+    // Non-task calls must never run with thinking enabled: structured output
+    // (`format: json_schema`) forces tool choice, and Amazon Bedrock rejects
+    // thinking combined with forced tool use — a helper-model reasoning
+    // effort would fail every routing call on such deployments. Reasoning is
+    // a coding-harness setting; title/summary/routing inference never needs
+    // it, so strip it for every provider rather than special-casing Bedrock.
+    // Applied to the merged config so operator-supplied
+    // OPENCODE_CONFIG_CONTENT cannot reintroduce thinking either.
+    if (
+      restricted.provider &&
+      typeof restricted.provider === 'object' &&
+      !Array.isArray(restricted.provider)
+    ) {
+      const strippedProvider = stripOpenCodeModelReasoningOptions(
+        restricted.provider as Record<string, unknown>,
+      );
+
+      if (Object.keys(strippedProvider).length > 0) {
+        restricted.provider = strippedProvider;
+      } else {
+        delete restricted.provider;
       }
     }
 
