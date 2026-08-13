@@ -26,6 +26,7 @@ import {
   getSetupModelProviderAdditionalEnvFields,
   getSetupModelProviderEnvVarNames,
   getSetupModelProvider,
+  getSetupProviderTaskModelPrefix,
   getTaskModelCatalog,
   getTaskModelProviderId,
   getEnabledTaskModels,
@@ -1067,8 +1068,6 @@ export async function deleteTaskModelProviderCommand(
 }
 
 export async function getLaunchTaskModelsCommand(_auth: UserAuthSuccess) {
-  await syncConnectedXaiTaskModels();
-
   const [
     settings,
     chatgptConnected,
@@ -1681,10 +1680,7 @@ export async function suggestTaskModelsCommand(
     return { suggestions: [] };
   }
 
-  const providerPrefix =
-    provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID
-      ? 'openai/'
-      : `${provider.id}/`;
+  const providerPrefix = `${getSetupProviderTaskModelPrefix(provider.id)}/`;
   const providerModelId = `${providerPrefix}${query}`;
 
   if (TASK_MODEL_CATALOG.some((model) => model.id === providerModelId)) {
@@ -1699,12 +1695,7 @@ export async function suggestTaskModelsCommand(
     return { suggestions: [] };
   }
 
-  const catalogProviderId =
-    provider.id === CHATGPT_SUBSCRIPTION_PROVIDER_ID
-      ? 'openai'
-      : provider.id === XAI_SUBSCRIPTION_PROVIDER_ID
-        ? 'xai'
-        : provider.id;
+  const catalogProviderId = getSetupProviderTaskModelPrefix(provider.id);
 
   return {
     suggestions: suggestModelsFromCatalog({

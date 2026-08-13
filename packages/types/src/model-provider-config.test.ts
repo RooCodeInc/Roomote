@@ -13,6 +13,7 @@ import {
   getReasoningEffortLabel,
   getRecommendedModelPresets,
   getSetupModelProvider,
+  getSetupProviderTaskModelPrefix,
   normalizeDeploymentModelConfig,
   REASONING_EFFORT_OPTIONS,
   resolveSetupModelProviderIdFromModel,
@@ -846,6 +847,13 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     );
     expect(disconnected?.runtimeApiKeySatisfied).toBe(false);
     expect(disconnected?.savedApiKeySatisfied).toBe(false);
+  });
+
+  it('maps subscription connect surfaces to their runtime model-id prefixes', () => {
+    expect(getSetupProviderTaskModelPrefix('chatgpt')).toBe('openai');
+    expect(getSetupProviderTaskModelPrefix('xai-subscription')).toBe('xai');
+    expect(getSetupProviderTaskModelPrefix('xai')).toBe('xai');
+    expect(getSetupProviderTaskModelPrefix('anthropic')).toBe('anthropic');
   });
 
   it('lets xAI API and Grok subscription switch between Grok 4.6 and Grok 4.5', () => {

@@ -331,7 +331,7 @@ export function listXaiChatModelsFromCatalog(
 }
 
 function isXaiChatModelEntry(entry: ModelsDevModelEntry): boolean {
-  if (entry.status === 'deprecated') {
+  if (entry.status === 'deprecated' || entry.tool_call === false) {
     return false;
   }
 

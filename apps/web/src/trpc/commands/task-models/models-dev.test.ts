@@ -439,6 +439,11 @@ describe('listXaiChatModelsFromCatalog', () => {
               name: 'Grok 4.7',
               modalities: { output: ['text'] },
             },
+            'grok-4.20-multi-agent-0309': {
+              name: 'Grok 4.20 Multi-Agent',
+              tool_call: false,
+              modalities: { output: ['text'] },
+            },
             'grok-imagine-image': {
               name: 'Grok Imagine Image',
               modalities: { output: ['image', 'pdf'] },
@@ -461,5 +466,8 @@ describe('listXaiChatModelsFromCatalog', () => {
       { id: 'xai/grok-4.6', displayName: 'Grok 4.6', family: 'Grok' },
       { id: 'xai/grok-4.7', displayName: 'Grok 4.7', family: 'Grok' },
     ]);
+    expect(
+      listXaiChatModelsFromCatalog(catalog).map((model) => model.id),
+    ).not.toContain('xai/grok-4.20-multi-agent-0309');
   });
 });
