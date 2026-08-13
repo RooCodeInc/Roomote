@@ -334,6 +334,7 @@ describe('inference gateway key lookups', () => {
           headerName: 'cf-aig-gateway-id',
         },
       ],
+      openCodeNpm: '@ai-sdk/openai-compatible',
       openCodeBaseUrlSuffix: '/v1',
     });
     expect(provider?.allowedPaths).toEqual(
@@ -364,6 +365,7 @@ describe('inference gateway key lookups', () => {
         'https://api.cloudflare.com/client/v4/accounts/{resource}/ai',
       resource: { envVarName: 'CLOUDFLARE_WORKERS_AI_ACCOUNT_ID' },
       authHeader: { name: 'authorization', scheme: 'bearer' },
+      openCodeNpm: '@ai-sdk/openai-compatible',
       openCodeBaseUrlSuffix: '/v1',
     });
     expect(provider?.requiredHeaders).toBeUndefined();

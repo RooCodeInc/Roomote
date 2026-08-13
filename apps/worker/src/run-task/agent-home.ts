@@ -1061,6 +1061,9 @@ function rebaseProviderOntoGateway(
     ...providerConfig,
     [openCodeProviderId]: {
       ...existingProvider,
+      ...(gatewayProvider.openCodeNpm
+        ? { npm: gatewayProvider.openCodeNpm }
+        : {}),
       options: {
         ...existingOptions,
         baseURL: buildInferenceGatewayOpenCodeBaseUrl(

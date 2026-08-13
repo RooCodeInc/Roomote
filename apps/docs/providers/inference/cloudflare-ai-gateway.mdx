@@ -14,10 +14,12 @@ Connecting AI Gateway does not connect Workers AI.
 ## Get credentials
 
 Create a [Cloudflare API token](https://developers.cloudflare.com/fundamentals/api/get-started/create-token/)
-with AI Gateway access. Copy the account ID from the Cloudflare dashboard, then
-create or select an [AI Gateway](https://developers.cloudflare.com/ai-gateway/get-started/)
-and copy its gateway ID. A `default` gateway is created automatically on first
-use.
+with **Account > Workers AI** permission. Roomote calls Cloudflare's unified
+`/accounts/<id>/ai/v1` REST surface, and a token that only has AI Gateway
+permission is rejected with 401. Copy the account ID from the Cloudflare
+dashboard, then create or select an
+[AI Gateway](https://developers.cloudflare.com/ai-gateway/get-started/) and
+copy its gateway ID. A `default` gateway is created automatically on first use.
 
 Configure stored provider keys or unified billing in Cloudflare for the vendors
 you plan to call through the gateway.
@@ -58,8 +60,9 @@ and invoice are authoritative. See [AI Gateway pricing](https://developers.cloud
 
 ## Common issues
 
-- **The token is rejected.** Confirm it is a Cloudflare API token with AI
-  Gateway permission, not an unrelated Cloudflare global API key.
+- **The token is rejected.** Confirm it is a Cloudflare API token with
+  Account > Workers AI permission. An AI Gateway-only token returns 401 on
+  the `/ai/v1` REST API Roomote uses.
 - **A model cannot be routed.** Check that the vendor is enabled on the
   selected gateway and that stored keys or unified billing cover that model.
 - **Workers AI models fail.** `@cf/` models through AI Gateway still need

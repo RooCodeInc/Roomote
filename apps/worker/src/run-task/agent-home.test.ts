@@ -353,6 +353,58 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
+  it('rebases Cloudflare AI Gateway onto the OpenAI-compatible gateway SDK', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'cloudflare-ai-gateway/openai/gpt-5.6-terra',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'CLOUDFLARE_AI_GATEWAY_API_TOKEN',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { npm?: string; options?: Record<string, unknown> }
+      >;
+    };
+
+    expect(config.provider['cloudflare-ai-gateway']).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      options: {
+        baseURL:
+          'https://api.example.com/api/inference/cloudflare-ai-gateway/v1',
+        apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      },
+    });
+  });
+
+  it('rebases Cloudflare Workers AI onto the OpenAI-compatible gateway SDK', () => {
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv: {
+        R_MODEL: 'cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code',
+        R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference',
+        R_INFERENCE_GATEWAY_KEYS: 'CLOUDFLARE_WORKERS_AI_API_TOKEN',
+      },
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { npm?: string; options?: Record<string, unknown> }
+      >;
+    };
+
+    expect(config.provider['cloudflare-workers-ai']).toMatchObject({
+      npm: '@ai-sdk/openai-compatible',
+      options: {
+        baseURL:
+          'https://api.example.com/api/inference/cloudflare-workers-ai/v1',
+        apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+      },
+    });
+  });
+
   it('rebases Azure providers onto the inference gateway without a /v1 suffix', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

@@ -435,7 +435,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     envVarLabel: 'API token',
     authKind: 'api-key',
     credentialHelp: {
-      text: 'Create a Cloudflare API token with AI Gateway access. Use the account ID and gateway ID from the Cloudflare dashboard. Connecting this provider does not connect Workers AI.',
+      text: 'Create a Cloudflare API token with Account > Workers AI permission. The /ai/v1 REST API Roomote uses rejects tokens that only have AI Gateway permission. Use the account ID and gateway ID from the Cloudflare dashboard. Connecting this provider does not connect the Workers AI provider.',
       href: 'https://developers.cloudflare.com/ai-gateway/get-started/',
       linkLabel: 'Open Cloudflare AI Gateway docs',
     },

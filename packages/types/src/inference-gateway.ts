@@ -192,6 +192,13 @@ export interface InferenceGatewayProvider {
    * like `/messages` or `/chat/completions` below it).
    */
   openCodeBaseUrlSuffix: string;
+  /**
+   * OpenCode npm package to install when this provider is rebased onto the
+   * Roomote inference gateway. Required when models.dev's package is not an
+   * OpenAI-compatible factory (Cloudflare AI Gateway's `ai-gateway-provider`
+   * would otherwise ignore Roomote's `/v1/chat/completions` route).
+   */
+  openCodeNpm?: string;
 }
 
 /**
@@ -367,6 +374,7 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
         ...OPENAI_COMPATIBLE_INFERENCE_PATHS,
         ...OPENAI_RESPONSES_INFERENCE_PATHS,
       ],
+      openCodeNpm: '@ai-sdk/openai-compatible',
       openCodeBaseUrlSuffix: '/v1',
     },
     {
@@ -378,6 +386,7 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       resource: { envVarName: 'CLOUDFLARE_WORKERS_AI_ACCOUNT_ID' },
       authHeader: { name: 'authorization', scheme: 'bearer' },
       allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      openCodeNpm: '@ai-sdk/openai-compatible',
       openCodeBaseUrlSuffix: '/v1',
     },
     {

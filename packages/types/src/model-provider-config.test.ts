@@ -1780,6 +1780,12 @@ describe('Cloudflare inference providers', () => {
       authKind: 'api-key',
       defaultRoomoteModel: 'cloudflare-ai-gateway/openai/gpt-5.6-terra',
     });
+    expect(gatewayProvider?.credentialHelp?.text).toMatch(
+      /Workers AI (access|permission)/u,
+    );
+    expect(gatewayProvider?.credentialHelp?.text).not.toMatch(
+      /token with AI Gateway access/u,
+    );
     expect(gatewayProvider?.additionalEnvFields).toEqual([
       {
         envVarName: 'CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID',
