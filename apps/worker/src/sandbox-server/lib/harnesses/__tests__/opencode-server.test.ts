@@ -461,11 +461,18 @@ describe('OpenCodeServerHarness', () => {
           parts: [
             {
               type: 'text',
-              text: expect.stringContaining('goal-generation:replacement'),
+              text: expect.stringContaining('<task_goal enabled="true">'),
             },
           ],
         },
       });
+      const agentPrompt = client.promptAsync.mock.calls[0]?.[0] as
+        | { request?: { parts?: Array<{ type: string; text?: string }> } }
+        | undefined;
+      const agentPromptText = agentPrompt?.request?.parts?.[0]?.text;
+      expect(agentPromptText).toContain('goal-generation:replacement');
+      expect(agentPromptText).toContain('Goal Mode is enabled for this turn');
+      expect(agentPromptText).not.toContain('/goal');
       expect(
         persistedEnvelopes.find(
           (envelope) =>

@@ -102,10 +102,7 @@ import {
   getInitialWorkflowPhase,
 } from './workflow-phase';
 import { wrapCommunicationMessage } from './communication-message-prompt';
-import {
-  buildTaskGoalContinuationPrompt,
-  buildTaskGoalInstructions,
-} from './task-goal';
+import { buildTaskGoalContinuationPrompt } from './task-goal';
 
 function formatEnvironmentInstructions(
   instructions?: string,
@@ -1046,12 +1043,7 @@ export const runTask = async ({
     // OpenCode consumes Roomote's identity, workflow, and runtime guidance
     // through its developer-instructions layer.
     const harnessDeveloperInstructions =
-      [
-        ROOMOTE_SYSTEM_PROMPT,
-        harnessInstructions,
-        buildTaskGoalInstructions(task?.goal ?? null),
-        environmentInstructions,
-      ]
+      [ROOMOTE_SYSTEM_PROMPT, harnessInstructions, environmentInstructions]
         .filter((value): value is string => Boolean(value))
         .join('\n\n') || undefined;
 
