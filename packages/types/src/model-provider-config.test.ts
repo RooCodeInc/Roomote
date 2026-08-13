@@ -445,11 +445,11 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     },
   );
 
-  it('recommends Gemini 3.6 Flash only from providers that support it', () => {
+  it('recommends Gemini 3.7 Flash from every provider that offered 3.6', () => {
     const geminiFlashByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
       (provider) => {
         const model = provider.suggestedTaskModels.find(
-          (suggestion) => suggestion.displayName === 'Gemini 3.6 Flash',
+          (suggestion) => suggestion.displayName === 'Gemini 3.7 Flash',
         );
 
         return model ? [{ providerId: provider.id, modelId: model.id }] : [];
@@ -459,12 +459,12 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(geminiFlashByProvider).toEqual([
       {
         providerId: 'openrouter',
-        modelId: 'openrouter/google/gemini-3.6-flash',
+        modelId: 'openrouter/google/gemini-3.7-flash',
       },
-      { providerId: 'vercel', modelId: 'vercel/google/gemini-3.6-flash' },
-      { providerId: 'requesty', modelId: 'requesty/gemini-3.6-flash' },
-      { providerId: 'opencode', modelId: 'opencode/gemini-3.6-flash' },
-      { providerId: 'google', modelId: 'google/gemini-3.6-flash' },
+      { providerId: 'vercel', modelId: 'vercel/google/gemini-3.7-flash' },
+      { providerId: 'requesty', modelId: 'requesty/gemini-3.7-flash' },
+      { providerId: 'opencode', modelId: 'opencode/gemini-3.7-flash' },
+      { providerId: 'google', modelId: 'google/gemini-3.7-flash' },
     ]);
   });
 
@@ -592,7 +592,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(googleProvider).toMatchObject({
       label: 'Google Gemini',
       envVarName: 'GEMINI_API_KEY',
-      defaultRoomoteModel: 'google/gemini-3.6-flash',
+      defaultRoomoteModel: 'google/gemini-3.7-flash',
     });
   });
 
@@ -798,9 +798,9 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       envVarName: 'REQUESTY_API_KEY',
       defaultRoomoteModel: 'requesty/claude-sonnet-5',
       recommendedRoleModels: {
-        helper: 'requesty/gemini-3.6-flash',
+        helper: 'requesty/gemini-3.7-flash',
         codeReview: 'requesty/claude-sonnet-5',
-        explore: 'requesty/gemini-3.6-flash',
+        explore: 'requesty/gemini-3.7-flash',
         planning: 'requesty/claude-opus-5',
       },
     });
@@ -814,7 +814,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/gpt-5.6-sol@eu',
       'requesty/gpt-5.6-terra@eu',
       'requesty/gpt-5.6-luna@eu',
-      'requesty/gemini-3.6-flash',
+      'requesty/gemini-3.7-flash',
       'requesty/deepseek-v4-flash-0731',
       'requesty/glm-5.2',
       'requesty/kimi-k3',
@@ -1041,9 +1041,28 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       buildRecommendedDeploymentModelConfig(getSetupModelProvider('google')),
     ).toEqual({
       ...createEmptyDeploymentModelConfig(),
-      roomoteModel: 'google/gemini-3.6-flash',
+      roomoteModel: 'google/gemini-3.7-flash',
     });
   });
+
+  it.each([
+    ['balanced', DEFAULT_TASK_MODEL_ID],
+    ['quick-turnaround', 'openrouter/google/gemini-3.7-flash'],
+  ])(
+    'recommends Gemini 3.7 Flash in the %s OpenRouter preset',
+    (presetId, codingModel) => {
+      expect(
+        buildRecommendedDeploymentModelConfig(
+          getSetupModelProvider('openrouter'),
+          presetId,
+        ),
+      ).toMatchObject({
+        roomoteModel: codingModel,
+        roomoteSmallModel: 'openrouter/google/gemini-3.7-flash',
+        roomoteExploreModel: 'openrouter/google/gemini-3.7-flash',
+      });
+    },
+  );
 
   it('recommends Kimi K3 for Moonshot vision, code review, and planning', () => {
     expect(

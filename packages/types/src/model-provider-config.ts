@@ -286,7 +286,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
         roles: {
           coding: { modelId: DEFAULT_TASK_MODEL_ID, reasoningEffort: 'medium' },
           helper: {
-            modelId: 'openrouter/google/gemini-3.6-flash',
+            modelId: 'openrouter/google/gemini-3.7-flash',
             reasoningEffort: 'low',
           },
           codeReview: {
@@ -294,7 +294,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'medium',
           },
           explore: {
-            modelId: 'openrouter/google/gemini-3.6-flash',
+            modelId: 'openrouter/google/gemini-3.7-flash',
             reasoningEffort: 'low',
           },
           planning: {
@@ -308,11 +308,11 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
         label: 'Quick turnaround',
         roles: {
           coding: {
-            modelId: 'openrouter/google/gemini-3.6-flash',
+            modelId: 'openrouter/google/gemini-3.7-flash',
             reasoningEffort: 'low',
           },
           helper: {
-            modelId: 'openrouter/google/gemini-3.6-flash',
+            modelId: 'openrouter/google/gemini-3.7-flash',
             reasoningEffort: 'low',
           },
           codeReview: {
@@ -320,7 +320,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             reasoningEffort: 'medium',
           },
           explore: {
-            modelId: 'openrouter/google/gemini-3.6-flash',
+            modelId: 'openrouter/google/gemini-3.7-flash',
             reasoningEffort: 'low',
           },
           planning: {
@@ -345,7 +345,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'vercel/openai/gpt-5.6-sol',
       'gpt-5-6-terra': 'vercel/openai/gpt-5.6-terra',
       'gpt-5-6-luna': 'vercel/openai/gpt-5.6-luna',
-      'gemini-3-6-flash': 'vercel/google/gemini-3.6-flash',
+      'gemini-3-7-flash': 'vercel/google/gemini-3.7-flash',
       'deepseek-v4-flash-0731': 'vercel/deepseek/deepseek-v4-flash-0731',
       'deepseek-v4-pro-0813': 'vercel/deepseek/deepseek-v4-pro-0813',
       'glm-5-2': 'vercel/zai/glm-5.2',
@@ -358,9 +358,9 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     // Vision is unset: the recommended coding model is multimodal, so image
     // work follows the coding model ("same as coding").
     recommendedRoleModels: {
-      helper: 'vercel/google/gemini-3.6-flash',
+      helper: 'vercel/google/gemini-3.7-flash',
       codeReview: 'vercel/anthropic/claude-sonnet-5',
-      explore: 'vercel/google/gemini-3.6-flash',
+      explore: 'vercel/google/gemini-3.7-flash',
       planning: 'vercel/anthropic/claude-opus-5',
     },
     recommendedRoleReasoningEfforts: { codeReview: 'medium' },
@@ -380,16 +380,16 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'requesty/gpt-5.6-sol@eu',
       'gpt-5-6-terra': 'requesty/gpt-5.6-terra@eu',
       'gpt-5-6-luna': 'requesty/gpt-5.6-luna@eu',
-      'gemini-3-6-flash': 'requesty/gemini-3.6-flash',
+      'gemini-3-7-flash': 'requesty/gemini-3.7-flash',
       'deepseek-v4-flash-0731': 'requesty/deepseek-v4-flash-0731',
       'glm-5-2': 'requesty/glm-5.2',
       'kimi-k3': 'requesty/kimi-k3',
       'grok-4-6': 'requesty/grok-4.6',
     }),
     recommendedRoleModels: {
-      helper: 'requesty/gemini-3.6-flash',
+      helper: 'requesty/gemini-3.7-flash',
       codeReview: 'requesty/claude-sonnet-5',
-      explore: 'requesty/gemini-3.6-flash',
+      explore: 'requesty/gemini-3.7-flash',
       planning: 'requesty/claude-opus-5',
     },
     recommendedRoleReasoningEfforts: { codeReview: 'medium' },
@@ -593,7 +593,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-sol': 'opencode/gpt-5.6-sol',
       'gpt-5-6-terra': 'opencode/gpt-5.6-terra',
       'gpt-5-6-luna': 'opencode/gpt-5.6-luna',
-      'gemini-3-6-flash': 'opencode/gemini-3.6-flash',
+      'gemini-3-7-flash': 'opencode/gemini-3.7-flash',
       // Zen serves the dated Flash release under this stable model alias.
       'deepseek-v4-flash-0731': 'opencode/deepseek-v4-flash',
       'deepseek-v4-pro-0813': 'opencode/deepseek-v4-pro',
@@ -607,10 +607,10 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     // so vision gets an explicit multimodal recommendation instead of the
     // usual same-as-coding fallback.
     recommendedRoleModels: {
-      helper: 'opencode/gemini-3.6-flash',
+      helper: 'opencode/gemini-3.7-flash',
       vision: 'opencode/claude-sonnet-5',
       codeReview: 'opencode/claude-sonnet-5',
-      explore: 'opencode/gemini-3.6-flash',
+      explore: 'opencode/gemini-3.7-flash',
       planning: 'opencode/claude-opus-5',
     },
     recommendedRoleReasoningEfforts: { codeReview: 'medium' },
@@ -694,10 +694,10 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: 'google',
     label: 'Google Gemini',
     envVarName: 'GEMINI_API_KEY',
-    defaultRoomoteModel: 'google/gemini-3.6-flash',
+    defaultRoomoteModel: 'google/gemini-3.7-flash',
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
-      'gemini-3-6-flash': 'google/gemini-3.6-flash',
+      'gemini-3-7-flash': 'google/gemini-3.7-flash',
     }),
     // All non-coding roles follow the Flash coding default.
   },

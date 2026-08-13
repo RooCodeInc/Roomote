@@ -36,8 +36,8 @@ export const RECOMMENDED_TASK_MODELS = [
   { id: 'gpt-5-6-terra', displayName: 'GPT 5.6 Terra', family: 'GPT' },
   { id: 'gpt-5-6-luna', displayName: 'GPT 5.6 Luna', family: 'GPT' },
   {
-    id: 'gemini-3-6-flash',
-    displayName: 'Gemini 3.6 Flash',
+    id: 'gemini-3-7-flash',
+    displayName: 'Gemini 3.7 Flash',
     family: 'Gemini',
   },
   {
@@ -100,7 +100,7 @@ export const OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS = {
   'gpt-5-6-sol': 'openrouter/openai/gpt-5.6-sol',
   'gpt-5-6-terra': 'openrouter/openai/gpt-5.6-terra',
   'gpt-5-6-luna': 'openrouter/openai/gpt-5.6-luna',
-  'gemini-3-6-flash': 'openrouter/google/gemini-3.6-flash',
+  'gemini-3-7-flash': 'openrouter/google/gemini-3.7-flash',
   'deepseek-v4-flash-0731': 'openrouter/deepseek/deepseek-v4-flash-0731',
   'deepseek-v4-pro-0813': 'openrouter/deepseek/deepseek-v4-pro-0813',
   'glm-5-2': 'openrouter/z-ai/glm-5.2',
