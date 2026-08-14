@@ -11,6 +11,7 @@ import {
   Button,
   Card,
   CardContent,
+  Spinner,
 } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 import { SetupFooter } from './SetupFooter';
@@ -73,24 +74,33 @@ export function StepAutomationRecommendations({
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
       <StepTitle
-        text={pending ? 'Looking for stuff to automate' : STEP.title}
+        text={pending ? 'Looking for stuff to automate...' : STEP.title}
       />
       {pending ? (
         <div
-          className="flex items-center gap-3 text-muted-foreground"
+          className="flex items-start gap-3 text-muted-foreground"
           aria-live="polite"
         >
-          <Loader2 className="size-5 animate-spin" />
+          <Spinner className="mt-1" />
           <p>
-            Roomote is checking the selected repositories for recurring work
-            worth automating.
+            Roomote is checking your repos for recurring work worth automating.
+            <br />
+            This only takes a few seconds.
           </p>
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
-          {batch.recommendations.map((recommendation) => (
-            <Card key={recommendation.id}>
-              <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:items-center">
+        <div className="space-y-4">
+          <p className="text-muted-foreground">
+            Considering the shape and update frequency of your connected
+            repositories, Roomote found some automations that can help you save
+            work:
+          </p>
+          <div className="divide-y divide-foreground/10">
+            {batch.recommendations.map((recommendation) => (
+              <div
+                key={recommendation.id}
+                className="flex flex-col gap-4 py-3 sm:flex-row sm:items-center"
+              >
                 <Switch
                   checked={recommendation.enabled}
                   onCheckedChange={(enabled) =>
@@ -109,6 +119,7 @@ export function StepAutomationRecommendations({
                 <Button
                   type="button"
                   variant="outline"
+                  size="sm"
                   disabled={runNow.isPending}
                   onClick={() => runNow.mutate({ id: recommendation.id })}
                   title="Starts a paid automation run"
@@ -116,14 +127,14 @@ export function StepAutomationRecommendations({
                   <Play />
                   Run now
                 </Button>
-              </CardContent>
-            </Card>
-          ))}
+              </div>
+            ))}
+          </div>
         </div>
       )}
       <SetupFooter onBack={onBack}>
-        <Button type="button" onClick={onContinue} className="ml-auto">
-          Continue
+        <Button type="button" onClick={onContinue}>
+          {pending ? 'Skip' : 'Continue'}
           <ArrowRight />
         </Button>
       </SetupFooter>

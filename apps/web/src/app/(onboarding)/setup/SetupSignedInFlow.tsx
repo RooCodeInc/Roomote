@@ -106,7 +106,6 @@ export function SetupSignedInFlow() {
     goToPreviousStep,
     goToNextStep,
     canGoBack,
-    goToNextPostOnboardingStep,
     readSetupSearchParams,
     commitSetupUrl,
     status,
@@ -507,7 +506,7 @@ export function SetupSignedInFlow() {
               onBack={canGoBack ? goToPreviousStep : undefined}
               onSkip={() => {
                 setupSession.unlockPostOnboardingFlow();
-                goToNextPostOnboardingStep(true);
+                goToStep('automation-recommendations', { revisit: true });
               }}
             />
           )}

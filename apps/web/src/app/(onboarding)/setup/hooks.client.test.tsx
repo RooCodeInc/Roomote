@@ -1218,11 +1218,9 @@ describe('useSetupFlow', () => {
     });
   });
 
-  it('keeps the user on invoke after skipping repo selection with no onboarding task yet', async () => {
-    // Skipping environment setup from repo selection before any onboarding
-    // task has started must land on invoke and stay there. Previously the
-    // auto-skip watchdog treated invoke as unreachable (no onboardingTaskId
-    // to scope the unlock to) and yanked the user back to repo selection.
+  it('keeps the recommendations step visible after skipping repo selection', async () => {
+    // Skipping environment setup before any onboarding task has started still
+    // needs to expose the recommendations step for the admin to review.
     setupSessionState.session = {
       ...setupSessionState.session,
       communicationStep: {
@@ -1299,17 +1297,17 @@ describe('useSetupFlow', () => {
 
     act(() => {
       result.current.setupSession.unlockPostOnboardingFlow();
-      result.current.goToNextPostOnboardingStep(true);
+      result.current.goToStep('automation-recommendations', { revisit: true });
     });
 
     await waitFor(() => {
-      expect(result.current.step).toBe('invoke');
+      expect(result.current.step).toBe('automation-recommendations');
     });
 
     // Give the auto-skip watchdog a chance to run after the navigation; it
-    // must not bounce the user back into repo selection.
+    // must not bounce the intentionally revisited step back to repo selection.
     await waitFor(() => {
-      expect(result.current.step).toBe('invoke');
+      expect(result.current.step).toBe('automation-recommendations');
     });
   });
 

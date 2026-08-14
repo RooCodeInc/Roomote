@@ -358,7 +358,7 @@ async function buildRecommendationBatch(
       rank: index + 1,
       score,
       explanation,
-      enabled: false,
+      enabled: true,
       lastRunTaskId: null,
       automationId: null,
     })),
