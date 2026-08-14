@@ -404,7 +404,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     );
 
     expect(providersByModel).toEqual([
-      { providerId: 'openrouter', modelId: 'openrouter/z-ai/glm-5.3' },
       { providerId: 'opencode-go', modelId: 'opencode-go/glm-5.3' },
       {
         providerId: 'zai-coding-plan',
