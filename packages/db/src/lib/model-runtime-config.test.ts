@@ -682,6 +682,69 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     expect(env.R_INFERENCE_GATEWAY_CHATGPT).toBe('1');
   });
 
+  it('emits trusted context windows for enabled sandbox models', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'litellm/qwen3.6:35b-unsloth' },
+      taskModelSettings: {
+        models: [
+          {
+            id: 'litellm/qwen3.6:35b-unsloth',
+            displayName: 'Qwen 3.6 35B',
+            family: 'Qwen',
+            metadata: {
+              contextWindow: 210_176,
+              inputTypes: ['text'],
+              inputPricePerToken: null,
+              outputPricePerToken: null,
+              lastRefreshedAt: null,
+            },
+          },
+          {
+            id: 'litellm/no-context-metadata',
+            displayName: 'Unknown context',
+            family: 'Custom',
+            metadata: {
+              contextWindow: null,
+              inputTypes: null,
+              inputPricePerToken: null,
+              outputPricePerToken: null,
+              lastRefreshedAt: null,
+            },
+          },
+          {
+            id: 'litellm/disabled-model',
+            displayName: 'Disabled',
+            family: 'Custom',
+            metadata: {
+              contextWindow: 999_999,
+              inputTypes: null,
+              inputPricePerToken: null,
+              outputPricePerToken: null,
+              lastRefreshedAt: null,
+            },
+          },
+        ],
+        allowedModelIds: [
+          'litellm/qwen3.6:35b-unsloth',
+          'litellm/no-context-metadata',
+        ],
+        defaultModelId: 'litellm/qwen3.6:35b-unsloth',
+      },
+    });
+
+    const env = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: {
+        R_TASK_MODEL_CONTEXT_WINDOWS: JSON.stringify({ stale: 1 }),
+        LITELLM_BASE_URL: 'https://litellm.example.com/v1',
+      },
+      deploymentEnvVars: {},
+    });
+
+    expect(JSON.parse(env.R_TASK_MODEL_CONTEXT_WINDOWS ?? '{}')).toEqual({
+      'litellm/qwen3.6:35b-unsloth': 210_176,
+    });
+  });
+
   it('does not emit the ChatGPT gateway marker when no subscription is connected', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: { roomoteModel: 'openai/gpt-5.4' },
