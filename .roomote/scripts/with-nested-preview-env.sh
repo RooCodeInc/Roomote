@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-preview_url="${ROOMOTE_PREVIEW_HOST:?ROOMOTE_PREVIEW_HOST is required}"
+# Deployments without outer preview routing omit named-port host variables.
+# Keep the Roomote development stack usable there; only nested preview URLs
+# are unavailable.
+if [[ -z "${ROOMOTE_PREVIEW_HOST:-}" ]]; then
+  exec "$@"
+fi
+
+preview_url="$ROOMOTE_PREVIEW_HOST"
 preview_scheme="${preview_url%%://*}"
 preview_host="${preview_url#*://}"
 preview_host="${preview_host%%/*}"
