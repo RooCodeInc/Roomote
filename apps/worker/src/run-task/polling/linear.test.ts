@@ -90,7 +90,7 @@ function createListenerOptions(overrides?: {
 
   const sendPrompt = overrides?.sendPrompt
     ? vi.fn(overrides.sendPrompt)
-    : vi.fn<ListenerOptions['sendPrompt']>(() => true);
+    : vi.fn<ListenerOptions['sendPrompt']>(async () => true);
   const answerUserInputRequest = overrides?.answerUserInputRequest
     ? vi.fn(overrides.answerUserInputRequest)
     : vi.fn<ListenerOptions['answerUserInputRequest']>(() => true);
@@ -560,6 +560,55 @@ describe('createLinearMessageInterval', () => {
           userId: 'user-2',
         }),
       ]);
+    } finally {
+      clearInterval(interval);
+    }
+  });
+
+  it('requeues Linear follow-ups when prompt delivery fails', async () => {
+    const message = {
+      sessionId: 'session-1',
+      organizationId: 'linear-org-1',
+      action: 'prompted' as const,
+      timestamp: 1710000000901,
+      payload: {
+        type: 'AgentSessionEvent' as const,
+        action: 'prompted' as const,
+        organizationId: 'linear-org-1',
+        webhookTimestamp: 1710000000901,
+        webhookId: 'webhook-1',
+        appUserId: 'app-user-1',
+        agentSession: {
+          id: 'session-1',
+          issue: {
+            id: 'issue-1',
+            identifier: 'ENG-1',
+            title: 'Test issue',
+            url: 'https://linear.app/issue/ENG-1',
+          },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+        agentActivity: {
+          id: 'activity-1',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          agentSessionId: 'session-1',
+          content: { type: 'response' as const, body: 'Please continue' },
+        },
+      },
+      userId: 'user-2',
+    };
+    mockGetLinearMessages.mockResolvedValueOnce([message]);
+    const { options } = createListenerOptions({
+      sendPrompt: async () => false,
+    });
+    const interval = createLinearMessageInterval(options);
+
+    try {
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(mockPrependLinearMessages).toHaveBeenCalledWith(42, [message]);
     } finally {
       clearInterval(interval);
     }

@@ -260,6 +260,7 @@ export type PollingIntervals = {
     Record<CommunicationProvider, () => Promise<void>>
   >;
   linearMessageInterval: NodeJS.Timeout | undefined;
+  linearMessageCleanup?: () => Promise<void>;
   githubTokenRefreshInterval: NodeJS.Timeout | undefined;
 };
 
@@ -293,7 +294,7 @@ export interface ListenerOptions {
     userName?: string;
     userImageUrl?: string;
     clientMessageId?: string;
-  }) => boolean;
+  }) => Promise<boolean>;
   slackReplySatisfactionStateFile?: string;
   answerUserInputRequest: (options: {
     requestId: string;

@@ -42,8 +42,16 @@ export function createLinearMessageInterval({
   logger,
   prepareActorScopedTurn,
 }: ListenerOptions): NodeJS.Timeout {
-  return setInterval(async () => {
-    if (!state.sessionId) {
+  let stopping = false;
+  let activePoll = Promise.resolve();
+
+  state.linearMessageCleanup = async () => {
+    stopping = true;
+    await activePoll;
+  };
+
+  const pollOnce = async () => {
+    if (stopping || !state.sessionId) {
       return;
     }
 
@@ -208,7 +216,7 @@ export function createLinearMessageInterval({
             continue;
           }
 
-          const sent = sendPrompt({
+          const sent = await sendPrompt({
             prompt: text,
             source: 'linear',
             // Deliver mid-turn replies like Slack does: native injection when
@@ -223,6 +231,18 @@ export function createLinearMessageInterval({
             logger.warn(
               `[listenForLinearEvents] Failed to send follow-up prompt for task ${state.sessionId}`,
             );
+
+            try {
+              await requeueLinearMessages(taskRun.id, linearMessages, index);
+            } catch (error) {
+              logger.error(
+                `[listenForLinearEvents] Failed to requeue Linear follow-up for task run ${taskRun.id}: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              );
+            }
+
+            break;
           }
 
           logger.log(
@@ -242,5 +262,13 @@ export function createLinearMessageInterval({
         message: `[listenForLinearEvents] Unexpected error while delivering queued Linear events for job ${taskRun.id}`,
       });
     }
+  };
+
+  return setInterval(() => {
+    if (stopping) {
+      return;
+    }
+
+    activePoll = activePoll.then(pollOnce);
   }, LINEAR_MESSAGE_CHECK_INTERVAL_MS);
 }

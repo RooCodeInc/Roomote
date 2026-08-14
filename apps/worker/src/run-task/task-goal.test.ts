@@ -2,7 +2,7 @@ import type { TaskGoal } from '@roomote/types';
 
 import {
   buildTaskGoalContinuationPrompt,
-  buildTaskGoalInstructions,
+  buildTaskGoalContext,
 } from './task-goal';
 
 const activeGoal: TaskGoal = {
@@ -16,19 +16,16 @@ const activeGoal: TaskGoal = {
 };
 
 describe('task goal prompts', () => {
-  it('injects bounded active-goal instructions', () => {
-    const instructions = buildTaskGoalInstructions(activeGoal);
+  it('builds trusted per-turn context for an active goal', () => {
+    const context = buildTaskGoalContext(activeGoal);
 
-    expect(instructions).not.toContain(activeGoal.objective);
-    expect(instructions).toContain('manage_goal');
-    expect(instructions).not.toContain('goal-generation:current');
-    expect(instructions).not.toContain('2 of 5');
-  });
-
-  it('does not inject instructions for terminal goals', () => {
-    expect(
-      buildTaskGoalInstructions({ ...activeGoal, status: 'complete' }),
-    ).toBeUndefined();
+    expect(context).toContain('<task_goal enabled="true">');
+    expect(context).toContain(activeGoal.objective);
+    expect(context).toContain('Goal Mode is enabled for this turn');
+    expect(context).toContain('manage_goal');
+    expect(context).toContain('goal-generation:current');
+    expect(context).toContain('2 of 5');
+    expect(context).not.toContain('/goal');
   });
 
   it('builds an action-oriented hidden continuation', () => {

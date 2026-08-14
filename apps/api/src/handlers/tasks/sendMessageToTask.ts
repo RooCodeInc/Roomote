@@ -6,6 +6,7 @@ import {
   db,
   eq,
   findReusableGitHubPrFollowUpOwner,
+  getTaskGoalForRun,
   taskPullRequests,
   taskRuns,
   users,
@@ -863,8 +864,9 @@ export async function sendMessageToTask({
         userId: senderUserId,
         sandboxServerUrl: run.sandboxServerUrl,
         fetch: fetchSandboxRpcResponseOrThrowIfNotReady,
-        call: (client) =>
-          client.commands.sendPrompt.mutate({
+        call: async (client) => {
+          const goal = await getTaskGoalForRun(run.id);
+          return client.commands.sendPrompt.mutate({
             prompt: message,
             quoteText,
             ...(followUpPromptSource ? { source: followUpPromptSource } : {}),
@@ -879,7 +881,9 @@ export async function sendMessageToTask({
             // next step; fallback steering aborts and replays promptly.
             ...(requiresActorHandoff ? { autoSteerWhenQueued: true } : {}),
             ...(images?.length ? { images } : {}),
-          }),
+            ...(goal?.status === 'active' ? { goalContext: goal } : {}),
+          });
+        },
       });
 
       return { success: true, result };
@@ -1032,15 +1036,18 @@ export async function steerMessageToTask({
         userId,
         sandboxServerUrl: run.sandboxServerUrl,
         fetch: fetchSandboxRpcResponseOrThrowIfNotReady,
-        call: (client) =>
-          client.commands.steerTask.mutate({
+        call: async (client) => {
+          const goal = await getTaskGoalForRun(run.id);
+          return client.commands.steerTask.mutate({
             prompt: message,
             quoteText,
             ...(resolvedQuoteUserName
               ? { userName: resolvedQuoteUserName }
               : {}),
             ...(images?.length ? { images } : {}),
-          }),
+            ...(goal?.status === 'active' ? { goalContext: goal } : {}),
+          });
+        },
       });
 
       return { success: true, result };
