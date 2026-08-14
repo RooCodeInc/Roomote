@@ -27,9 +27,7 @@ import {
   type InferenceGatewayProvider,
   isConfiguredEnvValue,
   isTaskModelIdDisabled,
-  mergeAmazonBedrockProviderConfig,
-  mergeBedrockMantleOpenAiProviderConfig,
-  mergeBedrockMantleProviderConfig,
+  mergeBedrockProviderConfigs,
   mergeOpenAiCompatibleProviderConfig,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenCodeChatGptFastModeOptions,
@@ -1617,23 +1615,15 @@ function resolveModelBackedOpenCodeConfig(
   const providerConfig = mergeInferenceGatewayProviderConfig(
     mergeOpenCodeGoProviderConfig(
       mergeAzureCognitiveServicesProviderConfig(
-        mergeAmazonBedrockProviderConfig(
-          mergeBedrockMantleProviderConfig(
-            mergeBedrockMantleOpenAiProviderConfig(
-              mergeOpenAiCompatibleProviderConfig(
-                mergeOpenRouterVariantAliasModels(
-                  providerModelConfig,
-                  variantAliases,
-                ),
-                runtimeEnv,
-                configuredModelIds,
-                visionModel ?? effectiveCodingModel,
-              ),
-              runtimeEnv,
-              configuredModelIds,
+        mergeBedrockProviderConfigs(
+          mergeOpenAiCompatibleProviderConfig(
+            mergeOpenRouterVariantAliasModels(
+              providerModelConfig,
+              variantAliases,
             ),
             runtimeEnv,
             configuredModelIds,
+            visionModel ?? effectiveCodingModel,
           ),
           runtimeEnv,
           configuredModelIds,

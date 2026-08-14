@@ -57,6 +57,59 @@ function collectModelIdsForPrefix(
   ];
 }
 
+type BedrockProviderRegistration = {
+  mergeOptions: (
+    existingOptions: Record<string, unknown>,
+    region: string,
+  ) => Record<string, unknown>;
+  npm: string;
+  providerId: string;
+};
+
+function mergeBedrockProviderConfig(
+  providerConfig: Record<string, unknown>,
+  runtimeEnv: RuntimeEnv,
+  modelIds: Array<string | undefined>,
+  registration: BedrockProviderRegistration,
+): Record<string, unknown> {
+  const registeredModelIds = collectModelIdsForPrefix(
+    modelIds,
+    registration.providerId,
+  );
+
+  if (registeredModelIds.length === 0) {
+    return providerConfig;
+  }
+
+  const region = resolveBedrockRegion(runtimeEnv);
+  const existingProvider = asRecord(providerConfig[registration.providerId]);
+  const existingOptions = asRecord(existingProvider.options);
+  const existingModels = asRecord(existingProvider.models);
+  const registeredModels = Object.fromEntries(
+    registeredModelIds.map((modelId) => [
+      modelId,
+      {
+        name: modelId,
+        ...asRecord(existingModels[modelId]),
+      },
+    ]),
+  );
+
+  return {
+    ...providerConfig,
+    [registration.providerId]: {
+      ...existingProvider,
+      npm: registration.npm,
+      name: 'Amazon Bedrock',
+      options: registration.mergeOptions(existingOptions, region),
+      models: {
+        ...existingModels,
+        ...registeredModels,
+      },
+    },
+  };
+}
+
 /**
  * Bedrock Mantle serves GPT models through its OpenAI-compatible endpoint
  * (Responses API), not the Anthropic Messages endpoint the `bedrock-mantle`
@@ -94,48 +147,15 @@ export function mergeBedrockMantleProviderConfig(
   runtimeEnv: RuntimeEnv,
   modelIds: Array<string | undefined>,
 ): Record<string, unknown> {
-  const mantleModelIds = collectModelIdsForPrefix(
-    modelIds,
-    BEDROCK_MANTLE_OPENCODE_PROVIDER_ID,
-  );
-
-  if (mantleModelIds.length === 0) {
-    return providerConfig;
-  }
-
-  const region = resolveBedrockRegion(runtimeEnv);
-  const existingProvider = asRecord(
-    providerConfig[BEDROCK_MANTLE_OPENCODE_PROVIDER_ID],
-  );
-  const existingOptions = asRecord(existingProvider.options);
-  const existingModels = asRecord(existingProvider.models);
-  const models = Object.fromEntries(
-    mantleModelIds.map((modelId) => [
-      modelId,
-      {
-        name: modelId,
-        ...asRecord(existingModels[modelId]),
-      },
-    ]),
-  );
-
-  return {
-    ...providerConfig,
-    [BEDROCK_MANTLE_OPENCODE_PROVIDER_ID]: {
-      ...existingProvider,
-      npm: '@ai-sdk/anthropic',
-      name: 'Amazon Bedrock',
-      options: {
-        ...existingOptions,
-        baseURL: `https://bedrock-mantle.${region}.api.aws/anthropic/v1`,
-        apiKey: '{env:AWS_BEARER_TOKEN_BEDROCK}',
-      },
-      models: {
-        ...existingModels,
-        ...models,
-      },
-    },
-  };
+  return mergeBedrockProviderConfig(providerConfig, runtimeEnv, modelIds, {
+    providerId: BEDROCK_MANTLE_OPENCODE_PROVIDER_ID,
+    npm: '@ai-sdk/anthropic',
+    mergeOptions: (existingOptions, region) => ({
+      ...existingOptions,
+      baseURL: `https://bedrock-mantle.${region}.api.aws/anthropic/v1`,
+      apiKey: '{env:AWS_BEARER_TOKEN_BEDROCK}',
+    }),
+  });
 }
 
 /**
@@ -148,49 +168,17 @@ export function mergeBedrockMantleOpenAiProviderConfig(
   runtimeEnv: RuntimeEnv,
   modelIds: Array<string | undefined>,
 ): Record<string, unknown> {
-  const mantleModelIds = collectModelIdsForPrefix(
-    modelIds,
-    BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID,
-  );
-
-  if (mantleModelIds.length === 0) {
-    return providerConfig;
-  }
-
-  const region = resolveBedrockRegion(runtimeEnv);
-  const existingProvider = asRecord(
-    providerConfig[BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID],
-  );
-  const existingOptions = asRecord(existingProvider.options);
-  const existingModels = asRecord(existingProvider.models);
-
-  return {
-    ...providerConfig,
-    [BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID]: {
-      ...existingProvider,
-      // Mantle GPT models support the OpenAI Responses API, not Chat
-      // Completions. The native provider selects the Responses transport.
-      npm: '@ai-sdk/openai',
-      name: 'Amazon Bedrock',
-      options: {
-        ...existingOptions,
-        baseURL: `https://bedrock-mantle.${region}.api.aws/openai/v1`,
-        apiKey: '{env:AWS_BEARER_TOKEN_BEDROCK}',
-      },
-      models: {
-        ...existingModels,
-        ...Object.fromEntries(
-          mantleModelIds.map((modelId) => [
-            modelId,
-            {
-              name: modelId,
-              ...asRecord(existingModels[modelId]),
-            },
-          ]),
-        ),
-      },
-    },
-  };
+  return mergeBedrockProviderConfig(providerConfig, runtimeEnv, modelIds, {
+    providerId: BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID,
+    // Mantle GPT models support the OpenAI Responses API, not Chat
+    // Completions. The native provider selects the Responses transport.
+    npm: '@ai-sdk/openai',
+    mergeOptions: (existingOptions, region) => ({
+      ...existingOptions,
+      baseURL: `https://bedrock-mantle.${region}.api.aws/openai/v1`,
+      apiKey: '{env:AWS_BEARER_TOKEN_BEDROCK}',
+    }),
+  });
 }
 
 /**
@@ -203,45 +191,35 @@ export function mergeAmazonBedrockProviderConfig(
   runtimeEnv: RuntimeEnv,
   modelIds: Array<string | undefined>,
 ): Record<string, unknown> {
-  const bedrockModelIds = collectModelIdsForPrefix(
-    modelIds,
-    AMAZON_BEDROCK_OPENCODE_PROVIDER_ID,
-  );
+  return mergeBedrockProviderConfig(providerConfig, runtimeEnv, modelIds, {
+    providerId: AMAZON_BEDROCK_OPENCODE_PROVIDER_ID,
+    npm: '@ai-sdk/amazon-bedrock',
+    mergeOptions: (existingOptions) => ({
+      apiKey: '{env:AWS_BEARER_TOKEN_BEDROCK}',
+      ...existingOptions,
+    }),
+  });
+}
 
-  if (bedrockModelIds.length === 0) {
-    return providerConfig;
+/** Registers every Bedrock transport needed by the selected model ids. */
+export function mergeBedrockProviderConfigs(
+  providerConfig: Record<string, unknown>,
+  runtimeEnv: RuntimeEnv,
+  modelIds: Array<string | undefined>,
+): Record<string, unknown> {
+  let mergedProviderConfig = providerConfig;
+
+  for (const mergeProviderConfig of [
+    mergeBedrockMantleOpenAiProviderConfig,
+    mergeBedrockMantleProviderConfig,
+    mergeAmazonBedrockProviderConfig,
+  ]) {
+    mergedProviderConfig = mergeProviderConfig(
+      mergedProviderConfig,
+      runtimeEnv,
+      modelIds,
+    );
   }
 
-  resolveBedrockRegion(runtimeEnv);
-
-  const existingProvider = asRecord(
-    providerConfig[AMAZON_BEDROCK_OPENCODE_PROVIDER_ID],
-  );
-  const existingOptions = asRecord(existingProvider.options);
-  const existingModels = asRecord(existingProvider.models);
-
-  return {
-    ...providerConfig,
-    [AMAZON_BEDROCK_OPENCODE_PROVIDER_ID]: {
-      ...existingProvider,
-      npm: '@ai-sdk/amazon-bedrock',
-      name: 'Amazon Bedrock',
-      options: {
-        apiKey: '{env:AWS_BEARER_TOKEN_BEDROCK}',
-        ...existingOptions,
-      },
-      models: {
-        ...existingModels,
-        ...Object.fromEntries(
-          bedrockModelIds.map((modelId) => [
-            modelId,
-            {
-              name: modelId,
-              ...asRecord(existingModels[modelId]),
-            },
-          ]),
-        ),
-      },
-    },
-  };
+  return mergedProviderConfig;
 }
