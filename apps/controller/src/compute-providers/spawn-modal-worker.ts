@@ -13,6 +13,7 @@ import {
 } from '@roomote/db/server';
 import { stampTaskRunMilestone } from '@roomote/sdk/server';
 import {
+  type ComputeProviderClient,
   buildComputeProviderMutationDetails,
   buildModalWorkerEnv,
   cleanupModalInstance,
@@ -37,6 +38,7 @@ import {
 } from './timeouts';
 
 const MODAL_LAUNCH_OUTPUT_TEXT_LIMIT = 500;
+const LAUNCH_DIAGNOSTIC_PROBE_TIMEOUT_MS = 15_000;
 
 class DetachedWorkerLaunchError extends Error {
   public readonly details: Record<string, unknown>;
@@ -71,11 +73,13 @@ function buildDetachedWorkerExitError(
     stdout?: string;
     stderr?: string;
   },
+  launchDiagnostics?: string,
 ): DetachedWorkerLaunchError {
   const stdout = truncateLaunchOutput(result.stdout);
   const stderr = truncateLaunchOutput(result.stderr);
-  const message = `Detached "worker ${command}" exited immediately with code ${result.exitCode}`;
-  const parts = [message];
+  const parts = [
+    `Detached "worker ${command}" exited immediately with code ${result.exitCode}`,
+  ];
 
   if (stderr) {
     parts.push(`stderr: ${stderr}`);
@@ -85,12 +89,52 @@ function buildDetachedWorkerExitError(
     parts.push(`stdout: ${stdout}`);
   }
 
-  return new DetachedWorkerLaunchError(message, {
+  if (launchDiagnostics) {
+    parts.push(launchDiagnostics);
+  }
+
+  return new DetachedWorkerLaunchError(parts.join('; '), {
     commandId: result.commandId ?? null,
     exitCode: result.exitCode,
     ...(stdout ? { stdout } : {}),
     ...(stderr ? { stderr } : {}),
+    ...(launchDiagnostics ? { launchDiagnostics } : {}),
   });
+}
+
+/**
+ * Modal regularly loses the output of a detached process that dies within the
+ * launch grace window, leaving "exited immediately with code N" with no
+ * stderr to act on. A non-detached `worker --version` in the same sandbox
+ * reproduces any crash that happens before the CLI dispatches a command
+ * (module-level env validation, a broken bundle, a missing runtime
+ * dependency) and its output streams back reliably. The probe parses no
+ * command, so it cannot claim the task run or mutate anything.
+ */
+async function captureWorkerLaunchDiagnostics(
+  computeClient: ComputeProviderClient,
+  instanceId: string,
+): Promise<string> {
+  try {
+    const probe = await computeClient.runCommand({
+      instanceId,
+      cmd: 'worker',
+      args: ['--version'],
+      signal: AbortSignal.timeout(LAUNCH_DIAGNOSTIC_PROBE_TIMEOUT_MS),
+    });
+    const probeStderr = truncateLaunchOutput(probe.stderr);
+    const probeStdout = truncateLaunchOutput(probe.stdout);
+
+    return [
+      `probe "worker --version" exited with code ${probe.exitCode}`,
+      ...(probeStderr ? [`probe stderr: ${probeStderr}`] : []),
+      ...(probeStdout ? [`probe stdout: ${probeStdout}`] : []),
+    ].join('; ');
+  } catch (error) {
+    return `probe "worker --version" failed: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+  }
 }
 
 function getWorkerLaunchCommand(
@@ -501,7 +545,21 @@ export async function spawnModalWorker(
     // grace-period exits through the same classifier as later exits so the
     // first bootstrap failure gets its one durable replacement.
     if (result.exitCode !== null) {
-      const exitError = buildDetachedWorkerExitError(command, result);
+      // Without any captured output the exit is undiagnosable from logs, so
+      // probe the still-alive sandbox before classification/cleanup.
+      const launchDiagnostics =
+        truncateLaunchOutput(result.stdout) ||
+        truncateLaunchOutput(result.stderr)
+          ? undefined
+          : await captureWorkerLaunchDiagnostics(
+              computeClient,
+              machine.machineId,
+            );
+      const exitError = buildDetachedWorkerExitError(
+        command,
+        result,
+        launchDiagnostics,
+      );
 
       if (onWorkerExit) {
         const disposition = await onWorkerExit({ exitCode: result.exitCode });

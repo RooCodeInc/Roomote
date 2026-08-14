@@ -316,7 +316,10 @@ describe('spawnModalWorker', () => {
           exitCode: 17,
           stderr: 'Unauthorized',
           stdout: 'booting worker',
-          error: 'Detached "worker run" exited immediately with code 17',
+          // The captured output is folded into the error message so the
+          // failure is diagnosable from controller logs alone.
+          error:
+            'Detached "worker run" exited immediately with code 17; stderr: Unauthorized; stdout: booting worker',
         }),
       }),
     );
@@ -411,6 +414,79 @@ describe('spawnModalWorker', () => {
         phase: 'spawn_worker',
       }),
     );
+  });
+
+  it('probes the sandbox for diagnostics when an immediate detached exit captured no output', async () => {
+    mockRunCommand
+      // Detached launch: dies instantly and Modal delivers no output.
+      .mockResolvedValueOnce({ exitCode: 1, commandId: undefined })
+      // Non-detached probe: reproduces the startup crash with real stderr.
+      .mockResolvedValueOnce({
+        exitCode: 1,
+        stderr: 'Error: WORKER_API_URL is required\n',
+      });
+
+    await expect(
+      spawnModalWorker(
+        mockTaskRun({
+          payloadKind: TaskPayloadKind.SnapshotEnvironment,
+          payload: { repo: '', environmentId: 'env_1' },
+        }),
+        'auth_token',
+        {
+          deploymentSlug: 'roomote',
+          modalTokenId: 'token-id',
+          modalTokenSecret: 'token-secret',
+          modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+          modalVmMemoryMiB: 8192,
+          modalTimeoutMs: 60_000,
+        },
+      ),
+    ).rejects.toThrow(
+      'Detached "worker snapshot" exited immediately with code 1; ' +
+        'probe "worker --version" exited with code 1; ' +
+        'probe stderr: Error: WORKER_API_URL is required',
+    );
+
+    expect(mockRunCommand).toHaveBeenCalledTimes(2);
+    expect(mockRunCommand).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        instanceId: 'modal-machine-123',
+        cmd: 'worker',
+        args: ['--version'],
+      }),
+    );
+  });
+
+  it('skips the diagnostic probe when the immediate exit already captured output', async () => {
+    mockRunCommand.mockResolvedValue({
+      exitCode: 1,
+      commandId: undefined,
+      stderr: 'worker failed before claim\n',
+    });
+
+    await expect(
+      spawnModalWorker(
+        mockTaskRun({
+          payloadKind: TaskPayloadKind.StandardTask,
+          payload: { repo: 'test/repo', environmentId: 'env_1' },
+        }),
+        'auth_token',
+        {
+          deploymentSlug: 'roomote',
+          modalTokenId: 'token-id',
+          modalTokenSecret: 'token-secret',
+          modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+          modalVmMemoryMiB: 8192,
+          modalTimeoutMs: 60_000,
+        },
+      ),
+    ).rejects.toThrow(
+      'Detached "worker run" exited immediately with code 1; stderr: worker failed before claim',
+    );
+
+    // Only the detached launch itself — no probe.
+    expect(mockRunCommand).toHaveBeenCalledTimes(1);
   });
 
   it('restarts when an immediate detached exit is claimed as the first bootstrap failure', async () => {
