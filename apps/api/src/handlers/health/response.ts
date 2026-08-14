@@ -6,6 +6,12 @@ type HealthResponseBase = {
   server: string;
   ok: boolean;
   timestamp: string;
+  /**
+   * Names of the sub-checks that failed (e.g. "stuckAfterDequeue"). Part of
+   * the unauthenticated base so an unhealthy response is diagnosable without
+   * reading server logs; detailed errors stay behind authentication.
+   */
+  failingChecks?: string[];
 };
 
 function hasAuthenticatedHealthDiagnostics(

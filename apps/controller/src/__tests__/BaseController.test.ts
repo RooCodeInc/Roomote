@@ -810,6 +810,35 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
     expect(mockSyncTaskStateFromRuns).toHaveBeenCalledTimes(2);
   });
 
+  it('fails a dequeued run abandoned before its environment ever became ready', async () => {
+    // The provisioned sweep finds nothing; the abandoned sweep claims the run
+    // whose sandbox died before the worker could ever start it (2026-08-14
+    // staging incident, runs #4616/#4617).
+    mockTaskRunsFindMany.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      makeTaskRun({
+        id: 4616,
+        status: RunStatus.Dequeued,
+        dequeuedAt: new Date(Date.now() - 24 * 60 * 60_000),
+        provisionReadyAt: null,
+        startedAt: null,
+        workerHeartbeatAt: null,
+      }),
+    ]);
+
+    await expect(controller.testFailTimedOutWorkerBootstraps()).resolves.toBe(
+      1,
+    );
+
+    expect(mockFinishRun).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 4616, status: RunStatus.Failed }),
+    );
+    expect(mockCaptureControllerMessage).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ runId: 4616 }),
+      expect.objectContaining({ signal: 'worker-bootstrap-abandoned' }),
+    );
+  });
+
   it('recovers every persisted bootstrap restart after controller state is lost', async () => {
     mockFindPersistedWorkerBootstrapRestarts.mockResolvedValueOnce([
       makeTaskRun({ id: 46, status: RunStatus.Pending }),

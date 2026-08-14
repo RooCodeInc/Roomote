@@ -128,10 +128,13 @@ describe('controllerHealth', () => {
     expect(consoleErrorSpy).not.toHaveBeenCalled();
   });
 
-  it('returns a redacted unhealthy response to unauthenticated callers', async () => {
+  it('returns a redacted unhealthy response naming the failing checks to unauthenticated callers', async () => {
     whereMock.mockReset();
     whereMock
-      .mockResolvedValueOnce([{ id: 12 }, { id: 13 }])
+      .mockResolvedValueOnce([
+        { id: 12, stuckSince: new Date('2026-03-21T04:30:00.000Z') },
+        { id: 13, stuckSince: new Date('2026-03-21T04:45:00.000Z') },
+      ])
       .mockResolvedValueOnce([]);
 
     const response = await createApp().request('/health/controller');
@@ -141,7 +144,52 @@ describe('controllerHealth', () => {
       server: 'controller',
       ok: false,
       timestamp: '2026-03-21T06:00:00.000Z',
+      failingChecks: ['stuckInQueue'],
     });
+  });
+
+  it('reports ancient stuck rows in the summary without failing health', async () => {
+    whereMock.mockReset();
+    whereMock
+      .mockResolvedValueOnce([
+        // Stuck for ~10 hours: debris from a past incident, not a live one.
+        { id: 4616, stuckSince: new Date('2026-03-20T20:00:00.000Z') },
+      ])
+      .mockResolvedValueOnce([
+        { id: 4617, stuckSince: new Date('2026-03-20T20:00:00.000Z') },
+      ]);
+
+    const response = await createApp(authContext).request('/health/controller');
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+  });
+
+  it('fails health when a stuck row is fresh even if ancient rows also exist', async () => {
+    whereMock.mockReset();
+    whereMock.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      { id: 4616, stuckSince: new Date('2026-03-20T20:00:00.000Z') },
+      { id: 5050, stuckSince: new Date('2026-03-21T05:30:00.000Z') },
+    ]);
+
+    const response = await createApp(authContext).request('/health/controller');
+
+    expect(response.status).toBe(503);
+    const body = (await response.json()) as {
+      failingChecks?: string[];
+      error?: string;
+    };
+    expect(body.failingChecks).toEqual(['stuckAfterDequeue']);
+    // Only the fresh row is reported as failing; the ancient one is summary
+    // data.
+    expect(body.error).toContain('[5050]');
+    expect(consoleErrorSpy).toHaveBeenCalledTimes(1);
+    const [message] = consoleErrorSpy.mock.calls[0] ?? [];
+    expect(message).toContain('"stuckAfterDequeueCount":1');
+    expect(message).toContain('"ancientStuckAfterDequeueCount":1');
   });
 
   it('logs per-check timings when the controller health request is slow', async () => {
@@ -167,7 +215,10 @@ describe('controllerHealth', () => {
   it('logs per-check failure details when the controller health request is unhealthy', async () => {
     whereMock.mockReset();
     whereMock
-      .mockResolvedValueOnce([{ id: 12 }, { id: 13 }])
+      .mockResolvedValueOnce([
+        { id: 12, stuckSince: new Date('2026-03-21T04:30:00.000Z') },
+        { id: 13, stuckSince: new Date('2026-03-21T04:45:00.000Z') },
+      ])
       .mockResolvedValueOnce([]);
 
     const response = await createApp(authContext).request('/health/controller');

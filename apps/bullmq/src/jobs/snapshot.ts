@@ -3,6 +3,7 @@ import { Job, UnrecoverableError } from 'bullmq';
 import {
   RunStatus,
   TaskPayloadKind,
+  exitedRunStatuses,
   extractErrorDetails,
   isObservedTimeoutError,
   resolveComputeProviderTarget,
@@ -35,7 +36,7 @@ import {
   type SourceInstanceSnapshot,
 } from '@roomote/compute-providers';
 import { drainLinearMessagesToResumeRun } from '@roomote/linear';
-import { withSandboxServerRpcClient } from '@roomote/sdk/server';
+import { finishRun, withSandboxServerRpcClient } from '@roomote/sdk/server';
 import { drainSlackMessagesToResumeRun } from '@roomote/slack';
 import { z } from 'zod';
 
@@ -343,6 +344,16 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
           });
         }
       }
+
+      await finalizeUnresumableRunAfterSnapshotFailure({
+        taskRun,
+        instanceId,
+        instanceStatus: status,
+        queueJobId,
+        queueAttempt,
+        snapshotIntentId,
+        triggerPath,
+      });
 
       throw new Error(`Instance is not running (status: ${status})`);
     }
@@ -670,6 +681,22 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
             signal: 'snapshot-failed',
           },
         );
+
+        // A sandbox that is dead after the failure means no worker can ever
+        // claim or resume this run, the same exposure as the pre-snapshot
+        // branch above. The helper no-ops for every other status: transient
+        // failures on a live sandbox leave the run alone, and the credential
+        // restore above lets a surviving task keep working.
+        await finalizeUnresumableRunAfterSnapshotFailure({
+          taskRun,
+          instanceId,
+          instanceStatus: postFailureInstanceStatus ?? 'unknown',
+          queueJobId,
+          queueAttempt,
+          snapshotIntentId,
+          triggerPath,
+        });
+
         throw new UnrecoverableError(errorMessage);
       }
 
@@ -1134,6 +1161,113 @@ async function recordSnapshotQueueEvent(
 
 function getQueueMaxAttempts(job: SnapshotJob): number {
   return Math.max(job.opts?.attempts ?? 1, 1);
+}
+
+/**
+ * Instance statuses that definitively mean the sandbox can never serve this
+ * run again, so the run is unresumable. Deliberately excludes 'stopping',
+ * 'snapshotting', 'pending' and 'unknown': those sandboxes may still be
+ * alive, and sleep-check can re-attempt a snapshot for a run whose request
+ * stamps the failure path already cleared.
+ */
+const UNRESUMABLE_INSTANCE_STATUSES = new Set(['stopped', 'failed']);
+
+/**
+ * Terminal transition for a run whose sandbox stopped before its snapshot
+ * could be taken. Left in place, such a run is unrecoverable but invisible to
+ * every reaper: no worker can ever claim it (its sandbox is gone), the
+ * controller's bootstrap watchdog only sweeps provisioned runs, and
+ * sleep-check only sweeps started or heartbeating runs — so it fails the
+ * deployment's stuck-run health check indefinitely (2026-08-14 staging
+ * incident, runs #4616/#4617). Mirrors sleep-check's not-running handling:
+ * idle runs complete without a snapshot, anything else finishes as failed
+ * (finishRun normalizes to canceled when a stop was requested) and the owning
+ * task's state is re-derived. Fenced to the sandbox this job snapshotted: a
+ * run that already went terminal, recorded a snapshot after all, or moved off
+ * this machine is left alone.
+ */
+async function finalizeUnresumableRunAfterSnapshotFailure(input: {
+  taskRun: TaskRun;
+  instanceId: string;
+  instanceStatus: string;
+  queueJobId: string | null;
+  queueAttempt: number;
+  snapshotIntentId: string;
+  triggerPath: string | null;
+}): Promise<void> {
+  const { taskRun, instanceId, instanceStatus, ...queueContext } = input;
+
+  if (!UNRESUMABLE_INSTANCE_STATUSES.has(instanceStatus)) {
+    return;
+  }
+
+  const run = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, taskRun.id),
+  });
+
+  if (!run) {
+    return;
+  }
+
+  const skipReason = (exitedRunStatuses as readonly RunStatus[]).includes(
+    run.status,
+  )
+    ? 'run_already_terminal'
+    : run.snapshotId
+      ? 'snapshot_recorded'
+      : run.machineId !== instanceId
+        ? 'run_left_this_sandbox'
+        : null;
+
+  if (skipReason) {
+    await recordSnapshotQueueEvent(taskRun, {
+      eventType: 'decision',
+      message: `Skipped finalizing task run #${taskRun.id} after the failed snapshot of sandbox ${instanceId} (${skipReason}).`,
+      details: {
+        ...queueContext,
+        decision: 'skip_finalize_unresumable_run',
+        skipReason,
+        sandboxId: instanceId,
+        instanceStatus,
+        runStatus: run.status,
+        runMachineId: run.machineId ?? null,
+      },
+    });
+    return;
+  }
+
+  const finalStatus =
+    run.status === RunStatus.Idle ? RunStatus.Completed : RunStatus.Failed;
+  const errorMessage = `Sandbox ${instanceId} was ${instanceStatus} before its snapshot completed; the run cannot be resumed`;
+
+  await recordSnapshotQueueEvent(taskRun, {
+    eventType: 'decision',
+    message: `Finalizing unresumable task run #${taskRun.id} as ${finalStatus} because sandbox ${instanceId} is ${instanceStatus}.`,
+    details: {
+      ...queueContext,
+      decision: 'finalize_unresumable_run',
+      sandboxId: instanceId,
+      instanceStatus,
+      runStatus: run.status,
+      finalStatus,
+    },
+  });
+
+  try {
+    await finishRun({
+      id: taskRun.id,
+      status: finalStatus,
+      error: errorMessage,
+    });
+  } catch (error) {
+    // The snapshot failure itself is already propagating to BullMQ; a
+    // finalize failure must not mask it. The run keeps its snapshotFailedAt
+    // and error stamps, and the controller's abandoned-dequeue watchdog is
+    // the backstop.
+    console.error(
+      `[SnapshotQueue] Failed to finalize unresumable task run #${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 async function reconcileSnapshottingFailure(input: {

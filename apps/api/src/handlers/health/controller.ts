@@ -4,6 +4,7 @@ import { Env } from '@roomote/env';
 import {
   STUCK_AFTER_DEQUEUE_THRESHOLD_MINUTES,
   STUCK_IN_QUEUE_THRESHOLD_MINUTES,
+  STUCK_RUN_HEALTH_MAX_AGE_MINUTES,
 } from '@roomote/types';
 import { getRedis, REDIS_KEYS } from '@roomote/redis';
 import {
@@ -32,12 +33,33 @@ type CheckResult =
   | { ok: true; summary?: HealthCheckSummary }
   | { ok: false; error: string; summary?: HealthCheckSummary };
 
+/**
+ * Splits stuck rows into a recent set (fails health: fresh stuckness means an
+ * active incident) and an ancient set (reported in the summary only: rows
+ * older than STUCK_RUN_HEALTH_MAX_AGE_MINUTES are debris from a past
+ * incident, and failing health on them forever blocks every fleet rollout).
+ */
+function partitionStuckRunsByAge<T extends { stuckSince: Date }>(
+  stuckRuns: T[],
+): { recent: T[]; ancient: T[] } {
+  const maxAgeCutoffMs = Date.now() - STUCK_RUN_HEALTH_MAX_AGE_MINUTES * 60_000;
+
+  return {
+    recent: stuckRuns.filter(
+      (run) => run.stuckSince.getTime() >= maxAgeCutoffMs,
+    ),
+    ancient: stuckRuns.filter(
+      (run) => run.stuckSince.getTime() < maxAgeCutoffMs,
+    ),
+  };
+}
+
 async function checkStuckInQueue(): Promise<CheckResult> {
   try {
     const thresholdTime = sql`NOW() - INTERVAL '${sql.raw(String(STUCK_IN_QUEUE_THRESHOLD_MINUTES))} minutes'`;
 
     const stuckRuns = await db
-      .select({ id: taskRuns.id })
+      .select({ id: taskRuns.id, stuckSince: taskRuns.createdAt })
       .from(taskRuns)
       .where(
         and(
@@ -48,14 +70,17 @@ async function checkStuckInQueue(): Promise<CheckResult> {
         ),
       );
 
-    if (stuckRuns.length > 0) {
-      const ids = stuckRuns.map((job) => job.id).join(', ');
+    const { recent, ancient } = partitionStuckRunsByAge(stuckRuns);
+
+    if (recent.length > 0) {
+      const ids = recent.map((job) => job.id).join(', ');
 
       return {
         ok: false,
         error: `Jobs stuck in queue (not dequeued within ${STUCK_IN_QUEUE_THRESHOLD_MINUTES} min): [${ids}]`,
         summary: {
-          stuckInQueueCount: stuckRuns.length,
+          stuckInQueueCount: recent.length,
+          ancientStuckInQueueCount: ancient.length,
         },
       };
     }
@@ -64,6 +89,7 @@ async function checkStuckInQueue(): Promise<CheckResult> {
       ok: true,
       summary: {
         stuckInQueueCount: 0,
+        ancientStuckInQueueCount: ancient.length,
       },
     };
   } catch (error) {
@@ -82,7 +108,7 @@ async function checkStuckAfterDequeue(): Promise<CheckResult> {
     const thresholdTime = sql`NOW() - INTERVAL '${sql.raw(String(STUCK_AFTER_DEQUEUE_THRESHOLD_MINUTES))} minutes'`;
 
     const stuckRuns = await db
-      .select({ id: taskRuns.id })
+      .select({ id: taskRuns.id, stuckSince: taskRuns.dequeuedAt })
       .from(taskRuns)
       .where(
         and(
@@ -94,14 +120,21 @@ async function checkStuckAfterDequeue(): Promise<CheckResult> {
         ),
       );
 
-    if (stuckRuns.length > 0) {
-      const ids = stuckRuns.map((job) => job.id).join(', ');
+    const { recent, ancient } = partitionStuckRunsByAge(
+      // The WHERE clause requires dequeuedAt to be set; assert it for the
+      // shared partition helper.
+      stuckRuns.map((run) => ({ ...run, stuckSince: run.stuckSince! })),
+    );
+
+    if (recent.length > 0) {
+      const ids = recent.map((job) => job.id).join(', ');
 
       return {
         ok: false,
         error: `Jobs stuck after dequeue (not started within ${STUCK_AFTER_DEQUEUE_THRESHOLD_MINUTES} min): [${ids}]`,
         summary: {
-          stuckAfterDequeueCount: stuckRuns.length,
+          stuckAfterDequeueCount: recent.length,
+          ancientStuckAfterDequeueCount: ancient.length,
         },
       };
     }
@@ -110,6 +143,7 @@ async function checkStuckAfterDequeue(): Promise<CheckResult> {
       ok: true,
       summary: {
         stuckAfterDequeueCount: 0,
+        ancientStuckAfterDequeueCount: ancient.length,
       },
     };
   } catch (error) {
@@ -179,10 +213,12 @@ controllerHealth.get('/', async (c) => {
   ]);
 
   const errors: string[] = [];
+  const failingChecks: string[] = [];
 
-  for (const { value: result } of checks) {
+  for (const { name, value: result } of checks) {
     if (!result.ok) {
       errors.push(result.error);
+      failingChecks.push(name);
     }
   }
 
@@ -209,6 +245,11 @@ controllerHealth.get('/', async (c) => {
         server: 'controller',
         ok: isHealthy,
         timestamp: new Date().toISOString(),
+        // Check names only — visible without auth so an unhealthy 503 is
+        // diagnosable from the response body (fleet rollout health gates
+        // surface this body, not the api's [Health Check] log lines). Run
+        // ids and error detail stay in the auth-gated `error` field.
+        ...(failingChecks.length > 0 ? { failingChecks } : {}),
       },
       {
         environment: { NODE_ENV: Env.NODE_ENV, APP_ENV: Env.APP_ENV },
