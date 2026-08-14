@@ -3,16 +3,8 @@ name: CI
 on:
   push:
     branches: [main, develop]
-    paths-ignore:
-      - 'apps/docs/**'
-      - '**/*.md'
-      - '**/*.mdx'
   pull_request:
     branches: [main, develop]
-    paths-ignore:
-      - 'apps/docs/**'
-      - '**/*.md'
-      - '**/*.mdx'
   workflow_dispatch:
 
 permissions:
