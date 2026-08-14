@@ -43,6 +43,7 @@ import { StepRepoSelection, type SetupRetryReason } from './StepRepoSelection';
 import { StepAutomationRecommendations } from './StepAutomationRecommendations';
 import { getSetupStepPath } from './types';
 import { LoadingSetupFlow, stepTransitionVariants } from './SetupBootstrapFlow';
+import { consumeSetupEmailPasswordAuthSelection } from './bootstrapFlow';
 
 function getSetupRetryReason(status: {
   onboardingFailed: boolean;
@@ -81,6 +82,9 @@ export function SetupSignedInFlow() {
     useState<ComputeProvider | null>(null);
   const [pendingModelProvider, setPendingModelProvider] =
     useState<SetupModelProviderId | null>(null);
+  const [communicationAfterSourceControl] = useState(
+    consumeSetupEmailPasswordAuthSelection,
+  );
   const trackWelcomeSeen = useMutation(
     trpc.setupNew.trackWelcomeSeen.mutationOptions(),
   );
@@ -97,6 +101,7 @@ export function SetupSignedInFlow() {
   const flow = useSetupFlow({
     enabled: isSignedIn && isAdmin,
     pendingAuthProvider: pendingSetupAuthProvider,
+    communicationAfterSourceControl,
   });
   const {
     step,

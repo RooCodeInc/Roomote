@@ -28,6 +28,8 @@ import {
   getBootstrapStepFromSetupStepParam,
   getBootstrapStepAfterWelcome,
   getNextBootstrapStep,
+  clearSetupEmailPasswordAuthSelected,
+  markSetupEmailPasswordAuthSelected,
   type BootstrapStep,
 } from './bootstrapFlow';
 import { useSetupFlow } from './hooks';
@@ -122,6 +124,15 @@ export function SetupBootstrapFlow() {
   );
 
   useRedirectToSignIn(shouldRedirectToSignIn);
+
+  useEffect(() => {
+    if (
+      bootstrapStep === 'auth-provider' ||
+      bootstrapStep === 'auth-env-vars'
+    ) {
+      clearSetupEmailPasswordAuthSelected();
+    }
+  }, [bootstrapStep]);
 
   // Setup docs are server-rendered from this query parameter. Keep the
   // effective provider in the URL while signed out just as the signed-in flow
@@ -241,14 +252,16 @@ export function SetupBootstrapFlow() {
           {bootstrapStep === 'email-account' && (
             <StepBootstrapAccount
               onUseProviderSignIn={(provider) => {
+                clearSetupEmailPasswordAuthSelected();
                 setPendingAuthProvider(provider);
                 setBootstrapStepWithTransition(
                   getNextBootstrapStep(bootstrapStatus.authSetup, provider),
                 );
               }}
-              onUseEmailPassword={() =>
-                setBootstrapStepWithTransition('email-password')
-              }
+              onUseEmailPassword={() => {
+                markSetupEmailPasswordAuthSelected();
+                setBootstrapStepWithTransition('email-password');
+              }}
             />
           )}
           {bootstrapStep === 'email-password' && (

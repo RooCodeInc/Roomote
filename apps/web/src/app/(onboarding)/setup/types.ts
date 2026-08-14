@@ -11,18 +11,6 @@ const SETUP_STEP_DEFINITIONS = [
     title: `Welcome to ${PRODUCT_NAME}!`,
   },
   {
-    id: 'auth-provider',
-    title: 'Communication provider',
-  },
-  {
-    id: 'auth-env-vars',
-    title: 'Configure comms',
-  },
-  {
-    id: 'slack',
-    title: 'Connect Slack',
-  },
-  {
     id: 'env-vars',
     title: 'Configure inference',
   },
@@ -37,6 +25,18 @@ const SETUP_STEP_DEFINITIONS = [
   {
     id: 'source-control-connect',
     title: 'Connect source control',
+  },
+  {
+    id: 'auth-provider',
+    title: 'Communication provider',
+  },
+  {
+    id: 'auth-env-vars',
+    title: 'Configure comms',
+  },
+  {
+    id: 'slack',
+    title: 'Connect Slack',
   },
   {
     id: 'automation-recommendations',
