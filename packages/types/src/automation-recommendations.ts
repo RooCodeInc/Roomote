@@ -107,22 +107,47 @@ const activePrRule = (weight: number): RecommendationScoringRule => ({
   signal: 'active_pr_flow',
   weight,
   explanation: (value, repositoryCount) =>
-    `These repos have active PR flow (${formatCount(value, 'recent PRs')} across ${repositoryCount} repos).`,
+    `Your repos have active PR flow (${formatCount(value, 'recent PRs')} across ${repositoryCount} repos), so Roomote can help keep the work moving.`,
 });
 
 const mergedPrRule = (weight: number): RecommendationScoringRule => ({
   signal: 'merged_prs',
   weight,
   explanation: (value, repositoryCount) =>
-    `You merged ${formatCount(value, 'PRs')} across ${repositoryCount} repos in the last 30 days.`,
+    `You merged ${formatCount(value, 'PRs')} across ${repositoryCount} repos in the last 30 days, so Roomote can help keep up with the pace of change.`,
 });
 
 const openPrRule = (weight: number): RecommendationScoringRule => ({
   signal: 'open_prs',
   weight,
   explanation: (value) =>
-    `There are ${formatCount(value, 'open PRs')} to keep moving.`,
+    `Your repos have ${formatCount(value, 'open PRs')}, and Roomote can help keep them moving.`,
 });
+
+function fallbackRecommendationExplanation(
+  candidate: AutomationRecommendationCandidate,
+): string {
+  switch (candidate.id) {
+    case 'built-in.review-code':
+      return 'Roomote can review your pull requests as they open and flag issues before they merge.';
+    case 'built-in.code-quality-auditor':
+      return 'As your repositories evolve, Roomote can run regular code quality checks and surface actionable fixes.';
+    case 'built-in.security-auditor':
+      return 'Roomote can regularly check your repositories for security issues and surface focused fixes.';
+    case 'built-in.resolve-pr-conflicts':
+      return 'Roomote can watch for merge conflicts and resolve safe conflicts in open pull requests.';
+    case 'built-in.dependabot-triage':
+      return 'Your repos seem to have Dependabot alerts, and Roomote can handle those for you.';
+    case 'built-in.codeql-triage':
+      return 'Your repos seem to have CodeQL alerts, and Roomote can handle those for you.';
+    case 'built-in.ci-failure-triage':
+      return 'Your CI setup can lead to default branch failures. Enable this to automatically fix broken builds.';
+    case 'cookbook.scheduled-housekeeping':
+      return 'Roomote can regularly check your repositories for dependency drift, stale flags, and flaky-test maintenance work.';
+    default:
+      return `Your repositories are connected, so Roomote can help with ${candidate.title.toLowerCase()}.`;
+  }
+}
 
 export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendationCandidate[] =
   [
@@ -169,7 +194,7 @@ export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendatio
           signal: 'conflicts',
           weight: 12,
           explanation: (value) =>
-            `There are ${formatCount(value, 'open PR conflicts')} right now.`,
+            `Your repos have ${formatCount(value, 'open PR conflicts')}, and Roomote can help resolve the safe ones.`,
         },
         openPrRule(2),
       ],
@@ -187,13 +212,13 @@ export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendatio
           signal: 'dependabot_alerts',
           weight: 10,
           explanation: (value) =>
-            `GitHub reports ${formatCount(value, 'open Dependabot alerts')}.`,
+            `Your repos have ${formatCount(value, 'open Dependabot alerts')}, and Roomote can handle those for you.`,
         },
         {
           signal: 'dependency_manifests',
           weight: 2,
           explanation: (value) =>
-            `Dependency manifests were found in ${formatCount(value, 'repos')}.`,
+            `Your repos include dependency manifests in ${formatCount(value, 'repos')}, so Roomote can help keep updates moving.`,
         },
       ],
     },
@@ -210,7 +235,7 @@ export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendatio
           signal: 'codeql_alerts',
           weight: 10,
           explanation: (value) =>
-            `GitHub reports ${formatCount(value, 'open CodeQL alerts')}.`,
+            `Your repos have ${formatCount(value, 'open CodeQL alerts')}, and Roomote can handle those for you.`,
         },
       ],
     },
@@ -227,7 +252,7 @@ export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendatio
           signal: 'ci_failures',
           weight: 9,
           explanation: (value) =>
-            `There were ${formatCount(value, 'recent CI failures')} to investigate.`,
+            `Your repos have ${formatCount(value, 'recent CI failures')}, and Roomote can investigate and fix broken builds.`,
         },
       ],
     },
@@ -267,8 +292,9 @@ export function scoreAutomationRecommendations(
   const catalog = options.catalog ?? AUTOMATION_RECOMMENDATION_CATALOG;
   const enabled = options.enabledCandidateIds ?? new Set<string>();
   // Recommendations should still be useful immediately after a repository is
-  // connected, before provider signal collection has produced rich data.
-  const allowFallbackCandidates = true;
+  // connected, before provider signal collection has produced rich data. Once
+  // collection is complete, only recommend candidates backed by real signals.
+  const allowFallbackCandidates = signals.partial !== false;
   const scored = catalog
     .filter((candidate) => !enabled.has(candidate.id))
     .filter((candidate) => {
@@ -302,8 +328,7 @@ export function scoreAutomationRecommendations(
         candidate,
         score: score || (allowFallbackCandidates ? 1 : 0),
         explanation:
-          explanation ??
-          'These repos are connected and ready for a lightweight recurring review.',
+          explanation ?? fallbackRecommendationExplanation(candidate),
       };
     })
     .filter(({ score }) => score >= (options.minScore ?? 1))

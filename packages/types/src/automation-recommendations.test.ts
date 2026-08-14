@@ -55,7 +55,7 @@ describe('scoreAutomationRecommendations', () => {
     );
   });
 
-  it('supports sparse data with honest fallback copy', () => {
+  it('supports sparse data with candidate-specific fallback copy', () => {
     const result = scoreAutomationRecommendations({
       ...signals,
       mergedPrs30d: 0,
@@ -70,12 +70,42 @@ describe('scoreAutomationRecommendations', () => {
     expect(result.length).toBeGreaterThanOrEqual(3);
     expect(result.length).toBeLessThanOrEqual(6);
     expect(
-      result.every(
-        ({ explanation }) =>
-          explanation.includes('connected') ||
-          explanation.includes('recurring'),
-      ),
-    ).toBe(true);
+      result.find(
+        ({ candidate }) => candidate.id === 'built-in.ci-failure-triage',
+      )?.explanation,
+    ).toBe(
+      'Your CI setup can lead to default branch failures. Enable this to automatically fix broken builds.',
+    );
+    expect(
+      result.find(
+        ({ candidate }) => candidate.id === 'built-in.dependabot-triage',
+      )?.explanation,
+    ).toBe(
+      'Your repos seem to have Dependabot alerts, and Roomote can handle those for you.',
+    );
+    expect(
+      result.find(({ candidate }) => candidate.id === 'built-in.codeql-triage')
+        ?.explanation,
+    ).toBe(
+      'Your repos seem to have CodeQL alerts, and Roomote can handle those for you.',
+    );
+  });
+
+  it('does not invent signal-backed recommendations after complete collection', () => {
+    const result = scoreAutomationRecommendations({
+      ...signals,
+      partial: false,
+      mergedPrs30d: 0,
+      openPrs: 0,
+      conflicts: 0,
+      ciFailures30d: 0,
+      dependabotAlerts: 0,
+      codeqlAlerts: 0,
+      dependencyManifests: 0,
+      docs: 0,
+    });
+
+    expect(result).toEqual([]);
   });
 });
 

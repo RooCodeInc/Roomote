@@ -3,16 +3,7 @@
 import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AUTOMATION_RECOMMENDATION_CATALOG } from '@roomote/types';
-import {
-  ArrowRight,
-  Loader2,
-  Play,
-  Switch,
-  Button,
-  Card,
-  CardContent,
-  Spinner,
-} from '@/components/system';
+import { ArrowRight, Play, Switch, Button, Spinner } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 import { SetupFooter } from './SetupFooter';
 import { StepTitle } from './StepTitle';
