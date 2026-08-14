@@ -31,11 +31,13 @@ export function parseTaskModelContextWindows(
     }
 
     return Object.fromEntries(
-      Object.entries(parsed).filter(
-        (entry): entry is [string, number] =>
-          entry[0].includes('/') &&
-          Number.isSafeInteger(entry[1]) &&
-          (entry[1] as number) > 0,
+      Object.entries(parsed).flatMap(([modelId, contextWindow]) =>
+        modelId.includes('/') &&
+        typeof contextWindow === 'number' &&
+        Number.isSafeInteger(contextWindow) &&
+        contextWindow > 0
+          ? [[modelId, contextWindow]]
+          : [],
       ),
     );
   } catch {
