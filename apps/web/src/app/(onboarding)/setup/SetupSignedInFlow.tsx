@@ -506,7 +506,7 @@ export function SetupSignedInFlow() {
               onBack={canGoBack ? goToPreviousStep : undefined}
               onSkip={() => {
                 setupSession.unlockPostOnboardingFlow();
-                goToStep('automation-recommendations', { revisit: true });
+                goToStep('invoke');
               }}
             />
           )}

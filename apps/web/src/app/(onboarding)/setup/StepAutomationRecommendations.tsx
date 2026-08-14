@@ -1,9 +1,18 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AUTOMATION_RECOMMENDATION_CATALOG } from '@roomote/types';
-import { ArrowRight, Play, Switch, Button, Spinner } from '@/components/system';
+import {
+  Alert,
+  AlertDescription,
+  AlertTriangle,
+  ArrowRight,
+  Play,
+  Switch,
+  Button,
+  Spinner,
+} from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 import { SetupFooter } from './SetupFooter';
 import { StepTitle } from './StepTitle';
@@ -51,9 +60,11 @@ export function StepAutomationRecommendations({
     }),
   );
   const recoveryAttemptedRef = useRef(false);
+  const [pendingTooLong, setPendingTooLong] = useState(false);
   const startRecommendations = useMutation(
     trpc.automations.startRecommendations.mutationOptions({
       onSuccess: (batch) => {
+        setPendingTooLong(false);
         queryClient.setQueryData(
           trpc.automations.listRecommendations.queryKey(),
           batch,
@@ -64,7 +75,6 @@ export function StepAutomationRecommendations({
           '[StepAutomationRecommendations] Failed to start recommendation scoring:',
           error,
         );
-        onContinue();
       },
     }),
   );
@@ -82,23 +92,30 @@ export function StepAutomationRecommendations({
     recoveryAttemptedRef.current = true;
     startRecommendations.mutate();
   }, [
-    onContinue,
     recommendations.data?.status,
     recommendations.isPending,
     startRecommendations,
   ]);
 
-  useEffect(() => {
-    if (recommendations.data?.status === 'failed') onContinue();
-  }, [onContinue, recommendations.data?.status]);
-  useEffect(() => {
-    if (recommendations.data?.status !== 'pending') return;
-    const timeout = window.setTimeout(onContinue, 30_000);
-    return () => window.clearTimeout(timeout);
-  }, [onContinue, recommendations.data?.status]);
-
   const batch = recommendations.data;
   const pending = !batch || batch.status === 'pending';
+  const failed = batch?.status === 'failed';
+
+  useEffect(() => {
+    if (!pending) {
+      setPendingTooLong(false);
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      console.warn(
+        '[StepAutomationRecommendations] Recommendation scoring is taking longer than expected',
+      );
+      setPendingTooLong(true);
+    }, 30_000);
+    return () => window.clearTimeout(timeout);
+  }, [pending]);
+
   return (
     <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
       <StepTitle
@@ -116,6 +133,14 @@ export function StepAutomationRecommendations({
             This only takes a few seconds.
           </p>
         </div>
+      ) : failed ? (
+        <Alert variant="destructive">
+          <AlertTriangle className="size-4" />
+          <AlertDescription>
+            Recommendation review failed before it could be shown. Retry to try
+            again, or continue without reviewing automations.
+          </AlertDescription>
+        </Alert>
       ) : (
         <div className="space-y-4">
           <p className="text-muted-foreground">
@@ -160,7 +185,40 @@ export function StepAutomationRecommendations({
           </div>
         </div>
       )}
+      {startRecommendations.error ? (
+        <Alert variant="destructive">
+          <AlertTriangle className="size-4" />
+          <AlertDescription>
+            <p>
+              Roomote could not start the recommendation review:{' '}
+              {startRecommendations.error.message}
+            </p>
+          </AlertDescription>
+        </Alert>
+      ) : pendingTooLong ? (
+        <Alert>
+          <AlertTriangle className="size-4" />
+          <AlertDescription>
+            Recommendation review is taking longer than expected. You can keep
+            waiting, retry it, or continue without reviewing automations.
+          </AlertDescription>
+        </Alert>
+      ) : null}
       <SetupFooter onBack={onBack}>
+        {(pending || failed) &&
+        (startRecommendations.error || pendingTooLong || failed) ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => {
+              setPendingTooLong(false);
+              startRecommendations.mutate();
+            }}
+            disabled={startRecommendations.isPending}
+          >
+            Retry
+          </Button>
+        ) : null}
         <Button type="button" onClick={onContinue}>
           {pending ? 'Skip' : 'Continue'}
           <ArrowRight />
