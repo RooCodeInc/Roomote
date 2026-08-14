@@ -1287,6 +1287,14 @@ describe('setup-new onboarding task start command', () => {
     const result = await startSetupNewOnboardingTaskCommand(buildMockAuth());
 
     expect(result.taskId).toBe('task-onboarding-1');
+    expect(result.nextStep).toBe('automation-recommendations');
+    expect(result.recommendationBatch).toMatchObject({
+      status: 'pending',
+      recommendations: [],
+    });
+    expect(result.setupNewState.automationRecommendations).toMatchObject({
+      status: 'pending',
+    });
     expect(enqueueTask).toHaveBeenCalledTimes(1);
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({

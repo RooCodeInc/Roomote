@@ -106,6 +106,7 @@ import {
   SETUP_COMPUTE_PROVISIONING_STATE_FIELDS,
   SHARED_WORKER_IMAGE_ENV_VAR,
   type SetupAuthProviderId,
+  type AutomationRecommendationBatch,
   type SetupComputeStatus,
   type SetupModelProviderId,
   type SetupProvisionableComputeProvider,
@@ -222,6 +223,55 @@ async function getPersistedSetupNewState(
     .limit(1);
 
   return normalizeSetupNewState(settings?.setupNewState ?? {});
+}
+
+async function markAutomationRecommendationBatchFailed(
+  inputFingerprint: string,
+  errorCode: string,
+) {
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
+    );
+    const currentState = await getPersistedSetupNewState(tx);
+    if (
+      currentState.automationRecommendations?.inputFingerprint !==
+      inputFingerprint
+    ) {
+      return;
+    }
+    await savePersistedSetupNewState(
+      normalizeSetupNewState({
+        ...currentState,
+        automationRecommendations: {
+          ...currentState.automationRecommendations,
+          status: 'failed',
+          completedAt: new Date().toISOString(),
+          errorCode,
+        },
+      }),
+      tx,
+    );
+  });
+}
+
+function createPendingAutomationRecommendationBatch(
+  inputFingerprint: string,
+  previousBatch: AutomationRecommendationBatch | null | undefined,
+): AutomationRecommendationBatch {
+  const sameInput = previousBatch?.inputFingerprint === inputFingerprint;
+  return {
+    version: 1,
+    inputFingerprint,
+    catalogVersion: AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
+    status: 'pending',
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    partial: false,
+    errorCode: null,
+    dismissed: sameInput ? previousBatch.dismissed : false,
+    recommendations: sameInput ? previousBatch.recommendations : [],
+  };
 }
 
 async function getPersistedRuntimeModelConfig(
@@ -2523,22 +2573,15 @@ export async function saveSetupNewSelectionCommand(
       normalizedRepositoryIds,
       selectedRepositories[0]?.sourceControlProvider ?? null,
     );
+    const existingRecommendationBatch = currentState.automationRecommendations;
     const recommendationBatch =
-      currentState.automationRecommendations?.inputFingerprint ===
-      nextFingerprint
-        ? currentState.automationRecommendations
-        : {
-            version: 1 as const,
-            inputFingerprint: nextFingerprint,
-            catalogVersion: AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
-            status: 'pending' as const,
-            startedAt: new Date().toISOString(),
-            completedAt: null,
-            partial: false,
-            errorCode: null,
-            dismissed: false,
-            recommendations: [],
-          };
+      existingRecommendationBatch?.inputFingerprint === nextFingerprint &&
+      existingRecommendationBatch.status !== 'failed'
+        ? existingRecommendationBatch
+        : createPendingAutomationRecommendationBatch(
+            nextFingerprint,
+            existingRecommendationBatch,
+          );
     const setupNewState = normalizeSetupNewState({
       ...currentState,
       selectedRepositoryIds: normalizedRepositoryIds,
@@ -2590,27 +2633,10 @@ export async function saveSetupNewSelectionCommand(
         '[saveSetupNewSelectionCommand] Failed to enqueue recommendation scoring:',
         error,
       );
-      await db.transaction(async (tx) => {
-        const currentState = await getPersistedSetupNewState(tx);
-        if (
-          currentState.automationRecommendations?.inputFingerprint !==
-          batch.inputFingerprint
-        ) {
-          return;
-        }
-        await savePersistedSetupNewState(
-          normalizeSetupNewState({
-            ...currentState,
-            automationRecommendations: {
-              ...currentState.automationRecommendations,
-              status: 'failed',
-              completedAt: new Date().toISOString(),
-              errorCode: 'recommendation_queue_unavailable',
-            },
-          }),
-          tx,
-        );
-      });
+      await markAutomationRecommendationBatchFailed(
+        batch.inputFingerprint,
+        'recommendation_queue_unavailable',
+      );
     }
   }
 
@@ -2628,10 +2654,38 @@ export async function startSetupNewOnboardingTaskCommand(
     const currentState = await getPersistedSetupNewState(tx);
 
     if (currentState.onboardingTaskId) {
+      let recommendationBatch = currentState.automationRecommendations;
+      let repositoryIds = currentState.selectedRepositoryIds;
+      let setupNewState = currentState;
+      if (!recommendationBatch && repositoryIds.length > 0) {
+        const { normalizedRepositoryIds, selectedRepositories } =
+          await resolveSelectedRepositories(repositoryIds);
+        const inputFingerprint = buildAutomationRecommendationFingerprint(
+          normalizedRepositoryIds,
+          selectedRepositories[0]?.sourceControlProvider ?? null,
+        );
+        recommendationBatch = createPendingAutomationRecommendationBatch(
+          inputFingerprint,
+          null,
+        );
+        repositoryIds = normalizedRepositoryIds;
+        setupNewState = normalizeSetupNewState({
+          ...currentState,
+          selectedRepositoryIds: repositoryIds,
+          automationRecommendations: recommendationBatch,
+        });
+        await savePersistedSetupNewState(setupNewState, tx);
+      }
       return {
         taskId: currentState.onboardingTaskId,
         startedAt: currentState.onboardingTaskStartedAt,
         launchedNewOnboardingTask: false as const,
+        recommendationBatch,
+        repositoryIds,
+        setupNewState,
+        nextStep: repositoryIds.length
+          ? ('automation-recommendations' as const)
+          : ('invoke' as const),
       };
     }
 
@@ -2660,6 +2714,21 @@ export async function startSetupNewOnboardingTaskCommand(
     if (selectedRepositories.length === 0) {
       throw new Error('Select at least one repository before starting setup.');
     }
+
+    const recommendationFingerprint = buildAutomationRecommendationFingerprint(
+      normalizedRepositoryIds,
+      selectedRepositories[0]?.sourceControlProvider ?? null,
+    );
+    const existingRecommendationBatch = currentState.automationRecommendations;
+    const recommendationBatch =
+      existingRecommendationBatch?.inputFingerprint ===
+        recommendationFingerprint &&
+      existingRecommendationBatch.status !== 'failed'
+        ? existingRecommendationBatch
+        : createPendingAutomationRecommendationBatch(
+            recommendationFingerprint,
+            existingRecommendationBatch,
+          );
 
     const selectedRepositoryFullNames = selectedRepositories.map(
       (repository) => repository.fullName,
@@ -2889,34 +2958,37 @@ export async function startSetupNewOnboardingTaskCommand(
             computeGate,
           );
 
-          await savePersistedSetupNewState(
-            normalizeSetupNewState({
-              ...currentState,
-              selectedRepositoryIds: normalizedRepositoryIds,
-              setupGuidance: currentState.setupGuidance ?? null,
-              onboardingTaskId: launchResult.taskId,
-              onboardingTaskStartedAt: startedAt,
-              slackTeamId: null,
-              slackChannel: null,
-              slackThreadTs: null,
-              chatHandoffProvider: fallbackTarget.provider,
-              chatHandoffChannelId: kickoffChannelId,
-              chatHandoffThreadId:
-                kickoffThreadId ??
-                (fallbackTarget.provider === 'teams' ? kickoffMessageId : null),
-              chatHandoffServiceUrl:
-                fallbackTarget.provider === 'teams'
-                  ? fallbackTarget.serviceUrl
-                  : null,
-              lastInteractedByUserId: userId,
-            }),
-            tx,
-          );
+          const setupNewState = normalizeSetupNewState({
+            ...currentState,
+            selectedRepositoryIds: normalizedRepositoryIds,
+            setupGuidance: currentState.setupGuidance ?? null,
+            onboardingTaskId: launchResult.taskId,
+            onboardingTaskStartedAt: startedAt,
+            slackTeamId: null,
+            slackChannel: null,
+            slackThreadTs: null,
+            chatHandoffProvider: fallbackTarget.provider,
+            chatHandoffChannelId: kickoffChannelId,
+            chatHandoffThreadId:
+              kickoffThreadId ??
+              (fallbackTarget.provider === 'teams' ? kickoffMessageId : null),
+            chatHandoffServiceUrl:
+              fallbackTarget.provider === 'teams'
+                ? fallbackTarget.serviceUrl
+                : null,
+            automationRecommendations: recommendationBatch,
+            lastInteractedByUserId: userId,
+          });
+          await savePersistedSetupNewState(setupNewState, tx);
 
           return {
             taskId: launchResult.taskId,
             startedAt,
             launchedNewOnboardingTask: true as const,
+            recommendationBatch,
+            repositoryIds: normalizedRepositoryIds,
+            setupNewState,
+            nextStep: 'automation-recommendations' as const,
           };
         }
       }
@@ -2952,29 +3024,32 @@ export async function startSetupNewOnboardingTaskCommand(
         computeGate,
       );
 
-      await savePersistedSetupNewState(
-        normalizeSetupNewState({
-          ...currentState,
-          selectedRepositoryIds: normalizedRepositoryIds,
-          setupGuidance: currentState.setupGuidance ?? null,
-          onboardingTaskId: launchResult.taskId,
-          onboardingTaskStartedAt: startedAt,
-          slackTeamId: null,
-          slackChannel: null,
-          slackThreadTs: null,
-          chatHandoffProvider: null,
-          chatHandoffChannelId: null,
-          chatHandoffThreadId: null,
-          chatHandoffServiceUrl: null,
-          lastInteractedByUserId: userId,
-        }),
-        tx,
-      );
+      const setupNewState = normalizeSetupNewState({
+        ...currentState,
+        selectedRepositoryIds: normalizedRepositoryIds,
+        setupGuidance: currentState.setupGuidance ?? null,
+        onboardingTaskId: launchResult.taskId,
+        onboardingTaskStartedAt: startedAt,
+        slackTeamId: null,
+        slackChannel: null,
+        slackThreadTs: null,
+        chatHandoffProvider: null,
+        chatHandoffChannelId: null,
+        chatHandoffThreadId: null,
+        chatHandoffServiceUrl: null,
+        automationRecommendations: recommendationBatch,
+        lastInteractedByUserId: userId,
+      });
+      await savePersistedSetupNewState(setupNewState, tx);
 
       return {
         taskId: launchResult.taskId,
         startedAt,
         launchedNewOnboardingTask: true as const,
+        recommendationBatch,
+        repositoryIds: normalizedRepositoryIds,
+        setupNewState,
+        nextStep: 'automation-recommendations' as const,
       };
     }
 
@@ -3046,24 +3121,23 @@ export async function startSetupNewOnboardingTaskCommand(
       throw error;
     }
 
-    await savePersistedSetupNewState(
-      normalizeSetupNewState({
-        ...currentState,
-        selectedRepositoryIds: normalizedRepositoryIds,
-        setupGuidance: currentState.setupGuidance ?? null,
-        onboardingTaskId: launchResult.taskId,
-        onboardingTaskStartedAt: startedAt,
-        slackTeamId: handoffTarget.slackTeamId,
-        slackChannel,
-        slackThreadTs,
-        chatHandoffProvider: 'slack',
-        chatHandoffChannelId: slackChannel,
-        chatHandoffThreadId: slackThreadTs,
-        chatHandoffServiceUrl: null,
-        lastInteractedByUserId: userId,
-      }),
-      tx,
-    );
+    const setupNewState = normalizeSetupNewState({
+      ...currentState,
+      selectedRepositoryIds: normalizedRepositoryIds,
+      setupGuidance: currentState.setupGuidance ?? null,
+      onboardingTaskId: launchResult.taskId,
+      onboardingTaskStartedAt: startedAt,
+      slackTeamId: handoffTarget.slackTeamId,
+      slackChannel,
+      slackThreadTs,
+      chatHandoffProvider: 'slack',
+      chatHandoffChannelId: slackChannel,
+      chatHandoffThreadId: slackThreadTs,
+      chatHandoffServiceUrl: null,
+      automationRecommendations: recommendationBatch,
+      lastInteractedByUserId: userId,
+    });
+    await savePersistedSetupNewState(setupNewState, tx);
 
     await recordSlackConversationMessageBestEffort({
       logContext: 'setupNew.startOnboardingTask',
@@ -3085,8 +3159,30 @@ export async function startSetupNewOnboardingTaskCommand(
       taskId: launchResult.taskId,
       startedAt,
       launchedNewOnboardingTask: true as const,
+      recommendationBatch,
+      repositoryIds: normalizedRepositoryIds,
+      setupNewState,
+      nextStep: 'automation-recommendations' as const,
     };
   });
+
+  if (startResult.recommendationBatch?.status === 'pending') {
+    try {
+      await enqueueAutomationRecommendations({
+        fingerprint: startResult.recommendationBatch.inputFingerprint,
+        repositoryIds: startResult.repositoryIds,
+      });
+    } catch (error) {
+      console.error(
+        '[startSetupNewOnboardingTaskCommand] Failed to enqueue recommendation scoring:',
+        error,
+      );
+      await markAutomationRecommendationBatchFailed(
+        startResult.recommendationBatch.inputFingerprint,
+        'recommendation_queue_unavailable',
+      );
+    }
+  }
 
   try {
     await triggerTaskSuggestionsCommand(auth);
@@ -3101,6 +3197,9 @@ export async function startSetupNewOnboardingTaskCommand(
   return {
     taskId: startResult.taskId,
     startedAt: startResult.startedAt,
+    recommendationBatch: startResult.recommendationBatch,
+    setupNewState: startResult.setupNewState,
+    nextStep: startResult.nextStep,
   };
 }
 

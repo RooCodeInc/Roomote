@@ -484,7 +484,26 @@ export function SetupSignedInFlow() {
               onReviewComputeProvider={() =>
                 goToStep('compute-provider', { revisit: true })
               }
-              onContinue={() => goToStep('automation-recommendations')}
+              onContinue={({
+                recommendationBatch,
+                setupNewState,
+                nextStep,
+              }) => {
+                if (recommendationBatch) {
+                  queryClient.setQueryData(
+                    trpc.automations.listRecommendations.queryKey(),
+                    recommendationBatch,
+                  );
+                }
+                queryClient.setQueryData(
+                  trpc.setup.status.queryKey(),
+                  (currentStatus) =>
+                    currentStatus
+                      ? { ...currentStatus, setupNewState }
+                      : currentStatus,
+                );
+                goToStep(nextStep);
+              }}
               onBack={canGoBack ? goToPreviousStep : undefined}
               onSkip={() => {
                 setupSession.unlockPostOnboardingFlow();

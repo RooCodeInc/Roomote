@@ -9,6 +9,10 @@ import {
   ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_PLACEHOLDER,
   PRODUCT_NAME,
 } from '@roomote/types';
+import type {
+  AutomationRecommendationBatch,
+  SetupNewState,
+} from '@roomote/types';
 
 import { useCreateGitHubInstallation } from '@/hooks/github';
 import { useRepositories } from '@/hooks/source-control';
@@ -56,6 +60,14 @@ export type SetupRetryReason =
   | 'task-canceled'
   | 'no-environment';
 
+type SetupOnboardingTransition = {
+  taskId: string;
+  startedAt: string | null;
+  recommendationBatch: AutomationRecommendationBatch | null;
+  setupNewState: SetupNewState;
+  nextStep: 'automation-recommendations' | 'invoke';
+};
+
 const SETUP_GUIDANCE_WARNING_THRESHOLD = 7_500;
 type SetupRepository = {
   id: string;
@@ -87,7 +99,7 @@ export function StepRepoSelection({
   computeProvisioningError = null,
   onRetryComputeProvisioning,
 }: {
-  onContinue: (onboardingTaskId: string) => void;
+  onContinue: (transition: SetupOnboardingTransition) => void;
   onSkip: () => void;
   onBack?: () => void;
   onReviewComputeProvider?: () => void;
@@ -273,7 +285,13 @@ export function StepRepoSelection({
       await queryClient.invalidateQueries({
         queryKey: trpc.setupNew.status.queryKey(),
       });
-      onContinue(result.taskId);
+      onContinue({
+        taskId: result.taskId,
+        startedAt: result.startedAt,
+        recommendationBatch: result.recommendationBatch,
+        setupNewState: result.setupNewState,
+        nextStep: result.nextStep,
+      });
     } catch {
       // Both mutations show the existing error toast. Keep local form state
       // intact so the saved selection can be retried safely.
