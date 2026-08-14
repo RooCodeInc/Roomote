@@ -1239,6 +1239,59 @@ async function finalizeUnresumableRunAfterSnapshotFailure(input: {
   const finalStatus =
     run.status === RunStatus.Idle ? RunStatus.Completed : RunStatus.Failed;
   const errorMessage = `Sandbox ${instanceId} was ${instanceStatus} before its snapshot completed; the run cannot be resumed`;
+  const now = new Date();
+
+  // Compare-and-swap on the state this decision was read from. The checks
+  // above only describe what was true a moment ago: a stalled-job redelivery
+  // or a reconcile can record a snapshot, move the run to a replacement
+  // sandbox, or settle it terminally before this write lands, and finishRun
+  // updates by id alone — so without the fence in the WHERE clause it would
+  // overwrite that newer state as failed. The terminal timestamp is part of
+  // the claim rather than left to finishRun: it is what stops the run from
+  // failing the stuck-run health check, so it must be durable even if the
+  // side effects below do not complete.
+  const claimed = await db.transaction(async (tx) => {
+    const claimedRuns = await tx
+      .update(taskRuns)
+      .set({ status: finalStatus, error: errorMessage, completedAt: now })
+      .where(
+        and(
+          eq(taskRuns.id, taskRun.id),
+          eq(taskRuns.status, run.status),
+          eq(taskRuns.machineId, instanceId),
+          isNull(taskRuns.snapshotId),
+        ),
+      )
+      .returning({ id: taskRuns.id });
+
+    if (claimedRuns.length === 0) {
+      return false;
+    }
+
+    // Keep the task projection durable with the terminal transition, the
+    // same way the controller's bootstrap-failure claim does: finishRun
+    // repeats this sync, but a later side-effect failure must not leave the
+    // task active forever.
+    await syncTaskStateFromRuns(tx, taskRun.taskId);
+    return true;
+  });
+
+  if (!claimed) {
+    await recordSnapshotQueueEvent(taskRun, {
+      eventType: 'decision',
+      message: `Skipped finalizing task run #${taskRun.id} after the failed snapshot of sandbox ${instanceId} because it advanced concurrently.`,
+      details: {
+        ...queueContext,
+        decision: 'skip_finalize_unresumable_run',
+        skipReason: 'claim_lost',
+        sandboxId: instanceId,
+        instanceStatus,
+        runStatus: run.status,
+        runMachineId: run.machineId ?? null,
+      },
+    });
+    return;
+  }
 
   await recordSnapshotQueueEvent(taskRun, {
     eventType: 'decision',
@@ -1261,9 +1314,9 @@ async function finalizeUnresumableRunAfterSnapshotFailure(input: {
     });
   } catch (error) {
     // The snapshot failure itself is already propagating to BullMQ; a
-    // finalize failure must not mask it. The run keeps its snapshotFailedAt
-    // and error stamps, and the controller's abandoned-dequeue watchdog is
-    // the backstop.
+    // side-effect failure must not mask it. The terminal transition and the
+    // task-state sync are already committed above, so the run stays out of
+    // the stuck-run health check regardless.
     console.error(
       `[SnapshotQueue] Failed to finalize unresumable task run #${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
     );

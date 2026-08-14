@@ -88,6 +88,8 @@ vi.mock('@roomote/db/server', () => ({
   },
   taskRuns: {
     id: 'id',
+    status: 'status',
+    machineId: 'machineId',
     snapshotId: 'snapshotId',
   },
   tasks: {
@@ -618,6 +620,14 @@ describe('snapshotJob', () => {
       } as never),
     ).rejects.toThrow('Instance is not running');
 
+    expect(setFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: RunStatus.Failed,
+        completedAt: expect.any(Date),
+        error: expect.stringContaining('cannot be resumed'),
+      }),
+    );
+    expect(mockSyncTaskStateFromRuns).toHaveBeenCalled();
     expect(mockFinishRun).toHaveBeenCalledWith({
       id: 123,
       status: RunStatus.Failed,
@@ -632,6 +642,41 @@ describe('snapshotJob', () => {
           decision: 'finalize_unresumable_run',
           instanceStatus: 'stopped',
           finalStatus: RunStatus.Failed,
+        }),
+      }),
+    );
+  });
+
+  it('does not settle the run when a concurrent recovery wins the terminal claim', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      status: RunStatus.Running,
+      machineId: 'sb-stopped',
+    });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'stopped' });
+    // The run advanced between the read and the claim (a redelivery recorded
+    // a snapshot, or a reconcile moved it to a replacement sandbox), so the
+    // fenced update matches no rows.
+    updateWhereFn.mockImplementation(() =>
+      Object.assign(Promise.resolve([]), {
+        returning: () => Promise.resolve([]),
+      }),
+    );
+
+    await expect(
+      snapshotJob({
+        data: { runId: 123, sandboxId: 'sb-stopped' },
+      } as never),
+    ).rejects.toThrow('Instance is not running');
+
+    expect(mockFinishRun).not.toHaveBeenCalled();
+    expect(mockSyncTaskStateFromRuns).not.toHaveBeenCalled();
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        details: expect.objectContaining({
+          decision: 'skip_finalize_unresumable_run',
+          skipReason: 'claim_lost',
         }),
       }),
     );
