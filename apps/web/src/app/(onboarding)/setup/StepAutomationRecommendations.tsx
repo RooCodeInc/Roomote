@@ -8,7 +8,6 @@ import {
   AlertDescription,
   AlertTriangle,
   ArrowRight,
-  Play,
   Switch,
   Button,
   Spinner,
@@ -52,12 +51,17 @@ export function StepAutomationRecommendations({
         }),
     }),
   );
-  const runNow = useMutation(
-    trpc.automations.runRecommendationNow.mutationOptions({
-      onSettled: () =>
-        queryClient.invalidateQueries({
-          queryKey: trpc.automations.listRecommendations.queryKey(),
-        }),
+  const applyRecommendations = useMutation(
+    trpc.automations.applyRecommendations.mutationOptions({
+      onSuccess: (appliedBatch) => {
+        if (appliedBatch) {
+          queryClient.setQueryData(
+            trpc.automations.listRecommendations.queryKey(),
+            appliedBatch,
+          );
+        }
+        onContinue();
+      },
     }),
   );
   const recoveryAttemptedRef = useRef(false);
@@ -101,6 +105,13 @@ export function StepAutomationRecommendations({
   const batch = recommendations.data;
   const pending = !batch || batch.status === 'pending';
   const failed = batch?.status === 'failed';
+  const handleContinue = () => {
+    if (batch?.status === 'ready') {
+      applyRecommendations.mutate();
+      return;
+    }
+    onContinue();
+  };
 
   useEffect(() => {
     if (!pending) {
@@ -173,11 +184,9 @@ export function StepAutomationRecommendations({
             ))}
           </div>
           <p>
-            <p>
-              You can manage these (and dozens of others) and create your own in
-              the <Zap className="inline size-4 ml-0.5 -mt-0.5" /> Automations
-              page.
-            </p>
+            You can manage these (and dozens of others) and create your own in
+            the <Zap className="inline size-4 ml-0.5 -mt-0.5" /> Automations
+            page.
           </p>
         </div>
       )}
@@ -189,6 +198,14 @@ export function StepAutomationRecommendations({
               Roomote could not start the recommendation review:{' '}
               {startRecommendations.error.message}
             </p>
+          </AlertDescription>
+        </Alert>
+      ) : applyRecommendations.error ? (
+        <Alert variant="destructive">
+          <AlertTriangle className="size-4" />
+          <AlertDescription>
+            Could not enable the selected automations:{' '}
+            {applyRecommendations.error.message}
           </AlertDescription>
         </Alert>
       ) : pendingTooLong ? (
@@ -215,8 +232,16 @@ export function StepAutomationRecommendations({
             Retry
           </Button>
         ) : null}
-        <Button type="button" onClick={onContinue}>
-          {pending ? 'Skip' : 'Continue'}
+        <Button
+          type="button"
+          onClick={handleContinue}
+          disabled={setEnabled.isPending || applyRecommendations.isPending}
+        >
+          {applyRecommendations.isPending
+            ? 'Applying...'
+            : pending
+              ? 'Skip'
+              : 'Continue'}
           <ArrowRight />
         </Button>
       </SetupFooter>

@@ -287,6 +287,7 @@ import {
   listSetupRecommendationsCommand,
   startSetupRecommendationsCommand,
   setSetupRecommendationEnabledCommand,
+  applySetupRecommendationsCommand,
   runSetupRecommendationNowCommand,
   dismissSetupRecommendationsCardCommand,
   trackSetupBootstrapWelcomeSeenCommand,
@@ -501,6 +502,9 @@ const automationsRouter = createRouter({
     .mutation(({ ctx: { auth }, input }) =>
       setSetupRecommendationEnabledCommand(auth, input),
     ),
+  applyRecommendations: protectedProcedure.mutation(({ ctx: { auth } }) =>
+    applySetupRecommendationsCommand(auth),
+  ),
   runRecommendationNow: protectedProcedure
     .input(z.object({ id: z.string().min(1) }))
     .mutation(({ ctx: { auth }, input }) =>

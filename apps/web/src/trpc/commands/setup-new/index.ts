@@ -3254,56 +3254,26 @@ export async function setSetupRecommendationEnabledCommand(
     );
     if (!candidate) throw new Error('Recommendation candidate was not found.');
 
-    if (candidate.source === 'built_in') {
-      await upsertAutomation(tx, {
-        key: candidate.automationKey,
-        enabled: input.enabled,
-        schedule: {
-          mode: input.enabled ? candidate.defaultScheduleMode : 'off',
-        },
-      });
-    }
+    const automationId = await applySetupRecommendationInTx(
+      tx,
+      auth,
+      recommendation,
+      input.enabled,
+      candidate,
+    );
 
     const nextBatch = {
       ...batch,
       recommendations: batch.recommendations.map((item) =>
-        item.id === input.id ? { ...item, enabled: input.enabled } : item,
+        item.id === input.id
+          ? {
+              ...item,
+              enabled: input.enabled,
+              ...(automationId ? { automationId } : {}),
+            }
+          : item,
       ),
     };
-    const updatedRecommendation = nextBatch.recommendations.find(
-      (item) => item.id === input.id,
-    );
-    if (candidate.source === 'cookbook' && updatedRecommendation) {
-      const existing = updatedRecommendation.automationId
-        ? await getCustomAutomationById(updatedRecommendation.automationId, tx)
-        : null;
-      const automation = existing
-        ? await updateCustomAutomation(
-            existing.id,
-            {
-              name: candidate.template.name,
-              prompt: candidate.template.prompt,
-              enabled: input.enabled,
-              scheduleMode: candidate.template.scheduleMode,
-              environmentId: ALL_REPOSITORIES,
-              target: {},
-            },
-            tx,
-          )
-        : await createCustomAutomation(
-            {
-              name: candidate.template.name,
-              prompt: candidate.template.prompt,
-              enabled: input.enabled,
-              scheduleMode: candidate.template.scheduleMode,
-              environmentId: ALL_REPOSITORIES,
-              target: {},
-              createdByUserId: auth.userId,
-            },
-            tx,
-          );
-      updatedRecommendation.automationId = automation.id;
-    }
     await savePersistedSetupNewState(
       normalizeSetupNewState({
         ...state,
@@ -3312,6 +3282,98 @@ export async function setSetupRecommendationEnabledCommand(
       tx,
     );
     return nextBatch.recommendations.find((item) => item.id === input.id);
+  });
+}
+
+async function applySetupRecommendationInTx(
+  tx: DatabaseOrTransaction,
+  auth: UserAuthSuccess,
+  recommendation: AutomationRecommendationBatch['recommendations'][number],
+  enabled: boolean,
+  candidate: (typeof AUTOMATION_RECOMMENDATION_CATALOG)[number],
+): Promise<string | null> {
+  if (candidate.source === 'built_in') {
+    await upsertAutomation(tx, {
+      key: candidate.automationKey,
+      enabled,
+      schedule: {
+        mode: enabled ? candidate.defaultScheduleMode : 'off',
+      },
+    });
+    return null;
+  }
+
+  const existing = recommendation.automationId
+    ? await getCustomAutomationById(recommendation.automationId, tx)
+    : null;
+  const automation = existing
+    ? await updateCustomAutomation(
+        existing.id,
+        {
+          name: candidate.template.name,
+          prompt: candidate.template.prompt,
+          enabled,
+          scheduleMode: candidate.template.scheduleMode,
+          environmentId: ALL_REPOSITORIES,
+          target: {},
+        },
+        tx,
+      )
+    : await createCustomAutomation(
+        {
+          name: candidate.template.name,
+          prompt: candidate.template.prompt,
+          enabled,
+          scheduleMode: candidate.template.scheduleMode,
+          environmentId: ALL_REPOSITORIES,
+          target: {},
+          createdByUserId: auth.userId,
+        },
+        tx,
+      );
+  return automation.id;
+}
+
+export async function applySetupRecommendationsCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
+    );
+    const state = await getPersistedSetupNewState(tx);
+    const batch = state.automationRecommendations;
+    if (!batch || batch.status !== 'ready') return batch;
+
+    const recommendations = [];
+    for (const recommendation of batch.recommendations) {
+      const candidate = AUTOMATION_RECOMMENDATION_CATALOG.find(
+        (item) => item.id === recommendation.candidateId,
+      );
+      if (!candidate) {
+        throw new Error('Recommendation candidate was not found.');
+      }
+      const automationId = await applySetupRecommendationInTx(
+        tx,
+        auth,
+        recommendation,
+        recommendation.enabled,
+        candidate,
+      );
+      recommendations.push({
+        ...recommendation,
+        ...(automationId ? { automationId } : {}),
+      });
+    }
+
+    const nextBatch = { ...batch, recommendations };
+    await savePersistedSetupNewState(
+      normalizeSetupNewState({
+        ...state,
+        automationRecommendations: nextBatch,
+      }),
+      tx,
+    );
+    return nextBatch;
   });
 }
 

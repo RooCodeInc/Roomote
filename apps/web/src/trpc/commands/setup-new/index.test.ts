@@ -21,6 +21,7 @@ const {
   mockInvalidateTelegramRuntimeCredentialsCache,
   mockValidateSetupModelProviderCredentials,
   mockEnqueueAutomationRecommendations,
+  mockUpsertAutomation,
 } = vi.hoisted(() => ({
   mockValidateTeamsBotCredentials: vi.fn(async () => undefined),
   mockTxSelect: vi.fn(),
@@ -49,6 +50,7 @@ const {
     .fn()
     .mockResolvedValue(undefined),
   mockEnqueueAutomationRecommendations: vi.fn(async () => undefined),
+  mockUpsertAutomation: vi.fn(async () => undefined),
 }));
 
 vi.mock('../task-models/provider-validation', () => ({
@@ -177,6 +179,7 @@ vi.mock('@roomote/db/server', () => ({
     repositoryId: 'pull_request_facts.repository_id',
     updatedAtRemote: 'pull_request_facts.updated_at_remote',
   },
+  upsertAutomation: mockUpsertAutomation,
   isChatGptSubscriptionConnected: vi.fn(async () => false),
   isGitHubCopilotSubscriptionConnected: vi.fn(async () => false),
   isXaiSubscriptionConnected: vi.fn(async () => false),
@@ -276,6 +279,7 @@ import {
   saveSetupNewSourceControlConfigCommand,
   saveSetupNewSourceControlProviderChoiceCommand,
   startSetupRecommendationsCommand,
+  applySetupRecommendationsCommand,
   startSetupNewOnboardingTaskCommand,
   trackSetupBootstrapWelcomeSeenCommand,
   trackSetupCommsStateCommand,
@@ -1401,6 +1405,76 @@ describe('setup-new onboarding task start command', () => {
       expect.objectContaining({
         repositoryIds: ['repo-1'],
       }),
+    );
+  });
+
+  it('applies the enabled recommendation selection before continuing setup', async () => {
+    mockOnboardingTransaction({
+      slackInstallation: null,
+      setupNewState: {
+        automationRecommendations: {
+          version: 1,
+          inputFingerprint: 'recommendation-fingerprint',
+          catalogVersion: 1,
+          status: 'ready',
+          startedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+          partial: false,
+          errorCode: null,
+          dismissed: false,
+          recommendations: [
+            {
+              id: 'built-in.review-code:1',
+              candidateId: 'built-in.review-code',
+              rank: 1,
+              score: 1,
+              explanation: 'Review PRs automatically.',
+              enabled: true,
+              lastRunTaskId: null,
+              automationId: null,
+            },
+            {
+              id: 'built-in.ci-failure-triage:2',
+              candidateId: 'built-in.ci-failure-triage',
+              rank: 2,
+              score: 1,
+              explanation: 'Fix broken builds.',
+              enabled: false,
+              lastRunTaskId: null,
+              automationId: null,
+            },
+          ],
+        },
+      },
+    });
+
+    const result = await applySetupRecommendationsCommand(buildMockAuth());
+
+    expect(mockUpsertAutomation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        key: 'review_code',
+        enabled: true,
+      }),
+    );
+    expect(mockUpsertAutomation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        key: 'ci_failure_triage',
+        enabled: false,
+      }),
+    );
+    expect(result?.recommendations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          candidateId: 'built-in.review-code',
+          enabled: true,
+        }),
+        expect.objectContaining({
+          candidateId: 'built-in.ci-failure-triage',
+          enabled: false,
+        }),
+      ]),
     );
   });
 

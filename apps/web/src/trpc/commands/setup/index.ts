@@ -431,15 +431,18 @@ export async function completeSetupCommand(
     // Persist the StepInvoke anonymous-analytics choice alongside setup
     // completion when the wizard provided one (opt-out: default stays
     // enabled when the field is absent).
+    const existingSettings = await tx.query.deploymentSettings.findFirst({
+      where: eq(deploymentSettings.id, 'default'),
+      columns: { metadata: true, setupNewState: true },
+    });
+    const recommendationsWereReviewed =
+      normalizeSetupNewState(existingSettings?.setupNewState ?? {})
+        .automationRecommendations?.status === 'ready';
     let metadataUpdate: Record<string, unknown> | undefined;
     const anonymousAnalyticsEnabled = isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED)
       ? true
       : input?.anonymousAnalyticsEnabled;
     if (anonymousAnalyticsEnabled !== undefined) {
-      const existingSettings = await tx.query.deploymentSettings.findFirst({
-        where: eq(deploymentSettings.id, 'default'),
-        columns: { metadata: true },
-      });
       const existingMetadata =
         existingSettings?.metadata &&
         typeof existingSettings.metadata === 'object' &&
@@ -476,7 +479,9 @@ export async function completeSetupCommand(
         .where(eq(users.id, userId)),
     ]);
 
-    await ensureManagedReviewerEnabledByDefaultInTx(tx, auth);
+    if (!recommendationsWereReviewed) {
+      await ensureManagedReviewerEnabledByDefaultInTx(tx, auth);
+    }
   });
 
   // Setup completion should not wait for the GitHub-backed recommendation scan.
