@@ -37,12 +37,17 @@ This is useful when you want to:
 ### Bring in Roomote and chat context
 
 Ask what your Roomote deployment can do or which integrations are connected.
-You can also read relevant conversation history from connected chat channels.
-For Slack and Discord, provide a channel or message link when you want context
-from a specific conversation.
+You can also list discoverable chat channels, then read relevant conversation
+history from a selected channel. Roomote can list public Slack channels the app
+has joined and Discord channels your linked Discord account can access. Microsoft
+Teams and Telegram do not support channel listing, but you can still provide a
+channel or message link when you want context from a specific conversation.
 
 Roomote still applies the access rules from the connected service, so the MCP
-only returns conversations your signed-in user is allowed to read.
+only returns conversations your signed-in user is allowed to read. For Slack,
+public channels are available when the Roomote app has joined them, even if your
+linked Slack account has not. Private channels require both the app and your
+linked Slack account to be members.
 
 ## Things to try
 
@@ -54,6 +59,7 @@ only returns conversations your signed-in user is allowed to read.
   morning.”
 - “Tell the running task to add a regression test before it opens the PR.”
 - “Use this Slack message as context and explain what the team decided.”
+- “List the Slack and Discord channels you can access.”
 - “Cancel the task working on the old approach.”
 
 ## Connect your MCP client
@@ -152,6 +158,9 @@ and connected-service access checks still apply to every request.
 
 You can revoke the connection from your MCP client. If a saved session expires
 or is revoked, Roomote asks you to approve access again in the browser.
+Roomote rotates refresh tokens and revokes the whole session if an already-used
+refresh token is replayed. If that happens, reconnect the MCP client to start a
+new session.
 
 ## Troubleshooting
 

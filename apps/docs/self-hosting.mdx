@@ -212,7 +212,7 @@ deployment should let you:
   not the container's), so it defers garbage collection and lets memory drift
   well above what the service needs; a container memory cap then kills the
   process before Node ever feels pressure. Current app images cap each Node
-  service's heap by default (768 MB for web and api, 512 MB for controller and
-  bullmq, reduced to ~75% of the container's memory when a cgroup limit is
-  set). Set `NODE_OPTIONS=--max-old-space-size=<MB>` on a service to override
-  the default, or on older images to add the cap manually.
+  service's heap by default (4096 MB for web, 768 MB for api, and 512 MB for
+  controller and bullmq, reduced to ~75% of the container's memory when a
+  cgroup limit is set). Set `NODE_OPTIONS=--max-old-space-size=<MB>` on a
+  service to override the default, or on older images to add the cap manually.
