@@ -131,7 +131,7 @@ function fallbackRecommendationExplanation(
 ): string {
   switch (candidate.id) {
     case 'built-in.review-code':
-      return 'Roomote can review your pull requests as they open and flag issues before they merge.';
+      return 'Strongly recommended. Have Roomote review use a separate run to review PRs it creates.';
     case 'built-in.code-quality-auditor':
       return 'As your repositories evolve, Roomote can run regular code quality checks and surface actionable fixes.';
     case 'built-in.security-auditor':
@@ -198,7 +198,7 @@ export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendatio
           signal: 'conflicts',
           weight: 12,
           explanation: (value) =>
-            `Your repos have ${formatCount(value, 'open PR conflicts')}, and Roomote can help resolve the safe ones.`,
+            `Your repos have at least ${formatCount(value, 'open PR conflicts')}, and Roomote can resolve the safe ones automatically.`,
         },
         openPrRule(2),
       ],
@@ -222,7 +222,7 @@ export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendatio
           signal: 'dependency_manifests',
           weight: 2,
           explanation: (value) =>
-            `Your repos include dependency manifests in ${formatCount(value, 'repos')}, so Roomote can help keep updates moving.`,
+            `${formatCount(value, 'of your repos')} include dependency manifests, which Roomote can keep up-to-date.`,
         },
       ],
     },
@@ -257,7 +257,7 @@ export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendatio
           signal: 'ci_failures',
           weight: 9,
           explanation: (value) =>
-            `Your repos have ${formatCount(value, 'recent CI failures')}, and Roomote can investigate and fix broken builds.`,
+            `Roomote found ${formatCount(value, 'recent CI failures')}, and it can automatically open PRs to fix broken builds.`,
         },
       ],
     },
@@ -391,5 +391,15 @@ export function scoreAutomationRecommendations(
     }
   }
 
-  return selected;
+  const reviewCode = selected.find(
+    ({ candidate }) => candidate.id === 'built-in.review-code',
+  );
+  if (!reviewCode) return selected;
+
+  return [
+    reviewCode,
+    ...selected.filter(
+      ({ candidate }) => candidate.id !== 'built-in.review-code',
+    ),
+  ];
 }

@@ -22,14 +22,14 @@ const signals: MergedAutomationRecommendationSignals = {
 };
 
 describe('scoreAutomationRecommendations', () => {
-  it('is deterministic and ranks signal-backed candidates first', () => {
+  it('is deterministic and pins Review Code first', () => {
     const first = scoreAutomationRecommendations(signals);
     const second = scoreAutomationRecommendations(signals);
 
     expect(first).toEqual(second);
     expect(first.length).toBeGreaterThanOrEqual(3);
     expect(first.length).toBeLessThanOrEqual(6);
-    expect(first[0]?.candidate.id).toBe('built-in.code-quality-auditor');
+    expect(first[0]?.candidate.id).toBe('built-in.review-code');
     expect(first.every(({ explanation }) => explanation.length > 0)).toBe(true);
   });
 

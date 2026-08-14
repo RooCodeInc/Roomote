@@ -12,6 +12,7 @@ import {
   Switch,
   Button,
   Spinner,
+  Zap,
 } from '@/components/system';
 import { useTRPC } from '@/trpc/client';
 import { SetupFooter } from './SetupFooter';
@@ -144,9 +145,8 @@ export function StepAutomationRecommendations({
       ) : (
         <div className="space-y-4">
           <p className="text-muted-foreground">
-            Considering the shape and update frequency of your connected
-            repositories, Roomote found some automations that can help you save
-            work:
+            After analyzing your connected repos, Roomote found some automations
+            to make your life easier:
           </p>
           <div className="divide-y divide-foreground/10">
             {batch.recommendations.map((recommendation) => (
@@ -162,27 +162,20 @@ export function StepAutomationRecommendations({
                   aria-label={`Enable ${recommendation.candidateId}`}
                 />
                 <div className="min-w-0 flex-1">
-                  <p className="font-semibold">
+                  <p className="text-sm font-semibold">
                     {candidateTitle(recommendation.candidateId)}
                   </p>
                   <p className="text-sm text-muted-foreground">
                     {recommendation.explanation}
                   </p>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={runNow.isPending}
-                  onClick={() => runNow.mutate({ id: recommendation.id })}
-                  title="Starts a paid automation run"
-                >
-                  <Play />
-                  Run now
-                </Button>
               </div>
             ))}
           </div>
+          <p>
+            You can manage these (plus many others) and create your own in the{' '}
+            <Zap className="inline size-4 ml-0.5 -mt-0.5" /> Automations page.
+          </p>
         </div>
       )}
       {startRecommendations.error ? (
