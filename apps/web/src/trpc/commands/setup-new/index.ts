@@ -1604,6 +1604,8 @@ export async function getSetupNewStatusCommand(auth: UserAuthSuccess) {
     hasSlackInstallation: slackAccessStatus.hasSlackInstallation,
     hasLinear: baseStatus.hasLinear,
     setupCompletedAt: baseStatus.setupCompletedAt,
+    hasPersistedAutomationRecommendations:
+      baseStatus.hasPersistedAutomationRecommendations,
     setupNewState,
     selectedRepositories,
     onboardingTaskStatus,

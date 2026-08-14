@@ -102,6 +102,7 @@ function mockStatus(overrides: Partial<Record<string, unknown>> = {}) {
       onboardingTaskStatus: null,
       onboardingTaskPhase: null,
       setupCompletedAt: null,
+      hasPersistedAutomationRecommendations: false,
       selectedRepositories: [],
       matchingEnvironment: null,
       queuedOnboardingTasks: [],
@@ -176,17 +177,20 @@ function mockReadyForRepository({
   selectedRepositoryIds = [],
   onboardingFailed = false,
   automationRecommendations,
+  hasPersistedAutomationRecommendations = false,
 }: {
   onboardingTaskId?: string | null;
   selectedRepositoryIds?: string[];
   onboardingFailed?: boolean;
   automationRecommendations?: null;
+  hasPersistedAutomationRecommendations?: boolean;
 } = {}) {
   setupSessionState.session = {
     ...setupSessionState.session,
     communicationStep: { state: 'skipped' },
   };
   mockStatus({
+    hasPersistedAutomationRecommendations,
     onboardingFailed,
     authSetup: {
       setupSatisfiedByRuntimeEnv: true,
@@ -429,6 +433,7 @@ describe('useSetupFlow', () => {
         slackChannel: null,
         slackThreadTs: null,
       },
+      hasPersistedAutomationRecommendations: true,
     });
 
     const { result } = renderHook(() => useSetupFlow());
@@ -445,7 +450,10 @@ describe('useSetupFlow', () => {
   });
 
   it('moves from automation recommendations to environment setup when compute is already configured', async () => {
-    mockReadyForRepository({ automationRecommendations: null });
+    mockReadyForRepository({
+      automationRecommendations: null,
+      hasPersistedAutomationRecommendations: true,
+    });
 
     const { result } = renderHook(() => useSetupFlow());
 

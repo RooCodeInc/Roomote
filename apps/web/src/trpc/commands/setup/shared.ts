@@ -24,6 +24,7 @@ type SetupBaseStatus = {
   hasSlack: boolean;
   hasLinear: boolean;
   setupCompletedAt: Date | null;
+  hasPersistedAutomationRecommendations: boolean;
   setupNewState: ReturnType<typeof createEmptySetupNewState>;
 };
 
@@ -81,6 +82,7 @@ export async function getSetupBaseStatus(
       .where(eq(deploymentSettings.id, 'default'))
       .limit(1),
   ]);
+  const persistedSetupNewState = orgResult[0]?.setupNewState;
 
   return {
     hasGitHub: githubResult.length > 0,
@@ -88,7 +90,12 @@ export async function getSetupBaseStatus(
     hasSlack: slackResult.length > 0,
     hasLinear: linearResult.length > 0,
     setupCompletedAt: orgResult[0]?.setupCompletedAt ?? null,
-    setupNewState: normalizeSetupNewState(orgResult[0]?.setupNewState),
+    hasPersistedAutomationRecommendations:
+      typeof persistedSetupNewState === 'object' &&
+      persistedSetupNewState !== null &&
+      !Array.isArray(persistedSetupNewState) &&
+      Object.hasOwn(persistedSetupNewState, 'automationRecommendations'),
+    setupNewState: normalizeSetupNewState(persistedSetupNewState),
   };
 }
 
