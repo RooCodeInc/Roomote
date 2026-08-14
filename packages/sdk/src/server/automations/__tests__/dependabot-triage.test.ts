@@ -112,8 +112,9 @@ describe('dependabotTriageJob buildScanTask', () => {
       'count its current open Dependabot alerts',
     );
     expect(payload.description).toContain('inspect its open pull requests');
+    expect(payload.description).toContain('Default to finishing silently');
     expect(payload.description).toContain(
-      'After triage reaches a final result, post exactly one concise status message',
+      'only when there is something a human should see now',
     );
     expect(payload.description).toContain(
       'total number of open Dependabot alerts with a critical/high/medium/low severity breakdown',
@@ -138,7 +139,7 @@ describe('dependabotTriageJob buildScanTask', () => {
       'Do not post any Slack opening acknowledgement, scan announcement, progress update, or partial finding',
     );
     expect(payload.description).toContain(
-      'post exactly one concise status message',
+      'If there are no actionable findings or blockers, do not post',
     );
   });
 

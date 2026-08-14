@@ -158,9 +158,9 @@ Rules:
 - Do not treat a missing environment as a reason to avoid an otherwise strong repository-specific suggestion.
 - Do not return ideas that genuinely require cross-repository execution unless you can tie the launch target to one repository.
 - Each suggestion should cover a different subsystem, flow, or file area when possible.
-- Finish with one \`send_chat_reply\` call: put the concise report summary in \`message\`, set \`purpose\` to \`closeout\`, and put the final structured actions in \`suggestions\` so they appear beneath that report in the originating conversation.
+- When at least one finding survives the quality bar, finish with one \`send_chat_reply\` call: put the concise report summary in \`message\`, set \`purpose\` to \`closeout\`, and put the final structured actions in \`suggestions\` so they appear beneath that report in the originating conversation.
 - Return all distinct, high-signal findings that survive scrutiny in priority order, up to a maximum of 10. Do not pad the list toward the maximum.
-- If nothing survives the bar, send the closeout report without \`suggestions\`.
+- If nothing survives the bar, finish silently without calling \`send_chat_reply\`; keep the clean result in the task transcript instead of interrupting the conversation.
 - Each submitted suggestion must use a short title and a concise brief covering the exact issue and user impact.
 - Each \`brief\` must stay within 2-3 sentences and include one concrete example scenario showing how the issue manifests in practice.
 - Each submitted suggestion must include:
