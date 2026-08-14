@@ -162,10 +162,12 @@ export async function suggesterJob(
     try {
       const runtime = await getAutomationRuntime('suggester');
       const frequency = runtime.enabled ? runtime.scheduleMode : 'off';
-      const destination = await resolveAutomationRuntimeDestination({
-        runtime,
-        slackConnected: deployment.slackBotToken !== null,
-      });
+      const destination =
+        opts.destination ??
+        (await resolveAutomationRuntimeDestination({
+          runtime,
+          slackConnected: deployment.slackBotToken !== null,
+        }));
       const channelId = resolveDispatchChannelId(
         destination,
         runtime.slackChannelId,

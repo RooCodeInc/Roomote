@@ -57,6 +57,11 @@ vi.mock('sonner', () => ({
 }));
 
 vi.mock('@/hooks/useUser', () => ({
+  useUser: () => ({
+    authStatus: 'signed-in',
+    isSignedIn: true,
+    user: { isAdmin: currentIsAdmin },
+  }),
   useAuthorizedUser: () => ({
     userId: 'user-1',
     isAdmin: currentIsAdmin,
@@ -115,6 +120,10 @@ vi.mock('@/lib/utils', () => ({
 
 vi.mock('./OnboardingCard', () => ({
   OnboardingCard: () => <div>Onboarding</div>,
+}));
+
+vi.mock('./AutomationRecommendationsCard', () => ({
+  AutomationRecommendationsCard: () => <div>Automation recommendations</div>,
 }));
 
 vi.mock('./BottomSheetTabs', () => ({

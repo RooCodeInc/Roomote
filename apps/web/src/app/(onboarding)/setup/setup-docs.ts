@@ -25,6 +25,7 @@ const SETUP_DOC_PATHS: Record<SetupDocsStep, string | null> = {
   'compute-provider': 'compute',
   'compute-config': 'compute',
   'repo-selection': 'environments',
+  'automation-recommendations': 'automations',
   invoke: 'how-roomote-works',
 };
 

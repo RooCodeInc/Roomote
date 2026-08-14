@@ -220,10 +220,12 @@ export async function managerStatsJob(
         continue;
       }
 
-      const destination = await resolveAutomationRuntimeDestination({
-        runtime,
-        slackConnected: deployment.slackBotToken !== null,
-      });
+      const destination =
+        opts.destination ??
+        (await resolveAutomationRuntimeDestination({
+          runtime,
+          slackConnected: deployment.slackBotToken !== null,
+        }));
 
       if (!destination) {
         result.skippedReason = 'Manager channel is not configured.';

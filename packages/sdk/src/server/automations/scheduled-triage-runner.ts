@@ -127,10 +127,12 @@ export function createScheduledTriageJob(
           continue;
         }
 
-        const destination = await resolveAutomationRuntimeDestination({
-          runtime,
-          slackConnected: deployment.slackBotToken !== null,
-        });
+        const destination =
+          opts.destination ??
+          (await resolveAutomationRuntimeDestination({
+            runtime,
+            slackConnected: deployment.slackBotToken !== null,
+          }));
 
         if (!destination) {
           if (deployment.slackBotToken) {

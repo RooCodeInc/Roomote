@@ -87,6 +87,45 @@ export const SETUP_COMPUTE_PROVISIONING_STATE_FIELDS = {
   azure: 'azureDiskImageBuild',
 } as const satisfies Partial<Record<ComputeProvider, keyof SetupNewState>>;
 
+export type AutomationRecommendation = {
+  id: string;
+  candidateId: string;
+  rank: number;
+  score: number;
+  explanation: string;
+  enabled: boolean;
+  lastRunTaskId: string | null;
+  automationId: string | null;
+  /** Whether setup or an explicit Home action created the automation. */
+  applied?: boolean;
+  /** Set while a durable initial-run job owns this recommendation. */
+  initialRunClaimedAt?: string | null;
+  /** Set immediately before the initial-run job starts dispatching work. */
+  initialRunDispatchAttemptedAt?: string | null;
+  /** Terminal marker preventing a paid initial run from being repeated. */
+  initialRunTerminalAt?: string | null;
+};
+
+export type AutomationRecommendationApplicationState =
+  | 'pending'
+  | 'applied'
+  | 'skipped';
+
+export type AutomationRecommendationBatch = {
+  version: 1;
+  inputFingerprint: string;
+  catalogVersion: number;
+  status: 'pending' | 'ready' | 'failed';
+  startedAt: string;
+  completedAt: string | null;
+  partial: boolean;
+  errorCode: string | null;
+  recommendations: AutomationRecommendation[];
+  dismissed: boolean;
+  /** Whether setup has applied the selected recommendation settings. */
+  applicationState?: AutomationRecommendationApplicationState;
+};
+
 export type SetupProvisionableComputeProvider =
   keyof typeof SETUP_COMPUTE_PROVISIONING_STATE_FIELDS;
 
@@ -134,6 +173,7 @@ export type SetupNewState = {
   blaxelImageBuild: SetupNewComputeProvisioningState | null;
   azureDiskImageBuild: SetupNewComputeProvisioningState | null;
   lastInteractedByUserId: string | null;
+  automationRecommendations: AutomationRecommendationBatch | null;
 };
 
 export function createEmptySetupNewState(): SetupNewState {
@@ -163,6 +203,7 @@ export function createEmptySetupNewState(): SetupNewState {
     blaxelImageBuild: null,
     azureDiskImageBuild: null,
     lastInteractedByUserId: null,
+    automationRecommendations: null,
   };
 }
 

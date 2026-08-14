@@ -40,6 +40,7 @@ import { StepCommunicationConnect } from './StepCommunicationConnect';
 import { StepInvoke } from './StepInvoke';
 import { useSetupFlow } from './hooks';
 import { StepRepoSelection, type SetupRetryReason } from './StepRepoSelection';
+import { StepAutomationRecommendations } from './StepAutomationRecommendations';
 import { getSetupStepPath } from './types';
 import { LoadingSetupFlow, stepTransitionVariants } from './SetupBootstrapFlow';
 
@@ -105,7 +106,6 @@ export function SetupSignedInFlow() {
     goToPreviousStep,
     goToNextStep,
     canGoBack,
-    goToNextPostOnboardingStep,
     readSetupSearchParams,
     commitSetupUrl,
     status,
@@ -424,6 +424,27 @@ export function SetupSignedInFlow() {
               onBack={canGoBack ? goToPreviousStep : undefined}
             />
           )}
+          {step === 'automation-recommendations' && (
+            <StepAutomationRecommendations
+              onContinue={(automationRecommendations) => {
+                queryClient.setQueryData(
+                  trpc.setupNew.status.queryKey(),
+                  (currentStatus) =>
+                    currentStatus
+                      ? {
+                          ...currentStatus,
+                          setupNewState: {
+                            ...currentStatus.setupNewState,
+                            automationRecommendations,
+                          },
+                        }
+                      : currentStatus,
+                );
+                goToNextStep();
+              }}
+              onBack={canGoBack ? goToPreviousStep : undefined}
+            />
+          )}
           {step === 'compute-provider' && (
             <StepComputeProvider
               computeSetup={status.computeSetup}
@@ -483,11 +504,30 @@ export function SetupSignedInFlow() {
               onReviewComputeProvider={() =>
                 goToStep('compute-provider', { revisit: true })
               }
-              onContinue={() => goToStep('invoke')}
+              onContinue={({
+                recommendationBatch,
+                setupNewState,
+                nextStep,
+              }) => {
+                if (recommendationBatch) {
+                  queryClient.setQueryData(
+                    trpc.automations.listRecommendations.queryKey(),
+                    recommendationBatch,
+                  );
+                }
+                queryClient.setQueryData(
+                  trpc.setup.status.queryKey(),
+                  (currentStatus) =>
+                    currentStatus
+                      ? { ...currentStatus, setupNewState }
+                      : currentStatus,
+                );
+                goToStep(nextStep);
+              }}
               onBack={canGoBack ? goToPreviousStep : undefined}
               onSkip={() => {
                 setupSession.unlockPostOnboardingFlow();
-                goToNextPostOnboardingStep(true);
+                goToStep('invoke');
               }}
             />
           )}

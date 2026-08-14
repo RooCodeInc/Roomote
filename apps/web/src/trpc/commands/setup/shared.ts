@@ -81,7 +81,6 @@ export async function getSetupBaseStatus(
       .where(eq(deploymentSettings.id, 'default'))
       .limit(1),
   ]);
-
   return {
     hasGitHub: githubResult.length > 0,
     hasEnvironments: environmentResult.length > 0,

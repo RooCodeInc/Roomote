@@ -1,5 +1,9 @@
+import type { ResolvedAutomationDestination } from './destination';
+
 export type AutomationRunOpts = {
   manualTrigger?: boolean;
+  /** Destination selected by the caller for a one-off run. */
+  destination?: ResolvedAutomationDestination;
 };
 
 /**

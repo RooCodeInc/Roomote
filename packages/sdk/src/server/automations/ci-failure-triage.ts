@@ -91,10 +91,12 @@ export async function ciFailureTriageJob(
     }
 
     const connectedProviders = await listConnectedCommunicationProviders();
-    const destination = await resolveAutomationRuntimeDestination({
-      runtime,
-      slackConnected: connectedProviders.includes('slack'),
-    });
+    const destination =
+      opts.destination ??
+      (await resolveAutomationRuntimeDestination({
+        runtime,
+        slackConnected: connectedProviders.includes('slack'),
+      }));
 
     if (!destination) {
       result.skippedReason = 'Manager channel is not configured.';
