@@ -45,6 +45,7 @@ vi.mock('@roomote/db/server', () => {
       taskId: 'taskRuns.taskId',
     },
     tasks: {
+      deletedAt: 'tasks.deletedAt',
       id: 'tasks.id',
       initiatorKind: 'tasks.initiatorKind',
       initiatorUserId: 'tasks.initiatorUserId',
@@ -194,5 +195,17 @@ describe('findActiveCommunicationTaskRun', () => {
       left: 'taskRuns.taskId',
       right: 'task-1',
     });
+  });
+
+  it('does not let a soft-deleted task retain conversation ownership', async () => {
+    queryResults.push([]);
+
+    await findActiveCommunicationTaskRun({
+      provider: 'discord',
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+    });
+
+    expect(whereConditions()).toContainEqual({ isNull: 'tasks.deletedAt' });
   });
 });
