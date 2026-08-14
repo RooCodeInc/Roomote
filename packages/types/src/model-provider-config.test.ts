@@ -383,13 +383,55 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         getSetupModelProvider('opencode-go'),
       ),
     ).toMatchObject({
-      roomoteModel: 'opencode-go/glm-5.2',
+      roomoteModel: 'opencode-go/glm-5.3',
       roomoteSmallModel: 'opencode-go/gpt-5.6-luna',
       roomoteVisionModel: 'opencode-go/gpt-5.6-luna',
       roomoteCodeReviewModel: 'opencode-go/minimax-m3',
       roomoteExploreModel: 'opencode-go/deepseek-v4-flash',
       roomotePlanningModel: 'opencode-go/qwen3.8-max',
     });
+  });
+
+  it('recommends GLM 5.3 where available and retains GLM 5.2 elsewhere', () => {
+    const glm53ByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) => {
+      const model = provider.suggestedTaskModels.find(
+        (suggestion) => suggestion.displayName === 'GLM 5.3',
+      );
+
+      return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+    });
+
+    expect(glm53ByProvider).toEqual([
+      { providerId: 'opencode-go', modelId: 'opencode-go/glm-5.3' },
+      {
+        providerId: 'zai-coding-plan',
+        modelId: 'zai-coding-plan/glm-5.3',
+      },
+    ]);
+    expect(getSetupModelProvider('zai-coding-plan').defaultRoomoteModel).toBe(
+      'zai-coding-plan/glm-5.3',
+    );
+    expect(
+      buildRecommendedDeploymentModelConfig(getSetupModelProvider('zai'))
+        .roomoteModel,
+    ).toBe('zai/glm-5.2');
+    expect(
+      SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) => {
+        const model = provider.suggestedTaskModels.find(
+          (suggestion) => suggestion.displayName === 'GLM 5.2',
+        );
+
+        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+      }),
+    ).toEqual([
+      { providerId: 'openrouter', modelId: 'openrouter/z-ai/glm-5.2' },
+      { providerId: 'vercel', modelId: 'vercel/zai/glm-5.2' },
+      { providerId: 'requesty', modelId: 'requesty/glm-5.2' },
+      { providerId: 'baseten', modelId: 'baseten/zai-org/GLM-5.2' },
+      { providerId: 'togetherai', modelId: 'togetherai/zai-org/GLM-5.2' },
+      { providerId: 'opencode', modelId: 'opencode/glm-5.2' },
+      { providerId: 'zai', modelId: 'zai/glm-5.2' },
+    ]);
   });
 
   it.each([

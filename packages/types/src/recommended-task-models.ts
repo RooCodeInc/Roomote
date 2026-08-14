@@ -50,6 +50,7 @@ export const RECOMMENDED_TASK_MODELS = [
     displayName: 'DeepSeek V4 Pro 0813',
     family: 'DeepSeek',
   },
+  { id: 'glm-5-3', displayName: 'GLM 5.3', family: 'GLM' },
   { id: 'glm-5-2', displayName: 'GLM 5.2', family: 'GLM' },
   { id: 'kimi-k3', displayName: 'Kimi K3', family: 'Kimi' },
   { id: 'kimi-k2-7-code', displayName: 'Kimi K2.7 Code', family: 'Kimi' },
