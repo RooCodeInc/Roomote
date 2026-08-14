@@ -46,11 +46,15 @@ export function getAutomationRunner(
  */
 export async function runAutomationNow(
   key: TriggerableBackgroundAutomationKey,
+  opts: AutomationRunOpts = {},
 ): Promise<AutomationRunNowResult> {
   let result: AutomationJobResult;
 
   try {
-    result = await AUTOMATION_RUNNERS[key]({ manualTrigger: true });
+    result = await AUTOMATION_RUNNERS[key]({
+      ...opts,
+      manualTrigger: true,
+    });
   } catch (error) {
     return {
       outcome: 'failed',

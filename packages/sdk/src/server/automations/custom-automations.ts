@@ -150,7 +150,42 @@ These are defaults, not requirements that override the automation request above.
 /**
  * Adds default presentation guidance to every custom automation prompt and,
  * when configured, anchors reporting to its destination conversation.
+ *
+ * A custom automation may intentionally omit a report destination. When it
+ * does, prefer the admin who created/enabled it as a private fallback so an
+ * enabled automation does not disappear from the communication surface.
  */
+async function resolveOwnerFallbackDestination(
+  ownerUserId: string | null,
+): Promise<ResolvedAutomationDestination | null> {
+  if (!ownerUserId) {
+    return null;
+  }
+
+  const connectedProviders = await listConnectedCommunicationProviders();
+  for (const provider of connectedProviders) {
+    try {
+      const destination = await findUserDirectMessageDestination(
+        provider,
+        ownerUserId,
+      );
+      if (destination) {
+        return {
+          provider,
+          ...destination,
+          source: 'automation_target',
+        };
+      }
+    } catch (error) {
+      console.warn(
+        `${LOG_PREFIX} Failed to resolve owner DM on ${provider}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  return null;
+}
+
 function buildCustomAutomationDescription(
   prompt: string,
   destination: ResolvedAutomationDestination | null,
@@ -271,8 +306,9 @@ async function launchCustomAutomationRow(
     return result;
   }
 
-  // A report destination is optional: automations without one run silently
-  // and surface results only in the task UI.
+  // A report destination is optional. Prefer a private DM to the admin who
+  // created/enabled the automation so an enabled run still has a chat-facing
+  // result; if that admin has no linked DM, preserve the task-UI fallback.
   let destination: ResolvedAutomationDestination | null = null;
   if (isConfiguredAutomationTarget(automation.target)) {
     destination = await resolveDestination(automation.target);
@@ -306,6 +342,10 @@ async function launchCustomAutomationRow(
       });
       return result;
     }
+  } else {
+    destination = await resolveOwnerFallbackDestination(
+      automation.createdByUserId,
+    );
   }
 
   // The short claim fence prevents concurrent launchers from double-launching

@@ -417,6 +417,38 @@ describe('customAutomationsJob', () => {
     expect(buildDestinationTaskPayloadFields).not.toHaveBeenCalled();
   });
 
+  it("falls back to the enabling admin's DM when no report channel is configured", async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        target: {},
+        createdByUserId: 'user-1',
+      } as never,
+    ]);
+
+    const result = await customAutomationsJob();
+
+    expect(result.launchedTaskId).toBe('task_abc');
+    expect(findUserDirectMessageDestination).toHaveBeenCalledWith(
+      'slack',
+      'user-1',
+    );
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            customAutomationId: automation.id,
+            channel: 'D123',
+            slackChannel: 'D123',
+            teamId: 'T123',
+            slackTeamId: 'T123',
+          }),
+        }),
+        channels: { slackChannelId: 'D123' },
+      }),
+    );
+  });
+
   it('uses hour-0 boundary for hourly schedules', async () => {
     vi.mocked(getCustomAutomationFrequency).mockReturnValue('every_hour');
 

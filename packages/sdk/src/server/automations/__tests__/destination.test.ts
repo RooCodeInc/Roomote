@@ -7,6 +7,7 @@ const {
   mockFindTeamsPrimaryConversation,
   mockFindTelegramPrimaryChatId,
   mockFindDiscordDefaultDestination,
+  mockFindUserDirectMessageDestination,
 } = vi.hoisted(() => ({
   mockFindFirstSlackInstallation: vi.fn(),
   mockResolveTeamsCredentials: vi.fn(),
@@ -16,6 +17,7 @@ const {
   mockFindTeamsPrimaryConversation: vi.fn(),
   mockFindTelegramPrimaryChatId: vi.fn(),
   mockFindDiscordDefaultDestination: vi.fn(),
+  mockFindUserDirectMessageDestination: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -55,6 +57,10 @@ vi.mock('../../lib/telegram-primary-chat', () => ({
 
 vi.mock('../../lib/discord-persistence', () => ({
   findDiscordDefaultDestination: mockFindDiscordDefaultDestination,
+}));
+
+vi.mock('../../lib/user-direct-message', () => ({
+  findUserDirectMessageDestination: mockFindUserDirectMessageDestination,
 }));
 
 import {
@@ -198,6 +204,37 @@ describe('resolveAutomationRuntimeDestination', () => {
       }),
     ).resolves.toBeNull();
     expect(mockFindTeamsPrimaryConversation).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the triggering admin DM when requested', async () => {
+    mockFindFirstSlackInstallation.mockResolvedValue({ id: 'inst-1' });
+    mockResolveTeamsCredentials.mockResolvedValue({
+      botAppId: null,
+      botAppPassword: null,
+    });
+    mockResolveTelegramCredentials.mockResolvedValue({ botToken: null });
+    mockResolveDiscordCredentials.mockResolvedValue({ botToken: null });
+    mockFindUserDirectMessageDestination.mockResolvedValue({
+      channelId: 'D123',
+      teamId: 'T123',
+    });
+
+    await expect(
+      resolveAutomationRuntimeDestination({
+        runtime: { destination: null },
+        slackConnected: true,
+        fallbackUserId: 'user-1',
+      }),
+    ).resolves.toEqual({
+      provider: 'slack',
+      channelId: 'D123',
+      teamId: 'T123',
+      source: 'automation_target',
+    });
+    expect(mockFindUserDirectMessageDestination).toHaveBeenCalledWith(
+      'slack',
+      'user-1',
+    );
   });
 
   it('falls back to the primary Teams conversation on Slack-less deployments', async () => {
