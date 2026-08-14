@@ -53,6 +53,7 @@ import {
   recordSlackConversationMessageBestEffort,
   buildAutomationRecommendationFingerprint,
   enqueueAutomationRecommendations,
+  enqueueAutomationSignalPrefetch,
 } from '@roomote/sdk/server';
 import {
   buildRecommendedDeploymentModelConfig,
@@ -2641,6 +2642,18 @@ export async function saveSetupNewSelectionCommand(
   }
 
   return result;
+}
+
+export async function prefetchSetupRecommendationSignalsCommand(
+  auth: UserAuthSuccess,
+  input: { repositoryIds: string[] },
+) {
+  assertAdmin(auth);
+  const { normalizedRepositoryIds } = await resolveSelectedRepositories(
+    input.repositoryIds,
+  );
+  await enqueueAutomationSignalPrefetch(normalizedRepositoryIds);
+  return { repositoryIds: normalizedRepositoryIds };
 }
 
 export async function startSetupNewOnboardingTaskCommand(

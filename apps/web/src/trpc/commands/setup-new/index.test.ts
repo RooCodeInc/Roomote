@@ -111,6 +111,7 @@ vi.mock('@roomote/sdk/server', () => ({
       `${provider ?? 'none'}:${repositoryIds.join(',')}`,
   ),
   enqueueAutomationRecommendations: vi.fn(async () => undefined),
+  enqueueAutomationSignalPrefetch: vi.fn(async () => undefined),
   createTeamsCommunicationProviderFromRuntimeCredentials: vi.fn(
     async () => null,
   ),

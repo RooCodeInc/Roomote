@@ -278,6 +278,7 @@ import {
   saveSetupNewSourceControlConfigCommand,
   saveSetupNewSourceControlProviderChoiceCommand,
   saveSetupNewSelectionCommand,
+  prefetchSetupRecommendationSignalsCommand,
   saveSetupNewQueuedTasksCommand,
   startSetupNewOnboardingTaskCommand,
   cancelSetupNewOnboardingTaskCommand,
@@ -2566,6 +2567,16 @@ export const appRouter = createRouter({
       )
       .mutation(({ ctx: { auth }, input }) =>
         saveSetupNewSelectionCommand(auth, input),
+      ),
+
+    prefetchRecommendationSignals: protectedProcedure
+      .input(
+        z.object({
+          repositoryIds: z.array(z.string().uuid()).max(100),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        prefetchSetupRecommendationSignalsCommand(auth, input),
       ),
 
     saveQueuedTasks: protectedProcedure

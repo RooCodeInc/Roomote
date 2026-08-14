@@ -16,6 +16,7 @@ import {
 
 const {
   mockSaveSelection,
+  mockPrefetchRecommendationSignals,
   mockStartOnboardingTask,
   mockCreateGitHubInstallation,
   mockToastError,
@@ -32,6 +33,9 @@ const {
       slackThreadTs: null,
       lastInteractedByUserId: 'user-1',
     },
+  }),
+  mockPrefetchRecommendationSignals: vi.fn().mockResolvedValue({
+    repositoryIds: ['repo-1', 'repo-2'],
   }),
   mockStartOnboardingTask: vi.fn().mockResolvedValue({
     taskId: 'task-onboarding-1',
@@ -102,6 +106,12 @@ vi.mock('@/trpc/client', () => ({
       saveSelection: {
         mutationOptions: (options = {}) => ({
           mutationFn: mockSaveSelection,
+          ...options,
+        }),
+      },
+      prefetchRecommendationSignals: {
+        mutationOptions: (options = {}) => ({
+          mutationFn: mockPrefetchRecommendationSignals,
           ...options,
         }),
       },
@@ -341,6 +351,9 @@ describe('StepRepoSelection', () => {
         onboardingTaskId: null,
       },
     });
+    mockPrefetchRecommendationSignals.mockResolvedValue({
+      repositoryIds: ['repo-1', 'repo-2'],
+    });
     mockStartOnboardingTask.mockResolvedValue({
       taskId: 'task-onboarding-1',
       startedAt: '2026-07-10T10:00:00.000Z',
@@ -399,6 +412,19 @@ describe('StepRepoSelection', () => {
 
     expect(mockUseRepositories).toHaveBeenCalledWith({
       includeEmptyState: true,
+    });
+  });
+
+  it('prefetches recommendation signals when repositories load', async () => {
+    await renderStepRepoSelection();
+
+    await waitFor(() => {
+      expect(mockPrefetchRecommendationSignals).toHaveBeenCalledWith(
+        {
+          repositoryIds: ['repo-1', 'repo-2'],
+        },
+        expect.anything(),
+      );
     });
   });
 

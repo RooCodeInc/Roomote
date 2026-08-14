@@ -464,6 +464,7 @@ async function collectSignals(
   repositoryId: string,
   githubOctokitCache: GitHubOctokitCache = new Map(),
 ): Promise<RepositoryAutomationSignals> {
+  const startedAt = Date.now();
   const [repository] = await db
     .select({
       id: repositories.id,
@@ -479,6 +480,10 @@ async function collectSignals(
     .limit(1);
 
   if (!repository) throw new Error(`Repository ${repositoryId} was not found.`);
+
+  console.info(
+    `[automation-recommendations] Started signal collection for ${repository.fullName} (${repository.sourceControlProvider})`,
+  );
 
   const facts = await db
     .select({
@@ -514,7 +519,7 @@ async function collectSignals(
     };
   }
 
-  return {
+  const payload = {
     repositoryId: repository.id,
     repositoryName: repository.fullName,
     sourceControlProvider: repository.sourceControlProvider,
@@ -531,12 +536,32 @@ async function collectSignals(
     docs: 0,
     partial: providerSignals.partial,
   };
+
+  console.info(
+    `[automation-recommendations] Collected signals for ${repository.fullName} in ${Date.now() - startedAt}ms`,
+    {
+      ciFailures30d: payload.ciFailures30d,
+      dependabotAlerts: payload.dependabotAlerts,
+      codeqlAlerts: payload.codeqlAlerts,
+      dependencyManifests: payload.dependencyManifests,
+      conflicts: payload.conflicts,
+      openPrs: payload.openPrs,
+      mergedPrs30d: payload.mergedPrs30d,
+      partial: payload.partial,
+    },
+  );
+
+  return payload;
 }
 
 export async function collectAutomationSignalsJob(
   input: AutomationSignalPrefetchJob,
 ): Promise<void> {
   const request = automationSignalPrefetchJobSchema.parse(input);
+  const startedAt = Date.now();
+  console.info(
+    `[automation-recommendations] Started signal prefetch for repository ${request.repositoryId}`,
+  );
   const payload = await collectSignals(request.repositoryId, new Map());
   await db
     .insert(repositoryAutomationSignals)
@@ -557,6 +582,9 @@ export async function collectAutomationSignalsJob(
         collectedAt: new Date(),
       },
     });
+  console.info(
+    `[automation-recommendations] Completed signal prefetch for repository ${request.repositoryId} in ${Date.now() - startedAt}ms`,
+  );
 }
 
 function mergeRecommendationState(
@@ -634,7 +662,12 @@ async function buildRecommendationBatch(
   const signals = await Promise.all(
     repositoriesForSelection.map(async (repository) => {
       const existing = cachedByRepositoryId.get(repository.id);
-      if (existing) return existing;
+      if (existing) {
+        console.info(
+          `[automation-recommendations] Using cached signals for ${repository.fullName}`,
+        );
+        return existing;
+      }
       const collected = await collectSignals(repository.id, githubOctokitCache);
       await db
         .insert(repositoryAutomationSignals)
@@ -725,6 +758,10 @@ export async function processAutomationRecommendationsJob(
   input: AutomationRecommendationJob,
 ): Promise<void> {
   const request = automationRecommendationJobSchema.parse(input);
+  const startedAt = Date.now();
+  console.info(
+    `[automation-recommendations] Started recommendation scoring for ${request.repositoryIds.length} repositories`,
+  );
   const [settings] = await db
     .select({ setupNewState: deploymentSettings.setupNewState })
     .from(deploymentSettings)
@@ -734,6 +771,9 @@ export async function processAutomationRecommendationsJob(
   if (
     state.automationRecommendations?.inputFingerprint !== request.fingerprint
   ) {
+    console.info(
+      '[automation-recommendations] Skipped recommendation scoring because the request is stale',
+    );
     return;
   }
 
@@ -767,6 +807,13 @@ export async function processAutomationRecommendationsJob(
       .update(deploymentSettings)
       .set({ setupNewState: nextState, updatedAt: new Date() })
       .where(eq(deploymentSettings.id, 'default'));
+    console.info(
+      `[automation-recommendations] Completed recommendation scoring for ${request.repositoryIds.length} repositories in ${Date.now() - startedAt}ms`,
+      {
+        recommendationCount: batch.recommendations.length,
+        partial: batch.partial,
+      },
+    );
   } catch (error) {
     const current = await db
       .select({ setupNewState: deploymentSettings.setupNewState })
@@ -798,6 +845,9 @@ export async function processAutomationRecommendationsJob(
         updatedAt: new Date(),
       })
       .where(eq(deploymentSettings.id, 'default'));
+    console.warn(
+      `[automation-recommendations] Recommendation scoring failed after ${Date.now() - startedAt}ms`,
+    );
     throw error;
   }
 }

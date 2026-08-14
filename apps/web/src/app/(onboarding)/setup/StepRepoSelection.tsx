@@ -139,6 +139,16 @@ export function StepRepoSelection({
       },
     }),
   );
+  const prefetchRecommendationSignals = useMutation(
+    trpc.setupNew.prefetchRecommendationSignals.mutationOptions({
+      onError: (error) => {
+        console.error(
+          '[StepRepoSelection] Failed to prefetch recommendation signals:',
+          error,
+        );
+      },
+    }),
+  );
   const startOnboardingTask = useMutation(
     trpc.setupNew.startOnboardingTask.mutationOptions({
       onError: (error) => {
@@ -167,6 +177,23 @@ export function StepRepoSelection({
       })),
     [repositories.data],
   );
+
+  const prefetchedRepositoryIdsKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (sortedRepositories.length === 0) {
+      return;
+    }
+
+    const repositoryIds = sortedRepositories.map((repository) => repository.id);
+    const repositoryIdsKey = [...repositoryIds].sort().join(',');
+    if (prefetchedRepositoryIdsKeyRef.current === repositoryIdsKey) {
+      return;
+    }
+
+    prefetchedRepositoryIdsKeyRef.current = repositoryIdsKey;
+    prefetchRecommendationSignals.mutate({ repositoryIds });
+  }, [prefetchRecommendationSignals, sortedRepositories]);
+
   const showRepositoryFilter = sortedRepositories.length > 5;
 
   useEffect(() => {
