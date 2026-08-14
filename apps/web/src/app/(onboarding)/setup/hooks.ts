@@ -468,12 +468,6 @@ export function useSetupFlow(
             !status.onboardingFailed
           );
         case 'automation-recommendations':
-          // Preserve the pre-recommendation wizard for existing deployments:
-          // normalization fills the missing field with `null`, so its raw
-          // persisted presence is carried separately in setup status.
-          if (status.hasPersistedAutomationRecommendations !== true) {
-            return true;
-          }
           return ['applied', 'skipped'].includes(
             status.setupNewState.automationRecommendations?.applicationState ??
               'pending',

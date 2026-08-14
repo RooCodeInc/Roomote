@@ -102,7 +102,6 @@ function mockStatus(overrides: Partial<Record<string, unknown>> = {}) {
       onboardingTaskStatus: null,
       onboardingTaskPhase: null,
       setupCompletedAt: null,
-      hasPersistedAutomationRecommendations: false,
       selectedRepositories: [],
       matchingEnvironment: null,
       queuedOnboardingTasks: [],
@@ -177,20 +176,17 @@ function mockReadyForRepository({
   selectedRepositoryIds = [],
   onboardingFailed = false,
   automationRecommendations,
-  hasPersistedAutomationRecommendations = false,
 }: {
   onboardingTaskId?: string | null;
   selectedRepositoryIds?: string[];
   onboardingFailed?: boolean;
   automationRecommendations?: null;
-  hasPersistedAutomationRecommendations?: boolean;
 } = {}) {
   setupSessionState.session = {
     ...setupSessionState.session,
     communicationStep: { state: 'skipped' },
   };
   mockStatus({
-    hasPersistedAutomationRecommendations,
     onboardingFailed,
     authSetup: {
       setupSatisfiedByRuntimeEnv: true,
@@ -233,7 +229,7 @@ function mockReadyForRepository({
       sourceControlProvider: 'github',
       ...(automationRecommendations === null
         ? { automationRecommendations }
-        : {}),
+        : { automationRecommendations: { applicationState: 'skipped' } }),
       selectedRepositoryIds,
       onboardingTaskId,
       onboardingTaskStartedAt: onboardingTaskId
@@ -433,7 +429,6 @@ describe('useSetupFlow', () => {
         slackChannel: null,
         slackThreadTs: null,
       },
-      hasPersistedAutomationRecommendations: true,
     });
 
     const { result } = renderHook(() => useSetupFlow());
@@ -452,7 +447,6 @@ describe('useSetupFlow', () => {
   it('moves from automation recommendations to environment setup when compute is already configured', async () => {
     mockReadyForRepository({
       automationRecommendations: null,
-      hasPersistedAutomationRecommendations: true,
     });
 
     const { result } = renderHook(() => useSetupFlow());
@@ -530,6 +524,7 @@ describe('useSetupFlow', () => {
         modelProvider: 'openrouter',
         computeProvider: 'docker',
         sourceControlProvider: 'github',
+        automationRecommendations: { applicationState: 'skipped' },
         selectedRepositoryIds: [],
         onboardingTaskId: null,
         onboardingTaskStartedAt: null,
@@ -607,6 +602,7 @@ describe('useSetupFlow', () => {
         modelProvider: 'openrouter',
         computeProvider: 'modal',
         sourceControlProvider: 'github',
+        automationRecommendations: { applicationState: 'skipped' },
         selectedRepositoryIds: [],
         onboardingTaskId: null,
         onboardingTaskStartedAt: null,
@@ -752,6 +748,7 @@ describe('useSetupFlow', () => {
         modelProvider: 'openrouter',
         computeProvider: null,
         sourceControlProvider: 'github',
+        automationRecommendations: { applicationState: 'skipped' },
         selectedRepositoryIds: [],
         onboardingTaskId: null,
         onboardingTaskStartedAt: null,
@@ -1239,6 +1236,7 @@ describe('useSetupFlow', () => {
         modelProvider: 'openrouter',
         computeProvider: null,
         sourceControlProvider: 'github',
+        automationRecommendations: { applicationState: 'skipped' },
         selectedRepositoryIds: [],
         onboardingTaskId: null,
         onboardingTaskStartedAt: null,
@@ -1254,9 +1252,7 @@ describe('useSetupFlow', () => {
     });
   });
 
-  it('keeps the recommendations step visible after skipping repo selection', async () => {
-    // Skipping environment setup before any onboarding task has started still
-    // needs to expose the recommendations step for the admin to review.
+  it('shows recommendations before environment setup', async () => {
     setupSessionState.session = {
       ...setupSessionState.session,
       communicationStep: {
@@ -1317,6 +1313,7 @@ describe('useSetupFlow', () => {
         modelProvider: 'openrouter',
         computeProvider: null,
         sourceControlProvider: 'github',
+        automationRecommendations: null,
         selectedRepositoryIds: [],
         onboardingTaskId: null,
         onboardingTaskStartedAt: null,
@@ -1328,20 +1325,11 @@ describe('useSetupFlow', () => {
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('repo-selection');
-    });
-
-    act(() => {
-      result.current.setupSession.unlockPostOnboardingFlow();
-      result.current.goToStep('automation-recommendations', { revisit: true });
-    });
-
-    await waitFor(() => {
       expect(result.current.step).toBe('automation-recommendations');
     });
 
-    // Give the auto-skip watchdog a chance to run after the navigation; it
-    // must not bounce the intentionally revisited step back to repo selection.
+    // Give the auto-skip watchdog a chance to run after initialization; it
+    // must leave the pending review visible.
     await waitFor(() => {
       expect(result.current.step).toBe('automation-recommendations');
     });
@@ -1633,6 +1621,7 @@ describe('useSetupFlow', () => {
         modelProvider: 'openrouter',
         computeProvider: null,
         sourceControlProvider: 'github',
+        automationRecommendations: { applicationState: 'skipped' },
         selectedRepositoryIds: [],
         onboardingTaskId: null,
         onboardingTaskStartedAt: null,
@@ -1722,6 +1711,7 @@ describe('useSetupFlow', () => {
         modelProvider: 'openrouter',
         computeProvider: null,
         sourceControlProvider: 'github',
+        automationRecommendations: { applicationState: 'skipped' },
         selectedRepositoryIds: [],
         onboardingTaskId: null,
         onboardingTaskStartedAt: null,
@@ -1859,6 +1849,7 @@ describe('useSetupFlow', () => {
         modelProvider: 'openrouter',
         computeProvider: null,
         sourceControlProvider: 'github',
+        automationRecommendations: { applicationState: 'skipped' },
         selectedRepositoryIds: [],
         onboardingTaskId: null,
         onboardingTaskStartedAt: null,
