@@ -3399,6 +3399,12 @@ export async function applySetupRecommendationsCommand(auth: UserAuthSuccess) {
       );
     }
   }
+  void triggerEnabledSetupRecommendations(auth, batch).catch((error) => {
+    console.error(
+      '[applySetupRecommendationsCommand] Failed to trigger enabled recommendations:',
+      error,
+    );
+  });
   return batch;
 }
 
@@ -3484,6 +3490,129 @@ export async function startSetupRecommendationsCommand(auth: UserAuthSuccess) {
   return result.batch;
 }
 
+async function runSetupRecommendationNowForCandidate(
+  auth: UserAuthSuccess,
+  recommendation: AutomationRecommendationBatch['recommendations'][number],
+  candidate: (typeof AUTOMATION_RECOMMENDATION_CATALOG)[number],
+) {
+  if (
+    candidate.source === 'built_in' &&
+    candidate.automationKey === 'review_code'
+  ) {
+    throw new Error('Review Code runs from pull-request events.');
+  }
+
+  let automationId = recommendation.automationId;
+  if (!recommendation.enabled) {
+    const updatedRecommendation = await setSetupRecommendationEnabledCommand(
+      auth,
+      {
+        id: recommendation.id,
+        enabled: true,
+      },
+    );
+    automationId = updatedRecommendation?.automationId ?? null;
+  }
+
+  if (candidate.source === 'cookbook') {
+    if (!automationId) {
+      const refreshed = await listSetupRecommendationsCommand(auth);
+      automationId =
+        refreshed?.recommendations.find((item) => item.id === recommendation.id)
+          ?.automationId ?? null;
+    }
+    if (!automationId)
+      throw new Error('Recommendation automation was not created.');
+    return triggerCustomAutomationCommand(auth, { id: automationId });
+  }
+
+  if (candidate.automationKey === 'review_code') {
+    throw new Error('Review Code runs from pull-request events.');
+  }
+
+  return triggerAutomationCommand(auth, {
+    automationKey: candidate.automationKey,
+  });
+}
+
+async function recordSetupRecommendationLaunch(
+  recommendationId: string,
+  taskId: string,
+) {
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
+    );
+    const state = await getPersistedSetupNewState(tx);
+    const nextBatch = state.automationRecommendations
+      ? {
+          ...state.automationRecommendations,
+          recommendations: state.automationRecommendations.recommendations.map(
+            (item) =>
+              item.id === recommendationId
+                ? { ...item, enabled: true, lastRunTaskId: taskId }
+                : item,
+          ),
+        }
+      : null;
+    if (nextBatch) {
+      await savePersistedSetupNewState(
+        normalizeSetupNewState({
+          ...state,
+          automationRecommendations: nextBatch,
+        }),
+        tx,
+      );
+    }
+  });
+}
+
+async function triggerEnabledSetupRecommendations(
+  auth: UserAuthSuccess,
+  batch: AutomationRecommendationBatch | null | undefined,
+) {
+  await Promise.all(
+    (batch?.recommendations ?? [])
+      .filter((recommendation) => recommendation.enabled)
+      .map(async (recommendation) => {
+        const candidate = AUTOMATION_RECOMMENDATION_CATALOG.find(
+          (item) => item.id === recommendation.candidateId,
+        );
+        if (
+          !candidate ||
+          (candidate.source === 'built_in' &&
+            candidate.automationKey === 'review_code')
+        ) {
+          return;
+        }
+
+        console.info(
+          `[applySetupRecommendationsCommand] Starting ${candidate.title} (${recommendation.id})`,
+        );
+        try {
+          const result = await runSetupRecommendationNowForCandidate(
+            auth,
+            recommendation,
+            candidate,
+          );
+          if (result.outcome === 'launched') {
+            await recordSetupRecommendationLaunch(
+              recommendation.id,
+              result.taskId,
+            );
+          }
+          console.info(
+            `[applySetupRecommendationsCommand] ${candidate.title} (${recommendation.id}) ${result.outcome}`,
+          );
+        } catch (error) {
+          console.warn(
+            `[applySetupRecommendationsCommand] Failed to start ${candidate.title} (${recommendation.id}): ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }),
+  );
+}
+
 export async function runSetupRecommendationNowCommand(
   auth: UserAuthSuccess,
   input: { id: string },
@@ -3501,61 +3630,14 @@ export async function runSetupRecommendationNowCommand(
   if (!batch || !recommendation || !candidate) {
     throw new Error('Recommendation was not found.');
   }
-  if (
-    candidate.source === 'built_in' &&
-    candidate.automationKey === 'review_code'
-  ) {
-    throw new Error('Review Code runs from pull-request events.');
-  }
-  if (!recommendation.enabled) {
-    await setSetupRecommendationEnabledCommand(auth, {
-      id: input.id,
-      enabled: true,
-    });
-  }
-  let result;
-  if (candidate.source === 'cookbook') {
-    const refreshed = await listSetupRecommendationsCommand(auth);
-    const automationId = refreshed?.recommendations.find(
-      (item) => item.id === input.id,
-    )?.automationId;
-    if (!automationId)
-      throw new Error('Recommendation automation was not created.');
-    result = await triggerCustomAutomationCommand(auth, { id: automationId });
-  } else if (candidate.automationKey !== 'review_code') {
-    result = await triggerAutomationCommand(auth, {
-      automationKey: candidate.automationKey,
-    });
-  } else {
-    throw new Error('Review Code runs from pull-request events.');
-  }
+
+  const result = await runSetupRecommendationNowForCandidate(
+    auth,
+    recommendation,
+    candidate,
+  );
   if (result.outcome === 'launched') {
-    await db.transaction(async (tx) => {
-      await tx.execute(
-        sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
-      );
-      const state = await getPersistedSetupNewState(tx);
-      const nextBatch = state.automationRecommendations
-        ? {
-            ...state.automationRecommendations,
-            recommendations:
-              state.automationRecommendations.recommendations.map((item) =>
-                item.id === input.id
-                  ? { ...item, enabled: true, lastRunTaskId: result.taskId }
-                  : item,
-              ),
-          }
-        : null;
-      if (nextBatch) {
-        await savePersistedSetupNewState(
-          normalizeSetupNewState({
-            ...state,
-            automationRecommendations: nextBatch,
-          }),
-          tx,
-        );
-      }
-    });
+    await recordSetupRecommendationLaunch(recommendation.id, result.taskId);
   }
   return result;
 }

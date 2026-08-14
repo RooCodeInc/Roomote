@@ -23,6 +23,8 @@ const {
   mockEnqueueAutomationRecommendations,
   mockUpsertAutomation,
   mockCaptureActivationAutomationChanged,
+  mockTriggerAutomationCommand,
+  mockTriggerCustomAutomationCommand,
 } = vi.hoisted(() => ({
   mockValidateTeamsBotCredentials: vi.fn(async () => undefined),
   mockTxSelect: vi.fn(),
@@ -53,6 +55,14 @@ const {
   mockEnqueueAutomationRecommendations: vi.fn(async () => undefined),
   mockUpsertAutomation: vi.fn(async () => undefined),
   mockCaptureActivationAutomationChanged: vi.fn(async () => undefined),
+  mockTriggerAutomationCommand: vi.fn(async () => ({
+    outcome: 'launched' as const,
+    taskId: 'task-recommendation-1',
+  })),
+  mockTriggerCustomAutomationCommand: vi.fn(async () => ({
+    outcome: 'launched' as const,
+    taskId: 'task-custom-recommendation-1',
+  })),
 }));
 
 vi.mock('../task-models/provider-validation', () => ({
@@ -102,6 +112,14 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 vi.mock('@roomote/telemetry/server', () => ({
   captureActivationAutomationChanged: mockCaptureActivationAutomationChanged,
   captureTaskSettled: vi.fn(),
+}));
+
+vi.mock('../automations/trigger-agent', () => ({
+  triggerAutomationCommand: mockTriggerAutomationCommand,
+}));
+
+vi.mock('../automations/custom-automations', () => ({
+  triggerCustomAutomationCommand: mockTriggerCustomAutomationCommand,
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -1446,6 +1464,16 @@ describe('setup-new onboarding task start command', () => {
               rank: 2,
               score: 1,
               explanation: 'Fix broken builds.',
+              enabled: true,
+              lastRunTaskId: null,
+              automationId: null,
+            },
+            {
+              id: 'built-in.codeql-triage:3',
+              candidateId: 'built-in.codeql-triage',
+              rank: 3,
+              score: 1,
+              explanation: 'Triage security alerts.',
               enabled: false,
               lastRunTaskId: null,
               automationId: null,
@@ -1468,6 +1496,13 @@ describe('setup-new onboarding task start command', () => {
       expect.anything(),
       expect.objectContaining({
         key: 'ci_failure_triage',
+        enabled: true,
+      }),
+    );
+    expect(mockUpsertAutomation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        key: 'codeql_triage',
         enabled: false,
       }),
     );
@@ -1475,9 +1510,23 @@ describe('setup-new onboarding task start command', () => {
       'enabled',
       'review_code',
     );
-    expect(mockCaptureActivationAutomationChanged).not.toHaveBeenCalledWith(
+    expect(mockCaptureActivationAutomationChanged).toHaveBeenCalledWith(
       'enabled',
       'ci_failure_triage',
+    );
+    expect(mockCaptureActivationAutomationChanged).not.toHaveBeenCalledWith(
+      'enabled',
+      'codeql_triage',
+    );
+    await vi.waitFor(() =>
+      expect(mockTriggerAutomationCommand).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: 'setup-test-user' }),
+        { automationKey: 'ci_failure_triage' },
+      ),
+    );
+    expect(mockTriggerAutomationCommand).not.toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'setup-test-user' }),
+      { automationKey: 'review_code' },
     );
     expect(result?.recommendations).toEqual(
       expect.arrayContaining([
@@ -1487,7 +1536,7 @@ describe('setup-new onboarding task start command', () => {
         }),
         expect.objectContaining({
           candidateId: 'built-in.ci-failure-triage',
-          enabled: false,
+          enabled: true,
         }),
       ]),
     );
