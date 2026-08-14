@@ -145,13 +145,21 @@ export async function enqueueAutomationRecommendations(
   input: AutomationRecommendationJob,
 ): Promise<void> {
   const request = automationRecommendationJobSchema.parse(input);
-  await getRecommendationQueue().add(
-    'score-automation-recommendations',
-    request,
-    {
-      jobId: `automation-recommendations-${request.fingerprint}`,
-    },
+  const queue = getRecommendationQueue();
+  const jobId = `automation-recommendations-${request.fingerprint}`;
+  const existing = await queue.getJob(jobId);
+  if (existing) {
+    const state = await existing.getState();
+    if (state === 'completed' || state === 'failed') {
+      await existing.remove();
+    }
+  }
+  console.info(
+    `[automation-recommendations] Enqueuing recommendation scoring for ${request.repositoryIds.length} repositories`,
   );
+  await queue.add('score-automation-recommendations', request, {
+    jobId,
+  });
 }
 
 export async function enqueueAutomationSignalPrefetch(
@@ -377,6 +385,10 @@ type CiSignalRepository = {
   defaultBranch: string;
 };
 
+type SignalCollectionOptions = {
+  collectProviderSignals?: boolean;
+};
+
 function matchesConfiguredHost(
   repositoryHost: string | null,
   configuredHost: string,
@@ -463,6 +475,7 @@ async function collectNonGitHubCiSignal(
 async function collectSignals(
   repositoryId: string,
   githubOctokitCache: GitHubOctokitCache = new Map(),
+  options: SignalCollectionOptions = {},
 ): Promise<RepositoryAutomationSignals> {
   const startedAt = Date.now();
   const [repository] = await db
@@ -493,30 +506,43 @@ async function collectSignals(
     .from(pullRequestFacts)
     .where(eq(pullRequestFacts.repositoryId, repositoryId));
   const since = Date.now() - AUTOMATION_SIGNAL_LOOKBACK_MS;
-  let providerSignals;
-  try {
-    providerSignals =
-      repository.sourceControlProvider === 'github'
-        ? await collectGitHubSignals(repository, githubOctokitCache)
-        : {
-            ...(await collectNonGitHubCiSignal(repository)),
-            dependabotAlerts: 0,
-            codeqlAlerts: 0,
-            dependencyManifests: 0,
-            conflicts: 0,
-          };
-  } catch (error) {
-    console.warn(
-      `[automation-recommendations] Failed to collect provider signals for ${repository.fullName}: ${error instanceof Error ? error.message : String(error)}`,
-    );
-    providerSignals = {
-      ciFailures30d: 0,
-      dependabotAlerts: 0,
-      codeqlAlerts: 0,
-      dependencyManifests: 0,
-      conflicts: 0,
-      partial: true,
-    };
+  let providerSignals = {
+    ciFailures30d: 0,
+    dependabotAlerts: 0,
+    codeqlAlerts: 0,
+    dependencyManifests: 0,
+    conflicts: 0,
+    partial: true,
+  };
+  if (options.collectProviderSignals !== false) {
+    try {
+      const collected =
+        repository.sourceControlProvider === 'github'
+          ? await collectGitHubSignals(repository, githubOctokitCache)
+          : {
+              ...(await collectNonGitHubCiSignal(repository)),
+              dependabotAlerts: 0,
+              codeqlAlerts: 0,
+              dependencyManifests: 0,
+              conflicts: 0,
+            };
+      providerSignals = {
+        ...collected,
+        partial: collected.partial ?? false,
+      };
+    } catch (error) {
+      console.warn(
+        `[automation-recommendations] Failed to collect provider signals for ${repository.fullName}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      providerSignals = {
+        ciFailures30d: 0,
+        dependabotAlerts: 0,
+        codeqlAlerts: 0,
+        dependencyManifests: 0,
+        conflicts: 0,
+        partial: true,
+      };
+    }
   }
 
   const payload = {
@@ -668,27 +694,9 @@ async function buildRecommendationBatch(
         );
         return existing;
       }
-      const collected = await collectSignals(repository.id, githubOctokitCache);
-      await db
-        .insert(repositoryAutomationSignals)
-        .values({
-          repositoryId: repository.id,
-          signalsVersion: AUTOMATION_SIGNALS_VERSION,
-          payload: collected,
-          partial: collected.partial ?? false,
-        })
-        .onConflictDoUpdate({
-          target: [
-            repositoryAutomationSignals.repositoryId,
-            repositoryAutomationSignals.signalsVersion,
-          ],
-          set: {
-            payload: collected,
-            partial: collected.partial ?? false,
-            collectedAt: new Date(),
-          },
-        });
-      return collected;
+      return collectSignals(repository.id, githubOctokitCache, {
+        collectProviderSignals: false,
+      });
     }),
   );
 

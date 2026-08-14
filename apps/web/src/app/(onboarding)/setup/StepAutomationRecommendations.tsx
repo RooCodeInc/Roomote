@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AUTOMATION_RECOMMENDATION_CATALOG } from '@roomote/types';
 import { ArrowRight, Play, Switch, Button, Spinner } from '@/components/system';
@@ -50,6 +50,43 @@ export function StepAutomationRecommendations({
         }),
     }),
   );
+  const recoveryAttemptedRef = useRef(false);
+  const startRecommendations = useMutation(
+    trpc.automations.startRecommendations.mutationOptions({
+      onSuccess: (batch) => {
+        queryClient.setQueryData(
+          trpc.automations.listRecommendations.queryKey(),
+          batch,
+        );
+      },
+      onError: (error) => {
+        console.error(
+          '[StepAutomationRecommendations] Failed to start recommendation scoring:',
+          error,
+        );
+        onContinue();
+      },
+    }),
+  );
+
+  useEffect(() => {
+    if (
+      recommendations.isPending ||
+      recommendations.data?.status === 'ready' ||
+      recommendations.data?.status === 'failed' ||
+      recoveryAttemptedRef.current
+    ) {
+      return;
+    }
+
+    recoveryAttemptedRef.current = true;
+    startRecommendations.mutate();
+  }, [
+    onContinue,
+    recommendations.data?.status,
+    recommendations.isPending,
+    startRecommendations,
+  ]);
 
   useEffect(() => {
     if (recommendations.data?.status === 'failed') onContinue();

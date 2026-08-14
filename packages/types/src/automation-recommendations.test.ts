@@ -91,7 +91,7 @@ describe('scoreAutomationRecommendations', () => {
     );
   });
 
-  it('does not invent signal-backed recommendations after complete collection', () => {
+  it('always includes the baseline workflows after complete collection', () => {
     const result = scoreAutomationRecommendations({
       ...signals,
       partial: false,
@@ -105,7 +105,34 @@ describe('scoreAutomationRecommendations', () => {
       docs: 0,
     });
 
-    expect(result).toEqual([]);
+    expect(result.map(({ candidate }) => candidate.id)).toEqual(
+      expect.arrayContaining([
+        'built-in.review-code',
+        'built-in.ci-failure-triage',
+        'built-in.resolve-pr-conflicts',
+      ]),
+    );
+  });
+
+  it('keeps baseline workflows in the result when other signals rank higher', () => {
+    const result = scoreAutomationRecommendations({
+      ...signals,
+      mergedPrs30d: 20,
+      openPrs: 20,
+      conflicts: 20,
+      ciFailures30d: 20,
+      dependabotAlerts: 20,
+      codeqlAlerts: 20,
+      dependencyManifests: 20,
+    });
+
+    expect(result.map(({ candidate }) => candidate.id)).toEqual(
+      expect.arrayContaining([
+        'built-in.review-code',
+        'built-in.ci-failure-triage',
+        'built-in.resolve-pr-conflicts',
+      ]),
+    );
   });
 });
 

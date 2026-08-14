@@ -41,6 +41,7 @@ export type AutomationRecommendationCandidate =
       defaultScheduleMode: string;
       environmentPolicy: 'not_required' | 'optional' | 'required';
       category: RecommendationCategory;
+      alwaysRecommend?: boolean;
       scoringRules: RecommendationScoringRule[];
     }
   | {
@@ -57,6 +58,7 @@ export type AutomationRecommendationCandidate =
       };
       environmentPolicy: 'not_required' | 'optional';
       category: RecommendationCategory;
+      alwaysRecommend?: boolean;
       scoringRules: RecommendationScoringRule[];
     };
 
@@ -159,6 +161,7 @@ export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendatio
       defaultScheduleMode: 'off',
       environmentPolicy: 'not_required',
       category: 'quality',
+      alwaysRecommend: true,
       scoringRules: [openPrRule(5), activePrRule(2)],
     },
     {
@@ -189,6 +192,7 @@ export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendatio
       defaultScheduleMode: 'daily',
       environmentPolicy: 'not_required',
       category: 'delivery',
+      alwaysRecommend: true,
       scoringRules: [
         {
           signal: 'conflicts',
@@ -247,6 +251,7 @@ export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendatio
       defaultScheduleMode: 'daily',
       environmentPolicy: 'optional',
       category: 'delivery',
+      alwaysRecommend: true,
       scoringRules: [
         {
           signal: 'ci_failures',
@@ -326,7 +331,10 @@ export function scoreAutomationRecommendations(
       );
       return {
         candidate,
-        score: score || (allowFallbackCandidates ? 1 : 0),
+        score: Math.max(
+          score,
+          candidate.alwaysRecommend || allowFallbackCandidates ? 1 : 0,
+        ),
         explanation:
           explanation ?? fallbackRecommendationExplanation(candidate),
       };
@@ -346,6 +354,28 @@ export function scoreAutomationRecommendations(
     categories.set(recommendation.candidate.category, count + 1);
     selected.push(recommendation);
     if (selected.length === 6) break;
+  }
+
+  for (const recommendation of scored.filter(
+    ({ candidate }) => candidate.alwaysRecommend,
+  )) {
+    if (
+      selected.some(
+        ({ candidate }) => candidate.id === recommendation.candidate.id,
+      )
+    ) {
+      continue;
+    }
+
+    const replacementIndex = [...selected]
+      .map((item, index) => ({ item, index }))
+      .reverse()
+      .find(({ item }) => !item.candidate.alwaysRecommend)?.index;
+    if (replacementIndex !== undefined) {
+      selected.splice(replacementIndex, 1, recommendation);
+    } else {
+      selected.push(recommendation);
+    }
   }
 
   if (selected.length < 3 && allowFallbackCandidates) {
