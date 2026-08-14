@@ -7,9 +7,7 @@ import {
   CHATGPT_FAST_MODE_ENV_VAR_NAME,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   isTaskModelIdDisabled,
-  mergeAmazonBedrockProviderConfig,
-  mergeBedrockMantleOpenAiProviderConfig,
-  mergeBedrockMantleProviderConfig,
+  mergeBedrockProviderConfigs,
   mergeOpenAiCompatibleProviderConfig,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenCodeChatGptFastModeOptions,
@@ -130,23 +128,12 @@ function buildModelBackedOpenCodeConfigContent(
   // Same Bedrock provider registrations the task worker applies: OpenCode's
   // catalog knows neither Mantle endpoint, and the native provider does not
   // read the deployment's bearer token on its own.
-  const providerConfig = mergeAmazonBedrockProviderConfig(
-    mergeBedrockMantleProviderConfig(
-      mergeBedrockMantleOpenAiProviderConfig(
-        mergeOpenAiCompatibleProviderConfig(
-          mergeOpenRouterVariantAliasModels(
-            providerModelConfig,
-            variantAliases,
-          ),
-          env,
-          configuredModelIds,
-          visionModel,
-        ),
-        env,
-        configuredModelIds,
-      ),
+  const providerConfig = mergeBedrockProviderConfigs(
+    mergeOpenAiCompatibleProviderConfig(
+      mergeOpenRouterVariantAliasModels(providerModelConfig, variantAliases),
       env,
       configuredModelIds,
+      visionModel,
     ),
     env,
     configuredModelIds,
@@ -328,16 +315,8 @@ function mergeBedrockRegistrationsIntoConfigContent(
       !Array.isArray(config.provider)
         ? (config.provider as Record<string, unknown>)
         : {};
-    const provider = mergeAmazonBedrockProviderConfig(
-      mergeBedrockMantleProviderConfig(
-        mergeBedrockMantleOpenAiProviderConfig(
-          existingProvider,
-          env,
-          roleModelIds,
-        ),
-        env,
-        roleModelIds,
-      ),
+    const provider = mergeBedrockProviderConfigs(
+      existingProvider,
       env,
       roleModelIds,
     );
