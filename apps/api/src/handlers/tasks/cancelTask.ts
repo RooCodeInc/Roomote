@@ -15,6 +15,7 @@ import {
   isExitedRunStatus,
 } from '@roomote/types';
 import { captureTaskSettled } from '@roomote/telemetry/server';
+import { destroyCanceledTaskRunSandbox } from '@roomote/sdk/server';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
@@ -88,6 +89,14 @@ export async function cancelTask(
 
     if (canceledRun) {
       void captureTaskSettled(canceledRun.id, 'canceled');
+
+      // This cancel writes the terminal state directly (it never reaches
+      // finishRun), so tear down any attached sandbox here or it keeps
+      // running against the provider's capacity until its TTL.
+      await destroyCanceledTaskRunSandbox({
+        runId: canceledRun.id,
+        logPrefix: 'cancelTask',
+      });
     }
 
     return c.json({ success: true });

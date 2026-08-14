@@ -33,6 +33,7 @@ import {
   tasks,
 } from '@roomote/db/server';
 import { SlackNotifier } from '@roomote/slack';
+import { destroyCanceledTaskRunSandbox } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
 import { Env, getArtifactById, getRepositories } from '@/lib/server';
@@ -562,6 +563,14 @@ export async function cancelTaskRunCommand(
 
       if (canceledRun) {
         void captureTaskSettled(canceledRun.id, 'canceled');
+
+        // This cancel writes the terminal state directly (it never reaches
+        // finishRun), so tear down any attached sandbox here or it keeps
+        // running against the provider's capacity until its TTL.
+        await destroyCanceledTaskRunSandbox({
+          runId: canceledRun.id,
+          logPrefix: 'cancelTaskRunCommand',
+        });
       }
     }
 

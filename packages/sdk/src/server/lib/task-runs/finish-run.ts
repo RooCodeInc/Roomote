@@ -65,6 +65,7 @@ import {
   readConflictResolutionSummary,
 } from './conflict-resolution-comments';
 import { cleanupSandboxOidcTargetsForTaskRun } from '../sandbox-oidc';
+import { destroyCanceledTaskRunSandbox } from './destroy-canceled-run-sandbox';
 import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
 import { refreshTaskTitleOnCompletion } from './record-task-message-envelope';
 import { getRedis } from '@roomote/redis';
@@ -473,6 +474,15 @@ export const finishRun = async ({
         }`,
       );
     }
+  }
+
+  // Canceled runs never re-enter the sleep/snapshot pipeline, so an attached
+  // machine must be destroyed here or it runs until the provider TTL while
+  // counting against sandbox capacity. Last on purpose: a worker-driven cancel
+  // awaits this RPC from inside the sandbox being destroyed, so every other
+  // side effect completes first. Best-effort — never throws.
+  if (status === RunStatus.Canceled) {
+    await destroyCanceledTaskRunSandbox({ runId: id, logPrefix: 'finishRun' });
   }
 };
 

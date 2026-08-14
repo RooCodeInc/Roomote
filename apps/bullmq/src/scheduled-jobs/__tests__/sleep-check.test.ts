@@ -10,6 +10,9 @@ const {
   mockGetInstanceStatus,
   mockCreateSnapshot,
   mockFinishRun,
+  mockClaimMachineDestroy,
+  mockClaimRelease,
+  mockClaimFinish,
   mockRecordComputeProviderUsage,
   mockRecordMutation,
   mockCreateComputeProviderMutationEventRecorder,
@@ -74,6 +77,9 @@ const {
     mockGetInstanceStatus: vi.fn() as AnyMock,
     mockCreateSnapshot: vi.fn() as AnyMock,
     mockFinishRun: vi.fn() as AnyMock,
+    mockClaimMachineDestroy: vi.fn() as AnyMock,
+    mockClaimRelease: vi.fn() as AnyMock,
+    mockClaimFinish: vi.fn() as AnyMock,
     mockRecordComputeProviderUsage: vi.fn() as AnyMock,
     mockRecordMutation: vi.fn() as AnyMock,
     mockCreateComputeProviderMutationEventRecorder: vi.fn() as AnyMock,
@@ -126,6 +132,7 @@ vi.mock('@roomote/compute-providers', () => ({
 vi.mock('@roomote/sdk/server', () => ({
   createSnapshot: mockCreateSnapshot,
   finishRun: mockFinishRun,
+  claimMachineDestroy: mockClaimMachineDestroy,
   recordComputeProviderUsage: mockRecordComputeProviderUsage,
 }));
 
@@ -361,6 +368,12 @@ describe('sleepCheckJob', () => {
     });
     returningFn.mockResolvedValue([]);
     mockFinishRun.mockResolvedValue(undefined);
+    mockClaimMachineDestroy.mockImplementation(async () => ({
+      outcome: 'claimed',
+      release: mockClaimRelease,
+      finish: mockClaimFinish,
+    }));
+    mockClaimRelease.mockResolvedValue(undefined);
     // No stop request persisted on the row unless a test opts in.
     mockDbQueryTaskRunsFindFirst.mockResolvedValue(undefined);
   });
@@ -975,6 +988,66 @@ describe('sleepCheckJob', () => {
       }),
     });
     expect(captureBullMqMessageMock).not.toHaveBeenCalled();
+  });
+
+  it('skips the provider delete when another destroyer holds the teardown claim', async () => {
+    const mockJob = {
+      id: 99,
+      machineId: 'sb-2',
+      payloadKind: TaskPayloadKind.GithubPrReview,
+      status: RunStatus.Running,
+      taskPhase: 'waiting_for_prompt',
+      vendor: 'modal',
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+    };
+
+    mockJobQueries({ dueJobs: [mockJob] });
+    mockGetInstanceStatus.mockResolvedValue({
+      status: 'running',
+      timeoutRemainingMs: 5 * 60 * 60 * 1_000,
+    });
+    returningFn.mockResolvedValue([{ id: 99 }]);
+    // A concurrent cancel finalization already owns the teardown.
+    mockClaimMachineDestroy.mockResolvedValue({ outcome: 'held' });
+
+    await sleepCheckJob();
+
+    expect(mockDestroyInstance).not.toHaveBeenCalled();
+    expect(mockRecordComputeProviderUsage).not.toHaveBeenCalled();
+    // The run still finalizes; only the duplicate provider delete is skipped.
+    expect(setFn).toHaveBeenCalledWith(
+      expect.objectContaining({ status: RunStatus.Completed }),
+    );
+  });
+
+  it('releases the teardown claim when the provider delete fails', async () => {
+    const mockJob = {
+      id: 99,
+      machineId: 'sb-2',
+      payloadKind: TaskPayloadKind.GithubPrReview,
+      status: RunStatus.Running,
+      taskPhase: 'waiting_for_prompt',
+      vendor: 'modal',
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+    };
+
+    mockJobQueries({ dueJobs: [mockJob] });
+    mockGetInstanceStatus.mockResolvedValue({
+      status: 'running',
+      timeoutRemainingMs: 5 * 60 * 60 * 1_000,
+    });
+    returningFn.mockResolvedValue([{ id: 99 }]);
+    mockDestroyInstance.mockRejectedValue(new Error('provider down'));
+
+    await sleepCheckJob().catch(() => {});
+
+    expect(mockClaimRelease).toHaveBeenCalled();
+    expect(mockClaimFinish).not.toHaveBeenCalled();
+    expect(mockRecordComputeProviderUsage).not.toHaveBeenCalled();
   });
 
   it('reports provider-timeout backstop shutdowns to Sentry', async () => {

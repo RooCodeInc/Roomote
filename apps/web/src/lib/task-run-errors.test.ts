@@ -25,6 +25,22 @@ stderr -> fatal: 'origin/main' is not a commit and a branch 'main' cannot be cre
     );
   });
 
+  it('explains the compute broker sandbox capacity rejection', () => {
+    expect(
+      getTaskRunErrorDisplayMessage('The tenant sandbox limit was reached.'),
+    ).toBe(
+      "Roomote couldn't start a new sandbox because this deployment is already running its maximum number of concurrent sandboxes. Wait for an active task to finish, or stop one you no longer need, then try again.",
+    );
+  });
+
+  it('explains the sandbox capacity rejection when only the broker code is present', () => {
+    expect(
+      getTaskRunErrorDisplayMessage(
+        'Broker request POST /v1/sandboxes failed with HTTP 429 (sandbox_limit_reached)',
+      ),
+    ).toContain('maximum number of concurrent sandboxes');
+  });
+
   it('explains missing Docker worker images instead of only showing docker run', () => {
     const error = `Failed to run docker run.
 

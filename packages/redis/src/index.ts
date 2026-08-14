@@ -17,6 +17,13 @@ export const REDIS_KEYS = {
    * `${prefix}:${scope}:${channelId}`.
    */
   SLACK_CHANNEL_INFO: 'slack:channel_info',
+  /**
+   * Teardown claim for one provider machine keyed as
+   * `${prefix}:${provider}:${machineId}`. Serializes concurrent destroyers
+   * (cancel finalization vs sleep-check) so only one issues the provider
+   * delete.
+   */
+  MACHINE_DESTROY_CLAIM: 'compute:machine-destroy-claim',
 } as const;
 
 /** Positive-cache TTL for successfully fetched GitHub release notes. */

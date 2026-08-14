@@ -274,6 +274,13 @@ vi.mock('../notify-source-run-on-settle', () => ({
     mockNotifySourceRunOnSettle(...args),
 }));
 
+const mockDestroyCanceledTaskRunSandbox = vi.fn().mockResolvedValue('skipped');
+
+vi.mock('../destroy-canceled-run-sandbox', () => ({
+  destroyCanceledTaskRunSandbox: (...args: unknown[]) =>
+    mockDestroyCanceledTaskRunSandbox(...args),
+}));
+
 import { finishRun } from '../finish-run';
 import { createTaskRunGitHubToken } from '@roomote/github';
 import { enqueueTask } from '@roomote/cloud-agents/server';
@@ -447,6 +454,53 @@ describe('finishRun', () => {
         outcome,
         errorCode,
       );
+    },
+  );
+
+  it('tears down the sandbox when a run finishes as canceled', async () => {
+    mockFindFirstRun.mockResolvedValue(
+      makeRun({ vendor: 'roomote', machineId: 'sb-42' }),
+    );
+
+    await finishRun({ id: 1, status: RunStatus.Canceled });
+
+    expect(mockDestroyCanceledTaskRunSandbox).toHaveBeenCalledWith({
+      runId: 1,
+      logPrefix: 'finishRun',
+    });
+  });
+
+  it('tears down the sandbox when a stop-requested failure is normalized to canceled', async () => {
+    mockFindFirstRun.mockResolvedValue(
+      makeRun({
+        vendor: 'roomote',
+        machineId: 'sb-42',
+        cancelRequestedAt: new Date(),
+      }),
+    );
+
+    await finishRun({
+      id: 1,
+      status: RunStatus.Failed,
+      error: 'sandbox died mid-cancel',
+    });
+
+    expect(mockDestroyCanceledTaskRunSandbox).toHaveBeenCalledWith({
+      runId: 1,
+      logPrefix: 'finishRun',
+    });
+  });
+
+  it.each([RunStatus.Completed, RunStatus.Failed, RunStatus.Idle] as const)(
+    'does not tear down the sandbox when a run finishes as %s',
+    async (status) => {
+      mockFindFirstRun.mockResolvedValue(
+        makeRun({ vendor: 'roomote', machineId: 'sb-42' }),
+      );
+
+      await finishRun({ id: 1, status });
+
+      expect(mockDestroyCanceledTaskRunSandbox).not.toHaveBeenCalled();
     },
   );
 

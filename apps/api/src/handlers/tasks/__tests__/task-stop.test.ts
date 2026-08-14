@@ -14,6 +14,7 @@ const {
   mockTxReturning,
   mockMarkTaskStartParallelCountEndedAt,
   mockCancelTaskRunDirect,
+  mockDestroyCanceledTaskRunSandbox,
 } = vi.hoisted(() => {
   const mockTxReturning = vi.fn();
   const mockTxUpdateWhere = vi.fn(() => ({ returning: mockTxReturning }));
@@ -36,11 +37,13 @@ const {
     mockTxReturning,
     mockMarkTaskStartParallelCountEndedAt: vi.fn(),
     mockCancelTaskRunDirect: vi.fn(),
+    mockDestroyCanceledTaskRunSandbox: vi.fn(() => Promise.resolve('skipped')),
   };
 });
 
 vi.mock('@roomote/sdk/server', () => ({
   withSandboxServerRpcClient: mockWithSandboxServerRpcClient,
+  destroyCanceledTaskRunSandbox: mockDestroyCanceledTaskRunSandbox,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -249,5 +252,11 @@ describe('stopTaskRun', () => {
     // parallel-count close live in the shared cancelTaskRunDirect helper,
     // covered by its real-DB tests in packages/db.
     expect(mockCancelTaskRunDirect).toHaveBeenCalledWith({ runId: 7 });
+    // A spawn racing this cancel may have stamped a machine already; the
+    // teardown helper decides whether anything actually needs destroying.
+    expect(mockDestroyCanceledTaskRunSandbox).toHaveBeenCalledWith({
+      runId: 7,
+      logPrefix: 'stopTaskRun',
+    });
   });
 });
