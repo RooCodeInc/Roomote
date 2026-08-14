@@ -524,6 +524,19 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
+// Keywords that already constrain an array's element shape. Injecting a
+// permissive `items` alongside any of them would change their meaning:
+// `unevaluatedItems: false` becomes a no-op once an `items` keyword
+// evaluates every element, and a bare `prefixItems`/`contains` schema would
+// gain an element type its author never declared.
+const ARRAY_ITEM_SHAPE_KEYWORDS = [
+  'items',
+  'prefixItems',
+  'additionalItems',
+  'unevaluatedItems',
+  'contains',
+] as const;
+
 function withProviderSafeArrayItems(
   schema: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -531,11 +544,13 @@ function withProviderSafeArrayItems(
     return schema;
   }
 
-  // Only fill in `items` when the upstream declared nothing at all. A
-  // declared shape of any form (object schema, boolean, draft-04 tuple
-  // array, or an explicit empty object) is the server's contract and must
-  // pass through untouched.
-  return 'items' in schema ? schema : { ...schema, items: { type: 'string' } };
+  // Only fill in `items` when the upstream declared no item constraint at
+  // all. A declared shape of any form (object schema, boolean, draft-04
+  // tuple array, an explicit empty object, or any sibling item-evaluating
+  // keyword) is the server's contract and must pass through untouched.
+  return ARRAY_ITEM_SHAPE_KEYWORDS.some((keyword) => keyword in schema)
+    ? schema
+    : { ...schema, items: { type: 'string' } };
 }
 
 function normalizeToolSchemaForStrictProviders(

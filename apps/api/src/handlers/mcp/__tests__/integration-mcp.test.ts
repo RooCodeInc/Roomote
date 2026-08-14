@@ -706,6 +706,12 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
                       items: [{ type: 'number' }, { type: 'number' }],
                       additionalItems: false,
                     },
+                    // `unevaluatedItems: false` alone means "empty array
+                    // only"; injecting `items` would silently void it.
+                    empty_only: {
+                      type: ['array', 'null'],
+                      unevaluatedItems: false,
+                    },
                   },
                 },
               },
@@ -760,6 +766,9 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
         },
         { type: 'null' },
       ],
+    });
+    expect(properties.empty_only).toEqual({
+      anyOf: [{ type: 'array', unevaluatedItems: false }, { type: 'null' }],
     });
   });
 
