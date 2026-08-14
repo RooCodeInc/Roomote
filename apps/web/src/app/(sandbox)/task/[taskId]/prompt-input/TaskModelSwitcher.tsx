@@ -24,6 +24,7 @@ import {
   Popover,
   PopoverContent,
   PopoverTrigger,
+  RotateCcw,
 } from '@/components/system';
 import { ModelSelect } from '@/components/tasks/ModelSelect';
 import { ReasoningEffortSelect } from '@/components/tasks/ReasoningEffortSelect';
@@ -120,9 +121,7 @@ export function TaskModelSwitcher({
       }),
     });
 
-  // Success is silent: the picker shows the new value and the popover's
-  // "Applies from the next message" hint carries the semantics. Only
-  // failures interrupt.
+  // Success is silent: the picker shows the new value. Only failures interrupt.
   const updateModelSelection = useMutation(
     trpc.sandboxSession.updateTaskModelSelection.mutationOptions({
       onSuccess: () => {
@@ -266,11 +265,20 @@ export function TaskModelSwitcher({
           </Button>
         </PopoverTrigger>
       </BasicTooltip>
-      <PopoverContent align="start" className="w-96 p-3">
+      <PopoverContent align="start" className="w-96 p-3 md:w-xl">
         <div className="space-y-3">
           <p className="text-sm font-medium">Models for this task</p>
 
-          <div className="flex items-center gap-2">
+          <div
+            className={`grid items-center gap-2 ${
+              showAllRoles
+                ? 'grid-cols-[6rem_minmax(0,1fr)_6rem]'
+                : 'grid-cols-[minmax(0,1fr)_6rem]'
+            }`}
+          >
+            {showAllRoles && (
+              <span className="text-muted-foreground text-xs">Coding</span>
+            )}
             <ModelSelect
               value={effectiveCodingModel ?? undefined}
               onValueChange={(model) => {
@@ -284,7 +292,7 @@ export function TaskModelSwitcher({
                 });
               }}
               disabled={disabled}
-              className="min-w-0 flex-1"
+              className="min-w-0 w-full"
               ariaLabel="Coding model"
             />
             <ReasoningEffortSelect
@@ -302,26 +310,14 @@ export function TaskModelSwitcher({
               }}
               disabled={disabled}
               ariaLabel="Coding reasoning level"
-              className="w-28 shrink-0"
+              className="w-full"
               size="sm"
             />
           </div>
 
           <Collapsible open={showAllRoles} onOpenChange={setShowAllRoles}>
-            <CollapsibleTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground h-7 justify-start gap-1 px-0 text-xs hover:bg-transparent has-[>svg]:px-0"
-              >
-                <ChevronDown
-                  className={`size-3 transition-transform ${showAllRoles ? '' : '-rotate-90'}`}
-                />
-                All roles
-              </Button>
-            </CollapsibleTrigger>
             <CollapsibleContent>
-              <div className="mt-2 space-y-2">
+              <div className="mb-2 space-y-2">
                 {OVERRIDE_ROLE_ROWS.map(({ role, label }) => {
                   const selection = resolveRoleSelection(role);
                   const roleDefault = roleDefaults?.roles[role];
@@ -333,8 +329,11 @@ export function TaskModelSwitcher({
                     selection.reasoningEffort !== null;
 
                   return (
-                    <div key={role} className="flex items-center gap-2">
-                      <span className="text-muted-foreground flex w-24 shrink-0 items-center gap-1.5 text-xs">
+                    <div
+                      key={role}
+                      className="grid grid-cols-[6rem_minmax(0,1fr)_6rem] items-center gap-2"
+                    >
+                      <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
                         {label}
                         {isOverridden && (
                           <span
@@ -352,9 +351,9 @@ export function TaskModelSwitcher({
                           })
                         }
                         disabled={disabled}
-                        className="min-w-0 flex-1"
+                        className="min-w-0 w-full"
                         ariaLabel={`${label} model`}
-                        emptyOptionLabel={`Default (${defaultModelName})`}
+                        emptyOptionLabel={`${defaultModelName} (Default)`}
                       />
                       <ReasoningEffortSelect
                         value={selection.reasoningEffort}
@@ -374,7 +373,7 @@ export function TaskModelSwitcher({
                         }}
                         disabled={disabled}
                         ariaLabel={`${label} reasoning level`}
-                        className="w-24 shrink-0"
+                        className="w-full"
                         size="sm"
                       />
                     </div>
@@ -382,11 +381,23 @@ export function TaskModelSwitcher({
                 })}
               </div>
             </CollapsibleContent>
+            <CollapsibleTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground h-7 justify-start gap-1 px-0 text-xs hover:bg-transparent has-[>svg]:px-0"
+              >
+                <ChevronDown
+                  className={`size-3 transition-transform ${showAllRoles ? '' : '-rotate-90'}`}
+                />
+                All roles
+              </Button>
+            </CollapsibleTrigger>
           </Collapsible>
 
-          <div className="border-border flex items-center justify-between border-t pt-2">
+          <div className="flex items-center justify-between">
             <span className="text-muted-foreground text-xs">
-              Applies from the next message
+              You can also just say &quot;Switch to Model X and...&quot;
             </span>
             <Button
               variant="ghost"
@@ -395,7 +406,8 @@ export function TaskModelSwitcher({
               onClick={() => void handleReset()}
               disabled={disabled || resetting}
             >
-              {resetting ? 'Resetting…' : 'Reset to defaults'}
+              <RotateCcw />
+              Reset
             </Button>
           </div>
         </div>
