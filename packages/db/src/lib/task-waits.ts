@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 
 import {
+  type ComputeProvider,
   MAX_TASK_WAIT_MS,
   MIN_TASK_WAIT_MS,
   RunStatus,
@@ -66,6 +67,29 @@ export async function findTaskWaitsNeedingWake(input: {
   return rows.flatMap((row) =>
     row.waitUntil ? [{ id: row.id, waitUntil: row.waitUntil }] : [],
   );
+}
+
+export async function findProtectedTaskWaitSnapshotHandles(input: {
+  provider: ComputeProvider;
+}): Promise<string[]> {
+  const resumeRuns = alias(taskRuns, 'protected_task_wait_resume_runs');
+  const rows = await db
+    .select({ handle: taskRuns.snapshotId })
+    .from(taskRuns)
+    .leftJoin(resumeRuns, eq(resumeRuns.id, taskRuns.waitResumeRunId))
+    .where(
+      and(
+        eq(taskRuns.vendor, input.provider),
+        isNotNull(taskRuns.snapshotId),
+        isNotNull(taskRuns.waitUntil),
+        or(
+          and(isNull(taskRuns.waitResumedAt), isNull(taskRuns.waitResumeRunId)),
+          eq(resumeRuns.status, RunStatus.Canceled),
+        ),
+      ),
+    );
+
+  return rows.flatMap(({ handle }) => (handle ? [handle] : []));
 }
 
 export async function scheduleTaskWait(input: {

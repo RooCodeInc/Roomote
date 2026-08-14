@@ -11,6 +11,7 @@ import {
 } from './task-goals';
 import {
   clearTaskWaitSchedule,
+  findProtectedTaskWaitSnapshotHandles,
   findTaskWaitsNeedingWake,
   releaseTaskWaitResume,
   scheduleTaskWait,
@@ -247,6 +248,9 @@ describe('task waits', () => {
         expect.objectContaining({ id: sourceRun.id, waitUntil }),
       ]),
     );
+    await expect(
+      findProtectedTaskWaitSnapshotHandles({ provider: 'docker' }),
+    ).resolves.toContain('standby-late-cancel');
   });
 
   it('rejects unsupported providers and short waits', async () => {

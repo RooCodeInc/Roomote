@@ -3,9 +3,9 @@ import {
   db,
   desc,
   eq,
+  findProtectedTaskWaitSnapshotHandles,
   inArray,
   isNotNull,
-  isNull,
   or,
   resolveComputeProviderEnvValues,
   taskRuns,
@@ -165,23 +165,14 @@ async function getProtectedHandles(provider: StandbyProvider) {
       ),
     );
 
-  const pendingWaitRows = await db
-    .select({ handle: taskRuns.snapshotId })
-    .from(taskRuns)
-    .where(
-      and(
-        eq(taskRuns.vendor, provider),
-        isNotNull(taskRuns.snapshotId),
-        isNotNull(taskRuns.waitUntil),
-        isNull(taskRuns.waitResumedAt),
-        isNull(taskRuns.waitResumeRunId),
-      ),
-    );
+  const pendingWaitHandles = await findProtectedTaskWaitSnapshotHandles({
+    provider,
+  });
 
   return new Set(
-    [...activeResumeRows, ...pendingWaitRows].flatMap(({ handle }) =>
-      handle === null ? [] : [handle],
-    ),
+    activeResumeRows
+      .flatMap(({ handle }) => (handle === null ? [] : [handle]))
+      .concat(pendingWaitHandles),
   );
 }
 

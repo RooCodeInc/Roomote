@@ -6,6 +6,7 @@ const {
   mockEnterStandby,
   mockDestroyInstance,
   mockResolveComputeProviderEnvValues,
+  mockFindProtectedTaskWaitSnapshotHandles,
   selectResults,
   selectFn,
   updateFn,
@@ -60,6 +61,7 @@ const {
     mockEnterStandby: vi.fn() as AnyMock,
     mockDestroyInstance: vi.fn() as AnyMock,
     mockResolveComputeProviderEnvValues: vi.fn() as AnyMock,
+    mockFindProtectedTaskWaitSnapshotHandles: vi.fn() as AnyMock,
     selectResults,
     selectFn,
     updateFn,
@@ -95,6 +97,8 @@ vi.mock('@roomote/db/server', () => ({
   isNotNull: vi.fn(),
   isNull: vi.fn(),
   or: vi.fn(),
+  findProtectedTaskWaitSnapshotHandles:
+    mockFindProtectedTaskWaitSnapshotHandles,
   resolveComputeProviderEnvValues: mockResolveComputeProviderEnvValues,
 }));
 
@@ -145,6 +149,7 @@ describe('standbyRetentionJob orphan re-suspend', () => {
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     mockResolveComputeProviderEnvValues.mockResolvedValue({});
+    mockFindProtectedTaskWaitSnapshotHandles.mockResolvedValue([]);
     mockCreateComputeProviderClient.mockReturnValue({
       destroyInstance: mockDestroyInstance,
       getInstanceStatus: mockGetInstanceStatus,
@@ -248,6 +253,25 @@ describe('standbyRetentionJob orphan re-suspend', () => {
       ],
       azureReSuspendProtected: [{ handle: 'sb-1' }],
     });
+
+    await standbyRetentionJob();
+
+    expect(mockEnterStandby).not.toHaveBeenCalled();
+  });
+
+  it('skips handles whose claimed wait child was canceled', async () => {
+    queueSelectResults({
+      azureReSuspendCandidates: [
+        {
+          runId: 32,
+          taskId: 'task-1',
+          provider: 'azure',
+          handle: 'sb-1',
+          createdAt: new Date(),
+        },
+      ],
+    });
+    mockFindProtectedTaskWaitSnapshotHandles.mockResolvedValue(['sb-1']);
 
     await standbyRetentionJob();
 
