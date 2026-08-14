@@ -378,16 +378,23 @@ export const refreshSnapshotsJob = async () => {
     const errors: Array<Record<string, unknown>> = [];
     // The controller dequeues each run within seconds of its enqueue, so
     // spacing the enqueues here is what spaces the sandbox creations at the
-    // broker. Skipped candidates never sleep; the delay only follows an
-    // actual launch with candidates still left to process.
-    const paceAfterLaunch = async (hasRemainingCandidates: boolean) => {
-      if (hasRemainingCandidates) {
-        await sleep(SNAPSHOT_REFRESH_LAUNCH_SPACING_MS);
+    // broker. The sleep happens lazily, immediately before the NEXT launch:
+    // skipped candidates never sleep, a trailing launch never sleeps, and no
+    // sleep ever runs inside the snapshot lock.
+    let lastLaunchAtMs: number | null = null;
+    const paceBeforeNextLaunch = async () => {
+      if (lastLaunchAtMs !== null) {
+        const elapsedMs = Date.now() - lastLaunchAtMs;
+
+        if (elapsedMs < SNAPSHOT_REFRESH_LAUNCH_SPACING_MS) {
+          await sleep(SNAPSHOT_REFRESH_LAUNCH_SPACING_MS - elapsedMs);
+        }
       }
     };
-    for (const [candidateIndex, candidate] of refreshCandidates.entries()) {
-      const hasRemainingCandidates =
-        candidateIndex < refreshCandidates.length - 1;
+    const recordLaunch = () => {
+      lastLaunchAtMs = Date.now();
+    };
+    for (const candidate of refreshCandidates) {
       const snapshotAgeHours = getSnapshotAgeHours(
         candidate.snapshotCreatedAt,
         startedAt,
@@ -429,6 +436,10 @@ export const refreshSnapshotsJob = async () => {
           if (await hasRecentPendingSnapshotClaim(candidate, new Date())) {
             continue;
           }
+
+          // The skip checks passed, so a launch is imminent: pace it before
+          // claiming, keeping the claim→enqueue window tight.
+          await paceBeforeNextLaunch();
 
           pendingSnapshotClaim =
             await claimPendingEnvironmentSnapshotForAttachment(db, {
@@ -488,8 +499,19 @@ export const refreshSnapshotsJob = async () => {
           });
 
           refreshed++;
-          await paceAfterLaunch(hasRemainingCandidates);
+          recordLaunch();
           continue;
+        }
+
+        // Lock-free pre-check mirroring the locked skip conditions, used only
+        // to decide whether to pace — sleeping must never happen inside the
+        // snapshot lock, and a candidate about to be skipped must not sleep.
+        // The locked re-check below stays authoritative.
+        if (
+          !(await findActiveSnapshotRefreshJob(candidate)) &&
+          !(await hasRecentPendingSnapshotClaim(candidate, new Date()))
+        ) {
+          await paceBeforeNextLaunch();
         }
 
         const lockResult = await withEnvironmentSnapshotLock(
@@ -595,7 +617,7 @@ export const refreshSnapshotsJob = async () => {
         });
 
         refreshed++;
-        await paceAfterLaunch(hasRemainingCandidates);
+        recordLaunch();
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
 

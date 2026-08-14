@@ -148,6 +148,27 @@ describe('refreshSnapshotsJob launch pacing', () => {
     expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
   });
 
+  it('does not sleep after a launch when every remaining candidate is skipped', async () => {
+    mockEnvironmentsFindMany.mockResolvedValue([
+      makeEnvironment('env-1'),
+      makeEnvironment('env-2'),
+      makeEnvironment('env-3'),
+    ]);
+    // env-1 launches; env-2 and env-3 already hold a fresh pending claim, so
+    // their skip check fires before any pacing sleep.
+    mockEnvironmentSnapshotsFindFirst
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValue({
+        snapshotStatus: 'pending',
+        updatedAt: new Date(),
+      });
+
+    // Real timers: a trailing pacing sleep would blow the test timeout.
+    await refreshSnapshotsJob();
+
+    expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
+  });
+
   it('does not sleep for skipped candidates', async () => {
     mockEnvironmentsFindMany.mockResolvedValue([
       makeEnvironment('env-1'),
