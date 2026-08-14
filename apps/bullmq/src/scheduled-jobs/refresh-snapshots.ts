@@ -437,17 +437,21 @@ export const refreshSnapshotsJob = async () => {
             continue;
           }
 
-          // The skip checks passed, so a launch is imminent: pace it before
-          // claiming, keeping the claim→enqueue window tight.
-          await paceBeforeNextLaunch();
-
+          // Claim first, pace after: the pending claim is the reservation
+          // that keeps concurrent claimants (the admin snapshot command, a
+          // competing cycle) off this environment during the wait, so a lost
+          // claim is always a skip that never slept. The claim is stamped
+          // with the current time rather than job start — pacing stretches
+          // this job over minutes, and a claim carrying an old timestamp
+          // would look stale and be stolen mid-wait.
+          const claimedAt = new Date();
           pendingSnapshotClaim =
             await claimPendingEnvironmentSnapshotForAttachment(db, {
               environmentId: candidate.environmentId,
               provider: candidate.provider,
-              updatedAt: startedAt,
+              updatedAt: claimedAt,
               allowStalePendingBefore: new Date(
-                startedAt.getTime() - PENDING_SNAPSHOT_RECOVERY_GRACE_MS,
+                claimedAt.getTime() - PENDING_SNAPSHOT_RECOVERY_GRACE_MS,
               ),
               requireMissingSnapshot: true,
             });
@@ -455,6 +459,8 @@ export const refreshSnapshotsJob = async () => {
           if (!pendingSnapshotClaim) {
             continue;
           }
+
+          await paceBeforeNextLaunch();
 
           logRefreshSnapshots('Queueing snapshot refresh job', {
             environmentId: candidate.environmentId,
@@ -506,7 +512,11 @@ export const refreshSnapshotsJob = async () => {
         // Lock-free pre-check mirroring the locked skip conditions, used only
         // to decide whether to pace — sleeping must never happen inside the
         // snapshot lock, and a candidate about to be skipped must not sleep.
-        // The locked re-check below stays authoritative.
+        // The locked re-check below stays authoritative. Unlike the missing-
+        // snapshot branch there is no claim primitive to reserve a ready-row
+        // refresh outside the lock, so a state change during the wait can at
+        // worst cost this one delay before the authoritative skip — it can
+        // never double-launch.
         if (
           !(await findActiveSnapshotRefreshJob(candidate)) &&
           !(await hasRecentPendingSnapshotClaim(candidate, new Date()))

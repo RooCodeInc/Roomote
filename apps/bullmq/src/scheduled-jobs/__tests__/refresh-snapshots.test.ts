@@ -125,6 +125,12 @@ describe('refreshSnapshotsJob launch pacing', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
 
+    // The second candidate reserves its pending claim BEFORE the pacing
+    // sleep, so concurrent claimants are locked out during the wait.
+    expect(
+      mockClaimPendingEnvironmentSnapshotForAttachment,
+    ).toHaveBeenCalledTimes(2);
+
     // The second launch waits out the full spacing interval.
     await vi.advanceTimersByTimeAsync(SNAPSHOT_REFRESH_LAUNCH_SPACING_MS - 1);
     expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
@@ -164,6 +170,28 @@ describe('refreshSnapshotsJob launch pacing', () => {
       });
 
     // Real timers: a trailing pacing sleep would blow the test timeout.
+    await refreshSnapshotsJob();
+
+    expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not sleep for candidates whose claim was taken by a concurrent claimant', async () => {
+    mockEnvironmentsFindMany.mockResolvedValue([
+      makeEnvironment('env-1'),
+      makeEnvironment('env-2'),
+      makeEnvironment('env-3'),
+    ]);
+    // env-1 claims and launches; env-2 and env-3 lose their claim (e.g. the
+    // admin snapshot command got there first). The claim precedes pacing, so
+    // the lost claims skip without ever sleeping.
+    mockClaimPendingEnvironmentSnapshotForAttachment
+      .mockImplementationOnce(
+        async (_db: unknown, params: { environmentId: string }) =>
+          makeClaim(params.environmentId),
+      )
+      .mockResolvedValue(null);
+
+    // Real timers: a pacing sleep for a lost claim would blow the test timeout.
     await refreshSnapshotsJob();
 
     expect(mockEnqueueTask).toHaveBeenCalledTimes(1);
