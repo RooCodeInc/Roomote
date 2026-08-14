@@ -1,4 +1,5 @@
 import * as GitHub from '@roomote/github';
+import { createHash } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import { resolveEnvironmentSourceControlProvider } from '@/lib/server/source-control-provider';
@@ -12,6 +13,7 @@ import {
   db,
   deploymentSettings,
   environments,
+  pullRequestFacts,
   environmentVariables,
   taskRuns,
   workItems,
@@ -39,6 +41,10 @@ import {
   isGitHubCopilotSubscriptionConnected,
   isXaiSubscriptionConnected,
   type DatabaseOrTransaction,
+  upsertAutomation,
+  createCustomAutomation,
+  updateCustomAutomation,
+  getCustomAutomationById,
 } from '@roomote/db/server';
 import {
   createTeamsCommunicationProviderFromRuntimeCredentials,
@@ -106,6 +112,11 @@ import {
   type SourceControlProvider,
   type TaskModelSettings,
   WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE,
+  AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
+  AUTOMATION_RECOMMENDATION_CATALOG,
+  scoreAutomationRecommendations,
+  type AutomationRecommendationBatch,
+  type MergedAutomationRecommendationSignals,
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
@@ -177,6 +188,8 @@ import {
 } from '../task-models/auto-add-models';
 import { validateSetupModelProviderCredentials } from '../task-models/provider-validation';
 import { triggerTaskSuggestionsCommand } from '../task-suggestions';
+import { triggerAutomationCommand } from '../automations/trigger-agent';
+import { triggerCustomAutomationCommand } from '../automations/custom-automations';
 
 type PersistedSetupNewState = ReturnType<typeof createEmptySetupNewState>;
 type PersistedRuntimeModelConfig = DeploymentModelConfig;
@@ -244,6 +257,86 @@ async function savePersistedSetupNewState(
     });
 
   return setupNewState;
+}
+
+function buildRecommendationFingerprint(
+  repositoryIds: string[],
+  provider: SourceControlProvider | null,
+): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        repositoryIds: [...repositoryIds].sort(),
+        provider,
+        catalogVersion: AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
+      }),
+    )
+    .digest('hex');
+}
+
+async function buildRecommendationBatch(
+  repositoryIds: string[],
+  repositories: SelectedRepositorySummary[],
+  executor: DatabaseOrTransaction,
+): Promise<AutomationRecommendationBatch> {
+  const facts = await executor
+    .select({
+      repositoryId: pullRequestFacts.repositoryId,
+      state: pullRequestFacts.state,
+      mergedAtRemote: pullRequestFacts.mergedAtRemote,
+    })
+    .from(pullRequestFacts)
+    .where(inArray(pullRequestFacts.repositoryId, repositoryIds));
+  const since = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const signals: MergedAutomationRecommendationSignals = {
+    repositoryCount: repositories.length,
+    sourceControlProviders: [
+      ...new Set(
+        repositories.map((repository) => repository.sourceControlProvider),
+      ),
+    ],
+    mergedPrs30d: facts.filter(
+      (fact) =>
+        fact.state === 'merged' &&
+        fact.mergedAtRemote &&
+        fact.mergedAtRemote.getTime() >= since,
+    ).length,
+    openPrs: facts.filter(
+      (fact) => fact.state === 'open' || fact.state === 'draft',
+    ).length,
+    conflicts: 0,
+    ciFailures30d: 0,
+    dependabotAlerts: 0,
+    codeqlAlerts: 0,
+    dependencyManifests: 0,
+    docs: 0,
+  };
+  const scored = scoreAutomationRecommendations(signals);
+  const startedAt = new Date().toISOString();
+  return {
+    version: 1,
+    inputFingerprint: buildRecommendationFingerprint(
+      repositoryIds,
+      repositories[0]?.sourceControlProvider ?? null,
+    ),
+    catalogVersion: AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
+    status: 'ready',
+    startedAt,
+    completedAt: new Date().toISOString(),
+    partial: true,
+    errorCode: null,
+    dismissed: false,
+    recommendations: scored.map(({ candidate, score, explanation }, index) => ({
+      id: `${candidate.id}:${index + 1}`,
+      candidateId: candidate.id,
+      rank: index + 1,
+      score,
+      explanation,
+      enabled: false,
+      lastRunTaskId: null,
+      automationId: null,
+    })),
+  };
 }
 
 async function savePersistedRuntimeModelConfig(
@@ -2498,14 +2591,29 @@ export async function saveSetupNewSelectionCommand(
     throw new Error('Select at least one repository to continue.');
   }
 
-  const { normalizedRepositoryIds } = await resolveSelectedRepositories(
-    input.repositoryIds,
-  );
+  const { normalizedRepositoryIds, selectedRepositories } =
+    await resolveSelectedRepositories(input.repositoryIds);
   const nextSetupGuidance = input.setupGuidance?.trim() || null;
   const nextSelectedModelId = input.selectedModelId?.trim() || null;
 
   return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
+    );
     const currentState = await getPersistedSetupNewState(tx);
+    const nextFingerprint = buildRecommendationFingerprint(
+      normalizedRepositoryIds,
+      selectedRepositories[0]?.sourceControlProvider ?? null,
+    );
+    const recommendationBatch =
+      currentState.automationRecommendations?.inputFingerprint ===
+      nextFingerprint
+        ? currentState.automationRecommendations
+        : await buildRecommendationBatch(
+            normalizedRepositoryIds,
+            selectedRepositories,
+            tx,
+          );
     const setupNewState = normalizeSetupNewState({
       ...currentState,
       selectedRepositoryIds: normalizedRepositoryIds,
@@ -2523,6 +2631,7 @@ export async function saveSetupNewSelectionCommand(
       suggestionTaskId: null,
       suggestionTaskStartedAt: null,
       suggestionGenerationTriggeredAt: null,
+      automationRecommendations: recommendationBatch,
       lastInteractedByUserId: userId,
     });
 
@@ -3032,6 +3141,229 @@ export async function startSetupNewOnboardingTaskCommand(
   };
 }
 
+export async function setSetupRecommendationEnabledCommand(
+  auth: UserAuthSuccess,
+  input: { id: string; enabled: boolean },
+) {
+  assertAdmin(auth);
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
+    );
+    const state = await getPersistedSetupNewState(tx);
+    const batch = state.automationRecommendations;
+    const recommendation = batch?.recommendations.find(
+      (item) => item.id === input.id,
+    );
+    if (!batch || !recommendation)
+      throw new Error('Recommendation was not found.');
+    const candidate = AUTOMATION_RECOMMENDATION_CATALOG.find(
+      (item) => item.id === recommendation.candidateId,
+    );
+    if (!candidate) throw new Error('Recommendation candidate was not found.');
+
+    if (candidate.source === 'built_in') {
+      await upsertAutomation(tx, {
+        key: candidate.automationKey,
+        enabled: input.enabled,
+        schedule: {
+          frequency: input.enabled ? candidate.defaultScheduleMode : 'off',
+        },
+      });
+    }
+
+    const nextBatch = {
+      ...batch,
+      recommendations: batch.recommendations.map((item) =>
+        item.id === input.id ? { ...item, enabled: input.enabled } : item,
+      ),
+    };
+    const updatedRecommendation = nextBatch.recommendations.find(
+      (item) => item.id === input.id,
+    );
+    if (candidate.source === 'cookbook' && updatedRecommendation) {
+      const existing = updatedRecommendation.automationId
+        ? await getCustomAutomationById(updatedRecommendation.automationId, tx)
+        : null;
+      const automation = existing
+        ? await updateCustomAutomation(
+            existing.id,
+            {
+              name: candidate.template.name,
+              prompt: candidate.template.prompt,
+              enabled: input.enabled,
+              scheduleMode: candidate.template.scheduleMode,
+              environmentId: 'all_repositories',
+              target: {},
+            },
+            tx,
+          )
+        : await createCustomAutomation(
+            {
+              name: candidate.template.name,
+              prompt: candidate.template.prompt,
+              enabled: input.enabled,
+              scheduleMode: candidate.template.scheduleMode,
+              environmentId: 'all_repositories',
+              target: {},
+              createdByUserId: auth.userId,
+            },
+            tx,
+          );
+      updatedRecommendation.automationId = automation.id;
+    }
+    await savePersistedSetupNewState(
+      normalizeSetupNewState({
+        ...state,
+        automationRecommendations: nextBatch,
+      }),
+      tx,
+    );
+    return nextBatch.recommendations.find((item) => item.id === input.id);
+  });
+}
+
+export async function listSetupRecommendationsCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+  const state = await getPersistedSetupNewState();
+  return state.automationRecommendations;
+}
+
+export async function startSetupRecommendationsCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
+    );
+    const state = await getPersistedSetupNewState(tx);
+    const { selectedRepositories } = await resolveSelectedRepositories(
+      state.selectedRepositoryIds,
+    );
+    const batch = await buildRecommendationBatch(
+      state.selectedRepositoryIds,
+      selectedRepositories,
+      tx,
+    );
+    const existingBatch = state.automationRecommendations;
+    if (existingBatch?.inputFingerprint === batch.inputFingerprint) {
+      batch.recommendations = batch.recommendations.map((recommendation) => {
+        const existing = existingBatch.recommendations.find(
+          (item) => item.candidateId === recommendation.candidateId,
+        );
+        return existing
+          ? {
+              ...recommendation,
+              enabled: existing.enabled,
+              lastRunTaskId: existing.lastRunTaskId,
+              automationId: existing.automationId,
+            }
+          : recommendation;
+      });
+      batch.dismissed = existingBatch.dismissed;
+    }
+    await savePersistedSetupNewState(
+      normalizeSetupNewState({ ...state, automationRecommendations: batch }),
+      tx,
+    );
+    return batch;
+  });
+}
+
+export async function runSetupRecommendationNowCommand(
+  auth: UserAuthSuccess,
+  input: { id: string },
+) {
+  assertAdmin(auth);
+  const batch = await listSetupRecommendationsCommand(auth);
+  const recommendation = batch?.recommendations.find(
+    (item) => item.id === input.id,
+  );
+  const candidate = recommendation
+    ? AUTOMATION_RECOMMENDATION_CATALOG.find(
+        (item) => item.id === recommendation.candidateId,
+      )
+    : null;
+  if (!batch || !recommendation || !candidate) {
+    throw new Error('Recommendation was not found.');
+  }
+  if (
+    candidate.source === 'built_in' &&
+    candidate.automationKey === 'review_code'
+  ) {
+    throw new Error('Review Code runs from pull-request events.');
+  }
+  if (!recommendation.enabled) {
+    await setSetupRecommendationEnabledCommand(auth, {
+      id: input.id,
+      enabled: true,
+    });
+  }
+  let result;
+  if (candidate.source === 'cookbook') {
+    const refreshed = await listSetupRecommendationsCommand(auth);
+    const automationId = refreshed?.recommendations.find(
+      (item) => item.id === input.id,
+    )?.automationId;
+    if (!automationId)
+      throw new Error('Recommendation automation was not created.');
+    result = await triggerCustomAutomationCommand(auth, { id: automationId });
+  } else if (candidate.automationKey !== 'review_code') {
+    result = await triggerAutomationCommand(auth, {
+      automationKey: candidate.automationKey,
+    });
+  } else {
+    throw new Error('Review Code runs from pull-request events.');
+  }
+  if (result.outcome === 'launched') {
+    await db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
+      );
+      const state = await getPersistedSetupNewState(tx);
+      const nextBatch = state.automationRecommendations
+        ? {
+            ...state.automationRecommendations,
+            recommendations:
+              state.automationRecommendations.recommendations.map((item) =>
+                item.id === input.id
+                  ? { ...item, enabled: true, lastRunTaskId: result.taskId }
+                  : item,
+              ),
+          }
+        : null;
+      if (nextBatch) {
+        await savePersistedSetupNewState(
+          normalizeSetupNewState({
+            ...state,
+            automationRecommendations: nextBatch,
+          }),
+          tx,
+        );
+      }
+    });
+  }
+  return result;
+}
+
+export async function dismissSetupRecommendationsCardCommand(
+  auth: UserAuthSuccess,
+) {
+  assertAdmin(auth);
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
+    );
+    const state = await getPersistedSetupNewState(tx);
+    if (!state.automationRecommendations) return null;
+    const batch = { ...state.automationRecommendations, dismissed: true };
+    await savePersistedSetupNewState(
+      normalizeSetupNewState({ ...state, automationRecommendations: batch }),
+      tx,
+    );
+    return batch;
+  });
+}
+
 export async function cancelSetupNewOnboardingTaskCommand(
   auth: UserAuthSuccess,
 ) {
@@ -3111,6 +3443,7 @@ export async function resetSetupNewSelectionCommand(auth: UserAuthSuccess) {
       suggestionTaskId: null,
       suggestionTaskStartedAt: null,
       suggestionGenerationTriggeredAt: null,
+      automationRecommendations: null,
       lastInteractedByUserId: userId,
     });
 

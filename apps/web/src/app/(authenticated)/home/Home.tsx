@@ -63,6 +63,7 @@ import {
 } from '@/components/tasks';
 
 import { OnboardingCard } from './OnboardingCard';
+import { AutomationRecommendationsCard } from './AutomationRecommendationsCard';
 import { BottomSheetTabs } from './BottomSheetTabs';
 import Image from 'next/image';
 import { DiscordLogoIcon } from '@radix-ui/react-icons';
@@ -753,6 +754,7 @@ export function Home({
             </div>
 
             <div className="flex flex-col md:flex-row flex-wrap md:items-center gap-2 animate-[fade-in_1s_1_750ms_backwards]">
+              <AutomationRecommendationsCard />
               <OnboardingCard />
               {isFeedbackPromptVisible ? (
                 <button

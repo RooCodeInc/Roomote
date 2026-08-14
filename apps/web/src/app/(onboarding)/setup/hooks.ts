@@ -467,6 +467,8 @@ export function useSetupFlow(
             status.setupNewState.onboardingTaskId !== null &&
             !status.onboardingFailed
           );
+        case 'automation-recommendations':
+          return status.setupNewState.automationRecommendations == null;
         case 'invoke':
           return !hasPostOnboardingAccess();
         default:

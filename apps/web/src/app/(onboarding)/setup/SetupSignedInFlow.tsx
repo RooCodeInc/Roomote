@@ -40,6 +40,7 @@ import { StepCommunicationConnect } from './StepCommunicationConnect';
 import { StepInvoke } from './StepInvoke';
 import { useSetupFlow } from './hooks';
 import { StepRepoSelection, type SetupRetryReason } from './StepRepoSelection';
+import { StepAutomationRecommendations } from './StepAutomationRecommendations';
 import { getSetupStepPath } from './types';
 import { LoadingSetupFlow, stepTransitionVariants } from './SetupBootstrapFlow';
 
@@ -483,12 +484,18 @@ export function SetupSignedInFlow() {
               onReviewComputeProvider={() =>
                 goToStep('compute-provider', { revisit: true })
               }
-              onContinue={() => goToStep('invoke')}
+              onContinue={() => goToNextStep()}
               onBack={canGoBack ? goToPreviousStep : undefined}
               onSkip={() => {
                 setupSession.unlockPostOnboardingFlow();
                 goToNextPostOnboardingStep(true);
               }}
+            />
+          )}
+          {step === 'automation-recommendations' && (
+            <StepAutomationRecommendations
+              onContinue={() => goToStep('invoke')}
+              onBack={canGoBack ? goToPreviousStep : undefined}
             />
           )}
           {step === 'invoke' && (

@@ -51,6 +51,10 @@ const SETUP_STEP_DEFINITIONS = [
     title: 'Set up environment',
   },
   {
+    id: 'automation-recommendations',
+    title: 'Automation recommendations',
+  },
+  {
     id: 'invoke',
     title: "That's it!",
   },

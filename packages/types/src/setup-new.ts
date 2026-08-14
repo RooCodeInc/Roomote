@@ -87,6 +87,30 @@ export const SETUP_COMPUTE_PROVISIONING_STATE_FIELDS = {
   azure: 'azureDiskImageBuild',
 } as const satisfies Partial<Record<ComputeProvider, keyof SetupNewState>>;
 
+export type AutomationRecommendation = {
+  id: string;
+  candidateId: string;
+  rank: number;
+  score: number;
+  explanation: string;
+  enabled: boolean;
+  lastRunTaskId: string | null;
+  automationId: string | null;
+};
+
+export type AutomationRecommendationBatch = {
+  version: 1;
+  inputFingerprint: string;
+  catalogVersion: number;
+  status: 'pending' | 'ready' | 'failed';
+  startedAt: string;
+  completedAt: string | null;
+  partial: boolean;
+  errorCode: string | null;
+  recommendations: AutomationRecommendation[];
+  dismissed: boolean;
+};
+
 export type SetupProvisionableComputeProvider =
   keyof typeof SETUP_COMPUTE_PROVISIONING_STATE_FIELDS;
 
@@ -134,6 +158,7 @@ export type SetupNewState = {
   blaxelImageBuild: SetupNewComputeProvisioningState | null;
   azureDiskImageBuild: SetupNewComputeProvisioningState | null;
   lastInteractedByUserId: string | null;
+  automationRecommendations: AutomationRecommendationBatch | null;
 };
 
 export function createEmptySetupNewState(): SetupNewState {
@@ -163,6 +188,7 @@ export function createEmptySetupNewState(): SetupNewState {
     blaxelImageBuild: null,
     azureDiskImageBuild: null,
     lastInteractedByUserId: null,
+    automationRecommendations: null,
   };
 }
 

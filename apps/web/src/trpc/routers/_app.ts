@@ -283,6 +283,11 @@ import {
   cancelSetupNewOnboardingTaskCommand,
   resetSetupNewSelectionCommand,
   ensureSetupNewDefaultAgentsCommand,
+  listSetupRecommendationsCommand,
+  startSetupRecommendationsCommand,
+  setSetupRecommendationEnabledCommand,
+  runSetupRecommendationNowCommand,
+  dismissSetupRecommendationsCardCommand,
   trackSetupBootstrapWelcomeSeenCommand,
   trackSetupCommsStateCommand,
   trackSetupWelcomeSeenCommand,
@@ -482,6 +487,26 @@ const automationsRouter = createRouter({
   // Slack-free subset of getSettings for the dashboard onboarding nudge.
   onboardingStatus: protectedProcedure.query(({ ctx: { auth } }) =>
     getAutomationOnboardingStatusCommand(auth),
+  ),
+
+  listRecommendations: protectedProcedure.query(({ ctx: { auth } }) =>
+    listSetupRecommendationsCommand(auth),
+  ),
+  startRecommendations: protectedProcedure.mutation(({ ctx: { auth } }) =>
+    startSetupRecommendationsCommand(auth),
+  ),
+  setRecommendationEnabled: protectedProcedure
+    .input(z.object({ id: z.string().min(1), enabled: z.boolean() }))
+    .mutation(({ ctx: { auth }, input }) =>
+      setSetupRecommendationEnabledCommand(auth, input),
+    ),
+  runRecommendationNow: protectedProcedure
+    .input(z.object({ id: z.string().min(1) }))
+    .mutation(({ ctx: { auth }, input }) =>
+      runSetupRecommendationNowCommand(auth, input),
+    ),
+  dismissRecommendationsCard: protectedProcedure.mutation(({ ctx: { auth } }) =>
+    dismissSetupRecommendationsCardCommand(auth),
   ),
 
   listSlackChannels: protectedProcedure.query(({ ctx: { auth } }) =>
