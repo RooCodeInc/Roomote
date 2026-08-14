@@ -875,7 +875,12 @@ export async function sendMessageToTask({
         sandboxServerUrl: run.sandboxServerUrl,
         fetch: fetchSandboxRpcResponseOrThrowIfNotReady,
         call: async (client) => {
-          const goal = await getTaskGoalForRun(run.id);
+          const currentGoal = goalContext
+            ? null
+            : await getTaskGoalForRun(run.id);
+          const resolvedGoalContext =
+            goalContext ??
+            (currentGoal?.status === 'active' ? currentGoal : undefined);
           return client.commands.sendPrompt.mutate({
             prompt: message,
             quoteText,
@@ -890,9 +895,11 @@ export async function sendMessageToTask({
             // credential identity changes. Native steering injects at the
             // next step; fallback steering aborts and replays promptly.
             ...(requiresActorHandoff ? { autoSteerWhenQueued: true } : {}),
-            ...(goalContext ? { autoSteerWhenQueued: true, goalContext } : {}),
+            ...(goalContext ? { autoSteerWhenQueued: true } : {}),
             ...(images?.length ? { images } : {}),
-            ...(goal?.status === 'active' ? { goalContext: goal } : {}),
+            ...(resolvedGoalContext
+              ? { goalContext: resolvedGoalContext }
+              : {}),
           });
         },
       });
