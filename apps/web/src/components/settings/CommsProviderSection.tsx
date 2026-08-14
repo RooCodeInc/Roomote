@@ -574,7 +574,7 @@ export function CommsProviderSection({
                 !provider.runtimeSatisfied && provider.id === 'telegram'
                   ? 'Roomote generates a webhook secret automatically, registers the webhook when you save, and defaults Telegram task launches to the admin who saves this configuration.'
                   : !provider.runtimeSatisfied && provider.id === 'discord'
-                    ? 'Roomote validates the token, derives the bot identity, and registers /new, /link, and /help when you save.'
+                    ? 'Roomote validates the token, derives the bot identity, and registers /new, /goal, /link, and /help when you save.'
                     : undefined
               }
               onCreateSlackApp={(configToken) =>

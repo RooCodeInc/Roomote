@@ -16,6 +16,7 @@ import type {
   TaskPayload,
   RunTokenContext,
   PullRequestStatus,
+  TaskGoal,
 } from '@roomote/types';
 import { trackLatestUserMessageForReplyQuote } from '@roomote/communication/messages';
 import {
@@ -729,6 +730,7 @@ export async function sendMessageToTask({
   clientMessageId,
   senderMode,
   workerQuoteUserName,
+  goalContext,
 }: {
   taskId: string;
   userId: string;
@@ -747,6 +749,7 @@ export async function sendMessageToTask({
    * commenter has no linked account.
    */
   workerQuoteUserName?: string;
+  goalContext?: TaskGoal;
 }): Promise<SendMessageToTaskResult> {
   try {
     const run = await findLatestTaskRun(taskId, {
@@ -788,6 +791,13 @@ export async function sendMessageToTask({
     }
 
     if (isExitedRunStatus(run.status)) {
+      if (goalContext) {
+        return {
+          success: false,
+          error: `Task is not active (status: ${run.status})`,
+          status: 409,
+        };
+      }
       const resumeResult = await resumeTaskFromSnapshot({
         taskId,
         userId: linkedReviewHandoff.senderUserId,
@@ -880,6 +890,7 @@ export async function sendMessageToTask({
             // credential identity changes. Native steering injects at the
             // next step; fallback steering aborts and replays promptly.
             ...(requiresActorHandoff ? { autoSteerWhenQueued: true } : {}),
+            ...(goalContext ? { autoSteerWhenQueued: true, goalContext } : {}),
             ...(images?.length ? { images } : {}),
             ...(goal?.status === 'active' ? { goalContext: goal } : {}),
           });
