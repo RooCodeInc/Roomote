@@ -392,18 +392,16 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     });
   });
 
-  it('replaces GLM 5.2 recommendations with GLM 5.3', () => {
-    const providersByModel = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
-      (provider) => {
-        const model = provider.suggestedTaskModels.find(
-          (suggestion) => suggestion.displayName === 'GLM 5.3',
-        );
+  it('recommends GLM 5.3 from supported providers and keeps GLM 5.2 for OpenRouter', () => {
+    const glm53ByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) => {
+      const model = provider.suggestedTaskModels.find(
+        (suggestion) => suggestion.displayName === 'GLM 5.3',
+      );
 
-        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
-      },
-    );
+      return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+    });
 
-    expect(providersByModel).toEqual([
+    expect(glm53ByProvider).toEqual([
       { providerId: 'opencode-go', modelId: 'opencode-go/glm-5.3' },
       {
         providerId: 'zai-coding-plan',
@@ -417,11 +415,17 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       buildRecommendedDeploymentModelConfig(getSetupModelProvider('zai'))
         .roomoteModel,
     ).toBe('zai/glm-5');
-    for (const provider of SETUP_MODEL_PROVIDER_CATALOG) {
-      expect(provider.suggestedTaskModels).not.toContainEqual(
-        expect.objectContaining({ displayName: 'GLM 5.2' }),
-      );
-    }
+    expect(
+      SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) => {
+        const model = provider.suggestedTaskModels.find(
+          (suggestion) => suggestion.displayName === 'GLM 5.2',
+        );
+
+        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+      }),
+    ).toEqual([
+      { providerId: 'openrouter', modelId: 'openrouter/z-ai/glm-5.2' },
+    ]);
   });
 
   it.each([
