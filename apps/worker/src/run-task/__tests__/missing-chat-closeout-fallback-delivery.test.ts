@@ -19,10 +19,7 @@ vi.mock('../../mcp/roomote-mcp-server/chat-api-client', () => ({
   replyToChatThread,
 }));
 
-import {
-  deliverMissingChatCloseoutFallback,
-  EMPTY_CHAT_CLOSEOUT_FALLBACK_TEXT,
-} from '../missing-chat-closeout-fallback-delivery';
+import { deliverMissingChatCloseoutFallback } from '../missing-chat-closeout-fallback-delivery';
 import {
   recordMissingChatCloseoutFallback,
   settleMissingChatCloseoutFallback,
@@ -132,7 +129,7 @@ describe('deliverMissingChatCloseoutFallback', () => {
     expect(releaseDelivery).not.toHaveBeenCalled();
   });
 
-  it('posts a neutral fallback when the finalized assistant message is empty', async () => {
+  it('posts a friendly fallback when the finalized assistant message is empty', async () => {
     await deliverMissingChatCloseoutFallback({
       runId: 42,
       completionId: 'completion-1',
@@ -142,7 +139,7 @@ describe('deliverMissingChatCloseoutFallback', () => {
     });
 
     expect(replyToChatThread).toHaveBeenCalledWith(expect.any(Object), {
-      text: EMPTY_CHAT_CLOSEOUT_FALLBACK_TEXT,
+      text: "I'm finished. Is there anything else you'd like me to do?",
     });
   });
 
