@@ -22,6 +22,7 @@ const {
   mockDrainLinearMessagesToResumeRun,
   mockDrainSlackMessagesToResumeRun,
   mockRecordComputeProviderUsage,
+  mockFinishRun,
   mockWithSandboxServerRpcClient,
   mockMarkTaskStartParallelCountEndedAt,
   mockSyncTaskStateFromRuns,
@@ -58,6 +59,7 @@ const {
     mockDrainLinearMessagesToResumeRun: vi.fn() as AnyMock,
     mockDrainSlackMessagesToResumeRun: vi.fn() as AnyMock,
     mockRecordComputeProviderUsage: vi.fn() as AnyMock,
+    mockFinishRun: vi.fn() as AnyMock,
     mockWithSandboxServerRpcClient: vi.fn() as AnyMock,
     mockMarkTaskStartParallelCountEndedAt: vi.fn() as AnyMock,
     mockSyncTaskStateFromRuns: vi.fn() as AnyMock,
@@ -86,6 +88,8 @@ vi.mock('@roomote/db/server', () => ({
   },
   taskRuns: {
     id: 'id',
+    status: 'status',
+    machineId: 'machineId',
     snapshotId: 'snapshotId',
   },
   tasks: {
@@ -146,6 +150,7 @@ vi.mock('@roomote/slack', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  finishRun: mockFinishRun,
   recordComputeProviderUsage: mockRecordComputeProviderUsage,
   withSandboxServerRpcClient: mockWithSandboxServerRpcClient,
 }));
@@ -599,6 +604,202 @@ describe('snapshotJob', () => {
       }),
     );
     expect(mockRecordMutation).not.toHaveBeenCalled();
+  });
+
+  it('finalizes an unresumable run as failed when its sandbox is stopped on the final attempt', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      status: RunStatus.Running,
+      machineId: 'sb-stopped',
+    });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'stopped' });
+
+    await expect(
+      snapshotJob({
+        data: { runId: 123, sandboxId: 'sb-stopped' },
+      } as never),
+    ).rejects.toThrow('Instance is not running');
+
+    expect(setFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: RunStatus.Failed,
+        completedAt: expect.any(Date),
+        error: expect.stringContaining('cannot be resumed'),
+      }),
+    );
+    expect(mockSyncTaskStateFromRuns).toHaveBeenCalled();
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 123,
+      status: RunStatus.Failed,
+      error: expect.stringContaining('cannot be resumed'),
+    });
+  });
+
+  it('does not settle the run when a concurrent recovery wins the terminal claim', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      status: RunStatus.Running,
+      machineId: 'sb-stopped',
+    });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'stopped' });
+    // The run advanced between the read and the claim (a redelivery recorded
+    // a snapshot, or a reconcile moved it to a replacement sandbox), so the
+    // fenced update matches no rows.
+    updateWhereFn.mockImplementation(() =>
+      Object.assign(Promise.resolve([]), {
+        returning: () => Promise.resolve([]),
+      }),
+    );
+
+    await expect(
+      snapshotJob({
+        data: { runId: 123, sandboxId: 'sb-stopped' },
+      } as never),
+    ).rejects.toThrow('Instance is not running');
+
+    expect(mockFinishRun).not.toHaveBeenCalled();
+    expect(mockSyncTaskStateFromRuns).not.toHaveBeenCalled();
+  });
+
+  it('completes an idle run without a snapshot when its sandbox is stopped on the final attempt', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      status: RunStatus.Idle,
+      machineId: 'sb-stopped',
+    });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'stopped' });
+
+    await expect(
+      snapshotJob({
+        data: { runId: 123, sandboxId: 'sb-stopped' },
+      } as never),
+    ).rejects.toThrow('Instance is not running');
+
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 123,
+      status: RunStatus.Completed,
+      error: expect.stringContaining('cannot be resumed'),
+    });
+  });
+
+  it('leaves the run recoverable when the sandbox is only mid-snapshot', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      status: RunStatus.Running,
+      machineId: 'sb-snapshotting',
+    });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'snapshotting' });
+
+    await expect(
+      snapshotJob({
+        data: { runId: 123, sandboxId: 'sb-snapshotting' },
+      } as never),
+    ).rejects.toThrow('Instance is not running');
+
+    // The sandbox may still be alive and produce an image; sleep-check can
+    // re-attempt once the failure path clears the request stamps.
+    expect(mockFinishRun).not.toHaveBeenCalled();
+  });
+
+  it('leaves a run that moved to a different sandbox alone after a terminal snapshot failure', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      status: RunStatus.Running,
+      machineId: 'sb-replacement',
+    });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'stopped' });
+
+    await expect(
+      snapshotJob({
+        data: { runId: 123, sandboxId: 'sb-stopped' },
+      } as never),
+    ).rejects.toThrow('Instance is not running');
+
+    expect(mockFinishRun).not.toHaveBeenCalled();
+  });
+
+  it('does not finalize the run while snapshot retries remain', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      status: RunStatus.Running,
+      machineId: 'sb-stopped',
+    });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'stopped' });
+
+    await expect(
+      snapshotJob({
+        data: { runId: 123, sandboxId: 'sb-stopped' },
+        attemptsMade: 0,
+        opts: { attempts: 3 },
+      } as never),
+    ).rejects.toThrow('Instance is not running');
+
+    expect(mockFinishRun).not.toHaveBeenCalled();
+  });
+
+  it('finalizes the run when createSnapshot fails terminally and the sandbox is stopped', async () => {
+    mockFindFirst.mockResolvedValue({
+      ...baseTaskRun,
+      status: RunStatus.Running,
+      machineId: 'sb-crash',
+    });
+    mockGetInstanceStatus
+      .mockResolvedValueOnce({ status: 'running' })
+      .mockResolvedValue({ status: 'stopped' });
+    mockCreateSnapshot.mockRejectedValue(new Error('snapshot rpc exploded'));
+
+    await expect(
+      snapshotJob({
+        data: { runId: 123, sandboxId: 'sb-crash' },
+      } as never),
+    ).rejects.toThrow('snapshot rpc exploded');
+
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 123,
+      status: RunStatus.Failed,
+      error: expect.stringContaining('cannot be resumed'),
+    });
+  });
+
+  it('does not complete a late snapshot after terminal finalization claims the run', async () => {
+    mockFindFirst
+      .mockResolvedValueOnce({
+        ...baseTaskRun,
+        status: RunStatus.Running,
+        machineId: 'sb-late-snapshot',
+      })
+      .mockResolvedValueOnce({
+        snapshotId: null,
+        snapshotCreatedAt: null,
+      });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+    updateWhereFn.mockImplementationOnce(() =>
+      Object.assign(Promise.resolve([]), {
+        // The terminal finalizer changed the status before the provider's
+        // onSnapshotCreated callback tried to persist its late snapshot.
+        returning: () => Promise.resolve([]),
+      }),
+    );
+    mockCreateSnapshot.mockImplementation(async ({ onSnapshotCreated }) => {
+      await onSnapshotCreated?.('snap_too_late');
+      return { snapshotId: 'snap_too_late' };
+    });
+
+    await expect(
+      snapshotJob({
+        data: { runId: 123, sandboxId: 'sb-late-snapshot' },
+      } as never),
+    ).rejects.toMatchObject({
+      name: 'UnrecoverableError',
+      message: expect.stringContaining(
+        'advanced while its snapshot was being created',
+      ),
+    });
+
+    expect(mockFinishRun).not.toHaveBeenCalled();
+    expect(setFn).not.toHaveBeenCalledWith(
+      expect.objectContaining({ status: RunStatus.Completed }),
+    );
   });
 
   it('guards the failure update when createSnapshot throws after the job started', async () => {
@@ -1470,14 +1671,15 @@ describe('snapshotJob', () => {
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
     // No row returned: the guarded update matched nothing because another
     // attempt already recorded a snapshot id.
-    updateWhereFn.mockImplementation(() =>
+    updateWhereFn.mockImplementationOnce(() =>
       Object.assign(Promise.resolve([]), {
         returning: () => Promise.resolve([]),
       }),
     );
-    mockFindFirst
-      .mockResolvedValueOnce(baseTaskRun)
-      .mockResolvedValueOnce({ snapshotCreatedAt: winnerCreatedAt });
+    mockFindFirst.mockResolvedValueOnce(baseTaskRun).mockResolvedValueOnce({
+      snapshotId: 'snap_winner',
+      snapshotCreatedAt: winnerCreatedAt,
+    });
     mockCreateSnapshot.mockImplementation(async ({ onSnapshotCreated }) => {
       await onSnapshotCreated?.('snap_loser');
       return { snapshotId: 'snap_loser' };

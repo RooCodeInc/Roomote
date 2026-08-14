@@ -4,7 +4,13 @@ import {
   buildGitHubPrSynchronizeFollowUpMessage,
   enqueueTask,
 } from '@roomote/cloud-agents/server';
-import { db, eq, taskPullRequests, taskRuns } from '@roomote/db/server';
+import {
+  db,
+  eq,
+  getTaskGoalForRun,
+  taskPullRequests,
+  taskRuns,
+} from '@roomote/db/server';
 import {
   activePrReviewFollowUpRequestSchema,
   type ActivePrReviewFollowUpRequest,
@@ -75,6 +81,7 @@ export const activePrReviewFollowUpJob = async (
   });
 
   if (!isExitedRunStatus(run.status)) {
+    const goal = await getTaskGoalForRun(run.id);
     await withSandboxServerRpcClient({
       runId: run.id,
       userId: null,
@@ -85,6 +92,7 @@ export const activePrReviewFollowUpJob = async (
           source: 'github-pr-synchronize',
           clientMessageId: buildClientMessageId(data),
           visibleInTranscript: false,
+          ...(goal?.status === 'active' ? { goalContext: goal } : {}),
         }),
     });
     await updateLinkedHead(run.taskId, data.eventHeadSha);

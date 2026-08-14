@@ -273,6 +273,45 @@ describe('sendMessageToTask', () => {
     );
   });
 
+  it('prefers an explicit goal over a pending activation from the database', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
+    mockGetTaskGoalForRun.mockResolvedValue({
+      objective: 'Pending objective',
+      generation: 'goal-activation:pending',
+      status: 'active',
+      maxContinuations: 5,
+      continuationsUsed: 0,
+      blockedReason: null,
+      completedAt: null,
+    });
+
+    await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Ship the release',
+      goalContext: {
+        objective: 'Ship the release',
+        generation: 'goal-generation:final',
+        status: 'active',
+        maxContinuations: 5,
+        continuationsUsed: 0,
+        blockedReason: null,
+        completedAt: null,
+      },
+    });
+
+    expect(mockGetTaskGoalForRun).not.toHaveBeenCalled();
+    expect(mockSendPromptMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        autoSteerWhenQueued: true,
+        goalContext: expect.objectContaining({
+          objective: 'Ship the release',
+          generation: 'goal-generation:final',
+        }),
+      }),
+    );
+  });
+
   it('includes the current active goal when steering a follow-up', async () => {
     mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
     mockGetTaskGoalForRun.mockResolvedValue({

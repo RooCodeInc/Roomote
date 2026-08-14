@@ -143,6 +143,7 @@ export {
   githubUserMappingsRelations,
   repositories,
   repositoriesRelations,
+  repositoryAutomationSignals,
   pullRequestFacts,
   pullRequestFactsRelations,
   pullRequestSyncStates,

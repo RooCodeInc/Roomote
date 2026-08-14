@@ -1,6 +1,7 @@
 const mockRunCommand = vi.fn();
 const mockWriteFiles = vi.fn();
 const mockGetInstanceStatus = vi.fn();
+const mockCreateComputeProviderClient = vi.fn();
 const mockRecordTaskRunEvent = vi.fn();
 const mockFindManySandboxOidcTargets = vi.fn();
 const mockEnvironmentFindFirst = vi.fn();
@@ -27,11 +28,15 @@ vi.mock('@roomote/auth', () => ({
 }));
 
 vi.mock('@roomote/compute-providers', () => ({
-  createComputeProviderClient: vi.fn(() => ({
-    writeFiles: (...args: unknown[]) => mockWriteFiles(...args),
-    runCommand: (...args: unknown[]) => mockRunCommand(...args),
-    getInstanceStatus: (...args: unknown[]) => mockGetInstanceStatus(...args),
-  })),
+  createComputeProviderClient: (...args: unknown[]) => {
+    mockCreateComputeProviderClient(...args);
+    return {
+      writeFiles: (...clientArgs: unknown[]) => mockWriteFiles(...clientArgs),
+      runCommand: (...clientArgs: unknown[]) => mockRunCommand(...clientArgs),
+      getInstanceStatus: (...clientArgs: unknown[]) =>
+        mockGetInstanceStatus(...clientArgs),
+    };
+  },
 }));
 
 vi.mock('@roomote/types', async (importOriginal) => {
@@ -562,6 +567,54 @@ describe('refreshDueSandboxOidcTargets', () => {
         status: 'running',
       });
     });
+  });
+
+  it('cleans legacy provider rows without calling the removed provider', async () => {
+    mockDbExecute.mockResolvedValue([
+      makeRow({
+        id: 'legacy-row',
+        computeProvider: 'sandbox',
+        computeProviderId: 'sbx_legacy',
+        runId: 42,
+      }),
+    ]);
+
+    const result = await refreshDueSandboxOidcTargets({
+      now: new Date('2026-01-01T00:00:00.000Z'),
+    });
+
+    expect(result).toEqual({
+      refreshedMachines: 0,
+      cleanedMachines: 1,
+      failedMachines: 0,
+    });
+    expect(mockDeleteWhere).toHaveBeenCalled();
+    expect(mockCreateComputeProviderClient).not.toHaveBeenCalled();
+  });
+
+  it('does not call a removed provider when legacy row cleanup fails', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockDbExecute.mockResolvedValue([
+      makeRow({
+        id: 'legacy-row',
+        computeProvider: 'sandbox',
+        computeProviderId: 'sbx_legacy',
+        runId: 42,
+      }),
+    ]);
+    mockDeleteWhere.mockRejectedValueOnce(new Error('database unavailable'));
+
+    const result = await refreshDueSandboxOidcTargets({
+      now: new Date('2026-01-01T00:00:00.000Z'),
+    });
+
+    expect(result).toEqual({
+      refreshedMachines: 0,
+      cleanedMachines: 0,
+      failedMachines: 1,
+    });
+    expect(mockCreateComputeProviderClient).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 
   it('cleans claimed rows when the instance is already stopped before refresh begins', async () => {

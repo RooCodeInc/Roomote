@@ -64,6 +64,7 @@ export async function findCompletedSlackTaskRunWithSnapshot(
         isNotNull(taskRuns.snapshotId),
         isNull(taskRuns.snapshotFailedAt),
         isNull(taskRuns.canceledAt),
+        isNull(tasks.deletedAt),
         gt(taskRuns.snapshotCreatedAt, snapshotCutoff),
       ),
     )

@@ -7,6 +7,7 @@ import {
 } from '@roomote/types';
 
 import { sleepWithSignal, throwIfAborted } from '../modal/abort';
+import { BoxApiError, BoxTransport } from './box-transport';
 import type {
   BoxConfig,
   CommandOutputEvent,
@@ -61,7 +62,6 @@ const NAMED_SNAPSHOTS_PATH = '/named-snapshots';
 export const BOX_SNAPSHOT_NAME_PREFIX = 'roomote-snap-';
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 const DEFAULT_READINESS_TIMEOUT_MS = 5 * 60_000;
-const READ_RETRY_ATTEMPTS = 3;
 const READY_MACHINE_STATES = new Set(['ready', 'idle', 'running']);
 const PENDING_MACHINE_STATES = new Set([
   'pending',
@@ -76,12 +76,6 @@ const PENDING_MACHINE_STATES = new Set([
 // while a box is provisioning (surfaced as 409, or 400 for
 // machine_not_running early in provisioning, per the Box platform guide),
 // and forks requested while the source named snapshot is still saving.
-const RETRYABLE_CONFLICT_CODES = new Set([
-  'box_starting',
-  'machine_not_running',
-  'snapshot_not_ready',
-]);
-const RETRYABLE_CONFLICT_STATUSES = new Set([400, 409]);
 const VALID_MACHINE_TYPES = new Set(['small', 'default', 'large']);
 
 type BoxMachineType = NonNullable<BoxConfig['machineType']>;
@@ -126,33 +120,14 @@ interface BoxLifecycleOptions {
   env?: Record<string, string>;
 }
 
-export interface BoxApiErrorMetadata {
-  method: string;
-  path: string;
-  status: number;
-  requestId?: string;
-  errorCode?: string;
-  errorMessage?: string;
-}
-
-export class BoxApiError extends Error {
-  public constructor(public readonly metadata: BoxApiErrorMetadata) {
-    super(
-      `Box API ${metadata.method} ${metadata.path} failed with status ${metadata.status}` +
-        (metadata.errorCode ? ` (${metadata.errorCode})` : '') +
-        (metadata.errorMessage ? `: ${metadata.errorMessage}` : ''),
-    );
-    this.name = 'BoxApiError';
-  }
-}
+export { BoxApiError } from './box-transport';
 
 export class BoxClient implements ComputeProviderClient {
   public readonly vendor: ComputeProvider = 'box';
   public readonly capabilities: ComputeProviderCapabilities =
     BOX_CAPABILITIES_VALUE;
 
-  private readonly apiBaseUrl: string;
-  private readonly fetchImpl: typeof fetch;
+  private readonly transport: BoxTransport;
 
   public constructor(private readonly config: BoxConfig) {
     if (!config.apiKey) throw new Error('Box requires an apiKey');
@@ -165,10 +140,12 @@ export class BoxClient implements ComputeProviderClient {
     ) {
       throw new Error('Box machineType must be one of: small, default, large');
     }
-    this.apiBaseUrl = trimTrailingSlashes(
+    this.transport = new BoxTransport(
+      config,
       config.boxApiBaseUrl ?? DEFAULT_BOX_API_BASE_URL,
+      () => this.pollIntervalMs(),
+      () => this.readinessTimeoutMs(),
     );
-    this.fetchImpl = config.fetchImpl ?? globalThis.fetch;
   }
 
   public async listInstances(
@@ -361,27 +338,8 @@ export class BoxClient implements ComputeProviderClient {
   public async *streamCommandOutput(
     input: StreamCommandOutputInput,
   ): AsyncIterable<CommandOutputEvent> {
-    let stdoutLength = 0;
-    let stderrLength = 0;
-
-    while (true) {
-      const command = await this.getCommand(
-        input.instanceId,
-        input.commandId,
-        input.signal,
-      );
-      const stdout = command.stdout ?? '';
-      const stderr = command.stderr ?? '';
-      if (stdout.length > stdoutLength) {
-        yield { stream: 'stdout', data: stdout.slice(stdoutLength) };
-        stdoutLength = stdout.length;
-      }
-      if (stderr.length > stderrLength) {
-        yield { stream: 'stderr', data: stderr.slice(stderrLength) };
-        stderrLength = stderr.length;
-      }
-      if (isTerminalCommand(command)) return;
-      await sleepWithSignal(this.pollIntervalMs(), input.signal);
+    for await (const update of this.pollCommandOutput(input)) {
+      yield* update.events;
     }
   }
 
@@ -482,34 +440,45 @@ export class BoxClient implements ComputeProviderClient {
     input: RunCommandInput,
     commandId: string,
   ): Promise<void> {
+    for await (const update of this.pollCommandOutput({
+      instanceId: input.instanceId,
+      commandId,
+      signal: input.signal,
+    })) {
+      update.events.forEach((event) => input.onOutput?.(event));
+      if (update.exitCode !== undefined) {
+        await input.onExit?.({ exitCode: update.exitCode });
+      }
+    }
+  }
+
+  private async *pollCommandOutput(
+    input: StreamCommandOutputInput,
+  ): AsyncIterable<{ events: CommandOutputEvent[]; exitCode?: number }> {
     let stdoutLength = 0;
     let stderrLength = 0;
     while (true) {
       const command = await this.getCommand(
         input.instanceId,
-        commandId,
+        input.commandId,
         input.signal,
       );
       const stdout = command.stdout ?? '';
       const stderr = command.stderr ?? '';
+      const events: CommandOutputEvent[] = [];
       if (stdout.length > stdoutLength) {
-        input.onOutput?.({
-          stream: 'stdout',
-          data: stdout.slice(stdoutLength),
-        });
+        events.push({ stream: 'stdout', data: stdout.slice(stdoutLength) });
         stdoutLength = stdout.length;
       }
       if (stderr.length > stderrLength) {
-        input.onOutput?.({
-          stream: 'stderr',
-          data: stderr.slice(stderrLength),
-        });
+        events.push({ stream: 'stderr', data: stderr.slice(stderrLength) });
         stderrLength = stderr.length;
       }
       if (isTerminalCommand(command)) {
-        await input.onExit?.({ exitCode: command.exitCode ?? 1 });
+        yield { events, exitCode: command.exitCode ?? 1 };
         return;
       }
+      if (events.length > 0) yield { events };
       await sleepWithSignal(this.pollIntervalMs(), input.signal);
     }
   }
@@ -600,11 +569,13 @@ export class BoxClient implements ComputeProviderClient {
   }
 
   private getMachine(instanceId: string, signal?: AbortSignal) {
-    return this.request<BoxApiMachine | { box?: BoxApiMachine }>(
-      'GET',
-      boxPath(instanceId),
-      { signal, retryRead: true },
-    ).then((response) => unwrapMachine(response));
+    return this.transport
+      .request<BoxApiMachine | { box?: BoxApiMachine }>(
+        'GET',
+        boxPath(instanceId),
+        { signal, retryRead: true },
+      )
+      .then((response) => unwrapMachine(response));
   }
 
   private getCommand(
@@ -612,7 +583,7 @@ export class BoxClient implements ComputeProviderClient {
     commandId: string,
     signal?: AbortSignal,
   ) {
-    return this.request<BoxApiCommandResult>(
+    return this.transport.request<BoxApiCommandResult>(
       'GET',
       `${boxPath(instanceId)}/commands/${encodeURIComponent(commandId)}`,
       { signal, retryRead: true },
@@ -627,113 +598,17 @@ export class BoxClient implements ComputeProviderClient {
     return this.config.readinessTimeoutMs ?? DEFAULT_READINESS_TIMEOUT_MS;
   }
 
-  private async request<T = unknown>(
+  private request<T = unknown>(
     method: string,
     path: string,
-    options: {
+    options?: {
       body?: unknown;
       signal?: AbortSignal;
       retryRead?: boolean;
-    } = {},
+    },
   ): Promise<T> {
-    let attempt = 0;
-    let provisioningDeadline: number | undefined;
-    while (true) {
-      throwIfAborted(options.signal);
-      let response: Response;
-      try {
-        response = await this.fetchImpl(`${this.apiBaseUrl}${path}`, {
-          method,
-          headers: {
-            Authorization: `Bearer ${this.config.apiKey}`,
-            Accept: 'application/json',
-            ...(options.body === undefined
-              ? {}
-              : { 'Content-Type': 'application/json' }),
-          },
-          ...(options.body === undefined
-            ? {}
-            : { body: JSON.stringify(options.body) }),
-          signal: options.signal,
-        });
-      } catch {
-        throwIfAborted(options.signal);
-        throw new BoxApiError({ method, path, status: 0 });
-      }
-
-      if (response.ok) {
-        if (response.status === 204) return undefined as T;
-        const text = await response.text();
-        if (!text) return undefined as T;
-        try {
-          return JSON.parse(text) as T;
-        } catch {
-          throw new BoxApiError({
-            method,
-            path,
-            status: response.status,
-            errorCode: 'invalid_response',
-          });
-        }
-      }
-
-      const errorPayload = await readErrorPayload(response);
-      const errorCode = readErrorPayloadField(errorPayload, 'code');
-
-      // Provisioning refusals are safe to retry for any method: the API
-      // rejected the request without acting on it. Poll until the box comes
-      // up, bounded by the same budget as explicit readiness waits.
-      if (
-        RETRYABLE_CONFLICT_STATUSES.has(response.status) &&
-        errorCode !== undefined &&
-        RETRYABLE_CONFLICT_CODES.has(errorCode)
-      ) {
-        provisioningDeadline ??= Date.now() + this.readinessTimeoutMs();
-        if (Date.now() < provisioningDeadline) {
-          await sleepWithSignal(this.pollIntervalMs(), options.signal);
-          continue;
-        }
-      }
-
-      attempt += 1;
-      if (
-        options.retryRead &&
-        attempt < READ_RETRY_ATTEMPTS &&
-        (response.status === 429 || response.status >= 500)
-      ) {
-        await sleepWithSignal(retryDelayMs(response, attempt), options.signal);
-        continue;
-      }
-
-      const headerRequestId = response.headers.get('x-request-id');
-      const errorMessage = readErrorPayloadField(errorPayload, 'message');
-      throw new BoxApiError({
-        method,
-        path,
-        status: response.status,
-        ...(headerRequestId
-          ? { requestId: headerRequestId }
-          : typeof errorPayload?.requestId === 'string'
-            ? { requestId: errorPayload.requestId }
-            : {}),
-        ...(errorCode ? { errorCode } : {}),
-        ...(errorMessage
-          ? {
-              errorMessage: sanitizeErrorMessage(
-                errorMessage,
-                this.config.apiKey,
-              ),
-            }
-          : {}),
-      });
-    }
+    return this.transport.request<T>(method, path, options);
   }
-}
-
-function trimTrailingSlashes(value: string): string {
-  let end = value.length;
-  while (end > 0 && value.charCodeAt(end - 1) === 47) end -= 1;
-  return value.slice(0, end);
 }
 
 function boxPath(instanceId: string): string {
@@ -942,51 +817,6 @@ function parseHostedUrl(output: string): string {
   // URL must not keep the trailing slash URL normalization adds.
   const pathname = url.pathname === '/' ? '' : url.pathname;
   return `${url.origin}${pathname}${url.search}`;
-}
-
-function retryDelayMs(response: Response, attempt: number): number {
-  const retryAfter = Number(response.headers.get('retry-after'));
-  if (Number.isFinite(retryAfter) && retryAfter >= 0) {
-    return Math.min(retryAfter * 1_000, 10_000);
-  }
-  return Math.min(250 * 2 ** (attempt - 1), 2_000);
-}
-
-const ERROR_MESSAGE_MAX_LENGTH = 300;
-
-/** Reads `field` from the payload, falling back to the nested `error` object. */
-function readErrorPayloadField(
-  payload: Record<string, unknown> | undefined,
-  field: 'code' | 'message',
-): string | undefined {
-  const direct = payload?.[field];
-  if (typeof direct === 'string' && direct) return direct;
-  const nested = payload?.error;
-  if (!nested || typeof nested !== 'object') return undefined;
-  const value = (nested as Record<string, unknown>)[field];
-  return typeof value === 'string' && value ? value : undefined;
-}
-
-// Server error text is echoed into task UI and logs; never let it carry our
-// bearer token, and cap it so a huge body cannot bloat stored events.
-function sanitizeErrorMessage(message: string, apiKey: string): string {
-  const redacted = apiKey ? message.replaceAll(apiKey, '[redacted]') : message;
-  return redacted.length > ERROR_MESSAGE_MAX_LENGTH
-    ? `${redacted.slice(0, ERROR_MESSAGE_MAX_LENGTH)}…`
-    : redacted;
-}
-
-async function readErrorPayload(
-  response: Response,
-): Promise<Record<string, unknown> | undefined> {
-  try {
-    const parsed = (await response.json()) as unknown;
-    return parsed && typeof parsed === 'object'
-      ? (parsed as Record<string, unknown>)
-      : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function isBoxNotFound(error: unknown): boolean {

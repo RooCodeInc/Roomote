@@ -111,6 +111,8 @@ import {
   findTaskRunByRunTokenClaims,
   claimShowWidgetFallbackDelivery,
   releaseShowWidgetFallbackDelivery,
+  claimMissingChatCloseoutFallbackDelivery,
+  releaseMissingChatCloseoutFallbackDelivery,
 } from '../lib/task-runs';
 import {
   findSlackConversationSubjectByUserId,
@@ -482,6 +484,20 @@ export const taskRunsRouter = router({
     }),
     'runId',
   ).mutation(({ input }) => releaseShowWidgetFallbackDelivery(input)),
+  claimMissingChatCloseoutFallbackDelivery: runTokenOnlyScoped(
+    z.object({
+      runId: z.number(),
+      completionId: z.string().trim().min(1).max(500),
+    }),
+    'runId',
+  ).mutation(({ input }) => claimMissingChatCloseoutFallbackDelivery(input)),
+  releaseMissingChatCloseoutFallbackDelivery: runTokenOnlyScoped(
+    z.object({
+      runId: z.number(),
+      completionId: z.string().trim().min(1).max(500),
+    }),
+    'runId',
+  ).mutation(({ input }) => releaseMissingChatCloseoutFallbackDelivery(input)),
   recordComputeProviderUsage: runScoped(
     z.object({
       runId: z.number(),

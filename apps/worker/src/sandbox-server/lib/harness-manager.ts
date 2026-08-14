@@ -128,6 +128,7 @@ export interface HarnessManagerCallbacks {
   onBeforeTaskCompletion?: (
     completionId: string,
   ) => Promise<HarnessManagerCompletionDecision>;
+  onTaskCompletionSettled?: (completionId: string) => Promise<void>;
 }
 
 interface HarnessFollowUpPromptOptions {
@@ -921,12 +922,21 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
     });
   }
 
-  private finalizeTaskCompletionNow(): void {
+  private finalizeTaskCompletionNow(completionId: string): void {
     this.deferredTurnSettlement = null;
     this.state.taskFinishedAt = Date.now();
 
     if (this.phase === 'running') {
       this.setPhase('waiting_for_prompt');
+    }
+
+    const settlement = this.callbacks.onTaskCompletionSettled?.(completionId);
+    if (settlement) {
+      void settlement.catch((error) => {
+        this.logger.warn(
+          `[HarnessManager] onTaskCompletionSettled callback failed: ${formatCallbackError(error)}`,
+        );
+      });
     }
 
     this.invokeOnExit();
@@ -935,20 +945,21 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
 
   private finalizeTaskCompletion(): void {
     const decide = this.callbacks.onBeforeTaskCompletion;
-    if (!decide) {
-      this.finalizeTaskCompletionNow();
+    if (this.completionDecisionPending || this.continuationStartPending) {
       return;
     }
-    if (this.completionDecisionPending || this.continuationStartPending) {
+
+    const sessionId = this.state.sessionId;
+    const completionId =
+      this.pendingCompletionId ??
+      `${sessionId ?? 'unknown'}:fallback:${++this.fallbackCompletionSequence}`;
+    if (!decide) {
+      this.finalizeTaskCompletionNow(completionId);
       return;
     }
 
     this.completionDecisionPending = true;
     const decisionSequence = ++this.completionDecisionSequence;
-    const sessionId = this.state.sessionId;
-    const completionId =
-      this.pendingCompletionId ??
-      `${sessionId ?? 'unknown'}:fallback:${++this.fallbackCompletionSequence}`;
     void decide(completionId)
       .then(async (disposition) => {
         if (decisionSequence !== this.completionDecisionSequence) {
@@ -1004,14 +1015,14 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
             !isStoppingPhase(this.phase) &&
             !this.state.cancelTriggeredAt
           ) {
-            this.finalizeTaskCompletionNow();
+            this.finalizeTaskCompletionNow(completionId);
           }
           return;
         }
         if (disposition === 'ignore') {
           return;
         }
-        this.finalizeTaskCompletionNow();
+        this.finalizeTaskCompletionNow(completionId);
       })
       .catch((error) => {
         if (decisionSequence !== this.completionDecisionSequence) {
@@ -1026,7 +1037,7 @@ export class HarnessManager extends EventEmitter<HarnessManagerEvents> {
           `[HarnessManager] Pre-completion decision failed: ${formatCallbackError(error)}`,
         );
         if (this.phase !== 'shutting_down' && this.phase !== 'stopped') {
-          this.finalizeTaskCompletionNow();
+          this.finalizeTaskCompletionNow(completionId);
         }
       });
   }

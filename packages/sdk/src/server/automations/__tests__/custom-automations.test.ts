@@ -247,7 +247,7 @@ describe('customAutomationsJob', () => {
     expect(enqueued.task.payload.harnessModelOverrides).toBeUndefined();
   });
 
-  it('anchors the prompt to the configured report channel', async () => {
+  it('makes the configured channel available for interruption-worthy reports', async () => {
     await customAutomationsJob();
 
     const enqueued = vi.mocked(enqueueTask).mock.calls[0]?.[0] as {
@@ -261,7 +261,31 @@ describe('customAutomationsJob', () => {
       'do not post progress updates',
     );
     expect(enqueued.task.payload.description).toContain(
+      'Default to finishing silently',
+    );
+    expect(enqueued.task.payload.description).toContain(
+      'a concrete actionable or important finding',
+    );
+    expect(enqueued.task.payload.description).toContain(
+      'Routine success, healthy status, no-change results',
+    );
+    expect(enqueued.task.payload.description).toContain(
       'do not mention this automation',
+    );
+    expect(enqueued.task.payload.description).toContain(
+      '<default_report_presentation>',
+    );
+    expect(enqueued.task.payload.description).toContain(
+      'On any conflict, follow the request',
+    );
+    expect(enqueued.task.payload.description).toContain(
+      'normally no more than about 250 words',
+    );
+    expect(enqueued.task.payload.description).toContain(
+      'send the detail in follow-up replies in the same thread',
+    );
+    expect(enqueued.task.payload.description.indexOf(automation.prompt)).toBe(
+      0,
     );
   });
 
@@ -369,7 +393,7 @@ describe('customAutomationsJob', () => {
     },
   );
 
-  it('launches without channel anchoring when no report channel is configured', async () => {
+  it('adds presentation defaults without channel anchoring when no report channel is configured', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       { ...automation, target: {} } as never,
     ]);
@@ -381,11 +405,57 @@ describe('customAutomationsJob', () => {
       task: { payload: Record<string, unknown> };
       channels?: unknown;
     };
-    expect(enqueued.task.payload.description).toBe(automation.prompt);
+    expect(enqueued.task.payload.description).toEqual(
+      expect.stringContaining(automation.prompt),
+    );
+    expect(enqueued.task.payload.description).toEqual(
+      expect.stringContaining('<default_report_presentation>'),
+    );
+    expect(enqueued.task.payload.description).toEqual(
+      expect.stringContaining('On any conflict, follow the request'),
+    );
+    expect(enqueued.task.payload.description).not.toEqual(
+      expect.stringContaining('send_chat_reply'),
+    );
+    expect(
+      String(enqueued.task.payload.description).indexOf(automation.prompt),
+    ).toBe(0);
     expect(enqueued.task.payload.customAutomationId).toBeUndefined();
     expect(enqueued.task.payload.channel).toBeUndefined();
     expect(enqueued.channels).toBeUndefined();
     expect(buildDestinationTaskPayloadFields).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the enabling admin's DM when no report channel is configured", async () => {
+    vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
+      {
+        ...automation,
+        target: {},
+        createdByUserId: 'user-1',
+      } as never,
+    ]);
+
+    const result = await customAutomationsJob();
+
+    expect(result.launchedTaskId).toBe('task_abc');
+    expect(findUserDirectMessageDestination).toHaveBeenCalledWith(
+      'slack',
+      'user-1',
+    );
+    expect(enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            customAutomationId: automation.id,
+            channel: 'D123',
+            slackChannel: 'D123',
+            teamId: 'T123',
+            slackTeamId: 'T123',
+          }),
+        }),
+        channels: { slackChannelId: 'D123' },
+      }),
+    );
   });
 
   it('uses hour-0 boundary for hourly schedules', async () => {
@@ -512,6 +582,13 @@ describe('runCustomAutomationNow', () => {
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         trigger: 'manual',
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            description: expect.stringContaining(
+              '<default_report_presentation>',
+            ),
+          }),
+        }),
       }),
     );
   });

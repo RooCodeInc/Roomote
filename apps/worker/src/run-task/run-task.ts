@@ -103,6 +103,7 @@ import {
 } from './workflow-phase';
 import { wrapCommunicationMessage } from './communication-message-prompt';
 import { buildTaskGoalContinuationPrompt } from './task-goal';
+import { settleMissingChatCloseoutFallback } from './missing-chat-closeout-fallback-settlement';
 
 function formatEnvironmentInstructions(
   instructions?: string,
@@ -354,12 +355,6 @@ function isSilentChannelAutomationLaunch(taskRun: {
     hasCustomAutomationId(taskRun) ||
     hasScheduledAutomationSource(taskRun)
   );
-}
-
-function requiresLateBoundAutomationCloseout(taskRun: {
-  payload: unknown;
-}): boolean {
-  return hasAutomationWorkItemId(taskRun) || hasCustomAutomationId(taskRun);
 }
 
 function shouldRequireInitialAckOnInitialTurn(taskRun: {
@@ -1026,14 +1021,6 @@ export const runTask = async ({
                   shouldAllowEmojiReactionOnInitialTurn(taskRun),
               }
             : {}),
-          // Late-bound automation tasks (work-item execution tasks and
-          // custom automation runs) have no inbound Slack turn, but must
-          // still end with one agent-written closeout; the Stop hook blocks
-          // silent completion when this flag is set.
-          ...(!initialTurnMessageTs &&
-          requiresLateBoundAutomationCloseout(taskRun)
-            ? { requiresTerminalCloseoutWithoutTurn: true }
-            : {}),
         }),
         'utf8',
       );
@@ -1355,6 +1342,9 @@ export const runTask = async ({
       taskId: taskRun.taskId,
       logger,
       callbacks: {
+        onTaskCompletionSettled: async (completionId: string) => {
+          await settleMissingChatCloseoutFallback(context, completionId);
+        },
         onBeforeTaskCompletion: async (completionId: string) => {
           if (taskCancellation.signal.aborted) {
             return 'finalize' as const;
@@ -1544,10 +1534,15 @@ export const runTask = async ({
         return;
       }
 
+      // Claim before the async lookup so concurrent state events cannot
+      // deliver the same setup outcome more than once.
+      pendingEnvironmentSetupOutcome = undefined;
+
       let goalContext;
       try {
         goalContext = await getActiveGoalContext();
       } catch (error) {
+        pendingEnvironmentSetupOutcome ??= outcome;
         logger.warn(
           `[runTask] Delaying background environment setup notice for task run ${taskRun.id} because active goal lookup failed: ${error instanceof Error ? error.message : String(error)}`,
         );
@@ -1563,8 +1558,8 @@ export const runTask = async ({
         goalContext,
       });
 
-      if (sent) {
-        pendingEnvironmentSetupOutcome = undefined;
+      if (!sent) {
+        pendingEnvironmentSetupOutcome ??= outcome;
       }
 
       void recordWorkerRuntimeEvent({

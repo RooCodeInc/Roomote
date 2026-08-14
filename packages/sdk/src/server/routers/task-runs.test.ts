@@ -23,6 +23,8 @@ const {
   mockClaimShowWidgetFallbackDelivery,
   mockClearPendingSlackRequestUserInput,
   mockReleaseShowWidgetFallbackDelivery,
+  mockClaimMissingChatCloseoutFallbackDelivery,
+  mockReleaseMissingChatCloseoutFallbackDelivery,
   mockUpdateTaskRun,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
@@ -40,6 +42,8 @@ const {
   mockClaimShowWidgetFallbackDelivery: vi.fn(),
   mockClearPendingSlackRequestUserInput: vi.fn(),
   mockReleaseShowWidgetFallbackDelivery: vi.fn(),
+  mockClaimMissingChatCloseoutFallbackDelivery: vi.fn(),
+  mockReleaseMissingChatCloseoutFallbackDelivery: vi.fn(),
   mockUpdateTaskRun: vi.fn(),
 }));
 
@@ -103,6 +107,10 @@ vi.mock('../lib/task-runs', () => ({
   recordTaskMessageEnvelope: mockRecordTaskMessageEnvelope,
   claimShowWidgetFallbackDelivery: mockClaimShowWidgetFallbackDelivery,
   releaseShowWidgetFallbackDelivery: mockReleaseShowWidgetFallbackDelivery,
+  claimMissingChatCloseoutFallbackDelivery:
+    mockClaimMissingChatCloseoutFallbackDelivery,
+  releaseMissingChatCloseoutFallbackDelivery:
+    mockReleaseMissingChatCloseoutFallbackDelivery,
   refreshGitHubTokenWithMetadata: vi.fn(),
   revertPrCommit: vi.fn(),
   setTaskHarnessSessionId: vi.fn(),
@@ -548,6 +556,37 @@ describe('taskRunsRouter queue message guards', () => {
       runId: 42,
       toolCallId: 'call-1',
     });
+  });
+
+  it('claims and releases missing chat closeout fallback delivery for the matching run token', async () => {
+    mockClaimMissingChatCloseoutFallbackDelivery.mockResolvedValueOnce({
+      claimed: true,
+    });
+
+    await expect(
+      createRunCaller().claimMissingChatCloseoutFallbackDelivery({
+        runId: 42,
+        completionId: 'completion-1',
+      }),
+    ).resolves.toEqual({ claimed: true });
+
+    await expect(
+      createRunCaller().releaseMissingChatCloseoutFallbackDelivery({
+        runId: 42,
+        completionId: 'completion-1',
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mockClaimMissingChatCloseoutFallbackDelivery).toHaveBeenCalledWith({
+      runId: 42,
+      completionId: 'completion-1',
+    });
+    expect(mockReleaseMissingChatCloseoutFallbackDelivery).toHaveBeenCalledWith(
+      {
+        runId: 42,
+        completionId: 'completion-1',
+      },
+    );
   });
 
   it('rejects recordInferenceUsage for auth-token callers', async () => {

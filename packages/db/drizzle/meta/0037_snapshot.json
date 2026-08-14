@@ -1,5 +1,5 @@
 {
-  "id": "7e230b2a-e0a9-4a37-9e27-7328b24b6788",
+  "id": "7f03804c-75a9-46f1-8b6e-0b50270b72cc",
   "prevId": "cfca2661-7418-4d26-9f2c-b865ba139f9f",
   "version": "7",
   "dialect": "postgresql",
@@ -5567,6 +5567,82 @@
       },
       "isRLSEnabled": false
     },
+    "public.repository_automation_signals": {
+      "name": "repository_automation_signals",
+      "schema": "",
+      "columns": {
+        "repository_id": {
+          "name": "repository_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "signals_version": {
+          "name": "signals_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "collected_at": {
+          "name": "collected_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "partial": {
+          "name": "partial",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        }
+      },
+      "indexes": {
+        "repository_automation_signals_collected_idx": {
+          "name": "repository_automation_signals_collected_idx",
+          "columns": [
+            {
+              "expression": "collected_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "repository_automation_signals_repository_id_repositories_id_fk": {
+          "name": "repository_automation_signals_repository_id_repositories_id_fk",
+          "tableFrom": "repository_automation_signals",
+          "tableTo": "repositories",
+          "columnsFrom": ["repository_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "repository_automation_signals_repository_id_signals_version_pk": {
+          "name": "repository_automation_signals_repository_id_signals_version_pk",
+          "columns": ["repository_id", "signals_version"]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.sandbox_oidc_targets": {
       "name": "sandbox_oidc_targets",
       "schema": "",
@@ -8259,30 +8335,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "wait_until": {
-          "name": "wait_until",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "wait_reason": {
-          "name": "wait_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "wait_resumed_at": {
-          "name": "wait_resumed_at",
-          "type": "timestamp",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "wait_resume_run_id": {
-          "name": "wait_resume_run_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "worker_heartbeat_at": {
           "name": "worker_heartbeat_at",
           "type": "timestamp",
@@ -8475,21 +8527,6 @@
           "method": "btree",
           "with": {}
         },
-        "task_runs_wait_until_idx": {
-          "name": "task_runs_wait_until_idx",
-          "columns": [
-            {
-              "expression": "wait_until",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "task_runs_worker_heartbeat_at_idx": {
           "name": "task_runs_worker_heartbeat_at_idx",
           "columns": [
@@ -8669,15 +8706,6 @@
           "tableFrom": "task_runs",
           "tableTo": "users",
           "columnsFrom": ["acting_user_id"],
-          "columnsTo": ["id"],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "task_runs_wait_resume_run_id_task_runs_id_fk": {
-          "name": "task_runs_wait_resume_run_id_task_runs_id_fk",
-          "tableFrom": "task_runs",
-          "tableTo": "task_runs",
-          "columnsFrom": ["wait_resume_run_id"],
           "columnsTo": ["id"],
           "onDelete": "no action",
           "onUpdate": "no action"

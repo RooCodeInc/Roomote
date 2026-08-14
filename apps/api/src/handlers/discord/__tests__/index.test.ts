@@ -56,6 +56,7 @@ const mocks = vi.hoisted(() => ({
   enqueueGatewayEvent: vi.fn(),
   callViaEmojiConfig: vi.fn(),
   appendAccountLinkHelpText: vi.fn(async (message: string) => message),
+  startGoal: vi.fn(),
 }));
 
 vi.mock('../../account-link-help.js', () => ({
@@ -153,6 +154,10 @@ vi.mock('../../call-roomote-via-emoji.js', () => ({
 
 vi.mock('../task-orchestration.js', () => ({
   startNewDiscordTask: mocks.startNewTask,
+}));
+
+vi.mock('../goal-command.js', () => ({
+  startDiscordTaskGoal: mocks.startGoal,
 }));
 
 vi.mock('../replies.js', () => ({ replyToDiscordEvent: mocks.reply }));
@@ -272,6 +277,7 @@ describe('Discord Gateway event handler', () => {
       status: 'started',
       launchResult: { id: 17, taskId: 'task-17' },
     });
+    mocks.startGoal.mockResolvedValue({ success: true });
     mocks.reply.mockResolvedValue({ messageId: 'reply-1' });
     mocks.createDirectMessage.mockResolvedValue({ id: 'dm-private-1' });
     mocks.postMessage.mockResolvedValue({ messageId: 'dm-msg-1' });
@@ -1712,6 +1718,13 @@ describe('Discord Gateway event handler', () => {
         text: expect.stringContaining('/new'),
       }),
     );
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining(
+          'keep working toward an objective across multiple turns',
+        ),
+      }),
+    );
   });
 
   it('uses /new to start fresh even when the DM has an active task', async () => {
@@ -1749,6 +1762,77 @@ describe('Discord Gateway event handler', () => {
         }),
         interaction: { interaction, interactionDeferred: true },
         forceNewThread: true,
+      }),
+    );
+  });
+
+  it('uses /goal to enable Goal Mode on the active task', async () => {
+    mocks.findActiveRun.mockResolvedValue({
+      id: 23,
+      taskId: 'task-23',
+      actingUserId: 'roomote-user-1',
+    });
+    const interaction = {
+      id: 'interaction-goal',
+      application_id: 'app-1',
+      type: 2,
+      token: 'interaction-token',
+      channel_id: 'dm-1',
+      user: { id: 'discord-user-1', username: 'matt' },
+      data: {
+        name: 'goal',
+        type: 1,
+        options: [{ name: 'objective', type: 3, value: 'Ship the release' }],
+      },
+    };
+
+    const response = await postEvent(
+      envelope(interaction, 'INTERACTION_CREATE'),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.startGoal).toHaveBeenCalledWith({
+      taskId: 'task-23',
+      userId: 'roomote-user-1',
+      objective: 'Ship the release',
+      clientMessageId: 'interaction-goal',
+    });
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        interaction: { interaction, interactionDeferred: true },
+        text: 'Goal Mode enabled.',
+        ephemeral: true,
+      }),
+    );
+  });
+
+  it('does not create a task when /goal has no active task', async () => {
+    const interaction = {
+      id: 'interaction-goal',
+      application_id: 'app-1',
+      type: 2,
+      token: 'interaction-token',
+      channel_id: 'dm-1',
+      user: { id: 'discord-user-1', username: 'matt' },
+      data: {
+        name: 'goal',
+        type: 1,
+        options: [{ name: 'objective', type: 3, value: 'Ship the release' }],
+      },
+    };
+
+    const response = await postEvent(
+      envelope(interaction, 'INTERACTION_CREATE'),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.startGoal).not.toHaveBeenCalled();
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining('active Roomote task'),
+        ephemeral: true,
       }),
     );
   });

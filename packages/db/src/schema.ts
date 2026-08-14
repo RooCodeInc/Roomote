@@ -10,6 +10,7 @@ import {
   bigint,
   boolean,
   unique,
+  primaryKey,
   check,
   uniqueIndex,
   type AnyPgColumn,
@@ -75,6 +76,7 @@ import type {
   WorkspaceRoutingSettings,
   TaskRunErrorCode,
   UserRole,
+  RepositoryAutomationSignals,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -2181,6 +2183,28 @@ export const repositoriesRelations = relations(repositories, ({ one }) => ({
     references: [users.id],
   }),
 }));
+
+/**
+ * Cached bounded source-control metadata used by automation recommendations.
+ * The version is part of the key so a scorer can invalidate old signal shapes
+ * without rewriting the repository row.
+ */
+export const repositoryAutomationSignals = pgTable(
+  'repository_automation_signals',
+  {
+    repositoryId: uuid('repository_id')
+      .notNull()
+      .references(() => repositories.id, { onDelete: 'cascade' }),
+    signalsVersion: integer('signals_version').notNull(),
+    payload: jsonb('payload').$type<RepositoryAutomationSignals>().notNull(),
+    collectedAt: timestamp('collected_at').notNull().defaultNow(),
+    partial: boolean('partial').notNull().default(false),
+  },
+  (table) => [
+    primaryKey({ columns: [table.repositoryId, table.signalsVersion] }),
+    index('repository_automation_signals_collected_idx').on(table.collectedAt),
+  ],
+);
 
 export const pullRequestFacts = pgTable(
   'pull_request_facts',

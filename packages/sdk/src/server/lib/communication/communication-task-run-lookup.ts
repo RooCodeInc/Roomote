@@ -85,6 +85,7 @@ export async function findActiveCommunicationTaskRun(
         ...(input.taskId ? [eq(taskRuns.taskId, input.taskId)] : []),
         inArray(taskRuns.status, [...activeRunStatuses]),
         isNull(taskRuns.canceledAt),
+        isNull(tasks.deletedAt),
       ),
     )
     .orderBy(desc(taskRuns.createdAt))
@@ -109,6 +110,7 @@ export async function findCompletedCommunicationTaskRunWithSnapshot(
         ...(input.taskId ? [eq(taskRuns.taskId, input.taskId)] : []),
         inArray(taskRuns.status, [RunStatus.Completed]),
         isNull(taskRuns.canceledAt),
+        isNull(tasks.deletedAt),
         sql`${taskRuns.snapshotId} IS NOT NULL`,
         sql`${taskRuns.snapshotCreatedAt} IS NOT NULL`,
       ),
@@ -147,6 +149,7 @@ export async function findTaskBackedAutomationReportRun(input: {
         sql`${taskRuns.payload}->>'communicationMessageId' = ${input.messageId}`,
         eq(tasks.initiatorKind, 'automation'),
         isNull(taskRuns.canceledAt),
+        isNull(tasks.deletedAt),
       ),
     )
     // A report root is immutable. Prefer its first binding if historical data
@@ -185,7 +188,13 @@ export async function findTaskBackedAutomationReportRun(input: {
     .select(ACTIVE_SELECTION)
     .from(taskRuns)
     .innerJoin(tasks, eq(taskRuns.taskId, tasks.id))
-    .where(and(eq(taskRuns.taskId, sourceTaskId), isNull(taskRuns.canceledAt)))
+    .where(
+      and(
+        eq(taskRuns.taskId, sourceTaskId),
+        isNull(taskRuns.canceledAt),
+        isNull(tasks.deletedAt),
+      ),
+    )
     .orderBy(asc(taskRuns.createdAt))
     .limit(1);
 

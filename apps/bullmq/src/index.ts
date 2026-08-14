@@ -49,6 +49,7 @@ import { startPrReviewNotificationQueue } from './pr-review-notification-queue';
 import { startActivePrReviewFollowUpQueue } from './active-pr-review-follow-up-queue';
 import { startTaskSleepQueue } from './task-sleep-queue';
 import { startTaskWakeQueue } from './task-wake-queue';
+import { startAutomationRecommendationsQueue } from './automation-recommendations-queue';
 
 // Resolve auto-generated auth keypairs before any queue worker starts so
 // scheduled jobs that sign tokens observe the resolved keys.
@@ -121,6 +122,18 @@ const {
   queueEvents: taskWakeQueueEvents,
 } = startTaskWakeQueue();
 const {
+  recommendationQueue: automationRecommendationsQueue,
+  recommendationWorker: automationRecommendationsWorker,
+  recommendationQueueEvents: automationRecommendationsQueueEvents,
+  recommendationInitialRunQueue: automationRecommendationInitialRunQueue,
+  recommendationInitialRunWorker: automationRecommendationInitialRunWorker,
+  recommendationInitialRunQueueEvents:
+    automationRecommendationInitialRunQueueEvents,
+  signalPrefetchQueue: automationSignalPrefetchQueue,
+  signalPrefetchWorker: automationSignalPrefetchWorker,
+  signalPrefetchQueueEvents: automationSignalPrefetchQueueEvents,
+} = startAutomationRecommendationsQueue();
+const {
   slackAccountLinkEducationQueue,
   slackAccountLinkEducationWorker,
   slackAccountLinkEducationQueueEvents,
@@ -184,6 +197,16 @@ createBullBoard({
     new BullMQAdapter(snapshotQueue, { readOnlyMode: false }),
     new BullMQAdapter(dockerValidationQueue, { readOnlyMode: false }),
     new BullMQAdapter(taskSleepQueue, { readOnlyMode: false }),
+    new BullMQAdapter(taskWakeQueue, { readOnlyMode: false }),
+    new BullMQAdapter(automationRecommendationsQueue, {
+      readOnlyMode: false,
+    }),
+    new BullMQAdapter(automationSignalPrefetchQueue, {
+      readOnlyMode: false,
+    }),
+    new BullMQAdapter(automationRecommendationInitialRunQueue, {
+      readOnlyMode: false,
+    }),
     new BullMQAdapter(slackAccountLinkEducationQueue, { readOnlyMode: false }),
     new BullMQAdapter(discordGatewayEventsQueue, { readOnlyMode: false }),
     new BullMQAdapter(discordSuggestedTasksOnboardingFollowupQueue, {
@@ -342,6 +365,15 @@ async function gracefulShutdown() {
     await taskWakeWorker.close();
     await taskWakeQueueEvents.close();
     await taskWakeQueue.close();
+    await automationRecommendationsWorker.close();
+    await automationRecommendationsQueueEvents.close();
+    await automationRecommendationsQueue.close();
+    await automationSignalPrefetchWorker.close();
+    await automationSignalPrefetchQueueEvents.close();
+    await automationSignalPrefetchQueue.close();
+    await automationRecommendationInitialRunWorker.close();
+    await automationRecommendationInitialRunQueueEvents.close();
+    await automationRecommendationInitialRunQueue.close();
     await slackAccountLinkEducationWorker.close();
     await slackAccountLinkEducationQueueEvents.close();
     await slackAccountLinkEducationQueue.close();

@@ -228,7 +228,7 @@ export type DiscordCommsStatus = {
 };
 
 const DISCORD_GATEWAY_STATUS_KEY = 'discord:gateway:status';
-const DISCORD_REQUIRED_COMMANDS = ['help', 'link', 'new'] as const;
+const DISCORD_REQUIRED_COMMANDS = ['goal', 'help', 'link', 'new'] as const;
 const DISCORD_APPLICATION_MESSAGE_CONTENT_FLAGS = (1 << 18) | (1 << 19);
 const DISCORD_API_TIMEOUT_MS = 5_000;
 

@@ -16,6 +16,7 @@ vi.mock('@roomote/db/server', () => {
   return {
     and: vi.fn((...args: unknown[]) => ({ and: args })),
     tasks: {
+      deletedAt: 'tasks.deletedAt',
       id: 'tasks.id',
       slackThreadTs: 'tasks.slackThreadTs',
     },
@@ -69,6 +70,7 @@ describe('findCompletedSlackTaskRunWithSnapshot', () => {
             'T-second',
           ]),
         }),
+        { isNull: 'tasks.deletedAt' },
       ]),
     });
   });

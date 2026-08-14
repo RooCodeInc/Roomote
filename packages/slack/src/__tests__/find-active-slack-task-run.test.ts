@@ -17,6 +17,7 @@ vi.mock('@roomote/db/server', () => {
   return {
     and: vi.fn((...args: unknown[]) => ({ and: args })),
     tasks: {
+      deletedAt: 'tasks.deletedAt',
       id: 'tasks.id',
       slackThreadTs: 'tasks.slackThreadTs',
     },
@@ -73,6 +74,7 @@ describe('findActiveSlackTaskRun', () => {
         }),
         { inArray: ['taskRuns.status', [...activeRunStatuses]] },
         { isNull: 'taskRuns.canceledAt' },
+        { isNull: 'tasks.deletedAt' },
       ],
     });
   });
@@ -114,6 +116,7 @@ describe('findActiveSlackTaskRun', () => {
         }),
         { inArray: ['taskRuns.status', [...activeRunStatuses]] },
         { isNull: 'taskRuns.canceledAt' },
+        { isNull: 'tasks.deletedAt' },
       ],
     });
   });

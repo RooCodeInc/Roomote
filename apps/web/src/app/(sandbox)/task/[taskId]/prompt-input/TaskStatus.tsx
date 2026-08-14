@@ -82,7 +82,7 @@ export function TaskStatus({ taskRun }: TaskStatusProps) {
         sleepRemainingMs != null &&
         sleepRemainingMs > 0 && (
           <BasicTooltip content="Approximate time until this task goes to sleep.">
-            <span className="text-muted-foreground tabular-nums text-xs mr-2 cursor-default">
+            <span className="text-muted-foreground tabular-nums text-xs mr-2 cursor-default hidden @min-[380px]:inline">
               {formatSleepMinutes(sleepRemainingMs)}
             </span>
           </BasicTooltip>

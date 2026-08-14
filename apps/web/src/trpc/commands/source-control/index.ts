@@ -36,6 +36,7 @@ import type { UserAuthSuccess } from '@/types';
 import { getRepositories } from '@/lib/server';
 import { Env } from '@/lib/server/env';
 import { getPublicAppUrl } from '@/lib/server/get-public-app-url';
+import { enqueueAutomationSignalPrefetch } from '@roomote/sdk/server/automation-recommendations';
 
 import {
   assertAdmin,
@@ -534,6 +535,14 @@ export async function syncRepositoriesCommand(
         const syncResult = await GitLab.syncGitLabRepositories({
           userId: auth.userId,
         });
+        void enqueueAutomationSignalPrefetch(
+          syncResult.repositories.map((repository) => repository.id),
+        ).catch((error) =>
+          console.error(
+            '[source-control] Failed to enqueue GitLab signal prefetch:',
+            error,
+          ),
+        );
 
         // Webhook setup failures should not fail the sync: repositories are
         // usable for manual launches even when webhooks could not be
@@ -554,6 +563,14 @@ export async function syncRepositoriesCommand(
         const syncResult = await Gitea.syncGiteaRepositories({
           userId: auth.userId,
         });
+        void enqueueAutomationSignalPrefetch(
+          syncResult.repositories.map((repository) => repository.id),
+        ).catch((error) =>
+          console.error(
+            '[source-control] Failed to enqueue Gitea signal prefetch:',
+            error,
+          ),
+        );
 
         const webhooks = await configureGiteaWebhooks(
           auth.userId,
@@ -571,6 +588,14 @@ export async function syncRepositoriesCommand(
         const syncResult = await Bitbucket.syncBitbucketRepositories({
           userId: auth.userId,
         });
+        void enqueueAutomationSignalPrefetch(
+          syncResult.repositories.map((repository) => repository.id),
+        ).catch((error) =>
+          console.error(
+            '[source-control] Failed to enqueue Bitbucket signal prefetch:',
+            error,
+          ),
+        );
 
         const webhooks = await configureBitbucketWebhooks(
           auth.userId,
@@ -588,6 +613,14 @@ export async function syncRepositoriesCommand(
         const syncResult = await Ado.syncAdoRepositories({
           userId: auth.userId,
         });
+        void enqueueAutomationSignalPrefetch(
+          syncResult.repositories.map((repository) => repository.id),
+        ).catch((error) =>
+          console.error(
+            '[source-control] Failed to enqueue ADO signal prefetch:',
+            error,
+          ),
+        );
 
         const webhooks = await configureAdoWebhooks(
           auth.userId,

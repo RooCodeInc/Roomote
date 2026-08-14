@@ -39,6 +39,10 @@ const SETUP_STEP_DEFINITIONS = [
     title: 'Connect source control',
   },
   {
+    id: 'automation-recommendations',
+    title: 'Automation recommendations',
+  },
+  {
     id: 'compute-provider',
     title: 'Sandbox provider',
   },
