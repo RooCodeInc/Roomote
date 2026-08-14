@@ -831,12 +831,11 @@ describe('generateOpenCodeConfig provider support', () => {
 
   it('configures trusted LiteLLM context limits for proactive compaction', () => {
     const runtimeEnv = {
-      R_MODEL: 'litellm/coding',
+      R_MODEL: 'openrouter/openai/gpt-5.4',
       R_TASK_MODEL_CONTEXT_WINDOWS: JSON.stringify({
         'litellm/qwen3.6:35b-unsloth': 210_176,
       }),
-      LITELLM_BASE_URL: 'https://litellm.example.com/v1',
-      LITELLM_API_KEY: 'litellm-key',
+      R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference/',
     };
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
@@ -845,7 +844,10 @@ describe('generateOpenCodeConfig provider support', () => {
     const config = JSON.parse(result.configContent) as {
       provider: Record<
         string,
-        { models: Record<string, { limit?: Record<string, number> }> }
+        {
+          models: Record<string, { limit?: Record<string, number> }>;
+          options?: Record<string, unknown>;
+        }
       >;
     };
 
@@ -856,8 +858,9 @@ describe('generateOpenCodeConfig provider support', () => {
       input: 210_176,
       output: 32_000,
     });
-    expect(config.provider.litellm?.models.coding).toMatchObject({
-      name: 'coding',
+    expect(config.provider.litellm?.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/litellm/v1',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
     });
     expect(runtimeEnv).not.toHaveProperty('R_TASK_MODEL_CONTEXT_WINDOWS');
   });

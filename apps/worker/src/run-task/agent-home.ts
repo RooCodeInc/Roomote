@@ -1654,7 +1654,7 @@ function resolveModelBackedOpenCodeConfig(
       configuredModelIds,
     ),
     runtimeEnv,
-    configuredModelIds,
+    openAiCompatibleModelIds,
   );
 
   return {
