@@ -284,7 +284,6 @@ export function mergeOpenAiCompatibleProviderConfig(
                         limit: {
                           ...existingLimit,
                           context: contextWindow,
-                          input: contextWindow,
                           output: outputLimit,
                         },
                       }

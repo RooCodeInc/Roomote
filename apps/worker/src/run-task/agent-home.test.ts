@@ -855,7 +855,6 @@ describe('generateOpenCodeConfig provider support', () => {
       config.provider.litellm?.models['qwen3.6:35b-unsloth']?.limit,
     ).toEqual({
       context: 210_176,
-      input: 210_176,
       output: 32_000,
     });
     expect(config.provider.litellm?.options).toMatchObject({

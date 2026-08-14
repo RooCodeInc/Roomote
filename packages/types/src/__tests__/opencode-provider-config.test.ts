@@ -30,34 +30,33 @@ describe('mergeOpenAiCompatibleProviderConfig', () => {
   });
 
   it('applies trusted context windows while preserving existing model options', () => {
-    expect(
-      mergeOpenAiCompatibleProviderConfig(
-        {
-          litellm: {
-            models: {
-              'qwen3.6:35b-unsloth': {
-                options: { temperature: 0 },
-                limit: { context: 999_999, output: 16_000 },
-              },
+    const config = mergeOpenAiCompatibleProviderConfig(
+      {
+        litellm: {
+          models: {
+            'qwen3.6:35b-unsloth': {
+              options: { temperature: 0 },
+              limit: { context: 999_999, output: 16_000 },
             },
           },
         },
-        {
-          LITELLM_BASE_URL: 'https://litellm.example.com/v1',
-          LITELLM_API_KEY: 'secret',
-        },
-        ['litellm/qwen3.6:35b-unsloth', 'litellm/unknown'],
-        undefined,
-        { 'litellm/qwen3.6:35b-unsloth': 210_176 },
-      ),
-    ).toMatchObject({
+      },
+      {
+        LITELLM_BASE_URL: 'https://litellm.example.com/v1',
+        LITELLM_API_KEY: 'secret',
+      },
+      ['litellm/qwen3.6:35b-unsloth', 'litellm/unknown'],
+      undefined,
+      { 'litellm/qwen3.6:35b-unsloth': 210_176 },
+    );
+
+    expect(config).toMatchObject({
       litellm: {
         models: {
           'qwen3.6:35b-unsloth': {
             options: { temperature: 0 },
             limit: {
               context: 210_176,
-              input: 210_176,
               output: 16_000,
             },
           },
@@ -65,6 +64,13 @@ describe('mergeOpenAiCompatibleProviderConfig', () => {
         },
       },
     });
+    expect(config).not.toHaveProperty([
+      'litellm',
+      'models',
+      'qwen3.6:35b-unsloth',
+      'limit',
+      'input',
+    ]);
   });
 
   it('preserves existing model options for named OpenAI-compatible providers', () => {
