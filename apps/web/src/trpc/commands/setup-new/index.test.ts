@@ -22,6 +22,7 @@ const {
   mockValidateSetupModelProviderCredentials,
   mockEnqueueAutomationRecommendations,
   mockUpsertAutomation,
+  mockCaptureActivationAutomationChanged,
 } = vi.hoisted(() => ({
   mockValidateTeamsBotCredentials: vi.fn(async () => undefined),
   mockTxSelect: vi.fn(),
@@ -51,6 +52,7 @@ const {
     .mockResolvedValue(undefined),
   mockEnqueueAutomationRecommendations: vi.fn(async () => undefined),
   mockUpsertAutomation: vi.fn(async () => undefined),
+  mockCaptureActivationAutomationChanged: vi.fn(async () => undefined),
 }));
 
 vi.mock('../task-models/provider-validation', () => ({
@@ -95,6 +97,11 @@ vi.mock('@roomote/gitea', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: vi.fn(),
+}));
+
+vi.mock('@roomote/telemetry/server', () => ({
+  captureActivationAutomationChanged: mockCaptureActivationAutomationChanged,
+  captureTaskSettled: vi.fn(),
 }));
 
 vi.mock('@roomote/slack', () => ({
@@ -1463,6 +1470,14 @@ describe('setup-new onboarding task start command', () => {
         key: 'ci_failure_triage',
         enabled: false,
       }),
+    );
+    expect(mockCaptureActivationAutomationChanged).toHaveBeenCalledWith(
+      'enabled',
+      'review_code',
+    );
+    expect(mockCaptureActivationAutomationChanged).not.toHaveBeenCalledWith(
+      'enabled',
+      'ci_failure_triage',
     );
     expect(result?.recommendations).toEqual(
       expect.arrayContaining([

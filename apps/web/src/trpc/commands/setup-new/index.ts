@@ -7,7 +7,10 @@ import { DiscordCommunicationProvider } from '@roomote/communication/discord-pro
 import type { TeamsCommunicationProvider } from '@roomote/communication/teams-provider';
 import { TelegramCommunicationProvider } from '@roomote/communication/telegram-provider';
 import { SlackNotifier } from '@roomote/slack';
-import { captureTaskSettled } from '@roomote/telemetry/server';
+import {
+  captureActivationAutomationChanged,
+  captureTaskSettled,
+} from '@roomote/telemetry/server';
 import {
   db,
   deploymentSettings,
@@ -3238,7 +3241,7 @@ export async function setSetupRecommendationEnabledCommand(
   input: { id: string; enabled: boolean },
 ) {
   assertAdmin(auth);
-  return db.transaction(async (tx) => {
+  const recommendation = await db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
     );
@@ -3283,6 +3286,15 @@ export async function setSetupRecommendationEnabledCommand(
     );
     return nextBatch.recommendations.find((item) => item.id === input.id);
   });
+  const candidate = recommendation
+    ? AUTOMATION_RECOMMENDATION_CATALOG.find(
+        (item) => item.id === recommendation.candidateId,
+      )
+    : null;
+  if (recommendation?.enabled && candidate?.source === 'built_in') {
+    void captureActivationAutomationChanged('enabled', candidate.automationKey);
+  }
+  return recommendation;
 }
 
 async function applySetupRecommendationInTx(
@@ -3336,7 +3348,7 @@ async function applySetupRecommendationInTx(
 
 export async function applySetupRecommendationsCommand(auth: UserAuthSuccess) {
   assertAdmin(auth);
-  return db.transaction(async (tx) => {
+  const batch = await db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
     );
@@ -3375,6 +3387,19 @@ export async function applySetupRecommendationsCommand(auth: UserAuthSuccess) {
     );
     return nextBatch;
   });
+  for (const recommendation of batch?.recommendations ?? []) {
+    if (!recommendation.enabled) continue;
+    const candidate = AUTOMATION_RECOMMENDATION_CATALOG.find(
+      (item) => item.id === recommendation.candidateId,
+    );
+    if (candidate?.source === 'built_in') {
+      void captureActivationAutomationChanged(
+        'enabled',
+        candidate.automationKey,
+      );
+    }
+  }
+  return batch;
 }
 
 export async function listSetupRecommendationsCommand(auth: UserAuthSuccess) {
