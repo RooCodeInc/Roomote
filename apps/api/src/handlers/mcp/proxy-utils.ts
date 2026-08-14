@@ -444,6 +444,24 @@ const OBJECT_ONLY_SCHEMA_KEYWORDS = [
   'propertyNames',
   'minProperties',
   'maxProperties',
+  'dependentRequired',
+  'dependentSchemas',
+] as const;
+
+// Keywords that constrain the value in ways a per-type branch split cannot
+// represent (combinators, references, conditionals). A composite union
+// carrying any of these as a sibling is left untouched: splitting it would
+// silently drop the constraint and widen what the schema accepts.
+const UNION_SPLIT_BLOCKING_KEYWORDS = [
+  'anyOf',
+  'oneOf',
+  'allOf',
+  'not',
+  'if',
+  'then',
+  'else',
+  '$ref',
+  '$dynamicRef',
 ] as const;
 
 const STRING_ONLY_SCHEMA_KEYWORDS = [
@@ -571,12 +589,12 @@ function normalizeToolSchemaForStrictProviders(
     return schema;
   }
 
-  if ('anyOf' in schema || 'oneOf' in schema || 'allOf' in schema) {
-    // Splitting the union would clobber the sibling combinator, so decline —
+  if (UNION_SPLIT_BLOCKING_KEYWORDS.some((keyword) => keyword in schema)) {
+    // Splitting the union would clobber the sibling constraint, so decline —
     // but say so, since strict providers may reject the untouched schema and
     // this log is the only breadcrumb when they do.
     console.warn(
-      '[mcp-proxy] Left composite type union with sibling anyOf/oneOf/allOf un-normalized; strict providers may reject this tool schema',
+      '[mcp-proxy] Left composite type union with a sibling combinator, reference, or conditional un-normalized; strict providers may reject this tool schema',
     );
     return schema;
   }

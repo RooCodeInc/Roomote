@@ -691,6 +691,14 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
                       items: { type: 'string' },
                       default: null,
                     },
+                    // A union with a sibling constraint a branch split cannot
+                    // represent ($ref, not, conditionals) must be declined
+                    // rather than rebuilt without the constraint.
+                    referenced_list: {
+                      type: ['array', 'null'],
+                      $ref: '#/$defs/AllowedValues',
+                      items: { type: 'string' },
+                    },
                   },
                 },
               },
@@ -730,6 +738,11 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
         { type: 'array', items: { type: 'string' } },
       ],
       default: null,
+    });
+    expect(properties.referenced_list).toEqual({
+      type: ['array', 'null'],
+      $ref: '#/$defs/AllowedValues',
+      items: { type: 'string' },
     });
   });
 
