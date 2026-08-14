@@ -392,7 +392,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     });
   });
 
-  it('recommends GLM 5.3 from supported providers and keeps GLM 5.2 for OpenRouter', () => {
+  it('recommends GLM 5.3 where available and retains GLM 5.2 elsewhere', () => {
     const glm53ByProvider = SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) => {
       const model = provider.suggestedTaskModels.find(
         (suggestion) => suggestion.displayName === 'GLM 5.3',
@@ -414,7 +414,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(
       buildRecommendedDeploymentModelConfig(getSetupModelProvider('zai'))
         .roomoteModel,
-    ).toBe('zai/glm-5');
+    ).toBe('zai/glm-5.2');
     expect(
       SETUP_MODEL_PROVIDER_CATALOG.flatMap((provider) => {
         const model = provider.suggestedTaskModels.find(
@@ -425,6 +425,12 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       }),
     ).toEqual([
       { providerId: 'openrouter', modelId: 'openrouter/z-ai/glm-5.2' },
+      { providerId: 'vercel', modelId: 'vercel/zai/glm-5.2' },
+      { providerId: 'requesty', modelId: 'requesty/glm-5.2' },
+      { providerId: 'baseten', modelId: 'baseten/zai-org/GLM-5.2' },
+      { providerId: 'togetherai', modelId: 'togetherai/zai-org/GLM-5.2' },
+      { providerId: 'opencode', modelId: 'opencode/glm-5.2' },
+      { providerId: 'zai', modelId: 'zai/glm-5.2' },
     ]);
   });
 
@@ -854,6 +860,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/gpt-5.6-luna@eu',
       'requesty/gemini-3.7-flash',
       'requesty/deepseek-v4-flash-0731',
+      'requesty/glm-5.2',
       'requesty/kimi-k3',
       'requesty/grok-4.6',
     ]);
