@@ -28,6 +28,21 @@ const SNAPSHOT_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const PENDING_SNAPSHOT_RECOVERY_GRACE_MS = 5 * 60 * 1000;
 const LOG_PREFIX = '[refreshSnapshots]';
 
+/**
+ * Minimum delay between snapshot refresh launches. The compute broker's
+ * per-tenant sandbox-creation budget is a small token bucket (burst 6,
+ * refilling ~6/minute) shared with interactive task launches, so enqueueing
+ * every candidate in one burst can drain the whole budget and rate-limit both
+ * the refresh itself and user-initiated tasks. Spacing background launches
+ * 30s apart caps the refresh at ~2 creations/minute, leaving most of the
+ * budget for interactive load.
+ */
+export const SNAPSHOT_REFRESH_LAUNCH_SPACING_MS = 30_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 interface SnapshotRefreshCandidateBase {
   environmentId: string;
   environmentName: string;
@@ -347,6 +362,7 @@ export const refreshSnapshotsJob = async () => {
 
     logRefreshSnapshots('Found environments due for snapshot maintenance', {
       cutoff: cutoff.toISOString(),
+      launchSpacingMs: SNAPSHOT_REFRESH_LAUNCH_SPACING_MS,
       candidateCount: refreshCandidates.length,
       candidatesByProvider: summarizeCandidatesByProvider(refreshCandidates),
       targetProvider: discovery.targetProvider,
@@ -360,7 +376,18 @@ export const refreshSnapshotsJob = async () => {
     let refreshed = 0;
     let skippedActiveRefreshCount = 0;
     const errors: Array<Record<string, unknown>> = [];
-    for (const candidate of refreshCandidates) {
+    // The controller dequeues each run within seconds of its enqueue, so
+    // spacing the enqueues here is what spaces the sandbox creations at the
+    // broker. Skipped candidates never sleep; the delay only follows an
+    // actual launch with candidates still left to process.
+    const paceAfterLaunch = async (hasRemainingCandidates: boolean) => {
+      if (hasRemainingCandidates) {
+        await sleep(SNAPSHOT_REFRESH_LAUNCH_SPACING_MS);
+      }
+    };
+    for (const [candidateIndex, candidate] of refreshCandidates.entries()) {
+      const hasRemainingCandidates =
+        candidateIndex < refreshCandidates.length - 1;
       const snapshotAgeHours = getSnapshotAgeHours(
         candidate.snapshotCreatedAt,
         startedAt,
@@ -461,6 +488,7 @@ export const refreshSnapshotsJob = async () => {
           });
 
           refreshed++;
+          await paceAfterLaunch(hasRemainingCandidates);
           continue;
         }
 
@@ -567,6 +595,7 @@ export const refreshSnapshotsJob = async () => {
         });
 
         refreshed++;
+        await paceAfterLaunch(hasRemainingCandidates);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
 
