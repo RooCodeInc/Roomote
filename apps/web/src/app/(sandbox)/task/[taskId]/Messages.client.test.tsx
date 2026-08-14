@@ -583,6 +583,75 @@ describe('Messages', () => {
     );
   });
 
+  it.each([
+    ['complete', 'Goal completed', null],
+    ['blocked', 'Goal blocked', 'Waiting for a number'],
+    ['budget_limited', 'Goal continuation limit reached', null],
+  ] as const)(
+    'keeps the prior %s marker while an optimistic retried goal is active',
+    (priorStatus, priorLabel, blockedReason) => {
+      const refreshTaskSession = vi.fn();
+      const previousGoal = {
+        id: 'previous-goal',
+        ts: 1_000,
+        role: 'user',
+        kind: 'text',
+        partial: false,
+        sessionId: 'session-1',
+        updateType: 'roomote_runtime.user_prompt',
+        text: 'Count to ten',
+        data: {
+          goal: {
+            objective: 'Count to ten',
+            generation: 'goal-generation:1',
+          },
+        },
+      };
+      const optimisticRetry = {
+        ...previousGoal,
+        id: 'optimistic-retry',
+        ts: 2_000,
+        data: {
+          goal: { objective: 'Count to ten', generation: null },
+        },
+      };
+      const session = {
+        taskId: `task-goal-retry-${priorStatus}`,
+        prompt: null,
+        task: {
+          goalObjective: 'Count to ten',
+          goalStatus: priorStatus,
+          goalBlockedReason: blockedReason,
+          goalGenerationIds: ['goal-generation:1'],
+        },
+        taskRun: null,
+        artifacts: [],
+        refreshTaskSession,
+      };
+
+      sandboxMessagesState.messages = [previousGoal];
+      mockBuildAcpRenderBlocks.mockReturnValue([
+        { kind: 'message', msg: previousGoal },
+      ] as never);
+      const { rerender } = render(<Messages session={session as never} />);
+
+      expect(screen.getByTestId('goal-status')).toHaveTextContent(priorLabel);
+
+      sandboxMessagesState.messages = [previousGoal, optimisticRetry];
+      mockBuildAcpRenderBlocks.mockReturnValue([
+        { kind: 'message', msg: previousGoal },
+        { kind: 'message', msg: optimisticRetry },
+      ] as never);
+      rerender(<Messages session={{ ...session } as never} />);
+
+      expect(screen.getAllByText('Sent as goal')).toHaveLength(2);
+      expect(screen.getByText(priorLabel)).toBeVisible();
+      expect(screen.getByText('Pursuing goal')).toBeVisible();
+      expect(screen.getAllByText('Count to ten')).toHaveLength(2);
+      expect(refreshTaskSession).toHaveBeenCalled();
+    },
+  );
+
   it('labels the matching historical goal turn when old envelopes lack provenance', () => {
     const goalMessage = {
       id: 'historical-goal-prompt',

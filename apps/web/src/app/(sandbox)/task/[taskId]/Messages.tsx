@@ -275,10 +275,20 @@ const MessagesBase = ({
   }, [historyReady, messages, session.task?.goalObjective]);
   const taskGoalGenerations = session.task?.goalGenerationIds ?? [];
   const taskHasLatestGoal = latestGoalPrompt
-    ? latestGoalPrompt.generation === null
-      ? session.task?.goalObjective === latestGoalPrompt.objective
-      : taskGoalGenerations.includes(latestGoalPrompt.generation)
+    ? latestGoalPrompt.generation !== null &&
+      taskGoalGenerations.includes(latestGoalPrompt.generation)
     : true;
+  const historicalGoalStatus =
+    latestGoalPrompt?.generation === null &&
+    session.task?.goalObjective &&
+    session.task.goalStatus &&
+    session.task.goalStatus !== 'active'
+      ? {
+          objective: session.task.goalObjective,
+          status: session.task.goalStatus,
+          blockedReason: session.task.goalBlockedReason,
+        }
+      : null;
   const goalStatus =
     session.task?.goalObjective && session.task.goalStatus && taskHasLatestGoal
       ? {
@@ -520,6 +530,9 @@ const MessagesBase = ({
           )}
           {!historyReady && <TranscriptSkeleton />}
           {renderBlocks.map((block) => renderRenderBlock(block, false))}
+          {historicalGoalStatus ? (
+            <GoalStatusMessage {...historicalGoalStatus} />
+          ) : null}
           {goalStatus ? <GoalStatusMessage {...goalStatus} /> : null}
           {session.taskRun && <SleepWakeMessages taskRun={session.taskRun} />}
           {shouldShowNarrationWorkingReasoning && (
