@@ -53,6 +53,7 @@ export async function findActiveSlackTaskRun(
           : []),
         inArray(taskRuns.status, [...activeRunStatuses]),
         isNull(taskRuns.canceledAt),
+        isNull(tasks.deletedAt),
       ),
     )
     .orderBy(desc(taskRuns.createdAt))
@@ -86,6 +87,7 @@ export async function findActiveSlackTaskRun(
           ...(scope.slackTeamId
             ? [getSlackTaskRunWorkspacePredicate(scope.slackTeamId)]
             : []),
+          isNull(tasks.deletedAt),
         ),
       )
       .orderBy(desc(taskRuns.createdAt))
