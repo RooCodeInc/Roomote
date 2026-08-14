@@ -119,6 +119,10 @@ const {
   recommendationQueue: automationRecommendationsQueue,
   recommendationWorker: automationRecommendationsWorker,
   recommendationQueueEvents: automationRecommendationsQueueEvents,
+  recommendationInitialRunQueue: automationRecommendationInitialRunQueue,
+  recommendationInitialRunWorker: automationRecommendationInitialRunWorker,
+  recommendationInitialRunQueueEvents:
+    automationRecommendationInitialRunQueueEvents,
   signalPrefetchQueue: automationSignalPrefetchQueue,
   signalPrefetchWorker: automationSignalPrefetchWorker,
   signalPrefetchQueueEvents: automationSignalPrefetchQueueEvents,
@@ -191,6 +195,9 @@ createBullBoard({
       readOnlyMode: false,
     }),
     new BullMQAdapter(automationSignalPrefetchQueue, {
+      readOnlyMode: false,
+    }),
+    new BullMQAdapter(automationRecommendationInitialRunQueue, {
       readOnlyMode: false,
     }),
     new BullMQAdapter(slackAccountLinkEducationQueue, { readOnlyMode: false }),
@@ -354,6 +361,9 @@ async function gracefulShutdown() {
     await automationSignalPrefetchWorker.close();
     await automationSignalPrefetchQueueEvents.close();
     await automationSignalPrefetchQueue.close();
+    await automationRecommendationInitialRunWorker.close();
+    await automationRecommendationInitialRunQueueEvents.close();
+    await automationRecommendationInitialRunQueue.close();
     await slackAccountLinkEducationWorker.close();
     await slackAccountLinkEducationQueueEvents.close();
     await slackAccountLinkEducationQueue.close();

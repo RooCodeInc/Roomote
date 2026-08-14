@@ -39,15 +39,22 @@ import {
   eq,
   gte,
   inArray,
+  sql,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
+
+import { runCustomAutomationNow } from '../automations/custom-automations';
+import { runAutomationNow } from '../automations/run-now';
 
 export const AUTOMATION_RECOMMENDATIONS_QUEUE_NAME =
   'automation-recommendations';
 export const AUTOMATION_SIGNAL_PREFETCH_QUEUE_NAME =
   'automation-signal-prefetch';
+export const AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME =
+  'automation-recommendation-initial-runs';
 export const AUTOMATION_SIGNALS_VERSION = 2;
 export const AUTOMATION_RECOMMENDATION_REPOSITORY_CAP = 10;
+const AUTOMATION_RECOMMENDATION_INITIAL_RUN_CLAIM_STALE_MS = 15 * 60 * 1_000;
 const AUTOMATION_SIGNAL_PREFETCH_CAP = AUTOMATION_RECOMMENDATION_REPOSITORY_CAP;
 
 const AUTOMATION_SIGNAL_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
@@ -92,8 +99,18 @@ export type AutomationSignalPrefetchJob = z.infer<
   typeof automationSignalPrefetchJobSchema
 >;
 
+export const automationRecommendationInitialRunJobSchema = z.object({
+  fingerprint: z.string().min(1),
+  recommendationId: z.string().min(1),
+});
+export type AutomationRecommendationInitialRunJob = z.infer<
+  typeof automationRecommendationInitialRunJobSchema
+>;
+
 let recommendationQueue: Queue<AutomationRecommendationJob> | null = null;
 let signalPrefetchQueue: Queue<AutomationSignalPrefetchJob> | null = null;
+let recommendationInitialRunQueue: Queue<AutomationRecommendationInitialRunJob> | null =
+  null;
 
 function getRecommendationQueue() {
   recommendationQueue ??= new Queue<AutomationRecommendationJob>(
@@ -125,6 +142,23 @@ function getSignalPrefetchQueue() {
     },
   );
   return signalPrefetchQueue;
+}
+
+function getRecommendationInitialRunQueue() {
+  recommendationInitialRunQueue ??=
+    new Queue<AutomationRecommendationInitialRunJob>(
+      AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME,
+      {
+        connection: getRedis(),
+        defaultJobOptions: {
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 5_000 },
+          removeOnComplete: { age: 24 * 3_600, count: 500 },
+          removeOnFail: { age: 7 * 24 * 3_600 },
+        },
+      },
+    );
+  return recommendationInitialRunQueue;
 }
 
 export function buildAutomationRecommendationFingerprint(
@@ -184,6 +218,28 @@ export async function enqueueAutomationSignalPrefetch(
       ),
     ),
   );
+}
+
+export async function enqueueAutomationRecommendationInitialRun(
+  input: AutomationRecommendationInitialRunJob,
+  delay: number,
+): Promise<void> {
+  const request = automationRecommendationInitialRunJobSchema.parse(input);
+  const queue = getRecommendationInitialRunQueue();
+  const jobId = `automation-recommendation-initial-run-${request.fingerprint}-${request.recommendationId}`;
+  const existing = await queue.getJob(jobId);
+  if (existing) {
+    const state = await existing.getState();
+    if (state === 'completed' || state === 'failed') {
+      await existing.remove();
+    } else {
+      return;
+    }
+  }
+  await queue.add('run-automation-recommendation', request, {
+    jobId,
+    delay,
+  });
 }
 
 async function getCachedGitHubOctokit(
@@ -622,9 +678,14 @@ function mergeRecommendationState(
     return batch;
   }
 
+  const applicationState =
+    previous.applicationState ??
+    (previous.status === 'ready' ? 'applied' : 'pending');
+
   return {
     ...batch,
     dismissed: previous.dismissed,
+    applicationState,
     recommendations: batch.recommendations.map((recommendation) => {
       const existing = previous.recommendations.find(
         (item) => item.candidateId === recommendation.candidateId,
@@ -632,11 +693,20 @@ function mergeRecommendationState(
       return existing
         ? {
             ...recommendation,
-            enabled: existing.enabled,
+            enabled:
+              applicationState === 'skipped' && existing.applied !== true
+                ? false
+                : existing.enabled,
             lastRunTaskId: existing.lastRunTaskId,
             automationId: existing.automationId,
+            applied: existing.applied,
+            initialRunClaimedAt: existing.initialRunClaimedAt,
           }
-        : recommendation;
+        : {
+            ...recommendation,
+            enabled:
+              applicationState === 'skipped' ? false : recommendation.enabled,
+          };
     }),
   };
 }
@@ -750,6 +820,7 @@ async function buildRecommendationBatch(
     partial: signals.some((signal) => signal.partial === true),
     errorCode: null,
     dismissed: false,
+    applicationState: 'pending',
     recommendations: scored.map(({ candidate, score, explanation }, index) => ({
       id: `${candidate.id}:${index + 1}`,
       candidateId: candidate.id,
@@ -759,6 +830,8 @@ async function buildRecommendationBatch(
       enabled: true,
       lastRunTaskId: null,
       automationId: null,
+      applied: false,
+      initialRunClaimedAt: null,
     })),
   };
 }
@@ -857,6 +930,171 @@ export async function processAutomationRecommendationsJob(
     console.warn(
       `[automation-recommendations] Recommendation scoring failed after ${Date.now() - startedAt}ms`,
     );
+    throw error;
+  }
+}
+
+function recommendationApplicationState(
+  batch: AutomationRecommendationBatch,
+): 'pending' | 'applied' | 'skipped' {
+  return (
+    batch.applicationState ?? (batch.status === 'ready' ? 'applied' : 'pending')
+  );
+}
+
+async function claimAutomationRecommendationInitialRun(
+  request: AutomationRecommendationInitialRunJob,
+) {
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
+    );
+    const [settings] = await tx
+      .select({ setupNewState: deploymentSettings.setupNewState })
+      .from(deploymentSettings)
+      .where(eq(deploymentSettings.id, 'default'))
+      .limit(1);
+    const state = normalizeSetupNewState(settings?.setupNewState ?? {});
+    const batch = state.automationRecommendations;
+    const recommendation = batch?.recommendations.find(
+      (item) => item.id === request.recommendationId,
+    );
+    if (
+      !batch ||
+      batch.inputFingerprint !== request.fingerprint ||
+      recommendationApplicationState(batch) !== 'applied' ||
+      !recommendation?.enabled ||
+      recommendation.lastRunTaskId
+    ) {
+      return null;
+    }
+
+    const claimedAt = recommendation.initialRunClaimedAt
+      ? Date.parse(recommendation.initialRunClaimedAt)
+      : Number.NaN;
+    if (
+      Number.isFinite(claimedAt) &&
+      Date.now() - claimedAt <
+        AUTOMATION_RECOMMENDATION_INITIAL_RUN_CLAIM_STALE_MS
+    ) {
+      return null;
+    }
+
+    const nextBatch = {
+      ...batch,
+      recommendations: batch.recommendations.map((item) =>
+        item.id === request.recommendationId
+          ? { ...item, initialRunClaimedAt: new Date().toISOString() }
+          : item,
+      ),
+    };
+    await tx
+      .update(deploymentSettings)
+      .set({
+        setupNewState: normalizeSetupNewState({
+          ...state,
+          automationRecommendations: nextBatch,
+        }),
+        updatedAt: new Date(),
+      })
+      .where(eq(deploymentSettings.id, 'default'));
+
+    return {
+      candidateId: recommendation.candidateId,
+      automationId: recommendation.automationId,
+    };
+  });
+}
+
+async function updateAutomationRecommendationInitialRun(
+  request: AutomationRecommendationInitialRunJob,
+  update: (
+    recommendation: AutomationRecommendationBatch['recommendations'][number],
+  ) => AutomationRecommendationBatch['recommendations'][number],
+) {
+  await db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
+    );
+    const [settings] = await tx
+      .select({ setupNewState: deploymentSettings.setupNewState })
+      .from(deploymentSettings)
+      .where(eq(deploymentSettings.id, 'default'))
+      .limit(1);
+    const state = normalizeSetupNewState(settings?.setupNewState ?? {});
+    const batch = state.automationRecommendations;
+    if (!batch || batch.inputFingerprint !== request.fingerprint) return;
+    const nextBatch = {
+      ...batch,
+      recommendations: batch.recommendations.map((item) =>
+        item.id === request.recommendationId ? update(item) : item,
+      ),
+    };
+    await tx
+      .update(deploymentSettings)
+      .set({
+        setupNewState: normalizeSetupNewState({
+          ...state,
+          automationRecommendations: nextBatch,
+        }),
+        updatedAt: new Date(),
+      })
+      .where(eq(deploymentSettings.id, 'default'));
+  });
+}
+
+export async function runAutomationRecommendationInitialRunJob(
+  input: AutomationRecommendationInitialRunJob,
+): Promise<void> {
+  const request = automationRecommendationInitialRunJobSchema.parse(input);
+  const claimed = await claimAutomationRecommendationInitialRun(request);
+  if (!claimed) return;
+
+  const candidate = AUTOMATION_RECOMMENDATION_CATALOG.find(
+    (item) => item.id === claimed.candidateId,
+  );
+  if (!candidate) {
+    await updateAutomationRecommendationInitialRun(request, (item) => ({
+      ...item,
+      initialRunClaimedAt: null,
+    }));
+    throw new Error(
+      `Recommendation candidate was not found: ${claimed.candidateId}`,
+    );
+  }
+
+  try {
+    const result =
+      candidate.source === 'built_in'
+        ? candidate.automationKey === 'review_code'
+          ? {
+              outcome: 'skipped' as const,
+              reason: 'Review Code runs from pull-request events.',
+            }
+          : await runAutomationNow(candidate.automationKey)
+        : claimed.automationId
+          ? await runCustomAutomationNow(claimed.automationId)
+          : {
+              outcome: 'failed' as const,
+              error: 'Recommendation automation was not created.',
+            };
+
+    if (result.outcome === 'failed') {
+      throw new Error(result.error);
+    }
+
+    await updateAutomationRecommendationInitialRun(request, (item) => ({
+      ...item,
+      initialRunClaimedAt: null,
+      ...(result.outcome === 'launched'
+        ? { lastRunTaskId: result.taskId }
+        : {}),
+    }));
+  } catch (error) {
+    await updateAutomationRecommendationInitialRun(request, (item) => ({
+      ...item,
+      initialRunClaimedAt: null,
+    }));
     throw error;
   }
 }

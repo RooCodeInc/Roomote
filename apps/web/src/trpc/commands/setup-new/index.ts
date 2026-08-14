@@ -58,6 +58,7 @@ import {
   recordSlackConversationMessageBestEffort,
   AUTOMATION_RECOMMENDATION_REPOSITORY_CAP,
   buildAutomationRecommendationFingerprint,
+  enqueueAutomationRecommendationInitialRun,
   enqueueAutomationRecommendations,
   enqueueAutomationSignalPrefetch,
 } from '@roomote/sdk/server';
@@ -278,6 +279,9 @@ function createPendingAutomationRecommendationBatch(
     partial: false,
     errorCode: null,
     dismissed: sameInput ? previousBatch.dismissed : false,
+    applicationState: sameInput
+      ? (previousBatch.applicationState ?? 'pending')
+      : 'pending',
     recommendations: sameInput ? previousBatch.recommendations : [],
   };
 }
@@ -3273,6 +3277,7 @@ export async function setSetupRecommendationEnabledCommand(
           ? {
               ...item,
               enabled: input.enabled,
+              applied: true,
               ...(automationId ? { automationId } : {}),
             }
           : item,
@@ -3374,11 +3379,13 @@ export async function applySetupRecommendationsCommand(auth: UserAuthSuccess) {
       );
       recommendations.push({
         ...recommendation,
+        applied: true,
         ...(automationId ? { automationId } : {}),
       });
     }
 
     const nextBatch = { ...batch, recommendations };
+    nextBatch.applicationState = 'applied';
     await savePersistedSetupNewState(
       normalizeSetupNewState({
         ...state,
@@ -3400,18 +3407,67 @@ export async function applySetupRecommendationsCommand(auth: UserAuthSuccess) {
       );
     }
   }
-  console.info(
-    `[applySetupRecommendationsCommand] Scheduling enabled recommendation runs in ${AUTOMATION_RECOMMENDATION_TRIGGER_DELAY_MS / 60_000} minutes`,
+  await Promise.all(
+    (batch?.recommendations ?? [])
+      .filter((recommendation) => recommendation.enabled)
+      .filter((recommendation) => {
+        const candidate = AUTOMATION_RECOMMENDATION_CATALOG.find(
+          (item) => item.id === recommendation.candidateId,
+        );
+        if (!candidate) return false;
+        return !(
+          candidate?.source === 'built_in' &&
+          candidate.automationKey === 'review_code'
+        );
+      })
+      .map(async (recommendation) => {
+        try {
+          await enqueueAutomationRecommendationInitialRun(
+            {
+              fingerprint: batch!.inputFingerprint,
+              recommendationId: recommendation.id,
+            },
+            AUTOMATION_RECOMMENDATION_TRIGGER_DELAY_MS,
+          );
+        } catch (error) {
+          console.error(
+            `[applySetupRecommendationsCommand] Failed to schedule ${recommendation.id}:`,
+            error,
+          );
+        }
+      }),
   );
-  setTimeout(() => {
-    void triggerEnabledSetupRecommendations(auth, batch).catch((error) => {
-      console.error(
-        '[applySetupRecommendationsCommand] Failed to trigger enabled recommendations:',
-        error,
-      );
-    });
-  }, AUTOMATION_RECOMMENDATION_TRIGGER_DELAY_MS);
   return batch;
+}
+
+export async function skipSetupRecommendationsCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
+    );
+    const state = await getPersistedSetupNewState(tx);
+    const batch = state.automationRecommendations;
+    if (!batch || batch.status !== 'pending') return batch ?? null;
+
+    const nextBatch = {
+      ...batch,
+      applicationState: 'skipped' as const,
+      recommendations: batch.recommendations.map((recommendation) => ({
+        ...recommendation,
+        enabled: false,
+        applied: false,
+      })),
+    };
+    await savePersistedSetupNewState(
+      normalizeSetupNewState({
+        ...state,
+        automationRecommendations: nextBatch,
+      }),
+      tx,
+    );
+    return nextBatch;
+  });
 }
 
 export async function listSetupRecommendationsCommand(auth: UserAuthSuccess) {
@@ -3446,6 +3502,7 @@ export async function startSetupRecommendationsCommand(auth: UserAuthSuccess) {
             completedAt: null,
             partial: false,
             dismissed: false,
+            applicationState: 'pending' as const,
             recommendations: [],
           }),
       status: 'pending' as const,
@@ -3571,52 +3628,6 @@ async function recordSetupRecommendationLaunch(
       );
     }
   });
-}
-
-async function triggerEnabledSetupRecommendations(
-  auth: UserAuthSuccess,
-  batch: AutomationRecommendationBatch | null | undefined,
-) {
-  await Promise.all(
-    (batch?.recommendations ?? [])
-      .filter((recommendation) => recommendation.enabled)
-      .map(async (recommendation) => {
-        const candidate = AUTOMATION_RECOMMENDATION_CATALOG.find(
-          (item) => item.id === recommendation.candidateId,
-        );
-        if (
-          !candidate ||
-          (candidate.source === 'built_in' &&
-            candidate.automationKey === 'review_code')
-        ) {
-          return;
-        }
-
-        console.info(
-          `[applySetupRecommendationsCommand] Starting ${candidate.title} (${recommendation.id})`,
-        );
-        try {
-          const result = await runSetupRecommendationNowForCandidate(
-            auth,
-            recommendation,
-            candidate,
-          );
-          if (result.outcome === 'launched') {
-            await recordSetupRecommendationLaunch(
-              recommendation.id,
-              result.taskId,
-            );
-          }
-          console.info(
-            `[applySetupRecommendationsCommand] ${candidate.title} (${recommendation.id}) ${result.outcome}`,
-          );
-        } catch (error) {
-          console.warn(
-            `[applySetupRecommendationsCommand] Failed to start ${candidate.title} (${recommendation.id}): ${error instanceof Error ? error.message : String(error)}`,
-          );
-        }
-      }),
-  );
 }
 
 export async function runSetupRecommendationNowCommand(

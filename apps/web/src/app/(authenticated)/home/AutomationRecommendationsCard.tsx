@@ -70,7 +70,7 @@ export function AutomationRecommendationsCard() {
   const isFailed = batch.status === 'failed';
   const untouched = batch.recommendations.some(
     (recommendation) =>
-      !recommendation.enabled && !recommendation.lastRunTaskId,
+      recommendation.applied === false && !recommendation.lastRunTaskId,
   );
   if (!isPending && !isFailed && !untouched) return null;
 
@@ -135,7 +135,9 @@ export function AutomationRecommendationsCard() {
               className="flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center"
             >
               <Switch
-                checked={recommendation.enabled}
+                checked={
+                  recommendation.enabled && recommendation.applied !== false
+                }
                 onCheckedChange={(enabled) =>
                   setEnabled.mutate({ id: recommendation.id, enabled })
                 }
@@ -153,7 +155,11 @@ export function AutomationRecommendationsCard() {
                 type="button"
                 variant="outline"
                 size="sm"
-                disabled={runNow.isPending}
+                disabled={
+                  runNow.isPending ||
+                  !recommendation.enabled ||
+                  recommendation.applied === false
+                }
                 onClick={() => runNow.mutate({ id: recommendation.id })}
                 title="Starts a paid automation run"
               >

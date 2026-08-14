@@ -21,6 +21,7 @@ const {
   mockInvalidateTelegramRuntimeCredentialsCache,
   mockValidateSetupModelProviderCredentials,
   mockEnqueueAutomationRecommendations,
+  mockEnqueueAutomationRecommendationInitialRun,
   mockUpsertAutomation,
   mockCaptureActivationAutomationChanged,
   mockTriggerAutomationCommand,
@@ -53,6 +54,7 @@ const {
     .fn()
     .mockResolvedValue(undefined),
   mockEnqueueAutomationRecommendations: vi.fn(async () => undefined),
+  mockEnqueueAutomationRecommendationInitialRun: vi.fn(async () => undefined),
   mockUpsertAutomation: vi.fn(async () => undefined),
   mockCaptureActivationAutomationChanged: vi.fn(async () => undefined),
   mockTriggerAutomationCommand: vi.fn(async () => ({
@@ -141,6 +143,8 @@ vi.mock('@roomote/sdk/server', () => ({
       `${provider ?? 'none'}:${repositoryIds.join(',')}`,
   ),
   enqueueAutomationRecommendations: mockEnqueueAutomationRecommendations,
+  enqueueAutomationRecommendationInitialRun:
+    mockEnqueueAutomationRecommendationInitialRun,
   enqueueAutomationSignalPrefetch: vi.fn(async () => undefined),
   createTeamsCommunicationProviderFromRuntimeCredentials: vi.fn(
     async () => null,
@@ -305,6 +309,7 @@ import {
   saveSetupNewSourceControlProviderChoiceCommand,
   startSetupRecommendationsCommand,
   applySetupRecommendationsCommand,
+  skipSetupRecommendationsCommand,
   startSetupNewOnboardingTaskCommand,
   trackSetupBootstrapWelcomeSeenCommand,
   trackSetupCommsStateCommand,
@@ -1435,7 +1440,6 @@ describe('setup-new onboarding task start command', () => {
   });
 
   it('applies the enabled recommendation selection before continuing setup', async () => {
-    vi.useFakeTimers();
     mockOnboardingTransaction({
       slackInstallation: null,
       setupNewState: {
@@ -1521,14 +1525,12 @@ describe('setup-new onboarding task start command', () => {
       'codeql_triage',
     );
     expect(mockTriggerAutomationCommand).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(5 * 60 * 1_000 - 1);
-    expect(mockTriggerAutomationCommand).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1);
-    await vi.waitFor(() =>
-      expect(mockTriggerAutomationCommand).toHaveBeenCalledWith(
-        expect.objectContaining({ userId: 'setup-test-user' }),
-        { automationKey: 'ci_failure_triage' },
-      ),
+    expect(mockEnqueueAutomationRecommendationInitialRun).toHaveBeenCalledWith(
+      {
+        fingerprint: 'recommendation-fingerprint',
+        recommendationId: 'built-in.ci-failure-triage:2',
+      },
+      5 * 60 * 1_000,
     );
     expect(mockTriggerAutomationCommand).not.toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'setup-test-user' }),
@@ -1546,6 +1548,47 @@ describe('setup-new onboarding task start command', () => {
         }),
       ]),
     );
+  });
+
+  it('keeps a skipped pending batch unapplied and disabled', async () => {
+    mockOnboardingTransaction({
+      slackInstallation: null,
+      setupNewState: {
+        automationRecommendations: {
+          version: 1,
+          inputFingerprint: 'recommendation-fingerprint',
+          catalogVersion: 1,
+          status: 'pending',
+          startedAt: new Date().toISOString(),
+          completedAt: null,
+          partial: false,
+          errorCode: null,
+          dismissed: false,
+          applicationState: 'pending',
+          recommendations: [
+            {
+              id: 'built-in.ci-failure-triage:1',
+              candidateId: 'built-in.ci-failure-triage',
+              rank: 1,
+              score: 1,
+              explanation: 'Fix broken builds.',
+              enabled: true,
+              lastRunTaskId: null,
+              automationId: null,
+            },
+          ],
+        },
+      },
+    });
+
+    const result = await skipSetupRecommendationsCommand(buildMockAuth());
+
+    expect(result).toMatchObject({
+      applicationState: 'skipped',
+      recommendations: [
+        expect.objectContaining({ enabled: false, applied: false }),
+      ],
+    });
   });
 
   it('uses the first workspace provider when setup repositories are mixed', async () => {

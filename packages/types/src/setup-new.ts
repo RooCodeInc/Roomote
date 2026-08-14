@@ -96,7 +96,16 @@ export type AutomationRecommendation = {
   enabled: boolean;
   lastRunTaskId: string | null;
   automationId: string | null;
+  /** Whether setup or an explicit Home action created the automation. */
+  applied?: boolean;
+  /** Set while a durable initial-run job owns this recommendation. */
+  initialRunClaimedAt?: string | null;
 };
+
+export type AutomationRecommendationApplicationState =
+  | 'pending'
+  | 'applied'
+  | 'skipped';
 
 export type AutomationRecommendationBatch = {
   version: 1;
@@ -109,6 +118,8 @@ export type AutomationRecommendationBatch = {
   errorCode: string | null;
   recommendations: AutomationRecommendation[];
   dismissed: boolean;
+  /** Whether setup has applied the selected recommendation settings. */
+  applicationState?: AutomationRecommendationApplicationState;
 };
 
 export type SetupProvisionableComputeProvider =

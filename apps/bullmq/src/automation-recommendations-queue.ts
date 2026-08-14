@@ -2,10 +2,13 @@ import { Queue, QueueEvents, Worker } from 'bullmq';
 
 import {
   AUTOMATION_RECOMMENDATIONS_QUEUE_NAME,
+  AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME,
   AUTOMATION_SIGNAL_PREFETCH_QUEUE_NAME,
   collectAutomationSignalsJob,
   processAutomationRecommendationsJob,
+  runAutomationRecommendationInitialRunJob,
   type AutomationRecommendationJob,
+  type AutomationRecommendationInitialRunJob,
   type AutomationSignalPrefetchJob,
 } from '@roomote/sdk/server';
 
@@ -41,6 +44,22 @@ export function startAutomationRecommendationsQueue() {
     { connection },
   );
 
+  const recommendationInitialRunQueue =
+    new Queue<AutomationRecommendationInitialRunJob>(
+      AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME,
+      { connection },
+    );
+  const recommendationInitialRunWorker =
+    new Worker<AutomationRecommendationInitialRunJob>(
+      AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME,
+      (job) => runAutomationRecommendationInitialRunJob(job.data),
+      { connection, concurrency: 5, autorun: true },
+    );
+  const recommendationInitialRunQueueEvents = new QueueEvents(
+    AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME,
+    { connection },
+  );
+
   recommendationWorker.on('failed', (job, error) =>
     console.error(
       `[AutomationRecommendationsQueue] recommendation job ${job?.id} failed:`,
@@ -53,6 +72,12 @@ export function startAutomationRecommendationsQueue() {
       error,
     ),
   );
+  recommendationInitialRunWorker.on('failed', (job, error) =>
+    console.error(
+      `[AutomationRecommendationsQueue] initial run job ${job?.id} failed:`,
+      error,
+    ),
+  );
 
   return {
     recommendationQueue,
@@ -61,5 +86,8 @@ export function startAutomationRecommendationsQueue() {
     signalPrefetchQueue,
     signalPrefetchWorker,
     signalPrefetchQueueEvents,
+    recommendationInitialRunQueue,
+    recommendationInitialRunWorker,
+    recommendationInitialRunQueueEvents,
   };
 }

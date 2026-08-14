@@ -64,6 +64,19 @@ export function StepAutomationRecommendations({
       },
     }),
   );
+  const skipRecommendations = useMutation(
+    trpc.automations.skipRecommendations.mutationOptions({
+      onSuccess: (skippedBatch) => {
+        if (skippedBatch) {
+          queryClient.setQueryData(
+            trpc.automations.listRecommendations.queryKey(),
+            skippedBatch,
+          );
+        }
+        onContinue();
+      },
+    }),
+  );
   const recoveryAttemptedRef = useRef(false);
   const [pendingTooLong, setPendingTooLong] = useState(false);
   const startRecommendations = useMutation(
@@ -108,6 +121,10 @@ export function StepAutomationRecommendations({
   const handleContinue = () => {
     if (batch?.status === 'ready') {
       applyRecommendations.mutate();
+      return;
+    }
+    if (pending) {
+      skipRecommendations.mutate();
       return;
     }
     onContinue();
@@ -208,6 +225,14 @@ export function StepAutomationRecommendations({
             {applyRecommendations.error.message}
           </AlertDescription>
         </Alert>
+      ) : skipRecommendations.error ? (
+        <Alert variant="destructive">
+          <AlertTriangle className="size-4" />
+          <AlertDescription>
+            Could not skip the recommendation review:{' '}
+            {skipRecommendations.error.message}
+          </AlertDescription>
+        </Alert>
       ) : pendingTooLong ? (
         <Alert>
           <AlertTriangle className="size-4" />
@@ -235,7 +260,11 @@ export function StepAutomationRecommendations({
         <Button
           type="button"
           onClick={handleContinue}
-          disabled={setEnabled.isPending || applyRecommendations.isPending}
+          disabled={
+            setEnabled.isPending ||
+            applyRecommendations.isPending ||
+            skipRecommendations.isPending
+          }
         >
           {applyRecommendations.isPending
             ? 'Applying...'
