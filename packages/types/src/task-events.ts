@@ -45,6 +45,14 @@ export type TaskToolUsage = Record<string, TaskToolUsageEntry>;
 export interface TaskCompletionMetadata {
   isSubtask: boolean;
   completionId?: string;
+  /**
+   * Present when a chat-backed turn exhausted its model closeout reminders
+   * without posting a terminal reply. The worker uses this to deliver the
+   * last finalized assistant message through the platform-owned chat path.
+   */
+  missingChatCloseout?: {
+    reminderCount: number;
+  };
 }
 
 export type TaskEventStartedPayload = [taskId: string];

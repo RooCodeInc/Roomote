@@ -232,6 +232,14 @@ export const releaseShowWidgetFallbackDelivery = (
   options: AppRouterInput['taskRuns']['releaseShowWidgetFallbackDelivery'],
 ) => client.taskRuns.releaseShowWidgetFallbackDelivery.mutate(options);
 
+export const claimMissingChatCloseoutFallbackDelivery = (
+  options: AppRouterInput['taskRuns']['claimMissingChatCloseoutFallbackDelivery'],
+) => client.taskRuns.claimMissingChatCloseoutFallbackDelivery.mutate(options);
+
+export const releaseMissingChatCloseoutFallbackDelivery = (
+  options: AppRouterInput['taskRuns']['releaseMissingChatCloseoutFallbackDelivery'],
+) => client.taskRuns.releaseMissingChatCloseoutFallbackDelivery.mutate(options);
+
 export const recordInferenceUsage = (
   options: AppRouterInput['taskRuns']['recordInferenceUsage'],
 ) => client.taskRuns.recordInferenceUsage.mutate(options);

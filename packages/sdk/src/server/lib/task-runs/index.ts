@@ -18,6 +18,7 @@ export * from './stamp-milestone';
 export * from './update-environment-setup';
 export * from './record-task-message-envelope';
 export * from './show-widget-fallback-delivery';
+export * from './missing-chat-closeout-fallback';
 export * from './record-task-inference-usage';
 export * from './record-compute-provider-usage';
 export * from './has-message-from-source';

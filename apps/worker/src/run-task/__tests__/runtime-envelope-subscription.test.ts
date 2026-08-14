@@ -1,6 +1,10 @@
 import { TaskEventName, type TaskEvent } from '@roomote/types';
 
-const { mockDeliverShowWidgetFallback } = vi.hoisted(() => ({
+const {
+  mockDeliverMissingChatCloseoutFallback,
+  mockDeliverShowWidgetFallback,
+} = vi.hoisted(() => ({
+  mockDeliverMissingChatCloseoutFallback: vi.fn().mockResolvedValue(undefined),
   mockDeliverShowWidgetFallback: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -16,6 +20,10 @@ vi.mock('@roomote/sdk/client', () => ({
 
 vi.mock('../show-widget-fallback-delivery', () => ({
   deliverShowWidgetFallback: mockDeliverShowWidgetFallback,
+}));
+
+vi.mock('../missing-chat-closeout-fallback-delivery', () => ({
+  deliverMissingChatCloseoutFallback: mockDeliverMissingChatCloseoutFallback,
 }));
 
 vi.mock('../../monitoring/sentry', () => ({
@@ -119,6 +127,7 @@ describe('subscribeHarnessCallbacks', () => {
     recordInferenceUsageMock.mockClear();
     recordInferenceUsageMock.mockResolvedValue({ recorded: true });
     captureWorkerExceptionMock.mockClear();
+    mockDeliverMissingChatCloseoutFallback.mockClear();
     mockDeliverShowWidgetFallback.mockClear();
   });
 
@@ -368,6 +377,115 @@ describe('subscribeHarnessCallbacks', () => {
       taskId: 'task-fallback',
       envelope: pendingEnvelope,
     });
+
+    await unsubscribe();
+  });
+
+  it('delivers the latest finalized assistant message when chat closeout reminders are exhausted', async () => {
+    const { harness, emitTaskEvent, emitTurnCompleted } =
+      createRuntimeHarness();
+    const logger = {
+      runId: 146,
+      filePath: '/tmp/test.log',
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      log: vi.fn(),
+    };
+    const mcpTaskEnv = {
+      ROOMOTE_CLOUD_TOKEN: 'token',
+      ROOMOTE_PLATFORM_API_URL: 'https://platform.example.com',
+      ROOMOTE_COMMUNICATION_PROVIDER: 'discord',
+      ROOMOTE_COMMUNICATION_CHANNEL_ID: 'channel-1',
+    };
+    const unsubscribe = subscribeHarnessCallbacks({
+      harness: harness as never,
+      taskRun: { id: 146, taskId: 'task-closeout' } as never,
+      callbacks: { onMessage: vi.fn().mockResolvedValue(undefined) },
+      context: {},
+      logger,
+      mcpTaskEnv,
+    });
+
+    emitTurnCompleted({
+      protocol: 'roomote_runtime',
+      sessionId: 'runtime-session-closeout',
+      ts: 1772823377001,
+      text: 'The final assistant answer.',
+    });
+    emitTaskEvent({
+      eventName: TaskEventName.TaskCompleted,
+      payload: [
+        'runtime-session-closeout',
+        {},
+        {},
+        {
+          isSubtask: false,
+          completionId: 'completion-closeout-1',
+          missingChatCloseout: { reminderCount: 3 },
+        },
+      ],
+    } as TaskEvent);
+
+    await vi.waitFor(() => {
+      expect(mockDeliverMissingChatCloseoutFallback).toHaveBeenCalledWith({
+        runId: 146,
+        completionId: 'completion-closeout-1',
+        text: 'The final assistant answer.',
+        mcpTaskEnv,
+        logger,
+      });
+    });
+
+    await unsubscribe();
+  });
+
+  it('uses the empty-message fallback only for completion events marked as missing closeout', async () => {
+    const { harness, emitTaskEvent } = createRuntimeHarness();
+    const logger = {
+      runId: 147,
+      filePath: '/tmp/test.log',
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      log: vi.fn(),
+    };
+    const unsubscribe = subscribeHarnessCallbacks({
+      harness: harness as never,
+      taskRun: { id: 147, taskId: 'task-empty-closeout' } as never,
+      callbacks: {},
+      context: {},
+      logger,
+    });
+
+    emitTaskEvent({
+      eventName: TaskEventName.TaskCompleted,
+      payload: [
+        'runtime-session-empty-closeout',
+        {},
+        {},
+        { isSubtask: false, missingChatCloseout: { reminderCount: 3 } },
+      ],
+    } as TaskEvent);
+
+    await vi.waitFor(() => {
+      expect(mockDeliverMissingChatCloseoutFallback).toHaveBeenCalledWith({
+        runId: 147,
+        completionId: 'runtime-session-empty-closeout',
+        text: null,
+        mcpTaskEnv: undefined,
+        logger,
+      });
+    });
+
+    mockDeliverMissingChatCloseoutFallback.mockClear();
+    emitTaskEvent({
+      eventName: TaskEventName.TaskCompleted,
+      payload: ['runtime-session-empty-closeout', {}, {}, { isSubtask: false }],
+    } as TaskEvent);
+
+    await Promise.resolve();
+    expect(mockDeliverMissingChatCloseoutFallback).not.toHaveBeenCalled();
 
     await unsubscribe();
   });
