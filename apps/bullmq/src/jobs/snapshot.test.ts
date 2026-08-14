@@ -633,18 +633,6 @@ describe('snapshotJob', () => {
       status: RunStatus.Failed,
       error: expect.stringContaining('cannot be resumed'),
     });
-    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        runId: 123,
-        source: 'snapshot_queue',
-        details: expect.objectContaining({
-          decision: 'finalize_unresumable_run',
-          instanceStatus: 'stopped',
-          finalStatus: RunStatus.Failed,
-        }),
-      }),
-    );
   });
 
   it('does not settle the run when a concurrent recovery wins the terminal claim', async () => {
@@ -671,15 +659,6 @@ describe('snapshotJob', () => {
 
     expect(mockFinishRun).not.toHaveBeenCalled();
     expect(mockSyncTaskStateFromRuns).not.toHaveBeenCalled();
-    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        details: expect.objectContaining({
-          decision: 'skip_finalize_unresumable_run',
-          skipReason: 'claim_lost',
-        }),
-      }),
-    );
   });
 
   it('completes an idle run without a snapshot when its sandbox is stopped on the final attempt', async () => {
@@ -737,15 +716,6 @@ describe('snapshotJob', () => {
     ).rejects.toThrow('Instance is not running');
 
     expect(mockFinishRun).not.toHaveBeenCalled();
-    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        details: expect.objectContaining({
-          decision: 'skip_finalize_unresumable_run',
-          skipReason: 'run_left_this_sandbox',
-        }),
-      }),
-    );
   });
 
   it('does not finalize the run while snapshot retries remain', async () => {

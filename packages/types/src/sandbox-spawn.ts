@@ -82,17 +82,6 @@ export const STUCK_AFTER_DEQUEUE_THRESHOLD_MINUTES = Math.ceil(
 
 export const STUCK_IN_QUEUE_THRESHOLD_MINUTES = 60;
 
-/**
- * Upper age bound for the stuck-run checks in the api's /health/controller
- * endpoint. A run stuck longer than this is debris from a past incident, not
- * a live one: it is still reported in the check summary, but no longer fails
- * health, so a single unrecoverable row cannot block fleet rollouts
- * indefinitely (2026-08-14 staging incident: two day-old unresumable runs
- * 503'd the endpoint until an operator deleted them). Fresh stuckness —
- * between the per-check threshold and this bound — still fails health.
- */
-export const STUCK_RUN_HEALTH_MAX_AGE_MINUTES = 4 * 60;
-
 const NON_RETRYABLE_SPAWN_ERROR_SYMBOL = Symbol.for(
   'roomote.nonRetryableSpawnError',
 );

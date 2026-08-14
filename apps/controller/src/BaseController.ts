@@ -10,8 +10,6 @@ import {
   resolveComputeProviderTarget,
   SANDBOX_ORPHAN_SCAN_INTERVAL_MS,
   SANDBOX_TIMEOUT_MS,
-  STUCK_AFTER_DEQUEUE_THRESHOLD_MINUTES,
-  STUCK_AFTER_DEQUEUE_THRESHOLD_MS,
   WORKER_BOOTSTRAP_CLAIM_TIMEOUT_MS,
 } from '@roomote/types';
 import { createRunToken } from '@roomote/auth';
@@ -716,48 +714,6 @@ export abstract class BaseController {
         await this.claimWorkerBootstrapFailure(taskRun, errorMessage, {
           message: 'Worker did not claim its task run after provisioning',
           signal: 'worker-bootstrap-timeout',
-        })
-      ) {
-        failedCount += 1;
-      }
-    }
-
-    // A dequeued run whose environment never became ready (provisionReadyAt
-    // still null) is invisible to the sweep above, and when its sandbox died
-    // before the worker claimed it, to every other reaper as well:
-    // sleep-check only sweeps started or heartbeating runs, and orphan
-    // recovery re-dequeues it just to fail the same way. Left alone it fails
-    // the deployment's stuck-after-dequeue health check forever (2026-08-14
-    // staging incident, runs #4616/#4617). The threshold matches that health
-    // check, so a run is claimed here the moment it would start failing
-    // health — anything younger may still be provisioning or awaiting orphan
-    // recovery, which refreshes dequeuedAt when it reclaims.
-    const abandonedRuns = await db.query.taskRuns.findMany({
-      where: and(
-        eq(taskRuns.status, RunStatus.Dequeued),
-        isNull(taskRuns.provisionReadyAt),
-        lt(
-          taskRuns.dequeuedAt,
-          new Date(Date.now() - STUCK_AFTER_DEQUEUE_THRESHOLD_MS),
-        ),
-        isNull(taskRuns.startedAt),
-        isNull(taskRuns.workerHeartbeatAt),
-        isNull(taskRuns.canceledAt),
-      ),
-      orderBy: [asc(taskRuns.dequeuedAt)],
-    });
-
-    const abandonedError = `Run was still unclaimed ${STUCK_AFTER_DEQUEUE_THRESHOLD_MINUTES} minutes after dequeue and its environment never became ready`;
-
-    for (const taskRun of abandonedRuns) {
-      if (this.inFlightSpawns.has(taskRun.id)) {
-        continue;
-      }
-
-      if (
-        await this.claimWorkerBootstrapFailure(taskRun, abandonedError, {
-          message: 'Dequeued run was abandoned before provisioning completed',
-          signal: 'worker-bootstrap-abandoned',
         })
       ) {
         failedCount += 1;
