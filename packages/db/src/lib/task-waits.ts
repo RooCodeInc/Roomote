@@ -5,6 +5,7 @@ import {
   MAX_TASK_WAIT_MS,
   MIN_TASK_WAIT_MS,
   RunStatus,
+  activeRunStatuses,
   isResumableTaskPayloadKind,
   isTaskResumeCapableComputeProvider,
 } from '@roomote/types';
@@ -84,7 +85,10 @@ export async function findProtectedTaskWaitSnapshotHandles(input: {
         isNotNull(taskRuns.waitUntil),
         or(
           and(isNull(taskRuns.waitResumedAt), isNull(taskRuns.waitResumeRunId)),
-          eq(resumeRuns.status, RunStatus.Canceled),
+          inArray(resumeRuns.status, [
+            ...activeRunStatuses,
+            RunStatus.Canceled,
+          ]),
         ),
       ),
     );

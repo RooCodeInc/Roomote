@@ -237,6 +237,9 @@ describe('task waits', () => {
     await expect(findTaskWaitsNeedingWake(recoveryInput)).resolves.not.toEqual(
       expect.arrayContaining([expect.objectContaining({ id: sourceRun.id })]),
     );
+    await expect(
+      findProtectedTaskWaitSnapshotHandles({ provider: 'docker' }),
+    ).resolves.toContain('standby-late-cancel');
 
     await db
       .update(taskRuns)
