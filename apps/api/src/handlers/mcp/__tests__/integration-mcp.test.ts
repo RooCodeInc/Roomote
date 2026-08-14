@@ -699,6 +699,13 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
                       $ref: '#/$defs/AllowedValues',
                       items: { type: 'string' },
                     },
+                    // Draft-04 tuple constraints travel with the array branch
+                    // when a nullable tuple union is split.
+                    coordinate: {
+                      type: ['array', 'null'],
+                      items: [{ type: 'number' }, { type: 'number' }],
+                      additionalItems: false,
+                    },
                   },
                 },
               },
@@ -743,6 +750,16 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
       type: ['array', 'null'],
       $ref: '#/$defs/AllowedValues',
       items: { type: 'string' },
+    });
+    expect(properties.coordinate).toEqual({
+      anyOf: [
+        {
+          type: 'array',
+          items: [{ type: 'number' }, { type: 'number' }],
+          additionalItems: false,
+        },
+        { type: 'null' },
+      ],
     });
   });
 

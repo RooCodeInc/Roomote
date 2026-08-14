@@ -427,6 +427,8 @@ function stripToolSchemaPatterns(value: unknown): unknown {
  */
 const ARRAY_ONLY_SCHEMA_KEYWORDS = [
   'items',
+  'additionalItems',
+  'unevaluatedItems',
   'prefixItems',
   'minItems',
   'maxItems',
@@ -440,6 +442,7 @@ const OBJECT_ONLY_SCHEMA_KEYWORDS = [
   'properties',
   'required',
   'additionalProperties',
+  'unevaluatedProperties',
   'patternProperties',
   'propertyNames',
   'minProperties',
