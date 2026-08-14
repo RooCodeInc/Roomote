@@ -149,6 +149,12 @@ If you want to start tasks by direct message, make sure the app can receive DMs.
 Enable the app surfaces needed for messages to the bot, then keep the
 `message.im` event subscription enabled.
 
+Roomote tasks can also send a new direct message to a linked Slack user when
+you explicitly ask them to. The target can be a Slack user ID, an `@` mention,
+or an existing Slack DM ID. For safety, the recipient must belong to the Slack
+workspace connected to the task and must have linked that Slack identity to a
+Roomote account. Channel names and channel IDs continue to post to channels.
+
 ## Local URL changes
 
 Keep the public URL stable. When it changes, update the Slack app's redirect

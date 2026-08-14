@@ -42,6 +42,11 @@ After connecting the provider, run a small task from chat and confirm that:
 - replies in the thread continue the same task
 - final summaries and links are posted back to chat
 
+If the model provider fails partway through a turn, Roomote posts an error in
+the originating Slack, Discord, Teams, or Telegram conversation instead of
+leaving the thread silent. The task remains available; reply in that thread to
+continue it, or open the linked task to inspect the full error.
+
 ## Start suggested tasks
 
 When a task or automation report identifies independent follow-up work, Roomote
