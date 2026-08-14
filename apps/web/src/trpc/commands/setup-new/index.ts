@@ -199,6 +199,7 @@ import { triggerCustomAutomationCommand } from '../automations/custom-automation
 
 type PersistedSetupNewState = ReturnType<typeof createEmptySetupNewState>;
 type PersistedRuntimeModelConfig = DeploymentModelConfig;
+const AUTOMATION_RECOMMENDATION_TRIGGER_DELAY_MS = 5 * 60 * 1_000;
 
 type SelectedRepositorySummary = {
   id: string;
@@ -3399,12 +3400,17 @@ export async function applySetupRecommendationsCommand(auth: UserAuthSuccess) {
       );
     }
   }
-  void triggerEnabledSetupRecommendations(auth, batch).catch((error) => {
-    console.error(
-      '[applySetupRecommendationsCommand] Failed to trigger enabled recommendations:',
-      error,
-    );
-  });
+  console.info(
+    `[applySetupRecommendationsCommand] Scheduling enabled recommendation runs in ${AUTOMATION_RECOMMENDATION_TRIGGER_DELAY_MS / 60_000} minutes`,
+  );
+  setTimeout(() => {
+    void triggerEnabledSetupRecommendations(auth, batch).catch((error) => {
+      console.error(
+        '[applySetupRecommendationsCommand] Failed to trigger enabled recommendations:',
+        error,
+      );
+    });
+  }, AUTOMATION_RECOMMENDATION_TRIGGER_DELAY_MS);
   return batch;
 }
 

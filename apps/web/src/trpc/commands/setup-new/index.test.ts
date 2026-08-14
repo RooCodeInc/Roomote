@@ -1329,6 +1329,7 @@ describe('setup-new onboarding task start command', () => {
 
   afterEach(() => {
     vi.unstubAllEnvs();
+    vi.useRealTimers();
   });
 
   it('launches a web onboarding task when no Slack workspace is connected', async () => {
@@ -1434,6 +1435,7 @@ describe('setup-new onboarding task start command', () => {
   });
 
   it('applies the enabled recommendation selection before continuing setup', async () => {
+    vi.useFakeTimers();
     mockOnboardingTransaction({
       slackInstallation: null,
       setupNewState: {
@@ -1518,6 +1520,10 @@ describe('setup-new onboarding task start command', () => {
       'enabled',
       'codeql_triage',
     );
+    expect(mockTriggerAutomationCommand).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(5 * 60 * 1_000 - 1);
+    expect(mockTriggerAutomationCommand).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
     await vi.waitFor(() =>
       expect(mockTriggerAutomationCommand).toHaveBeenCalledWith(
         expect.objectContaining({ userId: 'setup-test-user' }),
