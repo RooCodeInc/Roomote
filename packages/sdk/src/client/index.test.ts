@@ -399,6 +399,36 @@ describe('createWorkerFetchWithRetry', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('retries the snapshot startup status update on transport failure', async () => {
+    // `worker snapshot`'s first callback is taskRuns.update (→ Preparing);
+    // without a startup budget one transient edge failure killed the
+    // detached snapshot worker inside its launch grace period.
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce(
+        new Response('[]', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+
+    const workerFetch = createWorkerFetchWithRetry(fetchMock, {
+      baseDelayMs: 0,
+    });
+
+    const response = await workerFetch(
+      'https://api.roomote.dev/trpc/taskRuns.update?batch=1',
+      {
+        method: 'POST',
+        body: '{"0":{"json":{"id":5032,"status":"preparing"}}}',
+      },
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('lets explicit wrapper options pin the dequeue retry budget', async () => {
     const fetchError = new TypeError('fetch failed');
     const fetchMock = vi.fn<typeof fetch>().mockRejectedValue(fetchError);

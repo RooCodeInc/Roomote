@@ -103,6 +103,7 @@ describe('snapshot', () => {
     });
     mockWorkerEnvFromProcessEnv.mockReturnValue({});
     mockCreateStartupLogger.mockReturnValue({ userLog: { log: vi.fn() } });
+    mockTaskRunsUpdate.mockResolvedValue(undefined);
     mockDone.mockResolvedValue(undefined);
     mockUpdateSnapshotStatus.mockResolvedValue(undefined);
     mockSetup.mockRejectedValue(new Error('setup failed'));
@@ -111,6 +112,34 @@ describe('snapshot', () => {
   it('uses a longer timeout for explicit snapshot polling than the shared sleep handoff timeout', () => {
     expect(AUTO_SNAPSHOT_TIMEOUT_MS).toBe(5 * 60 * 1_000);
     expect(EXPLICIT_SNAPSHOT_TIMEOUT_MS).toBe(10 * 60 * 1_000);
+  });
+
+  it('returns false without throwing when the API is unreachable for every callback', async () => {
+    // The roo 2026-08-13 incident shape: the first status update fails on a
+    // transient edge error, and so does every cleanup callback after it. The
+    // command must exit through its normal failure path (exit code 1 via a
+    // false return), not an unhandled rejection, and must still try the
+    // remaining cleanup + reporting steps.
+    const fetchFailed = new Error('fetch failed');
+    mockTaskRunsUpdate.mockRejectedValue(fetchFailed);
+    mockDone.mockRejectedValue(fetchFailed);
+
+    const result = await snapshot({
+      runId: 5032,
+      environmentId: 'env-1',
+      sandboxId: 'sb-1',
+    });
+
+    expect(result).toBe(false);
+    expect(mockDone).toHaveBeenCalled();
+    expect(mockUpdateSnapshotStatus).toHaveBeenCalledWith({
+      environmentId: 'env-1',
+      snapshotStatus: 'failed',
+    });
+    expect(mockCaptureWorkerException).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'fetch failed' }),
+      expect.objectContaining({ stage: 'snapshot' }),
+    );
   });
 
   it('treats the failure cleanup status write as a best-effort no-op when it succeeds idempotently', async () => {

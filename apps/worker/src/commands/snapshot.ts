@@ -153,11 +153,23 @@ export async function snapshot({
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
-    await sdk.taskRuns.done({
-      id: runId,
-      status: RunStatus.Failed,
-      error: message,
-    });
+    // Best-effort: when the failure IS an unreachable API, this call fails
+    // too. Never let it escape — the rest of this handler must still report
+    // the failure, and the controller's terminal path marks the run (and its
+    // environment snapshot row) failed even when the worker cannot.
+    try {
+      await sdk.taskRuns.done({
+        id: runId,
+        status: RunStatus.Failed,
+        error: message,
+      });
+    } catch (doneError) {
+      console.error(
+        `Failed to report snapshot run failure: ${
+          doneError instanceof Error ? doneError.message : String(doneError)
+        }`,
+      );
+    }
 
     // Mark the environment snapshot as failed so the UI stops showing "Snapshotting..."
     try {

@@ -103,6 +103,14 @@ const RETRYABLE_WORKER_TRPC_MUTATION_PATHS = new Map<
   ['taskRuns.releaseGoalContinuation', {}],
   ['taskRuns.dequeue', WORKER_STARTUP_MUTATION_RETRY_OPTIONS],
   ['taskRuns.resume', WORKER_STARTUP_MUTATION_RETRY_OPTIONS],
+  // `worker snapshot`'s first callback is a status update, not a claim, so it
+  // hits the same freshly-(re)started-proxy window as dequeue/resume but had
+  // no budget: one transient edge failure killed the snapshot worker within
+  // the detached-launch grace period, with its output lost by the provider
+  // (the roo 2026-08-13 "exited immediately with code 1" incident). Status
+  // writes are last-writer-wins on the run row, so transport-level replays
+  // are safe.
+  ['taskRuns.update', WORKER_STARTUP_MUTATION_RETRY_OPTIONS],
 ]);
 
 function isQueryRequest(method?: string): boolean {
