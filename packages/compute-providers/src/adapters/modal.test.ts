@@ -845,7 +845,89 @@ describe('ModalClient', () => {
     ).resolves.toEqual({ status: 'stopped' });
   });
 
+  it('classifies missing sandboxes during status lookup without error logging', async () => {
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    sandboxFromIdMock.mockRejectedValue(
+      new Error(
+        '/modal.client.ModalClient/SandboxFromId NOT_FOUND: Modal Sandbox not found. This means this Sandbox has already shut down.',
+      ),
+    );
+
+    const client = new ModalClient({
+      tokenId: 'token-id',
+      tokenSecret: 'token-secret',
+      baseImageRef: MODAL_IMAGE_REF,
+    });
+
+    await expect(
+      client.getInstanceStatus({ instanceId: 'modal-stale' }),
+    ).resolves.toEqual({ status: 'stopped' });
+    expect(debugSpy).toHaveBeenCalledWith(
+      '[ModalClient] Sandbox "modal-stale" is unavailable during status lookup',
+    );
+    expect(errorSpy).not.toHaveBeenCalled();
+    debugSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
+  it('propagates aborted status lookups instead of classifying them as stopped', async () => {
+    sandboxFromIdMock.mockReturnValue(new Promise(() => {}));
+    const controller = new AbortController();
+    const client = new ModalClient({
+      tokenId: 'token-id',
+      tokenSecret: 'token-secret',
+      baseImageRef: MODAL_IMAGE_REF,
+    });
+
+    const statusPromise = client.getInstanceStatus({
+      instanceId: 'modal-pending',
+      signal: controller.signal,
+    });
+    controller.abort('lookup cancelled');
+
+    await expect(statusPromise).rejects.toMatchObject({
+      name: 'AbortError',
+      message: expect.stringContaining('lookup cancelled'),
+    });
+  });
+
+  it('keeps missing sandbox fetches error-level for non-status operations', async () => {
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    sandboxFromIdMock.mockRejectedValue(
+      new Error(
+        '/modal.client.ModalClient/SandboxFromId NOT_FOUND: Modal Sandbox not found. This means this Sandbox has already shut down.',
+      ),
+    );
+
+    const client = new ModalClient({
+      tokenId: 'token-id',
+      tokenSecret: 'token-secret',
+      baseImageRef: MODAL_IMAGE_REF,
+    });
+
+    await expect(
+      client.destroyInstance({ instanceId: 'modal-stale' }),
+    ).rejects.toMatchObject({
+      name: 'ModalRpcError',
+      metadata: {
+        grpcStatus: 'NOT_FOUND',
+        operation: 'sandbox_fetch',
+      },
+    });
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        '[ModalClient] Failed to fetch sandbox "modal-stale"',
+      ),
+    );
+    expect(debugSpy).not.toHaveBeenCalled();
+    debugSpy.mockRestore();
+    errorSpy.mockRestore();
+  });
+
   it('does not treat unrelated Modal status lookup 400s as stopped', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     sandboxFromIdMock.mockRejectedValue({
       status: 400,
       message: 'invalid sandbox id',
@@ -863,6 +945,12 @@ describe('ModalClient', () => {
       status: 400,
       message: 'invalid sandbox id',
     });
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        '[ModalClient] Failed to fetch sandbox "modal-123"',
+      ),
+    );
+    errorSpy.mockRestore();
   });
 
   it('does not hide Modal 400s from command operations', async () => {
