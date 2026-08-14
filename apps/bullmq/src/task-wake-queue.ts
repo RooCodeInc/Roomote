@@ -53,13 +53,12 @@ export async function wakeTaskJob(
     return;
   }
   if (sourceRun.waitResumedAt || sourceRun.waitResumeRunId) {
-    const claimedRun =
-      job.attemptsMade > 0 && sourceRun.waitResumeRunId
-        ? await db.query.taskRuns.findFirst({
-            where: eq(taskRuns.id, sourceRun.waitResumeRunId),
-            columns: { status: true },
-          })
-        : null;
+    const claimedRun = sourceRun.waitResumeRunId
+      ? await db.query.taskRuns.findFirst({
+          where: eq(taskRuns.id, sourceRun.waitResumeRunId),
+          columns: { status: true },
+        })
+      : null;
     if (
       !sourceRun.waitResumeRunId ||
       claimedRun?.status !== RunStatus.Canceled

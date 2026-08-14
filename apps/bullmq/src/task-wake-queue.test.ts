@@ -117,7 +117,7 @@ describe('task wake queue', () => {
     });
   });
 
-  it('recovers a canceled claimed child on a queue retry', async () => {
+  it('recovers a canceled manual-resume child on the first timed wake', async () => {
     queryFindFirst
       .mockResolvedValueOnce({
         id: 42,
@@ -136,7 +136,7 @@ describe('task wake queue', () => {
       .mockResolvedValueOnce({ status: 'canceled' });
 
     await wakeTaskJob({
-      attemptsMade: 1,
+      attemptsMade: 0,
       data: { runId: 42, waitUntil: '2026-08-13T16:00:00.000Z' },
     } as never);
 
