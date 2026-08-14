@@ -50,29 +50,47 @@ export async function waitTask(
       reason: input.reason,
     });
 
-    if (!result.scheduled) {
+    const isExistingWait =
+      !result.scheduled &&
+      result.reason === 'already_waiting' &&
+      result.waitUntil !== null;
+    if (!result.scheduled && !isExistingWait) {
       return c.json(result, result.reason === 'invalid_duration' ? 400 : 409);
+    }
+
+    const waitUntil = result.waitUntil;
+    if (!waitUntil) {
+      return c.json({ error: 'Task wait is missing a wake deadline' }, 500);
     }
 
     try {
       await enqueueTaskWake({
         runId,
-        waitUntil: result.waitUntil.toISOString(),
+        waitUntil: waitUntil.toISOString(),
       });
-      await scheduleTaskSleep({ runId });
+      if (result.scheduled || result.sleepRequired) {
+        await scheduleTaskSleep({ runId });
+      }
     } catch (error) {
-      await clearTaskWaitSchedule({ runId, waitUntil: result.waitUntil });
-      try {
-        await removeTaskWake(runId);
-      } catch (cleanupError) {
-        logHandlerError('waitTask wake cleanup', cleanupError);
+      if (result.scheduled) {
+        await clearTaskWaitSchedule({
+          runId,
+          waitUntil,
+          ...(result.goalRollback ? { goalRollback: result.goalRollback } : {}),
+        });
+        try {
+          await removeTaskWake(runId);
+        } catch (cleanupError) {
+          logHandlerError('waitTask wake cleanup', cleanupError);
+        }
       }
       throw error;
     }
 
     return c.json({
       scheduled: true,
-      waitUntil: result.waitUntil.toISOString(),
+      waitUntil: waitUntil.toISOString(),
+      ...(isExistingWait ? { alreadyScheduled: true } : {}),
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

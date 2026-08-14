@@ -15,7 +15,11 @@ import { taskRuns, tasks } from '../schema';
 const ACTIVE_WAIT_STATUSES = [RunStatus.Running, RunStatus.Idle] as const;
 
 export type ScheduleTaskWaitResult =
-  | { scheduled: true; waitUntil: Date }
+  | {
+      scheduled: true;
+      waitUntil: Date;
+      goalRollback?: TaskWaitGoalRollback;
+    }
   | {
       scheduled: false;
       reason:
@@ -23,9 +27,18 @@ export type ScheduleTaskWaitResult =
         | 'not_active'
         | 'unsupported'
         | 'already_waiting'
+        | 'already_resumed'
         | 'invalid_duration';
       waitUntil: Date | null;
+      sleepRequired?: boolean;
     };
+
+export type TaskWaitGoalRollback = {
+  taskId: string;
+  expectedGeneration: string;
+  previousLastContinuationId: string | null;
+  previousGenerationIds: string[];
+};
 
 export async function scheduleTaskWait(input: {
   runId: number;
@@ -53,6 +66,27 @@ export async function scheduleTaskWait(input: {
       return { scheduled: false, reason: 'missing', waitUntil: null };
     }
     if (
+      row.run.waitUntil &&
+      !row.run.waitResumedAt &&
+      !row.run.waitResumeRunId
+    ) {
+      return {
+        scheduled: false,
+        reason: 'already_waiting',
+        waitUntil: row.run.waitUntil,
+        sleepRequired: ACTIVE_WAIT_STATUSES.includes(
+          row.run.status as (typeof ACTIVE_WAIT_STATUSES)[number],
+        ),
+      };
+    }
+    if (row.run.waitUntil) {
+      return {
+        scheduled: false,
+        reason: 'already_resumed',
+        waitUntil: row.run.waitUntil,
+      };
+    }
+    if (
       !ACTIVE_WAIT_STATUSES.includes(
         row.run.status as (typeof ACTIVE_WAIT_STATUSES)[number],
       )
@@ -70,7 +104,7 @@ export async function scheduleTaskWait(input: {
     ) {
       return { scheduled: false, reason: 'unsupported', waitUntil: null };
     }
-    if (row.run.waitUntil || row.run.sleepRequestedAt || row.run.snapshotId) {
+    if (row.run.sleepRequestedAt || row.run.snapshotId) {
       return {
         scheduled: false,
         reason: 'already_waiting',
@@ -98,8 +132,15 @@ export async function scheduleTaskWait(input: {
 
     // Invalidate the pre-wait turn's goal generation without consuming a
     // continuation. The resumed run receives this fresh generation.
+    let goalRollback: TaskWaitGoalRollback | undefined;
     if (row.task.goalStatus === 'active') {
       const generation = `goal-generation:${randomUUID()}`;
+      goalRollback = {
+        taskId: row.task.id,
+        expectedGeneration: generation,
+        previousLastContinuationId: row.task.goalLastContinuationId,
+        previousGenerationIds: row.task.goalGenerationIds,
+      };
       await tx
         .update(tasks)
         .set({
@@ -110,22 +151,80 @@ export async function scheduleTaskWait(input: {
         .where(and(eq(tasks.id, row.task.id), eq(tasks.goalStatus, 'active')));
     }
 
-    return { scheduled: true, waitUntil };
+    return {
+      scheduled: true,
+      waitUntil,
+      ...(goalRollback ? { goalRollback } : {}),
+    };
   });
 }
 
 export async function clearTaskWaitSchedule(input: {
   runId: number;
   waitUntil: Date;
+  goalRollback?: TaskWaitGoalRollback;
 }): Promise<void> {
-  await db
-    .update(taskRuns)
-    .set({ waitUntil: null, waitReason: null })
-    .where(
-      and(
-        eq(taskRuns.id, input.runId),
-        eq(taskRuns.waitUntil, input.waitUntil),
-        isNull(taskRuns.waitResumedAt),
+  await db.transaction(async (tx) => {
+    const [cleared] = await tx
+      .update(taskRuns)
+      .set({ waitUntil: null, waitReason: null })
+      .where(
+        and(
+          eq(taskRuns.id, input.runId),
+          eq(taskRuns.waitUntil, input.waitUntil),
+          isNull(taskRuns.waitResumedAt),
+          isNull(taskRuns.waitResumeRunId),
+        ),
+      )
+      .returning({ id: taskRuns.id });
+
+    if (!cleared || !input.goalRollback) return;
+
+    await tx
+      .update(tasks)
+      .set({
+        goalLastContinuationId: input.goalRollback.previousLastContinuationId,
+        goalGenerationIds: input.goalRollback.previousGenerationIds,
+      })
+      .where(
+        and(
+          eq(tasks.id, input.goalRollback.taskId),
+          eq(tasks.goalStatus, 'active'),
+          eq(
+            tasks.goalLastContinuationId,
+            input.goalRollback.expectedGeneration,
+          ),
+        ),
+      );
+  });
+}
+
+export async function releaseTaskWaitResume(input: {
+  runId: number;
+  waitUntil: Date;
+  resumeRunId: number;
+}): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const resumeRun = await tx.query.taskRuns.findFirst({
+      where: and(
+        eq(taskRuns.id, input.resumeRunId),
+        eq(taskRuns.status, RunStatus.Canceled),
       ),
-    );
+      columns: { id: true },
+    });
+    if (!resumeRun) return false;
+
+    const [released] = await tx
+      .update(taskRuns)
+      .set({ waitResumedAt: null, waitResumeRunId: null })
+      .where(
+        and(
+          eq(taskRuns.id, input.runId),
+          eq(taskRuns.waitUntil, input.waitUntil),
+          eq(taskRuns.waitResumeRunId, input.resumeRunId),
+        ),
+      )
+      .returning({ id: taskRuns.id });
+    return Boolean(released);
+  });
 }

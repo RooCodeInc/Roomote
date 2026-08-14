@@ -3,8 +3,10 @@ import {
   db,
   desc,
   eq,
+  gt,
   inArray,
   isNotNull,
+  isNull,
   or,
   resolveComputeProviderEnvValues,
   taskRuns,
@@ -14,6 +16,7 @@ import { activeRunStatuses, type RunStatus } from '@roomote/types';
 
 const LOG_PREFIX = '[standbyRetention]';
 const MS_PER_HOUR = 60 * 60 * 1_000;
+const WAIT_RECOVERY_MARGIN_MS = MS_PER_HOUR;
 const STANDBY_PROVIDERS = ['docker', 'blaxel', 'box', 'azure'] as const;
 
 // Providers whose retained handles are live instances that can (and must) be
@@ -152,8 +155,8 @@ async function getInUseHandles(
   );
 }
 
-async function getProtectedHandles(provider: StandbyProvider) {
-  const rows = await db
+async function getProtectedHandles(provider: StandbyProvider, now: Date) {
+  const activeResumeRows = await db
     .select({ handle: taskRuns.sourceSnapshotId })
     .from(taskRuns)
     .where(
@@ -164,8 +167,27 @@ async function getProtectedHandles(provider: StandbyProvider) {
       ),
     );
 
+  const pendingWaitRows = await db
+    .select({ handle: taskRuns.snapshotId })
+    .from(taskRuns)
+    .where(
+      and(
+        eq(taskRuns.vendor, provider),
+        isNotNull(taskRuns.snapshotId),
+        isNotNull(taskRuns.waitUntil),
+        isNull(taskRuns.waitResumedAt),
+        isNull(taskRuns.waitResumeRunId),
+        gt(
+          taskRuns.waitUntil,
+          new Date(now.getTime() - WAIT_RECOVERY_MARGIN_MS),
+        ),
+      ),
+    );
+
   return new Set(
-    rows.flatMap(({ handle }) => (handle === null ? [] : [handle])),
+    [...activeResumeRows, ...pendingWaitRows].flatMap(({ handle }) =>
+      handle === null ? [] : [handle],
+    ),
   );
 }
 
@@ -213,7 +235,7 @@ async function enforceProviderRetention(
   const resolvedEnv = await resolveComputeProviderEnvValues(provider);
   const policy = resolveStandbyRetentionPolicy(provider, resolvedEnv);
   const candidates = await getCandidates(provider);
-  const protectedHandles = await getProtectedHandles(provider);
+  const protectedHandles = await getProtectedHandles(provider, now);
   const evicted = selectStandbyEvictions(
     candidates,
     protectedHandles,
@@ -272,11 +294,12 @@ async function enforceProviderRetention(
  */
 async function reSuspendOrphanedStandbys(
   provider: StandbyProvider,
+  now: Date,
 ): Promise<number> {
   const candidates = await getCandidates(provider);
   if (candidates.length === 0) return 0;
 
-  const protectedHandles = await getProtectedHandles(provider);
+  const protectedHandles = await getProtectedHandles(provider, now);
   const inUseHandles = await getInUseHandles(
     provider,
     candidates.map((candidate) => candidate.handle),
@@ -333,7 +356,7 @@ export async function standbyRetentionJob(
       provider,
       removed: await enforceProviderRetention(provider, now),
       resuspended: RE_SUSPEND_PROVIDERS.includes(provider)
-        ? await reSuspendOrphanedStandbys(provider)
+        ? await reSuspendOrphanedStandbys(provider, now)
         : 0,
     })),
   );

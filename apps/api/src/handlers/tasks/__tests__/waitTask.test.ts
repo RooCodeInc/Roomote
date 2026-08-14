@@ -40,7 +40,12 @@ function createApp(runId = 42) {
 }
 
 describe('wait task API', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    enqueueTaskWake.mockReset().mockResolvedValue(undefined);
+    removeTaskWake.mockReset().mockResolvedValue(undefined);
+    scheduleTaskSleep.mockReset().mockResolvedValue(undefined);
+  });
 
   it('schedules the wake before the resumable sleep', async () => {
     const waitUntil = new Date('2026-08-13T16:00:00.000Z');
@@ -76,7 +81,17 @@ describe('wait task API', () => {
 
   it('removes the wake and clears the DB schedule when sleep queueing fails', async () => {
     const waitUntil = new Date('2026-08-13T16:00:00.000Z');
-    scheduleTaskWait.mockResolvedValue({ scheduled: true, waitUntil });
+    const goalRollback = {
+      taskId: 'task-1',
+      expectedGeneration: 'goal-generation:wait',
+      previousLastContinuationId: 'goal-generation:current',
+      previousGenerationIds: ['goal-generation:current'],
+    };
+    scheduleTaskWait.mockResolvedValue({
+      scheduled: true,
+      waitUntil,
+      goalRollback,
+    });
     scheduleTaskSleep.mockRejectedValue(new Error('redis unavailable'));
 
     const response = await createApp().request('/runs/42/wait', {
@@ -90,7 +105,94 @@ describe('wait task API', () => {
     expect(clearTaskWaitSchedule).toHaveBeenCalledWith({
       runId: 42,
       waitUntil,
+      goalRollback,
     });
+  });
+
+  it('repairs queue side effects and succeeds when retrying an existing wait', async () => {
+    const waitUntil = new Date('2026-08-13T16:00:00.000Z');
+    scheduleTaskWait.mockResolvedValue({
+      scheduled: false,
+      reason: 'already_waiting',
+      waitUntil,
+      sleepRequired: true,
+    });
+
+    const response = await createApp().request('/runs/42/wait', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delaySeconds: 1_800, reason: 'Check deployment' }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      scheduled: true,
+      alreadyScheduled: true,
+      waitUntil: waitUntil.toISOString(),
+    });
+    expect(enqueueTaskWake).toHaveBeenCalledWith({
+      runId: 42,
+      waitUntil: waitUntil.toISOString(),
+    });
+    expect(scheduleTaskSleep).toHaveBeenCalledWith({ runId: 42 });
+  });
+
+  it('does not reschedule sleep when retrying after the task is already asleep', async () => {
+    const waitUntil = new Date('2026-08-13T16:00:00.000Z');
+    scheduleTaskWait.mockResolvedValue({
+      scheduled: false,
+      reason: 'already_waiting',
+      waitUntil,
+      sleepRequired: false,
+    });
+
+    const response = await createApp().request('/runs/42/wait', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delaySeconds: 1_800, reason: 'Check deployment' }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(enqueueTaskWake).toHaveBeenCalledOnce();
+    expect(scheduleTaskSleep).not.toHaveBeenCalled();
+  });
+
+  it('preserves an existing durable wait when retry repair cannot reach Redis', async () => {
+    const waitUntil = new Date('2026-08-13T16:00:00.000Z');
+    scheduleTaskWait.mockResolvedValue({
+      scheduled: false,
+      reason: 'already_waiting',
+      waitUntil,
+      sleepRequired: false,
+    });
+    enqueueTaskWake.mockRejectedValueOnce(new Error('redis unavailable'));
+
+    const response = await createApp().request('/runs/42/wait', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delaySeconds: 1_800, reason: 'Check deployment' }),
+    });
+
+    expect(response.status).toBe(500);
+    expect(clearTaskWaitSchedule).not.toHaveBeenCalled();
+    expect(removeTaskWake).not.toHaveBeenCalled();
+  });
+
+  it('rejects retries after the wait has already been consumed', async () => {
+    scheduleTaskWait.mockResolvedValue({
+      scheduled: false,
+      reason: 'already_resumed',
+      waitUntil: new Date('2026-08-13T16:00:00.000Z'),
+    });
+
+    const response = await createApp().request('/runs/42/wait', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ delaySeconds: 1_800, reason: 'Check deployment' }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(enqueueTaskWake).not.toHaveBeenCalled();
   });
 
   it('clears the DB schedule even when Redis wake cleanup fails', async () => {

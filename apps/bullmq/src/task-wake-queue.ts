@@ -1,7 +1,18 @@
 import { Queue, QueueEvents, Worker, type Job } from 'bullmq';
 
-import { enqueueTask } from '@roomote/cloud-agents/server';
-import { and, db, eq, isNull, sql, taskRuns } from '@roomote/db/server';
+import {
+  enqueueTask,
+  TaskRunQueueEnqueueError,
+} from '@roomote/cloud-agents/server';
+import {
+  and,
+  db,
+  eq,
+  isNull,
+  releaseTaskWaitResume,
+  sql,
+  taskRuns,
+} from '@roomote/db/server';
 import {
   TASK_WAKE_QUEUE_NAME,
   taskWakeRequestSchema,
@@ -14,6 +25,7 @@ import {
   populateSnapshotResumeCommunicationMetadata,
   populateSnapshotResumeSlackMetadata,
   restoreSnapshotResumeVisiblePromptFields,
+  RunStatus,
   TaskPayloadKind,
   type TaskPayload,
 } from '@roomote/types';
@@ -36,11 +48,30 @@ export async function wakeTaskJob(
   if (
     !sourceRun ||
     !sourceRun.waitUntil ||
-    sourceRun.waitUntil.getTime() !== waitUntil.getTime() ||
-    sourceRun.waitResumedAt ||
-    sourceRun.waitResumeRunId
+    sourceRun.waitUntil.getTime() !== waitUntil.getTime()
   ) {
     return;
+  }
+  if (sourceRun.waitResumedAt || sourceRun.waitResumeRunId) {
+    const claimedRun =
+      job.attemptsMade > 0 && sourceRun.waitResumeRunId
+        ? await db.query.taskRuns.findFirst({
+            where: eq(taskRuns.id, sourceRun.waitResumeRunId),
+            columns: { status: true },
+          })
+        : null;
+    if (
+      !sourceRun.waitResumeRunId ||
+      claimedRun?.status !== RunStatus.Canceled
+    ) {
+      return;
+    }
+    const released = await releaseTaskWaitResume({
+      runId: sourceRun.id,
+      waitUntil,
+      resumeRunId: sourceRun.waitResumeRunId,
+    });
+    if (!released) return;
   }
   if (Date.now() < sourceRun.waitUntil.getTime()) {
     throw new Error(`Task wait for run #${sourceRun.id} is not due yet`);
@@ -85,42 +116,53 @@ export async function wakeTaskJob(
   });
   restoreSnapshotResumeVisiblePromptFields(resumePayload, sourcePayload);
 
-  await enqueueTask(
-    {
-      task: {
-        type: TaskPayloadKind.SnapshotResume,
-        sourceSnapshotId: sourceRun.snapshotId,
-        sourceRunId: sourceRun.id,
-        payload: resumePayload,
+  try {
+    await enqueueTask(
+      {
+        task: {
+          type: TaskPayloadKind.SnapshotResume,
+          sourceSnapshotId: sourceRun.snapshotId,
+          sourceRunId: sourceRun.id,
+          payload: resumePayload,
+        },
+        actingUserId: sourceRun.actingUserId,
       },
-      actingUserId: sourceRun.actingUserId,
-    },
-    {
-      launchClass: 'human',
-      afterCreateInTransaction: async (tx, resumeRun) => {
-        await tx.execute(
-          sql`SELECT id FROM task_runs WHERE id = ${sourceRun.id} FOR UPDATE`,
-        );
-        const [claimed] = await tx
-          .update(taskRuns)
-          .set({ waitResumedAt: new Date(), waitResumeRunId: resumeRun.id })
-          .where(
-            and(
-              eq(taskRuns.id, sourceRun.id),
-              eq(taskRuns.waitUntil, waitUntil),
-              isNull(taskRuns.waitResumedAt),
-              isNull(taskRuns.waitResumeRunId),
-            ),
-          )
-          .returning({ id: taskRuns.id });
-        if (!claimed) {
-          throw new Error(
-            `Task wait for run #${sourceRun.id} was already resumed`,
+      {
+        launchClass: 'human',
+        afterCreateInTransaction: async (tx, resumeRun) => {
+          await tx.execute(
+            sql`SELECT id FROM task_runs WHERE id = ${sourceRun.id} FOR UPDATE`,
           );
-        }
+          const [claimed] = await tx
+            .update(taskRuns)
+            .set({ waitResumedAt: new Date(), waitResumeRunId: resumeRun.id })
+            .where(
+              and(
+                eq(taskRuns.id, sourceRun.id),
+                eq(taskRuns.waitUntil, waitUntil),
+                isNull(taskRuns.waitResumedAt),
+                isNull(taskRuns.waitResumeRunId),
+              ),
+            )
+            .returning({ id: taskRuns.id });
+          if (!claimed) {
+            throw new Error(
+              `Task wait for run #${sourceRun.id} was already resumed`,
+            );
+          }
+        },
       },
-    },
-  );
+    );
+  } catch (error) {
+    if (error instanceof TaskRunQueueEnqueueError) {
+      await releaseTaskWaitResume({
+        runId: sourceRun.id,
+        waitUntil,
+        resumeRunId: error.runId,
+      });
+    }
+    throw error;
+  }
 }
 
 export function startTaskWakeQueue() {

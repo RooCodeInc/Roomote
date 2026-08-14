@@ -4,9 +4,16 @@ import { RunStatus } from '@roomote/types';
 import { db } from '../db';
 import { runFactory } from '../fixtures/factories/run.factory';
 import { taskFactory } from '../fixtures/factories/task.factory';
-import { tasks } from '../schema';
-import { markTaskGoalForRun } from './task-goals';
-import { scheduleTaskWait } from './task-waits';
+import { taskRuns, tasks } from '../schema';
+import {
+  claimTaskGoalContinuationForRun,
+  markTaskGoalForRun,
+} from './task-goals';
+import {
+  clearTaskWaitSchedule,
+  releaseTaskWaitResume,
+  scheduleTaskWait,
+} from './task-waits';
 
 describe('task waits', () => {
   it('persists the wake deadline and rotates an active goal generation', async () => {
@@ -32,7 +39,7 @@ describe('task waits', () => {
         reason: 'Check the deployment',
         now,
       }),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       scheduled: true,
       waitUntil: new Date('2026-08-13T15:30:00.000Z'),
     });
@@ -49,6 +56,16 @@ describe('task waits', () => {
     expect(storedTask?.goalGenerationIds).toEqual([
       storedTask?.goalLastContinuationId,
     ]);
+    await expect(
+      claimTaskGoalContinuationForRun({
+        runId: run.id,
+        continuationId: 'goal-continuation:must-wait',
+      }),
+    ).resolves.toMatchObject({
+      updated: false,
+      reason: 'not_active',
+      goal: { continuationsUsed: 1 },
+    });
     await expect(
       markTaskGoalForRun({
         runId: run.id,
@@ -82,6 +99,111 @@ describe('task waits', () => {
       scheduled: false,
       reason: 'already_waiting',
       waitUntil: new Date('2026-08-13T15:30:00.000Z'),
+      sleepRequired: true,
+    });
+  });
+
+  it('does not treat a consumed wait as an idempotent pending wait', async () => {
+    const run = await runFactory.create({
+      status: RunStatus.Completed,
+      vendor: 'docker',
+      waitUntil: new Date('2026-08-13T15:30:00.000Z'),
+      waitReason: 'Original check',
+      waitResumedAt: new Date('2026-08-13T15:30:01.000Z'),
+    });
+
+    await expect(
+      scheduleTaskWait({
+        runId: run.id,
+        delayMs: 60 * 60 * 1_000,
+        reason: 'Retry check',
+      }),
+    ).resolves.toMatchObject({
+      scheduled: false,
+      reason: 'already_resumed',
+    });
+  });
+
+  it('restores the prior goal generation when scheduling is rolled back', async () => {
+    const task = await taskFactory.create({
+      goalObjective: 'Check the deployment later',
+      goalStatus: 'active',
+      goalLastContinuationId: 'goal-generation:current',
+      goalGenerationIds: ['goal-generation:current'],
+    });
+    const run = await runFactory.create({
+      taskId: task.id,
+      status: RunStatus.Running,
+      vendor: 'docker',
+      machineId: 'docker-rollback',
+    });
+
+    const result = await scheduleTaskWait({
+      runId: run.id,
+      delayMs: 30 * 60 * 1_000,
+      reason: 'Check the deployment',
+    });
+    expect(result.scheduled).toBe(true);
+    if (!result.scheduled) throw new Error('Expected wait to be scheduled');
+
+    await clearTaskWaitSchedule({
+      runId: run.id,
+      waitUntil: result.waitUntil,
+      goalRollback: result.goalRollback,
+    });
+
+    await expect(
+      db.query.tasks.findFirst({ where: eq(tasks.id, task.id) }),
+    ).resolves.toMatchObject({
+      goalLastContinuationId: 'goal-generation:current',
+      goalGenerationIds: ['goal-generation:current'],
+    });
+  });
+
+  it('only reopens a wait claim after its resume child is canceled', async () => {
+    const waitUntil = new Date('2026-08-13T15:30:00.000Z');
+    const sourceRun = await runFactory.create({
+      status: RunStatus.Completed,
+      vendor: 'docker',
+      snapshotId: 'standby-claim',
+      snapshotCreatedAt: new Date(),
+      waitUntil,
+      waitReason: 'Check deployment',
+    });
+    const resumeRun = await runFactory.create({
+      taskId: sourceRun.taskId,
+      sourceRunId: sourceRun.id,
+      status: RunStatus.Pending,
+      vendor: 'docker',
+    });
+    await db
+      .update(taskRuns)
+      .set({ waitResumedAt: new Date(), waitResumeRunId: resumeRun.id })
+      .where(eq(taskRuns.id, sourceRun.id));
+
+    await expect(
+      releaseTaskWaitResume({
+        runId: sourceRun.id,
+        waitUntil,
+        resumeRunId: resumeRun.id,
+      }),
+    ).resolves.toBe(false);
+    await db
+      .update(taskRuns)
+      .set({ status: RunStatus.Canceled, canceledAt: new Date() })
+      .where(eq(taskRuns.id, resumeRun.id));
+    await expect(
+      releaseTaskWaitResume({
+        runId: sourceRun.id,
+        waitUntil,
+        resumeRunId: resumeRun.id,
+      }),
+    ).resolves.toBe(true);
+    await expect(
+      db.query.taskRuns.findFirst({ where: eq(taskRuns.id, sourceRun.id) }),
+    ).resolves.toMatchObject({
+      waitResumedAt: null,
+      waitResumeRunId: null,
     });
   });
 

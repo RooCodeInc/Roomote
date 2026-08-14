@@ -47,11 +47,18 @@ export async function handleWaitTask(params: {
       );
     }
     const waitStatePath = process.env.ROOMOTE_TASK_WAIT_STATE_FILE?.trim();
+    let markerWarning: string | undefined;
     if (waitStatePath) {
-      fs.writeFileSync(waitStatePath, JSON.stringify(result), 'utf8');
+      try {
+        fs.writeFileSync(waitStatePath, JSON.stringify(result), 'utf8');
+      } catch {
+        markerWarning =
+          'The wait is durable, but local wait-state recording failed. End the turn immediately after the paused-state closeout.';
+      }
     }
     return successResult({
       ...result,
+      ...(markerWarning ? { warning: markerWarning } : {}),
       instruction:
         'The wait is scheduled. On chat-started tasks, post the paused-state closeout now, then end the turn without doing more work.',
     });

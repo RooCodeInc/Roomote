@@ -79,4 +79,27 @@ describe('wait task tool', () => {
       false,
     );
   });
+
+  it('reports a durable wait as successful when local state recording fails', async () => {
+    waitCurrentTask.mockResolvedValue({
+      scheduled: true,
+      waitUntil: '2026-08-13T16:00:00.000Z',
+    });
+    process.env.ROOMOTE_TASK_WAIT_STATE_FILE = path.join(
+      tempDir,
+      'missing',
+      'wait.json',
+    );
+
+    const result = await handleWaitTask({
+      delaySeconds: 1_800,
+      reason: 'Check deployment',
+    });
+
+    expect(result.isError).not.toBe(true);
+    expect(result.content[0]).toMatchObject({
+      type: 'text',
+      text: expect.stringContaining('wait is durable'),
+    });
+  });
 });
