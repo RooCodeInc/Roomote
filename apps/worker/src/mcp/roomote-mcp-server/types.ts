@@ -67,6 +67,17 @@ export interface TaskSummaryResponse {
   environmentSetupState: string | null;
   linkedEnvironmentId: string | null;
   linkedEnvironmentName: string | null;
+  /** Additive goal history fields; optional while older API servers remain supported. */
+  hasUsedGoalMode?: boolean;
+  goal?: {
+    objective: string | null;
+    status: 'active' | 'complete' | 'blocked' | 'budget_limited' | null;
+    maxContinuations: number | null;
+    continuationsUsed: number;
+    blockedReason: string | null;
+    completedAt: string | null;
+    generation: string | null;
+  } | null;
 }
 
 export interface TaskComputeLog {

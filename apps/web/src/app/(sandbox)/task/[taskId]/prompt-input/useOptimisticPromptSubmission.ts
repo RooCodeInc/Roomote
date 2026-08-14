@@ -27,6 +27,7 @@ type StartOptimisticPromptSubmissionInput = {
   taskId: string;
   prompt: string;
   images?: string[];
+  goalObjective?: string;
   location: OptimisticPromptLocation;
 };
 
@@ -67,6 +68,7 @@ export function useOptimisticPromptSubmission() {
       taskId,
       prompt,
       images,
+      goalObjective,
       location,
     }: StartOptimisticPromptSubmissionInput) => {
       const clientMessageId = generateClientUuid();
@@ -74,6 +76,7 @@ export function useOptimisticPromptSubmission() {
         taskId,
         prompt,
         images,
+        goalObjective,
         clientMessageId,
         currentUserInfo,
       });

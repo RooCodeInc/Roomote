@@ -11,6 +11,7 @@ import {
   type AcpRequestUserInputAnswers,
   type AcpRequestUserInputPayload,
   type AcpRequestUserInputResponsePayload,
+  type TaskGoal,
   type TaskCompletionMetadata,
   type TaskMessageContentBlock,
 } from '@roomote/types';
@@ -100,6 +101,7 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
     userName?: string;
     userImageUrl?: string;
     clientMessageId?: string;
+    goalContext?: TaskGoal;
   }): void {
     const { sessionId } = options;
 
@@ -141,6 +143,14 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
             ...(options.source ? { source: options.source } : {}),
             ...(options.clientMessageId
               ? { clientMessageId: options.clientMessageId }
+              : {}),
+            ...(options.goalContext
+              ? {
+                  goal: {
+                    objective: options.goalContext.objective,
+                    generation: options.goalContext.generation,
+                  },
+                }
               : {}),
           },
           visibleInTranscript: options.visibleInTranscript,

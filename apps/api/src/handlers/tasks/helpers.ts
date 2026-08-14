@@ -21,6 +21,14 @@ export const TASK_SELECT_COLUMNS = {
   timestamp: tasks.timestamp,
   activityAt: tasks.activityAt,
   repositoryName: tasks.repositoryName,
+  goalObjective: tasks.goalObjective,
+  goalStatus: tasks.goalStatus,
+  goalMaxContinuations: tasks.goalMaxContinuations,
+  goalContinuationsUsed: tasks.goalContinuationsUsed,
+  goalBlockedReason: tasks.goalBlockedReason,
+  goalCompletedAt: tasks.goalCompletedAt,
+  goalLastContinuationId: tasks.goalLastContinuationId,
+  goalGenerationIds: tasks.goalGenerationIds,
 };
 
 interface LatestTaskRunSummary {

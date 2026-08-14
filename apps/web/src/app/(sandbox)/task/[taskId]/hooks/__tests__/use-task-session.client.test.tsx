@@ -166,6 +166,32 @@ describe('useTaskSession', () => {
     );
   });
 
+  it('polls durable task state quickly only while a goal is active', () => {
+    renderHook(() => useTaskSession('task-1', { refetchInterval: 30_000 }));
+
+    const options = sessionQueryOptionsMock.mock.calls[0]?.[1] as {
+      refetchInterval: (query: {
+        state: { data: { task: { goalStatus: string | null } } };
+      }) => number | false;
+    };
+
+    expect(
+      options.refetchInterval({
+        state: { data: { task: { goalStatus: 'active' } } },
+      }),
+    ).toBe(2_000);
+    expect(
+      options.refetchInterval({
+        state: { data: { task: { goalStatus: 'complete' } } },
+      }),
+    ).toBe(30_000);
+    expect(
+      options.refetchInterval({
+        state: { data: { task: { goalStatus: null } } },
+      }),
+    ).toBe(30_000);
+  });
+
   it('splits session loading from token loading for interactive tasks', () => {
     useQueryMock.mockReset();
     useQueryMock

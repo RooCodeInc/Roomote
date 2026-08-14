@@ -328,6 +328,52 @@ describe('AcpTextMessage', () => {
     ).toBeVisible();
   });
 
+  it('labels a user prompt that was sent as a goal', () => {
+    render(
+      <AcpTextMessage
+        msg={{
+          id: 'message-goal',
+          ts: 123,
+          role: 'user',
+          kind: 'text',
+          partial: false,
+          sessionId: 'session-1',
+          updateType: 'roomote_runtime.user_prompt',
+          text: 'Count to ten',
+          data: {
+            goal: {
+              objective: 'Count to ten',
+              generation: 'goal-generation:1',
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('goal-origin')).toHaveTextContent('Sent as goal');
+    expect(screen.getByText('Count to ten')).toBeVisible();
+  });
+
+  it('does not label an ordinary user prompt as a goal', () => {
+    render(
+      <AcpTextMessage
+        msg={{
+          id: 'message-ordinary',
+          ts: 123,
+          role: 'user',
+          kind: 'text',
+          partial: false,
+          sessionId: 'session-1',
+          updateType: 'roomote_runtime.user_prompt',
+          text: 'Continue',
+          data: {},
+        }}
+      />,
+    );
+
+    expect(screen.queryByTestId('goal-origin')).not.toBeInTheDocument();
+  });
+
   it('renders user text as plain text instead of markdown', () => {
     render(
       <AcpTextMessage

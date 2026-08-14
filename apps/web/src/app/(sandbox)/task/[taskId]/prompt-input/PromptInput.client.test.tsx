@@ -898,6 +898,17 @@ describe('PromptInput', () => {
       });
     });
     expect(sandboxSendPromptMutateMock).not.toHaveBeenCalled();
+    expect(appendOptimisticAcpEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'ship the release',
+        payload: expect.objectContaining({
+          goal: {
+            objective: 'ship the release',
+            generation: null,
+          },
+        }),
+      }),
+    );
     expect(toastSuccessMock).toHaveBeenCalledWith('Goal Mode enabled');
   });
 

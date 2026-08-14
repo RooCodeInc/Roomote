@@ -20,6 +20,7 @@ type OptimisticPromptInput = {
   taskId: string;
   prompt: string;
   images?: string[];
+  goalObjective?: string;
   clientMessageId: string;
   currentUserInfo: OptimisticPromptUserInfo | null;
 };
@@ -38,6 +39,7 @@ export function createOptimisticPromptArtifacts({
   taskId,
   prompt,
   images,
+  goalObjective,
   clientMessageId,
   currentUserInfo,
 }: OptimisticPromptInput): OptimisticPromptArtifacts {
@@ -60,6 +62,9 @@ export function createOptimisticPromptArtifacts({
       prompt: contentBlocks,
       content,
       ...(images ? { images } : {}),
+      ...(goalObjective
+        ? { goal: { objective: goalObjective, generation: null } }
+        : {}),
       ...(currentUserInfo?.userId ? { userId: currentUserInfo.userId } : {}),
       ...(currentUserInfo?.userName
         ? { userName: currentUserInfo.userName }

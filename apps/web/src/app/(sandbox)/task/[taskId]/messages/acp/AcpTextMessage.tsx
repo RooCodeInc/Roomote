@@ -17,6 +17,7 @@ import {
   ChevronDownIcon,
   MediaViewerDialog,
   MediaViewerImage,
+  Sparkles,
 } from '@/components/system';
 import {
   type CollapsibleToggleRenderProps,
@@ -38,6 +39,7 @@ import { getTaskToolByInvocation } from '../../task-tools';
 import { useInternalTranscriptRowsVisible } from '../../useInternalTranscriptRowsVisible';
 import { messageAnchorId } from '../message-anchor';
 import type { AcpUiMessage } from './types';
+import { getGoalPromptProvenance } from './goal-prompt';
 import { ProviderRetryNoticeMessage } from './ProviderRetryNoticeMessage';
 import { TerminalProviderErrorMessage } from './TerminalProviderErrorMessage';
 
@@ -163,6 +165,7 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
     : stripLlmCitationArtifacts(msg.text ?? '');
   const anchorId = messageAnchorId(msg.ts);
   const taskTool = isUser ? getTaskToolByInvocation(baseContent) : undefined;
+  const goalPrompt = getGoalPromptProvenance(msg);
   const linkedReviewResult = isUser
     ? parseLinkedReviewResults(baseContent)
     : null;
@@ -298,38 +301,49 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
               data={msg.data as Record<string, unknown>}
             />
           ) : isUser ? (
-            <CollapsibleContent renderToggle={UserMessageToggle}>
-              <MessagePlainText
-                data-testid={
-                  requestUserInputResponse
-                    ? 'request-user-input-response'
-                    : undefined
-                }
-              >
-                {requestUserInputResponse ? (
-                  <>
-                    {requestUserInputResponse.title ? (
-                      <span className="block text-xs font-medium text-muted-foreground">
-                        {requestUserInputResponse.title}
-                      </span>
-                    ) : null}
-                    {requestUserInputResponse.questionTexts.map(
-                      (questionText, index) => (
-                        <p
-                          key={index}
-                          className="mt-1 border-l-2 pl-2 text-muted-foreground"
-                        >
-                          {questionText}
-                        </p>
-                      ),
-                    )}
-                    <span className="mt-2 block">{baseContent}</span>
-                  </>
-                ) : (
-                  baseContent
-                )}
-              </MessagePlainText>
-            </CollapsibleContent>
+            <div className="space-y-1.5">
+              {goalPrompt ? (
+                <div
+                  className="flex items-center justify-end gap-1 text-xs font-medium text-muted-foreground"
+                  data-testid="goal-origin"
+                >
+                  <Sparkles className="size-3" aria-hidden="true" />
+                  <span>Sent as goal</span>
+                </div>
+              ) : null}
+              <CollapsibleContent renderToggle={UserMessageToggle}>
+                <MessagePlainText
+                  data-testid={
+                    requestUserInputResponse
+                      ? 'request-user-input-response'
+                      : undefined
+                  }
+                >
+                  {requestUserInputResponse ? (
+                    <>
+                      {requestUserInputResponse.title ? (
+                        <span className="block text-xs font-medium text-muted-foreground">
+                          {requestUserInputResponse.title}
+                        </span>
+                      ) : null}
+                      {requestUserInputResponse.questionTexts.map(
+                        (questionText, index) => (
+                          <p
+                            key={index}
+                            className="mt-1 border-l-2 pl-2 text-muted-foreground"
+                          >
+                            {questionText}
+                          </p>
+                        ),
+                      )}
+                      <span className="mt-2 block">{baseContent}</span>
+                    </>
+                  ) : (
+                    baseContent
+                  )}
+                </MessagePlainText>
+              </CollapsibleContent>
+            </div>
           ) : (
             <MessageResponse>{content}</MessageResponse>
           )}

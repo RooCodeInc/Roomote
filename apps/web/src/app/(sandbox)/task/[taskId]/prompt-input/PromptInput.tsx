@@ -473,6 +473,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
             taskId: taskRun.taskId,
             prompt: preparedPrompt.text,
             images: preparedPrompt.images,
+            ...(goalObjective ? { goalObjective } : {}),
             location: optimisticLocation,
           });
           optimisticClientMessageId = clientMessageId;

@@ -86,6 +86,42 @@ describe('OpenCodeRuntimeEventEmitter', () => {
     });
   });
 
+  it('persists goal provenance on the originating user prompt', () => {
+    const { emitter, runtimeOutput, runtimePersistedEnvelope } =
+      createEmitter();
+
+    emitter.userPrompt({
+      sessionId: 'session-1',
+      text: 'Count to ten',
+      goalContext: {
+        objective: 'Count to ten',
+        generation: 'goal-generation:1',
+        status: 'active',
+        maxContinuations: 5,
+        continuationsUsed: 0,
+        blockedReason: null,
+        completedAt: null,
+      },
+    });
+
+    expect(runtimeOutput.mock.calls[0]?.[0]).toMatchObject({
+      payload: {
+        goal: {
+          objective: 'Count to ten',
+          generation: 'goal-generation:1',
+        },
+      },
+    });
+    expect(runtimePersistedEnvelope.mock.calls[0]?.[0]).toMatchObject({
+      payload: {
+        goal: {
+          objective: 'Count to ten',
+          generation: 'goal-generation:1',
+        },
+      },
+    });
+  });
+
   it('stamps stable logical ids on paired live and persisted tool call events', () => {
     const { emitter, runtimeOutput, runtimePersistedEnvelope } =
       createEmitter();

@@ -57,6 +57,12 @@ import { messageAnchorId } from './messages/message-anchor';
 import { LazyMessage } from './LazyMessage';
 import { ScrollToHash } from './ScrollToHash';
 import { ScrollBridge } from './ScrollBridge';
+import type { AcpUiMessage } from './types';
+import { GoalStatusMessage } from './GoalStatusMessage';
+import {
+  findLatestGoalPrompt,
+  getGoalPromptProvenance,
+} from './messages/acp/goal-prompt';
 
 export interface MessagesHandle {
   scrollToBottom: ScrollToBottom;
@@ -246,6 +252,90 @@ const MessagesBase = ({
     Boolean(sessionPrompt);
   const resolvedHideFirstAcpUserPrompt =
     hideFirstAcpUserPrompt ?? shouldRenderSessionPrompt;
+  const latestGoalPrompt = useMemo(
+    () => findLatestGoalPrompt(messages),
+    [messages],
+  );
+  const inferredGoalPromptMessageId = useMemo(() => {
+    if (!historyReady) {
+      return null;
+    }
+
+    const objective = session.task?.goalObjective?.trim();
+    if (!objective) {
+      return null;
+    }
+
+    const matchingMessages = messages.filter(
+      (message) =>
+        message.role === 'user' && message.text?.trim() === objective,
+    );
+
+    return matchingMessages.length === 1 ? matchingMessages[0]!.id : null;
+  }, [historyReady, messages, session.task?.goalObjective]);
+  const taskGoalGenerations = session.task?.goalGenerationIds ?? [];
+  const taskHasLatestGoal = latestGoalPrompt
+    ? latestGoalPrompt.generation === null
+      ? session.task?.goalObjective === latestGoalPrompt.objective
+      : taskGoalGenerations.includes(latestGoalPrompt.generation)
+    : true;
+  const goalStatus =
+    session.task?.goalObjective && session.task.goalStatus && taskHasLatestGoal
+      ? {
+          objective: session.task.goalObjective,
+          status: session.task.goalStatus,
+          blockedReason: session.task.goalBlockedReason,
+        }
+      : latestGoalPrompt
+        ? {
+            objective: latestGoalPrompt.objective,
+            status: 'active' as const,
+            blockedReason: null,
+          }
+        : null;
+  const renderedSessionPrompt = useMemo(() => {
+    if (!sessionPrompt) {
+      return sessionPrompt;
+    }
+
+    const firstGoalMessage = messages.find(
+      (message) =>
+        message.role === 'user' &&
+        message.text === sessionPrompt.text &&
+        (getGoalPromptProvenance(message) !== null ||
+          message.id === inferredGoalPromptMessageId),
+    );
+
+    const shouldInferSessionPromptGoal =
+      historyReady &&
+      session.task?.goalObjective?.trim() === sessionPrompt.text?.trim() &&
+      !messages.some(
+        (message) =>
+          message.role === 'user' &&
+          message.text?.trim() === session.task?.goalObjective?.trim(),
+      );
+
+    return firstGoalMessage
+      ? ({
+          ...sessionPrompt,
+          data: withGoalProvenance(firstGoalMessage).data,
+        } as typeof sessionPrompt)
+      : shouldInferSessionPromptGoal
+        ? withGoalProvenance(sessionPrompt)
+        : sessionPrompt;
+  }, [
+    historyReady,
+    inferredGoalPromptMessageId,
+    messages,
+    session.task?.goalObjective,
+    sessionPrompt,
+  ]);
+
+  useEffect(() => {
+    if (latestGoalPrompt && !taskHasLatestGoal) {
+      void session.refreshTaskSession?.();
+    }
+  }, [latestGoalPrompt, session, taskHasLatestGoal]);
 
   const renderBlocks = useMemo(() => {
     const acpBlocks = buildAcpRenderBlocks(messages, {
@@ -380,9 +470,13 @@ const MessagesBase = ({
       );
     }
 
+    const message =
+      block.msg.id === inferredGoalPromptMessageId
+        ? withGoalProvenance(block.msg)
+        : block.msg;
     const content = (
       <AcpMessageItem
-        msg={block.msg}
+        msg={message}
         onSuppress={suppressMessage}
         showSubagentPayload={showInternalMessages}
       >
@@ -422,10 +516,11 @@ const MessagesBase = ({
           className={cn('ph-no-capture', conversationClassName)}
         >
           {shouldRenderSessionPrompt && sessionPrompt && (
-            <AcpTextMessage msg={sessionPrompt} />
+            <AcpTextMessage msg={renderedSessionPrompt ?? sessionPrompt} />
           )}
           {!historyReady && <TranscriptSkeleton />}
           {renderBlocks.map((block) => renderRenderBlock(block, false))}
+          {goalStatus ? <GoalStatusMessage {...goalStatus} /> : null}
           {session.taskRun && <SleepWakeMessages taskRun={session.taskRun} />}
           {shouldShowNarrationWorkingReasoning && (
             <NarrationWorkingReasoningMessage />
@@ -463,6 +558,25 @@ function collectBlockAnchorIds(
   collectBlockAnchorIdsInto(blocks, pushAnchor);
 
   return anchorIds;
+}
+
+function withGoalProvenance(message: AcpUiMessage): AcpUiMessage {
+  if (getGoalPromptProvenance(message)) {
+    return message;
+  }
+
+  const objective = message.text?.trim();
+  if (!objective) {
+    return message;
+  }
+
+  return {
+    ...message,
+    data: {
+      ...message.data,
+      goal: { objective, generation: null },
+    },
+  } as AcpUiMessage;
 }
 
 function collectBlockAnchorIdsInto(
