@@ -18,7 +18,10 @@ import { captureWorkerException } from '../monitoring/sentry';
 
 import type { CallbackEvent, RunTaskCallbacks, RunTaskContext } from './types';
 import { fromRuntimeEnvelope } from './runtime-events/envelope';
-import { deliverMissingChatCloseoutFallback } from './missing-chat-closeout-fallback-delivery';
+import {
+  recordMissingChatCloseoutFallback,
+  waitForMissingChatCloseoutFallbackDelivery,
+} from './missing-chat-closeout-fallback-settlement';
 import { deliverShowWidgetFallback } from './show-widget-fallback-delivery';
 
 interface PendingCompletionEvents {
@@ -374,20 +377,21 @@ export function subscribeHarnessCallbacks({
       const completionMetadata = event.payload[3] as
         | TaskCompletionMetadata
         | undefined;
-      trackPendingTaskCompletionWork(
-        (async () => {
-          await waitForPendingPersistenceWrites();
-
-          if (completionMetadata?.missingChatCloseout) {
-            await deliverMissingChatCloseoutFallback({
+      recordMissingChatCloseoutFallback(
+        context,
+        completionMetadata?.missingChatCloseout
+          ? {
               runId: taskRun.id,
               completionId: completionMetadata.completionId ?? taskId,
               text: getLatestPendingCompletionText(taskId),
               mcpTaskEnv,
               logger,
-            });
-          }
-
+            }
+          : null,
+      );
+      trackPendingTaskCompletionWork(
+        (async () => {
+          await waitForPendingPersistenceWrites();
           flushPendingCompletionEvents(taskId);
         })(),
       );
@@ -411,6 +415,7 @@ export function subscribeHarnessCallbacks({
     await assistantOutputStampInFlight;
     await waitForPendingPersistenceWrites();
     await waitForPendingTaskCompletionWork();
+    await waitForMissingChatCloseoutFallbackDelivery(context);
 
     for (const callbackTaskId of pendingCompletionEventsByCallbackId.keys()) {
       flushPendingCompletionEvents(callbackTaskId);

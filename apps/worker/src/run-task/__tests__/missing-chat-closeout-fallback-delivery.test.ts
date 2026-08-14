@@ -23,6 +23,11 @@ import {
   deliverMissingChatCloseoutFallback,
   EMPTY_CHAT_CLOSEOUT_FALLBACK_TEXT,
 } from '../missing-chat-closeout-fallback-delivery';
+import {
+  recordMissingChatCloseoutFallback,
+  settleMissingChatCloseoutFallback,
+  waitForMissingChatCloseoutFallbackDelivery,
+} from '../missing-chat-closeout-fallback-settlement';
 
 const logger = {
   runId: 42,
@@ -46,6 +51,62 @@ describe('deliverMissingChatCloseoutFallback', () => {
     claimDelivery.mockResolvedValue({ claimed: true });
     releaseDelivery.mockResolvedValue(undefined);
     replyToChatThread.mockResolvedValue({ messageTs: '123.456' });
+  });
+
+  it('holds the fallback until the matching completion is settled', async () => {
+    const context = {};
+    recordMissingChatCloseoutFallback(context, {
+      runId: 42,
+      completionId: 'completion-settled',
+      text: 'Final answer after the goal settles.',
+      mcpTaskEnv,
+      logger,
+    });
+
+    expect(replyToChatThread).not.toHaveBeenCalled();
+
+    await settleMissingChatCloseoutFallback(context, 'another-completion');
+    expect(replyToChatThread).not.toHaveBeenCalled();
+
+    await settleMissingChatCloseoutFallback(context, 'completion-settled');
+    expect(replyToChatThread).toHaveBeenCalledWith(expect.any(Object), {
+      text: 'Final answer after the goal settles.',
+    });
+  });
+
+  it('drops an exhausted closeout when a later completion supersedes it', async () => {
+    const context = {};
+    recordMissingChatCloseoutFallback(context, {
+      runId: 42,
+      completionId: 'continued-completion',
+      text: 'Intermediate answer.',
+      mcpTaskEnv,
+      logger,
+    });
+
+    recordMissingChatCloseoutFallback(context, null);
+    await settleMissingChatCloseoutFallback(context, 'continued-completion');
+    await waitForMissingChatCloseoutFallbackDelivery(context);
+
+    expect(replyToChatThread).not.toHaveBeenCalled();
+  });
+
+  it('delivers when settlement wins the event-ordering race', async () => {
+    const context = {};
+    await settleMissingChatCloseoutFallback(context, 'completion-late-record');
+
+    recordMissingChatCloseoutFallback(context, {
+      runId: 42,
+      completionId: 'completion-late-record',
+      text: 'Final answer recorded after settlement.',
+      mcpTaskEnv,
+      logger,
+    });
+    await waitForMissingChatCloseoutFallbackDelivery(context);
+
+    expect(replyToChatThread).toHaveBeenCalledWith(expect.any(Object), {
+      text: 'Final answer recorded after settlement.',
+    });
   });
 
   it('posts the last finalized assistant message through the shared chat path', async () => {
