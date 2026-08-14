@@ -127,22 +127,53 @@ async function resolveDestination(
   };
 }
 
+function buildDefaultReportPresentationGuidance(
+  hasDestination: boolean,
+): string {
+  const channelGuidance = hasDestination
+    ? '\n- The first `send_chat_reply` is the report root and must stand alone. If important supporting detail would make it too long, keep the root concise and send the detail in follow-up replies in the same thread with clear headings. Keep essential conclusions and required actions in the root.'
+    : '';
+
+  return `<default_report_presentation>
+These are defaults, not requirements that override the automation request above. Before applying them, check the request for explicit guidance about format, structure, length, tone, audience, or where details should appear. On any conflict, follow the request. Apply these defaults only where the request is silent.
+
+- Lead with the result or most important takeaway in 1-2 sentences.
+- Keep the primary report concise, normally no more than about 250 words.
+- When the report has multiple topics, use 2-4 short bold Markdown headings with bullets underneath them.
+- Keep bullets short and put one finding, decision, or action in each bullet.
+- Prioritize decision-useful findings. Omit routine methodology, exhaustive test transcripts, and repeated conclusions unless the request asks for them or they materially support the result.
+- For a clean or no-action result, say so briefly and include only the most useful supporting evidence or caveats.
+- Use inline links with descriptive labels instead of raw URLs when possible.${channelGuidance}
+</default_report_presentation>`;
+}
+
 /**
- * Anchors a custom automation's prompt to its configured report conversation,
- * mirroring how the built-in channel automations tell the agent which surface
- * and posting tool to report through.
+ * Adds default presentation guidance to every custom automation prompt and,
+ * when configured, anchors reporting to its destination conversation.
  */
-function buildChannelAnchoredDescription(
+function buildCustomAutomationDescription(
   prompt: string,
-  destination: ResolvedAutomationDestination,
+  destination: ResolvedAutomationDestination | null,
   options: { allRepositories: boolean },
 ): string {
+  const presentationGuidance = buildDefaultReportPresentationGuidance(
+    destination !== null,
+  );
+
+  if (!destination) {
+    return `${prompt}
+
+${presentationGuidance}`;
+  }
+
   const promptContext = buildDestinationPromptContext(destination);
   const orgWideSuggestionInstruction = options.allRepositories
     ? ' This run spans all active repositories. Every launchable suggestion must include the concrete `targetRepositoryFullName` that owns the work so Roomote can start it in the matching environment.'
     : '';
 
   return `${prompt}
+
+${presentationGuidance}
 
 <task_context>
   <source>background-automation</source>
@@ -311,11 +342,13 @@ async function launchCustomAutomationRow(
           ...(automation.environmentId
             ? { environmentId: automation.environmentId }
             : {}),
-          description: destination
-            ? buildChannelAnchoredDescription(automation.prompt, destination, {
-                allRepositories: automation.allRepositories,
-              })
-            : automation.prompt,
+          description: buildCustomAutomationDescription(
+            automation.prompt,
+            destination,
+            {
+              allRepositories: automation.allRepositories,
+            },
+          ),
           ...(destination
             ? buildDestinationTaskPayloadFields(destination)
             : {}),

@@ -263,6 +263,21 @@ describe('customAutomationsJob', () => {
     expect(enqueued.task.payload.description).toContain(
       'do not mention this automation',
     );
+    expect(enqueued.task.payload.description).toContain(
+      '<default_report_presentation>',
+    );
+    expect(enqueued.task.payload.description).toContain(
+      'On any conflict, follow the request',
+    );
+    expect(enqueued.task.payload.description).toContain(
+      'normally no more than about 250 words',
+    );
+    expect(enqueued.task.payload.description).toContain(
+      'send the detail in follow-up replies in the same thread',
+    );
+    expect(enqueued.task.payload.description.indexOf(automation.prompt)).toBe(
+      0,
+    );
   });
 
   it('resolves a Slack DM target for the automation owner', async () => {
@@ -369,7 +384,7 @@ describe('customAutomationsJob', () => {
     },
   );
 
-  it('launches without channel anchoring when no report channel is configured', async () => {
+  it('adds presentation defaults without channel anchoring when no report channel is configured', async () => {
     vi.mocked(listEnabledCustomAutomations).mockResolvedValue([
       { ...automation, target: {} } as never,
     ]);
@@ -381,7 +396,21 @@ describe('customAutomationsJob', () => {
       task: { payload: Record<string, unknown> };
       channels?: unknown;
     };
-    expect(enqueued.task.payload.description).toBe(automation.prompt);
+    expect(enqueued.task.payload.description).toEqual(
+      expect.stringContaining(automation.prompt),
+    );
+    expect(enqueued.task.payload.description).toEqual(
+      expect.stringContaining('<default_report_presentation>'),
+    );
+    expect(enqueued.task.payload.description).toEqual(
+      expect.stringContaining('On any conflict, follow the request'),
+    );
+    expect(enqueued.task.payload.description).not.toEqual(
+      expect.stringContaining('send_chat_reply'),
+    );
+    expect(
+      String(enqueued.task.payload.description).indexOf(automation.prompt),
+    ).toBe(0);
     expect(enqueued.task.payload.customAutomationId).toBeUndefined();
     expect(enqueued.task.payload.channel).toBeUndefined();
     expect(enqueued.channels).toBeUndefined();
@@ -512,6 +541,13 @@ describe('runCustomAutomationNow', () => {
     expect(enqueueTask).toHaveBeenCalledWith(
       expect.objectContaining({
         trigger: 'manual',
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            description: expect.stringContaining(
+              '<default_report_presentation>',
+            ),
+          }),
+        }),
       }),
     );
   });
