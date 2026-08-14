@@ -8,6 +8,7 @@ import {
   getCommunicationThreadIdFromTaskPayload,
   getEnvironmentDefinitionIdFromPayload,
   parseConflictResolutionSummary,
+  resolveComputeProviderTarget,
   stripRunErrorMarkers,
   type TaskRunErrorCode,
 } from '@roomote/types';
@@ -23,15 +24,18 @@ import {
   type TaskRun,
   type Task,
   type TaskPullRequest,
+  buildPendingEnvironmentSnapshotMatchForTaskRun,
   db,
   taskRuns,
   taskPullRequests,
   deploymentSettings,
   markTaskStartParallelCountEndedAt,
   recordTaskRunLifecycleEvent,
+  resolveDefaultComputeProvider,
   slackInstallations,
   slackUserMappings,
   syncTaskStateFromRuns,
+  updatePendingEnvironmentSnapshot,
   asc,
   eq,
   and,
@@ -241,6 +245,28 @@ export const finishRun = async ({
     });
   });
 
+  // Truthful snapshot state: a snapshot refresh that dies on any terminal
+  // path — spawn failure, worker crash before claiming, watchdog cleanup,
+  // user stop — must not leave the environment_snapshots row 'pending' (the
+  // settings UI renders pending as "Snapshotting…" until the next daily
+  // cycle). The guarded update only matches rows still pending for this run's
+  // claim, so a ready row (the last known-good snapshot a refresh
+  // deliberately preserves) is never overwritten.
+  if (
+    payloadKind === TaskPayloadKind.SnapshotEnvironment &&
+    (status === RunStatus.Failed || status === RunStatus.Canceled)
+  ) {
+    try {
+      await failPendingEnvironmentSnapshotForRun(run);
+    } catch (err) {
+      console.error(
+        `[finishRun] Failed to record environment snapshot failure for run ${id}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
   // Deterministic spawned-task feedback: when this run was launched by
   // another task's run with notify-on-settle requested, deliver the outcome
   // into that launching run's session (waking it if idle) so the parent
@@ -449,6 +475,38 @@ export const finishRun = async ({
     }
   }
 };
+
+/**
+ * Flip this snapshot run's environment_snapshots row from 'pending' to
+ * 'failed'. The match built from the run's payload attachment (or, for legacy
+ * payloads, the run's createdAt upper bound) keeps the update scoped to the
+ * claim this run owned: a row that already advanced — re-claimed by a newer
+ * refresh, or 'ready' from a preserved last known-good snapshot — no-ops.
+ */
+async function failPendingEnvironmentSnapshotForRun(
+  run: FinishedRun,
+): Promise<void> {
+  const environmentId = run.payload.environmentId;
+
+  if (!environmentId) {
+    return;
+  }
+
+  const provider = resolveComputeProviderTarget(
+    run.vendor,
+    await resolveDefaultComputeProvider(),
+  );
+
+  await updatePendingEnvironmentSnapshot(db, {
+    environmentId,
+    provider,
+    snapshotId: null,
+    snapshotStatus: 'failed',
+    snapshotCreatedAt: null,
+    snapshotExpiresAt: null,
+    ...buildPendingEnvironmentSnapshotMatchForTaskRun(run),
+  });
+}
 
 /**
  * Returns the task's PR rows ordered by detection time. For PR-triggered
