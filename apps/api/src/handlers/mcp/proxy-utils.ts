@@ -419,8 +419,11 @@ function stripToolSchemaPatterns(value: unknown): unknown {
  * request that fails the whole task turn. Normalize the shapes that trigger
  * this at the proxy boundary: rewrite array/object type unions into explicit
  * `anyOf` branches with each branch keeping only its own type's keywords, and
- * give array schemas that declare no item shape a permissive string `items`
- * (the upstream server still validates the actual tool call).
+ * give array schemas that declare no item shape at all a permissive string
+ * `items` (the upstream server still validates the actual tool call). The
+ * transform must never destroy information the upstream declared: declared
+ * `items` of any form pass through untouched, and data-carrying keywords
+ * (`default`, `const`, `enum`, `examples`) are never recursed into.
  */
 const ARRAY_ONLY_SCHEMA_KEYWORDS = [
   'items',
@@ -443,6 +446,59 @@ const OBJECT_ONLY_SCHEMA_KEYWORDS = [
   'maxProperties',
 ] as const;
 
+const STRING_ONLY_SCHEMA_KEYWORDS = [
+  'minLength',
+  'maxLength',
+  'pattern',
+  'format',
+  'contentEncoding',
+  'contentMediaType',
+] as const;
+
+const NUMERIC_ONLY_SCHEMA_KEYWORDS = [
+  'minimum',
+  'maximum',
+  'exclusiveMinimum',
+  'exclusiveMaximum',
+  'multipleOf',
+] as const;
+
+// Union branches keep only the structural keywords that belong to their own
+// type; anything else leaking into a branch (a `minLength` on an array
+// branch, a `default: null` on an object branch) produces self-contradictory
+// schemas that strict providers can reject outright.
+const UNION_BRANCH_KEYWORDS_BY_TYPE: Record<string, readonly string[]> = {
+  array: ARRAY_ONLY_SCHEMA_KEYWORDS,
+  object: OBJECT_ONLY_SCHEMA_KEYWORDS,
+  string: STRING_ONLY_SCHEMA_KEYWORDS,
+  number: NUMERIC_ONLY_SCHEMA_KEYWORDS,
+  integer: NUMERIC_ONLY_SCHEMA_KEYWORDS,
+};
+
+// `enum` and `const` constrain the value itself and stay valid on any branch.
+const UNION_BRANCH_SHARED_KEYWORDS = ['enum', 'const'] as const;
+
+// Keys whose values are data, not schemas. Recursing into them would rewrite
+// literal values that merely look like schemas (a `default` of
+// `{"type": "array"}` would grow an injected `items`).
+const NON_SCHEMA_VALUE_KEYWORDS = new Set([
+  'default',
+  'const',
+  'enum',
+  'examples',
+]);
+
+// Keys whose values are maps of schemas keyed by arbitrary names. Entries in
+// these maps are schemas even when a property is literally named "default"
+// or "enum", so the data-keyword skip above must not apply inside them.
+const SCHEMA_MAP_KEYWORDS = new Set([
+  'properties',
+  'patternProperties',
+  'definitions',
+  '$defs',
+  'dependentSchemas',
+]);
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -454,16 +510,19 @@ function withProviderSafeArrayItems(
     return schema;
   }
 
-  const items = schema.items;
-  const declaresItemShape =
-    isPlainObject(items) && Object.keys(items).length > 0;
-
-  return declaresItemShape ? schema : { ...schema, items: { type: 'string' } };
+  // Only fill in `items` when the upstream declared nothing at all. A
+  // declared shape of any form (object schema, boolean, draft-04 tuple
+  // array, or an explicit empty object) is the server's contract and must
+  // pass through untouched.
+  return 'items' in schema ? schema : { ...schema, items: { type: 'string' } };
 }
 
-function normalizeToolSchemaForStrictProviders(value: unknown): unknown {
+function normalizeToolSchemaForStrictProviders(
+  value: unknown,
+  context: 'schema' | 'schema-map' = 'schema',
+): unknown {
   if (Array.isArray(value)) {
-    return value.map(normalizeToolSchemaForStrictProviders);
+    return value.map((entry) => normalizeToolSchemaForStrictProviders(entry));
   }
 
   if (!isPlainObject(value)) {
@@ -471,11 +530,27 @@ function normalizeToolSchemaForStrictProviders(value: unknown): unknown {
   }
 
   const schema = Object.fromEntries(
-    Object.entries(value).map(([key, nestedValue]) => [
-      key,
-      normalizeToolSchemaForStrictProviders(nestedValue),
-    ]),
+    Object.entries(value).map(([key, nestedValue]) => {
+      if (context === 'schema' && NON_SCHEMA_VALUE_KEYWORDS.has(key)) {
+        return [key, nestedValue];
+      }
+      return [
+        key,
+        normalizeToolSchemaForStrictProviders(
+          nestedValue,
+          context === 'schema' && SCHEMA_MAP_KEYWORDS.has(key)
+            ? 'schema-map'
+            : 'schema',
+        ),
+      ];
+    }),
   );
+
+  // A schema map's own keys are property names, not schema keywords; only
+  // its entries (handled above) are schemas.
+  if (context === 'schema-map') {
+    return schema;
+  }
 
   const typeValue = schema.type;
   if (
@@ -492,12 +567,17 @@ function normalizeToolSchemaForStrictProviders(value: unknown): unknown {
 
   // Scalar-only unions convert cleanly; only unions carrying a composite
   // type lose their keywords in the downstream Gemini conversion.
-  if (
-    (!typeValue.includes('array') && !typeValue.includes('object')) ||
-    'anyOf' in schema ||
-    'oneOf' in schema ||
-    'allOf' in schema
-  ) {
+  if (!typeValue.includes('array') && !typeValue.includes('object')) {
+    return schema;
+  }
+
+  if ('anyOf' in schema || 'oneOf' in schema || 'allOf' in schema) {
+    // Splitting the union would clobber the sibling combinator, so decline —
+    // but say so, since strict providers may reject the untouched schema and
+    // this log is the only breadcrumb when they do.
+    console.warn(
+      '[mcp-proxy] Left composite type union with sibling anyOf/oneOf/allOf un-normalized; strict providers may reject this tool schema',
+    );
     return schema;
   }
 
@@ -507,18 +587,13 @@ function normalizeToolSchemaForStrictProviders(value: unknown): unknown {
       return { type: 'null' };
     }
 
-    const branch: Record<string, unknown> = {
-      ...sharedKeywords,
-      type: branchType,
-    };
-    if (branchType !== 'array') {
-      for (const keyword of ARRAY_ONLY_SCHEMA_KEYWORDS) {
-        delete branch[keyword];
-      }
-    }
-    if (branchType !== 'object') {
-      for (const keyword of OBJECT_ONLY_SCHEMA_KEYWORDS) {
-        delete branch[keyword];
+    const branch: Record<string, unknown> = { type: branchType };
+    for (const keyword of [
+      ...(UNION_BRANCH_KEYWORDS_BY_TYPE[branchType] ?? []),
+      ...UNION_BRANCH_SHARED_KEYWORDS,
+    ]) {
+      if (keyword in sharedKeywords) {
+        branch[keyword] = sharedKeywords[keyword];
       }
     }
     return withProviderSafeArrayItems(branch);
@@ -527,6 +602,9 @@ function normalizeToolSchemaForStrictProviders(value: unknown): unknown {
   const normalized: Record<string, unknown> = { anyOf: branches };
   if (typeof sharedKeywords.description === 'string') {
     normalized.description = sharedKeywords.description;
+  }
+  if ('default' in sharedKeywords) {
+    normalized.default = sharedKeywords.default;
   }
   return normalized;
 }
@@ -606,6 +684,7 @@ function filterToolsListPayload(
 function parseSseEventJsonRpcResponse(
   eventChunk: string,
   expectedId: JsonRpcRequestId,
+  matchAnyResponse = false,
 ): unknown | null {
   const dataText = eventChunk
     .split(/\r?\n/)
@@ -637,9 +716,15 @@ function parseSseEventJsonRpcResponse(
   };
   const hasResponsePayload = 'result' in message || 'error' in message;
   const idMatches =
-    expectedId === null
+    matchAnyResponse ||
+    (expectedId === null
       ? message.id === undefined || message.id === null
-      : message.id === expectedId;
+      : message.id === expectedId ||
+        // Tolerate upstreams that echo a numeric id as a string (or vice
+        // versa); a missed match here means the reply is forwarded as the
+        // raw upstream stream instead of the rebuilt, filtered payload.
+        ((typeof message.id === 'string' || typeof message.id === 'number') &&
+          String(message.id) === String(expectedId)));
 
   return hasResponsePayload && idMatches ? parsed : null;
 }
@@ -657,18 +742,51 @@ function parseSseEventJsonRpcResponse(
  * returns the matching response frame the moment it is seen and cancels the
  * reader. Returns `null` if the stream ends before a matching response frame
  * appears.
+ *
+ * `matchAnyResponse` accepts the first frame carrying a `result`/`error`
+ * regardless of its id — used for id-less requests whose reply must still be
+ * rebuilt (a restricted connection's tools/list). `timeoutMs` bounds the
+ * whole read and throws on expiry so a never-closing stream cannot hang the
+ * caller.
  */
 async function readMatchingSseJsonRpcResponse(
   body: ReadableStream<Uint8Array>,
   expectedId: JsonRpcRequestId,
+  options?: { matchAnyResponse?: boolean; timeoutMs?: number },
 ): Promise<unknown | null> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  const matchAnyResponse = options?.matchAnyResponse ?? false;
+  const deadline =
+    options?.timeoutMs === undefined ? null : Date.now() + options.timeoutMs;
+
+  const readNext = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
+    if (deadline === null) {
+      return reader.read();
+    }
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      throw new Error('Timed out reading upstream SSE response');
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(new Error('Timed out reading upstream SSE response'));
+          }, remainingMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  };
 
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      const { done, value } = await readNext();
 
       if (value) {
         buffer += decoder.decode(value, { stream: true });
@@ -682,7 +800,11 @@ async function readMatchingSseJsonRpcResponse(
           const eventChunk = buffer.slice(0, boundary.index);
           buffer = buffer.slice(boundary.index + boundary[0].length);
 
-          const match = parseSseEventJsonRpcResponse(eventChunk, expectedId);
+          const match = parseSseEventJsonRpcResponse(
+            eventChunk,
+            expectedId,
+            matchAnyResponse,
+          );
           if (match !== null) {
             return match;
           }
@@ -691,7 +813,11 @@ async function readMatchingSseJsonRpcResponse(
 
       if (done) {
         buffer += decoder.decode();
-        return parseSseEventJsonRpcResponse(buffer, expectedId);
+        return parseSseEventJsonRpcResponse(
+          buffer,
+          expectedId,
+          matchAnyResponse,
+        );
       }
     }
   } finally {
@@ -702,6 +828,12 @@ async function readMatchingSseJsonRpcResponse(
     });
   }
 }
+
+// How long a restricted connection's tools/list rebuild will wait for an
+// uncorrelatable SSE reply before giving up. Generous relative to a normal
+// tools/list round trip, but bounded so a server that never closes its
+// response channel cannot hang the proxy.
+const UNCORRELATED_SSE_TOOLS_LIST_TIMEOUT_MS = 10_000;
 
 class RequestBodyTooLargeError extends Error {
   constructor(readonly observedBytes: number) {
@@ -1127,21 +1259,39 @@ export function createMcpProxy(config: McpProxyConfig) {
       }
 
       // Every tools/list reply is rebuilt (not just restricted ones) so tool
-      // schemas can be normalized for strict model providers.
+      // schemas can be normalized for strict model providers. Connections
+      // with tool restrictions or schema stripping must never see an
+      // unfiltered tools/list, even when the upstream reply is an SSE stream
+      // we cannot correlate.
+      const mustFilterToolsList =
+        hasToolRestrictions || shouldStripToolSchemaPatterns;
+
       if (
         method === 'POST' &&
         getJsonRpcMethod(parsedBody) === 'tools/list' &&
         upstreamResponse.ok &&
         // An SSE response without a correlatable JSON-RPC id may remain open
-        // indefinitely. Preserve that stream instead of buffering it to EOF.
-        (!isSseResponse || canReadMatchingSseResponse)
+        // indefinitely. Preserve that stream for unrestricted connections;
+        // restricted connections fall back to a bounded buffered read.
+        (!isSseResponse || canReadMatchingSseResponse || mustFilterToolsList)
       ) {
         try {
-          const sseBody = canReadMatchingSseResponse
-            ? upstreamResponse.clone().body
-            : null;
+          const sseBody = isSseResponse ? upstreamResponse.clone().body : null;
           const payload = sseBody
-            ? await readMatchingSseJsonRpcResponse(sseBody, jsonRpcRequestId)
+            ? await readMatchingSseJsonRpcResponse(
+                sseBody,
+                canReadMatchingSseResponse ? jsonRpcRequestId : null,
+                canReadMatchingSseResponse
+                  ? undefined
+                  : // An id-less request can't be correlated; accept the
+                    // first response frame within a bounded window so the
+                    // restricted rebuild neither hangs nor mistakes a
+                    // progress notification for the reply.
+                    {
+                      matchAnyResponse: true,
+                      timeoutMs: UNCORRELATED_SSE_TOOLS_LIST_TIMEOUT_MS,
+                    },
+              )
             : parseMcpJsonRpcPayload(
                 await upstreamResponse.clone().text(),
                 contentType,
@@ -1162,15 +1312,37 @@ export function createMcpProxy(config: McpProxyConfig) {
           const headers = buildProxyResponseHeaders(upstreamResponse.headers);
           headers.set('content-type', 'application/json');
 
-          if (sseBody) {
-            upstreamResponse.body?.cancel().catch(() => {});
-          }
+          // The raw upstream tee branch is no longer needed on any rebuild
+          // path; cancel it so the buffered body is released promptly.
+          upstreamResponse.body?.cancel().catch(() => {});
 
           return new Response(JSON.stringify(filteredPayload), {
             status: upstreamResponse.status,
             headers,
           });
-        } catch {
+        } catch (error) {
+          if (mustFilterToolsList) {
+            console.warn(
+              formatSingleLineLog(
+                `${logPrefix} Refusing to forward a tools/list reply that could not be filtered`,
+                {
+                  requestId,
+                  method,
+                  path,
+                  upstream: effectiveUpstream,
+                  tokenType: auth.tokenType,
+                  userId: auth.userId,
+                  error: error instanceof Error ? error.message : String(error),
+                },
+              ),
+            );
+            return jsonRpcErrorResponse(
+              502,
+              -32000,
+              `${name} MCP upstream returned a tools/list reply that could not be filtered for this connection`,
+              jsonRpcRequestId,
+            );
+          }
           // Fall through to the raw upstream response if the body is not JSON.
         }
       }

@@ -618,11 +618,9 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     expect(properties.tags).toEqual({
       description: 'Tags to filter by',
       anyOf: [
-        {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Tags to filter by',
-        },
+        // Branches keep only their own type's structural keywords;
+        // annotations like `description` live at the top level only.
+        { type: 'array', items: { type: 'string' } },
         { type: 'null' },
       ],
     });
@@ -652,5 +650,191 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
       type: ['array', 'null'],
       items: { type: 'string' },
     });
+  });
+
+  it('never destroys declared items, data values, or foreign-type keywords', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-1', userId: null });
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          result: {
+            tools: [
+              {
+                name: 'search_issues',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    // Draft-04 tuple, boolean, and empty-object items are all
+                    // declared contracts and must pass through untouched.
+                    tuple_list: {
+                      type: 'array',
+                      items: [{ type: 'string' }, { type: 'number' }],
+                    },
+                    flexible_list: { type: 'array', items: true },
+                    any_list: { type: 'array', items: {} },
+                    // A default whose value merely looks like a schema is
+                    // data and must not be rewritten.
+                    raw_filter: {
+                      type: 'object',
+                      default: { type: 'array' },
+                    },
+                    // A union's shared keywords go only to the branches they
+                    // are valid on; annotations stay at the top level.
+                    id_or_ids: {
+                      type: ['string', 'array'],
+                      minLength: 1,
+                      pattern: '^[a-z]+$',
+                      items: { type: 'string' },
+                      default: null,
+                    },
+                  },
+                },
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp('pylon', createRunToken()),
+      createToolsListRequest(1),
+    );
+    const body = (await response.json()) as {
+      result: {
+        tools: Array<{ inputSchema: { properties: Record<string, unknown> } }>;
+      };
+    };
+
+    expect(response.status).toBe(200);
+    const properties = body.result.tools[0]?.inputSchema.properties ?? {};
+    expect(properties.tuple_list).toEqual({
+      type: 'array',
+      items: [{ type: 'string' }, { type: 'number' }],
+    });
+    expect(properties.flexible_list).toEqual({ type: 'array', items: true });
+    expect(properties.any_list).toEqual({ type: 'array', items: {} });
+    expect(properties.raw_filter).toEqual({
+      type: 'object',
+      default: { type: 'array' },
+    });
+    expect(properties.id_or_ids).toEqual({
+      anyOf: [
+        { type: 'string', minLength: 1, pattern: '^[a-z]+$' },
+        { type: 'array', items: { type: 'string' } },
+      ],
+      default: null,
+    });
+  });
+
+  it('filters an SSE tools/list whose id is echoed as a different type', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-1', userId: null });
+    mockFindEnablement.mockResolvedValue({ disabledTools: ['secret_tool'] });
+
+    // The request sends a numeric id; a non-conformant upstream echoes it as
+    // a string. The filtered rebuild must still apply instead of forwarding
+    // the raw (unfiltered) stream.
+    const sseBody =
+      'event: message\n' +
+      'data: {"jsonrpc":"2.0","id":"1","result":{"tools":[{"name":"search_issues","inputSchema":{"type":"object"}},{"name":"secret_tool","inputSchema":{"type":"object"}}]}}\n\n';
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(sseBody, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp('pylon', createRunToken()),
+      createToolsListRequest(1),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('application/json');
+    const body = (await response.json()) as {
+      result: { tools: Array<{ name: string }> };
+    };
+    expect(body.result.tools.map((tool) => tool.name)).toEqual([
+      'search_issues',
+    ]);
+  });
+
+  it('filters an uncorrelatable SSE tools/list for a restricted connection', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-1', userId: null });
+    mockFindEnablement.mockResolvedValue({ disabledTools: ['secret_tool'] });
+
+    // An id-less request cannot be correlated to an SSE frame, but a
+    // restricted connection must still get the filtered rebuild (via the
+    // bounded buffered read) rather than the raw upstream stream.
+    const sseBody =
+      'event: message\n' +
+      'data: {"jsonrpc":"2.0","id":null,"result":{"tools":[{"name":"search_issues","inputSchema":{"type":"object"}},{"name":"secret_tool","inputSchema":{"type":"object"}}]}}\n\n';
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(sseBody, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(createApp('pylon', createRunToken()), {
+      jsonrpc: '2.0',
+      id: null,
+      method: 'tools/list',
+      params: {},
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('application/json');
+    const body = (await response.json()) as {
+      result: { tools: Array<{ name: string }> };
+    };
+    expect(body.result.tools.map((tool) => tool.name)).toEqual([
+      'search_issues',
+    ]);
+  });
+
+  it('refuses to forward an unfilterable tools/list to a restricted connection', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-1', userId: null });
+    mockFindEnablement.mockResolvedValue({ disabledTools: ['secret_tool'] });
+
+    // The stream closes without ever carrying a JSON-RPC response, so there
+    // is nothing to filter; a restricted connection must get an error, never
+    // the raw upstream bytes.
+    const sseBody =
+      'event: message\n' +
+      'data: {"jsonrpc":"2.0","method":"notifications/progress","params":{"progress":1}}\n\n';
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(sseBody, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(createApp('pylon', createRunToken()), {
+      jsonrpc: '2.0',
+      id: null,
+      method: 'tools/list',
+      params: {},
+    });
+
+    expect(response.status).toBe(502);
+    expect(response.headers.get('content-type')).toContain('application/json');
+    const body = (await response.json()) as {
+      error: { code: number; message: string };
+    };
+    expect(body.error.code).toBe(-32000);
+    expect(body.error.message).toContain('could not be filtered');
   });
 });
