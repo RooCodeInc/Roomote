@@ -155,7 +155,7 @@ const DISCORD_HELP_MESSAGE = [
   '',
   '**Available commands**',
   '`/new request:<request>` — start a fresh task.',
-  '`/goal objective:<objective>` — enable Goal Mode for the current task.',
+  '`/goal objective:<objective>` — keep working toward an objective across multiple turns.',
   '`/link code:<code>` — link this Discord account in a DM with me.',
   '`/help` — show this message.',
   '',

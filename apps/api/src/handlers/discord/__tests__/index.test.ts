@@ -1718,6 +1718,13 @@ describe('Discord Gateway event handler', () => {
         text: expect.stringContaining('/new'),
       }),
     );
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: expect.stringContaining(
+          'keep working toward an objective across multiple turns',
+        ),
+      }),
+    );
   });
 
   it('uses /new to start fresh even when the DM has an active task', async () => {
