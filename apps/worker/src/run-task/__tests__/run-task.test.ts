@@ -2729,6 +2729,45 @@ describe('runTask', () => {
       );
     });
 
+    it('does not duplicate a settled notice across concurrent state events', async () => {
+      let resolveGoalLookup!: (value: null) => void;
+      taskRunsGetGoalMock.mockImplementationOnce(
+        () =>
+          new Promise<null>((resolve) => {
+            resolveGoalLookup = resolve;
+          }),
+      );
+      const { manager, settledListener } = await runTaskWithBackgroundSetup();
+
+      manager.emit('taskStateEvent', 'taskStarted');
+      settledListener!({ status: 'fulfilled', warningMessages: [] });
+      manager.emit('stateChange', 'running', {});
+      resolveGoalLookup(null);
+
+      await vi.waitFor(() => {
+        expect(environmentSetupNoticeCalls(manager)).toHaveLength(1);
+      });
+      expect(taskRunsGetGoalMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('restores a settled notice when the harness rejects delivery', async () => {
+      const { manager, settledListener } = await runTaskWithBackgroundSetup();
+      manager.sendFollowUpPrompt.mockReturnValueOnce(false);
+
+      manager.emit('taskStateEvent', 'taskStarted');
+      settledListener!({ status: 'fulfilled', warningMessages: [] });
+
+      await vi.waitFor(() => {
+        expect(environmentSetupNoticeCalls(manager)).toHaveLength(1);
+      });
+
+      manager.emit('stateChange', 'running', {});
+
+      await vi.waitFor(() => {
+        expect(environmentSetupNoticeCalls(manager)).toHaveLength(2);
+      });
+    });
+
     it('holds the settled notice while a question is pending and delivers it when the phase returns to running', async () => {
       const { manager, settledListener } = await runTaskWithBackgroundSetup();
 
