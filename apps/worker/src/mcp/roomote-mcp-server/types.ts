@@ -75,6 +75,8 @@ export interface TaskSummaryResponse {
     maxContinuations: number | null;
     continuationsUsed: number;
     blockedReason: string | null;
+    startedAt?: string | null;
+    endedAt?: string | null;
     completedAt: string | null;
     generation: string | null;
   } | null;

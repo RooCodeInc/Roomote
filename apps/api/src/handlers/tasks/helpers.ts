@@ -26,6 +26,8 @@ export const TASK_SELECT_COLUMNS = {
   goalMaxContinuations: tasks.goalMaxContinuations,
   goalContinuationsUsed: tasks.goalContinuationsUsed,
   goalBlockedReason: tasks.goalBlockedReason,
+  goalStartedAt: tasks.goalStartedAt,
+  goalEndedAt: tasks.goalEndedAt,
   goalCompletedAt: tasks.goalCompletedAt,
   goalLastContinuationId: tasks.goalLastContinuationId,
   goalGenerationIds: tasks.goalGenerationIds,

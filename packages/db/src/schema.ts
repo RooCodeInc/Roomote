@@ -704,6 +704,8 @@ export const tasks = pgTable(
       .notNull()
       .default(0),
     goalBlockedReason: text('goal_blocked_reason'),
+    goalStartedAt: timestamp('goal_started_at'),
+    goalEndedAt: timestamp('goal_ended_at'),
     goalCompletedAt: timestamp('goal_completed_at'),
     goalLastContinuationId: text('goal_last_continuation_id'),
     goalContinuationIds: text('goal_continuation_ids')

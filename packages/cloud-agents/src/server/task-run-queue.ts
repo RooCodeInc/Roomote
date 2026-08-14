@@ -1540,6 +1540,7 @@ async function enqueueFreshLaunch(
         prompt: initialPrompt,
         goalObjective: input.goal?.objective ?? null,
         goalStatus: input.goal ? 'active' : null,
+        goalStartedAt: input.goal ? new Date() : null,
         goalMaxContinuations: input.goal?.maxContinuations ?? null,
         goalLastContinuationId: initialGoalGeneration,
         goalGenerationIds: initialGoalGeneration ? [initialGoalGeneration] : [],

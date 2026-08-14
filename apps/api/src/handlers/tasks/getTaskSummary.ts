@@ -78,6 +78,8 @@ export async function getTaskSummary(
             maxContinuations: task.goalMaxContinuations ?? null,
             continuationsUsed: task.goalContinuationsUsed ?? 0,
             blockedReason: task.goalBlockedReason ?? null,
+            startedAt: task.goalStartedAt ?? null,
+            endedAt: task.goalEndedAt ?? null,
             completedAt: task.goalCompletedAt ?? null,
             generation: task.goalLastContinuationId ?? null,
           }

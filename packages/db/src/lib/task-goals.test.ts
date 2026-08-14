@@ -13,6 +13,19 @@ import {
   type TaskGoalMutationResult,
 } from './task-goals';
 
+async function getStoredGoalTiming(taskId: string) {
+  const [stored] = await db
+    .select({
+      startedAt: tasks.goalStartedAt,
+      endedAt: tasks.goalEndedAt,
+      completedAt: tasks.goalCompletedAt,
+    })
+    .from(tasks)
+    .where(eq(tasks.id, taskId));
+
+  return stored;
+}
+
 describe('task goals', () => {
   it('holds a fast completion until goal delivery is committed', async () => {
     const task = await taskFactory.create({
@@ -71,11 +84,15 @@ describe('task goals', () => {
   });
 
   it('restores the previous goal when delivery fails', async () => {
+    const previousStartedAt = new Date('2020-01-01T10:00:00Z');
+    const previousEndedAt = new Date('2020-01-01T10:05:00Z');
     const task = await taskFactory.create({
       goalObjective: 'Keep the existing objective',
-      goalStatus: 'active',
+      goalStatus: 'blocked',
       goalMaxContinuations: 3,
       goalContinuationsUsed: 1,
+      goalStartedAt: previousStartedAt,
+      goalEndedAt: previousEndedAt,
       goalContinuationIds: ['existing-turn'],
     });
     const run = await runFactory.create({ taskId: task.id });
@@ -90,9 +107,52 @@ describe('task goals', () => {
     await expect(activation!.rollback()).resolves.toBe(true);
     await expect(getTaskGoalForRun(run.id)).resolves.toMatchObject({
       objective: 'Keep the existing objective',
-      status: 'active',
+      status: 'blocked',
       maxContinuations: 3,
       continuationsUsed: 1,
+    });
+    await expect(getStoredGoalTiming(task.id)).resolves.toEqual({
+      startedAt: previousStartedAt,
+      endedAt: previousEndedAt,
+      completedAt: null,
+    });
+  });
+
+  it('resets lifecycle timing when a replacement goal begins', async () => {
+    const previousStartedAt = new Date('2020-01-01T10:00:00Z');
+    const previousEndedAt = new Date('2020-01-01T10:05:00Z');
+    const task = await taskFactory.create({
+      goalObjective: 'Old objective',
+      goalStatus: 'complete',
+      goalMaxContinuations: 3,
+      goalStartedAt: previousStartedAt,
+      goalEndedAt: previousEndedAt,
+      goalCompletedAt: previousEndedAt,
+    });
+    const run = await runFactory.create({ taskId: task.id });
+
+    const activation = await prepareTaskGoalActivation({
+      taskId: task.id,
+      goal: { objective: 'Replacement objective', maxContinuations: 5 },
+    });
+    const replacement = await activation!.commit();
+
+    expect(replacement).toMatchObject({
+      objective: 'Replacement objective',
+      status: 'active',
+      completedAt: null,
+    });
+    const replacementTiming = await getStoredGoalTiming(task.id);
+    expect(replacementTiming?.startedAt?.getTime()).toBeGreaterThan(
+      previousEndedAt.getTime(),
+    );
+    expect(replacementTiming).toMatchObject({
+      endedAt: null,
+      completedAt: null,
+    });
+    await expect(getTaskGoalForRun(run.id)).resolves.toMatchObject({
+      objective: 'Replacement objective',
+      status: 'active',
     });
   });
 
@@ -383,7 +443,14 @@ describe('task goals', () => {
     expect(exhausted).toMatchObject({
       updated: false,
       reason: 'budget_exhausted',
-      goal: { status: 'budget_limited', continuationsUsed: 2 },
+      goal: {
+        status: 'budget_limited',
+        continuationsUsed: 2,
+      },
+    });
+    await expect(getStoredGoalTiming(task.id)).resolves.toMatchObject({
+      endedAt: expect.any(Date),
+      completedAt: null,
     });
   });
 
@@ -415,6 +482,9 @@ describe('task goals', () => {
     await expect(getTaskGoalForRun(run.id)).resolves.toMatchObject({
       status: 'active',
       continuationsUsed: 0,
+    });
+    await expect(getStoredGoalTiming(task.id)).resolves.toMatchObject({
+      endedAt: null,
     });
   });
 
@@ -570,7 +640,14 @@ describe('task goals', () => {
     await continueTurn('blocker-turn-4');
     await expect(observe('Missing credential')).resolves.toMatchObject({
       updated: true,
-      goal: { status: 'blocked', blockedReason: 'Missing credential' },
+      goal: {
+        status: 'blocked',
+        blockedReason: 'Missing credential',
+      },
+    });
+    await expect(getStoredGoalTiming(task.id)).resolves.toMatchObject({
+      endedAt: expect.any(Date),
+      completedAt: null,
     });
   });
 
@@ -633,8 +710,13 @@ describe('task goals', () => {
 
     expect(completed).toMatchObject({
       updated: true,
-      goal: { status: 'complete' },
+      goal: {
+        status: 'complete',
+        completedAt: expect.any(Date),
+      },
     });
+    const completedTiming = await getStoredGoalTiming(task.id);
+    expect(completedTiming?.endedAt).toEqual(completedTiming?.completedAt);
     expect(duplicate).toMatchObject({
       updated: false,
       reason: 'not_active',

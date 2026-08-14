@@ -51,6 +51,8 @@ export const taskSchema = z.object({
   goalObjective: z.string().nullable().optional(),
   goalStatus: z.enum(TASK_GOAL_STATUSES).nullable().optional(),
   goalBlockedReason: z.string().nullable().optional(),
+  goalStartedAt: z.coerce.date().nullable().optional(),
+  goalEndedAt: z.coerce.date().nullable().optional(),
   goalGenerationIds: z.array(z.string()).optional(),
   slackChannelId: z.string().nullable().optional(),
   slackThreadTs: z.string().nullable().optional(),

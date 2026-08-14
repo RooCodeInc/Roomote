@@ -92,16 +92,7 @@ vi.mock('./messages/index', () => ({
 }));
 
 vi.mock('./messages/acp', () => ({
-  AcpMessageItem: ({
-    msg,
-  }: {
-    msg: { id: string; data?: { goal?: unknown } };
-  }) => (
-    <div>
-      {msg.id}
-      {msg.data?.goal ? <span>Sent as goal</span> : null}
-    </div>
-  ),
+  AcpMessageItem: ({ msg }: { msg: { id: string } }) => <div>{msg.id}</div>,
   AcpGroupedToolMessage: () => null,
   AcpActivityGroupMessage: ({
     group,
@@ -117,15 +108,8 @@ vi.mock('./messages/acp', () => ({
       <div>{children}</div>
     </div>
   ),
-  AcpTextMessage: ({
-    msg,
-  }: {
-    msg: { text?: string; data?: { goal?: unknown } };
-  }) => (
-    <div>
-      {msg.data?.goal ? <span>Sent as goal</span> : null}
-      {msg.text}
-    </div>
+  AcpTextMessage: ({ msg }: { msg: { text?: string } }) => (
+    <div>{msg.text}</div>
   ),
 }));
 
@@ -483,178 +467,9 @@ describe('Messages', () => {
     );
   });
 
-  it('shows the active goal objective without expanding tool traces', () => {
-    render(
-      <Messages
-        session={
-          {
-            taskId: 'task-goal-active',
-            prompt: null,
-            task: {
-              goalObjective: 'Count to ten',
-              goalStatus: 'active',
-              goalBlockedReason: null,
-              goalGenerationIds: ['goal-generation:1'],
-            },
-            taskRun: null,
-            refreshTaskSession: vi.fn(),
-          } as never
-        }
-      />,
-    );
-
-    expect(screen.getByTestId('goal-status')).toHaveTextContent(
-      'Pursuing goal',
-    );
-    expect(screen.getByTestId('goal-status')).toHaveTextContent('Count to ten');
-    expect(screen.getByTestId('goal-status')).toHaveAttribute('role', 'status');
-  });
-
-  it.each([
-    ['complete', 'Goal completed'],
-    ['blocked', 'Goal blocked'],
-  ] as const)('shows the %s terminal goal marker', (goalStatus, label) => {
-    render(
-      <Messages
-        session={
-          {
-            taskId: `task-goal-${goalStatus}`,
-            prompt: null,
-            task: {
-              goalObjective: 'Count to ten',
-              goalStatus,
-              goalBlockedReason:
-                goalStatus === 'blocked' ? 'Waiting for a number' : null,
-              goalGenerationIds: ['goal-generation:1'],
-            },
-            taskRun: null,
-            refreshTaskSession: vi.fn(),
-          } as never
-        }
-      />,
-    );
-
-    expect(screen.getByTestId('goal-status')).toHaveTextContent(label);
-    expect(screen.getByTestId('goal-status')).toHaveTextContent('Count to ten');
-    if (goalStatus === 'blocked') {
-      expect(screen.getByTestId('goal-status')).toHaveTextContent(
-        'Waiting for a number',
-      );
-    }
-  });
-
-  it('keeps a completed goal visible after an ordinary follow-up message', () => {
-    mockBuildAcpRenderBlocks.mockReturnValue([
-      {
-        kind: 'message',
-        msg: {
-          id: 'ordinary-follow-up',
-          ts: 2_000,
-          role: 'user',
-          kind: 'text',
-          partial: false,
-        },
-      },
-    ] as never);
-
-    render(
-      <Messages
-        session={
-          {
-            taskId: 'task-goal-history',
-            prompt: null,
-            task: {
-              goalObjective: 'Count to ten',
-              goalStatus: 'complete',
-              goalBlockedReason: null,
-              goalGenerationIds: ['goal-generation:1'],
-            },
-            taskRun: null,
-            artifacts: [],
-            refreshTaskSession: vi.fn(),
-          } as never
-        }
-      />,
-    );
-
-    expect(screen.getByText('ordinary-follow-up')).toBeInTheDocument();
-    expect(screen.getByTestId('goal-status')).toHaveTextContent(
-      'Goal completed',
-    );
-  });
-
-  it.each([
-    ['complete', 'Goal completed', null],
-    ['blocked', 'Goal blocked', 'Waiting for a number'],
-    ['budget_limited', 'Goal continuation limit reached', null],
-  ] as const)(
-    'keeps the prior %s marker while an optimistic retried goal is active',
-    (priorStatus, priorLabel, blockedReason) => {
-      const refreshTaskSession = vi.fn();
-      const previousGoal = {
-        id: 'previous-goal',
-        ts: 1_000,
-        role: 'user',
-        kind: 'text',
-        partial: false,
-        sessionId: 'session-1',
-        updateType: 'roomote_runtime.user_prompt',
-        text: 'Count to ten',
-        data: {
-          goal: {
-            objective: 'Count to ten',
-            generation: 'goal-generation:1',
-          },
-        },
-      };
-      const optimisticRetry = {
-        ...previousGoal,
-        id: 'optimistic-retry',
-        ts: 2_000,
-        data: {
-          goal: { objective: 'Count to ten', generation: null },
-        },
-      };
-      const session = {
-        taskId: `task-goal-retry-${priorStatus}`,
-        prompt: null,
-        task: {
-          goalObjective: 'Count to ten',
-          goalStatus: priorStatus,
-          goalBlockedReason: blockedReason,
-          goalGenerationIds: ['goal-generation:1'],
-        },
-        taskRun: null,
-        artifacts: [],
-        refreshTaskSession,
-      };
-
-      sandboxMessagesState.messages = [previousGoal];
-      mockBuildAcpRenderBlocks.mockReturnValue([
-        { kind: 'message', msg: previousGoal },
-      ] as never);
-      const { rerender } = render(<Messages session={session as never} />);
-
-      expect(screen.getByTestId('goal-status')).toHaveTextContent(priorLabel);
-
-      sandboxMessagesState.messages = [previousGoal, optimisticRetry];
-      mockBuildAcpRenderBlocks.mockReturnValue([
-        { kind: 'message', msg: previousGoal },
-        { kind: 'message', msg: optimisticRetry },
-      ] as never);
-      rerender(<Messages session={{ ...session } as never} />);
-
-      expect(screen.getAllByText('Sent as goal')).toHaveLength(2);
-      expect(screen.getByText(priorLabel)).toBeVisible();
-      expect(screen.getByText('Pursuing goal')).toBeVisible();
-      expect(screen.getAllByText('Count to ten')).toHaveLength(2);
-      expect(refreshTaskSession).toHaveBeenCalled();
-    },
-  );
-
-  it('labels the matching historical goal turn when old envelopes lack provenance', () => {
-    const goalMessage = {
-      id: 'historical-goal-prompt',
+  it('never decorates the transcript from goal data or matching text', () => {
+    const matchingGoalMessage = {
+      id: 'matching-goal-message',
       ts: 1_000,
       role: 'user',
       kind: 'text',
@@ -662,54 +477,27 @@ describe('Messages', () => {
       sessionId: 'session-1',
       updateType: 'roomote_runtime.user_prompt',
       text: 'Count to ten',
-      data: {},
+      data: {
+        goal: {
+          objective: 'Count to ten',
+          generation: 'goal-generation:1',
+        },
+      },
     };
-    sandboxMessagesState.messages = [goalMessage];
+    sandboxMessagesState.messages = [matchingGoalMessage];
     mockBuildAcpRenderBlocks.mockReturnValue([
-      { kind: 'message', msg: goalMessage },
+      { kind: 'message', msg: matchingGoalMessage },
     ] as never);
 
     render(
       <Messages
         session={
           {
-            taskId: 'task-goal-history',
-            prompt: null,
-            task: {
-              goalObjective: 'Count to ten',
-              goalStatus: 'complete',
-              goalBlockedReason: null,
-              goalGenerationIds: ['goal-generation:1'],
-            },
-            taskRun: null,
-            artifacts: [],
-            refreshTaskSession: vi.fn(),
-          } as never
-        }
-      />,
-    );
-
-    expect(screen.getByText('Sent as goal')).toBeVisible();
-    expect(screen.getByTestId('goal-status')).toHaveTextContent(
-      'Goal completed',
-    );
-  });
-
-  it('labels a legacy goal session prompt when no matching envelope exists', () => {
-    render(
-      <Messages
-        session={
-          {
-            taskId: 'task-initial-goal-history',
+            taskId: 'task-goal',
             prompt: {
+              ...matchingGoalMessage,
               id: 'session-prompt',
-              ts: 1_000,
-              role: 'user',
-              kind: 'text',
-              partial: false,
               sessionId: null,
-              updateType: 'roomote_runtime.user_prompt',
-              text: 'Count to ten',
               data: {},
               visibleInTranscript: true,
             },
@@ -721,139 +509,15 @@ describe('Messages', () => {
             },
             taskRun: null,
             artifacts: [],
-            refreshTaskSession: vi.fn(),
           } as never
         }
       />,
     );
 
-    expect(screen.getByText('Sent as goal')).toBeVisible();
-    expect(screen.getByTestId('goal-status')).toHaveTextContent(
-      'Goal completed',
-    );
-  });
-
-  it('does not infer goal provenance when multiple legacy messages match', () => {
-    const matchingMessages = [
-      {
-        id: 'historical-goal-prompt',
-        ts: 1_000,
-        role: 'user',
-        kind: 'text',
-        partial: false,
-        sessionId: 'session-1',
-        updateType: 'roomote_runtime.user_prompt',
-        text: 'Count to ten',
-        data: {},
-      },
-      {
-        id: 'ordinary-duplicate-follow-up',
-        ts: 2_000,
-        role: 'user',
-        kind: 'text',
-        partial: false,
-        sessionId: 'session-1',
-        updateType: 'roomote_runtime.user_prompt',
-        text: 'Count to ten',
-        data: {},
-      },
-    ];
-    sandboxMessagesState.messages = matchingMessages;
-    mockBuildAcpRenderBlocks.mockReturnValue(
-      matchingMessages.map((msg) => ({ kind: 'message', msg })) as never,
-    );
-
-    render(
-      <Messages
-        session={
-          {
-            taskId: 'task-goal-ambiguous-history',
-            prompt: null,
-            task: {
-              goalObjective: 'Count to ten',
-              goalStatus: 'complete',
-              goalBlockedReason: null,
-              goalGenerationIds: ['goal-generation:1'],
-            },
-            taskRun: null,
-            artifacts: [],
-            refreshTaskSession: vi.fn(),
-          } as never
-        }
-      />,
-    );
-
-    expect(screen.queryByText('Sent as goal')).not.toBeInTheDocument();
-    expect(screen.getByTestId('goal-status')).toHaveTextContent(
-      'Goal completed',
-    );
-  });
-
-  it('does not infer legacy goal provenance before history finishes loading', () => {
-    const goalMessage = {
-      id: 'partial-goal-prompt',
-      ts: 1_000,
-      role: 'user',
-      kind: 'text',
-      partial: false,
-      sessionId: 'session-1',
-      updateType: 'roomote_runtime.user_prompt',
-      text: 'Count to ten',
-      data: {},
-    };
-    historyReadyState.ready = false;
-    sandboxMessagesState.messages = [goalMessage];
-    mockBuildAcpRenderBlocks.mockReturnValue([
-      { kind: 'message', msg: goalMessage },
-    ] as never);
-
-    render(
-      <Messages
-        session={
-          {
-            taskId: 'task-goal-partial-history',
-            prompt: null,
-            task: {
-              goalObjective: 'Count to ten',
-              goalStatus: 'active',
-              goalBlockedReason: null,
-              goalGenerationIds: ['goal-generation:1'],
-            },
-            taskRun: null,
-            artifacts: [],
-            refreshTaskSession: vi.fn(),
-          } as never
-        }
-      />,
-    );
-
-    expect(screen.queryByText('Sent as goal')).not.toBeInTheDocument();
-    expect(screen.getByTestId('goal-status')).toHaveTextContent(
-      'Pursuing goal',
-    );
-  });
-
-  it('leaves non-goal transcripts unchanged', () => {
-    render(
-      <Messages
-        session={
-          {
-            taskId: 'task-ordinary',
-            prompt: null,
-            task: {
-              goalObjective: null,
-              goalStatus: null,
-              goalBlockedReason: null,
-              goalGenerationIds: [],
-            },
-            taskRun: null,
-            refreshTaskSession: vi.fn(),
-          } as never
-        }
-      />,
-    );
-
+    expect(screen.getByText('matching-goal-message')).toBeVisible();
     expect(screen.queryByTestId('goal-status')).not.toBeInTheDocument();
+    expect(screen.queryByText('Sent as goal')).not.toBeInTheDocument();
+    expect(screen.queryByText('Goal completed')).not.toBeInTheDocument();
   });
 
   it('collapses eligible background activity between text messages', () => {
