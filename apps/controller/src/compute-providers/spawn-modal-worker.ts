@@ -13,6 +13,7 @@ import {
 } from '@roomote/db/server';
 import { stampTaskRunMilestone } from '@roomote/sdk/server';
 import {
+  type ComputeProviderClient,
   buildComputeProviderMutationDetails,
   buildModalWorkerEnv,
   cleanupModalInstance,
@@ -37,6 +38,7 @@ import {
 } from './timeouts';
 
 const MODAL_LAUNCH_OUTPUT_TEXT_LIMIT = 500;
+const LAUNCH_DIAGNOSTIC_PROBE_TIMEOUT_MS = 15_000;
 
 class DetachedWorkerLaunchError extends Error {
   public readonly details: Record<string, unknown>;
@@ -63,6 +65,27 @@ function truncateLaunchOutput(value: string | undefined): string | undefined {
     : trimmed;
 }
 
+/**
+ * Everything captured about a dead launch — stderr, stdout, and any probe
+ * output — as a single string, or undefined when nothing was captured. This
+ * is what makes the failure actionable, so it travels both in the thrown
+ * error and through onWorkerExit into the bootstrap-failure run error.
+ */
+function buildLaunchOutputSummary(
+  result: { stdout?: string; stderr?: string },
+  probeDiagnostics?: string,
+): string | undefined {
+  const stdout = truncateLaunchOutput(result.stdout);
+  const stderr = truncateLaunchOutput(result.stderr);
+  const parts = [
+    ...(stderr ? [`stderr: ${stderr}`] : []),
+    ...(stdout ? [`stdout: ${stdout}`] : []),
+    ...(probeDiagnostics ? [probeDiagnostics] : []),
+  ];
+
+  return parts.length > 0 ? parts.join('; ') : undefined;
+}
+
 function buildDetachedWorkerExitError(
   command: string,
   result: {
@@ -71,26 +94,57 @@ function buildDetachedWorkerExitError(
     stdout?: string;
     stderr?: string;
   },
+  probeDiagnostics?: string,
 ): DetachedWorkerLaunchError {
   const stdout = truncateLaunchOutput(result.stdout);
   const stderr = truncateLaunchOutput(result.stderr);
-  const message = `Detached "worker ${command}" exited immediately with code ${result.exitCode}`;
-  const parts = [message];
-
-  if (stderr) {
-    parts.push(`stderr: ${stderr}`);
-  }
-
-  if (stdout) {
-    parts.push(`stdout: ${stdout}`);
-  }
+  const summary = buildLaunchOutputSummary(result, probeDiagnostics);
+  const message = `Detached "worker ${command}" exited immediately with code ${result.exitCode}${
+    summary ? `; ${summary}` : ''
+  }`;
 
   return new DetachedWorkerLaunchError(message, {
     commandId: result.commandId ?? null,
     exitCode: result.exitCode,
     ...(stdout ? { stdout } : {}),
     ...(stderr ? { stderr } : {}),
+    ...(probeDiagnostics ? { launchDiagnostics: probeDiagnostics } : {}),
   });
+}
+
+/**
+ * Modal regularly loses the output of a detached process that dies within the
+ * launch grace window, leaving "exited immediately with code N" with no
+ * stderr to act on. A non-detached `worker --version` in the same sandbox
+ * reproduces any crash that happens before the CLI dispatches a command
+ * (module-level env validation, a broken bundle, a missing runtime
+ * dependency) and its output streams back reliably. The probe parses no
+ * command, so it cannot claim the task run or mutate anything.
+ */
+async function captureWorkerLaunchDiagnostics(
+  computeClient: ComputeProviderClient,
+  instanceId: string,
+): Promise<string> {
+  try {
+    const probe = await computeClient.runCommand({
+      instanceId,
+      cmd: 'worker',
+      args: ['--version'],
+      signal: AbortSignal.timeout(LAUNCH_DIAGNOSTIC_PROBE_TIMEOUT_MS),
+    });
+    const probeStderr = truncateLaunchOutput(probe.stderr);
+    const probeStdout = truncateLaunchOutput(probe.stdout);
+
+    return [
+      `probe "worker --version" exited with code ${probe.exitCode}`,
+      ...(probeStderr ? [`probe stderr: ${probeStderr}`] : []),
+      ...(probeStdout ? [`probe stdout: ${probeStdout}`] : []),
+    ].join('; ');
+  } catch (error) {
+    return `probe "worker --version" failed: ${
+      error instanceof Error ? error.message : String(error)
+    }`;
+  }
 }
 
 function getWorkerLaunchCommand(
@@ -156,10 +210,14 @@ export async function spawnModalWorker(
     modalTags?: Record<string, string>;
     /**
      * Classifies a post-launch exit so the provider can clean up before an
-     * optional fresh launch is scheduled.
+     * optional fresh launch is scheduled. Grace-period exits pass everything
+     * captured about the dead launch (stderr/stdout/probe output) as
+     * `launchDiagnostics` so the bootstrap-failure finalization can persist
+     * it on the run instead of a bare exit code.
      */
     onWorkerExit?: (event: {
       exitCode: number;
+      launchDiagnostics?: string;
     }) => Promise<'ignore' | 'restart' | 'failed'>;
     onWorkerRestart?: () => void;
   },
@@ -501,10 +559,34 @@ export async function spawnModalWorker(
     // grace-period exits through the same classifier as later exits so the
     // first bootstrap failure gets its one durable replacement.
     if (result.exitCode !== null) {
-      const exitError = buildDetachedWorkerExitError(command, result);
+      // Without any captured output the exit is undiagnosable from logs, so
+      // probe the still-alive sandbox before classification/cleanup.
+      const probeDiagnostics =
+        truncateLaunchOutput(result.stdout) ||
+        truncateLaunchOutput(result.stderr)
+          ? undefined
+          : await captureWorkerLaunchDiagnostics(
+              computeClient,
+              machine.machineId,
+            );
+      const launchDiagnostics = buildLaunchOutputSummary(
+        result,
+        probeDiagnostics,
+      );
+      const exitError = buildDetachedWorkerExitError(
+        command,
+        result,
+        probeDiagnostics,
+      );
 
       if (onWorkerExit) {
-        const disposition = await onWorkerExit({ exitCode: result.exitCode });
+        // The classifier finalizes the run itself on the 'failed' disposition
+        // (this spawn then returns without rethrowing), so the diagnostics
+        // must travel with the exit event to reach the run's error.
+        const disposition = await onWorkerExit({
+          exitCode: result.exitCode,
+          ...(launchDiagnostics ? { launchDiagnostics } : {}),
+        });
 
         if (disposition !== 'ignore') {
           immediateExitDisposition = disposition;

@@ -743,7 +743,7 @@ describe('generateOpenCodeConfig provider support', () => {
     });
   });
 
-  it('isolates helper agents from unrelated MCP tool schemas', () => {
+  it('isolates visual and proof agents from unrelated MCP tool schemas', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),
       runtimeEnv: {
@@ -774,12 +774,18 @@ describe('generateOpenCodeConfig provider support', () => {
       agent: Record<string, { tools?: Record<string, boolean> }>;
     };
 
-    for (const agentName of ['visual', 'judge', 'advisor']) {
-      expect(config.agent[agentName]?.tools).toMatchObject({
-        'roomote_*': false,
-        'pylon_*': false,
-        'custom-tools_*': false,
-      });
+    expect(config.agent.visual?.tools).toMatchObject({
+      'roomote_*': false,
+      'pylon_*': false,
+      'custom-tools_*': false,
+    });
+
+    for (const agentName of ['judge', 'advisor']) {
+      expect(config.agent[agentName]?.tools).not.toHaveProperty('roomote_*');
+      expect(config.agent[agentName]?.tools).not.toHaveProperty('pylon_*');
+      expect(config.agent[agentName]?.tools).not.toHaveProperty(
+        'custom-tools_*',
+      );
     }
 
     expect(config.agent['proof-runner']?.tools).toMatchObject({

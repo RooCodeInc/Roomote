@@ -30,7 +30,9 @@ vi.mock('@roomote/db/server', () => ({
     result: 'result',
   },
   tasks: {
+    deletedAt: 'tasks.deletedAt',
     id: 'tasks.id',
+    initiatorKind: 'tasks.initiatorKind',
     initiatorUserId: 'tasks.initiatorUserId',
   },
   db: {
@@ -66,6 +68,9 @@ import { activeRunStatuses } from '@roomote/types';
 import {
   buildTeamsTaskRunMatchConditions,
   findActiveTeamsTaskRun,
+  findCompletedTeamsTaskRunWithSnapshot,
+  findLatestTeamsThreadTaskRun,
+  findTaskBackedTeamsAutomationReportRun,
   stripTeamsMessageIdSuffix,
 } from '../find-active-teams-run';
 
@@ -185,8 +190,8 @@ describe('findActiveTeamsTaskRun', () => {
     };
     // The where clause includes the Teams provider match, the conversation
     // match (or-group), the thread match, the active-status filter, and the
-    // not-canceled filter.
-    expect(where.and).toHaveLength(5);
+    // not-canceled and not-deleted filters.
+    expect(where.and).toHaveLength(6);
 
     const conversationMatch = where.and.find(
       (entry) =>
@@ -203,5 +208,20 @@ describe('findActiveTeamsTaskRun', () => {
       expect(condition.values).toContain('19:conv@thread.tacv2');
     }
     expect([...activeRunStatuses]).toContain('running');
+  });
+
+  it.each([
+    ['active', findActiveTeamsTaskRun],
+    ['snapshot', findCompletedTeamsTaskRunWithSnapshot],
+    ['thread ownership', findLatestTeamsThreadTaskRun],
+    ['automation ownership', findTaskBackedTeamsAutomationReportRun],
+  ])('excludes deleted tasks from %s lookup', async (_name, lookup) => {
+    await lookup({
+      conversationId: '19:conv@thread.tacv2;messageid=root-1',
+      threadId: 'root-1',
+    });
+
+    const where = selectWhereMock.mock.calls[0]?.[0] as { and: unknown[] };
+    expect(where.and).toContainEqual({ isNull: 'tasks.deletedAt' });
   });
 });

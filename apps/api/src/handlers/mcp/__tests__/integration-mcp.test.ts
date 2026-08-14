@@ -452,4 +452,78 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
       type: 'string',
     });
   });
+
+  it('normalizes simple nullable array tool input schemas', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-1', userId: null });
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          result: {
+            tools: [
+              {
+                name: 'search_issues',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    tags: {
+                      type: ['null', 'array'],
+                      items: { type: 'string' },
+                      description: 'Tags to filter by',
+                    },
+                    constrained: {
+                      type: ['array', 'null'],
+                      items: { type: 'string' },
+                      minItems: 1,
+                    },
+                  },
+                },
+                outputSchema: {
+                  type: ['array', 'null'],
+                  items: { type: 'string' },
+                },
+              },
+            ],
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp('pylon', createRunToken()),
+      createToolsListRequest(1),
+    );
+    const body = (await response.json()) as {
+      result: {
+        tools: Array<{
+          inputSchema: { properties: Record<string, unknown> };
+          outputSchema: Record<string, unknown>;
+        }>;
+      };
+    };
+
+    const tool = body.result.tools[0];
+    expect(response.status).toBe(200);
+    expect(tool?.inputSchema.properties.tags).toEqual({
+      description: 'Tags to filter by',
+      anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }],
+    });
+    expect(tool?.inputSchema.properties.constrained).toEqual({
+      type: ['array', 'null'],
+      items: { type: 'string' },
+      minItems: 1,
+    });
+    expect(tool?.outputSchema).toEqual({
+      type: ['array', 'null'],
+      items: { type: 'string' },
+    });
+  });
 });

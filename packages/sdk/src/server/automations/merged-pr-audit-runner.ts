@@ -444,10 +444,12 @@ async function processDeployment(
       return { kind: 'skipped', reason: 'Automation is disabled.' };
     }
 
-    const destination = await resolveAutomationRuntimeDestination({
-      runtime,
-      slackConnected: deployment.slackConnected,
-    });
+    const destination =
+      opts.destination ??
+      (await resolveAutomationRuntimeDestination({
+        runtime,
+        slackConnected: deployment.slackConnected,
+      }));
 
     if (!destination) {
       console.log(

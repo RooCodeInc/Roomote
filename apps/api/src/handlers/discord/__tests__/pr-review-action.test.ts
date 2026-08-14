@@ -32,7 +32,7 @@ describe('handleDiscordPrReviewActionCallback', () => {
     mocks.dispatchFollowUp.mockResolvedValue({ outcome: 'queued' });
   });
 
-  it('preserves the feedback card while removing its action buttons', async () => {
+  it('preserves the feedback card and renders the resolution as subtext', async () => {
     await handleDiscordPrReviewActionCallback({
       provider: {} as never,
       applicationId: 'app-1',
@@ -61,13 +61,13 @@ describe('handleDiscordPrReviewActionCallback', () => {
         isDirectMessage: false,
         isThread: true,
       },
-      choice: 'yes',
+      choice: 'auto',
       nonce: 'nonce-1',
     });
 
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: 'Review feedback: add a regression test.\n\nOn it — resolving the review feedback.',
+        text: "Review feedback: add a regression test.\n\n-# I'll resolve these and any future feedback on this PR automatically. Starting on the current feedback now.",
       }),
     );
     expect(mocks.reply.mock.calls[0]?.[0]).not.toHaveProperty('buttons');
@@ -119,7 +119,49 @@ describe('handleDiscordPrReviewActionCallback', () => {
 
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: 'Review feedback: add a regression test.\n\nThis offer was already handled or has expired.',
+        text: 'Review feedback: add a regression test.\n\n-# This offer was already handled or has expired.',
+      }),
+    );
+  });
+
+  it('renders the resolution as subtext when the feedback is empty', async () => {
+    mocks.claimPending.mockResolvedValue(null);
+
+    await handleDiscordPrReviewActionCallback({
+      provider: {} as never,
+      applicationId: 'app-1',
+      interaction: {
+        id: 'interaction-1',
+        application_id: 'app-1',
+        type: 3,
+        token: 'token-1',
+        user: { id: 'discord-user-1', username: 'dan' },
+        message: {
+          id: 'message-1',
+          channel_id: 'thread-1',
+          content: '',
+          author: { id: 'bot-1', username: 'Roomote' },
+          attachments: [],
+          mentions: [],
+        },
+      },
+      interactionDeferred: true,
+      channel: {
+        channelId: 'thread-1',
+        channelName: 'Task thread',
+        channelType: 11,
+        guildId: 'guild-1',
+        parentChannelId: 'channel-1',
+        isDirectMessage: false,
+        isThread: true,
+      },
+      choice: 'yes',
+      nonce: 'nonce-1',
+    });
+
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: '-# This offer was already handled or has expired.',
       }),
     );
   });
@@ -161,6 +203,8 @@ describe('handleDiscordPrReviewActionCallback', () => {
 
     const text = mocks.reply.mock.calls[0]?.[0]?.text;
     expect(text).toHaveLength(2_000);
-    expect(text).toMatch(/\.\.\.\n\nOn it — resolving the review feedback\.$/);
+    expect(text).toMatch(
+      /\.\.\.\n\n-# On it — resolving the review feedback\.$/,
+    );
   });
 });

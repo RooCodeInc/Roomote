@@ -203,6 +203,10 @@ vi.mock('../github/mutations', () => ({
   disableGitHubAppCommand: mockDisableGitHubAppCommand,
 }));
 
+vi.mock('@roomote/sdk/server/automation-recommendations', () => ({
+  enqueueAutomationSignalPrefetch: vi.fn(async () => undefined),
+}));
+
 import {
   assertValidSourceControlConfigInput,
   clearSourceControlConfigCommand,

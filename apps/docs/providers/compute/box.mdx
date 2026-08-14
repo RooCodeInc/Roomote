@@ -1,6 +1,6 @@
 ---
 title: Box
-icon: 'cube'
+icon: '/logo/integrations/box.svg'
 description: Run Roomote tasks in Box-hosted sandboxes.
 ---
 
@@ -14,6 +14,7 @@ Use Box when:
 - task work should run on provider-managed machines
 - you want API-key-only setup without building a provider-side worker image,
   template, or snapshot during Roomote setup
+- environments need Docker, Docker Compose, or private preview URLs
 - retaining the same stopped task sandbox for a follow-up is sufficient
 
 Box supports Roomote environment snapshots through named snapshots (template
@@ -22,7 +23,9 @@ Box can also resume the task that created it directly.
 
 ## Configuration
 
-Add Box from **Settings > Sandboxes**, or provide:
+Create a key from the [Box dashboard](https://box.ascii.dev/box/dashboard),
+then add Box from **Settings > Sandboxes**. You can also provide the key as a
+deployment env var:
 
 ```sh
 DEFAULT_COMPUTE_PROVIDER=box
@@ -32,16 +35,18 @@ BOX_API_KEY=...
 Optional settings:
 
 ```sh
-# Custom Box-compatible API endpoint
-BOX_API_BASE_URL=https://...
+# Custom Box-compatible API endpoint. Defaults to
+# https://ascii.dev/api/box/v1
+BOX_API_BASE_URL=https://box.example.com/api/box/v1
 # small, default, or large
 BOX_MACHINE_TYPE=default
 # Active sandbox timeout in milliseconds. Defaults to 2 hours, the Box
 # free-trial maximum; paid accounts can set a higher value.
 BOX_TIMEOUT_MS=...
-# Standby retention policy; 0 disables retained task sandboxes
-BOX_STANDBY_MAX_COUNT=...
-BOX_STANDBY_MAX_AGE_HOURS=...
+# Standby retention policy. Defaults to 25 Boxes for 168 hours (7 days).
+# Set the count to 0 to disable retained task sandboxes.
+BOX_STANDBY_MAX_COUNT=25
+BOX_STANDBY_MAX_AGE_HOURS=168
 ```
 
 These optional values are also available under **Settings > Sandboxes > Box >
@@ -50,6 +55,12 @@ as locked values in Settings.
 
 Roomote does not provision a worker artifact in your Box account during setup.
 Saving a valid API key is enough to configure the provider.
+
+Roomote installs its worker into each Box when the sandbox starts. Box supports
+[Docker projects](/environments/definition#docker-projects), including Docker
+Compose services, without additional provider-side setup. Named environment
+ports are exposed through authenticated private preview URLs in the Roomote task
+view.
 
 ## Cleanup and resume behavior
 
@@ -80,7 +91,8 @@ one task's machine; it is not a Roomote environment snapshot.
 1. Save the Box API key.
 2. Select Box as the default sandbox provider.
 3. Start a small task and confirm logs reach the task view.
-4. Send a follow-up while the task sandbox is retained and confirm it resumes.
+4. If the environment exposes a port, open its preview from the task view.
+5. Send a follow-up while the task sandbox is retained and confirm it resumes.
 
 ## Common issues
 
@@ -91,6 +103,11 @@ one task's machine; it is not a Roomote environment snapshot.
   deployment.
 - **A follow-up starts a new sandbox.** Check the standby count and age limits.
   Roomote may no longer retain the previous Box as the task's resume target.
+- **A task stops after two hours.** Free-trial accounts require a timeout of two
+  hours or less. Paid accounts can increase `BOX_TIMEOUT_MS`; Roomote still caps
+  the Box lifetime to the task's configured timeout.
+- **A preview does not open.** Confirm the environment declares the port and the
+  application listens on `0.0.0.0`, not only `localhost`.
 - **An environment snapshot fails to save.** Box accounts allow at most 10
   named snapshots; delete stale `roomote-snap-*` templates from the Box
   dashboard and re-run the snapshot.

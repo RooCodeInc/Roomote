@@ -246,7 +246,7 @@ export function createCommunicationMessageInterval({
         const prompt =
           message.formattedPrompt ??
           wrapCommunicationMessage(provider, message);
-        const sent = sendPrompt({
+        const sent = await sendPrompt({
           prompt,
           images: message.images,
           autoSteerWhenQueued: true,

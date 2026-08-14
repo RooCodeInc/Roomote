@@ -6,6 +6,7 @@ const {
   mockCaptureEvent,
   mockCaptureActivationSetupCompleted,
   mockEnsureManagedReviewer,
+  mockFindDeploymentSettings,
   mockTransaction,
   mockGetSetupBaseStatus,
 } = vi.hoisted(() => ({
@@ -14,10 +15,16 @@ const {
   mockCaptureEvent: vi.fn(),
   mockCaptureActivationSetupCompleted: vi.fn(),
   mockEnsureManagedReviewer: vi.fn(),
+  mockFindDeploymentSettings: vi.fn(),
   mockGetSetupBaseStatus: vi.fn().mockResolvedValue({ setupNewState: null }),
   mockTransaction: vi.fn(async (callback: (tx: unknown) => Promise<void>) =>
     callback({
       execute: vi.fn(),
+      query: {
+        deploymentSettings: {
+          findFirst: mockFindDeploymentSettings,
+        },
+      },
       insert: () => ({
         values: () => ({ onConflictDoUpdate: vi.fn() }),
       }),
@@ -41,12 +48,16 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('@roomote/types', () => ({
   TaskPayloadKind: { McpRecommendations: 'mcp-recommendations' },
-  normalizeSetupNewState: () => ({
-    onboardingTaskId: null,
-    onboardingTaskStartedAt: null,
-    slackChannel: null,
-    selectedRepositoryIds: [],
-  }),
+  normalizeSetupNewState: (state: Record<string, unknown> | null = {}) => {
+    const current = state ?? {};
+    return {
+      ...current,
+      onboardingTaskId: current.onboardingTaskId ?? null,
+      onboardingTaskStartedAt: current.onboardingTaskStartedAt ?? null,
+      slackChannel: current.slackChannel ?? null,
+      selectedRepositoryIds: current.selectedRepositoryIds ?? [],
+    };
+  },
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -115,6 +126,7 @@ function buildAuth(overrides: Partial<UserAuthSuccess> = {}): UserAuthSuccess {
 describe('completeSetupCommand', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFindDeploymentSettings.mockResolvedValue(undefined);
   });
 
   it('subscribes by default with the setup source', async () => {
@@ -135,5 +147,18 @@ describe('completeSetupCommand', () => {
     );
 
     expect(mockSubscribe).not.toHaveBeenCalled();
+  });
+
+  it('preserves the reviewed automation selection during setup completion', async () => {
+    mockFindDeploymentSettings.mockResolvedValue({
+      setupNewState: {
+        automationRecommendations: { status: 'ready' },
+      },
+      metadata: null,
+    });
+
+    await completeSetupCommand(buildAuth());
+
+    expect(mockEnsureManagedReviewer).not.toHaveBeenCalled();
   });
 });

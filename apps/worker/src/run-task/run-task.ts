@@ -102,10 +102,8 @@ import {
   getInitialWorkflowPhase,
 } from './workflow-phase';
 import { wrapCommunicationMessage } from './communication-message-prompt';
-import {
-  buildTaskGoalContinuationPrompt,
-  buildTaskGoalInstructions,
-} from './task-goal';
+import { buildTaskGoalContinuationPrompt } from './task-goal';
+import { settleMissingChatCloseoutFallback } from './missing-chat-closeout-fallback-settlement';
 
 function formatEnvironmentInstructions(
   instructions?: string,
@@ -1046,12 +1044,7 @@ export const runTask = async ({
     // OpenCode consumes Roomote's identity, workflow, and runtime guidance
     // through its developer-instructions layer.
     const harnessDeveloperInstructions =
-      [
-        ROOMOTE_SYSTEM_PROMPT,
-        harnessInstructions,
-        buildTaskGoalInstructions(task?.goal ?? null),
-        environmentInstructions,
-      ]
+      [ROOMOTE_SYSTEM_PROMPT, harnessInstructions, environmentInstructions]
         .filter((value): value is string => Boolean(value))
         .join('\n\n') || undefined;
 
@@ -1343,6 +1336,9 @@ export const runTask = async ({
       taskId: taskRun.taskId,
       logger,
       callbacks: {
+        onTaskCompletionSettled: async (completionId: string) => {
+          await settleMissingChatCloseoutFallback(context, completionId);
+        },
         onBeforeTaskCompletion: async (completionId: string) => {
           if (taskCancellation.signal.aborted) {
             return 'finalize' as const;
@@ -1494,7 +1490,12 @@ export const runTask = async ({
       | undefined;
     let runtimeTaskStartedForSetupNotice = false;
 
-    const deliverEnvironmentSetupNotice = () => {
+    const getActiveGoalContext = async () => {
+      const goal = await sdk.taskRuns.getGoal({ runId: taskRun.id });
+      return goal?.status === 'active' ? goal : undefined;
+    };
+
+    const deliverEnvironmentSetupNotice = async () => {
       const currentManager = harnessManager;
       const outcome = pendingEnvironmentSetupOutcome;
 
@@ -1510,8 +1511,6 @@ export const runTask = async ({
         return;
       }
 
-      pendingEnvironmentSetupOutcome = undefined;
-
       // A task that settled to waiting_for_prompt while setup was still
       // running may have ended its turn reporting itself blocked on setup, so
       // wake it with an idle-aware notice instead of dropping the outcome.
@@ -1519,6 +1518,22 @@ export const runTask = async ({
       const wakeFromIdle = phase === 'waiting_for_prompt';
 
       if (phase !== 'running' && !wakeFromIdle) {
+        pendingEnvironmentSetupOutcome = undefined;
+        return;
+      }
+
+      // Claim before the async lookup so concurrent state events cannot
+      // deliver the same setup outcome more than once.
+      pendingEnvironmentSetupOutcome = undefined;
+
+      let goalContext;
+      try {
+        goalContext = await getActiveGoalContext();
+      } catch (error) {
+        pendingEnvironmentSetupOutcome ??= outcome;
+        logger.warn(
+          `[runTask] Delaying background environment setup notice for task run ${taskRun.id} because active goal lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
         return;
       }
 
@@ -1528,7 +1543,12 @@ export const runTask = async ({
           : buildEnvironmentSetupSettledPrompt(outcome),
         visibleInTranscript: false,
         source: 'environment-setup',
+        goalContext,
       });
+
+      if (!sent) {
+        pendingEnvironmentSetupOutcome ??= outcome;
+      }
 
       void recordWorkerRuntimeEvent({
         eventType: 'decision',
@@ -1544,16 +1564,16 @@ export const runTask = async ({
 
     backgroundEnvironmentSetup?.onSettled((outcome) => {
       pendingEnvironmentSetupOutcome = outcome;
-      deliverEnvironmentSetupNotice();
+      void deliverEnvironmentSetupNotice();
     });
     harnessManager.on('taskStateEvent', (eventName) => {
       if (eventName === 'taskStarted') {
         runtimeTaskStartedForSetupNotice = true;
-        deliverEnvironmentSetupNotice();
+        void deliverEnvironmentSetupNotice();
       }
     });
     harnessManager.on('stateChange', () => {
-      deliverEnvironmentSetupNotice();
+      void deliverEnvironmentSetupNotice();
     });
     harnessManager.on('taskStateEvent', (eventName) => {
       void recordWorkerRuntimeEvent({
@@ -1706,6 +1726,16 @@ export const runTask = async ({
 
       const workflowPhase =
         options.workflowPhase ?? getFollowUpWorkflowPhase(options.prompt);
+      let goalContext;
+      try {
+        goalContext = await getActiveGoalContext();
+      } catch (error) {
+        logger.warn(
+          `[runTask] Deferred resume prompt blocked for task run ${taskRun.id} because active goal lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        scheduleDeferredResumePromptRetry(options);
+        return false;
+      }
       const queued = harnessManager.sendFollowUpPrompt({
         prompt: options.prompt,
         images: options.images,
@@ -1715,6 +1745,7 @@ export const runTask = async ({
         clientMessageId: options.clientMessageId,
         // Attribute the turn to the identity actor-scoped routes resolve.
         userId: deferredPromptPrep.effectiveUserId ?? undefined,
+        goalContext,
       });
 
       if (queued) {
@@ -1737,7 +1768,7 @@ export const runTask = async ({
       return false;
     };
 
-    const sendPrompt = (options: {
+    const sendPrompt = async (options: {
       prompt: string;
       images?: string[];
       workflowPhase?: string;
@@ -1753,10 +1784,18 @@ export const runTask = async ({
       const workflowPhase =
         options.workflowPhase ?? getFollowUpWorkflowPhase(options.prompt);
 
-      return harnessManager.sendFollowUpPrompt({
-        ...options,
-        ...(workflowPhase ? { workflowPhase } : {}),
-      });
+      try {
+        return harnessManager.sendFollowUpPrompt({
+          ...options,
+          ...(workflowPhase ? { workflowPhase } : {}),
+          goalContext: await getActiveGoalContext(),
+        });
+      } catch (error) {
+        logger.warn(
+          `[runTask] Follow-up prompt blocked for task run ${taskRun.id} because active goal lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return false;
+      }
     };
 
     const deliverQueuedSnapshotResumeSlackMessages = async (
@@ -1801,7 +1840,7 @@ export const runTask = async ({
           wrapSlackMessage(stripLeadingSlackProductMention(message.text), {
             ts: message.ts,
           });
-        const sent = sendPrompt({
+        const sent = await sendPrompt({
           prompt,
           images: message.images,
           autoSteerWhenQueued: true,
@@ -1901,7 +1940,7 @@ export const runTask = async ({
                 ts: message.ts,
               })
             : wrapCommunicationMessage(message.provider, message));
-        const sent = sendPrompt({
+        const sent = await sendPrompt({
           prompt,
           images: message.images,
           autoSteerWhenQueued: true,
@@ -1983,7 +2022,7 @@ export const runTask = async ({
           continue;
         }
 
-        const sent = sendPrompt({
+        const sent = await sendPrompt({
           prompt: text,
           source: 'linear',
           // Attribute the turn to the identity actor-scoped routes resolve.

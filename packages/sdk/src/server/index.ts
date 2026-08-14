@@ -14,6 +14,25 @@ export {
 
 export { finishRun } from './lib/task-runs/finish-run';
 export {
+  AUTOMATION_RECOMMENDATIONS_QUEUE_NAME,
+  AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME,
+  AUTOMATION_RECOMMENDATION_REPOSITORY_CAP,
+  AUTOMATION_SIGNAL_PREFETCH_QUEUE_NAME,
+  AUTOMATION_SIGNALS_VERSION,
+  automationRecommendationJobSchema,
+  automationSignalPrefetchJobSchema,
+  buildAutomationRecommendationFingerprint,
+  collectAutomationSignalsJob,
+  enqueueAutomationRecommendations,
+  enqueueAutomationRecommendationInitialRun,
+  enqueueAutomationSignalPrefetch,
+  processAutomationRecommendationsJob,
+  runAutomationRecommendationInitialRunJob,
+  type AutomationRecommendationJob,
+  type AutomationRecommendationInitialRunJob,
+  type AutomationSignalPrefetchJob,
+} from './lib/automation-recommendations';
+export {
   recordLlmUsage,
   type RecordLlmUsageInput,
 } from './lib/task-runs/record-task-inference-usage';

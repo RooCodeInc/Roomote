@@ -34,6 +34,7 @@ import type {
 } from '../types';
 import { unsupported } from '../errors';
 import {
+  isAbortError,
   raceWithAbort,
   sleepWithSignal,
   toAbortError,
@@ -207,6 +208,7 @@ export class ModalClient implements ComputeProviderClient {
   private async getSandbox(
     sandboxId: string,
     signal?: AbortSignal,
+    options: { expectedUnavailable?: boolean } = {},
   ): Promise<Sandbox> {
     throwIfAborted(signal);
 
@@ -230,14 +232,27 @@ export class ModalClient implements ComputeProviderClient {
       return sandbox;
     } catch (error) {
       this.sandboxCache.delete(sandboxId);
+      const normalizedError = normalizeModalRpcError(error, 'sandbox_fetch');
 
-      console.error(
-        `[ModalClient] Failed to fetch sandbox "${sandboxId}" ${JSON.stringify({
-          error: formatError(error),
-        })}`,
-      );
+      if (
+        options.expectedUnavailable &&
+        (isSandboxUnavailableError(normalizedError) ||
+          isSandboxStatusLookupUnavailableError(error))
+      ) {
+        console.debug(
+          `[ModalClient] Sandbox "${sandboxId}" is unavailable during status lookup`,
+        );
+      } else {
+        console.error(
+          `[ModalClient] Failed to fetch sandbox "${sandboxId}" ${JSON.stringify(
+            {
+              error: formatError(error),
+            },
+          )}`,
+        );
+      }
 
-      throw normalizeModalRpcError(error, 'sandbox_fetch');
+      throw normalizedError;
     }
   }
 
@@ -375,7 +390,9 @@ export class ModalClient implements ComputeProviderClient {
     input: GetInstanceStatusInput,
   ): Promise<GetInstanceStatusResult> {
     try {
-      const sandbox = await this.getSandbox(input.instanceId, input.signal);
+      const sandbox = await this.getSandbox(input.instanceId, input.signal, {
+        expectedUnavailable: true,
+      });
 
       return await this.pollSandboxStatus(
         sandbox,
@@ -383,6 +400,10 @@ export class ModalClient implements ComputeProviderClient {
         input.signal,
       );
     } catch (error) {
+      if (isAbortError(error)) {
+        throw error;
+      }
+
       if (
         isSandboxUnavailableError(error) ||
         isSandboxStatusLookupUnavailableError(error)

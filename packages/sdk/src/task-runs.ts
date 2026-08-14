@@ -121,6 +121,9 @@ export const updateEnvironmentSetup = (
   options: AppRouterInput['taskRuns']['updateEnvironmentSetup'],
 ) => client.taskRuns.updateEnvironmentSetup.mutate(options);
 
+export const getGoal = (options: AppRouterInput['taskRuns']['getGoal']) =>
+  client.taskRuns.getGoal.query(options);
+
 export const claimGoalContinuation = (
   options: AppRouterInput['taskRuns']['claimGoalContinuation'],
 ) => client.taskRuns.claimGoalContinuation.mutate(options);
@@ -228,6 +231,14 @@ export const claimShowWidgetFallbackDelivery = (
 export const releaseShowWidgetFallbackDelivery = (
   options: AppRouterInput['taskRuns']['releaseShowWidgetFallbackDelivery'],
 ) => client.taskRuns.releaseShowWidgetFallbackDelivery.mutate(options);
+
+export const claimMissingChatCloseoutFallbackDelivery = (
+  options: AppRouterInput['taskRuns']['claimMissingChatCloseoutFallbackDelivery'],
+) => client.taskRuns.claimMissingChatCloseoutFallbackDelivery.mutate(options);
+
+export const releaseMissingChatCloseoutFallbackDelivery = (
+  options: AppRouterInput['taskRuns']['releaseMissingChatCloseoutFallbackDelivery'],
+) => client.taskRuns.releaseMissingChatCloseoutFallbackDelivery.mutate(options);
 
 export const recordInferenceUsage = (
   options: AppRouterInput['taskRuns']['recordInferenceUsage'],

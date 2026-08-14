@@ -3,6 +3,7 @@ export function IntegrationName({ href, icon, name }) {
     daytona: '/logo/integrations/daytona.svg',
     e2b: '/logo/integrations/e2b.svg',
     blaxel: '/logo/integrations/blaxel.svg',
+    box: '/logo/integrations/box.svg',
     azure: '/logo/integrations/azure.svg',
     granola: '/logo/integrations/granola.svg',
     monday: '/logo/integrations/monday.svg',

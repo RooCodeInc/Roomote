@@ -9,6 +9,7 @@ import {
   resolveAutomationRuntimeDestination,
   runAutomationNow,
   type AutomationRunNowResult,
+  type ResolvedAutomationDestination,
 } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
@@ -23,7 +24,8 @@ import { assertAdmin } from './feature-gates';
 
 async function assertManualTriggerIsRunnable(
   automationKey: TriggerableBackgroundAutomationKey,
-) {
+  fallbackUserId: string,
+): Promise<ResolvedAutomationDestination | null> {
   const descriptor =
     getTriggerableBackgroundAutomationDescriptorByKey(automationKey);
 
@@ -41,7 +43,11 @@ async function assertManualTriggerIsRunnable(
 
   const slackConnected = await hasActiveSlackInstallation();
   const destination = descriptor.usesManagerChannel
-    ? await resolveAutomationRuntimeDestination({ runtime, slackConnected })
+    ? await resolveAutomationRuntimeDestination({
+        runtime,
+        slackConnected,
+        fallbackUserId,
+      })
     : null;
 
   if (descriptor.usesManagerChannel) {
@@ -95,6 +101,8 @@ async function assertManualTriggerIsRunnable(
         break;
     }
   }
+
+  return destination;
 }
 
 /**
@@ -112,7 +120,12 @@ export async function triggerAutomationCommand(
     throw new Error(`Unsupported automation: ${String(input.automationKey)}`);
   }
 
-  await assertManualTriggerIsRunnable(input.automationKey);
+  const destination = await assertManualTriggerIsRunnable(
+    input.automationKey,
+    auth.userId,
+  );
 
-  return runAutomationNow(input.automationKey);
+  return runAutomationNow(input.automationKey, {
+    ...(destination ? { destination } : {}),
+  });
 }

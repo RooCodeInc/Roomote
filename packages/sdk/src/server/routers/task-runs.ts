@@ -5,6 +5,7 @@ import {
   claimTaskGoalContinuationForRun,
   db,
   eq,
+  getTaskGoalForRun,
   isNotNull,
   releaseTaskGoalContinuationForRun,
   slackInstallations,
@@ -110,6 +111,8 @@ import {
   findTaskRunByRunTokenClaims,
   claimShowWidgetFallbackDelivery,
   releaseShowWidgetFallbackDelivery,
+  claimMissingChatCloseoutFallbackDelivery,
+  releaseMissingChatCloseoutFallbackDelivery,
 } from '../lib/task-runs';
 import {
   findSlackConversationSubjectByUserId,
@@ -377,6 +380,9 @@ export const taskRunsRouter = router({
       completedAt: completedAt ?? undefined,
     }),
   ),
+  getGoal: runTokenOnlyScoped(z.object({ runId: z.number() }), 'runId').query(
+    ({ input }) => getTaskGoalForRun(input.runId),
+  ),
   claimGoalContinuation: runTokenOnlyScoped(
     z.object({ runId: z.number(), continuationId: z.string().min(1).max(200) }),
     'runId',
@@ -478,6 +484,20 @@ export const taskRunsRouter = router({
     }),
     'runId',
   ).mutation(({ input }) => releaseShowWidgetFallbackDelivery(input)),
+  claimMissingChatCloseoutFallbackDelivery: runTokenOnlyScoped(
+    z.object({
+      runId: z.number(),
+      completionId: z.string().trim().min(1).max(500),
+    }),
+    'runId',
+  ).mutation(({ input }) => claimMissingChatCloseoutFallbackDelivery(input)),
+  releaseMissingChatCloseoutFallbackDelivery: runTokenOnlyScoped(
+    z.object({
+      runId: z.number(),
+      completionId: z.string().trim().min(1).max(500),
+    }),
+    'runId',
+  ).mutation(({ input }) => releaseMissingChatCloseoutFallbackDelivery(input)),
   recordComputeProviderUsage: runScoped(
     z.object({
       runId: z.number(),

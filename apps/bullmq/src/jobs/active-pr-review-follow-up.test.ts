@@ -4,6 +4,7 @@ const {
   mockBuildPrompt,
   mockEnqueueTask,
   mockFindFirstRun,
+  mockGetTaskGoalForRun,
   mockSendPrompt,
   mockUpdateWhere,
   mockWithSandboxServerRpcClient,
@@ -11,6 +12,7 @@ const {
   mockBuildPrompt: vi.fn(),
   mockEnqueueTask: vi.fn(),
   mockFindFirstRun: vi.fn(),
+  mockGetTaskGoalForRun: vi.fn(),
   mockSendPrompt: vi.fn(),
   mockUpdateWhere: vi.fn(),
   mockWithSandboxServerRpcClient: vi.fn(),
@@ -36,6 +38,7 @@ vi.mock('@roomote/db/server', () => ({
     })),
   },
   eq: vi.fn((...args: unknown[]) => args),
+  getTaskGoalForRun: (...args: unknown[]) => mockGetTaskGoalForRun(...args),
   taskPullRequests: { taskId: 'taskPullRequests.taskId' },
   taskRuns: { id: 'taskRuns.id' },
 }));
@@ -102,6 +105,7 @@ describe('activePrReviewFollowUpJob', () => {
     mockBuildPrompt.mockReturnValue('Review the latest live PR head.');
     mockEnqueueTask.mockResolvedValue({ id: 200 });
     mockSendPrompt.mockResolvedValue({ success: true });
+    mockGetTaskGoalForRun.mockResolvedValue(null);
     mockUpdateWhere.mockResolvedValue(undefined);
     mockWithSandboxServerRpcClient.mockImplementation(
       ({ call }: { call: (client: unknown) => Promise<unknown> }) =>
@@ -132,6 +136,37 @@ describe('activePrReviewFollowUpJob', () => {
     });
     expect(mockUpdateWhere).toHaveBeenCalledOnce();
     expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('includes active goal context in a live review follow-up', async () => {
+    const goal = {
+      objective: 'Finish reviewing the pull request',
+      generation: 'goal-generation:review',
+      status: 'active' as const,
+      maxContinuations: 5,
+      continuationsUsed: 1,
+      blockedReason: null,
+      completedAt: null,
+    };
+    mockFindFirstRun.mockResolvedValue({
+      id: 100,
+      taskId: 'task-100',
+      status: RunStatus.Running,
+      sandboxServerUrl: 'https://sandbox.example.test',
+      snapshotId: null,
+      snapshotCreatedAt: null,
+      port: null,
+      payload: { repo: 'owner/repo' },
+      actingUserId: null,
+    });
+    mockGetTaskGoalForRun.mockResolvedValue(goal);
+
+    await activePrReviewFollowUpJob(makeJob());
+
+    expect(mockGetTaskGoalForRun).toHaveBeenCalledWith(100);
+    expect(mockSendPrompt).toHaveBeenCalledWith(
+      expect.objectContaining({ goalContext: goal }),
+    );
   });
 
   it('resumes the same task when the active review finishes during debounce', async () => {

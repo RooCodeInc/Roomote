@@ -9,10 +9,14 @@ import type {
 } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH } from '@roomote/types';
+import {
+  ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH,
+  type SetupNewState,
+} from '@roomote/types';
 
 const {
   mockSaveSelection,
+  mockPrefetchRecommendationSignals,
   mockStartOnboardingTask,
   mockCreateGitHubInstallation,
   mockToastError,
@@ -30,9 +34,26 @@ const {
       lastInteractedByUserId: 'user-1',
     },
   }),
+  mockPrefetchRecommendationSignals: vi.fn().mockResolvedValue({
+    repositoryIds: ['repo-1', 'repo-2'],
+  }),
   mockStartOnboardingTask: vi.fn().mockResolvedValue({
     taskId: 'task-onboarding-1',
     startedAt: '2026-07-10T10:00:00.000Z',
+    recommendationBatch: {
+      version: 1,
+      inputFingerprint: 'fingerprint-1',
+      catalogVersion: 1,
+      status: 'pending' as const,
+      startedAt: '2026-07-10T10:00:00.000Z',
+      completedAt: null,
+      partial: false,
+      errorCode: null,
+      dismissed: false,
+      recommendations: [],
+    },
+    setupNewState: {} as SetupNewState,
+    nextStep: 'invoke' as const,
   }),
   mockCreateGitHubInstallation: vi.fn(),
   mockToastError: vi.fn(),
@@ -85,6 +106,12 @@ vi.mock('@/trpc/client', () => ({
       saveSelection: {
         mutationOptions: (options = {}) => ({
           mutationFn: mockSaveSelection,
+          ...options,
+        }),
+      },
+      prefetchRecommendationSignals: {
+        mutationOptions: (options = {}) => ({
+          mutationFn: mockPrefetchRecommendationSignals,
           ...options,
         }),
       },
@@ -324,9 +351,26 @@ describe('StepRepoSelection', () => {
         onboardingTaskId: null,
       },
     });
+    mockPrefetchRecommendationSignals.mockResolvedValue({
+      repositoryIds: ['repo-1', 'repo-2'],
+    });
     mockStartOnboardingTask.mockResolvedValue({
       taskId: 'task-onboarding-1',
       startedAt: '2026-07-10T10:00:00.000Z',
+      recommendationBatch: {
+        version: 1,
+        inputFingerprint: 'fingerprint-1',
+        catalogVersion: 1,
+        status: 'pending' as const,
+        startedAt: '2026-07-10T10:00:00.000Z',
+        completedAt: null,
+        partial: false,
+        errorCode: null,
+        dismissed: false,
+        recommendations: [],
+      },
+      setupNewState: {} as SetupNewState,
+      nextStep: 'invoke' as const,
     });
     mockUseRepositories.mockImplementation(() => ({
       data: [...mockRepositories],
@@ -368,6 +412,19 @@ describe('StepRepoSelection', () => {
 
     expect(mockUseRepositories).toHaveBeenCalledWith({
       includeEmptyState: true,
+    });
+  });
+
+  it('prefetches recommendation signals when repositories load', async () => {
+    await renderStepRepoSelection();
+
+    await waitFor(() => {
+      expect(mockPrefetchRecommendationSignals).toHaveBeenCalledWith(
+        {
+          repositoryIds: ['repo-1', 'repo-2'],
+        },
+        expect.anything(),
+      );
     });
   });
 
@@ -939,12 +996,37 @@ describe('StepRepoSelection', () => {
       mockStartOnboardingTask.mock.invocationCallOrder[0]!,
     );
     expect(onContinue).toHaveBeenCalledTimes(1);
-    expect(onContinue).toHaveBeenCalledWith('task-onboarding-1');
+    expect(onContinue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: 'task-onboarding-1',
+        nextStep: 'invoke',
+        recommendationBatch: expect.objectContaining({
+          status: 'pending',
+        }),
+      }),
+    );
   });
 
   it('keeps Continue busy while saving and launching', async () => {
     let resolveSave!: (value: unknown) => void;
-    let resolveLaunch!: (value: { taskId: string; startedAt: string }) => void;
+    let resolveLaunch!: (value: {
+      taskId: string;
+      startedAt: string;
+      recommendationBatch: {
+        version: 1;
+        inputFingerprint: string;
+        catalogVersion: number;
+        status: 'pending';
+        startedAt: string;
+        completedAt: null;
+        partial: boolean;
+        errorCode: null;
+        dismissed: boolean;
+        recommendations: [];
+      };
+      setupNewState: SetupNewState;
+      nextStep: 'invoke';
+    }) => void;
     mockSaveSelection.mockImplementationOnce(
       () => new Promise((resolve) => (resolveSave = resolve)),
     );
@@ -965,6 +1047,20 @@ describe('StepRepoSelection', () => {
     resolveLaunch({
       taskId: 'task-onboarding-1',
       startedAt: '2026-07-10T10:00:00.000Z',
+      recommendationBatch: {
+        version: 1,
+        inputFingerprint: 'fingerprint-1',
+        catalogVersion: 1,
+        status: 'pending' as const,
+        startedAt: '2026-07-10T10:00:00.000Z',
+        completedAt: null,
+        partial: false,
+        errorCode: null,
+        dismissed: false,
+        recommendations: [],
+      },
+      setupNewState: {} as SetupNewState,
+      nextStep: 'invoke' as const,
     });
     await waitFor(() => expect(continueButton).toBeEnabled());
   });
@@ -976,6 +1072,20 @@ describe('StepRepoSelection', () => {
       .mockResolvedValueOnce({
         taskId: 'task-onboarding-retry',
         startedAt: '2026-07-10T10:01:00.000Z',
+        recommendationBatch: {
+          version: 1,
+          inputFingerprint: 'fingerprint-1',
+          catalogVersion: 1,
+          status: 'pending' as const,
+          startedAt: '2026-07-10T10:01:00.000Z',
+          completedAt: null,
+          partial: false,
+          errorCode: null,
+          dismissed: false,
+          recommendations: [],
+        },
+        setupNewState: {} as SetupNewState,
+        nextStep: 'invoke' as const,
       });
 
     await renderStepRepoSelection({ onContinue });
@@ -996,7 +1106,12 @@ describe('StepRepoSelection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
     await waitFor(() => {
-      expect(onContinue).toHaveBeenCalledWith('task-onboarding-retry');
+      expect(onContinue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          taskId: 'task-onboarding-retry',
+          nextStep: 'invoke',
+        }),
+      );
     });
     expect(mockSaveSelection).toHaveBeenCalledTimes(1);
     expect(mockStartOnboardingTask).toHaveBeenCalledTimes(2);

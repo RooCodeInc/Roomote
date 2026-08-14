@@ -28,6 +28,21 @@ const SNAPSHOT_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const PENDING_SNAPSHOT_RECOVERY_GRACE_MS = 5 * 60 * 1000;
 const LOG_PREFIX = '[refreshSnapshots]';
 
+/**
+ * Minimum delay between snapshot refresh launches. The compute broker's
+ * per-tenant sandbox-creation budget is a small token bucket (burst 6,
+ * refilling ~6/minute) shared with interactive task launches, so enqueueing
+ * every candidate in one burst can drain the whole budget and rate-limit both
+ * the refresh itself and user-initiated tasks. Spacing background launches
+ * 30s apart caps the refresh at ~2 creations/minute, leaving most of the
+ * budget for interactive load.
+ */
+export const SNAPSHOT_REFRESH_LAUNCH_SPACING_MS = 30_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 interface SnapshotRefreshCandidateBase {
   environmentId: string;
   environmentName: string;
@@ -347,6 +362,7 @@ export const refreshSnapshotsJob = async () => {
 
     logRefreshSnapshots('Found environments due for snapshot maintenance', {
       cutoff: cutoff.toISOString(),
+      launchSpacingMs: SNAPSHOT_REFRESH_LAUNCH_SPACING_MS,
       candidateCount: refreshCandidates.length,
       candidatesByProvider: summarizeCandidatesByProvider(refreshCandidates),
       targetProvider: discovery.targetProvider,
@@ -360,6 +376,24 @@ export const refreshSnapshotsJob = async () => {
     let refreshed = 0;
     let skippedActiveRefreshCount = 0;
     const errors: Array<Record<string, unknown>> = [];
+    // The controller dequeues each run within seconds of its enqueue, so
+    // spacing the enqueues here is what spaces the sandbox creations at the
+    // broker. The sleep happens lazily, immediately before the NEXT launch:
+    // skipped candidates never sleep, a trailing launch never sleeps, and no
+    // sleep ever runs inside the snapshot lock.
+    let lastLaunchAtMs: number | null = null;
+    const paceBeforeNextLaunch = async () => {
+      if (lastLaunchAtMs !== null) {
+        const elapsedMs = Date.now() - lastLaunchAtMs;
+
+        if (elapsedMs < SNAPSHOT_REFRESH_LAUNCH_SPACING_MS) {
+          await sleep(SNAPSHOT_REFRESH_LAUNCH_SPACING_MS - elapsedMs);
+        }
+      }
+    };
+    const recordLaunch = () => {
+      lastLaunchAtMs = Date.now();
+    };
     for (const candidate of refreshCandidates) {
       const snapshotAgeHours = getSnapshotAgeHours(
         candidate.snapshotCreatedAt,
@@ -403,13 +437,21 @@ export const refreshSnapshotsJob = async () => {
             continue;
           }
 
+          // Claim first, pace after: the pending claim is the reservation
+          // that keeps concurrent claimants (the admin snapshot command, a
+          // competing cycle) off this environment during the wait, so a lost
+          // claim is always a skip that never slept. The claim is stamped
+          // with the current time rather than job start — pacing stretches
+          // this job over minutes, and a claim carrying an old timestamp
+          // would look stale and be stolen mid-wait.
+          const claimedAt = new Date();
           pendingSnapshotClaim =
             await claimPendingEnvironmentSnapshotForAttachment(db, {
               environmentId: candidate.environmentId,
               provider: candidate.provider,
-              updatedAt: startedAt,
+              updatedAt: claimedAt,
               allowStalePendingBefore: new Date(
-                startedAt.getTime() - PENDING_SNAPSHOT_RECOVERY_GRACE_MS,
+                claimedAt.getTime() - PENDING_SNAPSHOT_RECOVERY_GRACE_MS,
               ),
               requireMissingSnapshot: true,
             });
@@ -417,6 +459,8 @@ export const refreshSnapshotsJob = async () => {
           if (!pendingSnapshotClaim) {
             continue;
           }
+
+          await paceBeforeNextLaunch();
 
           logRefreshSnapshots('Queueing snapshot refresh job', {
             environmentId: candidate.environmentId,
@@ -461,7 +505,23 @@ export const refreshSnapshotsJob = async () => {
           });
 
           refreshed++;
+          recordLaunch();
           continue;
+        }
+
+        // Lock-free pre-check mirroring the locked skip conditions, used only
+        // to decide whether to pace — sleeping must never happen inside the
+        // snapshot lock, and a candidate about to be skipped must not sleep.
+        // The locked re-check below stays authoritative. Unlike the missing-
+        // snapshot branch there is no claim primitive to reserve a ready-row
+        // refresh outside the lock, so a state change during the wait can at
+        // worst cost this one delay before the authoritative skip — it can
+        // never double-launch.
+        if (
+          !(await findActiveSnapshotRefreshJob(candidate)) &&
+          !(await hasRecentPendingSnapshotClaim(candidate, new Date()))
+        ) {
+          await paceBeforeNextLaunch();
         }
 
         const lockResult = await withEnvironmentSnapshotLock(
@@ -567,6 +627,7 @@ export const refreshSnapshotsJob = async () => {
         });
 
         refreshed++;
+        recordLaunch();
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
 

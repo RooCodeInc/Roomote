@@ -1,0 +1,14 @@
+{
+  "name": "@roomote/runtime-api-deps",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@10.29.3",
+  "dependencies": {
+    "snowflake-sdk": "2.4.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "axios": "1.18.1"
+    }
+  }
+}

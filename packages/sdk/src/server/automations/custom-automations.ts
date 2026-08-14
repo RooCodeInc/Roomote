@@ -127,22 +127,88 @@ async function resolveDestination(
   };
 }
 
+function buildDefaultReportPresentationGuidance(
+  hasDestination: boolean,
+): string {
+  const channelGuidance = hasDestination
+    ? '\n- The first `send_chat_reply` is the report root and must stand alone. If important supporting detail would make it too long, keep the root concise and send the detail in follow-up replies in the same thread with clear headings. Keep essential conclusions and required actions in the root.'
+    : '';
+
+  return `<default_report_presentation>
+These are defaults, not requirements that override the automation request above. Before applying them, check the request for explicit guidance about format, structure, length, tone, audience, or where details should appear. On any conflict, follow the request. Apply these defaults only where the request is silent.
+
+- Lead with the result or most important takeaway in 1-2 sentences.
+- Keep the primary report concise, normally no more than about 250 words.
+- When the report has multiple topics, use 2-4 short bold Markdown headings with bullets underneath them.
+- Keep bullets short and put one finding, decision, or action in each bullet.
+- Prioritize decision-useful findings. Omit routine methodology, exhaustive test transcripts, and repeated conclusions unless the request asks for them or they materially support the result.
+- For a clean or no-action result, say so briefly and include only the most useful supporting evidence or caveats.
+- Use inline links with descriptive labels instead of raw URLs when possible.${channelGuidance}
+</default_report_presentation>`;
+}
+
 /**
- * Anchors a custom automation's prompt to its configured report conversation,
- * mirroring how the built-in channel automations tell the agent which surface
- * and posting tool to report through.
+ * Adds default presentation guidance to every custom automation prompt and,
+ * when configured, anchors reporting to its destination conversation.
+ *
+ * A custom automation may intentionally omit a report destination. When it
+ * does, prefer the admin who created/enabled it as a private fallback so an
+ * enabled automation does not disappear from the communication surface.
  */
-function buildChannelAnchoredDescription(
+async function resolveOwnerFallbackDestination(
+  ownerUserId: string | null,
+): Promise<ResolvedAutomationDestination | null> {
+  if (!ownerUserId) {
+    return null;
+  }
+
+  const connectedProviders = await listConnectedCommunicationProviders();
+  for (const provider of connectedProviders) {
+    try {
+      const destination = await findUserDirectMessageDestination(
+        provider,
+        ownerUserId,
+      );
+      if (destination) {
+        return {
+          provider,
+          ...destination,
+          source: 'automation_target',
+        };
+      }
+    } catch (error) {
+      console.warn(
+        `${LOG_PREFIX} Failed to resolve owner DM on ${provider}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  return null;
+}
+
+function buildCustomAutomationDescription(
   prompt: string,
-  destination: ResolvedAutomationDestination,
+  destination: ResolvedAutomationDestination | null,
   options: { allRepositories: boolean },
 ): string {
+  const presentationGuidance = buildDefaultReportPresentationGuidance(
+    destination !== null,
+  );
+
+  if (!destination) {
+    return `${prompt}
+
+${presentationGuidance}`;
+  }
+
   const promptContext = buildDestinationPromptContext(destination);
   const orgWideSuggestionInstruction = options.allRepositories
     ? ' This run spans all active repositories. Every launchable suggestion must include the concrete `targetRepositoryFullName` that owns the work so Roomote can start it in the matching environment.'
     : '';
 
   return `${prompt}
+
+${presentationGuidance}
 
 <task_context>
   <source>background-automation</source>
@@ -240,8 +306,9 @@ async function launchCustomAutomationRow(
     return result;
   }
 
-  // A report destination is optional: automations without one run silently
-  // and surface results only in the task UI.
+  // A report destination is optional. Prefer a private DM to the admin who
+  // created/enabled the automation so an enabled run still has a chat-facing
+  // result; if that admin has no linked DM, preserve the task-UI fallback.
   let destination: ResolvedAutomationDestination | null = null;
   if (isConfiguredAutomationTarget(automation.target)) {
     destination = await resolveDestination(automation.target);
@@ -275,6 +342,10 @@ async function launchCustomAutomationRow(
       });
       return result;
     }
+  } else {
+    destination = await resolveOwnerFallbackDestination(
+      automation.createdByUserId,
+    );
   }
 
   // The short claim fence prevents concurrent launchers from double-launching
@@ -311,11 +382,13 @@ async function launchCustomAutomationRow(
           ...(automation.environmentId
             ? { environmentId: automation.environmentId }
             : {}),
-          description: destination
-            ? buildChannelAnchoredDescription(automation.prompt, destination, {
-                allRepositories: automation.allRepositories,
-              })
-            : automation.prompt,
+          description: buildCustomAutomationDescription(
+            automation.prompt,
+            destination,
+            {
+              allRepositories: automation.allRepositories,
+            },
+          ),
           ...(destination
             ? buildDestinationTaskPayloadFields(destination)
             : {}),
