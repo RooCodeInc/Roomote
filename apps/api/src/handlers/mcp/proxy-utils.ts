@@ -422,8 +422,10 @@ function stripToolSchemaPatterns(value: unknown): unknown {
  * give array schemas that declare no item shape at all a permissive string
  * `items` (the upstream server still validates the actual tool call). The
  * transform must never destroy information the upstream declared: declared
- * `items` of any form pass through untouched, and data-carrying keywords
- * (`default`, `const`, `enum`, `examples`) are never recursed into.
+ * `items` of any form pass through untouched, and recursion is limited to
+ * keyword positions known to carry schemas — data keywords (`default`,
+ * `const`, `enum`, `examples`), vendor extensions, and unrecognized
+ * keywords are opaque and never rewritten.
  */
 const ARRAY_ONLY_SCHEMA_KEYWORDS = [
   'items',
@@ -512,14 +514,27 @@ const UNION_SPLIT_UNDERSTOOD_KEYWORDS = new Set<string>([
   ...NUMERIC_ONLY_SCHEMA_KEYWORDS,
 ]);
 
-// Keys whose values are data, not schemas. Recursing into them would rewrite
-// literal values that merely look like schemas (a `default` of
-// `{"type": "array"}` would grow an injected `items`).
-const NON_SCHEMA_VALUE_KEYWORDS = new Set([
-  'default',
-  'const',
-  'enum',
-  'examples',
+// Keys whose values are schemas (or arrays of schemas). Recursion is limited
+// to these positions plus the schema/dependency maps below; every other
+// key's value — data keywords like `default`/`enum`, vendor extensions,
+// unrecognized keywords — is opaque data and passes through untouched, even
+// when it happens to look like a schema.
+const SCHEMA_VALUE_KEYWORDS = new Set([
+  'items',
+  'additionalItems',
+  'unevaluatedItems',
+  'prefixItems',
+  'contains',
+  'additionalProperties',
+  'unevaluatedProperties',
+  'propertyNames',
+  'anyOf',
+  'oneOf',
+  'allOf',
+  'not',
+  'if',
+  'then',
+  'else',
 ]);
 
 // Keys whose values are maps of schemas keyed by arbitrary names. Entries in
@@ -598,19 +613,28 @@ function normalizeToolSchemaForStrictProviders(
             : nestedValue,
         ];
       }
-      if (context === 'schema' && NON_SCHEMA_VALUE_KEYWORDS.has(key)) {
-        return [key, nestedValue];
+      if (context === 'schema-map') {
+        // Every entry of a schema map is a schema, whatever its name.
+        return [key, normalizeToolSchemaForStrictProviders(nestedValue)];
       }
-      let childContext: SchemaTraversalContext = 'schema';
-      if (context === 'schema' && SCHEMA_MAP_KEYWORDS.has(key)) {
-        childContext = 'schema-map';
-      } else if (context === 'schema' && DEPENDENCY_MAP_KEYWORDS.has(key)) {
-        childContext = 'dependency-map';
+      // In a schema, recurse only into positions known to carry schemas;
+      // any other value is opaque data.
+      if (SCHEMA_MAP_KEYWORDS.has(key)) {
+        return [
+          key,
+          normalizeToolSchemaForStrictProviders(nestedValue, 'schema-map'),
+        ];
       }
-      return [
-        key,
-        normalizeToolSchemaForStrictProviders(nestedValue, childContext),
-      ];
+      if (DEPENDENCY_MAP_KEYWORDS.has(key)) {
+        return [
+          key,
+          normalizeToolSchemaForStrictProviders(nestedValue, 'dependency-map'),
+        ];
+      }
+      if (SCHEMA_VALUE_KEYWORDS.has(key)) {
+        return [key, normalizeToolSchemaForStrictProviders(nestedValue)];
+      }
+      return [key, nestedValue];
     }),
   );
 

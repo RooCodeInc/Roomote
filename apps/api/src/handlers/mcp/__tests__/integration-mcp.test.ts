@@ -728,6 +728,15 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
                       dependencies: { type: ['foo'] },
                       dependentRequired: { type: ['foo'] },
                     },
+                    // Values under unrecognized keywords are opaque data;
+                    // schema-lookalikes inside them must not be rewritten.
+                    extended_field: {
+                      type: 'object',
+                      'x-samples': {
+                        type: ['array', 'null'],
+                        items: { type: 'string' },
+                      },
+                    },
                   },
                 },
               },
@@ -800,6 +809,13 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
         },
         { type: 'null' },
       ],
+    });
+    expect(properties.extended_field).toEqual({
+      type: 'object',
+      'x-samples': {
+        type: ['array', 'null'],
+        items: { type: 'string' },
+      },
     });
   });
 
