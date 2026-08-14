@@ -73,6 +73,27 @@ describe('mergeOpenAiCompatibleProviderConfig', () => {
     ]);
   });
 
+  it('preserves independently configured input limits', () => {
+    const config = mergeOpenAiCompatibleProviderConfig(
+      {
+        litellm: {
+          models: {
+            coding: { limit: { input: 120_000, output: 8_000 } },
+          },
+        },
+      },
+      {},
+      ['litellm/coding'],
+      undefined,
+      { 'litellm/coding': 128_000 },
+    );
+
+    expect(config).toHaveProperty(
+      ['litellm', 'models', 'coding', 'limit', 'input'],
+      120_000,
+    );
+  });
+
   it('preserves existing model options for named OpenAI-compatible providers', () => {
     expect(
       mergeOpenAiCompatibleProviderConfig(
