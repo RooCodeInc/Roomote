@@ -3,6 +3,7 @@ import {
   deleteCustomAutomation,
   getCustomAutomationById,
   listCustomAutomations,
+  listRecentCustomAutomationTaskRuns,
   updateCustomAutomation,
   type CustomAutomation,
 } from '@roomote/db/server';
@@ -22,6 +23,8 @@ import {
   type BackgroundAutomationTargetKind,
   type CustomAutomationScheduleMode,
   type OptionalAutomationTarget,
+  type TaskState,
+  type TaskTrigger,
 } from '@roomote/types';
 import { captureActivationCustomAutomationChanged } from '@roomote/telemetry/server';
 import { toActivationAutomationDestinationProvider } from '@roomote/telemetry';
@@ -45,6 +48,13 @@ export type CustomAutomationListItem = {
   lastFailedAt: Date | null;
   lastError: string | null;
   lastLaunchedTaskId: string | null;
+  recentRuns: Array<{
+    taskId: string;
+    title: string;
+    trigger: TaskTrigger;
+    state: TaskState;
+    createdAt: Date;
+  }>;
   createdByName: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -70,6 +80,7 @@ function toListItem(
   row: CustomAutomation & {
     createdByUser?: { name: string; email: string } | null;
   },
+  recentRuns: CustomAutomationListItem['recentRuns'],
 ): CustomAutomationListItem {
   const scheduleMode =
     row.scheduleMode === 'cron'
@@ -93,6 +104,7 @@ function toListItem(
     lastFailedAt: row.lastFailedAt,
     lastError: row.lastError,
     lastLaunchedTaskId: row.lastLaunchedTaskId,
+    recentRuns,
     createdByName: row.createdByUser?.name || row.createdByUser?.email || null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -177,7 +189,11 @@ export async function listCustomAutomationsCommand(
 ): Promise<CustomAutomationListItem[]> {
   assertAdmin(auth);
   const rows = await listCustomAutomations();
-  return rows.map(toListItem);
+  return Promise.all(
+    rows.map(async (row) =>
+      toListItem(row, await listRecentCustomAutomationTaskRuns(row.id)),
+    ),
+  );
 }
 
 export async function createCustomAutomationCommand(
@@ -214,7 +230,7 @@ export async function createCustomAutomationCommand(
     input.targetProvider ?? null,
   );
 
-  return toListItem(created);
+  return toListItem(created, []);
 }
 
 export async function updateCustomAutomationCommand(
@@ -250,7 +266,10 @@ export async function updateCustomAutomationCommand(
     target: buildTarget(input, existing.createdByUserId ?? auth.userId),
   });
 
-  return toListItem(updated);
+  return toListItem(
+    updated,
+    await listRecentCustomAutomationTaskRuns(updated.id),
+  );
 }
 
 export async function deleteCustomAutomationCommand(

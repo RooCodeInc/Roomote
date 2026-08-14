@@ -1,4 +1,4 @@
-import { and, asc, count, eq, isNull, lt, or } from 'drizzle-orm';
+import { and, asc, count, desc, eq, isNull, lt, or } from 'drizzle-orm';
 
 import {
   ALL_REPOSITORIES,
@@ -131,6 +131,45 @@ function assertValidWriteInput(input: CustomAutomationWriteInput): {
 export type CustomAutomationWithCreator = CustomAutomation & {
   createdByUser: { id: string; name: string; email: string } | null;
 };
+
+export type CustomAutomationTaskRun = {
+  taskId: string;
+  title: string;
+  trigger: (typeof tasks.$inferSelect)['trigger'];
+  state: (typeof tasks.$inferSelect)['state'];
+  createdAt: Date;
+};
+
+export async function listRecentCustomAutomationTaskRuns(
+  automationId: string,
+  limit = 5,
+  client: DatabaseOrTransaction = db,
+): Promise<CustomAutomationTaskRun[]> {
+  const rows = await client.query.tasks.findMany({
+    columns: {
+      id: true,
+      title: true,
+      trigger: true,
+      state: true,
+      createdAt: true,
+    },
+    where: and(
+      eq(tasks.initiatorAutomation, 'custom_automation'),
+      eq(tasks.actorExternalId, automationId),
+      isNull(tasks.deletedAt),
+    ),
+    orderBy: [desc(tasks.createdAt)],
+    limit,
+  });
+
+  return rows.map((row) => ({
+    taskId: row.id,
+    title: row.title,
+    trigger: row.trigger,
+    state: row.state,
+    createdAt: row.createdAt,
+  }));
+}
 
 export async function listCustomAutomations(
   client: DatabaseOrTransaction = db,

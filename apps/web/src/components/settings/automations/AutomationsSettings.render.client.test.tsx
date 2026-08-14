@@ -41,6 +41,13 @@ const state = vi.hoisted(() => ({
     lastFailedAt: null;
     lastError: null;
     lastLaunchedTaskId: null;
+    recentRuns: Array<{
+      taskId: string;
+      title: string;
+      trigger: 'schedule' | 'manual';
+      state: 'active' | 'completed' | 'failed' | 'canceled';
+      createdAt: Date;
+    }>;
     createdByName: string;
     createdAt: Date;
     updatedAt: Date;
@@ -959,6 +966,15 @@ describe('AutomationsSettings', () => {
         lastFailedAt: null,
         lastError: null,
         lastLaunchedTaskId: null,
+        recentRuns: [
+          {
+            taskId: 'task-custom-recent',
+            title: 'Weekly flaky-test scan',
+            trigger: 'schedule',
+            state: 'completed',
+            createdAt: new Date(),
+          },
+        ],
         createdByName: 'Ada',
         createdAt: new Date('2026-01-01T00:00:00Z'),
         updatedAt: new Date('2026-01-01T00:00:00Z'),
@@ -974,6 +990,18 @@ describe('AutomationsSettings', () => {
     expect(screen.getByText('Weekly, in Production →')).toBeInTheDocument();
     expect(screen.getByText('Slack #roomote-managers')).toBeInTheDocument();
     expect(screen.getByText('Created by Ada')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('Recent runs'));
+    expect(
+      screen.getByText(/Runs with nothing actionable stay quiet/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Tasks' })).toHaveAttribute(
+      'href',
+      '/tasks',
+    );
+    expect(screen.getByRole('link', { name: 'Open task' })).toHaveAttribute(
+      'href',
+      '/task/task-custom-recent',
+    );
     expect(
       screen.getByRole('button', { name: 'Run Weekly flaky-test scan now' }),
     ).toBeEnabled();
@@ -1063,6 +1091,7 @@ describe('AutomationsSettings', () => {
         lastFailedAt: null,
         lastError: null,
         lastLaunchedTaskId: null,
+        recentRuns: [],
         createdByName: 'Ada',
         createdAt: new Date('2026-01-01T00:00:00Z'),
         updatedAt: new Date('2026-01-01T00:00:00Z'),
@@ -1099,6 +1128,7 @@ describe('AutomationsSettings', () => {
         lastFailedAt: null,
         lastError: null,
         lastLaunchedTaskId: null,
+        recentRuns: [],
         createdByName: 'Ada',
         createdAt: new Date('2026-01-01T00:00:00Z'),
         updatedAt: new Date('2026-01-01T00:00:00Z'),
@@ -1140,6 +1170,7 @@ describe('AutomationsSettings', () => {
         lastFailedAt: null,
         lastError: null,
         lastLaunchedTaskId: null,
+        recentRuns: [],
         createdByName: 'Ada',
         createdAt: new Date('2026-01-01T00:00:00Z'),
         updatedAt: new Date('2026-01-01T00:00:00Z'),
@@ -1185,6 +1216,7 @@ describe('AutomationsSettings', () => {
         lastFailedAt: null,
         lastError: null,
         lastLaunchedTaskId: null,
+        recentRuns: [],
         createdByName: 'Ada',
         createdAt: new Date('2026-01-01T00:00:00Z'),
         updatedAt: new Date('2026-01-01T00:00:00Z'),
@@ -1252,6 +1284,7 @@ describe('AutomationsSettings', () => {
         lastFailedAt: null,
         lastError: null,
         lastLaunchedTaskId: null,
+        recentRuns: [],
         createdByName: 'Ada',
         createdAt: new Date('2026-01-01T00:00:00Z'),
         updatedAt: new Date('2026-01-01T00:00:00Z'),
@@ -1293,6 +1326,7 @@ describe('AutomationsSettings', () => {
         lastFailedAt: null,
         lastError: null,
         lastLaunchedTaskId: null,
+        recentRuns: [],
         createdByName: 'Ada',
         createdAt: new Date('2026-01-01T00:00:00Z'),
         updatedAt: new Date('2026-01-01T00:00:00Z'),

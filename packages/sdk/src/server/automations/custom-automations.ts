@@ -131,7 +131,7 @@ function buildDefaultReportPresentationGuidance(
   hasDestination: boolean,
 ): string {
   const channelGuidance = hasDestination
-    ? '\n- The first `send_chat_reply` is the report root and must stand alone. If important supporting detail would make it too long, keep the root concise and send the detail in follow-up replies in the same thread with clear headings. Keep essential conclusions and required actions in the root.'
+    ? '\n- If the run completes successfully with no actionable finding, requested recurring report, durable blocker, or required user input, do not call `send_chat_reply`; finish silently so the full run remains available in the task view.\n- The first `send_chat_reply` is the report root and must stand alone. If important supporting detail would make it too long, keep the root concise and send the detail in follow-up replies in the same thread with clear headings. Keep essential conclusions and required actions in the root.'
     : '';
 
   return `<default_report_presentation>
@@ -142,7 +142,7 @@ These are defaults, not requirements that override the automation request above.
 - When the report has multiple topics, use 2-4 short bold Markdown headings with bullets underneath them.
 - Keep bullets short and put one finding, decision, or action in each bullet.
 - Prioritize decision-useful findings. Omit routine methodology, exhaustive test transcripts, and repeated conclusions unless the request asks for them or they materially support the result.
-- For a clean or no-action result, say so briefly and include only the most useful supporting evidence or caveats.
+- When there is no report destination, keep a clean or no-action result brief and include only the most useful supporting evidence or caveats.
 - Use inline links with descriptive labels instead of raw URLs when possible.${channelGuidance}
 </default_report_presentation>`;
 }
@@ -215,7 +215,7 @@ ${presentationGuidance}
   <${promptContext.channelTag}>${destination.channelId}</${promptContext.channelTag}>
 </task_context>
 
-This run is anchored to the ${promptContext.surfaceLabel} conversation above and reports through \`send_chat_reply\`; do not use \`${promptContext.postToolName}\` and do not post anywhere else. Stay silent while work is in flight: send no opening acknowledgement and do not post progress updates. Send a ${promptContext.surfaceLabel} message only for your final result, a durable blocker, or a required user input. Your first message creates this run's thread in that conversation, so make it one self-contained message that stands alone for readers who have not seen this task; later messages and user replies continue that same thread. Write the report as the result itself, like a teammate sharing what they found or did: do not mention this automation, the schedule, the task, or that anything requested the work; the message footer already attributes the automation. Lead with the outcome, not with framing like "Automation requested ..." or "Outcome: ...".${orgWideSuggestionInstruction}`;
+This run is anchored to the ${promptContext.surfaceLabel} conversation above and reports through \`send_chat_reply\`; do not use \`${promptContext.postToolName}\` and do not post anywhere else. Stay silent while work is in flight: send no opening acknowledgement and do not post progress updates. Send a ${promptContext.surfaceLabel} message only when the final result contains an actionable finding, a report explicitly requested by the automation prompt, a durable blocker, or a required user input. If the run completes successfully without any of those outcomes, do not call \`send_chat_reply\`; finish silently so the run remains available in the task view without creating channel noise. Your first message creates this run's thread in that conversation, so make it one self-contained message that stands alone for readers who have not seen this task; later messages and user replies continue that same thread. Write the report as the result itself, like a teammate sharing what they found or did: do not mention this automation, the schedule, the task, or that anything requested the work; the message footer already attributes the automation. Lead with the outcome, not with framing like "Automation requested ..." or "Outcome: ...".${orgWideSuggestionInstruction}`;
 }
 
 async function launchCustomAutomationRow(

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
@@ -8,6 +9,7 @@ import {
   isBackgroundAutomationUserTargetKind,
   MAX_CUSTOM_AUTOMATIONS,
   type CustomAutomationScheduleMode,
+  type TaskState,
 } from '@roomote/types';
 
 import { tryParseCronSchedule } from '@/lib/cron-schedule';
@@ -122,6 +124,13 @@ function cadenceLabel(row: CustomAutomationListItem): string {
         'Custom schedule')
     : 'Custom schedule';
 }
+
+const RUN_STATE_LABELS: Record<TaskState, string> = {
+  active: 'Running',
+  completed: 'Completed',
+  failed: 'Failed',
+  canceled: 'Canceled',
+};
 
 function CustomAutomationRunButton({
   automation,
@@ -1153,6 +1162,58 @@ export function CustomAutomationsSection() {
                           </>
                         ) : null}
                       </p>
+                      <details className="pt-1 text-xs text-muted-foreground">
+                        <summary className="w-fit cursor-pointer select-none font-medium text-foreground">
+                          Recent runs
+                        </summary>
+                        <div className="mt-2 space-y-2 rounded-md border border-dashed border-border/70 px-3 py-2">
+                          <p>
+                            Runs with nothing actionable stay quiet. The five
+                            most recent launched runs are shown here; older runs
+                            remain in{' '}
+                            <Link
+                              href="/tasks"
+                              className="font-medium text-foreground underline underline-offset-2"
+                            >
+                              Tasks
+                            </Link>
+                            .
+                          </p>
+                          {row.recentRuns.length === 0 ? (
+                            <p>No runs yet.</p>
+                          ) : (
+                            <ul className="space-y-1.5">
+                              {row.recentRuns.map((run) => (
+                                <li
+                                  key={run.taskId}
+                                  className="flex flex-wrap items-center gap-x-2 gap-y-1"
+                                >
+                                  <span className="font-medium text-foreground">
+                                    {RUN_STATE_LABELS[run.state]}
+                                  </span>
+                                  <span>{run.trigger}</span>
+                                  <span
+                                    title={new Date(
+                                      run.createdAt,
+                                    ).toLocaleString()}
+                                  >
+                                    {formatDistanceToNowCompact(
+                                      new Date(run.createdAt),
+                                      { addSuffix: true },
+                                    )}
+                                  </span>
+                                  <Link
+                                    href={`/task/${run.taskId}`}
+                                    className="font-medium text-foreground underline underline-offset-2"
+                                  >
+                                    Open task
+                                  </Link>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      </details>
                     </div>
                     <div className="col-start-2 row-start-2 flex shrink-0 items-center gap-1 sm:col-start-3 sm:row-start-1">
                       <CustomAutomationRunButton

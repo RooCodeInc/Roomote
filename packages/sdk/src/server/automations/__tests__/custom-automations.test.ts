@@ -275,6 +275,12 @@ describe('customAutomationsJob', () => {
     expect(enqueued.task.payload.description).toContain(
       'send the detail in follow-up replies in the same thread',
     );
+    expect(enqueued.task.payload.description).toContain(
+      'If the run completes successfully without any of those outcomes, do not call `send_chat_reply`',
+    );
+    expect(enqueued.task.payload.description).toContain(
+      'a report explicitly requested by the automation prompt',
+    );
     expect(enqueued.task.payload.description.indexOf(automation.prompt)).toBe(
       0,
     );

@@ -6,6 +6,7 @@ import {
   deleteCustomAutomation,
   getCustomAutomationById,
   listCustomAutomations,
+  listRecentCustomAutomationTaskRuns,
   recordCustomAutomationRunOutcome,
   releaseCustomAutomationLaunchClaim,
   tryClaimCustomAutomationLaunch,
@@ -15,6 +16,7 @@ import {
   customAutomations,
   db,
   environments,
+  ensureAutomationRows,
   eq,
   taskFactory,
 } from '../../server';
@@ -114,6 +116,45 @@ describe('custom automations helpers', () => {
     expect(created.target).toEqual({});
 
     await deleteCustomAutomation(created.id);
+  });
+
+  it('lists recent tasks for one custom automation', async () => {
+    await ensureAutomationRows();
+    const automationId = `automation-run-history-${Date.now()}`;
+    const createdRuns = await Promise.all(
+      Array.from({ length: 6 }, (_, index) =>
+        taskFactory.create({
+          initiatorKind: 'automation',
+          initiatorAutomation: 'custom_automation',
+          initiatorUserId: null,
+          actorExternalId: automationId,
+          title: `Run ${index + 1}`,
+          state: index === 5 ? 'failed' : 'completed',
+          createdAt: new Date(Date.UTC(2026, 0, index + 1)),
+        }),
+      ),
+    );
+    await taskFactory.create({
+      initiatorKind: 'automation',
+      initiatorAutomation: 'custom_automation',
+      initiatorUserId: null,
+      actorExternalId: '22222222-2222-2222-2222-222222222222',
+      title: 'Other automation run',
+    });
+
+    const runs = await listRecentCustomAutomationTaskRuns(automationId);
+
+    expect(runs.map((run) => run.taskId)).toEqual(
+      createdRuns
+        .slice(1)
+        .reverse()
+        .map((run) => run.id),
+    );
+    expect(runs[0]).toMatchObject({
+      title: 'Run 6',
+      state: 'failed',
+      trigger: 'manual',
+    });
   });
 
   it('persists canonical cron schedules and rejects invalid mode combinations', async () => {
