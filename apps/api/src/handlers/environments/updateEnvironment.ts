@@ -29,7 +29,7 @@ import {
   getEnvironmentRepositoryConfigError,
   isEnvironmentNameUniqueViolation,
   resolveCallingVerificationTaskId,
-  resolveEnvironmentWriteUserId,
+  resolveEnvironmentAdminUserId,
 } from './createEnvironment';
 
 function duplicateEnvironmentNameResponse(
@@ -46,7 +46,7 @@ export async function updateEnvironment(
   c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,
 ): Promise<Response> {
   const auth = c.get('mcpAuth');
-  const userId = await resolveEnvironmentWriteUserId(auth);
+  const userId = await resolveEnvironmentAdminUserId(auth);
 
   if (!userId || !(await canAdministerEnvironments(userId))) {
     return c.json({ error: ENVIRONMENT_ADMIN_REQUIRED_ERROR }, 403);

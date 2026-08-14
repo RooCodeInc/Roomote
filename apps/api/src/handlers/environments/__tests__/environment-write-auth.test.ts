@@ -221,33 +221,40 @@ describe.each([
     expect(mockUsersFindFirst).toHaveBeenCalledOnce();
   });
 
-  it.each([
-    ['ordinary task', 'standard', {}],
-    [
-      'snapshot resume',
-      'snapshot_resume',
-      { environmentManagementMode: method === 'POST' ? 'create' : 'update' },
-    ],
-  ])(
-    'rejects an admin run token from an %s',
-    async (_label, payloadKind, payload) => {
-      mockTaskRunFindFirst
-        .mockResolvedValueOnce({ actingUserId: 'user-live-admin' })
-        .mockResolvedValueOnce({
-          payloadKind,
-          payload,
-          task: { workflow: 'standard' },
-        });
-
-      const app = createApp(deploymentRunToken());
-      const response = await app.request(invalidBodyRequest(method, path));
-
-      expect(response.status).toBe(403);
-      await expect(response.json()).resolves.toEqual({
-        error: 'This task is not allowed to perform that environment action.',
+  it('restricts an ordinary admin task to updating an existing environment', async () => {
+    mockTaskRunFindFirst
+      .mockResolvedValueOnce({ actingUserId: 'user-live-admin' })
+      .mockResolvedValueOnce({
+        payloadKind: 'standard',
+        payload: {},
+        task: { workflow: 'standard' },
       });
-    },
-  );
+
+    const app = createApp(deploymentRunToken());
+    const response = await app.request(invalidBodyRequest(method, path));
+
+    expect(response.status).toBe(method === 'PATCH' ? 400 : 403);
+  });
+
+  it('rejects an admin run token from a snapshot resume', async () => {
+    mockTaskRunFindFirst
+      .mockResolvedValueOnce({ actingUserId: 'user-live-admin' })
+      .mockResolvedValueOnce({
+        payloadKind: 'snapshot_resume',
+        payload: {
+          environmentManagementMode: method === 'POST' ? 'create' : 'update',
+        },
+        task: { workflow: 'standard' },
+      });
+
+    const app = createApp(deploymentRunToken());
+    const response = await app.request(invalidBodyRequest(method, path));
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: 'This task is not allowed to perform that environment action.',
+    });
+  });
 });
 
 describe.each([

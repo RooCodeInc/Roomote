@@ -1,10 +1,19 @@
 import type { Context } from 'hono';
 
-import { db, environments, eq } from '@roomote/db/server';
+import { and, db, environments, eq, isNull } from '@roomote/db/server';
 
 import type { Variables } from '../../types';
 import type { McpAuth } from '../mcp/middleware';
 import { logHandlerError } from '../utils';
+import {
+  ENVIRONMENT_TASK_CAPABILITY_ERROR,
+  canAdministerEnvironments,
+  canTaskRunReadEnvironmentConfig,
+  resolveEnvironmentAdminUserId,
+} from './createEnvironment';
+
+export const ENVIRONMENT_READ_ADMIN_REQUIRED_ERROR =
+  'Admin access is required to view environment configuration.';
 
 /**
  * GET /api/environments/:id
@@ -14,6 +23,17 @@ import { logHandlerError } from '../utils';
 export async function getEnvironment(
   c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,
 ): Promise<Response> {
+  const auth = c.get('mcpAuth');
+  const userId = await resolveEnvironmentAdminUserId(auth);
+
+  if (!userId || !(await canAdministerEnvironments(userId))) {
+    return c.json({ error: ENVIRONMENT_READ_ADMIN_REQUIRED_ERROR }, 403);
+  }
+
+  if (!(await canTaskRunReadEnvironmentConfig(auth))) {
+    return c.json({ error: ENVIRONMENT_TASK_CAPABILITY_ERROR }, 403);
+  }
+
   const environmentId = c.req.param('id');
 
   if (!environmentId?.trim()) {
@@ -22,7 +42,11 @@ export async function getEnvironment(
 
   try {
     const environment = await db.query.environments.findFirst({
-      where: eq(environments.id, environmentId),
+      where: and(
+        eq(environments.id, environmentId),
+        isNull(environments.userId),
+        eq(environments.isEval, false),
+      ),
       columns: {
         id: true,
         name: true,

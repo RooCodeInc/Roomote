@@ -1,6 +1,6 @@
 import type { Context } from 'hono';
 
-import { db, environments, eq } from '@roomote/db/server';
+import { and, db, environments, eq, isNull } from '@roomote/db/server';
 
 import type { Variables } from '../../types';
 
@@ -18,7 +18,7 @@ export async function listEnvironments(
   try {
     // Fetch environments with their repository mappings.
     const envs = await db.query.environments.findMany({
-      where: eq(environments.isEval, false),
+      where: and(isNull(environments.userId), eq(environments.isEval, false)),
       columns: { id: true, name: true, description: true },
       with: {
         repositoryMappings: {

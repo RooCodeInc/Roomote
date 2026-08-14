@@ -14,7 +14,9 @@ import {
 } from '@roomote/db/server';
 import {
   type EnvironmentManagementAction,
+  type EnvironmentManagementMode,
   type TaskPayload,
+  canReadEnvironmentConfig,
   canPerformEnvironmentManagementAction,
   environmentConfigSchema,
   getAmbiguousEnvironmentRepositoryError,
@@ -90,7 +92,7 @@ function extractRunId(auth: McpAuth): number | null {
 }
 
 /**
- * Resolve the human user an environment write should be attributed to.
+ * Resolve the human user an environment management request should act as.
  *
  * Chat-started task runs (for example Slack app mentions) are dequeued before
  * an acting user is attached, so their run tokens are minted as the
@@ -99,18 +101,18 @@ function extractRunId(auth: McpAuth): number | null {
  * `task_runs.actingUserId` — written only by trusted server-side writers
  * (web steer, follow-up delivery) — so prefer it the same way the MCP proxy
  * does and fall back to the token's mint-time claim. Returns null when no
- * human actor can be resolved; environment writes stay forbidden for pure
+ * human actor can be resolved; environment management stays forbidden for pure
  * deployment-principal automation.
  *
- * This live-actor resolution is deliberately scoped to environment writes,
- * where the resolved user only feeds deployment-scoped attribution
+ * This live-actor resolution is deliberately scoped to environment management.
+ * Writes use the resolved user for deployment-scoped attribution
  * (`createdByUserId`). Task-control handlers that act *as* a user
  * (launchTask, sendMessage, steerMessage) intentionally keep stricter
  * mint-time/user gating. task-stop deliberately allows a missing human
  * claim and mints a deployment-principal run token so chat cancel can
  * stop active sandboxes without a mint-time acting user.
  */
-export async function resolveEnvironmentWriteUserId(
+export async function resolveEnvironmentAdminUserId(
   auth: McpAuth,
 ): Promise<string | null> {
   let liveActingUserId: string | null = null;
@@ -122,10 +124,10 @@ export async function resolveEnvironmentWriteUserId(
       runId: extractRunId(auth) ?? undefined,
     });
   } catch (error) {
-    // Environment writes must fail closed when a run token is malformed, its
+    // Environment management must fail closed when a run token is malformed, its
     // task run no longer exists, or the live-actor lookup otherwise fails.
     if (!(error instanceof McpProxyError)) {
-      logHandlerError('resolveEnvironmentWriteUserId', error);
+      logHandlerError('resolveEnvironmentAdminUserId', error);
     }
 
     return null;
@@ -145,17 +147,16 @@ export async function canAdministerEnvironments(
   return user?.role === 'admin' && user.deletedAt == null;
 }
 
-export async function canTaskRunManageEnvironments(
+async function resolveTaskRunEnvironmentManagementMode(
   auth: McpAuth,
-  action: EnvironmentManagementAction,
-): Promise<boolean> {
+): Promise<EnvironmentManagementMode | null> {
   if (auth.authContext.tokenType !== 'run') {
-    return true;
+    return null;
   }
 
   const runId = extractRunId(auth);
   if (!runId) {
-    return false;
+    return null;
   }
 
   const taskRun = await db.query.taskRuns.findFirst({
@@ -165,17 +166,36 @@ export async function canTaskRunManageEnvironments(
   });
 
   if (!taskRun) {
-    return false;
+    return null;
   }
 
-  return canPerformEnvironmentManagementAction(
-    resolveEnvironmentManagementMode({
-      payloadKind: taskRun.payloadKind,
-      payload: taskRun.payload,
-      workflow: taskRun.task.workflow,
-    }),
-    action,
-  );
+  return resolveEnvironmentManagementMode({
+    payloadKind: taskRun.payloadKind,
+    payload: taskRun.payload,
+    workflow: taskRun.task.workflow,
+  });
+}
+
+export async function canTaskRunManageEnvironments(
+  auth: McpAuth,
+  action: EnvironmentManagementAction,
+): Promise<boolean> {
+  return auth.authContext.tokenType !== 'run'
+    ? true
+    : canPerformEnvironmentManagementAction(
+        await resolveTaskRunEnvironmentManagementMode(auth),
+        action,
+      );
+}
+
+export async function canTaskRunReadEnvironmentConfig(
+  auth: McpAuth,
+): Promise<boolean> {
+  return auth.authContext.tokenType !== 'run'
+    ? true
+    : canReadEnvironmentConfig(
+        await resolveTaskRunEnvironmentManagementMode(auth),
+      );
 }
 
 /**
@@ -266,7 +286,7 @@ export async function createEnvironment(
   c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,
 ): Promise<Response> {
   const auth = c.get('mcpAuth');
-  const userId = await resolveEnvironmentWriteUserId(auth);
+  const userId = await resolveEnvironmentAdminUserId(auth);
 
   if (!userId || !(await canAdministerEnvironments(userId))) {
     return c.json({ error: ENVIRONMENT_ADMIN_REQUIRED_ERROR }, 403);

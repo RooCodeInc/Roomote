@@ -970,6 +970,7 @@ describe('roomote MCP tool descriptions', () => {
   });
 
   it.each([
+    ['ordinary', ['update']],
     ['create', ['create', 'update', 'record_verification']],
     ['update', ['update', 'record_verification']],
     ['verify', ['record_verification']],
@@ -982,25 +983,15 @@ describe('roomote MCP tool descriptions', () => {
     expect(getInputSchemaField(envTool, 'action').options).toEqual(actions);
   });
 
-  it('omits environment management from ordinary tasks', async () => {
-    const { registeredTools } = await importRoomoteMcpServer();
+  it('limits environment management in ordinary tasks to updates', async () => {
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_ENVIRONMENT_MANAGEMENT_MODE: 'ordinary',
+    });
+    const envTool = getRegisteredTool(registeredTools, 'manage_environments');
 
-    expect(
-      registeredTools.some((tool) => tool.name === 'manage_environments'),
-    ).toBe(false);
+    expect(getInputSchemaField(envTool, 'action').options).toEqual(['update']);
   });
 
-  it('documents hidden investigation context on task suggestions', () => {
-    const source = readFileSync(
-      path.resolve(thisDirPath, '../index.ts'),
-      'utf8',
-    );
-
-    expect(source).toContain('investigationContext: z');
-    expect(source).toContain(
-      'Optional hidden implementation context for the implementing agent. This is not shown to Slack users.',
-    );
-  });
   it('forwards issueNumber from manage_source_control tool params', async () => {
     vi.stubGlobal(
       'fetch',

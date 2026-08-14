@@ -9,6 +9,7 @@ import {
 
 describe('environment management capabilities', () => {
   it.each([
+    ['ordinary', ['update']],
     ['create', ['create', 'update', 'record_verification']],
     ['update', ['update', 'record_verification']],
     ['verify', ['record_verification']],
@@ -26,6 +27,16 @@ describe('environment management capabilities', () => {
     ).toBe('update');
   });
 
+  it('limits ordinary tasks to updating existing environments', () => {
+    expect(
+      resolveEnvironmentManagementMode({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: {},
+        workflow: 'standard',
+      }),
+    ).toBe('ordinary');
+  });
+
   it('builds the restricted worker runtime environment', () => {
     expect(
       buildEnvironmentManagementRuntimeEnv({
@@ -35,7 +46,7 @@ describe('environment management capabilities', () => {
     ).toEqual({ ROOMOTE_ENVIRONMENT_MANAGEMENT_MODE: 'create' });
   });
 
-  it('removes an untrusted environment-management override', () => {
+  it('replaces an untrusted environment-management override', () => {
     expect(
       applyEnvironmentManagementRuntimeEnv(
         {
@@ -48,7 +59,10 @@ describe('environment management capabilities', () => {
           workflow: 'standard',
         },
       ),
-    ).toEqual({ PATH: '/usr/bin' });
+    ).toEqual({
+      PATH: '/usr/bin',
+      ROOMOTE_ENVIRONMENT_MANAGEMENT_MODE: 'ordinary',
+    });
   });
 
   it.each([
@@ -69,24 +83,24 @@ describe('environment management capabilities', () => {
     },
   );
 
-  it('omits environment management from ordinary tasks', () => {
+  it('gives ordinary tasks only their baseline capability', () => {
     expect(
       resolveEnvironmentManagementMode({
         payloadKind: TaskPayloadKind.StandardTask,
         payload: { environmentId: 'env-1' },
         workflow: 'standard',
       }),
-    ).toBeNull();
+    ).toBe('ordinary');
   });
 
-  it('does not infer update capability from markers on ordinary tasks', () => {
+  it('does not elevate ordinary tasks from legacy environment markers', () => {
     expect(
       resolveEnvironmentManagementMode({
         payloadKind: TaskPayloadKind.StandardTask,
         payload: { environmentDefinitionId: 'env-1' },
         workflow: 'standard',
       }),
-    ).toBeNull();
+    ).toBe('ordinary');
   });
 
   it('does not implicitly inherit setup capability on snapshot resume', () => {

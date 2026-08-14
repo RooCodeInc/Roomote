@@ -1,6 +1,7 @@
 import { getEnvironmentDefinitionIdFromPayload } from './environment-definition-tasks';
 
 export const environmentManagementModes = [
+  'ordinary',
   'create',
   'update',
   'verify',
@@ -15,6 +16,9 @@ export type EnvironmentManagementAction =
   | 'record_verification';
 
 export const environmentManagementActions = {
+  // Admin-driven ordinary tasks may repair an existing environment (for
+  // example after Doctor delegates an authorized environment repair).
+  ordinary: ['update'],
   // Creation tasks may need to revise the new definition after their spawned
   // verification task reports a fixable setup problem.
   create: ['create', 'update', 'record_verification'],
@@ -71,7 +75,7 @@ export function resolveEnvironmentManagementMode(input: {
     return 'create';
   }
 
-  return null;
+  return 'ordinary';
 }
 
 export function canPerformEnvironmentManagementAction(
@@ -83,4 +87,10 @@ export function canPerformEnvironmentManagementAction(
         (allowedAction) => allowedAction === action,
       )
     : false;
+}
+
+export function canReadEnvironmentConfig(
+  mode: EnvironmentManagementMode | null,
+): boolean {
+  return mode === 'ordinary' || mode === 'create' || mode === 'update';
 }
