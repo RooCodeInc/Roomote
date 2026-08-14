@@ -267,6 +267,13 @@
       "when": 1786706349543,
       "tag": "0037_youthful_fixer",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1786749259042,
+      "tag": "0038_breezy_power_man",
+      "breakpoints": true
     }
   ]
 }

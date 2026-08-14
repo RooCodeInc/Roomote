@@ -3,6 +3,7 @@ import {
   db,
   desc,
   eq,
+  findProtectedTaskWaitSnapshotHandles,
   inArray,
   isNotNull,
   or,
@@ -153,7 +154,7 @@ async function getInUseHandles(
 }
 
 async function getProtectedHandles(provider: StandbyProvider) {
-  const rows = await db
+  const activeResumeRows = await db
     .select({ handle: taskRuns.sourceSnapshotId })
     .from(taskRuns)
     .where(
@@ -164,8 +165,14 @@ async function getProtectedHandles(provider: StandbyProvider) {
       ),
     );
 
+  const pendingWaitHandles = await findProtectedTaskWaitSnapshotHandles({
+    provider,
+  });
+
   return new Set(
-    rows.flatMap(({ handle }) => (handle === null ? [] : [handle])),
+    activeResumeRows
+      .flatMap(({ handle }) => (handle === null ? [] : [handle]))
+      .concat(pendingWaitHandles),
   );
 }
 

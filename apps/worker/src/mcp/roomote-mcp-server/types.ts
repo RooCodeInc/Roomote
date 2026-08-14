@@ -33,6 +33,10 @@ export type TaskGoalMutationResponse =
   | { updated: true; goal: TaskGoalWire }
   | { updated: false; reason: string; goal: TaskGoalWire | null };
 
+export type TaskWaitResponse =
+  | { scheduled: true; waitUntil: string }
+  | { scheduled: false; reason: string; waitUntil: string | null };
+
 export interface TaskSearchResult {
   id: string;
   title: string | null;

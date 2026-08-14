@@ -255,9 +255,8 @@ function isCloseoutBookkeepingTool(input) {
   const toolName =
     input && typeof input.tool_name === 'string' ? input.tool_name : '';
 
-  // Todo bookkeeping (OpenCode's todowrite/todoread, legacy update_plan) does
-  // not add user-visible outcome, so it must not stale a terminal reply and
-  // force a redundant follow-up closeout.
+  // Todo bookkeeping does not add user-visible outcome, so it must not stale a
+  // terminal reply and force a redundant follow-up closeout.
   return (
     toolName.endsWith('update_plan') ||
     toolName.includes('/update_plan') ||

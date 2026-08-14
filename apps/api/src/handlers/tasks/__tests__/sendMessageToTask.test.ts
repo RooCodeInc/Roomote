@@ -13,6 +13,7 @@ const {
   mockRestoreActingUserIdAfterFailedDelivery,
   mockUpdateActingUserIdIfNeeded,
   mockUserFindFirst,
+  mockReleaseTaskWaitResume,
 } = vi.hoisted(() => ({
   mockCreateRunToken: vi.fn(),
   mockCreateTRPCProxyClient: vi.fn(),
@@ -28,6 +29,7 @@ const {
   mockRestoreActingUserIdAfterFailedDelivery: vi.fn(),
   mockUpdateActingUserIdIfNeeded: vi.fn(),
   mockUserFindFirst: vi.fn(),
+  mockReleaseTaskWaitResume: vi.fn(),
 }));
 
 vi.mock('../acting-user-sync', () => ({
@@ -53,7 +55,8 @@ vi.mock('@trpc/client', () => ({
   },
 }));
 
-vi.mock('@roomote/cloud-agents/server', () => ({
+vi.mock('@roomote/cloud-agents/server', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/cloud-agents/server')>()),
   enqueueTask: mockEnqueueTask,
 }));
 
@@ -114,10 +117,12 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
         })),
       })),
     },
+    releaseTaskWaitResume: mockReleaseTaskWaitResume,
   };
 });
 
 import { EXPIRED_SNAPSHOT_RESUME_ERROR } from '@roomote/types';
+import { TaskRunQueueEnqueueError } from '@roomote/cloud-agents/server';
 
 import { sendMessageToTask, steerMessageToTask } from '../sendMessageToTask';
 
@@ -137,6 +142,9 @@ function createActiveRun(
     linearSessionId: string | null;
     linearIssueId: string | null;
     linearOrganizationId: string | null;
+    waitUntil: Date | null;
+    waitResumedAt: Date | null;
+    waitResumeRunId: number | null;
   }> = {},
 ) {
   return {
@@ -157,6 +165,9 @@ function createActiveRun(
     linearSessionId: null,
     linearIssueId: null,
     linearOrganizationId: null,
+    waitUntil: null,
+    waitResumedAt: null,
+    waitResumeRunId: null,
     ...overrides,
   };
 }
@@ -552,6 +563,79 @@ describe('sendMessageToTask', () => {
       }),
       expect.any(Object),
     );
+  });
+
+  it('atomically consumes a pending timed wait when a user resumes manually', async () => {
+    const waitUntil = new Date('2026-08-13T16:00:00.000Z');
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        status: 'completed',
+        sandboxServerUrl: null,
+        snapshotId: 'snap-waiting',
+        waitUntil,
+        payload: { repo: 'acme/app' },
+      }),
+    );
+    const returning = vi.fn().mockResolvedValue([{ id: 42 }]);
+    const set = vi.fn(() => ({
+      where: vi.fn(() => ({ returning })),
+    }));
+    const tx = {
+      execute: vi.fn(),
+      update: vi.fn(() => ({ set })),
+    };
+    mockEnqueueTask.mockImplementationOnce(async (_input, options) => {
+      await options.afterCreateInTransaction(tx, { id: 77 });
+      return { id: 77, taskId: 'task-1' };
+    });
+
+    await expect(
+      sendMessageToTask({
+        taskId: 'task-1',
+        userId: 'user-1',
+        message: 'Resume before the timer fires.',
+      }),
+    ).resolves.toMatchObject({ success: true });
+
+    expect(set).toHaveBeenCalledWith({
+      waitResumedAt: expect.any(Date),
+      waitResumeRunId: 77,
+    });
+    expect(returning).toHaveBeenCalledOnce();
+  });
+
+  it('reopens a pending wait when the manual resume child cannot be queued', async () => {
+    const waitUntil = new Date('2026-08-13T16:00:00.000Z');
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        status: 'completed',
+        sandboxServerUrl: null,
+        snapshotId: 'snap-waiting',
+        waitUntil,
+        payload: { repo: 'acme/app' },
+      }),
+    );
+    mockEnqueueTask.mockRejectedValueOnce(
+      new TaskRunQueueEnqueueError({
+        runId: 77,
+        taskId: 'task-1',
+        originalError: new Error('redis unavailable'),
+      }),
+    );
+
+    await expect(
+      sendMessageToTask({
+        taskId: 'task-1',
+        userId: 'user-1',
+        message: 'Resume before the timer fires.',
+      }),
+    ).resolves.toMatchObject({ success: false, status: 500 });
+
+    expect(mockReleaseTaskWaitResume).toHaveBeenCalledWith({
+      runId: 42,
+      waitUntil,
+      resumeRunId: 77,
+    });
   });
 
   it('returns a clear error when a sleeping task snapshot has expired', async () => {

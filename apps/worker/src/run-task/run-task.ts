@@ -20,7 +20,7 @@ import {
   SANDBOX_SERVER_PORT,
   SANDBOX_TIMEOUT_MS,
 } from '@roomote/types';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { validateToken } from '@roomote/auth/client';
@@ -361,6 +361,13 @@ function shouldRequireInitialAckOnInitialTurn(taskRun: {
   payloadKind: string;
   payload: unknown;
 }): boolean {
+  if (
+    taskRun.payload &&
+    typeof taskRun.payload === 'object' &&
+    (taskRun.payload as { taskWaitWake?: unknown }).taskWaitWake === true
+  ) {
+    return false;
+  }
   // Channel-only automation launches deliberately skip opening
   // acknowledgements.
   if (isSilentChannelAutomationLaunch(taskRun)) {
@@ -976,6 +983,19 @@ export const runTask = async ({
       slackReplyContext,
       communicationReplyContext,
     });
+    mcpTaskEnv.ROOMOTE_TASK_WAIT_STATE_FILE = [
+      runtimeEnv.HOME ?? '/tmp',
+      '.config',
+      'opencode',
+      `roomote-task-wait-${taskRun.id}.json`,
+    ].join('/');
+    if (mcpTaskEnv.ROOMOTE_TASK_WAIT_STATE_FILE) {
+      runtimeEnv.ROOMOTE_TASK_WAIT_STATE_FILE =
+        mcpTaskEnv.ROOMOTE_TASK_WAIT_STATE_FILE;
+      mkdirSync(dirname(mcpTaskEnv.ROOMOTE_TASK_WAIT_STATE_FILE), {
+        recursive: true,
+      });
+    }
     if (mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE) {
       runtimeEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE =
         mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE;
@@ -1327,6 +1347,12 @@ export const runTask = async ({
         },
         onBeforeTaskCompletion: async (completionId: string) => {
           if (taskCancellation.signal.aborted) {
+            return 'finalize' as const;
+          }
+          if (
+            mcpTaskEnv.ROOMOTE_TASK_WAIT_STATE_FILE &&
+            existsSync(mcpTaskEnv.ROOMOTE_TASK_WAIT_STATE_FILE)
+          ) {
             return 'finalize' as const;
           }
 

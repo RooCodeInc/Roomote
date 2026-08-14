@@ -385,6 +385,18 @@ export async function claimTaskGoalContinuationForRun(input: {
   if (!task) {
     return { updated: false, reason: 'missing', goal: null };
   }
+  const pendingWait = await db.query.taskRuns.findFirst({
+    where: and(
+      eq(taskRuns.id, runId),
+      isNotNull(taskRuns.waitUntil),
+      isNull(taskRuns.waitResumedAt),
+      isNull(taskRuns.waitResumeRunId),
+    ),
+    columns: { id: true },
+  });
+  if (pendingWait) {
+    return { updated: false, reason: 'not_active', goal: toTaskGoal(task) };
+  }
   if (hasPendingGoalActivation(task)) {
     const activationId = task.goalLastContinuationId!;
     task = await waitForGoalActivation(runId, activationId);

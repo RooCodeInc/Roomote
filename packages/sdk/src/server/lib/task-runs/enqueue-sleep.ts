@@ -78,3 +78,19 @@ export async function enqueueTaskSleep(
   );
   return true;
 }
+
+/** Queue a resumable sleep without waiting for provider suspension to finish. */
+export async function scheduleTaskSleep(
+  request: TaskSleepRequest,
+  delayMs = 30_000,
+): Promise<void> {
+  const queue = getTaskSleepQueue();
+  const jobId = `task-sleep-${request.runId}`;
+  const existingJob = await queue.getJob(jobId);
+
+  if (existingJob && BLOCKING_JOB_STATES.has(await existingJob.getState())) {
+    return;
+  }
+  await existingJob?.remove();
+  await queue.add('sleep-task', request, { jobId, delay: delayMs });
+}

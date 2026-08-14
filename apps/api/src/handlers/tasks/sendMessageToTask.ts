@@ -1,5 +1,8 @@
 import { TRPCClientError } from '@trpc/client';
-import { enqueueTask } from '@roomote/cloud-agents/server';
+import {
+  enqueueTask,
+  TaskRunQueueEnqueueError,
+} from '@roomote/cloud-agents/server';
 import { withSandboxServerRpcClient } from '@roomote/sdk/server';
 import {
   and,
@@ -7,6 +10,9 @@ import {
   eq,
   findReusableGitHubPrFollowUpOwner,
   getTaskGoalForRun,
+  isNull,
+  releaseTaskWaitResume,
+  sql,
   taskPullRequests,
   taskRuns,
   users,
@@ -121,6 +127,9 @@ type LatestTaskRun = {
   payload: Record<string, unknown> | null;
   port: number | null;
   result: unknown;
+  waitUntil: Date | null;
+  waitResumedAt: Date | null;
+  waitResumeRunId: number | null;
 };
 
 type TaskChannelBindingsRow = {
@@ -553,18 +562,64 @@ async function resumeTaskFromSnapshot({
 
   // Resumes never create tasks and never re-attribute; the follow-up sender
   // becomes the new run's acting user.
-  const resumeLaunch = await enqueueTask(
-    {
-      task: {
-        type: TaskPayloadKind.SnapshotResume,
-        sourceSnapshotId: sourceRun.snapshotId,
-        sourceRunId: sourceRun.id,
-        payload,
+  const pendingWaitUntil =
+    sourceRun.waitUntil &&
+    !sourceRun.waitResumedAt &&
+    !sourceRun.waitResumeRunId
+      ? sourceRun.waitUntil
+      : null;
+  let resumeLaunch;
+  try {
+    resumeLaunch = await enqueueTask(
+      {
+        task: {
+          type: TaskPayloadKind.SnapshotResume,
+          sourceSnapshotId: sourceRun.snapshotId,
+          sourceRunId: sourceRun.id,
+          payload,
+        },
+        actingUserId: userId,
       },
-      actingUserId: userId,
-    },
-    {},
-  );
+      pendingWaitUntil
+        ? {
+            afterCreateInTransaction: async (tx, resumeRun) => {
+              await tx.execute(
+                sql`SELECT id FROM task_runs WHERE id = ${sourceRun.id} FOR UPDATE`,
+              );
+              const [claimed] = await tx
+                .update(taskRuns)
+                .set({
+                  waitResumedAt: new Date(),
+                  waitResumeRunId: resumeRun.id,
+                })
+                .where(
+                  and(
+                    eq(taskRuns.id, sourceRun.id),
+                    eq(taskRuns.waitUntil, pendingWaitUntil),
+                    isNull(taskRuns.waitResumedAt),
+                    isNull(taskRuns.waitResumeRunId),
+                  ),
+                )
+                .returning({ id: taskRuns.id });
+              if (!claimed) {
+                throw new Error(
+                  `Task wait for run #${sourceRun.id} was already resumed`,
+                );
+              }
+            },
+          }
+        : {},
+    );
+  } catch (error) {
+    if (pendingWaitUntil && error instanceof TaskRunQueueEnqueueError) {
+      await releaseTaskWaitResume({
+        runId: sourceRun.id,
+        waitUntil: pendingWaitUntil,
+        resumeRunId: error.runId,
+      });
+    }
+    throw error;
+  }
 
   await maybeCreateSlackReplyQuoteContext({
     runId: resumeLaunch.id,
@@ -763,6 +818,9 @@ export async function sendMessageToTask({
       payload: true,
       port: true,
       result: true,
+      waitUntil: true,
+      waitResumedAt: true,
+      waitResumeRunId: true,
     });
 
     if (!run) {
@@ -984,6 +1042,9 @@ export async function steerMessageToTask({
       payload: true,
       port: true,
       result: true,
+      waitUntil: true,
+      waitResumedAt: true,
+      waitResumeRunId: true,
     });
 
     if (!run) {

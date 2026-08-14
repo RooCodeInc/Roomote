@@ -35,6 +35,7 @@ import type {
   SourceControlIssueResponse,
   TaskGoalResponse,
   TaskGoalMutationResponse,
+  TaskWaitResponse,
 } from './types.js';
 
 /**
@@ -151,6 +152,23 @@ export async function updateTaskGoal(
       body: JSON.stringify(params),
     },
     'Failed to update goal',
+  );
+}
+
+export async function waitCurrentTask(
+  config: RoomoteConfig,
+  runId: number,
+  params: { delaySeconds: number; reason: string },
+): Promise<TaskWaitResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/runs/${runId}/wait`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to schedule task wait',
   );
 }
 

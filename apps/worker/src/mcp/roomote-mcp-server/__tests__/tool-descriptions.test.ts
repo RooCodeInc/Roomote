@@ -140,6 +140,19 @@ describe('roomote MCP tool descriptions', () => {
     expect(toolNames).not.toContain('complete_doctor_report');
   });
 
+  it('exposes bounded explicit task waiting', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const waitTool = getRegisteredTool(registeredTools, 'wait_task');
+
+    expect(waitTool.config.description).toContain('user explicitly asks');
+    expect(getInputSchemaField(waitTool, 'delaySeconds').description).toContain(
+      '600-518400',
+    );
+    expect(getInputSchemaField(waitTool, 'reason').description).toContain(
+      'wake',
+    );
+  });
+
   it('documents every built-in custom automation schedule preset', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const automationsTool = getRegisteredTool(

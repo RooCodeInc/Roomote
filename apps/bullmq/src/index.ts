@@ -48,6 +48,7 @@ import { startSlackPrInactivityQueue } from './slack-pr-inactivity-queue';
 import { startPrReviewNotificationQueue } from './pr-review-notification-queue';
 import { startActivePrReviewFollowUpQueue } from './active-pr-review-follow-up-queue';
 import { startTaskSleepQueue } from './task-sleep-queue';
+import { startTaskWakeQueue } from './task-wake-queue';
 import { startAutomationRecommendationsQueue } from './automation-recommendations-queue';
 
 // Resolve auto-generated auth keypairs before any queue worker starts so
@@ -115,6 +116,11 @@ const {
   worker: taskSleepWorker,
   queueEvents: taskSleepQueueEvents,
 } = startTaskSleepQueue();
+const {
+  queue: taskWakeQueue,
+  worker: taskWakeWorker,
+  queueEvents: taskWakeQueueEvents,
+} = startTaskWakeQueue();
 const {
   recommendationQueue: automationRecommendationsQueue,
   recommendationWorker: automationRecommendationsWorker,
@@ -191,6 +197,7 @@ createBullBoard({
     new BullMQAdapter(snapshotQueue, { readOnlyMode: false }),
     new BullMQAdapter(dockerValidationQueue, { readOnlyMode: false }),
     new BullMQAdapter(taskSleepQueue, { readOnlyMode: false }),
+    new BullMQAdapter(taskWakeQueue, { readOnlyMode: false }),
     new BullMQAdapter(automationRecommendationsQueue, {
       readOnlyMode: false,
     }),
@@ -355,6 +362,9 @@ async function gracefulShutdown() {
     await taskSleepWorker.close();
     await taskSleepQueueEvents.close();
     await taskSleepQueue.close();
+    await taskWakeWorker.close();
+    await taskWakeQueueEvents.close();
+    await taskWakeQueue.close();
     await automationRecommendationsWorker.close();
     await automationRecommendationsQueueEvents.close();
     await automationRecommendationsQueue.close();

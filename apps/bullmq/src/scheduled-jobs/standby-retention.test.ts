@@ -44,6 +44,17 @@ describe('selectStandbyEvictions', () => {
       ).map(({ handle }) => handle),
     ).toEqual(['h1', 'h2']);
   });
+
+  it('keeps pending-wait standbys under age and count pressure', () => {
+    expect(
+      selectStandbyEvictions(
+        [candidate('h1', 1), candidate('h2', 48)],
+        new Set(['h2']),
+        { maxCount: 1, maxAgeMs: 24 * 60 * 60 * 1_000 },
+        now,
+      ).map(({ handle }) => handle),
+    ).toEqual([]);
+  });
 });
 
 describe('resolveStandbyRetentionPolicy', () => {

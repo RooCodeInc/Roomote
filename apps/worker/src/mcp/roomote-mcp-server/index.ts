@@ -14,6 +14,8 @@ import {
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
   PRODUCT_NAME,
+  MAX_TASK_WAIT_MS,
+  MIN_TASK_WAIT_MS,
   sourceControlProviderSchema,
   taskArtifactTypeSchema,
   workspaceReadinessSchema,
@@ -70,6 +72,7 @@ import { taskSuggestionResultHasSubmittedSuggestions } from './automation-slack-
 import { registerAutomationWorkItemsTool } from './automation-work-items-tool.js';
 import { handleManageCustomAutomations } from './custom-automations.js';
 import { handleManageGoal } from './goal.js';
+import { handleWaitTask } from './wait-task.js';
 
 export {
   taskSuggestionResultHasSubmittedSuggestions,
@@ -683,6 +686,38 @@ roomoteMcpServer.registerTool(
     },
   },
   async (params): Promise<ToolResult> => handleManageGoal(params),
+);
+
+roomoteMcpServer.registerTool(
+  'wait_task',
+  {
+    title: 'Wait Task',
+    description:
+      'Put the current task to sleep and wake it later to continue the requested work. Use only when the user explicitly asks this task to wait. On chat-started tasks, call this first; after it succeeds, post one closeout explaining that work is paused and when it will resume, then end the turn. The active goal remains active across the wait.',
+    inputSchema: {
+      delaySeconds: z
+        .number()
+        .int()
+        .min(MIN_TASK_WAIT_MS / 1_000)
+        .max(MAX_TASK_WAIT_MS / 1_000)
+        .describe(
+          `Wait duration in seconds (${MIN_TASK_WAIT_MS / 1_000}-${MAX_TASK_WAIT_MS / 1_000}).`,
+        ),
+      reason: z
+        .string()
+        .trim()
+        .min(1)
+        .max(2_000)
+        .describe('Concrete work to perform when the task wakes up.'),
+    },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  async (params): Promise<ToolResult> => handleWaitTask(params),
 );
 
 roomoteMcpServer.registerTool(

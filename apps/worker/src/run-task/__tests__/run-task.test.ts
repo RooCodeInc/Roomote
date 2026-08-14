@@ -1862,6 +1862,15 @@ describe('runTask', () => {
   });
 
   it('queues a deferred resume prompt from SnapshotResume payloads', async () => {
+    taskRunsGetGoalMock.mockResolvedValueOnce({
+      objective: 'Verify the deployment after waiting',
+      generation: 'goal-generation:after-wait',
+      status: 'active',
+      maxContinuations: 5,
+      continuationsUsed: 1,
+      blockedReason: null,
+      completedAt: null,
+    });
     taskRunsSyncActingUserIdMock.mockImplementation(
       async ({ newUserId }: { newUserId: string }) => ({
         result: 'updated',
@@ -1904,6 +1913,25 @@ describe('runTask', () => {
           resumePromptImages: ['data:image/png;base64,abc'],
         },
         result: null,
+      } as never,
+      task: {
+        id: 'task-303',
+        title: 'Waited goal task',
+        prompt: null,
+        harnessInstructions: null,
+        requestedWorkKind: 'implement',
+        slackChannelId: 'C123',
+        slackThreadTs: '111.222',
+        linearSessionId: null,
+        goal: {
+          objective: 'Verify the deployment after waiting',
+          generation: 'goal-generation:after-wait',
+          status: 'active',
+          maxContinuations: 5,
+          continuationsUsed: 1,
+          blockedReason: null,
+          completedAt: null,
+        },
       } as never,
       envVars: {},
       workspacePath: '/tmp/workspace',
@@ -1981,6 +2009,15 @@ describe('runTask', () => {
       source: 'web',
       clientMessageId: 'client-303',
       userId: 'user-2',
+      goalContext: {
+        objective: 'Verify the deployment after waiting',
+        generation: 'goal-generation:after-wait',
+        status: 'active',
+        maxContinuations: 5,
+        continuationsUsed: 1,
+        blockedReason: null,
+        completedAt: null,
+      },
     });
     expect(recordSandboxPromptSlackTurnStartMock).toHaveBeenCalledWith({
       clientMessageId: 'client-303',
