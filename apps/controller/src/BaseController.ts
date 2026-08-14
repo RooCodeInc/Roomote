@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 import {
   type ComputeProvider,
   RunStatus,
-  TaskPayloadKind,
   TaskRunErrorCode,
   type TaskRunErrorCode as TaskRunErrorCodeValue,
   resolveComputeProviderTarget,
@@ -20,12 +19,10 @@ import {
   type TaskRun,
   db,
   taskRuns,
-  buildPendingEnvironmentSnapshotMatchForTaskRun,
   readManagedDeploymentAccess,
   recordTaskRunLifecycleEvent,
   resolveDefaultComputeProvider,
   syncTaskStateFromRuns,
-  updatePendingEnvironmentSnapshot,
   eq,
   and,
   asc,
@@ -914,37 +911,13 @@ export abstract class BaseController {
     errorCode?: TaskRunErrorCodeValue,
   ): Promise<void> {
     // Use the centralized termination path so all side-effects (email, Slack,
-    // Linear notifications, lock release, etc.) are applied consistently.
+    // Linear notifications, lock release, snapshot pending→failed, etc.) are
+    // applied consistently.
     await finishRun({
       id: taskRun.id,
       status: RunStatus.Failed,
       error: errorMessage,
       ...(errorCode ? { errorCode } : {}),
     });
-
-    // Snapshot-specific: only fail snapshots that are currently pending.
-    // Scheduled refreshes keep the last ready snapshot in place while the
-    // replacement is being created, so spawn failures must not overwrite it.
-    if (taskRun.payloadKind === TaskPayloadKind.SnapshotEnvironment) {
-      const environmentId = taskRun.payload.environmentId;
-
-      if (environmentId) {
-        const provider = resolveComputeProviderTarget(
-          taskRun.vendor,
-          await resolveDefaultComputeProvider(),
-        );
-        const pendingSnapshotMatch =
-          buildPendingEnvironmentSnapshotMatchForTaskRun(taskRun);
-        await updatePendingEnvironmentSnapshot(db, {
-          environmentId,
-          provider,
-          snapshotId: null,
-          snapshotStatus: 'failed',
-          snapshotCreatedAt: null,
-          snapshotExpiresAt: null,
-          ...pendingSnapshotMatch,
-        });
-      }
-    }
   }
 }

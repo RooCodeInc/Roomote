@@ -280,7 +280,7 @@ describe('BaseController.handleSpawnTaskRunError', () => {
     });
   });
 
-  it('marks pending snapshots as failed when job is SnapshotEnvironment', async () => {
+  it('routes SnapshotEnvironment spawn failures through finishRun, which owns the snapshot pending→failed flip', async () => {
     const attachmentSource = {
       source: 'pending_snapshot_row' as const,
       environmentSnapshotId: '80e3ceee-7d21-491a-96d8-7b0c72b90b4e',
@@ -308,19 +308,9 @@ describe('BaseController.handleSpawnTaskRunError', () => {
       error: 'Snapshot failed',
     });
 
-    expect(mockUpdatePendingEnvironmentSnapshot).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        environmentId: 'env-123',
-        provider: 'modal',
-        snapshotId: null,
-        snapshotStatus: 'failed',
-        snapshotCreatedAt: null,
-        snapshotExpiresAt: null,
-        attachmentSource,
-        maxPendingUpdatedAt: null,
-      }),
-    );
+    // The environment_snapshots pending→failed transition lives inside
+    // finishRun (covered by finish-run.test.ts), not in the controller.
+    expect(mockUpdatePendingEnvironmentSnapshot).not.toHaveBeenCalled();
   });
 
   it('re-throws a sanitized error after calling finishRun (no token-bearing cause)', async () => {
