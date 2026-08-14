@@ -243,7 +243,7 @@ export function createSlackMessageInterval({
             wrapSlackMessage(stripLeadingSlackProductMention(msg.text), {
               ts: msg.ts,
             });
-          const sent = sendPrompt({
+          const sent = await sendPrompt({
             prompt,
             images: msg.images,
             autoSteerWhenQueued: true,

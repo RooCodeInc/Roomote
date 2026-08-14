@@ -1,5 +1,6 @@
 import { TRPCError } from '@trpc/server';
 import { z } from 'zod';
+import { TASK_GOAL_STATUSES } from '@roomote/types';
 import { isActiveTaskPhase } from '../lib/harness-manager';
 import { publicProcedure } from '../trpc';
 import { getFollowUpWorkflowPhase } from '../../run-task/workflow-phase';
@@ -21,6 +22,17 @@ export const steerTask = publicProcedure
         quoteText: z.string(),
         images: z.array(z.string()).optional(),
         userName: z.string().optional(),
+        goalContext: z
+          .object({
+            objective: z.string().max(10_000),
+            generation: z.string().max(200).nullable(),
+            status: z.enum(TASK_GOAL_STATUSES),
+            maxContinuations: z.number().int().min(1).max(20),
+            continuationsUsed: z.number().int().min(0),
+            blockedReason: z.string().nullable(),
+            completedAt: z.date().nullable(),
+          })
+          .optional(),
       })
       .refine(
         (data) =>
@@ -83,6 +95,7 @@ export const steerTask = publicProcedure
           ...(workflowPhase ? { workflowPhase } : {}),
           autoSteerWhenQueued: true,
           userId,
+          goalContext: input.goalContext,
         });
 
         if (!success) {
@@ -139,6 +152,7 @@ export const steerTask = publicProcedure
           images: input.images,
           ...(workflowPhase ? { workflowPhase } : {}),
           userId,
+          goalContext: input.goalContext,
         });
 
         if (!success) {
@@ -209,6 +223,7 @@ export const steerTask = publicProcedure
         images: input.images,
         ...(workflowPhase ? { workflowPhase } : {}),
         userId,
+        goalContext: input.goalContext,
       });
 
       if (!success) {

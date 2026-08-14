@@ -96,6 +96,11 @@ export const stopPolling = async (state: RunTaskState) => {
     state.linearMessageInterval = undefined;
   }
 
+  if (state.linearMessageCleanup) {
+    await state.linearMessageCleanup();
+    state.linearMessageCleanup = undefined;
+  }
+
   if (state.githubTokenRefreshInterval) {
     clearInterval(state.githubTokenRefreshInterval);
     state.githubTokenRefreshInterval = undefined;

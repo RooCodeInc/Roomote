@@ -5,6 +5,7 @@ import {
   claimTaskGoalContinuationForRun,
   db,
   eq,
+  getTaskGoalForRun,
   isNotNull,
   releaseTaskGoalContinuationForRun,
   slackInstallations,
@@ -376,6 +377,9 @@ export const taskRunsRouter = router({
       state,
       completedAt: completedAt ?? undefined,
     }),
+  ),
+  getGoal: runTokenOnlyScoped(z.object({ runId: z.number() }), 'runId').query(
+    ({ input }) => getTaskGoalForRun(input.runId),
   ),
   claimGoalContinuation: runTokenOnlyScoped(
     z.object({ runId: z.number(), continuationId: z.string().min(1).max(200) }),

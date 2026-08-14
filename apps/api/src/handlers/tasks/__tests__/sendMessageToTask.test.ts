@@ -3,6 +3,7 @@ const {
   mockCreateTRPCProxyClient,
   mockEnqueueTask,
   mockGetTaskChannelBindings,
+  mockGetTaskGoalForRun,
   mockFindLatestTaskRun,
   mockHttpBatchLink,
   mockSendPromptMutate,
@@ -18,6 +19,7 @@ const {
   mockCreateTRPCProxyClient: vi.fn(),
   mockEnqueueTask: vi.fn(),
   mockGetTaskChannelBindings: vi.fn(),
+  mockGetTaskGoalForRun: vi.fn(),
   mockFindLatestTaskRun: vi.fn(),
   mockHttpBatchLink: vi.fn((options) => options),
   mockSendPromptMutate: vi.fn(),
@@ -99,6 +101,7 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
 
   return {
     ...actual,
+    getTaskGoalForRun: mockGetTaskGoalForRun,
     db: {
       query: {
         users: {
@@ -194,6 +197,7 @@ describe('sendMessageToTask', () => {
       linearIssueId: null,
       linearOrganizationId: null,
     });
+    mockGetTaskGoalForRun.mockResolvedValue(null);
     mockTrackLatestUserMessageForSlackQuote.mockResolvedValue(undefined);
     mockTrackLatestUserMessageForReplyQuote.mockResolvedValue(undefined);
     mockRestoreActingUserIdAfterFailedDelivery.mockResolvedValue(undefined);
@@ -236,6 +240,66 @@ describe('sendMessageToTask', () => {
       quoteText: 'Continue as the new sender.',
       autoSteerWhenQueued: true,
     });
+  });
+
+  it('includes the current active goal when delivering a follow-up', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
+    mockGetTaskGoalForRun.mockResolvedValue({
+      objective: 'Complete the release',
+      generation: 'goal-generation:current',
+      status: 'active',
+      maxContinuations: 5,
+      continuationsUsed: 1,
+      blockedReason: null,
+      completedAt: null,
+    });
+
+    await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Continue from GitHub.',
+    });
+
+    expect(mockGetTaskGoalForRun).toHaveBeenCalledWith(42);
+    expect(mockSendPromptMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'Continue from GitHub.',
+        goalContext: expect.objectContaining({
+          objective: 'Complete the release',
+          generation: 'goal-generation:current',
+          status: 'active',
+        }),
+      }),
+    );
+  });
+
+  it('includes the current active goal when steering a follow-up', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
+    mockGetTaskGoalForRun.mockResolvedValue({
+      objective: 'Complete the release',
+      generation: 'goal-generation:steer',
+      status: 'active',
+      maxContinuations: 5,
+      continuationsUsed: 1,
+      blockedReason: null,
+      completedAt: null,
+    });
+
+    await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Steer from GitHub.',
+    });
+
+    expect(mockSteerTaskMutate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: 'Steer from GitHub.',
+        goalContext: expect.objectContaining({
+          generation: 'goal-generation:steer',
+          status: 'active',
+        }),
+      }),
+    );
   });
 
   it('does not deliver the prompt when the pre-delivery acting-user write fails', async () => {

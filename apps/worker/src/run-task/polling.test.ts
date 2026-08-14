@@ -71,7 +71,7 @@ function createListenerOptions(
     logger: createLogger(),
     workingDirectory: '/tmp/workspace',
     cancelTask: vi.fn(),
-    sendPrompt: vi.fn<ListenerOptions['sendPrompt']>(() => true),
+    sendPrompt: vi.fn<ListenerOptions['sendPrompt']>(async () => true),
     answerUserInputRequest: vi.fn<ListenerOptions['answerUserInputRequest']>(
       () => true,
     ),
