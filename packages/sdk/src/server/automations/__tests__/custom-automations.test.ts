@@ -247,7 +247,7 @@ describe('customAutomationsJob', () => {
     expect(enqueued.task.payload.harnessModelOverrides).toBeUndefined();
   });
 
-  it('anchors the prompt to the configured report channel', async () => {
+  it('makes the configured channel available for interruption-worthy reports', async () => {
     await customAutomationsJob();
 
     const enqueued = vi.mocked(enqueueTask).mock.calls[0]?.[0] as {
@@ -259,6 +259,15 @@ describe('customAutomationsJob', () => {
     expect(enqueued.task.payload.description).toContain('send_chat_reply');
     expect(enqueued.task.payload.description).toContain(
       'do not post progress updates',
+    );
+    expect(enqueued.task.payload.description).toContain(
+      'Default to finishing silently',
+    );
+    expect(enqueued.task.payload.description).toContain(
+      'a concrete actionable or important finding',
+    );
+    expect(enqueued.task.payload.description).toContain(
+      'Routine success, healthy status, no-change results',
     );
     expect(enqueued.task.payload.description).toContain(
       'do not mention this automation',

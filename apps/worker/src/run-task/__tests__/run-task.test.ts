@@ -1154,7 +1154,7 @@ describe('runTask', () => {
     );
   });
 
-  it('marks late-bound automation execution tasks as requiring a terminal closeout', async () => {
+  it('lets late-bound automation execution tasks finish without a terminal closeout', async () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(345_678);
 
     try {
@@ -1206,7 +1206,6 @@ describe('runTask', () => {
       JSON.stringify({
         startedAtMs: 345_678,
         currentTurnRequiresInitialAck: false,
-        requiresTerminalCloseoutWithoutTurn: true,
       }),
       'utf8',
     );
@@ -1276,7 +1275,7 @@ describe('runTask', () => {
     );
   });
 
-  it('marks Slack custom automation runs as silent with a required terminal closeout', async () => {
+  it('lets silent Slack custom automation runs finish without a terminal closeout', async () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(456_789);
 
     try {
@@ -1329,13 +1328,12 @@ describe('runTask', () => {
       JSON.stringify({
         startedAtMs: 456_789,
         currentTurnRequiresInitialAck: false,
-        requiresTerminalCloseoutWithoutTurn: true,
       }),
       'utf8',
     );
   });
 
-  it('marks non-Slack custom automation runs as silent with a required terminal closeout', async () => {
+  it('lets silent non-Slack custom automation runs finish without a terminal closeout', async () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(567_891);
 
     try {
@@ -1388,7 +1386,6 @@ describe('runTask', () => {
       JSON.stringify({
         startedAtMs: 567_891,
         currentTurnRequiresInitialAck: false,
-        requiresTerminalCloseoutWithoutTurn: true,
       }),
       'utf8',
     );
