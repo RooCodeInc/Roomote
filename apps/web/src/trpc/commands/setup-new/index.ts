@@ -117,6 +117,7 @@ import {
   scoreAutomationRecommendations,
   type AutomationRecommendationBatch,
   type MergedAutomationRecommendationSignals,
+  ALL_REPOSITORIES,
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
@@ -3167,7 +3168,7 @@ export async function setSetupRecommendationEnabledCommand(
         key: candidate.automationKey,
         enabled: input.enabled,
         schedule: {
-          frequency: input.enabled ? candidate.defaultScheduleMode : 'off',
+          mode: input.enabled ? candidate.defaultScheduleMode : 'off',
         },
       });
     }
@@ -3193,7 +3194,7 @@ export async function setSetupRecommendationEnabledCommand(
               prompt: candidate.template.prompt,
               enabled: input.enabled,
               scheduleMode: candidate.template.scheduleMode,
-              environmentId: 'all_repositories',
+              environmentId: ALL_REPOSITORIES,
               target: {},
             },
             tx,
@@ -3204,7 +3205,7 @@ export async function setSetupRecommendationEnabledCommand(
               prompt: candidate.template.prompt,
               enabled: input.enabled,
               scheduleMode: candidate.template.scheduleMode,
-              environmentId: 'all_repositories',
+              environmentId: ALL_REPOSITORIES,
               target: {},
               createdByUserId: auth.userId,
             },

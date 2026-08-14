@@ -75,13 +75,13 @@ describe('catalog', () => {
   it('maps every curated slug to an existing recipe and matching frontmatter', () => {
     for (const candidate of AUTOMATION_RECOMMENDATION_CATALOG) {
       if (candidate.source !== 'cookbook') continue;
-      const path = resolve(
-        process.cwd(),
-        '../../apps/docs/cookbook',
-        `${candidate.cookbookSlug}.mdx`,
-      );
-      expect(existsSync(path)).toBe(true);
-      const frontmatterTitle = readFileSync(path, 'utf8').match(
+      const recipePath = `apps/docs/cookbook/${candidate.cookbookSlug}.mdx`;
+      const path = [
+        resolve(process.cwd(), '../../', recipePath),
+        resolve(process.cwd(), recipePath),
+      ].find((candidatePath) => existsSync(candidatePath));
+      expect(path).toBeDefined();
+      const frontmatterTitle = readFileSync(path!, 'utf8').match(
         /^title:\s*(.+)$/m,
       )?.[1];
       expect(frontmatterTitle).toBe(candidate.title);
