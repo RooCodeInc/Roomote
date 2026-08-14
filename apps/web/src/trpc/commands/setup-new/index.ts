@@ -2727,7 +2727,7 @@ export async function startSetupNewOnboardingTaskCommand(
         recommendationBatch,
         repositoryIds: recommendationRepositoryIds,
         setupNewState,
-        nextStep: 'automation-recommendations' as const,
+        nextStep: 'invoke' as const,
       };
     }
 
@@ -3026,7 +3026,7 @@ export async function startSetupNewOnboardingTaskCommand(
             recommendationBatch,
             repositoryIds: recommendationRepositoryIds,
             setupNewState,
-            nextStep: 'automation-recommendations' as const,
+            nextStep: 'invoke' as const,
           };
         }
       }
@@ -3087,7 +3087,7 @@ export async function startSetupNewOnboardingTaskCommand(
         recommendationBatch,
         repositoryIds: recommendationRepositoryIds,
         setupNewState,
-        nextStep: 'automation-recommendations' as const,
+        nextStep: 'invoke' as const,
       };
     }
 
@@ -3200,7 +3200,7 @@ export async function startSetupNewOnboardingTaskCommand(
       recommendationBatch,
       repositoryIds: recommendationRepositoryIds,
       setupNewState,
-      nextStep: 'automation-recommendations' as const,
+      nextStep: 'invoke' as const,
     };
   });
 
@@ -3448,7 +3448,9 @@ export async function skipSetupRecommendationsCommand(auth: UserAuthSuccess) {
     );
     const state = await getPersistedSetupNewState(tx);
     const batch = state.automationRecommendations;
-    if (!batch || batch.status !== 'pending') return batch ?? null;
+    if (!batch || (batch.applicationState ?? 'pending') !== 'pending') {
+      return batch ?? null;
+    }
 
     const nextBatch = {
       ...batch,

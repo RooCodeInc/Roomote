@@ -424,6 +424,27 @@ export function SetupSignedInFlow() {
               onBack={canGoBack ? goToPreviousStep : undefined}
             />
           )}
+          {step === 'automation-recommendations' && (
+            <StepAutomationRecommendations
+              onContinue={(automationRecommendations) => {
+                queryClient.setQueryData(
+                  trpc.setupNew.status.queryKey(),
+                  (currentStatus) =>
+                    currentStatus
+                      ? {
+                          ...currentStatus,
+                          setupNewState: {
+                            ...currentStatus.setupNewState,
+                            automationRecommendations,
+                          },
+                        }
+                      : currentStatus,
+                );
+                goToNextStep();
+              }}
+              onBack={canGoBack ? goToPreviousStep : undefined}
+            />
+          )}
           {step === 'compute-provider' && (
             <StepComputeProvider
               computeSetup={status.computeSetup}
@@ -506,14 +527,8 @@ export function SetupSignedInFlow() {
               onBack={canGoBack ? goToPreviousStep : undefined}
               onSkip={() => {
                 setupSession.unlockPostOnboardingFlow();
-                goToStep('automation-recommendations', { revisit: true });
+                goToStep('invoke');
               }}
-            />
-          )}
-          {step === 'automation-recommendations' && (
-            <StepAutomationRecommendations
-              onContinue={() => goToStep('invoke')}
-              onBack={canGoBack ? goToPreviousStep : undefined}
             />
           )}
           {step === 'invoke' && (

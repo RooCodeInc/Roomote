@@ -175,10 +175,12 @@ function mockReadyForRepository({
   onboardingTaskId = null,
   selectedRepositoryIds = [],
   onboardingFailed = false,
+  automationRecommendations,
 }: {
   onboardingTaskId?: string | null;
   selectedRepositoryIds?: string[];
   onboardingFailed?: boolean;
+  automationRecommendations?: null;
 } = {}) {
   setupSessionState.session = {
     ...setupSessionState.session,
@@ -225,6 +227,9 @@ function mockReadyForRepository({
       modelProvider: 'openrouter',
       computeProvider: null,
       sourceControlProvider: 'github',
+      ...(automationRecommendations === null
+        ? { automationRecommendations }
+        : {}),
       selectedRepositoryIds,
       onboardingTaskId,
       onboardingTaskStartedAt: onboardingTaskId
@@ -367,7 +372,7 @@ describe('useSetupFlow', () => {
     expect(result.current.step).toBe('source-control-provider');
   });
 
-  it('shows compute-provider after source control when compute setup is pending', async () => {
+  it('shows automation recommendations before compute setup after source control', async () => {
     mockStatus({
       hasSlack: true,
       authSetup: {
@@ -417,6 +422,7 @@ describe('useSetupFlow', () => {
         modelProvider: 'openrouter',
         computeProvider: null,
         sourceControlProvider: 'github',
+        automationRecommendations: null,
         selectedRepositoryIds: [],
         onboardingTaskId: null,
         onboardingTaskStartedAt: null,
@@ -428,8 +434,30 @@ describe('useSetupFlow', () => {
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('compute-provider');
+      expect(result.current.step).toBe('automation-recommendations');
     });
+
+    act(() => {
+      result.current.goToNextStep();
+    });
+
+    expect(result.current.step).toBe('compute-provider');
+  });
+
+  it('moves from automation recommendations to environment setup when compute is already configured', async () => {
+    mockReadyForRepository({ automationRecommendations: null });
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('automation-recommendations');
+    });
+
+    act(() => {
+      result.current.goToNextStep();
+    });
+
+    expect(result.current.step).toBe('repo-selection');
   });
 
   it('requires a new choice when the saved compute provider is excluded', async () => {

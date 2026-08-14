@@ -53,7 +53,7 @@ const {
       recommendations: [],
     },
     setupNewState: {} as SetupNewState,
-    nextStep: 'automation-recommendations' as const,
+    nextStep: 'invoke' as const,
   }),
   mockCreateGitHubInstallation: vi.fn(),
   mockToastError: vi.fn(),
@@ -370,7 +370,7 @@ describe('StepRepoSelection', () => {
         recommendations: [],
       },
       setupNewState: {} as SetupNewState,
-      nextStep: 'automation-recommendations' as const,
+      nextStep: 'invoke' as const,
     });
     mockUseRepositories.mockImplementation(() => ({
       data: [...mockRepositories],
@@ -999,7 +999,7 @@ describe('StepRepoSelection', () => {
     expect(onContinue).toHaveBeenCalledWith(
       expect.objectContaining({
         taskId: 'task-onboarding-1',
-        nextStep: 'automation-recommendations',
+        nextStep: 'invoke',
         recommendationBatch: expect.objectContaining({
           status: 'pending',
         }),
@@ -1025,7 +1025,7 @@ describe('StepRepoSelection', () => {
         recommendations: [];
       };
       setupNewState: SetupNewState;
-      nextStep: 'automation-recommendations';
+      nextStep: 'invoke';
     }) => void;
     mockSaveSelection.mockImplementationOnce(
       () => new Promise((resolve) => (resolveSave = resolve)),
@@ -1060,7 +1060,7 @@ describe('StepRepoSelection', () => {
         recommendations: [],
       },
       setupNewState: {} as SetupNewState,
-      nextStep: 'automation-recommendations' as const,
+      nextStep: 'invoke' as const,
     });
     await waitFor(() => expect(continueButton).toBeEnabled());
   });
@@ -1085,7 +1085,7 @@ describe('StepRepoSelection', () => {
           recommendations: [],
         },
         setupNewState: {} as SetupNewState,
-        nextStep: 'automation-recommendations' as const,
+        nextStep: 'invoke' as const,
       });
 
     await renderStepRepoSelection({ onContinue });
@@ -1109,7 +1109,7 @@ describe('StepRepoSelection', () => {
       expect(onContinue).toHaveBeenCalledWith(
         expect.objectContaining({
           taskId: 'task-onboarding-retry',
-          nextStep: 'automation-recommendations',
+          nextStep: 'invoke',
         }),
       );
     });

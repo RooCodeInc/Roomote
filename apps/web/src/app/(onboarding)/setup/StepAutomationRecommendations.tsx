@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AUTOMATION_RECOMMENDATION_CATALOG } from '@roomote/types';
+import {
+  AUTOMATION_RECOMMENDATION_CATALOG,
+  type AutomationRecommendationBatch,
+} from '@roomote/types';
 import {
   Alert,
   AlertDescription,
@@ -32,7 +35,7 @@ export function StepAutomationRecommendations({
   onContinue,
   onBack,
 }: {
-  onContinue: () => void;
+  onContinue: (batch: AutomationRecommendationBatch | null) => void;
   onBack?: () => void;
 }) {
   const trpc = useTRPC();
@@ -60,7 +63,7 @@ export function StepAutomationRecommendations({
             appliedBatch,
           );
         }
-        onContinue();
+        onContinue(appliedBatch);
       },
     }),
   );
@@ -73,7 +76,7 @@ export function StepAutomationRecommendations({
             skippedBatch,
           );
         }
-        onContinue();
+        onContinue(skippedBatch);
       },
     }),
   );
@@ -123,11 +126,11 @@ export function StepAutomationRecommendations({
       applyRecommendations.mutate();
       return;
     }
-    if (pending) {
+    if (pending || failed) {
       skipRecommendations.mutate();
       return;
     }
-    onContinue();
+    onContinue(batch);
   };
 
   useEffect(() => {

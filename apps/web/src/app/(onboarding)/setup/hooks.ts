@@ -468,7 +468,16 @@ export function useSetupFlow(
             !status.onboardingFailed
           );
         case 'automation-recommendations':
-          return status.setupNewState.automationRecommendations == null;
+          // Pre-recommendation setup state did not persist this field. Keep
+          // those existing deployments on their current path; new state is
+          // normalized to `null` and opens the review after source control.
+          if (status.setupNewState.automationRecommendations === undefined) {
+            return true;
+          }
+          return ['applied', 'skipped'].includes(
+            status.setupNewState.automationRecommendations?.applicationState ??
+              'pending',
+          );
         case 'invoke':
           return !hasPostOnboardingAccess();
         default:

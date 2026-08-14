@@ -65,7 +65,7 @@ type SetupOnboardingTransition = {
   startedAt: string | null;
   recommendationBatch: AutomationRecommendationBatch | null;
   setupNewState: SetupNewState;
-  nextStep: 'automation-recommendations' | 'invoke';
+  nextStep: 'invoke';
 };
 
 const SETUP_GUIDANCE_WARNING_THRESHOLD = 7_500;

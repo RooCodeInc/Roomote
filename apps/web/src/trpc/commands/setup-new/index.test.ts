@@ -1343,7 +1343,7 @@ describe('setup-new onboarding task start command', () => {
     const result = await startSetupNewOnboardingTaskCommand(buildMockAuth());
 
     expect(result.taskId).toBe('task-onboarding-1');
-    expect(result.nextStep).toBe('automation-recommendations');
+    expect(result.nextStep).toBe('invoke');
     expect(result.recommendationBatch).toMatchObject({
       status: 'pending',
       recommendations: [],

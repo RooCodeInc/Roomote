@@ -39,6 +39,10 @@ const SETUP_STEP_DEFINITIONS = [
     title: 'Connect source control',
   },
   {
+    id: 'automation-recommendations',
+    title: 'Automation recommendations',
+  },
+  {
     id: 'compute-provider',
     title: 'Sandbox provider',
   },
@@ -49,10 +53,6 @@ const SETUP_STEP_DEFINITIONS = [
   {
     id: 'repo-selection',
     title: 'Set up environment',
-  },
-  {
-    id: 'automation-recommendations',
-    title: 'Automation recommendations',
   },
   {
     id: 'invoke',
