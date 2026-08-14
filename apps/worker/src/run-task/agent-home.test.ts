@@ -829,6 +829,39 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(result.configContent).toContain('litellm');
   });
 
+  it('configures trusted LiteLLM context limits for proactive compaction', () => {
+    const runtimeEnv = {
+      R_MODEL: 'litellm/coding',
+      R_TASK_MODEL_CONTEXT_WINDOWS: JSON.stringify({
+        'litellm/qwen3.6:35b-unsloth': 210_176,
+      }),
+      LITELLM_BASE_URL: 'https://litellm.example.com/v1',
+      LITELLM_API_KEY: 'litellm-key',
+    };
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv,
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        { models: Record<string, { limit?: Record<string, number> }> }
+      >;
+    };
+
+    expect(
+      config.provider.litellm?.models['qwen3.6:35b-unsloth']?.limit,
+    ).toEqual({
+      context: 210_176,
+      input: 210_176,
+      output: 32_000,
+    });
+    expect(config.provider.litellm?.models.coding).toMatchObject({
+      name: 'coding',
+    });
+    expect(runtimeEnv).not.toHaveProperty('R_TASK_MODEL_CONTEXT_WINDOWS');
+  });
+
   it('configures named openai-compatible connections separately', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

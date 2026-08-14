@@ -36,12 +36,14 @@ import {
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
   parseInferenceGatewayKeys,
+  parseTaskModelContextWindows,
   renderManualSkillMarkdown,
   resolveOpenRouterVariantModelAlias,
   toBedrockMantleRuntimeModelId,
   OPENCODE_ARCHITECT_AGENT,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   OPENCODE_GO_API_KEY_ENV_VAR_NAME,
+  TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
   TaskPayloadKind,
   type EnvironmentManualSkill,
   type OpenRouterVariantModelAlias,
@@ -1312,6 +1314,10 @@ function resolveModelBackedOpenCodeConfig(
   reasoningEffortOverride?: ReasoningEffort,
 ): Record<string, unknown> | null {
   const isLiteLlmConfigured = isConfiguredEnvValue(runtimeEnv.LITELLM_BASE_URL);
+  const modelContextWindows = parseTaskModelContextWindows(
+    runtimeEnv[TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME],
+  );
+  delete runtimeEnv[TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME];
   const rawModel = applyImplicitLiteLlmModelPrefix(
     runtimeEnv.R_MODEL?.trim() ?? '',
     isLiteLlmConfigured,
@@ -1608,6 +1614,10 @@ function resolveModelBackedOpenCodeConfig(
     exploreModel,
     planningModel,
   ];
+  const openAiCompatibleModelIds = [
+    ...configuredModelIds,
+    ...Object.keys(modelContextWindows),
+  ];
   const providerModelConfig = chatGptFastMode
     ? mergeOpenCodeChatGptFastModeOptions(
         providerReasoningConfig,
@@ -1626,8 +1636,9 @@ function resolveModelBackedOpenCodeConfig(
                   variantAliases,
                 ),
                 runtimeEnv,
-                configuredModelIds,
+                openAiCompatibleModelIds,
                 visionModel ?? effectiveCodingModel,
+                modelContextWindows,
               ),
               runtimeEnv,
               configuredModelIds,

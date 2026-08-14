@@ -13,6 +13,36 @@ const OPENAI_COMPATIBLE_DEFAULT_FALLBACK_BASE_URL = 'http://127.0.0.1:4000/v1';
 const DEFAULT_OPENAI_COMPATIBLE_INSTANCE =
   buildOpenAiCompatibleProviderInstance(null);
 
+export const TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME =
+  'R_TASK_MODEL_CONTEXT_WINDOWS' as const;
+
+export function parseTaskModelContextWindows(
+  value: string | undefined,
+): Record<string, number> {
+  if (!value?.trim()) {
+    return {};
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(value);
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, number] =>
+          entry[0].includes('/') &&
+          Number.isSafeInteger(entry[1]) &&
+          (entry[1] as number) > 0,
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
 const STATIC_OPENAI_COMPATIBLE_PROVIDER_CONFIGS = {
   [OPENAI_COMPATIBLE_PROVIDER_ID]: {
     name: DEFAULT_OPENAI_COMPATIBLE_INSTANCE.label,
@@ -156,6 +186,7 @@ export function mergeOpenAiCompatibleProviderConfig(
   runtimeEnv: RuntimeEnv,
   modelIds: Array<string | undefined>,
   visionModel?: string,
+  modelContextWindows: Readonly<Record<string, number>> = {},
 ): Record<string, unknown> {
   let merged = providerConfig;
   const runtimeConfigs = getOpenAiCompatibleRuntimeConfigs(
@@ -214,22 +245,51 @@ export function mergeOpenAiCompatibleProviderConfig(
         models: {
           ...existingModels,
           ...Object.fromEntries(
-            modelIdsForProvider.map((modelId) => [
-              modelId,
-              {
-                name: modelId,
-                ...(visionModel === `${providerId}/${modelId}`
-                  ? {
-                      attachment: true,
-                      modalities: {
-                        input: ['text', 'image', 'video'],
-                        output: ['text'],
-                      },
-                    }
-                  : {}),
-                ...asRecord(existingModels[modelId]),
-              },
-            ]),
+            modelIdsForProvider.map((modelId) => {
+              const qualifiedModelId = `${providerId}/${modelId}`;
+              const existingModel = asRecord(existingModels[modelId]);
+              const contextWindow = modelContextWindows[qualifiedModelId];
+              const existingLimit = asRecord(existingModel.limit);
+              const existingOutputLimit = existingLimit.output;
+              const outputLimit =
+                typeof existingOutputLimit === 'number' &&
+                Number.isSafeInteger(existingOutputLimit) &&
+                existingOutputLimit > 0
+                  ? existingOutputLimit
+                  : contextWindow
+                    ? Math.min(
+                        32_000,
+                        Math.max(1, Math.floor(contextWindow / 4)),
+                      )
+                    : undefined;
+
+              return [
+                modelId,
+                {
+                  name: modelId,
+                  ...(visionModel === qualifiedModelId
+                    ? {
+                        attachment: true,
+                        modalities: {
+                          input: ['text', 'image', 'video'],
+                          output: ['text'],
+                        },
+                      }
+                    : {}),
+                  ...existingModel,
+                  ...(contextWindow && outputLimit
+                    ? {
+                        limit: {
+                          ...existingLimit,
+                          context: contextWindow,
+                          input: contextWindow,
+                          output: outputLimit,
+                        },
+                      }
+                    : {}),
+                },
+              ];
+            }),
           ),
         },
       },
