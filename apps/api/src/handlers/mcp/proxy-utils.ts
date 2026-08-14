@@ -447,6 +447,7 @@ const OBJECT_ONLY_SCHEMA_KEYWORDS = [
   'propertyNames',
   'minProperties',
   'maxProperties',
+  'dependencies',
   'dependentRequired',
   'dependentSchemas',
 ] as const;
@@ -532,6 +533,14 @@ const SCHEMA_MAP_KEYWORDS = new Set([
   'dependentSchemas',
 ]);
 
+// Maps keyed by property names whose values are property-name arrays (data)
+// or, in legacy draft-04 `dependencies`, sometimes schemas. An entry named
+// "type" with an array value is a dependency rule, not a type union, and
+// must never be reinterpreted as a schema keyword.
+const DEPENDENCY_MAP_KEYWORDS = new Set(['dependencies', 'dependentRequired']);
+
+type SchemaTraversalContext = 'schema' | 'schema-map' | 'dependency-map';
+
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -567,7 +576,7 @@ function withProviderSafeArrayItems(
 
 function normalizeToolSchemaForStrictProviders(
   value: unknown,
-  context: 'schema' | 'schema-map' = 'schema',
+  context: SchemaTraversalContext = 'schema',
 ): unknown {
   if (Array.isArray(value)) {
     return value.map((entry) => normalizeToolSchemaForStrictProviders(entry));
@@ -579,24 +588,35 @@ function normalizeToolSchemaForStrictProviders(
 
   const schema = Object.fromEntries(
     Object.entries(value).map(([key, nestedValue]) => {
+      if (context === 'dependency-map') {
+        // Array-valued entries list required property names (data); only
+        // object-valued legacy draft-04 dependency entries are schemas.
+        return [
+          key,
+          isPlainObject(nestedValue)
+            ? normalizeToolSchemaForStrictProviders(nestedValue)
+            : nestedValue,
+        ];
+      }
       if (context === 'schema' && NON_SCHEMA_VALUE_KEYWORDS.has(key)) {
         return [key, nestedValue];
       }
+      let childContext: SchemaTraversalContext = 'schema';
+      if (context === 'schema' && SCHEMA_MAP_KEYWORDS.has(key)) {
+        childContext = 'schema-map';
+      } else if (context === 'schema' && DEPENDENCY_MAP_KEYWORDS.has(key)) {
+        childContext = 'dependency-map';
+      }
       return [
         key,
-        normalizeToolSchemaForStrictProviders(
-          nestedValue,
-          context === 'schema' && SCHEMA_MAP_KEYWORDS.has(key)
-            ? 'schema-map'
-            : 'schema',
-        ),
+        normalizeToolSchemaForStrictProviders(nestedValue, childContext),
       ];
     }),
   );
 
-  // A schema map's own keys are property names, not schema keywords; only
-  // its entries (handled above) are schemas.
-  if (context === 'schema-map') {
+  // A schema or dependency map's own keys are property names, not schema
+  // keywords; only its entries (handled above) can be schemas.
+  if (context !== 'schema') {
     return schema;
   }
 

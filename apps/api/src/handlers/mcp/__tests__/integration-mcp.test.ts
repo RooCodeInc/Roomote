@@ -720,6 +720,14 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
                       items: { type: 'string' },
                       'x-order': 3,
                     },
+                    // Dependency maps are keyed by property names; an entry
+                    // named "type" with an array value is a dependency rule,
+                    // not a type union, and must pass through as data.
+                    conditional_object: {
+                      type: ['object', 'null'],
+                      dependencies: { type: ['foo'] },
+                      dependentRequired: { type: ['foo'] },
+                    },
                   },
                 },
               },
@@ -782,6 +790,16 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
       type: ['array', 'null'],
       items: { type: 'string' },
       'x-order': 3,
+    });
+    expect(properties.conditional_object).toEqual({
+      anyOf: [
+        {
+          type: 'object',
+          dependencies: { type: ['foo'] },
+          dependentRequired: { type: ['foo'] },
+        },
+        { type: 'null' },
+      ],
     });
   });
 
