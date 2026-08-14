@@ -26,6 +26,7 @@ import {
   buildPullRequestUrl,
   getSourceControlProviderLabel,
   findPrBodyAttributionLine,
+  preservePrBodyAttribution,
   getCommunicationProviderFromTaskPayload,
   getCommunicationGuildIdFromTaskPayload,
   getCommunicationTenantIdFromTaskPayload,
@@ -568,7 +569,7 @@ async function createOrUpdateGitHubPullRequest({
       repo,
       pull_number: pullRequest.number,
       title: input.title,
-      body: input.body,
+      body: preservePrBodyAttribution(input.body, pullRequest.body ?? ''),
     });
     pullRequest = data;
   } else {

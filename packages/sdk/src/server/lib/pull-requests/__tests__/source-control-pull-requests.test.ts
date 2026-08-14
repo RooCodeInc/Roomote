@@ -1482,7 +1482,7 @@ describe('optional targetBranch', () => {
     );
   });
 
-  it('uses fresh canonical attribution when updating a private pull request', async () => {
+  it('preserves the opener attribution when updating a private pull request', async () => {
     const existing = {
       number: 11,
       node_id: 'node-11',
@@ -1490,7 +1490,10 @@ describe('optional targetBranch', () => {
       title: 'Old title',
       draft: false,
       base: { ref: 'develop' },
-      body: attributionBody('Opened on behalf of Launch $& Owner.'),
+      body: attributionBody(
+        'Opened on behalf of Launch $& Owner.',
+        'Follow up through the old task link.',
+      ),
     };
     const octokit = makeOctokit({
       list: [existing],
@@ -1511,12 +1514,12 @@ describe('optional targetBranch', () => {
 
     expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: attributionBody('Opened on behalf of Participant.'),
+        body: attributionBody('Opened on behalf of Launch $& Owner.'),
       }),
     );
   });
 
-  it('does not preserve a private marked name when a public pull request is updated', async () => {
+  it('preserves the original marked attribution when a public pull request is updated', async () => {
     const existing = {
       number: 11,
       node_id: 'node-11',
@@ -1554,12 +1557,12 @@ describe('optional targetBranch', () => {
 
     expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: attributionBody('Opened on behalf of @participant.'),
+        body: attributionBody('Opened on behalf of Private Name.'),
       }),
     );
   });
 
-  it('uses the current linked handle when updating a public pull request', async () => {
+  it('preserves the original linked handle when updating a public pull request', async () => {
     const existing = {
       number: 11,
       node_id: 'node-11',
@@ -1597,7 +1600,7 @@ describe('optional targetBranch', () => {
 
     expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: attributionBody('Opened on behalf of @participant.'),
+        body: attributionBody('Opened on behalf of @launch-owner.'),
       }),
     );
   });
