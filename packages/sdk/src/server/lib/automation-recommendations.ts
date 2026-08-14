@@ -1063,6 +1063,7 @@ export async function runAutomationRecommendationInitialRunJob(
     );
   }
 
+  let launched = false;
   try {
     const result =
       candidate.source === 'built_in'
@@ -1083,6 +1084,7 @@ export async function runAutomationRecommendationInitialRunJob(
       throw new Error(result.error);
     }
 
+    launched = result.outcome === 'launched';
     await updateAutomationRecommendationInitialRun(request, (item) => ({
       ...item,
       initialRunClaimedAt: null,
@@ -1091,6 +1093,15 @@ export async function runAutomationRecommendationInitialRunJob(
         : {}),
     }));
   } catch (error) {
+    if (launched) {
+      // The task has already been enqueued. Keep the durable claim when the
+      // bookkeeping write fails so a BullMQ retry cannot launch a duplicate.
+      console.error(
+        `[automation-recommendations] Initial run launched for ${request.recommendationId}, but recording its task id failed:`,
+        error,
+      );
+      return;
+    }
     await updateAutomationRecommendationInitialRun(request, (item) => ({
       ...item,
       initialRunClaimedAt: null,
