@@ -827,26 +827,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
             modelId: 'github-copilot/gpt-5.6-luna',
             reasoningEffort: 'medium',
           },
-          helper: {
-            modelId: 'github-copilot/gpt-5.6-luna',
-            reasoningEffort: 'low',
-          },
-          vision: {
-            modelId: 'github-copilot/gpt-5.6-luna',
-            reasoningEffort: 'low',
-          },
-          codeReview: {
-            modelId: 'github-copilot/gpt-5.6-luna',
-            reasoningEffort: 'high',
-          },
-          explore: {
-            modelId: 'github-copilot/gpt-5.6-luna',
-            reasoningEffort: 'low',
-          },
-          planning: {
-            modelId: 'github-copilot/gpt-5.6-luna',
-            reasoningEffort: 'high',
-          },
         },
       },
     ],

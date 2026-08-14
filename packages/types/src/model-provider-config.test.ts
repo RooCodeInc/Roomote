@@ -1046,24 +1046,24 @@ describe('buildRecommendedDeploymentModelConfig', () => {
     },
   );
 
-  it('uses Luna for every GitHub Copilot role', () => {
+  it('uses Luna for GitHub Copilot with other roles following coding', () => {
     expect(
       buildRecommendedDeploymentModelConfig(
         getSetupModelProvider('github-copilot'),
       ),
     ).toEqual({
       roomoteModel: 'github-copilot/gpt-5.6-luna',
-      roomoteSmallModel: 'github-copilot/gpt-5.6-luna',
-      roomoteVisionModel: 'github-copilot/gpt-5.6-luna',
-      roomoteCodeReviewModel: 'github-copilot/gpt-5.6-luna',
-      roomoteExploreModel: 'github-copilot/gpt-5.6-luna',
-      roomotePlanningModel: 'github-copilot/gpt-5.6-luna',
+      roomoteSmallModel: null,
+      roomoteVisionModel: null,
+      roomoteCodeReviewModel: null,
+      roomoteExploreModel: null,
+      roomotePlanningModel: null,
       roomoteModelReasoningEffort: 'medium',
-      roomoteSmallModelReasoningEffort: 'low',
-      roomoteVisionModelReasoningEffort: 'low',
-      roomoteCodeReviewModelReasoningEffort: 'high',
-      roomoteExploreModelReasoningEffort: 'low',
-      roomotePlanningModelReasoningEffort: 'high',
+      roomoteSmallModelReasoningEffort: null,
+      roomoteVisionModelReasoningEffort: null,
+      roomoteCodeReviewModelReasoningEffort: null,
+      roomoteExploreModelReasoningEffort: null,
+      roomotePlanningModelReasoningEffort: null,
     });
   });
 
