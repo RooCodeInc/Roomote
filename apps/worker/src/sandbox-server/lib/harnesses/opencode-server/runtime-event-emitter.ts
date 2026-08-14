@@ -11,6 +11,7 @@ import {
   type AcpRequestUserInputAnswers,
   type AcpRequestUserInputPayload,
   type AcpRequestUserInputResponsePayload,
+  type TaskCompletionMetadata,
   type TaskMessageContentBlock,
 } from '@roomote/types';
 
@@ -598,6 +599,7 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
   taskCompleted(
     taskId: string,
     tokenUsage: Record<string, unknown> | undefined,
+    metadata: Partial<TaskCompletionMetadata> = {},
   ): void {
     const completionId = `${taskId}:${this.nextTs()}`;
     this.emitTaskEvent({
@@ -613,7 +615,7 @@ export class OpenCodeRuntimeEventEmitter extends RuntimeEnvelopeBuilder {
           contextTokens: Number(tokenUsage?.contextTokens ?? 0),
         },
         {},
-        { isSubtask: false, completionId },
+        { isSubtask: false, completionId, ...metadata },
       ],
     });
   }

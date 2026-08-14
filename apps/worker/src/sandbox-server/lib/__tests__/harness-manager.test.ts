@@ -2144,6 +2144,75 @@ describe('HarnessManager touchKeepalive', () => {
     }
   });
 
+  it('notifies settlement only after a goal continuation actually finalizes', async () => {
+    const onTaskCompletionSettled = vi.fn().mockResolvedValue(undefined);
+    const onBeforeTaskCompletion = vi.fn(async (completionId: string) =>
+      completionId === 'completion-1'
+        ? {
+            disposition: 'continue' as const,
+            prompt: { prompt: 'hidden continuation' },
+          }
+        : ('finalize' as const),
+    );
+    const { harness, manager } = createManager({
+      onBeforeTaskCompletion,
+      onTaskCompletionSettled,
+    });
+    const completion = (completionId: string) =>
+      ({
+        eventName: TaskEventName.TaskCompleted,
+        payload: [
+          'task-goal-settlement',
+          {
+            totalTokensIn: 0,
+            totalTokensOut: 0,
+            totalCost: 0,
+            contextTokens: 0,
+          },
+          {},
+          { isSubtask: false, completionId },
+        ],
+      }) as TaskEvent;
+
+    try {
+      manager.initializeWithoutPrompt();
+      manager.startNewTaskFromPrompt({ prompt: 'hello' });
+      harness.emitTaskEvent({
+        eventName: TaskEventName.TaskStarted,
+        payload: ['task-goal-settlement'],
+      } as TaskEvent);
+
+      harness.emitTaskEvent(completion('completion-1'));
+      await vi.waitFor(() => {
+        expect(onBeforeTaskCompletion).toHaveBeenCalledWith('completion-1');
+      });
+      expect(onTaskCompletionSettled).not.toHaveBeenCalled();
+
+      harness.emitRuntimeOutput({
+        id: 'task-goal-settlement:prompt-2',
+        ts: 10,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        kind: 'text',
+        role: 'user',
+        contentBlocks: [{ type: 'text', text: 'hidden continuation' }],
+        metadata: { sessionId: 'task-goal-settlement', sequence: 2 },
+        payload: {
+          sessionId: 'task-goal-settlement',
+          text: 'hidden continuation',
+        },
+      } as AcpMessage);
+      harness.emitTaskEvent(completion('completion-2'));
+
+      await vi.waitFor(() => {
+        expect(onTaskCompletionSettled).toHaveBeenCalledWith('completion-2');
+      });
+      expect(onTaskCompletionSettled).toHaveBeenCalledTimes(1);
+    } finally {
+      manager.dispose();
+      harness.dispose();
+    }
+  });
+
   it('marks continuation pending before dispatch can synchronously start and finish it', async () => {
     const onExit = vi.fn();
     const onBeforeTaskCompletion = vi.fn(async (completionId: string) =>

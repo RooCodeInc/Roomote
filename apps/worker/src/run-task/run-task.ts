@@ -103,6 +103,7 @@ import {
 } from './workflow-phase';
 import { wrapCommunicationMessage } from './communication-message-prompt';
 import { buildTaskGoalContinuationPrompt } from './task-goal';
+import { settleMissingChatCloseoutFallback } from './missing-chat-closeout-fallback-settlement';
 
 function formatEnvironmentInstructions(
   instructions?: string,
@@ -1335,6 +1336,9 @@ export const runTask = async ({
       taskId: taskRun.taskId,
       logger,
       callbacks: {
+        onTaskCompletionSettled: async (completionId: string) => {
+          await settleMissingChatCloseoutFallback(context, completionId);
+        },
         onBeforeTaskCompletion: async (completionId: string) => {
           if (taskCancellation.signal.aborted) {
             return 'finalize' as const;
