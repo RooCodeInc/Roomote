@@ -37,13 +37,13 @@ describe('resolveEffectiveHarnessModelState', () => {
   it('resolves the persisted model from an OpenCode harness override', () => {
     const { model } = resolveEffectiveHarnessModelState({
       task: makeTask({
-        'opencode-server': 'openrouter/z-ai/glm-5.2',
+        'opencode-server': 'openrouter/openai/gpt-5.6-terra',
       }),
       targetHarness: 'opencode-server',
       isSnapshotResume: false,
     });
 
-    expect(model).toBe('openrouter/z-ai/glm-5.2');
+    expect(model).toBe('openrouter/openai/gpt-5.6-terra');
   });
 
   it('uses the deployment code review model for PR review tasks when no override is present', () => {
@@ -108,7 +108,9 @@ describe('resolveEffectiveHarnessModelState', () => {
 
   it('stamps the default coding reasoning effort for a model override', () => {
     const { task } = resolveEffectiveHarnessModelState({
-      task: makeTask({ 'opencode-server': 'openrouter/z-ai/glm-5.2' }),
+      task: makeTask({
+        'opencode-server': 'openrouter/openai/gpt-5.6-terra',
+      }),
       targetHarness: 'opencode-server',
       isSnapshotResume: false,
     });
@@ -118,7 +120,9 @@ describe('resolveEffectiveHarnessModelState', () => {
 
   it('inherits the deployment coding reasoning effort for a model override', () => {
     const { task } = resolveEffectiveHarnessModelState({
-      task: makeTask({ 'opencode-server': 'openrouter/z-ai/glm-5.2' }),
+      task: makeTask({
+        'opencode-server': 'openrouter/openai/gpt-5.6-terra',
+      }),
       targetHarness: 'opencode-server',
       isSnapshotResume: false,
       deploymentCodingReasoningEffort: 'xhigh',
@@ -128,7 +132,9 @@ describe('resolveEffectiveHarnessModelState', () => {
   });
 
   it('keeps an explicit per-task reasoning effort over the deployment level', () => {
-    const task = makeTask({ 'opencode-server': 'openrouter/z-ai/glm-5.2' });
+    const task = makeTask({
+      'opencode-server': 'openrouter/openai/gpt-5.6-terra',
+    });
     task.payload.reasoningEffort = 'low';
 
     const { task: nextTask } = resolveEffectiveHarnessModelState({
