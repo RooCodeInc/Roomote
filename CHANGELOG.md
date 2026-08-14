@@ -23,6 +23,8 @@ This patch adds guided automation recommendations during setup and strengthens G
 - Improve provider and agent compatibility by restoring MCP access for judge and advisor agents, recommending GPT 5.6 Luna for GitHub Copilot, reducing expected Modal lookup noise, cleaning up legacy-provider OIDC refreshes, and supporting nullable-array MCP schemas with Gemini.
 - Make environment snapshots more reliable by pacing background refreshes, preserving actionable launch diagnostics, recording failed snapshots accurately, and finalizing runs whose sandboxes disappear before a snapshot completes.
 - Improve task visibility and control with artifact-build progress and direct task links, a clearer responsive model selector, and more concise, structured custom automation reports by default.
+- Let Discord `/goal` tasks complete or block normally by preserving the final Goal Mode context through activation.
+- Use a concise, first-person message when a chat task finishes without another response.
 
 ## 0.39.0 (2026-08-13)
 
