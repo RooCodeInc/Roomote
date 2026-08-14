@@ -57,6 +57,7 @@ export const AUTOMATION_RECOMMENDATION_REPOSITORY_CAP = 10;
 const AUTOMATION_SIGNAL_PREFETCH_CAP = AUTOMATION_RECOMMENDATION_REPOSITORY_CAP;
 
 const AUTOMATION_SIGNAL_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
+const AUTOMATION_RECOMMENDATION_INITIAL_RUN_CLAIM_TIMEOUT_MS = 15 * 60 * 1_000;
 const DEPENDENCY_MANIFEST_NAMES = new Set([
   'bun.lock',
   'bun.lockb',
@@ -700,6 +701,8 @@ function mergeRecommendationState(
             automationId: existing.automationId,
             applied: existing.applied,
             initialRunClaimedAt: existing.initialRunClaimedAt,
+            initialRunDispatchAttemptedAt:
+              existing.initialRunDispatchAttemptedAt,
             initialRunTerminalAt: existing.initialRunTerminalAt,
           }
         : {
@@ -832,6 +835,7 @@ async function buildRecommendationBatch(
       automationId: null,
       applied: false,
       initialRunClaimedAt: null,
+      initialRunDispatchAttemptedAt: null,
       initialRunTerminalAt: null,
     })),
   };
@@ -943,6 +947,27 @@ function recommendationApplicationState(
   );
 }
 
+export function canRecoverAutomationRecommendationInitialRunClaim(
+  recommendation: Pick<
+    AutomationRecommendationBatch['recommendations'][number],
+    'initialRunClaimedAt' | 'initialRunDispatchAttemptedAt'
+  >,
+  now = Date.now(),
+): boolean {
+  if (
+    !recommendation.initialRunClaimedAt ||
+    recommendation.initialRunDispatchAttemptedAt
+  ) {
+    return false;
+  }
+
+  const claimedAt = Date.parse(recommendation.initialRunClaimedAt);
+  return (
+    !Number.isFinite(claimedAt) ||
+    now - claimedAt >= AUTOMATION_RECOMMENDATION_INITIAL_RUN_CLAIM_TIMEOUT_MS
+  );
+}
+
 async function claimAutomationRecommendationInitialRun(
   request: AutomationRecommendationInitialRunJob,
 ) {
@@ -966,17 +991,28 @@ async function claimAutomationRecommendationInitialRun(
       recommendationApplicationState(batch) !== 'applied' ||
       !recommendation?.enabled ||
       recommendation.lastRunTaskId ||
-      recommendation.initialRunClaimedAt ||
       recommendation.initialRunTerminalAt
     ) {
       return null;
     }
 
+    if (
+      recommendation.initialRunClaimedAt &&
+      !canRecoverAutomationRecommendationInitialRunClaim(recommendation)
+    ) {
+      return null;
+    }
+
+    const claimedAt = new Date().toISOString();
     const nextBatch = {
       ...batch,
       recommendations: batch.recommendations.map((item) =>
         item.id === request.recommendationId
-          ? { ...item, initialRunClaimedAt: new Date().toISOString() }
+          ? {
+              ...item,
+              initialRunClaimedAt: claimedAt,
+              initialRunDispatchAttemptedAt: null,
+            }
           : item,
       ),
     };
@@ -992,10 +1028,34 @@ async function claimAutomationRecommendationInitialRun(
       .where(eq(deploymentSettings.id, 'default'));
 
     return {
+      claimedAt,
       candidateId: recommendation.candidateId,
       automationId: recommendation.automationId,
     };
   });
+}
+
+async function markAutomationRecommendationInitialRunDispatchAttempted(
+  request: AutomationRecommendationInitialRunJob,
+  claimedAt: string,
+): Promise<boolean> {
+  let dispatchMarked = false;
+  await updateAutomationRecommendationInitialRun(request, (item) => {
+    if (
+      item.initialRunClaimedAt !== claimedAt ||
+      item.initialRunDispatchAttemptedAt ||
+      item.initialRunTerminalAt
+    ) {
+      return item;
+    }
+
+    dispatchMarked = true;
+    return {
+      ...item,
+      initialRunDispatchAttemptedAt: new Date().toISOString(),
+    };
+  });
+  return dispatchMarked;
 }
 
 async function updateAutomationRecommendationInitialRun(
@@ -1049,6 +1109,7 @@ export async function runAutomationRecommendationInitialRunJob(
     await updateAutomationRecommendationInitialRun(request, (item) => ({
       ...item,
       initialRunClaimedAt: null,
+      initialRunDispatchAttemptedAt: null,
     }));
     throw new Error(
       `Recommendation candidate was not found: ${claimed.candidateId}`,
@@ -1057,6 +1118,13 @@ export async function runAutomationRecommendationInitialRunJob(
 
   let launched = false;
   try {
+    const dispatchMarked =
+      await markAutomationRecommendationInitialRunDispatchAttempted(
+        request,
+        claimed.claimedAt,
+      );
+    if (!dispatchMarked) return;
+
     const result =
       candidate.source === 'built_in'
         ? candidate.automationKey === 'review_code'
@@ -1080,6 +1148,7 @@ export async function runAutomationRecommendationInitialRunJob(
     await updateAutomationRecommendationInitialRun(request, (item) => ({
       ...item,
       initialRunClaimedAt: null,
+      initialRunDispatchAttemptedAt: null,
       initialRunTerminalAt: new Date().toISOString(),
       ...(result.outcome === 'launched'
         ? { lastRunTaskId: result.taskId }
@@ -1094,6 +1163,7 @@ export async function runAutomationRecommendationInitialRunJob(
         await updateAutomationRecommendationInitialRun(request, (item) => ({
           ...item,
           initialRunClaimedAt: null,
+          initialRunDispatchAttemptedAt: null,
           initialRunTerminalAt: new Date().toISOString(),
         }));
       } catch (terminalError) {
@@ -1107,6 +1177,7 @@ export async function runAutomationRecommendationInitialRunJob(
     await updateAutomationRecommendationInitialRun(request, (item) => ({
       ...item,
       initialRunClaimedAt: null,
+      initialRunDispatchAttemptedAt: null,
     }));
     throw error;
   }
