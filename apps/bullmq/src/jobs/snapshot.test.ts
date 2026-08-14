@@ -761,6 +761,47 @@ describe('snapshotJob', () => {
     });
   });
 
+  it('does not complete a late snapshot after terminal finalization claims the run', async () => {
+    mockFindFirst
+      .mockResolvedValueOnce({
+        ...baseTaskRun,
+        status: RunStatus.Running,
+        machineId: 'sb-late-snapshot',
+      })
+      .mockResolvedValueOnce({
+        snapshotId: null,
+        snapshotCreatedAt: null,
+      });
+    mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
+    updateWhereFn.mockImplementationOnce(() =>
+      Object.assign(Promise.resolve([]), {
+        // The terminal finalizer changed the status before the provider's
+        // onSnapshotCreated callback tried to persist its late snapshot.
+        returning: () => Promise.resolve([]),
+      }),
+    );
+    mockCreateSnapshot.mockImplementation(async ({ onSnapshotCreated }) => {
+      await onSnapshotCreated?.('snap_too_late');
+      return { snapshotId: 'snap_too_late' };
+    });
+
+    await expect(
+      snapshotJob({
+        data: { runId: 123, sandboxId: 'sb-late-snapshot' },
+      } as never),
+    ).rejects.toMatchObject({
+      name: 'UnrecoverableError',
+      message: expect.stringContaining(
+        'advanced while its snapshot was being created',
+      ),
+    });
+
+    expect(mockFinishRun).not.toHaveBeenCalled();
+    expect(setFn).not.toHaveBeenCalledWith(
+      expect.objectContaining({ status: RunStatus.Completed }),
+    );
+  });
+
   it('guards the failure update when createSnapshot throws after the job started', async () => {
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
     mockCreateSnapshot.mockRejectedValue(
@@ -1630,14 +1671,15 @@ describe('snapshotJob', () => {
     mockGetInstanceStatus.mockResolvedValue({ status: 'running' });
     // No row returned: the guarded update matched nothing because another
     // attempt already recorded a snapshot id.
-    updateWhereFn.mockImplementation(() =>
+    updateWhereFn.mockImplementationOnce(() =>
       Object.assign(Promise.resolve([]), {
         returning: () => Promise.resolve([]),
       }),
     );
-    mockFindFirst
-      .mockResolvedValueOnce(baseTaskRun)
-      .mockResolvedValueOnce({ snapshotCreatedAt: winnerCreatedAt });
+    mockFindFirst.mockResolvedValueOnce(baseTaskRun).mockResolvedValueOnce({
+      snapshotId: 'snap_winner',
+      snapshotCreatedAt: winnerCreatedAt,
+    });
     mockCreateSnapshot.mockImplementation(async ({ onSnapshotCreated }) => {
       await onSnapshotCreated?.('snap_loser');
       return { snapshotId: 'snap_loser' };
