@@ -8,10 +8,11 @@ Roomote can read supported file attachments from the web app and from chat
 threads where you start or continue a Roomote task.
 
 Support varies by chat provider. The web app, Slack, and Telegram can read the
-formats below. Discord supports images and a smaller text and code subset, but
-not Office documents, PDFs, or presentations. Microsoft Teams currently
-supports image attachments only. Slack can also describe one supported video
-attachment per message.
+text, document, and image formats below. Discord supports images and a smaller
+text and code subset, but not Office documents, PDFs, or presentations. Slack,
+Discord, Microsoft Teams, and Telegram can also transcribe supported audio
+attachments. Microsoft Teams otherwise supports image attachments only, and
+Slack can describe one supported video attachment per message.
 
 Use attachments when the file itself is the fastest way to show the problem: a
 bug report export, a config file, a markdown handoff, a spreadsheet, or a PDF
@@ -34,8 +35,8 @@ If the attachments are large, Roomote reads them in the order you attach them
 and applies a shared text budget so the task stays responsive. Very large
 earlier files can leave later files included by name only.
 
-Text-extracted files are limited to 8 MB each. Image, video, and provider
-transport limits vary by surface.
+Text-extracted files are limited to 8 MB each. Audio files are limited to 20
+MiB each. Image, video, and provider transport limits vary by surface.
 
 ## Accepted file types
 
@@ -48,6 +49,7 @@ transport limits vary by surface.
 | Documents       | `.pdf`, `.docx`                                                                                                                               |
 | Presentations   | `.pptx`                                                                                                                                       |
 | Images          | `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`                                                                                              |
+| Audio (chat)    | `.aac`, `.flac`, `.m4a`, `.mp3`, `.mp4`, `.oga`, `.ogg`, `.opus`, `.wav`, `.webm`                                                            |
 
 ## How Roomote uses them
 
@@ -55,7 +57,10 @@ Text, code, spreadsheet, document, and presentation files are read into the
 task as attachment context. Images are passed through as image inputs so
 Roomote can inspect them directly. `.svg` files are normally read as text
 markup, but Discord treats an SVG reported with the `image/svg+xml` content type
-as an image input.
+as an image input. In Slack, Discord, Microsoft Teams, and Telegram, supported
+audio is transcribed and the transcript is added to the task context. Where a
+provider permits multiple audio attachments in one message, Roomote transcribes
+only the first one.
 
 That means you can ask things like:
 
@@ -80,5 +85,10 @@ That means you can ask things like:
   log window, or section. Text-extracted files larger than 8 MB are rejected.
 - **The attachment is a format not listed here.** Export it as one of the
   accepted formats above.
+- **The audio was not transcribed.** Audio must be no larger than 20 MiB, use a
+  supported format, and have an audio-capable inference model available.
+  Roomote adds a warning to the task context when the format, size, model,
+  download, or transcription prevents processing, so the text portion of the
+  request can still proceed.
 - **The task still needs more context.** Add a short prompt that explains the
   question, expected behavior, or failure you want Roomote to investigate.
