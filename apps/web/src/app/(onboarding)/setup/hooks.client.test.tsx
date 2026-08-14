@@ -277,10 +277,12 @@ describe('useSetupFlow', () => {
     window.history.replaceState = originalReplaceState;
   });
 
-  it('starts with auth-provider when auth selection is still missing', async () => {
+  it('starts with inference when email/password auth leaves comms unselected', async () => {
     mockStatus();
 
-    const { result } = renderHook(() => useSetupFlow());
+    const { result } = renderHook(() =>
+      useSetupFlow({ communicationAfterSourceControl: true }),
+    );
 
     await waitFor(() => {
       expect(result.current.step).toBe('welcome');
@@ -289,7 +291,7 @@ describe('useSetupFlow', () => {
     act(() => {
       result.current.goToNextStep();
     });
-    expect(result.current.step).toBe('auth-provider');
+    expect(result.current.step).toBe('env-vars');
   });
 
   it('skips the wizard welcome when the bootstrap flow already showed it', async () => {
@@ -299,7 +301,50 @@ describe('useSetupFlow', () => {
     markSetupWelcomeSeen();
     mockStatus();
 
-    const { result } = renderHook(() => useSetupFlow());
+    const { result } = renderHook(() =>
+      useSetupFlow({ communicationAfterSourceControl: true }),
+    );
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('env-vars');
+    });
+  });
+
+  it('offers comms after source control for email/password auth', async () => {
+    markSetupWelcomeSeen();
+    mockStatus({
+      modelSetup: {
+        setupSatisfied: true,
+        setupSatisfiedByRuntimeEnv: false,
+        preselectedProvider: 'openrouter',
+      },
+      sourceControlSetup: {
+        setupSatisfied: true,
+        setupSatisfiedByRuntimeEnv: false,
+        selectedProvider: 'github',
+        preselectedProvider: 'github',
+        runtimeConfiguredProvider: null,
+        runtimeConfiguredProviders: [],
+        lockReason: null,
+        connectedProvider: 'github',
+        providers: [],
+      },
+      setupNewState: {
+        authProvider: null,
+        modelProvider: 'openrouter',
+        computeProvider: null,
+        sourceControlProvider: 'github',
+        selectedRepositoryIds: [],
+        onboardingTaskId: null,
+        onboardingTaskStartedAt: null,
+        slackChannel: null,
+        slackThreadTs: null,
+      },
+    });
+
+    const { result } = renderHook(() =>
+      useSetupFlow({ communicationAfterSourceControl: true }),
+    );
 
     await waitFor(() => {
       expect(result.current.step).toBe('auth-provider');
@@ -312,7 +357,9 @@ describe('useSetupFlow', () => {
       setupCompletedAt: '2024-01-01T00:00:00.000Z',
     });
 
-    const { result } = renderHook(() => useSetupFlow());
+    const { result } = renderHook(() =>
+      useSetupFlow({ communicationAfterSourceControl: true }),
+    );
 
     await waitFor(() => {
       expect(result.current.step).toBe('welcome');
@@ -1506,7 +1553,9 @@ describe('useSetupFlow', () => {
   it('pushes the next step URL when the user advances with goToNextStep', async () => {
     mockStatus();
 
-    const { result } = renderHook(() => useSetupFlow());
+    const { result } = renderHook(() =>
+      useSetupFlow({ communicationAfterSourceControl: true }),
+    );
 
     await waitFor(() => {
       expect(result.current.step).toBe('welcome');
@@ -1516,8 +1565,8 @@ describe('useSetupFlow', () => {
       result.current.goToNextStep();
     });
 
-    expect(result.current.step).toBe('auth-provider');
-    expect(routerMock.push).toHaveBeenCalledWith('/setup?step=auth-provider');
+    expect(result.current.step).toBe('env-vars');
+    expect(routerMock.push).toHaveBeenCalledWith('/setup?step=env-vars');
   });
 
   it('merges a later URL write into a step navigation the address bar has not committed yet', async () => {

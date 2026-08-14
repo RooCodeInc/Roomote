@@ -1,10 +1,13 @@
 import type { SetupAuthProviderId, SetupAuthStatus } from '@roomote/types';
 
 import {
+  clearSetupEmailPasswordAuthSelected,
+  consumeSetupEmailPasswordAuthSelection,
   getBootstrapAuthProvider,
   getBootstrapStepFromSetupStepParam,
   getBootstrapStepAfterWelcome,
   getNextBootstrapStep,
+  markSetupEmailPasswordAuthSelected,
   shouldSkipBootstrapAccountStep,
 } from './bootstrapFlow';
 
@@ -24,6 +27,23 @@ function buildAuthSetup(
 }
 
 describe('bootstrapFlow', () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it('carries the email/password account choice into the signed-in flow', () => {
+    markSetupEmailPasswordAuthSelected();
+    expect(consumeSetupEmailPasswordAuthSelection()).toBe(true);
+    expect(consumeSetupEmailPasswordAuthSelection()).toBe(false);
+  });
+
+  it('clears a stale email/password choice before Slack or Teams account auth', () => {
+    markSetupEmailPasswordAuthSelected();
+    clearSetupEmailPasswordAuthSelected();
+
+    expect(consumeSetupEmailPasswordAuthSelection()).toBe(false);
+  });
+
   it('routes runtime-configured Slack directly to auth env vars/sign-in', () => {
     const authSetup = buildAuthSetup({
       selectedProvider: 'slack',

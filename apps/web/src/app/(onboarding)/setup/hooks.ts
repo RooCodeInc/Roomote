@@ -66,6 +66,22 @@ const DEEP_LINK_REVISITABLE_SETUP_STEPS: readonly SetupStep[] = [
   'compute-config',
 ];
 
+const COMMUNICATION_AUTH_SETUP_STEPS: readonly SetupStep[] = [
+  'welcome',
+  'auth-provider',
+  'auth-env-vars',
+  'slack',
+  'env-vars',
+  'source-control-provider',
+  'source-control-config',
+  'source-control-connect',
+  'automation-recommendations',
+  'compute-provider',
+  'compute-config',
+  'repo-selection',
+  'invoke',
+];
+
 function readUrlEntryContext(): SetupEntryContext {
   if (typeof window === 'undefined') {
     return {
@@ -220,6 +236,7 @@ export function useSetupFlow(
   options: {
     enabled?: boolean;
     pendingAuthProvider?: SetupAuthProviderId | null;
+    communicationAfterSourceControl?: boolean;
   } = {},
 ) {
   const trpc = useTRPC();
@@ -227,6 +244,8 @@ export function useSetupFlow(
   const { user } = useUser();
   const queryEnabled = options.enabled ?? true;
   const pendingAuthProvider = options.pendingAuthProvider ?? null;
+  const communicationAfterSourceControl =
+    options.communicationAfterSourceControl ?? false;
 
   const {
     data: status,
@@ -279,21 +298,27 @@ export function useSetupFlow(
   const setupSession = useSetupAsyncSession({
     currentTaskId: status?.setupNewState.onboardingTaskId ?? null,
   });
+  const setupSteps = communicationAfterSourceControl
+    ? SETUP_STEPS
+    : COMMUNICATION_AUTH_SETUP_STEPS;
   stepRef.current = step;
 
-  const setStepWithTransition = useCallback((nextStep: SetupStep) => {
-    const currentIndex = SETUP_STEPS.indexOf(stepRef.current);
-    const nextIndex = SETUP_STEPS.indexOf(nextStep);
+  const setStepWithTransition = useCallback(
+    (nextStep: SetupStep) => {
+      const currentIndex = setupSteps.indexOf(stepRef.current);
+      const nextIndex = setupSteps.indexOf(nextStep);
 
-    if (nextStep !== stepRef.current) {
-      setTransitionDirection(
-        nextIndex >= currentIndex ? 'forward' : 'backward',
-      );
-    }
+      if (nextStep !== stepRef.current) {
+        setTransitionDirection(
+          nextIndex >= currentIndex ? 'forward' : 'backward',
+        );
+      }
 
-    stepRef.current = nextStep;
-    setStep(nextStep);
-  }, []);
+      stepRef.current = nextStep;
+      setStep(nextStep);
+    },
+    [setupSteps],
+  );
   const communicationStepResolved =
     setupSession.session.communicationStep.state === 'skipped' ||
     setupSession.session.communicationStep.state === 'completed';
@@ -507,8 +532,8 @@ export function useSetupFlow(
 
   const findNextStep = useCallback(
     (fromIndex: number): SetupStep => {
-      for (let index = fromIndex; index < SETUP_STEPS.length; index += 1) {
-        const candidate = SETUP_STEPS[index];
+      for (let index = fromIndex; index < setupSteps.length; index += 1) {
+        const candidate = setupSteps[index];
 
         if (candidate && !shouldSkip(candidate)) {
           return candidate;
@@ -517,13 +542,13 @@ export function useSetupFlow(
 
       return hasPostOnboardingAccess() ? 'invoke' : 'repo-selection';
     },
-    [hasPostOnboardingAccess, shouldSkip],
+    [hasPostOnboardingAccess, setupSteps, shouldSkip],
   );
 
   const findPreviousStep = useCallback(
     (fromIndex: number): SetupStep | null => {
       for (let index = fromIndex - 1; index >= 0; index -= 1) {
-        const candidate = SETUP_STEPS[index];
+        const candidate = setupSteps[index];
 
         if (candidate && !shouldSkip(candidate)) {
           return candidate;
@@ -532,33 +557,33 @@ export function useSetupFlow(
 
       return null;
     },
-    [shouldSkip],
+    [setupSteps, shouldSkip],
   );
 
   const getPreviousNavigationStep = useCallback(
     (currentStep: SetupStep): SetupStep | null => {
       return (
         navigationHistoryRef.current.at(-1) ??
-        findPreviousStep(SETUP_STEPS.indexOf(currentStep)) ??
+        findPreviousStep(setupSteps.indexOf(currentStep)) ??
         (currentStep === 'source-control-connect' ||
         currentStep === 'source-control-config'
           ? 'source-control-provider'
           : null)
       );
     },
-    [findPreviousStep],
+    [findPreviousStep, setupSteps],
   );
 
   const findNextPostOnboardingStep = useCallback(
     ({
-      fromIndex = SETUP_STEPS.indexOf('invoke'),
+      fromIndex = setupSteps.indexOf('invoke'),
       forceUnlocked,
     }: {
       fromIndex?: number;
       forceUnlocked?: boolean;
     } = {}): SetupStep => {
-      for (let index = fromIndex; index < SETUP_STEPS.length; index += 1) {
-        const candidate = SETUP_STEPS[index];
+      for (let index = fromIndex; index < setupSteps.length; index += 1) {
+        const candidate = setupSteps[index];
 
         if (
           candidate &&
@@ -570,7 +595,7 @@ export function useSetupFlow(
 
       return 'invoke';
     },
-    [shouldSkipPostOnboarding],
+    [setupSteps, shouldSkipPostOnboarding],
   );
 
   const readSetupSearchParams = useCallback(() => {
@@ -643,7 +668,7 @@ export function useSetupFlow(
       const firstPendingStep = findNextStep(0);
 
       if (
-        SETUP_STEPS.indexOf(requested) > SETUP_STEPS.indexOf(firstPendingStep)
+        setupSteps.indexOf(requested) > setupSteps.indexOf(firstPendingStep)
       ) {
         pinnedUrlStepRef.current = null;
         return firstPendingStep;
@@ -659,12 +684,12 @@ export function useSetupFlow(
       pinnedUrlStepRef.current = null;
 
       if (shouldSkip(requested)) {
-        return findNextStep(SETUP_STEPS.indexOf(requested) + 1);
+        return findNextStep(setupSteps.indexOf(requested) + 1);
       }
 
       return requested;
     },
-    [findNextStep, shouldSkip],
+    [findNextStep, setupSteps, shouldSkip],
   );
 
   useEffect(() => {
@@ -863,7 +888,7 @@ export function useSetupFlow(
   }, [getPreviousNavigationStep, pushStepUrl, shouldSkip, step]);
 
   const goToNextStep = useCallback(() => {
-    const currentIndex = SETUP_STEPS.indexOf(step);
+    const currentIndex = setupSteps.indexOf(step);
     const nextStep = findNextStep(currentIndex + 1);
     if (nextStep !== step) {
       navigationHistoryRef.current.push(step);
@@ -871,7 +896,7 @@ export function useSetupFlow(
     pinnedUrlStepRef.current = null;
     setStepWithTransition(nextStep);
     pushStepUrl(nextStep);
-  }, [findNextStep, pushStepUrl, setStepWithTransition, step]);
+  }, [findNextStep, pushStepUrl, setStepWithTransition, setupSteps, step]);
 
   const goToNextPostOnboardingStep = useCallback(
     (forceUnlocked = false) => {
@@ -889,7 +914,7 @@ export function useSetupFlow(
   const advancePostOnboardingStep = useCallback(
     (resolvedStep: SetupStep) => {
       const nextStep = findNextPostOnboardingStep({
-        fromIndex: SETUP_STEPS.indexOf(resolvedStep) + 1,
+        fromIndex: setupSteps.indexOf(resolvedStep) + 1,
         forceUnlocked: true,
       });
       if (nextStep !== resolvedStep) {
@@ -899,7 +924,12 @@ export function useSetupFlow(
       setStepWithTransition(nextStep);
       pushStepUrl(nextStep);
     },
-    [findNextPostOnboardingStep, pushStepUrl, setStepWithTransition],
+    [
+      findNextPostOnboardingStep,
+      pushStepUrl,
+      setStepWithTransition,
+      setupSteps,
+    ],
   );
 
   return {

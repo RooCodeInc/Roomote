@@ -1,5 +1,30 @@
 import type { SetupAuthProviderId, SetupAuthStatus } from '@roomote/types';
 
+const SETUP_ACCOUNT_AUTH_METHOD_KEY = 'roomote.setup.account-auth-method';
+
+export function markSetupEmailPasswordAuthSelected() {
+  window.sessionStorage.setItem(
+    SETUP_ACCOUNT_AUTH_METHOD_KEY,
+    'email-password',
+  );
+}
+
+export function clearSetupEmailPasswordAuthSelected() {
+  if (typeof window !== 'undefined') {
+    window.sessionStorage.removeItem(SETUP_ACCOUNT_AUTH_METHOD_KEY);
+  }
+}
+
+export function consumeSetupEmailPasswordAuthSelection() {
+  const selected =
+    typeof window !== 'undefined' &&
+    window.sessionStorage.getItem(SETUP_ACCOUNT_AUTH_METHOD_KEY) ===
+      'email-password';
+
+  clearSetupEmailPasswordAuthSelected();
+  return selected;
+}
+
 export type BootstrapStep =
   | 'welcome'
   | 'email-account'
