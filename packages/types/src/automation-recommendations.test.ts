@@ -67,7 +67,15 @@ describe('scoreAutomationRecommendations', () => {
       docs: 0,
     });
 
-    expect(result).toEqual([]);
+    expect(result.length).toBeGreaterThanOrEqual(3);
+    expect(result.length).toBeLessThanOrEqual(6);
+    expect(
+      result.every(
+        ({ explanation }) =>
+          explanation.includes('connected') ||
+          explanation.includes('recurring'),
+      ),
+    ).toBe(true);
   });
 });
 

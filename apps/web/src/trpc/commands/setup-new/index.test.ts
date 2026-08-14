@@ -106,6 +106,11 @@ vi.mock('@roomote/communication/discord-provider', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  buildAutomationRecommendationFingerprint: vi.fn(
+    (repositoryIds: string[], provider: string | null) =>
+      `${provider ?? 'none'}:${repositoryIds.join(',')}`,
+  ),
+  enqueueAutomationRecommendations: vi.fn(async () => undefined),
   createTeamsCommunicationProviderFromRuntimeCredentials: vi.fn(
     async () => null,
   ),

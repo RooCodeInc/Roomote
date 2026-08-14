@@ -266,7 +266,9 @@ export function scoreAutomationRecommendations(
 ): ScoredAutomationRecommendation[] {
   const catalog = options.catalog ?? AUTOMATION_RECOMMENDATION_CATALOG;
   const enabled = options.enabledCandidateIds ?? new Set<string>();
-  const fallbackSignals = signals.mergedPrs30d + signals.openPrs > 0;
+  // Recommendations should still be useful immediately after a repository is
+  // connected, before provider signal collection has produced rich data.
+  const allowFallbackCandidates = true;
   const scored = catalog
     .filter((candidate) => !enabled.has(candidate.id))
     .filter((candidate) => {
@@ -298,10 +300,10 @@ export function scoreAutomationRecommendations(
       );
       return {
         candidate,
-        score: score || (fallbackSignals ? 1 : 0),
+        score: score || (allowFallbackCandidates ? 1 : 0),
         explanation:
           explanation ??
-          'These repos have active PR flow, making a regular review useful.',
+          'These repos are connected and ready for a lightweight recurring review.',
       };
     })
     .filter(({ score }) => score >= (options.minScore ?? 1))
@@ -321,7 +323,7 @@ export function scoreAutomationRecommendations(
     if (selected.length === 6) break;
   }
 
-  if (selected.length < 3 && fallbackSignals) {
+  if (selected.length < 3 && allowFallbackCandidates) {
     for (const recommendation of scored) {
       if (
         selected.some(

@@ -1,5 +1,4 @@
 import * as GitHub from '@roomote/github';
-import { createHash } from 'node:crypto';
 import { TRPCError } from '@trpc/server';
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import { resolveEnvironmentSourceControlProvider } from '@/lib/server/source-control-provider';
@@ -13,7 +12,6 @@ import {
   db,
   deploymentSettings,
   environments,
-  pullRequestFacts,
   environmentVariables,
   taskRuns,
   workItems,
@@ -53,6 +51,8 @@ import {
   findDiscordUserMappingByRoomoteUserId,
   findTeamsPrimaryConversation,
   recordSlackConversationMessageBestEffort,
+  buildAutomationRecommendationFingerprint,
+  enqueueAutomationRecommendations,
 } from '@roomote/sdk/server';
 import {
   buildRecommendedDeploymentModelConfig,
@@ -114,9 +114,6 @@ import {
   WAITING_FOR_SANDBOX_PROVIDER_TASK_PHASE,
   AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
   AUTOMATION_RECOMMENDATION_CATALOG,
-  scoreAutomationRecommendations,
-  type AutomationRecommendationBatch,
-  type MergedAutomationRecommendationSignals,
   ALL_REPOSITORIES,
 } from '@roomote/types';
 
@@ -258,86 +255,6 @@ async function savePersistedSetupNewState(
     });
 
   return setupNewState;
-}
-
-function buildRecommendationFingerprint(
-  repositoryIds: string[],
-  provider: SourceControlProvider | null,
-): string {
-  return createHash('sha256')
-    .update(
-      JSON.stringify({
-        repositoryIds: [...repositoryIds].sort(),
-        provider,
-        catalogVersion: AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
-      }),
-    )
-    .digest('hex');
-}
-
-async function buildRecommendationBatch(
-  repositoryIds: string[],
-  repositories: SelectedRepositorySummary[],
-  executor: DatabaseOrTransaction,
-): Promise<AutomationRecommendationBatch> {
-  const facts = await executor
-    .select({
-      repositoryId: pullRequestFacts.repositoryId,
-      state: pullRequestFacts.state,
-      mergedAtRemote: pullRequestFacts.mergedAtRemote,
-    })
-    .from(pullRequestFacts)
-    .where(inArray(pullRequestFacts.repositoryId, repositoryIds));
-  const since = Date.now() - 30 * 24 * 60 * 60 * 1000;
-  const signals: MergedAutomationRecommendationSignals = {
-    repositoryCount: repositories.length,
-    sourceControlProviders: [
-      ...new Set(
-        repositories.map((repository) => repository.sourceControlProvider),
-      ),
-    ],
-    mergedPrs30d: facts.filter(
-      (fact) =>
-        fact.state === 'merged' &&
-        fact.mergedAtRemote &&
-        fact.mergedAtRemote.getTime() >= since,
-    ).length,
-    openPrs: facts.filter(
-      (fact) => fact.state === 'open' || fact.state === 'draft',
-    ).length,
-    conflicts: 0,
-    ciFailures30d: 0,
-    dependabotAlerts: 0,
-    codeqlAlerts: 0,
-    dependencyManifests: 0,
-    docs: 0,
-  };
-  const scored = scoreAutomationRecommendations(signals);
-  const startedAt = new Date().toISOString();
-  return {
-    version: 1,
-    inputFingerprint: buildRecommendationFingerprint(
-      repositoryIds,
-      repositories[0]?.sourceControlProvider ?? null,
-    ),
-    catalogVersion: AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
-    status: 'ready',
-    startedAt,
-    completedAt: new Date().toISOString(),
-    partial: true,
-    errorCode: null,
-    dismissed: false,
-    recommendations: scored.map(({ candidate, score, explanation }, index) => ({
-      id: `${candidate.id}:${index + 1}`,
-      candidateId: candidate.id,
-      rank: index + 1,
-      score,
-      explanation,
-      enabled: false,
-      lastRunTaskId: null,
-      automationId: null,
-    })),
-  };
 }
 
 async function savePersistedRuntimeModelConfig(
@@ -2597,12 +2514,12 @@ export async function saveSetupNewSelectionCommand(
   const nextSetupGuidance = input.setupGuidance?.trim() || null;
   const nextSelectedModelId = input.selectedModelId?.trim() || null;
 
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
     );
     const currentState = await getPersistedSetupNewState(tx);
-    const nextFingerprint = buildRecommendationFingerprint(
+    const nextFingerprint = buildAutomationRecommendationFingerprint(
       normalizedRepositoryIds,
       selectedRepositories[0]?.sourceControlProvider ?? null,
     );
@@ -2610,11 +2527,18 @@ export async function saveSetupNewSelectionCommand(
       currentState.automationRecommendations?.inputFingerprint ===
       nextFingerprint
         ? currentState.automationRecommendations
-        : await buildRecommendationBatch(
-            normalizedRepositoryIds,
-            selectedRepositories,
-            tx,
-          );
+        : {
+            version: 1 as const,
+            inputFingerprint: nextFingerprint,
+            catalogVersion: AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
+            status: 'pending' as const,
+            startedAt: new Date().toISOString(),
+            completedAt: null,
+            partial: false,
+            errorCode: null,
+            dismissed: false,
+            recommendations: [],
+          };
     const setupNewState = normalizeSetupNewState({
       ...currentState,
       selectedRepositoryIds: normalizedRepositoryIds,
@@ -2653,6 +2577,44 @@ export async function saveSetupNewSelectionCommand(
       setupNewState,
     };
   });
+
+  const batch = result.setupNewState.automationRecommendations;
+  if (batch?.status === 'pending') {
+    try {
+      await enqueueAutomationRecommendations({
+        fingerprint: batch.inputFingerprint,
+        repositoryIds: result.setupNewState.selectedRepositoryIds,
+      });
+    } catch (error) {
+      console.error(
+        '[saveSetupNewSelectionCommand] Failed to enqueue recommendation scoring:',
+        error,
+      );
+      await db.transaction(async (tx) => {
+        const currentState = await getPersistedSetupNewState(tx);
+        if (
+          currentState.automationRecommendations?.inputFingerprint !==
+          batch.inputFingerprint
+        ) {
+          return;
+        }
+        await savePersistedSetupNewState(
+          normalizeSetupNewState({
+            ...currentState,
+            automationRecommendations: {
+              ...currentState.automationRecommendations,
+              status: 'failed',
+              completedAt: new Date().toISOString(),
+              errorCode: 'recommendation_queue_unavailable',
+            },
+          }),
+          tx,
+        );
+      });
+    }
+  }
+
+  return result;
 }
 
 export async function startSetupNewOnboardingTaskCommand(
@@ -3232,42 +3194,79 @@ export async function listSetupRecommendationsCommand(auth: UserAuthSuccess) {
 
 export async function startSetupRecommendationsCommand(auth: UserAuthSuccess) {
   assertAdmin(auth);
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     await tx.execute(
       sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
     );
     const state = await getPersistedSetupNewState(tx);
-    const { selectedRepositories } = await resolveSelectedRepositories(
-      state.selectedRepositoryIds,
-    );
-    const batch = await buildRecommendationBatch(
-      state.selectedRepositoryIds,
-      selectedRepositories,
-      tx,
+    const { normalizedRepositoryIds, selectedRepositories } =
+      await resolveSelectedRepositories(state.selectedRepositoryIds);
+    if (normalizedRepositoryIds.length === 0) {
+      throw new Error('Select at least one repository before retrying.');
+    }
+    const fingerprint = buildAutomationRecommendationFingerprint(
+      normalizedRepositoryIds,
+      selectedRepositories[0]?.sourceControlProvider ?? null,
     );
     const existingBatch = state.automationRecommendations;
-    if (existingBatch?.inputFingerprint === batch.inputFingerprint) {
-      batch.recommendations = batch.recommendations.map((recommendation) => {
-        const existing = existingBatch.recommendations.find(
-          (item) => item.candidateId === recommendation.candidateId,
-        );
-        return existing
-          ? {
-              ...recommendation,
-              enabled: existing.enabled,
-              lastRunTaskId: existing.lastRunTaskId,
-              automationId: existing.automationId,
-            }
-          : recommendation;
-      });
-      batch.dismissed = existingBatch.dismissed;
-    }
+    const batch = {
+      ...(existingBatch?.inputFingerprint === fingerprint
+        ? existingBatch
+        : {
+            version: 1 as const,
+            inputFingerprint: fingerprint,
+            catalogVersion: AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
+            completedAt: null,
+            partial: false,
+            dismissed: false,
+            recommendations: [],
+          }),
+      status: 'pending' as const,
+      startedAt: new Date().toISOString(),
+      completedAt: null,
+      errorCode: null,
+    };
     await savePersistedSetupNewState(
       normalizeSetupNewState({ ...state, automationRecommendations: batch }),
       tx,
     );
-    return batch;
+    return { batch, repositoryIds: normalizedRepositoryIds };
   });
+
+  try {
+    await enqueueAutomationRecommendations({
+      fingerprint: result.batch.inputFingerprint,
+      repositoryIds: result.repositoryIds,
+    });
+  } catch (error) {
+    console.error(
+      '[startSetupRecommendationsCommand] Failed to enqueue recommendation scoring:',
+      error,
+    );
+    await db.transaction(async (tx) => {
+      const state = await getPersistedSetupNewState(tx);
+      if (
+        state.automationRecommendations?.inputFingerprint !==
+        result.batch.inputFingerprint
+      ) {
+        return;
+      }
+      await savePersistedSetupNewState(
+        normalizeSetupNewState({
+          ...state,
+          automationRecommendations: {
+            ...state.automationRecommendations,
+            status: 'failed',
+            completedAt: new Date().toISOString(),
+            errorCode: 'recommendation_queue_unavailable',
+          },
+        }),
+        tx,
+      );
+    });
+  }
+
+  return result.batch;
 }
 
 export async function runSetupRecommendationNowCommand(

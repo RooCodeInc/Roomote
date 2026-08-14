@@ -484,7 +484,7 @@ export function SetupSignedInFlow() {
               onReviewComputeProvider={() =>
                 goToStep('compute-provider', { revisit: true })
               }
-              onContinue={() => goToNextStep()}
+              onContinue={() => goToStep('automation-recommendations')}
               onBack={canGoBack ? goToPreviousStep : undefined}
               onSkip={() => {
                 setupSession.unlockPostOnboardingFlow();

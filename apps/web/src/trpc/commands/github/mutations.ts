@@ -4,6 +4,7 @@ import type { Endpoints } from '@octokit/types';
 import { createAuthToken } from '@roomote/auth';
 import * as GitHub from '@roomote/github';
 import { createClient } from '@roomote/sdk/client';
+import { enqueueAutomationSignalPrefetch } from '@roomote/sdk/server/automation-recommendations';
 import { isLoopbackHostname } from '@roomote/types';
 import {
   db,
@@ -951,10 +952,18 @@ export async function syncGitHubInstallationCommand(
     return getUnauthorizedResult();
   }
 
-  return GitHub.syncGitHubInstallation({
+  const result = await GitHub.syncGitHubInstallation({
     userId: auth.userId,
     installationId: input.installationId,
   });
+  if (result.success) {
+    void enqueueAutomationSignalPrefetch(
+      result.repositories.map((repository) => repository.id),
+    ).catch((error) =>
+      console.error('[github] Failed to enqueue signal prefetch:', error),
+    );
+  }
+  return result;
 }
 
 export async function syncGitHubInstallationsCommand(auth: UserAuthSuccess) {
@@ -962,9 +971,17 @@ export async function syncGitHubInstallationsCommand(auth: UserAuthSuccess) {
     return getUnauthorizedResult();
   }
 
-  return GitHub.syncGitHubInstallations({
+  const results = await GitHub.syncGitHubInstallations({
     userId: auth.userId,
   });
+  void enqueueAutomationSignalPrefetch(
+    results
+      .flatMap((result) => (result.success ? result.repositories : []))
+      .map((repository) => repository.id),
+  ).catch((error) =>
+    console.error('[github] Failed to enqueue signal prefetch:', error),
+  );
+  return results;
 }
 
 export async function disableGitHubAppCommand(
