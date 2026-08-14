@@ -1,3 +1,10 @@
+// The test command has already loaded .env.test. Avoid re-reading and
+// decrypting env files whenever server tests rehydrate runtime configuration.
+vi.mock('@dotenvx/dotenvx', () => ({
+  config: vi.fn(() => ({ parsed: {} })),
+  get: vi.fn((key: string) => process.env[key]),
+}));
+
 // Mock Redis before any imports that might use it.
 vi.mock('@roomote/redis', async () => {
   const actual = await vi.importActual('@roomote/redis');
