@@ -1518,10 +1518,15 @@ export const runTask = async ({
         return;
       }
 
+      // Claim before the async lookup so concurrent state events cannot
+      // deliver the same setup outcome more than once.
+      pendingEnvironmentSetupOutcome = undefined;
+
       let goalContext;
       try {
         goalContext = await getActiveGoalContext();
       } catch (error) {
+        pendingEnvironmentSetupOutcome ??= outcome;
         logger.warn(
           `[runTask] Delaying background environment setup notice for task run ${taskRun.id} because active goal lookup failed: ${error instanceof Error ? error.message : String(error)}`,
         );
@@ -1537,8 +1542,8 @@ export const runTask = async ({
         goalContext,
       });
 
-      if (sent) {
-        pendingEnvironmentSetupOutcome = undefined;
+      if (!sent) {
+        pendingEnvironmentSetupOutcome ??= outcome;
       }
 
       void recordWorkerRuntimeEvent({
