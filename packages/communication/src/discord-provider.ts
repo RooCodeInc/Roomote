@@ -1219,7 +1219,7 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
         },
         {
           name: 'goal',
-          description: 'Keep the current task working toward an objective',
+          description: 'Keep working toward a goal across multiple turns',
           type: 1,
           options: [
             {
