@@ -11,6 +11,7 @@ import {
 } from './task-goals';
 import {
   clearTaskWaitSchedule,
+  findTaskWaitsNeedingWake,
   releaseTaskWaitResume,
   scheduleTaskWait,
 } from './task-waits';
@@ -205,6 +206,47 @@ describe('task waits', () => {
       waitResumedAt: null,
       waitResumeRunId: null,
     });
+  });
+
+  it('recovers a due wait when its claimed child is canceled later', async () => {
+    const waitUntil = new Date('2026-08-13T15:30:00.000Z');
+    const sourceRun = await runFactory.create({
+      status: RunStatus.Completed,
+      vendor: 'docker',
+      snapshotId: 'standby-late-cancel',
+      snapshotCreatedAt: new Date(),
+      waitUntil,
+      waitReason: 'Check deployment',
+    });
+    const resumeRun = await runFactory.create({
+      taskId: sourceRun.taskId,
+      sourceRunId: sourceRun.id,
+      status: RunStatus.Pending,
+      vendor: 'docker',
+    });
+    await db
+      .update(taskRuns)
+      .set({ waitResumedAt: new Date(), waitResumeRunId: resumeRun.id })
+      .where(eq(taskRuns.id, sourceRun.id));
+
+    const recoveryInput = {
+      now: new Date('2026-08-13T16:00:00.000Z'),
+      limit: 500,
+    };
+    await expect(findTaskWaitsNeedingWake(recoveryInput)).resolves.not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: sourceRun.id })]),
+    );
+
+    await db
+      .update(taskRuns)
+      .set({ status: RunStatus.Canceled, canceledAt: new Date() })
+      .where(eq(taskRuns.id, resumeRun.id));
+
+    await expect(findTaskWaitsNeedingWake(recoveryInput)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: sourceRun.id, waitUntil }),
+      ]),
+    );
   });
 
   it('rejects unsupported providers and short waits', async () => {

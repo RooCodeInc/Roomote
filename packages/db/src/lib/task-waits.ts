@@ -7,7 +7,8 @@ import {
   isResumableTaskPayloadKind,
   isTaskResumeCapableComputeProvider,
 } from '@roomote/types';
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, lte, or } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 
 import { db } from '../db';
 import { taskRuns, tasks } from '../schema';
@@ -39,6 +40,33 @@ export type TaskWaitGoalRollback = {
   previousLastContinuationId: string | null;
   previousGenerationIds: string[];
 };
+
+export async function findTaskWaitsNeedingWake(input: {
+  now?: Date;
+  limit: number;
+}): Promise<Array<{ id: number; waitUntil: Date }>> {
+  const resumeRuns = alias(taskRuns, 'task_wait_resume_runs');
+  const rows = await db
+    .select({ id: taskRuns.id, waitUntil: taskRuns.waitUntil })
+    .from(taskRuns)
+    .leftJoin(resumeRuns, eq(resumeRuns.id, taskRuns.waitResumeRunId))
+    .where(
+      and(
+        isNotNull(taskRuns.waitUntil),
+        lte(taskRuns.waitUntil, input.now ?? new Date()),
+        or(
+          and(isNull(taskRuns.waitResumedAt), isNull(taskRuns.waitResumeRunId)),
+          eq(resumeRuns.status, RunStatus.Canceled),
+        ),
+      ),
+    )
+    .orderBy(asc(taskRuns.waitUntil))
+    .limit(input.limit);
+
+  return rows.flatMap((row) =>
+    row.waitUntil ? [{ id: row.id, waitUntil: row.waitUntil }] : [],
+  );
+}
 
 export async function scheduleTaskWait(input: {
   runId: number;
