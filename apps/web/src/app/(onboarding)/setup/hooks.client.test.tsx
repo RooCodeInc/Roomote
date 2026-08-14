@@ -277,7 +277,7 @@ describe('useSetupFlow', () => {
     window.history.replaceState = originalReplaceState;
   });
 
-  it('starts with auth-provider when auth selection is still missing', async () => {
+  it('starts with inference setup after email/password auth', async () => {
     mockStatus();
 
     const { result } = renderHook(() => useSetupFlow());
@@ -289,7 +289,7 @@ describe('useSetupFlow', () => {
     act(() => {
       result.current.goToNextStep();
     });
-    expect(result.current.step).toBe('auth-provider');
+    expect(result.current.step).toBe('env-vars');
   });
 
   it('skips the wizard welcome when the bootstrap flow already showed it', async () => {
@@ -302,7 +302,7 @@ describe('useSetupFlow', () => {
     const { result } = renderHook(() => useSetupFlow());
 
     await waitFor(() => {
-      expect(result.current.step).toBe('auth-provider');
+      expect(result.current.step).toBe('env-vars');
     });
   });
 
@@ -319,7 +319,7 @@ describe('useSetupFlow', () => {
     });
   });
 
-  it('puts communication connection between auth config and model setup', async () => {
+  it('keeps communication setup before model setup when comms handled auth', async () => {
     mockStatus({
       authSetup: {
         setupSatisfiedByRuntimeEnv: false,
@@ -370,6 +370,32 @@ describe('useSetupFlow', () => {
       result.current.goToNextStep();
     });
     expect(result.current.step).toBe('source-control-provider');
+  });
+
+  it('offers communication setup after source control for email/password auth', async () => {
+    markSetupWelcomeSeen();
+    mockStatus();
+
+    const { result } = renderHook(() => useSetupFlow());
+
+    await waitFor(() => {
+      expect(result.current.step).toBe('env-vars');
+    });
+
+    act(() => {
+      result.current.goToNextStep();
+    });
+    expect(result.current.step).toBe('source-control-provider');
+
+    act(() => {
+      result.current.goToStep('source-control-connect');
+    });
+    expect(result.current.step).toBe('source-control-connect');
+
+    act(() => {
+      result.current.goToNextStep();
+    });
+    expect(result.current.step).toBe('auth-provider');
   });
 
   it('shows automation recommendations before compute setup after source control', async () => {
@@ -1000,10 +1026,21 @@ describe('useSetupFlow', () => {
         setupSatisfiedByRuntimeEnv: true,
         preselectedProvider: 'openrouter',
       },
+      sourceControlSetup: {
+        setupSatisfied: true,
+        setupSatisfiedByRuntimeEnv: true,
+        selectedProvider: 'github',
+        preselectedProvider: 'github',
+        runtimeConfiguredProvider: 'github',
+        runtimeConfiguredProviders: ['github'],
+        lockReason: 'runtime_env',
+        connectedProvider: 'github',
+        providers: [],
+      },
       setupNewState: {
         authProvider: null,
         modelProvider: 'openrouter',
-        sourceControlProvider: null,
+        sourceControlProvider: 'github',
         selectedRepositoryIds: [],
         onboardingTaskId: null,
         onboardingTaskStartedAt: null,
@@ -1011,7 +1048,6 @@ describe('useSetupFlow', () => {
         slackThreadTs: null,
       },
     });
-    setLocationSearch('?step=source-control-connect');
 
     const { result } = renderHook(() => useSetupFlow());
 
@@ -1516,8 +1552,8 @@ describe('useSetupFlow', () => {
       result.current.goToNextStep();
     });
 
-    expect(result.current.step).toBe('auth-provider');
-    expect(routerMock.push).toHaveBeenCalledWith('/setup?step=auth-provider');
+    expect(result.current.step).toBe('env-vars');
+    expect(routerMock.push).toHaveBeenCalledWith('/setup?step=env-vars');
   });
 
   it('merges a later URL write into a step navigation the address bar has not committed yet', async () => {
