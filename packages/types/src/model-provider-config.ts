@@ -651,7 +651,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'deepseek-v4-flash-0731': 'opencode-go/deepseek-v4-flash',
       'deepseek-v4-pro-0813': 'opencode-go/deepseek-v4-pro',
       'glm-5-3': 'opencode-go/glm-5.3',
-      'glm-5-2': 'opencode-go/glm-5.2',
       'gpt-5-6-luna': 'opencode-go/gpt-5.6-luna',
       'grok-4-6': 'opencode-go/grok-4.6',
       'kimi-k2-7-code': 'opencode-go/kimi-k2.7-code',
@@ -789,7 +788,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     ],
     suggestedTaskModels: mapRecommendedTaskModels({
       'glm-5-3': 'zai-coding-plan/glm-5.3',
-      'glm-5-2': 'zai-coding-plan/glm-5.2',
     }),
     recommendedRoleModels: {
       vision: 'zai-coding-plan/glm-5v-turbo',

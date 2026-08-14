@@ -413,6 +413,11 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(getSetupModelProvider('zai-coding-plan').defaultRoomoteModel).toBe(
       'zai-coding-plan/glm-5.3',
     );
+    for (const { providerId } of providersByModel) {
+      expect(
+        getSetupModelProvider(providerId).suggestedTaskModels,
+      ).not.toContainEqual(expect.objectContaining({ displayName: 'GLM 5.2' }));
+    }
   });
 
   it.each([
