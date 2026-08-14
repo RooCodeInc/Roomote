@@ -518,7 +518,10 @@ describe('spawnModalWorker', () => {
       ),
     ).resolves.toEqual({ machineId: 'modal-machine-123' });
 
-    expect(onWorkerExit).toHaveBeenCalledWith({ exitCode: 1 });
+    expect(onWorkerExit).toHaveBeenCalledWith({
+      exitCode: 1,
+      launchDiagnostics: 'stderr: worker failed before claim',
+    });
     expect(mockCleanupModalInstance).toHaveBeenCalledWith(
       expect.objectContaining({
         instanceId: 'modal-machine-123',
@@ -526,6 +529,46 @@ describe('spawnModalWorker', () => {
       }),
     );
     expect(onWorkerRestart).toHaveBeenCalledOnce();
+  });
+
+  it('passes probe diagnostics to the exit classifier when a silent immediate exit is finalized as failed', async () => {
+    const onWorkerExit = vi.fn().mockResolvedValue('failed');
+    mockRunCommand
+      // Detached launch: dies instantly with no output.
+      .mockResolvedValueOnce({ exitCode: 1, commandId: undefined })
+      // Non-detached probe reproduces the crash.
+      .mockResolvedValueOnce({
+        exitCode: 1,
+        stderr: 'Error: WORKER_API_URL is required\n',
+      });
+
+    // The classifier owns finalization on 'failed', so the spawn itself
+    // resolves instead of rethrowing.
+    await expect(
+      spawnModalWorker(
+        mockTaskRun({
+          payloadKind: TaskPayloadKind.SnapshotEnvironment,
+          payload: { repo: '', environmentId: 'env_1' },
+        }),
+        'auth_token',
+        {
+          deploymentSlug: 'roomote',
+          modalTokenId: 'token-id',
+          modalTokenSecret: 'token-secret',
+          modalBaseImageRef: 'ghcr.io/roomote/modal-worker:test',
+          modalVmMemoryMiB: 8192,
+          modalTimeoutMs: 60_000,
+          onWorkerExit,
+        },
+      ),
+    ).resolves.toEqual({ machineId: 'modal-machine-123' });
+
+    expect(onWorkerExit).toHaveBeenCalledWith({
+      exitCode: 1,
+      launchDiagnostics:
+        'probe "worker --version" exited with code 1; ' +
+        'probe stderr: Error: WORKER_API_URL is required',
+    });
   });
 
   it('cleans up when a later detached exit is claimed as a bootstrap failure', async () => {

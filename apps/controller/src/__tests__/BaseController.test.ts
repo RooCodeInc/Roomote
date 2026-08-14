@@ -167,8 +167,13 @@ class TestController extends BaseController {
   public async testHandleWorkerExitBeforeStart(
     taskRun: TaskRun,
     exitCode: number,
+    launchDiagnostics?: string,
   ) {
-    return this.handleWorkerExitBeforeStart(taskRun, exitCode);
+    return this.handleWorkerExitBeforeStart(
+      taskRun,
+      exitCode,
+      launchDiagnostics,
+    );
   }
 
   public async testFailTimedOutWorkerBootstraps() {
@@ -697,6 +702,65 @@ describe('BaseController.handleWorkerExitBeforeStart', () => {
       status: RunStatus.Failed,
       error: 'Worker process exited before claiming task run (exit code 1)',
     });
+  });
+
+  it('persists launch diagnostics on the run when the bootstrap failure is finalized', async () => {
+    mockDbExecute
+      .mockResolvedValueOnce([{ id: 42 }])
+      .mockResolvedValueOnce([{ id: 'restart-event' }]);
+
+    await expect(
+      controller.testHandleWorkerExitBeforeStart(
+        makeTaskRun({ id: 42, status: RunStatus.Dequeued }),
+        1,
+        'probe "worker --version" exited with code 1; probe stderr: Error: WORKER_API_URL is required',
+      ),
+    ).resolves.toBe('failed');
+
+    const expectedError =
+      'Worker process exited before claiming task run (exit code 1); ' +
+      'probe "worker --version" exited with code 1; probe stderr: Error: WORKER_API_URL is required';
+
+    // The diagnostics reach both the durable run write and finishRun.
+    expect(mockDbUpdateSet).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: RunStatus.Failed,
+        error: expectedError,
+      }),
+    );
+    expect(mockFinishRun).toHaveBeenCalledWith({
+      id: 42,
+      status: RunStatus.Failed,
+      error: expectedError,
+    });
+  });
+
+  it('records launch diagnostics on the bootstrap restart decision event', async () => {
+    mockDbExecute.mockResolvedValueOnce([{ id: 42 }]).mockResolvedValueOnce([]);
+
+    await expect(
+      controller.testHandleWorkerExitBeforeStart(
+        makeTaskRun({
+          id: 42,
+          status: RunStatus.Dequeued,
+          machineId: 'sandbox-old',
+          startedAt: null,
+          workerHeartbeatAt: null,
+        }),
+        1,
+        'stderr: worker failed before claim',
+      ),
+    ).resolves.toBe('restart');
+
+    expect(mockRecordTaskRunLifecycleEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        details: expect.objectContaining({
+          stage: 'worker_bootstrap_restart',
+          launchDiagnostics: 'stderr: worker failed before claim',
+        }),
+      }),
+    );
   });
 
   it('ignores an exit when the run already advanced', async () => {

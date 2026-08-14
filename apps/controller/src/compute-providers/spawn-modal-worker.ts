@@ -65,6 +65,27 @@ function truncateLaunchOutput(value: string | undefined): string | undefined {
     : trimmed;
 }
 
+/**
+ * Everything captured about a dead launch — stderr, stdout, and any probe
+ * output — as a single string, or undefined when nothing was captured. This
+ * is what makes the failure actionable, so it travels both in the thrown
+ * error and through onWorkerExit into the bootstrap-failure run error.
+ */
+function buildLaunchOutputSummary(
+  result: { stdout?: string; stderr?: string },
+  probeDiagnostics?: string,
+): string | undefined {
+  const stdout = truncateLaunchOutput(result.stdout);
+  const stderr = truncateLaunchOutput(result.stderr);
+  const parts = [
+    ...(stderr ? [`stderr: ${stderr}`] : []),
+    ...(stdout ? [`stdout: ${stdout}`] : []),
+    ...(probeDiagnostics ? [probeDiagnostics] : []),
+  ];
+
+  return parts.length > 0 ? parts.join('; ') : undefined;
+}
+
 function buildDetachedWorkerExitError(
   command: string,
   result: {
@@ -73,32 +94,21 @@ function buildDetachedWorkerExitError(
     stdout?: string;
     stderr?: string;
   },
-  launchDiagnostics?: string,
+  probeDiagnostics?: string,
 ): DetachedWorkerLaunchError {
   const stdout = truncateLaunchOutput(result.stdout);
   const stderr = truncateLaunchOutput(result.stderr);
-  const parts = [
-    `Detached "worker ${command}" exited immediately with code ${result.exitCode}`,
-  ];
+  const summary = buildLaunchOutputSummary(result, probeDiagnostics);
+  const message = `Detached "worker ${command}" exited immediately with code ${result.exitCode}${
+    summary ? `; ${summary}` : ''
+  }`;
 
-  if (stderr) {
-    parts.push(`stderr: ${stderr}`);
-  }
-
-  if (stdout) {
-    parts.push(`stdout: ${stdout}`);
-  }
-
-  if (launchDiagnostics) {
-    parts.push(launchDiagnostics);
-  }
-
-  return new DetachedWorkerLaunchError(parts.join('; '), {
+  return new DetachedWorkerLaunchError(message, {
     commandId: result.commandId ?? null,
     exitCode: result.exitCode,
     ...(stdout ? { stdout } : {}),
     ...(stderr ? { stderr } : {}),
-    ...(launchDiagnostics ? { launchDiagnostics } : {}),
+    ...(probeDiagnostics ? { launchDiagnostics: probeDiagnostics } : {}),
   });
 }
 
@@ -200,10 +210,14 @@ export async function spawnModalWorker(
     modalTags?: Record<string, string>;
     /**
      * Classifies a post-launch exit so the provider can clean up before an
-     * optional fresh launch is scheduled.
+     * optional fresh launch is scheduled. Grace-period exits pass everything
+     * captured about the dead launch (stderr/stdout/probe output) as
+     * `launchDiagnostics` so the bootstrap-failure finalization can persist
+     * it on the run instead of a bare exit code.
      */
     onWorkerExit?: (event: {
       exitCode: number;
+      launchDiagnostics?: string;
     }) => Promise<'ignore' | 'restart' | 'failed'>;
     onWorkerRestart?: () => void;
   },
@@ -547,7 +561,7 @@ export async function spawnModalWorker(
     if (result.exitCode !== null) {
       // Without any captured output the exit is undiagnosable from logs, so
       // probe the still-alive sandbox before classification/cleanup.
-      const launchDiagnostics =
+      const probeDiagnostics =
         truncateLaunchOutput(result.stdout) ||
         truncateLaunchOutput(result.stderr)
           ? undefined
@@ -555,14 +569,24 @@ export async function spawnModalWorker(
               computeClient,
               machine.machineId,
             );
+      const launchDiagnostics = buildLaunchOutputSummary(
+        result,
+        probeDiagnostics,
+      );
       const exitError = buildDetachedWorkerExitError(
         command,
         result,
-        launchDiagnostics,
+        probeDiagnostics,
       );
 
       if (onWorkerExit) {
-        const disposition = await onWorkerExit({ exitCode: result.exitCode });
+        // The classifier finalizes the run itself on the 'failed' disposition
+        // (this spawn then returns without rethrowing), so the diagnostics
+        // must travel with the exit event to reach the run's error.
+        const disposition = await onWorkerExit({
+          exitCode: result.exitCode,
+          ...(launchDiagnostics ? { launchDiagnostics } : {}),
+        });
 
         if (disposition !== 'ignore') {
           immediateExitDisposition = disposition;

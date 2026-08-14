@@ -609,13 +609,25 @@ export abstract class BaseController {
   protected async handleWorkerExitBeforeStart(
     taskRun: TaskRun,
     exitCode: number,
+    launchDiagnostics?: string,
   ): Promise<WorkerBootstrapExitDisposition> {
-    if (await this.claimWorkerBootstrapRestart(taskRun, exitCode)) {
+    if (
+      await this.claimWorkerBootstrapRestart(
+        taskRun,
+        exitCode,
+        launchDiagnostics,
+      )
+    ) {
       this.workerBootstrapRestartsAwaitingCleanup.add(taskRun.id);
       return 'restart';
     }
 
-    const errorMessage = `Worker process exited before claiming task run (exit code ${exitCode})`;
+    // Fold any captured launch output (stderr/stdout/probe) into the run's
+    // persisted error: this finalization is the only record the 'failed'
+    // disposition leaves, so a bare exit code here is undiagnosable.
+    const errorMessage = `Worker process exited before claiming task run (exit code ${exitCode})${
+      launchDiagnostics ? `; ${launchDiagnostics}` : ''
+    }`;
     const failed = await this.claimWorkerBootstrapFailure(
       taskRun,
       errorMessage,
@@ -816,6 +828,7 @@ export abstract class BaseController {
   private async claimWorkerBootstrapRestart(
     taskRun: TaskRun,
     exitCode: number,
+    launchDiagnostics?: string,
   ): Promise<boolean> {
     const claimed = await db.transaction(async (tx) => {
       const [lockedRun] = await tx.execute<{ id: number }>(sql`
@@ -875,6 +888,7 @@ export abstract class BaseController {
           provider: taskRun.vendor ?? null,
           previousMachineId: taskRun.machineId ?? null,
           exitCode,
+          launchDiagnostics: launchDiagnostics ?? null,
           restartAttempt: 1,
         },
       });
