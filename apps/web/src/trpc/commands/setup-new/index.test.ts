@@ -20,6 +20,7 @@ const {
   mockGetTeamsIntegrationStatus,
   mockInvalidateTelegramRuntimeCredentialsCache,
   mockValidateSetupModelProviderCredentials,
+  mockEnqueueAutomationRecommendations,
 } = vi.hoisted(() => ({
   mockValidateTeamsBotCredentials: vi.fn(async () => undefined),
   mockTxSelect: vi.fn(),
@@ -47,6 +48,7 @@ const {
   mockValidateSetupModelProviderCredentials: vi
     .fn()
     .mockResolvedValue(undefined),
+  mockEnqueueAutomationRecommendations: vi.fn(async () => undefined),
 }));
 
 vi.mock('../task-models/provider-validation', () => ({
@@ -106,11 +108,12 @@ vi.mock('@roomote/communication/discord-provider', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  AUTOMATION_RECOMMENDATION_REPOSITORY_CAP: 10,
   buildAutomationRecommendationFingerprint: vi.fn(
     (repositoryIds: string[], provider: string | null) =>
       `${provider ?? 'none'}:${repositoryIds.join(',')}`,
   ),
-  enqueueAutomationRecommendations: vi.fn(async () => undefined),
+  enqueueAutomationRecommendations: mockEnqueueAutomationRecommendations,
   enqueueAutomationSignalPrefetch: vi.fn(async () => undefined),
   createTeamsCommunicationProviderFromRuntimeCredentials: vi.fn(
     async () => null,
@@ -140,6 +143,7 @@ vi.mock('@roomote/db/server', () => ({
   },
   environments: {},
   eq: vi.fn(),
+  gte: vi.fn(),
   inArray: vi.fn(),
   isNull: vi.fn(),
   markTaskStartParallelCountEndedAt: vi.fn(),
@@ -169,6 +173,10 @@ vi.mock('@roomote/db/server', () => ({
   sql: vi.fn(),
   users: {},
   workItems: {},
+  pullRequestFacts: {
+    repositoryId: 'pull_request_facts.repository_id',
+    updatedAtRemote: 'pull_request_facts.updated_at_remote',
+  },
   isChatGptSubscriptionConnected: vi.fn(async () => false),
   isGitHubCopilotSubscriptionConnected: vi.fn(async () => false),
   isXaiSubscriptionConnected: vi.fn(async () => false),
@@ -267,6 +275,7 @@ import {
   saveSetupNewComputeProviderChoiceCommand,
   saveSetupNewSourceControlConfigCommand,
   saveSetupNewSourceControlProviderChoiceCommand,
+  startSetupRecommendationsCommand,
   startSetupNewOnboardingTaskCommand,
   trackSetupBootstrapWelcomeSeenCommand,
   trackSetupCommsStateCommand,
@@ -342,6 +351,16 @@ function createSelectChain(result: unknown) {
 function createFromOnlySelectChain(result: unknown) {
   return {
     from: vi.fn(async () => result),
+  };
+}
+
+function createGroupBySelectChain(result: unknown) {
+  return {
+    from: vi.fn(() => ({
+      where: vi.fn(() => ({
+        groupBy: vi.fn(async () => result),
+      })),
+    })),
   };
 }
 
@@ -1237,6 +1256,7 @@ describe('setup-new onboarding task start command', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockTxSelect.mockReset();
+    mockTxSelect.mockReturnValue(createGroupBySelectChain([]));
     mockGetPersistedEnvironmentVariableNames.mockResolvedValue([]);
 
     vi.mocked(getRepositories).mockResolvedValue([
@@ -1323,6 +1343,63 @@ describe('setup-new onboarding task start command', () => {
           slackChannel: null,
           slackThreadTs: null,
         }),
+      }),
+    );
+  });
+
+  it('scores all connected repositories independently of environment selection', async () => {
+    vi.mocked(getRepositories).mockResolvedValue([
+      ...Array.from({ length: 11 }, (_, index) => ({
+        id: `repo-${index + 1}`,
+        fullName: `acme/repo-${String(index + 1).padStart(2, '0')}`,
+      })),
+    ] as Awaited<ReturnType<typeof getRepositories>>);
+    vi.mocked(normalizeRepositorySelection).mockImplementation((repositories) =>
+      repositories.map((repository) => repository.id),
+    );
+    mockOnboardingTransaction({
+      slackInstallation: null,
+      setupNewState: { selectedRepositoryIds: ['repo-1'] },
+    });
+    mockTxSelect.mockReturnValueOnce(
+      createGroupBySelectChain([
+        { repositoryId: 'repo-11', activity: 10 },
+        { repositoryId: 'repo-10', activity: 5 },
+      ]),
+    );
+
+    await startSetupNewOnboardingTaskCommand(buildMockAuth());
+
+    expect(mockEnqueueAutomationRecommendations).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repositoryIds: [
+          'repo-11',
+          'repo-10',
+          'repo-1',
+          'repo-2',
+          'repo-3',
+          'repo-4',
+          'repo-5',
+          'repo-6',
+          'repo-7',
+          'repo-8',
+        ],
+      }),
+    );
+  });
+
+  it('starts recommendations from connected repositories without environment selection', async () => {
+    mockOnboardingTransaction({
+      slackInstallation: null,
+      setupNewState: { selectedRepositoryIds: [] },
+    });
+
+    const result = await startSetupRecommendationsCommand(buildMockAuth());
+
+    expect(result.status).toBe('pending');
+    expect(mockEnqueueAutomationRecommendations).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repositoryIds: ['repo-1'],
       }),
     );
   });

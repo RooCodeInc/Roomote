@@ -47,7 +47,9 @@ export const AUTOMATION_RECOMMENDATIONS_QUEUE_NAME =
 export const AUTOMATION_SIGNAL_PREFETCH_QUEUE_NAME =
   'automation-signal-prefetch';
 export const AUTOMATION_SIGNALS_VERSION = 2;
-export const AUTOMATION_SIGNAL_PREFETCH_CAP = 15;
+export const AUTOMATION_RECOMMENDATION_REPOSITORY_CAP = 10;
+export const AUTOMATION_SIGNAL_PREFETCH_CAP =
+  AUTOMATION_RECOMMENDATION_REPOSITORY_CAP;
 
 const AUTOMATION_SIGNAL_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
 const DEPENDENCY_MANIFEST_NAMES = new Set([
@@ -77,7 +79,7 @@ type GitHubOctokitCache = Map<string, Promise<GitHubOctokit>>;
 
 export const automationRecommendationJobSchema = z.object({
   fingerprint: z.string().min(1),
-  repositoryIds: z.array(z.string().uuid()).min(1),
+  repositoryIds: z.array(z.string().uuid()),
 });
 export type AutomationRecommendationJob = z.infer<
   typeof automationRecommendationJobSchema
