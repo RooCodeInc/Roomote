@@ -92,7 +92,6 @@ vi.mock('@roomote/db/server', () => ({
     value,
   })),
   inArray: vi.fn(),
-  gt: vi.fn(),
   isNotNull: vi.fn(),
   isNull: vi.fn(),
   or: vi.fn(),

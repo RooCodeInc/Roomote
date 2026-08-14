@@ -3,7 +3,6 @@ import {
   db,
   desc,
   eq,
-  gt,
   inArray,
   isNotNull,
   isNull,
@@ -16,7 +15,6 @@ import { activeRunStatuses, type RunStatus } from '@roomote/types';
 
 const LOG_PREFIX = '[standbyRetention]';
 const MS_PER_HOUR = 60 * 60 * 1_000;
-const WAIT_RECOVERY_MARGIN_MS = MS_PER_HOUR;
 const STANDBY_PROVIDERS = ['docker', 'blaxel', 'box', 'azure'] as const;
 
 // Providers whose retained handles are live instances that can (and must) be
@@ -155,7 +153,7 @@ async function getInUseHandles(
   );
 }
 
-async function getProtectedHandles(provider: StandbyProvider, now: Date) {
+async function getProtectedHandles(provider: StandbyProvider) {
   const activeResumeRows = await db
     .select({ handle: taskRuns.sourceSnapshotId })
     .from(taskRuns)
@@ -177,10 +175,6 @@ async function getProtectedHandles(provider: StandbyProvider, now: Date) {
         isNotNull(taskRuns.waitUntil),
         isNull(taskRuns.waitResumedAt),
         isNull(taskRuns.waitResumeRunId),
-        gt(
-          taskRuns.waitUntil,
-          new Date(now.getTime() - WAIT_RECOVERY_MARGIN_MS),
-        ),
       ),
     );
 
@@ -235,7 +229,7 @@ async function enforceProviderRetention(
   const resolvedEnv = await resolveComputeProviderEnvValues(provider);
   const policy = resolveStandbyRetentionPolicy(provider, resolvedEnv);
   const candidates = await getCandidates(provider);
-  const protectedHandles = await getProtectedHandles(provider, now);
+  const protectedHandles = await getProtectedHandles(provider);
   const evicted = selectStandbyEvictions(
     candidates,
     protectedHandles,
@@ -294,12 +288,11 @@ async function enforceProviderRetention(
  */
 async function reSuspendOrphanedStandbys(
   provider: StandbyProvider,
-  now: Date,
 ): Promise<number> {
   const candidates = await getCandidates(provider);
   if (candidates.length === 0) return 0;
 
-  const protectedHandles = await getProtectedHandles(provider, now);
+  const protectedHandles = await getProtectedHandles(provider);
   const inUseHandles = await getInUseHandles(
     provider,
     candidates.map((candidate) => candidate.handle),
@@ -356,7 +349,7 @@ export async function standbyRetentionJob(
       provider,
       removed: await enforceProviderRetention(provider, now),
       resuspended: RE_SUSPEND_PROVIDERS.includes(provider)
-        ? await reSuspendOrphanedStandbys(provider, now)
+        ? await reSuspendOrphanedStandbys(provider)
         : 0,
     })),
   );
