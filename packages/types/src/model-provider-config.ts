@@ -367,7 +367,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gemini-3-7-flash': 'vercel/google/gemini-3.7-flash',
       'deepseek-v4-flash-0731': 'vercel/deepseek/deepseek-v4-flash-0731',
       'deepseek-v4-pro-0813': 'vercel/deepseek/deepseek-v4-pro-0813',
-      'glm-5-2': 'vercel/zai/glm-5.2',
       'kimi-k3': 'vercel/moonshotai/kimi-k3',
       'kimi-k2-7-code': 'vercel/moonshotai/kimi-k2.7-code',
       'qwen3-8-max': 'vercel/alibaba/qwen3.8-max',
@@ -401,7 +400,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gpt-5-6-luna': 'requesty/gpt-5.6-luna@eu',
       'gemini-3-7-flash': 'requesty/gemini-3.7-flash',
       'deepseek-v4-flash-0731': 'requesty/deepseek-v4-flash-0731',
-      'glm-5-2': 'requesty/glm-5.2',
       'kimi-k3': 'requesty/kimi-k3',
       'grok-4-6': 'requesty/grok-4.6',
     }),
@@ -422,7 +420,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     suggestedTaskModels: mapRecommendedTaskModels({
       'deepseek-v4-flash-0731': 'baseten/deepseek-ai/DeepSeek-V4-Flash-0731',
       'deepseek-v4-pro-0813': 'baseten/deepseek-ai/DeepSeek-V4-Pro',
-      'glm-5-2': 'baseten/zai-org/GLM-5.2',
       'kimi-k3': 'baseten/moonshotai/Kimi-K3',
       'kimi-k2-7-code': 'baseten/moonshotai/Kimi-K2.7-Code',
     }),
@@ -438,7 +435,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     authKind: 'api-key',
     suggestedTaskModels: mapRecommendedTaskModels({
       'deepseek-v4-pro-0813': 'togetherai/deepseek-ai/DeepSeek-V4-Pro',
-      'glm-5-2': 'togetherai/zai-org/GLM-5.2',
       'kimi-k3': 'togetherai/moonshotai/Kimi-K3',
       'kimi-k2-7-code': 'togetherai/moonshotai/Kimi-K2.7-Code',
       'minimax-m3': 'togetherai/MiniMaxAI/MiniMax-M3',
@@ -616,7 +612,6 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       // Zen serves the dated Flash release under this stable model alias.
       'deepseek-v4-flash-0731': 'opencode/deepseek-v4-flash',
       'deepseek-v4-pro-0813': 'opencode/deepseek-v4-pro',
-      'glm-5-2': 'opencode/glm-5.2',
       'kimi-k3': 'opencode/kimi-k3',
       'kimi-k2-7-code': 'opencode/kimi-k2.7-code',
       'minimax-m3': 'opencode/minimax-m3',
@@ -758,9 +753,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
         options: ZAI_REGION_OPTIONS,
       },
     ],
-    suggestedTaskModels: mapRecommendedTaskModels({
-      'glm-5-2': 'zai/glm-5.2',
-    }),
+    suggestedTaskModels: [],
     recommendedRoleModels: {
       vision: 'zai/glm-5v-turbo',
     },

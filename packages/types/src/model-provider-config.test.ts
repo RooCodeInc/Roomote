@@ -392,7 +392,7 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     });
   });
 
-  it('recommends GLM 5.3 only from supported providers', () => {
+  it('replaces GLM 5.2 recommendations with GLM 5.3', () => {
     const providersByModel = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
       (provider) => {
         const model = provider.suggestedTaskModels.find(
@@ -413,10 +413,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(getSetupModelProvider('zai-coding-plan').defaultRoomoteModel).toBe(
       'zai-coding-plan/glm-5.3',
     );
-    for (const { providerId } of providersByModel) {
-      expect(
-        getSetupModelProvider(providerId).suggestedTaskModels,
-      ).not.toContainEqual(expect.objectContaining({ displayName: 'GLM 5.2' }));
+    for (const provider of SETUP_MODEL_PROVIDER_CATALOG) {
+      expect(provider.suggestedTaskModels).not.toContainEqual(
+        expect.objectContaining({ displayName: 'GLM 5.2' }),
+      );
     }
   });
 
@@ -846,7 +846,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       'requesty/gpt-5.6-luna@eu',
       'requesty/gemini-3.7-flash',
       'requesty/deepseek-v4-flash-0731',
-      'requesty/glm-5.2',
       'requesty/kimi-k3',
       'requesty/grok-4.6',
     ]);
