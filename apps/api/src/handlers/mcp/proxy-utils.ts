@@ -451,20 +451,16 @@ const OBJECT_ONLY_SCHEMA_KEYWORDS = [
   'dependentSchemas',
 ] as const;
 
-// Keywords that constrain the value in ways a per-type branch split cannot
-// represent (combinators, references, conditionals). A composite union
-// carrying any of these as a sibling is left untouched: splitting it would
-// silently drop the constraint and widen what the schema accepts.
-const UNION_SPLIT_BLOCKING_KEYWORDS = [
-  'anyOf',
-  'oneOf',
-  'allOf',
-  'not',
-  'if',
-  'then',
-  'else',
-  '$ref',
-  '$dynamicRef',
+// Annotation keywords carry no validation semantics; when a union is split
+// they stay on the anyOf wrapper rather than being copied into branches.
+const UNION_ANNOTATION_KEYWORDS = [
+  'description',
+  'title',
+  'default',
+  'examples',
+  'deprecated',
+  'readOnly',
+  'writeOnly',
 ] as const;
 
 const STRING_ONLY_SCHEMA_KEYWORDS = [
@@ -498,6 +494,22 @@ const UNION_BRANCH_KEYWORDS_BY_TYPE: Record<string, readonly string[]> = {
 
 // `enum` and `const` constrain the value itself and stay valid on any branch.
 const UNION_BRANCH_SHARED_KEYWORDS = ['enum', 'const'] as const;
+
+// A composite type union is split ONLY when every keyword it carries is one
+// whose branch placement is understood exactly. Anything else — combinators,
+// references, conditionals, vendor extensions, keywords from a future
+// dialect — means the schema is left untouched. Declining costs at most the
+// pre-normalization status quo (a strict provider may reject that one tool);
+// rewriting wrongly would corrupt the contract for every provider.
+const UNION_SPLIT_UNDERSTOOD_KEYWORDS = new Set<string>([
+  'type',
+  ...UNION_ANNOTATION_KEYWORDS,
+  ...UNION_BRANCH_SHARED_KEYWORDS,
+  ...ARRAY_ONLY_SCHEMA_KEYWORDS,
+  ...OBJECT_ONLY_SCHEMA_KEYWORDS,
+  ...STRING_ONLY_SCHEMA_KEYWORDS,
+  ...NUMERIC_ONLY_SCHEMA_KEYWORDS,
+]);
 
 // Keys whose values are data, not schemas. Recursing into them would rewrite
 // literal values that merely look like schemas (a `default` of
@@ -607,12 +619,15 @@ function normalizeToolSchemaForStrictProviders(
     return schema;
   }
 
-  if (UNION_SPLIT_BLOCKING_KEYWORDS.some((keyword) => keyword in schema)) {
-    // Splitting the union would clobber the sibling constraint, so decline —
+  const unknownKeywords = Object.keys(schema).filter(
+    (key) => !UNION_SPLIT_UNDERSTOOD_KEYWORDS.has(key),
+  );
+  if (unknownKeywords.length > 0) {
+    // Decline rather than risk rewriting semantics we do not fully model —
     // but say so, since strict providers may reject the untouched schema and
     // this log is the only breadcrumb when they do.
     console.warn(
-      '[mcp-proxy] Left composite type union with a sibling combinator, reference, or conditional un-normalized; strict providers may reject this tool schema',
+      `[mcp-proxy] Left composite type union un-normalized; it carries keywords outside the understood set (${unknownKeywords.join(', ')}). Strict providers may reject this tool schema`,
     );
     return schema;
   }
@@ -636,18 +651,30 @@ function normalizeToolSchemaForStrictProviders(
   });
 
   const normalized: Record<string, unknown> = { anyOf: branches };
-  if (typeof sharedKeywords.description === 'string') {
-    normalized.description = sharedKeywords.description;
-  }
-  if ('default' in sharedKeywords) {
-    normalized.default = sharedKeywords.default;
+  for (const keyword of UNION_ANNOTATION_KEYWORDS) {
+    if (keyword in sharedKeywords) {
+      normalized[keyword] = sharedKeywords[keyword];
+    }
   }
   return normalized;
+}
+
+// Kill switch: set R_DISABLE_MCP_SCHEMA_NORMALIZATION=true to pass tool
+// schemas through untouched. This transform runs on every tools/list for
+// every workspace, so a misbehaving rewrite in production must be
+// disableable without a rollback.
+function isSchemaNormalizationDisabled(): boolean {
+  const flag = process.env.R_DISABLE_MCP_SCHEMA_NORMALIZATION?.trim();
+  return flag === 'true' || flag === '1';
 }
 
 function normalizeToolDefinitionInputSchemas<
   T extends { name: string } & Record<string, unknown>,
 >(tools: T[]): T[] {
+  if (isSchemaNormalizationDisabled()) {
+    return tools;
+  }
+
   return tools.map((tool) => {
     const normalized: Record<string, unknown> = { ...tool };
     if ('inputSchema' in normalized) {

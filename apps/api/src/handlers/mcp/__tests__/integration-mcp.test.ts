@@ -147,6 +147,7 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     mockFindEnablement.mockResolvedValue({ disabledTools: null });
     mockGetValidAccessToken.mockResolvedValue('valid-access-token');
   });
@@ -712,6 +713,13 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
                       type: ['array', 'null'],
                       unevaluatedItems: false,
                     },
+                    // Any keyword outside the understood set (vendor
+                    // extensions, future dialects) declines the split.
+                    annotated_list: {
+                      type: ['array', 'null'],
+                      items: { type: 'string' },
+                      'x-order': 3,
+                    },
                   },
                 },
               },
@@ -770,6 +778,63 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     expect(properties.empty_only).toEqual({
       anyOf: [{ type: 'array', unevaluatedItems: false }, { type: 'null' }],
     });
+    expect(properties.annotated_list).toEqual({
+      type: ['array', 'null'],
+      items: { type: 'string' },
+      'x-order': 3,
+    });
+  });
+
+  it('passes schemas through untouched when the kill switch is set', async () => {
+    vi.stubEnv('R_DISABLE_MCP_SCHEMA_NORMALIZATION', 'true');
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-1', userId: null });
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          result: {
+            tools: [
+              {
+                name: 'search_issues',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    tags: {
+                      type: ['array', 'null'],
+                      items: { type: 'string' },
+                    },
+                    bare_list: { type: 'array' },
+                  },
+                },
+              },
+            ],
+          },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp('pylon', createRunToken()),
+      createToolsListRequest(1),
+    );
+    const body = (await response.json()) as {
+      result: {
+        tools: Array<{ inputSchema: { properties: Record<string, unknown> } }>;
+      };
+    };
+
+    expect(response.status).toBe(200);
+    const properties = body.result.tools[0]?.inputSchema.properties ?? {};
+    expect(properties.tags).toEqual({
+      type: ['array', 'null'],
+      items: { type: 'string' },
+    });
+    expect(properties.bare_list).toEqual({ type: 'array' });
   });
 
   it('filters an SSE tools/list whose id is echoed as a different type', async () => {
