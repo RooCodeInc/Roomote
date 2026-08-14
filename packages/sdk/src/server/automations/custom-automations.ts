@@ -142,14 +142,15 @@ These are defaults, not requirements that override the automation request above.
 - When the report has multiple topics, use 2-4 short bold Markdown headings with bullets underneath them.
 - Keep bullets short and put one finding, decision, or action in each bullet.
 - Prioritize decision-useful findings. Omit routine methodology, exhaustive test transcripts, and repeated conclusions unless the request asks for them or they materially support the result.
-- For a clean or no-action result, say so briefly and include only the most useful supporting evidence or caveats.
+- If the request explicitly requires a clean or no-action report, say so briefly and include only the most useful supporting evidence or caveats.
 - Use inline links with descriptive labels instead of raw URLs when possible.${channelGuidance}
 </default_report_presentation>`;
 }
 
 /**
- * Adds default presentation guidance to every custom automation prompt and,
- * when configured, anchors reporting to its destination conversation.
+ * Adds default reporting guidance to every custom automation prompt and,
+ * when configured, makes its destination conversation available for
+ * interruption-worthy results.
  *
  * A custom automation may intentionally omit a report destination. When it
  * does, prefer the admin who created/enabled it as a private fallback so an
@@ -215,7 +216,7 @@ ${presentationGuidance}
   <${promptContext.channelTag}>${destination.channelId}</${promptContext.channelTag}>
 </task_context>
 
-This run is anchored to the ${promptContext.surfaceLabel} conversation above and reports through \`send_chat_reply\`; do not use \`${promptContext.postToolName}\` and do not post anywhere else. Stay silent while work is in flight: send no opening acknowledgement and do not post progress updates. Send a ${promptContext.surfaceLabel} message only for your final result, a durable blocker, or a required user input. Your first message creates this run's thread in that conversation, so make it one self-contained message that stands alone for readers who have not seen this task; later messages and user replies continue that same thread. Write the report as the result itself, like a teammate sharing what they found or did: do not mention this automation, the schedule, the task, or that anything requested the work; the message footer already attributes the automation. Lead with the outcome, not with framing like "Automation requested ..." or "Outcome: ...".${orgWideSuggestionInstruction}`;
+The ${promptContext.surfaceLabel} conversation above is available for reports through \`send_chat_reply\`; do not use \`${promptContext.postToolName}\` and do not post anywhere else. Default to finishing silently. Interrupt the conversation only when there is something a human should see now: a concrete actionable or important finding, a meaningful completed result, a durable blocker, or required user input. Routine success, healthy status, no-change results, and findings that are neither actionable nor important should not produce a message unless the automation request explicitly asks for them. Stay silent while work is in flight: send no opening acknowledgement and do not post progress updates. If you do report, your first message creates this run's thread in that conversation, so make it one self-contained message that stands alone for readers who have not seen this task; later messages and user replies continue that same thread. Write the report as the result itself, like a teammate sharing what they found or did: do not mention this automation, the schedule, the task, or that anything requested the work; the message footer already attributes the automation. Lead with the outcome, not with framing like "Automation requested ..." or "Outcome: ...".${orgWideSuggestionInstruction}`;
 }
 
 async function launchCustomAutomationRow(

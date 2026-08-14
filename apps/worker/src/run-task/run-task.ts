@@ -357,12 +357,6 @@ function isSilentChannelAutomationLaunch(taskRun: {
   );
 }
 
-function requiresLateBoundAutomationCloseout(taskRun: {
-  payload: unknown;
-}): boolean {
-  return hasAutomationWorkItemId(taskRun) || hasCustomAutomationId(taskRun);
-}
-
 function shouldRequireInitialAckOnInitialTurn(taskRun: {
   payloadKind: string;
   payload: unknown;
@@ -1006,14 +1000,6 @@ export const runTask = async ({
                 currentTurnReactionsAllowed:
                   shouldAllowEmojiReactionOnInitialTurn(taskRun),
               }
-            : {}),
-          // Late-bound automation tasks (work-item execution tasks and
-          // custom automation runs) have no inbound Slack turn, but must
-          // still end with one agent-written closeout; the Stop hook blocks
-          // silent completion when this flag is set.
-          ...(!initialTurnMessageTs &&
-          requiresLateBoundAutomationCloseout(taskRun)
-            ? { requiresTerminalCloseoutWithoutTurn: true }
             : {}),
         }),
         'utf8',

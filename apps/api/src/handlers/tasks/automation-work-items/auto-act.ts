@@ -138,9 +138,9 @@ function isLaunchableActWorkItem(
 
 /**
  * Automation scans hand off work as `act` items only: each item launches a
- * silent execution task that posts a single Slack closeout when it has a
- * terminal result. There is no root thread, no per-item Slack messages, and
- * no reaction-based approval flow.
+ * silent execution task that may post one Slack closeout when its outcome is
+ * worth interrupting a human. There is no root thread, no per-item Slack
+ * messages, and no reaction-based approval flow.
  */
 export async function submitAutoActWorkItems(params: {
   userId: string | null;
