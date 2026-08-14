@@ -1,6 +1,6 @@
 import type { AcpUiMessage } from './types';
 
-export interface GoalPromptProvenance {
+interface GoalPromptProvenance {
   objective: string;
   generation: string | null;
 }
