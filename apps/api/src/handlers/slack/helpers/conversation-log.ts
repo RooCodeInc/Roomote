@@ -14,6 +14,7 @@ import {
   desc,
   eq,
   findBackgroundAutomationSlackThread,
+  isNull,
   taskRuns,
   tasks,
   type SlackUserMapping,
@@ -79,7 +80,9 @@ export async function findRoomoteOwnedSlackThread(params: {
     })
     .from(tasks)
     .innerJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
-    .where(eq(tasks.slackThreadTs, params.threadTs))
+    .where(
+      and(eq(tasks.slackThreadTs, params.threadTs), isNull(tasks.deletedAt)),
+    )
     .limit(10);
 
   const existingSlackTaskRuns = existingSlackRows.map((row) => ({
@@ -168,6 +171,7 @@ export async function findRoomoteOwnedSlackThread(params: {
         and(
           eq(tasks.id, sourceTaskId),
           eq(tasks.slackThreadTs, params.threadTs),
+          isNull(tasks.deletedAt),
         ),
       )
       .orderBy(desc(taskRuns.createdAt))

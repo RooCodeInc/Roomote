@@ -132,6 +132,7 @@ export async function findActiveTeamsTaskRun(input: {
         threadMatch,
         inArray(taskRuns.status, [...activeRunStatuses]),
         isNull(taskRuns.canceledAt),
+        isNull(tasks.deletedAt),
       ),
     )
     .orderBy(desc(taskRuns.createdAt))
@@ -157,6 +158,7 @@ export async function findCompletedTeamsTaskRunWithSnapshot(input: {
         threadMatch,
         inArray(taskRuns.status, [RunStatus.Completed]),
         isNull(taskRuns.canceledAt),
+        isNull(tasks.deletedAt),
         sql`${taskRuns.snapshotId} IS NOT NULL`,
         sql`${taskRuns.snapshotCreatedAt} IS NOT NULL`,
       ),
@@ -193,7 +195,14 @@ export async function findLatestTeamsThreadTaskRun(input: {
     })
     .from(taskRuns)
     .innerJoin(tasks, eq(taskRuns.taskId, tasks.id))
-    .where(and(teamsProviderMatch, conversationMatch, threadMatch))
+    .where(
+      and(
+        teamsProviderMatch,
+        conversationMatch,
+        threadMatch,
+        isNull(tasks.deletedAt),
+      ),
+    )
     .orderBy(desc(taskRuns.createdAt))
     .limit(1);
 
@@ -222,6 +231,7 @@ export async function findTaskBackedTeamsAutomationReportRun(input: {
         threadMatch,
         eq(tasks.initiatorKind, 'automation'),
         isNull(taskRuns.canceledAt),
+        isNull(tasks.deletedAt),
       ),
     )
     .orderBy(asc(taskRuns.createdAt))
