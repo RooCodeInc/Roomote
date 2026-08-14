@@ -2,6 +2,28 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.39.1 (2026-08-14)
+
+This patch adds guided automation recommendations during setup and strengthens Goal Mode, chat continuity, snapshots, provider compatibility, and task controls.
+
+### Highlights
+
+- Review and apply repository-aware automation recommendations during setup.
+- Use `/goal` from Discord while keeping objective context intact across follow-ups.
+- Keep chat threads usable when tasks finish silently or are deleted.
+- Improve snapshot recovery, provider compatibility, artifact progress, and model controls.
+
+### Patch changes
+
+- Recommend useful automations during setup based on connected repository activity, with controls to review and apply the recommendations before continuing.
+- Keep chat conversations usable by delivering a fallback response when a task finishes without a final message and releasing Slack, Discord, Teams, and Telegram threads after their task is deleted.
+- Add Discord's `/goal` command for keeping Roomote focused on an objective across multiple turns, while preserving Goal Mode context through follow-ups and keeping internal lifecycle instructions out of agent prompts.
+- Format Discord pull-request review resolutions as subdued status text so action results are easier to distinguish from the main review message.
+- Remove an unused environment endpoint that could expose raw environment configuration while leaving task launches, environment updates, and verification unchanged.
+- Improve provider and agent compatibility by restoring MCP access for judge and advisor agents, recommending GPT 5.6 Luna for GitHub Copilot, reducing expected Modal lookup noise, cleaning up legacy-provider OIDC refreshes, and supporting nullable-array MCP schemas with Gemini.
+- Make environment snapshots more reliable by pacing background refreshes, preserving actionable launch diagnostics, recording failed snapshots accurately, and finalizing runs whose sandboxes disappear before a snapshot completes.
+- Improve task visibility and control with artifact-build progress and direct task links, a clearer responsive model selector, and more concise, structured custom automation reports by default.
+
 ## 0.39.0 (2026-08-13)
 
 This release expands model choice and per-task switching while improving provider setup, task reliability, pull request review delivery, snapshots, Slack conversations, and self-hosted installation.
