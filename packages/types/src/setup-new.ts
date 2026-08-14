@@ -100,6 +100,8 @@ export type AutomationRecommendation = {
   applied?: boolean;
   /** Set while a durable initial-run job owns this recommendation. */
   initialRunClaimedAt?: string | null;
+  /** Terminal marker preventing a paid initial run from being repeated. */
+  initialRunTerminalAt?: string | null;
 };
 
 export type AutomationRecommendationApplicationState =

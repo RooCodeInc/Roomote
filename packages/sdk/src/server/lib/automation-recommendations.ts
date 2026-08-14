@@ -54,7 +54,6 @@ export const AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME =
   'automation-recommendation-initial-runs';
 export const AUTOMATION_SIGNALS_VERSION = 2;
 export const AUTOMATION_RECOMMENDATION_REPOSITORY_CAP = 10;
-const AUTOMATION_RECOMMENDATION_INITIAL_RUN_CLAIM_STALE_MS = 15 * 60 * 1_000;
 const AUTOMATION_SIGNAL_PREFETCH_CAP = AUTOMATION_RECOMMENDATION_REPOSITORY_CAP;
 
 const AUTOMATION_SIGNAL_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
@@ -701,6 +700,7 @@ function mergeRecommendationState(
             automationId: existing.automationId,
             applied: existing.applied,
             initialRunClaimedAt: existing.initialRunClaimedAt,
+            initialRunTerminalAt: existing.initialRunTerminalAt,
           }
         : {
             ...recommendation,
@@ -832,6 +832,7 @@ async function buildRecommendationBatch(
       automationId: null,
       applied: false,
       initialRunClaimedAt: null,
+      initialRunTerminalAt: null,
     })),
   };
 }
@@ -964,18 +965,9 @@ async function claimAutomationRecommendationInitialRun(
       batch.inputFingerprint !== request.fingerprint ||
       recommendationApplicationState(batch) !== 'applied' ||
       !recommendation?.enabled ||
-      recommendation.lastRunTaskId
-    ) {
-      return null;
-    }
-
-    const claimedAt = recommendation.initialRunClaimedAt
-      ? Date.parse(recommendation.initialRunClaimedAt)
-      : Number.NaN;
-    if (
-      Number.isFinite(claimedAt) &&
-      Date.now() - claimedAt <
-        AUTOMATION_RECOMMENDATION_INITIAL_RUN_CLAIM_STALE_MS
+      recommendation.lastRunTaskId ||
+      recommendation.initialRunClaimedAt ||
+      recommendation.initialRunTerminalAt
     ) {
       return null;
     }
@@ -1088,18 +1080,28 @@ export async function runAutomationRecommendationInitialRunJob(
     await updateAutomationRecommendationInitialRun(request, (item) => ({
       ...item,
       initialRunClaimedAt: null,
+      initialRunTerminalAt: new Date().toISOString(),
       ...(result.outcome === 'launched'
         ? { lastRunTaskId: result.taskId }
         : {}),
     }));
   } catch (error) {
     if (launched) {
-      // The task has already been enqueued. Keep the durable claim when the
-      // bookkeeping write fails so a BullMQ retry cannot launch a duplicate.
-      console.error(
-        `[automation-recommendations] Initial run launched for ${request.recommendationId}, but recording its task id failed:`,
-        error,
-      );
+      // The task has already been enqueued. Persist a terminal marker when
+      // possible; if this fallback write also fails, retain the claim. Claims
+      // are never stale-reclaimed, so a retry cannot launch a duplicate.
+      try {
+        await updateAutomationRecommendationInitialRun(request, (item) => ({
+          ...item,
+          initialRunClaimedAt: null,
+          initialRunTerminalAt: new Date().toISOString(),
+        }));
+      } catch (terminalError) {
+        console.error(
+          `[automation-recommendations] Initial run launched for ${request.recommendationId}, but recording its terminal state failed:`,
+          terminalError,
+        );
+      }
       return;
     }
     await updateAutomationRecommendationInitialRun(request, (item) => ({
