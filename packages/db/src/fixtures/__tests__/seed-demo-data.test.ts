@@ -158,6 +158,43 @@ describe('seedDemoData', () => {
     }
   });
 
+  it('repairs incomplete setup state left by an earlier sandbox boot', async () => {
+    const settingsBefore = await db.query.deploymentSettings.findFirst({
+      where: eq(deploymentSettings.id, 'default'),
+    });
+
+    if (settingsBefore) {
+      await db
+        .update(deploymentSettings)
+        .set({ setupCompletedAt: null })
+        .where(eq(deploymentSettings.id, 'default'));
+    } else {
+      await db
+        .insert(deploymentSettings)
+        .values({ id: 'default', setupCompletedAt: null });
+    }
+
+    try {
+      await seedDemoData();
+
+      const settingsAfter = await db.query.deploymentSettings.findFirst({
+        where: eq(deploymentSettings.id, 'default'),
+      });
+      expect(settingsAfter?.setupCompletedAt).not.toBeNull();
+    } finally {
+      if (settingsBefore) {
+        await db
+          .update(deploymentSettings)
+          .set({ setupCompletedAt: settingsBefore.setupCompletedAt })
+          .where(eq(deploymentSettings.id, 'default'));
+      } else {
+        await db
+          .delete(deploymentSettings)
+          .where(eq(deploymentSettings.id, 'default'));
+      }
+    }
+  });
+
   it('is idempotent and leaves existing rows untouched on re-run', async () => {
     await seedDemoData();
 

@@ -122,20 +122,27 @@ export async function seedDemoData(): Promise<DemoSeedSummary> {
   const now = new Date();
 
   // Deployment settings. The web app gates everything behind /setup until the
-  // singleton settings row has `setupCompletedAt`, so a freshly seeded
-  // database also gets setup marked complete. An existing row is never
-  // touched so real setup state is preserved.
+  // singleton settings row has `setupCompletedAt`, so a seeded sandbox gets
+  // setup marked complete. Repair an incomplete singleton left by an earlier
+  // sandbox boot, while preserving every other setting.
   const existingSettings = await db.query.deploymentSettings.findFirst({
     where: eq(deploymentSettings.id, 'default'),
   });
+
+  const setupIncomplete = existingSettings?.setupCompletedAt == null;
 
   if (!existingSettings) {
     await db
       .insert(deploymentSettings)
       .values({ id: 'default', setupCompletedAt: now });
+  } else if (setupIncomplete) {
+    await db
+      .update(deploymentSettings)
+      .set({ setupCompletedAt: now })
+      .where(eq(deploymentSettings.id, 'default'));
   }
 
-  record('deployment settings default', !existingSettings);
+  record('deployment settings default', !existingSettings || setupIncomplete);
 
   // Demo user.
   const demoUser: CreateUser = {

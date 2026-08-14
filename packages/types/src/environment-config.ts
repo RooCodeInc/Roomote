@@ -712,6 +712,12 @@ export const environmentConfigSchema = z
      */
     docker_projects: z.array(dockerProjectSchema).optional(),
     /**
+     * Provision a Docker-capable sandbox without requiring a placeholder
+     * Docker project. Useful for applications that launch containers at
+     * runtime rather than during environment setup.
+     */
+    nested_docker: z.boolean().optional(),
+    /**
      * Optional sandbox OIDC targets for this environment.
      * Tokens are minted by Roomote, written into the sandbox filesystem, and
      * refreshed externally while the sandbox stays active.

@@ -499,7 +499,7 @@ export async function initializeDockerProjects(
 
   const config = options.workspace.environmentConfig;
   const projects = config.docker_projects ?? [];
-  if (projects.length === 0) return;
+  if (projects.length === 0 && config.nested_docker !== true) return;
 
   const baseEnv = getDefinedEnv(options.envVars);
 
@@ -522,6 +522,11 @@ export async function initializeDockerProjects(
     }
 
     throw new Error(message, { cause: error });
+  }
+
+  if (projects.length === 0) {
+    logger.userLog.log('Docker runtime is ready');
+    return;
   }
 
   for (const project of projects) {

@@ -39,6 +39,46 @@ describe('initializeDockerProjects', () => {
     await fs.rm(workspacePath, { recursive: true, force: true });
   });
 
+  it('initializes Docker without starting a placeholder project when requested', async () => {
+    const runCommand = vi.fn().mockResolvedValue({ stdout: '' });
+
+    await initializeDockerProjects(
+      logger,
+      {
+        workspace: {
+          type: 'environment',
+          environmentId: 'env-1',
+          environmentConfig: {
+            name: 'Test',
+            repositories: [{ repository: 'acme/app' }],
+            nested_docker: true,
+          },
+        },
+        envVars: { PATH: '/usr/bin' },
+        taskRunType: TaskPayloadKind.StandardTask,
+      },
+      {
+        workspacePath,
+        repoPaths: { 'acme/app': repositoryPath },
+      },
+      runCommand,
+    );
+
+    expect(runCommand).toHaveBeenCalledTimes(2);
+    expect(runCommand).toHaveBeenCalledWith(
+      'docker',
+      ['info'],
+      expect.objectContaining({ cwd: workspacePath }),
+    );
+    expect(runCommand).toHaveBeenCalledWith(
+      'docker',
+      ['compose', 'version'],
+      expect.objectContaining({ cwd: workspacePath }),
+    );
+    expect(logger.userLog.log).toHaveBeenCalledWith('Docker runtime is ready');
+    expect(startDockerProjectLogFollower).not.toHaveBeenCalled();
+  });
+
   it('validates and starts an existing Compose project after repository cloning', async () => {
     await fs.writeFile(
       path.join(repositoryPath, 'compose.yaml'),
