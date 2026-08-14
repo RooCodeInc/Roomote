@@ -383,13 +383,37 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         getSetupModelProvider('opencode-go'),
       ),
     ).toMatchObject({
-      roomoteModel: 'opencode-go/glm-5.2',
+      roomoteModel: 'opencode-go/glm-5.3',
       roomoteSmallModel: 'opencode-go/gpt-5.6-luna',
       roomoteVisionModel: 'opencode-go/gpt-5.6-luna',
       roomoteCodeReviewModel: 'opencode-go/minimax-m3',
       roomoteExploreModel: 'opencode-go/deepseek-v4-flash',
       roomotePlanningModel: 'opencode-go/qwen3.8-max',
     });
+  });
+
+  it('recommends GLM 5.3 only from supported providers', () => {
+    const providersByModel = SETUP_MODEL_PROVIDER_CATALOG.flatMap(
+      (provider) => {
+        const model = provider.suggestedTaskModels.find(
+          (suggestion) => suggestion.displayName === 'GLM 5.3',
+        );
+
+        return model ? [{ providerId: provider.id, modelId: model.id }] : [];
+      },
+    );
+
+    expect(providersByModel).toEqual([
+      { providerId: 'openrouter', modelId: 'openrouter/z-ai/glm-5.3' },
+      { providerId: 'opencode-go', modelId: 'opencode-go/glm-5.3' },
+      {
+        providerId: 'zai-coding-plan',
+        modelId: 'zai-coding-plan/glm-5.3',
+      },
+    ]);
+    expect(getSetupModelProvider('zai-coding-plan').defaultRoomoteModel).toBe(
+      'zai-coding-plan/glm-5.3',
+    );
   });
 
   it.each([
