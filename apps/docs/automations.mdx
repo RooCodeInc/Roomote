@@ -36,6 +36,17 @@ thread Roomote started and you are talking to the task behind that report,
 without needing to mention Roomote. That works on Slack, Discord, Teams, and
 Telegram, and it works after the run has finished.
 
+## Recommended automations
+
+During setup, Roomote checks connected repositories for recurring work that an
+automation could handle. Admins can review the recommendations, turn individual
+automations on or off, and continue to apply the selected set. Skipping the
+review does not enable anything.
+
+Recommendations are a starting point rather than a fixed policy. After applying
+them, use **Settings > Automations** to adjust schedules, destinations, workspace
+targets, prompts, or models, and to create other automations from scratch.
+
 ## Pull request automations
 
 These automations react to pull requests, issues, and repository state.
@@ -107,6 +118,13 @@ result, or a blocker or question that needs input) starts a thread, later
 updates continue that same thread, and you can reply in the thread to talk to the task.
 There is no progress chatter in between. Without a destination, the run happens
 silently and its results appear only in the task view.
+
+Unless the prompt asks for a different presentation, custom automation reports
+lead with the result, stay concise, and use short Markdown headings and bullets
+when there are several findings. A report sent to chat keeps the essential
+conclusions and actions in its first message; supporting detail can continue in
+thread replies. Explicit instructions in the automation prompt about format,
+length, tone, audience, or detail placement always take precedence.
 
 Direct-message destinations require the automation owner to link an account for
 the selected communications provider and make the bot reachable there.
