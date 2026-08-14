@@ -173,8 +173,11 @@ export function StepAutomationRecommendations({
             ))}
           </div>
           <p>
-            You can manage these (plus many others) and create your own in the{' '}
-            <Zap className="inline size-4 ml-0.5 -mt-0.5" /> Automations page.
+            <p>
+              You can manage these (and dozens of others) and create your own in
+              the <Zap className="inline size-4 ml-0.5 -mt-0.5" /> Automations
+              page.
+            </p>
           </p>
         </div>
       )}
