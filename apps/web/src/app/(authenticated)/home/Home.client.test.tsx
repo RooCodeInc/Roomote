@@ -122,10 +122,6 @@ vi.mock('./OnboardingCard', () => ({
   OnboardingCard: () => <div>Onboarding</div>,
 }));
 
-vi.mock('./AutomationRecommendationsCard', () => ({
-  AutomationRecommendationsCard: () => <div>Automation recommendations</div>,
-}));
-
 vi.mock('./BottomSheetTabs', () => ({
   BottomSheetTabs: () => <div>Tabs</div>,
 }));
