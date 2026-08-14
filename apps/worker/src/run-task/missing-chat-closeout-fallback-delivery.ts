@@ -5,7 +5,7 @@ import type { HarnessLogger } from '../logging';
 import { getChatFallbackDeliveryConfig } from './chat-fallback-delivery-config';
 
 export const EMPTY_CHAT_CLOSEOUT_FALLBACK_TEXT =
-  'Roomote finished this turn without producing a final response. Reply here to continue or open the task for details.';
+  "I'm finished. Is there anything else you'd like me to do?";
 
 export async function deliverMissingChatCloseoutFallback(input: {
   runId: number;
