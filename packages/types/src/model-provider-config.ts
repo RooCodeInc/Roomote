@@ -737,7 +737,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     id: 'zai',
     label: 'Z.AI',
     envVarName: 'ZAI_API_KEY',
-    defaultRoomoteModel: 'zai/glm-5.2',
+    defaultRoomoteModel: 'zai/glm-5',
     authKind: 'api-key',
     credentialHelp: {
       text: 'Paste a platform API key for the selected region. International keys come from the Z.AI API console; China keys come from the Zhipu / BigModel console. Coding Plan membership keys belong on Z.AI Coding Plan, not here.',

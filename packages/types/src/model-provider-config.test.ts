@@ -413,6 +413,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     expect(getSetupModelProvider('zai-coding-plan').defaultRoomoteModel).toBe(
       'zai-coding-plan/glm-5.3',
     );
+    expect(
+      buildRecommendedDeploymentModelConfig(getSetupModelProvider('zai'))
+        .roomoteModel,
+    ).toBe('zai/glm-5');
     for (const provider of SETUP_MODEL_PROVIDER_CATALOG) {
       expect(provider.suggestedTaskModels).not.toContainEqual(
         expect.objectContaining({ displayName: 'GLM 5.2' }),
