@@ -100,9 +100,12 @@ type RoutingFlowState = 'idle' | 'routing_pending' | 'launching';
 type SubmissionSnapshot = {
   branch?: string;
   description?: string;
+  goal?: { objective: string };
   images?: string[];
   blank: boolean;
 };
+
+const GOAL_COMMAND_PATTERN = /^\/goal(?:\s+([\s\S]*))?$/i;
 
 const DEFAULT_FORM_VALUES: CreateTaskFormValues = {
   repository: AUTO_WORKSPACE_VALUE,
@@ -427,6 +430,7 @@ export function Home({
       description?: string;
       images?: string[];
       modelId?: string;
+      goal?: { objective: string };
       blank: boolean;
     }): Promise<boolean> => {
       try {
@@ -434,6 +438,7 @@ export function Home({
           harness: DEFAULT_LAUNCH_CODING_HARNESS,
           model: payload.modelId ?? selectedModelId,
           computeProvider: selectedComputeProvider,
+          goal: payload.goal,
           payload,
         });
 
@@ -561,6 +566,7 @@ export function Home({
             ? routedResult.result.workspace.id
             : undefined,
         description: submission.description,
+        goal: submission.goal,
         images: submission.images,
         modelId: routedModelId,
         blank: submission.blank,
@@ -592,9 +598,25 @@ export function Home({
       }
 
       const text = message.text.trim();
+      const goalCommandMatch = GOAL_COMMAND_PATTERN.exec(text);
+      const goalObjective = goalCommandMatch
+        ? (goalCommandMatch[1] ?? '').trim()
+        : null;
+
+      if (
+        goalObjective !== null &&
+        (!goalObjective || message.files.length > 0)
+      ) {
+        toast.error(
+          message.files.length > 0
+            ? 'Goal Mode does not support attachments.'
+            : 'Describe the goal after /goal.',
+        );
+        return;
+      }
 
       const preparedPrompt = await preparePromptAttachments({
-        text,
+        text: goalObjective ?? text,
         attachments: message.files,
       });
 
@@ -602,6 +624,7 @@ export function Home({
         branch: canSelectBranch ? branch : undefined,
         description:
           preparedPrompt.text.length > 0 ? preparedPrompt.text : undefined,
+        goal: goalObjective === null ? undefined : { objective: goalObjective },
         images: preparedPrompt.images,
         blank: preparedPrompt.text.length === 0,
       };
@@ -616,6 +639,7 @@ export function Home({
         branch: environmentId ? undefined : submission.branch,
         environmentId,
         description: submission.description,
+        goal: submission.goal,
         images: submission.images,
         blank: submission.blank,
       });

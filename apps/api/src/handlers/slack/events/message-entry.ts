@@ -89,6 +89,12 @@ import {
 import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
 import { lookupSlackUserMapping } from '../helpers/user-mapping.js';
 import {
+  findSlackGoalCommandTask,
+  parseSlackGoalCommand,
+  processSlackGoalCommand,
+  type SlackGoalCommand,
+} from '../goal-command.js';
+import {
   compareNumericMessageIds,
   evaluateUnmentionedThreadReplyRouting,
   type UnmentionedThreadHistoryMessage,
@@ -102,6 +108,21 @@ export function isRemovedEvalCommandInvocation(text: string): boolean {
     .replace(/^\s*<@[^>]+>[\s,:;.-]*/u, '')
     .trimStart();
   return REMOVED_EVAL_COMMAND_PATTERN.test(mentionStrippedText);
+}
+
+export function getSlackGoalCommandForEvent(
+  event: SlackEvent,
+): SlackGoalCommand | null {
+  const command = parseSlackGoalCommand(event.text);
+
+  if (
+    !command ||
+    (event.channel_type !== 'im' && event.type !== 'app_mention')
+  ) {
+    return null;
+  }
+
+  return command;
 }
 
 async function postRemovedEvalCommandMessage(params: {
@@ -1541,6 +1562,7 @@ async function handleSlackEntryEvent(params: {
   completionEmoji: string;
   skipThreadFollowupHandling?: boolean;
   prefetchedThreadMessages?: SlackThreadMessage[];
+  goalCommand?: SlackGoalCommand | null;
 }): Promise<void> {
   const {
     event,
@@ -1551,6 +1573,7 @@ async function handleSlackEntryEvent(params: {
     completionEmoji,
     skipThreadFollowupHandling = false,
     prefetchedThreadMessages,
+    goalCommand = null,
   } = params;
 
   if (!event.user) {
@@ -1599,7 +1622,9 @@ async function handleSlackEntryEvent(params: {
 
   const activeRun = skipThreadFollowupHandling
     ? null
-    : await findActiveSlackTaskRun(threadId, { slackTeamId: teamId });
+    : goalCommand
+      ? await findSlackGoalCommandTask(event, teamId)
+      : await findActiveSlackTaskRun(threadId, { slackTeamId: teamId });
   const shouldRecordThreadReply =
     Boolean(event.thread_ts) &&
     !skipThreadFollowupHandling &&
@@ -1620,6 +1645,24 @@ async function handleSlackEntryEvent(params: {
     activeRunId: activeRun?.id,
     activeTaskId: activeRun?.taskId,
   });
+
+  if (goalCommand) {
+    void processSlackGoalCommand({
+      event,
+      slack,
+      teamId,
+      userId: userMapping.userId,
+      taskId: activeRun?.taskId ?? null,
+      threadTs: activeRun?.slackThreadTs ?? threadId,
+      command: goalCommand,
+    }).catch((error) => {
+      console.error(
+        `Failed to process Slack Goal Mode command in thread ${threadId}:`,
+        error instanceof Error ? error.message : String(error),
+      );
+    });
+    return;
+  }
 
   if (!skipThreadFollowupHandling) {
     const followUpRoute = await resolveSlackThreadFollowUpRoute({
@@ -1860,16 +1903,19 @@ export async function handleMessageOrAppMentionEvent(params: {
   )
     ? event
     : null;
+  const goalCommand = getSlackGoalCommandForEvent(event);
 
   const unmentionedThreadReplyRouting: UnmentionedSlackThreadReplyRoutingDecision =
-    event.type === 'message' && event.channel_type !== 'im'
-      ? await shouldRouteUnmentionedSlackThreadReplyToAgent({
-          event,
-          slack: context.slack,
-          slackInstallation: context.slackInstallation,
-          teamId: context.teamId,
-        })
-      : { shouldRoute: false };
+    goalCommand
+      ? { shouldRoute: true, threadMessages: [] }
+      : event.type === 'message' && event.channel_type !== 'im'
+        ? await shouldRouteUnmentionedSlackThreadReplyToAgent({
+            event,
+            slack: context.slack,
+            slackInstallation: context.slackInstallation,
+            teamId: context.teamId,
+          })
+        : { shouldRoute: false };
   const isBotMentionedMessageEvent =
     event.type === 'message' &&
     mentionsSlackBot(event, context.slackInstallation.botUserId);
@@ -1927,5 +1973,6 @@ export async function handleMessageOrAppMentionEvent(params: {
     prefetchedThreadMessages: unmentionedThreadReplyRouting.shouldRoute
       ? unmentionedThreadReplyRouting.threadMessages
       : undefined,
+    goalCommand,
   });
 }

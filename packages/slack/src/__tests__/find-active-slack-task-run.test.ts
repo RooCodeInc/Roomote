@@ -19,6 +19,7 @@ vi.mock('@roomote/db/server', () => {
     tasks: {
       deletedAt: 'tasks.deletedAt',
       id: 'tasks.id',
+      slackChannelId: 'tasks.slackChannelId',
       slackThreadTs: 'tasks.slackThreadTs',
     },
     taskRuns: {
@@ -52,7 +53,10 @@ vi.mock('@roomote/db/server', () => {
 
 import { activeRunStatuses } from '@roomote/types';
 
-import { findActiveSlackTaskRun } from '../find-active-slack-task-run';
+import {
+  findActiveSlackTaskRun,
+  findActiveSlackTaskRunByChannel,
+} from '../find-active-slack-task-run';
 
 describe('findActiveSlackTaskRun', () => {
   beforeEach(() => {
@@ -113,6 +117,43 @@ describe('findActiveSlackTaskRun', () => {
             expect.stringContaining('SELECT count(*)'),
             'T-second',
           ]),
+        }),
+        { inArray: ['taskRuns.status', [...activeRunStatuses]] },
+        { isNull: 'taskRuns.canceledAt' },
+        { isNull: 'tasks.deletedAt' },
+      ],
+    });
+  });
+});
+
+describe('findActiveSlackTaskRunByChannel', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    limitMock.mockResolvedValue([]);
+  });
+
+  it('finds the latest active task for a workspace-scoped DM channel', async () => {
+    limitMock.mockResolvedValueOnce([
+      {
+        id: 42,
+        taskId: 'task-42',
+        status: 'running',
+        slackThreadTs: '111.000',
+      },
+    ]);
+
+    await expect(
+      findActiveSlackTaskRunByChannel('D123', { slackTeamId: 'T-first' }),
+    ).resolves.toMatchObject({
+      id: 42,
+      taskId: 'task-42',
+      slackThreadTs: '111.000',
+    });
+    expect(whereMock).toHaveBeenCalledWith({
+      and: [
+        { eq: ['tasks.slackChannelId', 'D123'] },
+        expect.objectContaining({
+          sql: expect.arrayContaining(['T-first']),
         }),
         { inArray: ['taskRuns.status', [...activeRunStatuses]] },
         { isNull: 'taskRuns.canceledAt' },

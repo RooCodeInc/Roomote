@@ -32,6 +32,11 @@ export type SlackTaskRunLookupScope =
   | { slackTeamId: string; taskId?: string }
   | { taskId: string; slackTeamId?: string };
 
+const activeSlackTaskRunSelection = {
+  ...getTableColumns(taskRuns),
+  slackThreadTs: tasks.slackThreadTs,
+};
+
 export async function findActiveSlackTaskRun(
   slackThreadTs: string,
   scope: SlackTaskRunLookupScope,
@@ -41,7 +46,7 @@ export async function findActiveSlackTaskRun(
   );
 
   const [activeRun] = await db
-    .select(getTableColumns(taskRuns))
+    .select(activeSlackTaskRunSelection)
     .from(taskRuns)
     .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
     .where(
@@ -103,6 +108,30 @@ export async function findActiveSlackTaskRun(
       );
     }
   }
+
+  return activeRun ?? null;
+}
+
+/** Find the latest active task in a Slack DM, whose messages are not always threaded. */
+export async function findActiveSlackTaskRunByChannel(
+  slackChannelId: string,
+  scope: { slackTeamId: string },
+) {
+  const [activeRun] = await db
+    .select(activeSlackTaskRunSelection)
+    .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(
+      and(
+        eq(tasks.slackChannelId, slackChannelId),
+        getSlackTaskRunWorkspacePredicate(scope.slackTeamId),
+        inArray(taskRuns.status, [...activeRunStatuses]),
+        isNull(taskRuns.canceledAt),
+        isNull(tasks.deletedAt),
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt))
+    .limit(1);
 
   return activeRun ?? null;
 }

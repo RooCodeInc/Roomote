@@ -6,6 +6,7 @@ import {
   type LaunchCodingHarness,
   type StandardTask,
   type TaskGoal,
+  type TaskGoalInput,
   RunStatus,
   TaskPayloadKind,
   isExitedRunStatus,
@@ -119,6 +120,7 @@ type CreateStandardTaskRunInput = {
   harness?: LaunchCodingHarness;
   model?: string;
   computeProvider?: ComputeProvider;
+  goal?: TaskGoalInput;
   sourceTaskId?: string;
   sourceArtifactId?: string;
   sourceArtifactPath?: string;
@@ -459,6 +461,7 @@ export async function createStandardTaskRunCommand(
 
     const launchResult = await enqueueTask({
       task,
+      goal: input.goal,
       initiator: { kind: 'user', userId: auth.userId },
       workflow: 'standard',
       surface: 'web',

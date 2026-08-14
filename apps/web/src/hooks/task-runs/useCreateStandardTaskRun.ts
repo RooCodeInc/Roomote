@@ -12,6 +12,7 @@ type ManualTaskRunVariables = {
   harness?: LaunchCodingHarness;
   model?: string;
   computeProvider?: import('@roomote/types').ComputeProvider;
+  goal?: { objective: string; maxContinuations?: number };
   sourceTaskId?: string;
   sourceArtifactId?: string;
   sourceArtifactPath?: string;
