@@ -1096,7 +1096,7 @@ function brainSafeIdentityValue(value: string): string {
     .replace(IDENTITY_EMAIL_PATTERN, '')
     .replace(/<\s*>|\(\s*\)|\[\s*\]|\{\s*\}/g, '')
     .replace(/\s+/g, ' ')
-    .replace(/^[\s,;:|/\\<>()\[\]{}\-–—]+|[\s,;:|/\\<>()\[\]{}\-–—]+$/g, '')
+    .replace(/^[\s,;:|/\\<>(){}\-–—]+|[\s,;:|/\\<>(){}\-–—]+$/g, '')
     .trim();
 }
 
