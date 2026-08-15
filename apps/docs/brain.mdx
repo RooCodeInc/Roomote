@@ -55,6 +55,10 @@ precedence over the deployment's general provider keys.
 With no provider configured anywhere, the Brain stays inert. Agents are not
 told it exists, and nothing is ingested.
 
+Roomote schedules one maintenance pass each night. The gbrain service runs
+gbrain's own durable worker, so synthesis, embedding catch-up, and the rest of
+the maintenance algorithm stay upstream behavior rather than a Roomote fork.
+
 <Note>
   Self-hosted Compose deployments start the Brain from the `brain`
   profile, so set a Brain key in your environment file to bring the container
@@ -124,12 +128,13 @@ matching on keywords alone.
 
 ## Operating it
 
-- **Back up the Brain's volume** along with your database. The corpus lives
-  there.
-- **Losing the volume is recoverable but not free.** Task history and
-  integration sources re-ingest from scratch, and Roomote re-registers its
-  credentials automatically when the Brain no longer recognizes them, but the
-  deployment starts cold until that finishes.
+- **Back up Postgres.** The Brain uses an isolated `gbrain` database in the
+  same Postgres instance as Roomote, so the normal database backup covers the
+  corpus. Its small container volume holds only service configuration and
+  generated bootstrap credentials.
+- **Losing the Brain database is recoverable but not free.** Task history and
+  integration sources re-ingest from scratch, but the deployment starts cold
+  until that finishes.
 - **The Brain has no public route.** It is never exposed to the internet, and
   task sandboxes reach it only through Roomote's API with their run token,
   which grants read access only.

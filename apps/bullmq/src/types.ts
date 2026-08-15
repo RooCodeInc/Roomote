@@ -17,6 +17,7 @@ export enum ScheduledJobName {
   PrReviewNotificationDispatch = 'PrReviewNotificationDispatch',
   BrainOutboxDrain = 'BrainOutboxDrain',
   BrainCollectors = 'BrainCollectors',
+  BrainMaintenance = 'BrainMaintenance',
 }
 
 /**

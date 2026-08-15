@@ -33,6 +33,7 @@ import {
   prReviewNotificationDispatchJob,
   brainOutboxDrainJob,
   brainCollectorsJob,
+  brainMaintenanceJob,
 } from './scheduled-jobs';
 
 const QUEUE_NAME = 'scheduled-jobs';
@@ -207,6 +208,13 @@ async function createJobs(queue: Queue): Promise<void> {
     { every: 15 * 60 * 1000 },
   );
 
+  await queue.upsertJobScheduler(
+    ScheduledJobName.BrainMaintenance,
+    // 07:00 UTC daily. Roomote owns the schedule; gbrain's durable worker
+    // owns the built-in cycle and prevents overlapping work internally.
+    { pattern: '0 7 * * *' },
+  );
+
   const schedulers = await queue.getJobSchedulers();
   console.log('[createJobs] getJobSchedulers ->', schedulers);
 }
@@ -244,6 +252,8 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       return brainOutboxDrainJob();
     case ScheduledJobName.BrainCollectors:
       return brainCollectorsJob();
+    case ScheduledJobName.BrainMaintenance:
+      return brainMaintenanceJob();
     case ScheduledJobName.CustomAutomations:
       await customAutomationsJob();
       return;

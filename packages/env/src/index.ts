@@ -339,6 +339,9 @@ const serverSchema = {
   // queries. Distinct credential class from the ingest token by design: a
   // compromised agent path must be structurally incapable of writes.
   R_GBRAIN_AGENT_TOKEN: z.string().min(1).optional(),
+  // Admin-scoped bearer token used only by the scheduler to enqueue gbrain's
+  // built-in maintenance cycle. Normally Roomote provisions this itself.
+  R_GBRAIN_MAINTENANCE_TOKEN: z.string().min(1).optional(),
   // gbrain's admin bootstrap token, given directly or as a file path (the
   // compose profile mounts the gbrain volume read-only and points this at
   // the token the entrypoint generates). Roomote uses it once, headlessly,
@@ -504,6 +507,7 @@ const OPTIONAL_NON_EMPTY_KEYS = new Set([
   'R_GBRAIN_URL',
   'R_GBRAIN_INGEST_TOKEN',
   'R_GBRAIN_AGENT_TOKEN',
+  'R_GBRAIN_MAINTENANCE_TOKEN',
   'R_GBRAIN_ADMIN_TOKEN',
   'R_GBRAIN_ADMIN_TOKEN_FILE',
   'R_BRAIN_OPENROUTER_API_KEY',

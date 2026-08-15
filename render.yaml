@@ -133,6 +133,10 @@ services:
       mountPath: /data
       sizeGB: 10
     envVars:
+      - key: GBRAIN_DATABASE_URL
+        fromDatabase:
+          name: roomote-postgres
+          property: connectionString
       - key: PORT
         value: 8931
       - key: GBRAIN_PORT

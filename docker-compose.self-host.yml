@@ -284,8 +284,12 @@ services:
     container_name: roomote-gbrain
     build: .docker/gbrain
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks: [default]
     environment:
+      GBRAIN_DATABASE_URL: postgres://postgres:password@postgres:5432/roomote_development
       GBRAIN_ADMIN_BOOTSTRAP_TOKEN: ${GBRAIN_ADMIN_BOOTSTRAP_TOKEN:-}
       # The Brain holds no provider key. It calls back into this deployment,
       # which injects whichever provider key an admin configured in Settings,

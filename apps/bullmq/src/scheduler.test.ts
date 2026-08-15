@@ -60,6 +60,9 @@ vi.mock('./scheduled-jobs', () => ({
   webhookCleanupJob: vi.fn(),
   standbyRetentionJob: vi.fn(),
   prReviewNotificationDispatchJob: vi.fn(),
+  brainOutboxDrainJob: vi.fn(),
+  brainCollectorsJob: vi.fn(),
+  brainMaintenanceJob: vi.fn(),
 }));
 
 import { ScheduledJobName } from './types';
@@ -99,5 +102,14 @@ describe('startScheduler', () => {
     expect(
       mocks.queue.upsertJobScheduler.mock.invocationCallOrder.at(-1),
     ).toBeLessThan(mocks.workerConstructor.mock.invocationCallOrder[0]!);
+  });
+
+  it('schedules Brain maintenance nightly', async () => {
+    await startScheduler();
+
+    expect(mocks.queue.upsertJobScheduler).toHaveBeenCalledWith(
+      ScheduledJobName.BrainMaintenance,
+      { pattern: '0 7 * * *' },
+    );
   });
 });

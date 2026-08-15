@@ -3,7 +3,7 @@ name: roomote
 services:
   postgres:
     container_name: roomote-postgres
-    image: postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302
+    image: pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adfd27b5707128f60956f62a793c3c9326ea8cfaf0eab7adccb5d700b21
     # Publish datastore ports to loopback only so Postgres, Redis, and MinIO are
     # never reachable from another host. The production Caddy overlay resets
     # these to none; use an SSH tunnel or reverse proxy if remote access is
@@ -93,7 +93,11 @@ services:
     container_name: roomote-gbrain
     build: .docker/gbrain
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
+      GBRAIN_DATABASE_URL: postgres://postgres:password@postgres:5432/roomote_development
       GBRAIN_ADMIN_BOOTSTRAP_TOKEN: ${R_GBRAIN_ADMIN_TOKEN:-}
       # The Brain holds no provider key. It calls back into this deployment,
       # which injects whichever provider key an admin configured in Settings,

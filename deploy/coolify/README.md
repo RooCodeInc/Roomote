@@ -102,7 +102,7 @@ follow the image.
 
 | Service         | Image                   | Public domain              | Healthcheck                  |
 | --------------- | ----------------------- | -------------------------- | ---------------------------- |
-| `postgres`      | pinned `postgres:17.5`  | no                         | `pg_isready`                 |
+| `postgres`      | pinned PostgreSQL 17 + pgvector | no                  | `pg_isready`                 |
 | `redis`         | pinned `redis:7-alpine` | no                         | `redis-cli ping`             |
 | `minio`         | pinned MinIO + volume   | yes (routed to port 9000)  | `mc ready local`             |
 | `gbrain`        | `roomote-gbrain:develop` + volume | no (internal only) | `/health` via bun           |
@@ -250,8 +250,8 @@ panel in Coolify:
    `R_BRAIN_OPENROUTER_API_KEY` or `R_BRAIN_OPENAI_API_KEY` in the
    resource's environment variables panel. Those take precedence.
 2. Redeploy the resource. Within a minute the deployment registers its own
-   scoped clients against the Brain (a read-only one for agents, a
-   write-only one for ingestion), backfills the task history it already has,
+   scoped clients against the Brain (read-only agent access, ingestion, and
+   maintenance), backfills the task history it already has,
    and starts delivering the Brain to new tasks. Watch the `bullmq` service
    logs for `[brain] provisioned scoped clients`.
 
@@ -269,15 +269,14 @@ the key is set, because Coolify's compose parser does not honour `profiles`.
 That is a supported state and costs about 370 MB of idle memory. With the
 key empty, agents are told nothing about the Brain and no ingestion runs.
 Deployments that want no memory at all can delete the `gbrain` service and
-the `gbrain_data` volume from the compose file before deploying.
+the `gbrain_data` configuration volume from the compose file before deploying.
 
 Two operational notes:
 
-- **Back up the volume.** `gbrain_data` holds the corpus, so treat it like
-  `pg_data`. Losing it is recoverable — task history and integration
-  sources re-ingest, and Roomote re-registers its clients automatically when
-  the Brain no longer recognizes them — but the deployment starts cold until
-  that finishes.
+- **Back up Postgres.** The corpus lives in an isolated `gbrain` database in
+  the same Postgres instance as Roomote, so the normal `pg_data` backup covers
+  it. `gbrain_data` only holds service configuration and generated bootstrap
+  credentials.
 - **Model choice is a variable, not a rebuild.** `R_BRAIN_MODEL` selects the
   synthesis model and `R_BRAIN_EMBEDDING_MODEL` the embedding model, both in
   your provider's own naming, both set on the app services. Leave them empty for the

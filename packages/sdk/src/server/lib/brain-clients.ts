@@ -99,11 +99,13 @@ async function registerClient(
 export type ProvisionedGbrainClients = {
   agent: { clientId: string; clientSecret: string };
   ingest: { clientId: string; clientSecret: string };
+  maintenance: { clientId: string; clientSecret: string };
 };
 
 /**
- * Register the two Roomote credential classes against a gbrain server:
- * a read-only agent client and a write-capable ingest client. The admin
+ * Register Roomote's three credential classes against a gbrain server:
+ * a read-only agent client, a write-capable ingest client, and an
+ * admin-scoped maintenance client. The admin
  * bootstrap token is used transiently for the session and never stored.
  * Previously provisioned clients (when re-connecting) should be revoked by
  * the caller via revokeGbrainClient, best-effort.
@@ -121,8 +123,14 @@ export async function provisionGbrainClients(
     'roomote-ingest',
     'read write',
   );
+  const maintenance = await registerClient(
+    baseUrl,
+    cookie,
+    'roomote-maintenance',
+    'admin',
+  );
 
-  return { agent, ingest };
+  return { agent, ingest, maintenance };
 }
 
 /** Best-effort revocation of a previously provisioned client. */
@@ -218,7 +226,7 @@ export async function mintGbrainAccessToken(
  * hatch: static tokens win over provisioning when present.
  */
 export async function resolveBrainConnection(
-  role: 'agent' | 'ingest',
+  role: 'agent' | 'ingest' | 'maintenance',
 ): Promise<{ baseUrl: string; token: string } | null> {
   if (!isBrainConfigured(Env)) {
     return null;
@@ -230,8 +238,11 @@ export async function resolveBrainConnection(
     return null;
   }
 
-  const staticToken =
-    role === 'agent' ? Env.R_GBRAIN_AGENT_TOKEN : Env.R_GBRAIN_INGEST_TOKEN;
+  const staticToken = {
+    agent: Env.R_GBRAIN_AGENT_TOKEN,
+    ingest: Env.R_GBRAIN_INGEST_TOKEN,
+    maintenance: Env.R_GBRAIN_MAINTENANCE_TOKEN,
+  }[role];
 
   if (staticToken) {
     return { baseUrl, token: staticToken };
@@ -259,12 +270,16 @@ export async function resolveBrainConnection(
   const mint = async (
     resolved: McpConnectionGbrainConfig,
   ): Promise<{ baseUrl: string; token: string }> => {
-    const clientId =
-      role === 'agent' ? resolved.agentClientId : resolved.ingestClientId;
-    const encryptedSecret =
-      role === 'agent'
-        ? resolved.encryptedAgentClientSecret
-        : resolved.encryptedIngestClientSecret;
+    const clientId = {
+      agent: resolved.agentClientId,
+      ingest: resolved.ingestClientId,
+      maintenance: resolved.maintenanceClientId,
+    }[role];
+    const encryptedSecret = {
+      agent: resolved.encryptedAgentClientSecret,
+      ingest: resolved.encryptedIngestClientSecret,
+      maintenance: resolved.encryptedMaintenanceClientSecret,
+    }[role];
 
     return {
       baseUrl: resolved.url,
@@ -356,6 +371,10 @@ async function provisionAndStoreBrainClients(
       encryptedAgentClientSecret: encrypt(clients.agent.clientSecret),
       ingestClientId: clients.ingest.clientId,
       encryptedIngestClientSecret: encrypt(clients.ingest.clientSecret),
+      maintenanceClientId: clients.maintenance.clientId,
+      encryptedMaintenanceClientSecret: encrypt(
+        clients.maintenance.clientSecret,
+      ),
     };
 
     await db

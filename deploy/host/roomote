@@ -218,10 +218,10 @@ postgres_command() {
 
   if [ -n "$input_file" ]; then
     docker run --rm --network "$(compose_network_name)" --env-file "$env_file" -i \
-      postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302 sh -c "$*" <"$input_file"
+      pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adfd27b5707128f60956f62a793c3c9326ea8cfaf0eab7adccb5d700b21 sh -c "$*" <"$input_file"
   else
     docker run --rm --network "$(compose_network_name)" --env-file "$env_file" \
-      postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302 sh -c "$*"
+      pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adfd27b5707128f60956f62a793c3c9326ea8cfaf0eab7adccb5d700b21 sh -c "$*"
   fi
 }
 
