@@ -1,0 +1,89 @@
+---
+title: Goal Mode
+icon: target
+description: Keep a Roomote task working toward one objective across multiple turns.
+---
+
+Goal Mode keeps a Roomote task focused on one objective when the work may take
+more than a single agent turn. Roomote carries the objective into each turn,
+checks whether the full outcome is complete, and can continue automatically
+when more work remains.
+
+Use Goal Mode for work that has a clear finish line but may require several
+rounds of investigation, implementation, or verification. For a normal scoped
+request that should finish in one turn, send an ordinary task message instead.
+
+## Start Goal Mode
+
+Goal Mode starts on an existing task. The command does not create a new task.
+
+### From the web task view
+
+Enter `/goal` followed by the objective in the task composer:
+
+```text
+/goal Upgrade the API client, update its tests, and open a draft pull request
+```
+
+You can also open the command picker from the composer and select `/goal`.
+Describe the complete outcome after the command. Goal Mode does not accept file
+attachments, so send any supporting files to the task before starting the goal.
+
+### From Discord
+
+In an active Roomote task thread or direct message, run:
+
+```text
+/goal objective:Upgrade the API client, update its tests, and open a draft pull request
+```
+
+If there is no active task, start one with `/new` or mention Roomote first. See
+[Discord](/providers/communications/discord) for the complete task workflow.
+
+## What happens next
+
+The first Goal Mode turn receives the objective as its task instruction. If the
+agent reaches the end of a turn before the objective is complete, Roomote can
+start another turn automatically in the same task and workspace.
+
+By default, a goal can use up to five automatic continuation turns after its
+initial turn. The goal stops earlier when the agent verifies that the complete
+objective is done. It can also stop when the same concrete blocker prevents
+progress across three consecutive goal turns. If neither happens before the
+continuation budget is exhausted, the task settles without claiming the goal is
+complete.
+
+Ordinary follow-up messages in the task keep the active objective in context.
+Starting `/goal` again replaces the previous objective and resets the
+continuation budget for the new goal. If another Goal Mode activation is still
+pending, wait for it to finish before starting a replacement goal.
+
+## Write a useful objective
+
+State the whole outcome and the evidence required to call it complete. Include
+important constraints that should survive every continuation.
+
+Good objectives are specific and verifiable:
+
+- `/goal Reproduce the checkout timeout, fix its root cause, add a regression test, and open a draft pull request`
+- `/goal Audit the onboarding flow on mobile, fix confirmed layout regressions, and verify the final flow in the preview`
+- `/goal Compare the three deployment options, recommend one with costs and tradeoffs, and publish the report as an artifact`
+
+Avoid open-ended objectives such as "keep improving the app." Without a
+concrete finish line, the agent cannot reliably decide when the goal is
+complete.
+
+## When Goal Mode stops
+
+Review the final task message, logs, diff, artifacts, and pull request just as
+you would for any other task. A stopped goal may have one of these outcomes:
+
+- **Complete**: the agent verified the entire objective before closing out.
+- **Blocked**: the same external dependency or required user input prevented
+  progress across three consecutive goal turns.
+- **Continuation limit reached**: the automatic continuation budget ran out
+  before the agent could verify completion.
+
+If the goal stops before the outcome is complete, send the missing information
+or narrow the remaining work, then start a new `/goal` in the same task when
+the existing workspace and context are still useful.
