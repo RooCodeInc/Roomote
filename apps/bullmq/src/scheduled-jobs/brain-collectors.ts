@@ -1069,7 +1069,7 @@ export type PersonIdentityRecord = {
   providers: PersonIdentityProvider[];
 };
 
-export type PersonIdentityReference = { slug: string; title: string };
+type PersonIdentityReference = { slug: string; title: string };
 
 function personIdentitySlug(userId: string): string {
   const digest = createHash('sha256').update(userId).digest('hex').slice(0, 16);
@@ -1416,7 +1416,7 @@ export function selectPersonIdentityBatch(input: {
   };
 }
 
-export const personIdentitiesCollector: BrainCollector = {
+const personIdentitiesCollector: BrainCollector = {
   id: 'person-identities',
   displayName: 'Roomote member identities',
   async isEnabled() {
