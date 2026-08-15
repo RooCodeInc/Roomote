@@ -29,6 +29,7 @@ const MAX_COMMENTS_PER_ISSUE = 20;
 /** Bounds extra API calls: only this many issues per pass get their comments. */
 const MAX_COMMENT_FETCHES_PER_PASS = 30;
 const BACKFILL_PER_PAGE = 50;
+const GITHUB_REPLAY_OVERLAP_MS = 1000;
 
 export type BrainGithubPage = {
   slug: string;
@@ -48,7 +49,7 @@ export type BrainGithubCollectionResult = {
 
 type IncrementalCursor = {
   boundary: string;
-  seen: number[];
+  seen: Array<[number, string]>;
 };
 
 type EligibleRepository = {
@@ -94,13 +95,31 @@ function parseIncrementalCursor(
     return {
       boundary: boundary.toISOString(),
       seen: parsed.seen.filter(
-        (number): number is number =>
-          typeof number === 'number' && Number.isInteger(number) && number > 0,
+        (entry): entry is [number, string] =>
+          Array.isArray(entry) &&
+          typeof entry[0] === 'number' &&
+          Number.isInteger(entry[0]) &&
+          entry[0] > 0 &&
+          typeof entry[1] === 'string',
       ),
     };
   } catch {
     return null;
   }
+}
+
+/** Fields visible without another API call that change the rendered page. */
+function issueRevision(issue: GithubIssue): string {
+  return JSON.stringify([
+    issue.updated_at,
+    issue.title,
+    issue.body,
+    issue.state,
+    issue.comments,
+    issue.closed_at,
+    issue.user?.login,
+    labelNames(issue),
+  ]);
 }
 
 /**
@@ -334,16 +353,19 @@ export async function collectBrainGithubIssues(input: {
         repository.state?.watermark ??
         new Date(input.now.getTime() - 30 * 24 * 60 * 60 * 1000);
       const boundary = cursor ? new Date(cursor.boundary) : since;
-      const querySince = cursor ? new Date(boundary.getTime() - 1) : boundary;
       let progressBoundary = boundary;
-      let seenAtBoundary = new Set(cursor?.seen ?? []);
+      let seenAtBoundary = new Map(cursor?.seen ?? []);
       let apiPage = 1;
-      let exhausted = false;
+      let caughtUp = false;
       const octokit = await getInstallationOctokit({
         installationId: repository.installationId,
       });
 
       while (pages.length < input.limit) {
+        const replayingBoundary = cursor !== null || progressBoundary > since;
+        const querySince = replayingBoundary
+          ? new Date(progressBoundary.getTime() - 1)
+          : progressBoundary;
         const response = await octokit.rest.issues.listForRepo({
           owner,
           repo,
@@ -370,7 +392,7 @@ export async function collectBrainGithubIssues(input: {
           if (
             updatedAtMs < progressBoundary.getTime() ||
             (updatedAtMs === progressBoundary.getTime() &&
-              seenAtBoundary.has(issue.number))
+              seenAtBoundary.get(issue.number) === issueRevision(issue))
           ) {
             continue;
           }
@@ -409,11 +431,11 @@ export async function collectBrainGithubIssues(input: {
 
           if (safeUpdatedAt > progressBoundary) {
             progressBoundary = safeUpdatedAt;
-            seenAtBoundary = new Set();
+            seenAtBoundary = new Map();
           }
 
           if (safeUpdatedAt.getTime() === progressBoundary.getTime()) {
-            seenAtBoundary.add(issue.number);
+            seenAtBoundary.set(issue.number, issueRevision(issue));
           }
         }
 
@@ -421,27 +443,36 @@ export async function collectBrainGithubIssues(input: {
           break;
         }
 
+        // Any progress changes the keyset. Restart at page one so an item
+        // shifted backward by a concurrent update cannot fall behind the
+        // local offset. Exhaustion requires a complete scan with no progress.
+        if (processed.length > 0) {
+          apiPage = 1;
+          continue;
+        }
+
         if (rawIssues.length < 100) {
-          exhausted = true;
+          caughtUp = true;
           break;
         }
 
         apiPage += 1;
       }
 
-      // The cursor is a keyset boundary plus the identities already consumed
-      // at that exact timestamp. Every tick replays from the boundary and
-      // starts API pagination at page one, so mutations can cause duplicate
-      // upserts but cannot move an unread issue behind a persisted offset.
+      // Keep the keyset cursor even after a scan catches up. A mutable offset
+      // can look exhausted after an unread issue shifted into an earlier page;
+      // replaying this boundary next tick makes that issue reachable. The
+      // scheduling watermark can still move forward so quiet repositories do
+      // not starve active ones.
       stateUpdates.push({
         collectorId: repository.stateId,
-        watermark: exhausted ? input.now : progressBoundary,
-        cursor: exhausted
-          ? null
-          : JSON.stringify({
-              boundary: progressBoundary.toISOString(),
-              seen: [...seenAtBoundary].sort((a, b) => a - b),
-            }),
+        watermark: caughtUp
+          ? new Date(input.now.getTime() - GITHUB_REPLAY_OVERLAP_MS)
+          : progressBoundary,
+        cursor: JSON.stringify({
+          boundary: progressBoundary.toISOString(),
+          seen: [...seenAtBoundary].sort(([a], [b]) => a - b),
+        }),
       });
     } catch (error) {
       console.warn(

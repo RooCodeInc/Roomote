@@ -210,30 +210,30 @@ describe('GitHub issue collector progress', () => {
     const now = new Date('2026-08-15T00:00:00Z');
     githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
     githubMocks.syncState.set('github-issues:acme/a', { watermark: start });
-    githubMocks.listForRepo
-      .mockResolvedValueOnce({
-        data: Array.from({ length: 100 }, (_, index) =>
-          makeIssue(index + 1, tiedAt),
-        ),
-      })
-      .mockResolvedValueOnce({
-        data: Array.from({ length: 100 }, (_, index) =>
-          makeIssue(index + 1, tiedAt),
-        ),
-      })
-      .mockResolvedValueOnce({
-        data: [makeIssue(101, tiedAt)],
-      });
+    githubMocks.listForRepo.mockImplementation(
+      async ({ page = 1 }: { page?: number }) => ({
+        data:
+          page === 1
+            ? Array.from({ length: 100 }, (_, index) =>
+                makeIssue(index + 1, tiedAt),
+              )
+            : [makeIssue(101, tiedAt)],
+      }),
+    );
 
     const first = await collectBrainGithubIssues({ now, limit: 100 });
     expect(first.stateUpdates[0]).toMatchObject({
       collectorId: 'github-issues:acme/a',
       watermark: new Date(tiedAt),
     });
-    expect(JSON.parse(first.stateUpdates[0]!.cursor!)).toEqual({
-      boundary: new Date(tiedAt).toISOString(),
-      seen: Array.from({ length: 100 }, (_, index) => index + 1),
-    });
+    const firstCursor = JSON.parse(first.stateUpdates[0]!.cursor!) as {
+      boundary: string;
+      seen: Array<[number, string]>;
+    };
+    expect(firstCursor.boundary).toBe(new Date(tiedAt).toISOString());
+    expect(firstCursor.seen.map(([number]) => number)).toEqual(
+      Array.from({ length: 100 }, (_, index) => index + 1),
+    );
     githubMocks.syncState.set('github-issues:acme/a', {
       watermark: first.stateUpdates[0]!.watermark,
       backfillCursor: first.stateUpdates[0]!.cursor,
@@ -250,13 +250,11 @@ describe('GitHub issue collector progress', () => {
     expect(githubMocks.listForRepo.mock.calls[2]?.[0]).toMatchObject({
       page: 2,
     });
-    expect(second.stateUpdates).toEqual([
-      {
-        collectorId: 'github-issues:acme/a',
-        watermark: now,
-        cursor: null,
-      },
-    ]);
+    expect(second.stateUpdates[0]).toMatchObject({
+      collectorId: 'github-issues:acme/a',
+      watermark: new Date(now.getTime() - 1000),
+    });
+    expect(second.stateUpdates[0]?.cursor).not.toBeNull();
   });
 
   it('replays the keyset boundary when an earlier issue moves between ticks', async () => {
@@ -279,6 +277,9 @@ describe('GitHub issue collector progress', () => {
           makeIssue(101, issueTimes[100]!),
           makeIssue(1, '2026-08-03T00:00:00Z'),
         ],
+      })
+      .mockResolvedValueOnce({
+        data: [makeIssue(1, '2026-08-03T00:00:00Z')],
       });
 
     const first = await collectBrainGithubIssues({ now, limit: 100 });
@@ -296,6 +297,91 @@ describe('GitHub issue collector progress', () => {
       since: new Date(new Date(issueTimes[99]!).getTime() - 1).toISOString(),
       page: 1,
     });
+  });
+
+  it('keeps the keyset when a local offset scan misses a shifted issue', async () => {
+    const start = new Date('2026-08-01T00:00:00Z');
+    const tiedAt = '2026-08-02T00:00:00Z';
+    const now = new Date('2026-08-15T00:00:00Z');
+    const firstPage = Array.from({ length: 100 }, (_, index) =>
+      makeIssue(index + 1, tiedAt),
+    );
+    const shiftedPage = Array.from({ length: 100 }, (_, index) =>
+      makeIssue(index + 2, tiedAt),
+    );
+    githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
+    githubMocks.syncState.set('github-issues:acme/a', { watermark: start });
+    githubMocks.listForRepo
+      .mockResolvedValueOnce({ data: firstPage })
+      // The mutation occurs after this replay: issue 101 shifts into page 1,
+      // while the now-short page 2 incorrectly looks exhausted.
+      .mockResolvedValueOnce({ data: firstPage })
+      .mockResolvedValueOnce({ data: [] })
+      // The durable keyset makes the next tick restart at page 1 and find it.
+      .mockResolvedValueOnce({ data: shiftedPage })
+      .mockResolvedValueOnce({ data: shiftedPage })
+      .mockResolvedValueOnce({ data: [] });
+
+    const first = await collectBrainGithubIssues({ now, limit: 100 });
+    githubMocks.syncState.set('github-issues:acme/a', {
+      watermark: first.stateUpdates[0]!.watermark,
+      backfillCursor: first.stateUpdates[0]!.cursor,
+    });
+
+    const missed = await collectBrainGithubIssues({ now, limit: 100 });
+    expect(missed.pages).toEqual([]);
+    expect(missed.stateUpdates[0]?.cursor).not.toBeNull();
+    githubMocks.syncState.set('github-issues:acme/a', {
+      watermark: missed.stateUpdates[0]!.watermark,
+      backfillCursor: missed.stateUpdates[0]!.cursor,
+    });
+
+    const recovered = await collectBrainGithubIssues({ now, limit: 100 });
+    expect(recovered.pages.map((page) => page.slug)).toEqual([
+      'github/acme/a/issues/101',
+    ]);
+  });
+
+  it('reprocesses a tied issue when its visible revision changes', async () => {
+    const boundary = new Date('2026-08-02T12:00:00Z');
+    const now = new Date('2026-08-15T00:00:00Z');
+    const original = makeIssue(7, boundary.toISOString());
+    const changed = { ...original, comments: 1 };
+    githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
+    githubMocks.syncState.set('github-issues:acme/a', {
+      watermark: boundary,
+      backfillCursor: JSON.stringify({
+        boundary: boundary.toISOString(),
+        seen: [
+          [
+            7,
+            JSON.stringify([
+              original.updated_at,
+              original.title,
+              undefined,
+              undefined,
+              original.comments,
+              undefined,
+              undefined,
+              [],
+            ]),
+          ],
+        ],
+      }),
+    });
+    githubMocks.listForRepo
+      .mockResolvedValueOnce({ data: [changed] })
+      .mockResolvedValueOnce({ data: [changed] });
+
+    const result = await collectBrainGithubIssues({ now, limit: 100 });
+    expect(result.pages.map((page) => page.slug)).toEqual([
+      'github/acme/a/issues/7',
+    ]);
+    expect(result.stateUpdates[0]).toMatchObject({
+      collectorId: 'github-issues:acme/a',
+      watermark: new Date(now.getTime() - 1000),
+    });
+    expect(result.stateUpdates[0]?.cursor).not.toBeNull();
   });
 
   it('backfills a repository connected after the earlier set completed', async () => {
