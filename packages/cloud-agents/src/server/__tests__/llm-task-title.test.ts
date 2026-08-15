@@ -124,6 +124,13 @@ describe('llm-task-title', () => {
     );
     expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
       expect.objectContaining({
+        system: expect.stringContaining(
+          'when the user asks a question, describe the question or investigation as a task',
+        ),
+      }),
+    );
+    expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledWith(
+      expect.objectContaining({
         prompt: expect.stringContaining(
           'Conversation transcript (speaker-labeled):',
         ),

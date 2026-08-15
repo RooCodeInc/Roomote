@@ -28,6 +28,8 @@ const TITLE_SYSTEM_PROMPT = `You write concise task titles for coding conversati
 Return a title only, without punctuation wrappers or commentary.
 Rules:
 - maximum 12 words
+- write a label for the conversation; never answer the user or reply to them
+- when the user asks a question, describe the question or investigation as a task; do not state an inferred answer as the title
 - name the requested work; never assert an outcome or failure state such as failed, blocked, stuck, or missing unless the final message explicitly states that outcome
 - base the title on the full conversation as it evolves, not just the opening or latest message
 - use user messages as the primary source for the task's intention and requested outcome
