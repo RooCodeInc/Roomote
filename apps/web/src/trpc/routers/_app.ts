@@ -1035,6 +1035,7 @@ export const appRouter = createRouter({
           harness: z.enum(launchCodingHarnesses).optional(),
           model: z.string().trim().min(1).optional(),
           computeProvider: z.enum(computeProviders).optional(),
+          goal: taskGoalInputSchema.optional(),
           sourceTaskId: z.string().optional(),
           sourceArtifactId: z.string().uuid().optional(),
           sourceArtifactPath: z.string().optional(),

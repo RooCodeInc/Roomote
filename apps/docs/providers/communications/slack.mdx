@@ -149,6 +149,20 @@ If you want to start tasks by direct message, make sure the app can receive DMs.
 Enable the app surfaces needed for messages to the bot, then keep the
 `message.im` event subscription enabled.
 
+## Start Goal Mode
+
+In an active Roomote task thread, send:
+
+```text
+@Roomote goal <objective>
+```
+
+Replace `Roomote` with your Slack app's installed display name. In an active
+direct-message task conversation, send `goal <objective>` without the mention.
+Slack uses this message command instead of a native slash command so Roomote can
+identify the exact task thread. See [Goal Mode](/goal-mode) for examples and
+cross-surface usage.
+
 ## Local URL changes
 
 Keep the public URL stable. When it changes, update the Slack app's redirect
@@ -162,3 +176,5 @@ restart Roomote with the matching URL.
 3. mention the app in a channel or send it a direct message
 4. confirm Roomote starts a task and replies with a task link
 5. reply in the same thread and confirm the message continues the same task
+6. send `@Roomote goal <objective>` in the thread and confirm Roomote replies
+   with **Goal Mode enabled.**

@@ -368,6 +368,33 @@ describe('createStandardTaskRunCommand', () => {
     );
   });
 
+  it('forwards an initial Goal Mode objective to the task queue', async () => {
+    await createStandardTaskRunCommand(auth, {
+      goal: {
+        objective: 'Ship the release',
+        maxContinuations: 5,
+      },
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: 'Ship the release',
+      },
+    });
+
+    expect(mockEnqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        goal: {
+          objective: 'Ship the release',
+          maxContinuations: 5,
+        },
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            description: 'Ship the release',
+          }),
+        }),
+      }),
+    );
+  });
+
   it('rejects launches without an environment or repository target', async () => {
     const result = await createStandardTaskRunCommand(auth, {
       payload: {

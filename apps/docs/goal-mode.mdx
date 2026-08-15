@@ -15,19 +15,40 @@ request that should finish in one turn, send an ordinary task message instead.
 
 ## Start Goal Mode
 
-Goal Mode starts on an existing task. The command does not create a new task.
+You can start a new web task in Goal Mode or activate Goal Mode on an existing
+task. Activating it on an existing task keeps the current workspace and context.
 
-### From the web task view
+### From the web dashboard
 
-Enter `/goal` followed by the objective in the task composer:
+Enter `/goal` followed by the objective in the new-task input or an active task
+composer:
 
 ```text
 /goal Reduce p95 checkout latency below 120 ms, verified by the checkout benchmark, while keeping the correctness suite green
 ```
 
-You can also open the command picker from the composer and select `/goal`.
+From the new-task input, the command creates the task in Goal Mode immediately.
+From an active task, it sets or replaces the objective without creating a new
+task. You can also open the command picker from the active task composer and
+select `/goal`.
+
 Describe the complete outcome after the command. Goal Mode does not accept file
-attachments, so send any supporting files to the task before starting the goal.
+attachments, so send supporting files in a follow-up message.
+
+### From Slack
+
+In an active Roomote task thread, mention the installed Slack app:
+
+```text
+@Roomote goal Reduce p95 checkout latency below 120 ms while keeping the correctness suite green
+```
+
+Replace `Roomote` with your Slack app's installed display name. In an active
+direct-message task conversation, send `goal <objective>` without the mention.
+Slack uses a message command instead of a native slash command so the request
+stays attached to the exact task thread. If there is no active task, mention the
+app with a normal request first. See
+[Slack](/providers/communications/slack) for the complete task workflow.
 
 ### From Discord
 

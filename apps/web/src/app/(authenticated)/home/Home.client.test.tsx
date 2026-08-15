@@ -19,6 +19,8 @@ let currentEnvironments: Array<{ id: string; name: string }> | undefined = [
   { id: 'env-2', name: 'Secondary Env' },
 ];
 let currentEnvironmentsPending = false;
+let currentPromptText = 'Test prompt';
+let currentPromptFiles: PromptInputMessage['files'] = [];
 
 const {
   mockPush,
@@ -228,8 +230,11 @@ vi.mock('@/components/tasks', async () => {
           if (submitDisabledReason) {
             return;
           }
-          onPromptTextChange?.('Test prompt');
-          const result = onSubmit({ text: 'Test prompt', files: [] });
+          onPromptTextChange?.(currentPromptText);
+          const result = onSubmit({
+            text: currentPromptText,
+            files: currentPromptFiles,
+          });
 
           if (result instanceof Promise) {
             void result.catch(() => {});
@@ -321,6 +326,8 @@ describe('Home', () => {
       { id: 'env-2', name: 'Secondary Env' },
     ];
     currentEnvironmentsPending = false;
+    currentPromptText = 'Test prompt';
+    currentPromptFiles = [];
     localStorage.clear();
     vi.clearAllMocks();
 
@@ -652,6 +659,64 @@ describe('Home', () => {
     });
 
     expect(mockRouteHomeTask).not.toHaveBeenCalled();
+  });
+
+  it('creates an initial Goal Mode task from the new-task input', async () => {
+    currentPromptText = '/goal Ship the release';
+    mockRouteHomeTask.mockResolvedValue(routedEnvironmentSuggestion);
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockRouteHomeTask).toHaveBeenCalledWith({
+        description: 'Ship the release',
+      });
+      expect(mockCreateStandardTaskRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          goal: { objective: 'Ship the release' },
+          payload: expect.objectContaining({
+            description: 'Ship the release',
+          }),
+        }),
+      );
+    });
+  });
+
+  it('rejects an empty Goal Mode command from the new-task input', async () => {
+    currentPromptText = '/goal';
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(
+        'Describe the goal after /goal.',
+      );
+    });
+    expect(mockRouteHomeTask).not.toHaveBeenCalled();
+    expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
+  });
+
+  it('rejects attachments on an initial Goal Mode command', async () => {
+    currentPromptText = '/goal Ship the release';
+    currentPromptFiles = [
+      {} as NonNullable<PromptInputMessage['files']>[number],
+    ];
+
+    render(<Home initialPlaceholderIndex={0} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Submit prompt' }));
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(
+        'Goal Mode does not support attachments.',
+      );
+    });
+    expect(mockRouteHomeTask).not.toHaveBeenCalled();
+    expect(mockCreateStandardTaskRun).not.toHaveBeenCalled();
   });
 
   it('uses opencode as the default harness', async () => {
