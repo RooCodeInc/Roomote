@@ -458,13 +458,16 @@ export async function collectBrainGithubIssues(input: {
                   continue;
                 }
 
+                if (deferredBoundaryProbe) {
+                  continue;
+                }
+
                 if (commentBudget.remaining <= 0) {
                   deferredBoundaryProbe = true;
                   continue;
                 }
 
                 commentBudget.remaining -= 1;
-                commentProbes += 1;
 
                 try {
                   const comments = await fetchIssueComments(
@@ -473,6 +476,7 @@ export async function collectBrainGithubIssues(input: {
                     repo,
                     issue.number,
                   );
+                  commentProbes += 1;
                   prefetchedComments.set(issue.number, comments);
                   const revision = renderedIssueRevision(issue, comments);
                   checkedCommentRevisions.set(issue.number, revision);
@@ -483,6 +487,7 @@ export async function collectBrainGithubIssues(input: {
                 } catch {
                   // Do not suppress or overwrite a page when its comment
                   // revision cannot be checked. Holding the cursor retries it.
+                  deferredBoundaryProbe = true;
                   continue;
                 }
               } else if (seenRevision === renderedIssueRevision(issue, [])) {

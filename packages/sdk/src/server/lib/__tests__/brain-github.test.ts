@@ -539,6 +539,64 @@ describe('GitHub issue collector progress', () => {
     expect(second.pages[0]?.content).toContain('Edited comment');
   });
 
+  it('retries a failed tied comment probe before advancing', async () => {
+    const boundary = new Date('2026-08-02T12:00:00Z');
+    const now = new Date('2026-08-15T00:00:00Z');
+    const tiedIssue = { ...makeIssue(1, boundary.toISOString()), comments: 1 };
+    const newerIssue = makeIssue(2, '2026-08-02T12:00:01Z');
+    const issueFingerprint = JSON.stringify([
+      tiedIssue.updated_at,
+      tiedIssue.title,
+      undefined,
+      undefined,
+      tiedIssue.comments,
+      undefined,
+      undefined,
+      [],
+    ]);
+    githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
+    githubMocks.syncState.set('github-issues:acme/a', {
+      watermark: boundary,
+      backfillCursor: JSON.stringify({
+        boundary: boundary.toISOString(),
+        seen: [[1, JSON.stringify([issueFingerprint, []])]],
+        commentProbeOffset: 0,
+      }),
+    });
+    githubMocks.listForRepo.mockResolvedValue({
+      data: [tiedIssue, newerIssue],
+    });
+    githubMocks.listComments
+      .mockRejectedValueOnce(new Error('temporary GitHub failure'))
+      .mockResolvedValue({
+        data: [
+          {
+            user: { login: 'ada' },
+            body: 'Edited comment',
+            created_at: boundary.toISOString(),
+          },
+        ],
+      });
+
+    const first = await collectBrainGithubIssues({ now, limit: 100 });
+    expect(first.pages).toEqual([]);
+    expect(JSON.parse(first.stateUpdates[0]!.cursor!)).toMatchObject({
+      boundary: boundary.toISOString(),
+      commentProbeOffset: 0,
+    });
+    githubMocks.syncState.set('github-issues:acme/a', {
+      watermark: first.stateUpdates[0]!.watermark,
+      backfillCursor: first.stateUpdates[0]!.cursor,
+    });
+
+    const second = await collectBrainGithubIssues({ now, limit: 100 });
+    expect(second.pages.map((page) => page.slug)).toEqual([
+      'github/acme/a/issues/1',
+      'github/acme/a/issues/2',
+    ]);
+    expect(second.pages[0]?.content).toContain('Edited comment');
+  });
+
   it('backfills a repository connected after the earlier set completed', async () => {
     githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
     githubMocks.listForRepo.mockResolvedValueOnce({ data: [] });
