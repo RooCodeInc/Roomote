@@ -106,10 +106,8 @@ export function isBrainNotReady(error: unknown): boolean {
 
 /**
  * Write one memory page via gbrain's MCP `put_page` op with a write-scoped
- * access token. Synchronous and immediately retrievable, which matters:
- * the `/ingest` webhook path only enqueues jobs whose worker
- * (`gbrain jobs work`) is Postgres-only, so on the PGLite topology those
- * events would never become pages (verified against gbrain 0.45.10.0).
+ * access token. Synchronous and immediately retrievable, so task completion
+ * does not wait behind gbrain's background maintenance queue.
  */
 export async function postToBrain(
   page: IngestPage,

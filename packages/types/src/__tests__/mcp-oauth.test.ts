@@ -6,6 +6,7 @@ import {
   getMcpIntegrationOauthScopeMode,
   getMcpIntegrationOauthScopes,
   isMcpConnectionElevenLabsConfig,
+  isMcpConnectionGbrainConfig,
   LINEAR_APP_OAUTH_SCOPES,
   MONDAY_MCP_READ_ONLY_OAUTH_SCOPES,
   RESEND_DEFAULT_DISABLED_TOOL_NAMES,
@@ -112,6 +113,29 @@ describe('ElevenLabs credential-only integration', () => {
       }),
     ).toBe(false);
     expect(isMcpConnectionElevenLabsConfig({})).toBe(false);
+  });
+});
+
+describe('gbrain connection config', () => {
+  const config = {
+    type: 'gbrain' as const,
+    url: 'http://gbrain:8931',
+    agentClientId: 'agent',
+    encryptedAgentClientSecret: 'encrypted-agent',
+    ingestClientId: 'ingest',
+    encryptedIngestClientSecret: 'encrypted-ingest',
+    maintenanceClientId: 'maintenance',
+    encryptedMaintenanceClientSecret: 'encrypted-maintenance',
+  };
+
+  it('requires the dedicated maintenance credential', () => {
+    expect(isMcpConnectionGbrainConfig(config)).toBe(true);
+    expect(
+      isMcpConnectionGbrainConfig({
+        ...config,
+        maintenanceClientId: undefined,
+      } as never),
+    ).toBe(false);
   });
 });
 

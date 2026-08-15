@@ -191,11 +191,13 @@ export interface McpConnectionGrafanaConfig {
  * service (typically deployment-internal).
  *
  * Provisioned automatically at connect time: the admin supplies gbrain's
- * bootstrap token once (never persisted), and Roomote registers two OAuth
+ * bootstrap token once (never persisted), and Roomote registers three OAuth
  * clients via gbrain's admin API. Scopes are enforced server-side by gbrain:
  * the agent client is `read`-scoped (structurally incapable of mutation; the
  * proxy's tool allowlist is defense-in-depth on top), and the ingest client
- * carries `write` for the server-side ingestion worker only. Secrets are
+ * carries `write` for the server-side ingestion worker only. A third,
+ * admin-scoped maintenance client is held only by the scheduler, which uses
+ * it to enqueue the built-in nightly maintenance cycle. Secrets are
  * encrypted before persistence; short-lived access tokens are minted on
  * demand via the client_credentials grant. R_GBRAIN_* env, when set,
  * overrides this config entirely (operator-managed deployments, static
@@ -208,6 +210,8 @@ export interface McpConnectionGbrainConfig {
   encryptedAgentClientSecret: string;
   ingestClientId: string;
   encryptedIngestClientSecret: string;
+  maintenanceClientId: string;
+  encryptedMaintenanceClientSecret: string;
 }
 
 /**
@@ -989,7 +993,11 @@ export function isMcpConnectionGbrainConfig(
     'ingestClientId' in authConfig &&
     typeof authConfig.ingestClientId === 'string' &&
     'encryptedIngestClientSecret' in authConfig &&
-    typeof authConfig.encryptedIngestClientSecret === 'string',
+    typeof authConfig.encryptedIngestClientSecret === 'string' &&
+    'maintenanceClientId' in authConfig &&
+    typeof authConfig.maintenanceClientId === 'string' &&
+    'encryptedMaintenanceClientSecret' in authConfig &&
+    typeof authConfig.encryptedMaintenanceClientSecret === 'string',
   );
 }
 

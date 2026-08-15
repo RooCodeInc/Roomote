@@ -50,7 +50,7 @@ name: roomote-backup-ci
 
 services:
   postgres:
-    image: postgres:17.5
+    image: pgvector/pgvector:0.8.1-pg17
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password

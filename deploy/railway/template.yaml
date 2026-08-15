@@ -131,6 +131,7 @@ services:
     public_domain: no # private network only; the api service proxies agent access
     volume: /data
     env:
+      GBRAIN_DATABASE_URL: ${{Postgres.DATABASE_URL}}
       # Railway's private network is IPv6-only, so the Brain must bind :: to
       # be reachable at all. Compose deployments keep the 0.0.0.0 default.
       GBRAIN_BIND: '::'
@@ -214,8 +215,8 @@ services:
       # Railway's private network is IPv6-only and never leaves the project,
       # so the Brain is unreachable from the internet by construction.
       R_GBRAIN_URL: http://${{gbrain.RAILWAY_PRIVATE_DOMAIN}}:8931
-      # Roomote uses this once to register its own read-only and write-only
-      # clients against the Brain. Generated here and passed to the gbrain
+      # Roomote uses this once to register its own scoped clients against the
+      # Brain. Generated here and passed to the gbrain
       # service as its bootstrap token; gbrain requires >= 32 characters of
       # [A-Za-z0-9_-], so keep the generated form.
       R_GBRAIN_ADMIN_TOKEN: ${{secret(48)}}

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Brain bootstrap: init-once, then serve or run one maintenance cycle.
+# Brain bootstrap: init-once, then run the HTTP server and durable job worker.
 #
 # Credential provisioning happens over gbrain's admin HTTP API at connect
 # time (Roomote registers its own scoped OAuth clients), so nothing is
@@ -15,7 +15,6 @@ BRAIN_DIR="$DATA_DIR/brain"
 TOKEN_FILE="$DATA_DIR/admin-bootstrap-token"
 CONFIG_FILE="$DATA_DIR/.gbrain/config.json"
 PORT="${GBRAIN_PORT:-8931}"
-PROCESS="${GBRAIN_PROCESS:-serve}"
 # Width of the vector column, fixed when the brain is created. Defaults to
 # text-embedding-3-small, which is what both providers serve by default.
 # Overriding it means overriding the embedding model to match: a column sized
@@ -25,63 +24,52 @@ EMBEDDING_DIMENSIONS="${GBRAIN_EMBEDDING_DIMENSIONS:-1536}"
 
 mkdir -p "$DATA_DIR"
 
-case "$PROCESS" in
-  serve | dream) ;;
-  *)
-    echo "[gbrain-entrypoint] unknown GBRAIN_PROCESS '$PROCESS' (expected serve or dream)" >&2
-    exit 2
-    ;;
-esac
-
 # gbrain keeps its registration in $HOME/.gbrain, not in the data dir.
 # Anchor HOME on the volume so a rebuilt container still knows its brain.
 export HOME="$DATA_DIR"
-
-# A lock present at entrypoint time is always stale: this container runs
-# exactly one gbrain process, and a killed container leaves a lock recording
-# PID 1, which a fresh container's serve (also PID 1) mistakes for live.
-rm -rf "$BRAIN_DIR/.gbrain-lock"
 
 # Hosted deployments reuse their existing Postgres service while keeping the
 # Brain in its own database. gbrain installs database-wide maintenance and RLS
 # machinery in public, so pointing it at Roomote's application database would
 # let its migrations affect application tables. Creating a sibling database
 # gives it an independent public schema without another Railway service.
-if [ -n "${GBRAIN_DATABASE_URL:-}" ]; then
-  GBRAIN_DATABASE_NAME="${GBRAIN_DATABASE_NAME:-gbrain}"
-  case "$GBRAIN_DATABASE_NAME" in
-    *[!A-Za-z0-9_]* | '')
-      echo "[gbrain-entrypoint] GBRAIN_DATABASE_NAME must contain only letters, numbers, and underscores" >&2
-      exit 2
-      ;;
-  esac
+if [ -z "${GBRAIN_DATABASE_URL:-}" ]; then
+  echo "[gbrain-entrypoint] GBRAIN_DATABASE_URL is required (gbrain maintenance needs Postgres)" >&2
+  exit 2
+fi
 
-  DATABASE_SEED_URL="${GBRAIN_DATABASE_BOOTSTRAP_URL:-$GBRAIN_DATABASE_URL}"
-  if [ -n "${GBRAIN_DATABASE_BOOTSTRAP_URL:-}" ]; then
-    DATABASE_BOOTSTRAP_URL="$GBRAIN_DATABASE_BOOTSTRAP_URL"
-  else
-    DATABASE_BOOTSTRAP_URL="$(DATABASE_BOOTSTRAP_URL="$DATABASE_SEED_URL" \
-      bun -e '
-        const url = new URL(Bun.env.DATABASE_BOOTSTRAP_URL);
-        url.pathname = "/postgres";
-        console.log(url.toString());
-      ')"
-  fi
+GBRAIN_DATABASE_NAME="${GBRAIN_DATABASE_NAME:-gbrain}"
+case "$GBRAIN_DATABASE_NAME" in
+  *[!A-Za-z0-9_]* | '')
+    echo "[gbrain-entrypoint] GBRAIN_DATABASE_NAME must contain only letters, numbers, and underscores" >&2
+    exit 2
+    ;;
+esac
 
-  GBRAIN_DATABASE_URL="$(DATABASE_SEED_URL="$DATABASE_SEED_URL" \
-    GBRAIN_DATABASE_NAME="$GBRAIN_DATABASE_NAME" \
+DATABASE_SEED_URL="${GBRAIN_DATABASE_BOOTSTRAP_URL:-$GBRAIN_DATABASE_URL}"
+if [ -n "${GBRAIN_DATABASE_BOOTSTRAP_URL:-}" ]; then
+  DATABASE_BOOTSTRAP_URL="$GBRAIN_DATABASE_BOOTSTRAP_URL"
+else
+  DATABASE_BOOTSTRAP_URL="$(DATABASE_BOOTSTRAP_URL="$DATABASE_SEED_URL" \
     bun -e '
-      const url = new URL(Bun.env.DATABASE_SEED_URL);
-      url.pathname = `/${Bun.env.GBRAIN_DATABASE_NAME}`;
+      const url = new URL(Bun.env.DATABASE_BOOTSTRAP_URL);
+      url.pathname = "/postgres";
       console.log(url.toString());
     ')"
-  export GBRAIN_DATABASE_URL
+fi
 
-  echo "[gbrain-entrypoint] ensuring isolated Postgres database $GBRAIN_DATABASE_NAME"
-  # Both the server and cron service can boot during the first deployment.
-  # A session advisory lock keeps their check-and-create sequence atomic.
-  psql --dbname="$DATABASE_BOOTSTRAP_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 \
-    -v brain_database="$GBRAIN_DATABASE_NAME" <<'SQL'
+GBRAIN_DATABASE_URL="$(DATABASE_SEED_URL="$DATABASE_SEED_URL" \
+  GBRAIN_DATABASE_NAME="$GBRAIN_DATABASE_NAME" \
+  bun -e '
+    const url = new URL(Bun.env.DATABASE_SEED_URL);
+    url.pathname = `/${Bun.env.GBRAIN_DATABASE_NAME}`;
+    console.log(url.toString());
+  ')"
+export GBRAIN_DATABASE_URL
+
+echo "[gbrain-entrypoint] ensuring isolated Postgres database $GBRAIN_DATABASE_NAME"
+psql --dbname="$DATABASE_BOOTSTRAP_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 \
+  -v brain_database="$GBRAIN_DATABASE_NAME" <<'SQL'
 SELECT pg_advisory_lock(hashtext('roomote-gbrain-database-bootstrap')) AS locked \gset
 SELECT format('CREATE DATABASE %I', :'brain_database')
 WHERE NOT EXISTS (
@@ -89,7 +77,6 @@ WHERE NOT EXISTS (
 ) \gexec
 SELECT pg_advisory_unlock(hashtext('roomote-gbrain-database-bootstrap')) AS unlocked \gset
 SQL
-fi
 
 if [ -z "${GBRAIN_ADMIN_BOOTSTRAP_TOKEN:-}" ]; then
   if [ ! -s "$TOKEN_FILE" ]; then
@@ -207,33 +194,22 @@ fi
 # with --no-embedding writes a permanent `embedding_disabled: true` sentinel
 # that blocks every embed callsite, which silently degrades retrieval to
 # lexical-only no matter what model variables are set later.
-if [ -n "${GBRAIN_DATABASE_URL:-}" ] &&
-  grep -q '"engine": *"pglite"' "$CONFIG_FILE" 2>/dev/null; then
+if grep -q '"engine": *"pglite"' "$CONFIG_FILE" 2>/dev/null; then
   echo "[gbrain-entrypoint] replacing the legacy PGLite brain with Postgres"
   rm -rf "$BRAIN_DIR"
   rm -f "$CONFIG_FILE"
 fi
 
 if [ ! -s "$CONFIG_FILE" ]; then
-  if [ -n "${GBRAIN_DATABASE_URL:-}" ]; then
-    ENGINE_LABEL="Postgres"
-    INIT_ENGINE_ARGS=""
-  else
-    ENGINE_LABEL="PGLite"
-    INIT_ENGINE_ARGS="--pglite --path $BRAIN_DIR"
-  fi
-
   if [ "$BRAIN_PROVIDER" = "none" ]; then
-    echo "[gbrain-entrypoint] initializing brain ($ENGINE_LABEL, no provider key: embedding deferred)"
-    # shellcheck disable=SC2086 -- the optional PGLite flags are intentionally split.
-    gbrain init $INIT_ENGINE_ARGS --no-embedding --non-interactive
+    echo "[gbrain-entrypoint] initializing brain (Postgres, no provider key: embedding deferred)"
+    gbrain init --no-embedding --non-interactive
   else
-    echo "[gbrain-entrypoint] initializing brain ($ENGINE_LABEL, embedding: $DEFAULT_EMBEDDING_MODEL)"
+    echo "[gbrain-entrypoint] initializing brain (Postgres, embedding: $DEFAULT_EMBEDDING_MODEL)"
     # --skip-embed-check: the key is not exercised at init time, so a brain
     # still comes up on a temporarily unreachable provider instead of leaving
     # the volume half-initialized.
-    # shellcheck disable=SC2086 -- the optional PGLite flags are intentionally split.
-    gbrain init $INIT_ENGINE_ARGS \
+    gbrain init \
       --embedding-model "$DEFAULT_EMBEDDING_MODEL" \
       --embedding-dimensions "$EMBEDDING_DIMENSIONS" \
       --skip-embed-check \
@@ -298,13 +274,38 @@ if [ -n "$CONFIGURED_DIMENSIONS" ] && [ "$CONFIGURED_DIMENSIONS" != "$EMBEDDING_
   echo "[gbrain-entrypoint] WARNING:   gbrain migrate embeddings --to <provider:model> --yes"
 fi
 
-if [ "$PROCESS" = "dream" ]; then
-  echo "[gbrain-entrypoint] starting one built-in dream maintenance cycle"
-  exec gbrain dream --json
-fi
+echo "[gbrain-entrypoint] starting durable job worker"
+rm -f "$DATA_DIR/gbrain-worker-supervisor.pid"
+gbrain jobs supervisor \
+  --concurrency "${GBRAIN_WORKER_CONCURRENCY:-1}" \
+  --pid-file "$DATA_DIR/gbrain-worker-supervisor.pid" &
+WORKER_PID=$!
 
 echo "[gbrain-entrypoint] starting gbrain serve on :$PORT (full surface)"
 # gbrain binds loopback by default, which no container network can reach.
 # 0.0.0.0 covers Docker/compose; platforms whose private network is IPv6-only
 # (Railway) set GBRAIN_BIND=:: so the service is reachable there.
-exec gbrain serve --http --port "$PORT" --bind "${GBRAIN_BIND:-0.0.0.0}" --surface full
+gbrain serve --http --port "$PORT" --bind "${GBRAIN_BIND:-0.0.0.0}" --surface full &
+SERVER_PID=$!
+
+TERMINATING=0
+stop_processes() {
+  kill -TERM "$SERVER_PID" "$WORKER_PID" 2>/dev/null || true
+}
+trap 'TERMINATING=1; stop_processes' TERM INT
+
+while kill -0 "$SERVER_PID" 2>/dev/null && kill -0 "$WORKER_PID" 2>/dev/null; do
+  sleep 1 &
+  wait $! || true
+done
+
+stop_processes
+wait "$SERVER_PID" 2>/dev/null || true
+wait "$WORKER_PID" 2>/dev/null || true
+
+if [ "$TERMINATING" -eq 1 ]; then
+  exit 0
+fi
+
+echo "[gbrain-entrypoint] server or job worker exited unexpectedly" >&2
+exit 1

@@ -115,9 +115,8 @@ export type BrainSink = (
 
 /**
  * Run every registered collector once, writing collected pages to the brain
- * through the outbox-drain `put_page` path (never gbrain's /ingest webhook:
- * its job worker is Postgres-only, so on the PGLite topology those events
- * would never become pages).
+ * through the outbox-drain `put_page` path so collected pages are immediately
+ * retrievable instead of waiting behind gbrain's maintenance queue.
  *
  * Per collector and per pass: the incremental phase runs first (keeps the
  * brain fresh), then, while the initial deep backfill has not completed, a
