@@ -1,7 +1,15 @@
-import { runFactory, taskFactory, userFactory } from '@roomote/db/server';
+import {
+  automations,
+  db,
+  runFactory,
+  taskFactory,
+  userFactory,
+} from '@roomote/db/server';
 import { TaskPayloadKind } from '@roomote/types';
 
-import { searchTasks } from './tasks';
+import { buildCreatorFilterValue } from '@/lib/task-creator-filter';
+
+import { getTasks, searchTasks } from './tasks';
 
 describe('searchTasks', () => {
   it('returns only the current users tasks by default', async () => {
@@ -117,5 +125,62 @@ describe('searchTasks', () => {
     });
 
     expect(results.map((task) => task.id)).toEqual([myTask.id]);
+  });
+});
+
+describe('getTasks', () => {
+  it('scopes custom automation filters to one actor id', async () => {
+    await db
+      .insert(automations)
+      .values({ key: 'custom_automation', internal: true })
+      .onConflictDoNothing();
+
+    const selectedTask = await taskFactory.create({
+      title: 'Selected custom automation',
+      initiatorKind: 'automation',
+      initiatorUserId: null,
+      initiatorAutomation: 'custom_automation',
+      actorExternalId: 'automation-1',
+      actorDisplayName: 'Weekly flaky-test scan',
+      activityAt: 2_000,
+      timestamp: 2_000,
+    });
+    await runFactory.create({
+      taskId: selectedTask.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+    });
+    const otherTask = await taskFactory.create({
+      title: 'Other custom automation',
+      initiatorKind: 'automation',
+      initiatorUserId: null,
+      initiatorAutomation: 'custom_automation',
+      actorExternalId: 'automation-2',
+      actorDisplayName: 'Daily dependency scan',
+      activityAt: 3_000,
+      timestamp: 3_000,
+    });
+    await runFactory.create({
+      taskId: otherTask.id,
+      payloadKind: TaskPayloadKind.StandardTask,
+    });
+    const filterValue = buildCreatorFilterValue({
+      initiatorKind: 'automation',
+      initiatorUserId: null,
+      initiatorAutomation: 'custom_automation',
+      actorExternalId: 'automation-1',
+    });
+
+    const result = await getTasks({
+      userId: 'unused',
+      filters: [
+        {
+          type: 'userId',
+          value: filterValue!,
+          label: 'Weekly flaky-test scan',
+        },
+      ],
+    });
+
+    expect(result.tasks.map((task) => task.id)).toEqual([selectedTask.id]);
   });
 });

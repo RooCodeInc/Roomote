@@ -1031,7 +1031,10 @@ describe('AutomationsSettings', () => {
       screen.getByRole('link', {
         name: 'View previous runs for Weekly flaky-test scan',
       }),
-    ).toHaveAttribute('href', '/tasks?userId=automation%3Acustom_automation');
+    ).toHaveAttribute(
+      'href',
+      '/tasks?userId=automation%3Acustom_automation%3Aautomation-1',
+    );
     fireEvent.click(
       screen.getByRole('button', { name: 'Run Weekly flaky-test scan now' }),
     );

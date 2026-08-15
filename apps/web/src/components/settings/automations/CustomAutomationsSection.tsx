@@ -13,6 +13,7 @@ import {
 
 import { tryParseCronSchedule } from '@/lib/cron-schedule';
 import { formatDistanceToNowCompact, formatTimeZone } from '@/lib/formatters';
+import { buildCreatorFilterValue } from '@/lib/task-creator-filter';
 import { useTRPC } from '@/trpc/client';
 import type { CustomAutomationListItem } from '@/trpc/commands/automations';
 
@@ -1102,6 +1103,12 @@ export function CustomAutomationsSection() {
                               (option) => option.id === target.channelId,
                             )?.label ?? target.channelId)
                           : target.channelId;
+                const historyFilter = buildCreatorFilterValue({
+                  initiatorKind: 'automation',
+                  initiatorUserId: null,
+                  initiatorAutomation: 'custom_automation',
+                  actorExternalId: row.id,
+                });
 
                 return (
                   <div
@@ -1160,7 +1167,7 @@ export function CustomAutomationsSection() {
                       <BasicTooltip content="View previous runs">
                         <Button asChild size="icon" variant="ghost">
                           <Link
-                            href="/tasks?userId=automation%3Acustom_automation"
+                            href={`/tasks?userId=${encodeURIComponent(historyFilter!)}`}
                             aria-label={`View previous runs for ${row.name}`}
                           >
                             <RotateCcwClock />
