@@ -46,7 +46,13 @@
       },
       {
         "group": "Using Roomote",
-        "pages": ["how-roomote-works", "use-cases", "tasks", "file-attachments"]
+        "pages": [
+          "how-roomote-works",
+          "use-cases",
+          "tasks",
+          "goal-mode",
+          "file-attachments"
+        ]
       },
       {
         "group": "Cookbook",
