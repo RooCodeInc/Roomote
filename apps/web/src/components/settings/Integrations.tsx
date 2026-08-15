@@ -1829,9 +1829,7 @@ export function Integrations() {
           if (integration.id === 'notion') {
             return buildAdminConfiguredIntegrationItem({
               integration,
-              connection: isNotionConnected
-                ? userConnectionMap.get(integration.id)
-                : undefined,
+              connection: notionConnectionSummary,
               orgEnabled: orgEnablementMap.get(integration.id) ?? false,
               highlightedIntegrationId,
               savePending: saveNotionConnection.isPending,

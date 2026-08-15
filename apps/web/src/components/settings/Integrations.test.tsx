@@ -1560,6 +1560,30 @@ describe('Integrations settings', () => {
     ).toBeInTheDocument();
   });
 
+  it('lets admins replace a legacy Notion OAuth connection in place', () => {
+    state.deploymentEnablements = [{ mcpId: 'notion', enabled: true }];
+    state.userConnections = [
+      { id: 'conn-notion', mcpId: 'notion', authStatus: 'authenticated' },
+    ];
+    state.notionConnection = null;
+
+    render(<Integrations />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Edit Notion connection' }),
+    );
+
+    expect(
+      screen.getByRole('heading', { name: 'Connect Notion' }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Notion' }));
+
+    expect(
+      screen.getByText('Internal integration secret is required'),
+    ).toBeInTheDocument();
+    expect(mutations.saveNotionConnection).not.toHaveBeenCalled();
+  });
+
   it('opens the Grafana credential dialog from the integrations page', () => {
     render(<Integrations />);
 
