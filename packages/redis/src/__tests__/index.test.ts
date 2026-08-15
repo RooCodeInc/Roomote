@@ -66,6 +66,20 @@ describe('getRedis', () => {
     expect(options.retryStrategy(100)).toBe(2_000);
   });
 
+  it('provides a separate BullMQ-compatible blocking client', async () => {
+    const { getBullMqRedis, getRedis } = await import('../index');
+
+    const sharedClient = getRedis();
+    const bullMqClient = getBullMqRedis();
+
+    expect(bullMqClient).not.toBe(sharedClient);
+    expect(redisConstructorMock).toHaveBeenNthCalledWith(
+      2,
+      'redis://from-env-object:6379',
+      expect.objectContaining({ maxRetriesPerRequest: null }),
+    );
+  });
+
   it('rate-limits connection errors and summarizes recovery', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-15T03:41:59.000Z'));

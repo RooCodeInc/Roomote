@@ -54,6 +54,7 @@ export async function syncAutoStartChannelCacheBestEffort(params: {
 }
 
 let redis: Redis | null = null;
+let bullMqRedis: Redis | null = null;
 
 const REDIS_MAX_RETRIES_PER_REQUEST = 3;
 const REDIS_MAX_RECONNECT_DELAY_MS = 2_000;
@@ -119,18 +120,32 @@ function resolveRedisUrl(): string {
   return redisUrl;
 }
 
+function createRedis(maxRetriesPerRequest: number | null): Redis {
+  const client = new Redis(resolveRedisUrl(), {
+    maxRetriesPerRequest,
+    connectTimeout: 5000,
+    retryStrategy: (attempt) =>
+      Math.min(attempt * 50, REDIS_MAX_RECONNECT_DELAY_MS),
+  });
+  observeRedisConnectivity(client);
+  return client;
+}
+
 export const getRedis = () => {
   if (!redis) {
-    redis = new Redis(resolveRedisUrl(), {
-      maxRetriesPerRequest: REDIS_MAX_RETRIES_PER_REQUEST,
-      connectTimeout: 5000,
-      retryStrategy: (attempt) =>
-        Math.min(attempt * 50, REDIS_MAX_RECONNECT_DELAY_MS),
-    });
-    observeRedisConnectivity(redis);
+    redis = createRedis(REDIS_MAX_RETRIES_PER_REQUEST);
   }
 
   return redis;
+};
+
+export const getBullMqRedis = () => {
+  if (!bullMqRedis) {
+    // BullMQ blocking connections reject clients with a finite request retry limit.
+    bullMqRedis = createRedis(null);
+  }
+
+  return bullMqRedis;
 };
 
 export { acquireRedisLock, withRedisLock, withContention } from './lock';
