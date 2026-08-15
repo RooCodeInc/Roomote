@@ -747,6 +747,7 @@ describe('Env', () => {
       R_PUBLIC_URL: '',
       R_INSTANCE_ID: '',
       R_STATUSPAGE_INCIDENTS_URL: '',
+      R_BRAIN_EMBEDDING_DIMENSIONS: '',
       R_TEAMS_BOT_APP_ID: '',
       R_TEAMS_BOT_APP_PASSWORD: '',
       R_TEAMS_BOT_TENANT_ID: '',
@@ -777,6 +778,7 @@ describe('Env', () => {
       expect(env.R_PUBLIC_URL).toBeUndefined();
       expect(env.R_INSTANCE_ID).toBeUndefined();
       expect(env.R_STATUSPAGE_INCIDENTS_URL).toBeUndefined();
+      expect(env.R_BRAIN_EMBEDDING_DIMENSIONS).toBeUndefined();
       expect(env.R_TEAMS_BOT_APP_ID).toBeUndefined();
       expect(env.R_TEAMS_BOT_NAME).toBeUndefined();
       expect(env.R_TELEGRAM_BOT_TOKEN).toBeUndefined();
