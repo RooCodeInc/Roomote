@@ -257,6 +257,19 @@ describe('roomote MCP tool descriptions', () => {
     );
   });
 
+  it('documents explicit task steering on manage_tasks', async () => {
+    const { registeredTools } = await importRoomoteMcpServer();
+    const manageTasksTool = getRegisteredTool(registeredTools, 'manage_tasks');
+    const steerField = getInputSchemaField(manageTasksTool, 'steer');
+
+    expect(manageTasksTool.config.description).toContain(
+      'Set steer to true to interrupt the active turn and apply the message immediately; otherwise the message follows the task queue.',
+    );
+    expect(steerField.description).toBe(
+      'For send_message: when true, interrupt the active turn and apply the message immediately. Defaults to false, which follows the task queue.',
+    );
+  });
+
   it('keeps debug actions out of manage_tasks', async () => {
     const { registeredTools } = await importRoomoteMcpServer();
     const manageTasksTool = getRegisteredTool(registeredTools, 'manage_tasks');
