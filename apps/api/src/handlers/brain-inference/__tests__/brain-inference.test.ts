@@ -139,6 +139,57 @@ describe('brain inference gateway', () => {
     });
   });
 
+  it('routes reranking through OpenRouter without exposing its key to gbrain', async () => {
+    const fetchMock = vi.fn(
+      async (_url: string, _init: RequestInit) =>
+        new Response(JSON.stringify({ results: [] }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const body = {
+      model: 'cohere/rerank-v3.5',
+      query: 'Which result is relevant?',
+      documents: ['relevant', 'unrelated'],
+      top_n: 2,
+    };
+    const response = await post('/v1/rerank', {
+      token: GATEWAY_TOKEN,
+      body,
+    });
+
+    expect(response.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe('https://openrouter.ai/api/v1/rerank');
+    expect((init.headers as Headers).get('authorization')).toBe(
+      `Bearer ${OPENROUTER.apiKey}`,
+    );
+    expect(JSON.parse(init.body as string)).toEqual(body);
+  });
+
+  it('reports reranking as unavailable when only OpenAI is configured', async () => {
+    mockResolveBrainInferenceProvider.mockResolvedValue({
+      providerId: 'openai',
+      apiKey: 'sk-openai-provider-key',
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await post('/v1/rerank', {
+      token: GATEWAY_TOKEN,
+      body: {
+        model: 'cohere/rerank-v3.5',
+        query: 'query',
+        documents: ['document'],
+      },
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining('OpenRouter'),
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('surfaces an unreachable provider as 502 rather than a crash', async () => {
     vi.stubGlobal(
       'fetch',
