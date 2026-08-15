@@ -3,11 +3,13 @@ import { TaskEventName, type TaskEvent } from '@roomote/types';
 const {
   mockCancelPendingMissingChatCloseoutFallback,
   mockRecordMissingChatCloseoutFallback,
+  mockRecordMissingChatCloseoutToolActivity,
   mockDeliverShowWidgetFallback,
   mockWaitForMissingChatCloseoutFallbackDelivery,
 } = vi.hoisted(() => ({
   mockCancelPendingMissingChatCloseoutFallback: vi.fn(),
   mockRecordMissingChatCloseoutFallback: vi.fn(),
+  mockRecordMissingChatCloseoutToolActivity: vi.fn(),
   mockDeliverShowWidgetFallback: vi.fn().mockResolvedValue(undefined),
   mockWaitForMissingChatCloseoutFallbackDelivery: vi
     .fn()
@@ -32,6 +34,8 @@ vi.mock('../missing-chat-closeout-fallback-settlement', () => ({
   cancelPendingMissingChatCloseoutFallback:
     mockCancelPendingMissingChatCloseoutFallback,
   recordMissingChatCloseoutFallback: mockRecordMissingChatCloseoutFallback,
+  recordMissingChatCloseoutToolActivity:
+    mockRecordMissingChatCloseoutToolActivity,
   waitForMissingChatCloseoutFallbackDelivery:
     mockWaitForMissingChatCloseoutFallbackDelivery,
 }));
@@ -140,6 +144,7 @@ describe('subscribeHarnessCallbacks', () => {
     captureWorkerExceptionMock.mockClear();
     mockCancelPendingMissingChatCloseoutFallback.mockClear();
     mockRecordMissingChatCloseoutFallback.mockClear();
+    mockRecordMissingChatCloseoutToolActivity.mockClear();
     mockWaitForMissingChatCloseoutFallbackDelivery.mockClear();
     mockDeliverShowWidgetFallback.mockClear();
   });
@@ -711,6 +716,13 @@ describe('subscribeHarnessCallbacks', () => {
 
     expect(mockCancelPendingMissingChatCloseoutFallback).toHaveBeenCalledWith(
       context,
+    );
+    expect(mockRecordMissingChatCloseoutToolActivity).toHaveBeenCalledWith(
+      context,
+      {
+        toolCallId: 'call-raw-output',
+        status: 'completed',
+      },
     );
     expect(recordMessageEnvelopeMock).not.toHaveBeenCalled();
 

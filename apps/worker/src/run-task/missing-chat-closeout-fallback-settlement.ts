@@ -13,6 +13,7 @@ interface PendingMissingChatCloseoutFallback {
 interface MissingChatCloseoutFallbackState {
   pending: PendingMissingChatCloseoutFallback | null;
   settledCompletionIds: Set<string>;
+  activeToolCallIds: Set<string>;
   deliveryTimer: ReturnType<typeof setTimeout> | null;
   deliveryWork: Set<Promise<void>>;
 }
@@ -20,6 +21,13 @@ interface MissingChatCloseoutFallbackState {
 // OpenCode can emit a stale idle before trailing tool activity reaches Roomote.
 // Give that activity a chance to cancel the otherwise-terminal fallback.
 const MISSING_CHAT_CLOSEOUT_FALLBACK_GRACE_MS = 5_000;
+const TERMINAL_TOOL_STATUSES = new Set([
+  'canceled',
+  'cancelled',
+  'completed',
+  'error',
+  'failed',
+]);
 
 const stateByContext = new WeakMap<
   RunTaskContext,
@@ -35,6 +43,7 @@ function getState(context: RunTaskContext): MissingChatCloseoutFallbackState {
   const state: MissingChatCloseoutFallbackState = {
     pending: null,
     settledCompletionIds: new Set(),
+    activeToolCallIds: new Set(),
     deliveryTimer: null,
     deliveryWork: new Set(),
   };
@@ -53,9 +62,14 @@ function clearDeliveryTimer(state: MissingChatCloseoutFallbackState): void {
 
 function startDeliveryNowIfSettled(
   state: MissingChatCloseoutFallbackState,
+  options?: { allowActiveTools?: boolean },
 ): Promise<void> | null {
   const pending = state.pending;
-  if (!pending || !state.settledCompletionIds.has(pending.completionId)) {
+  if (
+    !pending ||
+    !state.settledCompletionIds.has(pending.completionId) ||
+    (!options?.allowActiveTools && state.activeToolCallIds.size > 0)
+  ) {
     return null;
   }
 
@@ -76,7 +90,8 @@ function scheduleDeliveryIfSettled(
   if (
     state.deliveryTimer ||
     !pending ||
-    !state.settledCompletionIds.has(pending.completionId)
+    !state.settledCompletionIds.has(pending.completionId) ||
+    state.activeToolCallIds.size > 0
   ) {
     return;
   }
@@ -115,6 +130,19 @@ export function cancelPendingMissingChatCloseoutFallback(
   state.settledCompletionIds.clear();
 }
 
+export function recordMissingChatCloseoutToolActivity(
+  context: RunTaskContext,
+  input: { toolCallId: string; status: string | null },
+): void {
+  const state = getState(context);
+  if (input.status && TERMINAL_TOOL_STATUSES.has(input.status)) {
+    state.activeToolCallIds.delete(input.toolCallId);
+    return;
+  }
+
+  state.activeToolCallIds.add(input.toolCallId);
+}
+
 export async function settleMissingChatCloseoutFallback(
   context: RunTaskContext,
   completionId: string,
@@ -133,7 +161,7 @@ export async function waitForMissingChatCloseoutFallbackDelivery(
   }
 
   clearDeliveryTimer(state);
-  await startDeliveryNowIfSettled(state);
+  await startDeliveryNowIfSettled(state, { allowActiveTools: true });
 
   while (state.deliveryWork.size > 0) {
     await Promise.allSettled([...state.deliveryWork]);

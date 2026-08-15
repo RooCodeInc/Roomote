@@ -1,4 +1,5 @@
 import {
+  ACP_ENVELOPE_EVENT_TYPES,
   ACP_LIVE_EVENT_TYPES,
   type AcpPersistedEnvelope,
   type AcpTurnCompletedEvent,
@@ -22,6 +23,7 @@ import { fromRuntimeEnvelope } from './runtime-events/envelope';
 import {
   cancelPendingMissingChatCloseoutFallback,
   recordMissingChatCloseoutFallback,
+  recordMissingChatCloseoutToolActivity,
   waitForMissingChatCloseoutFallbackDelivery,
 } from './missing-chat-closeout-fallback-settlement';
 import { deliverShowWidgetFallback } from './show-widget-fallback-delivery';
@@ -29,6 +31,10 @@ import { deliverShowWidgetFallback } from './show-widget-fallback-delivery';
 const NON_ACTIVITY_RUNTIME_EVENT_TYPES = new Set<string>(
   Object.values(ACP_LIVE_EVENT_TYPES),
 );
+const TOOL_RUNTIME_EVENT_TYPES = new Set<string>([
+  ACP_ENVELOPE_EVENT_TYPES.ToolCall,
+  ACP_ENVELOPE_EVENT_TYPES.ToolCallUpdate,
+]);
 
 interface PendingCompletionEvents {
   callbackTaskId: string;
@@ -309,6 +315,20 @@ export function subscribeHarnessCallbacks({
   );
 
   const unsubscribeRuntimeOutput = harness.subscribeRuntimeOutput((event) => {
+    if (TOOL_RUNTIME_EVENT_TYPES.has(event.eventType)) {
+      const metadata = asRecord(event.metadata);
+      const payload = asRecord(event.payload);
+      const toolCallId =
+        asString(metadata?.toolCallId) ?? asString(payload?.toolCallId);
+      if (toolCallId) {
+        recordMissingChatCloseoutToolActivity(context, {
+          toolCallId,
+          status:
+            asString(metadata?.status) ?? asString(payload?.status) ?? null,
+        });
+      }
+    }
+
     if (!NON_ACTIVITY_RUNTIME_EVENT_TYPES.has(event.eventType)) {
       cancelPendingMissingChatCloseoutFallback(context);
     }

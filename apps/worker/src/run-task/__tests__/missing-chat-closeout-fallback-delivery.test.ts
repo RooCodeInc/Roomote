@@ -148,7 +148,7 @@ describe('deliverMissingChatCloseoutFallback', () => {
     vi.useRealTimers();
   });
 
-  it('cancels a settled fallback through the runtime subscription path', async () => {
+  it('does not deliver a fallback while a tool started before completion is active', async () => {
     vi.useFakeTimers();
     const context = {};
     let outputListener: ((event: unknown) => void) | undefined;
@@ -173,6 +173,12 @@ describe('deliverMissingChatCloseoutFallback', () => {
       logger,
       mcpTaskEnv,
     });
+    outputListener?.({
+      eventType: 'roomote_runtime.tool_call_update',
+      metadata: { toolCallId: 'tool-before-completion', status: 'in_progress' },
+      payload: { toolCallId: 'tool-before-completion', status: 'in_progress' },
+      role: 'tool',
+    });
     taskListener?.({
       eventName: TaskEventName.TaskCompleted,
       payload: [
@@ -190,15 +196,17 @@ describe('deliverMissingChatCloseoutFallback', () => {
       context,
       'completion-with-late-tool-activity',
     );
+    await vi.runAllTimersAsync();
+
+    expect(replyToChatThread).not.toHaveBeenCalled();
 
     outputListener?.({
       eventType: 'roomote_runtime.tool_call_update',
-      role: 'assistant',
+      metadata: { toolCallId: 'tool-before-completion', status: 'completed' },
+      payload: { toolCallId: 'tool-before-completion', status: 'completed' },
+      role: 'tool',
     });
-    await vi.runAllTimersAsync();
     await unsubscribe();
-
-    expect(replyToChatThread).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 
