@@ -143,7 +143,7 @@ services:
       # goes over the public origin, exactly as TRPC_URL already does.
       OPENAI_BASE_URL: https://${{api.RAILWAY_PUBLIC_DOMAIN}}/api/brain/inference
       OPENAI_API_KEY: ${{api.R_BRAIN_GATEWAY_TOKEN}}
-      GBRAIN_RERANKER_MODEL: openrouter:cohere/rerank-v3.5
+      GBRAIN_RERANKER_MODEL: openrouter:voyageai/rerank-2.5-lite
       # Create-time, and it has to be the container that receives these: the
       # embedding model and its width are decided when the Brain is created,
       # and the gateway must never substitute a different one afterwards.
