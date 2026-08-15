@@ -32,10 +32,12 @@ export type SlackTaskRunLookupScope =
   | { slackTeamId: string; taskId?: string }
   | { taskId: string; slackTeamId?: string };
 
-const activeSlackTaskRunSelection = {
-  ...getTableColumns(taskRuns),
-  slackThreadTs: tasks.slackThreadTs,
-};
+function getActiveSlackTaskRunSelection() {
+  return {
+    ...getTableColumns(taskRuns),
+    slackThreadTs: tasks.slackThreadTs,
+  };
+}
 
 export async function findActiveSlackTaskRun(
   slackThreadTs: string,
@@ -46,7 +48,7 @@ export async function findActiveSlackTaskRun(
   );
 
   const [activeRun] = await db
-    .select(activeSlackTaskRunSelection)
+    .select(getActiveSlackTaskRunSelection())
     .from(taskRuns)
     .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
     .where(
@@ -118,7 +120,7 @@ export async function findActiveSlackTaskRunByChannel(
   scope: { slackTeamId: string },
 ) {
   const [activeRun] = await db
-    .select(activeSlackTaskRunSelection)
+    .select(getActiveSlackTaskRunSelection())
     .from(taskRuns)
     .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
     .where(
