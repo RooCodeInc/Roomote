@@ -452,6 +452,10 @@ export function groupSlackMessagesIntoDayPages(
           slug: `slack/${group.teamId}/${group.channelId}/${group.day}/${firstTs}-${lastTs}`,
           title: `#${group.channelName} — ${group.day}`,
           content: [
+            '---',
+            `date: ${group.day}`,
+            '---',
+            '',
             `Slack public channel #${group.channelName} (${group.channelId}), messages on ${group.day} (times UTC).`,
             '',
             ...lines,
