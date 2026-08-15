@@ -1184,24 +1184,30 @@ export const runTask = async ({
         reason?: string;
       }) => {
         const clientMessageId = delivery?.clientMessageId;
-        if (
-          result.shouldReconnect ||
-          delivery?.kind !== 'queuedPrompt' ||
-          !clientMessageId?.startsWith('slack:')
-        ) {
+        if (result.shouldReconnect || delivery?.kind !== 'queuedPrompt') {
           return result;
         }
 
         try {
+          if (!clientMessageId?.startsWith('slack:')) {
+            await sdk.taskRuns.clearActiveSlackReplyTarget({
+              runId: taskRun.id,
+            });
+            delete context.slackReplyTarget;
+            return result;
+          }
+
           const activeTarget = await sdk.taskRuns.activateSlackReplyTarget({
             runId: taskRun.id,
             messageTs: clientMessageId.slice('slack:'.length),
           });
           if (!activeTarget) {
+            delete context.slackReplyTarget;
             logger.warn(
               `[runTask] Slack reply target authorization is missing for ${clientMessageId}; delivering with canonical routing`,
             );
           } else {
+            context.slackReplyTarget = activeTarget;
             recordChatTurnStart({
               turnMessageTs: clientMessageId.slice('slack:'.length),
               allowReaction: activeTarget.reactionsAllowed,

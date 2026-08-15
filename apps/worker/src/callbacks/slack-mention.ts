@@ -20,6 +20,7 @@ import { type TaskRun, sdk } from '@roomote/sdk/client';
 
 import type {
   CallbackEvent,
+  CallbackDeliveryContext,
   RunTaskCallbacks,
   RunTaskContext,
 } from '../run-task';
@@ -96,7 +97,15 @@ function getSlackRequestUserInputReplyTargets(
 
 async function resolveSlackConversation(
   taskRun: TaskRun,
+  replyTarget?: NonNullable<CallbackDeliveryContext['slackReplyTarget']>,
 ): Promise<SlackConversation> {
+  if (replyTarget) {
+    return {
+      channel: replyTarget.channel,
+      thread_ts: replyTarget.threadTs,
+    };
+  }
+
   try {
     const activeTarget = await sdk.taskRuns.getActiveSlackReplyTarget({
       runId: taskRun.id,
@@ -274,13 +283,19 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
     _taskId: string,
     event: CallbackEvent,
     context: RunTaskContext,
+    deliveryContext?: CallbackDeliveryContext,
   ) => {
     if (event.type === 'completion') {
       await handleCompletion(taskRun, event, context);
     }
 
     if (event.type === 'request_user_input') {
-      await handleRequestUserInput(taskRun, event, context);
+      await handleRequestUserInput(
+        taskRun,
+        event,
+        context,
+        deliveryContext?.slackReplyTarget,
+      );
     }
 
     if (event.type === 'request_user_input_response') {
@@ -288,7 +303,12 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
     }
 
     if (event.type === 'followup') {
-      await handleFollowup(taskRun, event, context);
+      await handleFollowup(
+        taskRun,
+        event,
+        context,
+        deliveryContext?.slackReplyTarget,
+      );
     }
   },
   onExit: async (taskRun: TaskRun, _status, context: RunTaskContext) => {
@@ -373,6 +393,7 @@ async function handleRequestUserInput(
   taskRun: TaskRun,
   event: CallbackEvent & { type: 'request_user_input' },
   context: RunTaskContext,
+  replyTarget?: NonNullable<CallbackDeliveryContext['slackReplyTarget']>,
 ) {
   const postedSignatures = getRequestUserInputPromptSignatures(context);
   const promptMessageTsByRequestId =
@@ -391,7 +412,7 @@ async function handleRequestUserInput(
 
   try {
     const slack = await getSlackNotifier();
-    const conversation = await resolveSlackConversation(taskRun);
+    const conversation = await resolveSlackConversation(taskRun, replyTarget);
     const { channel, thread_ts: threadTs } = conversation;
     getSlackRequestUserInputReplyTargets(context).set(
       event.request.requestId,
@@ -587,6 +608,7 @@ async function handleFollowup(
   taskRun: TaskRun,
   event: CallbackEvent & { type: 'followup' },
   context: RunTaskContext,
+  replyTarget?: NonNullable<CallbackDeliveryContext['slackReplyTarget']>,
 ) {
   if (!context.postedFollowupTs) {
     context.postedFollowupTs = new Set<number>();
@@ -653,7 +675,7 @@ async function handleFollowup(
 
     const slack = await getSlackNotifier();
 
-    const conversation = await resolveSlackConversation(taskRun);
+    const conversation = await resolveSlackConversation(taskRun, replyTarget);
     const followupMessageTs = await slack.postMessage({
       blocks,
       ...conversation,

@@ -42,7 +42,12 @@ const {
   awaitSubprocessMock: vi.fn().mockResolvedValue(undefined),
   buildSandboxInstructionMock: vi.fn(() => undefined),
   taskRunsDoneMock: vi.fn().mockResolvedValue(undefined),
-  taskRunsActivateSlackReplyTargetMock: vi.fn().mockResolvedValue(true),
+  taskRunsActivateSlackReplyTargetMock: vi.fn().mockResolvedValue({
+    slackTeamId: 'T123',
+    channel: 'C_ALERT',
+    threadTs: '1710000000.456',
+    reactionsAllowed: false,
+  }),
   taskRunsGetGoalMock: vi.fn().mockResolvedValue(null),
   taskRunsClaimGoalContinuationMock: vi.fn(),
   taskRunsRecordEventMock: vi.fn().mockResolvedValue(undefined),
@@ -289,7 +294,12 @@ describe('runTask', () => {
     existsSyncMock.mockReturnValue(false);
     recordSandboxPromptSlackTurnStartMock.mockReset();
     recordChatTurnStartMock.mockReset();
-    taskRunsActivateSlackReplyTargetMock.mockResolvedValue(true);
+    taskRunsActivateSlackReplyTargetMock.mockResolvedValue({
+      slackTeamId: 'T123',
+      channel: 'C_ALERT',
+      threadTs: '1710000000.456',
+      reactionsAllowed: false,
+    });
 
     createHarnessMock.mockResolvedValue({
       harness: {},

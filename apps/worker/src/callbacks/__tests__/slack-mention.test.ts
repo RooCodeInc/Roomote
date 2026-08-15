@@ -976,6 +976,37 @@ describe('slackMentionCallbacks', () => {
     });
   });
 
+  it('keeps a delayed follow-up on the turn target captured at dispatch', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    await slackMentionCallbacks.onMessage?.(
+      taskRun,
+      'task_123',
+      {
+        type: 'followup',
+        question: 'Need anything else?',
+        suggestions: [],
+        ts: 1003,
+      },
+      context,
+      {
+        slackReplyTarget: {
+          slackTeamId: 'T123',
+          channel: 'C_EARLIER',
+          threadTs: '333.444',
+        },
+      },
+    );
+
+    expect(mockPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C_EARLIER',
+        thread_ts: '333.444',
+      }),
+    );
+    expect(mockGetActiveSlackReplyTarget).not.toHaveBeenCalled();
+  });
+
   it('does not mirror todo updates into Slack threads', async () => {
     const taskRun = createTaskRun();
     const context = {};
