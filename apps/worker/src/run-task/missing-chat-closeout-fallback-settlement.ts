@@ -13,8 +13,13 @@ interface PendingMissingChatCloseoutFallback {
 interface MissingChatCloseoutFallbackState {
   pending: PendingMissingChatCloseoutFallback | null;
   settledCompletionIds: Set<string>;
+  deliveryTimer: ReturnType<typeof setTimeout> | null;
   deliveryWork: Set<Promise<void>>;
 }
+
+// OpenCode can emit a stale idle before trailing tool activity reaches Roomote.
+// Give that activity a chance to cancel the otherwise-terminal fallback.
+const MISSING_CHAT_CLOSEOUT_FALLBACK_GRACE_MS = 5_000;
 
 const stateByContext = new WeakMap<
   RunTaskContext,
@@ -30,13 +35,23 @@ function getState(context: RunTaskContext): MissingChatCloseoutFallbackState {
   const state: MissingChatCloseoutFallbackState = {
     pending: null,
     settledCompletionIds: new Set(),
+    deliveryTimer: null,
     deliveryWork: new Set(),
   };
   stateByContext.set(context, state);
   return state;
 }
 
-function startDeliveryIfSettled(
+function clearDeliveryTimer(state: MissingChatCloseoutFallbackState): void {
+  if (!state.deliveryTimer) {
+    return;
+  }
+
+  clearTimeout(state.deliveryTimer);
+  state.deliveryTimer = null;
+}
+
+function startDeliveryNowIfSettled(
   state: MissingChatCloseoutFallbackState,
 ): Promise<void> | null {
   const pending = state.pending;
@@ -54,13 +69,50 @@ function startDeliveryIfSettled(
   return work;
 }
 
+function scheduleDeliveryIfSettled(
+  state: MissingChatCloseoutFallbackState,
+): void {
+  const pending = state.pending;
+  if (
+    state.deliveryTimer ||
+    !pending ||
+    !state.settledCompletionIds.has(pending.completionId)
+  ) {
+    return;
+  }
+
+  state.deliveryTimer = setTimeout(() => {
+    state.deliveryTimer = null;
+    startDeliveryNowIfSettled(state);
+  }, MISSING_CHAT_CLOSEOUT_FALLBACK_GRACE_MS);
+  state.deliveryTimer.unref?.();
+}
+
 export function recordMissingChatCloseoutFallback(
   context: RunTaskContext,
   pending: PendingMissingChatCloseoutFallback | null,
 ): void {
   const state = getState(context);
+  clearDeliveryTimer(state);
   state.pending = pending;
-  void startDeliveryIfSettled(state);
+  if (!pending) {
+    state.settledCompletionIds.clear();
+    return;
+  }
+  scheduleDeliveryIfSettled(state);
+}
+
+export function cancelPendingMissingChatCloseoutFallback(
+  context: RunTaskContext,
+): void {
+  const state = stateByContext.get(context);
+  if (!state?.pending) {
+    return;
+  }
+
+  clearDeliveryTimer(state);
+  state.pending = null;
+  state.settledCompletionIds.clear();
 }
 
 export async function settleMissingChatCloseoutFallback(
@@ -69,7 +121,7 @@ export async function settleMissingChatCloseoutFallback(
 ): Promise<void> {
   const state = getState(context);
   state.settledCompletionIds.add(completionId);
-  await startDeliveryIfSettled(state);
+  scheduleDeliveryIfSettled(state);
 }
 
 export async function waitForMissingChatCloseoutFallbackDelivery(
@@ -79,6 +131,9 @@ export async function waitForMissingChatCloseoutFallbackDelivery(
   if (!state) {
     return;
   }
+
+  clearDeliveryTimer(state);
+  await startDeliveryNowIfSettled(state);
 
   while (state.deliveryWork.size > 0) {
     await Promise.allSettled([...state.deliveryWork]);

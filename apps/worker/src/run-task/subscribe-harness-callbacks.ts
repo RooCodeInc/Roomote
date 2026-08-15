@@ -1,4 +1,5 @@
 import {
+  ACP_LIVE_EVENT_TYPES,
   type AcpPersistedEnvelope,
   type AcpTurnCompletedEvent,
   TaskEventName,
@@ -19,10 +20,15 @@ import { captureWorkerException } from '../monitoring/sentry';
 import type { CallbackEvent, RunTaskCallbacks, RunTaskContext } from './types';
 import { fromRuntimeEnvelope } from './runtime-events/envelope';
 import {
+  cancelPendingMissingChatCloseoutFallback,
   recordMissingChatCloseoutFallback,
   waitForMissingChatCloseoutFallbackDelivery,
 } from './missing-chat-closeout-fallback-settlement';
 import { deliverShowWidgetFallback } from './show-widget-fallback-delivery';
+
+const NON_ACTIVITY_RUNTIME_EVENT_TYPES = new Set<string>(
+  Object.values(ACP_LIVE_EVENT_TYPES),
+);
 
 interface PendingCompletionEvents {
   callbackTaskId: string;
@@ -303,6 +309,10 @@ export function subscribeHarnessCallbacks({
   );
 
   const unsubscribeRuntimeOutput = harness.subscribeRuntimeOutput((event) => {
+    if (!NON_ACTIVITY_RUNTIME_EVENT_TYPES.has(event.eventType)) {
+      cancelPendingMissingChatCloseoutFallback(context);
+    }
+
     if (event.role !== 'assistant') {
       return;
     }

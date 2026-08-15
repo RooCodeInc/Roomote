@@ -1,3 +1,5 @@
+import { TaskEventName } from '@roomote/types';
+
 const { claimDelivery, releaseDelivery, replyToChatThread } = vi.hoisted(
   () => ({
     claimDelivery: vi.fn(),
@@ -10,7 +12,10 @@ vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     taskRuns: {
       claimMissingChatCloseoutFallbackDelivery: claimDelivery,
+      recordInferenceUsage: vi.fn().mockResolvedValue({ recorded: true }),
+      recordMessageEnvelope: vi.fn().mockResolvedValue(null),
       releaseMissingChatCloseoutFallbackDelivery: releaseDelivery,
+      stampMilestone: vi.fn().mockResolvedValue(undefined),
     },
   },
 }));
@@ -20,7 +25,9 @@ vi.mock('../../mcp/roomote-mcp-server/chat-api-client', () => ({
 }));
 
 import { deliverMissingChatCloseoutFallback } from '../missing-chat-closeout-fallback-delivery';
+import { subscribeHarnessCallbacks } from '../subscribe-harness-callbacks';
 import {
+  cancelPendingMissingChatCloseoutFallback,
   recordMissingChatCloseoutFallback,
   settleMissingChatCloseoutFallback,
   waitForMissingChatCloseoutFallbackDelivery,
@@ -50,7 +57,12 @@ describe('deliverMissingChatCloseoutFallback', () => {
     replyToChatThread.mockResolvedValue({ messageTs: '123.456' });
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('holds the fallback until the matching completion is settled', async () => {
+    vi.useFakeTimers();
     const context = {};
     recordMissingChatCloseoutFallback(context, {
       runId: 42,
@@ -66,9 +78,14 @@ describe('deliverMissingChatCloseoutFallback', () => {
     expect(replyToChatThread).not.toHaveBeenCalled();
 
     await settleMissingChatCloseoutFallback(context, 'completion-settled');
+    expect(replyToChatThread).not.toHaveBeenCalled();
+
+    await vi.runAllTimersAsync();
+    await waitForMissingChatCloseoutFallbackDelivery(context);
     expect(replyToChatThread).toHaveBeenCalledWith(expect.any(Object), {
       text: 'Final answer after the goal settles.',
     });
+    vi.useRealTimers();
   });
 
   it('drops an exhausted closeout when a later completion supersedes it', async () => {
@@ -89,6 +106,7 @@ describe('deliverMissingChatCloseoutFallback', () => {
   });
 
   it('delivers when settlement wins the event-ordering race', async () => {
+    vi.useFakeTimers();
     const context = {};
     await settleMissingChatCloseoutFallback(context, 'completion-late-record');
 
@@ -99,11 +117,109 @@ describe('deliverMissingChatCloseoutFallback', () => {
       mcpTaskEnv,
       logger,
     });
+    await vi.runAllTimersAsync();
     await waitForMissingChatCloseoutFallbackDelivery(context);
 
     expect(replyToChatThread).toHaveBeenCalledWith(expect.any(Object), {
       text: 'Final answer recorded after settlement.',
     });
+    vi.useRealTimers();
+  });
+
+  it('cancels a settled fallback when later runtime activity arrives', async () => {
+    vi.useFakeTimers();
+    const context = {};
+    recordMissingChatCloseoutFallback(context, {
+      runId: 42,
+      completionId: 'completion-with-late-activity',
+      text: null,
+      mcpTaskEnv,
+      logger,
+    });
+
+    await settleMissingChatCloseoutFallback(
+      context,
+      'completion-with-late-activity',
+    );
+    cancelPendingMissingChatCloseoutFallback(context);
+    await vi.runAllTimersAsync();
+
+    expect(replyToChatThread).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('cancels a settled fallback through the runtime subscription path', async () => {
+    vi.useFakeTimers();
+    const context = {};
+    let outputListener: ((event: unknown) => void) | undefined;
+    let taskListener: ((event: unknown) => void) | undefined;
+    const unsubscribe = subscribeHarnessCallbacks({
+      harness: {
+        subscribe: (listener: (event: unknown) => void) => {
+          taskListener = listener;
+          return () => {};
+        },
+        subscribeRuntimeInferenceUsage: () => () => {},
+        subscribeRuntimeOutput: (listener: (event: unknown) => void) => {
+          outputListener = listener;
+          return () => {};
+        },
+        subscribeRuntimePersistedEnvelope: () => () => {},
+        subscribeRuntimeTurnCompleted: () => () => {},
+      } as never,
+      taskRun: { id: 42, taskId: 'task-with-late-tool-activity' } as never,
+      callbacks: {},
+      context,
+      logger,
+      mcpTaskEnv,
+    });
+    taskListener?.({
+      eventName: TaskEventName.TaskCompleted,
+      payload: [
+        'task-with-late-tool-activity',
+        {},
+        {},
+        {
+          completionId: 'completion-with-late-tool-activity',
+          isSubtask: false,
+          missingChatCloseout: { reminderCount: 3 },
+        },
+      ],
+    });
+    await settleMissingChatCloseoutFallback(
+      context,
+      'completion-with-late-tool-activity',
+    );
+
+    outputListener?.({
+      eventType: 'roomote_runtime.tool_call_update',
+      role: 'assistant',
+    });
+    await vi.runAllTimersAsync();
+    await unsubscribe();
+
+    expect(replyToChatThread).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('flushes a settled fallback immediately during harness teardown', async () => {
+    vi.useFakeTimers();
+    const context = {};
+    recordMissingChatCloseoutFallback(context, {
+      runId: 42,
+      completionId: 'completion-at-teardown',
+      text: null,
+      mcpTaskEnv,
+      logger,
+    });
+    await settleMissingChatCloseoutFallback(context, 'completion-at-teardown');
+
+    await waitForMissingChatCloseoutFallbackDelivery(context);
+
+    expect(replyToChatThread).toHaveBeenCalledWith(expect.any(Object), {
+      text: "I'm finished. Is there anything else you'd like me to do?",
+    });
+    vi.useRealTimers();
   });
 
   it('posts the last finalized assistant message through the shared chat path', async () => {
