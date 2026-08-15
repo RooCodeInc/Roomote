@@ -99,11 +99,18 @@ const ACTIONS_BLOCK_ID = 'pr_review_action';
 export function buildResolvedSlackPrReviewMessageBlocks(
   originalBlocks: unknown[] | undefined | null,
   resolution: string,
+  resolutionType: 'context' | 'section' = 'context',
 ): unknown[] {
-  const resolutionBlock = {
-    type: 'context',
-    elements: [{ type: 'mrkdwn', text: resolution }],
-  };
+  const resolutionBlock =
+    resolutionType === 'section'
+      ? {
+          type: 'section',
+          text: { type: 'mrkdwn', text: resolution },
+        }
+      : {
+          type: 'context',
+          elements: [{ type: 'mrkdwn', text: resolution }],
+        };
 
   if (!originalBlocks || originalBlocks.length === 0) {
     return [resolutionBlock];

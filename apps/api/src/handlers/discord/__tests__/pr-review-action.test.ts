@@ -32,7 +32,7 @@ describe('handleDiscordPrReviewActionCallback', () => {
     mocks.dispatchFollowUp.mockResolvedValue({ outcome: 'queued' });
   });
 
-  it('preserves the feedback card and renders the resolution as subtext', async () => {
+  it('preserves the feedback card and renders auto-resolve as a regular message', async () => {
     await handleDiscordPrReviewActionCallback({
       provider: {} as never,
       applicationId: 'app-1',
@@ -67,7 +67,7 @@ describe('handleDiscordPrReviewActionCallback', () => {
 
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: "Review feedback: add a regression test.\n\n-# I'll resolve these and any future feedback on this PR automatically. Starting on the current feedback now.",
+        text: 'Review feedback: add a regression test.\n\nOK, <@discord-user-1>. Future review feedback on this PR will get resolved automatically.',
       }),
     );
     expect(mocks.reply.mock.calls[0]?.[0]).not.toHaveProperty('buttons');

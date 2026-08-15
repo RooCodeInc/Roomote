@@ -255,11 +255,11 @@ describe('handleSlackPrReviewActionAuto', () => {
         message: {
           blocks: expect.arrayContaining([
             expect.objectContaining({
-              elements: [
-                expect.objectContaining({
-                  text: expect.stringContaining('Auto-resolve enabled'),
-                }),
-              ],
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: 'OK, <@U1>. Future review feedback on this PR will get resolved automatically.',
+              },
             }),
           ]),
         },
