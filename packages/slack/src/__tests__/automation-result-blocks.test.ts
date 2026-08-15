@@ -98,6 +98,22 @@ describe('automation result blocks', () => {
     ]);
   });
 
+  it('escapes literal Slack control characters while preserving converted links', () => {
+    expect(
+      buildAutomationResultContentBlocks(
+        'Notify <@U123> and <!here> when a < b & review [details](https://example.com?a=1&b=2).',
+      ),
+    ).toEqual([
+      {
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: 'Notify &lt;@U123&gt; and &lt;!here&gt; when a &lt; b &amp; review <https://example.com?a=1&amp;b=2|details>.',
+        },
+      },
+    ]);
+  });
+
   it('preserves pipes inside variable-length inline code table cells', () => {
     const blocks = buildAutomationResultContentBlocks(
       '| Value |\n| --- |\n| ``a|b`` |',

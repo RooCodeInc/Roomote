@@ -258,7 +258,12 @@ function parseMarkdownTable(
 }
 
 function splitSectionText(text: string): SlackBlock[] {
-  const converted = convertMarkdownToSlack(text.trim());
+  const escaped = text
+    .trim()
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+  const converted = convertMarkdownToSlack(escaped);
   if (!converted) return [];
 
   const blocks: SlackBlock[] = [];
