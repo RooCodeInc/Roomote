@@ -47,9 +47,8 @@ export type BrainGithubCollectionResult = {
 };
 
 type IncrementalCursor = {
-  since: string;
-  page: number;
-  perPage: number;
+  boundary: string;
+  seen: number[];
 };
 
 type EligibleRepository = {
@@ -81,27 +80,23 @@ function parseIncrementalCursor(
 
   try {
     const parsed = JSON.parse(cursor) as Partial<IncrementalCursor>;
-    const since =
-      typeof parsed.since === 'string' ? new Date(parsed.since) : null;
+    const boundary =
+      typeof parsed.boundary === 'string' ? new Date(parsed.boundary) : null;
 
     if (
-      !since ||
-      Number.isNaN(since.getTime()) ||
-      typeof parsed.page !== 'number' ||
-      !Number.isInteger(parsed.page) ||
-      parsed.page < 2 ||
-      typeof parsed.perPage !== 'number' ||
-      !Number.isInteger(parsed.perPage) ||
-      parsed.perPage < 1 ||
-      parsed.perPage > 100
+      !boundary ||
+      Number.isNaN(boundary.getTime()) ||
+      !Array.isArray(parsed.seen)
     ) {
       return null;
     }
 
     return {
-      since: since.toISOString(),
-      page: parsed.page,
-      perPage: parsed.perPage,
+      boundary: boundary.toISOString(),
+      seen: parsed.seen.filter(
+        (number): number is number =>
+          typeof number === 'number' && Number.isInteger(number) && number > 0,
+      ),
     };
   } catch {
     return null;
@@ -335,76 +330,117 @@ export async function collectBrainGithubIssues(input: {
       const cursor = parseIncrementalCursor(
         repository.state?.backfillCursor ?? null,
       );
-      const since = cursor
-        ? new Date(cursor.since)
-        : (repository.state?.watermark ??
-          new Date(input.now.getTime() - 30 * 24 * 60 * 60 * 1000));
-      const page = cursor?.page ?? 1;
-      const remaining = input.limit - pages.length;
-
-      // Offset pagination is only stable when its page size stays fixed.
-      // This repository will sort ahead of completed ones on the next tick,
-      // when the full budget is available again.
-      if (cursor && remaining < cursor.perPage) {
-        break;
-      }
-
-      const perPage = cursor?.perPage ?? Math.min(100, remaining);
+      const since =
+        repository.state?.watermark ??
+        new Date(input.now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const boundary = cursor ? new Date(cursor.boundary) : since;
+      const querySince = cursor ? new Date(boundary.getTime() - 1) : boundary;
+      let progressBoundary = boundary;
+      let seenAtBoundary = new Set(cursor?.seen ?? []);
+      let apiPage = 1;
+      let exhausted = false;
       const octokit = await getInstallationOctokit({
         installationId: repository.installationId,
       });
-      const response = await octokit.rest.issues.listForRepo({
-        owner,
-        repo,
-        state: 'all',
-        since: since.toISOString(),
-        sort: 'updated',
-        direction: 'asc',
-        per_page: perPage,
-        page,
-      });
 
-      const rawIssues = response.data as GithubIssue[];
-      const issues = rawIssues.filter((issue) => !issue.pull_request);
+      while (pages.length < input.limit) {
+        const response = await octokit.rest.issues.listForRepo({
+          owner,
+          repo,
+          state: 'all',
+          since: querySince.toISOString(),
+          sort: 'updated',
+          direction: 'asc',
+          per_page: 100,
+          page: apiPage,
+        });
+        const rawIssues = response.data as GithubIssue[];
+        const processed: GithubIssue[] = [];
+        const issues: GithubIssue[] = [];
+        let hitBudget = false;
 
-      pages.push(
-        ...(await pagesForIssues({
-          octokit,
-          fullName: repository.fullName,
-          issues,
-          commentBudget,
-        })),
-      );
+        for (const issue of rawIssues) {
+          const updatedAt = issue.updated_at
+            ? new Date(issue.updated_at)
+            : progressBoundary;
+          const updatedAtMs = Number.isNaN(updatedAt.getTime())
+            ? progressBoundary.getTime()
+            : updatedAt.getTime();
 
-      let maxUpdatedAt: Date | null = null;
+          if (
+            updatedAtMs < progressBoundary.getTime() ||
+            (updatedAtMs === progressBoundary.getTime() &&
+              seenAtBoundary.has(issue.number))
+          ) {
+            continue;
+          }
 
-      for (const issue of rawIssues) {
-        const updatedAt = issue.updated_at ? new Date(issue.updated_at) : null;
+          if (
+            !issue.pull_request &&
+            pages.length + issues.length >= input.limit
+          ) {
+            hitBudget = true;
+            break;
+          }
 
-        if (
-          updatedAt &&
-          !Number.isNaN(updatedAt.getTime()) &&
-          (!maxUpdatedAt || updatedAt > maxUpdatedAt)
-        ) {
-          maxUpdatedAt = updatedAt;
+          processed.push(issue);
+
+          if (!issue.pull_request) {
+            issues.push(issue);
+          }
         }
+
+        pages.push(
+          ...(await pagesForIssues({
+            octokit,
+            fullName: repository.fullName,
+            issues,
+            commentBudget,
+          })),
+        );
+
+        for (const issue of processed) {
+          const updatedAt = issue.updated_at
+            ? new Date(issue.updated_at)
+            : progressBoundary;
+          const safeUpdatedAt = Number.isNaN(updatedAt.getTime())
+            ? progressBoundary
+            : updatedAt;
+
+          if (safeUpdatedAt > progressBoundary) {
+            progressBoundary = safeUpdatedAt;
+            seenAtBoundary = new Set();
+          }
+
+          if (safeUpdatedAt.getTime() === progressBoundary.getTime()) {
+            seenAtBoundary.add(issue.number);
+          }
+        }
+
+        if (hitBudget) {
+          break;
+        }
+
+        if (rawIssues.length < 100) {
+          exhausted = true;
+          break;
+        }
+
+        apiPage += 1;
       }
 
-      // A short page exhausts this repository through `now`, including the
-      // quiet case. A full page keeps the original lower bound and persists
-      // the next page: a timestamp alone cannot represent a page boundary
-      // that lands inside an `updated_at` tie. The observed timestamp remains
-      // the scheduling watermark so another older repository gets a turn.
-      const exhausted = rawIssues.length < perPage;
+      // The cursor is a keyset boundary plus the identities already consumed
+      // at that exact timestamp. Every tick replays from the boundary and
+      // starts API pagination at page one, so mutations can cause duplicate
+      // upserts but cannot move an unread issue behind a persisted offset.
       stateUpdates.push({
         collectorId: repository.stateId,
-        watermark: exhausted ? input.now : (maxUpdatedAt ?? since),
+        watermark: exhausted ? input.now : progressBoundary,
         cursor: exhausted
           ? null
           : JSON.stringify({
-              since: since.toISOString(),
-              page: page + 1,
-              perPage,
+              boundary: progressBoundary.toISOString(),
+              seen: [...seenAtBoundary].sort((a, b) => a - b),
             }),
       });
     } catch (error) {

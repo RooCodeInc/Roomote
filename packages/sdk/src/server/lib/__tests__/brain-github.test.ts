@@ -157,17 +157,30 @@ describe('GitHub issue collector progress', () => {
     githubMocks.syncState.set('github-issues:acme/a', { watermark: start });
     githubMocks.syncState.set('github-issues:acme/b', { watermark: start });
     githubMocks.listForRepo.mockImplementation(
-      async ({ repo, per_page }: { repo: string; per_page: number }) => ({
-        data: (repo === 'a'
-          ? Array.from({ length: 100 }, (_, index) =>
-              makeIssue(
-                index + 1,
-                new Date(start.getTime() + (index + 1) * 60_000).toISOString(),
-              ),
-            )
-          : [makeIssue(500, '2026-08-01T00:30:00Z')]
-        ).slice(0, per_page),
-      }),
+      async ({
+        repo,
+        page = 1,
+        per_page,
+      }: {
+        repo: string;
+        page?: number;
+        per_page: number;
+      }) => {
+        const issues =
+          repo === 'a'
+            ? Array.from({ length: 100 }, (_, index) =>
+                makeIssue(
+                  index + 1,
+                  new Date(
+                    start.getTime() + (index + 1) * 60_000,
+                  ).toISOString(),
+                ),
+              )
+            : [makeIssue(500, '2026-08-01T00:30:00Z')];
+        const offset = (page - 1) * per_page;
+
+        return { data: issues.slice(offset, offset + per_page) };
+      },
     );
 
     const first = await collectBrainGithubIssues({ now, limit: 100 });
@@ -204,21 +217,23 @@ describe('GitHub issue collector progress', () => {
         ),
       })
       .mockResolvedValueOnce({
+        data: Array.from({ length: 100 }, (_, index) =>
+          makeIssue(index + 1, tiedAt),
+        ),
+      })
+      .mockResolvedValueOnce({
         data: [makeIssue(101, tiedAt)],
       });
 
     const first = await collectBrainGithubIssues({ now, limit: 100 });
-    expect(first.stateUpdates).toEqual([
-      {
-        collectorId: 'github-issues:acme/a',
-        watermark: new Date(tiedAt),
-        cursor: JSON.stringify({
-          since: start.toISOString(),
-          page: 2,
-          perPage: 100,
-        }),
-      },
-    ]);
+    expect(first.stateUpdates[0]).toMatchObject({
+      collectorId: 'github-issues:acme/a',
+      watermark: new Date(tiedAt),
+    });
+    expect(JSON.parse(first.stateUpdates[0]!.cursor!)).toEqual({
+      boundary: new Date(tiedAt).toISOString(),
+      seen: Array.from({ length: 100 }, (_, index) => index + 1),
+    });
     githubMocks.syncState.set('github-issues:acme/a', {
       watermark: first.stateUpdates[0]!.watermark,
       backfillCursor: first.stateUpdates[0]!.cursor,
@@ -229,7 +244,10 @@ describe('GitHub issue collector progress', () => {
       'github/acme/a/issues/101',
     ]);
     expect(githubMocks.listForRepo.mock.calls[1]?.[0]).toMatchObject({
-      since: start.toISOString(),
+      since: '2026-08-01T23:59:59.999Z',
+      page: 1,
+    });
+    expect(githubMocks.listForRepo.mock.calls[2]?.[0]).toMatchObject({
       page: 2,
     });
     expect(second.stateUpdates).toEqual([
@@ -239,6 +257,45 @@ describe('GitHub issue collector progress', () => {
         cursor: null,
       },
     ]);
+  });
+
+  it('replays the keyset boundary when an earlier issue moves between ticks', async () => {
+    const start = new Date('2026-08-01T00:00:00Z');
+    const now = new Date('2026-08-15T00:00:00Z');
+    const issueTimes = Array.from({ length: 101 }, (_, index) =>
+      new Date(start.getTime() + (index + 1) * 60_000).toISOString(),
+    );
+    githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
+    githubMocks.syncState.set('github-issues:acme/a', { watermark: start });
+    githubMocks.listForRepo
+      .mockResolvedValueOnce({
+        data: Array.from({ length: 100 }, (_, index) =>
+          makeIssue(index + 1, issueTimes[index]!),
+        ),
+      })
+      .mockResolvedValueOnce({
+        data: [
+          makeIssue(100, issueTimes[99]!),
+          makeIssue(101, issueTimes[100]!),
+          makeIssue(1, '2026-08-03T00:00:00Z'),
+        ],
+      });
+
+    const first = await collectBrainGithubIssues({ now, limit: 100 });
+    githubMocks.syncState.set('github-issues:acme/a', {
+      watermark: first.stateUpdates[0]!.watermark,
+      backfillCursor: first.stateUpdates[0]!.cursor,
+    });
+
+    const second = await collectBrainGithubIssues({ now, limit: 100 });
+    expect(second.pages.map((page) => page.slug)).toEqual([
+      'github/acme/a/issues/101',
+      'github/acme/a/issues/1',
+    ]);
+    expect(githubMocks.listForRepo.mock.calls[1]?.[0]).toMatchObject({
+      since: new Date(new Date(issueTimes[99]!).getTime() - 1).toISOString(),
+      page: 1,
+    });
   });
 
   it('backfills a repository connected after the earlier set completed', async () => {
