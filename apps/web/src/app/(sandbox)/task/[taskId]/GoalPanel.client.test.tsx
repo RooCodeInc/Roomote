@@ -133,15 +133,29 @@ describe('GoalPanel', () => {
     expect(screen.getByTestId('goal-panel').querySelector('p')).toBeNull();
   });
 
-  it('does not infer a terminal duration when durable timing is incomplete', () => {
+  it('uses a compact accessible fallback when durable timing is incomplete', () => {
     render(
       <GoalPanel
-        task={createTask({ goalStatus: 'blocked', goalEndedAt: null })}
+        task={createTask({
+          goalStatus: 'budget_limited',
+          goalStartedAt: null,
+          goalEndedAt: null,
+        })}
       />,
     );
 
-    expect(screen.getByTestId('goal-duration')).toHaveTextContent(
+    expect(screen.getByTestId('goal-status')).toHaveTextContent(
+      'Continuation limit reached',
+    );
+    expect(screen.getByTestId('goal-duration')).toHaveTextContent('N/A');
+    expect(screen.getByTestId('goal-duration')).toHaveAttribute(
+      'aria-label',
       'Duration unavailable',
     );
+    expect(screen.getByTestId('goal-duration')).toHaveAttribute(
+      'title',
+      'Duration unavailable',
+    );
+    expect(screen.getByTestId('goal-panel')).not.toHaveClass('flex-wrap');
   });
 });

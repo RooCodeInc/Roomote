@@ -153,8 +153,10 @@ export function GoalPanel({ task }: { task: TaskSession['task'] }) {
           <span
             className="shrink-0 tabular-nums text-muted-foreground"
             data-testid="goal-duration"
+            aria-label={duration ?? 'Duration unavailable'}
+            title={duration ? undefined : 'Duration unavailable'}
           >
-            {duration ?? 'Duration unavailable'}
+            {duration ?? 'N/A'}
           </span>
         </section>
       </TodoListPrimitive>
