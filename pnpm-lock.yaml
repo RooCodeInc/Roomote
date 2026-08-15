@@ -41,7 +41,7 @@ overrides:
   astro>zod: ^4.3.6
   knip>zod: ^4.1.11
   '@streamdown/mermaid>mermaid': 11.16.1
-  nanoid@<4: 3.3.17
+  nanoid@<4: 5.1.16
   dagre-d3-es>lodash-es: 4.18.1
   jws: '>=4.0.1'
   jayson>uuid: 11.1.1
@@ -9449,11 +9449,6 @@ packages:
   nano-spawn@2.0.0:
     resolution: {integrity: sha512-tacvGzUY5o2D8CBh2rrwxyNojUsZNU2zjNTzKQrkgGJQTbGAfArVWXSKMBokBeeg6C7OLRGUEyoFlYbfeWQIqw==}
     engines: {node: '>=20.17'}
-
-  nanoid@3.3.17:
-    resolution: {integrity: sha512-xQLf0A3HOMlgHq0n247/LRuAOYmB7dXJ/DvAxGvsSBij45XtBSmQycu+F8ODbHwns/XyFZagyL1+J0Offw1E0g==}
-    engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
-    hasBin: true
 
   nanoid@5.1.16:
     resolution: {integrity: sha512-kVrnsrJqMR8+oLJnGEmSWw9BivK5mt7H3FZatVRjrc5wGqFYuBxX1yG7+A7Gi5AefkX6t/oCkizcQgpu0cY1dQ==}
@@ -20489,8 +20484,6 @@ snapshots:
 
   nano-spawn@2.0.0: {}
 
-  nanoid@3.3.17: {}
-
   nanoid@5.1.16: {}
 
   nanostores@1.4.1: {}
@@ -21069,7 +21062,7 @@ snapshots:
 
   postcss@8.5.23:
     dependencies:
-      nanoid: 3.3.17
+      nanoid: 5.1.16
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
