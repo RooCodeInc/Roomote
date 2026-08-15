@@ -9,7 +9,7 @@ const {
   mockGetRedis,
   mockGetBullMqRedis,
 } = vi.hoisted(() => {
-  type AnyMock = Mock<(...args: any[]) => any>;
+  type AnyMock = Mock<(...args: unknown[]) => unknown>;
   const queueAddMock = vi.fn() as AnyMock;
   const queueGetJobMock = vi.fn() as AnyMock;
   const waitUntilFinishedMock = vi.fn() as AnyMock;
