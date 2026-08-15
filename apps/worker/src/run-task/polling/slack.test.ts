@@ -261,6 +261,32 @@ describe('createSlackMessageInterval', () => {
     }
   });
 
+  it('falls back to the canonical thread when reply target authorization is missing', async () => {
+    mockActivateSlackReplyTarget.mockResolvedValueOnce(false);
+    mockGetSlackMessages.mockResolvedValueOnce([
+      {
+        text: 'Please continue here',
+        user: 'U234',
+        userId: 'user-2',
+        ts: '1710000000.457',
+        channel: 'C123',
+        threadTs: '1710000000.100',
+      },
+    ]);
+    const { options, sendPrompt } = createListenerOptions();
+
+    const interval = createSlackMessageInterval(options);
+
+    try {
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(sendPrompt).toHaveBeenCalledTimes(1);
+      expect(mockPrependSlackMessages).not.toHaveBeenCalled();
+    } finally {
+      clearInterval(interval);
+    }
+  });
+
   it('records the delivered Slack follow-up as the current reply-satisfaction turn', async () => {
     mockGetSlackMessages.mockResolvedValueOnce([
       {
@@ -551,6 +577,33 @@ describe('createSlackMessageInterval', () => {
       expect(mockGetSlackMessages).toHaveBeenCalledWith({
         runId: 42,
       });
+    } finally {
+      clearInterval(interval);
+    }
+  });
+
+  it('delivers request_user_input answers when reply target authorization is missing', async () => {
+    mockActivateSlackReplyTarget.mockResolvedValueOnce(false);
+    mockGetSlackRequestUserInputAnswers.mockResolvedValueOnce([
+      {
+        requestId: 'rui:session:turn:call',
+        answers: { language: { answers: ['Rust'] } },
+        user: 'U234',
+        userId: 'user-2',
+        ts: '1710000000.902',
+        channel: 'C_ALERT',
+        threadTs: '1710000000.100',
+      },
+    ]);
+    const { options, answerUserInputRequest } = createListenerOptions();
+
+    const interval = createSlackMessageInterval(options);
+
+    try {
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(answerUserInputRequest).toHaveBeenCalledTimes(1);
+      expect(mockPrependSlackRequestUserInputAnswers).not.toHaveBeenCalled();
     } finally {
       clearInterval(interval);
     }

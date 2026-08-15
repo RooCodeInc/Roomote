@@ -1,15 +1,17 @@
-const { getMock, setMock } = vi.hoisted(() => ({
+const { delMock, getMock, setMock } = vi.hoisted(() => ({
+  delMock: vi.fn(),
   getMock: vi.fn(),
   setMock: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', () => ({
-  getRedis: () => ({ get: getMock, set: setMock }),
+  getRedis: () => ({ del: delMock, get: getMock, set: setMock }),
 }));
 
 import {
   activateSlackRunReplyTarget,
   authorizeSlackRunReplyTarget,
+  clearActiveSlackRunReplyTarget,
   getActiveSlackRunReplyTarget,
 } from '../run-reply-target';
 
@@ -23,6 +25,7 @@ describe('Slack run reply targets', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getMock.mockResolvedValue(null);
+    delMock.mockResolvedValue(1);
     setMock.mockResolvedValue('OK');
   });
 
@@ -57,6 +60,7 @@ describe('Slack run reply targets', () => {
     await expect(
       activateSlackRunReplyTarget({ runId: 42, messageTs: 'missing' }),
     ).resolves.toBe(false);
+    expect(delMock).toHaveBeenCalledWith('slack:run_reply_target:active:42');
     await expect(
       activateSlackRunReplyTarget({ runId: 42, messageTs: 'malformed' }),
     ).resolves.toBe(false);
@@ -70,5 +74,11 @@ describe('Slack run reply targets', () => {
 
     await expect(getActiveSlackRunReplyTarget(42)).resolves.toEqual(target);
     await expect(getActiveSlackRunReplyTarget(42)).resolves.toBeNull();
+  });
+
+  it('clears the active target at run lifecycle boundaries', async () => {
+    await clearActiveSlackRunReplyTarget(42);
+
+    expect(delMock).toHaveBeenCalledWith('slack:run_reply_target:active:42');
   });
 });

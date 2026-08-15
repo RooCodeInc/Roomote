@@ -145,13 +145,18 @@ export function createSlackMessageInterval({
               logger,
               message: `[listenForSlackEvents] Failed to activate Slack reply target for request_user_input answer on job ${taskRun.id}`,
             });
-            if (!activated) {
+            if (activated === null) {
               await requeueSlackRequestUserInputAnswers(
                 taskRun.id,
                 queuedAnswers,
                 index,
               );
               return;
+            }
+            if (!activated) {
+              logger.warn(
+                `[listenForSlackEvents] Slack reply target authorization is missing for request_user_input answer ${answer.ts}; continuing with the canonical thread`,
+              );
             }
           }
 
@@ -278,9 +283,14 @@ export function createSlackMessageInterval({
               logger,
               message: `[listenForSlackEvents] Failed to activate Slack reply target for job ${taskRun.id}`,
             });
-            if (!activated) {
+            if (activated === null) {
               await requeueSlackMessages(taskRun.id, deliveryOrder, index);
               return;
+            }
+            if (!activated) {
+              logger.warn(
+                `[listenForSlackEvents] Slack reply target authorization is missing for message ${msg.ts}; continuing with the canonical thread`,
+              );
             }
           }
 

@@ -65,7 +65,10 @@ export async function activateSlackRunReplyTarget(params: {
   const target = parseTarget(
     await redis.get(pendingKey(params.runId, params.messageTs)),
   );
-  if (!target) return false;
+  if (!target) {
+    await redis.del(activeKey(params.runId));
+    return false;
+  }
 
   await redis.set(
     activeKey(params.runId),
@@ -80,4 +83,10 @@ export async function getActiveSlackRunReplyTarget(
   runId: number,
 ): Promise<SlackRunReplyTarget | null> {
   return parseTarget(await getRedis().get(activeKey(runId)));
+}
+
+export async function clearActiveSlackRunReplyTarget(
+  runId: number,
+): Promise<void> {
+  await getRedis().del(activeKey(runId));
 }

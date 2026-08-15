@@ -56,7 +56,9 @@ import {
 } from '@roomote/cloud-agents/server';
 import {
   activateSlackRunReplyTarget,
+  clearActiveSlackRunReplyTarget,
   clearPendingSlackRequestUserInput,
+  getActiveSlackRunReplyTarget,
   getSlackThreadFooterText as buildSlackThreadFooterText,
   getSlackStartedMessageData,
   getSlackMessages,
@@ -587,10 +589,18 @@ export const taskRunsRouter = router({
   getSlackMessages: runScoped(z.object({ runId: z.number() }), 'runId').query(
     async ({ input }) => getSlackMessages(input.runId),
   ),
+  getActiveSlackReplyTarget: runScoped(
+    z.object({ runId: z.number() }),
+    'runId',
+  ).query(({ input }) => getActiveSlackRunReplyTarget(input.runId)),
   activateSlackReplyTarget: runScoped(
     z.object({ runId: z.number(), messageTs: z.string().min(1) }),
     'runId',
   ).mutation(({ input }) => activateSlackRunReplyTarget(input)),
+  clearActiveSlackReplyTarget: runScoped(
+    z.object({ runId: z.number() }),
+    'runId',
+  ).mutation(({ input }) => clearActiveSlackRunReplyTarget(input.runId)),
   getCommunicationMessages: runScoped(
     z.object({
       runId: z.number(),
