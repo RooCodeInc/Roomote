@@ -392,9 +392,10 @@ Two operational notes:
   longer recognizes them — but the deployment starts cold until that
   finishes.
 - **Model choice is a variable, not a rebuild.** `R_BRAIN_MODEL` selects the
-  synthesis model and `R_BRAIN_EMBEDDING_MODEL` the embedding model, both in
-  your provider's own naming, both set on the app services. Leave them empty for the
-  defaults. The synthesis model can change at any time; the embedding model
+  synthesis model, `R_BRAIN_EMBEDDING_MODEL` the embedding model, and
+  `R_BRAIN_RERANKER_MODEL` the reranker. Set them on the api service. Leave
+  them empty for the defaults. The synthesis model can change at any time;
+  the reranker changes after a gbrain restart; the embedding model
   sizes the Brain's vector storage when it is first created, so set it (with
   `R_BRAIN_EMBEDDING_DIMENSIONS`) before first boot or not at all. A later
   change is ignored and reported in the Brain's logs rather than silently

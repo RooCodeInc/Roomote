@@ -88,13 +88,13 @@ Three settings pick the Brain's models:
 | ----------------------------- | ----------------- | --------------------------------- | --------------------- |
 | `R_BRAIN_MODEL`               | Sourced synthesis | your provider's naming            | any time              |
 | `R_BRAIN_EMBEDDING_MODEL`     | Semantic recall   | a plain model id                  | before the first boot |
-| `GBRAIN_RERANKER_MODEL`       | Search precision  | `openrouter:<provider>/<model-id>` | after a restart       |
+| `R_BRAIN_RERANKER_MODEL`      | Search precision  | `openrouter:<provider>/<model-id>` | after a restart       |
 
 Leave the first two unset and the Brain uses OpenAI's `gpt-5.6-luna` and
 `text-embedding-3-small` through whichever provider you configured.
 
 The reranker defaults to OpenRouter's `voyageai/rerank-2.5-lite`. Set
-`GBRAIN_RERANKER_MODEL` on the gbrain service to choose another model from
+`R_BRAIN_RERANKER_MODEL` to choose another model from
 OpenRouter's reranker catalog. Reranking requires an OpenRouter key; with only
 OpenAI configured, gbrain keeps the unreranked results instead of failing the
 search.
