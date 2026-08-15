@@ -59,6 +59,10 @@
     "./server/safe-fetch": {
       "import": "./src/server/lib/safe-fetch.ts",
       "require": "./src/server/lib/safe-fetch.ts"
+    },
+    "./server/notion-api": {
+      "import": "./src/server/lib/notion-api.ts",
+      "require": "./src/server/lib/notion-api.ts"
     }
   },
   "scripts": {

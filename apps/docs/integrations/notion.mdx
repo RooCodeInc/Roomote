@@ -33,6 +33,12 @@ access list in Notion whenever the page hierarchy changes.
 
 The secret is encrypted server-side and is never sent to task sandboxes.
 
+When the Brain is enabled, Roomote also backfills the pages shared with this
+integration and keeps their Markdown snapshots current. Notion pages are
+stored under the `notion/` namespace. New and edited pages are picked up on
+regular Brain collector ticks, and a daily full sweep discovers older pages
+that were newly shared without being edited.
+
 <Note>
   A previous hosted-MCP OAuth connection is not reused because it inherits the
   authorizing person's full Notion permissions. Configure an internal

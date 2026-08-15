@@ -4,6 +4,8 @@ import { getBrainSyncState, upsertBrainSyncState } from '@roomote/db/server';
 
 import {
   buildGranolaMeetingPage,
+  buildNotionPage,
+  buildNotionSearchBody,
   buildPersonIdentityLookup,
   buildPersonIdentityPage,
   buildSlackDirectoryPersonPage,
@@ -17,6 +19,7 @@ import {
   type BrainSink,
   type CollectorPage,
   type PersonIdentityRecord,
+  type NotionSearchPage,
   type SlackDirectoryProfile,
   type SlackChannelMessage,
 } from '../brain-collectors';
@@ -102,6 +105,66 @@ function makeCollector(overrides: Partial<BrainCollector>): BrainCollector {
     ...overrides,
   };
 }
+
+describe('Notion page mapping', () => {
+  const page: NotionSearchPage = {
+    object: 'page',
+    id: '12345678-90AB-CDEF-1234-567890ABCDEF',
+    created_time: '2026-08-13T14:30:00.000Z',
+    last_edited_time: '2026-08-15T01:20:00.000Z',
+    url: 'https://www.notion.so/Project-brief-1234567890abcdef1234567890abcdef',
+    properties: {
+      Name: {
+        type: 'title',
+        title: [{ plain_text: 'Project ' }, { text: { content: 'brief' } }],
+      },
+    },
+  };
+
+  it('uses a stable page-id slug and preserves source dates and Markdown', () => {
+    const mapped = buildNotionPage(page, {
+      markdown: '## Decision\n\nShip the collector.',
+    });
+
+    expect(mapped).toMatchObject({
+      slug: 'notion/1234567890abcdef1234567890abcdef',
+      title: 'Project brief',
+    });
+    expect(mapped?.content).toContain('date: 2026-08-15');
+    expect(mapped?.content).toContain('created_at: 2026-08-13T14:30:00.000Z');
+    expect(mapped?.content).toContain(
+      'last_edited_at: 2026-08-15T01:20:00.000Z',
+    );
+    expect(mapped?.content).toContain('## Decision\n\nShip the collector.');
+  });
+
+  it('replaces the old body with a tombstone when Notion reports trash', () => {
+    const mapped = buildNotionPage({ ...page, in_trash: true }, {});
+
+    expect(mapped?.content).toContain('status: deleted');
+    expect(mapped?.content).toContain('This page is in the Notion trash.');
+  });
+
+  it('marks snapshots that Notion truncated', () => {
+    const mapped = buildNotionPage(page, {
+      markdown: '# Partial body',
+      truncated: true,
+    });
+
+    expect(mapped?.content).toContain(
+      'Notion truncated this Markdown snapshot',
+    );
+  });
+
+  it('searches pages newest-first and carries the durable Notion cursor', () => {
+    expect(buildNotionSearchBody('next-page', 100)).toEqual({
+      filter: { property: 'object', value: 'page' },
+      sort: { direction: 'descending', timestamp: 'last_edited_time' },
+      page_size: 20,
+      start_cursor: 'next-page',
+    });
+  });
+});
 
 describe('runBrainCollectors', () => {
   it('advances the watermark between runs', async () => {
