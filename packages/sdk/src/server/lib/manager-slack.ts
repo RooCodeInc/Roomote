@@ -8,6 +8,7 @@ import {
   getTriggerableBackgroundAutomationDescriptorByKey,
   MANAGER_CHANNEL_SETTINGS_HASH,
   MANAGER_STATS_SETTINGS_HASH,
+  PLATFORM_ISSUE_ALERTS_SETTINGS_HASH,
   SECURITY_AUDITOR_SETTINGS_HASH,
   SENTRY_TRIAGE_SETTINGS_HASH,
   SUGGEST_IDEAS_SETTINGS_HASH,
@@ -28,6 +29,7 @@ export {
   DEPENDABOT_TRIAGE_SETTINGS_HASH,
   MANAGER_CHANNEL_SETTINGS_HASH,
   MANAGER_STATS_SETTINGS_HASH,
+  PLATFORM_ISSUE_ALERTS_SETTINGS_HASH,
   SECURITY_AUDITOR_SETTINGS_HASH,
   SENTRY_TRIAGE_SETTINGS_HASH,
   SUGGEST_IDEAS_SETTINGS_HASH,
@@ -111,6 +113,7 @@ export function buildAutomationSettingsContextBlock(hash: string) {
 export function buildAutomationSettingsMessage(
   text: string,
   hash: string,
+  options?: { taskUrl?: string | null; slackIcon?: string },
 ): SlackAutomationSettingsMessage {
   const trimmedText = text.trim();
   const settingsDescriptor = getBackgroundAutomationSettingsDescriptor(hash);
@@ -125,8 +128,11 @@ export function buildAutomationSettingsMessage(
     text: trimmedText,
     blocks: buildAutomationResultBlocks({
       title,
-      iconUrl: buildAutomationIconUrl(automationDescriptor?.slackIcon ?? 'zap'),
+      iconUrl: buildAutomationIconUrl(
+        options?.slackIcon ?? automationDescriptor?.slackIcon ?? 'zap',
+      ),
       configureUrl: buildManagerSlackSettingsUrl(hash),
+      taskUrl: options?.taskUrl,
       contentBlocks: [
         {
           type: 'section',

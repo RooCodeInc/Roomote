@@ -74,7 +74,12 @@ describe('findRoomoteOwnedSlackThread', () => {
     getLatestSlackBotReplyMock.mockResolvedValue(null);
   });
 
-  it.each([['ci_failure_triage'], ['sentry_triage'], ['announcer']])(
+  it.each([
+    ['ci_failure_triage'],
+    ['sentry_triage'],
+    ['announcer'],
+    ['platform_issue_alerts'],
+  ])(
     'treats a task-bound %s report thread as an automation report thread',
     async (automationKey) => {
       taskRunRowsMock.mockResolvedValue([

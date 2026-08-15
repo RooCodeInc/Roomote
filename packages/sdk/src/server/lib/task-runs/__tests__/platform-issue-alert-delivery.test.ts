@@ -33,10 +33,12 @@ import {
   db,
   deploymentSettings,
   eq,
+  findBackgroundAutomationSlackThread,
   slackInstallations,
   taskFactory,
   taskPlatformIssueReports,
   taskRuns,
+  tasks,
   upsertAutomation,
   users,
 } from '@roomote/db/server';
@@ -216,7 +218,63 @@ describe('platform issue alert delivery', () => {
     const [post] = mockSlackPostMessage.mock.calls[0] ?? [];
     expect(post).toMatchObject({ channel: 'C999MANAGER' });
     expect(post.text).toContain(`*${REPORT.title}*`);
-    expect(post.text).toContain('utm_source=slack');
+    expect(post.blocks).toEqual([
+      expect.objectContaining({
+        type: 'container',
+        title: expect.objectContaining({ text: 'Alert on Config Errors' }),
+        icon: expect.objectContaining({
+          image_url:
+            'https://app.example.com/automation-icons/triangle-alert.png',
+        }),
+        child_blocks: expect.arrayContaining([
+          expect.objectContaining({
+            type: 'actions',
+            elements: expect.arrayContaining([
+              expect.objectContaining({
+                action_id: 'late_bound_automation_view_task',
+                url: expect.stringContaining('utm_source=slack'),
+              }),
+              expect.objectContaining({
+                action_id: 'late_bound_automation_configure',
+                url: 'https://app.example.com/automations#platform-issue-alerts',
+              }),
+            ]),
+          }),
+        ]),
+      }),
+    ]);
+
+    await expect(
+      db.query.tasks.findFirst({
+        where: eq(tasks.id, taskId),
+        columns: { slackChannelId: true, slackThreadTs: true },
+      }),
+    ).resolves.toMatchObject({
+      slackChannelId: 'C999MANAGER',
+      slackThreadTs: '1727000000.000100',
+    });
+    await expect(
+      db.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, runId),
+        columns: { payload: true },
+      }),
+    ).resolves.toMatchObject({
+      payload: expect.objectContaining({
+        channel: 'C999MANAGER',
+        teamId: 'T123',
+        threadTs: '1727000000.000100',
+      }),
+    });
+    await expect(
+      findBackgroundAutomationSlackThread({
+        surface: 'slack',
+        slackChannelId: 'C999MANAGER',
+        threadTs: '1727000000.000100',
+      }),
+    ).resolves.toMatchObject({
+      automationKey: 'platform_issue_alerts',
+      metadata: { sourceTaskId: taskId },
+    });
 
     const reportRow = await findReportRow(taskId);
     expect(reportRow?.slackPostedAt).not.toBeNull();

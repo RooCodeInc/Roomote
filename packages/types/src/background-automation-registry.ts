@@ -29,6 +29,7 @@ export const SECURITY_AUDITOR_SETTINGS_HASH = 'security-auditor';
 export const CODE_QUALITY_AUDITOR_SETTINGS_HASH = 'code-quality-auditor';
 export const CI_FAILURE_TRIAGE_SETTINGS_HASH = 'ci-failure-triage';
 export const SUMMARIZE_MERGED_PRS_SETTINGS_HASH = 'summarize-merged-prs';
+export const PLATFORM_ISSUE_ALERTS_SETTINGS_HASH = 'platform-issue-alerts';
 
 export type BackgroundAutomationSettingsHash =
   | typeof AUTO_RESPOND_CHANNELS_SETTINGS_HASH
@@ -42,7 +43,8 @@ export type BackgroundAutomationSettingsHash =
   | typeof SECURITY_AUDITOR_SETTINGS_HASH
   | typeof CODE_QUALITY_AUDITOR_SETTINGS_HASH
   | typeof CI_FAILURE_TRIAGE_SETTINGS_HASH
-  | typeof SUMMARIZE_MERGED_PRS_SETTINGS_HASH;
+  | typeof SUMMARIZE_MERGED_PRS_SETTINGS_HASH
+  | typeof PLATFORM_ISSUE_ALERTS_SETTINGS_HASH;
 
 export type BackgroundAutomationManualTriggerRequirement =
   | 'slack'
@@ -324,6 +326,10 @@ const BACKGROUND_AUTOMATION_SETTINGS_CATALOG = [
   {
     hash: MANAGER_CHANNEL_SETTINGS_HASH,
     label: 'Manager Channel',
+  },
+  {
+    hash: PLATFORM_ISSUE_ALERTS_SETTINGS_HASH,
+    label: 'Alert on Config Errors',
   },
   {
     hash: MANAGER_STATS_SETTINGS_HASH,
