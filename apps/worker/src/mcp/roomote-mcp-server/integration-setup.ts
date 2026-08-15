@@ -25,12 +25,13 @@ GitHub is connected via a GitHub App installation. An admin installs the Roomote
 
 # Notion
 
-Notion uses one deployment-wide OAuth connection:
+Notion uses one deployment-wide internal integration whose content access is enforced by Notion:
 1. A deployment operator opens Settings > Integrations.
-2. That operator connects Notion once for the deployment via OAuth.
-3. The operator keeps the default read-only access or explicitly enables read and write access in Manage tools.
+2. In Notion, that operator creates an internal integration and shares only approved pages and data sources with it.
+3. The operator stores the internal integration secret in Roomote.
+4. The operator keeps the default read-only access or explicitly enables read and write access in Manage tools.
 
-Once connected, I can use the permitted Notion tools during both interactive tasks and automations. Read-write access applies deployment-wide.
+Once connected, I can use the permitted Notion tools during both interactive tasks and automations. Unshared content, including private pages, is unavailable. Read-write access applies deployment-wide but remains inside the same Notion-enforced content boundary.
 
 # Jira
 

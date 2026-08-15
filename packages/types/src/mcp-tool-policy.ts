@@ -10,23 +10,48 @@ export type McpToolAccessModeConfig = {
   readonly readOnlyToolNames: readonly string[];
 };
 
-/**
- * Notion documents these as non-mutating tools. `fetch` and `search` are
- * aliases that Notion may advertise to OpenAI MCP clients in place of their
- * `notion-`-prefixed names.
- */
+/** Roomote's native Notion tools that do not mutate content. */
 export const NOTION_READ_ONLY_TOOL_NAMES = [
   'notion-search',
-  'search',
   'notion-fetch',
-  'fetch',
   'notion-query-data-sources',
-  'notion-query-database-view',
   'notion-get-comments',
-  'notion-get-teams',
-  'notion-get-users',
-  'notion-get-user',
-  'notion-get-self',
+] as const;
+
+export const NOTION_MCP_TOOL_DEFINITIONS = [
+  {
+    name: 'notion-search',
+    description: 'Search explicitly shared Notion pages and data sources.',
+  },
+  {
+    name: 'notion-fetch',
+    description:
+      'Fetch an explicitly shared Notion page, data source, or block.',
+  },
+  {
+    name: 'notion-query-data-sources',
+    description: 'Query rows from an explicitly shared Notion data source.',
+  },
+  {
+    name: 'notion-get-comments',
+    description: 'List comments on an explicitly shared Notion page or block.',
+  },
+  {
+    name: 'notion-create-pages',
+    description: 'Create a page beneath an available Notion parent.',
+  },
+  {
+    name: 'notion-update-page',
+    description: 'Update an available Notion page.',
+  },
+  {
+    name: 'notion-append-blocks',
+    description: 'Append content blocks to an available Notion page or block.',
+  },
+  {
+    name: 'notion-create-comment',
+    description: 'Create a comment on an available Notion page.',
+  },
 ] as const;
 
 const INTEGRATION_MCP_TOOL_ACCESS_MODE_CONFIGS: Readonly<

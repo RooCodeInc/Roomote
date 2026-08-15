@@ -16,8 +16,11 @@ import {
   getMcpIntegration,
   getMcpIntegrationConnectionScope,
   getMcpIntegrationDefaultDisabledTools,
+  NOTION_MCP_TOOL_DEFINITIONS,
+  NOTION_READ_ONLY_TOOL_NAMES,
   type McpConnectionRole,
   isMcpConnectionAsanaConfig,
+  isMcpConnectionNotionConfig,
   isMcpConnectionGranolaConfig,
   isMcpConnectionElevenLabsConfig,
   isMcpConnectionGrafanaConfig,
@@ -46,6 +49,7 @@ import { assertCuratedIntegrationsEnabled } from '@/lib/server/curated-integrati
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
 import type {
   SaveAsanaConnectionInput,
+  SaveNotionConnectionInput,
   SaveGranolaConnectionInput,
   SaveElevenLabsConnectionInput,
   SaveGrafanaConnectionInput,
@@ -181,6 +185,7 @@ async function getVisibleMcpConnectionForToolCatalog(
     columns: {
       id: true,
       mcpId: true,
+      authConfig: true,
     },
   });
 
@@ -192,7 +197,16 @@ async function getVisibleMcpConnectionForToolCatalog(
     );
   }
 
-  return connection;
+  if (
+    mcpId === 'notion' &&
+    !isMcpConnectionNotionConfig(connection.authConfig)
+  ) {
+    throw new Error(
+      'Configure a Notion internal integration before managing tools for this deployment.',
+    );
+  }
+
+  return { id: connection.id, mcpId: connection.mcpId };
 }
 
 /**
@@ -634,12 +648,21 @@ export async function setDeploymentMcpEnabledCommand(
         eq(mcpConnections.authStatus, 'authenticated'),
         isNull(mcpConnections.userId),
       ),
-      columns: { id: true },
+      columns: { id: true, authConfig: true },
     });
 
     if (!connection) {
       throw new Error(
         'This MCP integration must be connected before it can be enabled.',
+      );
+    }
+
+    if (
+      input.mcpId === 'notion' &&
+      !isMcpConnectionNotionConfig(connection.authConfig)
+    ) {
+      throw new Error(
+        'Configure a Notion internal integration before enabling it.',
       );
     }
   }
@@ -795,6 +818,27 @@ export async function getAsanaConnectionCommand(auth: UserAuthSuccess) {
   return {
     authStatus: connection.authStatus,
   };
+}
+
+export async function getNotionConnectionCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+
+  const connection = await db.query.mcpConnections.findFirst({
+    where: and(
+      eq(mcpConnections.mcpId, 'notion'),
+      isNull(mcpConnections.userId),
+    ),
+    columns: {
+      authConfig: true,
+      authStatus: true,
+    },
+  });
+
+  if (!connection || !isMcpConnectionNotionConfig(connection.authConfig)) {
+    return null;
+  }
+
+  return { authStatus: connection.authStatus };
 }
 
 export async function getGranolaConnectionCommand(auth: UserAuthSuccess) {
@@ -1148,6 +1192,91 @@ export async function saveAsanaConnectionCommand(
   return {
     authStatus: 'authenticated' as const,
   };
+}
+
+export async function saveNotionConnectionCommand(
+  auth: UserAuthSuccess,
+  input: SaveNotionConnectionInput,
+) {
+  assertAdmin(auth);
+  assertCuratedIntegrationsEnabled();
+
+  const existingConnection = await db.query.mcpConnections.findFirst({
+    where: and(
+      eq(mcpConnections.mcpId, 'notion'),
+      isNull(mcpConnections.userId),
+    ),
+    columns: { authConfig: true },
+  });
+  const existingConfig = isMcpConnectionNotionConfig(
+    existingConnection?.authConfig,
+  )
+    ? existingConnection.authConfig
+    : null;
+  const nextEncryptedToken =
+    input.internalIntegrationSecret.length > 0
+      ? encrypt(input.internalIntegrationSecret)
+      : existingConfig?.encryptedToken;
+
+  if (!nextEncryptedToken) {
+    throw new Error(
+      'A Notion internal integration secret is required when no secret is already stored.',
+    );
+  }
+
+  const authConfig = {
+    type: 'notion' as const,
+    encryptedToken: nextEncryptedToken,
+  };
+
+  await db
+    .insert(mcpConnections)
+    .values({
+      userId: null,
+      mcpId: 'notion',
+      connectionRole: 'default',
+      authConfig,
+      enabled: true,
+      authStatus: 'authenticated',
+    })
+    .onConflictDoUpdate({
+      target: [
+        mcpConnections.userId,
+        mcpConnections.mcpId,
+        mcpConnections.connectionRole,
+      ],
+      set: {
+        connectionRole: 'default',
+        authConfig,
+        accessToken: null,
+        refreshToken: null,
+        tokenExpiresAt: null,
+        scopes: null,
+        enabled: true,
+        authStatus: 'authenticated',
+        updatedAt: new Date(),
+      },
+    });
+
+  await db
+    .insert(deploymentMcpEnablements)
+    .values({
+      mcpId: 'notion',
+      enabled: true,
+      enabledByUserId: auth.userId,
+      toolAccessMode: 'read_only',
+    })
+    .onConflictDoUpdate({
+      target: [deploymentMcpEnablements.mcpId],
+      set: {
+        enabled: true,
+        enabledByUserId: auth.userId,
+        ...(!existingConfig ? { toolAccessMode: 'read_only' as const } : {}),
+        updatedAt: new Date(),
+      },
+    });
+
+  return { authStatus: 'authenticated' as const };
 }
 
 export async function saveGranolaConnectionCommand(
@@ -1592,15 +1721,27 @@ export async function listDeploymentMcpIntegrationToolsCommand(
     input.mcpId,
     enablement.toolAccessMode,
   );
+  const nativeNotionTools = NOTION_MCP_TOOL_DEFINITIONS.map((tool) => ({
+    ...tool,
+    enabled: isMcpToolAllowed(tool.name, {
+      disabledToolNames: enablement.disabledTools,
+    }),
+    availableInReadOnly: NOTION_READ_ONLY_TOOL_NAMES.includes(
+      tool.name as (typeof NOTION_READ_ONLY_TOOL_NAMES)[number],
+    ),
+  }));
 
   return {
     mcpId: enablement.mcpId,
     toolAccessMode: toolAccessMode ?? null,
-    tools: await fetchUpstreamMcpTools({
-      id: connection.id,
-      mcpId: connection.mcpId,
-      disabledTools: enablement.disabledTools,
-    }),
+    tools:
+      input.mcpId === 'notion'
+        ? nativeNotionTools
+        : await fetchUpstreamMcpTools({
+            id: connection.id,
+            mcpId: connection.mcpId,
+            disabledTools: enablement.disabledTools,
+          }),
   };
 }
 

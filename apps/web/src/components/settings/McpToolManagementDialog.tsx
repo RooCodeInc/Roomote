@@ -342,8 +342,9 @@ export function McpToolManagementDialog({
                     <Alert variant="warning">
                       <TriangleAlert />
                       <AlertDescription>
-                        Read and write access uses the permissions of the Notion
-                        account connected for this deployment.
+                        Read and write access remains limited to pages and data
+                        sources explicitly shared with the deployment&apos;s
+                        Notion internal integration.
                       </AlertDescription>
                     </Alert>
                   ) : null}

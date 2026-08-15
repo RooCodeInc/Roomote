@@ -41,6 +41,7 @@ import {
   pullRequestAnalyticsOverviewInputSchema,
   filterSchema,
   saveAsanaConnectionSchema,
+  saveNotionConnectionSchema,
   saveGranolaConnectionSchema,
   saveElevenLabsConnectionSchema,
   saveGrafanaConnectionSchema,
@@ -208,6 +209,7 @@ import {
   setDeploymentMcpEnabledCommand,
   getUserMcpConnectionsCommand,
   getAsanaConnectionCommand,
+  getNotionConnectionCommand,
   getGranolaConnectionCommand,
   getElevenLabsConnectionCommand,
   getGrafanaConnectionCommand,
@@ -216,6 +218,7 @@ import {
   getXConnectionCommand,
   listDeploymentMcpIntegrationToolsCommand,
   saveAsanaConnectionCommand,
+  saveNotionConnectionCommand,
   saveGranolaConnectionCommand,
   saveElevenLabsConnectionCommand,
   saveGrafanaConnectionCommand,
@@ -1761,6 +1764,10 @@ export const appRouter = createRouter({
       getAsanaConnectionCommand(auth),
     ),
 
+    notionConnection: protectedProcedure.query(({ ctx: { auth } }) =>
+      getNotionConnectionCommand(auth),
+    ),
+
     granolaConnection: protectedProcedure.query(({ ctx: { auth } }) =>
       getGranolaConnectionCommand(auth),
     ),
@@ -1834,6 +1841,12 @@ export const appRouter = createRouter({
       .input(saveAsanaConnectionSchema)
       .mutation(({ ctx: { auth }, input }) =>
         saveAsanaConnectionCommand(auth, input),
+      ),
+
+    saveNotionConnection: protectedProcedure
+      .input(saveNotionConnectionSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        saveNotionConnectionCommand(auth, input),
       ),
 
     saveGranolaConnection: protectedProcedure

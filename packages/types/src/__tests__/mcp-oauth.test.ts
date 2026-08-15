@@ -5,6 +5,7 @@ import {
   getMcpIntegrationDefaultDisabledTools,
   getMcpIntegrationOauthScopeMode,
   getMcpIntegrationOauthScopes,
+  isMcpConnectionNotionConfig,
   isMcpConnectionElevenLabsConfig,
   isMcpConnectionGbrainConfig,
   LINEAR_APP_OAUTH_SCOPES,
@@ -50,14 +51,32 @@ describe('monday.com OAuth', () => {
   });
 });
 
-describe('Notion OAuth', () => {
-  it('uses one deployment-scoped OAuth connection', () => {
+describe('Notion internal integration', () => {
+  it('uses a deployment-scoped native MCP with admin-managed credentials', () => {
     expect(getMcpIntegration('notion')).toMatchObject({
       name: 'Notion',
-      url: 'https://mcp.notion.com/mcp',
       connectionScope: 'deployment',
+      connectionMode: 'admin_configured',
+      serverMode: 'native',
     });
+    expect(getMcpIntegration('notion')?.url).toBeUndefined();
     expect(getMcpIntegrationConnectionScope('notion')).toBe('deployment');
+  });
+
+  it('recognizes only stored Notion internal integration configs', () => {
+    expect(
+      isMcpConnectionNotionConfig({
+        type: 'notion',
+        encryptedToken: 'encrypted',
+      }),
+    ).toBe(true);
+    expect(
+      isMcpConnectionNotionConfig({
+        type: 'oauth_client',
+        client_id: 'legacy-hosted-mcp',
+        registered_redirect_uri: 'https://example.com/callback',
+      }),
+    ).toBe(false);
   });
 });
 

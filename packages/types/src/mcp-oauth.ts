@@ -124,6 +124,18 @@ export interface McpConnectionAsanaConfig {
 }
 
 /**
+ * Deployment-scoped Notion internal integration configuration.
+ *
+ * Notion enforces the content boundary: this token can only access pages and
+ * data sources explicitly shared with the internal integration. The secret is
+ * expected to be encrypted before persistence.
+ */
+export interface McpConnectionNotionConfig {
+  type: 'notion';
+  encryptedToken: string;
+}
+
+/**
  * Deployment-scoped Granola connection config stored in mcpConnections.authConfig.
  *
  * The API key is expected to be encrypted before persistence.
@@ -225,6 +237,7 @@ export type McpConnectionAuthConfig =
   | McpConnectionOAuthConfig
   | McpConnectionSnowflakeConfig
   | McpConnectionAsanaConfig
+  | McpConnectionNotionConfig
   | McpConnectionGranolaConfig
   | McpConnectionElevenLabsConfig
   | McpConnectionVercelConfig
@@ -392,10 +405,13 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
   {
     id: 'notion',
     name: 'Notion',
-    url: 'https://mcp.notion.com/mcp',
-    description: `Access your Notion pages, databases, and content within ${PRODUCT_NAME} tasks`,
+    description: `Access only the Notion pages and data sources explicitly shared with ${PRODUCT_NAME}`,
     icon: 'notion',
     connectionScope: 'deployment',
+    connectionMode: 'admin_configured',
+    serverMode: 'native',
+    instructions:
+      'Use Notion for pages and data sources explicitly shared with the deployment integration. Content outside that connection boundary, including unshared private pages, is unavailable. Writes are available only when a deployment admin enables read-write mode.',
   },
   {
     id: 'jira',
@@ -922,6 +938,19 @@ export function isMcpConnectionAsanaConfig(
     typeof authConfig === 'object' &&
     'type' in authConfig &&
     authConfig.type === 'asana',
+  );
+}
+
+export function isMcpConnectionNotionConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionNotionConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'notion' &&
+    'encryptedToken' in authConfig &&
+    typeof authConfig.encryptedToken === 'string',
   );
 }
 
