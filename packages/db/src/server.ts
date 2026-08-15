@@ -154,6 +154,7 @@ export {
   slackInstallationChannelsRelations,
   slackUserMappings,
   slackUserMappingsRelations,
+  slackDirectoryUsers,
   telegramUserMappings,
   telegramUserMappingsRelations,
   discordInstallations,

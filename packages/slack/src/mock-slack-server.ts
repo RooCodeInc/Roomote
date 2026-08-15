@@ -39,7 +39,12 @@ export type MockSlackUser = {
   name: string;
   displayName?: string;
   realName?: string;
+  title?: string;
   email?: string;
+  deleted?: boolean;
+  isBot?: boolean;
+  isAppUser?: boolean;
+  updated?: number;
 };
 
 export type MockSlackChannel = {
@@ -932,11 +937,53 @@ export class MockSlackServer {
             id: user.id,
             name: user.name,
             real_name: user.realName ?? user.displayName ?? user.name,
+            deleted: user.deleted ?? false,
+            is_bot: user.isBot ?? false,
+            is_app_user: user.isAppUser ?? false,
+            updated: user.updated ?? 0,
             profile: {
               display_name: user.displayName ?? user.name,
               real_name: user.realName ?? user.displayName ?? user.name,
+              title: user.title ?? '',
               ...(user.email ? { email: user.email } : {}),
             },
+          },
+        });
+        return;
+      }
+
+      case 'GET users.list': {
+        const limit = Math.max(
+          1,
+          Number.parseInt(url.searchParams.get('limit') ?? '100', 10) || 100,
+        );
+        const offset = Math.max(
+          0,
+          Number.parseInt(url.searchParams.get('cursor') ?? '0', 10) || 0,
+        );
+        const page = this.state.users.slice(offset, offset + limit);
+        const nextOffset = offset + page.length;
+
+        json(response, 200, {
+          ok: true,
+          members: page.map((user) => ({
+            id: user.id,
+            name: user.name,
+            real_name: user.realName ?? user.displayName ?? user.name,
+            deleted: user.deleted ?? false,
+            is_bot: user.isBot ?? false,
+            is_app_user: user.isAppUser ?? false,
+            updated: user.updated ?? 0,
+            profile: {
+              display_name: user.displayName ?? user.name,
+              real_name: user.realName ?? user.displayName ?? user.name,
+              title: user.title ?? '',
+              ...(user.email ? { email: user.email } : {}),
+            },
+          })),
+          response_metadata: {
+            next_cursor:
+              nextOffset < this.state.users.length ? String(nextOffset) : '',
           },
         });
         return;

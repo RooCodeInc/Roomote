@@ -430,6 +430,63 @@ describe('MockSlackServer', () => {
     }
   });
 
+  it('returns complete user profiles from users.list and users.info', async () => {
+    const server = new MockSlackServer({
+      state: {
+        team: { id: 'T1', domain: 'mock-roomote' },
+        acceptedBotTokens: ['xoxb-mock-token'],
+        channels: [],
+        users: [
+          {
+            id: 'UADA',
+            name: 'ada',
+            displayName: 'Ada',
+            realName: 'Ada Lovelace',
+            title: 'Mathematician',
+            updated: 1_786_817_600,
+          },
+          { id: 'UGRACE', name: 'grace', displayName: 'Grace Hopper' },
+        ],
+      },
+    });
+
+    try {
+      await server.start();
+      const headers = { authorization: 'Bearer xoxb-mock-token' };
+      const first = await fetch(`${server.baseUrl}/api/users.list?limit=1`, {
+        headers,
+      });
+
+      await expect(first.json()).resolves.toMatchObject({
+        ok: true,
+        members: [
+          {
+            id: 'UADA',
+            profile: {
+              display_name: 'Ada',
+              real_name: 'Ada Lovelace',
+              title: 'Mathematician',
+            },
+          },
+        ],
+        response_metadata: { next_cursor: '1' },
+      });
+
+      const info = await fetch(`${server.baseUrl}/api/users.info?user=UADA`, {
+        headers,
+      });
+      await expect(info.json()).resolves.toMatchObject({
+        ok: true,
+        user: {
+          id: 'UADA',
+          profile: { title: 'Mathematician' },
+        },
+      });
+    } finally {
+      await server.stop();
+    }
+  });
+
   it('returns channel members with Slack-style pagination', async () => {
     const server = new MockSlackServer({
       state: {

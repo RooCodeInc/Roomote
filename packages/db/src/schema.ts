@@ -2430,6 +2430,40 @@ export const slackUserMappingsRelations = relations(
 );
 
 /**
+ * slack_directory_users
+ *
+ * Privacy-safe Slack profile projection used to build Brain person cards for
+ * the whole workspace, including people who do not have Roomote accounts.
+ * Email, status, timezone, and avatar fields are deliberately not retained.
+ */
+export const slackDirectoryUsers = pgTable(
+  'slack_directory_users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slackUserId: text('slack_user_id').notNull(),
+    slackTeamId: text('slack_team_id').notNull(),
+    username: text('username'),
+    displayName: text('display_name'),
+    realName: text('real_name'),
+    title: text('title'),
+    isDeleted: boolean('is_deleted').notNull().default(false),
+    isBot: boolean('is_bot').notNull().default(false),
+    isAppUser: boolean('is_app_user').notNull().default(false),
+    profileUpdatedAt: timestamp('profile_updated_at'),
+    lastSeenAt: timestamp('last_seen_at').notNull().defaultNow(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('slack_directory_users_team_id_idx').on(table.slackTeamId),
+    unique('slack_directory_users_unique').on(
+      table.slackUserId,
+      table.slackTeamId,
+    ),
+  ],
+);
+
+/**
  * telegram_user_mappings
  */
 
