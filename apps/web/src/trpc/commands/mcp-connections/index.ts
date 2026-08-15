@@ -12,6 +12,7 @@ import {
   filterMcpToolDefinitions,
   getDefaultMcpConnectionRole,
   getAllowedIntegrationMcpToolNames,
+  getMcpIntegrationToolAccessModeConfig,
   getMcpIntegration,
   getMcpIntegrationConnectionScope,
   getMcpIntegrationDefaultDisabledTools,
@@ -29,8 +30,10 @@ import {
   MCP_INTEGRATIONS,
   normalizeGrafanaBaseUrl,
   type McpIntegration,
+  type McpToolAccessMode,
   type McpToolsListJsonRpcPayload,
   parseMcpJsonRpcPayload,
+  resolveMcpIntegrationToolAccessMode,
 } from '@roomote/types';
 import { decrypt, encrypt } from '@roomote/db/encryption';
 import { getValidAccessToken } from '@roomote/sdk/server';
@@ -119,6 +122,7 @@ type ListedMcpTool = {
   name: string;
   description: string | null;
   enabled: boolean;
+  availableInReadOnly: boolean | null;
 };
 
 type VisibleMcpConnectionForCatalog = {
@@ -130,6 +134,7 @@ type DeploymentMcpEnablementForTools = {
   mcpId: string;
   enabled: boolean;
   disabledTools: string[] | null;
+  toolAccessMode: McpToolAccessMode | null;
 };
 
 async function getDeploymentMcpEnablementForTools(
@@ -141,6 +146,7 @@ async function getDeploymentMcpEnablementForTools(
       mcpId: true,
       enabled: true,
       disabledTools: true,
+      toolAccessMode: true,
     },
   });
 
@@ -516,29 +522,33 @@ async function fetchUpstreamMcpTools(input: {
   }
 
   const tools = payload.result.tools;
+  const toolDefinitions = tools.flatMap((tool) =>
+    typeof tool.name === 'string'
+      ? [
+          {
+            name: tool.name,
+            description:
+              typeof tool.description === 'string' ? tool.description : null,
+          },
+        ]
+      : [],
+  );
+  const accessModeConfig =
+    getMcpIntegrationToolAccessModeConfig(resolvedIntegration);
   const allowedToolNames =
     getAllowedIntegrationMcpToolNames(resolvedIntegration);
-  const filteredTools = filterMcpToolDefinitions(
-    tools.flatMap((tool) =>
-      typeof tool.name === 'string'
-        ? [
-            {
-              name: tool.name,
-              description:
-                typeof tool.description === 'string' ? tool.description : null,
-            },
-          ]
-        : [],
-    ),
-    { allowedToolNames },
-  );
+  const visibleTools = accessModeConfig
+    ? toolDefinitions
+    : filterMcpToolDefinitions(toolDefinitions, { allowedToolNames });
 
-  return filteredTools.map((tool) => ({
+  return visibleTools.map((tool) => ({
     ...tool,
     enabled: isMcpToolAllowed(tool.name, {
-      allowedToolNames,
       disabledToolNames: input.disabledTools,
     }),
+    availableInReadOnly: accessModeConfig
+      ? accessModeConfig.readOnlyToolNames.includes(tool.name)
+      : null,
   }));
 }
 
@@ -1578,9 +1588,14 @@ export async function listDeploymentMcpIntegrationToolsCommand(
     auth,
     input.mcpId,
   );
+  const toolAccessMode = resolveMcpIntegrationToolAccessMode(
+    input.mcpId,
+    enablement.toolAccessMode,
+  );
 
   return {
     mcpId: enablement.mcpId,
+    toolAccessMode: toolAccessMode ?? null,
     tools: await fetchUpstreamMcpTools({
       id: connection.id,
       mcpId: connection.mcpId,
@@ -1591,7 +1606,11 @@ export async function listDeploymentMcpIntegrationToolsCommand(
 
 export async function setDeploymentDisabledMcpIntegrationToolsCommand(
   auth: UserAuthSuccess,
-  input: { mcpId: string; disabledTools: string[] },
+  input: {
+    mcpId: string;
+    disabledTools: string[];
+    toolAccessMode?: McpToolAccessMode;
+  },
 ) {
   assertAdmin(auth);
   assertCuratedIntegrationsEnabled();
@@ -1601,6 +1620,17 @@ export async function setDeploymentDisabledMcpIntegrationToolsCommand(
   }
 
   await getDeploymentMcpEnablementForTools(input.mcpId);
+
+  const accessModeConfig = getMcpIntegrationToolAccessModeConfig(integration);
+  if (
+    input.toolAccessMode !== undefined &&
+    (!accessModeConfig ||
+      !accessModeConfig.supportedModes.includes(input.toolAccessMode))
+  ) {
+    throw new Error(
+      `${integration.name} does not support the requested tool access mode.`,
+    );
+  }
 
   const disabledTools = Array.from(
     new Set(
@@ -1614,12 +1644,16 @@ export async function setDeploymentDisabledMcpIntegrationToolsCommand(
     .update(deploymentMcpEnablements)
     .set({
       disabledTools: disabledTools.length > 0 ? disabledTools : null,
+      ...(input.toolAccessMode !== undefined
+        ? { toolAccessMode: input.toolAccessMode }
+        : {}),
       updatedAt: new Date(),
     })
     .where(eq(deploymentMcpEnablements.mcpId, input.mcpId))
     .returning({
       mcpId: deploymentMcpEnablements.mcpId,
       disabledTools: deploymentMcpEnablements.disabledTools,
+      toolAccessMode: deploymentMcpEnablements.toolAccessMode,
     });
 
   if (!updatedEnablement) {

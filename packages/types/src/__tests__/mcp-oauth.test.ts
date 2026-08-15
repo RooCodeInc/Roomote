@@ -50,6 +50,17 @@ describe('monday.com OAuth', () => {
   });
 });
 
+describe('Notion OAuth', () => {
+  it('uses one deployment-scoped OAuth connection', () => {
+    expect(getMcpIntegration('notion')).toMatchObject({
+      name: 'Notion',
+      url: 'https://mcp.notion.com/mcp',
+      connectionScope: 'deployment',
+    });
+    expect(getMcpIntegrationConnectionScope('notion')).toBe('deployment');
+  });
+});
+
 describe('Better Stack OAuth', () => {
   it('uses the hosted MCP with deployment-scoped read-only access', () => {
     expect(getMcpIntegration('betterstack')).toMatchObject({

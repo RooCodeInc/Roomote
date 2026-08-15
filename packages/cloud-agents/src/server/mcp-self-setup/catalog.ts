@@ -68,9 +68,9 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
   },
   notion: {
     capabilities: [
-      'Read Notion pages and databases',
+      'Search and read Notion pages and databases',
       'Pull requirements and product docs into task context',
-      'Answer questions against internal documentation',
+      'Optionally create and update content when an admin enables read-write access',
     ],
   },
   jira: {

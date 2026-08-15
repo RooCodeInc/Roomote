@@ -295,6 +295,11 @@ interface ResolvedCredentials {
   /** `null` for upstreams that take no Authorization header. */
   authHeader: string | null;
   extraHeaders?: Record<string, string>;
+  /**
+   * Per-request allowlist override. `null` explicitly removes a static
+   * allowlist, while `undefined` keeps the proxy's configured default.
+   */
+  allowedToolNames?: readonly string[] | null;
   disabledToolNames?: readonly string[] | null;
   /**
    * Per-request upstream URL. Required when the proxy was constructed without
@@ -907,8 +912,12 @@ export function createMcpProxy(config: McpProxyConfig) {
     }
 
     try {
+      const resolvedAllowedToolNames =
+        credentials.allowedToolNames === undefined
+          ? allowedToolNames
+          : (credentials.allowedToolNames ?? undefined);
       const effectiveAllowedToolNames = getEffectiveAllowedMcpToolNames({
-        allowedToolNames,
+        allowedToolNames: resolvedAllowedToolNames,
         disabledToolNames: credentials.disabledToolNames,
       });
       const hasToolRestrictions = Boolean(
@@ -941,7 +950,7 @@ export function createMcpProxy(config: McpProxyConfig) {
         if (
           toolName &&
           !isMcpToolAllowed(toolName, {
-            allowedToolNames,
+            allowedToolNames: resolvedAllowedToolNames,
             disabledToolNames: credentials.disabledToolNames,
           })
         ) {

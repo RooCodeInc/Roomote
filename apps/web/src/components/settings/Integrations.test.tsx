@@ -25,10 +25,12 @@ const state = vi.hoisted(() => ({
   }>,
   mcpTools: null as null | {
     mcpId: string;
+    toolAccessMode?: 'read_only' | 'read_write' | null;
     tools: Array<{
       name: string;
       description: string | null;
       enabled: boolean;
+      availableInReadOnly?: boolean | null;
     }>;
   },
   mcpToolsError: null as Error | null,
@@ -92,7 +94,7 @@ const state = vi.hoisted(() => ({
   searchParams: '',
 }));
 
-const { mutations, selectMock } = vi.hoisted(() => ({
+const { mutations, selectMock, radioMock } = vi.hoisted(() => ({
   mutations: {
     connectLinear: vi.fn(),
     disconnectLinear: vi.fn(),
@@ -111,6 +113,10 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     removeLinearOauthSetup: vi.fn(),
   },
   selectMock: {
+    latestOnValueChange: null as null | ((value: string) => void),
+  },
+  radioMock: {
+    currentValue: null as string | null,
     latestOnValueChange: null as null | ((value: string) => void),
   },
 }));
@@ -400,6 +406,28 @@ vi.mock('@/components/system', () => ({
   RefreshCw: ({ className }: { className?: string }) => (
     <svg aria-hidden="true" className={className} data-icon="refresh-cw" />
   ),
+  RadioGroup: ({
+    children,
+    value,
+    onValueChange,
+  }: {
+    children: ReactNode;
+    value: string;
+    onValueChange: (value: string) => void;
+  }) => {
+    radioMock.currentValue = value;
+    radioMock.latestOnValueChange = onValueChange;
+    return <div role="radiogroup">{children}</div>;
+  },
+  RadioGroupItem: ({ id, value }: { id: string; value: string }) => (
+    <input
+      id={id}
+      type="radio"
+      value={value}
+      checked={radioMock.currentValue === value}
+      onChange={() => radioMock.latestOnValueChange?.(value)}
+    />
+  ),
   Select: ({
     children,
     onValueChange,
@@ -447,16 +475,19 @@ vi.mock('@/components/system', () => ({
   Trash: () => <svg aria-hidden="true" />,
   Switch: ({
     checked,
+    disabled,
     onCheckedChange,
     'aria-label': ariaLabel,
   }: {
     checked: boolean;
+    disabled?: boolean;
     onCheckedChange: (checked: boolean) => void;
     'aria-label'?: string;
   }) => (
     <button
       type="button"
       aria-label={ariaLabel}
+      disabled={disabled}
       data-checked={checked ? 'true' : 'false'}
       onClick={() => onCheckedChange(!checked)}
     />
@@ -467,6 +498,8 @@ vi.mock('@/components/system', () => ({
   TriangleAlert: ({ className }: { className?: string }) => (
     <svg aria-hidden="true" className={className} data-icon="triangle-alert" />
   ),
+  ToggleLeft: () => <svg aria-hidden="true" />,
+  ToggleRight: () => <svg aria-hidden="true" />,
   X: () => <svg aria-hidden="true" />,
 }));
 
@@ -1359,7 +1392,7 @@ describe('Integrations settings', () => {
   });
 
   it('links user-scoped MCP tool authentication errors to personal settings in a new tab', () => {
-    state.deploymentEnablements = [{ mcpId: 'notion', enabled: true }];
+    state.deploymentEnablements = [{ mcpId: 'monday', enabled: true }];
     state.mcpToolsError = new Error(
       MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION,
     );
@@ -1367,7 +1400,7 @@ describe('Integrations settings', () => {
     render(<Integrations />);
 
     fireEvent.click(
-      screen.getByRole('button', { name: 'Manage Notion tools' }),
+      screen.getByRole('button', { name: 'Manage monday.com tools' }),
     );
 
     const link = screen.getByRole('link', { name: 'personal settings' });
@@ -1376,7 +1409,7 @@ describe('Integrations settings', () => {
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
     expect(link.closest('[data-slot="alert-description"]')).toHaveTextContent(
-      'link your Notion account in personal settings',
+      'link your monday.com account in personal settings',
     );
     expect(
       screen.queryByRole('button', { name: 'Save changes' }),
@@ -1387,13 +1420,70 @@ describe('Integrations settings', () => {
   });
 
   it('shows admin tool management for enabled user-scoped MCPs without a connection row', () => {
-    state.deploymentEnablements = [{ mcpId: 'notion', enabled: true }];
+    state.deploymentEnablements = [{ mcpId: 'monday', enabled: true }];
 
     render(<Integrations />);
 
     expect(
-      screen.getByRole('button', { name: 'Manage Notion tools' }),
+      screen.getByRole('button', { name: 'Manage monday.com tools' }),
     ).toBeInTheDocument();
+  });
+
+  it('lets admins opt a deployment-wide Notion connection into read-write access', () => {
+    state.deploymentEnablements = [{ mcpId: 'notion', enabled: true }];
+    state.userConnections = [
+      { id: 'conn-notion', mcpId: 'notion', authStatus: 'authenticated' },
+    ];
+    state.mcpTools = {
+      mcpId: 'notion',
+      toolAccessMode: 'read_only',
+      tools: [
+        {
+          name: 'notion-fetch',
+          description: 'Fetch a Notion page',
+          enabled: true,
+          availableInReadOnly: true,
+        },
+        {
+          name: 'notion-update-page',
+          description: 'Update a Notion page',
+          enabled: true,
+          availableInReadOnly: false,
+        },
+      ],
+    };
+
+    render(<Integrations />);
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Manage Notion tools' }),
+    );
+
+    expect(screen.getByLabelText('Read only (recommended)')).toBeChecked();
+    expect(
+      screen.getByRole('button', { name: 'Enable notion-update-page' }),
+    ).toBeDisabled();
+    fireEvent.click(screen.getByLabelText('Read and write'));
+
+    expect(
+      screen.getByRole('button', { name: 'Disable notion-update-page' }),
+    ).toBeEnabled();
+
+    expect(
+      screen.getByText(
+        'Read and write access uses the permissions of the Notion account connected for this deployment.',
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(mutations.setDisabledTools).toHaveBeenCalledWith(
+      {
+        mcpId: 'notion',
+        disabledTools: [],
+        toolAccessMode: 'read_write',
+      },
+      expect.any(Object),
+    );
   });
 
   it('opens the Snowflake credential dialog from the integrations page', () => {

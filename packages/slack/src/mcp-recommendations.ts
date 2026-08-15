@@ -40,7 +40,7 @@ const SLACK_ENABLE_DESCRIPTIONS: Record<string, string> = {
   posthog:
     'Roomote will be able to inspect analytics, feature flags, and experiments.',
   notion:
-    'Roomote will be able to read Notion pages and databases for context.',
+    'Roomote will use one deployment-wide Notion connection. It starts read-only, and admins can optionally allow writes.',
   jira: 'Roomote will be able to inspect Jira issues, workflows, and JQL search results.',
   neon: 'Roomote will get database access to inspect schemas and query data.',
   pylon:

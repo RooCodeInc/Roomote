@@ -106,7 +106,7 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to inspect monday.com boards, items, updates, docs, and workspace context.',
   neon: 'Roomote will get database access to inspect schemas and query data.',
   notion:
-    'Roomote will be able to read Notion pages and databases for context.',
+    'Roomote will use one deployment-wide Notion connection. It starts read-only, and admins can optionally allow writes.',
   pylon:
     'Roomote will be able to inspect customer issues, message history, and account context.',
   posthog:

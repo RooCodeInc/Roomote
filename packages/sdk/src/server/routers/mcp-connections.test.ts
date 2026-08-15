@@ -187,7 +187,7 @@ function createJobCaller(requestUrl?: string) {
 
 function buildJoinedConnectionRow({
   id = 'conn-1',
-  userId = 'user-1',
+  userId = null,
   mcpId = 'notion',
   authConfig = {
     type: 'oauth_client',
@@ -721,6 +721,16 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
               expect.objectContaining({
                 conditions: expect.arrayContaining([
                   { column: 'connection.userId', value: 'actor-user' },
+                  expect.objectContaining({
+                    type: 'inArray',
+                    column: 'connection.mcpId',
+                    values: expect.not.arrayContaining(['notion']),
+                  }),
+                ]),
+              }),
+              expect.objectContaining({
+                conditions: expect.arrayContaining([
+                  { type: 'isNull', column: 'connection.userId' },
                   expect.objectContaining({
                     type: 'inArray',
                     column: 'connection.mcpId',

@@ -281,6 +281,13 @@
       "when": 1786809000000,
       "tag": "0039_reset_brain_ingestion_state",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1786813704082,
+      "tag": "0040_regular_the_order",
+      "breakpoints": true
     }
   ]
 }

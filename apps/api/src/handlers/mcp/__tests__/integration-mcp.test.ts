@@ -35,6 +35,7 @@ vi.mock('@roomote/db/server', () => ({
   deploymentMcpEnablements: {
     mcpId: 'mcpId',
     enabled: 'enabled',
+    toolAccessMode: 'toolAccessMode',
   },
   eq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
   and: vi.fn((...clauses: unknown[]) => clauses),
@@ -147,7 +148,10 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
-    mockFindEnablement.mockResolvedValue({ disabledTools: null });
+    mockFindEnablement.mockResolvedValue({
+      disabledTools: null,
+      toolAccessMode: null,
+    });
     mockGetValidAccessToken.mockResolvedValue('valid-access-token');
   });
 
@@ -182,11 +186,25 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     expect(response.status).toBe(200);
   });
 
+  it('serves Notion on a run with no human actor through its deployment connection', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-notion', userId: null });
+    stubUpstreamFetch();
+
+    const response = await postMcp(
+      createApp('notion', createRunToken()),
+      createInitializeRequest(1),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockFindConnection).toHaveBeenCalledTimes(1);
+  });
+
   it('rejects a user-scoped integration on a run with no human actor', async () => {
     mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
 
     const response = await postMcp(
-      createApp('notion', createRunToken()),
+      createApp('monday', createRunToken()),
       createInitializeRequest(1),
     );
     const body = (await response.json()) as JsonRpcErrorBody;
@@ -194,6 +212,94 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     expect(response.status).toBe(403);
     expect(body.error.message).toContain('requires a human actor');
     expect(mockFindConnection).not.toHaveBeenCalled();
+  });
+
+  it('blocks direct Notion mutation calls in the default read-only mode', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-notion', userId: null });
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await postMcp(
+      createApp('notion', createRunToken()),
+      createToolCallRequest(1, 'notion-update-page'),
+    );
+
+    expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('allows Notion mutation calls after read-write is explicitly enabled', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-notion', userId: null });
+    mockFindEnablement.mockResolvedValue({
+      disabledTools: null,
+      toolAccessMode: 'read_write',
+    });
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await postMcp(
+      createApp('notion', createRunToken()),
+      createToolCallRequest(1, 'notion-update-page'),
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('filters Notion mutation tools from tools/list in read-only mode', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-notion', userId: null });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            result: {
+              tools: [
+                { name: 'notion-fetch' },
+                { name: 'notion-update-page' },
+                { name: 'notion-new-upstream-mutation' },
+              ],
+            },
+          }),
+          {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          },
+        ),
+      ),
+    );
+
+    const response = await postMcp(
+      createApp('notion', createRunToken()),
+      createToolsListRequest(1),
+    );
+    const body = (await response.json()) as {
+      result: { tools: Array<{ name: string }> };
+    };
+
+    expect(response.status).toBe(200);
+    expect(body.result.tools).toEqual([{ name: 'notion-fetch' }]);
+  });
+
+  it('keeps individually disabled Notion tools blocked in read-write mode', async () => {
+    mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
+    mockFindConnection.mockResolvedValue({ id: 'conn-notion', userId: null });
+    mockFindEnablement.mockResolvedValue({
+      disabledTools: ['notion-update-page'],
+      toolAccessMode: 'read_write',
+    });
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await postMcp(
+      createApp('notion', createRunToken()),
+      createToolCallRequest(1, 'notion-update-page'),
+    );
+
+    expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('resolves a user-scoped monday.com connection for the live acting user', async () => {

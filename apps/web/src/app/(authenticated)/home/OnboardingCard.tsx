@@ -61,11 +61,7 @@ const ADMIN_INTEGRATION_ORDER = [
   'asana',
 ] as const;
 
-const PERSONAL_MCP_INTEGRATION_ORDER = [
-  'notion',
-  'monday',
-  'supabase',
-] as const;
+const PERSONAL_MCP_INTEGRATION_ORDER = ['monday', 'supabase'] as const;
 
 const CARD_EXIT_TRANSITION = {
   duration: 0.4,
