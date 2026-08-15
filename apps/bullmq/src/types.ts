@@ -15,6 +15,8 @@ export enum ScheduledJobName {
   StandbyRetention = 'StandbyRetention',
   CustomAutomations = 'custom_automations',
   PrReviewNotificationDispatch = 'PrReviewNotificationDispatch',
+  BrainOutboxDrain = 'BrainOutboxDrain',
+  BrainCollectors = 'BrainCollectors',
 }
 
 /**

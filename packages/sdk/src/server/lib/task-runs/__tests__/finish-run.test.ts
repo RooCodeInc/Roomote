@@ -396,6 +396,14 @@ describe('finishRun', () => {
           },
           select: () => makeTxSelectChain(),
           update: (...args: unknown[]) => mockDbUpdate(...args),
+          // Brain outbox insert (maybeEnqueueBrainMemoryEvent)
+          // runs inside the completion transaction when the mocked enablement
+          // read comes back non-empty.
+          insert: () => ({
+            values: () => ({
+              onConflictDoNothing: async () => undefined,
+            }),
+          }),
         }),
     );
     mockDbSelect.mockClear();

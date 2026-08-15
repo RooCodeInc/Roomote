@@ -16,6 +16,8 @@ import {
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   getInferenceGatewayProvider,
   getInferenceGatewayProviderByEnvVarName,
+  BRAIN_MCP_ID,
+  BRAIN_MCP_INSTRUCTIONS,
   getMcpIntegration,
   getOpenAiCompatibleRuntimeConfigs,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
@@ -560,6 +562,12 @@ function createIntegrationMcpInstructions(
   mcpServers: OpenCodeConfigMcpServer[] | undefined,
 ): string | undefined {
   const sections = (mcpServers ?? []).flatMap((mcpServer) => {
+    // The Brain is infrastructure rather than a catalog integration, so its
+    // recall-first guidance ships from the shared types contract.
+    if (mcpServer.name === BRAIN_MCP_ID) {
+      return [`# Connected: Brain\n\n${BRAIN_MCP_INSTRUCTIONS}`];
+    }
+
     const integration = getMcpIntegration(mcpServer.name);
 
     if (!integration) {

@@ -41,6 +41,7 @@ export * from './thread-footer';
 export * from './thread-reply-footer-ops';
 export * from './thread-image-utils';
 export * from './video-descriptions';
+export * from './web-client';
 export * from './work-object-utils';
 
 export type {

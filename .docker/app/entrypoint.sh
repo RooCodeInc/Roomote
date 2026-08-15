@@ -37,6 +37,12 @@ fi
 if [ -z "${S3_PRESIGN_ENDPOINT:-}" ] && [ -n "${ROOMOTE_MINIO_HOST:-}" ]; then
   export S3_PRESIGN_ENDPOINT="https://${ROOMOTE_MINIO_HOST}"
 fi
+# The Brain is a private service with no public hostname, so this is plain
+# http over the internal network. Empty means no Brain, which is a supported
+# state: R_GBRAIN_URL stays unset and the deployment simply has no memory.
+if [ -z "${R_GBRAIN_URL:-}" ] && [ -n "${ROOMOTE_GBRAIN_HOSTPORT:-}" ]; then
+  export R_GBRAIN_URL="http://${ROOMOTE_GBRAIN_HOSTPORT}"
+fi
 
 # V8 sizes its default heap ceiling from the memory it can see, which in a
 # container is the host's total, not the container's limit. With that much

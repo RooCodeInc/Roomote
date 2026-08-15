@@ -31,6 +31,8 @@ import {
   webhookCleanupJob,
   standbyRetentionJob,
   prReviewNotificationDispatchJob,
+  brainOutboxDrainJob,
+  brainCollectorsJob,
 } from './scheduled-jobs';
 
 const QUEUE_NAME = 'scheduled-jobs';
@@ -191,6 +193,20 @@ async function createJobs(queue: Queue): Promise<void> {
     { every: 24 * 60 * 60 * 1000 }, // Every 24 hours.
   );
 
+  await queue.upsertJobScheduler(
+    ScheduledJobName.BrainOutboxDrain,
+    // Every minute; task memories should land promptly after completion, and
+    // the job no-ops in one enablement read when the Brain is disabled.
+    { every: 60 * 1000 },
+  );
+
+  await queue.upsertJobScheduler(
+    ScheduledJobName.BrainCollectors,
+    // Integration sources (Slack, Granola, PR facts) poll external APIs, so
+    // they run on a slower cadence than the internal task-memory outbox.
+    { every: 15 * 60 * 1000 },
+  );
+
   const schedulers = await queue.getJobSchedulers();
   console.log('[createJobs] getJobSchedulers ->', schedulers);
 }
@@ -224,6 +240,10 @@ const runJobs = async (job: ScheduledJob): Promise<void> => {
       return standbyRetentionJob();
     case ScheduledJobName.PrReviewNotificationDispatch:
       return prReviewNotificationDispatchJob();
+    case ScheduledJobName.BrainOutboxDrain:
+      return brainOutboxDrainJob();
+    case ScheduledJobName.BrainCollectors:
+      return brainCollectorsJob();
     case ScheduledJobName.CustomAutomations:
       await customAutomationsJob();
       return;

@@ -372,3 +372,6 @@ export {
   requestLicenseUsageSync,
   resetInstancePingQueueForTests,
 } from './lib/request-instance-ping';
+export * from './lib/brain-clients';
+export * from './lib/brain-github';
+export * from './lib/brain-inference';

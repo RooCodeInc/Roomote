@@ -21,6 +21,7 @@ export * from './conflict-resolution-comments';
 export * from './constants';
 export * from './deploy-marker';
 export * from './deployment-access-policy';
+export * from './brain';
 export * from './custom-mcp-servers';
 export * from './environment-config';
 export * from './reserved-mcp-env-vars';

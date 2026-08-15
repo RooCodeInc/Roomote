@@ -10,6 +10,14 @@ vi.mock('@roomote/env', () => ({
   areCuratedIntegrationsDisabled: (value: boolean | undefined) =>
     value === true,
   isCustomMcpDisabled: (value: boolean | undefined) => value === true,
+  // Mirrors the real signal so a fixture that sets a Brain key behaves as it
+  // would in production rather than silently never delivering the Brain.
+  isBrainConfigured: (env: Record<string, string | undefined> | undefined) =>
+    Boolean(
+      env?.R_BRAIN_GATEWAY_TOKEN?.trim() ||
+      env?.R_BRAIN_OPENROUTER_API_KEY?.trim() ||
+      env?.R_BRAIN_OPENAI_API_KEY?.trim(),
+    ),
 }));
 
 const {

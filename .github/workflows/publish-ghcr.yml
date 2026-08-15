@@ -230,6 +230,18 @@ jobs:
             image: roomote-worker
             arch: arm64
             runner: blacksmith-4vcpu-ubuntu-2404-arm
+          # The Brain (deployment-hosted gbrain). Published so template-based
+          # deployments (Railway) can run it without a build step.
+          - app: gbrain
+            dockerfile: .docker/gbrain/Dockerfile
+            image: roomote-gbrain
+            arch: amd64
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - app: gbrain
+            dockerfile: .docker/gbrain/Dockerfile
+            image: roomote-gbrain
+            arch: arm64
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
@@ -293,6 +305,8 @@ jobs:
             image: roomote-app
           - app: worker
             image: roomote-worker
+          - app: gbrain
+            image: roomote-gbrain
     steps:
       - name: Download digests
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4

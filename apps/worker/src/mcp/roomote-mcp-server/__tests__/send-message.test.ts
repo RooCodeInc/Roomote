@@ -21,7 +21,7 @@ describe('handleSendMessage', () => {
   });
 
   it('should return success when message is sent', async () => {
-    vi.mocked(tasksApiClient.sendMessageToTask).mockResolvedValueOnce({
+    vi.mocked(tasksApiClient.steerMessageToTask).mockResolvedValueOnce({
       success: true,
       result: { sent: true },
     });
@@ -35,7 +35,7 @@ describe('handleSendMessage', () => {
     const parsed = JSON.parse(text);
     expect(parsed.success).toBe(true);
     expect(parsed.message).toContain('task-1');
-    expect(tasksApiClient.sendMessageToTask).toHaveBeenCalledWith(
+    expect(tasksApiClient.steerMessageToTask).toHaveBeenCalledWith(
       config,
       'task-1',
       {
@@ -43,33 +43,11 @@ describe('handleSendMessage', () => {
         images: undefined,
       },
     );
-    expect(tasksApiClient.steerMessageToTask).not.toHaveBeenCalled();
-  });
-
-  it('steers the active task when requested', async () => {
-    vi.mocked(tasksApiClient.steerMessageToTask).mockResolvedValueOnce({
-      success: true,
-      result: { sent: true },
-    });
-
-    await handleSendMessage(
-      { taskId: 'task-1', message: 'Change direction', steer: true },
-      config,
-    );
-
-    expect(tasksApiClient.steerMessageToTask).toHaveBeenCalledWith(
-      config,
-      'task-1',
-      {
-        message: 'Change direction',
-        images: undefined,
-      },
-    );
     expect(tasksApiClient.sendMessageToTask).not.toHaveBeenCalled();
   });
 
   it('surfaces snapshot resumes with the new task run id', async () => {
-    vi.mocked(tasksApiClient.sendMessageToTask).mockResolvedValueOnce({
+    vi.mocked(tasksApiClient.steerMessageToTask).mockResolvedValueOnce({
       success: true,
       result: { resumed: true, runId: 77, taskId: 'task-1' },
     });
@@ -88,7 +66,7 @@ describe('handleSendMessage', () => {
       runId: 77,
       taskId: 'task-1',
     });
-    expect(tasksApiClient.sendMessageToTask).toHaveBeenCalledWith(
+    expect(tasksApiClient.steerMessageToTask).toHaveBeenCalledWith(
       config,
       'task-1',
       {
@@ -96,11 +74,11 @@ describe('handleSendMessage', () => {
         images: undefined,
       },
     );
-    expect(tasksApiClient.steerMessageToTask).not.toHaveBeenCalled();
+    expect(tasksApiClient.sendMessageToTask).not.toHaveBeenCalled();
   });
 
   it('should return error when API returns success=false', async () => {
-    vi.mocked(tasksApiClient.sendMessageToTask).mockResolvedValueOnce({
+    vi.mocked(tasksApiClient.steerMessageToTask).mockResolvedValueOnce({
       success: false,
       error: 'Task is not active',
     });
@@ -114,11 +92,11 @@ describe('handleSendMessage', () => {
     const parsed = JSON.parse(text);
     expect(parsed.success).toBe(false);
     expect(parsed.error).toBe('Task is not active');
-    expect(tasksApiClient.steerMessageToTask).not.toHaveBeenCalled();
+    expect(tasksApiClient.sendMessageToTask).not.toHaveBeenCalled();
   });
 
   it('should return error on exception', async () => {
-    vi.mocked(tasksApiClient.sendMessageToTask).mockRejectedValueOnce(
+    vi.mocked(tasksApiClient.steerMessageToTask).mockRejectedValueOnce(
       new Error('Connection refused'),
     );
 
@@ -131,7 +109,7 @@ describe('handleSendMessage', () => {
     const parsed = JSON.parse(text);
     expect(parsed.success).toBe(false);
     expect(parsed.error).toBe('Connection refused');
-    expect(tasksApiClient.steerMessageToTask).not.toHaveBeenCalled();
+    expect(tasksApiClient.sendMessageToTask).not.toHaveBeenCalled();
   });
 
   it('passes linked review handoff senderMode for review-result relays', async () => {
@@ -145,7 +123,6 @@ describe('handleSendMessage', () => {
       {
         taskId: 'task-1',
         message: '<review_result>Looks good</review_result>',
-        steer: true,
       },
       config,
     );

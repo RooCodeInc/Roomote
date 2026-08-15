@@ -18,6 +18,7 @@ import { environmentsRouter } from '../environments';
 import { customAutomationsRouter } from '../custom-automations';
 import { tasksRouter } from '../tasks';
 import { createCustomMcpProxy } from './custom-mcp';
+import { createGbrainMcpProxy } from './gbrain';
 import { createIntegrationMcpProxy } from './integration-mcp';
 import { granolaMcp } from './granola';
 import { grafanaMcp } from './grafana';
@@ -60,6 +61,12 @@ const requireCustomMcp: MiddlewareHandler<{
 
 mcp.use('/custom/*', requireCustomMcp);
 mcp.route('/custom/:serverId', createCustomMcpProxy());
+
+// Brain (deployment-hosted gbrain): a native-mode catalog
+// integration with a custom handler, like snowflake/grafana below. The
+// handler 404s per request unless the integration is enabled and a
+// connection (admin-entered or R_GBRAIN_* env) exists.
+mcp.route('/gbrain', createGbrainMcpProxy());
 
 mcp.route('/asana', asanaMcp);
 mcp.route('/granola', granolaMcp);

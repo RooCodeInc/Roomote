@@ -81,3 +81,6 @@ AGENTS.local.md
 
 # e2e
 artifacts/ci-e2e/
+
+# Scheduled-task runner lock (machine-local runtime state)
+.agents/scheduled_tasks.lock

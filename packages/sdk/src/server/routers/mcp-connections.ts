@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   Env,
   areCuratedIntegrationsDisabled,
+  isBrainConfigured,
   isCustomMcpDisabled,
 } from '@roomote/env';
 import {
@@ -25,6 +26,7 @@ import {
   MCP_INTEGRATIONS,
   isMcpConnectionAsanaConfig,
   isMcpConnectionGranolaConfig,
+  isMcpConnectionGbrainConfig,
   isMcpConnectionGrafanaConfig,
   getMcpIntegration,
   getMcpIntegrationConnectionScope,
@@ -33,6 +35,8 @@ import {
   isMcpConnectionVercelConfig,
   isMcpConnectionXConfig,
   isDeploymentScopedMcpIntegration,
+  BRAIN_MCP_ID,
+  BRAIN_PROXY_PATH,
   CUSTOM_MCP_PROXY_PATH_PREFIX,
   customMcpConnectionId,
   PRODUCT_NAME,
@@ -177,6 +181,18 @@ export const mcpConnectionsRouter = router({
           servers[name] = config;
         }
       }
+    }
+
+    // The Brain: infrastructure, not a catalog integration, so it is
+    // delivered directly whenever the deployment has one. The name cannot
+    // collide ('gbrain' is reserved for custom servers); the worker injects
+    // the run token sandbox-side and the read-only upstream credential never
+    // leaves the API proxy.
+    if (isBrainConfigured(Env) && Env.R_GBRAIN_URL && !servers[BRAIN_MCP_ID]) {
+      servers[BRAIN_MCP_ID] = {
+        url: `${getRequestOrigin(ctx.req) ?? ''}${BRAIN_PROXY_PATH}`,
+        headers: {},
+      };
     }
 
     console.info('[getMcpServerConfigs] Final resolved server keys:', [
@@ -494,6 +510,7 @@ async function buildCuratedMcpServerConfigs(ctx: {
         isMcpConnectionGranolaConfig(authConfig) ||
         isMcpConnectionVercelConfig(authConfig) ||
         isMcpConnectionGrafanaConfig(authConfig) ||
+        isMcpConnectionGbrainConfig(authConfig) ||
         isMcpConnectionXConfig(authConfig)
       ) {
         servers[connection.mcpId] = {

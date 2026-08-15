@@ -186,6 +186,31 @@ export interface McpConnectionGrafanaConfig {
 }
 
 /**
+ * Deployment-scoped Brain (gbrain) connection config stored in
+ * mcpConnections.authConfig. The URL points at the deployment-hosted gbrain
+ * service (typically deployment-internal).
+ *
+ * Provisioned automatically at connect time: the admin supplies gbrain's
+ * bootstrap token once (never persisted), and Roomote registers two OAuth
+ * clients via gbrain's admin API. Scopes are enforced server-side by gbrain:
+ * the agent client is `read`-scoped (structurally incapable of mutation; the
+ * proxy's tool allowlist is defense-in-depth on top), and the ingest client
+ * carries `write` for the server-side ingestion worker only. Secrets are
+ * encrypted before persistence; short-lived access tokens are minted on
+ * demand via the client_credentials grant. R_GBRAIN_* env, when set,
+ * overrides this config entirely (operator-managed deployments, static
+ * bearer tokens).
+ */
+export interface McpConnectionGbrainConfig {
+  type: 'gbrain';
+  url: string;
+  agentClientId: string;
+  encryptedAgentClientSecret: string;
+  ingestClientId: string;
+  encryptedIngestClientSecret: string;
+}
+
+/**
  * Union of all shapes stored in mcpConnections.authConfig.
  *
  * - McpConnectionOAuthConfig: completed OAuth dynamic registration
@@ -200,6 +225,7 @@ export type McpConnectionAuthConfig =
   | McpConnectionElevenLabsConfig
   | McpConnectionVercelConfig
   | McpConnectionGrafanaConfig
+  | McpConnectionGbrainConfig
   | McpConnectionXConfig
   | Record<string, never>;
 
@@ -943,6 +969,27 @@ export function isMcpConnectionXConfig(
     authConfig.type === 'x' &&
     'encryptedBearerToken' in authConfig &&
     typeof authConfig.encryptedBearerToken === 'string',
+  );
+}
+
+export function isMcpConnectionGbrainConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionGbrainConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'gbrain' &&
+    'url' in authConfig &&
+    typeof authConfig.url === 'string' &&
+    'agentClientId' in authConfig &&
+    typeof authConfig.agentClientId === 'string' &&
+    'encryptedAgentClientSecret' in authConfig &&
+    typeof authConfig.encryptedAgentClientSecret === 'string' &&
+    'ingestClientId' in authConfig &&
+    typeof authConfig.ingestClientId === 'string' &&
+    'encryptedIngestClientSecret' in authConfig &&
+    typeof authConfig.encryptedIngestClientSecret === 'string',
   );
 }
 

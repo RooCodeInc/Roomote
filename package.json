@@ -22,6 +22,7 @@
     "check": "pnpm lint && pnpm check-types && pnpm test && pnpm knip",
     "build": "turbo build --log-order grouped --output-logs new-only",
     "clean": "turbo clean --log-order grouped --output-logs new-only && rimraf logs .docker/data/worker .turbo worker-*.tar.gz*",
+    "brain:up": "dotenvx run --quiet -f .env.local -- docker compose --profile brain up gbrain -d --wait",
     "infra:up": "docker compose up postgres redis minio caddy-dev -d --wait && docker compose exec -T postgres /docker-entrypoint-initdb.d/create-databases.sh && docker compose up minio-init && pnpm --silent --filter @roomote/db db:migrate && pnpm --silent --filter @roomote/db db:push:test --force",
     "infra:down": "docker compose down postgres redis minio minio-init caddy-dev",
     "db:up": "docker compose up postgres redis minio -d --wait && docker compose exec -T postgres /docker-entrypoint-initdb.d/create-databases.sh && docker compose up minio-init && pnpm --silent --filter @roomote/db db:migrate && pnpm --silent --filter @roomote/db db:push:test --force",
