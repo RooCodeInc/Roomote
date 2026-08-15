@@ -11,6 +11,10 @@ FROM oven/bun:1.3.14
 
 ARG GBRAIN_REF=ac402f5
 
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends postgresql-client \
+  && rm -rf /var/lib/apt/lists/*
+
 RUN bun install -g "github:garrytan/gbrain#${GBRAIN_REF}"
 
 # bun hoists global deps, but gbrain resolves its PGLite wasm assets relative
