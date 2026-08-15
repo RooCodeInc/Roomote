@@ -55,6 +55,7 @@ export function getInboundSlackConversationSource(
 }
 
 type RoomoteOwnedSlackThreadMatch = {
+  taskId: string | null;
   userId: string | null;
   slackUserId: string | null;
   /**
@@ -117,6 +118,7 @@ export async function findRoomoteOwnedSlackThread(params: {
 
     if (payload.teamId === params.teamId) {
       const match = {
+        taskId: job.taskId,
         userId: job.userId,
         slackUserId: typeof payload.user === 'string' ? payload.user : null,
         isAutomationReportThread: isCustomAutomationThread,
@@ -157,6 +159,7 @@ export async function findRoomoteOwnedSlackThread(params: {
         userId: sourceTaskRun.userId,
         slackUserId: null,
         isAutomationReportThread: true,
+        taskId: sourceTaskRun.taskId,
       };
     }
 
@@ -167,18 +170,13 @@ export async function findRoomoteOwnedSlackThread(params: {
       })
       .from(tasks)
       .innerJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
-      .where(
-        and(
-          eq(tasks.id, sourceTaskId),
-          eq(tasks.slackThreadTs, params.threadTs),
-          isNull(tasks.deletedAt),
-        ),
-      )
+      .where(and(eq(tasks.id, sourceTaskId), isNull(tasks.deletedAt)))
       .orderBy(desc(taskRuns.createdAt))
       .limit(1);
 
     if (sourceTaskRunById) {
       return {
+        taskId: sourceTaskId,
         userId:
           sourceTaskRunById.initiatorUserId ?? sourceTaskRunById.actingUserId,
         slackUserId: null,
@@ -195,6 +193,7 @@ export async function findRoomoteOwnedSlackThread(params: {
   if (trackedBotReply) {
     return (
       fallbackMatch ?? {
+        taskId: null,
         userId: null,
         slackUserId: null,
         isAutomationReportThread: isCustomAutomationThread,

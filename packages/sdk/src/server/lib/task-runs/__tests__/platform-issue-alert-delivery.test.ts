@@ -176,6 +176,24 @@ describe('platform issue alert delivery', () => {
   it('keeps the Slack manager-channel fallback when no Discord destination is configured', async () => {
     const taskId = 'task-platform-issue-slack';
     const runId = await seedTaskRun(taskId);
+    await db
+      .update(tasks)
+      .set({
+        slackChannelId: 'C111SOURCE',
+        slackThreadTs: '1726999999.000100',
+      })
+      .where(eq(tasks.id, taskId));
+    await db
+      .update(taskRuns)
+      .set({
+        payload: {
+          repo: 'owner/repo',
+          channel: 'C111SOURCE',
+          teamId: 'T123',
+          thread_ts: '1726999999.000100',
+        } as never,
+      })
+      .where(eq(taskRuns.id, runId));
 
     await upsertAutomation(db, {
       key: 'platform_issue_alerts',
@@ -250,8 +268,8 @@ describe('platform issue alert delivery', () => {
         columns: { slackChannelId: true, slackThreadTs: true },
       }),
     ).resolves.toMatchObject({
-      slackChannelId: 'C999MANAGER',
-      slackThreadTs: '1727000000.000100',
+      slackChannelId: 'C111SOURCE',
+      slackThreadTs: '1726999999.000100',
     });
     await expect(
       db.query.taskRuns.findFirst({
@@ -260,9 +278,9 @@ describe('platform issue alert delivery', () => {
       }),
     ).resolves.toMatchObject({
       payload: expect.objectContaining({
-        channel: 'C999MANAGER',
+        channel: 'C111SOURCE',
         teamId: 'T123',
-        threadTs: '1727000000.000100',
+        thread_ts: '1726999999.000100',
       }),
     });
     await expect(

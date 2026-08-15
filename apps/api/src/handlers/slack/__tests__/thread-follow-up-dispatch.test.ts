@@ -62,6 +62,27 @@ describe('Slack thread follow-up dispatch', () => {
     );
   });
 
+  it('routes a tracked automation alias by task id without requiring the canonical thread binding', async () => {
+    await resolveSlackThreadFollowUpRoute({
+      threadId: '111.000',
+      slackTeamId: 'T2',
+      taskId: 'task-source',
+    });
+
+    const aliasScope = {
+      taskId: 'task-source',
+      matchTaskIdWithoutThread: true,
+    };
+    expect(findActiveSlackTaskRunMock).toHaveBeenCalledWith(
+      '111.000',
+      aliasScope,
+    );
+    expect(findCompletedSlackTaskRunWithSnapshotMock).toHaveBeenCalledWith(
+      '111.000',
+      aliasScope,
+    );
+  });
+
   it('falls back to a fresh launch when resume handling declines the completed task run', async () => {
     const onFresh = vi.fn().mockResolvedValue('started-fresh');
 

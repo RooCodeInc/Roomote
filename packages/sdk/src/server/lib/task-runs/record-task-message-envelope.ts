@@ -221,7 +221,6 @@ async function markPlatformIssueReportPosted(reportRowId: string) {
 async function maybeNotifyPlatformIssue(params: {
   reportRowId: string;
   taskId: string;
-  runId: number;
   report: { title: string; summary: string };
   slackPostedAt: Date | null;
 }): Promise<void> {
@@ -236,7 +235,6 @@ async function maybeNotifyPlatformIssue(params: {
       columns: {
         botAccessToken: true,
         isActive: true,
-        teamId: true,
       },
     }),
   ]);
@@ -312,33 +310,14 @@ async function maybeNotifyPlatformIssue(params: {
     return;
   }
 
-  const routingPatch = JSON.stringify({
-    channel: channelId,
-    teamId: slackInstallation.teamId,
+  await upsertBackgroundAutomationSlackThread(db, {
+    surface: 'slack',
+    automationKey: 'platform_issue_alerts',
+    slackChannelId: channelId,
     threadTs: messageTs,
-  });
-  await db.transaction(async (tx) => {
-    await tx
-      .update(tasks)
-      .set({ slackChannelId: channelId, slackThreadTs: messageTs })
-      .where(eq(tasks.id, params.taskId));
-    await tx
-      .update(taskRuns)
-      .set({
-        payload: sql`coalesce(${taskRuns.payload}, '{}'::jsonb) || ${routingPatch}::jsonb`,
-      })
-      .where(
-        and(eq(taskRuns.id, params.runId), eq(taskRuns.taskId, params.taskId)),
-      );
-    await upsertBackgroundAutomationSlackThread(tx, {
-      surface: 'slack',
-      automationKey: 'platform_issue_alerts',
-      slackChannelId: channelId,
-      threadTs: messageTs,
-      summaryText: message.text,
-      postedAt: new Date(),
-      metadata: { sourceTaskId: params.taskId },
-    });
+    summaryText: message.text,
+    postedAt: new Date(),
+    metadata: { sourceTaskId: params.taskId },
   });
 
   await markPlatformIssueReportPosted(params.reportRowId);
@@ -398,7 +377,6 @@ async function maybePersistPlatformIssueReport(params: {
   await maybeNotifyPlatformIssue({
     reportRowId: reportRow.id,
     taskId: reportRow.taskId,
-    runId: params.input.runId,
     report: reportRow.report,
     slackPostedAt: reportRow.slackPostedAt,
   });

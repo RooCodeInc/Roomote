@@ -111,6 +111,24 @@ describe('findRoomoteOwnedSlackThread', () => {
     await expect(findRoomoteOwnedSlackThread(THREAD)).resolves.toBeNull();
   });
 
+  it('resolves a tracked report alias without replacing the task source thread', async () => {
+    taskRunRowsMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { initiatorUserId: 'user-1', actingUserId: null },
+      ]);
+    findBackgroundAutomationSlackThreadMock.mockResolvedValue({
+      automationKey: 'platform_issue_alerts',
+      metadata: { sourceTaskId: 'task-source' },
+    });
+
+    await expect(findRoomoteOwnedSlackThread(THREAD)).resolves.toMatchObject({
+      taskId: 'task-source',
+      userId: 'user-1',
+      isAutomationReportThread: true,
+    });
+  });
+
   it('does not treat soft-deleted task bindings as thread ownership', async () => {
     await findRoomoteOwnedSlackThread(THREAD);
 

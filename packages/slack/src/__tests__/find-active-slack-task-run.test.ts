@@ -120,4 +120,20 @@ describe('findActiveSlackTaskRun', () => {
       ],
     });
   });
+
+  it('can resolve a trusted tracked-thread alias by task id alone', async () => {
+    await findActiveSlackTaskRun('111.000', {
+      taskId: 'task-1',
+      matchTaskIdWithoutThread: true,
+    });
+
+    expect(whereMock).toHaveBeenNthCalledWith(1, {
+      and: [
+        { eq: ['taskRuns.taskId', 'task-1'] },
+        { inArray: ['taskRuns.status', [...activeRunStatuses]] },
+        { isNull: 'taskRuns.canceledAt' },
+        { isNull: 'tasks.deletedAt' },
+      ],
+    });
+  });
 });

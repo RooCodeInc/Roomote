@@ -290,7 +290,11 @@ async function processRoutingCorrection(
 
 type UnmentionedSlackThreadReplyRoutingDecision =
   | { shouldRoute: false }
-  | { shouldRoute: true; threadMessages: SlackThreadMessage[] };
+  | {
+      shouldRoute: true;
+      threadMessages: SlackThreadMessage[];
+      taskId?: string;
+    };
 
 function getGroupSlackThreadReplyFooterText(text: string): string {
   const genericMatch = text.match(
@@ -576,7 +580,14 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     return { shouldRoute: false };
   }
 
-  return { shouldRoute: true, threadMessages };
+  return {
+    shouldRoute: true,
+    threadMessages,
+    ...(roomoteThreadMatch?.isAutomationReportThread &&
+    roomoteThreadMatch.taskId
+      ? { taskId: roomoteThreadMatch.taskId }
+      : {}),
+  };
 }
 
 async function startNewTaskConfigurationWithLock(params: {
@@ -1541,6 +1552,7 @@ async function handleSlackEntryEvent(params: {
   completionEmoji: string;
   skipThreadFollowupHandling?: boolean;
   prefetchedThreadMessages?: SlackThreadMessage[];
+  threadTaskId?: string;
 }): Promise<void> {
   const {
     event,
@@ -1551,6 +1563,7 @@ async function handleSlackEntryEvent(params: {
     completionEmoji,
     skipThreadFollowupHandling = false,
     prefetchedThreadMessages,
+    threadTaskId,
   } = params;
 
   if (!event.user) {
@@ -1599,7 +1612,12 @@ async function handleSlackEntryEvent(params: {
 
   const activeRun = skipThreadFollowupHandling
     ? null
-    : await findActiveSlackTaskRun(threadId, { slackTeamId: teamId });
+    : await findActiveSlackTaskRun(
+        threadId,
+        threadTaskId
+          ? { taskId: threadTaskId, matchTaskIdWithoutThread: true }
+          : { slackTeamId: teamId },
+      );
   const shouldRecordThreadReply =
     Boolean(event.thread_ts) &&
     !skipThreadFollowupHandling &&
@@ -1625,6 +1643,7 @@ async function handleSlackEntryEvent(params: {
     const followUpRoute = await resolveSlackThreadFollowUpRoute({
       threadId,
       slackTeamId: teamId,
+      ...(threadTaskId ? { taskId: threadTaskId } : {}),
       prefetchedActiveRun: activeRun ?? null,
       allowCompletedResume: false,
     });
@@ -1722,6 +1741,7 @@ async function handleSlackEntryEvent(params: {
   const followUpRoute = await resolveSlackThreadFollowUpRoute({
     threadId,
     slackTeamId: teamId,
+    ...(threadTaskId ? { taskId: threadTaskId } : {}),
     prefetchedActiveRun: null,
   });
   const startFreshTaskConfiguration = async (errorLogPrefix: string) => {
@@ -1926,6 +1946,9 @@ export async function handleMessageOrAppMentionEvent(params: {
     completionEmoji,
     prefetchedThreadMessages: unmentionedThreadReplyRouting.shouldRoute
       ? unmentionedThreadReplyRouting.threadMessages
+      : undefined,
+    threadTaskId: unmentionedThreadReplyRouting.shouldRoute
+      ? unmentionedThreadReplyRouting.taskId
       : undefined,
   });
 }

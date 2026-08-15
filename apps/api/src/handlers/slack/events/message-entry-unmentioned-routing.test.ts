@@ -236,6 +236,25 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     ).resolves.toMatchObject({ shouldRoute: true });
   });
 
+  it('carries the source task binding for a tracked automation report alias', async () => {
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue({
+      taskId: 'task-source',
+      userId: 'user-4',
+      slackUserId: null,
+      isAutomationReportThread: true,
+    });
+    fetchThreadMessagesMock.mockResolvedValue([
+      botMessage(THREAD_TS, 'Platform issue reported'),
+    ]);
+
+    await expect(
+      routeDecision(threadReplyEvent({ user: 'U444', ts: '102.000' })),
+    ).resolves.toMatchObject({
+      shouldRoute: true,
+      taskId: 'task-source',
+    });
+  });
+
   it('treats the whole thread as the window when no bot message is found in history', async () => {
     fetchThreadMessagesMock.mockResolvedValue([
       humanMessage('U111', THREAD_TS, '<@UBOT> please fix the bug'),

@@ -55,7 +55,9 @@ export async function findCompletedSlackTaskRunWithSnapshot(
     .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
     .where(
       and(
-        eq(tasks.slackThreadTs, slackThreadTs),
+        ...(scope.matchTaskIdWithoutThread
+          ? []
+          : [eq(tasks.slackThreadTs, slackThreadTs)]),
         ...(scope.taskId ? [eq(taskRuns.taskId, scope.taskId)] : []),
         ...(scope.slackTeamId
           ? [getSlackTaskRunWorkspacePredicate(scope.slackTeamId)]

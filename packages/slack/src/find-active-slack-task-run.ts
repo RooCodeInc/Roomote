@@ -29,8 +29,16 @@ import { getSlackTaskRunWorkspacePredicate } from './slack-task-run-workspace-sc
  * machine to finish booting.
  */
 export type SlackTaskRunLookupScope =
-  | { slackTeamId: string; taskId?: string }
-  | { taskId: string; slackTeamId?: string };
+  | {
+      slackTeamId: string;
+      taskId?: string;
+      matchTaskIdWithoutThread?: false;
+    }
+  | {
+      taskId: string;
+      slackTeamId?: string;
+      matchTaskIdWithoutThread?: boolean;
+    };
 
 export async function findActiveSlackTaskRun(
   slackThreadTs: string,
@@ -46,7 +54,9 @@ export async function findActiveSlackTaskRun(
     .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
     .where(
       and(
-        eq(tasks.slackThreadTs, slackThreadTs),
+        ...(scope.matchTaskIdWithoutThread
+          ? []
+          : [eq(tasks.slackThreadTs, slackThreadTs)]),
         ...(scope.taskId ? [eq(taskRuns.taskId, scope.taskId)] : []),
         ...(scope.slackTeamId
           ? [getSlackTaskRunWorkspacePredicate(scope.slackTeamId)]
@@ -82,7 +92,9 @@ export async function findActiveSlackTaskRun(
       .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
       .where(
         and(
-          eq(tasks.slackThreadTs, slackThreadTs),
+          ...(scope.matchTaskIdWithoutThread
+            ? []
+            : [eq(tasks.slackThreadTs, slackThreadTs)]),
           ...(scope.taskId ? [eq(taskRuns.taskId, scope.taskId)] : []),
           ...(scope.slackTeamId
             ? [getSlackTaskRunWorkspacePredicate(scope.slackTeamId)]

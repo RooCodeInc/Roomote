@@ -56,6 +56,10 @@ vi.mock('@roomote/db/server', () => {
 import { findCompletedSlackTaskRunWithSnapshot } from '../find-completed-slack-task-run-with-snapshot';
 
 describe('findCompletedSlackTaskRunWithSnapshot', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('isolates reused thread timestamps by Slack workspace', async () => {
     await findCompletedSlackTaskRunWithSnapshot('111.000', {
       slackTeamId: 'T-second',
@@ -72,6 +76,23 @@ describe('findCompletedSlackTaskRunWithSnapshot', () => {
         }),
         { isNull: 'tasks.deletedAt' },
       ]),
+    });
+  });
+
+  it('can resolve a trusted tracked-thread alias by task id alone', async () => {
+    await findCompletedSlackTaskRunWithSnapshot('111.000', {
+      taskId: 'task-1',
+      matchTaskIdWithoutThread: true,
+    });
+
+    expect(whereMock).toHaveBeenCalledWith({
+      and: expect.arrayContaining([
+        { eq: ['taskRuns.taskId', 'task-1'] },
+        { isNull: 'tasks.deletedAt' },
+      ]),
+    });
+    expect(whereMock.mock.calls[0]?.[0].and).not.toContainEqual({
+      eq: ['tasks.slackThreadTs', '111.000'],
     });
   });
 });
