@@ -105,11 +105,14 @@ export async function getUsersOnlyForFilterCommand(
     if (row.initiatorKind === 'automation') {
       optionsByValue.set(value, {
         value,
-        label: row.initiatorAutomation
-          ? formatAutomationLabel(row.initiatorAutomation, {
-              actorDisplayName: row.actorDisplayName,
-            })
-          : '',
+        label:
+          value === 'automation:custom_automation'
+            ? 'Custom Automations (All)'
+            : row.initiatorAutomation
+              ? formatAutomationLabel(row.initiatorAutomation, {
+                  actorDisplayName: row.actorDisplayName,
+                })
+              : '',
         subLabel: 'Automation',
       });
     } else if (row.initiatorUserId) {

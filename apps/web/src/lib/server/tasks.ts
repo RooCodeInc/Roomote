@@ -82,6 +82,9 @@ export function getCreatorFilterCondition(value: string): TaskFilterCondition {
         tasks.initiatorAutomation,
         creatorFilter.key as BackgroundAutomationKey,
       ),
+      creatorFilter.externalId
+        ? eq(tasks.actorExternalId, creatorFilter.externalId)
+        : undefined,
     )!;
   }
 

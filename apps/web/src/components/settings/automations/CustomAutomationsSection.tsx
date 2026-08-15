@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -12,6 +13,7 @@ import {
 
 import { tryParseCronSchedule } from '@/lib/cron-schedule';
 import { formatDistanceToNowCompact, formatTimeZone } from '@/lib/formatters';
+import { buildCreatorFilterValue } from '@/lib/task-creator-filter';
 import { useTRPC } from '@/trpc/client';
 import type { CustomAutomationListItem } from '@/trpc/commands/automations';
 
@@ -29,6 +31,7 @@ import {
   Label,
   Play,
   Plus,
+  RotateCcwClock,
   Select,
   SelectContent,
   SelectItem,
@@ -1100,6 +1103,12 @@ export function CustomAutomationsSection() {
                               (option) => option.id === target.channelId,
                             )?.label ?? target.channelId)
                           : target.channelId;
+                const historyFilter = buildCreatorFilterValue({
+                  initiatorKind: 'automation',
+                  initiatorUserId: null,
+                  initiatorAutomation: 'custom_automation',
+                  actorExternalId: row.id,
+                });
 
                 return (
                   <div
@@ -1155,6 +1164,16 @@ export function CustomAutomationsSection() {
                       </p>
                     </div>
                     <div className="col-start-2 row-start-2 flex shrink-0 items-center gap-1 sm:col-start-3 sm:row-start-1">
+                      <BasicTooltip content="View previous runs">
+                        <Button asChild size="icon" variant="ghost">
+                          <Link
+                            href={`/tasks?userId=${encodeURIComponent(historyFilter!)}`}
+                            aria-label={`View previous runs for ${row.name}`}
+                          >
+                            <RotateCcwClock />
+                          </Link>
+                        </Button>
+                      </BasicTooltip>
                       <CustomAutomationRunButton
                         automation={row}
                         disabled={busy}
