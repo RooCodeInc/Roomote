@@ -77,6 +77,29 @@ describe('automation result blocks', () => {
     ]);
   });
 
+  it('keeps tables inside tilde code fences as verbatim prose', () => {
+    const text = '~~~md\n| Name |\n| --- |\n| Demo |\n~~~';
+
+    expect(buildAutomationResultContentBlocks(text)).toEqual([
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text },
+      },
+    ]);
+  });
+
+  it('preserves pipes inside variable-length inline code table cells', () => {
+    const blocks = buildAutomationResultContentBlocks(
+      '| Value |\n| --- |\n| ``a|b`` |',
+    );
+
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]?.type).toBe('table');
+    if (blocks[0]?.type !== 'table') return;
+    expect(blocks[0].rows).toHaveLength(2);
+    expect(JSON.stringify(blocks[0].rows[1])).toContain('a|b');
+  });
+
   it('builds the requested container chrome and keeps task and configure actions', () => {
     expect(
       buildAutomationResultBlocks({

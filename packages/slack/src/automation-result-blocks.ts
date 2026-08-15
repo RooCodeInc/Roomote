@@ -26,34 +26,63 @@ function splitTableRow(line: string): string[] {
   const cells: string[] = [];
   let cell = '';
   let escaped = false;
-  let inCode = false;
+  let codeDelimiterLength: number | null = null;
 
-  for (const character of trimmed) {
+  for (let index = 0; index < trimmed.length;) {
+    const character = trimmed[index] ?? '';
     if (escaped) {
       cell += character;
       escaped = false;
+      index += 1;
       continue;
     }
     if (character === '\\') {
       cell += character;
       escaped = true;
+      index += 1;
       continue;
     }
     if (character === '`') {
-      inCode = !inCode;
-      cell += character;
+      let delimiterLength = 1;
+      while (trimmed[index + delimiterLength] === '`') {
+        delimiterLength += 1;
+      }
+      if (codeDelimiterLength === null) {
+        codeDelimiterLength = delimiterLength;
+      } else if (delimiterLength === codeDelimiterLength) {
+        codeDelimiterLength = null;
+      }
+      cell += '`'.repeat(delimiterLength);
+      index += delimiterLength;
       continue;
     }
-    if (character === '|' && !inCode) {
+    if (character === '|' && codeDelimiterLength === null) {
       cells.push(cell.trim().replaceAll('\\|', '|'));
       cell = '';
+      index += 1;
       continue;
     }
     cell += character;
+    index += 1;
   }
 
   cells.push(cell.trim().replaceAll('\\|', '|'));
   return cells;
+}
+
+function parseCodeFence(line: string): {
+  character: '`' | '~';
+  length: number;
+  trailing: string;
+} | null {
+  const match = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+  const marker = match?.[1];
+  if (!marker) return null;
+  return {
+    character: marker[0] as '`' | '~',
+    length: marker.length,
+    trailing: match[2] ?? '',
+  };
 }
 
 function parseAlignment(cell: string): 'left' | 'center' | 'right' | null {
@@ -258,7 +287,7 @@ export function buildAutomationResultContentBlocks(text: string): SlackBlock[] {
   const lines = text.trim().split('\n');
   const blocks: SlackBlock[] = [];
   let prose: string[] = [];
-  let inCodeFence = false;
+  let codeFence: { character: '`' | '~'; length: number } | null = null;
 
   const flushProse = () => {
     blocks.push(...splitSectionText(prose.join('\n')));
@@ -267,14 +296,21 @@ export function buildAutomationResultContentBlocks(text: string): SlackBlock[] {
 
   for (let index = 0; index < lines.length;) {
     const line = lines[index] ?? '';
-    if (line.trimStart().startsWith('```')) {
-      inCodeFence = !inCodeFence;
+    const fence = parseCodeFence(line);
+    if (
+      fence &&
+      (codeFence === null ||
+        (fence.character === codeFence.character &&
+          fence.length >= codeFence.length &&
+          fence.trailing.trim().length === 0))
+    ) {
+      codeFence = codeFence === null ? fence : null;
       prose.push(line);
       index += 1;
       continue;
     }
 
-    const table = !inCodeFence ? parseMarkdownTable(lines, index) : null;
+    const table = codeFence === null ? parseMarkdownTable(lines, index) : null;
     if (table) {
       flushProse();
       blocks.push(...table.blocks);
