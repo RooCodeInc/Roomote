@@ -13,6 +13,7 @@ import {
   and,
   eq,
   gt,
+  gte,
   or,
 } from '@roomote/db/server';
 import {
@@ -32,6 +33,11 @@ const CLAIM_BATCH_SIZE = 10;
 const MAX_BATCHES_PER_TICK = 20;
 const MAX_ATTEMPTS = 5;
 const PR_FACTS_COLLECTOR_ID = 'pull-request-facts';
+// PR analytics gives every repository in one sync the same timestamp but
+// writes repositories sequentially. Re-read a bounded window on each normal
+// collector tick so a row committed late with that shared timestamp cannot
+// fall behind a tuple cursor saved while the writer was still running.
+const PR_FACTS_OVERLAP_MS = 24 * 60 * 60 * 1000;
 const BACKFILL_CONTINUATION_DELAY_MS = 1_000;
 
 /**
@@ -313,7 +319,9 @@ export async function brainCollectorsJob(): Promise<void> {
 
   await drainBrainHistoricalIngestion({
     async runPass() {
-      const pullRequestFactsResult = await syncPullRequestFacts(connection);
+      const pullRequestFactsResult = await syncPullRequestFacts(connection, {
+        restartFromOverlap: includeIncremental,
+      });
 
       if (pullRequestFactsResult.interrupted) {
         return { progressed: false, interrupted: true };
@@ -534,6 +542,29 @@ function parsePullRequestFactsCursor(
   }
 }
 
+export function getPullRequestFactsResumeCursor(
+  state: { watermark: Date | null; backfillCursor: string | null } | null,
+  restartFromOverlap: boolean,
+): { updatedAt: Date; id: string | null } | null {
+  const cursor = parsePullRequestFactsCursor(state?.backfillCursor ?? null);
+  const updatedAt = cursor
+    ? new Date(cursor.updatedAt)
+    : (state?.watermark ?? null);
+
+  if (!updatedAt) {
+    return null;
+  }
+
+  if (restartFromOverlap) {
+    return {
+      updatedAt: new Date(updatedAt.getTime() - PR_FACTS_OVERLAP_MS),
+      id: null,
+    };
+  }
+
+  return { updatedAt, id: cursor?.id ?? null };
+}
+
 /**
  * First integration-derived memory source: merged pull requests, from the
  * locally mirrored pull_request_facts table (populated by the analytics
@@ -542,13 +573,20 @@ function parsePullRequestFactsCursor(
  * so a recreated corpus is repopulated without making every deploy re-read
  * the full table.
  */
-async function syncPullRequestFacts(connection: {
-  baseUrl: string;
-  token: string;
-}): Promise<{ progressed: boolean; interrupted: boolean }> {
+async function syncPullRequestFacts(
+  connection: {
+    baseUrl: string;
+    token: string;
+  },
+  options: {
+    restartFromOverlap: boolean;
+  },
+): Promise<{ progressed: boolean; interrupted: boolean }> {
   const state = await getBrainSyncState(db, PR_FACTS_COLLECTOR_ID);
-  const cursor = parsePullRequestFactsCursor(state?.backfillCursor ?? null);
-  const cursorAt = cursor ? new Date(cursor.updatedAt) : null;
+  const cursor = getPullRequestFactsResumeCursor(
+    state,
+    options.restartFromOverlap,
+  );
 
   const facts = await db
     .select({
@@ -564,17 +602,17 @@ async function syncPullRequestFacts(connection: {
     })
     .from(pullRequestFacts)
     .where(
-      cursorAt && cursor
-        ? or(
-            gt(pullRequestFacts.updatedAt, cursorAt),
-            and(
-              eq(pullRequestFacts.updatedAt, cursorAt),
-              gt(pullRequestFacts.id, cursor.id),
-            ),
-          )
-        : state?.watermark
-          ? gt(pullRequestFacts.updatedAt, state.watermark)
-          : undefined,
+      cursor
+        ? cursor.id
+          ? or(
+              gt(pullRequestFacts.updatedAt, cursor.updatedAt),
+              and(
+                eq(pullRequestFacts.updatedAt, cursor.updatedAt),
+                gt(pullRequestFacts.id, cursor.id),
+              ),
+            )
+          : gte(pullRequestFacts.updatedAt, cursor.updatedAt)
+        : undefined,
     )
     .orderBy(pullRequestFacts.updatedAt, pullRequestFacts.id)
     .limit(PR_FACTS_BATCH_SIZE);

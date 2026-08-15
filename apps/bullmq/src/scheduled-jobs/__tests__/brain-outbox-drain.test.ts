@@ -64,11 +64,36 @@ import {
   brainOutboxDrainJob,
   buildMemoryPage,
   drainBrainHistoricalIngestion,
+  getPullRequestFactsResumeCursor,
   isBrainNotReady,
   isBrainRateLimited,
   postToBrain,
   redactBrainText,
 } from '../brain-outbox-drain';
+
+describe('PR fact resume cursor', () => {
+  const state = {
+    watermark: new Date('2026-08-14T10:00:00Z'),
+    backfillCursor: JSON.stringify({
+      updatedAt: '2026-08-14T10:00:00.000Z',
+      id: '00000000-0000-0000-0000-000000000042',
+    }),
+  };
+
+  it('re-reads an overlap window at the start of a scheduled scan', () => {
+    expect(getPullRequestFactsResumeCursor(state, true)).toEqual({
+      updatedAt: new Date('2026-08-13T10:00:00.000Z'),
+      id: null,
+    });
+  });
+
+  it('keeps the exact tuple cursor within fast continuation', () => {
+    expect(getPullRequestFactsResumeCursor(state, false)).toEqual({
+      updatedAt: new Date('2026-08-14T10:00:00.000Z'),
+      id: '00000000-0000-0000-0000-000000000042',
+    });
+  });
+});
 
 describe('collector continuation orchestration', () => {
   beforeEach(() => {
