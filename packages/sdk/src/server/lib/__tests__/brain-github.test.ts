@@ -384,6 +384,55 @@ describe('GitHub issue collector progress', () => {
     expect(result.stateUpdates[0]?.cursor).not.toBeNull();
   });
 
+  it('reprocesses a tied issue when an existing comment is edited', async () => {
+    const boundary = new Date('2026-08-02T12:00:00Z');
+    const now = new Date('2026-08-15T00:00:00Z');
+    const tiedIssue = { ...makeIssue(7, boundary.toISOString()), comments: 1 };
+    const oldComments = [
+      {
+        author: 'ada',
+        body: 'Original comment',
+        createdAt: '2026-08-02T12:00:00Z',
+      },
+    ];
+    const issueFingerprint = JSON.stringify([
+      tiedIssue.updated_at,
+      tiedIssue.title,
+      undefined,
+      undefined,
+      tiedIssue.comments,
+      undefined,
+      undefined,
+      [],
+    ]);
+    githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
+    githubMocks.syncState.set('github-issues:acme/a', {
+      watermark: boundary,
+      backfillCursor: JSON.stringify({
+        boundary: boundary.toISOString(),
+        seen: [[7, JSON.stringify([issueFingerprint, oldComments])]],
+      }),
+    });
+    githubMocks.listForRepo
+      .mockResolvedValueOnce({ data: [tiedIssue] })
+      .mockResolvedValueOnce({ data: [tiedIssue] });
+    githubMocks.listComments.mockResolvedValue({
+      data: [
+        {
+          user: { login: 'ada' },
+          body: 'Edited comment',
+          created_at: '2026-08-02T12:00:00Z',
+        },
+      ],
+    });
+
+    const result = await collectBrainGithubIssues({ now, limit: 100 });
+    expect(result.pages).toHaveLength(1);
+    expect(result.pages[0]?.content).toContain('Edited comment');
+    expect(result.pages[0]?.content).not.toContain('Original comment');
+    expect(githubMocks.listComments).toHaveBeenCalledTimes(2);
+  });
+
   it('backfills a repository connected after the earlier set completed', async () => {
     githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
     githubMocks.listForRepo.mockResolvedValueOnce({ data: [] });

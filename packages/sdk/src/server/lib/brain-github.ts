@@ -72,6 +72,12 @@ type GithubIssue = {
   pull_request?: unknown;
 };
 
+type GithubIssueComments = Array<{
+  author: string | null;
+  body: string;
+  createdAt: string;
+}>;
+
 function parseIncrementalCursor(
   cursor: string | null,
 ): IncrementalCursor | null {
@@ -120,6 +126,13 @@ function issueRevision(issue: GithubIssue): string {
     issue.user?.login,
     labelNames(issue),
   ]);
+}
+
+function renderedIssueRevision(
+  issue: GithubIssue,
+  comments: GithubIssueComments,
+): string {
+  return JSON.stringify([issueRevision(issue), comments]);
 }
 
 /**
@@ -243,18 +256,18 @@ async function pagesForIssues(input: {
   fullName: string;
   issues: GithubIssue[];
   commentBudget: { remaining: number };
+  prefetchedComments?: Map<number, GithubIssueComments>;
+  usedComments?: Map<number, GithubIssueComments>;
 }): Promise<BrainGithubPage[]> {
   const [owner, repo] = input.fullName.split('/');
   const pages: BrainGithubPage[] = [];
 
   for (const issue of input.issues) {
-    let comments: Array<{
-      author: string | null;
-      body: string;
-      createdAt: string;
-    }> = [];
+    let comments: GithubIssueComments =
+      input.prefetchedComments?.get(issue.number) ?? [];
 
     if (
+      !input.prefetchedComments?.has(issue.number) &&
       owner &&
       repo &&
       (issue.comments ?? 0) > 0 &&
@@ -274,6 +287,8 @@ async function pagesForIssues(input: {
         comments = [];
       }
     }
+
+    input.usedComments?.set(issue.number, comments);
 
     const page = buildGithubIssuePage({
       fullName: input.fullName,
@@ -379,6 +394,8 @@ export async function collectBrainGithubIssues(input: {
         const rawIssues = response.data as GithubIssue[];
         const processed: GithubIssue[] = [];
         const issues: GithubIssue[] = [];
+        const prefetchedComments = new Map<number, GithubIssueComments>();
+        const usedComments = new Map<number, GithubIssueComments>();
         let hitBudget = false;
 
         for (const issue of rawIssues) {
@@ -389,12 +406,40 @@ export async function collectBrainGithubIssues(input: {
             ? progressBoundary.getTime()
             : updatedAt.getTime();
 
-          if (
-            updatedAtMs < progressBoundary.getTime() ||
-            (updatedAtMs === progressBoundary.getTime() &&
-              seenAtBoundary.get(issue.number) === issueRevision(issue))
-          ) {
+          if (updatedAtMs < progressBoundary.getTime()) {
             continue;
+          }
+
+          if (updatedAtMs === progressBoundary.getTime()) {
+            const seenRevision = seenAtBoundary.get(issue.number);
+
+            if (seenRevision) {
+              if (issue.pull_request) {
+                if (seenRevision === issueRevision(issue)) {
+                  continue;
+                }
+              } else if ((issue.comments ?? 0) > 0) {
+                try {
+                  const comments = await fetchIssueComments(
+                    octokit,
+                    owner,
+                    repo,
+                    issue.number,
+                  );
+                  prefetchedComments.set(issue.number, comments);
+
+                  if (seenRevision === renderedIssueRevision(issue, comments)) {
+                    continue;
+                  }
+                } catch {
+                  // Do not suppress or overwrite a page when its comment
+                  // revision cannot be checked. Holding the cursor retries it.
+                  continue;
+                }
+              } else if (seenRevision === renderedIssueRevision(issue, [])) {
+                continue;
+              }
+            }
           }
 
           if (
@@ -418,6 +463,8 @@ export async function collectBrainGithubIssues(input: {
             fullName: repository.fullName,
             issues,
             commentBudget,
+            prefetchedComments,
+            usedComments,
           })),
         );
 
@@ -435,7 +482,15 @@ export async function collectBrainGithubIssues(input: {
           }
 
           if (safeUpdatedAt.getTime() === progressBoundary.getTime()) {
-            seenAtBoundary.set(issue.number, issueRevision(issue));
+            seenAtBoundary.set(
+              issue.number,
+              issue.pull_request
+                ? issueRevision(issue)
+                : renderedIssueRevision(
+                    issue,
+                    usedComments.get(issue.number) ?? [],
+                  ),
+            );
           }
         }
 
