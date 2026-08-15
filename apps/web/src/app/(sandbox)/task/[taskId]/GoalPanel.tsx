@@ -5,11 +5,10 @@ import type { TaskGoalStatus } from '@roomote/types';
 
 import { TodoList as TodoListPrimitive } from '@/components/ai-elements';
 import {
-  Badge,
+  BasicTooltip,
   CircleAlert,
   CircleCheck,
   LoaderCircle,
-  Sparkles,
 } from '@/components/system';
 
 import type { TaskSession } from './hooks/use-task-session';
@@ -64,30 +63,22 @@ function getGoalPresentation(status: TaskGoalStatus) {
   switch (status) {
     case 'active':
       return {
-        label: 'Active',
-        durationPrefix: 'Active for',
-        badgeVariant: 'default' as const,
+        label: 'Pursuing goal',
         Icon: LoaderCircle,
       };
     case 'complete':
       return {
-        label: 'Complete',
-        durationPrefix: 'Completed after',
-        badgeVariant: 'success' as const,
+        label: 'Goal complete',
         Icon: CircleCheck,
       };
     case 'blocked':
       return {
-        label: 'Blocked',
-        durationPrefix: 'Blocked after',
-        badgeVariant: 'warning' as const,
+        label: 'Goal blocked',
         Icon: CircleAlert,
       };
     case 'budget_limited':
       return {
         label: 'Continuation limit reached',
-        durationPrefix: 'Limit reached after',
-        badgeVariant: 'warning' as const,
         Icon: CircleAlert,
       };
   }
@@ -126,35 +117,45 @@ export function GoalPanel({ task }: { task: TaskSession['task'] }) {
   return (
     <div className="overflow-hidden border-b border-background">
       <TodoListPrimitive className="mx-auto w-full max-w-4xl">
-        <section className="px-4 py-3" data-testid="goal-panel">
-          <div className="flex flex-wrap items-center gap-2">
-            <Sparkles className="size-4 shrink-0 text-muted-foreground" />
-            <span className="text-xs font-medium text-muted-foreground">
-              Current goal
-            </span>
-            <Badge variant={presentation.badgeVariant}>
-              <Icon
-                className={status === 'active' ? 'animate-spin' : undefined}
-              />
-              {presentation.label}
-            </Badge>
+        <section
+          className="flex min-w-0 items-center gap-1.5 px-4 py-2 text-sm"
+          data-testid="goal-panel"
+        >
+          <Icon
+            className={
+              status === 'active'
+                ? 'size-4 shrink-0 animate-spin text-muted-foreground'
+                : 'size-4 shrink-0 text-muted-foreground'
+            }
+          />
+          <span
+            className="shrink-0 font-semibold text-foreground"
+            data-testid="goal-status"
+          >
+            {presentation.label}
+          </span>
+          <BasicTooltip content={objective}>
             <span
-              className="ml-auto text-xs tabular-nums text-muted-foreground"
-              data-testid="goal-duration"
+              className="min-w-0 truncate text-muted-foreground"
+              data-testid="goal-objective"
+              title={objective}
             >
-              {duration
-                ? `${presentation.durationPrefix} ${duration}`
-                : 'Duration unavailable'}
+              {objective}
             </span>
-          </div>
-          <p className="mt-2 whitespace-pre-wrap wrap-break-word text-sm font-medium text-foreground">
-            {objective}
-          </p>
-          {status === 'blocked' && task.goalBlockedReason ? (
-            <p className="mt-1 whitespace-pre-wrap wrap-break-word text-xs text-muted-foreground">
-              {task.goalBlockedReason}
-            </p>
-          ) : null}
+          </BasicTooltip>
+          <span
+            className="shrink-0 text-muted-foreground/60"
+            data-testid="goal-separator"
+            aria-hidden="true"
+          >
+            ·
+          </span>
+          <span
+            className="shrink-0 tabular-nums text-muted-foreground"
+            data-testid="goal-duration"
+          >
+            {duration ?? 'Duration unavailable'}
+          </span>
         </section>
       </TodoListPrimitive>
     </div>

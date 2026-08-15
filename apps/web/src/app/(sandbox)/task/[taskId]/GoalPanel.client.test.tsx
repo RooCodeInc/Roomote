@@ -43,64 +43,54 @@ describe('GoalPanel', () => {
   it('shows an active goal and advances elapsed time from its durable start', () => {
     render(<GoalPanel task={createTask()} />);
 
-    expect(screen.getByTestId('goal-panel')).toHaveTextContent('Current goal');
-    expect(screen.getByTestId('goal-panel')).toHaveTextContent('Active');
-    expect(screen.getByTestId('goal-panel')).toHaveTextContent(
+    const panel = screen.getByTestId('goal-panel');
+    expect(panel).toHaveClass('flex', 'items-center', 'py-2');
+    expect(panel).not.toHaveClass('flex-wrap');
+    expect(panel.children).toHaveLength(5);
+    expect(screen.getByTestId('goal-status')).toHaveTextContent(
+      'Pursuing goal',
+    );
+    expect(screen.getByTestId('goal-objective')).toHaveTextContent(
       'Ship the durable goal panel',
     );
-    expect(screen.getByTestId('goal-duration')).toHaveTextContent(
-      'Active for 1m 5s',
-    );
+    expect(screen.getByTestId('goal-separator')).toHaveTextContent('·');
+    expect(screen.getByTestId('goal-duration')).toHaveTextContent('1m 5s');
+    expect(screen.getByTestId('goal-duration')).not.toHaveClass('ml-auto');
 
     act(() => vi.advanceTimersByTime(5_000));
 
-    expect(screen.getByTestId('goal-duration')).toHaveTextContent(
-      'Active for 1m 10s',
-    );
+    expect(screen.getByTestId('goal-duration')).toHaveTextContent('1m 10s');
   });
 
   it.each([
-    ['complete', 'Complete', 'Completed after'],
-    ['blocked', 'Blocked', 'Blocked after'],
-    ['budget_limited', 'Continuation limit reached', 'Limit reached after'],
-  ] as const)(
-    'shows a stable duration for a %s goal',
-    (status, label, durationPrefix) => {
-      render(
-        <GoalPanel
-          task={createTask({
-            goalStatus: status,
-            goalBlockedReason:
-              status === 'blocked' ? 'Waiting for approval' : null,
-            goalEndedAt: new Date('2026-08-14T12:02:05.000Z'),
-          })}
-        />,
-      );
+    ['complete', 'Goal complete'],
+    ['blocked', 'Goal blocked'],
+    ['budget_limited', 'Continuation limit reached'],
+  ] as const)('shows a stable duration for a %s goal', (status, label) => {
+    render(
+      <GoalPanel
+        task={createTask({
+          goalStatus: status,
+          goalBlockedReason:
+            status === 'blocked' ? 'Waiting for approval' : null,
+          goalEndedAt: new Date('2026-08-14T12:02:05.000Z'),
+        })}
+      />,
+    );
 
-      expect(screen.getByTestId('goal-panel')).toHaveTextContent(label);
-      expect(screen.getByTestId('goal-duration')).toHaveTextContent(
-        `${durationPrefix} 2m 5s`,
-      );
-      if (status === 'blocked') {
-        expect(screen.getByTestId('goal-panel')).toHaveTextContent(
-          'Waiting for approval',
-        );
-      }
+    expect(screen.getByTestId('goal-status')).toHaveTextContent(label);
+    expect(screen.getByTestId('goal-duration')).toHaveTextContent('2m 5s');
+    expect(screen.getByTestId('goal-panel').children).toHaveLength(5);
 
-      act(() => vi.advanceTimersByTime(10_000));
+    act(() => vi.advanceTimersByTime(10_000));
 
-      expect(screen.getByTestId('goal-duration')).toHaveTextContent(
-        `${durationPrefix} 2m 5s`,
-      );
-    },
-  );
+    expect(screen.getByTestId('goal-duration')).toHaveTextContent('2m 5s');
+  });
 
   it('resets objective and elapsed time when a replacement goal starts', () => {
     const { rerender } = render(<GoalPanel task={createTask()} />);
 
-    expect(screen.getByTestId('goal-duration')).toHaveTextContent(
-      'Active for 1m 5s',
-    );
+    expect(screen.getByTestId('goal-duration')).toHaveTextContent('1m 5s');
 
     rerender(
       <GoalPanel
@@ -111,12 +101,10 @@ describe('GoalPanel', () => {
       />,
     );
 
-    expect(screen.getByTestId('goal-panel')).toHaveTextContent(
+    expect(screen.getByTestId('goal-objective')).toHaveTextContent(
       'Ship the replacement goal',
     );
-    expect(screen.getByTestId('goal-duration')).toHaveTextContent(
-      'Active for 5s',
-    );
+    expect(screen.getByTestId('goal-duration')).toHaveTextContent('5s');
   });
 
   it('renders a durable goal again after remounting', () => {
@@ -126,15 +114,23 @@ describe('GoalPanel', () => {
     });
     const first = render(<GoalPanel task={task} />);
 
-    expect(screen.getByTestId('goal-duration')).toHaveTextContent(
-      'Completed after 45s',
-    );
+    expect(screen.getByTestId('goal-duration')).toHaveTextContent('45s');
     first.unmount();
     render(<GoalPanel task={task} />);
 
-    expect(screen.getByTestId('goal-duration')).toHaveTextContent(
-      'Completed after 45s',
-    );
+    expect(screen.getByTestId('goal-duration')).toHaveTextContent('45s');
+  });
+
+  it('keeps long objectives on one truncating line with full text available', () => {
+    const objective =
+      'Ship a very long durable goal objective without expanding the compact composer status row';
+    render(<GoalPanel task={createTask({ goalObjective: objective })} />);
+
+    const objectiveElement = screen.getByTestId('goal-objective');
+    expect(objectiveElement).toHaveClass('min-w-0', 'truncate');
+    expect(objectiveElement).toHaveAttribute('title', objective);
+    expect(objectiveElement.tagName).toBe('SPAN');
+    expect(screen.getByTestId('goal-panel').querySelector('p')).toBeNull();
   });
 
   it('does not infer a terminal duration when durable timing is incomplete', () => {

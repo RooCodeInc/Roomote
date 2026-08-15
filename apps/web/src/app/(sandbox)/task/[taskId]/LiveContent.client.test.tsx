@@ -150,7 +150,7 @@ describe('TaskInputStack', () => {
       />,
     );
 
-    expect(screen.getByTestId('goal-panel')).toHaveTextContent('Complete');
+    expect(screen.getByTestId('goal-panel')).toHaveTextContent('Goal complete');
     expect(screen.getByTestId('goal-panel')).toHaveTextContent(
       'Finish the current objective',
     );
