@@ -22,7 +22,7 @@ Goal Mode starts on an existing task. The command does not create a new task.
 Enter `/goal` followed by the objective in the task composer:
 
 ```text
-/goal Upgrade the API client, update its tests, and open a draft pull request
+/goal Reduce p95 checkout latency below 120 ms, verified by the checkout benchmark, while keeping the correctness suite green
 ```
 
 You can also open the command picker from the composer and select `/goal`.
@@ -34,7 +34,7 @@ attachments, so send any supporting files to the task before starting the goal.
 In an active Roomote task thread or direct message, run:
 
 ```text
-/goal objective:Upgrade the API client, update its tests, and open a draft pull request
+/goal objective:Make the checkout test suite pass on the current branch without changing public API behavior
 ```
 
 If there is no active task, start one with `/new` or mention Roomote first. See
@@ -60,14 +60,27 @@ pending, wait for it to finish before starting a replacement goal.
 
 ## Write a useful objective
 
-State the whole outcome and the evidence required to call it complete. Include
-important constraints that should survive every continuation.
+State what must be true when the work is done, the concrete evidence that will
+verify it, and any constraints that must remain intact. The path to the outcome
+can be uncertain, but the finish line should not be.
 
-Good objectives are specific and verifiable:
+A weak goal names an activity without defining success:
 
-- `/goal Reproduce the checkout timeout, fix its root cause, add a regression test, and open a draft pull request`
-- `/goal Audit the onboarding flow on mobile, fix confirmed layout regressions, and verify the final flow in the preview`
-- `/goal Compare the three deployment options, recommend one with costs and tradeoffs, and publish the report as an artifact`
+```text
+/goal Improve checkout performance
+```
+
+A stronger goal defines the outcome, verification surface, and constraint:
+
+```text
+/goal Reduce p95 checkout latency below 120 ms, verified by the checkout benchmark, while keeping the correctness suite green
+```
+
+Other verifiable objectives include:
+
+- `/goal Make the checkout test suite pass on the current branch, verified by a clean test run, without changing public API behavior`
+- `/goal Publish a Goal Mode guide that explains supported commands and completion states, verified by the docs build and current product behavior`
+- `/goal Produce a deployment comparison that recommends one option and includes sourced cost estimates, operational tradeoffs, and remaining uncertainties`
 
 Avoid open-ended objectives such as "keep improving the app." Without a
 concrete finish line, the agent cannot reliably decide when the goal is
