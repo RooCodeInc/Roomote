@@ -72,6 +72,7 @@ describe('maybeEnqueueBrainMemoryEvent', () => {
 
     expect(events).toHaveLength(1);
     expect(events[0]?.status).toBe('pending');
+    expect(events[0]?.runCompletedAt).toEqual(run.completedAt);
   });
 });
 
@@ -112,6 +113,11 @@ describe('saveBrainAgentSummary', () => {
     const run = await makeCompletedRun();
 
     await saveBrainAgentSummary(db, run.id, 'written before finish');
+    const completedAt = new Date('2026-08-14T12:00:00Z');
+    await db
+      .update(taskRuns)
+      .set({ completedAt })
+      .where(eq(taskRuns.id, run.id));
     await maybeEnqueueBrainMemoryEvent(db, run.id);
 
     const events = await db
@@ -121,6 +127,7 @@ describe('saveBrainAgentSummary', () => {
 
     expect(events).toHaveLength(1);
     expect(events[0]?.agentSummary).toBe('written before finish');
+    expect(events[0]?.runCompletedAt).toEqual(completedAt);
   });
 });
 
@@ -159,6 +166,7 @@ describe('backfillBrainMemoryEvents', () => {
       .where(eq(brainMemoryEvents.runId, running!.id));
 
     expect(completedEvents).toHaveLength(1);
+    expect(completedEvents[0]?.runCompletedAt).toEqual(completed.completedAt);
     expect(runningEvents).toHaveLength(0);
   });
 });

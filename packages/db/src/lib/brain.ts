@@ -56,10 +56,21 @@ export async function maybeEnqueueBrainMemoryEvent(
   tx: DatabaseOrTransaction,
   runId: number,
 ): Promise<void> {
+  const [run] = await tx
+    .select({ completedAt: taskRuns.completedAt })
+    .from(taskRuns)
+    .where(eq(taskRuns.id, runId))
+    .limit(1);
+
   await tx
     .insert(brainMemoryEvents)
-    .values({ runId })
-    .onConflictDoNothing({ target: brainMemoryEvents.runId });
+    .values({ runId, runCompletedAt: run?.completedAt })
+    .onConflictDoUpdate({
+      target: brainMemoryEvents.runId,
+      set: {
+        runCompletedAt: sql`coalesce(excluded.run_completed_at, ${brainMemoryEvents.runCompletedAt})`,
+      },
+    });
 }
 
 /**
@@ -78,9 +89,15 @@ export async function saveBrainAgentSummary(
   runId: number,
   agentSummary: string,
 ): Promise<void> {
+  const [run] = await database
+    .select({ completedAt: taskRuns.completedAt })
+    .from(taskRuns)
+    .where(eq(taskRuns.id, runId))
+    .limit(1);
+
   await database
     .insert(brainMemoryEvents)
-    .values({ runId, agentSummary })
+    .values({ runId, runCompletedAt: run?.completedAt, agentSummary })
     .onConflictDoUpdate({
       target: brainMemoryEvents.runId,
       set: {
@@ -88,6 +105,7 @@ export async function saveBrainAgentSummary(
         status: 'pending',
         attempts: 0,
         lastError: null,
+        runCompletedAt: sql`coalesce(excluded.run_completed_at, ${brainMemoryEvents.runCompletedAt})`,
         updatedAt: sql`now()`,
       },
     });
@@ -103,8 +121,8 @@ export async function backfillBrainMemoryEvents(
   database: DatabaseOrTransaction,
 ): Promise<number> {
   const rows = (await database.execute(
-    sql`INSERT INTO ${brainMemoryEvents} (run_id)
-        SELECT id FROM ${taskRuns} WHERE status = 'completed'
+    sql`INSERT INTO ${brainMemoryEvents} (run_id, run_completed_at)
+        SELECT id, completed_at FROM ${taskRuns} WHERE status = 'completed'
         ON CONFLICT (run_id) DO NOTHING
         RETURNING id`,
   )) as unknown as Array<{ id: string }>;
@@ -149,13 +167,12 @@ export async function claimPendingBrainMemoryEvents(
       sql`${brainMemoryEvents.id} IN (
         SELECT event.id
         FROM ${brainMemoryEvents} AS event
-        LEFT JOIN ${taskRuns} AS run ON run.id = event.run_id
         WHERE event.status = 'pending'
            OR (
              event.status = 'processing'
              AND event.updated_at < now() - ${sql.raw(`interval '${PROCESSING_RECLAIM_INTERVAL}'`)}
            )
-        ORDER BY run.completed_at DESC NULLS LAST, event.run_id DESC
+        ORDER BY event.run_completed_at DESC NULLS LAST, event.run_id DESC NULLS LAST
         LIMIT ${limit}
         FOR UPDATE OF event SKIP LOCKED
       )`,

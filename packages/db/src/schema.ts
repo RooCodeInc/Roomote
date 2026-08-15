@@ -3747,6 +3747,7 @@ export const brainMemoryEvents = pgTable(
     runId: integer('run_id')
       .notNull()
       .references(() => taskRuns.id, { onDelete: 'cascade' }),
+    runCompletedAt: timestamp('run_completed_at'),
     status: text('status')
       .notNull()
       .default('pending')
@@ -3767,10 +3768,9 @@ export const brainMemoryEvents = pgTable(
   },
   (table) => [
     unique('brain_memory_events_run_unique').on(table.runId),
-    index('brain_memory_events_status_created_idx').on(
-      table.status,
-      table.createdAt,
-    ),
+    index('brain_memory_events_active_priority_idx')
+      .on(table.runCompletedAt.desc().nullsLast(), table.runId.desc())
+      .where(sql`${table.status} IN ('pending', 'processing')`),
   ],
 );
 
