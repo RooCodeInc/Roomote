@@ -112,7 +112,7 @@ export const TaskFilters = ({
   const isTimePeriodActive = timePeriod !== 'all';
 
   const activeFilterStyle =
-    'text-accent-foreground font-medium border-b-2 border-accent-foreground rounded-none';
+    'text-accent-foreground font-medium border-b-2 border-accent-foreground focus-visible:border-accent-foreground rounded-none';
   const defaultFilterStyle =
     'text-muted-foreground hover:text-accent-foreground';
 
