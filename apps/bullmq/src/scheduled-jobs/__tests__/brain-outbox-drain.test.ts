@@ -40,11 +40,40 @@ beforeEach(() => {
 import {
   brainOutboxDrainJob,
   buildMemoryPage,
+  drainBrainHistoricalIngestion,
   isBrainNotReady,
   isBrainRateLimited,
   postToBrain,
   redactBrainText,
 } from '../brain-outbox-drain';
+
+describe('historical ingestion continuation', () => {
+  it('keeps running bounded passes while backfill makes progress', async () => {
+    const runPass = vi
+      .fn()
+      .mockResolvedValueOnce({ progressed: true, interrupted: false })
+      .mockResolvedValueOnce({ progressed: true, interrupted: false })
+      .mockResolvedValueOnce({ progressed: false, interrupted: false });
+    const wait = vi.fn(async () => {});
+
+    await drainBrainHistoricalIngestion({ runPass, wait });
+
+    expect(runPass).toHaveBeenCalledTimes(3);
+    expect(wait).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops immediately on Brain backpressure', async () => {
+    const runPass = vi
+      .fn()
+      .mockResolvedValue({ progressed: true, interrupted: true });
+    const wait = vi.fn(async () => {});
+
+    await drainBrainHistoricalIngestion({ runPass, wait });
+
+    expect(runPass).toHaveBeenCalledTimes(1);
+    expect(wait).not.toHaveBeenCalled();
+  });
+});
 
 describe('task memory page identity', () => {
   const base = {

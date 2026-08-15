@@ -12,18 +12,21 @@ import {
   taskRuns,
   taskFactory,
   brainMemoryEvents,
+  brainSyncState,
   backfillBrainMemoryEvents,
   claimPendingBrainMemoryEvents,
   markBrainMemoryEvent,
   releaseBrainMemoryEvents,
   maybeEnqueueBrainMemoryEvent,
   saveBrainAgentSummary,
+  resetBrainIngestionState,
+  upsertBrainSyncState,
 } from '../../server';
 import type { CreateTaskRun } from '../../types';
 
 const createdTaskIds: string[] = [];
 
-async function makeCompletedRun() {
+async function makeCompletedRun(completedAt?: Date) {
   const task = await taskFactory.create({ state: 'active' });
   createdTaskIds.push(task.id);
 
@@ -38,6 +41,7 @@ async function makeCompletedRun() {
         description: 'brain fixture run',
       } as CreateTaskRun['payload'],
       status: RunStatus.Completed,
+      completedAt,
     })
     .returning();
 
@@ -49,12 +53,42 @@ async function makeCompletedRun() {
 }
 
 afterEach(async () => {
+  await db.delete(brainSyncState);
   await db.delete(brainMemoryEvents);
 
   for (const taskId of createdTaskIds.splice(0)) {
     await db.delete(taskRuns).where(eq(taskRuns.taskId, taskId));
     await db.delete(tasks).where(eq(tasks.id, taskId));
   }
+});
+
+describe('resetBrainIngestionState', () => {
+  it('clears collector checkpoints and requeues completed task memories', async () => {
+    const run = await makeCompletedRun();
+    await maybeEnqueueBrainMemoryEvent(db, run.id);
+    const [claimed] = await claimPendingBrainMemoryEvents(db, 10);
+    await markBrainMemoryEvent(db, claimed!.id, 'done');
+    await upsertBrainSyncState(db, 'granola-meetings', {
+      watermark: new Date('2026-08-01T00:00:00Z'),
+      backfillCompletedAt: new Date('2026-08-01T01:00:00Z'),
+    });
+
+    await resetBrainIngestionState(db);
+
+    const states = await db.select().from(brainSyncState);
+    const [event] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.runId, run.id));
+
+    expect(states).toHaveLength(0);
+    expect(event).toMatchObject({
+      status: 'pending',
+      attempts: 0,
+      lastError: null,
+      processedAt: null,
+    });
+  });
 });
 
 describe('maybeEnqueueBrainMemoryEvent', () => {
@@ -163,6 +197,31 @@ describe('backfillBrainMemoryEvents', () => {
 });
 
 describe('claimPendingBrainMemoryEvents', () => {
+  it('claims the most recently completed runs first', async () => {
+    const oldest = await makeCompletedRun(new Date('2026-08-12T12:00:00Z'));
+    const newest = await makeCompletedRun(new Date('2026-08-14T12:00:00Z'));
+    const middle = await makeCompletedRun(new Date('2026-08-13T12:00:00Z'));
+    await maybeEnqueueBrainMemoryEvent(db, oldest.id);
+    await maybeEnqueueBrainMemoryEvent(db, newest.id);
+    await maybeEnqueueBrainMemoryEvent(db, middle.id);
+
+    const [claimed] = await claimPendingBrainMemoryEvents(db, 1);
+
+    expect(claimed?.runId).toBe(newest.id);
+  });
+
+  it('uses descending run ID to break equal completion times', async () => {
+    const completedAt = new Date('2026-08-14T12:00:00Z');
+    const first = await makeCompletedRun(completedAt);
+    const second = await makeCompletedRun(completedAt);
+    await maybeEnqueueBrainMemoryEvent(db, first.id);
+    await maybeEnqueueBrainMemoryEvent(db, second.id);
+
+    const [claimed] = await claimPendingBrainMemoryEvents(db, 1);
+
+    expect(claimed?.runId).toBe(Math.max(first.id, second.id));
+  });
+
   it('claims pending events once and increments attempts', async () => {
     const run = await makeCompletedRun();
     await maybeEnqueueBrainMemoryEvent(db, run.id);

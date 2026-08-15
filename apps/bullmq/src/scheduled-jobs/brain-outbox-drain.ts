@@ -10,8 +10,10 @@ import {
   pullRequestFacts,
   taskPullRequests,
   taskRuns,
+  and,
   eq,
   gt,
+  or,
 } from '@roomote/db/server';
 import {
   resolveBrainInferenceProvider,
@@ -29,13 +31,8 @@ const CLAIM_BATCH_SIZE = 10;
 // to this many batches per tick so the backlog clears in minutes, not hours.
 const MAX_BATCHES_PER_TICK = 20;
 const MAX_ATTEMPTS = 5;
-
-/**
- * In-process watermark for integration-source sync (merged-PR facts). The
- * first tick after process start re-syncs everything, which is harmless:
- * pages are idempotent upserts keyed by slug.
- */
-let prFactsSyncedThrough: Date | null = null;
+const PR_FACTS_COLLECTOR_ID = 'pull-request-facts';
+const BACKFILL_CONTINUATION_DELAY_MS = 1_000;
 
 /**
  * Deterministic pre-ingestion redaction. This is a structural boundary, not a
@@ -312,8 +309,48 @@ export async function brainCollectorsJob(): Promise<void> {
     return;
   }
 
-  await syncPullRequestFacts(connection);
-  await runBrainCollectors(connection);
+  await drainBrainHistoricalIngestion({
+    async runPass() {
+      const morePullRequestFacts = await syncPullRequestFacts(connection);
+      const collectorResult = await runBrainCollectors(connection);
+
+      return {
+        progressed: morePullRequestFacts || collectorResult.backfillProgressed,
+        interrupted: collectorResult.interrupted,
+      };
+    },
+  });
+}
+
+/**
+ * Keep spending the existing bounded per-pass budgets while historical work
+ * advances. The normal scheduler remains at 15 minutes for steady-state API
+ * polling; only an active backfill loops quickly, and any Brain backpressure
+ * ends the loop until the next scheduled tick.
+ */
+export async function drainBrainHistoricalIngestion(input: {
+  runPass: () => Promise<{ progressed: boolean; interrupted: boolean }>;
+  wait?: () => Promise<void>;
+}): Promise<void> {
+  const wait =
+    input.wait ??
+    (() =>
+      new Promise((resolve) =>
+        setTimeout(resolve, BACKFILL_CONTINUATION_DELAY_MS),
+      ));
+
+  for (;;) {
+    const result = await input.runPass();
+
+    if (result.interrupted || !result.progressed) {
+      return;
+    }
+
+    console.log(
+      `${LOG_PREFIX} historical ingestion advanced; continuing without waiting for the next scheduled tick`,
+    );
+    await wait();
+  }
 }
 
 /** Returns false when no pending events remained to claim. */
@@ -454,25 +491,56 @@ async function drainOneBatch(connection: {
   return true;
 }
 
-/** Per-tick ceiling on PR fact pages. See the tie handling in the body. */
+/** Per-pass ceiling on PR fact pages. A durable keyset resumes immediately. */
 const PR_FACTS_BATCH_SIZE = 500;
+
+type PullRequestFactsCursor = { updatedAt: string; id: string };
+
+function parsePullRequestFactsCursor(
+  raw: string | null,
+): PullRequestFactsCursor | null {
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<PullRequestFactsCursor>;
+    const updatedAt =
+      typeof parsed.updatedAt === 'string' ? new Date(parsed.updatedAt) : null;
+
+    if (
+      !updatedAt ||
+      Number.isNaN(updatedAt.getTime()) ||
+      typeof parsed.id !== 'string'
+    ) {
+      return null;
+    }
+
+    return { updatedAt: updatedAt.toISOString(), id: parsed.id };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * First integration-derived memory source: merged pull requests, from the
  * locally mirrored pull_request_facts table (populated by the analytics
- * sync from the deployment's connected source control). Incremental via an
- * in-process watermark; pages are idempotent upserts keyed by slug, so the
- * full re-sync after a process restart is harmless.
+ * sync from the deployment's connected source control). The durable
+ * timestamp-plus-id keyset is reset with the rest of Brain ingestion state,
+ * so a recreated corpus is repopulated without making every deploy re-read
+ * the full table.
  */
 async function syncPullRequestFacts(connection: {
   baseUrl: string;
   token: string;
-}): Promise<void> {
-  const since = prFactsSyncedThrough;
-  const syncStartedAt = new Date();
+}): Promise<boolean> {
+  const state = await getBrainSyncState(db, PR_FACTS_COLLECTOR_ID);
+  const cursor = parsePullRequestFactsCursor(state?.backfillCursor ?? null);
+  const cursorAt = cursor ? new Date(cursor.updatedAt) : null;
 
   const facts = await db
     .select({
+      id: pullRequestFacts.id,
       repositoryFullName: pullRequestFacts.repositoryFullName,
       prNumber: pullRequestFacts.prNumber,
       title: pullRequestFacts.title,
@@ -483,33 +551,29 @@ async function syncPullRequestFacts(connection: {
       updatedAt: pullRequestFacts.updatedAt,
     })
     .from(pullRequestFacts)
-    .where(since ? gt(pullRequestFacts.updatedAt, since) : undefined)
-    .orderBy(pullRequestFacts.updatedAt)
+    .where(
+      cursorAt && cursor
+        ? or(
+            gt(pullRequestFacts.updatedAt, cursorAt),
+            and(
+              eq(pullRequestFacts.updatedAt, cursorAt),
+              gt(pullRequestFacts.id, cursor.id),
+            ),
+          )
+        : state?.watermark
+          ? gt(pullRequestFacts.updatedAt, state.watermark)
+          : undefined,
+    )
+    .orderBy(pullRequestFacts.updatedAt, pullRequestFacts.id)
     .limit(PR_FACTS_BATCH_SIZE);
 
   if (facts.length === 0) {
-    prFactsSyncedThrough = syncStartedAt;
-    return;
+    return false;
   }
-
-  // The facts writer stamps one syncedAt across a whole sync batch, so ties on
-  // updatedAt are the norm rather than the exception. A strictly-greater
-  // watermark parked on a tied timestamp would skip every row sharing it past
-  // the batch limit, so drop the trailing tie group and let the next tick
-  // re-read it whole. Bail out only if the entire batch is one timestamp,
-  // where dropping it would mean never advancing at all.
-  const lastUpdatedAt = facts[facts.length - 1]!.updatedAt;
-  const batchWasCapped = facts.length === PR_FACTS_BATCH_SIZE;
-  const trimmed =
-    batchWasCapped && facts[0]!.updatedAt.getTime() !== lastUpdatedAt.getTime()
-      ? facts.filter(
-          (fact) => fact.updatedAt.getTime() !== lastUpdatedAt.getTime(),
-        )
-      : facts;
 
   let ingested = 0;
 
-  for (const fact of trimmed) {
+  for (const fact of facts) {
     try {
       const merged = fact.mergedAtRemote?.toISOString();
       const content = [
@@ -545,16 +609,24 @@ async function syncPullRequestFacts(connection: {
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      return;
+      return false;
     }
   }
 
-  prFactsSyncedThrough =
-    trimmed[trimmed.length - 1]?.updatedAt ?? prFactsSyncedThrough;
+  const last = facts.at(-1)!;
+  await upsertBrainSyncState(db, PR_FACTS_COLLECTOR_ID, {
+    watermark: last.updatedAt,
+    backfillCursor: JSON.stringify({
+      updatedAt: last.updatedAt.toISOString(),
+      id: last.id,
+    } satisfies PullRequestFactsCursor),
+  });
 
   if (ingested > 0) {
     console.log(
       `${LOG_PREFIX} synced ${ingested} pull request facts into the brain`,
     );
   }
+
+  return facts.length === PR_FACTS_BATCH_SIZE;
 }
