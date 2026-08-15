@@ -8,6 +8,7 @@ import {
   buildPersonIdentityPage,
   buildSlackDirectoryPersonPage,
   groupSlackMessagesIntoDayPages,
+  isSlackDirectoryRefreshDue,
   isSlackHumanProfile,
   runBrainCollectors,
   selectPersonIdentityBatch,
@@ -868,6 +869,30 @@ describe('person identity pages', () => {
       profile &&
         isSlackHumanProfile({ ...profile, isAppUser: true }, 'UROOMOTE'),
     ).toBe(false);
+  });
+
+  it('refreshes a newly connected Slack workspace immediately', () => {
+    const now = new Date('2026-08-15T12:00:00Z');
+
+    expect(isSlackDirectoryRefreshDue({ state: null, now })).toBe(true);
+    expect(
+      isSlackDirectoryRefreshDue({
+        state: {
+          watermark: new Date('2026-08-15T11:00:00Z'),
+          backfillCursor: null,
+        },
+        now,
+      }),
+    ).toBe(false);
+    expect(
+      isSlackDirectoryRefreshDue({
+        state: {
+          watermark: new Date('2026-08-15T11:00:00Z'),
+          backfillCursor: 'next-page',
+        },
+        now,
+      }),
+    ).toBe(true);
   });
 
   it('builds standalone person cards for Slack members without Roomote accounts', () => {

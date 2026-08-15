@@ -1335,6 +1335,20 @@ const SLACK_DIRECTORY_COLLECTOR_ID = 'slack-person-directory';
 const SLACK_DIRECTORY_REFRESH_MS = 24 * 60 * 60 * 1000;
 const SLACK_DIRECTORY_PAGE_SIZE = 100;
 
+export function isSlackDirectoryRefreshDue(input: {
+  state: { watermark: Date | null; backfillCursor: string | null } | null;
+  now: Date;
+}): boolean {
+  const { state, now } = input;
+
+  return (
+    !state ||
+    Boolean(state.backfillCursor) ||
+    !state.watermark ||
+    now.getTime() - state.watermark.getTime() >= SLACK_DIRECTORY_REFRESH_MS
+  );
+}
+
 export type SlackDirectoryProfile = {
   slackUserId: string;
   slackTeamId: string;
@@ -1695,10 +1709,7 @@ const slackPersonDirectoryCollector: BrainCollector = {
         state?.watermark ?? collectorState.backfillCompletedAt;
       const cursor = state?.backfillCursor ?? null;
 
-      if (
-        !cursor &&
-        now.getTime() - lastCompletedAt.getTime() < SLACK_DIRECTORY_REFRESH_MS
-      ) {
+      if (!isSlackDirectoryRefreshDue({ state, now })) {
         continue;
       }
       const remaining = limit - pages.length;
