@@ -19,7 +19,6 @@ import { createMcpProxy, McpProxyError } from './proxy-utils';
  * - `recall` leads with hot-memory facts saved via `remember`, which this
  *   deployment never writes. Its page arm duplicates `search`, so exposing it
  *   only offers a worse `search` with a permanently empty half.
- * - `entity` reads person/company/project cards, which nothing creates.
  * - `context_pack` and `delta` serve long-lived agents with standing entities
  *   and heartbeats. Roomote's agents are per-task and start cold.
  *
@@ -33,6 +32,9 @@ export const GBRAIN_READ_TOOL_NAMES = [
   // -token path with no expansion call.
   'query',
   'search',
+  // Exact, zero-LLM lookup for canonical person cards populated from Roomote
+  // member identities. Prefer this over broad search for a known person.
+  'entity',
   // Reason across pages. Expensive and slow, but bounded in tokens, which is
   // the only reason to prefer it over reading pages directly.
   'synthesize',

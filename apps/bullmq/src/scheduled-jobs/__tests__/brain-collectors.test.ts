@@ -4,11 +4,15 @@ import { getBrainSyncState, upsertBrainSyncState } from '@roomote/db/server';
 
 import {
   buildGranolaMeetingPage,
+  buildPersonIdentityLookup,
+  buildPersonIdentityPage,
   groupSlackMessagesIntoDayPages,
   runBrainCollectors,
+  selectPersonIdentityBatch,
   type BrainCollector,
   type BrainSink,
   type CollectorPage,
+  type PersonIdentityRecord,
   type SlackChannelMessage,
 } from '../brain-collectors';
 import { BrainRateLimitedError } from '../brain-outbox-drain';
@@ -538,6 +542,7 @@ describe('groupSlackMessagesIntoDayPages', () => {
         channelName: 'general',
         ts: day1Ts,
         userId: 'U1',
+        userLabel: 'Alice Example',
         text: 'first message',
       },
       {
@@ -578,7 +583,9 @@ describe('groupSlackMessagesIntoDayPages', () => {
     const secondIndex = pages[0]?.content.indexOf('second message') ?? -1;
     expect(firstIndex).toBeGreaterThan(-1);
     expect(secondIndex).toBeGreaterThan(firstIndex);
-    expect(pages[0]?.content).toContain('- [14:03] <U1>: first message');
+    expect(pages[0]?.content).toContain(
+      '- [14:03] <Alice Example (U1)>: first message',
+    );
     expect(pages[1]?.content).toContain('<unknown>: ops message');
   });
 
@@ -666,6 +673,185 @@ describe('buildGranolaMeetingPage', () => {
     const second = buildGranolaMeetingPage({ ...fixture, id: 'note-2' });
 
     expect(first?.page.slug).not.toBe(second?.page.slug);
+  });
+
+  it('links known attendees to canonical person pages without exposing email', () => {
+    const identities = new Map([
+      [
+        'danny@example.com',
+        { slug: 'people/roomote-member-abc', title: 'Dan Riccio' },
+      ],
+    ]);
+    const result = buildGranolaMeetingPage(fixture, identities);
+
+    expect(result?.page.content).toContain(
+      'attendees: ["people/roomote-member-abc"]',
+    );
+    expect(result?.page.content).toContain(
+      '- [Dan Riccio](people/roomote-member-abc)',
+    );
+    expect(result?.page.content).not.toContain('- danny@example.com');
+  });
+
+  it('tries both attendee name and email before leaving a person unresolved', () => {
+    const identities = new Map([
+      [
+        'dan@example.com',
+        { slug: 'people/roomote-member-abc', title: 'Dan Riccio' },
+      ],
+    ]);
+    const result = buildGranolaMeetingPage(
+      {
+        ...fixture,
+        attendees: [{ name: 'Danny', email: 'dan@example.com' }],
+      },
+      identities,
+    );
+
+    expect(result?.page.content).toContain(
+      '- [Dan Riccio](people/roomote-member-abc)',
+    );
+    expect(result?.page.content).not.toContain('dan@example.com');
+  });
+});
+
+describe('person identity pages', () => {
+  const record: PersonIdentityRecord = {
+    userId: 'user-dan',
+    name: 'Dan Riccio',
+    email: 'dan@example.com',
+    role: 'admin',
+    createdAt: new Date('2026-01-01T00:00:00Z'),
+    updatedAt: new Date('2026-08-01T00:00:00Z'),
+    deletedAt: null,
+    providers: [
+      {
+        provider: 'Slack',
+        identifier: 'U08TMEM25CP',
+        display: 'Dan Riccio',
+        updatedAt: new Date('2026-08-01T00:00:00Z'),
+      },
+      {
+        provider: 'GitHub',
+        identifier: 'daniel-lxs',
+        updatedAt: new Date('2026-08-01T00:00:00Z'),
+      },
+    ],
+  };
+
+  it('creates a stable person card with provider aliases but no email', () => {
+    const page = buildPersonIdentityPage(record);
+    const renamed = buildPersonIdentityPage({
+      ...record,
+      name: 'Daniel Riccio',
+    });
+
+    expect(page.slug).toBe(renamed.slug);
+    expect(page.slug).toMatch(/^people\/roomote-member-[a-f0-9]{16}$/);
+    expect(page.title).toBe('Dan Riccio');
+    expect(page.content).toContain('type: person');
+    expect(page.content).toContain('daniel-lxs');
+    expect(page.content).toContain('U08TMEM25CP');
+    expect(page.content).toContain('- Slack: Dan Riccio (U08TMEM25CP)');
+    expect(page.content).toContain('Joined Roomote on 2026-01-01.');
+    expect(page.content).not.toContain('dan@example.com');
+  });
+
+  it('filters email-shaped names and provider values from person cards', () => {
+    const page = buildPersonIdentityPage({
+      ...record,
+      name: 'dan@example.com',
+      providers: [
+        ...record.providers,
+        {
+          provider: 'Source control',
+          identifier: 'provider@example.com',
+          display: 'display@example.com',
+          updatedAt: record.updatedAt,
+        },
+      ],
+    });
+
+    expect(page.title).toBe('Roomote member');
+    expect(page.content).not.toContain('@example.com');
+  });
+
+  it('uses email only as a private attendee-resolution hint', () => {
+    const lookup = buildPersonIdentityLookup([record]);
+
+    expect(lookup.get('dan riccio')).toEqual(
+      expect.objectContaining({ title: 'Dan Riccio' }),
+    );
+    expect(lookup.get('daniel-lxs')).toEqual(
+      expect.objectContaining({ title: 'Dan Riccio' }),
+    );
+    expect(lookup.get('dan@example.com')).toEqual(
+      expect.objectContaining({ title: 'Dan Riccio' }),
+    );
+  });
+
+  it('removes provider aliases when a member is deleted', () => {
+    const page = buildPersonIdentityPage({
+      ...record,
+      deletedAt: new Date('2026-08-15T00:00:00Z'),
+    });
+
+    expect(page.content).toContain('status: deleted');
+    expect(page.content).toContain('aliases: []');
+    expect(page.content).not.toContain('U08TMEM25CP');
+    expect(page.content).not.toContain('daniel-lxs');
+  });
+
+  it('paginates full reconciliation sweeps without timestamp gaps', () => {
+    const second = { ...record, userId: 'user-zed', name: 'Zed Example' };
+    const firstBatch = selectPersonIdentityBatch({
+      records: [second, record],
+      state: null,
+      now: new Date('2026-08-15T00:00:00Z'),
+      limit: 1,
+    });
+    const secondBatch = selectPersonIdentityBatch({
+      records: [second, record],
+      state: {
+        watermark: firstBatch.watermark,
+        cursor: firstBatch.cursor,
+      },
+      now: new Date('2026-08-15T00:01:00Z'),
+      limit: 1,
+    });
+
+    expect(firstBatch.records.map(({ userId }) => userId)).toEqual([
+      'user-dan',
+    ]);
+    expect(secondBatch.records.map(({ userId }) => userId)).toEqual([
+      'user-zed',
+    ]);
+    expect(JSON.parse(secondBatch.cursor)).toMatchObject({ mode: 'idle' });
+  });
+
+  it('periodically reconciles mapping removals and late timestamp ties', () => {
+    const staleCursor = JSON.stringify({
+      mode: 'incremental',
+      lastSweepAt: '2026-08-13T00:00:00Z',
+      afterUpdatedAt: record.updatedAt.toISOString(),
+      afterUserId: 'user-zed',
+    });
+    const recordWithoutProviders = { ...record, providers: [] };
+    const batch = selectPersonIdentityBatch({
+      records: [recordWithoutProviders],
+      state: {
+        watermark: record.updatedAt,
+        cursor: staleCursor,
+      },
+      now: new Date('2026-08-15T00:00:00Z'),
+      limit: 100,
+    });
+
+    expect(batch.records).toEqual([recordWithoutProviders]);
+    expect(buildPersonIdentityPage(batch.records[0]!).content).not.toContain(
+      'daniel-lxs',
+    );
+    expect(JSON.parse(batch.cursor)).toMatchObject({ mode: 'idle' });
   });
 });
 

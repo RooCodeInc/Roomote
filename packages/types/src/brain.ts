@@ -45,7 +45,8 @@ Brain-first does not mean Brain-only. After evaluating its result, consult an un
 Which tool:
 - \`query\` when you are describing a concept and do not know how the Brain words it. It expands your phrasing into related queries, so it finds pages that talk about the same thing in different language. This is the default, and the right choice for that first pass.
 - \`search\` when you already know the exact token: a slug, a repository name, an error string, a person's handle. Cheaper than \`query\` because it skips the expansion step.
-- \`list_pages\` to enumerate rather than guess, and to answer "what is in the Brain" or "what happened recently" (it sorts by recency). Use it before ever concluding the Brain is empty. Pages are namespaced: \`tasks/\`, \`prs/\`, \`slack/\`, \`meetings/\`, \`github/\`.
+- \`entity\` for one known person. It resolves names and linked provider handles against canonical deployment-member cards without an LLM call.
+- \`list_pages\` to enumerate rather than guess, and to answer "what is in the Brain" or "what happened recently" (it sorts by recency). Use it before ever concluding the Brain is empty. Pages are namespaced: \`people/\`, \`tasks/\`, \`prs/\`, \`slack/\`, \`meetings/\`, \`github/\`.
 - \`get_page\` on a slug for a page's full text, once a search result looks relevant.
 
 A result set that comes back populated is not proof of coverage, and one query returning nothing is not proof of absence. If the answer matters, try the other phrasing or list the namespace before deciding the Brain has nothing.

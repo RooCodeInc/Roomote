@@ -60,6 +60,15 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
       }),
       query: {
         slackInstallations: { findFirst: async () => ({ id: 'i1' }) },
+        slackUserMappings: {
+          findMany: async () => [
+            {
+              slackTeamId: 'T1',
+              slackUserId: 'U1',
+              user: { name: 'Alice Example' },
+            },
+          ],
+        },
         mcpConnections: { findFirst: async () => null },
       },
     },

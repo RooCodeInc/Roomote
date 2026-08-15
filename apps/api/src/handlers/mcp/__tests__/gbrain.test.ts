@@ -171,7 +171,13 @@ describe('createGbrainMcpProxy', () => {
   });
 
   it('allows browsing so "what do you know?" is answerable', () => {
-    for (const tool of ['list_pages', 'get_page', 'search', 'query']) {
+    for (const tool of [
+      'list_pages',
+      'get_page',
+      'search',
+      'query',
+      'entity',
+    ]) {
       expect(GBRAIN_READ_TOOL_NAMES).toContain(tool);
     }
   });
