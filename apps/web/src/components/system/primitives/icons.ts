@@ -154,6 +154,7 @@ export {
   RefreshCwIcon,
   RectangleHorizontal,
   RotateCcw,
+  History as RotateCcwClock,
   RotateCcwKey,
   RotateCw,
   ScrollText,

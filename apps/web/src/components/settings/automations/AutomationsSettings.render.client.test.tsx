@@ -504,7 +504,10 @@ vi.mock('@/trpc/client', () => ({
   }),
 }));
 
-import { AutomationsSettings } from './AutomationsSettings';
+import {
+  AutomationsSettings,
+  getAutomationHistoryHref,
+} from './AutomationsSettings';
 
 async function openSuggesterCard() {
   fireEvent.click(
@@ -846,6 +849,53 @@ describe('AutomationsSettings', () => {
     expect(screen.queryByText('Meta automations')).toBeNull();
   });
 
+  it('links enabled built-in automations to their filtered task history', async () => {
+    render(<AutomationsSettings />);
+
+    expect(
+      await screen.findByRole('link', {
+        name: 'View previous runs for Auto-respond to channels',
+      }),
+    ).toHaveAttribute(
+      'href',
+      '/tasks?userId=automation%3Aslack_channel_auto_start',
+    );
+    expect(
+      screen.queryByRole('link', {
+        name: 'View previous runs for Review Code',
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['callRoomoteViaEmoji', 'call_roomote_via_emoji'],
+    ['channelAutoStart', 'slack_channel_auto_start'],
+    ['managerStats', 'manager_stats'],
+    ['sentryTriage', 'sentry_triage'],
+    ['dependabotTriage', 'dependabot_triage'],
+    ['codeqlTriage', 'codeql_triage'],
+    ['issueFixer', 'issue_fixer'],
+    ['securityAuditor', 'security_auditor'],
+    ['codeQualityAuditor', 'code_quality_auditor'],
+    ['ciFailureTriage', 'ci_failure_triage'],
+    ['reviewer', 'review_code'],
+    ['conflictResolver', 'conflict_resolver'],
+    ['suggester', 'suggester'],
+    ['announcer', 'announcer'],
+    ['platformIssueAlerts', 'platform_issue_alerts'],
+  ] as const)(
+    'builds the filtered task history link for %s',
+    (automationId, automationKey) => {
+      expect(getAutomationHistoryHref(automationId)).toBe(
+        `/tasks?userId=${encodeURIComponent(`automation:${automationKey}`)}`,
+      );
+    },
+  );
+
+  it('does not add task history to non-running built-in configuration', () => {
+    expect(getAutomationHistoryHref('managerChannel')).toBeNull();
+  });
+
   it('filters available automations by category and provider-aware search', async () => {
     render(<AutomationsSettings />);
 
@@ -977,6 +1027,11 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByRole('button', { name: 'Run Weekly flaky-test scan now' }),
     ).toBeEnabled();
+    expect(
+      screen.getByRole('link', {
+        name: 'View previous runs for Weekly flaky-test scan',
+      }),
+    ).toHaveAttribute('href', '/tasks?userId=automation%3Acustom_automation');
     fireEvent.click(
       screen.getByRole('button', { name: 'Run Weekly flaky-test scan now' }),
     );
@@ -1020,6 +1075,11 @@ describe('AutomationsSettings', () => {
     expect(
       screen.getByRole('button', {
         name: 'Configure Weekly flaky-test scan',
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', {
+        name: 'View previous runs for Weekly flaky-test scan',
       }),
     ).toBeInTheDocument();
     expect(

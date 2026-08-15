@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -29,6 +30,7 @@ import {
   Label,
   Play,
   Plus,
+  RotateCcwClock,
   Select,
   SelectContent,
   SelectItem,
@@ -1155,6 +1157,16 @@ export function CustomAutomationsSection() {
                       </p>
                     </div>
                     <div className="col-start-2 row-start-2 flex shrink-0 items-center gap-1 sm:col-start-3 sm:row-start-1">
+                      <BasicTooltip content="View previous runs">
+                        <Button asChild size="icon" variant="ghost">
+                          <Link
+                            href="/tasks?userId=automation%3Acustom_automation"
+                            aria-label={`View previous runs for ${row.name}`}
+                          >
+                            <RotateCcwClock />
+                          </Link>
+                        </Button>
+                      </BasicTooltip>
                       <CustomAutomationRunButton
                         automation={row}
                         disabled={busy}

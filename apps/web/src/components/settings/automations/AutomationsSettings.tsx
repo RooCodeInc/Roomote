@@ -103,6 +103,7 @@ import {
   Megaphone,
   Play,
   Plus,
+  RotateCcwClock,
   Search,
   Select,
   SelectContent,
@@ -630,6 +631,25 @@ const AUTOMATION_RUN_KEYS_BY_ID: Partial<
     ]),
   ),
 };
+
+const AUTOMATION_HISTORY_KEYS_BY_ID: Partial<
+  Record<AutomationId, BackgroundAutomationKey>
+> = {
+  callRoomoteViaEmoji: 'call_roomote_via_emoji',
+  channelAutoStart: 'slack_channel_auto_start',
+  reviewer: 'review_code',
+  platformIssueAlerts: 'platform_issue_alerts',
+  ...AUTOMATION_RUN_KEYS_BY_ID,
+};
+
+export function getAutomationHistoryHref(
+  automationId: AutomationId,
+): string | null {
+  const automationKey = AUTOMATION_HISTORY_KEYS_BY_ID[automationId];
+  return automationKey
+    ? `/tasks?userId=${encodeURIComponent(`automation:${automationKey}`)}`
+    : null;
+}
 
 type ScheduleOnlyAutomationFrequencyState = Pick<
   FormState,
@@ -1344,6 +1364,7 @@ function AutomationCard({
   const actionLabel = iconEnabled
     ? `Configure ${automation.label}`
     : `Set up ${automation.label}`;
+  const historyHref = getAutomationHistoryHref(automation.id);
 
   if (!iconEnabled && !isAvailableMatch) {
     return null;
@@ -1384,6 +1405,18 @@ function AutomationCard({
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1">
+              {historyHref && iconEnabled && !disabled ? (
+                <BasicTooltip content="View previous runs">
+                  <Button asChild size="icon" variant="ghost">
+                    <Link
+                      href={historyHref}
+                      aria-label={`View previous runs for ${automation.label}`}
+                    >
+                      <RotateCcwClock />
+                    </Link>
+                  </Button>
+                </BasicTooltip>
+              ) : null}
               {runAction && iconEnabled && !disabled ? runAction : null}
               <BasicTooltip content={actionLabel}>
                 <Button
