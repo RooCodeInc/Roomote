@@ -788,6 +788,7 @@ describe('person identity pages', () => {
     expect(page.slug).toMatch(/^people\/roomote-member-[a-f0-9]{16}$/);
     expect(page.title).toBe('Dan Riccio');
     expect(page.content).toContain('type: person');
+    expect(page.content).toContain('job_title: "VP of Engineering"');
     expect(page.content).toContain('daniel-lxs');
     expect(page.content).toContain('U08TMEM25CP');
     expect(page.content).toContain(
@@ -914,6 +915,7 @@ describe('person identity pages', () => {
     expect(page.slug).toMatch(/^people\/slack-member-[a-f0-9]{16}$/);
     expect(page.title).toBe('Ada');
     expect(page.content).toContain('type: person');
+    expect(page.content).toContain('job_title: "Mathematician"');
     expect(page.content).toContain('Title: Mathematician');
     expect(page.content).toContain('- Slack: ada (UADA)');
   });

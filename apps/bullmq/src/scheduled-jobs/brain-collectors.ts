@@ -1141,6 +1141,9 @@ export function buildPersonIdentityPage(
             a.provider.localeCompare(b.provider) ||
             a.identifier.localeCompare(b.identifier),
         );
+  const jobTitle = providers
+    .map(({ title }) => brainSafeIdentityValue(title ?? ''))
+    .find(Boolean);
 
   return {
     slug: personIdentitySlug(record.userId),
@@ -1150,6 +1153,7 @@ export function buildPersonIdentityPage(
       'type: person',
       `aliases: ${JSON.stringify(aliases)}`,
       `status: ${deleted ? 'deleted' : 'active'}`,
+      ...(jobTitle ? [`job_title: ${JSON.stringify(jobTitle)}`] : []),
       'provenance: roomote-person-identities',
       '---',
       '',
@@ -1489,6 +1493,7 @@ export function buildSlackDirectoryPersonPage(
       'type: person',
       `aliases: ${JSON.stringify(aliases)}`,
       `status: ${profile.isDeleted ? 'deleted' : 'active'}`,
+      ...(safeTitle ? [`job_title: ${JSON.stringify(safeTitle)}`] : []),
       'provenance: slack-directory',
       `workspace: ${JSON.stringify(safeWorkspace)}`,
       '---',
