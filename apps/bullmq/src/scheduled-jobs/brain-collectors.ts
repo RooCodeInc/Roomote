@@ -1,14 +1,22 @@
 import {
   and,
   db,
+  discordUserMappings,
   eq,
   getBrainSyncState,
+  githubUserMappings,
   isNull,
   mcpConnections,
   slackInstallations,
+  slackUserMappings,
+  sourceControlUserMappings,
+  teamsUserMappings,
+  telegramUserMappings,
   upsertBrainSyncState,
+  users,
 } from '@roomote/db/server';
 import { decrypt } from '@roomote/db/encryption';
+import { createHash } from 'node:crypto';
 import {
   backfillBrainGithubIssuesStep,
   collectBrainGithubIssues,
@@ -66,9 +74,11 @@ export type CollectorPage = {
 
 type CollectorStateUpdate = {
   collectorId: string;
-  watermark: Date;
+  watermark?: Date;
   /** Optional opaque incremental cursor stored on the partition's state row. */
   cursor?: string | null;
+  /** Optional deep-backfill completion reset for dependent projections. */
+  backfillCompletedAt?: Date | null;
 };
 
 export type CollectorResult = {
@@ -201,9 +211,14 @@ export async function runBrainCollectors(
         if (!overshot) {
           for (const update of stateUpdates) {
             await upsertBrainSyncState(db, update.collectorId, {
-              watermark: update.watermark,
+              ...(update.watermark !== undefined
+                ? { watermark: update.watermark }
+                : {}),
               ...(update.cursor !== undefined
                 ? { backfillCursor: update.cursor }
+                : {}),
+              ...(update.backfillCompletedAt !== undefined
+                ? { backfillCompletedAt: update.backfillCompletedAt }
                 : {}),
             });
           }
@@ -337,6 +352,7 @@ export type SlackChannelMessage = {
   /** Slack message ts, e.g. "1723500000.123456". */
   ts: string;
   userId: string | null;
+  userLabel?: string;
   text: string;
 };
 
@@ -464,7 +480,11 @@ export function groupSlackMessagesIntoDayPages(
         );
         const lines = chunk.map(
           (message) =>
-            `- [${formatUtcTime(message.at)}] <${message.userId ?? 'unknown'}>: ${message.text.trim()}`,
+            `- [${formatUtcTime(message.at)}] <${
+              message.userLabel && message.userId
+                ? `${message.userLabel} (${message.userId})`
+                : (message.userId ?? 'unknown')
+            }>: ${message.text.trim()}`,
         );
         const firstTs = chunk[0]!.ts.replace('.', '-');
         const lastTs = chunk.at(-1)!.ts.replace('.', '-');
@@ -506,6 +526,7 @@ type RawSlackMessage = {
 function toSlackChannelMessages(
   messages: RawSlackMessage[],
   channel: { id: string; name: string; teamId: string },
+  userLabels: ReadonlyMap<string, string> = new Map(),
 ): SlackChannelMessage[] {
   const collected: SlackChannelMessage[] = [];
 
@@ -526,11 +547,38 @@ function toSlackChannelMessages(
       channelName: channel.name,
       ts: message.ts,
       userId: message.user ?? message.bot_id ?? null,
+      userLabel: message.user
+        ? userLabels.get(`${channel.teamId}/${message.user}`)
+        : undefined,
       text: message.text,
     });
   }
 
   return collected;
+}
+
+async function loadSlackAuthorLabels(): Promise<Map<string, string>> {
+  try {
+    const mappings = await db.query.slackUserMappings.findMany({
+      with: { user: { columns: { name: true } } },
+    });
+
+    return new Map(
+      mappings
+        .filter((mapping) => brainSafeIdentityValue(mapping.user.name))
+        .map((mapping) => [
+          `${mapping.slackTeamId}/${mapping.slackUserId}`,
+          brainSafeIdentityValue(mapping.user.name),
+        ]),
+    );
+  } catch (error) {
+    console.warn(
+      `${LOG_PREFIX} could not resolve Slack author names: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return new Map();
+  }
 }
 
 async function listPublicMemberChannels(
@@ -572,6 +620,7 @@ async function collectSlackPublicChannelMessages(input: {
   now: Date;
   limit: number;
 }): Promise<CollectorResult> {
+  const userLabels = await loadSlackAuthorLabels();
   const installations = await db
     .select()
     .from(slackInstallations)
@@ -728,10 +777,14 @@ async function collectSlackPublicChannelMessages(input: {
     }
 
     const channelPages = groupSlackMessagesIntoDayPages(
-      toSlackChannelMessages(messages, {
-        ...entry.channel,
-        teamId: entry.teamId,
-      }),
+      toSlackChannelMessages(
+        messages,
+        {
+          ...entry.channel,
+          teamId: entry.teamId,
+        },
+        userLabels,
+      ),
     );
 
     if (pages.length + channelPages.length > input.limit) {
@@ -819,6 +872,7 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
   nextCursor: string | null;
   done: boolean;
 }> {
+  const userLabels = await loadSlackAuthorLabels();
   const noProgress = { pages: [], nextCursor: rawCursor, done: false };
   const installations = await db
     .select()
@@ -934,11 +988,15 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
   }
 
   const pages = groupSlackMessagesIntoDayPages(
-    toSlackChannelMessages(messages, {
-      id: entry.channelId,
-      name: entry.channelName,
-      teamId: entry.teamId,
-    }),
+    toSlackChannelMessages(
+      messages,
+      {
+        id: entry.channelId,
+        name: entry.channelName,
+        teamId: entry.teamId,
+      },
+      userLabels,
+    ),
   );
 
   if (nextSlackCursor) {
@@ -992,6 +1050,471 @@ export const slackPublicChannelsCollector: BrainCollector = {
 };
 
 /**
+ * Deployment members: canonical person cards derived from Roomote identity
+ * mappings. Postgres stays authoritative; these pages are a rebuildable search
+ * projection containing names and provider handles, never email addresses.
+ */
+
+type PersonIdentityProvider = {
+  provider: string;
+  identifier: string;
+  display?: string | null;
+  updatedAt: Date;
+};
+
+export type PersonIdentityRecord = {
+  userId: string;
+  name: string;
+  email: string;
+  role: string;
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
+  providers: PersonIdentityProvider[];
+};
+
+type PersonIdentityReference = { slug: string; title: string };
+
+function personIdentitySlug(userId: string): string {
+  const digest = createHash('sha256').update(userId).digest('hex').slice(0, 16);
+  return `people/roomote-member-${digest}`;
+}
+
+function normalizeIdentityAlias(value: string): string {
+  return singleLineIdentityValue(value).toLocaleLowerCase();
+}
+
+function singleLineIdentityValue(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+const IDENTITY_EMAIL_PATTERN =
+  /[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+/gi;
+
+function brainSafeIdentityValue(value: string): string {
+  return singleLineIdentityValue(value)
+    .replace(IDENTITY_EMAIL_PATTERN, '')
+    .replace(/<\s*>|\(\s*\)|\[\s*\]|\{\s*\}/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s,;:|/\\<>(){}\-–—]+|[\s,;:|/\\<>(){}\-–—]+$/g, '')
+    .trim();
+}
+
+function personIdentityDisplayName(record: PersonIdentityRecord): string {
+  return brainSafeIdentityValue(record.name) || 'Roomote member';
+}
+
+function personIdentityAliases(record: PersonIdentityRecord): string[] {
+  const aliases = new Map<string, string>();
+  const add = (value: string | null | undefined) => {
+    const trimmed = value ? brainSafeIdentityValue(value) : '';
+    if (trimmed) {
+      aliases.set(normalizeIdentityAlias(trimmed), trimmed);
+    }
+  };
+
+  add(record.name);
+  for (const provider of record.providers) {
+    add(provider.identifier);
+    add(provider.display);
+  }
+
+  return [...aliases.values()].sort((a, b) => a.localeCompare(b));
+}
+
+export function buildPersonIdentityPage(
+  record: PersonIdentityRecord,
+): CollectorPage {
+  const deleted = Boolean(record.deletedAt);
+  const name = personIdentityDisplayName(record);
+  const aliases = deleted ? [] : personIdentityAliases(record);
+  const providers = deleted
+    ? []
+    : [...record.providers]
+        .filter(({ identifier }) => brainSafeIdentityValue(identifier))
+        .sort(
+          (a, b) =>
+            a.provider.localeCompare(b.provider) ||
+            a.identifier.localeCompare(b.identifier),
+        );
+
+  return {
+    slug: personIdentitySlug(record.userId),
+    title: name,
+    content: [
+      '---',
+      'type: person',
+      `aliases: ${JSON.stringify(aliases)}`,
+      `status: ${deleted ? 'deleted' : 'active'}`,
+      'provenance: roomote-person-identities',
+      '---',
+      '',
+      `# ${name}`,
+      '',
+      deleted
+        ? 'This former Roomote member is no longer active.'
+        : `Roomote deployment member with the ${record.role} role.`,
+      `Joined Roomote on ${formatUtcDay(record.createdAt)}.`,
+      ...(providers.length > 0
+        ? [
+            '',
+            '## Linked identities',
+            '',
+            ...providers.map(({ provider, identifier, display }) => {
+              const safeProvider = brainSafeIdentityValue(provider);
+              const safeIdentifier = brainSafeIdentityValue(identifier);
+              const safeDisplay = display
+                ? brainSafeIdentityValue(display)
+                : '';
+              return `- ${safeProvider}: ${safeDisplay ? `${safeDisplay} (${safeIdentifier})` : safeIdentifier}`;
+            }),
+          ]
+        : []),
+      '',
+    ].join('\n'),
+  };
+}
+
+export function buildPersonIdentityLookup(
+  records: PersonIdentityRecord[],
+): Map<string, PersonIdentityReference> {
+  const lookup = new Map<string, PersonIdentityReference>();
+
+  for (const record of [...records].sort((a, b) =>
+    a.userId.localeCompare(b.userId),
+  )) {
+    if (record.deletedAt) continue;
+    const reference = {
+      slug: personIdentitySlug(record.userId),
+      title: personIdentityDisplayName(record),
+    };
+
+    // Email is an internal linking hint for meeting attendees, not Brain page
+    // content. It never leaves this process through the person-card projection.
+    for (const alias of [...personIdentityAliases(record), record.email]) {
+      const normalized = normalizeIdentityAlias(alias);
+      if (normalized && !lookup.has(normalized)) {
+        lookup.set(normalized, reference);
+      }
+    }
+  }
+
+  return lookup;
+}
+
+function latestIdentityUpdate(record: PersonIdentityRecord): Date {
+  return record.providers.reduce(
+    (latest, provider) =>
+      provider.updatedAt > latest ? provider.updatedAt : latest,
+    record.deletedAt && record.deletedAt > record.updatedAt
+      ? record.deletedAt
+      : record.updatedAt,
+  );
+}
+
+async function loadPersonIdentityRecords(): Promise<PersonIdentityRecord[]> {
+  const [
+    memberRows,
+    slackRows,
+    githubRows,
+    sourceControlRows,
+    telegramRows,
+    discordRows,
+    teamsRows,
+  ] = await Promise.all([
+    db.select().from(users),
+    db.select().from(slackUserMappings),
+    db.select().from(githubUserMappings),
+    db.select().from(sourceControlUserMappings),
+    db.select().from(telegramUserMappings),
+    db.select().from(discordUserMappings),
+    db.select().from(teamsUserMappings),
+  ]);
+  const byUserId = new Map<string, PersonIdentityRecord>(
+    memberRows.map((member) => [
+      member.id,
+      {
+        userId: member.id,
+        name: member.name,
+        email: member.email,
+        role: member.role,
+        createdAt: member.createdAt,
+        updatedAt: member.updatedAt,
+        deletedAt: member.deletedAt,
+        providers: [],
+      },
+    ]),
+  );
+  const addProvider = (userId: string, provider: PersonIdentityProvider) => {
+    byUserId.get(userId)?.providers.push(provider);
+  };
+
+  for (const row of slackRows) {
+    addProvider(row.userId, {
+      provider: 'Slack',
+      identifier: row.slackUserId,
+      display: byUserId.get(row.userId)?.name,
+      updatedAt: row.updatedAt,
+    });
+  }
+  for (const row of githubRows) {
+    addProvider(row.userId, {
+      provider: 'GitHub',
+      identifier: row.githubLogin,
+      updatedAt: row.updatedAt,
+    });
+  }
+  for (const row of sourceControlRows) {
+    addProvider(row.userId, {
+      provider: row.sourceControlProvider,
+      identifier: row.username ?? row.externalAccountId,
+      display: row.displayName,
+      updatedAt: row.updatedAt,
+    });
+  }
+  for (const row of telegramRows) {
+    addProvider(row.userId, {
+      provider: 'Telegram',
+      identifier: row.telegramUsername ?? row.telegramUserId,
+      updatedAt: row.updatedAt,
+    });
+  }
+  for (const row of discordRows) {
+    addProvider(row.userId, {
+      provider: 'Discord',
+      identifier: row.discordUsername ?? row.discordUserId,
+      display: row.discordGlobalName,
+      updatedAt: row.updatedAt,
+    });
+  }
+  for (const row of teamsRows) {
+    addProvider(row.userId, {
+      provider: 'Microsoft Teams',
+      identifier: row.teamsAadObjectId ?? row.teamsUserId,
+      updatedAt: row.updatedAt,
+    });
+  }
+
+  return [...byUserId.values()];
+}
+
+const PERSON_IDENTITIES_STATE_ID = 'person-identities:members';
+const PERSON_IDENTITIES_RECONCILIATION_MS = 24 * 60 * 60 * 1000;
+const GRANOLA_MEETINGS_COLLECTOR_ID = 'granola-meetings';
+
+type PersonIdentityCursor = {
+  mode: 'idle' | 'sweep' | 'incremental';
+  lastSweepAt: string | null;
+  projectionHash: string | null;
+  afterUserId?: string;
+  afterUpdatedAt?: string;
+};
+
+function parsePersonIdentityCursor(raw: string | null): PersonIdentityCursor {
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as Partial<PersonIdentityCursor>;
+      if (
+        parsed.mode === 'idle' ||
+        parsed.mode === 'sweep' ||
+        parsed.mode === 'incremental'
+      ) {
+        return {
+          mode: parsed.mode,
+          lastSweepAt:
+            typeof parsed.lastSweepAt === 'string' ? parsed.lastSweepAt : null,
+          projectionHash:
+            typeof parsed.projectionHash === 'string'
+              ? parsed.projectionHash
+              : null,
+          ...(typeof parsed.afterUserId === 'string'
+            ? { afterUserId: parsed.afterUserId }
+            : {}),
+          ...(typeof parsed.afterUpdatedAt === 'string'
+            ? { afterUpdatedAt: parsed.afterUpdatedAt }
+            : {}),
+        };
+      }
+    } catch {
+      // Restart with a full idempotent sweep if the cursor is unreadable.
+    }
+  }
+
+  return { mode: 'sweep', lastSweepAt: null, projectionHash: null };
+}
+
+function serializePersonIdentityCursor(cursor: PersonIdentityCursor): string {
+  return JSON.stringify(cursor);
+}
+
+function personIdentityProjectionHash(records: PersonIdentityRecord[]): string {
+  const projection = [...records]
+    .sort((a, b) => a.userId.localeCompare(b.userId))
+    .map((record) => ({
+      userId: record.userId,
+      name: record.name,
+      email: record.email,
+      role: record.role,
+      deletedAt: record.deletedAt?.toISOString() ?? null,
+      providers: [...record.providers]
+        .sort(
+          (a, b) =>
+            a.provider.localeCompare(b.provider) ||
+            a.identifier.localeCompare(b.identifier) ||
+            (a.display ?? '').localeCompare(b.display ?? ''),
+        )
+        .map(({ provider, identifier, display }) => ({
+          provider,
+          identifier,
+          display: display ?? null,
+        })),
+    }));
+
+  return createHash('sha256').update(JSON.stringify(projection)).digest('hex');
+}
+
+export function selectPersonIdentityBatch(input: {
+  records: PersonIdentityRecord[];
+  state: { watermark: Date | null; cursor: string | null } | null;
+  now: Date;
+  limit: number;
+}): {
+  records: PersonIdentityRecord[];
+  watermark: Date;
+  cursor: string;
+  projectionChanged: boolean;
+} {
+  const { records, state, now, limit } = input;
+  const cursor = parsePersonIdentityCursor(state?.cursor ?? null);
+  const projectionHash = personIdentityProjectionHash(records);
+  const projectionChanged = cursor.projectionHash !== projectionHash;
+  const lastSweepAt = cursor.lastSweepAt ? new Date(cursor.lastSweepAt) : null;
+  const sweepDue =
+    !lastSweepAt ||
+    Number.isNaN(lastSweepAt.getTime()) ||
+    now.getTime() - lastSweepAt.getTime() >=
+      PERSON_IDENTITIES_RECONCILIATION_MS;
+
+  if (cursor.mode === 'sweep' || sweepDue) {
+    const afterUserId = cursor.mode === 'sweep' ? cursor.afterUserId : '';
+    const candidates = [...records]
+      .sort((a, b) => a.userId.localeCompare(b.userId))
+      .filter((record) => record.userId > (afterUserId ?? ''));
+    const batch = candidates.slice(0, limit);
+    const last = batch.at(-1);
+    const hasMore = candidates.length > batch.length;
+
+    return {
+      records: batch,
+      watermark: hasMore ? (state?.watermark ?? new Date(0)) : now,
+      projectionChanged,
+      cursor: serializePersonIdentityCursor(
+        hasMore && last
+          ? {
+              mode: 'sweep',
+              lastSweepAt: cursor.lastSweepAt,
+              projectionHash,
+              afterUserId: last.userId,
+            }
+          : {
+              mode: 'idle',
+              lastSweepAt: now.toISOString(),
+              projectionHash,
+            },
+      ),
+    };
+  }
+
+  const incrementalCursor = cursor.mode === 'incremental' ? cursor : null;
+  const afterUpdatedAt = incrementalCursor?.afterUpdatedAt
+    ? new Date(incrementalCursor.afterUpdatedAt)
+    : (state?.watermark ?? new Date(0));
+  const afterUserId = incrementalCursor?.afterUserId ?? '';
+  const candidates = records
+    .filter((record) => {
+      const updatedAt = latestIdentityUpdate(record);
+      return (
+        updatedAt > afterUpdatedAt ||
+        (incrementalCursor &&
+          updatedAt.getTime() === afterUpdatedAt.getTime() &&
+          record.userId > afterUserId)
+      );
+    })
+    .sort(
+      (a, b) =>
+        latestIdentityUpdate(a).getTime() - latestIdentityUpdate(b).getTime() ||
+        a.userId.localeCompare(b.userId),
+    );
+  const batch = candidates.slice(0, limit);
+  const last = batch.at(-1);
+  const hasMore = candidates.length > batch.length;
+
+  return {
+    records: batch,
+    watermark: hasMore ? afterUpdatedAt : now,
+    projectionChanged,
+    cursor: serializePersonIdentityCursor(
+      hasMore && last
+        ? {
+            mode: 'incremental',
+            lastSweepAt: cursor.lastSweepAt,
+            projectionHash,
+            afterUpdatedAt: latestIdentityUpdate(last).toISOString(),
+            afterUserId: last.userId,
+          }
+        : {
+            mode: 'idle',
+            lastSweepAt: cursor.lastSweepAt,
+            projectionHash,
+          },
+    ),
+  };
+}
+
+const personIdentitiesCollector: BrainCollector = {
+  id: 'person-identities',
+  displayName: 'Roomote member identities',
+  async isEnabled() {
+    return true;
+  },
+  async collect({ now, limit }) {
+    const state = await getBrainSyncState(db, PERSON_IDENTITIES_STATE_ID);
+    const batch = selectPersonIdentityBatch({
+      records: await loadPersonIdentityRecords(),
+      state: state
+        ? {
+            watermark: state.watermark,
+            cursor: state.backfillCursor,
+          }
+        : null,
+      now,
+      limit,
+    });
+
+    return {
+      pages: batch.records.map(buildPersonIdentityPage),
+      nextSince: null,
+      stateUpdates: [
+        {
+          collectorId: PERSON_IDENTITIES_STATE_ID,
+          watermark: batch.watermark,
+          cursor: batch.cursor,
+        },
+        ...(batch.projectionChanged
+          ? [
+              {
+                collectorId: GRANOLA_MEETINGS_COLLECTOR_ID,
+                cursor: null,
+                backfillCompletedAt: null,
+              },
+            ]
+          : []),
+      ],
+    };
+  },
+};
+
+/**
  * Granola: meeting notes
  * ----------------------
  *
@@ -1032,7 +1555,9 @@ function slugifySegment(value: string): string {
     .replace(/-+$/g, '');
 }
 
-function extractAttendees(note: Record<string, unknown>): string[] {
+type GranolaAttendee = { display: string; identityCandidates: string[] };
+
+function extractAttendees(note: Record<string, unknown>): GranolaAttendee[] {
   const raw = note.attendees ?? note.people ?? note.participants;
 
   if (!Array.isArray(raw)) {
@@ -1042,18 +1567,29 @@ function extractAttendees(note: Record<string, unknown>): string[] {
   return raw
     .map((entry) => {
       if (typeof entry === 'string') {
-        return entry.trim();
+        const value = entry.trim();
+        return value ? { display: value, identityCandidates: [value] } : null;
       }
 
       if (entry && typeof entry === 'object') {
         const record = entry as Record<string, unknown>;
+        const name = asString(record.name);
+        const email = asString(record.email);
+        const identityCandidates = [name, email].filter(
+          (value): value is string => Boolean(value),
+        );
 
-        return asString(record.name) ?? asString(record.email) ?? '';
+        return identityCandidates.length > 0
+          ? {
+              display: name ?? email!,
+              identityCandidates,
+            }
+          : null;
       }
 
-      return '';
+      return null;
     })
-    .filter(Boolean);
+    .filter((attendee): attendee is GranolaAttendee => Boolean(attendee));
 }
 
 const GRANOLA_NOTE_EXCERPT_MAX_CHARS = 3000;
@@ -1065,6 +1601,7 @@ const GRANOLA_NOTE_EXCERPT_MAX_CHARS = 3000;
  */
 export function buildGranolaMeetingPage(
   note: unknown,
+  identities: ReadonlyMap<string, PersonIdentityReference> = new Map(),
 ): { page: CollectorPage; updatedAt: Date | null } | null {
   if (!note || typeof note !== 'object') {
     return null;
@@ -1086,6 +1623,19 @@ export function buildGranolaMeetingPage(
   const idSlug = id ? slugifySegment(id) : null;
   const slugTail = idSlug ? `${titleSlug}-${idSlug}` : titleSlug;
   const attendees = extractAttendees(record);
+  const resolvedAttendees = attendees.map((attendee) => ({
+    display: attendee.display,
+    identity: attendee.identityCandidates
+      .map((candidate) => identities.get(normalizeIdentityAlias(candidate)))
+      .find(Boolean),
+  }));
+  const attendeeSlugs = [
+    ...new Set(
+      resolvedAttendees
+        .map(({ identity }) => identity?.slug)
+        .filter((slug): slug is string => Boolean(slug)),
+    ),
+  ];
   const body =
     asString(record.summary) ??
     asString(record.overview) ??
@@ -1101,13 +1651,25 @@ export function buildGranolaMeetingPage(
     ...(id ? [`granola_note_id: ${id}`] : []),
     `date: ${day}`,
     'provenance: roomote-granola-meetings',
+    ...(attendeeSlugs.length > 0
+      ? [`attendees: ${JSON.stringify(attendeeSlugs)}`]
+      : []),
     '---',
     '',
     `# ${title}`,
     '',
     `Meeting on ${day}.`,
-    ...(attendees.length > 0
-      ? ['', '## Attendees', '', ...attendees.map((name) => `- ${name}`)]
+    ...(resolvedAttendees.length > 0
+      ? [
+          '',
+          '## Attendees',
+          '',
+          ...resolvedAttendees.map(({ display, identity }) =>
+            identity
+              ? `- [${identity.title}](${identity.slug})`
+              : `- ${display}`,
+          ),
+        ]
       : []),
     ...(excerpt ? ['', '## Notes', '', excerpt] : []),
     '',
@@ -1220,9 +1782,12 @@ async function collectGranolaMeetings(input: {
 
   const pages: CollectorPage[] = [];
   let nextSince: Date | null = null;
+  const identities = buildPersonIdentityLookup(
+    await loadPersonIdentityRecords(),
+  );
 
   for (const note of notes.slice(0, GRANOLA_MAX_NOTES_PER_TICK)) {
-    const mapped = buildGranolaMeetingPage(note);
+    const mapped = buildGranolaMeetingPage(note, identities);
 
     if (!mapped) {
       continue;
@@ -1300,9 +1865,12 @@ async function backfillGranolaNotesStep(cursor: string | null): Promise<{
   }
 
   const pages: CollectorPage[] = [];
+  const identities = buildPersonIdentityLookup(
+    await loadPersonIdentityRecords(),
+  );
 
   for (const note of payload.notes) {
-    const mapped = buildGranolaMeetingPage(note);
+    const mapped = buildGranolaMeetingPage(note, identities);
 
     if (mapped) {
       pages.push(mapped.page);
@@ -1315,7 +1883,7 @@ async function backfillGranolaNotesStep(cursor: string | null): Promise<{
 }
 
 const granolaMeetingsCollector: BrainCollector = {
-  id: 'granola-meetings',
+  id: GRANOLA_MEETINGS_COLLECTOR_ID,
   displayName: 'Granola meeting notes',
   async isEnabled() {
     return Boolean(await findGranolaConnectionConfig());
@@ -1351,6 +1919,7 @@ const githubIssuesCollector: BrainCollector = {
 };
 
 const BRAIN_COLLECTORS: BrainCollector[] = [
+  personIdentitiesCollector,
   slackPublicChannelsCollector,
   granolaMeetingsCollector,
   githubIssuesCollector,
