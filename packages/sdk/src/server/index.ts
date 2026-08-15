@@ -58,6 +58,7 @@ export {
   type ActivePrReviewFollowUpRequest,
 } from './lib/task-runs/active-pr-review-follow-up';
 export * from './lib/manager-slack';
+export * from './lib/automation-result-metadata';
 export * from './automations';
 export * from './lib/manager-stats';
 export {

@@ -73,6 +73,7 @@ describe('refreshAutomationRootFooter', () => {
               type: 'container',
               block_id: 'roomote_automation_result_container',
               title: { type: 'plain_text', text: 'Audit' },
+              subtitle: { type: 'plain_text', text: 'Stale metadata' },
               child_blocks: [
                 {
                   type: 'section',
@@ -103,12 +104,20 @@ describe('refreshAutomationRootFooter', () => {
         automationIconUrl:
           'https://app.example.com/automation-icons/wrench.png',
         configureUrl: 'https://app.example.com/automations#audit',
+        subtitle: {
+          type: 'plain_text',
+          text: 'Weekly · GPT 5.6 High · $0.56 · 02:37s',
+        },
         taskUrl: 'https://app.example.com/task/1',
         taskId: 'task-1',
       }),
     ).resolves.toBe(true);
 
     const blocks = updateMessage.mock.calls[0]?.[0]?.message?.blocks ?? [];
+    expect(blocks[0]?.subtitle).toEqual({
+      type: 'plain_text',
+      text: 'Weekly · GPT 5.6 High · $0.56 · 02:37s',
+    });
     const actionIds = blocks
       .flatMap(
         (block: { child_blocks?: Array<Record<string, unknown>> }) =>

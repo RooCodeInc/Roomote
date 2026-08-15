@@ -8,6 +8,7 @@ import {
   db,
   eq,
   findBackgroundAutomationSlackThread,
+  getAutomationRuntime,
   getCustomAutomationById,
   getTaskAutomationInitiatorKey,
   slackInstallations,
@@ -49,6 +50,7 @@ import {
   buildManagerSlackSettingsUrl,
   findSlackConversationSubjectByUserId,
   recordSlackConversationMessageBestEffort,
+  resolveAutomationResultSubtitle,
 } from '@roomote/sdk/server';
 import {
   clearLatestUserMessageForReplyQuoteIfId,
@@ -163,6 +165,7 @@ type AutomationRootPresentation = {
   automationIconUrl: string;
   configureUrl: string;
   linkedPrUrls: string[];
+  scheduleMode: string | null;
 };
 
 async function buildLateBoundAutomationRootPresentation(params: {
@@ -195,11 +198,15 @@ async function buildLateBoundAutomationRootPresentation(params: {
     prRepo: null,
     prNumber: null,
   });
+  const automationRuntime = await getAutomationRuntime(
+    descriptor.automationKey,
+  );
   return {
     automationLabel: descriptor.label,
     automationIconUrl: buildAutomationIconUrl(descriptor.slackIcon),
     configureUrl: buildManagerSlackSettingsUrl(settingsHash),
     linkedPrUrls: linkedPrs.map((pr) => pr.prUrl),
+    scheduleMode: automationRuntime.scheduleMode,
   };
 }
 
@@ -223,6 +230,7 @@ async function buildLateBoundCustomAutomationRootPresentation(params: {
     automationIconUrl: buildAutomationIconUrl('zap'),
     configureUrl: buildCustomAutomationSettingsUrl(automation.id),
     linkedPrUrls: linkedPrs.map((pr) => pr.prUrl),
+    scheduleMode: automation.scheduleMode,
   };
 }
 
@@ -243,11 +251,15 @@ async function buildBackgroundAutomationRootPresentation(params: {
     prRepo: null,
     prNumber: null,
   });
+  const automationRuntime = await getAutomationRuntime(
+    descriptor.automationKey,
+  );
   return {
     automationLabel: descriptor.label,
     automationIconUrl: buildAutomationIconUrl(descriptor.slackIcon),
     configureUrl: buildManagerSlackSettingsUrl(settingsHash),
     linkedPrUrls: linkedPrs.map((pr) => pr.prUrl),
+    scheduleMode: automationRuntime.scheduleMode,
   };
 }
 
@@ -369,6 +381,7 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
   channel: string;
   threadTs: string;
   taskId: string;
+  runId: number;
   taskUrl: string;
 }): Promise<void> {
   // Run rows are gone; the automation-thread linkage lives on the tracked
@@ -411,6 +424,7 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
         ?.label ?? null)
     : null;
   let customAutomationId: string | null = null;
+  let scheduleMode: string | null = null;
 
   // Custom automation runs have no registry descriptor, so the key would
   // render as "custom automation"; label the footer with the automation's
@@ -433,6 +447,7 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
       const customAutomation =
         await getCustomAutomationById(customAutomationId);
       automationLabel = customAutomation?.name ?? null;
+      scheduleMode = customAutomation?.scheduleMode ?? null;
     }
   }
 
@@ -447,6 +462,15 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
     : settingsHash
       ? buildManagerSlackSettingsUrl(settingsHash)
       : buildManagerSlackSettingsUrl();
+  if (!scheduleMode && descriptor) {
+    scheduleMode = (await getAutomationRuntime(descriptor.automationKey))
+      .scheduleMode;
+  }
+  const subtitle = await resolveAutomationResultSubtitle({
+    taskId: params.taskId,
+    runId: params.runId,
+    scheduleMode,
+  });
 
   const updated = await refreshAutomationRootFooter({
     slack: params.slack,
@@ -457,6 +481,7 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
       customAutomationId ? 'zap' : (descriptor?.slackIcon ?? 'zap'),
     ),
     configureUrl,
+    subtitle,
     taskUrl: params.taskUrl,
     taskId: params.taskId,
   });
@@ -998,6 +1023,13 @@ slackMcp.post('/thread_reply', async (c) => {
                 taskId: taskRun.taskId,
               })
             : null;
+    const automationSubtitle = automationPresentation
+      ? await resolveAutomationResultSubtitle({
+          taskId: taskRun.taskId,
+          runId: taskRun.id,
+          scheduleMode: automationPresentation.scheduleMode,
+        })
+      : undefined;
     const rootFooterBlocks =
       automationPresentation || !includeFooter
         ? []
@@ -1041,6 +1073,7 @@ slackMcp.post('/thread_reply', async (c) => {
           title: automationPresentation.automationLabel,
           iconUrl: automationPresentation.automationIconUrl,
           configureUrl: automationPresentation.configureUrl,
+          subtitle: automationSubtitle,
           contentBlocks: blocks as SlackBlock[],
           taskUrl,
           linkedPrUrls: automationPresentation.linkedPrUrls,
@@ -1354,6 +1387,7 @@ slackMcp.post('/thread_reply', async (c) => {
             channel: slackReplyTarget.channel,
             threadTs: existingThreadTs,
             taskId: taskRun.taskId,
+            runId: taskRun.id,
             taskUrl,
           });
         } catch (error) {

@@ -338,16 +338,19 @@ function normalizeContentBlocks(blocks: SlackBlock[]): SlackBlock[] {
   });
 }
 
-function formatRunTimestamp(runTimestamp: number): string {
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    timeZone: 'UTC',
-    timeZoneName: 'short',
-  }).format(new Date(runTimestamp * 1000));
+export function formatAutomationResultSubtitle(params: {
+  trigger: string;
+  model: string;
+  costMicroUsd: number;
+  durationMs: number;
+}): string {
+  const totalSeconds = Math.max(0, Math.floor(params.durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  const duration = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}s`;
+  const price = `$${(Math.max(0, params.costMicroUsd) / 1_000_000).toFixed(2)}`;
+
+  return `${params.trigger} · ${params.model} · ${price} · ${duration}`;
 }
 
 export function buildAutomationResultBlocks(params: {
@@ -356,7 +359,6 @@ export function buildAutomationResultBlocks(params: {
   configureUrl: string;
   contentText?: string;
   contentBlocks?: SlackBlock[];
-  runTimestamp?: number;
   subtitle?: { type: string; text: string };
   taskUrl?: string | null;
   linkedPrUrls?: string[];
@@ -403,11 +405,6 @@ export function buildAutomationResultBlocks(params: {
   const contentBlocks = params.contentBlocks
     ? normalizeContentBlocks(params.contentBlocks)
     : buildAutomationResultContentBlocks(params.contentText ?? '');
-  const runTimestamp = params.runTimestamp ?? Math.floor(Date.now() / 1000);
-  const subtitle = params.subtitle ?? {
-    type: 'plain_text',
-    text: `Run ${formatRunTimestamp(runTimestamp)}`,
-  };
 
   const groups: SlackBlock[][] = [];
   let remainingBlocks = contentBlocks;
@@ -429,7 +426,7 @@ export function buildAutomationResultBlocks(params: {
         ? AUTOMATION_RESULT_CONTAINER_BLOCK_ID
         : `${AUTOMATION_RESULT_CONTAINER_BLOCK_ID}_${index + 1}`,
     title: { type: 'plain_text', text: params.title, emoji: false },
-    subtitle,
+    ...(params.subtitle ? { subtitle: params.subtitle } : {}),
     icon: {
       type: 'image',
       image_url: params.iconUrl,

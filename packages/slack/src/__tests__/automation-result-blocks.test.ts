@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildAutomationResultBlocks,
   buildAutomationResultContentBlocks,
+  formatAutomationResultSubtitle,
 } from '../automation-result-blocks';
 
 describe('automation result blocks', () => {
@@ -125,7 +126,15 @@ describe('automation result blocks', () => {
         iconUrl: 'https://app.example.com/automation-icons/zap.png',
         configureUrl: 'https://app.example.com/automations#custom-automation-1',
         contentText: 'Everything is **healthy**.',
-        runTimestamp: 1_700_000_000,
+        subtitle: {
+          type: 'plain_text',
+          text: formatAutomationResultSubtitle({
+            trigger: 'Weekly',
+            model: 'GPT 5.6 High',
+            costMicroUsd: 560_000,
+            durationMs: 157_000,
+          }),
+        },
         taskUrl: 'https://app.example.com/task/1',
       }),
     ).toEqual([
@@ -135,7 +144,7 @@ describe('automation result blocks', () => {
         title: { type: 'plain_text', text: 'Daily report', emoji: false },
         subtitle: {
           type: 'plain_text',
-          text: 'Run Nov 14, 2023, 10:13 PM UTC',
+          text: 'Weekly · GPT 5.6 High · $0.56 · 02:37s',
         },
         icon: {
           type: 'image',
@@ -177,6 +186,26 @@ describe('automation result blocks', () => {
         ],
       },
     ]);
+  });
+
+  it('formats automation result metadata with zero-value padding', () => {
+    expect(
+      formatAutomationResultSubtitle({
+        trigger: 'Manual',
+        model: 'Kimi K3 Medium',
+        costMicroUsd: 200_000,
+        durationMs: 37_900,
+      }),
+    ).toBe('Manual · Kimi K3 Medium · $0.20 · 00:37s');
+
+    expect(
+      formatAutomationResultSubtitle({
+        trigger: 'Daily',
+        model: 'GPT 5.6 Max',
+        costMicroUsd: 0,
+        durationMs: 608_000,
+      }),
+    ).toBe('Daily · GPT 5.6 Max · $0.00 · 10:08s');
   });
 
   it('reserves action capacity for task and configure buttons', () => {
