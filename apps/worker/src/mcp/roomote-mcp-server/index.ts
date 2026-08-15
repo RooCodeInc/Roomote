@@ -552,7 +552,7 @@ const manageTasksToolDescription =
   'Use action "get_messages" to retrieve the latest message history for a task (requires taskId, returns newest first). ' +
   `Use action "launch" to create and start a new task against an environment using ${PRODUCT_NAME}'s default standard workflow (requires prompt and environmentId). ` +
   'Use action "cancel" to cancel an active task (requires taskId). ' +
-  'Use action "send_message" to send a follow-up message to a running task (requires taskId and message). ' +
+  'Use action "send_message" to send a follow-up message to a running task (requires taskId and message). Set steer to true to interrupt the active turn and apply the message immediately; otherwise the message follows the task queue. ' +
   'Use action "list_models" to list the enabled model IDs available for task model selection. Call it before "update_models" when resolving a requested model name to an exact ID. ' +
   'Use action "update_models" ONLY when the user explicitly asks to change the model or reasoning level for a task (requires role; taskId defaults to the current task). Pass the desired model id and/or reasoningEffort; omit both to reset the role to the deployment default. Users usually phrase both together: in "switch to Luna Max" or "use GPT 5.4 medium", the trailing low/medium/high/extra high/max word is the reasoningEffort and the rest names the model — set BOTH fields in one call. Changes apply from the next turn, so a change to the current task does not affect the turn that is already running.';
 
@@ -584,6 +584,12 @@ const manageTasksInputSchema = {
     .optional()
     .describe(
       'Follow-up message text to send to a running task (required for send_message)',
+    ),
+  steer: z
+    .boolean()
+    .optional()
+    .describe(
+      'For send_message: when true, interrupt the active turn and apply the message immediately. Defaults to false, which follows the task queue.',
     ),
   query: z
     .string()
@@ -810,7 +816,11 @@ roomoteMcpServer.registerTool(
           return errorResult('message is required for send_message');
         }
         return handleSendMessage(
-          { taskId: params.taskId, message: params.message },
+          {
+            taskId: params.taskId,
+            message: params.message,
+            steer: params.steer,
+          },
           config,
         );
       }
