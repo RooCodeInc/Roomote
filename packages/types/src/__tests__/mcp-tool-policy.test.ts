@@ -34,12 +34,12 @@ describe('Notion MCP tool access modes', () => {
         'notion-fetch',
         'notion-query-data-sources',
         'notion-get-comments',
-        'notion-get-users',
       ]),
     );
     expect(allowedToolNames).not.toContain('notion-create-pages');
     expect(allowedToolNames).not.toContain('notion-update-page');
     expect(allowedToolNames).not.toContain('notion-create-comment');
+    expect(allowedToolNames).not.toContain('notion-append-blocks');
   });
 
   it('removes the allowlist only after read-write is explicitly selected', () => {

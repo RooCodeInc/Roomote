@@ -1,44 +1,54 @@
 ---
 title: Notion
-description: Bring Notion pages and databases into Roomote tasks.
+description: Bring approved Notion pages and data sources into Roomote tasks.
 icon: 'https://api.iconify.design/simple-icons:notion.svg?color=currentColor'
 ---
 
 Connect Notion when product specs, runbooks, notes, or operating context already
-live there and Roomote should be able to use that material during tasks and
-automations.
+live there and Roomote should use that material during tasks and automations.
 
-## When to use it
+## Access boundary
 
-- Pull a spec or runbook into a planning or debugging task
-- Inspect database-backed project context without copying it into the prompt
-- Optionally create or update pages from approved Roomote workflows
+Roomote uses a Notion **internal integration**, not Notion's hosted MCP OAuth
+connection. Notion itself restricts the token to pages and data sources that
+have been explicitly shared with the internal integration. Unshared content,
+including private pages, is unavailable to Roomote.
 
-## How setup works
+Sharing a parent page may also grant access to its children. Review the content
+access list in Notion whenever the page hierarchy changes.
 
-An admin connects Notion once from **Settings > Integrations**. Roomote stores
-that OAuth connection for the deployment, so interactive tasks and automations
-use the same Notion workspace access without each teammate linking an account.
+## Set up Notion
+
+1. In [Notion integrations](https://www.notion.so/profile/integrations/internal),
+   create an internal integration for Roomote.
+2. Enable read-content capabilities. If you intend to use Roomote's **Read and
+   write** mode, also enable the required update, insert, and comment
+   capabilities in Notion.
+3. In Notion, share only the approved pages and data sources with the new
+   integration. You can manage this from the integration's **Content access**
+   settings or a page's **Connections** menu.
+4. Copy the internal integration secret.
+5. In Roomote, open **Settings > Integrations**, choose **Configure Notion**,
+   and paste the secret.
+
+The secret is encrypted server-side and is never sent to task sandboxes.
 
 <Note>
-  After upgrading from personal Notion connections, an admin must reconnect
-  Notion once from **Settings > Integrations**. Roomote does not promote an
-  existing teammate's credential into a deployment credential automatically.
+  A previous hosted-MCP OAuth connection is not reused because it inherits the
+  authorizing person's full Notion permissions. Configure an internal
+  integration before enabling this deployment-wide connection.
 </Note>
+
+## Choose read or write access
 
 Notion starts in **Read only** mode. In **Manage tools**, an admin can choose:
 
-- **Read only (recommended)** — allows reviewed search and read tools while
-  blocking content changes
-- **Read and write** — also allows tools that create, update, move, duplicate,
-  or comment on content
+- **Read only (recommended)** — search, fetch, query, and read comments within
+  the explicitly shared content
+- **Read and write** — additionally create and update pages, append blocks, and
+  create comments within that same content boundary
 
 The selected mode applies to every Roomote task and automation in the
-deployment. Individual tools can still be disabled to narrow access further.
-
-## What to expect
-
-The connection has the same Notion access as the account that authorizes it.
-Use an account whose workspace permissions match what Roomote should be able to
-reach, and enable read-write mode only when unattended automations are expected
-to change Notion content.
+deployment. Individual tools can still be disabled. The Notion integration's
+own capabilities remain authoritative, so Roomote cannot perform a write that
+the token does not permit.

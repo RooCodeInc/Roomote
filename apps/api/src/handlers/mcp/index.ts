@@ -25,6 +25,7 @@ import { grafanaMcp } from './grafana';
 import { getIntegrationMcpProxyOptions } from './integration-mcp-policy';
 import { linearMcp } from './linear';
 import { mcpAuthMiddleware } from './middleware';
+import { notionMcp } from './notion';
 import { slackMcp } from './slack';
 import { snowflakeMcp } from './snowflake';
 import { vercelMcp } from './vercel';
@@ -72,6 +73,7 @@ mcp.route('/asana', asanaMcp);
 mcp.route('/granola', granolaMcp);
 mcp.route('/grafana', grafanaMcp);
 mcp.route('/linear', linearMcp);
+mcp.route('/notion', notionMcp);
 mcp.route('/snowflake', snowflakeMcp);
 mcp.route('/vercel', vercelMcp);
 

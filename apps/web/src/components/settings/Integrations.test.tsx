@@ -37,6 +37,9 @@ const state = vi.hoisted(() => ({
   asanaConnection: null as null | {
     authStatus?: string | null;
   },
+  notionConnection: null as null | {
+    authStatus?: string | null;
+  },
   granolaConnection: null as null | {
     authStatus?: string | null;
   },
@@ -103,6 +106,7 @@ const { mutations, selectMock, radioMock } = vi.hoisted(() => ({
     disconnectMcp: vi.fn(),
     setDisabledTools: vi.fn(),
     saveAsanaConnection: vi.fn(),
+    saveNotionConnection: vi.fn(),
     saveGranolaConnection: vi.fn(),
     saveElevenLabsConnection: vi.fn(),
     saveGrafanaConnection: vi.fn(),
@@ -259,6 +263,14 @@ vi.mock('@/hooks/mcp-connections', () => ({
   }),
   useAsanaConnection: () => ({
     data: state.asanaConnection,
+    isPending: false,
+  }),
+  useSaveNotionConnection: () => ({
+    isPending: false,
+    mutate: mutations.saveNotionConnection,
+  }),
+  useNotionConnection: () => ({
+    data: state.notionConnection,
     isPending: false,
   }),
   useSaveGranolaConnection: () => ({
@@ -521,6 +533,7 @@ describe('Integrations settings', () => {
     };
     state.linearRedirectPath = '';
     state.asanaConnection = null;
+    state.notionConnection = null;
     state.granolaConnection = null;
     state.grafanaConnection = null;
     state.vercelConnection = null;
@@ -1434,6 +1447,7 @@ describe('Integrations settings', () => {
     state.userConnections = [
       { id: 'conn-notion', mcpId: 'notion', authStatus: 'authenticated' },
     ];
+    state.notionConnection = { authStatus: 'authenticated' };
     state.mcpTools = {
       mcpId: 'notion',
       toolAccessMode: 'read_only',
@@ -1470,7 +1484,7 @@ describe('Integrations settings', () => {
 
     expect(
       screen.getByText(
-        'Read and write access uses the permissions of the Notion account connected for this deployment.',
+        "Read and write access remains limited to pages and data sources explicitly shared with the deployment's Notion internal integration.",
       ),
     ).toBeInTheDocument();
 
@@ -1528,6 +1542,48 @@ describe('Integrations settings', () => {
     ).toHaveAttribute('href', 'https://app.asana.com/0/my-apps');
   });
 
+  it('opens the Notion internal integration dialog with page-sharing guidance', () => {
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Notion' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Connect Notion' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText('Internal integration secret'),
+    ).toHaveAttribute('type', 'password');
+    expect(
+      screen.getByText(
+        /share only the approved pages or data sources with it/i,
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('lets admins replace a legacy Notion OAuth connection in place', () => {
+    state.deploymentEnablements = [{ mcpId: 'notion', enabled: true }];
+    state.userConnections = [
+      { id: 'conn-notion', mcpId: 'notion', authStatus: 'authenticated' },
+    ];
+    state.notionConnection = null;
+
+    render(<Integrations />);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Edit Notion connection' }),
+    );
+
+    expect(
+      screen.getByRole('heading', { name: 'Connect Notion' }),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Notion' }));
+
+    expect(
+      screen.getByText('Internal integration secret is required'),
+    ).toBeInTheDocument();
+    expect(mutations.saveNotionConnection).not.toHaveBeenCalled();
+  });
+
   it('opens the Grafana credential dialog from the integrations page', () => {
     render(<Integrations />);
 
@@ -1581,6 +1637,24 @@ describe('Integrations settings', () => {
       {
         accessToken: 'asana-secret-token',
       },
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onError: expect.any(Function),
+      }),
+    );
+  });
+
+  it('submits a Notion internal integration secret', () => {
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Notion' }));
+    fireEvent.change(screen.getByLabelText('Internal integration secret'), {
+      target: { value: 'ntn_restricted-secret' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect Notion' }));
+
+    expect(mutations.saveNotionConnection).toHaveBeenCalledWith(
+      { internalIntegrationSecret: 'ntn_restricted-secret' },
       expect.objectContaining({
         onSuccess: expect.any(Function),
         onError: expect.any(Function),

@@ -28,7 +28,9 @@ import {
   useElevenLabsConnection,
   useDeploymentMcpEnablements,
   useMcpOauthReadiness,
+  useNotionConnection,
   useSaveAsanaConnection,
+  useSaveNotionConnection,
   useSaveGrafanaConnection,
   useSaveGranolaConnection,
   useSaveElevenLabsConnection,
@@ -50,6 +52,7 @@ import {
 import { useCustomMcpServers } from './CustomMcpServers';
 import {
   saveAsanaConnectionSchema,
+  saveNotionConnectionSchema,
   saveGrafanaConnectionSchema,
   saveGranolaConnectionSchema,
   saveElevenLabsConnectionSchema,
@@ -106,7 +109,7 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to inspect monday.com boards, items, updates, docs, and workspace context.',
   neon: 'Roomote will get database access to inspect schemas and query data.',
   notion:
-    'Roomote will use one deployment-wide Notion connection. It starts read-only, and admins can optionally allow writes.',
+    'Roomote will use one deployment-wide Notion internal integration. Only explicitly shared pages and data sources are accessible. It starts read-only, and admins can optionally allow writes.',
   pylon:
     'Roomote will be able to inspect customer issues, message history, and account context.',
   posthog:
@@ -178,6 +181,10 @@ type AsanaFormState = {
   accessToken: string;
 };
 
+type NotionFormState = {
+  internalIntegrationSecret: string;
+};
+
 type GranolaFormState = {
   apiKey: string;
 };
@@ -230,6 +237,10 @@ function buildEmptyAsanaForm(): AsanaFormState {
   return {
     accessToken: '',
   };
+}
+
+function buildEmptyNotionForm(): NotionFormState {
+  return { internalIntegrationSecret: '' };
 }
 
 function buildEmptyGranolaForm(): GranolaFormState {
@@ -337,6 +348,19 @@ function getAsanaFieldErrors(
 
   return {
     accessToken: fieldErrors.accessToken,
+  };
+}
+
+function getNotionFieldErrors(
+  result: ReturnType<typeof saveNotionConnectionSchema.safeParse>,
+): Partial<Record<keyof NotionFormState, string[]>> {
+  if (result.success) {
+    return {};
+  }
+
+  return {
+    internalIntegrationSecret:
+      result.error.flatten().fieldErrors.internalIntegrationSecret,
   };
 }
 
@@ -491,7 +515,7 @@ function buildAdminConfiguredIntegrationItem({
     secondaryAction:
       canManageTools &&
       enabled &&
-      integration.serverMode !== 'native' &&
+      (integration.serverMode !== 'native' || integration.id === 'notion') &&
       integration.serverMode !== 'credential_only'
         ? {
             label: 'Manage tools',
@@ -829,6 +853,76 @@ function AsanaConnectionFields({
         {fieldErrors.accessToken ? (
           <p className="text-sm text-destructive">
             {fieldErrors.accessToken[0]}
+          </p>
+        ) : null}
+      </div>
+      {formError ? (
+        <p className="text-sm text-destructive">{formError}</p>
+      ) : null}
+    </>
+  );
+}
+
+function NotionConnectionFields({
+  form,
+  fieldErrors,
+  formError,
+  allowBlankSecret,
+  onFieldChange,
+}: {
+  form: NotionFormState;
+  fieldErrors: Partial<Record<keyof NotionFormState, string[]>>;
+  formError: string | null;
+  allowBlankSecret: boolean;
+  onFieldChange: (field: keyof NotionFormState, value: string) => void;
+}) {
+  const fieldClassName =
+    'mt-2 w-full border-border/70 bg-background data-[invalid=true]:border-destructive';
+
+  return (
+    <>
+      <div className="space-y-2">
+        <Label htmlFor="notion-internal-integration-secret">
+          Internal integration secret
+        </Label>
+        <Input
+          id="notion-internal-integration-secret"
+          type="password"
+          placeholder="ntn_..."
+          value={form.internalIntegrationSecret}
+          onChange={(event) =>
+            onFieldChange('internalIntegrationSecret', event.target.value)
+          }
+          data-invalid={
+            fieldErrors.internalIntegrationSecret ? 'true' : undefined
+          }
+          className={fieldClassName}
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          data-1p-ignore
+        />
+        <p className="text-sm text-muted-foreground">
+          Create an internal integration in{' '}
+          <a
+            href="https://www.notion.so/profile/integrations/internal"
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary underline hover:no-underline"
+          >
+            Notion integrations
+          </a>
+          , then share only the approved pages or data sources with it. Roomote
+          cannot access anything that has not been shared with this connection.
+        </p>
+        {allowBlankSecret ? (
+          <p className="text-sm text-muted-foreground">
+            Leave blank to keep the existing secret.
+          </p>
+        ) : null}
+        {fieldErrors.internalIntegrationSecret ? (
+          <p className="text-sm text-destructive">
+            {fieldErrors.internalIntegrationSecret[0]}
           </p>
         ) : null}
       </div>
@@ -1234,6 +1328,14 @@ export function Integrations() {
     Partial<Record<keyof AsanaFormState, string[]>>
   >({});
   const [asanaFormError, setAsanaFormError] = useState<string | null>(null);
+  const [isNotionDialogOpen, setIsNotionDialogOpen] = useState(false);
+  const [notionForm, setNotionForm] = useState<NotionFormState>(
+    buildEmptyNotionForm(),
+  );
+  const [notionFieldErrors, setNotionFieldErrors] = useState<
+    Partial<Record<keyof NotionFormState, string[]>>
+  >({});
+  const [notionFormError, setNotionFormError] = useState<string | null>(null);
   const [isGranolaDialogOpen, setIsGranolaDialogOpen] = useState(false);
   const [granolaForm, setGranolaForm] = useState<GranolaFormState>(
     buildEmptyGranolaForm(),
@@ -1310,6 +1412,7 @@ export function Integrations() {
   const connectMcp = useConnectMcp();
   const disconnectMcp = useDisconnectMcp();
   const saveAsanaConnection = useSaveAsanaConnection();
+  const saveNotionConnection = useSaveNotionConnection();
   const saveGrafanaConnection = useSaveGrafanaConnection();
   const saveGranolaConnection = useSaveGranolaConnection();
   const saveElevenLabsConnection = useSaveElevenLabsConnection();
@@ -1328,6 +1431,19 @@ export function Integrations() {
   const asanaConnection = useAsanaConnection(
     isAdmin && (isAsanaConnected || isAsanaDialogOpen),
   );
+  const notionConnectionSummary = useMemo(
+    () =>
+      (userMcpConnections.data ?? []).find((entry) => entry.mcpId === 'notion'),
+    [userMcpConnections.data],
+  );
+  const notionConnection = useNotionConnection(
+    isAdmin &&
+      (notionConnectionSummary?.authStatus === 'authenticated' ||
+        isNotionDialogOpen),
+  );
+  const isNotionConnected =
+    notionConnectionSummary?.authStatus === 'authenticated' &&
+    notionConnection.data?.authStatus === 'authenticated';
   const granolaConnectionSummary = useMemo(() => {
     const connection = (userMcpConnections.data ?? []).find(
       (entry) => entry.mcpId === 'granola',
@@ -1415,6 +1531,20 @@ export function Integrations() {
     setAsanaFormError(null);
     setAsanaForm(buildEmptyAsanaForm());
   }, [asanaConnection.isPending, isAsanaConnected, isAsanaDialogOpen]);
+
+  useEffect(() => {
+    if (!isNotionDialogOpen) {
+      return;
+    }
+
+    if (notionConnection.isPending && isNotionConnected) {
+      return;
+    }
+
+    setNotionFieldErrors({});
+    setNotionFormError(null);
+    setNotionForm(buildEmptyNotionForm());
+  }, [isNotionConnected, isNotionDialogOpen, notionConnection.isPending]);
 
   useEffect(() => {
     if (!isGranolaDialogOpen) {
@@ -1696,6 +1826,26 @@ export function Integrations() {
             });
           }
 
+          if (integration.id === 'notion') {
+            return buildAdminConfiguredIntegrationItem({
+              integration,
+              connection: notionConnectionSummary,
+              orgEnabled: orgEnablementMap.get(integration.id) ?? false,
+              highlightedIntegrationId,
+              savePending: saveNotionConnection.isPending,
+              disconnectPending: disconnectMcp.isPending,
+              disconnectingMcpId: disconnectMcp.variables?.mcpId,
+              dialogOpen: isNotionDialogOpen,
+              connectionPending: notionConnection.isPending,
+              canConfigure: isAdmin,
+              canManageTools: isAdmin,
+              openDialog: () => setIsNotionDialogOpen(true),
+              openToolDialog: () => openMcpToolDialog(integration),
+              disconnectIntegration: () =>
+                disconnectAdminConfiguredIntegration(integration),
+            });
+          }
+
           if (integration.id === 'granola') {
             return buildAdminConfiguredIntegrationItem({
               integration,
@@ -1971,6 +2121,7 @@ export function Integrations() {
     isElevenLabsDialogOpen,
     isLinearOauthSetupOpen,
     saveAsanaConnection.isPending,
+    saveNotionConnection.isPending,
     saveGrafanaConnection.isPending,
     saveGranolaConnection.isPending,
     saveElevenLabsConnection.isPending,
@@ -1981,6 +2132,9 @@ export function Integrations() {
     saveSnowflakeConnection.isPending,
     asanaConnection.isPending,
     isAsanaDialogOpen,
+    isNotionDialogOpen,
+    notionConnectionSummary,
+    notionConnection.isPending,
     snowflakeConnection.isPending,
     isSnowflakeDialogOpen,
     vercelConnection.isPending,
@@ -2076,6 +2230,21 @@ export function Integrations() {
       return { ...current, [field]: undefined };
     });
     setAsanaFormError(null);
+  };
+
+  const handleNotionFieldChange = (
+    field: keyof NotionFormState,
+    value: string,
+  ) => {
+    setNotionForm((current) => ({ ...current, [field]: value }));
+    setNotionFieldErrors((current) => {
+      if (!current[field]) {
+        return current;
+      }
+
+      return { ...current, [field]: undefined };
+    });
+    setNotionFormError(null);
   };
 
   const handleGranolaFieldChange = (
@@ -2212,6 +2381,16 @@ export function Integrations() {
     setAsanaForm(buildEmptyAsanaForm());
   };
 
+  const handleNotionDialogOpenChange = (open: boolean) => {
+    setIsNotionDialogOpen(open);
+    setNotionFieldErrors({});
+    setNotionFormError(null);
+
+    if (open) {
+      setNotionForm(buildEmptyNotionForm());
+    }
+  };
+
   const handleGranolaDialogOpenChange = (open: boolean) => {
     setIsGranolaDialogOpen(open);
 
@@ -2316,6 +2495,40 @@ export function Integrations() {
       onError: (error) => {
         setAsanaFormError(error.message);
       },
+    });
+  };
+
+  const handleNotionSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const parsed = saveNotionConnectionSchema.safeParse(notionForm);
+    if (!parsed.success) {
+      setNotionFieldErrors(getNotionFieldErrors(parsed));
+      return;
+    }
+
+    if (
+      !isNotionConnected &&
+      parsed.data.internalIntegrationSecret.length === 0
+    ) {
+      setNotionFieldErrors({
+        internalIntegrationSecret: ['Internal integration secret is required'],
+      });
+      return;
+    }
+
+    setNotionFieldErrors({});
+    setNotionFormError(null);
+    saveNotionConnection.mutate(parsed.data, {
+      onSuccess: () => {
+        toast.success(
+          isNotionConnected
+            ? 'Notion connection updated for this deployment.'
+            : 'Notion connected for this deployment.',
+        );
+        handleNotionDialogOpenChange(false);
+      },
+      onError: (error) => setNotionFormError(error.message),
     });
   };
 
@@ -2579,6 +2792,30 @@ export function Integrations() {
           formError={asanaFormError}
           allowBlankToken={isAsanaConnected}
           onFieldChange={handleAsanaFieldChange}
+        />
+      </AdminConfiguredIntegrationDialog>
+      <AdminConfiguredIntegrationDialog
+        integrationName="Notion"
+        open={isNotionDialogOpen}
+        onOpenChange={handleNotionDialogOpenChange}
+        isEditing={isNotionConnected}
+        isPending={saveNotionConnection.isPending}
+        isLoading={isNotionConnected && notionConnection.isPending}
+        description={
+          <>
+            Store a Notion internal integration secret for this deployment.
+            Notion limits it to pages and data sources explicitly shared with
+            that integration; the secret stays encrypted server-side.
+          </>
+        }
+        onSubmit={handleNotionSubmit}
+      >
+        <NotionConnectionFields
+          form={notionForm}
+          fieldErrors={notionFieldErrors}
+          formError={notionFormError}
+          allowBlankSecret={isNotionConnected}
+          onFieldChange={handleNotionFieldChange}
         />
       </AdminConfiguredIntegrationDialog>
       <AdminConfiguredIntegrationDialog

@@ -11,6 +11,8 @@ export { useConnectMcp } from './useConnectMcp';
 export { useDisconnectMcp } from './useDisconnectMcp';
 export { useAsanaConnection } from './useAsanaConnection';
 export { useSaveAsanaConnection } from './useSaveAsanaConnection';
+export { useNotionConnection } from './useNotionConnection';
+export { useSaveNotionConnection } from './useSaveNotionConnection';
 export { useGranolaConnection } from './useGranolaConnection';
 export { useSaveGranolaConnection } from './useSaveGranolaConnection';
 export { useElevenLabsConnection } from './useElevenLabsConnection';

@@ -36,6 +36,14 @@ export type SaveAsanaConnectionInput = z.infer<
   typeof saveAsanaConnectionSchema
 >;
 
+export const saveNotionConnectionSchema = z.object({
+  internalIntegrationSecret: z.string().transform((value) => value.trim()),
+});
+
+export type SaveNotionConnectionInput = z.infer<
+  typeof saveNotionConnectionSchema
+>;
+
 export const saveGranolaConnectionSchema = z.object({
   apiKey: z.string().transform((value) => value.trim()),
 });

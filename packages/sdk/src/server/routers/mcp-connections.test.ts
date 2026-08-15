@@ -189,17 +189,23 @@ function buildJoinedConnectionRow({
   id = 'conn-1',
   userId = null,
   mcpId = 'notion',
-  authConfig = {
-    type: 'oauth_client',
-    client_id: 'client-id',
-    registered_redirect_uri: 'https://example.com/callback',
-  },
+  authConfig,
 }: {
   id?: string;
   userId?: string | null;
   mcpId?: string;
   authConfig?: Record<string, unknown>;
 } = {}) {
+  const resolvedAuthConfig =
+    authConfig ??
+    (mcpId === 'notion'
+      ? { type: 'notion', encryptedToken: 'enc:notion-secret' }
+      : {
+          type: 'oauth_client',
+          client_id: 'client-id',
+          registered_redirect_uri: 'https://example.com/callback',
+        });
+
   return {
     enabledMcpId: mcpId,
     connection: {
@@ -207,7 +213,7 @@ function buildJoinedConnectionRow({
       userId,
       mcpId,
       enabled: true,
-      authConfig,
+      authConfig: resolvedAuthConfig,
       createdAt: new Date('2026-03-12T00:00:00.000Z'),
     },
   };
@@ -242,17 +248,12 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     expect(mockGetValidAccessToken).not.toHaveBeenCalled();
   });
 
-  it('returns Notion proxy config without raw OAuth bearer token', async () => {
-    mockGetValidAccessToken.mockResolvedValue('notion-raw-access-token');
-
+  it('returns the native Notion proxy without resolving an OAuth token', async () => {
     const result = await createCaller(
       'https://api.preview.roomote.run/trpc/mcpConnections.getMcpServerConfigs',
     ).getMcpServerConfigs();
 
-    expect(getValidAccessToken).toHaveBeenCalledWith(
-      'conn-1',
-      'https://mcp.notion.com/mcp',
-    );
+    expect(getValidAccessToken).not.toHaveBeenCalled();
 
     expect(result).toEqual({
       servers: {
@@ -264,7 +265,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
         },
       },
     });
-    expect(JSON.stringify(result)).not.toContain('notion-raw-access-token');
+    expect(JSON.stringify(result)).not.toContain('notion-secret');
   });
 
   it.each([
@@ -642,8 +643,6 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
   });
 
   it('falls back to a proxy path when request origin is unavailable', async () => {
-    mockGetValidAccessToken.mockResolvedValue('notion-raw-access-token');
-
     const result = await createCaller().getMcpServerConfigs();
 
     expect(result).toEqual({
@@ -663,8 +662,6 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
       buildEnabledOnlyRow('posthog'),
       buildJoinedConnectionRow(),
     ]);
-    mockGetValidAccessToken.mockResolvedValue('notion-raw-access-token');
-
     const result = await createCaller(
       'https://api.preview.roomote.run/trpc/mcpConnections.getMcpServerConfigs',
     ).getMcpServerConfigs();
@@ -685,8 +682,16 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     );
   });
 
-  it('skips Notion connections when no valid token can be resolved', async () => {
-    mockGetValidAccessToken.mockResolvedValue(undefined);
+  it('skips Notion connections with a legacy OAuth config', async () => {
+    mockOrderBy.mockResolvedValue([
+      buildJoinedConnectionRow({
+        authConfig: {
+          type: 'oauth_client',
+          client_id: 'legacy-client-id',
+          registered_redirect_uri: 'https://example.com/callback',
+        },
+      }),
+    ]);
 
     const result = await createCaller(
       'https://api.preview.roomote.run/trpc/mcpConnections.getMcpServerConfigs',
@@ -694,7 +699,7 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
 
     expect(result).toEqual({ servers: {} });
     expect(consoleWarnSpy).toHaveBeenCalledWith(
-      '[getMcpServerConfigs] No tokens found for connection conn-1, skipping',
+      '[getMcpServerConfigs] Missing upstream URL for OAuth-backed MCP notion, skipping',
     );
   });
 
@@ -702,8 +707,6 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
     mockFindTaskRun.mockResolvedValueOnce({
       actingUserId: 'actor-user',
     });
-    mockGetValidAccessToken.mockResolvedValue('notion-raw-access-token');
-
     await createJobCaller(
       'https://api.preview.roomote.run/trpc/mcpConnections.getMcpServerConfigs',
     ).getMcpServerConfigs();
@@ -918,8 +921,6 @@ describe('mcpConnectionsRouter.getMcpServerConfigs', () => {
   });
 
   it('does not log build failures during the happy path', async () => {
-    mockGetValidAccessToken.mockResolvedValue('notion-raw-access-token');
-
     await createCaller(
       'https://api.preview.roomote.run/trpc/mcpConnections.getMcpServerConfigs',
     ).getMcpServerConfigs();

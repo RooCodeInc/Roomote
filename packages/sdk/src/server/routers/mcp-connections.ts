@@ -25,6 +25,7 @@ import {
   getMcpIntegrationUpstreamUrl,
   MCP_INTEGRATIONS,
   isMcpConnectionAsanaConfig,
+  isMcpConnectionNotionConfig,
   isMcpConnectionGranolaConfig,
   isMcpConnectionGbrainConfig,
   isMcpConnectionGrafanaConfig,
@@ -507,6 +508,7 @@ async function buildCuratedMcpServerConfigs(ctx: {
       } else if (
         isMcpConnectionSnowflakeConfig(authConfig) ||
         isMcpConnectionAsanaConfig(authConfig) ||
+        isMcpConnectionNotionConfig(authConfig) ||
         isMcpConnectionGranolaConfig(authConfig) ||
         isMcpConnectionVercelConfig(authConfig) ||
         isMcpConnectionGrafanaConfig(authConfig) ||
