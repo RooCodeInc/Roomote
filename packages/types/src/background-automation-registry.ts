@@ -61,6 +61,8 @@ export type TriggerableBackgroundAutomationDescriptor<
 > = {
   automationKey: TAutomationKey;
   label: string;
+  /** Public black-on-white PNG used in automation result cards. */
+  slackIcon: string;
   scheduleModes: readonly TScheduleMode[];
   manualTriggerRequirements: readonly BackgroundAutomationManualTriggerRequirement[];
   /** Whether the automation posts to the shared manager channel by default. */
@@ -132,6 +134,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
     automationKey: 'conflict_resolver',
     label: 'Resolve PR Conflicts',
+    slackIcon: 'git-merge-conflict',
     scheduleModes: CONFLICT_RESOLVER_SCHEDULE_MODES,
     // Provider-neutral scan: any active repository qualifies, GitHub
     // installation no longer required.
@@ -143,6 +146,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
     automationKey: 'suggester',
     label: 'Suggest Ideas',
+    slackIcon: 'lightbulb',
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
     // Provider-agnostic: suggestion scans work with any synced repository.
     manualTriggerRequirements: ['slack', 'repository'],
@@ -156,6 +160,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
     automationKey: 'announcer',
     label: 'Summarize Merged PRs',
+    slackIcon: 'megaphone',
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
     // Merged-PR summaries read the provider-neutral taskPullRequests table.
     manualTriggerRequirements: ['slack', 'repository'],
@@ -166,6 +171,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
     automationKey: 'manager_stats',
     label: 'Weekly Manager Stats',
+    slackIcon: 'chart-column-increasing',
     scheduleModes: MANAGER_STATS_SCHEDULE_MODES,
     // The stats digest is computed from the provider-neutral PR list
     // primitives plus taskPullRequests, so any active repository qualifies.
@@ -177,6 +183,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
     automationKey: 'sentry_triage',
     label: 'Triage Sentry Issues',
+    slackIcon: 'sentry',
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
     manualTriggerRequirements: ['slack', 'sentry'],
     usesManagerChannel: true,
@@ -187,6 +194,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
     automationKey: 'dependabot_triage',
     label: 'Triage Dependabot Alerts',
+    slackIcon: 'dependabot',
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
     manualTriggerRequirements: ['slack', 'github', 'repository'],
     usesManagerChannel: true,
@@ -197,6 +205,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
     automationKey: 'codeql_triage',
     label: 'Triage CodeQL Alerts',
+    slackIcon: 'github',
     scheduleModes: DAILY_WEEKLY_SCHEDULE_MODES,
     manualTriggerRequirements: ['slack', 'github', 'repository'],
     usesManagerChannel: true,
@@ -207,6 +216,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
     automationKey: 'issue_fixer',
     label: 'Triage Issues',
+    slackIcon: 'wrench',
     scheduleModes: ISSUE_FIXER_SCHEDULE_MODES,
     // Webhook-driven on new issues only (no Run now / batch scan).
     // Plans are posted on the issue itself, not as Slack suggestion cards.
@@ -221,6 +231,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
     automationKey: 'security_auditor',
     label: 'Security Auditor',
+    slackIcon: 'triangle-alert',
     scheduleModes: HOURLY_AUDIT_SCHEDULE_MODES,
     // Merged-PR audits read the provider-neutral pullRequestFacts table.
     manualTriggerRequirements: ['slack', 'repository'],
@@ -232,6 +243,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
     automationKey: 'code_quality_auditor',
     label: 'Code Quality Auditor',
+    slackIcon: 'square-pen',
     scheduleModes: HOURLY_AUDIT_SCHEDULE_MODES,
     // Merged-PR audits read the provider-neutral pullRequestFacts table.
     manualTriggerRequirements: ['slack', 'repository'],
@@ -243,6 +255,7 @@ export const TRIGGERABLE_BACKGROUND_AUTOMATION_DESCRIPTORS = [
   {
     automationKey: 'ci_failure_triage',
     label: 'CI Failure Triage',
+    slackIcon: 'wrench',
     scheduleModes: CI_FAILURE_TRIAGE_SCHEDULE_MODES,
     // GitHub workflow_run, GitLab Pipeline, Azure DevOps build.complete,
     // Bitbucket Pipelines commit-status, and Gitea Actions workflow_run hooks
