@@ -1163,7 +1163,10 @@ export const runTask = async ({
 
     const prepareQueuedPromptActorScope = async (
       targetUserId?: string,
-      delivery?: { kind: 'queuedPrompt' | 'userInputAnswer' },
+      delivery?: {
+        kind: 'queuedPrompt' | 'userInputAnswer';
+        clientMessageId?: string;
+      },
     ) => {
       if (
         pendingTaskModelSettingsRestart &&
@@ -1176,10 +1179,45 @@ export const runTask = async ({
         };
       }
 
+      const finishQueuedPromptPreparation = async (result: {
+        shouldReconnect: boolean;
+        reason?: string;
+      }) => {
+        const clientMessageId = delivery?.clientMessageId;
+        if (
+          result.shouldReconnect ||
+          delivery?.kind !== 'queuedPrompt' ||
+          !clientMessageId?.startsWith('slack:')
+        ) {
+          return result;
+        }
+
+        try {
+          const activated = await sdk.taskRuns.activateSlackReplyTarget({
+            runId: taskRun.id,
+            messageTs: clientMessageId.slice('slack:'.length),
+          });
+          if (!activated) {
+            logger.warn(
+              `[runTask] Slack reply target authorization is missing for ${clientMessageId}; delivering with canonical routing`,
+            );
+          }
+          return result;
+        } catch (error) {
+          return {
+            shouldReconnect: false,
+            shouldBlockPrompt: true,
+            reason: `Slack reply target activation failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          };
+        }
+      };
+
       if (!targetUserId) {
-        return {
+        return finishQueuedPromptPreparation({
           shouldReconnect: false,
-        };
+        });
       }
 
       const syncResult = await syncActorScopedTurnState({
@@ -1227,12 +1265,12 @@ export const runTask = async ({
 
       if (refreshResult.didFail) {
         if (!refreshResult.actorChanged) {
-          return {
+          return finishQueuedPromptPreparation({
             shouldReconnect: false,
             reason:
               refreshResult.reason ??
               'actor-scoped MCP refresh failed for the current actor; continuing with existing MCP state',
-          };
+          });
         }
 
         return {
@@ -1244,10 +1282,10 @@ export const runTask = async ({
         };
       }
 
-      return {
+      return finishQueuedPromptPreparation({
         shouldReconnect: refreshResult.didChange,
         reason: refreshResult.reason,
-      };
+      });
     };
 
     // Create the appropriate runtime harness. Harness setup wires the

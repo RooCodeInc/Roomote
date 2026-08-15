@@ -5,6 +5,7 @@ const {
   awaitSubprocessMock,
   buildSandboxInstructionMock,
   taskRunsDoneMock,
+  taskRunsActivateSlackReplyTargetMock,
   taskRunsGetGoalMock,
   taskRunsClaimGoalContinuationMock,
   taskRunsRecordEventMock,
@@ -40,6 +41,7 @@ const {
   awaitSubprocessMock: vi.fn().mockResolvedValue(undefined),
   buildSandboxInstructionMock: vi.fn(() => undefined),
   taskRunsDoneMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsActivateSlackReplyTargetMock: vi.fn().mockResolvedValue(true),
   taskRunsGetGoalMock: vi.fn().mockResolvedValue(null),
   taskRunsClaimGoalContinuationMock: vi.fn(),
   taskRunsRecordEventMock: vi.fn().mockResolvedValue(undefined),
@@ -146,6 +148,7 @@ vi.mock('@roomote/cloud-agents', () => ({
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     taskRuns: {
+      activateSlackReplyTarget: taskRunsActivateSlackReplyTargetMock,
       done: taskRunsDoneMock,
       getGoal: taskRunsGetGoalMock,
       claimGoalContinuation: taskRunsClaimGoalContinuationMock,
@@ -279,6 +282,7 @@ describe('runTask', () => {
     existsSyncMock.mockReset();
     existsSyncMock.mockReturnValue(false);
     recordSandboxPromptSlackTurnStartMock.mockReset();
+    taskRunsActivateSlackReplyTargetMock.mockResolvedValue(true);
 
     createHarnessMock.mockResolvedValue({
       harness: {},
@@ -2285,10 +2289,19 @@ describe('runTask', () => {
     const prepareQueuedPromptActorScope =
       createHarnessMock.mock.calls[0]?.[0].prepareQueuedPromptActorScope;
 
-    await expect(prepareQueuedPromptActorScope?.('user-2')).resolves.toEqual({
+    await expect(
+      prepareQueuedPromptActorScope?.('user-2', {
+        kind: 'queuedPrompt',
+        clientMessageId: 'slack:1710000000.456',
+      }),
+    ).resolves.toEqual({
       shouldReconnect: false,
       reason:
         'actor-scoped MCP refresh failed for the current actor; continuing with existing MCP state',
+    });
+    expect(taskRunsActivateSlackReplyTargetMock).toHaveBeenCalledWith({
+      runId: 405,
+      messageTs: '1710000000.456',
     });
   });
 

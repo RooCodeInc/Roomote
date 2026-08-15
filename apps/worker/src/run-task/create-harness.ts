@@ -51,7 +51,10 @@ interface CreateHarnessOptions {
   logger: HarnessLogger;
   prepareQueuedPromptActorScope?: (
     targetUserId?: string,
-    delivery?: { kind: 'queuedPrompt' | 'userInputAnswer' },
+    delivery?: {
+      kind: 'queuedPrompt' | 'userInputAnswer';
+      clientMessageId?: string;
+    },
   ) => Promise<{
     shouldReconnect: boolean;
     shouldBlockPrompt?: boolean;
@@ -145,11 +148,17 @@ export async function createHarness({
       beforeQueuedPrompt: prepareQueuedPromptActorScope
         ? async ({
             userId,
+            clientMessageId,
             kind,
           }: {
             userId?: string;
+            clientMessageId?: string;
             kind: 'queuedPrompt' | 'userInputAnswer';
-          }) => await prepareQueuedPromptActorScope(userId, { kind })
+          }) =>
+            await prepareQueuedPromptActorScope(userId, {
+              kind,
+              clientMessageId,
+            })
         : undefined,
       ...(modelOverride ? { modelOverride } : {}),
       ...(reasoningEffortOverride ? { reasoningEffortOverride } : {}),

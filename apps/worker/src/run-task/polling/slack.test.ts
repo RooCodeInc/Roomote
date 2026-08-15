@@ -231,7 +231,7 @@ describe('createSlackMessageInterval', () => {
     }
   });
 
-  it('activates the queued message reply target before sending the turn', async () => {
+  it('keeps targeted Slack messages queued until their harness turn starts', async () => {
     mockGetSlackMessages.mockResolvedValueOnce([
       {
         text: 'Please continue here',
@@ -249,39 +249,13 @@ describe('createSlackMessageInterval', () => {
     try {
       await vi.advanceTimersByTimeAsync(5_000);
 
-      expect(mockActivateSlackReplyTarget).toHaveBeenCalledWith({
-        runId: 42,
-        messageTs: '1710000000.456',
-      });
-      expect(
-        mockActivateSlackReplyTarget.mock.invocationCallOrder[0],
-      ).toBeLessThan(sendPrompt.mock.invocationCallOrder[0]!);
-    } finally {
-      clearInterval(interval);
-    }
-  });
-
-  it('falls back to the canonical thread when reply target authorization is missing', async () => {
-    mockActivateSlackReplyTarget.mockResolvedValueOnce(false);
-    mockGetSlackMessages.mockResolvedValueOnce([
-      {
-        text: 'Please continue here',
-        user: 'U234',
-        userId: 'user-2',
-        ts: '1710000000.457',
-        channel: 'C123',
-        threadTs: '1710000000.100',
-      },
-    ]);
-    const { options, sendPrompt } = createListenerOptions();
-
-    const interval = createSlackMessageInterval(options);
-
-    try {
-      await vi.advanceTimersByTimeAsync(5_000);
-
-      expect(sendPrompt).toHaveBeenCalledTimes(1);
-      expect(mockPrependSlackMessages).not.toHaveBeenCalled();
+      expect(sendPrompt).toHaveBeenCalledWith(
+        expect.objectContaining({
+          clientMessageId: 'slack:1710000000.456',
+          queueOnly: true,
+        }),
+      );
+      expect(mockActivateSlackReplyTarget).not.toHaveBeenCalled();
     } finally {
       clearInterval(interval);
     }

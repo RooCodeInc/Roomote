@@ -268,32 +268,6 @@ export function createSlackMessageInterval({
             continue;
           }
 
-          if (msg.channel && msg.threadTs) {
-            const activated = await runPollingSdkCall({
-              execute: () =>
-                sdk.taskRuns.activateSlackReplyTarget({
-                  runId: taskRun.id,
-                  messageTs: msg.ts,
-                }),
-              stage: 'listenForSlackEvents',
-              runId: taskRun.id,
-              sessionId: state.sessionId,
-              sdkMethod: 'taskRuns.activateSlackReplyTarget',
-              failurePoint: 'slackReplyTargetActivation',
-              logger,
-              message: `[listenForSlackEvents] Failed to activate Slack reply target for job ${taskRun.id}`,
-            });
-            if (activated === null) {
-              await requeueSlackMessages(taskRun.id, deliveryOrder, index);
-              return;
-            }
-            if (!activated) {
-              logger.warn(
-                `[listenForSlackEvents] Slack reply target authorization is missing for message ${msg.ts}; continuing with the canonical thread`,
-              );
-            }
-          }
-
           const prompt =
             msg.formattedPrompt ??
             wrapSlackMessage(stripLeadingSlackProductMention(msg.text), {
@@ -303,6 +277,7 @@ export function createSlackMessageInterval({
             prompt,
             images: msg.images,
             autoSteerWhenQueued: true,
+            ...(msg.channel && msg.threadTs ? { queueOnly: true } : {}),
             source: 'slack',
             // The delivered sender always equals the server-side acting user.
             userId: msgPrep.effectiveUserId ?? undefined,
