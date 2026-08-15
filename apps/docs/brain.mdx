@@ -46,9 +46,9 @@ up a provider for tasks, the Brain has what it needs and there is nothing else
 to do. Changing that key later takes effect on the Brain's next request, with
 no redeploy.
 
-OpenRouter and OpenAI are both supported, and the Brain runs the same OpenAI
-models either way, so the choice is about routing and billing rather than
-capability. To bill the Brain separately from task inference, set
+OpenRouter and OpenAI both support the Brain's embedding and synthesis calls,
+but search reranking requires OpenRouter. To bill the Brain separately from
+task inference, set
 `R_BRAIN_OPENROUTER_API_KEY` or `R_BRAIN_OPENAI_API_KEY`; those take
 precedence over the deployment's general provider keys.
 
@@ -82,15 +82,22 @@ in staging is distinguishable from one written against production.
 
 ## Choosing models
 
-Two settings pick the Brain's models:
+Three settings pick the Brain's models:
 
-| Variable                   | What it does      | Written as                     | Changeable            |
-| -------------------------- | ----------------- | ------------------------------ | --------------------- |
-| `R_BRAIN_MODEL`            | Sourced synthesis | your provider's naming         | any time              |
-| `R_BRAIN_EMBEDDING_MODEL`  | Semantic recall   | a plain model id               | before the first boot |
+| Variable                      | What it does      | Written as                        | Changeable            |
+| ----------------------------- | ----------------- | --------------------------------- | --------------------- |
+| `R_BRAIN_MODEL`               | Sourced synthesis | your provider's naming            | any time              |
+| `R_BRAIN_EMBEDDING_MODEL`     | Semantic recall   | a plain model id                  | before the first boot |
+| `R_BRAIN_RERANKER_MODEL`      | Search precision  | `openrouter:<provider>/<model-id>` | after a restart       |
 
-Leave both unset and the Brain uses OpenAI's `gpt-5.6-luna` and
+Leave the first two unset and the Brain uses OpenAI's `gpt-5.6-luna` and
 `text-embedding-3-small` through whichever provider you configured.
+
+The reranker defaults to OpenRouter's `voyageai/rerank-2.5-lite`. Set
+`R_BRAIN_RERANKER_MODEL` to choose another model from
+OpenRouter's reranker catalog. Reranking requires an OpenRouter key; with only
+OpenAI configured, gbrain keeps the unreranked results instead of failing the
+search.
 
 The synthesis model is applied by Roomote when it forwards the call and passed
 to the provider as written, so use that provider's naming

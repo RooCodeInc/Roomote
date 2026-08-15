@@ -162,6 +162,11 @@ services:
           type: web
           name: roomote-api
           envVarKey: R_BRAIN_GATEWAY_TOKEN
+      - key: GBRAIN_RERANKER_MODEL
+        fromService:
+          type: web
+          name: roomote-api
+          envVarKey: R_BRAIN_RERANKER_MODEL
       # Create-time, and it has to be the container that receives these: the
       # embedding model and its width are decided when the Brain is created,
       # and the gateway must never substitute a different one afterwards.
@@ -248,6 +253,8 @@ services:
         sync: false
       - key: R_BRAIN_EMBEDDING_MODEL
         sync: false
+      - key: R_BRAIN_RERANKER_MODEL
+        value: ''
       - key: ROOMOTE_GBRAIN_HOSTPORT
         fromService:
           type: pserv

@@ -18,13 +18,14 @@ import type { Variables } from '../../types';
 const LOG_PREFIX = '[Brain Inference]';
 
 /**
- * The Brain's whole inference surface: embeddings for recall, and one chat
- * path for sourced synthesis and query expansion. Deliberately narrower than
- * the task-sandbox gateway's allowlist, because this credential is a static
- * deployment secret rather than a short-lived run token.
+ * The Brain's whole inference surface: embeddings for recall, reranking for
+ * precision, and chat for sourced synthesis and query expansion. Deliberately
+ * narrower than the task-sandbox gateway's allowlist, because this credential
+ * is a static deployment secret rather than a short-lived run token.
  */
 const BRAIN_ALLOWED_PATHS = new Set([
   '/v1/embeddings',
+  '/v1/rerank',
   '/v1/chat/completions',
   '/v1/responses',
 ]);
@@ -171,6 +172,20 @@ brainInference.post('/*', async (c) => {
       {
         error:
           'No model provider is configured for this deployment. Add a provider key in Settings to enable the Brain.',
+      },
+      503,
+    );
+  }
+
+  // gbrain's OpenRouter reranker speaks the same authenticated gateway
+  // contract as embeddings and chat, but OpenAI itself has no compatible
+  // rerank endpoint. Fail explicitly instead of forwarding a doomed request
+  // to api.openai.com and obscuring the missing capability as a 404.
+  if (upstreamPath === '/v1/rerank' && resolved.providerId !== 'openrouter') {
+    return c.json(
+      {
+        error:
+          'Brain reranking requires an OpenRouter provider configured in Settings.',
       },
       503,
     );
