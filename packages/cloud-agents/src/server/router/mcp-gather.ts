@@ -2,6 +2,7 @@ import type { ModelMessage } from 'ai';
 import { z } from 'zod';
 
 import type { RoutingContext } from './types';
+import { gatherExternalCommunicationContext } from './external-communication-context';
 import { gatherExternalIssueContext } from './external-issue-context';
 import {
   generateTrackedNonTaskObject,
@@ -90,27 +91,36 @@ export async function gatherContextFromConfiguredMcps<
     return { response, toolsUsed: [], phase: 'direct', needsExternalLookup };
   }
 
-  // The precheck asked for the linked issue, so the fetch deadline is only
-  // paid when it can change the decision. Bare references (no pasted URL)
-  // resolve against the deployment's configured repositories only. Fail-open:
-  // with nothing fetched, the precheck decision stands.
-  const externalIssueContext = await gatherExternalIssueContext(
-    context,
-    response.externalReference,
-  );
+  // The precheck asked for external context, so lookup latency is only paid
+  // when it can change the decision. Bare issue references resolve against the
+  // deployment's configured repositories only. Fail-open: with nothing
+  // fetched, the precheck decision stands.
+  const [externalIssueContext, externalCommunicationContext] =
+    await Promise.all([
+      gatherExternalIssueContext(context, response.externalReference),
+      gatherExternalCommunicationContext(context, response.externalReference),
+    ]);
+  const externalContextMessages = [
+    ...externalIssueContext.contextMessages,
+    ...externalCommunicationContext.contextMessages,
+  ];
+  const toolsUsed = [
+    ...externalIssueContext.toolsUsed,
+    ...externalCommunicationContext.toolsUsed,
+  ];
 
-  if (externalIssueContext.contextMessages.length === 0) {
+  if (externalContextMessages.length === 0) {
     return { response, toolsUsed: [], phase: 'direct', needsExternalLookup };
   }
 
   const informedResponse = await generateRoutingDecision([
     ...contextMessages,
-    ...externalIssueContext.contextMessages,
+    ...externalContextMessages,
   ]);
 
   return {
     response: informedResponse,
-    toolsUsed: externalIssueContext.toolsUsed,
+    toolsUsed,
     phase: 'mcp',
     needsExternalLookup: true,
   };
