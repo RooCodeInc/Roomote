@@ -430,7 +430,34 @@ describe('GitHub issue collector progress', () => {
     expect(result.pages).toHaveLength(1);
     expect(result.pages[0]?.content).toContain('Edited comment');
     expect(result.pages[0]?.content).not.toContain('Original comment');
-    expect(githubMocks.listComments).toHaveBeenCalledTimes(2);
+    expect(githubMocks.listComments).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds tied comment revision probes and rotates the next batch', async () => {
+    const boundary = new Date('2026-08-02T12:00:00Z');
+    const now = new Date('2026-08-15T00:00:00Z');
+    const tiedIssues = Array.from({ length: 31 }, (_, index) => ({
+      ...makeIssue(index + 1, boundary.toISOString()),
+      comments: 1,
+    }));
+    githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
+    githubMocks.syncState.set('github-issues:acme/a', {
+      watermark: boundary,
+      backfillCursor: JSON.stringify({
+        boundary: boundary.toISOString(),
+        seen: tiedIssues.map((tiedIssue) => [tiedIssue.number, 'stale']),
+        commentProbeOffset: 0,
+      }),
+    });
+    githubMocks.listForRepo.mockResolvedValue({ data: tiedIssues });
+    githubMocks.listComments.mockResolvedValue({ data: [] });
+
+    const result = await collectBrainGithubIssues({ now, limit: 100 });
+    expect(result.pages).toHaveLength(30);
+    expect(githubMocks.listComments).toHaveBeenCalledTimes(30);
+    expect(JSON.parse(result.stateUpdates[0]!.cursor!)).toMatchObject({
+      commentProbeOffset: 30,
+    });
   });
 
   it('backfills a repository connected after the earlier set completed', async () => {

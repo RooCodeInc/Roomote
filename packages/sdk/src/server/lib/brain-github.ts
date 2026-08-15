@@ -50,6 +50,7 @@ export type BrainGithubCollectionResult = {
 type IncrementalCursor = {
   boundary: string;
   seen: Array<[number, string]>;
+  commentProbeOffset: number;
 };
 
 type EligibleRepository = {
@@ -108,6 +109,12 @@ function parseIncrementalCursor(
           entry[0] > 0 &&
           typeof entry[1] === 'string',
       ),
+      commentProbeOffset:
+        typeof parsed.commentProbeOffset === 'number' &&
+        Number.isInteger(parsed.commentProbeOffset) &&
+        parsed.commentProbeOffset >= 0
+          ? parsed.commentProbeOffset
+          : 0,
     };
   } catch {
     return null;
@@ -370,6 +377,10 @@ export async function collectBrainGithubIssues(input: {
       const boundary = cursor ? new Date(cursor.boundary) : since;
       let progressBoundary = boundary;
       let seenAtBoundary = new Map(cursor?.seen ?? []);
+      const commentProbeOffset = cursor?.commentProbeOffset ?? 0;
+      const checkedCommentRevisions = new Map<number, string>();
+      let commentProbeCandidates = 0;
+      let commentProbes = 0;
       let apiPage = 1;
       let caughtUp = false;
       const octokit = await getInstallationOctokit({
@@ -419,6 +430,27 @@ export async function collectBrainGithubIssues(input: {
                   continue;
                 }
               } else if ((issue.comments ?? 0) > 0) {
+                const alreadyChecked = checkedCommentRevisions.get(
+                  issue.number,
+                );
+
+                if (alreadyChecked === seenRevision) {
+                  continue;
+                }
+
+                const candidateIndex = commentProbeCandidates;
+                commentProbeCandidates += 1;
+
+                if (
+                  candidateIndex < commentProbeOffset ||
+                  commentBudget.remaining <= 0
+                ) {
+                  continue;
+                }
+
+                commentBudget.remaining -= 1;
+                commentProbes += 1;
+
                 try {
                   const comments = await fetchIssueComments(
                     octokit,
@@ -427,8 +459,10 @@ export async function collectBrainGithubIssues(input: {
                     issue.number,
                   );
                   prefetchedComments.set(issue.number, comments);
+                  const revision = renderedIssueRevision(issue, comments);
+                  checkedCommentRevisions.set(issue.number, revision);
 
-                  if (seenRevision === renderedIssueRevision(issue, comments)) {
+                  if (seenRevision === revision) {
                     continue;
                   }
                 } catch {
@@ -527,6 +561,11 @@ export async function collectBrainGithubIssues(input: {
         cursor: JSON.stringify({
           boundary: progressBoundary.toISOString(),
           seen: [...seenAtBoundary].sort(([a], [b]) => a - b),
+          commentProbeOffset:
+            caughtUp &&
+            commentProbeCandidates <= commentProbeOffset + commentProbes
+              ? 0
+              : commentProbeOffset + commentProbes,
         }),
       });
     } catch (error) {
