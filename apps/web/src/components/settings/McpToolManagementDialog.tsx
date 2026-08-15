@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
+import type { McpToolAccessMode } from '@roomote/types';
 
 import {
   Alert,
@@ -17,8 +18,13 @@ import {
   DialogHeader,
   DialogTitle,
   Label,
+  RadioGroup,
+  RadioGroupItem,
   Spinner,
   Switch,
+  ToggleLeft,
+  ToggleRight,
+  TriangleAlert,
 } from '@/components/system';
 import {
   useMcpConnectionTools,
@@ -26,7 +32,6 @@ import {
 } from '@/hooks/mcp-connections';
 import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-errors';
 import { SETTINGS_PATHS } from '@/lib/settings';
-import { ToggleLeft, ToggleRight } from 'lucide-react';
 
 type McpToolManagementDialogProps = {
   mcpId: string | null;
@@ -106,6 +111,8 @@ export function McpToolManagementDialog({
   const toolsQuery = useMcpConnectionTools(open ? mcpId : null);
   const setDisabledTools = useSetDisabledMcpTools();
   const [disabledToolNames, setDisabledToolNames] = useState<string[]>([]);
+  const [toolAccessMode, setToolAccessMode] =
+    useState<McpToolAccessMode | null>(null);
   const lastSyncedToolStateKey = useRef<string | null>(null);
 
   const initialDisabledToolNames = useMemo(
@@ -121,6 +128,7 @@ export function McpToolManagementDialog({
     () => initialDisabledToolNames.join('\n'),
     [initialDisabledToolNames],
   );
+  const initialToolAccessMode = toolsQuery.data?.toolAccessMode ?? null;
 
   useEffect(() => {
     if (!open) {
@@ -132,7 +140,7 @@ export function McpToolManagementDialog({
       return;
     }
 
-    const nextToolStateKey = `${mcpId}\n${initialDisabledToolNamesKey}`;
+    const nextToolStateKey = `${mcpId}\n${initialToolAccessMode ?? ''}\n${initialDisabledToolNamesKey}`;
 
     if (lastSyncedToolStateKey.current === nextToolStateKey) {
       return;
@@ -140,9 +148,11 @@ export function McpToolManagementDialog({
 
     lastSyncedToolStateKey.current = nextToolStateKey;
     setDisabledToolNames(initialDisabledToolNames);
+    setToolAccessMode(initialToolAccessMode);
   }, [
     initialDisabledToolNames,
     initialDisabledToolNamesKey,
+    initialToolAccessMode,
     mcpId,
     open,
     toolsQuery.status,
@@ -156,7 +166,8 @@ export function McpToolManagementDialog({
 
   const isDirty =
     initialDisabledToolNames.join('\n') !==
-    normalizedDisabledToolNames.join('\n');
+      normalizedDisabledToolNames.join('\n') ||
+    initialToolAccessMode !== toolAccessMode;
   const loadedTools = toolsQuery.data?.tools ?? [];
   const hasLoadedTools =
     !toolsQuery.isPending &&
@@ -164,8 +175,12 @@ export function McpToolManagementDialog({
     toolsQuery.data != null &&
     loadedTools.length > 0;
   const showBulkToolActions = loadedTools.length > 3;
-  const hasEnabledTools =
-    normalizedDisabledToolNames.length < loadedTools.length;
+  const isToolAvailableInSelectedMode = (tool: (typeof loadedTools)[number]) =>
+    toolAccessMode !== 'read_only' || tool.availableInReadOnly !== false;
+  const availableTools = loadedTools.filter(isToolAvailableInSelectedMode);
+  const hasEnabledTools = availableTools.some(
+    (tool) => !normalizedDisabledToolNames.includes(tool.name),
+  );
 
   const handleToggle = (toolName: string, enabled: boolean) => {
     setDisabledToolNames((current) => {
@@ -182,11 +197,18 @@ export function McpToolManagementDialog({
   };
 
   const handleEnableAllTools = () => {
-    setDisabledToolNames([]);
+    const availableToolNames = new Set(availableTools.map((tool) => tool.name));
+    setDisabledToolNames((current) =>
+      current.filter((toolName) => !availableToolNames.has(toolName)),
+    );
   };
 
   const handleDisableAllTools = () => {
-    setDisabledToolNames(loadedTools.map((tool) => tool.name));
+    setDisabledToolNames((current) =>
+      Array.from(
+        new Set([...current, ...availableTools.map((tool) => tool.name)]),
+      ),
+    );
   };
 
   const handleSave = () => {
@@ -198,6 +220,7 @@ export function McpToolManagementDialog({
       {
         mcpId,
         disabledTools: normalizedDisabledToolNames,
+        ...(toolAccessMode ? { toolAccessMode } : {}),
       },
       {
         onSuccess: () => {
@@ -223,7 +246,9 @@ export function McpToolManagementDialog({
             Manage {integrationName ?? 'integration'} tools
           </DialogTitle>
           <DialogDescription>
-            Enable or disable MCP tools for this integration.
+            {initialToolAccessMode
+              ? 'Choose the deployment access level and manage individual MCP tools.'
+              : 'Enable or disable MCP tools for this integration.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -261,10 +286,73 @@ export function McpToolManagementDialog({
 
           {hasLoadedTools ? (
             <div className="space-y-3 py-3">
+              {toolAccessMode ? (
+                <div className="space-y-3 border-b pb-4">
+                  <div className="space-y-1">
+                    <Label>Access level</Label>
+                    <p className="text-sm text-muted-foreground">
+                      This setting applies to every Roomote task and automation
+                      in this deployment.
+                    </p>
+                  </div>
+                  <RadioGroup
+                    value={toolAccessMode}
+                    disabled={setDisabledTools.isPending}
+                    onValueChange={(value) => {
+                      if (value === 'read_only' || value === 'read_write') {
+                        setToolAccessMode(value);
+                      }
+                    }}
+                    className="space-y-3"
+                  >
+                    <div className="flex items-start gap-3">
+                      <RadioGroupItem
+                        id="mcp-tool-access-read-only"
+                        value="read_only"
+                        className="mt-1"
+                      />
+                      <div className="space-y-1">
+                        <Label htmlFor="mcp-tool-access-read-only">
+                          Read only (recommended)
+                        </Label>
+                        <p className="text-sm text-muted-foreground">
+                          Allow searching and reading content, while blocking
+                          changes.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-3">
+                      <RadioGroupItem
+                        id="mcp-tool-access-read-write"
+                        value="read_write"
+                        className="mt-1"
+                      />
+                      <div className="space-y-1">
+                        <Label htmlFor="mcp-tool-access-read-write">
+                          Read and write
+                        </Label>
+                        <p className="text-sm text-muted-foreground">
+                          Allow tasks and unattended automations to create,
+                          update, move, and comment on accessible content.
+                        </p>
+                      </div>
+                    </div>
+                  </RadioGroup>
+                  {toolAccessMode === 'read_write' ? (
+                    <Alert variant="warning">
+                      <TriangleAlert />
+                      <AlertDescription>
+                        Read and write access uses the permissions of the Notion
+                        account connected for this deployment.
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
+                </div>
+              ) : null}
               {loadedTools.map((tool, index) => {
-                const enabled = !normalizedDisabledToolNames.includes(
-                  tool.name,
-                );
+                const available = isToolAvailableInSelectedMode(tool);
+                const enabled =
+                  available && !normalizedDisabledToolNames.includes(tool.name);
                 const switchId = `mcp-tool-${mcpId ?? 'unknown'}-${index}`;
 
                 return (
@@ -278,7 +366,7 @@ export function McpToolManagementDialog({
                           id={switchId}
                           checked={enabled}
                           aria-label={`${enabled ? 'Disable' : 'Enable'} ${tool.name}`}
-                          disabled={setDisabledTools.isPending}
+                          disabled={setDisabledTools.isPending || !available}
                           onCheckedChange={(nextEnabled) =>
                             handleToggle(tool.name, nextEnabled)
                           }
@@ -290,6 +378,11 @@ export function McpToolManagementDialog({
                           {prettifyToolName(tool.name, integrationName)}
                         </Label>
                       </div>
+                      {!available ? (
+                        <p className="pl-12 text-sm text-muted-foreground">
+                          Requires read and write access.
+                        </p>
+                      ) : null}
                     </div>
                   </div>
                 );
@@ -309,7 +402,9 @@ export function McpToolManagementDialog({
                   className="px-0!"
                   disabled={
                     setDisabledTools.isPending ||
-                    normalizedDisabledToolNames.length === loadedTools.length
+                    availableTools.every((tool) =>
+                      normalizedDisabledToolNames.includes(tool.name),
+                    )
                   }
                   onClick={handleDisableAllTools}
                 >
@@ -323,7 +418,10 @@ export function McpToolManagementDialog({
                   className="px-0!"
                   disabled={
                     setDisabledTools.isPending ||
-                    normalizedDisabledToolNames.length === 0
+                    availableTools.every(
+                      (tool) =>
+                        !normalizedDisabledToolNames.includes(tool.name),
+                    )
                   }
                   onClick={handleEnableAllTools}
                 >

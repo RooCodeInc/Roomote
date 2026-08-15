@@ -25,11 +25,12 @@ GitHub is connected via a GitHub App installation. An admin installs the Roomote
 
 # Notion
 
-Notion uses OAuth and requires both levels:
-1. An admin enables Notion from Settings > Integrations.
-2. Each user connects their Notion account via OAuth from the same page.
+Notion uses one deployment-wide OAuth connection:
+1. A deployment operator opens Settings > Integrations.
+2. That operator connects Notion once for the deployment via OAuth.
+3. The operator keeps the default read-only access or explicitly enables read and write access in Manage tools.
 
-Once connected, I can read Notion pages and databases for additional context during tasks.
+Once connected, I can use the permitted Notion tools during both interactive tasks and automations. Read-write access applies deployment-wide.
 
 # Jira
 

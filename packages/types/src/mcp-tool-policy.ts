@@ -1,5 +1,44 @@
 import type { McpIntegration } from './mcp-oauth';
 
+export const MCP_TOOL_ACCESS_MODES = ['read_only', 'read_write'] as const;
+
+export type McpToolAccessMode = (typeof MCP_TOOL_ACCESS_MODES)[number];
+
+export type McpToolAccessModeConfig = {
+  readonly defaultMode: McpToolAccessMode;
+  readonly supportedModes: readonly McpToolAccessMode[];
+  readonly readOnlyToolNames: readonly string[];
+};
+
+/**
+ * Notion documents these as non-mutating tools. `fetch` and `search` are
+ * aliases that Notion may advertise to OpenAI MCP clients in place of their
+ * `notion-`-prefixed names.
+ */
+export const NOTION_READ_ONLY_TOOL_NAMES = [
+  'notion-search',
+  'search',
+  'notion-fetch',
+  'fetch',
+  'notion-query-data-sources',
+  'notion-query-database-view',
+  'notion-get-comments',
+  'notion-get-teams',
+  'notion-get-users',
+  'notion-get-user',
+  'notion-get-self',
+] as const;
+
+const INTEGRATION_MCP_TOOL_ACCESS_MODE_CONFIGS: Readonly<
+  Partial<Record<string, McpToolAccessModeConfig>>
+> = {
+  notion: {
+    defaultMode: 'read_only',
+    supportedModes: MCP_TOOL_ACCESS_MODES,
+    readOnlyToolNames: NOTION_READ_ONLY_TOOL_NAMES,
+  },
+};
+
 const BETTER_STACK_READ_ONLY_UPTIME_TOOL_NAMES = [
   'escalation_policy',
   'heartbeat_availability',
@@ -225,11 +264,46 @@ export type McpToolPolicy = {
 
 export function getAllowedIntegrationMcpToolNames(
   integrationOrId: McpIntegration | string,
+  toolAccessMode?: string | null,
 ): readonly string[] | undefined {
   const integrationId =
     typeof integrationOrId === 'string' ? integrationOrId : integrationOrId.id;
 
+  const accessModeConfig =
+    INTEGRATION_MCP_TOOL_ACCESS_MODE_CONFIGS[integrationId];
+  if (accessModeConfig) {
+    return resolveMcpIntegrationToolAccessMode(
+      integrationId,
+      toolAccessMode,
+    ) === 'read_write'
+      ? undefined
+      : accessModeConfig.readOnlyToolNames;
+  }
+
   return INTEGRATION_MCP_ALLOWED_TOOL_NAMES[integrationId];
+}
+
+export function getMcpIntegrationToolAccessModeConfig(
+  integrationOrId: McpIntegration | string,
+): McpToolAccessModeConfig | undefined {
+  const integrationId =
+    typeof integrationOrId === 'string' ? integrationOrId : integrationOrId.id;
+
+  return INTEGRATION_MCP_TOOL_ACCESS_MODE_CONFIGS[integrationId];
+}
+
+export function resolveMcpIntegrationToolAccessMode(
+  integrationOrId: McpIntegration | string,
+  storedMode?: string | null,
+): McpToolAccessMode | undefined {
+  const config = getMcpIntegrationToolAccessModeConfig(integrationOrId);
+  if (!config) {
+    return undefined;
+  }
+
+  return config.supportedModes.includes(storedMode as McpToolAccessMode)
+    ? (storedMode as McpToolAccessMode)
+    : config.defaultMode;
 }
 
 export function isMcpToolAllowed(

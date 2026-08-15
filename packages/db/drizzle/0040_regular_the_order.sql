@@ -1,0 +1,1 @@
+ALTER TABLE "deployment_mcp_enablements" ADD COLUMN "tool_access_mode" text;

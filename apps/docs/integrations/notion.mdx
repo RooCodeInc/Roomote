@@ -5,21 +5,40 @@ icon: 'https://api.iconify.design/simple-icons:notion.svg?color=currentColor'
 ---
 
 Connect Notion when product specs, runbooks, notes, or operating context already
-live there and Roomote should be able to inspect that material during a task.
+live there and Roomote should be able to use that material during tasks and
+automations.
 
 ## When to use it
 
 - Pull a spec or runbook into a planning or debugging task
 - Inspect database-backed project context without copying it into the prompt
-- Keep task context close to the docs your team already maintains
+- Optionally create or update pages from approved Roomote workflows
 
 ## How setup works
 
-Admins enable Notion from **Settings > Integrations**. Each teammate then links
-their own Notion account from [Personal Settings](/personal-settings) when they
-need it.
+An admin connects Notion once from **Settings > Integrations**. Roomote stores
+that OAuth connection for the deployment, so interactive tasks and automations
+use the same Notion workspace access without each teammate linking an account.
+
+<Note>
+  After upgrading from personal Notion connections, an admin must reconnect
+  Notion once from **Settings > Integrations**. Roomote does not promote an
+  existing teammate's credential into a deployment credential automatically.
+</Note>
+
+Notion starts in **Read only** mode. In **Manage tools**, an admin can choose:
+
+- **Read only (recommended)** — allows reviewed search and read tools while
+  blocking content changes
+- **Read and write** — also allows tools that create, update, move, duplicate,
+  or comment on content
+
+The selected mode applies to every Roomote task and automation in the
+deployment. Individual tools can still be disabled to narrow access further.
 
 ## What to expect
 
-Notion gives Roomote shared document context. The resulting engineering work
-still gets reviewed in the Roomote task view and normal repository workflow.
+The connection has the same Notion access as the account that authorizes it.
+Use an account whose workspace permissions match what Roomote should be able to
+reach, and enable read-write mode only when unattended automations are expected
+to change Notion content.

@@ -395,6 +395,7 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     url: 'https://mcp.notion.com/mcp',
     description: `Access your Notion pages, databases, and content within ${PRODUCT_NAME} tasks`,
     icon: 'notion',
+    connectionScope: 'deployment',
   },
   {
     id: 'jira',

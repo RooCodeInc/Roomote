@@ -77,6 +77,7 @@ import type {
   TaskRunErrorCode,
   UserRole,
   RepositoryAutomationSignals,
+  McpToolAccessMode,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -3529,6 +3530,7 @@ export const deploymentMcpEnablements = pgTable(
       onDelete: 'set null',
     }),
     disabledTools: text('disabled_tools').array(),
+    toolAccessMode: text('tool_access_mode').$type<McpToolAccessMode>(),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
