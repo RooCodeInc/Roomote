@@ -460,6 +460,85 @@ describe('GitHub issue collector progress', () => {
     });
   });
 
+  it('does not advance past tied comment revisions that remain unprobed', async () => {
+    const boundary = new Date('2026-08-02T12:00:00Z');
+    const nextBoundary = new Date('2026-08-02T12:00:01Z');
+    const now = new Date('2026-08-15T00:00:00Z');
+    const tiedIssues = Array.from({ length: 31 }, (_, index) => ({
+      ...makeIssue(index + 1, boundary.toISOString()),
+      comments: 1,
+    }));
+    const storedComments = [
+      {
+        author: 'ada',
+        body: 'Original comment',
+        createdAt: boundary.toISOString(),
+      },
+    ];
+    const seen = tiedIssues.map(
+      (tiedIssue) =>
+        [
+          tiedIssue.number,
+          JSON.stringify([
+            JSON.stringify([
+              tiedIssue.updated_at,
+              tiedIssue.title,
+              undefined,
+              undefined,
+              tiedIssue.comments,
+              undefined,
+              undefined,
+              [],
+            ]),
+            storedComments,
+          ]),
+        ] as [number, string],
+    );
+    const newerIssue = makeIssue(32, nextBoundary.toISOString());
+    githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
+    githubMocks.syncState.set('github-issues:acme/a', {
+      watermark: boundary,
+      backfillCursor: JSON.stringify({
+        boundary: boundary.toISOString(),
+        seen,
+        commentProbeOffset: 0,
+      }),
+    });
+    githubMocks.listForRepo.mockResolvedValue({
+      data: [...tiedIssues, newerIssue],
+    });
+    githubMocks.listComments.mockImplementation(
+      async ({ issue_number }: { issue_number: number }) => ({
+        data: [
+          {
+            user: { login: 'ada' },
+            body: issue_number === 31 ? 'Edited comment' : 'Original comment',
+            created_at: boundary.toISOString(),
+          },
+        ],
+      }),
+    );
+
+    const first = await collectBrainGithubIssues({ now, limit: 100 });
+    expect(first.pages).toEqual([]);
+    expect(githubMocks.listComments).toHaveBeenCalledTimes(30);
+    expect(JSON.parse(first.stateUpdates[0]!.cursor!)).toMatchObject({
+      boundary: boundary.toISOString(),
+      commentProbeOffset: 30,
+    });
+    githubMocks.syncState.set('github-issues:acme/a', {
+      watermark: first.stateUpdates[0]!.watermark,
+      backfillCursor: first.stateUpdates[0]!.cursor,
+    });
+
+    const second = await collectBrainGithubIssues({ now, limit: 100 });
+    expect(second.pages.map((page) => page.slug)).toEqual([
+      'github/acme/a/issues/31',
+      'github/acme/a/issues/32',
+    ]);
+    expect(second.pages[0]?.content).toContain('Edited comment');
+  });
+
   it('backfills a repository connected after the earlier set completed', async () => {
     githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
     githubMocks.listForRepo.mockResolvedValueOnce({ data: [] });

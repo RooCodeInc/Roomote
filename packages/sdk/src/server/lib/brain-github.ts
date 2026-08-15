@@ -383,6 +383,7 @@ export async function collectBrainGithubIssues(input: {
       let commentProbes = 0;
       let apiPage = 1;
       let caughtUp = false;
+      let deferredBoundaryProbe = false;
       const octokit = await getInstallationOctokit({
         installationId: repository.installationId,
       });
@@ -417,6 +418,18 @@ export async function collectBrainGithubIssues(input: {
             ? progressBoundary.getTime()
             : updatedAt.getTime();
 
+          // Do not advance beyond a keyset boundary until every previously
+          // seen issue there has had its comment revision checked. Otherwise
+          // the per-pass probe cap could strand an edited comment behind the
+          // next boundary.
+          if (
+            deferredBoundaryProbe &&
+            updatedAtMs > progressBoundary.getTime()
+          ) {
+            hitBudget = true;
+            break;
+          }
+
           if (updatedAtMs < progressBoundary.getTime()) {
             continue;
           }
@@ -441,10 +454,12 @@ export async function collectBrainGithubIssues(input: {
                 const candidateIndex = commentProbeCandidates;
                 commentProbeCandidates += 1;
 
-                if (
-                  candidateIndex < commentProbeOffset ||
-                  commentBudget.remaining <= 0
-                ) {
+                if (candidateIndex < commentProbeOffset) {
+                  continue;
+                }
+
+                if (commentBudget.remaining <= 0) {
+                  deferredBoundaryProbe = true;
                   continue;
                 }
 
