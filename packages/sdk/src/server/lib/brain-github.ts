@@ -3,6 +3,7 @@ import {
   asc,
   db,
   eq,
+  getBrainSyncState,
   githubInstallations,
   isNotNull,
   isNull,
@@ -33,6 +34,12 @@ export type BrainGithubPage = {
   slug: string;
   title: string;
   content: string;
+};
+
+export type BrainGithubCollectionResult = {
+  pages: BrainGithubPage[];
+  nextSince: null;
+  stateUpdates: Array<{ collectorId: string; watermark: Date }>;
 };
 
 type EligibleRepository = {
@@ -227,9 +234,9 @@ async function pagesForIssues(input: {
  * every eligible repository until the page budget is spent.
  */
 export async function collectBrainGithubIssues(input: {
-  since: Date | null;
+  now: Date;
   limit: number;
-}): Promise<{ pages: BrainGithubPage[]; nextSince: Date | null }> {
+}): Promise<BrainGithubCollectionResult> {
   let repositoriesToScan: EligibleRepository[];
 
   try {
@@ -240,17 +247,32 @@ export async function collectBrainGithubIssues(input: {
         error instanceof Error ? error.message : String(error)
       }`,
     );
-    return { pages: [], nextSince: input.since };
+    return { pages: [], nextSince: null, stateUpdates: [] };
   }
 
   const pages: BrainGithubPage[] = [];
+  const stateUpdates: BrainGithubCollectionResult['stateUpdates'] = [];
   const commentBudget = { remaining: MAX_COMMENT_FETCHES_PER_PASS };
-  // Default first-pass window when no watermark exists yet; the backfill
-  // phase walks the deeper history.
-  const since = input.since ?? new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  let maxUpdatedAt: Date | null = input.since;
+  const repositoriesWithState = await Promise.all(
+    repositoriesToScan.map(async (repository) => {
+      const stateId = `github-issues:${repository.fullName}`;
 
-  for (const repository of repositoriesToScan) {
+      return {
+        ...repository,
+        stateId,
+        state: await getBrainSyncState(db, stateId),
+      };
+    }),
+  );
+
+  repositoriesWithState.sort(
+    (a, b) =>
+      (a.state?.watermark?.getTime() ?? 0) -
+        (b.state?.watermark?.getTime() ?? 0) ||
+      a.fullName.localeCompare(b.fullName),
+  );
+
+  for (const repository of repositoriesWithState) {
     if (pages.length >= input.limit) {
       break;
     }
@@ -262,6 +284,12 @@ export async function collectBrainGithubIssues(input: {
     }
 
     try {
+      // New repositories start with a short recent window; the separate
+      // durable backfill walks their older history.
+      const since =
+        repository.state?.watermark ??
+        new Date(input.now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      const perPage = Math.min(100, input.limit - pages.length);
       const octokit = await getInstallationOctokit({
         installationId: repository.installationId,
       });
@@ -272,12 +300,11 @@ export async function collectBrainGithubIssues(input: {
         since: since.toISOString(),
         sort: 'updated',
         direction: 'asc',
-        per_page: Math.min(100, input.limit - pages.length),
+        per_page: perPage,
       });
 
-      const issues = (response.data as GithubIssue[]).filter(
-        (issue) => !issue.pull_request,
-      );
+      const rawIssues = response.data as GithubIssue[];
+      const issues = rawIssues.filter((issue) => !issue.pull_request);
 
       pages.push(
         ...(await pagesForIssues({
@@ -288,13 +315,26 @@ export async function collectBrainGithubIssues(input: {
         })),
       );
 
-      for (const issue of issues) {
+      let maxUpdatedAt: Date | null = null;
+
+      for (const issue of rawIssues) {
         const updatedAt = issue.updated_at ? new Date(issue.updated_at) : null;
 
-        if (updatedAt && (!maxUpdatedAt || updatedAt > maxUpdatedAt)) {
+        if (
+          updatedAt &&
+          !Number.isNaN(updatedAt.getTime()) &&
+          (!maxUpdatedAt || updatedAt > maxUpdatedAt)
+        ) {
           maxUpdatedAt = updatedAt;
         }
       }
+
+      // A short page exhausts this repository through `now`, including the
+      // quiet case. A full page advances only through the last item actually
+      // observed so the next tick resumes the same repository safely.
+      const watermark =
+        rawIssues.length < perPage ? input.now : (maxUpdatedAt ?? since);
+      stateUpdates.push({ collectorId: repository.stateId, watermark });
     } catch (error) {
       console.warn(
         `[brainGithub] issue sync failed for ${repository.fullName}: ${
@@ -304,34 +344,44 @@ export async function collectBrainGithubIssues(input: {
     }
   }
 
-  return { pages, nextSince: maxUpdatedAt };
+  return { pages, nextSince: null, stateUpdates };
 }
 
-type BackfillCursor = { repositoryIndex: number; page: number };
+type BackfillCursor = {
+  completed: string[];
+  repository: string | null;
+  page: number;
+};
 
 function parseBackfillCursor(cursor: string | null): BackfillCursor {
   if (!cursor) {
-    return { repositoryIndex: 0, page: 1 };
+    return { completed: [], repository: null, page: 1 };
   }
 
   try {
     const parsed = JSON.parse(cursor) as Partial<BackfillCursor>;
 
     return {
-      repositoryIndex:
-        typeof parsed.repositoryIndex === 'number' ? parsed.repositoryIndex : 0,
+      completed: Array.isArray(parsed.completed)
+        ? parsed.completed.filter(
+            (entry): entry is string => typeof entry === 'string',
+          )
+        : [],
+      repository:
+        typeof parsed.repository === 'string' ? parsed.repository : null,
       page:
         typeof parsed.page === 'number' && parsed.page > 0 ? parsed.page : 1,
     };
   } catch {
-    return { repositoryIndex: 0, page: 1 };
+    return { completed: [], repository: null, page: 1 };
   }
 }
 
 /**
  * One bounded deep-backfill step: a single page of one repository's full
- * issue history, oldest first. The cursor walks pages within a repository,
- * then advances to the next repository, and reports done after the last one.
+ * issue history, oldest first. Completed repository identities are retained
+ * while the collector stays open, so a repository connected later is found
+ * and backfilled without invalidating a positional cursor.
  */
 export async function backfillBrainGithubIssuesStep(input: {
   cursor: string | null;
@@ -350,24 +400,40 @@ export async function backfillBrainGithubIssuesStep(input: {
   }
 
   if (repositoriesToScan.length === 0) {
-    return { pages: [], nextCursor: null, done: true };
+    return { pages: [], nextCursor: input.cursor, done: false };
   }
 
-  if (cursor.repositoryIndex >= repositoriesToScan.length) {
-    return { pages: [], nextCursor: null, done: true };
-  }
+  const completed = new Set(cursor.completed);
+  const repository =
+    repositoriesToScan.find(
+      (candidate) => candidate.fullName === cursor.repository,
+    ) ??
+    repositoriesToScan.find((candidate) => !completed.has(candidate.fullName));
 
-  const repository = repositoriesToScan[cursor.repositoryIndex]!;
-  const [owner, repo] = repository.fullName.split('/');
-
-  const advance = (): string =>
-    JSON.stringify({
-      repositoryIndex: cursor.repositoryIndex + 1,
+  if (!repository) {
+    const nextCursor = JSON.stringify({
+      completed: [...completed].sort(),
+      repository: null,
       page: 1,
     } satisfies BackfillCursor);
 
+    return { pages: [], nextCursor, done: false };
+  }
+
+  const page = repository.fullName === cursor.repository ? cursor.page : 1;
+  const [owner, repo] = repository.fullName.split('/');
+
   if (!owner || !repo) {
-    return { pages: [], nextCursor: advance(), done: false };
+    completed.add(repository.fullName);
+    return {
+      pages: [],
+      nextCursor: JSON.stringify({
+        completed: [...completed].sort(),
+        repository: null,
+        page: 1,
+      } satisfies BackfillCursor),
+      done: false,
+    };
   }
 
   try {
@@ -381,7 +447,7 @@ export async function backfillBrainGithubIssuesStep(input: {
       sort: 'updated',
       direction: 'asc',
       per_page: BACKFILL_PER_PAGE,
-      page: cursor.page,
+      page,
     });
 
     const rawIssues = response.data as GithubIssue[];
@@ -395,20 +461,22 @@ export async function backfillBrainGithubIssuesStep(input: {
 
     // Short page means this repository's history is exhausted.
     const repositoryExhausted = rawIssues.length < BACKFILL_PER_PAGE;
-    const isLastRepository =
-      cursor.repositoryIndex >= repositoriesToScan.length - 1;
-
-    if (repositoryExhausted && isLastRepository) {
-      return { pages, nextCursor: null, done: true };
+    if (repositoryExhausted) {
+      completed.add(repository.fullName);
     }
 
     return {
       pages,
       nextCursor: repositoryExhausted
-        ? advance()
+        ? JSON.stringify({
+            completed: [...completed].sort(),
+            repository: null,
+            page: 1,
+          } satisfies BackfillCursor)
         : JSON.stringify({
-            repositoryIndex: cursor.repositoryIndex,
-            page: cursor.page + 1,
+            completed: [...completed].sort(),
+            repository: repository.fullName,
+            page: page + 1,
           } satisfies BackfillCursor),
       done: false,
     };

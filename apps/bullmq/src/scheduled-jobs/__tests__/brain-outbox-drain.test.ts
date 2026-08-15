@@ -39,11 +39,31 @@ beforeEach(() => {
 
 import {
   brainOutboxDrainJob,
+  buildMemoryPage,
   isBrainNotReady,
   isBrainRateLimited,
   postToBrain,
   redactBrainText,
 } from '../brain-outbox-drain';
+
+describe('task memory page identity', () => {
+  const base = {
+    taskId: 'task-1',
+    taskTitle: 'Remember the fix',
+    completedAt: new Date('2026-08-13T10:00:00Z'),
+    environmentName: null,
+    agentSummary: 'Used the durable approach.',
+    pullRequests: [],
+  };
+
+  it('keeps separate runs of the same task distinct', () => {
+    const first = buildMemoryPage({ ...base, runId: 101 });
+    const followUp = buildMemoryPage({ ...base, runId: 102 });
+
+    expect(first.slug).toBe('tasks/task-1/runs/101');
+    expect(followUp.slug).toBe('tasks/task-1/runs/102');
+  });
+});
 
 describe('redactBrainText', () => {
   it.each([

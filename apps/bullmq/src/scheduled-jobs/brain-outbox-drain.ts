@@ -164,7 +164,7 @@ export async function postToBrain(
  * timestamps, provenance). LLM distillation of decisions/rationale layers on
  * top of this later; it must never widen what raw data can reach the brain.
  */
-function buildMemoryPage(input: {
+export function buildMemoryPage(input: {
   runId: number;
   taskId: string;
   taskTitle: string;
@@ -210,7 +210,7 @@ function buildMemoryPage(input: {
   ].join('\n');
 
   return {
-    slug: `tasks/${input.taskId}`,
+    slug: `tasks/${input.taskId}/runs/${input.runId}`,
     title: input.taskTitle,
     content: redactBrainText(content),
   };

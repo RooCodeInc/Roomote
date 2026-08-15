@@ -64,6 +64,22 @@ export type CollectorPage = {
   content: string;
 };
 
+type CollectorStateUpdate = {
+  collectorId: string;
+  watermark: Date;
+};
+
+export type CollectorResult = {
+  pages: CollectorPage[];
+  nextSince: Date | null;
+  /**
+   * Partition-specific progress for collectors that fan out over independent
+   * upstream sources. The engine persists these only after every returned
+   * page lands, preserving the same outbox-like ordering as `nextSince`.
+   */
+  stateUpdates?: CollectorStateUpdate[];
+};
+
 export interface BrainCollector {
   id: string;
   displayName: string;
@@ -72,7 +88,7 @@ export interface BrainCollector {
     since: Date | null;
     now: Date;
     limit: number;
-  }): Promise<{ pages: CollectorPage[]; nextSince: Date | null }>;
+  }): Promise<CollectorResult>;
   /**
    * Optional initial deep backfill over a longer history window, drained in
    * bounded steps across ticks. `cursor` is the collector's own opaque
@@ -132,7 +148,11 @@ export async function runBrainCollectors(
 
       // Incremental phase first: new activity reaches the brain within a
       // tick even while a long backfill is still draining.
-      const { pages, nextSince } = await collector.collect({
+      const {
+        pages,
+        nextSince,
+        stateUpdates = [],
+      } = await collector.collect({
         since: state?.watermark ?? null,
         now: new Date(),
         limit: MAX_PAGES_PER_COLLECTOR_PER_TICK,
@@ -159,6 +179,14 @@ export async function runBrainCollectors(
         await upsertBrainSyncState(db, collector.id, {
           watermark: nextSince,
         });
+      }
+
+      if (!overshot) {
+        for (const update of stateUpdates) {
+          await upsertBrainSyncState(db, update.collectorId, {
+            watermark: update.watermark,
+          });
+        }
       }
 
       if (capped.length > 0) {
@@ -277,6 +305,7 @@ async function drainCollectorBackfill(input: {
  */
 
 export type SlackChannelMessage = {
+  teamId: string;
   channelId: string;
   channelName: string;
   /** Slack message ts, e.g. "1723500000.123456". */
@@ -304,12 +333,9 @@ const SLACK_INCREMENTAL_WINDOW_MS = 24 * 60 * 60 * 1000;
  */
 const SLACK_INCREMENTAL_MAX_PAGES = 50;
 
-/**
- * Floor for that narrowing. A channel producing more than the page ceiling
- * inside this is past what any window size rescues, so it is where the pass
- * stops halving and reports instead.
- */
-const SLACK_MIN_WINDOW_MS = 15 * 60 * 1000;
+/** Smallest incremental slice. A source that still exceeds the request cap
+ * holds only its own watermark; unrelated channels continue independently. */
+const SLACK_MIN_WINDOW_MS = 1000;
 /** How far back the very first incremental pass reads, before a watermark exists. */
 const SLACK_FIRST_PASS_WINDOW_MS = 24 * 60 * 60 * 1000;
 const SLACK_CHANNEL_LIST_PAGE_LIMIT = 999;
@@ -349,40 +375,19 @@ function formatUtcTime(date: Date): string {
 }
 
 /**
- * Group collected Slack messages into one page per channel per UTC day:
- * slug `slack/{channelId}/{YYYY-MM-DD}`. Re-upserting a day page as the day
- * grows is fine; slugs are idempotent. Pure function, exported for tests.
+ * Group one fetched Slack batch into immutable channel/day chunks. Timestamp
+ * bounds are part of the slug, so a later tick cannot replace an earlier
+ * partial day. Replaying the same upstream batch remains idempotent.
  */
 export function groupSlackMessagesIntoDayPages(
   messages: SlackChannelMessage[],
 ): CollectorPage[] {
-  return groupSlackMessagesIntoDatedDayPages(messages).map(
-    (dated) => dated.page,
-  );
-}
-
-/** A day page plus the bounds the watermark logic needs. */
-type DatedSlackDayPage = {
-  page: CollectorPage;
-  /** UTC day, `YYYY-MM-DD`. */
-  day: string;
-  /** Newest message timestamp on this page, in epoch milliseconds. */
-  maxTsMs: number;
-};
-
-/**
- * Same grouping, carrying each page's day and newest timestamp so the
- * collector can cap a tick without advancing its watermark past history it
- * did not actually write.
- */
-function groupSlackMessagesIntoDatedDayPages(
-  messages: SlackChannelMessage[],
-): DatedSlackDayPage[] {
   const groups = new Map<
     string,
     {
       channelId: string;
       channelName: string;
+      teamId: string;
       day: string;
       messages: Array<SlackChannelMessage & { at: Date }>;
     }
@@ -396,8 +401,9 @@ function groupSlackMessagesIntoDatedDayPages(
     }
 
     const day = formatUtcDay(at);
-    const key = `${message.channelId}/${day}`;
+    const key = `${message.teamId}/${message.channelId}/${day}`;
     const group = groups.get(key) ?? {
+      teamId: message.teamId,
       channelId: message.channelId,
       channelName: message.channelName,
       day,
@@ -411,88 +417,45 @@ function groupSlackMessagesIntoDatedDayPages(
   return [...groups.values()]
     .sort(
       (a, b) =>
-        // Oldest day first: a capped tick must keep the oldest history and
-        // leave the newest for the next tick, so the watermark only ever
-        // moves forward over pages that were actually written.
         a.day.localeCompare(b.day) ||
+        a.teamId.localeCompare(b.teamId) ||
         a.channelName.localeCompare(b.channelName),
     )
-    .map((group) => {
-      const lines = group.messages
-        .sort((a, b) => Number.parseFloat(a.ts) - Number.parseFloat(b.ts))
-        .map(
+    .flatMap((group) => {
+      const sortedMessages = group.messages.sort(
+        (a, b) => Number.parseFloat(a.ts) - Number.parseFloat(b.ts),
+      );
+      const pages: CollectorPage[] = [];
+
+      for (
+        let start = 0;
+        start < sortedMessages.length;
+        start += SLACK_HISTORY_LIMIT_PER_CHANNEL
+      ) {
+        const chunk = sortedMessages.slice(
+          start,
+          start + SLACK_HISTORY_LIMIT_PER_CHANNEL,
+        );
+        const lines = chunk.map(
           (message) =>
             `- [${formatUtcTime(message.at)}] <${message.userId ?? 'unknown'}>: ${message.text.trim()}`,
         );
+        const firstTs = chunk[0]!.ts.replace('.', '-');
+        const lastTs = chunk.at(-1)!.ts.replace('.', '-');
 
-      return {
-        day: group.day,
-        maxTsMs: Math.max(
-          ...group.messages.map((message) => message.at.getTime()),
-        ),
-        page: {
-          slug: `slack/${group.channelId}/${group.day}`,
+        pages.push({
+          slug: `slack/${group.teamId}/${group.channelId}/${group.day}/${firstTs}-${lastTs}`,
           title: `#${group.channelName} — ${group.day}`,
           content: [
             `Slack public channel #${group.channelName} (${group.channelId}), messages on ${group.day} (times UTC).`,
             '',
             ...lines,
           ].join('\n'),
-        },
-      };
+        });
+      }
+
+      return pages;
     });
-}
-
-/**
- * Cap a tick's day pages without losing the remainder.
- *
- * The engine advances a collector's watermark to whatever `nextSince` it
- * reports, and Slack's `oldest` filter is a timestamp, not a page cursor. So
- * reporting a watermark computed over messages whose pages were dropped by
- * the cap would skip them permanently. Cut on a whole-day boundary instead:
- * keep only complete days, and let the watermark land at the newest kept
- * message, which is strictly older than every dropped page's day.
- *
- * If one single day exceeds the cap on its own, cutting on a day boundary
- * would keep nothing and never progress. That case keeps a partial day and
- * reports no watermark, so the next tick re-reads the same window; the pages
- * are idempotent upserts, and the deep backfill is what carries real history.
- */
-export function capSlackDayPagesForTick(
-  dated: DatedSlackDayPage[],
-  limit: number,
-): { pages: CollectorPage[]; nextSince: Date | null } {
-  if (dated.length <= limit) {
-    const maxTsMs = dated.reduce(
-      (max, entry) => Math.max(max, entry.maxTsMs),
-      0,
-    );
-
-    return {
-      pages: dated.map((entry) => entry.page),
-      nextSince: maxTsMs > 0 ? new Date(maxTsMs) : null,
-    };
-  }
-
-  const cutDay = dated[limit]!.day;
-  const wholeDays = dated.filter((entry) => entry.day < cutDay);
-
-  if (wholeDays.length === 0) {
-    return {
-      pages: dated.slice(0, limit).map((entry) => entry.page),
-      nextSince: null,
-    };
-  }
-
-  const maxTsMs = wholeDays.reduce(
-    (max, entry) => Math.max(max, entry.maxTsMs),
-    0,
-  );
-
-  return {
-    pages: wholeDays.map((entry) => entry.page),
-    nextSince: maxTsMs > 0 ? new Date(maxTsMs) : null,
-  };
 }
 
 function getSlackErrorCode(error: unknown): string | null {
@@ -512,7 +475,7 @@ type RawSlackMessage = {
 
 function toSlackChannelMessages(
   messages: RawSlackMessage[],
-  channel: { id: string; name: string },
+  channel: { id: string; name: string; teamId: string },
 ): SlackChannelMessage[] {
   const collected: SlackChannelMessage[] = [];
 
@@ -528,6 +491,7 @@ function toSlackChannelMessages(
     }
 
     collected.push({
+      teamId: channel.teamId,
       channelId: channel.id,
       channelName: channel.name,
       ts: message.ts,
@@ -575,41 +539,22 @@ async function listPublicMemberChannels(
 }
 
 async function collectSlackPublicChannelMessages(input: {
-  since: Date | null;
+  now: Date;
   limit: number;
-}): Promise<{ pages: CollectorPage[]; nextSince: Date | null }> {
+}): Promise<CollectorResult> {
   const installations = await db
     .select()
     .from(slackInstallations)
     .where(eq(slackInstallations.isActive, true));
 
-  const collected: SlackChannelMessage[] = [];
+  const entries: Array<{
+    key: string;
+    stateId: string;
+    teamId: string;
+    channel: { id: string; name: string };
+    client: ReturnType<typeof createSlackWebClient>;
+  }> = [];
   let scopeWarned = false;
-  // Any channel we could not read leaves a hole in this window, so the
-  // watermark stays put and the next pass asks for the same span again.
-  let allChannelsRead = true;
-  // With no watermark yet, read only a short recent window rather than
-  // whatever 200 messages per channel happen to reach back to. History is the
-  // deep backfill's job; letting the incremental pass drag in weeks of it is
-  // what pushes a first tick past the page cap.
-  const oldestMs = input.since
-    ? input.since.getTime()
-    : Date.now() - SLACK_FIRST_PASS_WINDOW_MS;
-  const oldest = (oldestMs / 1000).toFixed(3);
-  // Ask for a bounded slice, so a channel that is far behind is caught up over
-  // successive ticks rather than read newest-first with a gap behind it.
-  // Narrowed in place when a channel turns out too busy for the ask, so the
-  // watermark only ever advances as far as every channel was read completely.
-  let effectiveWindowMs = Math.min(
-    SLACK_INCREMENTAL_WINDOW_MS,
-    Math.max(0, Date.now() - oldestMs),
-  );
-
-  if (effectiveWindowMs <= 0) {
-    // The watermark is already current. Nothing to ask for, and nothing to
-    // advance: moving it now would step over messages not yet posted.
-    return { pages: [], nextSince: null };
-  }
 
   for (const installation of installations) {
     const client = createSlackWebClient(installation.botAccessToken);
@@ -631,124 +576,151 @@ async function collectSlackPublicChannelMessages(input: {
     }
 
     for (const channel of channels) {
-      let messages: RawSlackMessage[];
-      try {
-        // Page the whole window rather than taking Slack's newest slice.
-        // conversations.history returns newest-first, so reading one page of a
-        // busy channel and advancing the watermark to that page's newest
-        // message would step straight over everything older in the same
-        // window, permanently once the deep backfill has finished.
-        //
-        // A channel too busy even for the page ceiling narrows the window
-        // instead of losing the remainder: the ask halves until it fits, and
-        // the pass advances only as far as the narrowest window every channel
-        // completed. Channels that finished a wider window just read a little
-        // ahead, which costs nothing because pages are idempotent.
-        messages = [];
-
-        for (;;) {
-          const attemptLatest = ((oldestMs + effectiveWindowMs) / 1000).toFixed(
-            3,
-          );
-          const attempt: RawSlackMessage[] = [];
-          let cursor: string | undefined;
-          let pages = 0;
-
-          do {
-            const history = await client.conversations.history({
-              channel: channel.id,
-              limit: SLACK_HISTORY_LIMIT_PER_CHANNEL,
-              oldest,
-              latest: attemptLatest,
-              ...(cursor ? { cursor } : {}),
-            });
-
-            attempt.push(...(history.messages ?? []));
-            cursor = history.response_metadata?.next_cursor || undefined;
-            pages++;
-          } while (cursor && pages < SLACK_INCREMENTAL_MAX_PAGES);
-
-          if (!cursor) {
-            messages = attempt;
-            break;
-          }
-
-          if (effectiveWindowMs <= SLACK_MIN_WINDOW_MS) {
-            // More than the page ceiling inside the smallest window worth
-            // asking for. Keeping what was read is the only option left that
-            // still makes progress, so say so plainly.
-            console.warn(
-              `${LOG_PREFIX} slack channel ${channel.id} exceeded ${SLACK_INCREMENTAL_MAX_PAGES} pages within ${SLACK_MIN_WINDOW_MS / 60000} minutes; some messages in that window are not ingested`,
-            );
-            messages = attempt;
-            break;
-          }
-
-          effectiveWindowMs = Math.max(
-            SLACK_MIN_WINDOW_MS,
-            Math.floor(effectiveWindowMs / 2),
-          );
-        }
-      } catch (error) {
-        const code = getSlackErrorCode(error);
-
-        if (code === 'missing_scope' || code === 'invalid_auth') {
-          if (!scopeWarned) {
-            console.warn(
-              `${LOG_PREFIX} slack team ${installation.teamId}: conversations.history failed with ${code}; producing no pages for this team (the app manifest likely lacks the channels:history scope)`,
-            );
-            scopeWarned = true;
-          }
-
-          allChannelsRead = false;
-
-          if (code === 'invalid_auth') {
-            break;
-          }
-
-          continue;
-        }
-
-        console.warn(
-          `${LOG_PREFIX} slack channel ${channel.id} history read failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-        allChannelsRead = false;
-        continue;
-      }
-
-      collected.push(...toSlackChannelMessages(messages, channel));
+      const key = `${installation.teamId}/${channel.id}`;
+      entries.push({
+        key,
+        stateId: `${slackPublicChannelsCollector.id}:${key}`,
+        teamId: installation.teamId,
+        channel,
+        client,
+      });
     }
   }
 
-  const dated = groupSlackMessagesIntoDatedDayPages(collected);
-  const capped = capSlackDayPagesForTick(dated, input.limit);
-  const windowEndMs = oldestMs + effectiveWindowMs;
+  const entriesWithState = await Promise.all(
+    entries.map(async (entry) => ({
+      ...entry,
+      state: await getBrainSyncState(db, entry.stateId),
+    })),
+  );
 
-  // Two limits can bite in the same pass, and only one of them may move the
-  // watermark. The page cap defers whole channel-days to the next tick and
-  // reports how far it got; overriding that with the end of the time window
-  // would step straight over what it just deferred. So the window end applies
-  // only when nothing was held back.
-  if (!allChannelsRead) {
-    // A channel we could not read leaves a hole anywhere in this window, so
-    // the watermark cannot move at all. Returning what the cap computed would
-    // still advance it to the newest message the working channels produced,
-    // stepping over the unread one.
-    return { ...capped, nextSince: null };
+  // Oldest partitions go first so a continuously busy channel cannot starve
+  // another channel when the shared per-tick page budget is exhausted.
+  entriesWithState.sort(
+    (a, b) =>
+      (a.state?.watermark?.getTime() ?? 0) -
+        (b.state?.watermark?.getTime() ?? 0) || a.key.localeCompare(b.key),
+  );
+
+  const pages: CollectorPage[] = [];
+  const stateUpdates: CollectorStateUpdate[] = [];
+  const nowMs = input.now.getTime();
+
+  for (const entry of entriesWithState) {
+    const savedWatermarkMs = entry.state?.watermark?.getTime();
+    const oldestMs = Math.min(
+      savedWatermarkMs ?? nowMs - SLACK_FIRST_PASS_WINDOW_MS,
+      nowMs,
+    );
+    let effectiveWindowMs = Math.min(
+      SLACK_INCREMENTAL_WINDOW_MS,
+      Math.max(0, nowMs - oldestMs),
+    );
+
+    if (effectiveWindowMs <= 0) {
+      if (savedWatermarkMs && savedWatermarkMs > nowMs) {
+        stateUpdates.push({
+          collectorId: entry.stateId,
+          watermark: input.now,
+        });
+      }
+      continue;
+    }
+
+    let messages: RawSlackMessage[] = [];
+    let complete = false;
+
+    try {
+      for (;;) {
+        const oldest = (oldestMs / 1000).toFixed(3);
+        const latest = ((oldestMs + effectiveWindowMs) / 1000).toFixed(3);
+        const attempt: RawSlackMessage[] = [];
+        let cursor: string | undefined;
+        let requestPages = 0;
+
+        do {
+          const history = await entry.client.conversations.history({
+            channel: entry.channel.id,
+            limit: SLACK_HISTORY_LIMIT_PER_CHANNEL,
+            oldest,
+            latest,
+            ...(cursor ? { cursor } : {}),
+          });
+
+          attempt.push(...(history.messages ?? []));
+          cursor = history.response_metadata?.next_cursor || undefined;
+          requestPages++;
+        } while (cursor && requestPages < SLACK_INCREMENTAL_MAX_PAGES);
+
+        if (!cursor) {
+          messages = attempt;
+          complete = true;
+          break;
+        }
+
+        if (effectiveWindowMs <= SLACK_MIN_WINDOW_MS) {
+          // This partition alone holds position. Other channels have their
+          // own watermarks and continue; immutable chunk slugs make retrying
+          // the fetched subset harmless until cursor persistence is added.
+          console.warn(
+            `${LOG_PREFIX} slack channel ${entry.channel.id} exceeded ${SLACK_INCREMENTAL_MAX_PAGES} pages within ${SLACK_MIN_WINDOW_MS / 1000} second; holding this channel's watermark`,
+          );
+          // Do not spend the page budget on a partial prefix that cannot move
+          // its checkpoint and would be re-written on every tick.
+          messages = [];
+          break;
+        }
+
+        effectiveWindowMs = Math.max(
+          SLACK_MIN_WINDOW_MS,
+          Math.floor(effectiveWindowMs / 2),
+        );
+      }
+    } catch (error) {
+      const code = getSlackErrorCode(error);
+
+      if (code === 'missing_scope' || code === 'invalid_auth') {
+        if (!scopeWarned) {
+          console.warn(
+            `${LOG_PREFIX} slack team ${entry.key.split('/')[0]}: conversations.history failed with ${code}; holding affected channel watermarks (the app manifest likely lacks the channels:history scope)`,
+          );
+          scopeWarned = true;
+        }
+      } else {
+        console.warn(
+          `${LOG_PREFIX} slack channel ${entry.channel.id} history read failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+
+      continue;
+    }
+
+    const channelPages = groupSlackMessagesIntoDayPages(
+      toSlackChannelMessages(messages, {
+        ...entry.channel,
+        teamId: entry.teamId,
+      }),
+    );
+
+    if (pages.length + channelPages.length > input.limit) {
+      // This partition could not fit, but smaller partitions may still use
+      // the remaining budget. Its watermark stays behind for the next tick.
+      continue;
+    }
+
+    pages.push(...channelPages);
+
+    if (complete) {
+      stateUpdates.push({
+        collectorId: entry.stateId,
+        watermark: new Date(oldestMs + effectiveWindowMs),
+      });
+    }
   }
 
-  if (dated.length > capped.pages.length) {
-    // The cap deferred whole channel-days. Its own nextSince already stops
-    // short of them, so it stands rather than being widened below.
-    return capped;
-  }
-
-  // Otherwise advance to the end of the window that was asked for, not merely
-  // to the newest message seen, so a quiet window still makes progress instead
-  // of stalling on channels with nothing to say.
-  return { ...capped, nextSince: new Date(windowEndMs) };
+  return { pages, nextSince: null, stateUpdates };
 }
 
 /** Deep backfill reaches back this far through channel history. */
@@ -772,6 +744,8 @@ type SlackBackfillCursorState = {
   completed: string[];
   key: string | null;
   slackCursor: string | null;
+  /** Stable upper bound for the current channel, excluding incremental data. */
+  latest: string | null;
 };
 
 function parseSlackBackfillCursor(
@@ -794,6 +768,7 @@ function parseSlackBackfillCursor(
         key: typeof parsed.key === 'string' ? parsed.key : null,
         slackCursor:
           typeof parsed.slackCursor === 'string' ? parsed.slackCursor : null,
+        latest: typeof parsed.latest === 'string' ? parsed.latest : null,
       };
     }
   } catch {
@@ -824,6 +799,7 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
     key: string;
     channelId: string;
     channelName: string;
+    teamId: string;
     client: ReturnType<typeof createSlackWebClient>;
   }> = [];
 
@@ -834,6 +810,7 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
       for (const channel of await listPublicMemberChannels(client)) {
         entries.push({
           key: `${installation.teamId}/${channel.id}`,
+          teamId: installation.teamId,
           channelId: channel.id,
           channelName: channel.name,
           client,
@@ -870,7 +847,6 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
   let entry = state?.key
     ? entries.find((candidate) => candidate.key === state.key)
     : undefined;
-  const slackCursor = entry ? (state?.slackCursor ?? null) : null;
 
   if (!entry) {
     entry = entries.find((candidate) => !completed.has(candidate.key));
@@ -888,10 +864,17 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
         completed: [...completed].sort(),
         key: null,
         slackCursor: null,
+        latest: null,
       }),
       done: false,
     };
   }
+  const resuming = entry.key === state?.key;
+  const slackCursor = resuming ? (state?.slackCursor ?? null) : null;
+  const latest = resuming
+    ? (state?.latest ??
+      ((Date.now() - SLACK_FIRST_PASS_WINDOW_MS) / 1000).toFixed(3))
+    : ((Date.now() - SLACK_FIRST_PASS_WINDOW_MS) / 1000).toFixed(3);
   const oldest = ((Date.now() - SLACK_BACKFILL_WINDOW_MS) / 1000).toFixed(3);
 
   let messages: RawSlackMessage[];
@@ -901,6 +884,7 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
       channel: entry.channelId,
       limit: SLACK_HISTORY_LIMIT_PER_CHANNEL,
       oldest,
+      ...(latest ? { latest } : {}),
       ...(slackCursor ? { cursor: slackCursor } : {}),
     });
 
@@ -923,6 +907,7 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
     toSlackChannelMessages(messages, {
       id: entry.channelId,
       name: entry.channelName,
+      teamId: entry.teamId,
     }),
   );
 
@@ -933,6 +918,7 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
         completed: [...completed].sort(),
         key: entry.key,
         slackCursor: nextSlackCursor,
+        latest,
       }),
       done: false,
     };
@@ -949,6 +935,7 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
       completed: [...completed].sort(),
       key: null,
       slackCursor: null,
+      latest: null,
     }),
     done: false,
   };
@@ -966,8 +953,8 @@ export const slackPublicChannelsCollector: BrainCollector = {
 
     return Boolean(installation);
   },
-  async collect({ since, limit }) {
-    return collectSlackPublicChannelMessages({ since, limit });
+  async collect({ now, limit }) {
+    return collectSlackPublicChannelMessages({ now, limit });
   },
   async backfill({ cursor }) {
     return backfillSlackHistoryStep(cursor);
@@ -1065,7 +1052,9 @@ export function buildGranolaMeetingPage(
   const updatedAt =
     parseDate(record.updated_at) ?? parseDate(record.updatedAt) ?? createdAt;
   const day = createdAt ? formatUtcDay(createdAt) : 'undated';
-  const slugTail = slugifySegment(title) || id || 'meeting';
+  const titleSlug = slugifySegment(title) || 'meeting';
+  const idSlug = id ? slugifySegment(id) : null;
+  const slugTail = idSlug ? `${titleSlug}-${idSlug}` : titleSlug;
   const attendees = extractAttendees(record);
   const body =
     asString(record.summary) ??
@@ -1323,8 +1312,8 @@ const githubIssuesCollector: BrainCollector = {
   async isEnabled() {
     return hasBrainGithubSources();
   },
-  async collect({ since, limit }) {
-    return collectBrainGithubIssues({ since, limit });
+  async collect({ now, limit }) {
+    return collectBrainGithubIssues({ now, limit });
   },
   async backfill({ cursor }) {
     return backfillBrainGithubIssuesStep({ cursor });

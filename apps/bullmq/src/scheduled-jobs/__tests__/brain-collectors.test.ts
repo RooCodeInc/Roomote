@@ -4,7 +4,6 @@ import { getBrainSyncState, upsertBrainSyncState } from '@roomote/db/server';
 
 import {
   buildGranolaMeetingPage,
-  capSlackDayPagesForTick,
   groupSlackMessagesIntoDayPages,
   runBrainCollectors,
   type BrainCollector,
@@ -122,6 +121,55 @@ describe('runBrainCollectors', () => {
       collector.id,
       { watermark: firstNextSince },
     );
+  });
+
+  it('persists partition watermarks only after every page lands', async () => {
+    const partitionWatermark = new Date('2026-08-13T11:00:00Z');
+    const collector = makeCollector({
+      collect: async () => ({
+        pages: makePages(1),
+        nextSince: null,
+        stateUpdates: [
+          {
+            collectorId: 'test-collector:partition-a',
+            watermark: partitionWatermark,
+          },
+        ],
+      }),
+    });
+
+    await runBrainCollectors(connection, {
+      sink: vi.fn(async () => {}),
+      collectors: [collector],
+    });
+
+    expect(syncStateStore.get('test-collector:partition-a')?.watermark).toEqual(
+      partitionWatermark,
+    );
+  });
+
+  it('holds partition watermarks when a page fails', async () => {
+    const collector = makeCollector({
+      collect: async () => ({
+        pages: makePages(1),
+        nextSince: null,
+        stateUpdates: [
+          {
+            collectorId: 'test-collector:partition-a',
+            watermark: new Date('2026-08-13T11:00:00Z'),
+          },
+        ],
+      }),
+    });
+
+    await runBrainCollectors(connection, {
+      sink: vi.fn(async () => {
+        throw new Error('boom');
+      }),
+      collectors: [collector],
+    });
+
+    expect(syncStateStore.has('test-collector:partition-a')).toBe(false);
   });
 
   it('does not advance the watermark when the sink fails mid-batch', async () => {
@@ -438,9 +486,10 @@ describe('groupSlackMessagesIntoDayPages', () => {
   const day1LaterTs = String(Date.UTC(2026, 7, 13, 15, 30, 0) / 1000);
   const day2Ts = String(Date.UTC(2026, 7, 14, 9, 10, 0) / 1000);
 
-  it('groups messages into one page per channel per UTC day', () => {
+  it('groups a batch into immutable channel/day chunks', () => {
     const messages: SlackChannelMessage[] = [
       {
+        teamId: 'T1',
         channelId: 'C1',
         channelName: 'general',
         ts: day1LaterTs,
@@ -448,6 +497,7 @@ describe('groupSlackMessagesIntoDayPages', () => {
         text: 'second message',
       },
       {
+        teamId: 'T1',
         channelId: 'C1',
         channelName: 'general',
         ts: day1Ts,
@@ -455,6 +505,7 @@ describe('groupSlackMessagesIntoDayPages', () => {
         text: 'first message',
       },
       {
+        teamId: 'T1',
         channelId: 'C1',
         channelName: 'general',
         ts: day2Ts,
@@ -462,6 +513,7 @@ describe('groupSlackMessagesIntoDayPages', () => {
         text: 'next day',
       },
       {
+        teamId: 'T1',
         channelId: 'C2',
         channelName: 'ops',
         ts: day1Ts,
@@ -472,12 +524,11 @@ describe('groupSlackMessagesIntoDayPages', () => {
 
     const pages = groupSlackMessagesIntoDayPages(messages);
 
-    // Oldest day first, then channel name: a capped tick has to be able to
-    // drop the newest pages and still report an honest watermark.
+    // Oldest day first, then workspace and channel for deterministic writes.
     expect(pages.map((page) => page.slug)).toEqual([
-      'slack/C1/2026-08-13',
-      'slack/C2/2026-08-13',
-      'slack/C1/2026-08-14',
+      `slack/T1/C1/2026-08-13/${day1Ts}-${day1LaterTs}`.replaceAll('.', '-'),
+      `slack/T1/C2/2026-08-13/${day1Ts}-${day1Ts}`.replaceAll('.', '-'),
+      `slack/T1/C1/2026-08-14/${day2Ts}-${day2Ts}`.replaceAll('.', '-'),
     ]);
     expect(pages[0]?.title).toBe('#general — 2026-08-13');
     expect(pages[0]?.content).toContain(
@@ -496,6 +547,7 @@ describe('groupSlackMessagesIntoDayPages', () => {
   it('drops empty and unparsable messages', () => {
     const pages = groupSlackMessagesIntoDayPages([
       {
+        teamId: 'T1',
         channelId: 'C1',
         channelName: 'general',
         ts: 'not-a-ts',
@@ -503,6 +555,7 @@ describe('groupSlackMessagesIntoDayPages', () => {
         text: 'bad ts',
       },
       {
+        teamId: 'T1',
         channelId: 'C1',
         channelName: 'general',
         ts: day1Ts,
@@ -529,7 +582,9 @@ describe('buildGranolaMeetingPage', () => {
     const result = buildGranolaMeetingPage(fixture);
 
     expect(result).not.toBeNull();
-    expect(result?.page.slug).toBe('meetings/2026-08-10-weekly-growth-sync');
+    expect(result?.page.slug).toBe(
+      'meetings/2026-08-10-weekly-growth-sync-not-abc123def45678',
+    );
     expect(result?.page.title).toBe('Weekly Growth Sync');
     expect(result?.updatedAt).toEqual(new Date('2026-08-10T16:30:00Z'));
     expect(result?.page.content).toContain('# Weekly Growth Sync');
@@ -555,7 +610,9 @@ describe('buildGranolaMeetingPage', () => {
       created_at: '2026-08-10T15:00:00Z',
     });
 
-    expect(result?.page.slug).toBe('meetings/2026-08-10-untitled-meeting');
+    expect(result?.page.slug).toBe(
+      'meetings/2026-08-10-untitled-meeting-not-abc123def45678',
+    );
     expect(result?.page.title).toBe('Untitled meeting');
   });
 
@@ -565,59 +622,12 @@ describe('buildGranolaMeetingPage', () => {
     expect(buildGranolaMeetingPage('string')).toBeNull();
     expect(buildGranolaMeetingPage({})).toBeNull();
   });
-});
 
-describe('capSlackDayPagesForTick', () => {
-  const dayPage = (day: string, channel: string, hour: number) => ({
-    day,
-    maxTsMs: Date.UTC(2026, 7, Number(day.slice(-2)), hour),
-    page: {
-      slug: `slack/${channel}/${day}`,
-      title: `#${channel} — ${day}`,
-      content: 'x',
-    },
-  });
+  it('keeps same-day meetings with the same title distinct', () => {
+    const first = buildGranolaMeetingPage({ ...fixture, id: 'note-1' });
+    const second = buildGranolaMeetingPage({ ...fixture, id: 'note-2' });
 
-  it('reports the newest timestamp when nothing is capped', () => {
-    const result = capSlackDayPagesForTick(
-      [dayPage('2026-08-13', 'C1', 9), dayPage('2026-08-13', 'C2', 17)],
-      10,
-    );
-
-    expect(result.pages).toHaveLength(2);
-    expect(result.nextSince?.toISOString()).toBe('2026-08-13T17:00:00.000Z');
-  });
-
-  it('cuts on a day boundary so the watermark never passes a dropped page', () => {
-    const dated = [
-      dayPage('2026-08-13', 'C1', 9),
-      dayPage('2026-08-13', 'C2', 17),
-      dayPage('2026-08-14', 'C1', 10),
-      dayPage('2026-08-14', 'C2', 11),
-    ];
-
-    // A limit of 3 would slice mid-way through 2026-08-14; the whole day has
-    // to be deferred, or its dropped page would sit behind the watermark.
-    const result = capSlackDayPagesForTick(dated, 3);
-
-    expect(result.pages.map((page) => page.slug)).toEqual([
-      'slack/C1/2026-08-13',
-      'slack/C2/2026-08-13',
-    ]);
-    expect(result.nextSince?.toISOString()).toBe('2026-08-13T17:00:00.000Z');
-  });
-
-  it('refuses to advance when a single day exceeds the cap', () => {
-    const dated = [
-      dayPage('2026-08-13', 'C1', 9),
-      dayPage('2026-08-13', 'C2', 10),
-      dayPage('2026-08-13', 'C3', 11),
-    ];
-
-    const result = capSlackDayPagesForTick(dated, 2);
-
-    expect(result.pages).toHaveLength(2);
-    expect(result.nextSince).toBeNull();
+    expect(first?.page.slug).not.toBe(second?.page.slug);
   });
 });
 
@@ -634,7 +644,7 @@ describe('backfill reaches channels joined later', () => {
     const backfill = vi
       .fn<NonNullable<BrainCollector['backfill']>>()
       // Everything known is already read: no pages, cursor unchanged.
-      .mockResolvedValueOnce({
+      .mockResolvedValue({
         pages: [],
         nextCursor: cursorOf({ completed: ['T1/C1'] }),
         done: false,

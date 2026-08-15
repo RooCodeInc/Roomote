@@ -65,11 +65,11 @@ export async function maybeEnqueueBrainMemoryEvent(
 /**
  * Record the narrative an agent wrote about its own work. The agent authors;
  * the server places: this only parks text on the run's outbox row, so the
- * drainer stays the single writer to the brain and the slug, redaction, and
- * provenance remain server-controlled.
+ * drainer stays the single writer to the brain and the per-run slug,
+ * redaction, and provenance remain server-controlled.
  *
  * Status resets to 'pending' so a memory already ingested is re-written with
- * the richer content (page slugs are idempotent upserts), and the row is
+ * richer content at the same run-specific slug, and the row is
  * created if the run has not finished yet — the completion path's
  * onConflictDoNothing then leaves this summary intact.
  */
