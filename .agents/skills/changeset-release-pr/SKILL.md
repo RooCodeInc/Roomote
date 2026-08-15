@@ -136,6 +136,18 @@ For each meaningful feature:
 - update missing, stale, or incomplete guidance in the release branch, including
   setup steps, prerequisites, permissions, expected behavior, and navigation
   entries when needed
+- for every newly added or materially updated provider or integration, verify
+  that its page and every overview or comparison entry use a source-backed
+  provider icon rather than a generic placeholder; check both page frontmatter
+  and rendered overview helpers or tables
+- centralize each provider or integration logo reference: prefer one shared
+  Iconify slug when available, otherwise add one monochrome asset under
+  `apps/docs/logo/integrations/` and map the provider key in
+  `apps/docs/snippets/integration-name.jsx`; point page frontmatter and overview
+  entries at that shared slug, key, or asset instead of repeating unrelated
+  fallbacks or asset URLs
+- treat a missing icon, a generic icon used when a source-backed mark exists, or
+  inconsistent page and overview marks as incomplete documentation coverage
 - keep docs practical and user-facing; do not copy changelog prose or add
   internal implementation details just to mention the feature
 - record a feature-to-docs coverage checklist for the release PR body, linking
@@ -234,7 +246,8 @@ Then verify:
 - every pending changeset was consumed and `.changeset/README.md` remains
 - workspace package versions did not change
 - every meaningful user-facing feature has an accurate public docs destination,
-  with any required `apps/docs` updates and navigation changes included
+  with any required `apps/docs` updates, navigation changes, source-backed
+  provider icons, and centralized logo references included
 - the diff contains only release artifacts and required public docs updates:
   root `package.json`, `CHANGELOG.md`, relevant files under `apps/docs`, and
   deletions of changesets that already existed on the base branch. Locally

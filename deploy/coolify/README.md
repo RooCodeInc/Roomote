@@ -105,6 +105,7 @@ follow the image.
 | `postgres`      | pinned `postgres:17.5`  | no                         | `pg_isready`                 |
 | `redis`         | pinned `redis:7-alpine` | no                         | `redis-cli ping`             |
 | `minio`         | pinned MinIO + volume   | yes (routed to port 9000)  | `mc ready local`             |
+| `gbrain`        | `roomote-gbrain:develop` + volume | no (internal only) | `/health` via bun           |
 | `db-migrate`    | `roomote-app:develop`   | no (one-shot)              | excluded                     |
 | `web`           | `roomote-app:develop`   | yes (port 3000)            | `/health`                    |
 | `api`           | `roomote-app:develop`   | yes (port 3001)            | `/health/liveness`           |
@@ -132,6 +133,12 @@ Notes:
 - Leave `JOB_AUTH_*` and `PREVIEW_AUTH_*` unset —
   `R_AUTO_GENERATE_KEYS=true` manages them. If you later provide
   explicit env values, they take precedence over the persisted keypairs.
+- `R_BRAIN_OPENROUTER_API_KEY` and `R_BRAIN_OPENAI_API_KEY` are the one
+  exception to the rule above: they are template variables, because the
+  `gbrain` container needs a key in its own environment and cannot read
+  Roomote's encrypted store. They are separate from the provider keys you
+  enter in `/setup` for task models; the two can be different keys. Leave
+  both empty to run without a Brain. See "Enabling the Brain" below.
 - Leave `PREVIEW_PROXY_BASE_URL` and `PREVIEW_DOMAINS` unset unless you
   enable live previews. Roomote boots without them; previews report as not
   configured in the task page's preview pane until set.
@@ -224,6 +231,62 @@ wildcard-capable TLS setup on the Coolify proxy:
    hostname. Previews are always enabled and publish for every environment
    that defines preview ports.
 
+## Enabling the Brain (optional)
+
+The `gbrain` service gives this deployment shared memory: completed tasks
+and activity from connected integrations (pull requests, public Slack
+channels, meeting notes, GitHub issues) become pages that agents consult
+with citations, and agents record what they decided and why when they
+finish substantial work.
+
+One variable turns it on. Add it to the resource's environment variables
+panel in Coolify:
+
+1. Configure a model provider under **Settings → Models** after first boot,
+   if you have not already. The gbrain service holds no provider key; it asks
+   the api service for embeddings and synthesis, and the api service uses the
+   key your deployment already has. Changing it later needs no redeploy.
+2. To bill the Brain separately from task inference, set
+   `R_BRAIN_OPENROUTER_API_KEY` or `R_BRAIN_OPENAI_API_KEY` in the
+   resource's environment variables panel. Those take precedence.
+2. Redeploy the resource. Within a minute the deployment registers its own
+   scoped clients against the Brain (a read-only one for agents, a
+   write-only one for ingestion), backfills the task history it already has,
+   and starts delivering the Brain to new tasks. Watch the `bullmq` service
+   logs for `[brain] provisioned scoped clients`.
+
+`R_GBRAIN_ADMIN_TOKEN` is generated for you as
+`SERVICE_PASSWORD_64_GBRAINADMIN`; Roomote uses it only to register those
+clients and never hands it to an agent.
+
+Nothing is exposed. The service declares no `SERVICE_FQDN_*`, so Coolify
+never routes a domain to it, and task sandboxes never address it directly:
+they go through the api service with their run token, which grants read
+access only.
+
+Unlike the compose and Railway deployments, the service runs whether or not
+the key is set, because Coolify's compose parser does not honour `profiles`.
+That is a supported state and costs about 370 MB of idle memory. With the
+key empty, agents are told nothing about the Brain and no ingestion runs.
+Deployments that want no memory at all can delete the `gbrain` service and
+the `gbrain_data` volume from the compose file before deploying.
+
+Two operational notes:
+
+- **Back up the volume.** `gbrain_data` holds the corpus, so treat it like
+  `pg_data`. Losing it is recoverable — task history and integration
+  sources re-ingest, and Roomote re-registers its clients automatically when
+  the Brain no longer recognizes them — but the deployment starts cold until
+  that finishes.
+- **Model choice is a variable, not a rebuild.** `R_BRAIN_MODEL` selects the
+  synthesis model and `R_BRAIN_EMBEDDING_MODEL` the embedding model, both in
+  your provider's own naming, both set on the app services. Leave them empty for the
+  defaults. The synthesis model can change at any time; the embedding model
+  sizes the Brain's vector storage when it is first created, so set it (with
+  `R_BRAIN_EMBEDDING_DIMENSIONS`) before first boot or not at all. A later
+  change is ignored and reported in the Brain's logs rather than silently
+  applied.
+
 ## Upgrades, backups, and costs
 
 - **Upgrade a deployment on `:develop`** by redeploying the resource —
@@ -255,3 +318,13 @@ verification on a scratch Coolify resource before merging. Keep the file
 paste-ready: Coolify-specific fields (`SERVICE_*` magic variables,
 `exclude_from_hc`) are intentional and are consumed by Coolify's compose
 parser, not by plain `docker compose`.
+
+The `gbrain` service has not yet been exercised on a real Coolify resource.
+Its first-boot verification has two extra items: confirm that
+`SERVICE_PASSWORD_64_GBRAINADMIN` resolves to the same value in both the
+gbrain service and the app services (a mismatch shows up as
+`Brain admin login failed (401)` in the `bullmq` logs), and that the api
+service can reach `http://gbrain:8931/health` on the `roomote_default`
+network. Both failure modes are contained: a Brain that never provisions
+leaves the rest of the deployment working, because every Brain code path is
+already conditional on the key being present.

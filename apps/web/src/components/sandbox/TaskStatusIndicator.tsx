@@ -130,7 +130,11 @@ export function TaskStatusIndicator({
           </span>
         </BasicTooltip>
       ) : (
-        <span className={cn('text-xs', labelClassName)}>{statusLabel}</span>
+        <span
+          className={cn('text-xs hidden @min-[430px]:inline', labelClassName)}
+        >
+          {statusLabel}
+        </span>
       )}
     </span>
   );

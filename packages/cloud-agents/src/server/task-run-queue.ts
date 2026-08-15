@@ -50,6 +50,7 @@ import {
   isChatGptSubscriptionConnected,
   createTaskWithRetry,
   markTaskStartParallelCountEndedAt,
+  projectPendingPrReviewEventsForAssociation,
   recordTaskStartParallelCount,
   syncTaskStateFromRuns,
   taskPullRequests,
@@ -1570,6 +1571,12 @@ async function enqueueFreshLaunch(
         githubReactionId: input.prLinkage.githubReactionId ?? null,
         githubCheckRunId: input.prLinkage.githubCheckRunId ?? null,
         githubReviewCommentId: input.prLinkage.githubReviewCommentId ?? null,
+      });
+      await projectPendingPrReviewEventsForAssociation(tx, {
+        taskId: createdTask.id,
+        sourceControlProvider: input.prLinkage.provider,
+        repository: input.prLinkage.repository,
+        prNumber: input.prLinkage.prNumber,
       });
     }
 

@@ -76,6 +76,10 @@ vi.mock('../environment-variables', () => ({
 
 vi.stubGlobal('fetch', mockFetch);
 
+vi.mock('@roomote/sdk/server/automation-recommendations', () => ({
+  enqueueAutomationSignalPrefetch: vi.fn(async () => undefined),
+}));
+
 import {
   finishCreateGitHubAppManifestCommand,
   resolvePendingGitHubInstallationsCommand,

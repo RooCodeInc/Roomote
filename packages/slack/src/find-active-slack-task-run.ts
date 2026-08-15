@@ -12,6 +12,7 @@ import {
 import { activeRunStatuses } from '@roomote/types';
 
 import { slackDebug } from './logging';
+import { getSlackTaskRunWorkspacePredicate } from './slack-task-run-workspace-scope';
 
 /**
  * Find an active run for a given Slack thread.
@@ -19,13 +20,22 @@ import { slackDebug } from './logging';
  * Slack thread bindings live on tasks (tasks.slackThreadTs, 1:N by design),
  * so this joins task_runs to tasks and returns the most recent non-terminal
  * run across all tasks bound to the thread ("latest task run in thread" plurality
- * semantics -- no unique-thread assumption).
+ * semantics -- no unique-thread assumption). Every lookup must include
+ * workspace identity or an immutable task binding; a bare thread timestamp is
+ * not globally unique across Slack workspaces.
  *
  * Slack follow-up delivery is keyed by run ID, so the webhook can queue
  * messages as soon as the run exists instead of waiting for the worker
  * machine to finish booting.
  */
-export async function findActiveSlackTaskRun(slackThreadTs: string) {
+export type SlackTaskRunLookupScope =
+  | { slackTeamId: string; taskId?: string }
+  | { taskId: string; slackTeamId?: string };
+
+export async function findActiveSlackTaskRun(
+  slackThreadTs: string,
+  scope: SlackTaskRunLookupScope,
+) {
   slackDebug(
     `[findActiveSlackTaskRun] Searching for active task run in thread ${slackThreadTs}`,
   );
@@ -37,8 +47,13 @@ export async function findActiveSlackTaskRun(slackThreadTs: string) {
     .where(
       and(
         eq(tasks.slackThreadTs, slackThreadTs),
+        ...(scope.taskId ? [eq(taskRuns.taskId, scope.taskId)] : []),
+        ...(scope.slackTeamId
+          ? [getSlackTaskRunWorkspacePredicate(scope.slackTeamId)]
+          : []),
         inArray(taskRuns.status, [...activeRunStatuses]),
         isNull(taskRuns.canceledAt),
+        isNull(tasks.deletedAt),
       ),
     )
     .orderBy(desc(taskRuns.createdAt))
@@ -65,7 +80,16 @@ export async function findActiveSlackTaskRun(slackThreadTs: string) {
       })
       .from(taskRuns)
       .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
-      .where(eq(tasks.slackThreadTs, slackThreadTs))
+      .where(
+        and(
+          eq(tasks.slackThreadTs, slackThreadTs),
+          ...(scope.taskId ? [eq(taskRuns.taskId, scope.taskId)] : []),
+          ...(scope.slackTeamId
+            ? [getSlackTaskRunWorkspacePredicate(scope.slackTeamId)]
+            : []),
+          isNull(tasks.deletedAt),
+        ),
+      )
       .orderBy(desc(taskRuns.createdAt))
       .limit(1);
 

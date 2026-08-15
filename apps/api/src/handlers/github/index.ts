@@ -174,48 +174,69 @@ github.post('/', async (c) => {
       ),
     );
 
-    webhooks.on('issue_comment.created', ({ id, name, payload }) =>
-      recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        if (!payload.issue.pull_request) {
+    webhooks.on('issue_comment.created', async ({ id, name, payload }) => {
+      // Review activity is the durable ingress boundary. Persist it before
+      // generic webhook auditing or any downstream handler so a crash or
+      // retry cannot lose accepted feedback. Provider object ids make this
+      // operation idempotent across duplicate deliveries.
+      if (payload.issue.pull_request) {
+        await Promise.all([
+          queuePrReviewActivityNotification(payload, id),
+          queuePrReviewSummaryNotification(payload, id),
+        ]);
+      }
+
+      return recordWebhook(
+        id,
+        `${name}.${payload.action}`,
+        payload,
+        async () => {
+          if (!payload.issue.pull_request) {
+            if (isRepoSkipped(payload.repository.full_name)) {
+              return {
+                status: 'ok' as const,
+                message: `Skipping comment webhook for ${payload.repository.full_name}`,
+              };
+            }
+
+            return handleGitHubIssueComment(payload);
+          }
+
           if (isRepoSkipped(payload.repository.full_name)) {
             return {
               status: 'ok' as const,
-              message: `Skipping comment webhook for ${payload.repository.full_name}`,
+              message: `Skipping automated comment handling for ${payload.repository.full_name}`,
             };
           }
 
-          return handleGitHubIssueComment(payload);
-        }
+          return handlePrComment(payload);
+        },
+      );
+    });
 
+    webhooks.on('issue_comment.edited', async ({ id, name, payload }) => {
+      if (payload.issue.pull_request) {
+        // Roomote summaries and external top-level review comments can both
+        // be edited from placeholder content into their final result.
         await Promise.all([
-          queuePrReviewActivityNotification(payload),
-          queuePrReviewSummaryNotification(payload),
+          queuePrReviewActivityNotification(payload, id),
+          queuePrReviewSummaryNotification(payload, id),
         ]);
+      }
 
-        if (isRepoSkipped(payload.repository.full_name)) {
-          return {
-            status: 'ok' as const,
-            message: `Skipping automated comment handling for ${payload.repository.full_name}`,
-          };
-        }
+      return recordWebhook(
+        id,
+        `${name}.${payload.action}`,
+        payload,
+        async () => {
+          if (!payload.issue.pull_request) {
+            return { status: 'ok' as const, message: 'not_a_pr_comment' };
+          }
 
-        return handlePrComment(payload);
-      }),
-    );
-
-    webhooks.on('issue_comment.edited', ({ id, name, payload }) =>
-      recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        if (!payload.issue.pull_request) {
-          return { status: 'ok' as const, message: 'not_a_pr_comment' };
-        }
-
-        // Roomote review summaries are posted as "review in progress" and
-        // patched with the results, so the terminal content arrives here.
-        await queuePrReviewSummaryNotification(payload);
-
-        return { status: 'ok' as const };
-      }),
-    );
+          return { status: 'ok' as const };
+        },
+      );
+    });
 
     webhooks.on('issues.opened', ({ id, name, payload }) =>
       recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
@@ -428,36 +449,50 @@ github.post('/', async (c) => {
       }),
     );
 
-    webhooks.on('pull_request_review.submitted', ({ id, name, payload }) =>
-      recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-        await queuePrReviewActivityNotification(payload);
+    webhooks.on(
+      'pull_request_review.submitted',
+      async ({ id, name, payload }) => {
+        await queuePrReviewActivityNotification(payload, id);
 
-        if (isRepoSkipped(payload.repository.full_name)) {
-          return {
-            status: 'ok' as const,
-            message: `Skipping automated review handling for ${payload.repository.full_name}`,
-          };
-        }
+        return recordWebhook(
+          id,
+          `${name}.${payload.action}`,
+          payload,
+          async () => {
+            if (isRepoSkipped(payload.repository.full_name)) {
+              return {
+                status: 'ok' as const,
+                message: `Skipping automated review handling for ${payload.repository.full_name}`,
+              };
+            }
 
-        return handlePrComment(payload);
-      }),
+            return handlePrComment(payload);
+          },
+        );
+      },
     );
 
     webhooks.on(
       'pull_request_review_comment.created',
-      ({ id, name, payload }) =>
-        recordWebhook(id, `${name}.${payload.action}`, payload, async () => {
-          await queuePrReviewActivityNotification(payload);
+      async ({ id, name, payload }) => {
+        await queuePrReviewActivityNotification(payload, id);
 
-          if (isRepoSkipped(payload.repository.full_name)) {
-            return {
-              status: 'ok' as const,
-              message: `Skipping automated comment handling for ${payload.repository.full_name}`,
-            };
-          }
+        return recordWebhook(
+          id,
+          `${name}.${payload.action}`,
+          payload,
+          async () => {
+            if (isRepoSkipped(payload.repository.full_name)) {
+              return {
+                status: 'ok' as const,
+                message: `Skipping automated comment handling for ${payload.repository.full_name}`,
+              };
+            }
 
-          return handlePrComment(payload);
-        }),
+            return handlePrComment(payload);
+          },
+        );
+      },
     );
 
     webhooks.on('push', ({ id, name, payload }) =>

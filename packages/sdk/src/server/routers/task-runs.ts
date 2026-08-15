@@ -7,7 +7,6 @@ import {
   eq,
   getTaskGoalForRun,
   isNotNull,
-  markTaskGoalForRun,
   releaseTaskGoalContinuationForRun,
   slackInstallations,
   taskPullRequests,
@@ -112,6 +111,8 @@ import {
   findTaskRunByRunTokenClaims,
   claimShowWidgetFallbackDelivery,
   releaseShowWidgetFallbackDelivery,
+  claimMissingChatCloseoutFallbackDelivery,
+  releaseMissingChatCloseoutFallbackDelivery,
 } from '../lib/task-runs';
 import {
   findSlackConversationSubjectByUserId,
@@ -382,34 +383,6 @@ export const taskRunsRouter = router({
   getGoal: runTokenOnlyScoped(z.object({ runId: z.number() }), 'runId').query(
     ({ input }) => getTaskGoalForRun(input.runId),
   ),
-  markGoalComplete: runTokenOnlyScoped(
-    z.object({
-      runId: z.number(),
-      generation: z.string().max(200).nullable(),
-    }),
-    'runId',
-  ).mutation(({ input }) =>
-    markTaskGoalForRun({
-      runId: input.runId,
-      generation: input.generation,
-      status: 'complete',
-    }),
-  ),
-  markGoalBlocked: runTokenOnlyScoped(
-    z.object({
-      runId: z.number(),
-      generation: z.string().max(200).nullable(),
-      reason: z.string().trim().min(1).max(2_000),
-    }),
-    'runId',
-  ).mutation(({ input }) =>
-    markTaskGoalForRun({
-      runId: input.runId,
-      generation: input.generation,
-      status: 'blocked',
-      reason: input.reason,
-    }),
-  ),
   claimGoalContinuation: runTokenOnlyScoped(
     z.object({ runId: z.number(), continuationId: z.string().min(1).max(200) }),
     'runId',
@@ -511,6 +484,20 @@ export const taskRunsRouter = router({
     }),
     'runId',
   ).mutation(({ input }) => releaseShowWidgetFallbackDelivery(input)),
+  claimMissingChatCloseoutFallbackDelivery: runTokenOnlyScoped(
+    z.object({
+      runId: z.number(),
+      completionId: z.string().trim().min(1).max(500),
+    }),
+    'runId',
+  ).mutation(({ input }) => claimMissingChatCloseoutFallbackDelivery(input)),
+  releaseMissingChatCloseoutFallbackDelivery: runTokenOnlyScoped(
+    z.object({
+      runId: z.number(),
+      completionId: z.string().trim().min(1).max(500),
+    }),
+    'runId',
+  ).mutation(({ input }) => releaseMissingChatCloseoutFallbackDelivery(input)),
   recordComputeProviderUsage: runScoped(
     z.object({
       runId: z.number(),

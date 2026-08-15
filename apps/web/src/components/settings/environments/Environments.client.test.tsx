@@ -22,7 +22,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 const state = vi.hoisted(() => ({
   createSnapshot: vi.fn().mockResolvedValue({ success: true }),
   clearSnapshot: vi.fn(),
-  roomoteConfigured: false,
+  configuredProviders: ['modal'] as string[],
   repositories: [{ id: 'repo-1', fullName: 'acme/api' }],
   environments: [
     {
@@ -123,8 +123,7 @@ vi.mock('@/hooks/environments', () => ({
 }));
 
 vi.mock('@/hooks/compute', () => ({
-  useComputeProviderConfigured: (provider: string) =>
-    provider === 'roomote' && state.roomoteConfigured,
+  useConfiguredComputeProviders: () => state.configuredProviders,
 }));
 
 vi.mock('@/hooks/snapshots', () => ({
@@ -373,7 +372,7 @@ import { Environments } from './Environments';
 
 describe('Environments', () => {
   beforeEach(() => {
-    state.roomoteConfigured = false;
+    state.configuredProviders = ['modal'];
     state.repositories = [{ id: 'repo-1', fullName: 'acme/api' }];
     state.environments = [
       {
@@ -501,23 +500,36 @@ describe('Environments', () => {
     expect(screen.getByTitle('Clear modal snapshot')).toBeInTheDocument();
   });
 
-  it('shows snapshot controls for every supported provider', () => {
+  it('hides snapshot controls for unconfigured providers without snapshot state', () => {
     render(<Environments />);
 
     fireEvent.click(screen.getByTitle('Toggle environment details'));
 
     expect(screen.getByTitle('Refresh modal snapshot')).toBeInTheDocument();
     expect(screen.getByTitle('Clear modal snapshot')).toBeInTheDocument();
-    expect(screen.getByTitle('Create e2b snapshot')).toBeInTheDocument();
+    expect(screen.queryByTitle('Create e2b snapshot')).not.toBeInTheDocument();
   });
 
-  it('shows e2b snapshot controls', () => {
+  it('shows snapshot controls for another configured provider', () => {
+    state.configuredProviders = ['modal', 'e2b'];
     render(<Environments />);
 
     fireEvent.click(screen.getByTitle('Toggle environment details'));
 
     expect(screen.getByText('No snapshot')).toBeInTheDocument();
     expect(screen.getByTitle('Create e2b snapshot')).toBeInTheDocument();
+  });
+
+  it('shows snapshot controls for all configured snapshot-capable providers', () => {
+    state.configuredProviders = ['modal', 'daytona', 'box', 'azure'];
+    render(<Environments />);
+
+    fireEvent.click(screen.getByTitle('Toggle environment details'));
+
+    expect(screen.getByTitle('Refresh modal snapshot')).toBeInTheDocument();
+    expect(screen.getByTitle('Create daytona snapshot')).toBeInTheDocument();
+    expect(screen.getByTitle('Create box snapshot')).toBeInTheDocument();
+    expect(screen.getByTitle('Create azure snapshot')).toBeInTheDocument();
   });
 
   it('hides roomote snapshot controls when the provider is not configured', () => {
@@ -531,7 +543,7 @@ describe('Environments', () => {
   });
 
   it('offers roomote snapshot controls when the provider is configured', () => {
-    state.roomoteConfigured = true;
+    state.configuredProviders = ['modal', 'roomote'];
 
     render(<Environments />);
 
@@ -553,9 +565,40 @@ describe('Environments', () => {
 
     fireEvent.click(screen.getByTitle('Toggle environment details'));
 
-    expect(screen.getByTitle('Refresh roomote snapshot')).toBeInTheDocument();
+    expect(
+      screen.queryByTitle('Refresh roomote snapshot'),
+    ).not.toBeInTheDocument();
     expect(screen.getByTitle('Clear roomote snapshot')).toBeInTheDocument();
   });
+
+  it.each(['failed', 'pending'] as const)(
+    'keeps an unconfigured %s snapshot visible and clearable',
+    (snapshotStatus) => {
+      state.environments[0]!.snapshots.roomote = {
+        provider: 'roomote',
+        snapshotId: null,
+        snapshotStatus,
+        snapshotCreatedAt: null,
+        snapshotExpiresAt: null,
+      };
+
+      render(<Environments />);
+
+      fireEvent.click(screen.getByTitle('Toggle environment details'));
+
+      expect(
+        screen.getByText(
+          snapshotStatus === 'failed' ? 'Failed' : 'Snapshotting...',
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getByTitle('Clear roomote snapshot')).toBeInTheDocument();
+      expect(
+        screen.queryByTitle(
+          `${snapshotStatus === 'failed' ? 'Retry' : 'Refresh'} roomote snapshot`,
+        ),
+      ).not.toBeInTheDocument();
+    },
+  );
 
   it('preserves the provider override for an existing non-default snapshot', async () => {
     render(<Environments />);

@@ -125,7 +125,7 @@ export async function startSlackAppMentionTask(input: {
   workflow?: Extract<TaskWorkflow, 'standard' | 'eval'>;
   visibility?: TaskVisibility;
   channel: string;
-  teamId?: string;
+  teamId: string;
   teamDomain?: string;
   slackUserId: string;
   persistedSlackUserId?: string | null;
@@ -166,7 +166,9 @@ export async function startSlackAppMentionTask(input: {
   taskId: string | null;
   reusedExistingRun: boolean;
 }> {
-  const activeRun = await findActiveSlackTaskRun(input.threadTs);
+  const activeRun = await findActiveSlackTaskRun(input.threadTs, {
+    slackTeamId: input.teamId,
+  });
   const linkedInitiatorUserId = getLinkedInitiatorUserId(input.initiator);
   const promptRelevantThreadMessages = input.threadMessages?.length
     ? input.threadMessages.filter(

@@ -5,6 +5,7 @@ const {
   awaitSubprocessMock,
   buildSandboxInstructionMock,
   taskRunsDoneMock,
+  taskRunsGetGoalMock,
   taskRunsClaimGoalContinuationMock,
   taskRunsRecordEventMock,
   taskRunsReleaseGoalContinuationMock,
@@ -39,6 +40,7 @@ const {
   awaitSubprocessMock: vi.fn().mockResolvedValue(undefined),
   buildSandboxInstructionMock: vi.fn(() => undefined),
   taskRunsDoneMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsGetGoalMock: vi.fn().mockResolvedValue(null),
   taskRunsClaimGoalContinuationMock: vi.fn(),
   taskRunsRecordEventMock: vi.fn().mockResolvedValue(undefined),
   taskRunsReleaseGoalContinuationMock: vi.fn().mockResolvedValue(true),
@@ -145,6 +147,7 @@ vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     taskRuns: {
       done: taskRunsDoneMock,
+      getGoal: taskRunsGetGoalMock,
       claimGoalContinuation: taskRunsClaimGoalContinuationMock,
       recordEvent: taskRunsRecordEventMock,
       releaseGoalContinuation: taskRunsReleaseGoalContinuationMock,
@@ -316,6 +319,8 @@ describe('runTask', () => {
     taskRunsStampMilestoneMock.mockReset();
     taskRunsStampMilestoneMock.mockResolvedValue(undefined);
     taskRunsClaimGoalContinuationMock.mockReset();
+    taskRunsGetGoalMock.mockReset();
+    taskRunsGetGoalMock.mockResolvedValue(null);
     taskRunsClaimGoalContinuationMock.mockResolvedValue({
       updated: true,
       goal: {
@@ -1149,7 +1154,7 @@ describe('runTask', () => {
     );
   });
 
-  it('marks late-bound automation execution tasks as requiring a terminal closeout', async () => {
+  it('lets late-bound automation execution tasks finish without a terminal closeout', async () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(345_678);
 
     try {
@@ -1201,7 +1206,6 @@ describe('runTask', () => {
       JSON.stringify({
         startedAtMs: 345_678,
         currentTurnRequiresInitialAck: false,
-        requiresTerminalCloseoutWithoutTurn: true,
       }),
       'utf8',
     );
@@ -1271,7 +1275,7 @@ describe('runTask', () => {
     );
   });
 
-  it('marks Slack custom automation runs as silent with a required terminal closeout', async () => {
+  it('lets silent Slack custom automation runs finish without a terminal closeout', async () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(456_789);
 
     try {
@@ -1324,13 +1328,12 @@ describe('runTask', () => {
       JSON.stringify({
         startedAtMs: 456_789,
         currentTurnRequiresInitialAck: false,
-        requiresTerminalCloseoutWithoutTurn: true,
       }),
       'utf8',
     );
   });
 
-  it('marks non-Slack custom automation runs as silent with a required terminal closeout', async () => {
+  it('lets silent non-Slack custom automation runs finish without a terminal closeout', async () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(567_891);
 
     try {
@@ -1383,7 +1386,6 @@ describe('runTask', () => {
       JSON.stringify({
         startedAtMs: 567_891,
         currentTurnRequiresInitialAck: false,
-        requiresTerminalCloseoutWithoutTurn: true,
       }),
       'utf8',
     );
@@ -2577,6 +2579,72 @@ describe('runTask', () => {
     expect(manager.sendFollowUpPrompt).not.toHaveBeenCalled();
   });
 
+  it('includes the latest active goal on integration follow-up delivery', async () => {
+    taskRunsGetGoalMock.mockResolvedValue({
+      objective: 'Complete the active goal',
+      generation: 'goal-generation:integration',
+      status: 'active',
+      maxContinuations: 5,
+      continuationsUsed: 2,
+      blockedReason: null,
+      completedAt: null,
+    });
+
+    await runTask({
+      taskRun: {
+        id: 408,
+        taskId: 'task-408',
+        payloadKind: TaskPayloadKind.StandardTask,
+        harness: 'opencode-server',
+        payload: {},
+        result: null,
+      } as never,
+      envVars: {},
+      workspacePath: '/tmp/workspace',
+      prompt: 'do work',
+      harnessInstructions: undefined,
+      agentInstructions: undefined,
+      environmentConfig: undefined,
+      callbacks: {},
+      context: {},
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      } as never,
+      workerEnv: {
+        buildUserFacingEnv: vi.fn(() => ({})),
+        roomoteAppUrl: 'http://localhost:3000',
+        trpcUrl: 'http://localhost:3001',
+        authToken: 'auth-token',
+        appEnv: 'test',
+        setRuntimeEnv: vi.fn(),
+      } as never,
+    });
+
+    const pollingOptions = startPollingMock.mock.calls.at(-1)?.[0];
+    await expect(
+      pollingOptions?.sendPrompt({
+        prompt: '<discord_message>Continue.</discord_message>',
+        source: 'discord',
+      }),
+    ).resolves.toBe(true);
+    expect(taskRunsGetGoalMock).toHaveBeenCalledWith({ runId: 408 });
+    expect(
+      harnessManagerInstances.at(-1)?.sendFollowUpPrompt,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: '<discord_message>Continue.</discord_message>',
+        source: 'discord',
+        goalContext: expect.objectContaining({
+          generation: 'goal-generation:integration',
+          status: 'active',
+        }),
+      }),
+    );
+  });
+
   describe('background environment setup settled notices', () => {
     type SettledListener = (outcome: EnvironmentSetupSettledOutcome) => void;
 
@@ -2642,6 +2710,10 @@ describe('runTask', () => {
 
       manager.emit('taskStateEvent', 'taskStarted');
 
+      await vi.waitFor(() => {
+        expect(environmentSetupNoticeCalls(manager)).toHaveLength(1);
+      });
+
       const noticeCalls = environmentSetupNoticeCalls(manager);
 
       expect(noticeCalls).toHaveLength(1);
@@ -2652,6 +2724,45 @@ describe('runTask', () => {
       expect(noticeCalls[0]![0].prompt).toContain(
         'Environment setup update: background environment setup (repository setup commands and Docker projects) finished successfully.',
       );
+    });
+
+    it('does not duplicate a settled notice across concurrent state events', async () => {
+      let resolveGoalLookup!: (value: null) => void;
+      taskRunsGetGoalMock.mockImplementationOnce(
+        () =>
+          new Promise<null>((resolve) => {
+            resolveGoalLookup = resolve;
+          }),
+      );
+      const { manager, settledListener } = await runTaskWithBackgroundSetup();
+
+      manager.emit('taskStateEvent', 'taskStarted');
+      settledListener!({ status: 'fulfilled', warningMessages: [] });
+      manager.emit('stateChange', 'running', {});
+      resolveGoalLookup(null);
+
+      await vi.waitFor(() => {
+        expect(environmentSetupNoticeCalls(manager)).toHaveLength(1);
+      });
+      expect(taskRunsGetGoalMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('restores a settled notice when the harness rejects delivery', async () => {
+      const { manager, settledListener } = await runTaskWithBackgroundSetup();
+      manager.sendFollowUpPrompt.mockReturnValueOnce(false);
+
+      manager.emit('taskStateEvent', 'taskStarted');
+      settledListener!({ status: 'fulfilled', warningMessages: [] });
+
+      await vi.waitFor(() => {
+        expect(environmentSetupNoticeCalls(manager)).toHaveLength(1);
+      });
+
+      manager.emit('stateChange', 'running', {});
+
+      await vi.waitFor(() => {
+        expect(environmentSetupNoticeCalls(manager)).toHaveLength(2);
+      });
     });
 
     it('holds the settled notice while a question is pending and delivers it when the phase returns to running', async () => {
@@ -2676,6 +2787,10 @@ describe('runTask', () => {
         sessionId: undefined,
       });
       manager.emit('stateChange', 'running', {});
+
+      await vi.waitFor(() => {
+        expect(environmentSetupNoticeCalls(manager)).toHaveLength(1);
+      });
 
       const noticeCalls = environmentSetupNoticeCalls(manager);
 
@@ -2726,6 +2841,10 @@ describe('runTask', () => {
         warningMessages: ['Dev server never became ready'],
       });
 
+      await vi.waitFor(() => {
+        expect(environmentSetupNoticeCalls(manager)).toHaveLength(1);
+      });
+
       const noticeCalls = environmentSetupNoticeCalls(manager);
 
       expect(noticeCalls).toHaveLength(1);
@@ -2759,6 +2878,10 @@ describe('runTask', () => {
       manager.emit('taskStateEvent', 'taskStarted');
       settledListener!({ status: 'fulfilled', warningMessages: [] });
 
+      await vi.waitFor(() => {
+        expect(environmentSetupNoticeCalls(manager)).toHaveLength(1);
+      });
+
       const noticeCalls = environmentSetupNoticeCalls(manager);
 
       expect(noticeCalls).toHaveLength(1);
@@ -2777,6 +2900,10 @@ describe('runTask', () => {
       settledListener!({
         status: 'rejected',
         errorMessage: 'setup exploded',
+      });
+
+      await vi.waitFor(() => {
+        expect(environmentSetupNoticeCalls(manager)).toHaveLength(1);
       });
 
       const noticeCalls = environmentSetupNoticeCalls(manager);

@@ -213,10 +213,28 @@ export function buildAutoAddedTaskModelSettings(options: {
         );
       });
 
+  // Compare model-id prefixes, not the catalog provider id: several
+  // providers serve another prefix's models (`chatgpt` → `openai/`,
+  // `xai-subscription` → `xai/`, `amazon-bedrock` → `bedrock-mantle/`), and
+  // the guard must match those too or re-saving credentials resurrects
+  // deliberately removed models. The prefixes are derived from the
+  // provider's own curated model ids so new mappings cannot be missed.
+  const providerModelPrefixes = new Set(
+    [
+      options.provider.defaultRoomoteModel,
+      ...options.provider.suggestedTaskModels.map(
+        (suggestion) => suggestion.id,
+      ),
+    ]
+      .map((modelId) => getTaskModelProviderId(normalizeTaskModelId(modelId)))
+      .filter((prefix): prefix is string => prefix !== null),
+  );
+
   if (
-    baseModels.some(
-      (model) => getTaskModelProviderId(model.id) === options.provider.id,
-    )
+    baseModels.some((model) => {
+      const prefix = getTaskModelProviderId(model.id);
+      return prefix !== null && providerModelPrefixes.has(prefix);
+    })
   ) {
     return null;
   }
@@ -296,6 +314,9 @@ export function buildAutoAddedTaskModelSettings(options: {
       : modelsById.has(providerDefaultModelId)
         ? providerDefaultModelId
         : addedModels[0]!.id,
+    // Carry the catalog sync's deletion memory forward so connecting a
+    // provider does not wipe it.
+    catalogSyncedModelIds: persisted?.catalogSyncedModelIds,
   });
 
   return { taskModelSettings, addedModels };

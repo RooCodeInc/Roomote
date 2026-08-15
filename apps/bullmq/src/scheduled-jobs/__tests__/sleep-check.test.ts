@@ -1225,6 +1225,111 @@ describe('sleepCheckJob', () => {
     expect(mockCreateSnapshot).toHaveBeenCalledTimes(2);
   });
 
+  it('continues evaluating other vendors when one provider client cannot be constructed', async () => {
+    const modalJob = {
+      id: 200,
+      machineId: 'sb-modal-unconfigured',
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      vendor: 'modal',
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+    };
+    const blaxelJob = {
+      id: 201,
+      machineId: 'sb-blaxel-healthy',
+      sandboxCmdId: 'worker-command-3',
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      vendor: 'blaxel',
+      taskId: 'task-blaxel-2',
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+    };
+
+    mockJobQueries({ dueJobs: [modalJob, blaxelJob] });
+    mockCreateComputeProviderClient.mockImplementation(({ provider }) => {
+      if (provider === 'modal') {
+        throw new Error('Missing MODAL_BASE_IMAGE_REF');
+      }
+      return {
+        destroyInstance: mockDestroyInstance,
+        enterStandby: mockEnterStandby,
+        getInstanceStatus: mockGetInstanceStatus,
+      };
+    });
+    mockGetInstanceStatus.mockResolvedValue({
+      status: 'running',
+      timeoutRemainingMs: 5 * 60 * 60 * 1_000,
+    });
+    returningFn.mockResolvedValue([{ id: 201 }]);
+
+    await sleepCheckJob();
+
+    // The unconfigured provider's candidate records a failed skip event...
+    expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        runId: 200,
+        eventType: 'failed',
+        source: 'sleep_check',
+        details: expect.objectContaining({
+          decision: 'skip_provider_client_unavailable',
+          error: 'Missing MODAL_BASE_IMAGE_REF',
+        }),
+      }),
+    );
+    // ...and the other vendor's machine is still evaluated and retained.
+    expect(mockGetInstanceStatus).toHaveBeenCalledWith({
+      instanceId: 'sb-blaxel-healthy',
+    });
+    expect(mockEnterStandby).toHaveBeenCalledWith({
+      instanceId: 'sb-blaxel-healthy',
+      commandId: 'worker-command-3',
+    });
+  });
+
+  it('does not rebuild a failed provider client for every candidate in the same sweep', async () => {
+    const makeModalJob = (id: number) => ({
+      id,
+      machineId: `sb-modal-unconfigured-${id}`,
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      vendor: 'modal',
+      snapshotId: null,
+      sleepRequestedAt: null,
+      snapshotRequestedAt: null,
+    });
+
+    mockJobQueries({ dueJobs: [makeModalJob(210), makeModalJob(211)] });
+    mockCreateComputeProviderClient.mockImplementation(() => {
+      throw new Error('Missing MODAL_BASE_IMAGE_REF');
+    });
+
+    await sleepCheckJob();
+
+    expect(mockCreateComputeProviderClient).toHaveBeenCalledTimes(1);
+    for (const runId of [210, 211]) {
+      expect(mockRecordTaskRunEvent).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          runId,
+          eventType: 'failed',
+          source: 'sleep_check',
+          details: expect.objectContaining({
+            decision: 'skip_provider_client_unavailable',
+          }),
+        }),
+      );
+    }
+    expect(mockGetInstanceStatus).not.toHaveBeenCalled();
+  });
+
   it('extends stale active deadlines instead of snapshotting running jobs with plenty of sandbox time left', async () => {
     const mockJob = {
       id: 85,

@@ -19,6 +19,7 @@ import {
   normalizeOptionalReasoningEffort,
   parseModelProviderEnvKeys,
   resolveSetupModelProviderIdFromModel,
+  TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
   XAI_OPENCODE_PROVIDER_ID,
   type TaskModelOption,
 } from '@roomote/types';
@@ -379,6 +380,19 @@ async function resolveModelRuntimeEnv(
   const gatewaySwitchableModelIds = inferenceGateway
     ? enabledCatalogModels.map((model) => model.id)
     : [];
+  const taskModelContextWindows = inferenceGateway
+    ? Object.fromEntries(
+        enabledCatalogModels.flatMap((model) => {
+          const contextWindow = model.metadata?.contextWindow;
+
+          return typeof contextWindow === 'number' &&
+            Number.isSafeInteger(contextWindow) &&
+            contextWindow > 0
+            ? [[model.id, contextWindow]]
+            : [];
+        }),
+      )
+    : {};
   const gatewayProviderKeyNames = [
     ...new Set([
       ...providerKeyNames,
@@ -545,6 +559,11 @@ async function resolveModelRuntimeEnv(
     ...(effectiveGatewayServedKeyNames.length > 0 && {
       [INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME]:
         effectiveGatewayServedKeyNames.join(','),
+    }),
+    ...(Object.keys(taskModelContextWindows).length > 0 && {
+      [TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME]: JSON.stringify(
+        taskModelContextWindows,
+      ),
     }),
     ...(routeChatGptThroughGateway
       ? { [INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME]: '1' }

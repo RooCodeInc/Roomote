@@ -3,6 +3,7 @@ import { Job, UnrecoverableError } from 'bullmq';
 import {
   RunStatus,
   TaskPayloadKind,
+  exitedRunStatuses,
   extractErrorDetails,
   isObservedTimeoutError,
   resolveComputeProviderTarget,
@@ -35,7 +36,7 @@ import {
   type SourceInstanceSnapshot,
 } from '@roomote/compute-providers';
 import { drainLinearMessagesToResumeRun } from '@roomote/linear';
-import { withSandboxServerRpcClient } from '@roomote/sdk/server';
+import { finishRun, withSandboxServerRpcClient } from '@roomote/sdk/server';
 import { drainSlackMessagesToResumeRun } from '@roomote/slack';
 import { z } from 'zod';
 
@@ -344,6 +345,12 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
         }
       }
 
+      await finalizeUnresumableRunAfterSnapshotFailure({
+        taskRun,
+        instanceId,
+        instanceStatus: status,
+      });
+
       throw new Error(`Instance is not running (status: ${status})`);
     }
   }
@@ -449,6 +456,13 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
         },
       });
     } catch (error) {
+      // A terminal finalizer or recovery changed the run while the provider
+      // was snapshotting. The adapter propagates callback failures, so stop
+      // this attempt before its completion path can overwrite the winner.
+      if (error instanceof SnapshotRunOwnershipLostError) {
+        throw new UnrecoverableError(error.message);
+      }
+
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       const errorDetails = extractErrorDetails(error);
@@ -670,6 +684,18 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
             signal: 'snapshot-failed',
           },
         );
+
+        // A sandbox that is dead after the failure means no worker can ever
+        // claim or resume this run, the same exposure as the pre-snapshot
+        // branch above. The helper no-ops for every other status: transient
+        // failures on a live sandbox leave the run alone, and the credential
+        // restore above lets a surviving task keep working.
+        await finalizeUnresumableRunAfterSnapshotFailure({
+          taskRun,
+          instanceId,
+          instanceStatus: postFailureInstanceStatus ?? 'unknown',
+        });
+
         throw new UnrecoverableError(errorMessage);
       }
 
@@ -695,8 +721,9 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
     snapshotCreatedAt.getTime() + SANDBOX_SNAPSHOT_EXPIRY_MS,
   );
 
-  await db.transaction(async (tx) => {
-    await tx
+  const expectedSnapshotId = persistedSnapshotId ?? taskRun.snapshotId ?? null;
+  const completed = await db.transaction(async (tx) => {
+    const completedRuns = await tx
       .update(taskRuns)
       .set({
         payload: clearedCompletionPayload,
@@ -708,7 +735,21 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
         status: RunStatus.Completed,
         completedAt: now,
       })
-      .where(eq(taskRuns.id, runId));
+      .where(
+        and(
+          eq(taskRuns.id, runId),
+          eq(taskRuns.status, taskRun.status),
+          eq(taskRuns.machineId, instanceId),
+          expectedSnapshotId !== null
+            ? eq(taskRuns.snapshotId, expectedSnapshotId)
+            : isNull(taskRuns.snapshotId),
+        ),
+      )
+      .returning({ id: taskRuns.id });
+
+    if (completedRuns.length === 0) {
+      return false;
+    }
 
     if (shouldCompleteTask && taskRun.taskId) {
       // Derive the task state from all its runs now that this run is completed;
@@ -720,7 +761,28 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
       runId: runId,
       endedAt: now,
     });
+
+    return true;
   });
+
+  if (!completed) {
+    await recordSnapshotQueueEvent(taskRun, {
+      eventType: 'decision',
+      message: `Skipped completing task run #${runId} with snapshot ${snapshotId} because the run advanced concurrently.`,
+      details: {
+        queueJobId,
+        queueAttempt,
+        snapshotIntentId,
+        triggerPath,
+        decision: 'skip_snapshot_completion_claim_lost',
+        sandboxId: instanceId,
+        snapshotId,
+        expectedRunStatus: taskRun.status,
+        expectedSnapshotId,
+      },
+    });
+    return;
+  }
 
   await tryRecordComputeProviderUsage({
     runId: runId,
@@ -860,6 +922,7 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
       const drainResult = await drainSlackMessagesToResumeRun(
         {
           id: taskRun.id,
+          taskId: taskRun.taskId,
           slackThreadTs: taskChannelBindings.slackThreadTs,
           snapshotId,
           payload: taskRun.payload as Record<string, unknown>,
@@ -1030,11 +1093,10 @@ async function requestPostFailureCredentialRestore(input: {
  * a perfectly good snapshot was lost with no way to find it again, leaving the
  * task unresumable.
  *
- * Guarded on `snapshotId IS NULL` so a redelivered attempt never clobbers the
- * id a previous one already recorded. Returns whichever snapshot is actually
- * on the row, with its creation time: an attempt that loses the claim has to
- * finalize the winner, because the finalizing update is unconditional and
- * would otherwise point the run at its own orphaned image.
+ * Guarded on the observed run status, sandbox, and `snapshotId IS NULL`. If a
+ * concurrent snapshot already recorded an id, return that winner. If the row
+ * advanced without a snapshot (for example, terminal finalization won), abort
+ * this attempt so its later completion cannot overwrite the new state.
  */
 async function persistCreatedSnapshotId(input: {
   runId: number;
@@ -1055,7 +1117,14 @@ async function persistCreatedSnapshotId(input: {
       snapshotCreatedAt,
       snapshotFailedAt: null,
     })
-    .where(and(eq(taskRuns.id, input.runId), isNull(taskRuns.snapshotId)))
+    .where(
+      and(
+        eq(taskRuns.id, input.runId),
+        eq(taskRuns.status, input.taskRun.status),
+        eq(taskRuns.machineId, input.instanceId),
+        isNull(taskRuns.snapshotId),
+      ),
+    )
     .returning({ id: taskRuns.id });
 
   const details = {
@@ -1068,9 +1137,6 @@ async function persistCreatedSnapshotId(input: {
   };
 
   if (!persisted) {
-    // Another attempt got there first. Adopt its id and timestamp wholesale:
-    // ours names an image nothing references, and its clock would make an
-    // already-aging snapshot look freshly created.
     const existing = await db.query.taskRuns.findFirst({
       where: eq(taskRuns.id, input.runId),
       columns: { snapshotId: true, snapshotCreatedAt: true },
@@ -1078,7 +1144,9 @@ async function persistCreatedSnapshotId(input: {
 
     await recordSnapshotQueueEvent(input.taskRun, {
       eventType: 'decision',
-      message: `Snapshot ${input.snapshotId} for sandbox ${input.instanceId} was already persisted by another attempt.`,
+      message: existing?.snapshotId
+        ? `Snapshot ${input.snapshotId} for sandbox ${input.instanceId} was already persisted by another attempt.`
+        : `Skipped persisting snapshot ${input.snapshotId} because task run #${input.runId} advanced concurrently.`,
       details: {
         ...details,
         decision: 'skip_persist_snapshot_id_claim_lost',
@@ -1086,9 +1154,13 @@ async function persistCreatedSnapshotId(input: {
       },
     });
 
+    if (!existing?.snapshotId) {
+      throw new SnapshotRunOwnershipLostError(input.runId);
+    }
+
     return {
-      snapshotId: existing?.snapshotId ?? input.snapshotId,
-      snapshotCreatedAt: existing?.snapshotCreatedAt ?? snapshotCreatedAt,
+      snapshotId: existing.snapshotId,
+      snapshotCreatedAt: existing.snapshotCreatedAt ?? snapshotCreatedAt,
     };
   }
 
@@ -1133,6 +1205,83 @@ async function recordSnapshotQueueEvent(
 
 function getQueueMaxAttempts(job: SnapshotJob): number {
   return Math.max(job.opts?.attempts ?? 1, 1);
+}
+
+const UNRESUMABLE_INSTANCE_STATUSES = new Set(['stopped', 'failed']);
+
+class SnapshotRunOwnershipLostError extends Error {
+  constructor(runId: number) {
+    super(`Task run #${runId} advanced while its snapshot was being created`);
+    this.name = 'SnapshotRunOwnershipLostError';
+  }
+}
+
+/**
+ * A run cannot resume after its sandbox dies without producing a snapshot.
+ * Claim the terminal transition before finishRun so concurrent recovery or a
+ * late snapshot cannot be overwritten.
+ */
+async function finalizeUnresumableRunAfterSnapshotFailure(input: {
+  taskRun: TaskRun;
+  instanceId: string;
+  instanceStatus: string;
+}): Promise<void> {
+  const { taskRun, instanceId, instanceStatus } = input;
+
+  if (!UNRESUMABLE_INSTANCE_STATUSES.has(instanceStatus)) {
+    return;
+  }
+
+  if (
+    (exitedRunStatuses as readonly RunStatus[]).includes(taskRun.status) ||
+    taskRun.snapshotId ||
+    taskRun.machineId !== instanceId
+  ) {
+    return;
+  }
+
+  const finalStatus =
+    taskRun.status === RunStatus.Idle ? RunStatus.Completed : RunStatus.Failed;
+  const errorMessage = `Sandbox ${instanceId} was ${instanceStatus} before its snapshot completed; the run cannot be resumed`;
+  const now = new Date();
+
+  const claimed = await db.transaction(async (tx) => {
+    const claimedRuns = await tx
+      .update(taskRuns)
+      .set({ status: finalStatus, error: errorMessage, completedAt: now })
+      .where(
+        and(
+          eq(taskRuns.id, taskRun.id),
+          eq(taskRuns.status, taskRun.status),
+          eq(taskRuns.machineId, instanceId),
+          isNull(taskRuns.snapshotId),
+        ),
+      )
+      .returning({ id: taskRuns.id });
+
+    if (claimedRuns.length === 0) {
+      return false;
+    }
+
+    await syncTaskStateFromRuns(tx, taskRun.taskId);
+    return true;
+  });
+
+  if (!claimed) {
+    return;
+  }
+
+  try {
+    await finishRun({
+      id: taskRun.id,
+      status: finalStatus,
+      error: errorMessage,
+    });
+  } catch (error) {
+    console.error(
+      `[SnapshotQueue] Failed to finalize unresumable task run #${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 }
 
 async function reconcileSnapshottingFailure(input: {

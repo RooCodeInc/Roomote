@@ -82,6 +82,8 @@ function reviewPayload(review: {
   body?: string | null;
   state?: string;
   login?: string | null;
+  userId?: number;
+  userType?: string;
 }): any {
   return {
     repository,
@@ -93,7 +95,14 @@ function reviewPayload(review: {
       state: review.state ?? 'approved',
       submitted_at: createdAt,
       html_url: 'https://github.com/owner/repo/pull/42#pullrequestreview-1000',
-      user: review.login === null ? null : { login: review.login ?? 'alice' },
+      user:
+        review.login === null
+          ? null
+          : {
+              id: review.userId ?? 1,
+              login: review.login ?? 'alice',
+              type: review.userType ?? 'User',
+            },
     },
   };
 }
@@ -102,6 +111,8 @@ function reviewCommentPayload(comment: {
   body?: string;
   login?: string | null;
   inReplyToId?: number;
+  userId?: number;
+  userType?: string;
 }): any {
   return {
     repository,
@@ -114,7 +125,14 @@ function reviewCommentPayload(comment: {
       in_reply_to_id: comment.inReplyToId,
       pull_request_review_id: 1000,
       html_url: 'https://github.com/owner/repo/pull/42#discussion_r2000',
-      user: comment.login === null ? null : { login: comment.login ?? 'alice' },
+      user:
+        comment.login === null
+          ? null
+          : {
+              id: comment.userId ?? 1,
+              login: comment.login ?? 'alice',
+              type: comment.userType ?? 'User',
+            },
     },
   };
 }
@@ -124,6 +142,10 @@ function issueCommentPayload(
     body?: string;
     login?: string | null;
     isPr?: boolean;
+    userId?: number;
+    userType?: string;
+    updatedAt?: string;
+    edited?: boolean;
   } = {},
 ): any {
   return {
@@ -140,9 +162,20 @@ function issueCommentPayload(
       id: 3000,
       body: comment.body ?? 'Could we simplify this?',
       created_at: createdAt,
+      updated_at: comment.updatedAt,
       html_url: 'https://github.com/owner/repo/pull/42#issuecomment-3000',
-      user: comment.login === null ? null : { login: comment.login ?? 'alice' },
+      user:
+        comment.login === null
+          ? null
+          : {
+              id: comment.userId ?? 1,
+              login: comment.login ?? 'alice',
+              type: comment.userType ?? 'User',
+            },
     },
+    ...(comment.edited
+      ? { changes: { body: { from: 'Previous comment body' } } }
+      : {}),
   };
 }
 
@@ -159,7 +192,9 @@ describe('buildPrReviewActivityNotificationInput', () => {
       sourceControlProvider: 'github',
       event: {
         kind: 'review',
+        providerEventId: 'github-review:1000',
         authorLogin: 'alice',
+        body: 'Please fix',
         reviewHeadSha,
         batchId: 'github-review:1000',
         reviewState: 'changes_requested',
@@ -213,7 +248,9 @@ describe('buildPrReviewActivityNotificationInput', () => {
       sourceControlProvider: 'github',
       event: {
         kind: 'review_comment',
+        providerEventId: 'github-review-comment:2000',
         authorLogin: 'bob',
+        body: 'Looks off to me',
         reviewHeadSha,
         batchId: 'github-review:1000',
         url: 'https://github.com/owner/repo/pull/42#discussion_r2000',
@@ -232,11 +269,77 @@ describe('buildPrReviewActivityNotificationInput', () => {
       sourceControlProvider: 'github',
       event: {
         kind: 'issue_comment',
+        providerEventId: `github-issue-comment:3000:${createdAt}`,
         authorLogin: 'alice',
+        body: 'Could we simplify this?',
         url: 'https://github.com/owner/repo/pull/42#issuecomment-3000',
         observedAt,
       },
     });
+  });
+
+  it('keeps edited top-level review content as a distinct revision', () => {
+    const updatedAt = '2026-08-10T20:00:00.000Z';
+    expect(
+      buildPrReviewActivityNotificationInput(
+        issueCommentPayload({ body: 'Final result', updatedAt }),
+      ),
+    ).toMatchObject({
+      event: {
+        providerEventId: `github-issue-comment:3000:${updatedAt}`,
+        body: 'Final result',
+        observedAt: Date.parse(updatedAt),
+      },
+    });
+  });
+
+  it('uses the webhook delivery as the revision when an edit omits updated_at', () => {
+    const payload = issueCommentPayload({
+      body: 'Edited without a timestamp',
+      edited: true,
+    });
+    const first = buildPrReviewActivityNotificationInput(payload, {
+      deliveryId: 'delivery-one',
+    });
+    const second = buildPrReviewActivityNotificationInput(payload, {
+      deliveryId: 'delivery-two',
+    });
+
+    expect(first?.event.providerEventId).toBe(
+      'github-issue-comment:3000:delivery:delivery-one',
+    );
+    expect(second?.event.providerEventId).toBe(
+      'github-issue-comment:3000:delivery:delivery-two',
+    );
+    expect(first?.event.providerEventId).not.toBe(
+      second?.event.providerEventId,
+    );
+    expect(() => buildPrReviewActivityNotificationInput(payload)).toThrow(
+      'requires a delivery id',
+    );
+  });
+
+  it('maps one external bot identity across summary and review activity', () => {
+    const bot = {
+      login: 'reviewer[bot]',
+      userId: 9001,
+      userType: 'Bot',
+    };
+    const events = [
+      issueCommentPayload(bot),
+      reviewPayload(bot),
+      reviewCommentPayload(bot),
+    ].map((payload) => buildPrReviewActivityNotificationInput(payload));
+
+    expect(events).toEqual(
+      Array.from({ length: 3 }, () =>
+        expect.objectContaining({
+          event: expect.objectContaining({
+            automatedAuthorId: 'github:9001',
+          }),
+        }),
+      ),
+    );
   });
 
   it('skips top-level PR comments handled by the mention flow', () => {
@@ -319,6 +422,7 @@ describe('queuePrReviewActivityNotification', () => {
       sourceControlProvider: 'github',
       event: {
         kind: 'review',
+        providerEventId: 'github-review:1000',
         authorLogin: 'alice',
         reviewHeadSha,
         batchId: 'github-review:1000',
@@ -347,16 +451,12 @@ describe('queuePrReviewActivityNotification', () => {
     );
   });
 
-  it('swallows enqueue failures', async () => {
+  it('propagates persistence failures so the webhook can retry', async () => {
     mockEnqueuePrReviewNotification.mockRejectedValue(new Error('redis down'));
 
-    expect(() =>
+    await expect(
       queuePrReviewActivityNotification(reviewPayload({ state: 'approved' })),
-    ).not.toThrow();
-
-    await vi.waitFor(() =>
-      expect(mockEnqueuePrReviewNotification).toHaveBeenCalled(),
-    );
+    ).rejects.toThrow('redis down');
   });
 });
 
@@ -411,7 +511,7 @@ function summaryPayload({
   isPr?: boolean;
   /** When set, models an issue_comment.edited payload with changes.body.from. */
   previousBody?: string | null;
-  updatedAt?: string;
+  updatedAt?: string | null;
 } = {}): any {
   return {
     repository,
@@ -426,7 +526,7 @@ function summaryPayload({
       id: commentId,
       body,
       created_at: createdAt,
-      updated_at: updatedAt,
+      updated_at: updatedAt ?? undefined,
       html_url: `https://github.com/owner/repo/pull/42#issuecomment-${commentId}`,
       user: login === null ? null : { login },
     },
@@ -456,6 +556,7 @@ describe('buildPrReviewSummaryNotification', () => {
       sourceControlProvider: 'github',
       event: {
         kind: 'review_summary',
+        providerEventId: 'github-review-summary:99:2026-08-10T19:30:00.000Z',
         authorLogin: 'roomote[bot]',
         reviewHeadSha,
         summary: '1 minor doc note; no blocking issues.',
@@ -688,6 +789,38 @@ describe('queuePrReviewSummaryNotification', () => {
       cycleId: `github-summary:99:${nextUpdatedAt}`,
       observedAt: Date.parse(nextUpdatedAt),
     });
+  });
+
+  it('closes a timestamp-less summary edit against its exact open cycle', async () => {
+    await queuePrReviewSummaryNotification(
+      summaryPayload({
+        body: IN_PROGRESS_SUMMARY_BODY,
+        previousBody: TERMINAL_SUMMARY_BODY,
+        updatedAt: null,
+      }),
+      'delivery-start',
+    );
+    const openedCycle = mockStartPrReviewNotificationCycle.mock.calls[0]?.[0];
+
+    await queuePrReviewSummaryNotification(
+      summaryPayload({
+        body: TERMINAL_SUMMARY_BODY,
+        previousBody: IN_PROGRESS_SUMMARY_BODY,
+        updatedAt: null,
+      }),
+      'delivery-complete',
+    );
+
+    expect(openedCycle?.cycleId).toMatch(/^github-summary:99:body:/);
+    expect(mockEnqueuePrReviewNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          batchId: openedCycle?.cycleId,
+          providerEventId:
+            'github-review-summary:99:delivery:delivery-complete',
+        }),
+      }),
+    );
   });
 
   it('does not reopen a cycle for an in-progress to in-progress edit', () => {

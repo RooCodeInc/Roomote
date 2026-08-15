@@ -39,6 +39,7 @@ import { handleCancelTask } from './cancel-task.js';
 import { handleUpdateTaskModels } from './update-task-models.js';
 import { handleSendMessage } from './send-message.js';
 import { handleListEnvironments } from './list-environments.js';
+import { handleListTaskModels } from './list-models.js';
 import {
   handleCreateEnvironment,
   handleRecordVerification,
@@ -61,6 +62,7 @@ import { handleSendChatReactionEmoji } from './send-chat-reaction-emoji.js';
 import { handleReportPlatformIssue } from './report-platform-issue.js';
 import { handleManageSourceControl } from './source-control.js';
 import { getArtifactConfig, getRoomoteConfig } from './config.js';
+import { handleSaveTaskMemory } from './task-memory.js';
 import { ABOUT_ME_CONTENT } from './about-me.js';
 import { INTEGRATION_SETUP_CONTENT } from './integration-setup.js';
 import type { ToolResult } from './types.js';
@@ -469,6 +471,15 @@ function shouldRegisterEnvVarRequestTool(): boolean {
   return !!taskType && WEB_TASK_TYPES_WITH_SECURE_ENV_REQUESTS.has(taskType);
 }
 
+/**
+ * The Brain is delivered to the sandbox only when the deployment has one,
+ * and setup-mcps mirrors that into this flag — so agents without a Brain
+ * never see a memory tool that cannot work.
+ */
+function shouldRegisterTaskMemoryTool(): boolean {
+  return process.env.ROOMOTE_BRAIN_AVAILABLE === 'true';
+}
+
 function shouldRegisterSlackThreadReplyTool(): boolean {
   return (
     Boolean(process.env.ROOMOTE_SLACK_CHANNEL?.trim()) ||
@@ -552,6 +563,7 @@ const manageTasksToolDescription =
   `Use action "launch" to create and start a new task against an environment using ${PRODUCT_NAME}'s default standard workflow (requires prompt and environmentId). ` +
   'Use action "cancel" to cancel an active task (requires taskId). ' +
   'Use action "send_message" to send a follow-up message to a running task (requires taskId and message). ' +
+  'Use action "list_models" to list the enabled model IDs available for task model selection. Call it before "update_models" when resolving a requested model name to an exact ID. ' +
   'Use action "update_models" ONLY when the user explicitly asks to change the model or reasoning level for a task (requires role; taskId defaults to the current task). Pass the desired model id and/or reasoningEffort; omit both to reset the role to the deployment default. Users usually phrase both together: in "switch to Luna Max" or "use GPT 5.4 medium", the trailing low/medium/high/extra high/max word is the reasoningEffort and the rest names the model — set BOTH fields in one call. Changes apply from the next turn, so a change to the current task does not affect the turn that is already running.';
 
 const manageTasksInputSchema = {
@@ -564,6 +576,7 @@ const manageTasksInputSchema = {
       'launch',
       'cancel',
       'send_message',
+      'list_models',
       'update_models',
       'list_environments',
     ])
@@ -634,7 +647,7 @@ const manageTasksInputSchema = {
     .string()
     .optional()
     .describe(
-      'For update_models: desired model id in provider/model format (must be enabled for the deployment). Omit to keep the deployment default model for the role.',
+      'For update_models: desired model id in provider/model format. Call list_models first and pass an exact returned model ID. Omit to keep the deployment default model for the role.',
     ),
   reasoningEffort: z
     .enum(['low', 'medium', 'high', 'xhigh', 'max'])
@@ -795,6 +808,9 @@ roomoteMcpServer.registerTool(
           },
           config,
         );
+      }
+      case 'list_models': {
+        return handleListTaskModels(config);
       }
       case 'send_message': {
         if (!params.taskId?.trim()) {
@@ -1153,6 +1169,42 @@ roomoteMcpServer.registerTool(
     );
   },
 );
+
+if (shouldRegisterTaskMemoryTool()) {
+  roomoteMcpServer.registerTool(
+    'save_task_memory',
+    {
+      title: 'Save Task Memory',
+      description:
+        "Record what this task learned into the deployment's shared Brain, so future tasks and teammates can find it. Call this once when you finish substantial work, before your final message. Write for someone who lands on this problem months from now with no context: what the outcome was, the decisions you made and why, facts about the codebase or systems worth reusing, and anything still unresolved. Skip trivial, failed, or purely administrative tasks. You cannot write to the Brain directly; Roomote stores this under this task's own entry after redacting secrets.",
+      inputSchema: {
+        outcome: z
+          .string()
+          .describe('What was accomplished, in a few sentences.'),
+        decisions: z
+          .array(z.string())
+          .optional()
+          .describe('Decisions made during the task, one per entry.'),
+        rationale: z
+          .string()
+          .optional()
+          .describe('Why those decisions were made; alternatives rejected.'),
+        reusableFacts: z
+          .array(z.string())
+          .optional()
+          .describe(
+            'Durable facts about the codebase or systems worth remembering.',
+          ),
+        unresolvedQuestions: z
+          .array(z.string())
+          .optional()
+          .describe('Open questions or follow-ups left behind.'),
+      },
+      annotations: { readOnlyHint: false },
+    },
+    async (input) => handleSaveTaskMemory(input),
+  );
+}
 
 if (shouldRegisterEnvVarRequestTool()) {
   roomoteMcpServer.registerTool(

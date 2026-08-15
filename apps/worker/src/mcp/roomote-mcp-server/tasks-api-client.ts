@@ -24,6 +24,7 @@ import type {
   UpdateTaskModelSelectionResponse,
   SendMessageResponse,
   ListEnvironmentsResponse,
+  ListTaskModelsResponse,
   CreateEnvironmentResponse,
   UpdateEnvironmentResponse,
   RecordVerificationResponse,
@@ -32,6 +33,8 @@ import type {
   SourceControlPullRequestReadResponse,
   SourceControlPullRequestResponse,
   SourceControlIssueResponse,
+  TaskGoalResponse,
+  TaskGoalMutationResponse,
 } from './types.js';
 
 /**
@@ -92,6 +95,20 @@ export async function searchTasks(
 }
 
 /**
+ * List models enabled for task model selection.
+ */
+export async function listTaskModels(
+  config: RoomoteConfig,
+): Promise<ListTaskModelsResponse> {
+  return apiFetch(
+    config,
+    '/api/mcp/tasks/models',
+    {},
+    'Failed to list task models',
+  );
+}
+
+/**
  * Get a task summary via the platform API.
  */
 export async function getTaskSummary(
@@ -103,6 +120,37 @@ export async function getTaskSummary(
     `/api/mcp/tasks/${encodeURIComponent(taskId)}/summary`,
     {},
     'Failed to get task summary',
+  );
+}
+
+export async function getTaskGoal(
+  config: RoomoteConfig,
+  runId: number,
+): Promise<TaskGoalResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/runs/${runId}/goal`,
+    {},
+    'Failed to get goal',
+  );
+}
+
+export async function updateTaskGoal(
+  config: RoomoteConfig,
+  runId: number,
+  params:
+    | { action: 'complete'; generation: string | null }
+    | { action: 'blocked'; generation: string | null; reason: string },
+): Promise<TaskGoalMutationResponse> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/runs/${runId}/goal`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to update goal',
   );
 }
 
@@ -566,5 +614,32 @@ export async function recordEnvironmentVerification(
       }),
     },
     'Failed to record environment verification',
+  );
+}
+
+/**
+ * Save this run's agent-authored task memory. The platform API places it in
+ * the Brain; the sandbox never touches the Brain's write credential.
+ */
+export async function saveTaskMemory(
+  config: RoomoteConfig,
+  runId: number,
+  params: {
+    outcome: string;
+    decisions?: string[];
+    rationale?: string;
+    reusableFacts?: string[];
+    unresolvedQuestions?: string[];
+  },
+): Promise<{ saved: boolean; reason?: string }> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/runs/${runId}/memory`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to save task memory',
   );
 }

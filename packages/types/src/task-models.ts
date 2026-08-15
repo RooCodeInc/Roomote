@@ -173,6 +173,12 @@ export const taskModelSettingsSchema = z.object({
   models: z.array(taskModelOptionSchema).optional(),
   allowedModelIds: z.array(z.string().trim().min(1)),
   defaultModelId: z.string().trim().min(1),
+  /**
+   * Model ids the live-catalog sync has already seen and offered. A synced
+   * model an operator later deletes from `models` stays deleted because its
+   * id remains recorded here, so the sync never re-adds it.
+   */
+  catalogSyncedModelIds: z.array(z.string().trim().min(1)).optional(),
 });
 
 export type TaskModelSettings = z.infer<typeof taskModelSettingsSchema>;
@@ -481,10 +487,24 @@ export function normalizeTaskModelSettings(value: unknown): TaskModelSettings {
     ? requestedDefaultModelId
     : (nextAllowedModelIds[0] ?? DEFAULT_TASK_MODEL_SETTINGS.defaultModelId);
 
+  // An empty list is collapsed to "no baseline recorded": the sync only ever
+  // records non-empty baselines (it no-ops on an empty catalog), so a
+  // persisted `[]` must not read back as an established baseline that would
+  // let the next sync add the entire back-catalog.
+  const catalogSyncedModelIds =
+    parsed.success && parsed.data.catalogSyncedModelIds?.length
+      ? [
+          ...new Set(
+            parsed.data.catalogSyncedModelIds.map(normalizeTaskModelId),
+          ),
+        ]
+      : undefined;
+
   return {
     models,
     allowedModelIds: nextAllowedModelIds,
     defaultModelId,
+    ...(catalogSyncedModelIds ? { catalogSyncedModelIds } : {}),
   };
 }
 

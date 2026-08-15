@@ -3,6 +3,7 @@ import {
   type AcpTurnCompletedEvent,
   TaskEventName,
   type TaskEvent,
+  type TaskCompletionMetadata,
   asRecord,
   asString,
   deepStripCitations,
@@ -17,6 +18,10 @@ import { captureWorkerException } from '../monitoring/sentry';
 
 import type { CallbackEvent, RunTaskCallbacks, RunTaskContext } from './types';
 import { fromRuntimeEnvelope } from './runtime-events/envelope';
+import {
+  recordMissingChatCloseoutFallback,
+  waitForMissingChatCloseoutFallbackDelivery,
+} from './missing-chat-closeout-fallback-settlement';
 import { deliverShowWidgetFallback } from './show-widget-fallback-delivery';
 
 interface PendingCompletionEvents {
@@ -51,6 +56,7 @@ export function subscribeHarnessCallbacks({
     PendingCompletionEvents
   >();
   const pendingPersistenceWrites = new Set<Promise<void>>();
+  const pendingTaskCompletionWork = new Set<Promise<void>>();
   let consecutivePersistenceFailures = 0;
   let assistantOutputStamped = false;
   let assistantOutputStampInFlight: Promise<void> | null = null;
@@ -73,6 +79,19 @@ export function subscribeHarnessCallbacks({
   const waitForPendingPersistenceWrites = async () => {
     while (pendingPersistenceWrites.size > 0) {
       await Promise.allSettled([...pendingPersistenceWrites]);
+    }
+  };
+
+  const trackPendingTaskCompletionWork = (work: Promise<void>) => {
+    pendingTaskCompletionWork.add(work);
+    void work.finally(() => {
+      pendingTaskCompletionWork.delete(work);
+    });
+  };
+
+  const waitForPendingTaskCompletionWork = async () => {
+    while (pendingTaskCompletionWork.size > 0) {
+      await Promise.allSettled([...pendingTaskCompletionWork]);
     }
   };
 
@@ -240,6 +259,24 @@ export function subscribeHarnessCallbacks({
     pendingCompletionEventsByCallbackId.delete(callbackTaskId);
   };
 
+  const getLatestPendingCompletionText = (
+    callbackTaskId: string,
+  ): string | null => {
+    const pending = pendingCompletionEventsByCallbackId.get(callbackTaskId);
+    if (!pending) {
+      return null;
+    }
+
+    for (let index = pending.events.length - 1; index >= 0; index -= 1) {
+      const event = pending.events[index];
+      if (event?.type === 'completion' && event.text.trim()) {
+        return event.text;
+      }
+    }
+
+    return null;
+  };
+
   const unsubscribeTurnCompleted = harness.subscribeRuntimeTurnCompleted(
     (event: AcpTurnCompletedEvent) => {
       const text = stripLlmCitationArtifacts(event.text);
@@ -337,10 +374,27 @@ export function subscribeHarnessCallbacks({
     }
 
     if (event.eventName === TaskEventName.TaskCompleted) {
-      void (async () => {
-        await waitForPendingPersistenceWrites();
-        flushPendingCompletionEvents(taskId);
-      })();
+      const completionMetadata = event.payload[3] as
+        | TaskCompletionMetadata
+        | undefined;
+      recordMissingChatCloseoutFallback(
+        context,
+        completionMetadata?.missingChatCloseout
+          ? {
+              runId: taskRun.id,
+              completionId: completionMetadata.completionId ?? taskId,
+              text: getLatestPendingCompletionText(taskId),
+              mcpTaskEnv,
+              logger,
+            }
+          : null,
+      );
+      trackPendingTaskCompletionWork(
+        (async () => {
+          await waitForPendingPersistenceWrites();
+          flushPendingCompletionEvents(taskId);
+        })(),
+      );
       return;
     }
 
@@ -360,6 +414,8 @@ export function subscribeHarnessCallbacks({
     unsubscribeTaskEvents();
     await assistantOutputStampInFlight;
     await waitForPendingPersistenceWrites();
+    await waitForPendingTaskCompletionWork();
+    await waitForMissingChatCloseoutFallbackDelivery(context);
 
     for (const callbackTaskId of pendingCompletionEventsByCallbackId.keys()) {
       flushPendingCompletionEvents(callbackTaskId);

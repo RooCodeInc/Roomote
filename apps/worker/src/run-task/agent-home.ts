@@ -13,22 +13,25 @@ import {
   CHATGPT_GATEWAY_PROVIDER_ID,
   CHATGPT_OPENCODE_PROVIDER_ID,
   collectOpenRouterVariantModelAlias,
-  DEFAULT_BEDROCK_MANTLE_REGION,
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   getInferenceGatewayProvider,
   getInferenceGatewayProviderByEnvVarName,
+  BRAIN_MCP_ID,
+  BRAIN_MCP_INSTRUCTIONS,
   getMcpIntegration,
   getOpenAiCompatibleRuntimeConfigs,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_GITHUB_COPILOT_ENV_VAR_NAME,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
-  INFERENCE_GATEWAY_REGION_PATTERN,
   INFERENCE_GATEWAY_URL_ENV_VAR_NAME,
   INFERENCE_GATEWAY_XAI_ENV_VAR_NAME,
   XAI_OPENCODE_PROVIDER_ID,
   type InferenceGatewayProvider,
   isConfiguredEnvValue,
   isTaskModelIdDisabled,
+  mergeAmazonBedrockProviderConfig,
+  mergeBedrockMantleOpenAiProviderConfig,
+  mergeBedrockMantleProviderConfig,
   mergeCloudflareOpenCodeProviderConfig,
   mergeOpenAiCompatibleProviderConfig,
   rewriteCloudflareOpenCodeModelId,
@@ -37,11 +40,14 @@ import {
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
   parseInferenceGatewayKeys,
+  parseTaskModelContextWindows,
   renderManualSkillMarkdown,
   resolveOpenRouterVariantModelAlias,
+  toBedrockMantleRuntimeModelId,
   OPENCODE_ARCHITECT_AGENT,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   OPENCODE_GO_API_KEY_ENV_VAR_NAME,
+  TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
   TaskPayloadKind,
   type EnvironmentManualSkill,
   type OpenRouterVariantModelAlias,
@@ -111,6 +117,10 @@ const ROOMOTE_OPENCODE_ADVISOR_AGENT_NAME = 'advisor';
 
 const ROOMOTE_OPENCODE_EXPLORE_AGENT_NAME = 'explore';
 const OPENCODE_GENERAL_AGENT_NAME = 'general';
+
+const MCP_ISOLATED_AGENT_NAMES = [ROOMOTE_OPENCODE_VISUAL_AGENT_NAME] as const;
+
+const ROOMOTE_MCP_SERVER_NAME = 'roomote';
 
 const ROOMOTE_OPENCODE_VISUAL_MODEL_INSTRUCTIONS_FILE_NAME =
   'roomote-opencode-visual-model-instructions.md';
@@ -554,6 +564,12 @@ function createIntegrationMcpInstructions(
   mcpServers: OpenCodeConfigMcpServer[] | undefined,
 ): string | undefined {
   const sections = (mcpServers ?? []).flatMap((mcpServer) => {
+    // The Brain is infrastructure rather than a catalog integration, so its
+    // recall-first guidance ships from the shared types contract.
+    if (mcpServer.name === BRAIN_MCP_ID) {
+      return [`# Connected: Brain\n\n${BRAIN_MCP_INSTRUCTIONS}`];
+    }
+
     const integration = getMcpIntegration(mcpServer.name);
 
     if (!integration) {
@@ -613,6 +629,32 @@ function createOpenCodeMcpConfig(
   );
 }
 
+function createMcpToolExclusions(
+  mcpServers: OpenCodeConfigMcpServer[] | undefined,
+  shouldExclude: (mcpServer: OpenCodeConfigMcpServer) => boolean = () => true,
+): Record<string, false> {
+  return Object.fromEntries(
+    (mcpServers ?? [])
+      .filter(shouldExclude)
+      .map((mcpServer) => [`${mcpServer.name}_*`, false] as const),
+  );
+}
+
+function mergeAgentToolExclusions(
+  agentConfig: unknown,
+  exclusions: Record<string, false>,
+): Record<string, unknown> {
+  const config = asRecord(agentConfig);
+
+  return {
+    ...config,
+    tools: {
+      ...asRecord(config.tools),
+      ...exclusions,
+    },
+  };
+}
+
 function writeOpenCodeManagedFiles(openCodeConfigDir: string): void {
   const pluginsDir = path.join(
     openCodeConfigDir,
@@ -663,220 +705,10 @@ function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function mergeBedrockMantleProviderConfig(
-  providerConfig: Record<string, unknown>,
-  runtimeEnv: Record<string, string>,
-  modelIds: Array<string | undefined>,
-): Record<string, unknown> {
-  const mantleModelIds = [
-    ...new Set(
-      modelIds.flatMap((modelId) => {
-        const prefix = `${BEDROCK_MANTLE_OPENCODE_PROVIDER_ID}/`;
-        const normalized = modelId?.trim();
-
-        return normalized?.startsWith(prefix)
-          ? [normalized.slice(prefix.length)]
-          : [];
-      }),
-    ),
-  ];
-
-  if (mantleModelIds.length === 0) {
-    return providerConfig;
-  }
-
-  const region = runtimeEnv.AWS_REGION?.trim() || DEFAULT_BEDROCK_MANTLE_REGION;
-
-  if (!INFERENCE_GATEWAY_REGION_PATTERN.test(region)) {
-    throw new Error(
-      `AWS_REGION must be a valid AWS region for Amazon Bedrock. Received "${region}".`,
-    );
-  }
-
-  const existingProvider = asRecord(
-    providerConfig[BEDROCK_MANTLE_OPENCODE_PROVIDER_ID],
-  );
-  const existingOptions = asRecord(existingProvider.options);
-  const existingModels = asRecord(existingProvider.models);
-  const models = Object.fromEntries(
-    mantleModelIds.map((modelId) => [
-      modelId,
-      {
-        name: modelId,
-        ...asRecord(existingModels[modelId]),
-      },
-    ]),
-  );
-
-  return {
-    ...providerConfig,
-    [BEDROCK_MANTLE_OPENCODE_PROVIDER_ID]: {
-      ...existingProvider,
-      npm: '@ai-sdk/anthropic',
-      name: 'Amazon Bedrock',
-      options: {
-        ...existingOptions,
-        baseURL: `https://bedrock-mantle.${region}.api.aws/anthropic/v1`,
-        apiKey: '{env:AWS_BEARER_TOKEN_BEDROCK}',
-      },
-      models: {
-        ...existingModels,
-        ...models,
-      },
-    },
-  };
-}
-
-function mergeBedrockMantleOpenAiProviderConfig(
-  providerConfig: Record<string, unknown>,
-  runtimeEnv: Record<string, string>,
-  modelIds: Array<string | undefined>,
-): Record<string, unknown> {
-  const prefix = `${BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID}/`;
-  const mantleModelIds = [
-    ...new Set(
-      modelIds.flatMap((modelId) => {
-        const normalized = modelId?.trim();
-
-        return normalized?.startsWith(prefix)
-          ? [normalized.slice(prefix.length)]
-          : [];
-      }),
-    ),
-  ];
-
-  if (mantleModelIds.length === 0) {
-    return providerConfig;
-  }
-
-  const region = runtimeEnv.AWS_REGION?.trim() || DEFAULT_BEDROCK_MANTLE_REGION;
-
-  if (!INFERENCE_GATEWAY_REGION_PATTERN.test(region)) {
-    throw new Error(
-      `AWS_REGION must be a valid AWS region for Amazon Bedrock. Received "${region}".`,
-    );
-  }
-
-  const existingProvider = asRecord(
-    providerConfig[BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID],
-  );
-  const existingOptions = asRecord(existingProvider.options);
-  const existingModels = asRecord(existingProvider.models);
-
-  return {
-    ...providerConfig,
-    [BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID]: {
-      ...existingProvider,
-      // Mantle GPT models support the OpenAI Responses API, not Chat
-      // Completions. The native provider selects the Responses transport.
-      npm: '@ai-sdk/openai',
-      name: 'Amazon Bedrock',
-      options: {
-        ...existingOptions,
-        baseURL: `https://bedrock-mantle.${region}.api.aws/openai/v1`,
-        apiKey: '{env:AWS_BEARER_TOKEN_BEDROCK}',
-      },
-      models: {
-        ...existingModels,
-        ...Object.fromEntries(
-          mantleModelIds.map((modelId) => [
-            modelId,
-            {
-              name: modelId,
-              ...asRecord(existingModels[modelId]),
-            },
-          ]),
-        ),
-      },
-    },
-  };
-}
-
-function mergeAmazonBedrockProviderConfig(
-  providerConfig: Record<string, unknown>,
-  runtimeEnv: Record<string, string>,
-  modelIds: Array<string | undefined>,
-): Record<string, unknown> {
-  const prefix = `${AMAZON_BEDROCK_OPENCODE_PROVIDER_ID}/`;
-  const bedrockModelIds = [
-    ...new Set(
-      modelIds.flatMap((modelId) => {
-        const normalized = modelId?.trim();
-
-        return normalized?.startsWith(prefix)
-          ? [normalized.slice(prefix.length)]
-          : [];
-      }),
-    ),
-  ];
-
-  if (bedrockModelIds.length === 0) {
-    return providerConfig;
-  }
-
-  const region = runtimeEnv.AWS_REGION?.trim() || DEFAULT_BEDROCK_MANTLE_REGION;
-
-  if (!INFERENCE_GATEWAY_REGION_PATTERN.test(region)) {
-    throw new Error(
-      `AWS_REGION must be a valid AWS region for Amazon Bedrock. Received "${region}".`,
-    );
-  }
-
-  const existingProvider = asRecord(
-    providerConfig[AMAZON_BEDROCK_OPENCODE_PROVIDER_ID],
-  );
-  const existingOptions = asRecord(existingProvider.options);
-  const existingModels = asRecord(existingProvider.models);
-
-  return {
-    ...providerConfig,
-    [AMAZON_BEDROCK_OPENCODE_PROVIDER_ID]: {
-      ...existingProvider,
-      npm: '@ai-sdk/amazon-bedrock',
-      name: 'Amazon Bedrock',
-      options: {
-        apiKey: '{env:AWS_BEARER_TOKEN_BEDROCK}',
-        ...existingOptions,
-      },
-      models: {
-        ...existingModels,
-        ...Object.fromEntries(
-          bedrockModelIds.map((modelId) => [
-            modelId,
-            {
-              name: modelId,
-              ...asRecord(existingModels[modelId]),
-            },
-          ]),
-        ),
-      },
-    },
-  };
-}
-
 function toOpenCodeRuntimeModelId(modelId: string): string {
   return rewriteCloudflareOpenCodeModelId(
     toBedrockMantleRuntimeModelId(modelId),
   );
-}
-
-function toBedrockMantleRuntimeModelId(modelId: string): string {
-  const mantlePrefix = `${BEDROCK_MANTLE_OPENCODE_PROVIDER_ID}/openai.`;
-  const nativePrefix = `${AMAZON_BEDROCK_OPENCODE_PROVIDER_ID}/openai.`;
-
-  if (modelId.startsWith(mantlePrefix)) {
-    return `${BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID}/${modelId.slice(
-      BEDROCK_MANTLE_OPENCODE_PROVIDER_ID.length + 1,
-    )}`;
-  }
-
-  if (modelId.startsWith(nativePrefix)) {
-    return `${BEDROCK_MANTLE_OPENAI_OPENCODE_PROVIDER_ID}/${modelId.slice(
-      AMAZON_BEDROCK_OPENCODE_PROVIDER_ID.length + 1,
-    )}`;
-  }
-
-  return modelId;
 }
 
 /**
@@ -976,6 +808,19 @@ function mergeInferenceGatewayProviderConfig(
         gatewayUrl,
         copilotProvider,
       );
+      // OpenCode registers its GitHub Copilot endpoint router (GPT-5+ models
+      // must call /responses; Copilot rejects them on /chat/completions) only
+      // for providers enabled before its custom-loader pass, and a provider
+      // declared purely through config merges after that pass. Naming the run
+      // token — already present in the harness env — as the provider's env
+      // key enables the provider early so the router registers.
+      merged = {
+        ...merged,
+        'github-copilot': {
+          ...asRecord(merged['github-copilot']),
+          env: ['ROOMOTE_CLOUD_TOKEN'],
+        },
+      };
     }
   }
 
@@ -1488,6 +1333,10 @@ function resolveModelBackedOpenCodeConfig(
   reasoningEffortOverride?: ReasoningEffort,
 ): Record<string, unknown> | null {
   const isLiteLlmConfigured = isConfiguredEnvValue(runtimeEnv.LITELLM_BASE_URL);
+  const modelContextWindows = parseTaskModelContextWindows(
+    runtimeEnv[TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME],
+  );
+  delete runtimeEnv[TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME];
   const rawModel = applyImplicitLiteLlmModelPrefix(
     runtimeEnv.R_MODEL?.trim() ?? '',
     isLiteLlmConfigured,
@@ -1784,6 +1633,10 @@ function resolveModelBackedOpenCodeConfig(
     exploreModel,
     planningModel,
   ];
+  const openAiCompatibleModelIds = [
+    ...configuredModelIds,
+    ...Object.keys(modelContextWindows),
+  ];
   const providerModelConfig = chatGptFastMode
     ? mergeOpenCodeChatGptFastModeOptions(
         providerReasoningConfig,
@@ -1803,8 +1656,9 @@ function resolveModelBackedOpenCodeConfig(
                     variantAliases,
                   ),
                   runtimeEnv,
-                  configuredModelIds,
+                  openAiCompatibleModelIds,
                   visionModel ?? effectiveCodingModel,
+                  modelContextWindows,
                 ),
                 runtimeEnv,
                 configuredModelIds,
@@ -1823,7 +1677,7 @@ function resolveModelBackedOpenCodeConfig(
       configuredModelIds,
     ),
     runtimeEnv,
-    configuredModelIds,
+    openAiCompatibleModelIds,
   );
 
   return {
@@ -2023,6 +1877,27 @@ export function generateOpenCodeConfig({
       'utf8',
     );
     instructions.push(proofRunnerInstructionsPath);
+  }
+
+  const mcpToolExclusions = createMcpToolExclusions(mcpServers);
+  for (const agentName of MCP_ISOLATED_AGENT_NAMES) {
+    if (operatorAgent[agentName]) {
+      operatorAgent[agentName] = mergeAgentToolExclusions(
+        operatorAgent[agentName],
+        mcpToolExclusions,
+      );
+    }
+  }
+
+  if (operatorAgent[ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME]) {
+    operatorAgent[ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME] =
+      mergeAgentToolExclusions(
+        operatorAgent[ROOMOTE_OPENCODE_PROOF_RUNNER_AGENT_NAME],
+        createMcpToolExclusions(
+          mcpServers,
+          (mcpServer) => mcpServer.name !== ROOMOTE_MCP_SERVER_NAME,
+        ),
+      );
   }
 
   const integrationInstructionsContent =

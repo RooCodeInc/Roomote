@@ -483,7 +483,9 @@ describe('resolveOpenCodeSmallModel', () => {
         prompt: 'Answer.',
       }),
     ).rejects.toThrow(
-      'OpenCode structured prompt failed: StructuredOutputError: failed to satisfy schema',
+      // The resolved provider/model id rides in the message so a router
+      // fallback log names the model without a database lookup.
+      'OpenCode structured prompt failed (model openrouter/z-ai/glm-5.2): StructuredOutputError: failed to satisfy schema',
     );
   });
 
@@ -573,6 +575,99 @@ describe('resolveOpenCodeSmallModel', () => {
         },
       }),
       expect.anything(),
+    );
+  });
+
+  it('addresses Mantle GPT helper models by their runtime provider id', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/z-ai/glm-5.2',
+      // The dashboard saves Mantle GPT helper models under `bedrock-mantle/`;
+      // the runtime provider that actually serves them (and that the helper
+      // server's config registers) is `bedrock-mantle-openai`.
+      R_SMALL_MODEL: 'bedrock-mantle/openai.gpt-5.6-luna',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: { error: null },
+        parts: [{ type: 'text', text: 'routed' }],
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+
+    await generateTrackedNonTaskText({
+      surface: NON_TASK_INFERENCE_SURFACES.routerTaskRouting,
+      prompt: 'Choose a workspace.',
+    });
+
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: {
+          providerID: 'bedrock-mantle-openai',
+          modelID: 'openai.gpt-5.6-luna',
+        },
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('registers an explicit Bedrock model on the helper server it leases', async () => {
+    process.env = {
+      ...originalEnv,
+    };
+    // The deployment's role models do not include the explicit model — its
+    // provider registration must come from the explicit model itself.
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/z-ai/glm-5.2',
+      AWS_REGION: 'us-east-1',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: { error: null },
+        parts: [{ type: 'text', text: 'ok' }],
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+
+    await generateTrackedNonTaskText({
+      surface: NON_TASK_INFERENCE_SURFACES.routerTaskRouting,
+      model: 'bedrock-mantle/openai.gpt-5.6-luna',
+      prompt: 'Choose a workspace.',
+    });
+
+    const spawnEnv = spawnMock.mock.calls[0]?.[2]?.env as
+      | NodeJS.ProcessEnv
+      | undefined;
+    const spawnedConfig = JSON.parse(
+      spawnEnv?.OPENCODE_CONFIG_CONTENT ?? '{}',
+    ) as {
+      provider?: Record<string, unknown>;
+    };
+
+    expect(spawnedConfig.provider).toMatchObject({
+      'bedrock-mantle-openai': {
+        models: {
+          'openai.gpt-5.6-luna': { name: 'openai.gpt-5.6-luna' },
+        },
+      },
+    });
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: {
+          providerID: 'bedrock-mantle-openai',
+          modelID: 'openai.gpt-5.6-luna',
+        },
+      }),
+      expect.any(Object),
     );
   });
 
@@ -851,6 +946,159 @@ describe('resolveOpenCodeSmallModel', () => {
       expect.any(Object),
     );
   });
+  it('validates candidate credentials with a managed non-task OpenCode server', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4999',
+    };
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: { structured: { ok: true } },
+        parts: [],
+      },
+      error: undefined,
+    });
+
+    const { validateNonTaskInference } =
+      await import('../non-task-provider-usage.js');
+    const result = await validateNonTaskInference({
+      model: 'anthropic/claude-sonnet-5',
+      runtimeEnv: { ANTHROPIC_API_KEY: 'candidate-key' },
+    });
+
+    expect(result).toMatchObject({
+      success: true,
+      model: 'anthropic/claude-sonnet-5',
+    });
+    // Validation must not use the configured server, whose process may have
+    // entirely different credentials from the candidate being checked.
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(spawnMock.mock.calls[0]?.[2]?.env).toMatchObject({
+      ANTHROPIC_API_KEY: 'candidate-key',
+      R_MODEL: 'anthropic/claude-sonnet-5',
+    });
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        format: expect.objectContaining({ retryCount: 0 }),
+        model: {
+          providerID: 'anthropic',
+          modelID: 'claude-sonnet-5',
+        },
+        tools: { '*': false, StructuredOutput: true },
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it.each([
+    {
+      providerError: '401 invalid API key sk-secret-that-must-not-leak',
+      reason: 'invalid_credentials',
+      retryable: false,
+    },
+    {
+      providerError: '402 payment required: insufficient credits',
+      reason: 'insufficient_credits',
+      retryable: false,
+    },
+    {
+      providerError: '429 too many requests',
+      reason: 'rate_limited',
+      retryable: true,
+    },
+  ])(
+    'sanitizes a $reason provider validation failure',
+    async ({ providerError, reason, retryable }) => {
+      process.env = { ...originalEnv };
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      sessionPromptMock.mockResolvedValue({
+        data: undefined,
+        error: { data: { message: providerError } },
+      });
+
+      try {
+        const { validateNonTaskInference } =
+          await import('../non-task-provider-usage.js');
+        const result = await validateNonTaskInference({
+          model: 'openrouter/openai/gpt-5.6-terra',
+          // The provider error above echoes this submitted key back, the
+          // way real 401 responses can.
+          runtimeEnv: { OPENROUTER_API_KEY: 'sk-secret-that-must-not-leak' },
+        });
+
+        expect(result).toMatchObject({ success: false, reason, retryable });
+        expect(result.success || result.message).not.toContain('sk-secret');
+        expect(result.success || result.message).not.toContain(providerError);
+        // The server-side log keeps provider detail but must redact the
+        // candidate credential the provider echoed.
+        expect(warnSpy.mock.calls.flat().join(' ')).not.toContain('sk-secret');
+      } finally {
+        warnSpy.mockRestore();
+      }
+    },
+  );
+
+  // Real provider rejections arrive as structured `{name, data: {message,
+  // statusCode, responseBody}}` assistant errors whose wording varies too
+  // much for keyword matching — Anthropic says "API key is invalid.",
+  // Bedrock Mantle says "Invalid bearer token". The status code decides.
+  it.each([
+    {
+      providerMessage: 'API key is invalid.',
+      statusCode: 401,
+      reason: 'invalid_credentials',
+      retryable: false,
+    },
+    {
+      providerMessage: 'Invalid bearer token',
+      statusCode: 403,
+      reason: 'invalid_credentials',
+      retryable: false,
+    },
+    {
+      providerMessage: 'upgrade your plan',
+      statusCode: 402,
+      reason: 'insufficient_credits',
+      retryable: false,
+    },
+    {
+      providerMessage: 'slow down',
+      statusCode: 429,
+      reason: 'rate_limited',
+      retryable: true,
+    },
+  ])(
+    'classifies a structured status-$statusCode provider error as $reason',
+    async ({ providerMessage, statusCode, reason, retryable }) => {
+      process.env = { ...originalEnv };
+      sessionPromptMock.mockResolvedValue({
+        data: {
+          info: {
+            error: {
+              name: 'APIError',
+              data: {
+                message: providerMessage,
+                statusCode,
+                responseBody: `{"type":"error","error":{"message":"${providerMessage}"}}`,
+              },
+            },
+          },
+          parts: [],
+        },
+        error: undefined,
+      });
+
+      const { validateNonTaskInference } =
+        await import('../non-task-provider-usage.js');
+      const result = await validateNonTaskInference({
+        model: 'anthropic/claude-sonnet-5',
+        runtimeEnv: { ANTHROPIC_API_KEY: 'candidate-key' },
+      });
+
+      expect(result).toMatchObject({ success: false, reason, retryable });
+      expect(result.success || result.message).not.toContain(providerMessage);
+    },
+  );
 });
 
 describe('createOpenCodeSdkFetch', () => {

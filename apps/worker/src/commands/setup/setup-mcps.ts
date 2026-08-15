@@ -1,6 +1,8 @@
 import * as path from 'node:path';
 
 import {
+  BRAIN_MCP_ID,
+  BRAIN_PROXY_PATH,
   CUSTOM_MCP_PROXY_PATH_PREFIX,
   getMcpIntegrationUpstreamUrl,
   isCredentialOnlyMcpIntegration,
@@ -368,11 +370,23 @@ export function resolveBuiltInMcpServers(
 
   const resolvedMcps: Record<string, McpServerConfig> = {};
 
+  // The Brain is delivered only when the deployment has one, so its presence
+  // here is the signal that gates Brain-dependent Roomote tools (agents on
+  // deployments without a Brain never see a memory tool that cannot work).
+  const brainAvailable = Boolean(
+    integrations?.userMcpServers?.[BRAIN_MCP_ID]?.url,
+  );
+
   for (const [name, config] of Object.entries(BUILT_IN_MCPS)) {
     if (config.type === 'stdio') {
       const extraEnv =
         name === 'roomote'
-          ? { ...stdioEnvExtras, ...roomoteEnv, ...config.env }
+          ? {
+              ...stdioEnvExtras,
+              ...roomoteEnv,
+              ...(brainAvailable ? { ROOMOTE_BRAIN_AVAILABLE: 'true' } : {}),
+              ...config.env,
+            }
           : { ...stdioEnvExtras, ...config.env };
 
       resolvedMcps[name] = { ...config, env: extraEnv };
@@ -385,6 +399,35 @@ export function resolveBuiltInMcpServers(
   if (integrations?.userMcpServers) {
     for (const [name, config] of Object.entries(integrations.userMcpServers)) {
       if (!config.url) {
+        continue;
+      }
+
+      // The Brain arrives as the fixed /api/mcp/gbrain proxy URL; rewrite the
+      // origin to the API base and inject the run token, exactly like the
+      // curated integration proxies below. The Brain's own read-only
+      // credential stays server-side in the API proxy.
+      if (
+        name === BRAIN_MCP_ID &&
+        isExpectedProxyUrl(config.url, BRAIN_PROXY_PATH)
+      ) {
+        const apiUrl = resolveApiBaseUrl(taskEnv);
+        const cloudToken = taskEnv?.ROOMOTE_CLOUD_TOKEN;
+
+        if (!apiUrl || !cloudToken) {
+          console.warn(
+            `[resolveBuiltInMcpServers] Skipping Brain MCP: missing API base URL or ROOMOTE_CLOUD_TOKEN in task env`,
+          );
+          continue;
+        }
+
+        resolvedMcps[name] = {
+          type: 'streamable-http',
+          url: `${apiUrl}${BRAIN_PROXY_PATH}`,
+          headers: withPreviewProxyBypassHeader(
+            withTaskRunTokenAuthHeader(config.headers, cloudToken),
+            taskEnv,
+          ),
+        };
         continue;
       }
 

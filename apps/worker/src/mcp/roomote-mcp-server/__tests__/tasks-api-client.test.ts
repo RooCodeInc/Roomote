@@ -6,11 +6,14 @@ import {
   getTaskSummary,
   launchTask,
   cancelTask,
+  listTaskModels,
   stopTask,
   submitAutomationWorkItems,
   createEnvironment,
   updateEnvironment,
   submitTaskSuggestions,
+  getTaskGoal,
+  updateTaskGoal,
 } from '../tasks-api-client.js';
 import type { RoomoteConfig } from '../types.js';
 
@@ -18,6 +21,83 @@ const config: RoomoteConfig = {
   token: 'test-token',
   platformApiUrl: 'https://test-api.example.com',
 };
+
+describe('task goal API', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('reads and updates a goal through the bounded platform API client', async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ goal: null }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ updated: true, goal: {} }),
+      });
+
+    await getTaskGoal(config, 42);
+    await updateTaskGoal(config, 42, {
+      action: 'complete',
+      generation: 'goal-generation:current',
+    });
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      'https://test-api.example.com/api/mcp/tasks/runs/42/goal',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer test-token',
+        }),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      'https://test-api.example.com/api/mcp/tasks/runs/42/goal',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'complete',
+          generation: 'goal-generation:current',
+        }),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+});
+
+describe('listTaskModels', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('lists models from the task model endpoint', async () => {
+    const mockResponse = {
+      models: [
+        {
+          id: 'openai/gpt-5.6-luna',
+          displayName: 'GPT 5.6 Luna',
+          family: 'GPT',
+        },
+      ],
+      defaultModelId: 'openai/gpt-5.6-luna',
+    };
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => mockResponse,
+    });
+
+    await expect(listTaskModels(config)).resolves.toEqual(mockResponse);
+    expect(fetch).toHaveBeenCalledWith(
+      'https://test-api.example.com/api/mcp/tasks/models',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer test-token',
+        }),
+      }),
+    );
+  });
+});
 
 describe('searchTasks', () => {
   afterEach(() => vi.restoreAllMocks());

@@ -389,6 +389,54 @@ domain, which requires a domain you control:
    hostname. Previews are always enabled and publish for every environment
    that defines preview ports.
 
+## Enabling the Brain (optional)
+
+The `gbrain` service is part of the template and boots idle. It gives this
+deployment shared memory: completed tasks and activity from connected
+integrations (pull requests, public Slack channels, meeting notes, GitHub
+issues) become pages that agents consult with citations, and agents record
+what they decided and why when they finish substantial work.
+
+Nothing here, in most cases:
+
+1. Configure a model provider under **Settings → Models** after first boot, if
+   you have not already. The Brain has no provider key of its own; it asks the
+   api service for embeddings and synthesis, and the api service uses the key
+   your deployment already has. Changing that key later takes effect on the
+   Brain's next request, with no redeploy.
+2. To bill the Brain separately from task inference, set
+   `R_BRAIN_OPENROUTER_API_KEY` or `R_BRAIN_OPENAI_API_KEY` on **api**.
+   Those take precedence over the deployment's general provider keys.
+Within a minute of a provider being configured, the deployment registers
+its own scoped clients against the Brain (a read-only one for agents, a
+write-only one for ingestion), backfills the task history it already has, and
+starts delivering the Brain to new tasks. Watch the bullmq service logs for
+`[brain] provisioned scoped clients`.
+
+Nothing else is required, and nothing is exposed: the Brain has no public
+domain, so it is reachable only over Railway's private network, and task
+sandboxes never touch it directly — they go through the api service with
+their run token, which grants read access only.
+
+Leaving every provider unconfigured is a supported state: the Brain sits
+idle, agents are told nothing about it, and no ingestion runs. Deployments that will never
+want memory can delete the `gbrain` service entirely.
+
+Two operational notes:
+
+- **Back up the volume.** The `/data` volume holds the corpus. Losing it is
+  recoverable — task history and integration sources re-ingest, and Roomote
+  re-registers its clients automatically when the Brain no longer recognizes
+  them — but the deployment starts cold until that finishes.
+- **Model choice is a variable, not a rebuild.** `R_BRAIN_MODEL` selects the
+  synthesis model and `R_BRAIN_EMBEDDING_MODEL` the embedding model, both in
+  your provider's own naming, both set on **api**. Leave them empty for the
+  defaults. The synthesis model can change at any time; the embedding model
+  sizes the Brain's vector storage when it is first created, so set it (with
+  `R_BRAIN_EMBEDDING_DIMENSIONS`) before first boot or not at all. A later
+  change is ignored and reported in the Brain's logs rather than silently
+  applied.
+
 ## Upgrades, backups, and costs
 
 - **Template edits do not propagate.** A deployed project is a snapshot;

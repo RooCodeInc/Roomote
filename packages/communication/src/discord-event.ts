@@ -533,7 +533,12 @@ function findInteractionOption(
 
 export function getDiscordInteractionCommand(
   eventOrInteraction: DiscordGatewayEvent | DiscordInteraction,
-): { name: string; request?: string; code?: string } | null {
+): {
+  name: string;
+  request?: string;
+  code?: string;
+  objective?: string;
+} | null {
   const interaction = isDiscordGatewayEventValue(eventOrInteraction)
     ? getDiscordInteractionCreate(eventOrInteraction)
     : eventOrInteraction;
@@ -545,12 +550,19 @@ export function getDiscordInteractionCommand(
     'request',
   )?.value;
   const code = findInteractionOption(interaction.data.options, 'code')?.value;
+  const objective = findInteractionOption(
+    interaction.data.options,
+    'objective',
+  )?.value;
   return {
     name: interaction.data.name.toLowerCase(),
     ...(typeof request === 'string' && request.trim()
       ? { request: request.trim() }
       : {}),
     ...(typeof code === 'string' && code.trim() ? { code: code.trim() } : {}),
+    ...(typeof objective === 'string' && objective.trim()
+      ? { objective: objective.trim() }
+      : {}),
   };
 }
 
@@ -573,7 +585,8 @@ export function isDiscordTaskEntryEvent(
         isDiscordBotMentioned(message, options.botUserId))
     );
   }
-  return getDiscordInteractionCommand(event)?.name === 'new';
+  const commandName = getDiscordInteractionCommand(event)?.name;
+  return commandName === 'new' || commandName === 'goal';
 }
 
 function formatDiscordUser(input: {

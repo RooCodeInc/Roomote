@@ -18,6 +18,7 @@ import {
   tasks,
   taskRuns,
   getDeploymentPrAction,
+  projectPendingPrReviewEventsForAssociation,
   taskPullRequests,
   type TaskRun,
 } from '@roomote/db/server';
@@ -25,6 +26,7 @@ import {
   buildPullRequestUrl,
   getSourceControlProviderLabel,
   findPrBodyAttributionLine,
+  preservePrBodyAttribution,
   getCommunicationProviderFromTaskPayload,
   getCommunicationGuildIdFromTaskPayload,
   getCommunicationTenantIdFromTaskPayload,
@@ -452,8 +454,9 @@ async function resolveEffectivePrAction(taskRun: TaskRun): Promise<PrAction> {
  * delivery path used to create this association by parsing `gh pr create`
  * tool output from the transcript; the server-side mutation path knows the
  * pull request authoritatively for every provider, so it persists the
- * association directly. Association failures must not fail the mutation the
- * agent already performed.
+ * association directly. The provider mutation is idempotent, so an
+ * association failure must reject the operation and make the whole mutation
+ * visibly retriable instead of reporting an unowned pull request as complete.
  */
 async function persistSourceControlPullRequestAssociation({
   taskRun,
@@ -470,8 +473,8 @@ async function persistSourceControlPullRequestAssociation({
 
   const status = result.draft ? 'draft' : 'open';
 
-  try {
-    await db
+  await db.transaction(async (tx) => {
+    await tx
       .insert(taskPullRequests)
       .values({
         taskId: taskRun.taskId,
@@ -498,13 +501,13 @@ async function persistSourceControlPullRequestAssociation({
           updatedAt: new Date(),
         },
       });
-  } catch (error) {
-    console.warn(
-      `[persistSourceControlPullRequestAssociation] Failed to associate ${result.repositoryFullName}#${result.number} with task ${taskRun.taskId}: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
-    );
-  }
+    await projectPendingPrReviewEventsForAssociation(tx, {
+      taskId: taskRun.taskId,
+      sourceControlProvider: repository.sourceControlProvider,
+      repository: result.repositoryFullName,
+      prNumber: result.number,
+    });
+  });
 }
 
 async function createOrUpdateGitHubPullRequest({
@@ -566,7 +569,7 @@ async function createOrUpdateGitHubPullRequest({
       repo,
       pull_number: pullRequest.number,
       title: input.title,
-      body: input.body,
+      body: preservePrBodyAttribution(input.body, pullRequest.body ?? ''),
     });
     pullRequest = data;
   } else {

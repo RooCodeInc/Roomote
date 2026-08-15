@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   taskRunRowsMock,
+  whereMock,
   findBackgroundAutomationSlackThreadMock,
   getLatestSlackBotReplyMock,
 } = vi.hoisted(() => ({
   taskRunRowsMock: vi.fn(),
+  whereMock: vi.fn(),
   findBackgroundAutomationSlackThreadMock: vi.fn(),
   getLatestSlackBotReplyMock: vi.fn(),
 }));
@@ -27,7 +29,7 @@ vi.mock('@roomote/db/server', () => {
   const chain = {
     from: vi.fn(),
     innerJoin: vi.fn(),
-    where: vi.fn(),
+    where: whereMock,
     orderBy: vi.fn(),
     limit: vi.fn(async () => taskRunRowsMock()),
   };
@@ -41,6 +43,7 @@ vi.mock('@roomote/db/server', () => {
     db: { select: vi.fn(() => chain) },
     desc: vi.fn((value: unknown) => value),
     eq: vi.fn((left: unknown, right: unknown) => ({ left, right })),
+    isNull: vi.fn((value: unknown) => ({ isNull: value })),
     findBackgroundAutomationSlackThread:
       findBackgroundAutomationSlackThreadMock,
     taskRuns: {
@@ -51,6 +54,7 @@ vi.mock('@roomote/db/server', () => {
       taskId: 'taskRuns.taskId',
     },
     tasks: {
+      deletedAt: 'tasks.deletedAt',
       id: 'tasks.id',
       initiatorUserId: 'tasks.initiatorUserId',
       slackThreadTs: 'tasks.slackThreadTs',
@@ -100,5 +104,16 @@ describe('findRoomoteOwnedSlackThread', () => {
     });
 
     await expect(findRoomoteOwnedSlackThread(THREAD)).resolves.toBeNull();
+  });
+
+  it('does not treat soft-deleted task bindings as thread ownership', async () => {
+    await findRoomoteOwnedSlackThread(THREAD);
+
+    expect(whereMock).toHaveBeenNthCalledWith(1, {
+      conditions: [
+        { left: 'tasks.slackThreadTs', right: THREAD.threadTs },
+        { isNull: 'tasks.deletedAt' },
+      ],
+    });
   });
 });

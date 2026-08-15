@@ -40,6 +40,7 @@ import { type SelectedRepositorySummary } from './EnvironmentDefinitionAgentTask
 import { EnvironmentRepositorySelector } from './EnvironmentRepositorySelector';
 import { UpdateGitHubReposHint } from './UpdateGitHubReposHint';
 import {
+  type YamlEditorTab,
   type YamlEnvironmentEditorHandle,
   YamlEnvironmentEditor,
 } from './YamlEnvironmentEditor';
@@ -87,6 +88,9 @@ export function EditEnvironmentPage({
     null,
   );
   const [editorResetKey, setEditorResetKey] = useState(0);
+  // Lifted above YamlMasterView/YamlEnvironmentEditor so it survives the
+  // `editorResetKey`-driven remount that happens when switching versions.
+  const [yamlEditorTab, setYamlEditorTab] = useState<YamlEditorTab>('editor');
   const [selectedVersionValue, setSelectedVersionValue] = useState<string>(
     CURRENT_VERSION_VALUE,
   );
@@ -121,6 +125,7 @@ export function EditEnvironmentPage({
     setAgentChangeRequest('');
     setSelectedModelId(undefined);
     setIsLoadingVersion(false);
+    setYamlEditorTab('editor');
   }, [environmentId]);
 
   useEffect(() => {
@@ -149,6 +154,7 @@ export function EditEnvironmentPage({
     setAgentChangeRequest('');
     setSelectedModelId(undefined);
     setActiveView('yaml');
+    setYamlEditorTab('editor');
   };
 
   const resetLoadedVersionState = (shouldResetEditor: boolean) => {
@@ -329,6 +335,17 @@ export function EditEnvironmentPage({
     [configVersionsQuery.data],
   );
   const showVersionSelector = versionOptions.length >= 2;
+  // `listConfigVersions` is sorted newest-first, so the first entry is the
+  // version number of the currently saved config.
+  const currentVersionNumber = configVersionsQuery.data?.[0]?.version;
+  const diffOriginalLabel =
+    currentVersionNumber != null
+      ? `Saved configuration (Version ${currentVersionNumber})`
+      : undefined;
+  const diffModifiedLabel =
+    selectedVersionValue !== CURRENT_VERSION_VALUE
+      ? `Editing Version ${selectedVersionValue}`
+      : undefined;
 
   return (
     <>
@@ -406,6 +423,10 @@ export function EditEnvironmentPage({
                 versionOptions={versionOptions}
                 isLoadingVersion={isLoadingVersion}
                 onSelectVersion={(value) => void handleVersionSelect(value)}
+                activeTab={yamlEditorTab}
+                onActiveTabChange={setYamlEditorTab}
+                diffOriginalLabel={diffOriginalLabel}
+                diffModifiedLabel={diffModifiedLabel}
               />
             ) : (
               <AgentMasterView
@@ -457,6 +478,10 @@ function YamlMasterView({
   versionOptions,
   isLoadingVersion,
   onSelectVersion,
+  activeTab,
+  onActiveTabChange,
+  diffOriginalLabel,
+  diffModifiedLabel,
 }: {
   editorRef: React.RefObject<YamlEnvironmentEditorHandle | null>;
   initialConfig: EnvironmentConfig | undefined;
@@ -477,6 +502,10 @@ function YamlMasterView({
   versionOptions: Array<{ value: string; label: string }>;
   isLoadingVersion: boolean;
   onSelectVersion: (value: string) => void;
+  activeTab: YamlEditorTab;
+  onActiveTabChange: (tab: YamlEditorTab) => void;
+  diffOriginalLabel?: string;
+  diffModifiedLabel?: string;
 }) {
   return (
     <div id="yaml-editor">
@@ -491,6 +520,10 @@ function YamlMasterView({
         isSaving={isSaving}
         warnings={warnings}
         hideActions
+        activeTab={activeTab}
+        onActiveTabChange={onActiveTabChange}
+        diffOriginalLabel={diffOriginalLabel}
+        diffModifiedLabel={diffModifiedLabel}
       />
 
       <div className="flex flex-col gap-4 border-t pt-4 md:flex-row md:items-center md:justify-between">

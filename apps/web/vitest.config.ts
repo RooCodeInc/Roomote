@@ -16,8 +16,6 @@ export default defineConfig({
     globals: true,
     watch: false,
     reporters: ['dot'],
-    // Keep DB-backed server tests below the local Postgres connection limit.
-    maxWorkers: 4,
     projects: [
       {
         extends: true,
@@ -30,6 +28,8 @@ export default defineConfig({
             '!src/{hooks,components}/**/*.test.{js,jsx,ts,tsx}',
           ],
           environment: 'node',
+          // Keep DB-backed server tests below the local Postgres connection limit.
+          maxWorkers: 4,
           globalSetup: './vitest.setup.server.ts',
           setupFiles: './vitest.setup.mocks.ts',
         },
@@ -43,6 +43,7 @@ export default defineConfig({
             'src/{hooks,components}/**/*.test.{js,jsx,ts,tsx}',
           ],
           environment: 'jsdom',
+          maxWorkers: 8,
           setupFiles: './vitest.setup.client.ts',
         },
       },

@@ -10,6 +10,25 @@ x-roomote-app-image: &roomote-app-image ${IMAGE_REGISTRY:-ghcr.io}/${IMAGE_NAMES
 
 x-roomote-base-env: &roomote-base-env
   NODE_ENV: production
+  # The Brain: supplying this key gives the deployment shared memory that
+  # agents consult. It powers the brain service's embeddings and is the
+  # single activation signal — there is no Settings UI for it.
+  R_BRAIN_OPENROUTER_API_KEY: ${R_BRAIN_OPENROUTER_API_KEY:-}
+  R_BRAIN_OPENAI_API_KEY: ${R_BRAIN_OPENAI_API_KEY:-}
+  # Shared secret the Brain presents to /api/brain/inference. REQUIRED to
+  # enable the Brain: a provider key alone leaves it unable to embed. The
+  # installer generates one; set any 32+ random characters by hand.
+  R_BRAIN_GATEWAY_TOKEN: ${R_BRAIN_GATEWAY_TOKEN:-}
+  # Which models the Brain runs, in the configured provider's own naming.
+  # The synthesis model is free to change; the embedding pair is create-time.
+  R_BRAIN_MODEL: ${R_BRAIN_MODEL:-}
+  R_BRAIN_EMBEDDING_MODEL: ${R_BRAIN_EMBEDDING_MODEL:-}
+  R_BRAIN_EMBEDDING_DIMENSIONS: ${R_BRAIN_EMBEDDING_DIMENSIONS:-}
+  R_GBRAIN_URL: ${R_GBRAIN_URL:-http://gbrain:8931}
+  R_GBRAIN_ADMIN_TOKEN_FILE: /gbrain-data/admin-bootstrap-token
+  # Written by the Brain on first boot when no token was supplied, so a stack
+  # started by hand needs only a provider key.
+  R_BRAIN_GATEWAY_TOKEN_FILE: /gbrain-data/gateway-token
   # Dual-write APP_ENV / ROOMOTE_* aliases keep the previous release bootable
   # against this expand-window compose file during upgrade compatibility.
   R_APP_ENV: ${R_APP_ENV:-${APP_ENV:-production}}
@@ -415,6 +434,8 @@ services:
       <<: *roomote-api-env
       ROOMOTE_SERVICE: api
       PORT: 3001
+    volumes:
+      - gbrain_data:/gbrain-data:ro
     healthcheck:
       test:
         [
@@ -478,6 +499,8 @@ services:
       ROOMOTE_SERVICE: bullmq
       PORT: 3002
       DOCKER_HOST: tcp://docker-proxy:2375
+    volumes:
+      - gbrain_data:/gbrain-data:ro
     healthcheck:
       test:
         [
@@ -488,6 +511,44 @@ services:
       timeout: 6s
       retries: 12
       start_period: 20s
+
+  # Brain (deployment-hosted gbrain). Opt-in via
+  # COMPOSE_PROFILES=brain (local-postgres precedent); deployments
+  # that never enable the profile see no infrastructure change. Internal-only:
+  # no published ports and no Caddy route; the API fronts it at
+  # /api/mcp/gbrain. Set GBRAIN_IMAGE to the pinned published image once the
+  # publish workflow ships it; until then the installer builds from
+  # .docker/gbrain. Wire R_GBRAIN_URL plus static tokens into api/bullmq
+  # (operator-pinned), or the normal path: set GBRAIN_ADMIN_BOOTSTRAP_TOKEN
+  # (>= 32 chars of [A-Za-z0-9_-]) and paste http://gbrain:8931 plus that
+  # same token into Settings > Integrations > Brain; Roomote then
+  # registers its own scoped clients via the admin API. If left unset, the
+  # entrypoint generates one at /data/admin-bootstrap-token on the volume.
+  gbrain:
+    profiles:
+      - brain
+    image: ${GBRAIN_IMAGE:-roomote-gbrain:local}
+    restart: unless-stopped
+    networks: [default]
+    environment:
+      GBRAIN_ADMIN_BOOTSTRAP_TOKEN: ${GBRAIN_ADMIN_BOOTSTRAP_TOKEN:-}
+      # The Brain holds no provider key. It calls back into this deployment,
+      # which injects whichever provider key an admin configured in Settings,
+      # so rotating or switching that key needs no restart here. Setting a
+      # provider key below instead makes the Brain call the provider directly.
+      OPENAI_BASE_URL: ${GBRAIN_OPENAI_BASE_URL:-http://api:3001/api/brain/inference}
+      OPENAI_API_KEY: ${R_BRAIN_GATEWAY_TOKEN:-}
+      # Create-time, and it has to be the container that receives these: the
+      # embedding model and its width are decided when the Brain is created,
+      # and the gateway must never substitute a different one afterwards.
+      # Set both before the first boot, or neither. The synthesis model is
+      # the opposite (R_BRAIN_MODEL, applied by the gateway per request).
+      GBRAIN_EMBEDDING_MODEL: ${R_BRAIN_EMBEDDING_MODEL:-}
+      GBRAIN_EMBEDDING_DIMENSIONS: ${R_BRAIN_EMBEDDING_DIMENSIONS:-}
+    volumes:
+      - gbrain_data:/data
+    security_opt:
+      - no-new-privileges:true
 
   preview-proxy:
     <<: *roomote-service
@@ -543,6 +604,7 @@ volumes:
   minio_data:
   caddy_data:
   caddy_config:
+  gbrain_data:
 
 networks:
   default:

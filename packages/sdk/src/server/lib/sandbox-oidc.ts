@@ -15,6 +15,7 @@ import {
   RunStatus,
   extractErrorDetails,
   getEnvironmentOidcTargets,
+  isComputeProvider,
   isObservedTimeoutError,
   serializeError,
   wrapObservedTimeoutError,
@@ -504,8 +505,14 @@ async function cleanupSandboxOidcRows(
     return;
   }
 
-  const tokenFiles = [...new Set(rows.map((row) => row.tokenFile))];
   const first = getFirstRow(rows);
+
+  if (!isComputeProvider(String(first.computeProvider))) {
+    await deleteRowsByIds(rows.map((row) => row.id));
+    return;
+  }
+
+  const tokenFiles = [...new Set(rows.map((row) => row.tokenFile))];
 
   try {
     await removeSandboxOidcFiles({
@@ -910,6 +917,11 @@ async function refreshSandboxOidcRowsForMachine(
   const firstRow = getFirstRow(rows);
 
   try {
+    if (!isComputeProvider(String(firstRow.computeProvider))) {
+      await cleanupSandboxOidcRows(rows);
+      return { status: 'cleaned' };
+    }
+
     const shouldCleanupStoppedInstance =
       await isDeadOrMissingSandboxOidcInstance({
         computeProvider: firstRow.computeProvider,
@@ -947,6 +959,14 @@ async function refreshSandboxOidcRowsForMachine(
 
     return { status: 'refreshed' };
   } catch (error) {
+    if (!isComputeProvider(String(firstRow.computeProvider))) {
+      console.error(
+        `[sandbox-oidc] Failed to clean OIDC targets for unsupported provider ${firstRow.computeProvider}:${firstRow.computeProviderId}:`,
+        error,
+      );
+      return { status: 'failed', error };
+    }
+
     const shouldCleanupStoppedInstance =
       await isDeadOrMissingSandboxOidcInstance({
         computeProvider: firstRow.computeProvider,

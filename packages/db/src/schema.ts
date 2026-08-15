@@ -10,6 +10,7 @@ import {
   bigint,
   boolean,
   unique,
+  primaryKey,
   check,
   uniqueIndex,
   type AnyPgColumn,
@@ -75,6 +76,7 @@ import type {
   WorkspaceRoutingSettings,
   TaskRunErrorCode,
   UserRole,
+  RepositoryAutomationSignals,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -1032,6 +1034,118 @@ export const taskPullRequests = pgTable(
     check(
       'task_pull_requests_source_control_provider_check',
       sql`${table.sourceControlProvider} in ('github', 'gitlab', 'gitea', 'ado', 'bitbucket')`,
+    ),
+  ],
+);
+
+/**
+ * Durable normalized PR review events. Postgres owns an event before lookup or
+ * delivery; queue wakeups only reduce latency and are never authoritative.
+ */
+export const prReviewEvents = pgTable(
+  'pr_review_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    eventKey: text('event_key').notNull(),
+    sourceControlProvider: text('source_control_provider')
+      .notNull()
+      .$type<SourceControlProvider>(),
+    repository: text('repository').notNull(),
+    prNumber: integer('pr_number').notNull(),
+    prUrl: text('pr_url'),
+    event: jsonb('event').$type<Record<string, unknown>>().notNull(),
+    batchKind: text('batch_kind').notNull().$type<'human' | 'roomote'>(),
+    batchId: text('batch_id'),
+    reviewHeadSha: text('review_head_sha'),
+    /** Permanently set when an automated batch first leaves pending state. */
+    sealedAt: timestamp('sealed_at'),
+    superseded: boolean('superseded').notNull().default(false),
+    availableAt: timestamp('available_at').notNull(),
+    observedAt: timestamp('observed_at').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('pr_review_events_source_unique').on(
+      table.sourceControlProvider,
+      table.repository,
+      table.prNumber,
+      table.eventKey,
+    ),
+    index('pr_review_events_pr_idx').on(
+      table.sourceControlProvider,
+      table.repository,
+      table.prNumber,
+    ),
+    check(
+      'pr_review_events_batch_kind_check',
+      sql`${table.batchKind} in ('human', 'roomote')`,
+    ),
+  ],
+);
+
+/**
+ * One lifecycle row per concrete Roomote review pass. Multiple passes may
+ * review the same commit concurrently, so the provider-stable cycle id is
+ * part of the identity and start/completion times are retained separately.
+ */
+export const prReviewCycles = pgTable(
+  'pr_review_cycles',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sourceControlProvider: text('source_control_provider')
+      .notNull()
+      .$type<SourceControlProvider>(),
+    repository: text('repository').notNull(),
+    prNumber: integer('pr_number').notNull(),
+    reviewHeadSha: text('review_head_sha').notNull(),
+    cycleId: text('cycle_id').notNull(),
+    startedAt: timestamp('started_at').notNull(),
+    completedAt: timestamp('completed_at'),
+  },
+  (table) => [
+    uniqueIndex('pr_review_cycles_source_unique').on(
+      table.sourceControlProvider,
+      table.repository,
+      table.prNumber,
+      table.reviewHeadSha,
+      table.cycleId,
+    ),
+  ],
+);
+
+export const prReviewEventDeliveries = pgTable(
+  'pr_review_event_deliveries',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    eventId: uuid('event_id')
+      .notNull()
+      .references(() => prReviewEvents.id, { onDelete: 'cascade' }),
+    taskId: text('task_id')
+      .notNull()
+      .references(() => tasks.id, { onDelete: 'cascade' }),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<'pending' | 'processing' | 'delivered' | 'suppressed'>(),
+    dueAt: timestamp('due_at').notNull(),
+    deferrals: integer('deferrals').notNull().default(0),
+    leaseToken: uuid('lease_token'),
+    leaseExpiresAt: timestamp('lease_expires_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('pr_review_event_deliveries_event_task_unique').on(
+      table.eventId,
+      table.taskId,
+    ),
+    index('pr_review_event_deliveries_due_idx').on(
+      table.status,
+      table.dueAt,
+      table.leaseExpiresAt,
+    ),
+    check(
+      'pr_review_event_deliveries_status_check',
+      sql`${table.status} in ('pending', 'processing', 'delivered', 'suppressed')`,
     ),
   ],
 );
@@ -2062,6 +2176,28 @@ export const repositoriesRelations = relations(repositories, ({ one }) => ({
     references: [users.id],
   }),
 }));
+
+/**
+ * Cached bounded source-control metadata used by automation recommendations.
+ * The version is part of the key so a scorer can invalidate old signal shapes
+ * without rewriting the repository row.
+ */
+export const repositoryAutomationSignals = pgTable(
+  'repository_automation_signals',
+  {
+    repositoryId: uuid('repository_id')
+      .notNull()
+      .references(() => repositories.id, { onDelete: 'cascade' }),
+    signalsVersion: integer('signals_version').notNull(),
+    payload: jsonb('payload').$type<RepositoryAutomationSignals>().notNull(),
+    collectedAt: timestamp('collected_at').notNull().defaultNow(),
+    partial: boolean('partial').notNull().default(false),
+  },
+  (table) => [
+    primaryKey({ columns: [table.repositoryId, table.signalsVersion] }),
+    index('repository_automation_signals_collected_idx').on(table.collectedAt),
+  ],
+);
 
 export const pullRequestFacts = pgTable(
   'pull_request_facts',
@@ -3591,6 +3727,78 @@ export const mcpOauthReplaysRelations = relations(
     user: one(users, {
       fields: [mcpOauthReplays.userId],
       references: [users.id],
+    }),
+  }),
+);
+
+/**
+ * brainMemoryEvents
+ *
+ * Transactional outbox for task-memory ingestion. A row is inserted in the
+ * same transaction that marks a run Completed (finish-run.ts), then drained
+ * asynchronously by the bullmq worker; ingestion upserts by runId so replays
+ * are idempotent. Never fire-and-forget: the unique(runId) row is the durable
+ * record that a completed task still owes the brain a memory.
+ */
+export const brainMemoryEvents = pgTable(
+  'brain_memory_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    runId: integer('run_id')
+      .notNull()
+      .references(() => taskRuns.id, { onDelete: 'cascade' }),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<'pending' | 'processing' | 'done' | 'skipped' | 'failed'>(),
+    /**
+     * Narrative the agent wrote about its own work (decisions, rationale,
+     * reusable facts). The agent authors it; the server still places it: the
+     * drainer remains the only writer to the brain, so the slug, redaction,
+     * and provenance stay server-controlled and an agent cannot reach any
+     * other page.
+     */
+    agentSummary: text('agent_summary'),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    processedAt: timestamp('processed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('brain_memory_events_run_unique').on(table.runId),
+    index('brain_memory_events_status_created_idx').on(
+      table.status,
+      table.createdAt,
+    ),
+  ],
+);
+
+/**
+ * brainSyncState
+ *
+ * Durable per-collector sync state for Brain memory sources. `watermark`
+ * drives the steady-state incremental sync; `backfillCursor` and
+ * `backfillCompletedAt` drive the one-time deep historical backfill, which
+ * pages older history across ticks and must survive process restarts (an
+ * in-process cursor would re-page old history after every deploy).
+ */
+export const brainSyncState = pgTable('brain_sync_state', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  collectorId: text('collector_id').notNull().unique(),
+  watermark: timestamp('watermark'),
+  backfillCursor: text('backfill_cursor'),
+  backfillCompletedAt: timestamp('backfill_completed_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export const brainMemoryEventsRelations = relations(
+  brainMemoryEvents,
+  ({ one }) => ({
+    run: one(taskRuns, {
+      fields: [brainMemoryEvents.runId],
+      references: [taskRuns.id],
     }),
   }),
 );

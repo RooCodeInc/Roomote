@@ -78,19 +78,24 @@ describe('customMcpServerInputSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it.each(['roomote', 'sentry', 'linear', 'github', 'slack', 'notion'])(
-    'rejects reserved name %s',
-    (name) => {
-      expect(RESERVED_CUSTOM_MCP_SERVER_NAMES.has(name)).toBe(true);
+  it.each([
+    'roomote',
+    'sentry',
+    'linear',
+    'github',
+    'slack',
+    'notion',
+    'gbrain',
+  ])('rejects reserved name %s', (name) => {
+    expect(RESERVED_CUSTOM_MCP_SERVER_NAMES.has(name)).toBe(true);
 
-      const result = customMcpServerInputSchema.safeParse({
-        ...validServer,
-        name,
-      });
+    const result = customMcpServerInputSchema.safeParse({
+      ...validServer,
+      name,
+    });
 
-      expect(result.success).toBe(false);
-    },
-  );
+    expect(result.success).toBe(false);
+  });
 
   it.each([
     'Uppercase',

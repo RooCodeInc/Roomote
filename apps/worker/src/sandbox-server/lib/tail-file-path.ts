@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const TMP_ROOT = '/tmp';
+const REAL_TMP_ROOT = fs.realpathSync.native(TMP_ROOT);
 
 /**
  * Validate a path accepted by sandbox log tails and return the path that
@@ -38,7 +39,7 @@ export function resolveSafeTailFilePath(filePath: string): string {
 
   const resolved = resolveAbsoluteUnderTmp(normalized);
 
-  if (!isStrictlyUnderTmp(resolved)) {
+  if (!isStrictlyUnderTmp(resolved) && !isRealTmpPath(resolved)) {
     throw new Error('Absolute paths outside /tmp are not allowed');
   }
 
@@ -81,6 +82,13 @@ function isTmpRootOrBelow(absolutePath: string): boolean {
   return absolutePath === TMP_ROOT || isStrictlyUnderTmp(absolutePath);
 }
 
+function isRealTmpPath(absolutePath: string): boolean {
+  return (
+    absolutePath === REAL_TMP_ROOT ||
+    absolutePath.startsWith(`${REAL_TMP_ROOT}/`)
+  );
+}
+
 /**
  * realpath the target when it exists. For not-yet-created logfiles, realpath
  * the deepest existing ancestor, re-join missing segments, and re-validate.
@@ -116,7 +124,7 @@ function resolveAbsoluteUnderTmp(normalized: string): string {
 
   const realBase = fs.realpathSync.native(current);
 
-  if (!isTmpRootOrBelow(realBase)) {
+  if (!isRealTmpPath(realBase)) {
     throw new Error('Absolute paths outside /tmp are not allowed');
   }
 
@@ -124,8 +132,9 @@ function resolveAbsoluteUnderTmp(normalized: string): string {
     return realBase;
   }
 
-  // Join with posix so we never reintroduce platform separators under /tmp.
-  return path.posix.join(realBase, ...missingSegments);
+  // Preserve the logical `/tmp` spelling for paths that do not exist yet.
+  // The existing ancestor was already checked through its canonical path.
+  return path.posix.join(current, ...missingSegments);
 }
 
 function isEnoent(error: unknown): boolean {

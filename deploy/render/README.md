@@ -148,6 +148,7 @@ deliberately, ideally right after a disk backup.
 | `roomote-postgres`   | Postgres  | Render managed PostgreSQL 17 | no                        | managed              |
 | `roomote-redis`      | Key Value | Render managed (Redis API)   | no (empty `ipAllowList`)  | managed              |
 | `roomote-minio`      | web       | `minio/minio` + disk `/data` | yes (routed to port 9000) | `/minio/health/live` |
+| `roomote-gbrain`     | pserv     | `roomote-gbrain:main` + disk `/data` | no (private network only) | —                    |
 | `roomote-api`        | web       | `roomote-app:main`           | yes                       | `/health/liveness`   |
 | `roomote-web`        | web       | `roomote-app:main`           | yes                       | `/health`            |
 | `roomote-controller` | worker    | `roomote-app:main`           | no                        | —                    |
@@ -344,6 +345,64 @@ Live previews need a wildcard domain, which requires a domain you control:
    hostname. Previews are always enabled and publish for every environment
    that defines preview ports.
 
+## Enabling the Brain (optional)
+
+The `roomote-gbrain` private service ships with the Blueprint and boots
+idle. It gives the deployment shared memory: completed tasks and activity
+from connected integrations (pull requests, public Slack channels, meeting
+notes, GitHub issues) become pages that agents consult with citations, and
+agents record what they decided and why when they finish substantial work.
+
+Render's Blueprint cannot generate the admin token for you (`generateValue`
+produces base64, and gbrain requires at least 32 characters of
+`[A-Za-z0-9_-]` or it refuses to boot), so enabling the Brain is two values
+rather than Railway's one. Both go on the **roomote-gbrain** service:
+
+1. Configure a model provider under **Settings → Models** after first boot,
+   if you have not already. The roomote-gbrain service holds no provider key;
+   it asks roomote-api for embeddings and synthesis, and roomote-api uses the
+   key your deployment already has. Changing it later needs no redeploy. To
+   bill the Brain separately, set `R_BRAIN_OPENROUTER_API_KEY` or
+   `R_BRAIN_OPENAI_API_KEY` on the app services instead.
+2. Set `GBRAIN_ADMIN_BOOTSTRAP_TOKEN` to a fresh random value. Generate one
+   with `openssl rand -hex 24`, which is 48 conforming characters. Roomote
+   uses it only to register its own scoped clients; it is never handed to an
+   agent.
+3. Redeploy `roomote-gbrain` and the four app services. Within a minute the
+   deployment registers a read-only client for agents and a write-only one
+   for ingestion, backfills the task history it already has, and starts
+   delivering the Brain to new tasks. Watch the `roomote-bullmq` logs for
+   `[brain] provisioned scoped clients`.
+
+The app services read these through `fromService` references, so setting
+them in one place is enough and there is no second copy to drift.
+Blank on the gbrain service means blank everywhere, which is the Brain-off
+state: agents are told nothing about it and no ingestion runs.
+
+Nothing is exposed. The service is a Render private service with no public
+hostname, reachable only over the internal network, and task sandboxes never
+address it directly — they go through the api service with their run token,
+which grants read access only.
+
+Two operational notes:
+
+- **Back up the disk.** The 10 GB `gbrain-data` disk holds the corpus.
+  Losing it is recoverable — task history and integration sources re-ingest,
+  and Roomote re-registers its clients automatically when the Brain no
+  longer recognizes them — but the deployment starts cold until that
+  finishes.
+- **Model choice is a variable, not a rebuild.** `R_BRAIN_MODEL` selects the
+  synthesis model and `R_BRAIN_EMBEDDING_MODEL` the embedding model, both in
+  your provider's own naming, both set on the app services. Leave them empty for the
+  defaults. The synthesis model can change at any time; the embedding model
+  sizes the Brain's vector storage when it is first created, so set it (with
+  `R_BRAIN_EMBEDDING_DIMENSIONS`) before first boot or not at all. A later
+  change is ignored and reported in the Brain's logs rather than silently
+  applied.
+
+Deployments that want no memory at all can delete `roomote-gbrain` from the
+Blueprint; the app services treat the missing reference as Brain-off.
+
 ## Upgrades, backups, and costs
 
 - **Upgrade a deployment on `:main`** by redeploying the four app
@@ -382,3 +441,13 @@ the composed URLs reach the running services (`/health` on web,
 `/health/liveness` on api). Keep the file at the repository root: the
 Deploy to Render button and Blueprint sync only read `render.yaml` from
 there.
+
+The `roomote-gbrain` service has not yet been exercised on a real Render
+workspace. Its first-boot verification has two extra items beyond the
+references above: confirm that a private service accepts a `disk` (the
+Blueprint spec documents disks per service type without listing private
+services explicitly), and that `ROOMOTE_GBRAIN_HOSTPORT` resolves to a
+`host:port` pair the app services can reach. Both failure modes are
+contained — a Brain that never boots leaves the rest of the deployment
+working, because every Brain code path is already conditional on the key
+being present.

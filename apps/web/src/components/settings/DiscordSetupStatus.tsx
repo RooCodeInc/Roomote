@@ -113,7 +113,7 @@ export function DiscordSetupStatus({ status }: { status: DiscordCommsStatus }) {
           label="Slash commands"
           detail={
             commandsReady
-              ? '/new, /link, and /help are registered.'
+              ? '/new, /goal, /link, and /help are registered.'
               : status.commands.status === 'missing'
                 ? 'One or more Roomote commands are missing.'
                 : 'Roomote could not verify command registration.'

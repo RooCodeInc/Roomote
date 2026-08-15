@@ -32,6 +32,71 @@ describe('mergeOpenAiCompatibleProviderConfig', () => {
     });
   });
 
+  it('applies trusted context windows while preserving existing model options', () => {
+    const config = mergeOpenAiCompatibleProviderConfig(
+      {
+        litellm: {
+          models: {
+            'qwen3.6:35b-unsloth': {
+              options: { temperature: 0 },
+              limit: { context: 999_999, output: 16_000 },
+            },
+          },
+        },
+      },
+      {
+        LITELLM_BASE_URL: 'https://litellm.example.com/v1',
+        LITELLM_API_KEY: 'secret',
+      },
+      ['litellm/qwen3.6:35b-unsloth', 'litellm/unknown'],
+      undefined,
+      { 'litellm/qwen3.6:35b-unsloth': 210_176 },
+    );
+
+    expect(config).toMatchObject({
+      litellm: {
+        models: {
+          'qwen3.6:35b-unsloth': {
+            options: { temperature: 0 },
+            limit: {
+              context: 210_176,
+              output: 16_000,
+            },
+          },
+          unknown: { name: 'unknown' },
+        },
+      },
+    });
+    expect(config).not.toHaveProperty([
+      'litellm',
+      'models',
+      'qwen3.6:35b-unsloth',
+      'limit',
+      'input',
+    ]);
+  });
+
+  it('preserves independently configured input limits', () => {
+    const config = mergeOpenAiCompatibleProviderConfig(
+      {
+        litellm: {
+          models: {
+            coding: { limit: { input: 120_000, output: 8_000 } },
+          },
+        },
+      },
+      {},
+      ['litellm/coding'],
+      undefined,
+      { 'litellm/coding': 128_000 },
+    );
+
+    expect(config).toHaveProperty(
+      ['litellm', 'models', 'coding', 'limit', 'input'],
+      120_000,
+    );
+  });
+
   it('preserves existing model options for named OpenAI-compatible providers', () => {
     expect(
       mergeOpenAiCompatibleProviderConfig(

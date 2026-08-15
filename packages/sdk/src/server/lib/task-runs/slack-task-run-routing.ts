@@ -8,6 +8,7 @@ import {
 } from '@roomote/db/server';
 import {
   getSlackChannelFromTaskPayload,
+  getSlackTeamIdFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
 } from '@roomote/types';
 
@@ -61,6 +62,7 @@ export async function resolveSlackTaskRunRouting(
   run: SlackTaskRunRoutingRecord,
 ): Promise<{
   channel: string | null;
+  teamId: string | null;
   threadTs: string | null;
   route: SlackTaskRunRoute;
 }> {
@@ -74,11 +76,12 @@ export async function resolveSlackTaskRunRouting(
 
   let channel: string | null =
     task?.slackChannelId ?? getSlackChannelFromTaskPayload(run.payload);
+  let teamId = getSlackTeamIdFromTaskPayload(run.payload);
   let threadTs: string | null =
     task?.slackThreadTs ?? getSlackThreadTsFromTaskPayload(run.payload);
   let webPath = getSlackWebPathFromPayload(run.payload);
 
-  if (!channel || !threadTs || !webPath) {
+  if (!channel || !teamId || !threadTs || !webPath) {
     const siblingRuns = await db.query.taskRuns.findMany({
       columns: {
         id: true,
@@ -94,14 +97,20 @@ export async function resolveSlackTaskRunRouting(
       }
 
       channel ||= getSlackChannelFromTaskPayload(siblingRun.payload);
+      teamId ||= getSlackTeamIdFromTaskPayload(siblingRun.payload);
       threadTs ||= getSlackThreadTsFromTaskPayload(siblingRun.payload);
       webPath ||= getSlackWebPathFromPayload(siblingRun.payload);
 
-      if (channel && threadTs && webPath) {
+      if (channel && teamId && threadTs && webPath) {
         break;
       }
     }
   }
 
-  return { channel, threadTs, route: classifySlackTaskRunRoute(webPath) };
+  return {
+    channel,
+    teamId,
+    threadTs,
+    route: classifySlackTaskRunRoute(webPath),
+  };
 }

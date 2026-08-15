@@ -1217,6 +1217,20 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
             },
           ],
         },
+        {
+          name: 'goal',
+          description: 'Keep working toward an objective across multiple turns',
+          type: 1,
+          options: [
+            {
+              type: 3,
+              name: 'objective',
+              description: 'What should the current task keep working toward?',
+              required: true,
+              max_length: 6_000,
+            },
+          ],
+        },
         { name: 'help', description: 'Show Roomote command help', type: 1 },
       ],
       { retryNetworkErrors: true, retryServerErrors: true },

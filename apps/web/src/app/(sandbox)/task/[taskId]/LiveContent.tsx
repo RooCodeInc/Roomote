@@ -225,7 +225,10 @@ function LiveContentInner({
   return (
     <PreviewPaneProvider>
       <div className="flex h-full min-h-0 min-w-0 flex-1 bg-card">
-        <FramedSurface surfaceClassName="flex flex-col bg-transparent @container">
+        <FramedSurface
+          frameClassName="pb-0 md:pb-2"
+          surfaceClassName="flex flex-col bg-transparent @container"
+        >
           <PreviewPaneLayout
             session={session}
             diffPanel={{

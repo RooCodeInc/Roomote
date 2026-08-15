@@ -212,7 +212,9 @@ describe('DiscordSetupStatus', () => {
 
     expect(screen.getByText(/Connected as @roomote/)).toBeInTheDocument();
     expect(screen.getByText(/receiving Discord events/)).toBeInTheDocument();
-    expect(screen.getByText(/\/new, \/link, and \/help/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/\/new, \/goal, \/link, and \/help/),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole('link', { name: /Add to Discord/i }),
     ).toHaveAttribute(

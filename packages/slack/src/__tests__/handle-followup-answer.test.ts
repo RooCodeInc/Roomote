@@ -248,6 +248,9 @@ describe('handleFollowupAnswer', () => {
   it('rejects structured answers for stale pending requests on a reused thread', async () => {
     await handleFollowupAnswer(buildPayload());
 
+    expect(findActiveSlackTaskRunMock).toHaveBeenCalledWith('111.222', {
+      slackTeamId: 'T123',
+    });
     expect(clearPendingSlackRequestUserInputMock).toHaveBeenCalledWith(
       '111.222',
       {

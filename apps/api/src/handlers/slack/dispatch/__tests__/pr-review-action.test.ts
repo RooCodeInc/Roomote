@@ -62,6 +62,7 @@ import {
 const pendingAction = {
   nonce: 'nonce-1',
   provider: 'slack' as const,
+  slackTeamId: 'T1',
   taskId: 'task-1',
   repository: 'owner/repo',
   prNumber: 42,
@@ -125,10 +126,14 @@ describe('handleSlackPrReviewActionYes', () => {
   it('claims the offer, dispatches the follow-up, and marks the message resolved', async () => {
     await handleSlackPrReviewActionYes(makePayload('pr_review_action_yes'));
 
-    expect(claimPendingMock).toHaveBeenCalledWith('nonce-1');
+    expect(claimPendingMock).toHaveBeenCalledWith('nonce-1', {
+      expectedSlackTeamId: 'T1',
+    });
     expect(enableAutoHandleMock).not.toHaveBeenCalled();
     expect(dispatchFollowUpMock).toHaveBeenCalledWith({
       provider: 'slack',
+      taskId: 'task-1',
+      slackTeamId: 'T1',
       channelId: 'C123',
       threadId: '111.222',
       followUpPrompt: pendingAction.followUpPrompt,
@@ -154,6 +159,40 @@ describe('handleSlackPrReviewActionYes', () => {
       },
     });
     expect(postSlackInteractiveResponseMock).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when a button is delivered by another workspace', async () => {
+    claimPendingMock.mockResolvedValue(null);
+
+    await handleSlackPrReviewActionYes({
+      ...makePayload('pr_review_action_yes'),
+      team: { id: 'T2', domain: 'other' },
+    });
+
+    expect(dispatchFollowUpMock).not.toHaveBeenCalled();
+    expect(postSlackInteractiveResponseMock).toHaveBeenCalledWith(
+      'https://hooks.slack.test/response',
+      expect.objectContaining({ text: expect.stringContaining('expired') }),
+    );
+  });
+
+  it('dispatches a verified legacy offer using only its immutable task binding', async () => {
+    claimPendingMock.mockResolvedValue({
+      ...pendingAction,
+      slackTeamId: undefined,
+    });
+
+    await handleSlackPrReviewActionYes(makePayload('pr_review_action_yes'));
+
+    expect(dispatchFollowUpMock).toHaveBeenCalledWith({
+      provider: 'slack',
+      taskId: 'task-1',
+      channelId: 'C123',
+      threadId: '111.222',
+      followUpPrompt: pendingAction.followUpPrompt,
+      actingUserId: 'user-1',
+      providerUserId: 'U1',
+    });
   });
 
   it('reports an expired offer without dispatching anything', async () => {
@@ -251,7 +290,9 @@ describe('handleSlackPrReviewActionDismiss', () => {
       makePayload('pr_review_action_dismiss'),
     );
 
-    expect(claimPendingMock).toHaveBeenCalledWith('nonce-1');
+    expect(claimPendingMock).toHaveBeenCalledWith('nonce-1', {
+      expectedSlackTeamId: 'T1',
+    });
     expect(dispatchFollowUpMock).not.toHaveBeenCalled();
     expect(updateMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({

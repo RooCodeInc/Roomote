@@ -27,6 +27,7 @@ const {
   mockTasksFindFirst,
   mockResolveLaunchTaskCommitAuthor,
   mockResolveRunCommitAuthor,
+  mockProjectPendingPrReviewEventsForAssociation,
 } = vi.hoisted(() => ({
   mockCreateGitHubToken: vi.fn(),
   mockGetDeploymentPrAction: vi.fn(),
@@ -47,6 +48,7 @@ const {
   mockTasksFindFirst: vi.fn(),
   mockResolveLaunchTaskCommitAuthor: vi.fn(),
   mockResolveRunCommitAuthor: vi.fn(),
+  mockProjectPendingPrReviewEventsForAssociation: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -118,6 +120,15 @@ vi.mock('@roomote/db/server', () => ({
   resolveTelegramRuntimeCredentials: (...args: unknown[]) =>
     mockResolveTelegramRuntimeCredentials(...args),
   db: {
+    transaction: (callback: (tx: unknown) => unknown) =>
+      callback({
+        insert: () => ({
+          values: (values: unknown) => ({
+            onConflictDoUpdate: () =>
+              Promise.resolve(mockTaskPullRequestUpsert(values)),
+          }),
+        }),
+      }),
     query: {
       repositories: {
         // resolveRepositoryRow queries with findMany; tests queue a single
@@ -146,6 +157,8 @@ vi.mock('@roomote/db/server', () => ({
       }),
     }),
   },
+  projectPendingPrReviewEventsForAssociation: (...args: unknown[]) =>
+    mockProjectPendingPrReviewEventsForAssociation(...args),
   repositories: {
     sourceControlProvider: 'repositories.sourceControlProvider',
     fullName: 'repositories.fullName',
@@ -230,6 +243,7 @@ beforeEach(() => {
 describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockProjectPendingPrReviewEventsForAssociation.mockResolvedValue(undefined);
     mockGetDeploymentGitHubRoomoteMentionEnabled.mockResolvedValue(true);
     mockResolveConfiguredGitHubAppSlugIfConfigured.mockResolvedValue(null);
     mockResolveRunCommitAuthor.mockResolvedValue({
@@ -509,6 +523,47 @@ describe('platform-managed draft state', () => {
     expect(octokit.graphql).not.toHaveBeenCalled();
     expect(result.draft).toBe(true);
     expect(result.warnings).toEqual([]);
+  });
+
+  it('rejects an unassociated remote PR and safely associates it on retry', async () => {
+    const pullRequest = {
+      number: 19,
+      node_id: 'node-19',
+      html_url: 'https://github.com/acme/web/pull/19',
+      title: '[Feature] X',
+      draft: true,
+      base: { ref: 'main' },
+      assignees: [],
+    };
+    const octokit = makeOctokit({
+      created: pullRequest,
+      updated: pullRequest,
+    });
+    octokit.rest.pulls.list
+      .mockResolvedValueOnce({ data: [] })
+      .mockResolvedValue({ data: [pullRequest] });
+    mockProjectPendingPrReviewEventsForAssociation.mockRejectedValueOnce(
+      new Error('association transaction failed'),
+    );
+
+    await expect(
+      createOrUpdateSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({ repo: 'acme/web' }),
+        input: { ...githubInput },
+      }),
+    ).rejects.toThrow('association transaction failed');
+
+    const retry = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: { ...githubInput },
+    });
+
+    expect(octokit.rest.pulls.create).toHaveBeenCalledTimes(1);
+    expect(octokit.rest.pulls.update).toHaveBeenCalledTimes(1);
+    expect(
+      mockProjectPendingPrReviewEventsForAssociation,
+    ).toHaveBeenCalledTimes(2);
+    expect(retry).toMatchObject({ action: 'updated', number: 19 });
   });
 
   it('uses the @roomote shorthand in attribution when enabled', async () => {
@@ -1427,7 +1482,7 @@ describe('optional targetBranch', () => {
     );
   });
 
-  it('uses fresh canonical attribution when updating a private pull request', async () => {
+  it('preserves the opener attribution when updating a private pull request', async () => {
     const existing = {
       number: 11,
       node_id: 'node-11',
@@ -1435,7 +1490,10 @@ describe('optional targetBranch', () => {
       title: 'Old title',
       draft: false,
       base: { ref: 'develop' },
-      body: attributionBody('Opened on behalf of Launch $& Owner.'),
+      body: attributionBody(
+        'Opened on behalf of Launch $& Owner.',
+        'Follow up through the old task link.',
+      ),
     };
     const octokit = makeOctokit({
       list: [existing],
@@ -1456,12 +1514,12 @@ describe('optional targetBranch', () => {
 
     expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: attributionBody('Opened on behalf of Participant.'),
+        body: attributionBody('Opened on behalf of Launch $& Owner.'),
       }),
     );
   });
 
-  it('does not preserve a private marked name when a public pull request is updated', async () => {
+  it('preserves the original marked attribution when a public pull request is updated', async () => {
     const existing = {
       number: 11,
       node_id: 'node-11',
@@ -1499,12 +1557,12 @@ describe('optional targetBranch', () => {
 
     expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: attributionBody('Opened on behalf of @participant.'),
+        body: attributionBody('Opened on behalf of Private Name.'),
       }),
     );
   });
 
-  it('uses the current linked handle when updating a public pull request', async () => {
+  it('preserves the original linked handle when updating a public pull request', async () => {
     const existing = {
       number: 11,
       node_id: 'node-11',
@@ -1542,7 +1600,7 @@ describe('optional targetBranch', () => {
 
     expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: attributionBody('Opened on behalf of @participant.'),
+        body: attributionBody('Opened on behalf of @launch-owner.'),
       }),
     );
   });

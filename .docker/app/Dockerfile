@@ -175,10 +175,12 @@ RUN cd /roomote && pnpm dlx esbuild@0.25.5 packages/db/src/run-migrations.ts \
   --banner:js="import{createRequire as __createRequire}from 'module';const require=__createRequire(import.meta.url);" && \
   cp -R packages/db/drizzle /migrate/drizzle
 
-# Runtime-only dependency tree for the externals tsup does not bundle.
-RUN mkdir -p /runtime-deps && cd /runtime-deps && npm init -y >/dev/null && \
-  npm install --omit=dev --no-audit --no-fund \
-    "snowflake-sdk@$(cd /roomote/apps/api && node -p "require('snowflake-sdk/package.json').version")"
+# Runtime-only dependency tree for the externals tsup does not bundle. Install
+# from its standalone lockfile so unrelated workspace packages stay excluded.
+COPY .docker/app/runtime-deps/api /runtime-deps/
+RUN cd /runtime-deps && pnpm install --prod --frozen-lockfile && \
+  test "$(node -p "require('snowflake-sdk/package.json').version")" = \
+    "$(cd /roomote/apps/api && node -p "require('snowflake-sdk/package.json').version")"
 
 # ---------------------------------------------------------------------------
 # controller: bundled dist plus the packaged worker release archives that the

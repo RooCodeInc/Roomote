@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Streamdown, defaultRemarkPlugins } from 'streamdown';
@@ -168,11 +169,21 @@ export function ArtifactViewerContent({
   const [isUrlCopied, setIsUrlCopied] = useState(false);
   const [isRawUrlCopied, setIsRawUrlCopied] = useState(false);
   const [isBuildDialogOpen, setIsBuildDialogOpen] = useState(false);
+  const artifactTitle = artifact ? humanizeFilename(artifact.path) : '';
 
   const createTaskRun = useCreateStandardTaskRun({
-    onSuccess: (result) => {
+    onSuccess: (result, variables) => {
       if (result.success) {
-        toast.success('status' in result ? 'Task queued.' : 'Task started.');
+        const startedArtifactTitle = humanizeFilename(
+          variables.sourceArtifactPath ?? '',
+        );
+        toast.success(`Building ${startedArtifactTitle}.`, {
+          action: (
+            <Button asChild size="sm">
+              <Link href={`/task/${result.taskId}`}>View task</Link>
+            </Button>
+          ),
+        });
       } else {
         toast.error(result.error);
       }
@@ -253,6 +264,7 @@ export function ArtifactViewerContent({
       artifactContent: artifact.content,
     });
 
+    toast.info(`Starting new task to build ${artifactTitle}`);
     createTaskRun.mutate({
       model: values.modelId,
       sourceTaskId: taskId,
@@ -490,7 +502,7 @@ export function ArtifactViewerContent({
       <BuildArtifactConfirmDialog
         open={isBuildDialogOpen}
         onOpenChange={setIsBuildDialogOpen}
-        artifactName={humanizeFilename(artifact.path)}
+        artifactName={artifactTitle}
         artifactVersion={artifact.version}
         taskRepository={taskPayload?.repo || task?.repositoryName || undefined}
         taskBranch={taskPayload?.branch}

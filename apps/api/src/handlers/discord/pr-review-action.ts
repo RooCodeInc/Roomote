@@ -43,12 +43,15 @@ export async function handleDiscordPrReviewActionCallback(input: {
       text,
     });
   const replyToOffer = (resolution: string) => {
+    const formattedResolution = `-# ${resolution}`;
     const content = input.interaction.message?.content;
-    if (!content) return reply(resolution);
+    if (!content) return reply(formattedResolution);
 
     const separator = '\n\n';
     const availableContentLength =
-      DISCORD_MAX_MESSAGE_LENGTH - separator.length - resolution.length;
+      DISCORD_MAX_MESSAGE_LENGTH -
+      separator.length -
+      formattedResolution.length;
     const preservedContent =
       content.length <= availableContentLength
         ? content
@@ -56,7 +59,7 @@ export async function handleDiscordPrReviewActionCallback(input: {
           ? `${content.slice(0, availableContentLength - 3)}...`
           : content.slice(0, Math.max(availableContentLength, 0));
 
-    return reply(`${preservedContent}${separator}${resolution}`);
+    return reply(`${preservedContent}${separator}${formattedResolution}`);
   };
   const user = input.interaction.member?.user ?? input.interaction.user;
   const mappedUserId = await findDiscordMappedUserId(user?.id);
@@ -93,6 +96,7 @@ export async function handleDiscordPrReviewActionCallback(input: {
 
     const dispatched = await dispatchPrReviewFollowUp({
       provider: 'discord',
+      taskId: pending.taskId,
       channelId: pending.channelId,
       threadId: pending.threadId,
       followUpPrompt: pending.followUpPrompt,

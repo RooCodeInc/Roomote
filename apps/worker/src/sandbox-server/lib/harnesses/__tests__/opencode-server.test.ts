@@ -180,10 +180,14 @@ async function connectHarness(
   await connectPromise;
 }
 
-function createFinalAssistantMessage(): OpenCodeSessionMessage {
+function createFinalAssistantMessage(
+  options: { messageId?: string; text?: string } = {},
+): OpenCodeSessionMessage {
+  const messageId = options.messageId ?? 'msg_1';
+
   return {
     info: {
-      id: 'msg_1',
+      id: messageId,
       sessionID: 'ses_1',
       role: 'assistant',
       providerID: 'openrouter',
@@ -206,11 +210,11 @@ function createFinalAssistantMessage(): OpenCodeSessionMessage {
     },
     parts: [
       {
-        id: 'part_1',
+        id: `part_${messageId}`,
         sessionID: 'ses_1',
-        messageID: 'msg_1',
+        messageID: messageId,
         type: 'text',
-        text: 'OK',
+        text: options.text ?? 'OK',
       },
     ],
   };
@@ -461,11 +465,18 @@ describe('OpenCodeServerHarness', () => {
           parts: [
             {
               type: 'text',
-              text: expect.stringContaining('goal-generation:replacement'),
+              text: expect.stringContaining('<task_goal enabled="true">'),
             },
           ],
         },
       });
+      const agentPrompt = client.promptAsync.mock.calls[0]?.[0] as
+        | { request?: { parts?: Array<{ type: string; text?: string }> } }
+        | undefined;
+      const agentPromptText = agentPrompt?.request?.parts?.[0]?.text;
+      expect(agentPromptText).toContain('goal-generation:replacement');
+      expect(agentPromptText).toContain('Goal Mode is enabled for this turn');
+      expect(agentPromptText).not.toContain('/goal');
       expect(
         persistedEnvelopes.find(
           (envelope) =>
@@ -2015,8 +2026,12 @@ describe('OpenCodeServerHarness', () => {
       },
     });
     const taskEvents: TaskEvent[] = [];
+    const turnCompletedEvents: AcpTurnCompletedEvent[] = [];
 
     harness.subscribe((event) => taskEvents.push(event));
+    harness.subscribeRuntimeTurnCompleted((event) =>
+      turnCompletedEvents.push(event),
+    );
 
     try {
       await connectHarness(harness, client);
@@ -2066,6 +2081,24 @@ describe('OpenCodeServerHarness', () => {
         expect(client.promptAsync).toHaveBeenCalledTimes(4);
       });
 
+      client.message.mockResolvedValueOnce(
+        createFinalAssistantMessage({
+          messageId: 'msg_final_closeout_fallback',
+          text: 'The last finalized assistant answer.',
+        }),
+      );
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_final_closeout_fallback',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 1 },
+          },
+        },
+      });
+
       // The next blocked turn-end gives up and completes the turn instead of
       // aborting the task or injecting more reminders.
       await client.emit({
@@ -2088,6 +2121,22 @@ describe('OpenCodeServerHarness', () => {
         ),
       ).toBe(false);
       expect(client.promptAsync).toHaveBeenCalledTimes(4);
+      expect(turnCompletedEvents).toEqual([
+        expect.objectContaining({
+          sessionId: 'ses_1',
+          text: 'The last finalized assistant answer.',
+        }),
+      ]);
+      expect(
+        taskEvents.find(
+          (event) => event.eventName === TaskEventName.TaskCompleted,
+        )?.payload[3],
+      ).toEqual(
+        expect.objectContaining({
+          isSubtask: false,
+          missingChatCloseout: { reminderCount: 3 },
+        }),
+      );
     } finally {
       harness.dispose();
       fs.rmSync(tempDir, { recursive: true, force: true });
@@ -2119,8 +2168,12 @@ describe('OpenCodeServerHarness', () => {
       stopHookReminderStallTimeoutMs: 50,
     });
     const taskEvents: TaskEvent[] = [];
+    const turnCompletedEvents: AcpTurnCompletedEvent[] = [];
 
     harness.subscribe((event) => taskEvents.push(event));
+    harness.subscribeRuntimeTurnCompleted((event) =>
+      turnCompletedEvents.push(event),
+    );
 
     try {
       await connectHarness(harness, client);
@@ -2134,6 +2187,24 @@ describe('OpenCodeServerHarness', () => {
 
       await vi.waitFor(() => {
         expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      client.message.mockResolvedValueOnce(
+        createFinalAssistantMessage({
+          messageId: 'msg_before_wedged_reminder',
+          text: 'The answer before the reminder wedged.',
+        }),
+      );
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_before_wedged_reminder',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 1 },
+          },
+        },
       });
 
       // The blocked turn-end injects a closeout reminder and then awaits a
@@ -2163,6 +2234,22 @@ describe('OpenCodeServerHarness', () => {
       ).toBe(false);
       // No extra reminder was injected — the fail-safe completed the turn.
       expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      expect(turnCompletedEvents).toEqual([
+        expect.objectContaining({
+          sessionId: 'ses_1',
+          text: 'The answer before the reminder wedged.',
+        }),
+      ]);
+      expect(
+        taskEvents.find(
+          (event) => event.eventName === TaskEventName.TaskCompleted,
+        )?.payload[3],
+      ).toEqual(
+        expect.objectContaining({
+          isSubtask: false,
+          missingChatCloseout: { reminderCount: 1 },
+        }),
+      );
     } finally {
       harness.dispose();
       fs.rmSync(tempDir, { recursive: true, force: true });

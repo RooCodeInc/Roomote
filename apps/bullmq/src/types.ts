@@ -14,6 +14,9 @@ export enum ScheduledJobName {
   WebhookCleanup = 'WebhookCleanup',
   StandbyRetention = 'StandbyRetention',
   CustomAutomations = 'custom_automations',
+  PrReviewNotificationDispatch = 'PrReviewNotificationDispatch',
+  BrainOutboxDrain = 'BrainOutboxDrain',
+  BrainCollectors = 'BrainCollectors',
 }
 
 /**

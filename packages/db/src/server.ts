@@ -85,8 +85,10 @@ export * from './lib/telemetry-ids';
 export * from './lib/instance-report';
 export * from './lib/deployment-license';
 export * from './lib/license-usage-observations';
+export * from './lib/pr-review-events';
 export * from './lib/invocation-identities';
 export * from './lib/webhook-retention';
+export * from './lib/brain';
 export * from './lib/managed-access';
 
 export {
@@ -113,6 +115,9 @@ export {
   taskArtifactsRelations,
   taskPullRequests,
   taskPullRequestsRelations,
+  prReviewEvents,
+  prReviewCycles,
+  prReviewEventDeliveries,
   taskRuns,
   taskRunsRelations,
   taskRunEvents,
@@ -138,6 +143,7 @@ export {
   githubUserMappingsRelations,
   repositories,
   repositoriesRelations,
+  repositoryAutomationSignals,
   pullRequestFacts,
   pullRequestFactsRelations,
   pullRequestSyncStates,
@@ -201,6 +207,9 @@ export {
   mcpOauthReplaysRelations,
   userApiKeys,
   userApiKeysRelations,
+  brainMemoryEvents,
+  brainMemoryEventsRelations,
+  brainSyncState,
 } from './schema';
 
 export * from './fixtures/factories/index';

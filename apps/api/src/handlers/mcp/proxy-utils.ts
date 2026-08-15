@@ -409,6 +409,75 @@ function stripToolSchemaPatterns(value: unknown): unknown {
   );
 }
 
+const NULLABLE_ARRAY_SCHEMA_KEYS = new Set([
+  'type',
+  'items',
+  'description',
+  'title',
+  'default',
+  'examples',
+  'deprecated',
+  'readOnly',
+  'writeOnly',
+]);
+
+/**
+ * OpenCode's Gemini schema conversion splits `type: ["array", "null"]`
+ * into `anyOf` branches but leaves `items` on the wrapper. Gemini then rejects
+ * the array branch because it has no item schema. Rewrite only that simple,
+ * semantics-preserving shape and leave more complex schemas untouched.
+ */
+function normalizeNullableArraySchema(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return value;
+  }
+
+  const schema = { ...(value as Record<string, unknown>) };
+
+  if (
+    schema.properties &&
+    typeof schema.properties === 'object' &&
+    !Array.isArray(schema.properties)
+  ) {
+    schema.properties = Object.fromEntries(
+      Object.entries(schema.properties).map(([name, propertySchema]) => [
+        name,
+        normalizeNullableArraySchema(propertySchema),
+      ]),
+    );
+  }
+
+  if ('items' in schema) {
+    schema.items = Array.isArray(schema.items)
+      ? schema.items.map(normalizeNullableArraySchema)
+      : normalizeNullableArraySchema(schema.items);
+  }
+
+  const types = schema.type;
+  const isNullableArray =
+    Array.isArray(types) &&
+    types.length === 2 &&
+    types.includes('array') &&
+    types.includes('null');
+  const hasOnlyUnderstoodKeys = Object.keys(schema).every((key) =>
+    NULLABLE_ARRAY_SCHEMA_KEYS.has(key),
+  );
+
+  if (
+    !isNullableArray ||
+    schema.items === undefined ||
+    !hasOnlyUnderstoodKeys
+  ) {
+    return schema;
+  }
+
+  const { type: _type, items, ...annotations } = schema;
+  return {
+    ...annotations,
+    anyOf: [{ type: 'array', items }, { type: 'null' }],
+  };
+}
+
 function filterToolsListPayload(
   payload: unknown,
   toolPolicy: {
@@ -446,7 +515,15 @@ function filterToolsListPayload(
       ),
   );
 
-  const filteredTools = filterMcpToolDefinitions(namedTools, toolPolicy);
+  const filteredTools = filterMcpToolDefinitions(namedTools, toolPolicy).map(
+    (tool) =>
+      'inputSchema' in tool
+        ? {
+            ...tool,
+            inputSchema: normalizeNullableArraySchema(tool.inputSchema),
+          }
+        : tool,
+  );
 
   return {
     ...payload,
@@ -982,7 +1059,9 @@ export function createMcpProxy(config: McpProxyConfig) {
       }
 
       if (
-        (hasToolRestrictions || shouldStripToolSchemaPatterns) &&
+        (hasToolRestrictions ||
+          shouldStripToolSchemaPatterns ||
+          isJsonResponse(contentType)) &&
         method === 'POST' &&
         getJsonRpcMethod(parsedBody) === 'tools/list' &&
         upstreamResponse.ok
@@ -1007,6 +1086,8 @@ export function createMcpProxy(config: McpProxyConfig) {
           );
           const headers = buildProxyResponseHeaders(upstreamResponse.headers);
           headers.set('content-type', 'application/json');
+
+          upstreamResponse.body?.cancel().catch(() => {});
 
           return new Response(JSON.stringify(filteredPayload), {
             status: upstreamResponse.status,

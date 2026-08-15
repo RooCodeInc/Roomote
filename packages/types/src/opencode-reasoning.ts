@@ -1,4 +1,4 @@
-import type { ReasoningEffort } from './task-runs';
+import { REASONING_EFFORT_VALUES, type ReasoningEffort } from './task-runs';
 
 /**
  * Maps a Roomote reasoning effort to the Anthropic extended-thinking token
@@ -161,10 +161,63 @@ function buildAmazonBedrockReasoningOptions(
   return null;
 }
 
+/**
+ * Effort constraints for GitHub Copilot models that accept only a subset of
+ * the effort scale (or none at all), mirrored from Copilot's `/models`
+ * catalog. A configured effort is mapped to the nearest supported level so
+ * the request is not rejected outright; an empty list means the model takes
+ * no reasoning parameters and must receive none.
+ */
+const GITHUB_COPILOT_MODEL_EFFORT_SUPPORT: ReadonlyArray<{
+  pattern: RegExp;
+  supported: readonly ReasoningEffort[];
+}> = [
+  { pattern: /kimi-k2\.7/iu, supported: [] },
+  { pattern: /kimi-k3/iu, supported: ['low', 'high', 'max'] },
+  {
+    pattern: /claude-(?:opus|sonnet)-4\.6/iu,
+    supported: ['low', 'medium', 'high', 'max'],
+  },
+];
+
+/**
+ * Maps an effort onto a model's supported subset of the scale: unchanged when
+ * supported, otherwise the nearest supported level below it, falling back to
+ * the lowest supported level above it.
+ */
+function clampReasoningEffortToSupported(
+  effort: ReasoningEffort,
+  supported: readonly ReasoningEffort[],
+): ReasoningEffort | undefined {
+  if (supported.includes(effort)) {
+    return effort;
+  }
+
+  const configuredIndex = REASONING_EFFORT_VALUES.indexOf(effort);
+
+  for (let index = configuredIndex - 1; index >= 0; index--) {
+    if (supported.includes(REASONING_EFFORT_VALUES[index]!)) {
+      return REASONING_EFFORT_VALUES[index];
+    }
+  }
+
+  for (
+    let index = configuredIndex + 1;
+    index < REASONING_EFFORT_VALUES.length;
+    index++
+  ) {
+    if (supported.includes(REASONING_EFFORT_VALUES[index]!)) {
+      return REASONING_EFFORT_VALUES[index];
+    }
+  }
+
+  return undefined;
+}
+
 function buildGitHubCopilotReasoningOptions(
   modelID: string,
   reasoningEffort: ReasoningEffort,
-): Record<string, unknown> {
+): Record<string, unknown> | null {
   // Copilot exposes older Claude models through its OpenAI-compatible chat
   // endpoint, where extended thinking is configured with the provider's
   // snake_case `thinking_budget` option. Newer Copilot models expose effort
@@ -178,7 +231,24 @@ function buildGitHubCopilotReasoningOptions(
     };
   }
 
-  return { reasoningEffort };
+  const constraint = GITHUB_COPILOT_MODEL_EFFORT_SUPPORT.find(({ pattern }) =>
+    pattern.test(modelID),
+  );
+
+  if (!constraint) {
+    return { reasoningEffort };
+  }
+
+  if (constraint.supported.length === 0) {
+    return null;
+  }
+
+  const clamped = clampReasoningEffortToSupported(
+    reasoningEffort,
+    constraint.supported,
+  );
+
+  return clamped ? { reasoningEffort: clamped } : null;
 }
 
 export function splitTaskModelId(
@@ -307,4 +377,89 @@ export function mergeOpenCodeModelReasoningOptions(
       },
     },
   };
+}
+
+/**
+ * Every per-model `options` key that {@link buildOpenCodeModelReasoningOptions}
+ * can emit, across all providers. Kept next to the builders so a new provider
+ * shape and its strip coverage change together.
+ */
+const OPENCODE_MODEL_REASONING_OPTION_KEYS = [
+  'thinking',
+  'effort',
+  'reasoning',
+  'reasoningEffort',
+  'reasoningConfig',
+  'thinking_budget',
+] as const;
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Removes reasoning options from every `provider.<id>.models.<model>.options`
+ * entry of an OpenCode `provider` config subtree, leaving all other model
+ * options (variant routing, service tiers, modalities) untouched.
+ *
+ * Exists for calls that must never run with thinking enabled: OpenCode
+ * fulfils `format: json_schema` structured output by forcing tool choice,
+ * and Amazon Bedrock rejects thinking combined with forced tool use — so a
+ * reasoning effort configured for the coding harness would otherwise fail
+ * every structured call routed through the same model. Entries emptied by
+ * the strip are pruned so a config that only carried reasoning collapses to
+ * one without a `provider` subtree at all.
+ */
+export function stripOpenCodeModelReasoningOptions(
+  providerConfig: Record<string, unknown>,
+): Record<string, unknown> {
+  const strippedProviders: Record<string, unknown> = {};
+
+  for (const [providerID, providerEntry] of Object.entries(providerConfig)) {
+    if (!isPlainRecord(providerEntry) || !isPlainRecord(providerEntry.models)) {
+      strippedProviders[providerID] = providerEntry;
+      continue;
+    }
+
+    const strippedModels: Record<string, unknown> = {};
+
+    for (const [modelID, modelEntry] of Object.entries(providerEntry.models)) {
+      if (!isPlainRecord(modelEntry) || !isPlainRecord(modelEntry.options)) {
+        strippedModels[modelID] = modelEntry;
+        continue;
+      }
+
+      const options = { ...modelEntry.options };
+
+      for (const key of OPENCODE_MODEL_REASONING_OPTION_KEYS) {
+        delete options[key];
+      }
+
+      const stripped: Record<string, unknown> = { ...modelEntry };
+
+      if (Object.keys(options).length > 0) {
+        stripped.options = options;
+      } else {
+        delete stripped.options;
+      }
+
+      if (Object.keys(stripped).length > 0) {
+        strippedModels[modelID] = stripped;
+      }
+    }
+
+    const strippedEntry: Record<string, unknown> = { ...providerEntry };
+
+    if (Object.keys(strippedModels).length > 0) {
+      strippedEntry.models = strippedModels;
+    } else {
+      delete strippedEntry.models;
+    }
+
+    if (Object.keys(strippedEntry).length > 0) {
+      strippedProviders[providerID] = strippedEntry;
+    }
+  }
+
+  return strippedProviders;
 }

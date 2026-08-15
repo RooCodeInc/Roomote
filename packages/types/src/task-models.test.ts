@@ -153,6 +153,41 @@ describe('task model settings', () => {
     });
   });
 
+  it('carries catalogSyncedModelIds through, normalized and deduped', () => {
+    const settings = normalizeTaskModelSettings({
+      models: DEFAULT_TASK_MODEL_SETTINGS.models,
+      allowedModelIds: ['openrouter/openai/gpt-5.6-terra'],
+      defaultModelId: 'openrouter/openai/gpt-5.6-terra',
+      catalogSyncedModelIds: ['xai/grok-4.6', ' xai/grok-4.6 ', 'xai/grok-4.5'],
+    });
+
+    expect(settings.catalogSyncedModelIds).toEqual([
+      'xai/grok-4.6',
+      'xai/grok-4.5',
+    ]);
+  });
+
+  it('omits catalogSyncedModelIds when the persisted value has none', () => {
+    const settings = normalizeTaskModelSettings({
+      models: DEFAULT_TASK_MODEL_SETTINGS.models,
+      allowedModelIds: ['openrouter/openai/gpt-5.6-terra'],
+      defaultModelId: 'openrouter/openai/gpt-5.6-terra',
+    });
+
+    expect('catalogSyncedModelIds' in settings).toBe(false);
+  });
+
+  it('collapses an empty catalogSyncedModelIds list to no baseline', () => {
+    const settings = normalizeTaskModelSettings({
+      models: DEFAULT_TASK_MODEL_SETTINGS.models,
+      allowedModelIds: ['openrouter/openai/gpt-5.6-terra'],
+      defaultModelId: 'openrouter/openai/gpt-5.6-terra',
+      catalogSyncedModelIds: [],
+    });
+
+    expect('catalogSyncedModelIds' in settings).toBe(false);
+  });
+
   it('migrates persisted OpenCode DeepSeek Flash model settings', () => {
     const settings = normalizeTaskModelSettings({
       models: [

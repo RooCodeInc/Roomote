@@ -24,6 +24,8 @@ const mockDiscordPostMessage = vi.fn();
 const mockNotifySourceRunOnSettle = vi.fn().mockResolvedValue(undefined);
 const mockDbTransaction = vi.fn();
 const mockCaptureTaskSettled = vi.fn();
+const mockResolveDefaultComputeProvider = vi.fn().mockResolvedValue('modal');
+const mockUpdatePendingEnvironmentSnapshot = vi.fn().mockResolvedValue(true);
 
 /**
  * Rows resolved by db.select() chains that join tasks with task_runs (the
@@ -146,8 +148,12 @@ vi.mock('@roomote/db/server', async () => {
     },
     recordTaskRunLifecycleEvent: (...args: unknown[]) =>
       mockRecordTaskRunLifecycleEvent(...args),
+    resolveDefaultComputeProvider: (...args: unknown[]) =>
+      mockResolveDefaultComputeProvider(...args),
     resolveDiscordRuntimeCredentials: (...args: unknown[]) =>
       mockResolveDiscordRuntimeCredentials(...args),
+    updatePendingEnvironmentSnapshot: (...args: unknown[]) =>
+      mockUpdatePendingEnvironmentSnapshot(...args),
   };
 });
 
@@ -376,6 +382,8 @@ describe('finishRun', () => {
     mockRedisDel.mockResolvedValue(1);
     mockUpdateMessage.mockResolvedValue(true);
     mockDbExecute.mockResolvedValue([]);
+    mockResolveDefaultComputeProvider.mockResolvedValue('modal');
+    mockUpdatePendingEnvironmentSnapshot.mockResolvedValue(true);
     syncRunRows = [];
     mockDbTransaction.mockImplementation(
       async (callback: (tx: unknown) => unknown) =>
@@ -388,6 +396,14 @@ describe('finishRun', () => {
           },
           select: () => makeTxSelectChain(),
           update: (...args: unknown[]) => mockDbUpdate(...args),
+          // Brain outbox insert (maybeEnqueueBrainMemoryEvent)
+          // runs inside the completion transaction when the mocked enablement
+          // read comes back non-empty.
+          insert: () => ({
+            values: () => ({
+              onConflictDoNothing: async () => undefined,
+            }),
+          }),
         }),
     );
     mockDbSelect.mockClear();
@@ -701,6 +717,142 @@ describe('finishRun', () => {
         }),
       }),
     );
+  });
+
+  describe('environment snapshot failure state', () => {
+    const attachmentSource = {
+      source: 'pending_snapshot_row' as const,
+      environmentSnapshotId: '80e3ceee-7d21-491a-96d8-7b0c72b90b4e',
+      claimedAt: '2026-05-29T00:00:00.000Z',
+    };
+
+    function makeSnapshotRun(overrides: Partial<TaskRun> = {}) {
+      return makeRun({
+        id: 55,
+        payloadKind: TaskPayloadKind.SnapshotEnvironment,
+        vendor: 'modal',
+        payload: {
+          repo: '',
+          environmentId: 'env-123',
+          environmentSnapshotAttachment: attachmentSource,
+        },
+        ...overrides,
+      });
+    }
+
+    it('flips the pending environment snapshot row to failed when the run fails', async () => {
+      mockFindFirstRun.mockResolvedValue(makeSnapshotRun());
+
+      await finishRun({
+        id: 55,
+        status: RunStatus.Failed,
+        error: 'Detached "worker snapshot" exited immediately with code 1',
+      });
+
+      expect(mockUpdatePendingEnvironmentSnapshot).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          environmentId: 'env-123',
+          provider: 'modal',
+          snapshotId: null,
+          snapshotStatus: 'failed',
+          snapshotCreatedAt: null,
+          snapshotExpiresAt: null,
+          attachmentSource,
+          maxPendingUpdatedAt: null,
+        }),
+      );
+    });
+
+    it('flips the pending row to failed when the run is canceled', async () => {
+      mockFindFirstRun.mockResolvedValue(makeSnapshotRun());
+
+      await finishRun({ id: 55, status: RunStatus.Canceled });
+
+      expect(mockUpdatePendingEnvironmentSnapshot).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ snapshotStatus: 'failed' }),
+      );
+    });
+
+    it('flips the pending row when a stop request normalizes the failure to canceled', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeSnapshotRun({ cancelRequestedAt: new Date() }),
+      );
+
+      await finishRun({
+        id: 55,
+        status: RunStatus.Failed,
+        error: 'sandbox died during stop',
+      });
+
+      expect(mockUpdatePendingEnvironmentSnapshot).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ snapshotStatus: 'failed' }),
+      );
+    });
+
+    it('bounds legacy payloads without an attachment by the run creation time', async () => {
+      const createdAt = new Date('2026-08-13T15:57:00.000Z');
+      mockFindFirstRun.mockResolvedValue(
+        makeSnapshotRun({
+          createdAt,
+          payload: { repo: '', environmentId: 'env-123' },
+        }),
+      );
+
+      await finishRun({ id: 55, status: RunStatus.Failed, error: 'boom' });
+
+      expect(mockUpdatePendingEnvironmentSnapshot).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          attachmentSource: null,
+          maxPendingUpdatedAt: createdAt,
+        }),
+      );
+    });
+
+    it('does not touch the snapshot row when the run completes', async () => {
+      mockFindFirstRun.mockResolvedValue(makeSnapshotRun());
+
+      await finishRun({ id: 55, status: RunStatus.Completed });
+
+      expect(mockUpdatePendingEnvironmentSnapshot).not.toHaveBeenCalled();
+    });
+
+    it('does not touch the snapshot row for non-snapshot runs', async () => {
+      mockFindFirstRun.mockResolvedValue(makeRun());
+
+      await finishRun({ id: 1, status: RunStatus.Failed, error: 'boom' });
+
+      expect(mockUpdatePendingEnvironmentSnapshot).not.toHaveBeenCalled();
+    });
+
+    it('skips the flip when the payload has no environmentId', async () => {
+      mockFindFirstRun.mockResolvedValue(
+        makeSnapshotRun({ payload: { repo: '' } }),
+      );
+
+      await finishRun({ id: 55, status: RunStatus.Failed, error: 'boom' });
+
+      expect(mockUpdatePendingEnvironmentSnapshot).not.toHaveBeenCalled();
+    });
+
+    it('still finishes the run when recording the snapshot failure state throws', async () => {
+      mockFindFirstRun.mockResolvedValue(makeSnapshotRun());
+      mockUpdatePendingEnvironmentSnapshot.mockRejectedValue(
+        new Error('db unavailable'),
+      );
+
+      await expect(
+        finishRun({ id: 55, status: RunStatus.Failed, error: 'boom' }),
+      ).resolves.toBeUndefined();
+
+      // The terminal run write still happened.
+      expect(mockDbUpdateSet).toHaveBeenCalledWith(
+        expect.objectContaining({ status: RunStatus.Failed }),
+      );
+    });
   });
 
   describe('Slack completion handling', () => {

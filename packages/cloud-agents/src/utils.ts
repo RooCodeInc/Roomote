@@ -202,10 +202,12 @@ export function buildSlackThreadPromptBlocks({
   threadMessages,
   currentMessageTs,
   latestOwnBotReply,
+  includeMessagesAfterCurrent = false,
 }: {
   threadMessages: SlackThreadPromptMessage[];
   currentMessageTs: string;
   latestOwnBotReply?: { ts: string; text: string };
+  includeMessagesAfterCurrent?: boolean;
 }): {
   threadContext: string | undefined;
   replyingTo: string | undefined;
@@ -213,7 +215,9 @@ export function buildSlackThreadPromptBlocks({
 } {
   const earlierMessages = threadMessages.filter(
     (message) =>
-      compareSlackTimestamps(message.ts, currentMessageTs) < 0 &&
+      message.ts !== currentMessageTs &&
+      (includeMessagesAfterCurrent ||
+        compareSlackTimestamps(message.ts, currentMessageTs) < 0) &&
       message.text.trim().length > 0,
   );
   const latestBotReply =

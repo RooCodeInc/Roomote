@@ -15,6 +15,7 @@ import type { CommunicationProvider } from '@roomote/types';
 import { findDiscordDefaultDestination } from '../lib/discord-persistence';
 import { findTeamsPrimaryConversation } from '../lib/teams-primary-conversation';
 import { findTelegramPrimaryChatId } from '../lib/telegram-primary-chat';
+import { findUserDirectMessageDestination } from '../lib/user-direct-message';
 
 /** Fully resolved destination an automation run reports to. */
 export type ResolvedAutomationDestination = {
@@ -115,6 +116,8 @@ export async function findTeamsConversationServiceUrl(
 export async function resolveAutomationRuntimeDestination(params: {
   runtime: Pick<AutomationRuntime, 'destination'>;
   slackConnected: boolean;
+  /** Optional user whose DM should receive a one-off fallback report. */
+  fallbackUserId?: string | null;
 }): Promise<ResolvedAutomationDestination | null> {
   const destination = params.runtime.destination;
 
@@ -132,6 +135,29 @@ export async function resolveAutomationRuntimeDestination(params: {
       }
 
       return destination;
+    }
+  }
+
+  if (params.fallbackUserId) {
+    const connectedProviders = await listConnectedCommunicationProviders();
+    for (const provider of connectedProviders) {
+      try {
+        const directMessage = await findUserDirectMessageDestination(
+          provider,
+          params.fallbackUserId,
+        );
+        if (directMessage) {
+          return {
+            provider,
+            ...directMessage,
+            source: 'automation_target',
+          };
+        }
+      } catch (error) {
+        console.warn(
+          `[automation-destination] Failed to resolve fallback DM on ${provider}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
   }
 

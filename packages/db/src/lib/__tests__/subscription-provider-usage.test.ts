@@ -633,6 +633,29 @@ describe('parseXaiSubscriptionUsage', () => {
     expect(parseXaiSubscriptionUsage({})).toEqual([]);
     expect(parseXaiSubscriptionUsage({ plan: 'pro' })).toEqual([]);
   });
+
+  it('does not invent a window from period metadata without creditUsagePercent', () => {
+    // Live cli-chat-proxy response when Grok CLI identity headers are omitted:
+    // 200 with weekly period fields, but no creditUsagePercent / productUsage.
+    expect(
+      parseXaiSubscriptionUsage({
+        config: {
+          currentPeriod: {
+            type: 'USAGE_PERIOD_TYPE_WEEKLY',
+            start: '2026-08-07T01:21:57.505552+00:00',
+            end: '2026-08-14T01:21:57.505552+00:00',
+          },
+          onDemandCap: { val: 0 },
+          onDemandUsed: { val: 0 },
+          isUnifiedBillingUser: true,
+          prepaidBalance: { val: 0 },
+          topUpMethod: 'TOP_UP_METHOD_SAVED_PAYMENT_METHOD',
+          billingPeriodStart: '2026-08-07T01:21:57.505552+00:00',
+          billingPeriodEnd: '2026-08-14T01:21:57.505552+00:00',
+        },
+      }),
+    ).toEqual([]);
+  });
 });
 
 describe('fetchXaiSubscriptionUsage', () => {
@@ -686,6 +709,62 @@ describe('fetchXaiSubscriptionUsage', () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           authorization: 'Bearer xai-access',
+          'X-XAI-Token-Auth': 'xai-grok-cli',
+          'x-grok-client-identifier': 'grok-shell',
+          'x-grok-client-mode': 'billing',
+          'x-userid': 'user-1',
+        }),
+      }),
+    );
+  });
+
+  it('sends Grok CLI identity headers so the billing proxy returns usage', async () => {
+    mockGetFreshXaiAccessToken.mockResolvedValue({
+      access: 'xai-access',
+      expires: Date.now() + 3_600_000,
+    });
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ userId: 'user-1' }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          config: { creditUsagePercent: 27 },
+        }),
+      );
+
+    const usage = await fetchXaiSubscriptionUsage({ fetchImpl });
+
+    expect(usage).toMatchObject({
+      providerId: 'xai-subscription',
+      windows: [{ label: 'Included usage', usedPercent: 27 }],
+    });
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      1,
+      'https://cli-chat-proxy.grok.com/v1/user',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: 'Bearer xai-access',
+          'user-agent': 'roomote',
+        }),
+      }),
+    );
+    const userHeaders = (
+      fetchImpl.mock.calls[0]?.[1] as { headers: Record<string, string> }
+    ).headers;
+    expect(userHeaders).not.toHaveProperty('X-XAI-Token-Auth');
+    expect(userHeaders).not.toHaveProperty('x-grok-client-identifier');
+    expect(userHeaders).not.toHaveProperty('x-grok-client-mode');
+    expect(userHeaders).not.toHaveProperty('x-userid');
+    expect(fetchImpl).toHaveBeenNthCalledWith(
+      2,
+      'https://cli-chat-proxy.grok.com/v1/billing?format=credits',
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          authorization: 'Bearer xai-access',
+          'X-XAI-Token-Auth': 'xai-grok-cli',
+          'x-grok-client-identifier': 'grok-shell',
+          'x-grok-client-mode': 'billing',
+          'x-userid': 'user-1',
         }),
       }),
     );

@@ -20,6 +20,8 @@ export * from './slack-api-base-url';
 export * from './slack-api-fetch';
 export * from './slack-channel-info-cache';
 export * from './slack-messages';
+export * from './slack-resume-lock';
+export * from './slack-task-run-workspace-scope';
 export * from './post-message-delivery';
 export * from './slack-notifier';
 export * from './slack-system-messages';
@@ -39,6 +41,7 @@ export * from './thread-footer';
 export * from './thread-reply-footer-ops';
 export * from './thread-image-utils';
 export * from './video-descriptions';
+export * from './web-client';
 export * from './work-object-utils';
 
 export type {
