@@ -56,10 +56,21 @@ export async function maybeEnqueueBrainMemoryEvent(
   tx: DatabaseOrTransaction,
   runId: number,
 ): Promise<void> {
+  const [run] = await tx
+    .select({ completedAt: taskRuns.completedAt })
+    .from(taskRuns)
+    .where(eq(taskRuns.id, runId))
+    .limit(1);
+
   await tx
     .insert(brainMemoryEvents)
-    .values({ runId })
-    .onConflictDoNothing({ target: brainMemoryEvents.runId });
+    .values({ runId, runCompletedAt: run?.completedAt })
+    .onConflictDoUpdate({
+      target: brainMemoryEvents.runId,
+      set: {
+        runCompletedAt: sql`coalesce(excluded.run_completed_at, ${brainMemoryEvents.runCompletedAt})`,
+      },
+    });
 }
 
 /**
@@ -78,9 +89,15 @@ export async function saveBrainAgentSummary(
   runId: number,
   agentSummary: string,
 ): Promise<void> {
+  const [run] = await database
+    .select({ completedAt: taskRuns.completedAt })
+    .from(taskRuns)
+    .where(eq(taskRuns.id, runId))
+    .limit(1);
+
   await database
     .insert(brainMemoryEvents)
-    .values({ runId, agentSummary })
+    .values({ runId, runCompletedAt: run?.completedAt, agentSummary })
     .onConflictDoUpdate({
       target: brainMemoryEvents.runId,
       set: {
@@ -88,6 +105,7 @@ export async function saveBrainAgentSummary(
         status: 'pending',
         attempts: 0,
         lastError: null,
+        runCompletedAt: sql`coalesce(excluded.run_completed_at, ${brainMemoryEvents.runCompletedAt})`,
         updatedAt: sql`now()`,
       },
     });
@@ -103,8 +121,8 @@ export async function backfillBrainMemoryEvents(
   database: DatabaseOrTransaction,
 ): Promise<number> {
   const rows = (await database.execute(
-    sql`INSERT INTO ${brainMemoryEvents} (run_id)
-        SELECT id FROM ${taskRuns} WHERE status = 'completed'
+    sql`INSERT INTO ${brainMemoryEvents} (run_id, run_completed_at)
+        SELECT id, completed_at FROM ${taskRuns} WHERE status = 'completed'
         ON CONFLICT (run_id) DO NOTHING
         RETURNING id`,
   )) as unknown as Array<{ id: string }>;
@@ -130,6 +148,9 @@ const PROCESSING_RECLAIM_INTERVAL = '15 minutes';
  * back rather than silently drop the memory. Their attempts counter keeps
  * climbing across reclaims, so a row that poisons the drainer still reaches
  * MAX_ATTEMPTS instead of cycling forever.
+ *
+ * Newer completed runs are claimed first so a large historical backfill makes
+ * the Brain useful for recent work immediately. Run ID breaks timestamp ties.
  */
 export async function claimPendingBrainMemoryEvents(
   database: DatabaseOrTransaction,
@@ -144,15 +165,16 @@ export async function claimPendingBrainMemoryEvents(
     })
     .where(
       sql`${brainMemoryEvents.id} IN (
-        SELECT id FROM ${brainMemoryEvents}
-        WHERE status = 'pending'
+        SELECT event.id
+        FROM ${brainMemoryEvents} AS event
+        WHERE event.status = 'pending'
            OR (
-             status = 'processing'
-             AND updated_at < now() - ${sql.raw(`interval '${PROCESSING_RECLAIM_INTERVAL}'`)}
+             event.status = 'processing'
+             AND event.updated_at < now() - ${sql.raw(`interval '${PROCESSING_RECLAIM_INTERVAL}'`)}
            )
-        ORDER BY created_at
+        ORDER BY event.run_completed_at DESC NULLS LAST, event.run_id DESC NULLS LAST
         LIMIT ${limit}
-        FOR UPDATE SKIP LOCKED
+        FOR UPDATE OF event SKIP LOCKED
       )`,
     )
     .returning();
