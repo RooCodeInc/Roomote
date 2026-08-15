@@ -405,7 +405,7 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
   {
     id: 'notion',
     name: 'Notion',
-    description: `Access only the Notion pages and data sources explicitly shared with ${PRODUCT_NAME}`,
+    description: `Connect Notion so your agents can find context and keep shared pages and data sources up to date from ${PRODUCT_NAME} tasks`,
     icon: 'notion',
     connectionScope: 'deployment',
     connectionMode: 'admin_configured',
@@ -595,7 +595,7 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
   {
     id: 'elevenlabs',
     name: 'ElevenLabs',
-    description: `Connect ElevenLabs so ${PRODUCT_NAME} can narrate feature-demo videos with your voice. The API key stays on the control plane; agents get no ElevenLabs tools and the key never enters a task sandbox`,
+    description: `Connect ElevenLabs so ${PRODUCT_NAME} can narrate feature-demo videos with your voice`,
     icon: 'elevenlabs',
     connectionScope: 'deployment',
     connectionMode: 'admin_configured',
