@@ -10,9 +10,9 @@ describe('BRAIN_MCP_INSTRUCTIONS', () => {
     );
   });
 
-  it('allows narrow live-source fallback only for an explicit coverage or freshness gap', () => {
+  it('continues to relevant sources when Brain context is incomplete', () => {
     expect(BRAIN_MCP_INSTRUCTIONS).toContain(
-      'the Brain lacks enough coverage, freshness beyond its collection window could materially change the answer, or the user explicitly asks for live verification',
+      "Treat Brain as context, not a stopping point; if it doesn't fully answer the question, continue with the relevant sources",
     );
     expect(BRAIN_MCP_INSTRUCTIONS).toContain(
       'do not sweep an entire integration when the Brain already answers the question',
