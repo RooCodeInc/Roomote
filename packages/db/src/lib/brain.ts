@@ -130,6 +130,9 @@ const PROCESSING_RECLAIM_INTERVAL = '15 minutes';
  * back rather than silently drop the memory. Their attempts counter keeps
  * climbing across reclaims, so a row that poisons the drainer still reaches
  * MAX_ATTEMPTS instead of cycling forever.
+ *
+ * Newer completed runs are claimed first so a large historical backfill makes
+ * the Brain useful for recent work immediately. Run ID breaks timestamp ties.
  */
 export async function claimPendingBrainMemoryEvents(
   database: DatabaseOrTransaction,
@@ -144,15 +147,17 @@ export async function claimPendingBrainMemoryEvents(
     })
     .where(
       sql`${brainMemoryEvents.id} IN (
-        SELECT id FROM ${brainMemoryEvents}
-        WHERE status = 'pending'
+        SELECT event.id
+        FROM ${brainMemoryEvents} AS event
+        LEFT JOIN ${taskRuns} AS run ON run.id = event.run_id
+        WHERE event.status = 'pending'
            OR (
-             status = 'processing'
-             AND updated_at < now() - ${sql.raw(`interval '${PROCESSING_RECLAIM_INTERVAL}'`)}
+             event.status = 'processing'
+             AND event.updated_at < now() - ${sql.raw(`interval '${PROCESSING_RECLAIM_INTERVAL}'`)}
            )
-        ORDER BY created_at
+        ORDER BY run.completed_at DESC NULLS LAST, event.run_id DESC
         LIMIT ${limit}
-        FOR UPDATE SKIP LOCKED
+        FOR UPDATE OF event SKIP LOCKED
       )`,
     )
     .returning();
