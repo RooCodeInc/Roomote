@@ -107,8 +107,7 @@ describe('native Notion MCP', () => {
       },
     });
     mockFindEnablement.mockResolvedValue({
-      disabledTools: null,
-      toolAccessMode: 'read_only',
+      mcpId: 'notion',
     });
   });
 
@@ -127,7 +126,7 @@ describe('native Notion MCP', () => {
     expect(response.status).toBe(403);
   });
 
-  it('exposes only read tools by default', async () => {
+  it('exposes tools whose permissions are enforced by Notion capabilities', async () => {
     const response = await postMcp(createApp(createRunToken()), {
       jsonrpc: '2.0',
       id: 1,
@@ -145,52 +144,11 @@ describe('native Notion MCP', () => {
         'notion-fetch',
         'notion-query-data-sources',
         'notion-get-comments',
-      ]),
-    );
-    expect(toolNames).not.toContain('notion-update-page');
-    expect(toolNames).not.toContain('notion-create-pages');
-  });
-
-  it('exposes writes only after read-write is enabled', async () => {
-    mockFindEnablement.mockResolvedValue({
-      disabledTools: null,
-      toolAccessMode: 'read_write',
-    });
-    const response = await postMcp(createApp(createRunToken()), {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/list',
-    });
-    const body = (await response.json()) as {
-      result: { tools: Array<{ name: string }> };
-    };
-
-    expect(body.result.tools.map((tool) => tool.name)).toEqual(
-      expect.arrayContaining([
         'notion-create-pages',
         'notion-update-page',
         'notion-append-blocks',
         'notion-create-comment',
       ]),
-    );
-  });
-
-  it('keeps individually disabled write tools unavailable', async () => {
-    mockFindEnablement.mockResolvedValue({
-      disabledTools: ['notion-update-page'],
-      toolAccessMode: 'read_write',
-    });
-    const response = await postMcp(createApp(createRunToken()), {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/list',
-    });
-    const body = (await response.json()) as {
-      result: { tools: Array<{ name: string }> };
-    };
-
-    expect(body.result.tools.map((tool) => tool.name)).not.toContain(
-      'notion-update-page',
     );
   });
 

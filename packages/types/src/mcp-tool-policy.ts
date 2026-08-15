@@ -4,66 +4,6 @@ export const MCP_TOOL_ACCESS_MODES = ['read_only', 'read_write'] as const;
 
 export type McpToolAccessMode = (typeof MCP_TOOL_ACCESS_MODES)[number];
 
-export type McpToolAccessModeConfig = {
-  readonly defaultMode: McpToolAccessMode;
-  readonly supportedModes: readonly McpToolAccessMode[];
-  readonly readOnlyToolNames: readonly string[];
-};
-
-/** Roomote's native Notion tools that do not mutate content. */
-export const NOTION_READ_ONLY_TOOL_NAMES = [
-  'notion-search',
-  'notion-fetch',
-  'notion-query-data-sources',
-  'notion-get-comments',
-] as const;
-
-export const NOTION_MCP_TOOL_DEFINITIONS = [
-  {
-    name: 'notion-search',
-    description: 'Search explicitly shared Notion pages and data sources.',
-  },
-  {
-    name: 'notion-fetch',
-    description:
-      'Fetch an explicitly shared Notion page, data source, or block.',
-  },
-  {
-    name: 'notion-query-data-sources',
-    description: 'Query rows from an explicitly shared Notion data source.',
-  },
-  {
-    name: 'notion-get-comments',
-    description: 'List comments on an explicitly shared Notion page or block.',
-  },
-  {
-    name: 'notion-create-pages',
-    description: 'Create a page beneath an available Notion parent.',
-  },
-  {
-    name: 'notion-update-page',
-    description: 'Update an available Notion page.',
-  },
-  {
-    name: 'notion-append-blocks',
-    description: 'Append content blocks to an available Notion page or block.',
-  },
-  {
-    name: 'notion-create-comment',
-    description: 'Create a comment on an available Notion page.',
-  },
-] as const;
-
-const INTEGRATION_MCP_TOOL_ACCESS_MODE_CONFIGS: Readonly<
-  Partial<Record<string, McpToolAccessModeConfig>>
-> = {
-  notion: {
-    defaultMode: 'read_only',
-    supportedModes: MCP_TOOL_ACCESS_MODES,
-    readOnlyToolNames: NOTION_READ_ONLY_TOOL_NAMES,
-  },
-};
-
 const BETTER_STACK_READ_ONLY_UPTIME_TOOL_NAMES = [
   'escalation_policy',
   'heartbeat_availability',
@@ -289,46 +229,11 @@ export type McpToolPolicy = {
 
 export function getAllowedIntegrationMcpToolNames(
   integrationOrId: McpIntegration | string,
-  toolAccessMode?: string | null,
 ): readonly string[] | undefined {
   const integrationId =
     typeof integrationOrId === 'string' ? integrationOrId : integrationOrId.id;
 
-  const accessModeConfig =
-    INTEGRATION_MCP_TOOL_ACCESS_MODE_CONFIGS[integrationId];
-  if (accessModeConfig) {
-    return resolveMcpIntegrationToolAccessMode(
-      integrationId,
-      toolAccessMode,
-    ) === 'read_write'
-      ? undefined
-      : accessModeConfig.readOnlyToolNames;
-  }
-
   return INTEGRATION_MCP_ALLOWED_TOOL_NAMES[integrationId];
-}
-
-export function getMcpIntegrationToolAccessModeConfig(
-  integrationOrId: McpIntegration | string,
-): McpToolAccessModeConfig | undefined {
-  const integrationId =
-    typeof integrationOrId === 'string' ? integrationOrId : integrationOrId.id;
-
-  return INTEGRATION_MCP_TOOL_ACCESS_MODE_CONFIGS[integrationId];
-}
-
-export function resolveMcpIntegrationToolAccessMode(
-  integrationOrId: McpIntegration | string,
-  storedMode?: string | null,
-): McpToolAccessMode | undefined {
-  const config = getMcpIntegrationToolAccessModeConfig(integrationOrId);
-  if (!config) {
-    return undefined;
-  }
-
-  return config.supportedModes.includes(storedMode as McpToolAccessMode)
-    ? (storedMode as McpToolAccessMode)
-    : config.defaultMode;
 }
 
 export function isMcpToolAllowed(

@@ -109,7 +109,7 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
     'Roomote will be able to inspect monday.com boards, items, updates, docs, and workspace context.',
   neon: 'Roomote will get database access to inspect schemas and query data.',
   notion:
-    'Roomote will use one deployment-wide Notion internal integration. Only explicitly shared pages and data sources are accessible. It starts read-only, and admins can optionally allow writes.',
+    'Roomote will use one deployment-wide Notion internal integration. Notion controls its capabilities and which pages and data sources it can access.',
   pylon:
     'Roomote will be able to inspect customer issues, message history, and account context.',
   posthog:
@@ -515,7 +515,7 @@ function buildAdminConfiguredIntegrationItem({
     secondaryAction:
       canManageTools &&
       enabled &&
-      (integration.serverMode !== 'native' || integration.id === 'notion') &&
+      integration.serverMode !== 'native' &&
       integration.serverMode !== 'credential_only'
         ? {
             label: 'Manage tools',
@@ -912,8 +912,10 @@ function NotionConnectionFields({
           >
             Notion integrations
           </a>
-          , then share only the approved pages or data sources with it. Roomote
-          cannot access anything that has not been shared with this connection.
+          . In Notion, choose its read, update, insert, and comment
+          capabilities, then share only the approved pages or data sources with
+          it. Roomote cannot access anything that has not been shared with this
+          connection.
         </p>
         {allowBlankSecret ? (
           <p className="text-sm text-muted-foreground">
@@ -1838,7 +1840,7 @@ export function Integrations() {
               dialogOpen: isNotionDialogOpen,
               connectionPending: notionConnection.isPending,
               canConfigure: isAdmin,
-              canManageTools: isAdmin,
+              canManageTools: false,
               openDialog: () => setIsNotionDialogOpen(true),
               openToolDialog: () => openMcpToolDialog(integration),
               disconnectIntegration: () =>
@@ -2804,8 +2806,9 @@ export function Integrations() {
         description={
           <>
             Store a Notion internal integration secret for this deployment.
-            Notion limits it to pages and data sources explicitly shared with
-            that integration; the secret stays encrypted server-side.
+            Notion controls the connection&apos;s capabilities and limits it to
+            pages and data sources explicitly shared with that integration; the
+            secret stays encrypted server-side.
           </>
         }
         onSubmit={handleNotionSubmit}

@@ -85,15 +85,12 @@ async function resolveDeploymentToolPolicy(mcpId: string) {
     ),
     columns: {
       disabledTools: true,
-      toolAccessMode: true,
     },
   });
 
   return {
     disabledToolNames: enablement?.disabledTools ?? null,
-    allowedToolNames:
-      getAllowedIntegrationMcpToolNames(mcpId, enablement?.toolAccessMode) ??
-      null,
+    allowedToolNames: getAllowedIntegrationMcpToolNames(mcpId) ?? null,
   };
 }
 

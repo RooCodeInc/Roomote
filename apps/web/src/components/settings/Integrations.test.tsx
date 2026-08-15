@@ -25,12 +25,10 @@ const state = vi.hoisted(() => ({
   }>,
   mcpTools: null as null | {
     mcpId: string;
-    toolAccessMode?: 'read_only' | 'read_write' | null;
     tools: Array<{
       name: string;
       description: string | null;
       enabled: boolean;
-      availableInReadOnly?: boolean | null;
     }>;
   },
   mcpToolsError: null as Error | null,
@@ -97,7 +95,7 @@ const state = vi.hoisted(() => ({
   searchParams: '',
 }));
 
-const { mutations, selectMock, radioMock } = vi.hoisted(() => ({
+const { mutations, selectMock } = vi.hoisted(() => ({
   mutations: {
     connectLinear: vi.fn(),
     disconnectLinear: vi.fn(),
@@ -117,10 +115,6 @@ const { mutations, selectMock, radioMock } = vi.hoisted(() => ({
     removeLinearOauthSetup: vi.fn(),
   },
   selectMock: {
-    latestOnValueChange: null as null | ((value: string) => void),
-  },
-  radioMock: {
-    currentValue: null as string | null,
     latestOnValueChange: null as null | ((value: string) => void),
   },
 }));
@@ -417,28 +411,6 @@ vi.mock('@/components/system', () => ({
   PlugIcon: () => <svg aria-hidden="true" />,
   RefreshCw: ({ className }: { className?: string }) => (
     <svg aria-hidden="true" className={className} data-icon="refresh-cw" />
-  ),
-  RadioGroup: ({
-    children,
-    value,
-    onValueChange,
-  }: {
-    children: ReactNode;
-    value: string;
-    onValueChange: (value: string) => void;
-  }) => {
-    radioMock.currentValue = value;
-    radioMock.latestOnValueChange = onValueChange;
-    return <div role="radiogroup">{children}</div>;
-  },
-  RadioGroupItem: ({ id, value }: { id: string; value: string }) => (
-    <input
-      id={id}
-      type="radio"
-      value={value}
-      checked={radioMock.currentValue === value}
-      onChange={() => radioMock.latestOnValueChange?.(value)}
-    />
   ),
   Select: ({
     children,
@@ -1442,62 +1414,21 @@ describe('Integrations settings', () => {
     ).toBeInTheDocument();
   });
 
-  it('lets admins opt a deployment-wide Notion connection into read-write access', () => {
+  it('does not show duplicate tool management for Notion', () => {
     state.deploymentEnablements = [{ mcpId: 'notion', enabled: true }];
     state.userConnections = [
       { id: 'conn-notion', mcpId: 'notion', authStatus: 'authenticated' },
     ];
     state.notionConnection = { authStatus: 'authenticated' };
-    state.mcpTools = {
-      mcpId: 'notion',
-      toolAccessMode: 'read_only',
-      tools: [
-        {
-          name: 'notion-fetch',
-          description: 'Fetch a Notion page',
-          enabled: true,
-          availableInReadOnly: true,
-        },
-        {
-          name: 'notion-update-page',
-          description: 'Update a Notion page',
-          enabled: true,
-          availableInReadOnly: false,
-        },
-      ],
-    };
 
     render(<Integrations />);
-    fireEvent.click(
-      screen.getByRole('button', { name: 'Manage Notion tools' }),
-    );
-
-    expect(screen.getByLabelText('Read only (recommended)')).toBeChecked();
-    expect(
-      screen.getByRole('button', { name: 'Enable notion-update-page' }),
-    ).toBeDisabled();
-    fireEvent.click(screen.getByLabelText('Read and write'));
 
     expect(
-      screen.getByRole('button', { name: 'Disable notion-update-page' }),
-    ).toBeEnabled();
-
+      screen.queryByRole('button', { name: 'Manage Notion tools' }),
+    ).not.toBeInTheDocument();
     expect(
-      screen.getByText(
-        "Read and write access remains limited to pages and data sources explicitly shared with the deployment's Notion internal integration.",
-      ),
+      screen.getByRole('button', { name: 'Edit Notion connection' }),
     ).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-
-    expect(mutations.setDisabledTools).toHaveBeenCalledWith(
-      {
-        mcpId: 'notion',
-        disabledTools: [],
-        toolAccessMode: 'read_write',
-      },
-      expect.any(Object),
-    );
   });
 
   it('opens the Snowflake credential dialog from the integrations page', () => {
@@ -1556,6 +1487,11 @@ describe('Integrations settings', () => {
     expect(
       screen.getByText(
         /share only the approved pages or data sources with it/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /choose its read, update, insert, and comment capabilities/i,
       ),
     ).toBeInTheDocument();
   });
