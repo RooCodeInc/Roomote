@@ -295,6 +295,13 @@
       "when": 1786818427321,
       "tag": "0041_narrow_lizard",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1786827234253,
+      "tag": "0042_slim_proemial_gods",
+      "breakpoints": true
     }
   ]
 }

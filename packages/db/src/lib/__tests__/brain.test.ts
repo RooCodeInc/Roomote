@@ -12,6 +12,7 @@ import {
   taskRuns,
   taskFactory,
   brainMemoryEvents,
+  brainCollectorItems,
   brainSyncState,
   backfillBrainMemoryEvents,
   claimPendingBrainMemoryEvents,
@@ -20,6 +21,10 @@ import {
   maybeEnqueueBrainMemoryEvent,
   saveBrainAgentSummary,
   resetBrainIngestionState,
+  deleteBrainCollectorItems,
+  listBrainCollectorItems,
+  listBrainCollectorItemsBefore,
+  upsertBrainCollectorItems,
   upsertBrainSyncState,
 } from '../../server';
 import type { CreateTaskRun } from '../../types';
@@ -53,6 +58,7 @@ async function makeCompletedRun(completedAt?: Date) {
 }
 
 afterEach(async () => {
+  await db.delete(brainCollectorItems);
   await db.delete(brainSyncState);
   await db.delete(brainMemoryEvents);
 
@@ -72,22 +78,69 @@ describe('resetBrainIngestionState', () => {
       watermark: new Date('2026-08-01T00:00:00Z'),
       backfillCompletedAt: new Date('2026-08-01T01:00:00Z'),
     });
+    await upsertBrainCollectorItems(db, 'notion-pages', [
+      {
+        itemId: 'page-1',
+        slug: 'notion/page1',
+        lastSeenAt: new Date('2026-08-01T00:00:00Z'),
+      },
+    ]);
 
     await resetBrainIngestionState(db);
 
     const states = await db.select().from(brainSyncState);
+    const collectorItems = await db.select().from(brainCollectorItems);
     const [event] = await db
       .select()
       .from(brainMemoryEvents)
       .where(eq(brainMemoryEvents.runId, run.id));
 
     expect(states).toHaveLength(0);
+    expect(collectorItems).toHaveLength(0);
     expect(event).toMatchObject({
       status: 'pending',
       attempts: 0,
       lastError: null,
       processedAt: null,
     });
+  });
+});
+
+describe('Brain collector item inventory', () => {
+  it('finds only items missing from a completed sweep', async () => {
+    await upsertBrainCollectorItems(db, 'notion-pages', [
+      {
+        itemId: 'still-shared',
+        slug: 'notion/stillshared',
+        lastSeenAt: new Date('2026-08-14T00:00:00Z'),
+      },
+      {
+        itemId: 'revoked',
+        slug: 'notion/revoked',
+        lastSeenAt: new Date('2026-08-14T00:00:00Z'),
+      },
+    ]);
+    const sweepStartedAt = new Date('2026-08-15T00:00:00Z');
+    await upsertBrainCollectorItems(db, 'notion-pages', [
+      {
+        itemId: 'still-shared',
+        slug: 'notion/stillshared',
+        lastSeenAt: sweepStartedAt,
+      },
+    ]);
+
+    const missing = await listBrainCollectorItemsBefore(
+      db,
+      'notion-pages',
+      sweepStartedAt,
+      100,
+    );
+
+    expect(missing.map((item) => item.itemId)).toEqual(['revoked']);
+
+    await deleteBrainCollectorItems(db, 'notion-pages', ['revoked']);
+    const remaining = await listBrainCollectorItems(db, 'notion-pages', 100);
+    expect(remaining.map((item) => item.itemId)).toEqual(['still-shared']);
   });
 });
 

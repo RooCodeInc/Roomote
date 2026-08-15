@@ -210,6 +210,7 @@ export {
   userApiKeysRelations,
   brainMemoryEvents,
   brainMemoryEventsRelations,
+  brainCollectorItems,
   brainSyncState,
 } from './schema';
 

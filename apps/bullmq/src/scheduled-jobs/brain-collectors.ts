@@ -2,11 +2,14 @@ import {
   and,
   db,
   deploymentMcpEnablements,
+  deleteBrainCollectorItems,
   discordUserMappings,
   eq,
   getBrainSyncState,
   githubUserMappings,
   isNull,
+  listBrainCollectorItems,
+  listBrainCollectorItemsBefore,
   mcpConnections,
   slackDirectoryUsers,
   slackInstallations,
@@ -15,6 +18,7 @@ import {
   teamsUserMappings,
   telegramUserMappings,
   upsertBrainSyncState,
+  upsertBrainCollectorItems,
   users,
 } from '@roomote/db/server';
 import { decrypt } from '@roomote/db/encryption';
@@ -89,6 +93,18 @@ type CollectorStateUpdate = {
   backfillCompletedAt?: Date | null;
 };
 
+type CollectorItemUpdate = {
+  collectorId: string;
+  itemId: string;
+  slug: string;
+  lastSeenAt: Date;
+};
+
+type CollectorItemDelete = {
+  collectorId: string;
+  itemIds: string[];
+};
+
 export type CollectorResult = {
   pages: CollectorPage[];
   nextSince: Date | null;
@@ -98,7 +114,25 @@ export type CollectorResult = {
    * page lands, preserving the same outbox-like ordering as `nextSince`.
    */
   stateUpdates?: CollectorStateUpdate[];
+  /** Inventory changes persist only after every returned page lands. */
+  itemUpdates?: CollectorItemUpdate[];
+  itemDeletes?: CollectorItemDelete[];
 };
+
+async function persistCollectorItemUpdates(
+  updates: CollectorItemUpdate[],
+): Promise<void> {
+  const byCollector = new Map<string, CollectorItemUpdate[]>();
+  for (const update of updates) {
+    const existing = byCollector.get(update.collectorId) ?? [];
+    existing.push(update);
+    byCollector.set(update.collectorId, existing);
+  }
+
+  for (const [collectorId, items] of byCollector) {
+    await upsertBrainCollectorItems(db, collectorId, items);
+  }
+}
 
 type BrainCollectorRunResult = {
   /** At least one durable deep-backfill cursor advanced in this pass. */
@@ -128,6 +162,7 @@ export interface BrainCollector {
     pages: CollectorPage[];
     nextCursor: string | null;
     done: boolean;
+    itemUpdates?: CollectorItemUpdate[];
   }>;
 }
 
@@ -187,6 +222,8 @@ export async function runBrainCollectors(
           pages,
           nextSince,
           stateUpdates = [],
+          itemUpdates = [],
+          itemDeletes = [],
         } = await collector.collect({
           since: state?.watermark ?? null,
           now: new Date(),
@@ -217,6 +254,14 @@ export async function runBrainCollectors(
         }
 
         if (!overshot) {
+          await persistCollectorItemUpdates(itemUpdates);
+          for (const deletion of itemDeletes) {
+            await deleteBrainCollectorItems(
+              db,
+              deletion.collectorId,
+              deletion.itemIds,
+            );
+          }
           for (const update of stateUpdates) {
             await upsertBrainSyncState(db, update.collectorId, {
               ...(update.watermark !== undefined
@@ -304,6 +349,8 @@ async function drainCollectorBackfill(input: {
         connection,
       );
     }
+
+    await persistCollectorItemUpdates(step.itemUpdates ?? []);
 
     budget -= step.pages.length;
     ingested += step.pages.length;
@@ -2184,8 +2231,8 @@ export function buildNotionPage(
   if (!pageId) {
     return null;
   }
-  const stableId = pageId.toLowerCase().replace(/[^a-z0-9]/g, '');
-  if (!stableId) {
+  const slug = notionPageSlug(pageId);
+  if (!slug) {
     return null;
   }
 
@@ -2196,7 +2243,7 @@ export function buildNotionPage(
   const body = asString(markdown.markdown);
 
   return {
-    slug: `notion/${stableId}`,
+    slug,
     title,
     content: [
       '---',
@@ -2228,6 +2275,11 @@ export function buildNotionPage(
       '',
     ].join('\n'),
   };
+}
+
+function notionPageSlug(pageId: string): string | null {
+  const stableId = pageId.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return stableId ? `notion/${stableId}` : null;
 }
 
 async function findNotionConnectionConfig(): Promise<McpConnectionNotionConfig | null> {
@@ -2293,6 +2345,7 @@ export function buildNotionSearchBody(
 async function fetchNotionPage(
   config: McpConnectionNotionConfig,
   page: NotionSearchPage,
+  unavailableOnNotFound = true,
 ): Promise<CollectorPage | null> {
   if (page.in_trash) {
     return buildNotionPage(page, {});
@@ -2305,7 +2358,11 @@ async function fetchNotionPage(
     });
     return buildNotionPage(page, markdown);
   } catch (error) {
-    if (error instanceof NotionApiError && error.status === 404) {
+    if (
+      unavailableOnNotFound &&
+      error instanceof NotionApiError &&
+      error.status === 404
+    ) {
       return buildNotionPage(page, {}, 'unavailable');
     }
     throw error;
@@ -2313,7 +2370,7 @@ async function fetchNotionPage(
 }
 
 type NotionScanCursor = {
-  mode: 'idle' | 'incremental' | 'sweep';
+  mode: 'idle' | 'incremental' | 'sweep' | 'reconcile';
   lastSweepAt: string | null;
   upstreamCursor?: string;
   since?: string;
@@ -2327,7 +2384,8 @@ function parseNotionScanCursor(raw: string | null): NotionScanCursor {
       if (
         parsed.mode === 'idle' ||
         parsed.mode === 'incremental' ||
-        parsed.mode === 'sweep'
+        parsed.mode === 'sweep' ||
+        parsed.mode === 'reconcile'
       ) {
         return {
           mode: parsed.mode,
@@ -2352,6 +2410,163 @@ function parseNotionScanCursor(raw: string | null): NotionScanCursor {
 
 function serializeNotionScanCursor(cursor: NotionScanCursor): string {
   return JSON.stringify(cursor);
+}
+
+function notionItemUpdate(
+  page: NotionSearchPage,
+  slug: string,
+  lastSeenAt: Date,
+): CollectorItemUpdate {
+  return {
+    collectorId: NOTION_PAGES_COLLECTOR_ID,
+    itemId: page.id,
+    slug,
+    lastSeenAt,
+  };
+}
+
+export function buildNotionSweepInventory(
+  pages: NotionSearchPage[],
+  scanStartedAt: Date,
+): CollectorItemUpdate[] {
+  return pages.flatMap((page) => {
+    const slug = notionPageSlug(page.id);
+    return slug ? [notionItemUpdate(page, slug, scanStartedAt)] : [];
+  });
+}
+
+export function buildUnavailableNotionPage(item: {
+  itemId: string;
+  slug: string;
+}): CollectorPage {
+  const page = buildNotionPage(
+    { object: 'page', id: item.itemId },
+    {},
+    'unavailable',
+  );
+
+  return {
+    slug: item.slug,
+    title: page?.title ?? 'Unavailable Notion page',
+    content:
+      page?.content ??
+      `---\ntype: notion-page\nstatus: unavailable\nprovenance: roomote-notion\n---\n\n# Unavailable Notion page\n\nThis page is no longer available to the Notion integration.\n`,
+  };
+}
+
+export async function collectNotionReconciliation(input: {
+  config: McpConnectionNotionConfig;
+  saved: NotionScanCursor;
+  limit: number;
+}): Promise<CollectorResult> {
+  const scanStartedAt = parseDate(input.saved.scanStartedAt) ?? new Date(0);
+  const stale = await listBrainCollectorItemsBefore(
+    db,
+    NOTION_PAGES_COLLECTOR_ID,
+    scanStartedAt,
+    input.limit + 1,
+  );
+  const batch = stale.slice(0, input.limit);
+  const complete = stale.length <= input.limit;
+  const pages: CollectorPage[] = [];
+  const itemUpdates: CollectorItemUpdate[] = [];
+  const itemIdsToDelete: string[] = [];
+
+  for (const item of batch) {
+    try {
+      const page = await notionCollectorRequest<unknown>({
+        config: input.config,
+        path: `pages/${encodeURIComponent(item.itemId)}`,
+      });
+      if (!isNotionSearchPage(page)) {
+        throw new Error(
+          `Notion returned an invalid page object for ${item.itemId}`,
+        );
+      }
+      const mapped = await fetchNotionPage(input.config, page, false);
+      if (mapped) {
+        pages.push(mapped);
+        itemUpdates.push(notionItemUpdate(page, mapped.slug, scanStartedAt));
+      }
+    } catch (error) {
+      if (!(error instanceof NotionApiError) || error.status !== 404) {
+        throw error;
+      }
+      pages.push(buildUnavailableNotionPage(item));
+      itemIdsToDelete.push(item.itemId);
+    }
+  }
+
+  return {
+    pages,
+    nextSince: null,
+    itemUpdates,
+    itemDeletes: [
+      {
+        collectorId: NOTION_PAGES_COLLECTOR_ID,
+        itemIds: itemIdsToDelete,
+      },
+    ],
+    stateUpdates: [
+      {
+        collectorId: NOTION_INCREMENTAL_STATE_ID,
+        ...(complete ? { watermark: scanStartedAt } : {}),
+        cursor: serializeNotionScanCursor(
+          complete
+            ? {
+                mode: 'idle',
+                lastSweepAt: scanStartedAt.toISOString(),
+              }
+            : {
+                mode: 'reconcile',
+                lastSweepAt: input.saved.lastSweepAt,
+                scanStartedAt: scanStartedAt.toISOString(),
+              },
+        ),
+      },
+    ],
+  };
+}
+
+async function collectDisabledNotionPages(
+  limit: number,
+): Promise<CollectorResult> {
+  const tracked = await listBrainCollectorItems(
+    db,
+    NOTION_PAGES_COLLECTOR_ID,
+    limit + 1,
+  );
+  const batch = tracked.slice(0, limit);
+  const complete = tracked.length <= limit;
+
+  return {
+    pages: batch.map(buildUnavailableNotionPage),
+    nextSince: null,
+    itemDeletes: [
+      {
+        collectorId: NOTION_PAGES_COLLECTOR_ID,
+        itemIds: batch.map((item) => item.itemId),
+      },
+    ],
+    ...(complete
+      ? {
+          stateUpdates: [
+            {
+              collectorId: NOTION_PAGES_COLLECTOR_ID,
+              cursor: null,
+              backfillCompletedAt: null,
+            },
+            {
+              collectorId: NOTION_INCREMENTAL_STATE_ID,
+              cursor: serializeNotionScanCursor({
+                mode: 'sweep',
+                lastSweepAt: null,
+              }),
+            },
+          ],
+        }
+      : {}),
+  };
 }
 
 async function collectNotionPages(input: {
@@ -2379,7 +2594,7 @@ async function collectNotionPages(input: {
           watermark: input.now,
           cursor: serializeNotionScanCursor({
             mode: 'idle',
-            lastSweepAt: input.now.toISOString(),
+            lastSweepAt: null,
           }),
         },
       ],
@@ -2387,6 +2602,13 @@ async function collectNotionPages(input: {
   }
 
   const saved = parseNotionScanCursor(state?.backfillCursor ?? null);
+  if (saved.mode === 'reconcile') {
+    return collectNotionReconciliation({
+      config: input.config,
+      saved,
+      limit: input.limit,
+    });
+  }
   const savedSweepAt = saved.lastSweepAt ? parseDate(saved.lastSweepAt) : null;
   const continuing = saved.mode === 'incremental' || saved.mode === 'sweep';
   const mode: 'incremental' | 'sweep' = continuing
@@ -2408,6 +2630,7 @@ async function collectNotionPages(input: {
     : input.now;
   let upstreamCursor = continuing ? (saved.upstreamCursor ?? null) : null;
   const pages: CollectorPage[] = [];
+  const itemUpdates: CollectorItemUpdate[] = [];
   let searchRequests = 0;
   let complete = false;
 
@@ -2421,6 +2644,12 @@ async function collectNotionPages(input: {
       pageSize: Math.max(1, input.limit - pages.length),
     });
     searchRequests++;
+
+    if (mode === 'sweep') {
+      itemUpdates.push(
+        ...buildNotionSweepInventory(batch.pages, scanStartedAt),
+      );
+    }
 
     const candidates = batch.pages.filter((page) => {
       const updatedAt = parseDate(page.last_edited_time);
@@ -2440,6 +2669,9 @@ async function collectNotionPages(input: {
       const mapped = await fetchNotionPage(input.config, page);
       if (mapped) {
         pages.push(mapped);
+        if (mode === 'incremental') {
+          itemUpdates.push(notionItemUpdate(page, mapped.slug, input.now));
+        }
       }
     }
 
@@ -2450,21 +2682,23 @@ async function collectNotionPages(input: {
     }
   }
 
-  const lastSweepAt =
-    mode === 'sweep' && complete
-      ? scanStartedAt.toISOString()
-      : saved.lastSweepAt;
-
   return {
     pages,
     nextSince: null,
+    itemUpdates,
     stateUpdates: [
       {
         collectorId: NOTION_INCREMENTAL_STATE_ID,
         ...(complete ? { watermark: scanStartedAt } : {}),
         cursor: serializeNotionScanCursor(
           complete
-            ? { mode: 'idle', lastSweepAt }
+            ? mode === 'sweep'
+              ? {
+                  mode: 'reconcile',
+                  lastSweepAt: saved.lastSweepAt,
+                  scanStartedAt: scanStartedAt.toISOString(),
+                }
+              : { mode: 'idle', lastSweepAt: saved.lastSweepAt }
             : {
                 mode,
                 lastSweepAt: saved.lastSweepAt,
@@ -2486,6 +2720,7 @@ async function backfillNotionPagesStep(
   pages: CollectorPage[];
   nextCursor: string | null;
   done: boolean;
+  itemUpdates: CollectorItemUpdate[];
 }> {
   const batch = await searchNotionPages({
     config,
@@ -2493,11 +2728,14 @@ async function backfillNotionPagesStep(
     pageSize: Math.max(1, limit),
   });
   const pages: CollectorPage[] = [];
+  const itemUpdates: CollectorItemUpdate[] = [];
+  const observedAt = new Date();
 
   for (const page of batch.pages) {
     const mapped = await fetchNotionPage(config, page);
     if (mapped) {
       pages.push(mapped);
+      itemUpdates.push(notionItemUpdate(page, mapped.slug, observedAt));
     }
   }
 
@@ -2505,6 +2743,7 @@ async function backfillNotionPagesStep(
     pages,
     nextCursor: batch.nextCursor,
     done: batch.nextCursor === null,
+    itemUpdates,
   };
 }
 
@@ -2512,13 +2751,17 @@ const notionPagesCollector: BrainCollector = {
   id: NOTION_PAGES_COLLECTOR_ID,
   displayName: 'Notion pages',
   async isEnabled() {
-    return Boolean(await findNotionConnectionConfig());
+    const [config, tracked] = await Promise.all([
+      findNotionConnectionConfig(),
+      listBrainCollectorItems(db, NOTION_PAGES_COLLECTOR_ID, 1),
+    ]);
+    return Boolean(config || tracked.length > 0);
   },
   async collect({ now, limit }) {
     const config = await findNotionConnectionConfig();
     return config
       ? collectNotionPages({ config, now, limit })
-      : { pages: [], nextSince: null };
+      : collectDisabledNotionPages(limit);
   },
   async backfill({ cursor, limit }) {
     const config = await findNotionConnectionConfig();
