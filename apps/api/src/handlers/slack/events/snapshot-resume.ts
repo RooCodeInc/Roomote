@@ -8,6 +8,7 @@ import { withContention } from '@roomote/redis';
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   appendSlackVideoDescriptionsToText,
+  authorizeSlackRunReplyTarget,
   clearLatestUserMessage,
   collectAndProcessThreadImages,
   getSlackResumeLockKey,
@@ -266,6 +267,15 @@ export async function processSnapshotResume(
       return false;
     }
 
+    await authorizeSlackRunReplyTarget({
+      runId: resumeRunId,
+      messageTs: event.ts,
+      target: {
+        slackTeamId,
+        channel: event.channel,
+        threadTs: threadId,
+      },
+    });
     await queueSlackMessage(resumeRunId, queuedSlackMessage);
     await clearLatestUserMessage(resumeRunId);
     // A typed reply supersedes any pending PR review offers in the thread.
