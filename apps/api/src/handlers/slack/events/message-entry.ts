@@ -686,6 +686,7 @@ async function maybeRecordTrackedAutomationThreadReply(params: {
   }
 
   const trackedThread = await findTrackedBackgroundAutomationSlackThread({
+    teamId,
     channelId: event.channel,
     threadTs: event.thread_ts,
   });

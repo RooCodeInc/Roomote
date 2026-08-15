@@ -40,6 +40,7 @@ import {
   taskRuns,
   tasks,
   upsertAutomation,
+  upsertBackgroundAutomationSlackThread,
   users,
 } from '@roomote/db/server';
 import {
@@ -286,12 +287,64 @@ describe('platform issue alert delivery', () => {
     await expect(
       findBackgroundAutomationSlackThread({
         surface: 'slack',
+        slackTeamId: 'T123',
         slackChannelId: 'C999MANAGER',
         threadTs: '1727000000.000100',
       }),
     ).resolves.toMatchObject({
       automationKey: 'platform_issue_alerts',
       metadata: { sourceTaskId: taskId, slackTeamId: 'T123' },
+    });
+
+    await upsertBackgroundAutomationSlackThread(db, {
+      surface: 'slack',
+      automationKey: 'platform_issue_alerts',
+      slackTeamId: 'T999',
+      slackChannelId: 'C999MANAGER',
+      threadTs: '1727000000.000100',
+      summaryText: 'Other workspace alert',
+      postedAt: new Date(),
+      metadata: { sourceTaskId: 'task-other', slackTeamId: 'T999' },
+    });
+    await expect(
+      findBackgroundAutomationSlackThread({
+        surface: 'slack',
+        slackTeamId: 'T123',
+        slackChannelId: 'C999MANAGER',
+        threadTs: '1727000000.000100',
+      }),
+    ).resolves.toMatchObject({
+      metadata: { sourceTaskId: taskId, slackTeamId: 'T123' },
+    });
+    await expect(
+      findBackgroundAutomationSlackThread({
+        surface: 'slack',
+        slackTeamId: 'T999',
+        slackChannelId: 'C999MANAGER',
+        threadTs: '1727000000.000100',
+      }),
+    ).resolves.toMatchObject({
+      metadata: { sourceTaskId: 'task-other', slackTeamId: 'T999' },
+    });
+
+    await upsertBackgroundAutomationSlackThread(db, {
+      surface: 'slack',
+      automationKey: 'announcer',
+      slackChannelId: 'CLEGACY',
+      threadTs: '1727000000.000200',
+      summaryText: 'Legacy alert',
+      postedAt: new Date(),
+      metadata: { sourceTaskId: 'task-legacy' },
+    });
+    await expect(
+      findBackgroundAutomationSlackThread({
+        surface: 'slack',
+        slackTeamId: 'T123',
+        slackChannelId: 'CLEGACY',
+        threadTs: '1727000000.000200',
+      }),
+    ).resolves.toMatchObject({
+      metadata: { sourceTaskId: 'task-legacy' },
     });
 
     const reportRow = await findReportRow(taskId);

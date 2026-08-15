@@ -136,6 +136,7 @@ export async function findRoomoteOwnedSlackThread(params: {
 
   const trackedAutomationThread = await findBackgroundAutomationSlackThread({
     surface: 'slack',
+    slackTeamId: params.teamId,
     slackChannelId: params.channelId,
     threadTs: params.threadTs,
   });
@@ -219,11 +220,13 @@ export async function isRoomoteOwnedSlackThread(params: {
 }
 
 export async function findTrackedBackgroundAutomationSlackThread(params: {
+  teamId?: string;
   channelId: string;
   threadTs: string;
 }) {
   return findBackgroundAutomationSlackThread({
     surface: 'slack',
+    ...(params.teamId ? { slackTeamId: params.teamId } : {}),
     slackChannelId: params.channelId,
     threadTs: params.threadTs,
   });

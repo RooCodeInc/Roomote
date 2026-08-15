@@ -314,6 +314,7 @@ async function maybeNotifyPlatformIssue(params: {
   await upsertBackgroundAutomationSlackThread(db, {
     surface: 'slack',
     automationKey: 'platform_issue_alerts',
+    slackTeamId: slackInstallation.teamId,
     slackChannelId: channelId,
     threadTs: messageTs,
     summaryText: message.text,
