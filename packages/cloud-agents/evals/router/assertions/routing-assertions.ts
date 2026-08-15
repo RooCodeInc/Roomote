@@ -361,6 +361,31 @@ function doesNotRequestExternalLookup(output: string): AssertionResult {
   };
 }
 
+/** Asserts that underspecified task text requests the supplied external reference. */
+function requestsExpectedExternalLookup(
+  output: string,
+  context: { vars: Record<string, string> },
+): AssertionResult {
+  const json = extractJson(output);
+  if (!json) {
+    return { pass: false, score: 0, reason: 'Invalid JSON response' };
+  }
+
+  const expected = context.vars.expectedExternalReference;
+  const requestsLookup =
+    typeof expected === 'string' &&
+    json.needsExternalLookup === true &&
+    json.externalReference === expected;
+
+  return {
+    pass: requestsLookup,
+    score: requestsLookup ? 1 : 0,
+    reason: requestsLookup
+      ? `routing requested external context for ${expected}`
+      : `expected external lookup for ${String(expected)}, got needsExternalLookup=${String(json.needsExternalLookup)}, externalReference=${String(json.externalReference)}`,
+  };
+}
+
 export {
   isValidRoutingJson,
   hasValidWorkspaceValue,
@@ -372,6 +397,7 @@ export {
   hasValidKickoffMessage,
   requestedModelIdIsNull,
   doesNotRequestExternalLookup,
+  requestsExpectedExternalLookup,
   extractJson,
 };
 

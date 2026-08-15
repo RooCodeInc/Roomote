@@ -17,14 +17,14 @@ export const NO_MODEL_MENTIONED_VALUE = '__no_model__';
 const needsExternalLookupField = z
   .boolean()
   .describe(
-    'Set to true only when the task message contains an explicit external reference to a specific entity in an external system and the rest of the message is too underspecified to route without fetching it first. External references include specific issue or ticket IDs like LIN-123 or ENG-456 or GitHub issue or pull request numbers like #123. Do not treat general URLs, file paths, code snippets, feature names, or other task context as external references.',
+    'Set to true only when the task message contains an explicit external reference to a specific entity in an external system and the rest of the message is too underspecified to route without fetching it first. External references include specific issue or ticket identifiers and links to messages or threads in connected communication platforms. Do not treat other general URLs, file paths, code snippets, feature names, or descriptive task context as external references.',
   );
 
 const externalReferenceField = z
   .string()
   .nullable()
   .describe(
-    'The specific external reference to fetch when needsExternalLookup is true, such as LIN-123, ENG-456, or #123. Return null when no external lookup is required.',
+    'The specific external identifier or communication message/thread link to fetch when needsExternalLookup is true. Return null when no external lookup is required.',
   );
 
 const confidenceField = z
