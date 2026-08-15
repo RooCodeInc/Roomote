@@ -1,0 +1,391 @@
+import type {
+  CustomAutomationScheduleMode,
+  RepositoryAutomationSignals,
+  SourceControlProvider,
+  TriggerableBackgroundAutomationKey,
+} from '@roomote/types';
+import { getTriggerableBackgroundAutomationDescriptorByKey } from '@roomote/types';
+import { sourceControlProviders } from '@roomote/types';
+
+export const AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION = 1;
+
+export type RecommendationCategory =
+  | 'quality'
+  | 'security'
+  | 'maintenance'
+  | 'delivery'
+  | 'communication';
+
+type RecommendationSignal =
+  | 'active_pr_flow'
+  | 'merged_prs'
+  | 'open_prs'
+  | 'conflicts'
+  | 'ci_failures'
+  | 'dependabot_alerts'
+  | 'codeql_alerts'
+  | 'dependency_manifests'
+  | 'docs';
+
+export type RecommendationScoringRule = {
+  signal: RecommendationSignal;
+  weight: number;
+  explanation: (value: number, repositoryCount: number) => string;
+};
+
+export type AutomationRecommendationCandidate =
+  | {
+      id: string;
+      source: 'built_in';
+      automationKey: TriggerableBackgroundAutomationKey | 'review_code';
+      title: string;
+      defaultScheduleMode: string;
+      environmentPolicy: 'not_required' | 'optional' | 'required';
+      category: RecommendationCategory;
+      alwaysRecommend?: boolean;
+      scoringRules: RecommendationScoringRule[];
+    }
+  | {
+      id: string;
+      source: 'cookbook';
+      cookbookSlug: string;
+      title: string;
+      template: {
+        name: string;
+        prompt: string;
+        scheduleMode: CustomAutomationScheduleMode;
+        workspace: 'all_repositories';
+        destination: 'none';
+      };
+      environmentPolicy: 'not_required' | 'optional';
+      category: RecommendationCategory;
+      alwaysRecommend?: boolean;
+      scoringRules: RecommendationScoringRule[];
+    };
+
+export type MergedAutomationRecommendationSignals = Omit<
+  RepositoryAutomationSignals,
+  'repositoryId' | 'repositoryName' | 'sourceControlProvider'
+> & {
+  repositoryCount: number;
+  sourceControlProviders: SourceControlProvider[];
+};
+
+const signalValue = (
+  signals: MergedAutomationRecommendationSignals,
+  signal: RecommendationSignal,
+) => {
+  const values: Record<RecommendationSignal, number> = {
+    active_pr_flow: signals.openPrs + signals.mergedPrs30d,
+    merged_prs: signals.mergedPrs30d,
+    open_prs: signals.openPrs,
+    conflicts: signals.conflicts,
+    ci_failures: signals.ciFailures30d,
+    dependabot_alerts: signals.dependabotAlerts,
+    codeql_alerts: signals.codeqlAlerts,
+    dependency_manifests: signals.dependencyManifests,
+    docs: signals.docs,
+  };
+  return values[signal];
+};
+
+const formatCount = (value: number, noun: string) => `${value} ${noun}`;
+
+const activePrRule = (weight: number): RecommendationScoringRule => ({
+  signal: 'active_pr_flow',
+  weight,
+  explanation: (value, repositoryCount) =>
+    `Your repos have active PR flow (${formatCount(value, 'recent PRs')} across ${repositoryCount} repos), so Roomote can help keep the work moving.`,
+});
+
+const mergedPrRule = (weight: number): RecommendationScoringRule => ({
+  signal: 'merged_prs',
+  weight,
+  explanation: (value, repositoryCount) =>
+    `You merged ${formatCount(value, 'PRs')} across ${repositoryCount} repos in the last 30 days, so Roomote can help keep up with the pace of change.`,
+});
+
+const openPrRule = (weight: number): RecommendationScoringRule => ({
+  signal: 'open_prs',
+  weight,
+  explanation: (value) =>
+    `Your repos have ${formatCount(value, 'open PRs')}, and Roomote can help keep them moving.`,
+});
+
+function fallbackRecommendationExplanation(
+  candidate: AutomationRecommendationCandidate,
+): string {
+  switch (candidate.id) {
+    case 'built-in.review-code':
+      return 'Strongly recommended. Have Roomote review use a separate run to review PRs it creates.';
+    case 'built-in.code-quality-auditor':
+      return 'As your repositories evolve, Roomote can run regular code quality checks and surface actionable fixes.';
+    case 'built-in.security-auditor':
+      return 'Roomote can regularly check your repositories for security issues and surface focused fixes.';
+    case 'built-in.resolve-pr-conflicts':
+      return 'Roomote can watch for merge conflicts and resolve safe conflicts in open pull requests.';
+    case 'built-in.dependabot-triage':
+      return 'Your repos seem to have Dependabot alerts, and Roomote can handle those for you.';
+    case 'built-in.codeql-triage':
+      return 'Your repos seem to have CodeQL alerts, and Roomote can handle those for you.';
+    case 'built-in.ci-failure-triage':
+      return 'Your CI setup can lead to default branch failures. Enable this to automatically fix broken builds.';
+    case 'cookbook.scheduled-housekeeping':
+      return 'Roomote can regularly check your repositories for dependency drift, stale flags, and flaky-test maintenance work.';
+    default:
+      return `Your repositories are connected, so Roomote can help with ${candidate.title.toLowerCase()}.`;
+  }
+}
+
+export const AUTOMATION_RECOMMENDATION_CATALOG: readonly AutomationRecommendationCandidate[] =
+  [
+    {
+      id: 'built-in.review-code',
+      source: 'built_in',
+      automationKey: 'review_code',
+      title: 'Review Code',
+      defaultScheduleMode: 'off',
+      environmentPolicy: 'not_required',
+      category: 'quality',
+      alwaysRecommend: true,
+      scoringRules: [openPrRule(5), activePrRule(2)],
+    },
+    {
+      id: 'built-in.code-quality-auditor',
+      source: 'built_in',
+      automationKey: 'code_quality_auditor',
+      title: 'Code Quality Auditor',
+      defaultScheduleMode: 'weekly',
+      environmentPolicy: 'not_required',
+      category: 'quality',
+      scoringRules: [mergedPrRule(4), activePrRule(2)],
+    },
+    {
+      id: 'built-in.security-auditor',
+      source: 'built_in',
+      automationKey: 'security_auditor',
+      title: 'Security Auditor',
+      defaultScheduleMode: 'weekly',
+      environmentPolicy: 'not_required',
+      category: 'security',
+      scoringRules: [mergedPrRule(3), activePrRule(1)],
+    },
+    {
+      id: 'built-in.resolve-pr-conflicts',
+      source: 'built_in',
+      automationKey: 'conflict_resolver',
+      title: 'Resolve PR Conflicts',
+      defaultScheduleMode: 'daily',
+      environmentPolicy: 'not_required',
+      category: 'delivery',
+      alwaysRecommend: true,
+      scoringRules: [
+        {
+          signal: 'conflicts',
+          weight: 12,
+          explanation: (value) =>
+            `Your repos have at least ${formatCount(value, 'open PR conflicts')}, and Roomote can resolve the safe ones automatically.`,
+        },
+        openPrRule(2),
+      ],
+    },
+    {
+      id: 'built-in.dependabot-triage',
+      source: 'built_in',
+      automationKey: 'dependabot_triage',
+      title: 'Triage Dependabot Alerts',
+      defaultScheduleMode: 'weekly',
+      environmentPolicy: 'not_required',
+      category: 'maintenance',
+      scoringRules: [
+        {
+          signal: 'dependabot_alerts',
+          weight: 10,
+          explanation: (value) =>
+            `Your repos have ${formatCount(value, 'open Dependabot alerts')}, and Roomote can handle those for you.`,
+        },
+        {
+          signal: 'dependency_manifests',
+          weight: 2,
+          explanation: (value) =>
+            `${formatCount(value, 'of your repos')} include dependency manifests, which Roomote can keep up-to-date.`,
+        },
+      ],
+    },
+    {
+      id: 'built-in.codeql-triage',
+      source: 'built_in',
+      automationKey: 'codeql_triage',
+      title: 'Triage CodeQL Alerts',
+      defaultScheduleMode: 'weekly',
+      environmentPolicy: 'not_required',
+      category: 'security',
+      scoringRules: [
+        {
+          signal: 'codeql_alerts',
+          weight: 10,
+          explanation: (value) =>
+            `Your repos have ${formatCount(value, 'open CodeQL alerts')}, and Roomote can handle those for you.`,
+        },
+      ],
+    },
+    {
+      id: 'built-in.ci-failure-triage',
+      source: 'built_in',
+      automationKey: 'ci_failure_triage',
+      title: 'CI Failure Triage',
+      defaultScheduleMode: 'daily',
+      environmentPolicy: 'optional',
+      category: 'delivery',
+      alwaysRecommend: true,
+      scoringRules: [
+        {
+          signal: 'ci_failures',
+          weight: 9,
+          explanation: (value) =>
+            `Roomote found ${formatCount(value, 'recent CI failures')}, and it can automatically open PRs to fix broken builds.`,
+        },
+      ],
+    },
+    {
+      id: 'cookbook.scheduled-housekeeping',
+      source: 'cookbook',
+      cookbookSlug: 'scheduled-housekeeping',
+      title: 'Schedule maintenance',
+      template: {
+        name: 'Repository maintenance review',
+        prompt:
+          'Review these repositories for dependency drift, stale feature flags, and flaky-test maintenance opportunities. Report only concrete, actionable findings with file paths and concise next steps.',
+        scheduleMode: 'weekly',
+        workspace: 'all_repositories',
+        destination: 'none',
+      },
+      environmentPolicy: 'not_required',
+      category: 'maintenance',
+      scoringRules: [mergedPrRule(3), activePrRule(1)],
+    },
+  ] as const;
+
+type ScoredAutomationRecommendation = {
+  candidate: AutomationRecommendationCandidate;
+  score: number;
+  explanation: string;
+};
+
+export function scoreAutomationRecommendations(
+  signals: MergedAutomationRecommendationSignals,
+  options: {
+    enabledCandidateIds?: ReadonlySet<string>;
+    catalog?: readonly AutomationRecommendationCandidate[];
+    minScore?: number;
+  } = {},
+): ScoredAutomationRecommendation[] {
+  const catalog = options.catalog ?? AUTOMATION_RECOMMENDATION_CATALOG;
+  const enabled = options.enabledCandidateIds ?? new Set<string>();
+  // Recommendations should still be useful immediately after a repository is
+  // connected, before provider signal collection has produced rich data. Once
+  // collection is complete, only recommend candidates backed by real signals.
+  const allowFallbackCandidates = signals.partial !== false;
+  const scored = catalog
+    .filter((candidate) => !enabled.has(candidate.id))
+    .filter((candidate) => {
+      if (candidate.source !== 'built_in') return true;
+      const descriptor = getTriggerableBackgroundAutomationDescriptorByKey(
+        candidate.automationKey === 'review_code'
+          ? 'conflict_resolver'
+          : candidate.automationKey,
+      );
+      return candidate.automationKey === 'review_code'
+        ? signals.sourceControlProviders.some((provider) =>
+            sourceControlProviders.includes(provider),
+          )
+        : (descriptor?.supportedSourceControlProviders.some((provider) =>
+            signals.sourceControlProviders.includes(provider),
+          ) ?? false);
+    })
+    .map((candidate) => {
+      const matches = candidate.scoringRules
+        .map((rule) => ({ rule, value: signalValue(signals, rule.signal) }))
+        .filter(({ value }) => value > 0);
+      const score = matches.reduce(
+        (total, { rule, value }) => total + rule.weight * Math.min(value, 20),
+        0,
+      );
+      const explanation = matches[0]?.rule.explanation(
+        matches[0].value,
+        signals.repositoryCount,
+      );
+      return {
+        candidate,
+        score: Math.max(
+          score,
+          candidate.alwaysRecommend || allowFallbackCandidates ? 1 : 0,
+        ),
+        explanation:
+          explanation ?? fallbackRecommendationExplanation(candidate),
+      };
+    })
+    .filter(({ score }) => score >= (options.minScore ?? 1))
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        left.candidate.id.localeCompare(right.candidate.id),
+    );
+
+  const categories = new Map<RecommendationCategory, number>();
+  const selected: ScoredAutomationRecommendation[] = [];
+  for (const recommendation of scored) {
+    const count = categories.get(recommendation.candidate.category) ?? 0;
+    if (count >= 2) continue;
+    categories.set(recommendation.candidate.category, count + 1);
+    selected.push(recommendation);
+    if (selected.length === 6) break;
+  }
+
+  for (const recommendation of scored.filter(
+    ({ candidate }) => candidate.alwaysRecommend,
+  )) {
+    if (
+      selected.some(
+        ({ candidate }) => candidate.id === recommendation.candidate.id,
+      )
+    ) {
+      continue;
+    }
+
+    const replacementIndex = [...selected]
+      .map((item, index) => ({ item, index }))
+      .reverse()
+      .find(({ item }) => !item.candidate.alwaysRecommend)?.index;
+    if (replacementIndex !== undefined) {
+      selected.splice(replacementIndex, 1, recommendation);
+    } else {
+      selected.push(recommendation);
+    }
+  }
+
+  if (selected.length < 3 && allowFallbackCandidates) {
+    for (const recommendation of scored) {
+      if (
+        selected.some(
+          (item) => item.candidate.id === recommendation.candidate.id,
+        )
+      )
+        continue;
+      selected.push(recommendation);
+      if (selected.length === 3) break;
+    }
+  }
+
+  const reviewCode = selected.find(
+    ({ candidate }) => candidate.id === 'built-in.review-code',
+  );
+  if (!reviewCode) return selected;
+
+  return [
+    reviewCode,
+    ...selected.filter(
+      ({ candidate }) => candidate.id !== 'built-in.review-code',
+    ),
+  ];
+}

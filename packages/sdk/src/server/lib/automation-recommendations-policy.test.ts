@@ -6,7 +6,7 @@ import {
   AUTOMATION_RECOMMENDATION_CATALOG,
   scoreAutomationRecommendations,
   type MergedAutomationRecommendationSignals,
-} from './automation-recommendations';
+} from './automation-recommendations-policy';
 
 const signals: MergedAutomationRecommendationSignals = {
   repositoryCount: 2,

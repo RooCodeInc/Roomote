@@ -27,11 +27,31 @@ export {
   enqueueAutomationRecommendationInitialRun,
   enqueueAutomationSignalPrefetch,
   processAutomationRecommendationsJob,
-  runAutomationRecommendationInitialRunJob,
   type AutomationRecommendationJob,
   type AutomationRecommendationInitialRunJob,
   type AutomationSignalPrefetchJob,
 } from './lib/automation-recommendations';
+export {
+  canRecoverAutomationRecommendationInitialRunClaim,
+  runAutomationRecommendationInitialRunJob,
+} from './lib/automation-recommendation-initial-runs';
+export {
+  applySetupAutomationRecommendations,
+  createPendingAutomationRecommendationBatch,
+  dispatchSetupAutomationRecommendationBatch,
+  dismissSetupAutomationRecommendations,
+  listSetupAutomationRecommendations,
+  markAutomationRecommendationBatchFailed,
+  prepareSetupAutomationRecommendationInput,
+  prefetchSetupAutomationRecommendationSignals,
+  resolveConnectedAutomationRecommendationRepositories,
+  runSetupAutomationRecommendationNow,
+  setSetupAutomationRecommendationEnabled,
+  skipSetupAutomationRecommendations,
+  startSetupAutomationRecommendations,
+  isSetupAutomationRecommendationFingerprintCurrent,
+  updateSetupAutomationRecommendationBatchIfCurrent,
+} from './lib/setup-automation-recommendations';
 export {
   recordLlmUsage,
   type RecordLlmUsageInput,

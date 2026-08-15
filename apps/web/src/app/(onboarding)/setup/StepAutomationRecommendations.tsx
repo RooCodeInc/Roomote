@@ -2,10 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  AUTOMATION_RECOMMENDATION_CATALOG,
-  type AutomationRecommendationBatch,
-} from '@roomote/types';
+import type { AutomationRecommendationBatch } from '@roomote/types';
 import {
   Alert,
   AlertDescription,
@@ -23,12 +20,10 @@ import { getSetupStepDefinition } from './types';
 
 const STEP = getSetupStepDefinition('automation-recommendations');
 
-function candidateTitle(candidateId: string) {
-  return (
-    AUTOMATION_RECOMMENDATION_CATALOG.find(
-      (candidate) => candidate.id === candidateId,
-    )?.title ?? candidateId
-  );
+function candidateTitle(
+  recommendation: AutomationRecommendationBatch['recommendations'][number],
+) {
+  return recommendation.title ?? recommendation.candidateId;
 }
 
 export function StepAutomationRecommendations({
@@ -194,7 +189,7 @@ export function StepAutomationRecommendations({
                 />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold">
-                    {candidateTitle(recommendation.candidateId)}
+                    {candidateTitle(recommendation)}
                   </p>
                   <p className="text-sm text-muted-foreground">
                     {recommendation.explanation}
