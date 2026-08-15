@@ -157,6 +157,38 @@ describe('runBrainCollectors', () => {
     ).toBe(partitionCursor);
   });
 
+  it('can reset a dependent collector backfill after pages land', async () => {
+    syncStateStore.set('granola-meetings', {
+      watermark: new Date('2026-08-13T11:00:00Z'),
+      backfillCursor: 'finished-cursor',
+      backfillCompletedAt: new Date('2026-08-13T12:00:00Z'),
+    });
+    const collector = makeCollector({
+      collect: async () => ({
+        pages: makePages(1),
+        nextSince: null,
+        stateUpdates: [
+          {
+            collectorId: 'granola-meetings',
+            cursor: null,
+            backfillCompletedAt: null,
+          },
+        ],
+      }),
+    });
+
+    await runBrainCollectors(connection, {
+      sink: vi.fn(async () => {}),
+      collectors: [collector],
+    });
+
+    expect(syncStateStore.get('granola-meetings')).toMatchObject({
+      watermark: new Date('2026-08-13T11:00:00Z'),
+      backfillCursor: null,
+      backfillCompletedAt: null,
+    });
+  });
+
   it('holds partition watermarks when a page fails', async () => {
     const collector = makeCollector({
       collect: async () => ({
@@ -757,22 +789,23 @@ describe('person identity pages', () => {
     expect(page.content).not.toContain('dan@example.com');
   });
 
-  it('filters email-shaped names and provider values from person cards', () => {
+  it('scrubs embedded emails from names and provider values', () => {
     const page = buildPersonIdentityPage({
       ...record,
-      name: 'dan@example.com',
+      name: 'Dan Riccio <dan@example.com>',
       providers: [
         ...record.providers,
         {
           provider: 'Source control',
-          identifier: 'provider@example.com',
-          display: 'display@example.com',
+          identifier: 'daniel-lxs <provider@example.com>',
+          display: 'Dan R. (display@example.com)',
           updatedAt: record.updatedAt,
         },
       ],
     });
 
-    expect(page.title).toBe('Roomote member');
+    expect(page.title).toBe('Dan Riccio');
+    expect(page.content).toContain('Dan R. (daniel-lxs)');
     expect(page.content).not.toContain('@example.com');
   });
 
@@ -823,10 +856,41 @@ describe('person identity pages', () => {
     expect(firstBatch.records.map(({ userId }) => userId)).toEqual([
       'user-dan',
     ]);
+    expect(firstBatch.projectionChanged).toBe(true);
     expect(secondBatch.records.map(({ userId }) => userId)).toEqual([
       'user-zed',
     ]);
+    expect(secondBatch.projectionChanged).toBe(false);
     expect(JSON.parse(secondBatch.cursor)).toMatchObject({ mode: 'idle' });
+  });
+
+  it('detects identity projection changes independently of page pagination', () => {
+    const initial = selectPersonIdentityBatch({
+      records: [record],
+      state: null,
+      now: new Date('2026-08-15T00:00:00Z'),
+      limit: 100,
+    });
+    const changed = selectPersonIdentityBatch({
+      records: [
+        {
+          ...record,
+          providers: [
+            ...record.providers,
+            {
+              provider: 'GitHub',
+              identifier: 'dan-renamed',
+              updatedAt: new Date('2026-08-15T00:01:00Z'),
+            },
+          ],
+        },
+      ],
+      state: { watermark: initial.watermark, cursor: initial.cursor },
+      now: new Date('2026-08-15T00:02:00Z'),
+      limit: 100,
+    });
+
+    expect(changed.projectionChanged).toBe(true);
   });
 
   it('periodically reconciles mapping removals and late timestamp ties', () => {

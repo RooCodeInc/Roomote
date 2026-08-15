@@ -74,9 +74,11 @@ export type CollectorPage = {
 
 type CollectorStateUpdate = {
   collectorId: string;
-  watermark: Date;
+  watermark?: Date;
   /** Optional opaque incremental cursor stored on the partition's state row. */
   cursor?: string | null;
+  /** Optional deep-backfill completion reset for dependent projections. */
+  backfillCompletedAt?: Date | null;
 };
 
 export type CollectorResult = {
@@ -209,9 +211,14 @@ export async function runBrainCollectors(
         if (!overshot) {
           for (const update of stateUpdates) {
             await upsertBrainSyncState(db, update.collectorId, {
-              watermark: update.watermark,
+              ...(update.watermark !== undefined
+                ? { watermark: update.watermark }
+                : {}),
               ...(update.cursor !== undefined
                 ? { backfillCursor: update.cursor }
+                : {}),
+              ...(update.backfillCompletedAt !== undefined
+                ? { backfillCompletedAt: update.backfillCompletedAt }
                 : {}),
             });
           }
@@ -558,13 +565,10 @@ async function loadSlackAuthorLabels(): Promise<Map<string, string>> {
 
     return new Map(
       mappings
-        .filter(
-          (mapping) =>
-            mapping.user.name.trim() && !isEmailLike(mapping.user.name),
-        )
+        .filter((mapping) => brainSafeIdentityValue(mapping.user.name))
         .map((mapping) => [
           `${mapping.slackTeamId}/${mapping.slackUserId}`,
-          singleLineIdentityValue(mapping.user.name),
+          brainSafeIdentityValue(mapping.user.name),
         ]),
     );
   } catch (error) {
@@ -1084,20 +1088,27 @@ function singleLineIdentityValue(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 
-function isEmailLike(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(singleLineIdentityValue(value));
+const IDENTITY_EMAIL_PATTERN =
+  /[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+/gi;
+
+function brainSafeIdentityValue(value: string): string {
+  return singleLineIdentityValue(value)
+    .replace(IDENTITY_EMAIL_PATTERN, '')
+    .replace(/<\s*>|\(\s*\)|\[\s*\]|\{\s*\}/g, '')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s,;:|/\\<>()\[\]{}\-–—]+|[\s,;:|/\\<>()\[\]{}\-–—]+$/g, '')
+    .trim();
 }
 
 function personIdentityDisplayName(record: PersonIdentityRecord): string {
-  const name = singleLineIdentityValue(record.name);
-  return name && !isEmailLike(name) ? name : 'Roomote member';
+  return brainSafeIdentityValue(record.name) || 'Roomote member';
 }
 
 function personIdentityAliases(record: PersonIdentityRecord): string[] {
   const aliases = new Map<string, string>();
   const add = (value: string | null | undefined) => {
-    const trimmed = value ? singleLineIdentityValue(value) : '';
-    if (trimmed && !isEmailLike(trimmed)) {
+    const trimmed = value ? brainSafeIdentityValue(value) : '';
+    if (trimmed) {
       aliases.set(normalizeIdentityAlias(trimmed), trimmed);
     }
   };
@@ -1120,7 +1131,7 @@ export function buildPersonIdentityPage(
   const providers = deleted
     ? []
     : [...record.providers]
-        .filter(({ identifier }) => !isEmailLike(identifier))
+        .filter(({ identifier }) => brainSafeIdentityValue(identifier))
         .sort(
           (a, b) =>
             a.provider.localeCompare(b.provider) ||
@@ -1150,14 +1161,11 @@ export function buildPersonIdentityPage(
             '## Linked identities',
             '',
             ...providers.map(({ provider, identifier, display }) => {
-              const safeProvider = singleLineIdentityValue(provider);
-              const safeIdentifier = singleLineIdentityValue(identifier);
-              const candidateDisplay = display
-                ? singleLineIdentityValue(display)
+              const safeProvider = brainSafeIdentityValue(provider);
+              const safeIdentifier = brainSafeIdentityValue(identifier);
+              const safeDisplay = display
+                ? brainSafeIdentityValue(display)
                 : '';
-              const safeDisplay = isEmailLike(candidateDisplay)
-                ? ''
-                : candidateDisplay;
               return `- ${safeProvider}: ${safeDisplay ? `${safeDisplay} (${safeIdentifier})` : safeIdentifier}`;
             }),
           ]
@@ -1292,10 +1300,12 @@ async function loadPersonIdentityRecords(): Promise<PersonIdentityRecord[]> {
 
 const PERSON_IDENTITIES_STATE_ID = 'person-identities:members';
 const PERSON_IDENTITIES_RECONCILIATION_MS = 24 * 60 * 60 * 1000;
+const GRANOLA_MEETINGS_COLLECTOR_ID = 'granola-meetings';
 
 type PersonIdentityCursor = {
   mode: 'idle' | 'sweep' | 'incremental';
   lastSweepAt: string | null;
+  projectionHash: string | null;
   afterUserId?: string;
   afterUpdatedAt?: string;
 };
@@ -1313,6 +1323,10 @@ function parsePersonIdentityCursor(raw: string | null): PersonIdentityCursor {
           mode: parsed.mode,
           lastSweepAt:
             typeof parsed.lastSweepAt === 'string' ? parsed.lastSweepAt : null,
+          projectionHash:
+            typeof parsed.projectionHash === 'string'
+              ? parsed.projectionHash
+              : null,
           ...(typeof parsed.afterUserId === 'string'
             ? { afterUserId: parsed.afterUserId }
             : {}),
@@ -1326,11 +1340,37 @@ function parsePersonIdentityCursor(raw: string | null): PersonIdentityCursor {
     }
   }
 
-  return { mode: 'sweep', lastSweepAt: null };
+  return { mode: 'sweep', lastSweepAt: null, projectionHash: null };
 }
 
 function serializePersonIdentityCursor(cursor: PersonIdentityCursor): string {
   return JSON.stringify(cursor);
+}
+
+function personIdentityProjectionHash(records: PersonIdentityRecord[]): string {
+  const projection = [...records]
+    .sort((a, b) => a.userId.localeCompare(b.userId))
+    .map((record) => ({
+      userId: record.userId,
+      name: record.name,
+      email: record.email,
+      role: record.role,
+      deletedAt: record.deletedAt?.toISOString() ?? null,
+      providers: [...record.providers]
+        .sort(
+          (a, b) =>
+            a.provider.localeCompare(b.provider) ||
+            a.identifier.localeCompare(b.identifier) ||
+            (a.display ?? '').localeCompare(b.display ?? ''),
+        )
+        .map(({ provider, identifier, display }) => ({
+          provider,
+          identifier,
+          display: display ?? null,
+        })),
+    }));
+
+  return createHash('sha256').update(JSON.stringify(projection)).digest('hex');
 }
 
 export function selectPersonIdentityBatch(input: {
@@ -1342,9 +1382,12 @@ export function selectPersonIdentityBatch(input: {
   records: PersonIdentityRecord[];
   watermark: Date;
   cursor: string;
+  projectionChanged: boolean;
 } {
   const { records, state, now, limit } = input;
   const cursor = parsePersonIdentityCursor(state?.cursor ?? null);
+  const projectionHash = personIdentityProjectionHash(records);
+  const projectionChanged = cursor.projectionHash !== projectionHash;
   const lastSweepAt = cursor.lastSweepAt ? new Date(cursor.lastSweepAt) : null;
   const sweepDue =
     !lastSweepAt ||
@@ -1364,14 +1407,20 @@ export function selectPersonIdentityBatch(input: {
     return {
       records: batch,
       watermark: hasMore ? (state?.watermark ?? new Date(0)) : now,
+      projectionChanged,
       cursor: serializePersonIdentityCursor(
         hasMore && last
           ? {
               mode: 'sweep',
               lastSweepAt: cursor.lastSweepAt,
+              projectionHash,
               afterUserId: last.userId,
             }
-          : { mode: 'idle', lastSweepAt: now.toISOString() },
+          : {
+              mode: 'idle',
+              lastSweepAt: now.toISOString(),
+              projectionHash,
+            },
       ),
     };
   }
@@ -1403,15 +1452,21 @@ export function selectPersonIdentityBatch(input: {
   return {
     records: batch,
     watermark: hasMore ? afterUpdatedAt : now,
+    projectionChanged,
     cursor: serializePersonIdentityCursor(
       hasMore && last
         ? {
             mode: 'incremental',
             lastSweepAt: cursor.lastSweepAt,
+            projectionHash,
             afterUpdatedAt: latestIdentityUpdate(last).toISOString(),
             afterUserId: last.userId,
           }
-        : { mode: 'idle', lastSweepAt: cursor.lastSweepAt },
+        : {
+            mode: 'idle',
+            lastSweepAt: cursor.lastSweepAt,
+            projectionHash,
+          },
     ),
   };
 }
@@ -1445,6 +1500,15 @@ const personIdentitiesCollector: BrainCollector = {
           watermark: batch.watermark,
           cursor: batch.cursor,
         },
+        ...(batch.projectionChanged
+          ? [
+              {
+                collectorId: GRANOLA_MEETINGS_COLLECTOR_ID,
+                cursor: null,
+                backfillCompletedAt: null,
+              },
+            ]
+          : []),
       ],
     };
   },
@@ -1819,7 +1883,7 @@ async function backfillGranolaNotesStep(cursor: string | null): Promise<{
 }
 
 const granolaMeetingsCollector: BrainCollector = {
-  id: 'granola-meetings',
+  id: GRANOLA_MEETINGS_COLLECTOR_ID,
   displayName: 'Granola meeting notes',
   async isEnabled() {
     return Boolean(await findGranolaConnectionConfig());

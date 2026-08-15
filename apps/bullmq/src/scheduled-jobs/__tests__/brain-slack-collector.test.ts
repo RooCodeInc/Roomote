@@ -65,7 +65,7 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
             {
               slackTeamId: 'T1',
               slackUserId: 'U1',
-              user: { name: 'Alice Example' },
+              user: { name: 'Alice Example <alice@example.com>' },
             },
           ],
         },
@@ -175,6 +175,7 @@ function applyResult(
   }
 
   for (const update of result.stateUpdates ?? []) {
+    if (!update.watermark) continue;
     workspace.syncState.set(update.collectorId, {
       watermark: update.watermark,
     });
@@ -257,6 +258,12 @@ describe('slack collector against a fake Slack', () => {
 
     expect(ingested.size).toBe(25);
     expect(watermarks.size).toBe(2);
+    expect([...workspace.brainPages.values()].join('\n')).toContain(
+      '<Alice Example (U1)>',
+    );
+    expect([...workspace.brainPages.values()].join('\n')).not.toContain(
+      'alice@example.com',
+    );
   });
 
   it('loses nothing in a channel far busier than one page', async () => {
@@ -363,6 +370,7 @@ describe('slack collector against a fake Slack', () => {
     });
 
     for (const update of result.stateUpdates ?? []) {
+      if (!update.watermark) continue;
       expect(update.watermark.getTime()).toBeLessThanOrEqual(now);
     }
   });
