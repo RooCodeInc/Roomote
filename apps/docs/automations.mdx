@@ -111,13 +111,16 @@ clarification rather than guessing when the recurrence itself is ambiguous.
 Custom schedules do not support seconds or cron macros.
 
 On each due tick, Roomote launches a normal task with that prompt in the selected
-environment or across all active repositories. A run can skip or fail before task creation when its configuration
-or launch state prevents it from starting. When a report destination is set,
-the run is anchored to that conversation: Roomote's first message (the final
-result, or a blocker or question that needs input) starts a thread, later
-updates continue that same thread, and you can reply in the thread to talk to the task.
-There is no progress chatter in between. Without a destination, the run happens
-silently and its results appear only in the task view.
+environment or across all active repositories. A run can skip or fail before
+task creation when its configuration or launch state prevents it from starting.
+When a report destination is set, Roomote uses that conversation for actionable
+or important findings, meaningful completed results, blockers, and questions
+that need input. Routine success, healthy status, and no-change results stay
+silent unless the automation prompt explicitly asks for a report in those
+cases. The first message starts a thread, later updates continue that same
+thread, and you can reply there to talk to the task. There is no progress
+chatter in between. Without a destination, the run happens silently and its
+results appear only in the task view.
 
 Unless the prompt asks for a different presentation, custom automation reports
 lead with the result, stay concise, and use short Markdown headings and bullets
