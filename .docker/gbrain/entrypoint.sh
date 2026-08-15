@@ -1,0 +1,230 @@
+#!/bin/sh
+# Brain bootstrap: init-once, then serve.
+#
+# Credential provisioning happens over gbrain's admin HTTP API at connect
+# time (Roomote registers its own scoped OAuth clients), so nothing is
+# pre-minted here. The admin bootstrap token comes from
+# GBRAIN_ADMIN_BOOTSTRAP_TOKEN (>= 32 chars of [A-Za-z0-9_-]; gbrain
+# validates at startup). When unset, one is generated on first boot and
+# persisted on the volume so restarts keep the same token; the operator
+# reads it from $DATA_DIR/admin-bootstrap-token when connecting.
+set -eu
+
+DATA_DIR="${GBRAIN_DATA_DIR:-/data}"
+BRAIN_DIR="$DATA_DIR/brain"
+TOKEN_FILE="$DATA_DIR/admin-bootstrap-token"
+CONFIG_FILE="$DATA_DIR/.gbrain/config.json"
+PORT="${GBRAIN_PORT:-8931}"
+# Width of the vector column, fixed when the brain is created. Defaults to
+# text-embedding-3-small, which is what both providers serve by default.
+# Overriding it means overriding the embedding model to match: a column sized
+# for one model and filled by another is the failure gbrain's own PR #1421
+# incident describes.
+EMBEDDING_DIMENSIONS="${GBRAIN_EMBEDDING_DIMENSIONS:-1536}"
+
+mkdir -p "$DATA_DIR"
+
+# gbrain keeps its registration in $HOME/.gbrain, not in the data dir.
+# Anchor HOME on the volume so a rebuilt container still knows its brain.
+export HOME="$DATA_DIR"
+
+# A lock present at entrypoint time is always stale: this container runs
+# exactly one gbrain process, and a killed container leaves a lock recording
+# PID 1, which a fresh container's serve (also PID 1) mistakes for live.
+rm -rf "$BRAIN_DIR/.gbrain-lock"
+
+if [ -z "${GBRAIN_ADMIN_BOOTSTRAP_TOKEN:-}" ]; then
+  if [ ! -s "$TOKEN_FILE" ]; then
+    echo "[gbrain-entrypoint] generating admin bootstrap token at $TOKEN_FILE"
+    head -c 48 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=' | cut -c1-48 > "$TOKEN_FILE"
+    # Readable by the app services: they run as a non-root user from another
+    # image and mount this volume read-only, so owner-only permissions leave
+    # them unable to read what the file exists to give them. The volume is
+    # only ever mounted into this deployment's own containers.
+    chmod 644 "$TOKEN_FILE"
+  fi
+  GBRAIN_ADMIN_BOOTSTRAP_TOKEN="$(cat "$TOKEN_FILE")"
+  export GBRAIN_ADMIN_BOOTSTRAP_TOKEN
+  echo "[gbrain-entrypoint] admin bootstrap token available at $TOKEN_FILE (not logged)"
+fi
+
+# Gateway mode: the Brain calls Roomote instead of a provider directly, so it
+# never holds a provider key and an admin can change that key in Settings
+# without restarting anything here. Some hosts (Render) cannot build a URL
+# from a service reference, so they pass the api host alone and the origin is
+# composed here, the same way the app image derives TRPC_URL and S3_ENDPOINT.
+if [ -z "${OPENAI_BASE_URL:-}" ] && [ -n "${ROOMOTE_API_HOST:-}" ]; then
+  OPENAI_BASE_URL="https://${ROOMOTE_API_HOST}/api/brain/inference"
+  export OPENAI_BASE_URL
+fi
+
+# Compose stacks brought up by hand supply no gateway token, so generate one
+# on the volume the app services already mount read-only. Same treatment as
+# the admin bootstrap token above: nobody has to invent a value, and no shared
+# default ships in the repository.
+GATEWAY_TOKEN_FILE="$DATA_DIR/gateway-token"
+
+if [ -z "${OPENAI_API_KEY:-}" ] && [ -n "${OPENAI_BASE_URL:-}" ]; then
+  if [ ! -s "$GATEWAY_TOKEN_FILE" ]; then
+    echo "[gbrain-entrypoint] generating gateway token at $GATEWAY_TOKEN_FILE"
+    head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > "$GATEWAY_TOKEN_FILE"
+    chmod 644 "$GATEWAY_TOKEN_FILE"
+  fi
+
+  OPENAI_API_KEY="$(cat "$GATEWAY_TOKEN_FILE")"
+  export OPENAI_API_KEY
+fi
+
+# Model defaults follow whichever provider credential is present, so every
+# deployment surface (compose, Railway, Coolify, Render) passes keys through
+# and none of them has to encode a provider-conditional default of its own.
+# Both providers serve the same OpenAI models; the prefix only decides who
+# routes and bills for them. OpenRouter wins when both keys are set: it is the
+# pre-existing default, and an operator adding an OpenAI key for some other
+# purpose should never silently re-point a populated Brain's embeddings.
+if [ -n "${OPENROUTER_API_KEY:-}" ]; then
+  BRAIN_PROVIDER="openrouter"
+  DEFAULT_EMBEDDING_MODEL="openrouter:openai/text-embedding-3-small"
+  DEFAULT_CHAT_MODEL="openrouter:openai/gpt-5.6-luna"
+elif [ -n "${OPENAI_API_KEY:-}" ]; then
+  BRAIN_PROVIDER="openai"
+  DEFAULT_EMBEDDING_MODEL="openai:text-embedding-3-small"
+  DEFAULT_CHAT_MODEL="openai:gpt-5.6-luna"
+else
+  # No credential: the server still boots and serves, it just cannot embed or
+  # synthesize. Roomote gates every Brain code path on the same keys, so it
+  # will not talk to this container either.
+  BRAIN_PROVIDER="none"
+  DEFAULT_EMBEDDING_MODEL=""
+  DEFAULT_CHAT_MODEL=""
+fi
+
+# An operator-chosen embedding model arrives as a bare id (text-embedding-3-large)
+# because it is written once and must survive a provider switch; gbrain wants
+# it provider-qualified. Qualify it with whichever provider this container
+# talks to, which in gateway mode is always openai, since Roomote translates
+# the name on the way out.
+if [ -n "${GBRAIN_EMBEDDING_MODEL:-}" ] && [ "$BRAIN_PROVIDER" != "none" ]; then
+  case "$GBRAIN_EMBEDDING_MODEL" in
+    *:*) ;;
+    *)
+      GBRAIN_EMBEDDING_MODEL="${BRAIN_PROVIDER}:${GBRAIN_EMBEDDING_MODEL}"
+      export GBRAIN_EMBEDDING_MODEL
+      ;;
+  esac
+fi
+
+DEFAULT_EMBEDDING_MODEL="${GBRAIN_EMBEDDING_MODEL:-$DEFAULT_EMBEDDING_MODEL}"
+unset GBRAIN_EMBEDDING_MODEL
+
+# The resolved embedding model is used for init below and nothing else. It is
+# never left in the environment for gbrain to read per request, because env
+# wins over config there and gbrain documents an incident (its PR #1421) where
+# exactly that split kept producing 1536d vectors after a schema moved to
+# 2560d. The chat model has no such coupling, so it is a plain export.
+if [ -z "${GBRAIN_MODEL:-}" ] && [ -n "$DEFAULT_CHAT_MODEL" ]; then
+  GBRAIN_MODEL="$DEFAULT_CHAT_MODEL"
+  export GBRAIN_MODEL
+fi
+
+# Gateway mode with nothing to present is a misconfiguration that otherwise
+# fails quietly: the brain initializes without embedding, ingestion still
+# writes pages, and retrieval silently degrades to keyword-only. Say it at
+# every start, since the operator's next action fixes it.
+if [ -n "${OPENAI_BASE_URL:-}" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
+  echo "[gbrain-entrypoint] WARNING: this Brain is pointed at ${OPENAI_BASE_URL} but has no gateway token."
+  echo "[gbrain-entrypoint] WARNING: set R_BRAIN_GATEWAY_TOKEN (any 32+ random characters) and restart."
+  echo "[gbrain-entrypoint] WARNING: until then it cannot embed, and recall is keyword-only."
+fi
+
+if [ -n "${OPENAI_BASE_URL:-}" ] && [ "$BRAIN_PROVIDER" = "openai" ]; then
+  echo "[gbrain-entrypoint] provider: roomote gateway (${OPENAI_BASE_URL})"
+else
+  echo "[gbrain-entrypoint] provider: $BRAIN_PROVIDER (direct)"
+fi
+
+# Init runs after provider resolution because the embedding model is a
+# create-time decision, not a runtime one: it sizes the vector column, and
+# gbrain refuses to change it afterwards on a populated brain. Initializing
+# with --no-embedding writes a permanent `embedding_disabled: true` sentinel
+# that blocks every embed callsite, which silently degrades retrieval to
+# lexical-only no matter what model variables are set later.
+if [ ! -s "$CONFIG_FILE" ]; then
+  if [ "$BRAIN_PROVIDER" = "none" ]; then
+    echo "[gbrain-entrypoint] initializing brain at $BRAIN_DIR (PGLite, no provider key: embedding deferred)"
+    gbrain init --pglite --no-embedding --non-interactive --path "$BRAIN_DIR"
+  else
+    echo "[gbrain-entrypoint] initializing brain at $BRAIN_DIR (PGLite, embedding: $DEFAULT_EMBEDDING_MODEL)"
+    # --skip-embed-check: the key is not exercised at init time, so a brain
+    # still comes up on a temporarily unreachable provider instead of leaving
+    # the volume half-initialized.
+    gbrain init --pglite \
+      --embedding-model "$DEFAULT_EMBEDDING_MODEL" \
+      --embedding-dimensions "$EMBEDDING_DIMENSIONS" \
+      --skip-embed-check \
+      --non-interactive \
+      --path "$BRAIN_DIR"
+  fi
+fi
+
+# Adding a key to a brain created without one is a first-class flow rather
+# than an edge case: on hosts whose compose parser ignores `profiles` the
+# service always runs, so a keyless first deploy followed by filling the key
+# in is the normal path. That brain still carries the deferred sentinel, so
+# repair it here instead of leaving retrieval quietly lexical-only.
+#
+# Safe to do unattended, which is why it is not gated behind a prompt: the
+# migration's only destructive act is rebuilding the embedding column, and a
+# deferred brain has no embeddings to lose (gbrain reports "0 chunk(s)
+# invalidated"). Page content is preserved either way, and Roomote refuses to
+# ingest into a keyless brain at all, so there is rarely anything here yet.
+#
+# The middle step is not a typo. In gbrain 0.45.10.0 `config set
+# embedding_disabled false` prints "Set embedding_disabled = false" and does
+# not write the file, so the sentinel survives and keeps blocking embed. The
+# file edit is what actually clears it. Re-check on upgrade.
+if [ "$BRAIN_PROVIDER" != "none" ] &&
+  grep -q '"embedding_disabled": *true' "$CONFIG_FILE" 2>/dev/null; then
+  echo "[gbrain-entrypoint] this brain predates its provider key; enabling semantic recall"
+
+  # Deliberately not chained on the migration's exit code: on a deferred brain
+  # it rebuilds the vector column (the part that matters here) and then exits
+  # non-zero when its own re-embed pass trips the very sentinel being cleared
+  # two lines down. `embed --all` is the real success signal.
+  gbrain migrate embeddings --to "$DEFAULT_EMBEDDING_MODEL" --yes >/dev/null 2>&1 || true
+
+  if bun -e "
+      const p = '$CONFIG_FILE';
+      const c = JSON.parse(await Bun.file(p).text());
+      delete c.embedding_disabled;
+      await Bun.write(p, JSON.stringify(c, null, 2));
+    " &&
+    gbrain embed --all >/dev/null 2>&1; then
+    echo "[gbrain-entrypoint] semantic recall enabled ($DEFAULT_EMBEDDING_MODEL, ${EMBEDDING_DIMENSIONS}d)"
+  else
+    echo "[gbrain-entrypoint] WARNING: could not enable embeddings automatically."
+    echo "[gbrain-entrypoint] WARNING: retrieval stays lexical-only. Stop this service and run:"
+    echo "[gbrain-entrypoint] WARNING:   gbrain migrate embeddings --to $DEFAULT_EMBEDDING_MODEL --yes"
+    echo "[gbrain-entrypoint] WARNING:   (remove the \"embedding_disabled\" key from $CONFIG_FILE)"
+    echo "[gbrain-entrypoint] WARNING:   gbrain embed --all"
+  fi
+fi
+
+# The vector column cannot be resized in place, so a dimension change after
+# creation is a silent corruption risk rather than a config change. Say so on
+# the start that introduces it, while the operator still has the context to
+# act, instead of letting embeds fail or store mismatched vectors later.
+CONFIGURED_DIMENSIONS="$(sed -n 's/.*"embedding_dimensions": *\([0-9]*\).*/\1/p' "$CONFIG_FILE" 2>/dev/null | head -1)"
+
+if [ -n "$CONFIGURED_DIMENSIONS" ] && [ "$CONFIGURED_DIMENSIONS" != "$EMBEDDING_DIMENSIONS" ]; then
+  echo "[gbrain-entrypoint] WARNING: this brain's vector column is ${CONFIGURED_DIMENSIONS}d but ${EMBEDDING_DIMENSIONS}d is configured."
+  echo "[gbrain-entrypoint] WARNING: the column keeps its original width; the setting is ignored."
+  echo "[gbrain-entrypoint] WARNING: to change it, stop this service and run:"
+  echo "[gbrain-entrypoint] WARNING:   gbrain migrate embeddings --to <provider:model> --yes"
+fi
+
+echo "[gbrain-entrypoint] starting gbrain serve on :$PORT (full surface)"
+# gbrain binds loopback by default, which no container network can reach.
+# 0.0.0.0 covers Docker/compose; platforms whose private network is IPv6-only
+# (Railway) set GBRAIN_BIND=:: so the service is reachable there.
+exec gbrain serve --http --port "$PORT" --bind "${GBRAIN_BIND:-0.0.0.0}" --surface full

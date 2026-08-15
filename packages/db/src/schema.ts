@@ -3730,3 +3730,75 @@ export const mcpOauthReplaysRelations = relations(
     }),
   }),
 );
+
+/**
+ * brainMemoryEvents
+ *
+ * Transactional outbox for task-memory ingestion. A row is inserted in the
+ * same transaction that marks a run Completed (finish-run.ts), then drained
+ * asynchronously by the bullmq worker; ingestion upserts by runId so replays
+ * are idempotent. Never fire-and-forget: the unique(runId) row is the durable
+ * record that a completed task still owes the brain a memory.
+ */
+export const brainMemoryEvents = pgTable(
+  'brain_memory_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    runId: integer('run_id')
+      .notNull()
+      .references(() => taskRuns.id, { onDelete: 'cascade' }),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<'pending' | 'processing' | 'done' | 'skipped' | 'failed'>(),
+    /**
+     * Narrative the agent wrote about its own work (decisions, rationale,
+     * reusable facts). The agent authors it; the server still places it: the
+     * drainer remains the only writer to the brain, so the slug, redaction,
+     * and provenance stay server-controlled and an agent cannot reach any
+     * other page.
+     */
+    agentSummary: text('agent_summary'),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    processedAt: timestamp('processed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('brain_memory_events_run_unique').on(table.runId),
+    index('brain_memory_events_status_created_idx').on(
+      table.status,
+      table.createdAt,
+    ),
+  ],
+);
+
+/**
+ * brainSyncState
+ *
+ * Durable per-collector sync state for Brain memory sources. `watermark`
+ * drives the steady-state incremental sync; `backfillCursor` and
+ * `backfillCompletedAt` drive the one-time deep historical backfill, which
+ * pages older history across ticks and must survive process restarts (an
+ * in-process cursor would re-page old history after every deploy).
+ */
+export const brainSyncState = pgTable('brain_sync_state', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  collectorId: text('collector_id').notNull().unique(),
+  watermark: timestamp('watermark'),
+  backfillCursor: text('backfill_cursor'),
+  backfillCompletedAt: timestamp('backfill_completed_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+export const brainMemoryEventsRelations = relations(
+  brainMemoryEvents,
+  ({ one }) => ({
+    run: one(taskRuns, {
+      fields: [brainMemoryEvents.runId],
+      references: [taskRuns.id],
+    }),
+  }),
+);

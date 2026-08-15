@@ -276,9 +276,7 @@ describe('buildSuggestedTasksPrompt', () => {
     expect(prompt).toContain('missing or incomplete functionality');
     expect(prompt).toContain('test gaps');
     expect(prompt).toContain('observability and operational improvements');
-    expect(prompt).toContain(
-      'When at least one finding survives the quality bar, finish with one `send_chat_reply` call',
-    );
+    expect(prompt).toContain('Finish with one `send_chat_reply` call');
     expect(prompt).toContain(
       'put the final structured actions in `suggestions`',
     );
@@ -286,9 +284,6 @@ describe('buildSuggestedTasksPrompt', () => {
       'Submit suggestions only with the submit_task_suggestions tool',
     );
     expect(prompt).toContain('Do not pad the list toward the maximum');
-    expect(prompt).toContain(
-      'If nothing survives the bar, finish silently without calling `send_chat_reply`',
-    );
   });
 
   it('preserves the template interpolation slots in source', () => {

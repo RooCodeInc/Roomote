@@ -88,6 +88,7 @@ export * from './lib/license-usage-observations';
 export * from './lib/pr-review-events';
 export * from './lib/invocation-identities';
 export * from './lib/webhook-retention';
+export * from './lib/brain';
 export * from './lib/managed-access';
 
 export {
@@ -206,6 +207,9 @@ export {
   mcpOauthReplaysRelations,
   userApiKeys,
   userApiKeysRelations,
+  brainMemoryEvents,
+  brainMemoryEventsRelations,
+  brainSyncState,
 } from './schema';
 
 export * from './fixtures/factories/index';

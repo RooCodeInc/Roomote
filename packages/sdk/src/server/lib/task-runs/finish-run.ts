@@ -20,6 +20,7 @@ import {
 import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../telegram-communication';
+import { Env, isBrainConfigured } from '@roomote/env';
 import {
   type TaskRun,
   type Task,
@@ -30,6 +31,7 @@ import {
   taskPullRequests,
   deploymentSettings,
   markTaskStartParallelCountEndedAt,
+  maybeEnqueueBrainMemoryEvent,
   recordTaskRunLifecycleEvent,
   resolveDefaultComputeProvider,
   slackInstallations,
@@ -243,6 +245,14 @@ export const finishRun = async ({
       },
       createdAt: now,
     });
+
+    // Transactional outbox for Brain task memory: the event commits with the
+    // completion or not at all, so no completed task can silently skip
+    // memory ingestion. Deployments without a Brain never enqueue; skip
+    // rules and DLP live in the bullmq drainer, not here.
+    if (status === RunStatus.Completed && isBrainConfigured(Env)) {
+      await maybeEnqueueBrainMemoryEvent(tx, id);
+    }
   });
 
   // Truthful snapshot state: a snapshot refresh that dies on any terminal

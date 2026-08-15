@@ -48,22 +48,17 @@ function resolveSenderMode(
 }
 
 export async function handleSendMessage(
-  params: {
-    taskId: string;
-    message: string;
-    images?: string[];
-    steer?: boolean;
-  },
+  params: { taskId: string; message: string; images?: string[] },
   config: RoomoteConfig,
 ): Promise<ToolResult> {
   try {
     const senderMode = resolveSenderMode(params.message);
     const result =
-      senderMode === 'linked_review_handoff' || !params.steer
+      senderMode === 'linked_review_handoff'
         ? await sendMessageToTask(config, params.taskId, {
             message: params.message,
             images: params.images,
-            ...(senderMode ? { senderMode } : {}),
+            senderMode,
           })
         : await steerMessageToTask(config, params.taskId, {
             message: params.message,

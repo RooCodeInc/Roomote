@@ -69,6 +69,25 @@ x-roomote-shared-env: &roomote-shared-env
   R_DISCORD_BOT_TOKEN: ${R_DISCORD_BOT_TOKEN:-}
   S3_ENDPOINT: http://minio:9000
   S3_PRESIGN_ENDPOINT: ${SERVICE_URL_MINIO}
+  # The Brain (shared memory). Leave the key empty and the gbrain service
+  # below still runs but nothing uses it: every Brain code path is gated on
+  # this key, so the deployment behaves exactly as if there were no Brain.
+  # Fill it in and the deployment provisions its own scoped clients on the
+  # next tick. See "Enabling the Brain" in README.md.
+  R_BRAIN_OPENROUTER_API_KEY: ${R_BRAIN_OPENROUTER_API_KEY:-}
+  R_BRAIN_OPENAI_API_KEY: ${R_BRAIN_OPENAI_API_KEY:-}
+  R_BRAIN_GATEWAY_TOKEN: ${SERVICE_PASSWORD_64_BRAINGATEWAY}
+  # Which models the Brain runs, in the configured provider's own naming.
+  # The synthesis model is free to change; the embedding pair is create-time.
+  R_BRAIN_MODEL: ${R_BRAIN_MODEL:-}
+  R_BRAIN_EMBEDDING_MODEL: ${R_BRAIN_EMBEDDING_MODEL:-}
+  R_BRAIN_EMBEDDING_DIMENSIONS: ${R_BRAIN_EMBEDDING_DIMENSIONS:-}
+  R_GBRAIN_URL: http://gbrain:8931
+  # Roomote uses this only to register its own read-only and write-only
+  # clients against the Brain. Coolify's SERVICE_PASSWORD_64_* generates an
+  # alphanumeric value, which satisfies gbrain's >= 32 characters of
+  # [A-Za-z0-9_-]; SERVICE_BASE64_* would not.
+  R_GBRAIN_ADMIN_TOKEN: ${SERVICE_PASSWORD_64_GBRAINADMIN}
 
 services:
   postgres:
@@ -120,6 +139,46 @@ services:
       timeout: 5s
       retries: 12
       start_period: 20s
+
+  # The Brain: shared memory for this deployment's agents. No published
+  # domain and no SERVICE_FQDN_*, so Coolify never routes to it; agents read
+  # it through the api service's proxy with their run token. It runs
+  # unconditionally because Coolify's compose parser does not honour
+  # `profiles`, and idling costs about 370 MB. Delete this service and the
+  # gbrain_data volume if the deployment should have no memory at all.
+  gbrain:
+    image: ghcr.io/roocodeinc/roomote-gbrain:develop
+    restart: unless-stopped
+    networks:
+      - default
+    volumes:
+      - gbrain_data:/data
+    environment:
+      GBRAIN_ADMIN_BOOTSTRAP_TOKEN: ${SERVICE_PASSWORD_64_GBRAINADMIN}
+      # The Brain holds no provider key. It calls back into this deployment,
+      # which injects whichever provider key an admin configured in Settings,
+      # so rotating or switching that key needs no restart here. Setting a
+      # provider key below instead makes the Brain call the provider directly.
+      OPENAI_BASE_URL: ${GBRAIN_OPENAI_BASE_URL:-http://api:3001/api/brain/inference}
+      OPENAI_API_KEY: ${SERVICE_PASSWORD_64_BRAINGATEWAY}
+      # Create-time, and it has to be the container that receives these: the
+      # embedding model and its width are decided when the Brain is created,
+      # and the gateway must never substitute a different one afterwards.
+      # Set both before the first boot, or neither. The synthesis model is
+      # the opposite (R_BRAIN_MODEL, applied by the gateway per request).
+      GBRAIN_EMBEDDING_MODEL: ${R_BRAIN_EMBEDDING_MODEL:-}
+      GBRAIN_EMBEDDING_DIMENSIONS: ${R_BRAIN_EMBEDDING_DIMENSIONS:-}
+    healthcheck:
+      # The image is bun-based and ships no curl or wget.
+      test:
+        [
+          'CMD-SHELL',
+          'bun -e "const r = await fetch(\"http://127.0.0.1:8931/health\"); process.exit(r.ok ? 0 : 1)"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
 
   docker-proxy:
     image: ghcr.io/tecnativa/docker-socket-proxy:v0.4.2@sha256:1f3a6f303320723d199d2316a3e82b2e2685d86c275d5e3deeaf182573b47476
@@ -318,6 +377,9 @@ volumes:
   pg_data:
   redis_data:
   minio_data:
+  # The Brain's corpus. Back it up like pg_data; losing it is recoverable
+  # (task history and integration sources re-ingest) but not free.
+  gbrain_data:
 
 networks:
   # Named explicitly so the controller's DOCKER_WORKER_NETWORK value is
