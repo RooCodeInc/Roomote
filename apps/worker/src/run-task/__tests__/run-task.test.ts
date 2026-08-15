@@ -5,6 +5,7 @@ const {
   awaitSubprocessMock,
   buildSandboxInstructionMock,
   taskRunsDoneMock,
+  taskRunsActivateSlackReplyTargetMock,
   taskRunsGetGoalMock,
   taskRunsClaimGoalContinuationMock,
   taskRunsRecordEventMock,
@@ -33,6 +34,7 @@ const {
   waitForExternalSleepActionMock,
   mkdirSyncMock,
   recordSandboxPromptSlackTurnStartMock,
+  recordChatTurnStartMock,
   writeFileSyncMock,
   installZeroCliMock,
 } = vi.hoisted(() => ({
@@ -40,6 +42,12 @@ const {
   awaitSubprocessMock: vi.fn().mockResolvedValue(undefined),
   buildSandboxInstructionMock: vi.fn(() => undefined),
   taskRunsDoneMock: vi.fn().mockResolvedValue(undefined),
+  taskRunsActivateSlackReplyTargetMock: vi.fn().mockResolvedValue({
+    slackTeamId: 'T123',
+    channel: 'C_ALERT',
+    threadTs: '1710000000.456',
+    reactionsAllowed: false,
+  }),
   taskRunsGetGoalMock: vi.fn().mockResolvedValue(null),
   taskRunsClaimGoalContinuationMock: vi.fn(),
   taskRunsRecordEventMock: vi.fn().mockResolvedValue(undefined),
@@ -89,6 +97,7 @@ const {
     .mockResolvedValue({ claimed: false, completed: false }),
   mkdirSyncMock: vi.fn(),
   recordSandboxPromptSlackTurnStartMock: vi.fn(),
+  recordChatTurnStartMock: vi.fn(),
   writeFileSyncMock: vi.fn(),
   installZeroCliMock: vi.fn().mockResolvedValue(undefined),
 }));
@@ -97,6 +106,10 @@ vi.mock('node:fs', () => ({
   existsSync: existsSyncMock,
   mkdirSync: mkdirSyncMock,
   writeFileSync: writeFileSyncMock,
+}));
+
+vi.mock('../../mcp/roomote-mcp-server/chat-reply-satisfaction', () => ({
+  recordChatTurnStart: recordChatTurnStartMock,
 }));
 
 type FakeHarnessManager = EventEmitter & {
@@ -146,6 +159,7 @@ vi.mock('@roomote/cloud-agents', () => ({
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     taskRuns: {
+      activateSlackReplyTarget: taskRunsActivateSlackReplyTargetMock,
       done: taskRunsDoneMock,
       getGoal: taskRunsGetGoalMock,
       claimGoalContinuation: taskRunsClaimGoalContinuationMock,
@@ -279,6 +293,13 @@ describe('runTask', () => {
     existsSyncMock.mockReset();
     existsSyncMock.mockReturnValue(false);
     recordSandboxPromptSlackTurnStartMock.mockReset();
+    recordChatTurnStartMock.mockReset();
+    taskRunsActivateSlackReplyTargetMock.mockResolvedValue({
+      slackTeamId: 'T123',
+      channel: 'C_ALERT',
+      threadTs: '1710000000.456',
+      reactionsAllowed: false,
+    });
 
     createHarnessMock.mockResolvedValue({
       harness: {},
@@ -2285,11 +2306,25 @@ describe('runTask', () => {
     const prepareQueuedPromptActorScope =
       createHarnessMock.mock.calls[0]?.[0].prepareQueuedPromptActorScope;
 
-    await expect(prepareQueuedPromptActorScope?.('user-2')).resolves.toEqual({
+    await expect(
+      prepareQueuedPromptActorScope?.('user-2', {
+        kind: 'queuedPrompt',
+        clientMessageId: 'slack:1710000000.456',
+      }),
+    ).resolves.toEqual({
       shouldReconnect: false,
       reason:
         'actor-scoped MCP refresh failed for the current actor; continuing with existing MCP state',
     });
+    expect(taskRunsActivateSlackReplyTargetMock).toHaveBeenCalledWith({
+      runId: 405,
+      messageTs: '1710000000.456',
+    });
+    expect(recordChatTurnStartMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        turnMessageTs: '1710000000.456',
+      }),
+    );
   });
 
   it('retries blocked deferred resume prompts instead of marking them rejected immediately', async () => {

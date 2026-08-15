@@ -130,6 +130,36 @@ export function createSlackMessageInterval({
             return;
           }
 
+          if (answer.channel && answer.threadTs) {
+            const activated = await runPollingSdkCall({
+              execute: () =>
+                sdk.taskRuns.activateSlackReplyTarget({
+                  runId: taskRun.id,
+                  messageTs: answer.ts,
+                }),
+              stage: 'listenForSlackEvents',
+              runId: taskRun.id,
+              sessionId: state.sessionId,
+              sdkMethod: 'taskRuns.activateSlackReplyTarget',
+              failurePoint: 'slackReplyTargetActivation',
+              logger,
+              message: `[listenForSlackEvents] Failed to activate Slack reply target for request_user_input answer on job ${taskRun.id}`,
+            });
+            if (activated === null) {
+              await requeueSlackRequestUserInputAnswers(
+                taskRun.id,
+                queuedAnswers,
+                index,
+              );
+              return;
+            }
+            if (!activated) {
+              logger.warn(
+                `[listenForSlackEvents] Slack reply target authorization is missing for request_user_input answer ${answer.ts}; continuing with the canonical thread`,
+              );
+            }
+          }
+
           const sent = answerUserInputRequest({
             requestId: answer.requestId,
             answers: answer.answers,
@@ -247,6 +277,7 @@ export function createSlackMessageInterval({
             prompt,
             images: msg.images,
             autoSteerWhenQueued: true,
+            ...(msg.channel && msg.threadTs ? { queueOnly: true } : {}),
             source: 'slack',
             // The delivered sender always equals the server-side acting user.
             userId: msgPrep.effectiveUserId ?? undefined,
@@ -275,12 +306,14 @@ export function createSlackMessageInterval({
             return;
           }
 
-          recordChatTurnStart({
-            turnMessageTs: msg.ts,
-            allowReaction: getQueuedSlackTurnReactionAllowance(msg),
-            sessionId: state.sessionId,
-            stateFilePath: slackReplySatisfactionStateFile,
-          });
+          if (!msg.channel || !msg.threadTs) {
+            recordChatTurnStart({
+              turnMessageTs: msg.ts,
+              allowReaction: getQueuedSlackTurnReactionAllowance(msg),
+              sessionId: state.sessionId,
+              stateFilePath: slackReplySatisfactionStateFile,
+            });
+          }
 
           index += 1;
         }

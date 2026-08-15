@@ -12,7 +12,10 @@ import {
 import { activeRunStatuses } from '@roomote/types';
 
 import { slackDebug } from './logging';
-import { getSlackTaskRunWorkspacePredicate } from './slack-task-run-workspace-scope';
+import {
+  getSlackTaskRunWorkspacePredicate,
+  getSlackTrackedAliasTaskPredicate,
+} from './slack-task-run-workspace-scope';
 
 /**
  * Find an active run for a given Slack thread.
@@ -29,8 +32,25 @@ import { getSlackTaskRunWorkspacePredicate } from './slack-task-run-workspace-sc
  * machine to finish booting.
  */
 export type SlackTaskRunLookupScope =
-  | { slackTeamId: string; taskId?: string }
-  | { taskId: string; slackTeamId?: string };
+  | {
+      slackTeamId: string;
+      taskId?: string;
+      trackedAlias?: never;
+    }
+  | {
+      taskId: string;
+      slackTeamId?: string;
+      trackedAlias?: never;
+    }
+  | {
+      taskId: string;
+      slackTeamId?: never;
+      trackedAlias: {
+        slackTeamId: string;
+        channelId: string;
+        threadTs: string;
+      };
+    };
 
 export async function findActiveSlackTaskRun(
   slackThreadTs: string,
@@ -46,10 +66,18 @@ export async function findActiveSlackTaskRun(
     .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
     .where(
       and(
-        eq(tasks.slackThreadTs, slackThreadTs),
+        ...(scope.trackedAlias ? [] : [eq(tasks.slackThreadTs, slackThreadTs)]),
         ...(scope.taskId ? [eq(taskRuns.taskId, scope.taskId)] : []),
         ...(scope.slackTeamId
           ? [getSlackTaskRunWorkspacePredicate(scope.slackTeamId)]
+          : []),
+        ...(scope.trackedAlias
+          ? [
+              getSlackTrackedAliasTaskPredicate({
+                taskId: scope.taskId,
+                ...scope.trackedAlias,
+              }),
+            ]
           : []),
         inArray(taskRuns.status, [...activeRunStatuses]),
         isNull(taskRuns.canceledAt),
@@ -82,10 +110,20 @@ export async function findActiveSlackTaskRun(
       .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
       .where(
         and(
-          eq(tasks.slackThreadTs, slackThreadTs),
+          ...(scope.trackedAlias
+            ? []
+            : [eq(tasks.slackThreadTs, slackThreadTs)]),
           ...(scope.taskId ? [eq(taskRuns.taskId, scope.taskId)] : []),
           ...(scope.slackTeamId
             ? [getSlackTaskRunWorkspacePredicate(scope.slackTeamId)]
+            : []),
+          ...(scope.trackedAlias
+            ? [
+                getSlackTrackedAliasTaskPredicate({
+                  taskId: scope.taskId,
+                  ...scope.trackedAlias,
+                }),
+              ]
             : []),
           isNull(tasks.deletedAt),
         ),

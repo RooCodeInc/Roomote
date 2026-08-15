@@ -8,6 +8,7 @@ import { withContention } from '@roomote/redis';
 import { enqueueTask } from '@roomote/cloud-agents/server';
 import {
   appendSlackVideoDescriptionsToText,
+  authorizeSlackRunReplyTarget,
   clearLatestUserMessage,
   collectAndProcessThreadImages,
   getSlackResumeLockKey,
@@ -20,7 +21,17 @@ import {
   type SlackEvent,
   type SlackNotifier,
 } from '@roomote/slack';
-import { and, db, desc, eq, gt, taskRuns, tasks } from '@roomote/db/server';
+import {
+  and,
+  db,
+  desc,
+  eq,
+  gt,
+  or,
+  sql,
+  taskRuns,
+  tasks,
+} from '@roomote/db/server';
 import {
   appendAttachmentTextsToPromptText,
   stripLeadingRawSlackMention,
@@ -43,6 +54,37 @@ type CompletedSlackTaskRun = {
   payload: unknown;
   port: number | null;
 };
+
+export async function findRecentSlackResumeRun(params: {
+  taskId: string;
+  slackTeamId: string;
+  channelId: string;
+  threadId: string;
+}): Promise<number | undefined> {
+  const [recent] = await db
+    .select({ id: taskRuns.id })
+    .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(
+      and(
+        or(
+          eq(tasks.slackThreadTs, params.threadId),
+          and(
+            sql`${taskRuns.payload}->>'channel' = ${params.channelId}`,
+            sql`${taskRuns.payload}->>'thread_ts' = ${params.threadId}`,
+          ),
+        ),
+        eq(taskRuns.taskId, params.taskId),
+        getSlackTaskRunWorkspacePredicate(params.slackTeamId),
+        eq(taskRuns.kind, 'resume'),
+        gt(taskRuns.createdAt, new Date(Date.now() - 60_000)),
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt))
+    .limit(1);
+
+  return recent?.id;
+}
 
 export async function processSnapshotResume(
   event: SlackEvent,
@@ -157,6 +199,8 @@ export async function processSnapshotResume(
       user: event.user,
       userId: userId ?? undefined,
       ts: event.ts,
+      channel: event.channel,
+      threadTs: threadId,
       images: allImages.length > 0 ? allImages : undefined,
       formattedPrompt,
       turnPolicy,
@@ -209,25 +253,12 @@ export async function processSnapshotResume(
           return resumeLaunch.id;
         },
         onContended: async () => {
-          // Slack channel bindings live on tasks; resume runs are the
-          // kind='resume' rows of the bound task.
-          const [recent] = await db
-            .select({ id: taskRuns.id })
-            .from(taskRuns)
-            .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
-            .where(
-              and(
-                eq(tasks.slackThreadTs, threadId),
-                eq(taskRuns.taskId, completedRun.taskId),
-                getSlackTaskRunWorkspacePredicate(slackTeamId),
-                eq(taskRuns.kind, 'resume'),
-                gt(taskRuns.createdAt, new Date(Date.now() - 60_000)),
-              ),
-            )
-            .orderBy(desc(taskRuns.createdAt))
-            .limit(1);
-
-          return recent?.id;
+          return findRecentSlackResumeRun({
+            taskId: completedRun.taskId,
+            slackTeamId,
+            channelId: event.channel,
+            threadId,
+          });
         },
       },
     );
@@ -236,6 +267,16 @@ export async function processSnapshotResume(
       return false;
     }
 
+    await authorizeSlackRunReplyTarget({
+      runId: resumeRunId,
+      messageTs: event.ts,
+      target: {
+        slackTeamId,
+        channel: event.channel,
+        threadTs: threadId,
+        reactionsAllowed: turnPolicy?.reactionsAllowed,
+      },
+    });
     await queueSlackMessage(resumeRunId, queuedSlackMessage);
     await clearLatestUserMessage(resumeRunId);
     // A typed reply supersedes any pending PR review offers in the thread.

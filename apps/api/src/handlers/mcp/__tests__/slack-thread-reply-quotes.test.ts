@@ -8,6 +8,7 @@ const {
   clearLatestUserMessageForReplyQuoteIfIdMock,
   clearLatestUserMessageMock,
   getLatestUserMessageMock,
+  getActiveSlackRunReplyTargetMock,
   getCustomAutomationByIdMock,
   getTaskChannelBindingsMock,
   maybeSendCommunicationThreadReplyMock,
@@ -20,6 +21,7 @@ const {
   clearLatestUserMessageForReplyQuoteIfIdMock: vi.fn(),
   clearLatestUserMessageMock: vi.fn(),
   getLatestUserMessageMock: vi.fn(),
+  getActiveSlackRunReplyTargetMock: vi.fn(),
   getCustomAutomationByIdMock: vi.fn(),
   getTaskChannelBindingsMock: vi.fn(),
   maybeSendCommunicationThreadReplyMock: vi.fn(),
@@ -69,6 +71,7 @@ vi.mock('@roomote/slack', async (importOriginal) => {
     clearLatestUserMessage: clearLatestUserMessageMock,
     clearSlackThreadReplyFooterMessageTs: vi.fn(),
     getLatestUserMessage: getLatestUserMessageMock,
+    getActiveSlackRunReplyTarget: getActiveSlackRunReplyTargetMock,
     getSlackThreadReplyFooterMessageTs: vi.fn().mockResolvedValue(null),
     removeSlackThreadReplyFooter: vi.fn(),
     resolveSlackThreadFooterContext: vi.fn().mockResolvedValue({
@@ -169,6 +172,7 @@ function createApp() {
 describe('Slack thread reply quotes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getActiveSlackRunReplyTargetMock.mockResolvedValue(null);
     taskRunFindFirstMock.mockResolvedValue({
       id: 42,
       actingUserId: null,
@@ -230,6 +234,37 @@ describe('Slack thread reply quotes', () => {
       'slack',
       42,
       'quote-image',
+    );
+  });
+
+  it('replies to the active turn target instead of the task source thread', async () => {
+    getActiveSlackRunReplyTargetMock.mockResolvedValue({
+      slackTeamId: 'T_ALERT',
+      channel: 'C_ALERT',
+      threadTs: '222.333',
+    });
+    getTaskChannelBindingsMock.mockResolvedValue({
+      slackChannelId: 'C_SOURCE',
+      slackThreadTs: '111.222',
+    });
+    slackInstallationFindFirstMock.mockResolvedValue({
+      botAccessToken: 'xoxb-alert',
+      teamId: 'T_ALERT',
+    });
+
+    const response = await createApp().request('/mcp/thread_reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'Responding in the alert thread' }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(eq).toHaveBeenCalledWith('teamId', 'T_ALERT');
+    expect(postMessageDetailedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C_ALERT',
+        thread_ts: '222.333',
+      }),
     );
   });
 

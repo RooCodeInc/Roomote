@@ -143,6 +143,7 @@ interface OpenCodeServerHarnessOptions {
   }) => void;
   beforeQueuedPrompt?: (input: {
     userId?: string;
+    clientMessageId?: string;
     /**
      * Distinguishes deliveries that survive a reconnect (queued prompts are
      * restored and replayed) from ones that do not (user-input answers fail
@@ -5265,6 +5266,7 @@ export class OpenCodeServerHarness
 
     const result = await this.beforeQueuedPrompt({
       userId: prompt.userId,
+      clientMessageId: prompt.clientMessageId,
       kind: 'queuedPrompt',
     });
 

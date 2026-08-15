@@ -21,6 +21,7 @@ import {
   getSlackTeamIdFromTaskPayload,
   getTriggerableBackgroundAutomationDescriptorByKey,
   getTriggerableBackgroundAutomationSettingsHash,
+  TaskPayloadKind,
   type SlackBlock,
 } from '@roomote/types';
 import {
@@ -30,6 +31,7 @@ import {
   clearLatestUserMessage,
   clearSlackThreadReplyFooterMessageTs,
   getLatestUserMessage,
+  getActiveSlackRunReplyTarget,
   getSlackThreadReplyFooterMessageTs,
   removeSlackThreadReplyFooter,
   resolveSlackThreadFooterContext,
@@ -378,6 +380,7 @@ async function peekSlackThreadReplyQuote(params: { runId: number }): Promise<{
 
 async function refreshTrackedAutomationThreadRootFooter(params: {
   slack: SlackNotifier;
+  slackTeamId: string;
   channel: string;
   threadTs: string;
   taskId: string;
@@ -390,6 +393,7 @@ async function refreshTrackedAutomationThreadRootFooter(params: {
   const [trackedThread, boundTask] = await Promise.all([
     findBackgroundAutomationSlackThread({
       surface: 'slack',
+      slackTeamId: params.slackTeamId,
       slackChannelId: params.channel,
       threadTs: params.threadTs,
     }),
@@ -863,6 +867,7 @@ slackMcp.post('/thread_reply', async (c) => {
       actingUserId: true,
       taskId: true,
       payload: true,
+      payloadKind: true,
     },
     where: eq(taskRuns.id, authContext.runId),
   });
@@ -892,25 +897,50 @@ slackMcp.post('/thread_reply', async (c) => {
     );
   }
 
-  const communicationReply = await maybeSendCommunicationThreadReply({
-    taskRun: {
-      id: taskRun.id,
-      taskId: taskRun.taskId,
-      payload: taskRun.payload,
-    },
-    parsedBody,
-  });
+  const activeSlackReplyTarget = await getActiveSlackRunReplyTarget(taskRun.id);
+  const resumeSlackReplyTarget =
+    taskRun.payloadKind === TaskPayloadKind.SnapshotResume
+      ? getSlackReplyTarget(
+          {
+            slackChannelId: null,
+            slackThreadTs: null,
+            payload: taskRun.payload,
+          },
+          { preferPayload: true },
+        )
+      : null;
+  const communicationReply =
+    activeSlackReplyTarget || resumeSlackReplyTarget
+      ? null
+      : await maybeSendCommunicationThreadReply({
+          taskRun: {
+            id: taskRun.id,
+            taskId: taskRun.taskId,
+            payload: taskRun.payload,
+          },
+          parsedBody,
+        });
 
   if (communicationReply) {
     return communicationReply;
   }
 
   const channelBindings = await getTaskChannelBindings(taskRun.taskId);
-  const slackReplyTarget = getSlackReplyTarget({
-    slackChannelId: channelBindings?.slackChannelId ?? null,
-    slackThreadTs: channelBindings?.slackThreadTs ?? null,
-    payload: taskRun.payload,
-  });
+  const slackReplyTarget = activeSlackReplyTarget
+    ? {
+        channel: activeSlackReplyTarget.channel,
+        threadTs: activeSlackReplyTarget.threadTs,
+      }
+    : getSlackReplyTarget(
+        {
+          slackChannelId: channelBindings?.slackChannelId ?? null,
+          slackThreadTs: channelBindings?.slackThreadTs ?? null,
+          payload: taskRun.payload,
+        },
+        {
+          preferPayload: taskRun.payloadKind === TaskPayloadKind.SnapshotResume,
+        },
+      );
   if (!slackReplyTarget) {
     return c.json(
       {
@@ -944,7 +974,9 @@ slackMcp.post('/thread_reply', async (c) => {
     );
   }
 
-  const slackTeamId = getSlackTeamIdFromTaskPayload(taskRun.payload);
+  const slackTeamId =
+    activeSlackReplyTarget?.slackTeamId ??
+    getSlackTeamIdFromTaskPayload(taskRun.payload);
   const slackInstallation = await db.query.slackInstallations.findFirst({
     columns: { botAccessToken: true, teamId: true },
     where: slackTeamId
@@ -1384,6 +1416,7 @@ slackMcp.post('/thread_reply', async (c) => {
         try {
           await refreshTrackedAutomationThreadRootFooter({
             slack,
+            slackTeamId: slackInstallation.teamId,
             channel: slackReplyTarget.channel,
             threadTs: existingThreadTs,
             taskId: taskRun.taskId,

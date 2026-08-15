@@ -14,7 +14,10 @@ import { RunStatus, SANDBOX_SNAPSHOT_EXPIRY_MS } from '@roomote/types';
 
 import { slackDebug } from './logging';
 import type { SlackTaskRunLookupScope } from './find-active-slack-task-run';
-import { getSlackTaskRunWorkspacePredicate } from './slack-task-run-workspace-scope';
+import {
+  getSlackTaskRunWorkspacePredicate,
+  getSlackTrackedAliasTaskPredicate,
+} from './slack-task-run-workspace-scope';
 
 /**
  * Find the most recent completed/idle run for a Slack thread that has a
@@ -55,10 +58,18 @@ export async function findCompletedSlackTaskRunWithSnapshot(
     .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
     .where(
       and(
-        eq(tasks.slackThreadTs, slackThreadTs),
+        ...(scope.trackedAlias ? [] : [eq(tasks.slackThreadTs, slackThreadTs)]),
         ...(scope.taskId ? [eq(taskRuns.taskId, scope.taskId)] : []),
         ...(scope.slackTeamId
           ? [getSlackTaskRunWorkspacePredicate(scope.slackTeamId)]
+          : []),
+        ...(scope.trackedAlias
+          ? [
+              getSlackTrackedAliasTaskPredicate({
+                taskId: scope.taskId,
+                ...scope.trackedAlias,
+              }),
+            ]
           : []),
         inArray(taskRuns.status, [RunStatus.Completed, RunStatus.Idle]),
         isNotNull(taskRuns.snapshotId),

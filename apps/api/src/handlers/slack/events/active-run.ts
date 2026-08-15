@@ -5,6 +5,7 @@ import {
 import { Env } from '@roomote/env';
 import {
   appendSlackVideoDescriptionsToText,
+  authorizeSlackRunReplyTarget,
   clearLatestUserMessage,
   clearPendingSlackRequestUserInput,
   buildSlackAnsweredRequestUserInputBlocks,
@@ -158,6 +159,8 @@ async function handlePendingRequestUserInputReply(params: {
               user: event.user,
               userId,
               ts: event.ts,
+              channel: event.channel,
+              threadTs: threadId,
             },
           ),
       });
@@ -218,6 +221,8 @@ async function handlePendingRequestUserInputReply(params: {
               user: event.user,
               userId,
               ts: event.ts,
+              channel: event.channel,
+              threadTs: threadId,
             },
           ),
       });
@@ -333,6 +338,8 @@ async function handlePendingRequestUserInputReply(params: {
         user: event.user,
         userId,
         ts: event.ts,
+        channel: event.channel,
+        threadTs: threadId,
       }),
   });
 
@@ -413,6 +420,15 @@ export async function processActiveRunMessage(
         });
         return;
       } else {
+        await authorizeSlackRunReplyTarget({
+          runId: activeRun.id,
+          messageTs: event.ts,
+          target: {
+            slackTeamId,
+            channel: event.channel,
+            threadTs: threadId,
+          },
+        });
         const outcome = await handlePendingRequestUserInputReply({
           event,
           slack,
@@ -523,11 +539,23 @@ export async function processActiveRunMessage(
         runId: activeRun.id,
         senderUserId: userId,
       });
+      await authorizeSlackRunReplyTarget({
+        runId: activeRun.id,
+        messageTs: event.ts,
+        target: {
+          slackTeamId,
+          channel: event.channel,
+          threadTs: threadId,
+          reactionsAllowed: turnPolicy?.reactionsAllowed,
+        },
+      });
       await queueSlackMessage(activeRun.id, {
         text: messageTextWithVideoDescriptions,
         user: event.user,
         userId,
         ts: event.ts,
+        channel: event.channel,
+        threadTs: threadId,
         images: allImages.length > 0 ? allImages : undefined,
         formattedPrompt,
         turnPolicy,

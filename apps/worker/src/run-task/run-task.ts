@@ -1163,7 +1163,10 @@ export const runTask = async ({
 
     const prepareQueuedPromptActorScope = async (
       targetUserId?: string,
-      delivery?: { kind: 'queuedPrompt' | 'userInputAnswer' },
+      delivery?: {
+        kind: 'queuedPrompt' | 'userInputAnswer';
+        clientMessageId?: string;
+      },
     ) => {
       if (
         pendingTaskModelSettingsRestart &&
@@ -1176,10 +1179,59 @@ export const runTask = async ({
         };
       }
 
+      const finishQueuedPromptPreparation = async (result: {
+        shouldReconnect: boolean;
+        reason?: string;
+      }) => {
+        const clientMessageId = delivery?.clientMessageId;
+        if (result.shouldReconnect || delivery?.kind !== 'queuedPrompt') {
+          return result;
+        }
+
+        try {
+          if (!clientMessageId?.startsWith('slack:')) {
+            await sdk.taskRuns.clearActiveSlackReplyTarget({
+              runId: taskRun.id,
+            });
+            delete context.slackReplyTarget;
+            return result;
+          }
+
+          const activeTarget = await sdk.taskRuns.activateSlackReplyTarget({
+            runId: taskRun.id,
+            messageTs: clientMessageId.slice('slack:'.length),
+          });
+          if (!activeTarget) {
+            delete context.slackReplyTarget;
+            logger.warn(
+              `[runTask] Slack reply target authorization is missing for ${clientMessageId}; delivering with canonical routing`,
+            );
+          } else {
+            context.slackReplyTarget = activeTarget;
+            recordChatTurnStart({
+              turnMessageTs: clientMessageId.slice('slack:'.length),
+              allowReaction: activeTarget.reactionsAllowed,
+              sessionId: pollingState.sessionId,
+              stateFilePath:
+                mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE,
+            });
+          }
+          return result;
+        } catch (error) {
+          return {
+            shouldReconnect: false,
+            shouldBlockPrompt: true,
+            reason: `Slack reply target activation failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          };
+        }
+      };
+
       if (!targetUserId) {
-        return {
+        return finishQueuedPromptPreparation({
           shouldReconnect: false,
-        };
+        });
       }
 
       const syncResult = await syncActorScopedTurnState({
@@ -1227,12 +1279,12 @@ export const runTask = async ({
 
       if (refreshResult.didFail) {
         if (!refreshResult.actorChanged) {
-          return {
+          return finishQueuedPromptPreparation({
             shouldReconnect: false,
             reason:
               refreshResult.reason ??
               'actor-scoped MCP refresh failed for the current actor; continuing with existing MCP state',
-          };
+          });
         }
 
         return {
@@ -1244,10 +1296,10 @@ export const runTask = async ({
         };
       }
 
-      return {
+      return finishQueuedPromptPreparation({
         shouldReconnect: refreshResult.didChange,
         reason: refreshResult.reason,
-      };
+      });
     };
 
     // Create the appropriate runtime harness. Harness setup wires the

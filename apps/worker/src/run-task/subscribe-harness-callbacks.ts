@@ -230,15 +230,27 @@ export function subscribeHarnessCallbacks({
       );
     }
 
-    void callbacks
-      .onMessage?.(taskRun, callbackTaskId, event, context)
-      .catch((error) => {
-        logger.warn(
-          `[subscribeHarnessCallbacks] Failed callback onMessage for task run ${taskRun.id}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-      });
+    const slackReplyTarget = context.slackReplyTarget as
+      | {
+          slackTeamId: string;
+          channel: string;
+          threadTs: string;
+          reactionsAllowed?: boolean;
+        }
+      | undefined;
+    const callbackPromise = slackReplyTarget
+      ? callbacks.onMessage?.(taskRun, callbackTaskId, event, context, {
+          slackReplyTarget: { ...slackReplyTarget },
+        })
+      : callbacks.onMessage?.(taskRun, callbackTaskId, event, context);
+
+    void callbackPromise?.catch((error) => {
+      logger.warn(
+        `[subscribeHarnessCallbacks] Failed callback onMessage for task run ${taskRun.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
   };
 
   const flushPendingCompletionEvents = (callbackTaskId: string) => {
