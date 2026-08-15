@@ -1890,8 +1890,9 @@ export function selectPersonIdentityBatch(input: {
     now.getTime() - lastSweepAt.getTime() >=
       PERSON_IDENTITIES_RECONCILIATION_MS;
 
-  if (cursor.mode === 'sweep' || sweepDue) {
-    const afterUserId = cursor.mode === 'sweep' ? cursor.afterUserId : '';
+  if (cursor.mode === 'sweep' || sweepDue || projectionChanged) {
+    const afterUserId =
+      cursor.mode === 'sweep' && !projectionChanged ? cursor.afterUserId : '';
     const candidates = [...records]
       .sort((a, b) => a.userId.localeCompare(b.userId))
       .filter((record) => record.userId > (afterUserId ?? ''));

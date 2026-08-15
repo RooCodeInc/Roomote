@@ -999,6 +999,62 @@ describe('person identity pages', () => {
     expect(changed.projectionChanged).toBe(true);
   });
 
+  it('refreshes canonical cards when a provider projection changes with an old timestamp', () => {
+    const initial = selectPersonIdentityBatch({
+      records: [record],
+      state: null,
+      now: new Date('2026-08-15T00:00:00Z'),
+      limit: 100,
+    });
+    const changedRecord = {
+      ...record,
+      providers: record.providers.map((provider) =>
+        provider.provider === 'Slack'
+          ? { ...provider, title: 'Chief Analogy Officer' }
+          : provider,
+      ),
+    };
+    const changed = selectPersonIdentityBatch({
+      records: [changedRecord],
+      state: { watermark: initial.watermark, cursor: initial.cursor },
+      now: new Date('2026-08-15T00:01:00Z'),
+      limit: 100,
+    });
+
+    expect(changed.projectionChanged).toBe(true);
+    expect(changed.records).toEqual([changedRecord]);
+    expect(buildPersonIdentityPage(changed.records[0]!).content).toContain(
+      'Chief Analogy Officer',
+    );
+  });
+
+  it('restarts an active sweep when an earlier provider projection changes', () => {
+    const second = { ...record, userId: 'user-zed', name: 'Zed Example' };
+    const firstBatch = selectPersonIdentityBatch({
+      records: [second, record],
+      state: null,
+      now: new Date('2026-08-15T00:00:00Z'),
+      limit: 1,
+    });
+    const changedRecord = {
+      ...record,
+      providers: record.providers.map((provider) =>
+        provider.provider === 'Slack'
+          ? { ...provider, title: 'Chief Analogy Officer' }
+          : provider,
+      ),
+    };
+    const restarted = selectPersonIdentityBatch({
+      records: [second, changedRecord],
+      state: { watermark: firstBatch.watermark, cursor: firstBatch.cursor },
+      now: new Date('2026-08-15T00:01:00Z'),
+      limit: 1,
+    });
+
+    expect(restarted.projectionChanged).toBe(true);
+    expect(restarted.records).toEqual([changedRecord]);
+  });
+
   it('periodically reconciles mapping removals and late timestamp ties', () => {
     const staleCursor = JSON.stringify({
       mode: 'incremental',
