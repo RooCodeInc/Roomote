@@ -3,7 +3,6 @@ export type SlackBlock =
       type: 'section' | 'context' | 'actions';
       block_id?: string;
       expand?: boolean;
-      width?: 'standard' | 'full';
       text?: { type: string; text: string };
       accessory?: Record<string, unknown>;
       elements?: Record<string, unknown>[];
@@ -39,6 +38,7 @@ export type SlackBlock =
       subtitle?: { type: string; text: string };
       icon?: Record<string, unknown>;
       has_header_divider?: boolean;
+      width?: 'narrow' | 'standard' | 'wide' | 'full';
       child_blocks: SlackBlock[];
     };
 

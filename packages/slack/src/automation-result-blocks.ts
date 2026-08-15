@@ -1,5 +1,7 @@
 import type { SlackBlock } from '@roomote/types';
 
+import { convertMarkdownToSlack } from './markdown-converter';
+
 export const AUTOMATION_RESULT_CONTAINER_BLOCK_ID =
   'roomote_automation_result_container';
 export const AUTOMATION_RESULT_ACTIONS_BLOCK_ID =
@@ -221,7 +223,6 @@ function parseMarkdownTable(
       if (chunk.length > 0 && chunkLength + line.length + 1 > 2700) {
         blocks.push({
           type: 'section',
-          width: 'full',
           text: { type: 'mrkdwn', text: `\`\`\`\n${chunk.join('\n')}\n\`\`\`` },
         });
         chunk = [];
@@ -233,7 +234,6 @@ function parseMarkdownTable(
     if (chunk.length > 0) {
       blocks.push({
         type: 'section',
-        width: 'full',
         text: { type: 'mrkdwn', text: `\`\`\`\n${chunk.join('\n')}\n\`\`\`` },
       });
     }
@@ -257,12 +257,17 @@ function parseMarkdownTable(
   };
 }
 
-function splitMarkdownText(text: string): SlackBlock[] {
-  const trimmed = text.trim();
-  if (!trimmed) return [];
+function splitSectionText(text: string): SlackBlock[] {
+  const escaped = text
+    .trim()
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;');
+  const converted = convertMarkdownToSlack(escaped);
+  if (!converted) return [];
 
   const blocks: SlackBlock[] = [];
-  let remaining = trimmed;
+  let remaining = converted;
   while (remaining.length > MAX_SECTION_TEXT_LENGTH) {
     const candidate = remaining.slice(0, MAX_SECTION_TEXT_LENGTH);
     const splitAt = Math.max(
@@ -272,13 +277,13 @@ function splitMarkdownText(text: string): SlackBlock[] {
     const boundary =
       splitAt > MAX_SECTION_TEXT_LENGTH / 2 ? splitAt : MAX_SECTION_TEXT_LENGTH;
     blocks.push({
-      type: 'markdown',
-      text: remaining.slice(0, boundary).trimEnd(),
+      type: 'section',
+      text: { type: 'mrkdwn', text: remaining.slice(0, boundary).trimEnd() },
     });
     remaining = remaining.slice(boundary).trimStart();
   }
   if (remaining) {
-    blocks.push({ type: 'markdown', text: remaining });
+    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: remaining } });
   }
   return blocks;
 }
@@ -290,7 +295,7 @@ export function buildAutomationResultContentBlocks(text: string): SlackBlock[] {
   let codeFence: { character: '`' | '~'; length: number } | null = null;
 
   const flushProse = () => {
-    blocks.push(...splitMarkdownText(prose.join('\n')));
+    blocks.push(...splitSectionText(prose.join('\n')));
     prose = [];
   };
 
@@ -332,7 +337,7 @@ function normalizeContentBlocks(blocks: SlackBlock[]): SlackBlock[] {
       return buildAutomationResultContentBlocks(block.text);
     }
     if (block.type === 'section') {
-      return [{ ...block, width: 'full' }];
+      return [block];
     }
     return [block];
   });
@@ -421,6 +426,7 @@ export function buildAutomationResultBlocks(params: {
 
   return groups.map((group, index) => ({
     type: 'container',
+    width: 'full',
     block_id:
       index === 0
         ? AUTOMATION_RESULT_CONTAINER_BLOCK_ID

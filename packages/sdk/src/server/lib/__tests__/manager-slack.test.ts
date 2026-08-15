@@ -47,6 +47,7 @@ describe('manager slack helpers', () => {
     expect(message.blocks).toEqual([
       expect.objectContaining({
         type: 'container',
+        width: 'full',
         title: {
           type: 'plain_text',
           text: 'Suggest Ideas',
@@ -60,7 +61,6 @@ describe('manager slack helpers', () => {
         child_blocks: [
           {
             type: 'section',
-            width: 'full',
             text: { type: 'mrkdwn', text: 'Hello managers' },
           },
           expect.objectContaining({
