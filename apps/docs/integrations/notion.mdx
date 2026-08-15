@@ -21,9 +21,9 @@ access list in Notion whenever the page hierarchy changes.
 
 1. In [Notion integrations](https://www.notion.so/profile/integrations/internal),
    create an internal integration for Roomote.
-2. Enable read-content capabilities. If you intend to use Roomote's **Read and
-   write** mode, also enable the required update, insert, and comment
-   capabilities in Notion.
+2. In the integration's **Configuration** tab, enable only the capabilities
+   Roomote should have: read, update, insert, and comment access are controlled
+   independently by Notion.
 3. In Notion, share only the approved pages and data sources with the new
    integration. You can manage this from the integration's **Content access**
    settings or a page's **Connections** menu.
@@ -39,16 +39,9 @@ The secret is encrypted server-side and is never sent to task sandboxes.
   integration before enabling this deployment-wide connection.
 </Note>
 
-## Choose read or write access
+## Control capabilities
 
-Notion starts in **Read only** mode. In **Manage tools**, an admin can choose:
-
-- **Read only (recommended)** — search, fetch, query, and read comments within
-  the explicitly shared content
-- **Read and write** — additionally create and update pages, append blocks, and
-  create comments within that same content boundary
-
-The selected mode applies to every Roomote task and automation in the
-deployment. Individual tools can still be disabled. The Notion integration's
-own capabilities remain authoritative, so Roomote cannot perform a write that
-the token does not permit.
+Notion's **Configuration** tab is the source of truth for what Roomote can do.
+Disable update, insert, or comment capabilities there when the connection
+should be read-only. Roomote exposes its Notion tools, but Notion rejects any
+operation the integration's capabilities do not permit.

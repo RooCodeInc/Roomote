@@ -3564,6 +3564,7 @@ export const deploymentMcpEnablements = pgTable(
       onDelete: 'set null',
     }),
     disabledTools: text('disabled_tools').array(),
+    // N-1 rollback: retained for the previous release's Notion access-mode code.
     toolAccessMode: text('tool_access_mode').$type<McpToolAccessMode>(),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),

@@ -11,7 +11,6 @@ import {
   launchCodingHarnesses,
   computeProviders,
   environmentConfigSchema,
-  MCP_TOOL_ACCESS_MODES,
   workspaceRoutingSettingsSchema,
   ENVIRONMENT_DEFINITION_SETUP_GUIDANCE_MAX_LENGTH,
   REASONING_EFFORT_VALUES,
@@ -1799,7 +1798,6 @@ export const appRouter = createRouter({
         z.object({
           mcpId: z.string(),
           disabledTools: z.array(z.string().min(1)),
-          toolAccessMode: z.enum(MCP_TOOL_ACCESS_MODES).optional(),
         }),
       )
       .mutation(({ ctx: { auth }, input }) =>

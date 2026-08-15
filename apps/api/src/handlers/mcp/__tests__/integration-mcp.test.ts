@@ -35,7 +35,6 @@ vi.mock('@roomote/db/server', () => ({
   deploymentMcpEnablements: {
     mcpId: 'mcpId',
     enabled: 'enabled',
-    toolAccessMode: 'toolAccessMode',
   },
   eq: vi.fn((column: unknown, value: unknown) => ({ column, value })),
   and: vi.fn((...clauses: unknown[]) => clauses),
@@ -150,7 +149,6 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     vi.unstubAllGlobals();
     mockFindEnablement.mockResolvedValue({
       disabledTools: null,
-      toolAccessMode: null,
     });
     mockGetValidAccessToken.mockResolvedValue('valid-access-token');
   });

@@ -411,7 +411,7 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     connectionMode: 'admin_configured',
     serverMode: 'native',
     instructions:
-      'Use Notion for pages and data sources explicitly shared with the deployment integration. Content outside that connection boundary, including unshared private pages, is unavailable. Writes are available only when a deployment admin enables read-write mode.',
+      'Use Notion for pages and data sources explicitly shared with the deployment integration. Content outside that connection boundary, including unshared private pages, is unavailable. Notion controls whether the connection may read, update, insert, or comment.',
   },
   {
     id: 'jira',

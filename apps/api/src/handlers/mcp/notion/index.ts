@@ -10,10 +10,7 @@ import {
   mcpConnections,
   taskRuns,
 } from '@roomote/db/server';
-import {
-  getAllowedIntegrationMcpToolNames,
-  isMcpConnectionNotionConfig,
-} from '@roomote/types';
+import { isMcpConnectionNotionConfig } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
@@ -62,7 +59,7 @@ async function resolveNotionMcpAuth(
   );
 }
 
-async function resolveNotionConnectionAndPolicy() {
+async function resolveNotionConnection() {
   const [connection, enablement] = await Promise.all([
     db.query.mcpConnections.findFirst({
       where: and(
@@ -77,10 +74,7 @@ async function resolveNotionConnectionAndPolicy() {
         eq(deploymentMcpEnablements.mcpId, 'notion'),
         eq(deploymentMcpEnablements.enabled, true),
       ),
-      columns: {
-        disabledTools: true,
-        toolAccessMode: true,
-      },
+      columns: { mcpId: true },
     }),
   ]);
 
@@ -98,28 +92,18 @@ async function resolveNotionConnectionAndPolicy() {
     );
   }
 
-  return {
-    config: connection.authConfig,
-    policy: {
-      allowedToolNames:
-        getAllowedIntegrationMcpToolNames(
-          'notion',
-          enablement.toolAccessMode,
-        ) ?? undefined,
-      disabledToolNames: enablement.disabledTools,
-    },
-  };
+  return connection.authConfig;
 }
 
 function createNotionMcpServer(
-  resolved: Awaited<ReturnType<typeof resolveNotionConnectionAndPolicy>>,
+  config: Awaited<ReturnType<typeof resolveNotionConnection>>,
 ) {
   const server = new McpServer(NOTION_MCP_SERVER_INFO, {
     instructions:
       'Use these Notion tools only for content explicitly shared with the deployment internal integration. Unshared pages, including private pages, are inaccessible to the stored token.',
   });
 
-  registerNotionTools(server, resolved.config, resolved.policy);
+  registerNotionTools(server, config);
   return server;
 }
 
@@ -132,8 +116,8 @@ notionMcp.on(['POST', 'GET', 'DELETE'], '/', async (c) => {
 
   try {
     await resolveNotionMcpAuth(c.get('authContext'));
-    const connectionAndPolicy = await resolveNotionConnectionAndPolicy();
-    const server = createNotionMcpServer(connectionAndPolicy);
+    const connection = await resolveNotionConnection();
+    const server = createNotionMcpServer(connection);
 
     await server.connect(transport);
     return await transport.handleRequest(c.req.raw);

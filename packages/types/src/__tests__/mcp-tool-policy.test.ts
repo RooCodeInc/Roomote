@@ -1,58 +1,7 @@
 import {
   filterMcpToolDefinitions,
   getAllowedIntegrationMcpToolNames,
-  getMcpIntegrationToolAccessModeConfig,
-  NOTION_READ_ONLY_TOOL_NAMES,
-  resolveMcpIntegrationToolAccessMode,
 } from '../mcp-tool-policy';
-
-describe('Notion MCP tool access modes', () => {
-  it('defaults missing and invalid values to a fail-closed read-only policy', () => {
-    expect(resolveMcpIntegrationToolAccessMode('notion', null)).toBe(
-      'read_only',
-    );
-    expect(resolveMcpIntegrationToolAccessMode('notion', 'unexpected')).toBe(
-      'read_only',
-    );
-    expect(getAllowedIntegrationMcpToolNames('notion')).toEqual(
-      NOTION_READ_ONLY_TOOL_NAMES,
-    );
-    expect(getAllowedIntegrationMcpToolNames('notion', 'unexpected')).toEqual(
-      NOTION_READ_ONLY_TOOL_NAMES,
-    );
-  });
-
-  it('allows only documented non-mutating tools in read-only mode', () => {
-    const allowedToolNames = getAllowedIntegrationMcpToolNames(
-      'notion',
-      'read_only',
-    );
-
-    expect(allowedToolNames).toEqual(
-      expect.arrayContaining([
-        'notion-search',
-        'notion-fetch',
-        'notion-query-data-sources',
-        'notion-get-comments',
-      ]),
-    );
-    expect(allowedToolNames).not.toContain('notion-create-pages');
-    expect(allowedToolNames).not.toContain('notion-update-page');
-    expect(allowedToolNames).not.toContain('notion-create-comment');
-    expect(allowedToolNames).not.toContain('notion-append-blocks');
-  });
-
-  it('removes the allowlist only after read-write is explicitly selected', () => {
-    expect(
-      getAllowedIntegrationMcpToolNames('notion', 'read_write'),
-    ).toBeUndefined();
-    expect(getMcpIntegrationToolAccessModeConfig('notion')).toMatchObject({
-      defaultMode: 'read_only',
-      supportedModes: ['read_only', 'read_write'],
-    });
-    expect(getMcpIntegrationToolAccessModeConfig('sentry')).toBeUndefined();
-  });
-});
 
 describe('Better Stack MCP tool policy', () => {
   it('allows current read-only tools and excludes obsolete and mutating names', () => {
