@@ -219,7 +219,7 @@ jobs:
             target: runtime-app
             image: roomote-app
             arch: arm64
-            runner: blacksmith-4vcpu-ubuntu-2404-arm
+            runner: blacksmith-8vcpu-ubuntu-2404-arm
           - app: worker
             context: .
             dockerfile: apps/worker/Dockerfile
