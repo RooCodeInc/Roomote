@@ -14,8 +14,11 @@ describe('automation result blocks', () => {
       ),
     ).toEqual([
       {
-        type: 'markdown',
-        text: '**Summary** with [details](https://example.com).',
+        type: 'section',
+        text: {
+          type: 'mrkdwn',
+          text: '*Summary* with <https://example.com|details>.',
+        },
       },
       {
         type: 'table',
@@ -80,15 +83,18 @@ describe('automation result blocks', () => {
 
     expect(buildAutomationResultContentBlocks(text)).toEqual([
       {
-        type: 'markdown',
-        text,
+        type: 'section',
+        text: { type: 'mrkdwn', text },
       },
     ]);
   });
 
-  it('keeps markdown lists in markdown blocks', () => {
+  it('converts markdown lists into supported container child sections', () => {
     expect(buildAutomationResultContentBlocks('- First\n- Second')).toEqual([
-      { type: 'markdown', text: '- First\n- Second' },
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: '- First\n- Second' },
+      },
     ]);
   });
 
@@ -104,7 +110,7 @@ describe('automation result blocks', () => {
     expect(JSON.stringify(blocks[0].rows[1])).toContain('a|b');
   });
 
-  it('makes oversized table fallback sections full-width', () => {
+  it('uses sections for oversized table fallbacks', () => {
     const rows = Array.from({ length: 100 }, (_, index) => `| ${index} |`);
     const blocks = buildAutomationResultContentBlocks(
       ['| Value |', '| --- |', ...rows].join('\n'),
@@ -112,11 +118,6 @@ describe('automation result blocks', () => {
 
     expect(blocks.length).toBeGreaterThan(0);
     expect(blocks.every((block) => block.type === 'section')).toBe(true);
-    expect(
-      blocks.every(
-        (block) => block.type !== 'section' || block.width === 'full',
-      ),
-    ).toBe(true);
   });
 
   it('builds the requested container chrome and keeps task and configure actions', () => {
@@ -125,7 +126,9 @@ describe('automation result blocks', () => {
         title: 'Daily report',
         iconUrl: 'https://app.example.com/automation-icons/zap.png',
         configureUrl: 'https://app.example.com/automations#custom-automation-1',
-        contentText: 'Everything is **healthy**.',
+        contentBlocks: [
+          { type: 'markdown', text: 'Everything is **healthy**.' },
+        ],
         subtitle: {
           type: 'plain_text',
           text: formatAutomationResultSubtitle({
@@ -140,6 +143,7 @@ describe('automation result blocks', () => {
     ).toEqual([
       {
         type: 'container',
+        width: 'full',
         block_id: 'roomote_automation_result_container',
         title: { type: 'plain_text', text: 'Daily report', emoji: false },
         subtitle: {
@@ -154,8 +158,8 @@ describe('automation result blocks', () => {
         has_header_divider: true,
         child_blocks: [
           {
-            type: 'markdown',
-            text: 'Everything is **healthy**.',
+            type: 'section',
+            text: { type: 'mrkdwn', text: 'Everything is *healthy*.' },
           },
           {
             type: 'actions',
@@ -240,7 +244,7 @@ describe('automation result blocks', () => {
     ]);
   });
 
-  it('makes sections full-width when rebuilding a result', () => {
+  it('puts full width on the container when rebuilding a result', () => {
     const [container] = buildAutomationResultBlocks({
       title: 'Audit',
       iconUrl: 'https://app.example.com/automation-icons/wrench.png',
@@ -248,7 +252,6 @@ describe('automation result blocks', () => {
       contentBlocks: [
         {
           type: 'section',
-          width: 'standard',
           text: { type: 'mrkdwn', text: 'Finished.' },
         },
       ],
@@ -256,9 +259,9 @@ describe('automation result blocks', () => {
 
     expect(container?.type).toBe('container');
     if (container?.type !== 'container') return;
+    expect(container.width).toBe('full');
     expect(container.child_blocks[0]).toEqual({
       type: 'section',
-      width: 'full',
       text: { type: 'mrkdwn', text: 'Finished.' },
     });
   });
