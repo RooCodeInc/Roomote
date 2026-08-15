@@ -178,7 +178,9 @@ export function buildMemoryPage(input: {
     prUrl: string;
   }>;
 }): IngestPage {
-  const completed = input.completedAt?.toISOString() ?? 'unknown';
+  const completedAtIso = input.completedAt?.toISOString();
+  const completed = completedAtIso ?? 'unknown';
+  const completedDate = completedAtIso?.slice(0, 10);
   const prLines = input.pullRequests.map((pr) => {
     const label =
       pr.repository && pr.prNumber
@@ -192,6 +194,10 @@ export function buildMemoryPage(input: {
     '---',
     `roomote_task_id: ${input.taskId}`,
     `roomote_run_id: ${input.runId}`,
+    // GBrain derives effective_date from this conventional field. Keep the
+    // full timestamp below as provenance, but make backfilled pages sort and
+    // filter by when the task completed rather than when it was ingested.
+    ...(completedDate ? [`date: ${completedDate}`] : []),
     `completed_at: ${completed}`,
     // Environment stamp: costs nothing now, enables environment-scoped
     // retrieval (gbrain sources) or admin triage later without re-ingesting.

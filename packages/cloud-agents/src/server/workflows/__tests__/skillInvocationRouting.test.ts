@@ -85,6 +85,15 @@ describe('packaged skill invocation routing', () => {
       'Do not assume repository inspection is relevant',
     );
     expect(generalSkill).toContain(
+      'call `query` and wait for its result before choosing or calling any overlapping source',
+    );
+    expect(generalSkill).toContain(
+      'Never put the Brain query and an overlapping integration lookup in the same parallel batch',
+    );
+    expect(generalSkill).toContain(
+      'freshness beyond its collection window could materially change the answer',
+    );
+    expect(generalSkill).toContain(
       'repository or workspace file edits or commands, validation of repository changes, or code delivery',
     );
     expect(generalSkill).not.toContain(

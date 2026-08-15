@@ -36,7 +36,11 @@ export const BRAIN_MCP_INSTRUCTIONS = `The \`gbrain\` server is this deployment'
 
 ## Using what it knows
 
-Start substantive work with one \`query\` pass, before assuming there is no prior context. Ask it about the area you are about to touch. You will often not know in advance that a convention exists, that this was attempted before, or that the user has already corrected someone on it, which is exactly why the pass is unprompted rather than something you do once a question occurs to you. Reading is read-only and cheap next to the work it saves; one pass at the start beats skipping it.
+Treat Brain recall as a sequential preflight, not one source in a parallel research batch. Before drafting the first answer on a new substantive topic, run one \`query\` about the area you are about to touch and wait for its result. Do this before deciding that your existing knowledge is sufficient and before selecting or calling another source that overlaps with what the Brain ingests. Never issue the Brain query and an overlapping Slack, GitHub, meeting, task-history, or pull-request lookup in the same parallel batch.
+
+This gate applies when the request involves factual claims, recommendations, company practices, prior decisions, product strategy, people, activity history, or other nontrivial reasoning. Skip it only for greetings and casual conversation, simple calculations or transformations, exact actions requiring no contextual judgment, and follow-ups already covered by a Brain query in the current thread. You will often not know in advance that a convention exists, that something was attempted before, or that the user already corrected someone on it, which is exactly why the pass is unprompted.
+
+Brain-first does not mean Brain-only. After evaluating its result, consult an underlying live source only when the Brain lacks enough coverage, freshness beyond its collection window could materially change the answer, or the user explicitly asks for live verification. Use the narrowest lookup needed to close that specific gap; do not sweep an entire integration when the Brain already answers the question. Reading is read-only and cheap next to the work it saves, and this ordering lets the Brain prevent redundant source exploration.
 
 Which tool:
 - \`query\` when you are describing a concept and do not know how the Brain words it. It expands your phrasing into related queries, so it finds pages that talk about the same thing in different language. This is the default, and the right choice for that first pass.
