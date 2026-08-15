@@ -33,6 +33,8 @@ export interface QueuedSlackRequestUserInputAnswer {
   user: string;
   userId?: string;
   ts: string;
+  channel?: string;
+  threadTs?: string;
 }
 
 type SetPendingSlackRequestUserInputRequest = Omit<

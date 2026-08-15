@@ -583,11 +583,31 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
   return {
     shouldRoute: true,
     threadMessages,
-    ...(roomoteThreadMatch?.isAutomationReportThread &&
-    roomoteThreadMatch.taskId
-      ? { taskId: roomoteThreadMatch.taskId }
+    ...(roomoteThreadMatch?.trackedAliasTaskId
+      ? { taskId: roomoteThreadMatch.trackedAliasTaskId }
       : {}),
   };
+}
+
+export async function resolveMentionedSlackThreadAliasTaskId(params: {
+  event: SlackEvent;
+  botUserId: string;
+  teamId: string;
+}): Promise<string | null> {
+  const { event } = params;
+  if (
+    !event.thread_ts ||
+    (event.type !== 'app_mention' && !mentionsSlackBot(event, params.botUserId))
+  ) {
+    return null;
+  }
+
+  const match = await findRoomoteOwnedSlackThread({
+    teamId: params.teamId,
+    channelId: event.channel,
+    threadTs: event.thread_ts,
+  });
+  return match?.trackedAliasTaskId ?? null;
 }
 
 async function startNewTaskConfigurationWithLock(params: {
@@ -1301,6 +1321,7 @@ async function processAutomatedAppMentionTask(params: {
   };
   const followUpRoute = await resolveSlackThreadFollowUpRoute({
     threadId,
+    channelId: event.channel,
     slackTeamId: teamId,
   });
   const followUpOutcome = await dispatchSlackThreadFollowUp<boolean>({
@@ -1616,7 +1637,14 @@ async function handleSlackEntryEvent(params: {
     : await findActiveSlackTaskRun(
         threadId,
         threadTaskId
-          ? { taskId: threadTaskId, matchTaskIdWithoutThread: true }
+          ? {
+              taskId: threadTaskId,
+              trackedAlias: {
+                slackTeamId: teamId,
+                channelId: event.channel,
+                threadTs: threadId,
+              },
+            }
           : { slackTeamId: teamId },
       );
   const shouldRecordThreadReply =
@@ -1643,6 +1671,7 @@ async function handleSlackEntryEvent(params: {
   if (!skipThreadFollowupHandling) {
     const followUpRoute = await resolveSlackThreadFollowUpRoute({
       threadId,
+      channelId: event.channel,
       slackTeamId: teamId,
       ...(threadTaskId ? { taskId: threadTaskId } : {}),
       prefetchedActiveRun: activeRun ?? null,
@@ -1741,6 +1770,7 @@ async function handleSlackEntryEvent(params: {
 
   const followUpRoute = await resolveSlackThreadFollowUpRoute({
     threadId,
+    channelId: event.channel,
     slackTeamId: teamId,
     ...(threadTaskId ? { taskId: threadTaskId } : {}),
     prefetchedActiveRun: null,
@@ -1881,6 +1911,12 @@ export async function handleMessageOrAppMentionEvent(params: {
   )
     ? event
     : null;
+  const mentionedThreadAliasTaskId =
+    await resolveMentionedSlackThreadAliasTaskId({
+      event,
+      botUserId: context.slackInstallation.botUserId,
+      teamId: context.teamId,
+    });
 
   const unmentionedThreadReplyRouting: UnmentionedSlackThreadReplyRoutingDecision =
     event.type === 'message' && event.channel_type !== 'im'
@@ -1950,6 +1986,6 @@ export async function handleMessageOrAppMentionEvent(params: {
       : undefined,
     threadTaskId: unmentionedThreadReplyRouting.shouldRoute
       ? unmentionedThreadReplyRouting.taskId
-      : undefined,
+      : (mentionedThreadAliasTaskId ?? undefined),
   });
 }

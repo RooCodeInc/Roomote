@@ -239,6 +239,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
   it('carries the source task binding for a tracked automation report alias', async () => {
     findRoomoteOwnedSlackThreadMock.mockResolvedValue({
       taskId: 'task-source',
+      trackedAliasTaskId: 'task-source',
       userId: 'user-4',
       slackUserId: null,
       isAutomationReportThread: true,
@@ -253,6 +254,49 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
       shouldRoute: true,
       taskId: 'task-source',
     });
+  });
+
+  it('does not pin custom automation fallback threads to an arbitrary task', async () => {
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue({
+      taskId: 'task-from-unordered-fallback',
+      trackedAliasTaskId: null,
+      userId: null,
+      slackUserId: null,
+      isAutomationReportThread: true,
+    });
+    fetchThreadMessagesMock.mockResolvedValue([
+      botMessage(THREAD_TS, 'Custom automation report'),
+    ]);
+
+    await expect(
+      routeDecision(threadReplyEvent({ user: 'U444', ts: '102.000' })),
+    ).resolves.toEqual(
+      expect.not.objectContaining({ taskId: 'task-from-unordered-fallback' }),
+    );
+  });
+
+  it('resolves the same alert alias when the reply explicitly mentions Roomote', async () => {
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue({
+      taskId: 'task-source',
+      trackedAliasTaskId: 'task-source',
+      userId: 'user-4',
+      slackUserId: null,
+      isAutomationReportThread: true,
+    });
+    const { resolveMentionedSlackThreadAliasTaskId } =
+      await import('./message-entry.js');
+
+    await expect(
+      resolveMentionedSlackThreadAliasTaskId({
+        event: threadReplyEvent({
+          user: 'U444',
+          text: '<@UBOT> please continue',
+          ts: '102.000',
+        }),
+        botUserId: 'UBOT',
+        teamId: 'T123',
+      }),
+    ).resolves.toBe('task-source');
   });
 
   it('treats the whole thread as the window when no bot message is found in history', async () => {

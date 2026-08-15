@@ -30,6 +30,24 @@ function automationThreadDedupeKey(params: {
     .join(':');
 }
 
+function automationThreadDedupeKeys(params: {
+  slackTeamId?: string;
+  slackChannelId: string;
+  threadTs: string;
+}): string[] {
+  return [
+    automationThreadDedupeKey(params),
+    ...(params.slackTeamId
+      ? [
+          automationThreadDedupeKey({
+            slackChannelId: params.slackChannelId,
+            threadTs: params.threadTs,
+          }),
+        ]
+      : []),
+  ];
+}
+
 export async function upsertBackgroundAutomationSlackThread(
   tx: DatabaseOrTransaction,
   params: {
@@ -108,17 +126,7 @@ export async function findBackgroundAutomationSlackThread(params: {
   slackChannelId: string;
   threadTs: string;
 }): Promise<BackgroundAutomationSlackThreadRow | undefined> {
-  const dedupeKeys = [
-    automationThreadDedupeKey(params),
-    ...(params.slackTeamId
-      ? [
-          automationThreadDedupeKey({
-            slackChannelId: params.slackChannelId,
-            threadTs: params.threadTs,
-          }),
-        ]
-      : []),
-  ];
+  const dedupeKeys = automationThreadDedupeKeys(params);
 
   for (const dedupeKey of dedupeKeys) {
     const row = await db.query.trackedMessages.findFirst({
@@ -150,26 +158,31 @@ export async function updateBackgroundAutomationSlackThreadMetadata(
   tx: DatabaseOrTransaction,
   params: {
     surface: TrackedMessageSurface;
+    slackTeamId?: string;
     slackChannelId: string;
     threadTs: string;
     metadata: Record<string, unknown>;
   },
 ): Promise<boolean> {
-  const dedupeKey = automationThreadDedupeKey(params);
+  let existing: { id: string; metadata: Record<string, unknown> } | undefined;
+  for (const dedupeKey of automationThreadDedupeKeys(params)) {
+    [existing] = await tx
+      .select({
+        id: trackedMessages.id,
+        metadata: trackedMessages.metadata,
+      })
+      .from(trackedMessages)
+      .where(
+        and(
+          eq(trackedMessages.surface, params.surface),
+          eq(trackedMessages.kind, 'automation_thread'),
+          eq(trackedMessages.dedupeKey, dedupeKey),
+        ),
+      )
+      .limit(1);
 
-  const [existing] = await tx
-    .select({
-      metadata: trackedMessages.metadata,
-    })
-    .from(trackedMessages)
-    .where(
-      and(
-        eq(trackedMessages.surface, params.surface),
-        eq(trackedMessages.kind, 'automation_thread'),
-        eq(trackedMessages.dedupeKey, dedupeKey),
-      ),
-    )
-    .limit(1);
+    if (existing) break;
+  }
 
   if (!existing) {
     return false;
@@ -184,13 +197,7 @@ export async function updateBackgroundAutomationSlackThreadMetadata(
       },
       updatedAt: new Date(),
     })
-    .where(
-      and(
-        eq(trackedMessages.surface, params.surface),
-        eq(trackedMessages.kind, 'automation_thread'),
-        eq(trackedMessages.dedupeKey, dedupeKey),
-      ),
-    );
+    .where(eq(trackedMessages.id, existing.id));
 
   return true;
 }

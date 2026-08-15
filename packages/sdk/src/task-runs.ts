@@ -276,6 +276,10 @@ export const getSlackMessages = (
   options: AppRouterInput['taskRuns']['getSlackMessages'],
 ) => client.taskRuns.getSlackMessages.query(options);
 
+export const activateSlackReplyTarget = (
+  options: AppRouterInput['taskRuns']['activateSlackReplyTarget'],
+) => client.taskRuns.activateSlackReplyTarget.mutate(options);
+
 export const getCommunicationMessages = (
   options: AppRouterInput['taskRuns']['getCommunicationMessages'],
 ) => client.taskRuns.getCommunicationMessages.query(options);

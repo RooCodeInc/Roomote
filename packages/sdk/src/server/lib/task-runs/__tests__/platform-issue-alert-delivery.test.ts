@@ -41,6 +41,7 @@ import {
   tasks,
   upsertAutomation,
   upsertBackgroundAutomationSlackThread,
+  updateBackgroundAutomationSlackThreadMetadata,
   users,
 } from '@roomote/db/server';
 import {
@@ -294,6 +295,27 @@ describe('platform issue alert delivery', () => {
     ).resolves.toMatchObject({
       automationKey: 'platform_issue_alerts',
       metadata: { sourceTaskId: taskId, slackTeamId: 'T123' },
+    });
+    await updateBackgroundAutomationSlackThreadMetadata(db, {
+      surface: 'slack',
+      slackTeamId: 'T123',
+      slackChannelId: 'C999MANAGER',
+      threadTs: '1727000000.000100',
+      metadata: { footerMessageTs: '1727000000.000300' },
+    });
+    await expect(
+      findBackgroundAutomationSlackThread({
+        surface: 'slack',
+        slackTeamId: 'T123',
+        slackChannelId: 'C999MANAGER',
+        threadTs: '1727000000.000100',
+      }),
+    ).resolves.toMatchObject({
+      metadata: {
+        sourceTaskId: taskId,
+        slackTeamId: 'T123',
+        footerMessageTs: '1727000000.000300',
+      },
     });
 
     await upsertBackgroundAutomationSlackThread(db, {

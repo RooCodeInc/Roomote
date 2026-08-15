@@ -37,6 +37,7 @@ describe('Slack thread follow-up dispatch', () => {
 
     const route = await resolveSlackThreadFollowUpRoute({
       threadId: '111.000',
+      channelId: 'C123',
       slackTeamId: 'T1',
       prefetchedActiveRun: activeRun,
       allowCompletedResume: false,
@@ -50,6 +51,7 @@ describe('Slack thread follow-up dispatch', () => {
   it('scopes active and snapshot lookup to the Slack workspace', async () => {
     await resolveSlackThreadFollowUpRoute({
       threadId: '111.000',
+      channelId: 'C123',
       slackTeamId: 'T2',
     });
 
@@ -65,13 +67,18 @@ describe('Slack thread follow-up dispatch', () => {
   it('routes a tracked automation alias by task id without requiring the canonical thread binding', async () => {
     await resolveSlackThreadFollowUpRoute({
       threadId: '111.000',
+      channelId: 'C123',
       slackTeamId: 'T2',
       taskId: 'task-source',
     });
 
     const aliasScope = {
       taskId: 'task-source',
-      matchTaskIdWithoutThread: true,
+      trackedAlias: {
+        slackTeamId: 'T2',
+        channelId: 'C123',
+        threadTs: '111.000',
+      },
     };
     expect(findActiveSlackTaskRunMock).toHaveBeenCalledWith(
       '111.000',

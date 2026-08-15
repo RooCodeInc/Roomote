@@ -130,6 +130,31 @@ export function createSlackMessageInterval({
             return;
           }
 
+          if (answer.channel && answer.threadTs) {
+            const activated = await runPollingSdkCall({
+              execute: () =>
+                sdk.taskRuns.activateSlackReplyTarget({
+                  runId: taskRun.id,
+                  messageTs: answer.ts,
+                }),
+              stage: 'listenForSlackEvents',
+              runId: taskRun.id,
+              sessionId: state.sessionId,
+              sdkMethod: 'taskRuns.activateSlackReplyTarget',
+              failurePoint: 'slackReplyTargetActivation',
+              logger,
+              message: `[listenForSlackEvents] Failed to activate Slack reply target for request_user_input answer on job ${taskRun.id}`,
+            });
+            if (!activated) {
+              await requeueSlackRequestUserInputAnswers(
+                taskRun.id,
+                queuedAnswers,
+                index,
+              );
+              return;
+            }
+          }
+
           const sent = answerUserInputRequest({
             requestId: answer.requestId,
             answers: answer.answers,
@@ -236,6 +261,27 @@ export function createSlackMessageInterval({
             );
             index += 1;
             continue;
+          }
+
+          if (msg.channel && msg.threadTs) {
+            const activated = await runPollingSdkCall({
+              execute: () =>
+                sdk.taskRuns.activateSlackReplyTarget({
+                  runId: taskRun.id,
+                  messageTs: msg.ts,
+                }),
+              stage: 'listenForSlackEvents',
+              runId: taskRun.id,
+              sessionId: state.sessionId,
+              sdkMethod: 'taskRuns.activateSlackReplyTarget',
+              failurePoint: 'slackReplyTargetActivation',
+              logger,
+              message: `[listenForSlackEvents] Failed to activate Slack reply target for job ${taskRun.id}`,
+            });
+            if (!activated) {
+              await requeueSlackMessages(taskRun.id, deliveryOrder, index);
+              return;
+            }
           }
 
           const prompt =

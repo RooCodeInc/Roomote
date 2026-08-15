@@ -311,19 +311,27 @@ async function maybeNotifyPlatformIssue(params: {
     return;
   }
 
-  await upsertBackgroundAutomationSlackThread(db, {
-    surface: 'slack',
-    automationKey: 'platform_issue_alerts',
-    slackTeamId: slackInstallation.teamId,
-    slackChannelId: channelId,
-    threadTs: messageTs,
-    summaryText: message.text,
-    postedAt: new Date(),
-    metadata: {
-      sourceTaskId: params.taskId,
+  try {
+    await upsertBackgroundAutomationSlackThread(db, {
+      surface: 'slack',
+      automationKey: 'platform_issue_alerts',
       slackTeamId: slackInstallation.teamId,
-    },
-  });
+      slackChannelId: channelId,
+      threadTs: messageTs,
+      summaryText: message.text,
+      postedAt: new Date(),
+      metadata: {
+        sourceTaskId: params.taskId,
+        slackTeamId: slackInstallation.teamId,
+      },
+    });
+  } catch (error) {
+    console.warn(
+      `[recordTaskMessageEnvelope] Failed to track platform issue Slack alert thread for task ${params.taskId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 
   await markPlatformIssueReportPosted(params.reportRowId);
 }

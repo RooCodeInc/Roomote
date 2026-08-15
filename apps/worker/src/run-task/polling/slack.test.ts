@@ -9,6 +9,7 @@ import type { ListenerOptions } from '../types';
 
 const {
   mockGetSlackMessages,
+  mockActivateSlackReplyTarget,
   mockGetSlackRequestUserInputAnswers,
   mockPrepareActorScopedTurn,
   mockPrependSlackMessages,
@@ -16,6 +17,7 @@ const {
   mockCaptureWorkerException,
 } = vi.hoisted(() => ({
   mockGetSlackMessages: vi.fn(),
+  mockActivateSlackReplyTarget: vi.fn(),
   mockGetSlackRequestUserInputAnswers: vi.fn(),
   mockPrepareActorScopedTurn: vi.fn(),
   mockPrependSlackMessages: vi.fn(),
@@ -26,6 +28,7 @@ const {
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     taskRuns: {
+      activateSlackReplyTarget: mockActivateSlackReplyTarget,
       getSlackMessages: mockGetSlackMessages,
       getSlackRequestUserInputAnswers: mockGetSlackRequestUserInputAnswers,
     },
@@ -148,6 +151,7 @@ describe('createSlackMessageInterval', () => {
     vi.useFakeTimers();
     vi.resetAllMocks();
     mockGetSlackMessages.mockResolvedValue([]);
+    mockActivateSlackReplyTarget.mockResolvedValue(true);
     mockGetSlackRequestUserInputAnswers.mockResolvedValue([]);
     mockPrepareActorScopedTurn.mockImplementation(
       async (targetUserId?: string) => ({
@@ -222,6 +226,36 @@ describe('createSlackMessageInterval', () => {
         userId: 'user-2',
         clientMessageId: 'slack:1710000000.123',
       });
+    } finally {
+      clearInterval(interval);
+    }
+  });
+
+  it('activates the queued message reply target before sending the turn', async () => {
+    mockGetSlackMessages.mockResolvedValueOnce([
+      {
+        text: 'Please continue here',
+        user: 'U234',
+        userId: 'user-2',
+        ts: '1710000000.456',
+        channel: 'C123',
+        threadTs: '1710000000.100',
+      },
+    ]);
+    const { options, sendPrompt } = createListenerOptions();
+
+    const interval = createSlackMessageInterval(options);
+
+    try {
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(mockActivateSlackReplyTarget).toHaveBeenCalledWith({
+        runId: 42,
+        messageTs: '1710000000.456',
+      });
+      expect(
+        mockActivateSlackReplyTarget.mock.invocationCallOrder[0],
+      ).toBeLessThan(sendPrompt.mock.invocationCallOrder[0]!);
     } finally {
       clearInterval(interval);
     }

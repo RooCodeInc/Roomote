@@ -22,6 +22,7 @@ type SlackThreadFollowUpResumeHandlerResult<T> =
 
 export async function resolveSlackThreadFollowUpRoute(params: {
   threadId: string;
+  channelId: string;
   slackTeamId: string;
   taskId?: string;
   prefetchedActiveRun?: ActiveSlackThreadTaskRun | null;
@@ -36,7 +37,11 @@ export async function resolveSlackThreadFollowUpRoute(params: {
   const lookupScope = params.taskId
     ? {
         taskId: params.taskId,
-        matchTaskIdWithoutThread: true,
+        trackedAlias: {
+          slackTeamId,
+          channelId: params.channelId,
+          threadTs: threadId,
+        },
       }
     : { slackTeamId };
   const activeRun =
