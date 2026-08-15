@@ -13,11 +13,8 @@ describe('automation result blocks', () => {
       ),
     ).toEqual([
       {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: '*Summary* with <https://example.com|details>.',
-        },
+        type: 'markdown',
+        text: '**Summary** with [details](https://example.com).',
       },
       {
         type: 'table',
@@ -82,9 +79,15 @@ describe('automation result blocks', () => {
 
     expect(buildAutomationResultContentBlocks(text)).toEqual([
       {
-        type: 'section',
-        text: { type: 'mrkdwn', text },
+        type: 'markdown',
+        text,
       },
+    ]);
+  });
+
+  it('keeps markdown lists in markdown blocks', () => {
+    expect(buildAutomationResultContentBlocks('- First\n- Second')).toEqual([
+      { type: 'markdown', text: '- First\n- Second' },
     ]);
   });
 
@@ -98,6 +101,21 @@ describe('automation result blocks', () => {
     if (blocks[0]?.type !== 'table') return;
     expect(blocks[0].rows).toHaveLength(2);
     expect(JSON.stringify(blocks[0].rows[1])).toContain('a|b');
+  });
+
+  it('makes oversized table fallback sections full-width', () => {
+    const rows = Array.from({ length: 100 }, (_, index) => `| ${index} |`);
+    const blocks = buildAutomationResultContentBlocks(
+      ['| Value |', '| --- |', ...rows].join('\n'),
+    );
+
+    expect(blocks.length).toBeGreaterThan(0);
+    expect(blocks.every((block) => block.type === 'section')).toBe(true);
+    expect(
+      blocks.every(
+        (block) => block.type !== 'section' || block.width === 'full',
+      ),
+    ).toBe(true);
   });
 
   it('builds the requested container chrome and keeps task and configure actions', () => {
@@ -116,8 +134,8 @@ describe('automation result blocks', () => {
         block_id: 'roomote_automation_result_container',
         title: { type: 'plain_text', text: 'Daily report', emoji: false },
         subtitle: {
-          type: 'mrkdwn',
-          text: 'Run <!date^1700000000^{relative}|just now>',
+          type: 'plain_text',
+          text: 'Run Nov 14, 2023, 10:13 PM UTC',
         },
         icon: {
           type: 'image',
@@ -127,8 +145,8 @@ describe('automation result blocks', () => {
         has_header_divider: true,
         child_blocks: [
           {
-            type: 'section',
-            text: { type: 'mrkdwn', text: 'Everything is *healthy*.' },
+            type: 'markdown',
+            text: 'Everything is **healthy**.',
           },
           {
             type: 'actions',
@@ -191,5 +209,28 @@ describe('automation result blocks', () => {
     expect(actions[1].elements?.map((element) => element.action_id)).toEqual([
       'late_bound_automation_configure',
     ]);
+  });
+
+  it('makes sections full-width when rebuilding a result', () => {
+    const [container] = buildAutomationResultBlocks({
+      title: 'Audit',
+      iconUrl: 'https://app.example.com/automation-icons/wrench.png',
+      configureUrl: 'https://app.example.com/automations#audit',
+      contentBlocks: [
+        {
+          type: 'section',
+          width: 'standard',
+          text: { type: 'mrkdwn', text: 'Finished.' },
+        },
+      ],
+    });
+
+    expect(container?.type).toBe('container');
+    if (container?.type !== 'container') return;
+    expect(container.child_blocks[0]).toEqual({
+      type: 'section',
+      width: 'full',
+      text: { type: 'mrkdwn', text: 'Finished.' },
+    });
   });
 });
