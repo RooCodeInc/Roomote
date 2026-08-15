@@ -202,6 +202,8 @@ function formatSubagentElapsed(activity: SubagentActivity): string | undefined {
 
 /** Format a raw tool/server identifier into a human-readable label. */
 function formatToolPart(str: string): string {
+  if (str.toLowerCase() === 'gbrain') return 'Hippocampus';
+
   return str
     .replace(/[.]/g, ' ')
     .replace(/[-_]/g, ' ')
