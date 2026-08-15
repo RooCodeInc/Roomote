@@ -12,6 +12,7 @@ const {
   getTaskChannelBindingsMock,
   maybeSendCommunicationThreadReplyMock,
   postMessageDetailedMock,
+  resolveAutomationResultSubtitleMock,
   slackInstallationFindFirstMock,
   taskRunFindFirstMock,
 } = vi.hoisted(() => ({
@@ -23,6 +24,7 @@ const {
   getTaskChannelBindingsMock: vi.fn(),
   maybeSendCommunicationThreadReplyMock: vi.fn(),
   postMessageDetailedMock: vi.fn(),
+  resolveAutomationResultSubtitleMock: vi.fn(),
   slackInstallationFindFirstMock: vi.fn(),
   taskRunFindFirstMock: vi.fn(),
 }));
@@ -40,6 +42,7 @@ vi.mock('@roomote/db/server', () => ({
   },
   eq: vi.fn(),
   findBackgroundAutomationSlackThread: vi.fn().mockResolvedValue(null),
+  getAutomationRuntime: vi.fn().mockResolvedValue({ scheduleMode: 'daily' }),
   getCustomAutomationById: getCustomAutomationByIdMock,
   getTaskAutomationInitiatorKey: vi.fn().mockResolvedValue(null),
   slackInstallations: { isActive: 'isActive', teamId: 'teamId' },
@@ -104,6 +107,7 @@ vi.mock('@roomote/sdk/server', () => ({
   buildManagerSlackSettingsUrl: () => 'https://app.example.com/automations',
   findSlackConversationSubjectByUserId: vi.fn().mockResolvedValue(null),
   recordSlackConversationMessageBestEffort: vi.fn(),
+  resolveAutomationResultSubtitle: resolveAutomationResultSubtitleMock,
 }));
 
 vi.mock('../communication-thread-replies', () => ({
@@ -177,6 +181,10 @@ describe('Slack thread reply quotes', () => {
     });
     getTaskChannelBindingsMock.mockResolvedValue(null);
     maybeSendCommunicationThreadReplyMock.mockResolvedValue(null);
+    resolveAutomationResultSubtitleMock.mockResolvedValue({
+      type: 'plain_text',
+      text: 'Daily · GPT 5.6 High · $0.56 · 02:37s',
+    });
     getLatestUserMessageMock.mockResolvedValue({
       id: 'quote-image',
       text: 'Take a screenshot',
@@ -260,6 +268,7 @@ describe('Slack thread reply quotes', () => {
     getCustomAutomationByIdMock.mockResolvedValue({
       id: 'automation-1',
       name: 'Daily demo ideas',
+      scheduleMode: 'daily',
     });
     buildThreadReplyImageBlocksMock.mockResolvedValue([]);
 
@@ -279,6 +288,10 @@ describe('Slack thread reply quotes', () => {
           expect.objectContaining({
             type: 'container',
             title: expect.objectContaining({ text: 'Daily demo ideas' }),
+            subtitle: {
+              type: 'plain_text',
+              text: 'Daily · GPT 5.6 High · $0.56 · 02:37s',
+            },
             icon: expect.objectContaining({
               image_url: 'https://app.example.com/automation-icons/zap.png',
             }),

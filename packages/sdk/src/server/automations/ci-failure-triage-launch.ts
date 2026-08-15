@@ -36,6 +36,7 @@ import {
   buildManagerSlackSettingsUrl,
   CI_FAILURE_TRIAGE_SETTINGS_HASH,
 } from '../lib/manager-slack';
+import { resolveAutomationResultSubtitle } from '../lib/automation-result-metadata';
 import {
   buildDestinationTaskPayloadFields,
   listConnectedCommunicationProviders,
@@ -481,6 +482,10 @@ export async function launchCiFailureTriageForFailedRun(
     });
 
     if (announcementTs && destination.provider === 'slack' && slackNotifier) {
+      const subtitle = await resolveAutomationResultSubtitle({
+        taskId: launchResult.taskId,
+        runId: launchResult.id,
+      });
       await refreshAutomationRootFooter({
         slack: slackNotifier,
         channelId,
@@ -490,6 +495,7 @@ export async function launchCiFailureTriageForFailedRun(
         configureUrl: buildManagerSlackSettingsUrl(
           CI_FAILURE_TRIAGE_SETTINGS_HASH,
         ),
+        subtitle,
         taskUrl: getTaskUrl({
           taskId: launchResult.taskId,
           utm: { source: 'slack', campaign: 'slack.thread_reply' },

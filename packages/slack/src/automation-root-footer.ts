@@ -91,6 +91,7 @@ export async function refreshAutomationRootFooter(params: {
   automationLabel: string;
   automationIconUrl: string;
   configureUrl: string;
+  subtitle?: { type: string; text: string };
   taskUrl?: string | null;
   taskId?: string | null;
   prRepo?: string | null;
@@ -143,8 +144,7 @@ export async function refreshAutomationRootFooter(params: {
     }
     return isAutomationRootFooterBlock(block) ? [] : [block];
   });
-  const messageTimestamp = Number(params.messageTs.split('.')[0]);
-
+  const subtitle = params.subtitle ?? existingSubtitle;
   return (
     (await params.slack.updateMessage({
       channel: params.channelId,
@@ -156,10 +156,7 @@ export async function refreshAutomationRootFooter(params: {
             iconUrl: params.automationIconUrl,
             configureUrl: params.configureUrl,
             contentBlocks,
-            ...(existingSubtitle ? { subtitle: existingSubtitle } : {}),
-            ...(!existingSubtitle && Number.isFinite(messageTimestamp)
-              ? { runTimestamp: messageTimestamp }
-              : {}),
+            ...(subtitle ? { subtitle } : {}),
             taskUrl: params.taskUrl ?? null,
             linkedPrUrls: linkedPrs.map((pr) => pr.prUrl),
           }),

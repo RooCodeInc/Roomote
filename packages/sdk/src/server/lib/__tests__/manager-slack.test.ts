@@ -60,6 +60,7 @@ describe('manager slack helpers', () => {
         child_blocks: [
           {
             type: 'section',
+            width: 'full',
             text: { type: 'mrkdwn', text: 'Hello managers' },
           },
           expect.objectContaining({

@@ -16,6 +16,7 @@ const {
   mockReleaseCiFailureTriageInvestigation,
   mockRedisSet,
   mockPostMessage,
+  mockResolveAutomationResultSubtitle,
   mockUpdateMessage,
   mockDbSelect,
 } = vi.hoisted(() => ({
@@ -39,6 +40,7 @@ const {
   mockReleaseCiFailureTriageInvestigation: vi.fn(),
   mockRedisSet: vi.fn(),
   mockPostMessage: vi.fn(),
+  mockResolveAutomationResultSubtitle: vi.fn(),
   mockUpdateMessage: vi.fn(),
   mockDbSelect: vi.fn(),
 }));
@@ -156,6 +158,7 @@ vi.mock('@roomote/slack', () => ({
     channelId: string;
     messageTs: string;
     automationLabel: string;
+    subtitle?: { type: string; text: string };
     taskUrl: string;
   }) => {
     await params.slack.updateMessage({
@@ -166,6 +169,7 @@ vi.mock('@roomote/slack', () => ({
           {
             type: 'markdown',
             text: 'I noticed a CI failure on `main` in acme/api.',
+            subtitle: params.subtitle,
           },
           {
             type: 'context',
@@ -204,6 +208,10 @@ const mockGetCommunicationProviderAdapter = vi.hoisted(() => vi.fn());
 
 vi.mock('../../lib/communication-providers', () => ({
   getCommunicationProviderAdapter: mockGetCommunicationProviderAdapter,
+}));
+
+vi.mock('../../lib/automation-result-metadata', () => ({
+  resolveAutomationResultSubtitle: mockResolveAutomationResultSubtitle,
 }));
 
 import { TaskPayloadKind } from '@roomote/types';
@@ -248,6 +256,10 @@ describe('launchCiFailureTriageForFailedRun', () => {
     mockFindEnvironmentIdForRepositoryId.mockResolvedValue(undefined);
     mockFindEnvironmentForRepo.mockResolvedValue('env-api');
     mockRedisSet.mockResolvedValue('OK');
+    mockResolveAutomationResultSubtitle.mockResolvedValue({
+      type: 'plain_text',
+      text: 'Webhook · GPT 5.6 High · $0.00 · 00:00s',
+    });
     mockTryClaimCiFailureTriageInvestigation.mockResolvedValue(true);
     mockReleaseCiFailureTriageInvestigation.mockResolvedValue(undefined);
     mockDbSelect.mockImplementation(() => ({
@@ -264,8 +276,8 @@ describe('launchCiFailureTriageForFailedRun', () => {
     mockFinalizeAutomationLaunch.mockResolvedValue({ attached: true });
     mockRecordAutomationRunOutcome.mockResolvedValue(undefined);
     mockEnqueueTask.mockResolvedValue({
+      id: 7,
       success: true,
-      runId: 7,
       taskId: 'task-scan-1',
     });
     mockGetCommunicationProviderAdapter.mockResolvedValue(null);
@@ -336,6 +348,24 @@ describe('launchCiFailureTriageForFailedRun', () => {
       }),
     );
     expect(mockUpdateMessage).toHaveBeenCalled();
+    expect(mockResolveAutomationResultSubtitle).toHaveBeenCalledWith({
+      taskId: 'task-scan-1',
+      runId: 7,
+    });
+    expect(mockUpdateMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          blocks: expect.arrayContaining([
+            expect.objectContaining({
+              subtitle: {
+                type: 'plain_text',
+                text: 'Webhook · GPT 5.6 High · $0.00 · 00:00s',
+              },
+            }),
+          ]),
+        }),
+      }),
+    );
     expect(mockUpsertBackgroundAutomationSlackThread).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({

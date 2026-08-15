@@ -1,7 +1,5 @@
 import type { SlackBlock } from '@roomote/types';
 
-import { convertMarkdownToSlack } from './markdown-converter';
-
 export const AUTOMATION_RESULT_CONTAINER_BLOCK_ID =
   'roomote_automation_result_container';
 export const AUTOMATION_RESULT_ACTIONS_BLOCK_ID =
@@ -223,6 +221,7 @@ function parseMarkdownTable(
       if (chunk.length > 0 && chunkLength + line.length + 1 > 2700) {
         blocks.push({
           type: 'section',
+          width: 'full',
           text: { type: 'mrkdwn', text: `\`\`\`\n${chunk.join('\n')}\n\`\`\`` },
         });
         chunk = [];
@@ -234,6 +233,7 @@ function parseMarkdownTable(
     if (chunk.length > 0) {
       blocks.push({
         type: 'section',
+        width: 'full',
         text: { type: 'mrkdwn', text: `\`\`\`\n${chunk.join('\n')}\n\`\`\`` },
       });
     }
@@ -257,12 +257,12 @@ function parseMarkdownTable(
   };
 }
 
-function splitSectionText(text: string): SlackBlock[] {
-  const converted = convertMarkdownToSlack(text.trim());
-  if (!converted) return [];
+function splitMarkdownText(text: string): SlackBlock[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
 
   const blocks: SlackBlock[] = [];
-  let remaining = converted;
+  let remaining = trimmed;
   while (remaining.length > MAX_SECTION_TEXT_LENGTH) {
     const candidate = remaining.slice(0, MAX_SECTION_TEXT_LENGTH);
     const splitAt = Math.max(
@@ -272,13 +272,13 @@ function splitSectionText(text: string): SlackBlock[] {
     const boundary =
       splitAt > MAX_SECTION_TEXT_LENGTH / 2 ? splitAt : MAX_SECTION_TEXT_LENGTH;
     blocks.push({
-      type: 'section',
-      text: { type: 'mrkdwn', text: remaining.slice(0, boundary).trimEnd() },
+      type: 'markdown',
+      text: remaining.slice(0, boundary).trimEnd(),
     });
     remaining = remaining.slice(boundary).trimStart();
   }
   if (remaining) {
-    blocks.push({ type: 'section', text: { type: 'mrkdwn', text: remaining } });
+    blocks.push({ type: 'markdown', text: remaining });
   }
   return blocks;
 }
@@ -290,7 +290,7 @@ export function buildAutomationResultContentBlocks(text: string): SlackBlock[] {
   let codeFence: { character: '`' | '~'; length: number } | null = null;
 
   const flushProse = () => {
-    blocks.push(...splitSectionText(prose.join('\n')));
+    blocks.push(...splitMarkdownText(prose.join('\n')));
     prose = [];
   };
 
@@ -327,11 +327,30 @@ export function buildAutomationResultContentBlocks(text: string): SlackBlock[] {
 }
 
 function normalizeContentBlocks(blocks: SlackBlock[]): SlackBlock[] {
-  return blocks.flatMap((block) =>
-    block.type === 'markdown'
-      ? buildAutomationResultContentBlocks(block.text)
-      : [block],
-  );
+  return blocks.flatMap((block) => {
+    if (block.type === 'markdown') {
+      return buildAutomationResultContentBlocks(block.text);
+    }
+    if (block.type === 'section') {
+      return [{ ...block, width: 'full' }];
+    }
+    return [block];
+  });
+}
+
+export function formatAutomationResultSubtitle(params: {
+  trigger: string;
+  model: string;
+  costMicroUsd: number;
+  durationMs: number;
+}): string {
+  const totalSeconds = Math.max(0, Math.floor(params.durationMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  const duration = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}s`;
+  const price = `$${(Math.max(0, params.costMicroUsd) / 1_000_000).toFixed(2)}`;
+
+  return `${params.trigger} · ${params.model} · ${price} · ${duration}`;
 }
 
 export function buildAutomationResultBlocks(params: {
@@ -340,7 +359,6 @@ export function buildAutomationResultBlocks(params: {
   configureUrl: string;
   contentText?: string;
   contentBlocks?: SlackBlock[];
-  runTimestamp?: number;
   subtitle?: { type: string; text: string };
   taskUrl?: string | null;
   linkedPrUrls?: string[];
@@ -387,11 +405,6 @@ export function buildAutomationResultBlocks(params: {
   const contentBlocks = params.contentBlocks
     ? normalizeContentBlocks(params.contentBlocks)
     : buildAutomationResultContentBlocks(params.contentText ?? '');
-  const runTimestamp = params.runTimestamp ?? Math.floor(Date.now() / 1000);
-  const subtitle = params.subtitle ?? {
-    type: 'mrkdwn',
-    text: `Run <!date^${runTimestamp}^{relative}|just now>`,
-  };
 
   const groups: SlackBlock[][] = [];
   let remainingBlocks = contentBlocks;
@@ -413,7 +426,7 @@ export function buildAutomationResultBlocks(params: {
         ? AUTOMATION_RESULT_CONTAINER_BLOCK_ID
         : `${AUTOMATION_RESULT_CONTAINER_BLOCK_ID}_${index + 1}`,
     title: { type: 'plain_text', text: params.title, emoji: false },
-    subtitle,
+    ...(params.subtitle ? { subtitle: params.subtitle } : {}),
     icon: {
       type: 'image',
       image_url: params.iconUrl,

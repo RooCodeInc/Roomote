@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildAutomationResultBlocks,
   buildAutomationResultContentBlocks,
+  formatAutomationResultSubtitle,
 } from '../automation-result-blocks';
 
 describe('automation result blocks', () => {
@@ -13,11 +14,8 @@ describe('automation result blocks', () => {
       ),
     ).toEqual([
       {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: '*Summary* with <https://example.com|details>.',
-        },
+        type: 'markdown',
+        text: '**Summary** with [details](https://example.com).',
       },
       {
         type: 'table',
@@ -82,9 +80,15 @@ describe('automation result blocks', () => {
 
     expect(buildAutomationResultContentBlocks(text)).toEqual([
       {
-        type: 'section',
-        text: { type: 'mrkdwn', text },
+        type: 'markdown',
+        text,
       },
+    ]);
+  });
+
+  it('keeps markdown lists in markdown blocks', () => {
+    expect(buildAutomationResultContentBlocks('- First\n- Second')).toEqual([
+      { type: 'markdown', text: '- First\n- Second' },
     ]);
   });
 
@@ -100,6 +104,21 @@ describe('automation result blocks', () => {
     expect(JSON.stringify(blocks[0].rows[1])).toContain('a|b');
   });
 
+  it('makes oversized table fallback sections full-width', () => {
+    const rows = Array.from({ length: 100 }, (_, index) => `| ${index} |`);
+    const blocks = buildAutomationResultContentBlocks(
+      ['| Value |', '| --- |', ...rows].join('\n'),
+    );
+
+    expect(blocks.length).toBeGreaterThan(0);
+    expect(blocks.every((block) => block.type === 'section')).toBe(true);
+    expect(
+      blocks.every(
+        (block) => block.type !== 'section' || block.width === 'full',
+      ),
+    ).toBe(true);
+  });
+
   it('builds the requested container chrome and keeps task and configure actions', () => {
     expect(
       buildAutomationResultBlocks({
@@ -107,7 +126,15 @@ describe('automation result blocks', () => {
         iconUrl: 'https://app.example.com/automation-icons/zap.png',
         configureUrl: 'https://app.example.com/automations#custom-automation-1',
         contentText: 'Everything is **healthy**.',
-        runTimestamp: 1_700_000_000,
+        subtitle: {
+          type: 'plain_text',
+          text: formatAutomationResultSubtitle({
+            trigger: 'Weekly',
+            model: 'GPT 5.6 High',
+            costMicroUsd: 560_000,
+            durationMs: 157_000,
+          }),
+        },
         taskUrl: 'https://app.example.com/task/1',
       }),
     ).toEqual([
@@ -116,8 +143,8 @@ describe('automation result blocks', () => {
         block_id: 'roomote_automation_result_container',
         title: { type: 'plain_text', text: 'Daily report', emoji: false },
         subtitle: {
-          type: 'mrkdwn',
-          text: 'Run <!date^1700000000^{relative}|just now>',
+          type: 'plain_text',
+          text: 'Weekly · GPT 5.6 High · $0.56 · 02:37s',
         },
         icon: {
           type: 'image',
@@ -127,8 +154,8 @@ describe('automation result blocks', () => {
         has_header_divider: true,
         child_blocks: [
           {
-            type: 'section',
-            text: { type: 'mrkdwn', text: 'Everything is *healthy*.' },
+            type: 'markdown',
+            text: 'Everything is **healthy**.',
           },
           {
             type: 'actions',
@@ -161,6 +188,26 @@ describe('automation result blocks', () => {
     ]);
   });
 
+  it('formats automation result metadata with zero-value padding', () => {
+    expect(
+      formatAutomationResultSubtitle({
+        trigger: 'Manual',
+        model: 'Kimi K3 Medium',
+        costMicroUsd: 200_000,
+        durationMs: 37_900,
+      }),
+    ).toBe('Manual · Kimi K3 Medium · $0.20 · 00:37s');
+
+    expect(
+      formatAutomationResultSubtitle({
+        trigger: 'Daily',
+        model: 'GPT 5.6 Max',
+        costMicroUsd: 0,
+        durationMs: 608_000,
+      }),
+    ).toBe('Daily · GPT 5.6 Max · $0.00 · 10:08s');
+  });
+
   it('reserves action capacity for task and configure buttons', () => {
     const [container] = buildAutomationResultBlocks({
       title: 'Audit',
@@ -191,5 +238,28 @@ describe('automation result blocks', () => {
     expect(actions[1].elements?.map((element) => element.action_id)).toEqual([
       'late_bound_automation_configure',
     ]);
+  });
+
+  it('makes sections full-width when rebuilding a result', () => {
+    const [container] = buildAutomationResultBlocks({
+      title: 'Audit',
+      iconUrl: 'https://app.example.com/automation-icons/wrench.png',
+      configureUrl: 'https://app.example.com/automations#audit',
+      contentBlocks: [
+        {
+          type: 'section',
+          width: 'standard',
+          text: { type: 'mrkdwn', text: 'Finished.' },
+        },
+      ],
+    });
+
+    expect(container?.type).toBe('container');
+    if (container?.type !== 'container') return;
+    expect(container.child_blocks[0]).toEqual({
+      type: 'section',
+      width: 'full',
+      text: { type: 'mrkdwn', text: 'Finished.' },
+    });
   });
 });
