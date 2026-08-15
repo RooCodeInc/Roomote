@@ -226,7 +226,11 @@ if [ -n "${GBRAIN_RERANKER_MODEL:-}" ]; then
   case "$GBRAIN_RERANKER_MODEL" in
     openrouter:*)
       if [ -z "${OPENROUTER_BASE_URL:-}" ] && [ -n "${OPENAI_BASE_URL:-}" ]; then
-        OPENROUTER_BASE_URL="${OPENAI_BASE_URL%/}/v1"
+        OPENROUTER_BASE_URL="${OPENAI_BASE_URL%/}"
+        case "$OPENROUTER_BASE_URL" in
+          */v1) ;;
+          *) OPENROUTER_BASE_URL="$OPENROUTER_BASE_URL/v1" ;;
+        esac
         export OPENROUTER_BASE_URL
       fi
       if [ -z "${OPENROUTER_API_KEY:-}" ] && [ -n "${OPENAI_API_KEY:-}" ]; then
