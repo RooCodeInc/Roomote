@@ -24,7 +24,7 @@ x-roomote-base-env: &roomote-base-env
   R_BRAIN_MODEL: ${R_BRAIN_MODEL:-}
   R_BRAIN_EMBEDDING_MODEL: ${R_BRAIN_EMBEDDING_MODEL:-}
   R_BRAIN_EMBEDDING_DIMENSIONS: ${R_BRAIN_EMBEDDING_DIMENSIONS:-}
-  R_BRAIN_RERANKER_MODEL: ${R_BRAIN_RERANKER_MODEL:-openrouter:voyageai/rerank-2.5-lite}
+  R_BRAIN_RERANKER_MODEL: ${R_BRAIN_RERANKER_MODEL:-}
   R_GBRAIN_URL: ${R_GBRAIN_URL:-http://gbrain:8931}
   R_GBRAIN_ADMIN_TOKEN_FILE: /gbrain-data/admin-bootstrap-token
   # Written by the Brain on first boot when no token was supplied, so a stack
@@ -535,7 +535,7 @@ services:
       # provider key below instead makes the Brain call the provider directly.
       OPENAI_BASE_URL: ${GBRAIN_OPENAI_BASE_URL:-http://api:3001/api/brain/inference}
       OPENAI_API_KEY: ${R_BRAIN_GATEWAY_TOKEN:-}
-      GBRAIN_RERANKER_MODEL: ${R_BRAIN_RERANKER_MODEL:-openrouter:voyageai/rerank-2.5-lite}
+      GBRAIN_RERANKER_MODEL: ${R_BRAIN_RERANKER_MODEL:-}
       # Create-time, and it has to be the container that receives these: the
       # embedding model and its width are decided when the Brain is created,
       # and the gateway must never substitute a different one afterwards.

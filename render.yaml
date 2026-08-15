@@ -254,7 +254,7 @@ services:
       - key: R_BRAIN_EMBEDDING_MODEL
         sync: false
       - key: R_BRAIN_RERANKER_MODEL
-        value: openrouter:voyageai/rerank-2.5-lite
+        value: ''
       - key: ROOMOTE_GBRAIN_HOSTPORT
         fromService:
           type: pserv

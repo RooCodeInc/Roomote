@@ -213,7 +213,7 @@ services:
       R_BRAIN_MODEL: ''
       R_BRAIN_EMBEDDING_MODEL: ''
       R_BRAIN_EMBEDDING_DIMENSIONS: ''
-      R_BRAIN_RERANKER_MODEL: openrouter:voyageai/rerank-2.5-lite
+      R_BRAIN_RERANKER_MODEL: ''
       # Railway's private network is IPv6-only and never leaves the project,
       # so the Brain is unreachable from the internet by construction.
       R_GBRAIN_URL: http://${{gbrain.RAILWAY_PRIVATE_DOMAIN}}:8931

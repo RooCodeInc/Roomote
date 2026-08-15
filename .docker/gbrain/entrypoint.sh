@@ -221,32 +221,32 @@ fi
 # Route gbrain's OpenRouter reranker through the same Roomote credential
 # gateway as embeddings and chat. Do this after initialization so exposing an
 # OpenRouter-compatible endpoint does not change which provider gbrain chooses
-# when it creates the Brain.
-if [ -n "${GBRAIN_RERANKER_MODEL:-}" ]; then
-  case "$GBRAIN_RERANKER_MODEL" in
-    openrouter:*)
-      if [ -z "${OPENROUTER_BASE_URL:-}" ] && [ -n "${OPENAI_BASE_URL:-}" ]; then
-        OPENROUTER_BASE_URL="${OPENAI_BASE_URL%/}"
-        case "$OPENROUTER_BASE_URL" in
-          */v1) ;;
-          *) OPENROUTER_BASE_URL="$OPENROUTER_BASE_URL/v1" ;;
-        esac
-        export OPENROUTER_BASE_URL
-      fi
-      if [ -z "${OPENROUTER_API_KEY:-}" ] && [ -n "${OPENAI_API_KEY:-}" ]; then
-        OPENROUTER_API_KEY="$OPENAI_API_KEY"
-        export OPENROUTER_API_KEY
-      fi
-      if [ -z "${OPENROUTER_BASE_URL:-}" ] || [ -z "${OPENROUTER_API_KEY:-}" ]; then
-        echo "[gbrain-entrypoint] WARNING: $GBRAIN_RERANKER_MODEL needs OPENROUTER_BASE_URL and OPENROUTER_API_KEY."
-        echo "[gbrain-entrypoint] WARNING: reranking will remain fail-open until the gateway is configured."
-      fi
-      ;;
-  esac
+# when it creates the Brain. An empty forwarded setting restores the default,
+# including after a deployment previously selected another reranker.
+GBRAIN_RERANKER_MODEL="${GBRAIN_RERANKER_MODEL:-openrouter:voyageai/rerank-2.5-lite}"
+case "$GBRAIN_RERANKER_MODEL" in
+  openrouter:*)
+    if [ -z "${OPENROUTER_BASE_URL:-}" ] && [ -n "${OPENAI_BASE_URL:-}" ]; then
+      OPENROUTER_BASE_URL="${OPENAI_BASE_URL%/}"
+      case "$OPENROUTER_BASE_URL" in
+        */v1) ;;
+        *) OPENROUTER_BASE_URL="$OPENROUTER_BASE_URL/v1" ;;
+      esac
+      export OPENROUTER_BASE_URL
+    fi
+    if [ -z "${OPENROUTER_API_KEY:-}" ] && [ -n "${OPENAI_API_KEY:-}" ]; then
+      OPENROUTER_API_KEY="$OPENAI_API_KEY"
+      export OPENROUTER_API_KEY
+    fi
+    if [ -z "${OPENROUTER_BASE_URL:-}" ] || [ -z "${OPENROUTER_API_KEY:-}" ]; then
+      echo "[gbrain-entrypoint] WARNING: $GBRAIN_RERANKER_MODEL needs OPENROUTER_BASE_URL and OPENROUTER_API_KEY."
+      echo "[gbrain-entrypoint] WARNING: reranking will remain fail-open until the gateway is configured."
+    fi
+    ;;
+esac
 
-  gbrain config set search.reranker.model "$GBRAIN_RERANKER_MODEL" >/dev/null
-  echo "[gbrain-entrypoint] reranker: $GBRAIN_RERANKER_MODEL"
-fi
+gbrain config set search.reranker.model "$GBRAIN_RERANKER_MODEL" >/dev/null
+echo "[gbrain-entrypoint] reranker: $GBRAIN_RERANKER_MODEL"
 
 # Adding a key to a brain created without one is a first-class flow rather
 # than an edge case: on hosts whose compose parser ignores `profiles` the
