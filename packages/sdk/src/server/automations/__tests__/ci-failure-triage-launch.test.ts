@@ -132,6 +132,12 @@ vi.mock('@roomote/slack', () => ({
     ]);
     updateMessage = (...args: unknown[]) => mockUpdateMessage(...args);
   },
+  buildAutomationResultBlocks: (params: { contentText: string }) => [
+    {
+      type: 'container',
+      child_blocks: [{ type: 'section', text: params.contentText }],
+    },
+  ],
   buildAutomationRootFooterBlocks: () => [
     {
       type: 'context',

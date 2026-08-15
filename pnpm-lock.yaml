@@ -895,6 +895,9 @@ importers:
       postcss-load-config:
         specifier: ^6.0.1
         version: 6.0.1(jiti@2.7.0)(postcss@8.5.23)(tsx@4.20.4)(yaml@2.9.0)
+      sharp:
+        specifier: 0.35.0
+        version: 0.35.0
       storybook:
         specifier: ^10.2.10
         version: 10.2.10(@testing-library/dom@10.4.1)(bufferutil@4.1.0)(prettier@3.8.3)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(utf-8-validate@6.0.6)

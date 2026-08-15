@@ -18,6 +18,27 @@ export type SlackBlock =
     }
   | {
       type: 'divider';
+    }
+  | {
+      type: 'image';
+      block_id?: string;
+      image_url: string;
+      alt_text: string;
+    }
+  | {
+      type: 'table';
+      block_id?: string;
+      rows: Array<Array<Record<string, unknown>>>;
+      column_settings?: Array<Record<string, unknown>>;
+    }
+  | {
+      type: 'container';
+      block_id?: string;
+      title: { type: 'plain_text'; text: string; emoji?: boolean };
+      subtitle?: { type: string; text: string };
+      icon?: Record<string, unknown>;
+      has_header_divider?: boolean;
+      child_blocks: SlackBlock[];
     };
 
 export const DEFAULT_SLACK_ACK_EMOJI = 'eyes';

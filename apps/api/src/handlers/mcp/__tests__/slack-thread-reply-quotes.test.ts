@@ -8,6 +8,7 @@ const {
   clearLatestUserMessageForReplyQuoteIfIdMock,
   clearLatestUserMessageMock,
   getLatestUserMessageMock,
+  getCustomAutomationByIdMock,
   getTaskChannelBindingsMock,
   maybeSendCommunicationThreadReplyMock,
   postMessageDetailedMock,
@@ -18,6 +19,7 @@ const {
   clearLatestUserMessageForReplyQuoteIfIdMock: vi.fn(),
   clearLatestUserMessageMock: vi.fn(),
   getLatestUserMessageMock: vi.fn(),
+  getCustomAutomationByIdMock: vi.fn(),
   getTaskChannelBindingsMock: vi.fn(),
   maybeSendCommunicationThreadReplyMock: vi.fn(),
   postMessageDetailedMock: vi.fn(),
@@ -38,7 +40,7 @@ vi.mock('@roomote/db/server', () => ({
   },
   eq: vi.fn(),
   findBackgroundAutomationSlackThread: vi.fn().mockResolvedValue(null),
-  getCustomAutomationById: vi.fn(),
+  getCustomAutomationById: getCustomAutomationByIdMock,
   getTaskAutomationInitiatorKey: vi.fn().mockResolvedValue(null),
   slackInstallations: { isActive: 'isActive', teamId: 'teamId' },
   taskRuns: { id: 'id' },
@@ -50,40 +52,43 @@ vi.mock('@roomote/db/server', () => ({
   workItems: { id: 'id' },
 }));
 
-vi.mock('@roomote/slack', async (importOriginal) => ({
-  SlackPostDeliveryError: (
-    await importOriginal<typeof import('@roomote/slack')>()
-  ).SlackPostDeliveryError,
-  buildSlackThreadFooterText: vi.fn().mockReturnValue('Task footer'),
-  buildSlackThreadReplyFooterBlock: vi.fn(({ footerText }) => ({
-    type: 'context',
-    block_id: 'footer',
-    elements: [{ type: 'mrkdwn', text: footerText }],
-  })),
-  clearLatestUserMessage: clearLatestUserMessageMock,
-  clearSlackThreadReplyFooterMessageTs: vi.fn(),
-  getLatestUserMessage: getLatestUserMessageMock,
-  getSlackThreadReplyFooterMessageTs: vi.fn().mockResolvedValue(null),
-  removeSlackThreadReplyFooter: vi.fn(),
-  resolveSlackThreadFooterContext: vi.fn().mockResolvedValue({
-    linkedPrs: [],
-    livePreviewUrl: null,
-  }),
-  ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID: 'roomote_thread_reply_quote',
-  setLatestSlackBotReply: vi.fn(),
-  setSlackThreadReplyFooterMessageTs: vi.fn(),
-  SlackNotifier: vi.fn(
-    class {
-      postMessageDetailed = postMessageDetailedMock;
-    },
-  ),
-  trackLatestUserMessageForSlackQuote: vi.fn(),
-  trackSlackBotReply: vi.fn(),
-  withSlackThreadReplyFooterLock: vi.fn(
-    async ({ fn }: { fn: () => Promise<unknown> }) => fn(),
-  ),
-  THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE: 'busy',
-}));
+vi.mock('@roomote/slack', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/slack')>();
+  return {
+    ...actual,
+    SlackPostDeliveryError: actual.SlackPostDeliveryError,
+    buildSlackThreadFooterText: vi.fn().mockReturnValue('Task footer'),
+    buildSlackThreadReplyFooterBlock: vi.fn(({ footerText }) => ({
+      type: 'context',
+      block_id: 'footer',
+      elements: [{ type: 'mrkdwn', text: footerText }],
+    })),
+    clearLatestUserMessage: clearLatestUserMessageMock,
+    clearSlackThreadReplyFooterMessageTs: vi.fn(),
+    getLatestUserMessage: getLatestUserMessageMock,
+    getSlackThreadReplyFooterMessageTs: vi.fn().mockResolvedValue(null),
+    removeSlackThreadReplyFooter: vi.fn(),
+    resolveSlackThreadFooterContext: vi.fn().mockResolvedValue({
+      linkedPrs: [],
+      livePreviewUrl: null,
+    }),
+    resolveSlackThreadLinkedPrs: vi.fn().mockResolvedValue([]),
+    ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID: 'roomote_thread_reply_quote',
+    setLatestSlackBotReply: vi.fn().mockResolvedValue(undefined),
+    setSlackThreadReplyFooterMessageTs: vi.fn(),
+    SlackNotifier: vi.fn(
+      class {
+        postMessageDetailed = postMessageDetailedMock;
+      },
+    ),
+    trackLatestUserMessageForSlackQuote: vi.fn(),
+    trackSlackBotReply: vi.fn().mockResolvedValue(undefined),
+    withSlackThreadReplyFooterLock: vi.fn(
+      async ({ fn }: { fn: () => Promise<unknown> }) => fn(),
+    ),
+    THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE: 'busy',
+  };
+});
 
 vi.mock('@roomote/communication/messages', () => ({
   clearLatestUserMessageForReplyQuoteIfId:
@@ -92,6 +97,11 @@ vi.mock('@roomote/communication/messages', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  buildAutomationIconUrl: (icon: string) =>
+    `https://app.example.com/automation-icons/${icon}.png`,
+  buildCustomAutomationSettingsUrl: (id: string) =>
+    `https://app.example.com/automations#custom-automation-${id}`,
+  buildManagerSlackSettingsUrl: () => 'https://app.example.com/automations',
   findSlackConversationSubjectByUserId: vi.fn().mockResolvedValue(null),
   recordSlackConversationMessageBestEffort: vi.fn(),
 }));
@@ -237,6 +247,59 @@ describe('Slack thread reply quotes', () => {
     expect(eq).toHaveBeenCalledWith('teamId', 'T_DM');
     expect(postMessageDetailedMock).toHaveBeenCalledWith(
       expect.objectContaining({ channel: 'D123' }),
+    );
+  });
+
+  it('wraps a custom automation root report in the structured container', async () => {
+    taskRunFindFirstMock.mockResolvedValue({
+      id: 42,
+      actingUserId: null,
+      taskId: 'task-1',
+      payload: { channel: 'C123', customAutomationId: 'automation-1' },
+    });
+    getCustomAutomationByIdMock.mockResolvedValue({
+      id: 'automation-1',
+      name: 'Daily demo ideas',
+    });
+    buildThreadReplyImageBlocksMock.mockResolvedValue([]);
+
+    const response = await createApp().request('/mcp/thread_reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        text: '**Summary**\n\n| Idea | Priority |\n| --- | --- |\n| Demo | High |',
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(postMessageDetailedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        blocks: [
+          expect.objectContaining({
+            type: 'container',
+            title: expect.objectContaining({ text: 'Daily demo ideas' }),
+            icon: expect.objectContaining({
+              image_url: 'https://app.example.com/automation-icons/zap.png',
+            }),
+            child_blocks: expect.arrayContaining([
+              expect.objectContaining({ type: 'table' }),
+              expect.objectContaining({
+                type: 'actions',
+                elements: expect.arrayContaining([
+                  expect.objectContaining({
+                    action_id: 'late_bound_automation_view_task',
+                  }),
+                  expect.objectContaining({
+                    action_id: 'late_bound_automation_configure',
+                    url: 'https://app.example.com/automations#custom-automation-automation-1',
+                  }),
+                ]),
+              }),
+            ]),
+          }),
+        ],
+      }),
     );
   });
 

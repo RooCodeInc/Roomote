@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildAutomationRootFooterBlocks } from '../automation-root-footer';
+const resolveThreadReplyLinkedPrsMock = vi.hoisted(() => vi.fn());
+
+vi.mock('@roomote/communication', () => ({
+  resolveThreadReplyLinkedPrs: resolveThreadReplyLinkedPrsMock,
+}));
+
+import {
+  buildAutomationRootFooterBlocks,
+  refreshAutomationRootFooter,
+} from '../automation-root-footer';
 
 function getActions(
   blocks: ReturnType<typeof buildAutomationRootFooterBlocks>,
@@ -44,5 +53,80 @@ describe('buildAutomationRootFooterBlocks', () => {
 
     expect(actions).toHaveLength(25);
     expect(actions.at(-1)?.action_id).toBe('late_bound_automation_view_task');
+  });
+});
+
+describe('refreshAutomationRootFooter', () => {
+  it('replaces every prior automation action row at the Slack action limit', async () => {
+    resolveThreadReplyLinkedPrsMock.mockResolvedValue(
+      Array.from({ length: 30 }, (_, index) => ({
+        prUrl: `https://github.com/org/repo/pull/${index + 1}`,
+      })),
+    );
+    const updateMessage = vi.fn().mockResolvedValue(true);
+
+    await expect(
+      refreshAutomationRootFooter({
+        slack: {
+          getMessageBlocks: vi.fn().mockResolvedValue([
+            {
+              type: 'container',
+              block_id: 'roomote_automation_result_container',
+              title: { type: 'plain_text', text: 'Audit' },
+              child_blocks: [
+                {
+                  type: 'section',
+                  text: { type: 'mrkdwn', text: 'Finished.' },
+                },
+                {
+                  type: 'actions',
+                  block_id: 'roomote_automation_result_actions',
+                  elements: [],
+                },
+                {
+                  type: 'actions',
+                  block_id: 'roomote_automation_result_actions_2',
+                  elements: [
+                    {
+                      action_id: 'late_bound_automation_configure',
+                    },
+                  ],
+                },
+              ],
+            },
+          ]),
+          updateMessage,
+        },
+        channelId: 'C123',
+        messageTs: '1700000000.000001',
+        automationLabel: 'Audit',
+        automationIconUrl:
+          'https://app.example.com/automation-icons/wrench.png',
+        configureUrl: 'https://app.example.com/automations#audit',
+        taskUrl: 'https://app.example.com/task/1',
+        taskId: 'task-1',
+      }),
+    ).resolves.toBe(true);
+
+    const blocks = updateMessage.mock.calls[0]?.[0]?.message?.blocks ?? [];
+    const actionIds = blocks
+      .flatMap(
+        (block: { child_blocks?: Array<Record<string, unknown>> }) =>
+          block.child_blocks ?? [],
+      )
+      .filter((block: { type?: unknown }) => block.type === 'actions')
+      .flatMap(
+        (block: { elements?: Array<{ action_id?: string }> }) =>
+          block.elements ?? [],
+      )
+      .map((element: { action_id?: string }) => element.action_id);
+    expect(
+      actionIds.filter((id: string | undefined) =>
+        id?.includes('automation_configure'),
+      ),
+    ).toEqual(['late_bound_automation_configure']);
+    expect(
+      actionIds.filter((id: string | undefined) => id?.includes('view_pr')),
+    ).toHaveLength(24);
   });
 });

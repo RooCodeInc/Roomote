@@ -2,8 +2,10 @@ import {
   AUTO_RESPOND_CHANNELS_SETTINGS_HASH,
   CODE_QUALITY_AUDITOR_SETTINGS_HASH,
   CODEQL_TRIAGE_SETTINGS_HASH,
+  CI_FAILURE_TRIAGE_SETTINGS_HASH,
   DEPENDABOT_TRIAGE_SETTINGS_HASH,
   getBackgroundAutomationSettingsDescriptor,
+  getTriggerableBackgroundAutomationDescriptorByKey,
   MANAGER_CHANNEL_SETTINGS_HASH,
   MANAGER_STATS_SETTINGS_HASH,
   SECURITY_AUDITOR_SETTINGS_HASH,
@@ -11,7 +13,10 @@ import {
   SUGGEST_IDEAS_SETTINGS_HASH,
   SUMMARIZE_MERGED_PRS_SETTINGS_HASH,
 } from '@roomote/types';
-import { convertSlackLinksToMarkdown } from '@roomote/slack';
+import {
+  buildAutomationResultBlocks,
+  convertSlackLinksToMarkdown,
+} from '@roomote/slack';
 
 const DEFAULT_LOCAL_R_APP_URL = 'http://localhost:13000';
 
@@ -19,6 +24,7 @@ export {
   AUTO_RESPOND_CHANNELS_SETTINGS_HASH,
   CODE_QUALITY_AUDITOR_SETTINGS_HASH,
   CODEQL_TRIAGE_SETTINGS_HASH,
+  CI_FAILURE_TRIAGE_SETTINGS_HASH,
   DEPENDABOT_TRIAGE_SETTINGS_HASH,
   MANAGER_CHANNEL_SETTINGS_HASH,
   MANAGER_STATS_SETTINGS_HASH,
@@ -44,6 +50,19 @@ function buildAutomationsSettingsUrl(hash?: string) {
   }
 
   return url;
+}
+
+export function buildAutomationIconUrl(icon: string) {
+  return new URL(
+    `/automation-icons/${icon}.png`,
+    process.env.R_APP_URL || DEFAULT_LOCAL_R_APP_URL,
+  ).toString();
+}
+
+export function buildCustomAutomationSettingsUrl(automationId: string) {
+  return buildAutomationsSettingsUrl(
+    `custom-automation-${automationId}`,
+  ).toString();
 }
 
 export function buildManagerSlackSettingsUrl(
@@ -94,19 +113,27 @@ export function buildAutomationSettingsMessage(
   hash: string,
 ): SlackAutomationSettingsMessage {
   const trimmedText = text.trim();
+  const settingsDescriptor = getBackgroundAutomationSettingsDescriptor(hash);
+  const automationDescriptor = settingsDescriptor?.automationKey
+    ? getTriggerableBackgroundAutomationDescriptorByKey(
+        settingsDescriptor.automationKey,
+      )
+    : null;
+  const title = settingsDescriptor?.label ?? 'Automation';
 
   return {
     text: trimmedText,
-    blocks: [
-      {
-        type: 'section',
-        text: {
-          type: 'mrkdwn',
-          text: trimmedText,
+    blocks: buildAutomationResultBlocks({
+      title,
+      iconUrl: buildAutomationIconUrl(automationDescriptor?.slackIcon ?? 'zap'),
+      configureUrl: buildManagerSlackSettingsUrl(hash),
+      contentBlocks: [
+        {
+          type: 'section',
+          text: { type: 'mrkdwn', text: trimmedText },
         },
-      },
-      buildAutomationSettingsContextBlock(hash),
-    ],
+      ],
+    }),
   };
 }
 
