@@ -1,9 +1,88 @@
-import { eq, inArray, sql } from 'drizzle-orm';
+import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 
 import { type DatabaseOrTransaction } from '../db';
-import { brainMemoryEvents, brainSyncState, taskRuns } from '../schema';
+import {
+  brainCollectorItems,
+  brainMemoryEvents,
+  brainSyncState,
+  taskRuns,
+} from '../schema';
 
 export type BrainSyncStateRow = typeof brainSyncState.$inferSelect;
+export type BrainCollectorItemRow = typeof brainCollectorItems.$inferSelect;
+
+export async function upsertBrainCollectorItems(
+  database: DatabaseOrTransaction,
+  collectorId: string,
+  items: Array<{ itemId: string; slug: string; lastSeenAt: Date }>,
+): Promise<void> {
+  if (items.length === 0) {
+    return;
+  }
+
+  await database
+    .insert(brainCollectorItems)
+    .values(items.map((item) => ({ collectorId, ...item })))
+    .onConflictDoUpdate({
+      target: [brainCollectorItems.collectorId, brainCollectorItems.itemId],
+      set: {
+        slug: sql`excluded.slug`,
+        lastSeenAt: sql`excluded.last_seen_at`,
+        updatedAt: sql`now()`,
+      },
+    });
+}
+
+export async function listBrainCollectorItemsBefore(
+  database: DatabaseOrTransaction,
+  collectorId: string,
+  before: Date,
+  limit: number,
+): Promise<BrainCollectorItemRow[]> {
+  return database
+    .select()
+    .from(brainCollectorItems)
+    .where(
+      and(
+        eq(brainCollectorItems.collectorId, collectorId),
+        lt(brainCollectorItems.lastSeenAt, before),
+      ),
+    )
+    .orderBy(brainCollectorItems.itemId)
+    .limit(limit);
+}
+
+export async function listBrainCollectorItems(
+  database: DatabaseOrTransaction,
+  collectorId: string,
+  limit: number,
+): Promise<BrainCollectorItemRow[]> {
+  return database
+    .select()
+    .from(brainCollectorItems)
+    .where(eq(brainCollectorItems.collectorId, collectorId))
+    .orderBy(brainCollectorItems.itemId)
+    .limit(limit);
+}
+
+export async function deleteBrainCollectorItems(
+  database: DatabaseOrTransaction,
+  collectorId: string,
+  itemIds: string[],
+): Promise<void> {
+  if (itemIds.length === 0) {
+    return;
+  }
+
+  await database
+    .delete(brainCollectorItems)
+    .where(
+      and(
+        eq(brainCollectorItems.collectorId, collectorId),
+        inArray(brainCollectorItems.itemId, itemIds),
+      ),
+    );
+}
 
 /**
  * Durable per-collector sync state: steady-state watermark plus deep-backfill
@@ -56,7 +135,10 @@ export async function resetBrainIngestionState(
   database: DatabaseOrTransaction,
 ): Promise<void> {
   await database.execute(sql`
-    WITH reset_sync_state AS (
+    WITH reset_collector_items AS (
+      DELETE FROM ${brainCollectorItems}
+      RETURNING 1
+    ), reset_sync_state AS (
       DELETE FROM ${brainSyncState}
       RETURNING 1
     )

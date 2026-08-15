@@ -3830,6 +3830,34 @@ export const brainSyncState = pgTable('brain_sync_state', {
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
 });
 
+/**
+ * Durable inventory of upstream objects written by Brain collectors. A
+ * completed source sweep can compare its observation timestamp with this
+ * inventory and tombstone objects that disappeared because access was
+ * revoked upstream.
+ */
+export const brainCollectorItems = pgTable(
+  'brain_collector_items',
+  {
+    collectorId: text('collector_id').notNull(),
+    itemId: text('item_id').notNull(),
+    slug: text('slug').notNull(),
+    lastSeenAt: timestamp('last_seen_at').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.collectorId, table.itemId],
+      name: 'brain_collector_items_collector_item_pk',
+    }),
+    index('brain_collector_items_collector_seen_idx').on(
+      table.collectorId,
+      table.lastSeenAt,
+    ),
+  ],
+);
+
 export const brainMemoryEventsRelations = relations(
   brainMemoryEvents,
   ({ one }) => ({

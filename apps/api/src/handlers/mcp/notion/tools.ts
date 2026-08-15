@@ -1,9 +1,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { notionApiRequestJson } from '@roomote/sdk/server/notion-api';
 import type { McpConnectionNotionConfig } from '@roomote/types';
 import { z } from 'zod';
 
 import { toMcpToolResult } from '../proxy-utils';
-import { notionApiRequestJson } from './api';
 
 const READ_ONLY_ANNOTATIONS = {
   destructiveHint: false,
