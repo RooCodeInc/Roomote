@@ -41,6 +41,12 @@ export async function handleTelegramPrReviewActionCallback(params: {
   const senderUserId = query.from?.id
     ? await resolveTelegramSenderUserId(String(query.from.id))
     : null;
+  const senderName = query.from
+    ? [query.from.first_name, query.from.last_name]
+        .filter(Boolean)
+        .join(' ')
+        .trim() || query.from.username
+    : undefined;
 
   if (choice !== 'dismiss' && !senderUserId) {
     // Not claimed: a teammate with a linked account can still accept.
@@ -132,7 +138,7 @@ export async function handleTelegramPrReviewActionCallback(params: {
           replyToMessageId: messageId,
           text:
             choice === 'auto'
-              ? "I'll resolve these and any future feedback on this PR automatically. Starting on the current feedback now."
+              ? `OK, ${senderName ?? 'there'}. Future review feedback on this PR will get resolved automatically.`
               : 'On it — resolving the review feedback.',
         });
       }

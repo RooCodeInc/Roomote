@@ -1,4 +1,7 @@
-import { buildSlackPrReviewActionBlocks } from '../pr-review-action';
+import {
+  buildResolvedSlackPrReviewMessageBlocks,
+  buildSlackPrReviewActionBlocks,
+} from '../pr-review-action';
 
 describe('PR review action blocks', () => {
   it('uses neutral styling for every response button', () => {
@@ -23,5 +26,20 @@ describe('PR review action blocks', () => {
     expect(actions.elements?.every((element) => !('style' in element))).toBe(
       true,
     );
+  });
+
+  it('can render a resolution as a regular message', () => {
+    expect(
+      buildResolvedSlackPrReviewMessageBlocks(
+        [{ type: 'actions', block_id: 'pr_review_action', elements: [] }],
+        'Resolution',
+        'section',
+      ),
+    ).toEqual([
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: 'Resolution' },
+      },
+    ]);
   });
 });

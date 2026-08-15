@@ -38,9 +38,11 @@ async function getSlackTeamNotifier(teamId: string) {
 async function updateNotificationMessage({
   payload,
   resolution,
+  resolutionType,
 }: {
   payload: SlackInteractivePayload;
   resolution: string;
+  resolutionType?: 'context' | 'section';
 }): Promise<void> {
   try {
     const { slack } = await getSlackTeamNotifier(payload.team.id);
@@ -52,6 +54,7 @@ async function updateNotificationMessage({
         blocks: buildResolvedSlackPrReviewMessageBlocks(
           payload.message.blocks,
           resolution,
+          resolutionType,
         ),
       },
     });
@@ -200,10 +203,14 @@ async function dispatchAcceptedPrReviewAction({
   }
 
   const resolution = enableAutoHandle
-    ? `Auto-resolve enabled — requested by <@${payload.user.id}>. Future review feedback on this PR gets resolved in this task automatically.`
+    ? `OK, <@${payload.user.id}>. Future review feedback on this PR will get resolved automatically.`
     : `On it — requested by <@${payload.user.id}>.`;
 
-  await updateNotificationMessage({ payload, resolution });
+  await updateNotificationMessage({
+    payload,
+    resolution,
+    ...(enableAutoHandle ? { resolutionType: 'section' } : {}),
+  });
 }
 
 /**
