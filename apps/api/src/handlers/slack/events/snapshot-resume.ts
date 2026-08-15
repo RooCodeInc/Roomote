@@ -274,6 +274,7 @@ export async function processSnapshotResume(
         slackTeamId,
         channel: event.channel,
         threadTs: threadId,
+        reactionsAllowed: turnPolicy?.reactionsAllowed,
       },
     });
     await queueSlackMessage(resumeRunId, queuedSlackMessage);

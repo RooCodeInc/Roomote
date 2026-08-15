@@ -306,12 +306,14 @@ export function createSlackMessageInterval({
             return;
           }
 
-          recordChatTurnStart({
-            turnMessageTs: msg.ts,
-            allowReaction: getQueuedSlackTurnReactionAllowance(msg),
-            sessionId: state.sessionId,
-            stateFilePath: slackReplySatisfactionStateFile,
-          });
+          if (!msg.channel || !msg.threadTs) {
+            recordChatTurnStart({
+              turnMessageTs: msg.ts,
+              allowReaction: getQueuedSlackTurnReactionAllowance(msg),
+              sessionId: state.sessionId,
+              stateFilePath: slackReplySatisfactionStateFile,
+            });
+          }
 
           index += 1;
         }

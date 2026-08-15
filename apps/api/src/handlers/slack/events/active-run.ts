@@ -546,6 +546,7 @@ export async function processActiveRunMessage(
           slackTeamId,
           channel: event.channel,
           threadTs: threadId,
+          reactionsAllowed: turnPolicy?.reactionsAllowed,
         },
       });
       await queueSlackMessage(activeRun.id, {

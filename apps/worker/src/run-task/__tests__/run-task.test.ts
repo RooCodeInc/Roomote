@@ -34,6 +34,7 @@ const {
   waitForExternalSleepActionMock,
   mkdirSyncMock,
   recordSandboxPromptSlackTurnStartMock,
+  recordChatTurnStartMock,
   writeFileSyncMock,
   installZeroCliMock,
 } = vi.hoisted(() => ({
@@ -91,6 +92,7 @@ const {
     .mockResolvedValue({ claimed: false, completed: false }),
   mkdirSyncMock: vi.fn(),
   recordSandboxPromptSlackTurnStartMock: vi.fn(),
+  recordChatTurnStartMock: vi.fn(),
   writeFileSyncMock: vi.fn(),
   installZeroCliMock: vi.fn().mockResolvedValue(undefined),
 }));
@@ -99,6 +101,10 @@ vi.mock('node:fs', () => ({
   existsSync: existsSyncMock,
   mkdirSync: mkdirSyncMock,
   writeFileSync: writeFileSyncMock,
+}));
+
+vi.mock('../../mcp/roomote-mcp-server/chat-reply-satisfaction', () => ({
+  recordChatTurnStart: recordChatTurnStartMock,
 }));
 
 type FakeHarnessManager = EventEmitter & {
@@ -282,6 +288,7 @@ describe('runTask', () => {
     existsSyncMock.mockReset();
     existsSyncMock.mockReturnValue(false);
     recordSandboxPromptSlackTurnStartMock.mockReset();
+    recordChatTurnStartMock.mockReset();
     taskRunsActivateSlackReplyTargetMock.mockResolvedValue(true);
 
     createHarnessMock.mockResolvedValue({
@@ -2303,6 +2310,11 @@ describe('runTask', () => {
       runId: 405,
       messageTs: '1710000000.456',
     });
+    expect(recordChatTurnStartMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        turnMessageTs: '1710000000.456',
+      }),
+    );
   });
 
   it('retries blocked deferred resume prompts instead of marking them rejected immediately', async () => {

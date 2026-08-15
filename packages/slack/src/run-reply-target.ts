@@ -8,6 +8,7 @@ export type SlackRunReplyTarget = {
   slackTeamId: string;
   channel: string;
   threadTs: string;
+  reactionsAllowed?: boolean;
 };
 
 function pendingKey(runId: number, messageTs: string) {
@@ -35,6 +36,9 @@ function parseTarget(value: string | null): SlackRunReplyTarget | null {
         slackTeamId: parsed.slackTeamId,
         channel: parsed.channel,
         threadTs: parsed.threadTs,
+        ...(typeof parsed.reactionsAllowed === 'boolean'
+          ? { reactionsAllowed: parsed.reactionsAllowed }
+          : {}),
       };
     }
   } catch {
@@ -60,7 +64,7 @@ export async function authorizeSlackRunReplyTarget(params: {
 export async function activateSlackRunReplyTarget(params: {
   runId: number;
   messageTs: string;
-}): Promise<boolean> {
+}): Promise<SlackRunReplyTarget | false> {
   const redis = getRedis();
   const target = parseTarget(
     await redis.get(pendingKey(params.runId, params.messageTs)),
@@ -76,7 +80,7 @@ export async function activateSlackRunReplyTarget(params: {
     'EX',
     SLACK_RUN_REPLY_TARGET_TTL_SECONDS,
   );
-  return true;
+  return target;
 }
 
 export async function getActiveSlackRunReplyTarget(

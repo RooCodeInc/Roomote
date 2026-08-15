@@ -1193,14 +1193,22 @@ export const runTask = async ({
         }
 
         try {
-          const activated = await sdk.taskRuns.activateSlackReplyTarget({
+          const activeTarget = await sdk.taskRuns.activateSlackReplyTarget({
             runId: taskRun.id,
             messageTs: clientMessageId.slice('slack:'.length),
           });
-          if (!activated) {
+          if (!activeTarget) {
             logger.warn(
               `[runTask] Slack reply target authorization is missing for ${clientMessageId}; delivering with canonical routing`,
             );
+          } else {
+            recordChatTurnStart({
+              turnMessageTs: clientMessageId.slice('slack:'.length),
+              allowReaction: activeTarget.reactionsAllowed,
+              sessionId: pollingState.sessionId,
+              stateFilePath:
+                mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE,
+            });
           }
           return result;
         } catch (error) {

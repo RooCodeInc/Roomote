@@ -45,7 +45,7 @@ describe('Slack run reply targets', () => {
     getMock.mockResolvedValueOnce(JSON.stringify(target));
     await expect(
       activateSlackRunReplyTarget({ runId: 42, messageTs: '333.444' }),
-    ).resolves.toBe(true);
+    ).resolves.toEqual(target);
     expect(setMock).toHaveBeenLastCalledWith(
       'slack:run_reply_target:active:42',
       JSON.stringify(target),
