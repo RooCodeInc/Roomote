@@ -39,7 +39,17 @@ export type BrainGithubPage = {
 export type BrainGithubCollectionResult = {
   pages: BrainGithubPage[];
   nextSince: null;
-  stateUpdates: Array<{ collectorId: string; watermark: Date }>;
+  stateUpdates: Array<{
+    collectorId: string;
+    watermark: Date;
+    cursor?: string | null;
+  }>;
+};
+
+type IncrementalCursor = {
+  since: string;
+  page: number;
+  perPage: number;
 };
 
 type EligibleRepository = {
@@ -61,6 +71,42 @@ type GithubIssue = {
   labels?: Array<string | { name?: string }>;
   pull_request?: unknown;
 };
+
+function parseIncrementalCursor(
+  cursor: string | null,
+): IncrementalCursor | null {
+  if (!cursor) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(cursor) as Partial<IncrementalCursor>;
+    const since =
+      typeof parsed.since === 'string' ? new Date(parsed.since) : null;
+
+    if (
+      !since ||
+      Number.isNaN(since.getTime()) ||
+      typeof parsed.page !== 'number' ||
+      !Number.isInteger(parsed.page) ||
+      parsed.page < 2 ||
+      typeof parsed.perPage !== 'number' ||
+      !Number.isInteger(parsed.perPage) ||
+      parsed.perPage < 1 ||
+      parsed.perPage > 100
+    ) {
+      return null;
+    }
+
+    return {
+      since: since.toISOString(),
+      page: parsed.page,
+      perPage: parsed.perPage,
+    };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Active GitHub repositories whose installation is present and not
@@ -286,10 +332,24 @@ export async function collectBrainGithubIssues(input: {
     try {
       // New repositories start with a short recent window; the separate
       // durable backfill walks their older history.
-      const since =
-        repository.state?.watermark ??
-        new Date(input.now.getTime() - 30 * 24 * 60 * 60 * 1000);
-      const perPage = Math.min(100, input.limit - pages.length);
+      const cursor = parseIncrementalCursor(
+        repository.state?.backfillCursor ?? null,
+      );
+      const since = cursor
+        ? new Date(cursor.since)
+        : (repository.state?.watermark ??
+          new Date(input.now.getTime() - 30 * 24 * 60 * 60 * 1000));
+      const page = cursor?.page ?? 1;
+      const remaining = input.limit - pages.length;
+
+      // Offset pagination is only stable when its page size stays fixed.
+      // This repository will sort ahead of completed ones on the next tick,
+      // when the full budget is available again.
+      if (cursor && remaining < cursor.perPage) {
+        break;
+      }
+
+      const perPage = cursor?.perPage ?? Math.min(100, remaining);
       const octokit = await getInstallationOctokit({
         installationId: repository.installationId,
       });
@@ -301,6 +361,7 @@ export async function collectBrainGithubIssues(input: {
         sort: 'updated',
         direction: 'asc',
         per_page: perPage,
+        page,
       });
 
       const rawIssues = response.data as GithubIssue[];
@@ -330,11 +391,22 @@ export async function collectBrainGithubIssues(input: {
       }
 
       // A short page exhausts this repository through `now`, including the
-      // quiet case. A full page advances only through the last item actually
-      // observed so the next tick resumes the same repository safely.
-      const watermark =
-        rawIssues.length < perPage ? input.now : (maxUpdatedAt ?? since);
-      stateUpdates.push({ collectorId: repository.stateId, watermark });
+      // quiet case. A full page keeps the original lower bound and persists
+      // the next page: a timestamp alone cannot represent a page boundary
+      // that lands inside an `updated_at` tie. The observed timestamp remains
+      // the scheduling watermark so another older repository gets a turn.
+      const exhausted = rawIssues.length < perPage;
+      stateUpdates.push({
+        collectorId: repository.stateId,
+        watermark: exhausted ? input.now : (maxUpdatedAt ?? since),
+        cursor: exhausted
+          ? null
+          : JSON.stringify({
+              since: since.toISOString(),
+              page: page + 1,
+              perPage,
+            }),
+      });
     } catch (error) {
       console.warn(
         `[brainGithub] issue sync failed for ${repository.fullName}: ${

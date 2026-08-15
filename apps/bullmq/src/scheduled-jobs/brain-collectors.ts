@@ -67,6 +67,8 @@ export type CollectorPage = {
 type CollectorStateUpdate = {
   collectorId: string;
   watermark: Date;
+  /** Optional opaque incremental cursor stored on the partition's state row. */
+  cursor?: string | null;
 };
 
 export type CollectorResult = {
@@ -185,6 +187,9 @@ export async function runBrainCollectors(
         for (const update of stateUpdates) {
           await upsertBrainSyncState(db, update.collectorId, {
             watermark: update.watermark,
+            ...(update.cursor !== undefined
+              ? { backfillCursor: update.cursor }
+              : {}),
           });
         }
       }

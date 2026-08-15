@@ -123,8 +123,9 @@ describe('runBrainCollectors', () => {
     );
   });
 
-  it('persists partition watermarks only after every page lands', async () => {
+  it('persists partition progress only after every page lands', async () => {
     const partitionWatermark = new Date('2026-08-13T11:00:00Z');
+    const partitionCursor = '{"page":2}';
     const collector = makeCollector({
       collect: async () => ({
         pages: makePages(1),
@@ -133,6 +134,7 @@ describe('runBrainCollectors', () => {
           {
             collectorId: 'test-collector:partition-a',
             watermark: partitionWatermark,
+            cursor: partitionCursor,
           },
         ],
       }),
@@ -146,6 +148,9 @@ describe('runBrainCollectors', () => {
     expect(syncStateStore.get('test-collector:partition-a')?.watermark).toEqual(
       partitionWatermark,
     );
+    expect(
+      syncStateStore.get('test-collector:partition-a')?.backfillCursor,
+    ).toBe(partitionCursor);
   });
 
   it('holds partition watermarks when a page fails', async () => {

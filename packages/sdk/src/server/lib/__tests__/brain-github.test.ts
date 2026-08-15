@@ -1,6 +1,9 @@
 const githubMocks = vi.hoisted(() => ({
   repositories: [] as Array<{ fullName: string; installationId: number }>,
-  syncState: new Map<string, { watermark: Date | null }>(),
+  syncState: new Map<
+    string,
+    { watermark: Date | null; backfillCursor?: string | null }
+  >(),
   listForRepo: vi.fn(),
   listComments: vi.fn(),
 }));
@@ -175,16 +178,67 @@ describe('GitHub issue collector progress', () => {
     for (const update of first.stateUpdates) {
       githubMocks.syncState.set(update.collectorId, {
         watermark: update.watermark,
+        backfillCursor: update.cursor,
       });
     }
 
     const second = await collectBrainGithubIssues({ now, limit: 100 });
-    expect(second.pages).toHaveLength(100);
+    expect(second.pages).toHaveLength(1);
     expect(second.pages[0]?.slug).toBe('github/acme/b/issues/500');
     expect(githubMocks.listForRepo.mock.calls[1]?.[0]).toMatchObject({
       repo: 'b',
       since: start.toISOString(),
     });
+  });
+
+  it('resumes a full page without skipping issues tied at its boundary', async () => {
+    const start = new Date('2026-08-01T00:00:00Z');
+    const tiedAt = '2026-08-02T00:00:00Z';
+    const now = new Date('2026-08-15T00:00:00Z');
+    githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
+    githubMocks.syncState.set('github-issues:acme/a', { watermark: start });
+    githubMocks.listForRepo
+      .mockResolvedValueOnce({
+        data: Array.from({ length: 100 }, (_, index) =>
+          makeIssue(index + 1, tiedAt),
+        ),
+      })
+      .mockResolvedValueOnce({
+        data: [makeIssue(101, tiedAt)],
+      });
+
+    const first = await collectBrainGithubIssues({ now, limit: 100 });
+    expect(first.stateUpdates).toEqual([
+      {
+        collectorId: 'github-issues:acme/a',
+        watermark: new Date(tiedAt),
+        cursor: JSON.stringify({
+          since: start.toISOString(),
+          page: 2,
+          perPage: 100,
+        }),
+      },
+    ]);
+    githubMocks.syncState.set('github-issues:acme/a', {
+      watermark: first.stateUpdates[0]!.watermark,
+      backfillCursor: first.stateUpdates[0]!.cursor,
+    });
+
+    const second = await collectBrainGithubIssues({ now, limit: 100 });
+    expect(second.pages.map((page) => page.slug)).toEqual([
+      'github/acme/a/issues/101',
+    ]);
+    expect(githubMocks.listForRepo.mock.calls[1]?.[0]).toMatchObject({
+      since: start.toISOString(),
+      page: 2,
+    });
+    expect(second.stateUpdates).toEqual([
+      {
+        collectorId: 'github-issues:acme/a',
+        watermark: now,
+        cursor: null,
+      },
+    ]);
   });
 
   it('backfills a repository connected after the earlier set completed', async () => {
