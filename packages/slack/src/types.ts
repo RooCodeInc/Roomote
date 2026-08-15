@@ -86,6 +86,7 @@ export interface SlackUserInfo {
     profile: {
       display_name: string;
       real_name: string;
+      title?: string;
       email?: string;
     };
   };

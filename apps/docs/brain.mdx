@@ -23,8 +23,10 @@ Roomote fills the Brain from what it can already see:
 - **public Slack channels** the Roomote bot has been added to
 - **GitHub issues** in connected repositories
 - **meeting notes** from Granola, when that integration is connected
-- **deployment member identities**, projected from Roomote accounts and their
-  linked provider handles so agents can connect names across sources
+- **people identities**, projected from Roomote accounts, linked provider
+  handles, and the human members in connected Slack workspace directories;
+  Slack display names, real names, and job titles help agents connect people
+  across sources even when they do not have Roomote accounts
 
 Turning the Brain on also backfills history rather than starting from the
 moment you enabled it. Completed tasks are enqueued immediately, and each
@@ -33,7 +35,9 @@ ticks.
 
 Private Slack channels and DMs are never read. Adding the Roomote bot to a
 public channel is what designates that channel as a source, so the corpus stays
-inside what your team has already made visible company-wide.
+inside what your team has already made visible company-wide. Slack directory
+cards contain names, handles, and job titles, but never copy profile email,
+status, timezone, or avatar fields into the Brain.
 
 ## Turning it on
 

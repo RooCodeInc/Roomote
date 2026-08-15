@@ -6,13 +6,17 @@ import {
   buildGranolaMeetingPage,
   buildPersonIdentityLookup,
   buildPersonIdentityPage,
+  buildSlackDirectoryPersonPage,
   groupSlackMessagesIntoDayPages,
+  isSlackHumanProfile,
   runBrainCollectors,
   selectPersonIdentityBatch,
+  slackDirectoryProfileFromApi,
   type BrainCollector,
   type BrainSink,
   type CollectorPage,
   type PersonIdentityRecord,
+  type SlackDirectoryProfile,
   type SlackChannelMessage,
 } from '../brain-collectors';
 import { BrainRateLimitedError } from '../brain-outbox-drain';
@@ -761,6 +765,7 @@ describe('person identity pages', () => {
         provider: 'Slack',
         identifier: 'U08TMEM25CP',
         display: 'Dan Riccio',
+        title: 'VP of Engineering',
         updatedAt: new Date('2026-08-01T00:00:00Z'),
       },
       {
@@ -784,7 +789,9 @@ describe('person identity pages', () => {
     expect(page.content).toContain('type: person');
     expect(page.content).toContain('daniel-lxs');
     expect(page.content).toContain('U08TMEM25CP');
-    expect(page.content).toContain('- Slack: Dan Riccio (U08TMEM25CP)');
+    expect(page.content).toContain(
+      '- Slack: Dan Riccio (U08TMEM25CP) — VP of Engineering',
+    );
     expect(page.content).toContain('Joined Roomote on 2026-01-01.');
     expect(page.content).not.toContain('dan@example.com');
   });
@@ -833,6 +840,80 @@ describe('person identity pages', () => {
     expect(page.content).toContain('aliases: []');
     expect(page.content).not.toContain('U08TMEM25CP');
     expect(page.content).not.toContain('daniel-lxs');
+  });
+
+  it('normalizes Slack directory profiles and excludes bots and app users', () => {
+    const profile = slackDirectoryProfileFromApi({
+      teamId: 'TROOMOTE',
+      teamName: 'Roomote',
+      user: {
+        id: 'UADA',
+        name: 'ada',
+        real_name: 'Ada Lovelace',
+        updated: 1_786_817_600,
+        profile: { display_name: 'Ada', title: 'Mathematician' },
+      },
+    });
+
+    expect(profile).toMatchObject({
+      displayName: 'Ada',
+      realName: 'Ada Lovelace',
+      title: 'Mathematician',
+    });
+    expect(profile && isSlackHumanProfile(profile, 'UROOMOTE')).toBe(true);
+    expect(
+      profile && isSlackHumanProfile({ ...profile, isBot: true }, 'UROOMOTE'),
+    ).toBe(false);
+    expect(
+      profile &&
+        isSlackHumanProfile({ ...profile, isAppUser: true }, 'UROOMOTE'),
+    ).toBe(false);
+  });
+
+  it('builds standalone person cards for Slack members without Roomote accounts', () => {
+    const profile: SlackDirectoryProfile = {
+      slackUserId: 'UADA',
+      slackTeamId: 'TROOMOTE',
+      slackTeamName: 'Roomote',
+      username: 'ada',
+      displayName: 'Ada',
+      realName: 'Ada Lovelace',
+      title: 'Mathematician',
+      isDeleted: false,
+      isBot: false,
+      isAppUser: false,
+      profileUpdatedAt: new Date('2026-08-15T00:00:00Z'),
+    };
+    const page = buildSlackDirectoryPersonPage(profile);
+
+    expect(page.slug).toMatch(/^people\/slack-member-[a-f0-9]{16}$/);
+    expect(page.title).toBe('Ada');
+    expect(page.content).toContain('type: person');
+    expect(page.content).toContain('Title: Mathematician');
+    expect(page.content).toContain('- Slack: ada (UADA)');
+  });
+
+  it('turns a mapped Slack profile into an alias of its canonical Roomote card', () => {
+    const page = buildSlackDirectoryPersonPage(
+      {
+        slackUserId: 'U08TMEM25CP',
+        slackTeamId: 'TROOMOTE',
+        slackTeamName: 'Roomote',
+        username: 'dan',
+        displayName: 'Dan Riccio',
+        realName: 'Daniel Riccio',
+        title: 'VP of Engineering',
+        isDeleted: false,
+        isBot: false,
+        isAppUser: false,
+        profileUpdatedAt: new Date('2026-08-15T00:00:00Z'),
+      },
+      { slug: 'people/roomote-member-abc', title: 'Dan Riccio' },
+    );
+
+    expect(page.content).toContain('type: person-alias');
+    expect(page.content).toContain('canonical: "people/roomote-member-abc"');
+    expect(page.content).toContain('[Dan Riccio](people/roomote-member-abc)');
   });
 
   it('paginates full reconciliation sweeps without timestamp gaps', () => {
