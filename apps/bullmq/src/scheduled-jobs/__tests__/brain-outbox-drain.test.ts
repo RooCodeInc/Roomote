@@ -63,6 +63,26 @@ describe('task memory page identity', () => {
     expect(first.slug).toBe('tasks/task-1/runs/101');
     expect(followUp.slug).toBe('tasks/task-1/runs/102');
   });
+
+  it('dates live and backfilled memories by task completion', () => {
+    const page = buildMemoryPage({ ...base, runId: 101 });
+
+    expect(page.content).toContain('\ndate: 2026-08-13\n');
+    expect(page.content).toContain(
+      '\ncompleted_at: 2026-08-13T10:00:00.000Z\n',
+    );
+  });
+
+  it('does not emit an invalid date when legacy completion time is missing', () => {
+    const page = buildMemoryPage({
+      ...base,
+      completedAt: null,
+      runId: 101,
+    });
+
+    expect(page.content).not.toContain('\ndate:');
+    expect(page.content).toContain('\ncompleted_at: unknown\n');
+  });
 });
 
 describe('redactBrainText', () => {
