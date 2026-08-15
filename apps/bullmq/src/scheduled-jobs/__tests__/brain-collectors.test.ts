@@ -212,7 +212,7 @@ describe('runBrainCollectors', () => {
     expect(collect).not.toHaveBeenCalled();
   });
 
-  it('caps pages per collector per tick', async () => {
+  it('caps pages per collector per pass', async () => {
     const collector = makeCollector({
       collect: async () => ({ pages: makePages(150), nextSince: null }),
     });
@@ -241,7 +241,7 @@ describe('runBrainCollectors', () => {
         sink,
         collectors: [firstCollector, secondCollector],
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ backfillProgressed: false, interrupted: true });
 
     expect(sink).toHaveBeenCalledTimes(1);
     expect(secondCollect).not.toHaveBeenCalled();
@@ -287,7 +287,7 @@ describe('runBrainCollectors', () => {
         sink,
         collectors: [firstCollector, secondCollector],
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ backfillProgressed: false, interrupted: false });
 
     expect(secondCollect).toHaveBeenCalledTimes(1);
     expect(sink).toHaveBeenCalledTimes(1);
@@ -319,6 +319,29 @@ describe('runBrainCollectors', () => {
 });
 
 describe('runBrainCollectors deep backfill', () => {
+  it('skips incremental upstream polling during historical continuation', async () => {
+    const collect = vi.fn<BrainCollector['collect']>();
+    const backfill = vi
+      .fn<NonNullable<BrainCollector['backfill']>>()
+      .mockResolvedValue({
+        pages: makePages(1, 'old'),
+        nextCursor: null,
+        done: true,
+      });
+    const collector = makeCollector({ collect, backfill });
+    const sink: BrainSink = vi.fn(async () => {});
+
+    await runBrainCollectors(connection, {
+      sink,
+      collectors: [collector],
+      includeIncremental: false,
+    });
+
+    expect(collect).not.toHaveBeenCalled();
+    expect(backfill).toHaveBeenCalledTimes(1);
+    expect(sink).toHaveBeenCalledTimes(1);
+  });
+
   it('runs the incremental phase first, then backfill, while backfill is incomplete', async () => {
     const collect = vi
       .fn<BrainCollector['collect']>()
@@ -346,7 +369,7 @@ describe('runBrainCollectors deep backfill', () => {
     expect(sink).toHaveBeenCalledTimes(2);
   });
 
-  it('respects the per-tick backfill page budget and persists each cursor', async () => {
+  it('respects the per-pass backfill page budget and persists each cursor', async () => {
     let step = 0;
     const backfill = vi
       .fn<NonNullable<BrainCollector['backfill']>>()
@@ -361,7 +384,7 @@ describe('runBrainCollectors deep backfill', () => {
     const collector = makeCollector({ backfill });
     const sink: BrainSink = vi.fn(async () => {});
 
-    await runBrainCollectors(connection, {
+    const result = await runBrainCollectors(connection, {
       sink,
       collectors: [collector],
     });
@@ -373,6 +396,10 @@ describe('runBrainCollectors deep backfill', () => {
     expect(backfill.mock.calls[1]?.[0].cursor).toBe('c1');
     expect(syncStateStore.get(collector.id)?.backfillCursor).toBe('c2');
     expect(syncStateStore.get(collector.id)?.backfillCompletedAt).toBeNull();
+    expect(result).toEqual({
+      backfillProgressed: true,
+      interrupted: false,
+    });
   });
 
   it('keeps the last landed cursor when the sink 429s mid-backfill', async () => {
@@ -403,7 +430,7 @@ describe('runBrainCollectors deep backfill', () => {
         sink,
         collectors: [collector],
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toEqual({ backfillProgressed: false, interrupted: false });
 
     // The first step's cursor landed; the failed second step's did not.
     expect(syncStateStore.get(collector.id)?.backfillCursor).toBe('c1');
@@ -475,13 +502,17 @@ describe('runBrainCollectors deep backfill', () => {
       .mockResolvedValue({ pages: [], nextCursor: null, done: false });
     const collector = makeCollector({ backfill });
 
-    await runBrainCollectors(connection, {
+    const result = await runBrainCollectors(connection, {
       sink: vi.fn(async () => {}),
       collectors: [collector],
     });
 
     expect(backfill).toHaveBeenCalledTimes(1);
     expect(syncStateStore.get(collector.id)?.backfillCompletedAt).toBeNull();
+    expect(result).toEqual({
+      backfillProgressed: false,
+      interrupted: false,
+    });
   });
 });
 

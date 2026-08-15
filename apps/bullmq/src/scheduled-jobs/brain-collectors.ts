@@ -30,23 +30,23 @@ import {
 const LOG_PREFIX = '[brainCollectors]';
 
 /**
- * Per-collector, per-tick ceiling on pages written to the brain by the
+ * Per-collector, per-pass ceiling on pages written to the brain by the
  * incremental phase. Collectors are handed this as their `limit` and are
  * expected to return a `nextSince` covering only the pages they returned.
  * A collector that overshoots anyway has its watermark held back entirely
- * this tick, because the engine cannot know which history the pages it had
+ * this pass, because the engine cannot know which history the pages it had
  * to drop covered, and a watermark past unwritten pages loses them for good.
  */
-const MAX_PAGES_PER_COLLECTOR_PER_TICK = 100;
+const MAX_PAGES_PER_COLLECTOR_PER_PASS = 100;
 
 /**
- * Per-collector, per-tick page budget for the deep-backfill phase. Each
+ * Per-collector, per-pass page budget for the deep-backfill phase. Each
  * backfill step's pages are always fully posted before the cursor persists
  * (never a cursor past unposted pages), so a single step may overshoot the
  * budget by at most one upstream page size (~30-200 messages' worth of day
  * pages).
  */
-const MAX_BACKFILL_PAGES_PER_COLLECTOR_PER_TICK = 100;
+const MAX_BACKFILL_PAGES_PER_COLLECTOR_PER_PASS = 100;
 
 /**
  * Companion ceiling on backfill steps. The page budget alone does not bound a
@@ -56,7 +56,7 @@ const MAX_BACKFILL_PAGES_PER_COLLECTOR_PER_TICK = 100;
  * budget at all. Cursors persist per step, so a tick that stops here resumes
  * where it left off.
  */
-const MAX_BACKFILL_STEPS_PER_COLLECTOR_PER_TICK = 25;
+const MAX_BACKFILL_STEPS_PER_COLLECTOR_PER_PASS = 25;
 
 export type CollectorPage = {
   slug: string;
@@ -82,6 +82,13 @@ export type CollectorResult = {
   stateUpdates?: CollectorStateUpdate[];
 };
 
+type BrainCollectorRunResult = {
+  /** At least one durable deep-backfill cursor advanced in this pass. */
+  backfillProgressed: boolean;
+  /** Stop fast continuation and wait for the normal scheduled retry. */
+  interrupted: boolean;
+};
+
 export interface BrainCollector {
   id: string;
   displayName: string;
@@ -97,7 +104,7 @@ export interface BrainCollector {
    * resume token (persisted durably between passes); `done: true` marks the
    * backfill finished forever. A step that returns zero pages with an
    * unchanged cursor signals "no progress" (e.g. upstream auth trouble) and
-   * ends this tick's backfill without marking it done.
+   * ends this pass's backfill without marking it done.
    */
   backfill?(input: { cursor: string | null; limit: number }): Promise<{
     pages: CollectorPage[];
@@ -134,10 +141,17 @@ export type BrainSink = (
  */
 export async function runBrainCollectors(
   connection: BrainConnection,
-  options: { sink?: BrainSink; collectors?: BrainCollector[] } = {},
-): Promise<void> {
+  options: {
+    sink?: BrainSink;
+    collectors?: BrainCollector[];
+    /** Skip upstream incremental polls during fast historical continuation. */
+    includeIncremental?: boolean;
+  } = {},
+): Promise<BrainCollectorRunResult> {
   const sink = options.sink ?? postToBrain;
   const collectors = options.collectors ?? BRAIN_COLLECTORS;
+  const includeIncremental = options.includeIncremental ?? true;
+  let backfillProgressed = false;
 
   for (const collector of collectors) {
     try {
@@ -147,68 +161,72 @@ export async function runBrainCollectors(
 
       const state = await getBrainSyncState(db, collector.id);
 
-      // Incremental phase first: new activity reaches the brain within a
-      // tick even while a long backfill is still draining.
-      const {
-        pages,
-        nextSince,
-        stateUpdates = [],
-      } = await collector.collect({
-        since: state?.watermark ?? null,
-        now: new Date(),
-        limit: MAX_PAGES_PER_COLLECTOR_PER_TICK,
-      });
-      const overshot = pages.length > MAX_PAGES_PER_COLLECTOR_PER_TICK;
-      const capped = pages.slice(0, MAX_PAGES_PER_COLLECTOR_PER_TICK);
-
-      for (const page of capped) {
-        await sink(
-          { ...page, content: redactBrainText(page.content) },
-          connection,
-        );
-      }
-
-      if (overshot) {
-        console.warn(
-          `${LOG_PREFIX} ${collector.id} returned ${pages.length} pages over a limit of ${MAX_PAGES_PER_COLLECTOR_PER_TICK}; holding its watermark so the remainder is re-collected`,
-        );
-      }
-
-      // Advance only after every page landed; a mid-batch failure leaves the
-      // watermark behind so the next tick retries the same idempotent slugs.
-      if (nextSince && !overshot) {
-        await upsertBrainSyncState(db, collector.id, {
-          watermark: nextSince,
+      if (includeIncremental) {
+        // Incremental phase runs once per scheduled tick: new activity stays
+        // fresh without repeating upstream API polls in the one-second
+        // historical continuation loop.
+        const {
+          pages,
+          nextSince,
+          stateUpdates = [],
+        } = await collector.collect({
+          since: state?.watermark ?? null,
+          now: new Date(),
+          limit: MAX_PAGES_PER_COLLECTOR_PER_PASS,
         });
-      }
+        const overshot = pages.length > MAX_PAGES_PER_COLLECTOR_PER_PASS;
+        const capped = pages.slice(0, MAX_PAGES_PER_COLLECTOR_PER_PASS);
 
-      if (!overshot) {
-        for (const update of stateUpdates) {
-          await upsertBrainSyncState(db, update.collectorId, {
-            watermark: update.watermark,
-            ...(update.cursor !== undefined
-              ? { backfillCursor: update.cursor }
-              : {}),
+        for (const page of capped) {
+          await sink(
+            { ...page, content: redactBrainText(page.content) },
+            connection,
+          );
+        }
+
+        if (overshot) {
+          console.warn(
+            `${LOG_PREFIX} ${collector.id} returned ${pages.length} pages over a limit of ${MAX_PAGES_PER_COLLECTOR_PER_PASS}; holding its watermark so the remainder is re-collected`,
+          );
+        }
+
+        // Advance only after every page landed; a mid-batch failure leaves the
+        // watermark behind so the next tick retries the same idempotent slugs.
+        if (nextSince && !overshot) {
+          await upsertBrainSyncState(db, collector.id, {
+            watermark: nextSince,
           });
         }
-      }
 
-      if (capped.length > 0) {
-        console.log(
-          `${LOG_PREFIX} ${collector.id} ingested ${capped.length} pages`,
-        );
+        if (!overshot) {
+          for (const update of stateUpdates) {
+            await upsertBrainSyncState(db, update.collectorId, {
+              watermark: update.watermark,
+              ...(update.cursor !== undefined
+                ? { backfillCursor: update.cursor }
+                : {}),
+            });
+          }
+        }
+
+        if (capped.length > 0) {
+          console.log(
+            `${LOG_PREFIX} ${collector.id} ingested ${capped.length} pages`,
+          );
+        }
       }
 
       const backfill = collector.backfill?.bind(collector);
 
       if (backfill && !state?.backfillCompletedAt) {
-        await drainCollectorBackfill({
-          collectorId: collector.id,
-          backfill,
-          startCursor: state?.backfillCursor ?? null,
-          connection,
-          sink,
-        });
+        backfillProgressed =
+          (await drainCollectorBackfill({
+            collectorId: collector.id,
+            backfill,
+            startCursor: state?.backfillCursor ?? null,
+            connection,
+            sink,
+          })) || backfillProgressed;
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -221,7 +239,7 @@ export async function runBrainCollectors(
             isBrainRateLimited(error) ? 'rate limited' : 'cannot embed'
           }); ending collector pass until next tick`,
         );
-        return;
+        return { backfillProgressed, interrupted: true };
       }
 
       console.warn(
@@ -229,10 +247,12 @@ export async function runBrainCollectors(
       );
     }
   }
+
+  return { backfillProgressed, interrupted: false };
 }
 
 /**
- * Drain bounded backfill steps until the tick's budget is spent, the
+ * Drain bounded backfill steps until the pass's budget is spent, the
  * collector reports done, or a step makes no progress. Each step's pages are
  * fully posted before its cursor persists, so the durable cursor never moves
  * past unposted history; a sink failure mid-step leaves the previous cursor
@@ -244,14 +264,14 @@ async function drainCollectorBackfill(input: {
   startCursor: string | null;
   connection: BrainConnection;
   sink: BrainSink;
-}): Promise<void> {
+}): Promise<boolean> {
   const { collectorId, backfill, startCursor, connection, sink } = input;
   let cursor = startCursor;
-  let budget = MAX_BACKFILL_PAGES_PER_COLLECTOR_PER_TICK;
+  let budget = MAX_BACKFILL_PAGES_PER_COLLECTOR_PER_PASS;
   let steps = 0;
   let ingested = 0;
 
-  while (budget > 0 && steps < MAX_BACKFILL_STEPS_PER_COLLECTOR_PER_TICK) {
+  while (budget > 0 && steps < MAX_BACKFILL_STEPS_PER_COLLECTOR_PER_PASS) {
     steps++;
     const step = await backfill({ cursor, limit: budget });
 
@@ -271,9 +291,9 @@ async function drainCollectorBackfill(input: {
         backfillCompletedAt: new Date(),
       });
       console.log(
-        `${LOG_PREFIX} ${collectorId} deep backfill complete (${ingested} pages this tick)`,
+        `${LOG_PREFIX} ${collectorId} deep backfill complete (${ingested} pages this pass)`,
       );
-      return;
+      return true;
     }
 
     const progressed = step.nextCursor !== cursor || step.pages.length > 0;
@@ -284,15 +304,17 @@ async function drainCollectorBackfill(input: {
     cursor = step.nextCursor;
 
     if (!progressed) {
-      return;
+      return steps > 1 || ingested > 0;
     }
   }
 
   if (ingested > 0) {
     console.log(
-      `${LOG_PREFIX} ${collectorId} backfilled ${ingested} pages; resuming next tick`,
+      `${LOG_PREFIX} ${collectorId} backfilled ${ingested} pages; resuming next pass`,
     );
   }
+
+  return cursor !== startCursor || ingested > 0;
 }
 
 /**
@@ -603,7 +625,7 @@ async function collectSlackPublicChannelMessages(input: {
   );
 
   // Oldest partitions go first so a continuously busy channel cannot starve
-  // another channel when the shared per-tick page budget is exhausted.
+  // another channel when the shared per-pass page budget is exhausted.
   entriesWithState.sort(
     (a, b) =>
       (a.state?.watermark?.getTime() ?? 0) -
@@ -714,7 +736,7 @@ async function collectSlackPublicChannelMessages(input: {
 
     if (pages.length + channelPages.length > input.limit) {
       // This partition could not fit, but smaller partitions may still use
-      // the remaining budget. Its watermark stays behind for the next tick.
+      // the remaining budget. Its watermark stays behind for the next pass.
       continue;
     }
 

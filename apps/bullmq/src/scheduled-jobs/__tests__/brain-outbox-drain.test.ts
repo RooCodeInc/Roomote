@@ -6,12 +6,16 @@ const {
   mockBackfillEvents,
   mockClaimEvents,
   mockGetSyncState,
+  mockPullRequestFacts,
+  mockRunBrainCollectors,
 } = vi.hoisted(() => ({
   mockResolveConnection: vi.fn(),
   mockResolveBrainProvider: vi.fn(),
   mockBackfillEvents: vi.fn(),
   mockClaimEvents: vi.fn(),
   mockGetSyncState: vi.fn(),
+  mockPullRequestFacts: vi.fn(),
+  mockRunBrainCollectors: vi.fn(),
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -24,6 +28,15 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
 
   return {
     ...original,
+    db: {
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({
+            orderBy: vi.fn(() => ({ limit: mockPullRequestFacts })),
+          })),
+        })),
+      })),
+    },
     backfillBrainMemoryEvents: mockBackfillEvents,
     claimPendingBrainMemoryEvents: mockClaimEvents,
     getBrainSyncState: mockGetSyncState,
@@ -31,20 +44,157 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
   };
 });
 
+vi.mock('../brain-collectors', () => ({
+  runBrainCollectors: mockRunBrainCollectors,
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockGetSyncState.mockResolvedValue(null);
   mockClaimEvents.mockResolvedValue([]);
+  mockPullRequestFacts.mockResolvedValue([]);
+  mockRunBrainCollectors.mockResolvedValue({
+    backfillProgressed: false,
+    interrupted: false,
+  });
 });
 
 import {
+  brainCollectorsJob,
   brainOutboxDrainJob,
   buildMemoryPage,
+  drainBrainHistoricalIngestion,
+  getPullRequestFactsResumeCursor,
   isBrainNotReady,
   isBrainRateLimited,
   postToBrain,
   redactBrainText,
 } from '../brain-outbox-drain';
+
+describe('PR fact resume cursor', () => {
+  const state = {
+    watermark: new Date('2026-08-14T10:00:00Z'),
+    backfillCursor: JSON.stringify({
+      updatedAt: '2026-08-14T10:00:00.000Z',
+      id: '00000000-0000-0000-0000-000000000042',
+    }),
+  };
+
+  it('re-reads an overlap window at the start of a scheduled scan', () => {
+    expect(getPullRequestFactsResumeCursor(state, true)).toEqual({
+      updatedAt: new Date('2026-08-13T10:00:00.000Z'),
+      id: null,
+    });
+  });
+
+  it('keeps the exact tuple cursor within fast continuation', () => {
+    expect(getPullRequestFactsResumeCursor(state, false)).toEqual({
+      updatedAt: new Date('2026-08-14T10:00:00.000Z'),
+      id: '00000000-0000-0000-0000-000000000042',
+    });
+  });
+});
+
+describe('collector continuation orchestration', () => {
+  beforeEach(() => {
+    mockResolveConnection.mockResolvedValue({
+      baseUrl: 'http://brain.test',
+      token: 'ingest-token',
+    });
+    mockResolveBrainProvider.mockResolvedValue({
+      providerId: 'openrouter',
+      apiKey: 'sk-or',
+    });
+  });
+
+  it('runs incremental integrations only on the scheduled pass', async () => {
+    vi.useFakeTimers();
+    mockRunBrainCollectors
+      .mockResolvedValueOnce({
+        backfillProgressed: true,
+        interrupted: false,
+      })
+      .mockResolvedValueOnce({
+        backfillProgressed: false,
+        interrupted: false,
+      });
+
+    try {
+      const job = brainCollectorsJob();
+      await vi.runAllTimersAsync();
+      await job;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(mockRunBrainCollectors).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      { includeIncremental: true },
+    );
+    expect(mockRunBrainCollectors).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      { includeIncremental: false },
+    );
+  });
+
+  it('stops before collectors when PR-fact ingestion hits Brain backpressure', async () => {
+    mockPullRequestFacts.mockResolvedValue([
+      {
+        id: 'pr-fact-1',
+        repositoryFullName: 'owner/repo',
+        prNumber: 42,
+        title: 'Ship it',
+        htmlUrl: 'https://example.test/owner/repo/pull/42',
+        authorLogin: 'octocat',
+        state: 'merged',
+        mergedAtRemote: new Date('2026-08-14T10:00:00Z'),
+        updatedAt: new Date('2026-08-14T11:00:00Z'),
+      },
+    ]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('rate limited', { status: 429 })),
+    );
+
+    try {
+      await brainCollectorsJob();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+
+    expect(mockRunBrainCollectors).not.toHaveBeenCalled();
+  });
+});
+
+describe('historical ingestion continuation', () => {
+  it('keeps running bounded passes while backfill makes progress', async () => {
+    const runPass = vi
+      .fn()
+      .mockResolvedValueOnce({ progressed: true, interrupted: false })
+      .mockResolvedValueOnce({ progressed: true, interrupted: false })
+      .mockResolvedValueOnce({ progressed: false, interrupted: false });
+    const wait = vi.fn(async () => {});
+
+    await drainBrainHistoricalIngestion({ runPass, wait });
+
+    expect(runPass).toHaveBeenCalledTimes(3);
+    expect(wait).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops immediately on Brain backpressure', async () => {
+    const runPass = vi
+      .fn()
+      .mockResolvedValue({ progressed: true, interrupted: true });
+    const wait = vi.fn(async () => {});
+
+    await drainBrainHistoricalIngestion({ runPass, wait });
+
+    expect(runPass).toHaveBeenCalledTimes(1);
+    expect(wait).not.toHaveBeenCalled();
+  });
+});
 
 describe('task memory page identity', () => {
   const base = {

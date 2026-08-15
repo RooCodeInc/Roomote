@@ -15,7 +15,14 @@
 
 import { readFileSync } from 'node:fs';
 
-import { and, db, eq, isNull, mcpConnections } from '@roomote/db/server';
+import {
+  and,
+  db,
+  eq,
+  isNull,
+  mcpConnections,
+  resetBrainIngestionState,
+} from '@roomote/db/server';
 import { decrypt, encrypt } from '@roomote/db/encryption';
 import { Env, isBrainConfigured } from '@roomote/env';
 import {
@@ -400,6 +407,12 @@ async function provisionAndStoreBrainClients(
           updatedAt: new Date(),
         },
       });
+
+    // Provisioning is also how Roomote detects a recreated gbrain database:
+    // the old OAuth clients disappear with the corpus. Its ingestion
+    // checkpoints live in Roomote's Postgres database, so reset them here or
+    // the fresh Brain would incorrectly skip completed backfills.
+    await resetBrainIngestionState(db);
 
     console.log('[brain] provisioned scoped clients for the Brain');
 
