@@ -34,6 +34,11 @@ This is useful when you want to:
 - pull the result of a Roomote task into your current conversation
 - send follow-up instructions or cancel work that is no longer needed
 
+Follow-up instructions normally wait behind the task's current turn. When the
+new instruction must take effect immediately, ask your MCP client to steer the
+running task; steering interrupts the active turn instead of adding the message
+to the task queue.
+
 ### Bring in Roomote and chat context
 
 Ask what your Roomote deployment can do or which integrations are connected.
