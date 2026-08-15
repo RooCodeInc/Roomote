@@ -235,6 +235,7 @@ async function maybeNotifyPlatformIssue(params: {
       columns: {
         botAccessToken: true,
         isActive: true,
+        teamId: true,
       },
     }),
   ]);
@@ -317,7 +318,10 @@ async function maybeNotifyPlatformIssue(params: {
     threadTs: messageTs,
     summaryText: message.text,
     postedAt: new Date(),
-    metadata: { sourceTaskId: params.taskId },
+    metadata: {
+      sourceTaskId: params.taskId,
+      slackTeamId: slackInstallation.teamId,
+    },
   });
 
   await markPlatformIssueReportPosted(params.reportRowId);

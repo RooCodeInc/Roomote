@@ -22,6 +22,9 @@ vi.mock('@roomote/sdk/server', () => ({
 }));
 
 vi.mock('@roomote/slack', () => ({
+  getSlackTaskRunWorkspacePredicate: vi.fn((slackTeamId: string) => ({
+    workspaceTeamId: slackTeamId,
+  })),
   getLatestSlackBotReply: getLatestSlackBotReplyMock,
 }));
 
@@ -126,6 +129,47 @@ describe('findRoomoteOwnedSlackThread', () => {
       taskId: 'task-source',
       userId: 'user-1',
       isAutomationReportThread: true,
+    });
+    expect(whereMock).toHaveBeenNthCalledWith(2, {
+      conditions: [
+        { left: 'tasks.id', right: 'task-source' },
+        { workspaceTeamId: 'T1' },
+        { isNull: 'tasks.deletedAt' },
+      ],
+    });
+  });
+
+  it('rejects a tracked report alias posted by another Slack workspace', async () => {
+    taskRunRowsMock.mockResolvedValueOnce([]);
+    findBackgroundAutomationSlackThreadMock.mockResolvedValue({
+      automationKey: 'platform_issue_alerts',
+      metadata: { sourceTaskId: 'task-source', slackTeamId: 'T2' },
+    });
+
+    await expect(findRoomoteOwnedSlackThread(THREAD)).resolves.toBeNull();
+    expect(taskRunRowsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts a tracked report alias posted by the inbound Slack workspace', async () => {
+    taskRunRowsMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { initiatorUserId: 'user-1', actingUserId: null },
+      ]);
+    findBackgroundAutomationSlackThreadMock.mockResolvedValue({
+      automationKey: 'platform_issue_alerts',
+      metadata: { sourceTaskId: 'task-source', slackTeamId: 'T1' },
+    });
+
+    await expect(findRoomoteOwnedSlackThread(THREAD)).resolves.toMatchObject({
+      taskId: 'task-source',
+      isAutomationReportThread: true,
+    });
+    expect(whereMock).toHaveBeenNthCalledWith(2, {
+      conditions: [
+        { left: 'tasks.id', right: 'task-source' },
+        { isNull: 'tasks.deletedAt' },
+      ],
     });
   });
 

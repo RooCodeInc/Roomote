@@ -4,6 +4,7 @@ import {
 } from '@roomote/cloud-agents';
 import { recordSlackConversationMessageBestEffort } from '@roomote/sdk/server';
 import {
+  getSlackTaskRunWorkspacePredicate,
   getLatestSlackBotReply,
   type SlackEvent,
   type SlackNotifier,
@@ -150,17 +151,12 @@ export async function findRoomoteOwnedSlackThread(params: {
       : null;
 
   if (sourceTaskId) {
-    const sourceTaskRun = existingSlackTaskRuns.find(
-      (job) => job.taskId === sourceTaskId,
-    );
-
-    if (sourceTaskRun) {
-      return {
-        userId: sourceTaskRun.userId,
-        slackUserId: null,
-        isAutomationReportThread: true,
-        taskId: sourceTaskRun.taskId,
-      };
+    const trackedSlackTeamId =
+      typeof trackedAutomationThread?.metadata.slackTeamId === 'string'
+        ? trackedAutomationThread.metadata.slackTeamId
+        : null;
+    if (trackedSlackTeamId && trackedSlackTeamId !== params.teamId) {
+      return fallbackMatch;
     }
 
     const [sourceTaskRunById] = await db
@@ -170,7 +166,15 @@ export async function findRoomoteOwnedSlackThread(params: {
       })
       .from(tasks)
       .innerJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
-      .where(and(eq(tasks.id, sourceTaskId), isNull(tasks.deletedAt)))
+      .where(
+        and(
+          eq(tasks.id, sourceTaskId),
+          ...(trackedSlackTeamId
+            ? []
+            : [getSlackTaskRunWorkspacePredicate(params.teamId)]),
+          isNull(tasks.deletedAt),
+        ),
+      )
       .orderBy(desc(taskRuns.createdAt))
       .limit(1);
 
@@ -183,6 +187,8 @@ export async function findRoomoteOwnedSlackThread(params: {
         isAutomationReportThread: true,
       };
     }
+
+    return fallbackMatch;
   }
 
   const trackedBotReply = await getLatestSlackBotReply(

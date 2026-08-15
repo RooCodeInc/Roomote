@@ -291,7 +291,7 @@ describe('platform issue alert delivery', () => {
       }),
     ).resolves.toMatchObject({
       automationKey: 'platform_issue_alerts',
-      metadata: { sourceTaskId: taskId },
+      metadata: { sourceTaskId: taskId, slackTeamId: 'T123' },
     });
 
     const reportRow = await findReportRow(taskId);
