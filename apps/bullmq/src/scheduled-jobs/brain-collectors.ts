@@ -141,10 +141,16 @@ export type BrainSink = (
  */
 export async function runBrainCollectors(
   connection: BrainConnection,
-  options: { sink?: BrainSink; collectors?: BrainCollector[] } = {},
+  options: {
+    sink?: BrainSink;
+    collectors?: BrainCollector[];
+    /** Skip upstream incremental polls during fast historical continuation. */
+    includeIncremental?: boolean;
+  } = {},
 ): Promise<BrainCollectorRunResult> {
   const sink = options.sink ?? postToBrain;
   const collectors = options.collectors ?? BRAIN_COLLECTORS;
+  const includeIncremental = options.includeIncremental ?? true;
   let backfillProgressed = false;
 
   for (const collector of collectors) {
@@ -155,56 +161,59 @@ export async function runBrainCollectors(
 
       const state = await getBrainSyncState(db, collector.id);
 
-      // Incremental phase first: new activity reaches the brain within a
-      // tick even while a long backfill is still draining.
-      const {
-        pages,
-        nextSince,
-        stateUpdates = [],
-      } = await collector.collect({
-        since: state?.watermark ?? null,
-        now: new Date(),
-        limit: MAX_PAGES_PER_COLLECTOR_PER_PASS,
-      });
-      const overshot = pages.length > MAX_PAGES_PER_COLLECTOR_PER_PASS;
-      const capped = pages.slice(0, MAX_PAGES_PER_COLLECTOR_PER_PASS);
-
-      for (const page of capped) {
-        await sink(
-          { ...page, content: redactBrainText(page.content) },
-          connection,
-        );
-      }
-
-      if (overshot) {
-        console.warn(
-          `${LOG_PREFIX} ${collector.id} returned ${pages.length} pages over a limit of ${MAX_PAGES_PER_COLLECTOR_PER_PASS}; holding its watermark so the remainder is re-collected`,
-        );
-      }
-
-      // Advance only after every page landed; a mid-batch failure leaves the
-      // watermark behind so the next tick retries the same idempotent slugs.
-      if (nextSince && !overshot) {
-        await upsertBrainSyncState(db, collector.id, {
-          watermark: nextSince,
+      if (includeIncremental) {
+        // Incremental phase runs once per scheduled tick: new activity stays
+        // fresh without repeating upstream API polls in the one-second
+        // historical continuation loop.
+        const {
+          pages,
+          nextSince,
+          stateUpdates = [],
+        } = await collector.collect({
+          since: state?.watermark ?? null,
+          now: new Date(),
+          limit: MAX_PAGES_PER_COLLECTOR_PER_PASS,
         });
-      }
+        const overshot = pages.length > MAX_PAGES_PER_COLLECTOR_PER_PASS;
+        const capped = pages.slice(0, MAX_PAGES_PER_COLLECTOR_PER_PASS);
 
-      if (!overshot) {
-        for (const update of stateUpdates) {
-          await upsertBrainSyncState(db, update.collectorId, {
-            watermark: update.watermark,
-            ...(update.cursor !== undefined
-              ? { backfillCursor: update.cursor }
-              : {}),
+        for (const page of capped) {
+          await sink(
+            { ...page, content: redactBrainText(page.content) },
+            connection,
+          );
+        }
+
+        if (overshot) {
+          console.warn(
+            `${LOG_PREFIX} ${collector.id} returned ${pages.length} pages over a limit of ${MAX_PAGES_PER_COLLECTOR_PER_PASS}; holding its watermark so the remainder is re-collected`,
+          );
+        }
+
+        // Advance only after every page landed; a mid-batch failure leaves the
+        // watermark behind so the next tick retries the same idempotent slugs.
+        if (nextSince && !overshot) {
+          await upsertBrainSyncState(db, collector.id, {
+            watermark: nextSince,
           });
         }
-      }
 
-      if (capped.length > 0) {
-        console.log(
-          `${LOG_PREFIX} ${collector.id} ingested ${capped.length} pages`,
-        );
+        if (!overshot) {
+          for (const update of stateUpdates) {
+            await upsertBrainSyncState(db, update.collectorId, {
+              watermark: update.watermark,
+              ...(update.cursor !== undefined
+                ? { backfillCursor: update.cursor }
+                : {}),
+            });
+          }
+        }
+
+        if (capped.length > 0) {
+          console.log(
+            `${LOG_PREFIX} ${collector.id} ingested ${capped.length} pages`,
+          );
+        }
       }
 
       const backfill = collector.backfill?.bind(collector);

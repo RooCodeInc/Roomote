@@ -319,6 +319,29 @@ describe('runBrainCollectors', () => {
 });
 
 describe('runBrainCollectors deep backfill', () => {
+  it('skips incremental upstream polling during historical continuation', async () => {
+    const collect = vi.fn<BrainCollector['collect']>();
+    const backfill = vi
+      .fn<NonNullable<BrainCollector['backfill']>>()
+      .mockResolvedValue({
+        pages: makePages(1, 'old'),
+        nextCursor: null,
+        done: true,
+      });
+    const collector = makeCollector({ collect, backfill });
+    const sink: BrainSink = vi.fn(async () => {});
+
+    await runBrainCollectors(connection, {
+      sink,
+      collectors: [collector],
+      includeIncremental: false,
+    });
+
+    expect(collect).not.toHaveBeenCalled();
+    expect(backfill).toHaveBeenCalledTimes(1);
+    expect(sink).toHaveBeenCalledTimes(1);
+  });
+
   it('runs the incremental phase first, then backfill, while backfill is incomplete', async () => {
     const collect = vi
       .fn<BrainCollector['collect']>()

@@ -309,13 +309,25 @@ export async function brainCollectorsJob(): Promise<void> {
     return;
   }
 
+  let includeIncremental = true;
+
   await drainBrainHistoricalIngestion({
     async runPass() {
-      const morePullRequestFacts = await syncPullRequestFacts(connection);
-      const collectorResult = await runBrainCollectors(connection);
+      const pullRequestFactsResult = await syncPullRequestFacts(connection);
+
+      if (pullRequestFactsResult.interrupted) {
+        return { progressed: false, interrupted: true };
+      }
+
+      const collectorResult = await runBrainCollectors(connection, {
+        includeIncremental,
+      });
+      includeIncremental = false;
 
       return {
-        progressed: morePullRequestFacts || collectorResult.backfillProgressed,
+        progressed:
+          pullRequestFactsResult.progressed ||
+          collectorResult.backfillProgressed,
         interrupted: collectorResult.interrupted,
       };
     },
@@ -533,7 +545,7 @@ function parsePullRequestFactsCursor(
 async function syncPullRequestFacts(connection: {
   baseUrl: string;
   token: string;
-}): Promise<boolean> {
+}): Promise<{ progressed: boolean; interrupted: boolean }> {
   const state = await getBrainSyncState(db, PR_FACTS_COLLECTOR_ID);
   const cursor = parsePullRequestFactsCursor(state?.backfillCursor ?? null);
   const cursorAt = cursor ? new Date(cursor.updatedAt) : null;
@@ -568,7 +580,7 @@ async function syncPullRequestFacts(connection: {
     .limit(PR_FACTS_BATCH_SIZE);
 
   if (facts.length === 0) {
-    return false;
+    return { progressed: false, interrupted: false };
   }
 
   let ingested = 0;
@@ -609,7 +621,10 @@ async function syncPullRequestFacts(connection: {
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      return false;
+      return {
+        progressed: false,
+        interrupted: isBrainRateLimited(error) || isBrainNotReady(error),
+      };
     }
   }
 
@@ -628,5 +643,8 @@ async function syncPullRequestFacts(connection: {
     );
   }
 
-  return facts.length === PR_FACTS_BATCH_SIZE;
+  return {
+    progressed: facts.length === PR_FACTS_BATCH_SIZE,
+    interrupted: false,
+  };
 }
