@@ -56,15 +56,31 @@ if [ -n "${GBRAIN_DATABASE_URL:-}" ]; then
       ;;
   esac
 
-  : "${PGHOST:?PGHOST is required with GBRAIN_DATABASE_URL}"
-  : "${PGUSER:?PGUSER is required with GBRAIN_DATABASE_URL}"
-  : "${PGPASSWORD:?PGPASSWORD is required with GBRAIN_DATABASE_URL}"
-  : "${PGDATABASE:?PGDATABASE is required with GBRAIN_DATABASE_URL}"
+  DATABASE_SEED_URL="${GBRAIN_DATABASE_BOOTSTRAP_URL:-$GBRAIN_DATABASE_URL}"
+  if [ -n "${GBRAIN_DATABASE_BOOTSTRAP_URL:-}" ]; then
+    DATABASE_BOOTSTRAP_URL="$GBRAIN_DATABASE_BOOTSTRAP_URL"
+  else
+    DATABASE_BOOTSTRAP_URL="$(DATABASE_BOOTSTRAP_URL="$DATABASE_SEED_URL" \
+      bun -e '
+        const url = new URL(Bun.env.DATABASE_BOOTSTRAP_URL);
+        url.pathname = "/postgres";
+        console.log(url.toString());
+      ')"
+  fi
+
+  GBRAIN_DATABASE_URL="$(DATABASE_SEED_URL="$DATABASE_SEED_URL" \
+    GBRAIN_DATABASE_NAME="$GBRAIN_DATABASE_NAME" \
+    bun -e '
+      const url = new URL(Bun.env.DATABASE_SEED_URL);
+      url.pathname = `/${Bun.env.GBRAIN_DATABASE_NAME}`;
+      console.log(url.toString());
+    ')"
+  export GBRAIN_DATABASE_URL
 
   echo "[gbrain-entrypoint] ensuring isolated Postgres database $GBRAIN_DATABASE_NAME"
   # Both the server and cron service can boot during the first deployment.
   # A session advisory lock keeps their check-and-create sequence atomic.
-  psql --no-psqlrc --quiet -v ON_ERROR_STOP=1 \
+  psql --dbname="$DATABASE_BOOTSTRAP_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 \
     -v brain_database="$GBRAIN_DATABASE_NAME" <<'SQL'
 SELECT pg_advisory_lock(hashtext('roomote-gbrain-database-bootstrap')) AS locked \gset
 SELECT format('CREATE DATABASE %I', :'brain_database')
