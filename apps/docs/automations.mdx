@@ -94,6 +94,10 @@ Create arbitrary scheduled agent runs with:
 Each automation card summarizes its cadence, workspace target, report destination,
 creator, and most recent run.
 
+Use **View previous runs** on an automation card to open the task list
+filtered to that automation's runs. For a custom automation, the history is
+scoped to that specific automation rather than all custom automations.
+
 When creating an automation through Roomote chat, ask for **suggested tasks** or
 **launchable follow-ups** if qualifying findings should become tasks that
 teammates can start from the report. Asking only for a summary or list of action
@@ -128,6 +132,11 @@ when there are several findings. A report sent to chat keeps the essential
 conclusions and actions in its first message; supporting detail can continue in
 thread replies. Explicit instructions in the automation prompt about format,
 length, tone, audience, or detail placement always take precedence.
+
+In Slack, automation reports appear as structured cards. Markdown tables render
+as tables when they fit, and the card can include links to the task, related pull
+requests, and automation settings. Completed runs also show their trigger or
+schedule, model, estimated inference cost, and elapsed time.
 
 Direct-message destinations require the automation owner to link an account for
 the selected communications provider and make the bot reachable there.
