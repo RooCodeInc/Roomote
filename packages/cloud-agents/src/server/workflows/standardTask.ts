@@ -73,6 +73,7 @@ export function standardTask({
   sourceChannelId,
   sourceThreadId,
   sourceMessageId,
+  resultOnlyChatDelivery = false,
   linkedWorkItems,
   interactiveMode = false,
   requestFormat = 'plain',
@@ -122,6 +123,8 @@ export function standardTask({
   sourceChannelId?: string;
   sourceThreadId?: string;
   sourceMessageId?: string;
+  /** Initial automation report with no directed chat turn to acknowledge. */
+  resultOnlyChatDelivery?: boolean;
   linkedWorkItems?: LinkedWorkItem[];
   interactiveMode?: boolean;
   requestFormat?: 'plain' | 'structured';
@@ -258,6 +261,11 @@ export function standardTask({
 `
     : '';
   const defaultMode = interactiveMode ? 'interactive' : 'autonomous';
+  const isChatTaskSurface =
+    taskSurface === 'slack' ||
+    taskSurface === 'teams' ||
+    taskSurface === 'telegram' ||
+    taskSurface === 'discord';
   const taskSurfaceContext =
     taskSurface === 'slack'
       ? `
@@ -330,6 +338,15 @@ ${buildGitHubMessageInstructions()}`
     <rule>If a workflow or packaged skill distinguishes web dashboard tasks from other surfaces, treat this run as a web dashboard task.</rule>
     <rule>When a secure web-task flow exists for the current step, prefer that flow over asking the user to paste secrets into chat or make local-only task edits.</rule>
   </task_surface_context>`;
+  const effectiveTaskSurfaceContext =
+    resultOnlyChatDelivery && isChatTaskSurface
+      ? `
+  <task_surface_context>
+    <rule>This run was launched by an automation with ${taskSurface} as its report destination. It was not launched by a directed chat turn.</rule>
+    <rule>The automation's chat message must always be its result, never an in-progress message. Keep acknowledgements, reactions, progress updates, partial findings, and routine status in the web task only.</rule>
+    <rule>The first and only chat-visible reply for this automation turn must use \`send_chat_reply\` with \`purpose\` set to \`closeout\` and contain the final result, a durable blocker, or a concrete input request required to continue.</rule>
+  </task_surface_context>`
+      : taskSurfaceContext;
   const sourceContext =
     sourceProvider && (sourceChannelId || sourceThreadId || sourceMessageId)
       ? `
@@ -404,7 +421,7 @@ ${buildGitHubMessageInstructions()}`
     <visual_proof_context>Screencast auto-classification is disabled for this task.</visual_proof_context>
   </task_context>
 
-  ${taskSurfaceContext}
+  ${effectiveTaskSurfaceContext}
   ${sourceContext}
   ${sourceControlContext}
   ${codeReviewSelfReviewCloseoutContext}
