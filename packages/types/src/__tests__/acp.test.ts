@@ -33,10 +33,13 @@ describe('normalizeAcpReasoningText', () => {
     );
   });
 
-  it('preserves standalone Markdown rules and ordinary emphasis', () => {
-    expect(normalizeAcpReasoningText('First\n\n****\n\n**Second**')).toBe(
-      'First\n\n****\n\n**Second**',
-    );
+  it.each([
+    'First\n\n****\n\n**Second**',
+    'The requested **read****write** permissions are required.',
+    '**read****write** permissions are required.',
+    'Permissions: **read****write**',
+  ])('preserves non-heading Markdown: %s', (markdown) => {
+    expect(normalizeAcpReasoningText(markdown)).toBe(markdown);
   });
 });
 

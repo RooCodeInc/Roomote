@@ -55,7 +55,21 @@ export type AcpEventType = AcpEnvelopeEventType | AcpLiveEventType;
 
 /** Restore separation between bold reasoning headings concatenated by a provider. */
 export function normalizeAcpReasoningText(text: string): string {
-  return text.replace(/(\S)\*\*\*\*(?=\S)/g, '$1**\n\n**');
+  return text.replace(/[^\r\n]+/g, (line) => {
+    if (!line.startsWith('**') || !line.endsWith('**')) {
+      return line;
+    }
+
+    const headings = line.slice(2, -2).split('****');
+    if (
+      headings.length < 2 ||
+      headings.some((heading) => heading.length === 0 || heading.includes('**'))
+    ) {
+      return line;
+    }
+
+    return `**${headings.join('**\n\n**')}**`;
+  });
 }
 
 export const ACP_LOGICAL_EVENT_ID_KEY = 'logicalEventId' as const;
