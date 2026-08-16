@@ -13,6 +13,8 @@ import { postToBrain } from './brain-outbox-drain';
 const BRAIN_MAINTENANCE_TIMEOUT_MS = 60 * 60 * 1000;
 const BRAIN_DAILY_DIGEST_STATE_ID = 'roomote-daily-digest';
 const BRAIN_DAILY_DIGEST_INITIAL_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+const BRAIN_DAILY_DIGEST_INGESTION_LAG_MS = 60 * 60 * 1000;
+const BRAIN_DAILY_DIGEST_OVERLAP_MS = 60 * 60 * 1000;
 const GENERATED_SYNTHESIS_SLUG_PREFIXES = [
   'daily/digests/',
   'dream-cycle-summaries/',
@@ -30,8 +32,10 @@ type GbrainSynthesis = {
   synthesis_status?: string;
 };
 
-type GbrainSearch = {
-  results?: Array<{ slug?: string; title?: string }>;
+type GbrainSearchResult = {
+  slug?: string;
+  title?: string;
+  effective_date?: string | null;
 };
 
 const DAILY_DIGEST_SEARCH_QUERY =
@@ -104,23 +108,41 @@ function parseToolPayloads(body: string): unknown[] {
   ];
 }
 
-function parseSearch(body: string): Array<{ slug: string; title: string }> {
-  const search = parseToolPayloads(body).find(
-    (candidate): candidate is GbrainSearch =>
+function parseSearch(
+  body: string,
+  since: Date,
+  until: Date,
+): Array<{ slug: string; title: string }> {
+  const payloads = parseToolPayloads(body);
+  const results = payloads.find(Array.isArray) as
+    | GbrainSearchResult[]
+    | undefined;
+  const wrappedResults = payloads.find(
+    (candidate): candidate is { results: GbrainSearchResult[] } =>
       typeof candidate === 'object' &&
       candidate !== null &&
-      Array.isArray((candidate as GbrainSearch).results),
+      Array.isArray((candidate as { results?: unknown }).results),
   );
+  const sinceDate = since.toISOString().slice(0, 10);
+  const untilDate = until.toISOString().slice(0, 10);
 
-  return (search?.results ?? [])
-    .filter(
-      (result): result is { slug: string; title?: string } =>
-        typeof result.slug === 'string' &&
-        result.slug.length > 0 &&
+  return (results ?? wrappedResults?.results ?? [])
+    .filter((result): result is GbrainSearchResult & { slug: string } => {
+      const slug = result.slug;
+      const effectiveDate = result.effective_date?.slice(0, 10);
+
+      return (
+        typeof slug === 'string' &&
+        slug.length > 0 &&
+        typeof effectiveDate === 'string' &&
+        /^\d{4}-\d{2}-\d{2}$/.test(effectiveDate) &&
+        effectiveDate >= sinceDate &&
+        effectiveDate <= untilDate &&
         !GENERATED_SYNTHESIS_SLUG_PREFIXES.some((prefix) =>
-          result.slug!.startsWith(prefix),
-        ),
-    )
+          slug.startsWith(prefix),
+        )
+      );
+    })
     .map((result) => ({
       slug: result.slug,
       title: (result.title ?? result.slug).replace(/\s+/g, ' ').trim(),
@@ -230,13 +252,19 @@ export async function runBrainDailyDigest(
   now = new Date(),
 ): Promise<void> {
   const state = await getBrainSyncState(db, BRAIN_DAILY_DIGEST_STATE_ID);
+  // Collectors run every 15 minutes and the outbox drains every minute. Keep
+  // the digest cutoff well behind both, then reopen the previous hour on the
+  // next run so a transaction that committed around the boundary is seen.
+  const until = new Date(now.getTime() - BRAIN_DAILY_DIGEST_INGESTION_LAG_MS);
   const since = state?.watermark
-    ? new Date(state.watermark)
-    : new Date(now.getTime() - BRAIN_DAILY_DIGEST_INITIAL_LOOKBACK_MS);
-  const searchBody = await callGbrainTool(readConnection, 'search', {
+    ? new Date(
+        new Date(state.watermark).getTime() - BRAIN_DAILY_DIGEST_OVERLAP_MS,
+      )
+    : new Date(until.getTime() - BRAIN_DAILY_DIGEST_INITIAL_LOOKBACK_MS);
+  const searchBody = await callGbrainTool(readConnection, 'query', {
     query: DAILY_DIGEST_SEARCH_QUERY,
     since: since.toISOString(),
-    until: now.toISOString(),
+    until: until.toISOString(),
     limit: 50,
     expand: false,
     detail: 'low',
@@ -244,11 +272,11 @@ export async function runBrainDailyDigest(
     salience: 'on',
     autocut: false,
   });
-  const candidates = parseSearch(searchBody);
+  const candidates = parseSearch(searchBody, since, until);
 
   if (candidates.length === 0) {
     await upsertBrainSyncState(db, BRAIN_DAILY_DIGEST_STATE_ID, {
-      watermark: now,
+      watermark: until,
     });
     return;
   }
@@ -256,7 +284,7 @@ export async function runBrainDailyDigest(
   const body = await callGbrainTool(readConnection, 'synthesize', {
     question: buildConstrainedDigestQuestion(candidates),
     since: since.toISOString(),
-    until: now.toISOString(),
+    until: until.toISOString(),
   });
   const synthesis = parseSynthesis(body);
   const eligibleSlugs = new Set(candidates.map((candidate) => candidate.slug));
@@ -272,11 +300,11 @@ export async function runBrainDailyDigest(
         : 'gbrain daily digest returned no source citations',
     );
   }
-  const page = buildDailyDigestPage({ synthesis, since, until: now });
+  const page = buildDailyDigestPage({ synthesis, since, until });
 
   await postToBrain(page, writeConnection);
   await upsertBrainSyncState(db, BRAIN_DAILY_DIGEST_STATE_ID, {
-    watermark: now,
+    watermark: until,
   });
 }
 

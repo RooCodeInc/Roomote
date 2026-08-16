@@ -68,8 +68,10 @@ since the previous successful pass, then stores it under `daily/digests/` in
 both the searchable index and the persistent Markdown corpus. The digest
 focuses on concrete decisions, shipped work, blockers, commitments, and
 cross-source connections rather than generating a reflection for every raw
-page. gbrain's durable worker still owns embedding catch-up and the rest of
-the maintenance algorithm.
+page. Its cutoff trails active ingestion and overlaps the previous pass so
+collector writes around the nightly boundary are reconsidered. gbrain's
+durable worker still owns embedding catch-up and the rest of the maintenance
+algorithm.
 
 <Note>
   Self-hosted Compose deployments start the Brain from the `brain`

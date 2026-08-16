@@ -60,7 +60,11 @@ function synthesisResponse(input?: {
 }
 
 function searchResponse(input?: {
-  results?: Array<{ slug: string; title: string }>;
+  results?: Array<{
+    slug: string;
+    title: string;
+    effective_date?: string | null;
+  }>;
 }): Response {
   return new Response(
     JSON.stringify({
@@ -70,14 +74,15 @@ function searchResponse(input?: {
         content: [
           {
             type: 'text',
-            text: JSON.stringify({
-              results: input?.results ?? [
+            text: JSON.stringify(
+              input?.results ?? [
                 {
                   slug: 'slack/general/2026-08-16',
                   title: 'Slack general — 2026-08-16',
+                  effective_date: '2026-08-16',
                 },
               ],
-            }),
+            ),
           },
         ],
       },
@@ -207,16 +212,23 @@ describe('runBrainDailyDigest', () => {
   });
 
   it('synthesizes only the window after the durable watermark', async () => {
-    const since = new Date('2026-08-15T07:00:00.000Z');
-    const until = new Date('2026-08-16T07:00:00.000Z');
-    mockGetBrainSyncState.mockResolvedValue({ watermark: since });
+    const watermark = new Date('2026-08-15T07:00:00.000Z');
+    const runAt = new Date('2026-08-16T07:00:00.000Z');
+    const expectedSince = new Date('2026-08-15T06:00:00.000Z');
+    const expectedUntil = new Date('2026-08-16T06:00:00.000Z');
+    mockGetBrainSyncState.mockResolvedValue({ watermark });
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       searchResponse({
         results: [
-          { slug: 'prs/example/42', title: 'Ship a specific change' },
+          {
+            slug: 'prs/example/42',
+            title: 'Ship a specific change',
+            effective_date: '2026-08-15',
+          },
           {
             slug: 'slack/general/2026-08-16',
             title: 'Slack general',
+            effective_date: '2026-08-16',
           },
         ],
       }),
@@ -224,10 +236,15 @@ describe('runBrainDailyDigest', () => {
     fetchSpy.mockResolvedValueOnce(
       searchResponse({
         results: [
-          { slug: 'prs/example/42', title: 'Ship a specific change' },
+          {
+            slug: 'prs/example/42',
+            title: 'Ship a specific change',
+            effective_date: '2026-08-15',
+          },
           {
             slug: 'slack/general/2026-08-16',
             title: 'Slack general',
+            effective_date: '2026-08-16',
           },
         ],
       }),
@@ -242,16 +259,16 @@ describe('runBrainDailyDigest', () => {
     await runBrainDailyDigest(
       { baseUrl: 'http://gbrain.test', token: 'read-token' },
       { baseUrl: 'http://gbrain.test', token: 'write-token' },
-      until,
+      runAt,
     );
 
     const searchRequest = fetchSpy.mock.calls[0]?.[1] as RequestInit;
     expect(JSON.parse(String(searchRequest.body))).toMatchObject({
       params: {
-        name: 'search',
+        name: 'query',
         arguments: {
-          since: since.toISOString(),
-          until: until.toISOString(),
+          since: expectedSince.toISOString(),
+          until: expectedUntil.toISOString(),
         },
       },
     });
@@ -260,8 +277,8 @@ describe('runBrainDailyDigest', () => {
       params: {
         name: 'synthesize',
         arguments: {
-          since: since.toISOString(),
-          until: until.toISOString(),
+          since: expectedSince.toISOString(),
+          until: expectedUntil.toISOString(),
         },
       },
     });
@@ -275,7 +292,7 @@ describe('runBrainDailyDigest', () => {
     expect(mockUpsertBrainSyncState).toHaveBeenCalledWith(
       {},
       'roomote-daily-digest',
-      { watermark: until },
+      { watermark: expectedUntil },
     );
   });
 
@@ -319,7 +336,8 @@ describe('runBrainDailyDigest', () => {
   });
 
   it('advances the watermark without synthesis when nothing changed', async () => {
-    const until = new Date('2026-08-16T07:00:00.000Z');
+    const runAt = new Date('2026-08-16T07:00:00.000Z');
+    const expectedUntil = new Date('2026-08-16T06:00:00.000Z');
     mockGetBrainSyncState.mockResolvedValue(null);
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
@@ -328,7 +346,7 @@ describe('runBrainDailyDigest', () => {
     await runBrainDailyDigest(
       { baseUrl: 'http://gbrain.test', token: 'read-token' },
       { baseUrl: 'http://gbrain.test', token: 'write-token' },
-      until,
+      runAt,
     );
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
@@ -336,12 +354,13 @@ describe('runBrainDailyDigest', () => {
     expect(mockUpsertBrainSyncState).toHaveBeenCalledWith(
       {},
       'roomote-daily-digest',
-      { watermark: until },
+      { watermark: expectedUntil },
     );
   });
 
   it('does not synthesize prior generated synthesis pages', async () => {
-    const until = new Date('2026-08-16T07:00:00.000Z');
+    const runAt = new Date('2026-08-16T07:00:00.000Z');
+    const expectedUntil = new Date('2026-08-16T06:00:00.000Z');
     mockGetBrainSyncState.mockResolvedValue(null);
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       searchResponse({
@@ -349,14 +368,17 @@ describe('runBrainDailyDigest', () => {
           {
             slug: 'wiki/personal/reflections/task-1',
             title: 'Prior reflection',
+            effective_date: '2026-08-16',
           },
           {
             slug: 'wiki/personal/patterns/pattern-1',
             title: 'Prior pattern',
+            effective_date: '2026-08-16',
           },
           {
             slug: 'daily/digests/2026-08-15',
             title: 'Prior digest',
+            effective_date: '2026-08-15',
           },
         ],
       }),
@@ -365,7 +387,7 @@ describe('runBrainDailyDigest', () => {
     await runBrainDailyDigest(
       { baseUrl: 'http://gbrain.test', token: 'read-token' },
       { baseUrl: 'http://gbrain.test', token: 'write-token' },
-      until,
+      runAt,
     );
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
@@ -373,7 +395,43 @@ describe('runBrainDailyDigest', () => {
     expect(mockUpsertBrainSyncState).toHaveBeenCalledWith(
       {},
       'roomote-daily-digest',
-      { watermark: until },
+      { watermark: expectedUntil },
+    );
+  });
+
+  it('rejects query results without an effective date inside the window', async () => {
+    const runAt = new Date('2026-08-16T07:00:00.000Z');
+    const expectedUntil = new Date('2026-08-16T06:00:00.000Z');
+    mockGetBrainSyncState.mockResolvedValue(null);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      searchResponse({
+        results: [
+          {
+            slug: 'slack/general/2026-08-14',
+            title: 'Historical Slack page',
+            effective_date: '2026-08-14',
+          },
+          {
+            slug: 'notion/undated',
+            title: 'Undated page',
+            effective_date: null,
+          },
+        ],
+      }),
+    );
+
+    await runBrainDailyDigest(
+      { baseUrl: 'http://gbrain.test', token: 'read-token' },
+      { baseUrl: 'http://gbrain.test', token: 'write-token' },
+      runAt,
+    );
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(mockPostToBrain).not.toHaveBeenCalled();
+    expect(mockUpsertBrainSyncState).toHaveBeenCalledWith(
+      {},
+      'roomote-daily-digest',
+      { watermark: expectedUntil },
     );
   });
 });
