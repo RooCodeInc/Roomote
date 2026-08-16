@@ -6,6 +6,7 @@ import {
   asFiniteInt,
   ACP_UI_TOOL_OUTPUT_MAX_CHARS,
   ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+  TRANSCRIPT_VISIBILITY_METADATA_KEY,
   resolveAcpTranscriptVisibility,
 } from '@roomote/types';
 import {
@@ -16,6 +17,7 @@ import {
   eq,
   like,
   not,
+  sql,
   taskMessages,
   tasks,
   users,
@@ -27,15 +29,22 @@ import { getUserDisplayName } from '@/lib/user-display-name';
 export async function getTaskMessageEnvelopes({
   taskId,
   limit,
+  visibleOnly = false,
 }: {
   taskId: string;
   limit?: number;
+  visibleOnly?: boolean;
 }): Promise<TaskMessageEnvelope[]> {
   const whereConditions = [
     eq(taskMessages.taskId, taskId),
     eq(taskMessages.protocol, ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL),
     not(like(taskMessages.eventType, 'roomote_runtime.output.%')),
   ];
+  if (visibleOnly) {
+    whereConditions.push(
+      sql`${taskMessages.metadata} ->> ${TRANSCRIPT_VISIBILITY_METADATA_KEY} IS DISTINCT FROM 'false'`,
+    );
+  }
 
   const query = db
     .select({

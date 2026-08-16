@@ -188,6 +188,7 @@ export async function answerFastTaskCommand(
     await getTaskMessageEnvelopes({
       taskId: input.taskId,
       limit: 500,
+      visibleOnly: true,
     })
   ).flatMap((envelope) => {
     const text = envelope.text?.trim();

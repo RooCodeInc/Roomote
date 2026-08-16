@@ -260,6 +260,7 @@ describe('answerFastTaskCommand', () => {
     expect(mockGetTaskMessageEnvelopes).toHaveBeenCalledWith({
       taskId: 'task-123',
       limit: 500,
+      visibleOnly: true,
     });
     expect(mockRecordTaskMessageEnvelope).toHaveBeenCalledTimes(2);
     expect(mockRecordTaskMessageEnvelope).toHaveBeenNthCalledWith(

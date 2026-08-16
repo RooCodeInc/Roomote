@@ -52,8 +52,8 @@ describe('getTaskMessageEnvelopes', () => {
       taskId: task.id,
     });
 
-    await db.insert(taskMessages).values(
-      ['first', 'second', 'third'].map((text, index) => ({
+    await db.insert(taskMessages).values([
+      ...['first', 'second', 'third'].map((text, index) => ({
         runId: run.id,
         taskId: task.id,
         ts: 1_000 + index,
@@ -63,11 +63,23 @@ describe('getTaskMessageEnvelopes', () => {
         contentBlocks: [{ type: 'text' as const, text }],
         payload: {},
       })),
-    );
+      ...['hidden-first', 'hidden-second'].map((text, index) => ({
+        runId: run.id,
+        taskId: task.id,
+        ts: 2_000 + index,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user' as const,
+        protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+        contentBlocks: [{ type: 'text' as const, text }],
+        metadata: { visibleInTranscript: false },
+        payload: {},
+      })),
+    ]);
 
     const messages = await getTaskMessageEnvelopes({
       taskId: task.id,
       limit: 2,
+      visibleOnly: true,
     });
 
     expect(messages.map((message) => message.text)).toEqual([
