@@ -43,7 +43,7 @@ describe('getTaskMessageEnvelopes', () => {
     });
   });
 
-  it('limits in the database to the newest messages and restores chronological order', async () => {
+  it('pages past every hidden legacy form to return the newest visible messages', async () => {
     const task = await taskFactory.create({
       id: 'task-message-limited-history',
     });
@@ -119,6 +119,23 @@ describe('getTaskMessageEnvelopes', () => {
         metadata: { visibleInTranscript: true },
         payload: {},
       },
+      ...['First passive update', 'Second passive update'].map(
+        (text, index) => ({
+          runId: run.id,
+          taskId: task.id,
+          ts: 5_000 + index,
+          eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          role: 'user' as const,
+          protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+          contentBlocks: [
+            {
+              type: 'text' as const,
+              text: `<thread_activity>\n${text}\n</thread_activity>`,
+            },
+          ],
+          payload: {},
+        }),
+      ),
     ]);
 
     const messages = await getTaskMessageEnvelopes({

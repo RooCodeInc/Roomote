@@ -1,6 +1,5 @@
 import {
   type AcpEventType,
-  ACP_ENVELOPE_EVENT_TYPES,
   sanitizeEnvelopeFields,
   inferAcpMessageKind,
   extractAcpMessageText,
@@ -43,57 +42,38 @@ export async function getTaskMessageEnvelopes({
   ];
   if (visibleOnly) {
     whereConditions.push(
-      sql`CASE
-        WHEN ${taskMessages.metadata} ->> ${TRANSCRIPT_VISIBILITY_METADATA_KEY} IS NOT NULL
-          THEN ${taskMessages.metadata} ->> ${TRANSCRIPT_VISIBILITY_METADATA_KEY} <> 'false'
-        WHEN ${taskMessages.eventType} = ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
-          THEN ${taskMessages.contentBlocks}::text NOT LIKE '%<environment-instructions>%'
-            AND ${taskMessages.contentBlocks}::text NOT LIKE '%<workflow>%'
-            AND ${taskMessages.contentBlocks}::text NOT LIKE '%&lt;environment-instructions&gt;%'
-            AND ${taskMessages.contentBlocks}::text NOT LIKE '%&lt;workflow&gt;%'
-            AND ${taskMessages.payload}::text NOT LIKE '%<environment-instructions>%'
-            AND ${taskMessages.payload}::text NOT LIKE '%<workflow>%'
-            AND ${taskMessages.payload}::text NOT LIKE '%&lt;environment-instructions&gt;%'
-            AND ${taskMessages.payload}::text NOT LIKE '%&lt;workflow&gt;%'
-        ELSE true
-      END`,
+      sql`${taskMessages.metadata} ->> ${TRANSCRIPT_VISIBILITY_METADATA_KEY} IS DISTINCT FROM 'false'`,
     );
   }
 
-  const query = db
-    .select({
-      id: taskMessages.id,
-      userId: taskMessages.userId,
-      userName: users.name,
-      userEmail: users.email,
-      userImageUrl: users.imageUrl,
-      taskId: taskMessages.taskId,
-      ts: taskMessages.ts,
-      createdAt: taskMessages.createdAt,
-      eventType: taskMessages.eventType,
-      role: taskMessages.role,
-      protocol: taskMessages.protocol,
-      contentBlocks: taskMessages.contentBlocks,
-      metadata: taskMessages.metadata,
-      payload: taskMessages.payload,
-    })
-    .from(taskMessages)
-    .innerJoin(tasks, eq(tasks.id, taskMessages.taskId))
-    .leftJoin(users, eq(users.id, taskMessages.userId))
-    .where(and(...whereConditions));
+  const buildQuery = () =>
+    db
+      .select({
+        id: taskMessages.id,
+        userId: taskMessages.userId,
+        userName: users.name,
+        userEmail: users.email,
+        userImageUrl: users.imageUrl,
+        taskId: taskMessages.taskId,
+        ts: taskMessages.ts,
+        createdAt: taskMessages.createdAt,
+        eventType: taskMessages.eventType,
+        role: taskMessages.role,
+        protocol: taskMessages.protocol,
+        contentBlocks: taskMessages.contentBlocks,
+        metadata: taskMessages.metadata,
+        payload: taskMessages.payload,
+      })
+      .from(taskMessages)
+      .innerJoin(tasks, eq(tasks.id, taskMessages.taskId))
+      .leftJoin(users, eq(users.id, taskMessages.userId))
+      .where(and(...whereConditions));
   const boundedLimit =
     typeof limit === 'number' && Number.isInteger(limit) && limit > 0
       ? limit
       : null;
-  const rows = boundedLimit
-    ? (
-        await query
-          .orderBy(desc(taskMessages.createdAt), desc(taskMessages.ts))
-          .limit(boundedLimit)
-      ).reverse()
-    : await query.orderBy(asc(taskMessages.createdAt), asc(taskMessages.ts));
-
-  return rows.map((row) => {
+  type TaskMessageRow = Awaited<ReturnType<typeof buildQuery>>[number];
+  const mapRow = (row: TaskMessageRow): TaskMessageEnvelope => {
     // Sanitize at the read boundary: the DB stores full payloads,
     // but we truncate oversized tool output before serving to clients.
     const sanitized = sanitizeEnvelopeFields(
@@ -135,5 +115,52 @@ export async function getTaskMessageEnvelopes({
         extractAcpMessageText(sanitized.contentBlocks, sanitized.payload) ??
         undefined,
     };
-  });
+  };
+
+  if (boundedLimit && visibleOnly) {
+    const visibleMessages: TaskMessageEnvelope[] = [];
+    let offset = 0;
+
+    while (visibleMessages.length < boundedLimit) {
+      const rows = await buildQuery()
+        .orderBy(
+          desc(taskMessages.createdAt),
+          desc(taskMessages.ts),
+          desc(taskMessages.id),
+        )
+        .limit(boundedLimit)
+        .offset(offset);
+      visibleMessages.push(
+        ...rows.map(mapRow).filter((message) => message.visibleInTranscript),
+      );
+      offset += rows.length;
+
+      if (rows.length < boundedLimit) {
+        break;
+      }
+    }
+
+    return visibleMessages.slice(0, boundedLimit).reverse();
+  }
+
+  const rows = boundedLimit
+    ? (
+        await buildQuery()
+          .orderBy(
+            desc(taskMessages.createdAt),
+            desc(taskMessages.ts),
+            desc(taskMessages.id),
+          )
+          .limit(boundedLimit)
+      ).reverse()
+    : await buildQuery().orderBy(
+        asc(taskMessages.createdAt),
+        asc(taskMessages.ts),
+        asc(taskMessages.id),
+      );
+
+  const messages = rows.map(mapRow);
+  return visibleOnly
+    ? messages.filter((message) => message.visibleInTranscript)
+    : messages;
 }
