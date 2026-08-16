@@ -35,6 +35,15 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'Do not add a reaction to every Fast mode message',
     );
+    expect(prompt).toContain(
+      'When you plan to use an integration or task tool, first send a brief "ack"',
+    );
+    expect(prompt).toContain(
+      'If the answer is immediate and needs no tool, skip the acknowledgement and send the "closeout" directly',
+    );
+    expect(prompt).toContain(
+      'An "ack" or "progress" does not end the turn. Continue using the tools you need, then send a "closeout"',
+    );
     expect(prompt).toContain('"purpose"');
     expect(prompt).not.toContain('Use "respond"');
     expect(prompt).toContain('no local filesystem, shell');
