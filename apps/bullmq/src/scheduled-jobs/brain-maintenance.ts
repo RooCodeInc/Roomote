@@ -291,6 +291,12 @@ function justBeforeUtcDate(value: Date): string {
   ).toISOString();
 }
 
+function extractInlineSourceCitations(answer: string): string[] {
+  const citations = answer.matchAll(/(?<!!)\[([^\s[\]]+\/[^\s[\]]+)\](?!\()/g);
+
+  return [...new Set([...citations].map((match) => match[1]!))];
+}
+
 export function buildDailyDigestPage(input: {
   synthesis: GbrainSynthesis;
   since: Date;
@@ -398,7 +404,12 @@ export async function runBrainDailyDigest(
   // directly so older pages cannot enter through a second retrieval pass.
   const synthesis = await synthesizeDailyDigest(candidates, since, until);
   const eligibleSlugs = new Set(candidates.map((candidate) => candidate.slug));
-  const citedSources = synthesis.sources ?? [];
+  const citedSources = [
+    ...new Set([
+      ...(synthesis.sources ?? []),
+      ...extractInlineSourceCitations(synthesis.answer),
+    ]),
+  ];
   const outsideWindow = citedSources.filter(
     (source) => !eligibleSlugs.has(source),
   );
@@ -410,7 +421,11 @@ export async function runBrainDailyDigest(
         : 'Brain daily digest returned no source citations',
     );
   }
-  const page = buildDailyDigestPage({ synthesis, since, until });
+  const page = buildDailyDigestPage({
+    synthesis: { ...synthesis, sources: citedSources },
+    since,
+    until,
+  });
 
   await postToBrain(page, writeConnection);
   await upsertBrainSyncState(db, BRAIN_DAILY_DIGEST_STATE_ID, {

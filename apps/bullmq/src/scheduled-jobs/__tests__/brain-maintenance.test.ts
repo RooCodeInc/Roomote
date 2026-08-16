@@ -298,7 +298,8 @@ describe('runBrainDailyDigest', () => {
     );
     fetchSpy.mockResolvedValueOnce(
       synthesisResponse({
-        answer: '## Work shipped\n\nA specific change shipped.',
+        answer:
+          '## Work shipped\n\nA specific change shipped [prs/example/42] and was discussed in Slack [slack/general/2026-08-16].',
         sources: ['prs/example/42', 'slack/general/2026-08-16'],
       }),
     );
@@ -409,6 +410,29 @@ describe('runBrainDailyDigest', () => {
         new Date('2026-08-16T07:00:00.000Z'),
       ),
     ).rejects.toThrow('outside its evidence window');
+    expect(mockPostToBrain).not.toHaveBeenCalled();
+    expect(mockUpsertBrainSyncState).not.toHaveBeenCalled();
+  });
+
+  it('rejects an out-of-window inline citation omitted from sources', async () => {
+    mockGetBrainSyncState.mockResolvedValue(null);
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(searchResponse())
+      .mockResolvedValueOnce(
+        synthesisResponse({
+          answer:
+            'Current context [slack/general/2026-08-16], plus an older item [notion/older-page].',
+          sources: ['slack/general/2026-08-16'],
+        }),
+      );
+
+    await expect(
+      runBrainDailyDigest(
+        { baseUrl: 'http://gbrain.test', token: 'read-token' },
+        { baseUrl: 'http://gbrain.test', token: 'write-token' },
+        new Date('2026-08-16T07:00:00.000Z'),
+      ),
+    ).rejects.toThrow('outside its evidence window: notion/older-page');
     expect(mockPostToBrain).not.toHaveBeenCalled();
     expect(mockUpsertBrainSyncState).not.toHaveBeenCalled();
   });
