@@ -111,6 +111,7 @@ function createHarness(
     providerErrorMaxDelayMs?: number;
     mcpServerNames?: string[];
     model?: string;
+    initialSessionId?: string;
   } = {},
 ) {
   const harness = new OpenCodeServerHarness({
@@ -118,6 +119,7 @@ function createHarness(
     workspacePath: '/tmp/workspace',
     logger: createLogger(),
     commandEnv: options.commandEnv,
+    initialSessionId: options.initialSessionId,
     model: options.model ?? TEST_OPENCODE_MODEL,
     eventStreamReadyTimeoutMs: 100,
     executeToolProgressInitialDelayMs:
@@ -5470,13 +5472,62 @@ describe('OpenCodeServerHarness', () => {
       // The prior session is validated server-side, then reused — no new
       // session is created behind the user's back.
       expect(client.messages).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'ses_prior', limit: 1 }),
+        expect.objectContaining({ sessionId: 'ses_prior', limit: 20 }),
       );
       expect(client.createSession).not.toHaveBeenCalled();
       expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
         sessionId: 'ses_prior',
       });
     } finally {
+      harness.dispose();
+    }
+  });
+
+  it('orders the first resumed prompt after the restored session history', async () => {
+    const client = new FakeOpenCodeServerClient();
+    const restoredMessageId = `msg_000000000100${'z'.repeat(14)}`;
+    client.messages.mockResolvedValueOnce([
+      // The API returns newest-by-time first. This simulates a prompt already
+      // accepted after restore with an id that still sorts below the older
+      // assistant; the floor must be the greatest id in the tail.
+      createFinalAssistantMessage({
+        messageId: `msg_000000000010${'0'.repeat(14)}`,
+      }),
+      createFinalAssistantMessage({ messageId: restoredMessageId }),
+    ]);
+    let resolveSubmittedPrompt: (prompt: unknown) => void = () => {};
+    const submittedPrompt = new Promise<unknown>((resolve) => {
+      resolveSubmittedPrompt = resolve;
+    });
+    client.promptAsync.mockImplementationOnce(async (prompt: unknown) => {
+      resolveSubmittedPrompt(prompt);
+    });
+    const { harness } = createHarness(client, {
+      initialSessionId: 'ses_prior',
+    });
+    let dateNow: ReturnType<typeof vi.spyOn> | undefined;
+
+    try {
+      await connectHarness(harness, client);
+      dateNow = vi.spyOn(Date, 'now').mockReturnValue(0);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: { text: 'Continue.', visibleInTranscript: true },
+      });
+
+      const prompt = (await submittedPrompt) as
+        | { request?: { messageID?: string }; sessionId?: string }
+        | undefined;
+      const submittedMessageId = prompt?.request?.messageID;
+      expect(prompt?.sessionId).toBe('ses_prior');
+      expect(submittedMessageId).toMatch(/^msg_[a-f0-9]{12}0{14}$/u);
+      expect(submittedMessageId && submittedMessageId > restoredMessageId).toBe(
+        true,
+      );
+      expect(client.createSession).not.toHaveBeenCalled();
+    } finally {
+      dateNow?.mockRestore();
       harness.dispose();
     }
   });
