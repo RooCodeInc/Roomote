@@ -119,7 +119,7 @@ describe('fast-agent integration broker', () => {
         id: 'gbrain',
         name: 'Brain',
         instructions: expect.stringContaining(
-          'Treat Brain recall as a sequential preflight',
+          'Use Brain as lightweight conversational context',
         ),
         tools: [{ name: 'search', inputSchema: { type: 'object' } }],
       }),
