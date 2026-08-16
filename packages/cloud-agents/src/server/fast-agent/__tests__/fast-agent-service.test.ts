@@ -35,7 +35,10 @@ vi.mock('../fast-agent-tasks', () => ({
   cancelFastAgentTask: mocks.cancelTask,
 }));
 
-import { answerFastAgentQuestion } from '../fast-agent-service';
+import {
+  answerFastAgentQuestion,
+  FAST_AGENT_MAX_INTEGRATION_CALLS,
+} from '../fast-agent-service';
 
 const baseParams = {
   question: 'What does this service do?',
@@ -171,8 +174,14 @@ describe('answerFastAgentQuestion', () => {
     );
   });
 
-  it('allows one brokered integration call and then requires a response', async () => {
+  it('allows chained brokered integration calls before responding', async () => {
     mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'gbrain',
+        name: 'Brain',
+        description: 'Deployment memory',
+        tools: [{ name: 'query' }],
+      },
       {
         id: 'github',
         name: 'GitHub',
@@ -185,6 +194,15 @@ describe('answerFastAgentQuestion', () => {
         object: decision({
           action: 'call_integration',
           response: '',
+          integrationId: 'gbrain',
+          toolName: 'query',
+          toolArguments: { query: 'orchestrator' },
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'call_integration',
+          response: '',
           integrationId: 'github',
           toolName: 'search_code',
           toolArguments: { query: 'orchestrator' },
@@ -193,15 +211,36 @@ describe('answerFastAgentQuestion', () => {
       .mockResolvedValueOnce({
         object: decision({ response: 'The code is in the fast-agent module.' }),
       });
-    mocks.callIntegration.mockResolvedValue({ matches: ['fast-agent.ts'] });
+    mocks.callIntegration
+      .mockResolvedValueOnce({ pages: ['Fast mode uses an orchestrator.'] })
+      .mockResolvedValueOnce({ matches: ['fast-agent.ts'] });
 
     const result = await answerFastAgentQuestion({
       ...baseParams,
       postSlackReply: vi.fn().mockResolvedValue(undefined),
     });
 
-    expect(mocks.callIntegration).toHaveBeenCalledOnce();
-    expect(mocks.callIntegration).toHaveBeenCalledWith(
+    expect(mocks.callIntegration).toHaveBeenCalledTimes(2);
+    expect(mocks.callIntegration).toHaveBeenNthCalledWith(
+      1,
+      {
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+        sessionId: 'session-1',
+        slackTeamId: 'team-1',
+        slackChannel: 'channel-1',
+        slackThreadTs: '100.1',
+        slackMessageTs: '100.2',
+      },
+      expect.any(Array),
+      {
+        integrationId: 'gbrain',
+        toolName: 'query',
+        args: { query: 'orchestrator' },
+      },
+    );
+    expect(mocks.callIntegration).toHaveBeenNthCalledWith(
+      2,
       {
         userId: 'user-1',
         apiBaseUrl: 'https://api.example.com',
@@ -218,7 +257,41 @@ describe('answerFastAgentQuestion', () => {
         args: { query: 'orchestrator' },
       },
     );
-    expect(mocks.generateObject).toHaveBeenCalledTimes(2);
+    expect(mocks.generateObject).toHaveBeenCalledTimes(3);
     expect(result).toBe('The code is in the fast-agent module.');
+  });
+
+  it('stops integration chains at the per-turn call limit', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'github',
+        name: 'GitHub',
+        description: 'Repositories',
+        tools: [{ name: 'search_code' }],
+      },
+    ]);
+    mocks.generateObject.mockResolvedValue({
+      object: decision({
+        action: 'call_integration',
+        response: '',
+        integrationId: 'github',
+        toolName: 'search_code',
+        toolArguments: { query: 'orchestrator' },
+      }),
+    });
+    mocks.callIntegration.mockResolvedValue({ matches: [] });
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      postSlackReply: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(mocks.callIntegration).toHaveBeenCalledTimes(
+      FAST_AGENT_MAX_INTEGRATION_CALLS,
+    );
+    expect(mocks.generateObject).toHaveBeenCalledTimes(
+      FAST_AGENT_MAX_INTEGRATION_CALLS + 1,
+    );
+    expect(result).toContain('within the allowed number of calls');
   });
 });
