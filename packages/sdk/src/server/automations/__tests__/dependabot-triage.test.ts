@@ -113,7 +113,7 @@ describe('dependabotTriageJob buildScanTask', () => {
     );
     expect(payload.description).toContain('inspect its open pull requests');
     expect(payload.description).toContain(
-      'After triage reaches a final result, post exactly one concise status message',
+      'After triage reaches a final result, send exactly one concise report',
     );
     expect(payload.description).toContain(
       'total number of open Dependabot alerts with a critical/high/medium/low severity breakdown',
@@ -137,9 +137,10 @@ describe('dependabotTriageJob buildScanTask', () => {
     expect(payload.description).toContain(
       'Do not post any Slack opening acknowledgement, scan announcement, progress update, or partial finding',
     );
-    expect(payload.description).toContain(
-      'post exactly one concise status message',
-    );
+    expect(payload.description).toContain('send exactly one concise report');
+    expect(payload.description).toContain('with `send_chat_reply`');
+    expect(payload.description).toContain('using purpose `closeout`');
+    expect(payload.description).not.toContain('with `post_to_channel`');
   });
 
   it('scans and reports repositories without environments without permitting remediation launches', async () => {
