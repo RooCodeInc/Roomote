@@ -274,6 +274,7 @@ describe('answerFastAgentQuestion', () => {
     expect(result).toBe('');
     expect(callbacks.postSlackReaction).toHaveBeenCalledWith({
       name: 'thumbsup',
+      purpose: 'closeout',
       slackChannel: 'channel-1',
       slackMessageTs: '100.2',
     });
@@ -308,6 +309,9 @@ describe('answerFastAgentQuestion', () => {
     });
 
     expect(callbacks.postSlackReaction).toHaveBeenCalledOnce();
+    expect(callbacks.postSlackReaction).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: 'ack' }),
+    );
     expect(callbacks.postSlackReply).toHaveBeenCalledWith(
       expect.objectContaining({
         purpose: 'closeout',
