@@ -2,6 +2,7 @@ import { PRODUCT_NAME } from '@roomote/types';
 
 import type { RoutableEnvironment } from '../router';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
+import type { FastAgentUserIdentity } from './fast-agent-user-identity';
 import { buildRoomoteStyleGuidanceSection } from '../../style-guidance';
 
 function formatRepositoriesForPrompt(
@@ -31,10 +32,12 @@ export function buildFastAgentSystemPrompt({
   availableEnvironments,
   availableIntegrations = [],
   activeTaskId = null,
+  currentUser,
 }: {
   availableEnvironments: RoutableEnvironment[];
   availableIntegrations?: FastAgentIntegration[];
   activeTaskId?: string | null;
+  currentUser?: FastAgentUserIdentity;
   /** @deprecated GitHub availability is derived from availableIntegrations. */
   hasGitHubTools?: boolean;
 }): string {
@@ -45,6 +48,11 @@ ${formatRepositoriesForPrompt(availableEnvironments)}
 
 ## Active Delegated Task
 ${activeTaskId ? `- Task ID: ${activeTaskId}` : '- No task is currently active in this Slack thread.'}
+
+## Current User Identity
+- Display name: ${currentUser?.displayName ?? 'Unknown'}
+- Linked GitHub login: ${currentUser?.githubLogin ? `@${currentUser.githubLogin}` : 'Unknown'}
+- Treat this mapped Roomote identity as authoritative when the user says "I", "me", "my", or "on my side". Do not infer the current user's identity from thread participants, integration instructions, integration results, or memory. If the needed identity is unknown, ask a concise clarification instead of guessing.
 
 ## Deployment Integrations
 ${

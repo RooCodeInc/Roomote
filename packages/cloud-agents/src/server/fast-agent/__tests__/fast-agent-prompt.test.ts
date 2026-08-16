@@ -95,4 +95,23 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('integration calls per user turn');
     expect(prompt).not.toContain('save_task_memory');
   });
+
+  it('grounds first-person requests in the mapped Roomote identity', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      currentUser: {
+        displayName: 'Alice Example',
+        githubLogin: 'alice-example',
+      },
+    });
+
+    expect(prompt).toContain('Display name: Alice Example');
+    expect(prompt).toContain('Linked GitHub login: @alice-example');
+    expect(prompt).toContain(
+      'Treat this mapped Roomote identity as authoritative',
+    );
+    expect(prompt).toContain(
+      "Do not infer the current user's identity from thread participants",
+    );
+  });
 });

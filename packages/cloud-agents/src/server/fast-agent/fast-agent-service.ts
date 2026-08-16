@@ -30,6 +30,10 @@ import {
   cancelFastAgentTask,
   sendFastAgentTaskMessage,
 } from './fast-agent-tasks';
+import {
+  getFastAgentUserIdentity,
+  type FastAgentUserIdentity,
+} from './fast-agent-user-identity';
 
 export type FastAgentSlackThreadMessage = SlackThreadPromptMessage;
 
@@ -178,14 +182,69 @@ function parseIntegrationToolArguments(
 
 function buildBrainPreflightQuery({
   question,
-  senderDisplayName,
+  currentUser,
 }: {
   question: string;
-  senderDisplayName?: string;
+  currentUser?: FastAgentUserIdentity;
 }): string {
-  const displayName = senderDisplayName?.trim();
+  const identity = [
+    currentUser?.displayName,
+    currentUser?.githubLogin ? `@${currentUser.githubLogin}` : undefined,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(' ');
 
-  return displayName ? `${displayName}: ${question}` : question;
+  return identity ? `${identity}: ${question}` : question;
+}
+
+function isRetryableFastAgentInferenceError(error: unknown): boolean {
+  const detail = formatErrorForLog(error).toLowerCase();
+
+  return [
+    'fetch failed',
+    'econnreset',
+    'econnrefused',
+    'enotfound',
+    'network error',
+    'socket hang up',
+  ].some((signature) => detail.includes(signature));
+}
+
+async function generateFastAgentDecision({
+  userId,
+  system,
+  prompt,
+}: {
+  userId: string;
+  system: string;
+  prompt: string;
+}) {
+  try {
+    return await generateTrackedNonTaskObject({
+      userId,
+      surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+      modelRole: FAST_AGENT_MODEL_ROLE,
+      schema: fastAgentDecisionSchema,
+      system,
+      prompt,
+    });
+  } catch (error) {
+    if (!isRetryableFastAgentInferenceError(error)) {
+      throw error;
+    }
+
+    console.warn(
+      `[Fast Agent] Retrying transient inference failure: ${formatErrorForLog(error)}`,
+    );
+    return generateTrackedNonTaskObject({
+      userId,
+      surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+      modelRole: FAST_AGENT_MODEL_ROLE,
+      schema: fastAgentDecisionSchema,
+      system,
+      prompt,
+    });
+  }
 }
 
 function buildUserTextMessage(text: string): ModelMessage {
@@ -401,7 +460,7 @@ export async function answerFastAgentQuestion({
   const turnSessionMessages: ModelMessage[] = [userMessage];
 
   try {
-    const [availableEnvironments, session, availableIntegrations] =
+    const [availableEnvironments, session, availableIntegrations, currentUser] =
       await Promise.all([
         getAvailableEnvironments(),
         getOrCreateFastAgentSession({
@@ -416,6 +475,15 @@ export async function answerFastAgentQuestion({
           );
           return [];
         }),
+        getFastAgentUserIdentity(userId).catch((error) => {
+          console.warn(
+            `[Fast Agent] User identity unavailable: ${formatErrorForLog(error)}`,
+          );
+          return {
+            displayName: senderDisplayName?.trim() || null,
+            githubLogin: null,
+          };
+        }),
       ]);
     sessionId = session.id;
     const fastAgentMessages = buildFastAgentMessages({
@@ -428,6 +496,7 @@ export async function answerFastAgentQuestion({
       availableEnvironments,
       availableIntegrations,
       activeTaskId,
+      currentUser,
     });
     let prompt = serializeFastAgentMessages(fastAgentMessages);
     const integrationCallSignatures = new Set<string>();
@@ -446,7 +515,7 @@ export async function answerFastAgentQuestion({
       const toolArguments = {
         query: buildBrainPreflightQuery({
           question: normalizedQuestion,
-          senderDisplayName,
+          currentUser,
         }),
       };
       integrationCallSignatures.add(
@@ -488,11 +557,8 @@ export async function answerFastAgentQuestion({
       generation < FAST_AGENT_MAX_STEPS;
       generation += 1
     ) {
-      const generated = await generateTrackedNonTaskObject({
+      const generated = await generateFastAgentDecision({
         userId,
-        surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
-        modelRole: FAST_AGENT_MODEL_ROLE,
-        schema: fastAgentDecisionSchema,
         system,
         prompt,
       });
@@ -716,8 +782,9 @@ export async function answerFastAgentQuestion({
     console.error(
       `[Fast Agent] Failed to answer question: ${formatErrorForLog(error)}`,
     );
-    const message =
-      'I hit an error while handling that request. Please try again in a moment.';
+    const message = isRetryableFastAgentInferenceError(error)
+      ? 'Fast mode could not reach the model after retrying. Please try again in a moment.'
+      : 'I hit an error while handling that request. Please try again in a moment.';
 
     try {
       await postSlackReply({

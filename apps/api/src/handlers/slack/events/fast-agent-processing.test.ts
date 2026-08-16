@@ -288,6 +288,41 @@ describe('processFastAgentMessage', () => {
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
   });
 
+  it('does not trust a current-message display name from another Slack user', async () => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => [
+        {
+          user: 'U_OTHER',
+          username: 'Wrong Person',
+          text: '!fast show my PRs',
+          ts: '100.001',
+          type: 'message',
+        },
+      ]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'D123',
+        channel_type: 'im',
+        user: 'U123',
+        text: '!fast show my PRs',
+        ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ senderDisplayName: undefined }),
+    );
+  });
+
   it('clears the task-processing reaction when fast processing fails', async () => {
     mocks.answerQuestion.mockRejectedValueOnce(new Error('model unavailable'));
     const slack = {

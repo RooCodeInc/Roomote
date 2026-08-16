@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   callIntegration: vi.fn(),
   sendTaskMessage: vi.fn(),
   cancelTask: vi.fn(),
+  getUserIdentity: vi.fn(),
 }));
 
 vi.mock('../fast-agent-session', () => ({
@@ -33,6 +34,10 @@ vi.mock('../fast-agent-integration-broker', () => ({
 vi.mock('../fast-agent-tasks', () => ({
   sendFastAgentTaskMessage: mocks.sendTaskMessage,
   cancelFastAgentTask: mocks.cancelTask,
+}));
+
+vi.mock('../fast-agent-user-identity', () => ({
+  getFastAgentUserIdentity: mocks.getUserIdentity,
 }));
 
 import {
@@ -89,6 +94,10 @@ describe('answerFastAgentQuestion', () => {
     mocks.generateObject.mockResolvedValue({ object: decision() });
     mocks.sendTaskMessage.mockResolvedValue({ success: true });
     mocks.cancelTask.mockResolvedValue({ success: true });
+    mocks.getUserIdentity.mockResolvedValue({
+      displayName: 'Matt Rubens',
+      githubLogin: 'mrubens',
+    });
   });
 
   it('answers through send_chat_reply and persists the Slack conversation', async () => {
@@ -109,6 +118,12 @@ describe('answerFastAgentQuestion', () => {
     expect(callbacks.postSlackReaction).not.toHaveBeenCalled();
     expect(mocks.generateObject).toHaveBeenCalledWith(
       expect.objectContaining({ modelRole: 'primary' }),
+    );
+    expect(mocks.generateObject.mock.calls[0]?.[0]?.system).toContain(
+      'Linked GitHub login: @mrubens',
+    );
+    expect(mocks.generateObject.mock.calls[0]?.[0]?.system).toContain(
+      'Treat this mapped Roomote identity as authoritative',
     );
     expect(mocks.generateObject).toHaveBeenCalledOnce();
     expect(
@@ -497,7 +512,9 @@ describe('answerFastAgentQuestion', () => {
       {
         integrationId: 'gbrain',
         toolName: 'search',
-        args: { query: 'Matt: What does this service do?' },
+        args: {
+          query: 'Matt Rubens @mrubens: What does this service do?',
+        },
       },
     );
     expect(mocks.generateObject.mock.calls[0]?.[0]?.prompt).toContain(
@@ -771,6 +788,52 @@ describe('answerFastAgentQuestion', () => {
     });
 
     expect(result).toContain('hit an error');
+    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
+    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: 'closeout', message: result }),
+    );
+  });
+
+  it('retries a transient inference transport failure before closing out', async () => {
+    mocks.generateObject
+      .mockRejectedValueOnce(
+        new Error(
+          'OpenCode structured prompt failed (model openai/example): TypeError: fetch failed',
+        ),
+      )
+      .mockResolvedValueOnce({ object: decision() });
+    const callbacks = chatCallbacks();
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      ...callbacks,
+    });
+
+    expect(mocks.generateObject).toHaveBeenCalledTimes(2);
+    expect(result).toBe('It coordinates incoming requests.');
+    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
+    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: 'closeout', message: result }),
+    );
+  });
+
+  it('reports a model connection failure after the transient retry fails', async () => {
+    mocks.generateObject.mockRejectedValue(
+      new Error(
+        'OpenCode structured prompt failed (model openai/example): TypeError: fetch failed',
+      ),
+    );
+    const callbacks = chatCallbacks();
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      ...callbacks,
+    });
+
+    expect(mocks.generateObject).toHaveBeenCalledTimes(2);
+    expect(result).toBe(
+      'Fast mode could not reach the model after retrying. Please try again in a moment.',
+    );
     expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
     expect(callbacks.postSlackReply).toHaveBeenCalledWith(
       expect.objectContaining({ purpose: 'closeout', message: result }),
