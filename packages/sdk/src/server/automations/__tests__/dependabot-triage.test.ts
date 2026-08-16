@@ -43,7 +43,10 @@ type TriageConfig = {
   buildScanTask: (params: {
     deployment: { slackBotToken: string | null; slackTeamId: string | null };
     channelId: string;
-    destination: { provider: 'slack'; channelId: string };
+    destination: {
+      provider: 'slack' | 'discord';
+      channelId: string;
+    };
     runtime: Record<string, unknown>;
     manualTrigger: boolean;
   }) => Promise<
@@ -54,11 +57,14 @@ type TriageConfig = {
 
 const config = dependabotTriageJob as unknown as TriageConfig;
 
-function buildScanTaskParams() {
+function buildScanTaskParams(provider: 'slack' | 'discord' = 'slack') {
+  const channelId =
+    provider === 'slack' ? 'C123MANAGER' : 'discord-manager-channel';
+
   return {
     deployment: { slackBotToken: 'xoxb-test', slackTeamId: 'T-1' },
-    channelId: 'C123MANAGER',
-    destination: { provider: 'slack' as const, channelId: 'C123MANAGER' },
+    channelId,
+    destination: { provider, channelId },
     runtime: {},
     manualTrigger: false,
   };
@@ -165,6 +171,28 @@ describe('dependabotTriageJob buildScanTask', () => {
     expect(result.payloads[0]?.description).toContain(
       'Only consider repositories that appear in the "Repository environments" list below',
     );
+  });
+
+  it('builds destination-generic closeout guidance for Discord', async () => {
+    mockGetActiveGitHubRepositoryFullNames.mockResolvedValue(['acme/api']);
+    mockBuildRepositoryCoverage.mockResolvedValue([
+      { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-1' },
+    ]);
+
+    const result = await config.buildScanTask(buildScanTaskParams('discord'));
+
+    expect(result.kind).toBe('scan');
+    if (result.kind !== 'scan') {
+      throw new Error('expected a scan build');
+    }
+
+    expect(result.payloads[0]?.description).toContain(
+      '<channel_id>discord-manager-channel</channel_id>',
+    );
+    expect(result.payloads[0]?.description).toContain(
+      'standard automation result thread in the configured Discord conversation',
+    );
+    expect(result.payloads[0]?.description).not.toContain('<slack_channel_id>');
   });
 
   it('skips when there are no active GitHub repositories', async () => {
