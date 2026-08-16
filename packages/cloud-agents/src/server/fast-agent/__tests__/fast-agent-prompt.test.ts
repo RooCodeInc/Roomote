@@ -82,17 +82,10 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('one useful Brain result is usually enough');
     expect(prompt).toContain(
-      'offer to look deeper instead of investigating every possibility before replying. For personal-context questions such as "what do you know about me?", answer naturally',
+      "If Brain has limited context, say what you found and offer to look deeper instead of investigating every possibility before replying. Don't apologize for not knowing everything.",
     );
     expect(prompt).toContain(
-      'directly state what you know, then offer to look for more detail if the user wants',
-    );
-    expect(prompt).toContain(
-      'Do not call the information a "person record", "profile", or "shared memory"',
-    );
-    expect(prompt).toContain('do not add an apology or defensive caveat');
-    expect(prompt).toContain(
-      "Never expose Brain's `source` field or other internal provenance metadata",
+      "Never expose Brain's `source` field, architecture, or other internal provenance metadata in a user-facing reply. This includes source IDs, page or entity IDs, storage paths, raw record keys, presence or absence of records or profiles, and similar implementation details.",
     );
     expect(prompt).toContain('Do not add a `Source:` line for Brain results');
     expect(prompt).not.toContain('cite pages when relying on them');
