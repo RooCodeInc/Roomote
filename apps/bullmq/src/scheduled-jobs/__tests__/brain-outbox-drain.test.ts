@@ -97,7 +97,7 @@ describe('PR fact resume cursor', () => {
 });
 
 describe('pull request fact pages', () => {
-  it('uses the fact update date instead of the ingestion date', () => {
+  it('uses the remote update date instead of the local sync date', () => {
     const page = buildPullRequestFactPage({
       repositoryFullName: 'owner/repo',
       prNumber: 42,
@@ -106,10 +106,10 @@ describe('pull request fact pages', () => {
       authorLogin: 'octocat',
       state: 'merged',
       mergedAtRemote: new Date('2026-08-14T10:00:00Z'),
-      updatedAt: new Date('2026-08-15T11:00:00Z'),
+      updatedAtRemote: new Date('2026-08-13T11:00:00Z'),
     });
 
-    expect(page.content).toContain('\ndate: 2026-08-15\n');
+    expect(page.content).toContain('\ndate: 2026-08-13\n');
     expect(page.content).toContain('\nmerged_at: 2026-08-14T10:00:00.000Z\n');
   });
 });
@@ -169,6 +169,7 @@ describe('collector continuation orchestration', () => {
         authorLogin: 'octocat',
         state: 'merged',
         mergedAtRemote: new Date('2026-08-14T10:00:00Z'),
+        updatedAtRemote: new Date('2026-08-14T10:30:00Z'),
         updatedAt: new Date('2026-08-14T11:00:00Z'),
       },
     ]);

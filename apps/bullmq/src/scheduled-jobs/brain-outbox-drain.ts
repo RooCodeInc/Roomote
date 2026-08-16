@@ -575,12 +575,12 @@ export function buildPullRequestFactPage(fact: {
   authorLogin: string | null;
   state: string;
   mergedAtRemote: Date | null;
-  updatedAt: Date;
+  updatedAtRemote: Date;
 }): IngestPage {
   const merged = fact.mergedAtRemote?.toISOString();
   const content = [
     '---',
-    `date: ${fact.updatedAt.toISOString().slice(0, 10)}`,
+    `date: ${fact.updatedAtRemote.toISOString().slice(0, 10)}`,
     `repository: ${fact.repositoryFullName}`,
     `pr_number: ${fact.prNumber}`,
     `state: ${fact.state}`,
@@ -636,6 +636,7 @@ async function syncPullRequestFacts(
       authorLogin: pullRequestFacts.authorLogin,
       state: pullRequestFacts.state,
       mergedAtRemote: pullRequestFacts.mergedAtRemote,
+      updatedAtRemote: pullRequestFacts.updatedAtRemote,
       updatedAt: pullRequestFacts.updatedAt,
     })
     .from(pullRequestFacts)
