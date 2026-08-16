@@ -1,6 +1,5 @@
 import { buildFastAgentSystemPrompt } from '../fast-agent-prompt';
 import { BRAIN_MCP_READ_INSTRUCTIONS } from '@roomote/types';
-import { FAST_AGENT_MAX_INTEGRATION_CALLS } from '../fast-agent-constants';
 
 describe('buildFastAgentSystemPrompt', () => {
   it('uses the default Roomote tone guidance', () => {
@@ -47,10 +46,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Brain [integrationId: gbrain]');
     expect(prompt).toContain('Treat Brain recall as a sequential preflight');
     expect(prompt).toContain('- query:');
-    expect(prompt).toContain(
-      `no more than ${FAST_AGENT_MAX_INTEGRATION_CALLS} per user turn`,
-    );
+    expect(prompt).toContain('make multiple integration calls');
     expect(prompt).not.toContain('at most one integration call');
+    expect(prompt).not.toContain('integration calls per user turn');
     expect(prompt).not.toContain('save_task_memory');
   });
 });

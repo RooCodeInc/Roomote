@@ -37,7 +37,7 @@ vi.mock('../fast-agent-tasks', () => ({
 
 import {
   answerFastAgentQuestion,
-  FAST_AGENT_MAX_INTEGRATION_CALLS,
+  FAST_AGENT_MAX_STEPS,
 } from '../fast-agent-service';
 
 const baseParams = {
@@ -261,7 +261,7 @@ describe('answerFastAgentQuestion', () => {
     expect(result).toBe('The code is in the fast-agent module.');
   });
 
-  it('stops integration chains at the per-turn call limit', async () => {
+  it('uses only the overall step budget to stop a runaway integration chain', async () => {
     mocks.listIntegrations.mockResolvedValue([
       {
         id: 'github',
@@ -286,12 +286,8 @@ describe('answerFastAgentQuestion', () => {
       postSlackReply: vi.fn().mockResolvedValue(undefined),
     });
 
-    expect(mocks.callIntegration).toHaveBeenCalledTimes(
-      FAST_AGENT_MAX_INTEGRATION_CALLS,
-    );
-    expect(mocks.generateObject).toHaveBeenCalledTimes(
-      FAST_AGENT_MAX_INTEGRATION_CALLS + 1,
-    );
-    expect(result).toContain('within the allowed number of calls');
+    expect(mocks.callIntegration).toHaveBeenCalledTimes(FAST_AGENT_MAX_STEPS);
+    expect(mocks.generateObject).toHaveBeenCalledTimes(FAST_AGENT_MAX_STEPS);
+    expect(result).toContain('within the available turn steps');
   });
 });

@@ -9,11 +9,7 @@ import {
   type SlackThreadPromptMessage,
 } from '../../utils';
 import { getAvailableEnvironments, type RoutableEnvironment } from '../router';
-import {
-  FAST_AGENT_MAX_INTEGRATION_CALLS,
-  FAST_AGENT_MAX_STEPS,
-  FAST_AGENT_MODEL,
-} from './fast-agent-constants';
+import { FAST_AGENT_MAX_STEPS, FAST_AGENT_MODEL } from './fast-agent-constants';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import {
   appendFastAgentSessionMessages,
@@ -312,11 +308,10 @@ export async function answerFastAgentQuestion({
     });
     let prompt = serializeFastAgentMessages(fastAgentMessages);
     let decision: z.infer<typeof fastAgentDecisionSchema> | null = null;
-    let integrationCallCount = 0;
 
     for (
       let generation = 0;
-      generation <= FAST_AGENT_MAX_INTEGRATION_CALLS;
+      generation < FAST_AGENT_MAX_STEPS;
       generation += 1
     ) {
       const generated = await generateTrackedNonTaskObject({
@@ -331,12 +326,6 @@ export async function answerFastAgentQuestion({
       if (decision.action !== 'call_integration') {
         break;
       }
-
-      if (integrationCallCount >= FAST_AGENT_MAX_INTEGRATION_CALLS) {
-        break;
-      }
-
-      integrationCallCount += 1;
 
       const integrationId = decision.integrationId?.trim();
       const toolName = decision.toolName?.trim();
@@ -377,7 +366,7 @@ export async function answerFastAgentQuestion({
       decision = {
         action: 'respond',
         response:
-          'I could not complete that integration request within the allowed number of calls.',
+          'I could not complete that request within the available turn steps.',
         taskPrompt: null,
         environmentId: null,
         taskMessage: null,
@@ -489,9 +478,5 @@ export async function answerFastAgentQuestion({
   }
 }
 
-export {
-  FAST_AGENT_MAX_INTEGRATION_CALLS,
-  FAST_AGENT_MAX_STEPS,
-  FAST_AGENT_MODEL,
-};
+export { FAST_AGENT_MAX_STEPS, FAST_AGENT_MODEL };
 export type { RoutableEnvironment };
