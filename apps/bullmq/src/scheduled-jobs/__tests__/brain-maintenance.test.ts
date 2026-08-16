@@ -1,10 +1,12 @@
 const {
+  mockEnv,
   mockGetBrainSyncState,
   mockPostToBrain,
   mockResolveConnection,
   mockResolveProvider,
   mockUpsertBrainSyncState,
 } = vi.hoisted(() => ({
+  mockEnv: { TRPC_URL: 'http://api.test:3001' },
   mockGetBrainSyncState: vi.fn(),
   mockPostToBrain: vi.fn(),
   mockResolveConnection: vi.fn(),
@@ -19,7 +21,7 @@ vi.mock('@roomote/sdk/server', () => ({
 }));
 
 vi.mock('@roomote/env', () => ({
-  Env: { TRPC_URL: 'http://api.test:3001' },
+  Env: mockEnv,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -230,11 +232,31 @@ describe('brainMaintenanceJob', () => {
 describe('runBrainDailyDigest', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    mockEnv.TRPC_URL = 'http://api.test:3001';
     mockGetBrainSyncState.mockReset();
     mockPostToBrain.mockReset();
     mockResolveProvider.mockReset();
     mockResolveProvider.mockResolvedValue(TEST_PROVIDER);
     mockUpsertBrainSyncState.mockReset();
+  });
+
+  it('preserves a path-prefixed TRPC_URL for Brain inference', async () => {
+    mockEnv.TRPC_URL = 'https://roomote.test/_roomote-api';
+    mockGetBrainSyncState.mockResolvedValue(null);
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(searchResponse())
+      .mockResolvedValueOnce(synthesisResponse());
+
+    await runBrainDailyDigest(
+      { baseUrl: 'http://gbrain.test', token: 'read-token' },
+      { baseUrl: 'http://gbrain.test', token: 'write-token' },
+      new Date('2026-08-16T07:00:00.000Z'),
+    );
+
+    expect(String(fetchSpy.mock.calls[1]?.[0])).toBe(
+      'https://roomote.test/_roomote-api/api/brain/inference/v1/chat/completions',
+    );
   });
 
   it('includes date-only pages on the timestamp watermark boundary', async () => {

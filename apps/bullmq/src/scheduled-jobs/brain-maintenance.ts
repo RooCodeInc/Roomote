@@ -226,7 +226,10 @@ async function synthesizeDailyDigest(
   }
 
   const response = await fetch(
-    new URL('/api/brain/inference/v1/chat/completions', apiBaseUrl),
+    new URL(
+      'api/brain/inference/v1/chat/completions',
+      `${apiBaseUrl.replace(/\/+$/, '')}/`,
+    ),
     {
       method: 'POST',
       headers: {
