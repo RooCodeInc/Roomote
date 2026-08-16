@@ -82,7 +82,10 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('one useful Brain result is usually enough');
     expect(prompt).toContain(
-      "Never expose Brain's `source` field or other internal provenance metadata",
+      "If Brain has limited context, say what you found and offer to look deeper instead of investigating every possibility before replying. Don't apologize for not knowing everything.",
+    );
+    expect(prompt).toContain(
+      "Never expose Brain's `source` field, architecture, or other internal provenance metadata in a user-facing reply. This includes source IDs, page or entity IDs, storage paths, raw record keys, presence or absence of records or profiles, and similar implementation details.",
     );
     expect(prompt).toContain('Do not add a `Source:` line for Brain results');
     expect(prompt).not.toContain('cite pages when relying on them');
