@@ -1,7 +1,15 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 
-const { showConnectAccountMock } = vi.hoisted(() => ({
+const {
+  fastAgentMessageMock,
+  showConnectAccountMock,
+  startTaskMock,
+  userMappingRowsMock,
+} = vi.hoisted(() => ({
+  fastAgentMessageMock: vi.fn(),
   showConnectAccountMock: vi.fn(),
+  startTaskMock: vi.fn(),
+  userMappingRowsMock: vi.fn(),
 }));
 
 const { enrichSlackMessageEventMock, isRoomoteAuthoredSlackEventMock } =
@@ -11,7 +19,11 @@ const { enrichSlackMessageEventMock, isRoomoteAuthoredSlackEventMock } =
   }));
 
 vi.mock('@roomote/env', () => ({
-  Env: { TRPC_URL: null, R_APP_URL: 'http://localhost:3000' },
+  Env: {
+    TRPC_URL: null,
+    R_APP_URL: 'http://localhost:3000',
+    R_SLACK_FAST_MODE_SETTING_ENABLED: true,
+  },
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -31,7 +43,17 @@ vi.mock('../helpers/event-normalization.js', () => ({
 
 vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
+  resolveSlackReactionNames: vi.fn().mockResolvedValue({
+    ackEmoji: 'eyes',
+    completionEmoji: 'white_check_mark',
+  }),
   showConnectAccount: showConnectAccountMock,
+  startAutoRoutedSlackTask: startTaskMock,
+}));
+
+vi.mock('./fast-agent.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./fast-agent.js')>()),
+  processFastAgentMessage: fastAgentMessageMock,
 }));
 
 const redisClientMock = {
@@ -60,7 +82,7 @@ const userMappingSelectChain = () => ({
   from: vi.fn(() => ({
     leftJoin: vi.fn(() => ({
       where: vi.fn(() => ({
-        limit: vi.fn().mockResolvedValue([]),
+        limit: userMappingRowsMock,
       })),
     })),
   })),
@@ -78,6 +100,8 @@ describe('channel auto-start unlinked author', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     showConnectAccountMock.mockResolvedValue(undefined);
+    fastAgentMessageMock.mockResolvedValue(undefined);
+    userMappingRowsMock.mockResolvedValue([]);
   });
 
   it('prompts an unlinked human author to connect their account instead of silently skipping', async () => {
@@ -113,5 +137,52 @@ describe('channel auto-start unlinked author', () => {
       expect.objectContaining({ teamId: 'T123' }),
       expect.anything(),
     );
+  }, 30000);
+
+  it('routes an opted-in linked author to fast mode before channel auto-start', async () => {
+    userMappingRowsMock.mockResolvedValue([
+      {
+        id: 'mapping-1',
+        slackUserId: 'U456',
+        slackTeamId: 'T123',
+        userId: 'user-1',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        matchedUserId: 'user-1',
+        userDeletedAt: null,
+        userMetadata: { slack_fast_mode_default: true },
+      },
+    ]);
+    const { handleMessageOrAppMentionEvent } =
+      await import('./message-entry.js');
+
+    await handleMessageOrAppMentionEvent({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U456',
+        text: 'please look into this',
+        ts: '112.000',
+        channel_type: 'channel',
+      } as never,
+      context: {
+        slackInstallation: { teamId: 'T123', botUserId: 'UBOT' } as never,
+        slack: {} as never,
+        teamId: 'T123',
+      } as never,
+    });
+
+    expect(fastAgentMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        continuation: true,
+        event: expect.objectContaining({
+          text: 'please look into this',
+          user: 'U456',
+        }),
+        teamId: 'T123',
+        userId: 'user-1',
+      }),
+    );
+    expect(startTaskMock).not.toHaveBeenCalled();
   }, 30000);
 });

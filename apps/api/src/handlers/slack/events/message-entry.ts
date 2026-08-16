@@ -55,6 +55,7 @@ import type { AutomatedSlackAppMentionEvent } from '../types.js';
 import { processActiveRunMessage } from './active-run.js';
 import {
   isBareFastCommandInvocation,
+  isFastCommandInvocation,
   processFastAgentMessage,
   resolveFastAgentEntryMode,
 } from './fast-agent.js';
@@ -1223,11 +1224,21 @@ async function maybeHandleChannelAutoStart(params: {
 
   const { ackEmoji } = await resolveSlackReactionNames();
 
-  if (
-    userMapping &&
-    typeof channelAutoStartEvent.user === 'string' &&
-    isBareFastCommandInvocation(channelAutoStartEvent.text)
-  ) {
+  const fastAgentEntryMode =
+    userMapping && typeof channelAutoStartEvent.user === 'string'
+      ? resolveFastAgentEntryMode({
+          explicitInvocation: isBareFastCommandInvocation(
+            channelAutoStartEvent.text,
+          ),
+          deploymentSettingEnabled:
+            Env.R_SLACK_FAST_MODE_SETTING_ENABLED === true,
+          userDefaultEnabled:
+            userMapping.slackFastModeDefault &&
+            !isRemovedEvalCommandInvocation(channelAutoStartEvent.text),
+        })
+      : null;
+
+  if (fastAgentEntryMode && userMapping) {
     startFastAgentResponse({
       event: { ...channelAutoStartEvent, user: channelAutoStartEvent.user },
       slackInstallation: context.slackInstallation,
@@ -1236,6 +1247,7 @@ async function maybeHandleChannelAutoStart(params: {
       userId: userMapping.userId,
       teamId: context.teamId,
       usageText: 'Use `!fast <question>` in this channel.',
+      continuation: fastAgentEntryMode === 'default',
       processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent response failed for auto-start thread ${channelAutoStartEvent.ts}:`,
     });
@@ -1688,7 +1700,7 @@ async function handleSlackEntryEvent(params: {
   });
 
   const fastAgentEntryMode = resolveFastAgentEntryMode({
-    text: event.text,
+    explicitInvocation: isFastCommandInvocation(event.text),
     deploymentSettingEnabled: Env.R_SLACK_FAST_MODE_SETTING_ENABLED === true,
     userDefaultEnabled:
       userMapping.slackFastModeDefault &&

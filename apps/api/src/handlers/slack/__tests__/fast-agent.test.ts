@@ -31,7 +31,7 @@ describe('Slack fast-agent helpers', () => {
   it('keeps ordinary messages on standard routing when the deployment flag is disabled', () => {
     expect(
       resolveFastAgentEntryMode({
-        text: 'please fix this',
+        explicitInvocation: false,
         deploymentSettingEnabled: false,
         userDefaultEnabled: true,
       }),
@@ -41,7 +41,7 @@ describe('Slack fast-agent helpers', () => {
   it('keeps ordinary messages on standard routing when the user setting is off', () => {
     expect(
       resolveFastAgentEntryMode({
-        text: 'please fix this',
+        explicitInvocation: false,
         deploymentSettingEnabled: true,
         userDefaultEnabled: false,
       }),
@@ -51,7 +51,7 @@ describe('Slack fast-agent helpers', () => {
   it('defaults ordinary messages to fast mode when both settings are enabled', () => {
     expect(
       resolveFastAgentEntryMode({
-        text: 'please fix this',
+        explicitInvocation: false,
         deploymentSettingEnabled: true,
         userDefaultEnabled: true,
       }),
@@ -61,7 +61,7 @@ describe('Slack fast-agent helpers', () => {
   it('preserves explicit !fast routing regardless of the user setting', () => {
     expect(
       resolveFastAgentEntryMode({
-        text: '!fast please fix this',
+        explicitInvocation: true,
         deploymentSettingEnabled: true,
         userDefaultEnabled: true,
       }),

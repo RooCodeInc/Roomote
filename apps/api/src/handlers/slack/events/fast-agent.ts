@@ -30,11 +30,11 @@ export function isBareFastCommandInvocation(text: string): boolean {
 type FastAgentEntryMode = 'explicit' | 'default';
 
 export function resolveFastAgentEntryMode(params: {
-  text: string;
+  explicitInvocation: boolean;
   deploymentSettingEnabled: boolean;
   userDefaultEnabled: boolean;
 }): FastAgentEntryMode | null {
-  if (isFastCommandInvocation(params.text)) {
+  if (params.explicitInvocation) {
     return 'explicit';
   }
 
