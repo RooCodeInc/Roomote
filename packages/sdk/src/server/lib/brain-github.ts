@@ -184,6 +184,21 @@ function labelNames(issue: GithubIssue): string[] {
     .filter((name): name is string => Boolean(name));
 }
 
+function issueEffectiveDate(issue: GithubIssue): string | null {
+  for (const value of [issue.updated_at, issue.closed_at, issue.created_at]) {
+    if (!value) {
+      continue;
+    }
+
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString().slice(0, 10);
+    }
+  }
+
+  return null;
+}
+
 export function buildGithubIssuePage(input: {
   fullName: string;
   issue: GithubIssue;
@@ -196,6 +211,7 @@ export function buildGithubIssuePage(input: {
   }
 
   const labels = labelNames(issue);
+  const effectiveDate = issueEffectiveDate(issue);
   const body = (issue.body ?? '').trim();
   const commentLines = input.comments.flatMap((comment) => {
     const text = comment.body.trim();
@@ -213,6 +229,7 @@ export function buildGithubIssuePage(input: {
 
   const content = [
     '---',
+    ...(effectiveDate ? [`date: ${effectiveDate}`] : []),
     `repository: ${fullName}`,
     `issue_number: ${issue.number}`,
     `state: ${issue.state ?? 'unknown'}`,

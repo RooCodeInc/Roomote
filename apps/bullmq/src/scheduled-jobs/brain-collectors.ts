@@ -3142,7 +3142,9 @@ const granolaMeetingsCollector: BrainCollector = {
  * limit can never masquerade as brain-side backpressure.
  */
 const githubIssuesCollector: BrainCollector = {
-  id: 'github-issues',
+  // Versioned once so the historical backfill rewrites pages created before
+  // GitHub issue effective dates were explicit.
+  id: 'github-issues:effective-date-v2',
   displayName: 'GitHub issues',
   async isEnabled() {
     return hasBrainGithubSources();
