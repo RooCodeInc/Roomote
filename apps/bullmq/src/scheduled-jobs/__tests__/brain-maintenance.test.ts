@@ -211,10 +211,9 @@ describe('runBrainDailyDigest', () => {
     mockUpsertBrainSyncState.mockReset();
   });
 
-  it('synthesizes only the window after the durable watermark', async () => {
+  it('includes date-only pages on the timestamp watermark boundary', async () => {
     const watermark = new Date('2026-08-15T07:00:00.000Z');
     const runAt = new Date('2026-08-16T07:00:00.000Z');
-    const expectedSince = new Date('2026-08-15T06:00:00.000Z');
     const expectedUntil = new Date('2026-08-16T06:00:00.000Z');
     mockGetBrainSyncState.mockResolvedValue({ watermark });
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
@@ -267,8 +266,8 @@ describe('runBrainDailyDigest', () => {
       params: {
         name: 'query',
         arguments: {
-          since: expectedSince.toISOString(),
-          until: expectedUntil.toISOString(),
+          since: '2026-08-14',
+          until: '2026-08-16',
         },
       },
     });
@@ -277,8 +276,8 @@ describe('runBrainDailyDigest', () => {
       params: {
         name: 'synthesize',
         arguments: {
-          since: expectedSince.toISOString(),
-          until: expectedUntil.toISOString(),
+          since: '2026-08-14',
+          until: '2026-08-16',
         },
       },
     });

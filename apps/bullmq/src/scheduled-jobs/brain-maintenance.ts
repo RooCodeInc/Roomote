@@ -185,6 +185,18 @@ function yamlString(value: string): string {
   return JSON.stringify(value);
 }
 
+function previousUtcDate(value: Date): string {
+  return new Date(
+    Date.UTC(
+      value.getUTCFullYear(),
+      value.getUTCMonth(),
+      value.getUTCDate() - 1,
+    ),
+  )
+    .toISOString()
+    .slice(0, 10);
+}
+
 export function buildDailyDigestPage(input: {
   synthesis: GbrainSynthesis;
   since: Date;
@@ -261,10 +273,16 @@ export async function runBrainDailyDigest(
         new Date(state.watermark).getTime() - BRAIN_DAILY_DIGEST_OVERLAP_MS,
       )
     : new Date(until.getTime() - BRAIN_DAILY_DIGEST_INITIAL_LOOKBACK_MS);
+  // Roomote collectors intentionally write date-only effective dates. gbrain's
+  // lower bound is strict, so querying from the previous calendar date keeps
+  // midnight on the first eligible date in play. parseSearch then enforces the
+  // exact inclusive calendar-date window before a page becomes citable.
+  const retrievalSince = previousUtcDate(since);
+  const retrievalUntil = until.toISOString().slice(0, 10);
   const searchBody = await callGbrainTool(readConnection, 'query', {
     query: DAILY_DIGEST_SEARCH_QUERY,
-    since: since.toISOString(),
-    until: until.toISOString(),
+    since: retrievalSince,
+    until: retrievalUntil,
     limit: 50,
     expand: false,
     detail: 'low',
@@ -283,8 +301,8 @@ export async function runBrainDailyDigest(
 
   const body = await callGbrainTool(readConnection, 'synthesize', {
     question: buildConstrainedDigestQuestion(candidates),
-    since: since.toISOString(),
-    until: until.toISOString(),
+    since: retrievalSince,
+    until: retrievalUntil,
   });
   const synthesis = parseSynthesis(body);
   const eligibleSlugs = new Set(candidates.map((candidate) => candidate.slug));
