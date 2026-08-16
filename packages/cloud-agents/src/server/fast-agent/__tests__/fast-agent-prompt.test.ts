@@ -96,22 +96,17 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('save_task_memory');
   });
 
-  it('grounds first-person requests in the mapped Roomote identity', () => {
+  it('grounds first-person requests in current Slack message attributes', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
-      currentUser: {
-        displayName: 'Alice Example',
-        githubLogin: 'alice-example',
-      },
     });
 
-    expect(prompt).toContain('Display name: Alice Example');
-    expect(prompt).toContain('Linked GitHub login: @alice-example');
     expect(prompt).toContain(
-      'Treat this mapped Roomote identity as authoritative',
+      'attributes on the current `<slack_message>` identify its sender',
     );
     expect(prompt).toContain(
-      "Do not infer the current user's identity from thread participants",
+      'If an account-specific request needs a GitHub identity and `sender_github` is absent, ask',
     );
+    expect(prompt).not.toContain('## Current User Identity');
   });
 });

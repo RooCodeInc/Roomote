@@ -176,7 +176,7 @@ describe('normalizeTranscriptUserText', () => {
           '<thread_activity>\nBob Example: Added another clue\n</thread_activity>',
           '<thread_context>\n<slack_thread_message ts="109.000">Carol Example: Earlier thread detail</slack_thread_message>\n</thread_context>',
           '<replying_to ts="110.000">\nRoomote Bot: Previous reply\n</replying_to>',
-          '<slack_message ts="111.000">\nlatest question\n</slack_message>',
+          '<slack_message ts="111.000" sender_slack_id="U123" sender_name="Alice Example" sender_github="alice-example">\nlatest question\n</slack_message>',
         ].join('\n\n'),
       ),
     ).toBe('latest question');

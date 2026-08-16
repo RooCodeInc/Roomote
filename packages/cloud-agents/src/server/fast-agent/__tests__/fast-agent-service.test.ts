@@ -54,6 +54,7 @@ const baseParams = {
   slackThreadTs: '100.1',
   currentMessageTs: '100.2',
   senderDisplayName: 'Matt',
+  senderSlackUserId: 'U123',
 };
 
 function decision(overrides: Record<string, unknown> = {}) {
@@ -119,11 +120,8 @@ describe('answerFastAgentQuestion', () => {
     expect(mocks.generateObject).toHaveBeenCalledWith(
       expect.objectContaining({ modelRole: 'primary' }),
     );
-    expect(mocks.generateObject.mock.calls[0]?.[0]?.system).toContain(
-      'Linked GitHub login: @mrubens',
-    );
-    expect(mocks.generateObject.mock.calls[0]?.[0]?.system).toContain(
-      'Treat this mapped Roomote identity as authoritative',
+    expect(mocks.generateObject.mock.calls[0]?.[0]?.prompt).toContain(
+      '<slack_message ts="100.2" sender_slack_id="U123" sender_name="Matt" sender_github="mrubens">',
     );
     expect(mocks.generateObject).toHaveBeenCalledOnce();
     expect(
@@ -521,6 +519,39 @@ describe('answerFastAgentQuestion', () => {
       'AUTOMATIC BRAIN PREFLIGHT',
     );
     expect(result).toBe('The code is in the fast-agent module.');
+  });
+
+  it('keeps Slack sender context unlinked when persisted identity lookup fails', async () => {
+    mocks.getUserIdentity.mockRejectedValueOnce(new Error('database offline'));
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'gbrain',
+        name: 'Brain',
+        description: 'Deployment memory',
+        tools: [{ name: 'search' }],
+      },
+    ]);
+    mocks.callIntegration.mockResolvedValue({ results: [] });
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      ...chatCallbacks(),
+    });
+
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Array),
+      {
+        integrationId: 'gbrain',
+        toolName: 'search',
+        args: { query: 'What does this service do?' },
+      },
+    );
+    const prompt = mocks.generateObject.mock.calls[0]?.[0]?.prompt;
+    expect(prompt).toContain(
+      '<slack_message ts="100.2" sender_slack_id="U123" sender_name="Matt">',
+    );
+    expect(prompt).not.toContain('sender_github=');
   });
 
   it('forwards JSON-encoded arguments to a follow-up Brain entity lookup', async () => {

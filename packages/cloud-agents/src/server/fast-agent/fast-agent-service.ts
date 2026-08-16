@@ -338,15 +338,26 @@ function buildFastAgentMessages({
   threadContext,
   sessionMessages,
   currentMessageTs,
+  currentMessageSender,
 }: {
   question: string;
   threadContext: FastAgentSlackThreadMessage[];
   sessionMessages: ModelMessage[];
   currentMessageTs?: string;
+  currentMessageSender?: {
+    slackUserId?: string;
+    displayName?: string;
+    githubLogin?: string;
+  };
 }): ModelMessage[] {
   const normalizedQuestion = normalizeThreadText(question);
   const currentUserMessageText = currentMessageTs
-    ? wrapSlackMessage(normalizedQuestion, { ts: currentMessageTs })
+    ? wrapSlackMessage(normalizedQuestion, {
+        ts: currentMessageTs,
+        senderSlackId: currentMessageSender?.slackUserId,
+        senderName: currentMessageSender?.displayName,
+        senderGithub: currentMessageSender?.githubLogin,
+      })
     : normalizedQuestion;
   const serializedThreadContext = threadContext;
   const serializedSessionMessages = sessionMessages;
@@ -435,6 +446,7 @@ export async function answerFastAgentQuestion({
   slackThreadTs,
   currentMessageTs,
   senderDisplayName,
+  senderSlackUserId,
   activeTaskId = null,
   launchTask,
   postSlackReply,
@@ -449,6 +461,7 @@ export async function answerFastAgentQuestion({
   slackThreadTs: string;
   currentMessageTs?: string;
   senderDisplayName?: string;
+  senderSlackUserId?: string;
   activeTaskId?: string | null;
   launchTask?: LaunchFastAgentSlackTask;
   postSlackReply: PostFastAgentSlackReply;
@@ -480,7 +493,7 @@ export async function answerFastAgentQuestion({
             `[Fast Agent] User identity unavailable: ${formatErrorForLog(error)}`,
           );
           return {
-            displayName: senderDisplayName?.trim() || null,
+            displayName: null,
             githubLogin: null,
           };
         }),
@@ -491,12 +504,17 @@ export async function answerFastAgentQuestion({
       threadContext,
       sessionMessages: session.messages,
       currentMessageTs,
+      currentMessageSender: {
+        slackUserId: senderSlackUserId,
+        displayName:
+          senderDisplayName?.trim() || currentUser.displayName || undefined,
+        githubLogin: currentUser.githubLogin || undefined,
+      },
     });
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,
       availableIntegrations,
       activeTaskId,
-      currentUser,
     });
     let prompt = serializeFastAgentMessages(fastAgentMessages);
     const integrationCallSignatures = new Set<string>();

@@ -162,6 +162,7 @@ export async function processFastAgentMessage(params: {
       slackChannel: event.channel,
       slackThreadTs: threadId,
       currentMessageTs: event.ts,
+      senderSlackUserId: event.user,
       senderDisplayName:
         currentMessage?.user === event.user
           ? currentMessage.username

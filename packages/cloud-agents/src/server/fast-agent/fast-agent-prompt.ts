@@ -2,7 +2,6 @@ import { PRODUCT_NAME } from '@roomote/types';
 
 import type { RoutableEnvironment } from '../router';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
-import type { FastAgentUserIdentity } from './fast-agent-user-identity';
 import { buildRoomoteStyleGuidanceSection } from '../../style-guidance';
 
 function formatRepositoriesForPrompt(
@@ -32,12 +31,10 @@ export function buildFastAgentSystemPrompt({
   availableEnvironments,
   availableIntegrations = [],
   activeTaskId = null,
-  currentUser,
 }: {
   availableEnvironments: RoutableEnvironment[];
   availableIntegrations?: FastAgentIntegration[];
   activeTaskId?: string | null;
-  currentUser?: FastAgentUserIdentity;
   /** @deprecated GitHub availability is derived from availableIntegrations. */
   hasGitHubTools?: boolean;
 }): string {
@@ -48,11 +45,6 @@ ${formatRepositoriesForPrompt(availableEnvironments)}
 
 ## Active Delegated Task
 ${activeTaskId ? `- Task ID: ${activeTaskId}` : '- No task is currently active in this Slack thread.'}
-
-## Current User Identity
-- Display name: ${currentUser?.displayName ?? 'Unknown'}
-- Linked GitHub login: ${currentUser?.githubLogin ? `@${currentUser.githubLogin}` : 'Unknown'}
-- Treat this mapped Roomote identity as authoritative when the user says "I", "me", "my", or "on my side". Do not infer the current user's identity from thread participants, integration instructions, integration results, or memory. If the needed identity is unknown, ask a concise clarification instead of guessing.
 
 ## Deployment Integrations
 ${
@@ -107,6 +99,7 @@ ${buildRoomoteStyleGuidanceSection()}
 
 ## Slack Output
 - Be concise and direct. Every sentence should add information.
+- The \`sender_*\` attributes on the current \`<slack_message>\` identify its sender. Resolve "I", "me", "my", and "on my side" to that sender. If an account-specific request needs a GitHub identity and \`sender_github\` is absent, ask instead of inferring one from thread context, memory, or integration results.
 - Do not place decorative emoji in text replies. Use "send_chat_reaction_emoji" when an emoji itself is the appropriate response.
 - Lead with the answer, not a preamble or a recap of the question.
 <slack_modern_markdown>

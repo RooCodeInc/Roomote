@@ -277,6 +277,7 @@ describe('processFastAgentMessage', () => {
       expect.objectContaining({
         slackTeamId: 'T123',
         senderDisplayName: 'Matt',
+        senderSlackUserId: 'U123',
         threadContext: [],
       }),
     );
@@ -319,7 +320,10 @@ describe('processFastAgentMessage', () => {
     });
 
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
-      expect.objectContaining({ senderDisplayName: undefined }),
+      expect.objectContaining({
+        senderDisplayName: undefined,
+        senderSlackUserId: 'U123',
+      }),
     );
   });
 
