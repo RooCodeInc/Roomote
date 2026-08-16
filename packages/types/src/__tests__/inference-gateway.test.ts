@@ -4,10 +4,13 @@ import {
   CHATGPT_GATEWAY_PROVIDER_ID,
   getInferenceGatewayProvider,
   getInferenceGatewayProviderByEnvVarName,
+  INFERENCE_GATEWAY_IDENTITY_PATTERN,
   INFERENCE_GATEWAY_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_PROVIDERS,
   isInferenceGatewayCoveredEnvVar,
   parseInferenceGatewayKeys,
+  rewriteCloudflareAiGatewayRequestBody,
+  toCloudflareAiGatewayUpstreamModelId,
 } from '../inference-gateway';
 import { getSetupModelProvider } from '../model-provider-config';
 
@@ -317,5 +320,104 @@ describe('inference gateway key lookups', () => {
     ).toEqual(['ANTHROPIC_API_KEY', 'OPENROUTER_API_KEY']);
     expect(parseInferenceGatewayKeys('')).toEqual([]);
     expect(parseInferenceGatewayKeys(undefined)).toEqual([]);
+  });
+
+  it('registers Cloudflare AI Gateway with account URL templating and a required gateway header', () => {
+    const provider = getInferenceGatewayProvider('cloudflare-ai-gateway');
+
+    expect(provider).toMatchObject({
+      envVarNames: ['CLOUDFLARE_AI_GATEWAY_API_TOKEN'],
+      upstreamBaseUrl:
+        'https://api.cloudflare.com/client/v4/accounts/{resource}/ai',
+      resource: { envVarName: 'CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID' },
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      requiredHeaders: [
+        {
+          envVarName: 'CLOUDFLARE_AI_GATEWAY_ID',
+          headerName: 'cf-aig-gateway-id',
+        },
+      ],
+      openCodeNpm: '@ai-sdk/openai-compatible',
+      openCodeBaseUrlSuffix: '/v1',
+    });
+    expect(provider?.allowedPaths).toEqual(
+      expect.arrayContaining([
+        '/v1/chat/completions',
+        '/v1/embeddings',
+        '/v1/models',
+      ]),
+    );
+    expect(
+      getInferenceGatewayProviderByEnvVarName('CLOUDFLARE_AI_GATEWAY_API_TOKEN')
+        ?.id,
+    ).toBe('cloudflare-ai-gateway');
+    expect(
+      buildInferenceGatewayOpenCodeBaseUrl(
+        'https://api.example.com/api/inference',
+        provider!,
+      ),
+    ).toBe('https://api.example.com/api/inference/cloudflare-ai-gateway/v1');
+  });
+
+  it('registers Cloudflare Workers AI with account URL templating and no gateway id', () => {
+    const provider = getInferenceGatewayProvider('cloudflare-workers-ai');
+
+    expect(provider).toMatchObject({
+      envVarNames: ['CLOUDFLARE_WORKERS_AI_API_TOKEN'],
+      upstreamBaseUrl:
+        'https://api.cloudflare.com/client/v4/accounts/{resource}/ai',
+      resource: { envVarName: 'CLOUDFLARE_WORKERS_AI_ACCOUNT_ID' },
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      openCodeNpm: '@ai-sdk/openai-compatible',
+      openCodeBaseUrlSuffix: '/v1',
+    });
+    expect(provider?.requiredHeaders).toBeUndefined();
+    expect(provider?.allowedPaths).toEqual(
+      expect.arrayContaining([
+        '/v1/chat/completions',
+        '/v1/embeddings',
+        '/v1/responses',
+      ]),
+    );
+    expect(
+      getInferenceGatewayProviderByEnvVarName('CLOUDFLARE_WORKERS_AI_API_TOKEN')
+        ?.id,
+    ).toBe('cloudflare-workers-ai');
+    expect(
+      buildInferenceGatewayOpenCodeBaseUrl(
+        'https://api.example.com/api/inference',
+        provider!,
+      ),
+    ).toBe('https://api.example.com/api/inference/cloudflare-workers-ai/v1');
+  });
+
+  it('accepts underscore gateway ids and rejects header-unsafe values', () => {
+    expect(INFERENCE_GATEWAY_IDENTITY_PATTERN.test('default')).toBe(true);
+    expect(INFERENCE_GATEWAY_IDENTITY_PATTERN.test('my_gateway')).toBe(true);
+    expect(INFERENCE_GATEWAY_IDENTITY_PATTERN.test('my-gateway')).toBe(true);
+    expect(INFERENCE_GATEWAY_IDENTITY_PATTERN.test('my gateway')).toBe(false);
+    expect(INFERENCE_GATEWAY_IDENTITY_PATTERN.test('gw\nid')).toBe(false);
+  });
+
+  it('strips the models.dev workers-ai namespace before /ai/v1', () => {
+    expect(
+      toCloudflareAiGatewayUpstreamModelId('workers-ai/@cf/zai-org/glm-5.2'),
+    ).toBe('@cf/zai-org/glm-5.2');
+    expect(toCloudflareAiGatewayUpstreamModelId('openai/gpt-5.6-terra')).toBe(
+      'openai/gpt-5.6-terra',
+    );
+    expect(
+      rewriteCloudflareAiGatewayRequestBody(
+        JSON.stringify({
+          model: 'workers-ai/@cf/zai-org/glm-5.2',
+          messages: [{ role: 'user', content: 'hi' }],
+        }),
+      ),
+    ).toBe(
+      JSON.stringify({
+        model: '@cf/zai-org/glm-5.2',
+        messages: [{ role: 'user', content: 'hi' }],
+      }),
+    );
   });
 });

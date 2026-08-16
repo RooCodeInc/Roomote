@@ -7,7 +7,10 @@ import {
   type PermissionRuleset,
 } from '@opencode-ai/sdk/v2/client';
 import { resolveEffectiveModelRuntimeEnv } from '@roomote/db/server';
-import { toBedrockMantleRuntimeModelId } from '@roomote/types';
+import {
+  rewriteCloudflareOpenCodeModelId,
+  toBedrockMantleRuntimeModelId,
+} from '@roomote/types';
 import type { z } from 'zod';
 import zodToJsonSchema from 'zod-to-json-schema';
 
@@ -185,6 +188,9 @@ function splitOpenCodeModelId(model: string): {
   providerID: string;
   modelID: string;
 } {
+  model = rewriteCloudflareOpenCodeModelId(
+    toBedrockMantleRuntimeModelId(model),
+  );
   const separatorIndex = model.indexOf('/');
 
   if (separatorIndex <= 0 || separatorIndex === model.length - 1) {
@@ -319,7 +325,9 @@ async function resolveNonTaskModelRuntime(model?: string): Promise<{
     // The prompt must address the same runtime provider id the helper
     // server's config registered (Bedrock Mantle GPT ids run under
     // `bedrock-mantle-openai`), mirroring the task worker's rewrite.
-    model: toBedrockMantleRuntimeModelId(resolvedModel),
+    model: rewriteCloudflareOpenCodeModelId(
+      toBedrockMantleRuntimeModelId(resolvedModel),
+    ),
     // An explicit model rides into the server lease env as the primary role
     // model so the config builder registers its provider — the deployment's
     // role models may not include it, and an unregistered Bedrock (or

@@ -236,7 +236,8 @@ export async function fetchModelsDevCatalog(
 /**
  * Resolves the models.dev catalog slug for a Roomote task model id.
  * Strips a leading gateway provider prefix (`openrouter/`, `vercel/`,
- * `requesty/`, `baseten/`, `togetherai/`) and any leading `~` alias marker.
+ * `requesty/`, `baseten/`, `togetherai/`, `cloudflare-ai-gateway/`,
+ * `cloudflare-workers-ai/`) and any leading `~` alias marker.
  * Mantle's `lab.model` identifiers are converted to models.dev's `lab/model`
  * slugs so metadata continues to resolve through the underlying model lab.
  */

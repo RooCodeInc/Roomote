@@ -1,6 +1,7 @@
 import {
   CHATGPT_ACCOUNT_ID_HEADER,
   getInferenceGatewayProvider,
+  INFERENCE_GATEWAY_IDENTITY_PATTERN,
   INFERENCE_GATEWAY_RESOURCE_PATTERN,
   INFERENCE_GATEWAY_REGION_PATTERN,
   type InferenceGatewayProvider,
@@ -79,21 +80,55 @@ export async function resolveGatewayUpstream(
     };
   }
 
+  const requiredHeaders = await resolveRequiredForwardHeaders(provider);
+
   return {
     ok: true,
     resolved: {
       upstreamUrl: `${upstreamBaseUrl}${upstreamPath}${search}`,
-      headers:
-        apiKey && provider.authHeader
+      headers: {
+        ...requiredHeaders,
+        ...(apiKey && provider.authHeader
           ? {
               [provider.authHeader.name]: formatProviderAuthHeaderValue(
                 provider,
                 apiKey,
               ),
             }
-          : {},
+          : {}),
+      },
     },
   };
+}
+
+async function resolveRequiredForwardHeaders(
+  provider: InferenceGatewayProvider,
+): Promise<Record<string, string>> {
+  if (!provider.requiredHeaders?.length) {
+    return {};
+  }
+
+  const headers: Record<string, string> = {};
+
+  for (const spec of provider.requiredHeaders) {
+    const value = await resolveModelProviderEnvValue([spec.envVarName]);
+
+    if (!value) {
+      throw new Error(
+        `${spec.envVarName} must be configured for ${provider.name}.`,
+      );
+    }
+
+    if (!INFERENCE_GATEWAY_IDENTITY_PATTERN.test(value)) {
+      throw new Error(
+        `${spec.envVarName} must be a valid identity value for ${provider.name}. Received "${value}".`,
+      );
+    }
+
+    headers[spec.headerName] = value;
+  }
+
+  return headers;
 }
 
 /**

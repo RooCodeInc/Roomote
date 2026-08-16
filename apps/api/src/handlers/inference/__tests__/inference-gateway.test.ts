@@ -116,6 +116,8 @@ describe('inference gateway', () => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+    delete process.env.AWS_BEARER_TOKEN_BEDROCK;
+    delete process.env.AWS_REGION;
     mockFindTaskRun.mockResolvedValue({ id: 42 });
     mockGetGitHubCopilotAccessToken.mockResolvedValue(null);
     mockGetFreshXaiAccessToken.mockResolvedValue(null);
@@ -1311,4 +1313,212 @@ describe('inference gateway', () => {
     expect(response.status).toBe(405);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('proxies Cloudflare AI Gateway with account URL and required gateway header', async () => {
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+        if (nameList.includes('CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID')) {
+          return 'a1b2c3d4e5f6789012345678abcdef90';
+        }
+        if (nameList.includes('CLOUDFLARE_AI_GATEWAY_ID')) {
+          return 'default';
+        }
+        return 'provider-secret-key';
+      },
+    );
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/cloudflare-ai-gateway/v1/chat/completions',
+    );
+
+    expect(response.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      'https://api.cloudflare.com/client/v4/accounts/a1b2c3d4e5f6789012345678abcdef90/ai/v1/chat/completions',
+    );
+    const headers = new Headers(init.headers);
+    expect(headers.get('authorization')).toBe('Bearer provider-secret-key');
+    expect(headers.get('cf-aig-gateway-id')).toBe('default');
+  });
+
+  it('proxies Cloudflare Workers AI with account URL and no gateway header', async () => {
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+        if (nameList.includes('CLOUDFLARE_WORKERS_AI_ACCOUNT_ID')) {
+          return 'a1b2c3d4e5f6789012345678abcdef90';
+        }
+        return 'provider-secret-key';
+      },
+    );
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/cloudflare-workers-ai/v1/chat/completions',
+    );
+
+    expect(response.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      'https://api.cloudflare.com/client/v4/accounts/a1b2c3d4e5f6789012345678abcdef90/ai/v1/chat/completions',
+    );
+    const headers = new Headers(init.headers);
+    expect(headers.get('authorization')).toBe('Bearer provider-secret-key');
+    expect(headers.get('cf-aig-gateway-id')).toBeNull();
+  });
+
+  it('proxies Cloudflare Workers AI responses without a gateway id', async () => {
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+        if (nameList.includes('CLOUDFLARE_WORKERS_AI_ACCOUNT_ID')) {
+          return 'a1b2c3d4e5f6789012345678abcdef90';
+        }
+        return 'provider-secret-key';
+      },
+    );
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/cloudflare-workers-ai/v1/responses',
+    );
+
+    expect(response.status).toBe(200);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      'https://api.cloudflare.com/client/v4/accounts/a1b2c3d4e5f6789012345678abcdef90/ai/v1/responses',
+    );
+    expect(new Headers(init.headers).get('cf-aig-gateway-id')).toBeNull();
+  });
+
+  it('proxies Cloudflare Workers AI embeddings without a gateway id', async () => {
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+        if (nameList.includes('CLOUDFLARE_WORKERS_AI_ACCOUNT_ID')) {
+          return 'a1b2c3d4e5f6789012345678abcdef90';
+        }
+        return 'provider-secret-key';
+      },
+    );
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/cloudflare-workers-ai/v1/embeddings',
+    );
+
+    expect(response.status).toBe(200);
+    const [url] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(
+      'https://api.cloudflare.com/client/v4/accounts/a1b2c3d4e5f6789012345678abcdef90/ai/v1/embeddings',
+    );
+  });
+
+  it('accepts an underscore Cloudflare AI Gateway id', async () => {
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+        if (nameList.includes('CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID')) {
+          return 'a1b2c3d4e5f6789012345678abcdef90';
+        }
+        if (nameList.includes('CLOUDFLARE_AI_GATEWAY_ID')) {
+          return 'my_gateway';
+        }
+        return 'provider-secret-key';
+      },
+    );
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/cloudflare-ai-gateway/v1/chat/completions',
+    );
+
+    expect(response.status).toBe(200);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(new Headers(init.headers).get('cf-aig-gateway-id')).toBe(
+      'my_gateway',
+    );
+  });
+
+  it('rewrites workers-ai/@cf model ids before forwarding AI Gateway requests', async () => {
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+        if (nameList.includes('CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID')) {
+          return 'a1b2c3d4e5f6789012345678abcdef90';
+        }
+        if (nameList.includes('CLOUDFLARE_AI_GATEWAY_ID')) {
+          return 'default';
+        }
+        return 'provider-secret-key';
+      },
+    );
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await appRequest(
+      createApp(createRunToken()),
+      '/api/inference/cloudflare-ai-gateway/v1/chat/completions',
+      {
+        model: 'workers-ai/@cf/zai-org/glm-5.2',
+        messages: [{ role: 'user', content: 'hi' }],
+      },
+    );
+
+    expect(response.status).toBe(200);
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      model: '@cf/zai-org/glm-5.2',
+    });
+  });
+
+  it('fails closed when the AI Gateway id is missing', async () => {
+    mockResolveModelProviderEnvValue.mockImplementation(
+      async (names: string | readonly string[]) => {
+        const nameList = typeof names === 'string' ? [names] : names;
+        if (nameList.includes('CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID')) {
+          return 'a1b2c3d4e5f6789012345678abcdef90';
+        }
+        if (nameList.includes('CLOUDFLARE_AI_GATEWAY_ID')) {
+          return undefined;
+        }
+        return 'provider-secret-key';
+      },
+    );
+    const fetchMock = stubUpstreamFetch();
+
+    const response = await postMessages(
+      createApp(createRunToken()),
+      '/api/inference/cloudflare-ai-gateway/v1/chat/completions',
+    );
+
+    expect(response.status).toBe(500);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'cloudflare-ai-gateway',
+      '/api/inference/cloudflare-ai-gateway/accounts/a1b2c3d4e5f6789012345678abcdef90/tokens',
+    ],
+    [
+      'cloudflare-workers-ai',
+      '/api/inference/cloudflare-workers-ai/accounts/a1b2c3d4e5f6789012345678abcdef90/ai/run',
+    ],
+  ] as const)(
+    'rejects %s account-admin and non-inference paths',
+    async (_providerId, path) => {
+      const fetchMock = stubUpstreamFetch();
+      const response = await postMessages(createApp(createRunToken()), path);
+
+      expect(response.status).toBe(403);
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 });

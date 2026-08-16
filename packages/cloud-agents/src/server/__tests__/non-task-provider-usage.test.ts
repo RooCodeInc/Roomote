@@ -543,6 +543,41 @@ describe('resolveOpenCodeSmallModel', () => {
     expect(sessionPromptMock.mock.calls[0]?.[0]).not.toHaveProperty('format');
   });
 
+  it('rewrites AI Gateway workers-ai/@cf slugs before the structured SDK prompt', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'cloudflare-ai-gateway/workers-ai/@cf/zai-org/glm-5.2',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: { error: null },
+        parts: [{ type: 'text', text: 'ok' }],
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskText, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+
+    await generateTrackedNonTaskText({
+      surface: NON_TASK_INFERENCE_SURFACES.taskSummaryGeneration,
+      prompt: 'Summarize the change.',
+    });
+
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: {
+          providerID: 'cloudflare-ai-gateway',
+          modelID: '@cf/zai-org/glm-5.2',
+        },
+      }),
+      expect.anything(),
+    );
+  });
+
   it('addresses Mantle GPT helper models by their runtime provider id', async () => {
     process.env = {
       ...originalEnv,

@@ -46,6 +46,84 @@ export const INFERENCE_GATEWAY_REGION_PATTERN =
 export const INFERENCE_GATEWAY_RESOURCE_PATTERN =
   /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/iu;
 
+/**
+ * Non-DNS identity values injected as headers (Cloudflare gateway ids).
+ * Allows underscores and up to 64 characters; rejects spaces and CR/LF.
+ */
+export const INFERENCE_GATEWAY_IDENTITY_PATTERN =
+  /^[A-Za-z0-9](?:[A-Za-z0-9_-]{0,62}[A-Za-z0-9])?$/u;
+
+const CLOUDFLARE_WORKERS_AI_CATALOG_PREFIX = 'workers-ai/';
+
+/**
+ * models.dev stores hosted Workers AI models under a `workers-ai/` namespace
+ * on the AI Gateway provider. Cloudflare's `/ai/v1` surface expects the
+ * `@cf/...` id with that namespace removed.
+ */
+export function toCloudflareAiGatewayUpstreamModelId(modelId: string): string {
+  const trimmed = modelId.trim();
+
+  if (
+    trimmed.startsWith(CLOUDFLARE_WORKERS_AI_CATALOG_PREFIX) &&
+    trimmed
+      .slice(CLOUDFLARE_WORKERS_AI_CATALOG_PREFIX.length)
+      .startsWith('@cf/')
+  ) {
+    return trimmed.slice(CLOUDFLARE_WORKERS_AI_CATALOG_PREFIX.length);
+  }
+
+  return trimmed;
+}
+
+/** Rewrites a Roomote task model id for OpenCode / Cloudflare `/ai/v1`. */
+export function rewriteCloudflareOpenCodeModelId(modelId: string): string {
+  const prefix = 'cloudflare-ai-gateway/';
+
+  if (!modelId.startsWith(prefix)) {
+    return modelId;
+  }
+
+  return `${prefix}${toCloudflareAiGatewayUpstreamModelId(modelId.slice(prefix.length))}`;
+}
+
+/**
+ * Rewrites a JSON chat-completions body so Cloudflare `/ai/v1` receives
+ * `@cf/...` instead of models.dev's `workers-ai/@cf/...` catalog slug.
+ */
+export function rewriteCloudflareAiGatewayRequestBody(
+  bodyText: string,
+): string {
+  if (!bodyText.trim()) {
+    return bodyText;
+  }
+
+  let body: unknown;
+
+  try {
+    body = JSON.parse(bodyText);
+  } catch {
+    return bodyText;
+  }
+
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return bodyText;
+  }
+
+  const record = body as { model?: unknown };
+
+  if (typeof record.model !== 'string') {
+    return bodyText;
+  }
+
+  const rewritten = toCloudflareAiGatewayUpstreamModelId(record.model);
+
+  if (rewritten === record.model) {
+    return bodyText;
+  }
+
+  return JSON.stringify({ ...record, model: rewritten });
+}
+
 /** Default AWS region for the Bedrock Mantle Anthropic-compatible endpoint. */
 export const DEFAULT_BEDROCK_MANTLE_REGION = 'us-east-1';
 
@@ -160,6 +238,15 @@ export interface InferenceGatewayProvider {
   resource?: {
     envVarName: string;
   };
+  /**
+   * Extra headers resolved from deployment env vars and injected on every
+   * forwarded request. Used when a second identity value cannot fit in
+   * `{resource}` (Cloudflare AI Gateway's `cf-aig-gateway-id`).
+   */
+  requiredHeaders?: readonly {
+    envVarName: string;
+    headerName: string;
+  }[];
   /** How the upstream expects its API key when the gateway forwards. */
   authHeader?: InferenceGatewayAuthHeader;
   /** A configured upstream key is forwarded when present but is not required. */
@@ -183,6 +270,13 @@ export interface InferenceGatewayProvider {
    * like `/messages` or `/chat/completions` below it).
    */
   openCodeBaseUrlSuffix: string;
+  /**
+   * OpenCode npm package to install when this provider is rebased onto the
+   * Roomote inference gateway. Required when models.dev's package is not an
+   * OpenAI-compatible factory (Cloudflare AI Gateway's `ai-gateway-provider`
+   * would otherwise ignore Roomote's `/v1/chat/completions` route).
+   */
+  openCodeNpm?: string;
 }
 
 /**
@@ -338,6 +432,42 @@ export const INFERENCE_GATEWAY_PROVIDERS: readonly InferenceGatewayProvider[] =
       upstreamBaseUrl: 'https://api.together.xyz',
       authHeader: { name: 'authorization', scheme: 'bearer' },
       allowedPaths: OPENAI_COMPATIBLE_INFERENCE_PATHS,
+      openCodeBaseUrlSuffix: '/v1',
+    },
+    {
+      id: 'cloudflare-ai-gateway',
+      name: 'Cloudflare AI Gateway',
+      envVarNames: ['CLOUDFLARE_AI_GATEWAY_API_TOKEN'],
+      upstreamBaseUrl:
+        'https://api.cloudflare.com/client/v4/accounts/{resource}/ai',
+      resource: { envVarName: 'CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID' },
+      requiredHeaders: [
+        {
+          envVarName: 'CLOUDFLARE_AI_GATEWAY_ID',
+          headerName: 'cf-aig-gateway-id',
+        },
+      ],
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: [
+        ...OPENAI_COMPATIBLE_INFERENCE_PATHS,
+        ...OPENAI_RESPONSES_INFERENCE_PATHS,
+      ],
+      openCodeNpm: '@ai-sdk/openai-compatible',
+      openCodeBaseUrlSuffix: '/v1',
+    },
+    {
+      id: 'cloudflare-workers-ai',
+      name: 'Cloudflare Workers AI',
+      envVarNames: ['CLOUDFLARE_WORKERS_AI_API_TOKEN'],
+      upstreamBaseUrl:
+        'https://api.cloudflare.com/client/v4/accounts/{resource}/ai',
+      resource: { envVarName: 'CLOUDFLARE_WORKERS_AI_ACCOUNT_ID' },
+      authHeader: { name: 'authorization', scheme: 'bearer' },
+      allowedPaths: [
+        ...OPENAI_COMPATIBLE_INFERENCE_PATHS,
+        ...OPENAI_RESPONSES_INFERENCE_PATHS,
+      ],
+      openCodeNpm: '@ai-sdk/openai-compatible',
       openCodeBaseUrlSuffix: '/v1',
     },
     {

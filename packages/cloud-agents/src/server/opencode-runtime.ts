@@ -10,7 +10,9 @@ import {
   mergeAmazonBedrockProviderConfig,
   mergeBedrockMantleOpenAiProviderConfig,
   mergeBedrockMantleProviderConfig,
+  mergeCloudflareOpenCodeProviderConfig,
   mergeOpenAiCompatibleProviderConfig,
+  rewriteCloudflareOpenCodeModelId,
   mergeOpenCodeModelReasoningOptions,
   mergeOpenCodeChatGptFastModeOptions,
   mergeOpenRouterVariantAliasModels,
@@ -54,24 +56,30 @@ function buildModelBackedOpenCodeConfigContent(
   // rewrite (and the provider registrations below) a Bedrock helper model
   // fails with ProviderModelNotFoundError before any request is made.
   const variantAliases = new Map<string, OpenRouterVariantModelAlias>();
-  const model = collectOpenRouterVariantModelAlias(
-    variantAliases,
-    toBedrockMantleRuntimeModelId(rawModel),
+  const model = rewriteCloudflareOpenCodeModelId(
+    collectOpenRouterVariantModelAlias(
+      variantAliases,
+      toBedrockMantleRuntimeModelId(rawModel),
+    ),
   );
   const rawSmallModel = env.R_SMALL_MODEL?.trim();
   const smallModel =
     rawSmallModel && !isTaskModelIdDisabled(rawSmallModel)
-      ? collectOpenRouterVariantModelAlias(
-          variantAliases,
-          toBedrockMantleRuntimeModelId(rawSmallModel),
+      ? rewriteCloudflareOpenCodeModelId(
+          collectOpenRouterVariantModelAlias(
+            variantAliases,
+            toBedrockMantleRuntimeModelId(rawSmallModel),
+          ),
         )
       : undefined;
   const rawVisionModel = env.R_VISION_MODEL?.trim();
   const visionModel =
     rawVisionModel && !isTaskModelIdDisabled(rawVisionModel)
-      ? collectOpenRouterVariantModelAlias(
-          variantAliases,
-          toBedrockMantleRuntimeModelId(rawVisionModel),
+      ? rewriteCloudflareOpenCodeModelId(
+          collectOpenRouterVariantModelAlias(
+            variantAliases,
+            toBedrockMantleRuntimeModelId(rawVisionModel),
+          ),
         )
       : undefined;
   const modelReasoningEffort = normalizeOptionalReasoningEffort(
@@ -130,17 +138,21 @@ function buildModelBackedOpenCodeConfigContent(
   // Same Bedrock provider registrations the task worker applies: OpenCode's
   // catalog knows neither Mantle endpoint, and the native provider does not
   // read the deployment's bearer token on its own.
-  const providerConfig = mergeAmazonBedrockProviderConfig(
-    mergeBedrockMantleProviderConfig(
-      mergeBedrockMantleOpenAiProviderConfig(
-        mergeOpenAiCompatibleProviderConfig(
-          mergeOpenRouterVariantAliasModels(
-            providerModelConfig,
-            variantAliases,
+  const providerConfig = mergeCloudflareOpenCodeProviderConfig(
+    mergeAmazonBedrockProviderConfig(
+      mergeBedrockMantleProviderConfig(
+        mergeBedrockMantleOpenAiProviderConfig(
+          mergeOpenAiCompatibleProviderConfig(
+            mergeOpenRouterVariantAliasModels(
+              providerModelConfig,
+              variantAliases,
+            ),
+            env,
+            configuredModelIds,
+            visionModel,
           ),
           env,
           configuredModelIds,
-          visionModel,
         ),
         env,
         configuredModelIds,

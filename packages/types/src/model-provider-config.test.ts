@@ -244,6 +244,8 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         'requesty',
         'baseten',
         'togetherai',
+        'cloudflare-ai-gateway',
+        'cloudflare-workers-ai',
         'openai',
         'azure',
         'azure-cognitive-services',
@@ -351,6 +353,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
       { providerId: 'requesty', modelId: 'requesty/kimi-k3' },
       { providerId: 'baseten', modelId: 'baseten/moonshotai/Kimi-K3' },
       { providerId: 'togetherai', modelId: 'togetherai/moonshotai/Kimi-K3' },
+      {
+        providerId: 'cloudflare-ai-gateway',
+        modelId: 'cloudflare-ai-gateway/moonshotai/kimi-k3',
+      },
       { providerId: 'moonshotai', modelId: 'moonshotai/kimi-k3' },
       { providerId: 'kimi-for-coding', modelId: 'kimi-for-coding/k3' },
       { providerId: 'opencode', modelId: 'opencode/kimi-k3' },
@@ -464,6 +470,10 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         { providerId: 'openrouter', modelId: `openrouter/openai/${modelId}` },
         { providerId: 'vercel', modelId: `vercel/openai/${modelId}` },
         { providerId: 'requesty', modelId: `requesty/${modelId}@eu` },
+        {
+          providerId: 'cloudflare-ai-gateway',
+          modelId: `cloudflare-ai-gateway/openai/${modelId}`,
+        },
         { providerId: 'openai', modelId: `openai/${modelId}` },
         { providerId: 'azure', modelId: `azure/${modelId}` },
         {
@@ -1890,5 +1900,213 @@ describe('collectSetupModelProviderCredentialValues', () => {
         action: 'save it',
       }),
     ).toThrow('Enter a valid Region for Z.AI to save it.');
+  });
+});
+
+describe('Cloudflare inference providers', () => {
+  const gatewayProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
+    (provider) => provider.id === 'cloudflare-ai-gateway',
+  );
+  const workersProvider = SETUP_MODEL_PROVIDER_CATALOG.find(
+    (provider) => provider.id === 'cloudflare-workers-ai',
+  );
+
+  it('exposes Cloudflare AI Gateway and Workers AI as two catalog providers', () => {
+    expect(gatewayProvider).toMatchObject({
+      id: 'cloudflare-ai-gateway',
+      label: 'Cloudflare AI Gateway',
+      envVarName: 'CLOUDFLARE_AI_GATEWAY_API_TOKEN',
+      envVarLabel: 'API token',
+      authKind: 'api-key',
+      defaultRoomoteModel: 'cloudflare-ai-gateway/openai/gpt-5.6-terra',
+    });
+    expect(gatewayProvider?.credentialHelp?.text).toMatch(
+      /Workers AI (access|permission)/u,
+    );
+    expect(gatewayProvider?.credentialHelp?.text).not.toMatch(
+      /token with AI Gateway access/u,
+    );
+    expect(gatewayProvider?.additionalEnvFields).toEqual([
+      {
+        envVarName: 'CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID',
+        label: 'Account ID',
+        secret: false,
+        required: true,
+        placeholder: 'your-account-id',
+      },
+      {
+        envVarName: 'CLOUDFLARE_AI_GATEWAY_ID',
+        label: 'Gateway ID',
+        secret: false,
+        required: true,
+        placeholder: 'default',
+      },
+    ]);
+    expect(
+      gatewayProvider?.suggestedTaskModels.map((model) => model.id),
+    ).toEqual(
+      expect.arrayContaining([
+        'cloudflare-ai-gateway/openai/gpt-5.6-terra',
+        'cloudflare-ai-gateway/anthropic/claude-sonnet-5',
+        'cloudflare-ai-gateway/moonshotai/kimi-k3',
+      ]),
+    );
+    expect(
+      gatewayProvider?.suggestedTaskModels.every((model) =>
+        model.id.startsWith('cloudflare-ai-gateway/'),
+      ),
+    ).toBe(true);
+
+    expect(workersProvider).toMatchObject({
+      id: 'cloudflare-workers-ai',
+      label: 'Cloudflare Workers AI',
+      envVarName: 'CLOUDFLARE_WORKERS_AI_API_TOKEN',
+      envVarLabel: 'API token',
+      authKind: 'api-key',
+      defaultRoomoteModel:
+        'cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code',
+    });
+    expect(workersProvider?.additionalEnvFields).toEqual([
+      {
+        envVarName: 'CLOUDFLARE_WORKERS_AI_ACCOUNT_ID',
+        label: 'Account ID',
+        secret: false,
+        required: true,
+        placeholder: 'your-account-id',
+      },
+    ]);
+    expect(
+      workersProvider?.suggestedTaskModels.map((model) => model.id),
+    ).toEqual(
+      expect.arrayContaining([
+        'cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code',
+        'cloudflare-workers-ai/@cf/zai-org/glm-5.2',
+      ]),
+    );
+    expect(
+      workersProvider?.suggestedTaskModels.every((model) =>
+        model.id.startsWith('cloudflare-workers-ai/'),
+      ),
+    ).toBe(true);
+
+    expect(getModelProviderLabel('cloudflare-ai-gateway')).toBe(
+      'Cloudflare AI Gateway',
+    );
+    expect(getModelProviderLabel('cloudflare-workers-ai')).toBe(
+      'Cloudflare Workers AI',
+    );
+    expect(
+      resolveSetupModelProviderIdFromModel(
+        'cloudflare-ai-gateway/openai/gpt-5.6-terra',
+      ),
+    ).toBe('cloudflare-ai-gateway');
+    expect(
+      resolveSetupModelProviderIdFromModel(
+        'cloudflare-workers-ai/@cf/moonshotai/kimi-k2.7-code',
+      ),
+    ).toBe('cloudflare-workers-ai');
+    expect(
+      getModelProviderEnvKeyCandidates({
+        providerId: 'cloudflare-ai-gateway',
+      }),
+    ).toEqual([
+      'CLOUDFLARE_AI_GATEWAY_API_TOKEN',
+      'CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID',
+      'CLOUDFLARE_AI_GATEWAY_ID',
+    ]);
+    expect(
+      getModelProviderEnvKeyCandidates({
+        providerId: 'cloudflare-workers-ai',
+      }),
+    ).toEqual([
+      'CLOUDFLARE_WORKERS_AI_API_TOKEN',
+      'CLOUDFLARE_WORKERS_AI_ACCOUNT_ID',
+    ]);
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).toContain(
+      'CLOUDFLARE_AI_GATEWAY_API_TOKEN',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).toContain(
+      'CLOUDFLARE_WORKERS_AI_API_TOKEN',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).not.toContain(
+      'CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).not.toContain(
+      'CLOUDFLARE_AI_GATEWAY_ID',
+    );
+    expect(DEFAULT_MODEL_PROVIDER_CREDENTIAL_ENV_VAR_NAMES).not.toContain(
+      'CLOUDFLARE_WORKERS_AI_ACCOUNT_ID',
+    );
+  });
+
+  it('does not treat a complete AI Gateway config as Workers AI connectedness', () => {
+    const status = buildSetupModelStatus({
+      runtimeEnv: {
+        CLOUDFLARE_AI_GATEWAY_API_TOKEN: 'cf-gateway-token',
+        CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+        CLOUDFLARE_AI_GATEWAY_ID: 'default',
+      },
+    });
+
+    expect(
+      status.providers.find(
+        (provider) => provider.id === 'cloudflare-ai-gateway',
+      ),
+    ).toMatchObject({
+      runtimeApiKeySatisfied: true,
+      savedApiKeySatisfied: false,
+    });
+    expect(
+      status.providers.find(
+        (provider) => provider.id === 'cloudflare-workers-ai',
+      ),
+    ).toMatchObject({
+      runtimeApiKeySatisfied: false,
+      savedApiKeySatisfied: false,
+    });
+  });
+
+  it('does not treat a complete Workers AI config as AI Gateway connectedness', () => {
+    const status = buildSetupModelStatus({
+      persistedEnvVarNames: [
+        'CLOUDFLARE_WORKERS_AI_API_TOKEN',
+        'CLOUDFLARE_WORKERS_AI_ACCOUNT_ID',
+      ],
+      persistedEnvVarValues: {
+        CLOUDFLARE_WORKERS_AI_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+      },
+    });
+
+    expect(
+      status.providers.find(
+        (provider) => provider.id === 'cloudflare-workers-ai',
+      ),
+    ).toMatchObject({
+      runtimeApiKeySatisfied: false,
+      savedApiKeySatisfied: true,
+    });
+    expect(
+      status.providers.find(
+        (provider) => provider.id === 'cloudflare-ai-gateway',
+      ),
+    ).toMatchObject({
+      runtimeApiKeySatisfied: false,
+      savedApiKeySatisfied: false,
+    });
+  });
+
+  it('requires the AI Gateway id in addition to the token and account', () => {
+    const status = buildSetupModelStatus({
+      runtimeEnv: {
+        CLOUDFLARE_AI_GATEWAY_API_TOKEN: 'cf-gateway-token',
+        CLOUDFLARE_AI_GATEWAY_ACCOUNT_ID: 'a1b2c3d4e5f6789012345678abcdef90',
+      },
+    });
+
+    expect(
+      status.providers.find(
+        (provider) => provider.id === 'cloudflare-ai-gateway',
+      )?.runtimeApiKeySatisfied,
+    ).toBe(false);
   });
 });

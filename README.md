@@ -83,6 +83,7 @@ cleans up after itself.
    the models included in your subscription.
 2. **API keys (BYOK).** Paste a key from OpenRouter, Anthropic, OpenAI, xAI,
    Google Gemini, Amazon Bedrock, Vercel AI Gateway,
+   Cloudflare AI Gateway, Cloudflare Workers AI,
    Baseten, Together AI, Moonshot AI (Kimi), Kimi for Coding, MiniMax,
    Z.AI (including Coding Plan), OpenCode Zen / Go, or GitHub Copilot.
 
@@ -232,7 +233,8 @@ it runs.
 **What models does it support?**
 Two options. Connect your ChatGPT Plus or Pro subscription directly (no API key
 needed), or paste an API key from OpenRouter, Anthropic, OpenAI, xAI, Google
-Gemini, Amazon Bedrock, Vercel AI Gateway, Baseten,
+Gemini, Amazon Bedrock, Vercel AI Gateway, Cloudflare AI Gateway,
+Cloudflare Workers AI, Baseten,
 Together AI, Moonshot AI (Kimi), Kimi for Coding, MiniMax, Z.AI (including
 Coding Plan), OpenCode Zen / Go, or GitHub Copilot.
 
