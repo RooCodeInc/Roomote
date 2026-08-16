@@ -57,6 +57,7 @@ export async function processFastAgentMessage(params: {
   continuation?: boolean;
   activeTaskId?: string | null;
   launchTask?: LaunchFastAgentSlackTask;
+  processingReactionName?: string;
 }): Promise<void> {
   const {
     event,
@@ -68,6 +69,7 @@ export async function processFastAgentMessage(params: {
     continuation = false,
     activeTaskId = null,
     launchTask,
+    processingReactionName = 'eyes',
   } = params;
   const threadId = event.thread_ts || event.ts;
   const releaseFastAgentLock = await acquireRedisLock(
@@ -98,7 +100,15 @@ export async function processFastAgentMessage(params: {
   );
   const question = extractFastQuestion(normalizedText, continuation);
 
+  let didAddProcessingReaction = false;
+
   try {
+    didAddProcessingReaction = await slack.addReaction({
+      channel: event.channel,
+      timestamp: event.ts,
+      name: processingReactionName,
+    });
+
     if (!question) {
       await postSlackThreadMarkdownMessage({
         slack,
@@ -173,6 +183,16 @@ export async function processFastAgentMessage(params: {
         }
       },
       postSlackReaction: async ({ name, slackMessageTs }) => {
+        if (
+          didAddProcessingReaction &&
+          name === processingReactionName &&
+          slackMessageTs === event.ts
+        ) {
+          didAddProcessingReaction = false;
+          didSendVisibleResponse = true;
+          return;
+        }
+
         const added = await slack.addReaction({
           channel: event.channel,
           timestamp: slackMessageTs,
@@ -200,6 +220,15 @@ export async function processFastAgentMessage(params: {
       });
     }
   } finally {
+    if (didAddProcessingReaction) {
+      await slack
+        .removeReaction({
+          channel: event.channel,
+          timestamp: event.ts,
+          name: processingReactionName,
+        })
+        .catch(() => {});
+    }
     await releaseFastAgentLock().catch(() => {});
   }
 }
