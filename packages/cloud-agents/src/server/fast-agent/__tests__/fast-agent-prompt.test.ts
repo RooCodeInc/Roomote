@@ -45,6 +45,9 @@ describe('buildFastAgentSystemPrompt', () => {
 
     expect(prompt).toContain('Brain [integrationId: gbrain]');
     expect(prompt).toContain('lightweight conversational context');
+    expect(prompt).toContain(
+      'automatically performs one Brain query before making its first decision',
+    );
     expect(prompt).toContain('one useful Brain result is usually enough');
     expect(prompt).not.toContain('sequential preflight');
     expect(prompt).not.toContain('proof of coverage');

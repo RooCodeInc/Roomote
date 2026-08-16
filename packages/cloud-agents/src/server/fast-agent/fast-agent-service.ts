@@ -1,5 +1,5 @@
 import type { ModelMessage } from 'ai';
-import { formatErrorForLog } from '@roomote/types';
+import { BRAIN_MCP_ID, formatErrorForLog } from '@roomote/types';
 import { z } from 'zod';
 
 import {
@@ -128,6 +128,18 @@ function buildIntegrationCallSignature({
     toolName,
     canonicalizeIntegrationCallValue(args),
   ]);
+}
+
+function buildBrainPreflightQuery({
+  question,
+  senderDisplayName,
+}: {
+  question: string;
+  senderDisplayName?: string;
+}): string {
+  const displayName = senderDisplayName?.trim();
+
+  return displayName ? `${displayName}: ${question}` : question;
 }
 
 function buildUserTextMessage(text: string): ModelMessage {
@@ -317,6 +329,7 @@ export async function answerFastAgentQuestion({
   slackChannel,
   slackThreadTs,
   currentMessageTs,
+  senderDisplayName,
   activeTaskId = null,
   launchTask,
   postSlackReply,
@@ -329,6 +342,7 @@ export async function answerFastAgentQuestion({
   slackChannel: string;
   slackThreadTs: string;
   currentMessageTs?: string;
+  senderDisplayName?: string;
   activeTaskId?: string | null;
   launchTask?: LaunchFastAgentSlackTask;
   postSlackReply: PostFastAgentSlackReply;
@@ -370,6 +384,53 @@ export async function answerFastAgentQuestion({
     let decision: z.infer<typeof fastAgentDecisionSchema> | null = null;
     let requireFinalDecision = false;
     const integrationCallSignatures = new Set<string>();
+    const brain = availableIntegrations.find(
+      (integration) =>
+        integration.id === BRAIN_MCP_ID &&
+        integration.tools.some((tool) => tool.name === 'query'),
+    );
+
+    if (brain) {
+      const toolName = 'query';
+      const toolArguments = {
+        query: buildBrainPreflightQuery({
+          question: normalizedQuestion,
+          senderDisplayName,
+        }),
+      };
+      integrationCallSignatures.add(
+        buildIntegrationCallSignature({
+          integrationId: brain.id,
+          toolName,
+          args: toolArguments,
+        }),
+      );
+      let brainResult: unknown;
+
+      try {
+        brainResult = await callFastAgentIntegration(
+          {
+            userId,
+            apiBaseUrl,
+            sessionId: session.id,
+            slackTeamId,
+            slackChannel,
+            slackThreadTs,
+            slackMessageTs: currentMessageTs ?? slackThreadTs,
+          },
+          availableIntegrations,
+          {
+            integrationId: brain.id,
+            toolName,
+            args: toolArguments,
+          },
+        );
+      } catch (error) {
+        brainResult = { error: formatErrorForLog(error) };
+      }
+
+      prompt += `\n\n[AUTOMATIC BRAIN PREFLIGHT]\nResult: ${JSON.stringify(brainResult).slice(0, 30_000)}\n[END AUTOMATIC BRAIN PREFLIGHT]\n\nUse this as lightweight context while deciding the best way to answer. The required initial Brain lookup is complete; do not repeat it.`;
+    }
 
     for (
       let generation = 0;
