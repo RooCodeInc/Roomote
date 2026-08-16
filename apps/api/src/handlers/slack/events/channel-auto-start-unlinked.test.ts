@@ -22,7 +22,7 @@ vi.mock('@roomote/env', () => ({
   Env: {
     TRPC_URL: null,
     R_APP_URL: 'http://localhost:3000',
-    R_SLACK_FAST_MODE_SETTING_ENABLED: true,
+    R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED: true,
   },
 }));
 
@@ -150,7 +150,7 @@ describe('channel auto-start unlinked author', () => {
         updatedAt: new Date('2026-01-01T00:00:00.000Z'),
         matchedUserId: 'user-1',
         userDeletedAt: null,
-        userMetadata: { slack_fast_mode_default: true },
+        userMetadata: { communications_fast_mode_default: true },
       },
     ]);
     const { handleMessageOrAppMentionEvent } =

@@ -1432,14 +1432,14 @@ export const appRouter = createRouter({
             colorTheme: z.enum(PERSONAL_COLOR_THEMES).optional(),
             mindReaderMode: z.boolean().optional(),
             narrationMode: z.boolean().optional(),
-            slackFastModeDefault: z.boolean().optional(),
+            communicationsFastModeDefault: z.boolean().optional(),
           })
           .refine(
             (input) =>
               input.colorTheme !== undefined ||
               input.mindReaderMode !== undefined ||
               input.narrationMode !== undefined ||
-              input.slackFastModeDefault !== undefined,
+              input.communicationsFastModeDefault !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
             },

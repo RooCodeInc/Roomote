@@ -16,7 +16,7 @@ export interface PersonalPreferences {
   colorTheme: PersonalColorTheme;
   mindReaderMode: boolean;
   narrationMode: boolean;
-  slackFastModeDefault: boolean;
+  communicationsFastModeDefault: boolean;
 }
 
 export type PersonalPreferencesUpdate = Partial<PersonalPreferences>;
@@ -25,5 +25,5 @@ export const DEFAULT_PERSONAL_PREFERENCES: PersonalPreferences = {
   colorTheme: 'system',
   mindReaderMode: false,
   narrationMode: false,
-  slackFastModeDefault: false,
+  communicationsFastModeDefault: false,
 };

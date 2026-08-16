@@ -150,7 +150,7 @@ describe('usePersonalPreferences', () => {
       colorTheme: 'system',
       mindReaderMode: false,
       narrationMode: false,
-      slackFastModeDefault: false,
+      communicationsFastModeDefault: false,
     });
   });
 

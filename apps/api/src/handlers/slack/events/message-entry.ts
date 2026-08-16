@@ -1231,9 +1231,9 @@ async function maybeHandleChannelAutoStart(params: {
             channelAutoStartEvent.text,
           ),
           deploymentSettingEnabled:
-            Env.R_SLACK_FAST_MODE_SETTING_ENABLED === true,
+            Env.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED === true,
           userDefaultEnabled:
-            userMapping.slackFastModeDefault &&
+            userMapping.communicationsFastModeDefault &&
             !isRemovedEvalCommandInvocation(channelAutoStartEvent.text),
         })
       : null;
@@ -1701,9 +1701,10 @@ async function handleSlackEntryEvent(params: {
 
   const fastAgentEntryMode = resolveFastAgentEntryMode({
     explicitInvocation: isFastCommandInvocation(event.text),
-    deploymentSettingEnabled: Env.R_SLACK_FAST_MODE_SETTING_ENABLED === true,
+    deploymentSettingEnabled:
+      Env.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED === true,
     userDefaultEnabled:
-      userMapping.slackFastModeDefault &&
+      userMapping.communicationsFastModeDefault &&
       !isRemovedEvalCommandInvocation(event.text),
   });
 

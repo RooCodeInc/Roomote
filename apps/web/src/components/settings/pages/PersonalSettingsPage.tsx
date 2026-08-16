@@ -13,12 +13,12 @@ export function PersonalSettingsPage({
   profile,
   canChangePassword,
   canSetPassword,
-  slackFastModeDefaultAvailable,
+  communicationsFastModeDefaultAvailable,
 }: {
   profile: UserProfileSectionProfile;
   canChangePassword: boolean;
   canSetPassword: boolean;
-  slackFastModeDefaultAvailable: boolean;
+  communicationsFastModeDefaultAvailable: boolean;
 }) {
   return (
     <SettingsShell pageId="personal">
@@ -30,7 +30,9 @@ export function PersonalSettingsPage({
         <ChangePasswordSection mode={canChangePassword ? 'change' : 'set'} />
       ) : null}
       <UserPreferencesSection
-        slackFastModeDefaultAvailable={slackFastModeDefaultAvailable}
+        communicationsFastModeDefaultAvailable={
+          communicationsFastModeDefaultAvailable
+        }
       />
       <LinkedAccounts />
     </SettingsShell>

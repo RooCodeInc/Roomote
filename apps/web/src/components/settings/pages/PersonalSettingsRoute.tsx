@@ -18,8 +18,9 @@ export function PersonalSettingsRoute() {
     <PersonalSettingsPage
       canChangePassword={accountCapabilities.data?.canChangePassword ?? false}
       canSetPassword={accountCapabilities.data?.canSetPassword ?? false}
-      slackFastModeDefaultAvailable={
-        accountCapabilities.data?.slackFastModeDefaultAvailable ?? false
+      communicationsFastModeDefaultAvailable={
+        accountCapabilities.data?.communicationsFastModeDefaultAvailable ??
+        false
       }
       profile={{
         email: user.primaryEmail ?? '',

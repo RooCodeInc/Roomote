@@ -28,7 +28,7 @@ const {
     setEnabled: vi.fn(),
   },
   personalPreferencesState: {
-    preferences: { slackFastModeDefault: false },
+    preferences: { communicationsFastModeDefault: false },
     isLoading: false,
     isUpdating: false,
     setPreferences: vi.fn(),
@@ -136,7 +136,7 @@ describe('UserPreferencesSection', () => {
     narrationModeState.enabled = false;
     narrationModeState.isLoading = false;
     narrationModeState.isUpdating = false;
-    personalPreferencesState.preferences.slackFastModeDefault = false;
+    personalPreferencesState.preferences.communicationsFastModeDefault = false;
     personalPreferencesState.isLoading = false;
     personalPreferencesState.isUpdating = false;
   });
@@ -221,26 +221,30 @@ describe('UserPreferencesSection', () => {
     );
   });
 
-  it('hides the Slack fast mode default when it is unavailable', () => {
+  it('hides the communications fast mode default when it is unavailable', () => {
     render(<UserPreferencesSection />);
 
     expect(
-      screen.queryByLabelText('Toggle Slack fast mode default'),
+      screen.queryByLabelText('Toggle communications fast mode default'),
     ).not.toBeInTheDocument();
   });
 
-  it('updates the Slack fast mode default when it is available', () => {
-    personalPreferencesState.preferences.slackFastModeDefault = true;
+  it('updates the communications fast mode default when it is available', () => {
+    personalPreferencesState.preferences.communicationsFastModeDefault = true;
 
-    render(<UserPreferencesSection slackFastModeDefaultAvailable={true} />);
+    render(
+      <UserPreferencesSection communicationsFastModeDefaultAvailable={true} />,
+    );
 
-    const toggle = screen.getByLabelText('Toggle Slack fast mode default');
+    const toggle = screen.getByLabelText(
+      'Toggle communications fast mode default',
+    );
     expect(toggle).toBeChecked();
 
     fireEvent.click(toggle);
 
     expect(personalPreferencesState.setPreferences).toHaveBeenCalledWith({
-      slackFastModeDefault: false,
+      communicationsFastModeDefault: false,
     });
   });
 });

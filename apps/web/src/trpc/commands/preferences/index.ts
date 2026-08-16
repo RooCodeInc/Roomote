@@ -37,9 +37,9 @@ function normalizePersonalPreferences(
       typeof metadata.narration_mode === 'boolean'
         ? metadata.narration_mode
         : DEFAULT_PERSONAL_PREFERENCES.narrationMode,
-    slackFastModeDefault:
-      Env.R_SLACK_FAST_MODE_SETTING_ENABLED === true &&
-      metadata.slack_fast_mode_default === true,
+    communicationsFastModeDefault:
+      Env.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED === true &&
+      metadata.communications_fast_mode_default === true,
   };
 }
 
@@ -66,8 +66,8 @@ export async function getPersonalAccountCapabilitiesCommand(
   return {
     canChangePassword: hasCredentialAccount,
     canSetPassword: !hasCredentialAccount,
-    slackFastModeDefaultAvailable:
-      Env.R_SLACK_FAST_MODE_SETTING_ENABLED === true,
+    communicationsFastModeDefaultAvailable:
+      Env.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED === true,
   };
 }
 
@@ -120,11 +120,11 @@ export async function updatePersonalPreferencesCommand(
   const nextMetadataRecord: UserMetadataRecord = {};
 
   if (
-    input.slackFastModeDefault !== undefined &&
-    Env.R_SLACK_FAST_MODE_SETTING_ENABLED !== true
+    input.communicationsFastModeDefault !== undefined &&
+    Env.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED !== true
   ) {
     throw new Error(
-      'The Slack fast mode default setting is not enabled for this deployment.',
+      'The communications fast mode default setting is not enabled for this deployment.',
     );
   }
 
@@ -140,8 +140,9 @@ export async function updatePersonalPreferencesCommand(
     nextMetadataRecord.narration_mode = input.narrationMode;
   }
 
-  if (input.slackFastModeDefault !== undefined) {
-    nextMetadataRecord.slack_fast_mode_default = input.slackFastModeDefault;
+  if (input.communicationsFastModeDefault !== undefined) {
+    nextMetadataRecord.communications_fast_mode_default =
+      input.communicationsFastModeDefault;
   }
 
   if (Object.keys(nextMetadataRecord).length === 0) {

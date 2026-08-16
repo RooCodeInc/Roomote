@@ -8,7 +8,9 @@ import {
 } from '@roomote/db/server';
 
 type SlackUserMappingLookup = {
-  activeMapping: (SlackUserMapping & { slackFastModeDefault: boolean }) | null;
+  activeMapping:
+    | (SlackUserMapping & { communicationsFastModeDefault: boolean })
+    | null;
   hasInactiveMapping: boolean;
 };
 
@@ -60,12 +62,12 @@ export async function lookupSlackUserMapping(params: {
       userId: row.userId,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
-      slackFastModeDefault:
+      communicationsFastModeDefault:
         typeof row.userMetadata === 'object' &&
         row.userMetadata !== null &&
         !Array.isArray(row.userMetadata) &&
         (row.userMetadata as Record<string, unknown>)
-          .slack_fast_mode_default === true,
+          .communications_fast_mode_default === true,
     },
     hasInactiveMapping: false,
   };

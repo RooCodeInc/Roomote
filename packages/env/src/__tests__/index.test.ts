@@ -226,19 +226,19 @@ describe('Env', () => {
     expect(areCuratedIntegrationsDisabled('0')).toBe(false);
   });
 
-  it('keeps the Slack fast mode setting opt-in', () => {
+  it('keeps the communications fast mode setting opt-in', () => {
     const runtimeEnv = { ...process.env };
     delete runtimeEnv.SKIP_ENV_VALIDATION;
-    delete runtimeEnv.R_SLACK_FAST_MODE_SETTING_ENABLED;
+    delete runtimeEnv.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED;
 
-    expect(createRoomoteEnv(runtimeEnv).R_SLACK_FAST_MODE_SETTING_ENABLED).toBe(
-      false,
-    );
+    expect(
+      createRoomoteEnv(runtimeEnv).R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED,
+    ).toBe(false);
     expect(
       createRoomoteEnv({
         ...runtimeEnv,
-        R_SLACK_FAST_MODE_SETTING_ENABLED: 'true',
-      }).R_SLACK_FAST_MODE_SETTING_ENABLED,
+        R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED: 'true',
+      }).R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED,
     ).toBe(true);
   });
 

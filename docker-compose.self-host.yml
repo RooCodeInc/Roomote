@@ -22,7 +22,7 @@ x-roomote-env: &roomote-env
   R_APP_URL: ${R_PUBLIC_URL:-http://localhost:13000}
   R_INSTANCE_ID: ${R_INSTANCE_ID:-}
   R_CURATED_INTEGRATIONS_DISABLED: ${R_CURATED_INTEGRATIONS_DISABLED:-false}
-  R_SLACK_FAST_MODE_SETTING_ENABLED: ${R_SLACK_FAST_MODE_SETTING_ENABLED:-false}
+  R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED: ${R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED:-false}
   # The Brain: supplying this key gives the deployment shared memory that
   # agents consult. It powers the brain service's embeddings and is the
   # single activation signal — there is no Settings UI for it.

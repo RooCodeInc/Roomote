@@ -3,7 +3,7 @@ import { db, eq, userFactory, users } from '@roomote/db/server';
 import type { UserAuthSuccess } from '@/types';
 
 const { mockEnv } = vi.hoisted(() => ({
-  mockEnv: { R_SLACK_FAST_MODE_SETTING_ENABLED: false },
+  mockEnv: { R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED: false },
 }));
 
 vi.mock('@/lib/server/env', () => ({ Env: mockEnv }));
@@ -19,7 +19,7 @@ function buildAuth(userId: string) {
 
 describe('personal preferences', () => {
   beforeEach(() => {
-    mockEnv.R_SLACK_FAST_MODE_SETTING_ENABLED = false;
+    mockEnv.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED = false;
   });
 
   it('defaults mind reader mode to disabled', async () => {
@@ -71,39 +71,41 @@ describe('personal preferences', () => {
     );
   });
 
-  it('rejects Slack fast mode updates when the deployment setting is disabled', async () => {
+  it('rejects communications fast mode updates when the deployment setting is disabled', async () => {
     const user = await userFactory.create();
 
     await expect(
       updatePersonalPreferencesCommand(buildAuth(user.id), {
-        slackFastModeDefault: true,
+        communicationsFastModeDefault: true,
       }),
     ).rejects.toThrow(
-      'The Slack fast mode default setting is not enabled for this deployment.',
+      'The communications fast mode default setting is not enabled for this deployment.',
     );
   });
 
-  it('does not expose a stored Slack fast mode default when the deployment setting is disabled', async () => {
+  it('does not expose a stored communications fast mode default when the deployment setting is disabled', async () => {
     const user = await userFactory.create({
-      metadata: { slack_fast_mode_default: true },
+      metadata: { communications_fast_mode_default: true },
     });
 
     await expect(
       getPersonalPreferencesCommand(buildAuth(user.id)),
     ).resolves.toEqual(
-      expect.objectContaining({ slackFastModeDefault: false }),
+      expect.objectContaining({ communicationsFastModeDefault: false }),
     );
   });
 
-  it('persists the Slack fast mode default when the deployment setting is enabled', async () => {
-    mockEnv.R_SLACK_FAST_MODE_SETTING_ENABLED = true;
+  it('persists the communications fast mode default when the deployment setting is enabled', async () => {
+    mockEnv.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED = true;
     const user = await userFactory.create();
 
     await expect(
       updatePersonalPreferencesCommand(buildAuth(user.id), {
-        slackFastModeDefault: true,
+        communicationsFastModeDefault: true,
       }),
-    ).resolves.toEqual(expect.objectContaining({ slackFastModeDefault: true }));
+    ).resolves.toEqual(
+      expect.objectContaining({ communicationsFastModeDefault: true }),
+    );
 
     const storedUser = await db.query.users.findFirst({
       where: eq(users.id, user.id),
@@ -111,7 +113,7 @@ describe('personal preferences', () => {
     });
 
     expect(storedUser?.metadata).toEqual(
-      expect.objectContaining({ slack_fast_mode_default: true }),
+      expect.objectContaining({ communications_fast_mode_default: true }),
     );
   });
 });

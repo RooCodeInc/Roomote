@@ -52,7 +52,7 @@ describe('lookupSlackUserMapping', () => {
         updatedAt,
         matchedUserId: 'user-1',
         userDeletedAt: null,
-        userMetadata: { slack_fast_mode_default: true },
+        userMetadata: { communications_fast_mode_default: true },
       },
     ]);
 
@@ -68,7 +68,7 @@ describe('lookupSlackUserMapping', () => {
         userId: 'user-1',
         createdAt,
         updatedAt,
-        slackFastModeDefault: true,
+        communicationsFastModeDefault: true,
       },
       hasInactiveMapping: false,
     });

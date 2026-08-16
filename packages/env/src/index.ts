@@ -124,8 +124,8 @@ const serverSchema = {
   // Roomote Cloud-only analytics and support integrations. These values are
   // intentionally not used by self-hosted deployments.
   R_CLOUD_ENABLED: optInBoolean(),
-  // Exposes the per-user setting that defaults Slack messages to fast mode.
-  R_SLACK_FAST_MODE_SETTING_ENABLED: optInBoolean(),
+  // Exposes the per-user setting that defaults communications messages to fast mode.
+  R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED: optInBoolean(),
   // Operator policy for the curated Settings > Integrations catalog. Enabled
   // by default; operators opt out explicitly. Existing connections remain
   // stored but cannot be configured or used while disabled.

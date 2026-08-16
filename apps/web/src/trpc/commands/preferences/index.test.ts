@@ -41,7 +41,7 @@ describe('personal account capabilities', () => {
     await expect(getPersonalAccountCapabilitiesCommand(auth)).resolves.toEqual({
       canChangePassword: false,
       canSetPassword: true,
-      slackFastModeDefaultAvailable: false,
+      communicationsFastModeDefaultAvailable: false,
     });
   });
 
@@ -51,7 +51,7 @@ describe('personal account capabilities', () => {
     await expect(getPersonalAccountCapabilitiesCommand(auth)).resolves.toEqual({
       canChangePassword: true,
       canSetPassword: false,
-      slackFastModeDefaultAvailable: false,
+      communicationsFastModeDefaultAvailable: false,
     });
   });
 
