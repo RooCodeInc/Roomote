@@ -350,9 +350,18 @@ export function formatAutomationResultSubtitle(params: {
   durationMs: number;
 }): string {
   const totalSeconds = Math.max(0, Math.floor(params.durationMs / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
+  const days = Math.floor(totalSeconds / 86_400);
+  const hours = Math.floor((totalSeconds % 86_400) / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
   const seconds = totalSeconds % 60;
-  const duration = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}s`;
+  const duration = [
+    days > 0 ? `${days}d` : null,
+    hours > 0 ? `${hours}h` : null,
+    minutes > 0 ? `${minutes}m` : null,
+    `${seconds}s`,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(' ');
   const price = `$${(Math.max(0, params.costMicroUsd) / 1_000_000).toFixed(2)}`;
 
   return `${params.trigger} · ${params.model} · ${price} · ${duration}`;

@@ -164,7 +164,7 @@ describe('automation result blocks', () => {
         title: { type: 'plain_text', text: 'Daily report', emoji: false },
         subtitle: {
           type: 'plain_text',
-          text: 'Weekly · GPT 5.6 High · $0.56 · 02:37s',
+          text: 'Weekly · GPT 5.6 High · $0.56 · 2m 37s',
         },
         icon: {
           type: 'image',
@@ -208,7 +208,7 @@ describe('automation result blocks', () => {
     ]);
   });
 
-  it('formats automation result metadata with zero-value padding', () => {
+  it('formats automation result metadata with compact duration units', () => {
     expect(
       formatAutomationResultSubtitle({
         trigger: 'Manual',
@@ -216,7 +216,7 @@ describe('automation result blocks', () => {
         costMicroUsd: 200_000,
         durationMs: 37_900,
       }),
-    ).toBe('Manual · Kimi K3 Medium · $0.20 · 00:37s');
+    ).toBe('Manual · Kimi K3 Medium · $0.20 · 37s');
 
     expect(
       formatAutomationResultSubtitle({
@@ -225,7 +225,16 @@ describe('automation result blocks', () => {
         costMicroUsd: 0,
         durationMs: 608_000,
       }),
-    ).toBe('Daily · GPT 5.6 Max · $0.00 · 10:08s');
+    ).toBe('Daily · GPT 5.6 Max · $0.00 · 10m 8s');
+
+    expect(
+      formatAutomationResultSubtitle({
+        trigger: 'Weekly',
+        model: 'GPT 5.6 Max',
+        costMicroUsd: 0,
+        durationMs: 93_784_000,
+      }),
+    ).toBe('Weekly · GPT 5.6 Max · $0.00 · 1d 2h 3m 4s');
   });
 
   it('reserves action capacity for task and configure buttons', () => {
