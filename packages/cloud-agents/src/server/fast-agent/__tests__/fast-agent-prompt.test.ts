@@ -27,6 +27,12 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('send_chat_reaction_emoji');
     expect(prompt).toContain('There is no implicit final response');
     expect(prompt).toContain(
+      'the next action for one orchestration step, not necessarily the final answer for the user turn',
+    );
+    expect(prompt).toContain(
+      'call exactly once or only at the end applies only to the current model invocation',
+    );
+    expect(prompt).toContain(
       'Do not add a reaction to every Fast mode message',
     );
     expect(prompt).toContain('"purpose"');

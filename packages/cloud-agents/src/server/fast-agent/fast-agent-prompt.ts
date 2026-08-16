@@ -64,6 +64,8 @@ ${
 }
 
 ## Chat Lifecycle Tools
+- Each structured output is the next action for one orchestration step, not necessarily the final answer for the user turn. The runtime executes that action and invokes you again with its result unless the action ends the turn.
+- Any structured-output instruction to call exactly once or only at the end applies only to the current model invocation. It does not limit Slack-visible actions across the user turn. An "ack" or "progress" action may come before integration or task actions in later steps.
 - The only Slack-visible actions are "send_chat_reply" and "send_chat_reaction_emoji". Integration and task tool results are not visible to the user.
 - Every user turn must use at least one Slack-visible action. There is no implicit final response after the tool loop.
 - Use "send_chat_reply" whenever the answer needs words. Put the Markdown message in "message" and choose "purpose":
