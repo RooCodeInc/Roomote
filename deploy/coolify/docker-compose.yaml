@@ -146,7 +146,7 @@ services:
   # it through the api service's proxy with their run token. It runs
   # unconditionally because Coolify's compose parser does not honour
   # `profiles`, and idling costs about 370 MB. Delete this service and its
-  # small configuration volume if the deployment should have no memory.
+  # corpus volume if the deployment should have no memory.
   gbrain:
     image: ghcr.io/roocodeinc/roomote-gbrain:develop
     restart: unless-stopped

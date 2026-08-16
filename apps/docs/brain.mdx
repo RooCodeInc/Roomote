@@ -62,9 +62,13 @@ precedence over the deployment's general provider keys.
 With no provider configured anywhere, the Brain stays inert. Agents are not
 told it exists, and nothing is ingested.
 
-Roomote schedules one maintenance pass each night. The gbrain service runs
-gbrain's own durable worker, so synthesis, embedding catch-up, and the rest of
-the maintenance algorithm stay upstream behavior rather than a Roomote fork.
+Roomote schedules one maintenance pass each night. Every page written through
+the Brain is also rendered into the persistent Markdown corpus, so gbrain's
+built-in synthesis can judge the newly collected material, write linked
+reflections and original ideas, and detect recurring patterns across those
+reflections. The gbrain service runs its own durable worker, so that synthesis,
+embedding catch-up, and the rest of the maintenance algorithm stay upstream
+behavior rather than a Roomote fork.
 
 <Note>
   Self-hosted Compose deployments start the Brain from the `brain`
@@ -142,13 +146,20 @@ matching on keywords alone.
 
 ## Operating it
 
-- **Back up Postgres.** The Brain uses an isolated `gbrain` database in the
-  same Postgres instance as Roomote, so the normal database backup covers the
-  corpus. Its small container volume holds only service configuration and
-  generated bootstrap credentials.
-- **Losing the Brain database is recoverable but not free.** Task history and
-  integration sources re-ingest from scratch, but the deployment starts cold
-  until that finishes.
+- **Back up the Brain volume.** Its `/data/brain` directory is the Markdown
+  corpus, including pages produced by nightly synthesis. Postgres holds the
+  searchable index, extracted facts, and durable maintenance jobs; keeping it
+  in the normal database backup makes restores faster, but it is not the only
+  copy of the source pages.
+- **Losing the Brain is recoverable but not free.** If the volume or isolated
+  `gbrain` database is recreated, Roomote re-registers its clients, resets its
+  ingestion checkpoints, and backfills task history and integration sources.
+  The deployment starts cold until that finishes, and regenerated synthesis
+  may not be byte-for-byte identical.
+- **The filesystem cutover rebuilds older Brains once.** The first start of a
+  filesystem-backed image replaces a Postgres-only Brain instead of trying to
+  merge the old index into an empty checkout. Roomote then repopulates it from
+  its connected sources.
 - **The Brain has no public route.** It is never exposed to the internet, and
   task sandboxes reach it only through Roomote's API with their run token,
   which grants read access only.

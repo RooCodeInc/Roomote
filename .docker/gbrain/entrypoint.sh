@@ -14,6 +14,8 @@ DATA_DIR="${GBRAIN_DATA_DIR:-/data}"
 BRAIN_DIR="$DATA_DIR/brain"
 TOKEN_FILE="$DATA_DIR/admin-bootstrap-token"
 CONFIG_FILE="$DATA_DIR/.gbrain/config.json"
+STORAGE_LAYOUT_FILE="$DATA_DIR/roomote-brain-storage-layout"
+STORAGE_LAYOUT_VERSION="filesystem-v1"
 PORT="${GBRAIN_PORT:-8931}"
 # Width of the vector column, fixed when the brain is created. Defaults to
 # text-embedding-3-small, which is what both providers serve by default.
@@ -67,9 +69,29 @@ GBRAIN_DATABASE_URL="$(DATABASE_SEED_URL="$DATABASE_SEED_URL" \
   ')"
 export GBRAIN_DATABASE_URL
 
-echo "[gbrain-entrypoint] ensuring isolated Postgres database $GBRAIN_DATABASE_NAME"
-psql --dbname="$DATABASE_BOOTSTRAP_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 \
-  -v brain_database="$GBRAIN_DATABASE_NAME" <<'SQL'
+CURRENT_STORAGE_LAYOUT="$(cat "$STORAGE_LAYOUT_FILE" 2>/dev/null || true)"
+
+if [ "$CURRENT_STORAGE_LAYOUT" != "$STORAGE_LAYOUT_VERSION" ]; then
+  echo "[gbrain-entrypoint] initializing filesystem-backed Brain (existing Brain content will be rebuilt)"
+  psql --dbname="$DATABASE_BOOTSTRAP_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 \
+    -v brain_database="$GBRAIN_DATABASE_NAME" <<'SQL'
+SELECT pg_advisory_lock(hashtext('roomote-gbrain-database-bootstrap')) AS locked \gset
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE datname = :'brain_database' AND pid <> pg_backend_pid();
+SELECT format('DROP DATABASE IF EXISTS %I', :'brain_database') \gexec
+SELECT format('CREATE DATABASE %I', :'brain_database') \gexec
+SELECT pg_advisory_unlock(hashtext('roomote-gbrain-database-bootstrap')) AS unlocked \gset
+SQL
+
+  # The target is fixed under DATA_DIR. Keep deployment credentials alongside
+  # it, but remove the old corpus/config so gbrain cannot mix storage layouts.
+  rm -rf "$BRAIN_DIR"
+  rm -f "$CONFIG_FILE"
+else
+  echo "[gbrain-entrypoint] ensuring isolated Postgres database $GBRAIN_DATABASE_NAME"
+  psql --dbname="$DATABASE_BOOTSTRAP_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 \
+    -v brain_database="$GBRAIN_DATABASE_NAME" <<'SQL'
 SELECT pg_advisory_lock(hashtext('roomote-gbrain-database-bootstrap')) AS locked \gset
 SELECT format('CREATE DATABASE %I', :'brain_database')
 WHERE NOT EXISTS (
@@ -77,6 +99,7 @@ WHERE NOT EXISTS (
 ) \gexec
 SELECT pg_advisory_unlock(hashtext('roomote-gbrain-database-bootstrap')) AS unlocked \gset
 SQL
+fi
 
 if [ -z "${GBRAIN_ADMIN_BOOTSTRAP_TOKEN:-}" ]; then
   if [ ! -s "$TOKEN_FILE" ]; then
@@ -217,6 +240,18 @@ if [ ! -s "$CONFIG_FILE" ]; then
       --path "$BRAIN_DIR"
   fi
 fi
+
+# Roomote's collectors write through gbrain's MCP API. Pointing the default
+# source at a real directory makes every successful put_page also render a
+# Markdown artifact there. The same checkout is the corpus for gbrain's
+# built-in synthesize and pattern phases, which otherwise skip on a Postgres
+# brain because they have no filesystem input.
+mkdir -p "$BRAIN_DIR"
+gbrain config set sync.repo_path "$BRAIN_DIR" >/dev/null
+gbrain config set dream.synthesize.session_corpus_dir "$BRAIN_DIR" >/dev/null
+gbrain config set dream.synthesize.enabled true >/dev/null
+printf '%s\n' "$STORAGE_LAYOUT_VERSION" > "$STORAGE_LAYOUT_FILE"
+echo "[gbrain-entrypoint] corpus checkout: $BRAIN_DIR (filesystem + Postgres index)"
 
 # Route gbrain's OpenRouter reranker through the same Roomote credential
 # gateway as embeddings and chat. Do this after initialization so exposing an
