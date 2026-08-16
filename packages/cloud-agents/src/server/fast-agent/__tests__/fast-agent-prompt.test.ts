@@ -35,6 +35,21 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'Do not add a reaction to every Fast mode message',
     );
+    expect(prompt).toContain(
+      'When you plan to initiate an integration or task tool action, first send a brief "ack"',
+    );
+    expect(prompt).toContain(
+      'This requirement applies only to model-initiated tool use',
+    );
+    expect(prompt).toContain(
+      'The automatic Brain integration preflight is exempt because it runs before your first decision, when you cannot yet send an acknowledgement',
+    );
+    expect(prompt).toContain(
+      'If the answer is immediate and needs no model-initiated tool, skip the acknowledgement and send the "closeout" directly',
+    );
+    expect(prompt).toContain(
+      'An "ack" or "progress" does not end the turn. Continue using the tools you need, then send a "closeout"',
+    );
     expect(prompt).toContain('"purpose"');
     expect(prompt).not.toContain('Use "respond"');
     expect(prompt).toContain('no local filesystem, shell');
