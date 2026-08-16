@@ -62,13 +62,16 @@ precedence over the deployment's general provider keys.
 With no provider configured anywhere, the Brain stays inert. Agents are not
 told it exists, and nothing is ingested.
 
-Roomote schedules one maintenance pass each night. Every page written through
-the Brain is also rendered into the persistent Markdown corpus, so gbrain's
-built-in synthesis can judge the newly collected material, write linked
-reflections and original ideas, and detect recurring patterns across those
-reflections. The gbrain service runs its own durable worker, so that synthesis,
-embedding catch-up, and the rest of the maintenance algorithm stay upstream
-behavior rather than a Roomote fork.
+Roomote schedules one maintenance pass each night. It asks gbrain's built-in
+cross-page synthesis primitive for a cited digest of material effective-dated
+since the previous successful pass, then stores it under `daily/digests/` in
+both the searchable index and the persistent Markdown corpus. The digest
+focuses on concrete decisions, shipped work, blockers, commitments, and
+cross-source connections rather than generating a reflection for every raw
+page. Its cutoff trails active ingestion and overlaps the previous pass so
+collector writes around the nightly boundary are reconsidered. gbrain's
+durable worker still owns embedding catch-up and the rest of the maintenance
+algorithm.
 
 <Note>
   Self-hosted Compose deployments start the Brain from the `brain`
