@@ -265,6 +265,11 @@ mkdir -p "$BRAIN_DIR"
 gbrain config set sync.repo_path "$BRAIN_DIR" >/dev/null
 gbrain config set dream.synthesize.session_corpus_dir "$BRAIN_DIR" >/dev/null
 gbrain config set dream.synthesize.enabled true >/dev/null
+# Roomote routes synthesis through an OpenAI-compatible gateway. gbrain's
+# legacy subagent loop only supports Anthropic directly, so non-Anthropic
+# models need the provider-neutral gateway loop or every dream child is
+# rejected before inference.
+gbrain config set agent.use_gateway_loop true >/dev/null
 echo "[gbrain-entrypoint] corpus checkout: $BRAIN_DIR (filesystem + Postgres index)"
 
 # Route gbrain's OpenRouter reranker through the same Roomote credential

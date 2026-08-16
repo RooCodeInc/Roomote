@@ -217,6 +217,12 @@ assert(
 );
 
 const gbrainEntrypoint = read('.docker/gbrain/entrypoint.sh');
+assert(
+  gbrainEntrypoint.includes(
+    'gbrain config set agent.use_gateway_loop true >/dev/null',
+  ),
+  'gbrain: Roomote gateway models require the gateway-native agent loop',
+);
 const gbrainResetIndex = gbrainEntrypoint.indexOf(
   'write_storage_layout "$STORAGE_LAYOUT_RESETTING"',
 );
