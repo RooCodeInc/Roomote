@@ -53,8 +53,10 @@ const baseParams = {
 
 function decision(overrides: Record<string, unknown> = {}) {
   return {
-    action: 'respond',
-    response: 'It coordinates incoming requests.',
+    action: 'send_chat_reply',
+    message: 'It coordinates incoming requests.',
+    purpose: 'closeout',
+    reactionName: null,
     taskPrompt: null,
     environmentId: null,
     taskMessage: null,
@@ -62,6 +64,13 @@ function decision(overrides: Record<string, unknown> = {}) {
     toolName: null,
     toolArguments: null,
     ...overrides,
+  };
+}
+
+function chatCallbacks() {
+  return {
+    postSlackReply: vi.fn().mockResolvedValue(undefined),
+    postSlackReaction: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -82,99 +91,256 @@ describe('answerFastAgentQuestion', () => {
     mocks.cancelTask.mockResolvedValue({ success: true });
   });
 
-  it('answers directly and persists the Slack conversation', async () => {
-    const postSlackReply = vi.fn().mockResolvedValue(undefined);
+  it('answers through send_chat_reply and persists the Slack conversation', async () => {
+    const callbacks = chatCallbacks();
 
     const result = await answerFastAgentQuestion({
       ...baseParams,
-      postSlackReply,
+      ...callbacks,
     });
 
     expect(result).toBe('It coordinates incoming requests.');
-    expect(mocks.getSession).toHaveBeenCalledWith({
-      userId: 'user-1',
-      slackTeamId: 'team-1',
+    expect(callbacks.postSlackReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
       slackChannel: 'channel-1',
       slackThreadTs: '100.1',
+      message: 'It coordinates incoming requests.',
     });
-    expect(postSlackReply).toHaveBeenCalledWith(
-      expect.objectContaining({ text: 'It coordinates incoming requests.' }),
-    );
+    expect(callbacks.postSlackReaction).not.toHaveBeenCalled();
     expect(mocks.generateObject).toHaveBeenCalledWith(
       expect.objectContaining({ modelRole: 'primary' }),
     );
-    expect(mocks.appendSessionMessages).toHaveBeenCalledOnce();
+    expect(mocks.appendSessionMessages).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({ role: 'user' }),
+          expect.objectContaining({ role: 'assistant' }),
+        ]),
+      }),
+    );
   });
 
-  it('launches selected execution work through the Slack-owned callback', async () => {
-    mocks.generateObject.mockResolvedValue({
-      object: decision({
-        action: 'launch_task',
-        response: "I'll start that in App.",
-        taskPrompt: 'Add the regression test.',
-        environmentId: 'env-1',
-      }),
-    });
-    const launchTask = vi.fn().mockResolvedValue({
-      success: true,
-      taskId: 'task-1',
-      taskUrl: 'https://roomote.example/tasks/task-1',
-    });
+  it('continues working after an acknowledgement and then sends a closeout', async () => {
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          message: "I'll check.",
+          purpose: 'ack',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({ message: 'It is configured correctly.' }),
+      });
+    const callbacks = chatCallbacks();
 
     const result = await answerFastAgentQuestion({
       ...baseParams,
+      ...callbacks,
+    });
+
+    expect(result).toBe('It is configured correctly.');
+    expect(callbacks.postSlackReply).toHaveBeenCalledTimes(2);
+    expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ purpose: 'ack', message: "I'll check." }),
+    );
+    expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        purpose: 'closeout',
+        message: 'It is configured correctly.',
+      }),
+    );
+  });
+
+  it('can close out a lightweight turn with an emoji reaction', async () => {
+    mocks.generateObject.mockResolvedValue({
+      object: decision({
+        action: 'send_chat_reaction_emoji',
+        message: null,
+        purpose: 'closeout',
+        reactionName: 'thumbsup',
+      }),
+    });
+    const callbacks = chatCallbacks();
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      ...callbacks,
+    });
+
+    expect(result).toBe('');
+    expect(callbacks.postSlackReaction).toHaveBeenCalledWith({
+      name: 'thumbsup',
+      slackChannel: 'channel-1',
+      slackMessageTs: '100.2',
+    });
+    expect(callbacks.postSlackReply).not.toHaveBeenCalled();
+    expect(mocks.appendSessionMessages).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({ role: 'assistant' }),
+        ]),
+      }),
+    );
+  });
+
+  it('continues working after an emoji acknowledgement', async () => {
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'send_chat_reaction_emoji',
+          message: null,
+          purpose: 'ack',
+          reactionName: 'eyes',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({ message: 'I found the answer.' }),
+      });
+    const callbacks = chatCallbacks();
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      ...callbacks,
+    });
+
+    expect(callbacks.postSlackReaction).toHaveBeenCalledOnce();
+    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: 'closeout',
+        message: 'I found the answer.',
+      }),
+    );
+    expect(result).toBe('I found the answer.');
+  });
+
+  it('launches work, exposes the result to the loop, and then replies', async () => {
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'launch_task',
+          message: null,
+          purpose: null,
+          taskPrompt: 'Add the regression test.',
+          environmentId: 'env-1',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          message: 'I started it. [Open task](https://roomote.example/task-1)',
+        }),
+      });
+    const launchTask = vi.fn().mockResolvedValue({
+      success: true,
+      taskId: 'task-1',
+      taskUrl: 'https://roomote.example/task-1',
+    });
+    const callbacks = chatCallbacks();
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      ...callbacks,
       launchTask,
-      postSlackReply: vi.fn().mockResolvedValue(undefined),
     });
 
     expect(launchTask).toHaveBeenCalledWith({
       prompt: 'Add the regression test.',
       environmentId: 'env-1',
     });
+    expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
+      'FAST ORCHESTRATION TOOL RESULT',
+    );
+    expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
+      'https://roomote.example/task-1',
+    );
     expect(result).toContain('[Open task]');
   });
 
-  it('does not launch or message another task when a task is already active', async () => {
-    mocks.generateObject.mockResolvedValue({
-      object: decision({
-        action: 'launch_task',
-        response: "I'll start that in App.",
-        taskPrompt: 'Add the regression test.',
-        environmentId: 'env-1',
-      }),
-    });
+  it('does not launch another task when one is active and asks the agent to report the result', async () => {
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'launch_task',
+          message: null,
+          purpose: null,
+          taskPrompt: 'Add the regression test.',
+          environmentId: 'env-1',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({ message: 'There is already an active task.' }),
+      });
     const launchTask = vi.fn();
+    const callbacks = chatCallbacks();
 
     const result = await answerFastAgentQuestion({
       ...baseParams,
+      ...callbacks,
       activeTaskId: 'task-1',
       launchTask,
-      postSlackReply: vi.fn().mockResolvedValue(undefined),
     });
 
     expect(launchTask).not.toHaveBeenCalled();
-    expect(mocks.sendTaskMessage).not.toHaveBeenCalled();
     expect(result).toContain('already an active task');
   });
 
-  it('sends only an explicit task instruction to the active task', async () => {
-    mocks.generateObject.mockResolvedValue({
-      object: decision({
-        action: 'send_task_message',
-        response: 'I sent that update.',
-        taskMessage: 'Also add a regression test.',
-      }),
-    });
+  it('sends an explicit instruction to the active task before replying', async () => {
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'send_task_message',
+          message: null,
+          purpose: null,
+          taskMessage: 'Also add a regression test.',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({ message: 'I sent that instruction.' }),
+      });
+    const callbacks = chatCallbacks();
 
     await answerFastAgentQuestion({
       ...baseParams,
+      ...callbacks,
       activeTaskId: 'task-1',
-      postSlackReply: vi.fn().mockResolvedValue(undefined),
     });
 
     expect(mocks.sendTaskMessage).toHaveBeenCalledWith(
       { userId: 'user-1', apiBaseUrl: 'https://api.example.com' },
       { taskId: 'task-1', message: 'Also add a regression test.' },
+    );
+    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'I sent that instruction.' }),
+    );
+  });
+
+  it('cancels the active task before reporting the result', async () => {
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'cancel_task',
+          message: null,
+          purpose: null,
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({ message: 'I canceled the active task.' }),
+      });
+    const callbacks = chatCallbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      ...callbacks,
+      activeTaskId: 'task-1',
+    });
+
+    expect(mocks.cancelTask).toHaveBeenCalledWith(
+      { userId: 'user-1', apiBaseUrl: 'https://api.example.com' },
+      'task-1',
+    );
+    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'I canceled the active task.' }),
     );
   });
 
@@ -197,36 +363,30 @@ describe('answerFastAgentQuestion', () => {
       .mockResolvedValueOnce({
         object: decision({
           action: 'call_integration',
-          response: '',
+          message: null,
+          purpose: null,
           integrationId: 'github',
           toolName: 'search_code',
           toolArguments: JSON.stringify({ query: 'orchestrator' }),
         }),
       })
       .mockResolvedValueOnce({
-        object: decision({ response: 'The code is in the fast-agent module.' }),
+        object: decision({ message: 'The code is in the fast-agent module.' }),
       });
     mocks.callIntegration
       .mockResolvedValueOnce({ pages: ['Fast mode uses an orchestrator.'] })
       .mockResolvedValueOnce({ matches: ['fast-agent.ts'] });
+    const callbacks = chatCallbacks();
 
     const result = await answerFastAgentQuestion({
       ...baseParams,
-      postSlackReply: vi.fn().mockResolvedValue(undefined),
+      ...callbacks,
     });
 
     expect(mocks.callIntegration).toHaveBeenCalledTimes(2);
     expect(mocks.callIntegration).toHaveBeenNthCalledWith(
       1,
-      {
-        userId: 'user-1',
-        apiBaseUrl: 'https://api.example.com',
-        sessionId: 'session-1',
-        slackTeamId: 'team-1',
-        slackChannel: 'channel-1',
-        slackThreadTs: '100.1',
-        slackMessageTs: '100.2',
-      },
+      expect.objectContaining({ sessionId: 'session-1' }),
       expect.any(Array),
       {
         integrationId: 'gbrain',
@@ -234,30 +394,8 @@ describe('answerFastAgentQuestion', () => {
         args: { query: 'Matt: What does this service do?' },
       },
     );
-    expect(mocks.callIntegration).toHaveBeenNthCalledWith(
-      2,
-      {
-        userId: 'user-1',
-        apiBaseUrl: 'https://api.example.com',
-        sessionId: 'session-1',
-        slackTeamId: 'team-1',
-        slackChannel: 'channel-1',
-        slackThreadTs: '100.1',
-        slackMessageTs: '100.2',
-      },
-      expect.any(Array),
-      {
-        integrationId: 'github',
-        toolName: 'search_code',
-        args: { query: 'orchestrator' },
-      },
-    );
-    expect(mocks.generateObject).toHaveBeenCalledTimes(2);
     expect(mocks.generateObject.mock.calls[0]?.[0]?.prompt).toContain(
       'AUTOMATIC BRAIN PREFLIGHT',
-    );
-    expect(mocks.generateObject.mock.calls[0]?.[0]?.prompt).toContain(
-      'Fast mode uses an orchestrator.',
     );
     expect(result).toBe('The code is in the fast-agent module.');
   });
@@ -275,14 +413,15 @@ describe('answerFastAgentQuestion', () => {
       .mockResolvedValueOnce({
         object: decision({
           action: 'call_integration',
-          response: '',
+          message: null,
+          purpose: null,
           integrationId: 'gbrain',
           toolName: 'entity',
           toolArguments: JSON.stringify({ name: 'Alice Example' }),
         }),
       })
       .mockResolvedValueOnce({
-        object: decision({ response: 'I found the person card.' }),
+        object: decision({ message: 'I found the person card.' }),
       });
     mocks.callIntegration
       .mockResolvedValueOnce({ results: [] })
@@ -290,7 +429,7 @@ describe('answerFastAgentQuestion', () => {
 
     const result = await answerFastAgentQuestion({
       ...baseParams,
-      postSlackReply: vi.fn().mockResolvedValue(undefined),
+      ...chatCallbacks(),
     });
 
     expect(mocks.callIntegration).toHaveBeenNthCalledWith(
@@ -306,7 +445,7 @@ describe('answerFastAgentQuestion', () => {
     expect(result).toBe('I found the person card.');
   });
 
-  it('rejects an equivalent duplicate integration call and requires a response', async () => {
+  it('rejects an equivalent duplicate integration call and asks for a visible reply', async () => {
     mocks.listIntegrations.mockResolvedValue([
       {
         id: 'github',
@@ -317,7 +456,8 @@ describe('answerFastAgentQuestion', () => {
     ]);
     const repeatedCall = decision({
       action: 'call_integration',
-      response: '',
+      message: null,
+      purpose: null,
       integrationId: 'github',
       toolName: 'search_code',
       toolArguments: JSON.stringify({
@@ -337,13 +477,13 @@ describe('answerFastAgentQuestion', () => {
         }),
       })
       .mockResolvedValueOnce({
-        object: decision({ response: 'I found the orchestrator.' }),
+        object: decision({ message: 'I found the orchestrator.' }),
       });
     mocks.callIntegration.mockResolvedValue({ matches: [] });
 
     const result = await answerFastAgentQuestion({
       ...baseParams,
-      postSlackReply: vi.fn().mockResolvedValue(undefined),
+      ...chatCallbacks(),
     });
 
     expect(mocks.callIntegration).toHaveBeenCalledOnce();
@@ -351,50 +491,7 @@ describe('answerFastAgentQuestion', () => {
     expect(result).toBe('I found the orchestrator.');
   });
 
-  it('posts a fallback when forced-final structured output fails', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    mocks.listIntegrations.mockResolvedValue([
-      {
-        id: 'github',
-        name: 'GitHub',
-        description: 'Repositories',
-        tools: [{ name: 'search_code' }],
-      },
-    ]);
-    const repeatedCall = decision({
-      action: 'call_integration',
-      response: '',
-      integrationId: 'github',
-      toolName: 'search_code',
-      toolArguments: JSON.stringify({ query: 'orchestrator' }),
-    });
-    mocks.generateObject
-      .mockResolvedValueOnce({ object: repeatedCall })
-      .mockResolvedValueOnce({ object: repeatedCall })
-      .mockRejectedValueOnce(new Error('No object generated'));
-    mocks.callIntegration.mockResolvedValue({ matches: [] });
-    const postSlackReply = vi.fn().mockResolvedValue(undefined);
-
-    const result = await answerFastAgentQuestion({
-      ...baseParams,
-      postSlackReply,
-    });
-
-    expect(mocks.callIntegration).toHaveBeenCalledOnce();
-    expect(result).toContain('within the available turn steps');
-    expect(postSlackReply).toHaveBeenCalledWith({
-      type: 'final_answer',
-      slackChannel: 'channel-1',
-      slackThreadTs: '100.1',
-      text: result,
-    });
-    expect(warn).toHaveBeenCalledWith(
-      expect.stringContaining('Final decision generation failed'),
-    );
-    warn.mockRestore();
-  });
-
-  it('reserves the final overall step for a response', async () => {
+  it('uses the completion hook when the model never sends a visible response', async () => {
     mocks.listIntegrations.mockResolvedValue([
       {
         id: 'github',
@@ -407,36 +504,107 @@ describe('answerFastAgentQuestion', () => {
     mocks.generateObject.mockImplementation(async () => {
       generation += 1;
       return {
-        object:
-          generation < FAST_AGENT_MAX_STEPS
-            ? decision({
-                action: 'call_integration',
-                response: '',
-                integrationId: 'github',
-                toolName: 'search_code',
-                toolArguments: JSON.stringify({
-                  query: `orchestrator-${generation}`,
-                }),
-              })
-            : decision({ response: 'Here is what I found.' }),
+        object: decision({
+          action: 'call_integration',
+          message: null,
+          purpose: null,
+          integrationId: 'github',
+          toolName: 'search_code',
+          toolArguments: JSON.stringify({
+            query: `orchestrator-${generation}`,
+          }),
+        }),
       };
     });
     mocks.callIntegration.mockResolvedValue({ matches: [] });
+    const callbacks = chatCallbacks();
 
     const result = await answerFastAgentQuestion({
       ...baseParams,
-      postSlackReply: vi.fn().mockResolvedValue(undefined),
+      ...callbacks,
     });
 
-    expect(mocks.callIntegration).toHaveBeenCalledTimes(
-      FAST_AGENT_MAX_STEPS - 1,
+    expect(mocks.callIntegration).toHaveBeenCalledTimes(FAST_AGENT_MAX_STEPS);
+    expect(result).toContain('within the available turn steps');
+    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
+    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: 'closeout', message: result }),
     );
-    expect(mocks.generateObject).toHaveBeenCalledTimes(FAST_AGENT_MAX_STEPS);
-    expect(result).toBe('Here is what I found.');
+  });
 
-    const finalSchema = mocks.generateObject.mock.calls.at(-1)?.[0]?.schema;
-    expect(
-      finalSchema.safeParse(decision({ action: 'call_integration' })).success,
-    ).toBe(false);
+  it('uses the completion hook when an acknowledgement is not followed by a closeout', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'github',
+        name: 'GitHub',
+        description: 'Repositories',
+        tools: [{ name: 'search_code' }],
+      },
+    ]);
+    let generation = 0;
+    mocks.generateObject.mockImplementation(async () => {
+      generation += 1;
+      return generation === 1
+        ? {
+            object: decision({
+              message: "I'll take a look.",
+              purpose: 'ack',
+            }),
+          }
+        : {
+            object: decision({
+              action: 'call_integration',
+              message: null,
+              purpose: null,
+              integrationId: 'github',
+              toolName: 'search_code',
+              toolArguments: JSON.stringify({
+                query: `orchestrator-${generation}`,
+              }),
+            }),
+          };
+    });
+    mocks.callIntegration.mockResolvedValue({ matches: [] });
+    const callbacks = chatCallbacks();
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      ...callbacks,
+    });
+
+    expect(result).toContain('within the available turn steps');
+    expect(callbacks.postSlackReply).toHaveBeenCalledTimes(2);
+    expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ purpose: 'ack', message: "I'll take a look." }),
+    );
+    expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ purpose: 'closeout', message: result }),
+    );
+  });
+
+  it('posts an error closeout when inference fails after an acknowledgement', async () => {
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          message: "I'll check.",
+          purpose: 'ack',
+        }),
+      })
+      .mockRejectedValueOnce(new Error('Inference failed'));
+    const callbacks = chatCallbacks();
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      ...callbacks,
+    });
+
+    expect(result).toContain('hit an error');
+    expect(callbacks.postSlackReply).toHaveBeenCalledTimes(2);
+    expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ purpose: 'closeout', message: result }),
+    );
   });
 });

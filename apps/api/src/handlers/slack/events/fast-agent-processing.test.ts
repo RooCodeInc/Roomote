@@ -35,9 +35,82 @@ describe('processFastAgentMessage', () => {
       }: {
         postSlackReply: (reply: unknown) => void;
       }) => {
-        await postSlackReply({ type: 'final_answer', text: 'Doing well.' });
+        await postSlackReply({
+          purpose: 'closeout',
+          message: 'Doing well.',
+        });
         return 'Doing well.';
       },
+    );
+  });
+
+  it('can answer with a reaction without posting a text fallback', async () => {
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        postSlackReaction,
+      }: {
+        postSlackReaction: (reaction: unknown) => void;
+      }) => {
+        await postSlackReaction({
+          name: 'thumbsup',
+          slackMessageTs: '100.001',
+        });
+        return '';
+      },
+    );
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'D123',
+        channel_type: 'im',
+        user: 'U123',
+        text: '!fast sounds good',
+        ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+    });
+
+    expect(slack.addReaction).toHaveBeenCalledWith({
+      channel: 'D123',
+      timestamp: '100.001',
+      name: 'thumbsup',
+    });
+    expect(mocks.postThreadMessage).not.toHaveBeenCalled();
+  });
+
+  it('posts the returned fallback when no chat tool delivered a response', async () => {
+    mocks.answerQuestion.mockResolvedValueOnce('Please try again.');
+    const slack = {
+      addReaction: vi.fn(),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'D123',
+        channel_type: 'im',
+        user: 'U123',
+        text: '!fast hello',
+        ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+    });
+
+    expect(mocks.postThreadMessage).toHaveBeenCalledOnce();
+    expect(mocks.postThreadMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'Please try again.' }),
     );
   });
 
