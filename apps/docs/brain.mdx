@@ -31,8 +31,8 @@ Roomote fills the Brain from what it can already see:
 
 Turning the Brain on also backfills history rather than starting from the
 moment you enabled it. Completed tasks are enqueued immediately, and each
-source drains its own deeper history in the background over the following
-ticks.
+source drains its own deeper history in bounded background passes that resume
+after an interruption.
 
 Private Slack channels and DMs are never read. Adding the Roomote bot to a
 public channel is what designates that channel as a source, so the corpus stays
@@ -81,6 +81,11 @@ behavior rather than a Roomote fork.
 Agents get the Brain as an MCP server with read-only tools. They can search it,
 recall relevant pages, browse what exists, and ask for a synthesized answer
 with sources. They cannot write to it directly.
+
+For a substantive topic, agents query the Brain before consulting overlapping
+Slack, GitHub, task-history, meeting, or pull-request sources. They check those
+live sources when Brain coverage is insufficient, freshness could change the
+answer, or you explicitly ask for live verification.
 
 Writes go through Roomote instead. When an agent finishes substantial work it
 records a short memory of what it did, and the platform places that text under
