@@ -67,7 +67,7 @@ describe('buildFastAgentSystemPrompt', () => {
           name: 'Brain',
           description: 'Deployment memory',
           instructions: FAST_AGENT_BRAIN_INSTRUCTIONS,
-          tools: [{ name: 'query' }],
+          tools: [{ name: 'search' }, { name: 'query' }],
         },
       ],
     });
@@ -75,7 +75,10 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Brain [integrationId: gbrain]');
     expect(prompt).toContain('lightweight conversational context');
     expect(prompt).toContain(
-      'automatically performs one Brain query before making its first decision',
+      'automatically performs one Brain `search` before making its first decision',
+    );
+    expect(prompt).toContain(
+      'Use Brain `query` only as an escalation when the automatic search is insufficient',
     );
     expect(prompt).toContain('one useful Brain result is usually enough');
     expect(prompt).toContain(
@@ -85,6 +88,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('cite pages when relying on them');
     expect(prompt).not.toContain('sequential preflight');
     expect(prompt).not.toContain('proof of coverage');
+    expect(prompt).toContain('- search:');
     expect(prompt).toContain('- query:');
     expect(prompt).toContain('make multiple integration calls');
     expect(prompt).not.toContain('at most one integration call');

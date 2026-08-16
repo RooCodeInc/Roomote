@@ -437,11 +437,11 @@ export async function answerFastAgentQuestion({
     const brain = availableIntegrations.find(
       (integration) =>
         integration.id === BRAIN_MCP_ID &&
-        integration.tools.some((tool) => tool.name === 'query'),
+        integration.tools.some((tool) => tool.name === 'search'),
     );
 
     if (brain) {
-      const toolName = 'query';
+      const toolName = 'search';
       const toolArguments = {
         query: buildBrainPreflightQuery({
           question: normalizedQuestion,
@@ -479,7 +479,7 @@ export async function answerFastAgentQuestion({
         brainResult = { error: formatErrorForLog(error) };
       }
 
-      prompt += `\n\n[AUTOMATIC BRAIN PREFLIGHT]\nResult: ${JSON.stringify(brainResult).slice(0, 30_000)}\n[END AUTOMATIC BRAIN PREFLIGHT]\n\nUse this as lightweight context while deciding the best way to answer. The required initial Brain lookup is complete; do not repeat it.`;
+      prompt += `\n\n[AUTOMATIC BRAIN PREFLIGHT]\nResult: ${JSON.stringify(brainResult).slice(0, 30_000)}\n[END AUTOMATIC BRAIN PREFLIGHT]\n\nUse this as lightweight context while deciding the best way to answer. The required initial Brain search is complete; do not repeat it. Use Brain query only if semantic recall is specifically needed to fill an important gap.`;
     }
 
     for (
