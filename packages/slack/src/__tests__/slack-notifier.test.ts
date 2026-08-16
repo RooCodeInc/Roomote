@@ -3181,4 +3181,100 @@ describe('SlackNotifier', () => {
       expect('metadata' in args).toBe(false);
     });
   });
+
+  describe('Slack Connect support channels', () => {
+    it('creates a private channel with the bot token', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          channel: { id: 'C123SUPPORT', name: 'roomote-support' },
+        }),
+      });
+
+      await expect(
+        notifier.createPrivateChannel('roomote-support'),
+      ).resolves.toEqual({
+        success: true,
+        data: { id: 'C123SUPPORT', name: 'roomote-support' },
+      });
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledWith(
+        'https://slack.com/api/conversations.create',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ name: 'roomote-support', is_private: true }),
+        }),
+      );
+    });
+
+    it('sends a full-member Slack Connect invitation', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, invite_id: 'I123' }),
+      });
+
+      await expect(
+        notifier.inviteSharedChannel({
+          channelId: 'C123SUPPORT',
+          email: 'support@example.com',
+        }),
+      ).resolves.toEqual({ success: true, data: { inviteId: 'I123' } });
+      expect(getGlobalWithFetch().fetch).toHaveBeenCalledWith(
+        'https://slack.com/api/conversations.inviteShared',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            channel: 'C123SUPPORT',
+            emails: ['support@example.com'],
+            external_limited: false,
+          }),
+        }),
+      );
+    });
+
+    it('accepts a successful invitation response without an invite id', async () => {
+      getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true }),
+      });
+
+      await expect(
+        notifier.inviteSharedChannel({
+          channelId: 'C123SUPPORT',
+          email: 'support@example.com',
+        }),
+      ).resolves.toEqual({ success: true, data: { inviteId: null } });
+    });
+
+    it('distinguishes pending and connected channels', async () => {
+      getGlobalWithFetch().fetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            channel: { is_pending_ext_shared: true },
+          }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            channel: { is_ext_shared: true },
+          }),
+        });
+
+      await expect(
+        notifier.getSlackConnectChannelStatus('C123SUPPORT'),
+      ).resolves.toEqual({ success: true, data: 'pending' });
+      await expect(
+        notifier.getSlackConnectChannelStatus('C123SUPPORT'),
+      ).resolves.toEqual({ success: true, data: 'connected' });
+    });
+  });
 });

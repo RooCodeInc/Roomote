@@ -806,4 +806,61 @@ describe('MockSlackServer', () => {
       await server.stop();
     }
   });
+
+  it('creates a private channel and records its Slack Connect invitation', async () => {
+    const server = new MockSlackServer({
+      state: {
+        team: { id: 'T1', domain: 'mock-roomote' },
+        acceptedBotTokens: ['xoxb-mock-token'],
+        channels: [],
+        users: [],
+      },
+    });
+
+    try {
+      await server.start();
+      const createResponse = await fetch(
+        `${server.baseUrl}/api/conversations.create`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer xoxb-mock-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ name: 'roomote-support', is_private: true }),
+        },
+      );
+      const created = (await createResponse.json()) as {
+        channel: { id: string };
+      };
+
+      const inviteResponse = await fetch(
+        `${server.baseUrl}/api/conversations.inviteShared`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: 'Bearer xoxb-mock-token',
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            channel: created.channel.id,
+            emails: ['support@roomote.example'],
+            external_limited: false,
+          }),
+        },
+      );
+
+      await expect(inviteResponse.json()).resolves.toMatchObject({ ok: true });
+      expect(server.getState().channels).toEqual([
+        expect.objectContaining({
+          id: created.channel.id,
+          name: 'roomote-support',
+          type: 'private_channel',
+          isPendingExtShared: true,
+        }),
+      ]);
+    } finally {
+      await server.stop();
+    }
+  });
 });

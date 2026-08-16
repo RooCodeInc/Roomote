@@ -119,6 +119,8 @@ import {
   startAuthenticateSlackAccountCommand,
   finishAuthenticateSlackAccountCommand,
   completePendingSlackAuthenticationCommand,
+  createSlackSupportChannelCommand,
+  getSlackSupportChannelStatusCommand,
 } from '../commands/slack';
 import {
   getLinearInstallationCommand,
@@ -1261,6 +1263,14 @@ export const appRouter = createRouter({
   slack: createRouter({
     installation: protectedProcedure.query(({ ctx: { auth } }) =>
       getSlackInstallationCommand(auth),
+    ),
+
+    supportChannel: protectedProcedure.query(({ ctx: { auth } }) =>
+      getSlackSupportChannelStatusCommand(auth),
+    ),
+
+    createSupportChannel: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      createSlackSupportChannelCommand(auth),
     ),
 
     connectApp: protectedProcedure

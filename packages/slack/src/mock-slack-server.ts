@@ -53,6 +53,9 @@ export type MockSlackChannel = {
   type?: 'public_channel' | 'private_channel' | 'im';
   isMember?: boolean;
   members?: string[];
+  isExtShared?: boolean;
+  isPendingExtShared?: boolean;
+  pendingShared?: string[];
 };
 
 export type MockSlackTeam = {
@@ -597,7 +600,62 @@ export class MockSlackServer {
             id: channel.id,
             name: channel.name,
             is_member: channel.isMember ?? true,
+            is_private: channel.type === 'private_channel',
+            is_ext_shared: channel.isExtShared ?? false,
+            is_pending_ext_shared: channel.isPendingExtShared ?? false,
+            pending_shared: channel.pendingShared ?? [],
           },
+        });
+        return;
+      }
+
+      case 'POST conversations.create': {
+        const name = typeof jsonBody.name === 'string' ? jsonBody.name : '';
+        if (!name) {
+          json(response, 200, { ok: false, error: 'invalid_name_required' });
+          return;
+        }
+        if (this.state.channels.some((channel) => channel.name === name)) {
+          json(response, 200, { ok: false, error: 'name_taken' });
+          return;
+        }
+
+        const channel: MockSlackChannel = {
+          id: `C${String(this.state.channels.length + 1).padStart(10, '0')}`,
+          name,
+          type: jsonBody.is_private ? 'private_channel' : 'public_channel',
+          isMember: true,
+          members: [this.state.botUserId ?? 'UMOCKBOT'],
+        };
+        this.state.channels.push(channel);
+        json(response, 200, {
+          ok: true,
+          channel: {
+            id: channel.id,
+            name: channel.name,
+            is_private: channel.type === 'private_channel',
+          },
+        });
+        return;
+      }
+
+      case 'POST conversations.inviteShared': {
+        const channelId =
+          typeof jsonBody.channel === 'string' ? jsonBody.channel : '';
+        const channel = this.state.channels.find(
+          (entry) => entry.id === channelId,
+        );
+        if (!channel) {
+          json(response, 200, { ok: false, error: 'channel_not_found' });
+          return;
+        }
+
+        channel.isPendingExtShared = true;
+        channel.pendingShared = ['TEXTERNAL'];
+        json(response, 200, {
+          ok: true,
+          invite_id: `I${channel.id.slice(1)}`,
+          is_legacy_shared_channel: false,
         });
         return;
       }

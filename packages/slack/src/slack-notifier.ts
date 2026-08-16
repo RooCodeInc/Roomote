@@ -202,6 +202,16 @@ type SlackChannelInfoContext = {
   transportFailureLabel: string;
 };
 
+export type SlackSupportChannelApiResult<T> =
+  | { success: true; data: T }
+  | { success: false; error: string };
+
+export type SlackConnectChannelStatus =
+  | 'connected'
+  | 'pending'
+  | 'not_shared'
+  | 'not_found';
+
 export class SlackNotifier {
   private readonly token: string;
   private readonly channelInfoCache: SlackChannelInfoCache | null;
@@ -408,6 +418,144 @@ export class SlackNotifier {
    */
   public async resolveChannelId(input: string): Promise<string | null> {
     return this.getChannelDiscovery().resolveChannelId(input);
+  }
+
+  public async createPrivateChannel(
+    name: string,
+  ): Promise<SlackSupportChannelApiResult<{ id: string; name: string }>> {
+    try {
+      const response = await slackFetch(
+        buildSlackApiUrl('conversations.create'),
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify({ name, is_private: true }),
+        },
+      );
+      const result = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        channel?: { id?: string; name?: string };
+      };
+
+      if (!response.ok || !result.ok || !result.channel?.id) {
+        return {
+          success: false,
+          error: result.error ?? `http_${response.status}`,
+        };
+      }
+
+      return {
+        success: true,
+        data: {
+          id: result.channel.id,
+          name: result.channel.name?.trim() || name,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  public async inviteSharedChannel(params: {
+    channelId: string;
+    email: string;
+  }): Promise<SlackSupportChannelApiResult<{ inviteId: string | null }>> {
+    try {
+      const response = await slackFetch(
+        buildSlackApiUrl('conversations.inviteShared'),
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${this.token}`,
+            'Content-Type': 'application/json; charset=utf-8',
+          },
+          body: JSON.stringify({
+            channel: params.channelId,
+            emails: [params.email],
+            external_limited: false,
+          }),
+        },
+      );
+      const result = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        invite_id?: string;
+      };
+
+      if (!response.ok || !result.ok) {
+        return {
+          success: false,
+          error: result.error ?? `http_${response.status}`,
+        };
+      }
+
+      return {
+        success: true,
+        data: { inviteId: result.invite_id?.trim() || null },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  public async getSlackConnectChannelStatus(
+    channelId: string,
+  ): Promise<SlackSupportChannelApiResult<SlackConnectChannelStatus>> {
+    try {
+      const params = new URLSearchParams({ channel: channelId });
+      const response = await slackFetch(
+        `${buildSlackApiUrl('conversations.info')}?${params.toString()}`,
+        {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${this.token}` },
+        },
+      );
+      const result = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        channel?: {
+          is_ext_shared?: boolean;
+          is_pending_ext_shared?: boolean;
+          pending_shared?: string[];
+        };
+      };
+
+      if (!result.ok && result.error === 'channel_not_found') {
+        return { success: true, data: 'not_found' };
+      }
+      if (!response.ok || !result.ok) {
+        return {
+          success: false,
+          error: result.error ?? `http_${response.status}`,
+        };
+      }
+      if (result.channel?.is_ext_shared) {
+        return { success: true, data: 'connected' };
+      }
+      if (
+        result.channel?.is_pending_ext_shared ||
+        (result.channel?.pending_shared?.length ?? 0) > 0
+      ) {
+        return { success: true, data: 'pending' };
+      }
+
+      return { success: true, data: 'not_shared' };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
   }
 
   /**

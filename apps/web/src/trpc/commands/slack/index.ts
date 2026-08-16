@@ -27,6 +27,8 @@ import {
 import type { UserAuthSuccess } from '@/types';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getSlackRedirectUri } from '@/lib/server/slack-redirect-uri';
+import { Env, isRoomoteCloudEnabled } from '@/lib/server/env';
+import { getSlackManifestBotScopes } from '@/lib/slack-app-manifest';
 import { syncUser } from '@/lib/server/sync-internal';
 import {
   createSignedSlackInstallState,
@@ -35,6 +37,10 @@ import {
 } from '@/lib/server/slack-oauth-state';
 
 export { createSlackAppFromManifestCommand } from './create-app-from-manifest';
+export {
+  createSlackSupportChannelCommand,
+  getSlackSupportChannelStatusCommand,
+} from './support-channel';
 
 interface SlackOAuthResponse {
   ok: boolean;
@@ -546,26 +552,9 @@ export async function connectSlackAppCommand(
     }
     const slackOAuthConfig = await resolveSlackOAuthConfig();
 
-    const permissions = [
-      'app_mentions:read',
-      'channels:read',
-      'channels:history',
-      'chat:write',
-      'files:read',
-      'groups:read',
-      'groups:history',
-      'im:read',
-      'im:history',
-      'im:write',
-      'links:read',
-      'links:write',
-      'mpim:read',
-      'mpim:history',
-      'reactions:read',
-      'reactions:write',
-      'team:read',
-      'users:read',
-    ];
+    const permissions = getSlackManifestBotScopes(
+      isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
+    );
 
     const redirectPath = input.redirectPath ?? '/settings';
     const state = await createSignedSlackInstallState({ redirectPath });
