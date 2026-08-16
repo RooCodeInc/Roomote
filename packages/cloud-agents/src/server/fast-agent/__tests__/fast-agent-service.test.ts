@@ -174,7 +174,7 @@ describe('answerFastAgentQuestion', () => {
     );
   });
 
-  it('allows chained brokered integration calls before responding', async () => {
+  it('runs a Brain preflight before deciding and can chain another integration', async () => {
     mocks.listIntegrations.mockResolvedValue([
       {
         id: 'gbrain',
@@ -190,15 +190,6 @@ describe('answerFastAgentQuestion', () => {
       },
     ]);
     mocks.generateObject
-      .mockResolvedValueOnce({
-        object: decision({
-          action: 'call_integration',
-          response: '',
-          integrationId: 'gbrain',
-          toolName: 'query',
-          toolArguments: { query: 'orchestrator' },
-        }),
-      })
       .mockResolvedValueOnce({
         object: decision({
           action: 'call_integration',
@@ -236,7 +227,7 @@ describe('answerFastAgentQuestion', () => {
       {
         integrationId: 'gbrain',
         toolName: 'query',
-        args: { query: 'orchestrator' },
+        args: { query: 'What does this service do?' },
       },
     );
     expect(mocks.callIntegration).toHaveBeenNthCalledWith(
@@ -257,7 +248,13 @@ describe('answerFastAgentQuestion', () => {
         args: { query: 'orchestrator' },
       },
     );
-    expect(mocks.generateObject).toHaveBeenCalledTimes(3);
+    expect(mocks.generateObject).toHaveBeenCalledTimes(2);
+    expect(mocks.generateObject.mock.calls[0]?.[0]?.prompt).toContain(
+      'AUTOMATIC BRAIN PREFLIGHT',
+    );
+    expect(mocks.generateObject.mock.calls[0]?.[0]?.prompt).toContain(
+      'Fast mode uses an orchestrator.',
+    );
     expect(result).toBe('The code is in the fast-agent module.');
   });
 

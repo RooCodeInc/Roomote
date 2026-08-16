@@ -2,6 +2,7 @@ export const FAST_AGENT_MODEL = 'openai/gpt-5.4';
 export const FAST_AGENT_MAX_STEPS = 50;
 export const FAST_AGENT_BRAIN_INSTRUCTIONS = `Use Brain as lightweight conversational context, not as an exhaustive research assignment.
 
+- Fast mode automatically performs one Brain query before making its first decision. Treat that preflight result as the lay of the land; do not repeat it.
 - Make the narrowest lookup that is likely to help with the user's request.
 - For ordinary conversation, one useful Brain result is usually enough. Answer as soon as you have helpful context.
 - Do not try to prove complete coverage, enumerate every possible source, or keep searching merely because more context might exist.
