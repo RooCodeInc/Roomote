@@ -12,7 +12,12 @@ import {
 import { useTRPC } from '@/trpc/client';
 import { useUser } from '@/hooks/useUser';
 
-import { SETUP_STEPS, getSetupPath, type SetupStep } from './types';
+import {
+  SETUP_STEPS,
+  getSetupPath,
+  getSetupSteps,
+  type SetupStep,
+} from './types';
 import { useSetupAsyncSession } from './setup-session';
 import { hasSeenSetupWelcome } from './welcome-seen';
 
@@ -64,22 +69,6 @@ const DEEP_LINK_REVISITABLE_SETUP_STEPS: readonly SetupStep[] = [
   'source-control-config',
   'compute-provider',
   'compute-config',
-];
-
-const EMAIL_PASSWORD_SETUP_STEPS: readonly SetupStep[] = [
-  'welcome',
-  'env-vars',
-  'source-control-provider',
-  'source-control-config',
-  'source-control-connect',
-  'auth-provider',
-  'auth-env-vars',
-  'slack',
-  'automation-recommendations',
-  'compute-provider',
-  'compute-config',
-  'repo-selection',
-  'invoke',
 ];
 
 function readUrlEntryContext(): SetupEntryContext {
@@ -295,10 +284,9 @@ export function useSetupFlow(
   const setupSession = useSetupAsyncSession({
     currentTaskId: status?.setupNewState.onboardingTaskId ?? null,
   });
-  const setupSteps =
-    (pendingAuthProvider ?? status?.setupNewState.authProvider)
-      ? SETUP_STEPS
-      : EMAIL_PASSWORD_SETUP_STEPS;
+  const setupSteps = getSetupSteps(
+    Boolean(pendingAuthProvider ?? status?.setupNewState.authProvider),
+  );
   stepRef.current = step;
 
   const setStepWithTransition = useCallback(
