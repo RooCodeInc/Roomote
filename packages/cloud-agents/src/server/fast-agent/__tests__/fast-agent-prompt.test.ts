@@ -82,7 +82,7 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('one useful Brain result is usually enough');
     expect(prompt).toContain(
-      'For personal-context questions such as "what do you know about me?", answer naturally',
+      'offer to look deeper instead of investigating every possibility before replying. For personal-context questions such as "what do you know about me?", answer naturally',
     );
     expect(prompt).toContain(
       'directly state what you know, then offer to look for more detail if the user wants',
