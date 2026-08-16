@@ -6,10 +6,13 @@ const {
   mockEnqueueTask,
   mockAnswerFastAgentQuestion,
   mockGetRepositories,
+  mockGetTaskMessageEnvelopes,
   mockDbWhere,
   mockDbSelect,
   mockGoalCommit,
   mockGoalRollback,
+  mockFastEnvelopeTimestampRef,
+  mockRedisEval,
   mockPrepareTaskGoalActivation,
   mockResolveTaskByIdAccess,
   mockResolveWorkspaceProvider,
@@ -19,10 +22,13 @@ const {
   mockEnqueueTask: vi.fn(),
   mockAnswerFastAgentQuestion: vi.fn(),
   mockGetRepositories: vi.fn(),
+  mockGetTaskMessageEnvelopes: vi.fn(),
   mockDbWhere: vi.fn(),
   mockDbSelect: vi.fn(),
   mockGoalCommit: vi.fn(),
   mockGoalRollback: vi.fn(),
+  mockFastEnvelopeTimestampRef: { current: 0 },
+  mockRedisEval: vi.fn(),
   mockPrepareTaskGoalActivation: vi.fn(),
   mockResolveTaskByIdAccess: vi.fn(),
   mockResolveWorkspaceProvider: vi.fn(),
@@ -42,6 +48,10 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 vi.mock('@roomote/sdk/server', () => ({
   recordTaskMessageEnvelope: (...args: unknown[]) =>
     mockRecordTaskMessageEnvelope(...args),
+}));
+
+vi.mock('@roomote/redis', () => ({
+  getRedis: () => ({ eval: mockRedisEval }),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -111,6 +121,8 @@ vi.mock('@/lib/server', () => ({
   },
   getArtifactById: vi.fn(),
   getRepositories: (...args: unknown[]) => mockGetRepositories(...args),
+  getTaskMessageEnvelopes: (...args: unknown[]) =>
+    mockGetTaskMessageEnvelopes(...args),
 }));
 
 vi.mock('@/lib/task-utils', () => ({
@@ -171,6 +183,44 @@ describe('answerFastTaskCommand', () => {
       })),
     });
     mockAnswerFastAgentQuestion.mockResolvedValue('A quick answer');
+    mockFastEnvelopeTimestampRef.current = 0;
+    mockRedisEval.mockImplementation(
+      async (_script, _keyCount, _key, requestedTimestamp) => {
+        const userTimestamp = Math.max(
+          Number(requestedTimestamp),
+          mockFastEnvelopeTimestampRef.current + 1,
+        );
+        const assistantTimestamp = userTimestamp + 1;
+        mockFastEnvelopeTimestampRef.current = assistantTimestamp;
+        return [userTimestamp, assistantTimestamp];
+      },
+    );
+    mockGetTaskMessageEnvelopes.mockResolvedValue([
+      {
+        userId: 'user-123',
+        userName: 'Test User',
+        ts: 100,
+        role: 'user',
+        text: 'How does authentication work?',
+        visibleInTranscript: true,
+      },
+      {
+        userId: null,
+        userName: null,
+        ts: 101,
+        role: 'assistant',
+        text: 'It validates the session token.',
+        visibleInTranscript: true,
+      },
+      {
+        userId: null,
+        userName: null,
+        ts: 102,
+        role: 'assistant',
+        text: 'hidden internal state',
+        visibleInTranscript: false,
+      },
+    ]);
     mockRecordTaskMessageEnvelope.mockResolvedValue(undefined);
   });
 
@@ -190,6 +240,21 @@ describe('answerFastTaskCommand', () => {
         userId: 'user-123',
         activeTaskId: 'task-123',
         surface: 'web',
+        threadContext: [
+          {
+            user: 'user-123',
+            username: 'Test User',
+            text: 'How does authentication work?',
+            ts: '100',
+          },
+          {
+            user: 'roomote',
+            username: 'Roomote',
+            text: 'It validates the session token.',
+            ts: '101',
+            bot_id: 'roomote',
+          },
+        ],
       }),
     );
     expect(mockRecordTaskMessageEnvelope).toHaveBeenCalledTimes(2);
@@ -204,6 +269,44 @@ describe('answerFastTaskCommand', () => {
         }),
       }),
     );
+  });
+
+  it('uses distinct ordered timestamps for concurrent fast exchanges', async () => {
+    mockAnswerFastAgentQuestion.mockImplementation(
+      async ({ question }: { question: string }) => `Answer: ${question}`,
+    );
+    await Promise.all([
+      answerFastTaskCommand(auth, {
+        taskId: 'task-123',
+        runId: 42,
+        request: 'First request',
+      }),
+      answerFastTaskCommand(auth, {
+        taskId: 'task-123',
+        runId: 42,
+        request: 'Second request',
+      }),
+    ]);
+
+    const timestamps = mockRecordTaskMessageEnvelope.mock.calls.map(
+      ([call]) => call.envelope.ts as number,
+    );
+    expect(new Set(timestamps)).toHaveLength(4);
+
+    for (const request of ['First request', 'Second request']) {
+      const userCall = mockRecordTaskMessageEnvelope.mock.calls.find(
+        ([call]) => call.envelope.contentBlocks[0]?.text === request,
+      );
+      const assistantCall = mockRecordTaskMessageEnvelope.mock.calls.find(
+        ([call]) =>
+          call.envelope.contentBlocks[0]?.text === `Answer: ${request}`,
+      );
+      expect(userCall).toBeDefined();
+      expect(assistantCall).toBeDefined();
+      expect(userCall![0].envelope.ts).toBeLessThan(
+        assistantCall![0].envelope.ts,
+      );
+    }
   });
 });
 
