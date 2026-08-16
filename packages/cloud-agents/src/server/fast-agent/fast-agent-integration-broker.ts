@@ -11,7 +11,6 @@ import {
 } from '@roomote/db/server';
 import {
   BRAIN_MCP_ID,
-  BRAIN_MCP_READ_INSTRUCTIONS,
   getMcpIntegration,
   getMcpIntegrationConnectionScope,
   formatErrorForLog,
@@ -25,6 +24,7 @@ import {
 } from '../mcp-tool-client';
 import { isRouterMcpServerEnabled } from '../router/mcp-policy';
 import { resolveApiBaseUrl } from '../shared-utils';
+import { FAST_AGENT_BRAIN_INSTRUCTIONS } from './fast-agent-constants';
 
 export type FastAgentIntegration = {
   id: string;
@@ -168,7 +168,7 @@ export async function listFastAgentIntegrations(
       name: 'Brain',
       description:
         "Read this deployment's shared memory of completed tasks and connected integration activity.",
-      instructions: BRAIN_MCP_READ_INSTRUCTIONS,
+      instructions: FAST_AGENT_BRAIN_INSTRUCTIONS,
       disabledTools: new Set<string>(),
     });
   }

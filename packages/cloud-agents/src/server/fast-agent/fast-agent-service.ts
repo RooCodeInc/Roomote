@@ -58,6 +58,15 @@ const fastAgentDecisionSchema = z
   })
   .strict();
 
+const fastAgentFinalDecisionSchema = fastAgentDecisionSchema.extend({
+  action: z.enum([
+    'respond',
+    'launch_task',
+    'send_task_message',
+    'cancel_task',
+  ]),
+});
+
 export type LaunchFastAgentSlackTask = (params: {
   prompt: string;
   environmentId: string | null;
@@ -68,6 +77,41 @@ export type LaunchFastAgentSlackTask = (params: {
 
 function normalizeThreadText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
+}
+
+function canonicalizeIntegrationCallValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeIntegrationCallValue);
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nestedValue]) => [
+          key,
+          canonicalizeIntegrationCallValue(nestedValue),
+        ]),
+    );
+  }
+
+  return value;
+}
+
+function buildIntegrationCallSignature({
+  integrationId,
+  toolName,
+  args,
+}: {
+  integrationId: string | null;
+  toolName: string | null;
+  args: Record<string, unknown>;
+}): string {
+  return JSON.stringify([
+    integrationId,
+    toolName,
+    canonicalizeIntegrationCallValue(args),
+  ]);
 }
 
 function buildUserTextMessage(text: string): ModelMessage {
@@ -308,16 +352,22 @@ export async function answerFastAgentQuestion({
     });
     let prompt = serializeFastAgentMessages(fastAgentMessages);
     let decision: z.infer<typeof fastAgentDecisionSchema> | null = null;
+    let requireFinalDecision = false;
+    const integrationCallSignatures = new Set<string>();
 
     for (
       let generation = 0;
       generation < FAST_AGENT_MAX_STEPS;
       generation += 1
     ) {
+      const isFinalGeneration = generation === FAST_AGENT_MAX_STEPS - 1;
+      const mustFinish = requireFinalDecision || isFinalGeneration;
       const generated = await generateTrackedNonTaskObject({
         userId,
         surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
-        schema: fastAgentDecisionSchema,
+        schema: mustFinish
+          ? fastAgentFinalDecisionSchema
+          : fastAgentDecisionSchema,
         system,
         prompt,
       });
@@ -327,8 +377,26 @@ export async function answerFastAgentQuestion({
         break;
       }
 
+      if (mustFinish) {
+        break;
+      }
+
       const integrationId = decision.integrationId?.trim();
       const toolName = decision.toolName?.trim();
+      const toolArguments = decision.toolArguments ?? {};
+      const callSignature = buildIntegrationCallSignature({
+        integrationId: integrationId ?? null,
+        toolName: toolName ?? null,
+        args: toolArguments,
+      });
+
+      if (integrationCallSignatures.has(callSignature)) {
+        requireFinalDecision = true;
+        prompt += `\n\n[INTEGRATION CALL REJECTED]\nThe same integration tool call with equivalent arguments has already been made in this turn. Do not call another integration. Answer the original request now using the results already available.\n[END INTEGRATION CALL REJECTED]`;
+        continue;
+      }
+
+      integrationCallSignatures.add(callSignature);
       let integrationResult: unknown;
 
       if (!integrationId || !toolName) {
@@ -351,7 +419,7 @@ export async function answerFastAgentQuestion({
             {
               integrationId,
               toolName,
-              args: decision.toolArguments ?? {},
+              args: toolArguments,
             },
           );
         } catch (error) {

@@ -261,7 +261,7 @@ describe('answerFastAgentQuestion', () => {
     expect(result).toBe('The code is in the fast-agent module.');
   });
 
-  it('uses only the overall step budget to stop a runaway integration chain', async () => {
+  it('rejects an equivalent duplicate integration call and requires a response', async () => {
     mocks.listIntegrations.mockResolvedValue([
       {
         id: 'github',
@@ -270,14 +270,60 @@ describe('answerFastAgentQuestion', () => {
         tools: [{ name: 'search_code' }],
       },
     ]);
-    mocks.generateObject.mockResolvedValue({
-      object: decision({
-        action: 'call_integration',
-        response: '',
-        integrationId: 'github',
-        toolName: 'search_code',
-        toolArguments: { query: 'orchestrator' },
-      }),
+    const repeatedCall = decision({
+      action: 'call_integration',
+      response: '',
+      integrationId: 'github',
+      toolName: 'search_code',
+      toolArguments: { repository: 'acme/app', query: 'orchestrator' },
+    });
+    mocks.generateObject
+      .mockResolvedValueOnce({ object: repeatedCall })
+      .mockResolvedValueOnce({
+        object: decision({
+          ...repeatedCall,
+          toolArguments: { query: 'orchestrator', repository: 'acme/app' },
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({ response: 'I found the orchestrator.' }),
+      });
+    mocks.callIntegration.mockResolvedValue({ matches: [] });
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      postSlackReply: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(mocks.callIntegration).toHaveBeenCalledOnce();
+    expect(mocks.generateObject).toHaveBeenCalledTimes(3);
+    expect(result).toBe('I found the orchestrator.');
+  });
+
+  it('reserves the final overall step for a response', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'github',
+        name: 'GitHub',
+        description: 'Repositories',
+        tools: [{ name: 'search_code' }],
+      },
+    ]);
+    let generation = 0;
+    mocks.generateObject.mockImplementation(async () => {
+      generation += 1;
+      return {
+        object:
+          generation < FAST_AGENT_MAX_STEPS
+            ? decision({
+                action: 'call_integration',
+                response: '',
+                integrationId: 'github',
+                toolName: 'search_code',
+                toolArguments: { query: `orchestrator-${generation}` },
+              })
+            : decision({ response: 'Here is what I found.' }),
+      };
     });
     mocks.callIntegration.mockResolvedValue({ matches: [] });
 
@@ -286,8 +332,15 @@ describe('answerFastAgentQuestion', () => {
       postSlackReply: vi.fn().mockResolvedValue(undefined),
     });
 
-    expect(mocks.callIntegration).toHaveBeenCalledTimes(FAST_AGENT_MAX_STEPS);
+    expect(mocks.callIntegration).toHaveBeenCalledTimes(
+      FAST_AGENT_MAX_STEPS - 1,
+    );
     expect(mocks.generateObject).toHaveBeenCalledTimes(FAST_AGENT_MAX_STEPS);
-    expect(result).toContain('within the available turn steps');
+    expect(result).toBe('Here is what I found.');
+
+    const finalSchema = mocks.generateObject.mock.calls.at(-1)?.[0]?.schema;
+    expect(
+      finalSchema.safeParse(decision({ action: 'call_integration' })).success,
+    ).toBe(false);
   });
 });
