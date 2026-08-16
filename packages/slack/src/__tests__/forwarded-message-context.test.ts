@@ -299,6 +299,68 @@ describe('forwarded-message-context', () => {
     );
   });
 
+  it('skips block text that only differs because a bare link is omitted', () => {
+    const context = formatSlackBlockTextContext(
+      [
+        {
+          type: 'rich_text',
+          elements: [
+            {
+              type: 'rich_text_section',
+              elements: [
+                { type: 'text', text: 'Really bad experience here  ' },
+                { type: 'text', text: " let's try to debug" },
+              ],
+            },
+          ],
+        },
+      ],
+      [
+        "Really bad experience here <https://example.com/thread>  let's try to debug",
+        '',
+        'Forwarded Slack message:',
+        'Text:',
+        'Can you help?',
+      ].join('\n'),
+    );
+
+    expect(context).toBeUndefined();
+  });
+
+  it('skips block text that duplicates a Markdown-linked fallback', () => {
+    const context = formatSlackBlockTextContext(
+      [
+        {
+          type: 'rich_text',
+          elements: [
+            {
+              type: 'rich_text_section',
+              elements: [
+                { type: 'text', text: 'The fix is in draft PR #1416.' },
+              ],
+            },
+          ],
+        },
+      ],
+      'The fix is in [draft PR #1416](https://example.com/pull/1416).',
+    );
+
+    expect(context).toBeUndefined();
+  });
+
+  it('keeps a bare link when it is the only block text', () => {
+    const context = formatSlackBlockTextContext([
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: '<https://example.com/thread>' },
+      },
+    ]);
+
+    expect(context).toBe(
+      ['Slack block text:', 'https://example.com/thread'].join('\n'),
+    );
+  });
+
   it('appends Slack block link context to message text', () => {
     expect(
       appendSlackAttachmentContext('can you investigate?', undefined, [

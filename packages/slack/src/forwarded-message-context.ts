@@ -184,7 +184,17 @@ function normalizeSlackBlockText(text: string): string {
 }
 
 function normalizeSlackBlockTextForComparison(text: string): string {
-  return normalizeSlackBlockText(text).replace(/[*_~`]/g, '');
+  const normalizedText = normalizeSlackBlockText(text)
+    .replace(/\[([^\]]+)\]\(<?(?:https?:\/\/|mailto:)[^)\s>]+>?\)/g, '$1')
+    .replace(/[*_~`]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const textWithoutLinks = normalizedText
+    .replace(/(?:https?:\/\/|mailto:)\S+/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return textWithoutLinks || normalizedText;
 }
 
 function appendUniqueSlackBlockText(
