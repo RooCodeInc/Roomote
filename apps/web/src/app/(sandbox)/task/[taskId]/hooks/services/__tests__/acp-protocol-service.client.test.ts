@@ -23,6 +23,14 @@ function assistantChunk(text: string, sequence: number): AcpMessage {
   };
 }
 
+function reasoningChunk(text: string, sequence: number): AcpMessage {
+  return {
+    ...assistantChunk(text, sequence),
+    eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantThoughtChunk,
+    kind: 'reasoning',
+  };
+}
+
 function toolCallUpdate(sequence: number): AcpMessage {
   return {
     id: `opencode-server:${sequence}`,
@@ -72,6 +80,25 @@ function subagentActivityUpdate(
 }
 
 describe('AcpProtocolService', () => {
+  it('separates adjacent bold headings across reasoning chunks', () => {
+    const service = new AcpProtocolService();
+    let messages = service.applyOutputEvent(
+      [],
+      reasoningChunk('**Clarifying boundaries***', 1),
+    )!.acpMessages;
+
+    messages = service.applyOutputEvent(
+      messages,
+      reasoningChunk('*Assessing precision**', 2),
+    )!.acpMessages;
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      partial: true,
+      text: '**Clarifying boundaries**\n\n**Assessing precision**',
+    });
+  });
+
   it('continues a partial assistant stream after active stream state is rebuilt', () => {
     const service = new AcpProtocolService();
     let messages = service.applyOutputEvent(

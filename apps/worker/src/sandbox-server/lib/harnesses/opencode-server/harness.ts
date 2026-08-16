@@ -10,6 +10,7 @@ import {
   asRecord,
   asString,
   buildAcpRequestUserInputRequestId,
+  normalizeAcpReasoningText,
   parseAcpFlattenedMcpToolName,
   OPENCODE_ARCHITECT_AGENT,
   OPENCODE_BUILD_AGENT,
@@ -607,11 +608,13 @@ function extractAssistantText(message: OpenCodeSessionMessage): string {
 }
 
 function extractAssistantReasoning(message: OpenCodeSessionMessage): string {
-  return message.parts
-    .filter((part) => part.type === 'reasoning')
-    .map(extractPartText)
-    .filter((text) => text.length > 0)
-    .join('\n');
+  return normalizeAcpReasoningText(
+    message.parts
+      .filter((part) => part.type === 'reasoning')
+      .map(extractPartText)
+      .filter((text) => text.length > 0)
+      .join('\n'),
+  );
 }
 
 function parseOpenCodeMessageRole(value: unknown): OpenCodeMessageRole | null {

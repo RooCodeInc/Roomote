@@ -21,6 +21,7 @@ import {
   getImageUrisFromContentBlocks,
   getProviderRetryNoticeFromMessageData,
   inferAcpMessageKind,
+  normalizeAcpReasoningText,
   normalizeTranscriptUserText,
   normalizePlanPayload,
   parseAcpRequestUserInputPayload,
@@ -317,6 +318,7 @@ export function toAcpUiMessage(
     case 'reasoning':
       return {
         ...base,
+        text: normalizeAcpReasoningText(normalized.text ?? ''),
         role: 'assistant',
         kind: 'reasoning',
         data: payloadRecord,
@@ -1281,10 +1283,14 @@ export class AcpProtocolService {
         const existing = messages[idx]! as AcpOtherUiMessage;
         const next = messages.slice();
 
+        const combinedText = (existing.text ?? '') + (candidate.text ?? '');
         next[idx] = {
           ...existing,
           ts: event.ts,
-          text: (existing.text ?? '') + (candidate.text ?? ''),
+          text:
+            idPrefix === 'reasoning'
+              ? normalizeAcpReasoningText(combinedText)
+              : combinedText,
           partial: true,
           data: event.payload,
         };

@@ -53,6 +53,11 @@ export type AcpLiveEventType =
 /** All known Roomote runtime event types — envelope (persisted) + live-only (streamed). */
 export type AcpEventType = AcpEnvelopeEventType | AcpLiveEventType;
 
+/** Restore separation between bold reasoning headings concatenated by a provider. */
+export function normalizeAcpReasoningText(text: string): string {
+  return text.replace(/(\S)\*\*\*\*(?=\S)/g, '$1**\n\n**');
+}
+
 export const ACP_LOGICAL_EVENT_ID_KEY = 'logicalEventId' as const;
 
 export interface AcpLogicalEventIdParts {

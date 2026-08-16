@@ -6,6 +6,7 @@ import {
   parseAcpTaskCancelledPayload,
   type AcpRequestUserInputQuestion,
   isLinkedReviewResultsMessage,
+  normalizeAcpReasoningText,
   normalizeTranscriptUserText,
   parseLinkedReviewResults,
   parseAcpRequestUserInputAnswerReply,
@@ -20,6 +21,24 @@ import {
   wrapOutOfBandContext,
   ACP_API_TOOL_OUTPUT_MAX_CHARS,
 } from '../acp';
+
+describe('normalizeAcpReasoningText', () => {
+  it('separates adjacent bold reasoning headings', () => {
+    expect(
+      normalizeAcpReasoningText(
+        '**Clarifying boundaries****Assessing precision****Checking gaps**',
+      ),
+    ).toBe(
+      '**Clarifying boundaries**\n\n**Assessing precision**\n\n**Checking gaps**',
+    );
+  });
+
+  it('preserves standalone Markdown rules and ordinary emphasis', () => {
+    expect(normalizeAcpReasoningText('First\n\n****\n\n**Second**')).toBe(
+      'First\n\n****\n\n**Second**',
+    );
+  });
+});
 
 describe('wrapOutOfBandContext', () => {
   it('wraps messages with escaped content and a sent_at attribute', () => {

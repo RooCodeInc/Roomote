@@ -589,6 +589,10 @@ describe('OpenCodeServerHarness', () => {
 
   it('persists a consolidated AssistantThought from reasoning parts', async () => {
     const { client, harness } = createHarness();
+    const rawReasoning =
+      '**Clarifying boundaries****Assessing precision****Checking gaps**';
+    const normalizedReasoning =
+      '**Clarifying boundaries**\n\n**Assessing precision**\n\n**Checking gaps**';
     const runtimeOutputEvents: AcpMessage[] = [];
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
     const turnCompletedEvents: AcpTurnCompletedEvent[] = [];
@@ -627,9 +631,9 @@ describe('OpenCodeServerHarness', () => {
             sessionID: 'ses_1',
             messageID: 'msg_1',
             type: 'reasoning',
-            text: 'Because reasons.',
+            text: rawReasoning,
           },
-          delta: 'Because reasons.',
+          delta: rawReasoning,
         },
       });
 
@@ -648,7 +652,7 @@ describe('OpenCodeServerHarness', () => {
             sessionID: 'ses_1',
             messageID: 'msg_1',
             type: 'reasoning',
-            text: 'Because reasons.',
+            text: rawReasoning,
           },
           {
             id: 'part_1',
@@ -686,7 +690,7 @@ describe('OpenCodeServerHarness', () => {
           (event) =>
             event.eventType ===
               ACP_ENVELOPE_EVENT_TYPES.AssistantThoughtChunk &&
-            event.text === 'Because reasons.',
+            event.text === rawReasoning,
         ),
       ).toBe(true);
 
@@ -704,7 +708,7 @@ describe('OpenCodeServerHarness', () => {
         (envelope) =>
           envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantThought,
       );
-      expect(thought?.payload.text).toBe('Because reasons.');
+      expect(thought?.payload.text).toBe(normalizedReasoning);
 
       // ...and it lands before the answer message in the transcript.
       const thoughtIndex = persistedEnvelopes.findIndex(
