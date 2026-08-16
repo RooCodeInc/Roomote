@@ -111,7 +111,7 @@ describe('native Notion MCP', () => {
     });
   });
 
-  it('rejects user auth tokens', async () => {
+  it('accepts user auth tokens for control-plane orchestration', async () => {
     const authToken: AuthTokenContext = {
       userId: 'user-1',
       tokenType: 'auth',
@@ -123,7 +123,7 @@ describe('native Notion MCP', () => {
       method: 'tools/list',
     });
 
-    expect(response.status).toBe(403);
+    expect(response.status).toBe(200);
   });
 
   it('exposes tools whose permissions are enforced by Notion capabilities', async () => {

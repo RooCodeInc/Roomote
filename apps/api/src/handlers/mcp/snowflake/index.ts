@@ -66,9 +66,13 @@ async function resolveSnowflakeMcpAuth(
     };
   }
 
+  if (authContext.tokenType === 'auth') {
+    return { userId: authContext.userId, tokenType: 'auth' };
+  }
+
   throw new McpProxyError(
     403,
-    'Snowflake MCP requires a task run token for server-side credential access',
+    'Snowflake MCP requires a user auth token or task run token for server-side credential access',
   );
 }
 

@@ -6,12 +6,14 @@ const {
   findRoomoteOwnedSlackThreadMock,
   markSlackThreadExplicitMentionRequiredMock,
   getSlackThreadReplyFooterMessageTsMock,
+  hasFastAgentSessionMock,
 } = vi.hoisted(() => ({
   fetchThreadMessagesMock: vi.fn(),
   hasPendingRoutingConfirmationMock: vi.fn(),
   findRoomoteOwnedSlackThreadMock: vi.fn(),
   markSlackThreadExplicitMentionRequiredMock: vi.fn(),
   getSlackThreadReplyFooterMessageTsMock: vi.fn(),
+  hasFastAgentSessionMock: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -20,6 +22,7 @@ vi.mock('@roomote/env', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   ROUTING_AUTO_CONFIRM_TIMEOUT_MS: 0,
+  hasFastAgentSession: hasFastAgentSessionMock,
 }));
 
 vi.mock('@roomote/cloud-agents', () => ({
@@ -109,8 +112,34 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     });
     markSlackThreadExplicitMentionRequiredMock.mockResolvedValue(undefined);
     getSlackThreadReplyFooterMessageTsMock.mockResolvedValue(null);
+    hasFastAgentSessionMock.mockResolvedValue(false);
     fetchThreadMessagesMock.mockResolvedValue([]);
   });
+
+  it('routes an unmentioned reply in an existing fast-agent thread', async () => {
+    hasFastAgentSessionMock.mockResolvedValue(true);
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanMessage('U111', THREAD_TS, '<@UBOT> !fast hi'),
+      botMessage('101.000', 'Hi there.'),
+    ]);
+
+    await expect(
+      routeDecision(
+        threadReplyEvent({
+          user: 'U111',
+          ts: '102.000',
+          text: 'How are you?',
+        }),
+      ),
+    ).resolves.toMatchObject({ shouldRoute: true });
+    expect(hasFastAgentSessionMock).toHaveBeenCalledWith({
+      slackTeamId: 'T123',
+      slackChannel: 'C123',
+      slackThreadTs: THREAD_TS,
+    });
+    expect(findRoomoteOwnedSlackThreadMock).not.toHaveBeenCalled();
+  }, 15_000);
 
   it('routes an unmentioned reply directly after the bot last spoke', async () => {
     fetchThreadMessagesMock.mockResolvedValue([

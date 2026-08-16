@@ -52,9 +52,10 @@ export const GBRAIN_READ_TOOL_NAMES = [
  * upstream. Requests are refused unless the integration is enabled and a
  * connection (admin-entered or env-pinned) exists.
  */
-export function createGbrainMcpProxy() {
+export function createGbrainMcpProxy(options?: { allowAuthTokens?: boolean }) {
   return createMcpProxy({
     name: 'Brain',
+    allowAuthTokens: options?.allowAuthTokens,
     allowedToolNames: GBRAIN_READ_TOOL_NAMES,
     validateTaskRunToken: async () => null,
     resolveCredentials: async () => {

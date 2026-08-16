@@ -66,9 +66,13 @@ async function resolveVercelMcpAuth(
     };
   }
 
+  if (authContext.tokenType === 'auth') {
+    return { userId: authContext.userId, tokenType: 'auth' };
+  }
+
   throw new McpProxyError(
     403,
-    'Vercel MCP requires a task run token for server-side credential access',
+    'Vercel MCP requires a user auth token or task run token for server-side credential access',
   );
 }
 

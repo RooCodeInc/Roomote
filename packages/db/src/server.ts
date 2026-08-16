@@ -76,6 +76,7 @@ export * from './lib/teams-runtime-credentials';
 export * from './lib/telegram-runtime-credentials';
 export * from './lib/discord-runtime-credentials';
 export * from './lib/router-debug-settings';
+export * from './lib/slack-fast-integration-calls';
 export * from './lib/pr-action-settings';
 export * from './lib/github-mention-settings';
 export * from './lib/account-link-help-settings';
@@ -173,6 +174,8 @@ export {
   slackConversationMessagesRelations,
   slackQuickAnswers,
   slackQuickAnswersRelations,
+  slackFastIntegrationCalls,
+  slackFastIntegrationCallsRelations,
   linearPendingSelections,
   linearPendingSelectionsRelations,
   automations,

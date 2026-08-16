@@ -66,9 +66,13 @@ async function resolveAsanaMcpAuth(
     };
   }
 
+  if (authContext.tokenType === 'auth') {
+    return { userId: authContext.userId, tokenType: 'auth' };
+  }
+
   throw new McpProxyError(
     403,
-    'Asana MCP requires a task run token for server-side credential access',
+    'Asana MCP requires a user auth token or task run token for server-side credential access',
   );
 }
 

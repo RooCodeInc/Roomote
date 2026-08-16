@@ -148,6 +148,7 @@ export const userRelations = relations(users, ({ many }) => ({
   tasks: many(tasks, { relationName: 'taskInitiatorUser' }),
   taskPins: many(taskPins),
   slackQuickAnswers: many(slackQuickAnswers),
+  slackFastIntegrationCalls: many(slackFastIntegrationCalls),
   workItems: many(workItems),
   setupQualificationBlocks: many(setupQualificationBlocks),
 }));
@@ -2881,9 +2882,78 @@ export const slackQuickAnswers = pgTable(
 
 export const slackQuickAnswersRelations = relations(
   slackQuickAnswers,
-  ({ one }) => ({
+  ({ one, many }) => ({
     user: one(users, {
       fields: [slackQuickAnswers.userId],
+      references: [users.id],
+    }),
+    integrationCalls: many(slackFastIntegrationCalls),
+  }),
+);
+
+export type SlackFastIntegrationCallStatus =
+  | 'executing'
+  | 'succeeded'
+  | 'failed';
+
+/**
+ * slack_fast_integration_calls
+ *
+ * Durable audit trail for deployment MCP tools executed directly by runless
+ * Slack fast-mode conversations. An `executing` row is inserted before the
+ * external call so a missing terminal update remains visibly ambiguous.
+ */
+export const slackFastIntegrationCalls = pgTable(
+  'slack_fast_integration_calls',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slackQuickAnswerId: uuid('slack_quick_answer_id')
+      .notNull()
+      .references(() => slackQuickAnswers.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    slackTeamId: text('slack_team_id').notNull(),
+    slackChannel: text('slack_channel').notNull(),
+    slackThreadTs: text('slack_thread_ts').notNull(),
+    slackMessageTs: text('slack_message_ts').notNull(),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    arguments: jsonb('arguments').notNull().$type<Record<string, unknown>>(),
+    status: text('status').notNull().$type<SlackFastIntegrationCallStatus>(),
+    resultPreview: text('result_preview'),
+    error: text('error'),
+    startedAt: timestamp('started_at').notNull().defaultNow(),
+    completedAt: timestamp('completed_at'),
+    durationMs: integer('duration_ms'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('slack_fast_integration_calls_session_idx').on(
+      table.slackQuickAnswerId,
+      table.createdAt,
+    ),
+    index('slack_fast_integration_calls_user_idx').on(
+      table.userId,
+      table.createdAt,
+    ),
+    index('slack_fast_integration_calls_status_idx').on(
+      table.status,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const slackFastIntegrationCallsRelations = relations(
+  slackFastIntegrationCalls,
+  ({ one }) => ({
+    slackQuickAnswer: one(slackQuickAnswers, {
+      fields: [slackFastIntegrationCalls.slackQuickAnswerId],
+      references: [slackQuickAnswers.id],
+    }),
+    user: one(users, {
+      fields: [slackFastIntegrationCalls.userId],
       references: [users.id],
     }),
   }),
