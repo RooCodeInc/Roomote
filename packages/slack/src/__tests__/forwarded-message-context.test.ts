@@ -419,6 +419,44 @@ describe('forwarded-message-context', () => {
     expect(context).toBeUndefined();
   });
 
+  it('skips block text matching a Markdown link with balanced parentheses', () => {
+    const context = formatSlackBlockTextContext(
+      [
+        {
+          type: 'rich_text',
+          elements: [
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'Open incident' }],
+            },
+          ],
+        },
+      ],
+      'Open [incident](https://example.com/issues/(abc))',
+    );
+
+    expect(context).toBeUndefined();
+  });
+
+  it('skips block text matching a Markdown link with escaped parentheses', () => {
+    const context = formatSlackBlockTextContext(
+      [
+        {
+          type: 'rich_text',
+          elements: [
+            {
+              type: 'rich_text_section',
+              elements: [{ type: 'text', text: 'Open incident' }],
+            },
+          ],
+        },
+      ],
+      'Open [incident](https://example.com/issues/\\(abc\\))',
+    );
+
+    expect(context).toBeUndefined();
+  });
+
   it('appends Slack block link context to message text', () => {
     expect(
       appendSlackAttachmentContext('can you investigate?', undefined, [

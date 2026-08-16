@@ -47,6 +47,68 @@ function replaceSlackLinks(
   return result;
 }
 
+function replaceMarkdownLinks(
+  text: string,
+  onLink: (url: string, label: string) => string,
+): string {
+  let result = '';
+  let index = 0;
+
+  while (index < text.length) {
+    if (text[index] === '[') {
+      const labelEnd = text.indexOf('](', index + 1);
+      if (labelEnd !== -1) {
+        const label = text.slice(index + 1, labelEnd);
+        const targetStart = labelEnd + 2;
+        let targetEnd: number | undefined;
+        let url: string | undefined;
+
+        if (text[targetStart] === '<') {
+          const close = text.indexOf('>', targetStart + 1);
+          if (close !== -1 && text[close + 1] === ')') {
+            targetEnd = close + 1;
+            url = text.slice(targetStart + 1, close);
+          }
+        } else {
+          let depth = 1;
+          let cursor = targetStart;
+
+          while (cursor < text.length) {
+            if (text[cursor] === '\\') {
+              cursor += 2;
+              continue;
+            }
+            if (text[cursor] === '(') {
+              depth += 1;
+            } else if (text[cursor] === ')') {
+              depth -= 1;
+              if (depth === 0) {
+                targetEnd = cursor;
+                url = text
+                  .slice(targetStart, cursor)
+                  .replace(/\\([()\\])/g, '$1');
+                break;
+              }
+            }
+            cursor += 1;
+          }
+        }
+
+        if (targetEnd !== undefined && url && label && isSlackLinkScheme(url)) {
+          result += onLink(url, label);
+          index = targetEnd + 1;
+          continue;
+        }
+      }
+    }
+
+    result += text[index];
+    index += 1;
+  }
+
+  return result;
+}
+
 function forEachSlackMarkdownLink(
   text: string,
   onMatch: (url: string, label: string) => void,
@@ -204,14 +266,13 @@ function normalizeSlackBlockTextForComparison(
     },
   );
 
-  const normalizedText = normalizeSlackBlockText(text)
-    .replace(
-      /\[([^\]]+)\]\(<?((?:https?:\/\/|mailto:)[^)\s>]+)>?\)/g,
-      (_match, label: string, url: string) => {
-        linkTargets.add(decodeSlackEntity(url));
-        return label;
-      },
-    )
+  const normalizedText = replaceMarkdownLinks(
+    normalizeSlackBlockText(text),
+    (url, label) => {
+      linkTargets.add(decodeSlackEntity(url));
+      return label;
+    },
+  )
     .replace(/[*_~`]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
