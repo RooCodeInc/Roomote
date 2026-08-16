@@ -132,17 +132,12 @@ function buildIntegrationCallSignature({
 
 function buildBrainPreflightQuery({
   question,
-  threadContext,
-  currentMessageTs,
+  senderDisplayName,
 }: {
   question: string;
-  threadContext: FastAgentSlackThreadMessage[];
-  currentMessageTs?: string;
+  senderDisplayName?: string;
 }): string {
-  const currentMessage = currentMessageTs
-    ? threadContext.find((message) => message.ts === currentMessageTs)
-    : undefined;
-  const displayName = currentMessage?.username?.trim();
+  const displayName = senderDisplayName?.trim();
 
   return displayName ? `${displayName}: ${question}` : question;
 }
@@ -334,6 +329,7 @@ export async function answerFastAgentQuestion({
   slackChannel,
   slackThreadTs,
   currentMessageTs,
+  senderDisplayName,
   activeTaskId = null,
   launchTask,
   postSlackReply,
@@ -346,6 +342,7 @@ export async function answerFastAgentQuestion({
   slackChannel: string;
   slackThreadTs: string;
   currentMessageTs?: string;
+  senderDisplayName?: string;
   activeTaskId?: string | null;
   launchTask?: LaunchFastAgentSlackTask;
   postSlackReply: PostFastAgentSlackReply;
@@ -398,8 +395,7 @@ export async function answerFastAgentQuestion({
       const toolArguments = {
         query: buildBrainPreflightQuery({
           question: normalizedQuestion,
-          threadContext,
-          currentMessageTs,
+          senderDisplayName,
         }),
       };
       integrationCallSignatures.add(

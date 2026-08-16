@@ -46,7 +46,15 @@ describe('processFastAgentMessage', () => {
       addReaction: vi.fn(),
       removeReaction: vi.fn(),
       normalizeIncomingText: vi.fn(async (text: string) => text),
-      fetchThreadMessages: vi.fn(async () => []),
+      fetchThreadMessages: vi.fn(async () => [
+        {
+          user: 'U123',
+          username: 'Matt',
+          text: '!fast hi how are you',
+          ts: '100.001',
+          type: 'message',
+        },
+      ]),
     };
 
     await processFastAgentMessage({
@@ -67,7 +75,11 @@ describe('processFastAgentMessage', () => {
     expect(slack.removeReaction).not.toHaveBeenCalled();
     expect(mocks.answerQuestion).toHaveBeenCalledOnce();
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
-      expect.objectContaining({ slackTeamId: 'T123' }),
+      expect.objectContaining({
+        slackTeamId: 'T123',
+        senderDisplayName: 'Matt',
+        threadContext: [],
+      }),
     );
     expect(mocks.acquireLock).toHaveBeenCalledWith(
       expect.stringContaining('T123:D123:100.001'),

@@ -131,6 +131,9 @@ export async function processFastAgentMessage(params: {
 
     let didFailToReplyToSlack = false;
     let didPostFinalAnswer = false;
+    const currentMessage = threadContext.find(
+      (message) => message.ts === event.ts,
+    );
     const serializedThreadContext = threadContext
       .filter((message) => message.ts !== event.ts)
       .map((message) => ({
@@ -150,6 +153,7 @@ export async function processFastAgentMessage(params: {
       slackChannel: event.channel,
       slackThreadTs: threadId,
       currentMessageTs: event.ts,
+      senderDisplayName: currentMessage?.username,
       activeTaskId,
       launchTask,
       postSlackReply: async ({ type, text }) => {

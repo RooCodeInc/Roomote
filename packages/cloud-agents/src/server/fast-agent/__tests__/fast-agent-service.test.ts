@@ -48,6 +48,7 @@ const baseParams = {
   slackChannel: 'channel-1',
   slackThreadTs: '100.1',
   currentMessageTs: '100.2',
+  senderDisplayName: 'Matt',
 };
 
 function decision(overrides: Record<string, unknown> = {}) {
@@ -227,7 +228,7 @@ describe('answerFastAgentQuestion', () => {
       {
         integrationId: 'gbrain',
         toolName: 'query',
-        args: { query: 'What does this service do?' },
+        args: { query: 'Matt: What does this service do?' },
       },
     );
     expect(mocks.callIntegration).toHaveBeenNthCalledWith(
