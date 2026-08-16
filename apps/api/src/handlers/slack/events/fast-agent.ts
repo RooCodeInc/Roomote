@@ -27,7 +27,7 @@ export function isBareFastCommandInvocation(text: string): boolean {
   return /^!fast(?:\s|$)/i.test(text.trimStart());
 }
 
-export type FastAgentEntryMode = 'explicit' | 'default';
+type FastAgentEntryMode = 'explicit' | 'default';
 
 export function resolveFastAgentEntryMode(params: {
   text: string;
