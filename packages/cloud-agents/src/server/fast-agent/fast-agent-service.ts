@@ -44,6 +44,7 @@ type PostFastAgentSlackReply = (reply: FastAgentSlackReply) => Promise<void>;
 
 interface FastAgentSlackReaction {
   name: string;
+  purpose: 'ack' | 'closeout';
   slackChannel: string;
   slackMessageTs: string;
 }
@@ -541,6 +542,7 @@ export async function answerFastAgentQuestion({
 
         await postSlackReaction({
           name,
+          purpose,
           slackChannel,
           slackMessageTs: currentMessageTs ?? slackThreadTs,
         });

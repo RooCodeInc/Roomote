@@ -182,13 +182,15 @@ export async function processFastAgentMessage(params: {
           didSendVisibleResponse = true;
         }
       },
-      postSlackReaction: async ({ name, slackMessageTs }) => {
+      postSlackReaction: async ({ name, purpose, slackMessageTs }) => {
         if (
           didAddProcessingReaction &&
           name === processingReactionName &&
           slackMessageTs === event.ts
         ) {
-          didAddProcessingReaction = false;
+          if (purpose === 'closeout') {
+            didAddProcessingReaction = false;
+          }
           didSendVisibleResponse = true;
           return;
         }

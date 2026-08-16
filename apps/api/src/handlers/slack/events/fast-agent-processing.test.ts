@@ -53,6 +53,7 @@ describe('processFastAgentMessage', () => {
       }) => {
         await postSlackReaction({
           name: 'thumbsup',
+          purpose: 'closeout',
           slackMessageTs: '100.001',
         });
         return '';
@@ -97,7 +98,7 @@ describe('processFastAgentMessage', () => {
     expect(mocks.postThreadMessage).not.toHaveBeenCalled();
   });
 
-  it('keeps the processing reaction when it becomes the visible response', async () => {
+  it('keeps the processing reaction when it becomes the visible closeout', async () => {
     mocks.answerQuestion.mockImplementationOnce(
       async ({
         postSlackReaction,
@@ -106,6 +107,7 @@ describe('processFastAgentMessage', () => {
       }) => {
         await postSlackReaction({
           name: 'eyes',
+          purpose: 'closeout',
           slackMessageTs: '100.001',
         });
         return '';
@@ -140,6 +142,59 @@ describe('processFastAgentMessage', () => {
     });
     expect(slack.removeReaction).not.toHaveBeenCalled();
     expect(mocks.postThreadMessage).not.toHaveBeenCalled();
+  });
+
+  it('clears a same-name processing reaction after an intermediate acknowledgement', async () => {
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        postSlackReaction,
+        postSlackReply,
+      }: {
+        postSlackReaction: (reaction: unknown) => void;
+        postSlackReply: (reply: unknown) => void;
+      }) => {
+        await postSlackReaction({
+          name: 'eyes',
+          purpose: 'ack',
+          slackMessageTs: '100.001',
+        });
+        await postSlackReply({
+          purpose: 'closeout',
+          message: 'I found the answer.',
+        });
+        return 'I found the answer.';
+      },
+    );
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'D123',
+        channel_type: 'im',
+        user: 'U123',
+        text: '!fast investigate this',
+        ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+    });
+
+    expect(slack.addReaction).toHaveBeenCalledOnce();
+    expect(slack.removeReaction).toHaveBeenCalledWith({
+      channel: 'D123',
+      timestamp: '100.001',
+      name: 'eyes',
+    });
+    expect(mocks.postThreadMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'I found the answer.' }),
+    );
   });
 
   it('posts the returned fallback when no chat tool delivered a response', async () => {
