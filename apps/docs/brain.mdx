@@ -146,11 +146,13 @@ matching on keywords alone.
 
 ## Operating it
 
-- **Back up the Brain volume.** Its `/data/brain` directory is the Markdown
-  corpus, including pages produced by nightly synthesis. Postgres holds the
-  searchable index, extracted facts, and durable maintenance jobs; keeping it
-  in the normal database backup makes restores faster, but it is not the only
-  copy of the source pages.
+- **Back up the Brain volume.** The Railway template schedules daily and
+  weekly backups for it. On other platforms, include `/data/brain` in the
+  deployment's normal volume backups. That directory is the Markdown corpus,
+  including pages produced by nightly synthesis. Postgres holds the searchable
+  index, extracted facts, and durable maintenance jobs; keeping it in the
+  normal database backup makes restores faster, but it is not the only copy of
+  the source pages.
 - **Losing the Brain is recoverable but not free.** If the volume or isolated
   `gbrain` database is recreated, Roomote re-registers its clients, resets its
   ingestion checkpoints, and backfills task history and integration sources.

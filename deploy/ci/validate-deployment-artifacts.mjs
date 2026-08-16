@@ -209,6 +209,27 @@ assert(
   'R_DISCORD_GATEWAY_SECRET' in railway.services.bullmq.env,
   'railway: bullmq must receive R_DISCORD_GATEWAY_SECRET',
 );
+assert(
+  railway.services.gbrain?.volume === '/data' &&
+    JSON.stringify(railway.services.gbrain?.backup_schedules) ===
+      JSON.stringify(['DAILY', 'WEEKLY']),
+  'railway: gbrain must retain daily and weekly volume backups',
+);
+
+const gbrainEntrypoint = read('.docker/gbrain/entrypoint.sh');
+const gbrainResetIndex = gbrainEntrypoint.indexOf(
+  'write_storage_layout "$STORAGE_LAYOUT_RESETTING"',
+);
+const gbrainCutoverCompleteIndex = gbrainEntrypoint.indexOf(
+  'write_storage_layout "$STORAGE_LAYOUT_VERSION"',
+);
+const gbrainInitIndex = gbrainEntrypoint.indexOf('\n    gbrain init');
+assert(
+  gbrainResetIndex >= 0 &&
+    gbrainCutoverCompleteIndex > gbrainResetIndex &&
+    gbrainCutoverCompleteIndex < gbrainInitIndex,
+  'gbrain: filesystem cutover must be recorded before fallible initialization',
+);
 
 const render = YAML.parse(read('render.yaml'));
 const renderServices = new Map(
@@ -496,6 +517,7 @@ for (const script of [
   'deploy/ci/upgrade-compatibility.sh',
   'deploy/host/tests/backup-restore.integration.sh',
   'deploy/host/tests/upgrade-failed-pull.sh',
+  '.docker/gbrain/entrypoint.sh',
 ]) {
   execFileSync('bash', ['-n', join(root, script)], { stdio: 'pipe' });
 }

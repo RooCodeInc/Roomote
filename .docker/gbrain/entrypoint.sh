@@ -16,6 +16,7 @@ TOKEN_FILE="$DATA_DIR/admin-bootstrap-token"
 CONFIG_FILE="$DATA_DIR/.gbrain/config.json"
 STORAGE_LAYOUT_FILE="$DATA_DIR/roomote-brain-storage-layout"
 STORAGE_LAYOUT_VERSION="filesystem-v1"
+STORAGE_LAYOUT_RESETTING="${STORAGE_LAYOUT_VERSION}-resetting"
 PORT="${GBRAIN_PORT:-8931}"
 # Width of the vector column, fixed when the brain is created. Defaults to
 # text-embedding-3-small, which is what both providers serve by default.
@@ -25,6 +26,13 @@ PORT="${GBRAIN_PORT:-8931}"
 EMBEDDING_DIMENSIONS="${GBRAIN_EMBEDDING_DIMENSIONS:-1536}"
 
 mkdir -p "$DATA_DIR"
+
+write_storage_layout() {
+  layout="$1"
+  temporary_layout_file="${STORAGE_LAYOUT_FILE}.tmp"
+  printf '%s\n' "$layout" > "$temporary_layout_file"
+  mv -f "$temporary_layout_file" "$STORAGE_LAYOUT_FILE"
+}
 
 # gbrain keeps its registration in $HOME/.gbrain, not in the data dir.
 # Anchor HOME on the volume so a rebuilt container still knows its brain.
@@ -73,6 +81,12 @@ CURRENT_STORAGE_LAYOUT="$(cat "$STORAGE_LAYOUT_FILE" 2>/dev/null || true)"
 
 if [ "$CURRENT_STORAGE_LAYOUT" != "$STORAGE_LAYOUT_VERSION" ]; then
   echo "[gbrain-entrypoint] initializing filesystem-backed Brain (existing Brain content will be rebuilt)"
+  # Only the reset itself may repeat after an interruption. Once it completes,
+  # persist the final layout before gbrain init and the remaining config steps,
+  # so a later bootstrap failure resumes instead of dropping the fresh Brain.
+  if [ "$CURRENT_STORAGE_LAYOUT" != "$STORAGE_LAYOUT_RESETTING" ]; then
+    write_storage_layout "$STORAGE_LAYOUT_RESETTING"
+  fi
   psql --dbname="$DATABASE_BOOTSTRAP_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 \
     -v brain_database="$GBRAIN_DATABASE_NAME" <<'SQL'
 SELECT pg_advisory_lock(hashtext('roomote-gbrain-database-bootstrap')) AS locked \gset
@@ -88,6 +102,7 @@ SQL
   # it, but remove the old corpus/config so gbrain cannot mix storage layouts.
   rm -rf "$BRAIN_DIR"
   rm -f "$CONFIG_FILE"
+  write_storage_layout "$STORAGE_LAYOUT_VERSION"
 else
   echo "[gbrain-entrypoint] ensuring isolated Postgres database $GBRAIN_DATABASE_NAME"
   psql --dbname="$DATABASE_BOOTSTRAP_URL" --no-psqlrc --quiet -v ON_ERROR_STOP=1 \
@@ -250,7 +265,6 @@ mkdir -p "$BRAIN_DIR"
 gbrain config set sync.repo_path "$BRAIN_DIR" >/dev/null
 gbrain config set dream.synthesize.session_corpus_dir "$BRAIN_DIR" >/dev/null
 gbrain config set dream.synthesize.enabled true >/dev/null
-printf '%s\n' "$STORAGE_LAYOUT_VERSION" > "$STORAGE_LAYOUT_FILE"
 echo "[gbrain-entrypoint] corpus checkout: $BRAIN_DIR (filesystem + Postgres index)"
 
 # Route gbrain's OpenRouter reranker through the same Roomote credential
