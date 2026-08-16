@@ -95,4 +95,18 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('integration calls per user turn');
     expect(prompt).not.toContain('save_task_memory');
   });
+
+  it('grounds first-person requests in current Slack message attributes', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+    });
+
+    expect(prompt).toContain(
+      'attributes on the current `<slack_message>` identify its sender',
+    );
+    expect(prompt).toContain(
+      'If an account-specific request needs a GitHub identity and `sender_github` is absent, ask',
+    );
+    expect(prompt).not.toContain('## Current User Identity');
+  });
 });
