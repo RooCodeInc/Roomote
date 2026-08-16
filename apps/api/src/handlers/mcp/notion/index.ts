@@ -53,9 +53,13 @@ async function resolveNotionMcpAuth(
     };
   }
 
+  if (authContext.tokenType === 'auth') {
+    return { userId: authContext.userId, tokenType: 'auth' };
+  }
+
   throw new McpProxyError(
     403,
-    'Notion MCP requires a task run token for server-side credential access',
+    'Notion MCP requires a user auth token or task run token for server-side credential access',
   );
 }
 

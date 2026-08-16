@@ -1,6 +1,9 @@
 import { acquireRedisLock } from '@roomote/redis';
 import { PRODUCT_NAME } from '@roomote/types';
-import { answerFastAgentQuestion } from '@roomote/cloud-agents/server';
+import {
+  answerFastAgentQuestion,
+  type LaunchFastAgentSlackTask,
+} from '@roomote/cloud-agents/server';
 import { type SlackEvent, type SlackNotifier } from '@roomote/slack';
 import { stripLeadingSlackProductMention } from '@roomote/cloud-agents';
 
@@ -24,7 +27,15 @@ export function isBareFastCommandInvocation(text: string): boolean {
   return /^!fast(?:\s|$)/i.test(text.trimStart());
 }
 
-function extractFastQuestion(mentionStrippedText: string): string | null {
+export function extractFastQuestion(
+  mentionStrippedText: string,
+  continuation = false,
+): string | null {
+  if (continuation) {
+    const trimmedQuestion = mentionStrippedText.trim();
+    return trimmedQuestion.length > 0 ? trimmedQuestion : null;
+  }
+
   const match = mentionStrippedText.match(/^!fast\s*(.*)$/is);
   if (!match) {
     return null;
@@ -42,8 +53,10 @@ export async function processFastAgentMessage(params: {
   userId: string;
   teamId: string;
   apiBaseUrl?: string;
-  ackEmoji: string;
   usageText?: string;
+  continuation?: boolean;
+  activeTaskId?: string | null;
+  launchTask?: LaunchFastAgentSlackTask;
 }): Promise<void> {
   const {
     event,
@@ -51,8 +64,10 @@ export async function processFastAgentMessage(params: {
     userId,
     teamId,
     apiBaseUrl,
-    ackEmoji,
     usageText = `Use \`!fast <question>\` after mentioning ${PRODUCT_NAME}.`,
+    continuation = false,
+    activeTaskId = null,
+    launchTask,
   } = params;
   const threadId = event.thread_ts || event.ts;
   const releaseFastAgentLock = await acquireRedisLock(
@@ -76,18 +91,12 @@ export async function processFastAgentMessage(params: {
     return;
   }
 
-  await slack.addReaction({
-    channel: event.channel,
-    timestamp: event.ts,
-    name: ackEmoji,
-  });
-
   const normalizedText = stripLeadingSlackProductMention(
     await slack.normalizeIncomingText(
       stripLeadingFastCommandMention(event.text),
     ),
   );
-  const question = extractFastQuestion(normalizedText);
+  const question = extractFastQuestion(normalizedText, continuation);
 
   try {
     if (!question) {
@@ -140,6 +149,8 @@ export async function processFastAgentMessage(params: {
       slackChannel: event.channel,
       slackThreadTs: threadId,
       currentMessageTs: event.ts,
+      activeTaskId,
+      launchTask,
       postSlackReply: async ({ type, text }) => {
         try {
           const posted = await postSlackThreadMarkdownMessage({
@@ -182,13 +193,6 @@ export async function processFastAgentMessage(params: {
       });
     }
   } finally {
-    await slack
-      .removeReaction({
-        channel: event.channel,
-        timestamp: event.ts,
-        name: ackEmoji,
-      })
-      .catch(() => {});
     await releaseFastAgentLock().catch(() => {});
   }
 }

@@ -136,7 +136,7 @@ describe('Granola MCP auth and tool handling', () => {
     expect(body.error.message).toContain('missing or invalid bearer token');
   });
 
-  it('requires a task run token', async () => {
+  it('accepts user auth tokens for control-plane Granola access', async () => {
     const authToken: AuthTokenContext = {
       userId: 'user-1',
       tokenType: 'auth',
@@ -146,10 +146,7 @@ describe('Granola MCP auth and tool handling', () => {
       createApp(authToken),
       createInitializeRequest(1),
     );
-    const body = (await response.json()) as JsonRpcErrorBody;
-
-    expect(response.status).toBe(403);
-    expect(body.error.message).toContain('requires a task run token');
+    expect(response.status).toBe(200);
   });
 
   it('initializes for a valid run token and deployment connection', async () => {

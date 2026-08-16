@@ -95,6 +95,21 @@ export async function getOrCreateFastAgentSession({
   };
 }
 
+export async function hasFastAgentSession({
+  slackChannel,
+  slackThreadTs,
+}: {
+  slackChannel: string;
+  slackThreadTs: string;
+}): Promise<boolean> {
+  const session = await db.query.slackQuickAnswers.findFirst({
+    where: buildFastAgentSessionWhere({ slackChannel, slackThreadTs }),
+    columns: { id: true },
+  });
+
+  return Boolean(session);
+}
+
 export async function appendFastAgentSessionMessages({
   sessionId,
   messages,

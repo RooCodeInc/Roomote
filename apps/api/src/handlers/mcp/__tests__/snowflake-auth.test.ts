@@ -212,7 +212,7 @@ describe('snowflake MCP auth and tool handling', () => {
     expect(body.error.message).toContain('Unauthorized');
   });
 
-  it('rejects user auth tokens for Snowflake access', async () => {
+  it('accepts user auth tokens for control-plane Snowflake access', async () => {
     const authToken: AuthTokenContext = {
       userId: 'user-1',
       tokenType: 'auth',
@@ -223,10 +223,7 @@ describe('snowflake MCP auth and tool handling', () => {
       createApp(authToken),
       createInitializeRequest(1),
     );
-    const body = (await response.json()) as JsonRpcErrorBody;
-
-    expect(response.status).toBe(403);
-    expect(body.error.message).toContain('requires a task run token');
+    expect(response.status).toBe(200);
   });
 
   it('initializes successfully for task run tokens', async () => {

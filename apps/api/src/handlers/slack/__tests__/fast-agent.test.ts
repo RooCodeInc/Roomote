@@ -1,4 +1,5 @@
 import {
+  extractFastQuestion,
   isFastCommandInvocation,
   stripLeadingFastCommandMention,
 } from '../events/fast-agent';
@@ -14,8 +15,15 @@ describe('Slack fast-agent helpers', () => {
     expect(isFastCommandInvocation('<@U_BOT> !fast what file owns this?')).toBe(
       true,
     );
+    expect(isFastCommandInvocation('!fast What is 17 × 23?')).toBe(true);
     expect(isFastCommandInvocation('<@U_BOT> can you help with this?')).toBe(
       false,
     );
+  });
+
+  it('accepts ordinary text when continuing a fast thread', () => {
+    expect(extractFastQuestion('Good, tired', true)).toBe('Good, tired');
+    expect(extractFastQuestion('   ', true)).toBeNull();
+    expect(extractFastQuestion('Good, tired')).toBeNull();
   });
 });
