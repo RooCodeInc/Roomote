@@ -114,6 +114,22 @@ function submitResponse(): Response {
   );
 }
 
+function mockDigestFetch(searches: Response[], following: Response[] = []) {
+  const fetchSpy = vi.spyOn(globalThis, 'fetch');
+  const paddedSearches = [
+    ...searches,
+    ...Array.from({ length: Math.max(0, 4 - searches.length) }, () =>
+      searchResponse({ results: [] }),
+    ),
+  ].slice(0, 4);
+
+  for (const response of [...paddedSearches, ...following]) {
+    fetchSpy.mockResolvedValueOnce(response);
+  }
+
+  return fetchSpy;
+}
+
 function asServerSentEvent(response: Response): Promise<Response> {
   return response.text().then(
     (body) =>
@@ -151,18 +167,17 @@ describe('brainMaintenanceJob', () => {
       baseUrl: 'http://gbrain.test/',
       token: `${credential}-token`,
     }));
-    const fetchSpy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(searchResponse())
-      .mockResolvedValueOnce(synthesisResponse())
-      .mockResolvedValueOnce(submitResponse());
+    const fetchSpy = mockDigestFetch(
+      [searchResponse()],
+      [synthesisResponse(), submitResponse()],
+    );
 
     await brainMaintenanceJob();
 
     expect(mockResolveConnection).toHaveBeenCalledWith('maintenance');
     expect(mockResolveConnection).toHaveBeenCalledWith('ingest');
     expect(fetchSpy).toHaveBeenNthCalledWith(
-      3,
+      6,
       'http://gbrain.test/mcp',
       expect.objectContaining({
         method: 'POST',
@@ -171,7 +186,7 @@ describe('brainMaintenanceJob', () => {
         }),
       }),
     );
-    const request = fetchSpy.mock.calls[2]?.[1] as RequestInit;
+    const request = fetchSpy.mock.calls[5]?.[1] as RequestInit;
     expect(JSON.parse(String(request.body))).toMatchObject({
       params: {
         name: 'submit_job',
@@ -199,10 +214,10 @@ describe('brainMaintenanceJob', () => {
       baseUrl: 'http://gbrain.test',
       token: 'maintenance-token',
     });
-    vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(searchResponse())
-      .mockResolvedValueOnce(synthesisResponse())
-      .mockResolvedValueOnce(new Response('{"error":"nope"}', { status: 500 }));
+    mockDigestFetch(
+      [searchResponse()],
+      [synthesisResponse(), new Response('{"error":"nope"}', { status: 500 })],
+    );
 
     await expect(brainMaintenanceJob()).rejects.toThrow(
       'gbrain submit_job failed: 500',
@@ -215,17 +230,18 @@ describe('brainMaintenanceJob', () => {
       baseUrl: 'http://gbrain.test',
       token: `${credential}-token`,
     }));
-    vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(searchResponse())
-      .mockResolvedValueOnce(
+    mockDigestFetch(
+      [searchResponse()],
+      [
         new Response('{"error":"unavailable"}', { status: 500 }),
-      )
-      .mockResolvedValueOnce(submitResponse());
+        submitResponse(),
+      ],
+    );
 
     await expect(brainMaintenanceJob()).rejects.toThrow(
       'Brain daily digest inference failed: 500',
     );
-    expect(globalThis.fetch).toHaveBeenCalledTimes(3);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(6);
   });
 });
 
@@ -243,10 +259,7 @@ describe('runBrainDailyDigest', () => {
   it('preserves a path-prefixed TRPC_URL for Brain inference', async () => {
     mockEnv.TRPC_URL = 'https://roomote.test/_roomote-api';
     mockGetBrainSyncState.mockResolvedValue(null);
-    const fetchSpy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(searchResponse())
-      .mockResolvedValueOnce(synthesisResponse());
+    const fetchSpy = mockDigestFetch([searchResponse()], [synthesisResponse()]);
 
     await runBrainDailyDigest(
       { baseUrl: 'http://gbrain.test', token: 'read-token' },
@@ -254,7 +267,7 @@ describe('runBrainDailyDigest', () => {
       new Date('2026-08-16T07:00:00.000Z'),
     );
 
-    expect(String(fetchSpy.mock.calls[1]?.[0])).toBe(
+    expect(String(fetchSpy.mock.calls[4]?.[0])).toBe(
       'https://roomote.test/_roomote-api/api/brain/inference/v1/chat/completions',
     );
   });
@@ -264,44 +277,35 @@ describe('runBrainDailyDigest', () => {
     const runAt = new Date('2026-08-16T07:00:00.000Z');
     const expectedUntil = new Date('2026-08-16T06:00:00.000Z');
     mockGetBrainSyncState.mockResolvedValue({ watermark });
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      searchResponse({
-        results: [
-          {
-            slug: 'prs/example/42',
-            title: 'Ship a specific change',
-            effective_date: '2026-08-15',
-          },
-          {
-            slug: 'slack/general/2026-08-16',
-            title: 'Slack general',
-            effective_date: '2026-08-16',
-          },
-        ],
-      }),
-    );
-    fetchSpy.mockResolvedValueOnce(
-      searchResponse({
-        results: [
-          {
-            slug: 'prs/example/42',
-            title: 'Ship a specific change',
-            effective_date: '2026-08-15',
-          },
-          {
-            slug: 'slack/general/2026-08-16',
-            title: 'Slack general',
-            effective_date: '2026-08-16',
-          },
-        ],
-      }),
-    );
-    fetchSpy.mockResolvedValueOnce(
-      synthesisResponse({
-        answer:
-          '## Work shipped\n\nA specific change shipped [prs/example/42] and was discussed in Slack [slack/general/2026-08-16].',
-        sources: ['prs/example/42', 'slack/general/2026-08-16'],
-      }),
+    const fetchSpy = mockDigestFetch(
+      [
+        searchResponse({
+          results: [
+            {
+              slug: 'slack/general/2026-08-16',
+              title: 'Slack general',
+              effective_date: '2026-08-16',
+            },
+          ],
+        }),
+        searchResponse({ results: [] }),
+        searchResponse({
+          results: [
+            {
+              slug: 'prs/example/42',
+              title: 'Ship a specific change',
+              effective_date: '2026-08-15',
+            },
+          ],
+        }),
+      ],
+      [
+        synthesisResponse({
+          answer:
+            '## Work shipped\n\nA specific change shipped [prs/example/42] and was discussed in Slack [slack/general/2026-08-16].',
+          sources: ['prs/example/42', 'slack/general/2026-08-16'],
+        }),
+      ],
     );
 
     await runBrainDailyDigest(
@@ -320,11 +324,24 @@ describe('runBrainDailyDigest', () => {
         },
       },
     });
-    const synthesisRequest = fetchSpy.mock.calls[1]?.[1] as RequestInit;
+    for (let index = 0; index < 4; index++) {
+      const request = fetchSpy.mock.calls[index]?.[1] as RequestInit;
+      expect(JSON.parse(String(request.body))).toMatchObject({
+        params: {
+          name: 'query',
+          arguments: {
+            since: '2026-08-14T23:59:59.999Z',
+            until: '2026-08-16T06:00:00.000Z',
+            limit: 30,
+          },
+        },
+      });
+    }
+    const synthesisRequest = fetchSpy.mock.calls[4]?.[1] as RequestInit;
     const synthesisBody = JSON.parse(String(synthesisRequest.body)) as {
       messages: Array<{ content: string }>;
     };
-    expect(String(fetchSpy.mock.calls[1]?.[0])).toBe(
+    expect(String(fetchSpy.mock.calls[4]?.[0])).toBe(
       'http://api.test:3001/api/brain/inference/v1/chat/completions',
     );
     expect(new Headers(synthesisRequest.headers).get('authorization')).toBe(
@@ -359,9 +376,10 @@ describe('runBrainDailyDigest', () => {
 
   it('parses MCP server-sent events with a leading event field', async () => {
     mockGetBrainSyncState.mockResolvedValue(null);
-    vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(await asServerSentEvent(searchResponse()))
-      .mockResolvedValueOnce(synthesisResponse());
+    mockDigestFetch(
+      [await asServerSentEvent(searchResponse())],
+      [synthesisResponse()],
+    );
 
     await runBrainDailyDigest(
       { baseUrl: 'http://gbrain.test', token: 'read-token' },
@@ -377,9 +395,7 @@ describe('runBrainDailyDigest', () => {
 
   it('does not advance the watermark when the digest write fails', async () => {
     mockGetBrainSyncState.mockResolvedValue(null);
-    vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(searchResponse())
-      .mockResolvedValueOnce(synthesisResponse());
+    mockDigestFetch([searchResponse()], [synthesisResponse()]);
     mockPostToBrain.mockRejectedValue(new Error('write failed'));
 
     await expect(
@@ -394,14 +410,15 @@ describe('runBrainDailyDigest', () => {
 
   it('rejects synthesis that cites a page outside the bounded evidence', async () => {
     mockGetBrainSyncState.mockResolvedValue(null);
-    vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(searchResponse())
-      .mockResolvedValueOnce(
+    mockDigestFetch(
+      [searchResponse()],
+      [
         synthesisResponse({
           answer: 'An older item was important.',
           sources: ['notion/older-page'],
         }),
-      );
+      ],
+    );
 
     await expect(
       runBrainDailyDigest(
@@ -416,15 +433,16 @@ describe('runBrainDailyDigest', () => {
 
   it('rejects an out-of-window inline citation omitted from sources', async () => {
     mockGetBrainSyncState.mockResolvedValue(null);
-    vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(searchResponse())
-      .mockResolvedValueOnce(
+    mockDigestFetch(
+      [searchResponse()],
+      [
         synthesisResponse({
           answer:
             'Current context [slack/general/2026-08-16], plus an older item [notion/older-page].',
           sources: ['slack/general/2026-08-16'],
         }),
-      );
+      ],
+    );
 
     await expect(
       runBrainDailyDigest(
@@ -441,9 +459,7 @@ describe('runBrainDailyDigest', () => {
     const runAt = new Date('2026-08-16T07:00:00.000Z');
     const expectedUntil = new Date('2026-08-16T06:00:00.000Z');
     mockGetBrainSyncState.mockResolvedValue(null);
-    const fetchSpy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(searchResponse({ results: [] }));
+    const fetchSpy = mockDigestFetch([]);
 
     await runBrainDailyDigest(
       { baseUrl: 'http://gbrain.test', token: 'read-token' },
@@ -451,7 +467,7 @@ describe('runBrainDailyDigest', () => {
       runAt,
     );
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
     expect(mockPostToBrain).not.toHaveBeenCalled();
     expect(mockUpsertBrainSyncState).toHaveBeenCalledWith(
       {},
@@ -464,7 +480,7 @@ describe('runBrainDailyDigest', () => {
     const runAt = new Date('2026-08-16T07:00:00.000Z');
     const expectedUntil = new Date('2026-08-16T06:00:00.000Z');
     mockGetBrainSyncState.mockResolvedValue(null);
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    const fetchSpy = mockDigestFetch([
       searchResponse({
         results: [
           {
@@ -484,7 +500,7 @@ describe('runBrainDailyDigest', () => {
           },
         ],
       }),
-    );
+    ]);
 
     await runBrainDailyDigest(
       { baseUrl: 'http://gbrain.test', token: 'read-token' },
@@ -492,7 +508,7 @@ describe('runBrainDailyDigest', () => {
       runAt,
     );
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
     expect(mockPostToBrain).not.toHaveBeenCalled();
     expect(mockUpsertBrainSyncState).toHaveBeenCalledWith(
       {},
@@ -505,7 +521,7 @@ describe('runBrainDailyDigest', () => {
     const runAt = new Date('2026-08-16T07:00:00.000Z');
     const expectedUntil = new Date('2026-08-16T06:00:00.000Z');
     mockGetBrainSyncState.mockResolvedValue(null);
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+    const fetchSpy = mockDigestFetch([
       searchResponse({
         results: [
           {
@@ -520,7 +536,7 @@ describe('runBrainDailyDigest', () => {
           },
         ],
       }),
-    );
+    ]);
 
     await runBrainDailyDigest(
       { baseUrl: 'http://gbrain.test', token: 'read-token' },
@@ -528,13 +544,88 @@ describe('runBrainDailyDigest', () => {
       runAt,
     );
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
     expect(mockPostToBrain).not.toHaveBeenCalled();
     expect(mockUpsertBrainSyncState).toHaveBeenCalledWith(
       {},
       'roomote-daily-digest',
       { watermark: expectedUntil },
     );
+  });
+
+  it('keeps evidence from each source family and excludes person profiles', async () => {
+    mockGetBrainSyncState.mockResolvedValue(null);
+    const fetchSpy = mockDigestFetch(
+      [
+        searchResponse({
+          results: [
+            {
+              slug: 'people/member-1',
+              title: 'A person profile',
+              effective_date: '2026-08-16',
+            },
+            {
+              slug: 'slack/team/channel/2026-08-16/batch',
+              title: 'Slack discussion',
+              effective_date: '2026-08-16',
+            },
+          ],
+        }),
+        searchResponse({
+          results: [
+            {
+              slug: 'tasks/task-1/runs/1',
+              title: 'Completed task',
+              effective_date: '2026-08-16',
+            },
+          ],
+        }),
+        searchResponse({
+          results: [
+            {
+              slug: 'prs/acme/repo/42',
+              title: 'Merged pull request',
+              effective_date: '2026-08-16',
+            },
+          ],
+        }),
+        searchResponse({
+          results: [
+            {
+              slug: 'notion/decision',
+              title: 'Decision document',
+              effective_date: '2026-08-16',
+            },
+          ],
+        }),
+      ],
+      [
+        synthesisResponse({
+          answer:
+            'Sources [slack/team/channel/2026-08-16/batch] [tasks/task-1/runs/1] [prs/acme/repo/42] [notion/decision].',
+          sources: [
+            'slack/team/channel/2026-08-16/batch',
+            'tasks/task-1/runs/1',
+            'prs/acme/repo/42',
+            'notion/decision',
+          ],
+        }),
+      ],
+    );
+
+    await runBrainDailyDigest(
+      { baseUrl: 'http://gbrain.test', token: 'read-token' },
+      { baseUrl: 'http://gbrain.test', token: 'write-token' },
+      new Date('2026-08-16T07:00:00.000Z'),
+    );
+
+    const synthesisRequest = fetchSpy.mock.calls[4]?.[1] as RequestInit;
+    const synthesisBody = String(synthesisRequest.body);
+    expect(synthesisBody).toContain('slack/team/channel/2026-08-16/batch');
+    expect(synthesisBody).toContain('tasks/task-1/runs/1');
+    expect(synthesisBody).toContain('prs/acme/repo/42');
+    expect(synthesisBody).toContain('notion/decision');
+    expect(synthesisBody).not.toContain('people/member-1');
   });
 });
 

@@ -20,6 +20,7 @@ const BRAIN_DAILY_DIGEST_OVERLAP_MS = 60 * 60 * 1000;
 const BRAIN_DAILY_DIGEST_MODEL = 'gpt-5.6-luna';
 const BRAIN_DAILY_DIGEST_MAX_EVIDENCE_CHARS = 60_000;
 const BRAIN_DAILY_DIGEST_MAX_PAGE_CHARS = 4_000;
+const BRAIN_DAILY_DIGEST_SEARCH_LIMIT = 30;
 const GENERATED_SYNTHESIS_SLUG_PREFIXES = [
   'daily/digests/',
   'dream-cycle-summaries/',
@@ -50,8 +51,28 @@ type DailyDigestEvidence = {
   excerpt: string;
 };
 
-const DAILY_DIGEST_SEARCH_QUERY =
-  'decisions shipped changes blockers commitments follow-ups people project updates contradictions';
+const DAILY_DIGEST_SEARCHES = [
+  {
+    query:
+      'Slack discussions decisions blockers commitments follow-ups people project updates contradictions',
+    slugPrefixes: ['slack/'],
+  },
+  {
+    query:
+      'completed Roomote tasks decisions shipped changes blockers commitments follow-ups project updates',
+    slugPrefixes: ['tasks/'],
+  },
+  {
+    query:
+      'pull requests GitHub issues decisions shipped changes blockers follow-ups project updates',
+    slugPrefixes: ['prs/', 'github/'],
+  },
+  {
+    query:
+      'Notion documents meeting notes decisions commitments follow-ups people project updates contradictions',
+    slugPrefixes: ['notion/', 'meetings/'],
+  },
+] as const;
 
 const DAILY_DIGEST_QUESTION = `Produce a concise operational daily digest from the source material in this time window.
 
@@ -124,6 +145,7 @@ function parseSearch(
   body: string,
   since: Date,
   until: Date,
+  slugPrefixes: readonly string[],
 ): DailyDigestEvidence[] {
   const payloads = parseToolPayloads(body);
   const results = payloads.find(Array.isArray) as
@@ -140,7 +162,6 @@ function parseSearch(
 
   const seen = new Set<string>();
   const evidence: DailyDigestEvidence[] = [];
-  let evidenceChars = 0;
 
   for (const result of results ?? wrappedResults?.results ?? []) {
     const slug = result.slug;
@@ -157,30 +178,56 @@ function parseSearch(
         /^\d{4}-\d{2}-\d{2}$/.test(effectiveDate) &&
         effectiveDate >= sinceDate &&
         effectiveDate <= untilDate &&
+        slugPrefixes.some((prefix) => slug.startsWith(prefix)) &&
+        !slug.startsWith('people/') &&
         !GENERATED_SYNTHESIS_SLUG_PREFIXES.some((prefix) =>
           slug.startsWith(prefix),
         )
       ) ||
-      seen.has(slug) ||
-      evidenceChars >= BRAIN_DAILY_DIGEST_MAX_EVIDENCE_CHARS
+      seen.has(slug)
     ) {
       continue;
     }
 
-    const packedExcerpt = excerpt.slice(
-      0,
-      Math.min(
-        BRAIN_DAILY_DIGEST_MAX_PAGE_CHARS,
-        BRAIN_DAILY_DIGEST_MAX_EVIDENCE_CHARS - evidenceChars,
-      ),
-    );
+    const packedExcerpt = excerpt.slice(0, BRAIN_DAILY_DIGEST_MAX_PAGE_CHARS);
     seen.add(slug);
-    evidenceChars += packedExcerpt.length;
     evidence.push({
       slug,
       title: (result.title ?? slug).replace(/\s+/g, ' ').trim(),
       excerpt: packedExcerpt,
     });
+  }
+
+  return evidence;
+}
+
+function mergeEvidenceBatches(
+  batches: DailyDigestEvidence[][],
+): DailyDigestEvidence[] {
+  const evidence: DailyDigestEvidence[] = [];
+  const seen = new Set<string>();
+  let evidenceChars = 0;
+  const maxBatchLength = Math.max(0, ...batches.map((batch) => batch.length));
+
+  // Round-robin preserves gbrain's ranking inside each source family while
+  // preventing the largest namespace from consuming the entire prompt.
+  for (let index = 0; index < maxBatchLength; index++) {
+    for (const batch of batches) {
+      const candidate = batch[index];
+      if (!candidate || seen.has(candidate.slug)) {
+        continue;
+      }
+
+      const remaining = BRAIN_DAILY_DIGEST_MAX_EVIDENCE_CHARS - evidenceChars;
+      if (remaining <= 0) {
+        return evidence;
+      }
+
+      const excerpt = candidate.excerpt.slice(0, remaining);
+      evidence.push({ ...candidate, excerpt });
+      seen.add(candidate.slug);
+      evidenceChars += excerpt.length;
+    }
   }
 
   return evidence;
@@ -379,18 +426,26 @@ export async function runBrainDailyDigest(
   // whole prior day. parseSearch remains the client-side authority as well.
   const retrievalSince = justBeforeUtcDate(since);
   const retrievalUntil = until.toISOString();
-  const searchBody = await callGbrainTool(readConnection, 'query', {
-    query: DAILY_DIGEST_SEARCH_QUERY,
-    since: retrievalSince,
-    until: retrievalUntil,
-    limit: 50,
-    expand: false,
-    detail: 'low',
-    recency: 'strong',
-    salience: 'on',
-    autocut: false,
-  });
-  const candidates = parseSearch(searchBody, since, until);
+  const candidateBatches: DailyDigestEvidence[][] = [];
+
+  for (const search of DAILY_DIGEST_SEARCHES) {
+    const searchBody = await callGbrainTool(readConnection, 'query', {
+      query: search.query,
+      since: retrievalSince,
+      until: retrievalUntil,
+      limit: BRAIN_DAILY_DIGEST_SEARCH_LIMIT,
+      expand: false,
+      detail: 'low',
+      recency: 'strong',
+      salience: 'on',
+      autocut: false,
+    });
+    candidateBatches.push(
+      parseSearch(searchBody, since, until, search.slugPrefixes),
+    );
+  }
+
+  const candidates = mergeEvidenceBatches(candidateBatches);
 
   if (candidates.length === 0) {
     await upsertBrainSyncState(db, BRAIN_DAILY_DIGEST_STATE_ID, {

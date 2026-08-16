@@ -32,7 +32,9 @@ const CLAIM_BATCH_SIZE = 10;
 // to this many batches per tick so the backlog clears in minutes, not hours.
 const MAX_BATCHES_PER_TICK = 20;
 const MAX_ATTEMPTS = 5;
-const PR_FACTS_COLLECTOR_ID = 'pull-request-facts';
+// Versioned once so existing pages that predate explicit effective dates are
+// replayed and corrected instead of retaining their ingestion date forever.
+const PR_FACTS_COLLECTOR_ID = 'pull-request-facts:effective-date-v2';
 // PR analytics gives every repository in one sync the same timestamp but
 // writes repositories sequentially. Re-read a bounded window on each normal
 // collector tick so a row committed late with that shared timestamp cannot
@@ -565,6 +567,42 @@ export function getPullRequestFactsResumeCursor(
   return { updatedAt, id: cursor?.id ?? null };
 }
 
+export function buildPullRequestFactPage(fact: {
+  repositoryFullName: string;
+  prNumber: number;
+  title: string;
+  htmlUrl: string;
+  authorLogin: string | null;
+  state: string;
+  mergedAtRemote: Date | null;
+  updatedAt: Date;
+}): IngestPage {
+  const merged = fact.mergedAtRemote?.toISOString();
+  const content = [
+    '---',
+    `date: ${fact.updatedAt.toISOString().slice(0, 10)}`,
+    `repository: ${fact.repositoryFullName}`,
+    `pr_number: ${fact.prNumber}`,
+    `state: ${fact.state}`,
+    ...(fact.authorLogin ? [`author: ${fact.authorLogin}`] : []),
+    ...(merged ? [`merged_at: ${merged}`] : []),
+    'provenance: roomote-pull-requests',
+    '---',
+    '',
+    `# ${fact.repositoryFullName}#${fact.prNumber}: ${fact.title}`,
+    '',
+    `${fact.state === 'merged' || merged ? 'Merged' : 'State: ' + fact.state}${merged ? ` at ${merged}` : ''}${fact.authorLogin ? ` by ${fact.authorLogin}` : ''}.`,
+    '',
+    fact.htmlUrl,
+  ].join('\n');
+
+  return {
+    slug: `prs/${fact.repositoryFullName}/${fact.prNumber}`,
+    title: `${fact.repositoryFullName}#${fact.prNumber}: ${fact.title}`,
+    content: redactBrainText(content),
+  };
+}
+
 /**
  * First integration-derived memory source: merged pull requests, from the
  * locally mirrored pull_request_facts table (populated by the analytics
@@ -625,32 +663,7 @@ async function syncPullRequestFacts(
 
   for (const fact of facts) {
     try {
-      const merged = fact.mergedAtRemote?.toISOString();
-      const content = [
-        '---',
-        `repository: ${fact.repositoryFullName}`,
-        `pr_number: ${fact.prNumber}`,
-        `state: ${fact.state}`,
-        ...(fact.authorLogin ? [`author: ${fact.authorLogin}`] : []),
-        ...(merged ? [`merged_at: ${merged}`] : []),
-        'provenance: roomote-pull-requests',
-        '---',
-        '',
-        `# ${fact.repositoryFullName}#${fact.prNumber}: ${fact.title}`,
-        '',
-        `${fact.state === 'merged' || merged ? 'Merged' : 'State: ' + fact.state}${merged ? ` at ${merged}` : ''}${fact.authorLogin ? ` by ${fact.authorLogin}` : ''}.`,
-        '',
-        fact.htmlUrl,
-      ].join('\n');
-
-      await postToBrain(
-        {
-          slug: `prs/${fact.repositoryFullName}/${fact.prNumber}`,
-          title: `${fact.repositoryFullName}#${fact.prNumber}: ${fact.title}`,
-          content: redactBrainText(content),
-        },
-        connection,
-      );
+      await postToBrain(buildPullRequestFactPage(fact), connection);
       ingested++;
     } catch (error) {
       // Leave the watermark unadvanced past this fact; retry next tick.

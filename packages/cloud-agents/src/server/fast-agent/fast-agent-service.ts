@@ -54,7 +54,12 @@ const fastAgentDecisionSchema = z
     taskMessage: z.string().nullable(),
     integrationId: z.string().nullable(),
     toolName: z.string().nullable(),
-    toolArguments: z.record(z.unknown()).nullable(),
+    toolArguments: z
+      .string()
+      .nullable()
+      .describe(
+        'For call_integration, a JSON-encoded object matching the selected tool input schema. Use null for every other action.',
+      ),
   })
   .strict();
 
@@ -128,6 +133,32 @@ function buildIntegrationCallSignature({
     toolName,
     canonicalizeIntegrationCallValue(args),
   ]);
+}
+
+function parseIntegrationToolArguments(
+  value: string | null,
+): { ok: true; args: Record<string, unknown> } | { ok: false; error: string } {
+  if (value === null || value.trim() === '') {
+    return { ok: true, args: {} };
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {
+        ok: false,
+        error: 'Integration tool arguments must decode to a JSON object.',
+      };
+    }
+
+    return { ok: true, args: parsed as Record<string, unknown> };
+  } catch {
+    return {
+      ok: false,
+      error: 'Integration tool arguments were not valid JSON.',
+    };
+  }
 }
 
 function buildBrainPreflightQuery({
@@ -472,7 +503,12 @@ export async function answerFastAgentQuestion({
 
       const integrationId = decision.integrationId?.trim();
       const toolName = decision.toolName?.trim();
-      const toolArguments = decision.toolArguments ?? {};
+      const parsedToolArguments = parseIntegrationToolArguments(
+        decision.toolArguments,
+      );
+      const toolArguments = parsedToolArguments.ok
+        ? parsedToolArguments.args
+        : {};
       const callSignature = buildIntegrationCallSignature({
         integrationId: integrationId ?? null,
         toolName: toolName ?? null,
@@ -488,7 +524,9 @@ export async function answerFastAgentQuestion({
       integrationCallSignatures.add(callSignature);
       let integrationResult: unknown;
 
-      if (!integrationId || !toolName) {
+      if (!parsedToolArguments.ok) {
+        integrationResult = { error: parsedToolArguments.error };
+      } else if (!integrationId || !toolName) {
         integrationResult = {
           error: 'An integration ID and tool name are required.',
         };

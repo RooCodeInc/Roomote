@@ -62,6 +62,7 @@ beforeEach(() => {
 import {
   brainCollectorsJob,
   brainOutboxDrainJob,
+  buildPullRequestFactPage,
   buildMemoryPage,
   drainBrainHistoricalIngestion,
   getPullRequestFactsResumeCursor,
@@ -92,6 +93,24 @@ describe('PR fact resume cursor', () => {
       updatedAt: new Date('2026-08-14T10:00:00.000Z'),
       id: '00000000-0000-0000-0000-000000000042',
     });
+  });
+});
+
+describe('pull request fact pages', () => {
+  it('uses the fact update date instead of the ingestion date', () => {
+    const page = buildPullRequestFactPage({
+      repositoryFullName: 'owner/repo',
+      prNumber: 42,
+      title: 'Ship it',
+      htmlUrl: 'https://example.test/owner/repo/pull/42',
+      authorLogin: 'octocat',
+      state: 'merged',
+      mergedAtRemote: new Date('2026-08-14T10:00:00Z'),
+      updatedAt: new Date('2026-08-15T11:00:00Z'),
+    });
+
+    expect(page.content).toContain('\ndate: 2026-08-15\n');
+    expect(page.content).toContain('\nmerged_at: 2026-08-14T10:00:00.000Z\n');
   });
 });
 

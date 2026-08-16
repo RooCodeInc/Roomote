@@ -83,6 +83,7 @@ describe('buildGithubIssuePage', () => {
       'acme/widgets#42: Sandbox boots without the preview proxy',
     );
     expect(page?.content).toContain('repository: acme/widgets');
+    expect(page?.content).toContain('\ndate: 2026-08-03\n');
     expect(page?.content).toContain('state: closed');
     expect(page?.content).toContain('labels: bug, previews');
     expect(page?.content).toContain('author: ada');
@@ -104,6 +105,16 @@ describe('buildGithubIssuePage', () => {
     });
 
     expect(page?.content).not.toContain('## Discussion');
+  });
+
+  it('falls back to the creation date when no update date is available', () => {
+    const page = buildGithubIssuePage({
+      fullName: 'acme/widgets',
+      issue: { ...issue, updated_at: undefined, closed_at: undefined },
+      comments: [],
+    });
+
+    expect(page?.content).toContain('\ndate: 2026-08-01\n');
   });
 
   it('caps long bodies and comment bodies', () => {

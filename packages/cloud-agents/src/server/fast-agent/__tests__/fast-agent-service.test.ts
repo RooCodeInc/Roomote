@@ -197,7 +197,7 @@ describe('answerFastAgentQuestion', () => {
           response: '',
           integrationId: 'github',
           toolName: 'search_code',
-          toolArguments: { query: 'orchestrator' },
+          toolArguments: JSON.stringify({ query: 'orchestrator' }),
         }),
       })
       .mockResolvedValueOnce({
@@ -259,6 +259,50 @@ describe('answerFastAgentQuestion', () => {
     expect(result).toBe('The code is in the fast-agent module.');
   });
 
+  it('forwards JSON-encoded arguments to a follow-up Brain entity lookup', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'gbrain',
+        name: 'Brain',
+        description: 'Deployment memory',
+        tools: [{ name: 'query' }, { name: 'entity' }],
+      },
+    ]);
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'call_integration',
+          response: '',
+          integrationId: 'gbrain',
+          toolName: 'entity',
+          toolArguments: JSON.stringify({ name: 'Alice Example' }),
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({ response: 'I found the person card.' }),
+      });
+    mocks.callIntegration
+      .mockResolvedValueOnce({ results: [] })
+      .mockResolvedValueOnce({ found: true });
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      postSlackReply: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(mocks.callIntegration).toHaveBeenNthCalledWith(
+      2,
+      expect.any(Object),
+      expect.any(Array),
+      {
+        integrationId: 'gbrain',
+        toolName: 'entity',
+        args: { name: 'Alice Example' },
+      },
+    );
+    expect(result).toBe('I found the person card.');
+  });
+
   it('rejects an equivalent duplicate integration call and requires a response', async () => {
     mocks.listIntegrations.mockResolvedValue([
       {
@@ -273,14 +317,20 @@ describe('answerFastAgentQuestion', () => {
       response: '',
       integrationId: 'github',
       toolName: 'search_code',
-      toolArguments: { repository: 'acme/app', query: 'orchestrator' },
+      toolArguments: JSON.stringify({
+        repository: 'acme/app',
+        query: 'orchestrator',
+      }),
     });
     mocks.generateObject
       .mockResolvedValueOnce({ object: repeatedCall })
       .mockResolvedValueOnce({
         object: decision({
           ...repeatedCall,
-          toolArguments: { query: 'orchestrator', repository: 'acme/app' },
+          toolArguments: JSON.stringify({
+            query: 'orchestrator',
+            repository: 'acme/app',
+          }),
         }),
       })
       .mockResolvedValueOnce({
@@ -313,7 +363,7 @@ describe('answerFastAgentQuestion', () => {
       response: '',
       integrationId: 'github',
       toolName: 'search_code',
-      toolArguments: { query: 'orchestrator' },
+      toolArguments: JSON.stringify({ query: 'orchestrator' }),
     });
     mocks.generateObject
       .mockResolvedValueOnce({ object: repeatedCall })
@@ -361,7 +411,9 @@ describe('answerFastAgentQuestion', () => {
                 response: '',
                 integrationId: 'github',
                 toolName: 'search_code',
-                toolArguments: { query: `orchestrator-${generation}` },
+                toolArguments: JSON.stringify({
+                  query: `orchestrator-${generation}`,
+                }),
               })
             : decision({ response: 'Here is what I found.' }),
       };
