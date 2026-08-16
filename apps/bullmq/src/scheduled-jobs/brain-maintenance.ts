@@ -3,6 +3,8 @@ import {
   resolveBrainInferenceProvider,
 } from '@roomote/sdk/server';
 
+const BRAIN_MAINTENANCE_TIMEOUT_MS = 60 * 60 * 1000;
+
 /**
  * Ask gbrain's durable Postgres worker to run one built-in maintenance cycle.
  * Roomote owns the clock so hosted and self-hosted deployments behave alike;
@@ -38,6 +40,7 @@ export async function brainMaintenanceJob(): Promise<void> {
           name: 'autopilot-cycle',
           data: { pull: false },
           max_attempts: 2,
+          timeout_ms: BRAIN_MAINTENANCE_TIMEOUT_MS,
         },
       },
     }),

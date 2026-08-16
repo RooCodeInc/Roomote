@@ -61,6 +61,7 @@ describe('brainMaintenanceJob', () => {
         arguments: {
           name: 'autopilot-cycle',
           data: { pull: false },
+          timeout_ms: 60 * 60 * 1000,
         },
       },
     });
