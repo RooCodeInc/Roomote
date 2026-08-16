@@ -3,28 +3,37 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 
 type PersonalColorTheme = 'light' | 'dark' | 'system';
 
-const { colorThemeState, mindReaderModeState, narrationModeState } = vi.hoisted(
-  () => ({
-    colorThemeState: {
-      colorTheme: 'system' as PersonalColorTheme,
-      isLoading: false,
-      isUpdating: false,
-      setColorTheme: vi.fn(),
-    },
-    mindReaderModeState: {
-      enabled: false,
-      isLoading: false,
-      isUpdating: false,
-      setEnabled: vi.fn(),
-    },
-    narrationModeState: {
-      enabled: false,
-      isLoading: false,
-      isUpdating: false,
-      setEnabled: vi.fn(),
-    },
-  }),
-);
+const {
+  colorThemeState,
+  mindReaderModeState,
+  narrationModeState,
+  personalPreferencesState,
+} = vi.hoisted(() => ({
+  colorThemeState: {
+    colorTheme: 'system' as PersonalColorTheme,
+    isLoading: false,
+    isUpdating: false,
+    setColorTheme: vi.fn(),
+  },
+  mindReaderModeState: {
+    enabled: false,
+    isLoading: false,
+    isUpdating: false,
+    setEnabled: vi.fn(),
+  },
+  narrationModeState: {
+    enabled: false,
+    isLoading: false,
+    isUpdating: false,
+    setEnabled: vi.fn(),
+  },
+  personalPreferencesState: {
+    preferences: { communicationsFastModeDefault: false },
+    isLoading: false,
+    isUpdating: false,
+    setPreferences: vi.fn(),
+  },
+}));
 
 vi.mock('@/hooks/useColorTheme', () => ({
   useColorTheme: () => colorThemeState,
@@ -36,6 +45,10 @@ vi.mock('@/hooks/useNarrationMode', () => ({
 
 vi.mock('@/hooks/useMindReaderMode', () => ({
   useMindReaderMode: () => mindReaderModeState,
+}));
+
+vi.mock('@/hooks/usePersonalPreferences', () => ({
+  usePersonalPreferences: () => personalPreferencesState,
 }));
 
 vi.mock('@/components/system', () => ({
@@ -123,6 +136,9 @@ describe('UserPreferencesSection', () => {
     narrationModeState.enabled = false;
     narrationModeState.isLoading = false;
     narrationModeState.isUpdating = false;
+    personalPreferencesState.preferences.communicationsFastModeDefault = false;
+    personalPreferencesState.isLoading = false;
+    personalPreferencesState.isUpdating = false;
   });
 
   it('renders user preference controls with the current state', () => {
@@ -203,5 +219,32 @@ describe('UserPreferencesSection', () => {
     expect(within(dropdown).getByRole('option', { name: 'Auto' })).toHaveValue(
       'system',
     );
+  });
+
+  it('hides the communications fast mode default when it is unavailable', () => {
+    render(<UserPreferencesSection />);
+
+    expect(
+      screen.queryByLabelText('Toggle communications fast mode default'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('updates the communications fast mode default when it is available', () => {
+    personalPreferencesState.preferences.communicationsFastModeDefault = true;
+
+    render(
+      <UserPreferencesSection communicationsFastModeDefaultAvailable={true} />,
+    );
+
+    const toggle = screen.getByLabelText(
+      'Toggle communications fast mode default',
+    );
+    expect(toggle).toBeChecked();
+
+    fireEvent.click(toggle);
+
+    expect(personalPreferencesState.setPreferences).toHaveBeenCalledWith({
+      communicationsFastModeDefault: false,
+    });
   });
 });
