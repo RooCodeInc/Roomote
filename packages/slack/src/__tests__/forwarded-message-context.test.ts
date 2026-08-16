@@ -361,6 +361,64 @@ describe('forwarded-message-context', () => {
     );
   });
 
+  it('keeps block text when its bare link target differs from the fallback', () => {
+    const context = formatSlackBlockTextContext(
+      [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: 'Review: <https://new.example/2>',
+          },
+        },
+      ],
+      'Review: <https://old.example/1>',
+    );
+
+    expect(context).toBe(
+      ['Slack block text:', 'Review: https://new.example/2'].join('\n'),
+    );
+  });
+
+  it('keeps a bare block link omitted from otherwise equivalent fallback text', () => {
+    const context = formatSlackBlockTextContext(
+      [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: 'Review: <https://new.example/2>',
+          },
+        },
+      ],
+      'Review:',
+    );
+
+    expect(context).toBe(
+      ['Slack block text:', 'Review: https://new.example/2'].join('\n'),
+    );
+  });
+
+  it('skips block links already present alongside other fallback links', () => {
+    const context = formatSlackBlockTextContext(
+      [
+        {
+          type: 'section',
+          text: {
+            type: 'mrkdwn',
+            text: 'Review: <https://shared.example/1>',
+          },
+        },
+      ],
+      [
+        'Review: <https://shared.example/1>',
+        'Source: <https://other.example/2>',
+      ].join('\n'),
+    );
+
+    expect(context).toBeUndefined();
+  });
+
   it('appends Slack block link context to message text', () => {
     expect(
       appendSlackAttachmentContext('can you investigate?', undefined, [

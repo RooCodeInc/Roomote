@@ -183,18 +183,61 @@ function normalizeSlackBlockText(text: string): string {
     .trim();
 }
 
-function normalizeSlackBlockTextForComparison(text: string): string {
+type SlackBlockTextComparison = {
+  text: string;
+  linkTargets: string[];
+};
+
+function normalizeSlackBlockTextForComparison(
+  text: string,
+): SlackBlockTextComparison {
+  const linkTargets = new Set<string>();
+  replaceSlackLinks(
+    decodeSlackEntity(text),
+    (url) => {
+      linkTargets.add(decodeSlackEntity(url));
+      return '';
+    },
+    (url) => {
+      linkTargets.add(decodeSlackEntity(url));
+      return '';
+    },
+  );
+
   const normalizedText = normalizeSlackBlockText(text)
-    .replace(/\[([^\]]+)\]\(<?(?:https?:\/\/|mailto:)[^)\s>]+>?\)/g, '$1')
+    .replace(
+      /\[([^\]]+)\]\(<?((?:https?:\/\/|mailto:)[^)\s>]+)>?\)/g,
+      (_match, label: string, url: string) => {
+        linkTargets.add(decodeSlackEntity(url));
+        return label;
+      },
+    )
     .replace(/[*_~`]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+
+  for (const match of normalizedText.matchAll(/(?:https?:\/\/|mailto:)\S+/g)) {
+    linkTargets.add(match[0]);
+  }
+
   const textWithoutLinks = normalizedText
     .replace(/(?:https?:\/\/|mailto:)\S+/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 
-  return textWithoutLinks || normalizedText;
+  return {
+    text: textWithoutLinks || normalizedText,
+    linkTargets: [...linkTargets].sort(),
+  };
+}
+
+function hasAdditionalSlackBlockLink(
+  blockText: SlackBlockTextComparison,
+  existingText: SlackBlockTextComparison,
+): boolean {
+  return blockText.linkTargets.some(
+    (target) => !existingText.linkTargets.includes(target),
+  );
 }
 
 function appendUniqueSlackBlockText(
@@ -1019,11 +1062,16 @@ export function formatSlackBlockTextContext(
     normalizeSlackBlockTextForComparison(existingText);
   const uniqueParts = parts.filter((part) => {
     const comparablePart = normalizeSlackBlockTextForComparison(part);
+    const hasAdditionalLink = hasAdditionalSlackBlockLink(
+      comparablePart,
+      comparableExistingText,
+    );
 
     return (
       part !== normalizedExistingText &&
-      comparablePart !== comparableExistingText &&
-      !comparableExistingText.includes(comparablePart)
+      (hasAdditionalLink ||
+        (comparablePart.text !== comparableExistingText.text &&
+          !comparableExistingText.text.includes(comparablePart.text)))
     );
   });
 
