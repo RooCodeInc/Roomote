@@ -100,6 +100,9 @@ describe('answerFastAgentQuestion', () => {
     expect(postSlackReply).toHaveBeenCalledWith(
       expect.objectContaining({ text: 'It coordinates incoming requests.' }),
     );
+    expect(mocks.generateObject).toHaveBeenCalledWith(
+      expect.objectContaining({ modelRole: 'primary' }),
+    );
     expect(mocks.appendSessionMessages).toHaveBeenCalledOnce();
   });
 

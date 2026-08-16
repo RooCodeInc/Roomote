@@ -9,7 +9,10 @@ import {
   type SlackThreadPromptMessage,
 } from '../../utils';
 import { getAvailableEnvironments, type RoutableEnvironment } from '../router';
-import { FAST_AGENT_MAX_STEPS, FAST_AGENT_MODEL } from './fast-agent-constants';
+import {
+  FAST_AGENT_MAX_STEPS,
+  FAST_AGENT_MODEL_ROLE,
+} from './fast-agent-constants';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import {
   appendFastAgentSessionMessages,
@@ -443,6 +446,7 @@ export async function answerFastAgentQuestion({
         const generated = await generateTrackedNonTaskObject({
           userId,
           surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+          modelRole: FAST_AGENT_MODEL_ROLE,
           schema: mustFinish
             ? fastAgentFinalDecisionSchema
             : fastAgentDecisionSchema,
@@ -625,5 +629,5 @@ export async function answerFastAgentQuestion({
   }
 }
 
-export { FAST_AGENT_MAX_STEPS, FAST_AGENT_MODEL };
+export { FAST_AGENT_MAX_STEPS, FAST_AGENT_MODEL_ROLE };
 export type { RoutableEnvironment };
