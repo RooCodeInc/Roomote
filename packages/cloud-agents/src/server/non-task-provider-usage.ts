@@ -553,7 +553,10 @@ async function runNonTaskSdkPrompt(
 export async function generateTrackedNonTaskText(
   params: GenerateTrackedNonTaskTextParams,
 ): Promise<string> {
-  const runtime = await resolveNonTaskModelRuntime(params.model);
+  const runtime = await resolveNonTaskModelRuntime(
+    params.model,
+    params.modelRole,
+  );
   const model = await resolveModelForInputModality(params, runtime);
 
   const data = await runNonTaskSdkPrompt(
