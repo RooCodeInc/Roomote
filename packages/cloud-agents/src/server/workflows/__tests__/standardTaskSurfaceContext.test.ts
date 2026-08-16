@@ -83,7 +83,10 @@ describe('Standard Task surface context', () => {
       "The automation's chat message must always be its result, never an in-progress message.",
     );
     expect(harnessInstructions).toContain(
-      'The first and only chat-visible reply for this automation turn must use `send_chat_reply` with `purpose` set to `closeout`',
+      'The automation-specific prompt remains authoritative for whether to report, which chat tools to use, and the number and shape of final messages.',
+    );
+    expect(harnessInstructions).not.toContain(
+      'The first and only chat-visible reply for this automation turn must use `send_chat_reply`',
     );
     expect(harnessInstructions).not.toContain(
       'This run was launched from a Slack conversation surface',

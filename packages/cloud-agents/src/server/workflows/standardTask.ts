@@ -344,7 +344,7 @@ ${buildGitHubMessageInstructions()}`
   <task_surface_context>
     <rule>This run was launched by an automation with ${taskSurface} as its report destination. It was not launched by a directed chat turn.</rule>
     <rule>The automation's chat message must always be its result, never an in-progress message. Keep acknowledgements, reactions, progress updates, partial findings, and routine status in the web task only.</rule>
-    <rule>The first and only chat-visible reply for this automation turn must use \`send_chat_reply\` with \`purpose\` set to \`closeout\` and contain the final result, a durable blocker, or a concrete input request required to continue.</rule>
+    <rule>The automation-specific prompt remains authoritative for whether to report, which chat tools to use, and the number and shape of final messages. This context only suppresses acknowledgements and in-progress updates before that delivery contract's result.</rule>
   </task_surface_context>`
       : taskSurfaceContext;
   const sourceContext =
