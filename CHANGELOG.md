@@ -19,7 +19,7 @@ This patch adds guided automation recommendations during setup and strengthens G
 - Keep chat conversations usable by delivering a fallback response when a task finishes without a final message and releasing Slack, Discord, Teams, and Telegram threads after their task is deleted.
 - Add Discord's `/goal` command for keeping Roomote focused on an objective across multiple turns, while preserving Goal Mode context through follow-ups and keeping internal lifecycle instructions out of agent prompts.
 - Format Discord pull-request review resolutions as subdued status text so action results are easier to distinguish from the main review message.
-- Remove an unused environment endpoint that could expose raw environment configuration while leaving task launches, environment updates, and verification unchanged.
+- Remove an unused environment endpoint that could expose raw environment configuration while leaving task launches, environment updates, and verification unchanged (thanks @canblmz1 for reporting).
 - Improve provider and agent compatibility by restoring MCP access for judge and advisor agents, recommending GPT 5.6 Luna for GitHub Copilot, reducing expected Modal lookup noise, cleaning up legacy-provider OIDC refreshes, and supporting nullable-array MCP schemas with Gemini.
 - Make environment snapshots more reliable by pacing background refreshes, preserving actionable launch diagnostics, recording failed snapshots accurately, and finalizing runs whose sandboxes disappear before a snapshot completes.
 - Improve task visibility and control with artifact-build progress and direct task links, a clearer responsive model selector, and more concise, structured custom automation reports by default.
