@@ -6,11 +6,11 @@ The core product invariant under test is: **each task owns one thread (or forum 
 
 ## 1. dm-fast-answer
 
-A linked user DMs `!fast <question>`.
+A linked user invokes `/fast request:<question>` in a DM.
 
-- Inject: `message` in a DM channel (type 1), text `!fast what file handles Discord events?`.
-- Expect: eyes reaction on the inbound message; one inline bot answer in the same channel; **no** cloud job created.
-- Assert: state `.messages` (one bot message), `.reactions`; DB has no new task row.
+- Inject: `interaction` (type 2, `data.name: "fast"`, options `[{name: "request", type: 3, value: "what file handles Discord events?"}]`) in a DM channel.
+- Expect: the deferred interaction response is edited with the answer; **no** cloud job is created.
+- Assert: state interaction responses; DB has no new task row.
 
 ## 2. dm-task-entry
 

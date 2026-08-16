@@ -1233,7 +1233,7 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
         },
         {
           name: 'fast',
-          description: 'Get a quick answer without starting another task',
+          description: 'Ask Roomote or start work with the fast orchestrator',
           type: 1,
           options: [
             {

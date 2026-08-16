@@ -53,7 +53,7 @@ type PostFastAgentSlackReaction = (
   reaction: FastAgentSlackReaction,
 ) => Promise<void>;
 
-export type FastAgentSurface = 'slack' | 'discord' | 'web';
+export type FastAgentSurface = 'slack' | 'discord';
 
 const fastAgentDecisionSchema = z
   .object({

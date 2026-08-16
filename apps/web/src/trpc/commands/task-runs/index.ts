@@ -1,7 +1,5 @@
 import {
   ALL_REPOSITORIES,
-  ACP_ENVELOPE_EVENT_TYPES,
-  ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
   activeRunStatuses,
   type TaskPayload,
   type ComputeProvider,
@@ -19,7 +17,6 @@ import {
   DeploymentReadOnlyError,
   enqueueTask,
   getTaskUrl,
-  answerFastAgentQuestion,
   routeTask,
 } from '@roomote/cloud-agents/server';
 import { captureTaskSettled } from '@roomote/telemetry/server';
@@ -36,16 +33,9 @@ import {
   tasks,
 } from '@roomote/db/server';
 import { SlackNotifier } from '@roomote/slack';
-import { recordTaskMessageEnvelope } from '@roomote/sdk/server';
-import { getRedis } from '@roomote/redis';
 
 import type { UserAuthSuccess } from '@/types';
-import {
-  Env,
-  getArtifactById,
-  getRepositories,
-  getTaskMessageEnvelopes,
-} from '@/lib/server';
+import { Env, getArtifactById, getRepositories } from '@/lib/server';
 import {
   resolveEnvironmentSourceControlProvider,
   resolveSelectedRepositorySourceControlProvider,
@@ -123,151 +113,6 @@ export async function startTaskGoalCommand(
   }
 
   return { success: true, goal };
-}
-
-const FAST_ENVELOPE_TIMESTAMP_KEY_PREFIX = 'web:fast-envelope-ts:';
-const ALLOCATE_FAST_ENVELOPE_TIMESTAMPS_SCRIPT = `
-local previous = tonumber(redis.call('GET', KEYS[1]) or '0')
-local requested = tonumber(ARGV[1])
-local user_timestamp = math.max(requested, previous + 1)
-local assistant_timestamp = user_timestamp + 1
-redis.call('SET', KEYS[1], assistant_timestamp, 'EX', 86400)
-return { user_timestamp, assistant_timestamp }
-`;
-
-async function allocateFastEnvelopeTimestamps(
-  taskId: string,
-  minimumTimestamp: number,
-): Promise<[number, number]> {
-  const result = await getRedis().eval(
-    ALLOCATE_FAST_ENVELOPE_TIMESTAMPS_SCRIPT,
-    1,
-    `${FAST_ENVELOPE_TIMESTAMP_KEY_PREFIX}${taskId}`,
-    minimumTimestamp,
-  );
-  if (!Array.isArray(result) || result.length !== 2) {
-    throw new Error('Failed to allocate fast transcript timestamps');
-  }
-
-  return [Number(result[0]), Number(result[1])];
-}
-
-export async function answerFastTaskCommand(
-  auth: UserAuthSuccess,
-  input: {
-    taskId: string;
-    runId: number;
-    request: string;
-    clientMessageId?: string;
-  },
-): Promise<
-  { success: true; response: string } | { success: false; error: string }
-> {
-  const taskAccess = await resolveTaskByIdAccessCommand(auth, {
-    taskId: input.taskId,
-  });
-  if (taskAccess.kind !== 'resolved') {
-    return { success: false, error: 'Task not found' };
-  }
-
-  const [run] = await db
-    .select({ id: taskRuns.id })
-    .from(taskRuns)
-    .where(and(eq(taskRuns.id, input.runId), eq(taskRuns.taskId, input.taskId)))
-    .limit(1);
-  if (!run) {
-    return { success: false, error: 'Task run not found' };
-  }
-
-  const request = input.request.trim();
-  if (!request) {
-    return { success: false, error: 'Fast mode requires a request' };
-  }
-
-  const threadContext = (
-    await getTaskMessageEnvelopes({
-      taskId: input.taskId,
-      limit: 500,
-      visibleOnly: true,
-    })
-  ).flatMap((envelope) => {
-    const text = envelope.text?.trim();
-    if (
-      !text ||
-      envelope.visibleInTranscript === false ||
-      (envelope.role !== 'user' && envelope.role !== 'assistant')
-    ) {
-      return [];
-    }
-
-    const isAssistant = envelope.role === 'assistant';
-    return [
-      {
-        user: envelope.userId ?? (isAssistant ? 'roomote' : 'task-participant'),
-        username:
-          envelope.userName ?? (isAssistant ? 'Roomote' : 'Task participant'),
-        text,
-        ts: String(envelope.ts),
-        ...(isAssistant ? { bot_id: 'roomote' } : {}),
-      },
-    ];
-  });
-
-  const response = await answerFastAgentQuestion({
-    question: request,
-    threadContext,
-    userId: auth.userId,
-    apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
-    slackTeamId: 'web',
-    slackChannel: input.taskId,
-    slackThreadTs: input.taskId,
-    activeTaskId: input.taskId,
-    surface: 'web',
-  });
-  const latestTaskTimestamp = threadContext.at(-1)?.ts;
-  const minimumTimestamp = Math.max(
-    Date.now(),
-    latestTaskTimestamp ? Number(latestTaskTimestamp) + 1 : 0,
-  );
-  const [userTimestamp, assistantTimestamp] =
-    await allocateFastEnvelopeTimestamps(input.taskId, minimumTimestamp);
-
-  await recordTaskMessageEnvelope({
-    runId: input.runId,
-    taskId: input.taskId,
-    userId: auth.userId,
-    envelope: {
-      ts: userTimestamp,
-      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
-      role: 'user',
-      protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
-      contentBlocks: [{ type: 'text', text: request }],
-      metadata: { source: 'fast_agent', userId: auth.userId },
-      payload: {
-        prompt: [{ type: 'text', text: request }],
-        content: request,
-        userId: auth.userId,
-        ...(input.clientMessageId
-          ? { clientMessageId: input.clientMessageId }
-          : {}),
-      },
-    },
-  });
-  await recordTaskMessageEnvelope({
-    runId: input.runId,
-    taskId: input.taskId,
-    envelope: {
-      ts: assistantTimestamp,
-      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
-      role: 'assistant',
-      protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
-      contentBlocks: [{ type: 'text', text: response }],
-      metadata: { source: 'fast_agent' },
-      payload: { text: response, source: 'fast_agent' },
-    },
-  });
-
-  return { success: true, response };
 }
 
 type CreateStandardTaskRunInput = {

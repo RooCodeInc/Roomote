@@ -1840,11 +1840,15 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
-  it('uses /fast to answer in the active task conversation', async () => {
-    mocks.findActiveRun.mockResolvedValue({
-      id: 24,
-      taskId: 'task-24',
-      actingUserId: 'roomote-user-1',
+  it('uses /fast as a top-level orchestrator that can launch a new task', async () => {
+    mocks.answerFast.mockImplementationOnce(async ({ launchTask }) => {
+      const launched = await launchTask({
+        prompt: 'Investigate the flaky build',
+        environmentId: null,
+      });
+      return launched.success
+        ? `Started ${launched.taskId}`
+        : `Failed: ${launched.error}`;
     });
     const interaction = {
       id: 'interaction-fast',
@@ -1856,7 +1860,7 @@ describe('Discord Gateway event handler', () => {
       data: {
         name: 'fast',
         type: 1,
-        options: [{ name: 'request', type: 3, value: 'Summarize this task' }],
+        options: [{ name: 'request', type: 3, value: 'Fix the flaky build' }],
       },
     };
 
@@ -1867,12 +1871,57 @@ describe('Discord Gateway event handler', () => {
     expect(response.status).toBe(200);
     expect(mocks.answerFast).toHaveBeenCalledWith(
       expect.objectContaining({
-        question: 'Summarize this task',
+        question: 'Fix the flaky build',
         userId: 'roomote-user-1',
-        activeTaskId: 'task-24',
         surface: 'discord',
+        launchTask: expect.any(Function),
       }),
     );
+    expect(mocks.answerFast.mock.calls[0]?.[0].activeTaskId).toBeUndefined();
+    expect(mocks.startNewTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        forceNewThread: true,
+        skipRoutingConfirmation: true,
+        workspaceOverride: {
+          repoForPayload: '__all_repositories__',
+          workspaceDisplayName: 'all repos',
+        },
+        queuedMessage: expect.objectContaining({
+          text: 'Investigate the flaky build',
+          userId: 'roomote-user-1',
+          ts: 'interaction-fast',
+        }),
+      }),
+    );
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        interaction: { interaction, interactionDeferred: true },
+        text: 'Started task-17',
+      }),
+    );
+  });
+
+  it('lets /fast answer directly without launching a task', async () => {
+    const interaction = {
+      id: 'interaction-fast-answer',
+      application_id: 'app-1',
+      type: 2,
+      token: 'interaction-token',
+      channel_id: 'dm-1',
+      user: { id: 'discord-user-1', username: 'matt' },
+      data: {
+        name: 'fast',
+        type: 1,
+        options: [{ name: 'request', type: 3, value: 'What can Roomote do?' }],
+      },
+    };
+
+    const response = await postEvent(
+      envelope(interaction, 'INTERACTION_CREATE'),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
     expect(mocks.reply).toHaveBeenCalledWith(
       expect.objectContaining({
         interaction: { interaction, interactionDeferred: true },

@@ -21,12 +21,10 @@ const {
   appendAcpEventMock,
   mutateMock,
   preparePromptAttachmentsMock,
-  queryClientInvalidateQueriesMock,
   queryClientSetQueryDataMock,
   removeOptimisticMessageMock,
   removeOptimisticQueuedMessageMock,
   sandboxSendPromptMutateMock,
-  taskRunAnswerFastMutateMock,
   taskRunStartGoalMutateMock,
   taskRunCancelMutateMock,
   toastErrorMock,
@@ -60,12 +58,10 @@ const {
   appendAcpEventMock: vi.fn(),
   mutateMock: vi.fn(),
   preparePromptAttachmentsMock: vi.fn(),
-  queryClientInvalidateQueriesMock: vi.fn(),
   queryClientSetQueryDataMock: vi.fn(),
   removeOptimisticMessageMock: vi.fn(),
   removeOptimisticQueuedMessageMock: vi.fn(),
   sandboxSendPromptMutateMock: vi.fn(),
-  taskRunAnswerFastMutateMock: vi.fn(),
   taskRunStartGoalMutateMock: vi.fn(),
   taskRunCancelMutateMock: vi.fn(),
   toastErrorMock: vi.fn(),
@@ -98,7 +94,6 @@ const submittedFilesRef: {
 vi.mock('@tanstack/react-query', () => ({
   useMutation: useMutationMock,
   useQueryClient: () => ({
-    invalidateQueries: queryClientInvalidateQueriesMock,
     setQueryData: queryClientSetQueryDataMock,
   }),
 }));
@@ -341,10 +336,6 @@ describe('PromptInput', () => {
       },
     });
     sandboxSendPromptMutateMock.mockResolvedValue({ success: true });
-    taskRunAnswerFastMutateMock.mockResolvedValue({
-      success: true,
-      response: 'A quick answer',
-    });
     taskRunStartGoalMutateMock.mockResolvedValue({ success: true });
     taskRunCancelMutateMock.mockResolvedValue({ success: true });
     preparePromptAttachmentsMock.mockImplementation(async (input) => ({
@@ -357,9 +348,6 @@ describe('PromptInput', () => {
         },
       },
       taskRuns: {
-        answerFast: {
-          mutate: taskRunAnswerFastMutateMock,
-        },
         startGoal: {
           mutate: taskRunStartGoalMutateMock,
         },
@@ -944,45 +932,6 @@ describe('PromptInput', () => {
       'Describe the goal after /goal.',
     );
     expect(taskRunStartGoalMutateMock).not.toHaveBeenCalled();
-    expect(sandboxSendPromptMutateMock).not.toHaveBeenCalled();
-  });
-
-  it('answers /fast through the fast-agent command handler', async () => {
-    useSandboxConnectedMock.mockReturnValue(true);
-    useSandboxConnectionStatusMock.mockReturnValue({
-      connected: true,
-      connectionError: false,
-      reconnect: vi.fn(),
-    });
-    useSandboxClientMock.mockReturnValue({
-      commands: {
-        sendPrompt: { mutate: vi.fn() },
-        touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
-      },
-    });
-
-    render(
-      <PromptInput
-        taskRun={createTaskRun(45, { taskId: 'task-fast' })}
-        onFileSearchOpen={() => {}}
-        onCommandSearchOpen={() => {}}
-      />,
-    );
-
-    fireEvent.change(screen.getByPlaceholderText(/Message agent/i), {
-      target: { value: '/fast summarize this task' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-
-    await waitFor(() => {
-      expect(taskRunAnswerFastMutateMock).toHaveBeenCalledWith({
-        taskId: 'task-fast',
-        runId: 45,
-        request: 'summarize this task',
-        clientMessageId: expect.any(String),
-      });
-    });
-    expect(queryClientInvalidateQueriesMock).toHaveBeenCalled();
     expect(sandboxSendPromptMutateMock).not.toHaveBeenCalled();
   });
 

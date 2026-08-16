@@ -95,4 +95,15 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('integration calls per user turn');
     expect(prompt).not.toContain('save_task_memory');
   });
+
+  it('adapts chat lifecycle guidance for Discord', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      surface: 'discord',
+    });
+
+    expect(prompt).toContain('fast mode on Discord');
+    expect(prompt).toContain('Emoji reactions are unavailable on this surface');
+    expect(prompt).not.toContain('<slack_modern_markdown>');
+  });
 });

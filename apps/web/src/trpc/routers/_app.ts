@@ -104,7 +104,6 @@ import {
   syncRepositoriesCommand,
 } from '../commands/source-control';
 import {
-  answerFastTaskCommand,
   routeHomeTaskCommand,
   createStandardTaskRunCommand,
   cancelTaskRunCommand,
@@ -1009,19 +1008,6 @@ export const appRouter = createRouter({
   }),
 
   taskRuns: createRouter({
-    answerFast: protectedProcedure
-      .input(
-        z.object({
-          taskId: z.string(),
-          runId: z.number().int(),
-          request: z.string().trim().min(1).max(6_000),
-          clientMessageId: z.string().optional(),
-        }),
-      )
-      .mutation(({ ctx: { auth }, input }) =>
-        answerFastTaskCommand(auth, input),
-      ),
-
     startGoal: protectedProcedure
       .input(
         z.object({

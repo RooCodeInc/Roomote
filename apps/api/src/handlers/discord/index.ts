@@ -28,8 +28,10 @@ import {
   answerFastAgentQuestion,
   getTaskUrl,
 } from '@roomote/cloud-agents/server';
+import { Env } from '@roomote/env';
 import {
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
+  ALL_REPOSITORIES,
   RunStatus,
   activeRunStatuses,
   isSnapshotResumable,
@@ -94,6 +96,7 @@ import {
 import {
   discordMetadataForChannel,
   resolveDiscordChannelContext,
+  resolveDiscordWorkspace,
 } from './task-launch.js';
 import { startNewDiscordTask } from './task-orchestration.js';
 import { startDiscordTaskGoal } from './goal-command.js';
@@ -159,7 +162,7 @@ const DISCORD_HELP_MESSAGE = [
   '**Available commands**',
   '`/new request:<request>` — start a fresh task.',
   '`/goal objective:<objective>` — keep working toward an objective across multiple turns.',
-  '`/fast request:<request>` — get a quick answer in the current task conversation.',
+  '`/fast request:<request>` — ask Roomote or start work through the fast orchestrator.',
   '`/link code:<code>` — link this Discord account in a DM with me.',
   '`/help` — show this message.',
   '',
@@ -746,25 +749,18 @@ async function processDiscordGatewayEvent(
       });
       return { ok: true, fastAnswered: false, reason: 'missing_request' };
     }
-    if (!activeRun) {
-      await replyToDiscordEvent({
-        provider: resolved.provider,
-        applicationId: resolved.applicationId,
-        channel,
-        interaction: interactionReplyContext(event),
-        text: 'Use `/fast` in an active Roomote task thread or DM. Start a task with `/new` or mention me first.',
-        ephemeral: true,
-      });
-      return { ok: true, fastAnswered: false, reason: 'no_active_task' };
-    }
-
-    const history = await fetchDiscordThreadHistoryBestEffort({
-      provider: resolved.provider,
-      channelId: channel.channelId,
-      ...(channel.parentChannelId
-        ? { parentChannelId: channel.parentChannelId }
-        : {}),
-    });
+    const history =
+      channel.isThread || channel.isDirectMessage
+        ? await fetchDiscordThreadHistoryBestEffort({
+            provider: resolved.provider,
+            channelId: channel.channelId,
+            ...(channel.parentChannelId
+              ? { parentChannelId: channel.parentChannelId }
+              : {}),
+          })
+        : [];
+    const fastInteraction = interactionReplyContext(event);
+    let didSendVisibleResponse = false;
     const response = await answerFastAgentQuestion({
       question: command.request,
       threadContext: history.map((entry) => ({
@@ -775,20 +771,94 @@ async function processDiscordGatewayEvent(
         ...(entry.botId ? { bot_id: entry.botId } : {}),
       })),
       userId: senderUserId,
+      apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
       slackTeamId: `discord:${channel.guildId ?? 'dm'}`,
       slackChannel: metadata.communicationChannelId,
-      slackThreadTs: metadata.communicationThreadId ?? channel.channelId,
-      activeTaskId: activeRun.taskId,
+      slackThreadTs: interaction?.id ?? event.eventId,
+      senderDisplayName:
+        interaction?.member?.nick ?? sender.global_name ?? sender.username,
+      launchTask: async ({ prompt, environmentId }) => {
+        const workspaceOverride = environmentId
+          ? await resolveDiscordWorkspace({
+              type: 'environment',
+              id: environmentId,
+              name: environmentId,
+            })
+          : {
+              repoForPayload: ALL_REPOSITORIES,
+              workspaceDisplayName: 'all repos',
+            };
+        if (!workspaceOverride) {
+          return {
+            success: false,
+            error: 'The selected environment is unavailable.',
+          };
+        }
+
+        const started = await startNewDiscordTask({
+          provider: resolved.provider,
+          applicationId: resolved.applicationId,
+          requesterDiscordUserId: sender.id,
+          launchOwnerUserId: senderUserId,
+          queuedMessage: {
+            provider: 'discord',
+            text: prompt,
+            user: sender.global_name?.trim() || sender.username,
+            userId: senderUserId,
+            ts: interaction?.id ?? event.eventId,
+            channel: metadata.communicationChannelId,
+            ...(metadata.communicationThreadId
+              ? { threadTs: metadata.communicationThreadId }
+              : {}),
+            turnPolicy: { reactionsAllowed: true },
+          },
+          metadata,
+          channel,
+          forceNewThread: true,
+          skipRoutingConfirmation: true,
+          workspaceOverride,
+        });
+        if (started.status === 'started') {
+          return {
+            success: true,
+            taskId: started.launchResult.taskId,
+            taskUrl: started.taskUrl,
+          };
+        }
+        if (started.status === 'already_started') {
+          return {
+            success: true,
+            taskId: started.existingRun.taskId,
+            taskUrl: started.taskUrl,
+          };
+        }
+        return {
+          success: false,
+          error: `Task launch stopped with status ${started.status}.`,
+        };
+      },
+      postSlackReply: async ({ message: text }) => {
+        await replyToDiscordEvent({
+          provider: resolved.provider,
+          applicationId: resolved.applicationId,
+          channel,
+          interaction: fastInteraction,
+          text,
+        });
+        didSendVisibleResponse = true;
+      },
       surface: 'discord',
     });
-    await replyToDiscordEvent({
-      provider: resolved.provider,
-      applicationId: resolved.applicationId,
-      channel,
-      interaction: interactionReplyContext(event),
-      text: response,
-    });
-    return { ok: true, fastAnswered: true, runId: activeRun.id };
+    if (response && !didSendVisibleResponse) {
+      await replyToDiscordEvent({
+        provider: resolved.provider,
+        applicationId: resolved.applicationId,
+        channel,
+        interaction: fastInteraction,
+        text: response,
+      });
+    }
+    return { ok: true, fastAnswered: true };
   }
 
   const messageAttachments = message

@@ -41,8 +41,7 @@ export function buildFastAgentSystemPrompt({
   /** @deprecated GitHub availability is derived from availableIntegrations. */
   hasGitHubTools?: boolean;
 }): string {
-  const surfaceName =
-    surface === 'slack' ? 'Slack' : surface === 'discord' ? 'Discord' : 'web';
+  const surfaceName = surface === 'slack' ? 'Slack' : 'Discord';
   const reactionGuidance =
     surface === 'slack'
       ? '- Use "send_chat_reaction_emoji" only for a lightweight acknowledgement or an emoji-only answer. Put the Slack emoji name without colons in "reactionName" and set "purpose" to "ack" when work continues or "closeout" when the reaction fully answers the turn.\n- Choose reactions by intent. Reserve "eyes" for actively taking a look; use "thumbsup" for acknowledgement or agreement and "white_check_mark" for completion. Do not add a reaction to every Fast mode message.'

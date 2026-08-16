@@ -75,24 +75,6 @@ describe('CommandSearch', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it('shows and selects the built-in fast command', () => {
-    const onOpenChange = vi.fn();
-    const onSelectCommand = vi.fn();
-
-    render(
-      <CommandSearch
-        open={true}
-        onOpenChange={onOpenChange}
-        onSelectCommand={onSelectCommand}
-      />,
-    );
-
-    fireEvent.click(screen.getByText('/fast'));
-
-    expect(onSelectCommand).toHaveBeenCalledWith('/fast');
-    expect(onOpenChange).toHaveBeenCalledWith(false);
-  });
-
   it('filters the goal command by its description', () => {
     render(
       <CommandSearch

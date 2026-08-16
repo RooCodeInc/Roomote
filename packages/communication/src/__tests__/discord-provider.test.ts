@@ -237,6 +237,7 @@ describe('DiscordCommunicationProvider', () => {
       {
         name: 'fast',
         type: 1,
+        description: 'Ask Roomote or start work with the fast orchestrator',
         options: [
           expect.objectContaining({
             name: 'request',
