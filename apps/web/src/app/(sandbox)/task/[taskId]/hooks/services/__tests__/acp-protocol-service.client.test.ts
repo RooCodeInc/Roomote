@@ -92,10 +92,23 @@ describe('AcpProtocolService', () => {
       reasoningChunk('*Assessing precision**', 2),
     )!.acpMessages;
 
+    service.reset();
+    service.rebindMessages(messages);
+    messages = service.applyOutputEvent(
+      messages,
+      reasoningChunk('****Checking gaps**', 3),
+    )!.acpMessages;
+
     expect(messages).toHaveLength(1);
     expect(messages[0]).toMatchObject({
       partial: true,
-      text: '**Clarifying boundaries**\n\n**Assessing precision**',
+      rawText:
+        '**Clarifying boundaries****Assessing precision****Checking gaps**',
+      text: [
+        '**Clarifying boundaries**',
+        '**Assessing precision**',
+        '**Checking gaps**',
+      ].join('\n\n'),
     });
   });
 
