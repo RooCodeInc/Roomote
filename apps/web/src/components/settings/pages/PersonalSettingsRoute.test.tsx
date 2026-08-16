@@ -1,10 +1,15 @@
 import { render } from '@testing-library/react';
 
 let accountCapabilities:
-  | { canChangePassword: boolean; canSetPassword: boolean }
+  | {
+      canChangePassword: boolean;
+      canSetPassword: boolean;
+      slackFastModeDefaultAvailable: boolean;
+    }
   | undefined = {
   canChangePassword: true,
   canSetPassword: false,
+  slackFastModeDefaultAvailable: true,
 };
 
 const { personalSettingsPageMock } = vi.hoisted(() => ({
@@ -41,7 +46,11 @@ import { PersonalSettingsRoute } from './PersonalSettingsRoute';
 
 describe('PersonalSettingsRoute', () => {
   beforeEach(() => {
-    accountCapabilities = { canChangePassword: true, canSetPassword: false };
+    accountCapabilities = {
+      canChangePassword: true,
+      canSetPassword: false,
+      slackFastModeDefaultAvailable: true,
+    };
     personalSettingsPageMock.mockClear();
   });
 
@@ -52,6 +61,7 @@ describe('PersonalSettingsRoute', () => {
       {
         canChangePassword: true,
         canSetPassword: false,
+        slackFastModeDefaultAvailable: true,
         profile: {
           email: 'ada@example.com',
           imageUrl: 'https://example.com/ada.png',

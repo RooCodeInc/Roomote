@@ -51,6 +51,10 @@ function mergeResultForUpdatedFields(
       updates.narrationMode === undefined
         ? mergedPreferences.narrationMode
         : result.narrationMode,
+    slackFastModeDefault:
+      updates.slackFastModeDefault === undefined
+        ? mergedPreferences.slackFastModeDefault
+        : result.slackFastModeDefault,
   };
 }
 
@@ -81,6 +85,12 @@ function rollbackUpdatedFields(
       mergedPreferences.narrationMode === optimisticPreferences.narrationMode
         ? previousPreferences.narrationMode
         : mergedPreferences.narrationMode,
+    slackFastModeDefault:
+      updates.slackFastModeDefault !== undefined &&
+      mergedPreferences.slackFastModeDefault ===
+        optimisticPreferences.slackFastModeDefault
+        ? previousPreferences.slackFastModeDefault
+        : mergedPreferences.slackFastModeDefault,
   };
 }
 

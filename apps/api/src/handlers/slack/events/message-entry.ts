@@ -55,8 +55,8 @@ import type { AutomatedSlackAppMentionEvent } from '../types.js';
 import { processActiveRunMessage } from './active-run.js';
 import {
   isBareFastCommandInvocation,
-  isFastCommandInvocation,
   processFastAgentMessage,
+  resolveFastAgentEntryMode,
 } from './fast-agent.js';
 import { createFastAgentTaskLauncher } from './fast-agent-task-launcher.js';
 import { processSnapshotResume } from './snapshot-resume.js';
@@ -1687,7 +1687,15 @@ async function handleSlackEntryEvent(params: {
     activeTaskId: activeRun?.taskId,
   });
 
-  if (isFastCommandInvocation(event.text)) {
+  const fastAgentEntryMode = resolveFastAgentEntryMode({
+    text: event.text,
+    deploymentSettingEnabled: Env.R_SLACK_FAST_MODE_SETTING_ENABLED === true,
+    userDefaultEnabled:
+      userMapping.slackFastModeDefault &&
+      !isRemovedEvalCommandInvocation(event.text),
+  });
+
+  if (fastAgentEntryMode) {
     startFastAgentResponse({
       event,
       slackInstallation,
@@ -1696,6 +1704,7 @@ async function handleSlackEntryEvent(params: {
       userId: userMapping.userId,
       teamId,
       activeTaskId: activeRun?.taskId ?? null,
+      continuation: fastAgentEntryMode === 'default',
       processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent response failed for thread ${threadId}:`,
     });

@@ -3,6 +3,7 @@
 import { useColorTheme } from '@/hooks/useColorTheme';
 import { useMindReaderMode } from '@/hooks/useMindReaderMode';
 import { useNarrationMode } from '@/hooks/useNarrationMode';
+import { usePersonalPreferences } from '@/hooks/usePersonalPreferences';
 import type { PersonalColorTheme } from '@/types/preferences';
 
 import {
@@ -27,7 +28,11 @@ const COLOR_THEME_OPTIONS: ReadonlyArray<{
   { label: 'Auto', value: 'system' },
 ];
 
-export function UserPreferencesSection() {
+export function UserPreferencesSection({
+  slackFastModeDefaultAvailable = false,
+}: {
+  slackFastModeDefaultAvailable?: boolean;
+}) {
   const {
     colorTheme,
     isLoading: isThemeLoading,
@@ -46,6 +51,15 @@ export function UserPreferencesSection() {
     isUpdating: isNarrationModeUpdating,
     setEnabled: setNarrationModeEnabled,
   } = useNarrationMode();
+  const {
+    preferences,
+    isLoading: isSlackFastModeDefaultLoading,
+    isUpdating: isSlackFastModeDefaultUpdating,
+    setPreferences,
+  } = usePersonalPreferences({
+    enabled: slackFastModeDefaultAvailable,
+    errorMessage: 'Failed to update the Slack fast mode default.',
+  });
   const isThemeDisabled = isThemeLoading || isThemeUpdating;
 
   return (
@@ -113,6 +127,29 @@ export function UserPreferencesSection() {
             </p>
           </div>
         </div>
+
+        {slackFastModeDefaultAvailable ? (
+          <div className="flex gap-3">
+            <Switch
+              aria-label="Toggle Slack fast mode default"
+              checked={preferences.slackFastModeDefault}
+              disabled={
+                isSlackFastModeDefaultLoading || isSlackFastModeDefaultUpdating
+              }
+              onCheckedChange={(enabled) =>
+                setPreferences({ slackFastModeDefault: enabled })
+              }
+            />
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-foreground">
+                Default Slack messages to fast mode
+              </p>
+              <p className="text-sm text-foreground">
+                Use fast mode for your Slack messages without adding !fast.
+              </p>
+            </div>
+          </div>
+        ) : null}
       </div>
     </Section>
   );

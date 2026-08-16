@@ -53,6 +53,7 @@ describe('PersonalSettingsPage', () => {
       <PersonalSettingsPage
         canChangePassword={true}
         canSetPassword={false}
+        slackFastModeDefaultAvailable={true}
         profile={profile}
       />,
     );
@@ -70,6 +71,7 @@ describe('PersonalSettingsPage', () => {
       <PersonalSettingsPage
         canChangePassword={false}
         canSetPassword={true}
+        slackFastModeDefaultAvailable={false}
         profile={profile}
       />,
     );

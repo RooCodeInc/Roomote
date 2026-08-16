@@ -27,6 +27,22 @@ export function isBareFastCommandInvocation(text: string): boolean {
   return /^!fast(?:\s|$)/i.test(text.trimStart());
 }
 
+export type FastAgentEntryMode = 'explicit' | 'default';
+
+export function resolveFastAgentEntryMode(params: {
+  text: string;
+  deploymentSettingEnabled: boolean;
+  userDefaultEnabled: boolean;
+}): FastAgentEntryMode | null {
+  if (isFastCommandInvocation(params.text)) {
+    return 'explicit';
+  }
+
+  return params.deploymentSettingEnabled && params.userDefaultEnabled
+    ? 'default'
+    : null;
+}
+
 export function extractFastQuestion(
   mentionStrippedText: string,
   continuation = false,
