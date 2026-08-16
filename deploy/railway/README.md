@@ -111,6 +111,7 @@ follow the image.
 | `Postgres`      | Railway managed PostgreSQL     | —                                                  | no                         | managed            |
 | `Redis`         | Railway managed Redis          | —                                                  | no                         | managed            |
 | `minio`         | pinned `minio/minio` + `/data` | `minio server /data --console-address :9001`       | yes (HTTP proxy port 9000) | —                  |
+| `gbrain`        | `roomote-gbrain:<channel>` + `/data` | image entrypoint                               | no                         | `/health`          |
 | `web`           | `roomote-app:<channel>`        | `/roomote/.docker/app/entrypoint.sh web`           | yes (HTTP proxy port 8080) | `/health`          |
 | `api`           | `roomote-app:<channel>`        | `/roomote/.docker/app/entrypoint.sh api`           | yes (HTTP proxy port 8080) | `/health/liveness` |
 | `controller`    | `roomote-app:<channel>`        | `/roomote/.docker/app/entrypoint.sh controller`    | no                         | —                  |
@@ -424,10 +425,12 @@ want memory can delete the `gbrain` service entirely.
 
 Two operational notes:
 
-- **Back up the volume.** The `/data` volume holds the corpus. Losing it is
-  recoverable — task history and integration sources re-ingest, and Roomote
-  re-registers its clients automatically when the Brain no longer recognizes
-  them — but the deployment starts cold until that finishes.
+- **The template backs up the volume.** The `/data` volume holds the corpus,
+  and new template deployments schedule Railway's daily and weekly backups
+  for it. Losing it is recoverable — task history and integration sources
+  re-ingest, and Roomote re-registers its clients automatically when the Brain
+  no longer recognizes them — but the deployment starts cold until that
+  finishes.
 - **Model choice is a variable, not a rebuild.** `R_BRAIN_MODEL` selects the
   synthesis model, `R_BRAIN_EMBEDDING_MODEL` the embedding model, and
   `R_BRAIN_RERANKER_MODEL` the reranker, all set on **api**. Leave them empty
@@ -460,9 +463,10 @@ Two operational notes:
   **bullmq** (and any other service that already copies `api.*` secrets)
   before enabling or continuing Discord. Template edits do not rewrite
   variables on existing projects.
-- **Back up** the Railway Postgres database (Railway backups or `pg_dump`)
-  and the MinIO volume or external bucket. Everything else is reproducible
-  from config.
+- **Back up** the Railway Postgres database, the MinIO volume or external
+  bucket, and the Brain volume. The template schedules volume backups for all
+  three Railway-managed copies; keep equivalent coverage if you replace any
+  of them with external infrastructure.
 - **Costs** split three ways: Railway hosts the control plane (web, api, preview-proxy,
   controller, bullmq, Postgres, Redis, MinIO), while task execution bills
   through your hosted sandbox provider and model usage bills
@@ -512,6 +516,10 @@ particular the `${{api.*}}` references to values that are themselves
 references, like `R_APP_URL` — also open each app service's Variables
 tab on the scratch project and confirm the resolved values are real URLs,
 not literal `${{...}}` strings.
+
+For Brain storage changes, also open the `gbrain` service's **Backups** tab
+and confirm its `/data` volume has both Daily and Weekly schedules before
+publishing the template update.
 
 The `R_APP_URL` deploy-time prompt needs its own check on the scratch
 deploy: on the deploy screen, open the api service's **Configure** step and

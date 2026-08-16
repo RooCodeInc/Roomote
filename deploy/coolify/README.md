@@ -269,14 +269,14 @@ the key is set, because Coolify's compose parser does not honour `profiles`.
 That is a supported state and costs about 370 MB of idle memory. With the
 key empty, agents are told nothing about the Brain and no ingestion runs.
 Deployments that want no memory at all can delete the `gbrain` service and
-the `gbrain_data` configuration volume from the compose file before deploying.
+the `gbrain_data` corpus volume from the compose file before deploying.
 
 Two operational notes:
 
-- **Back up Postgres.** The corpus lives in an isolated `gbrain` database in
-  the same Postgres instance as Roomote, so the normal `pg_data` backup covers
-  it. `gbrain_data` only holds service configuration and generated bootstrap
-  credentials.
+- **Back up the Brain volume.** `gbrain_data` holds the Markdown corpus,
+  including pages produced by nightly synthesis. The isolated `gbrain`
+  database in Postgres holds its searchable index, extracted facts, and
+  durable jobs, so keep it in the normal `pg_data` backup too.
 - **Model choice is a variable, not a rebuild.** `R_BRAIN_MODEL` selects the
   synthesis model, `R_BRAIN_EMBEDDING_MODEL` the embedding model, and
   `R_BRAIN_RERANKER_MODEL` the reranker. Set them on the app services. Leave
