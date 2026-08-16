@@ -134,14 +134,27 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function hasExplicitEnvironmentMention(context: RoutingContext): boolean {
+function hasExplicitEnvironmentSignal(context: RoutingContext): boolean {
   return context.availableEnvironments.some((environment) => {
     const name = environment.name.trim();
-    return (
+    const hasEnvironmentMention =
       name.length > 0 &&
       new RegExp(`(^|[^a-z0-9])${escapeRegExp(name)}($|[^a-z0-9])`, 'i').test(
         context.taskDescription,
-      )
+      );
+
+    return (
+      hasEnvironmentMention ||
+      environment.repositoryNames.some((repositoryName) => {
+        const repository = repositoryName.trim();
+        return (
+          repository.length > 0 &&
+          new RegExp(
+            `(^|[^a-z0-9_.-])${escapeRegExp(repository)}(?:\\.git)?($|[^a-z0-9_.-])`,
+            'i',
+          ).test(context.taskDescription)
+        );
+      })
     );
   });
 }
@@ -179,7 +192,7 @@ function applyEnvironmentPreference(
     confidence >= ENVIRONMENT_PREFERENCE_MAX_ROUTER_CONFIDENCE ||
     result.workspace.type !== 'environment' ||
     result.workspace.id === preference.environmentId ||
-    hasExplicitEnvironmentMention(context)
+    hasExplicitEnvironmentSignal(context)
   ) {
     return { result };
   }

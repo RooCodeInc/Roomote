@@ -194,6 +194,56 @@ describe('routeTask', () => {
     });
   });
 
+  it.each([
+    'Investigate acme/web#42',
+    'Investigate https://github.com/acme/web/issues/42',
+  ])(
+    'does not let Brain preference override configured repository reference: %s',
+    async (taskDescription) => {
+      mockGenerateTrackedNonTaskObject.mockResolvedValue({
+        object: {
+          workspaceValue: 'Full Stack',
+          reasoning: 'The configured repository belongs to Full Stack.',
+          confidence: 0.55,
+          needsExternalLookup: false,
+          externalReference: null,
+        },
+      });
+
+      const result = await routeTask(
+        createContext({
+          taskDescription,
+          availableEnvironments: [
+            ...environments,
+            {
+              id: 'env-api',
+              name: 'API',
+              repositoryNames: ['acme/api'],
+            },
+          ],
+          environmentPreference: {
+            environmentId: 'env-api',
+            acceptedCount: 0,
+            correctionCount: 3,
+            lastSelectedAt: new Date(),
+          },
+        }),
+      );
+
+      expect(result).toMatchObject({
+        status: 'routed',
+        result: {
+          workspace: {
+            type: 'environment',
+            id: 'env-full-stack',
+            name: 'Full Stack',
+          },
+          debug: { environmentSource: 'router' },
+        },
+      });
+    },
+  );
+
   it('fetches pasted GitHub issue context when the precheck asks for it', async () => {
     mockCallRouterMcpTool.mockResolvedValue({
       title: 'Fix the dashboard refresh failure',
