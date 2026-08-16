@@ -1236,6 +1236,7 @@ async function maybeHandleChannelAutoStart(params: {
       userId: userMapping.userId,
       teamId: context.teamId,
       usageText: 'Use `/fast <question>` in this channel.',
+      processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent response failed for auto-start thread ${channelAutoStartEvent.ts}:`,
     });
 
@@ -1566,6 +1567,7 @@ function startFastAgentResponse(params: {
   usageText?: string;
   continuation?: boolean;
   activeTaskId?: string | null;
+  processingReactionName: string;
   errorLogPrefix: string;
 }): void {
   const { errorLogPrefix, ...fastAgentParams } = params;
@@ -1694,6 +1696,7 @@ async function handleSlackEntryEvent(params: {
       userId: userMapping.userId,
       teamId,
       activeTaskId: activeRun?.taskId ?? null,
+      processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent response failed for thread ${threadId}:`,
     });
 
@@ -1718,6 +1721,7 @@ async function handleSlackEntryEvent(params: {
       teamId,
       continuation: true,
       activeTaskId: activeRun?.taskId ?? null,
+      processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent continuation failed for thread ${threadId}:`,
     });
 
