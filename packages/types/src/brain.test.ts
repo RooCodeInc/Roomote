@@ -1,4 +1,4 @@
-import { BRAIN_MCP_INSTRUCTIONS } from './brain';
+import { BRAIN_MCP_INSTRUCTIONS, BRAIN_MCP_READ_INSTRUCTIONS } from './brain';
 
 describe('BRAIN_MCP_INSTRUCTIONS', () => {
   it('makes Brain recall a sequential gate before overlapping sources', () => {
@@ -17,5 +17,14 @@ describe('BRAIN_MCP_INSTRUCTIONS', () => {
     expect(BRAIN_MCP_INSTRUCTIONS).toContain(
       'do not sweep an entire integration when the Brain already answers the question',
     );
+  });
+
+  it('exports read guidance without the task-only memory writer', () => {
+    expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
+      'Treat Brain recall as a sequential preflight',
+    );
+    expect(BRAIN_MCP_READ_INSTRUCTIONS).not.toContain('save_task_memory');
+    expect(BRAIN_MCP_INSTRUCTIONS).toContain(BRAIN_MCP_READ_INSTRUCTIONS);
+    expect(BRAIN_MCP_INSTRUCTIONS).toContain('save_task_memory');
   });
 });
