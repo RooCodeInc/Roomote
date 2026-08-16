@@ -67,6 +67,22 @@ const fastAgentFinalDecisionSchema = fastAgentDecisionSchema.extend({
   ]),
 });
 
+function buildFastAgentTurnFallbackDecision(): z.infer<
+  typeof fastAgentDecisionSchema
+> {
+  return {
+    action: 'respond',
+    response:
+      'I could not complete that request within the available turn steps.',
+    taskPrompt: null,
+    environmentId: null,
+    taskMessage: null,
+    integrationId: null,
+    toolName: null,
+    toolArguments: null,
+  };
+}
+
 export type LaunchFastAgentSlackTask = (params: {
   prompt: string;
   environmentId: string | null;
@@ -362,16 +378,28 @@ export async function answerFastAgentQuestion({
     ) {
       const isFinalGeneration = generation === FAST_AGENT_MAX_STEPS - 1;
       const mustFinish = requireFinalDecision || isFinalGeneration;
-      const generated = await generateTrackedNonTaskObject({
-        userId,
-        surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
-        schema: mustFinish
-          ? fastAgentFinalDecisionSchema
-          : fastAgentDecisionSchema,
-        system,
-        prompt,
-      });
-      decision = generated.object;
+      try {
+        const generated = await generateTrackedNonTaskObject({
+          userId,
+          surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+          schema: mustFinish
+            ? fastAgentFinalDecisionSchema
+            : fastAgentDecisionSchema,
+          system,
+          prompt,
+        });
+        decision = generated.object;
+      } catch (error) {
+        if (!mustFinish) {
+          throw error;
+        }
+
+        console.warn(
+          `[Fast Agent] Final decision generation failed; posting fallback: ${formatErrorForLog(error)}`,
+        );
+        decision = buildFastAgentTurnFallbackDecision();
+        break;
+      }
 
       if (decision.action !== 'call_integration') {
         break;
@@ -431,17 +459,7 @@ export async function answerFastAgentQuestion({
     }
 
     if (!decision || decision.action === 'call_integration') {
-      decision = {
-        action: 'respond',
-        response:
-          'I could not complete that request within the available turn steps.',
-        taskPrompt: null,
-        environmentId: null,
-        taskMessage: null,
-        integrationId: null,
-        toolName: null,
-        toolArguments: null,
-      };
+      decision = buildFastAgentTurnFallbackDecision();
     }
 
     let responseText = decision.response.trim();

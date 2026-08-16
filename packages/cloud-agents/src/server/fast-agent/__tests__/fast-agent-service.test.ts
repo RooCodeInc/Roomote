@@ -300,6 +300,49 @@ describe('answerFastAgentQuestion', () => {
     expect(result).toBe('I found the orchestrator.');
   });
 
+  it('posts a fallback when forced-final structured output fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'github',
+        name: 'GitHub',
+        description: 'Repositories',
+        tools: [{ name: 'search_code' }],
+      },
+    ]);
+    const repeatedCall = decision({
+      action: 'call_integration',
+      response: '',
+      integrationId: 'github',
+      toolName: 'search_code',
+      toolArguments: { query: 'orchestrator' },
+    });
+    mocks.generateObject
+      .mockResolvedValueOnce({ object: repeatedCall })
+      .mockResolvedValueOnce({ object: repeatedCall })
+      .mockRejectedValueOnce(new Error('No object generated'));
+    mocks.callIntegration.mockResolvedValue({ matches: [] });
+    const postSlackReply = vi.fn().mockResolvedValue(undefined);
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      postSlackReply,
+    });
+
+    expect(mocks.callIntegration).toHaveBeenCalledOnce();
+    expect(result).toContain('within the available turn steps');
+    expect(postSlackReply).toHaveBeenCalledWith({
+      type: 'final_answer',
+      slackChannel: 'channel-1',
+      slackThreadTs: '100.1',
+      text: result,
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining('Final decision generation failed'),
+    );
+    warn.mockRestore();
+  });
+
   it('reserves the final overall step for a response', async () => {
     mocks.listIntegrations.mockResolvedValue([
       {
