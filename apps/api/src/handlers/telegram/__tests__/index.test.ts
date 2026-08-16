@@ -30,6 +30,7 @@ const {
   redisGetMock,
   redisGetdelMock,
   redisSetMock,
+  recordRoutingPreferenceMock,
   resolveRoutingFollowUpMock,
   routeTaskMock,
   setLatestInboundMessageIdMock,
@@ -74,6 +75,7 @@ const {
   redisGetMock: vi.fn(),
   redisGetdelMock: vi.fn(),
   redisSetMock: vi.fn(),
+  recordRoutingPreferenceMock: vi.fn(),
   resolveRoutingFollowUpMock: vi.fn(),
   routeTaskMock: vi.fn(),
   setLatestInboundMessageIdMock: vi.fn(),
@@ -301,6 +303,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   getRoutingAutoConfirmDelayMs: getRoutingAutoConfirmDelayMsMock,
   getTaskUrl: getTaskUrlMock,
   resolveRoutingFollowUp: resolveRoutingFollowUpMock,
+  recordRoutingPreference: recordRoutingPreferenceMock,
   routeTask: routeTaskMock,
 }));
 
@@ -2248,6 +2251,12 @@ describe('Telegram webhook handler', () => {
       ],
       suggestedIndex: 0,
       confirmMessageId: '990',
+      routingContext: {
+        routingActor: {
+          userId: 'launch-owner-23',
+          apiBaseUrl: 'https://api.example.com',
+        },
+      },
     });
     redisGetMock.mockResolvedValue(pending);
     redisGetdelMock.mockResolvedValue(pending);
@@ -2293,6 +2302,12 @@ describe('Telegram webhook handler', () => {
         text: 'Starting in Web App.',
       }),
     );
+    expect(recordRoutingPreferenceMock).toHaveBeenCalledWith({
+      userId: 'launch-owner-23',
+      apiBaseUrl: 'https://api.example.com',
+      environmentId: 'env-1',
+      signal: 'accepted',
+    });
     // The card is finalized in place: text swapped, keyboard removed.
     expect(editMessageTextMock).toHaveBeenCalledWith(
       expect.objectContaining({

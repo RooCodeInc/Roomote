@@ -121,6 +121,93 @@ function isPlatformWorkspaceSelection(value: string): boolean {
  */
 const MODEL_PREFERENCE_MIN_CONFIDENCE = 0.9;
 
+// Routing memory is a bounded tie-breaker, never a replacement for an explicit
+// environment choice or a confident router decision.
+const ENVIRONMENT_PREFERENCE_MAX_ROUTER_CONFIDENCE = 0.8;
+const ENVIRONMENT_PREFERENCE_HALF_LIFE_DAYS = 30;
+const ENVIRONMENT_PREFERENCE_MIN_WEIGHT = 0.45;
+const ENVIRONMENT_PREFERENCE_MAX_CORRECTIONS = 3;
+const ENVIRONMENT_PREFERENCE_MAX_ACCEPTANCES = 4;
+const ENVIRONMENT_PREFERENCE_ACCEPTANCE_WEIGHT = 0.25;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function hasExplicitEnvironmentMention(context: RoutingContext): boolean {
+  return context.availableEnvironments.some((environment) => {
+    const name = environment.name.trim();
+    return (
+      name.length > 0 &&
+      new RegExp(`(^|[^a-z0-9])${escapeRegExp(name)}($|[^a-z0-9])`, 'i').test(
+        context.taskDescription,
+      )
+    );
+  });
+}
+
+function getEnvironmentPreferenceWeight(
+  preference: NonNullable<RoutingContext['environmentPreference']>,
+  now = new Date(),
+): number {
+  const ageDays =
+    Math.max(0, now.getTime() - preference.lastSelectedAt.getTime()) /
+    (24 * 60 * 60 * 1000);
+  const recencyWeight = 2 ** (-ageDays / ENVIRONMENT_PREFERENCE_HALF_LIFE_DAYS);
+  const signalWeight =
+    Math.min(
+      preference.correctionCount,
+      ENVIRONMENT_PREFERENCE_MAX_CORRECTIONS,
+    ) +
+    Math.min(preference.acceptedCount, ENVIRONMENT_PREFERENCE_MAX_ACCEPTANCES) *
+      ENVIRONMENT_PREFERENCE_ACCEPTANCE_WEIGHT;
+
+  return signalWeight * recencyWeight;
+}
+
+function applyEnvironmentPreference(
+  context: RoutingContext,
+  result: RoutingResult,
+  confidence: number | null,
+): { result: RoutingResult; weight?: number } {
+  const preference = context.environmentPreference;
+
+  if (
+    !preference ||
+    context.previousSuggestion ||
+    confidence === null ||
+    confidence >= ENVIRONMENT_PREFERENCE_MAX_ROUTER_CONFIDENCE ||
+    result.workspace.type !== 'environment' ||
+    result.workspace.id === preference.environmentId ||
+    hasExplicitEnvironmentMention(context)
+  ) {
+    return { result };
+  }
+
+  const preferredEnvironment = context.availableEnvironments.find(
+    (environment) => environment.id === preference.environmentId,
+  );
+  const weight = getEnvironmentPreferenceWeight(preference);
+
+  if (!preferredEnvironment || weight < ENVIRONMENT_PREFERENCE_MIN_WEIGHT) {
+    return { result };
+  }
+
+  return {
+    result: {
+      ...result,
+      workspace: {
+        type: 'environment',
+        id: preferredEnvironment.id,
+        name: preferredEnvironment.name,
+      },
+      // The generated kickoff can name the original environment.
+      kickoffMessage: undefined,
+    },
+    weight,
+  };
+}
+
 /**
  * Resolves the routed task model from the LLM's `requestedModelId` pick, the
  * previous correction suggestion, and the deployment default. The LLM must
@@ -528,12 +615,33 @@ export async function routeTask(
     return fallbackDecision;
   }
 
+  const preferenceResolution =
+    decision.status === 'routed'
+      ? applyEnvironmentPreference(context, decision.result, confidence)
+      : undefined;
+
+  if (
+    decision.status === 'routed' &&
+    preferenceResolution?.weight !== undefined
+  ) {
+    decision.result = preferenceResolution.result;
+  }
+
   const debug: RoutingDebugInfo = {
     phase,
     toolsUsed,
     needsExternalLookup,
     confidence: decision.status === 'routed' ? confidence : null,
     workspaceRemapped,
+    ...(decision.status === 'routed' &&
+    preferenceResolution?.weight !== undefined
+      ? {
+          environmentSource: 'memory' as const,
+          environmentPreferenceWeight: preferenceResolution.weight,
+        }
+      : decision.status === 'routed'
+        ? { environmentSource: 'router' as const }
+        : {}),
   };
 
   switch (decision.status) {
@@ -723,6 +831,7 @@ export async function classifyFollowUp(params: {
     return {
       intent: 'correct',
       reasoning: `Classification failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      isFallback: true,
     };
   }
 }

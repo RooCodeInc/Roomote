@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   getTaskUrl: vi.fn(),
   classifyFollowUp: vi.fn(),
   resolveRoutingFollowUp: vi.fn(),
+  recordRoutingPreference: vi.fn(),
   routeTask: vi.fn(),
   findMappedUser: vi.fn(),
   findSourceRun: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   getTaskUrl: mocks.getTaskUrl,
   ROUTING_AUTO_CONFIRM_TIMEOUT_MS: 30_000,
   resolveRoutingFollowUp: mocks.resolveRoutingFollowUp,
+  recordRoutingPreference: mocks.recordRoutingPreference,
   routeTask: mocks.routeTask,
 }));
 
@@ -1351,6 +1353,12 @@ describe('Discord routing confirmation', () => {
           isDirectMessage: false,
           isThread: true,
         },
+        routingContext: {
+          routingActor: {
+            userId: 'user-1',
+            apiBaseUrl: 'http://api.test',
+          },
+        },
         options: [
           {
             label: 'Sunny Acres',
@@ -1361,6 +1369,7 @@ describe('Discord routing confirmation', () => {
             },
           },
         ],
+        suggestedIndex: 0,
       }),
     );
 
@@ -1395,6 +1404,12 @@ describe('Discord routing confirmation', () => {
       }),
     );
     expect(mocks.reply).not.toHaveBeenCalled();
+    expect(mocks.recordRoutingPreference).toHaveBeenCalledWith({
+      userId: 'user-1',
+      apiBaseUrl: 'http://api.test',
+      environmentId: 'env-1',
+      signal: 'accepted',
+    });
   });
 
   it('keeps the launch acknowledgement when the card stayed in the channel', async () => {

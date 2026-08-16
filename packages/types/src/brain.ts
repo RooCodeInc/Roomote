@@ -16,6 +16,19 @@ export const BRAIN_MCP_ID = 'gbrain';
 /** API proxy mount; shared by SDK config delivery and the worker. */
 export const BRAIN_PROXY_PATH = '/api/mcp/gbrain';
 
+/** Router-only Roomote MCP tools backed by exact Brain pages. */
+export const ROUTING_PREFERENCE_GET_TOOL = 'get_routing_preference';
+export const ROUTING_PREFERENCE_RECORD_TOOL = 'record_routing_preference';
+
+export type RoutingPreferenceSignal = 'accepted' | 'corrected';
+
+export interface RoutingPreferenceMemory {
+  environmentId: string;
+  acceptedCount: number;
+  correctionCount: number;
+  lastSelectedAt: string;
+}
+
 /**
  * Usage guidance injected into the agent's instruction files when the Brain
  * MCP server is attached. Prompts are a first-class control surface: both

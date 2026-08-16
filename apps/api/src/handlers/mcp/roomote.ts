@@ -22,6 +22,8 @@ import {
   MCP_INTEGRATIONS,
   isUserToken,
   PRODUCT_NAME,
+  ROUTING_PREFERENCE_GET_TOOL,
+  ROUTING_PREFERENCE_RECORD_TOOL,
 } from '@roomote/types';
 import { Env, getDefaultDocsUrl } from '@roomote/env';
 import {
@@ -49,6 +51,10 @@ import {
 import { requireCommunicationLookupTaskRun } from './communication-lookup-run-context';
 import type { McpAuth } from './middleware';
 import { registerRoomoteMemberTools } from './roomote-member-tools';
+import {
+  getRoutingPreferenceMemory,
+  recordRoutingPreferenceMemory,
+} from './routing-preference-memory';
 
 const ROOMOTE_MCP_SERVER_INFO = {
   name: 'roomote-router-mcp',
@@ -371,6 +377,7 @@ function createRoomoteMcpServer(
   auth: McpAuthContext,
   actingUserId: string | null,
   memberAuth?: McpAuth,
+  routerTools = false,
 ) {
   const server = new McpServer(ROOMOTE_MCP_SERVER_INFO, {
     instructions: `Use get_about_me for Roomote platform, integration, and getting-started context. Use ${CHAT_MESSAGE_CONTEXT_TOOL.name} for surrounding context from the task communication channel or a referenced Slack/Discord message. Use ${CHAT_CHANNEL_MESSAGES_TOOL.name} for readable history from the task communication channel or an explicitly linked channel.`,
@@ -378,6 +385,79 @@ function createRoomoteMcpServer(
 
   if (memberAuth) {
     registerRoomoteMemberTools(server, memberAuth);
+  }
+
+  if (routerTools) {
+    server.registerTool(
+      ROUTING_PREFERENCE_GET_TOOL,
+      {
+        title: 'Get Routing Preference',
+        description:
+          'Get the current user routing preference from the Brain by exact key.',
+        inputSchema: {},
+        outputSchema: z.object({
+          preference: z
+            .object({
+              environmentId: z.string(),
+              acceptedCount: z.number(),
+              correctionCount: z.number(),
+              lastSelectedAt: z.string(),
+            })
+            .nullable(),
+        }),
+        annotations: {
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      },
+      async () =>
+        toMcpToolResult({
+          preference: actingUserId
+            ? await getRoutingPreferenceMemory(actingUserId)
+            : null,
+        }),
+    );
+
+    server.registerTool(
+      ROUTING_PREFERENCE_RECORD_TOOL,
+      {
+        title: 'Record Routing Preference',
+        description:
+          'Record an accepted or corrected environment choice in the current user routing preference page.',
+        inputSchema: {
+          environmentId: z.string().min(1),
+          signal: z.enum(['accepted', 'corrected']),
+        },
+        outputSchema: z.object({
+          preference: z
+            .object({
+              environmentId: z.string(),
+              acceptedCount: z.number(),
+              correctionCount: z.number(),
+              lastSelectedAt: z.string(),
+            })
+            .nullable(),
+        }),
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: false,
+        },
+      },
+      async ({ environmentId, signal }) =>
+        toMcpToolResult({
+          preference: actingUserId
+            ? await recordRoutingPreferenceMemory({
+                userId: actingUserId,
+                environmentId,
+                signal,
+              })
+            : null,
+        }),
+    );
   }
 
   server.registerTool(
@@ -509,6 +589,7 @@ function createRoomoteMcpServer(
 function createRoomoteMcpRouter(options: {
   memberTools: boolean;
   allowLegacyAudience: boolean;
+  routerTools: boolean;
 }) {
   const router = new Hono<{ Variables: Variables }>();
 
@@ -536,7 +617,12 @@ function createRoomoteMcpRouter(options: {
                   : rawAuth,
             }
           : undefined;
-      const server = createRoomoteMcpServer(auth, actingUserId, memberAuth);
+      const server = createRoomoteMcpServer(
+        auth,
+        actingUserId,
+        memberAuth,
+        options.routerTools,
+      );
 
       await server.connect(transport);
       return await transport.handleRequest(c.req.raw);
@@ -578,8 +664,10 @@ function createRoomoteMcpRouter(options: {
 export const roomoteMcp = createRoomoteMcpRouter({
   memberTools: false,
   allowLegacyAudience: true,
+  routerTools: true,
 });
 export const publicRoomoteMcp = createRoomoteMcpRouter({
   memberTools: true,
   allowLegacyAudience: false,
+  routerTools: false,
 });

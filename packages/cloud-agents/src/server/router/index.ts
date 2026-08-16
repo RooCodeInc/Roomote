@@ -43,6 +43,10 @@ export {
 
 export { routeTask, routeGitHubTask, classifyFollowUp } from './router-service';
 export { resolveRoutingFollowUp } from './follow-up-service';
+export {
+  normalizeRoutingPreferenceEnvironmentId,
+  recordRoutingPreference,
+} from './routing-preference-memory';
 export { evaluateChannelLaunchCriteria } from './channel-launch-gate';
 export type {
   ChannelLaunchGateActivityEntry,

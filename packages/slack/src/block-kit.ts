@@ -54,6 +54,8 @@ import {
   resolveRoutingFollowUp,
   buildSlackRoutingContext,
   getRoutingAutoConfirmDelayMs,
+  normalizeRoutingPreferenceEnvironmentId,
+  recordRoutingPreference,
 } from '@roomote/cloud-agents/server';
 
 import type {
@@ -1737,6 +1739,21 @@ export async function handleTaskConfiguration(
       },
     });
 
+    if (environmentId) {
+      const suggestedEnvironmentId = normalizeRoutingPreferenceEnvironmentId(
+        prefill?.workspaceValue,
+      );
+      await recordRoutingPreference({
+        userId: userMapping.userId,
+        apiBaseUrl: Env.TRPC_URL,
+        environmentId,
+        signal:
+          suggestedEnvironmentId && suggestedEnvironmentId !== environmentId
+            ? 'corrected'
+            : 'accepted',
+      });
+    }
+
     if (taskRun.reusedExistingRun) {
       await postSlackInteractiveResponse(payload.response_url, {
         replace_original: true,
@@ -2437,6 +2454,7 @@ export async function handleSlackRoutingCorrection({
       },
       userResponse: correctionText,
       userId: userMapping.userId,
+      apiBaseUrl: Env.TRPC_URL,
       correctionMessage: {
         user: event.user,
         text: correctionWithoutMention,
@@ -2888,6 +2906,19 @@ export async function handleRoutingConfirmOk(payload: SlackInteractivePayload) {
         '[RoutingConfirmOk] Failed to create task run from prefill',
       );
       return;
+    }
+
+    const environmentId =
+      prefill.workspaceType === 'environment'
+        ? normalizeRoutingPreferenceEnvironmentId(prefill.workspaceValue)
+        : null;
+    if (environmentId) {
+      await recordRoutingPreference({
+        userId: userMapping.userId,
+        apiBaseUrl: Env.TRPC_URL,
+        environmentId,
+        signal: 'accepted',
+      });
     }
 
     if (result.reusedExistingRun) {

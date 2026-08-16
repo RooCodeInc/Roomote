@@ -4,6 +4,8 @@ import {
   parseDiscordMessagePermalink,
   parseSlackChannelPermalink,
   parseSlackMessagePermalink,
+  ROUTING_PREFERENCE_GET_TOOL,
+  ROUTING_PREFERENCE_RECORD_TOOL,
 } from '@roomote/types';
 
 export const ROUTER_MCP_ENABLED_SERVER_IDS = [
@@ -69,6 +71,8 @@ const ROUTER_ROOMOTE_ALLOWED_TOOLS = [
   'get_about_me',
   CHAT_CHANNEL_MESSAGES_TOOL.name,
   CHAT_MESSAGE_CONTEXT_TOOL.name,
+  ROUTING_PREFERENCE_GET_TOOL,
+  ROUTING_PREFERENCE_RECORD_TOOL,
 ] as const;
 
 const ROUTER_LINEAR_ALLOWED_TOOLS = [
