@@ -27,6 +27,22 @@ export function isBareFastCommandInvocation(text: string): boolean {
   return /^(?:\/|!)fast(?:\s|$)/i.test(text.trimStart());
 }
 
+type FastAgentEntryMode = 'explicit' | 'default';
+
+export function resolveFastAgentEntryMode(params: {
+  explicitInvocation: boolean;
+  deploymentSettingEnabled: boolean;
+  userDefaultEnabled: boolean;
+}): FastAgentEntryMode | null {
+  if (params.explicitInvocation) {
+    return 'explicit';
+  }
+
+  return params.deploymentSettingEnabled && params.userDefaultEnabled
+    ? 'default'
+    : null;
+}
+
 export function extractFastQuestion(
   mentionStrippedText: string,
   continuation = false,
@@ -162,7 +178,11 @@ export async function processFastAgentMessage(params: {
       slackChannel: event.channel,
       slackThreadTs: threadId,
       currentMessageTs: event.ts,
-      senderDisplayName: currentMessage?.username,
+      senderSlackUserId: event.user,
+      senderDisplayName:
+        currentMessage?.user === event.user
+          ? currentMessage.username
+          : undefined,
       activeTaskId,
       launchTask,
       postSlackReply: async ({ message }) => {

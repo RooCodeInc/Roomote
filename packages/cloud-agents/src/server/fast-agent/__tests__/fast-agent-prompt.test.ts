@@ -82,7 +82,10 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('one useful Brain result is usually enough');
     expect(prompt).toContain(
-      "Never expose Brain's `source` field or other internal provenance metadata",
+      "If Brain has limited context, say what you found and offer to look deeper instead of investigating every possibility before replying. Don't apologize for not knowing everything.",
+    );
+    expect(prompt).toContain(
+      "Never expose Brain's `source` field, architecture, or other internal provenance metadata in a user-facing reply. This includes source IDs, page or entity IDs, storage paths, raw record keys, presence or absence of records or profiles, and similar implementation details.",
     );
     expect(prompt).toContain('Do not add a `Source:` line for Brain results');
     expect(prompt).not.toContain('cite pages when relying on them');
@@ -105,5 +108,22 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('fast mode on Discord');
     expect(prompt).toContain('Emoji reactions are unavailable on this surface');
     expect(prompt).not.toContain('<slack_modern_markdown>');
+    expect(prompt).not.toContain(
+      'attributes on the current `<slack_message>` identify its sender',
+    );
+  });
+
+  it('grounds first-person requests in current Slack message attributes', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+    });
+
+    expect(prompt).toContain(
+      'attributes on the current `<slack_message>` identify its sender',
+    );
+    expect(prompt).toContain(
+      'If an account-specific request needs a GitHub identity and `sender_github` is absent, ask',
+    );
+    expect(prompt).not.toContain('## Current User Identity');
   });
 });

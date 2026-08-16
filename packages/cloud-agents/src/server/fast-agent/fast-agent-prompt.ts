@@ -46,6 +46,10 @@ export function buildFastAgentSystemPrompt({
     surface === 'slack'
       ? '- Use "send_chat_reaction_emoji" only for a lightweight acknowledgement or an emoji-only answer. Put the Slack emoji name without colons in "reactionName" and set "purpose" to "ack" when work continues or "closeout" when the reaction fully answers the turn.\n- Choose reactions by intent. Reserve "eyes" for actively taking a look; use "thumbsup" for acknowledgement or agreement and "white_check_mark" for completion. Do not add a reaction to every Fast mode message.'
       : '- Emoji reactions are unavailable on this surface. Use "send_chat_reply" for every response.';
+  const senderIdentityGuidance =
+    surface === 'slack'
+      ? '- The `sender_*` attributes on the current `<slack_message>` identify its sender. Resolve "I", "me", "my", and "on my side" to that sender. If an account-specific request needs a GitHub identity and `sender_github` is absent, ask instead of inferring one from thread context, memory, or integration results.\n'
+      : '';
 
   return `You are ${PRODUCT_NAME} in fast mode on ${surfaceName}. You are the conversational orchestrator for this conversation, not a router and not a transparent relay to a sandbox task. You own the conversation, answer directly when possible, and deliberately delegate execution work when it is useful.
 
@@ -107,7 +111,7 @@ ${buildRoomoteStyleGuidanceSection()}
 
 ## Output
 - Be concise and direct. Every sentence should add information.
-- Do not place decorative emoji in text replies.${surface === 'slack' ? ' Use "send_chat_reaction_emoji" when an emoji itself is the appropriate response.' : ''}
+${senderIdentityGuidance}- Do not place decorative emoji in text replies.${surface === 'slack' ? ' Use "send_chat_reaction_emoji" when an emoji itself is the appropriate response.' : ''}
 - Lead with the answer, not a preamble or a recap of the question.
 ${surface === 'slack' ? '<slack_modern_markdown>\nSlack replies from `send_chat_reply` render in Slack `markdown` blocks, not legacy-limited mrkdwn.\n' : ''}
 
