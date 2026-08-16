@@ -110,6 +110,10 @@ describe('answerFastAgentQuestion', () => {
     expect(mocks.generateObject).toHaveBeenCalledWith(
       expect.objectContaining({ modelRole: 'primary' }),
     );
+    expect(mocks.generateObject).toHaveBeenCalledOnce();
+    expect(
+      mocks.generateObject.mock.calls[0]?.[0]?.schema.description,
+    ).toContain('single next Fast mode orchestration action');
     expect(mocks.appendSessionMessages).toHaveBeenCalledWith(
       expect.objectContaining({
         messages: expect.arrayContaining([
@@ -150,6 +154,104 @@ describe('answerFastAgentQuestion', () => {
         purpose: 'closeout',
         message: 'It is configured correctly.',
       }),
+    );
+  });
+
+  it('interleaves multiple Slack replies with integration work before closeout', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'github',
+        name: 'GitHub',
+        description: 'Repositories',
+        tools: [{ name: 'search_code' }],
+      },
+    ]);
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          message: "I'll trace that path.",
+          purpose: 'ack',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'call_integration',
+          message: null,
+          purpose: null,
+          integrationId: 'github',
+          toolName: 'search_code',
+          toolArguments: JSON.stringify({ query: 'fast agent' }),
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          message: 'I found the orchestration boundary and am checking it.',
+          purpose: 'progress',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({ message: 'The lifecycle is configured correctly.' }),
+      });
+    mocks.callIntegration.mockResolvedValue({ matches: ['fast-agent.ts'] });
+    const callbacks = chatCallbacks();
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      ...callbacks,
+    });
+
+    expect(result).toBe('The lifecycle is configured correctly.');
+    expect(mocks.generateObject).toHaveBeenCalledTimes(4);
+    expect(mocks.callIntegration).toHaveBeenCalledOnce();
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'session-1' }),
+      expect.any(Array),
+      {
+        integrationId: 'github',
+        toolName: 'search_code',
+        args: { query: 'fast agent' },
+      },
+    );
+    expect(callbacks.postSlackReply).toHaveBeenCalledTimes(3);
+    expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ purpose: 'ack' }),
+    );
+    expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ purpose: 'progress' }),
+    );
+    expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({ purpose: 'closeout' }),
+    );
+    expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
+      'The turn is still open',
+    );
+    expect(mocks.generateObject.mock.calls[3]?.[0]?.prompt).toContain(
+      'Purpose: progress',
+    );
+  });
+
+  it('ends the turn after a clarification reply', async () => {
+    mocks.generateObject.mockResolvedValueOnce({
+      object: decision({
+        message: 'Which repository should I inspect?',
+        purpose: 'clarification',
+      }),
+    });
+    const callbacks = chatCallbacks();
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      ...callbacks,
+    });
+
+    expect(result).toBe('Which repository should I inspect?');
+    expect(mocks.generateObject).toHaveBeenCalledOnce();
+    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
+    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: 'clarification' }),
     );
   });
 
@@ -604,6 +706,22 @@ describe('answerFastAgentQuestion', () => {
     expect(callbacks.postSlackReply).toHaveBeenCalledTimes(2);
     expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
       2,
+      expect.objectContaining({ purpose: 'closeout', message: result }),
+    );
+  });
+
+  it('posts an error closeout when inference fails before any visible reply', async () => {
+    mocks.generateObject.mockRejectedValueOnce(new Error('Inference failed'));
+    const callbacks = chatCallbacks();
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      ...callbacks,
+    });
+
+    expect(result).toContain('hit an error');
+    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
+    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
       expect.objectContaining({ purpose: 'closeout', message: result }),
     );
   });

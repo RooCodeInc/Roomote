@@ -79,7 +79,10 @@ const fastAgentDecisionSchema = z
         'For call_integration, a JSON-encoded object matching the selected tool input schema. Use null for every other action.',
       ),
   })
-  .strict();
+  .strict()
+  .describe(
+    'The single next Fast mode orchestration action. The runtime executes this action and invokes the model again unless it is a closeout or clarification.',
+  );
 
 function buildFastAgentTurnFallbackDecision(): z.infer<
   typeof fastAgentDecisionSchema
@@ -392,7 +395,6 @@ export async function answerFastAgentQuestion({
   postSlackReaction: PostFastAgentSlackReaction;
 }): Promise<string> {
   let sessionId: string | null = null;
-  let didSendNonTerminalResponse = false;
   const normalizedQuestion = normalizeThreadText(question);
   const userMessage = buildUserTextMessage(normalizedQuestion);
   const turnSessionMessages: ModelMessage[] = [userMessage];
@@ -520,7 +522,6 @@ export async function answerFastAgentQuestion({
           return message;
         }
 
-        didSendNonTerminalResponse = true;
         prompt += `\n\n[CHAT TOOL RESULT]\nTool: send_chat_reply\nPurpose: ${purpose}\nResult: delivered\n[END CHAT TOOL RESULT]\n\nThe turn is still open. Continue the requested work, then use send_chat_reply with purpose "closeout" when there is an answer or result.`;
         continue;
       }
@@ -555,7 +556,6 @@ export async function answerFastAgentQuestion({
           return '';
         }
 
-        didSendNonTerminalResponse = true;
         prompt += `\n\n[CHAT TOOL RESULT]\nTool: send_chat_reaction_emoji\nPurpose: ack\nReaction: ${name}\nResult: delivered\n[END CHAT TOOL RESULT]\n\nThe reaction acknowledged the turn but did not close it. Continue the requested work, then use send_chat_reply with purpose "closeout".`;
         continue;
       }
@@ -717,19 +717,17 @@ export async function answerFastAgentQuestion({
     const message =
       'I hit an error while handling that request. Please try again in a moment.';
 
-    if (didSendNonTerminalResponse) {
-      try {
-        await postSlackReply({
-          purpose: 'closeout',
-          slackChannel,
-          slackThreadTs,
-          message,
-        });
-      } catch (postError) {
-        console.error(
-          `[Fast Agent] Failed to post error closeout: ${formatErrorForLog(postError)}`,
-        );
-      }
+    try {
+      await postSlackReply({
+        purpose: 'closeout',
+        slackChannel,
+        slackThreadTs,
+        message,
+      });
+    } catch (postError) {
+      console.error(
+        `[Fast Agent] Failed to post error closeout: ${formatErrorForLog(postError)}`,
+      );
     }
 
     if (sessionId) {
