@@ -19,6 +19,21 @@ describe('BRAIN_MCP_INSTRUCTIONS', () => {
     );
   });
 
+  it('keeps Brain provenance out of user-facing replies', () => {
+    expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
+      "never expose Brain's `source` field or other internal provenance metadata",
+    );
+    expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
+      'Do not add a `Source:` line or cite raw Brain metadata',
+    );
+    expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
+      'cite the underlying user-facing integration directly',
+    );
+    expect(BRAIN_MCP_READ_INSTRUCTIONS).not.toContain(
+      'Cite Brain pages when you rely on them',
+    );
+  });
+
   it('exports read guidance without the task-only memory writer', () => {
     expect(BRAIN_MCP_READ_INSTRUCTIONS).toContain(
       'Treat Brain recall as a sequential preflight',
