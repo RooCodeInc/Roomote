@@ -30,6 +30,65 @@ import {
 } from './dimensions';
 import { formatAnalyticsDateTime, getTimeCutoff } from './time-buckets';
 
+const MULTIPLE_VALUES_LABEL = 'Multiple';
+
+export function aggregateCostAnalyticsRowsByTask(
+  rows: AnalyticsRow[],
+): AnalyticsRow[] {
+  const aggregatedRows = new Map<string, AnalyticsRow>();
+  const ungroupedRows: AnalyticsRow[] = [];
+
+  for (const row of rows) {
+    const taskId = row.meta?.canonicalTaskId;
+    if (!taskId) {
+      ungroupedRows.push(row);
+      continue;
+    }
+
+    const existingRow = aggregatedRows.get(taskId);
+    if (!existingRow) {
+      aggregatedRows.set(taskId, {
+        ...row,
+        id: `task:${taskId}`,
+        details: {
+          ...row.details,
+          id: `task:${taskId}`,
+        },
+      });
+      continue;
+    }
+
+    const value = existingRow.value + row.value;
+    const values: Record<string, string> = {
+      ...existingRow.details.values,
+      cost: value.toFixed(2),
+    };
+
+    for (const [key, rowValue] of Object.entries(row.details.values)) {
+      if (key === 'date' || key === 'cost' || key === 'taskTitle') {
+        continue;
+      }
+
+      if (values[key] !== rowValue) {
+        values[key] = MULTIPLE_VALUES_LABEL;
+      }
+    }
+
+    aggregatedRows.set(taskId, {
+      ...existingRow,
+      value,
+      details: {
+        ...existingRow.details,
+        values,
+      },
+    });
+  }
+
+  return [...aggregatedRows.values(), ...ungroupedRows].sort(
+    (left, right) => right.timestamp.getTime() - left.timestamp.getTime(),
+  );
+}
+
 export async function getCostAnalyticsRows(
   _auth: UserAuthSuccess,
   timePeriod: TimePeriodFilter | undefined,
