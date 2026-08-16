@@ -137,12 +137,13 @@ return { user_timestamp, assistant_timestamp }
 
 async function allocateFastEnvelopeTimestamps(
   taskId: string,
+  minimumTimestamp: number,
 ): Promise<[number, number]> {
   const result = await getRedis().eval(
     ALLOCATE_FAST_ENVELOPE_TIMESTAMPS_SCRIPT,
     1,
     `${FAST_ENVELOPE_TIMESTAMP_KEY_PREFIX}${taskId}`,
-    Date.now() * 1_000,
+    minimumTimestamp,
   );
   if (!Array.isArray(result) || result.length !== 2) {
     throw new Error('Failed to allocate fast transcript timestamps');
@@ -186,32 +187,30 @@ export async function answerFastTaskCommand(
   const threadContext = (
     await getTaskMessageEnvelopes({
       taskId: input.taskId,
+      limit: 500,
     })
-  )
-    .flatMap((envelope) => {
-      const text = envelope.text?.trim();
-      if (
-        !text ||
-        envelope.visibleInTranscript === false ||
-        (envelope.role !== 'user' && envelope.role !== 'assistant')
-      ) {
-        return [];
-      }
+  ).flatMap((envelope) => {
+    const text = envelope.text?.trim();
+    if (
+      !text ||
+      envelope.visibleInTranscript === false ||
+      (envelope.role !== 'user' && envelope.role !== 'assistant')
+    ) {
+      return [];
+    }
 
-      const isAssistant = envelope.role === 'assistant';
-      return [
-        {
-          user:
-            envelope.userId ?? (isAssistant ? 'roomote' : 'task-participant'),
-          username:
-            envelope.userName ?? (isAssistant ? 'Roomote' : 'Task participant'),
-          text,
-          ts: String(envelope.ts),
-          ...(isAssistant ? { bot_id: 'roomote' } : {}),
-        },
-      ];
-    })
-    .slice(-500);
+    const isAssistant = envelope.role === 'assistant';
+    return [
+      {
+        user: envelope.userId ?? (isAssistant ? 'roomote' : 'task-participant'),
+        username:
+          envelope.userName ?? (isAssistant ? 'Roomote' : 'Task participant'),
+        text,
+        ts: String(envelope.ts),
+        ...(isAssistant ? { bot_id: 'roomote' } : {}),
+      },
+    ];
+  });
 
   const response = await answerFastAgentQuestion({
     question: request,
@@ -224,8 +223,13 @@ export async function answerFastTaskCommand(
     activeTaskId: input.taskId,
     surface: 'web',
   });
+  const latestTaskTimestamp = threadContext.at(-1)?.ts;
+  const minimumTimestamp = Math.max(
+    Date.now(),
+    latestTaskTimestamp ? Number(latestTaskTimestamp) + 1 : 0,
+  );
   const [userTimestamp, assistantTimestamp] =
-    await allocateFastEnvelopeTimestamps(input.taskId);
+    await allocateFastEnvelopeTimestamps(input.taskId, minimumTimestamp);
 
   await recordTaskMessageEnvelope({
     runId: input.runId,

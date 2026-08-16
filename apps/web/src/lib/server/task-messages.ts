@@ -12,6 +12,7 @@ import {
   asc,
   and,
   db,
+  desc,
   eq,
   like,
   not,
@@ -25,8 +26,10 @@ import { getUserDisplayName } from '@/lib/user-display-name';
 
 export async function getTaskMessageEnvelopes({
   taskId,
+  limit,
 }: {
   taskId: string;
+  limit?: number;
 }): Promise<TaskMessageEnvelope[]> {
   const whereConditions = [
     eq(taskMessages.taskId, taskId),
@@ -34,7 +37,7 @@ export async function getTaskMessageEnvelopes({
     not(like(taskMessages.eventType, 'roomote_runtime.output.%')),
   ];
 
-  const rows = await db
+  const query = db
     .select({
       id: taskMessages.id,
       userId: taskMessages.userId,
@@ -54,8 +57,18 @@ export async function getTaskMessageEnvelopes({
     .from(taskMessages)
     .innerJoin(tasks, eq(tasks.id, taskMessages.taskId))
     .leftJoin(users, eq(users.id, taskMessages.userId))
-    .where(and(...whereConditions))
-    .orderBy(asc(taskMessages.createdAt), asc(taskMessages.ts));
+    .where(and(...whereConditions));
+  const boundedLimit =
+    typeof limit === 'number' && Number.isInteger(limit) && limit > 0
+      ? limit
+      : null;
+  const rows = boundedLimit
+    ? (
+        await query
+          .orderBy(desc(taskMessages.createdAt), desc(taskMessages.ts))
+          .limit(boundedLimit)
+      ).reverse()
+    : await query.orderBy(asc(taskMessages.createdAt), asc(taskMessages.ts));
 
   return rows.map((row) => {
     // Sanitize at the read boundary: the DB stores full payloads,

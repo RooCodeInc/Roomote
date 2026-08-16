@@ -42,4 +42,37 @@ describe('getTaskMessageEnvelopes', () => {
       userImageUrl: null,
     });
   });
+
+  it('limits in the database to the newest messages and restores chronological order', async () => {
+    const task = await taskFactory.create({
+      id: 'task-message-limited-history',
+    });
+    const run = await runFactory.create({
+      payloadKind: TaskPayloadKind.StandardTask,
+      taskId: task.id,
+    });
+
+    await db.insert(taskMessages).values(
+      ['first', 'second', 'third'].map((text, index) => ({
+        runId: run.id,
+        taskId: task.id,
+        ts: 1_000 + index,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user' as const,
+        protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+        contentBlocks: [{ type: 'text' as const, text }],
+        payload: {},
+      })),
+    );
+
+    const messages = await getTaskMessageEnvelopes({
+      taskId: task.id,
+      limit: 2,
+    });
+
+    expect(messages.map((message) => message.text)).toEqual([
+      'second',
+      'third',
+    ]);
+  });
 });

@@ -257,6 +257,10 @@ describe('answerFastTaskCommand', () => {
         ],
       }),
     );
+    expect(mockGetTaskMessageEnvelopes).toHaveBeenCalledWith({
+      taskId: 'task-123',
+      limit: 500,
+    });
     expect(mockRecordTaskMessageEnvelope).toHaveBeenCalledTimes(2);
     expect(mockRecordTaskMessageEnvelope).toHaveBeenNthCalledWith(
       2,
@@ -272,26 +276,34 @@ describe('answerFastTaskCommand', () => {
   });
 
   it('uses distinct ordered timestamps for concurrent fast exchanges', async () => {
+    const now = 1_700_000_000_000;
+    const dateNow = vi.spyOn(Date, 'now').mockReturnValue(now);
     mockAnswerFastAgentQuestion.mockImplementation(
       async ({ question }: { question: string }) => `Answer: ${question}`,
     );
-    await Promise.all([
-      answerFastTaskCommand(auth, {
-        taskId: 'task-123',
-        runId: 42,
-        request: 'First request',
-      }),
-      answerFastTaskCommand(auth, {
-        taskId: 'task-123',
-        runId: 42,
-        request: 'Second request',
-      }),
-    ]);
+    try {
+      await Promise.all([
+        answerFastTaskCommand(auth, {
+          taskId: 'task-123',
+          runId: 42,
+          request: 'First request',
+        }),
+        answerFastTaskCommand(auth, {
+          taskId: 'task-123',
+          runId: 42,
+          request: 'Second request',
+        }),
+      ]);
+    } finally {
+      dateNow.mockRestore();
+    }
 
     const timestamps = mockRecordTaskMessageEnvelope.mock.calls.map(
       ([call]) => call.envelope.ts as number,
     );
     expect(new Set(timestamps)).toHaveLength(4);
+    expect(Math.min(...timestamps)).toBe(now);
+    expect(Math.max(...timestamps)).toBe(now + 3);
 
     for (const request of ['First request', 'Second request']) {
       const userCall = mockRecordTaskMessageEnvelope.mock.calls.find(
