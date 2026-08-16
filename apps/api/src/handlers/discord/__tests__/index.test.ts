@@ -57,6 +57,7 @@ const mocks = vi.hoisted(() => ({
   callViaEmojiConfig: vi.fn(),
   appendAccountLinkHelpText: vi.fn(async (message: string) => message),
   startGoal: vi.fn(),
+  answerFast: vi.fn(),
 }));
 
 vi.mock('../../account-link-help.js', () => ({
@@ -168,6 +169,7 @@ vi.mock('../callback-actions.js', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
+  answerFastAgentQuestion: mocks.answerFast,
   getTaskUrl: mocks.getTaskUrl,
 }));
 
@@ -278,6 +280,7 @@ describe('Discord Gateway event handler', () => {
       launchResult: { id: 17, taskId: 'task-17' },
     });
     mocks.startGoal.mockResolvedValue({ success: true });
+    mocks.answerFast.mockResolvedValue('A quick answer');
     mocks.reply.mockResolvedValue({ messageId: 'reply-1' });
     mocks.createDirectMessage.mockResolvedValue({ id: 'dm-private-1' });
     mocks.postMessage.mockResolvedValue({ messageId: 'dm-msg-1' });
@@ -1833,6 +1836,47 @@ describe('Discord Gateway event handler', () => {
       expect.objectContaining({
         text: expect.stringContaining('active Roomote task'),
         ephemeral: true,
+      }),
+    );
+  });
+
+  it('uses /fast to answer in the active task conversation', async () => {
+    mocks.findActiveRun.mockResolvedValue({
+      id: 24,
+      taskId: 'task-24',
+      actingUserId: 'roomote-user-1',
+    });
+    const interaction = {
+      id: 'interaction-fast',
+      application_id: 'app-1',
+      type: 2,
+      token: 'interaction-token',
+      channel_id: 'dm-1',
+      user: { id: 'discord-user-1', username: 'matt' },
+      data: {
+        name: 'fast',
+        type: 1,
+        options: [{ name: 'request', type: 3, value: 'Summarize this task' }],
+      },
+    };
+
+    const response = await postEvent(
+      envelope(interaction, 'INTERACTION_CREATE'),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.answerFast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'Summarize this task',
+        userId: 'roomote-user-1',
+        activeTaskId: 'task-24',
+        surface: 'discord',
+      }),
+    );
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        interaction: { interaction, interactionDeferred: true },
+        text: 'A quick answer',
       }),
     );
   });

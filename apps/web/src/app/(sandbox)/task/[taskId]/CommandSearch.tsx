@@ -27,6 +27,10 @@ interface SlashCommand {
 
 const AVAILABLE_COMMANDS: SlashCommand[] = [
   {
+    name: '/fast',
+    description: 'Get a quick answer without starting another task',
+  },
+  {
     name: '/goal',
     description: 'Keep working toward an objective across multiple turns',
   },

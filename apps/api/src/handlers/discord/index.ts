@@ -24,7 +24,10 @@ import {
   setLatestInboundMessageId,
 } from '@roomote/communication/messages';
 import { reactionEmojiMatches } from '@roomote/communication/reaction-emoji';
-import { getTaskUrl } from '@roomote/cloud-agents/server';
+import {
+  answerFastAgentQuestion,
+  getTaskUrl,
+} from '@roomote/cloud-agents/server';
 import {
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
   RunStatus,
@@ -156,6 +159,7 @@ const DISCORD_HELP_MESSAGE = [
   '**Available commands**',
   '`/new request:<request>` — start a fresh task.',
   '`/goal objective:<objective>` — keep working toward an objective across multiple turns.',
+  '`/fast request:<request>` — get a quick answer in the current task conversation.',
   '`/link code:<code>` — link this Discord account in a DM with me.',
   '`/help` — show this message.',
   '',
@@ -511,7 +515,7 @@ async function processDiscordGatewayEvent(
   }
 
   if (command && command.name !== 'new') {
-    if (command.name === 'goal') {
+    if (command.name === 'goal' || command.name === 'fast') {
       // Handled after resolving the current conversation and linked user.
     } else {
       return { ok: true, ignored: 'unsupported_command' };
@@ -728,6 +732,63 @@ async function processDiscordGatewayEvent(
       ephemeral: true,
     });
     return { ok: true, goalStarted: result.success, runId: activeRun.id };
+  }
+
+  if (command?.name === 'fast') {
+    if (!command.request) {
+      await replyToDiscordEvent({
+        provider: resolved.provider,
+        applicationId: resolved.applicationId,
+        channel,
+        interaction: interactionReplyContext(event),
+        text: 'Add what you want Roomote to answer in the `request` field.',
+        ephemeral: true,
+      });
+      return { ok: true, fastAnswered: false, reason: 'missing_request' };
+    }
+    if (!activeRun) {
+      await replyToDiscordEvent({
+        provider: resolved.provider,
+        applicationId: resolved.applicationId,
+        channel,
+        interaction: interactionReplyContext(event),
+        text: 'Use `/fast` in an active Roomote task thread or DM. Start a task with `/new` or mention me first.',
+        ephemeral: true,
+      });
+      return { ok: true, fastAnswered: false, reason: 'no_active_task' };
+    }
+
+    const history = await fetchDiscordThreadHistoryBestEffort({
+      provider: resolved.provider,
+      channelId: channel.channelId,
+      ...(channel.parentChannelId
+        ? { parentChannelId: channel.parentChannelId }
+        : {}),
+    });
+    const response = await answerFastAgentQuestion({
+      question: command.request,
+      threadContext: history.map((entry) => ({
+        user: entry.user,
+        username: entry.username,
+        text: entry.text,
+        ts: entry.id,
+        ...(entry.botId ? { bot_id: entry.botId } : {}),
+      })),
+      userId: senderUserId,
+      slackTeamId: `discord:${channel.guildId ?? 'dm'}`,
+      slackChannel: metadata.communicationChannelId,
+      slackThreadTs: metadata.communicationThreadId ?? channel.channelId,
+      activeTaskId: activeRun.taskId,
+      surface: 'discord',
+    });
+    await replyToDiscordEvent({
+      provider: resolved.provider,
+      applicationId: resolved.applicationId,
+      channel,
+      interaction: interactionReplyContext(event),
+      text: response,
+    });
+    return { ok: true, fastAnswered: true, runId: activeRun.id };
   }
 
   const messageAttachments = message

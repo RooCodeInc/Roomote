@@ -586,7 +586,9 @@ export function isDiscordTaskEntryEvent(
     );
   }
   const commandName = getDiscordInteractionCommand(event)?.name;
-  return commandName === 'new' || commandName === 'goal';
+  return (
+    commandName === 'new' || commandName === 'goal' || commandName === 'fast'
+  );
 }
 
 function formatDiscordUser(input: {

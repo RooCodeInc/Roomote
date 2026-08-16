@@ -120,7 +120,17 @@ export function useOptimisticPromptSubmission() {
     ],
   );
 
+  const refreshTranscript = useCallback(
+    async (taskId: string) => {
+      await queryClient.invalidateQueries({
+        queryKey: trpc.tasks.messageEnvelopes.queryKey({ taskId }),
+      });
+    },
+    [queryClient, trpc],
+  );
+
   return {
+    refreshTranscript,
     rollbackOptimisticPromptSubmission,
     startOptimisticPromptSubmission,
   };

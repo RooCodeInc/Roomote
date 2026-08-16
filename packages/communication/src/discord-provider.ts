@@ -1231,6 +1231,20 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
             },
           ],
         },
+        {
+          name: 'fast',
+          description: 'Get a quick answer without starting another task',
+          type: 1,
+          options: [
+            {
+              type: 3,
+              name: 'request',
+              description: 'What would you like Roomote to help with?',
+              required: true,
+              max_length: 6_000,
+            },
+          ],
+        },
         { name: 'help', description: 'Show Roomote command help', type: 1 },
       ],
       { retryNetworkErrors: true, retryServerErrors: true },

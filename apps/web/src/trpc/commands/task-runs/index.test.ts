@@ -4,6 +4,7 @@ import type { UserAuthSuccess } from '@/types';
 
 const {
   mockEnqueueTask,
+  mockAnswerFastAgentQuestion,
   mockGetRepositories,
   mockDbWhere,
   mockDbSelect,
@@ -12,9 +13,11 @@ const {
   mockPrepareTaskGoalActivation,
   mockResolveTaskByIdAccess,
   mockResolveWorkspaceProvider,
+  mockRecordTaskMessageEnvelope,
   mockSendSandboxPrompt,
 } = vi.hoisted(() => ({
   mockEnqueueTask: vi.fn(),
+  mockAnswerFastAgentQuestion: vi.fn(),
   mockGetRepositories: vi.fn(),
   mockDbWhere: vi.fn(),
   mockDbSelect: vi.fn(),
@@ -23,14 +26,22 @@ const {
   mockPrepareTaskGoalActivation: vi.fn(),
   mockResolveTaskByIdAccess: vi.fn(),
   mockResolveWorkspaceProvider: vi.fn(),
+  mockRecordTaskMessageEnvelope: vi.fn(),
   mockSendSandboxPrompt: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
+  answerFastAgentQuestion: (...args: unknown[]) =>
+    mockAnswerFastAgentQuestion(...args),
   buildSlackRoutingContext: vi.fn(),
   enqueueTask: (...args: unknown[]) => mockEnqueueTask(...args),
   getTaskUrl: vi.fn(() => 'https://roomote.test/tasks/task-123'),
   routeTask: vi.fn(),
+}));
+
+vi.mock('@roomote/sdk/server', () => ({
+  recordTaskMessageEnvelope: (...args: unknown[]) =>
+    mockRecordTaskMessageEnvelope(...args),
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -116,7 +127,11 @@ vi.mock('../sandbox-session', () => ({
     mockSendSandboxPrompt(...args),
 }));
 
-import { createStandardTaskRunCommand, startTaskGoalCommand } from './index';
+import {
+  answerFastTaskCommand,
+  createStandardTaskRunCommand,
+  startTaskGoalCommand,
+} from './index';
 
 const auth = {
   success: true,
@@ -140,6 +155,57 @@ const auth = {
     createdAt: null,
   },
 } satisfies UserAuthSuccess;
+
+describe('answerFastTaskCommand', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockResolveTaskByIdAccess.mockResolvedValue({
+      kind: 'resolved',
+      task: { id: 'task-123' },
+    });
+    mockDbSelect.mockReturnValue({
+      from: vi.fn(() => ({
+        where: vi.fn(() => ({
+          limit: vi.fn().mockResolvedValue([{ id: 42 }]),
+        })),
+      })),
+    });
+    mockAnswerFastAgentQuestion.mockResolvedValue('A quick answer');
+    mockRecordTaskMessageEnvelope.mockResolvedValue(undefined);
+  });
+
+  it('answers with the shared fast agent and persists the exchange', async () => {
+    await expect(
+      answerFastTaskCommand(auth, {
+        taskId: 'task-123',
+        runId: 42,
+        request: 'Summarize this task',
+        clientMessageId: 'message-1',
+      }),
+    ).resolves.toEqual({ success: true, response: 'A quick answer' });
+
+    expect(mockAnswerFastAgentQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'Summarize this task',
+        userId: 'user-123',
+        activeTaskId: 'task-123',
+        surface: 'web',
+      }),
+    );
+    expect(mockRecordTaskMessageEnvelope).toHaveBeenCalledTimes(2);
+    expect(mockRecordTaskMessageEnvelope).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        runId: 42,
+        taskId: 'task-123',
+        envelope: expect.objectContaining({
+          role: 'assistant',
+          contentBlocks: [{ type: 'text', text: 'A quick answer' }],
+        }),
+      }),
+    );
+  });
+});
 
 function mockSuccessfulEnqueue() {
   mockEnqueueTask.mockResolvedValue({

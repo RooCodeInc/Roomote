@@ -105,6 +105,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     const trpcClient = useTRPCClient();
     const client = useSandboxClient();
     const {
+      refreshTranscript,
       rollbackOptimisticPromptSubmission,
       startOptimisticPromptSubmission,
     } = useOptimisticPromptSubmission();
@@ -412,6 +413,10 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         const goalObjective = goalCommandMatch
           ? (goalCommandMatch[1] ?? '').trim()
           : null;
+        const fastCommandMatch = /^\/fast(?:\s+([\s\S]*))?$/i.exec(text);
+        const fastRequest = fastCommandMatch
+          ? (fastCommandMatch[1] ?? '').trim()
+          : null;
         // Keyed off the live pending request rather than the task phase:
         // the phase can report running while the turn is still blocked on
         // the question, and a message here must answer it, not steer.
@@ -430,13 +435,16 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
 
         if (
           !shouldAnswerPendingFreeText &&
-          goalObjective !== null &&
-          (!goalObjective || hasAttachments)
+          (goalObjective !== null || fastRequest !== null) &&
+          (!(goalObjective ?? fastRequest) || hasAttachments)
         ) {
+          const commandName = goalObjective !== null ? 'Goal' : 'Fast';
           toast.error(
             hasAttachments
-              ? 'Goal Mode does not support attachments.'
-              : 'Describe the goal after /goal.',
+              ? `${commandName} Mode does not support attachments.`
+              : goalObjective !== null
+                ? 'Describe the goal after /goal.'
+                : 'Describe the request after /fast.',
           );
           return;
         }
@@ -461,7 +469,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
           }
 
           const preparedPrompt = await preparePromptAttachments({
-            text: goalObjective ?? text,
+            text: goalObjective ?? fastRequest ?? text,
             attachments: message.files,
           });
 
@@ -488,6 +496,17 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
             if (!started.success) {
               throw new Error(started.error);
             }
+          } else if (fastRequest !== null) {
+            const answered = await trpcClient.taskRuns.answerFast.mutate({
+              taskId: taskRun.taskId,
+              runId: taskRun.id,
+              request: fastRequest,
+              clientMessageId,
+            });
+            if (!answered.success) {
+              throw new Error(answered.error);
+            }
+            await refreshTranscript(taskRun.taskId);
           } else {
             await trpcClient.sandboxSession.sendPrompt.mutate({
               taskId: taskRun.taskId,
@@ -532,6 +551,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         handlePromptChange,
         scrollToBottom,
         handleMessageSent,
+        refreshTranscript,
         taskRun,
         trpcClient,
         rollbackOptimisticPromptSubmission,

@@ -234,6 +234,17 @@ describe('DiscordCommunicationProvider', () => {
           }),
         ],
       },
+      {
+        name: 'fast',
+        type: 1,
+        options: [
+          expect.objectContaining({
+            name: 'request',
+            required: true,
+            max_length: 6_000,
+          }),
+        ],
+      },
       { name: 'help', type: 1 },
     ]);
   });

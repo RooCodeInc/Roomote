@@ -1,5 +1,7 @@
 import {
   ALL_REPOSITORIES,
+  ACP_ENVELOPE_EVENT_TYPES,
+  ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
   activeRunStatuses,
   type TaskPayload,
   type ComputeProvider,
@@ -17,6 +19,7 @@ import {
   DeploymentReadOnlyError,
   enqueueTask,
   getTaskUrl,
+  answerFastAgentQuestion,
   routeTask,
 } from '@roomote/cloud-agents/server';
 import { captureTaskSettled } from '@roomote/telemetry/server';
@@ -33,6 +36,7 @@ import {
   tasks,
 } from '@roomote/db/server';
 import { SlackNotifier } from '@roomote/slack';
+import { recordTaskMessageEnvelope } from '@roomote/sdk/server';
 
 import type { UserAuthSuccess } from '@/types';
 import { Env, getArtifactById, getRepositories } from '@/lib/server';
@@ -113,6 +117,88 @@ export async function startTaskGoalCommand(
   }
 
   return { success: true, goal };
+}
+
+export async function answerFastTaskCommand(
+  auth: UserAuthSuccess,
+  input: {
+    taskId: string;
+    runId: number;
+    request: string;
+    clientMessageId?: string;
+  },
+): Promise<
+  { success: true; response: string } | { success: false; error: string }
+> {
+  const taskAccess = await resolveTaskByIdAccessCommand(auth, {
+    taskId: input.taskId,
+  });
+  if (taskAccess.kind !== 'resolved') {
+    return { success: false, error: 'Task not found' };
+  }
+
+  const [run] = await db
+    .select({ id: taskRuns.id })
+    .from(taskRuns)
+    .where(and(eq(taskRuns.id, input.runId), eq(taskRuns.taskId, input.taskId)))
+    .limit(1);
+  if (!run) {
+    return { success: false, error: 'Task run not found' };
+  }
+
+  const request = input.request.trim();
+  if (!request) {
+    return { success: false, error: 'Fast mode requires a request' };
+  }
+
+  const response = await answerFastAgentQuestion({
+    question: request,
+    userId: auth.userId,
+    apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
+    slackTeamId: 'web',
+    slackChannel: input.taskId,
+    slackThreadTs: input.taskId,
+    activeTaskId: input.taskId,
+    surface: 'web',
+  });
+  const timestamp = Date.now();
+
+  await recordTaskMessageEnvelope({
+    runId: input.runId,
+    taskId: input.taskId,
+    userId: auth.userId,
+    envelope: {
+      ts: timestamp,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+      role: 'user',
+      protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+      contentBlocks: [{ type: 'text', text: request }],
+      metadata: { source: 'fast_agent', userId: auth.userId },
+      payload: {
+        prompt: [{ type: 'text', text: request }],
+        content: request,
+        userId: auth.userId,
+        ...(input.clientMessageId
+          ? { clientMessageId: input.clientMessageId }
+          : {}),
+      },
+    },
+  });
+  await recordTaskMessageEnvelope({
+    runId: input.runId,
+    taskId: input.taskId,
+    envelope: {
+      ts: timestamp + 1,
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+      contentBlocks: [{ type: 'text', text: response }],
+      metadata: { source: 'fast_agent' },
+      payload: { text: response, source: 'fast_agent' },
+    },
+  });
+
+  return { success: true, response };
 }
 
 type CreateStandardTaskRunInput = {
