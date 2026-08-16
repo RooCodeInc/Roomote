@@ -55,17 +55,17 @@ Every factual claim must cite the supporting Brain page slug. Preserve specific 
 
 function parseJsonRpcBody(body: string): unknown {
   const trimmed = body.trim();
-
-  if (!trimmed.startsWith('data:')) {
-    return JSON.parse(trimmed);
-  }
-
-  const events = trimmed
+  const dataLines = trimmed
     .split(/\r?\n/)
     .filter((line) => line.startsWith('data:'))
     .map((line) => line.slice('data:'.length).trim())
-    .filter((line) => line && line !== '[DONE]')
-    .map((line) => JSON.parse(line));
+    .filter((line) => line && line !== '[DONE]');
+
+  if (dataLines.length === 0) {
+    return JSON.parse(trimmed);
+  }
+
+  const events = dataLines.map((line) => JSON.parse(line));
 
   return events.at(-1);
 }

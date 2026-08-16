@@ -98,6 +98,16 @@ function submitResponse(): Response {
   );
 }
 
+function asServerSentEvent(response: Response): Promise<Response> {
+  return response.text().then(
+    (body) =>
+      new Response(`event: message\ndata: ${body}\n\n`, {
+        status: response.status,
+        headers: { 'content-type': 'text/event-stream' },
+      }),
+  );
+}
+
 describe('brainMaintenanceJob', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -292,6 +302,24 @@ describe('runBrainDailyDigest', () => {
       {},
       'roomote-daily-digest',
       { watermark: expectedUntil },
+    );
+  });
+
+  it('parses MCP server-sent events with a leading event field', async () => {
+    mockGetBrainSyncState.mockResolvedValue(null);
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(await asServerSentEvent(searchResponse()))
+      .mockResolvedValueOnce(await asServerSentEvent(synthesisResponse()));
+
+    await runBrainDailyDigest(
+      { baseUrl: 'http://gbrain.test', token: 'read-token' },
+      { baseUrl: 'http://gbrain.test', token: 'write-token' },
+      new Date('2026-08-16T07:00:00.000Z'),
+    );
+
+    expect(mockPostToBrain).toHaveBeenCalledWith(
+      expect.objectContaining({ slug: 'daily/digests/2026-08-16' }),
+      { baseUrl: 'http://gbrain.test', token: 'write-token' },
     );
   });
 
