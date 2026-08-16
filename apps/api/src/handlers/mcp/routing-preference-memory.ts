@@ -1,7 +1,5 @@
 import { resolveBrainConnection } from '@roomote/sdk/server';
 import {
-  ROUTING_PREFERENCE_GET_TOOL,
-  ROUTING_PREFERENCE_RECORD_TOOL,
   type RoutingPreferenceMemory,
   type RoutingPreferenceSignal,
 } from '@roomote/types';
@@ -128,8 +126,3 @@ export async function recordRoutingPreferenceMemory(input: {
 
   return preference;
 }
-
-export const ROUTING_PREFERENCE_TOOL_NAMES = [
-  ROUTING_PREFERENCE_GET_TOOL,
-  ROUTING_PREFERENCE_RECORD_TOOL,
-] as const;
