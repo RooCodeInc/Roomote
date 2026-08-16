@@ -43,7 +43,10 @@ type TriageConfig = {
   buildScanTask: (params: {
     deployment: { slackBotToken: string | null; slackTeamId: string | null };
     channelId: string;
-    destination: { provider: 'slack'; channelId: string };
+    destination: {
+      provider: 'slack' | 'discord';
+      channelId: string;
+    };
     runtime: Record<string, unknown>;
     manualTrigger: boolean;
   }) => Promise<
@@ -54,11 +57,14 @@ type TriageConfig = {
 
 const config = dependabotTriageJob as unknown as TriageConfig;
 
-function buildScanTaskParams() {
+function buildScanTaskParams(provider: 'slack' | 'discord' = 'slack') {
+  const channelId =
+    provider === 'slack' ? 'C123MANAGER' : 'discord-manager-channel';
+
   return {
     deployment: { slackBotToken: 'xoxb-test', slackTeamId: 'T-1' },
-    channelId: 'C123MANAGER',
-    destination: { provider: 'slack' as const, channelId: 'C123MANAGER' },
+    channelId,
+    destination: { provider, channelId },
     runtime: {},
     manualTrigger: false,
   };
@@ -113,7 +119,7 @@ describe('dependabotTriageJob buildScanTask', () => {
     );
     expect(payload.description).toContain('inspect its open pull requests');
     expect(payload.description).toContain(
-      'After triage reaches a final result, post exactly one concise status message',
+      'After triage reaches a final result, send exactly one concise report',
     );
     expect(payload.description).toContain(
       'total number of open Dependabot alerts with a critical/high/medium/low severity breakdown',
@@ -137,9 +143,10 @@ describe('dependabotTriageJob buildScanTask', () => {
     expect(payload.description).toContain(
       'Do not post any Slack opening acknowledgement, scan announcement, progress update, or partial finding',
     );
-    expect(payload.description).toContain(
-      'post exactly one concise status message',
-    );
+    expect(payload.description).toContain('send exactly one concise report');
+    expect(payload.description).toContain('with `send_chat_reply`');
+    expect(payload.description).toContain('using purpose `closeout`');
+    expect(payload.description).not.toContain('with `post_to_channel`');
   });
 
   it('scans and reports repositories without environments without permitting remediation launches', async () => {
@@ -164,6 +171,28 @@ describe('dependabotTriageJob buildScanTask', () => {
     expect(result.payloads[0]?.description).toContain(
       'Only consider repositories that appear in the "Repository environments" list below',
     );
+  });
+
+  it('builds destination-generic closeout guidance for Discord', async () => {
+    mockGetActiveGitHubRepositoryFullNames.mockResolvedValue(['acme/api']);
+    mockBuildRepositoryCoverage.mockResolvedValue([
+      { repositoryFullName: 'acme/api', targetEnvironmentId: 'env-1' },
+    ]);
+
+    const result = await config.buildScanTask(buildScanTaskParams('discord'));
+
+    expect(result.kind).toBe('scan');
+    if (result.kind !== 'scan') {
+      throw new Error('expected a scan build');
+    }
+
+    expect(result.payloads[0]?.description).toContain(
+      '<channel_id>discord-manager-channel</channel_id>',
+    );
+    expect(result.payloads[0]?.description).toContain(
+      'standard automation result thread in the configured Discord conversation',
+    );
+    expect(result.payloads[0]?.description).not.toContain('<slack_channel_id>');
   });
 
   it('skips when there are no active GitHub repositories', async () => {
