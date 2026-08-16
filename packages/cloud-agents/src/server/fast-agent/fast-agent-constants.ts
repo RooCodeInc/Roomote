@@ -1,4 +1,4 @@
-export const FAST_AGENT_MODEL = 'openai/gpt-5.4';
+export const FAST_AGENT_MODEL_ROLE = 'primary' as const;
 export const FAST_AGENT_MAX_STEPS = 50;
 export const FAST_AGENT_BRAIN_INSTRUCTIONS = `Use Brain as lightweight conversational context, not as an exhaustive research assignment.
 

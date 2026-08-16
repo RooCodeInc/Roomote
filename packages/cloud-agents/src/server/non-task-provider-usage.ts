@@ -124,6 +124,7 @@ interface GenerateTrackedNonTaskBaseParams extends NonTaskInferenceTrackingInput
   prompt: string;
   system?: string;
   model?: string;
+  modelRole?: 'primary' | 'small';
   maxOutputTokens?: number;
   timeoutMs?: number;
 }
@@ -282,7 +283,10 @@ function formatOpenCodeSdkError(error: unknown): string {
   }
 }
 
-async function resolveNonTaskModelRuntime(model?: string): Promise<{
+async function resolveNonTaskModelRuntime(
+  model?: string,
+  modelRole: 'primary' | 'small' = 'small',
+): Promise<{
   model: string;
   resolvedModelRuntimeEnv: Partial<Record<string, string>>;
 }> {
@@ -305,9 +309,13 @@ async function resolveNonTaskModelRuntime(model?: string): Promise<{
 
   const resolvedModel =
     requestedModel ||
-    resolvedModelRuntimeEnv.R_SMALL_MODEL ||
-    resolvedModelRuntimeEnv.R_MODEL ||
-    resolveOpenCodeSmallModel();
+    (modelRole === 'primary'
+      ? resolvedModelRuntimeEnv.R_MODEL
+      : resolvedModelRuntimeEnv.R_SMALL_MODEL ||
+        resolvedModelRuntimeEnv.R_MODEL) ||
+    (modelRole === 'primary'
+      ? asString(parseOpenCodeConfigJson(readOpenCodeDebugConfig()).model)
+      : resolveOpenCodeSmallModel());
 
   if (!resolvedModel) {
     throw new Error(
@@ -603,7 +611,8 @@ async function generateTrackedNonTaskObjectWithSdk<
   },
 ): Promise<{ object: z.output<TSchema> }> {
   const resolvedRuntime =
-    runtime ?? (await resolveNonTaskModelRuntime(params.model));
+    runtime ??
+    (await resolveNonTaskModelRuntime(params.model, params.modelRole));
 
   const data = await runNonTaskSdkPrompt(params, resolvedRuntime, {
     system: params.system,
