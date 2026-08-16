@@ -1,5 +1,6 @@
 import {
   type AcpEventType,
+  ACP_ENVELOPE_EVENT_TYPES,
   sanitizeEnvelopeFields,
   inferAcpMessageKind,
   extractAcpMessageText,
@@ -42,7 +43,20 @@ export async function getTaskMessageEnvelopes({
   ];
   if (visibleOnly) {
     whereConditions.push(
-      sql`${taskMessages.metadata} ->> ${TRANSCRIPT_VISIBILITY_METADATA_KEY} IS DISTINCT FROM 'false'`,
+      sql`CASE
+        WHEN ${taskMessages.metadata} ->> ${TRANSCRIPT_VISIBILITY_METADATA_KEY} IS NOT NULL
+          THEN ${taskMessages.metadata} ->> ${TRANSCRIPT_VISIBILITY_METADATA_KEY} <> 'false'
+        WHEN ${taskMessages.eventType} = ${ACP_ENVELOPE_EVENT_TYPES.UserPrompt}
+          THEN ${taskMessages.contentBlocks}::text NOT LIKE '%<environment-instructions>%'
+            AND ${taskMessages.contentBlocks}::text NOT LIKE '%<workflow>%'
+            AND ${taskMessages.contentBlocks}::text NOT LIKE '%&lt;environment-instructions&gt;%'
+            AND ${taskMessages.contentBlocks}::text NOT LIKE '%&lt;workflow&gt;%'
+            AND ${taskMessages.payload}::text NOT LIKE '%<environment-instructions>%'
+            AND ${taskMessages.payload}::text NOT LIKE '%<workflow>%'
+            AND ${taskMessages.payload}::text NOT LIKE '%&lt;environment-instructions&gt;%'
+            AND ${taskMessages.payload}::text NOT LIKE '%&lt;workflow&gt;%'
+        ELSE true
+      END`,
     );
   }
 

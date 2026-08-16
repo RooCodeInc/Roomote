@@ -74,6 +74,51 @@ describe('getTaskMessageEnvelopes', () => {
         metadata: { visibleInTranscript: false },
         payload: {},
       })),
+      {
+        runId: run.id,
+        taskId: task.id,
+        ts: 3_000,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user' as const,
+        protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+        contentBlocks: [
+          { type: 'text' as const, text: '<workflow>internal</workflow>' },
+        ],
+        payload: {},
+      },
+      {
+        runId: run.id,
+        taskId: task.id,
+        ts: 3_001,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user' as const,
+        protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+        contentBlocks: [],
+        payload: {
+          prompt: [
+            {
+              type: 'text',
+              text: '<environment-instructions>internal</environment-instructions>',
+            },
+          ],
+        },
+      },
+      {
+        runId: run.id,
+        taskId: task.id,
+        ts: 4_000,
+        eventType: ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        role: 'user' as const,
+        protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+        contentBlocks: [
+          {
+            type: 'text' as const,
+            text: '<workflow>explicitly visible</workflow>',
+          },
+        ],
+        metadata: { visibleInTranscript: true },
+        payload: {},
+      },
     ]);
 
     const messages = await getTaskMessageEnvelopes({
@@ -83,8 +128,8 @@ describe('getTaskMessageEnvelopes', () => {
     });
 
     expect(messages.map((message) => message.text)).toEqual([
-      'second',
       'third',
+      '<workflow>explicitly visible</workflow>',
     ]);
   });
 });
