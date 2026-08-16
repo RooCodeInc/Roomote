@@ -262,6 +262,7 @@ export async function answerFastAgentQuestion({
   threadContext = [],
   userId,
   apiBaseUrl,
+  slackTeamId,
   slackChannel,
   slackThreadTs,
   currentMessageTs,
@@ -273,6 +274,7 @@ export async function answerFastAgentQuestion({
   threadContext?: FastAgentSlackThreadMessage[];
   userId: string;
   apiBaseUrl?: string;
+  slackTeamId: string;
   slackChannel: string;
   slackThreadTs: string;
   currentMessageTs?: string;
@@ -290,6 +292,7 @@ export async function answerFastAgentQuestion({
         getAvailableEnvironments(),
         getOrCreateFastAgentSession({
           userId,
+          slackTeamId,
           slackChannel,
           slackThreadTs,
         }),

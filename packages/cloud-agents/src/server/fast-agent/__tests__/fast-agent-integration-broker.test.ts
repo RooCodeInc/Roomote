@@ -35,12 +35,14 @@ vi.mock('../../mcp-tool-client', () => ({
 
 import {
   callFastAgentIntegration,
+  clearFastAgentIntegrationToolCache,
   listFastAgentIntegrations,
 } from '../fast-agent-integration-broker';
 
 describe('fast-agent integration broker', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearFastAgentIntegrationToolCache();
     mocks.enabledRows = [];
     mocks.select.mockImplementation(() => ({
       from: () => ({
@@ -87,6 +89,45 @@ describe('fast-agent integration broker', () => {
     expect(integrations.map((integration) => integration.id)).toEqual([
       'notion',
     ]);
+  });
+
+  it('reuses discovered tools across fast turns', async () => {
+    mocks.enabledRows = [{ mcpId: 'notion' }];
+
+    await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.example.com',
+    });
+    await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.example.com',
+    });
+
+    expect(mocks.listMcpTools).toHaveBeenCalledOnce();
+  });
+
+  it('does not cache failed tool discovery', async () => {
+    mocks.enabledRows = [{ mcpId: 'notion' }];
+    mocks.listMcpTools
+      .mockRejectedValueOnce(new Error('temporary MCP failure'))
+      .mockResolvedValueOnce([{ name: 'search' }]);
+
+    await expect(
+      listFastAgentIntegrations({
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+      }),
+    ).resolves.toEqual([]);
+    await expect(
+      listFastAgentIntegrations({
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ id: 'notion', tools: [{ name: 'search' }] }),
+    ]);
+
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
   });
 
   it('rejects tools outside the discovered allowlist without making a call', async () => {

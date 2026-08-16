@@ -13,30 +13,56 @@ type FastAgentSessionRecord = Pick<SlackQuickAnswer, 'id'> & {
 };
 
 function buildFastAgentSessionWhere({
+  slackTeamId,
   slackChannel,
   slackThreadTs,
 }: {
+  slackTeamId: string;
   slackChannel: string;
   slackThreadTs: string;
 }) {
+  const scopedSlackChannel = buildFastAgentSessionChannelKey({
+    slackTeamId,
+    slackChannel,
+  });
+
   return and(
-    eq(slackQuickAnswers.slackChannel, slackChannel),
+    eq(slackQuickAnswers.slackChannel, scopedSlackChannel),
     eq(slackQuickAnswers.slackThreadTs, slackThreadTs),
   );
 }
 
+export function buildFastAgentSessionChannelKey({
+  slackTeamId,
+  slackChannel,
+}: {
+  slackTeamId: string;
+  slackChannel: string;
+}): string {
+  // The existing column and unique index predate multi-workspace scoping.
+  // Qualifying the value keeps N-1 rollback compatibility without a migration.
+  return `${slackTeamId}:${slackChannel}`;
+}
+
 export async function getOrCreateFastAgentSession({
   userId,
+  slackTeamId,
   slackChannel,
   slackThreadTs,
 }: {
   userId: string;
+  slackTeamId: string;
   slackChannel: string;
   slackThreadTs: string;
 }): Promise<FastAgentSessionRecord> {
   const where = buildFastAgentSessionWhere({
+    slackTeamId,
     slackChannel,
     slackThreadTs,
+  });
+  const scopedSlackChannel = buildFastAgentSessionChannelKey({
+    slackTeamId,
+    slackChannel,
   });
 
   const existingSession = await db.query.slackQuickAnswers.findFirst({
@@ -58,7 +84,7 @@ export async function getOrCreateFastAgentSession({
     .insert(slackQuickAnswers)
     .values({
       userId,
-      slackChannel,
+      slackChannel: scopedSlackChannel,
       slackThreadTs,
       messages: [],
     })
@@ -96,14 +122,20 @@ export async function getOrCreateFastAgentSession({
 }
 
 export async function hasFastAgentSession({
+  slackTeamId,
   slackChannel,
   slackThreadTs,
 }: {
+  slackTeamId: string;
   slackChannel: string;
   slackThreadTs: string;
 }): Promise<boolean> {
   const session = await db.query.slackQuickAnswers.findFirst({
-    where: buildFastAgentSessionWhere({ slackChannel, slackThreadTs }),
+    where: buildFastAgentSessionWhere({
+      slackTeamId,
+      slackChannel,
+      slackThreadTs,
+    }),
     columns: { id: true },
   });
 

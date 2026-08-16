@@ -6,7 +6,6 @@ import {
   syncAutoStartChannelCacheBestEffort,
 } from '@roomote/redis';
 import {
-  getTaskUrl,
   hasFastAgentSession,
   ROUTING_AUTO_CONFIRM_TIMEOUT_MS,
 } from '@roomote/cloud-agents/server';
@@ -25,7 +24,6 @@ import {
   showConnectAccount,
   showTaskConfiguration,
   handleSlackRoutingCorrection,
-  startSlackAppMentionTask,
   startAutoRoutedSlackTask,
   type SlackEvent,
   type SlackNotifier,
@@ -38,7 +36,6 @@ import {
 } from '@roomote/db/server';
 import {
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
-  ALL_REPOSITORIES,
   type ChannelAutoStartLaunchMode,
   DEFAULT_CHANNEL_AUTO_START_LAUNCH_MODE,
   type TaskInitiator,
@@ -61,6 +58,7 @@ import {
   isFastCommandInvocation,
   processFastAgentMessage,
 } from './fast-agent.js';
+import { createFastAgentTaskLauncher } from './fast-agent-task-launcher.js';
 import { processSnapshotResume } from './snapshot-resume.js';
 import {
   dispatchSlackThreadFollowUp,
@@ -501,6 +499,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     eligibilityReason = 'pending-routing-confirmation';
   } else {
     const isFastAgentThread = await hasFastAgentSession({
+      slackTeamId: teamId,
       slackChannel: event.channel,
       slackThreadTs: event.thread_ts,
     });
@@ -1574,39 +1573,7 @@ function startFastAgentResponse(params: {
   processFastAgentMessage({
     ...fastAgentParams,
     apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
-    launchTask: async ({ prompt, environmentId }) => {
-      const threadId = params.event.thread_ts || params.event.ts;
-      const launch = await startSlackAppMentionTask({
-        initiator: { kind: 'user', userId: params.userId },
-        trigger: 'message',
-        channel: params.event.channel,
-        teamId: params.teamId,
-        teamDomain: params.slackInstallation.teamDomain ?? undefined,
-        slackUserId: params.event.user ?? params.userMapping.slackUserId,
-        persistedSlackUserId: params.userMapping.slackUserId,
-        text: prompt,
-        ts: params.event.ts,
-        threadTs: threadId,
-        repo: ALL_REPOSITORIES,
-        ...(environmentId ? { environmentId } : {}),
-      });
-
-      if (!launch.taskId) {
-        return {
-          success: false as const,
-          error: 'The task launch did not return a task ID.',
-        };
-      }
-
-      return {
-        success: true as const,
-        taskId: launch.taskId,
-        taskUrl: getTaskUrl({
-          taskId: launch.taskId,
-          utm: { source: 'slack', campaign: 'fast-delegation' },
-        }),
-      };
-    },
+    launchTask: createFastAgentTaskLauncher(params),
   }).catch((error) => {
     console.error(
       errorLogPrefix,
@@ -1736,6 +1703,7 @@ async function handleSlackEntryEvent(params: {
   const isFastAgentContinuation = isRemovedEvalCommandInvocation(event.text)
     ? false
     : await hasFastAgentSession({
+        slackTeamId: teamId,
         slackChannel: event.channel,
         slackThreadTs: threadId,
       });

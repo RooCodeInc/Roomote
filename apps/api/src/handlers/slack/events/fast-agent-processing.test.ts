@@ -66,6 +66,13 @@ describe('processFastAgentMessage', () => {
     expect(slack.addReaction).not.toHaveBeenCalled();
     expect(slack.removeReaction).not.toHaveBeenCalled();
     expect(mocks.answerQuestion).toHaveBeenCalledOnce();
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ slackTeamId: 'T123' }),
+    );
+    expect(mocks.acquireLock).toHaveBeenCalledWith(
+      expect.stringContaining('T123:D123:100.001'),
+      expect.anything(),
+    );
     expect(mocks.postThreadMessage).toHaveBeenCalledOnce();
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
   });

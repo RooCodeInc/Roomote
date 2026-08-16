@@ -129,6 +129,11 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
         threadReplyEvent({ user: 'U111', ts: '102.000', text: 'How are you?' }),
       ),
     ).resolves.toMatchObject({ shouldRoute: true });
+    expect(hasFastAgentSessionMock).toHaveBeenCalledWith({
+      slackTeamId: 'T123',
+      slackChannel: 'C123',
+      slackThreadTs: THREAD_TS,
+    });
     expect(findRoomoteOwnedSlackThreadMock).not.toHaveBeenCalled();
   });
 

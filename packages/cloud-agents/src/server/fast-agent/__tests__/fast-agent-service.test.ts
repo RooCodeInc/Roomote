@@ -41,6 +41,7 @@ const baseParams = {
   question: 'What does this service do?',
   userId: 'user-1',
   apiBaseUrl: 'https://api.example.com',
+  slackTeamId: 'team-1',
   slackChannel: 'channel-1',
   slackThreadTs: '100.1',
   currentMessageTs: '100.2',
@@ -86,6 +87,12 @@ describe('answerFastAgentQuestion', () => {
     });
 
     expect(result).toBe('It coordinates incoming requests.');
+    expect(mocks.getSession).toHaveBeenCalledWith({
+      userId: 'user-1',
+      slackTeamId: 'team-1',
+      slackChannel: 'channel-1',
+      slackThreadTs: '100.1',
+    });
     expect(postSlackReply).toHaveBeenCalledWith(
       expect.objectContaining({ text: 'It coordinates incoming requests.' }),
     );

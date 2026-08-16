@@ -71,7 +71,7 @@ export async function processFastAgentMessage(params: {
   } = params;
   const threadId = event.thread_ts || event.ts;
   const releaseFastAgentLock = await acquireRedisLock(
-    `${SLACK_FAST_AGENT_LOCK_PREFIX}${threadId}`,
+    `${SLACK_FAST_AGENT_LOCK_PREFIX}${teamId}:${event.channel}:${threadId}`,
     { ttlSeconds: FAST_AGENT_LOCK_TTL_SECONDS },
   );
 
@@ -146,6 +146,7 @@ export async function processFastAgentMessage(params: {
       threadContext: serializedThreadContext,
       userId,
       apiBaseUrl,
+      slackTeamId: teamId,
       slackChannel: event.channel,
       slackThreadTs: threadId,
       currentMessageTs: event.ts,

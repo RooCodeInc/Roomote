@@ -32,6 +32,44 @@ type BrokerContext = {
   apiBaseUrl?: string;
 };
 
+const FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS = 5 * 60_000;
+
+type IntegrationToolCacheEntry = {
+  expiresAt: number;
+  tools: Promise<McpToolDefinition[]>;
+};
+
+const integrationToolCache = new Map<string, IntegrationToolCacheEntry>();
+
+async function listCachedIntegrationTools(options: {
+  url: string;
+  headers: Record<string, string>;
+}): Promise<McpToolDefinition[]> {
+  const cached = integrationToolCache.get(options.url);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.tools;
+  }
+
+  const tools = listMcpTools(options);
+  integrationToolCache.set(options.url, {
+    expiresAt: Date.now() + FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS,
+    tools,
+  });
+
+  try {
+    return await tools;
+  } catch (error) {
+    if (integrationToolCache.get(options.url)?.tools === tools) {
+      integrationToolCache.delete(options.url);
+    }
+    throw error;
+  }
+}
+
+export function clearFastAgentIntegrationToolCache(): void {
+  integrationToolCache.clear();
+}
+
 function isFastModeIntegration(
   integration: ReturnType<typeof getMcpIntegration>,
 ): integration is NonNullable<ReturnType<typeof getMcpIntegration>> {
@@ -111,7 +149,7 @@ export async function listFastAgentIntegrations(
   const results = await Promise.allSettled(
     candidates.map(async (integration) => ({
       ...integration,
-      tools: await listMcpTools({
+      tools: await listCachedIntegrationTools({
         url: integrationProxyUrl(apiBaseUrl, integration.id),
         headers: { Authorization: `Bearer ${authToken}` },
       }),
