@@ -1,8 +1,10 @@
 const mocks = vi.hoisted(() => ({
-  enabledRows: [] as Array<{ mcpId: string }>,
+  enabledRows: [] as Array<{ mcpId: string; disabledTools?: string[] | null }>,
   createAuthToken: vi.fn(),
   listMcpTools: vi.fn(),
   callMcpTool: vi.fn(),
+  beginIntegrationCall: vi.fn(),
+  completeIntegrationCall: vi.fn(),
   select: vi.fn(),
   findGithubInstallation: vi.fn(),
 }));
@@ -12,13 +14,19 @@ vi.mock('@roomote/auth', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
+  beginSlackFastIntegrationCall: mocks.beginIntegrationCall,
+  completeSlackFastIntegrationCall: mocks.completeIntegrationCall,
   db: {
     select: mocks.select,
     query: {
       githubInstallations: { findFirst: mocks.findGithubInstallation },
     },
   },
-  deploymentMcpEnablements: { mcpId: 'mcpId', enabled: 'enabled' },
+  deploymentMcpEnablements: {
+    mcpId: 'mcpId',
+    enabled: 'enabled',
+    disabledTools: 'disabledTools',
+  },
   eq: vi.fn(() => 'enabled-filter'),
   githubInstallations: { suspendedAt: 'suspendedAt' },
   isNull: vi.fn(() => 'not-suspended-filter'),
@@ -39,6 +47,16 @@ import {
   listFastAgentIntegrations,
 } from '../fast-agent-integration-broker';
 
+const auditContext = {
+  userId: 'user-1',
+  apiBaseUrl: 'https://api.example.com',
+  sessionId: 'session-1',
+  slackTeamId: 'team-1',
+  slackChannel: 'channel-1',
+  slackThreadTs: '100.1',
+  slackMessageTs: '100.2',
+};
+
 describe('fast-agent integration broker', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -51,6 +69,11 @@ describe('fast-agent integration broker', () => {
     }));
     mocks.createAuthToken.mockResolvedValue('control-plane-token');
     mocks.findGithubInstallation.mockResolvedValue(undefined);
+    mocks.beginIntegrationCall.mockResolvedValue({
+      id: 'audit-1',
+      startedAt: new Date('2026-08-16T00:00:00.000Z'),
+    });
+    mocks.completeIntegrationCall.mockResolvedValue(undefined);
     mocks.listMcpTools.mockResolvedValue([
       { name: 'search', inputSchema: { type: 'object' } },
     ]);
@@ -106,6 +129,17 @@ describe('fast-agent integration broker', () => {
     expect(mocks.listMcpTools).toHaveBeenCalledOnce();
   });
 
+  it('excludes tools disabled by the deployment', async () => {
+    mocks.enabledRows = [{ mcpId: 'notion', disabledTools: ['search'] }];
+
+    const integrations = await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.example.com',
+    });
+
+    expect(integrations).toEqual([]);
+  });
+
   it('does not cache failed tool discovery', async () => {
     mocks.enabledRows = [{ mcpId: 'notion' }];
     mocks.listMcpTools
@@ -133,7 +167,7 @@ describe('fast-agent integration broker', () => {
   it('rejects tools outside the discovered allowlist without making a call', async () => {
     await expect(
       callFastAgentIntegration(
-        { userId: 'user-1', apiBaseUrl: 'https://api.example.com' },
+        auditContext,
         [
           {
             id: 'notion',
@@ -146,13 +180,14 @@ describe('fast-agent integration broker', () => {
       ),
     ).rejects.toThrow('tool is not available to fast mode');
     expect(mocks.callMcpTool).not.toHaveBeenCalled();
+    expect(mocks.beginIntegrationCall).not.toHaveBeenCalled();
   });
 
   it('calls an allowlisted tool through a fixed authenticated proxy URL', async () => {
     mocks.callMcpTool.mockResolvedValue({ results: ['Roadmap'] });
 
     await callFastAgentIntegration(
-      { userId: 'user-1', apiBaseUrl: 'https://api.example.com' },
+      auditContext,
       [
         {
           id: 'notion',
@@ -173,7 +208,71 @@ describe('fast-agent integration broker', () => {
       headers: { Authorization: 'Bearer control-plane-token' },
       toolName: 'search',
       args: { query: 'roadmap' },
-      toolCallId: 'fast:notion:search',
+      toolCallId: 'fast:audit-1:notion:search',
+    });
+    expect(mocks.beginIntegrationCall).toHaveBeenCalledWith({
+      slackQuickAnswerId: 'session-1',
+      userId: 'user-1',
+      slackTeamId: 'team-1',
+      slackChannel: 'channel-1',
+      slackThreadTs: '100.1',
+      slackMessageTs: '100.2',
+      integrationId: 'notion',
+      toolName: 'search',
+      arguments: { query: 'roadmap' },
+    });
+    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith({
+      id: 'audit-1',
+      status: 'succeeded',
+      resultPreview: '{"results":["Roadmap"]}',
+      startedAt: new Date('2026-08-16T00:00:00.000Z'),
+    });
+  });
+
+  it('does not execute a tool when its durable audit cannot be created', async () => {
+    mocks.beginIntegrationCall.mockRejectedValue(new Error('database offline'));
+
+    await expect(
+      callFastAgentIntegration(
+        auditContext,
+        [
+          {
+            id: 'notion',
+            name: 'Notion',
+            description: 'Knowledge',
+            tools: [{ name: 'search' }],
+          },
+        ],
+        { integrationId: 'notion', toolName: 'search', args: {} },
+      ),
+    ).rejects.toThrow('database offline');
+
+    expect(mocks.callMcpTool).not.toHaveBeenCalled();
+  });
+
+  it('records a failed tool call and preserves its original error', async () => {
+    mocks.callMcpTool.mockRejectedValue(new Error('integration unavailable'));
+
+    await expect(
+      callFastAgentIntegration(
+        auditContext,
+        [
+          {
+            id: 'notion',
+            name: 'Notion',
+            description: 'Knowledge',
+            tools: [{ name: 'search' }],
+          },
+        ],
+        { integrationId: 'notion', toolName: 'search', args: {} },
+      ),
+    ).rejects.toThrow('integration unavailable');
+
+    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith({
+      id: 'audit-1',
+      status: 'failed',
+      error: 'integration unavailable',
+      startedAt: new Date('2026-08-16T00:00:00.000Z'),
     });
   });
 });

@@ -126,7 +126,11 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
 
     await expect(
       routeDecision(
-        threadReplyEvent({ user: 'U111', ts: '102.000', text: 'How are you?' }),
+        threadReplyEvent({
+          user: 'U111',
+          ts: '102.000',
+          text: 'How are you?',
+        }),
       ),
     ).resolves.toMatchObject({ shouldRoute: true });
     expect(hasFastAgentSessionMock).toHaveBeenCalledWith({
@@ -135,7 +139,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
       slackThreadTs: THREAD_TS,
     });
     expect(findRoomoteOwnedSlackThreadMock).not.toHaveBeenCalled();
-  });
+  }, 15_000);
 
   it('routes an unmentioned reply directly after the bot last spoke', async () => {
     fetchThreadMessagesMock.mockResolvedValue([

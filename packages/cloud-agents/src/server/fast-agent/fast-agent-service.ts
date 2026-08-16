@@ -346,7 +346,15 @@ export async function answerFastAgentQuestion({
       } else {
         try {
           integrationResult = await callFastAgentIntegration(
-            { userId, apiBaseUrl },
+            {
+              userId,
+              apiBaseUrl,
+              sessionId: session.id,
+              slackTeamId,
+              slackChannel,
+              slackThreadTs,
+              slackMessageTs: currentMessageTs ?? slackThreadTs,
+            },
             availableIntegrations,
             {
               integrationId,
@@ -379,35 +387,40 @@ export async function answerFastAgentQuestion({
     let responseText = decision.response.trim();
 
     if (decision.action === 'launch_task') {
-      const taskPrompt = decision.taskPrompt?.trim();
-      const validEnvironmentIds = new Set(
-        availableEnvironments.map((environment) => environment.id),
-      );
-
-      if (!taskPrompt) {
-        responseText = 'What work would you like me to delegate?';
-      } else if (
-        decision.environmentId &&
-        !validEnvironmentIds.has(decision.environmentId)
-      ) {
+      if (activeTaskId) {
         responseText =
-          'I could not find that environment. Which configured workspace should I use?';
-      } else if (!launchTask) {
-        responseText = 'Task delegation is unavailable in this conversation.';
+          'There is already an active task in this Slack thread, so I did not start another task or send it that instruction. If the work belongs to the active task, tell me to send it there; otherwise start a new Slack thread.';
       } else {
-        const launchResult = await launchTask({
-          prompt: taskPrompt,
-          environmentId: decision.environmentId,
-        });
-        responseText = launchResult.success
-          ? [
-              responseText ||
-                'I started the work and will keep it in this thread.',
-              launchResult.taskUrl
-                ? `[Open task](${launchResult.taskUrl})`
-                : `Task ID: ${launchResult.taskId}`,
-            ].join('\n\n')
-          : `I could not launch that work: ${launchResult.error}`;
+        const taskPrompt = decision.taskPrompt?.trim();
+        const validEnvironmentIds = new Set(
+          availableEnvironments.map((environment) => environment.id),
+        );
+
+        if (!taskPrompt) {
+          responseText = 'What work would you like me to delegate?';
+        } else if (
+          decision.environmentId &&
+          !validEnvironmentIds.has(decision.environmentId)
+        ) {
+          responseText =
+            'I could not find that environment. Which configured workspace should I use?';
+        } else if (!launchTask) {
+          responseText = 'Task delegation is unavailable in this conversation.';
+        } else {
+          const launchResult = await launchTask({
+            prompt: taskPrompt,
+            environmentId: decision.environmentId,
+          });
+          responseText = launchResult.success
+            ? [
+                responseText ||
+                  'I started the work and will keep it in this thread.',
+                launchResult.taskUrl
+                  ? `[Open task](${launchResult.taskUrl})`
+                  : `Task ID: ${launchResult.taskId}`,
+              ].join('\n\n')
+            : `I could not launch that work: ${launchResult.error}`;
+        }
       }
     } else if (decision.action === 'send_task_message') {
       const taskMessage = decision.taskMessage?.trim();

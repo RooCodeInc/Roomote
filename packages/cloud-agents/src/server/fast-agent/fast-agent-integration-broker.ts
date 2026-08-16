@@ -1,5 +1,7 @@
 import { createAuthToken } from '@roomote/auth';
 import {
+  beginSlackFastIntegrationCall,
+  completeSlackFastIntegrationCall,
   db,
   deploymentMcpEnablements,
   eq,
@@ -9,6 +11,7 @@ import {
 import {
   getMcpIntegration,
   getMcpIntegrationConnectionScope,
+  formatErrorForLog,
   isCredentialOnlyMcpIntegration,
 } from '@roomote/types';
 
@@ -30,6 +33,14 @@ export type FastAgentIntegration = {
 type BrokerContext = {
   userId: string;
   apiBaseUrl?: string;
+};
+
+type IntegrationAuditContext = BrokerContext & {
+  sessionId: string;
+  slackTeamId: string;
+  slackChannel: string;
+  slackThreadTs: string;
+  slackMessageTs: string;
 };
 
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS = 5 * 60_000;
@@ -105,14 +116,18 @@ async function resolveBrokerAuth(context: BrokerContext) {
 
 /**
  * Deployment integrations only. Fast mode never receives MCP server configs,
- * local transports, filesystem tools, or arbitrary proxy URLs.
+ * local transports, filesystem tools, or arbitrary proxy URLs. Tools disabled
+ * by the deployment remain unavailable; calls to exposed tools are audited.
  */
 export async function listFastAgentIntegrations(
   context: BrokerContext,
 ): Promise<FastAgentIntegration[]> {
   const [enabled, githubInstallation] = await Promise.all([
     db
-      .select({ mcpId: deploymentMcpEnablements.mcpId })
+      .select({
+        mcpId: deploymentMcpEnablements.mcpId,
+        disabledTools: deploymentMcpEnablements.disabledTools,
+      })
       .from(deploymentMcpEnablements)
       .where(eq(deploymentMcpEnablements.enabled, true)),
     isRouterMcpServerEnabled('github')
@@ -123,14 +138,19 @@ export async function listFastAgentIntegrations(
       : Promise.resolve(undefined),
   ]);
 
-  const candidates = enabled
-    .map(({ mcpId }) => getMcpIntegration(mcpId))
-    .filter(isFastModeIntegration)
-    .map((integration) => ({
-      id: integration.id,
-      name: integration.name,
-      description: integration.description,
-    }));
+  const candidates = enabled.flatMap(({ mcpId, disabledTools }) => {
+    const integration = getMcpIntegration(mcpId);
+    return isFastModeIntegration(integration)
+      ? [
+          {
+            id: integration.id,
+            name: integration.name,
+            description: integration.description,
+            disabledTools: new Set(disabledTools ?? []),
+          },
+        ]
+      : [];
+  });
 
   if (githubInstallation) {
     candidates.push({
@@ -138,6 +158,7 @@ export async function listFastAgentIntegrations(
       name: 'GitHub',
       description:
         'Read repositories, code, issues, pull requests, commits, and recent activity available to the deployment GitHub App.',
+      disabledTools: new Set<string>(),
     });
   }
 
@@ -149,22 +170,39 @@ export async function listFastAgentIntegrations(
   const results = await Promise.allSettled(
     candidates.map(async (integration) => ({
       ...integration,
-      tools: await listCachedIntegrationTools({
-        url: integrationProxyUrl(apiBaseUrl, integration.id),
-        headers: { Authorization: `Bearer ${authToken}` },
-      }),
+      tools: (
+        await listCachedIntegrationTools({
+          url: integrationProxyUrl(apiBaseUrl, integration.id),
+          headers: { Authorization: `Bearer ${authToken}` },
+        })
+      ).filter((tool) => !integration.disabledTools.has(tool.name)),
     })),
   );
 
   return results.flatMap((result) =>
     result.status === 'fulfilled' && result.value.tools.length > 0
-      ? [result.value]
+      ? [
+          {
+            id: result.value.id,
+            name: result.value.name,
+            description: result.value.description,
+            tools: result.value.tools,
+          },
+        ]
       : [],
   );
 }
 
+function serializeAuditPreview(value: unknown, maxLength: number): string {
+  try {
+    return (JSON.stringify(value) ?? String(value)).slice(0, maxLength);
+  } catch {
+    return '[Unserializable integration result]';
+  }
+}
+
 export async function callFastAgentIntegration(
-  context: BrokerContext,
+  context: IntegrationAuditContext,
   available: FastAgentIntegration[],
   request: {
     integrationId: string;
@@ -182,12 +220,57 @@ export async function callFastAgentIntegration(
     throw new Error('That integration tool is not available to fast mode.');
   }
 
-  const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
-  return callMcpTool({
-    url: integrationProxyUrl(apiBaseUrl, integration.id),
-    headers: { Authorization: `Bearer ${authToken}` },
+  // Fail closed: an integration tool never executes unless its durable audit
+  // record exists first.
+  const audit = await beginSlackFastIntegrationCall({
+    slackQuickAnswerId: context.sessionId,
+    userId: context.userId,
+    slackTeamId: context.slackTeamId,
+    slackChannel: context.slackChannel,
+    slackThreadTs: context.slackThreadTs,
+    slackMessageTs: context.slackMessageTs,
+    integrationId: integration.id,
     toolName: request.toolName,
-    args: request.args,
-    toolCallId: `fast:${integration.id}:${request.toolName}`,
+    arguments: request.args,
   });
+
+  try {
+    const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
+    const result = await callMcpTool({
+      url: integrationProxyUrl(apiBaseUrl, integration.id),
+      headers: { Authorization: `Bearer ${authToken}` },
+      toolName: request.toolName,
+      args: request.args,
+      toolCallId: `fast:${audit.id}:${integration.id}:${request.toolName}`,
+    });
+
+    try {
+      await completeSlackFastIntegrationCall({
+        id: audit.id,
+        status: 'succeeded',
+        resultPreview: serializeAuditPreview(result, 30_000),
+        startedAt: audit.startedAt,
+      });
+    } catch (error) {
+      console.warn(
+        `[Fast Agent] Could not complete integration audit ${audit.id}: ${formatErrorForLog(error)}`,
+      );
+    }
+
+    return result;
+  } catch (error) {
+    try {
+      await completeSlackFastIntegrationCall({
+        id: audit.id,
+        status: 'failed',
+        error: formatErrorForLog(error).slice(0, 10_000),
+        startedAt: audit.startedAt,
+      });
+    } catch (auditError) {
+      console.warn(
+        `[Fast Agent] Could not complete failed integration audit ${audit.id}: ${formatErrorForLog(auditError)}`,
+      );
+    }
+    throw error;
+  }
 }

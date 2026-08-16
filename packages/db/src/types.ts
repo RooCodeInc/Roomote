@@ -46,6 +46,7 @@ import type {
   teamsInstallations,
   teamsUserMappings,
   slackQuickAnswers,
+  slackFastIntegrationCalls,
   linearPendingSelections,
   environmentVariables,
   environments,
@@ -268,6 +269,18 @@ export type SlackQuickAnswer = typeof slackQuickAnswers.$inferSelect;
 
 export type CreateSlackQuickAnswer = Omit<
   typeof slackQuickAnswers.$inferInsert,
+  Generated
+>;
+
+/**
+ * slackFastIntegrationCalls
+ */
+
+export type SlackFastIntegrationCall =
+  typeof slackFastIntegrationCalls.$inferSelect;
+
+export type CreateSlackFastIntegrationCall = Omit<
+  typeof slackFastIntegrationCalls.$inferInsert,
   Generated
 >;
 

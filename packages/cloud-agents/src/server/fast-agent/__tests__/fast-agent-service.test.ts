@@ -127,6 +127,29 @@ describe('answerFastAgentQuestion', () => {
     expect(result).toContain('[Open task]');
   });
 
+  it('does not launch or message another task when a task is already active', async () => {
+    mocks.generateObject.mockResolvedValue({
+      object: decision({
+        action: 'launch_task',
+        response: "I'll start that in App.",
+        taskPrompt: 'Add the regression test.',
+        environmentId: 'env-1',
+      }),
+    });
+    const launchTask = vi.fn();
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      activeTaskId: 'task-1',
+      launchTask,
+      postSlackReply: vi.fn().mockResolvedValue(undefined),
+    });
+
+    expect(launchTask).not.toHaveBeenCalled();
+    expect(mocks.sendTaskMessage).not.toHaveBeenCalled();
+    expect(result).toContain('already an active task');
+  });
+
   it('sends only an explicit task instruction to the active task', async () => {
     mocks.generateObject.mockResolvedValue({
       object: decision({
@@ -178,6 +201,23 @@ describe('answerFastAgentQuestion', () => {
     });
 
     expect(mocks.callIntegration).toHaveBeenCalledOnce();
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      {
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+        sessionId: 'session-1',
+        slackTeamId: 'team-1',
+        slackChannel: 'channel-1',
+        slackThreadTs: '100.1',
+        slackMessageTs: '100.2',
+      },
+      expect.any(Array),
+      {
+        integrationId: 'github',
+        toolName: 'search_code',
+        args: { query: 'orchestrator' },
+      },
+    );
     expect(mocks.generateObject).toHaveBeenCalledTimes(2);
     expect(result).toBe('The code is in the fast-agent module.');
   });
