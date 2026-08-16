@@ -129,8 +129,7 @@ export async function processFastAgentMessage(params: {
       );
     }
 
-    let didFailToReplyToSlack = false;
-    let didPostFinalAnswer = false;
+    let didSendVisibleResponse = false;
     const currentMessage = threadContext.find(
       (message) => message.ts === event.ts,
     );
@@ -156,34 +155,37 @@ export async function processFastAgentMessage(params: {
       senderDisplayName: currentMessage?.username,
       activeTaskId,
       launchTask,
-      postSlackReply: async ({ type, text }) => {
-        try {
-          const posted = await postSlackThreadMarkdownMessage({
-            slack,
-            channel: event.channel,
-            threadTs: threadId,
-            text,
-            sourceMessageTs: event.ts,
-            conversationLog: {
-              userId,
-              slackTeamId: teamId,
-              source: 'fast_agent',
-            },
-          });
-          if (posted && type === 'final_answer') {
-            didPostFinalAnswer = true;
-          }
-        } catch (error) {
-          didFailToReplyToSlack = true;
-          throw error;
+      postSlackReply: async ({ message }) => {
+        const posted = await postSlackThreadMarkdownMessage({
+          slack,
+          channel: event.channel,
+          threadTs: threadId,
+          text: message,
+          sourceMessageTs: event.ts,
+          conversationLog: {
+            userId,
+            slackTeamId: teamId,
+            source: 'fast_agent',
+          },
+        });
+        if (posted) {
+          didSendVisibleResponse = true;
         }
+      },
+      postSlackReaction: async ({ name, slackMessageTs }) => {
+        const added = await slack.addReaction({
+          channel: event.channel,
+          timestamp: slackMessageTs,
+          name,
+        });
+        if (!added) {
+          throw new Error(`Slack rejected the ${name} reaction.`);
+        }
+        didSendVisibleResponse = true;
       },
     });
 
-    if (
-      responseText.length > 0 &&
-      (didFailToReplyToSlack || !didPostFinalAnswer)
-    ) {
+    if (responseText.length > 0 && !didSendVisibleResponse) {
       await postSlackThreadMarkdownMessage({
         slack,
         channel: event.channel,

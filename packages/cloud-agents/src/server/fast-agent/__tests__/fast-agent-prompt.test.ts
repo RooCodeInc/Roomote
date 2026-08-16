@@ -23,6 +23,14 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('conversational orchestrator');
     expect(prompt).toContain('Task ID: task-1');
     expect(prompt).toContain('let me know how it goes');
+    expect(prompt).toContain('send_chat_reply');
+    expect(prompt).toContain('send_chat_reaction_emoji');
+    expect(prompt).toContain('There is no implicit final response');
+    expect(prompt).toContain(
+      'Do not add a reaction to every Fast mode message',
+    );
+    expect(prompt).toContain('"purpose"');
+    expect(prompt).not.toContain('Use "respond"');
     expect(prompt).toContain('no local filesystem, shell');
     expect(prompt).not.toContain(
       'Use the following organization-specific tone of voice for user-facing communication:',
