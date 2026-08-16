@@ -57,6 +57,11 @@ describe('buildFastAgentSystemPrompt', () => {
       'automatically performs one Brain query before making its first decision',
     );
     expect(prompt).toContain('one useful Brain result is usually enough');
+    expect(prompt).toContain(
+      "Never expose Brain's `source` field or other internal provenance metadata",
+    );
+    expect(prompt).toContain('Do not add a `Source:` line for Brain results');
+    expect(prompt).not.toContain('cite pages when relying on them');
     expect(prompt).not.toContain('sequential preflight');
     expect(prompt).not.toContain('proof of coverage');
     expect(prompt).toContain('- query:');
