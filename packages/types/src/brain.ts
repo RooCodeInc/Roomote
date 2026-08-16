@@ -32,7 +32,7 @@ export const BRAIN_PROXY_PATH = '/api/mcp/gbrain';
  * chosen from gbrain's own description, which is written for a different
  * product and routes to tools this deployment does not expose.
  */
-export const BRAIN_MCP_INSTRUCTIONS = `The \`gbrain\` server is this deployment's shared memory (the Brain). It holds memories distilled from completed tasks plus activity from connected integrations (pull requests, Slack channels, meeting notes, GitHub issues), each stored as a page with citations.
+export const BRAIN_MCP_READ_INSTRUCTIONS = `The \`gbrain\` server is this deployment's shared memory (the Brain). It holds memories distilled from completed tasks plus activity from connected integrations (pull requests, Slack channels, meeting notes, GitHub issues), each stored as a page with citations.
 
 ## Using what it knows
 
@@ -53,7 +53,9 @@ A result set that comes back populated is not proof of coverage, and one query r
 
 \`synthesize\` reasons across many pages and returns a cited answer with gap analysis, but it makes LLM calls on this deployment's own provider key and can take a minute. You are usually the better reasoner: prefer pulling the handful of pages you need with \`query\` and \`get_page\` and reasoning yourself. Reach for \`synthesize\` only when a question genuinely spans more pages than you want to read into context, and say when you used it.
 
-When the Brain genuinely has nothing on a question, say so rather than guessing. Cite Brain pages when you rely on them, so humans can verify.
+When the Brain genuinely has nothing on a question, say so rather than guessing. Cite Brain pages when you rely on them, so humans can verify.`;
+
+export const BRAIN_MCP_INSTRUCTIONS = `${BRAIN_MCP_READ_INSTRUCTIONS}
 
 ## Contributing what you learned
 

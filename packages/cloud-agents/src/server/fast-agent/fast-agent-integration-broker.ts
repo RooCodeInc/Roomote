@@ -1,4 +1,5 @@
 import { createAuthToken } from '@roomote/auth';
+import { Env, isBrainConfigured } from '@roomote/env';
 import {
   beginSlackFastIntegrationCall,
   completeSlackFastIntegrationCall,
@@ -9,6 +10,8 @@ import {
   isNull,
 } from '@roomote/db/server';
 import {
+  BRAIN_MCP_ID,
+  BRAIN_MCP_READ_INSTRUCTIONS,
   getMcpIntegration,
   getMcpIntegrationConnectionScope,
   formatErrorForLog,
@@ -27,7 +30,12 @@ export type FastAgentIntegration = {
   id: string;
   name: string;
   description: string;
+  instructions?: string;
   tools: McpToolDefinition[];
+};
+
+type FastAgentIntegrationCandidate = Omit<FastAgentIntegration, 'tools'> & {
+  disabledTools: Set<string>;
 };
 
 type BrokerContext = {
@@ -138,19 +146,32 @@ export async function listFastAgentIntegrations(
       : Promise.resolve(undefined),
   ]);
 
-  const candidates = enabled.flatMap(({ mcpId, disabledTools }) => {
-    const integration = getMcpIntegration(mcpId);
-    return isFastModeIntegration(integration)
-      ? [
-          {
-            id: integration.id,
-            name: integration.name,
-            description: integration.description,
-            disabledTools: new Set(disabledTools ?? []),
-          },
-        ]
-      : [];
-  });
+  const candidates: FastAgentIntegrationCandidate[] = enabled.flatMap(
+    ({ mcpId, disabledTools }) => {
+      const integration = getMcpIntegration(mcpId);
+      return isFastModeIntegration(integration)
+        ? [
+            {
+              id: integration.id,
+              name: integration.name,
+              description: integration.description,
+              disabledTools: new Set(disabledTools ?? []),
+            },
+          ]
+        : [];
+    },
+  );
+
+  if (isBrainConfigured(Env) && Env.R_GBRAIN_URL) {
+    candidates.push({
+      id: BRAIN_MCP_ID,
+      name: 'Brain',
+      description:
+        "Read this deployment's shared memory of completed tasks and connected integration activity.",
+      instructions: BRAIN_MCP_READ_INSTRUCTIONS,
+      disabledTools: new Set<string>(),
+    });
+  }
 
   if (githubInstallation) {
     candidates.push({
@@ -186,6 +207,7 @@ export async function listFastAgentIntegrations(
             id: result.value.id,
             name: result.value.name,
             description: result.value.description,
+            instructions: result.value.instructions,
             tools: result.value.tools,
           },
         ]

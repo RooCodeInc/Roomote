@@ -52,7 +52,7 @@ ${
     ? availableIntegrations
         .map(
           (integration) =>
-            `### ${integration.name} [integrationId: ${integration.id}]\n${integration.description}\n${integration.tools
+            `### ${integration.name} [integrationId: ${integration.id}]\n${integration.description}${integration.instructions ? `\n\n${integration.instructions}` : ''}\n${integration.tools
               .map(
                 (tool) =>
                   `- ${tool.name}: ${tool.description ?? 'No description'}\n  Input schema: ${JSON.stringify(tool.inputSchema ?? {})}`,

@@ -7,10 +7,17 @@ const mocks = vi.hoisted(() => ({
   completeIntegrationCall: vi.fn(),
   select: vi.fn(),
   findGithubInstallation: vi.fn(),
+  brainEnv: { R_GBRAIN_URL: undefined as string | undefined },
+  isBrainConfigured: vi.fn(),
 }));
 
 vi.mock('@roomote/auth', () => ({
   createAuthToken: mocks.createAuthToken,
+}));
+
+vi.mock('@roomote/env', () => ({
+  Env: mocks.brainEnv,
+  isBrainConfigured: mocks.isBrainConfigured,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -69,6 +76,8 @@ describe('fast-agent integration broker', () => {
     }));
     mocks.createAuthToken.mockResolvedValue('control-plane-token');
     mocks.findGithubInstallation.mockResolvedValue(undefined);
+    mocks.brainEnv.R_GBRAIN_URL = undefined;
+    mocks.isBrainConfigured.mockReturnValue(false);
     mocks.beginIntegrationCall.mockResolvedValue({
       id: 'audit-1',
       startedAt: new Date('2026-08-16T00:00:00.000Z'),
@@ -94,6 +103,60 @@ describe('fast-agent integration broker', () => {
       url: 'https://api.example.com/api/mcp-routing/github',
       headers: { Authorization: 'Bearer control-plane-token' },
     });
+  });
+
+  it('exposes the read-only Brain proxy when the Brain is configured', async () => {
+    mocks.brainEnv.R_GBRAIN_URL = 'http://gbrain:8931';
+    mocks.isBrainConfigured.mockReturnValue(true);
+
+    const integrations = await listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.example.com',
+    });
+
+    expect(integrations).toEqual([
+      expect.objectContaining({
+        id: 'gbrain',
+        name: 'Brain',
+        instructions: expect.stringContaining(
+          'Treat Brain recall as a sequential preflight',
+        ),
+        tools: [{ name: 'search', inputSchema: { type: 'object' } }],
+      }),
+    ]);
+    expect(mocks.listMcpTools).toHaveBeenCalledWith({
+      url: 'https://api.example.com/api/mcp/gbrain',
+      headers: { Authorization: 'Bearer control-plane-token' },
+    });
+  });
+
+  it('does not probe or expose Brain when it is not fully configured', async () => {
+    mocks.brainEnv.R_GBRAIN_URL = 'http://gbrain:8931';
+    mocks.isBrainConfigured.mockReturnValue(false);
+
+    await expect(
+      listFastAgentIntegrations({
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+      }),
+    ).resolves.toEqual([]);
+
+    expect(mocks.listMcpTools).not.toHaveBeenCalled();
+  });
+
+  it('does not expose a wired Brain whose proxy is not usable yet', async () => {
+    mocks.brainEnv.R_GBRAIN_URL = 'http://gbrain:8931';
+    mocks.isBrainConfigured.mockReturnValue(true);
+    mocks.listMcpTools.mockRejectedValue(
+      new Error('The Brain inference provider is not configured'),
+    );
+
+    await expect(
+      listFastAgentIntegrations({
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+      }),
+    ).resolves.toEqual([]);
   });
 
   it('excludes user-scoped, credential-only, and unknown integrations', async () => {
