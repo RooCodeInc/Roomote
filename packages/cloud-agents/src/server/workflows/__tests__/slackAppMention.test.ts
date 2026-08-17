@@ -4,6 +4,7 @@ import {
   type SlackAppMentionTask,
 } from '@roomote/types';
 import type { ResolvedTaskCommitAuthor } from '../../commit-author';
+import { buildChatResponseDecisionPolicy } from '../../chat-response-policy';
 
 import {
   buildChatProviderMessageInstructions,
@@ -99,11 +100,16 @@ describe('slackAppMention', () => {
       '`ack` and `progress` replies keep the Slack turn open, as does a `clarification` you can keep working past; a `clarification` whose answer the next step genuinely depends on ends the turn. Obey the prompt-provided `<slack_turn_policy>` block for whether the current Slack message can receive emoji reactions.',
     );
     expect(result.harnessInstructions).toContain('<slack_turn_lifecycle>');
+    for (const rule of Object.values(
+      buildChatResponseDecisionPolicy({ surface: 'slack' }),
+    )) {
+      expect(result.harnessInstructions).toContain(rule);
+    }
     expect(result.harnessInstructions).toContain(
       'A Slack user turn has a small lifecycle: acknowledge the turn when needed, report useful progress when there is useful new state, and close out when there is an answer, result, blocker, or a clear paused-waiting state. Slack uses this lifecycle for user-visible replies instead of treating Slack as an intermediary-update surface.',
     );
     expect(result.harnessInstructions).toContain(
-      '`ack`: Send one early Slack-visible acknowledgement before substantial work that will not post to Slack when the answer is not immediate. When the `<slack_turn_policy>` block says `prefer_emoji_ack="true"`, the latest directed user turn itself came from Slack, and a lightweight acknowledgement is enough, acknowledge with `send_chat_reaction_emoji`.',
+      '`ack`: Send one early Slack-visible acknowledgement before substantial work that will not otherwise post to Slack when the answer is not immediate.',
     );
     expect(result.harnessInstructions).toContain(
       'Do not use `request_user_input` as a generic opening acknowledgement; only use it when the task is already blocked on concrete input from the user.',
@@ -124,7 +130,7 @@ describe('slackAppMention', () => {
       'A `request_user_input` prompt or UI handoff never satisfies closeout on its own.',
     );
     expect(result.harnessInstructions).toContain(
-      '`clarification`: Ask lightweight non-secret questions with `send_chat_reply` only when thread context and available tools do not already resolve the question well enough to continue.',
+      '`clarification`: Ask one lightweight question with `send_chat_reply` only when conversation context and available tools do not already resolve it well enough to continue.',
     );
     expect(result.harnessInstructions).toContain(
       'It does not satisfy ack or closeout on its own.',
@@ -206,10 +212,10 @@ describe('slackAppMention', () => {
       'When a lifecycle reply is due, send it before running further tools. The only non-reply exception is `tool_search` when the needed Slack reply/post tool is not visible. This orders the reply ahead of more work; it does not cap the work you may do afterward in the same turn.',
     );
     expect(result.harnessInstructions).toContain(
-      'Sending an `ack` or `progress` reply does not end your turn. Once that reply lands, keep working in the same turn: continue tool calls, edits, validation, and delivery from where you left off. Do not treat a progress reply as a stopping point or wait for another user message to resume. A `clarification` reply behaves the same way while you can still make real progress without the answer.',
+      'An `ack` or `progress` reply does not end the turn. Keep working after sending it.',
     );
     expect(result.harnessInstructions).toContain(
-      'The turn ends on a `closeout` reply, on a `clarification` whose answer the next step genuinely depends on, or on an explicit user instruction to pause or stop. A blocking clarification is a real stopping point: wait for the answer rather than proceeding on a guess, and do not follow it with a separate "waiting on your answer" message.',
+      'The turn ends on a `closeout`, on a clarification whose answer the next step genuinely depends on, or on an explicit user instruction to pause or stop.',
     );
     expect(result.harnessInstructions).toContain(
       'Outside those cases, a reply that describes what you are about to do next is a `progress` reply, and you must actually do it in the same turn instead of stopping there. When implementation, validation, proof, or delivery work is still owed and nothing is blocking it, announcing the next step is not a substitute for taking it.',
@@ -254,7 +260,7 @@ describe('slackAppMention', () => {
       'When reactions are allowed and the latest directed user turn itself came from Slack, using `send_chat_reaction_emoji` on that current Slack message counts as answering that Slack turn. When the latest user turn did not come from Slack, `send_chat_reaction_emoji` does not count as satisfying the turn. When the user explicitly asks for a reaction on a different known Slack message, `add_reaction_to_slack_message` counts only when it targets that requested message.',
     );
     expect(result.harnessInstructions).toContain(
-      "Every new Slack user turn that you answer still needs its own fresh Slack-visible satisfaction tool call. A prior turn's `send_chat_reply`, `send_chat_reaction_emoji`, or `add_reaction_to_slack_message` call on a different message does not satisfy a later turn. A reaction only counts for the turn it actually answers.",
+      "Every new directed Slack user turn that you answer needs its own fresh Slack-visible response. A prior turn's reply or reaction does not satisfy a later turn.",
     );
     expect(result.harnessInstructions).not.toContain(
       'Because this run originated from Slack, apply these Slack thread obligations before top-level workflow routing.',
@@ -310,7 +316,7 @@ describe('slackAppMention', () => {
       'Before calling a Slack-visible reply tool, choose the current lifecycle purpose for the latest Slack user turn: `ack`, `progress`, `closeout`, or `clarification`. The message content should match that purpose.',
     );
     expect(result.harnessInstructions).toContain(
-      '`ack`: Send one early Slack-visible acknowledgement before substantial work that will not post to Slack when the answer is not immediate. When the `<slack_turn_policy>` block says `prefer_emoji_ack="true"`, the latest directed user turn itself came from Slack, and a lightweight acknowledgement is enough, acknowledge with `send_chat_reaction_emoji`.',
+      '`ack`: Send one early Slack-visible acknowledgement before substantial work that will not otherwise post to Slack when the answer is not immediate.',
     );
     expect(result.harnessInstructions).toContain(
       '`progress`: After an acknowledgement, send progress only when the update adds decision-useful state since the last Slack-visible reply',
