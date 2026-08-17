@@ -136,6 +136,17 @@ export interface McpConnectionNotionConfig {
 }
 
 /**
+ * Deployment-scoped Rippling HRIS configuration.
+ *
+ * The API token is used only by the server-side Brain collector and is
+ * expected to be encrypted before persistence.
+ */
+export interface McpConnectionRipplingConfig {
+  type: 'rippling';
+  encryptedApiToken: string;
+}
+
+/**
  * Deployment-scoped Granola connection config stored in mcpConnections.authConfig.
  *
  * The API key is expected to be encrypted before persistence.
@@ -238,6 +249,7 @@ export type McpConnectionAuthConfig =
   | McpConnectionSnowflakeConfig
   | McpConnectionAsanaConfig
   | McpConnectionNotionConfig
+  | McpConnectionRipplingConfig
   | McpConnectionGranolaConfig
   | McpConnectionElevenLabsConfig
   | McpConnectionVercelConfig
@@ -412,6 +424,15 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
     serverMode: 'native',
     instructions:
       'Use Notion for pages and data sources explicitly shared with the deployment integration. Content outside that connection boundary, including unshared private pages, is unavailable. Notion controls whether the connection may read, update, insert, or comment.',
+  },
+  {
+    id: 'rippling',
+    name: 'Rippling',
+    description: `Connect Rippling so Brain can keep an authoritative employee directory and reporting structure current for ${PRODUCT_NAME} tasks`,
+    icon: 'rippling',
+    connectionScope: 'deployment',
+    connectionMode: 'admin_configured',
+    serverMode: 'credential_only',
   },
   {
     id: 'jira',
@@ -951,6 +972,19 @@ export function isMcpConnectionNotionConfig(
     authConfig.type === 'notion' &&
     'encryptedToken' in authConfig &&
     typeof authConfig.encryptedToken === 'string',
+  );
+}
+
+export function isMcpConnectionRipplingConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionRipplingConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'rippling' &&
+    'encryptedApiToken' in authConfig &&
+    typeof authConfig.encryptedApiToken === 'string',
   );
 }
 

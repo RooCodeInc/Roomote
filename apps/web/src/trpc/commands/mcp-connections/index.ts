@@ -18,6 +18,7 @@ import {
   type McpConnectionRole,
   isMcpConnectionAsanaConfig,
   isMcpConnectionNotionConfig,
+  isMcpConnectionRipplingConfig,
   isMcpConnectionGranolaConfig,
   isMcpConnectionElevenLabsConfig,
   isMcpConnectionGrafanaConfig,
@@ -35,6 +36,7 @@ import {
 } from '@roomote/types';
 import { decrypt, encrypt } from '@roomote/db/encryption';
 import { getValidAccessToken } from '@roomote/sdk/server';
+import { validateRipplingConnection } from '@roomote/sdk/server/rippling-api';
 
 import type { UserAuthSuccess } from '@/types';
 import type { StaticOauthReadiness } from '@/lib/server/mcp-static-oauth';
@@ -45,6 +47,7 @@ import { MCP_TOOL_CATALOG_REQUIRES_PERSONAL_CONNECTION } from '@/lib/mcp-tool-er
 import type {
   SaveAsanaConnectionInput,
   SaveNotionConnectionInput,
+  SaveRipplingConnectionInput,
   SaveGranolaConnectionInput,
   SaveElevenLabsConnectionInput,
   SaveGrafanaConnectionInput,
@@ -828,6 +831,24 @@ export async function getNotionConnectionCommand(auth: UserAuthSuccess) {
   return { authStatus: connection.authStatus };
 }
 
+export async function getRipplingConnectionCommand(auth: UserAuthSuccess) {
+  assertAdmin(auth);
+
+  const connection = await db.query.mcpConnections.findFirst({
+    where: and(
+      eq(mcpConnections.mcpId, 'rippling'),
+      isNull(mcpConnections.userId),
+    ),
+    columns: { authConfig: true, authStatus: true },
+  });
+
+  if (!connection || !isMcpConnectionRipplingConfig(connection.authConfig)) {
+    return null;
+  }
+
+  return { authStatus: connection.authStatus };
+}
+
 export async function getGranolaConnectionCommand(auth: UserAuthSuccess) {
   assertAdmin(auth);
 
@@ -1249,6 +1270,92 @@ export async function saveNotionConnectionCommand(
     .insert(deploymentMcpEnablements)
     .values({
       mcpId: 'notion',
+      enabled: true,
+      enabledByUserId: auth.userId,
+    })
+    .onConflictDoUpdate({
+      target: [deploymentMcpEnablements.mcpId],
+      set: {
+        enabled: true,
+        enabledByUserId: auth.userId,
+        disabledTools: null,
+        updatedAt: new Date(),
+      },
+    });
+
+  return { authStatus: 'authenticated' as const };
+}
+
+export async function saveRipplingConnectionCommand(
+  auth: UserAuthSuccess,
+  input: SaveRipplingConnectionInput,
+) {
+  assertAdmin(auth);
+  assertCuratedIntegrationsEnabled();
+
+  const existingConnection = await db.query.mcpConnections.findFirst({
+    where: and(
+      eq(mcpConnections.mcpId, 'rippling'),
+      isNull(mcpConnections.userId),
+    ),
+    columns: { authConfig: true },
+  });
+  const existingConfig = isMcpConnectionRipplingConfig(
+    existingConnection?.authConfig,
+  )
+    ? existingConnection.authConfig
+    : null;
+  const nextEncryptedApiToken =
+    input.apiToken.length > 0
+      ? encrypt(input.apiToken)
+      : existingConfig?.encryptedApiToken;
+
+  if (!nextEncryptedApiToken) {
+    throw new Error(
+      'A Rippling API token is required when no token is already stored.',
+    );
+  }
+
+  const authConfig = {
+    type: 'rippling' as const,
+    encryptedApiToken: nextEncryptedApiToken,
+  };
+
+  await validateRipplingConnection(authConfig);
+
+  await db
+    .insert(mcpConnections)
+    .values({
+      userId: null,
+      mcpId: 'rippling',
+      connectionRole: 'default',
+      authConfig,
+      enabled: true,
+      authStatus: 'authenticated',
+    })
+    .onConflictDoUpdate({
+      target: [
+        mcpConnections.userId,
+        mcpConnections.mcpId,
+        mcpConnections.connectionRole,
+      ],
+      set: {
+        connectionRole: 'default',
+        authConfig,
+        accessToken: null,
+        refreshToken: null,
+        tokenExpiresAt: null,
+        scopes: null,
+        enabled: true,
+        authStatus: 'authenticated',
+        updatedAt: new Date(),
+      },
+    });
+
+  await db
+    .insert(deploymentMcpEnablements)
+    .values({
+      mcpId: 'rippling',
       enabled: true,
       enabledByUserId: auth.userId,
     })

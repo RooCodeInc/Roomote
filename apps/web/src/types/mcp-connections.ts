@@ -44,6 +44,14 @@ export type SaveNotionConnectionInput = z.infer<
   typeof saveNotionConnectionSchema
 >;
 
+export const saveRipplingConnectionSchema = z.object({
+  apiToken: z.string().transform((value) => value.trim()),
+});
+
+export type SaveRipplingConnectionInput = z.infer<
+  typeof saveRipplingConnectionSchema
+>;
+
 export const saveGranolaConnectionSchema = z.object({
   apiKey: z.string().transform((value) => value.trim()),
 });

@@ -158,6 +158,7 @@
           "integrations/pylon",
           "integrations/railway",
           "integrations/resend",
+          "integrations/rippling",
           "integrations/sentry",
           "integrations/snowflake",
           "integrations/supabase",
