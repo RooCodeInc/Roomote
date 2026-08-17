@@ -118,9 +118,10 @@ function submitResponse(): Response {
   );
 }
 
-function toolSynthesisResponse(input: {
-  answer: string;
-  sources: string[];
+function pageResponse(input: {
+  slug: string;
+  title?: string;
+  content?: string;
 }): Response {
   return new Response(
     JSON.stringify({
@@ -128,10 +129,9 @@ function toolSynthesisResponse(input: {
       id: 1,
       result: {
         structuredContent: {
-          answer: input.answer,
-          sources: input.sources,
-          gaps: [],
-          synthesis_status: 'ok',
+          slug: input.slug,
+          title: input.title ?? input.slug,
+          compiled_truth: input.content ?? `# ${input.title ?? input.slug}`,
         },
       },
     }),
@@ -733,13 +733,22 @@ describe('runBrainWeeklySynthesis', () => {
   });
 
   it('updates one ISO-week page from multiple cited daily digests', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      toolSynthesisResponse({
-        answer:
-          'A blocker persisted across both days [daily/digests/2026-08-17] [daily/digests/2026-08-18].',
-        sources: ['daily/digests/2026-08-17', 'daily/digests/2026-08-18'],
-      }),
-    );
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        pageResponse({
+          slug: 'daily/digests/2026-08-17',
+          title: 'Daily digest — 2026-08-17',
+          content: '# Monday\n\nA blocker appeared.',
+        }),
+      )
+      .mockResolvedValueOnce(
+        synthesisResponse({
+          answer:
+            'A blocker persisted across both days [daily/digests/2026-08-17] [daily/digests/2026-08-18].',
+          sources: ['daily/digests/2026-08-17', 'daily/digests/2026-08-18'],
+        }),
+      );
 
     const page = await runBrainWeeklySynthesis(
       { baseUrl: 'http://gbrain.test', token: 'read-token' },
@@ -759,19 +768,32 @@ describe('runBrainWeeklySynthesis', () => {
       baseUrl: 'http://gbrain.test',
       token: 'write-token',
     });
-    const synthesisRequest = fetchSpy.mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(synthesisRequest.body))).toMatchObject({
+    const pageRequest = fetchSpy.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(pageRequest.body))).toMatchObject({
       params: {
-        name: 'synthesize',
+        name: 'get_page',
         arguments: {
-          question: expect.stringContaining(
-            'daily/digests/2026-08-17, daily/digests/2026-08-18',
-          ),
-          since: '2026-08-16T23:59:59.999Z',
-          until: '2026-08-18T06:00:00.000Z',
+          slug: 'daily/digests/2026-08-17',
+          fuzzy: false,
         },
       },
     });
+    const synthesisRequest = fetchSpy.mock.calls[1]?.[1] as RequestInit;
+    const synthesisBody = JSON.parse(String(synthesisRequest.body)) as {
+      messages: Array<{ content: string }>;
+    };
+    expect(String(fetchSpy.mock.calls[1]?.[0])).toBe(
+      'http://api.test:3001/api/brain/inference/v1/chat/completions',
+    );
+    expect(synthesisBody.messages[1]?.content).toContain(
+      '"slug":"daily/digests/2026-08-17"',
+    );
+    expect(synthesisBody.messages[1]?.content).toContain(
+      '"slug":"daily/digests/2026-08-18"',
+    );
+    expect(synthesisBody.messages[1]?.content).not.toContain(
+      'slack/general/2026-08-17',
+    );
   });
 
   it('skips weekly synthesis until two daily pages exist', async () => {
@@ -794,12 +816,14 @@ describe('runBrainWeeklySynthesis', () => {
   });
 
   it('rejects citations outside the current week evidence', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      toolSynthesisResponse({
-        answer: 'An older conclusion was important.',
-        sources: ['daily/digests/2026-08-10'],
-      }),
-    );
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(pageResponse({ slug: 'daily/digests/2026-08-17' }))
+      .mockResolvedValueOnce(
+        synthesisResponse({
+          answer: 'An older conclusion was important.',
+          sources: ['daily/digests/2026-08-10'],
+        }),
+      );
 
     await expect(
       runBrainWeeklySynthesis(
@@ -813,6 +837,37 @@ describe('runBrainWeeklySynthesis', () => {
         new Date('2026-08-18T06:00:00.000Z'),
       ),
     ).rejects.toThrow('outside its evidence window');
+    expect(mockPostToBrain).not.toHaveBeenCalled();
+  });
+
+  it('does not synthesize when only the current daily digest exists', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          result: {
+            isError: true,
+            content: [{ type: 'text', text: 'page_not_found: Page not found' }],
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    const page = await runBrainWeeklySynthesis(
+      { baseUrl: 'http://gbrain.test', token: 'read-token' },
+      { baseUrl: 'http://gbrain.test', token: 'write-token' },
+      {
+        slug: 'daily/digests/2026-08-18',
+        title: 'Daily digest — 2026-08-18',
+        content: '# Daily digest — 2026-08-18',
+      },
+      new Date('2026-08-18T06:00:00.000Z'),
+    );
+
+    expect(page).toBeNull();
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     expect(mockPostToBrain).not.toHaveBeenCalled();
   });
 });
