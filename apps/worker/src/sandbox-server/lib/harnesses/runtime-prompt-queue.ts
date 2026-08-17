@@ -297,7 +297,7 @@ export class RuntimePromptQueue {
     ).length;
 
     this.callbacks.emitRuntimeUpdate({
-      ts: Date.now(),
+      ts: sequence,
       eventType: ACP_ENVELOPE_EVENT_TYPES.QueuedMessagesUpdate,
       role: null,
       contentBlocks: [],

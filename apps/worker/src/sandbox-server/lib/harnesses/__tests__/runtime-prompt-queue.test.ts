@@ -46,6 +46,18 @@ describe('RuntimePromptQueue', () => {
       expect(a?.id).not.toBe(b?.id);
     });
 
+    it('uses the monotonic sequence as the durable envelope timestamp', () => {
+      const { queue, emittedEvents } = createQueue();
+
+      queue.enqueue({ text: 'first' });
+      queue.enqueue({ text: 'second' });
+
+      expect(emittedEvents.map((event) => event.ts)).toEqual([1, 2]);
+      expect(emittedEvents.map((event) => event.metadata?.sequence)).toEqual([
+        1, 2,
+      ]);
+    });
+
     it('preserves images in queued messages', () => {
       const { queue } = createQueue();
 
