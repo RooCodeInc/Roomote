@@ -1,5 +1,6 @@
 import { buildFastAgentSystemPrompt } from '../fast-agent-prompt';
 import { FAST_AGENT_BRAIN_INSTRUCTIONS } from '../fast-agent-constants';
+import { RunStatus } from '@roomote/types';
 
 describe('buildFastAgentSystemPrompt', () => {
   it('uses the default Roomote tone guidance', () => {
@@ -13,7 +14,10 @@ describe('buildFastAgentSystemPrompt', () => {
         },
       ],
       availableIntegrations: [],
-      activeTaskId: 'task-1',
+      activeTasks: [
+        { taskId: 'task-1', title: 'Fix API', status: RunStatus.Running },
+        { taskId: 'task-2', title: 'Update docs', status: RunStatus.Pending },
+      ],
     });
 
     expect(prompt).toContain(
@@ -22,6 +26,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Roomote/example-app');
     expect(prompt).toContain('conversational orchestrator');
     expect(prompt).toContain('Task ID: task-1');
+    expect(prompt).toContain('Task ID: task-2 | Update docs | pending');
+    expect(prompt).toContain('Existing active tasks do not block');
+    expect(prompt).toContain('ask which active task the user means');
     expect(prompt).toContain('let me know how it goes');
     expect(prompt).toContain('send_chat_reply');
     expect(prompt).toContain('send_chat_reaction_emoji');

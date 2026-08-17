@@ -989,6 +989,7 @@ describe('launchDiscordTask', () => {
         workspaceDisplayName: 'Acme',
       },
       forceNewThread: true,
+      fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
     });
 
     expect(provider.reserveTaskThread).toHaveBeenCalledWith(
@@ -999,6 +1000,7 @@ describe('launchDiscordTask', () => {
         task: expect.objectContaining({
           payload: expect.objectContaining({
             communicationThreadId: 'new-thread',
+            fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
           }),
         }),
       }),

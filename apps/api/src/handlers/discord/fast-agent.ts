@@ -34,7 +34,7 @@ export async function processDiscordFastAgentMessage(input: {
   metadata: ReturnType<typeof discordMetadataForChannel>;
   sessionThreadId: string;
   interaction?: DiscordInteractionReplyContext;
-  activeTaskId?: string | null;
+  activeTasks?: { taskId: string }[];
 }): Promise<void> {
   const history =
     input.channel.isThread || input.channel.isDirectMessage
@@ -66,8 +66,8 @@ export async function processDiscordFastAgentMessage(input: {
       input.interaction?.interaction.member?.nick ??
       input.sender.global_name ??
       input.sender.username,
-    activeTaskId: input.activeTaskId,
-    launchTask: async ({ prompt, environmentId }) => {
+    activeTasks: input.activeTasks,
+    launchTask: async ({ prompt, environmentId, parentSessionId }) => {
       const workspaceOverride = environmentId
         ? await resolveDiscordWorkspace({
             type: 'environment',
@@ -105,6 +105,7 @@ export async function processDiscordFastAgentMessage(input: {
         metadata: input.metadata,
         channel: input.channel,
         forceNewThread: true,
+        fastAgentSessionId: parentSessionId,
         skipRoutingConfirmation: true,
         workspaceOverride,
       });

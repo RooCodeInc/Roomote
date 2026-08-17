@@ -1,6 +1,6 @@
 const mocks = vi.hoisted(() => ({
   appendSessionMessages: vi.fn(),
-  getActiveTaskId: vi.fn(),
+  getActiveTasks: vi.fn(),
   getSession: vi.fn(),
   getEnvironments: vi.fn(),
   generateObject: vi.fn(),
@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../fast-agent-session', () => ({
   appendFastAgentSessionMessages: mocks.appendSessionMessages,
-  getActiveFastAgentTaskId: mocks.getActiveTaskId,
+  getActiveFastAgentTasks: mocks.getActiveTasks,
   getOrCreateFastAgentSession: mocks.getSession,
 }));
 
@@ -67,6 +67,7 @@ function decision(overrides: Record<string, unknown> = {}) {
     reactionName: null,
     taskPrompt: null,
     environmentId: null,
+    taskId: null,
     taskMessage: null,
     integrationId: null,
     toolName: null,
@@ -82,7 +83,7 @@ function chatCallbacks() {
   };
 }
 
-function successfulLaunchTask() {
+function successfulLaunchTask(taskId = 'task-1') {
   return vi.fn(
     async ({
       postKickoff,
@@ -93,8 +94,8 @@ function successfulLaunchTask() {
       }) => Promise<void>;
     }) => {
       const task = {
-        taskId: 'task-1',
-        taskUrl: 'https://roomote.example/task-1',
+        taskId,
+        taskUrl: `https://roomote.example/${taskId}`,
       };
       await postKickoff(task);
       return { success: true as const, ...task };
@@ -106,7 +107,7 @@ describe('answerFastAgentQuestion', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getSession.mockResolvedValue({ id: 'session-1', messages: [] });
-    mocks.getActiveTaskId.mockResolvedValue(null);
+    mocks.getActiveTasks.mockResolvedValue([]);
     mocks.getEnvironments.mockResolvedValue([
       {
         id: 'env-1',
@@ -528,8 +529,10 @@ describe('answerFastAgentQuestion', () => {
     );
   });
 
-  it('does not launch another task when one is active and asks the agent to report the result', async () => {
-    mocks.getActiveTaskId.mockResolvedValueOnce('task-1');
+  it('launches independent work while another delegated task is active', async () => {
+    mocks.getActiveTasks.mockResolvedValueOnce([
+      { taskId: 'task-1', title: 'Fix the API' },
+    ]);
     mocks.generateObject
       .mockResolvedValueOnce({
         object: decision({
@@ -541,9 +544,12 @@ describe('answerFastAgentQuestion', () => {
         }),
       })
       .mockResolvedValueOnce({
-        object: decision({ message: 'There is already an active task.' }),
+        object: decision({
+          message:
+            'I delegated the regression test. [Follow the task](https://roomote.example/task-2)',
+        }),
       });
-    const launchTask = vi.fn();
+    const launchTask = successfulLaunchTask('task-2');
     const callbacks = chatCallbacks();
 
     const result = await answerFastAgentQuestion({
@@ -552,11 +558,48 @@ describe('answerFastAgentQuestion', () => {
       launchTask,
     });
 
-    expect(launchTask).not.toHaveBeenCalled();
-    expect(result).toContain('already an active task');
+    expect(launchTask).toHaveBeenCalledOnce();
+    expect(result).toContain('task-2');
   });
 
-  it('sends an explicit instruction to the active task before replying', async () => {
+  it('sends an explicit instruction to the selected active task before replying', async () => {
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'send_task_message',
+          message: null,
+          purpose: null,
+          taskMessage: 'Also add a regression test.',
+          taskId: 'task-2',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({ message: 'I sent that instruction.' }),
+      });
+    const callbacks = chatCallbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      ...callbacks,
+      activeTasks: [
+        { taskId: 'task-1', title: 'Fix the API' },
+        { taskId: 'task-2', title: 'Update the docs' },
+      ],
+    });
+
+    expect(mocks.sendTaskMessage).toHaveBeenCalledWith(
+      { userId: 'user-1', apiBaseUrl: 'https://api.example.com' },
+      { taskId: 'task-2', message: 'Also add a regression test.' },
+    );
+    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'I sent that instruction.' }),
+    );
+  });
+
+  it('preserves implicit routing when exactly one task is active', async () => {
+    mocks.getActiveTasks.mockResolvedValueOnce([
+      { taskId: 'task-1', title: 'Fix the API' },
+    ]);
     mocks.generateObject
       .mockResolvedValueOnce({
         object: decision({
@@ -569,20 +612,15 @@ describe('answerFastAgentQuestion', () => {
       .mockResolvedValueOnce({
         object: decision({ message: 'I sent that instruction.' }),
       });
-    const callbacks = chatCallbacks();
 
     await answerFastAgentQuestion({
       ...baseParams,
-      ...callbacks,
-      activeTaskId: 'task-1',
+      ...chatCallbacks(),
     });
 
     expect(mocks.sendTaskMessage).toHaveBeenCalledWith(
       { userId: 'user-1', apiBaseUrl: 'https://api.example.com' },
       { taskId: 'task-1', message: 'Also add a regression test.' },
-    );
-    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
-      expect.objectContaining({ message: 'I sent that instruction.' }),
     );
   });
 
@@ -593,6 +631,7 @@ describe('answerFastAgentQuestion', () => {
           action: 'cancel_task',
           message: null,
           purpose: null,
+          taskId: 'task-1',
         }),
       })
       .mockResolvedValueOnce({
@@ -603,15 +642,158 @@ describe('answerFastAgentQuestion', () => {
     await answerFastAgentQuestion({
       ...baseParams,
       ...callbacks,
-      activeTaskId: 'task-1',
+      activeTasks: [
+        { taskId: 'task-1', title: 'Fix the API' },
+        { taskId: 'task-2', title: 'Update the docs' },
+      ],
     });
 
     expect(mocks.cancelTask).toHaveBeenCalledWith(
       { userId: 'user-1', apiBaseUrl: 'https://api.example.com' },
       'task-1',
     );
+    expect(mocks.cancelTask).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'task-2',
+    );
     expect(callbacks.postSlackReply).toHaveBeenCalledWith(
       expect.objectContaining({ message: 'I canceled the active task.' }),
+    );
+  });
+
+  it('asks which task the user means instead of routing an ambiguous follow-up', async () => {
+    mocks.getActiveTasks.mockResolvedValueOnce([
+      { taskId: 'task-1', title: 'Fix the API' },
+      { taskId: 'task-2', title: 'Update the docs' },
+    ]);
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'send_task_message',
+          message: null,
+          purpose: null,
+          taskMessage: 'Also add a regression test.',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          message: 'Which active task should receive that instruction?',
+          purpose: 'clarification',
+        }),
+      });
+    const callbacks = chatCallbacks();
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      ...callbacks,
+    });
+
+    expect(mocks.sendTaskMessage).not.toHaveBeenCalled();
+    expect(result).toContain('Which active task');
+    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: 'clarification' }),
+    );
+    expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
+      'Multiple delegated tasks are active',
+    );
+  });
+
+  it('asks which task the user means instead of canceling ambiguously', async () => {
+    mocks.getActiveTasks.mockResolvedValueOnce([
+      { taskId: 'task-1', title: 'Fix the API' },
+      { taskId: 'task-2', title: 'Update the docs' },
+    ]);
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'cancel_task',
+          message: null,
+          purpose: null,
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          message: 'Which active task should I cancel?',
+          purpose: 'clarification',
+        }),
+      });
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      ...chatCallbacks(),
+    });
+
+    expect(mocks.cancelTask).not.toHaveBeenCalled();
+    expect(result).toContain('Which active task');
+    expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
+      'before canceling',
+    );
+  });
+
+  it('does not route task controls when no task is active', async () => {
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'send_task_message',
+          message: null,
+          purpose: null,
+          taskMessage: 'Please retry.',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({ message: 'There is no active delegated task.' }),
+      });
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      ...chatCallbacks(),
+    });
+
+    expect(mocks.sendTaskMessage).not.toHaveBeenCalled();
+    expect(mocks.cancelTask).not.toHaveBeenCalled();
+  });
+
+  it('keeps other active tasks routable after canceling one task', async () => {
+    mocks.getActiveTasks.mockResolvedValueOnce([
+      { taskId: 'task-1', title: 'Fix the API' },
+      { taskId: 'task-2', title: 'Update the docs' },
+    ]);
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'cancel_task',
+          message: null,
+          purpose: null,
+          taskId: 'task-1',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'send_task_message',
+          message: null,
+          purpose: null,
+          taskId: null,
+          taskMessage: 'Please add the final example.',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          message: 'I canceled the API task and updated the docs task.',
+        }),
+      });
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      ...chatCallbacks(),
+    });
+
+    expect(mocks.cancelTask).toHaveBeenCalledWith(
+      { userId: 'user-1', apiBaseUrl: 'https://api.example.com' },
+      'task-1',
+    );
+    expect(mocks.sendTaskMessage).toHaveBeenCalledWith(
+      { userId: 'user-1', apiBaseUrl: 'https://api.example.com' },
+      { taskId: 'task-2', message: 'Please add the final example.' },
     );
   });
 

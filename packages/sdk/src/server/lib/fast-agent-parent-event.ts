@@ -265,8 +265,6 @@ export async function deliverFastAgentParentEvent(params: {
       slackTeamId: params.parent.slackTeamId,
       slackChannel: params.parent.slackChannel,
       slackThreadTs: params.parent.slackThreadTs,
-      activeTaskId:
-        params.event.type === 'task_settled' ? null : params.event.taskId,
       platformEvent: true,
       postSlackReply: async ({ message, imageArtifactIds = [] }) => {
         const imageBlocks = await buildSelectedImageBlocks({

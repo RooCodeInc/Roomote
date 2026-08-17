@@ -788,7 +788,7 @@ async function processDiscordGatewayEvent(
         channel.isDirectMessage || channel.isThread
           ? channel.channelId
           : defaultFastMessage.id,
-      activeTaskId: activeRun?.taskId ?? null,
+      activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
     });
     return { ok: true, fastAnswered: true, fastDefaulted: true };
   }

@@ -1211,6 +1211,10 @@ export const taskRuns = pgTable(
     queueScope: text('queue_scope'),
     taskPhase: text('task_phase'),
     payload: jsonb('payload').notNull().$type<TaskPayload>(),
+    /** Indexed projection of payload.fastAgentSessionId for Fast task lookup. */
+    fastAgentSessionId: uuid('fast_agent_session_id').generatedAlwaysAs(
+      sql`((payload ->> 'fastAgentSessionId')::uuid)`,
+    ),
     // Per-attempt prompt, including the deferred resume prompt.
     prompt: text('prompt'),
     log: text('log'),
@@ -1330,6 +1334,7 @@ export const taskRuns = pgTable(
   },
   (table) => [
     index('task_runs_task_id_idx').on(table.taskId),
+    index('task_runs_fast_agent_session_id_idx').on(table.fastAgentSessionId),
     index('task_runs_queue_scope_idx').on(table.queueScope),
     index('task_runs_acting_user_id_idx').on(table.actingUserId),
     index('task_runs_snapshot_id_idx').on(table.snapshotId),
