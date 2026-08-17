@@ -245,6 +245,7 @@ describe('handleSlackPrReviewActionAuto', () => {
 
     expect(enableAutoHandleMock).toHaveBeenCalledWith({
       taskId: 'task-1',
+      sourceControlProvider: 'github',
       repository: 'owner/repo',
       prNumber: 42,
       userId: 'user-1',

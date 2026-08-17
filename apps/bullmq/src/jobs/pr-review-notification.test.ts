@@ -793,6 +793,7 @@ describe('prReviewNotificationJob', () => {
       route: null,
       text: 'I reviewed owner/repo#42 on GitHub and found an issue.\nWould you like me to resolve this issue?',
       action: {
+        sourceControlProvider: 'github',
         repository: 'owner/repo',
         prNumber: 42,
         prUrl: 'https://github.com/owner/repo/pull/42',

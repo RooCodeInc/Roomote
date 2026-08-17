@@ -421,6 +421,7 @@ export async function handlePrReviewNotificationActionCommand(
     if (parsed.action === 'auto_resolve') {
       await enableAutoHandlePrReviewFeedback({
         taskId: parsed.taskId,
+        sourceControlProvider: reviewAction.sourceControlProvider,
         repository: reviewAction.repository,
         prNumber: reviewAction.prNumber,
         userId: auth.userId,

@@ -6,6 +6,7 @@ import {
   taskPullRequests,
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
+import type { SourceControlProvider } from '@roomote/types';
 
 /** Conversation providers that can render PR review action buttons. */
 export type PrReviewActionProvider = 'slack' | 'discord' | 'telegram';
@@ -30,6 +31,8 @@ export interface PendingPrReviewAction {
   repository: string;
   prNumber: number;
   prUrl: string;
+  /** Absent only on legacy pending records, which originated from GitHub. */
+  sourceControlProvider?: SourceControlProvider;
   channelId: string;
   /**
    * Slack thread_ts, Discord thread channel id, or Telegram topic id; null
@@ -271,6 +274,7 @@ export async function claimPendingPrReviewActionsForThread(input: {
  */
 export async function enableAutoHandlePrReviewFeedback(input: {
   taskId: string;
+  sourceControlProvider: SourceControlProvider;
   repository: string;
   prNumber: number;
   userId: string;
@@ -281,6 +285,7 @@ export async function enableAutoHandlePrReviewFeedback(input: {
     .where(
       and(
         eq(taskPullRequests.taskId, input.taskId),
+        eq(taskPullRequests.sourceControlProvider, input.sourceControlProvider),
         eq(taskPullRequests.repository, input.repository),
         eq(taskPullRequests.prNumber, input.prNumber),
       ),

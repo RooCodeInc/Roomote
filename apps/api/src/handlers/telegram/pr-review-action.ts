@@ -84,6 +84,7 @@ export async function handleTelegramPrReviewActionCallback(params: {
     if (choice === 'auto') {
       await enableAutoHandlePrReviewFeedback({
         taskId: pending.taskId,
+        sourceControlProvider: pending.sourceControlProvider ?? 'github',
         repository: pending.repository,
         prNumber: pending.prNumber,
         userId: senderUserId!,

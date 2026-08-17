@@ -1412,6 +1412,7 @@ describe('recordPrReviewNotificationDeliveryBestEffort', () => {
       route: null,
       text: 'formatted-message\nWould you like me to resolve this issue?',
       action: {
+        sourceControlProvider: 'github',
         repository: 'owner/repo',
         prNumber: 42,
         prUrl: 'https://github.com/owner/repo/pull/42',
@@ -1432,6 +1433,7 @@ describe('recordPrReviewNotificationDeliveryBestEffort', () => {
             repository: 'owner/repo',
             prNumber: 42,
             prUrl: 'https://github.com/owner/repo/pull/42',
+            sourceControlProvider: 'github',
             question: 'Would you like me to resolve this issue?',
             followUpPrompt: 'Resolve the review feedback.',
             status: 'pending',

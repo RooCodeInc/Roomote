@@ -153,6 +153,7 @@ async function createPendingReviewActionTestContext() {
           repository: 'owner/repo',
           prNumber: 42,
           prUrl: 'https://github.com/owner/repo/pull/42',
+          sourceControlProvider: 'github',
           question: 'Would you like me to resolve this issue?',
           followUpPrompt: 'Resolve the review feedback.',
           status: 'pending',
@@ -627,6 +628,7 @@ describe('sendSandboxPromptCommand', () => {
             repository: 'owner/repo',
             prNumber: 42,
             prUrl: 'https://github.com/owner/repo/pull/42',
+            sourceControlProvider: 'github',
             question: 'Would you like me to resolve this issue?',
             followUpPrompt: 'Resolve the review feedback.',
             status: 'pending',
@@ -691,6 +693,7 @@ describe('sendSandboxPromptCommand', () => {
             repository: 'owner/repo',
             prNumber: 42,
             prUrl: 'https://github.com/owner/repo/pull/42',
+            sourceControlProvider: 'github',
             question: 'Would you like me to resolve this issue?',
             followUpPrompt: 'Resolve the review feedback.',
             status: 'processing',
@@ -760,6 +763,7 @@ describe('sendSandboxPromptCommand', () => {
 
     expect(mockEnableAutoHandlePrReviewFeedback).toHaveBeenCalledWith({
       taskId: task.id,
+      sourceControlProvider: 'github',
       repository: 'owner/repo',
       prNumber: 42,
       userId: user.id,

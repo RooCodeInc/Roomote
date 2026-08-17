@@ -1,4 +1,5 @@
 import { asBoolean } from './primitives';
+import type { SourceControlProvider } from './source-control';
 
 export const ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL = 'roomote_runtime' as const;
 
@@ -114,6 +115,7 @@ export interface PrReviewNotificationAction {
   repository: string;
   prNumber: number;
   prUrl: string;
+  sourceControlProvider: SourceControlProvider;
   question: string;
   followUpPrompt: string;
   status: PrReviewNotificationActionStatus;
@@ -138,6 +140,11 @@ export function getPrReviewNotificationAction(
     typeof value.repository !== 'string' ||
     typeof value.prNumber !== 'number' ||
     typeof value.prUrl !== 'string' ||
+    !['github', 'gitlab', 'gitea', 'ado', 'bitbucket'].includes(
+      typeof value.sourceControlProvider === 'string'
+        ? value.sourceControlProvider
+        : '',
+    ) ||
     typeof value.question !== 'string' ||
     typeof value.followUpPrompt !== 'string' ||
     (value.processingStartedAt !== undefined &&

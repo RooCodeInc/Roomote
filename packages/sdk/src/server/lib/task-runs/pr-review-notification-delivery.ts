@@ -1125,6 +1125,7 @@ export async function recordPrReviewNotificationDeliveryBestEffort(params: {
   route?: PrReviewNotificationRoute | null;
   messageTs?: string | null;
   action?: {
+    sourceControlProvider: SourceControlProvider;
     repository: string;
     prNumber: number;
     prUrl: string;
