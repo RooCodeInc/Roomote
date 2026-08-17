@@ -92,6 +92,7 @@ export const queuedCommunicationMessageSchema = z.object({
   threadTs: z.string().optional(),
   images: z.array(z.string()).optional(),
   formattedPrompt: z.string().optional(),
+  agentContext: z.string().optional(),
   turnPolicy: z
     .object({
       reactionsAllowed: z.boolean().optional(),

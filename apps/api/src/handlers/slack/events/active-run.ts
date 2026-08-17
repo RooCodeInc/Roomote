@@ -460,7 +460,9 @@ export async function processActiveRunMessage(
           logContext: `active task run ${activeRun.id} in ${event.channel}:${threadId}`,
           prefetchedMessages: prefetchedThreadMessages,
         }),
-        slack.normalizeIncomingText(stripLeadingRawSlackMention(event.text)),
+        slack.normalizeIncomingText(
+          stripLeadingRawSlackMention(event.authoredText ?? event.text),
+        ),
         getLatestSlackBotReply(event.channel, threadId),
       ]);
     const messageText = stripLeadingSlackProductMention(normalizedMessageText);
@@ -502,6 +504,7 @@ export async function processActiveRunMessage(
     } = await deliveryTracker.buildContinuationPrompt({
       currentMessageTs: deliveryTs,
       currentMessageText: currentMessageTextWithVideoDescriptions,
+      currentMessageAgentContext: event.agentContext,
       excludedContextTimestamps:
         deliveryTs === event.ts ? undefined : [event.ts],
       resolveCurrentMessageText: (claimedMessages) =>
@@ -551,6 +554,7 @@ export async function processActiveRunMessage(
       });
       await queueSlackMessage(activeRun.id, {
         text: messageTextWithVideoDescriptions,
+        agentContext: event.agentContext,
         user: event.user,
         userId,
         ts: event.ts,

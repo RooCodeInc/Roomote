@@ -32,23 +32,6 @@ function compareSlackTimestamps(left: string, right: string): number {
   return Number(left) - Number(right);
 }
 
-const SLACK_TURN_POLICY_REACTIONS_ALLOWED_PATTERN =
-  /<slack_turn_policy\b[^>]*\breactions_allowed="(true|false)"/u;
-
-function getTurnPolicyFromPrompt(
-  prompt: string,
-): { reactionsAllowed: boolean } | undefined {
-  const match = SLACK_TURN_POLICY_REACTIONS_ALLOWED_PATTERN.exec(prompt);
-
-  if (!match) {
-    return undefined;
-  }
-
-  return {
-    reactionsAllowed: match[1] === 'true',
-  };
-}
-
 /**
  * Resolves the linked Roomote user id carried by an initiator, if any.
  * Automation initiators and unmatched external senders have none.
@@ -65,6 +48,7 @@ function getLinkedInitiatorUserId(
 
 function buildActiveSlackFollowUpPrompt(input: {
   text: string;
+  agentContext?: string;
   ts: string;
   threadMessages?: SlackThreadMessage[];
   latestOwnBotReplyText?: string;
@@ -105,7 +89,10 @@ function buildActiveSlackFollowUpPrompt(input: {
         reactionsAllowed: hasPriorBotReply,
         preferEmojiAck: hasPriorBotReply,
       }),
-      wrapSlackMessage(input.text, { ts: input.ts }),
+      wrapSlackMessage(input.text, {
+        ts: input.ts,
+        agentContext: input.agentContext,
+      }),
     ]
       .filter(Boolean)
       .join('\n\n'),
@@ -130,6 +117,7 @@ export async function startSlackAppMentionTask(input: {
   slackUserId: string;
   persistedSlackUserId?: string | null;
   text: string;
+  slackMessageContext?: string;
   agentPromptText?: string;
   /**
    * Deprecated: acknowledgement/completion reactions are fixed defaults and
@@ -192,21 +180,19 @@ export async function startSlackAppMentionTask(input: {
       : undefined;
   if (activeRun) {
     const agentPromptText = input.agentPromptText?.trim();
-    const builtPrompt = !agentPromptText
-      ? buildActiveSlackFollowUpPrompt({
-          text: input.text,
-          ts: input.ts,
-          threadMessages: promptRelevantThreadMessages,
-          latestOwnBotReplyText: promptRelevantLatestOwnBotReply?.text,
-          latestOwnBotReplyTs: promptRelevantLatestOwnBotReply?.ts,
-        })
-      : null;
-    const formattedPrompt = agentPromptText || builtPrompt?.formattedPrompt;
-    const turnPolicy = builtPrompt
-      ? { reactionsAllowed: builtPrompt.reactionsAllowed }
-      : agentPromptText
-        ? getTurnPolicyFromPrompt(agentPromptText)
-        : undefined;
+    const agentContext = [agentPromptText, input.slackMessageContext]
+      .filter((value): value is string => Boolean(value))
+      .join('\n\n');
+    const builtPrompt = buildActiveSlackFollowUpPrompt({
+      text: input.text,
+      agentContext: agentContext || undefined,
+      ts: input.ts,
+      threadMessages: promptRelevantThreadMessages,
+      latestOwnBotReplyText: promptRelevantLatestOwnBotReply?.text,
+      latestOwnBotReplyTs: promptRelevantLatestOwnBotReply?.ts,
+    });
+    const formattedPrompt = builtPrompt.formattedPrompt;
+    const turnPolicy = { reactionsAllowed: builtPrompt.reactionsAllowed };
     const slackConversationUrl = input.slackConversationUrl?.trim();
 
     if (
@@ -232,6 +218,7 @@ export async function startSlackAppMentionTask(input: {
 
     await queueSlackMessage(activeRun.id, {
       text: input.text,
+      agentContext: agentContext || undefined,
       user: input.slackUserId,
       userId: linkedInitiatorUserId,
       ts: input.ts,
@@ -278,6 +265,9 @@ export async function startSlackAppMentionTask(input: {
         ? {}
         : { user: input.persistedSlackUserId ?? input.slackUserId }),
       text: input.text,
+      ...(input.slackMessageContext?.trim()
+        ? { slackMessageContext: input.slackMessageContext.trim() }
+        : {}),
       ...(input.agentPromptText?.trim()
         ? { agentPromptText: input.agentPromptText.trim() }
         : {}),

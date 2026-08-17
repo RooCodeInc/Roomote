@@ -1115,6 +1115,7 @@ const queuedSnapshotResumeSlackMessageSchema = z.object({
   ts: z.string(),
   images: z.array(z.string()).optional(),
   formattedPrompt: z.string().optional(),
+  agentContext: z.string().optional(),
   turnPolicy: z
     .object({
       reactionsAllowed: z.boolean().optional(),
@@ -1235,6 +1236,7 @@ export const slackAppMentionSchema = sharedTaskSchema.extend({
     user: z.string().optional(),
     text: z.string(),
     agentPromptText: z.string().optional(),
+    slackMessageContext: z.string().optional(),
     /**
      * Optional acknowledgement emoji name that was applied to the source
      * message when the task was kicked off.
@@ -1256,6 +1258,8 @@ export const slackAppMentionSchema = sharedTaskSchema.extend({
           user: z.string(),
           username: z.string().optional(),
           text: z.string(),
+          authoredText: z.string().optional(),
+          agentContext: z.string().optional(),
           ts: z.string(),
           bot_id: z.string().optional(),
           type: z.string(),

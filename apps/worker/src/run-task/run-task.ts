@@ -583,6 +583,7 @@ type QueuedSnapshotResumeSlackMessage = {
   ts: string;
   images?: string[];
   formattedPrompt?: string;
+  agentContext?: string;
   turnPolicy?: {
     reactionsAllowed?: boolean;
   };
@@ -1877,6 +1878,7 @@ export const runTask = async ({
           message.formattedPrompt ??
           wrapSlackMessage(stripLeadingSlackProductMention(message.text), {
             ts: message.ts,
+            agentContext: message.agentContext,
           });
         const sent = await sendPrompt({
           prompt,
@@ -1976,6 +1978,7 @@ export const runTask = async ({
           (message.provider === 'slack'
             ? wrapSlackMessage(stripLeadingSlackProductMention(message.text), {
                 ts: message.ts,
+                agentContext: message.agentContext,
               })
             : wrapCommunicationMessage(message.provider, message));
         const sent = await sendPrompt({

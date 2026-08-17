@@ -145,6 +145,7 @@ export async function startAutoRoutedSlackTask({
   initiatingSlackUserId,
   channel,
   prompt,
+  slackMessageContext,
   threadTs,
   originMessageTs,
   processedImages,
@@ -186,6 +187,7 @@ export async function startAutoRoutedSlackTask({
   initiatingSlackUserId?: string;
   channel: string;
   prompt: string;
+  slackMessageContext?: string;
   threadTs?: string;
   originMessageTs?: string;
   processedImages?: string[];
@@ -354,12 +356,18 @@ export async function startAutoRoutedSlackTask({
       text: taskDescription,
       attachmentTexts: allAttachmentTexts,
     });
+    const routingTaskDescription = [
+      taskDescriptionWithAttachments,
+      slackMessageContext?.trim(),
+    ]
+      .filter((value): value is string => Boolean(value))
+      .join('\n\n');
 
     const channelName = (await slack.getChannelName?.(channel)) ?? undefined;
 
     const routingContext = await buildSlackRoutingContext({
       userId: launchUserId ?? undefined,
-      taskDescription: taskDescriptionWithAttachments,
+      taskDescription: routingTaskDescription,
       channelName,
       threadMessages: threadMessages?.map((message) => ({
         text: message.text,
@@ -403,7 +411,7 @@ export async function startAutoRoutedSlackTask({
               threadTs: threadId,
             }) ?? undefined)
           : undefined,
-        taskDescription: taskDescriptionWithAttachments,
+        taskDescription: routingTaskDescription,
         reason: decision.reason,
         cause: decision.cause,
       });
@@ -501,6 +509,7 @@ export async function startAutoRoutedSlackTask({
         slackUserId,
         persistedSlackUserId,
         text: taskText,
+        slackMessageContext,
         agentPromptText,
         ts: sourceMessageTs,
         threadTs: threadId,

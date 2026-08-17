@@ -21,6 +21,7 @@ import { isSlackRoutingWaitReplyText } from './slack-system-messages';
 interface SlackThreadContinuationPromptOptions {
   currentMessageTs: string;
   currentMessageText: string;
+  currentMessageAgentContext?: string;
   excludedContextTimestamps?: string[];
   resolveCurrentMessageText?: (
     claimedMessages: SlackThreadMessage[],
@@ -76,6 +77,7 @@ export class SlackThreadDeliveryTracker {
   public async buildContinuationPrompt({
     currentMessageTs,
     currentMessageText,
+    currentMessageAgentContext,
     excludedContextTimestamps,
     resolveCurrentMessageText,
     fetchThreadMessages,
@@ -211,6 +213,7 @@ export class SlackThreadDeliveryTracker {
       };
       const currentMessageBlock = wrapSlackMessage(resolvedCurrentMessageText, {
         ts: currentMessageTs,
+        agentContext: currentMessageAgentContext,
       });
 
       if (!contextBlock && !normalizedLatestBotReply) {

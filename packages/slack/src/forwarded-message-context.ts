@@ -47,68 +47,6 @@ function replaceSlackLinks(
   return result;
 }
 
-function replaceMarkdownLinks(
-  text: string,
-  onLink: (url: string, label: string) => string,
-): string {
-  let result = '';
-  let index = 0;
-
-  while (index < text.length) {
-    if (text[index] === '[') {
-      const labelEnd = text.indexOf('](', index + 1);
-      if (labelEnd !== -1) {
-        const label = text.slice(index + 1, labelEnd);
-        const targetStart = labelEnd + 2;
-        let targetEnd: number | undefined;
-        let url: string | undefined;
-
-        if (text[targetStart] === '<') {
-          const close = text.indexOf('>', targetStart + 1);
-          if (close !== -1 && text[close + 1] === ')') {
-            targetEnd = close + 1;
-            url = text.slice(targetStart + 1, close);
-          }
-        } else {
-          let depth = 1;
-          let cursor = targetStart;
-
-          while (cursor < text.length) {
-            if (text[cursor] === '\\') {
-              cursor += 2;
-              continue;
-            }
-            if (text[cursor] === '(') {
-              depth += 1;
-            } else if (text[cursor] === ')') {
-              depth -= 1;
-              if (depth === 0) {
-                targetEnd = cursor;
-                url = text
-                  .slice(targetStart, cursor)
-                  .replace(/\\([()\\])/g, '$1');
-                break;
-              }
-            }
-            cursor += 1;
-          }
-        }
-
-        if (targetEnd !== undefined && url && label && isSlackLinkScheme(url)) {
-          result += onLink(url, label);
-          index = targetEnd + 1;
-          continue;
-        }
-      }
-    }
-
-    result += text[index];
-    index += 1;
-  }
-
-  return result;
-}
-
 function forEachSlackMarkdownLink(
   text: string,
   onMatch: (url: string, label: string) => void,
@@ -243,62 +181,6 @@ function normalizeSlackBlockText(text: string): string {
   )
     .replace(/\r\n?/g, '\n')
     .trim();
-}
-
-type SlackBlockTextComparison = {
-  text: string;
-  linkTargets: string[];
-};
-
-function normalizeSlackBlockTextForComparison(
-  text: string,
-): SlackBlockTextComparison {
-  const linkTargets = new Set<string>();
-  replaceSlackLinks(
-    decodeSlackEntity(text),
-    (url) => {
-      linkTargets.add(decodeSlackEntity(url));
-      return '';
-    },
-    (url) => {
-      linkTargets.add(decodeSlackEntity(url));
-      return '';
-    },
-  );
-
-  const normalizedText = replaceMarkdownLinks(
-    normalizeSlackBlockText(text),
-    (url, label) => {
-      linkTargets.add(decodeSlackEntity(url));
-      return label;
-    },
-  )
-    .replace(/[*_~`]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  for (const match of normalizedText.matchAll(/(?:https?:\/\/|mailto:)\S+/g)) {
-    linkTargets.add(match[0]);
-  }
-
-  const textWithoutLinks = normalizedText
-    .replace(/(?:https?:\/\/|mailto:)\S+/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  return {
-    text: textWithoutLinks || normalizedText,
-    linkTargets: [...linkTargets].sort(),
-  };
-}
-
-function hasAdditionalSlackBlockLink(
-  blockText: SlackBlockTextComparison,
-  existingText: SlackBlockTextComparison,
-): boolean {
-  return blockText.linkTargets.some(
-    (target) => !existingText.linkTargets.includes(target),
-  );
 }
 
 function appendUniqueSlackBlockText(
@@ -1119,22 +1001,7 @@ export function formatSlackBlockTextContext(
   extractBlockText(blocks, parts, seenParts);
 
   const normalizedExistingText = normalizeSlackBlockText(existingText);
-  const comparableExistingText =
-    normalizeSlackBlockTextForComparison(existingText);
-  const uniqueParts = parts.filter((part) => {
-    const comparablePart = normalizeSlackBlockTextForComparison(part);
-    const hasAdditionalLink = hasAdditionalSlackBlockLink(
-      comparablePart,
-      comparableExistingText,
-    );
-
-    return (
-      part !== normalizedExistingText &&
-      (hasAdditionalLink ||
-        (comparablePart.text !== comparableExistingText.text &&
-          !comparableExistingText.text.includes(comparablePart.text)))
-    );
-  });
+  const uniqueParts = parts.filter((part) => part !== normalizedExistingText);
 
   if (uniqueParts.length === 0) {
     return undefined;
@@ -1220,6 +1087,27 @@ export function appendSlackAttachmentContext(
   attachments?: unknown[],
   blocks?: unknown[],
 ): string {
+  const attachmentContext = formatSlackAttachmentContext(
+    text,
+    attachments,
+    blocks,
+  );
+
+  if (!attachmentContext) {
+    return text;
+  }
+
+  const normalizedText = text.trim();
+  return normalizedText
+    ? `${normalizedText}\n\n${attachmentContext}`
+    : attachmentContext;
+}
+
+export function formatSlackAttachmentContext(
+  text: string,
+  attachments?: unknown[],
+  blocks?: unknown[],
+): string | undefined {
   const textWithForwardedContext = appendSlackForwardedMessageContext(
     text,
     attachments,
@@ -1232,17 +1120,15 @@ export function appendSlackAttachmentContext(
   );
   const blockLinkContext = formatSlackBlockLinkContext(blocks);
   const additionalContexts = [
+    formatSlackForwardedMessageContext(attachments),
     attachmentTitleContext,
     blockTextContext,
     blockLinkContext,
   ].filter((context): context is string => Boolean(context));
 
   if (additionalContexts.length === 0) {
-    return textWithForwardedContext;
+    return undefined;
   }
 
-  const normalizedText = textWithForwardedContext.trim();
-  return normalizedText
-    ? `${normalizedText}\n\n${additionalContexts.join('\n\n')}`
-    : additionalContexts.join('\n\n');
+  return additionalContexts.join('\n\n');
 }

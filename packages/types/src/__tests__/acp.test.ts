@@ -406,6 +406,39 @@ describe('normalizeTranscriptUserText', () => {
     ).toBe('latest question');
   });
 
+  it('hides agent-only Slack message context from transcript text', () => {
+    expect(
+      normalizeTranscriptUserText(
+        [
+          '<slack_turn_policy reactions_allowed="false" prefer_emoji_ack="false">',
+          'Emoji reactions are not allowed.',
+          '</slack_turn_policy>',
+          '',
+          '<slack_message_context>',
+          'Slack block text:',
+          'State: New',
+          '</slack_message_context>',
+          '',
+          '<slack_message ts="111.000">',
+          'latest question',
+          '</slack_message>',
+        ].join('\n'),
+      ),
+    ).toBe('latest question');
+  });
+
+  it('leaves malformed Slack message context visible instead of stripping arbitrary text', () => {
+    const text = [
+      '<slack_message_context>',
+      'Slack block text without a closing context tag',
+      '<slack_message>',
+      'latest question',
+      '</slack_message>',
+    ].join('\n');
+
+    expect(normalizeTranscriptUserText(text)).toBe(text);
+  });
+
   it('extracts the current Slack turn when the prompt wrappers are HTML-escaped', () => {
     expect(
       normalizeTranscriptUserText(
@@ -417,6 +450,10 @@ describe('normalizeTranscriptUserText', () => {
           '&lt;replying_to ts="110.000"&gt;',
           'Roomote Bot: Previous reply',
           '&lt;/replying_to&gt;',
+          '',
+          '&lt;slack_message_context&gt;',
+          'Slack block text: State: New',
+          '&lt;/slack_message_context&gt;',
           '',
           '&lt;slack_message ts="111.000"&gt;',
           'latest question',

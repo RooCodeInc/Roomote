@@ -272,6 +272,7 @@ export function createSlackMessageInterval({
             msg.formattedPrompt ??
             wrapSlackMessage(stripLeadingSlackProductMention(msg.text), {
               ts: msg.ts,
+              agentContext: msg.agentContext,
             });
           const sent = await sendPrompt({
             prompt,

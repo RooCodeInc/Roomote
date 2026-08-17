@@ -4,6 +4,7 @@ import {
   appendSlackForwardedMessageContext,
   extractSlackForwardedMessageFiles,
   formatSlackAttachmentTitleContexts,
+  formatSlackAttachmentContext,
   formatSlackBlockLinkContext,
   formatSlackBlockTextContext,
   formatSlackForwardedMessageContext,
@@ -268,6 +269,7 @@ describe('forwarded-message-context', () => {
     expect(context).toBe(
       [
         'Slack block text:',
+        ':red_circle: *Issue title*',
         'State: *New*   First Seen: *Just now*',
         'Assigned to <@U123>',
       ].join('\n'),
@@ -299,7 +301,7 @@ describe('forwarded-message-context', () => {
     );
   });
 
-  it('skips block text that only differs because a bare link is omitted', () => {
+  it('preserves differently formatted block text as agent context', () => {
     const context = formatSlackBlockTextContext(
       [
         {
@@ -324,137 +326,28 @@ describe('forwarded-message-context', () => {
       ].join('\n'),
     );
 
-    expect(context).toBeUndefined();
-  });
-
-  it('skips block text that duplicates a Markdown-linked fallback', () => {
-    const context = formatSlackBlockTextContext(
+    expect(context).toBe(
       [
-        {
-          type: 'rich_text',
-          elements: [
-            {
-              type: 'rich_text_section',
-              elements: [
-                { type: 'text', text: 'The fix is in draft PR #1416.' },
-              ],
-            },
-          ],
-        },
-      ],
-      'The fix is in [draft PR #1416](https://example.com/pull/1416).',
+        'Slack block text:',
+        "Really bad experience here   let's try to debug",
+      ].join('\n'),
     );
-
-    expect(context).toBeUndefined();
   });
 
-  it('keeps a bare link when it is the only block text', () => {
-    const context = formatSlackBlockTextContext([
+  it('formats attachment context independently from authored text', () => {
+    const context = formatSlackAttachmentContext('Review:', undefined, [
       {
         type: 'section',
-        text: { type: 'mrkdwn', text: '<https://example.com/thread>' },
+        text: {
+          type: 'mrkdwn',
+          text: 'Review: <https://new.example/2>',
+        },
       },
     ]);
 
     expect(context).toBe(
-      ['Slack block text:', 'https://example.com/thread'].join('\n'),
-    );
-  });
-
-  it('keeps block text when its bare link target differs from the fallback', () => {
-    const context = formatSlackBlockTextContext(
-      [
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: 'Review: <https://new.example/2>',
-          },
-        },
-      ],
-      'Review: <https://old.example/1>',
-    );
-
-    expect(context).toBe(
       ['Slack block text:', 'Review: https://new.example/2'].join('\n'),
     );
-  });
-
-  it('keeps a bare block link omitted from otherwise equivalent fallback text', () => {
-    const context = formatSlackBlockTextContext(
-      [
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: 'Review: <https://new.example/2>',
-          },
-        },
-      ],
-      'Review:',
-    );
-
-    expect(context).toBe(
-      ['Slack block text:', 'Review: https://new.example/2'].join('\n'),
-    );
-  });
-
-  it('skips block links already present alongside other fallback links', () => {
-    const context = formatSlackBlockTextContext(
-      [
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: 'Review: <https://shared.example/1>',
-          },
-        },
-      ],
-      [
-        'Review: <https://shared.example/1>',
-        'Source: <https://other.example/2>',
-      ].join('\n'),
-    );
-
-    expect(context).toBeUndefined();
-  });
-
-  it('skips block text matching a Markdown link with balanced parentheses', () => {
-    const context = formatSlackBlockTextContext(
-      [
-        {
-          type: 'rich_text',
-          elements: [
-            {
-              type: 'rich_text_section',
-              elements: [{ type: 'text', text: 'Open incident' }],
-            },
-          ],
-        },
-      ],
-      'Open [incident](https://example.com/issues/(abc))',
-    );
-
-    expect(context).toBeUndefined();
-  });
-
-  it('skips block text matching a Markdown link with escaped parentheses', () => {
-    const context = formatSlackBlockTextContext(
-      [
-        {
-          type: 'rich_text',
-          elements: [
-            {
-              type: 'rich_text_section',
-              elements: [{ type: 'text', text: 'Open incident' }],
-            },
-          ],
-        },
-      ],
-      'Open [incident](https://example.com/issues/\\(abc\\))',
-    );
-
-    expect(context).toBeUndefined();
   });
 
   it('appends Slack block link context to message text', () => {

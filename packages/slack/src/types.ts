@@ -52,6 +52,7 @@ export interface SlackThreadMessage {
   username?: string; // Display name fetched from Slack API, fallback to user ID if not available
   text: string;
   authoredText?: string;
+  agentContext?: string;
   ts: string;
   bot_id?: string;
   type: string;
@@ -67,6 +68,7 @@ export interface SlackChannelMessage extends SlackThreadMessage {
 export interface SlackConversationMessage {
   text: string;
   authoredText?: string;
+  agentContext?: string;
   ts: string;
   thread_ts?: string;
   user?: string;
@@ -100,6 +102,7 @@ export interface SlackEvent {
   user: string;
   text: string;
   authoredText?: string;
+  agentContext?: string;
   ts: string;
   /** Internal turn ID when an event is synthesized from another Slack event. */
   deliveryTs?: string;

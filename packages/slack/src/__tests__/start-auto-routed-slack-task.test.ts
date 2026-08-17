@@ -202,6 +202,7 @@ describe('startAutoRoutedSlackTask', () => {
       initiatingSlackUserId: 'UINSTALLER',
       channel: 'C123',
       prompt: 'Investigate this',
+      slackMessageContext: 'Slack block text:\nState: New',
       threadTs: '120.000',
       originMessageTs: '123.456',
     });
@@ -219,7 +220,7 @@ describe('startAutoRoutedSlackTask', () => {
     expect(buildSlackRoutingContextMock).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: 'user_installer',
-        taskDescription: 'Investigate this',
+        taskDescription: 'Investigate this\n\nSlack block text:\nState: New',
         channelName: 'eng-routing',
         threadMessages: [
           { text: 'Earlier context', user: 'U123' },
@@ -234,6 +235,7 @@ describe('startAutoRoutedSlackTask', () => {
         trigger: 'message',
         slackUserId: 'UINSTALLER',
         channel: 'C123',
+        slackMessageContext: 'Slack block text:\nState: New',
         ts: '123.456',
         threadTs: '120.000',
         skipInitialActingUser: false,

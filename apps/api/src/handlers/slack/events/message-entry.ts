@@ -970,7 +970,8 @@ export async function processSlackChannelAutoStartTask(params: {
             ? undefined
             : launchIdentity.slackUserId,
         channel: event.channel,
-        prompt: event.text,
+        prompt: event.authoredText ?? event.text,
+        slackMessageContext: event.agentContext,
         threadTs: threadId,
         originMessageTs: event.ts,
         processedImages: images.length > 0 ? images : undefined,
@@ -1444,7 +1445,8 @@ async function processAutomatedAppMentionTask(params: {
             ? undefined
             : launchIdentity.slackUserId,
         channel: event.channel,
-        prompt: event.text,
+        prompt: event.authoredText ?? event.text,
+        slackMessageContext: event.agentContext,
         threadTs: threadId,
         originMessageTs: event.ts,
         processedImages: images.length > 0 ? images : undefined,

@@ -544,6 +544,7 @@ describe('slackAppMention', () => {
         text: '**Idea 1: Fix cron retries**\nFix cron retries',
         agentPromptText:
           '**Idea 1: Fix cron retries**\nFix cron retries\n\nInvestigation context:\napps/api/src/jobs/retry.ts:92 drops the persisted retry delay.',
+        slackMessageContext: 'Slack block text:\nState: New',
         ts: '123.456',
       },
     };
@@ -555,6 +556,12 @@ describe('slackAppMention', () => {
 
     expect(result.prompt).toContain(
       'Investigation context:\napps/api/src/jobs/retry.ts:92 drops the persisted retry delay.',
+    );
+    expect(result.prompt).toContain(
+      '&lt;slack_message_context&gt;\n**Idea 1: Fix cron retries**\nFix cron retries\n\nInvestigation context:\napps/api/src/jobs/retry.ts:92 drops the persisted retry delay.\n\nSlack block text:\nState: New\n&lt;/slack_message_context&gt;',
+    );
+    expect(result.prompt).toContain(
+      '&lt;slack_message ts="123.456"&gt;\n**Idea 1: Fix cron retries**\nFix cron retries\n&lt;/slack_message&gt;',
     );
   });
 
