@@ -25,6 +25,49 @@ const paginationSchema = {
   start_cursor: z.string().optional(),
   page_size: z.number().int().min(1).max(100).optional(),
 } as const;
+const blockPositionSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('start') }),
+  z.object({ type: z.literal('end') }),
+  z.object({
+    type: z.literal('after_block'),
+    after_block: z.object({ id: nonEmptyStringSchema }),
+  }),
+]);
+const pageParentSchema = z.union([
+  z.object({
+    type: z.literal('page_id'),
+    page_id: nonEmptyStringSchema,
+  }),
+  z.object({
+    type: z.literal('data_source_id'),
+    data_source_id: nonEmptyStringSchema,
+  }),
+]);
+const markdownOperationSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('update_content'),
+    update_content: z.object({
+      content_updates: z
+        .array(
+          z.object({
+            old_str: nonEmptyStringSchema,
+            new_str: z.string(),
+            replace_all_matches: z.boolean().optional(),
+          }),
+        )
+        .min(1)
+        .max(100),
+      allow_deleting_content: z.boolean().optional(),
+    }),
+  }),
+  z.object({
+    type: z.literal('replace_content'),
+    replace_content: z.object({
+      new_str: z.string(),
+      allow_deleting_content: z.boolean().optional(),
+    }),
+  }),
+]);
 
 function registerSearchTool(
   server: McpServer,
@@ -75,16 +118,23 @@ function registerFetchTool(
     {
       title: 'Fetch Notion Content',
       description:
-        'Fetch a page, data source, or block explicitly shared with the deployment Notion integration. Page and block fetches include one page of child blocks.',
+        'Fetch a page, data source, or block explicitly shared with the deployment Notion integration. Pages include enhanced Markdown content; blocks include one page of child blocks.',
       inputSchema: {
         id: nonEmptyStringSchema,
         object_type: z.enum(['page', 'data_source', 'block']).default('page'),
+        include_transcript: z.boolean().optional(),
         ...paginationSchema,
       },
       outputSchema: z.object({}).passthrough(),
       annotations: READ_ONLY_ANNOTATIONS,
     },
-    async ({ id, object_type: objectType, start_cursor, page_size }) => {
+    async ({
+      id,
+      object_type: objectType,
+      include_transcript,
+      start_cursor,
+      page_size,
+    }) => {
       const encodedId = encodeURIComponent(id);
       if (objectType === 'data_source') {
         const dataSource = await notionApiRequestJson<Record<string, unknown>>({
@@ -99,6 +149,15 @@ function registerFetchTool(
         path:
           objectType === 'page' ? `pages/${encodedId}` : `blocks/${encodedId}`,
       });
+      if (objectType === 'page') {
+        const content = await notionApiRequestJson<Record<string, unknown>>({
+          config,
+          path: `pages/${encodedId}/markdown`,
+          query: { include_transcript },
+        });
+        return toMcpToolResult({ page: object, content });
+      }
+
       const children = await notionApiRequestJson<Record<string, unknown>>({
         config,
         path: `blocks/${encodedId}/children`,
@@ -234,59 +293,158 @@ function registerUpdatePageTool(
     {
       title: 'Update Notion Page',
       description:
-        'Update properties or trash state for a page available to the deployment Notion integration.',
+        'Update properties, content, icon, cover, or trash state for a page available to the deployment Notion integration.',
       inputSchema: {
         page_id: nonEmptyStringSchema,
         properties: jsonObjectSchema.optional(),
         icon: jsonObjectSchema.nullable().optional(),
         cover: jsonObjectSchema.nullable().optional(),
         in_trash: z.boolean().optional(),
+        content: markdownOperationSchema.optional(),
+        allow_async: z.boolean().optional(),
       },
       outputSchema: z.object({}).passthrough(),
       annotations: WRITE_ANNOTATIONS,
     },
-    async ({ page_id: pageId, properties, icon, cover, in_trash }) => {
-      const page = await notionApiRequestJson<Record<string, unknown>>({
-        config,
-        path: `pages/${encodeURIComponent(pageId)}`,
-        method: 'PATCH',
-        body: {
-          ...(properties ? { properties } : {}),
-          ...(icon !== undefined ? { icon } : {}),
-          ...(cover !== undefined ? { cover } : {}),
-          ...(in_trash !== undefined ? { in_trash } : {}),
-        },
+    async ({
+      page_id: pageId,
+      properties,
+      icon,
+      cover,
+      in_trash,
+      content,
+      allow_async,
+    }) => {
+      const encodedPageId = encodeURIComponent(pageId);
+      const hasMetadataUpdate =
+        properties !== undefined ||
+        icon !== undefined ||
+        cover !== undefined ||
+        in_trash !== undefined;
+      if (!hasMetadataUpdate && !content) {
+        throw new Error('Specify at least one page update');
+      }
+
+      const page = hasMetadataUpdate
+        ? await notionApiRequestJson<Record<string, unknown>>({
+            config,
+            path: `pages/${encodedPageId}`,
+            method: 'PATCH',
+            body: {
+              ...(properties ? { properties } : {}),
+              ...(icon !== undefined ? { icon } : {}),
+              ...(cover !== undefined ? { cover } : {}),
+              ...(in_trash !== undefined ? { in_trash } : {}),
+            },
+          })
+        : undefined;
+      const updatedContent = content
+        ? await notionApiRequestJson<Record<string, unknown>>({
+            config,
+            path: `pages/${encodedPageId}/markdown`,
+            method: 'PATCH',
+            body: {
+              ...content,
+              ...(allow_async !== undefined ? { allow_async } : {}),
+            },
+          })
+        : undefined;
+      return toMcpToolResult({
+        ...(page ? { page } : {}),
+        ...(updatedContent ? { content: updatedContent } : {}),
       });
-      return toMcpToolResult({ page });
     },
   );
 }
 
-function registerAppendBlocksTool(
+function registerGetAsyncTaskTool(
   server: McpServer,
   config: McpConnectionNotionConfig,
 ) {
-  const toolName = 'notion-append-blocks';
+  const toolName = 'notion-get-async-task';
   server.registerTool(
     toolName,
     {
-      title: 'Append Notion Blocks',
+      title: 'Get Notion Async Task',
       description:
-        'Append content blocks to a page or block available to the deployment Notion integration.',
+        'Get the current status and result or error for an asynchronous Notion operation.',
+      inputSchema: { task_id: nonEmptyStringSchema },
+      outputSchema: z.object({}).passthrough(),
+      annotations: READ_ONLY_ANNOTATIONS,
+    },
+    async ({ task_id: taskId }) => {
+      const response = await notionApiRequestJson<Record<string, unknown>>({
+        config,
+        path: `async_tasks/${encodeURIComponent(taskId)}`,
+      });
+      return toMcpToolResult(response);
+    },
+  );
+}
+
+function registerMovePagesTool(
+  server: McpServer,
+  config: McpConnectionNotionConfig,
+) {
+  const toolName = 'notion-move-pages';
+  server.registerTool(
+    toolName,
+    {
+      title: 'Move Notion Pages',
+      description:
+        'Move one or more regular Notion pages beneath another page or into a data source available to the deployment integration. The public API cannot move databases or blocks.',
       inputSchema: {
-        block_id: nonEmptyStringSchema,
-        children: z.array(jsonObjectSchema).min(1).max(100),
-        after: z.string().optional(),
+        page_ids: z.array(nonEmptyStringSchema).min(1).max(100),
+        parent: pageParentSchema,
       },
       outputSchema: z.object({}).passthrough(),
       annotations: WRITE_ANNOTATIONS,
     },
-    async ({ block_id: blockId, children, after }) => {
+    async ({ page_ids: pageIds, parent }) => {
+      const pages = [];
+      for (const pageId of pageIds) {
+        pages.push(
+          await notionApiRequestJson<Record<string, unknown>>({
+            config,
+            path: `pages/${encodeURIComponent(pageId)}/move`,
+            method: 'POST',
+            body: { parent },
+          }),
+        );
+      }
+      return toMcpToolResult({ pages });
+    },
+  );
+}
+
+function registerInsertBlocksTool(
+  server: McpServer,
+  config: McpConnectionNotionConfig,
+) {
+  const toolName = 'notion-insert-blocks';
+  server.registerTool(
+    toolName,
+    {
+      title: 'Insert Notion Blocks',
+      description:
+        'Create content blocks at the start or end of a page or block, or after an existing child block. Notion cannot move or reorder existing blocks; position applies only to newly created blocks.',
+      inputSchema: {
+        block_id: nonEmptyStringSchema,
+        children: z.array(jsonObjectSchema).min(1).max(100),
+        position: blockPositionSchema.optional(),
+      },
+      outputSchema: z.object({}).passthrough(),
+      annotations: WRITE_ANNOTATIONS,
+    },
+    async ({ block_id: blockId, children, position }) => {
       const response = await notionApiRequestJson<Record<string, unknown>>({
         config,
         path: `blocks/${encodeURIComponent(blockId)}/children`,
         method: 'PATCH',
-        body: { children, ...(after ? { after } : {}) },
+        body: {
+          children,
+          ...(position ? { position } : {}),
+        },
       });
       return toMcpToolResult(response);
     },
@@ -333,6 +491,8 @@ export function registerNotionTools(
   registerGetCommentsTool(server, config);
   registerCreatePagesTool(server, config);
   registerUpdatePageTool(server, config);
-  registerAppendBlocksTool(server, config);
+  registerGetAsyncTaskTool(server, config);
+  registerMovePagesTool(server, config);
+  registerInsertBlocksTool(server, config);
   registerCreateCommentTool(server, config);
 }

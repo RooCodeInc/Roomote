@@ -41,6 +41,23 @@ that were newly shared without being edited. The same sweep replaces pages
 that are no longer shared with unavailable tombstones, so their former
 content is no longer retained in Brain search results.
 
+Roomote agents can read and update page content as enhanced Markdown, move
+regular pages beneath another page or into a data source, and create blocks at
+the start or end of existing content or after a specific child block. These
+operations use Notion's public API rather than Notion's hosted MCP tools, so
+their schemas and limitations follow the public API.
+
+Notion's public API cannot move or reorder an existing block. Positional block
+insertion applies only to newly created blocks. Moving a database or preserving
+a block's ID while recreating it in another position is also unsupported.
+
+Roomote's deployment-wide integration is not a proxy for Notion's hosted MCP.
+Hosted-only features such as connected-source search, attachment helpers,
+database and view creation, page duplication, folders, meeting-note queries,
+and workspace team or user lookup are not currently exposed. Roomote instead
+provides the direct public-API operations that work with a restricted internal
+integration token.
+
 <Note>
   A previous hosted-MCP OAuth connection is not reused because it inherits the
   authorizing person's full Notion permissions. Configure an internal
@@ -53,3 +70,8 @@ Notion's **Configuration** tab is the source of truth for what Roomote can do.
 Disable update, insert, or comment capabilities there when the connection
 should be read-only. Roomote exposes its Notion tools, but Notion rejects any
 operation the integration's capabilities do not permit.
+
+Inserting blocks requires **Insert content**. Moving pages and updating page
+Markdown require **Update content**, including edit access to the destination
+parent for page moves. Changing these capabilities on an existing internal
+integration takes effect without reconnecting Roomote.
