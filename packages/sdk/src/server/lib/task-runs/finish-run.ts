@@ -403,7 +403,10 @@ export const finishRun = async ({
     status,
     run.task.title,
   );
-  await notifyFastAgentParentOnSettle(
+  // Detached: this can hold the parent's turn lock through a full
+  // orchestrator turn, and settle callers (tRPC finish, controller, queue
+  // jobs) must not block on it. The delivery claim keeps it idempotent.
+  void notifyFastAgentParentOnSettle(
     { ...run, error: sanitizedError ?? run.error },
     status,
     run.task.title,

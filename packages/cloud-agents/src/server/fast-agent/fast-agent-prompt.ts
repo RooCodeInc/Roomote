@@ -33,11 +33,13 @@ export function buildFastAgentSystemPrompt({
   availableIntegrations = [],
   activeTaskId = null,
   surface = 'slack',
+  platformEvent = false,
 }: {
   availableEnvironments: RoutableEnvironment[];
   availableIntegrations?: FastAgentIntegration[];
   activeTaskId?: string | null;
   surface?: FastAgentSurface;
+  platformEvent?: boolean;
   /** @deprecated GitHub availability is derived from availableIntegrations. */
   hasGitHubTools?: boolean;
 }): string {
@@ -107,6 +109,18 @@ ${reactionGuidance}
 - Do not launch a task merely to answer a question or make a plan.
 - Select an environment ID only when the target is clear. Otherwise use null to use the deployment default.
 - Always return every schema field. Use null for fields that do not apply.
+${
+  platformEvent
+    ? `
+## Delegated Task Platform Event
+- The current input is a trusted platform-generated event about a delegated task, not a human-authored request.
+- Decide whether the event is useful to the user now. Use "ignore_event" when it is routine, redundant, or not worth interrupting them for.
+- When it is useful, emit exactly one "send_chat_reply" with purpose "closeout" and describe the outcome naturally in the context of the delegated work. Never use "ack" or "progress" for a platform event, and never copy a canned event sentence.
+- Do not use integrations or task-control actions for this event.
+- Artifact events include stable artifact IDs and view URLs. When an image would help the user, include its ID in imageArtifactIds so it renders inline with the same reply. For non-image artifacts, link the supplied view URL when useful.
+`
+    : '- "ignore_event" is reserved for platform-generated delegated-task events and is invalid for a human-authored turn.\n'
+}
 
 ## Tone of Voice
 ${buildRoomoteStyleGuidanceSection()}

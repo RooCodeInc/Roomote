@@ -43,6 +43,7 @@ interface FastAgentSlackReply {
   slackChannel: string;
   slackThreadTs: string;
   message: string;
+  imageArtifactIds?: string[];
 }
 
 type PostFastAgentSlackReply = (reply: FastAgentSlackReply) => Promise<void>;
@@ -69,6 +70,7 @@ const fastAgentDecisionSchema = z
       'send_task_message',
       'cancel_task',
       'call_integration',
+      'ignore_event',
     ]),
     message: z.string().nullable(),
     purpose: z
@@ -86,6 +88,7 @@ const fastAgentDecisionSchema = z
       .describe(
         'For call_integration, a JSON-encoded object matching the selected tool input schema. Use null for every other action.',
       ),
+    imageArtifactIds: z.array(z.string()).nullable().optional(),
   })
   .strict()
   .describe(
@@ -107,7 +110,46 @@ function buildFastAgentTurnFallbackDecision(): z.infer<
     integrationId: null,
     toolName: null,
     toolArguments: null,
+    imageArtifactIds: null,
   };
+}
+
+async function generateFastAgentKickoffMessage({
+  userId,
+  system,
+  prompt,
+  task,
+}: {
+  userId: string;
+  system: string;
+  prompt: string;
+  task: { taskId: string; taskUrl?: string };
+}): Promise<string> {
+  let kickoffPrompt = `${prompt}\n\n[FAST ORCHESTRATION TOOL RESULT]\nTool: launch_task\nResult: ${JSON.stringify({ success: true, ...task })}\n[END FAST ORCHESTRATION TOOL RESULT]\n\nThe task has been prepared but is not runnable until its parent-owned kickoff is delivered. Write a meaningful closeout that explains what was delegated in the context of the user's request and links to the task when taskUrl is present. Do not use a generic sentence such as "I started the task." Use send_chat_reply with purpose "closeout".`;
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const generated = await generateFastAgentDecision({
+      userId,
+      system,
+      prompt: kickoffPrompt,
+    });
+    const decision = generated.object;
+    const message = decision.message?.trim();
+
+    if (
+      decision.action === 'send_chat_reply' &&
+      decision.purpose === 'closeout' &&
+      message &&
+      (!task.taskUrl || message.includes(task.taskUrl))
+    ) {
+      return message;
+    }
+
+    kickoffPrompt +=
+      '\n\n[KICKOFF REPLY REJECTED]\nThe prepared task still needs exactly one model-authored send_chat_reply with purpose "closeout". Include the task link when available and explain the delegated work specifically.\n[END KICKOFF REPLY REJECTED]';
+  }
+
+  throw new Error('Fast mode did not produce a valid task kickoff reply.');
 }
 
 export type LaunchFastAgentSlackTask = (params: {
@@ -457,6 +499,7 @@ export async function answerFastAgentQuestion({
   postSlackReply,
   postSlackReaction,
   surface = 'slack',
+  platformEvent = false,
 }: {
   question: string;
   threadContext?: FastAgentSlackThreadMessage[];
@@ -473,10 +516,13 @@ export async function answerFastAgentQuestion({
   postSlackReply?: PostFastAgentSlackReply;
   postSlackReaction?: PostFastAgentSlackReaction;
   surface?: FastAgentSurface;
+  /** Platform-generated child lifecycle input, not a human-authored turn. */
+  platformEvent?: boolean;
 }): Promise<string> {
   let sessionId: string | null = null;
-  let launchedTask: { taskId: string; taskUrl?: string } | null = null;
+  let launchedTaskMessage: string | null = null;
   let persistedTurnMessageCount = 0;
+  let pendingLifecycleReply: FastAgentSlackReply | null = null;
   const normalizedQuestion = normalizeThreadText(question);
   const userMessage = buildUserTextMessage(normalizedQuestion);
   const turnSessionMessages: ModelMessage[] = [userMessage];
@@ -527,6 +573,7 @@ export async function answerFastAgentQuestion({
       availableIntegrations,
       activeTaskId: resolvedActiveTaskId,
       surface,
+      platformEvent,
     });
     let prompt = serializeFastAgentMessages(fastAgentMessages);
     const integrationCallSignatures = new Set<string>();
@@ -534,13 +581,23 @@ export async function answerFastAgentQuestion({
       'launch_task' | 'send_task_message' | 'cancel_task'
     >();
     let currentActiveTaskId = resolvedActiveTaskId;
+    const flushPendingLifecycleReply = async () => {
+      if (!pendingLifecycleReply) {
+        return;
+      }
+
+      const reply = pendingLifecycleReply;
+      pendingLifecycleReply = null;
+      await postSlackReply?.(reply);
+      turnSessionMessages.push(buildAssistantTextMessage(reply.message));
+    };
     const brain = availableIntegrations.find(
       (integration) =>
         integration.id === BRAIN_MCP_ID &&
         integration.tools.some((tool) => tool.name === 'query'),
     );
 
-    if (brain) {
+    if (brain && !platformEvent) {
       const toolName = 'query';
       const toolArguments = {
         query: buildBrainPreflightQuery({
@@ -594,6 +651,19 @@ export async function answerFastAgentQuestion({
       });
       const decision = generated.object;
 
+      if (decision.action === 'ignore_event') {
+        if (!platformEvent) {
+          prompt += `\n\n[EVENT ACTION REJECTED]\nignore_event is only valid for a platform-generated delegated-task event. Answer the user's turn with a chat-visible action.\n[END EVENT ACTION REJECTED]`;
+          continue;
+        }
+
+        await persistFastAgentSessionMessages({
+          sessionId: session.id,
+          messages: turnSessionMessages,
+        });
+        return '';
+      }
+
       if (decision.action === 'send_chat_reply') {
         const message = decision.message?.trim();
         const purpose = decision.purpose;
@@ -603,23 +673,47 @@ export async function answerFastAgentQuestion({
           continue;
         }
 
-        await postSlackReply?.({
+        if (
+          platformEvent &&
+          purpose !== 'closeout' &&
+          purpose !== 'clarification'
+        ) {
+          prompt += `\n\n[PLATFORM EVENT REPLY REJECTED]\nA delegated-task platform event may emit at most one chat reply. Use purpose "closeout" for a useful event or ignore_event for a redundant event.\n[END PLATFORM EVENT REPLY REJECTED]`;
+          continue;
+        }
+
+        const reply = {
           purpose,
           slackChannel,
           slackThreadTs,
           message,
-        });
-        turnSessionMessages.push(buildAssistantTextMessage(message));
+          ...(decision.imageArtifactIds?.length
+            ? { imageArtifactIds: decision.imageArtifactIds }
+            : {}),
+        } satisfies FastAgentSlackReply;
 
-        if (purpose === 'closeout' || purpose === 'clarification') {
-          await persistFastAgentSessionMessages({
-            sessionId: session.id,
-            messages: turnSessionMessages,
-          });
-          return message;
+        if (purpose === 'ack' || purpose === 'progress') {
+          // Hold nonterminal prose until the model actually chooses a tool.
+          // If its next action is a closeout, the pending paraphrase is dropped
+          // so one immediate answer cannot become two near-identical messages.
+          pendingLifecycleReply = reply;
+          prompt += `\n\n[CHAT TOOL RESULT]\nTool: send_chat_reply\nPurpose: ${purpose}\nResult: queued until a non-chat action begins\n[END CHAT TOOL RESULT]\n\nThe turn is still open. Continue with a task or integration action, or send one closeout now. A closeout replaces the queued ${purpose} instead of posting both.`;
+          continue;
         }
 
-        prompt += `\n\n[CHAT TOOL RESULT]\nTool: send_chat_reply\nPurpose: ${purpose}\nResult: delivered\n[END CHAT TOOL RESULT]\n\nThe turn is still open. Continue the requested work, then use send_chat_reply with purpose "closeout" when there is an answer or result.`;
+        pendingLifecycleReply = null;
+        await postSlackReply?.(reply);
+        turnSessionMessages.push(buildAssistantTextMessage(message));
+
+        await persistFastAgentSessionMessages({
+          sessionId: session.id,
+          messages: turnSessionMessages,
+        });
+        return message;
+      }
+
+      if (platformEvent) {
+        prompt += `\n\n[PLATFORM EVENT ACTION REJECTED]\nA delegated-task platform event may only use send_chat_reply or ignore_event. Do not launch, message, or cancel tasks, react, or call integrations for this event.\n[END PLATFORM EVENT ACTION REJECTED]`;
         continue;
       }
 
@@ -664,6 +758,7 @@ export async function answerFastAgentQuestion({
       }
 
       if (decision.action === 'call_integration') {
+        await flushPendingLifecycleReply();
         const integrationId = decision.integrationId?.trim();
         const toolName = decision.toolName?.trim();
         const parsedToolArguments = parseIntegrationToolArguments(
@@ -731,6 +826,7 @@ export async function answerFastAgentQuestion({
         completedTaskActions.add(taskAction);
 
         if (taskAction === 'launch_task') {
+          pendingLifecycleReply = null;
           const taskPrompt = decision.taskPrompt?.trim();
           const validEnvironmentIds = new Set(
             availableEnvironments.map((environment) => environment.id),
@@ -751,31 +847,38 @@ export async function answerFastAgentQuestion({
           } else if (!launchTask) {
             taskResult = { error: 'Task delegation is unavailable.' };
           } else {
+            const deliverParentKickoff = async (task: {
+              taskId: string;
+              taskUrl?: string;
+            }) => {
+              if (!postSlackReply) {
+                throw new Error('Parent chat delivery is unavailable.');
+              }
+              const message = await generateFastAgentKickoffMessage({
+                userId,
+                system,
+                prompt,
+                task,
+              });
+              await postSlackReply({
+                purpose: 'closeout',
+                slackChannel,
+                slackThreadTs,
+                message,
+              });
+              turnSessionMessages.push(buildAssistantTextMessage(message));
+              await appendFastAgentSessionMessages({
+                sessionId: session.id,
+                messages: turnSessionMessages,
+              });
+              launchedTaskMessage = message;
+              persistedTurnMessageCount = turnSessionMessages.length;
+            };
             taskResult = await launchTask({
               prompt: taskPrompt,
               environmentId: decision.environmentId,
               parentSessionId: session.id,
-              postKickoff: async (task) => {
-                if (!postSlackReply) {
-                  throw new Error('Parent chat delivery is unavailable.');
-                }
-                const message = task.taskUrl
-                  ? `I started the task. [Open task](${task.taskUrl})`
-                  : `I started task ${task.taskId}.`;
-                await postSlackReply({
-                  purpose: 'closeout',
-                  slackChannel,
-                  slackThreadTs,
-                  message,
-                });
-                turnSessionMessages.push(buildAssistantTextMessage(message));
-                await appendFastAgentSessionMessages({
-                  sessionId: session.id,
-                  messages: turnSessionMessages,
-                });
-                launchedTask = task;
-                persistedTurnMessageCount = turnSessionMessages.length;
-              },
+              postKickoff: deliverParentKickoff,
             });
             if (
               taskResult &&
@@ -786,20 +889,28 @@ export async function answerFastAgentQuestion({
               typeof taskResult.taskId === 'string'
             ) {
               currentActiveTaskId = taskResult.taskId;
-              launchedTask = {
-                taskId: taskResult.taskId,
-                ...('taskUrl' in taskResult &&
-                typeof taskResult.taskUrl === 'string'
-                  ? { taskUrl: taskResult.taskUrl }
-                  : {}),
-              };
-              const message = launchedTask.taskUrl
-                ? `I started the task. [Open task](${launchedTask.taskUrl})`
-                : `I started task ${launchedTask.taskId}.`;
-              return message;
+              if (!launchedTaskMessage) {
+                // Launchers without a kickoff-capable enqueue hook (e.g.
+                // Discord) return success without having called postKickoff;
+                // deliver the parent-owned kickoff for the queued task now.
+                await deliverParentKickoff({
+                  taskId: taskResult.taskId,
+                  ...('taskUrl' in taskResult &&
+                  typeof taskResult.taskUrl === 'string'
+                    ? { taskUrl: taskResult.taskUrl }
+                    : {}),
+                });
+              }
+              if (!launchedTaskMessage) {
+                throw new Error(
+                  'The task was queued without a parent-owned kickoff.',
+                );
+              }
+              return launchedTaskMessage;
             }
           }
         } else if (taskAction === 'send_task_message') {
+          await flushPendingLifecycleReply();
           const taskMessage = decision.taskMessage?.trim();
           if (!currentActiveTaskId) {
             taskResult = { error: 'There is no active delegated task.' };
@@ -812,8 +923,10 @@ export async function answerFastAgentQuestion({
             );
           }
         } else if (!currentActiveTaskId) {
+          await flushPendingLifecycleReply();
           taskResult = { error: 'There is no active delegated task.' };
         } else {
+          await flushPendingLifecycleReply();
           taskResult = await cancelFastAgentTask(
             { userId, apiBaseUrl },
             currentActiveTaskId,
@@ -850,7 +963,15 @@ export async function answerFastAgentQuestion({
     console.error(
       `[Fast Agent] Failed to answer question: ${formatErrorForLog(error)}`,
     );
-    const message = launchedTask
+
+    if (platformEvent) {
+      // Platform-event deliveries are claimed and retried by their notifier;
+      // returning an error string here would record the event as delivered
+      // and post a human-style apology for a turn no human started.
+      throw error;
+    }
+
+    const message = launchedTaskMessage
       ? 'I posted the task kickoff, but the task could not be queued. Please retry.'
       : isRetryableFastAgentInferenceError(error)
         ? 'Fast mode could not reach the model after retrying. Please try again in a moment.'

@@ -21,6 +21,44 @@ const { redisLists, redisMock, redisStrings } = vi.hoisted(() => {
     del: vi.fn(async (key: string) => deleteKey(key)),
     eval: vi.fn(
       async (_script: string, keyCount: number, ...args: unknown[]) => {
+        if (keyCount === 3) {
+          const [
+            pendingKey,
+            sourceQueueKey,
+            resumedQueueKey,
+            taskId,
+            sourceRunId,
+            resumedRunId,
+          ] = args as [string, string, string, string, string, string];
+          const rawRequest = strings.get(pendingKey);
+          if (!rawRequest) {
+            return 0;
+          }
+
+          const pendingRequest = JSON.parse(rawRequest) as Record<
+            string,
+            unknown
+          >;
+          if (
+            pendingRequest.taskId !== taskId ||
+            String(pendingRequest.runId) !== sourceRunId
+          ) {
+            return 0;
+          }
+
+          pendingRequest.runId = Number(resumedRunId);
+          strings.set(pendingKey, JSON.stringify(pendingRequest));
+          const queuedAnswers = lists.get(sourceQueueKey) ?? [];
+          if (queuedAnswers.length > 0) {
+            lists.set(resumedQueueKey, [
+              ...(lists.get(resumedQueueKey) ?? []),
+              ...queuedAnswers,
+            ]);
+            lists.delete(sourceQueueKey);
+          }
+          return 1;
+        }
+
         if (keyCount === 1) {
           const [pendingKey, requestId, runId] = args as [
             string,
@@ -135,6 +173,7 @@ import {
   clearPendingSlackRequestUserInput,
   getPendingSlackRequestUserInput,
   getSlackRequestUserInputAnswers,
+  rebindPendingSlackRequestUserInputRun,
   setPendingSlackRequestUserInput,
   submitPendingSlackRequestUserInputAnswer,
 } from '../request-user-input';
@@ -256,5 +295,41 @@ describe('request_user_input Redis helpers', () => {
       status: 'submitted',
       answers: answer.answers,
     });
+  });
+
+  it('atomically rebinds a submitted prompt and queued answer to a resumed run', async () => {
+    await setPendingSlackRequestUserInput('thread-1', {
+      requestId: 'rui:session:turn:call',
+      runId: 42,
+      taskId: 'task-1',
+      questions: [],
+      status: 'submitted',
+    });
+    const answer = {
+      requestId: 'rui:session:turn:call',
+      answers: {},
+      user: 'U123',
+      ts: '111.000',
+    };
+    redisLists.set('slack:request_user_input:answers:42', [
+      JSON.stringify(answer),
+    ]);
+
+    await expect(
+      rebindPendingSlackRequestUserInputRun({
+        threadId: 'thread-1',
+        taskId: 'task-1',
+        sourceRunId: 42,
+        resumedRunId: 43,
+      }),
+    ).resolves.toBe(true);
+
+    await expect(getPendingSlackRequestUserInput('thread-1')).resolves.toEqual(
+      expect.objectContaining({ runId: 43, status: 'submitted' }),
+    );
+    await expect(getSlackRequestUserInputAnswers(42)).resolves.toEqual([]);
+    await expect(getSlackRequestUserInputAnswers(43)).resolves.toEqual([
+      answer,
+    ]);
   });
 });

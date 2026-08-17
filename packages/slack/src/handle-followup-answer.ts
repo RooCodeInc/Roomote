@@ -1,10 +1,19 @@
-import { PRODUCT_NAME, type AcpRequestUserInputAnswers } from '@roomote/types';
+import {
+  PRODUCT_NAME,
+  activeRunStatuses,
+  getFastAgentParentFromPayload,
+  type AcpRequestUserInputAnswers,
+} from '@roomote/types';
 import { Env } from '@roomote/env';
 import {
   db,
   type SlackInstallation,
+  getTableColumns,
+  inArray,
+  isNull,
   slackInstallations,
   slackUserMappings,
+  taskRuns,
   setTrustedRunActingUser,
   setTrustedRunActingUserOnSuccess,
   and,
@@ -120,6 +129,60 @@ function parseStructuredRequestUserInputButtonValue(
   return null;
 }
 
+/**
+ * Fast children are deliberately unbound from tasks.slackThreadTs, so
+ * findActiveSlackTaskRun cannot see them. When this thread holds a pending
+ * structured prompt whose requestId matches the clicked button, resolve the
+ * child run directly from that prompt's run ID and verify the run's
+ * fastAgentParent stamp points back at this exact thread and workspace.
+ */
+async function findFastAgentChildRunForPendingInput(params: {
+  threadId: string;
+  slackTeamId: string;
+  answerValue: string;
+}) {
+  const structuredAnswer = parseStructuredRequestUserInputButtonValue(
+    params.answerValue,
+  );
+  if (!structuredAnswer) {
+    return null;
+  }
+
+  const pendingRequest = await getPendingSlackRequestUserInput(params.threadId);
+  if (
+    !pendingRequest ||
+    pendingRequest.requestId !== structuredAnswer.requestId
+  ) {
+    return null;
+  }
+
+  const [run] = await db
+    .select(getTableColumns(taskRuns))
+    .from(taskRuns)
+    .where(
+      and(
+        eq(taskRuns.id, pendingRequest.runId),
+        inArray(taskRuns.status, [...activeRunStatuses]),
+        isNull(taskRuns.canceledAt),
+      ),
+    )
+    .limit(1);
+  if (!run) {
+    return null;
+  }
+
+  const parent = getFastAgentParentFromPayload(run.payload);
+  if (
+    !parent ||
+    parent.slackTeamId !== params.slackTeamId ||
+    parent.slackThreadTs !== params.threadId
+  ) {
+    return null;
+  }
+
+  return run;
+}
+
 function mergeRequestUserInputAnswers(
   existing: AcpRequestUserInputAnswers,
   next: AcpRequestUserInputAnswers,
@@ -164,9 +227,15 @@ export async function handleFollowupAnswer(payload: SlackInteractivePayload) {
       return;
     }
 
-    const activeRun = await findActiveSlackTaskRun(threadId, {
-      slackTeamId: payload.team.id,
-    });
+    const activeRun =
+      (await findActiveSlackTaskRun(threadId, {
+        slackTeamId: payload.team.id,
+      })) ??
+      (await findFastAgentChildRunForPendingInput({
+        threadId,
+        slackTeamId: payload.team.id,
+        answerValue,
+      }));
 
     if (!activeRun) {
       console.error(

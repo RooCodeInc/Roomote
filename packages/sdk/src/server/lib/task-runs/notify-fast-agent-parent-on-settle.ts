@@ -5,13 +5,19 @@ import {
   db,
   eq,
   recordTaskRunLifecycleEvent,
-  slackInstallations,
-  slackQuickAnswers,
   sql,
   taskRuns,
 } from '@roomote/db/server';
 import { getTaskUrl } from '@roomote/cloud-agents/server';
-import { SlackNotifier } from '@roomote/slack';
+
+import {
+  FastAgentParentEventDeliveryError,
+  deliverFastAgentParentEvent,
+} from '../fast-agent-parent-event';
+import {
+  buildFastAgentDeliveringMarker,
+  buildFastAgentDeliveryClaimPredicate,
+} from './fast-agent-delivery-claim';
 
 const NOTIFIED_RESULT_KEY = 'fastAgentParentSettleNotifiedAt';
 
@@ -21,24 +27,7 @@ type SettledStatus =
   | RunStatus.Canceled
   | RunStatus.Idle;
 
-function getStatusText(status: SettledStatus): string {
-  switch (status) {
-    case RunStatus.Completed:
-      return 'completed';
-    case RunStatus.Failed:
-      return 'failed';
-    case RunStatus.Canceled:
-      return 'was canceled';
-    case RunStatus.Idle:
-      return 'is waiting for input or review';
-  }
-}
-
-/**
- * Relay a Fast-delegated child's terminal/idle lifecycle state through the
- * runless Fast parent. The child has no communication tools or live reply
- * context; this platform-owned path is its only route back to Slack.
- */
+/** Pass a Fast child's terminal/idle state to its conversational orchestrator. */
 export async function notifyFastAgentParentOnSettle(
   run: TaskRun,
   status: SettledStatus,
@@ -49,116 +38,94 @@ export async function notifyFastAgentParentOnSettle(
     return;
   }
 
-  let claimHeld = false;
-  let slackDelivered = false;
-
-  try {
-    const scopedChannel = `${parent.slackTeamId}:${parent.slackChannel}`;
-    const [session, installation] = await Promise.all([
-      db.query.slackQuickAnswers.findFirst({
-        where: and(
-          eq(slackQuickAnswers.id, parent.sessionId),
-          eq(slackQuickAnswers.slackChannel, scopedChannel),
-          eq(slackQuickAnswers.slackThreadTs, parent.slackThreadTs),
-        ),
-        columns: { id: true },
-      }),
-      db.query.slackInstallations.findFirst({
-        where: and(
-          eq(slackInstallations.isActive, true),
-          eq(slackInstallations.teamId, parent.slackTeamId),
-        ),
-        columns: { botAccessToken: true },
-      }),
-    ]);
-
-    if (!session || !installation?.botAccessToken) {
-      return;
-    }
-
-    const claimRows = await db
+  const markSettled = async () => {
+    await db
       .update(taskRuns)
       .set({
         result: sql`coalesce(${taskRuns.result}, '{}'::jsonb) || jsonb_build_object(${NOTIFIED_RESULT_KEY}::text, to_jsonb(now()))`,
       })
-      .where(
-        and(
-          eq(taskRuns.id, run.id),
-          sql`(${taskRuns.result} -> ${NOTIFIED_RESULT_KEY}) is null`,
-        ),
-      )
-      .returning({ id: taskRuns.id });
+      .where(eq(taskRuns.id, run.id));
+  };
+  const claimRows = await db
+    .update(taskRuns)
+    .set({
+      result: sql`coalesce(${taskRuns.result}, '{}'::jsonb) || jsonb_build_object(${NOTIFIED_RESULT_KEY}::text, ${buildFastAgentDeliveringMarker()}::text)`,
+    })
+    .where(
+      and(
+        eq(taskRuns.id, run.id),
+        buildFastAgentDeliveryClaimPredicate(NOTIFIED_RESULT_KEY),
+      ),
+    )
+    .returning({ id: taskRuns.id });
 
-    if (claimRows.length === 0) {
-      return;
-    }
-    claimHeld = true;
+  if (claimRows.length === 0) {
+    return;
+  }
 
-    const title = taskTitle?.trim();
-    const subject = title
-      ? `The delegated task "${title}"`
-      : 'The delegated task';
-    const statusText = getStatusText(status);
-    const taskUrl = getTaskUrl({
-      taskId: run.taskId,
-      utm: { source: 'slack', campaign: 'fast-delegation-settle' },
+  let delivered = false;
+
+  try {
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'task_settled',
+        taskId: run.taskId,
+        runId: run.id,
+        ...(taskTitle?.trim() ? { title: taskTitle.trim() } : {}),
+        status,
+        taskUrl: getTaskUrl({
+          taskId: run.taskId,
+          utm: { source: 'slack', campaign: 'fast-delegation-settle' },
+        }),
+      },
     });
-    const slackMessage = `${subject} ${statusText}. <${taskUrl}|Open task>`;
-    const sessionMessage = `${subject} ${statusText}. [Open task](${taskUrl})`;
+    delivered = true;
 
-    const messageTs = await new SlackNotifier(
-      installation.botAccessToken,
-    ).postMessage({
-      channel: parent.slackChannel,
-      thread_ts: parent.slackThreadTs,
-      text: slackMessage,
-      unfurl_links: false,
-      unfurl_media: false,
-    });
-    if (!messageTs) {
-      throw new Error('Slack did not return a lifecycle message timestamp.');
-    }
-    slackDelivered = true;
-
-    await db
-      .update(slackQuickAnswers)
-      .set({
-        messages: sql`${slackQuickAnswers.messages} || ${JSON.stringify([
-          { role: 'assistant', content: sessionMessage },
-        ])}::jsonb`,
-        updatedAt: sql`now()`,
-      })
-      .where(eq(slackQuickAnswers.id, parent.sessionId));
+    await markSettled();
 
     await recordTaskRunLifecycleEvent(db, {
       runId: run.id,
       taskId: run.taskId,
       eventType: 'decision',
-      message: `Delivered ${status} lifecycle update through the Fast parent.`,
+      message: `Passed ${status} lifecycle state to the Fast parent orchestrator.`,
       details: {
-        reason: 'fast_agent_parent_settle_notification',
+        reason: 'fast_agent_parent_settle_event',
         fastAgentSessionId: parent.sessionId,
         status,
       },
     });
   } catch (error) {
-    if (claimHeld && !slackDelivered) {
-      try {
-        await db
-          .update(taskRuns)
-          .set({
-            result: sql`coalesce(${taskRuns.result}, '{}'::jsonb) - ${NOTIFIED_RESULT_KEY}`,
-          })
-          .where(eq(taskRuns.id, run.id));
-      } catch {
-        // Best-effort retry release only.
-      }
-    }
-
     console.error(
       `[notifyFastAgentParentOnSettle] Failed for run ${run.id}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
+    const deliveryError =
+      error instanceof FastAgentParentEventDeliveryError ? error : null;
+
+    if (delivered || deliveryError?.slackPosted) {
+      // The parent thread already saw the settle message; releasing the claim
+      // would let the other settle caller double-post. Settle the marker.
+      await markSettled().catch(() => {});
+      return;
+    }
+
+    if (deliveryError?.permanent) {
+      // No retry can succeed (parent session or installation gone).
+      await markSettled().catch(() => {});
+      return;
+    }
+
+    try {
+      await db
+        .update(taskRuns)
+        .set({
+          result: sql`coalesce(${taskRuns.result}, '{}'::jsonb) - ${NOTIFIED_RESULT_KEY}`,
+        })
+        .where(eq(taskRuns.id, run.id));
+    } catch {
+      // Best-effort claim release for retry.
+    }
   }
 }

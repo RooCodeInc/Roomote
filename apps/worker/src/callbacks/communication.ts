@@ -4,6 +4,7 @@ import {
   getCommunicationProviderFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
   getDiscordIntakeAckReactionTargetFromTaskPayload,
+  getFastAgentParentFromPayload,
   type CommunicationProvider,
 } from '@roomote/types';
 
@@ -26,8 +27,15 @@ const COMMUNICATION_RUI_PROVIDERS = new Set<CommunicationProvider>([
 
 function supportsCommunicationRequestUserInput(
   provider: CommunicationProvider | null | undefined,
-): provider is 'discord' | 'telegram' | 'teams' {
-  return Boolean(provider && COMMUNICATION_RUI_PROVIDERS.has(provider));
+  taskRun?: TaskRun,
+): boolean {
+  return Boolean(
+    provider &&
+    (COMMUNICATION_RUI_PROVIDERS.has(provider) ||
+      (provider === 'slack' &&
+        taskRun &&
+        getFastAgentParentFromPayload(taskRun.payload))),
+  );
 }
 
 function supportsCommunicationAckReactionCleanup(taskRun: TaskRun): boolean {
@@ -87,7 +95,7 @@ async function handleRequestUserInput(
   context: RunTaskContext,
 ): Promise<void> {
   const provider = getCommunicationProviderFromTaskPayload(taskRun.payload);
-  if (!supportsCommunicationRequestUserInput(provider)) {
+  if (!provider || !supportsCommunicationRequestUserInput(provider, taskRun)) {
     return;
   }
 
@@ -110,12 +118,24 @@ async function handleRequestUserInput(
       return;
     }
 
-    await sdk.taskRuns.publishCommunicationRequestUserInput({
-      runId: taskRun.id,
-      requestId: event.request.requestId,
-      taskId: taskRun.taskId,
-      questions: event.request.questions,
-    });
+    if (provider === 'slack') {
+      const result = await sdk.taskRuns.publishFastAgentRequestUserInput({
+        runId: taskRun.id,
+        requestId: event.request.requestId,
+        taskId: taskRun.taskId,
+        questions: event.request.questions,
+      });
+      if (!result.published) {
+        return;
+      }
+    } else {
+      await sdk.taskRuns.publishCommunicationRequestUserInput({
+        runId: taskRun.id,
+        requestId: event.request.requestId,
+        taskId: taskRun.taskId,
+        questions: event.request.questions,
+      });
+    }
     postedSignatures.set(event.request.requestId, promptSignature);
   } catch (error) {
     console.error(
@@ -131,7 +151,7 @@ async function handleRequestUserInputResponse(
   event: CallbackEvent & { type: 'request_user_input_response' },
 ): Promise<void> {
   const provider = getCommunicationProviderFromTaskPayload(taskRun.payload);
-  if (!supportsCommunicationRequestUserInput(provider)) {
+  if (!provider || !supportsCommunicationRequestUserInput(provider, taskRun)) {
     return;
   }
 
@@ -141,12 +161,20 @@ async function handleRequestUserInputResponse(
   }
 
   try {
-    await sdk.taskRuns.clearPendingCommunicationRequestUserInput({
-      runId: taskRun.id,
-      provider,
-      conversationId,
-      requestId: event.response.requestId,
-    });
+    if (provider === 'slack') {
+      await sdk.taskRuns.clearPendingSlackRequestUserInput({
+        runId: taskRun.id,
+        threadId: conversationId,
+        requestId: event.response.requestId,
+      });
+    } else {
+      await sdk.taskRuns.clearPendingCommunicationRequestUserInput({
+        runId: taskRun.id,
+        provider,
+        conversationId,
+        requestId: event.response.requestId,
+      });
+    }
   } catch (error) {
     console.error(
       `[communicationCallbacks] Failed to clear ${provider} request_user_input state: ${
@@ -160,7 +188,10 @@ export function getCommunicationRunTaskCallbacks(
   taskRun: TaskRun,
 ): RunTaskCallbacks {
   const provider = getCommunicationProviderFromTaskPayload(taskRun.payload);
-  const supportsRui = supportsCommunicationRequestUserInput(provider);
+  if (!provider) {
+    return {};
+  }
+  const supportsRui = supportsCommunicationRequestUserInput(provider, taskRun);
   const supportsAckCleanup = supportsCommunicationAckReactionCleanup(taskRun);
 
   if (!supportsRui && !supportsAckCleanup) {
@@ -191,11 +222,18 @@ export function getCommunicationRunTaskCallbacks(
               return;
             }
             try {
-              await sdk.taskRuns.clearPendingCommunicationRequestUserInput({
-                runId: run.id,
-                provider,
-                conversationId,
-              });
+              if (provider === 'slack') {
+                await sdk.taskRuns.clearPendingSlackRequestUserInput({
+                  runId: run.id,
+                  threadId: conversationId,
+                });
+              } else {
+                await sdk.taskRuns.clearPendingCommunicationRequestUserInput({
+                  runId: run.id,
+                  provider,
+                  conversationId,
+                });
+              }
             } catch (error) {
               console.error(
                 `[communicationCallbacks#onExit] Failed to clear ${provider} request_user_input: ${

@@ -316,6 +316,10 @@ export const setPendingSlackRequestUserInput = (
   options: AppRouterInput['taskRuns']['setPendingSlackRequestUserInput'],
 ) => client.taskRuns.setPendingSlackRequestUserInput.mutate(options);
 
+export const publishFastAgentRequestUserInput = (
+  options: AppRouterInput['taskRuns']['publishFastAgentRequestUserInput'],
+) => client.taskRuns.publishFastAgentRequestUserInput.mutate(options);
+
 export const clearPendingSlackRequestUserInput = (
   options: AppRouterInput['taskRuns']['clearPendingSlackRequestUserInput'],
 ) => client.taskRuns.clearPendingSlackRequestUserInput.mutate(options);

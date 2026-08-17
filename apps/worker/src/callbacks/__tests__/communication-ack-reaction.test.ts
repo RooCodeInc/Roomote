@@ -2,14 +2,22 @@ import type { TaskRun } from '@roomote/sdk/client';
 import { TaskPayloadKind } from '@roomote/types';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { clearCommunicationAckReactionMock } = vi.hoisted(() => ({
+const {
+  clearCommunicationAckReactionMock,
+  publishFastAgentRequestUserInputMock,
+  clearPendingSlackRequestUserInputMock,
+} = vi.hoisted(() => ({
   clearCommunicationAckReactionMock: vi.fn(),
+  publishFastAgentRequestUserInputMock: vi.fn(),
+  clearPendingSlackRequestUserInputMock: vi.fn(),
 }));
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     taskRuns: {
       clearCommunicationAckReaction: clearCommunicationAckReactionMock,
+      publishFastAgentRequestUserInput: publishFastAgentRequestUserInputMock,
+      clearPendingSlackRequestUserInput: clearPendingSlackRequestUserInputMock,
       publishCommunicationRequestUserInput: vi.fn(),
       clearPendingCommunicationRequestUserInput: vi.fn(),
     },
@@ -41,6 +49,67 @@ describe('getCommunicationRunTaskCallbacks ack reaction cleanup', () => {
   beforeEach(() => {
     clearCommunicationAckReactionMock.mockReset();
     clearCommunicationAckReactionMock.mockResolvedValue({ cleared: true });
+    publishFastAgentRequestUserInputMock.mockResolvedValue({
+      published: true,
+      messageTs: '101.001',
+    });
+    clearPendingSlackRequestUserInputMock.mockResolvedValue({ cleared: true });
+  });
+
+  it('publishes structured input from a Fast-delegated Slack child', async () => {
+    const run = makeTaskRun({
+      communicationProvider: 'slack',
+      communicationChannelId: 'C123',
+      communicationThreadId: '100.001',
+      fastAgentParent: {
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        slackTeamId: 'T123',
+        slackChannel: 'C123',
+        slackThreadTs: '100.001',
+      },
+    });
+    const callbacks = getCommunicationRunTaskCallbacks(run);
+
+    await callbacks.onMessage?.(
+      run,
+      run.taskId,
+      {
+        type: 'request_user_input',
+        request: {
+          requestId: 'request-1',
+          questions: [
+            {
+              id: 'animal',
+              prompt: 'Which animal?',
+              options: [{ label: 'Hedgehog', value: 'hedgehog' }],
+            },
+          ],
+        },
+        ts: Date.now(),
+      } as never,
+      {},
+    );
+
+    expect(publishFastAgentRequestUserInputMock).toHaveBeenCalledWith({
+      runId: 42,
+      requestId: 'request-1',
+      taskId: 'task_abc',
+      questions: [
+        expect.objectContaining({ id: 'animal', prompt: 'Which animal?' }),
+      ],
+    });
+  });
+
+  it('does not activate Slack structured input for a non-Fast task', () => {
+    const callbacks = getCommunicationRunTaskCallbacks(
+      makeTaskRun({
+        communicationProvider: 'slack',
+        communicationChannelId: 'C123',
+        communicationThreadId: '100.001',
+      }),
+    );
+
+    expect(callbacks.onMessage).toBeUndefined();
   });
 
   it('clears Discord intake eyes on start when intake pending is set', async () => {

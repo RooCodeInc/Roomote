@@ -160,7 +160,7 @@ describe('answerFastAgentQuestion', () => {
     );
   });
 
-  it('continues working after an acknowledgement and then sends a closeout', async () => {
+  it('drops an acknowledgement that is immediately replaced by a closeout', async () => {
     mocks.generateObject
       .mockResolvedValueOnce({
         object: decision({
@@ -179,13 +179,8 @@ describe('answerFastAgentQuestion', () => {
     });
 
     expect(result).toBe('It is configured correctly.');
-    expect(callbacks.postSlackReply).toHaveBeenCalledTimes(2);
-    expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({ purpose: 'ack', message: "I'll check." }),
-    );
-    expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
-      2,
+    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
+    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
       expect.objectContaining({
         purpose: 'closeout',
         message: 'It is configured correctly.',
@@ -248,17 +243,13 @@ describe('answerFastAgentQuestion', () => {
         args: { query: 'fast agent' },
       },
     );
-    expect(callbacks.postSlackReply).toHaveBeenCalledTimes(3);
+    expect(callbacks.postSlackReply).toHaveBeenCalledTimes(2);
     expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ purpose: 'ack' }),
     );
     expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ purpose: 'progress' }),
-    );
-    expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
-      3,
       expect.objectContaining({ purpose: 'closeout' }),
     );
     expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
@@ -288,6 +279,45 @@ describe('answerFastAgentQuestion', () => {
     expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
     expect(callbacks.postSlackReply).toHaveBeenCalledWith(
       expect.objectContaining({ purpose: 'clarification' }),
+    );
+  });
+
+  it('allows at most one terminal reply for a delegated-task platform event', async () => {
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          message: 'Visual proof is ready.',
+          purpose: 'progress',
+          imageArtifactIds: ['artifact-1'],
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          message: 'The hedgehog is visible in the selection screen.',
+          purpose: 'closeout',
+          imageArtifactIds: ['artifact-1'],
+        }),
+      });
+    const callbacks = chatCallbacks();
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      question:
+        '<delegated_task_event>{"type":"artifact_published"}</delegated_task_event>',
+      platformEvent: true,
+      ...callbacks,
+    });
+
+    expect(result).toBe('The hedgehog is visible in the selection screen.');
+    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
+    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: 'closeout',
+        imageArtifactIds: ['artifact-1'],
+      }),
+    );
+    expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
+      'may emit at most one chat reply',
     );
   });
 
@@ -358,15 +388,22 @@ describe('answerFastAgentQuestion', () => {
   });
 
   it('posts one parent kickoff and ends the turn when launching work', async () => {
-    mocks.generateObject.mockResolvedValueOnce({
-      object: decision({
-        action: 'launch_task',
-        message: null,
-        purpose: null,
-        taskPrompt: 'Add the regression test.',
-        environmentId: 'env-1',
-      }),
-    });
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'launch_task',
+          message: null,
+          purpose: null,
+          taskPrompt: 'Add the regression test.',
+          environmentId: 'env-1',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          message:
+            'I delegated the regression test and will report the result here. [Follow the task](https://roomote.example/task-1)',
+        }),
+      });
     const launchTask = successfulLaunchTask();
     const callbacks = chatCallbacks();
 
@@ -382,28 +419,35 @@ describe('answerFastAgentQuestion', () => {
       parentSessionId: 'session-1',
       postKickoff: expect.any(Function),
     });
-    expect(mocks.generateObject).toHaveBeenCalledOnce();
+    expect(mocks.generateObject).toHaveBeenCalledTimes(2);
     expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
     expect(callbacks.postSlackReply).toHaveBeenCalledWith(
       expect.objectContaining({
         purpose: 'closeout',
         message:
-          'I started the task. [Open task](https://roomote.example/task-1)',
+          'I delegated the regression test and will report the result here. [Follow the task](https://roomote.example/task-1)',
       }),
     );
-    expect(result).toContain('[Open task]');
+    expect(result).toContain('[Follow the task]');
   });
 
   it('reports a queue failure after a persisted parent kickoff without duplicating session history', async () => {
-    mocks.generateObject.mockResolvedValueOnce({
-      object: decision({
-        action: 'launch_task',
-        message: null,
-        purpose: null,
-        taskPrompt: 'Add the regression test.',
-        environmentId: 'env-1',
-      }),
-    });
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'launch_task',
+          message: null,
+          purpose: null,
+          taskPrompt: 'Add the regression test.',
+          environmentId: 'env-1',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          message:
+            'I delegated the regression test. [Follow the task](https://roomote.example/task-1)',
+        }),
+      });
     const launchTask = vi.fn(
       async ({
         postKickoff,
@@ -447,15 +491,22 @@ describe('answerFastAgentQuestion', () => {
   });
 
   it('fails the launch when the parent kickoff cannot be persisted', async () => {
-    mocks.generateObject.mockResolvedValueOnce({
-      object: decision({
-        action: 'launch_task',
-        message: null,
-        purpose: null,
-        taskPrompt: 'Add the regression test.',
-        environmentId: 'env-1',
-      }),
-    });
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'launch_task',
+          message: null,
+          purpose: null,
+          taskPrompt: 'Add the regression test.',
+          environmentId: 'env-1',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          message:
+            'I delegated the regression test. [Follow the task](https://roomote.example/task-1)',
+        }),
+      });
     mocks.appendSessionMessages.mockRejectedValueOnce(
       new Error('database unavailable'),
     );
@@ -852,9 +903,8 @@ describe('answerFastAgentQuestion', () => {
     });
 
     expect(result).toContain('hit an error');
-    expect(callbacks.postSlackReply).toHaveBeenCalledTimes(2);
-    expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
-      2,
+    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
+    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
       expect.objectContaining({ purpose: 'closeout', message: result }),
     );
   });

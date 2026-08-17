@@ -1,37 +1,43 @@
-const mocks = vi.hoisted(() => ({
-  findRun: vi.fn(),
-  findSession: vi.fn(),
-  findInstallation: vi.fn(),
-  transaction: vi.fn(),
-  txUpdate: vi.fn(),
-  deliveredReturning: vi.fn(),
-  updateSet: vi.fn(),
-  postMessage: vi.fn(),
-  recordLifecycle: vi.fn(),
-}));
+const mocks = vi.hoisted(() => {
+  class FastAgentParentEventDeliveryError extends Error {
+    readonly slackPosted: boolean;
+    readonly permanent: boolean;
+
+    constructor(
+      message: string,
+      options: { slackPosted: boolean; permanent?: boolean },
+    ) {
+      super(message);
+      this.slackPosted = options.slackPosted;
+      this.permanent = options.permanent ?? false;
+    }
+  }
+
+  return {
+    findRun: vi.fn(),
+    claimReturning: vi.fn(),
+    updateSet: vi.fn(),
+    recordLifecycle: vi.fn(),
+    deliverParentEvent: vi.fn(),
+    FastAgentParentEventDeliveryError,
+  };
+});
 
 vi.mock('@roomote/db/server', () => ({
   db: {
-    query: {
-      taskRuns: { findFirst: mocks.findRun },
-      slackQuickAnswers: { findFirst: mocks.findSession },
-      slackInstallations: { findFirst: mocks.findInstallation },
-    },
-    transaction: (...args: unknown[]) => mocks.transaction(...args),
+    query: { taskRuns: { findFirst: mocks.findRun } },
+    update: vi.fn(() => ({
+      set: vi.fn((values: unknown) => {
+        mocks.updateSet(values);
+        return {
+          where: vi.fn(() => ({ returning: mocks.claimReturning })),
+        };
+      }),
+    })),
   },
   and: vi.fn((...args: unknown[]) => args),
   eq: vi.fn((...args: unknown[]) => args),
   recordTaskRunLifecycleEvent: mocks.recordLifecycle,
-  slackInstallations: {
-    isActive: 'slack_installations.is_active',
-    teamId: 'slack_installations.team_id',
-  },
-  slackQuickAnswers: {
-    id: 'slack_quick_answers.id',
-    messages: 'slack_quick_answers.messages',
-    slackChannel: 'slack_quick_answers.slack_channel',
-    slackThreadTs: 'slack_quick_answers.slack_thread_ts',
-  },
   sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
     strings: [...strings],
     values,
@@ -47,10 +53,9 @@ vi.mock('@roomote/env', () => ({
   Env: { R_APP_URL: 'https://roomote.example' },
 }));
 
-vi.mock('@roomote/slack', () => ({
-  SlackNotifier: class {
-    postMessage = mocks.postMessage;
-  },
+vi.mock('../../fast-agent-parent-event', () => ({
+  deliverFastAgentParentEvent: mocks.deliverParentEvent,
+  FastAgentParentEventDeliveryError: mocks.FastAgentParentEventDeliveryError,
 }));
 
 import { notifyFastAgentParentOnArtifact } from '../notify-fast-agent-parent';
@@ -71,8 +76,9 @@ function artifact(
     id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
     taskId: 'child-task',
     runId: 200,
-    path: 'reports/result.md',
+    path: 'proof/result.png',
     version: 1,
+    contentType: 'image/png',
     uploaded: true,
     ...overrides,
   };
@@ -87,102 +93,119 @@ describe('notifyFastAgentParentOnArtifact', () => {
       payload: { fastAgentParent: fastParent },
       result: {},
     });
-    mocks.findSession.mockResolvedValue({ id: fastParent.sessionId });
-    mocks.findInstallation.mockResolvedValue({ botAccessToken: 'xoxb-test' });
-    mocks.txUpdate.mockImplementation(() => ({
-      set: (values: unknown) => {
-        mocks.updateSet(values);
-        return {
-          where: () => ({ returning: mocks.deliveredReturning }),
-        };
-      },
-    }));
-    mocks.transaction.mockImplementation(
-      async (callback: (tx: { update: typeof mocks.txUpdate }) => unknown) =>
-        callback({ update: mocks.txUpdate }),
-    );
-    mocks.deliveredReturning.mockResolvedValue([{ id: 200 }]);
-    mocks.postMessage.mockResolvedValue('101.001');
+    mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
+    mocks.deliverParentEvent.mockResolvedValue(undefined);
     mocks.recordLifecycle.mockResolvedValue(undefined);
   });
 
-  it('delivers each artifact version immediately through the Fast parent', async () => {
+  it('passes structured artifact metadata to the Fast orchestrator', async () => {
     await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
       'delivered',
     );
-    await expect(
-      notifyFastAgentParentOnArtifact(
-        artifact({
-          id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-          version: 2,
-        }),
-      ),
-    ).resolves.toBe('delivered');
 
-    expect(mocks.postMessage).toHaveBeenCalledTimes(2);
-    expect(mocks.postMessage).toHaveBeenNthCalledWith(
-      2,
+    expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
-        channel: 'C123',
-        thread_ts: '100.001',
-        client_msg_id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
-        text: expect.stringContaining('version 2'),
+        parent: fastParent,
+        lockWaitMs: expect.any(Number),
+        event: expect.objectContaining({
+          type: 'artifact_published',
+          taskId: 'child-task',
+          runId: 200,
+          artifact: expect.objectContaining({
+            id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            path: 'proof/result.png',
+            contentType: 'image/png',
+            viewUrl:
+              'https://roomote.example/task/child-task/artifacts/proof/result.png?v=1',
+          }),
+        }),
       }),
     );
-    expect(mocks.recordLifecycle).toHaveBeenNthCalledWith(
-      2,
+    expect(mocks.recordLifecycle).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         details: expect.objectContaining({
-          reason: 'fast_agent_parent_artifact_notification',
-          artifactVersion: 2,
+          reason: 'fast_agent_parent_artifact_event',
         }),
       }),
     );
   });
 
-  it('deduplicates replayed publication for the same artifact version', async () => {
-    const claimKey = 'fastAgentArtifact:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-    mocks.findRun
-      .mockResolvedValueOnce({
-        id: 200,
-        taskId: 'child-task',
-        payload: { fastAgentParent: fastParent },
-        result: {},
-      })
-      .mockResolvedValueOnce({
-        id: 200,
-        taskId: 'child-task',
-        payload: { fastAgentParent: fastParent },
-        result: { [claimKey]: 'delivered' },
-      });
-    await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
-      'delivered',
-    );
+  it('deduplicates an event already claimed by another delivery', async () => {
+    mocks.claimReturning.mockResolvedValueOnce([]);
+
     await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
       'already_delivered',
     );
-
-    expect(mocks.postMessage).toHaveBeenCalledOnce();
+    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
   });
 
-  it('records only one parent event when concurrent replays race', async () => {
-    mocks.deliveredReturning
-      .mockResolvedValueOnce([{ id: 200 }])
-      .mockResolvedValueOnce([]);
+  it('releases a failed orchestrator delivery for retry', async () => {
+    mocks.deliverParentEvent.mockRejectedValueOnce(new Error('model offline'));
 
-    await expect(
-      Promise.all([
-        notifyFastAgentParentOnArtifact(artifact()),
-        notifyFastAgentParentOnArtifact(artifact()),
-      ]),
-    ).resolves.toEqual(['delivered', 'already_delivered']);
-
-    expect(mocks.postMessage).toHaveBeenCalledTimes(2);
-    expect(mocks.postMessage.mock.calls[0]?.[0]?.client_msg_id).toBe(
-      mocks.postMessage.mock.calls[1]?.[0]?.client_msg_id,
+    await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
+      'failed',
     );
-    expect(mocks.recordLifecycle).toHaveBeenCalledOnce();
+    expect(
+      mocks.updateSet.mock.calls.some(([values]) => {
+        const result = (values as { result?: { strings?: string[] } }).result;
+        return result?.strings?.join('').includes(' - ') === true;
+      }),
+    ).toBe(true);
+  });
+
+  it('reports an in-flight delivery as in_progress instead of delivered', async () => {
+    mocks.claimReturning.mockResolvedValueOnce([]);
+    mocks.findRun.mockResolvedValue({
+      id: 200,
+      taskId: 'child-task',
+      payload: { fastAgentParent: fastParent },
+      result: {
+        'fastAgentArtifact:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa': `delivering:${Date.now()}`,
+      },
+    });
+
+    await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
+      'in_progress',
+    );
+    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
+  });
+
+  it('keeps the claim when the failure happened after the Slack post', async () => {
+    mocks.deliverParentEvent.mockRejectedValueOnce(
+      new mocks.FastAgentParentEventDeliveryError('lifecycle write failed', {
+        slackPosted: true,
+      }),
+    );
+
+    await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
+      'delivered',
+    );
+    expect(
+      mocks.updateSet.mock.calls.some(([values]) => {
+        const result = (values as { result?: { strings?: string[] } }).result;
+        return result?.strings?.join('').includes(' - ') === true;
+      }),
+    ).toBe(false);
+  });
+
+  it('settles the claim as skipped when no retry can ever succeed', async () => {
+    mocks.deliverParentEvent.mockRejectedValueOnce(
+      new mocks.FastAgentParentEventDeliveryError('parent session gone', {
+        slackPosted: false,
+        permanent: true,
+      }),
+    );
+
+    await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
+      'skipped',
+    );
+    expect(
+      mocks.updateSet.mock.calls.some(([values]) => {
+        const result = (values as { result?: { values?: unknown[] } }).result;
+        return result?.values?.includes('skipped') === true;
+      }),
+    ).toBe(true);
   });
 
   it('uses inherited Fast parent metadata on resumed runs', async () => {
@@ -200,50 +223,10 @@ describe('notifyFastAgentParentOnArtifact', () => {
     await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
       'delivered',
     );
-    expect(mocks.postMessage).toHaveBeenCalledOnce();
+    expect(mocks.deliverParentEvent).toHaveBeenCalledOnce();
   });
 
-  it('releases failed delivery for retry, including a missing timestamp', async () => {
-    mocks.postMessage
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce('101.002');
-
-    await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
-      'failed',
-    );
-    await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
-      'delivered',
-    );
-
-    expect(mocks.postMessage).toHaveBeenCalledTimes(2);
-    expect(mocks.postMessage.mock.calls[0]?.[0]?.client_msg_id).toBe(
-      mocks.postMessage.mock.calls[1]?.[0]?.client_msg_id,
-    );
-  });
-
-  it('retries the same Slack post when persistence fails after delivery', async () => {
-    mocks.transaction
-      .mockRejectedValueOnce(new Error('database unavailable'))
-      .mockImplementationOnce(
-        async (callback: (tx: { update: typeof mocks.txUpdate }) => unknown) =>
-          callback({ update: mocks.txUpdate }),
-      );
-
-    await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
-      'failed',
-    );
-    await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
-      'delivered',
-    );
-
-    expect(mocks.postMessage).toHaveBeenCalledTimes(2);
-    expect(mocks.postMessage.mock.calls[0]?.[0]?.client_msg_id).toBe(
-      mocks.postMessage.mock.calls[1]?.[0]?.client_msg_id,
-    );
-    expect(mocks.recordLifecycle).toHaveBeenCalledOnce();
-  });
-
-  it('does nothing for standalone non-Fast artifacts', async () => {
+  it('does nothing for standalone artifacts', async () => {
     mocks.findRun.mockResolvedValueOnce({
       id: 200,
       taskId: 'child-task',
@@ -254,6 +237,6 @@ describe('notifyFastAgentParentOnArtifact', () => {
     await expect(notifyFastAgentParentOnArtifact(artifact())).resolves.toBe(
       'not_applicable',
     );
-    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
   });
 });

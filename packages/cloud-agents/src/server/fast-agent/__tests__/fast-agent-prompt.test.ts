@@ -115,6 +115,19 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('limits delegated-task platform events to one terminal reply', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      platformEvent: true,
+    });
+
+    expect(prompt).toContain(
+      'emit exactly one "send_chat_reply" with purpose "closeout"',
+    );
+    expect(prompt).toContain('Never use "ack" or "progress"');
+    expect(prompt).toContain('Use "ignore_event"');
+  });
+
   it('grounds first-person requests in current Slack message attributes', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],

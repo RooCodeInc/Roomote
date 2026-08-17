@@ -405,7 +405,9 @@ export async function notifyCanceledTaskRunOnSettle(
       RunStatus.Canceled,
       taskTitle,
     );
-    await notifyFastAgentParentOnSettle(
+    // Detached like the finishRun call site: never block the cancel path on
+    // the parent's turn lock plus an orchestrator turn.
+    void notifyFastAgentParentOnSettle(
       {
         ...taskRun,
         error: errorMessage ?? persistedRun?.error ?? taskRun.error,
