@@ -28,6 +28,7 @@ import type { UserAuthSuccess } from '@/types';
 import { bootstrapWebRuntimeEnv } from '@/lib/server/bootstrap-runtime-env';
 import { getSlackRedirectUri } from '@/lib/server/slack-redirect-uri';
 import { syncUser } from '@/lib/server/sync-internal';
+import { buildSlackInstallUrl } from '@/lib/slack-install-url';
 import {
   createSignedSlackInstallState,
   createSignedSlackLinkAccountState,
@@ -546,30 +547,13 @@ export async function connectSlackAppCommand(
     }
     const slackOAuthConfig = await resolveSlackOAuthConfig();
 
-    const permissions = [
-      'app_mentions:read',
-      'channels:read',
-      'channels:history',
-      'chat:write',
-      'files:read',
-      'groups:read',
-      'groups:history',
-      'im:read',
-      'im:history',
-      'im:write',
-      'links:read',
-      'links:write',
-      'mpim:read',
-      'mpim:history',
-      'reactions:read',
-      'reactions:write',
-      'team:read',
-      'users:read',
-    ];
-
     const redirectPath = input.redirectPath ?? '/settings';
     const state = await createSignedSlackInstallState({ redirectPath });
-    const url = `https://slack.com/oauth/v2/authorize?client_id=${slackOAuthConfig.clientId}&scope=${permissions.join(',')}&state=${state}&redirect_uri=${encodeURIComponent(getSlackRedirectUri())}`;
+    const url = buildSlackInstallUrl({
+      clientId: slackOAuthConfig.clientId,
+      state,
+      redirectUri: getSlackRedirectUri(),
+    });
 
     return { success: true, url };
   } catch (error) {
