@@ -71,7 +71,7 @@ export type FastAgentPullRequestContext = {
   status: PullRequestStatus | null;
 };
 
-export type FastAgentParentEvent =
+type FastAgentParentEvent =
   | {
       type: 'artifact_published';
       taskId: string;
