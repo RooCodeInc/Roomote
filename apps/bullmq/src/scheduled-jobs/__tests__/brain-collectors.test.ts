@@ -24,6 +24,7 @@ import {
   isSlackHumanProfile,
   runBrainCollectors,
   selectPersonIdentityBatch,
+  slackDirectoryPageUserIds,
   slackDirectoryProfileFromApi,
   type BrainCollector,
   type BrainSink,
@@ -1154,6 +1155,17 @@ describe('person identity pages', () => {
     });
 
     expect(profile?.firstKnownAt).toEqual(new Date('2026-07-01T00:00:00Z'));
+  });
+
+  it('scopes cached Slack profiles to the current API page', () => {
+    expect(
+      slackDirectoryPageUserIds([
+        { id: ' U1 ' },
+        { id: 'U2' },
+        { id: 'U1' },
+        {},
+      ]),
+    ).toEqual(['U1', 'U2']);
   });
 
   it('refreshes a newly connected Slack workspace immediately', () => {

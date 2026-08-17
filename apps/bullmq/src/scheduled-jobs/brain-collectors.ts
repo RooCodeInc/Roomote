@@ -7,6 +7,7 @@ import {
   eq,
   getBrainSyncState,
   githubUserMappings,
+  inArray,
   isNull,
   listBrainCollectorItems,
   listBrainCollectorItemsBefore,
@@ -1444,6 +1445,18 @@ type RawSlackDirectoryUser = {
   };
 };
 
+export function slackDirectoryPageUserIds(
+  users: Array<{ id?: string }>,
+): string[] {
+  return [
+    ...new Set(
+      users
+        .map((user) => user.id?.trim())
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+}
+
 function slackDirectoryIdentityKey(teamId: string, userId: string): string {
   return `${teamId}/${userId}`;
 }
@@ -1679,45 +1692,53 @@ async function readSlackDirectoryBatch(input: {
   now: Date;
 }): Promise<SlackDirectoryBatch> {
   const client = createSlackWebClient(input.installation.botAccessToken);
-  const [canonical, existingProfiles, response] = await Promise.all([
+  const [canonical, response] = await Promise.all([
     loadSlackCanonicalIdentityLookup(),
-    db.query.slackDirectoryUsers.findMany({
-      where: eq(slackDirectoryUsers.slackTeamId, input.installation.teamId),
-      columns: { slackUserId: true, createdAt: true },
-    }),
     client.users.list({
       limit: Math.min(input.limit, SLACK_DIRECTORY_PAGE_SIZE),
       ...(input.slackCursor ? { cursor: input.slackCursor } : {}),
     }),
   ]);
-  const existingCreatedAt = new Map(
-    existingProfiles.map((profile) => [profile.slackUserId, profile.createdAt]),
-  );
   const listed = (response.members ?? []) as RawSlackDirectoryUser[];
+  const pageUserIds = slackDirectoryPageUserIds(listed);
 
   // users.list supplies the directory and full profile shape. Refresh linked
   // Roomote identities with users.info so their canonical cards pick up the
   // freshest Slack name/title even if a paginated directory snapshot lags.
-  const refreshed = await Promise.all(
-    listed.map(async (user) => {
-      if (
-        !user.id ||
-        !canonical.has(
-          slackDirectoryIdentityKey(input.installation.teamId, user.id),
-        )
-      ) {
-        return user;
-      }
-      try {
-        const info = await client.users.info({ user: user.id });
-        return (info.user as RawSlackDirectoryUser | undefined) ?? user;
-      } catch (error) {
-        console.warn(
-          `${LOG_PREFIX} slack team ${input.installation.teamId}: users.info failed for a linked member; using users.list profile: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        return user;
-      }
-    }),
+  const [existingProfiles, refreshed] = await Promise.all([
+    pageUserIds.length > 0
+      ? db.query.slackDirectoryUsers.findMany({
+          where: and(
+            eq(slackDirectoryUsers.slackTeamId, input.installation.teamId),
+            inArray(slackDirectoryUsers.slackUserId, pageUserIds),
+          ),
+          columns: { slackUserId: true, createdAt: true },
+        })
+      : Promise.resolve([]),
+    Promise.all(
+      listed.map(async (user) => {
+        if (
+          !user.id ||
+          !canonical.has(
+            slackDirectoryIdentityKey(input.installation.teamId, user.id),
+          )
+        ) {
+          return user;
+        }
+        try {
+          const info = await client.users.info({ user: user.id });
+          return (info.user as RawSlackDirectoryUser | undefined) ?? user;
+        } catch (error) {
+          console.warn(
+            `${LOG_PREFIX} slack team ${input.installation.teamId}: users.info failed for a linked member; using users.list profile: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return user;
+        }
+      }),
+    ),
+  ]);
+  const existingCreatedAt = new Map(
+    existingProfiles.map((profile) => [profile.slackUserId, profile.createdAt]),
   );
   const profiles = refreshed
     .map((user) =>
