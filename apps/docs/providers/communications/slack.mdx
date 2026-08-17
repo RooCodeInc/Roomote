@@ -166,6 +166,10 @@ question or delegate work into a task. For example: `@Roomote /fast summarize
 this thread` or `@Roomote /fast fix the failing CI job`. The earlier
 `!fast <request>` form remains supported for compatibility.
 
+Fast answers can use the conversation, the deployment's Brain, and enabled
+deployment integrations to answer directly. Requests that need repository or
+workspace execution are delegated to a normal Roomote task.
+
 When your deployment exposes **Default messages to fast mode**, enable it under
 **Settings > Personal** to send ordinary Slack and Discord messages through the
 fast orchestrator without an explicit command.
