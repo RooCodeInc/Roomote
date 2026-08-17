@@ -118,9 +118,17 @@ describe('native Notion MCP', () => {
       method: 'tools/list',
     });
     const body = (await response.json()) as {
-      result: { tools: Array<{ name: string }> };
+      result: {
+        tools: Array<{
+          name: string;
+          inputSchema: { properties?: Record<string, unknown> };
+        }>;
+      };
     };
     const toolNames = body.result.tools.map((tool) => tool.name);
+    const insertBlocksTool = body.result.tools.find(
+      (tool) => tool.name === 'notion-insert-blocks',
+    );
 
     expect(response.status).toBe(200);
     expect(toolNames).toEqual(
@@ -131,13 +139,21 @@ describe('native Notion MCP', () => {
         'notion-get-comments',
         'notion-create-pages',
         'notion-update-page',
-        'notion-fetch-page-markdown',
-        'notion-update-page-markdown',
         'notion-get-async-task',
-        'notion-move-page',
-        'notion-append-blocks',
+        'notion-move-pages',
+        'notion-insert-blocks',
         'notion-create-comment',
       ]),
+    );
+    expect(toolNames).not.toEqual(
+      expect.arrayContaining([
+        'notion-append-blocks',
+        'notion-fetch-page-markdown',
+        'notion-update-page-markdown',
+      ]),
+    );
+    expect(insertBlocksTool?.inputSchema.properties).not.toHaveProperty(
+      'after',
     );
   });
 
@@ -177,7 +193,7 @@ describe('native Notion MCP', () => {
 
     const response = await postMcp(
       createApp(createRunToken()),
-      createToolCallRequest('notion-append-blocks', {
+      createToolCallRequest('notion-insert-blocks', {
         block_id: 'parent-page',
         children,
         position: { type: 'start' },
@@ -203,7 +219,7 @@ describe('native Notion MCP', () => {
 
     const response = await postMcp(
       createApp(createRunToken()),
-      createToolCallRequest('notion-append-blocks', {
+      createToolCallRequest('notion-insert-blocks', {
         block_id: 'parent-page',
         children,
         position: {
@@ -237,8 +253,8 @@ describe('native Notion MCP', () => {
 
     const response = await postMcp(
       createApp(createRunToken()),
-      createToolCallRequest('notion-move-page', {
-        page_id: 'child-page',
+      createToolCallRequest('notion-move-pages', {
+        page_ids: ['child-page'],
         parent: { type: 'page_id', page_id: 'new-parent' },
       }),
     );
@@ -258,6 +274,7 @@ describe('native Notion MCP', () => {
   it('reads and updates page content as enhanced Markdown', async () => {
     const fetchMock = vi
       .fn()
+      .mockResolvedValueOnce(Response.json({ object: 'page', id: 'plan-page' }))
       .mockResolvedValueOnce(
         Response.json({ object: 'page_markdown', markdown: '# Plan' }),
       )
@@ -276,16 +293,17 @@ describe('native Notion MCP', () => {
 
     const readResponse = await postMcp(
       app,
-      createToolCallRequest('notion-fetch-page-markdown', {
-        page_id: 'plan-page',
+      createToolCallRequest('notion-fetch', {
+        id: 'plan-page',
+        object_type: 'page',
         include_transcript: true,
       }),
     );
     const updateResponse = await postMcp(
       app,
-      createToolCallRequest('notion-update-page-markdown', {
+      createToolCallRequest('notion-update-page', {
         page_id: 'plan-page',
-        operation: {
+        content: {
           type: 'update_content',
           update_content: {
             content_updates: [{ old_str: '# Plan', new_str: '# Updated plan' }],
@@ -303,13 +321,18 @@ describe('native Notion MCP', () => {
     expect(taskResponse.status).toBe(200);
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
+      new URL('https://api.notion.com/v1/pages/plan-page'),
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
       new URL(
         'https://api.notion.com/v1/pages/plan-page/markdown?include_transcript=true',
       ),
       expect.objectContaining({ method: 'GET' }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+      3,
       new URL('https://api.notion.com/v1/pages/plan-page/markdown'),
       expect.objectContaining({
         method: 'PATCH',
@@ -322,7 +345,7 @@ describe('native Notion MCP', () => {
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
+      4,
       new URL('https://api.notion.com/v1/async_tasks/task-1'),
       expect.objectContaining({ method: 'GET' }),
     );
