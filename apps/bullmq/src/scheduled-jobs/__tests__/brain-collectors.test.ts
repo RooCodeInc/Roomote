@@ -1056,6 +1056,7 @@ describe('person identity pages', () => {
     expect(page.slug).toMatch(/^people\/roomote-member-[a-f0-9]{16}$/);
     expect(page.title).toBe('Dan Riccio');
     expect(page.content).toContain('type: person');
+    expect(page.content).toContain('event_date: 2026-01-01');
     expect(page.content).toContain('job_title: "VP of Engineering"');
     expect(page.content).toContain('daniel-lxs');
     expect(page.content).toContain('U08TMEM25CP');
@@ -1140,6 +1141,21 @@ describe('person identity pages', () => {
     ).toBe(false);
   });
 
+  it('keeps a Slack profile anchored before later profile updates', () => {
+    const profile = slackDirectoryProfileFromApi({
+      teamId: 'TROOMOTE',
+      teamName: 'Roomote',
+      firstKnownAt: new Date('2026-07-01T00:00:00Z'),
+      observedAt: new Date('2026-09-01T00:00:00Z'),
+      user: {
+        id: 'UADA',
+        updated: new Date('2026-08-15T00:00:00Z').getTime() / 1000,
+      },
+    });
+
+    expect(profile?.firstKnownAt).toEqual(new Date('2026-07-01T00:00:00Z'));
+  });
+
   it('refreshes a newly connected Slack workspace immediately', () => {
     const now = new Date('2026-08-15T12:00:00Z');
 
@@ -1177,12 +1193,14 @@ describe('person identity pages', () => {
       isBot: false,
       isAppUser: false,
       profileUpdatedAt: new Date('2026-08-15T00:00:00Z'),
+      firstKnownAt: new Date('2026-07-01T00:00:00Z'),
     };
     const page = buildSlackDirectoryPersonPage(profile);
 
     expect(page.slug).toMatch(/^people\/slack-member-[a-f0-9]{16}$/);
     expect(page.title).toBe('Ada');
     expect(page.content).toContain('type: person');
+    expect(page.content).toContain('event_date: 2026-07-01');
     expect(page.content).toContain('job_title: "Mathematician"');
     expect(page.content).toContain('Title: Mathematician');
     expect(page.content).toContain('- Slack: ada (UADA)');
@@ -1202,11 +1220,17 @@ describe('person identity pages', () => {
         isBot: false,
         isAppUser: false,
         profileUpdatedAt: new Date('2026-08-15T00:00:00Z'),
+        firstKnownAt: new Date('2026-07-01T00:00:00Z'),
       },
-      { slug: 'people/roomote-member-abc', title: 'Dan Riccio' },
+      {
+        slug: 'people/roomote-member-abc',
+        title: 'Dan Riccio',
+        effectiveDate: new Date('2026-08-01T00:00:00Z'),
+      },
     );
 
     expect(page.content).toContain('type: person-alias');
+    expect(page.content).toContain('event_date: 2026-07-01');
     expect(page.content).toContain('canonical: "people/roomote-member-abc"');
     expect(page.content).toContain('[Dan Riccio](people/roomote-member-abc)');
   });

@@ -215,7 +215,19 @@ export async function saveBrainAgentSummary(
  */
 export async function backfillBrainMemoryEvents(
   database: DatabaseOrTransaction,
+  options: { requeueCompleted?: boolean } = {},
 ): Promise<number> {
+  const requeued = options.requeueCompleted
+    ? ((await database.execute(
+        sql`UPDATE ${brainMemoryEvents} AS event
+            SET status = 'pending', attempts = 0, last_error = NULL, updated_at = now()
+            FROM ${taskRuns} AS run
+            WHERE event.run_id = run.id
+              AND event.status = 'done'
+              AND run.status = 'completed'
+            RETURNING event.id`,
+      )) as unknown as Array<{ id: string }>)
+    : [];
   const rows = (await database.execute(
     sql`INSERT INTO ${brainMemoryEvents} (run_id)
         SELECT id FROM ${taskRuns} WHERE status = 'completed'
@@ -223,7 +235,7 @@ export async function backfillBrainMemoryEvents(
         RETURNING id`,
   )) as unknown as Array<{ id: string }>;
 
-  return rows.length;
+  return requeued.length + rows.length;
 }
 
 /**

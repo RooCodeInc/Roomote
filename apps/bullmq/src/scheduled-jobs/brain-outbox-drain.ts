@@ -26,15 +26,15 @@ import { runBrainCollectors } from './brain-collectors';
 
 const LOG_PREFIX = '[brainOutboxDrain]';
 /** Sync-state key for the one-time task-history backfill. */
-const TASK_MEMORY_COLLECTOR_ID = 'task-memory';
+const TASK_MEMORY_COLLECTOR_ID = 'task-memory:effective-date-v2';
 const CLAIM_BATCH_SIZE = 10;
 // Backfill can enqueue a deployment's whole task history at once; drain up
 // to this many batches per tick so the backlog clears in minutes, not hours.
 const MAX_BATCHES_PER_TICK = 20;
 const MAX_ATTEMPTS = 5;
-// Versioned once so existing pages that predate explicit effective dates are
-// replayed and corrected instead of retaining their ingestion date forever.
-const PR_FACTS_COLLECTOR_ID = 'pull-request-facts:effective-date-v2';
+// Versioned when date semantics change so existing pages are replayed and
+// corrected instead of retaining stale effective dates forever.
+const PR_FACTS_COLLECTOR_ID = 'pull-request-facts:occurrence-date-v3';
 // PR analytics gives every repository in one sync the same timestamp but
 // writes repositories sequentially. Re-read a bounded window on each normal
 // collector tick so a row committed late with that shared timestamp cannot
@@ -293,7 +293,9 @@ async function backfillTaskHistoryOnce(): Promise<void> {
     return;
   }
 
-  const enqueued = await backfillBrainMemoryEvents(db);
+  const enqueued = await backfillBrainMemoryEvents(db, {
+    requeueCompleted: true,
+  });
 
   await upsertBrainSyncState(db, TASK_MEMORY_COLLECTOR_ID, {
     backfillCompletedAt: new Date(),
@@ -574,13 +576,16 @@ export function buildPullRequestFactPage(fact: {
   htmlUrl: string;
   authorLogin: string | null;
   state: string;
+  createdAtRemote: Date;
+  closedAtRemote: Date | null;
   mergedAtRemote: Date | null;
-  updatedAtRemote: Date;
 }): IngestPage {
   const merged = fact.mergedAtRemote?.toISOString();
+  const occurredAt =
+    fact.mergedAtRemote ?? fact.closedAtRemote ?? fact.createdAtRemote;
   const content = [
     '---',
-    `date: ${fact.updatedAtRemote.toISOString().slice(0, 10)}`,
+    `event_date: ${occurredAt.toISOString().slice(0, 10)}`,
     `repository: ${fact.repositoryFullName}`,
     `pr_number: ${fact.prNumber}`,
     `state: ${fact.state}`,
@@ -635,8 +640,9 @@ async function syncPullRequestFacts(
       htmlUrl: pullRequestFacts.htmlUrl,
       authorLogin: pullRequestFacts.authorLogin,
       state: pullRequestFacts.state,
+      createdAtRemote: pullRequestFacts.createdAtRemote,
+      closedAtRemote: pullRequestFacts.closedAtRemote,
       mergedAtRemote: pullRequestFacts.mergedAtRemote,
-      updatedAtRemote: pullRequestFacts.updatedAtRemote,
       updatedAt: pullRequestFacts.updatedAt,
     })
     .from(pullRequestFacts)
