@@ -88,6 +88,7 @@ Scopes**:
 
 ```text
 app_mentions:read
+assistant:write
 channels:read
 channels:history
 chat:write
@@ -122,6 +123,8 @@ Turn on **Event Subscriptions** and set **Request URL** to:
 Subscribe to these bot events:
 
 ```text
+app_context_changed
+app_home_opened
 app_mention
 message.im
 message.channels
@@ -143,11 +146,18 @@ Turn on **Interactivity & Shortcuts** and use the same request URL:
 Roomote uses this endpoint for button clicks and other interactive Slack
 payloads.
 
-## App home and messages
+## Agent messaging experience
 
-If you want to start tasks by direct message, make sure the app can receive DMs.
-Enable the app surfaces needed for messages to the bot, then keep the
-`message.im` event subscription enabled.
+Roomote-created apps enable Slack's current **Agent messaging experience**
+(`features.agent_view`). This keeps conversations in the app's Messages tab,
+opens Fast-mode responses in threads, and allows Slack to render native loading
+states and streamed task cards.
+
+For an existing manually configured app, open its Slack app settings, enable
+the **Agents** feature, and select the Agent messaging experience. Add the
+`assistant:write` scope and the `app_home_opened` and `app_context_changed`
+events listed above, then reinstall the app and hard-refresh Slack. Keep
+`message.im` enabled so direct messages continue reaching Roomote.
 
 ## Fast answers
 

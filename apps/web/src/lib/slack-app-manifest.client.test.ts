@@ -77,6 +77,16 @@ describe('Slack app manifest builder', () => {
     });
   });
 
+  it("enables Slack's Agent messaging experience", () => {
+    const manifest = buildSlackAppManifest({
+      publicOrigin: 'https://roomote.example.com',
+    });
+
+    expect(manifest.features.agent_view).toEqual({
+      agent_description: SLACK_MANIFEST_DESCRIPTION,
+    });
+  });
+
   it('includes Slack OAuth callback URLs from the deployment origin', () => {
     const manifest = buildSlackAppManifest({
       publicOrigin: 'https://roomote.example.com/',
@@ -116,6 +126,7 @@ describe('Slack app manifest builder', () => {
     expect(manifest.oauth_config.scopes.bot).toEqual(
       expect.arrayContaining([
         'app_mentions:read',
+        'assistant:write',
         'chat:write',
         'reactions:write',
         'users:read',
@@ -123,6 +134,8 @@ describe('Slack app manifest builder', () => {
     );
     expect(manifest.settings.event_subscriptions.bot_events).toEqual(
       expect.arrayContaining([
+        'app_context_changed',
+        'app_home_opened',
         'app_mention',
         'function_executed',
         'message.im',

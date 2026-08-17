@@ -5,6 +5,7 @@ import {
 
 export const SLACK_MANIFEST_BOT_SCOPES = [
   'app_mentions:read',
+  'assistant:write',
   'channels:read',
   'channels:history',
   'chat:write',
@@ -25,6 +26,8 @@ export const SLACK_MANIFEST_BOT_SCOPES = [
 ] as const;
 
 export const SLACK_MANIFEST_BOT_EVENTS = [
+  'app_context_changed',
+  'app_home_opened',
   'app_mention',
   'entity_details_requested',
   'function_executed',
@@ -63,6 +66,9 @@ export function buildSlackAppManifest({
         home_tab_enabled: false,
         messages_tab_enabled: true,
         messages_tab_read_only_enabled: false,
+      },
+      agent_view: {
+        agent_description: SLACK_MANIFEST_DESCRIPTION,
       },
       bot_user: {
         display_name: appName,
