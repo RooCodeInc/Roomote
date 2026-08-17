@@ -98,6 +98,7 @@ export function useTerminal(
     let opened = false;
     let intentionalClose = false;
     let initialInputSent = false;
+    let resizeFrame: number | null = null;
 
     // Helper to fit the terminal and notify the server of the new size.
     function fitAndResize() {
@@ -212,7 +213,6 @@ export function useTerminal(
 
       opened = true;
       terminal.open(container);
-      fitAddon.fit();
       connect();
     }
 
@@ -231,8 +231,22 @@ export function useTerminal(
 
     // Resize handling — also triggers deferred open when container becomes visible.
     const resizeObserver = new ResizeObserver(() => {
-      openIfReady();
-      fitAndResize();
+      if (resizeFrame !== null) {
+        return;
+      }
+
+      // Fitting xterm mutates layout. Defer it outside the ResizeObserver
+      // callback and coalesce notifications to avoid observer feedback loops.
+      resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = null;
+
+        if (!opened) {
+          openIfReady();
+          return;
+        }
+
+        fitAndResize();
+      });
     });
     resizeObserver.observe(container);
 
@@ -241,6 +255,9 @@ export function useTerminal(
       intentionalClose = true;
       connectRef.current = null;
       cancelAnimationFrame(initialOpenFrame);
+      if (resizeFrame !== null) {
+        cancelAnimationFrame(resizeFrame);
+      }
 
       resizeObserver.disconnect();
       inputDisposable.dispose();

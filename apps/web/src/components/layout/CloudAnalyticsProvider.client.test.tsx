@@ -56,6 +56,7 @@ describe('CloudAnalyticsProvider', () => {
     expect(window.posthog?._i).toContainEqual([
       'posthog-project',
       expect.objectContaining({
+        capture_exceptions: true,
         defaults: '2026-05-30',
         session_recording: { maskAllInputs: true },
       }),
