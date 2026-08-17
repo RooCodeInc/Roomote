@@ -251,6 +251,46 @@ describe('processFastAgentMessage', () => {
     expect(mocks.postThreadMessage).toHaveBeenCalledOnce();
   });
 
+  it('aborts a Fast launch when the kickoff post is suppressed', async () => {
+    mocks.postThreadMessage.mockResolvedValue('suppressed');
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        postSlackReply,
+      }: {
+        postSlackReply: (reply: unknown) => void;
+      }) => {
+        await postSlackReply({
+          purpose: 'closeout',
+          message: 'Delegated the work.',
+          kickoff: true,
+        });
+        return 'Delegated the work.';
+      },
+    );
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await expect(
+      processFastAgentMessage({
+        event: {
+          type: 'message',
+          channel: 'D123',
+          channel_type: 'im',
+          user: 'U123',
+          text: '!fast implement this',
+          ts: '100.001',
+        } as never,
+        slack: slack as never,
+        userId: 'user-1',
+        teamId: 'T123',
+      }),
+    ).rejects.toThrow('The Fast kickoff was suppressed');
+  });
+
   it('rejects a non-delivered parent reply instead of treating it as a kickoff', async () => {
     mocks.postThreadMessage.mockResolvedValue('failed');
     const slack = {

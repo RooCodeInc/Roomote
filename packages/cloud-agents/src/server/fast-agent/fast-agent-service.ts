@@ -44,6 +44,10 @@ interface FastAgentSlackReply {
   slackThreadTs: string;
   message: string;
   imageArtifactIds?: string[];
+  /** True for the parent-owned task kickoff. Deliverers must treat anything
+   * short of a visible, durable post (including deliberate suppression) as a
+   * failure so the launch gate never opens without its kickoff. */
+  kickoff?: boolean;
 }
 
 type PostFastAgentSlackReply = (reply: FastAgentSlackReply) => Promise<void>;
@@ -865,6 +869,7 @@ export async function answerFastAgentQuestion({
                 slackChannel,
                 slackThreadTs,
                 message,
+                kickoff: true,
               });
               turnSessionMessages.push(buildAssistantTextMessage(message));
               await appendFastAgentSessionMessages({

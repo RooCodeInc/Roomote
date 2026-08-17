@@ -157,7 +157,7 @@ export async function processFastAgentMessage(params: {
           : undefined,
       activeTaskId,
       launchTask,
-      postSlackReply: async ({ message }) => {
+      postSlackReply: async ({ message, kickoff }) => {
         const posted = await postSlackThreadMarkdownMessage({
           slack,
           channel: event.channel,
@@ -173,8 +173,17 @@ export async function processFastAgentMessage(params: {
         if (posted === 'failed') {
           throw new Error('Slack did not accept the Fast parent reply.');
         }
-        // 'suppressed' is deliberate (the triggering message was deleted);
-        // treat it as delivered so the turn is not aborted mid-flight.
+        if (posted === 'suppressed' && kickoff) {
+          // The launch gate requires a visible, durable parent kickoff
+          // before the child becomes runnable; a suppressed kickoff must
+          // abort the launch instead of opening the gate silently.
+          throw new Error(
+            'The Fast kickoff was suppressed because the triggering message was deleted.',
+          );
+        }
+        // Suppression of an ordinary reply is deliberate (the triggering
+        // message was deleted); treat it as delivered so the turn is not
+        // aborted mid-flight.
         didSendVisibleResponse = true;
       },
       postSlackReaction: async ({ name, purpose, slackMessageTs }) => {
