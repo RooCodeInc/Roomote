@@ -58,6 +58,7 @@ import {
   isFastCommandInvocation,
   processFastAgentMessage,
 } from './fast-agent.js';
+import { resolveFastAgentEntryMode } from '../../fast-agent-entry.js';
 import { createFastAgentTaskLauncher } from './fast-agent-task-launcher.js';
 import { processSnapshotResume } from './snapshot-resume.js';
 import {
@@ -512,7 +513,20 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
           threadTs: event.thread_ts,
         });
 
-    if (isFastAgentThread || roomoteThreadMatch) {
+    const taskThreadRoute =
+      isFastAgentThread || roomoteThreadMatch
+        ? null
+        : await resolveSlackThreadFollowUpRoute({
+            threadId: event.thread_ts,
+            channelId: event.channel,
+            slackTeamId: teamId,
+          });
+
+    if (
+      isFastAgentThread ||
+      roomoteThreadMatch ||
+      (taskThreadRoute && taskThreadRoute.kind !== 'fresh')
+    ) {
       eligibilityReason = 'roomote-owned-thread';
     }
   }
@@ -1224,11 +1238,21 @@ async function maybeHandleChannelAutoStart(params: {
 
   const { ackEmoji } = await resolveSlackReactionNames();
 
-  if (
-    userMapping &&
-    typeof channelAutoStartEvent.user === 'string' &&
-    isBareFastCommandInvocation(channelAutoStartEvent.text)
-  ) {
+  const fastAgentEntryMode =
+    userMapping && typeof channelAutoStartEvent.user === 'string'
+      ? resolveFastAgentEntryMode({
+          explicitInvocation: isBareFastCommandInvocation(
+            channelAutoStartEvent.text,
+          ),
+          deploymentSettingEnabled:
+            Env.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED === true,
+          userDefaultEnabled:
+            userMapping.communicationsFastModeDefault &&
+            !isRemovedEvalCommandInvocation(channelAutoStartEvent.text),
+        })
+      : null;
+
+  if (fastAgentEntryMode && userMapping) {
     startFastAgentResponse({
       event: { ...channelAutoStartEvent, user: channelAutoStartEvent.user },
       slackInstallation: context.slackInstallation,
@@ -1236,7 +1260,8 @@ async function maybeHandleChannelAutoStart(params: {
       slack: context.slack,
       userId: userMapping.userId,
       teamId: context.teamId,
-      usageText: 'Use `!fast <question>` in this channel.',
+      usageText: 'Use `/fast <question>` in this channel.',
+      continuation: fastAgentEntryMode === 'default',
       processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent response failed for auto-start thread ${channelAutoStartEvent.ts}:`,
     });
@@ -1689,7 +1714,16 @@ async function handleSlackEntryEvent(params: {
     activeTaskId: activeRun?.taskId,
   });
 
-  if (isFastCommandInvocation(event.text)) {
+  const fastAgentEntryMode = resolveFastAgentEntryMode({
+    explicitInvocation: isFastCommandInvocation(event.text),
+    deploymentSettingEnabled:
+      Env.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED === true,
+    userDefaultEnabled:
+      userMapping.communicationsFastModeDefault &&
+      !isRemovedEvalCommandInvocation(event.text),
+  });
+
+  if (fastAgentEntryMode) {
     startFastAgentResponse({
       event,
       slackInstallation,
@@ -1698,6 +1732,7 @@ async function handleSlackEntryEvent(params: {
       userId: userMapping.userId,
       teamId,
       activeTaskId: activeRun?.taskId ?? null,
+      continuation: fastAgentEntryMode === 'default',
       processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent response failed for thread ${threadId}:`,
     });

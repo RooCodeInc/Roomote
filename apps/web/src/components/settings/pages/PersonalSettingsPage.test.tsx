@@ -53,6 +53,7 @@ describe('PersonalSettingsPage', () => {
       <PersonalSettingsPage
         canChangePassword={true}
         canSetPassword={false}
+        communicationsFastModeDefaultAvailable={true}
         profile={profile}
       />,
     );
@@ -70,6 +71,7 @@ describe('PersonalSettingsPage', () => {
       <PersonalSettingsPage
         canChangePassword={false}
         canSetPassword={true}
+        communicationsFastModeDefaultAvailable={false}
         profile={profile}
       />,
     );

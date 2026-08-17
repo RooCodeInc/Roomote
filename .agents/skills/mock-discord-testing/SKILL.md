@@ -1,6 +1,6 @@
 ---
 name: mock-discord-testing
-description: Run Roomote Discord integration flows through the checked-in mock Discord REST harness and synthetic Gateway envelopes instead of a real Discord bot. Use when testing Discord task entry, follow-up queueing to active jobs, slash commands (`/new`, `/link`, `/help`), button interactions, outbound Discord posts, task threads and forum posts, message chunking, `DISCORD_API_BASE_URL` routing, `/mock/state`, or `/mock/events`.
+description: Run Roomote Discord integration flows through the checked-in mock Discord REST harness and synthetic Gateway envelopes instead of a real Discord bot. Use when testing Discord task entry, follow-up queueing to active jobs, slash commands (`/new`, `/goal`, `/fast`, `/link`, `/help`), button interactions, outbound Discord posts, task threads and forum posts, message chunking, `DISCORD_API_BASE_URL` routing, `/mock/state`, or `/mock/events`.
 ---
 
 # Mock Discord Testing
@@ -166,6 +166,7 @@ curl -s http://127.0.0.1:3014/mock/state | jq '.requests | map({method, path})'
 See `references/scenarios.md` for the full user-journey catalog. Common picks:
 
 - **`dm-task-entry`** — DM task kickoff that creates a cloud job and a task reply
+- **`dm-fast-answer`** — `/fast request:<...>` interaction answers directly without creating a task
 - **`guild-mention-task-entry`** — root-channel @mention creates a task thread
 - **`followup-in-task-thread`** — message in the task thread queues to the running job instead of launching a new task
 - **`slash-new-command`** — `/new request:<...>` interaction forces a fresh task
