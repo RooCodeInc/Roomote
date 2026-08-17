@@ -67,7 +67,7 @@ export async function processDiscordFastAgentMessage(input: {
       input.sender.global_name ??
       input.sender.username,
     activeTasks: input.activeTasks,
-    launchTask: async ({ prompt, environmentId }) => {
+    launchTask: async ({ prompt, environmentId, parentSessionId }) => {
       const workspaceOverride = environmentId
         ? await resolveDiscordWorkspace({
             type: 'environment',
@@ -105,6 +105,7 @@ export async function processDiscordFastAgentMessage(input: {
         metadata: input.metadata,
         channel: input.channel,
         forceNewThread: true,
+        fastAgentSessionId: parentSessionId,
         skipRoutingConfirmation: true,
         workspaceOverride,
       });

@@ -5,6 +5,7 @@ import {
   db,
   eq,
   isNull,
+  or,
   slackQuickAnswers,
   sql,
   taskRuns,
@@ -167,7 +168,10 @@ export async function getActiveFastAgentTasks(
     .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
     .where(
       and(
-        sql`${taskRuns.payload} -> 'fastAgentParent' ->> 'sessionId' = ${sessionId}`,
+        or(
+          sql`${taskRuns.payload} -> 'fastAgentParent' ->> 'sessionId' = ${sessionId}`,
+          sql`${taskRuns.payload} ->> 'fastAgentSessionId' = ${sessionId}`,
+        ),
         isNull(tasks.deletedAt),
       ),
     )

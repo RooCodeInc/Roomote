@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
     status: string;
     canceledAt: Date | null;
   }>,
+  or: vi.fn(),
 }));
 
 vi.mock('@roomote/db/server', () => {
@@ -22,8 +23,12 @@ vi.mock('@roomote/db/server', () => {
     eq: vi.fn((...values: unknown[]) => values),
     inArray: vi.fn((...values: unknown[]) => values),
     isNull: vi.fn((value: unknown) => value),
+    or: mocks.or,
     slackQuickAnswers: {},
-    sql: vi.fn(),
+    sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
+      strings: Array.from(strings),
+      values,
+    })),
     taskRuns: {
       createdAt: 'task_runs.created_at',
       payload: 'task_runs.payload',
@@ -43,6 +48,11 @@ import { RunStatus } from '@roomote/types';
 import { getActiveFastAgentTasks } from '../fast-agent-session';
 
 describe('getActiveFastAgentTasks', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.or.mockImplementation((...values: unknown[]) => values);
+  });
+
   it('returns every distinct active task and keeps the newest run per task', async () => {
     mocks.activeRuns = [
       {
@@ -95,5 +105,26 @@ describe('getActiveFastAgentTasks', () => {
         status: RunStatus.Processing,
       },
     ]);
+  });
+
+  it('matches both Slack parents and provider-neutral Fast session links', async () => {
+    mocks.activeRuns = [];
+
+    await getActiveFastAgentTasks('11111111-1111-4111-8111-111111111111');
+
+    expect(mocks.or).toHaveBeenCalledWith(
+      expect.objectContaining({
+        strings: expect.arrayContaining([
+          expect.stringContaining("'fastAgentParent'"),
+        ]),
+        values: ['task_runs.payload', '11111111-1111-4111-8111-111111111111'],
+      }),
+      expect.objectContaining({
+        strings: expect.arrayContaining([
+          expect.stringContaining("'fastAgentSessionId'"),
+        ]),
+        values: ['task_runs.payload', '11111111-1111-4111-8111-111111111111'],
+      }),
+    );
   });
 });
