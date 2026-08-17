@@ -458,6 +458,17 @@ ${delivery.text}`;
       taskId: data.taskId,
       route: delivery.route,
       text: textWithQuestion,
+      ...(followUp && !delivery.route
+        ? {
+            action: {
+              repository: data.repository,
+              prNumber: data.prNumber,
+              prUrl: data.prUrl,
+              question: followUp.question,
+              followUpPrompt: followUp.prompt,
+            },
+          }
+        : {}),
       ...(messageTs ? { messageTs } : {}),
     });
     await finalizePrReviewNotificationRequest(data);

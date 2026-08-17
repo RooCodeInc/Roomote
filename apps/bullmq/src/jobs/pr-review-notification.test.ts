@@ -779,7 +779,9 @@ describe('prReviewNotificationJob', () => {
     mockPrepareDelivery.mockResolvedValue({
       post: true,
       route: null,
-      text: 'I reviewed owner/repo#42 on GitHub and found no issues.',
+      text: 'I reviewed owner/repo#42 on GitHub and found an issue.',
+      followUpQuestion: 'Would you like me to resolve this issue?',
+      followUpPrompt: 'Resolve the review feedback on owner/repo#42.',
     });
 
     await prReviewNotificationJob(makeJob() as never);
@@ -789,7 +791,14 @@ describe('prReviewNotificationJob', () => {
       runId: 1,
       taskId: 'task-1',
       route: null,
-      text: 'I reviewed owner/repo#42 on GitHub and found no issues.',
+      text: 'I reviewed owner/repo#42 on GitHub and found an issue.\nWould you like me to resolve this issue?',
+      action: {
+        repository: 'owner/repo',
+        prNumber: 42,
+        prUrl: 'https://github.com/owner/repo/pull/42',
+        question: 'Would you like me to resolve this issue?',
+        followUpPrompt: 'Resolve the review feedback on owner/repo#42.',
+      },
     });
   });
 

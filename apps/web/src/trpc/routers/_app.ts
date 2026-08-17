@@ -194,6 +194,8 @@ import {
   answerSandboxUserInputRequestCommand,
   answerSandboxUserInputRequestInputSchema,
   getSandboxSessionByTaskIdCommand,
+  handlePrReviewNotificationActionCommand,
+  handlePrReviewNotificationActionInputSchema,
   saveDraftPromptCommand,
   sendSandboxPromptCommand,
   sendSandboxPromptInputSchema,
@@ -2065,6 +2067,12 @@ export const appRouter = createRouter({
       .input(sendSandboxPromptInputSchema)
       .mutation(({ ctx: { auth }, input }) =>
         sendSandboxPromptCommand(auth, input),
+      ),
+
+    handlePrReviewNotificationAction: protectedProcedure
+      .input(handlePrReviewNotificationActionInputSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        handlePrReviewNotificationActionCommand(auth, input),
       ),
 
     answerUserInputRequest: protectedProcedure

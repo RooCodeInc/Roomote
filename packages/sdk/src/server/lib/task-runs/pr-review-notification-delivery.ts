@@ -1124,6 +1124,13 @@ export async function recordPrReviewNotificationDeliveryBestEffort(params: {
   text: string;
   route?: PrReviewNotificationRoute | null;
   messageTs?: string | null;
+  action?: {
+    repository: string;
+    prNumber: number;
+    prUrl: string;
+    question: string;
+    followUpPrompt: string;
+  } | null;
 }): Promise<void> {
   const route = params.route ?? null;
   const operations: Array<{ label: string; promise: Promise<unknown> }> = [
@@ -1148,6 +1155,15 @@ export async function recordPrReviewNotificationDeliveryBestEffort(params: {
           payload: {
             text: params.text,
             source: PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
+            ...(params.action
+              ? {
+                  prReviewAction: {
+                    taskId: params.taskId,
+                    ...params.action,
+                    status: 'pending',
+                  },
+                }
+              : {}),
           },
           visibleInTranscript: true,
         },

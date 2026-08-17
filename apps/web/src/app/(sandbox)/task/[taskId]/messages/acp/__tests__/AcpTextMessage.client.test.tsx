@@ -1,9 +1,20 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { ACP_ENVELOPE_EVENT_TYPES } from '@roomote/types';
 
 const transcriptVisibilityState = vi.hoisted(() => ({
   enabled: false,
+}));
+const handlePrReviewNotificationActionMock = vi.hoisted(() => vi.fn());
+
+vi.mock('@/trpc/client', () => ({
+  useTRPCClient: () => ({
+    sandboxSession: {
+      handlePrReviewNotificationAction: {
+        mutate: handlePrReviewNotificationActionMock,
+      },
+    },
+  }),
 }));
 
 vi.mock('@/components/ai-elements', () => ({
@@ -80,6 +91,7 @@ vi.mock('@/components/system', () => ({
   GitPullRequestDraft: () => <svg aria-label="GitPullRequestDraft" />,
   Image: () => <svg aria-label="Image" />,
   ListChecks: () => <svg aria-label="ListChecks" />,
+  Loader2: () => <svg aria-label="Loader2" />,
   MediaViewerDialog: ({
     children,
     open,
@@ -111,6 +123,95 @@ import { AcpTextMessage } from '../AcpTextMessage';
 describe('AcpTextMessage', () => {
   beforeEach(() => {
     transcriptVisibilityState.enabled = false;
+    handlePrReviewNotificationActionMock.mockReset();
+  });
+
+  it('renders and handles persisted PR review notification actions', async () => {
+    handlePrReviewNotificationActionMock.mockResolvedValue({
+      status: 'resolved',
+      currentFeedbackDispatched: true,
+    });
+
+    render(
+      <AcpTextMessage
+        msg={{
+          id: '10000000-0000-4000-8000-000000000001',
+          ts: 123,
+          role: 'assistant',
+          kind: 'text',
+          partial: false,
+          sessionId: null,
+          updateType: 'roomote_runtime.assistant_message',
+          text: 'Would you like me to resolve this issue?',
+          data: {
+            prReviewAction: {
+              taskId: 'task-1',
+              repository: 'owner/repo',
+              prNumber: 42,
+              prUrl: 'https://github.com/owner/repo/pull/42',
+              question: 'Would you like me to resolve this issue?',
+              followUpPrompt: 'Resolve the feedback.',
+              status: 'pending',
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Resolve these issues' }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'Auto-resolve on this PR' }),
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeVisible();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Resolve these issues' }),
+    );
+
+    await waitFor(() => {
+      expect(handlePrReviewNotificationActionMock).toHaveBeenCalledWith({
+        taskId: 'task-1',
+        messageId: '10000000-0000-4000-8000-000000000001',
+        action: 'resolve',
+      });
+    });
+    expect(await screen.findByText('Resolution requested.')).toBeVisible();
+  });
+
+  it('re-enables controls for an abandoned processing action', () => {
+    render(
+      <AcpTextMessage
+        msg={{
+          id: '10000000-0000-4000-8000-000000000002',
+          ts: 123,
+          role: 'assistant',
+          kind: 'text',
+          partial: false,
+          sessionId: null,
+          updateType: 'roomote_runtime.assistant_message',
+          text: 'Would you like me to resolve this issue?',
+          data: {
+            prReviewAction: {
+              taskId: 'task-1',
+              repository: 'owner/repo',
+              prNumber: 42,
+              prUrl: 'https://github.com/owner/repo/pull/42',
+              question: 'Would you like me to resolve this issue?',
+              followUpPrompt: 'Resolve the feedback.',
+              status: 'processing',
+              processingStartedAt: Date.now() - 10 * 60 * 1000,
+              processingToken: 'abandoned-request',
+            },
+          },
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByRole('button', { name: 'Resolve these issues' }),
+    ).toBeEnabled();
   });
 
   it('shows copy and new task actions for assistant completion text', () => {
