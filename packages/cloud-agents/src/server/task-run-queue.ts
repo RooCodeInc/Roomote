@@ -2146,6 +2146,18 @@ function inheritSnapshotResumeFastAgentContext(
     payload.fastAgentParent = parent;
   }
 
+  const fastAgentSessionId = z
+    .string()
+    .uuid()
+    .safeParse(
+      sourcePayload && typeof sourcePayload === 'object'
+        ? (sourcePayload as Record<string, unknown>).fastAgentSessionId
+        : undefined,
+    );
+  if (fastAgentSessionId.success && !payload.fastAgentSessionId) {
+    payload.fastAgentSessionId = fastAgentSessionId.data;
+  }
+
   if (
     sourcePayload &&
     typeof sourcePayload === 'object' &&

@@ -1009,6 +1009,44 @@ describe('enqueueTask snapshot resume', () => {
     expect(resumePayload.fastAgentParent).toEqual(fastAgentParent);
   });
 
+  it('preserves a Discord Fast session across resume', async () => {
+    const userId = await createUser();
+    const fastAgentSessionId = '33333333-3333-4333-8333-333333333333';
+    const freshRun = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: 'acme/widgets',
+          description: 'Do the thing',
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          communicationThreadId: 'child-thread-1',
+          fastAgentSessionId,
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'discord',
+      trigger: 'message',
+    });
+    const resumeTask: SnapshotResumeTask = {
+      type: TaskPayloadKind.SnapshotResume,
+      payload: {
+        repo: 'acme/widgets',
+        sourceSnapshotId: 'snap-fast-discord-1',
+        sourceRunId: freshRun.id,
+      },
+    } as SnapshotResumeTask;
+
+    const resumeRun = await enqueueTask(
+      { task: resumeTask, actingUserId: userId },
+      { enqueue: false },
+    );
+
+    expect(
+      (resumeRun.payload as Record<string, unknown>).fastAgentSessionId,
+    ).toBe(fastAgentSessionId);
+  });
+
   it('recovers Fast parent isolation from an older ancestor in a resume chain', async () => {
     const userId = await createUser();
     const fastAgentParent = {
@@ -1017,6 +1055,7 @@ describe('enqueueTask snapshot resume', () => {
       slackChannel: 'C123',
       slackThreadTs: '333.444',
     };
+    const fastAgentSessionId = '44444444-4444-4444-8444-444444444444';
     const freshRun = await launchFresh({
       task: standardTaskInput({
         payload: {
@@ -1024,6 +1063,7 @@ describe('enqueueTask snapshot resume', () => {
           description: 'Do the thing',
           communicationContextInherited: true,
           fastAgentParent,
+          fastAgentSessionId,
         },
       }),
       initiator: { kind: 'user', userId },
@@ -1064,6 +1104,7 @@ describe('enqueueTask snapshot resume', () => {
 
     expect(resumePayload.communicationContextInherited).toBe(true);
     expect(resumePayload.fastAgentParent).toEqual(fastAgentParent);
+    expect(resumePayload.fastAgentSessionId).toBe(fastAgentSessionId);
   });
 
   it('inherits per-task model role overrides from the source run payload', async () => {
