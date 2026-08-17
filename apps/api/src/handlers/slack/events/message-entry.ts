@@ -490,6 +490,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
   let roomoteThreadMatch: Awaited<
     ReturnType<typeof findRoomoteOwnedSlackThread>
   > | null = null;
+  let isFastAgentThread = false;
 
   let eligibilityReason:
     | 'pending-routing-confirmation'
@@ -499,7 +500,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
   if (pendingRoutingConfirmation) {
     eligibilityReason = 'pending-routing-confirmation';
   } else {
-    const isFastAgentThread = await hasFastAgentSession({
+    isFastAgentThread = await hasFastAgentSession({
       slackTeamId: teamId,
       slackChannel: event.channel,
       slackThreadTs: event.thread_ts,
@@ -592,6 +593,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     isAutomationReportThread: Boolean(
       roomoteThreadMatch?.isAutomationReportThread,
     ),
+    isOpenConversationThread: isFastAgentThread,
     threadMessages: sharedHistory,
     compareMessageIds: compareNumericMessageIds,
   });
@@ -809,7 +811,6 @@ export async function processSlackChannelAutoStartTask(params: {
   channelAutoStartLaunchMode: ChannelAutoStartLaunchMode;
   agentPromptPrefix?: string;
   launchCriteria?: string | null;
-  fastAgentEntryMode?: 'explicit' | 'default' | null;
 }): Promise<boolean> {
   const {
     event,
@@ -822,7 +823,6 @@ export async function processSlackChannelAutoStartTask(params: {
     channelAutoStartLaunchMode,
     agentPromptPrefix,
     launchCriteria,
-    fastAgentEntryMode,
   } = params;
   const threadId = event.ts;
   const humanUserMapping =
@@ -927,34 +927,6 @@ export async function processSlackChannelAutoStartTask(params: {
           await redis.del(routingLockKey).catch(() => {});
           return;
         }
-      }
-
-      if (
-        fastAgentEntryMode &&
-        humanUserMapping &&
-        typeof event.user === 'string'
-      ) {
-        try {
-          await runFastAgentResponse({
-            event: { ...event, user: event.user },
-            slackInstallation,
-            userMapping: humanUserMapping,
-            slack,
-            userId: humanUserMapping.userId,
-            teamId,
-            usageText: 'Use `/fast <question>` in this channel.',
-            continuation: fastAgentEntryMode === 'default',
-            processingReactionName: ackEmoji,
-          });
-        } catch (error) {
-          console.error(
-            `❌ Background fast-agent response failed for auto-start thread ${threadId}:`,
-            error instanceof Error ? error.message : String(error),
-          );
-        } finally {
-          await redis.del(routingLockKey).catch(() => {});
-        }
-        return;
       }
 
       if (humanUserMapping && typeof event.user === 'string') {
@@ -1284,6 +1256,23 @@ async function maybeHandleChannelAutoStart(params: {
         })
       : null;
 
+  if (fastAgentEntryMode && userMapping) {
+    startFastAgentResponse({
+      event: { ...channelAutoStartEvent, user: channelAutoStartEvent.user },
+      slackInstallation: context.slackInstallation,
+      userMapping,
+      slack: context.slack,
+      userId: userMapping.userId,
+      teamId: context.teamId,
+      usageText: 'Use `/fast <question>` in this channel.',
+      continuation: fastAgentEntryMode === 'default',
+      processingReactionName: ackEmoji,
+      errorLogPrefix: `❌ Background fast-agent response failed for auto-start thread ${channelAutoStartEvent.ts}:`,
+    });
+
+    return true;
+  }
+
   if (
     userMapping &&
     typeof channelAutoStartEvent.user === 'string' &&
@@ -1316,7 +1305,6 @@ async function maybeHandleChannelAutoStart(params: {
     channelAutoStartLaunchMode: channelAutoStartLaunchConfig.launchMode,
     agentPromptPrefix: channelAutoStartLaunchConfig.agentPromptPrefix,
     launchCriteria: matchedChannelAutoStart?.launchCriteria ?? null,
-    fastAgentEntryMode,
   });
 
   return started;
@@ -1602,7 +1590,7 @@ async function startAutomatedAppMentionTaskWithLock(params: {
   return true;
 }
 
-type FastAgentResponseParams = {
+function startFastAgentResponse(params: {
   event: SlackEvent;
   slackInstallation: SlackInstallation;
   userMapping: SlackUserMapping;
@@ -1613,24 +1601,15 @@ type FastAgentResponseParams = {
   continuation?: boolean;
   activeTasks?: { taskId: string }[];
   processingReactionName: string;
-};
-
-function runFastAgentResponse(params: FastAgentResponseParams): Promise<void> {
-  return processFastAgentMessage({
-    ...params,
-    apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
-    launchTask: createFastAgentTaskLauncher(params),
-  });
-}
-
-function startFastAgentResponse(
-  params: FastAgentResponseParams & {
-    errorLogPrefix: string;
-  },
-): void {
+  errorLogPrefix: string;
+}): void {
   const { errorLogPrefix, ...fastAgentParams } = params;
 
-  runFastAgentResponse(fastAgentParams).catch((error) => {
+  processFastAgentMessage({
+    ...fastAgentParams,
+    apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
+    launchTask: createFastAgentTaskLauncher(params),
+  }).catch((error) => {
     console.error(
       errorLogPrefix,
       error instanceof Error ? error.message : String(error),
