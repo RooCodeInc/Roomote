@@ -1747,7 +1747,7 @@ export class OpenCodeServerHarness
     this.prompts = new RuntimePromptQueue({
       getSessionId: () => this.sessionId,
       getNextSequence: () => this.runtimeEvents.nextTs(),
-      emitRuntimeOutput: (event) => this.emit('runtimeOutput', event),
+      emitRuntimeUpdate: (event) => this.runtimeEvents.outputAndPersist(event),
     });
     this.stallWatchdogs = new OpenCodeStallWatchdogs({
       turnStallTimeoutMs:

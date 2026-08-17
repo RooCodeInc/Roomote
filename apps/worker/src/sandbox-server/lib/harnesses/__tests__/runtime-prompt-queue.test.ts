@@ -1,15 +1,14 @@
-import type { AcpMessage } from '@roomote/types';
-
 import { RuntimePromptQueue } from '../runtime-prompt-queue';
+import type { PersistableEnvelope } from '../../runtime-envelope-builder';
 
 function createQueue() {
-  const emittedEvents: AcpMessage[] = [];
+  const emittedEvents: PersistableEnvelope[] = [];
   let sequence = 0;
 
   const queue = new RuntimePromptQueue({
     getSessionId: () => 'test-session',
     getNextSequence: () => ++sequence,
-    emitRuntimeOutput: (event) => emittedEvents.push(event),
+    emitRuntimeUpdate: (event) => emittedEvents.push(event),
   });
 
   return { queue, emittedEvents };
