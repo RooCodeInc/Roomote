@@ -535,9 +535,9 @@ export async function answerFastAgentQuestion({
   senderDisplayName?: string;
   senderSlackUserId?: string;
   activeTasks?: FastAgentActiveTask[];
-  launchTask?: LaunchFastAgentSlackTask;
+  launchTask: LaunchFastAgentSlackTask;
   retryTaskStart?: RetryFastAgentTaskStart;
-  postSlackReply?: PostFastAgentSlackReply;
+  postSlackReply: PostFastAgentSlackReply;
   postSlackReaction?: PostFastAgentSlackReaction;
   surface?: FastAgentSurface;
   /** Platform-generated child lifecycle input, not a human-authored turn. */
@@ -625,7 +625,7 @@ export async function answerFastAgentQuestion({
 
       const reply = pendingLifecycleReply;
       pendingLifecycleReply = null;
-      await postSlackReply?.(reply);
+      await postSlackReply(reply);
       turnSessionMessages.push(buildAssistantTextMessage(reply.message));
     };
     const brain = availableIntegrations.find(
@@ -739,7 +739,7 @@ export async function answerFastAgentQuestion({
         }
 
         pendingLifecycleReply = null;
-        await postSlackReply?.(reply);
+        await postSlackReply(reply);
         turnSessionMessages.push(buildAssistantTextMessage(message));
 
         await persistFastAgentSessionMessages({
@@ -773,11 +773,6 @@ export async function answerFastAgentQuestion({
           };
         }
         prompt += `\n\n[FAST ORCHESTRATION TOOL RESULT]\nTool: retry_task_start\nResult: ${JSON.stringify(retryResult)}\n[END FAST ORCHESTRATION TOOL RESULT]\n\nReport the retry outcome with one send_chat_reply closeout.`;
-        continue;
-      }
-
-      if (platformEvent && decision.action !== 'launch_task') {
-        prompt += `\n\n[PLATFORM EVENT ACTION REJECTED]\nA delegated-task platform event may only use send_chat_reply, ignore_event, launch_task, or the offered retry_task_start action. Do not message or cancel tasks, react, or call integrations for this event.\n[END PLATFORM EVENT ACTION REJECTED]`;
         continue;
       }
 
@@ -908,16 +903,11 @@ export async function answerFastAgentQuestion({
             !validEnvironmentIds.has(decision.environmentId)
           ) {
             taskResult = { error: 'The selected environment was not found.' };
-          } else if (!launchTask) {
-            taskResult = { error: 'Task delegation is unavailable.' };
           } else {
             const deliverParentKickoff = async (task: {
               taskId: string;
               taskUrl?: string;
             }) => {
-              if (!postSlackReply) {
-                throw new Error('Parent chat delivery is unavailable.');
-              }
               const message = await generateFastAgentKickoffMessage({
                 userId,
                 system,
@@ -1044,7 +1034,7 @@ export async function answerFastAgentQuestion({
 
     const fallback = buildFastAgentTurnFallbackDecision();
     const fallbackMessage = fallback.message ?? 'How can I help?';
-    await postSlackReply?.({
+    await postSlackReply({
       purpose: 'closeout',
       slackChannel,
       slackThreadTs,
@@ -1075,7 +1065,7 @@ export async function answerFastAgentQuestion({
         : 'I hit an error while handling that request. Please try again in a moment.';
 
     try {
-      await postSlackReply?.({
+      await postSlackReply({
         purpose: 'closeout',
         slackChannel,
         slackThreadTs,

@@ -53,7 +53,7 @@ export async function processFastAgentMessage(params: {
   usageText?: string;
   continuation?: boolean;
   activeTasks?: FastAgentActiveTask[];
-  launchTask?: LaunchFastAgentSlackTask;
+  launchTask: LaunchFastAgentSlackTask;
   processingReactionName?: string;
 }): Promise<void> {
   const {

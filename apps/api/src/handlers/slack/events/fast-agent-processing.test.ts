@@ -18,7 +18,15 @@ vi.mock('../helpers/thread-posting.js', () => ({
   postSlackThreadMarkdownMessage: mocks.postThreadMessage,
 }));
 
-import { processFastAgentMessage } from './fast-agent.js';
+import { processFastAgentMessage as processFastAgentMessageImpl } from './fast-agent.js';
+
+type ProcessFastAgentMessageParams = Parameters<
+  typeof processFastAgentMessageImpl
+>[0];
+const launchTask = vi.fn();
+const processFastAgentMessage = (
+  params: Omit<ProcessFastAgentMessageParams, 'launchTask'>,
+) => processFastAgentMessageImpl({ ...params, launchTask });
 
 describe('processFastAgentMessage', () => {
   beforeEach(() => {
@@ -72,6 +80,7 @@ describe('processFastAgentMessage', () => {
       expect.objectContaining({
         question: 'investigate this',
         currentMessageAgentContext: 'Slack block text:\nState: New',
+        launchTask,
         activeTasks: [
           { taskId: 'task-1', title: 'Fix API' },
           { taskId: 'task-2', title: 'Update docs' },

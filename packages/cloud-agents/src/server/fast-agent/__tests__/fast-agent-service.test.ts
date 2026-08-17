@@ -57,6 +57,8 @@ const baseParams = {
   currentMessageTs: '100.2',
   senderDisplayName: 'Matt',
   senderSlackUserId: 'U123',
+  launchTask: vi.fn(),
+  postSlackReply: vi.fn().mockResolvedValue(undefined),
 };
 
 function decision(overrides: Record<string, unknown> = {}) {
@@ -447,8 +449,26 @@ describe('answerFastAgentQuestion', () => {
     expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
   });
 
-  it('continues to reject other task controls for platform events', async () => {
+  it('keeps ordinary orchestration tools available for platform events', async () => {
+    mocks.listIntegrations.mockResolvedValueOnce([
+      {
+        id: 'deployments',
+        name: 'Deployments',
+        description: 'Inspect deployments',
+        tools: [{ name: 'status', description: 'Get deployment status' }],
+      },
+    ]);
     mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'call_integration',
+          message: null,
+          purpose: null,
+          integrationId: 'deployments',
+          toolName: 'status',
+          toolArguments: '{}',
+        }),
+      })
       .mockResolvedValueOnce({
         object: decision({
           action: 'send_task_message',
@@ -459,7 +479,15 @@ describe('answerFastAgentQuestion', () => {
         }),
       })
       .mockResolvedValueOnce({
-        object: decision({ message: 'The original task failed.' }),
+        object: decision({
+          action: 'cancel_task',
+          message: null,
+          purpose: null,
+          taskId: 'task-2',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({ message: 'I handled the task update.' }),
       });
     const callbacks = chatCallbacks();
 
@@ -472,11 +500,25 @@ describe('answerFastAgentQuestion', () => {
       ...callbacks,
     });
 
-    expect(mocks.sendTaskMessage).not.toHaveBeenCalled();
-    expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
-      'Do not message or cancel tasks',
+    expect(mocks.callIntegration).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      expect.any(Array),
+      {
+        integrationId: 'deployments',
+        toolName: 'status',
+        args: {},
+      },
     );
-    expect(result).toBe('The original task failed.');
+    expect(mocks.sendTaskMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      { taskId: 'task-2', message: 'Keep working.' },
+    );
+    expect(mocks.cancelTask).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      'task-2',
+    );
+    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
+    expect(result).toBe('I handled the task update.');
   });
 
   it('can close out a lightweight turn with an emoji reaction', async () => {

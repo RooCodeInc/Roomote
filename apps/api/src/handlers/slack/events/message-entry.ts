@@ -6,6 +6,7 @@ import {
   syncAutoStartChannelCacheBestEffort,
 } from '@roomote/redis';
 import {
+  createFastAgentSlackTaskLauncher,
   hasFastAgentSession,
   ROUTING_AUTO_CONFIRM_TIMEOUT_MS,
 } from '@roomote/cloud-agents/server';
@@ -59,7 +60,6 @@ import {
   processFastAgentMessage,
 } from './fast-agent.js';
 import { resolveFastAgentEntryMode } from '../../fast-agent-entry.js';
-import { createFastAgentTaskLauncher } from './fast-agent-task-launcher.js';
 import { processSnapshotResume } from './snapshot-resume.js';
 import {
   dispatchSlackThreadFollowUp,
@@ -1606,7 +1606,16 @@ function startFastAgentResponse(params: {
   processFastAgentMessage({
     ...fastAgentParams,
     apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
-    launchTask: createFastAgentTaskLauncher(params),
+    launchTask: createFastAgentSlackTaskLauncher({
+      userId: params.userId,
+      teamId: params.teamId,
+      ...(params.slackInstallation.teamDomain
+        ? { teamDomain: params.slackInstallation.teamDomain }
+        : {}),
+      channelId: params.event.channel,
+      threadTs: params.event.thread_ts || params.event.ts,
+      messageId: params.event.ts,
+    }),
   }).catch((error) => {
     console.error(
       errorLogPrefix,
