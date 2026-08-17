@@ -197,6 +197,23 @@ function buildBrainPreflightQuery({
   return identity ? `${identity}: ${question}` : question;
 }
 
+function isVolatileCurrentWorkQuestion(question: string): boolean {
+  const hasFreshnessSignal =
+    /\b(?:right now|current(?:ly)?|active(?:ly)?|today|recently|latest|at the moment|this (?:morning|afternoon|evening|week))\b/i.test(
+      question,
+    );
+  const hasWorkSignal =
+    /\b(?:work(?:ing)?|focus(?:ed)?|active|activity|project|pull requests?|prs?|tasks?|up to)\b/i.test(
+      question,
+    );
+  const asksWhatIsBeingWorkedOn =
+    /\b(?:am i|are we|have i been|have we been|i am|we are|i'm|we're)\s+(?:(?:currently|actively)\s+)?working on\b/i.test(
+      question,
+    );
+
+  return asksWhatIsBeingWorkedOn || (hasFreshnessSignal && hasWorkSignal);
+}
+
 function isRetryableFastAgentInferenceError(error: unknown): boolean {
   const detail = formatErrorForLog(error).toLowerCase();
 
@@ -522,6 +539,10 @@ export async function answerFastAgentQuestion({
       'launch_task' | 'send_task_message' | 'cancel_task'
     >();
     let currentActiveTaskId = activeTaskId;
+    const requiresFreshGithubActivity =
+      isVolatileCurrentWorkQuestion(normalizedQuestion) &&
+      availableIntegrations.some((integration) => integration.id === 'github');
+    let consultedGithubActivity = false;
     const brain = availableIntegrations.find(
       (integration) =>
         integration.id === BRAIN_MCP_ID &&
@@ -570,6 +591,10 @@ export async function answerFastAgentQuestion({
       prompt += `\n\n[AUTOMATIC BRAIN PREFLIGHT]\nResult: ${JSON.stringify(brainResult).slice(0, 30_000)}\n[END AUTOMATIC BRAIN PREFLIGHT]\n\nUse this as lightweight context while deciding the best way to answer. The required initial Brain search is complete; do not repeat it. Use Brain query only if semantic recall is specifically needed to fill an important gap.`;
     }
 
+    if (requiresFreshGithubActivity) {
+      prompt += `\n\n[VOLATILE CURRENT-WORK REQUEST]\nThis question asks about time-sensitive current activity. Brain recall can lag behind live systems, so treat Brain results as background context rather than sufficient freshness evidence. Before closeout, consult fresh GitHub activity when the GitHub integration is listed. Prefer an open pull request or commit from today over an older meeting or completed-task summary. Include the active delegated task shown in the system prompt when it is relevant.\n[END VOLATILE CURRENT-WORK REQUEST]`;
+    }
+
     for (
       let generation = 0;
       generation < FAST_AGENT_MAX_STEPS;
@@ -588,6 +613,15 @@ export async function answerFastAgentQuestion({
 
         if (!message || !purpose) {
           prompt += `\n\n[CHAT TOOL CALL REJECTED]\nsend_chat_reply requires a non-empty message and purpose. Call it again with valid arguments.\n[END CHAT TOOL CALL REJECTED]`;
+          continue;
+        }
+
+        if (
+          purpose === 'closeout' &&
+          requiresFreshGithubActivity &&
+          !consultedGithubActivity
+        ) {
+          prompt += `\n\n[CHAT TOOL CALL REJECTED]\nThis volatile current-work request requires one fresh GitHub integration call before closeout. Brain recall alone is not sufficient.\n[END CHAT TOOL CALL REJECTED]`;
           continue;
         }
 
@@ -621,6 +655,15 @@ export async function answerFastAgentQuestion({
           (purpose !== 'ack' && purpose !== 'closeout')
         ) {
           prompt += `\n\n[CHAT TOOL CALL REJECTED]\nsend_chat_reaction_emoji requires a reactionName and purpose "ack" or "closeout". Use "closeout" only when the emoji fully answers the turn.\n[END CHAT TOOL CALL REJECTED]`;
+          continue;
+        }
+
+        if (
+          purpose === 'closeout' &&
+          requiresFreshGithubActivity &&
+          !consultedGithubActivity
+        ) {
+          prompt += `\n\n[CHAT TOOL CALL REJECTED]\nThis volatile current-work request requires one fresh GitHub integration call before closeout. Brain recall alone is not sufficient.\n[END CHAT TOOL CALL REJECTED]`;
           continue;
         }
 
@@ -676,6 +719,17 @@ export async function answerFastAgentQuestion({
             error: 'An integration ID and tool name are required.',
           };
         } else {
+          if (
+            integrationId === 'github' &&
+            availableIntegrations.some(
+              (integration) =>
+                integration.id === integrationId &&
+                integration.tools.some((tool) => tool.name === toolName),
+            )
+          ) {
+            consultedGithubActivity = true;
+          }
+
           try {
             integrationResult = await callFastAgentIntegration(
               {
@@ -783,7 +837,10 @@ export async function answerFastAgentQuestion({
     }
 
     const fallback = buildFastAgentTurnFallbackDecision();
-    const fallbackMessage = fallback.message ?? 'How can I help?';
+    const fallbackMessage =
+      requiresFreshGithubActivity && !consultedGithubActivity
+        ? 'I could not verify fresh GitHub activity within this turn, so I cannot reliably say what is current.'
+        : (fallback.message ?? 'How can I help?');
     await postSlackReply({
       purpose: 'closeout',
       slackChannel,

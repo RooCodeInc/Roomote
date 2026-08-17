@@ -521,6 +521,143 @@ describe('answerFastAgentQuestion', () => {
     expect(result).toBe('The code is in the fast-agent module.');
   });
 
+  it('uses fresh GitHub activity for volatile current-work questions instead of stale Brain recall', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'gbrain',
+        name: 'Brain',
+        description: 'Deployment memory',
+        tools: [{ name: 'search' }],
+      },
+      {
+        id: 'github',
+        name: 'GitHub',
+        description: 'Repositories',
+        tools: [{ name: 'search_pull_requests' }],
+      },
+    ]);
+    mocks.callIntegration
+      .mockResolvedValueOnce({
+        results: ['Meeting summary from last month: planning onboarding work.'],
+      })
+      .mockRejectedValueOnce(new Error('Tool is not available'))
+      .mockResolvedValueOnce({
+        pullRequests: ['Open today: Improve Fast mode recency handling.'],
+      });
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          message: 'The older meeting says you are planning onboarding work.',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'call_integration',
+          message: null,
+          purpose: null,
+          integrationId: 'github',
+          toolName: 'unavailable_tool',
+          toolArguments: JSON.stringify({}),
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          message: 'The older meeting says you are planning onboarding work.',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'call_integration',
+          message: null,
+          purpose: null,
+          integrationId: 'github',
+          toolName: 'search_pull_requests',
+          toolArguments: JSON.stringify({
+            author: 'mrubens',
+            state: 'open',
+          }),
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          message: 'You are working on Fast mode recency handling.',
+        }),
+      });
+
+    const callbacks = chatCallbacks();
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      ...callbacks,
+      question: 'What am I working on right now?',
+      activeTaskId: 'task-current',
+    });
+
+    const firstPrompt = mocks.generateObject.mock.calls[0]?.[0]?.prompt;
+    expect(firstPrompt).toContain('VOLATILE CURRENT-WORK REQUEST');
+    expect(firstPrompt).toContain(
+      'Prefer an open pull request or commit from today over an older meeting or completed-task summary.',
+    );
+    expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
+      'requires one fresh GitHub integration call before closeout',
+    );
+    expect(mocks.generateObject.mock.calls[3]?.[0]?.prompt).toContain(
+      'requires one fresh GitHub integration call before closeout',
+    );
+    expect(mocks.generateObject.mock.calls[0]?.[0]?.system).toContain(
+      'Task ID: task-current',
+    );
+    expect(mocks.callIntegration).toHaveBeenNthCalledWith(
+      3,
+      expect.any(Object),
+      expect.any(Array),
+      {
+        integrationId: 'github',
+        toolName: 'search_pull_requests',
+        args: { author: 'mrubens', state: 'open' },
+      },
+    );
+    expect(mocks.generateObject).toHaveBeenCalledTimes(5);
+    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
+    expect(callbacks.postSlackReply).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'The older meeting says you are planning onboarding work.',
+      }),
+    );
+    expect(result).toBe('You are working on Fast mode recency handling.');
+  });
+
+  it('keeps durable profile questions on the lightweight Brain-only path', async () => {
+    mocks.listIntegrations.mockResolvedValue([
+      {
+        id: 'gbrain',
+        name: 'Brain',
+        description: 'Deployment memory',
+        tools: [{ name: 'search' }],
+      },
+      {
+        id: 'github',
+        name: 'GitHub',
+        description: 'Repositories',
+        tools: [{ name: 'search_pull_requests' }],
+      },
+    ]);
+    mocks.callIntegration.mockResolvedValueOnce({
+      results: ['Profile: Staff engineer working on developer tools.'],
+    });
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      ...chatCallbacks(),
+      question: 'What do you know about my role?',
+    });
+
+    expect(mocks.callIntegration).toHaveBeenCalledOnce();
+    expect(mocks.generateObject.mock.calls[0]?.[0]?.prompt).not.toContain(
+      'VOLATILE CURRENT-WORK REQUEST',
+    );
+    expect(result).toBe('It coordinates incoming requests.');
+  });
+
   it('keeps Slack sender context unlinked when persisted identity lookup fails', async () => {
     mocks.getUserIdentity.mockRejectedValueOnce(new Error('database offline'));
     mocks.listIntegrations.mockResolvedValue([
