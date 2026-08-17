@@ -315,10 +315,9 @@ echo "[gbrain-entrypoint] reranker: $GBRAIN_RERANKER_MODEL"
 # invalidated"). Page content is preserved either way, and Roomote refuses to
 # ingest into a keyless brain at all, so there is rarely anything here yet.
 #
-# The middle step is not a typo. In gbrain 0.45.10.0 `config set
-# embedding_disabled false` prints "Set embedding_disabled = false" and does
-# not write the file, so the sentinel survives and keeps blocking embed. The
-# file edit is what actually clears it. Re-check on upgrade.
+# The middle step keeps the repair compatible with brains initialized by
+# older gbrain releases whose `config set embedding_disabled false` command
+# did not persist the change. The file edit is idempotent on newer releases.
 if [ "$BRAIN_PROVIDER" != "none" ] &&
   grep -q '"embedding_disabled": *true' "$CONFIG_FILE" 2>/dev/null; then
   echo "[gbrain-entrypoint] this brain predates its provider key; enabling semantic recall"

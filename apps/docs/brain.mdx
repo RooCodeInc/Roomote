@@ -62,16 +62,29 @@ precedence over the deployment's general provider keys.
 With no provider configured anywhere, the Brain stays inert. Agents are not
 told it exists, and nothing is ingested.
 
-Roomote schedules one maintenance pass each night. It asks gbrain's built-in
-cross-page synthesis primitive for a cited digest of material effective-dated
-since the previous successful pass, then stores it under `daily/digests/` in
-both the searchable index and the persistent Markdown corpus. The digest
+Roomote schedules one maintenance pass each night. It retrieves a bounded,
+source-balanced evidence set from gbrain, produces a cited digest of material
+effective-dated since the previous successful pass, then stores it under
+`daily/digests/` in both the searchable index and the persistent Markdown
+corpus. The digest
 focuses on concrete decisions, shipped work, blockers, commitments, and
 cross-source connections rather than generating a reflection for every raw
-page. Its cutoff trails active ingestion and overlaps the previous pass so
+page. Each page records how many Slack, task, GitHub, and Notion or meeting
+pages were considered and cited, so missing source coverage is visible.
+
+Beginning Tuesday, the same pass also updates
+`weekly/summaries/<year>-W<week>`. That bounded synthesis connects durable
+decisions, unresolved blockers, commitments, and recurring or superseded
+information across the week's available daily digests without reprocessing
+every raw page.
+
+The daily cutoff trails active ingestion and overlaps the previous pass so
 collector writes around the nightly boundary are reconsidered. gbrain's
-durable worker still owns embedding catch-up and the rest of the maintenance
-algorithm.
+durable worker still owns structural maintenance such as link extraction,
+fact consolidation, embedding catch-up, orphan checks, and purging. Roomote
+does not run gbrain's prediction-proposal and calibration queue unattended;
+that upstream feature requires an operator review workflow before proposals
+become canonical memory.
 
 <Note>
   Self-hosted Compose deployments start the Brain from the `brain`

@@ -37,7 +37,9 @@ vi.mock('../brain-outbox-drain', () => ({
 import {
   brainMaintenanceJob,
   buildDailyDigestPage,
+  buildWeeklySynthesisPage,
   runBrainDailyDigest,
+  runBrainWeeklySynthesis,
 } from '../brain-maintenance';
 
 const TEST_PROVIDER = {
@@ -48,6 +50,7 @@ const TEST_PROVIDER = {
 function synthesisResponse(input?: {
   answer?: string;
   sources?: string[];
+  coverageOmissions?: Record<string, string>;
 }): Response {
   return new Response(
     JSON.stringify({
@@ -59,6 +62,7 @@ function synthesisResponse(input?: {
               sources: input?.sources ?? ['slack/general/2026-08-16'],
               gaps: [],
               synthesis_status: 'ok',
+              coverage_omissions: input?.coverageOmissions,
             }),
           },
         },
@@ -114,6 +118,27 @@ function submitResponse(): Response {
   );
 }
 
+function toolSynthesisResponse(input: {
+  answer: string;
+  sources: string[];
+}): Response {
+  return new Response(
+    JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      result: {
+        structuredContent: {
+          answer: input.answer,
+          sources: input.sources,
+          gaps: [],
+          synthesis_status: 'ok',
+        },
+      },
+    }),
+    { status: 200 },
+  );
+}
+
 function mockDigestFetch(searches: Response[], following: Response[] = []) {
   const fetchSpy = vi.spyOn(globalThis, 'fetch');
   const paddedSearches = [
@@ -142,6 +167,8 @@ function asServerSentEvent(response: Response): Promise<Response> {
 
 describe('brainMaintenanceJob', () => {
   beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-17T07:00:00.000Z'));
     vi.restoreAllMocks();
     mockGetBrainSyncState.mockReset();
     mockGetBrainSyncState.mockResolvedValue(null);
@@ -149,6 +176,10 @@ describe('brainMaintenanceJob', () => {
     mockResolveConnection.mockReset();
     mockResolveProvider.mockReset();
     mockUpsertBrainSyncState.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('does nothing when the Brain provider is disabled', async () => {
@@ -192,7 +223,22 @@ describe('brainMaintenanceJob', () => {
         name: 'submit_job',
         arguments: {
           name: 'autopilot-cycle',
-          data: { pull: false },
+          data: {
+            pull: false,
+            phases: [
+              'lint',
+              'backlinks',
+              'sync',
+              'extract',
+              'extract_facts',
+              'resolve_symbol_edges',
+              'recompute_emotional_weight',
+              'consolidate',
+              'embed',
+              'orphans',
+              'purge',
+            ],
+          },
           timeout_ms: 60 * 60 * 1000,
         },
       },
@@ -627,6 +673,148 @@ describe('runBrainDailyDigest', () => {
     expect(synthesisBody).toContain('notion/decision');
     expect(synthesisBody).not.toContain('people/member-1');
   });
+
+  it('records why a nonempty source family was not cited', async () => {
+    mockGetBrainSyncState.mockResolvedValue(null);
+    mockDigestFetch(
+      [
+        searchResponse({
+          results: [
+            {
+              slug: 'slack/team/channel/2026-08-16/batch',
+              title: 'Slack decision',
+              effective_date: '2026-08-16',
+            },
+          ],
+        }),
+        searchResponse({
+          results: [
+            {
+              slug: 'tasks/task-1/runs/1',
+              title: 'Routine task',
+              effective_date: '2026-08-16',
+            },
+          ],
+        }),
+      ],
+      [
+        synthesisResponse({
+          answer: 'A decision was made [slack/team/channel/2026-08-16/batch].',
+          sources: ['slack/team/channel/2026-08-16/batch'],
+          coverageOmissions: {
+            tasks: 'The task contained no durable change.',
+          },
+        }),
+      ],
+    );
+
+    await runBrainDailyDigest(
+      { baseUrl: 'http://gbrain.test', token: 'read-token' },
+      { baseUrl: 'http://gbrain.test', token: 'write-token' },
+      new Date('2026-08-16T07:00:00.000Z'),
+    );
+
+    expect(mockPostToBrain).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: expect.stringContaining(
+          '- Roomote tasks: 1 candidate, 0 cited — The task contained no durable change.',
+        ),
+      }),
+      { baseUrl: 'http://gbrain.test', token: 'write-token' },
+    );
+  });
+});
+
+describe('runBrainWeeklySynthesis', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    mockEnv.TRPC_URL = 'http://api.test:3001';
+    mockPostToBrain.mockReset();
+  });
+
+  it('updates one ISO-week page from multiple cited daily digests', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      toolSynthesisResponse({
+        answer:
+          'A blocker persisted across both days [daily/digests/2026-08-17] [daily/digests/2026-08-18].',
+        sources: ['daily/digests/2026-08-17', 'daily/digests/2026-08-18'],
+      }),
+    );
+
+    const page = await runBrainWeeklySynthesis(
+      { baseUrl: 'http://gbrain.test', token: 'read-token' },
+      { baseUrl: 'http://gbrain.test', token: 'write-token' },
+      {
+        slug: 'daily/digests/2026-08-18',
+        title: 'Daily digest — 2026-08-18',
+        content: '# Daily digest — 2026-08-18\n\nTuesday decisions.',
+      },
+      new Date('2026-08-18T06:00:00.000Z'),
+    );
+
+    expect(page?.slug).toBe('weekly/summaries/2026-W34');
+    expect(page?.content).toContain('[[daily/digests/2026-08-17]]');
+    expect(page?.content).toContain('[[daily/digests/2026-08-18]]');
+    expect(mockPostToBrain).toHaveBeenCalledWith(page, {
+      baseUrl: 'http://gbrain.test',
+      token: 'write-token',
+    });
+    const synthesisRequest = fetchSpy.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(synthesisRequest.body))).toMatchObject({
+      params: {
+        name: 'synthesize',
+        arguments: {
+          question: expect.stringContaining(
+            'daily/digests/2026-08-17, daily/digests/2026-08-18',
+          ),
+          since: '2026-08-16T23:59:59.999Z',
+          until: '2026-08-18T06:00:00.000Z',
+        },
+      },
+    });
+  });
+
+  it('skips weekly synthesis until two daily pages exist', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    const page = await runBrainWeeklySynthesis(
+      { baseUrl: 'http://gbrain.test', token: 'read-token' },
+      { baseUrl: 'http://gbrain.test', token: 'write-token' },
+      {
+        slug: 'daily/digests/2026-08-17',
+        title: 'Daily digest — 2026-08-17',
+        content: '# Daily digest — 2026-08-17',
+      },
+      new Date('2026-08-17T06:00:00.000Z'),
+    );
+
+    expect(page).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(mockPostToBrain).not.toHaveBeenCalled();
+  });
+
+  it('rejects citations outside the current week evidence', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      toolSynthesisResponse({
+        answer: 'An older conclusion was important.',
+        sources: ['daily/digests/2026-08-10'],
+      }),
+    );
+
+    await expect(
+      runBrainWeeklySynthesis(
+        { baseUrl: 'http://gbrain.test', token: 'read-token' },
+        { baseUrl: 'http://gbrain.test', token: 'write-token' },
+        {
+          slug: 'daily/digests/2026-08-18',
+          title: 'Daily digest — 2026-08-18',
+          content: '# Daily digest — 2026-08-18',
+        },
+        new Date('2026-08-18T06:00:00.000Z'),
+      ),
+    ).rejects.toThrow('outside its evidence window');
+    expect(mockPostToBrain).not.toHaveBeenCalled();
+  });
 });
 
 describe('buildDailyDigestPage', () => {
@@ -638,11 +826,42 @@ describe('buildDailyDigestPage', () => {
       },
       since: new Date('2026-08-15T07:00:00.000Z'),
       until: new Date('2026-08-16T07:00:00.000Z'),
+      coverage: [
+        { family: 'slack', candidates: 2, cited: 1 },
+        { family: 'tasks', candidates: 0, cited: 0 },
+        {
+          family: 'github',
+          candidates: 1,
+          cited: 0,
+          omissionReason: 'No high-signal GitHub change.',
+        },
+        { family: 'notion_meetings', candidates: 1, cited: 1 },
+      ],
     });
 
     expect(page.slug).toBe('daily/digests/2026-08-16');
     expect(page.content).toContain('## Key decisions');
     expect(page.content.match(/\[\[notion\/decision\]\]/g)).toHaveLength(1);
     expect(page.content).toContain('[[slack/general]]');
+    expect(page.content).toContain('source_coverage:');
+    expect(page.content).toContain(
+      '- GitHub: 1 candidate, 0 cited — No high-signal GitHub change.',
+    );
+  });
+});
+
+describe('buildWeeklySynthesisPage', () => {
+  it('uses the ISO week-year across a calendar-year boundary', () => {
+    const page = buildWeeklySynthesisPage({
+      synthesis: {
+        answer: '## Decisions\n\nKeep the bounded workflow.',
+        sources: ['daily/digests/2026-12-31'],
+      },
+      weekStart: new Date('2026-12-28T00:00:00.000Z'),
+      until: new Date('2027-01-01T06:00:00.000Z'),
+    });
+
+    expect(page.slug).toBe('weekly/summaries/2026-W53');
+    expect(page.content).toContain('week: "2026-W53"');
   });
 });
