@@ -1,5 +1,6 @@
 export const FAST_AGENT_MODEL_ROLE = 'primary' as const;
 export const FAST_AGENT_MAX_STEPS = 50;
+export const FAST_AGENT_MAX_IMAGE_ATTACHMENTS = 3;
 export const FAST_AGENT_BRAIN_INSTRUCTIONS = `Use Brain as lightweight conversational context, not as an exhaustive research assignment.
 
 - Fast mode automatically performs one Brain query before making its first decision. Treat that preflight result as the lay of the land; do not repeat it.

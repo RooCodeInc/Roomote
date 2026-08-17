@@ -290,6 +290,93 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
+  it('uses a vision model and files for structured image prompts', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.6-terra',
+      R_SMALL_MODEL: 'openrouter/openai/gpt-5.6-nano',
+      R_VISION_MODEL: 'openrouter/google/gemini-3.6-pro',
+    });
+    configProvidersMock.mockResolvedValue({
+      data: {
+        providers: [
+          {
+            id: 'openrouter',
+            models: {
+              'openai/gpt-5.6-terra': {
+                capabilities: {
+                  input: { image: true },
+                  output: { text: true },
+                },
+              },
+              'openai/gpt-5.6-nano': {
+                capabilities: {
+                  input: { image: false },
+                  output: { text: true },
+                },
+              },
+              'google/gemini-3.6-pro': {
+                capabilities: {
+                  input: { image: true },
+                  output: { text: true },
+                },
+              },
+            },
+          },
+        ],
+        default: {},
+      },
+      error: undefined,
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: { structured: { answer: 'The menu is clipped.' } },
+        parts: [],
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskObject, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+    await generateTrackedNonTaskObject({
+      surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+      modelRole: 'small',
+      schema: z.object({ answer: z.string() }),
+      prompt: 'Inspect the screenshot.',
+      requiredInputModality: 'image',
+      files: [
+        {
+          mime: 'image/png',
+          url: 'data:image/png;base64,c2NyZWVuc2hvdA==',
+        },
+      ],
+    });
+
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: {
+          providerID: 'openrouter',
+          modelID: 'google/gemini-3.6-pro',
+        },
+        parts: [
+          expect.objectContaining({
+            type: 'text',
+            text: expect.stringContaining('Inspect the screenshot.'),
+          }),
+          {
+            type: 'file',
+            mime: 'image/png',
+            url: 'data:image/png;base64,c2NyZWVuc2hvdA==',
+          },
+        ],
+      }),
+      expect.anything(),
+    );
+  });
+
   it('starts a separate managed OpenCode SDK server when model env changes', async () => {
     process.env = {
       ...originalEnv,

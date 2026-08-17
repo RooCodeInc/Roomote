@@ -2,14 +2,37 @@ import { PRODUCT_NAME } from '@roomote/types';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  FAST_AGENT_MAX_IMAGE_ATTACHMENTS,
   type FastAgentActiveTask,
   type LaunchFastAgentSlackTask,
 } from '@roomote/cloud-agents/server';
-import { type SlackEvent, type SlackNotifier } from '@roomote/slack';
+import {
+  isSlackImageFile,
+  type SlackEvent,
+  type SlackFile,
+  type SlackNotifier,
+} from '@roomote/slack';
 import { stripLeadingSlackProductMention } from '@roomote/cloud-agents';
 
 import { LEADING_FAST_COMMAND_MENTION_PATTERN } from '../constants.js';
+import { processSlackAttachments } from '../helpers/attachments.js';
 import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
+
+const IMAGE_ONLY_FAST_QUESTION =
+  'The user shared an image without additional text. Respond using the attached image and the preceding thread context.';
+
+function limitFastAgentImages(files?: SlackFile[]): SlackFile[] | undefined {
+  let imageCount = 0;
+
+  return files?.filter((file) => {
+    if (!isSlackImageFile(file)) {
+      return true;
+    }
+
+    imageCount += 1;
+    return imageCount <= FAST_AGENT_MAX_IMAGE_ATTACHMENTS;
+  });
+}
 
 export function stripLeadingFastCommandMention(text: string): string {
   return text.replace(LEADING_FAST_COMMAND_MENTION_PATTERN, '').trimStart();
@@ -87,7 +110,6 @@ export async function processFastAgentMessage(params: {
       stripLeadingFastCommandMention(event.authoredText ?? event.text),
     ),
   );
-  const question = extractFastQuestion(normalizedText, continuation);
 
   let didAddProcessingReaction = false;
 
@@ -97,6 +119,24 @@ export async function processFastAgentMessage(params: {
       timestamp: event.ts,
       name: processingReactionName,
     });
+
+    const { images, attachmentTexts, videoDescriptions } =
+      await processSlackAttachments({
+        slack,
+        files: limitFastAgentImages(event.files),
+        userId,
+        userTextContext: normalizedText,
+      });
+    const attachmentAwareText = [
+      normalizedText,
+      ...attachmentTexts,
+      ...videoDescriptions,
+    ]
+      .filter((part) => part.trim().length > 0)
+      .join('\n\n');
+    const question =
+      extractFastQuestion(attachmentAwareText, continuation) ??
+      (images.length > 0 ? IMAGE_ONLY_FAST_QUESTION : null);
 
     if (!question) {
       await postSlackThreadMarkdownMessage({
@@ -144,6 +184,7 @@ export async function processFastAgentMessage(params: {
 
     const responseText = await answerFastAgentQuestion({
       question,
+      images,
       currentMessageAgentContext: event.agentContext,
       threadContext: serializedThreadContext,
       userId,

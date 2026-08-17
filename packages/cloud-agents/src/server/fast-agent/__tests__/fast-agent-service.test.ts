@@ -165,6 +165,53 @@ describe('answerFastAgentQuestion', () => {
     );
   });
 
+  it('sends image attachments through multimodal structured inference', async () => {
+    await answerFastAgentQuestion({
+      ...baseParams,
+      images: [
+        'data:image/png;base64,aW1hZ2UtMQ==',
+        'data:image/png;base64,aW1hZ2UtMg==',
+        'data:image/png;base64,aW1hZ2UtMw==',
+        'data:image/png;base64,aW1hZ2UtNA==',
+      ],
+      ...chatCallbacks(),
+    });
+
+    expect(mocks.generateObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        files: [
+          {
+            mime: 'image/png',
+            url: 'data:image/png;base64,aW1hZ2UtMQ==',
+          },
+          {
+            mime: 'image/png',
+            url: 'data:image/png;base64,aW1hZ2UtMg==',
+          },
+          {
+            mime: 'image/png',
+            url: 'data:image/png;base64,aW1hZ2UtMw==',
+          },
+        ],
+        requiredInputModality: 'image',
+      }),
+    );
+    expect(mocks.appendSessionMessages).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: expect.arrayContaining([
+          expect.objectContaining({
+            role: 'user',
+            content: [
+              expect.objectContaining({
+                text: expect.stringContaining('[3 image attachments]'),
+              }),
+            ],
+          }),
+        ]),
+      }),
+    );
+  });
+
   it('drops an acknowledgement that is immediately replaced by a closeout', async () => {
     mocks.generateObject
       .mockResolvedValueOnce({

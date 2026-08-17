@@ -10,6 +10,7 @@ import {
 } from '../../utils';
 import { getAvailableEnvironments, type RoutableEnvironment } from '../router';
 import {
+  FAST_AGENT_MAX_IMAGE_ATTACHMENTS,
   FAST_AGENT_MAX_STEPS,
   FAST_AGENT_MODEL_ROLE,
 } from './fast-agent-constants';
@@ -23,6 +24,7 @@ import {
 import {
   generateTrackedNonTaskObject,
   NON_TASK_INFERENCE_SURFACES,
+  type NonTaskPromptFile,
 } from '../non-task-provider-usage';
 import {
   callFastAgentIntegration,
@@ -131,11 +133,13 @@ async function generateFastAgentKickoffMessage({
   userId,
   system,
   prompt,
+  files,
   task,
 }: {
   userId: string;
   system: string;
   prompt: string;
+  files?: NonTaskPromptFile[];
   task: { taskId: string; taskUrl?: string };
 }): Promise<string> {
   let kickoffPrompt = `${prompt}\n\n[FAST ORCHESTRATION TOOL RESULT]\nTool: launch_task\nResult: ${JSON.stringify({ success: true, ...task })}\n[END FAST ORCHESTRATION TOOL RESULT]\n\nThe task has been prepared but is not runnable until its parent-owned kickoff is delivered. Write a meaningful closeout that explains what was delegated in the context of the user's request and links to the task when taskUrl is present. Do not use a generic sentence such as "I started the task." Use send_chat_reply with purpose "closeout".`;
@@ -145,6 +149,7 @@ async function generateFastAgentKickoffMessage({
       userId,
       system,
       prompt: kickoffPrompt,
+      files,
     });
     const decision = generated.object;
     const message = decision.message?.trim();
@@ -278,10 +283,12 @@ async function generateFastAgentDecision({
   userId,
   system,
   prompt,
+  files,
 }: {
   userId: string;
   system: string;
   prompt: string;
+  files?: NonTaskPromptFile[];
 }) {
   try {
     return await generateTrackedNonTaskObject({
@@ -291,6 +298,9 @@ async function generateFastAgentDecision({
       schema: fastAgentDecisionSchema,
       system,
       prompt,
+      ...(files?.length
+        ? { files, requiredInputModality: 'image' as const }
+        : {}),
     });
   } catch (error) {
     if (!isRetryableFastAgentInferenceError(error)) {
@@ -307,8 +317,21 @@ async function generateFastAgentDecision({
       schema: fastAgentDecisionSchema,
       system,
       prompt,
+      ...(files?.length
+        ? { files, requiredInputModality: 'image' as const }
+        : {}),
     });
   }
+}
+
+function buildFastAgentImageFiles(images: string[]): NonTaskPromptFile[] {
+  return images
+    .slice(0, FAST_AGENT_MAX_IMAGE_ATTACHMENTS)
+    .map((url) => {
+      const mime = /^data:([^;,]+);base64,/iu.exec(url)?.[1];
+      return mime?.startsWith('image/') ? { mime, url } : null;
+    })
+    .filter((file): file is NonTaskPromptFile => file !== null);
 }
 
 function buildUserTextMessage(text: string): ModelMessage {
@@ -505,6 +528,7 @@ function serializeFastAgentMessages(messages: ModelMessage[]): string {
 
 export async function answerFastAgentQuestion({
   question,
+  images = [],
   currentMessageAgentContext,
   threadContext = [],
   userId,
@@ -524,6 +548,7 @@ export async function answerFastAgentQuestion({
   platformEvent = false,
 }: {
   question: string;
+  images?: string[];
   currentMessageAgentContext?: string;
   threadContext?: FastAgentSlackThreadMessage[];
   userId: string;
@@ -548,7 +573,12 @@ export async function answerFastAgentQuestion({
   let persistedTurnMessageCount = 0;
   let pendingLifecycleReply: FastAgentSlackReply | null = null;
   const normalizedQuestion = normalizeThreadText(question);
-  const userMessage = buildUserTextMessage(normalizedQuestion);
+  const imageFiles = buildFastAgentImageFiles(images);
+  const userMessage = buildUserTextMessage(
+    imageFiles.length > 0
+      ? `${normalizedQuestion}\n\n[${imageFiles.length} image attachment${imageFiles.length === 1 ? '' : 's'}]`
+      : normalizedQuestion,
+  );
   const turnSessionMessages: ModelMessage[] = [userMessage];
 
   try {
@@ -685,6 +715,7 @@ export async function answerFastAgentQuestion({
         userId,
         system,
         prompt,
+        files: imageFiles,
       });
       const decision = generated.object;
 
@@ -922,6 +953,7 @@ export async function answerFastAgentQuestion({
                 userId,
                 system,
                 prompt,
+                files: imageFiles,
                 task,
               });
               await postSlackReply({

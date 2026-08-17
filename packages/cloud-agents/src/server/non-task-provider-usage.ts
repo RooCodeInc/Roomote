@@ -152,6 +152,8 @@ export class NonTaskInputModalityUnsupportedError extends Error {
 export interface GenerateTrackedNonTaskObjectParams<
   TSchema extends z.ZodTypeAny,
 > extends GenerateTrackedNonTaskBaseParams {
+  files?: NonTaskPromptFile[];
+  requiredInputModality?: NonTaskInputModality;
   schema: TSchema;
 }
 
@@ -365,7 +367,9 @@ type NonTaskSdkPromptOptions = {
 };
 
 async function resolveModelForInputModality(
-  params: GenerateTrackedNonTaskTextParams,
+  params: GenerateTrackedNonTaskBaseParams & {
+    requiredInputModality?: NonTaskInputModality;
+  },
   runtime: {
     model: string;
     resolvedModelRuntimeEnv: Partial<Record<string, string>>;
@@ -616,31 +620,42 @@ async function generateTrackedNonTaskObjectWithSdk<
   const resolvedRuntime =
     runtime ??
     (await resolveNonTaskModelRuntime(params.model, params.modelRole));
+  const model = await resolveModelForInputModality(params, resolvedRuntime);
 
-  const data = await runNonTaskSdkPrompt(params, resolvedRuntime, {
-    system: params.system,
-    format: {
-      type: 'json_schema',
-      schema: zodToJsonSchema(params.schema, {
-        $refStrategy: 'none',
-        target: 'jsonSchema7',
-      }) as Record<string, unknown>,
-      retryCount: DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT,
-    },
-    parts: [
-      {
-        type: 'text',
-        text: buildOpenCodePrompt({
-          prompt: params.prompt,
-          maxOutputTokens: params.maxOutputTokens,
-        }),
+  const data = await runNonTaskSdkPrompt(
+    params,
+    { ...resolvedRuntime, model },
+    {
+      system: params.system,
+      format: {
+        type: 'json_schema',
+        schema: zodToJsonSchema(params.schema, {
+          $refStrategy: 'none',
+          target: 'jsonSchema7',
+        }) as Record<string, unknown>,
+        retryCount: DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT,
       },
-    ],
-  });
+      parts: [
+        {
+          type: 'text',
+          text: buildOpenCodePrompt({
+            prompt: params.prompt,
+            maxOutputTokens: params.maxOutputTokens,
+          }),
+        },
+        ...(params.files ?? []).map((file) => ({
+          type: 'file' as const,
+          mime: file.mime,
+          ...(file.filename ? { filename: file.filename } : {}),
+          url: file.url,
+        })),
+      ],
+    },
+  );
 
   if (data.info.error) {
     throw new Error(
-      `OpenCode structured prompt failed (model ${resolvedRuntime.model}): ${formatOpenCodeSdkError(data.info.error)}`,
+      `OpenCode structured prompt failed (model ${model}): ${formatOpenCodeSdkError(data.info.error)}`,
     );
   }
 
