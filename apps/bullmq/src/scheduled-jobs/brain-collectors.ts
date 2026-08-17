@@ -7,6 +7,7 @@ import {
   eq,
   getBrainSyncState,
   githubUserMappings,
+  inArray,
   isNull,
   listBrainCollectorItems,
   listBrainCollectorItemsBefore,
@@ -1129,7 +1130,11 @@ export type PersonIdentityRecord = {
   providers: PersonIdentityProvider[];
 };
 
-type PersonIdentityReference = { slug: string; title: string };
+type PersonIdentityReference = {
+  slug: string;
+  title: string;
+  effectiveDate?: Date;
+};
 
 const LEGACY_SETUP_BOOTSTRAP_USER_ID = 'setup-bootstrap-user';
 
@@ -1207,6 +1212,7 @@ export function buildPersonIdentityPage(
       'type: person',
       `aliases: ${JSON.stringify(aliases)}`,
       `status: ${deleted ? 'deleted' : 'active'}`,
+      `event_date: ${formatUtcDay(record.createdAt)}`,
       ...(jobTitle ? [`job_title: ${JSON.stringify(jobTitle)}`] : []),
       'provenance: roomote-person-identities',
       '---',
@@ -1250,6 +1256,7 @@ export function buildPersonIdentityLookup(
     const reference = {
       slug: personIdentitySlug(record.userId),
       title: personIdentityDisplayName(record),
+      effectiveDate: record.createdAt,
     };
 
     // Email is an internal linking hint for meeting attendees, not Brain page
@@ -1389,7 +1396,8 @@ async function loadPersonIdentityRecords(): Promise<PersonIdentityRecord[]> {
   return [...byUserId.values()];
 }
 
-const SLACK_DIRECTORY_COLLECTOR_ID = 'slack-person-directory';
+const SLACK_DIRECTORY_COLLECTOR_ID =
+  'slack-person-directory:occurrence-date-v2';
 const SLACK_DIRECTORY_REFRESH_MS = 24 * 60 * 60 * 1000;
 const SLACK_DIRECTORY_PAGE_SIZE = 100;
 
@@ -1419,6 +1427,7 @@ export type SlackDirectoryProfile = {
   isBot: boolean;
   isAppUser: boolean;
   profileUpdatedAt: Date | null;
+  firstKnownAt: Date;
 };
 
 type RawSlackDirectoryUser = {
@@ -1436,6 +1445,18 @@ type RawSlackDirectoryUser = {
   };
 };
 
+export function slackDirectoryPageUserIds(
+  users: Array<{ id?: string }>,
+): string[] {
+  return [
+    ...new Set(
+      users
+        .map((user) => user.id?.trim())
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+}
+
 function slackDirectoryIdentityKey(teamId: string, userId: string): string {
   return `${teamId}/${userId}`;
 }
@@ -1452,12 +1473,24 @@ export function slackDirectoryProfileFromApi(input: {
   teamId: string;
   teamName: string;
   user: RawSlackDirectoryUser;
+  firstKnownAt?: Date;
+  observedAt?: Date;
 }): SlackDirectoryProfile | null {
   const slackUserId = input.user.id?.trim();
   if (!slackUserId) return null;
 
   const toOptional = (value: string | undefined) => value?.trim() || null;
   const updatedSeconds = input.user.updated;
+
+  const profileUpdatedAt =
+    typeof updatedSeconds === 'number' && Number.isFinite(updatedSeconds)
+      ? new Date(updatedSeconds * 1000)
+      : null;
+  const firstKnownAt = [input.firstKnownAt, profileUpdatedAt, input.observedAt]
+    .filter((date): date is Date => Boolean(date))
+    .sort((a, b) => a.getTime() - b.getTime())[0];
+
+  if (!firstKnownAt) return null;
 
   return {
     slackUserId,
@@ -1470,10 +1503,8 @@ export function slackDirectoryProfileFromApi(input: {
     isDeleted: input.user.deleted === true,
     isBot: input.user.is_bot === true,
     isAppUser: input.user.is_app_user === true,
-    profileUpdatedAt:
-      typeof updatedSeconds === 'number' && Number.isFinite(updatedSeconds)
-        ? new Date(updatedSeconds * 1000)
-        : null,
+    profileUpdatedAt,
+    firstKnownAt,
   };
 }
 
@@ -1509,6 +1540,14 @@ export function buildSlackDirectoryPersonPage(
   const name = slackDirectoryDisplayName(profile);
   const safeWorkspace =
     brainSafeIdentityValue(profile.slackTeamName) || 'Slack workspace';
+  const effectiveDate = canonical?.effectiveDate
+    ? new Date(
+        Math.min(
+          canonical.effectiveDate.getTime(),
+          profile.firstKnownAt.getTime(),
+        ),
+      )
+    : profile.firstKnownAt;
 
   if (canonical) {
     return {
@@ -1518,6 +1557,7 @@ export function buildSlackDirectoryPersonPage(
         '---',
         'type: person-alias',
         `canonical: ${JSON.stringify(canonical.slug)}`,
+        `event_date: ${formatUtcDay(effectiveDate)}`,
         'provenance: slack-directory',
         '---',
         '',
@@ -1547,6 +1587,7 @@ export function buildSlackDirectoryPersonPage(
       'type: person',
       `aliases: ${JSON.stringify(aliases)}`,
       `status: ${profile.isDeleted ? 'deleted' : 'active'}`,
+      `event_date: ${formatUtcDay(effectiveDate)}`,
       ...(safeTitle ? [`job_title: ${JSON.stringify(safeTitle)}`] : []),
       'provenance: slack-directory',
       `workspace: ${JSON.stringify(safeWorkspace)}`,
@@ -1571,7 +1612,9 @@ async function loadSlackCanonicalIdentityLookup(): Promise<
   Map<string, PersonIdentityReference>
 > {
   const mappings = await db.query.slackUserMappings.findMany({
-    with: { user: { columns: { name: true, deletedAt: true } } },
+    with: {
+      user: { columns: { name: true, deletedAt: true, createdAt: true } },
+    },
   });
   const lookup = new Map<string, PersonIdentityReference>();
 
@@ -1587,6 +1630,7 @@ async function loadSlackCanonicalIdentityLookup(): Promise<
       {
         slug: personIdentitySlug(mapping.userId),
         title: brainSafeIdentityValue(mapping.user.name) || 'Roomote member',
+        effectiveDate: mapping.user.createdAt,
       },
     );
   }
@@ -1648,36 +1692,53 @@ async function readSlackDirectoryBatch(input: {
   now: Date;
 }): Promise<SlackDirectoryBatch> {
   const client = createSlackWebClient(input.installation.botAccessToken);
-  const canonical = await loadSlackCanonicalIdentityLookup();
-  const response = await client.users.list({
-    limit: Math.min(input.limit, SLACK_DIRECTORY_PAGE_SIZE),
-    ...(input.slackCursor ? { cursor: input.slackCursor } : {}),
-  });
+  const [canonical, response] = await Promise.all([
+    loadSlackCanonicalIdentityLookup(),
+    client.users.list({
+      limit: Math.min(input.limit, SLACK_DIRECTORY_PAGE_SIZE),
+      ...(input.slackCursor ? { cursor: input.slackCursor } : {}),
+    }),
+  ]);
   const listed = (response.members ?? []) as RawSlackDirectoryUser[];
+  const pageUserIds = slackDirectoryPageUserIds(listed);
 
   // users.list supplies the directory and full profile shape. Refresh linked
   // Roomote identities with users.info so their canonical cards pick up the
   // freshest Slack name/title even if a paginated directory snapshot lags.
-  const refreshed = await Promise.all(
-    listed.map(async (user) => {
-      if (
-        !user.id ||
-        !canonical.has(
-          slackDirectoryIdentityKey(input.installation.teamId, user.id),
-        )
-      ) {
-        return user;
-      }
-      try {
-        const info = await client.users.info({ user: user.id });
-        return (info.user as RawSlackDirectoryUser | undefined) ?? user;
-      } catch (error) {
-        console.warn(
-          `${LOG_PREFIX} slack team ${input.installation.teamId}: users.info failed for a linked member; using users.list profile: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        return user;
-      }
-    }),
+  const [existingProfiles, refreshed] = await Promise.all([
+    pageUserIds.length > 0
+      ? db.query.slackDirectoryUsers.findMany({
+          where: and(
+            eq(slackDirectoryUsers.slackTeamId, input.installation.teamId),
+            inArray(slackDirectoryUsers.slackUserId, pageUserIds),
+          ),
+          columns: { slackUserId: true, createdAt: true },
+        })
+      : Promise.resolve([]),
+    Promise.all(
+      listed.map(async (user) => {
+        if (
+          !user.id ||
+          !canonical.has(
+            slackDirectoryIdentityKey(input.installation.teamId, user.id),
+          )
+        ) {
+          return user;
+        }
+        try {
+          const info = await client.users.info({ user: user.id });
+          return (info.user as RawSlackDirectoryUser | undefined) ?? user;
+        } catch (error) {
+          console.warn(
+            `${LOG_PREFIX} slack team ${input.installation.teamId}: users.info failed for a linked member; using users.list profile: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return user;
+        }
+      }),
+    ),
+  ]);
+  const existingCreatedAt = new Map(
+    existingProfiles.map((profile) => [profile.slackUserId, profile.createdAt]),
   );
   const profiles = refreshed
     .map((user) =>
@@ -1685,6 +1746,8 @@ async function readSlackDirectoryBatch(input: {
         teamId: input.installation.teamId,
         teamName: input.installation.teamName,
         user,
+        firstKnownAt: user.id ? existingCreatedAt.get(user.id) : undefined,
+        observedAt: input.installation.createdAt,
       }),
     )
     .filter((profile): profile is SlackDirectoryProfile => Boolean(profile));
@@ -1851,7 +1914,8 @@ const slackPersonDirectoryCollector: BrainCollector = {
   },
 };
 
-const PERSON_IDENTITIES_STATE_ID = 'person-identities:members';
+const PERSON_IDENTITIES_STATE_ID =
+  'person-identities:members:occurrence-date-v2';
 const PERSON_IDENTITIES_RECONCILIATION_MS = 24 * 60 * 60 * 1000;
 const GRANOLA_MEETINGS_COLLECTOR_ID = 'granola-meetings';
 
@@ -3142,9 +3206,8 @@ const granolaMeetingsCollector: BrainCollector = {
  * limit can never masquerade as brain-side backpressure.
  */
 const githubIssuesCollector: BrainCollector = {
-  // Versioned once so the historical backfill rewrites pages created before
-  // GitHub issue effective dates were explicit.
-  id: 'github-issues:effective-date-v2',
+  // Version when date semantics change so the deep backfill rewrites history.
+  id: 'github-issues:occurrence-date-v3',
   displayName: 'GitHub issues',
   async isEnabled() {
     return hasBrainGithubSources();

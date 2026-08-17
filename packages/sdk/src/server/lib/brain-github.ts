@@ -185,7 +185,7 @@ function labelNames(issue: GithubIssue): string[] {
 }
 
 function issueEffectiveDate(issue: GithubIssue): string | null {
-  for (const value of [issue.updated_at, issue.closed_at, issue.created_at]) {
+  for (const value of [issue.closed_at, issue.created_at]) {
     if (!value) {
       continue;
     }
@@ -229,7 +229,7 @@ export function buildGithubIssuePage(input: {
 
   const content = [
     '---',
-    ...(effectiveDate ? [`date: ${effectiveDate}`] : []),
+    ...(effectiveDate ? [`event_date: ${effectiveDate}`] : []),
     `repository: ${fullName}`,
     `issue_number: ${issue.number}`,
     `state: ${issue.state ?? 'unknown'}`,
@@ -354,7 +354,7 @@ export async function collectBrainGithubIssues(input: {
   const commentBudget = { remaining: MAX_COMMENT_FETCHES_PER_PASS };
   const repositoriesWithState = await Promise.all(
     repositoriesToScan.map(async (repository) => {
-      const stateId = `github-issues:${repository.fullName}`;
+      const stateId = `github-issues:occurrence-date-v2:${repository.fullName}`;
 
       return {
         ...repository,

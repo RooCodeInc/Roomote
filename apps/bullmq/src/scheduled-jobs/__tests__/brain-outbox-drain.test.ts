@@ -97,7 +97,7 @@ describe('PR fact resume cursor', () => {
 });
 
 describe('pull request fact pages', () => {
-  it('uses the remote update date instead of the local sync date', () => {
+  it('uses the merge occurrence instead of later remote updates', () => {
     const page = buildPullRequestFactPage({
       repositoryFullName: 'owner/repo',
       prNumber: 42,
@@ -105,12 +105,40 @@ describe('pull request fact pages', () => {
       htmlUrl: 'https://example.test/owner/repo/pull/42',
       authorLogin: 'octocat',
       state: 'merged',
+      createdAtRemote: new Date('2026-08-01T09:00:00Z'),
+      closedAtRemote: new Date('2026-08-14T10:00:00Z'),
       mergedAtRemote: new Date('2026-08-14T10:00:00Z'),
-      updatedAtRemote: new Date('2026-08-13T11:00:00Z'),
     });
 
-    expect(page.content).toContain('\ndate: 2026-08-13\n');
+    expect(page.content).toContain('\nevent_date: 2026-08-14\n');
     expect(page.content).toContain('\nmerged_at: 2026-08-14T10:00:00.000Z\n');
+  });
+
+  it('uses close then creation dates for unmerged pull requests', () => {
+    const base = {
+      repositoryFullName: 'owner/repo',
+      prNumber: 42,
+      title: 'Ship it',
+      htmlUrl: 'https://example.test/owner/repo/pull/42',
+      authorLogin: 'octocat',
+      createdAtRemote: new Date('2026-08-01T09:00:00Z'),
+      mergedAtRemote: null,
+    };
+
+    expect(
+      buildPullRequestFactPage({
+        ...base,
+        state: 'closed',
+        closedAtRemote: new Date('2026-08-09T10:00:00Z'),
+      }).content,
+    ).toContain('\nevent_date: 2026-08-09\n');
+    expect(
+      buildPullRequestFactPage({
+        ...base,
+        state: 'open',
+        closedAtRemote: null,
+      }).content,
+    ).toContain('\nevent_date: 2026-08-01\n');
   });
 });
 
@@ -168,8 +196,9 @@ describe('collector continuation orchestration', () => {
         htmlUrl: 'https://example.test/owner/repo/pull/42',
         authorLogin: 'octocat',
         state: 'merged',
+        createdAtRemote: new Date('2026-08-13T10:00:00Z'),
+        closedAtRemote: new Date('2026-08-14T10:00:00Z'),
         mergedAtRemote: new Date('2026-08-14T10:00:00Z'),
-        updatedAtRemote: new Date('2026-08-14T10:30:00Z'),
         updatedAt: new Date('2026-08-14T11:00:00Z'),
       },
     ]);

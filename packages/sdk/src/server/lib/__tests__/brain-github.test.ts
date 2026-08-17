@@ -83,7 +83,7 @@ describe('buildGithubIssuePage', () => {
       'acme/widgets#42: Sandbox boots without the preview proxy',
     );
     expect(page?.content).toContain('repository: acme/widgets');
-    expect(page?.content).toContain('\ndate: 2026-08-03\n');
+    expect(page?.content).toContain('\nevent_date: 2026-08-03\n');
     expect(page?.content).toContain('state: closed');
     expect(page?.content).toContain('labels: bug, previews');
     expect(page?.content).toContain('author: ada');
@@ -107,14 +107,14 @@ describe('buildGithubIssuePage', () => {
     expect(page?.content).not.toContain('## Discussion');
   });
 
-  it('falls back to the creation date when no update date is available', () => {
+  it('uses the creation date for an open issue despite later updates', () => {
     const page = buildGithubIssuePage({
       fullName: 'acme/widgets',
-      issue: { ...issue, updated_at: undefined, closed_at: undefined },
+      issue: { ...issue, closed_at: undefined },
       comments: [],
     });
 
-    expect(page?.content).toContain('\ndate: 2026-08-01\n');
+    expect(page?.content).toContain('\nevent_date: 2026-08-01\n');
   });
 
   it('caps long bodies and comment bodies', () => {
@@ -165,8 +165,12 @@ describe('GitHub issue collector progress', () => {
       { fullName: 'acme/a', installationId: 1 },
       { fullName: 'acme/b', installationId: 2 },
     ];
-    githubMocks.syncState.set('github-issues:acme/a', { watermark: start });
-    githubMocks.syncState.set('github-issues:acme/b', { watermark: start });
+    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
+      watermark: start,
+    });
+    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/b', {
+      watermark: start,
+    });
     githubMocks.listForRepo.mockImplementation(
       async ({
         repo,
@@ -197,7 +201,7 @@ describe('GitHub issue collector progress', () => {
     const first = await collectBrainGithubIssues({ now, limit: 100 });
     expect(first.pages).toHaveLength(100);
     expect(first.stateUpdates.map((update) => update.collectorId)).toEqual([
-      'github-issues:acme/a',
+      'github-issues:occurrence-date-v2:acme/a',
     ]);
     for (const update of first.stateUpdates) {
       githubMocks.syncState.set(update.collectorId, {
@@ -220,7 +224,9 @@ describe('GitHub issue collector progress', () => {
     const tiedAt = '2026-08-02T00:00:00Z';
     const now = new Date('2026-08-15T00:00:00Z');
     githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
-    githubMocks.syncState.set('github-issues:acme/a', { watermark: start });
+    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
+      watermark: start,
+    });
     githubMocks.listForRepo.mockImplementation(
       async ({ page = 1 }: { page?: number }) => ({
         data:
@@ -234,7 +240,7 @@ describe('GitHub issue collector progress', () => {
 
     const first = await collectBrainGithubIssues({ now, limit: 100 });
     expect(first.stateUpdates[0]).toMatchObject({
-      collectorId: 'github-issues:acme/a',
+      collectorId: 'github-issues:occurrence-date-v2:acme/a',
       watermark: new Date(tiedAt),
     });
     const firstCursor = JSON.parse(first.stateUpdates[0]!.cursor!) as {
@@ -245,7 +251,7 @@ describe('GitHub issue collector progress', () => {
     expect(firstCursor.seen.map(([number]) => number)).toEqual(
       Array.from({ length: 100 }, (_, index) => index + 1),
     );
-    githubMocks.syncState.set('github-issues:acme/a', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
       watermark: first.stateUpdates[0]!.watermark,
       backfillCursor: first.stateUpdates[0]!.cursor,
     });
@@ -262,7 +268,7 @@ describe('GitHub issue collector progress', () => {
       page: 2,
     });
     expect(second.stateUpdates[0]).toMatchObject({
-      collectorId: 'github-issues:acme/a',
+      collectorId: 'github-issues:occurrence-date-v2:acme/a',
       watermark: new Date(now.getTime() - 1000),
     });
     expect(second.stateUpdates[0]?.cursor).not.toBeNull();
@@ -275,7 +281,9 @@ describe('GitHub issue collector progress', () => {
       new Date(start.getTime() + (index + 1) * 60_000).toISOString(),
     );
     githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
-    githubMocks.syncState.set('github-issues:acme/a', { watermark: start });
+    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
+      watermark: start,
+    });
     githubMocks.listForRepo
       .mockResolvedValueOnce({
         data: Array.from({ length: 100 }, (_, index) =>
@@ -294,7 +302,7 @@ describe('GitHub issue collector progress', () => {
       });
 
     const first = await collectBrainGithubIssues({ now, limit: 100 });
-    githubMocks.syncState.set('github-issues:acme/a', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
       watermark: first.stateUpdates[0]!.watermark,
       backfillCursor: first.stateUpdates[0]!.cursor,
     });
@@ -321,7 +329,9 @@ describe('GitHub issue collector progress', () => {
       makeIssue(index + 2, tiedAt),
     );
     githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
-    githubMocks.syncState.set('github-issues:acme/a', { watermark: start });
+    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
+      watermark: start,
+    });
     githubMocks.listForRepo
       .mockResolvedValueOnce({ data: firstPage })
       // The mutation occurs after this replay: issue 101 shifts into page 1,
@@ -334,7 +344,7 @@ describe('GitHub issue collector progress', () => {
       .mockResolvedValueOnce({ data: [] });
 
     const first = await collectBrainGithubIssues({ now, limit: 100 });
-    githubMocks.syncState.set('github-issues:acme/a', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
       watermark: first.stateUpdates[0]!.watermark,
       backfillCursor: first.stateUpdates[0]!.cursor,
     });
@@ -342,7 +352,7 @@ describe('GitHub issue collector progress', () => {
     const missed = await collectBrainGithubIssues({ now, limit: 100 });
     expect(missed.pages).toEqual([]);
     expect(missed.stateUpdates[0]?.cursor).not.toBeNull();
-    githubMocks.syncState.set('github-issues:acme/a', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
       watermark: missed.stateUpdates[0]!.watermark,
       backfillCursor: missed.stateUpdates[0]!.cursor,
     });
@@ -359,7 +369,7 @@ describe('GitHub issue collector progress', () => {
     const original = makeIssue(7, boundary.toISOString());
     const changed = { ...original, comments: 1 };
     githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
-    githubMocks.syncState.set('github-issues:acme/a', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
       watermark: boundary,
       backfillCursor: JSON.stringify({
         boundary: boundary.toISOString(),
@@ -389,7 +399,7 @@ describe('GitHub issue collector progress', () => {
       'github/acme/a/issues/7',
     ]);
     expect(result.stateUpdates[0]).toMatchObject({
-      collectorId: 'github-issues:acme/a',
+      collectorId: 'github-issues:occurrence-date-v2:acme/a',
       watermark: new Date(now.getTime() - 1000),
     });
     expect(result.stateUpdates[0]?.cursor).not.toBeNull();
@@ -417,7 +427,7 @@ describe('GitHub issue collector progress', () => {
       [],
     ]);
     githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
-    githubMocks.syncState.set('github-issues:acme/a', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
       watermark: boundary,
       backfillCursor: JSON.stringify({
         boundary: boundary.toISOString(),
@@ -452,7 +462,7 @@ describe('GitHub issue collector progress', () => {
       comments: 1,
     }));
     githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
-    githubMocks.syncState.set('github-issues:acme/a', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
       watermark: boundary,
       backfillCursor: JSON.stringify({
         boundary: boundary.toISOString(),
@@ -507,7 +517,7 @@ describe('GitHub issue collector progress', () => {
     );
     const newerIssue = makeIssue(32, nextBoundary.toISOString());
     githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
-    githubMocks.syncState.set('github-issues:acme/a', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
       watermark: boundary,
       backfillCursor: JSON.stringify({
         boundary: boundary.toISOString(),
@@ -537,7 +547,7 @@ describe('GitHub issue collector progress', () => {
       boundary: boundary.toISOString(),
       commentProbeOffset: 30,
     });
-    githubMocks.syncState.set('github-issues:acme/a', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
       watermark: first.stateUpdates[0]!.watermark,
       backfillCursor: first.stateUpdates[0]!.cursor,
     });
@@ -566,7 +576,7 @@ describe('GitHub issue collector progress', () => {
       [],
     ]);
     githubMocks.repositories = [{ fullName: 'acme/a', installationId: 1 }];
-    githubMocks.syncState.set('github-issues:acme/a', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
       watermark: boundary,
       backfillCursor: JSON.stringify({
         boundary: boundary.toISOString(),
@@ -595,7 +605,7 @@ describe('GitHub issue collector progress', () => {
       boundary: boundary.toISOString(),
       commentProbeOffset: 0,
     });
-    githubMocks.syncState.set('github-issues:acme/a', {
+    githubMocks.syncState.set('github-issues:occurrence-date-v2:acme/a', {
       watermark: first.stateUpdates[0]!.watermark,
       backfillCursor: first.stateUpdates[0]!.cursor,
     });

@@ -247,6 +247,29 @@ describe('backfillBrainMemoryEvents', () => {
     expect(completedEvents).toHaveLength(1);
     expect(runningEvents).toHaveLength(0);
   });
+
+  it('requeues completed memories for a one-time metadata replay', async () => {
+    const completed = await makeCompletedRun();
+    await saveBrainAgentSummary(db, completed.id, 'Keep this summary.');
+    const [event] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.runId, completed.id));
+    await markBrainMemoryEvent(db, event!.id, 'done');
+
+    await backfillBrainMemoryEvents(db, { requeueCompleted: true });
+
+    const [requeued] = await db
+      .select()
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.runId, completed.id));
+    expect(requeued).toMatchObject({
+      status: 'pending',
+      attempts: 0,
+      lastError: null,
+      agentSummary: 'Keep this summary.',
+    });
+  });
 });
 
 describe('claimPendingBrainMemoryEvents', () => {
