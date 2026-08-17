@@ -17,6 +17,8 @@ export interface SlackMessage {
   unfurl_links?: boolean;
   unfurl_media?: boolean;
   metadata?: SlackMessageMetadata;
+  /** Slack request idempotency key for retry-safe chat.postMessage calls. */
+  client_msg_id?: string;
 }
 
 export interface SlackResponse {

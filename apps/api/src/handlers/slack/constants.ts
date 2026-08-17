@@ -20,10 +20,8 @@ export const SLACK_EVENT_DEDUP_PREFIX = 'slack:event:';
 export const SLACK_WORKFLOW_COMPLETION_PREFIX = 'slack:workflow-completion:';
 export const SLACK_WORKFLOW_COMPLETION_TTL_SECONDS = 24 * 60 * 60;
 export const ROUTING_LOCK_TTL_SECONDS = 60;
-export const FAST_AGENT_LOCK_TTL_SECONDS = 600;
 export const SLACK_WELCOME_MESSAGE_CHANNEL_LIMIT = 3;
 export const SLACK_ROUTING_LOCK_PREFIX = 'slack:routing-lock:';
-export const SLACK_FAST_AGENT_LOCK_PREFIX = 'slack:fast-agent-lock:';
 export const SLACK_SETUP_SUGGESTION_LOCK_PREFIX =
   'slack:setup-suggestion-reaction:';
 export const LEADING_FAST_COMMAND_MENTION_PATTERN = /^\s*<@[^>]+>[\s,:;.-]*/;

@@ -22,6 +22,7 @@ const mockCleanupSandboxOidcTargetsForTaskRun = vi
 const mockResolveDiscordRuntimeCredentials = vi.fn();
 const mockDiscordPostMessage = vi.fn();
 const mockNotifySourceRunOnSettle = vi.fn().mockResolvedValue(undefined);
+const mockNotifyFastAgentParentOnSettle = vi.fn().mockResolvedValue(undefined);
 const mockDbTransaction = vi.fn();
 const mockCaptureTaskSettled = vi.fn();
 const mockResolveDefaultComputeProvider = vi.fn().mockResolvedValue('modal');
@@ -279,6 +280,11 @@ vi.mock('../../sandbox-oidc', () => ({
 vi.mock('../notify-source-run-on-settle', () => ({
   notifySourceRunOnSettle: (...args: unknown[]) =>
     mockNotifySourceRunOnSettle(...args),
+}));
+
+vi.mock('../notify-fast-agent-parent-on-settle', () => ({
+  notifyFastAgentParentOnSettle: (...args: unknown[]) =>
+    mockNotifyFastAgentParentOnSettle(...args),
 }));
 
 vi.mock('../../automation-result-metadata', () => ({
@@ -1476,6 +1482,39 @@ describe('finishRun', () => {
   });
 
   describe('Slack failure notification', () => {
+    it('routes Fast child failures through the parent without generic Slack delivery', async () => {
+      const job = makeRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: 'owner/repo',
+          description: 'Implement the fix',
+          communicationProvider: 'slack',
+          communicationContextInherited: true,
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            slackTeamId: 'T123',
+            slackChannel: 'C123',
+            slackThreadTs: '111.222',
+          },
+        },
+      });
+      mockFindFirstRun.mockResolvedValue(job);
+      mockFindFirstTask.mockResolvedValue(job.task);
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'spawn timeout',
+      });
+
+      expect(mockPostMessage).not.toHaveBeenCalled();
+      expect(mockNotifyFastAgentParentOnSettle).toHaveBeenCalledWith(
+        expect.objectContaining({ taskId: job.taskId }),
+        RunStatus.Failed,
+        job.task.title,
+      );
+    });
+
     it('posts a retryable generic thread reply when a non-setup Slack job fails', async () => {
       const job = makeRun(
         {

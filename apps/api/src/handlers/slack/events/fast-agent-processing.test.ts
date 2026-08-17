@@ -5,11 +5,8 @@ const mocks = vi.hoisted(() => ({
   postThreadMessage: vi.fn(),
 }));
 
-vi.mock('@roomote/redis', () => ({
-  acquireRedisLock: mocks.acquireLock,
-}));
-
 vi.mock('@roomote/cloud-agents/server', () => ({
+  acquireFastAgentTurnLock: mocks.acquireLock,
   answerFastAgentQuestion: mocks.answerQuestion,
 }));
 
@@ -28,7 +25,7 @@ describe('processFastAgentMessage', () => {
     vi.clearAllMocks();
     mocks.acquireLock.mockResolvedValue(mocks.releaseLock);
     mocks.releaseLock.mockResolvedValue(undefined);
-    mocks.postThreadMessage.mockResolvedValue(true);
+    mocks.postThreadMessage.mockResolvedValue('posted');
     mocks.answerQuestion.mockImplementation(
       async ({
         postSlackReply,
@@ -257,6 +254,100 @@ describe('processFastAgentMessage', () => {
     );
   });
 
+  it('completes quietly when the reply is suppressed for a deleted source message', async () => {
+    mocks.postThreadMessage.mockResolvedValue('suppressed');
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await expect(
+      processFastAgentMessage({
+        event: {
+          type: 'message',
+          channel: 'D123',
+          channel_type: 'im',
+          user: 'U123',
+          text: '!fast implement this',
+          ts: '100.001',
+        } as never,
+        slack: slack as never,
+        userId: 'user-1',
+        teamId: 'T123',
+      }),
+    ).resolves.toBeUndefined();
+    // The suppressed reply counts as handled: no fallback repost attempt.
+    expect(mocks.postThreadMessage).toHaveBeenCalledOnce();
+  });
+
+  it('aborts a Fast launch when the kickoff post is suppressed', async () => {
+    mocks.postThreadMessage.mockResolvedValue('suppressed');
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        postSlackReply,
+      }: {
+        postSlackReply: (reply: unknown) => void;
+      }) => {
+        await postSlackReply({
+          purpose: 'closeout',
+          message: 'Delegated the work.',
+          kickoff: true,
+        });
+        return 'Delegated the work.';
+      },
+    );
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await expect(
+      processFastAgentMessage({
+        event: {
+          type: 'message',
+          channel: 'D123',
+          channel_type: 'im',
+          user: 'U123',
+          text: '!fast implement this',
+          ts: '100.001',
+        } as never,
+        slack: slack as never,
+        userId: 'user-1',
+        teamId: 'T123',
+      }),
+    ).rejects.toThrow('The Fast kickoff was suppressed');
+  });
+
+  it('rejects a non-delivered parent reply instead of treating it as a kickoff', async () => {
+    mocks.postThreadMessage.mockResolvedValue('failed');
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await expect(
+      processFastAgentMessage({
+        event: {
+          type: 'message',
+          channel: 'D123',
+          channel_type: 'im',
+          user: 'U123',
+          text: '!fast implement this',
+          ts: '100.001',
+        } as never,
+        slack: slack as never,
+        userId: 'user-1',
+        teamId: 'T123',
+      }),
+    ).rejects.toThrow('Slack did not accept the Fast parent reply.');
+  });
+
   it('shows the task-processing reaction until the fast response is loaded', async () => {
     const slack = {
       addReaction: vi.fn().mockResolvedValue(true),
@@ -312,10 +403,11 @@ describe('processFastAgentMessage', () => {
         threadContext: [],
       }),
     );
-    expect(mocks.acquireLock).toHaveBeenCalledWith(
-      expect.stringContaining('T123:D123:100.001'),
-      expect.anything(),
-    );
+    expect(mocks.acquireLock).toHaveBeenCalledWith({
+      slackTeamId: 'T123',
+      slackChannel: 'D123',
+      slackThreadTs: '100.001',
+    });
     expect(mocks.postThreadMessage).toHaveBeenCalledOnce();
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
   });

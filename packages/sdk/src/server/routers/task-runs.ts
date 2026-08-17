@@ -77,6 +77,7 @@ import {
   setPendingLinearRequestUserInput,
 } from '@roomote/linear';
 import { publishCommunicationRequestUserInput } from '../lib/communication-request-user-input';
+import { publishFastAgentRequestUserInput } from '../lib/task-runs/publish-fast-agent-request-user-input';
 import {
   authenticatedProcedure,
   isRunToken,
@@ -770,6 +771,15 @@ export const taskRunsRouter = router({
       promptMessageTs: input.promptMessageTs,
     }),
   ),
+  publishFastAgentRequestUserInput: runScoped(
+    z.object({
+      runId: z.number(),
+      requestId: z.string(),
+      taskId: z.string(),
+      questions: z.array(acpRequestUserInputQuestionSchema),
+    }),
+    'runId',
+  ).mutation(async ({ input }) => publishFastAgentRequestUserInput(input)),
   clearPendingSlackRequestUserInput: runScoped(
     z.object({
       runId: z.number(),

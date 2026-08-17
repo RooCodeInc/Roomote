@@ -18,6 +18,7 @@ import {
   eq,
 } from '@roomote/db/server';
 import { releaseTaskRun } from '@roomote/cloud-agents/server';
+import { rebindPendingSlackRequestUserInputRun } from '@roomote/slack';
 
 import { updateTaskRun } from './update-task-run';
 import {
@@ -489,6 +490,21 @@ export const dequeueResumeTaskRun = async (
     const slackTaskRunRouting = await resolveSlackTaskRunRouting(
       result.taskRun,
     );
+    const sourceRunId =
+      result.taskRun.sourceRunId ??
+      (
+        result.taskRun.payload as TaskPayload<
+          typeof TaskPayloadKind.SnapshotResume
+        >
+      ).sourceRunId;
+    if (slackTaskRunRouting.threadTs && sourceRunId) {
+      await rebindPendingSlackRequestUserInputRun({
+        threadId: slackTaskRunRouting.threadTs,
+        taskId: result.taskRun.taskId,
+        sourceRunId,
+        resumedRunId: result.taskRun.id,
+      });
+    }
 
     const { error: _, task, ...rest } = result;
     return {

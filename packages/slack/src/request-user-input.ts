@@ -137,6 +137,47 @@ redis.call('SET', KEYS[1], cjson.encode(pendingRequest), 'EX', tonumber(ARGV[4])
 return 1
 `;
 
+const REBIND_PENDING_REQUEST_USER_INPUT_RUN_SCRIPT = `
+local rawRequest = redis.call('GET', KEYS[1])
+if not rawRequest then
+  return 0
+end
+
+local ok, pendingRequest = pcall(cjson.decode, rawRequest)
+if not ok then
+  return 0
+end
+
+if pendingRequest['taskId'] ~= ARGV[1] then
+  return 0
+end
+
+if tostring(pendingRequest['runId']) ~= ARGV[2] then
+  return 0
+end
+
+pendingRequest['runId'] = tonumber(ARGV[3])
+
+local queuedAnswers = redis.call('LRANGE', KEYS[2], 0, -1)
+for _, answer in ipairs(queuedAnswers) do
+  redis.call('RPUSH', KEYS[3], answer)
+end
+if #queuedAnswers > 0 then
+  redis.call('DEL', KEYS[2])
+  redis.call('EXPIRE', KEYS[3], tonumber(ARGV[5]))
+end
+
+redis.call(
+  'SET',
+  KEYS[1],
+  cjson.encode(pendingRequest),
+  'EX',
+  tonumber(ARGV[4])
+)
+
+return 1
+`;
+
 function getPendingRequestKey(threadId: string): string {
   return `${SLACK_PENDING_REQUEST_USER_INPUT_PREFIX}${threadId}`;
 }
@@ -199,6 +240,34 @@ export async function setPendingSlackRequestUserInput(
     'EX',
     PENDING_REQUEST_TTL_SECONDS,
   );
+}
+
+/** Atomically move a pending prompt and any submitted answer to a resumed run. */
+export async function rebindPendingSlackRequestUserInputRun(params: {
+  threadId: string;
+  taskId: string;
+  sourceRunId: number;
+  resumedRunId: number;
+}): Promise<boolean> {
+  if (params.sourceRunId === params.resumedRunId) {
+    return false;
+  }
+
+  const redis = getRedis();
+  const result = await redis.eval(
+    REBIND_PENDING_REQUEST_USER_INPUT_RUN_SCRIPT,
+    3,
+    getPendingRequestKey(params.threadId),
+    getAnswerQueueKey(params.sourceRunId),
+    getAnswerQueueKey(params.resumedRunId),
+    params.taskId,
+    String(params.sourceRunId),
+    String(params.resumedRunId),
+    String(PENDING_REQUEST_TTL_SECONDS),
+    String(ANSWER_QUEUE_TTL_SECONDS),
+  );
+
+  return result === 1;
 }
 
 function parsePendingSlackRequestUserInput(

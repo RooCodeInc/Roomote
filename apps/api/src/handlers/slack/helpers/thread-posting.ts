@@ -12,6 +12,8 @@ import {
 
 import { apiLogger } from '../../../logging.js';
 
+type SlackThreadMarkdownPostResult = 'posted' | 'suppressed' | 'failed';
+
 export async function postSlackThreadMarkdownMessage({
   slack,
   channel,
@@ -30,7 +32,7 @@ export async function postSlackThreadMarkdownMessage({
     slackTeamId: string;
     source: string;
   };
-}): Promise<boolean> {
+}): Promise<SlackThreadMarkdownPostResult> {
   if (sourceMessageTs) {
     const sourceMessageExists = await slack.hasMessageInThread({
       channel,
@@ -42,7 +44,9 @@ export async function postSlackThreadMarkdownMessage({
       apiLogger.debug(
         `[SlackWebhook] Skipping fast-agent reply because source message ${sourceMessageTs} is no longer in thread ${threadTs}`,
       );
-      return false;
+      // Deliberate suppression (the triggering message was deleted), not a
+      // Slack delivery failure; callers must not treat this as an error.
+      return 'suppressed';
     }
   }
 
@@ -59,7 +63,7 @@ export async function postSlackThreadMarkdownMessage({
   });
 
   if (!messageTs) {
-    return false;
+    return 'failed';
   }
 
   if (conversationLog) {
@@ -85,7 +89,7 @@ export async function postSlackThreadMarkdownMessage({
     }
   }
 
-  return true;
+  return 'posted';
 }
 
 export async function postTaskSuggestionStartedMessage(params: {

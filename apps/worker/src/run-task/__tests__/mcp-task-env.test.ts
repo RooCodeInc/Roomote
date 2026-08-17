@@ -2,6 +2,7 @@ import {
   buildMcpTaskEnv,
   getCommunicationReplyContext,
   getSlackReplyContext,
+  isFastAgentChildTaskRun,
 } from '../mcp-task-env';
 
 describe('getSlackReplyContext', () => {
@@ -53,6 +54,27 @@ describe('getSlackReplyContext', () => {
 });
 
 describe('getCommunicationReplyContext', () => {
+  it('does not activate Fast child Slack context inherited from its parent', () => {
+    const taskRun = {
+      payload: {
+        communicationProvider: 'slack',
+        communicationChannelId: 'C123',
+        communicationThreadId: '111.222',
+        communicationContextInherited: true,
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          slackTeamId: 'T123',
+          slackChannel: 'C123',
+          slackThreadTs: '111.222',
+        },
+      },
+    };
+
+    expect(getSlackReplyContext(taskRun)).toBeNull();
+    expect(getCommunicationReplyContext(taskRun)).toBeNull();
+    expect(isFastAgentChildTaskRun(taskRun)).toBe(true);
+  });
+
   it('returns Teams communication context from provider-neutral payload metadata', () => {
     expect(
       getCommunicationReplyContext({

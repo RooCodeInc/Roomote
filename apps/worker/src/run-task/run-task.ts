@@ -85,6 +85,7 @@ import {
   buildMcpTaskEnv,
   getCommunicationReplyContext,
   getSlackReplyContext,
+  isFastAgentChildTaskRun,
 } from './mcp-task-env';
 import {
   type ActorMismatchPolicy,
@@ -966,6 +967,9 @@ export const runTask = async ({
 
     const slackReplyContext = getSlackReplyContext(taskRun);
     const communicationReplyContext = getCommunicationReplyContext(taskRun);
+    if (isFastAgentChildTaskRun(taskRun)) {
+      runtimeEnv.ROOMOTE_FAST_AGENT_CHILD = 'true';
+    }
     if (slackReplyContext?.threadTs) {
       runtimeEnv.ROOMOTE_SLACK_CHANNEL = slackReplyContext.channel;
       runtimeEnv.ROOMOTE_SLACK_THREAD_TS = slackReplyContext.threadTs;

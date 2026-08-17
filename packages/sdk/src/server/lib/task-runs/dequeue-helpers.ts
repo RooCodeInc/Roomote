@@ -47,6 +47,7 @@ import {
 
 import { withBootstrapFailureSignal } from '../../../bootstrap-failure-signal';
 import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
+import { notifyFastAgentParentOnSettle } from './notify-fast-agent-parent-on-settle';
 
 /**
  * Resolved git author identity for commits made by the worker.
@@ -397,6 +398,16 @@ export async function notifyCanceledTaskRunOnSettle(
     void captureTaskSettled(taskRun.id, RunStatus.Canceled);
 
     await notifySourceRunOnSettle(
+      {
+        ...taskRun,
+        error: errorMessage ?? persistedRun?.error ?? taskRun.error,
+      },
+      RunStatus.Canceled,
+      taskTitle,
+    );
+    // Detached like the finishRun call site: never block the cancel path on
+    // the parent's turn lock plus an orchestrator turn.
+    void notifyFastAgentParentOnSettle(
       {
         ...taskRun,
         error: errorMessage ?? persistedRun?.error ?? taskRun.error,

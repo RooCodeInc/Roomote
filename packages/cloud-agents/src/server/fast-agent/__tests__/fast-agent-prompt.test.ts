@@ -36,13 +36,19 @@ describe('buildFastAgentSystemPrompt', () => {
       'Do not add a reaction to every Fast mode message',
     );
     expect(prompt).toContain(
-      'When you plan to initiate an integration or task tool action, first send a brief "ack"',
+      'Before initiating an integration, sending a message to an active task, or canceling a task, first send a brief "ack"',
     );
     expect(prompt).toContain(
       'This requirement applies only to model-initiated tool use',
     );
     expect(prompt).toContain(
       'The automatic Brain integration preflight is exempt because it runs before your first decision, when you cannot yet send an acknowledgement',
+    );
+    expect(prompt).toContain(
+      'For "launch_task", do not send a separate acknowledgement first. The runtime posts exactly one kickoff with the task link before making the child runnable, then ends this turn.',
+    );
+    expect(prompt).toContain(
+      'A successful "launch_task" is the exception because the runtime posts and persists its parent-owned kickoff before queueing the child.',
     );
     expect(prompt).toContain(
       'If the answer is immediate and needs no model-initiated tool, skip the acknowledgement and send the "closeout" directly',
@@ -107,6 +113,19 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain(
       'attributes on the current `<slack_message>` identify its sender',
     );
+  });
+
+  it('limits delegated-task platform events to one terminal reply', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      platformEvent: true,
+    });
+
+    expect(prompt).toContain(
+      'emit exactly one "send_chat_reply" with purpose "closeout"',
+    );
+    expect(prompt).toContain('Never use "ack" or "progress"');
+    expect(prompt).toContain('Use "ignore_event"');
   });
 
   it('grounds first-person requests in current Slack message attributes', () => {

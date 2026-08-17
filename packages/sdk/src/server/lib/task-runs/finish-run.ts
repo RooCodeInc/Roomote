@@ -72,6 +72,7 @@ import {
 } from './conflict-resolution-comments';
 import { cleanupSandboxOidcTargetsForTaskRun } from '../sandbox-oidc';
 import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
+import { notifyFastAgentParentOnSettle } from './notify-fast-agent-parent-on-settle';
 import { refreshTaskTitleOnCompletion } from './record-task-message-envelope';
 import { getRedis } from '@roomote/redis';
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
@@ -398,6 +399,14 @@ export const finishRun = async ({
   // never has to poll for it. Never throws. `run` was read before the
   // transaction, so splice in the error that was just finalized.
   await notifySourceRunOnSettle(
+    { ...run, error: sanitizedError ?? run.error },
+    status,
+    run.task.title,
+  );
+  // Detached: this can hold the parent's turn lock through a full
+  // orchestrator turn, and settle callers (tRPC finish, controller, queue
+  // jobs) must not block on it. The delivery claim keeps it idempotent.
+  void notifyFastAgentParentOnSettle(
     { ...run, error: sanitizedError ?? run.error },
     status,
     run.task.title,

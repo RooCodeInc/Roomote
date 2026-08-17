@@ -1,6 +1,7 @@
 import {
   TaskPayloadKind,
   getCommunicationProviderFromTaskPayload,
+  getFastAgentParentFromPayload,
   getSlackChannelFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
 } from '@roomote/types';
@@ -22,11 +23,15 @@ export const startPolling = (options: ListenerOptions) => {
 
   // Prefer the task channel bindings from the dequeue/resume response; fall
   // back to payload-derived extraction for payloads that predate them.
+  // Fast children are deliberately unbound from the Slack thread, but their
+  // request_user_input answers are still queued by run ID, so they need the
+  // same answer-polling loop to ever receive them.
   if (
     task?.slackThreadTs ||
     task?.slackChannelId ||
     getSlackThreadTsFromTaskPayload(taskRun.payload) ||
-    getSlackChannelFromTaskPayload(taskRun.payload)
+    getSlackChannelFromTaskPayload(taskRun.payload) ||
+    getFastAgentParentFromPayload(taskRun.payload)
   ) {
     state.slackMessageInterval = createSlackMessageInterval(options);
   }

@@ -375,7 +375,7 @@ describe('confirmUpload', () => {
   });
 
   it('should throw on error', async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce({
+    global.fetch = vi.fn().mockResolvedValue({
       ok: false,
       status: 500,
       statusText: 'Internal Server Error',
@@ -384,6 +384,22 @@ describe('confirmUpload', () => {
     await expect(confirmUpload(config, 'art-1', 'task-1')).rejects.toThrow(
       'Failed to confirm upload',
     );
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('retries the same publication after a transient parent-delivery failure', async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+      })
+      .mockResolvedValueOnce({ ok: true });
+
+    await confirmUpload(config, 'art-1', 'task-1');
+
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 });
 

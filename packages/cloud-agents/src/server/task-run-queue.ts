@@ -26,6 +26,7 @@ import {
   DEFAULT_LAUNCH_CODING_HARNESS,
   getDisplayModelProviderId,
   getTaskInitiatorLinkedUserId,
+  getFastAgentParentFromPayload,
   getPrimaryPortFromConfig,
   isConfiguredEnvValue,
   isReasoningEffort,
@@ -2136,6 +2137,26 @@ function inheritSnapshotResumeSourceControlStamps(
   }
 }
 
+function inheritSnapshotResumeFastAgentContext(
+  payload: SnapshotResumeTask['payload'],
+  sourcePayload: unknown,
+): void {
+  const parent = getFastAgentParentFromPayload(sourcePayload);
+  if (parent && !payload.fastAgentParent) {
+    payload.fastAgentParent = parent;
+  }
+
+  if (
+    sourcePayload &&
+    typeof sourcePayload === 'object' &&
+    !Array.isArray(sourcePayload) &&
+    (sourcePayload as Record<string, unknown>).communicationContextInherited ===
+      true
+  ) {
+    payload.communicationContextInherited = true;
+  }
+}
+
 async function enqueueSnapshotResume(
   input: ResumeTaskLaunch,
   options: EnqueueTaskOptions,
@@ -2175,6 +2196,7 @@ async function enqueueSnapshotResume(
   }
 
   inheritSnapshotResumeSourceControlStamps(task.payload, sourceRun.payload);
+  inheritSnapshotResumeFastAgentContext(task.payload, sourceRun.payload);
 
   await recordSnapshotResumeRequestEvent({
     runId: sourceRun.id,
@@ -2246,6 +2268,7 @@ async function enqueueSnapshotResume(
     // though an ancestor has them; pick up whatever is still missing while
     // walking, nearest ancestor first.
     inheritSnapshotResumeSourceControlStamps(task.payload, parentRun.payload);
+    inheritSnapshotResumeFastAgentContext(task.payload, parentRun.payload);
 
     sourceTaskType = parentRun.payloadKind;
     parentRunId = parentRun.sourceRunId;

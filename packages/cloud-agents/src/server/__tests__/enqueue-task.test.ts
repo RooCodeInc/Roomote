@@ -965,6 +965,107 @@ describe('enqueueTask snapshot resume', () => {
     });
   });
 
+  it('preserves Fast parent routing and communication isolation across resume', async () => {
+    const userId = await createUser();
+    const fastAgentParent = {
+      sessionId: '11111111-1111-4111-8111-111111111111',
+      slackTeamId: 'T123',
+      slackChannel: 'C123',
+      slackThreadTs: '111.222',
+    };
+    const freshRun = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: 'acme/widgets',
+          description: 'Do the thing',
+          communicationProvider: 'slack',
+          communicationChannelId: 'C123',
+          communicationThreadId: '111.222',
+          communicationContextInherited: true,
+          fastAgentParent,
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'slack',
+      trigger: 'message',
+    });
+    const resumeTask: SnapshotResumeTask = {
+      type: TaskPayloadKind.SnapshotResume,
+      payload: {
+        repo: 'acme/widgets',
+        sourceSnapshotId: 'snap-fast-1',
+        sourceRunId: freshRun.id,
+      },
+    } as SnapshotResumeTask;
+
+    const resumeRun = await enqueueTask(
+      { task: resumeTask, actingUserId: userId },
+      { enqueue: false },
+    );
+    const resumePayload = resumeRun.payload as Record<string, unknown>;
+
+    expect(resumePayload.communicationContextInherited).toBe(true);
+    expect(resumePayload.fastAgentParent).toEqual(fastAgentParent);
+  });
+
+  it('recovers Fast parent isolation from an older ancestor in a resume chain', async () => {
+    const userId = await createUser();
+    const fastAgentParent = {
+      sessionId: '22222222-2222-4222-8222-222222222222',
+      slackTeamId: 'T123',
+      slackChannel: 'C123',
+      slackThreadTs: '333.444',
+    };
+    const freshRun = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: 'acme/widgets',
+          description: 'Do the thing',
+          communicationContextInherited: true,
+          fastAgentParent,
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'slack',
+      trigger: 'message',
+    });
+    const [legacyResume] = await db
+      .insert(taskRuns)
+      .values({
+        taskId: freshRun.taskId,
+        kind: 'resume',
+        sourceRunId: freshRun.id,
+        payloadKind: TaskPayloadKind.SnapshotResume,
+        status: RunStatus.Completed,
+        sourceSnapshotId: 'snap-fast-legacy',
+        payload: {
+          repo: 'acme/widgets',
+          sourceSnapshotId: 'snap-fast-legacy',
+          sourceRunId: freshRun.id,
+        },
+      })
+      .returning();
+    const resumeTask: SnapshotResumeTask = {
+      type: TaskPayloadKind.SnapshotResume,
+      payload: {
+        repo: 'acme/widgets',
+        sourceSnapshotId: 'snap-fast-latest',
+        sourceRunId: legacyResume!.id,
+      },
+    } as SnapshotResumeTask;
+
+    const resumeRun = await enqueueTask(
+      { task: resumeTask, actingUserId: userId },
+      { enqueue: false },
+    );
+    const resumePayload = resumeRun.payload as Record<string, unknown>;
+
+    expect(resumePayload.communicationContextInherited).toBe(true);
+    expect(resumePayload.fastAgentParent).toEqual(fastAgentParent);
+  });
+
   it('inherits per-task model role overrides from the source run payload', async () => {
     const userId = await createUser();
 

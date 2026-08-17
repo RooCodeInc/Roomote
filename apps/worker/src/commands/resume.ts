@@ -1,5 +1,6 @@
 import {
   TaskPayloadKind,
+  getFastAgentParentFromPayload,
   getSlackThreadTsFromTaskPayload,
 } from '@roomote/types';
 import {
@@ -64,8 +65,11 @@ export async function resume(runId: number): Promise<boolean> {
           getLinearSessionIdFromResumePayload(jobContext.taskRun.payload),
         );
 
+      const isFastAgentChildResume =
+        getFastAgentParentFromPayload(jobContext.taskRun.payload) !== null;
       const isSlackResume =
         jobContext.taskRun.payloadKind === TaskPayloadKind.SnapshotResume &&
+        !isFastAgentChildResume &&
         Boolean(
           jobContext.task?.slackThreadTs ??
           getSlackThreadTsFromTaskPayload(jobContext.taskRun.payload),

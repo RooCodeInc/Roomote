@@ -1,17 +1,13 @@
-import { acquireRedisLock } from '@roomote/redis';
 import { PRODUCT_NAME } from '@roomote/types';
 import {
+  acquireFastAgentTurnLock,
   answerFastAgentQuestion,
   type LaunchFastAgentSlackTask,
 } from '@roomote/cloud-agents/server';
 import { type SlackEvent, type SlackNotifier } from '@roomote/slack';
 import { stripLeadingSlackProductMention } from '@roomote/cloud-agents';
 
-import {
-  FAST_AGENT_LOCK_TTL_SECONDS,
-  LEADING_FAST_COMMAND_MENTION_PATTERN,
-  SLACK_FAST_AGENT_LOCK_PREFIX,
-} from '../constants.js';
+import { LEADING_FAST_COMMAND_MENTION_PATTERN } from '../constants.js';
 import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
 
 export function stripLeadingFastCommandMention(text: string): string {
@@ -72,24 +68,16 @@ export async function processFastAgentMessage(params: {
     processingReactionName = 'eyes',
   } = params;
   const threadId = event.thread_ts || event.ts;
-  const releaseFastAgentLock = await acquireRedisLock(
-    `${SLACK_FAST_AGENT_LOCK_PREFIX}${teamId}:${event.channel}:${threadId}`,
-    { ttlSeconds: FAST_AGENT_LOCK_TTL_SECONDS },
-  );
+  const releaseFastAgentLock = await acquireFastAgentTurnLock({
+    slackTeamId: teamId,
+    slackChannel: event.channel,
+    slackThreadTs: threadId,
+  });
 
   if (!releaseFastAgentLock) {
-    await postSlackThreadMarkdownMessage({
-      slack,
-      channel: event.channel,
-      threadTs: threadId,
-      text: "I'm already working on a question in this thread - please wait.",
-      sourceMessageTs: event.ts,
-      conversationLog: {
-        userId,
-        slackTeamId: teamId,
-        source: 'fast_agent',
-      },
-    });
+    console.error(
+      `[SlackWebhook] Fast turn lock did not become available for ${teamId}:${event.channel}:${threadId}`,
+    );
     return;
   }
 
@@ -170,7 +158,7 @@ export async function processFastAgentMessage(params: {
           : undefined,
       activeTaskId,
       launchTask,
-      postSlackReply: async ({ message }) => {
+      postSlackReply: async ({ message, kickoff }) => {
         const posted = await postSlackThreadMarkdownMessage({
           slack,
           channel: event.channel,
@@ -183,9 +171,21 @@ export async function processFastAgentMessage(params: {
             source: 'fast_agent',
           },
         });
-        if (posted) {
-          didSendVisibleResponse = true;
+        if (posted === 'failed') {
+          throw new Error('Slack did not accept the Fast parent reply.');
         }
+        if (posted === 'suppressed' && kickoff) {
+          // The launch gate requires a visible, durable parent kickoff
+          // before the child becomes runnable; a suppressed kickoff must
+          // abort the launch instead of opening the gate silently.
+          throw new Error(
+            'The Fast kickoff was suppressed because the triggering message was deleted.',
+          );
+        }
+        // Suppression of an ordinary reply is deliberate (the triggering
+        // message was deleted); treat it as delivered so the turn is not
+        // aborted mid-flight.
+        didSendVisibleResponse = true;
       },
       postSlackReaction: async ({ name, purpose, slackMessageTs }) => {
         if (

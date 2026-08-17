@@ -95,6 +95,7 @@ describe('SlackNotifier', () => {
       const ts = await notifier.postMessage({
         channel: 'C123',
         text: 'hello world',
+        client_msg_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
       });
 
       expect(getGlobalWithFetch().fetch).toHaveBeenCalledTimes(1);
@@ -106,7 +107,11 @@ describe('SlackNotifier', () => {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
           }),
-          body: JSON.stringify({ channel: 'C123', text: 'hello world' }),
+          body: JSON.stringify({
+            channel: 'C123',
+            text: 'hello world',
+            client_msg_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+          }),
         }),
       );
 
