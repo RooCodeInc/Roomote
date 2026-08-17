@@ -407,7 +407,11 @@ export const finishRun = async ({
   // orchestrator turn, and settle callers (tRPC finish, controller, queue
   // jobs) must not block on it. The delivery claim keeps it idempotent.
   void notifyFastAgentParentOnSettle(
-    { ...run, error: sanitizedError ?? run.error },
+    {
+      ...run,
+      error: sanitizedError ?? run.error,
+      errorCode: errorCode ?? run.errorCode,
+    },
     status,
     run.task.title,
   );

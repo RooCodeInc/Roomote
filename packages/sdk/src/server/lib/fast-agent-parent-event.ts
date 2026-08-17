@@ -90,6 +90,7 @@ type FastAgentParentEvent =
       runId: number;
       title?: string;
       status: string;
+      error?: string;
       taskUrl: string;
       pullRequests: FastAgentPullRequestContext[];
     }

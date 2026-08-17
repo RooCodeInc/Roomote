@@ -325,6 +325,48 @@ describe('answerFastAgentQuestion', () => {
     );
   });
 
+  it('lets the orchestration loop report a delegated task terminal error', async () => {
+    mocks.generateObject.mockResolvedValueOnce({
+      object: decision({
+        message:
+          'The task stopped because the sandbox provider rejected its credentials. Check the provider configuration before retrying.',
+        purpose: 'closeout',
+      }),
+    });
+    const callbacks = chatCallbacks();
+    const event = {
+      type: 'task_settled',
+      taskId: 'task-1',
+      runId: 42,
+      status: 'failed',
+      error: 'The sandbox provider rejected its credentials.',
+      taskUrl: 'https://roomote.example/task/task-1',
+      pullRequests: [],
+    };
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      question: `<delegated_task_event>${JSON.stringify(event)}</delegated_task_event>`,
+      platformEvent: true,
+      ...callbacks,
+    });
+
+    expect(mocks.generateObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining(
+          'The sandbox provider rejected its credentials.',
+        ),
+      }),
+    );
+    expect(result).toContain('Check the provider configuration');
+    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: 'closeout',
+        message: expect.stringContaining('Check the provider configuration'),
+      }),
+    );
+  });
+
   it('can close out a lightweight turn with an emoji reaction', async () => {
     mocks.generateObject.mockResolvedValue({
       object: decision({
