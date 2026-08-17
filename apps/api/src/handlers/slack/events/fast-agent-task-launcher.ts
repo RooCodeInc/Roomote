@@ -17,6 +17,7 @@ import {
 import {
   ALL_REPOSITORIES,
   TaskPayloadKind,
+  buildSlackRichTextValue,
   type StandardTask,
 } from '@roomote/types';
 
@@ -77,45 +78,30 @@ export function createFastAgentTaskLauncher(params: {
           });
         const title = buildSlackLiveTaskTitle(prompt);
         const taskUpdateId = `roomote-task-${taskRun.taskId}`;
-        // One entry whose title always shows the CURRENT step (the worker
-        // title-swaps it per todo; only title/status replace on append).
-        // The task link is sent exactly once (Slack accumulates sources),
-        // and the settled card returns to the task title with the output.
-        const initialTask = {
-          id: taskUpdateId,
-          title,
-          // A pending-only stream does not render; start in_progress so the
-          // card is visible with the kickoff instead of materializing only
-          // at the worker's first update.
-          status: 'in_progress' as const,
-          sources: [
-            { type: 'url' as const, url: resolvedTaskUrl, text: 'View task' },
-          ],
-        };
-        const messageTs = await params.slack.startTaskStream({
+        // A task_card BLOCK in an ordinary message, not a stream: the
+        // worker re-renders the whole card via chat.update on every event,
+        // so the body always shows only the latest state.
+        const messageTs = await params.slack.postMessage({
           channel: params.event.channel,
-          threadTs: threadId,
-          recipientTeamId: params.teamId,
-          recipientUserId: params.event.user ?? params.userMapping.slackUserId,
-          task: initialTask,
-        });
-
-        if (messageTs) {
-          // The Slack client does not paint a stream whose only content is
-          // the opening chunk; re-append the entry so the card renders
-          // immediately instead of waiting for the worker's first update.
-          // Sources are deliberately omitted: Slack appends them per chunk
-          // instead of replacing, so the link is sent exactly once.
-          await params.slack.appendTaskStream({
-            channel: params.event.channel,
-            messageTs,
-            task: {
-              id: initialTask.id,
-              title: initialTask.title,
-              status: initialTask.status,
+          thread_ts: threadId,
+          text: title,
+          blocks: [
+            {
+              type: 'task_card',
+              task_id: taskUpdateId,
+              title,
+              status: 'in_progress',
+              details: buildSlackRichTextValue(
+                'Delegating to a Roomote agent…',
+              ),
+              sources: [
+                { type: 'url', url: resolvedTaskUrl, text: 'View task' },
+              ],
             },
-          });
-        }
+          ],
+          unfurl_links: false,
+          unfurl_media: false,
+        });
 
         if (messageTs) {
           await setSlackLiveTaskStreamData(taskRun.taskId, {

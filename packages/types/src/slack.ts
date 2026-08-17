@@ -40,7 +40,41 @@ export type SlackBlock =
       has_header_divider?: boolean;
       width?: 'narrow' | 'standard' | 'wide' | 'full';
       child_blocks: SlackBlock[];
+    }
+  | {
+      /** Native agent task card, fully replaceable via chat.update (unlike
+       * streamed task_update chunks, whose body fields only append). */
+      type: 'task_card';
+      block_id?: string;
+      task_id: string;
+      title: string;
+      status?: 'pending' | 'in_progress' | 'complete' | 'error';
+      details?: SlackRichTextValue;
+      output?: SlackRichTextValue;
+      sources?: Array<{ type: 'url'; url: string; text: string }>;
     };
+
+export interface SlackRichTextValue {
+  type: 'rich_text';
+  elements: Array<{
+    type: 'rich_text_section';
+    elements: Array<Record<string, unknown>>;
+  }>;
+}
+
+/** Wrap plain text as the single-section rich_text value task_card fields
+ * expect; splits on newlines so each line renders as its own section. */
+export function buildSlackRichTextValue(text: string): SlackRichTextValue {
+  const lines = text.split('\n').filter((line) => line.trim().length > 0);
+
+  return {
+    type: 'rich_text',
+    elements: (lines.length > 0 ? lines : ['']).map((line) => ({
+      type: 'rich_text_section',
+      elements: [{ type: 'text', text: line }],
+    })),
+  };
+}
 
 export const DEFAULT_SLACK_ACK_EMOJI = 'eyes';
 export const DEFAULT_SLACK_COMPLETION_EMOJI = 'white_check_mark';

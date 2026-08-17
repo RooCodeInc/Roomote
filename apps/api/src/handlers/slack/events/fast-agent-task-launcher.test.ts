@@ -3,8 +3,7 @@ const mocks = vi.hoisted(() => ({
   getTaskUrl: vi.fn(() => 'https://roomote.example/task/task-1'),
   getSlackLiveTaskStreamData: vi.fn(),
   setSlackLiveTaskStreamData: vi.fn(),
-  startTaskStream: vi.fn(),
-  appendTaskStream: vi.fn(),
+  postMessage: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -40,8 +39,7 @@ describe('createFastAgentTaskLauncher', () => {
       },
     );
     mocks.getSlackLiveTaskStreamData.mockResolvedValue(null);
-    mocks.startTaskStream.mockResolvedValue('stream-ts');
-    mocks.appendTaskStream.mockResolvedValue(true);
+    mocks.postMessage.mockResolvedValue('stream-ts');
     mocks.setSlackLiveTaskStreamData.mockResolvedValue(undefined);
   });
 
@@ -64,10 +62,7 @@ describe('createFastAgentTaskLauncher', () => {
       } as never,
       userId: 'user-1',
       teamId: 'T123',
-      slack: {
-        startTaskStream: mocks.startTaskStream,
-        appendTaskStream: mocks.appendTaskStream,
-      } as never,
+      slack: { postMessage: mocks.postMessage } as never,
     });
     const order: string[] = [];
     const postKickoff = vi.fn(async () => {
@@ -101,17 +96,18 @@ describe('createFastAgentTaskLauncher', () => {
       taskId: 'task-1',
       taskUrl: 'https://roomote.example/task/task-1',
     });
-    expect(mocks.startTaskStream).toHaveBeenCalledWith(
+    expect(mocks.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: 'C123',
-        threadTs: '100.001',
-        recipientTeamId: 'T123',
-        recipientUserId: 'U123',
-        task: expect.objectContaining({
-          id: 'roomote-task-task-1',
-          title: 'Add a regression test',
-          status: 'in_progress',
-        }),
+        thread_ts: '100.001',
+        blocks: [
+          expect.objectContaining({
+            type: 'task_card',
+            task_id: 'roomote-task-task-1',
+            title: 'Add a regression test',
+            status: 'in_progress',
+          }),
+        ],
       }),
     );
     expect(mocks.setSlackLiveTaskStreamData).toHaveBeenCalledWith(
@@ -173,10 +169,7 @@ describe('createFastAgentTaskLauncher', () => {
       userMapping: { slackUserId: 'U123' } as never,
       userId: 'user-1',
       teamId: 'T123',
-      slack: {
-        startTaskStream: mocks.startTaskStream,
-        appendTaskStream: mocks.appendTaskStream,
-      } as never,
+      slack: { postMessage: mocks.postMessage } as never,
     });
     const postKickoff = vi.fn().mockRejectedValue(new Error('Slack failed'));
     let queued = false;
