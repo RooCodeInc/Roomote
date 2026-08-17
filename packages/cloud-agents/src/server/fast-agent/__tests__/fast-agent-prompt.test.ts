@@ -126,6 +126,15 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain('Never use "ack" or "progress"');
     expect(prompt).toContain('Use "ignore_event"');
+    expect(prompt).toContain(
+      'Pull-request-opened events contain authoritative, user-presentable pull request metadata',
+    );
+    expect(prompt).toContain(
+      'unless that exact pull request URL was already reported in this conversation',
+    );
+    expect(prompt).toContain(
+      "Task-settled events include the task's current pullRequests list",
+    );
   });
 
   it('grounds first-person requests in current Slack message attributes', () => {

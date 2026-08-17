@@ -79,6 +79,7 @@ import {
   type FetchImpl,
   type RepositoryRow,
 } from './source-control-pull-request-shared';
+import { notifyFastAgentParentOnPullRequestOpened } from '../task-runs/notify-fast-agent-parent-on-pull-request-opened';
 
 const ADO_API_VERSION = '7.1';
 
@@ -398,6 +399,33 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     result,
     repository,
   });
+
+  try {
+    // Finish the open event before returning to the child so a very fast
+    // completion cannot overtake it in the parent conversation. Updates also
+    // enter the deduplicated path so a retried create can recover a transient
+    // notification failure after the provider starts reporting the PR as open.
+    await notifyFastAgentParentOnPullRequestOpened({
+      run: taskRun,
+      pullRequest: {
+        provider: result.provider,
+        host: repository.host,
+        repository: result.repositoryFullName,
+        number: result.number,
+        title: result.title,
+        url: result.url,
+        status: result.draft ? 'draft' : 'open',
+      },
+    });
+  } catch (error) {
+    // The PR and its task association are authoritative even if the
+    // conversational notification path is temporarily unavailable.
+    console.error(
+      `[createOrUpdateSourceControlPullRequestForTaskRun] Failed to notify the Fast parent for ${result.url}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 
   return result;
 }

@@ -6,6 +6,7 @@ import {
   answerFastAgentQuestion,
 } from '@roomote/cloud-agents/server';
 import {
+  asc,
   and,
   db,
   eq,
@@ -13,15 +14,26 @@ import {
   slackInstallations,
   slackQuickAnswers,
   taskArtifacts,
+  taskPullRequests,
+  taskRuns,
 } from '@roomote/db/server';
 import { Env, getArtifactSigningKey } from '@roomote/env';
 import { SlackNotifier } from '@roomote/slack';
-import type { FastAgentParent, SlackBlock } from '@roomote/types';
+import {
+  exitedRunStatuses,
+  type FastAgentParent,
+  type PullRequestStatus,
+  type RunStatus,
+  type SlackBlock,
+  type SourceControlProvider,
+} from '@roomote/types';
 
 import {
   buildSignedArtifactRawUrl,
   currentEpochSeconds,
 } from './artifacts/raw-url';
+
+const EXITED_RUN_STATUSES = new Set<RunStatus>(exitedRunStatuses);
 
 /** Deterministic uuid-shaped Slack client_msg_id so a retried delivery of the
  * same event posts with the same idempotency key instead of duplicating. */
@@ -49,7 +61,17 @@ export class FastAgentParentEventDeliveryError extends Error {
   }
 }
 
-type FastAgentParentEvent =
+export type FastAgentPullRequestContext = {
+  provider: SourceControlProvider;
+  host: string | null;
+  repository: string | null;
+  number: number | null;
+  title: string | null;
+  url: string;
+  status: PullRequestStatus | null;
+};
+
+export type FastAgentParentEvent =
   | {
       type: 'artifact_published';
       taskId: string;
@@ -69,7 +91,46 @@ type FastAgentParentEvent =
       title?: string;
       status: string;
       taskUrl: string;
+      pullRequests: FastAgentPullRequestContext[];
+    }
+  | {
+      type: 'pull_request_opened';
+      taskId: string;
+      runId: number;
+      taskUrl: string;
+      pullRequest: FastAgentPullRequestContext;
     };
+
+export async function listFastAgentPullRequestContexts(
+  taskId: string,
+): Promise<FastAgentPullRequestContext[]> {
+  const rows = await db.query.taskPullRequests.findMany({
+    where: eq(taskPullRequests.taskId, taskId),
+    columns: {
+      sourceControlProvider: true,
+      host: true,
+      repository: true,
+      prNumber: true,
+      prTitle: true,
+      prUrl: true,
+      status: true,
+    },
+    orderBy: [
+      asc(taskPullRequests.detectedAt),
+      asc(taskPullRequests.createdAt),
+    ],
+  });
+
+  return rows.map((row) => ({
+    provider: row.sourceControlProvider,
+    host: row.host,
+    repository: row.repository,
+    number: row.prNumber,
+    title: row.prTitle,
+    url: row.prUrl,
+    status: row.status,
+  }));
+}
 
 async function buildSelectedImageBlocks(params: {
   artifactIds: string[];
@@ -125,9 +186,14 @@ async function buildSelectedImageBlocks(params: {
 }
 
 function buildEventClientMessageSeed(event: FastAgentParentEvent): string {
-  return event.type === 'artifact_published'
-    ? `fast-parent-artifact:${event.artifact.id}:v${event.artifact.version}`
-    : `fast-parent-settle:${event.runId}`;
+  switch (event.type) {
+    case 'artifact_published':
+      return `fast-parent-artifact:${event.artifact.id}:v${event.artifact.version}`;
+    case 'pull_request_opened':
+      return `fast-parent-pr-opened:${event.taskId}:${event.pullRequest.url}`;
+    case 'task_settled':
+      return `fast-parent-settle:${event.runId}`;
+  }
 }
 
 /** Give a structured child event to the Fast orchestrator for presentation. */
@@ -137,7 +203,7 @@ export async function deliverFastAgentParentEvent(params: {
   /** Cap the turn-lock wait so callers holding an HTTP request can fail fast
    * and lean on their own retry instead of blocking. */
   lockWaitMs?: number;
-}): Promise<void> {
+}): Promise<'delivered' | 'skipped'> {
   const releaseTurnLock = await acquireFastAgentTurnLock({
     slackTeamId: params.parent.slackTeamId,
     slackChannel: params.parent.slackChannel,
@@ -156,6 +222,16 @@ export async function deliverFastAgentParentEvent(params: {
   let slackPosted = false;
 
   try {
+    if (params.event.type === 'pull_request_opened') {
+      const currentRun = await db.query.taskRuns.findFirst({
+        where: eq(taskRuns.id, params.event.runId),
+        columns: { status: true },
+      });
+      if (!currentRun || EXITED_RUN_STATUSES.has(currentRun.status)) {
+        return 'skipped';
+      }
+    }
+
     const scopedChannel = `${params.parent.slackTeamId}:${params.parent.slackChannel}`;
     const [session, installation] = await Promise.all([
       db.query.slackQuickAnswers.findFirst({
@@ -190,7 +266,7 @@ export async function deliverFastAgentParentEvent(params: {
       slackChannel: params.parent.slackChannel,
       slackThreadTs: params.parent.slackThreadTs,
       activeTaskId:
-        params.event.type === 'artifact_published' ? params.event.taskId : null,
+        params.event.type === 'task_settled' ? null : params.event.taskId,
       platformEvent: true,
       postSlackReply: async ({ message, imageArtifactIds = [] }) => {
         const imageBlocks = await buildSelectedImageBlocks({
@@ -216,6 +292,7 @@ export async function deliverFastAgentParentEvent(params: {
         slackPosted = true;
       },
     });
+    return 'delivered';
   } catch (error) {
     if (error instanceof FastAgentParentEventDeliveryError) {
       throw error;

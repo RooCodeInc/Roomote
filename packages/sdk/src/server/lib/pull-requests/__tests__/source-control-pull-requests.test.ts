@@ -28,6 +28,7 @@ const {
   mockResolveLaunchTaskCommitAuthor,
   mockResolveRunCommitAuthor,
   mockProjectPendingPrReviewEventsForAssociation,
+  mockNotifyFastAgentParentOnPullRequestOpened,
 } = vi.hoisted(() => ({
   mockCreateGitHubToken: vi.fn(),
   mockGetDeploymentPrAction: vi.fn(),
@@ -49,7 +50,16 @@ const {
   mockResolveLaunchTaskCommitAuthor: vi.fn(),
   mockResolveRunCommitAuthor: vi.fn(),
   mockProjectPendingPrReviewEventsForAssociation: vi.fn(),
+  mockNotifyFastAgentParentOnPullRequestOpened: vi.fn(),
 }));
+
+vi.mock(
+  '../../task-runs/notify-fast-agent-parent-on-pull-request-opened',
+  () => ({
+    notifyFastAgentParentOnPullRequestOpened: (...args: unknown[]) =>
+      mockNotifyFastAgentParentOnPullRequestOpened(...args),
+  }),
+);
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   DEFAULT_ROOMOTE_COMMIT_AUTHOR: {
@@ -425,6 +435,15 @@ describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
     );
     expect(result.draft).toBe(true);
     expect(result.warnings).toEqual([]);
+    expect(mockNotifyFastAgentParentOnPullRequestOpened).toHaveBeenCalledWith({
+      run: expect.objectContaining({ id: 123, taskId: 'task-123' }),
+      pullRequest: expect.objectContaining({
+        provider: 'ado',
+        repository: 'acme/Platform/backend',
+        number: 7,
+        status: 'draft',
+      }),
+    });
   });
 });
 
@@ -512,10 +531,29 @@ describe('platform-managed draft state', () => {
       },
     });
 
-    const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+    let finishNotification!: () => void;
+    mockNotifyFastAgentParentOnPullRequestOpened.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishNotification = resolve;
+      }),
+    );
+    let mutationResolved = false;
+    const resultPromise = createOrUpdateSourceControlPullRequestForTaskRun({
       taskRun: makeTaskRun({ repo: 'acme/web' }),
       input: { ...githubInput },
     });
+    void resultPromise.then(() => {
+      mutationResolved = true;
+    });
+
+    await vi.waitFor(() =>
+      expect(
+        mockNotifyFastAgentParentOnPullRequestOpened,
+      ).toHaveBeenCalledOnce(),
+    );
+    expect(mutationResolved).toBe(false);
+    finishNotification();
+    const result = await resultPromise;
 
     expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
       expect.objectContaining({ draft: true }),
@@ -523,6 +561,18 @@ describe('platform-managed draft state', () => {
     expect(octokit.graphql).not.toHaveBeenCalled();
     expect(result.draft).toBe(true);
     expect(result.warnings).toEqual([]);
+    expect(mockNotifyFastAgentParentOnPullRequestOpened).toHaveBeenCalledWith({
+      run: expect.objectContaining({ id: 123, taskId: 'task-123' }),
+      pullRequest: {
+        provider: 'github',
+        host: undefined,
+        repository: 'acme/web',
+        number: 9,
+        title: '[Feature] X',
+        url: 'https://github.com/acme/web/pull/9',
+        status: 'draft',
+      },
+    });
   });
 
   it('rejects an unassociated remote PR and safely associates it on retry', async () => {

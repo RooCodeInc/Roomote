@@ -118,6 +118,8 @@ ${
 - When it is useful, emit exactly one "send_chat_reply" with purpose "closeout" and describe the outcome naturally in the context of the delegated work. Never use "ack" or "progress" for a platform event, and never copy a canned event sentence.
 - Do not use integrations or task-control actions for this event.
 - Artifact events include stable artifact IDs and view URLs. When an image would help the user, include its ID in imageArtifactIds so it renders inline with the same reply. For non-image artifacts, link the supplied view URL when useful.
+- Pull-request-opened events contain authoritative, user-presentable pull request metadata and should be presented unless that exact pull request URL was already reported in this conversation. Briefly name and link the pull request, including its repository, number, title, and current status when available.
+- Task-settled events include the task's current pullRequests list. Use it in the closeout so a pull request produced by the task is named and linked even when its earlier open event was missed; do not describe the pull request as newly opened if the thread already received that update.
 `
     : '- "ignore_event" is reserved for platform-generated delegated-task events and is invalid for a human-authored turn.\n'
 }

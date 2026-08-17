@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   findSession: vi.fn(),
   findInstallation: vi.fn(),
   findArtifacts: vi.fn(),
+  findTaskRun: vi.fn(),
   postMessage: vi.fn(),
 }));
 
@@ -19,6 +20,7 @@ vi.mock('@roomote/db/server', () => ({
       slackQuickAnswers: { findFirst: mocks.findSession },
       slackInstallations: { findFirst: mocks.findInstallation },
       taskArtifacts: { findMany: mocks.findArtifacts },
+      taskRuns: { findFirst: mocks.findTaskRun },
     },
   },
   and: vi.fn((...args: unknown[]) => args),
@@ -34,6 +36,7 @@ vi.mock('@roomote/db/server', () => ({
     slackThreadTs: 'slack_quick_answers.slack_thread_ts',
   },
   taskArtifacts: { id: 'task_artifacts.id' },
+  taskRuns: { id: 'task_runs.id' },
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -95,6 +98,7 @@ describe('deliverFastAgentParentEvent', () => {
         uploaded: true,
       },
     ]);
+    mocks.findTaskRun.mockResolvedValue({ status: 'running' });
     mocks.postMessage.mockResolvedValue('101.001');
     mocks.answerQuestion.mockImplementation(
       async ({
@@ -149,5 +153,81 @@ describe('deliverFastAgentParentEvent', () => {
       deliverFastAgentParentEvent({ parent, event }),
     ).rejects.toThrow('turn lock did not become available');
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
+  });
+
+  it('delivers a pull request event with a stable Slack idempotency key', async () => {
+    const pullRequestEvent = {
+      type: 'pull_request_opened' as const,
+      taskId: 'task-1',
+      runId: 42,
+      taskUrl: 'https://roomote.example/task/task-1',
+      pullRequest: {
+        provider: 'github' as const,
+        host: 'github.com',
+        repository: 'acme/web',
+        number: 42,
+        title: '[Fix] Keep the PR in the closeout',
+        url: 'https://github.com/acme/web/pull/42',
+        status: 'open' as const,
+      },
+    };
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        postSlackReply,
+      }: {
+        postSlackReply: (reply: unknown) => unknown;
+      }) =>
+        postSlackReply({
+          purpose: 'closeout',
+          message: 'The pull request is open.',
+        }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: { ...pullRequestEvent, runId: 43 },
+    });
+    const firstClientMessageId =
+      mocks.postMessage.mock.calls[0]?.[0]?.client_msg_id;
+    await deliverFastAgentParentEvent({ parent, event: pullRequestEvent });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: expect.stringContaining(pullRequestEvent.pullRequest.url),
+        activeTaskId: 'task-1',
+        platformEvent: true,
+      }),
+    );
+    expect(firstClientMessageId).toEqual(expect.any(String));
+    expect(mocks.postMessage.mock.calls[1]?.[0]?.client_msg_id).toBe(
+      firstClientMessageId,
+    );
+  });
+
+  it('skips a claimed pull request event that became terminal before delivery', async () => {
+    mocks.findTaskRun.mockResolvedValueOnce({ status: 'completed' });
+    const result = await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'pull_request_opened',
+        taskId: 'task-1',
+        runId: 42,
+        taskUrl: 'https://roomote.example/task/task-1',
+        pullRequest: {
+          provider: 'github',
+          host: 'github.com',
+          repository: 'acme/web',
+          number: 42,
+          title: '[Fix] Keep the PR in the closeout',
+          url: 'https://github.com/acme/web/pull/42',
+          status: 'open',
+        },
+      },
+    });
+
+    expect(result).toBe('skipped');
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
   });
 });
