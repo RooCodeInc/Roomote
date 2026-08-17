@@ -119,6 +119,18 @@ describe('wrapSlackTurnPolicy', () => {
       '<slack_turn_policy reactions_allowed="false" prefer_emoji_ack="false">\nEmoji reactions are not allowed on the current Slack message. Use `send_chat_reply` for acknowledgements and lightweight clarification. Use `request_user_input` only when the task actually needs structured or private input from the user.\n</slack_turn_policy>',
     );
   });
+
+  it('marks delegated task turns whose kickoff is already visible', () => {
+    expect(
+      wrapSlackTurnPolicy({
+        reactionsAllowed: false,
+        preferEmojiAck: false,
+        initialAckRequired: false,
+      }),
+    ).toBe(
+      '<slack_turn_policy reactions_allowed="false" prefer_emoji_ack="false" initial_ack_required="false">\nEmoji reactions are not allowed on the current Slack message. A kickoff for this task is already visible. Do not send another initial acknowledgement or kickoff; begin the work and reserve Slack-visible progress for material new information.\n</slack_turn_policy>',
+    );
+  });
 });
 
 describe('wrapSlackThreadContext', () => {

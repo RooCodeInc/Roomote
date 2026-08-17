@@ -36,13 +36,19 @@ describe('buildFastAgentSystemPrompt', () => {
       'Do not add a reaction to every Fast mode message',
     );
     expect(prompt).toContain(
-      'When you plan to initiate an integration or task tool action, first send a brief "ack"',
+      'Before initiating an integration, sending a message to an active task, or canceling a task, first send a brief "ack"',
     );
     expect(prompt).toContain(
       'This requirement applies only to model-initiated tool use',
     );
     expect(prompt).toContain(
       'The automatic Brain integration preflight is exempt because it runs before your first decision, when you cannot yet send an acknowledgement',
+    );
+    expect(prompt).toContain(
+      'For "launch_task", do not send a separate acknowledgement first. Launch the task, then send exactly one concise "closeout" confirming the handoff and linking the task.',
+    );
+    expect(prompt).toContain(
+      'After a successful "launch_task", post only the single kickoff closeout described above, not an additional progress or acknowledgement message.',
     );
     expect(prompt).toContain(
       'If the answer is immediate and needs no model-initiated tool, skip the acknowledgement and send the "closeout" directly',

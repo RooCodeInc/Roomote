@@ -52,7 +52,10 @@ describe('slackAppMention', () => {
     });
 
     expect(result.prompt).toContain(
-      '&lt;slack_turn_policy reactions_allowed="false" prefer_emoji_ack="false"&gt;',
+      '&lt;slack_turn_policy reactions_allowed="false" prefer_emoji_ack="false" initial_ack_required="false"&gt;',
+    );
+    expect(result.prompt).toContain(
+      'A kickoff for this task is already visible. Do not send another initial acknowledgement or kickoff',
     );
     expect(result.prompt).toContain('&lt;slack_message ts="123.456"&gt;');
     expect(result.prompt).toContain('Can you explain the search_file tool?');
@@ -74,7 +77,7 @@ describe('slackAppMention', () => {
       "When present, the `<replying_to>` block highlights the most recent earlier Slack reply that the user is responding to, often the bot's latest Slack message. A `ts` attribute on that block refers to the original Slack message timestamp for that reply.",
     );
     expect(result.harnessInstructions).toContain(
-      'When present, the `<slack_turn_policy ...>...</slack_turn_policy>` block is the source of truth for whether emoji reactions are allowed on the current Slack message and whether a lightweight acknowledgement should prefer an emoji reaction.',
+      'When present, the `<slack_turn_policy ...>...</slack_turn_policy>` block is the source of truth for whether emoji reactions are allowed, whether a lightweight acknowledgement should prefer an emoji reaction, and whether an initial acknowledgement is required for the current Slack message.',
     );
     expect(result.harnessInstructions).toContain(
       "The `<slack_message>` block contains the user's current message. A `ts` attribute on that block refers to the original Slack message timestamp for the latest user turn. This is what they're asking you to do.",
@@ -103,7 +106,7 @@ describe('slackAppMention', () => {
       'A Slack user turn has a small lifecycle: acknowledge the turn when needed, report useful progress when there is useful new state, and close out when there is an answer, result, blocker, or a clear paused-waiting state. Slack uses this lifecycle for user-visible replies instead of treating Slack as an intermediary-update surface.',
     );
     expect(result.harnessInstructions).toContain(
-      '`ack`: Send one early Slack-visible acknowledgement before substantial work that will not post to Slack when the answer is not immediate. When the `<slack_turn_policy>` block says `prefer_emoji_ack="true"`, the latest directed user turn itself came from Slack, and a lightweight acknowledgement is enough, acknowledge with `send_chat_reaction_emoji`.',
+      '`ack`: Send one early Slack-visible acknowledgement before substantial work that will not post to Slack when the answer is not immediate, unless the `<slack_turn_policy>` block says `initial_ack_required="false"`.',
     );
     expect(result.harnessInstructions).toContain(
       'Do not use `request_user_input` as a generic opening acknowledgement; only use it when the task is already blocked on concrete input from the user.',
@@ -130,7 +133,10 @@ describe('slackAppMention', () => {
       'It does not satisfy ack or closeout on its own.',
     );
     expect(result.harnessInstructions).toContain(
-      'For code-writing turns, the initial ack should say implementation is the next action when that is true and the agent already has enough inspected repository context to describe the work concretely. If the codebase has not been inspected yet, send a short text ack first and then start digging. Do not invent repo-specific details just to make the ack sound informed.',
+      'For code-writing turns that require an initial ack, the ack should say implementation is the next action when that is true and the agent already has enough inspected repository context to describe the work concretely.',
+    );
+    expect(result.harnessInstructions).toContain(
+      'When `initial_ack_required="false"`, skip this acknowledgement because the delegated task kickoff is already visible.',
     );
     expect(result.harnessInstructions).toContain(
       'Passive `thread_activity` can shape the next natural Slack reply when relevant, but it does not create a new lifecycle by itself. A new directed Slack user turn gets its own lifecycle.',
@@ -301,7 +307,7 @@ describe('slackAppMention', () => {
     });
 
     expect(result.prompt).toContain(
-      '&lt;slack_turn_policy reactions_allowed="false" prefer_emoji_ack="false"&gt;',
+      '&lt;slack_turn_policy reactions_allowed="false" prefer_emoji_ack="false" initial_ack_required="false"&gt;',
     );
     expect(result.prompt).toContain(
       '&lt;slack_message ts="123.456"&gt;\nWhat would influence slack message frequency?\n&lt;/slack_message&gt;',
@@ -310,7 +316,7 @@ describe('slackAppMention', () => {
       'Before calling a Slack-visible reply tool, choose the current lifecycle purpose for the latest Slack user turn: `ack`, `progress`, `closeout`, or `clarification`. The message content should match that purpose.',
     );
     expect(result.harnessInstructions).toContain(
-      '`ack`: Send one early Slack-visible acknowledgement before substantial work that will not post to Slack when the answer is not immediate. When the `<slack_turn_policy>` block says `prefer_emoji_ack="true"`, the latest directed user turn itself came from Slack, and a lightweight acknowledgement is enough, acknowledge with `send_chat_reaction_emoji`.',
+      '`ack`: Send one early Slack-visible acknowledgement before substantial work that will not post to Slack when the answer is not immediate, unless the `<slack_turn_policy>` block says `initial_ack_required="false"`.',
     );
     expect(result.harnessInstructions).toContain(
       '`progress`: After an acknowledgement, send progress only when the update adds decision-useful state since the last Slack-visible reply',
@@ -319,7 +325,7 @@ describe('slackAppMention', () => {
       'prevents more than 10 minutes of Slack-visible silence during active work',
     );
     expect(result.harnessInstructions).toContain(
-      'For code-writing turns, the initial ack should say implementation is the next action when that is true and the agent already has enough inspected repository context to describe the work concretely',
+      'For code-writing turns that require an initial ack, the ack should say implementation is the next action when that is true and the agent already has enough inspected repository context to describe the work concretely',
     );
     expect(result.harnessInstructions).toContain(
       '`closeout`: Send one Slack-visible closeout when the turn has an answer, completed result, explicit blocker, or a paused-waiting state that you explain in prose.',

@@ -373,6 +373,13 @@ describe('answerFastAgentQuestion', () => {
     expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
       'https://roomote.example/task-1',
     );
+    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
+    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: 'closeout',
+        message: 'I started it. [Open task](https://roomote.example/task-1)',
+      }),
+    );
     expect(result).toContain('[Open task]');
   });
 
