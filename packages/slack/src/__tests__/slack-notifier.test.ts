@@ -241,11 +241,25 @@ describe('SlackNotifier', () => {
   });
 
   describe('native agent surfaces', () => {
-    it('sets and clears the assistant thread status', async () => {
-      getGlobalWithFetch().fetch = vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ ok: true }),
-      });
+    it('sets assistant status and drives a task stream', async () => {
+      getGlobalWithFetch().fetch = vi
+        .fn()
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ ok: true }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ ok: true, ts: 'stream-ts' }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ ok: true, ts: 'stream-ts' }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ ok: true, ts: 'stream-ts' }),
+        });
 
       await expect(
         notifier.setAssistantThreadStatus({
@@ -255,13 +269,92 @@ describe('SlackNotifier', () => {
         }),
       ).resolves.toBe(true);
 
-      expect(getGlobalWithFetch().fetch).toHaveBeenCalledWith(
+      const initialTask = {
+        id: 'task-1',
+        title: 'Fix the button',
+        status: 'pending' as const,
+      };
+      await expect(
+        notifier.startTaskStream({
+          channel: 'C123',
+          threadTs: '100.001',
+          recipientTeamId: 'T123',
+          recipientUserId: 'U123',
+          task: initialTask,
+        }),
+      ).resolves.toBe('stream-ts');
+      await expect(
+        notifier.appendTaskStream({
+          channel: 'C123',
+          messageTs: 'stream-ts',
+          task: { ...initialTask, status: 'in_progress' },
+        }),
+      ).resolves.toBe(true);
+      await expect(
+        notifier.stopTaskStream({
+          channel: 'C123',
+          messageTs: 'stream-ts',
+          task: {
+            ...initialTask,
+            status: 'complete',
+            output: 'Ready for review',
+          },
+        }),
+      ).resolves.toBe(true);
+
+      expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
+        1,
         'https://slack.com/api/assistant.threads.setStatus',
         expect.objectContaining({
           body: JSON.stringify({
             channel_id: 'C123',
             thread_ts: '100.001',
             status: 'is thinking…',
+          }),
+        }),
+      );
+      expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
+        2,
+        'https://slack.com/api/chat.startStream',
+        expect.objectContaining({
+          body: JSON.stringify({
+            channel: 'C123',
+            thread_ts: '100.001',
+            task_display_mode: 'timeline',
+            recipient_team_id: 'T123',
+            recipient_user_id: 'U123',
+            chunks: [{ type: 'task_update', ...initialTask }],
+          }),
+        }),
+      );
+      expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
+        3,
+        'https://slack.com/api/chat.appendStream',
+        expect.objectContaining({
+          body: JSON.stringify({
+            channel: 'C123',
+            ts: 'stream-ts',
+            chunks: [
+              { type: 'task_update', ...initialTask, status: 'in_progress' },
+            ],
+          }),
+        }),
+      );
+      expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
+        4,
+        'https://slack.com/api/chat.stopStream',
+        expect.objectContaining({
+          body: JSON.stringify({
+            channel: 'C123',
+            ts: 'stream-ts',
+            chunks: [
+              {
+                type: 'task_update',
+                ...initialTask,
+                status: 'complete',
+                output: 'Ready for review',
+              },
+            ],
           }),
         }),
       );

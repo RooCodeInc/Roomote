@@ -1,4 +1,8 @@
 export { SlackNotifier } from './slack-notifier';
+export type {
+  SlackTaskStreamStatus,
+  SlackTaskStreamUpdate,
+} from './slack-notifier';
 export {
   buildSlackLiveTaskTitle,
   clearSlackLiveTaskStreamData,
