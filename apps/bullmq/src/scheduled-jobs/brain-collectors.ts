@@ -2178,7 +2178,7 @@ const RIPPLING_WORKER_EXPANSIONS =
 
 type RipplingObject = Record<string, unknown>;
 
-export type RipplingWorker = RipplingObject & {
+type RipplingWorker = RipplingObject & {
   id?: unknown;
   status?: unknown;
   work_email?: unknown;
