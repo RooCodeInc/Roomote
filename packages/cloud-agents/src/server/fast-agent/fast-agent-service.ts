@@ -76,6 +76,7 @@ const fastAgentDecisionSchema = z
       'cancel_task',
       'call_integration',
       'ignore_event',
+      'retry_task_start',
     ]),
     message: z.string().nullable(),
     purpose: z
@@ -172,6 +173,10 @@ export type LaunchFastAgentSlackTask = (params: {
 }) => Promise<
   | { success: true; taskId: string; taskUrl?: string }
   | { success: false; error: string }
+>;
+
+export type RetryFastAgentTaskStart = () => Promise<
+  { success: true; runId: number } | { success: false; error: string }
 >;
 
 function normalizeThreadText(text: string): string {
@@ -512,6 +517,7 @@ export async function answerFastAgentQuestion({
   senderSlackUserId,
   activeTasks = [],
   launchTask,
+  retryTaskStart,
   postSlackReply,
   postSlackReaction,
   surface = 'slack',
@@ -530,6 +536,7 @@ export async function answerFastAgentQuestion({
   senderSlackUserId?: string;
   activeTasks?: FastAgentActiveTask[];
   launchTask?: LaunchFastAgentSlackTask;
+  retryTaskStart?: RetryFastAgentTaskStart;
   postSlackReply?: PostFastAgentSlackReply;
   postSlackReaction?: PostFastAgentSlackReaction;
   surface?: FastAgentSurface;
@@ -602,6 +609,7 @@ export async function answerFastAgentQuestion({
       activeTasks: resolvedActiveTasks,
       surface,
       platformEvent,
+      retryTaskStartAvailable: Boolean(retryTaskStart),
     });
     let prompt = serializeFastAgentMessages(fastAgentMessages);
     const integrationCallSignatures = new Set<string>();
@@ -609,6 +617,7 @@ export async function answerFastAgentQuestion({
     const currentActiveTasks = new Map(
       resolvedActiveTasks.map((task) => [task.taskId, task]),
     );
+    let retriedTaskStart = false;
     const flushPendingLifecycleReply = async () => {
       if (!pendingLifecycleReply) {
         return;
@@ -740,8 +749,35 @@ export async function answerFastAgentQuestion({
         return message;
       }
 
+      if (decision.action === 'retry_task_start') {
+        if (!platformEvent || !retryTaskStart) {
+          prompt += `\n\n[PLATFORM EVENT ACTION REJECTED]\nretry_task_start is only available for an eligible failed delegated-task event.\n[END PLATFORM EVENT ACTION REJECTED]`;
+          continue;
+        }
+        if (retriedTaskStart) {
+          prompt += `\n\n[FAST ORCHESTRATION TOOL RESULT]\nTool: retry_task_start\nResult: ${JSON.stringify({ success: false, error: 'The task start retry has already been attempted for this event.' })}\n[END FAST ORCHESTRATION TOOL RESULT]\n\nReport the result with one send_chat_reply closeout.`;
+          continue;
+        }
+
+        retriedTaskStart = true;
+        let retryResult: Awaited<ReturnType<RetryFastAgentTaskStart>>;
+        try {
+          retryResult = await retryTaskStart();
+        } catch (error) {
+          console.error(
+            `[Fast Agent] Failed to retry delegated task start: ${formatErrorForLog(error)}`,
+          );
+          retryResult = {
+            success: false,
+            error: 'The failed-start retry could not be queued.',
+          };
+        }
+        prompt += `\n\n[FAST ORCHESTRATION TOOL RESULT]\nTool: retry_task_start\nResult: ${JSON.stringify(retryResult)}\n[END FAST ORCHESTRATION TOOL RESULT]\n\nReport the retry outcome with one send_chat_reply closeout.`;
+        continue;
+      }
+
       if (platformEvent) {
-        prompt += `\n\n[PLATFORM EVENT ACTION REJECTED]\nA delegated-task platform event may only use send_chat_reply or ignore_event. Do not launch, message, or cancel tasks, react, or call integrations for this event.\n[END PLATFORM EVENT ACTION REJECTED]`;
+        prompt += `\n\n[PLATFORM EVENT ACTION REJECTED]\nA delegated-task platform event may only use send_chat_reply, ignore_event, or the offered retry_task_start action. Do not launch, message, or cancel tasks, react, or call integrations for this event.\n[END PLATFORM EVENT ACTION REJECTED]`;
         continue;
       }
 

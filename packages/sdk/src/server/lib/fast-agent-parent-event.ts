@@ -24,6 +24,7 @@ import {
   type FastAgentParent,
   type PullRequestStatus,
   type RunStatus,
+  type TaskRunErrorCode,
   type SlackBlock,
   type SourceControlProvider,
 } from '@roomote/types';
@@ -90,6 +91,8 @@ type FastAgentParentEvent =
       runId: number;
       title?: string;
       status: string;
+      error?: string;
+      errorCode?: TaskRunErrorCode;
       taskUrl: string;
       pullRequests: FastAgentPullRequestContext[];
     }
@@ -200,6 +203,9 @@ function buildEventClientMessageSeed(event: FastAgentParentEvent): string {
 export async function deliverFastAgentParentEvent(params: {
   parent: FastAgentParent;
   event: FastAgentParentEvent;
+  retryTaskStart?: () => Promise<
+    { success: true; runId: number } | { success: false; error: string }
+  >;
   /** Cap the turn-lock wait so callers holding an HTTP request can fail fast
    * and lean on their own retry instead of blocking. */
   lockWaitMs?: number;
@@ -266,6 +272,9 @@ export async function deliverFastAgentParentEvent(params: {
       slackChannel: params.parent.slackChannel,
       slackThreadTs: params.parent.slackThreadTs,
       platformEvent: true,
+      ...(params.retryTaskStart
+        ? { retryTaskStart: params.retryTaskStart }
+        : {}),
       postSlackReply: async ({ message, imageArtifactIds = [] }) => {
         const imageBlocks = await buildSelectedImageBlocks({
           artifactIds: imageArtifactIds,

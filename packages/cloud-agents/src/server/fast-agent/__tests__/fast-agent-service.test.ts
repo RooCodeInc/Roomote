@@ -326,6 +326,88 @@ describe('answerFastAgentQuestion', () => {
     );
   });
 
+  it('lets the orchestration loop report a delegated task terminal error', async () => {
+    mocks.generateObject.mockResolvedValueOnce({
+      object: decision({
+        message:
+          'The task stopped because the sandbox provider rejected its credentials. Check the provider configuration before retrying.',
+        purpose: 'closeout',
+      }),
+    });
+    const callbacks = chatCallbacks();
+    const event = {
+      type: 'task_settled',
+      taskId: 'task-1',
+      runId: 42,
+      status: 'failed',
+      error: 'The sandbox provider rejected its credentials.',
+      taskUrl: 'https://roomote.example/task/task-1',
+      pullRequests: [],
+    };
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      question: `<delegated_task_event>${JSON.stringify(event)}</delegated_task_event>`,
+      platformEvent: true,
+      ...callbacks,
+    });
+
+    expect(mocks.generateObject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining(
+          'The sandbox provider rejected its credentials.',
+        ),
+      }),
+    );
+    expect(result).toContain('Check the provider configuration');
+    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: 'closeout',
+        message: expect.stringContaining('Check the provider configuration'),
+      }),
+    );
+  });
+
+  it('lets the parent retry a failed delegated task start before closing out', async () => {
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'retry_task_start',
+          message: null,
+          purpose: null,
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          message: 'The sandbox startup looked transient, so I retried it.',
+          purpose: 'closeout',
+        }),
+      });
+    const callbacks = chatCallbacks();
+    const retryTaskStart = vi.fn().mockResolvedValue({
+      success: true,
+      runId: 43,
+    });
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      question:
+        '<delegated_task_event>{"type":"task_settled","status":"failed","error":"HTTP 503","errorCode":null}</delegated_task_event>',
+      platformEvent: true,
+      retryTaskStart,
+      ...callbacks,
+    });
+
+    expect(retryTaskStart).toHaveBeenCalledOnce();
+    expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
+      '"success":true,"runId":43',
+    );
+    expect(result).toBe(
+      'The sandbox startup looked transient, so I retried it.',
+    );
+    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
+  });
+
   it('can close out a lightweight turn with an emoji reaction', async () => {
     mocks.generateObject.mockResolvedValue({
       object: decision({

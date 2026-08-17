@@ -126,6 +126,7 @@ describe('buildFastAgentSystemPrompt', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       platformEvent: true,
+      retryTaskStartAvailable: true,
     });
 
     expect(prompt).toContain(
@@ -134,6 +135,12 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Never use "ack" or "progress"');
     expect(prompt).toContain('Use "ignore_event"');
     expect(prompt).toContain(
+      'includes the full secret-redacted error and its machine-readable errorCode',
+    );
+    expect(prompt).toContain(
+      'Use "retry_task_start" only when the failure appears transient',
+    );
+    expect(prompt).toContain(
       'Pull-request-opened events contain authoritative, user-presentable pull request metadata',
     );
     expect(prompt).toContain(
@@ -141,6 +148,20 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain(
       "Task-settled events include the task's current pullRequests list",
+    );
+  });
+
+  it('does not offer a failed-start retry for ineligible platform events', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      platformEvent: true,
+    });
+
+    expect(prompt).toContain(
+      'No failed-start retry action is available for this event',
+    );
+    expect(prompt).not.toContain(
+      'Use "retry_task_start" only when the failure appears transient',
     );
   });
 
