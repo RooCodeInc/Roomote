@@ -1,12 +1,18 @@
 import type { ModelMessage } from 'ai';
 import {
   and,
+  desc,
   db,
   eq,
+  inArray,
+  isNull,
   slackQuickAnswers,
   sql,
+  taskRuns,
+  tasks,
   type SlackQuickAnswer,
 } from '@roomote/db/server';
+import { activeRunStatuses } from '@roomote/types';
 
 type FastAgentSessionRecord = Pick<SlackQuickAnswer, 'id'> & {
   messages: ModelMessage[];
@@ -140,6 +146,27 @@ export async function hasFastAgentSession({
   });
 
   return Boolean(session);
+}
+
+export async function getActiveFastAgentTaskId(
+  sessionId: string,
+): Promise<string | null> {
+  const [activeRun] = await db
+    .select({ taskId: taskRuns.taskId })
+    .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(
+      and(
+        sql`${taskRuns.payload} -> 'fastAgentParent' ->> 'sessionId' = ${sessionId}`,
+        inArray(taskRuns.status, [...activeRunStatuses]),
+        isNull(taskRuns.canceledAt),
+        isNull(tasks.deletedAt),
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt))
+    .limit(1);
+
+  return activeRun?.taskId ?? null;
 }
 
 export async function appendFastAgentSessionMessages({

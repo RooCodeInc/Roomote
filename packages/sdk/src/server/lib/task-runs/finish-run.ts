@@ -72,6 +72,7 @@ import {
 } from './conflict-resolution-comments';
 import { cleanupSandboxOidcTargetsForTaskRun } from '../sandbox-oidc';
 import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
+import { notifyFastAgentParentOnSettle } from './notify-fast-agent-parent-on-settle';
 import { refreshTaskTitleOnCompletion } from './record-task-message-envelope';
 import { getRedis } from '@roomote/redis';
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
@@ -398,6 +399,11 @@ export const finishRun = async ({
   // never has to poll for it. Never throws. `run` was read before the
   // transaction, so splice in the error that was just finalized.
   await notifySourceRunOnSettle(
+    { ...run, error: sanitizedError ?? run.error },
+    status,
+    run.task.title,
+  );
+  await notifyFastAgentParentOnSettle(
     { ...run, error: sanitizedError ?? run.error },
     status,
     run.task.title,

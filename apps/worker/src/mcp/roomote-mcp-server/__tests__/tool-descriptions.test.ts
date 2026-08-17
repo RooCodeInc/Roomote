@@ -664,6 +664,14 @@ describe('roomote MCP tool descriptions', () => {
     expect(
       registeredTools.find(({ name }) => name === 'send_chat_reaction_emoji'),
     ).toBe(undefined);
+    expect(
+      registeredTools.find(({ name }) => name === 'post_to_channel'),
+    ).toBeUndefined();
+    expect(
+      registeredTools.find(
+        ({ name }) => name === 'add_reaction_to_slack_message',
+      ),
+    ).toBeUndefined();
   });
 
   it('registers one provider-neutral channel history lookup tool', async () => {
@@ -684,6 +692,24 @@ describe('roomote MCP tool descriptions', () => {
     );
     expect(oldestField.description).toContain('Slack timestamp');
     expect(latestField.description).toContain('message snowflake');
+  });
+
+  it('keeps Slack communication tools for independently launched Slack tasks', async () => {
+    const { registeredTools } = await importRoomoteMcpServer({
+      ROOMOTE_SLACK_CHANNEL: 'C123',
+      ROOMOTE_SLACK_THREAD_TS: '123.456',
+      ROOMOTE_TASK_ID: 'task_123',
+    });
+    const names = registeredTools.map(({ name }) => name);
+
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'send_chat_reply',
+        'send_chat_reaction_emoji',
+        'post_to_channel',
+        'add_reaction_to_slack_message',
+      ]),
+    );
   });
 
   it('registers and forwards the provider-neutral channel listing tool', async () => {

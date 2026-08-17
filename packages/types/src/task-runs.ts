@@ -1235,8 +1235,6 @@ export const slackAppMentionSchema = sharedTaskSchema.extend({
     user: z.string().optional(),
     text: z.string(),
     agentPromptText: z.string().optional(),
-    /** The delegating parent owns the initial Slack kickoff for this task. */
-    parentOwnsKickoff: z.boolean().optional(),
     /**
      * Optional acknowledgement emoji name that was applied to the source
      * message when the task was kicked off.
@@ -1346,7 +1344,36 @@ const delegatedTaskPayloadSchema = sharedTaskPayloadSchema.extend({
    * `notifyOnSettle`; read by the run-finalization path.
    */
   notifySourceRunOnSettle: z.boolean().optional(),
+  /** Runless Fast parent that owns this child task's user-visible lifecycle. */
+  fastAgentParent: z
+    .object({
+      sessionId: z.string().uuid(),
+      slackTeamId: z.string().min(1),
+      slackChannel: z.string().min(1),
+      slackThreadTs: z.string().min(1),
+    })
+    .optional(),
 });
+
+export type FastAgentParent = NonNullable<
+  z.infer<typeof delegatedTaskPayloadSchema>['fastAgentParent']
+>;
+
+export function getFastAgentParentFromPayload(
+  payload: unknown,
+): FastAgentParent | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+
+  const parsed = z
+    .object({
+      fastAgentParent: delegatedTaskPayloadSchema.shape.fastAgentParent,
+    })
+    .safeParse(payload);
+
+  return parsed.success ? (parsed.data.fastAgentParent ?? null) : null;
+}
 
 export function getNotifySourceRunOnSettleFromPayload(
   payload: unknown,

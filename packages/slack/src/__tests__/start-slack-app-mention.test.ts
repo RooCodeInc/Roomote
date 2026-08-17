@@ -117,31 +117,6 @@ describe('startSlackAppMentionTask', () => {
       }),
       {},
     );
-    expect(enqueueTaskMock.mock.calls[0]?.[0]?.task.payload).not.toHaveProperty(
-      'parentOwnsKickoff',
-    );
-  });
-
-  it('persists Fast parent kickoff ownership when requested', async () => {
-    const { startSlackAppMentionTask } =
-      await import('../start-slack-app-mention');
-
-    await startSlackAppMentionTask({
-      initiator: { kind: 'user', userId: 'user_123' },
-      trigger: 'message',
-      channel: 'C123',
-      teamId: 'T123',
-      slackUserId: 'U123',
-      text: 'hello',
-      parentOwnsKickoff: true,
-      ts: '111.000',
-      threadTs: '111.000',
-      repo: 'owner/repo',
-    });
-
-    expect(enqueueTaskMock.mock.calls[0]?.[0]?.task.payload).toEqual(
-      expect.objectContaining({ parentOwnsKickoff: true }),
-    );
   });
 
   it('persists an exact Slack conversation permalink onto a reused active task run', async () => {

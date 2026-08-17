@@ -16,6 +16,7 @@ import {
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import {
   appendFastAgentSessionMessages,
+  getActiveFastAgentTaskId,
   getOrCreateFastAgentSession,
 } from './fast-agent-session';
 import {
@@ -112,6 +113,8 @@ function buildFastAgentTurnFallbackDecision(): z.infer<
 export type LaunchFastAgentSlackTask = (params: {
   prompt: string;
   environmentId: string | null;
+  parentSessionId: string;
+  postKickoff: (task: { taskId: string; taskUrl?: string }) => Promise<void>;
 }) => Promise<
   | { success: true; taskId: string; taskUrl?: string }
   | { success: false; error: string }
@@ -472,6 +475,8 @@ export async function answerFastAgentQuestion({
   surface?: FastAgentSurface;
 }): Promise<string> {
   let sessionId: string | null = null;
+  let launchedTask: { taskId: string; taskUrl?: string } | null = null;
+  let persistedTurnMessageCount = 0;
   const normalizedQuestion = normalizeThreadText(question);
   const userMessage = buildUserTextMessage(normalizedQuestion);
   const turnSessionMessages: ModelMessage[] = [userMessage];
@@ -503,6 +508,8 @@ export async function answerFastAgentQuestion({
         }),
       ]);
     sessionId = session.id;
+    const resolvedActiveTaskId =
+      activeTaskId ?? (await getActiveFastAgentTaskId(session.id));
     const fastAgentMessages = buildFastAgentMessages({
       question,
       threadContext,
@@ -518,7 +525,7 @@ export async function answerFastAgentQuestion({
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,
       availableIntegrations,
-      activeTaskId,
+      activeTaskId: resolvedActiveTaskId,
       surface,
     });
     let prompt = serializeFastAgentMessages(fastAgentMessages);
@@ -526,7 +533,7 @@ export async function answerFastAgentQuestion({
     const completedTaskActions = new Set<
       'launch_task' | 'send_task_message' | 'cancel_task'
     >();
-    let currentActiveTaskId = activeTaskId;
+    let currentActiveTaskId = resolvedActiveTaskId;
     const brain = availableIntegrations.find(
       (integration) =>
         integration.id === BRAIN_MCP_ID &&
@@ -747,6 +754,28 @@ export async function answerFastAgentQuestion({
             taskResult = await launchTask({
               prompt: taskPrompt,
               environmentId: decision.environmentId,
+              parentSessionId: session.id,
+              postKickoff: async (task) => {
+                if (!postSlackReply) {
+                  throw new Error('Parent chat delivery is unavailable.');
+                }
+                const message = task.taskUrl
+                  ? `I started the task. [Open task](${task.taskUrl})`
+                  : `I started task ${task.taskId}.`;
+                await postSlackReply({
+                  purpose: 'closeout',
+                  slackChannel,
+                  slackThreadTs,
+                  message,
+                });
+                turnSessionMessages.push(buildAssistantTextMessage(message));
+                await appendFastAgentSessionMessages({
+                  sessionId: session.id,
+                  messages: turnSessionMessages,
+                });
+                launchedTask = task;
+                persistedTurnMessageCount = turnSessionMessages.length;
+              },
             });
             if (
               taskResult &&
@@ -757,6 +786,17 @@ export async function answerFastAgentQuestion({
               typeof taskResult.taskId === 'string'
             ) {
               currentActiveTaskId = taskResult.taskId;
+              launchedTask = {
+                taskId: taskResult.taskId,
+                ...('taskUrl' in taskResult &&
+                typeof taskResult.taskUrl === 'string'
+                  ? { taskUrl: taskResult.taskUrl }
+                  : {}),
+              };
+              const message = launchedTask.taskUrl
+                ? `I started the task. [Open task](${launchedTask.taskUrl})`
+                : `I started task ${launchedTask.taskId}.`;
+              return message;
             }
           }
         } else if (taskAction === 'send_task_message') {
@@ -810,9 +850,11 @@ export async function answerFastAgentQuestion({
     console.error(
       `[Fast Agent] Failed to answer question: ${formatErrorForLog(error)}`,
     );
-    const message = isRetryableFastAgentInferenceError(error)
-      ? 'Fast mode could not reach the model after retrying. Please try again in a moment.'
-      : 'I hit an error while handling that request. Please try again in a moment.';
+    const message = launchedTask
+      ? 'I posted the task kickoff, but the task could not be queued. Please retry.'
+      : isRetryableFastAgentInferenceError(error)
+        ? 'Fast mode could not reach the model after retrying. Please try again in a moment.'
+        : 'I hit an error while handling that request. Please try again in a moment.';
 
     try {
       await postSlackReply?.({
@@ -831,7 +873,7 @@ export async function answerFastAgentQuestion({
       turnSessionMessages.push(buildAssistantTextMessage(message));
       await persistFastAgentSessionMessages({
         sessionId,
-        messages: turnSessionMessages,
+        messages: turnSessionMessages.slice(persistedTurnMessageCount),
       });
     }
 

@@ -145,24 +145,17 @@ export function wrapSlackMessage(
 export function wrapSlackTurnPolicy({
   reactionsAllowed,
   preferEmojiAck,
-  initialAckRequired = true,
 }: {
   reactionsAllowed: boolean;
   preferEmojiAck: boolean;
-  initialAckRequired?: boolean;
 }): string {
-  const guidance = !initialAckRequired
-    ? `${reactionsAllowed ? 'Emoji reactions are allowed' : 'Emoji reactions are not allowed'} on the current Slack message. A kickoff for this task is already visible. Do not send another initial acknowledgement or kickoff; begin the work and reserve Slack-visible progress for material new information.`
-    : reactionsAllowed
-      ? preferEmojiAck
-        ? 'Emoji reactions are allowed on the current Slack message. Prefer `send_chat_reaction_emoji` instead of a short text acknowledgement when a lightweight acknowledgement or emoji-only answer is enough.'
-        : 'Emoji reactions are allowed on the current Slack message.'
-      : 'Emoji reactions are not allowed on the current Slack message. Use `send_chat_reply` for acknowledgements and lightweight clarification. Use `request_user_input` only when the task actually needs structured or private input from the user.';
-  const initialAckAttribute = initialAckRequired
-    ? ''
-    : ' initial_ack_required="false"';
+  const guidance = reactionsAllowed
+    ? preferEmojiAck
+      ? 'Emoji reactions are allowed on the current Slack message. Prefer `send_chat_reaction_emoji` instead of a short text acknowledgement when a lightweight acknowledgement or emoji-only answer is enough.'
+      : 'Emoji reactions are allowed on the current Slack message.'
+    : 'Emoji reactions are not allowed on the current Slack message. Use `send_chat_reply` for acknowledgements and lightweight clarification. Use `request_user_input` only when the task actually needs structured or private input from the user.';
 
-  return `<slack_turn_policy reactions_allowed="${reactionsAllowed ? 'true' : 'false'}" prefer_emoji_ack="${preferEmojiAck ? 'true' : 'false'}"${initialAckAttribute}>\n${escapeSlackMessageContent(guidance)}\n</slack_turn_policy>`;
+  return `<slack_turn_policy reactions_allowed="${reactionsAllowed ? 'true' : 'false'}" prefer_emoji_ack="${preferEmojiAck ? 'true' : 'false'}">\n${escapeSlackMessageContent(guidance)}\n</slack_turn_policy>`;
 }
 
 export function wrapSlackThreadActivity({

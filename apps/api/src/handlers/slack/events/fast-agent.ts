@@ -184,7 +184,9 @@ export async function processFastAgentMessage(params: {
         });
         if (posted) {
           didSendVisibleResponse = true;
+          return;
         }
+        throw new Error('Slack did not accept the Fast parent reply.');
       },
       postSlackReaction: async ({ name, purpose, slackMessageTs }) => {
         if (

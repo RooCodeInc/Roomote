@@ -45,10 +45,10 @@ describe('buildFastAgentSystemPrompt', () => {
       'The automatic Brain integration preflight is exempt because it runs before your first decision, when you cannot yet send an acknowledgement',
     );
     expect(prompt).toContain(
-      'For "launch_task", do not send a separate acknowledgement first. Launch the task, then send exactly one concise "closeout" confirming the handoff and linking the task.',
+      'For "launch_task", do not send a separate acknowledgement first. The runtime posts exactly one kickoff with the task link before making the child runnable, then ends this turn.',
     );
     expect(prompt).toContain(
-      'After a successful "launch_task", post only the single kickoff closeout described above, not an additional progress or acknowledgement message.',
+      'A successful "launch_task" is the exception because the runtime posts and persists its parent-owned kickoff before queueing the child.',
     );
     expect(prompt).toContain(
       'If the answer is immediate and needs no model-initiated tool, skip the acknowledgement and send the "closeout" directly',

@@ -106,6 +106,10 @@ vi.mock('../notify-source-run-on-settle', () => ({
     mockNotifySourceRunOnSettle(...args),
 }));
 
+vi.mock('../notify-fast-agent-parent-on-settle', () => ({
+  notifyFastAgentParentOnSettle: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { resolveWorkspaceSourceControlProvider } from '@roomote/db/server';
 
 import {

@@ -226,6 +226,32 @@ describe('processFastAgentMessage', () => {
     );
   });
 
+  it('rejects a non-delivered parent reply instead of treating it as a kickoff', async () => {
+    mocks.postThreadMessage.mockResolvedValue(false);
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await expect(
+      processFastAgentMessage({
+        event: {
+          type: 'message',
+          channel: 'D123',
+          channel_type: 'im',
+          user: 'U123',
+          text: '!fast implement this',
+          ts: '100.001',
+        } as never,
+        slack: slack as never,
+        userId: 'user-1',
+        teamId: 'T123',
+      }),
+    ).rejects.toThrow('Slack did not accept the Fast parent reply.');
+  });
+
   it('shows the task-processing reaction until the fast response is loaded', async () => {
     const slack = {
       addReaction: vi.fn().mockResolvedValue(true),

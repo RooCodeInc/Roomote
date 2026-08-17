@@ -1,5 +1,6 @@
 const mocks = vi.hoisted(() => ({
   appendSessionMessages: vi.fn(),
+  getActiveTaskId: vi.fn(),
   getSession: vi.fn(),
   getEnvironments: vi.fn(),
   generateObject: vi.fn(),
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../fast-agent-session', () => ({
   appendFastAgentSessionMessages: mocks.appendSessionMessages,
+  getActiveFastAgentTaskId: mocks.getActiveTaskId,
   getOrCreateFastAgentSession: mocks.getSession,
 }));
 
@@ -80,10 +82,31 @@ function chatCallbacks() {
   };
 }
 
+function successfulLaunchTask() {
+  return vi.fn(
+    async ({
+      postKickoff,
+    }: {
+      postKickoff: (task: {
+        taskId: string;
+        taskUrl?: string;
+      }) => Promise<void>;
+    }) => {
+      const task = {
+        taskId: 'task-1',
+        taskUrl: 'https://roomote.example/task-1',
+      };
+      await postKickoff(task);
+      return { success: true as const, ...task };
+    },
+  );
+}
+
 describe('answerFastAgentQuestion', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getSession.mockResolvedValue({ id: 'session-1', messages: [] });
+    mocks.getActiveTaskId.mockResolvedValue(null);
     mocks.getEnvironments.mockResolvedValue([
       {
         id: 'env-1',
@@ -334,27 +357,17 @@ describe('answerFastAgentQuestion', () => {
     expect(result).toBe('I found the answer.');
   });
 
-  it('launches work, exposes the result to the loop, and then replies', async () => {
-    mocks.generateObject
-      .mockResolvedValueOnce({
-        object: decision({
-          action: 'launch_task',
-          message: null,
-          purpose: null,
-          taskPrompt: 'Add the regression test.',
-          environmentId: 'env-1',
-        }),
-      })
-      .mockResolvedValueOnce({
-        object: decision({
-          message: 'I started it. [Open task](https://roomote.example/task-1)',
-        }),
-      });
-    const launchTask = vi.fn().mockResolvedValue({
-      success: true,
-      taskId: 'task-1',
-      taskUrl: 'https://roomote.example/task-1',
+  it('posts one parent kickoff and ends the turn when launching work', async () => {
+    mocks.generateObject.mockResolvedValueOnce({
+      object: decision({
+        action: 'launch_task',
+        message: null,
+        purpose: null,
+        taskPrompt: 'Add the regression test.',
+        environmentId: 'env-1',
+      }),
     });
+    const launchTask = successfulLaunchTask();
     const callbacks = chatCallbacks();
 
     const result = await answerFastAgentQuestion({
@@ -366,24 +379,102 @@ describe('answerFastAgentQuestion', () => {
     expect(launchTask).toHaveBeenCalledWith({
       prompt: 'Add the regression test.',
       environmentId: 'env-1',
+      parentSessionId: 'session-1',
+      postKickoff: expect.any(Function),
     });
-    expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
-      'FAST ORCHESTRATION TOOL RESULT',
-    );
-    expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
-      'https://roomote.example/task-1',
-    );
+    expect(mocks.generateObject).toHaveBeenCalledOnce();
     expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
     expect(callbacks.postSlackReply).toHaveBeenCalledWith(
       expect.objectContaining({
         purpose: 'closeout',
-        message: 'I started it. [Open task](https://roomote.example/task-1)',
+        message:
+          'I started the task. [Open task](https://roomote.example/task-1)',
       }),
     );
     expect(result).toContain('[Open task]');
   });
 
+  it('reports a queue failure after a persisted parent kickoff without duplicating session history', async () => {
+    mocks.generateObject.mockResolvedValueOnce({
+      object: decision({
+        action: 'launch_task',
+        message: null,
+        purpose: null,
+        taskPrompt: 'Add the regression test.',
+        environmentId: 'env-1',
+      }),
+    });
+    const launchTask = vi.fn(
+      async ({
+        postKickoff,
+      }: {
+        postKickoff: (task: {
+          taskId: string;
+          taskUrl?: string;
+        }) => Promise<void>;
+      }) => {
+        await postKickoff({
+          taskId: 'task-1',
+          taskUrl: 'https://roomote.example/task-1',
+        });
+        throw new Error('queue unavailable');
+      },
+    );
+    const callbacks = chatCallbacks();
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      ...callbacks,
+      launchTask,
+    });
+
+    expect(callbacks.postSlackReply).toHaveBeenCalledTimes(2);
+    expect(result).toContain('could not be queued');
+    expect(mocks.appendSessionMessages).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        messages: [
+          expect.objectContaining({
+            content: [
+              expect.objectContaining({
+                text: 'I posted the task kickoff, but the task could not be queued. Please retry.',
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+  });
+
+  it('fails the launch when the parent kickoff cannot be persisted', async () => {
+    mocks.generateObject.mockResolvedValueOnce({
+      object: decision({
+        action: 'launch_task',
+        message: null,
+        purpose: null,
+        taskPrompt: 'Add the regression test.',
+        environmentId: 'env-1',
+      }),
+    });
+    mocks.appendSessionMessages.mockRejectedValueOnce(
+      new Error('database unavailable'),
+    );
+    const callbacks = chatCallbacks();
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      ...callbacks,
+      launchTask: successfulLaunchTask(),
+    });
+
+    expect(callbacks.postSlackReply).toHaveBeenCalledTimes(2);
+    expect(result).toBe(
+      'I hit an error while handling that request. Please try again in a moment.',
+    );
+  });
+
   it('does not launch another task when one is active and asks the agent to report the result', async () => {
+    mocks.getActiveTaskId.mockResolvedValueOnce('task-1');
     mocks.generateObject
       .mockResolvedValueOnce({
         object: decision({
@@ -403,7 +494,6 @@ describe('answerFastAgentQuestion', () => {
     const result = await answerFastAgentQuestion({
       ...baseParams,
       ...callbacks,
-      activeTaskId: 'task-1',
       launchTask,
     });
 
