@@ -1,6 +1,6 @@
-export type ChatResponseSurface = 'slack' | 'discord' | 'teams' | 'telegram';
+type ChatResponseSurface = 'slack' | 'discord' | 'teams' | 'telegram';
 
-export interface ChatResponseDecisionPolicy {
+interface ChatResponseDecisionPolicy {
   lifecycle: string;
   acknowledgement: string;
   progress: string;
