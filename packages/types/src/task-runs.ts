@@ -886,6 +886,13 @@ export type LinkedWorkItem = z.infer<typeof linkedWorkItemSchema>;
  * workspace configuration. When using environments, the `repo` field is ignored
  * (but still populated for backwards compatibility).
  */
+const fastAgentParentSchema = z.object({
+  sessionId: z.string().uuid(),
+  slackTeamId: z.string().min(1),
+  slackChannel: z.string().min(1),
+  slackThreadTs: z.string().min(1),
+});
+
 const sharedTaskPayloadSchema = z.object({
   /**
    * Legacy single-repository field in owner/repo format, or the
@@ -1039,6 +1046,8 @@ const sharedTaskPayloadSchema = z.object({
   communicationMessageId: z.string().optional(),
   /** True when communication coordinates were inherited from a parent run. */
   communicationContextInherited: z.boolean().optional(),
+  /** Runless Fast parent that owns this task's user-visible lifecycle. */
+  fastAgentParent: fastAgentParentSchema.optional(),
   /** Provider event that caused this fresh launch; used for idempotent retries. */
   communicationSourceEventId: z.string().optional(),
   /**
@@ -1344,20 +1353,9 @@ const delegatedTaskPayloadSchema = sharedTaskPayloadSchema.extend({
    * `notifyOnSettle`; read by the run-finalization path.
    */
   notifySourceRunOnSettle: z.boolean().optional(),
-  /** Runless Fast parent that owns this child task's user-visible lifecycle. */
-  fastAgentParent: z
-    .object({
-      sessionId: z.string().uuid(),
-      slackTeamId: z.string().min(1),
-      slackChannel: z.string().min(1),
-      slackThreadTs: z.string().min(1),
-    })
-    .optional(),
 });
 
-export type FastAgentParent = NonNullable<
-  z.infer<typeof delegatedTaskPayloadSchema>['fastAgentParent']
->;
+export type FastAgentParent = z.infer<typeof fastAgentParentSchema>;
 
 export function getFastAgentParentFromPayload(
   payload: unknown,
@@ -1367,12 +1365,10 @@ export function getFastAgentParentFromPayload(
   }
 
   const parsed = z
-    .object({
-      fastAgentParent: delegatedTaskPayloadSchema.shape.fastAgentParent,
-    })
+    .object({ fastAgentParent: fastAgentParentSchema })
     .safeParse(payload);
 
-  return parsed.success ? (parsed.data.fastAgentParent ?? null) : null;
+  return parsed.success ? parsed.data.fastAgentParent : null;
 }
 
 export function getNotifySourceRunOnSettleFromPayload(

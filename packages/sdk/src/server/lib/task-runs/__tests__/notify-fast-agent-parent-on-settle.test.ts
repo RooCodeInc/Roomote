@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   findSession: vi.fn(),
   findInstallation: vi.fn(),
   claimReturning: vi.fn(),
+  updateSet: vi.fn(),
   postMessage: vi.fn(),
   recordLifecycle: vi.fn(),
 }));
@@ -16,9 +17,12 @@ vi.mock('@roomote/db/server', () => ({
       slackInstallations: { findFirst: mocks.findInstallation },
     },
     update: vi.fn(() => ({
-      set: vi.fn(() => ({
-        where: vi.fn(() => ({ returning: mocks.claimReturning })),
-      })),
+      set: vi.fn((values: unknown) => {
+        mocks.updateSet(values);
+        return {
+          where: vi.fn(() => ({ returning: mocks.claimReturning })),
+        };
+      }),
     })),
   },
   and: vi.fn((...args: unknown[]) => args),
@@ -34,7 +38,10 @@ vi.mock('@roomote/db/server', () => ({
     slackChannel: 'slack_quick_answers.slack_channel',
     slackThreadTs: 'slack_quick_answers.slack_thread_ts',
   },
-  sql: vi.fn(),
+  sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
+    strings: [...strings],
+    values,
+  })),
   taskRuns: { id: 'task_runs.id', result: 'task_runs.result' },
 }));
 
@@ -138,5 +145,35 @@ describe('notifyFastAgentParentOnSettle', () => {
 
     expect(mocks.postMessage).toHaveBeenCalledTimes(2);
     expect(mocks.recordLifecycle).toHaveBeenCalledOnce();
+    expect(
+      mocks.updateSet.mock.calls.some(([values]) => {
+        const result = (values as { result?: { strings?: string[] } }).result;
+        return result?.strings?.join('').includes(' - ') === true;
+      }),
+    ).toBe(true);
+  });
+
+  it('treats a missing Slack message timestamp as retryable delivery failure', async () => {
+    mocks.postMessage
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce('101.003');
+
+    await notifyFastAgentParentOnSettle(
+      makeRun({ fastAgentParent: fastParent }),
+      RunStatus.Idle,
+    );
+    await notifyFastAgentParentOnSettle(
+      makeRun({ fastAgentParent: fastParent }),
+      RunStatus.Idle,
+    );
+
+    expect(mocks.postMessage).toHaveBeenCalledTimes(2);
+    expect(mocks.recordLifecycle).toHaveBeenCalledOnce();
+    expect(
+      mocks.updateSet.mock.calls.some(([values]) => {
+        const result = (values as { result?: { strings?: string[] } }).result;
+        return result?.strings?.join('').includes(' - ') === true;
+      }),
+    ).toBe(true);
   });
 });

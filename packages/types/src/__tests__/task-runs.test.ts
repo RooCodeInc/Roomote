@@ -495,6 +495,13 @@ describe('taskSpecSchema', () => {
         channel: 'C123',
         slackChannel: 'C123',
         thread_ts: '111.222',
+        communicationContextInherited: true,
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          slackTeamId: 'T123',
+          slackChannel: 'C123',
+          slackThreadTs: '111.222',
+        },
       },
     });
 
@@ -505,6 +512,10 @@ describe('taskSpecSchema', () => {
     expect(parsed.payload.channel).toBe('C123');
     expect(parsed.payload.slackChannel).toBe('C123');
     expect(parsed.payload.thread_ts).toBe('111.222');
+    expect(parsed.payload.communicationContextInherited).toBe(true);
+    expect(parsed.payload.fastAgentParent?.sessionId).toBe(
+      '11111111-1111-4111-8111-111111111111',
+    );
   });
 
   it('parses Dependabot suggestion sources on SuggestedTasks payloads', () => {

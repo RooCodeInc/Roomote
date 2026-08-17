@@ -106,13 +106,18 @@ export async function notifyFastAgentParentOnSettle(
     const slackMessage = `${subject} ${statusText}. <${taskUrl}|Open task>`;
     const sessionMessage = `${subject} ${statusText}. [Open task](${taskUrl})`;
 
-    await new SlackNotifier(installation.botAccessToken).postMessage({
+    const messageTs = await new SlackNotifier(
+      installation.botAccessToken,
+    ).postMessage({
       channel: parent.slackChannel,
       thread_ts: parent.slackThreadTs,
       text: slackMessage,
       unfurl_links: false,
       unfurl_media: false,
     });
+    if (!messageTs) {
+      throw new Error('Slack did not return a lifecycle message timestamp.');
+    }
     slackDelivered = true;
 
     await db
