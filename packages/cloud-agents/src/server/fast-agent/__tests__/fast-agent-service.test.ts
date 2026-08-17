@@ -469,7 +469,7 @@ describe('answerFastAgentQuestion', () => {
         id: 'gbrain',
         name: 'Brain',
         description: 'Deployment memory',
-        tools: [{ name: 'search' }, { name: 'query' }],
+        tools: [{ name: 'query' }],
       },
       {
         id: 'github',
@@ -509,7 +509,7 @@ describe('answerFastAgentQuestion', () => {
       expect.any(Array),
       {
         integrationId: 'gbrain',
-        toolName: 'search',
+        toolName: 'query',
         args: {
           query: 'Matt Rubens @mrubens: What does this service do?',
         },
@@ -528,7 +528,7 @@ describe('answerFastAgentQuestion', () => {
         id: 'gbrain',
         name: 'Brain',
         description: 'Deployment memory',
-        tools: [{ name: 'search' }],
+        tools: [{ name: 'query' }],
       },
     ]);
     mocks.callIntegration.mockResolvedValue({ results: [] });
@@ -543,7 +543,7 @@ describe('answerFastAgentQuestion', () => {
       expect.any(Array),
       {
         integrationId: 'gbrain',
-        toolName: 'search',
+        toolName: 'query',
         args: { query: 'What does this service do?' },
       },
     );
@@ -560,7 +560,7 @@ describe('answerFastAgentQuestion', () => {
         id: 'gbrain',
         name: 'Brain',
         description: 'Deployment memory',
-        tools: [{ name: 'search' }, { name: 'query' }, { name: 'entity' }],
+        tools: [{ name: 'query' }, { name: 'entity' }],
       },
     ]);
     mocks.generateObject
@@ -597,53 +597,6 @@ describe('answerFastAgentQuestion', () => {
       },
     );
     expect(result).toBe('I found the person card.');
-  });
-
-  it('allows a semantic Brain query when the automatic search is insufficient', async () => {
-    mocks.listIntegrations.mockResolvedValue([
-      {
-        id: 'gbrain',
-        name: 'Brain',
-        description: 'Deployment memory',
-        tools: [{ name: 'search' }, { name: 'query' }],
-      },
-    ]);
-    mocks.generateObject
-      .mockResolvedValueOnce({
-        object: decision({
-          action: 'call_integration',
-          message: null,
-          purpose: null,
-          integrationId: 'gbrain',
-          toolName: 'query',
-          toolArguments: JSON.stringify({
-            query: 'decisions related to orchestration',
-          }),
-        }),
-      })
-      .mockResolvedValueOnce({
-        object: decision({ message: 'I found the relevant broader context.' }),
-      });
-    mocks.callIntegration
-      .mockResolvedValueOnce({ results: [] })
-      .mockResolvedValueOnce({ results: ['Orchestration decision'] });
-
-    const result = await answerFastAgentQuestion({
-      ...baseParams,
-      ...chatCallbacks(),
-    });
-
-    expect(mocks.callIntegration).toHaveBeenNthCalledWith(
-      2,
-      expect.any(Object),
-      expect.any(Array),
-      {
-        integrationId: 'gbrain',
-        toolName: 'query',
-        args: { query: 'decisions related to orchestration' },
-      },
-    );
-    expect(result).toBe('I found the relevant broader context.');
   });
 
   it('rejects an equivalent duplicate integration call and asks for a visible reply', async () => {
