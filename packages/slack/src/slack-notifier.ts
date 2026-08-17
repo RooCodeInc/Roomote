@@ -318,11 +318,6 @@ export class SlackNotifier {
         return {
           ...msg,
           authoredText: textWithoutSuggestionNotice,
-          agentContext: formatSlackAttachmentContext(
-            textWithoutSuggestionNotice,
-            msg.attachments,
-            msg.blocks,
-          ),
           text: appendSlackAttachmentContext(
             textWithoutSuggestionNotice,
             msg.attachments,

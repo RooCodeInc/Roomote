@@ -52,7 +52,6 @@ export interface SlackThreadMessage {
   username?: string; // Display name fetched from Slack API, fallback to user ID if not available
   text: string;
   authoredText?: string;
-  agentContext?: string;
   ts: string;
   bot_id?: string;
   type: string;

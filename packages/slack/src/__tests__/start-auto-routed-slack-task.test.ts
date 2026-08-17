@@ -220,7 +220,7 @@ describe('startAutoRoutedSlackTask', () => {
     expect(buildSlackRoutingContextMock).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: 'user_installer',
-        taskDescription: 'Investigate this\n\nSlack block text:\nState: New',
+        taskDescription: 'Investigate this',
         channelName: 'eng-routing',
         threadMessages: [
           { text: 'Earlier context', user: 'U123' },

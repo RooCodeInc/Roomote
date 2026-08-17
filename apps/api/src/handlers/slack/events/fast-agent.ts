@@ -95,7 +95,7 @@ export async function processFastAgentMessage(params: {
 
   const normalizedText = stripLeadingSlackProductMention(
     await slack.normalizeIncomingText(
-      stripLeadingFastCommandMention(event.authoredText ?? event.text),
+      stripLeadingFastCommandMention(event.text),
     ),
   );
   const question = extractFastQuestion(normalizedText, continuation);
@@ -155,7 +155,6 @@ export async function processFastAgentMessage(params: {
 
     const responseText = await answerFastAgentQuestion({
       question,
-      currentMessageAgentContext: event.agentContext,
       threadContext: serializedThreadContext,
       userId,
       apiBaseUrl,

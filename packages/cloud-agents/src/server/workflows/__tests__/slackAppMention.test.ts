@@ -558,10 +558,10 @@ describe('slackAppMention', () => {
       'Investigation context:\napps/api/src/jobs/retry.ts:92 drops the persisted retry delay.',
     );
     expect(result.prompt).toContain(
-      '&lt;slack_message_context&gt;\n**Idea 1: Fix cron retries**\nFix cron retries\n\nInvestigation context:\napps/api/src/jobs/retry.ts:92 drops the persisted retry delay.\n\nSlack block text:\nState: New\n&lt;/slack_message_context&gt;',
+      '&lt;slack_message_context&gt;\nSlack block text:\nState: New\n&lt;/slack_message_context&gt;',
     );
     expect(result.prompt).toContain(
-      '&lt;slack_message ts="123.456"&gt;\n**Idea 1: Fix cron retries**\nFix cron retries\n&lt;/slack_message&gt;',
+      '&lt;slack_message ts="123.456"&gt;\n**Idea 1: Fix cron retries**\nFix cron retries\n\nInvestigation context:\napps/api/src/jobs/retry.ts:92 drops the persisted retry delay.\n&lt;/slack_message&gt;',
     );
   });
 

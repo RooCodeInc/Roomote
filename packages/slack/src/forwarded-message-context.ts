@@ -183,6 +183,10 @@ function normalizeSlackBlockText(text: string): string {
     .trim();
 }
 
+function normalizeSlackBlockTextForComparison(text: string): string {
+  return normalizeSlackBlockText(text).replace(/[*_~`]/g, '');
+}
+
 function appendUniqueSlackBlockText(
   parts: string[],
   seenParts: Set<string>,
@@ -1001,7 +1005,17 @@ export function formatSlackBlockTextContext(
   extractBlockText(blocks, parts, seenParts);
 
   const normalizedExistingText = normalizeSlackBlockText(existingText);
-  const uniqueParts = parts.filter((part) => part !== normalizedExistingText);
+  const comparableExistingText =
+    normalizeSlackBlockTextForComparison(existingText);
+  const uniqueParts = parts.filter((part) => {
+    const comparablePart = normalizeSlackBlockTextForComparison(part);
+
+    return (
+      part !== normalizedExistingText &&
+      comparablePart !== comparableExistingText &&
+      !comparableExistingText.includes(comparablePart)
+    );
+  });
 
   if (uniqueParts.length === 0) {
     return undefined;

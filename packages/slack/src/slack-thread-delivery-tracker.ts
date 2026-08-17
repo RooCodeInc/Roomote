@@ -248,6 +248,16 @@ export class SlackThreadDeliveryTracker {
       return {
         currentMessageText,
         claimedImageUris: [],
+        formattedPrompt: [
+          wrapSlackTurnPolicy({
+            reactionsAllowed: false,
+            preferEmojiAck: false,
+          }),
+          wrapSlackMessage(currentMessageText, {
+            ts: currentMessageTs,
+            agentContext: currentMessageAgentContext,
+          }),
+        ].join('\n\n'),
         turnPolicy: {
           reactionsAllowed: false,
         },

@@ -356,18 +356,11 @@ export async function startAutoRoutedSlackTask({
       text: taskDescription,
       attachmentTexts: allAttachmentTexts,
     });
-    const routingTaskDescription = [
-      taskDescriptionWithAttachments,
-      slackMessageContext?.trim(),
-    ]
-      .filter((value): value is string => Boolean(value))
-      .join('\n\n');
-
     const channelName = (await slack.getChannelName?.(channel)) ?? undefined;
 
     const routingContext = await buildSlackRoutingContext({
       userId: launchUserId ?? undefined,
-      taskDescription: routingTaskDescription,
+      taskDescription: taskDescriptionWithAttachments,
       channelName,
       threadMessages: threadMessages?.map((message) => ({
         text: message.text,
@@ -411,7 +404,7 @@ export async function startAutoRoutedSlackTask({
               threadTs: threadId,
             }) ?? undefined)
           : undefined,
-        taskDescription: routingTaskDescription,
+        taskDescription: taskDescriptionWithAttachments,
         reason: decision.reason,
         cause: decision.cause,
       });

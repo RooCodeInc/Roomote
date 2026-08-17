@@ -554,7 +554,6 @@ export async function processActiveRunMessage(
       });
       await queueSlackMessage(activeRun.id, {
         text: messageTextWithVideoDescriptions,
-        agentContext: event.agentContext,
         user: event.user,
         userId,
         ts: event.ts,

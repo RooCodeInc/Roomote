@@ -304,11 +304,9 @@ export async function slackAppMention({
     readinessMessage,
     slackMessageContext,
   } = taskSpec.payload;
-  const currentMessageText = stripLeadingSlackProductMention(text);
-  const currentMessageAgentContext = [agentPromptText, slackMessageContext]
-    .map((value) => value?.trim())
-    .filter((value): value is string => Boolean(value))
-    .join('\n\n');
+  const currentMessageText = stripLeadingSlackProductMention(
+    agentPromptText ?? text,
+  );
   const threadContext = formatSlackThreadContext({
     threadMessages,
     ts,
@@ -323,7 +321,7 @@ export async function slackAppMention({
   });
   const currentMessage = wrapSlackMessage(currentMessageText, {
     ts,
-    agentContext: currentMessageAgentContext || undefined,
+    agentContext: slackMessageContext,
   });
   const workspaceReadinessContext = formatWorkspaceReadinessContext({
     workspaceReadiness,

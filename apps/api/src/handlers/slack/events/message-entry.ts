@@ -1242,15 +1242,13 @@ async function maybeHandleChannelAutoStart(params: {
     userMapping && typeof channelAutoStartEvent.user === 'string'
       ? resolveFastAgentEntryMode({
           explicitInvocation: isBareFastCommandInvocation(
-            channelAutoStartEvent.authoredText ?? channelAutoStartEvent.text,
+            channelAutoStartEvent.text,
           ),
           deploymentSettingEnabled:
             Env.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED === true,
           userDefaultEnabled:
             userMapping.communicationsFastModeDefault &&
-            !isRemovedEvalCommandInvocation(
-              channelAutoStartEvent.authoredText ?? channelAutoStartEvent.text,
-            ),
+            !isRemovedEvalCommandInvocation(channelAutoStartEvent.text),
         })
       : null;
 
@@ -1274,9 +1272,7 @@ async function maybeHandleChannelAutoStart(params: {
   if (
     userMapping &&
     typeof channelAutoStartEvent.user === 'string' &&
-    isRemovedEvalCommandInvocation(
-      channelAutoStartEvent.authoredText ?? channelAutoStartEvent.text,
-    )
+    isRemovedEvalCommandInvocation(channelAutoStartEvent.text)
   ) {
     await postRemovedEvalCommandMessage({
       event: channelAutoStartEvent,
@@ -1718,14 +1714,13 @@ async function handleSlackEntryEvent(params: {
     activeTaskId: activeRun?.taskId,
   });
 
-  const authoredEventText = event.authoredText ?? event.text;
   const fastAgentEntryMode = resolveFastAgentEntryMode({
-    explicitInvocation: isFastCommandInvocation(authoredEventText),
+    explicitInvocation: isFastCommandInvocation(event.text),
     deploymentSettingEnabled:
       Env.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED === true,
     userDefaultEnabled:
       userMapping.communicationsFastModeDefault &&
-      !isRemovedEvalCommandInvocation(authoredEventText),
+      !isRemovedEvalCommandInvocation(event.text),
   });
 
   if (fastAgentEntryMode) {
@@ -1745,9 +1740,7 @@ async function handleSlackEntryEvent(params: {
     return;
   }
 
-  const isFastAgentContinuation = isRemovedEvalCommandInvocation(
-    authoredEventText,
-  )
+  const isFastAgentContinuation = isRemovedEvalCommandInvocation(event.text)
     ? false
     : await hasFastAgentSession({
         slackTeamId: teamId,
@@ -1842,7 +1835,7 @@ async function handleSlackEntryEvent(params: {
 
   if (
     event.type === 'app_mention' &&
-    isRemovedEvalCommandInvocation(authoredEventText)
+    isRemovedEvalCommandInvocation(event.text)
   ) {
     await postRemovedEvalCommandMessage({
       event,

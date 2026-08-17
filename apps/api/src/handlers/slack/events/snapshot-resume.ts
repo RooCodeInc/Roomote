@@ -199,7 +199,6 @@ export async function processSnapshotResume(
     const allImages = [...attachments.images, ...claimedImageUris];
     const queuedSlackMessage = {
       text: messageTextWithVideoDescriptions,
-      agentContext: event.agentContext,
       user: event.user,
       userId: userId ?? undefined,
       ts: event.ts,

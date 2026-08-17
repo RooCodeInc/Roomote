@@ -337,14 +337,12 @@ function buildSupplementalSlackThreadContext({
 
 function buildFastAgentMessages({
   question,
-  currentMessageAgentContext,
   threadContext,
   sessionMessages,
   currentMessageTs,
   currentMessageSender,
 }: {
   question: string;
-  currentMessageAgentContext?: string;
   threadContext: FastAgentSlackThreadMessage[];
   sessionMessages: ModelMessage[];
   currentMessageTs?: string;
@@ -361,7 +359,6 @@ function buildFastAgentMessages({
         senderSlackId: currentMessageSender?.slackUserId,
         senderName: currentMessageSender?.displayName,
         senderGithub: currentMessageSender?.githubLogin,
-        agentContext: currentMessageAgentContext,
       })
     : normalizedQuestion;
   const serializedThreadContext = threadContext;
@@ -443,7 +440,6 @@ function serializeFastAgentMessages(messages: ModelMessage[]): string {
 
 export async function answerFastAgentQuestion({
   question,
-  currentMessageAgentContext,
   threadContext = [],
   userId,
   apiBaseUrl,
@@ -460,7 +456,6 @@ export async function answerFastAgentQuestion({
   surface = 'slack',
 }: {
   question: string;
-  currentMessageAgentContext?: string;
   threadContext?: FastAgentSlackThreadMessage[];
   userId: string;
   apiBaseUrl?: string;
@@ -510,7 +505,6 @@ export async function answerFastAgentQuestion({
     sessionId = session.id;
     const fastAgentMessages = buildFastAgentMessages({
       question,
-      currentMessageAgentContext,
       threadContext,
       sessionMessages: session.messages,
       currentMessageTs,

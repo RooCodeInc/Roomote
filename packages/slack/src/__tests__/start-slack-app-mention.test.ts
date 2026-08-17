@@ -93,6 +93,7 @@ describe('startSlackAppMentionTask', () => {
       teamId: 'T123',
       slackUserId: 'U123',
       text: 'hello',
+      slackMessageContext: 'Slack block text:\nState: New',
       ts: '111.000',
       threadTs: '111.000',
       repo: 'owner/repo',
@@ -112,6 +113,7 @@ describe('startSlackAppMentionTask', () => {
         },
         task: expect.objectContaining({
           payload: expect.objectContaining({
+            slackMessageContext: 'Slack block text:\nState: New',
             slackConversationUrl:
               'https://acme-team.slack.com/archives/C123/p111000?thread_ts=111.000&cid=C123',
           }),
@@ -141,6 +143,7 @@ describe('startSlackAppMentionTask', () => {
       teamId: 'T123',
       slackUserId: 'U123',
       text: 'hello again',
+      slackMessageContext: 'Slack block text:\nPriority: High',
       ts: '111.000',
       threadTs: '111.000',
       repo: 'owner/repo',
@@ -168,6 +171,10 @@ describe('startSlackAppMentionTask', () => {
         text: 'hello again',
       }),
     );
+    expect(wrapSlackMessageMock).toHaveBeenCalledWith('hello again', {
+      ts: '111.000',
+      agentContext: 'Slack block text:\nPriority: High',
+    });
   });
 
   it('does not rewrite the reused job payload when the permalink is unchanged', async () => {
@@ -206,73 +213,5 @@ describe('startSlackAppMentionTask', () => {
         text: 'hello again',
       }),
     );
-  });
-
-  it('keeps Slack agent context separate for new and active task turns', async () => {
-    const { startSlackAppMentionTask } =
-      await import('../start-slack-app-mention');
-
-    await startSlackAppMentionTask({
-      initiator: { kind: 'user', userId: 'user_123' },
-      trigger: 'message',
-      channel: 'C123',
-      teamId: 'T123',
-      slackUserId: 'U123',
-      text: 'visible question',
-      slackMessageContext: 'Slack block text:\nState: New',
-      ts: '111.000',
-      threadTs: '111.000',
-      repo: 'owner/repo',
-    });
-
-    expect(enqueueTaskMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({
-          payload: expect.objectContaining({
-            text: 'visible question',
-            slackMessageContext: 'Slack block text:\nState: New',
-          }),
-        }),
-      }),
-      {},
-    );
-
-    findActiveSlackTaskRunMock.mockResolvedValueOnce({
-      id: 99,
-      taskId: 'task_existing',
-      payload: {
-        channel: 'C123',
-        text: 'earlier text',
-        thread_ts: '111.000',
-      },
-    });
-
-    await startSlackAppMentionTask({
-      initiator: { kind: 'user', userId: 'user_123' },
-      trigger: 'message',
-      channel: 'C123',
-      teamId: 'T123',
-      slackUserId: 'U123',
-      text: 'visible follow-up',
-      slackMessageContext: 'Slack block text:\nPriority: High',
-      agentPromptText: 'Use the saved triage instructions.',
-      ts: '112.000',
-      threadTs: '111.000',
-      repo: 'owner/repo',
-    });
-
-    expect(queueSlackMessageMock).toHaveBeenCalledWith(
-      99,
-      expect.objectContaining({
-        text: 'visible follow-up',
-        agentContext:
-          'Use the saved triage instructions.\n\nSlack block text:\nPriority: High',
-      }),
-    );
-    expect(wrapSlackMessageMock).toHaveBeenCalledWith('visible follow-up', {
-      ts: '112.000',
-      agentContext:
-        'Use the saved triage instructions.\n\nSlack block text:\nPriority: High',
-    });
   });
 });

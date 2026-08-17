@@ -269,7 +269,6 @@ describe('forwarded-message-context', () => {
     expect(context).toBe(
       [
         'Slack block text:',
-        ':red_circle: *Issue title*',
         'State: *New*   First Seen: *Just now*',
         'Assigned to <@U123>',
       ].join('\n'),
@@ -298,39 +297,6 @@ describe('forwarded-message-context', () => {
 
     expect(context).toBe(
       ['Slack block text:', 'Assigned to <@U123>', 'Priority high'].join('\n'),
-    );
-  });
-
-  it('preserves differently formatted block text as agent context', () => {
-    const context = formatSlackBlockTextContext(
-      [
-        {
-          type: 'rich_text',
-          elements: [
-            {
-              type: 'rich_text_section',
-              elements: [
-                { type: 'text', text: 'Really bad experience here  ' },
-                { type: 'text', text: " let's try to debug" },
-              ],
-            },
-          ],
-        },
-      ],
-      [
-        "Really bad experience here <https://example.com/thread>  let's try to debug",
-        '',
-        'Forwarded Slack message:',
-        'Text:',
-        'Can you help?',
-      ].join('\n'),
-    );
-
-    expect(context).toBe(
-      [
-        'Slack block text:',
-        "Really bad experience here   let's try to debug",
-      ].join('\n'),
     );
   });
 
