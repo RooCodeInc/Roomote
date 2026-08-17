@@ -2,6 +2,7 @@ import {
   buildMcpTaskEnv,
   getCommunicationReplyContext,
   getSlackReplyContext,
+  isFastAgentChildTaskRun,
 } from '../mcp-task-env';
 
 describe('getSlackReplyContext', () => {
@@ -71,6 +72,7 @@ describe('getCommunicationReplyContext', () => {
 
     expect(getSlackReplyContext(taskRun)).toBeNull();
     expect(getCommunicationReplyContext(taskRun)).toBeNull();
+    expect(isFastAgentChildTaskRun(taskRun)).toBe(true);
   });
 
   it('returns Teams communication context from provider-neutral payload metadata', () => {
