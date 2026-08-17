@@ -2605,6 +2605,22 @@ async function collectRipplingReconciliation(
   };
 }
 
+export function buildRipplingWorkersRequest(
+  nextLink: string | null,
+  limit: number,
+): {
+  pathOrUrl: string;
+  query: { expand: string; limit?: number };
+} {
+  return {
+    pathOrUrl: nextLink ?? 'workers/',
+    query: {
+      expand: RIPPLING_WORKER_EXPANSIONS,
+      ...(nextLink ? {} : { limit: Math.min(100, Math.max(1, limit)) }),
+    },
+  };
+}
+
 async function collectRipplingWorkers(input: {
   config: McpConnectionRipplingConfig;
   now: Date;
@@ -2623,18 +2639,13 @@ async function collectRipplingWorkers(input: {
     saved.mode === 'scan'
       ? (parseDate(saved.startedAt) ?? input.now)
       : input.now;
+  const request = buildRipplingWorkersRequest(
+    saved.mode === 'scan' ? saved.nextLink : null,
+    input.limit,
+  );
   const response = await ripplingApiRequestJson<unknown>({
     config: input.config,
-    pathOrUrl:
-      saved.mode === 'scan' && saved.nextLink ? saved.nextLink : 'workers/',
-    ...(saved.mode === 'scan'
-      ? {}
-      : {
-          query: {
-            limit: Math.min(100, Math.max(1, input.limit)),
-            expand: RIPPLING_WORKER_EXPANSIONS,
-          },
-        }),
+    ...request,
   });
   const batch = parseRipplingWorkersResponse(response);
   const identities = buildPersonIdentityLookup(

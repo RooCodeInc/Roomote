@@ -19,6 +19,7 @@ import {
   buildPersonIdentityLookup,
   buildPersonIdentityPage,
   buildRipplingWorkerPage,
+  buildRipplingWorkersRequest,
   buildUnavailableRipplingWorkerPage,
   buildSlackDirectoryPersonPage,
   groupSlackMessagesIntoDayPages,
@@ -1500,6 +1501,21 @@ describe('Rippling worker pages', () => {
         }),
       ),
     ).toMatchObject({ mode: 'scan', startedAt: '2026-08-17T12:00:00.000Z' });
+  });
+
+  it('reapplies relationship expansions to cursor-only continuation links', () => {
+    expect(
+      buildRipplingWorkersRequest(
+        'https://rest.ripplingapis.com/workers/?cursor=opaque-next-page',
+        100,
+      ),
+    ).toEqual({
+      pathOrUrl:
+        'https://rest.ripplingapis.com/workers/?cursor=opaque-next-page',
+      query: {
+        expand: 'user,manager,manager.user,department,employment_type,teams',
+      },
+    });
   });
 
   it('rejects malformed roster pages before reconciliation can advance', () => {
