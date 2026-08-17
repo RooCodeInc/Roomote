@@ -65,7 +65,8 @@ services:
         mc mb --ignore-existing "roomote/$$S3_BUCKET_ARTIFACTS"
 
   # Local dev edge mirroring the production Caddy routing: one origin serves
-  # the web app and proxies the reserved /_roomote-api/* prefix to the API.
+  # the web app, routes public webhooks directly to the API, and proxies the
+  # reserved /_roomote-api/* prefix to the API.
   # The dev CLI points the public tunnel at this port so hosted compute
   # workers can reach the API through the public app URL.
   caddy-dev:

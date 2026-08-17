@@ -1,11 +1,21 @@
 const mocks = vi.hoisted(() => ({
   enqueueTask: vi.fn(),
   getTaskUrl: vi.fn(() => 'https://roomote.example/task/task-1'),
+  getSlackLiveTaskStreamData: vi.fn(),
+  setSlackLiveTaskStreamData: vi.fn(),
+  startTaskStream: vi.fn(),
+  appendTaskStream: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mocks.enqueueTask,
   getTaskUrl: mocks.getTaskUrl,
+}));
+
+vi.mock('@roomote/slack', () => ({
+  buildSlackLiveTaskTitle: (prompt: string) => prompt,
+  getSlackLiveTaskStreamData: mocks.getSlackLiveTaskStreamData,
+  setSlackLiveTaskStreamData: mocks.setSlackLiveTaskStreamData,
 }));
 
 import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
@@ -19,13 +29,20 @@ describe('createFastAgentTaskLauncher', () => {
       async (
         _input: unknown,
         options: {
-          beforeEnqueue: (taskRun: { taskId: string }) => Promise<void>;
+          beforeEnqueue: (taskRun: {
+            id: number;
+            taskId: string;
+          }) => Promise<void>;
         },
       ) => {
-        await options.beforeEnqueue({ taskId: 'task-1' });
+        await options.beforeEnqueue({ id: 42, taskId: 'task-1' });
         return { taskId: 'task-1' };
       },
     );
+    mocks.getSlackLiveTaskStreamData.mockResolvedValue(null);
+    mocks.startTaskStream.mockResolvedValue('stream-ts');
+    mocks.appendTaskStream.mockResolvedValue(true);
+    mocks.setSlackLiveTaskStreamData.mockResolvedValue(undefined);
   });
 
   it('launches a communication-isolated child owned by the Fast parent', async () => {
@@ -47,6 +64,10 @@ describe('createFastAgentTaskLauncher', () => {
       } as never,
       userId: 'user-1',
       teamId: 'T123',
+      slack: {
+        startTaskStream: mocks.startTaskStream,
+        appendTaskStream: mocks.appendTaskStream,
+      } as never,
     });
     const order: string[] = [];
     const postKickoff = vi.fn(async () => {
@@ -56,10 +77,13 @@ describe('createFastAgentTaskLauncher', () => {
       async (
         _input: unknown,
         options: {
-          beforeEnqueue: (taskRun: { taskId: string }) => Promise<void>;
+          beforeEnqueue: (taskRun: {
+            id: number;
+            taskId: string;
+          }) => Promise<void>;
         },
       ) => {
-        await options.beforeEnqueue({ taskId: 'task-1' });
+        await options.beforeEnqueue({ id: 42, taskId: 'task-1' });
         order.push('queued');
         return { taskId: 'task-1' };
       },
@@ -77,6 +101,26 @@ describe('createFastAgentTaskLauncher', () => {
       taskId: 'task-1',
       taskUrl: 'https://roomote.example/task/task-1',
     });
+    expect(mocks.startTaskStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        threadTs: '100.001',
+        recipientTeamId: 'T123',
+        recipientUserId: 'U123',
+        task: expect.objectContaining({
+          id: 'roomote-task-task-1',
+          title: 'Add a regression test',
+          status: 'in_progress',
+        }),
+      }),
+    );
+    expect(mocks.setSlackLiveTaskStreamData).toHaveBeenCalledWith(
+      'task-1',
+      expect.objectContaining({
+        messageTs: 'stream-ts',
+        taskId: 'task-1',
+      }),
+    );
     expect(mocks.enqueueTask).toHaveBeenCalledWith(
       {
         task: {
@@ -97,6 +141,7 @@ describe('createFastAgentTaskLauncher', () => {
               slackChannel: 'C123',
               slackThreadTs: '100.001',
             },
+            liveTaskStream: true,
             environmentId: 'env-1',
           },
         },
@@ -128,6 +173,10 @@ describe('createFastAgentTaskLauncher', () => {
       userMapping: { slackUserId: 'U123' } as never,
       userId: 'user-1',
       teamId: 'T123',
+      slack: {
+        startTaskStream: mocks.startTaskStream,
+        appendTaskStream: mocks.appendTaskStream,
+      } as never,
     });
     const postKickoff = vi.fn().mockRejectedValue(new Error('Slack failed'));
     let queued = false;

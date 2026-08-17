@@ -83,6 +83,80 @@ type SlackUsersListResponse = {
   };
 };
 
+export type SlackTaskStreamStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'complete'
+  | 'error';
+
+export interface SlackTaskStreamUpdate {
+  id: string;
+  title: string;
+  status: SlackTaskStreamStatus;
+  details?: string;
+  output?: string;
+  sources?: Array<{
+    type: 'url';
+    url: string;
+    text: string;
+  }>;
+}
+
+// The documented chunk guidance is 256 chars, but the surface demonstrably
+// demonstrably renders far larger details/output content.
+// callSlackAgentApi logs Slack's response warnings, which is where a dropped
+// oversized chunk would surface.
+const SLACK_TASK_STREAM_CHUNK_MAX_CHARS = 256;
+const SLACK_TASK_STREAM_DETAILS_MAX_CHARS = 3000;
+const SLACK_TASK_STREAM_OUTPUT_MAX_CHARS = 4000;
+
+function truncateWithEllipsis(text: string, maxLength: number): string {
+  const normalized = text.trim();
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength - 1).trimEnd()}…`;
+}
+
+/** Length cap that preserves whitespace: details/output are append deltas
+ * whose leading newlines separate them from already-streamed content. */
+function truncatePreservingWhitespace(text: string, maxLength: number): string {
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  return `${text.slice(0, maxLength - 1)}…`;
+}
+
+/** Cap each task_update field at its rendering-safe budget. */
+function fitTaskStreamUpdate(
+  task: SlackTaskStreamUpdate,
+): Record<string, unknown> {
+  return {
+    type: 'task_update',
+    ...task,
+    title: truncateWithEllipsis(task.title, SLACK_TASK_STREAM_CHUNK_MAX_CHARS),
+    ...(task.details
+      ? {
+          details: truncatePreservingWhitespace(
+            task.details,
+            SLACK_TASK_STREAM_DETAILS_MAX_CHARS,
+          ),
+        }
+      : {}),
+    ...(task.output
+      ? {
+          output: truncatePreservingWhitespace(
+            task.output,
+            SLACK_TASK_STREAM_OUTPUT_MAX_CHARS,
+          ),
+        }
+      : {}),
+  };
+}
+
 const SLACK_USERS_LIST_LIMIT = 999;
 const MAX_SLACK_CONVERSATIONS_REPLIES_RATE_LIMIT_RETRIES = 3;
 const MAX_SLACK_UPDATE_RETRIES = 2;
@@ -925,6 +999,155 @@ export class SlackNotifier {
 
       return null;
     }
+  }
+
+  private async callSlackAgentApi(
+    endpoint:
+      | 'assistant.threads.setStatus'
+      | 'chat.startStream'
+      | 'chat.appendStream'
+      | 'chat.stopStream',
+    payload: Record<string, unknown>,
+  ): Promise<SlackResponse | null> {
+    try {
+      const response = await slackFetch(buildSlackApiUrl(endpoint), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json; charset=utf-8',
+          Authorization: `Bearer ${this.token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        console.error(
+          `[callSlackAgentApi] Slack ${endpoint} failed: ${response.status} ${response.statusText}`,
+        );
+        return null;
+      }
+
+      const result = (await response.json()) as SlackResponse;
+
+      if (!result.ok) {
+        console.error(
+          `[callSlackAgentApi] Slack ${endpoint} error: ${result.error ?? 'unknown_error'}`,
+        );
+      }
+
+      // Slack reports dropped chunks (for example an oversized task_update)
+      // as warnings on an ok:true response; surface them or the stream
+      // renders as an empty message with no trace of why.
+      const warnings = [
+        result.warning,
+        ...(result.response_metadata?.warnings ?? []),
+        ...(result.response_metadata?.messages ?? []),
+      ].filter(Boolean);
+      if (warnings.length > 0) {
+        console.warn(
+          `[callSlackAgentApi] Slack ${endpoint} warnings: ${JSON.stringify(warnings)}`,
+        );
+      }
+
+      return result;
+    } catch (error) {
+      console.error(
+        `[callSlackAgentApi] Failed to call Slack ${endpoint}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Shows Slack's native app/thread status (for example, "Roomote is
+   * thinking…"). Passing an empty status clears the indicator.
+   */
+  public async setAssistantThreadStatus({
+    channel,
+    threadTs,
+    status,
+  }: {
+    channel: string;
+    threadTs: string;
+    status: string;
+  }): Promise<boolean> {
+    const response = await this.callSlackAgentApi(
+      'assistant.threads.setStatus',
+      {
+        channel_id: channel,
+        thread_ts: threadTs,
+        status,
+      },
+    );
+
+    return response?.ok === true;
+  }
+
+  /** Starts a native Slack task stream and returns its message timestamp. */
+  public async startTaskStream({
+    channel,
+    threadTs,
+    recipientTeamId,
+    recipientUserId,
+    task,
+  }: {
+    channel: string;
+    threadTs: string;
+    recipientTeamId?: string;
+    recipientUserId?: string;
+    task: SlackTaskStreamUpdate;
+  }): Promise<string | undefined> {
+    const response = await this.callSlackAgentApi('chat.startStream', {
+      channel,
+      thread_ts: threadTs,
+      // A single entry whose title is the task and whose details/output
+      // carry markdown body content. Timeline mode
+      // renders one entry as one card; plan mode would duplicate the title
+      // as both header and row.
+      task_display_mode: 'timeline',
+      ...(recipientTeamId ? { recipient_team_id: recipientTeamId } : {}),
+      ...(recipientUserId ? { recipient_user_id: recipientUserId } : {}),
+      chunks: [fitTaskStreamUpdate(task)],
+    });
+
+    return response?.ok ? response.ts : undefined;
+  }
+
+  /** Updates the task card inside an existing native Slack stream. */
+  public async appendTaskStream({
+    channel,
+    messageTs,
+    task,
+  }: {
+    channel: string;
+    messageTs: string;
+    task: SlackTaskStreamUpdate;
+  }): Promise<boolean> {
+    const response = await this.callSlackAgentApi('chat.appendStream', {
+      channel,
+      ts: messageTs,
+      chunks: [fitTaskStreamUpdate(task)],
+    });
+
+    return response?.ok === true;
+  }
+
+  /** Settles a native Slack task stream with its final task-card state. */
+  public async stopTaskStream({
+    channel,
+    messageTs,
+    task,
+  }: {
+    channel: string;
+    messageTs: string;
+    task: SlackTaskStreamUpdate;
+  }): Promise<boolean> {
+    const response = await this.callSlackAgentApi('chat.stopStream', {
+      channel,
+      ts: messageTs,
+      chunks: [fitTaskStreamUpdate(task)],
+    });
+
+    return response?.ok === true;
   }
 
   public async postMessage(message: SlackMessage) {

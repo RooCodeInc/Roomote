@@ -1048,6 +1048,8 @@ const sharedTaskPayloadSchema = z.object({
   communicationContextInherited: z.boolean().optional(),
   /** Runless Fast parent that owns this task's user-visible lifecycle. */
   fastAgentParent: fastAgentParentSchema.optional(),
+  /** Native Slack task stream enabled for a Fast-mode delegation. */
+  liveTaskStream: z.boolean().optional(),
   /** Provider event that caused this fresh launch; used for idempotent retries. */
   communicationSourceEventId: z.string().optional(),
   /**
@@ -2008,6 +2010,15 @@ export function populateSnapshotResumeSlackMetadata(
 
   if (conversationUrl) {
     payload.slackConversationUrl = conversationUrl;
+  }
+
+  if (
+    options.sourcePayload &&
+    typeof options.sourcePayload === 'object' &&
+    (options.sourcePayload as { liveTaskStream?: unknown }).liveTaskStream ===
+      true
+  ) {
+    payload.liveTaskStream = true;
   }
 }
 

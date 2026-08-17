@@ -257,9 +257,10 @@ To let Terraform create these records in DigitalOcean DNS, pass
 that zone.
 
 Caddy serves web and worker-facing API traffic on the app domain. The app
-domain routes the reserved `/_roomote-api/*` prefix to the API container after
-stripping that prefix, routes the configured artifact bucket path to MinIO for
-presigned S3 requests, and sends other app-domain paths to the web container.
+domain routes public `/api/webhooks/*` requests directly to the API, routes the
+reserved `/_roomote-api/*` prefix to the API after stripping that prefix,
+routes the configured artifact bucket path to MinIO for presigned S3 requests,
+and sends other app-domain paths to the web container.
 
 ## Create A Deployment
 

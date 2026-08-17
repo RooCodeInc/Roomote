@@ -61,6 +61,28 @@ const configSchema = z.object({
           attachments: z.array(z.unknown()).optional(),
           ephemeral: z.boolean().optional(),
           reactions: z.array(z.string()).optional(),
+          chunks: z.array(z.unknown()).optional(),
+          streaming_state: z.enum(['in_progress', 'completed']).optional(),
+        }),
+      )
+      .optional(),
+    assistantThreadStatuses: z
+      .array(
+        z.object({
+          channel: z.string().min(1),
+          threadTs: z.string().min(1),
+          status: z.string(),
+        }),
+      )
+      .optional(),
+    streamEvents: z
+      .array(
+        z.object({
+          method: z.enum(['start', 'append', 'stop']),
+          channel: z.string().min(1),
+          messageTs: z.string().min(1),
+          threadTs: z.string().optional(),
+          chunks: z.array(z.unknown()),
         }),
       )
       .optional(),

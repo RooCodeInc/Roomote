@@ -108,25 +108,17 @@ describe('processFastAgentMessage', () => {
       teamId: 'T123',
     });
 
-    expect(slack.addReaction).toHaveBeenNthCalledWith(1, {
-      channel: 'D123',
-      timestamp: '100.001',
-      name: 'eyes',
-    });
-    expect(slack.addReaction).toHaveBeenNthCalledWith(2, {
+    expect(slack.addReaction).toHaveBeenCalledOnce();
+    expect(slack.addReaction).toHaveBeenCalledWith({
       channel: 'D123',
       timestamp: '100.001',
       name: 'thumbsup',
     });
-    expect(slack.removeReaction).toHaveBeenCalledWith({
-      channel: 'D123',
-      timestamp: '100.001',
-      name: 'eyes',
-    });
+    expect(slack.removeReaction).not.toHaveBeenCalled();
     expect(mocks.postThreadMessage).not.toHaveBeenCalled();
   });
 
-  it('keeps the processing reaction when it becomes the visible closeout', async () => {
+  it('can intentionally use eyes as an emoji-only closeout', async () => {
     mocks.answerQuestion.mockImplementationOnce(
       async ({
         postSlackReaction,
@@ -172,7 +164,7 @@ describe('processFastAgentMessage', () => {
     expect(mocks.postThreadMessage).not.toHaveBeenCalled();
   });
 
-  it('clears a same-name processing reaction after an intermediate acknowledgement', async () => {
+  it('can intentionally use eyes as an intermediate acknowledgement', async () => {
     mocks.answerQuestion.mockImplementationOnce(
       async ({
         postSlackReaction,
@@ -215,11 +207,7 @@ describe('processFastAgentMessage', () => {
     });
 
     expect(slack.addReaction).toHaveBeenCalledOnce();
-    expect(slack.removeReaction).toHaveBeenCalledWith({
-      channel: 'D123',
-      timestamp: '100.001',
-      name: 'eyes',
-    });
+    expect(slack.removeReaction).not.toHaveBeenCalled();
     expect(mocks.postThreadMessage).toHaveBeenCalledWith(
       expect.objectContaining({ text: 'I found the answer.' }),
     );
@@ -348,10 +336,14 @@ describe('processFastAgentMessage', () => {
     ).rejects.toThrow('Slack did not accept the Fast parent reply.');
   });
 
-  it('shows the task-processing reaction until the fast response is loaded', async () => {
+  it('does not set an assistant thread status or automatic reaction', async () => {
+    // Slack replaces custom status text with its own rotating placeholders
+    // ("Generating response…"), so Fast turns deliberately post no status
+    // and no reaction; the task card is the progress surface.
     const slack = {
       addReaction: vi.fn().mockResolvedValue(true),
       removeReaction: vi.fn().mockResolvedValue(true),
+      setAssistantThreadStatus: vi.fn().mockResolvedValue(true),
       normalizeIncomingText: vi.fn(async (text: string) => text),
       fetchThreadMessages: vi.fn(async () => [
         {
@@ -378,22 +370,8 @@ describe('processFastAgentMessage', () => {
       teamId: 'T123',
     });
 
-    expect(slack.addReaction).toHaveBeenCalledWith({
-      channel: 'D123',
-      timestamp: '100.001',
-      name: 'eyes',
-    });
-    expect(slack.removeReaction).toHaveBeenCalledWith({
-      channel: 'D123',
-      timestamp: '100.001',
-      name: 'eyes',
-    });
-    expect(slack.addReaction.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.answerQuestion.mock.invocationCallOrder[0]!,
-    );
-    expect(mocks.answerQuestion.mock.invocationCallOrder[0]).toBeLessThan(
-      slack.removeReaction.mock.invocationCallOrder[0]!,
-    );
+    expect(slack.setAssistantThreadStatus).not.toHaveBeenCalled();
+    expect(slack.addReaction).not.toHaveBeenCalled();
     expect(mocks.answerQuestion).toHaveBeenCalledOnce();
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -450,11 +428,12 @@ describe('processFastAgentMessage', () => {
     );
   });
 
-  it('clears the task-processing reaction when fast processing fails', async () => {
+  it('clears the native thinking status when fast processing fails', async () => {
     mocks.answerQuestion.mockRejectedValueOnce(new Error('model unavailable'));
     const slack = {
       addReaction: vi.fn().mockResolvedValue(true),
       removeReaction: vi.fn().mockResolvedValue(true),
+      setAssistantThreadStatus: vi.fn().mockResolvedValue(true),
       normalizeIncomingText: vi.fn(async (text: string) => text),
       fetchThreadMessages: vi.fn(async () => []),
     };
@@ -475,11 +454,8 @@ describe('processFastAgentMessage', () => {
       }),
     ).rejects.toThrow('model unavailable');
 
-    expect(slack.removeReaction).toHaveBeenCalledWith({
-      channel: 'D123',
-      timestamp: '100.001',
-      name: 'eyes',
-    });
+    expect(slack.setAssistantThreadStatus).not.toHaveBeenCalled();
+    expect(slack.addReaction).not.toHaveBeenCalled();
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
   });
 
