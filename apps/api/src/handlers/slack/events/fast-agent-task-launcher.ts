@@ -27,6 +27,7 @@ export function createFastAgentTaskLauncher(params: {
       slackUserId: params.event.user ?? params.userMapping.slackUserId,
       persistedSlackUserId: params.userMapping.slackUserId,
       text: prompt,
+      parentOwnsKickoff: true,
       ts: params.event.ts,
       threadTs: threadId,
       repo: ALL_REPOSITORIES,

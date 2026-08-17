@@ -294,6 +294,7 @@ export async function slackAppMention({
   const {
     text,
     agentPromptText,
+    parentOwnsKickoff,
     repo,
     threadMessages,
     latestOwnBotReplyText,
@@ -325,7 +326,7 @@ export async function slackAppMention({
   const currentTurnPolicy = wrapSlackTurnPolicy({
     reactionsAllowed: false,
     preferEmojiAck: false,
-    initialAckRequired: false,
+    initialAckRequired: !parentOwnsKickoff,
   });
   const description = [
     workspaceReadinessContext,

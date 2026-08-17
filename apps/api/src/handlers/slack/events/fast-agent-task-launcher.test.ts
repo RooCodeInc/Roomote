@@ -44,6 +44,7 @@ describe('createFastAgentTaskLauncher', () => {
         teamId: 'T123',
         threadTs: '100.001',
         text: 'Add a regression test',
+        parentOwnsKickoff: true,
         environmentId: 'env-1',
       }),
     );

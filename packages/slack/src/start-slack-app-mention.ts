@@ -131,6 +131,7 @@ export async function startSlackAppMentionTask(input: {
   persistedSlackUserId?: string | null;
   text: string;
   agentPromptText?: string;
+  parentOwnsKickoff?: boolean;
   /**
    * Deprecated: acknowledgement/completion reactions are fixed defaults and
    * cannot be customized. Kept on the input type only for call-site
@@ -281,6 +282,7 @@ export async function startSlackAppMentionTask(input: {
       ...(input.agentPromptText?.trim()
         ? { agentPromptText: input.agentPromptText.trim() }
         : {}),
+      ...(input.parentOwnsKickoff ? { parentOwnsKickoff: true } : {}),
       ...(ackEmoji ? { ackEmoji } : {}),
       ...(completionEmoji ? { completionEmoji } : {}),
       ts: input.ts,

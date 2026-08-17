@@ -1235,6 +1235,8 @@ export const slackAppMentionSchema = sharedTaskSchema.extend({
     user: z.string().optional(),
     text: z.string(),
     agentPromptText: z.string().optional(),
+    /** The delegating parent owns the initial Slack kickoff for this task. */
+    parentOwnsKickoff: z.boolean().optional(),
     /**
      * Optional acknowledgement emoji name that was applied to the source
      * message when the task was kicked off.

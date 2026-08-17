@@ -52,10 +52,7 @@ describe('slackAppMention', () => {
     });
 
     expect(result.prompt).toContain(
-      '&lt;slack_turn_policy reactions_allowed="false" prefer_emoji_ack="false" initial_ack_required="false"&gt;',
-    );
-    expect(result.prompt).toContain(
-      'A kickoff for this task is already visible. Do not send another initial acknowledgement or kickoff',
+      '&lt;slack_turn_policy reactions_allowed="false" prefer_emoji_ack="false"&gt;',
     );
     expect(result.prompt).toContain('&lt;slack_message ts="123.456"&gt;');
     expect(result.prompt).toContain('Can you explain the search_file tool?');
@@ -289,6 +286,32 @@ describe('slackAppMention', () => {
     ).toBeLessThan(result.harnessInstructions?.indexOf('<workflow>') ?? 0);
   });
 
+  it('skips the initial acknowledgement only when the parent owns the kickoff', async () => {
+    const taskSpec: SlackAppMentionTask = {
+      type: TaskPayloadKind.SlackAppMention,
+      payload: {
+        repo: 'Roomote/example-app',
+        channel: 'C123',
+        user: 'U123',
+        text: '@Roomote implement the fix',
+        parentOwnsKickoff: true,
+        ts: '123.456',
+      },
+    };
+
+    const result = await slackAppMention({
+      taskSpec,
+      taskRunUrl: 'https://example.com/tasks/1',
+    });
+
+    expect(result.prompt).toContain(
+      '&lt;slack_turn_policy reactions_allowed="false" prefer_emoji_ack="false" initial_ack_required="false"&gt;',
+    );
+    expect(result.prompt).toContain(
+      'A kickoff for this task is already visible. Do not send another initial acknowledgement or kickoff',
+    );
+  });
+
   it('guides normal Slack frequency answers toward short concrete replies', async () => {
     const taskSpec: SlackAppMentionTask = {
       type: TaskPayloadKind.SlackAppMention,
@@ -307,7 +330,7 @@ describe('slackAppMention', () => {
     });
 
     expect(result.prompt).toContain(
-      '&lt;slack_turn_policy reactions_allowed="false" prefer_emoji_ack="false" initial_ack_required="false"&gt;',
+      '&lt;slack_turn_policy reactions_allowed="false" prefer_emoji_ack="false"&gt;',
     );
     expect(result.prompt).toContain(
       '&lt;slack_message ts="123.456"&gt;\nWhat would influence slack message frequency?\n&lt;/slack_message&gt;',
