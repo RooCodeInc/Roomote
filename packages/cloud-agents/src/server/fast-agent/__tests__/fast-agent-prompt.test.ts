@@ -127,6 +127,10 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Never use "ack" or "progress"');
     expect(prompt).toContain('Use "ignore_event"');
     expect(prompt).toContain(
+      'includes the full secret-redacted error and its machine-readable errorCode',
+    );
+    expect(prompt).toContain('Use "retry_task_start" only for a failure');
+    expect(prompt).toContain(
       'Pull-request-opened events contain authoritative, user-presentable pull request metadata',
     );
     expect(prompt).toContain(

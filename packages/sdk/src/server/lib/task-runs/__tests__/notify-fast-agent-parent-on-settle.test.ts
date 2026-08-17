@@ -169,9 +169,15 @@ describe('notifyFastAgentParentOnSettle', () => {
     );
   });
 
-  it('retries a transient failed startup before notifying the Fast parent', async () => {
+  it('lets the Fast parent retry an eligible failed startup', async () => {
     vi.useFakeTimers();
     mocks.canRetryFailedStart.mockResolvedValueOnce(true);
+    let retryResult: unknown;
+    mocks.deliverParentEvent.mockImplementationOnce(
+      async (input: { retryTaskStart?: () => Promise<unknown> }) => {
+        retryResult = await input.retryTaskStart?.();
+      },
+    );
 
     try {
       const pending = notifyFastAgentParentOnSettle(
@@ -195,12 +201,21 @@ describe('notifyFastAgentParentOnSettle', () => {
       expect(mocks.canRetryFailedStart).toHaveBeenCalledWith(
         expect.objectContaining({ status: RunStatus.Failed }),
       );
-      expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
+      expect(retryResult).toEqual({ success: true, runId: 201 });
+      expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          retryTaskStart: expect.any(Function),
+          event: expect.objectContaining({
+            error: 'Sandbox startup timed out while contacting the provider.',
+            errorCode: TaskRunErrorCode.DockerWorkerStartTimeout,
+          }),
+        }),
+      );
       expect(mocks.recordLifecycle).toHaveBeenCalledWith(
         expect.anything(),
         expect.objectContaining({
           details: expect.objectContaining({
-            reason: 'fast_agent_transient_startup_retry',
+            reason: 'fast_agent_parent_startup_retry',
             retryNumber: 1,
             delayMs: 1_000,
           }),
@@ -211,7 +226,7 @@ describe('notifyFastAgentParentOnSettle', () => {
     }
   });
 
-  it('stops retrying after the bounded startup retry budget', async () => {
+  it('reports the bounded startup retry budget to the Fast parent', async () => {
     mocks.canRetryFailedStart.mockResolvedValueOnce(true);
     mocks.findTaskRun
       .mockResolvedValueOnce({
@@ -222,6 +237,12 @@ describe('notifyFastAgentParentOnSettle', () => {
         sourceRunId: null,
         payload: { fastAgentParent: fastParent },
       });
+    let retryResult: unknown;
+    mocks.deliverParentEvent.mockImplementationOnce(
+      async (input: { retryTaskStart?: () => Promise<unknown> }) => {
+        retryResult = await input.retryTaskStart?.();
+      },
+    );
 
     await notifyFastAgentParentOnSettle(
       makeRun(
@@ -235,25 +256,19 @@ describe('notifyFastAgentParentOnSettle', () => {
     );
 
     expect(mocks.enqueueTaskRelaunch).not.toHaveBeenCalled();
-    expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        event: expect.objectContaining({
-          status: RunStatus.Failed,
-          error: 'HTTP 503 while starting the sandbox.',
-        }),
-      }),
-    );
+    expect(retryResult).toEqual({
+      success: false,
+      error: 'The automatic failed-start retry limit has been reached.',
+    });
   });
 
-  it('does not retry permanent startup errors and redacts the terminal detail', async () => {
-    mocks.canRetryFailedStart.mockResolvedValueOnce(true);
-
+  it('gives the Fast parent the full redacted error and error code', async () => {
     await notifyFastAgentParentOnSettle(
       makeRun(
         { fastAgentParent: fastParent },
         {
           error:
-            'Invalid credential xoxb-1234567890-abcdefghijklmnop while loading https://provider.example/setup',
+            'Invalid credential xoxb-1234567890-abcdefghijklmnop while loading https://provider.example/setup\nProvider configuration must be updated.',
           errorCode: TaskRunErrorCode.DockerWorkerStartTimeout,
         },
       ),
@@ -265,40 +280,14 @@ describe('notifyFastAgentParentOnSettle', () => {
       expect.objectContaining({
         event: expect.objectContaining({
           status: RunStatus.Failed,
-          error: 'Invalid credential [redacted] while loading [redacted URL]',
+          error:
+            'Invalid credential [redacted] while loading https://provider.example/setup\nProvider configuration must be updated.',
+          errorCode: TaskRunErrorCode.DockerWorkerStartTimeout,
         }),
+        retryTaskStart: expect.any(Function),
       }),
     );
-  });
-
-  it('reports the terminal failure when automatic relaunch cannot be queued', async () => {
-    vi.useFakeTimers();
-    mocks.canRetryFailedStart.mockResolvedValueOnce(true);
-    mocks.enqueueTaskRelaunch.mockRejectedValueOnce(new Error('queue offline'));
-
-    try {
-      const pending = notifyFastAgentParentOnSettle(
-        makeRun(
-          { fastAgentParent: fastParent },
-          { error: 'Sandbox startup timed out.' },
-        ),
-        RunStatus.Failed,
-      );
-
-      await vi.advanceTimersByTimeAsync(1_000);
-      await pending;
-
-      expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          event: expect.objectContaining({
-            status: RunStatus.Failed,
-            error: 'Sandbox startup timed out.',
-          }),
-        }),
-      );
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(mocks.enqueueTaskRelaunch).not.toHaveBeenCalled();
   });
 
   it('passes terminal cancellation errors to the Fast parent', async () => {

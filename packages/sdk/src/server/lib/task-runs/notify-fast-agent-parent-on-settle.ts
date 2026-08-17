@@ -8,10 +8,8 @@ import {
 } from '@roomote/cloud-agents/server';
 import {
   RunStatus,
-  TaskRunErrorCode,
   getFastAgentParentFromPayload,
   type FastAgentParent,
-  type TaskRunErrorCode as TaskRunErrorCodeValue,
 } from '@roomote/types';
 import {
   type TaskRun,
@@ -35,41 +33,12 @@ import {
 const NOTIFIED_RESULT_KEY = 'fastAgentParentSettleNotifiedAt';
 const FAST_AGENT_STARTUP_MAX_RETRIES = 2;
 const FAST_AGENT_STARTUP_RETRY_BASE_DELAY_MS = 1_000;
-const FAST_AGENT_ERROR_MAX_CHARS = 300;
-
-const TRANSIENT_STARTUP_ERROR_CODES = new Set<TaskRunErrorCodeValue>([
-  TaskRunErrorCode.DockerDaemonUnreachable,
-  TaskRunErrorCode.DockerWorkerStartTimeout,
-  TaskRunErrorCode.DockerWorkerExitedEarly,
-  TaskRunErrorCode.DockerWorkerFetchFailed,
-]);
-const PERMANENT_STARTUP_ERROR_PATTERN =
-  /\b(?:unauthorized|forbidden|invalid (?:api )?key|invalid credential|authentication failed|permission denied|not configured|configuration|unsupported|not found|missing|required|read[ -]?only|spend limit|quota|billing|address pool exhausted|port is already (?:allocated|in use))\b/i;
-const TRANSIENT_STARTUP_ERROR_PATTERN =
-  /\b(?:timed? out|timeout|temporar(?:y|ily)|unavailable|rate limit|too many requests|connection (?:closed|refused|reset)|network error|socket hang up|fetch failed|econnreset|econnrefused|enotfound|http (?:408|429|5\d\d)|status (?:408|429|5\d\d)|machine unavailable)\b/i;
 
 type SettledStatus =
   | RunStatus.Completed
   | RunStatus.Failed
   | RunStatus.Canceled
   | RunStatus.Idle;
-
-function isTransientFastAgentStartupFailure(run: TaskRun): boolean {
-  const error = run.error?.trim();
-  if (error && PERMANENT_STARTUP_ERROR_PATTERN.test(error)) {
-    return false;
-  }
-
-  if (run.errorCode) {
-    return TRANSIENT_STARTUP_ERROR_CODES.has(run.errorCode);
-  }
-
-  if (!error) {
-    return false;
-  }
-
-  return TRANSIENT_STARTUP_ERROR_PATTERN.test(error);
-}
 
 async function countFastAgentStartupRetries(
   run: TaskRun,
@@ -98,20 +67,25 @@ async function countFastAgentStartupRetries(
   return retries;
 }
 
-async function retryTransientFastAgentStartup(
+async function retryFastAgentStartup(
   run: TaskRun,
   parent: FastAgentParent,
-): Promise<boolean> {
-  if (
-    !isTransientFastAgentStartupFailure(run) ||
-    !(await canRetryFailedStart({ ...run, status: RunStatus.Failed }))
-  ) {
-    return false;
+): Promise<
+  { success: true; runId: number } | { success: false; error: string }
+> {
+  if (!(await canRetryFailedStart({ ...run, status: RunStatus.Failed }))) {
+    return {
+      success: false,
+      error: 'This task is not eligible for a failed-start retry.',
+    };
   }
 
   const retries = await countFastAgentStartupRetries(run, parent);
   if (retries >= FAST_AGENT_STARTUP_MAX_RETRIES) {
-    return false;
+    return {
+      success: false,
+      error: 'The automatic failed-start retry limit has been reached.',
+    };
   }
 
   const retryNumber = retries + 1;
@@ -119,7 +93,7 @@ async function retryTransientFastAgentStartup(
     FAST_AGENT_STARTUP_RETRY_BASE_DELAY_MS * 2 ** (retryNumber - 1);
 
   await delay(delayMs);
-  await enqueueTaskRelaunch({
+  const relaunchedRun = await enqueueTaskRelaunch({
     sourceRunId: run.id,
     actingUserId: run.actingUserId,
   });
@@ -127,9 +101,9 @@ async function retryTransientFastAgentStartup(
     runId: run.id,
     taskId: run.taskId,
     eventType: 'decision',
-    message: `Automatically retried transient Fast child sandbox startup (${retryNumber}/${FAST_AGENT_STARTUP_MAX_RETRIES}).`,
+    message: `Fast parent retried child sandbox startup (${retryNumber}/${FAST_AGENT_STARTUP_MAX_RETRIES}).`,
     details: {
-      reason: 'fast_agent_transient_startup_retry',
+      reason: 'fast_agent_parent_startup_retry',
       fastAgentSessionId: parent.sessionId,
       retryNumber,
       maxRetries: FAST_AGENT_STARTUP_MAX_RETRIES,
@@ -141,23 +115,16 @@ async function retryTransientFastAgentStartup(
     );
   });
 
-  return true;
+  return { success: true, runId: relaunchedRun.id };
 }
 
 function formatFastAgentTerminalError(run: TaskRun): string {
-  const firstLine = run.error?.split(/\r?\n/u, 1)[0]?.trim();
-  if (!firstLine) {
+  const error = run.error?.trim();
+  if (!error) {
     return 'The task stopped without a detailed error. Open the task for diagnostics.';
   }
 
-  const safeError = redactSecrets(firstLine).replace(
-    /https?:\/\/\S+/giu,
-    '[redacted URL]',
-  );
-
-  return safeError.length > FAST_AGENT_ERROR_MAX_CHARS
-    ? `${safeError.slice(0, FAST_AGENT_ERROR_MAX_CHARS - 1)}…`
-    : safeError;
+  return redactSecrets(error);
 }
 
 /** Pass a Fast child's terminal/idle state to its conversational orchestrator. */
@@ -199,22 +166,12 @@ export async function notifyFastAgentParentOnSettle(
   let delivered = false;
 
   try {
-    if (status === RunStatus.Failed) {
-      try {
-        if (await retryTransientFastAgentStartup(run, parent)) {
-          await markSettled();
-          return;
-        }
-      } catch (error) {
-        console.warn(
-          `[notifyFastAgentParentOnSettle] Automatic startup retry failed for run ${run.id}; reporting the terminal failure: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
-
     const pullRequests = await listFastAgentPullRequestContexts(run.taskId);
     await deliverFastAgentParentEvent({
       parent,
+      ...(status === RunStatus.Failed
+        ? { retryTaskStart: () => retryFastAgentStartup(run, parent) }
+        : {}),
       event: {
         type: 'task_settled',
         taskId: run.taskId,
@@ -222,7 +179,10 @@ export async function notifyFastAgentParentOnSettle(
         ...(taskTitle?.trim() ? { title: taskTitle.trim() } : {}),
         status,
         ...(status === RunStatus.Failed || status === RunStatus.Canceled
-          ? { error: formatFastAgentTerminalError(run) }
+          ? {
+              error: formatFastAgentTerminalError(run),
+              ...(run.errorCode ? { errorCode: run.errorCode } : {}),
+            }
           : {}),
         taskUrl: getTaskUrl({
           taskId: run.taskId,

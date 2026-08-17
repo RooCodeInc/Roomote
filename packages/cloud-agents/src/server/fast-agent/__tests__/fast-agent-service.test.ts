@@ -367,6 +367,46 @@ describe('answerFastAgentQuestion', () => {
     );
   });
 
+  it('lets the parent retry a failed delegated task start before closing out', async () => {
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'retry_task_start',
+          message: null,
+          purpose: null,
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          message: 'The sandbox startup looked transient, so I retried it.',
+          purpose: 'closeout',
+        }),
+      });
+    const callbacks = chatCallbacks();
+    const retryTaskStart = vi.fn().mockResolvedValue({
+      success: true,
+      runId: 43,
+    });
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      question:
+        '<delegated_task_event>{"type":"task_settled","status":"failed","error":"HTTP 503","errorCode":null}</delegated_task_event>',
+      platformEvent: true,
+      retryTaskStart,
+      ...callbacks,
+    });
+
+    expect(retryTaskStart).toHaveBeenCalledOnce();
+    expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
+      '"success":true,"runId":43',
+    );
+    expect(result).toBe(
+      'The sandbox startup looked transient, so I retried it.',
+    );
+    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
+  });
+
   it('can close out a lightweight turn with an emoji reaction', async () => {
     mocks.generateObject.mockResolvedValue({
       object: decision({
