@@ -18,6 +18,12 @@ vi.mock('@roomote/slack', () => ({
   setSlackLiveTaskStreamData: mocks.setSlackLiveTaskStreamData,
 }));
 
+vi.mock('@roomote/db/server', () => ({
+  db: { query: { tasks: { findFirst: vi.fn().mockResolvedValue(null) } } },
+  eq: vi.fn(),
+  tasks: { id: 'tasks.id', title: 'tasks.title' },
+}));
+
 import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 
 import { createFastAgentTaskLauncher } from './fast-agent-task-launcher.js';

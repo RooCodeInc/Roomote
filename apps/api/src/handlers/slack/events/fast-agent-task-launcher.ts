@@ -11,6 +11,9 @@ import {
   type SlackNotifier,
 } from '@roomote/slack';
 import {
+  db,
+  eq,
+  tasks,
   type SlackInstallation,
   type SlackUserMapping,
 } from '@roomote/db/server';
@@ -135,6 +138,52 @@ export function createFastAgentTaskLauncher(params: {
       }
     };
 
+    // The generated task title usually lands right after enqueue, well
+    // before the worker's first event; refresh the card's opening
+    // (prompt-derived) title as soon as it exists. Bounded to the
+    // pre-worker window so it never overwrites a step title.
+    const refreshLiveTaskCardTitle = async (taskId: string): Promise<void> => {
+      try {
+        for (const delayMs of [0, 5_000]) {
+          if (delayMs > 0) {
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+          }
+
+          const [data, taskRow] = await Promise.all([
+            getSlackLiveTaskStreamData(taskId),
+            db.query.tasks.findFirst({
+              where: eq(tasks.id, taskId),
+              columns: { title: true },
+            }),
+          ]);
+          const generatedTitle = taskRow?.title?.trim();
+          if (!data) {
+            return;
+          }
+          if (!generatedTitle) {
+            continue;
+          }
+
+          const title = buildSlackLiveTaskTitle(generatedTitle);
+          if (title === data.title) {
+            return;
+          }
+
+          await params.slack.appendTaskStream({
+            channel: data.channel,
+            messageTs: data.messageTs,
+            task: { id: data.taskUpdateId, title, status: 'in_progress' },
+          });
+          await setSlackLiveTaskStreamData(taskId, { ...data, title });
+          return;
+        }
+      } catch (error) {
+        console.error(
+          `[Fast Agent] Failed to refresh live task card title for ${taskId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    };
+
     const launch = await enqueueTask(
       {
         task,
@@ -161,6 +210,8 @@ export function createFastAgentTaskLauncher(params: {
         error: 'The task launch did not return a task ID.',
       };
     }
+
+    void refreshLiveTaskCardTitle(launch.taskId);
 
     return { success: true, taskId: launch.taskId, taskUrl };
   };
