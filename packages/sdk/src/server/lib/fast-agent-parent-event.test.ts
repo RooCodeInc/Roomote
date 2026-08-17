@@ -2,6 +2,8 @@ const mocks = vi.hoisted(() => ({
   acquireTurnLock: vi.fn(),
   releaseTurnLock: vi.fn(),
   answerQuestion: vi.fn(),
+  createLauncher: vi.fn(),
+  launchTask: vi.fn(),
   findSession: vi.fn(),
   findInstallation: vi.fn(),
   findArtifacts: vi.fn(),
@@ -12,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
+  createFastAgentSlackTaskLauncher: mocks.createLauncher,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -87,7 +90,11 @@ describe('deliverFastAgentParentEvent', () => {
     mocks.acquireTurnLock.mockResolvedValue(mocks.releaseTurnLock);
     mocks.releaseTurnLock.mockResolvedValue(undefined);
     mocks.findSession.mockResolvedValue({ id: parent.sessionId, userId: 'u1' });
-    mocks.findInstallation.mockResolvedValue({ botAccessToken: 'xoxb-test' });
+    mocks.findInstallation.mockResolvedValue({
+      botAccessToken: 'xoxb-test',
+      teamDomain: 'acme',
+    });
+    mocks.createLauncher.mockReturnValue(mocks.launchTask);
     mocks.findArtifacts.mockResolvedValue([
       {
         id: 'artifact-1',
@@ -125,8 +132,16 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         platformEvent: true,
+        launchTask: mocks.launchTask,
       }),
     );
+    expect(mocks.createLauncher).toHaveBeenCalledWith({
+      userId: 'u1',
+      teamId: 'T123',
+      teamDomain: 'acme',
+      channelId: 'C123',
+      threadTs: '100.001',
+    });
     expect(mocks.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: 'C123',
