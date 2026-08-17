@@ -131,6 +131,10 @@ describe('native Notion MCP', () => {
         'notion-get-comments',
         'notion-create-pages',
         'notion-update-page',
+        'notion-fetch-page-markdown',
+        'notion-update-page-markdown',
+        'notion-get-async-task',
+        'notion-move-page',
         'notion-append-blocks',
         'notion-create-comment',
       ]),
@@ -161,6 +165,166 @@ describe('native Notion MCP', () => {
           'Notion-Version': '2026-03-11',
         }),
       }),
+    );
+  });
+
+  it('inserts newly created blocks at the beginning of a page', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(Response.json({ object: 'list', results: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const children = [{ object: 'block', type: 'divider', divider: {} }];
+
+    const response = await postMcp(
+      createApp(createRunToken()),
+      createToolCallRequest('notion-append-blocks', {
+        block_id: 'parent-page',
+        children,
+        position: { type: 'start' },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL('https://api.notion.com/v1/blocks/parent-page/children'),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ children, position: { type: 'start' } }),
+      }),
+    );
+  });
+
+  it('inserts newly created blocks after an existing child block', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(Response.json({ object: 'list', results: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const children = [{ object: 'block', type: 'divider', divider: {} }];
+
+    const response = await postMcp(
+      createApp(createRunToken()),
+      createToolCallRequest('notion-append-blocks', {
+        block_id: 'parent-page',
+        children,
+        position: {
+          type: 'after_block',
+          after_block: { id: 'existing-block' },
+        },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL('https://api.notion.com/v1/blocks/parent-page/children'),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({
+          children,
+          position: {
+            type: 'after_block',
+            after_block: { id: 'existing-block' },
+          },
+        }),
+      }),
+    );
+  });
+
+  it('moves a regular page to an editable parent', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(Response.json({ object: 'page', id: 'child-page' }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await postMcp(
+      createApp(createRunToken()),
+      createToolCallRequest('notion-move-page', {
+        page_id: 'child-page',
+        parent: { type: 'page_id', page_id: 'new-parent' },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      new URL('https://api.notion.com/v1/pages/child-page/move'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          parent: { type: 'page_id', page_id: 'new-parent' },
+        }),
+      }),
+    );
+  });
+
+  it('reads and updates page content as enhanced Markdown', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({ object: 'page_markdown', markdown: '# Plan' }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({ object: 'page_markdown', markdown: '# Updated plan' }),
+      )
+      .mockResolvedValueOnce(
+        Response.json({
+          object: 'async_task',
+          id: 'task-1',
+          status: 'running',
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const app = createApp(createRunToken());
+
+    const readResponse = await postMcp(
+      app,
+      createToolCallRequest('notion-fetch-page-markdown', {
+        page_id: 'plan-page',
+        include_transcript: true,
+      }),
+    );
+    const updateResponse = await postMcp(
+      app,
+      createToolCallRequest('notion-update-page-markdown', {
+        page_id: 'plan-page',
+        operation: {
+          type: 'update_content',
+          update_content: {
+            content_updates: [{ old_str: '# Plan', new_str: '# Updated plan' }],
+          },
+        },
+      }),
+    );
+    const taskResponse = await postMcp(
+      app,
+      createToolCallRequest('notion-get-async-task', { task_id: 'task-1' }),
+    );
+
+    expect(readResponse.status).toBe(200);
+    expect(updateResponse.status).toBe(200);
+    expect(taskResponse.status).toBe(200);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      new URL(
+        'https://api.notion.com/v1/pages/plan-page/markdown?include_transcript=true',
+      ),
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      new URL('https://api.notion.com/v1/pages/plan-page/markdown'),
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({
+          type: 'update_content',
+          update_content: {
+            content_updates: [{ old_str: '# Plan', new_str: '# Updated plan' }],
+          },
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      new URL('https://api.notion.com/v1/async_tasks/task-1'),
+      expect.objectContaining({ method: 'GET' }),
     );
   });
 
