@@ -13,6 +13,7 @@ import { getTaskUrl } from '@roomote/cloud-agents/server';
 import {
   FastAgentParentEventDeliveryError,
   deliverFastAgentParentEvent,
+  listFastAgentPullRequestContexts,
 } from '../fast-agent-parent-event';
 import {
   buildFastAgentDeliveringMarker,
@@ -66,6 +67,7 @@ export async function notifyFastAgentParentOnSettle(
   let delivered = false;
 
   try {
+    const pullRequests = await listFastAgentPullRequestContexts(run.taskId);
     await deliverFastAgentParentEvent({
       parent,
       event: {
@@ -78,6 +80,7 @@ export async function notifyFastAgentParentOnSettle(
           taskId: run.taskId,
           utm: { source: 'slack', campaign: 'fast-delegation-settle' },
         }),
+        pullRequests,
       },
     });
     delivered = true;

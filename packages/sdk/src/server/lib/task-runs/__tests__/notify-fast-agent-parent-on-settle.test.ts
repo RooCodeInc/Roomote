@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => {
     updateSet: vi.fn(),
     recordLifecycle: vi.fn(),
     deliverParentEvent: vi.fn(),
+    listPullRequests: vi.fn(),
     FastAgentParentEventDeliveryError,
   };
 });
@@ -52,6 +53,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 
 vi.mock('../../fast-agent-parent-event', () => ({
   deliverFastAgentParentEvent: mocks.deliverParentEvent,
+  listFastAgentPullRequestContexts: mocks.listPullRequests,
   FastAgentParentEventDeliveryError: mocks.FastAgentParentEventDeliveryError,
 }));
 
@@ -79,6 +81,7 @@ describe('notifyFastAgentParentOnSettle', () => {
     vi.clearAllMocks();
     mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
     mocks.deliverParentEvent.mockResolvedValue(undefined);
+    mocks.listPullRequests.mockResolvedValue([]);
     mocks.recordLifecycle.mockResolvedValue(undefined);
   });
 
@@ -98,6 +101,7 @@ describe('notifyFastAgentParentOnSettle', () => {
         title: 'Implement the fix',
         status: RunStatus.Idle,
         taskUrl: 'https://roomote.example/task/child-task',
+        pullRequests: [],
       },
     });
     expect(mocks.recordLifecycle).toHaveBeenCalledWith(
@@ -105,6 +109,44 @@ describe('notifyFastAgentParentOnSettle', () => {
       expect.objectContaining({
         details: expect.objectContaining({
           reason: 'fast_agent_parent_settle_event',
+        }),
+      }),
+    );
+  });
+
+  it('passes current pull request context with the completion event', async () => {
+    mocks.listPullRequests.mockResolvedValueOnce([
+      {
+        provider: 'github',
+        host: 'github.com',
+        repository: 'acme/web',
+        number: 42,
+        title: '[Fix] Keep the PR in the closeout',
+        url: 'https://github.com/acme/web/pull/42',
+        status: 'merged',
+      },
+    ]);
+
+    await notifyFastAgentParentOnSettle(
+      makeRun({ fastAgentParent: fastParent }),
+      RunStatus.Completed,
+      'Implement the fix',
+    );
+
+    expect(mocks.listPullRequests).toHaveBeenCalledWith('child-task');
+    expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          type: 'task_settled',
+          pullRequests: [
+            expect.objectContaining({
+              repository: 'acme/web',
+              number: 42,
+              title: '[Fix] Keep the PR in the closeout',
+              url: 'https://github.com/acme/web/pull/42',
+              status: 'merged',
+            }),
+          ],
         }),
       }),
     );
