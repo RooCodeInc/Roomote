@@ -13,6 +13,7 @@ import {
   isDiscordBotMentioned,
   isDiscordTaskEntryEvent,
   parseDiscordGatewayEvent,
+  stripDiscordBotMention,
   type DiscordGatewayEvent,
 } from '@roomote/communication/discord-event';
 import {
@@ -24,14 +25,9 @@ import {
   setLatestInboundMessageId,
 } from '@roomote/communication/messages';
 import { reactionEmojiMatches } from '@roomote/communication/reaction-emoji';
-import {
-  answerFastAgentQuestion,
-  getTaskUrl,
-} from '@roomote/cloud-agents/server';
-import { Env } from '@roomote/env';
+import { getTaskUrl } from '@roomote/cloud-agents/server';
 import {
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
-  ALL_REPOSITORIES,
   RunStatus,
   activeRunStatuses,
   isSnapshotResumable,
@@ -48,6 +44,7 @@ import {
 } from '@roomote/sdk/server';
 
 import { apiLogger } from '../../logging.js';
+import { hasCommunicationsFastModeDefault } from '../fast-agent-entry.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import {
@@ -72,6 +69,7 @@ import {
   handleDiscordSuggestionReaction,
 } from './callback-actions.js';
 import { maybeHandleDiscordChannelAutoStart } from './channel-auto-start.js';
+import { processDiscordFastAgentMessage } from './fast-agent.js';
 import {
   claimPendingDiscordAccountLinkTask,
   rememberPendingDiscordAccountLinkTask,
@@ -96,7 +94,6 @@ import {
 import {
   discordMetadataForChannel,
   resolveDiscordChannelContext,
-  resolveDiscordWorkspace,
 } from './task-launch.js';
 import { startNewDiscordTask } from './task-orchestration.js';
 import { startDiscordTaskGoal } from './goal-command.js';
@@ -696,6 +693,13 @@ async function processDiscordGatewayEvent(
     userId: senderUserId,
   });
 
+  const defaultFastMessage =
+    message != null &&
+    command == null &&
+    (await hasCommunicationsFastModeDefault(senderUserId))
+      ? message
+      : null;
+
   if (command?.name === 'goal') {
     if (!command.objective) {
       await replyToDiscordEvent({
@@ -749,116 +753,44 @@ async function processDiscordGatewayEvent(
       });
       return { ok: true, fastAnswered: false, reason: 'missing_request' };
     }
-    const history =
-      channel.isThread || channel.isDirectMessage
-        ? await fetchDiscordThreadHistoryBestEffort({
-            provider: resolved.provider,
-            channelId: channel.channelId,
-            ...(channel.parentChannelId
-              ? { parentChannelId: channel.parentChannelId }
-              : {}),
-          })
-        : [];
-    const fastInteraction = interactionReplyContext(event);
-    let didSendVisibleResponse = false;
-    const response = await answerFastAgentQuestion({
+    await processDiscordFastAgentMessage({
+      event,
       question: command.request,
-      threadContext: history.map((entry) => ({
-        user: entry.user,
-        username: entry.username,
-        text: entry.text,
-        ts: entry.id,
-        ...(entry.botId ? { bot_id: entry.botId } : {}),
-      })),
-      userId: senderUserId,
-      apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
-      slackTeamId: `discord:${channel.guildId ?? 'dm'}`,
-      slackChannel: metadata.communicationChannelId,
-      slackThreadTs: interaction?.id ?? event.eventId,
-      senderDisplayName:
-        interaction?.member?.nick ?? sender.global_name ?? sender.username,
-      launchTask: async ({ prompt, environmentId }) => {
-        const workspaceOverride = environmentId
-          ? await resolveDiscordWorkspace({
-              type: 'environment',
-              id: environmentId,
-              name: environmentId,
-            })
-          : {
-              repoForPayload: ALL_REPOSITORIES,
-              workspaceDisplayName: 'all repos',
-            };
-        if (!workspaceOverride) {
-          return {
-            success: false,
-            error: 'The selected environment is unavailable.',
-          };
-        }
-
-        const started = await startNewDiscordTask({
-          provider: resolved.provider,
-          applicationId: resolved.applicationId,
-          requesterDiscordUserId: sender.id,
-          launchOwnerUserId: senderUserId,
-          queuedMessage: {
-            provider: 'discord',
-            text: prompt,
-            user: sender.global_name?.trim() || sender.username,
-            userId: senderUserId,
-            ts: interaction?.id ?? event.eventId,
-            channel: metadata.communicationChannelId,
-            ...(metadata.communicationThreadId
-              ? { threadTs: metadata.communicationThreadId }
-              : {}),
-            turnPolicy: { reactionsAllowed: true },
-          },
-          metadata,
-          channel,
-          forceNewThread: true,
-          skipRoutingConfirmation: true,
-          workspaceOverride,
-        });
-        if (started.status === 'started') {
-          return {
-            success: true,
-            taskId: started.launchResult.taskId,
-            taskUrl: started.taskUrl,
-          };
-        }
-        if (started.status === 'already_started') {
-          return {
-            success: true,
-            taskId: started.existingRun.taskId,
-            taskUrl: started.taskUrl,
-          };
-        }
-        return {
-          success: false,
-          error: `Task launch stopped with status ${started.status}.`,
-        };
-      },
-      postSlackReply: async ({ message: text }) => {
-        await replyToDiscordEvent({
-          provider: resolved.provider,
-          applicationId: resolved.applicationId,
-          channel,
-          interaction: fastInteraction,
-          text,
-        });
-        didSendVisibleResponse = true;
-      },
-      surface: 'discord',
+      sender,
+      senderUserId,
+      provider: resolved.provider,
+      applicationId: resolved.applicationId,
+      channel,
+      metadata,
+      sessionThreadId: interaction?.id ?? event.eventId,
+      interaction: interactionReplyContext(event),
     });
-    if (response && !didSendVisibleResponse) {
-      await replyToDiscordEvent({
-        provider: resolved.provider,
-        applicationId: resolved.applicationId,
-        channel,
-        interaction: fastInteraction,
-        text: response,
-      });
-    }
     return { ok: true, fastAnswered: true };
+  }
+
+  const defaultFastQuestion = defaultFastMessage
+    ? stripDiscordBotMention(
+        getDiscordMessageContent(defaultFastMessage),
+        resolved.botUserId,
+      )
+    : '';
+  if (defaultFastMessage && defaultFastQuestion) {
+    await processDiscordFastAgentMessage({
+      event,
+      question: defaultFastQuestion,
+      sender,
+      senderUserId,
+      provider: resolved.provider,
+      applicationId: resolved.applicationId,
+      channel,
+      metadata,
+      sessionThreadId:
+        channel.isDirectMessage || channel.isThread
+          ? channel.channelId
+          : defaultFastMessage.id,
+      activeTaskId: activeRun?.taskId ?? null,
+    });
+    return { ok: true, fastAnswered: true, fastDefaulted: true };
   }
 
   const messageAttachments = message

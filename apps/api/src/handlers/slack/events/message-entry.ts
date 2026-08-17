@@ -57,8 +57,8 @@ import {
   isBareFastCommandInvocation,
   isFastCommandInvocation,
   processFastAgentMessage,
-  resolveFastAgentEntryMode,
 } from './fast-agent.js';
+import { resolveFastAgentEntryMode } from '../../fast-agent-entry.js';
 import { createFastAgentTaskLauncher } from './fast-agent-task-launcher.js';
 import { processSnapshotResume } from './snapshot-resume.js';
 import {

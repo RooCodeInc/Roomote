@@ -1,9 +1,9 @@
 import {
   extractFastQuestion,
   isFastCommandInvocation,
-  resolveFastAgentEntryMode,
   stripLeadingFastCommandMention,
 } from '../events/fast-agent';
+import { resolveFastAgentEntryMode } from '../../fast-agent-entry';
 
 describe('Slack fast-agent helpers', () => {
   it('strips only the leading mention before parsing !fast', () => {
