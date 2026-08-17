@@ -5,7 +5,7 @@ describe('fast-agent task operations', () => {
     vi.unstubAllGlobals();
   });
 
-  it('preserves a reverse-proxy pathname in the task API base URL', async () => {
+  it('steers messages to active tasks through a reverse-proxy pathname', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ success: true }), {
         status: 200,
@@ -24,13 +24,14 @@ describe('fast-agent task operations', () => {
     );
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://app.example.test/_roomote-api/api/mcp/tasks/task-42/send_message',
+      'https://app.example.test/_roomote-api/api/mcp/tasks/task-42/steer_message',
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
           Authorization: 'Bearer auth-token',
           'Content-Type': 'application/json',
         }),
+        body: JSON.stringify({ message: 'Also add a test.' }),
       }),
     );
   });
