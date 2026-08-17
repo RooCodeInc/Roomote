@@ -3,11 +3,22 @@ import { Env } from '@roomote/env';
 
 type FastAgentEntryMode = 'explicit' | 'default';
 
+export function isFastAgentInputSupported(params: {
+  hasAttachments: boolean;
+}): boolean {
+  return !params.hasAttachments;
+}
+
 export function resolveFastAgentEntryMode(params: {
   explicitInvocation: boolean;
   deploymentSettingEnabled: boolean;
   userDefaultEnabled: boolean;
+  hasAttachments: boolean;
 }): FastAgentEntryMode | null {
+  if (!isFastAgentInputSupported(params)) {
+    return null;
+  }
+
   if (params.explicitInvocation) {
     return 'explicit';
   }
