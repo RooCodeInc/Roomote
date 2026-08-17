@@ -57,6 +57,8 @@ type PostFastAgentSlackReaction = (
   reaction: FastAgentSlackReaction,
 ) => Promise<void>;
 
+export type FastAgentSurface = 'slack' | 'discord';
+
 const fastAgentDecisionSchema = z
   .object({
     action: z.enum([
@@ -451,6 +453,7 @@ export async function answerFastAgentQuestion({
   launchTask,
   postSlackReply,
   postSlackReaction,
+  surface = 'slack',
 }: {
   question: string;
   threadContext?: FastAgentSlackThreadMessage[];
@@ -464,8 +467,9 @@ export async function answerFastAgentQuestion({
   senderSlackUserId?: string;
   activeTaskId?: string | null;
   launchTask?: LaunchFastAgentSlackTask;
-  postSlackReply: PostFastAgentSlackReply;
-  postSlackReaction: PostFastAgentSlackReaction;
+  postSlackReply?: PostFastAgentSlackReply;
+  postSlackReaction?: PostFastAgentSlackReaction;
+  surface?: FastAgentSurface;
 }): Promise<string> {
   let sessionId: string | null = null;
   const normalizedQuestion = normalizeThreadText(question);
@@ -515,6 +519,7 @@ export async function answerFastAgentQuestion({
       availableEnvironments,
       availableIntegrations,
       activeTaskId,
+      surface,
     });
     let prompt = serializeFastAgentMessages(fastAgentMessages);
     const integrationCallSignatures = new Set<string>();
@@ -591,7 +596,7 @@ export async function answerFastAgentQuestion({
           continue;
         }
 
-        await postSlackReply({
+        await postSlackReply?.({
           purpose,
           slackChannel,
           slackThreadTs,
@@ -621,6 +626,11 @@ export async function answerFastAgentQuestion({
           (purpose !== 'ack' && purpose !== 'closeout')
         ) {
           prompt += `\n\n[CHAT TOOL CALL REJECTED]\nsend_chat_reaction_emoji requires a reactionName and purpose "ack" or "closeout". Use "closeout" only when the emoji fully answers the turn.\n[END CHAT TOOL CALL REJECTED]`;
+          continue;
+        }
+
+        if (!postSlackReaction) {
+          prompt += `\n\n[CHAT TOOL CALL REJECTED]\nEmoji reactions are unavailable on this conversation surface. Use send_chat_reply instead.\n[END CHAT TOOL CALL REJECTED]`;
           continue;
         }
 
@@ -722,7 +732,7 @@ export async function answerFastAgentQuestion({
           if (currentActiveTaskId) {
             taskResult = {
               error:
-                'There is already an active task in this Slack thread. Do not start or message another task unless the user explicitly asks.',
+                'There is already an active task in this conversation. Do not start or message another task unless the user explicitly asks.',
             };
           } else if (!taskPrompt) {
             taskResult = { error: 'A task prompt is required.' };
@@ -784,7 +794,7 @@ export async function answerFastAgentQuestion({
 
     const fallback = buildFastAgentTurnFallbackDecision();
     const fallbackMessage = fallback.message ?? 'How can I help?';
-    await postSlackReply({
+    await postSlackReply?.({
       purpose: 'closeout',
       slackChannel,
       slackThreadTs,
@@ -805,7 +815,7 @@ export async function answerFastAgentQuestion({
       : 'I hit an error while handling that request. Please try again in a moment.';
 
     try {
-      await postSlackReply({
+      await postSlackReply?.({
         purpose: 'closeout',
         slackChannel,
         slackThreadTs,

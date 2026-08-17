@@ -99,6 +99,20 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('save_task_memory');
   });
 
+  it('adapts chat lifecycle guidance for Discord', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      surface: 'discord',
+    });
+
+    expect(prompt).toContain('fast mode on Discord');
+    expect(prompt).toContain('Emoji reactions are unavailable on this surface');
+    expect(prompt).not.toContain('<slack_modern_markdown>');
+    expect(prompt).not.toContain(
+      'attributes on the current `<slack_message>` identify its sender',
+    );
+  });
+
   it('grounds first-person requests in current Slack message attributes', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],

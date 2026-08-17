@@ -129,7 +129,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     hasFastAgentSessionMock.mockResolvedValue(true);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([
-      humanMessage('U111', THREAD_TS, '<@UBOT> !fast hi'),
+      humanMessage('U111', THREAD_TS, '<@UBOT> /fast hi'),
       botMessage('101.000', 'Hi there.'),
     ]);
 
