@@ -1,6 +1,7 @@
 import type { Context } from 'hono';
 
 import { db, eq, taskArtifacts } from '@roomote/db/server';
+import { notifyFastAgentParentOnArtifact } from '@roomote/sdk/server';
 
 import type { Variables } from '../../types';
 import {
@@ -51,6 +52,21 @@ export async function markArtifactUploadComplete(
       updatedAt: new Date(),
     })
     .where(eq(taskArtifacts.id, artifactId));
+
+  const notification = await notifyFastAgentParentOnArtifact({
+    id: artifact.id,
+    taskId: artifact.taskId,
+    runId: artifact.runId,
+    path: artifact.path,
+    version: artifact.version,
+    uploaded: true,
+  });
+  if (notification === 'failed') {
+    return c.json(
+      { error: 'Artifact published, but parent notification failed' },
+      503,
+    );
+  }
 
   return new Response(null, { status: 200 });
 }

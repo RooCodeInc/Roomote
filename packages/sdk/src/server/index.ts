@@ -82,6 +82,10 @@ export {
   verifyArtifactSignatureWithKeys,
 } from './lib/artifacts/raw-url';
 export { createTaskArtifactRecord } from './lib/artifacts/create-record';
+export {
+  notifyFastAgentParentOnArtifact,
+  type FastArtifactNotificationResult,
+} from './lib/artifacts/notify-fast-agent-parent';
 
 export {
   SLACK_ACCOUNT_LINK_EDUCATION_DELAY_MS,
