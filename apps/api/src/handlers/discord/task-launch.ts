@@ -363,6 +363,7 @@ export async function launchDiscordTask(input: {
   workspace: DiscordWorkspaceSelection;
   /** `/new` in an existing task thread creates a sibling, never a second run in-place. */
   forceNewThread?: boolean;
+  fastAgentSessionId?: string;
   /**
    * An already-posted message to turn into the acknowledgement instead of
    * posting a new one — a routing card sitting in the task thread becomes the
@@ -452,6 +453,9 @@ export async function launchDiscordTask(input: {
           ? { images: input.queuedMessage.images }
           : {}),
         communicationProvider: 'discord',
+        ...(input.fastAgentSessionId
+          ? { fastAgentSessionId: input.fastAgentSessionId }
+          : {}),
         communicationChannelId,
         ...(input.metadata.communicationGuildId
           ? { communicationGuildId: input.metadata.communicationGuildId }

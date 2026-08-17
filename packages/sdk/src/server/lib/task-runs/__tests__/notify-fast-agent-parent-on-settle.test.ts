@@ -50,7 +50,12 @@ vi.mock('@roomote/db/server', () => ({
     strings: [...strings],
     values,
   })),
-  taskRuns: { id: 'task_runs.id', result: 'task_runs.result' },
+  taskRuns: {
+    id: 'task_runs.id',
+    taskId: 'task_runs.task_id',
+    sourceRunId: 'task_runs.source_run_id',
+    result: 'task_runs.result',
+  },
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -171,7 +176,7 @@ describe('notifyFastAgentParentOnSettle', () => {
 
   it('lets the Fast parent retry an eligible failed startup', async () => {
     vi.useFakeTimers();
-    mocks.canRetryFailedStart.mockResolvedValueOnce(true);
+    mocks.canRetryFailedStart.mockResolvedValue(true);
     let retryResult: unknown;
     mocks.deliverParentEvent.mockImplementationOnce(
       async (input: { retryTaskStart?: () => Promise<unknown> }) => {
@@ -227,8 +232,9 @@ describe('notifyFastAgentParentOnSettle', () => {
   });
 
   it('reports the bounded startup retry budget to the Fast parent', async () => {
-    mocks.canRetryFailedStart.mockResolvedValueOnce(true);
+    mocks.canRetryFailedStart.mockResolvedValue(true);
     mocks.findTaskRun
+      .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce({
         sourceRunId: 100,
         payload: { fastAgentParent: fastParent },
@@ -263,6 +269,7 @@ describe('notifyFastAgentParentOnSettle', () => {
   });
 
   it('gives the Fast parent the full redacted error and error code', async () => {
+    mocks.canRetryFailedStart.mockResolvedValue(true);
     await notifyFastAgentParentOnSettle(
       makeRun(
         { fastAgentParent: fastParent },
@@ -288,6 +295,44 @@ describe('notifyFastAgentParentOnSettle', () => {
       }),
     );
     expect(mocks.enqueueTaskRelaunch).not.toHaveBeenCalled();
+  });
+
+  it('reuses an already-queued retry when the parent event is redelivered', async () => {
+    mocks.canRetryFailedStart.mockResolvedValue(true);
+    mocks.findTaskRun.mockResolvedValueOnce({ id: 201 });
+    let retryResult: unknown;
+    mocks.deliverParentEvent.mockImplementationOnce(
+      async (input: { retryTaskStart?: () => Promise<unknown> }) => {
+        retryResult = await input.retryTaskStart?.();
+      },
+    );
+
+    await notifyFastAgentParentOnSettle(
+      makeRun(
+        { fastAgentParent: fastParent },
+        { error: 'Sandbox startup timed out.' },
+      ),
+      RunStatus.Failed,
+    );
+
+    expect(retryResult).toEqual({ success: true, runId: 201 });
+    expect(mocks.enqueueTaskRelaunch).not.toHaveBeenCalled();
+  });
+
+  it('does not offer retry control when failed-start eligibility rejects the run', async () => {
+    mocks.canRetryFailedStart.mockResolvedValue(false);
+
+    await notifyFastAgentParentOnSettle(
+      makeRun(
+        { fastAgentParent: fastParent },
+        { error: 'The agent already produced output.' },
+      ),
+      RunStatus.Failed,
+    );
+
+    expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
+      expect.not.objectContaining({ retryTaskStart: expect.any(Function) }),
+    );
   });
 
   it('passes terminal cancellation errors to the Fast parent', async () => {

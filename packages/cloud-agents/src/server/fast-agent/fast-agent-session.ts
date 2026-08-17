@@ -12,10 +12,16 @@ import {
   tasks,
   type SlackQuickAnswer,
 } from '@roomote/db/server';
-import { activeRunStatuses } from '@roomote/types';
+import { activeRunStatuses, type RunStatus } from '@roomote/types';
 
 type FastAgentSessionRecord = Pick<SlackQuickAnswer, 'id'> & {
   messages: ModelMessage[];
+};
+
+export type FastAgentActiveTask = {
+  taskId: string;
+  title?: string;
+  status?: RunStatus;
 };
 
 function buildFastAgentSessionWhere({
@@ -148,25 +154,45 @@ export async function hasFastAgentSession({
   return Boolean(session);
 }
 
-export async function getActiveFastAgentTaskId(
+export async function getActiveFastAgentTasks(
   sessionId: string,
-): Promise<string | null> {
-  const [activeRun] = await db
-    .select({ taskId: taskRuns.taskId })
-    .from(taskRuns)
-    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+): Promise<FastAgentActiveTask[]> {
+  const latestRunPerTask = db.$with('latest_fast_agent_task_runs').as(
+    db
+      .selectDistinctOn([taskRuns.taskId], {
+        runId: taskRuns.id,
+        createdAt: taskRuns.createdAt,
+        taskId: taskRuns.taskId,
+        title: tasks.title,
+        status: taskRuns.status,
+        canceledAt: taskRuns.canceledAt,
+      })
+      .from(taskRuns)
+      .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+      .where(
+        and(
+          eq(taskRuns.fastAgentSessionId, sessionId),
+          isNull(tasks.deletedAt),
+        ),
+      )
+      .orderBy(taskRuns.taskId, desc(taskRuns.createdAt), desc(taskRuns.id)),
+  );
+
+  return db
+    .with(latestRunPerTask)
+    .select({
+      taskId: latestRunPerTask.taskId,
+      title: latestRunPerTask.title,
+      status: latestRunPerTask.status,
+    })
+    .from(latestRunPerTask)
     .where(
       and(
-        sql`${taskRuns.payload} -> 'fastAgentParent' ->> 'sessionId' = ${sessionId}`,
-        inArray(taskRuns.status, [...activeRunStatuses]),
-        isNull(taskRuns.canceledAt),
-        isNull(tasks.deletedAt),
+        inArray(latestRunPerTask.status, [...activeRunStatuses]),
+        isNull(latestRunPerTask.canceledAt),
       ),
     )
-    .orderBy(desc(taskRuns.createdAt))
-    .limit(1);
-
-  return activeRun?.taskId ?? null;
+    .orderBy(desc(latestRunPerTask.createdAt));
 }
 
 export async function appendFastAgentSessionMessages({

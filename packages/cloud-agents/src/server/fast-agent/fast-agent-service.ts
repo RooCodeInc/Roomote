@@ -16,8 +16,9 @@ import {
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import {
   appendFastAgentSessionMessages,
-  getActiveFastAgentTaskId,
+  getActiveFastAgentTasks,
   getOrCreateFastAgentSession,
+  type FastAgentActiveTask,
 } from './fast-agent-session';
 import {
   generateTrackedNonTaskObject,
@@ -84,6 +85,12 @@ const fastAgentDecisionSchema = z
     reactionName: z.string().nullable(),
     taskPrompt: z.string().nullable(),
     environmentId: z.string().nullable(),
+    taskId: z
+      .string()
+      .nullable()
+      .describe(
+        'For send_task_message and cancel_task, the selected active task ID. Use null only when exactly one task is active or for every other action.',
+      ),
     taskMessage: z.string().nullable(),
     integrationId: z.string().nullable(),
     toolName: z.string().nullable(),
@@ -111,6 +118,7 @@ function buildFastAgentTurnFallbackDecision(): z.infer<
     reactionName: null,
     taskPrompt: null,
     environmentId: null,
+    taskId: null,
     taskMessage: null,
     integrationId: null,
     toolName: null,
@@ -507,7 +515,7 @@ export async function answerFastAgentQuestion({
   currentMessageTs,
   senderDisplayName,
   senderSlackUserId,
-  activeTaskId = null,
+  activeTasks = [],
   launchTask,
   retryTaskStart,
   postSlackReply,
@@ -526,7 +534,7 @@ export async function answerFastAgentQuestion({
   currentMessageTs?: string;
   senderDisplayName?: string;
   senderSlackUserId?: string;
-  activeTaskId?: string | null;
+  activeTasks?: FastAgentActiveTask[];
   launchTask?: LaunchFastAgentSlackTask;
   retryTaskStart?: RetryFastAgentTaskStart;
   postSlackReply?: PostFastAgentSlackReply;
@@ -570,8 +578,18 @@ export async function answerFastAgentQuestion({
         }),
       ]);
     sessionId = session.id;
-    const resolvedActiveTaskId =
-      activeTaskId ?? (await getActiveFastAgentTaskId(session.id));
+    const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
+    // Surface lookups contribute a task whose thread predates this Fast
+    // session. Session-linked rows contribute every child delegated by Fast,
+    // with their richer title and status taking precedence on duplicate IDs.
+    const resolvedActiveTasks = [
+      ...new Map(
+        [...activeTasks, ...sessionActiveTasks].map((task) => [
+          task.taskId,
+          task,
+        ]),
+      ).values(),
+    ];
     const fastAgentMessages = buildFastAgentMessages({
       question,
       currentMessageAgentContext,
@@ -588,16 +606,17 @@ export async function answerFastAgentQuestion({
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,
       availableIntegrations,
-      activeTaskId: resolvedActiveTaskId,
+      activeTasks: resolvedActiveTasks,
       surface,
       platformEvent,
+      retryTaskStartAvailable: Boolean(retryTaskStart),
     });
     let prompt = serializeFastAgentMessages(fastAgentMessages);
     const integrationCallSignatures = new Set<string>();
-    const completedTaskActions = new Set<
-      'launch_task' | 'send_task_message' | 'cancel_task'
-    >();
-    let currentActiveTaskId = resolvedActiveTaskId;
+    const completedTaskActions = new Set<string>();
+    const currentActiveTasks = new Map(
+      resolvedActiveTasks.map((task) => [task.taskId, task]),
+    );
     let retriedTaskStart = false;
     const flushPendingLifecycleReply = async () => {
       if (!pendingLifecycleReply) {
@@ -862,13 +881,18 @@ export async function answerFastAgentQuestion({
 
       const taskAction = decision.action;
       let taskResult: unknown;
+      const requestedTaskId = decision.taskId?.trim() || null;
+      const taskActionSignature =
+        taskAction === 'launch_task'
+          ? taskAction
+          : `${taskAction}:${requestedTaskId ?? 'implicit'}`;
 
-      if (completedTaskActions.has(taskAction)) {
+      if (completedTaskActions.has(taskActionSignature)) {
         taskResult = {
           error: `${taskAction} has already been attempted in this turn.`,
         };
       } else {
-        completedTaskActions.add(taskAction);
+        completedTaskActions.add(taskActionSignature);
 
         if (taskAction === 'launch_task') {
           pendingLifecycleReply = null;
@@ -877,12 +901,7 @@ export async function answerFastAgentQuestion({
             availableEnvironments.map((environment) => environment.id),
           );
 
-          if (currentActiveTaskId) {
-            taskResult = {
-              error:
-                'There is already an active task in this conversation. Do not start or message another task unless the user explicitly asks.',
-            };
-          } else if (!taskPrompt) {
+          if (!taskPrompt) {
             taskResult = { error: 'A task prompt is required.' };
           } else if (
             decision.environmentId &&
@@ -934,7 +953,9 @@ export async function answerFastAgentQuestion({
               'taskId' in taskResult &&
               typeof taskResult.taskId === 'string'
             ) {
-              currentActiveTaskId = taskResult.taskId;
+              currentActiveTasks.set(taskResult.taskId, {
+                taskId: taskResult.taskId,
+              });
               if (!launchedTaskMessage) {
                 // Launchers without a kickoff-capable enqueue hook (e.g.
                 // Discord) return success without having called postKickoff;
@@ -958,32 +979,62 @@ export async function answerFastAgentQuestion({
         } else if (taskAction === 'send_task_message') {
           await flushPendingLifecycleReply();
           const taskMessage = decision.taskMessage?.trim();
-          if (!currentActiveTaskId) {
+          const targetTaskId =
+            requestedTaskId ??
+            (currentActiveTasks.size === 1
+              ? currentActiveTasks.keys().next().value
+              : null);
+          if (currentActiveTasks.size === 0) {
             taskResult = { error: 'There is no active delegated task.' };
+          } else if (!targetTaskId) {
+            taskResult = {
+              error:
+                'Multiple delegated tasks are active. Ask the user which task they mean before sending a message.',
+            };
+          } else if (!currentActiveTasks.has(targetTaskId)) {
+            taskResult = {
+              error: `Task ${targetTaskId} is not active in this conversation.`,
+            };
           } else if (!taskMessage) {
             taskResult = { error: 'A task message is required.' };
           } else {
             taskResult = await sendFastAgentTaskMessage(
               { userId, apiBaseUrl },
-              { taskId: currentActiveTaskId, message: taskMessage },
+              { taskId: targetTaskId, message: taskMessage },
             );
           }
-        } else if (!currentActiveTaskId) {
+        } else if (currentActiveTasks.size === 0) {
           await flushPendingLifecycleReply();
           taskResult = { error: 'There is no active delegated task.' };
         } else {
           await flushPendingLifecycleReply();
-          taskResult = await cancelFastAgentTask(
-            { userId, apiBaseUrl },
-            currentActiveTaskId,
-          );
-          if (
-            taskResult &&
-            typeof taskResult === 'object' &&
-            'success' in taskResult &&
-            taskResult.success === true
-          ) {
-            currentActiveTaskId = null;
+          const targetTaskId =
+            requestedTaskId ??
+            (currentActiveTasks.size === 1
+              ? currentActiveTasks.keys().next().value
+              : null);
+          if (!targetTaskId) {
+            taskResult = {
+              error:
+                'Multiple delegated tasks are active. Ask the user which task they mean before canceling.',
+            };
+          } else if (!currentActiveTasks.has(targetTaskId)) {
+            taskResult = {
+              error: `Task ${targetTaskId} is not active in this conversation.`,
+            };
+          } else {
+            taskResult = await cancelFastAgentTask(
+              { userId, apiBaseUrl },
+              targetTaskId,
+            );
+            if (
+              taskResult &&
+              typeof taskResult === 'object' &&
+              'success' in taskResult &&
+              taskResult.success === true
+            ) {
+              currentActiveTasks.delete(targetTaskId);
+            }
           }
         }
       }

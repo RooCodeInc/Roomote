@@ -73,6 +73,21 @@ async function retryFastAgentStartup(
 ): Promise<
   { success: true; runId: number } | { success: false; error: string }
 > {
+  const existingRetry = await db.query.taskRuns.findFirst({
+    where: and(
+      eq(taskRuns.taskId, run.taskId),
+      eq(taskRuns.sourceRunId, run.id),
+    ),
+    columns: { id: true },
+  });
+
+  // A parent event may be redelivered when the retry was queued but its Slack
+  // closeout failed. Return the original relaunch instead of attempting a
+  // second side effect or reporting the already-queued retry as a failure.
+  if (existingRetry) {
+    return { success: true, runId: existingRetry.id };
+  }
+
   if (!(await canRetryFailedStart({ ...run, status: RunStatus.Failed }))) {
     return {
       success: false,
@@ -167,11 +182,25 @@ export async function notifyFastAgentParentOnSettle(
 
   try {
     const pullRequests = await listFastAgentPullRequestContexts(run.taskId);
+    let retryTaskStart:
+      | (() => ReturnType<typeof retryFastAgentStartup>)
+      | undefined;
+
+    if (status === RunStatus.Failed) {
+      try {
+        if (await canRetryFailedStart({ ...run, status: RunStatus.Failed })) {
+          retryTaskStart = () => retryFastAgentStartup(run, parent);
+        }
+      } catch (error) {
+        console.warn(
+          `[notifyFastAgentParentOnSettle] Could not determine failed-start retry eligibility for run ${run.id}; delivering the failure without retry control: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+
     await deliverFastAgentParentEvent({
       parent,
-      ...(status === RunStatus.Failed
-        ? { retryTaskStart: () => retryFastAgentStartup(run, parent) }
-        : {}),
+      ...(retryTaskStart ? { retryTaskStart } : {}),
       event: {
         type: 'task_settled',
         taskId: run.taskId,

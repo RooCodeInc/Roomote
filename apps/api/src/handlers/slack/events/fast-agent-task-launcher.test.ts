@@ -91,6 +91,7 @@ describe('createFastAgentTaskLauncher', () => {
             communicationThreadId: '100.001',
             communicationMessageId: '100.002',
             communicationContextInherited: true,
+            fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
             fastAgentParent: {
               sessionId: '11111111-1111-4111-8111-111111111111',
               slackTeamId: 'T123',

@@ -2137,7 +2137,7 @@ function inheritSnapshotResumeSourceControlStamps(
   }
 }
 
-function inheritSnapshotResumeFastAgentContext(
+function inheritSnapshotResumeFastAgentParent(
   payload: SnapshotResumeTask['payload'],
   sourcePayload: unknown,
 ): void {
@@ -2145,7 +2145,29 @@ function inheritSnapshotResumeFastAgentContext(
   if (parent && !payload.fastAgentParent) {
     payload.fastAgentParent = parent;
   }
+}
 
+function inheritSnapshotResumeFastAgentSession(
+  payload: SnapshotResumeTask['payload'],
+  sourcePayload: unknown,
+): void {
+  const fastAgentSessionId = z
+    .string()
+    .uuid()
+    .safeParse(
+      sourcePayload && typeof sourcePayload === 'object'
+        ? (sourcePayload as Record<string, unknown>).fastAgentSessionId
+        : undefined,
+    );
+  if (fastAgentSessionId.success && !payload.fastAgentSessionId) {
+    payload.fastAgentSessionId = fastAgentSessionId.data;
+  }
+}
+
+function inheritSnapshotResumeCommunicationContext(
+  payload: SnapshotResumeTask['payload'],
+  sourcePayload: unknown,
+): void {
   if (
     sourcePayload &&
     typeof sourcePayload === 'object' &&
@@ -2196,7 +2218,9 @@ async function enqueueSnapshotResume(
   }
 
   inheritSnapshotResumeSourceControlStamps(task.payload, sourceRun.payload);
-  inheritSnapshotResumeFastAgentContext(task.payload, sourceRun.payload);
+  inheritSnapshotResumeFastAgentParent(task.payload, sourceRun.payload);
+  inheritSnapshotResumeFastAgentSession(task.payload, sourceRun.payload);
+  inheritSnapshotResumeCommunicationContext(task.payload, sourceRun.payload);
 
   await recordSnapshotResumeRequestEvent({
     runId: sourceRun.id,
@@ -2264,11 +2288,11 @@ async function enqueueSnapshotResume(
       break;
     }
 
-    // Resume rows created before stamps were inherited may lack them even
-    // though an ancestor has them; pick up whatever is still missing while
-    // walking, nearest ancestor first.
+    // Older resume rows may lack established source-control and Slack-parent
+    // stamps. New Fast session IDs always propagate from the immediate source.
     inheritSnapshotResumeSourceControlStamps(task.payload, parentRun.payload);
-    inheritSnapshotResumeFastAgentContext(task.payload, parentRun.payload);
+    inheritSnapshotResumeFastAgentParent(task.payload, parentRun.payload);
+    inheritSnapshotResumeCommunicationContext(task.payload, parentRun.payload);
 
     sourceTaskType = parentRun.payloadKind;
     parentRunId = parentRun.sourceRunId;

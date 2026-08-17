@@ -101,6 +101,7 @@ export async function startNewDiscordTask(input: {
     initiator: TaskInitiator;
   };
   forceNewThread?: boolean;
+  fastAgentSessionId?: string;
   workspaceOverride?: DiscordWorkspaceSelection;
   /**
    * True when the Discord intake path successfully pinned 👀 on the origin
@@ -366,6 +367,9 @@ export async function startNewDiscordTask(input: {
       channel: input.channel,
       workspace,
       forceNewThread: input.forceNewThread,
+      ...(input.fastAgentSessionId
+        ? { fastAgentSessionId: input.fastAgentSessionId }
+        : {}),
       ...(kickoffMessage ? { kickoffMessage } : {}),
       ...(input.intakeAckPinned ? { intakeAckPinned: true } : {}),
     });

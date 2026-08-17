@@ -746,7 +746,7 @@ describe('Discord Gateway event handler', () => {
         question: 'Fix the flaky tests',
         userId: 'roomote-user-1',
         slackThreadTs: 'dm-1',
-        activeTaskId: null,
+        activeTasks: [],
         surface: 'discord',
       }),
     );
@@ -767,12 +767,11 @@ describe('Discord Gateway event handler', () => {
       taskId: 'task-23',
       userId: 'roomote-user-1',
     });
-
     const response = await postEvent(envelope(message()));
 
     expect(response.status).toBe(200);
     expect(mocks.answerFast).toHaveBeenCalledWith(
-      expect.objectContaining({ activeTaskId: 'task-23' }),
+      expect.objectContaining({ activeTasks: [{ taskId: 'task-23' }] }),
     );
     expect(mocks.queueMessage).not.toHaveBeenCalled();
   });
@@ -1898,6 +1897,7 @@ describe('Discord Gateway event handler', () => {
       const launched = await launchTask({
         prompt: 'Investigate the flaky build',
         environmentId: null,
+        parentSessionId: '11111111-1111-4111-8111-111111111111',
       });
       return launched.success
         ? `Started ${launched.taskId}`
@@ -1930,10 +1930,11 @@ describe('Discord Gateway event handler', () => {
         launchTask: expect.any(Function),
       }),
     );
-    expect(mocks.answerFast.mock.calls[0]?.[0].activeTaskId).toBeUndefined();
+    expect(mocks.answerFast.mock.calls[0]?.[0].activeTasks).toBeUndefined();
     expect(mocks.startNewTask).toHaveBeenCalledWith(
       expect.objectContaining({
         forceNewThread: true,
+        fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
         skipRoutingConfirmation: true,
         workspaceOverride: {
           repoForPayload: '__all_repositories__',

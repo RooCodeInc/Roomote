@@ -1,5 +1,6 @@
 import { buildFastAgentSystemPrompt } from '../fast-agent-prompt';
 import { FAST_AGENT_BRAIN_INSTRUCTIONS } from '../fast-agent-constants';
+import { RunStatus } from '@roomote/types';
 
 describe('buildFastAgentSystemPrompt', () => {
   it('uses the default Roomote tone guidance', () => {
@@ -13,7 +14,10 @@ describe('buildFastAgentSystemPrompt', () => {
         },
       ],
       availableIntegrations: [],
-      activeTaskId: 'task-1',
+      activeTasks: [
+        { taskId: 'task-1', title: 'Fix API', status: RunStatus.Running },
+        { taskId: 'task-2', title: 'Update docs', status: RunStatus.Pending },
+      ],
     });
 
     expect(prompt).toContain(
@@ -22,6 +26,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Roomote/example-app');
     expect(prompt).toContain('conversational orchestrator');
     expect(prompt).toContain('Task ID: task-1');
+    expect(prompt).toContain('Task ID: task-2 | Update docs | pending');
+    expect(prompt).toContain('Existing active tasks do not block');
+    expect(prompt).toContain('ask which active task the user means');
     expect(prompt).toContain('let me know how it goes');
     expect(prompt).toContain('send_chat_reply');
     expect(prompt).toContain('send_chat_reaction_emoji');
@@ -119,6 +126,7 @@ describe('buildFastAgentSystemPrompt', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
       platformEvent: true,
+      retryTaskStartAvailable: true,
     });
 
     expect(prompt).toContain(
@@ -129,7 +137,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'includes the full secret-redacted error and its machine-readable errorCode',
     );
-    expect(prompt).toContain('Use "retry_task_start" only for a failure');
+    expect(prompt).toContain(
+      'Use "retry_task_start" only when the failure appears transient',
+    );
     expect(prompt).toContain(
       'Pull-request-opened events contain authoritative, user-presentable pull request metadata',
     );
@@ -138,6 +148,20 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).toContain(
       "Task-settled events include the task's current pullRequests list",
+    );
+  });
+
+  it('does not offer a failed-start retry for ineligible platform events', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      platformEvent: true,
+    });
+
+    expect(prompt).toContain(
+      'No failed-start retry action is available for this event',
+    );
+    expect(prompt).not.toContain(
+      'Use "retry_task_start" only when the failure appears transient',
     );
   });
 

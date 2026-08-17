@@ -36,6 +36,7 @@ export function createFastAgentTaskLauncher(params: {
         communicationThreadId: threadId,
         communicationMessageId: params.event.ts,
         communicationContextInherited: true,
+        fastAgentSessionId: parentSessionId,
         fastAgentParent: {
           sessionId: parentSessionId,
           slackTeamId: params.teamId,
