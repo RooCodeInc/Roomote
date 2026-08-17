@@ -141,6 +141,12 @@ describe('buildFastAgentSystemPrompt', () => {
       'Use "retry_task_start" only when the failure appears transient',
     );
     expect(prompt).toContain(
+      '"launch_task" remains available under the normal orchestration policy',
+    );
+    expect(prompt).toContain(
+      'It creates a separate delegated task; it does not retry the task associated with this event',
+    );
+    expect(prompt).toContain(
       'Pull-request-opened events contain authoritative, user-presentable pull request metadata',
     );
     expect(prompt).toContain(
@@ -162,6 +168,9 @@ describe('buildFastAgentSystemPrompt', () => {
     );
     expect(prompt).not.toContain(
       'Use "retry_task_start" only when the failure appears transient',
+    );
+    expect(prompt).toContain(
+      '"launch_task" remains available under the normal orchestration policy',
     );
   });
 

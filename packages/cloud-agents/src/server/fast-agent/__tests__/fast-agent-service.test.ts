@@ -408,6 +408,77 @@ describe('answerFastAgentQuestion', () => {
     expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
   });
 
+  it('lets a delegated-task platform event launch a separate task', async () => {
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'launch_task',
+          message: null,
+          purpose: null,
+          taskPrompt: 'Investigate the failure with a fresh approach.',
+          environmentId: 'env-1',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          message:
+            'I started a separate investigation. [Follow the task](https://roomote.example/task-2)',
+        }),
+      });
+    const callbacks = chatCallbacks();
+    const launchTask = successfulLaunchTask('task-2');
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      question:
+        '<delegated_task_event>{"type":"task_settled","taskId":"task-1","status":"failed"}</delegated_task_event>',
+      platformEvent: true,
+      launchTask,
+      ...callbacks,
+    });
+
+    expect(launchTask).toHaveBeenCalledWith({
+      prompt: 'Investigate the failure with a fresh approach.',
+      environmentId: 'env-1',
+      parentSessionId: 'session-1',
+      postKickoff: expect.any(Function),
+    });
+    expect(result).toContain('task-2');
+    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
+  });
+
+  it('continues to reject other task controls for platform events', async () => {
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'send_task_message',
+          message: null,
+          purpose: null,
+          taskId: 'task-2',
+          taskMessage: 'Keep working.',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({ message: 'The original task failed.' }),
+      });
+    const callbacks = chatCallbacks();
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      question:
+        '<delegated_task_event>{"type":"task_settled","taskId":"task-1","status":"failed"}</delegated_task_event>',
+      platformEvent: true,
+      activeTasks: [{ taskId: 'task-2', title: 'Other work' }],
+      ...callbacks,
+    });
+
+    expect(mocks.sendTaskMessage).not.toHaveBeenCalled();
+    expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
+      'Do not message or cancel tasks',
+    );
+    expect(result).toBe('The original task failed.');
+  });
+
   it('can close out a lightweight turn with an emoji reaction', async () => {
     mocks.generateObject.mockResolvedValue({
       object: decision({

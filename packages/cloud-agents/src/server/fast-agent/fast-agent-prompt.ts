@@ -137,9 +137,11 @@ ${
 - When it is useful, emit exactly one "send_chat_reply" with purpose "closeout" and describe the outcome naturally in the context of the delegated work. Never use "ack" or "progress" for a platform event, and never copy a canned event sentence.
 ${
   retryTaskStartAvailable
-    ? '- This failed task-settled event includes the full secret-redacted error and its machine-readable errorCode when available. Decide from that evidence whether another startup attempt is worthwhile. Use "retry_task_start" only when the failure appears transient; do not use it for clear configuration, authentication, permission, billing, quota, missing-resource, or other permanent failures.\n- After "retry_task_start", report its result with one closeout. Do not use integrations or any other task-control action for this event.'
+    ? '- This failed task-settled event includes the full secret-redacted error and its machine-readable errorCode when available. Decide from that evidence whether another startup attempt is worthwhile. Use "retry_task_start" only when the failure appears transient; do not use it for clear configuration, authentication, permission, billing, quota, missing-resource, or other permanent failures.\n- After "retry_task_start", report its result with one closeout.'
     : '- No failed-start retry action is available for this event. Report or ignore the event without attempting a retry.'
 }
+- "launch_task" remains available under the normal orchestration policy. It creates a separate delegated task; it does not retry the task associated with this event.
+- Do not use integrations, send messages to tasks, cancel tasks, or react for this event.
 - Artifact events include stable artifact IDs and view URLs. When an image would help the user, include its ID in imageArtifactIds so it renders inline with the same reply. For non-image artifacts, link the supplied view URL when useful.
 - Pull-request-opened events contain authoritative, user-presentable pull request metadata and should be presented unless that exact pull request URL was already reported in this conversation. Briefly name and link the pull request, including its repository, number, title, and current status when available.
 - Task-settled events include the task's current pullRequests list. Use it in the closeout so a pull request produced by the task is named and linked even when its earlier open event was missed; do not describe the pull request as newly opened if the thread already received that update.

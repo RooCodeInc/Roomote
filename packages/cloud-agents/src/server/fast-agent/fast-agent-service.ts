@@ -776,8 +776,8 @@ export async function answerFastAgentQuestion({
         continue;
       }
 
-      if (platformEvent) {
-        prompt += `\n\n[PLATFORM EVENT ACTION REJECTED]\nA delegated-task platform event may only use send_chat_reply, ignore_event, or the offered retry_task_start action. Do not launch, message, or cancel tasks, react, or call integrations for this event.\n[END PLATFORM EVENT ACTION REJECTED]`;
+      if (platformEvent && decision.action !== 'launch_task') {
+        prompt += `\n\n[PLATFORM EVENT ACTION REJECTED]\nA delegated-task platform event may only use send_chat_reply, ignore_event, launch_task, or the offered retry_task_start action. Do not message or cancel tasks, react, or call integrations for this event.\n[END PLATFORM EVENT ACTION REJECTED]`;
         continue;
       }
 
