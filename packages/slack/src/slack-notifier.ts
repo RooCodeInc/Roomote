@@ -1468,8 +1468,7 @@ export class SlackNotifier {
 
         return {
           text,
-          authoredText,
-          agentContext,
+          ...(agentContext ? { authoredText, agentContext } : {}),
           ts: message.ts,
           thread_ts:
             typeof message.thread_ts === 'string'
@@ -1483,7 +1482,7 @@ export class SlackNotifier {
           attachments: Array.isArray(message.attachments)
             ? message.attachments
             : undefined,
-          blocks: Array.isArray(message.blocks) ? message.blocks : undefined,
+          ...(Array.isArray(message.blocks) ? { blocks: message.blocks } : {}),
           files,
         };
       };
