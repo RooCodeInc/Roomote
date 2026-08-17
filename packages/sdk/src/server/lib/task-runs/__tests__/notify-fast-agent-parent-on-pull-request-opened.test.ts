@@ -150,7 +150,9 @@ describe('notifyFastAgentParentOnPullRequestOpened', () => {
       .mockResolvedValueOnce(undefined);
 
     const run = makeRun({ fastAgentParent: fastParent });
-    await notifyFastAgentParentOnPullRequestOpened({ run, pullRequest });
+    await expect(
+      notifyFastAgentParentOnPullRequestOpened({ run, pullRequest }),
+    ).rejects.toThrow('model offline');
     await notifyFastAgentParentOnPullRequestOpened({ run, pullRequest });
 
     expect(mocks.deliverParentEvent).toHaveBeenCalledTimes(2);

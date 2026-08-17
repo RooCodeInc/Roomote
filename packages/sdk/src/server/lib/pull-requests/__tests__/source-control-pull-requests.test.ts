@@ -575,6 +575,47 @@ describe('platform-managed draft state', () => {
     });
   });
 
+  it('propagates a transient Fast notification failure and retries it through the existing PR', async () => {
+    const pullRequest = {
+      number: 9,
+      node_id: 'node-9',
+      html_url: 'https://github.com/acme/web/pull/9',
+      title: '[Feature] X',
+      draft: true,
+      base: { ref: 'main' },
+      assignees: [],
+    };
+    const octokit = makeOctokit({
+      created: pullRequest,
+      updated: pullRequest,
+    });
+    octokit.rest.pulls.list
+      .mockResolvedValueOnce({ data: [] })
+      .mockResolvedValueOnce({ data: [pullRequest] });
+    mockNotifyFastAgentParentOnPullRequestOpened
+      .mockRejectedValueOnce(new Error('Fast turn lock unavailable'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(
+      createOrUpdateSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({ repo: 'acme/web' }),
+        input: { ...githubInput },
+      }),
+    ).rejects.toThrow('Fast turn lock unavailable');
+
+    const retry = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: { ...githubInput },
+    });
+
+    expect(retry.action).toBe('updated');
+    expect(octokit.rest.pulls.create).toHaveBeenCalledTimes(1);
+    expect(octokit.rest.pulls.update).toHaveBeenCalledTimes(1);
+    expect(mockNotifyFastAgentParentOnPullRequestOpened).toHaveBeenCalledTimes(
+      2,
+    );
+  });
+
   it('rejects an unassociated remote PR and safely associates it on retry', async () => {
     const pullRequest = {
       number: 19,

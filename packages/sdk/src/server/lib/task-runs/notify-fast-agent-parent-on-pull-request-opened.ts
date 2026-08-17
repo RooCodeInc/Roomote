@@ -153,5 +153,6 @@ export async function notifyFastAgentParentOnPullRequestOpened(params: {
     } catch {
       // Best-effort claim release for a later retry.
     }
+    throw error;
   }
 }
