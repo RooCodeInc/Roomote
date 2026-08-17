@@ -120,6 +120,9 @@ export interface TaskSession {
 
   /** Refresh the live sandbox connection target after a connection error. */
   refreshConnection: () => Promise<SandboxConnectionTarget | null>;
+
+  /** Refresh durable task state after a live event announces an external change. */
+  refreshTaskSession?: () => Promise<void>;
 }
 
 interface UseTaskSessionOptions {
@@ -134,10 +137,23 @@ export function useTaskSession(
   const queryClient = useQueryClient();
   const [isSnapshotting, setIsSnapshotting] = useState(false);
   const effectiveRefetchInterval = (query?: {
-    state?: { data?: { refetchInterval?: number } };
-  }) =>
-    query?.state?.data?.refetchInterval ??
-    (isSnapshotting ? 2_000 : (refetchInterval ?? false));
+    state?: {
+      data?: {
+        refetchInterval?: number;
+        task?: { goalStatus?: string | null } | null;
+      };
+    };
+  }) => {
+    const data = query?.state?.data;
+    if (data?.task?.goalStatus === 'active') {
+      return 2_000;
+    }
+
+    return (
+      data?.refetchInterval ??
+      (isSnapshotting ? 2_000 : (refetchInterval ?? false))
+    );
+  };
   const sessionQuery = useQuery(
     trpc.sandboxSession.byTaskId.queryOptions(
       { taskId },
@@ -147,8 +163,10 @@ export function useTaskSession(
     ),
   );
   const sessionRefetchInterval =
-    sessionQuery.data?.refetchInterval ??
-    (isSnapshotting ? 2_000 : (refetchInterval ?? false));
+    sessionQuery.data?.task?.goalStatus === 'active'
+      ? 2_000
+      : (sessionQuery.data?.refetchInterval ??
+        (isSnapshotting ? 2_000 : (refetchInterval ?? false)));
 
   // Switch to fast-poll (2s) while a snapshot is in progress so the UI
   // picks up snapshotCreatedAt promptly and shows the "Going to sleep" state.
@@ -306,6 +324,9 @@ export function useTaskSession(
       token: nextToken,
     };
   }, [queryClient]);
+  const refreshTaskSession = useCallback(async () => {
+    await sessionRefetchRef.current();
+  }, []);
 
   return useMemo(
     () => ({
@@ -326,6 +347,7 @@ export function useTaskSession(
       transportErrorCategory,
       isLoading: isSessionLoading || isTokenLoading,
       refreshConnection,
+      refreshTaskSession,
     }),
     [
       taskId,
@@ -343,6 +365,7 @@ export function useTaskSession(
       hasTransportError,
       transportErrorCategory,
       refreshConnection,
+      refreshTaskSession,
     ],
   );
 }

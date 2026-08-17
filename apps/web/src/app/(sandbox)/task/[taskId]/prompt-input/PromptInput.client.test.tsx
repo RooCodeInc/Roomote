@@ -21,6 +21,7 @@ const {
   appendAcpEventMock,
   mutateMock,
   preparePromptAttachmentsMock,
+  queryClientInvalidateQueriesMock,
   queryClientSetQueryDataMock,
   removeOptimisticMessageMock,
   removeOptimisticQueuedMessageMock,
@@ -58,6 +59,7 @@ const {
   appendAcpEventMock: vi.fn(),
   mutateMock: vi.fn(),
   preparePromptAttachmentsMock: vi.fn(),
+  queryClientInvalidateQueriesMock: vi.fn(),
   queryClientSetQueryDataMock: vi.fn(),
   removeOptimisticMessageMock: vi.fn(),
   removeOptimisticQueuedMessageMock: vi.fn(),
@@ -94,6 +96,7 @@ const submittedFilesRef: {
 vi.mock('@tanstack/react-query', () => ({
   useMutation: useMutationMock,
   useQueryClient: () => ({
+    invalidateQueries: queryClientInvalidateQueriesMock,
     setQueryData: queryClientSetQueryDataMock,
   }),
 }));
@@ -322,6 +325,12 @@ describe('PromptInput', () => {
 
     useTRPCMock.mockReturnValue({
       sandboxSession: {
+        byTaskId: {
+          queryKey: vi.fn(({ taskId }: { taskId: string }) => [
+            'sandboxSession.byTaskId',
+            taskId,
+          ]),
+        },
         saveDraftPrompt: {
           mutationOptions: vi.fn((options) => options ?? {}),
         },
@@ -898,6 +907,17 @@ describe('PromptInput', () => {
       });
     });
     expect(sandboxSendPromptMutateMock).not.toHaveBeenCalled();
+    expect(appendOptimisticAcpEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'ship the release',
+        payload: expect.not.objectContaining({ goal: expect.anything() }),
+      }),
+    );
+    await waitFor(() => {
+      expect(queryClientInvalidateQueriesMock).toHaveBeenCalledWith({
+        queryKey: ['sandboxSession.byTaskId', 'task-goal'],
+      });
+    });
     expect(toastSuccessMock).toHaveBeenCalledWith('Goal Mode enabled');
   });
 

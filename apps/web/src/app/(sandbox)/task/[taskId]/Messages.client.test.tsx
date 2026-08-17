@@ -21,6 +21,10 @@ const sandboxMessagesState = vi.hoisted(() => ({
   messages: [] as unknown[],
 }));
 
+const historyReadyState = vi.hoisted(() => ({
+  ready: true,
+}));
+
 vi.mock('@/components/ai-elements', () => ({
   Conversation: ({ children }: { children: ReactNode }) => (
     <div>{children}</div>
@@ -61,7 +65,7 @@ vi.mock('./hooks', () => ({
   useSandboxMessages: () => ({
     messages: sandboxMessagesState.messages,
   }),
-  useSandboxHistoryReady: () => true,
+  useSandboxHistoryReady: () => historyReadyState.ready,
   useSandboxTaskPhase: () => taskPhaseState.phase,
 }));
 
@@ -130,7 +134,11 @@ vi.mock('./ScrollBridge', () => ({
 }));
 
 vi.mock('@/components/system', () => ({
+  CircleAlert: () => <svg aria-hidden="true" />,
+  CircleCheck: () => <svg aria-hidden="true" />,
   Lightbulb: () => <svg aria-hidden="true" />,
+  LoaderCircle: () => <svg aria-hidden="true" />,
+  Skeleton: () => <div data-testid="skeleton" />,
 }));
 
 import { Messages } from './Messages';
@@ -143,6 +151,7 @@ describe('Messages', () => {
     narrationModeState.enabled = false;
     taskPhaseState.phase = null;
     sandboxMessagesState.messages = [];
+    historyReadyState.ready = true;
     mockBuildAcpRenderBlocks.mockReturnValue([]);
   });
 
@@ -456,6 +465,59 @@ describe('Messages', () => {
         shouldHideFirstMessage: true,
       }),
     );
+  });
+
+  it('never decorates the transcript from goal data or matching text', () => {
+    const matchingGoalMessage = {
+      id: 'matching-goal-message',
+      ts: 1_000,
+      role: 'user',
+      kind: 'text',
+      partial: false,
+      sessionId: 'session-1',
+      updateType: 'roomote_runtime.user_prompt',
+      text: 'Count to ten',
+      data: {
+        goal: {
+          objective: 'Count to ten',
+          generation: 'goal-generation:1',
+        },
+      },
+    };
+    sandboxMessagesState.messages = [matchingGoalMessage];
+    mockBuildAcpRenderBlocks.mockReturnValue([
+      { kind: 'message', msg: matchingGoalMessage },
+    ] as never);
+
+    render(
+      <Messages
+        session={
+          {
+            taskId: 'task-goal',
+            prompt: {
+              ...matchingGoalMessage,
+              id: 'session-prompt',
+              sessionId: null,
+              data: {},
+              visibleInTranscript: true,
+            },
+            task: {
+              goalObjective: 'Count to ten',
+              goalStatus: 'complete',
+              goalBlockedReason: null,
+              goalGenerationIds: ['goal-generation:1'],
+            },
+            taskRun: null,
+            artifacts: [],
+          } as never
+        }
+      />,
+    );
+
+    expect(screen.getByText('matching-goal-message')).toBeVisible();
+    expect(screen.queryByTestId('goal-status')).not.toBeInTheDocument();
+    expect(screen.queryByText('Sent as goal')).not.toBeInTheDocument();
+    expect(screen.queryByText('Goal completed')).not.toBeInTheDocument();
   });
 
   it('collapses eligible background activity between text messages', () => {
