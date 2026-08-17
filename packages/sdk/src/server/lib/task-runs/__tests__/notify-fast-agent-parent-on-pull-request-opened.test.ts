@@ -107,6 +107,7 @@ describe('notifyFastAgentParentOnPullRequestOpened', () => {
 
     expect(mocks.deliverParentEvent).toHaveBeenCalledWith({
       parent: fastParent,
+      lockWaitMs: 30_000,
       event: {
         type: 'pull_request_opened',
         taskId: 'child-task',

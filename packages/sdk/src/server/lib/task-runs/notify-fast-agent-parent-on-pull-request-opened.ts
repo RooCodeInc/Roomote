@@ -29,6 +29,8 @@ import {
   buildFastAgentDeliveryClaimPredicate,
 } from './fast-agent-delivery-claim';
 
+const PR_OPEN_DELIVERY_LOCK_WAIT_MS = 30_000;
+
 function buildNotifiedResultKey(prUrl: string): string {
   const digest = createHash('sha256').update(prUrl).digest('hex').slice(0, 24);
   return `fastAgentParentPrOpened:${digest}`;
@@ -103,6 +105,7 @@ export async function notifyFastAgentParentOnPullRequestOpened(params: {
         }),
         pullRequest,
       },
+      lockWaitMs: PR_OPEN_DELIVERY_LOCK_WAIT_MS,
     });
     if (delivery === 'skipped') {
       await markDelivered();
