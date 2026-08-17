@@ -258,7 +258,7 @@ describe('notifyFastAgentParentOnSettle', () => {
     expect(mocks.enqueueTaskRelaunch).not.toHaveBeenCalled();
     expect(retryResult).toEqual({
       success: false,
-      error: 'The automatic failed-start retry limit has been reached.',
+      error: 'The failed-start retry limit has been reached.',
     });
   });
 

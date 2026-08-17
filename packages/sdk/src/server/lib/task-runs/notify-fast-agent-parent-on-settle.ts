@@ -84,7 +84,7 @@ async function retryFastAgentStartup(
   if (retries >= FAST_AGENT_STARTUP_MAX_RETRIES) {
     return {
       success: false,
-      error: 'The automatic failed-start retry limit has been reached.',
+      error: 'The failed-start retry limit has been reached.',
     };
   }
 
@@ -111,7 +111,7 @@ async function retryFastAgentStartup(
     },
   }).catch((error) => {
     console.warn(
-      `[notifyFastAgentParentOnSettle] Failed to record automatic startup retry for run ${run.id}: ${error instanceof Error ? error.message : String(error)}`,
+      `[notifyFastAgentParentOnSettle] Failed to record parent-requested startup retry for run ${run.id}: ${error instanceof Error ? error.message : String(error)}`,
     );
   });
 
