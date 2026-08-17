@@ -106,6 +106,7 @@ describe('answerFastAgentQuestion', () => {
 
     const result = await answerFastAgentQuestion({
       ...baseParams,
+      currentMessageAgentContext: 'Slack block text:\nState: New',
       ...callbacks,
     });
 
@@ -122,6 +123,9 @@ describe('answerFastAgentQuestion', () => {
     );
     expect(mocks.generateObject.mock.calls[0]?.[0]?.prompt).toContain(
       '<slack_message ts="100.2" sender_slack_id="U123" sender_name="Matt" sender_github="mrubens">',
+    );
+    expect(mocks.generateObject.mock.calls[0]?.[0]?.prompt).toContain(
+      '<slack_message_context>\nSlack block text:\nState: New\n</slack_message_context>',
     );
     expect(mocks.generateObject).toHaveBeenCalledOnce();
     expect(

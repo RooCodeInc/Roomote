@@ -44,6 +44,37 @@ describe('processFastAgentMessage', () => {
     );
   });
 
+  it('keeps injected Slack context separate from the Fast question', async () => {
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'D123',
+        user: 'U123',
+        authoredText: '!fast investigate this',
+        agentContext: 'Slack block text:\nState: New',
+        text: '!fast investigate this\n\nSlack block text:\nState: New',
+        ts: '100.001',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'investigate this',
+        currentMessageAgentContext: 'Slack block text:\nState: New',
+      }),
+    );
+  });
+
   it('can answer with a reaction without posting a text fallback', async () => {
     mocks.answerQuestion.mockImplementationOnce(
       async ({
