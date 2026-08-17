@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
+import type { RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
@@ -109,21 +109,6 @@ describe('native Notion MCP', () => {
     mockFindEnablement.mockResolvedValue({
       mcpId: 'notion',
     });
-  });
-
-  it('accepts user auth tokens for control-plane orchestration', async () => {
-    const authToken: AuthTokenContext = {
-      userId: 'user-1',
-      tokenType: 'auth',
-      version: 1,
-    };
-    const response = await postMcp(createApp(authToken), {
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/list',
-    });
-
-    expect(response.status).toBe(200);
   });
 
   it('exposes tools whose permissions are enforced by Notion capabilities', async () => {

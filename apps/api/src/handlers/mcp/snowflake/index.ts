@@ -1,23 +1,13 @@
 import { Hono } from 'hono';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import {
-  and,
-  db,
-  eq,
-  isNull,
-  mcpConnections,
-  taskRuns,
-} from '@roomote/db/server';
+import { and, db, eq, isNull, mcpConnections } from '@roomote/db/server';
 import { isMcpConnectionSnowflakeConfig } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
-import {
-  isRunTokenContext,
-  McpProxyError,
-  type McpAuthContext,
-} from '../proxy-utils';
+import { resolveDeploymentMcpAuth } from '../deployment-mcp-auth';
+import { McpProxyError, type McpAuthContext } from '../proxy-utils';
 import { registerSnowflakeTools } from './tools';
 
 const SNOWFLAKE_MCP_SERVER_INFO = {
@@ -29,51 +19,6 @@ function createSnowflakeTransport() {
   return new WebStandardStreamableHTTPServerTransport({
     enableJsonResponse: true,
   });
-}
-
-async function resolveSnowflakeMcpAuth(
-  authContext: Variables['authContext'],
-): Promise<McpAuthContext> {
-  if (!authContext) {
-    throw new McpProxyError(
-      401,
-      'Unauthorized: missing or invalid bearer token',
-    );
-  }
-
-  if (isRunTokenContext(authContext)) {
-    const taskRun = await db.query.taskRuns.findFirst({
-      columns: { id: true },
-      where: eq(taskRuns.id, authContext.runId),
-    });
-
-    if (!taskRun) {
-      throw new McpProxyError(404, 'Task run not found for this MCP token');
-    }
-
-    // No principal equality check: the run-scoped token IS the authorization
-    // (only this run's sandbox holds it), and Snowflake credentials come from a
-    // deployment-scoped connection, so the token's userId plays no role in
-    // credential selection. The token's userId is mint-time attribution while
-    // task_runs.actingUserId is current-steering attribution — they
-    // legitimately diverge once a web steer or follow-up switches the acting
-    // user mid-run.
-
-    return {
-      userId: authContext.userId,
-      tokenType: 'run',
-      runId: authContext.runId,
-    };
-  }
-
-  if (authContext.tokenType === 'auth') {
-    return { userId: authContext.userId, tokenType: 'auth' };
-  }
-
-  throw new McpProxyError(
-    403,
-    'Snowflake MCP requires a user auth token or task run token for server-side credential access',
-  );
 }
 
 async function resolveSnowflakeConnection() {
@@ -123,7 +68,10 @@ snowflakeMcp.on(['POST', 'GET', 'DELETE'], '/', async (c) => {
   const transport = createSnowflakeTransport();
 
   try {
-    const auth = await resolveSnowflakeMcpAuth(c.get('authContext'));
+    const auth = await resolveDeploymentMcpAuth(
+      c.get('authContext'),
+      'Snowflake',
+    );
     const connectionConfig = await resolveSnowflakeConnection();
     const server = createSnowflakeMcpServer(auth, connectionConfig);
 
