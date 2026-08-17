@@ -513,7 +513,20 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
           threadTs: event.thread_ts,
         });
 
-    if (isFastAgentThread || roomoteThreadMatch) {
+    const taskThreadRoute =
+      isFastAgentThread || roomoteThreadMatch
+        ? null
+        : await resolveSlackThreadFollowUpRoute({
+            threadId: event.thread_ts,
+            channelId: event.channel,
+            slackTeamId: teamId,
+          });
+
+    if (
+      isFastAgentThread ||
+      roomoteThreadMatch ||
+      (taskThreadRoute && taskThreadRoute.kind !== 'fresh')
+    ) {
       eligibilityReason = 'roomote-owned-thread';
     }
   }
