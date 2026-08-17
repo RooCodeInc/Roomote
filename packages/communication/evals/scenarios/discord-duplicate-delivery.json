@@ -2,8 +2,8 @@
   "name": "discord-duplicate-delivery",
   "description": "The Gateway redelivers the same durable envelope (identical eventId) 6 seconds apart; the Redis event-id gate must make handling exactly-once.",
   "criteria": [
-    "The bot answered the question exactly once — there is exactly one bot answer message in channel 500000000000000001.",
-    "The second delivery of the same eventId did not produce a second acknowledgement or a second task launch."
+    "The bot answered the /fast interaction exactly once by editing its deferred response.",
+    "The second delivery of the same eventId did not produce a second interaction answer or a task launch."
   ],
   "state": {
     "channels": [{ "id": "500000000000000001", "name": "grace-dm", "type": 1 }]
@@ -12,32 +12,52 @@
     {
       "delayMs": 0,
       "envelope": {
-        "kind": "message",
+        "kind": "interaction",
         "eventId": "$M1",
         "payload": {
           "id": "$M1",
+          "application_id": "200000000000000001",
+          "type": 2,
+          "token": "mock-duplicate-fast-token",
           "channel_id": "500000000000000001",
-          "content": "!fast what does the /new command do on Discord?",
-          "author": { "id": "111000111000111001", "username": "grace_mock" },
-          "mentions": [],
-          "attachments": [],
-          "channel": { "id": "500000000000000001", "type": 1 }
+          "user": { "id": "111000111000111001", "username": "grace_mock" },
+          "data": {
+            "name": "fast",
+            "type": 1,
+            "options": [
+              {
+                "name": "request",
+                "type": 3,
+                "value": "what does the /new command do on Discord?"
+              }
+            ]
+          }
         }
       }
     },
     {
       "delayMs": 6000,
       "envelope": {
-        "kind": "message",
+        "kind": "interaction",
         "eventId": "$M1",
         "payload": {
           "id": "$M1",
+          "application_id": "200000000000000001",
+          "type": 2,
+          "token": "mock-duplicate-fast-token",
           "channel_id": "500000000000000001",
-          "content": "!fast what does the /new command do on Discord?",
-          "author": { "id": "111000111000111001", "username": "grace_mock" },
-          "mentions": [],
-          "attachments": [],
-          "channel": { "id": "500000000000000001", "type": 1 }
+          "user": { "id": "111000111000111001", "username": "grace_mock" },
+          "data": {
+            "name": "fast",
+            "type": 1,
+            "options": [
+              {
+                "name": "request",
+                "type": 3,
+                "value": "what does the /new command do on Discord?"
+              }
+            ]
+          }
         }
       }
     }

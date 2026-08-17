@@ -342,6 +342,32 @@ describe('Discord Gateway event normalization', () => {
     expect(isDiscordTaskEntryEvent(event)).toBe(true);
     expect(discordEventToQueuedCommunicationMessage(event)).toBeNull();
   });
+
+  it('parses fast commands without queueing them as ordinary messages', () => {
+    const event = parse({
+      op: 0,
+      t: 'INTERACTION_CREATE',
+      d: {
+        id: 'interaction-fast',
+        application_id: 'application-1',
+        type: 2,
+        token: 'token',
+        channel_id: 'channel-1',
+        user: { id: 'user-1', username: 'matt' },
+        data: {
+          name: 'FAST',
+          options: [{ name: 'request', type: 3, value: '  Summarize this  ' }],
+        },
+      },
+    });
+
+    expect(getDiscordInteractionCommand(event)).toEqual({
+      name: 'fast',
+      request: 'Summarize this',
+    });
+    expect(isDiscordTaskEntryEvent(event)).toBe(true);
+    expect(discordEventToQueuedCommunicationMessage(event)).toBeNull();
+  });
 });
 
 describe('component interaction envelopes', () => {

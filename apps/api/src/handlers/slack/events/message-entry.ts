@@ -57,8 +57,8 @@ import {
   isBareFastCommandInvocation,
   isFastCommandInvocation,
   processFastAgentMessage,
-  resolveFastAgentEntryMode,
 } from './fast-agent.js';
+import { resolveFastAgentEntryMode } from '../../fast-agent-entry.js';
 import { createFastAgentTaskLauncher } from './fast-agent-task-launcher.js';
 import { processSnapshotResume } from './snapshot-resume.js';
 import {
@@ -1259,7 +1259,7 @@ async function maybeHandleChannelAutoStart(params: {
       slack: context.slack,
       userId: userMapping.userId,
       teamId: context.teamId,
-      usageText: 'Use `!fast <question>` in this channel.',
+      usageText: 'Use `/fast <question>` in this channel.',
       continuation: fastAgentEntryMode === 'default',
       processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent response failed for auto-start thread ${channelAutoStartEvent.ts}:`,
