@@ -8,60 +8,19 @@ import {
   eq,
   isNull,
   mcpConnections,
-  taskRuns,
 } from '@roomote/db/server';
 import { isMcpConnectionNotionConfig } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
-import {
-  isRunTokenContext,
-  McpProxyError,
-  type McpAuthContext,
-} from '../proxy-utils';
+import { resolveDeploymentMcpAuth } from '../deployment-mcp-auth';
+import { McpProxyError } from '../proxy-utils';
 import { registerNotionTools } from './tools';
 
 const NOTION_MCP_SERVER_INFO = {
   name: 'roomote-notion-mcp',
   version: '1.0.0',
 } as const;
-
-async function resolveNotionMcpAuth(
-  authContext: Variables['authContext'],
-): Promise<McpAuthContext> {
-  if (!authContext) {
-    throw new McpProxyError(
-      401,
-      'Unauthorized: missing or invalid bearer token',
-    );
-  }
-
-  if (isRunTokenContext(authContext)) {
-    const taskRun = await db.query.taskRuns.findFirst({
-      columns: { id: true },
-      where: eq(taskRuns.id, authContext.runId),
-    });
-
-    if (!taskRun) {
-      throw new McpProxyError(404, 'Task run not found for this MCP token');
-    }
-
-    return {
-      userId: authContext.userId,
-      tokenType: 'run',
-      runId: authContext.runId,
-    };
-  }
-
-  if (authContext.tokenType === 'auth') {
-    return { userId: authContext.userId, tokenType: 'auth' };
-  }
-
-  throw new McpProxyError(
-    403,
-    'Notion MCP requires a user auth token or task run token for server-side credential access',
-  );
-}
 
 async function resolveNotionConnection() {
   const [connection, enablement] = await Promise.all([
@@ -119,7 +78,7 @@ notionMcp.on(['POST', 'GET', 'DELETE'], '/', async (c) => {
   });
 
   try {
-    await resolveNotionMcpAuth(c.get('authContext'));
+    await resolveDeploymentMcpAuth(c.get('authContext'), 'Notion');
     const connection = await resolveNotionConnection();
     const server = createNotionMcpServer(connection);
 

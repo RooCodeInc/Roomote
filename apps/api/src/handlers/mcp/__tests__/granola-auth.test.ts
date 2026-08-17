@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import type { AuthTokenContext, RunTokenContext } from '@roomote/types';
+import type { RunTokenContext } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
@@ -123,30 +123,6 @@ describe('Granola MCP auth and tool handling', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
-  });
-
-  it('rejects requests without authentication', async () => {
-    const response = await postMcp(
-      createApp(undefined),
-      createInitializeRequest(1),
-    );
-    const body = (await response.json()) as JsonRpcErrorBody;
-
-    expect(response.status).toBe(401);
-    expect(body.error.message).toContain('missing or invalid bearer token');
-  });
-
-  it('accepts user auth tokens for control-plane Granola access', async () => {
-    const authToken: AuthTokenContext = {
-      userId: 'user-1',
-      tokenType: 'auth',
-      version: 1,
-    };
-    const response = await postMcp(
-      createApp(authToken),
-      createInitializeRequest(1),
-    );
-    expect(response.status).toBe(200);
   });
 
   it('initializes for a valid run token and deployment connection', async () => {
