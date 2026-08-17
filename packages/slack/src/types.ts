@@ -67,6 +67,7 @@ export interface SlackChannelMessage extends SlackThreadMessage {
 export interface SlackConversationMessage {
   text: string;
   authoredText?: string;
+  agentContext?: string;
   ts: string;
   thread_ts?: string;
   user?: string;
@@ -100,6 +101,7 @@ export interface SlackEvent {
   user: string;
   text: string;
   authoredText?: string;
+  agentContext?: string;
   ts: string;
   /** Internal turn ID when an event is synthesized from another Slack event. */
   deliveryTs?: string;

@@ -984,7 +984,8 @@ export async function processSlackChannelAutoStartTask(params: {
             ? undefined
             : launchIdentity.slackUserId,
         channel: event.channel,
-        prompt: event.text,
+        prompt: event.authoredText ?? event.text,
+        slackMessageContext: event.agentContext,
         threadTs: threadId,
         originMessageTs: event.ts,
         processedImages: images.length > 0 ? images : undefined,
@@ -1241,13 +1242,15 @@ async function maybeHandleChannelAutoStart(params: {
     userMapping && typeof channelAutoStartEvent.user === 'string'
       ? resolveFastAgentEntryMode({
           explicitInvocation: isBareFastCommandInvocation(
-            channelAutoStartEvent.text,
+            channelAutoStartEvent.authoredText ?? channelAutoStartEvent.text,
           ),
           deploymentSettingEnabled:
             Env.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED === true,
           userDefaultEnabled:
             userMapping.communicationsFastModeDefault &&
-            !isRemovedEvalCommandInvocation(channelAutoStartEvent.text),
+            !isRemovedEvalCommandInvocation(
+              channelAutoStartEvent.authoredText ?? channelAutoStartEvent.text,
+            ),
         })
       : null;
 
@@ -1271,7 +1274,9 @@ async function maybeHandleChannelAutoStart(params: {
   if (
     userMapping &&
     typeof channelAutoStartEvent.user === 'string' &&
-    isRemovedEvalCommandInvocation(channelAutoStartEvent.text)
+    isRemovedEvalCommandInvocation(
+      channelAutoStartEvent.authoredText ?? channelAutoStartEvent.text,
+    )
   ) {
     await postRemovedEvalCommandMessage({
       event: channelAutoStartEvent,
@@ -1469,7 +1474,8 @@ async function processAutomatedAppMentionTask(params: {
             ? undefined
             : launchIdentity.slackUserId,
         channel: event.channel,
-        prompt: event.text,
+        prompt: event.authoredText ?? event.text,
+        slackMessageContext: event.agentContext,
         threadTs: threadId,
         originMessageTs: event.ts,
         processedImages: images.length > 0 ? images : undefined,
@@ -1712,13 +1718,14 @@ async function handleSlackEntryEvent(params: {
     activeTaskId: activeRun?.taskId,
   });
 
+  const authoredEventText = event.authoredText ?? event.text;
   const fastAgentEntryMode = resolveFastAgentEntryMode({
-    explicitInvocation: isFastCommandInvocation(event.text),
+    explicitInvocation: isFastCommandInvocation(authoredEventText),
     deploymentSettingEnabled:
       Env.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED === true,
     userDefaultEnabled:
       userMapping.communicationsFastModeDefault &&
-      !isRemovedEvalCommandInvocation(event.text),
+      !isRemovedEvalCommandInvocation(authoredEventText),
   });
 
   if (fastAgentEntryMode) {
@@ -1738,7 +1745,9 @@ async function handleSlackEntryEvent(params: {
     return;
   }
 
-  const isFastAgentContinuation = isRemovedEvalCommandInvocation(event.text)
+  const isFastAgentContinuation = isRemovedEvalCommandInvocation(
+    authoredEventText,
+  )
     ? false
     : await hasFastAgentSession({
         slackTeamId: teamId,
@@ -1833,7 +1842,7 @@ async function handleSlackEntryEvent(params: {
 
   if (
     event.type === 'app_mention' &&
-    isRemovedEvalCommandInvocation(event.text)
+    isRemovedEvalCommandInvocation(authoredEventText)
   ) {
     await postRemovedEvalCommandMessage({
       event,

@@ -1101,6 +1101,27 @@ export function appendSlackAttachmentContext(
   attachments?: unknown[],
   blocks?: unknown[],
 ): string {
+  const attachmentContext = formatSlackAttachmentContext(
+    text,
+    attachments,
+    blocks,
+  );
+
+  if (!attachmentContext) {
+    return text;
+  }
+
+  const normalizedText = text.trim();
+  return normalizedText
+    ? `${normalizedText}\n\n${attachmentContext}`
+    : attachmentContext;
+}
+
+export function formatSlackAttachmentContext(
+  text: string,
+  attachments?: unknown[],
+  blocks?: unknown[],
+): string | undefined {
   const textWithForwardedContext = appendSlackForwardedMessageContext(
     text,
     attachments,
@@ -1113,17 +1134,15 @@ export function appendSlackAttachmentContext(
   );
   const blockLinkContext = formatSlackBlockLinkContext(blocks);
   const additionalContexts = [
+    formatSlackForwardedMessageContext(attachments),
     attachmentTitleContext,
     blockTextContext,
     blockLinkContext,
   ].filter((context): context is string => Boolean(context));
 
   if (additionalContexts.length === 0) {
-    return textWithForwardedContext;
+    return undefined;
   }
 
-  const normalizedText = textWithForwardedContext.trim();
-  return normalizedText
-    ? `${normalizedText}\n\n${additionalContexts.join('\n\n')}`
-    : additionalContexts.join('\n\n');
+  return additionalContexts.join('\n\n');
 }

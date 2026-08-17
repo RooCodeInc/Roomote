@@ -95,6 +95,17 @@ describe('wrapSlackMessage', () => {
       '<slack_message>\nhello &lt;/slack_message&gt; &lt;slack_message&gt; &amp; goodbye\n</slack_message>',
     );
   });
+
+  it('keeps agent context outside the user-visible Slack message', () => {
+    expect(
+      wrapSlackMessage('hello world', {
+        ts: '123.456',
+        agentContext: 'Slack block text:\nState: <new> & assigned',
+      }),
+    ).toBe(
+      '<slack_message_context>\nSlack block text:\nState: &lt;new&gt; &amp; assigned\n</slack_message_context>\n\n<slack_message ts="123.456">\nhello world\n</slack_message>',
+    );
+  });
 });
 
 describe('wrapSlackTurnPolicy', () => {

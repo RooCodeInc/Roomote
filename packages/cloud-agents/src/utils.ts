@@ -134,12 +134,17 @@ export function wrapSlackMessage(
     senderSlackId?: string;
     senderName?: string;
     senderGithub?: string;
+    agentContext?: string;
   },
 ): string {
   const normalizedText = escapeSlackMessageContent(text.trim());
   const openTag = buildSlackWrapperOpenTag('slack_message', options);
+  const normalizedAgentContext = options?.agentContext?.trim();
+  const contextBlock = normalizedAgentContext
+    ? `<slack_message_context>\n${escapeSlackMessageContent(normalizedAgentContext)}\n</slack_message_context>\n\n`
+    : '';
 
-  return `${openTag}\n${normalizedText}\n</slack_message>`;
+  return `${contextBlock}${openTag}\n${normalizedText}\n</slack_message>`;
 }
 
 export function wrapSlackTurnPolicy({

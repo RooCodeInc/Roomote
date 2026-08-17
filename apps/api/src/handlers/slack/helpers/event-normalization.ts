@@ -3,6 +3,7 @@ import type { SlackInstallation } from '@roomote/db/server';
 import {
   appendSlackAttachmentContext,
   appendSlackForwardedMessageFiles,
+  formatSlackAttachmentContext,
 } from '@roomote/slack';
 
 import { THUMBS_UP_REACTIONS } from '../constants.js';
@@ -108,6 +109,11 @@ export function enrichSlackMessageEvent(event: SlackWebhookEvent): void {
         : '';
 
   slackEvent.authoredText = authoredText;
+  slackEvent.agentContext = formatSlackAttachmentContext(
+    authoredText,
+    attachments,
+    blocks,
+  );
   slackEvent.text = appendSlackAttachmentContext(
     authoredText,
     attachments,

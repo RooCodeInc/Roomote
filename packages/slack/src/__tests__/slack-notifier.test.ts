@@ -1556,6 +1556,17 @@ describe('SlackNotifier', () => {
           'Forwarded body',
         ].join('\n'),
       );
+      expect(message?.authoredText).toBe('can you see this?');
+      expect(message?.agentContext).toBe(
+        [
+          'Forwarded Slack message:',
+          'Context:',
+          '- Author: Annie Easley',
+          '- Channel: C0EXAMPLE01',
+          'Text:',
+          'Forwarded body',
+        ].join('\n'),
+      );
     });
 
     it('adds forwarded Slack image files to source messages', async () => {

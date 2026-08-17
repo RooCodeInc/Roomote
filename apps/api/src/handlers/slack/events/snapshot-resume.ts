@@ -124,7 +124,9 @@ export async function processSnapshotResume(
         startedMessageRunId: completedRun.id,
         logContext,
       }),
-      slack.normalizeIncomingText(stripLeadingRawSlackMention(event.text)),
+      slack.normalizeIncomingText(
+        stripLeadingRawSlackMention(event.authoredText ?? event.text),
+      ),
       getLatestSlackBotReply(event.channel, threadId),
     ]);
   const messageText = stripLeadingSlackProductMention(normalizedMessageText);
@@ -166,6 +168,7 @@ export async function processSnapshotResume(
   } = await deliveryTracker.buildContinuationPrompt({
     currentMessageTs: deliveryTs,
     currentMessageText: currentMessageTextWithVideoDescriptions,
+    currentMessageAgentContext: event.agentContext,
     excludedContextTimestamps: deliveryTs === event.ts ? undefined : [event.ts],
     resolveCurrentMessageText: (claimedMessages) =>
       buildResolvedCurrentMessageText({

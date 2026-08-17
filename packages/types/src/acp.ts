@@ -1420,7 +1420,7 @@ function isSlackThreadActivityOnlyBlock(text: string): boolean {
 /**
  * Extract slack_message content from:
  *   thread_activity* thread_context? thread_activity*
- *   replying_to? slack_turn_policy? slack_message
+ *   replying_to? slack_turn_policy? slack_message_context? slack_message
  *
  * Implemented as the original recursive descent with per-(pos, phase) memoization,
  * executed on an explicit heap stack so thousands of sequential activity blocks
@@ -1486,15 +1486,41 @@ function parseSlackRestFrom(text: string, index: number): string | null {
         afterPolicyOpen + 1,
         closeMarker,
         (_close, afterClose) =>
-          extractSlackMessageAt(text, afterClose) !== null,
+          extractSlackMessageAfterOptionalContext(text, afterClose) !== null,
       );
       if (found !== null) {
-        return extractSlackMessageAt(text, found.afterClose);
+        return extractSlackMessageAfterOptionalContext(text, found.afterClose);
       }
     }
 
-    return extractSlackMessageAt(text, at);
+    return extractSlackMessageAfterOptionalContext(text, at);
   }
+}
+
+function extractSlackMessageAfterOptionalContext(
+  text: string,
+  index: number,
+): string | null {
+  const afterContextOpen = matchOpenTag(
+    text,
+    index,
+    'slack_message_context',
+    false,
+  );
+  if (afterContextOpen !== null && text[afterContextOpen] === '\n') {
+    const closeMarker = '\n</slack_message_context>';
+    const found = findStructuralClose(
+      text,
+      afterContextOpen + 1,
+      closeMarker,
+      (_close, afterClose) => extractSlackMessageAt(text, afterClose) !== null,
+    );
+    if (found !== null) {
+      return extractSlackMessageAt(text, found.afterClose);
+    }
+  }
+
+  return extractSlackMessageAt(text, index);
 }
 
 function parseSlackTranscriptFrom(text: string, start: number): string | null {

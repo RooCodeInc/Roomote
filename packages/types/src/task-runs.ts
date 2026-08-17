@@ -1235,6 +1235,7 @@ export const slackAppMentionSchema = sharedTaskSchema.extend({
     user: z.string().optional(),
     text: z.string(),
     agentPromptText: z.string().optional(),
+    slackMessageContext: z.string().optional(),
     /**
      * Optional acknowledgement emoji name that was applied to the source
      * message when the task was kicked off.
