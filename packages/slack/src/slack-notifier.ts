@@ -1099,10 +1099,10 @@ export class SlackNotifier {
     const response = await this.callSlackAgentApi('chat.startStream', {
       channel,
       thread_ts: threadTs,
-      // 'dense' collapses consecutive tool-call entries into one summarized
-      // card; a single entry renders as one card (plan mode would duplicate
-      // the title as both header and row).
-      task_display_mode: 'dense',
+      // A single entry renders as one card in timeline mode (plan mode
+      // would duplicate the title as both header and row). NOTE: 'dense' is
+      // documented but the API rejects it as an invalid enum value.
+      task_display_mode: 'timeline',
       ...(recipientTeamId ? { recipient_team_id: recipientTeamId } : {}),
       ...(recipientUserId ? { recipient_user_id: recipientUserId } : {}),
       chunks: [fitTaskStreamUpdate(task)],
