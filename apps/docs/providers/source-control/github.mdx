@@ -85,23 +85,6 @@ Grant these repository permissions:
 - **Pull requests**: Read and write
 - **Workflows**: Read and write
 
-Fast mode needs at least **Actions: Read-only** to inspect workflow runs, jobs,
-step conclusions, and available failure logs. The Roomote manifest requests
-**Read and write** because other Roomote workflows can also manage Actions; Fast
-mode still accesses GitHub through a read-only tool policy.
-
-If the GitHub App or installation predates the Actions permission, an app owner
-must add **Actions: Read-only** or **Read and write** under **Permissions &
-events**. GitHub then requires an installation owner to approve the updated
-permission. In Roomote, open **Settings > Source control** and select **Approve
-GitHub access**, then **Refresh GitHub**. A full reinstall is normally not
-required, but uninstall and reinstall the app if GitHub does not offer the
-permission approval for the existing installation.
-
-GitHub may remove logs after the repository's retention period or deny them for
-an installation that lacks access. In those cases Roomote can report run, job,
-and step metadata, but it will not claim to have inspected unavailable logs.
-
 Subscribe to these events:
 
 - **Check run**

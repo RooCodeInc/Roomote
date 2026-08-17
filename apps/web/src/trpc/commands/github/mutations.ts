@@ -45,27 +45,6 @@ type CloudActionResult =
   | { success: true; redirectUrl: string }
   | { success: false; error: string };
 
-function hasGitHubActionsReadPermission(permissions: unknown): boolean {
-  if (!permissions || typeof permissions !== 'object') {
-    return false;
-  }
-
-  const actions = (permissions as Record<string, unknown>).actions;
-  return actions === 'read' || actions === 'write';
-}
-
-function getGitHubInstallationSettingsUrl(installation: {
-  installationId: number;
-  accountLogin: string;
-  accountType: string;
-}): string {
-  if (installation.accountType === 'Organization') {
-    return `https://github.com/organizations/${encodeURIComponent(installation.accountLogin)}/settings/installations/${installation.installationId}`;
-  }
-
-  return `https://github.com/settings/installations/${installation.installationId}`;
-}
-
 const GITHUB_APP_DEFAULT_EVENTS = [
   'check_run',
   'check_suite',
@@ -697,30 +676,6 @@ export async function enableGitHubAppCommand(
       if (results.some((result) => result.success)) {
         return { success: true, mode: 'synced' };
       }
-    }
-
-    const activeInstallations = await db.query.githubInstallations.findMany({
-      where: isNull(githubInstallations.suspendedAt),
-      columns: {
-        installationId: true,
-        accountLogin: true,
-        accountType: true,
-        permissions: true,
-      },
-    });
-    const installationMissingActionsPermission = activeInstallations.find(
-      (installation) =>
-        !hasGitHubActionsReadPermission(installation.permissions),
-    );
-
-    if (installationMissingActionsPermission) {
-      return {
-        success: true,
-        mode: 'redirect',
-        url: getGitHubInstallationSettingsUrl(
-          installationMissingActionsPermission,
-        ),
-      };
     }
 
     const installResult = await startCreateGitHubInstallationCommand(

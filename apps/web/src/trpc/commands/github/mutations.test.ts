@@ -5,7 +5,6 @@ const {
   mockDbTransaction,
   mockEnvState,
   mockFetch,
-  mockFindGitHubInstallations,
   mockResolveDeploymentEnvVar,
   mockResolvePendingGitHubInstallations,
   mockUpsertDeploymentEnvironmentVariables,
@@ -20,7 +19,6 @@ const {
     R_GITHUB_CLIENT_SECRET: 'client-secret',
   },
   mockFetch: vi.fn(),
-  mockFindGitHubInstallations: vi.fn(),
   mockResolveDeploymentEnvVar: vi.fn(),
   mockResolvePendingGitHubInstallations: vi.fn(),
   mockUpsertDeploymentEnvironmentVariables: vi.fn(),
@@ -48,7 +46,7 @@ vi.mock('@roomote/db/server', () => ({
     transaction: mockDbTransaction,
     query: {
       githubInstallations: {
-        findMany: mockFindGitHubInstallations,
+        findMany: vi.fn(),
       },
     },
   },
@@ -83,7 +81,6 @@ vi.mock('@roomote/sdk/server/automation-recommendations', () => ({
 }));
 
 import {
-  enableGitHubAppCommand,
   finishCreateGitHubAppManifestCommand,
   resolvePendingGitHubInstallationsCommand,
   startAuthenticateGitHubAccountCommand,
@@ -124,7 +121,6 @@ describe('GitHub App manifest commands', () => {
     mockDbTransaction.mockImplementation(async (callback) =>
       callback({ kind: 'tx' }),
     );
-    mockFindGitHubInstallations.mockResolvedValue([]);
     mockResolveDeploymentEnvVar.mockResolvedValue('created-roomote-app');
   });
 
@@ -220,25 +216,6 @@ describe('GitHub App manifest commands', () => {
       request_oauth_on_install: true,
       setup_on_update: true,
       public: true,
-    });
-  });
-
-  it('routes older organization installations to their permission approval settings', async () => {
-    mockFindGitHubInstallations
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([
-        {
-          installationId: 12345,
-          accountLogin: 'roomote-org',
-          accountType: 'Organization',
-          permissions: { contents: 'write' },
-        },
-      ]);
-
-    await expect(enableGitHubAppCommand(buildMockAuth())).resolves.toEqual({
-      success: true,
-      mode: 'redirect',
-      url: 'https://github.com/organizations/roomote-org/settings/installations/12345',
     });
   });
 

@@ -53,8 +53,6 @@ type IntegrationAuditContext = BrokerContext & {
 
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS = 5 * 60_000;
 
-const FAST_AGENT_GITHUB_INSTRUCTIONS = `For a GitHub Actions run link, use actions_get to read the workflow run, actions_list to inspect its jobs and step conclusions, and get_job_logs only when failure details require logs. Prefer failed-job logs over the full run archive; request bounded log content with failed_only=true, return_content=true, and a reasonable tail_lines value. If logs are expired, unavailable, or denied, explain what the run, job, and step metadata shows and explicitly say that logs were not available; never imply that logs or annotations were inspected unless the tool result contains them.`;
-
 type IntegrationToolCacheEntry = {
   expiresAt: number;
   tools: Promise<McpToolDefinition[]>;
@@ -180,8 +178,7 @@ export async function listFastAgentIntegrations(
       id: 'github',
       name: 'GitHub',
       description:
-        'Read repositories, code, issues, pull requests, commits, GitHub Actions runs, jobs, and failure details available to the deployment GitHub App.',
-      instructions: FAST_AGENT_GITHUB_INSTRUCTIONS,
+        'Read repositories, code, issues, pull requests, commits, and recent activity available to the deployment GitHub App.',
       disabledTools: new Set<string>(),
     });
   }
