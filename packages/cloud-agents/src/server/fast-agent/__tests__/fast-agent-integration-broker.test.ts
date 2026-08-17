@@ -99,6 +99,14 @@ describe('fast-agent integration broker', () => {
     expect(integrations.map((integration) => integration.id)).toEqual([
       'github',
     ]);
+    expect(integrations[0]).toEqual(
+      expect.objectContaining({
+        description: expect.stringContaining('GitHub Actions runs'),
+        instructions: expect.stringContaining(
+          'explicitly say that logs were not available',
+        ),
+      }),
+    );
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
       url: 'https://api.example.com/api/mcp-routing/github',
       headers: { Authorization: 'Bearer control-plane-token' },

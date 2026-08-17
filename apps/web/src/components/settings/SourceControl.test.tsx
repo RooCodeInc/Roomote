@@ -8,7 +8,9 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { toast } from 'sonner';
 
 const state = vi.hoisted(() => ({
-  gitHubInstallations: [{ id: 'gh-1' }],
+  gitHubInstallations: [
+    { id: 'gh-1', permissions: { actions: 'write' } },
+  ] as Array<{ id: string; permissions: Record<string, string> }>,
   gitHubRepositories: [
     {
       id: 'repo-1',
@@ -354,7 +356,9 @@ describe('SourceControl settings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     state.searchParams = '';
-    state.gitHubInstallations = [{ id: 'gh-1' }];
+    state.gitHubInstallations = [
+      { id: 'gh-1', permissions: { actions: 'write' } },
+    ];
     state.gitHubRepositories = [
       {
         id: 'repo-1',
@@ -559,6 +563,27 @@ describe('SourceControl settings', () => {
         callbackBackground: 'background',
       },
       expect.any(Object),
+    );
+  });
+
+  it('guides older GitHub installations through Actions permission approval', () => {
+    state.gitHubInstallations = [
+      { id: 'gh-1', permissions: { contents: 'write' } },
+    ];
+
+    render(<SourceControl />);
+
+    expect(
+      screen.getByText(/This installation cannot read GitHub Actions runs/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: 'Approve GitHub access' }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('link', { name: 'Review the setup steps' }),
+    ).toHaveAttribute(
+      'href',
+      'https://docs.roomote.dev/providers/source-control/github#permissions-and-events',
     );
   });
 

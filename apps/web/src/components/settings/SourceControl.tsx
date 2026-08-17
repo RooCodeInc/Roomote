@@ -58,6 +58,15 @@ import { SourceControlConfigForm } from './SourceControlConfigForm';
 
 const INITIAL_REPO_COUNT = 100;
 
+function hasGitHubActionsReadPermission(permissions: unknown): boolean {
+  if (!permissions || typeof permissions !== 'object') {
+    return false;
+  }
+
+  const actions = (permissions as Record<string, unknown>).actions;
+  return actions === 'read' || actions === 'write';
+}
+
 type Repository = {
   id: string;
   fullName: string;
@@ -243,6 +252,13 @@ export function SourceControl() {
     gitHubRepositories.isPending ||
     sourceControlConfigStatus.isPending;
   const gitHubIsConnected = (gitHubInstallations.data?.length ?? 0) > 0;
+  const gitHubNeedsActionsPermission =
+    gitHubIsConnected &&
+    (gitHubInstallations.data?.some(
+      (installation) =>
+        !hasGitHubActionsReadPermission(installation.permissions),
+    ) ??
+      false);
   const gitHubIsConfigured = isProviderConfigured(
     sourceControlConfigStatus.data,
     'github',
@@ -367,7 +383,11 @@ export function SourceControl() {
               disabled={enableGitHubApp.isPending}
             >
               {gitHubIsConnected ? <Pencil /> : <Plug />}
-              {gitHubIsConnected ? 'Update GitHub' : 'Connect GitHub'}
+              {gitHubNeedsActionsPermission
+                ? 'Approve GitHub access'
+                : gitHubIsConnected
+                  ? 'Update GitHub'
+                  : 'Connect GitHub'}
             </Button>
             {gitHubIsConnected ? (
               <Button
@@ -413,11 +433,31 @@ export function SourceControl() {
         ? 'Missing a repo here? Update GitHub, then refresh to make it available here.'
         : undefined,
       configForm: isAdmin ? (
-        <SourceControlConfigForm
-          provider="github"
-          configStatus={sourceControlConfigStatus.data}
-          saveSuccessMessage="GitHub App credentials saved."
-        />
+        <div className="space-y-4">
+          {gitHubNeedsActionsPermission ? (
+            <Alert variant="warning">
+              <AlertDescription>
+                This installation cannot read GitHub Actions runs. First grant
+                the GitHub App <strong>Actions: Read-only</strong> or higher,
+                then use <strong>Approve GitHub access</strong> to approve the
+                updated permission. Refresh GitHub after approval.{' '}
+                <Link
+                  href="https://docs.roomote.dev/providers/source-control/github#permissions-and-events"
+                  target="_blank"
+                  className="font-medium underline underline-offset-4"
+                >
+                  Review the setup steps
+                </Link>
+                .
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          <SourceControlConfigForm
+            provider="github"
+            configStatus={sourceControlConfigStatus.data}
+            saveSuccessMessage="GitHub App credentials saved."
+          />
+        </div>
       ) : null,
       githubSetup: isAdmin ? (
         <GitHubAppSettingsSetup redirectTarget={redirectTarget} />
