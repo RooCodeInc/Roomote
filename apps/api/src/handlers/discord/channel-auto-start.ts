@@ -233,6 +233,7 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
   let initiator: TaskInitiator;
   let launchOwnerUserId: string | undefined;
   let queuedMessageUserId: string | undefined;
+  let defaultFastQuestion: string | null = null;
 
   if (isBotAuthored) {
     initiator = {
@@ -272,34 +273,15 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
     launchOwnerUserId = mappedUserId;
     queuedMessageUserId = mappedUserId;
 
-    const defaultFastQuestion = stripDiscordBotMention(
+    const fastQuestion = stripDiscordBotMention(
       getDiscordMessageContent(message),
       botUserId,
     );
     if (
-      defaultFastQuestion &&
+      fastQuestion &&
       (await hasCommunicationsFastModeDefault(mappedUserId))
     ) {
-      void processDiscordFastAgentMessage({
-        event,
-        question: defaultFastQuestion,
-        sender: message.author,
-        senderUserId: mappedUserId,
-        provider,
-        applicationId: input.applicationId,
-        channel,
-        metadata: discordMetadataForChannel({
-          channel,
-          messageId: message.id,
-          anchorMessageId: message.id,
-        }),
-        sessionThreadId: message.id,
-      }).catch((error) => {
-        apiLogger.error(
-          `[DiscordChannelAutoStart] Failed to answer in Fast mode for ${logContext}: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      });
-      return true;
+      defaultFastQuestion = fastQuestion;
     }
   }
 
@@ -392,6 +374,29 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
           await releaseRoutingLock();
           return;
         }
+      }
+
+      if (defaultFastQuestion && launchOwnerUserId) {
+        try {
+          await processDiscordFastAgentMessage({
+            event,
+            question: defaultFastQuestion,
+            sender: message.author,
+            senderUserId: launchOwnerUserId,
+            provider,
+            applicationId: input.applicationId,
+            channel,
+            metadata,
+            sessionThreadId: message.id,
+          });
+        } catch (error) {
+          apiLogger.error(
+            `[DiscordChannelAutoStart] Failed to answer in Fast mode for ${logContext}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        } finally {
+          await releaseRoutingLock();
+        }
+        return;
       }
 
       let intakeAckPinned = false;

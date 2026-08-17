@@ -220,6 +220,87 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
+  it('runs a Roomote-directed Fast message through the shared launch gate', async () => {
+    mocks.hasFastDefault.mockResolvedValue(true);
+    mocks.getBackgroundAgentSettings.mockResolvedValue(
+      settingsWith([
+        {
+          channelId: MONITORED_CHANNEL_ID,
+          launchCriteria:
+            'Only respond when the message is directed at Roomote.',
+        },
+      ]),
+    );
+
+    await expect(
+      runHandler({
+        payload: messagePayload({
+          content: '<@bot-1> can you check this?',
+          mentions: [{ id: 'bot-1', username: 'roomote', bot: true }],
+        }),
+      }),
+    ).resolves.toBe(true);
+    await flushBackgroundWork();
+
+    expect(mocks.evaluateGate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        botMentioned: true,
+        launchCriteria: 'Only respond when the message is directed at Roomote.',
+      }),
+    );
+    expect(mocks.processFast).toHaveBeenCalledWith(
+      expect.objectContaining({ question: 'can you check this?' }),
+    );
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      'a peer-directed message',
+      messagePayload({
+        content: '<@discord-user-2> what do you think?',
+        mentions: [{ id: 'discord-user-2', username: 'alice' }],
+      }),
+    ],
+    [
+      'an ambiguous reply with conversation context',
+      messagePayload({
+        type: 19,
+        content: 'I think that is probably right',
+        message_reference: {
+          message_id: 'parent-message-1',
+          channel_id: MONITORED_CHANNEL_ID,
+        },
+      }),
+    ],
+  ])(
+    'keeps Fast mode silent for %s when the shared gate skips it',
+    async (_label, payload) => {
+      mocks.hasFastDefault.mockResolvedValue(true);
+      mocks.getBackgroundAgentSettings.mockResolvedValue(
+        settingsWith([
+          {
+            channelId: MONITORED_CHANNEL_ID,
+            launchCriteria:
+              'Only respond when the message is directed at Roomote.',
+          },
+        ]),
+      );
+      mocks.evaluateGate.mockResolvedValue({
+        shouldLaunch: false,
+        skipReason: 'criteria_not_met',
+        debug: { llmDecision: 'skip', reason: 'Peer conversation.' },
+      });
+
+      await expect(runHandler({ payload })).resolves.toBe(true);
+      await flushBackgroundWork();
+
+      expect(mocks.evaluateGate).toHaveBeenCalled();
+      expect(mocks.processFast).not.toHaveBeenCalled();
+      expect(mocks.startNewTask).not.toHaveBeenCalled();
+    },
+  );
+
   describe('qualification', () => {
     it.each([
       ['a DM', { channel: guildChannel({ isDirectMessage: true }) }],
