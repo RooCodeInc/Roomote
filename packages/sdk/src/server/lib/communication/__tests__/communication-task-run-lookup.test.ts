@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { RunStatus } from '@roomote/types';
 
 const { queryResults, whereMock } = vi.hoisted(() => ({
   queryResults: [] as unknown[][],
@@ -12,6 +13,8 @@ vi.mock('@roomote/db/server', () => {
     where: whereMock,
     orderBy: vi.fn(),
     limit: vi.fn(async () => queryResults.shift() ?? []),
+    then: (resolve: (value: unknown[]) => unknown) =>
+      Promise.resolve(queryResults.shift() ?? []).then(resolve),
   };
   chain.from.mockReturnValue(chain);
   chain.innerJoin.mockReturnValue(chain);
@@ -49,6 +52,7 @@ vi.mock('@roomote/db/server', () => {
       id: 'tasks.id',
       initiatorKind: 'tasks.initiatorKind',
       initiatorUserId: 'tasks.initiatorUserId',
+      title: 'tasks.title',
     },
     trackedMessages: {
       automationKey: 'trackedMessages.automationKey',
@@ -63,6 +67,7 @@ vi.mock('@roomote/db/server', () => {
 
 import {
   findActiveCommunicationTaskRun,
+  findActiveCommunicationTaskRuns,
   findTaskBackedAutomationReportRun,
 } from '../communication-task-run-lookup';
 
@@ -207,5 +212,49 @@ describe('findActiveCommunicationTaskRun', () => {
     });
 
     expect(whereConditions()).toContainEqual({ isNull: 'tasks.deletedAt' });
+  });
+});
+
+describe('findActiveCommunicationTaskRuns', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    queryResults.length = 0;
+  });
+
+  it('returns each active task once and ignores stale runs after settlement', async () => {
+    queryResults.push([
+      {
+        ...automationRun(24, 'task-2'),
+        title: 'Update docs',
+        status: RunStatus.Running,
+        canceledAt: null,
+      },
+      {
+        ...automationRun(23, 'task-1'),
+        title: 'Fix API',
+        status: RunStatus.Completed,
+        canceledAt: null,
+      },
+      {
+        ...automationRun(22, 'task-1'),
+        title: 'Fix API',
+        status: RunStatus.Idle,
+        canceledAt: null,
+      },
+    ]);
+
+    await expect(
+      findActiveCommunicationTaskRuns({
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        taskId: 'task-2',
+        title: 'Update docs',
+        status: RunStatus.Running,
+      }),
+    ]);
   });
 });

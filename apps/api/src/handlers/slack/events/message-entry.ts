@@ -1597,7 +1597,7 @@ function startFastAgentResponse(params: {
   teamId: string;
   usageText?: string;
   continuation?: boolean;
-  activeTaskId?: string | null;
+  activeTasks?: { taskId: string }[];
   processingReactionName: string;
   errorLogPrefix: string;
 }): void {
@@ -1736,7 +1736,7 @@ async function handleSlackEntryEvent(params: {
       slack,
       userId: userMapping.userId,
       teamId,
-      activeTaskId: activeRun?.taskId ?? null,
+      activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
       continuation: fastAgentEntryMode === 'default',
       processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent response failed for thread ${threadId}:`,
@@ -1764,7 +1764,7 @@ async function handleSlackEntryEvent(params: {
       userId: userMapping.userId,
       teamId,
       continuation: true,
-      activeTaskId: activeRun?.taskId ?? null,
+      activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
       processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent continuation failed for thread ${threadId}:`,
     });

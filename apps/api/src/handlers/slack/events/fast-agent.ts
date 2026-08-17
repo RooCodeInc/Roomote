@@ -2,6 +2,7 @@ import { PRODUCT_NAME } from '@roomote/types';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  type FastAgentActiveTask,
   type LaunchFastAgentSlackTask,
 } from '@roomote/cloud-agents/server';
 import { type SlackEvent, type SlackNotifier } from '@roomote/slack';
@@ -51,7 +52,7 @@ export async function processFastAgentMessage(params: {
   apiBaseUrl?: string;
   usageText?: string;
   continuation?: boolean;
-  activeTaskId?: string | null;
+  activeTasks?: FastAgentActiveTask[];
   launchTask?: LaunchFastAgentSlackTask;
   processingReactionName?: string;
 }): Promise<void> {
@@ -63,7 +64,7 @@ export async function processFastAgentMessage(params: {
     apiBaseUrl,
     usageText = `Use \`/fast <question>\` after mentioning ${PRODUCT_NAME}.`,
     continuation = false,
-    activeTaskId = null,
+    activeTasks = [],
     launchTask,
     processingReactionName = 'eyes',
   } = params;
@@ -156,7 +157,7 @@ export async function processFastAgentMessage(params: {
         currentMessage?.user === event.user
           ? currentMessage.username
           : undefined,
-      activeTaskId,
+      activeTasks,
       launchTask,
       postSlackReply: async ({ message, kickoff }) => {
         const posted = await postSlackThreadMarkdownMessage({

@@ -39,6 +39,12 @@ const ACTIVE_SELECTION = {
   snapshotCreatedAt: taskRuns.snapshotCreatedAt,
 };
 
+const FAST_ACTIVE_SELECTION = {
+  ...ACTIVE_SELECTION,
+  title: tasks.title,
+  canceledAt: taskRuns.canceledAt,
+};
+
 const SNAPSHOT_SELECTION = {
   id: taskRuns.id,
   initiatorUserId: tasks.initiatorUserId,
@@ -91,6 +97,45 @@ export async function findActiveCommunicationTaskRun(
     .orderBy(desc(taskRuns.createdAt))
     .limit(1);
   return row ? withResolvedUserId(row) : undefined;
+}
+
+export async function findActiveCommunicationTaskRuns(
+  input: CommunicationConversationRef,
+) {
+  const { providerMatch, conversationMatch, threadMatch } =
+    buildMatchConditions(input);
+  const rows = await db
+    .select(FAST_ACTIVE_SELECTION)
+    .from(taskRuns)
+    .innerJoin(tasks, eq(taskRuns.taskId, tasks.id))
+    .where(
+      and(
+        providerMatch,
+        conversationMatch,
+        threadMatch,
+        ...(input.taskId ? [eq(taskRuns.taskId, input.taskId)] : []),
+        isNull(tasks.deletedAt),
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt));
+  const seenTaskIds = new Set<string>();
+
+  return rows.flatMap((row) => {
+    if (seenTaskIds.has(row.taskId)) {
+      return [];
+    }
+    seenTaskIds.add(row.taskId);
+
+    if (
+      row.canceledAt ||
+      !activeRunStatuses.some((status) => status === row.status)
+    ) {
+      return [];
+    }
+
+    const { canceledAt: _canceledAt, ...activeRow } = row;
+    return [withResolvedUserId(activeRow)];
+  });
 }
 
 export async function findCompletedCommunicationTaskRunWithSnapshot(

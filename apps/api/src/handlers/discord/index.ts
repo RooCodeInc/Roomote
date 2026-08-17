@@ -50,6 +50,7 @@ import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import {
   attachOutOfBandContextToCommunicationMessage,
   findActiveCommunicationTaskRun,
+  findActiveCommunicationTaskRuns,
   findCommunicationTaskRunBySourceEvent,
   findCompletedCommunicationTaskRunWithSnapshot,
   findTaskBackedAutomationReportRun,
@@ -775,6 +776,7 @@ async function processDiscordGatewayEvent(
       )
     : '';
   if (defaultFastMessage && defaultFastQuestion) {
+    const activeFastRuns = await findActiveCommunicationTaskRuns(conversation);
     await processDiscordFastAgentMessage({
       event,
       question: defaultFastQuestion,
@@ -788,7 +790,10 @@ async function processDiscordGatewayEvent(
         channel.isDirectMessage || channel.isThread
           ? channel.channelId
           : defaultFastMessage.id,
-      activeTaskId: activeRun?.taskId ?? null,
+      activeTasks: activeFastRuns.map(({ taskId, title }) => ({
+        taskId,
+        title,
+      })),
     });
     return { ok: true, fastAnswered: true, fastDefaulted: true };
   }

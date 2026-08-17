@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   upsertUserMapping: vi.fn(),
   upsertInstallation: vi.fn(),
   findActiveRun: vi.fn(),
+  findActiveRuns: vi.fn(),
   findCompletedRun: vi.fn(),
   findAutomationReportRun: vi.fn(),
   findSourceRun: vi.fn(),
@@ -108,6 +109,7 @@ vi.mock('@roomote/sdk/server', () => ({
 
 vi.mock('@roomote/sdk/server/communication', () => ({
   findActiveCommunicationTaskRun: mocks.findActiveRun,
+  findActiveCommunicationTaskRuns: mocks.findActiveRuns,
   findCompletedCommunicationTaskRunWithSnapshot: mocks.findCompletedRun,
   findTaskBackedAutomationReportRun: mocks.findAutomationReportRun,
   findCommunicationTaskRunBySourceEvent: mocks.findSourceRun,
@@ -271,6 +273,7 @@ describe('Discord Gateway event handler', () => {
     mocks.findMappedUserId.mockResolvedValue('roomote-user-1');
     mocks.findInstallation.mockResolvedValue(null);
     mocks.findActiveRun.mockResolvedValue(undefined);
+    mocks.findActiveRuns.mockResolvedValue([]);
     mocks.findCompletedRun.mockResolvedValue(null);
     mocks.findAutomationReportRun.mockResolvedValue(null);
     mocks.findSourceRun.mockResolvedValue(null);
@@ -746,7 +749,7 @@ describe('Discord Gateway event handler', () => {
         question: 'Fix the flaky tests',
         userId: 'roomote-user-1',
         slackThreadTs: 'dm-1',
-        activeTaskId: null,
+        activeTasks: [],
         surface: 'discord',
       }),
     );
@@ -760,19 +763,28 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.queueMessage).not.toHaveBeenCalled();
   });
 
-  it('gives defaulted Discord Fast mode the active task for thread continuation', async () => {
+  it('gives defaulted Discord Fast mode every active task for thread continuation', async () => {
     mocks.hasFastDefault.mockResolvedValue(true);
     mocks.findActiveRun.mockResolvedValue({
       id: 23,
       taskId: 'task-23',
       userId: 'roomote-user-1',
     });
+    mocks.findActiveRuns.mockResolvedValue([
+      { taskId: 'task-23', title: 'Fix API' },
+      { taskId: 'task-24', title: 'Update docs' },
+    ]);
 
     const response = await postEvent(envelope(message()));
 
     expect(response.status).toBe(200);
     expect(mocks.answerFast).toHaveBeenCalledWith(
-      expect.objectContaining({ activeTaskId: 'task-23' }),
+      expect.objectContaining({
+        activeTasks: [
+          { taskId: 'task-23', title: 'Fix API' },
+          { taskId: 'task-24', title: 'Update docs' },
+        ],
+      }),
     );
     expect(mocks.queueMessage).not.toHaveBeenCalled();
   });
@@ -1930,7 +1942,7 @@ describe('Discord Gateway event handler', () => {
         launchTask: expect.any(Function),
       }),
     );
-    expect(mocks.answerFast.mock.calls[0]?.[0].activeTaskId).toBeUndefined();
+    expect(mocks.answerFast.mock.calls[0]?.[0].activeTasks).toBeUndefined();
     expect(mocks.startNewTask).toHaveBeenCalledWith(
       expect.objectContaining({
         forceNewThread: true,

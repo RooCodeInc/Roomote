@@ -125,7 +125,6 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         platformEvent: true,
-        activeTaskId: 'task-1',
       }),
     );
     expect(mocks.postMessage).toHaveBeenCalledWith(
@@ -194,7 +193,6 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         question: expect.stringContaining(pullRequestEvent.pullRequest.url),
-        activeTaskId: 'task-1',
         platformEvent: true,
       }),
     );
@@ -202,6 +200,30 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postMessage.mock.calls[1]?.[0]?.client_msg_id).toBe(
       firstClientMessageId,
     );
+  });
+
+  it('lets a settled task event re-query the remaining active task set', async () => {
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'task_settled',
+        taskId: 'task-1',
+        runId: 42,
+        title: 'Fix API',
+        status: 'completed',
+        taskUrl: 'https://roomote.example/task/task-1',
+        pullRequests: [],
+      },
+    });
+
+    const input = mocks.answerQuestion.mock.calls[0]?.[0];
+    expect(input).toEqual(
+      expect.objectContaining({
+        question: expect.stringContaining('"type":"task_settled"'),
+        platformEvent: true,
+      }),
+    );
+    expect(input).not.toHaveProperty('activeTasks');
   });
 
   it('skips a claimed pull request event that became terminal before delivery', async () => {

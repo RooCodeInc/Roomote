@@ -4,7 +4,6 @@ import {
   desc,
   db,
   eq,
-  inArray,
   isNull,
   slackQuickAnswers,
   sql,
@@ -12,10 +11,16 @@ import {
   tasks,
   type SlackQuickAnswer,
 } from '@roomote/db/server';
-import { activeRunStatuses } from '@roomote/types';
+import { activeRunStatuses, type RunStatus } from '@roomote/types';
 
 type FastAgentSessionRecord = Pick<SlackQuickAnswer, 'id'> & {
   messages: ModelMessage[];
+};
+
+export type FastAgentActiveTask = {
+  taskId: string;
+  title?: string;
+  status?: RunStatus;
 };
 
 function buildFastAgentSessionWhere({
@@ -148,25 +153,47 @@ export async function hasFastAgentSession({
   return Boolean(session);
 }
 
-export async function getActiveFastAgentTaskId(
+export async function getActiveFastAgentTasks(
   sessionId: string,
-): Promise<string | null> {
-  const [activeRun] = await db
-    .select({ taskId: taskRuns.taskId })
+): Promise<FastAgentActiveTask[]> {
+  const activeRuns = await db
+    .select({
+      taskId: taskRuns.taskId,
+      title: tasks.title,
+      status: taskRuns.status,
+      canceledAt: taskRuns.canceledAt,
+    })
     .from(taskRuns)
     .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
     .where(
       and(
         sql`${taskRuns.payload} -> 'fastAgentParent' ->> 'sessionId' = ${sessionId}`,
-        inArray(taskRuns.status, [...activeRunStatuses]),
-        isNull(taskRuns.canceledAt),
         isNull(tasks.deletedAt),
       ),
     )
-    .orderBy(desc(taskRuns.createdAt))
-    .limit(1);
+    .orderBy(desc(taskRuns.createdAt));
 
-  return activeRun?.taskId ?? null;
+  const tasksById = new Map<string, FastAgentActiveTask>();
+  const seenTaskIds = new Set<string>();
+  for (const run of activeRuns) {
+    if (seenTaskIds.has(run.taskId)) {
+      continue;
+    }
+    seenTaskIds.add(run.taskId);
+
+    if (
+      !run.canceledAt &&
+      activeRunStatuses.some((status) => status === run.status)
+    ) {
+      tasksById.set(run.taskId, {
+        taskId: run.taskId,
+        title: run.title,
+        status: run.status,
+      });
+    }
+  }
+
+  return [...tasksById.values()];
 }
 
 export async function appendFastAgentSessionMessages({
