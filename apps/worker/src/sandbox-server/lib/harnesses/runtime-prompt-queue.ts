@@ -1,10 +1,7 @@
-import {
-  type AcpMessage,
-  ACP_ENVELOPE_EVENT_TYPES,
-  type TaskGoal,
-} from '@roomote/types';
+import { ACP_ENVELOPE_EVENT_TYPES, type TaskGoal } from '@roomote/types';
 
 import type { QueuedPromptMessageSnapshot } from '../harness';
+import type { PersistableEnvelope } from '../runtime-envelope-builder';
 
 import { imageInputToPromptBlock } from './runtime-prompt-utils';
 
@@ -25,7 +22,7 @@ type RuntimePromptQueueUpdateCause =
 interface RuntimePromptQueueCallbacks {
   getSessionId: () => string | undefined;
   getNextSequence: () => number;
-  emitRuntimeOutput: (event: AcpMessage) => void;
+  emitRuntimeUpdate: (event: PersistableEnvelope) => void;
 }
 
 function isHiddenPlatformPrompt(prompt: {
@@ -299,12 +296,10 @@ export class RuntimePromptQueue {
       (message) => !message.queueOnly,
     ).length;
 
-    this.callbacks.emitRuntimeOutput({
-      id: `${sessionId}:${sequence}`,
-      ts: Date.now(),
+    this.callbacks.emitRuntimeUpdate({
+      ts: sequence,
       eventType: ACP_ENVELOPE_EVENT_TYPES.QueuedMessagesUpdate,
       role: null,
-      kind: 'unknown',
       contentBlocks: [],
       metadata: { sessionId, sequence },
       payload: {
