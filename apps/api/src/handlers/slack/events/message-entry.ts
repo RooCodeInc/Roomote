@@ -58,10 +58,7 @@ import {
   isFastCommandInvocation,
   processFastAgentMessage,
 } from './fast-agent.js';
-import {
-  isFastAgentInputSupported,
-  resolveFastAgentEntryMode,
-} from '../../fast-agent-entry.js';
+import { resolveFastAgentEntryMode } from '../../fast-agent-entry.js';
 import { createFastAgentTaskLauncher } from './fast-agent-task-launcher.js';
 import { processSnapshotResume } from './snapshot-resume.js';
 import {
@@ -1254,7 +1251,6 @@ async function maybeHandleChannelAutoStart(params: {
             !isRemovedEvalCommandInvocation(
               channelAutoStartEvent.authoredText ?? channelAutoStartEvent.text,
             ),
-          hasAttachments: Boolean(channelAutoStartEvent.files?.length),
         })
       : null;
 
@@ -1730,7 +1726,6 @@ async function handleSlackEntryEvent(params: {
     userDefaultEnabled:
       userMapping.communicationsFastModeDefault &&
       !isRemovedEvalCommandInvocation(authoredEventText),
-    hasAttachments: Boolean(event.files?.length),
   });
 
   if (fastAgentEntryMode) {
@@ -1750,16 +1745,15 @@ async function handleSlackEntryEvent(params: {
     return;
   }
 
-  const isFastAgentContinuation =
-    !isFastAgentInputSupported({
-      hasAttachments: Boolean(event.files?.length),
-    }) || isRemovedEvalCommandInvocation(authoredEventText)
-      ? false
-      : await hasFastAgentSession({
-          slackTeamId: teamId,
-          slackChannel: event.channel,
-          slackThreadTs: threadId,
-        });
+  const isFastAgentContinuation = isRemovedEvalCommandInvocation(
+    authoredEventText,
+  )
+    ? false
+    : await hasFastAgentSession({
+        slackTeamId: teamId,
+        slackChannel: event.channel,
+        slackThreadTs: threadId,
+      });
 
   if (isFastAgentContinuation) {
     startFastAgentResponse({

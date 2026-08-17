@@ -3,10 +3,7 @@ import {
   isFastCommandInvocation,
   stripLeadingFastCommandMention,
 } from '../events/fast-agent';
-import {
-  isFastAgentInputSupported,
-  resolveFastAgentEntryMode,
-} from '../../fast-agent-entry';
+import { resolveFastAgentEntryMode } from '../../fast-agent-entry';
 
 describe('Slack fast-agent helpers', () => {
   it('strips only the leading mention before parsing !fast', () => {
@@ -46,7 +43,6 @@ describe('Slack fast-agent helpers', () => {
         explicitInvocation: false,
         deploymentSettingEnabled: false,
         userDefaultEnabled: true,
-        hasAttachments: false,
       }),
     ).toBeNull();
   });
@@ -57,7 +53,6 @@ describe('Slack fast-agent helpers', () => {
         explicitInvocation: false,
         deploymentSettingEnabled: true,
         userDefaultEnabled: false,
-        hasAttachments: false,
       }),
     ).toBeNull();
   });
@@ -68,7 +63,6 @@ describe('Slack fast-agent helpers', () => {
         explicitInvocation: false,
         deploymentSettingEnabled: true,
         userDefaultEnabled: true,
-        hasAttachments: false,
       }),
     ).toBe('default');
   });
@@ -79,30 +73,7 @@ describe('Slack fast-agent helpers', () => {
         explicitInvocation: true,
         deploymentSettingEnabled: true,
         userDefaultEnabled: true,
-        hasAttachments: false,
       }),
     ).toBe('explicit');
-  });
-
-  it('routes attachment-bearing messages through the standard task path', () => {
-    expect(isFastAgentInputSupported({ hasAttachments: true })).toBe(false);
-
-    expect(
-      resolveFastAgentEntryMode({
-        explicitInvocation: false,
-        deploymentSettingEnabled: true,
-        userDefaultEnabled: true,
-        hasAttachments: true,
-      }),
-    ).toBeNull();
-
-    expect(
-      resolveFastAgentEntryMode({
-        explicitInvocation: true,
-        deploymentSettingEnabled: true,
-        userDefaultEnabled: true,
-        hasAttachments: true,
-      }),
-    ).toBeNull();
   });
 });
