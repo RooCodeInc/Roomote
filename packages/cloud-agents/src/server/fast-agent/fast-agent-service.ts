@@ -572,6 +572,9 @@ export async function answerFastAgentQuestion({
       ]);
     sessionId = session.id;
     const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
+    // Surface lookups contribute a task whose thread predates this Fast
+    // session. Session-linked rows contribute every child delegated by Fast,
+    // with their richer title and status taking precedence on duplicate IDs.
     const resolvedActiveTasks = [
       ...new Map(
         [...activeTasks, ...sessionActiveTasks].map((task) => [

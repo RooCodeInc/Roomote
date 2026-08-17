@@ -1,130 +1,175 @@
-const mocks = vi.hoisted(() => ({
-  activeRuns: [] as Array<{
-    taskId: string;
-    title: string;
-    status: string;
-    canceledAt: Date | null;
-  }>,
-  or: vi.fn(),
-}));
+import { db, inArray, taskFactory, taskRuns, tasks } from '@roomote/db/server';
+import { RunStatus, TaskPayloadKind } from '@roomote/types';
 
-vi.mock('@roomote/db/server', () => {
-  const orderBy = vi.fn(async () => mocks.activeRuns);
-  const where = vi.fn(() => ({ orderBy }));
-  const innerJoin = vi.fn(() => ({ where }));
-  const from = vi.fn(() => ({ innerJoin }));
-
-  return {
-    and: vi.fn((...values: unknown[]) => values),
-    desc: vi.fn((value: unknown) => value),
-    db: {
-      select: vi.fn(() => ({ from })),
-    },
-    eq: vi.fn((...values: unknown[]) => values),
-    inArray: vi.fn((...values: unknown[]) => values),
-    isNull: vi.fn((value: unknown) => value),
-    or: mocks.or,
-    slackQuickAnswers: {},
-    sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
-      strings: Array.from(strings),
-      values,
-    })),
-    taskRuns: {
-      createdAt: 'task_runs.created_at',
-      payload: 'task_runs.payload',
-      status: 'task_runs.status',
-      taskId: 'task_runs.task_id',
-      canceledAt: 'task_runs.canceled_at',
-    },
-    tasks: {
-      id: 'tasks.id',
-      title: 'tasks.title',
-      deletedAt: 'tasks.deleted_at',
-    },
-  };
-});
-
-import { RunStatus } from '@roomote/types';
 import { getActiveFastAgentTasks } from '../fast-agent-session';
 
+const SESSION_ID = '11111111-1111-4111-8111-111111111111';
+const OTHER_SESSION_ID = '22222222-2222-4222-8222-222222222222';
+const createdTaskIds: string[] = [];
+
+async function createTask(title: string, deletedAt: Date | null = null) {
+  const task = await taskFactory.create({ title, deletedAt });
+  createdTaskIds.push(task.id);
+  return task;
+}
+
+async function createRun(input: {
+  taskId: string;
+  status: RunStatus;
+  createdAt: Date;
+  canceledAt?: Date;
+  fastAgentSessionId?: string;
+  fastAgentParent?: {
+    sessionId: string;
+    slackTeamId: string;
+    slackChannel: string;
+    slackThreadTs: string;
+  };
+}) {
+  const [run] = await db
+    .insert(taskRuns)
+    .values({
+      taskId: input.taskId,
+      kind: 'fresh',
+      payloadKind: TaskPayloadKind.StandardTask,
+      status: input.status,
+      createdAt: input.createdAt,
+      canceledAt: input.canceledAt,
+      payload: {
+        repo: 'acme/widgets',
+        description: 'Test Fast session task',
+        ...(input.fastAgentSessionId
+          ? { fastAgentSessionId: input.fastAgentSessionId }
+          : {}),
+        ...(input.fastAgentParent
+          ? { fastAgentParent: input.fastAgentParent }
+          : {}),
+      },
+    })
+    .returning();
+
+  if (!run) {
+    throw new Error('Failed to create Fast session test run.');
+  }
+
+  return run;
+}
+
+afterEach(async () => {
+  if (createdTaskIds.length === 0) {
+    return;
+  }
+
+  await db.delete(taskRuns).where(inArray(taskRuns.taskId, createdTaskIds));
+  await db.delete(tasks).where(inArray(tasks.id, createdTaskIds));
+  createdTaskIds.length = 0;
+});
+
 describe('getActiveFastAgentTasks', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mocks.or.mockImplementation((...values: unknown[]) => values);
-  });
+  it('returns active tasks whose newest run is active', async () => {
+    const docsTask = await createTask('Update docs');
+    const apiTask = await createTask('Fix API');
+    const settledTask = await createTask('Settled restart');
+    const canceledTask = await createTask('Canceled task');
+    const otherSessionTask = await createTask('Other session');
+    const deletedTask = await createTask(
+      'Deleted task',
+      new Date('2026-08-17T00:00:00Z'),
+    );
 
-  it('returns every distinct active task and keeps the newest run per task', async () => {
-    mocks.activeRuns = [
+    await createRun({
+      taskId: docsTask.id,
+      status: RunStatus.Running,
+      createdAt: new Date('2026-08-17T00:06:00Z'),
+      fastAgentSessionId: SESSION_ID,
+    });
+    await createRun({
+      taskId: apiTask.id,
+      status: RunStatus.Processing,
+      createdAt: new Date('2026-08-17T00:05:00Z'),
+      fastAgentSessionId: SESSION_ID,
+    });
+    await createRun({
+      taskId: apiTask.id,
+      status: RunStatus.Pending,
+      createdAt: new Date('2026-08-17T00:04:00Z'),
+      fastAgentSessionId: SESSION_ID,
+    });
+    await createRun({
+      taskId: settledTask.id,
+      status: RunStatus.Completed,
+      createdAt: new Date('2026-08-17T00:03:00Z'),
+      fastAgentSessionId: SESSION_ID,
+    });
+    await createRun({
+      taskId: settledTask.id,
+      status: RunStatus.Idle,
+      createdAt: new Date('2026-08-17T00:02:00Z'),
+      fastAgentSessionId: SESSION_ID,
+    });
+    await createRun({
+      taskId: canceledTask.id,
+      status: RunStatus.Running,
+      createdAt: new Date('2026-08-17T00:01:00Z'),
+      canceledAt: new Date('2026-08-17T00:01:30Z'),
+      fastAgentSessionId: SESSION_ID,
+    });
+    await createRun({
+      taskId: otherSessionTask.id,
+      status: RunStatus.Running,
+      createdAt: new Date('2026-08-17T00:08:00Z'),
+      fastAgentSessionId: OTHER_SESSION_ID,
+    });
+    await createRun({
+      taskId: deletedTask.id,
+      status: RunStatus.Running,
+      createdAt: new Date('2026-08-17T00:07:00Z'),
+      fastAgentSessionId: SESSION_ID,
+    });
+
+    await expect(getActiveFastAgentTasks(SESSION_ID)).resolves.toEqual([
       {
-        taskId: 'task-2',
+        taskId: docsTask.id,
         title: 'Update docs',
         status: RunStatus.Running,
-        canceledAt: null,
       },
       {
-        taskId: 'task-1',
-        title: 'Fix API',
-        status: RunStatus.Processing,
-        canceledAt: null,
-      },
-      {
-        taskId: 'task-1',
-        title: 'Fix API',
-        status: RunStatus.Pending,
-        canceledAt: null,
-      },
-      {
-        taskId: 'task-3',
-        title: 'Settled restart',
-        status: RunStatus.Completed,
-        canceledAt: null,
-      },
-      {
-        taskId: 'task-3',
-        title: 'Settled restart',
-        status: RunStatus.Idle,
-        canceledAt: null,
-      },
-      {
-        taskId: 'task-4',
-        title: 'Canceled task',
-        status: RunStatus.Running,
-        canceledAt: new Date('2026-08-17T00:00:00Z'),
-      },
-    ];
-
-    await expect(getActiveFastAgentTasks('session-1')).resolves.toEqual([
-      {
-        taskId: 'task-2',
-        title: 'Update docs',
-        status: RunStatus.Running,
-      },
-      {
-        taskId: 'task-1',
+        taskId: apiTask.id,
         title: 'Fix API',
         status: RunStatus.Processing,
       },
     ]);
   });
 
-  it('matches both Slack parents and provider-neutral Fast session links', async () => {
-    mocks.activeRuns = [];
+  it('uses only the provider-neutral Fast session link', async () => {
+    const canonicalTask = await createTask('Canonical session task');
+    const parentOnlyTask = await createTask('Parent-only task');
 
-    await getActiveFastAgentTasks('11111111-1111-4111-8111-111111111111');
+    const canonicalRun = await createRun({
+      taskId: canonicalTask.id,
+      status: RunStatus.Running,
+      createdAt: new Date('2026-08-17T00:02:00Z'),
+      fastAgentSessionId: SESSION_ID,
+    });
+    await createRun({
+      taskId: parentOnlyTask.id,
+      status: RunStatus.Running,
+      createdAt: new Date('2026-08-17T00:01:00Z'),
+      fastAgentParent: {
+        sessionId: SESSION_ID,
+        slackTeamId: 'T123',
+        slackChannel: 'C123',
+        slackThreadTs: '111.222',
+      },
+    });
 
-    expect(mocks.or).toHaveBeenCalledWith(
-      expect.objectContaining({
-        strings: expect.arrayContaining([
-          expect.stringContaining("'fastAgentParent'"),
-        ]),
-        values: ['task_runs.payload', '11111111-1111-4111-8111-111111111111'],
-      }),
-      expect.objectContaining({
-        strings: expect.arrayContaining([
-          expect.stringContaining("'fastAgentSessionId'"),
-        ]),
-        values: ['task_runs.payload', '11111111-1111-4111-8111-111111111111'],
-      }),
-    );
+    expect(canonicalRun.fastAgentSessionId).toBe(SESSION_ID);
+    await expect(getActiveFastAgentTasks(SESSION_ID)).resolves.toEqual([
+      {
+        taskId: canonicalTask.id,
+        title: 'Canonical session task',
+        status: RunStatus.Running,
+      },
+    ]);
   });
 });

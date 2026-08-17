@@ -1,0 +1,2 @@
+ALTER TABLE "task_runs" ADD COLUMN "fast_agent_session_id" uuid GENERATED ALWAYS AS (((payload ->> 'fastAgentSessionId')::uuid)) STORED;--> statement-breakpoint
+CREATE INDEX "task_runs_fast_agent_session_id_idx" ON "task_runs" USING btree ("fast_agent_session_id");

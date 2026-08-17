@@ -967,8 +967,9 @@ describe('enqueueTask snapshot resume', () => {
 
   it('preserves Fast parent routing and communication isolation across resume', async () => {
     const userId = await createUser();
+    const fastAgentSessionId = '11111111-1111-4111-8111-111111111111';
     const fastAgentParent = {
-      sessionId: '11111111-1111-4111-8111-111111111111',
+      sessionId: fastAgentSessionId,
       slackTeamId: 'T123',
       slackChannel: 'C123',
       slackThreadTs: '111.222',
@@ -982,6 +983,7 @@ describe('enqueueTask snapshot resume', () => {
           communicationChannelId: 'C123',
           communicationThreadId: '111.222',
           communicationContextInherited: true,
+          fastAgentSessionId,
           fastAgentParent,
         },
       }),
@@ -1007,6 +1009,7 @@ describe('enqueueTask snapshot resume', () => {
 
     expect(resumePayload.communicationContextInherited).toBe(true);
     expect(resumePayload.fastAgentParent).toEqual(fastAgentParent);
+    expect(resumePayload.fastAgentSessionId).toBe(fastAgentSessionId);
   });
 
   it('preserves a Discord Fast session across resume', async () => {
@@ -1055,7 +1058,6 @@ describe('enqueueTask snapshot resume', () => {
       slackChannel: 'C123',
       slackThreadTs: '333.444',
     };
-    const fastAgentSessionId = '44444444-4444-4444-8444-444444444444';
     const freshRun = await launchFresh({
       task: standardTaskInput({
         payload: {
@@ -1063,7 +1065,6 @@ describe('enqueueTask snapshot resume', () => {
           description: 'Do the thing',
           communicationContextInherited: true,
           fastAgentParent,
-          fastAgentSessionId,
         },
       }),
       initiator: { kind: 'user', userId },
@@ -1104,7 +1105,6 @@ describe('enqueueTask snapshot resume', () => {
 
     expect(resumePayload.communicationContextInherited).toBe(true);
     expect(resumePayload.fastAgentParent).toEqual(fastAgentParent);
-    expect(resumePayload.fastAgentSessionId).toBe(fastAgentSessionId);
   });
 
   it('inherits per-task model role overrides from the source run payload', async () => {
