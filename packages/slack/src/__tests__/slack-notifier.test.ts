@@ -320,7 +320,7 @@ describe('SlackNotifier', () => {
           body: JSON.stringify({
             channel: 'C123',
             thread_ts: '100.001',
-            task_display_mode: 'timeline',
+            task_display_mode: 'dense',
             recipient_team_id: 'T123',
             recipient_user_id: 'U123',
             chunks: [{ type: 'task_update', ...initialTask }],

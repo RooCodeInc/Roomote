@@ -163,6 +163,65 @@ describe('Slack live task stream', () => {
     });
   });
 
+  it('filters transient status lines and limits narration per step', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1000, text: 'Provider error: Bad Gateway' },
+      context,
+    );
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1001, text: 'Retrying now.' },
+      context,
+    );
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1002, text: 'Inspecting the registry.' },
+      context,
+    );
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1003, text: 'A second narration for this step.' },
+      context,
+    );
+
+    expect(mocks.appendTaskStream).toHaveBeenCalledOnce();
+    expect(mocks.appendTaskStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          output: '\nInspecting the registry.',
+        }),
+      }),
+    );
+
+    // A new step reopens the narration budget.
+    await updateSlackLiveTaskStream(
+      taskRun,
+      {
+        type: 'todo_update',
+        ts: 1004,
+        todos: [
+          {
+            id: '1',
+            content: 'Make the change',
+            status: 'in_progress' as const,
+          },
+        ],
+      },
+      context,
+    );
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1005, text: 'Editing the selector metadata.' },
+      context,
+    );
+
+    expect(mocks.appendTaskStream).toHaveBeenCalledTimes(3);
+  });
+
   it('does not expose reasoning events in Slack', async () => {
     await updateSlackLiveTaskStream(
       createTaskRun(),

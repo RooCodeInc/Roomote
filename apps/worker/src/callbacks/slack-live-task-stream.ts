@@ -16,6 +16,9 @@ import { getCallbackEventKey } from './utils';
 
 const updateQueues = new Map<number, Promise<void>>();
 
+/** Harness status noise that reads as an error but resolves on its own. */
+const TRANSIENT_NARRATION_PATTERN = /^(provider error|retrying)\b/i;
+
 function usesSlackLiveTaskStream(taskRun: TaskRun): boolean {
   return (
     taskRun.payload !== null &&
@@ -159,6 +162,11 @@ async function appendCardUpdate(params: {
   const outputLine = params.output?.trim();
   const title = params.title ?? getCardTitle(params.context);
 
+  if (params.title && params.title !== getCardTitle(params.context)) {
+    // A new step opens a fresh narration budget for the body.
+    params.context.slackLiveTaskStepNarrated = false;
+  }
+
   // Skip no-op updates: nothing new to append and the title is unchanged.
   if (
     !outputLine &&
@@ -256,6 +264,16 @@ export async function updateSlackLiveTaskStream(
   }
 
   if (event.type === 'text') {
+    // Appended body text is permanent, so transient status lines (provider
+    // retries) never enter it, and each step contributes at most one
+    // narration line to keep the card readable on long runs.
+    if (
+      TRANSIENT_NARRATION_PATTERN.test(event.text.trim()) ||
+      context.slackLiveTaskStepNarrated === true
+    ) {
+      return;
+    }
+    context.slackLiveTaskStepNarrated = true;
     await appendCardUpdate({ taskRun, context, output: event.text });
     return;
   }
