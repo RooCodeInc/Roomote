@@ -259,13 +259,20 @@ fi
 # Roomote's collectors write through gbrain's MCP API. Pointing the default
 # source at a real directory makes every successful put_page also render a
 # Markdown artifact there. Roomote performs one bounded, cited daily digest
-# through gbrain's built-in `synthesize` memory verb; the older per-transcript
-# reflection fan-out and reflection-pattern pass are deliberately disabled.
+# through its provider-neutral gateway; native dream reflection/pattern pages
+# remain disabled because they do not refresh existing entity prose. That
+# missing supported capability is tracked upstream:
+# https://github.com/garrytan/gbrain/issues/4294
 mkdir -p "$BRAIN_DIR"
 gbrain config set sync.repo_path "$BRAIN_DIR" >/dev/null
 gbrain config set dream.synthesize.session_corpus_dir "$BRAIN_DIR" >/dev/null
 gbrain config set dream.synthesize.enabled false >/dev/null
 gbrain config set dream.patterns.enabled false >/dev/null
+# Pin the latest native synthesis contract even while the phase is disabled,
+# so enabling it later uses one bounded validated completion rather than the
+# legacy multi-turn child loop.
+gbrain config set dream.synthesize.mode oneshot >/dev/null
+gbrain config set dream.synthesize.link_manifest true >/dev/null
 # Roomote routes synthesis through an OpenAI-compatible gateway. gbrain's
 # legacy subagent loop only supports Anthropic directly, so non-Anthropic
 # models need the provider-neutral gateway loop or every dream child is

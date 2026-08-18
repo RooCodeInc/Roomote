@@ -42,6 +42,7 @@ import {
 } from '@roomote/types';
 
 import {
+  callBrainWriteTool,
   isBrainNotReady,
   isBrainRateLimited,
   postToBrain,
@@ -83,6 +84,15 @@ export type CollectorPage = {
   slug: string;
   title: string;
   content: string;
+  timelineEvidence?: EntityTimelineEvidence[];
+};
+
+export type EntityTimelineEvidence = {
+  slug: string;
+  date: string;
+  summary: string;
+  detail?: string;
+  source: string;
 };
 
 type CollectorStateUpdate = {
@@ -174,6 +184,18 @@ export type BrainSink = (
   connection: BrainConnection,
 ) => Promise<void>;
 
+type BrainTimelineSink = (
+  evidence: EntityTimelineEvidence,
+  connection: BrainConnection,
+) => Promise<void>;
+
+async function appendBrainTimelineEvidence(
+  evidence: EntityTimelineEvidence,
+  connection: BrainConnection,
+): Promise<void> {
+  await callBrainWriteTool(connection, 'add_timeline_entry', evidence);
+}
+
 /**
  * Run every registered collector once, writing collected pages to the brain
  * through the outbox-drain `put_page` path so collected pages are immediately
@@ -197,12 +219,14 @@ export async function runBrainCollectors(
   connection: BrainConnection,
   options: {
     sink?: BrainSink;
+    timelineSink?: BrainTimelineSink;
     collectors?: BrainCollector[];
     /** Skip upstream incremental polls during fast historical continuation. */
     includeIncremental?: boolean;
   } = {},
 ): Promise<BrainCollectorRunResult> {
   const sink = options.sink ?? postToBrain;
+  const timelineSink = options.timelineSink ?? appendBrainTimelineEvidence;
   const collectors = options.collectors ?? BRAIN_COLLECTORS;
   const includeIncremental = options.includeIncremental ?? true;
   let backfillProgressed = false;
@@ -238,6 +262,18 @@ export async function runBrainCollectors(
             { ...page, content: redactBrainText(page.content) },
             connection,
           );
+          for (const evidence of page.timelineEvidence ?? []) {
+            await timelineSink(
+              {
+                ...evidence,
+                summary: redactBrainText(evidence.summary),
+                ...(evidence.detail
+                  ? { detail: redactBrainText(evidence.detail) }
+                  : {}),
+              },
+              connection,
+            );
+          }
         }
 
         if (overshot) {
@@ -295,6 +331,7 @@ export async function runBrainCollectors(
             startCursor: state?.backfillCursor ?? null,
             connection,
             sink,
+            timelineSink,
           })) || backfillProgressed;
       }
     } catch (error) {
@@ -333,8 +370,10 @@ async function drainCollectorBackfill(input: {
   startCursor: string | null;
   connection: BrainConnection;
   sink: BrainSink;
+  timelineSink: BrainTimelineSink;
 }): Promise<boolean> {
-  const { collectorId, backfill, startCursor, connection, sink } = input;
+  const { collectorId, backfill, startCursor, connection, sink, timelineSink } =
+    input;
   let cursor = startCursor;
   let budget = MAX_BACKFILL_PAGES_PER_COLLECTOR_PER_PASS;
   let steps = 0;
@@ -349,6 +388,18 @@ async function drainCollectorBackfill(input: {
         { ...page, content: redactBrainText(page.content) },
         connection,
       );
+      for (const evidence of page.timelineEvidence ?? []) {
+        await timelineSink(
+          {
+            ...evidence,
+            summary: redactBrainText(evidence.summary),
+            ...(evidence.detail
+              ? { detail: redactBrainText(evidence.detail) }
+              : {}),
+          },
+          connection,
+        );
+      }
     }
 
     await persistCollectorItemUpdates(step.itemUpdates ?? []);
@@ -409,6 +460,7 @@ export type SlackChannelMessage = {
   ts: string;
   userId: string | null;
   userLabel?: string;
+  person?: PersonIdentityReference;
   text: string;
 };
 
@@ -534,19 +586,28 @@ export function groupSlackMessagesIntoDayPages(
           start,
           start + SLACK_HISTORY_LIMIT_PER_CHANNEL,
         );
-        const lines = chunk.map(
-          (message) =>
-            `- [${formatUtcTime(message.at)}] <${
-              message.userLabel && message.userId
-                ? `${message.userLabel} (${message.userId})`
-                : (message.userId ?? 'unknown')
-            }>: ${message.text.trim()}`,
-        );
+        const lines = chunk.map((message) => {
+          const author =
+            message.person && message.userId
+              ? `[${message.person.title}](${message.person.slug}) (${message.userId})`
+              : `<${
+                  message.userLabel && message.userId
+                    ? `${message.userLabel} (${message.userId})`
+                    : (message.userId ?? 'unknown')
+                }>`;
+          return `- [${formatUtcTime(message.at)}] ${author}: ${message.text.trim()}`;
+        });
         const firstTs = chunk[0]!.ts.replace('.', '-');
         const lastTs = chunk.at(-1)!.ts.replace('.', '-');
+        const slug = `slack/${group.teamId}/${group.channelId}/${group.day}/${firstTs}-${lastTs}`;
+        const people = new Set<string>();
+        for (const message of chunk) {
+          if (!message.person) continue;
+          people.add(message.person.slug);
+        }
 
         pages.push({
-          slug: `slack/${group.teamId}/${group.channelId}/${group.day}/${firstTs}-${lastTs}`,
+          slug,
           title: `#${group.channelName} — ${group.day}`,
           content: [
             '---',
@@ -557,6 +618,16 @@ export function groupSlackMessagesIntoDayPages(
             '',
             ...lines,
           ].join('\n'),
+          // Timeline rows are append-only. Keep their identity and payload
+          // stable across collector windows, edits, channel renames, and
+          // historical reprojections so one person's day cannot accumulate a
+          // wall of stale per-batch activity atoms.
+          timelineEvidence: [...people].map((personSlug) => ({
+            slug: personSlug,
+            date: group.day,
+            summary: 'Participated in a public Slack channel',
+            source: `slack:channel-day:${group.teamId}/${group.channelId}/${group.day}`,
+          })),
         });
       }
 
@@ -582,7 +653,7 @@ type RawSlackMessage = {
 function toSlackChannelMessages(
   messages: RawSlackMessage[],
   channel: { id: string; name: string; teamId: string },
-  userLabels: ReadonlyMap<string, string> = new Map(),
+  userLabels: ReadonlyMap<string, PersonIdentityReference> = new Map(),
 ): SlackChannelMessage[] {
   const collected: SlackChannelMessage[] = [];
 
@@ -604,6 +675,9 @@ function toSlackChannelMessages(
       ts: message.ts,
       userId: message.user ?? message.bot_id ?? null,
       userLabel: message.user
+        ? userLabels.get(`${channel.teamId}/${message.user}`)?.title
+        : undefined,
+      person: message.user
         ? userLabels.get(`${channel.teamId}/${message.user}`)
         : undefined,
       text: message.text,
@@ -613,19 +687,39 @@ function toSlackChannelMessages(
   return collected;
 }
 
-async function loadSlackAuthorLabels(): Promise<Map<string, string>> {
+async function loadSlackAuthorLabels(): Promise<
+  Map<string, PersonIdentityReference>
+> {
   try {
     const mappings = await db.query.slackUserMappings.findMany({
-      with: { user: { columns: { name: true } } },
+      with: {
+        user: {
+          columns: {
+            id: true,
+            name: true,
+            createdAt: true,
+            deletedAt: true,
+          },
+        },
+      },
     });
 
     return new Map(
-      mappings
-        .filter((mapping) => brainSafeIdentityValue(mapping.user.name))
-        .map((mapping) => [
-          `${mapping.slackTeamId}/${mapping.slackUserId}`,
-          brainSafeIdentityValue(mapping.user.name),
-        ]),
+      mappings.flatMap(({ slackTeamId, slackUserId, user }) => {
+        const title = brainSafeIdentityValue(user.name);
+        return !user.deletedAt && title
+          ? [
+              [
+                `${slackTeamId}/${slackUserId}`,
+                {
+                  slug: personIdentitySlug(user.id),
+                  title,
+                  effectiveDate: user.createdAt,
+                },
+              ] as const,
+            ]
+          : [];
+      }),
     );
   } catch (error) {
     console.warn(
@@ -1087,7 +1181,7 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
 
 /** Exported for the fake-Slack integration test, which drives it directly. */
 export const slackPublicChannelsCollector: BrainCollector = {
-  id: 'slack-public-channels',
+  id: 'slack-public-channels:entity-timeline-v2',
   displayName: 'Slack public channels',
   async isEnabled() {
     const installation = await db.query.slackInstallations.findFirst({
@@ -1917,7 +2011,7 @@ const slackPersonDirectoryCollector: BrainCollector = {
 const PERSON_IDENTITIES_STATE_ID =
   'person-identities:members:occurrence-date-v2';
 const PERSON_IDENTITIES_RECONCILIATION_MS = 24 * 60 * 60 * 1000;
-const GRANOLA_MEETINGS_COLLECTOR_ID = 'granola-meetings:detail-v2';
+const GRANOLA_MEETINGS_COLLECTOR_ID = 'granola-meetings:entity-timeline-v3';
 
 type PersonIdentityCursor = {
   mode: 'idle' | 'sweep' | 'incremental';
@@ -2981,7 +3075,20 @@ export function buildGranolaMeetingPage(
   ].join('\n');
 
   return {
-    page: { slug: `meetings/${day}-${slugTail}`, title, content },
+    page: {
+      slug: `meetings/${day}-${slugTail}`,
+      title,
+      content,
+      timelineEvidence:
+        id && createdAt
+          ? attendeeSlugs.map((slug) => ({
+              slug,
+              date: day,
+              summary: 'Attended a meeting recorded in Granola',
+              source: `granola:note:${id}`,
+            }))
+          : [],
+    },
     updatedAt,
   };
 }

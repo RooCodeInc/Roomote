@@ -825,6 +825,50 @@ describe('runBrainCollectors deep backfill', () => {
       interrupted: false,
     });
   });
+
+  it('retries the same timeline evidence before advancing its watermark', async () => {
+    const evidence = {
+      slug: 'people/member-a',
+      date: '2026-08-17',
+      summary: 'Participated in #general',
+      source: 'slack/team/general/batch',
+    };
+    const collector = makeCollector({
+      collect: async () => ({
+        pages: [
+          {
+            slug: evidence.source,
+            title: 'Slack batch',
+            content: 'content',
+            timelineEvidence: [evidence],
+          },
+        ],
+        nextSince: new Date('2026-08-18T00:00:00Z'),
+      }),
+    });
+    const timelineSink = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('timeline unavailable'))
+      .mockResolvedValueOnce(undefined);
+
+    await runBrainCollectors(connection, {
+      sink: vi.fn(async () => {}),
+      timelineSink,
+      collectors: [collector],
+    });
+    expect(syncStateStore.get(collector.id)?.watermark).toBeUndefined();
+
+    await runBrainCollectors(connection, {
+      sink: vi.fn(async () => {}),
+      timelineSink,
+      collectors: [collector],
+    });
+    expect(timelineSink).toHaveBeenNthCalledWith(1, evidence, connection);
+    expect(timelineSink).toHaveBeenNthCalledWith(2, evidence, connection);
+    expect(syncStateStore.get(collector.id)?.watermark).toEqual(
+      new Date('2026-08-18T00:00:00Z'),
+    );
+  });
 });
 
 describe('groupSlackMessagesIntoDayPages', () => {
@@ -917,6 +961,102 @@ describe('groupSlackMessagesIntoDayPages', () => {
     ]);
 
     expect(pages).toEqual([]);
+  });
+
+  it('links canonical authors and emits stable timeline evidence', () => {
+    const person = {
+      slug: 'people/roomote-member-abc',
+      title: 'Alice Example',
+    };
+    const pages = groupSlackMessagesIntoDayPages([
+      {
+        teamId: 'T1',
+        channelId: 'C1',
+        channelName: 'general',
+        ts: day1Ts,
+        userId: 'U1',
+        person,
+        text: 'first decision',
+      },
+      {
+        teamId: 'T1',
+        channelId: 'C1',
+        channelName: 'general',
+        ts: day1LaterTs,
+        userId: 'U1',
+        person,
+        text: 'follow-up',
+      },
+    ]);
+
+    expect(pages[0]?.content).toContain(
+      '[Alice Example](people/roomote-member-abc) (U1): first decision',
+    );
+    expect(pages[0]?.timelineEvidence).toEqual([
+      {
+        slug: 'people/roomote-member-abc',
+        date: '2026-08-13',
+        summary: 'Participated in a public Slack channel',
+        source: 'slack:channel-day:T1/C1/2026-08-13',
+      },
+    ]);
+    expect(
+      groupSlackMessagesIntoDayPages([
+        {
+          teamId: 'T1',
+          channelId: 'C1',
+          channelName: 'general',
+          ts: day1Ts,
+          userId: 'U1',
+          person,
+          text: 'first decision',
+        },
+        {
+          teamId: 'T1',
+          channelId: 'C1',
+          channelName: 'general',
+          ts: day1LaterTs,
+          userId: 'U1',
+          person,
+          text: 'follow-up',
+        },
+      ])[0]?.timelineEvidence,
+    ).toEqual(pages[0]?.timelineEvidence);
+  });
+
+  it('keeps timeline evidence stable across Slack batches, edits, and channel renames', () => {
+    const person = {
+      slug: 'people/roomote-member-abc',
+      title: 'Alice Example',
+    };
+    const firstBatch = groupSlackMessagesIntoDayPages([
+      {
+        teamId: 'T1',
+        channelId: 'C1',
+        channelName: 'general',
+        ts: day1Ts,
+        userId: 'U1',
+        person,
+        text: 'original message',
+      },
+    ]);
+    const laterBatch = groupSlackMessagesIntoDayPages([
+      {
+        teamId: 'T1',
+        channelId: 'C1',
+        channelName: 'renamed-channel',
+        ts: day1LaterTs,
+        userId: 'U1',
+        person,
+        text: 'edited or later message',
+      },
+    ]);
+
+    expect(firstBatch[0]?.slug).not.toBe(laterBatch[0]?.slug);
+    expect(laterBatch[0]?.timelineEvidence).toEqual(
+      firstBatch[0]?.timelineEvidence,
+    );
+    expect(laterBatch[0]?.timelineEvidence?.[0]).not.toHaveProperty('detail');
   });
 });
 
@@ -1022,6 +1162,50 @@ describe('buildGranolaMeetingPage', () => {
       '- [Dan Riccio](people/roomote-member-abc)',
     );
     expect(result?.page.content).not.toContain('- danny@example.com');
+    expect(result?.page.timelineEvidence).toEqual([
+      {
+        slug: 'people/roomote-member-abc',
+        date: '2026-08-10',
+        summary: 'Attended a meeting recorded in Granola',
+        source: 'granola:note:not_abc123def45678',
+      },
+    ]);
+  });
+
+  it('keeps timeline evidence stable when a meeting title or notes change', () => {
+    const identities = new Map([
+      [
+        'danny@example.com',
+        { slug: 'people/roomote-member-abc', title: 'Dan Riccio' },
+      ],
+    ]);
+    const original = buildGranolaMeetingPage(fixture, identities);
+    const edited = buildGranolaMeetingPage(
+      {
+        ...fixture,
+        title: 'Renamed Growth Sync',
+        summary: 'Completely revised meeting notes.',
+      },
+      identities,
+    );
+
+    expect(edited?.page.timelineEvidence).toEqual(
+      original?.page.timelineEvidence,
+    );
+    expect(edited?.page.timelineEvidence?.[0]).not.toHaveProperty('detail');
+  });
+
+  it('does not emit an invalid timeline date for undated meeting input', () => {
+    const result = buildGranolaMeetingPage(
+      {
+        id: 'note-without-date',
+        title: 'Undated meeting',
+        attendees: ['Matt'],
+      },
+      new Map([['matt', { slug: 'people/roomote-member-abc', title: 'Matt' }]]),
+    );
+
+    expect(result?.page.timelineEvidence).toEqual([]);
   });
 
   it('tries both attendee name and email before leaving a person unresolved', () => {
