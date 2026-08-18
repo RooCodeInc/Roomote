@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import type {
   CommunicationChannelMessagesResult,
   CommunicationMessage,
@@ -15,6 +17,17 @@ const DEFAULT_DISCORD_API_BASE_URL = 'https://discord.com/api/v10';
 const DEFAULT_DISCORD_TIMEOUT_MS = 10_000;
 const DEFAULT_DISCORD_MAX_RETRIES = 2;
 const DISCORD_RETRY_BASE_DELAY_MS = 250;
+
+/** Discord accepts string nonces up to an unsigned 64-bit integer. */
+export function buildDiscordMessageNonce(
+  idempotencyKey: string,
+  partIndex = 0,
+): string {
+  const digest = createHash('sha256')
+    .update(`${idempotencyKey}:${partIndex}`)
+    .digest();
+  return digest.readBigUInt64BE(0).toString();
+}
 
 export type DiscordCommunicationProviderOptions = {
   botToken: string;
@@ -531,7 +544,9 @@ export class DiscordCommunicationProvider implements CommunicationProviderAdapte
     let lastTextMessage: DiscordApiMessage | null = null;
 
     for (let index = 0; index < batchCount; index += 1) {
-      const nonce = this.nonceFactory();
+      const nonce = input.idempotencyKey
+        ? buildDiscordMessageNonce(input.idempotencyKey, index)
+        : this.nonceFactory();
       const imageGroup = imageGroups[index] ?? [];
       const body = {
         ...(textChunks[index] ? { content: textChunks[index] } : {}),

@@ -72,8 +72,11 @@ export async function processFastAgentMessage(params: {
   const conversation = {
     surface: 'slack' as const,
     workspaceId: teamId,
-    channelId: event.channel,
-    threadId,
+    conversationId: threadId,
+    replyTarget: {
+      channelId: event.channel,
+      threadId,
+    },
   };
   const releaseFastAgentLock = await acquireFastAgentTurnLock({
     conversation,

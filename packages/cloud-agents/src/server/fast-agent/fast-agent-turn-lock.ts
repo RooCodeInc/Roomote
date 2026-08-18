@@ -19,11 +19,11 @@ export async function acquireFastAgentTurnLock(params: {
    * user-feedback path can fail fast instead of blocking their context. */
   maxWaitMs?: number;
 }) {
-  const { channelId, threadId } = params.conversation;
+  const { conversationId, replyTarget } = params.conversation;
   const storageWorkspaceId = getFastAgentConversationStorageWorkspaceId(
     params.conversation,
   );
-  const key = `${FAST_AGENT_TURN_LOCK_PREFIX}${storageWorkspaceId}:${channelId}:${threadId}`;
+  const key = `${FAST_AGENT_TURN_LOCK_PREFIX}${storageWorkspaceId}:${replyTarget.channelId}:${conversationId}`;
   const maxAttempts =
     params.maxWaitMs === undefined
       ? FAST_AGENT_TURN_LOCK_MAX_ATTEMPTS

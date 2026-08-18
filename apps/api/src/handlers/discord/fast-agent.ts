@@ -23,6 +23,15 @@ type DiscordInteractionReplyContext = {
   interactionDeferred: boolean;
 };
 
+export function getDiscordFastConversationId(
+  channel: DiscordChannelContext,
+  eventId: string,
+): string {
+  return channel.isDirectMessage || channel.isThread
+    ? channel.channelId
+    : eventId;
+}
+
 export async function processDiscordFastAgentMessage(input: {
   event: DiscordGatewayEvent;
   question: string;
@@ -32,7 +41,7 @@ export async function processDiscordFastAgentMessage(input: {
   applicationId: string;
   channel: DiscordChannelContext;
   metadata: ReturnType<typeof discordMetadataForChannel>;
-  sessionThreadId: string;
+  conversationId: string;
   interaction?: DiscordInteractionReplyContext;
   activeTasks?: { taskId: string }[];
 }): Promise<void> {
@@ -51,8 +60,13 @@ export async function processDiscordFastAgentMessage(input: {
   const conversation = {
     surface: 'discord' as const,
     workspaceId: input.channel.guildId ?? 'dm',
-    channelId: input.metadata.communicationChannelId,
-    threadId: input.sessionThreadId,
+    conversationId: input.conversationId,
+    replyTarget: {
+      channelId: input.metadata.communicationChannelId,
+      ...(input.metadata.communicationThreadId
+        ? { threadId: input.metadata.communicationThreadId }
+        : {}),
+    },
   };
   const response = await answerFastAgentQuestion({
     question: input.question,
@@ -111,6 +125,10 @@ export async function processDiscordFastAgentMessage(input: {
           channel: input.channel,
           forceNewThread: true,
           fastAgentSessionId: parentSessionId,
+          fastAgentParent: {
+            sessionId: parentSessionId,
+            conversation,
+          },
           skipRoutingConfirmation: true,
           workspaceOverride,
         });

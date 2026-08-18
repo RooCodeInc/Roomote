@@ -1,3 +1,4 @@
+import { buildFastAgentSessionChannelKey } from '@roomote/cloud-agents/server';
 import {
   and,
   db,
@@ -49,8 +50,9 @@ export async function publishFastAgentRequestUserInput(input: {
     return { published: false };
   }
 
-  const { workspaceId, channelId, threadId } = parent.conversation;
-  const scopedChannel = `${workspaceId}:${channelId}`;
+  const { workspaceId, replyTarget } = parent.conversation;
+  const { channelId, threadId } = replyTarget;
+  const scopedChannel = buildFastAgentSessionChannelKey(parent.conversation);
   const [session, installation] = await Promise.all([
     db.query.slackQuickAnswers.findFirst({
       where: and(

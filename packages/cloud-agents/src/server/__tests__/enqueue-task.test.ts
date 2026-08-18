@@ -973,8 +973,8 @@ describe('enqueueTask snapshot resume', () => {
       conversation: {
         surface: 'slack' as const,
         workspaceId: 'T123',
-        channelId: 'C123',
-        threadId: '111.222',
+        conversationId: '111.222',
+        replyTarget: { channelId: 'C123', threadId: '111.222' },
       },
     };
     const freshRun = await launchFresh({
@@ -1060,8 +1060,8 @@ describe('enqueueTask snapshot resume', () => {
       conversation: {
         surface: 'slack' as const,
         workspaceId: 'T123',
-        channelId: 'C123',
-        threadId: '333.444',
+        conversationId: '333.444',
+        replyTarget: { channelId: 'C123', threadId: '333.444' },
       },
     };
     const freshRun = await launchFresh({

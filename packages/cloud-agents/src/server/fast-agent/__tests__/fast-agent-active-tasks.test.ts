@@ -159,8 +159,8 @@ describe('getActiveFastAgentTasks', () => {
         conversation: {
           surface: 'slack',
           workspaceId: 'T123',
-          channelId: 'C123',
-          threadId: '111.222',
+          conversationId: '111.222',
+          replyTarget: { channelId: 'C123', threadId: '111.222' },
         },
       },
     });

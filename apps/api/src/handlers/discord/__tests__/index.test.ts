@@ -751,8 +751,8 @@ describe('Discord Gateway event handler', () => {
         conversation: {
           surface: 'discord',
           workspaceId: 'dm',
-          channelId: 'dm-1',
-          threadId: 'dm-1',
+          conversationId: 'dm-1',
+          replyTarget: { channelId: 'dm-1' },
         },
         activeTasks: [],
       }),
@@ -1245,8 +1245,8 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.hasFastSession).toHaveBeenCalledWith({
       surface: 'discord',
       workspaceId: 'guild-1',
-      channelId: 'channel-1',
-      threadId: 'thread-1',
+      conversationId: 'thread-1',
+      replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
     });
     expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1986,6 +1986,15 @@ describe('Discord Gateway event handler', () => {
       expect.objectContaining({
         forceNewThread: true,
         fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'discord',
+            workspaceId: 'dm',
+            conversationId: 'dm-1',
+            replyTarget: { channelId: 'dm-1' },
+          },
+        },
         skipRoutingConfirmation: true,
         workspaceOverride: {
           repoForPayload: '__all_repositories__',
@@ -2002,6 +2011,100 @@ describe('Discord Gateway event handler', () => {
       expect.objectContaining({
         interaction: { interaction, interactionDeferred: true },
         text: 'Started task-17',
+      }),
+    );
+  });
+
+  it('keeps guild /fast session identity separate from its reply destination', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'channel-1',
+      name: 'general',
+      type: 0,
+      guildId: 'guild-1',
+    });
+    mocks.answerFast.mockImplementationOnce(async ({ adapter }) => {
+      await adapter.launchTask({
+        prompt: 'Investigate the flaky build',
+        environmentId: null,
+        parentSessionId: '11111111-1111-4111-8111-111111111111',
+      });
+      return 'Started';
+    });
+    const interaction = {
+      id: 'interaction-fast-guild',
+      application_id: 'app-1',
+      type: 2,
+      token: 'interaction-token',
+      channel_id: 'channel-1',
+      guild_id: 'guild-1',
+      member: {
+        user: { id: 'discord-user-1', username: 'matt' },
+      },
+      data: {
+        name: 'fast',
+        type: 1,
+        options: [{ name: 'request', type: 3, value: 'Fix the flaky build' }],
+      },
+    };
+
+    const response = await postEvent(
+      envelope(interaction, 'INTERACTION_CREATE'),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.startNewTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'discord',
+            workspaceId: 'guild-1',
+            conversationId: 'interaction-fast-guild',
+            replyTarget: { channelId: 'channel-1' },
+          },
+        },
+      }),
+    );
+  });
+
+  it('reuses the durable guild thread as the /fast conversation', async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      name: 'investigation',
+      type: 11,
+      guildId: 'guild-1',
+      parentId: 'channel-1',
+    });
+    const interaction = {
+      id: 'interaction-fast-thread',
+      application_id: 'app-1',
+      type: 2,
+      token: 'interaction-token',
+      channel_id: 'thread-1',
+      guild_id: 'guild-1',
+      member: {
+        user: { id: 'discord-user-1', username: 'matt' },
+      },
+      data: {
+        name: 'fast',
+        type: 1,
+        options: [{ name: 'request', type: 3, value: 'What changed?' }],
+      },
+    };
+
+    const response = await postEvent(
+      envelope(interaction, 'INTERACTION_CREATE'),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.answerFast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'guild-1',
+          conversationId: 'thread-1',
+          replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+        },
       }),
     );
   });

@@ -6,13 +6,15 @@ describe('fast-agent session scoping', () => {
       buildFastAgentSessionChannelKey({
         surface: 'slack',
         workspaceId: 'team-1',
-        channelId: 'channel-1',
+        conversationId: 'thread-1',
+        replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
       }),
     ).not.toBe(
       buildFastAgentSessionChannelKey({
         surface: 'slack',
         workspaceId: 'team-2',
-        channelId: 'channel-1',
+        conversationId: 'thread-1',
+        replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
       }),
     );
   });
@@ -22,7 +24,8 @@ describe('fast-agent session scoping', () => {
       buildFastAgentSessionChannelKey({
         surface: 'discord',
         workspaceId: 'guild-1',
-        channelId: 'channel-1',
+        conversationId: 'interaction-1',
+        replyTarget: { channelId: 'channel-1' },
       }),
     ).toBe('discord:guild-1:channel-1');
   });

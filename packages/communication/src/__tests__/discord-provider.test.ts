@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { MockDiscordServer } from '../mock-discord-server';
 import {
+  buildDiscordMessageNonce,
   chunkDiscordMessage,
   DiscordApiTransportError,
   DiscordCommunicationProvider,
@@ -23,6 +24,31 @@ function createHarness(options: { nonceFactory?: () => string } = {}) {
 }
 
 describe('DiscordCommunicationProvider', () => {
+  it('deduplicates the same logical send across provider instances', async () => {
+    const server = new MockDiscordServer();
+    const createProvider = () =>
+      new DiscordCommunicationProvider({
+        botToken: server.botToken,
+        applicationId: server.application.id,
+        apiBaseUrl: 'https://discord.example.test/api/v10',
+        fetch: server.fetch as typeof fetch,
+      });
+    const input = {
+      channelId: '400000000000000001',
+      text: 'Task finished.',
+      idempotencyKey: 'fast-parent-settle:42',
+    };
+
+    const first = await createProvider().postMessage(input);
+    const retried = await createProvider().postMessage(input);
+
+    expect(retried.messageId).toBe(first.messageId);
+    expect(server.state.messages[input.channelId]).toHaveLength(1);
+    expect(server.state.messages[input.channelId]?.[0]?.nonce).toBe(
+      buildDiscordMessageNonce(input.idempotencyKey),
+    );
+  });
+
   it('chunks messages at 2000 characters and disables every allowed mention', async () => {
     const nonces = ['123456789012345678', '123456789012345679'];
     const { server, provider } = createHarness({

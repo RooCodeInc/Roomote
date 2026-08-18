@@ -612,7 +612,7 @@ export async function answerFastAgentQuestion({
             apiBaseUrl,
             sessionId: session.id,
             conversation,
-            messageId: currentMessageId ?? conversation.threadId,
+            messageId: currentMessageId ?? conversation.conversationId,
           },
           availableIntegrations,
           {
@@ -747,7 +747,7 @@ export async function answerFastAgentQuestion({
         await postReaction({
           name,
           purpose,
-          messageId: currentMessageId ?? conversation.threadId,
+          messageId: currentMessageId ?? conversation.conversationId,
         });
         turnSessionMessages.push(
           buildAssistantTextMessage(`[Reacted with :${name}:]`),
@@ -803,7 +803,7 @@ export async function answerFastAgentQuestion({
                 apiBaseUrl,
                 sessionId: session.id,
                 conversation,
-                messageId: currentMessageId ?? conversation.threadId,
+                messageId: currentMessageId ?? conversation.conversationId,
               },
               availableIntegrations,
               {

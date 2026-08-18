@@ -54,8 +54,8 @@ const parent = {
   conversation: {
     surface: 'slack' as const,
     workspaceId: 'T123',
-    channelId: 'C123',
-    threadId: '100.001',
+    conversationId: '100.001',
+    replyTarget: { channelId: 'C123', threadId: '100.001' },
   },
 };
 
