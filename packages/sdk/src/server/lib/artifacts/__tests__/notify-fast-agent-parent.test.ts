@@ -1,14 +1,14 @@
 const mocks = vi.hoisted(() => {
   class FastAgentParentEventDeliveryError extends Error {
-    readonly slackPosted: boolean;
+    readonly replyPosted: boolean;
     readonly permanent: boolean;
 
     constructor(
       message: string,
-      options: { slackPosted: boolean; permanent?: boolean },
+      options: { replyPosted: boolean; permanent?: boolean },
     ) {
       super(message);
-      this.slackPosted = options.slackPosted;
+      this.replyPosted = options.replyPosted;
       this.permanent = options.permanent ?? false;
     }
   }
@@ -62,9 +62,12 @@ import { notifyFastAgentParentOnArtifact } from '../notify-fast-agent-parent';
 
 const fastParent = {
   sessionId: '11111111-1111-4111-8111-111111111111',
-  slackTeamId: 'T123',
-  slackChannel: 'C123',
-  slackThreadTs: '100.001',
+  conversation: {
+    surface: 'slack' as const,
+    workspaceId: 'T123',
+    conversationId: '100.001',
+    replyTarget: { channelId: 'C123', threadId: '100.001' },
+  },
 };
 
 function artifact(
@@ -174,7 +177,7 @@ describe('notifyFastAgentParentOnArtifact', () => {
   it('keeps the claim when the failure happened after the Slack post', async () => {
     mocks.deliverParentEvent.mockRejectedValueOnce(
       new mocks.FastAgentParentEventDeliveryError('lifecycle write failed', {
-        slackPosted: true,
+        replyPosted: true,
       }),
     );
 
@@ -192,7 +195,7 @@ describe('notifyFastAgentParentOnArtifact', () => {
   it('settles the claim as skipped when no retry can ever succeed', async () => {
     mocks.deliverParentEvent.mockRejectedValueOnce(
       new mocks.FastAgentParentEventDeliveryError('parent session gone', {
-        slackPosted: false,
+        replyPosted: false,
         permanent: true,
       }),
     );

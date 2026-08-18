@@ -13,6 +13,7 @@ import type { DiscordCommunicationProvider } from '@roomote/communication/discor
 import { findDiscordInstallationByGuildId } from '@roomote/sdk/server';
 import {
   ALL_REPOSITORIES,
+  type FastAgentParent,
   type QueuedCommunicationMessage,
   type TaskInitiator,
 } from '@roomote/types';
@@ -102,6 +103,7 @@ export async function startNewDiscordTask(input: {
   };
   forceNewThread?: boolean;
   fastAgentSessionId?: string;
+  fastAgentParent?: FastAgentParent;
   workspaceOverride?: DiscordWorkspaceSelection;
   /**
    * True when the Discord intake path successfully pinned 👀 on the origin
@@ -369,6 +371,9 @@ export async function startNewDiscordTask(input: {
       forceNewThread: input.forceNewThread,
       ...(input.fastAgentSessionId
         ? { fastAgentSessionId: input.fastAgentSessionId }
+        : {}),
+      ...(input.fastAgentParent
+        ? { fastAgentParent: input.fastAgentParent }
         : {}),
       ...(kickoffMessage ? { kickoffMessage } : {}),
       ...(input.intakeAckPinned ? { intakeAckPinned: true } : {}),

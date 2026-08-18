@@ -29,30 +29,20 @@ export type FastAgentActiveTask = {
 };
 
 function buildFastAgentSessionWhere(conversation: FastAgentConversation) {
-  const scopedSlackChannel = buildFastAgentSessionChannelKey({
-    surface: conversation.surface,
-    workspaceId: conversation.workspaceId,
-    channelId: conversation.channelId,
-  });
+  const scopedSlackChannel = buildFastAgentSessionChannelKey(conversation);
 
   return and(
     eq(slackQuickAnswers.slackChannel, scopedSlackChannel),
-    eq(slackQuickAnswers.slackThreadTs, conversation.threadId),
+    eq(slackQuickAnswers.slackThreadTs, conversation.conversationId),
   );
 }
 
-export function buildFastAgentSessionChannelKey({
-  surface,
-  workspaceId,
-  channelId,
-}: {
-  surface: FastAgentConversation['surface'];
-  workspaceId: string;
-  channelId: string;
-}): string {
+export function buildFastAgentSessionChannelKey(
+  conversation: FastAgentConversation,
+): string {
   // The existing column and unique index predate multi-workspace scoping.
   // Qualifying the value keeps N-1 rollback compatibility without a migration.
-  return `${getFastAgentConversationStorageWorkspaceId({ surface, workspaceId })}:${channelId}`;
+  return `${getFastAgentConversationStorageWorkspaceId(conversation)}:${conversation.replyTarget.channelId}`;
 }
 
 export async function getOrCreateFastAgentSession({
@@ -63,11 +53,7 @@ export async function getOrCreateFastAgentSession({
   conversation: FastAgentConversation;
 }): Promise<FastAgentSessionRecord> {
   const where = buildFastAgentSessionWhere(conversation);
-  const scopedSlackChannel = buildFastAgentSessionChannelKey({
-    surface: conversation.surface,
-    workspaceId: conversation.workspaceId,
-    channelId: conversation.channelId,
-  });
+  const scopedSlackChannel = buildFastAgentSessionChannelKey(conversation);
 
   const existingSession = await db.query.slackQuickAnswers.findFirst({
     where,
@@ -89,7 +75,7 @@ export async function getOrCreateFastAgentSession({
     .values({
       userId,
       slackChannel: scopedSlackChannel,
-      slackThreadTs: conversation.threadId,
+      slackThreadTs: conversation.conversationId,
       messages: [],
     })
     .onConflictDoNothing({

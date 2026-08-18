@@ -101,7 +101,10 @@ export async function notifyFastAgentParentOnPullRequestOpened(params: {
         runId: params.run.id,
         taskUrl: getTaskUrl({
           taskId: params.run.taskId,
-          utm: { source: 'slack', campaign: 'fast-delegation-pr-opened' },
+          utm: {
+            source: parent.conversation.surface,
+            campaign: 'fast-delegation-pr-opened',
+          },
         }),
         pullRequest,
       },
@@ -138,7 +141,7 @@ export async function notifyFastAgentParentOnPullRequestOpened(params: {
     const deliveryError =
       error instanceof FastAgentParentEventDeliveryError ? error : null;
 
-    if (delivered || deliveryError?.slackPosted || deliveryError?.permanent) {
+    if (delivered || deliveryError?.replyPosted || deliveryError?.permanent) {
       await markDelivered().catch(() => {});
       return;
     }

@@ -1,3 +1,4 @@
+import { buildFastAgentSessionChannelKey } from '@roomote/cloud-agents/server';
 import {
   and,
   db,
@@ -45,24 +46,26 @@ export async function publishFastAgentRequestUserInput(input: {
   });
   const parent = getFastAgentParentFromPayload(run?.payload);
 
-  if (!run || !parent) {
+  if (!run || !parent || parent.conversation.surface !== 'slack') {
     return { published: false };
   }
 
-  const scopedChannel = `${parent.slackTeamId}:${parent.slackChannel}`;
+  const { workspaceId, replyTarget } = parent.conversation;
+  const { channelId, threadId } = replyTarget;
+  const scopedChannel = buildFastAgentSessionChannelKey(parent.conversation);
   const [session, installation] = await Promise.all([
     db.query.slackQuickAnswers.findFirst({
       where: and(
         eq(slackQuickAnswers.id, parent.sessionId),
         eq(slackQuickAnswers.slackChannel, scopedChannel),
-        eq(slackQuickAnswers.slackThreadTs, parent.slackThreadTs),
+        eq(slackQuickAnswers.slackThreadTs, threadId),
       ),
       columns: { id: true },
     }),
     db.query.slackInstallations.findFirst({
       where: and(
         eq(slackInstallations.isActive, true),
-        eq(slackInstallations.teamId, parent.slackTeamId),
+        eq(slackInstallations.teamId, workspaceId),
       ),
       columns: { botAccessToken: true },
     }),
@@ -72,7 +75,7 @@ export async function publishFastAgentRequestUserInput(input: {
     return { published: false };
   }
 
-  const lockKey = `fast-agent:request-user-input:publish:${parent.slackTeamId}:${parent.slackChannel}:${parent.slackThreadTs}`;
+  const lockKey = `fast-agent:request-user-input:publish:${workspaceId}:${channelId}:${threadId}`;
   let releaseLock: Awaited<ReturnType<typeof acquireRedisLock>> = null;
 
   for (
@@ -93,9 +96,7 @@ export async function publishFastAgentRequestUserInput(input: {
   }
 
   try {
-    const existing = await getPendingSlackRequestUserInput(
-      parent.slackThreadTs,
-    );
+    const existing = await getPendingSlackRequestUserInput(threadId);
 
     if (existing && existing.requestId !== input.requestId) {
       // A child can only wait on one structured prompt at a time. Preserve the
@@ -123,7 +124,7 @@ export async function publishFastAgentRequestUserInput(input: {
         : {}),
     };
 
-    await setPendingSlackRequestUserInput(parent.slackThreadTs, pendingRequest);
+    await setPendingSlackRequestUserInput(threadId, pendingRequest);
 
     const slack = new SlackNotifier(installation.botAccessToken);
     const blocks = buildSlackRequestUserInputBlocks({
@@ -134,7 +135,7 @@ export async function publishFastAgentRequestUserInput(input: {
     });
     const updated = existing?.promptMessageTs
       ? await slack.updateMessage({
-          channel: parent.slackChannel,
+          channel: channelId,
           ts: existing.promptMessageTs,
           message: { blocks },
         })
@@ -142,8 +143,8 @@ export async function publishFastAgentRequestUserInput(input: {
     const messageTs = updated
       ? existing?.promptMessageTs
       : await slack.postMessage({
-          channel: parent.slackChannel,
-          thread_ts: parent.slackThreadTs,
+          channel: channelId,
+          thread_ts: threadId,
           blocks,
           client_msg_id: buildSlackClientMessageId(input.requestId),
         });
@@ -152,7 +153,7 @@ export async function publishFastAgentRequestUserInput(input: {
       throw new Error('Slack did not return a request_user_input timestamp.');
     }
 
-    await setPendingSlackRequestUserInput(parent.slackThreadTs, {
+    await setPendingSlackRequestUserInput(threadId, {
       ...pendingRequest,
       promptMessageTs: messageTs,
     });

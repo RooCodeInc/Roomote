@@ -57,6 +57,11 @@ vi.mock('../attachments.js', () => ({
 }));
 
 vi.mock('../fast-agent.js', () => ({
+  getDiscordFastConversationId: (
+    channel: DiscordChannelContext,
+    eventId: string,
+  ) =>
+    channel.isDirectMessage || channel.isThread ? channel.channelId : eventId,
   processDiscordFastAgentMessage: mocks.processFast,
 }));
 
@@ -213,7 +218,7 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
       expect.objectContaining({
         question: 'The login page 500s on refresh',
         senderUserId: 'roomote-user-1',
-        sessionThreadId: 'message-1',
+        conversationId: 'message-1',
       }),
     );
     expect(mocks.evaluateGate).not.toHaveBeenCalled();

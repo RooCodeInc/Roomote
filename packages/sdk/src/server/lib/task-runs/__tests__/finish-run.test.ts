@@ -1492,9 +1492,12 @@ describe('finishRun', () => {
           communicationContextInherited: true,
           fastAgentParent: {
             sessionId: '11111111-1111-4111-8111-111111111111',
-            slackTeamId: 'T123',
-            slackChannel: 'C123',
-            slackThreadTs: '111.222',
+            conversation: {
+              surface: 'slack',
+              workspaceId: 'T123',
+              conversationId: '111.222',
+              replyTarget: { channelId: 'C123', threadId: '111.222' },
+            },
           },
         },
       });

@@ -3,15 +3,15 @@ import { RunStatus, TaskRunErrorCode } from '@roomote/types';
 
 const mocks = vi.hoisted(() => {
   class FastAgentParentEventDeliveryError extends Error {
-    readonly slackPosted: boolean;
+    readonly replyPosted: boolean;
     readonly permanent: boolean;
 
     constructor(
       message: string,
-      options: { slackPosted: boolean; permanent?: boolean },
+      options: { replyPosted: boolean; permanent?: boolean },
     ) {
       super(message);
-      this.slackPosted = options.slackPosted;
+      this.replyPosted = options.replyPosted;
       this.permanent = options.permanent ?? false;
     }
   }
@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => {
     recordLifecycle: vi.fn(),
     deliverParentEvent: vi.fn(),
     listPullRequests: vi.fn(),
+    getTaskUrl: vi.fn(() => 'https://roomote.example/task/child-task'),
     findTaskRun: vi.fn(),
     canRetryFailedStart: vi.fn(),
     enqueueTaskRelaunch: vi.fn(),
@@ -61,7 +62,7 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   canRetryFailedStart: mocks.canRetryFailedStart,
   enqueueTaskRelaunch: mocks.enqueueTaskRelaunch,
-  getTaskUrl: vi.fn(() => 'https://roomote.example/task/child-task'),
+  getTaskUrl: mocks.getTaskUrl,
 }));
 
 vi.mock('../../fast-agent-parent-event', () => ({
@@ -74,9 +75,22 @@ import { notifyFastAgentParentOnSettle } from '../notify-fast-agent-parent-on-se
 
 const fastParent = {
   sessionId: '11111111-1111-4111-8111-111111111111',
-  slackTeamId: 'T123',
-  slackChannel: 'C123',
-  slackThreadTs: '100.001',
+  conversation: {
+    surface: 'slack' as const,
+    workspaceId: 'T123',
+    conversationId: '100.001',
+    replyTarget: { channelId: 'C123', threadId: '100.001' },
+  },
+};
+
+const discordFastParent = {
+  sessionId: '22222222-2222-4222-8222-222222222222',
+  conversation: {
+    surface: 'discord' as const,
+    workspaceId: 'guild-1',
+    conversationId: 'interaction-1',
+    replyTarget: { channelId: 'channel-1' },
+  },
 };
 
 function makeRun(
@@ -109,13 +123,13 @@ describe('notifyFastAgentParentOnSettle', () => {
 
   it('passes child lifecycle state to the Fast orchestrator', async () => {
     await notifyFastAgentParentOnSettle(
-      makeRun({ fastAgentParent: fastParent }),
+      makeRun({ fastAgentParent: discordFastParent }),
       RunStatus.Idle,
       'Implement the fix',
     );
 
     expect(mocks.deliverParentEvent).toHaveBeenCalledWith({
-      parent: fastParent,
+      parent: discordFastParent,
       event: {
         type: 'task_settled',
         taskId: 'child-task',
@@ -124,6 +138,13 @@ describe('notifyFastAgentParentOnSettle', () => {
         status: RunStatus.Idle,
         taskUrl: 'https://roomote.example/task/child-task',
         pullRequests: [],
+      },
+    });
+    expect(mocks.getTaskUrl).toHaveBeenCalledWith({
+      taskId: 'child-task',
+      utm: {
+        source: 'discord',
+        campaign: 'fast-delegation-settle',
       },
     });
     expect(mocks.recordLifecycle).toHaveBeenCalledWith(
@@ -385,7 +406,7 @@ describe('notifyFastAgentParentOnSettle', () => {
   it('keeps the claim when the failure happened after the Slack post', async () => {
     mocks.deliverParentEvent.mockRejectedValueOnce(
       new mocks.FastAgentParentEventDeliveryError('lifecycle write failed', {
-        slackPosted: true,
+        replyPosted: true,
       }),
     );
 

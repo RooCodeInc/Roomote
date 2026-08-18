@@ -69,7 +69,10 @@ import {
   handleDiscordSuggestionReaction,
 } from './callback-actions.js';
 import { maybeHandleDiscordChannelAutoStart } from './channel-auto-start.js';
-import { processDiscordFastAgentMessage } from './fast-agent.js';
+import {
+  getDiscordFastConversationId,
+  processDiscordFastAgentMessage,
+} from './fast-agent.js';
 import {
   claimPendingDiscordAccountLinkTask,
   rememberPendingDiscordAccountLinkTask,
@@ -582,8 +585,11 @@ async function processDiscordGatewayEvent(
     ? await hasFastAgentSession({
         surface: 'discord',
         workspaceId: channel.guildId ?? 'dm',
-        channelId: metadata.communicationChannelId,
-        threadId: channel.channelId,
+        conversationId: channel.channelId,
+        replyTarget: {
+          channelId: metadata.communicationChannelId,
+          threadId: channel.channelId,
+        },
       })
     : false;
   const isRoomoteThread = Boolean(
@@ -772,7 +778,10 @@ async function processDiscordGatewayEvent(
       applicationId: resolved.applicationId,
       channel,
       metadata,
-      sessionThreadId: interaction?.id ?? event.eventId,
+      conversationId: getDiscordFastConversationId(
+        channel,
+        interaction?.id ?? event.eventId,
+      ),
       interaction: interactionReplyContext(event),
       directedAtRoomote: true,
     });
@@ -795,10 +804,10 @@ async function processDiscordGatewayEvent(
       applicationId: resolved.applicationId,
       channel,
       metadata,
-      sessionThreadId:
-        channel.isDirectMessage || channel.isThread
-          ? channel.channelId
-          : defaultFastMessage.id,
+      conversationId: getDiscordFastConversationId(
+        channel,
+        defaultFastMessage.id,
+      ),
       activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
       directedAtRoomote:
         channel.isDirectMessage ||

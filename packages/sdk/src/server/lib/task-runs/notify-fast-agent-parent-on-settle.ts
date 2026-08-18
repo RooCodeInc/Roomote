@@ -215,7 +215,10 @@ export async function notifyFastAgentParentOnSettle(
           : {}),
         taskUrl: getTaskUrl({
           taskId: run.taskId,
-          utm: { source: 'slack', campaign: 'fast-delegation-settle' },
+          utm: {
+            source: parent.conversation.surface,
+            campaign: 'fast-delegation-settle',
+          },
         }),
         pullRequests,
       },
@@ -244,7 +247,7 @@ export async function notifyFastAgentParentOnSettle(
     const deliveryError =
       error instanceof FastAgentParentEventDeliveryError ? error : null;
 
-    if (delivered || deliveryError?.slackPosted) {
+    if (delivered || deliveryError?.replyPosted) {
       // The parent thread already saw the settle message; releasing the claim
       // would let the other settle caller double-post. Settle the marker.
       await markSettled().catch(() => {});
