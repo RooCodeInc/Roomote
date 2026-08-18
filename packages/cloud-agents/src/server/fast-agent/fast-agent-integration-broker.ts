@@ -1,5 +1,5 @@
 import { createAuthToken } from '@roomote/auth';
-import { Env, isBrainConfigured } from '@roomote/env';
+import { Env } from '@roomote/env';
 import {
   beginSlackFastIntegrationCall,
   completeSlackFastIntegrationCall,
@@ -7,6 +7,7 @@ import {
   deploymentMcpEnablements,
   eq,
   githubInstallations,
+  isBrainProviderConfigured,
   isNull,
 } from '@roomote/db/server';
 import {
@@ -164,7 +165,10 @@ export async function listFastAgentIntegrations(
     },
   );
 
-  if (isBrainConfigured(Env) && Env.R_GBRAIN_URL) {
+  // Same activation rule as sandbox MCP delivery: only an explicit R_BRAIN_*
+  // provider key means the deployment has a Brain, because the URL and
+  // gateway token are template-defaulted plumbing on some platforms.
+  if (Env.R_GBRAIN_URL && (await isBrainProviderConfigured())) {
     candidates.push({
       id: BRAIN_MCP_ID,
       name: 'Brain',

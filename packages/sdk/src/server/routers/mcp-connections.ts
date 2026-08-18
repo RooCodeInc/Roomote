@@ -3,7 +3,6 @@ import { z } from 'zod';
 import {
   Env,
   areCuratedIntegrationsDisabled,
-  isBrainConfigured,
   isCustomMcpDisabled,
 } from '@roomote/env';
 import {
@@ -15,6 +14,7 @@ import {
   eq,
   and,
   inArray,
+  isBrainProviderConfigured,
   isNull,
   isNotNull,
   or,
@@ -189,7 +189,19 @@ export const mcpConnectionsRouter = router({
     // collide ('gbrain' is reserved for custom servers); the worker injects
     // the run token sandbox-side and the read-only upstream credential never
     // leaves the API proxy.
-    if (isBrainConfigured(Env) && Env.R_GBRAIN_URL && !servers[BRAIN_MCP_ID]) {
+    //
+    // Delivery requires the operator's explicit R_BRAIN_* provider key, not
+    // just Brain plumbing (R_GBRAIN_URL and the gateway token are
+    // template-defaulted on some platforms): an agent told the Brain exists
+    // starts every substantive topic with a preflight against it, which must
+    // never happen on a deployment that only *could* have a Brain. The check
+    // is cached alongside provider resolution, so the common off state costs
+    // nothing.
+    if (
+      Env.R_GBRAIN_URL &&
+      !servers[BRAIN_MCP_ID] &&
+      (await isBrainProviderConfigured())
+    ) {
       servers[BRAIN_MCP_ID] = {
         url: `${getRequestOrigin(ctx.req) ?? ''}${BRAIN_PROXY_PATH}`,
         headers: {},

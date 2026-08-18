@@ -50,21 +50,24 @@ The Brain runs as its own service alongside Roomote, reachable only on your
 deployment's internal network. On the hosted templates (Railway, Render,
 Coolify) that service is already there after a deploy, sitting idle.
 
-It holds no model provider key of its own. Instead it asks Roomote for
-embeddings and synthesis, and Roomote uses whichever provider key your
-deployment has configured under **Settings → Models**. So if you already set
-up a provider for tasks, the Brain has what it needs and there is nothing else
-to do. Changing that key later takes effect on the Brain's next request, with
-no redeploy.
+Setting a Brain provider key, `R_BRAIN_OPENROUTER_API_KEY` or
+`R_BRAIN_OPENAI_API_KEY`, is what turns it on. Set either one as an
+environment variable or a Settings environment value; the value can be the
+same key you already use for tasks, or a separate one to bill the Brain
+independently. The explicit `R_BRAIN_*` name is the opt-in: the general
+provider keys your deployment uses for tasks never activate the Brain on
+their own, so configuring task models leaves the Brain off.
+
+The Brain service holds no provider key of its own. It asks Roomote for
+embeddings and synthesis, and Roomote forwards them under the Brain key.
+Changing that key later takes effect on the Brain's next request, with no
+redeploy.
 
 OpenRouter and OpenAI both support the Brain's embedding and synthesis calls,
-but search reranking requires OpenRouter. To bill the Brain separately from
-task inference, set
-`R_BRAIN_OPENROUTER_API_KEY` or `R_BRAIN_OPENAI_API_KEY`; those take
-precedence over the deployment's general provider keys.
+but search reranking requires OpenRouter.
 
-With no provider configured anywhere, the Brain stays inert. Agents are not
-told it exists, and nothing is ingested.
+Without a Brain key, the Brain stays inert. Agents are not told it exists,
+and nothing is ingested.
 
 Roomote schedules one maintenance pass each night. It retrieves a bounded,
 source-balanced evidence set from gbrain, produces a cited digest of material

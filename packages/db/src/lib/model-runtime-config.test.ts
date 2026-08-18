@@ -35,9 +35,18 @@ vi.mock('../db', () => ({
   },
 }));
 
-vi.mock('./environment-variables', () => ({
-  stringifyDecryptedEnvVarValue: (value: unknown) => String(value),
-}));
+vi.mock('./environment-variables', async (importOriginal) => {
+  // Keep the real resolveDeploymentEnvVar: it reads through the mocked db
+  // and encryption modules above, and isBrainProviderConfigured exercises
+  // that persisted-settings path for real.
+  const actual =
+    await importOriginal<typeof import('./environment-variables')>();
+
+  return {
+    ...actual,
+    stringifyDecryptedEnvVarValue: (value: unknown) => String(value),
+  };
+});
 
 vi.mock('./chatgpt-subscription', () => ({
   resolveOpenCodeAuthContent: (...args: unknown[]) =>
@@ -62,6 +71,8 @@ vi.mock('../schema', () => ({
 }));
 
 import {
+  isBrainProviderConfigured,
+  resetBrainProviderConfiguredCache,
   resolveEffectiveModelRuntimeEnv,
   resolveSandboxModelRuntimeEnv,
 } from './model-runtime-config';
@@ -1050,5 +1061,61 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       expect(env).not.toHaveProperty('LITELLM_API_KEY');
       expect(env).not.toHaveProperty('LITELLM_BASE_URL');
     });
+  });
+});
+
+describe('isBrainProviderConfigured', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    resetBrainProviderConfiguredCache();
+    mockDecryptSecrets.mockImplementation(async (value) => value);
+    mockEnvironmentVariablesFindMany.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    resetBrainProviderConfiguredCache();
+  });
+
+  it('is off with nothing configured', async () => {
+    await expect(isBrainProviderConfigured()).resolves.toBe(false);
+  });
+
+  it('is never satisfied by the general task provider keys', async () => {
+    // Nearly every deployment has one of these to run tasks. Counting them
+    // would activate the Brain everywhere the templates generate the gateway
+    // token, which is the auto-activation bug this predicate exists to close.
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-general');
+    vi.stubEnv('OPENAI_API_KEY', 'sk-general');
+
+    await expect(isBrainProviderConfigured()).resolves.toBe(false);
+  });
+
+  it('activates on an explicit Brain key in the runtime env', async () => {
+    vi.stubEnv('R_BRAIN_OPENROUTER_API_KEY', 'sk-or-brain');
+
+    await expect(isBrainProviderConfigured()).resolves.toBe(true);
+  });
+
+  it('activates on an explicit Brain key persisted in Settings', async () => {
+    mockEnvironmentVariablesFindMany.mockResolvedValue([
+      { name: 'R_BRAIN_OPENAI_API_KEY', value: 'sk-brain-persisted' },
+    ]);
+
+    await expect(isBrainProviderConfigured()).resolves.toBe(true);
+  });
+
+  it('caches the answer between calls', async () => {
+    vi.stubEnv('R_BRAIN_OPENAI_API_KEY', 'sk-brain');
+
+    await expect(isBrainProviderConfigured()).resolves.toBe(true);
+    await expect(isBrainProviderConfigured()).resolves.toBe(true);
+
+    // The second call answers from cache; only the first resolution may have
+    // touched persisted settings at all.
+    expect(
+      mockEnvironmentVariablesFindMany.mock.calls.length,
+    ).toBeLessThanOrEqual(1);
   });
 });

@@ -6,6 +6,7 @@ const {
   buildSandboxInstructionMock,
   taskRunsDoneMock,
   taskRunsActivateSlackReplyTargetMock,
+  taskRunsClearActiveSlackReplyTargetMock,
   taskRunsGetGoalMock,
   taskRunsClaimGoalContinuationMock,
   taskRunsRecordEventMock,
@@ -48,6 +49,7 @@ const {
     threadTs: '1710000000.456',
     reactionsAllowed: false,
   }),
+  taskRunsClearActiveSlackReplyTargetMock: vi.fn().mockResolvedValue(undefined),
   taskRunsGetGoalMock: vi.fn().mockResolvedValue(null),
   taskRunsClaimGoalContinuationMock: vi.fn(),
   taskRunsRecordEventMock: vi.fn().mockResolvedValue(undefined),
@@ -160,6 +162,7 @@ vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     taskRuns: {
       activateSlackReplyTarget: taskRunsActivateSlackReplyTargetMock,
+      clearActiveSlackReplyTarget: taskRunsClearActiveSlackReplyTargetMock,
       done: taskRunsDoneMock,
       getGoal: taskRunsGetGoalMock,
       claimGoalContinuation: taskRunsClaimGoalContinuationMock,
@@ -2325,6 +2328,108 @@ describe('runTask', () => {
         turnMessageTs: '1710000000.456',
       }),
     );
+  });
+
+  const runMinimalTask = async (runId: number) => {
+    await runTask({
+      taskRun: {
+        id: runId,
+        taskId: `task-${runId}`,
+        payloadKind: TaskPayloadKind.StandardTask,
+        harness: 'opencode-server',
+        payload: {},
+        result: null,
+      } as never,
+      envVars: {},
+      workspacePath: '/tmp/workspace',
+      prompt: '',
+      harnessInstructions: undefined,
+      agentInstructions: undefined,
+      environmentConfig: undefined,
+      callbacks: {},
+      context: {},
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      } as never,
+      workerEnv: {
+        buildUserFacingEnv: vi.fn(() => ({})),
+        roomoteAppUrl: 'http://localhost:3000',
+        trpcUrl: 'http://localhost:3001',
+        authToken: 'auth-token',
+        appEnv: 'test',
+        setRuntimeEnv: vi.fn(),
+      } as never,
+    });
+
+    return createHarnessMock.mock.calls[0]?.[0].prepareQueuedPromptActorScope;
+  };
+
+  /**
+   * A rolled-back API (the supported N-1 target) has no reply-target
+   * procedures, and tRPC reports the missing procedure as NOT_FOUND. That
+   * release routed replies canonically, so canonical delivery is the correct
+   * degraded behavior; blocking would stall every queued prompt until the
+   * snapshot is replaced.
+   */
+  const missingProcedureError = (path: string) =>
+    Object.assign(new Error(`No "mutation"-procedure on path "${path}"`), {
+      name: 'TRPCClientError',
+      data: { code: 'NOT_FOUND', httpStatus: 404 },
+    });
+
+  it('falls back to canonical routing when the activate procedure is missing on a rolled-back API', async () => {
+    taskRunsActivateSlackReplyTargetMock.mockRejectedValueOnce(
+      missingProcedureError('taskRuns.activateSlackReplyTarget'),
+    );
+
+    const prepareQueuedPromptActorScope = await runMinimalTask(406);
+
+    await expect(
+      prepareQueuedPromptActorScope?.(undefined, {
+        kind: 'queuedPrompt',
+        clientMessageId: 'slack:1710000000.456',
+      }),
+    ).resolves.toEqual({ shouldReconnect: false });
+    expect(recordChatTurnStartMock).not.toHaveBeenCalledWith(
+      expect.objectContaining({ turnMessageTs: '1710000000.456' }),
+    );
+  });
+
+  it('falls back to canonical routing when the clear procedure is missing on a rolled-back API', async () => {
+    taskRunsClearActiveSlackReplyTargetMock.mockRejectedValueOnce(
+      missingProcedureError('taskRuns.clearActiveSlackReplyTarget'),
+    );
+
+    const prepareQueuedPromptActorScope = await runMinimalTask(407);
+
+    await expect(
+      prepareQueuedPromptActorScope?.(undefined, {
+        kind: 'queuedPrompt',
+        clientMessageId: 'web:abc-123',
+      }),
+    ).resolves.toEqual({ shouldReconnect: false });
+  });
+
+  it('still blocks queued prompt delivery on transient reply-target failures', async () => {
+    taskRunsActivateSlackReplyTargetMock.mockRejectedValueOnce(
+      new Error('socket hang up'),
+    );
+
+    const prepareQueuedPromptActorScope = await runMinimalTask(408);
+
+    await expect(
+      prepareQueuedPromptActorScope?.(undefined, {
+        kind: 'queuedPrompt',
+        clientMessageId: 'slack:1710000000.456',
+      }),
+    ).resolves.toEqual({
+      shouldReconnect: false,
+      shouldBlockPrompt: true,
+      reason: 'Slack reply target activation failed: socket hang up',
+    });
   });
 
   it('retries blocked deferred resume prompts instead of marking them rejected immediately', async () => {
