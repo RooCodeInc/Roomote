@@ -1,7 +1,7 @@
 import { db, eq, users } from '@roomote/db/server';
 import { Env } from '@roomote/env';
 
-export type FastAgentEntryMode = 'explicit' | 'default';
+type FastAgentEntryMode = 'explicit' | 'default';
 
 export function shouldShowFastAgentProcessingReaction(params: {
   entryMode: FastAgentEntryMode;
