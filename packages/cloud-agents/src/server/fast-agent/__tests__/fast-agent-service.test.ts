@@ -522,6 +522,130 @@ describe('answerFastAgentQuestion', () => {
     expect(result).toBe('I handled the task update.');
   });
 
+  it('keeps one conversation and action schema across user and task turns', async () => {
+    type PersistedMessage = {
+      role: 'user' | 'assistant';
+      content: Array<{ type: 'text'; text: string }>;
+    };
+
+    const sessionMessages: PersistedMessage[] = [];
+    mocks.getSession.mockImplementation(async () => ({
+      id: 'session-1',
+      messages: sessionMessages,
+    }));
+    mocks.appendSessionMessages.mockImplementation(
+      async ({ messages }: { messages: PersistedMessage[] }) => {
+        sessionMessages.push(...messages);
+      },
+    );
+    mocks.getActiveTasks
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        { taskId: 'task-1', title: 'Fix checkout', status: 'running' },
+      ])
+      .mockResolvedValueOnce([
+        { taskId: 'task-1', title: 'Fix checkout', status: 'running' },
+      ]);
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'launch_task',
+          message: null,
+          purpose: null,
+          taskPrompt: 'Fix checkout.',
+          environmentId: 'env-1',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          message:
+            'I delegated the checkout fix. [Follow the task](https://roomote.example/task-1)',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'send_task_message',
+          message: null,
+          purpose: null,
+          taskId: 'task-1',
+          taskMessage: 'Please include the failing test name in your result.',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({ message: 'The task is still working on checkout.' }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({ message: 'I’ll stop that task.', purpose: 'ack' }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'cancel_task',
+          message: null,
+          purpose: null,
+          taskId: 'task-1',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({ message: 'The checkout task was canceled.' }),
+      });
+    const callbacks = chatCallbacks();
+    const launchTask = successfulLaunchTask();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'Fix checkout.',
+      launchTask,
+      ...callbacks,
+    });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question:
+        '<delegated_task_event>{"type":"artifact_published","taskId":"task-1"}</delegated_task_event>',
+      currentMessageTs: undefined,
+      platformEvent: true,
+      launchTask,
+      ...callbacks,
+    });
+    await answerFastAgentQuestion({
+      ...baseParams,
+      question: 'Cancel it.',
+      launchTask,
+      ...callbacks,
+    });
+
+    expect(launchTask).toHaveBeenCalledOnce();
+    expect(mocks.sendTaskMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      {
+        taskId: 'task-1',
+        message: 'Please include the failing test name in your result.',
+      },
+    );
+    expect(mocks.cancelTask).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      'task-1',
+    );
+    expect(
+      new Set(mocks.generateObject.mock.calls.map(([call]) => call.schema))
+        .size,
+    ).toBe(1);
+    expect(mocks.generateObject.mock.calls[4]?.[0]?.prompt).toContain(
+      'artifact_published',
+    );
+    expect(mocks.generateObject.mock.calls[4]?.[0]?.prompt).toContain(
+      'Cancel it.',
+    );
+    expect(sessionMessages).toEqual([
+      expect.objectContaining({ role: 'user' }),
+      expect.objectContaining({ role: 'assistant' }),
+      expect.objectContaining({ role: 'user' }),
+      expect.objectContaining({ role: 'assistant' }),
+      expect.objectContaining({ role: 'user' }),
+      expect.objectContaining({ role: 'assistant' }),
+      expect.objectContaining({ role: 'assistant' }),
+    ]);
+  });
+
   it('can close out a lightweight turn with an emoji reaction', async () => {
     mocks.generateObject.mockResolvedValue({
       object: decision({
