@@ -406,6 +406,7 @@ function buildFastAgentMessages({
   currentMessageTs,
   currentMessageSender,
   multiParticipantThread,
+  directedAtRoomote,
 }: {
   question: string;
   currentMessageAgentContext?: string;
@@ -418,6 +419,7 @@ function buildFastAgentMessages({
     githubLogin?: string;
   };
   multiParticipantThread: boolean;
+  directedAtRoomote: boolean;
 }): ModelMessage[] {
   const normalizedQuestion = normalizeThreadText(question);
   const currentUserMessageText = currentMessageTs
@@ -465,7 +467,7 @@ function buildFastAgentMessages({
       };
   const text = [
     slackThreadContext,
-    multiParticipantThread ? undefined : replyingTo,
+    multiParticipantThread && !directedAtRoomote ? undefined : replyingTo,
     currentUserMessageText,
   ]
     .filter((entry): entry is string => Boolean(entry))
@@ -616,6 +618,7 @@ export async function answerFastAgentQuestion({
         githubLogin: currentUser.githubLogin || undefined,
       },
       multiParticipantThread,
+      directedAtRoomote,
     });
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,

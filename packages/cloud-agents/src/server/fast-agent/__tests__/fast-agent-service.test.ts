@@ -368,10 +368,22 @@ describe('answerFastAgentQuestion', () => {
       ...baseParams,
       multiParticipantThread: true,
       directedAtRoomote: true,
+      threadContext: [
+        {
+          user: 'UBOT',
+          username: 'Roomote',
+          bot_id: 'B999',
+          text: 'What should I check?',
+          ts: '100.1',
+        },
+      ],
       ...callbacks,
     });
 
     expect(mocks.generateObject).toHaveBeenCalledTimes(2);
+    expect(mocks.generateObject.mock.calls[0]?.[0]?.prompt).toContain(
+      '<replying_to ts="100.1">\nRoomote: What should I check?\n</replying_to>',
+    );
     expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
   });
 
