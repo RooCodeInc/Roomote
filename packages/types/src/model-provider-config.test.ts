@@ -402,6 +402,8 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
     });
 
     expect(glm53ByProvider).toEqual([
+      { providerId: 'openrouter', modelId: 'openrouter/z-ai/glm-5.3' },
+      { providerId: 'vercel', modelId: 'vercel/zai/glm-5.3' },
       { providerId: 'opencode-go', modelId: 'opencode-go/glm-5.3' },
       {
         providerId: 'zai-coding-plan',
@@ -424,8 +426,6 @@ describe('SETUP_MODEL_PROVIDER_CATALOG', () => {
         return model ? [{ providerId: provider.id, modelId: model.id }] : [];
       }),
     ).toEqual([
-      { providerId: 'openrouter', modelId: 'openrouter/z-ai/glm-5.2' },
-      { providerId: 'vercel', modelId: 'vercel/zai/glm-5.2' },
       { providerId: 'requesty', modelId: 'requesty/glm-5.2' },
       { providerId: 'baseten', modelId: 'baseten/zai-org/GLM-5.2' },
       { providerId: 'togetherai', modelId: 'togetherai/zai-org/GLM-5.2' },
