@@ -36,35 +36,15 @@ import {
   getFastAgentUserIdentity,
   type FastAgentUserIdentity,
 } from './fast-agent-user-identity';
+import {
+  type FastAgentConversation,
+  type FastAgentReply,
+  type FastAgentTurnAdapter,
+  type FastAgentTurnSource,
+  type RetryFastAgentTaskStart,
+} from './fast-agent-conversation';
 
-export type FastAgentSlackThreadMessage = SlackThreadPromptMessage;
-
-interface FastAgentSlackReply {
-  purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
-  slackChannel: string;
-  slackThreadTs: string;
-  message: string;
-  imageArtifactIds?: string[];
-  /** True for the parent-owned task kickoff. Deliverers must treat anything
-   * short of a visible, durable post (including deliberate suppression) as a
-   * failure so the launch gate never opens without its kickoff. */
-  kickoff?: boolean;
-}
-
-type PostFastAgentSlackReply = (reply: FastAgentSlackReply) => Promise<void>;
-
-interface FastAgentSlackReaction {
-  name: string;
-  purpose: 'ack' | 'closeout';
-  slackChannel: string;
-  slackMessageTs: string;
-}
-
-type PostFastAgentSlackReaction = (
-  reaction: FastAgentSlackReaction,
-) => Promise<void>;
-
-export type FastAgentSurface = 'slack' | 'discord';
+export type FastAgentThreadMessage = SlackThreadPromptMessage;
 
 const fastAgentDecisionSchema = z
   .object({
@@ -165,20 +145,6 @@ async function generateFastAgentKickoffMessage({
 
   throw new Error('Fast mode did not produce a valid task kickoff reply.');
 }
-
-export type LaunchFastAgentSlackTask = (params: {
-  prompt: string;
-  environmentId: string | null;
-  parentSessionId: string;
-  postKickoff: (task: { taskId: string; taskUrl?: string }) => Promise<void>;
-}) => Promise<
-  | { success: true; taskId: string; taskUrl?: string }
-  | { success: false; error: string }
->;
-
-export type RetryFastAgentTaskStart = () => Promise<
-  { success: true; runId: number } | { success: false; error: string }
->;
 
 function normalizeThreadText(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
@@ -346,7 +312,7 @@ function buildSupplementalSlackThreadContext({
   sessionMessages,
 }: {
   question: string;
-  threadContext: FastAgentSlackThreadMessage[];
+  threadContext: FastAgentThreadMessage[];
   sessionMessages: ModelMessage[];
 }): string | undefined {
   const persistedMessageCounts = new Map<string, number>();
@@ -410,7 +376,7 @@ function buildFastAgentMessages({
 }: {
   question: string;
   currentMessageAgentContext?: string;
-  threadContext: FastAgentSlackThreadMessage[];
+  threadContext: FastAgentThreadMessage[];
   sessionMessages: ModelMessage[];
   currentMessageTs?: string;
   currentMessageSender?: {
@@ -518,50 +484,40 @@ export async function answerFastAgentQuestion({
   threadContext = [],
   userId,
   apiBaseUrl,
-  slackTeamId,
-  slackChannel,
-  slackThreadTs,
-  currentMessageTs,
+  conversation,
+  currentMessageId,
   senderDisplayName,
-  senderSlackUserId,
+  senderExternalId,
   activeTasks = [],
-  launchTask,
-  retryTaskStart,
-  postSlackReply,
-  postSlackReaction,
-  surface = 'slack',
-  platformEvent = false,
   multiParticipantThread = false,
   directedAtRoomote = false,
+  adapter,
+  turnSource = 'human',
 }: {
   question: string;
   currentMessageAgentContext?: string;
-  threadContext?: FastAgentSlackThreadMessage[];
+  threadContext?: FastAgentThreadMessage[];
   userId: string;
   apiBaseUrl?: string;
-  slackTeamId: string;
-  slackChannel: string;
-  slackThreadTs: string;
-  currentMessageTs?: string;
+  conversation: FastAgentConversation;
+  currentMessageId?: string;
   senderDisplayName?: string;
-  senderSlackUserId?: string;
+  senderExternalId?: string;
   activeTasks?: FastAgentActiveTask[];
-  launchTask: LaunchFastAgentSlackTask;
-  retryTaskStart?: RetryFastAgentTaskStart;
-  postSlackReply: PostFastAgentSlackReply;
-  postSlackReaction?: PostFastAgentSlackReaction;
-  surface?: FastAgentSurface;
-  /** Platform-generated child lifecycle input, not a human-authored turn. */
-  platformEvent?: boolean;
   /** True when another human participant is present in the conversation. */
   multiParticipantThread?: boolean;
   /** True when the current message explicitly addressed Roomote. */
   directedAtRoomote?: boolean;
+  adapter: FastAgentTurnAdapter;
+  /** Identifies whether this turn came from a person or an internal task update. */
+  turnSource?: FastAgentTurnSource;
 }): Promise<string> {
+  const { launchTask, postReply, postReaction, retryTaskStart } = adapter;
+  const platformEvent = turnSource === 'platform_event';
   let sessionId: string | null = null;
   let launchedTaskMessage: string | null = null;
   let persistedTurnMessageCount = 0;
-  let pendingLifecycleReply: FastAgentSlackReply | null = null;
+  let pendingLifecycleReply: FastAgentReply | null = null;
   const normalizedQuestion = normalizeThreadText(question);
   const userMessage = buildUserTextMessage(normalizedQuestion);
   const turnSessionMessages: ModelMessage[] = [userMessage];
@@ -572,9 +528,7 @@ export async function answerFastAgentQuestion({
         getAvailableEnvironments(),
         getOrCreateFastAgentSession({
           userId,
-          slackTeamId,
-          slackChannel,
-          slackThreadTs,
+          conversation,
         }),
         listFastAgentIntegrations({ userId, apiBaseUrl }).catch((error) => {
           console.warn(
@@ -610,9 +564,9 @@ export async function answerFastAgentQuestion({
       currentMessageAgentContext,
       threadContext,
       sessionMessages: session.messages,
-      currentMessageTs,
+      currentMessageTs: currentMessageId,
       currentMessageSender: {
-        slackUserId: senderSlackUserId,
+        slackUserId: senderExternalId,
         displayName:
           senderDisplayName?.trim() || currentUser.displayName || undefined,
         githubLogin: currentUser.githubLogin || undefined,
@@ -624,8 +578,8 @@ export async function answerFastAgentQuestion({
       availableEnvironments,
       availableIntegrations,
       activeTasks: resolvedActiveTasks,
-      surface,
-      platformEvent,
+      surface: conversation.surface,
+      turnSource,
       retryTaskStartAvailable: Boolean(retryTaskStart),
       multiParticipantThread,
       directedAtRoomote,
@@ -644,7 +598,7 @@ export async function answerFastAgentQuestion({
 
       const reply = pendingLifecycleReply;
       pendingLifecycleReply = null;
-      await postSlackReply(reply);
+      await postReply(reply);
       turnSessionMessages.push(buildAssistantTextMessage(reply.message));
     };
     const brain = availableIntegrations.find(
@@ -676,10 +630,8 @@ export async function answerFastAgentQuestion({
             userId,
             apiBaseUrl,
             sessionId: session.id,
-            slackTeamId,
-            slackChannel,
-            slackThreadTs,
-            slackMessageTs: currentMessageTs ?? slackThreadTs,
+            conversation,
+            messageId: currentMessageId ?? conversation.threadId,
           },
           availableIntegrations,
           {
@@ -754,13 +706,11 @@ export async function answerFastAgentQuestion({
 
         const reply = {
           purpose,
-          slackChannel,
-          slackThreadTs,
           message,
           ...(decision.imageArtifactIds?.length
             ? { imageArtifactIds: decision.imageArtifactIds }
             : {}),
-        } satisfies FastAgentSlackReply;
+        } satisfies FastAgentReply;
 
         if (purpose === 'ack' || purpose === 'progress') {
           // Hold nonterminal prose until the model actually chooses a tool.
@@ -772,7 +722,7 @@ export async function answerFastAgentQuestion({
         }
 
         pendingLifecycleReply = null;
-        await postSlackReply(reply);
+        await postReply(reply);
         turnSessionMessages.push(buildAssistantTextMessage(message));
 
         await persistFastAgentSessionMessages({
@@ -822,16 +772,15 @@ export async function answerFastAgentQuestion({
           continue;
         }
 
-        if (!postSlackReaction) {
+        if (!postReaction) {
           prompt += `\n\n[CHAT TOOL CALL REJECTED]\nEmoji reactions are unavailable on this conversation surface. Use send_chat_reply instead.\n[END CHAT TOOL CALL REJECTED]`;
           continue;
         }
 
-        await postSlackReaction({
+        await postReaction({
           name,
           purpose,
-          slackChannel,
-          slackMessageTs: currentMessageTs ?? slackThreadTs,
+          messageId: currentMessageId ?? conversation.threadId,
         });
         turnSessionMessages.push(
           buildAssistantTextMessage(`[Reacted with :${name}:]`),
@@ -886,10 +835,8 @@ export async function answerFastAgentQuestion({
                 userId,
                 apiBaseUrl,
                 sessionId: session.id,
-                slackTeamId,
-                slackChannel,
-                slackThreadTs,
-                slackMessageTs: currentMessageTs ?? slackThreadTs,
+                conversation,
+                messageId: currentMessageId ?? conversation.threadId,
               },
               availableIntegrations,
               {
@@ -947,10 +894,8 @@ export async function answerFastAgentQuestion({
                 prompt,
                 task,
               });
-              await postSlackReply({
+              await postReply({
                 purpose: 'closeout',
-                slackChannel,
-                slackThreadTs,
                 message,
                 kickoff: true,
               });
@@ -1067,10 +1012,8 @@ export async function answerFastAgentQuestion({
 
     const fallback = buildFastAgentTurnFallbackDecision();
     const fallbackMessage = fallback.message ?? 'How can I help?';
-    await postSlackReply({
+    await postReply({
       purpose: 'closeout',
-      slackChannel,
-      slackThreadTs,
       message: fallbackMessage,
     });
     turnSessionMessages.push(buildAssistantTextMessage(fallbackMessage));
@@ -1098,10 +1041,8 @@ export async function answerFastAgentQuestion({
         : 'I hit an error while handling that request. Please try again in a moment.';
 
     try {
-      await postSlackReply({
+      await postReply({
         purpose: 'closeout',
-        slackChannel,
-        slackThreadTs,
         message,
       });
     } catch (postError) {

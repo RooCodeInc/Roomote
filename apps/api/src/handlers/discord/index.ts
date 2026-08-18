@@ -580,9 +580,10 @@ async function processDiscordGatewayEvent(
       : null;
   const isFastAgentThread = channel.isThread
     ? await hasFastAgentSession({
-        slackTeamId: `discord:${channel.guildId ?? 'dm'}`,
-        slackChannel: metadata.communicationChannelId,
-        slackThreadTs: channel.channelId,
+        surface: 'discord',
+        workspaceId: channel.guildId ?? 'dm',
+        channelId: metadata.communicationChannelId,
+        threadId: channel.channelId,
       })
     : false;
   const isRoomoteThread = Boolean(

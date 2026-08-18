@@ -6,7 +6,7 @@ import {
 
 import { enqueueTask } from '../task-run-queue';
 import { getTaskUrl } from '../task-url';
-import type { LaunchFastAgentSlackTask } from './fast-agent-service';
+import type { LaunchFastAgentTask } from './fast-agent-conversation';
 
 export function createFastAgentSlackTaskLauncher(params: {
   userId: string;
@@ -15,7 +15,7 @@ export function createFastAgentSlackTaskLauncher(params: {
   channelId: string;
   threadTs: string;
   messageId?: string;
-}): LaunchFastAgentSlackTask {
+}): LaunchFastAgentTask {
   return async ({ prompt, environmentId, parentSessionId, postKickoff }) => {
     const task: StandardTask = {
       type: TaskPayloadKind.StandardTask,

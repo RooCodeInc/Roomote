@@ -53,6 +53,12 @@ export async function processDiscordFastAgentMessage(input: {
       !entry.botId && Boolean(entry.user) && entry.user !== input.sender.id,
   );
   let didSendVisibleResponse = false;
+  const conversation = {
+    surface: 'discord' as const,
+    workspaceId: input.channel.guildId ?? 'dm',
+    channelId: input.metadata.communicationChannelId,
+    threadId: input.sessionThreadId,
+  };
   const response = await answerFastAgentQuestion({
     question: input.question,
     threadContext: history.map((entry) => ({
@@ -64,9 +70,7 @@ export async function processDiscordFastAgentMessage(input: {
     })),
     userId: input.senderUserId,
     apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
-    slackTeamId: `discord:${input.channel.guildId ?? 'dm'}`,
-    slackChannel: input.metadata.communicationChannelId,
-    slackThreadTs: input.sessionThreadId,
+    conversation,
     senderDisplayName:
       input.interaction?.interaction.member?.nick ??
       input.sender.global_name ??
@@ -74,79 +78,80 @@ export async function processDiscordFastAgentMessage(input: {
     activeTasks: input.activeTasks,
     multiParticipantThread,
     directedAtRoomote: input.directedAtRoomote,
-    launchTask: async ({ prompt, environmentId, parentSessionId }) => {
-      const workspaceOverride = environmentId
-        ? await resolveDiscordWorkspace({
-            type: 'environment',
-            id: environmentId,
-            name: environmentId,
-          })
-        : {
-            repoForPayload: ALL_REPOSITORIES,
-            workspaceDisplayName: 'all repos',
+    adapter: {
+      launchTask: async ({ prompt, environmentId, parentSessionId }) => {
+        const workspaceOverride = environmentId
+          ? await resolveDiscordWorkspace({
+              type: 'environment',
+              id: environmentId,
+              name: environmentId,
+            })
+          : {
+              repoForPayload: ALL_REPOSITORIES,
+              workspaceDisplayName: 'all repos',
+            };
+        if (!workspaceOverride) {
+          return {
+            success: false,
+            error: 'The selected environment is unavailable.',
           };
-      if (!workspaceOverride) {
+        }
+
+        const started = await startNewDiscordTask({
+          provider: input.provider,
+          applicationId: input.applicationId,
+          requesterDiscordUserId: input.sender.id,
+          launchOwnerUserId: input.senderUserId,
+          queuedMessage: {
+            provider: 'discord',
+            text: prompt,
+            user: input.sender.global_name?.trim() || input.sender.username,
+            userId: input.senderUserId,
+            ts: input.event.eventId,
+            channel: input.metadata.communicationChannelId,
+            ...(input.metadata.communicationThreadId
+              ? { threadTs: input.metadata.communicationThreadId }
+              : {}),
+            turnPolicy: { reactionsAllowed: true },
+          },
+          metadata: input.metadata,
+          channel: input.channel,
+          forceNewThread: true,
+          fastAgentSessionId: parentSessionId,
+          skipRoutingConfirmation: true,
+          workspaceOverride,
+        });
+        if (started.status === 'started') {
+          return {
+            success: true,
+            taskId: started.launchResult.taskId,
+            taskUrl: started.taskUrl,
+          };
+        }
+        if (started.status === 'already_started') {
+          return {
+            success: true,
+            taskId: started.existingRun.taskId,
+            taskUrl: started.taskUrl,
+          };
+        }
         return {
           success: false,
-          error: 'The selected environment is unavailable.',
+          error: `Task launch stopped with status ${started.status}.`,
         };
-      }
-
-      const started = await startNewDiscordTask({
-        provider: input.provider,
-        applicationId: input.applicationId,
-        requesterDiscordUserId: input.sender.id,
-        launchOwnerUserId: input.senderUserId,
-        queuedMessage: {
-          provider: 'discord',
-          text: prompt,
-          user: input.sender.global_name?.trim() || input.sender.username,
-          userId: input.senderUserId,
-          ts: input.event.eventId,
-          channel: input.metadata.communicationChannelId,
-          ...(input.metadata.communicationThreadId
-            ? { threadTs: input.metadata.communicationThreadId }
-            : {}),
-          turnPolicy: { reactionsAllowed: true },
-        },
-        metadata: input.metadata,
-        channel: input.channel,
-        forceNewThread: true,
-        fastAgentSessionId: parentSessionId,
-        skipRoutingConfirmation: true,
-        workspaceOverride,
-      });
-      if (started.status === 'started') {
-        return {
-          success: true,
-          taskId: started.launchResult.taskId,
-          taskUrl: started.taskUrl,
-        };
-      }
-      if (started.status === 'already_started') {
-        return {
-          success: true,
-          taskId: started.existingRun.taskId,
-          taskUrl: started.taskUrl,
-        };
-      }
-      return {
-        success: false,
-        error: `Task launch stopped with status ${started.status}.`,
-      };
+      },
+      postReply: async ({ message: text }) => {
+        await replyToDiscordEvent({
+          provider: input.provider,
+          applicationId: input.applicationId,
+          channel: input.channel,
+          ...(input.interaction ? { interaction: input.interaction } : {}),
+          ...(message ? { replyToMessageId: message.id } : {}),
+          text,
+        });
+        didSendVisibleResponse = true;
+      },
     },
-    postSlackReply: async ({ message: text }) => {
-      await replyToDiscordEvent({
-        provider: input.provider,
-        applicationId: input.applicationId,
-        channel: input.channel,
-        ...(input.interaction ? { interaction: input.interaction } : {}),
-        ...(message ? { replyToMessageId: message.id } : {}),
-        text,
-      });
-      didSendVisibleResponse = true;
-    },
-    surface: 'discord',
   });
   if (response && !didSendVisibleResponse) {
     await replyToDiscordEvent({

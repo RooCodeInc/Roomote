@@ -46,19 +46,28 @@ import {
   answerFastAgentQuestion,
   FAST_AGENT_MAX_STEPS,
 } from '../fast-agent-service';
+import type {
+  FastAgentTurnAdapter,
+  LaunchFastAgentTask,
+} from '../fast-agent-conversation';
 
 const baseParams = {
   question: 'What does this service do?',
   userId: 'user-1',
   apiBaseUrl: 'https://api.example.com',
-  slackTeamId: 'team-1',
-  slackChannel: 'channel-1',
-  slackThreadTs: '100.1',
-  currentMessageTs: '100.2',
+  conversation: {
+    surface: 'slack' as const,
+    workspaceId: 'team-1',
+    channelId: 'channel-1',
+    threadId: '100.1',
+  },
+  currentMessageId: '100.2',
   senderDisplayName: 'Matt',
-  senderSlackUserId: 'U123',
-  launchTask: vi.fn(),
-  postSlackReply: vi.fn().mockResolvedValue(undefined),
+  senderExternalId: 'U123',
+  adapter: {
+    launchTask: vi.fn<LaunchFastAgentTask>(),
+    postReply: vi.fn().mockResolvedValue(undefined),
+  },
 };
 
 function decision(overrides: Record<string, unknown> = {}) {
@@ -78,10 +87,25 @@ function decision(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function chatCallbacks() {
+function chatCallbacks(
+  options: {
+    launchTask?: FastAgentTurnAdapter['launchTask'];
+    retryTaskStart?: NonNullable<FastAgentTurnAdapter['retryTaskStart']>;
+  } = {},
+) {
+  const postReply = vi.fn().mockResolvedValue(undefined);
+  const postReaction = vi.fn().mockResolvedValue(undefined);
   return {
-    postSlackReply: vi.fn().mockResolvedValue(undefined),
-    postSlackReaction: vi.fn().mockResolvedValue(undefined),
+    postReply,
+    postReaction,
+    adapter: {
+      launchTask: options.launchTask ?? vi.fn<LaunchFastAgentTask>(),
+      postReply: postReply,
+      postReaction: postReaction,
+      ...(options.retryTaskStart
+        ? { retryTaskStart: options.retryTaskStart }
+        : {}),
+    },
   };
 }
 
@@ -138,13 +162,11 @@ describe('answerFastAgentQuestion', () => {
     });
 
     expect(result).toBe('It coordinates incoming requests.');
-    expect(callbacks.postSlackReply).toHaveBeenCalledWith({
+    expect(callbacks.postReply).toHaveBeenCalledWith({
       purpose: 'closeout',
-      slackChannel: 'channel-1',
-      slackThreadTs: '100.1',
       message: 'It coordinates incoming requests.',
     });
-    expect(callbacks.postSlackReaction).not.toHaveBeenCalled();
+    expect(callbacks.postReaction).not.toHaveBeenCalled();
     expect(mocks.generateObject).toHaveBeenCalledWith(
       expect.objectContaining({ modelRole: 'primary' }),
     );
@@ -187,8 +209,8 @@ describe('answerFastAgentQuestion', () => {
     });
 
     expect(result).toBe('It is configured correctly.');
-    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
-    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+    expect(callbacks.postReply).toHaveBeenCalledOnce();
+    expect(callbacks.postReply).toHaveBeenCalledWith(
       expect.objectContaining({
         purpose: 'closeout',
         message: 'It is configured correctly.',
@@ -251,12 +273,12 @@ describe('answerFastAgentQuestion', () => {
         args: { query: 'fast agent' },
       },
     );
-    expect(callbacks.postSlackReply).toHaveBeenCalledTimes(2);
-    expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
+    expect(callbacks.postReply).toHaveBeenCalledTimes(2);
+    expect(callbacks.postReply).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ purpose: 'ack' }),
     );
-    expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
+    expect(callbacks.postReply).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ purpose: 'closeout' }),
     );
@@ -284,8 +306,8 @@ describe('answerFastAgentQuestion', () => {
 
     expect(result).toBe('Which repository should I inspect?');
     expect(mocks.generateObject).toHaveBeenCalledOnce();
-    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
-    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+    expect(callbacks.postReply).toHaveBeenCalledOnce();
+    expect(callbacks.postReply).toHaveBeenCalledWith(
       expect.objectContaining({ purpose: 'clarification' }),
     );
   });
@@ -316,8 +338,8 @@ describe('answerFastAgentQuestion', () => {
     });
 
     expect(result).toBe('');
-    expect(callbacks.postSlackReply).not.toHaveBeenCalled();
-    expect(callbacks.postSlackReaction).not.toHaveBeenCalled();
+    expect(callbacks.postReply).not.toHaveBeenCalled();
+    expect(callbacks.postReaction).not.toHaveBeenCalled();
     expect(mocks.generateObject.mock.calls[0]?.[0]?.prompt).not.toContain(
       '<replying_to',
     );
@@ -349,7 +371,7 @@ describe('answerFastAgentQuestion', () => {
     expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
       'ignore_message is only valid for an ambient human-authored message in a multi-participant thread',
     );
-    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
+    expect(callbacks.postReply).toHaveBeenCalledOnce();
   });
 
   it('rejects ignoring an explicitly directed multi-participant turn', async () => {
@@ -384,7 +406,7 @@ describe('answerFastAgentQuestion', () => {
     expect(mocks.generateObject.mock.calls[0]?.[0]?.prompt).toContain(
       '<replying_to ts="100.1">\nRoomote: What should I check?\n</replying_to>',
     );
-    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
+    expect(callbacks.postReply).toHaveBeenCalledOnce();
   });
 
   it('allows at most one terminal reply for a delegated-task platform event', async () => {
@@ -409,13 +431,13 @@ describe('answerFastAgentQuestion', () => {
       ...baseParams,
       question:
         '<delegated_task_event>{"type":"artifact_published"}</delegated_task_event>',
-      platformEvent: true,
+      turnSource: 'platform_event',
       ...callbacks,
     });
 
     expect(result).toBe('The hedgehog is visible in the selection screen.');
-    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
-    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+    expect(callbacks.postReply).toHaveBeenCalledOnce();
+    expect(callbacks.postReply).toHaveBeenCalledWith(
       expect.objectContaining({
         purpose: 'closeout',
         imageArtifactIds: ['artifact-1'],
@@ -448,7 +470,7 @@ describe('answerFastAgentQuestion', () => {
     const result = await answerFastAgentQuestion({
       ...baseParams,
       question: `<delegated_task_event>${JSON.stringify(event)}</delegated_task_event>`,
-      platformEvent: true,
+      turnSource: 'platform_event',
       ...callbacks,
     });
 
@@ -460,7 +482,7 @@ describe('answerFastAgentQuestion', () => {
       }),
     );
     expect(result).toContain('Check the provider configuration');
-    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+    expect(callbacks.postReply).toHaveBeenCalledWith(
       expect.objectContaining({
         purpose: 'closeout',
         message: expect.stringContaining('Check the provider configuration'),
@@ -483,18 +505,17 @@ describe('answerFastAgentQuestion', () => {
           purpose: 'closeout',
         }),
       });
-    const callbacks = chatCallbacks();
     const retryTaskStart = vi.fn().mockResolvedValue({
       success: true,
       runId: 43,
     });
+    const callbacks = chatCallbacks({ retryTaskStart });
 
     const result = await answerFastAgentQuestion({
       ...baseParams,
       question:
         '<delegated_task_event>{"type":"task_settled","status":"failed","error":"HTTP 503","errorCode":null}</delegated_task_event>',
-      platformEvent: true,
-      retryTaskStart,
+      turnSource: 'platform_event',
       ...callbacks,
     });
 
@@ -505,7 +526,7 @@ describe('answerFastAgentQuestion', () => {
     expect(result).toBe(
       'The sandbox startup looked transient, so I retried it.',
     );
-    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
+    expect(callbacks.postReply).toHaveBeenCalledOnce();
   });
 
   it('lets a delegated-task platform event launch a separate task', async () => {
@@ -525,15 +546,14 @@ describe('answerFastAgentQuestion', () => {
             'I started a separate investigation. [Follow the task](https://roomote.example/task-2)',
         }),
       });
-    const callbacks = chatCallbacks();
     const launchTask = successfulLaunchTask('task-2');
+    const callbacks = chatCallbacks({ launchTask });
 
     const result = await answerFastAgentQuestion({
       ...baseParams,
       question:
         '<delegated_task_event>{"type":"task_settled","taskId":"task-1","status":"failed"}</delegated_task_event>',
-      platformEvent: true,
-      launchTask,
+      turnSource: 'platform_event',
       ...callbacks,
     });
 
@@ -544,7 +564,7 @@ describe('answerFastAgentQuestion', () => {
       postKickoff: expect.any(Function),
     });
     expect(result).toContain('task-2');
-    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
+    expect(callbacks.postReply).toHaveBeenCalledOnce();
   });
 
   it('keeps ordinary orchestration tools available for platform events', async () => {
@@ -593,7 +613,7 @@ describe('answerFastAgentQuestion', () => {
       ...baseParams,
       question:
         '<delegated_task_event>{"type":"task_settled","taskId":"task-1","status":"failed"}</delegated_task_event>',
-      platformEvent: true,
+      turnSource: 'platform_event',
       activeTasks: [{ taskId: 'task-2', title: 'Other work' }],
       ...callbacks,
     });
@@ -615,7 +635,7 @@ describe('answerFastAgentQuestion', () => {
       expect.objectContaining({ userId: 'user-1' }),
       'task-2',
     );
-    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
+    expect(callbacks.postReply).toHaveBeenCalledOnce();
     expect(result).toBe('I handled the task update.');
   });
 
@@ -685,28 +705,25 @@ describe('answerFastAgentQuestion', () => {
       .mockResolvedValueOnce({
         object: decision({ message: 'The checkout task was canceled.' }),
       });
-    const callbacks = chatCallbacks();
     const launchTask = successfulLaunchTask();
+    const callbacks = chatCallbacks({ launchTask });
 
     await answerFastAgentQuestion({
       ...baseParams,
       question: 'Fix checkout.',
-      launchTask,
       ...callbacks,
     });
     await answerFastAgentQuestion({
       ...baseParams,
       question:
         '<delegated_task_event>{"type":"artifact_published","taskId":"task-1"}</delegated_task_event>',
-      currentMessageTs: undefined,
-      platformEvent: true,
-      launchTask,
+      currentMessageId: undefined,
+      turnSource: 'platform_event',
       ...callbacks,
     });
     await answerFastAgentQuestion({
       ...baseParams,
       question: 'Cancel it.',
-      launchTask,
       ...callbacks,
     });
 
@@ -760,13 +777,12 @@ describe('answerFastAgentQuestion', () => {
     });
 
     expect(result).toBe('');
-    expect(callbacks.postSlackReaction).toHaveBeenCalledWith({
+    expect(callbacks.postReaction).toHaveBeenCalledWith({
       name: 'thumbsup',
       purpose: 'closeout',
-      slackChannel: 'channel-1',
-      slackMessageTs: '100.2',
+      messageId: '100.2',
     });
-    expect(callbacks.postSlackReply).not.toHaveBeenCalled();
+    expect(callbacks.postReply).not.toHaveBeenCalled();
     expect(mocks.appendSessionMessages).toHaveBeenCalledWith(
       expect.objectContaining({
         messages: expect.arrayContaining([
@@ -796,11 +812,11 @@ describe('answerFastAgentQuestion', () => {
       ...callbacks,
     });
 
-    expect(callbacks.postSlackReaction).toHaveBeenCalledOnce();
-    expect(callbacks.postSlackReaction).toHaveBeenCalledWith(
+    expect(callbacks.postReaction).toHaveBeenCalledOnce();
+    expect(callbacks.postReaction).toHaveBeenCalledWith(
       expect.objectContaining({ purpose: 'ack' }),
     );
-    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+    expect(callbacks.postReply).toHaveBeenCalledWith(
       expect.objectContaining({
         purpose: 'closeout',
         message: 'I found the answer.',
@@ -827,12 +843,11 @@ describe('answerFastAgentQuestion', () => {
         }),
       });
     const launchTask = successfulLaunchTask();
-    const callbacks = chatCallbacks();
+    const callbacks = chatCallbacks({ launchTask });
 
     const result = await answerFastAgentQuestion({
       ...baseParams,
       ...callbacks,
-      launchTask,
     });
 
     expect(launchTask).toHaveBeenCalledWith({
@@ -842,8 +857,8 @@ describe('answerFastAgentQuestion', () => {
       postKickoff: expect.any(Function),
     });
     expect(mocks.generateObject).toHaveBeenCalledTimes(2);
-    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
-    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+    expect(callbacks.postReply).toHaveBeenCalledOnce();
+    expect(callbacks.postReply).toHaveBeenCalledWith(
       expect.objectContaining({
         purpose: 'closeout',
         message:
@@ -886,15 +901,14 @@ describe('answerFastAgentQuestion', () => {
         throw new Error('queue unavailable');
       },
     );
-    const callbacks = chatCallbacks();
+    const callbacks = chatCallbacks({ launchTask });
 
     const result = await answerFastAgentQuestion({
       ...baseParams,
       ...callbacks,
-      launchTask,
     });
 
-    expect(callbacks.postSlackReply).toHaveBeenCalledTimes(2);
+    expect(callbacks.postReply).toHaveBeenCalledTimes(2);
     expect(result).toContain('could not be queued');
     expect(mocks.appendSessionMessages).toHaveBeenNthCalledWith(
       2,
@@ -932,15 +946,16 @@ describe('answerFastAgentQuestion', () => {
     mocks.appendSessionMessages.mockRejectedValueOnce(
       new Error('database unavailable'),
     );
-    const callbacks = chatCallbacks();
+    const callbacks = chatCallbacks({
+      launchTask: successfulLaunchTask(),
+    });
 
     const result = await answerFastAgentQuestion({
       ...baseParams,
       ...callbacks,
-      launchTask: successfulLaunchTask(),
     });
 
-    expect(callbacks.postSlackReply).toHaveBeenCalledTimes(2);
+    expect(callbacks.postReply).toHaveBeenCalledTimes(2);
     expect(result).toBe(
       'I hit an error while handling that request. Please try again in a moment.',
     );
@@ -967,12 +982,11 @@ describe('answerFastAgentQuestion', () => {
         }),
       });
     const launchTask = successfulLaunchTask('task-2');
-    const callbacks = chatCallbacks();
+    const callbacks = chatCallbacks({ launchTask });
 
     const result = await answerFastAgentQuestion({
       ...baseParams,
       ...callbacks,
-      launchTask,
     });
 
     expect(launchTask).toHaveBeenCalledOnce();
@@ -1008,7 +1022,7 @@ describe('answerFastAgentQuestion', () => {
       { userId: 'user-1', apiBaseUrl: 'https://api.example.com' },
       { taskId: 'task-2', message: 'Also add a regression test.' },
     );
-    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+    expect(callbacks.postReply).toHaveBeenCalledWith(
       expect.objectContaining({ message: 'I sent that instruction.' }),
     );
   });
@@ -1073,7 +1087,7 @@ describe('answerFastAgentQuestion', () => {
       expect.anything(),
       'task-2',
     );
-    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+    expect(callbacks.postReply).toHaveBeenCalledWith(
       expect.objectContaining({ message: 'I canceled the active task.' }),
     );
   });
@@ -1107,7 +1121,7 @@ describe('answerFastAgentQuestion', () => {
 
     expect(mocks.sendTaskMessage).not.toHaveBeenCalled();
     expect(result).toContain('Which active task');
-    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+    expect(callbacks.postReply).toHaveBeenCalledWith(
       expect.objectContaining({ purpose: 'clarification' }),
     );
     expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
@@ -1431,8 +1445,8 @@ describe('answerFastAgentQuestion', () => {
 
     expect(mocks.callIntegration).toHaveBeenCalledTimes(FAST_AGENT_MAX_STEPS);
     expect(result).toContain('within the available turn steps');
-    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
-    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+    expect(callbacks.postReply).toHaveBeenCalledOnce();
+    expect(callbacks.postReply).toHaveBeenCalledWith(
       expect.objectContaining({ purpose: 'closeout', message: result }),
     );
   });
@@ -1478,12 +1492,12 @@ describe('answerFastAgentQuestion', () => {
     });
 
     expect(result).toContain('within the available turn steps');
-    expect(callbacks.postSlackReply).toHaveBeenCalledTimes(2);
-    expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
+    expect(callbacks.postReply).toHaveBeenCalledTimes(2);
+    expect(callbacks.postReply).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ purpose: 'ack', message: "I'll take a look." }),
     );
-    expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
+    expect(callbacks.postReply).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ purpose: 'closeout', message: result }),
     );
@@ -1506,8 +1520,8 @@ describe('answerFastAgentQuestion', () => {
     });
 
     expect(result).toContain('hit an error');
-    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
-    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+    expect(callbacks.postReply).toHaveBeenCalledOnce();
+    expect(callbacks.postReply).toHaveBeenCalledWith(
       expect.objectContaining({ purpose: 'closeout', message: result }),
     );
   });
@@ -1522,8 +1536,8 @@ describe('answerFastAgentQuestion', () => {
     });
 
     expect(result).toContain('hit an error');
-    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
-    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+    expect(callbacks.postReply).toHaveBeenCalledOnce();
+    expect(callbacks.postReply).toHaveBeenCalledWith(
       expect.objectContaining({ purpose: 'closeout', message: result }),
     );
   });
@@ -1545,8 +1559,8 @@ describe('answerFastAgentQuestion', () => {
 
     expect(mocks.generateObject).toHaveBeenCalledTimes(2);
     expect(result).toBe('It coordinates incoming requests.');
-    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
-    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+    expect(callbacks.postReply).toHaveBeenCalledOnce();
+    expect(callbacks.postReply).toHaveBeenCalledWith(
       expect.objectContaining({ purpose: 'closeout', message: result }),
     );
   });
@@ -1568,8 +1582,8 @@ describe('answerFastAgentQuestion', () => {
     expect(result).toBe(
       'Fast mode could not reach the model after retrying. Please try again in a moment.',
     );
-    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
-    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+    expect(callbacks.postReply).toHaveBeenCalledOnce();
+    expect(callbacks.postReply).toHaveBeenCalledWith(
       expect.objectContaining({ purpose: 'closeout', message: result }),
     );
   });

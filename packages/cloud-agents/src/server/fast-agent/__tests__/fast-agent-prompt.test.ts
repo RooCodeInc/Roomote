@@ -125,7 +125,7 @@ describe('buildFastAgentSystemPrompt', () => {
   it('limits delegated-task platform events to one terminal reply', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
-      platformEvent: true,
+      turnSource: 'platform_event',
       retryTaskStartAvailable: true,
     });
 
@@ -192,7 +192,7 @@ describe('buildFastAgentSystemPrompt', () => {
   it('does not offer a failed-start retry for ineligible platform events', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
-      platformEvent: true,
+      turnSource: 'platform_event',
     });
 
     expect(prompt).toContain(

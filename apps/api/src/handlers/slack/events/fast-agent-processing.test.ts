@@ -36,11 +36,11 @@ describe('processFastAgentMessage', () => {
     mocks.postThreadMessage.mockResolvedValue('posted');
     mocks.answerQuestion.mockImplementation(
       async ({
-        postSlackReply,
+        adapter,
       }: {
-        postSlackReply: (reply: unknown) => void;
+        adapter: { postReply: (reply: unknown) => void };
       }) => {
-        await postSlackReply({
+        await adapter.postReply({
           purpose: 'closeout',
           message: 'Doing well.',
         });
@@ -80,7 +80,7 @@ describe('processFastAgentMessage', () => {
       expect.objectContaining({
         question: 'investigate this',
         currentMessageAgentContext: 'Slack block text:\nState: New',
-        launchTask,
+        adapter: expect.objectContaining({ launchTask }),
         activeTasks: [
           { taskId: 'task-1', title: 'Fix API' },
           { taskId: 'task-2', title: 'Update docs' },
@@ -134,14 +134,14 @@ describe('processFastAgentMessage', () => {
   it('can answer with a reaction without posting a text fallback', async () => {
     mocks.answerQuestion.mockImplementationOnce(
       async ({
-        postSlackReaction,
+        adapter,
       }: {
-        postSlackReaction: (reaction: unknown) => void;
+        adapter: { postReaction: (reaction: unknown) => void };
       }) => {
-        await postSlackReaction({
+        await adapter.postReaction({
           name: 'thumbsup',
           purpose: 'closeout',
-          slackMessageTs: '100.001',
+          messageId: '100.001',
         });
         return '';
       },
@@ -188,14 +188,14 @@ describe('processFastAgentMessage', () => {
   it('keeps the processing reaction when it becomes the visible closeout', async () => {
     mocks.answerQuestion.mockImplementationOnce(
       async ({
-        postSlackReaction,
+        adapter,
       }: {
-        postSlackReaction: (reaction: unknown) => void;
+        adapter: { postReaction: (reaction: unknown) => void };
       }) => {
-        await postSlackReaction({
+        await adapter.postReaction({
           name: 'eyes',
           purpose: 'closeout',
-          slackMessageTs: '100.001',
+          messageId: '100.001',
         });
         return '';
       },
@@ -234,18 +234,19 @@ describe('processFastAgentMessage', () => {
   it('clears a same-name processing reaction after an intermediate acknowledgement', async () => {
     mocks.answerQuestion.mockImplementationOnce(
       async ({
-        postSlackReaction,
-        postSlackReply,
+        adapter,
       }: {
-        postSlackReaction: (reaction: unknown) => void;
-        postSlackReply: (reply: unknown) => void;
+        adapter: {
+          postReaction: (reaction: unknown) => void;
+          postReply: (reply: unknown) => void;
+        };
       }) => {
-        await postSlackReaction({
+        await adapter.postReaction({
           name: 'eyes',
           purpose: 'ack',
-          slackMessageTs: '100.001',
+          messageId: '100.001',
         });
-        await postSlackReply({
+        await adapter.postReply({
           purpose: 'closeout',
           message: 'I found the answer.',
         });
@@ -345,11 +346,11 @@ describe('processFastAgentMessage', () => {
     mocks.postThreadMessage.mockResolvedValue('suppressed');
     mocks.answerQuestion.mockImplementationOnce(
       async ({
-        postSlackReply,
+        adapter,
       }: {
-        postSlackReply: (reply: unknown) => void;
+        adapter: { postReply: (reply: unknown) => void };
       }) => {
-        await postSlackReply({
+        await adapter.postReply({
           purpose: 'closeout',
           message: 'Delegated the work.',
           kickoff: true,
@@ -456,16 +457,24 @@ describe('processFastAgentMessage', () => {
     expect(mocks.answerQuestion).toHaveBeenCalledOnce();
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
-        slackTeamId: 'T123',
+        conversation: {
+          surface: 'slack',
+          workspaceId: 'T123',
+          channelId: 'D123',
+          threadId: '100.001',
+        },
         senderDisplayName: 'Matt',
-        senderSlackUserId: 'U123',
+        senderExternalId: 'U123',
         threadContext: [],
       }),
     );
     expect(mocks.acquireLock).toHaveBeenCalledWith({
-      slackTeamId: 'T123',
-      slackChannel: 'D123',
-      slackThreadTs: '100.001',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T123',
+        channelId: 'D123',
+        threadId: '100.001',
+      },
     });
     expect(mocks.postThreadMessage).toHaveBeenCalledOnce();
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
@@ -504,7 +513,7 @@ describe('processFastAgentMessage', () => {
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         senderDisplayName: undefined,
-        senderSlackUserId: 'U123',
+        senderExternalId: 'U123',
       }),
     );
   });
