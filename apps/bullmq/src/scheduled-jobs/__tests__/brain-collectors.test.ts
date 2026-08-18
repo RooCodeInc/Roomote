@@ -1129,13 +1129,49 @@ describe('buildGranolaMeetingPage', () => {
     );
     expect(result?.page.content).not.toContain('- danny@example.com');
     expect(result?.page.timelineEvidence).toEqual([
-      expect.objectContaining({
+      {
         slug: 'people/roomote-member-abc',
         date: '2026-08-10',
-        summary: 'Attended Weekly Growth Sync',
-        source: 'meetings/2026-08-10-weekly-growth-sync-not-abc123def45678',
-      }),
+        summary: 'Attended a meeting recorded in Granola',
+        source: 'granola:note:not_abc123def45678',
+      },
     ]);
+  });
+
+  it('keeps timeline evidence stable when a meeting title or notes change', () => {
+    const identities = new Map([
+      [
+        'danny@example.com',
+        { slug: 'people/roomote-member-abc', title: 'Dan Riccio' },
+      ],
+    ]);
+    const original = buildGranolaMeetingPage(fixture, identities);
+    const edited = buildGranolaMeetingPage(
+      {
+        ...fixture,
+        title: 'Renamed Growth Sync',
+        summary: 'Completely revised meeting notes.',
+      },
+      identities,
+    );
+
+    expect(edited?.page.timelineEvidence).toEqual(
+      original?.page.timelineEvidence,
+    );
+    expect(edited?.page.timelineEvidence?.[0]).not.toHaveProperty('detail');
+  });
+
+  it('does not emit an invalid timeline date for undated meeting input', () => {
+    const result = buildGranolaMeetingPage(
+      {
+        id: 'note-without-date',
+        title: 'Undated meeting',
+        attendees: ['Matt'],
+      },
+      new Map([['matt', { slug: 'people/roomote-member-abc', title: 'Matt' }]]),
+    );
+
+    expect(result?.page.timelineEvidence).toEqual([]);
   });
 
   it('tries both attendee name and email before leaving a person unresolved', () => {

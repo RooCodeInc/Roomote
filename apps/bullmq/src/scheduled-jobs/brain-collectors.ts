@@ -3086,13 +3086,15 @@ export function buildGranolaMeetingPage(
       slug: `meetings/${day}-${slugTail}`,
       title,
       content,
-      timelineEvidence: attendeeSlugs.map((slug) => ({
-        slug,
-        date: day,
-        summary: `Attended ${title}`,
-        detail: excerpt,
-        source: `meetings/${day}-${slugTail}`,
-      })),
+      timelineEvidence:
+        id && createdAt
+          ? attendeeSlugs.map((slug) => ({
+              slug,
+              date: day,
+              summary: 'Attended a meeting recorded in Granola',
+              source: `granola:note:${id}`,
+            }))
+          : [],
     },
     updatedAt,
   };
