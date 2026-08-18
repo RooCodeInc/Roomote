@@ -105,6 +105,7 @@ import {
 import { wrapCommunicationMessage } from './communication-message-prompt';
 import { buildTaskGoalContinuationPrompt } from './task-goal';
 import { settleMissingChatCloseoutFallback } from './missing-chat-closeout-fallback-settlement';
+import { isMissingSlackReplyTargetProcedureError } from './slack-reply-target';
 
 function formatEnvironmentInstructions(
   instructions?: string,
@@ -222,29 +223,6 @@ function buildEnvironmentSetupSettledWakePrompt(
     "If any part of the user's request was deferred or reported as blocked because setup had not finished, continue that work now and report the outcome as you normally would.",
     'If the request was already fully handled, end this turn immediately without calling any tools and without posting any message — this update needs no acknowledgement.',
   ].join('\n');
-}
-
-/**
- * True when a tRPC call failed because the procedure does not exist on the
- * server, which for the Slack reply-target procedures means the API is the
- * previous release (the supported N-1 rollback target). Those procedures
- * never answer NOT_FOUND themselves (a missing authorization is a null
- * result and auth failures map to UNAUTHORIZED/FORBIDDEN), so NOT_FOUND can
- * only mean the router has no such procedure.
- */
-function isMissingSlackReplyTargetProcedureError(error: unknown): boolean {
-  if (!(error instanceof Error) || error.name !== 'TRPCClientError') {
-    return false;
-  }
-
-  const data = (error as { data?: { code?: string } }).data;
-
-  return (
-    data?.code === 'NOT_FOUND' ||
-    // Backstop for responses that lose the typed code (e.g. a proxy rewrote
-    // the body): tRPC's unknown-procedure message across versions.
-    /no .*procedure.* on path/i.test(error.message)
-  );
 }
 
 function getInitialSlackTurnMessageTs(taskRun: {

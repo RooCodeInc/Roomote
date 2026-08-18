@@ -583,6 +583,77 @@ describe('createSlackMessageInterval', () => {
     }
   });
 
+  it('delivers request_user_input answers canonically when the reply-target procedure is missing', async () => {
+    mockActivateSlackReplyTarget.mockRejectedValueOnce(
+      Object.assign(
+        new Error(
+          'No "mutation"-procedure on path "taskRuns.activateSlackReplyTarget"',
+        ),
+        {
+          name: 'TRPCClientError',
+          data: { code: 'NOT_FOUND', httpStatus: 404 },
+        },
+      ),
+    );
+    mockGetSlackRequestUserInputAnswers.mockResolvedValueOnce([
+      {
+        requestId: 'rui:session:turn:call',
+        answers: { language: { answers: ['Rust'] } },
+        user: 'U234',
+        userId: 'user-2',
+        ts: '1710000000.903',
+        channel: 'C_ALERT',
+        threadTs: '1710000000.100',
+      },
+    ]);
+    const { options, logger, answerUserInputRequest } = createListenerOptions();
+
+    const interval = createSlackMessageInterval(options);
+
+    try {
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(answerUserInputRequest).toHaveBeenCalledTimes(1);
+      expect(mockPrependSlackRequestUserInputAnswers).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('delivering request_user_input answer'),
+      );
+    } finally {
+      clearInterval(interval);
+    }
+  });
+
+  it('requeues request_user_input answers on transient reply-target failures', async () => {
+    mockActivateSlackReplyTarget.mockRejectedValueOnce(
+      new Error('socket hang up'),
+    );
+    mockGetSlackRequestUserInputAnswers.mockResolvedValueOnce([
+      {
+        requestId: 'rui:session:turn:call',
+        answers: { language: { answers: ['Rust'] } },
+        user: 'U234',
+        userId: 'user-2',
+        ts: '1710000000.904',
+        channel: 'C_ALERT',
+        threadTs: '1710000000.100',
+      },
+    ]);
+    const { options, answerUserInputRequest } = createListenerOptions();
+
+    const interval = createSlackMessageInterval(options);
+
+    try {
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(answerUserInputRequest).not.toHaveBeenCalled();
+      expect(mockPrependSlackRequestUserInputAnswers).toHaveBeenCalledWith(42, [
+        expect.objectContaining({ ts: '1710000000.904' }),
+      ]);
+    } finally {
+      clearInterval(interval);
+    }
+  });
+
   it('sends multiple queued Slack messages in reverse drain order so auto-steer preserves chronology', async () => {
     mockGetSlackMessages.mockResolvedValueOnce([
       {
