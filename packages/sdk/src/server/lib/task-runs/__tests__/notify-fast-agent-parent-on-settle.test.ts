@@ -22,18 +22,14 @@ const mocks = vi.hoisted(() => {
     recordLifecycle: vi.fn(),
     deliverParentEvent: vi.fn(),
     listPullRequests: vi.fn(),
-    findTaskRun: vi.fn(),
     canRetryFailedStart: vi.fn(),
-    enqueueTaskRelaunch: vi.fn(),
+    retryFastAgentFailedStart: vi.fn(),
     FastAgentParentEventDeliveryError,
   };
 });
 
 vi.mock('@roomote/db/server', () => ({
   db: {
-    query: {
-      taskRuns: { findFirst: mocks.findTaskRun },
-    },
     update: vi.fn(() => ({
       set: vi.fn((values: unknown) => {
         mocks.updateSet(values);
@@ -52,15 +48,13 @@ vi.mock('@roomote/db/server', () => ({
   })),
   taskRuns: {
     id: 'task_runs.id',
-    taskId: 'task_runs.task_id',
-    sourceRunId: 'task_runs.source_run_id',
     result: 'task_runs.result',
   },
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   canRetryFailedStart: mocks.canRetryFailedStart,
-  enqueueTaskRelaunch: mocks.enqueueTaskRelaunch,
+  retryFastAgentFailedStart: mocks.retryFastAgentFailedStart,
   getTaskUrl: vi.fn(() => 'https://roomote.example/task/child-task'),
 }));
 
@@ -102,9 +96,11 @@ describe('notifyFastAgentParentOnSettle', () => {
     mocks.deliverParentEvent.mockResolvedValue(undefined);
     mocks.listPullRequests.mockResolvedValue([]);
     mocks.recordLifecycle.mockResolvedValue(undefined);
-    mocks.findTaskRun.mockResolvedValue(undefined);
     mocks.canRetryFailedStart.mockResolvedValue(false);
-    mocks.enqueueTaskRelaunch.mockResolvedValue({ id: 201 });
+    mocks.retryFastAgentFailedStart.mockResolvedValue({
+      success: true,
+      runId: 201,
+    });
   });
 
   it('passes child lifecycle state to the Fast orchestrator', async () => {
@@ -175,7 +171,6 @@ describe('notifyFastAgentParentOnSettle', () => {
   });
 
   it('lets the Fast parent retry an eligible failed startup', async () => {
-    vi.useFakeTimers();
     mocks.canRetryFailedStart.mockResolvedValue(true);
     let retryResult: unknown;
     mocks.deliverParentEvent.mockImplementationOnce(
@@ -184,65 +179,42 @@ describe('notifyFastAgentParentOnSettle', () => {
       },
     );
 
-    try {
-      const pending = notifyFastAgentParentOnSettle(
-        makeRun(
-          { fastAgentParent: fastParent },
-          {
-            error: 'Sandbox startup timed out while contacting the provider.',
-            errorCode: TaskRunErrorCode.DockerWorkerStartTimeout,
-          },
-        ),
-        RunStatus.Failed,
-      );
+    await notifyFastAgentParentOnSettle(
+      makeRun(
+        { fastAgentParent: fastParent },
+        {
+          error: 'Sandbox startup timed out while contacting the provider.',
+          errorCode: TaskRunErrorCode.DockerWorkerStartTimeout,
+        },
+      ),
+      RunStatus.Failed,
+    );
 
-      await vi.advanceTimersByTimeAsync(1_000);
-      await pending;
-
-      expect(mocks.enqueueTaskRelaunch).toHaveBeenCalledWith({
-        sourceRunId: 200,
-        actingUserId: 'user-1',
-      });
-      expect(mocks.canRetryFailedStart).toHaveBeenCalledWith(
-        expect.objectContaining({ status: RunStatus.Failed }),
-      );
-      expect(retryResult).toEqual({ success: true, runId: 201 });
-      expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
-        expect.objectContaining({
-          retryTaskStart: expect.any(Function),
-          event: expect.objectContaining({
-            error: 'Sandbox startup timed out while contacting the provider.',
-            errorCode: TaskRunErrorCode.DockerWorkerStartTimeout,
-          }),
+    expect(mocks.retryFastAgentFailedStart).toHaveBeenCalledWith({
+      sourceRunId: 200,
+      actingUserId: 'user-1',
+    });
+    expect(mocks.canRetryFailedStart).toHaveBeenCalledWith(
+      expect.objectContaining({ status: RunStatus.Failed }),
+    );
+    expect(retryResult).toEqual({ success: true, runId: 201 });
+    expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        retryTaskStart: expect.any(Function),
+        event: expect.objectContaining({
+          error: 'Sandbox startup timed out while contacting the provider.',
+          errorCode: TaskRunErrorCode.DockerWorkerStartTimeout,
         }),
-      );
-      expect(mocks.recordLifecycle).toHaveBeenCalledWith(
-        expect.anything(),
-        expect.objectContaining({
-          details: expect.objectContaining({
-            reason: 'fast_agent_parent_startup_retry',
-            retryNumber: 1,
-            delayMs: 1_000,
-          }),
-        }),
-      );
-    } finally {
-      vi.useRealTimers();
-    }
+      }),
+    );
   });
 
   it('reports the bounded startup retry budget to the Fast parent', async () => {
     mocks.canRetryFailedStart.mockResolvedValue(true);
-    mocks.findTaskRun
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce({
-        sourceRunId: 100,
-        payload: { fastAgentParent: fastParent },
-      })
-      .mockResolvedValueOnce({
-        sourceRunId: null,
-        payload: { fastAgentParent: fastParent },
-      });
+    mocks.retryFastAgentFailedStart.mockResolvedValueOnce({
+      success: false,
+      error: 'The failed-start retry limit has been reached.',
+    });
     let retryResult: unknown;
     mocks.deliverParentEvent.mockImplementationOnce(
       async (input: { retryTaskStart?: () => Promise<unknown> }) => {
@@ -261,7 +233,6 @@ describe('notifyFastAgentParentOnSettle', () => {
       RunStatus.Failed,
     );
 
-    expect(mocks.enqueueTaskRelaunch).not.toHaveBeenCalled();
     expect(retryResult).toEqual({
       success: false,
       error: 'The failed-start retry limit has been reached.',
@@ -282,7 +253,6 @@ describe('notifyFastAgentParentOnSettle', () => {
       RunStatus.Failed,
     );
 
-    expect(mocks.enqueueTaskRelaunch).not.toHaveBeenCalled();
     expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
       expect.objectContaining({
         event: expect.objectContaining({
@@ -294,12 +264,10 @@ describe('notifyFastAgentParentOnSettle', () => {
         retryTaskStart: expect.any(Function),
       }),
     );
-    expect(mocks.enqueueTaskRelaunch).not.toHaveBeenCalled();
   });
 
   it('reuses an already-queued retry when the parent event is redelivered', async () => {
     mocks.canRetryFailedStart.mockResolvedValue(true);
-    mocks.findTaskRun.mockResolvedValueOnce({ id: 201 });
     let retryResult: unknown;
     mocks.deliverParentEvent.mockImplementationOnce(
       async (input: { retryTaskStart?: () => Promise<unknown> }) => {
@@ -316,7 +284,7 @@ describe('notifyFastAgentParentOnSettle', () => {
     );
 
     expect(retryResult).toEqual({ success: true, runId: 201 });
-    expect(mocks.enqueueTaskRelaunch).not.toHaveBeenCalled();
+    expect(mocks.retryFastAgentFailedStart).toHaveBeenCalledOnce();
   });
 
   it('does not offer retry control when failed-start eligibility rejects the run', async () => {
@@ -333,6 +301,7 @@ describe('notifyFastAgentParentOnSettle', () => {
     expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
       expect.not.objectContaining({ retryTaskStart: expect.any(Function) }),
     );
+    expect(mocks.retryFastAgentFailedStart).not.toHaveBeenCalled();
   });
 
   it('passes terminal cancellation errors to the Fast parent', async () => {
