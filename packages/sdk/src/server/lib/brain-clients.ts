@@ -1,6 +1,6 @@
 /**
  * Brain (gbrain) client provisioning and access-token minting over
- * gbrain's admin HTTP API. Verified against gbrain 0.45.10.0:
+ * gbrain's admin HTTP API. Verified against gbrain 0.46.12.3:
  *
  * - POST /admin/login {token} -> Set-Cookie gbrain_admin (bootstrap token is
  *   exchanged for a cookie session; the token itself is never persisted).

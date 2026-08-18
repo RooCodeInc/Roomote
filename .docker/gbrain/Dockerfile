@@ -8,7 +8,7 @@
 # worker. The worker is required for Roomote-scheduled maintenance cycles.
 FROM oven/bun:1.3.14
 
-ARG GBRAIN_REF=ac402f5
+ARG GBRAIN_REF=d995508731ac85710c05486536a5458a00c37d73
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git postgresql-client \
