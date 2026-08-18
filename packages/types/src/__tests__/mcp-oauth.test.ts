@@ -14,6 +14,18 @@ import {
 } from '../mcp-oauth';
 
 describe('Linear OAuth scopes', () => {
+  it('keeps issue comments separate from issue field updates', () => {
+    expect(getMcpIntegration('linear')?.instructions).toContain(
+      'dedicated comment-creation tool',
+    );
+    expect(getMcpIntegration('linear')?.instructions).toContain(
+      'do not pass comment text to an issue-update or status-update tool',
+    );
+    expect(getMcpIntegration('linear')?.instructions).toContain(
+      'report the returned tool error verbatim',
+    );
+  });
+
   it('makes deployment app actors assignable and mentionable', () => {
     expect(
       getMcpIntegrationOauthScopes('linear', 'linear_org_install'),
