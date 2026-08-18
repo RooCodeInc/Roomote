@@ -1,7 +1,14 @@
 import { db, eq, users } from '@roomote/db/server';
 import { Env } from '@roomote/env';
 
-type FastAgentEntryMode = 'explicit' | 'default';
+export type FastAgentEntryMode = 'explicit' | 'default';
+
+export function shouldShowFastAgentProcessingReaction(params: {
+  entryMode: FastAgentEntryMode;
+  hasExistingSession: boolean;
+}): boolean {
+  return params.entryMode === 'explicit' || !params.hasExistingSession;
+}
 
 export function resolveFastAgentEntryMode(params: {
   explicitInvocation: boolean;

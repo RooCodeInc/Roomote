@@ -59,7 +59,10 @@ import {
   isFastCommandInvocation,
   processFastAgentMessage,
 } from './fast-agent.js';
-import { resolveFastAgentEntryMode } from '../../fast-agent-entry.js';
+import {
+  resolveFastAgentEntryMode,
+  shouldShowFastAgentProcessingReaction,
+} from '../../fast-agent-entry.js';
 import { processSnapshotResume } from './snapshot-resume.js';
 import {
   dispatchSlackThreadFollowUp,
@@ -1258,6 +1261,22 @@ async function maybeHandleChannelAutoStart(params: {
       : null;
 
   if (fastAgentEntryMode && userMapping) {
+    const hasExistingSession =
+      fastAgentEntryMode === 'default' &&
+      (await hasFastAgentSession({
+        surface: 'slack',
+        workspaceId: context.teamId,
+        conversationId: channelAutoStartEvent.ts,
+        replyTarget: {
+          channelId: channelAutoStartEvent.channel,
+          threadId: channelAutoStartEvent.ts,
+        },
+      }));
+    const showProcessingReaction = shouldShowFastAgentProcessingReaction({
+      entryMode: fastAgentEntryMode,
+      hasExistingSession,
+    });
+
     startFastAgentResponse({
       event: { ...channelAutoStartEvent, user: channelAutoStartEvent.user },
       slackInstallation: context.slackInstallation,
@@ -1268,6 +1287,7 @@ async function maybeHandleChannelAutoStart(params: {
       usageText: 'Use `/fast <question>` in this channel.',
       continuation: fastAgentEntryMode === 'default',
       processingReactionName: ackEmoji,
+      showProcessingReaction,
       errorLogPrefix: `❌ Background fast-agent response failed for auto-start thread ${channelAutoStartEvent.ts}:`,
     });
 
@@ -1602,6 +1622,7 @@ function startFastAgentResponse(params: {
   continuation?: boolean;
   activeTasks?: { taskId: string }[];
   processingReactionName: string;
+  showProcessingReaction?: boolean;
   errorLogPrefix: string;
 }): void {
   const { errorLogPrefix, ...fastAgentParams } = params;
@@ -1741,6 +1762,19 @@ async function handleSlackEntryEvent(params: {
   });
 
   if (fastAgentEntryMode) {
+    const hasExistingSession =
+      fastAgentEntryMode === 'default' &&
+      (await hasFastAgentSession({
+        surface: 'slack',
+        workspaceId: teamId,
+        conversationId: threadId,
+        replyTarget: { channelId: event.channel, threadId },
+      }));
+    const showProcessingReaction = shouldShowFastAgentProcessingReaction({
+      entryMode: fastAgentEntryMode,
+      hasExistingSession,
+    });
+
     startFastAgentResponse({
       event,
       slackInstallation,
@@ -1751,6 +1785,7 @@ async function handleSlackEntryEvent(params: {
       activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
       continuation: fastAgentEntryMode === 'default',
       processingReactionName: ackEmoji,
+      showProcessingReaction,
       errorLogPrefix: `❌ Background fast-agent response failed for thread ${threadId}:`,
     });
 
@@ -1779,6 +1814,7 @@ async function handleSlackEntryEvent(params: {
       continuation: true,
       activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
       processingReactionName: ackEmoji,
+      showProcessingReaction: false,
       errorLogPrefix: `❌ Background fast-agent continuation failed for thread ${threadId}:`,
     });
 
