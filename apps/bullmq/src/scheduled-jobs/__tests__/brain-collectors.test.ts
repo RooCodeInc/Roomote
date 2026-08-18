@@ -11,6 +11,7 @@ import { NotionApiError } from '@roomote/sdk/server/notion-api';
 
 import {
   buildGranolaMeetingPage,
+  fetchGranolaNoteDetail,
   buildNotionPage,
   buildNotionSearchBody,
   buildNotionSweepInventory,
@@ -947,6 +948,30 @@ describe('buildGranolaMeetingPage', () => {
     );
   });
 
+  it('uses Granola detail response summary fields', () => {
+    const result = buildGranolaMeetingPage({
+      ...fixture,
+      summary: undefined,
+      summary_markdown: '## Decisions\n\nShip the detail collector.',
+      summary_text: 'Plain-text fallback.',
+    });
+
+    expect(result?.page.content).toContain(
+      '## Decisions\n\nShip the detail collector.',
+    );
+    expect(result?.page.content).not.toContain('Plain-text fallback.');
+  });
+
+  it('falls back to Granola plain-text summaries', () => {
+    const result = buildGranolaMeetingPage({
+      ...fixture,
+      summary: undefined,
+      summary_text: 'Plain-text meeting summary.',
+    });
+
+    expect(result?.page.content).toContain('Plain-text meeting summary.');
+  });
+
   it('caps the notes excerpt at 3000 characters', () => {
     const result = buildGranolaMeetingPage(fixture);
     const notesSection = result?.page.content.split('## Notes')[1] ?? '';
@@ -1018,6 +1043,33 @@ describe('buildGranolaMeetingPage', () => {
       '- [Dan Riccio](people/roomote-member-abc)',
     );
     expect(result?.page.content).not.toContain('dan@example.com');
+  });
+
+  it('fetches the full Granola note record before mapping it', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      Response.json({
+        ...fixture,
+        summary_markdown: '## Full meeting summary',
+      }),
+    );
+
+    const detail = await fetchGranolaNoteDetail(fixture, 'granola-test-key');
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      new URL('https://public-api.granola.ai/v1/notes/not_abc123def45678'),
+      {
+        headers: {
+          Accept: 'application/json',
+          Authorization: 'Bearer granola-test-key',
+        },
+      },
+    );
+    expect(detail).toMatchObject({
+      id: 'not_abc123def45678',
+      summary_markdown: '## Full meeting summary',
+    });
+
+    fetchSpy.mockRestore();
   });
 });
 

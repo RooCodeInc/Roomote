@@ -1917,7 +1917,7 @@ const slackPersonDirectoryCollector: BrainCollector = {
 const PERSON_IDENTITIES_STATE_ID =
   'person-identities:members:occurrence-date-v2';
 const PERSON_IDENTITIES_RECONCILIATION_MS = 24 * 60 * 60 * 1000;
-const GRANOLA_MEETINGS_COLLECTOR_ID = 'granola-meetings';
+const GRANOLA_MEETINGS_COLLECTOR_ID = 'granola-meetings:detail-v2';
 
 type PersonIdentityCursor = {
   mode: 'idle' | 'sweep' | 'incremental';
@@ -2855,6 +2855,8 @@ const GRANOLA_PAGE_SIZE = 30; // Granola's documented per-page maximum.
 const GRANOLA_MAX_NOTES_PER_TICK = 50;
 /** Enough to page to the note ceiling, with headroom for short pages. */
 const GRANOLA_MAX_REQUESTS_PER_TICK = 10;
+/** Granola allows five sustained requests per second. */
+const GRANOLA_REQUEST_INTERVAL_MS = 210;
 
 type GranolaAttendee = { display: string; identityCandidates: string[] };
 
@@ -2938,6 +2940,8 @@ export function buildGranolaMeetingPage(
     ),
   ];
   const body =
+    asString(record.summary_markdown) ??
+    asString(record.summary_text) ??
     asString(record.summary) ??
     asString(record.overview) ??
     asString(record.notes_markdown) ??
@@ -2980,6 +2984,77 @@ export function buildGranolaMeetingPage(
     page: { slug: `meetings/${day}-${slugTail}`, title, content },
     updatedAt,
   };
+}
+
+export async function fetchGranolaNoteDetail(
+  note: unknown,
+  apiKey: string,
+): Promise<unknown | null> {
+  if (!note || typeof note !== 'object') {
+    return null;
+  }
+
+  const id = asString((note as Record<string, unknown>).id);
+
+  if (!id) {
+    return null;
+  }
+
+  const url = new URL(
+    `v1/notes/${encodeURIComponent(id)}`,
+    `${GRANOLA_API_BASE_URL}/`,
+  );
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+  });
+
+  // A note can disappear between the list and detail requests. Skipping that
+  // one note lets the remaining accessible history continue rebuilding.
+  if (response.status === 404) {
+    console.warn(
+      `${LOG_PREFIX} granola note ${id} disappeared before its details were fetched`,
+    );
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `Granola get-note failed for ${id} with status ${response.status}`,
+    );
+  }
+
+  const detail = await response.json().catch(() => null);
+
+  if (!detail || typeof detail !== 'object') {
+    throw new Error(`Granola get-note returned an invalid payload for ${id}`);
+  }
+
+  return detail;
+}
+
+async function hydrateGranolaNotes(
+  notes: unknown[],
+  apiKey: string,
+): Promise<unknown[]> {
+  const details: unknown[] = [];
+
+  for (const note of notes) {
+    // List calls count against the same workspace limit, so leave a full
+    // request interval before every detail request rather than bursting.
+    await new Promise((resolve) =>
+      setTimeout(resolve, GRANOLA_REQUEST_INTERVAL_MS),
+    );
+    const detail = await fetchGranolaNoteDetail(note, apiKey);
+
+    if (detail) {
+      details.push(detail);
+    }
+  }
+
+  return details;
 }
 
 async function findGranolaConnectionConfig(): Promise<McpConnectionGranolaConfig | null> {
@@ -3081,13 +3156,17 @@ async function collectGranolaMeetings(input: {
     }
   }
 
+  const detailedNotes = await hydrateGranolaNotes(
+    notes.slice(0, GRANOLA_MAX_NOTES_PER_TICK),
+    apiKey,
+  );
   const pages: CollectorPage[] = [];
   let nextSince: Date | null = null;
   const identities = buildPersonIdentityLookup(
     await loadPersonIdentityRecords(),
   );
 
-  for (const note of notes.slice(0, GRANOLA_MAX_NOTES_PER_TICK)) {
+  for (const note of detailedNotes) {
     const mapped = buildGranolaMeetingPage(note, identities);
 
     if (!mapped) {
@@ -3165,12 +3244,13 @@ async function backfillGranolaNotesStep(cursor: string | null): Promise<{
     return noProgress;
   }
 
+  const detailedNotes = await hydrateGranolaNotes(payload.notes, apiKey);
   const pages: CollectorPage[] = [];
   const identities = buildPersonIdentityLookup(
     await loadPersonIdentityRecords(),
   );
 
-  for (const note of payload.notes) {
+  for (const note of detailedNotes) {
     const mapped = buildGranolaMeetingPage(note, identities);
 
     if (mapped) {
