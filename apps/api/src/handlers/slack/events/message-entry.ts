@@ -490,6 +490,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
   let roomoteThreadMatch: Awaited<
     ReturnType<typeof findRoomoteOwnedSlackThread>
   > | null = null;
+  let isFastAgentThread = false;
 
   let eligibilityReason:
     | 'pending-routing-confirmation'
@@ -499,7 +500,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
   if (pendingRoutingConfirmation) {
     eligibilityReason = 'pending-routing-confirmation';
   } else {
-    const isFastAgentThread = await hasFastAgentSession({
+    isFastAgentThread = await hasFastAgentSession({
       slackTeamId: teamId,
       slackChannel: event.channel,
       slackThreadTs: event.thread_ts,
@@ -592,6 +593,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     isAutomationReportThread: Boolean(
       roomoteThreadMatch?.isAutomationReportThread,
     ),
+    isOpenConversationThread: isFastAgentThread,
     threadMessages: sharedHistory,
     compareMessageIds: compareNumericMessageIds,
   });

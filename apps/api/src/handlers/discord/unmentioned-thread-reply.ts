@@ -104,6 +104,8 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
   ownedThreadUserId: string | null | undefined;
   /** True when the reply targets an automation report root. */
   isAutomationReportThread?: boolean;
+  /** True when the thread is an open Fast conversation. */
+  isOpenConversationThread?: boolean;
   fetchThreadMessages: () => Promise<DiscordThreadHistoryMessage[] | null>;
 }): Promise<boolean> {
   const { message, botUserId } = params;
@@ -171,6 +173,7 @@ export async function shouldRouteUnmentionedDiscordThreadReplyToAgent(params: {
       params.ownedThreadUserId === params.mappedUserId,
     isThreadRootAuthor,
     isAutomationReportThread: params.isAutomationReportThread,
+    isOpenConversationThread: params.isOpenConversationThread,
     threadMessages: toSharedHistoryMessages(
       threadMessages,
       botUserId,

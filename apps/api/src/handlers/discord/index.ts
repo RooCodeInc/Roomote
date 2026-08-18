@@ -25,7 +25,7 @@ import {
   setLatestInboundMessageId,
 } from '@roomote/communication/messages';
 import { reactionEmojiMatches } from '@roomote/communication/reaction-emoji';
-import { getTaskUrl } from '@roomote/cloud-agents/server';
+import { getTaskUrl, hasFastAgentSession } from '@roomote/cloud-agents/server';
 import {
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
   RunStatus,
@@ -578,11 +578,19 @@ async function processDiscordGatewayEvent(
           launchOwnerUserId: senderUserId,
         })
       : null;
+  const isFastAgentThread = channel.isThread
+    ? await hasFastAgentSession({
+        slackTeamId: `discord:${channel.guildId ?? 'dm'}`,
+        slackChannel: metadata.communicationChannelId,
+        slackThreadTs: channel.channelId,
+      })
+    : false;
   const isRoomoteThread = Boolean(
     activeRun ||
     completedRun ||
     pendingRoutingReply ||
-    repliedToAutomationReport,
+    repliedToAutomationReport ||
+    isFastAgentThread,
   );
   const isTaskEntry = isDiscordTaskEntryEvent(event, {
     botUserId: resolved.botUserId,
@@ -662,6 +670,7 @@ async function processDiscordGatewayEvent(
           repliedToAutomationReport?.userId ??
           (pendingRoutingReply ? senderUserId : null),
         isAutomationReportThread: Boolean(repliedToAutomationReport),
+        isOpenConversationThread: isFastAgentThread,
         fetchThreadMessages: async () => {
           const history = await fetchDiscordThreadHistoryBestEffort({
             provider: resolved.provider,
