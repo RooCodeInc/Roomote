@@ -17,11 +17,11 @@ export function stripLeadingFastCommandMention(text: string): string {
 
 export function isFastCommandInvocation(text: string): boolean {
   const mentionStrippedText = stripLeadingFastCommandMention(text);
-  return /^(?:\/|!)fast(?:\s|$)/i.test(mentionStrippedText);
+  return /^!fast(?:\s|$)/i.test(mentionStrippedText);
 }
 
 export function isBareFastCommandInvocation(text: string): boolean {
-  return /^(?:\/|!)fast(?:\s|$)/i.test(text.trimStart());
+  return /^!fast(?:\s|$)/i.test(text.trimStart());
 }
 
 export function extractFastQuestion(
@@ -33,7 +33,7 @@ export function extractFastQuestion(
     return trimmedQuestion.length > 0 ? trimmedQuestion : null;
   }
 
-  const match = mentionStrippedText.match(/^(?:\/|!)fast\s*(.*)$/is);
+  const match = mentionStrippedText.match(/^!fast\s*(.*)$/is);
   if (!match) {
     return null;
   }
@@ -62,7 +62,7 @@ export async function processFastAgentMessage(params: {
     userId,
     teamId,
     apiBaseUrl,
-    usageText = `Use \`/fast <question>\` after mentioning ${PRODUCT_NAME}.`,
+    usageText = `Use \`!fast <question>\` after mentioning ${PRODUCT_NAME}.`,
     continuation = false,
     activeTasks = [],
     launchTask,
