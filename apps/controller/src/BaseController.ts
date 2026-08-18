@@ -32,7 +32,8 @@ import {
   sql,
 } from '@roomote/db/server';
 import { dequeueTaskRun } from '@roomote/cloud-agents/server';
-import { finishRun } from '@roomote/sdk/server';
+import { finishRun, reportTaskPlatformIssue } from '@roomote/sdk/server';
+import { isModalConcurrentSandboxLimitError } from '@roomote/compute-providers';
 
 import { getOrphanedTaskRun } from './orphaned-task-runs';
 import {
@@ -593,6 +594,30 @@ export abstract class BaseController {
     console.error(
       `[BaseController] ❌ Error spawning ${taskRun.payloadKind} worker for task run #${taskRun.id}: ${errorMessage}`,
     );
+
+    if (isModalConcurrentSandboxLimitError(error)) {
+      try {
+        await reportTaskPlatformIssue({
+          taskId: taskRun.taskId,
+          runId: taskRun.id,
+          report: {
+            title: 'Concurrent sandbox limit reached',
+            summary:
+              'A task could not start because the Modal workspace reached its concurrent sandbox limit.',
+          },
+        });
+      } catch (alertError) {
+        captureControllerException(alertError, {
+          runId: taskRun.id,
+          payloadKind: taskRun.payloadKind,
+          provider: taskRun.vendor,
+          phase: 'concurrent_sandbox_limit_alert',
+        });
+        console.error(
+          `[BaseController] Failed to report concurrent sandbox limit for task run #${taskRun.id}: ${alertError instanceof Error ? alertError.message : String(alertError)}`,
+        );
+      }
+    }
 
     await this.finishFailedTaskRun(taskRun, errorMessage, errorCode);
 

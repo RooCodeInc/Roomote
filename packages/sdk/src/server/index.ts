@@ -47,6 +47,7 @@ export {
 export { recordComputeProviderUsage } from './lib/task-runs/record-compute-provider-usage';
 export {
   recordTaskMessageEnvelope,
+  reportTaskPlatformIssue,
   refreshTaskTitleOnCompletion,
 } from './lib/task-runs/record-task-message-envelope';
 export { ensureSnapshotResumeGitHubFollowUpFallback } from './lib/task-runs/ensure-snapshot-resume-github-follow-up-fallback';

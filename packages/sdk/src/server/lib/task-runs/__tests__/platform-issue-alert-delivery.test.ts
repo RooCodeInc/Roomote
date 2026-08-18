@@ -50,7 +50,10 @@ import {
   type AcpPersistedEnvelope,
 } from '@roomote/types';
 
-import { recordTaskMessageEnvelope } from '../record-task-message-envelope';
+import {
+  recordTaskMessageEnvelope,
+  reportTaskPlatformIssue,
+} from '../record-task-message-envelope';
 
 const REPORT = {
   title: 'Broken webhook secret',
@@ -404,6 +407,44 @@ describe('platform issue alert delivery', () => {
 
     const reportRow = await findReportRow(taskId);
     expect(reportRow?.slackPostedAt).not.toBeNull();
+  });
+
+  it('delivers controller-originated reports without a task message envelope', async () => {
+    const taskId = 'task-platform-issue-controller';
+    const runId = await seedTaskRun(taskId);
+
+    await db.insert(deploymentSettings).values({
+      id: 'default',
+      managerSlackChannelId: 'C999MANAGER',
+    });
+    await db
+      .insert(users)
+      .values({
+        id: 'user-admin',
+        name: 'Admin',
+        email: 'admin@example.com',
+        imageUrl: '',
+        entity: {},
+      })
+      .onConflictDoNothing();
+    await db.insert(slackInstallations).values({
+      teamId: 'T123',
+      teamName: 'Acme',
+      appId: 'A123',
+      botUserId: 'B123',
+      botAccessToken: 'xoxb-test',
+      scopes: { bot: ['chat:write'] },
+      installedByUserId: 'user-admin',
+      isActive: true,
+    });
+
+    await reportTaskPlatformIssue({ taskId, runId, report: REPORT });
+
+    expect(mockSlackPostMessage).toHaveBeenCalledTimes(1);
+    expect(mockSlackPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'C999MANAGER' }),
+    );
+    expect(await findReportRow(taskId)).toMatchObject({ report: REPORT });
   });
 
   it('leaves the report unposted when the Discord destination has no runtime credentials', async () => {
