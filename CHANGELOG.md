@@ -28,6 +28,7 @@ This release adds safer Notion workflows, environment diffs, automation history,
 - Make Slack task delivery more reliable by waking sleeping tasks from thread replies, removing internal block context from task messages, and preventing duplicate kickoff messages.
 - Keep task transcripts and controls readable by separating thinking headings, preserving table-format menus, and preventing terminal views from flooding browser error telemetry.
 - Keep long-running tasks moving by compacting custom-model context before provider limits, restoring prompts in order after snapshot resumes, and reporting queued messages only when their turn starts.
+- Initial explorations of an orchestration interface and persistent Brain. Let us know in Discord if you’re interested in testing them or contributing.
 
 ## 0.39.1 (2026-08-14)
 
