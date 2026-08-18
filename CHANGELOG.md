@@ -25,7 +25,7 @@ This release adds safer Notion workflows, environment diffs, automation history,
 
 - Make automation reports quieter and easier to act on with structured Slack cards, run metadata, compact durations, replyable platform alerts, and reliable delivery for failure and Dependabot results.
 - Remove repeated task rows from cost drilldowns, preserve pull-request opener attribution, and clarify when pull-request review threads will be auto-resolved.
-- Make Slack task delivery more reliable by waking sleeping tasks from thread replies, removing internal block context from task messages, and preventing duplicate kickoff messages.
+- Make Slack task delivery more reliable by waking sleeping tasks from thread replies, preserving follow-up delivery during API rollback, removing internal block context from task messages, and preventing duplicate kickoff messages.
 - Keep task transcripts and controls readable by separating thinking headings, preserving table-format menus, and preventing terminal views from flooding browser error telemetry.
 - Keep long-running tasks moving by compacting custom-model context before provider limits, restoring prompts in order after snapshot resumes, and reporting queued messages only when their turn starts.
 - Initial explorations of an orchestration interface and persistent Brain. Let us know in Discord if you’re interested in testing them or contributing.
