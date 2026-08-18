@@ -104,7 +104,7 @@ export const OPENROUTER_RECOMMENDED_TASK_MODEL_SLUGS = {
   'gemini-3-7-flash': 'openrouter/google/gemini-3.7-flash',
   'deepseek-v4-flash-0731': 'openrouter/deepseek/deepseek-v4-flash-0731',
   'deepseek-v4-pro-0813': 'openrouter/deepseek/deepseek-v4-pro-0813',
-  'glm-5-2': 'openrouter/z-ai/glm-5.2',
+  'glm-5-3': 'openrouter/z-ai/glm-5.3',
   'kimi-k3': 'openrouter/moonshotai/kimi-k3',
   'kimi-k2-7-code': 'openrouter/moonshotai/kimi-k2.7-code',
   'qwen3-8-max': 'openrouter/qwen/qwen3.8-max',
