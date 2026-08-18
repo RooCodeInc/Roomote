@@ -16,7 +16,6 @@ This release adds safer Notion workflows, environment diffs, automation history,
 ### Minor changes
 
 - Open previous automation runs from the Automations settings page to review their status, timing, and linked task history.
-- Initial explorations of an orchestration interface and persistent Brain. Let us know in Discord if you’re interested in testing them or contributing.
 - Add a deployment-wide Notion internal integration for tasks and automations, with permission-scoped access to shared content and precise controls for inserting and updating page content.
 - Compare draft environment edits and saved versions side by side in the environment editor. Thanks to @a8trejo for contributing this improvement and reporting [#1160](https://github.com/RooCodeInc/Roomote/issues/1160).
 - Add GLM 5.3 support and updated model recommendations for OpenCode Go and Z.AI Coding Plan users.
