@@ -1986,6 +1986,15 @@ describe('Discord Gateway event handler', () => {
       expect.objectContaining({
         forceNewThread: true,
         fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'discord',
+            workspaceId: 'dm',
+            channelId: 'dm-1',
+            threadId: 'interaction-fast',
+          },
+        },
         skipRoutingConfirmation: true,
         workspaceOverride: {
           repoForPayload: '__all_repositories__',

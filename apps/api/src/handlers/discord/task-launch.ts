@@ -1,6 +1,7 @@
 import {
   ALL_REPOSITORIES,
   TaskPayloadKind,
+  type FastAgentParent,
   type QueuedCommunicationMessage,
   type TaskInitiator,
   type TaskSpec,
@@ -364,6 +365,7 @@ export async function launchDiscordTask(input: {
   /** `/new` in an existing task thread creates a sibling, never a second run in-place. */
   forceNewThread?: boolean;
   fastAgentSessionId?: string;
+  fastAgentParent?: FastAgentParent;
   /**
    * An already-posted message to turn into the acknowledgement instead of
    * posting a new one — a routing card sitting in the task thread becomes the
@@ -455,6 +457,9 @@ export async function launchDiscordTask(input: {
         communicationProvider: 'discord',
         ...(input.fastAgentSessionId
           ? { fastAgentSessionId: input.fastAgentSessionId }
+          : {}),
+        ...(input.fastAgentParent
+          ? { fastAgentParent: input.fastAgentParent }
           : {}),
         communicationChannelId,
         ...(input.metadata.communicationGuildId

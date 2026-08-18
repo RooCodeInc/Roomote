@@ -990,6 +990,15 @@ describe('launchDiscordTask', () => {
       },
       forceNewThread: true,
       fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+      fastAgentParent: {
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'guild-1',
+          channelId: 'channel-1',
+          threadId: 'old-thread',
+        },
+      },
     });
 
     expect(provider.reserveTaskThread).toHaveBeenCalledWith(
@@ -1001,6 +1010,15 @@ describe('launchDiscordTask', () => {
           payload: expect.objectContaining({
             communicationThreadId: 'new-thread',
             fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+            fastAgentParent: {
+              sessionId: '11111111-1111-4111-8111-111111111111',
+              conversation: {
+                surface: 'discord',
+                workspaceId: 'guild-1',
+                channelId: 'channel-1',
+                threadId: 'old-thread',
+              },
+            },
           }),
         }),
       }),

@@ -9,12 +9,29 @@ const mocks = vi.hoisted(() => ({
   findArtifacts: vi.fn(),
   findTaskRun: vi.fn(),
   postMessage: vi.fn(),
+  createDiscordProvider: vi.fn(),
+  discordPostMessage: vi.fn(),
+  createDiscordThread: vi.fn(),
+  enqueueTask: vi.fn(),
+  getTaskUrl: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
+  buildFastAgentSessionChannelKey: ({
+    surface,
+    workspaceId,
+    channelId,
+  }: {
+    surface: string;
+    workspaceId: string;
+    channelId: string;
+  }) =>
+    `${surface === 'slack' ? workspaceId : `${surface}:${workspaceId}`}:${channelId}`,
   createFastAgentSlackTaskLauncher: mocks.createLauncher,
+  enqueueTask: mocks.enqueueTask,
+  getTaskUrl: mocks.getTaskUrl,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -59,6 +76,11 @@ vi.mock('./artifacts/raw-url', () => ({
       `https://api.roomote.example/api/artifacts/${artifactId}/raw?signed=1`,
   ),
   currentEpochSeconds: vi.fn(() => 1234),
+}));
+
+vi.mock('./discord-communication', () => ({
+  createDiscordCommunicationProviderFromRuntimeCredentials:
+    mocks.createDiscordProvider,
 }));
 
 import { deliverFastAgentParentEvent } from './fast-agent-parent-event';
@@ -110,6 +132,37 @@ describe('deliverFastAgentParentEvent', () => {
     ]);
     mocks.findTaskRun.mockResolvedValue({ status: 'running' });
     mocks.postMessage.mockResolvedValue('101.001');
+    mocks.discordPostMessage.mockResolvedValue({
+      provider: 'discord',
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      messageId: 'message-1',
+    });
+    mocks.createDiscordThread.mockResolvedValue({
+      channelId: 'child-thread-1',
+      parentChannelId: 'channel-1',
+      messageId: 'child-message-1',
+      name: 'Child task',
+      kind: 'thread',
+    });
+    mocks.createDiscordProvider.mockResolvedValue({
+      postMessage: mocks.discordPostMessage,
+      createTaskThread: mocks.createDiscordThread,
+    });
+    mocks.getTaskUrl.mockReturnValue(
+      'https://roomote.example/task/child-task-1',
+    );
+    mocks.enqueueTask.mockImplementation(
+      async (
+        _input: unknown,
+        options?: {
+          beforeEnqueue?: (run: { taskId: string }) => Promise<void>;
+        },
+      ) => {
+        await options?.beforeEnqueue?.({ taskId: 'child-task-1' });
+        return { taskId: 'child-task-1' };
+      },
+    );
     mocks.answerQuestion.mockImplementation(
       async ({
         adapter,
@@ -175,8 +228,54 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
   });
 
-  it('fails permanently when the parent surface has no delivery adapter', async () => {
-    const delivery = deliverFastAgentParentEvent({
+  it('delivers the same parent event into a Discord Fast conversation', async () => {
+    const discordParent = {
+      ...parent,
+      conversation: {
+        surface: 'discord' as const,
+        workspaceId: 'guild-1',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+      },
+    };
+
+    await expect(
+      deliverFastAgentParentEvent({ parent: discordParent, event }),
+    ).resolves.toBe('delivered');
+
+    expect(mocks.discordPostMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      text: 'The proof is ready.',
+      textFormat: 'markdown',
+      images: [
+        {
+          url: 'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+          altText: 'result.png',
+          contentType: 'image/png',
+        },
+      ],
+    });
+    expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
+  });
+
+  it('keeps launch_task available during a Discord parent event', async () => {
+    const postKickoff = vi.fn().mockResolvedValue(undefined);
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: { launchTask: (input: unknown) => unknown };
+      }) =>
+        adapter.launchTask({
+          prompt: 'Fix the follow-up regression',
+          environmentId: null,
+          parentSessionId: parent.sessionId,
+          postKickoff,
+        }),
+    );
+
+    await deliverFastAgentParentEvent({
       parent: {
         ...parent,
         conversation: {
@@ -189,13 +288,34 @@ describe('deliverFastAgentParentEvent', () => {
       event,
     });
 
-    await expect(delivery).rejects.toMatchObject({
-      replyPosted: false,
-      permanent: true,
+    expect(mocks.createDiscordThread).toHaveBeenCalledWith(
+      expect.objectContaining({ channelId: 'channel-1' }),
+    );
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            communicationProvider: 'discord',
+            communicationThreadId: 'child-thread-1',
+            fastAgentSessionId: parent.sessionId,
+            fastAgentParent: {
+              sessionId: parent.sessionId,
+              conversation: {
+                surface: 'discord',
+                workspaceId: 'guild-1',
+                channelId: 'channel-1',
+                threadId: 'thread-1',
+              },
+            },
+          }),
+        }),
+      }),
+      expect.any(Object),
+    );
+    expect(postKickoff).toHaveBeenCalledWith({
+      taskId: 'child-task-1',
+      taskUrl: 'https://roomote.example/task/child-task-1',
     });
-    expect(mocks.findSession).not.toHaveBeenCalled();
-    expect(mocks.answerQuestion).not.toHaveBeenCalled();
-    expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
   });
 
   it('delivers a pull request event with a stable Slack idempotency key', async () => {

@@ -4,9 +4,14 @@ import { basename } from 'node:path';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  buildFastAgentSessionChannelKey,
   createFastAgentSlackTaskLauncher,
+  enqueueTask,
+  getTaskUrl,
   type FastAgentTurnAdapter,
+  type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
+import { buildCommunicationTaskThreadName } from '@roomote/communication/task-thread-title';
 import {
   asc,
   and,
@@ -22,19 +27,23 @@ import {
 import { Env, getArtifactSigningKey } from '@roomote/env';
 import { SlackNotifier } from '@roomote/slack';
 import {
+  ALL_REPOSITORIES,
+  TaskPayloadKind,
   exitedRunStatuses,
+  type FastAgentConversation,
   type FastAgentParent,
   type PullRequestStatus,
   type RunStatus,
   type TaskRunErrorCode,
-  type SlackBlock,
   type SourceControlProvider,
+  type StandardTask,
 } from '@roomote/types';
 
 import {
   buildSignedArtifactRawUrl,
   currentEpochSeconds,
 } from './artifacts/raw-url';
+import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
 
 const EXITED_RUN_STATUSES = new Set<RunStatus>(exitedRunStatuses);
 
@@ -137,10 +146,16 @@ export async function listFastAgentPullRequestContexts(
   }));
 }
 
-async function buildSelectedImageBlocks(params: {
+type FastAgentEventImage = {
+  url: string;
+  altText: string;
+  contentType: string;
+};
+
+async function buildSelectedImages(params: {
   artifactIds: string[];
   event: FastAgentParentEvent;
-}): Promise<SlackBlock[]> {
+}): Promise<FastAgentEventImage[]> {
   const artifactIds = [...new Set(params.artifactIds)];
   if (params.event.type !== 'artifact_published' || artifactIds.length === 0) {
     return [];
@@ -178,14 +193,14 @@ async function buildSelectedImageBlocks(params: {
     }
 
     return {
-      type: 'image' as const,
-      image_url: buildSignedArtifactRawUrl({
+      url: buildSignedArtifactRawUrl({
         artifactId: artifact.id,
         ts,
         apiBaseUrl: Env.R_APP_URL,
         signingKey: getArtifactSigningKey(),
       }),
-      alt_text: basename(artifact.path) || 'Task artifact',
+      altText: basename(artifact.path) || 'Task artifact',
+      contentType: artifact.contentType,
     };
   });
 }
@@ -256,7 +271,7 @@ async function createSlackFastAgentParentTurn(params: {
         threadTs: conversation.threadId,
       }),
       postReply: async ({ message, imageArtifactIds = [] }) => {
-        const imageBlocks = await buildSelectedImageBlocks({
+        const images = await buildSelectedImages({
           artifactIds: imageArtifactIds,
           event: params.event,
         });
@@ -264,7 +279,14 @@ async function createSlackFastAgentParentTurn(params: {
           channel: conversation.channelId,
           thread_ts: conversation.threadId,
           text: message,
-          blocks: [{ type: 'markdown', text: message }, ...imageBlocks],
+          blocks: [
+            { type: 'markdown', text: message },
+            ...images.map((image) => ({
+              type: 'image' as const,
+              image_url: image.url,
+              alt_text: image.altText,
+            })),
+          ],
           unfurl_links: false,
           unfurl_media: false,
           client_msg_id: buildSlackClientMessageId(
@@ -282,6 +304,141 @@ async function createSlackFastAgentParentTurn(params: {
   };
 }
 
+function createFastAgentDiscordTaskLauncher(params: {
+  provider: NonNullable<
+    Awaited<
+      ReturnType<
+        typeof createDiscordCommunicationProviderFromRuntimeCredentials
+      >
+    >
+  >;
+  userId: string;
+  conversation: FastAgentConversation;
+}): LaunchFastAgentTask {
+  return async ({ prompt, environmentId, parentSessionId, postKickoff }) => {
+    const isDirectMessage = params.conversation.workspaceId === 'dm';
+    const thread = isDirectMessage
+      ? null
+      : await params.provider.createTaskThread({
+          channelId: params.conversation.channelId,
+          name: buildCommunicationTaskThreadName(prompt),
+          initialText: `Delegated by Fast:\n\n${prompt}`,
+        });
+    const task: StandardTask = {
+      type: TaskPayloadKind.StandardTask,
+      payload: {
+        repo: ALL_REPOSITORIES,
+        description: prompt,
+        communicationProvider: 'discord',
+        communicationChannelId:
+          thread?.parentChannelId ?? params.conversation.channelId,
+        ...(thread?.channelId
+          ? { communicationThreadId: thread.channelId }
+          : isDirectMessage
+            ? {}
+            : { communicationThreadId: params.conversation.threadId }),
+        ...(thread?.messageId
+          ? { communicationMessageId: thread.messageId }
+          : {}),
+        ...(isDirectMessage
+          ? {}
+          : { communicationGuildId: params.conversation.workspaceId }),
+        ...(thread ? { discordTaskThread: true } : {}),
+        fastAgentSessionId: parentSessionId,
+        fastAgentParent: {
+          sessionId: parentSessionId,
+          conversation: params.conversation,
+        },
+        ...(environmentId && environmentId !== ALL_REPOSITORIES
+          ? { environmentId }
+          : {}),
+      },
+    };
+    let taskUrl: string | undefined;
+    const launch = await enqueueTask(
+      {
+        task,
+        initiator: { kind: 'user', userId: params.userId },
+        workflow: 'standard',
+        surface: 'discord',
+        trigger: 'message',
+      },
+      {
+        beforeEnqueue: async (taskRun) => {
+          taskUrl = getTaskUrl({
+            taskId: taskRun.taskId,
+            utm: { source: 'discord', campaign: 'fast-delegation' },
+          });
+          await postKickoff({ taskId: taskRun.taskId, taskUrl });
+        },
+      },
+    );
+
+    return launch.taskId
+      ? { success: true, taskId: launch.taskId, taskUrl }
+      : { success: false, error: 'The task launch did not return a task ID.' };
+  };
+}
+
+async function createDiscordFastAgentParentTurn(params: {
+  parent: FastAgentParent;
+  event: FastAgentParentEvent;
+  onReplyPosted: () => void;
+}): Promise<FastAgentParentTurn> {
+  const conversation = params.parent.conversation;
+  if (conversation.surface !== 'discord') {
+    throw new Error('Expected a Discord Fast parent conversation.');
+  }
+
+  const [session, provider] = await Promise.all([
+    db.query.slackQuickAnswers.findFirst({
+      where: and(
+        eq(slackQuickAnswers.id, params.parent.sessionId),
+        eq(
+          slackQuickAnswers.slackChannel,
+          buildFastAgentSessionChannelKey(conversation),
+        ),
+        eq(slackQuickAnswers.slackThreadTs, conversation.threadId),
+      ),
+      columns: { id: true, userId: true },
+    }),
+    createDiscordCommunicationProviderFromRuntimeCredentials(),
+  ]);
+  if (!session || !provider) {
+    throw new FastAgentParentEventDeliveryError(
+      'Fast parent session or Discord credentials were not found.',
+      { replyPosted: false, permanent: true },
+    );
+  }
+
+  return {
+    userId: session.userId,
+    adapter: {
+      launchTask: createFastAgentDiscordTaskLauncher({
+        provider,
+        userId: session.userId,
+        conversation,
+      }),
+      postReply: async ({ message, imageArtifactIds = [] }) => {
+        const images = await buildSelectedImages({
+          artifactIds: imageArtifactIds,
+          event: params.event,
+        });
+        await provider.postMessage({
+          channelId: conversation.channelId,
+          ...(conversation.workspaceId === 'dm'
+            ? {}
+            : { threadId: conversation.threadId }),
+          text: message,
+          textFormat: 'markdown',
+          images,
+        });
+        params.onReplyPosted();
+      },
+    },
+  };
+}
+
 async function createFastAgentParentTurn(params: {
   parent: FastAgentParent;
   event: FastAgentParentEvent;
@@ -291,10 +448,7 @@ async function createFastAgentParentTurn(params: {
     case 'slack':
       return createSlackFastAgentParentTurn(params);
     case 'discord':
-      throw new FastAgentParentEventDeliveryError(
-        'Fast parent delivery is not configured for discord.',
-        { replyPosted: false, permanent: true },
-      );
+      return createDiscordFastAgentParentTurn(params);
   }
 }
 

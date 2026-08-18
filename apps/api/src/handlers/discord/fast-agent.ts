@@ -111,6 +111,10 @@ export async function processDiscordFastAgentMessage(input: {
           channel: input.channel,
           forceNewThread: true,
           fastAgentSessionId: parentSessionId,
+          fastAgentParent: {
+            sessionId: parentSessionId,
+            conversation,
+          },
           skipRoutingConfirmation: true,
           workspaceOverride,
         });
