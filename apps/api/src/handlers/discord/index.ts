@@ -162,7 +162,6 @@ const DISCORD_HELP_MESSAGE = [
   '**Available commands**',
   '`/new request:<request>` — start a fresh task.',
   '`/goal objective:<objective>` — keep working toward an objective across multiple turns.',
-  '`/fast request:<request>` — ask Roomote or start work through the fast orchestrator.',
   '`/link code:<code>` — link this Discord account in a DM with me.',
   '`/help` — show this message.',
   '',
@@ -518,7 +517,7 @@ async function processDiscordGatewayEvent(
   }
 
   if (command && command.name !== 'new') {
-    if (command.name === 'goal' || command.name === 'fast') {
+    if (command.name === 'goal') {
       // Handled after resolving the current conversation and linked user.
     } else {
       return { ok: true, ignored: 'unsupported_command' };
@@ -755,36 +754,6 @@ async function processDiscordGatewayEvent(
       ephemeral: true,
     });
     return { ok: true, goalStarted: result.success, runId: activeRun.id };
-  }
-
-  if (command?.name === 'fast') {
-    if (!command.request) {
-      await replyToDiscordEvent({
-        provider: resolved.provider,
-        applicationId: resolved.applicationId,
-        channel,
-        interaction: interactionReplyContext(event),
-        text: 'Add what you want Roomote to answer in the `request` field.',
-        ephemeral: true,
-      });
-      return { ok: true, fastAnswered: false, reason: 'missing_request' };
-    }
-    await processDiscordFastAgentMessage({
-      event,
-      question: command.request,
-      sender,
-      senderUserId,
-      provider: resolved.provider,
-      applicationId: resolved.applicationId,
-      channel,
-      metadata,
-      conversationId: getDiscordFastConversationId(
-        channel,
-        interaction?.id ?? event.eventId,
-      ),
-      interaction: interactionReplyContext(event),
-    });
-    return { ok: true, fastAnswered: true };
   }
 
   const defaultFastQuestion = defaultFastMessage
