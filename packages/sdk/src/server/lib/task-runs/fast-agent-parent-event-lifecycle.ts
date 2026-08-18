@@ -8,7 +8,7 @@ import {
 
 type DeliveryMarker = 'timestamp' | 'delivered' | 'skipped';
 
-export type FastAgentParentEventLifecycleResult =
+type FastAgentParentEventLifecycleResult =
   | { status: 'not_claimed' }
   | { status: 'delivered' }
   | { status: 'skipped' }
