@@ -5,6 +5,7 @@ import type { FastAgentIntegration } from './fast-agent-integration-broker';
 import type { FastAgentSurface } from './fast-agent-service';
 import type { FastAgentActiveTask } from './fast-agent-session';
 import { buildRoomoteStyleGuidanceSection } from '../../style-guidance';
+import { buildChatResponseDecisionPolicy } from '../chat-response-policy';
 
 function formatRepositoriesForPrompt(
   availableEnvironments: RoutableEnvironment[],
@@ -62,6 +63,10 @@ export function buildFastAgentSystemPrompt({
   hasGitHubTools?: boolean;
 }): string {
   const surfaceName = surface === 'slack' ? 'Slack' : 'Discord';
+  const responsePolicy = buildChatResponseDecisionPolicy({
+    surface,
+    reactionsAvailable: surface === 'slack',
+  });
   const reactionGuidance =
     surface === 'slack'
       ? '- Use "send_chat_reaction_emoji" only for a lightweight acknowledgement or an emoji-only answer. Put the Slack emoji name without colons in "reactionName" and set "purpose" to "ack" when work continues or "closeout" when the reaction fully answers the turn.\n- Choose reactions by intent. Reserve "eyes" for actively taking a look; use "thumbsup" for acknowledgement or agreement and "white_check_mark" for completion. Do not add a reaction to every Fast mode message.'
@@ -100,18 +105,20 @@ ${
 - Each structured output is the next action for one orchestration step, not necessarily the final answer for the user turn. The runtime executes that action and invokes you again with its result unless the action ends the turn.
 - Any structured-output instruction to call exactly once or only at the end applies only to the current model invocation. It does not limit Slack-visible actions across the user turn. An "ack" or "progress" action may come before integration or task actions in later steps.
 - The only user-visible action is "send_chat_reply"${surface === 'slack' ? ' (or "send_chat_reaction_emoji" for an emoji-only Slack response)' : ''}. Integration and task tool results are not visible to the user.
-- Every user turn must use at least one user-visible action. There is no implicit final response after the tool loop.
-- Use "send_chat_reply" whenever the answer needs words. Put the Markdown message in "message" and choose "purpose":
-  - "ack": a brief acknowledgement before work continues.
-  - "progress": new decision-useful state while work continues.
-  - "closeout": the answer, completed result, blocker, or handoff. This ends the turn.
-  - "clarification": one concise question whose answer is needed next. This ends the turn.
-- An "ack" or "progress" does not end the turn. Continue using the tools you need, then send a "closeout".
+## Chat Response Decision Policy
+- ${responsePolicy.lifecycle}
+- ${responsePolicy.acknowledgement}
+- ${responsePolicy.progress}
+- ${responsePolicy.closeout}
+- ${responsePolicy.clarification}
+- ${responsePolicy.continuation}
+- ${responsePolicy.freshResponse} There is no implicit final response after the tool loop.
+- Use "send_chat_reply" whenever the response needs words. Put the Markdown message in "message" and set "purpose" to "ack", "progress", "closeout", or "clarification" to match the lifecycle decision above.
 - Before initiating an integration, sending a message to an active task, or canceling a task, first send a brief "ack". This requirement applies only to model-initiated tool use. The automatic Brain integration preflight is exempt because it runs before your first decision, when you cannot yet send an acknowledgement.
 - For "launch_task", do not send a separate acknowledgement first. The runtime posts exactly one kickoff with the task link before making the child runnable, then ends this turn. Return the launch action directly and do not add another acknowledgement, progress update, or closeout.
 - If the answer is immediate and needs no model-initiated tool, skip the acknowledgement and send the "closeout" directly.
 ${reactionGuidance}
-- Prefer one direct closeout over an acknowledgement followed immediately by the same answer.
+- Fast mode queues prose acknowledgements and progress updates until a non-chat action begins. If the next action is an immediate closeout, the queued update is replaced so the user receives one direct answer rather than two near-identical messages.
 
 ## Orchestration Tool Policy
 - Use "launch_task" when the user asks to build, change, fix, edit, run, or otherwise execute new independent work in a repository or workspace. Existing active tasks do not block a new independent task.

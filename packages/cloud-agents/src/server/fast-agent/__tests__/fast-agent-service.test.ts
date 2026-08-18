@@ -226,6 +226,16 @@ describe('answerFastAgentQuestion', () => {
         }),
       })
       .mockResolvedValueOnce({
+        object: decision({
+          action: 'call_integration',
+          message: null,
+          purpose: null,
+          integrationId: 'github',
+          toolName: 'search_code',
+          toolArguments: JSON.stringify({ query: 'chat response policy' }),
+        }),
+      })
+      .mockResolvedValueOnce({
         object: decision({ message: 'The lifecycle is configured correctly.' }),
       });
     mocks.callIntegration.mockResolvedValue({ matches: ['fast-agent.ts'] });
@@ -237,9 +247,10 @@ describe('answerFastAgentQuestion', () => {
     });
 
     expect(result).toBe('The lifecycle is configured correctly.');
-    expect(mocks.generateObject).toHaveBeenCalledTimes(4);
-    expect(mocks.callIntegration).toHaveBeenCalledOnce();
-    expect(mocks.callIntegration).toHaveBeenCalledWith(
+    expect(mocks.generateObject).toHaveBeenCalledTimes(5);
+    expect(mocks.callIntegration).toHaveBeenCalledTimes(2);
+    expect(mocks.callIntegration).toHaveBeenNthCalledWith(
+      1,
       expect.objectContaining({ sessionId: 'session-1' }),
       expect.any(Array),
       {
@@ -248,13 +259,27 @@ describe('answerFastAgentQuestion', () => {
         args: { query: 'fast agent' },
       },
     );
-    expect(callbacks.postSlackReply).toHaveBeenCalledTimes(2);
+    expect(mocks.callIntegration).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ sessionId: 'session-1' }),
+      expect.any(Array),
+      {
+        integrationId: 'github',
+        toolName: 'search_code',
+        args: { query: 'chat response policy' },
+      },
+    );
+    expect(callbacks.postSlackReply).toHaveBeenCalledTimes(3);
     expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ purpose: 'ack' }),
     );
     expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
       2,
+      expect.objectContaining({ purpose: 'progress' }),
+    );
+    expect(callbacks.postSlackReply).toHaveBeenNthCalledWith(
+      3,
       expect.objectContaining({ purpose: 'closeout' }),
     );
     expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
@@ -324,6 +349,64 @@ describe('answerFastAgentQuestion', () => {
     expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
       'may emit at most one chat reply',
     );
+  });
+
+  it('rejects clarification replies for delegated-task platform events', async () => {
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          message: 'Should I retry the task?',
+          purpose: 'clarification',
+        }),
+      })
+      .mockResolvedValueOnce({
+        object: decision({
+          message: 'The task needs attention before it can continue.',
+          purpose: 'closeout',
+        }),
+      });
+    const callbacks = chatCallbacks();
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      question:
+        '<delegated_task_event>{"type":"task_settled","status":"failed"}</delegated_task_event>',
+      platformEvent: true,
+      ...callbacks,
+    });
+
+    expect(result).toBe('The task needs attention before it can continue.');
+    expect(callbacks.postSlackReply).toHaveBeenCalledOnce();
+    expect(callbacks.postSlackReply).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: 'closeout' }),
+    );
+    expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
+      'may emit at most one chat reply',
+    );
+  });
+
+  it('keeps a routine delegated-task platform event silent', async () => {
+    mocks.generateObject.mockResolvedValueOnce({
+      object: decision({
+        action: 'ignore_event',
+        message: null,
+        purpose: null,
+      }),
+    });
+    const callbacks = chatCallbacks();
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      question:
+        '<delegated_task_event>{"type":"task_progress","status":"running"}</delegated_task_event>',
+      platformEvent: true,
+      ...callbacks,
+    });
+
+    expect(result).toBe('');
+    expect(callbacks.postSlackReply).not.toHaveBeenCalled();
+    expect(callbacks.postSlackReaction).not.toHaveBeenCalled();
+    expect(mocks.appendSessionMessages).toHaveBeenCalledOnce();
   });
 
   it('lets the orchestration loop report a delegated task terminal error', async () => {

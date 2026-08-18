@@ -710,11 +710,7 @@ export async function answerFastAgentQuestion({
           continue;
         }
 
-        if (
-          platformEvent &&
-          purpose !== 'closeout' &&
-          purpose !== 'clarification'
-        ) {
+        if (platformEvent && purpose !== 'closeout') {
           prompt += `\n\n[PLATFORM EVENT REPLY REJECTED]\nA delegated-task platform event may emit at most one chat reply. Use purpose "closeout" for a useful event or ignore_event for a redundant event.\n[END PLATFORM EVENT REPLY REJECTED]`;
           continue;
         }

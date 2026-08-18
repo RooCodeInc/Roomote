@@ -1,6 +1,7 @@
 import { buildFastAgentSystemPrompt } from '../fast-agent-prompt';
 import { FAST_AGENT_BRAIN_INSTRUCTIONS } from '../fast-agent-constants';
 import { RunStatus } from '@roomote/types';
+import { buildChatResponseDecisionPolicy } from '../../chat-response-policy';
 
 describe('buildFastAgentSystemPrompt', () => {
   it('uses the default Roomote tone guidance', () => {
@@ -60,8 +61,13 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'If the answer is immediate and needs no model-initiated tool, skip the acknowledgement and send the "closeout" directly',
     );
+    for (const rule of Object.values(
+      buildChatResponseDecisionPolicy({ surface: 'slack' }),
+    )) {
+      expect(prompt).toContain(rule);
+    }
     expect(prompt).toContain(
-      'An "ack" or "progress" does not end the turn. Continue using the tools you need, then send a "closeout"',
+      'Fast mode queues prose acknowledgements and progress updates until a non-chat action begins',
     );
     expect(prompt).toContain('"purpose"');
     expect(prompt).not.toContain('Use "respond"');
@@ -116,6 +122,14 @@ describe('buildFastAgentSystemPrompt', () => {
 
     expect(prompt).toContain('fast mode on Discord');
     expect(prompt).toContain('Emoji reactions are unavailable on this surface');
+    for (const rule of Object.values(
+      buildChatResponseDecisionPolicy({
+        surface: 'discord',
+        reactionsAvailable: false,
+      }),
+    )) {
+      expect(prompt).toContain(rule);
+    }
     expect(prompt).not.toContain('<slack_modern_markdown>');
     expect(prompt).not.toContain(
       'attributes on the current `<slack_message>` identify its sender',

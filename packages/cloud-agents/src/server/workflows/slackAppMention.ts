@@ -7,6 +7,7 @@ import {
   type PrAction,
 } from '@roomote/types';
 import type { ResolvedTaskCommitAuthor } from '../commit-author';
+import { buildChatResponseDecisionPolicy } from '../chat-response-policy';
 import {
   stripLeadingSlackProductMention,
   wrapSlackMessage,
@@ -22,6 +23,7 @@ export function buildSlackMessageInstructions({
 }: {
   includeRequestUserInputGuidance?: boolean;
 } = {}): string {
+  const responsePolicy = buildChatResponseDecisionPolicy({ surface: 'slack' });
   const slackProofDeliveryInstructions = `
     <rule>Visual-proof uploads are not posted to Slack automatically. When proof needs to be visible in the originating thread, share it with \`send_chat_reply\`: pass image artifact IDs via \`imageArtifactIds\`, or include artifact \`viewUrl\`/\`rawUrl\` links in the reply text for non-images.</rule>
     <rule>When a Slack-visible reply mentions or relies on a successful proof capture, attach that proof's screenshot artifact IDs to the same reply via \`imageArtifactIds\`. Do not narrate captured proof in one message and defer sharing the images to a later one.</rule>
@@ -64,13 +66,14 @@ export function buildSlackMessageInstructions({
   </slack_visibility_contract>
 
   <slack_turn_lifecycle>
-    <context>A Slack user turn has a small lifecycle: acknowledge the turn when needed, report useful progress when there is useful new state, and close out when there is an answer, result, blocker, or a clear paused-waiting state. Slack uses this lifecycle for user-visible replies instead of treating Slack as an intermediary-update surface. One Slack message can satisfy multiple lifecycle purposes only when its content genuinely does so.</context>
-    <rule>\`ack\`: Send one early Slack-visible acknowledgement before substantial work that will not post to Slack when the answer is not immediate. When the \`<slack_turn_policy>\` block says \`prefer_emoji_ack="true"\`, the latest directed user turn itself came from Slack, and a lightweight acknowledgement is enough, acknowledge with \`send_chat_reaction_emoji\`. When the acknowledgement needs words, the latest user turn did not come from Slack, or the policy disallows reactions, use \`send_chat_reply\`. Do not use \`request_user_input\` as a generic opening acknowledgement; only use it when the task is already blocked on concrete input from the user. If the first Slack-visible action already answers or completes the turn, that action is the acknowledgement and no separate ack is needed.</rule>
-    <rule>\`progress\`: After an acknowledgement, send progress only when the update adds decision-useful state since the last Slack-visible reply: a material result, blocker, input need, changed approach, meaningful phase transition, proof artifact, or a timed update that prevents more than 10 minutes of Slack-visible silence during active work. When that timed update is warranted, keep it brief and outcome-level: say what is materially true now and what happens next in user terms instead of turning Slack into a running work log.</rule>
+    <context>${responsePolicy.lifecycle}</context>
+    <rule>${responsePolicy.acknowledgement}</rule>
+    <rule>Obey the prompt-provided \`<slack_turn_policy>\` block for whether the latest directed user turn came from Slack, whether reactions are allowed, and whether a lightweight acknowledgement should prefer \`send_chat_reaction_emoji\`. Do not use \`request_user_input\` as a generic opening acknowledgement; only use it when the task is already blocked on concrete input from the user.</rule>
+    <rule>${responsePolicy.progress}</rule>
     <rule>When internal review, proof, or delegated helper steps create follow-up work, keep the update parent-owned and phase-based. Describe the current phase in human terms such as reviewing, tightening follow-ups, or final checking instead of naming the internal agent, review pass, or proof run unless that mechanism is itself the blocker or the user explicitly asked for it.</rule>
     <rule>When an active parent workflow delegates to a child skill and the parent still owns remaining proof, delivery, blocker handling, or final reporting, do not let the child satisfy the Slack closeout on its own. Treat that child completion as internal progress, keep any user-visible update parent-owned, and wait for the parent workflow's true terminal state before sending \`send_chat_reply\` with purpose \`closeout\`.</rule>
-    <rule>\`closeout\`: Send one Slack-visible closeout when the turn has an answer, completed result, explicit blocker, or a paused-waiting state that you explain in prose. This is the only terminal \`send_chat_reply\` purpose. A \`request_user_input\` prompt or UI handoff never satisfies closeout on its own. If a prior Slack-visible reply already resolved the turn, the closeout can be brief and should make that outcome clear.</rule>
-    <rule>\`clarification\`: Ask lightweight non-secret questions with \`send_chat_reply\` only when thread context and available tools do not already resolve the question well enough to continue. Use \`request_user_input\` when the needed input is structured, private, or blocks final completion. It does not satisfy ack or closeout on its own.</rule>
+    <rule>${responsePolicy.closeout} A \`request_user_input\` prompt or UI handoff never satisfies closeout on its own.</rule>
+    <rule>${responsePolicy.clarification} Use \`request_user_input\` when the needed input is structured, private, or blocks final completion. It does not satisfy ack or closeout on its own.</rule>
     <rule>For code-writing turns, the initial ack should say implementation is the next action when that is true and the agent already has enough inspected repository context to describe the work concretely. If the codebase has not been inspected yet, send a short text ack first and then start digging. Do not invent repo-specific details just to make the ack sound informed. After that, code reading, editing, validation, push, or PR work can continue silently until the progress or closeout criteria above are met.</rule>
     <rule>Passive \`thread_activity\` can shape the next natural Slack reply when relevant, but it does not create a new lifecycle by itself. A new directed Slack user turn gets its own lifecycle.</rule>
   </slack_turn_lifecycle>
@@ -112,8 +115,7 @@ export function buildSlackMessageInstructions({
   <slack_response_delivery>
     <rule>Use \`send_chat_reply\` for lifecycle replies in the originating Slack thread when the reply needs words: early acknowledgements, useful progress, closeouts, and lightweight clarifications. Set its \`purpose\` to match the lifecycle purpose.</rule>
     <rule>When a lifecycle reply is due, send it before running further tools. The only non-reply exception is \`tool_search\` when the needed Slack reply/post tool is not visible. This orders the reply ahead of more work; it does not cap the work you may do afterward in the same turn.</rule>
-    <rule>Sending an \`ack\` or \`progress\` reply does not end your turn. Once that reply lands, keep working in the same turn: continue tool calls, edits, validation, and delivery from where you left off. Do not treat a progress reply as a stopping point or wait for another user message to resume. A \`clarification\` reply behaves the same way while you can still make real progress without the answer.</rule>
-    <rule>The turn ends on a \`closeout\` reply, on a \`clarification\` whose answer the next step genuinely depends on, or on an explicit user instruction to pause or stop. A blocking clarification is a real stopping point: wait for the answer rather than proceeding on a guess, and do not follow it with a separate "waiting on your answer" message.</rule>
+    <rule>${responsePolicy.continuation} A non-blocking clarification behaves like progress while you can still make real progress without the answer. A blocking clarification is a real stopping point: wait for the answer rather than proceeding on a guess, and do not follow it with a separate "waiting on your answer" message.</rule>
     <rule>Outside those cases, a reply that describes what you are about to do next is a \`progress\` reply, and you must actually do it in the same turn instead of stopping there. When implementation, validation, proof, or delivery work is still owed and nothing is blocking it, announcing the next step is not a substitute for taking it.</rule>
     <rule>Use \`send_chat_reaction_emoji\` for lightweight acknowledgements, confirmations, or emoji-only answers only when the latest directed user turn came from Slack and the prompt-provided \`<slack_turn_policy>\` block allows reactions, especially when \`prefer_emoji_ack="true"\`. Use \`send_chat_reply\` when the answer needs words or when the latest user turn did not come from Slack. When the user explicitly wants a reaction added to a different known Slack message, use \`add_reaction_to_slack_message\` for that other-message reaction.</rule>
     <rule>When using \`send_chat_reaction_emoji\`, choose the reaction that best matches the intent instead of treating \`eyes\` as the default. Reserve \`eyes\` for "taking a look" or active investigation, use \`thumbsup\` for acknowledgement, agreement, or go-ahead, use \`white_check_mark\` for completed work, and prefer another reaction when it fits the interaction better.</rule>
@@ -124,7 +126,7 @@ export function buildSlackMessageInstructions({
     <rule>When sharing screenshots or screencast links with \`send_chat_reply\`, and the environment instructions expose configured external preview URLs, include the most relevant preview link in the Slack text. Prefer the matching port for the proved surface, or the primary port when one relevant match is not explicit. Do not share raw machine hosts instead of those configured preview URLs.</rule>
     <rule>Do not add a separate sentence telling the user to use the task UI; the Slack thread reply tool already appends the standard footer.</rule>
     <rule>When reactions are allowed and the latest directed user turn itself came from Slack, using \`send_chat_reaction_emoji\` on that current Slack message counts as answering that Slack turn. When the latest user turn did not come from Slack, \`send_chat_reaction_emoji\` does not count as satisfying the turn. When the user explicitly asks for a reaction on a different known Slack message, \`add_reaction_to_slack_message\` counts only when it targets that requested message.</rule>
-    <rule>Every new Slack user turn that you answer still needs its own fresh Slack-visible satisfaction tool call. A prior turn's \`send_chat_reply\`, \`send_chat_reaction_emoji\`, or \`add_reaction_to_slack_message\` call on a different message does not satisfy a later turn. A reaction only counts for the turn it actually answers.</rule>
+    <rule>${responsePolicy.freshResponse} A reaction only counts for the turn it actually answers, and a reaction on a different known message does not satisfy the current turn.</rule>
   </slack_response_delivery>
 
   ${
@@ -163,6 +165,9 @@ export function buildChatProviderMessageInstructions(
   provider: NonSlackChatProvider,
 ): string {
   const { tag, name, label } = getNonSlackChatProviderDisplay(provider);
+  const responsePolicy = buildChatResponseDecisionPolicy({
+    surface: provider,
+  });
   const requestUserInputInstructions =
     provider === 'discord' || provider === 'telegram' || provider === 'teams'
       ? `
@@ -195,13 +200,14 @@ export function buildChatProviderMessageInstructions(
   </${tag}_visibility_contract>
 
   <${tag}_turn_lifecycle>
-    <context>A ${label} user turn has a small lifecycle: acknowledge the turn when needed, report useful progress when there is useful new state, and close out when there is an answer, result, blocker, or a clear paused-waiting state. ${label} uses this lifecycle for user-visible replies instead of treating ${label} as an intermediary-update surface. One ${label} message can satisfy multiple lifecycle purposes only when its content genuinely does so.</context>
-    <rule>\`ack\`: Send one early ${label}-visible acknowledgement before substantial work that will not otherwise post to ${label} when the answer is not immediate. When the current turn allows emoji reactions (see an optional \`<${tag}_turn_policy prefer_emoji_ack="true">\` block, or \`reactions_allowed="true"\` on the inbound message policy) and a lightweight acknowledgement is enough, prefer \`send_chat_reaction_emoji\` over a short text ack. When the ack needs words, reactions are not allowed, or this is the first chat turn of a task, use \`send_chat_reply\`. If the first ${label}-visible action already answers or completes the turn, that action is the acknowledgement and no separate ack is needed.</rule>
-    <rule>\`progress\`: After an acknowledgement, send progress only when the update adds decision-useful state since the last ${label}-visible reply: a material result, blocker, input need, changed approach, meaningful phase transition, proof artifact, or a timed update that prevents more than 10 minutes of ${label}-visible silence during active work. When that timed update is warranted, keep it brief and outcome-level: say what is materially true now and what happens next in user terms instead of turning ${label} into a running work log.</rule>
+    <context>${responsePolicy.lifecycle}</context>
+    <rule>${responsePolicy.acknowledgement}</rule>
+    <rule>Use the current turn policy to decide whether reactions are allowed. On the first chat turn of a task, use \`send_chat_reply\` rather than a reaction-only acknowledgement or answer.</rule>
+    <rule>${responsePolicy.progress}</rule>
     <rule>When internal review, proof, or delegated helper steps create follow-up work, keep the update parent-owned and phase-based. Describe the current phase in human terms such as reviewing, tightening follow-ups, or final checking instead of naming the internal agent, review pass, or proof run unless that mechanism is itself the blocker or the user explicitly asked for it.</rule>
     <rule>When an active parent workflow delegates to a child skill and the parent still owns remaining proof, delivery, blocker handling, or final reporting, do not let the child satisfy the ${label} closeout on its own. Treat that child completion as internal progress, keep any user-visible update parent-owned, and wait for the parent workflow's true terminal state before sending \`send_chat_reply\` with purpose \`closeout\`.</rule>
-    <rule>\`closeout\`: Send one ${label}-visible closeout when the turn has an answer, completed result, explicit blocker, or a paused-waiting state that you explain in prose. This is the only terminal \`send_chat_reply\` purpose. A \`request_user_input\` prompt or UI handoff never satisfies closeout on its own. If a prior ${label}-visible reply already resolved the turn, the closeout can be brief and should make that outcome clear. Do not send another closeout that restates the same delivery outcome (for example the same PR link and self-review note) after internal bookkeeping, validation, or helper follow-up unless the user-visible outcome actually changed.</rule>
-    <rule>\`clarification\`: Ask lightweight non-secret questions with \`send_chat_reply\` only when thread context and available tools do not already resolve the question well enough to continue. Use \`request_user_input\` when the needed input is structured, private, or blocks final completion. It does not satisfy ack or closeout on its own.</rule>
+    <rule>${responsePolicy.closeout} A \`request_user_input\` prompt or UI handoff never satisfies closeout on its own.</rule>
+    <rule>${responsePolicy.clarification} Use \`request_user_input\` when the needed input is structured, private, or blocks final completion. It does not satisfy ack or closeout on its own.</rule>
     <rule>For code-writing turns, the initial ack should say implementation is the next action when that is true and the agent already has enough inspected repository context to describe the work concretely. If the codebase has not been inspected yet, send a short text ack first and then start digging. Do not invent repo-specific details just to make the ack sound informed. After that, code reading, editing, validation, push, or PR work can continue silently until the progress or closeout criteria above are met.</rule>
   </${tag}_turn_lifecycle>
 
@@ -221,7 +227,7 @@ export function buildChatProviderMessageInstructions(
     ${proofDeliveryInstructions}
     <rule>When sharing screenshots or screencast links with \`send_chat_reply\`, and the environment instructions expose configured external preview URLs, include the most relevant preview link in the ${label} text. Prefer the matching port for the proved surface, or the primary port when one relevant match is not explicit. Do not share raw machine hosts instead of those configured preview URLs.</rule>
     <rule>When a blocker, delivery update, input request, useful progress update, or closeout would otherwise leave the ${label} thread hanging, post the concise ${label} lifecycle reply before finalizing. After that terminal outcome is already visible, do not re-post a second near-identical lifecycle reply just because stop or silence machinery asks for another chat-visible update; only post again when the outcome, blocker, or next step genuinely changed.</rule>
-    <rule>Every new directed ${label} user turn that you answer still needs its own fresh ${label}-visible response. A prior turn's reply or reaction does not satisfy a later turn. An emoji reaction only satisfies a lightweight ack when the current policy allows reactions; a first-turn or closeout still needs \`send_chat_reply\`.</rule>
+    <rule>${responsePolicy.freshResponse} An emoji reaction only satisfies a lightweight ack when the current policy allows reactions; a first-turn or closeout still needs \`send_chat_reply\`.</rule>
   </${tag}_response_delivery>
 </${tag}_message_instructions>
 `.trim();
