@@ -91,6 +91,33 @@ describe('processDiscordAttachments', () => {
     expect(result.warnings[0]).toContain('exceeds');
   });
 
+  it('rejects an oversized declared response before reading its body', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(Uint8Array.from([1]), {
+        status: 200,
+        headers: { 'content-length': String(10 * 1024 * 1024 + 1) },
+      }),
+    );
+
+    const result = await processDiscordAttachments(
+      [
+        {
+          id: 'image-1',
+          filename: 'misreported.png',
+          content_type: 'image/png',
+          size: 1,
+          url: 'https://cdn.discordapp.com/attachments/1/2/misreported.png',
+        },
+      ],
+      { fetch: fetchImpl },
+    );
+
+    expect(result.images).toEqual([]);
+    expect(result.warnings[0]).toContain(
+      `Discord attachment exceeds ${10 * 1024 * 1024} bytes.`,
+    );
+  });
+
   it('transcribes a bounded audio attachment without exposing its URL', async () => {
     transcribeAudioAttachmentMock.mockResolvedValue({
       status: 'transcribed',
