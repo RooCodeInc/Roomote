@@ -118,6 +118,7 @@ describe('answerFastAgentQuestion', () => {
       },
     ]);
     mocks.listIntegrations.mockResolvedValue([]);
+    mocks.callIntegration.mockResolvedValue({ status: 'ok' });
     mocks.generateObject.mockResolvedValue({ object: decision() });
     mocks.sendTaskMessage.mockResolvedValue({ success: true });
     mocks.cancelTask.mockResolvedValue({ success: true });
