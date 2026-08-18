@@ -38,6 +38,9 @@ const state = vi.hoisted(() => ({
   notionConnection: null as null | {
     authStatus?: string | null;
   },
+  ripplingConnection: null as null | {
+    authStatus?: string | null;
+  },
   granolaConnection: null as null | {
     authStatus?: string | null;
   },
@@ -105,6 +108,7 @@ const { mutations, selectMock } = vi.hoisted(() => ({
     setDisabledTools: vi.fn(),
     saveAsanaConnection: vi.fn(),
     saveNotionConnection: vi.fn(),
+    saveRipplingConnection: vi.fn(),
     saveGranolaConnection: vi.fn(),
     saveElevenLabsConnection: vi.fn(),
     saveGrafanaConnection: vi.fn(),
@@ -265,6 +269,14 @@ vi.mock('@/hooks/mcp-connections', () => ({
   }),
   useNotionConnection: () => ({
     data: state.notionConnection,
+    isPending: false,
+  }),
+  useSaveRipplingConnection: () => ({
+    isPending: false,
+    mutate: mutations.saveRipplingConnection,
+  }),
+  useRipplingConnection: () => ({
+    data: state.ripplingConnection,
     isPending: false,
   }),
   useSaveGranolaConnection: () => ({
@@ -506,6 +518,7 @@ describe('Integrations settings', () => {
     state.linearRedirectPath = '';
     state.asanaConnection = null;
     state.notionConnection = null;
+    state.ripplingConnection = null;
     state.granolaConnection = null;
     state.grafanaConnection = null;
     state.vercelConnection = null;
@@ -886,6 +899,7 @@ describe('Integrations settings', () => {
       'Pylon',
       'Railway',
       'Resend',
+      'Rippling',
       'Sentry',
       'Snowflake',
       'Supabase',
@@ -1494,6 +1508,24 @@ describe('Integrations settings', () => {
         /choose its read, update, insert, and comment capabilities/i,
       ),
     ).toBeInTheDocument();
+  });
+
+  it('opens the Rippling HRIS dialog with secure roster guidance', () => {
+    render(<Integrations />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Configure Rippling' }));
+
+    expect(
+      screen.getByRole('heading', { name: 'Connect Rippling' }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText('API token')).toHaveAttribute(
+      'type',
+      'password',
+    );
+    expect(
+      screen.getByText(/workers.read and the user, department, team/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/never sent to agents/i)).toBeInTheDocument();
   });
 
   it('lets admins replace a legacy Notion OAuth connection in place', () => {

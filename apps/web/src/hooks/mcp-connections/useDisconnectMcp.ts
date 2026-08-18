@@ -27,6 +27,9 @@ export function useDisconnectMcp() {
           queryKey: trpc.mcpConnections.granolaConnection.queryKey(),
         });
         queryClient.invalidateQueries({
+          queryKey: trpc.mcpConnections.ripplingConnection.queryKey(),
+        });
+        queryClient.invalidateQueries({
           queryKey: trpc.mcpConnections.grafanaConnection.queryKey(),
         });
         queryClient.invalidateQueries({
