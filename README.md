@@ -30,6 +30,26 @@ API keys.
 &nbsp;&nbsp;
 <a href="https://render.com/deploy?repo=https://github.com/RooCodeInc/Roomote"><img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render" style="height: 40px; width: auto;"></a>
 
+---
+
+## Table of Contents
+
+- [How it works](#how-it-works-60-second-mental-model)
+- [Tech stack](#tech-stack)
+- [Quickstart](#five-minute-quickstart)
+- [What can it do?](#what-can-it-do)
+- [Example tasks](#example-tasks)
+- [Supported providers](#supported-providers)
+- [Why self-host?](#why-self-host-a-coding-agent)
+- [Teams and organizations](#teams-and-organizations)
+- [Configuration reference](#configuration-reference)
+- [Troubleshooting](#troubleshooting)
+- [FAQ](#faq)
+- [Documentation](#documentation)
+- [Community](#community)
+- [Contributing](#contributing)
+- [Security](#security)
+- [License](#license)
 
 ---
 
@@ -74,6 +94,19 @@ to the tools you already use and runs agents in throwaway sandboxes.
 Every task gets its own sandbox. Nothing touches your local machine. The agent
 cleans up after itself.
 
+### Tech stack
+
+| Layer | Technology |
+| ----- | ---------- |
+| Web app | Next.js, React, Tailwind CSS |
+| API server | Node.js, Hono, tRPC |
+| Background jobs | BullMQ, Redis |
+| Database | PostgreSQL (Drizzle ORM) |
+| Sandbox orchestration | Modal, E2B, Daytona, Blaxel, or local Docker |
+| Agent runtime | OpenCode CLI |
+| Queue / events | BullMQ with Redis |
+| Artifact storage | MinIO (S3-compatible) |
+
 ### Supported providers
 
 **Inference:** Two ways to connect models.
@@ -89,6 +122,11 @@ cleans up after itself.
 **Sandbox compute:** Modal, E2B, Daytona, Blaxel, and Local Docker.
 
 **Source control:** GitHub, GitLab, Gitea, Azure DevOps, and Bitbucket Cloud.
+
+**Communications:** Slack, Microsoft Teams, Telegram, Discord.
+
+**Integrations:** Linear, Sentry, Grafana, PostHog, Notion, Jira, Figma, and
+more via MCP.
 
 ---
 
@@ -167,6 +205,22 @@ It connects to dozens of tools (Sentry, Grafana, PostHog, Notion, Figma, and
 more) so it can read logs, check dashboards, and pull context without you
 copy-pasting.
 
+### Example tasks
+
+```text
+"Upgrade all dependencies to their latest versions and fix any breaking changes"
+
+"Add a 'forgot password' flow to the auth service — email link, token expiry, the works"
+
+"Why is the /api/export endpoint timing out for large datasets? Fix it."
+
+"Add unit tests for the billing module — aim for 80% coverage"
+
+"Refactor the database layer to use connection pooling"
+
+"Add a dark mode toggle that persists the user's preference"
+```
+
 ---
 
 ## Why self-host a coding agent?
@@ -204,6 +258,86 @@ Features that matter at scale:
 
 Need SSO, custom SLAs, or dedicated support? Get in touch:
 [help@roomote.dev](mailto:help@roomote.dev).
+
+---
+
+## Configuration reference
+
+Roomote is configured through environment variables. The setup wizard handles
+most of this, but here are the key variables for self-hosters and contributors:
+
+| Variable | Required | Description |
+| -------- | -------- | ----------- |
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `REDIS_URL` | Yes | Redis connection string |
+| `R_APP_ENV` | Yes | `development` or `production` |
+| `R_PUBLIC_URL` | Yes (prod) | Public HTTPS URL for OAuth and webhook callbacks |
+| `R_MODEL` | For tasks | Default model in `provider/model` format (e.g. `openrouter/anthropic/claude-sonnet-4`) |
+| `DEFAULT_COMPUTE_PROVIDER` | No | Sandbox backend: `modal`, `docker`, `daytona`, `e2b`, or `roomote` |
+| `WEB_DEV_LOGIN_ENABLED` | No | Enable password-less dev login (development only) |
+
+Provider-specific API keys follow standard naming (`OPENROUTER_API_KEY`,
+`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.). See the
+[environment variables docs](https://docs.roomote.dev/environment-variables)
+for the full list.
+
+### Local development
+
+```sh
+mise install && pnpm install
+cp .env.local.example .env.local
+pnpm dev
+```
+
+This starts all services locally (web, API, controller, BullMQ, preview proxy)
+via PM2. See [LOCAL_DEVELOPMENT.md](LOCAL_DEVELOPMENT.md) for the full guide.
+
+---
+
+## Troubleshooting
+
+### Agent tasks fail to start
+
+- Verify `R_MODEL` is set and the matching API key is present in your environment.
+- Check that your sandbox compute provider is configured and credentials are valid.
+- Run `pm2 logs` to inspect service output.
+
+### Sandbox cannot clone the repository
+
+- Ensure the source control provider (GitHub, GitLab, etc.) is connected and the
+  OAuth token has repo access.
+- For private repos, verify the app installation has been granted access to the
+  repository.
+
+### Webhooks not arriving (Slack, GitHub, etc.)
+
+- Confirm `R_PUBLIC_URL` is set to a reachable HTTPS URL.
+- For local development, use ngrok: set `R_PUBLIC_URL` to your ngrok domain and
+  `pnpm dev` will tunnel traffic automatically.
+
+### Database migration errors
+
+```sh
+pnpm --filter @roomote/db db:migrate
+```
+
+If needed, re-run migrations:
+
+```sh
+pnpm --filter @roomote/db db:migrate
+```
+
+### Reset local state
+
+```sh
+pnpm dev --reset
+```
+
+This recreates and migrates the development database. To re-seed demo data, run:
+
+```sh
+pnpm --filter @roomote/db db:seed:demo
+```
 
 ---
 
@@ -276,6 +410,17 @@ code. "Fix the typo on the pricing page" works.
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and the [CLA](CLA.md).
+
+Quick start for contributors:
+
+```sh
+mise install && pnpm install
+cp .env.local.example .env.local
+pnpm dev
+```
+
+Run the test suite with `pnpm test`, lint with `pnpm lint`, and type-check with
+`pnpm check-types`. Pre-commit hooks format staged files automatically.
 
 ## Security
 
