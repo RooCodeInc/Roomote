@@ -112,6 +112,39 @@ become canonical memory.
   up. Everything after that is the same.
 </Note>
 
+## Seeing what it knows
+
+**Settings → Brain** is the deployment-wide view of the memory, for admins. It
+answers three questions in order.
+
+**Is it working?** The header reports the Brain's endpoint, which provider is
+serving its embeddings and synthesis, how many pages it holds, and how many
+sources are connected. A Brain that is running but has no provider key is
+called out as needing attention rather than shown as healthy: without one it
+can only match keywords, so recall would look real while missing everything
+semantic.
+
+**What has it learned?** A composition bar breaks the corpus down by namespace
+— people, task memories, pull requests, Slack, GitHub issues, Notion, meetings,
+and the digests the nightly pass writes — followed by the pages written most
+recently. The Brain lists its newest pages first and answers with a bounded
+window, so on a large deployment this is labelled as a recent sample rather
+than presented as a total.
+
+**Where does it learn from?** Each source shows whether its integration is
+connected, when it was last read, and how far its one-time history sweep has
+got. A source with nothing connected upstream says so, which distinguishes
+"nothing collected yet" from "nothing to collect from".
+
+The page ends with the task-memory queue: how many completed tasks have been
+recorded, how many are waiting, and how many failed. Two actions live there.
+**Ingest task history** enqueues a memory for every completed task that does
+not have one, which is what you want after enabling the Brain on a deployment
+with existing history. **Retry failed** hands memories that exhausted their
+attempts back to the queue with a fresh budget, which is the fix after an
+outage. Both are safe to run twice: memories are filed under a slug derived
+from the run, so a repeat rewrites the same page rather than adding another.
+
 ## How agents use it
 
 Agents get the Brain as an MCP server with read-only tools. They can search it,

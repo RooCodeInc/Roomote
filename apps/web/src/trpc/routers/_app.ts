@@ -432,6 +432,11 @@ import {
   setAnonymousAnalyticsCommand,
 } from '../commands/misc-settings';
 import {
+  backfillBrainTaskMemoriesCommand,
+  getBrainSettingsCommand,
+  retryFailedBrainTaskMemoriesCommand,
+} from '../commands/brain';
+import {
   getReleaseNotesCommand,
   getReleaseStatusCommand,
 } from '../commands/product-releases';
@@ -2951,6 +2956,20 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         updateExperimentalFlagCommand(auth, input),
       ),
+  }),
+
+  brain: createRouter({
+    get: protectedProcedure.query(({ ctx: { auth } }) =>
+      getBrainSettingsCommand(auth),
+    ),
+
+    backfillTaskMemories: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      backfillBrainTaskMemoriesCommand(auth),
+    ),
+
+    retryFailedTaskMemories: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      retryFailedBrainTaskMemoriesCommand(auth),
+    ),
   }),
 
   miscSettings: createRouter({

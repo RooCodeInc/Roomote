@@ -14,6 +14,7 @@ import {
   assertSecureBootBinding as sharedAssertSecureBootBinding,
   getWebBundledEnvFilePaths as getSharedWebBundledEnvFilePaths,
   getWebEnvFilePaths as getSharedWebEnvFilePaths,
+  isBrainConfigured as isBrainConfiguredForEnv,
   isEnvFlagEnabled,
   isExposedBindHost,
   isRoomoteCloudEnabled,
@@ -206,6 +207,11 @@ export {
   isRoomoteCloudEnabled,
   resolveAppEnv,
 };
+
+/** Whether this deployment has a Brain, per the shared env contract. */
+export function isBrainConfigured(): boolean {
+  return isBrainConfiguredForEnv(Env);
+}
 
 /** Whether the web server binds a non-loopback interface. */
 export function isWebServerBindExposed(): boolean {
