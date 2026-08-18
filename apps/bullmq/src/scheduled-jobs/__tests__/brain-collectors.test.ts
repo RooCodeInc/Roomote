@@ -963,7 +963,7 @@ describe('groupSlackMessagesIntoDayPages', () => {
     expect(pages).toEqual([]);
   });
 
-  it('links canonical authors and emits one deduplicated timeline intent per page', () => {
+  it('links canonical authors and emits stable timeline evidence', () => {
     const person = {
       slug: 'people/roomote-member-abc',
       title: 'Alice Example',
@@ -996,9 +996,8 @@ describe('groupSlackMessagesIntoDayPages', () => {
       {
         slug: 'people/roomote-member-abc',
         date: '2026-08-13',
-        summary: 'Participated in #general',
-        detail: '[14:03 UTC] first decision\n[15:30 UTC] follow-up',
-        source: pages[0]?.slug,
+        summary: 'Participated in a public Slack channel',
+        source: 'slack:channel-day:T1/C1/2026-08-13',
       },
     ]);
     expect(
@@ -1023,6 +1022,41 @@ describe('groupSlackMessagesIntoDayPages', () => {
         },
       ])[0]?.timelineEvidence,
     ).toEqual(pages[0]?.timelineEvidence);
+  });
+
+  it('keeps timeline evidence stable across Slack batches, edits, and channel renames', () => {
+    const person = {
+      slug: 'people/roomote-member-abc',
+      title: 'Alice Example',
+    };
+    const firstBatch = groupSlackMessagesIntoDayPages([
+      {
+        teamId: 'T1',
+        channelId: 'C1',
+        channelName: 'general',
+        ts: day1Ts,
+        userId: 'U1',
+        person,
+        text: 'original message',
+      },
+    ]);
+    const laterBatch = groupSlackMessagesIntoDayPages([
+      {
+        teamId: 'T1',
+        channelId: 'C1',
+        channelName: 'renamed-channel',
+        ts: day1LaterTs,
+        userId: 'U1',
+        person,
+        text: 'edited or later message',
+      },
+    ]);
+
+    expect(firstBatch[0]?.slug).not.toBe(laterBatch[0]?.slug);
+    expect(laterBatch[0]?.timelineEvidence).toEqual(
+      firstBatch[0]?.timelineEvidence,
+    );
+    expect(laterBatch[0]?.timelineEvidence?.[0]).not.toHaveProperty('detail');
   });
 });
 

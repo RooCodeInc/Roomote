@@ -600,12 +600,10 @@ export function groupSlackMessagesIntoDayPages(
         const firstTs = chunk[0]!.ts.replace('.', '-');
         const lastTs = chunk.at(-1)!.ts.replace('.', '-');
         const slug = `slack/${group.teamId}/${group.channelId}/${group.day}/${firstTs}-${lastTs}`;
-        const byPerson = new Map<string, typeof chunk>();
+        const people = new Set<string>();
         for (const message of chunk) {
           if (!message.person) continue;
-          const authored = byPerson.get(message.person.slug) ?? [];
-          authored.push(message);
-          byPerson.set(message.person.slug, authored);
+          people.add(message.person.slug);
         }
 
         pages.push({
@@ -620,21 +618,16 @@ export function groupSlackMessagesIntoDayPages(
             '',
             ...lines,
           ].join('\n'),
-          timelineEvidence: [...byPerson.entries()].map(
-            ([personSlug, authored]) => ({
-              slug: personSlug,
-              date: group.day,
-              summary: `Participated in #${group.channelName}`,
-              detail: authored
-                .map(
-                  (message) =>
-                    `[${formatUtcTime(message.at)} UTC] ${message.text.trim()}`,
-                )
-                .join('\n')
-                .slice(0, 3_000),
-              source: slug,
-            }),
-          ),
+          // Timeline rows are append-only. Keep their identity and payload
+          // stable across collector windows, edits, channel renames, and
+          // historical reprojections so one person's day cannot accumulate a
+          // wall of stale per-batch activity atoms.
+          timelineEvidence: [...people].map((personSlug) => ({
+            slug: personSlug,
+            date: group.day,
+            summary: 'Participated in a public Slack channel',
+            source: `slack:channel-day:${group.teamId}/${group.channelId}/${group.day}`,
+          })),
         });
       }
 
