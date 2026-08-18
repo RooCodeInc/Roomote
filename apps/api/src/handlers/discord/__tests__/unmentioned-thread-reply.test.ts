@@ -107,7 +107,7 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
 
   it("routes Matt when he joins Dan's open fast-agent thread", async () => {
     fetchThreadMessagesMock.mockResolvedValue([
-      humanHistory(THREAD_ROOT_ID, USER_1, `<@${BOT_USER_ID}> /fast hi`),
+      humanHistory(THREAD_ROOT_ID, USER_1, 'Can you summarize this?'),
       botHistory('200', 'Hi Dan.'),
     ]);
 

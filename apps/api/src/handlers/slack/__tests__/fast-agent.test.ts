@@ -12,15 +12,12 @@ describe('Slack fast-agent helpers', () => {
     ).toBe('!fast what file owns this?');
   });
 
-  it('detects canonical /fast commands and the legacy !fast alias', () => {
-    expect(isFastCommandInvocation('<@U_BOT> /fast what file owns this?')).toBe(
-      true,
-    );
-    expect(isFastCommandInvocation('/fast What is 17 × 23?')).toBe(true);
+  it('detects !fast commands', () => {
     expect(isFastCommandInvocation('<@U_BOT> !fast what file owns this?')).toBe(
       true,
     );
     expect(isFastCommandInvocation('!fast What is 17 × 23?')).toBe(true);
+    expect(isFastCommandInvocation('/fast What is 17 × 23?')).toBe(false);
     expect(isFastCommandInvocation('<@U_BOT> can you help with this?')).toBe(
       false,
     );
@@ -32,8 +29,7 @@ describe('Slack fast-agent helpers', () => {
     expect(extractFastQuestion('Good, tired')).toBeNull();
   });
 
-  it('extracts questions from both fast command forms', () => {
-    expect(extractFastQuestion('/fast ship this')).toBe('ship this');
+  it('extracts questions from !fast commands', () => {
     expect(extractFastQuestion('!fast ship this')).toBe('ship this');
   });
 
