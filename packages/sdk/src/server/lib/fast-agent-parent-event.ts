@@ -4,6 +4,7 @@ import { basename } from 'node:path';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  createFastAgentSlackTaskLauncher,
 } from '@roomote/cloud-agents/server';
 import {
   asc,
@@ -253,7 +254,7 @@ export async function deliverFastAgentParentEvent(params: {
           eq(slackInstallations.isActive, true),
           eq(slackInstallations.teamId, params.parent.slackTeamId),
         ),
-        columns: { botAccessToken: true },
+        columns: { botAccessToken: true, teamDomain: true },
       }),
     ]);
 
@@ -265,6 +266,15 @@ export async function deliverFastAgentParentEvent(params: {
     }
 
     const slack = new SlackNotifier(installation.botAccessToken);
+    const launchTask = createFastAgentSlackTaskLauncher({
+      userId: session.userId,
+      teamId: params.parent.slackTeamId,
+      ...(installation.teamDomain
+        ? { teamDomain: installation.teamDomain }
+        : {}),
+      channelId: params.parent.slackChannel,
+      threadTs: params.parent.slackThreadTs,
+    });
     await answerFastAgentQuestion({
       question: `<delegated_task_event>${JSON.stringify(params.event)}</delegated_task_event>`,
       userId: session.userId,
@@ -272,6 +282,7 @@ export async function deliverFastAgentParentEvent(params: {
       slackChannel: params.parent.slackChannel,
       slackThreadTs: params.parent.slackThreadTs,
       platformEvent: true,
+      launchTask,
       ...(params.retryTaskStart
         ? { retryTaskStart: params.retryTaskStart }
         : {}),

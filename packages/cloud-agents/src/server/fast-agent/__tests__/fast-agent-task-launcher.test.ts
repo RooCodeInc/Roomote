@@ -3,16 +3,19 @@ const mocks = vi.hoisted(() => ({
   getTaskUrl: vi.fn(() => 'https://roomote.example/task/task-1'),
 }));
 
-vi.mock('@roomote/cloud-agents/server', () => ({
+vi.mock('../../task-run-queue', () => ({
   enqueueTask: mocks.enqueueTask,
+}));
+
+vi.mock('../../task-url', () => ({
   getTaskUrl: mocks.getTaskUrl,
 }));
 
 import { ALL_REPOSITORIES, TaskPayloadKind } from '@roomote/types';
 
-import { createFastAgentTaskLauncher } from './fast-agent-task-launcher.js';
+import { createFastAgentSlackTaskLauncher } from '../fast-agent-task-launcher';
 
-describe('createFastAgentTaskLauncher', () => {
+describe('createFastAgentSlackTaskLauncher', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.enqueueTask.mockImplementation(
@@ -29,24 +32,13 @@ describe('createFastAgentTaskLauncher', () => {
   });
 
   it('launches a communication-isolated child owned by the Fast parent', async () => {
-    const launchTask = createFastAgentTaskLauncher({
-      event: {
-        type: 'message',
-        channel: 'C123',
-        channel_type: 'channel',
-        thread_ts: '100.001',
-        user: 'U123',
-        text: 'Add a regression test',
-        ts: '100.002',
-      } as never,
-      slackInstallation: {
-        teamDomain: 'acme',
-      } as never,
-      userMapping: {
-        slackUserId: 'U123',
-      } as never,
+    const launchTask = createFastAgentSlackTaskLauncher({
       userId: 'user-1',
       teamId: 'T123',
+      teamDomain: 'acme',
+      channelId: 'C123',
+      threadTs: '100.001',
+      messageId: '100.002',
     });
     const order: string[] = [];
     const postKickoff = vi.fn(async () => {
@@ -115,20 +107,32 @@ describe('createFastAgentTaskLauncher', () => {
     expect(order).toEqual(['kickoff', 'queued']);
   });
 
-  it('does not make the child runnable when the parent kickoff fails', async () => {
-    const launchTask = createFastAgentTaskLauncher({
-      event: {
-        type: 'message',
-        channel: 'C123',
-        channel_type: 'channel',
-        user: 'U123',
-        text: 'Add a regression test',
-        ts: '100.002',
-      } as never,
-      slackInstallation: {} as never,
-      userMapping: { slackUserId: 'U123' } as never,
+  it('supports platform-event launches without a human message ID', async () => {
+    const launchTask = createFastAgentSlackTaskLauncher({
       userId: 'user-1',
       teamId: 'T123',
+      channelId: 'C123',
+      threadTs: '100.001',
+    });
+
+    await launchTask({
+      prompt: 'Investigate separately',
+      environmentId: null,
+      parentSessionId: '11111111-1111-4111-8111-111111111111',
+      postKickoff: vi.fn(),
+    });
+
+    const task = mocks.enqueueTask.mock.calls[0]?.[0]?.task;
+    expect(task.payload).not.toHaveProperty('communicationMessageId');
+    expect(task.payload).not.toHaveProperty('communicationTeamDomain');
+  });
+
+  it('does not make the child runnable when the parent kickoff fails', async () => {
+    const launchTask = createFastAgentSlackTaskLauncher({
+      userId: 'user-1',
+      teamId: 'T123',
+      channelId: 'C123',
+      threadTs: '100.002',
     });
     const postKickoff = vi.fn().mockRejectedValue(new Error('Slack failed'));
     let queued = false;

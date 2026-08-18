@@ -1,28 +1,22 @@
 import {
-  enqueueTask,
-  getTaskUrl,
-  type LaunchFastAgentSlackTask,
-} from '@roomote/cloud-agents/server';
-import { type SlackEvent } from '@roomote/slack';
-import {
-  type SlackInstallation,
-  type SlackUserMapping,
-} from '@roomote/db/server';
-import {
   ALL_REPOSITORIES,
   TaskPayloadKind,
   type StandardTask,
 } from '@roomote/types';
 
-export function createFastAgentTaskLauncher(params: {
-  event: SlackEvent;
-  slackInstallation: SlackInstallation;
-  userMapping: SlackUserMapping;
+import { enqueueTask } from '../task-run-queue';
+import { getTaskUrl } from '../task-url';
+import type { LaunchFastAgentSlackTask } from './fast-agent-service';
+
+export function createFastAgentSlackTaskLauncher(params: {
   userId: string;
   teamId: string;
+  teamDomain?: string;
+  channelId: string;
+  threadTs: string;
+  messageId?: string;
 }): LaunchFastAgentSlackTask {
   return async ({ prompt, environmentId, parentSessionId, postKickoff }) => {
-    const threadId = params.event.thread_ts || params.event.ts;
     const task: StandardTask = {
       type: TaskPayloadKind.StandardTask,
       payload: {
@@ -30,18 +24,21 @@ export function createFastAgentTaskLauncher(params: {
         description: prompt,
         communicationProvider: 'slack',
         communicationTeamId: params.teamId,
-        communicationTeamDomain:
-          params.slackInstallation.teamDomain ?? undefined,
-        communicationChannelId: params.event.channel,
-        communicationThreadId: threadId,
-        communicationMessageId: params.event.ts,
+        ...(params.teamDomain
+          ? { communicationTeamDomain: params.teamDomain }
+          : {}),
+        communicationChannelId: params.channelId,
+        communicationThreadId: params.threadTs,
+        ...(params.messageId
+          ? { communicationMessageId: params.messageId }
+          : {}),
         communicationContextInherited: true,
         fastAgentSessionId: parentSessionId,
         fastAgentParent: {
           sessionId: parentSessionId,
           slackTeamId: params.teamId,
-          slackChannel: params.event.channel,
-          slackThreadTs: threadId,
+          slackChannel: params.channelId,
+          slackThreadTs: params.threadTs,
         },
         ...(environmentId && environmentId !== ALL_REPOSITORIES
           ? { environmentId }

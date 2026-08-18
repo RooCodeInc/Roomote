@@ -26,6 +26,7 @@ vi.mock('@roomote/env', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   ROUTING_AUTO_CONFIRM_TIMEOUT_MS: 0,
+  createFastAgentSlackTaskLauncher: vi.fn(() => vi.fn()),
   hasFastAgentSession: hasFastAgentSessionMock,
 }));
 
