@@ -51,6 +51,8 @@ export function buildFastAgentSystemPrompt({
   surface = 'slack',
   platformEvent = false,
   retryTaskStartAvailable = false,
+  multiParticipantThread = false,
+  directedAtRoomote = false,
 }: {
   availableEnvironments: RoutableEnvironment[];
   availableIntegrations?: FastAgentIntegration[];
@@ -58,6 +60,8 @@ export function buildFastAgentSystemPrompt({
   surface?: FastAgentSurface;
   platformEvent?: boolean;
   retryTaskStartAvailable?: boolean;
+  multiParticipantThread?: boolean;
+  directedAtRoomote?: boolean;
   /** @deprecated GitHub availability is derived from availableIntegrations. */
   hasGitHubTools?: boolean;
 }): string {
@@ -70,6 +74,8 @@ export function buildFastAgentSystemPrompt({
     surface === 'slack'
       ? '- The `sender_*` attributes on the current `<slack_message>` identify its sender. Resolve "I", "me", "my", and "on my side" to that sender. If an account-specific request needs a GitHub identity and `sender_github` is absent, ask instead of inferring one from thread context, memory, or integration results.\n'
       : '';
+  const canIgnoreAmbientMessage =
+    multiParticipantThread && !platformEvent && !directedAtRoomote;
 
   return `You are ${PRODUCT_NAME} in fast mode on ${surfaceName}. You are the conversational orchestrator for this conversation, not a router and not a transparent relay to a sandbox task. You own the conversation, answer directly when possible, and deliberately delegate execution work when it is useful.
 
@@ -100,7 +106,7 @@ ${
 - Each structured output is the next action for one orchestration step, not necessarily the final answer for the user turn. The runtime executes that action and invokes you again with its result unless the action ends the turn.
 - Any structured-output instruction to call exactly once or only at the end applies only to the current model invocation. It does not limit Slack-visible actions across the user turn. An "ack" or "progress" action may come before integration or task actions in later steps.
 - The only user-visible action is "send_chat_reply"${surface === 'slack' ? ' (or "send_chat_reaction_emoji" for an emoji-only Slack response)' : ''}. Integration and task tool results are not visible to the user.
-- Every user turn must use at least one user-visible action. There is no implicit final response after the tool loop.
+- Every directed user turn must use at least one user-visible action. There is no implicit final response after the tool loop.${canIgnoreAmbientMessage ? '\n- This thread has multiple human participants. If the current message is ambient conversation between people rather than a request or reply directed at Roomote, use "ignore_message" to end the turn silently. Do not use it merely because the request is unclear, difficult, or needs clarification. Direct address, a reply to Roomote, an answer to Roomote\'s question, or an established participant continuing their Roomote exchange should receive a normal response.' : ''}
 - Use "send_chat_reply" whenever the answer needs words. Put the Markdown message in "message" and choose "purpose":
   - "ack": a brief acknowledgement before work continues.
   - "progress": new decision-useful state while work continues.
@@ -147,7 +153,7 @@ ${
 - Pull-request-opened events contain authoritative, user-presentable pull request metadata and should be presented unless that exact pull request URL was already reported in this conversation. Briefly name and link the pull request, including its repository, number, title, and current status when available.
 - Task-settled events include the task's current pullRequests list. Use it in the closeout so a pull request produced by the task is named and linked even when its earlier open event was missed; do not describe the pull request as newly opened if the thread already received that update.
 `
-    : '- "ignore_event" is reserved for platform-generated delegated-task events and is invalid for a human-authored turn.\n'
+    : `- "ignore_event" is reserved for platform-generated delegated-task events and is invalid for a human-authored turn.\n${canIgnoreAmbientMessage ? '- "ignore_message" is available only because this human-authored turn is in a multi-participant thread. Use it only for ambient conversation not directed at Roomote.\n' : '- "ignore_message" is invalid because this turn must receive a response.\n'}`
 }
 
 ## Tone of Voice

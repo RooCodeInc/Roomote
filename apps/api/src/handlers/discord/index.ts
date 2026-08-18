@@ -773,6 +773,7 @@ async function processDiscordGatewayEvent(
       metadata,
       sessionThreadId: interaction?.id ?? event.eventId,
       interaction: interactionReplyContext(event),
+      directedAtRoomote: true,
     });
     return { ok: true, fastAnswered: true };
   }
@@ -798,6 +799,9 @@ async function processDiscordGatewayEvent(
           ? channel.channelId
           : defaultFastMessage.id,
       activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
+      directedAtRoomote:
+        channel.isDirectMessage ||
+        (message != null && isDiscordBotMentioned(message, resolved.botUserId)),
     });
     return { ok: true, fastAnswered: true, fastDefaulted: true };
   }
