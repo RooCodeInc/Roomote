@@ -342,6 +342,7 @@ describe('deliverFastAgentParentEvent', () => {
           payload: expect.objectContaining({
             communicationProvider: 'discord',
             communicationThreadId: 'child-thread-1',
+            communicationContextInherited: true,
             fastAgentSessionId: parent.sessionId,
             fastAgentParent: {
               sessionId: parent.sessionId,

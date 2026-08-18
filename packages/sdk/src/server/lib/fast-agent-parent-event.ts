@@ -27,6 +27,7 @@ import { Env, getArtifactSigningKey } from '@roomote/env';
 import { SlackNotifier } from '@roomote/slack';
 import {
   ALL_REPOSITORIES,
+  buildFastAgentChildTaskMetadata,
   TaskPayloadKind,
   exitedRunStatuses,
   type FastAgentConversation,
@@ -353,11 +354,10 @@ function createFastAgentDiscordTaskLauncher(params: {
             ? {}
             : { communicationGuildId: params.conversation.workspaceId }),
           ...(thread ? { discordTaskThread: true } : {}),
-          fastAgentSessionId: parentSessionId,
-          fastAgentParent: {
+          ...buildFastAgentChildTaskMetadata({
             sessionId: parentSessionId,
             conversation: params.conversation,
-          },
+          }),
           ...(environmentId && environmentId !== ALL_REPOSITORIES
             ? { environmentId }
             : {}),

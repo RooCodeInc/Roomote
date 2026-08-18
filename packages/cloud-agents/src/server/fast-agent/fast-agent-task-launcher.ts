@@ -1,5 +1,6 @@
 import {
   ALL_REPOSITORIES,
+  buildFastAgentChildTaskMetadata,
   TaskPayloadKind,
   type FastAgentSurface,
   type StandardTask,
@@ -81,9 +82,7 @@ export function createFastAgentSlackTaskLauncher(params: {
         ...(params.messageId
           ? { communicationMessageId: params.messageId }
           : {}),
-        communicationContextInherited: true,
-        fastAgentSessionId: parentSessionId,
-        fastAgentParent: {
+        ...buildFastAgentChildTaskMetadata({
           sessionId: parentSessionId,
           conversation: {
             surface: 'slack',
@@ -94,7 +93,7 @@ export function createFastAgentSlackTaskLauncher(params: {
               threadId: params.threadTs,
             },
           },
-        },
+        }),
         ...(environmentId && environmentId !== ALL_REPOSITORIES
           ? { environmentId }
           : {}),

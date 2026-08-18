@@ -44,6 +44,23 @@ export const fastAgentParentSchema = z.object({
 
 export type FastAgentParent = z.infer<typeof fastAgentParentSchema>;
 
+/**
+ * A delegated Fast child keeps its parent's coordinates for lifecycle routing,
+ * but the child runtime must not treat those coordinates as a direct reply
+ * surface. Fast owns all chat delivery for the child.
+ */
+export function buildFastAgentChildTaskMetadata(parent: FastAgentParent): {
+  communicationContextInherited: true;
+  fastAgentSessionId: string;
+  fastAgentParent: FastAgentParent;
+} {
+  return {
+    communicationContextInherited: true,
+    fastAgentSessionId: parent.sessionId,
+    fastAgentParent: parent,
+  };
+}
+
 export function getFastAgentParentFromPayload(
   payload: unknown,
 ): FastAgentParent | null {

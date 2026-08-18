@@ -126,6 +126,29 @@ describe('getCommunicationReplyContext', () => {
     });
   });
 
+  it('does not activate direct Discord replies for a Fast child task', () => {
+    const taskRun = {
+      payload: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationThreadId: 'child-thread-1',
+        communicationContextInherited: true,
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'discord',
+            workspaceId: 'guild-1',
+            conversationId: 'interaction-1',
+            replyTarget: { channelId: 'channel-1' },
+          },
+        },
+      },
+    };
+
+    expect(getCommunicationReplyContext(taskRun)).toBeNull();
+    expect(isFastAgentChildTaskRun(taskRun)).toBe(true);
+  });
+
   it('does not activate inherited provider-neutral source context', () => {
     expect(
       getCommunicationReplyContext({

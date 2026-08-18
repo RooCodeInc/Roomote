@@ -1,5 +1,6 @@
 import {
   ALL_REPOSITORIES,
+  buildFastAgentChildTaskMetadata,
   TaskPayloadKind,
   type FastAgentParent,
   type QueuedCommunicationMessage,
@@ -455,12 +456,11 @@ export async function launchDiscordTask(input: {
           ? { images: input.queuedMessage.images }
           : {}),
         communicationProvider: 'discord',
-        ...(input.fastAgentSessionId
-          ? { fastAgentSessionId: input.fastAgentSessionId }
-          : {}),
         ...(input.fastAgentParent
-          ? { fastAgentParent: input.fastAgentParent }
-          : {}),
+          ? buildFastAgentChildTaskMetadata(input.fastAgentParent)
+          : input.fastAgentSessionId
+            ? { fastAgentSessionId: input.fastAgentSessionId }
+            : {}),
         communicationChannelId,
         ...(input.metadata.communicationGuildId
           ? { communicationGuildId: input.metadata.communicationGuildId }
