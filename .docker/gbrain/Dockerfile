@@ -11,7 +11,7 @@ FROM oven/bun:1.3.14
 ARG GBRAIN_REF=d995508731ac85710c05486536a5458a00c37d73
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git postgresql-client \
+  && apt-get install -y --no-install-recommends ca-certificates git postgresql-client \
   && rm -rf /var/lib/apt/lists/*
 
 RUN bun install -g "github:garrytan/gbrain#${GBRAIN_REF}"
