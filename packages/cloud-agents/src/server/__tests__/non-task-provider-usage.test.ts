@@ -250,6 +250,85 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
+  it('reuses an explicitly held OpenCode session without replaying prior prompts', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: { info: { structured: { answer: 'ok' } }, parts: [] },
+      error: undefined,
+    });
+    const {
+      generateTrackedNonTaskObjectInOpenCodeSession,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+    const session: { id?: string } = {};
+    const schema = z.object({ answer: z.string() });
+
+    await generateTrackedNonTaskObjectInOpenCodeSession(
+      {
+        surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+        schema,
+        prompt: 'first turn with bootstrap context',
+      },
+      session,
+    );
+    await generateTrackedNonTaskObjectInOpenCodeSession(
+      {
+        surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+        schema,
+        prompt: 'second turn delta only',
+      },
+      session,
+    );
+
+    expect(session.id).toBe('session-1');
+    expect(sessionCreateMock).toHaveBeenCalledOnce();
+    expect(sessionPromptMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        sessionID: 'session-1',
+        parts: [{ type: 'text', text: 'first turn with bootstrap context' }],
+      }),
+      expect.any(Object),
+    );
+    expect(sessionPromptMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        sessionID: 'session-1',
+        parts: [{ type: 'text', text: 'second turn delta only' }],
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('classifies a missing held OpenCode session for cold bootstrap recovery', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: undefined,
+      error: { name: 'NotFoundError', data: { message: 'Session not found' } },
+    });
+    const {
+      generateTrackedNonTaskObjectInOpenCodeSession,
+      NonTaskOpenCodeSessionNotFoundError,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskObjectInOpenCodeSession(
+        {
+          surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+          schema: z.object({ answer: z.string() }),
+          prompt: 'turn delta',
+        },
+        { id: 'missing-session' },
+      ),
+    ).rejects.toBeInstanceOf(NonTaskOpenCodeSessionNotFoundError);
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
   it('uses the deployment primary model when requested', async () => {
     process.env = {
       ...originalEnv,

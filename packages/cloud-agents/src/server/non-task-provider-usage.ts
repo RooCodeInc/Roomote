@@ -155,6 +155,28 @@ export interface GenerateTrackedNonTaskObjectParams<
   schema: TSchema;
 }
 
+/**
+ * An intentionally in-memory reference to an OpenCode conversation. Callers
+ * may reuse it while their process is warm, but must be able to bootstrap a
+ * replacement when the helper server no longer recognizes the id.
+ */
+export type NonTaskOpenCodeSession = {
+  id?: string;
+};
+
+export class NonTaskOpenCodeSessionNotFoundError extends Error {
+  constructor() {
+    super('The OpenCode session is no longer available.');
+    this.name = 'NonTaskOpenCodeSessionNotFoundError';
+  }
+}
+
+export function isNonTaskOpenCodeSessionNotFoundError(
+  error: unknown,
+): error is NonTaskOpenCodeSessionNotFoundError {
+  return error instanceof NonTaskOpenCodeSessionNotFoundError;
+}
+
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
@@ -281,6 +303,26 @@ function formatOpenCodeSdkError(error: unknown): string {
   } catch {
     return String(error);
   }
+}
+
+function isOpenCodeSessionMissing(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const record = error as Record<string, unknown>;
+  const data =
+    record.data && typeof record.data === 'object'
+      ? (record.data as Record<string, unknown>)
+      : undefined;
+  const statusCode =
+    typeof data?.statusCode === 'number'
+      ? data.statusCode
+      : typeof record.status === 'number'
+        ? record.status
+        : undefined;
+
+  return statusCode === 404 || record.name === 'NotFoundError';
 }
 
 async function resolveNonTaskModelRuntime(
@@ -459,6 +501,7 @@ async function runNonTaskSdkPrompt(
   promptOptions: NonTaskSdkPromptOptions,
   options: {
     ephemeral?: boolean;
+    session?: NonTaskOpenCodeSession;
     signal?: AbortSignal;
     useConfiguredServer?: boolean;
   } = {},
@@ -506,24 +549,32 @@ async function runNonTaskSdkPrompt(
       fetch: openCodeSdkFetch,
     });
     const sessionDirectory = resolveNonTaskSessionDirectory();
-    const sessionResult = await client.session.create(
-      {
-        directory: sessionDirectory,
-        title: `Roomote ${params.surface}`,
-        permission: NON_TASK_SESSION_PERMISSIONS,
-      },
-      { signal: abortController.signal },
-    );
-
-    if (sessionResult.error || !sessionResult.data) {
-      throw new Error(
-        `OpenCode structured session creation failed (model ${model}): ${formatOpenCodeSdkError(sessionResult.error)}`,
+    let sessionId = options.session?.id;
+    if (!sessionId) {
+      const sessionResult = await client.session.create(
+        {
+          directory: sessionDirectory,
+          title: `Roomote ${params.surface}`,
+          permission: NON_TASK_SESSION_PERMISSIONS,
+        },
+        { signal: abortController.signal },
       );
+
+      if (sessionResult.error || !sessionResult.data) {
+        throw new Error(
+          `OpenCode structured session creation failed (model ${model}): ${formatOpenCodeSdkError(sessionResult.error)}`,
+        );
+      }
+
+      sessionId = sessionResult.data.id;
+      if (options.session) {
+        options.session.id = sessionId;
+      }
     }
 
     const promptResult = await client.session.prompt(
       {
-        sessionID: sessionResult.data.id,
+        sessionID: sessionId,
         directory: sessionDirectory,
         model: splitOpenCodeModelId(model),
         tools: NON_TASK_SESSION_TOOL_DISABLES,
@@ -533,6 +584,10 @@ async function runNonTaskSdkPrompt(
     );
 
     if (promptResult.error || !promptResult.data) {
+      if (isOpenCodeSessionMissing(promptResult.error)) {
+        throw new NonTaskOpenCodeSessionNotFoundError();
+      }
+
       // The resolved `provider/model` id rides in the message because callers
       // (the router's fallback log among them) only know the role alias —
       // production diagnosis of a provider-specific rejection needs the real
@@ -612,31 +667,37 @@ async function generateTrackedNonTaskObjectWithSdk<
     model: string;
     resolvedModelRuntimeEnv: Partial<Record<string, string>>;
   },
+  session?: NonTaskOpenCodeSession,
 ): Promise<{ object: z.output<TSchema> }> {
   const resolvedRuntime =
     runtime ??
     (await resolveNonTaskModelRuntime(params.model, params.modelRole));
 
-  const data = await runNonTaskSdkPrompt(params, resolvedRuntime, {
-    system: params.system,
-    format: {
-      type: 'json_schema',
-      schema: zodToJsonSchema(params.schema, {
-        $refStrategy: 'none',
-        target: 'jsonSchema7',
-      }) as Record<string, unknown>,
-      retryCount: DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT,
-    },
-    parts: [
-      {
-        type: 'text',
-        text: buildOpenCodePrompt({
-          prompt: params.prompt,
-          maxOutputTokens: params.maxOutputTokens,
-        }),
+  const data = await runNonTaskSdkPrompt(
+    params,
+    resolvedRuntime,
+    {
+      system: params.system,
+      format: {
+        type: 'json_schema',
+        schema: zodToJsonSchema(params.schema, {
+          $refStrategy: 'none',
+          target: 'jsonSchema7',
+        }) as Record<string, unknown>,
+        retryCount: DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT,
       },
-    ],
-  });
+      parts: [
+        {
+          type: 'text',
+          text: buildOpenCodePrompt({
+            prompt: params.prompt,
+            maxOutputTokens: params.maxOutputTokens,
+          }),
+        },
+      ],
+    },
+    { session },
+  );
 
   if (data.info.error) {
     throw new Error(
@@ -660,6 +721,15 @@ export async function generateTrackedNonTaskObject<
   params: GenerateTrackedNonTaskObjectParams<TSchema>,
 ): Promise<{ object: z.output<TSchema> }> {
   return generateTrackedNonTaskObjectWithSdk(params);
+}
+
+export async function generateTrackedNonTaskObjectInOpenCodeSession<
+  TSchema extends z.ZodTypeAny,
+>(
+  params: GenerateTrackedNonTaskObjectParams<TSchema>,
+  session: NonTaskOpenCodeSession,
+): Promise<{ object: z.output<TSchema> }> {
+  return generateTrackedNonTaskObjectWithSdk(params, undefined, session);
 }
 
 function classifyNonTaskInferenceValidationError(

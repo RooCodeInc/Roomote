@@ -2,8 +2,8 @@ import type { FastAgentConversation } from '@roomote/types';
 
 export type { FastAgentConversation, FastAgentSurface } from '@roomote/types';
 
-/** Preserve existing persisted/Redis workspace keys while the storage schema
- * remains Slack-shaped. New provider adapters always pass raw provider IDs. */
+/** Build the N-1 Slack-shaped compatibility namespace. New persistence and
+ * turn locks use surface/workspace/conversation identity fields directly. */
 export function getFastAgentConversationStorageWorkspaceId(
   conversation: Pick<FastAgentConversation, 'surface' | 'workspaceId'>,
 ): string {

@@ -12,7 +12,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../fast-agent-session', () => ({
-  appendFastAgentSessionMessages: mocks.appendSessionMessages,
+  appendFastAgentVisibleMessages: mocks.appendSessionMessages,
   getActiveFastAgentTasks: mocks.getActiveTasks,
   getOrCreateFastAgentSession: mocks.getSession,
 }));
@@ -25,7 +25,22 @@ vi.mock('../../non-task-provider-usage', () => ({
   NON_TASK_INFERENCE_SURFACES: {
     fastAgentQuestionAnswering: 'fast_agent_question_answering',
   },
-  generateTrackedNonTaskObject: mocks.generateObject,
+  generateTrackedNonTaskObjectInOpenCodeSession: mocks.generateObject,
+}));
+
+vi.mock('../fast-agent-opencode-session', () => ({
+  fastAgentOpenCodeSessionManager: {
+    run: ({
+      prompt,
+      execute,
+    }: {
+      prompt: string;
+      execute: (
+        session: { id: string },
+        selectedPrompt: string,
+      ) => Promise<unknown>;
+    }) => execute({ id: 'opencode-session-1' }, prompt),
+  },
 }));
 
 vi.mock('../fast-agent-integration-broker', () => ({
@@ -132,7 +147,10 @@ function successfulLaunchTask(taskId = 'task-1') {
 describe('answerFastAgentQuestion', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getSession.mockResolvedValue({ id: 'session-1', messages: [] });
+    mocks.getSession.mockResolvedValue({
+      id: 'session-1',
+      compatibilityMessages: [],
+    });
     mocks.getActiveTasks.mockResolvedValue([]);
     mocks.getEnvironments.mockResolvedValue([
       {
@@ -169,6 +187,7 @@ describe('answerFastAgentQuestion', () => {
     expect(callbacks.postReaction).not.toHaveBeenCalled();
     expect(mocks.generateObject).toHaveBeenCalledWith(
       expect.objectContaining({ modelRole: 'primary' }),
+      expect.any(Object),
     );
     expect(mocks.generateObject.mock.calls[0]?.[0]?.prompt).toContain(
       '<slack_message ts="100.2" sender_slack_id="U123" sender_name="Matt" sender_github="mrubens">',
@@ -383,6 +402,7 @@ describe('answerFastAgentQuestion', () => {
           'The sandbox provider rejected its credentials.',
         ),
       }),
+      expect.any(Object),
     );
     expect(result).toContain('Check the provider configuration');
     expect(callbacks.postReply).toHaveBeenCalledWith(
@@ -551,7 +571,7 @@ describe('answerFastAgentQuestion', () => {
     const sessionMessages: PersistedMessage[] = [];
     mocks.getSession.mockImplementation(async () => ({
       id: 'session-1',
-      messages: sessionMessages,
+      compatibilityMessages: sessionMessages,
     }));
     mocks.appendSessionMessages.mockImplementation(
       async ({ messages }: { messages: PersistedMessage[] }) => {
@@ -646,11 +666,14 @@ describe('answerFastAgentQuestion', () => {
       new Set(mocks.generateObject.mock.calls.map(([call]) => call.schema))
         .size,
     ).toBe(1);
-    expect(mocks.generateObject.mock.calls[4]?.[0]?.prompt).toContain(
+    expect(mocks.generateObject.mock.calls[2]?.[0]?.prompt).toContain(
       'artifact_published',
     );
     expect(mocks.generateObject.mock.calls[4]?.[0]?.prompt).toContain(
       'Cancel it.',
+    );
+    expect(mocks.generateObject.mock.calls[4]?.[0]?.prompt).not.toContain(
+      'artifact_published',
     );
     expect(sessionMessages).toEqual([
       expect.objectContaining({ role: 'user' }),

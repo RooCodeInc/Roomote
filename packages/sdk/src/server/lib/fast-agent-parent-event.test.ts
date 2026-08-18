@@ -19,16 +19,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
-  buildFastAgentSessionChannelKey: ({
-    surface,
-    workspaceId,
-    replyTarget,
-  }: {
-    surface: string;
-    workspaceId: string;
-    replyTarget: { channelId: string };
-  }) =>
-    `${surface === 'slack' ? workspaceId : `${surface}:${workspaceId}`}:${replyTarget.channelId}`,
+  fastAgentConversationRepository: { findById: mocks.findSession },
   createFastAgentSlackTaskLauncher: mocks.createLauncher,
   createFastAgentTaskLauncher:
     ({
@@ -60,7 +51,6 @@ vi.mock('@roomote/cloud-agents/server', () => ({
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      slackQuickAnswers: { findFirst: mocks.findSession },
       slackInstallations: { findFirst: mocks.findInstallation },
       taskArtifacts: { findMany: mocks.findArtifacts },
       taskRuns: { findFirst: mocks.findTaskRun },
@@ -72,11 +62,6 @@ vi.mock('@roomote/db/server', () => ({
   slackInstallations: {
     isActive: 'slack_installations.is_active',
     teamId: 'slack_installations.team_id',
-  },
-  slackQuickAnswers: {
-    id: 'slack_quick_answers.id',
-    slackChannel: 'slack_quick_answers.slack_channel',
-    slackThreadTs: 'slack_quick_answers.slack_thread_ts',
   },
   taskArtifacts: { id: 'task_artifacts.id' },
   taskRuns: { id: 'task_runs.id' },
@@ -137,7 +122,14 @@ describe('deliverFastAgentParentEvent', () => {
     vi.clearAllMocks();
     mocks.acquireTurnLock.mockResolvedValue(mocks.releaseTurnLock);
     mocks.releaseTurnLock.mockResolvedValue(undefined);
-    mocks.findSession.mockResolvedValue({ id: parent.sessionId, userId: 'u1' });
+    mocks.findSession.mockImplementation(
+      async ({ fallbackConversation }: { fallbackConversation: unknown }) => ({
+        id: parent.sessionId,
+        userId: 'u1',
+        conversation: fallbackConversation,
+        messages: [],
+      }),
+    );
     mocks.findInstallation.mockResolvedValue({
       botAccessToken: 'xoxb-test',
       teamDomain: 'acme',
@@ -301,6 +293,31 @@ describe('deliverFastAgentParentEvent', () => {
         channelId: 'channel-1',
         threadId: 'thread-1',
       }),
+    );
+  });
+
+  it('uses the repository current destination instead of stale child metadata', async () => {
+    mocks.findSession.mockResolvedValueOnce({
+      id: parent.sessionId,
+      userId: 'u1',
+      messages: [],
+      conversation: {
+        ...parent.conversation,
+        replyTarget: { channelId: 'C456', threadId: '200.002' },
+      },
+    });
+
+    await deliverFastAgentParentEvent({ parent, event });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversation: expect.objectContaining({
+          replyTarget: { channelId: 'C456', threadId: '200.002' },
+        }),
+      }),
+    );
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'C456', thread_ts: '200.002' }),
     );
   });
 
