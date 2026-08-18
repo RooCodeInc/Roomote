@@ -17,6 +17,154 @@ export const BRAIN_MCP_ID = 'gbrain';
 export const BRAIN_PROXY_PATH = '/api/mcp/gbrain';
 
 /**
+ * Namespaces the Brain files pages under, in the order a reader should see
+ * them: what the deployment is about first, then the activity streams, then
+ * the pages the Brain writes about itself.
+ *
+ * Shared rather than local to the ingestion worker because the Settings page
+ * groups a corpus by the same prefixes the collectors write, and a label that
+ * drifts from the writer is a chart that quietly misattributes pages.
+ */
+export const BRAIN_NAMESPACES = [
+  { id: 'people', prefix: 'people/', label: 'People' },
+  { id: 'tasks', prefix: 'tasks/', label: 'Task memories' },
+  { id: 'prs', prefix: 'prs/', label: 'Pull requests' },
+  { id: 'github', prefix: 'github/', label: 'GitHub issues' },
+  { id: 'slack', prefix: 'slack/', label: 'Slack' },
+  { id: 'notion', prefix: 'notion/', label: 'Notion' },
+  { id: 'meetings', prefix: 'meetings/', label: 'Meetings' },
+  { id: 'daily', prefix: 'daily/', label: 'Daily digests' },
+  { id: 'weekly', prefix: 'weekly/', label: 'Weekly syntheses' },
+  { id: 'wiki', prefix: 'wiki/', label: 'Wiki' },
+] as const;
+
+export type BrainNamespaceId = (typeof BRAIN_NAMESPACES)[number]['id'];
+
+/** Bucket for a slug written under a prefix this registry does not name. */
+export const BRAIN_OTHER_NAMESPACE_ID = 'other';
+
+export type BrainNamespaceBucketId =
+  | BrainNamespaceId
+  | typeof BRAIN_OTHER_NAMESPACE_ID;
+
+export function resolveBrainNamespaceId(slug: string): BrainNamespaceBucketId {
+  return (
+    BRAIN_NAMESPACES.find((namespace) => slug.startsWith(namespace.prefix))
+      ?.id ?? BRAIN_OTHER_NAMESPACE_ID
+  );
+}
+
+export function brainNamespaceLabel(id: BrainNamespaceBucketId): string {
+  return (
+    BRAIN_NAMESPACES.find((namespace) => namespace.id === id)?.label ?? 'Other'
+  );
+}
+
+/**
+ * What feeds the Brain, described once for anything that has to explain it.
+ *
+ * `collectorIdPrefix` is the stable half of a collector's id. The ids
+ * themselves carry a version suffix that is bumped whenever page semantics
+ * change (`slack-public-channels:entity-timeline-v2`) and, for collectors that
+ * fan out, a partition suffix per workspace or channel. Matching on the prefix
+ * means the Settings page keeps reporting a source across a version bump
+ * instead of showing it as newly unknown.
+ *
+ * `requires` names the integration that has to be connected before the source
+ * produces anything, so the UI can distinguish "nothing collected yet" from
+ * "nothing to collect from".
+ */
+export const BRAIN_SOURCES = [
+  {
+    id: 'task-memories',
+    label: 'Task memories',
+    description:
+      'What each completed task learned: decisions, dead ends, and conventions the diff cannot show.',
+    namespaceId: 'tasks',
+    // Ingested through the completed-run outbox, not a polling collector.
+    collectorIdPrefix: null,
+    requires: null,
+  },
+  {
+    id: 'person-identities',
+    label: 'Deployment members',
+    description:
+      'Canonical person cards built from Roomote members and their linked provider handles. Never email addresses.',
+    namespaceId: 'people',
+    collectorIdPrefix: 'person-identities',
+    requires: null,
+  },
+  {
+    id: 'slack-person-directory',
+    label: 'Slack directory',
+    description:
+      'Slack profiles, resolved against deployment members so one person is one entity.',
+    namespaceId: 'people',
+    collectorIdPrefix: 'slack-person-directory',
+    requires: 'slack',
+  },
+  {
+    id: 'slack-public-channels',
+    label: 'Slack public channels',
+    description:
+      'History of the public channels the Roomote bot was added to. Private channels and DMs are never read.',
+    namespaceId: 'slack',
+    collectorIdPrefix: 'slack-public-channels',
+    requires: 'slack',
+  },
+  {
+    id: 'github-issues',
+    label: 'GitHub issues',
+    description:
+      'Bug reports, feature discussions, and decisions from the repositories Roomote can already see.',
+    namespaceId: 'github',
+    collectorIdPrefix: 'github-issues',
+    requires: 'github',
+  },
+  {
+    id: 'notion-pages',
+    label: 'Notion',
+    description:
+      'Pages the connected Notion integration can reach, refreshed as they change upstream.',
+    namespaceId: 'notion',
+    collectorIdPrefix: 'notion-pages',
+    requires: 'notion',
+  },
+  {
+    id: 'granola-meetings',
+    label: 'Meeting notes',
+    description:
+      'Granola meeting notes and their attendees, linked to the people they mention.',
+    namespaceId: 'meetings',
+    collectorIdPrefix: 'granola-meetings',
+    requires: 'granola',
+  },
+] as const;
+
+export type BrainSourceId = (typeof BRAIN_SOURCES)[number]['id'];
+
+export type BrainSourceRequirement = NonNullable<
+  (typeof BRAIN_SOURCES)[number]['requires']
+>;
+
+/**
+ * Map a durable sync-state row back to the source it belongs to. Partitioned
+ * collectors store one row per workspace or channel under
+ * `${collectorId}:${partition}`, and every collector id may carry a version
+ * suffix, so only the leading segment is stable enough to match on.
+ */
+export function resolveBrainSourceIdForCollector(
+  collectorId: string,
+): BrainSourceId | null {
+  const base = collectorId.split(':')[0];
+
+  return (
+    BRAIN_SOURCES.find((source) => source.collectorIdPrefix === base)?.id ??
+    null
+  );
+}
+
+/**
  * Usage guidance injected into the agent's instruction files when the Brain
  * MCP server is attached. Prompts are a first-class control surface: both
  * halves of the behaviour live here rather than in code.

@@ -20,6 +20,7 @@ export {
   BookCopy,
   BookMarked,
   Brain,
+  BrainCircuit,
   Bot,
   BotMessageSquare,
   Bug,

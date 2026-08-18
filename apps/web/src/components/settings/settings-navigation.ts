@@ -1,6 +1,7 @@
 import type { LucideIcon } from '@/components/system';
 import {
   Brain,
+  BrainCircuit,
   Cpu,
   FlaskConical,
   GraduationCap,
@@ -26,6 +27,7 @@ export type SettingsPageId =
   | 'compute'
   | 'source-control'
   | 'models'
+  | 'brain'
   | 'skills'
   | 'experimental'
   | 'misc';
@@ -134,6 +136,17 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.agentGuidance),
   },
 
+  {
+    id: 'brain',
+    label: 'Brain',
+    title: 'Brain',
+    description:
+      'The shared memory agents read before they start: what it has learned, where it learns from, and how ingestion is doing.',
+    href: SETTINGS_PATHS.brain,
+    icon: BrainCircuit,
+    adminOnly: true,
+    matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.brain),
+  },
   {
     id: 'skills',
     label: 'Skills',
