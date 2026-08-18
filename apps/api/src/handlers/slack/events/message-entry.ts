@@ -1263,7 +1263,7 @@ async function maybeHandleChannelAutoStart(params: {
   if (fastAgentEntryMode && userMapping) {
     const hasExistingSession =
       fastAgentEntryMode === 'default' &&
-      (await hasFastAgentSession({
+      (await hasFastAgentSessionForProcessingReaction({
         surface: 'slack',
         workspaceId: context.teamId,
         conversationId: channelAutoStartEvent.ts,
@@ -1648,6 +1648,20 @@ function startFastAgentResponse(params: {
   });
 }
 
+async function hasFastAgentSessionForProcessingReaction(
+  conversation: Parameters<typeof hasFastAgentSession>[0],
+): Promise<boolean> {
+  try {
+    return await hasFastAgentSession(conversation);
+  } catch (error) {
+    console.error(
+      `[SlackWebhook] Failed to check Fast session before processing ${conversation.workspaceId}:${conversation.replyTarget.channelId}:${conversation.conversationId}; showing processing reaction:`,
+      error instanceof Error ? error.message : String(error),
+    );
+    return false;
+  }
+}
+
 async function handleSlackEntryEvent(params: {
   event: SlackEvent;
   slackInstallation: SlackInstallation;
@@ -1764,7 +1778,7 @@ async function handleSlackEntryEvent(params: {
   if (fastAgentEntryMode) {
     const hasExistingSession =
       fastAgentEntryMode === 'default' &&
-      (await hasFastAgentSession({
+      (await hasFastAgentSessionForProcessingReaction({
         surface: 'slack',
         workspaceId: teamId,
         conversationId: threadId,

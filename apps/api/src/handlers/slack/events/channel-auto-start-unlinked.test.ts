@@ -234,4 +234,49 @@ describe('channel auto-start unlinked author', () => {
     );
     expect(startTaskMock).not.toHaveBeenCalled();
   }, 30000);
+
+  it('shows the processing reaction when the session lookup fails', async () => {
+    userMappingRowsMock.mockResolvedValue([
+      {
+        id: 'mapping-1',
+        slackUserId: 'U456',
+        slackTeamId: 'T123',
+        userId: 'user-1',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        matchedUserId: 'user-1',
+        userDeletedAt: null,
+        userMetadata: { communications_fast_mode_default: true },
+      },
+    ]);
+    hasFastAgentSessionMock.mockRejectedValue(
+      new Error('database unavailable'),
+    );
+    const { handleMessageOrAppMentionEvent } =
+      await import('./message-entry.js');
+
+    await handleMessageOrAppMentionEvent({
+      event: {
+        type: 'message',
+        channel: 'C123',
+        user: 'U456',
+        text: 'please keep going',
+        ts: '114.000',
+        channel_type: 'channel',
+      } as never,
+      context: {
+        slackInstallation: { teamId: 'T123', botUserId: 'UBOT' } as never,
+        slack: {} as never,
+        teamId: 'T123',
+      } as never,
+    });
+
+    expect(fastAgentMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        continuation: true,
+        showProcessingReaction: true,
+      }),
+    );
+    expect(startTaskMock).not.toHaveBeenCalled();
+  }, 30000);
 });
