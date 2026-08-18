@@ -825,6 +825,86 @@ describe('runBrainCollectors deep backfill', () => {
       interrupted: false,
     });
   });
+
+  it('retries the same timeline evidence before advancing its watermark', async () => {
+    const evidence = {
+      slug: 'people/member-a',
+      date: '2026-08-17',
+      summary: 'Participated in #general',
+      source: 'slack/team/general/batch',
+    };
+    const collector = makeCollector({
+      collect: async () => ({
+        pages: [
+          {
+            slug: evidence.source,
+            title: 'Slack batch',
+            content: 'content',
+            timelineEvidence: [evidence],
+          },
+        ],
+        nextSince: new Date('2026-08-18T00:00:00Z'),
+      }),
+    });
+    const timelineSink = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('timeline unavailable'))
+      .mockResolvedValueOnce(undefined);
+
+    await runBrainCollectors(connection, {
+      sink: vi.fn(async () => {}),
+      timelineSink,
+      collectors: [collector],
+    });
+    expect(syncStateStore.get(collector.id)?.watermark).toBeUndefined();
+
+    await runBrainCollectors(connection, {
+      sink: vi.fn(async () => {}),
+      timelineSink,
+      collectors: [collector],
+    });
+    expect(timelineSink).toHaveBeenNthCalledWith(1, evidence, connection);
+    expect(timelineSink).toHaveBeenNthCalledWith(2, evidence, connection);
+    expect(syncStateStore.get(collector.id)?.watermark).toEqual(
+      new Date('2026-08-18T00:00:00Z'),
+    );
+  });
+
+  it('routes deterministic entity refreshes through the preserving identity sink', async () => {
+    const collector = makeCollector({
+      collect: async () => ({
+        pages: [
+          {
+            slug: 'people/member-a',
+            title: 'Alice',
+            content: 'identity projection',
+            preserveExistingEntityContent: true,
+          },
+        ],
+        nextSince: new Date('2026-08-18T00:00:00Z'),
+      }),
+    });
+    const sink = vi.fn(async () => {});
+    const identitySink = vi.fn(async () => {});
+
+    await runBrainCollectors(connection, {
+      sink,
+      identitySink,
+      collectors: [collector],
+    });
+
+    expect(sink).not.toHaveBeenCalled();
+    expect(identitySink).toHaveBeenCalledWith(
+      expect.objectContaining({
+        slug: 'people/member-a',
+        content: 'identity projection',
+      }),
+      connection,
+    );
+    expect(syncStateStore.get(collector.id)?.watermark).toEqual(
+      new Date('2026-08-18T00:00:00Z'),
+    );
+  });
 });
 
 describe('groupSlackMessagesIntoDayPages', () => {
@@ -917,6 +997,68 @@ describe('groupSlackMessagesIntoDayPages', () => {
     ]);
 
     expect(pages).toEqual([]);
+  });
+
+  it('links canonical authors and emits one deduplicated timeline intent per page', () => {
+    const person = {
+      slug: 'people/roomote-member-abc',
+      title: 'Alice Example',
+    };
+    const pages = groupSlackMessagesIntoDayPages([
+      {
+        teamId: 'T1',
+        channelId: 'C1',
+        channelName: 'general',
+        ts: day1Ts,
+        userId: 'U1',
+        person,
+        text: 'first decision',
+      },
+      {
+        teamId: 'T1',
+        channelId: 'C1',
+        channelName: 'general',
+        ts: day1LaterTs,
+        userId: 'U1',
+        person,
+        text: 'follow-up',
+      },
+    ]);
+
+    expect(pages[0]?.content).toContain(
+      '[Alice Example](people/roomote-member-abc) (U1): first decision',
+    );
+    expect(pages[0]?.timelineEvidence).toEqual([
+      {
+        slug: 'people/roomote-member-abc',
+        date: '2026-08-13',
+        summary: 'Participated in #general',
+        detail: '[14:03 UTC] first decision\n[15:30 UTC] follow-up',
+        source: pages[0]?.slug,
+      },
+    ]);
+    expect(
+      groupSlackMessagesIntoDayPages([
+        {
+          teamId: 'T1',
+          channelId: 'C1',
+          channelName: 'general',
+          ts: day1Ts,
+          userId: 'U1',
+          person,
+          text: 'first decision',
+        },
+        {
+          teamId: 'T1',
+          channelId: 'C1',
+          channelName: 'general',
+          ts: day1LaterTs,
+          userId: 'U1',
+          person,
+          text: 'follow-up',
+        },
+      ])[0]?.timelineEvidence,
+    ).toEqual(pages[0]?.timelineEvidence);
   });
 });
 
@@ -1022,6 +1164,14 @@ describe('buildGranolaMeetingPage', () => {
       '- [Dan Riccio](people/roomote-member-abc)',
     );
     expect(result?.page.content).not.toContain('- danny@example.com');
+    expect(result?.page.timelineEvidence).toEqual([
+      expect.objectContaining({
+        slug: 'people/roomote-member-abc',
+        date: '2026-08-10',
+        summary: 'Attended Weekly Growth Sync',
+        source: 'meetings/2026-08-10-weekly-growth-sync-not-abc123def45678',
+      }),
+    ]);
   });
 
   it('tries both attendee name and email before leaving a person unresolved', () => {
@@ -1117,6 +1267,14 @@ describe('person identity pages', () => {
       '- Slack: Dan Riccio (U08TMEM25CP) — VP of Engineering',
     );
     expect(page.content).toContain('Joined Roomote on 2026-01-01.');
+    expect(page.content).toContain(
+      '<!-- roomote:identity:start -->\n# Dan Riccio',
+    );
+    expect(page.content).toContain('<!-- roomote:identity:end -->');
+    expect(page.content).toContain(
+      '<!-- roomote:compiled-activity:start -->\n## Activity summary',
+    );
+    expect(page.content).toContain('<!-- roomote:compiled-activity:end -->');
     expect(page.content).not.toContain('dan@example.com');
   });
 
@@ -1325,6 +1483,7 @@ describe('person identity pages', () => {
       'user-zed',
     ]);
     expect(secondBatch.projectionChanged).toBe(false);
+    expect(secondBatch.resetCompilationState).toBe(true);
     expect(JSON.parse(secondBatch.cursor)).toMatchObject({ mode: 'idle' });
   });
 

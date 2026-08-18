@@ -11,6 +11,7 @@ import {
 import { Env } from '@roomote/env';
 
 import { postToBrain } from './brain-outbox-drain';
+import { runBrainEntityCompilation } from './brain-entity-compilation';
 
 const BRAIN_MAINTENANCE_TIMEOUT_MS = 60 * 60 * 1000;
 const BRAIN_DAILY_DIGEST_STATE_ID = 'roomote-daily-digest';
@@ -830,6 +831,21 @@ export async function brainMaintenanceJob(): Promise<void> {
 
   if (ingestConnection) {
     try {
+      await runBrainEntityCompilation(
+        connection,
+        ingestConnection,
+        maintenanceNow,
+      );
+    } catch (error) {
+      synthesisError ??= error;
+      console.error(
+        `[brainMaintenance] entity compilation failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
+    try {
       const dailyPage = await runBrainDailyDigest(
         connection,
         ingestConnection,
@@ -847,7 +863,7 @@ export async function brainMaintenanceJob(): Promise<void> {
             ),
           );
         } catch (error) {
-          synthesisError = error;
+          synthesisError ??= error;
           console.error(
             `[brainMaintenance] weekly synthesis failed: ${
               error instanceof Error ? error.message : String(error)
@@ -856,7 +872,7 @@ export async function brainMaintenanceJob(): Promise<void> {
         }
       }
     } catch (error) {
-      synthesisError = error;
+      synthesisError ??= error;
       console.error(
         `[brainMaintenance] daily digest failed: ${
           error instanceof Error ? error.message : String(error)

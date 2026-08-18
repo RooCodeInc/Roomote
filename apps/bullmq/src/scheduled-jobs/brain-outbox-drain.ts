@@ -109,6 +109,50 @@ export function isBrainNotReady(error: unknown): boolean {
   return error instanceof BrainNotReadyError;
 }
 
+export async function callBrainWriteTool(
+  connection: { baseUrl: string; token: string },
+  name: string,
+  args: Record<string, unknown>,
+): Promise<string> {
+  const response = await fetch(`${connection.baseUrl.replace(/\/$/, '')}/mcp`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+      authorization: `Bearer ${connection.token}`,
+    },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name, arguments: args },
+    }),
+  });
+  const body = await response.text().catch(() => '');
+
+  if (response.status === 429) {
+    throw new BrainRateLimitedError(
+      `gbrain ${name} rate limited: ${body.slice(0, 300)}`,
+    );
+  }
+
+  const failed = !response.ok || body.includes('"isError":true');
+
+  if (failed && /embed\(|embedding/i.test(body)) {
+    throw new BrainNotReadyError(
+      `gbrain ${name} could not embed: ${body.slice(0, 300)}`,
+    );
+  }
+
+  if (failed) {
+    throw new Error(
+      `gbrain ${name} failed: ${response.status} ${body.slice(0, 300)}`,
+    );
+  }
+
+  return body;
+}
+
 /**
  * Write one memory page via gbrain's MCP `put_page` op with a write-scoped
  * access token. Synchronous and immediately retrievable, so task completion
@@ -118,47 +162,10 @@ export async function postToBrain(
   page: IngestPage,
   connection: { baseUrl: string; token: string },
 ): Promise<void> {
-  const { baseUrl, token } = connection;
-
-  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/mcp`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      accept: 'application/json, text/event-stream',
-      authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/call',
-      params: {
-        name: 'put_page',
-        arguments: { slug: page.slug, content: page.content },
-      },
-    }),
+  await callBrainWriteTool(connection, 'put_page', {
+    slug: page.slug,
+    content: page.content,
   });
-
-  const body = await response.text().catch(() => '');
-
-  if (response.status === 429) {
-    throw new BrainRateLimitedError(
-      `gbrain put_page rate limited: ${body.slice(0, 300)}`,
-    );
-  }
-
-  const failed = !response.ok || body.includes('"isError":true');
-
-  if (failed && /embed\(|embedding/i.test(body)) {
-    throw new BrainNotReadyError(
-      `gbrain put_page could not embed: ${body.slice(0, 300)}`,
-    );
-  }
-
-  if (failed) {
-    throw new Error(
-      `gbrain put_page failed: ${response.status} ${body.slice(0, 300)}`,
-    );
-  }
 }
 
 /**

@@ -16,6 +16,16 @@ RUN apt-get update \
 
 RUN bun install -g "github:garrytan/gbrain#${GBRAIN_REF}"
 
+# Upstream exposes idempotent timeline appends but not a remote operation that
+# can replace generated prose without round-tripping private Facts/Takes fences.
+# Keep the narrow marker-based merge inside gbrain until that API lands there.
+COPY roomote-entity-compilation.patch /tmp/roomote-entity-compilation.patch
+RUN git -C /root/.bun/install/global/node_modules/gbrain apply \
+  --no-index --check /tmp/roomote-entity-compilation.patch \
+  && git -C /root/.bun/install/global/node_modules/gbrain apply \
+    --no-index /tmp/roomote-entity-compilation.patch \
+  && rm /tmp/roomote-entity-compilation.patch
+
 # bun hoists global deps, but gbrain resolves its PGLite wasm assets relative
 # to its own node_modules (spike gotcha 1). Link the hoisted package where
 # gbrain expects it; keep this until fixed upstream.

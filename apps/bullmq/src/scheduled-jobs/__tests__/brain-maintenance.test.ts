@@ -1,6 +1,7 @@
 const {
   mockEnv,
   mockGetBrainSyncState,
+  mockRunBrainEntityCompilation,
   mockPostToBrain,
   mockResolveConnection,
   mockResolveProvider,
@@ -8,6 +9,7 @@ const {
 } = vi.hoisted(() => ({
   mockEnv: { TRPC_URL: 'http://api.test:3001' },
   mockGetBrainSyncState: vi.fn(),
+  mockRunBrainEntityCompilation: vi.fn(),
   mockPostToBrain: vi.fn(),
   mockResolveConnection: vi.fn(),
   mockResolveProvider: vi.fn(),
@@ -32,6 +34,10 @@ vi.mock('@roomote/db/server', () => ({
 
 vi.mock('../brain-outbox-drain', () => ({
   postToBrain: mockPostToBrain,
+}));
+
+vi.mock('../brain-entity-compilation', () => ({
+  runBrainEntityCompilation: mockRunBrainEntityCompilation,
 }));
 
 import {
@@ -173,6 +179,12 @@ describe('brainMaintenanceJob', () => {
     mockGetBrainSyncState.mockReset();
     mockGetBrainSyncState.mockResolvedValue(null);
     mockPostToBrain.mockReset();
+    mockRunBrainEntityCompilation.mockReset();
+    mockRunBrainEntityCompilation.mockResolvedValue({
+      scanned: 0,
+      compiled: 0,
+      unchanged: 0,
+    });
     mockResolveConnection.mockReset();
     mockResolveProvider.mockReset();
     mockUpsertBrainSyncState.mockReset();
@@ -207,6 +219,11 @@ describe('brainMaintenanceJob', () => {
 
     expect(mockResolveConnection).toHaveBeenCalledWith('maintenance');
     expect(mockResolveConnection).toHaveBeenCalledWith('ingest');
+    expect(mockRunBrainEntityCompilation).toHaveBeenCalledWith(
+      { baseUrl: 'http://gbrain.test/', token: 'maintenance-token' },
+      { baseUrl: 'http://gbrain.test/', token: 'ingest-token' },
+      new Date('2026-08-17T07:00:00.000Z'),
+    );
     expect(fetchSpy).toHaveBeenNthCalledWith(
       6,
       'http://gbrain.test/mcp',
