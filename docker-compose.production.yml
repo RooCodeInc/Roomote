@@ -3,6 +3,7 @@ name: roomote
 x-roomote-production-env: &roomote-production-env
   NODE_ENV: production
   R_APP_ENV: production
+  APP_ENV: production
   DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
   REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
   S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
@@ -137,6 +138,7 @@ services:
   web:
     environment:
       <<: *roomote-production-env
+      SENTRY_DSN: ${SENTRY_DSN:-}
     ports: !reset []
     healthcheck:
       test:
@@ -152,6 +154,7 @@ services:
   api:
     environment:
       <<: *roomote-production-env
+      SENTRY_DSN: ${SENTRY_DSN:-}
     ports: !reset []
     healthcheck:
       test:
@@ -167,6 +170,7 @@ services:
   controller:
     environment:
       <<: *roomote-production-env
+      SENTRY_DSN: ${SENTRY_DSN:-}
     healthcheck:
       test:
         [
@@ -181,6 +185,7 @@ services:
   bullmq:
     environment:
       <<: *roomote-production-env
+      SENTRY_DSN: ${SENTRY_DSN:-}
     ports: !reset []
     healthcheck:
       test:

@@ -1,10 +1,29 @@
 import {
   isWebSentryEnabled,
+  resolveWebSentryDsn,
   resolveWebSentryEnvironment,
   resolveWebSentryRelease,
 } from './sentry-config';
 
 describe('web sentry config', () => {
+  it('prefers the runtime server DSN', () => {
+    expect(
+      resolveWebSentryDsn({
+        SENTRY_DSN: ' https://server.example/1 ',
+        NEXT_PUBLIC_SENTRY_DSN: 'https://browser.example/1',
+      }),
+    ).toBe('https://server.example/1');
+  });
+
+  it('falls back to the build-time browser DSN', () => {
+    expect(
+      resolveWebSentryDsn({
+        SENTRY_DSN: ' ',
+        NEXT_PUBLIC_SENTRY_DSN: ' https://browser.example/1 ',
+      }),
+    ).toBe('https://browser.example/1');
+  });
+
   it('disables Sentry in development', () => {
     expect(isWebSentryEnabled({ NODE_ENV: 'development' })).toBe(false);
   });

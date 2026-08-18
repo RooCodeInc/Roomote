@@ -90,6 +90,7 @@ x-roomote-inference-env: &roomote-inference-env
 
 x-roomote-web-env: &roomote-web-env
   <<: *roomote-inference-env
+  SENTRY_DSN: ${SENTRY_DSN:-}
   DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379}
   S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
@@ -164,6 +165,7 @@ x-roomote-web-env: &roomote-web-env
 
 x-roomote-api-env: &roomote-api-env
   <<: *roomote-inference-env
+  SENTRY_DSN: ${SENTRY_DSN:-}
   DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379}
   S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
@@ -208,6 +210,7 @@ x-roomote-api-env: &roomote-api-env
 
 x-roomote-controller-env: &roomote-controller-env
   <<: *roomote-base-env
+  SENTRY_DSN: ${SENTRY_DSN:-}
   DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379}
   JOB_AUTH_PRIVATE_KEY: ${JOB_AUTH_PRIVATE_KEY:?JOB_AUTH_PRIVATE_KEY is required}
@@ -245,6 +248,7 @@ x-roomote-controller-env: &roomote-controller-env
 
 x-roomote-bullmq-env: &roomote-bullmq-env
   <<: *roomote-inference-env
+  SENTRY_DSN: ${SENTRY_DSN:-}
   DATABASE_URL: ${DATABASE_URL:-postgres://postgres:roomote-postgres-password@postgres:5432/roomote}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379}
   DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?DASHBOARD_PASSWORD is required}

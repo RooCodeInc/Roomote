@@ -4,7 +4,9 @@ type WebSentryEnv = Partial<
   Pick<
     NodeJS.ProcessEnv,
     | 'GITHUB_SHA'
+    | 'SENTRY_DSN'
     | 'R_APP_ENV'
+    | 'NEXT_PUBLIC_SENTRY_DSN'
     | 'NEXT_PUBLIC_SENTRY_RELEASE'
     | 'NODE_ENV'
     | 'VERCEL_GIT_COMMIT_SHA'
@@ -12,6 +14,14 @@ type WebSentryEnv = Partial<
     | 'RELEASE_VERSION'
   >
 >;
+
+export function resolveWebSentryDsn(
+  env: WebSentryEnv = process.env as WebSentryEnv,
+): string | undefined {
+  return (
+    env.SENTRY_DSN?.trim() || env.NEXT_PUBLIC_SENTRY_DSN?.trim() || undefined
+  );
+}
 
 export function isWebSentryEnabled(
   env: Pick<NodeJS.ProcessEnv, 'NODE_ENV'> = process.env,
