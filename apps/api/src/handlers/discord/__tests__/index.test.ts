@@ -1227,7 +1227,6 @@ describe('Discord Gateway event handler', () => {
       type: 11,
     });
     mocks.hasFastSession.mockResolvedValue(true);
-    mocks.hasFastDefault.mockResolvedValue(true);
     mocks.shouldRouteUnmentioned.mockResolvedValue(true);
 
     const response = await postEvent(
@@ -1242,6 +1241,9 @@ describe('Discord Gateway event handler', () => {
     );
 
     expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({ fastAnswered: true, fastContinued: true }),
+    );
     expect(mocks.hasFastSession).toHaveBeenCalledWith({
       surface: 'discord',
       workspaceId: 'guild-1',
@@ -1260,6 +1262,41 @@ describe('Discord Gateway event handler', () => {
         conversation: expect.objectContaining({ surface: 'discord' }),
       }),
     );
+  });
+
+  it('continues an existing fast-agent DM without Fast mode being the default', async () => {
+    mocks.hasFastSession.mockResolvedValue(true);
+
+    const response = await postEvent(
+      envelope(
+        message({
+          content: 'What did I ask you to remember?',
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({ fastAnswered: true, fastContinued: true }),
+    );
+    expect(mocks.hasFastSession).toHaveBeenCalledWith({
+      surface: 'discord',
+      workspaceId: 'dm',
+      conversationId: 'dm-1',
+      replyTarget: { channelId: 'dm-1' },
+    });
+    expect(mocks.answerFast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'What did I ask you to remember?',
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'dm',
+          conversationId: 'dm-1',
+          replyTarget: { channelId: 'dm-1' },
+        },
+      }),
+    );
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   it('nudges an unlinked mentioned user without launching work', async () => {
