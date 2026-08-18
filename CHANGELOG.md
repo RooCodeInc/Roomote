@@ -2,6 +2,34 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.40.0 (2026-08-18)
+
+This release adds safer Notion workflows, environment diffs, automation history, model support, and reliability improvements across tasks and Slack.
+
+### Highlights
+
+- Connect a deployment-wide Notion integration with permission-scoped access and precise content editing.
+- Compare draft environment edits and saved versions side by side.
+- Review previous automation runs and steer active tasks through the Roomote MCP.
+- Improve reliability across long-running tasks, Slack task delivery, and automation reports.
+
+### Minor changes
+
+- Open previous automation runs from the Automations settings page to review their status, timing, and linked task history.
+- Initial explorations of an orchestration interface and persistent Brain. Let us know in Discord if you’re interested in testing them or contributing.
+- Add a deployment-wide Notion internal integration for tasks and automations, with permission-scoped access to shared content and precise controls for inserting and updating page content.
+- Compare draft environment edits and saved versions side by side in the environment editor. Thanks to @a8trejo for contributing this improvement and reporting [#1160](https://github.com/RooCodeInc/Roomote/issues/1160).
+- Add GLM 5.3 support and updated model recommendations for OpenCode Go and Z.AI Coding Plan users.
+- Send immediate steering instructions to active tasks through the Roomote MCP so agents can adjust work without waiting for another task turn.
+
+### Patch changes
+
+- Make automation reports quieter and easier to act on with structured Slack cards, run metadata, compact durations, replyable platform alerts, and reliable delivery for failure and Dependabot results.
+- Remove repeated task rows from cost drilldowns, preserve pull-request opener attribution, and clarify when pull-request review threads will be auto-resolved.
+- Make Slack task delivery more reliable by waking sleeping tasks from thread replies, removing internal block context from task messages, and preventing duplicate kickoff messages.
+- Keep task transcripts and controls readable by separating thinking headings, preserving table-format menus, and preventing terminal views from flooding browser error telemetry.
+- Keep long-running tasks moving by compacting custom-model context before provider limits, restoring prompts in order after snapshot resumes, and reporting queued messages only when their turn starts.
+
 ## 0.39.1 (2026-08-14)
 
 This patch adds guided automation recommendations during setup and strengthens Goal Mode, chat continuity, snapshots, provider compatibility, and task controls.
