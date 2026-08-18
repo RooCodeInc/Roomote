@@ -1,4 +1,8 @@
 import { acquireRedisLock } from '@roomote/redis';
+import {
+  getFastAgentConversationStorageWorkspaceId,
+  type FastAgentConversation,
+} from './fast-agent-conversation';
 
 const FAST_AGENT_TURN_LOCK_PREFIX = 'slack:fast-agent-lock:';
 const FAST_AGENT_TURN_LOCK_TTL_SECONDS = 600;
@@ -10,14 +14,16 @@ const FAST_AGENT_TURN_LOCK_MAX_ATTEMPTS =
 
 /** Serialize every human and platform-generated Fast turn for one chat. */
 export async function acquireFastAgentTurnLock(params: {
-  slackTeamId: string;
-  slackChannel: string;
-  slackThreadTs: string;
+  conversation: FastAgentConversation;
   /** Cap the wait below the lock TTL so callers with their own retry or
    * user-feedback path can fail fast instead of blocking their context. */
   maxWaitMs?: number;
 }) {
-  const key = `${FAST_AGENT_TURN_LOCK_PREFIX}${params.slackTeamId}:${params.slackChannel}:${params.slackThreadTs}`;
+  const { channelId, threadId } = params.conversation;
+  const storageWorkspaceId = getFastAgentConversationStorageWorkspaceId(
+    params.conversation,
+  );
+  const key = `${FAST_AGENT_TURN_LOCK_PREFIX}${storageWorkspaceId}:${channelId}:${threadId}`;
   const maxAttempts =
     params.maxWaitMs === undefined
       ? FAST_AGENT_TURN_LOCK_MAX_ATTEMPTS

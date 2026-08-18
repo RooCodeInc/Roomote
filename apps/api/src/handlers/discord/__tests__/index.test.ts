@@ -748,9 +748,13 @@ describe('Discord Gateway event handler', () => {
       expect.objectContaining({
         question: 'Fix the flaky tests',
         userId: 'roomote-user-1',
-        slackThreadTs: 'dm-1',
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'dm',
+          channelId: 'dm-1',
+          threadId: 'dm-1',
+        },
         activeTasks: [],
-        surface: 'discord',
       }),
     );
     expect(mocks.reply).toHaveBeenCalledWith(
@@ -1239,9 +1243,10 @@ describe('Discord Gateway event handler', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.hasFastSession).toHaveBeenCalledWith({
-      slackTeamId: 'discord:guild-1',
-      slackChannel: 'channel-1',
-      slackThreadTs: 'thread-1',
+      surface: 'discord',
+      workspaceId: 'guild-1',
+      channelId: 'channel-1',
+      threadId: 'thread-1',
     });
     expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1252,7 +1257,7 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.answerFast).toHaveBeenCalledWith(
       expect.objectContaining({
         question: 'Hey Roomote, can you check this too?',
-        surface: 'discord',
+        conversation: expect.objectContaining({ surface: 'discord' }),
       }),
     );
   });
@@ -1939,8 +1944,8 @@ describe('Discord Gateway event handler', () => {
   });
 
   it('uses /fast as a top-level orchestrator that can launch a new task', async () => {
-    mocks.answerFast.mockImplementationOnce(async ({ launchTask }) => {
-      const launched = await launchTask({
+    mocks.answerFast.mockImplementationOnce(async ({ adapter }) => {
+      const launched = await adapter.launchTask({
         prompt: 'Investigate the flaky build',
         environmentId: null,
         parentSessionId: '11111111-1111-4111-8111-111111111111',
@@ -1972,8 +1977,8 @@ describe('Discord Gateway event handler', () => {
       expect.objectContaining({
         question: 'Fix the flaky build',
         userId: 'roomote-user-1',
-        surface: 'discord',
-        launchTask: expect.any(Function),
+        conversation: expect.objectContaining({ surface: 'discord' }),
+        adapter: expect.objectContaining({ launchTask: expect.any(Function) }),
       }),
     );
     expect(mocks.answerFast.mock.calls[0]?.[0].activeTasks).toBeUndefined();

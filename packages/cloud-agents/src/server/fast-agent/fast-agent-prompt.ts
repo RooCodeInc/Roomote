@@ -2,7 +2,10 @@ import { PRODUCT_NAME } from '@roomote/types';
 
 import type { RoutableEnvironment } from '../router';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
-import type { FastAgentSurface } from './fast-agent-service';
+import type {
+  FastAgentSurface,
+  FastAgentTurnSource,
+} from './fast-agent-conversation';
 import type { FastAgentActiveTask } from './fast-agent-session';
 import { buildRoomoteStyleGuidanceSection } from '../../style-guidance';
 
@@ -49,18 +52,19 @@ export function buildFastAgentSystemPrompt({
   availableIntegrations = [],
   activeTasks = [],
   surface = 'slack',
-  platformEvent = false,
+  turnSource = 'human',
   retryTaskStartAvailable = false,
 }: {
   availableEnvironments: RoutableEnvironment[];
   availableIntegrations?: FastAgentIntegration[];
   activeTasks?: FastAgentActiveTask[];
   surface?: FastAgentSurface;
-  platformEvent?: boolean;
+  turnSource?: FastAgentTurnSource;
   retryTaskStartAvailable?: boolean;
   /** @deprecated GitHub availability is derived from availableIntegrations. */
   hasGitHubTools?: boolean;
 }): string {
+  const platformEvent = turnSource === 'platform_event';
   const surfaceName = surface === 'slack' ? 'Slack' : 'Discord';
   const reactionGuidance =
     surface === 'slack'

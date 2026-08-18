@@ -25,6 +25,10 @@ import {
 import { isRouterMcpServerEnabled } from '../router/mcp-policy';
 import { resolveApiBaseUrl } from '../shared-utils';
 import { FAST_AGENT_BRAIN_INSTRUCTIONS } from './fast-agent-constants';
+import {
+  getFastAgentConversationStorageWorkspaceId,
+  type FastAgentConversation,
+} from './fast-agent-conversation';
 
 export type FastAgentIntegration = {
   id: string;
@@ -45,10 +49,8 @@ type BrokerContext = {
 
 type IntegrationAuditContext = BrokerContext & {
   sessionId: string;
-  slackTeamId: string;
-  slackChannel: string;
-  slackThreadTs: string;
-  slackMessageTs: string;
+  conversation: FastAgentConversation;
+  messageId: string;
 };
 
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS = 5 * 60_000;
@@ -247,10 +249,14 @@ export async function callFastAgentIntegration(
   const audit = await beginSlackFastIntegrationCall({
     slackQuickAnswerId: context.sessionId,
     userId: context.userId,
-    slackTeamId: context.slackTeamId,
-    slackChannel: context.slackChannel,
-    slackThreadTs: context.slackThreadTs,
-    slackMessageTs: context.slackMessageTs,
+    // The persisted audit schema is legacy Slack-shaped; the broker boundary
+    // remains provider-neutral while a later N-1-safe migration renames it.
+    slackTeamId: getFastAgentConversationStorageWorkspaceId(
+      context.conversation,
+    ),
+    slackChannel: context.conversation.channelId,
+    slackThreadTs: context.conversation.threadId,
+    slackMessageTs: context.messageId,
     integrationId: integration.id,
     toolName: request.toolName,
     arguments: request.args,

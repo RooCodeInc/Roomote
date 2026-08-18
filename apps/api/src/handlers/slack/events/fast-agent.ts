@@ -3,7 +3,7 @@ import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
   type FastAgentActiveTask,
-  type LaunchFastAgentSlackTask,
+  type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
 import { type SlackEvent, type SlackNotifier } from '@roomote/slack';
 import { stripLeadingSlackProductMention } from '@roomote/cloud-agents';
@@ -53,7 +53,7 @@ export async function processFastAgentMessage(params: {
   usageText?: string;
   continuation?: boolean;
   activeTasks?: FastAgentActiveTask[];
-  launchTask: LaunchFastAgentSlackTask;
+  launchTask: LaunchFastAgentTask;
   processingReactionName?: string;
 }): Promise<void> {
   const {
@@ -69,10 +69,14 @@ export async function processFastAgentMessage(params: {
     processingReactionName = 'eyes',
   } = params;
   const threadId = event.thread_ts || event.ts;
+  const conversation = {
+    surface: 'slack' as const,
+    workspaceId: teamId,
+    channelId: event.channel,
+    threadId,
+  };
   const releaseFastAgentLock = await acquireFastAgentTurnLock({
-    slackTeamId: teamId,
-    slackChannel: event.channel,
-    slackThreadTs: threadId,
+    conversation,
   });
 
   if (!releaseFastAgentLock) {
@@ -148,68 +152,68 @@ export async function processFastAgentMessage(params: {
       threadContext: serializedThreadContext,
       userId,
       apiBaseUrl,
-      slackTeamId: teamId,
-      slackChannel: event.channel,
-      slackThreadTs: threadId,
-      currentMessageTs: event.ts,
-      senderSlackUserId: event.user,
+      conversation,
+      currentMessageId: event.ts,
+      senderExternalId: event.user,
       senderDisplayName:
         currentMessage?.user === event.user
           ? currentMessage.username
           : undefined,
       activeTasks,
-      launchTask,
-      postSlackReply: async ({ message, kickoff }) => {
-        const posted = await postSlackThreadMarkdownMessage({
-          slack,
-          channel: event.channel,
-          threadTs: threadId,
-          text: message,
-          sourceMessageTs: event.ts,
-          conversationLog: {
-            userId,
-            slackTeamId: teamId,
-            source: 'fast_agent',
-          },
-        });
-        if (posted === 'failed') {
-          throw new Error('Slack did not accept the Fast parent reply.');
-        }
-        if (posted === 'suppressed' && kickoff) {
-          // The launch gate requires a visible, durable parent kickoff
-          // before the child becomes runnable; a suppressed kickoff must
-          // abort the launch instead of opening the gate silently.
-          throw new Error(
-            'The Fast kickoff was suppressed because the triggering message was deleted.',
-          );
-        }
-        // Suppression of an ordinary reply is deliberate (the triggering
-        // message was deleted); treat it as delivered so the turn is not
-        // aborted mid-flight.
-        didSendVisibleResponse = true;
-      },
-      postSlackReaction: async ({ name, purpose, slackMessageTs }) => {
-        if (
-          didAddProcessingReaction &&
-          name === processingReactionName &&
-          slackMessageTs === event.ts
-        ) {
-          if (purpose === 'closeout') {
-            didAddProcessingReaction = false;
+      adapter: {
+        launchTask,
+        postReply: async ({ message, kickoff }) => {
+          const posted = await postSlackThreadMarkdownMessage({
+            slack,
+            channel: event.channel,
+            threadTs: threadId,
+            text: message,
+            sourceMessageTs: event.ts,
+            conversationLog: {
+              userId,
+              slackTeamId: teamId,
+              source: 'fast_agent',
+            },
+          });
+          if (posted === 'failed') {
+            throw new Error('Slack did not accept the Fast parent reply.');
+          }
+          if (posted === 'suppressed' && kickoff) {
+            // The launch gate requires a visible, durable parent kickoff
+            // before the child becomes runnable; a suppressed kickoff must
+            // abort the launch instead of opening the gate silently.
+            throw new Error(
+              'The Fast kickoff was suppressed because the triggering message was deleted.',
+            );
+          }
+          // Suppression of an ordinary reply is deliberate (the triggering
+          // message was deleted); treat it as delivered so the turn is not
+          // aborted mid-flight.
+          didSendVisibleResponse = true;
+        },
+        postReaction: async ({ name, purpose, messageId }) => {
+          if (
+            didAddProcessingReaction &&
+            name === processingReactionName &&
+            messageId === event.ts
+          ) {
+            if (purpose === 'closeout') {
+              didAddProcessingReaction = false;
+            }
+            didSendVisibleResponse = true;
+            return;
+          }
+
+          const added = await slack.addReaction({
+            channel: event.channel,
+            timestamp: messageId,
+            name,
+          });
+          if (!added) {
+            throw new Error(`Slack rejected the ${name} reaction.`);
           }
           didSendVisibleResponse = true;
-          return;
-        }
-
-        const added = await slack.addReaction({
-          channel: event.channel,
-          timestamp: slackMessageTs,
-          name,
-        });
-        if (!added) {
-          throw new Error(`Slack rejected the ${name} reaction.`);
-        }
-        didSendVisibleResponse = true;
+        },
       },
     });
 

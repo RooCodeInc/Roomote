@@ -109,11 +109,11 @@ describe('deliverFastAgentParentEvent', () => {
     mocks.postMessage.mockResolvedValue('101.001');
     mocks.answerQuestion.mockImplementation(
       async ({
-        postSlackReply,
+        adapter,
       }: {
-        postSlackReply: (reply: unknown) => unknown;
+        adapter: { postReply: (reply: unknown) => unknown };
       }) =>
-        postSlackReply({
+        adapter.postReply({
           purpose: 'closeout',
           message: 'The proof is ready.',
           imageArtifactIds: ['artifact-1', 'artifact-1'],
@@ -125,14 +125,17 @@ describe('deliverFastAgentParentEvent', () => {
     await deliverFastAgentParentEvent({ parent, event });
 
     expect(mocks.acquireTurnLock).toHaveBeenCalledWith({
-      slackTeamId: 'T123',
-      slackChannel: 'C123',
-      slackThreadTs: '100.001',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T123',
+        channelId: 'C123',
+        threadId: '100.001',
+      },
     });
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
-        platformEvent: true,
-        launchTask: mocks.launchTask,
+        turnSource: 'platform_event',
+        adapter: expect.objectContaining({ launchTask: mocks.launchTask }),
       }),
     );
     expect(mocks.createLauncher).toHaveBeenCalledWith({
@@ -187,11 +190,11 @@ describe('deliverFastAgentParentEvent', () => {
     };
     mocks.answerQuestion.mockImplementation(
       async ({
-        postSlackReply,
+        adapter,
       }: {
-        postSlackReply: (reply: unknown) => unknown;
+        adapter: { postReply: (reply: unknown) => unknown };
       }) =>
-        postSlackReply({
+        adapter.postReply({
           purpose: 'closeout',
           message: 'The pull request is open.',
         }),
@@ -208,7 +211,7 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         question: expect.stringContaining(pullRequestEvent.pullRequest.url),
-        platformEvent: true,
+        turnSource: 'platform_event',
       }),
     );
     expect(firstClientMessageId).toEqual(expect.any(String));
@@ -235,7 +238,7 @@ describe('deliverFastAgentParentEvent', () => {
     expect(input).toEqual(
       expect.objectContaining({
         question: expect.stringContaining('"type":"task_settled"'),
-        platformEvent: true,
+        turnSource: 'platform_event',
       }),
     );
     expect(input).not.toHaveProperty('activeTasks');
