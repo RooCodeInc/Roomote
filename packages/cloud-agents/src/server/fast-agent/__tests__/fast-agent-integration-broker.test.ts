@@ -58,10 +58,13 @@ const auditContext = {
   userId: 'user-1',
   apiBaseUrl: 'https://api.example.com',
   sessionId: 'session-1',
-  slackTeamId: 'team-1',
-  slackChannel: 'channel-1',
-  slackThreadTs: '100.1',
-  slackMessageTs: '100.2',
+  conversation: {
+    surface: 'slack' as const,
+    workspaceId: 'team-1',
+    channelId: 'channel-1',
+    threadId: '100.1',
+  },
+  messageId: '100.2',
 };
 
 describe('fast-agent integration broker', () => {

@@ -211,10 +211,14 @@ export async function deliverFastAgentParentEvent(params: {
    * and lean on their own retry instead of blocking. */
   lockWaitMs?: number;
 }): Promise<'delivered' | 'skipped'> {
+  const conversation = {
+    surface: 'slack' as const,
+    workspaceId: params.parent.slackTeamId,
+    channelId: params.parent.slackChannel,
+    threadId: params.parent.slackThreadTs,
+  };
   const releaseTurnLock = await acquireFastAgentTurnLock({
-    slackTeamId: params.parent.slackTeamId,
-    slackChannel: params.parent.slackChannel,
-    slackThreadTs: params.parent.slackThreadTs,
+    conversation,
     ...(params.lockWaitMs !== undefined
       ? { maxWaitMs: params.lockWaitMs }
       : {}),
@@ -278,36 +282,36 @@ export async function deliverFastAgentParentEvent(params: {
     await answerFastAgentQuestion({
       question: `<delegated_task_event>${JSON.stringify(params.event)}</delegated_task_event>`,
       userId: session.userId,
-      slackTeamId: params.parent.slackTeamId,
-      slackChannel: params.parent.slackChannel,
-      slackThreadTs: params.parent.slackThreadTs,
-      platformEvent: true,
-      launchTask,
-      ...(params.retryTaskStart
-        ? { retryTaskStart: params.retryTaskStart }
-        : {}),
-      postSlackReply: async ({ message, imageArtifactIds = [] }) => {
-        const imageBlocks = await buildSelectedImageBlocks({
-          artifactIds: imageArtifactIds,
-          event: params.event,
-        });
-        const messageTs = await slack.postMessage({
-          channel: params.parent.slackChannel,
-          thread_ts: params.parent.slackThreadTs,
-          text: message,
-          blocks: [{ type: 'markdown', text: message }, ...imageBlocks],
-          unfurl_links: false,
-          unfurl_media: false,
-          client_msg_id: buildSlackClientMessageId(
-            buildEventClientMessageSeed(params.event),
-          ),
-        });
-        if (!messageTs) {
-          throw new Error(
-            'Slack did not return a Fast parent event timestamp.',
-          );
-        }
-        slackPosted = true;
+      conversation,
+      turnSource: 'platform_event',
+      adapter: {
+        launchTask,
+        ...(params.retryTaskStart
+          ? { retryTaskStart: params.retryTaskStart }
+          : {}),
+        postReply: async ({ message, imageArtifactIds = [] }) => {
+          const imageBlocks = await buildSelectedImageBlocks({
+            artifactIds: imageArtifactIds,
+            event: params.event,
+          });
+          const messageTs = await slack.postMessage({
+            channel: params.parent.slackChannel,
+            thread_ts: params.parent.slackThreadTs,
+            text: message,
+            blocks: [{ type: 'markdown', text: message }, ...imageBlocks],
+            unfurl_links: false,
+            unfurl_media: false,
+            client_msg_id: buildSlackClientMessageId(
+              buildEventClientMessageSeed(params.event),
+            ),
+          });
+          if (!messageTs) {
+            throw new Error(
+              'Slack did not return a Fast parent event timestamp.',
+            );
+          }
+          slackPosted = true;
+        },
       },
     });
     return 'delivered';

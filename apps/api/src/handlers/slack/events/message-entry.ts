@@ -501,9 +501,10 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     eligibilityReason = 'pending-routing-confirmation';
   } else {
     isFastAgentThread = await hasFastAgentSession({
-      slackTeamId: teamId,
-      slackChannel: event.channel,
-      slackThreadTs: event.thread_ts,
+      surface: 'slack',
+      workspaceId: teamId,
+      channelId: event.channel,
+      threadId: event.thread_ts,
     });
 
     roomoteThreadMatch = isFastAgentThread
@@ -1761,9 +1762,10 @@ async function handleSlackEntryEvent(params: {
   )
     ? false
     : await hasFastAgentSession({
-        slackTeamId: teamId,
-        slackChannel: event.channel,
-        slackThreadTs: threadId,
+        surface: 'slack',
+        workspaceId: teamId,
+        channelId: event.channel,
+        threadId,
       });
 
   if (isFastAgentContinuation) {

@@ -13,6 +13,10 @@ import {
   type SlackQuickAnswer,
 } from '@roomote/db/server';
 import { activeRunStatuses, type RunStatus } from '@roomote/types';
+import {
+  getFastAgentConversationStorageWorkspaceId,
+  type FastAgentConversation,
+} from './fast-agent-conversation';
 
 type FastAgentSessionRecord = Pick<SlackQuickAnswer, 'id'> & {
   messages: ModelMessage[];
@@ -24,57 +28,45 @@ export type FastAgentActiveTask = {
   status?: RunStatus;
 };
 
-function buildFastAgentSessionWhere({
-  slackTeamId,
-  slackChannel,
-  slackThreadTs,
-}: {
-  slackTeamId: string;
-  slackChannel: string;
-  slackThreadTs: string;
-}) {
+function buildFastAgentSessionWhere(conversation: FastAgentConversation) {
   const scopedSlackChannel = buildFastAgentSessionChannelKey({
-    slackTeamId,
-    slackChannel,
+    surface: conversation.surface,
+    workspaceId: conversation.workspaceId,
+    channelId: conversation.channelId,
   });
 
   return and(
     eq(slackQuickAnswers.slackChannel, scopedSlackChannel),
-    eq(slackQuickAnswers.slackThreadTs, slackThreadTs),
+    eq(slackQuickAnswers.slackThreadTs, conversation.threadId),
   );
 }
 
 export function buildFastAgentSessionChannelKey({
-  slackTeamId,
-  slackChannel,
+  surface,
+  workspaceId,
+  channelId,
 }: {
-  slackTeamId: string;
-  slackChannel: string;
+  surface: FastAgentConversation['surface'];
+  workspaceId: string;
+  channelId: string;
 }): string {
   // The existing column and unique index predate multi-workspace scoping.
   // Qualifying the value keeps N-1 rollback compatibility without a migration.
-  return `${slackTeamId}:${slackChannel}`;
+  return `${getFastAgentConversationStorageWorkspaceId({ surface, workspaceId })}:${channelId}`;
 }
 
 export async function getOrCreateFastAgentSession({
   userId,
-  slackTeamId,
-  slackChannel,
-  slackThreadTs,
+  conversation,
 }: {
   userId: string;
-  slackTeamId: string;
-  slackChannel: string;
-  slackThreadTs: string;
+  conversation: FastAgentConversation;
 }): Promise<FastAgentSessionRecord> {
-  const where = buildFastAgentSessionWhere({
-    slackTeamId,
-    slackChannel,
-    slackThreadTs,
-  });
+  const where = buildFastAgentSessionWhere(conversation);
   const scopedSlackChannel = buildFastAgentSessionChannelKey({
-    slackTeamId,
-    slackChannel,
+    surface: conversation.surface,
+    workspaceId: conversation.workspaceId,
+    channelId: conversation.channelId,
   });
 
   const existingSession = await db.query.slackQuickAnswers.findFirst({
@@ -97,7 +89,7 @@ export async function getOrCreateFastAgentSession({
     .values({
       userId,
       slackChannel: scopedSlackChannel,
-      slackThreadTs,
+      slackThreadTs: conversation.threadId,
       messages: [],
     })
     .onConflictDoNothing({
@@ -133,21 +125,11 @@ export async function getOrCreateFastAgentSession({
   };
 }
 
-export async function hasFastAgentSession({
-  slackTeamId,
-  slackChannel,
-  slackThreadTs,
-}: {
-  slackTeamId: string;
-  slackChannel: string;
-  slackThreadTs: string;
-}): Promise<boolean> {
+export async function hasFastAgentSession(
+  conversation: FastAgentConversation,
+): Promise<boolean> {
   const session = await db.query.slackQuickAnswers.findFirst({
-    where: buildFastAgentSessionWhere({
-      slackTeamId,
-      slackChannel,
-      slackThreadTs,
-    }),
+    where: buildFastAgentSessionWhere(conversation),
     columns: { id: true },
   });
 
