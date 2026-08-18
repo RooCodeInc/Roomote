@@ -138,7 +138,7 @@ export async function notifyFastAgentParentOnPullRequestOpened(params: {
     const deliveryError =
       error instanceof FastAgentParentEventDeliveryError ? error : null;
 
-    if (delivered || deliveryError?.slackPosted || deliveryError?.permanent) {
+    if (delivered || deliveryError?.replyPosted || deliveryError?.permanent) {
       await markDelivered().catch(() => {});
       return;
     }

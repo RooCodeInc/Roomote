@@ -5,6 +5,7 @@ import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
   createFastAgentSlackTaskLauncher,
+  type FastAgentTurnAdapter,
 } from '@roomote/cloud-agents/server';
 import {
   asc,
@@ -45,20 +46,20 @@ export function buildSlackClientMessageId(seed: string): string {
 }
 
 export class FastAgentParentEventDeliveryError extends Error {
-  /** True once the orchestrator's reply reached Slack; callers must not
+  /** True once the orchestrator's reply reached the chat; callers must not
    * release their delivery claim in that case or a retry double-posts. */
-  readonly slackPosted: boolean;
-  /** True when no retry can ever succeed (parent session or Slack
+  readonly replyPosted: boolean;
+  /** True when no retry can ever succeed (parent session or surface
    * installation is gone); callers should stop retrying. */
   readonly permanent: boolean;
 
   constructor(
     message: string,
-    options: { cause?: unknown; slackPosted: boolean; permanent?: boolean },
+    options: { cause?: unknown; replyPosted: boolean; permanent?: boolean },
   ) {
     super(message, options.cause !== undefined ? { cause: options.cause } : {});
     this.name = 'FastAgentParentEventDeliveryError';
-    this.slackPosted = options.slackPosted;
+    this.replyPosted = options.replyPosted;
     this.permanent = options.permanent ?? false;
   }
 }
@@ -200,6 +201,103 @@ function buildEventClientMessageSeed(event: FastAgentParentEvent): string {
   }
 }
 
+type FastAgentParentTurn = {
+  userId: string;
+  adapter: FastAgentTurnAdapter;
+};
+
+async function createSlackFastAgentParentTurn(params: {
+  parent: FastAgentParent;
+  event: FastAgentParentEvent;
+  onReplyPosted: () => void;
+}): Promise<FastAgentParentTurn> {
+  const conversation = params.parent.conversation;
+  if (conversation.surface !== 'slack') {
+    throw new Error('Expected a Slack Fast parent conversation.');
+  }
+
+  const scopedChannel = `${conversation.workspaceId}:${conversation.channelId}`;
+  const [session, installation] = await Promise.all([
+    db.query.slackQuickAnswers.findFirst({
+      where: and(
+        eq(slackQuickAnswers.id, params.parent.sessionId),
+        eq(slackQuickAnswers.slackChannel, scopedChannel),
+        eq(slackQuickAnswers.slackThreadTs, conversation.threadId),
+      ),
+      columns: { id: true, userId: true },
+    }),
+    db.query.slackInstallations.findFirst({
+      where: and(
+        eq(slackInstallations.isActive, true),
+        eq(slackInstallations.teamId, conversation.workspaceId),
+      ),
+      columns: { botAccessToken: true, teamDomain: true },
+    }),
+  ]);
+
+  if (!session || !installation?.botAccessToken) {
+    throw new FastAgentParentEventDeliveryError(
+      'Fast parent session or Slack installation was not found.',
+      { replyPosted: false, permanent: true },
+    );
+  }
+
+  const slack = new SlackNotifier(installation.botAccessToken);
+  return {
+    userId: session.userId,
+    adapter: {
+      launchTask: createFastAgentSlackTaskLauncher({
+        userId: session.userId,
+        teamId: conversation.workspaceId,
+        ...(installation.teamDomain
+          ? { teamDomain: installation.teamDomain }
+          : {}),
+        channelId: conversation.channelId,
+        threadTs: conversation.threadId,
+      }),
+      postReply: async ({ message, imageArtifactIds = [] }) => {
+        const imageBlocks = await buildSelectedImageBlocks({
+          artifactIds: imageArtifactIds,
+          event: params.event,
+        });
+        const messageTs = await slack.postMessage({
+          channel: conversation.channelId,
+          thread_ts: conversation.threadId,
+          text: message,
+          blocks: [{ type: 'markdown', text: message }, ...imageBlocks],
+          unfurl_links: false,
+          unfurl_media: false,
+          client_msg_id: buildSlackClientMessageId(
+            buildEventClientMessageSeed(params.event),
+          ),
+        });
+        if (!messageTs) {
+          throw new Error(
+            'Slack did not return a Fast parent event timestamp.',
+          );
+        }
+        params.onReplyPosted();
+      },
+    },
+  };
+}
+
+async function createFastAgentParentTurn(params: {
+  parent: FastAgentParent;
+  event: FastAgentParentEvent;
+  onReplyPosted: () => void;
+}): Promise<FastAgentParentTurn> {
+  switch (params.parent.conversation.surface) {
+    case 'slack':
+      return createSlackFastAgentParentTurn(params);
+    case 'discord':
+      throw new FastAgentParentEventDeliveryError(
+        'Fast parent delivery is not configured for discord.',
+        { replyPosted: false, permanent: true },
+      );
+  }
+}
+
 /** Give a structured child event to the Fast orchestrator for presentation. */
 export async function deliverFastAgentParentEvent(params: {
   parent: FastAgentParent;
@@ -211,12 +309,7 @@ export async function deliverFastAgentParentEvent(params: {
    * and lean on their own retry instead of blocking. */
   lockWaitMs?: number;
 }): Promise<'delivered' | 'skipped'> {
-  const conversation = {
-    surface: 'slack' as const,
-    workspaceId: params.parent.slackTeamId,
-    channelId: params.parent.slackChannel,
-    threadId: params.parent.slackThreadTs,
-  };
+  const conversation = params.parent.conversation;
   const releaseTurnLock = await acquireFastAgentTurnLock({
     conversation,
     ...(params.lockWaitMs !== undefined
@@ -226,11 +319,11 @@ export async function deliverFastAgentParentEvent(params: {
   if (!releaseTurnLock) {
     throw new FastAgentParentEventDeliveryError(
       'Fast parent turn lock did not become available.',
-      { slackPosted: false },
+      { replyPosted: false },
     );
   }
 
-  let slackPosted = false;
+  let replyPosted = false;
 
   try {
     if (params.event.type === 'pull_request_opened') {
@@ -243,75 +336,23 @@ export async function deliverFastAgentParentEvent(params: {
       }
     }
 
-    const scopedChannel = `${params.parent.slackTeamId}:${params.parent.slackChannel}`;
-    const [session, installation] = await Promise.all([
-      db.query.slackQuickAnswers.findFirst({
-        where: and(
-          eq(slackQuickAnswers.id, params.parent.sessionId),
-          eq(slackQuickAnswers.slackChannel, scopedChannel),
-          eq(slackQuickAnswers.slackThreadTs, params.parent.slackThreadTs),
-        ),
-        columns: { id: true, userId: true },
-      }),
-      db.query.slackInstallations.findFirst({
-        where: and(
-          eq(slackInstallations.isActive, true),
-          eq(slackInstallations.teamId, params.parent.slackTeamId),
-        ),
-        columns: { botAccessToken: true, teamDomain: true },
-      }),
-    ]);
-
-    if (!session || !installation?.botAccessToken) {
-      throw new FastAgentParentEventDeliveryError(
-        'Fast parent session or Slack installation was not found.',
-        { slackPosted: false, permanent: true },
-      );
-    }
-
-    const slack = new SlackNotifier(installation.botAccessToken);
-    const launchTask = createFastAgentSlackTaskLauncher({
-      userId: session.userId,
-      teamId: params.parent.slackTeamId,
-      ...(installation.teamDomain
-        ? { teamDomain: installation.teamDomain }
-        : {}),
-      channelId: params.parent.slackChannel,
-      threadTs: params.parent.slackThreadTs,
+    const parentTurn = await createFastAgentParentTurn({
+      parent: params.parent,
+      event: params.event,
+      onReplyPosted: () => {
+        replyPosted = true;
+      },
     });
     await answerFastAgentQuestion({
       question: `<delegated_task_event>${JSON.stringify(params.event)}</delegated_task_event>`,
-      userId: session.userId,
+      userId: parentTurn.userId,
       conversation,
       turnSource: 'platform_event',
       adapter: {
-        launchTask,
+        ...parentTurn.adapter,
         ...(params.retryTaskStart
           ? { retryTaskStart: params.retryTaskStart }
           : {}),
-        postReply: async ({ message, imageArtifactIds = [] }) => {
-          const imageBlocks = await buildSelectedImageBlocks({
-            artifactIds: imageArtifactIds,
-            event: params.event,
-          });
-          const messageTs = await slack.postMessage({
-            channel: params.parent.slackChannel,
-            thread_ts: params.parent.slackThreadTs,
-            text: message,
-            blocks: [{ type: 'markdown', text: message }, ...imageBlocks],
-            unfurl_links: false,
-            unfurl_media: false,
-            client_msg_id: buildSlackClientMessageId(
-              buildEventClientMessageSeed(params.event),
-            ),
-          });
-          if (!messageTs) {
-            throw new Error(
-              'Slack did not return a Fast parent event timestamp.',
-            );
-          }
-          slackPosted = true;
-        },
       },
     });
     return 'delivered';
@@ -321,7 +362,7 @@ export async function deliverFastAgentParentEvent(params: {
     }
     throw new FastAgentParentEventDeliveryError(
       error instanceof Error ? error.message : String(error),
-      { cause: error, slackPosted },
+      { cause: error, replyPosted },
     );
   } finally {
     await releaseTurnLock();

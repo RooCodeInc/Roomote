@@ -36,9 +36,12 @@ export function createFastAgentSlackTaskLauncher(params: {
         fastAgentSessionId: parentSessionId,
         fastAgentParent: {
           sessionId: parentSessionId,
-          slackTeamId: params.teamId,
-          slackChannel: params.channelId,
-          slackThreadTs: params.threadTs,
+          conversation: {
+            surface: 'slack',
+            workspaceId: params.teamId,
+            channelId: params.channelId,
+            threadId: params.threadTs,
+          },
         },
         ...(environmentId && environmentId !== ALL_REPOSITORIES
           ? { environmentId }

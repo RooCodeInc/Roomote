@@ -1,5 +1,9 @@
 import { db, inArray, taskFactory, taskRuns, tasks } from '@roomote/db/server';
-import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import {
+  RunStatus,
+  TaskPayloadKind,
+  type FastAgentParent,
+} from '@roomote/types';
 
 import { getActiveFastAgentTasks } from '../fast-agent-session';
 
@@ -19,12 +23,7 @@ async function createRun(input: {
   createdAt: Date;
   canceledAt?: Date;
   fastAgentSessionId?: string;
-  fastAgentParent?: {
-    sessionId: string;
-    slackTeamId: string;
-    slackChannel: string;
-    slackThreadTs: string;
-  };
+  fastAgentParent?: FastAgentParent;
 }) {
   const [run] = await db
     .insert(taskRuns)
@@ -157,9 +156,12 @@ describe('getActiveFastAgentTasks', () => {
       createdAt: new Date('2026-08-17T00:01:00Z'),
       fastAgentParent: {
         sessionId: SESSION_ID,
-        slackTeamId: 'T123',
-        slackChannel: 'C123',
-        slackThreadTs: '111.222',
+        conversation: {
+          surface: 'slack',
+          workspaceId: 'T123',
+          channelId: 'C123',
+          threadId: '111.222',
+        },
       },
     });
 

@@ -2,15 +2,15 @@ import type { TaskRun } from '@roomote/db/server';
 
 const mocks = vi.hoisted(() => {
   class FastAgentParentEventDeliveryError extends Error {
-    readonly slackPosted: boolean;
+    readonly replyPosted: boolean;
     readonly permanent: boolean;
 
     constructor(
       message: string,
-      options: { slackPosted: boolean; permanent?: boolean },
+      options: { replyPosted: boolean; permanent?: boolean },
     ) {
       super(message);
-      this.slackPosted = options.slackPosted;
+      this.replyPosted = options.replyPosted;
       this.permanent = options.permanent ?? false;
     }
   }
@@ -66,9 +66,12 @@ import { notifyFastAgentParentOnPullRequestOpened } from '../notify-fast-agent-p
 
 const fastParent = {
   sessionId: '11111111-1111-4111-8111-111111111111',
-  slackTeamId: 'T123',
-  slackChannel: 'C123',
-  slackThreadTs: '100.001',
+  conversation: {
+    surface: 'slack' as const,
+    workspaceId: 'T123',
+    channelId: 'C123',
+    threadId: '100.001',
+  },
 };
 
 function makeRun(payload: Record<string, unknown>): TaskRun {
