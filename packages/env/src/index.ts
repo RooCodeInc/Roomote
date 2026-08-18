@@ -386,33 +386,6 @@ const serverSchema = {
   // boot, or leave both unset.
   R_BRAIN_EMBEDDING_MODEL: z.string().min(1).optional(),
   R_BRAIN_EMBEDDING_DIMENSIONS: z.coerce.number().int().positive().optional(),
-  // Nightly entity compilation scans a bounded roster slice and compiles only
-  // a smaller changed subset. Timeline/evidence caps bound gbrain reads and
-  // provider input independently of deployment size.
-  R_BRAIN_ENTITY_COMPILATION_SCAN_LIMIT: z.coerce
-    .number()
-    .int()
-    .positive()
-    .max(1_000)
-    .default(100),
-  R_BRAIN_ENTITY_COMPILATION_BATCH_SIZE: z.coerce
-    .number()
-    .int()
-    .positive()
-    .max(100)
-    .default(10),
-  R_BRAIN_ENTITY_COMPILATION_TIMELINE_LIMIT: z.coerce
-    .number()
-    .int()
-    .positive()
-    .max(500)
-    .default(100),
-  R_BRAIN_ENTITY_COMPILATION_MAX_EVIDENCE_CHARS: z.coerce
-    .number()
-    .int()
-    .min(1_000)
-    .max(100_000)
-    .default(30_000),
   API_EXTERNAL_REQUEST_TIMEOUT_MS: z.coerce
     .number()
     .int()

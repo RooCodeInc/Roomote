@@ -85,7 +85,6 @@ export type CollectorPage = {
   title: string;
   content: string;
   timelineEvidence?: EntityTimelineEvidence[];
-  preserveExistingEntityContent?: boolean;
 };
 
 export type EntityTimelineEvidence = {
@@ -190,26 +189,11 @@ type BrainTimelineSink = (
   connection: BrainConnection,
 ) => Promise<void>;
 
-type BrainIdentitySink = (
-  page: CollectorPage,
-  connection: BrainConnection,
-) => Promise<void>;
-
 async function appendBrainTimelineEvidence(
   evidence: EntityTimelineEvidence,
   connection: BrainConnection,
 ): Promise<void> {
   await callBrainWriteTool(connection, 'add_timeline_entry', evidence);
-}
-
-async function upsertBrainEntityIdentity(
-  page: CollectorPage,
-  connection: BrainConnection,
-): Promise<void> {
-  await callBrainWriteTool(connection, 'upsert_entity_identity', {
-    slug: page.slug,
-    content: page.content,
-  });
 }
 
 /**
@@ -236,7 +220,6 @@ export async function runBrainCollectors(
   options: {
     sink?: BrainSink;
     timelineSink?: BrainTimelineSink;
-    identitySink?: BrainIdentitySink;
     collectors?: BrainCollector[];
     /** Skip upstream incremental polls during fast historical continuation. */
     includeIncremental?: boolean;
@@ -244,7 +227,6 @@ export async function runBrainCollectors(
 ): Promise<BrainCollectorRunResult> {
   const sink = options.sink ?? postToBrain;
   const timelineSink = options.timelineSink ?? appendBrainTimelineEvidence;
-  const identitySink = options.identitySink ?? upsertBrainEntityIdentity;
   const collectors = options.collectors ?? BRAIN_COLLECTORS;
   const includeIncremental = options.includeIncremental ?? true;
   let backfillProgressed = false;
@@ -276,12 +258,8 @@ export async function runBrainCollectors(
         const capped = pages.slice(0, MAX_PAGES_PER_COLLECTOR_PER_PASS);
 
         for (const page of capped) {
-          const safePage = {
-            ...page,
-            content: redactBrainText(page.content),
-          };
-          await (page.preserveExistingEntityContent ? identitySink : sink)(
-            safePage,
+          await sink(
+            { ...page, content: redactBrainText(page.content) },
             connection,
           );
           for (const evidence of page.timelineEvidence ?? []) {
@@ -354,7 +332,6 @@ export async function runBrainCollectors(
             connection,
             sink,
             timelineSink,
-            identitySink,
           })) || backfillProgressed;
       }
     } catch (error) {
@@ -394,17 +371,9 @@ async function drainCollectorBackfill(input: {
   connection: BrainConnection;
   sink: BrainSink;
   timelineSink: BrainTimelineSink;
-  identitySink: BrainIdentitySink;
 }): Promise<boolean> {
-  const {
-    collectorId,
-    backfill,
-    startCursor,
-    connection,
-    sink,
-    timelineSink,
-    identitySink,
-  } = input;
+  const { collectorId, backfill, startCursor, connection, sink, timelineSink } =
+    input;
   let cursor = startCursor;
   let budget = MAX_BACKFILL_PAGES_PER_COLLECTOR_PER_PASS;
   let steps = 0;
@@ -415,9 +384,8 @@ async function drainCollectorBackfill(input: {
     const step = await backfill({ cursor, limit: budget });
 
     for (const page of step.pages) {
-      const safePage = { ...page, content: redactBrainText(page.content) };
-      await (page.preserveExistingEntityContent ? identitySink : sink)(
-        safePage,
+      await sink(
+        { ...page, content: redactBrainText(page.content) },
         connection,
       );
       for (const evidence of page.timelineEvidence ?? []) {
@@ -730,26 +698,33 @@ async function loadSlackAuthorLabels(): Promise<
   Map<string, PersonIdentityReference>
 > {
   try {
-    const records = await loadPersonIdentityRecords();
-    const references = new Map(
-      records
-        .filter((record) => !record.deletedAt)
-        .map((record) => [
-          record.userId,
-          {
-            slug: personIdentitySlug(record.userId),
-            title: personIdentityDisplayName(record),
-            effectiveDate: record.createdAt,
+    const mappings = await db.query.slackUserMappings.findMany({
+      with: {
+        user: {
+          columns: {
+            id: true,
+            name: true,
+            createdAt: true,
+            deletedAt: true,
           },
-        ]),
-    );
-    const mappings = await db.select().from(slackUserMappings);
+        },
+      },
+    });
 
     return new Map(
-      mappings.flatMap((mapping) => {
-        const reference = references.get(mapping.userId);
-        return reference
-          ? [[`${mapping.slackTeamId}/${mapping.slackUserId}`, reference]]
+      mappings.flatMap(({ slackTeamId, slackUserId, user }) => {
+        const title = brainSafeIdentityValue(user.name);
+        return !user.deletedAt && title
+          ? [
+              [
+                `${slackTeamId}/${slackUserId}`,
+                {
+                  slug: personIdentitySlug(user.id),
+                  title,
+                  effectiveDate: user.createdAt,
+                },
+              ] as const,
+            ]
           : [];
       }),
     );
@@ -1269,11 +1244,6 @@ function personIdentitySlug(userId: string): string {
   return `people/roomote-member-${digest}`;
 }
 
-function personCompilationStateId(slug: string): string {
-  const digest = createHash('sha256').update(slug).digest('hex').slice(0, 24);
-  return `roomote-entity-compilation:entity:${digest}`;
-}
-
 function normalizeIdentityAlias(value: string): string {
   return singleLineIdentityValue(value).toLocaleLowerCase();
 }
@@ -1348,7 +1318,6 @@ export function buildPersonIdentityPage(
       'provenance: roomote-person-identities',
       '---',
       '',
-      '<!-- roomote:identity:start -->',
       `# ${name}`,
       '',
       deleted
@@ -1371,16 +1340,8 @@ export function buildPersonIdentityPage(
             }),
           ]
         : []),
-      '<!-- roomote:identity:end -->',
-      '',
-      '<!-- roomote:compiled-activity:start -->',
-      '## Activity summary',
-      '',
-      'No compiled activity yet.',
-      '<!-- roomote:compiled-activity:end -->',
       '',
     ].join('\n'),
-    preserveExistingEntityContent: true,
   };
 }
 
@@ -1534,19 +1495,6 @@ async function loadPersonIdentityRecords(): Promise<PersonIdentityRecord[]> {
   }
 
   return [...byUserId.values()];
-}
-
-export async function listCanonicalPersonReferences(): Promise<
-  PersonIdentityReference[]
-> {
-  return (await loadPersonIdentityRecords())
-    .filter((record) => !record.deletedAt)
-    .map((record) => ({
-      slug: personIdentitySlug(record.userId),
-      title: personIdentityDisplayName(record),
-      effectiveDate: record.createdAt,
-    }))
-    .sort((a, b) => a.slug.localeCompare(b.slug));
 }
 
 const SLACK_DIRECTORY_COLLECTOR_ID =
@@ -2068,7 +2016,8 @@ const slackPersonDirectoryCollector: BrainCollector = {
 };
 
 const PERSON_IDENTITIES_STATE_ID =
-  'person-identities:members:compiled-activity-v3';
+  'person-identities:members:occurrence-date-v2';
+const PERSON_IDENTITIES_RECONCILIATION_MS = 24 * 60 * 60 * 1000;
 const GRANOLA_MEETINGS_COLLECTOR_ID = 'granola-meetings:entity-timeline-v3';
 
 type PersonIdentityCursor = {
@@ -2153,13 +2102,19 @@ export function selectPersonIdentityBatch(input: {
   watermark: Date;
   cursor: string;
   projectionChanged: boolean;
-  resetCompilationState: boolean;
 } {
   const { records, state, now, limit } = input;
   const cursor = parsePersonIdentityCursor(state?.cursor ?? null);
   const projectionHash = personIdentityProjectionHash(records);
   const projectionChanged = cursor.projectionHash !== projectionHash;
-  if (cursor.mode === 'sweep' || projectionChanged) {
+  const lastSweepAt = cursor.lastSweepAt ? new Date(cursor.lastSweepAt) : null;
+  const sweepDue =
+    !lastSweepAt ||
+    Number.isNaN(lastSweepAt.getTime()) ||
+    now.getTime() - lastSweepAt.getTime() >=
+      PERSON_IDENTITIES_RECONCILIATION_MS;
+
+  if (cursor.mode === 'sweep' || sweepDue || projectionChanged) {
     const afterUserId =
       cursor.mode === 'sweep' && !projectionChanged ? cursor.afterUserId : '';
     const candidates = [...records]
@@ -2173,7 +2128,6 @@ export function selectPersonIdentityBatch(input: {
       records: batch,
       watermark: hasMore ? (state?.watermark ?? new Date(0)) : now,
       projectionChanged,
-      resetCompilationState: true,
       cursor: serializePersonIdentityCursor(
         hasMore && last
           ? {
@@ -2219,7 +2173,6 @@ export function selectPersonIdentityBatch(input: {
     records: batch,
     watermark: hasMore ? afterUpdatedAt : now,
     projectionChanged,
-    resetCompilationState: false,
     cursor: serializePersonIdentityCursor(
       hasMore && last
         ? {
@@ -2267,19 +2220,13 @@ const personIdentitiesCollector: BrainCollector = {
           watermark: batch.watermark,
           cursor: batch.cursor,
         },
-        ...(batch.resetCompilationState
+        ...(batch.projectionChanged
           ? [
               {
                 collectorId: GRANOLA_MEETINGS_COLLECTOR_ID,
                 cursor: null,
                 backfillCompletedAt: null,
               },
-              ...batch.records.map((record) => ({
-                collectorId: personCompilationStateId(
-                  personIdentitySlug(record.userId),
-                ),
-                cursor: null,
-              })),
             ]
           : []),
       ],

@@ -8,23 +8,13 @@
 # worker. The worker is required for Roomote-scheduled maintenance cycles.
 FROM oven/bun:1.3.14
 
-ARG GBRAIN_REF=d995508731ac85710c05486536a5458a00c37d73
+ARG GBRAIN_REF=f49ca569232dbc0d8e0783d84606115e3bfe5ab1
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates git postgresql-client \
   && rm -rf /var/lib/apt/lists/*
 
 RUN bun install -g "github:garrytan/gbrain#${GBRAIN_REF}"
-
-# Upstream exposes idempotent timeline appends but not a remote operation that
-# can replace generated prose without round-tripping private Facts/Takes fences.
-# Keep the narrow marker-based merge inside gbrain until that API lands there.
-COPY roomote-entity-compilation.patch /tmp/roomote-entity-compilation.patch
-RUN git -C /root/.bun/install/global/node_modules/gbrain apply \
-  --no-index --check /tmp/roomote-entity-compilation.patch \
-  && git -C /root/.bun/install/global/node_modules/gbrain apply \
-    --no-index /tmp/roomote-entity-compilation.patch \
-  && rm /tmp/roomote-entity-compilation.patch
 
 # bun hoists global deps, but gbrain resolves its PGLite wasm assets relative
 # to its own node_modules (spike gotcha 1). Link the hoisted package where

@@ -869,42 +869,6 @@ describe('runBrainCollectors deep backfill', () => {
       new Date('2026-08-18T00:00:00Z'),
     );
   });
-
-  it('routes deterministic entity refreshes through the preserving identity sink', async () => {
-    const collector = makeCollector({
-      collect: async () => ({
-        pages: [
-          {
-            slug: 'people/member-a',
-            title: 'Alice',
-            content: 'identity projection',
-            preserveExistingEntityContent: true,
-          },
-        ],
-        nextSince: new Date('2026-08-18T00:00:00Z'),
-      }),
-    });
-    const sink = vi.fn(async () => {});
-    const identitySink = vi.fn(async () => {});
-
-    await runBrainCollectors(connection, {
-      sink,
-      identitySink,
-      collectors: [collector],
-    });
-
-    expect(sink).not.toHaveBeenCalled();
-    expect(identitySink).toHaveBeenCalledWith(
-      expect.objectContaining({
-        slug: 'people/member-a',
-        content: 'identity projection',
-      }),
-      connection,
-    );
-    expect(syncStateStore.get(collector.id)?.watermark).toEqual(
-      new Date('2026-08-18T00:00:00Z'),
-    );
-  });
 });
 
 describe('groupSlackMessagesIntoDayPages', () => {
@@ -1267,14 +1231,6 @@ describe('person identity pages', () => {
       '- Slack: Dan Riccio (U08TMEM25CP) — VP of Engineering',
     );
     expect(page.content).toContain('Joined Roomote on 2026-01-01.');
-    expect(page.content).toContain(
-      '<!-- roomote:identity:start -->\n# Dan Riccio',
-    );
-    expect(page.content).toContain('<!-- roomote:identity:end -->');
-    expect(page.content).toContain(
-      '<!-- roomote:compiled-activity:start -->\n## Activity summary',
-    );
-    expect(page.content).toContain('<!-- roomote:compiled-activity:end -->');
     expect(page.content).not.toContain('dan@example.com');
   });
 
@@ -1483,7 +1439,6 @@ describe('person identity pages', () => {
       'user-zed',
     ]);
     expect(secondBatch.projectionChanged).toBe(false);
-    expect(secondBatch.resetCompilationState).toBe(true);
     expect(JSON.parse(secondBatch.cursor)).toMatchObject({ mode: 'idle' });
   });
 

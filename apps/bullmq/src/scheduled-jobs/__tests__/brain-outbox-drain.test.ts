@@ -64,6 +64,7 @@ import {
   brainOutboxDrainJob,
   buildPullRequestFactPage,
   buildMemoryPage,
+  callBrainWriteTool,
   drainBrainHistoricalIngestion,
   getPullRequestFactsResumeCursor,
   isBrainNotReady,
@@ -382,6 +383,29 @@ describe('postToBrain failure classification', () => {
 
     await expect(postToBrain(page, connection)).rejects.toSatisfy(
       isBrainRateLimited,
+    );
+  });
+
+  it('calls supported gbrain write operations with the ingest credential', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ result: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await callBrainWriteTool(connection, 'add_timeline_entry', {
+      slug: 'people/member-a',
+      date: '2026-08-18',
+      summary: 'Participated in #general',
+      source: 'slack/team/channel/batch',
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://brain.test/mcp',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          authorization: 'Bearer ingest-token',
+        }),
+        body: expect.stringContaining('"name":"add_timeline_entry"'),
+      }),
     );
   });
 });
