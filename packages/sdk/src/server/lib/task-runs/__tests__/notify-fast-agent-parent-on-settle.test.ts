@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => {
     recordLifecycle: vi.fn(),
     deliverParentEvent: vi.fn(),
     listPullRequests: vi.fn(),
+    getTaskUrl: vi.fn(() => 'https://roomote.example/task/child-task'),
     findTaskRun: vi.fn(),
     canRetryFailedStart: vi.fn(),
     enqueueTaskRelaunch: vi.fn(),
@@ -61,7 +62,7 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   canRetryFailedStart: mocks.canRetryFailedStart,
   enqueueTaskRelaunch: mocks.enqueueTaskRelaunch,
-  getTaskUrl: vi.fn(() => 'https://roomote.example/task/child-task'),
+  getTaskUrl: mocks.getTaskUrl,
 }));
 
 vi.mock('../../fast-agent-parent-event', () => ({
@@ -77,8 +78,18 @@ const fastParent = {
   conversation: {
     surface: 'slack' as const,
     workspaceId: 'T123',
-    channelId: 'C123',
-    threadId: '100.001',
+    conversationId: '100.001',
+    replyTarget: { channelId: 'C123', threadId: '100.001' },
+  },
+};
+
+const discordFastParent = {
+  sessionId: '22222222-2222-4222-8222-222222222222',
+  conversation: {
+    surface: 'discord' as const,
+    workspaceId: 'guild-1',
+    conversationId: 'interaction-1',
+    replyTarget: { channelId: 'channel-1' },
   },
 };
 
@@ -112,13 +123,13 @@ describe('notifyFastAgentParentOnSettle', () => {
 
   it('passes child lifecycle state to the Fast orchestrator', async () => {
     await notifyFastAgentParentOnSettle(
-      makeRun({ fastAgentParent: fastParent }),
+      makeRun({ fastAgentParent: discordFastParent }),
       RunStatus.Idle,
       'Implement the fix',
     );
 
     expect(mocks.deliverParentEvent).toHaveBeenCalledWith({
-      parent: fastParent,
+      parent: discordFastParent,
       event: {
         type: 'task_settled',
         taskId: 'child-task',
@@ -127,6 +138,13 @@ describe('notifyFastAgentParentOnSettle', () => {
         status: RunStatus.Idle,
         taskUrl: 'https://roomote.example/task/child-task',
         pullRequests: [],
+      },
+    });
+    expect(mocks.getTaskUrl).toHaveBeenCalledWith({
+      taskId: 'child-task',
+      utm: {
+        source: 'discord',
+        campaign: 'fast-delegation-settle',
       },
     });
     expect(mocks.recordLifecycle).toHaveBeenCalledWith(

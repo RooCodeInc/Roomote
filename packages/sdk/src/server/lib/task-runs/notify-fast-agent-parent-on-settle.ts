@@ -215,7 +215,10 @@ export async function notifyFastAgentParentOnSettle(
           : {}),
         taskUrl: getTaskUrl({
           taskId: run.taskId,
-          utm: { source: 'slack', campaign: 'fast-delegation-settle' },
+          utm: {
+            source: parent.conversation.surface,
+            campaign: 'fast-delegation-settle',
+          },
         }),
         pullRequests,
       },

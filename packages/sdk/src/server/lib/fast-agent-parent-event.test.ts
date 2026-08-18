@@ -22,16 +22,39 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   buildFastAgentSessionChannelKey: ({
     surface,
     workspaceId,
-    channelId,
+    replyTarget,
   }: {
     surface: string;
     workspaceId: string;
-    channelId: string;
+    replyTarget: { channelId: string };
   }) =>
-    `${surface === 'slack' ? workspaceId : `${surface}:${workspaceId}`}:${channelId}`,
+    `${surface === 'slack' ? workspaceId : `${surface}:${workspaceId}`}:${replyTarget.channelId}`,
   createFastAgentSlackTaskLauncher: mocks.createLauncher,
-  enqueueTask: mocks.enqueueTask,
-  getTaskUrl: mocks.getTaskUrl,
+  createFastAgentTaskLauncher:
+    ({
+      buildTask,
+    }: {
+      buildTask: (input: {
+        prompt: string;
+        environmentId: string | null;
+        parentSessionId: string;
+      }) => unknown | Promise<unknown>;
+    }) =>
+    async (input: {
+      prompt: string;
+      environmentId: string | null;
+      parentSessionId: string;
+      postKickoff: (task: {
+        taskId: string;
+        taskUrl?: string;
+      }) => Promise<void>;
+    }) => {
+      const task = await buildTask(input);
+      const taskUrl = mocks.getTaskUrl();
+      await input.postKickoff({ taskId: 'child-task-1', taskUrl });
+      await mocks.enqueueTask({ task });
+      return { success: true, taskId: 'child-task-1', taskUrl };
+    },
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -90,8 +113,8 @@ const parent = {
   conversation: {
     surface: 'slack' as const,
     workspaceId: 'T123',
-    channelId: 'C123',
-    threadId: '100.001',
+    conversationId: '100.001',
+    replyTarget: { channelId: 'C123', threadId: '100.001' },
   },
 };
 
@@ -184,8 +207,8 @@ describe('deliverFastAgentParentEvent', () => {
       conversation: {
         surface: 'slack' as const,
         workspaceId: 'T123',
-        channelId: 'C123',
-        threadId: '100.001',
+        conversationId: '100.001',
+        replyTarget: { channelId: 'C123', threadId: '100.001' },
       },
     });
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
@@ -228,14 +251,14 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
   });
 
-  it('delivers the same parent event into a Discord Fast conversation', async () => {
+  it('delivers a guild parent event to its routable channel, not its session identity', async () => {
     const discordParent = {
       ...parent,
       conversation: {
         surface: 'discord' as const,
         workspaceId: 'guild-1',
-        channelId: 'channel-1',
-        threadId: 'thread-1',
+        conversationId: 'interaction-fast-guild',
+        replyTarget: { channelId: 'channel-1' },
       },
     };
 
@@ -245,7 +268,7 @@ describe('deliverFastAgentParentEvent', () => {
 
     expect(mocks.discordPostMessage).toHaveBeenCalledWith({
       channelId: 'channel-1',
-      threadId: 'thread-1',
+      idempotencyKey: 'fast-parent-artifact:artifact-1:v1',
       text: 'The proof is ready.',
       textFormat: 'markdown',
       images: [
@@ -257,6 +280,28 @@ describe('deliverFastAgentParentEvent', () => {
       ],
     });
     expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
+  });
+
+  it('delivers a threaded Discord parent event inside the provider thread', async () => {
+    await deliverFastAgentParentEvent({
+      parent: {
+        ...parent,
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'guild-1',
+          conversationId: 'thread-1',
+          replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+        },
+      },
+      event,
+    });
+
+    expect(mocks.discordPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+      }),
+    );
   });
 
   it('keeps launch_task available during a Discord parent event', async () => {
@@ -281,8 +326,8 @@ describe('deliverFastAgentParentEvent', () => {
         conversation: {
           surface: 'discord',
           workspaceId: 'guild-1',
-          channelId: 'channel-1',
-          threadId: 'thread-1',
+          conversationId: 'thread-1',
+          replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
         },
       },
       event,
@@ -303,14 +348,16 @@ describe('deliverFastAgentParentEvent', () => {
               conversation: {
                 surface: 'discord',
                 workspaceId: 'guild-1',
-                channelId: 'channel-1',
-                threadId: 'thread-1',
+                conversationId: 'thread-1',
+                replyTarget: {
+                  channelId: 'channel-1',
+                  threadId: 'thread-1',
+                },
               },
             },
           }),
         }),
       }),
-      expect.any(Object),
     );
     expect(postKickoff).toHaveBeenCalledWith({
       taskId: 'child-task-1',

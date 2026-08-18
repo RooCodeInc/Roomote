@@ -254,8 +254,8 @@ export async function callFastAgentIntegration(
     slackTeamId: getFastAgentConversationStorageWorkspaceId(
       context.conversation,
     ),
-    slackChannel: context.conversation.channelId,
-    slackThreadTs: context.conversation.threadId,
+    slackChannel: context.conversation.replyTarget.channelId,
+    slackThreadTs: context.conversation.conversationId,
     slackMessageTs: context.messageId,
     integrationId: integration.id,
     toolName: request.toolName,

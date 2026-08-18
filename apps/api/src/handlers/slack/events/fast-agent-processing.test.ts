@@ -418,8 +418,8 @@ describe('processFastAgentMessage', () => {
         conversation: {
           surface: 'slack',
           workspaceId: 'T123',
-          channelId: 'D123',
-          threadId: '100.001',
+          conversationId: '100.001',
+          replyTarget: { channelId: 'D123', threadId: '100.001' },
         },
         senderDisplayName: 'Matt',
         senderExternalId: 'U123',
@@ -430,8 +430,8 @@ describe('processFastAgentMessage', () => {
       conversation: {
         surface: 'slack',
         workspaceId: 'T123',
-        channelId: 'D123',
-        threadId: '100.001',
+        conversationId: '100.001',
+        replyTarget: { channelId: 'D123', threadId: '100.001' },
       },
     });
     expect(mocks.postThreadMessage).toHaveBeenCalledOnce();

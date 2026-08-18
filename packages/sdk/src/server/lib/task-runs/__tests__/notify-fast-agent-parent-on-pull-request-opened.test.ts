@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => {
     not: vi.fn((...args: unknown[]) => args),
     recordLifecycle: vi.fn(),
     deliverParentEvent: vi.fn(),
+    getTaskUrl: vi.fn(() => 'https://roomote.example/task/child-task'),
     FastAgentParentEventDeliveryError,
   };
 });
@@ -54,7 +55,7 @@ vi.mock('@roomote/db/server', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
-  getTaskUrl: vi.fn(() => 'https://roomote.example/task/child-task'),
+  getTaskUrl: mocks.getTaskUrl,
 }));
 
 vi.mock('../../fast-agent-parent-event', () => ({
@@ -69,8 +70,18 @@ const fastParent = {
   conversation: {
     surface: 'slack' as const,
     workspaceId: 'T123',
-    channelId: 'C123',
-    threadId: '100.001',
+    conversationId: '100.001',
+    replyTarget: { channelId: 'C123', threadId: '100.001' },
+  },
+};
+
+const discordFastParent = {
+  sessionId: '22222222-2222-4222-8222-222222222222',
+  conversation: {
+    surface: 'discord' as const,
+    workspaceId: 'guild-1',
+    conversationId: 'interaction-1',
+    replyTarget: { channelId: 'channel-1' },
   },
 };
 
@@ -104,12 +115,12 @@ describe('notifyFastAgentParentOnPullRequestOpened', () => {
 
   it('passes structured pull request context to the Fast parent', async () => {
     await notifyFastAgentParentOnPullRequestOpened({
-      run: makeRun({ fastAgentParent: fastParent }),
+      run: makeRun({ fastAgentParent: discordFastParent }),
       pullRequest,
     });
 
     expect(mocks.deliverParentEvent).toHaveBeenCalledWith({
-      parent: fastParent,
+      parent: discordFastParent,
       lockWaitMs: 30_000,
       event: {
         type: 'pull_request_opened',
@@ -117,6 +128,13 @@ describe('notifyFastAgentParentOnPullRequestOpened', () => {
         runId: 200,
         taskUrl: 'https://roomote.example/task/child-task',
         pullRequest,
+      },
+    });
+    expect(mocks.getTaskUrl).toHaveBeenCalledWith({
+      taskId: 'child-task',
+      utm: {
+        source: 'discord',
+        campaign: 'fast-delegation-pr-opened',
       },
     });
     expect(mocks.inArray).toHaveBeenCalledWith(

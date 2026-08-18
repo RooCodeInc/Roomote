@@ -66,8 +66,8 @@ describe('getCommunicationRunTaskCallbacks ack reaction cleanup', () => {
         conversation: {
           surface: 'slack',
           workspaceId: 'T123',
-          channelId: 'C123',
-          threadId: '100.001',
+          conversationId: '100.001',
+          replyTarget: { channelId: 'C123', threadId: '100.001' },
         },
       },
     });

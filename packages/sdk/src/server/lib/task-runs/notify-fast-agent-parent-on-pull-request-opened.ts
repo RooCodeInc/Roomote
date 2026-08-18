@@ -101,7 +101,10 @@ export async function notifyFastAgentParentOnPullRequestOpened(params: {
         runId: params.run.id,
         taskUrl: getTaskUrl({
           taskId: params.run.taskId,
-          utm: { source: 'slack', campaign: 'fast-delegation-pr-opened' },
+          utm: {
+            source: parent.conversation.surface,
+            campaign: 'fast-delegation-pr-opened',
+          },
         }),
         pullRequest,
       },

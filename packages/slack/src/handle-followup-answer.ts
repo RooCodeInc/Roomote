@@ -176,7 +176,7 @@ async function findFastAgentChildRunForPendingInput(params: {
     !parent ||
     parent.conversation.surface !== 'slack' ||
     parent.conversation.workspaceId !== params.slackTeamId ||
-    parent.conversation.threadId !== params.threadId
+    parent.conversation.replyTarget.threadId !== params.threadId
   ) {
     return null;
   }

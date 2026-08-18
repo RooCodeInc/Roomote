@@ -995,8 +995,8 @@ describe('launchDiscordTask', () => {
         conversation: {
           surface: 'discord',
           workspaceId: 'guild-1',
-          channelId: 'channel-1',
-          threadId: 'old-thread',
+          conversationId: 'old-thread',
+          replyTarget: { channelId: 'channel-1', threadId: 'old-thread' },
         },
       },
     });
@@ -1015,8 +1015,11 @@ describe('launchDiscordTask', () => {
               conversation: {
                 surface: 'discord',
                 workspaceId: 'guild-1',
-                channelId: 'channel-1',
-                threadId: 'old-thread',
+                conversationId: 'old-thread',
+                replyTarget: {
+                  channelId: 'channel-1',
+                  threadId: 'old-thread',
+                },
               },
             },
           }),

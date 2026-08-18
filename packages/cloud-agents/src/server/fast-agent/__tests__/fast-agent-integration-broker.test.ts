@@ -61,8 +61,8 @@ const auditContext = {
   conversation: {
     surface: 'slack' as const,
     workspaceId: 'team-1',
-    channelId: 'channel-1',
-    threadId: '100.1',
+    conversationId: '100.1',
+    replyTarget: { channelId: 'channel-1', threadId: '100.1' },
   },
   messageId: '100.2',
 };

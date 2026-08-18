@@ -503,8 +503,8 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     isFastAgentThread = await hasFastAgentSession({
       surface: 'slack',
       workspaceId: teamId,
-      channelId: event.channel,
-      threadId: event.thread_ts,
+      conversationId: event.thread_ts,
+      replyTarget: { channelId: event.channel, threadId: event.thread_ts },
     });
 
     roomoteThreadMatch = isFastAgentThread
@@ -1764,8 +1764,8 @@ async function handleSlackEntryEvent(params: {
     : await hasFastAgentSession({
         surface: 'slack',
         workspaceId: teamId,
-        channelId: event.channel,
-        threadId,
+        conversationId: threadId,
+        replyTarget: { channelId: event.channel, threadId },
       });
 
   if (isFastAgentContinuation) {
