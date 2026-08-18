@@ -55,6 +55,8 @@ export interface AcpTodoSectionUiMessage extends AcpUiMessageBase {
 export interface AcpOtherUiMessage extends AcpUiMessageBase {
   kind: Exclude<AcpMessageKind, 'tool_call' | 'tool_result' | 'plan'>;
   data: Record<string, unknown>;
+  /** Source chunks before reasoning-only display normalization. */
+  rawText?: string;
 }
 
 export type AcpUiMessage =

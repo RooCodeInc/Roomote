@@ -25,6 +25,12 @@ describe('event-normalization', () => {
 
     expect(() => enrichSlackMessageEvent(event)).not.toThrow();
     expect(event.authoredText).toBe('');
+    expect(event.agentContext).toBe(
+      [
+        'Slack block text:',
+        'Where would an api log message like this come from?',
+      ].join('\n'),
+    );
     expect(event.text).toBe(
       [
         'Slack block text:',
@@ -52,6 +58,9 @@ describe('event-normalization', () => {
 
     expect(() => enrichSlackMessageEvent(event)).not.toThrow();
     expect(event.authoredText).toBe('');
+    expect(event.agentContext).toBe(
+      ['Slack block text:', '!fast check this thread'].join('\n'),
+    );
     expect(event.text).toBe(
       ['Slack block text:', '!fast check this thread'].join('\n'),
     );

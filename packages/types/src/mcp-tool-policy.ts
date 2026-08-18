@@ -1,5 +1,9 @@
 import type { McpIntegration } from './mcp-oauth';
 
+export const MCP_TOOL_ACCESS_MODES = ['read_only', 'read_write'] as const;
+
+export type McpToolAccessMode = (typeof MCP_TOOL_ACCESS_MODES)[number];
+
 const BETTER_STACK_READ_ONLY_UPTIME_TOOL_NAMES = [
   'escalation_policy',
   'heartbeat_availability',

@@ -111,6 +111,7 @@ function createHarness(
     providerErrorMaxDelayMs?: number;
     mcpServerNames?: string[];
     model?: string;
+    initialSessionId?: string;
   } = {},
 ) {
   const harness = new OpenCodeServerHarness({
@@ -118,6 +119,7 @@ function createHarness(
     workspacePath: '/tmp/workspace',
     logger: createLogger(),
     commandEnv: options.commandEnv,
+    initialSessionId: options.initialSessionId,
     model: options.model ?? TEST_OPENCODE_MODEL,
     eventStreamReadyTimeoutMs: 100,
     executeToolProgressInitialDelayMs:
@@ -587,6 +589,10 @@ describe('OpenCodeServerHarness', () => {
 
   it('persists a consolidated AssistantThought from reasoning parts', async () => {
     const { client, harness } = createHarness();
+    const rawReasoning =
+      '**Clarifying boundaries****Assessing precision****Checking gaps**';
+    const normalizedReasoning =
+      '**Clarifying boundaries**\n\n**Assessing precision**\n\n**Checking gaps**';
     const runtimeOutputEvents: AcpMessage[] = [];
     const persistedEnvelopes: AcpPersistedEnvelope[] = [];
     const turnCompletedEvents: AcpTurnCompletedEvent[] = [];
@@ -625,9 +631,9 @@ describe('OpenCodeServerHarness', () => {
             sessionID: 'ses_1',
             messageID: 'msg_1',
             type: 'reasoning',
-            text: 'Because reasons.',
+            text: rawReasoning,
           },
-          delta: 'Because reasons.',
+          delta: rawReasoning,
         },
       });
 
@@ -646,7 +652,7 @@ describe('OpenCodeServerHarness', () => {
             sessionID: 'ses_1',
             messageID: 'msg_1',
             type: 'reasoning',
-            text: 'Because reasons.',
+            text: rawReasoning,
           },
           {
             id: 'part_1',
@@ -684,7 +690,7 @@ describe('OpenCodeServerHarness', () => {
           (event) =>
             event.eventType ===
               ACP_ENVELOPE_EVENT_TYPES.AssistantThoughtChunk &&
-            event.text === 'Because reasons.',
+            event.text === rawReasoning,
         ),
       ).toBe(true);
 
@@ -702,7 +708,7 @@ describe('OpenCodeServerHarness', () => {
         (envelope) =>
           envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.AssistantThought,
       );
-      expect(thought?.payload.text).toBe('Because reasons.');
+      expect(thought?.payload.text).toBe(normalizedReasoning);
 
       // ...and it lands before the answer message in the transcript.
       const thoughtIndex = persistedEnvelopes.findIndex(
@@ -2382,6 +2388,182 @@ describe('OpenCodeServerHarness', () => {
           (event) => event.eventName === TaskEventName.TaskAborted,
         ),
       ).toBe(false);
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('persists an ordinary follow-up as queued until the next turn begins', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Start work.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: {
+          text: 'Handle this after the current turn.',
+          visibleInTranscript: true,
+          clientMessageId: 'queued-follow-up',
+        },
+      });
+
+      expect(
+        persistedEnvelopes
+          .filter(
+            (envelope) =>
+              envelope.eventType ===
+              ACP_ENVELOPE_EVENT_TYPES.QueuedMessagesUpdate,
+          )
+          .at(-1)?.payload,
+      ).toMatchObject({
+        cause: 'enqueue',
+        queuedMessages: [
+          expect.objectContaining({
+            text: 'Handle this after the current turn.',
+            clientMessageId: 'queued-follow-up',
+          }),
+        ],
+      });
+      expect(
+        persistedEnvelopes.filter(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        ),
+      ).toHaveLength(1);
+
+      client.message.mockResolvedValueOnce(createFinalAssistantMessage());
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_1',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 1 },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+      expect(
+        persistedEnvelopes
+          .filter(
+            (envelope) =>
+              envelope.eventType ===
+              ACP_ENVELOPE_EVENT_TYPES.QueuedMessagesUpdate,
+          )
+          .at(-1)?.payload,
+      ).toMatchObject({ cause: 'dequeue', queuedMessages: [] });
+      expect(
+        persistedEnvelopes
+          .filter(
+            (envelope) =>
+              envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          )
+          .at(-1),
+      ).toMatchObject({
+        contentBlocks: [
+          { type: 'text', text: 'Handle this after the current turn.' },
+        ],
+        metadata: { clientMessageId: 'queued-follow-up' },
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('persists a queued follow-up as delivered when explicitly steered', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Start work.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: {
+          text: 'Apply this now.',
+          visibleInTranscript: true,
+          clientMessageId: 'steered-follow-up',
+        },
+      });
+      const queuedMessage = harness.getQueuedMessageSnapshots?.()[0];
+
+      expect(queuedMessage).toMatchObject({
+        text: 'Apply this now.',
+        clientMessageId: 'steered-follow-up',
+      });
+      expect(queuedMessage?.id).toBeTruthy();
+
+      harness.sendCommand({
+        commandName: TaskCommandName.DeleteQueuedMessage,
+        data: { id: queuedMessage!.id },
+      });
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: {
+          text: queuedMessage!.text,
+          visibleInTranscript: queuedMessage!.visibleInTranscript,
+          clientMessageId: queuedMessage!.clientMessageId,
+          autoSteerWhenQueued: true,
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+      expect(
+        persistedEnvelopes
+          .filter(
+            (envelope) =>
+              envelope.eventType ===
+              ACP_ENVELOPE_EVENT_TYPES.QueuedMessagesUpdate,
+          )
+          .at(-1)?.payload,
+      ).toMatchObject({ cause: 'delete', queuedMessages: [] });
+      expect(
+        persistedEnvelopes
+          .filter(
+            (envelope) =>
+              envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          )
+          .at(-1),
+      ).toMatchObject({
+        contentBlocks: [{ type: 'text', text: 'Apply this now.' }],
+        metadata: { clientMessageId: 'steered-follow-up' },
+      });
     } finally {
       harness.dispose();
     }
@@ -5470,13 +5652,62 @@ describe('OpenCodeServerHarness', () => {
       // The prior session is validated server-side, then reused — no new
       // session is created behind the user's back.
       expect(client.messages).toHaveBeenCalledWith(
-        expect.objectContaining({ sessionId: 'ses_prior', limit: 1 }),
+        expect.objectContaining({ sessionId: 'ses_prior', limit: 20 }),
       );
       expect(client.createSession).not.toHaveBeenCalled();
       expect(client.promptAsync.mock.calls[0]?.[0]).toMatchObject({
         sessionId: 'ses_prior',
       });
     } finally {
+      harness.dispose();
+    }
+  });
+
+  it('orders the first resumed prompt after the restored session history', async () => {
+    const client = new FakeOpenCodeServerClient();
+    const restoredMessageId = `msg_000000000100${'z'.repeat(14)}`;
+    client.messages.mockResolvedValueOnce([
+      // The API returns newest-by-time first. This simulates a prompt already
+      // accepted after restore with an id that still sorts below the older
+      // assistant; the floor must be the greatest id in the tail.
+      createFinalAssistantMessage({
+        messageId: `msg_000000000010${'0'.repeat(14)}`,
+      }),
+      createFinalAssistantMessage({ messageId: restoredMessageId }),
+    ]);
+    let resolveSubmittedPrompt: (prompt: unknown) => void = () => {};
+    const submittedPrompt = new Promise<unknown>((resolve) => {
+      resolveSubmittedPrompt = resolve;
+    });
+    client.promptAsync.mockImplementationOnce(async (prompt: unknown) => {
+      resolveSubmittedPrompt(prompt);
+    });
+    const { harness } = createHarness(client, {
+      initialSessionId: 'ses_prior',
+    });
+    let dateNow: ReturnType<typeof vi.spyOn> | undefined;
+
+    try {
+      await connectHarness(harness, client);
+      dateNow = vi.spyOn(Date, 'now').mockReturnValue(0);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: { text: 'Continue.', visibleInTranscript: true },
+      });
+
+      const prompt = (await submittedPrompt) as
+        | { request?: { messageID?: string }; sessionId?: string }
+        | undefined;
+      const submittedMessageId = prompt?.request?.messageID;
+      expect(prompt?.sessionId).toBe('ses_prior');
+      expect(submittedMessageId).toMatch(/^msg_[a-f0-9]{12}0{14}$/u);
+      expect(submittedMessageId && submittedMessageId > restoredMessageId).toBe(
+        true,
+      );
+      expect(client.createSession).not.toHaveBeenCalled();
+    } finally {
+      dateNow?.mockRestore();
       harness.dispose();
     }
   });

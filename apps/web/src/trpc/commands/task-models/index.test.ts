@@ -352,8 +352,8 @@ describe('lookupTaskModelCommand', () => {
       new Response(
         JSON.stringify({
           data: {
-            id: 'z-ai/glm-5.3',
-            name: 'GLM 5.3',
+            id: 'z-ai/glm-5.1',
+            name: 'GLM 5.1',
             context_length: 1_050_000,
             architecture: {
               input_modalities: ['text', 'image'],
@@ -372,11 +372,11 @@ describe('lookupTaskModelCommand', () => {
 
     await expect(
       lookupTaskModelCommand(buildMockAuth(), {
-        modelId: 'z-ai/glm-5.3',
+        modelId: 'z-ai/glm-5.1',
       }),
     ).resolves.toEqual({
-      modelId: 'openrouter/z-ai/glm-5.3',
-      displayName: 'GLM 5.3',
+      modelId: 'openrouter/z-ai/glm-5.1',
+      displayName: 'GLM 5.1',
       family: 'GLM',
       metadata: {
         contextWindow: 1_050_000,
@@ -388,7 +388,7 @@ describe('lookupTaskModelCommand', () => {
     });
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://openrouter.ai/api/v1/model/z-ai/glm-5.3',
+      'https://openrouter.ai/api/v1/model/z-ai/glm-5.1',
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: 'Bearer openrouter-test-key',

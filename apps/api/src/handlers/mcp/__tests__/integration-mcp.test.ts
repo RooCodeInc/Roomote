@@ -147,7 +147,9 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.unstubAllGlobals();
-    mockFindEnablement.mockResolvedValue({ disabledTools: null });
+    mockFindEnablement.mockResolvedValue({
+      disabledTools: null,
+    });
     mockGetValidAccessToken.mockResolvedValue('valid-access-token');
   });
 
@@ -186,7 +188,7 @@ describe('createIntegrationMcpProxy acting-user scoping', () => {
     mockFindTaskRun.mockResolvedValue({ id: 42, actingUserId: null });
 
     const response = await postMcp(
-      createApp('notion', createRunToken()),
+      createApp('monday', createRunToken()),
       createInitializeRequest(1),
     );
     const body = (await response.json()) as JsonRpcErrorBody;

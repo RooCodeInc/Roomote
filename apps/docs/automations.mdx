@@ -94,6 +94,10 @@ Create arbitrary scheduled agent runs with:
 Each automation card summarizes its cadence, workspace target, report destination,
 creator, and most recent run.
 
+Use **View previous runs** on an automation card to open the task list
+filtered to that automation's runs. For a custom automation, the history is
+scoped to that specific automation rather than all custom automations.
+
 When creating an automation through Roomote chat, ask for **suggested tasks** or
 **launchable follow-ups** if qualifying findings should become tasks that
 teammates can start from the report. Asking only for a summary or list of action
@@ -111,13 +115,16 @@ clarification rather than guessing when the recurrence itself is ambiguous.
 Custom schedules do not support seconds or cron macros.
 
 On each due tick, Roomote launches a normal task with that prompt in the selected
-environment or across all active repositories. A run can skip or fail before task creation when its configuration
-or launch state prevents it from starting. When a report destination is set,
-the run is anchored to that conversation: Roomote's first message (the final
-result, or a blocker or question that needs input) starts a thread, later
-updates continue that same thread, and you can reply in the thread to talk to the task.
-There is no progress chatter in between. Without a destination, the run happens
-silently and its results appear only in the task view.
+environment or across all active repositories. A run can skip or fail before
+task creation when its configuration or launch state prevents it from starting.
+When a report destination is set, Roomote uses that conversation for actionable
+or important findings, meaningful completed results, blockers, and questions
+that need input. Routine success, healthy status, and no-change results stay
+silent unless the automation prompt explicitly asks for a report in those
+cases. The first message starts a thread, later updates continue that same
+thread, and you can reply there to talk to the task. There is no progress
+chatter in between. Without a destination, the run happens silently and its
+results appear only in the task view.
 
 Unless the prompt asks for a different presentation, custom automation reports
 lead with the result, stay concise, and use short Markdown headings and bullets
@@ -125,6 +132,11 @@ when there are several findings. A report sent to chat keeps the essential
 conclusions and actions in its first message; supporting detail can continue in
 thread replies. Explicit instructions in the automation prompt about format,
 length, tone, audience, or detail placement always take precedence.
+
+In Slack, automation reports appear as structured cards. Markdown tables render
+as tables when they fit, and the card can include links to the task, related pull
+requests, and automation settings. Completed runs also show their trigger or
+schedule, model, estimated inference cost, and elapsed time.
 
 Direct-message destinations require the automation owner to link an account for
 the selected communications provider and make the bot reachable there.

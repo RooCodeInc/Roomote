@@ -1,43 +1,59 @@
 import type { ModelMessage } from 'ai';
 import {
   and,
+  desc,
   db,
   eq,
+  inArray,
+  isNull,
   slackQuickAnswers,
   sql,
+  taskRuns,
+  tasks,
   type SlackQuickAnswer,
 } from '@roomote/db/server';
+import { activeRunStatuses, type RunStatus } from '@roomote/types';
+import {
+  getFastAgentConversationStorageWorkspaceId,
+  type FastAgentConversation,
+} from './fast-agent-conversation';
 
 type FastAgentSessionRecord = Pick<SlackQuickAnswer, 'id'> & {
   messages: ModelMessage[];
 };
 
-function buildFastAgentSessionWhere({
-  slackChannel,
-  slackThreadTs,
-}: {
-  slackChannel: string;
-  slackThreadTs: string;
-}) {
+export type FastAgentActiveTask = {
+  taskId: string;
+  title?: string;
+  status?: RunStatus;
+};
+
+function buildFastAgentSessionWhere(conversation: FastAgentConversation) {
+  const scopedSlackChannel = buildFastAgentSessionChannelKey(conversation);
+
   return and(
-    eq(slackQuickAnswers.slackChannel, slackChannel),
-    eq(slackQuickAnswers.slackThreadTs, slackThreadTs),
+    eq(slackQuickAnswers.slackChannel, scopedSlackChannel),
+    eq(slackQuickAnswers.slackThreadTs, conversation.conversationId),
   );
+}
+
+export function buildFastAgentSessionChannelKey(
+  conversation: FastAgentConversation,
+): string {
+  // The existing column and unique index predate multi-workspace scoping.
+  // Qualifying the value keeps N-1 rollback compatibility without a migration.
+  return `${getFastAgentConversationStorageWorkspaceId(conversation)}:${conversation.replyTarget.channelId}`;
 }
 
 export async function getOrCreateFastAgentSession({
   userId,
-  slackChannel,
-  slackThreadTs,
+  conversation,
 }: {
   userId: string;
-  slackChannel: string;
-  slackThreadTs: string;
+  conversation: FastAgentConversation;
 }): Promise<FastAgentSessionRecord> {
-  const where = buildFastAgentSessionWhere({
-    slackChannel,
-    slackThreadTs,
-  });
+  const where = buildFastAgentSessionWhere(conversation);
+  const scopedSlackChannel = buildFastAgentSessionChannelKey(conversation);
 
   const existingSession = await db.query.slackQuickAnswers.findFirst({
     where,
@@ -58,8 +74,8 @@ export async function getOrCreateFastAgentSession({
     .insert(slackQuickAnswers)
     .values({
       userId,
-      slackChannel,
-      slackThreadTs,
+      slackChannel: scopedSlackChannel,
+      slackThreadTs: conversation.conversationId,
       messages: [],
     })
     .onConflictDoNothing({
@@ -93,6 +109,58 @@ export async function getOrCreateFastAgentSession({
     id: concurrentSession.id,
     messages: concurrentSession.messages as ModelMessage[],
   };
+}
+
+export async function hasFastAgentSession(
+  conversation: FastAgentConversation,
+): Promise<boolean> {
+  const session = await db.query.slackQuickAnswers.findFirst({
+    where: buildFastAgentSessionWhere(conversation),
+    columns: { id: true },
+  });
+
+  return Boolean(session);
+}
+
+export async function getActiveFastAgentTasks(
+  sessionId: string,
+): Promise<FastAgentActiveTask[]> {
+  const latestRunPerTask = db.$with('latest_fast_agent_task_runs').as(
+    db
+      .selectDistinctOn([taskRuns.taskId], {
+        runId: taskRuns.id,
+        createdAt: taskRuns.createdAt,
+        taskId: taskRuns.taskId,
+        title: tasks.title,
+        status: taskRuns.status,
+        canceledAt: taskRuns.canceledAt,
+      })
+      .from(taskRuns)
+      .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+      .where(
+        and(
+          eq(taskRuns.fastAgentSessionId, sessionId),
+          isNull(tasks.deletedAt),
+        ),
+      )
+      .orderBy(taskRuns.taskId, desc(taskRuns.createdAt), desc(taskRuns.id)),
+  );
+
+  return db
+    .with(latestRunPerTask)
+    .select({
+      taskId: latestRunPerTask.taskId,
+      title: latestRunPerTask.title,
+      status: latestRunPerTask.status,
+    })
+    .from(latestRunPerTask)
+    .where(
+      and(
+        inArray(latestRunPerTask.status, [...activeRunStatuses]),
+        isNull(latestRunPerTask.canceledAt),
+      ),
+    )
+    .orderBy(desc(latestRunPerTask.createdAt));
 }
 
 export async function appendFastAgentSessionMessages({

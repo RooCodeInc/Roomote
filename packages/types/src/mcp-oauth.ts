@@ -124,6 +124,29 @@ export interface McpConnectionAsanaConfig {
 }
 
 /**
+ * Deployment-scoped Notion internal integration configuration.
+ *
+ * Notion enforces the content boundary: this token can only access pages and
+ * data sources explicitly shared with the internal integration. The secret is
+ * expected to be encrypted before persistence.
+ */
+export interface McpConnectionNotionConfig {
+  type: 'notion';
+  encryptedToken: string;
+}
+
+/**
+ * Deployment-scoped Rippling HRIS configuration.
+ *
+ * The API token is used only by the server-side Brain collector and is
+ * expected to be encrypted before persistence.
+ */
+export interface McpConnectionRipplingConfig {
+  type: 'rippling';
+  encryptedApiToken: string;
+}
+
+/**
  * Deployment-scoped Granola connection config stored in mcpConnections.authConfig.
  *
  * The API key is expected to be encrypted before persistence.
@@ -186,6 +209,35 @@ export interface McpConnectionGrafanaConfig {
 }
 
 /**
+ * Deployment-scoped Brain (gbrain) connection config stored in
+ * mcpConnections.authConfig. The URL points at the deployment-hosted gbrain
+ * service (typically deployment-internal).
+ *
+ * Provisioned automatically at connect time: the admin supplies gbrain's
+ * bootstrap token once (never persisted), and Roomote registers three OAuth
+ * clients via gbrain's admin API. Scopes are enforced server-side by gbrain:
+ * the agent client is `read`-scoped (structurally incapable of mutation; the
+ * proxy's tool allowlist is defense-in-depth on top), and the ingest client
+ * carries `write` for the server-side ingestion worker only. A third,
+ * admin-scoped maintenance client is held only by the scheduler, which uses
+ * it to enqueue the built-in nightly maintenance cycle. Secrets are
+ * encrypted before persistence; short-lived access tokens are minted on
+ * demand via the client_credentials grant. R_GBRAIN_* env, when set,
+ * overrides this config entirely (operator-managed deployments, static
+ * bearer tokens).
+ */
+export interface McpConnectionGbrainConfig {
+  type: 'gbrain';
+  url: string;
+  agentClientId: string;
+  encryptedAgentClientSecret: string;
+  ingestClientId: string;
+  encryptedIngestClientSecret: string;
+  maintenanceClientId: string;
+  encryptedMaintenanceClientSecret: string;
+}
+
+/**
  * Union of all shapes stored in mcpConnections.authConfig.
  *
  * - McpConnectionOAuthConfig: completed OAuth dynamic registration
@@ -196,10 +248,13 @@ export type McpConnectionAuthConfig =
   | McpConnectionOAuthConfig
   | McpConnectionSnowflakeConfig
   | McpConnectionAsanaConfig
+  | McpConnectionNotionConfig
+  | McpConnectionRipplingConfig
   | McpConnectionGranolaConfig
   | McpConnectionElevenLabsConfig
   | McpConnectionVercelConfig
   | McpConnectionGrafanaConfig
+  | McpConnectionGbrainConfig
   | McpConnectionXConfig
   | Record<string, never>;
 
@@ -362,9 +417,22 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
   {
     id: 'notion',
     name: 'Notion',
-    url: 'https://mcp.notion.com/mcp',
-    description: `Access your Notion pages, databases, and content within ${PRODUCT_NAME} tasks`,
+    description: `Connect Notion so your agents can find context and keep shared pages and data sources up to date from ${PRODUCT_NAME} tasks`,
     icon: 'notion',
+    connectionScope: 'deployment',
+    connectionMode: 'admin_configured',
+    serverMode: 'native',
+    instructions:
+      'Use Notion for pages and data sources explicitly shared with the deployment integration. Content outside that connection boundary, including unshared private pages, is unavailable. Notion controls whether the connection may read, update, insert, or comment.',
+  },
+  {
+    id: 'rippling',
+    name: 'Rippling',
+    description: `Connect Rippling so Brain can keep an authoritative employee directory and reporting structure current for ${PRODUCT_NAME} tasks`,
+    icon: 'rippling',
+    connectionScope: 'deployment',
+    connectionMode: 'admin_configured',
+    serverMode: 'credential_only',
   },
   {
     id: 'jira',
@@ -548,7 +616,7 @@ export const MCP_INTEGRATIONS: McpIntegration[] = [
   {
     id: 'elevenlabs',
     name: 'ElevenLabs',
-    description: `Connect ElevenLabs so ${PRODUCT_NAME} can narrate feature-demo videos with your voice. The API key stays on the control plane; agents get no ElevenLabs tools and the key never enters a task sandbox`,
+    description: `Connect ElevenLabs so ${PRODUCT_NAME} can narrate feature-demo videos with your voice`,
     icon: 'elevenlabs',
     connectionScope: 'deployment',
     connectionMode: 'admin_configured',
@@ -894,6 +962,32 @@ export function isMcpConnectionAsanaConfig(
   );
 }
 
+export function isMcpConnectionNotionConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionNotionConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'notion' &&
+    'encryptedToken' in authConfig &&
+    typeof authConfig.encryptedToken === 'string',
+  );
+}
+
+export function isMcpConnectionRipplingConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionRipplingConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'rippling' &&
+    'encryptedApiToken' in authConfig &&
+    typeof authConfig.encryptedApiToken === 'string',
+  );
+}
+
 export function isMcpConnectionGranolaConfig(
   authConfig: McpConnectionAuthConfig | null | undefined,
 ): authConfig is McpConnectionGranolaConfig {
@@ -943,6 +1037,31 @@ export function isMcpConnectionXConfig(
     authConfig.type === 'x' &&
     'encryptedBearerToken' in authConfig &&
     typeof authConfig.encryptedBearerToken === 'string',
+  );
+}
+
+export function isMcpConnectionGbrainConfig(
+  authConfig: McpConnectionAuthConfig | null | undefined,
+): authConfig is McpConnectionGbrainConfig {
+  return Boolean(
+    authConfig &&
+    typeof authConfig === 'object' &&
+    'type' in authConfig &&
+    authConfig.type === 'gbrain' &&
+    'url' in authConfig &&
+    typeof authConfig.url === 'string' &&
+    'agentClientId' in authConfig &&
+    typeof authConfig.agentClientId === 'string' &&
+    'encryptedAgentClientSecret' in authConfig &&
+    typeof authConfig.encryptedAgentClientSecret === 'string' &&
+    'ingestClientId' in authConfig &&
+    typeof authConfig.ingestClientId === 'string' &&
+    'encryptedIngestClientSecret' in authConfig &&
+    typeof authConfig.encryptedIngestClientSecret === 'string' &&
+    'maintenanceClientId' in authConfig &&
+    typeof authConfig.maintenanceClientId === 'string' &&
+    'encryptedMaintenanceClientSecret' in authConfig &&
+    typeof authConfig.encryptedMaintenanceClientSecret === 'string',
   );
 }
 

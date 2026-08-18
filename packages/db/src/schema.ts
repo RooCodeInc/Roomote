@@ -77,6 +77,7 @@ import type {
   TaskRunErrorCode,
   UserRole,
   RepositoryAutomationSignals,
+  McpToolAccessMode,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -147,6 +148,7 @@ export const userRelations = relations(users, ({ many }) => ({
   tasks: many(tasks, { relationName: 'taskInitiatorUser' }),
   taskPins: many(taskPins),
   slackQuickAnswers: many(slackQuickAnswers),
+  slackFastIntegrationCalls: many(slackFastIntegrationCalls),
   workItems: many(workItems),
   setupQualificationBlocks: many(setupQualificationBlocks),
 }));
@@ -1209,6 +1211,10 @@ export const taskRuns = pgTable(
     queueScope: text('queue_scope'),
     taskPhase: text('task_phase'),
     payload: jsonb('payload').notNull().$type<TaskPayload>(),
+    /** Indexed projection of payload.fastAgentSessionId for Fast task lookup. */
+    fastAgentSessionId: uuid('fast_agent_session_id').generatedAlwaysAs(
+      sql`((payload ->> 'fastAgentSessionId')::uuid)`,
+    ),
     // Per-attempt prompt, including the deferred resume prompt.
     prompt: text('prompt'),
     log: text('log'),
@@ -1328,6 +1334,7 @@ export const taskRuns = pgTable(
   },
   (table) => [
     index('task_runs_task_id_idx').on(table.taskId),
+    index('task_runs_fast_agent_session_id_idx').on(table.fastAgentSessionId),
     index('task_runs_queue_scope_idx').on(table.queueScope),
     index('task_runs_acting_user_id_idx').on(table.actingUserId),
     index('task_runs_snapshot_id_idx').on(table.snapshotId),
@@ -2429,6 +2436,40 @@ export const slackUserMappingsRelations = relations(
 );
 
 /**
+ * slack_directory_users
+ *
+ * Privacy-safe Slack profile projection used to build Brain person cards for
+ * the whole workspace, including people who do not have Roomote accounts.
+ * Email, status, timezone, and avatar fields are deliberately not retained.
+ */
+export const slackDirectoryUsers = pgTable(
+  'slack_directory_users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slackUserId: text('slack_user_id').notNull(),
+    slackTeamId: text('slack_team_id').notNull(),
+    username: text('username'),
+    displayName: text('display_name'),
+    realName: text('real_name'),
+    title: text('title'),
+    isDeleted: boolean('is_deleted').notNull().default(false),
+    isBot: boolean('is_bot').notNull().default(false),
+    isAppUser: boolean('is_app_user').notNull().default(false),
+    profileUpdatedAt: timestamp('profile_updated_at'),
+    lastSeenAt: timestamp('last_seen_at').notNull().defaultNow(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('slack_directory_users_team_id_idx').on(table.slackTeamId),
+    unique('slack_directory_users_unique').on(
+      table.slackUserId,
+      table.slackTeamId,
+    ),
+  ],
+);
+
+/**
  * telegram_user_mappings
  */
 
@@ -2846,9 +2887,78 @@ export const slackQuickAnswers = pgTable(
 
 export const slackQuickAnswersRelations = relations(
   slackQuickAnswers,
-  ({ one }) => ({
+  ({ one, many }) => ({
     user: one(users, {
       fields: [slackQuickAnswers.userId],
+      references: [users.id],
+    }),
+    integrationCalls: many(slackFastIntegrationCalls),
+  }),
+);
+
+export type SlackFastIntegrationCallStatus =
+  | 'executing'
+  | 'succeeded'
+  | 'failed';
+
+/**
+ * slack_fast_integration_calls
+ *
+ * Durable audit trail for deployment MCP tools executed directly by runless
+ * Slack fast-mode conversations. An `executing` row is inserted before the
+ * external call so a missing terminal update remains visibly ambiguous.
+ */
+export const slackFastIntegrationCalls = pgTable(
+  'slack_fast_integration_calls',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slackQuickAnswerId: uuid('slack_quick_answer_id')
+      .notNull()
+      .references(() => slackQuickAnswers.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    slackTeamId: text('slack_team_id').notNull(),
+    slackChannel: text('slack_channel').notNull(),
+    slackThreadTs: text('slack_thread_ts').notNull(),
+    slackMessageTs: text('slack_message_ts').notNull(),
+    integrationId: text('integration_id').notNull(),
+    toolName: text('tool_name').notNull(),
+    arguments: jsonb('arguments').notNull().$type<Record<string, unknown>>(),
+    status: text('status').notNull().$type<SlackFastIntegrationCallStatus>(),
+    resultPreview: text('result_preview'),
+    error: text('error'),
+    startedAt: timestamp('started_at').notNull().defaultNow(),
+    completedAt: timestamp('completed_at'),
+    durationMs: integer('duration_ms'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('slack_fast_integration_calls_session_idx').on(
+      table.slackQuickAnswerId,
+      table.createdAt,
+    ),
+    index('slack_fast_integration_calls_user_idx').on(
+      table.userId,
+      table.createdAt,
+    ),
+    index('slack_fast_integration_calls_status_idx').on(
+      table.status,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const slackFastIntegrationCallsRelations = relations(
+  slackFastIntegrationCalls,
+  ({ one }) => ({
+    slackQuickAnswer: one(slackQuickAnswers, {
+      fields: [slackFastIntegrationCalls.slackQuickAnswerId],
+      references: [slackQuickAnswers.id],
+    }),
+    user: one(users, {
+      fields: [slackFastIntegrationCalls.userId],
       references: [users.id],
     }),
   }),
@@ -3529,6 +3639,8 @@ export const deploymentMcpEnablements = pgTable(
       onDelete: 'set null',
     }),
     disabledTools: text('disabled_tools').array(),
+    // N-1 rollback: retained for the previous release's Notion access-mode code.
+    toolAccessMode: text('tool_access_mode').$type<McpToolAccessMode>(),
     createdAt: timestamp('created_at').notNull().defaultNow(),
     updatedAt: timestamp('updated_at').notNull().defaultNow(),
   },
@@ -3727,6 +3839,106 @@ export const mcpOauthReplaysRelations = relations(
     user: one(users, {
       fields: [mcpOauthReplays.userId],
       references: [users.id],
+    }),
+  }),
+);
+
+/**
+ * brainMemoryEvents
+ *
+ * Transactional outbox for task-memory ingestion. A row is inserted in the
+ * same transaction that marks a run Completed (finish-run.ts), then drained
+ * asynchronously by the bullmq worker; ingestion upserts by runId so replays
+ * are idempotent. Never fire-and-forget: the unique(runId) row is the durable
+ * record that a completed task still owes the brain a memory.
+ */
+export const brainMemoryEvents = pgTable(
+  'brain_memory_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    runId: integer('run_id')
+      .notNull()
+      .references(() => taskRuns.id, { onDelete: 'cascade' }),
+    status: text('status')
+      .notNull()
+      .default('pending')
+      .$type<'pending' | 'processing' | 'done' | 'skipped' | 'failed'>(),
+    /**
+     * Narrative the agent wrote about its own work (decisions, rationale,
+     * reusable facts). The agent authors it; the server still places it: the
+     * drainer remains the only writer to the brain, so the slug, redaction,
+     * and provenance stay server-controlled and an agent cannot reach any
+     * other page.
+     */
+    agentSummary: text('agent_summary'),
+    attempts: integer('attempts').notNull().default(0),
+    lastError: text('last_error'),
+    processedAt: timestamp('processed_at'),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    unique('brain_memory_events_run_unique').on(table.runId),
+    index('brain_memory_events_status_created_idx').on(
+      table.status,
+      table.createdAt,
+    ),
+  ],
+);
+
+/**
+ * brainSyncState
+ *
+ * Durable per-collector sync state for Brain memory sources. `watermark`
+ * drives the steady-state incremental sync; `backfillCursor` and
+ * `backfillCompletedAt` drive the one-time deep historical backfill, which
+ * pages older history across ticks and must survive process restarts (an
+ * in-process cursor would re-page old history after every deploy).
+ */
+export const brainSyncState = pgTable('brain_sync_state', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  collectorId: text('collector_id').notNull().unique(),
+  watermark: timestamp('watermark'),
+  backfillCursor: text('backfill_cursor'),
+  backfillCompletedAt: timestamp('backfill_completed_at'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+});
+
+/**
+ * Durable inventory of upstream objects written by Brain collectors. A
+ * completed source sweep can compare its observation timestamp with this
+ * inventory and tombstone objects that disappeared because access was
+ * revoked upstream.
+ */
+export const brainCollectorItems = pgTable(
+  'brain_collector_items',
+  {
+    collectorId: text('collector_id').notNull(),
+    itemId: text('item_id').notNull(),
+    slug: text('slug').notNull(),
+    lastSeenAt: timestamp('last_seen_at').notNull(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.collectorId, table.itemId],
+      name: 'brain_collector_items_collector_item_pk',
+    }),
+    index('brain_collector_items_collector_seen_idx').on(
+      table.collectorId,
+      table.lastSeenAt,
+    ),
+  ],
+);
+
+export const brainMemoryEventsRelations = relations(
+  brainMemoryEvents,
+  ({ one }) => ({
+    run: one(taskRuns, {
+      fields: [brainMemoryEvents.runId],
+      references: [taskRuns.id],
     }),
   }),
 );

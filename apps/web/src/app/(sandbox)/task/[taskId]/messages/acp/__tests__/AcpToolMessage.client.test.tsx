@@ -349,6 +349,29 @@ describe('AcpToolMessage', () => {
     expect(toolDetailsSpy).not.toHaveBeenCalled();
   });
 
+  it('renders the gbrain MCP server as Hippocampus', () => {
+    render(
+      <AcpToolMessage
+        msg={buildResultMessage('mcp', {
+          title: 'query',
+          isMcp: true,
+          mcpServerName: 'gbrain',
+          mcpToolName: 'query',
+          serverName: 'gbrain',
+          toolName: 'query',
+        })}
+      />,
+    );
+
+    expect(toolHeaderSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'Used',
+        object: 'Query',
+        suffix: 'Hippocampus',
+      }),
+    );
+  });
+
   it('keeps Wrench as the fallback icon for unknown tool kinds', () => {
     render(<AcpToolMessage msg={buildMessage('custom')} />);
 

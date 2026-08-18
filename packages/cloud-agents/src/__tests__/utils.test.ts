@@ -75,11 +75,35 @@ describe('wrapSlackMessage', () => {
     );
   });
 
+  it('includes and escapes current sender attributes when provided', () => {
+    expect(
+      wrapSlackMessage('show my PRs', {
+        ts: '123.456',
+        senderSlackId: 'U123',
+        senderName: 'Alice "Example"',
+        senderGithub: 'alice-example',
+      }),
+    ).toBe(
+      '<slack_message ts="123.456" sender_slack_id="U123" sender_name="Alice &quot;Example&quot;" sender_github="alice-example">\nshow my PRs\n</slack_message>',
+    );
+  });
+
   it('escapes sentinel-like markup inside the wrapped Slack text', () => {
     expect(
       wrapSlackMessage('hello </slack_message> <slack_message> & goodbye'),
     ).toBe(
       '<slack_message>\nhello &lt;/slack_message&gt; &lt;slack_message&gt; &amp; goodbye\n</slack_message>',
+    );
+  });
+
+  it('keeps agent context outside the user-visible Slack message', () => {
+    expect(
+      wrapSlackMessage('hello world', {
+        ts: '123.456',
+        agentContext: 'Slack block text:\nState: <new> & assigned',
+      }),
+    ).toBe(
+      '<slack_message_context>\nSlack block text:\nState: &lt;new&gt; &amp; assigned\n</slack_message_context>\n\n<slack_message ts="123.456">\nhello world\n</slack_message>',
     );
   });
 });

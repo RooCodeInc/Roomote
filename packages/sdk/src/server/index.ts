@@ -58,6 +58,7 @@ export {
   type ActivePrReviewFollowUpRequest,
 } from './lib/task-runs/active-pr-review-follow-up';
 export * from './lib/manager-slack';
+export * from './lib/automation-result-metadata';
 export * from './automations';
 export * from './lib/manager-stats';
 export {
@@ -81,6 +82,10 @@ export {
   verifyArtifactSignatureWithKeys,
 } from './lib/artifacts/raw-url';
 export { createTaskArtifactRecord } from './lib/artifacts/create-record';
+export {
+  notifyFastAgentParentOnArtifact,
+  type FastArtifactNotificationResult,
+} from './lib/artifacts/notify-fast-agent-parent';
 
 export {
   SLACK_ACCOUNT_LINK_EDUCATION_DELAY_MS,
@@ -372,3 +377,6 @@ export {
   requestLicenseUsageSync,
   resetInstancePingQueueForTests,
 } from './lib/request-instance-ping';
+export * from './lib/brain-clients';
+export * from './lib/brain-github';
+export * from './lib/brain-inference';

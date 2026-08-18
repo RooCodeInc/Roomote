@@ -37,30 +37,44 @@ describe('manager slack helpers', () => {
     );
   });
 
-  it('wraps automation text in a section and context footer', () => {
-    expect(
-      buildAutomationSettingsMessage('  Hello managers  ', 'suggest-ideas'),
-    ).toEqual({
-      text: 'Hello managers',
-      blocks: [
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: 'Hello managers',
+  it('wraps automation text in a structured result container', () => {
+    const message = buildAutomationSettingsMessage(
+      '  Hello managers  ',
+      'suggest-ideas',
+    );
+
+    expect(message.text).toBe('Hello managers');
+    expect(message.blocks).toEqual([
+      expect.objectContaining({
+        type: 'container',
+        width: 'full',
+        title: {
+          type: 'plain_text',
+          text: 'Suggest Ideas',
+          emoji: false,
+        },
+        icon: {
+          type: 'image',
+          image_url: 'https://app.example.com/automation-icons/lightbulb.png',
+          alt_text: 'Suggest Ideas automation icon',
+        },
+        child_blocks: [
+          {
+            type: 'section',
+            text: { type: 'mrkdwn', text: 'Hello managers' },
           },
-        },
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: 'Configure the Suggest Ideas automation in <https://app.example.com/automations#suggest-ideas|automation settings>.',
-            },
-          ],
-        },
-      ],
-    });
+          expect.objectContaining({
+            type: 'actions',
+            elements: [
+              expect.objectContaining({
+                action_id: 'late_bound_automation_configure',
+                url: 'https://app.example.com/automations#suggest-ideas',
+              }),
+            ],
+          }),
+        ],
+      }),
+    ]);
   });
 
   it('joins a generated summary with an optional action footer', () => {
@@ -73,15 +87,18 @@ describe('manager slack helpers', () => {
   });
 
   it('wraps a generated root summary in the standard automation message chrome', () => {
-    expect(
-      buildAutomationRootSummaryMessage({
-        summaryText: '  - Do the important thing  ',
-        actionFooterText: '  React on a thread item to start it.  ',
-        automationSettingsHash: 'suggest-ideas',
-      }),
-    ).toEqual({
-      text: '- Do the important thing\n\nReact on a thread item to start it.',
-      blocks: [
+    const message = buildAutomationRootSummaryMessage({
+      summaryText: '  - Do the important thing  ',
+      actionFooterText: '  React on a thread item to start it.  ',
+      automationSettingsHash: 'suggest-ideas',
+    });
+    expect(message.text).toBe(
+      '- Do the important thing\n\nReact on a thread item to start it.',
+    );
+    expect(message.blocks[0]).toMatchObject({
+      type: 'container',
+      title: { text: 'Suggest Ideas' },
+      child_blocks: [
         {
           type: 'section',
           text: {
@@ -89,15 +106,7 @@ describe('manager slack helpers', () => {
             text: '- Do the important thing\n\nReact on a thread item to start it.',
           },
         },
-        {
-          type: 'context',
-          elements: [
-            {
-              type: 'mrkdwn',
-              text: 'Configure the Suggest Ideas automation in <https://app.example.com/automations#suggest-ideas|automation settings>.',
-            },
-          ],
-        },
+        { type: 'actions' },
       ],
     });
   });

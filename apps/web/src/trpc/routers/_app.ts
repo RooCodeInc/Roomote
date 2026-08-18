@@ -40,6 +40,8 @@ import {
   pullRequestAnalyticsOverviewInputSchema,
   filterSchema,
   saveAsanaConnectionSchema,
+  saveNotionConnectionSchema,
+  saveRipplingConnectionSchema,
   saveGranolaConnectionSchema,
   saveElevenLabsConnectionSchema,
   saveGrafanaConnectionSchema,
@@ -207,6 +209,8 @@ import {
   setDeploymentMcpEnabledCommand,
   getUserMcpConnectionsCommand,
   getAsanaConnectionCommand,
+  getNotionConnectionCommand,
+  getRipplingConnectionCommand,
   getGranolaConnectionCommand,
   getElevenLabsConnectionCommand,
   getGrafanaConnectionCommand,
@@ -215,6 +219,8 @@ import {
   getXConnectionCommand,
   listDeploymentMcpIntegrationToolsCommand,
   saveAsanaConnectionCommand,
+  saveNotionConnectionCommand,
+  saveRipplingConnectionCommand,
   saveGranolaConnectionCommand,
   saveElevenLabsConnectionCommand,
   saveGrafanaConnectionCommand,
@@ -1429,12 +1435,14 @@ export const appRouter = createRouter({
             colorTheme: z.enum(PERSONAL_COLOR_THEMES).optional(),
             mindReaderMode: z.boolean().optional(),
             narrationMode: z.boolean().optional(),
+            communicationsFastModeDefault: z.boolean().optional(),
           })
           .refine(
             (input) =>
               input.colorTheme !== undefined ||
               input.mindReaderMode !== undefined ||
-              input.narrationMode !== undefined,
+              input.narrationMode !== undefined ||
+              input.communicationsFastModeDefault !== undefined,
             {
               message: 'Expected at least one personal preference to update.',
             },
@@ -1760,6 +1768,14 @@ export const appRouter = createRouter({
       getAsanaConnectionCommand(auth),
     ),
 
+    notionConnection: protectedProcedure.query(({ ctx: { auth } }) =>
+      getNotionConnectionCommand(auth),
+    ),
+
+    ripplingConnection: protectedProcedure.query(({ ctx: { auth } }) =>
+      getRipplingConnectionCommand(auth),
+    ),
+
     granolaConnection: protectedProcedure.query(({ ctx: { auth } }) =>
       getGranolaConnectionCommand(auth),
     ),
@@ -1832,6 +1848,18 @@ export const appRouter = createRouter({
       .input(saveAsanaConnectionSchema)
       .mutation(({ ctx: { auth }, input }) =>
         saveAsanaConnectionCommand(auth, input),
+      ),
+
+    saveNotionConnection: protectedProcedure
+      .input(saveNotionConnectionSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        saveNotionConnectionCommand(auth, input),
+      ),
+
+    saveRipplingConnection: protectedProcedure
+      .input(saveRipplingConnectionSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        saveRipplingConnectionCommand(auth, input),
       ),
 
     saveGranolaConnection: protectedProcedure

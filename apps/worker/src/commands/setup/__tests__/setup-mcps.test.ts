@@ -518,6 +518,58 @@ describe('resolveBuiltInMcpServers', () => {
     );
   });
 
+  it('rewrites Brain MCP to the Roomote proxy with run token auth', () => {
+    delete process.env.TRPC_URL;
+
+    const parsed = {
+      mcpServers: resolveBuiltInMcpServers(
+        {
+          ROOMOTE_CLOUD_TOKEN: 'roomote-run-token',
+          R_APP_URL: 'https://api.test.com/',
+        },
+        {
+          userMcpServers: {
+            gbrain: {
+              url: 'https://app.example.com/api/mcp/gbrain',
+              headers: {},
+            },
+          },
+        },
+      ),
+    };
+
+    expect(parsed.mcpServers).toHaveProperty('gbrain');
+
+    const gbrainConfig = parsed.mcpServers.gbrain as {
+      type: string;
+      url: string;
+      headers: Record<string, string>;
+    };
+    expect(gbrainConfig.type).toBe('streamable-http');
+    expect(gbrainConfig.url).toBe('https://api.test.com/api/mcp/gbrain');
+    expect(gbrainConfig.headers.Authorization).toBe('Bearer roomote-run-token');
+  });
+
+  it('skips Brain MCP when task env is missing auth inputs', () => {
+    delete process.env.TRPC_URL;
+
+    const parsed = {
+      mcpServers: resolveBuiltInMcpServers(
+        {},
+        {
+          userMcpServers: {
+            gbrain: {
+              url: 'https://app.example.com/api/mcp/gbrain',
+              headers: {},
+            },
+          },
+        },
+      ),
+    };
+
+    expect(parsed.mcpServers).not.toHaveProperty('gbrain');
+  });
+
   it('adds the preview proxy bypass header for proxied integration MCPs when present in task env', () => {
     delete process.env.TRPC_URL;
 
@@ -791,7 +843,7 @@ describe('resolveBuiltInMcpServers', () => {
     );
   });
 
-  it('skips user Notion MCP when it points at the raw upstream URL', () => {
+  it('skips Notion MCP when it points at the hosted MCP instead of the native proxy', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const parsed = {
@@ -815,7 +867,7 @@ describe('resolveBuiltInMcpServers', () => {
 
     expect(parsed.mcpServers).not.toHaveProperty('notion');
     expect(warnSpy).toHaveBeenCalledWith(
-      '[resolveBuiltInMcpServers] Skipping Notion MCP: raw upstream URL is not allowed (https://mcp.notion.com/mcp)',
+      "[resolveBuiltInMcpServers] Skipping Notion MCP: expected proxy path '/api/mcp/notion' but received 'https://mcp.notion.com/mcp'",
     );
   });
 

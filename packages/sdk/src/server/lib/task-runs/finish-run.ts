@@ -7,6 +7,8 @@ import {
   getCommunicationServiceUrlFromTaskPayload,
   getCommunicationThreadIdFromTaskPayload,
   getEnvironmentDefinitionIdFromPayload,
+  getTriggerableBackgroundAutomationDescriptorByKey,
+  getTriggerableBackgroundAutomationSettingsHash,
   parseConflictResolutionSummary,
   resolveComputeProviderTarget,
   stripRunErrorMarkers,
@@ -20,16 +22,20 @@ import {
 import { DiscordCommunicationProvider } from '@roomote/communication/discord-provider';
 import { createTeamsCommunicationProviderFromRuntimeCredentials } from '../teams-communication';
 import { createTelegramCommunicationProviderFromRuntimeCredentials } from '../telegram-communication';
+import { Env, isBrainConfigured } from '@roomote/env';
 import {
   type TaskRun,
   type Task,
   type TaskPullRequest,
   buildPendingEnvironmentSnapshotMatchForTaskRun,
   db,
+  getAutomationRuntime,
+  getCustomAutomationById,
   taskRuns,
   taskPullRequests,
   deploymentSettings,
   markTaskStartParallelCountEndedAt,
+  maybeEnqueueBrainMemoryEvent,
   recordTaskRunLifecycleEvent,
   resolveDefaultComputeProvider,
   slackInstallations,
@@ -66,6 +72,7 @@ import {
 } from './conflict-resolution-comments';
 import { cleanupSandboxOidcTargetsForTaskRun } from '../sandbox-oidc';
 import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
+import { notifyFastAgentParentOnSettle } from './notify-fast-agent-parent-on-settle';
 import { refreshTaskTitleOnCompletion } from './record-task-message-envelope';
 import { getRedis } from '@roomote/redis';
 import { resolveSlackTaskRunRouting } from './slack-task-run-routing';
@@ -73,6 +80,7 @@ import {
   SlackNotifier,
   buildTaskFailedMessage,
   getSlackStartedMessageTs,
+  refreshAutomationRootFooter,
   SLACK_RUNTIME_FAILURE_TEXT,
   SLACK_STARTUP_FAILURE_TEXT,
 } from '@roomote/slack';
@@ -88,7 +96,12 @@ import {
   findSlackConversationSubjectByUserId,
   recordSlackConversationMessageBestEffort,
 } from '../slack-conversation-log';
-import { buildManagerSlackSettingsUrl } from '../manager-slack';
+import {
+  buildAutomationIconUrl,
+  buildCustomAutomationSettingsUrl,
+  buildManagerSlackSettingsUrl,
+} from '../manager-slack';
+import { resolveAutomationResultSubtitle } from '../automation-result-metadata';
 
 const DEFAULT_LOCAL_R_APP_URL = 'http://localhost:13000';
 const DEFAULT_DEPLOYMENT_ID = 'default';
@@ -99,6 +112,97 @@ const DEFAULT_DEPLOYMENT_ID = 'default';
  * from `task` and attempt-scoped state from the run row.
  */
 type FinishedRun = TaskRun & { task: Task };
+
+function getCustomAutomationIdFromPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+
+  const customAutomationId = (payload as { customAutomationId?: unknown })
+    .customAutomationId;
+  return typeof customAutomationId === 'string' && customAutomationId
+    ? customAutomationId
+    : null;
+}
+
+async function refreshFinishedAutomationSlackResult(
+  run: FinishedRun,
+): Promise<void> {
+  const automationKey = run.task.initiatorAutomation;
+  if (!automationKey) return;
+
+  const { channel, teamId, threadTs } = await resolveSlackTaskRunRouting(run);
+  if (!channel || !threadTs) return;
+
+  let automationLabel: string;
+  let automationIcon: string;
+  let configureUrl: string;
+  let scheduleMode: string | null;
+
+  if (automationKey === 'custom_automation') {
+    const siblingRuns = await db.query.taskRuns.findMany({
+      columns: { payload: true },
+      where: eq(taskRuns.taskId, run.taskId),
+      orderBy: [asc(taskRuns.createdAt)],
+    });
+    const customAutomationId = siblingRuns
+      .map((siblingRun) => getCustomAutomationIdFromPayload(siblingRun.payload))
+      .find((id) => id !== null);
+    if (!customAutomationId) return;
+
+    const automation = await getCustomAutomationById(customAutomationId);
+    if (!automation) return;
+    automationLabel = automation.name;
+    automationIcon = 'zap';
+    configureUrl = buildCustomAutomationSettingsUrl(automation.id);
+    scheduleMode = automation.scheduleMode;
+  } else {
+    const descriptor =
+      getTriggerableBackgroundAutomationDescriptorByKey(automationKey);
+    const settingsHash = descriptor
+      ? getTriggerableBackgroundAutomationSettingsHash(descriptor.automationKey)
+      : null;
+    if (!descriptor || !settingsHash) return;
+
+    automationLabel = descriptor.label;
+    automationIcon = descriptor.slackIcon;
+    configureUrl = buildManagerSlackSettingsUrl(settingsHash);
+    scheduleMode = (await getAutomationRuntime(descriptor.automationKey))
+      .scheduleMode;
+  }
+
+  const slackInstallation = await db.query.slackInstallations.findFirst({
+    where: teamId
+      ? and(
+          eq(slackInstallations.isActive, true),
+          eq(slackInstallations.teamId, teamId),
+        )
+      : eq(slackInstallations.isActive, true),
+  });
+  if (!slackInstallation?.botAccessToken) return;
+
+  const subtitle = await resolveAutomationResultSubtitle({
+    taskId: run.taskId,
+    runId: run.id,
+    scheduleMode,
+  });
+  if (!subtitle) return;
+
+  await refreshAutomationRootFooter({
+    slack: new SlackNotifier(slackInstallation.botAccessToken),
+    channelId: channel,
+    messageTs: threadTs,
+    automationLabel,
+    automationIconUrl: buildAutomationIconUrl(automationIcon),
+    configureUrl,
+    subtitle,
+    taskUrl: getTaskUrl({
+      taskId: run.taskId,
+      utm: { campaign: run.payloadKind, source: 'slack' },
+    }),
+    taskId: run.taskId,
+  });
+}
 
 export const finishRun = async ({
   id,
@@ -243,7 +347,29 @@ export const finishRun = async ({
       },
       createdAt: now,
     });
+
+    // Transactional outbox for Brain task memory: the event commits with the
+    // completion or not at all, so no completed task can silently skip
+    // memory ingestion. Deployments without a Brain never enqueue; skip
+    // rules and DLP live in the bullmq drainer, not here.
+    if (status === RunStatus.Completed && isBrainConfigured(Env)) {
+      await maybeEnqueueBrainMemoryEvent(tx, id);
+    }
   });
+
+  if (status !== RunStatus.Idle) {
+    try {
+      await refreshFinishedAutomationSlackResult(run);
+    } catch (refreshError) {
+      console.error(
+        `[finishRun] Failed to refresh Slack automation result metadata for run ${id}: ${
+          refreshError instanceof Error
+            ? refreshError.message
+            : String(refreshError)
+        }`,
+      );
+    }
+  }
 
   // Truthful snapshot state: a snapshot refresh that dies on any terminal
   // path — spawn failure, worker crash before claiming, watchdog cleanup,
@@ -274,6 +400,18 @@ export const finishRun = async ({
   // transaction, so splice in the error that was just finalized.
   await notifySourceRunOnSettle(
     { ...run, error: sanitizedError ?? run.error },
+    status,
+    run.task.title,
+  );
+  // Detached: this can hold the parent's turn lock through a full
+  // orchestrator turn, and settle callers (tRPC finish, controller, queue
+  // jobs) must not block on it. The delivery claim keeps it idempotent.
+  void notifyFastAgentParentOnSettle(
+    {
+      ...run,
+      error: sanitizedError ?? run.error,
+      errorCode: errorCode ?? run.errorCode,
+    },
     status,
     run.task.title,
   );

@@ -106,6 +106,10 @@ vi.mock('../notify-source-run-on-settle', () => ({
     mockNotifySourceRunOnSettle(...args),
 }));
 
+vi.mock('../notify-fast-agent-parent-on-settle', () => ({
+  notifyFastAgentParentOnSettle: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { resolveWorkspaceSourceControlProvider } from '@roomote/db/server';
 
 import {
@@ -873,6 +877,39 @@ describe('fetchResolvedRuntimeEnvVars', () => {
 
     expect(envVars.ROOMOTE_MODEL).toBe('anthropic/claude-test');
     expect(envVars.R_MODEL).toBe('anthropic/claude-test');
+  });
+
+  it('replaces stale deployment context metadata with the resolved value', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({
+      R_MODEL: 'litellm/qwen3.6:35b-unsloth',
+      R_TASK_MODEL_CONTEXT_WINDOWS: JSON.stringify({
+        'litellm/qwen3.6:35b-unsloth': 210_176,
+      }),
+    });
+
+    const envVars = await fetchResolvedRuntimeEnvVars({
+      R_TASK_MODEL_CONTEXT_WINDOWS: JSON.stringify({
+        'litellm/qwen3.6:35b-unsloth': 999_999,
+      }),
+    });
+
+    expect(JSON.parse(envVars.R_TASK_MODEL_CONTEXT_WINDOWS ?? '{}')).toEqual({
+      'litellm/qwen3.6:35b-unsloth': 210_176,
+    });
+  });
+
+  it('removes stale deployment context metadata when none is resolved', async () => {
+    mockResolveSandboxModelRuntimeEnv.mockResolvedValueOnce({
+      R_MODEL: 'litellm/coding',
+    });
+
+    const envVars = await fetchResolvedRuntimeEnvVars({
+      R_TASK_MODEL_CONTEXT_WINDOWS: JSON.stringify({
+        'litellm/qwen3.6:35b-unsloth': 999_999,
+      }),
+    });
+
+    expect(envVars).not.toHaveProperty('R_TASK_MODEL_CONTEXT_WINDOWS');
   });
 
   it('admits no raw provider keys when the gateway is enabled', async () => {

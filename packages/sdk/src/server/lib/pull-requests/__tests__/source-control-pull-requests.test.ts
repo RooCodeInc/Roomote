@@ -28,6 +28,7 @@ const {
   mockResolveLaunchTaskCommitAuthor,
   mockResolveRunCommitAuthor,
   mockProjectPendingPrReviewEventsForAssociation,
+  mockNotifyFastAgentParentOnPullRequestOpened,
 } = vi.hoisted(() => ({
   mockCreateGitHubToken: vi.fn(),
   mockGetDeploymentPrAction: vi.fn(),
@@ -49,7 +50,16 @@ const {
   mockResolveLaunchTaskCommitAuthor: vi.fn(),
   mockResolveRunCommitAuthor: vi.fn(),
   mockProjectPendingPrReviewEventsForAssociation: vi.fn(),
+  mockNotifyFastAgentParentOnPullRequestOpened: vi.fn(),
 }));
+
+vi.mock(
+  '../../task-runs/notify-fast-agent-parent-on-pull-request-opened',
+  () => ({
+    notifyFastAgentParentOnPullRequestOpened: (...args: unknown[]) =>
+      mockNotifyFastAgentParentOnPullRequestOpened(...args),
+  }),
+);
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   DEFAULT_ROOMOTE_COMMIT_AUTHOR: {
@@ -425,6 +435,15 @@ describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
     );
     expect(result.draft).toBe(true);
     expect(result.warnings).toEqual([]);
+    expect(mockNotifyFastAgentParentOnPullRequestOpened).toHaveBeenCalledWith({
+      run: expect.objectContaining({ id: 123, taskId: 'task-123' }),
+      pullRequest: expect.objectContaining({
+        provider: 'ado',
+        repository: 'acme/Platform/backend',
+        number: 7,
+        status: 'draft',
+      }),
+    });
   });
 });
 
@@ -512,10 +531,29 @@ describe('platform-managed draft state', () => {
       },
     });
 
-    const result = await createOrUpdateSourceControlPullRequestForTaskRun({
+    let finishNotification!: () => void;
+    mockNotifyFastAgentParentOnPullRequestOpened.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        finishNotification = resolve;
+      }),
+    );
+    let mutationResolved = false;
+    const resultPromise = createOrUpdateSourceControlPullRequestForTaskRun({
       taskRun: makeTaskRun({ repo: 'acme/web' }),
       input: { ...githubInput },
     });
+    void resultPromise.then(() => {
+      mutationResolved = true;
+    });
+
+    await vi.waitFor(() =>
+      expect(
+        mockNotifyFastAgentParentOnPullRequestOpened,
+      ).toHaveBeenCalledOnce(),
+    );
+    expect(mutationResolved).toBe(false);
+    finishNotification();
+    const result = await resultPromise;
 
     expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
       expect.objectContaining({ draft: true }),
@@ -523,6 +561,59 @@ describe('platform-managed draft state', () => {
     expect(octokit.graphql).not.toHaveBeenCalled();
     expect(result.draft).toBe(true);
     expect(result.warnings).toEqual([]);
+    expect(mockNotifyFastAgentParentOnPullRequestOpened).toHaveBeenCalledWith({
+      run: expect.objectContaining({ id: 123, taskId: 'task-123' }),
+      pullRequest: {
+        provider: 'github',
+        host: undefined,
+        repository: 'acme/web',
+        number: 9,
+        title: '[Feature] X',
+        url: 'https://github.com/acme/web/pull/9',
+        status: 'draft',
+      },
+    });
+  });
+
+  it('propagates a transient Fast notification failure and retries it through the existing PR', async () => {
+    const pullRequest = {
+      number: 9,
+      node_id: 'node-9',
+      html_url: 'https://github.com/acme/web/pull/9',
+      title: '[Feature] X',
+      draft: true,
+      base: { ref: 'main' },
+      assignees: [],
+    };
+    const octokit = makeOctokit({
+      created: pullRequest,
+      updated: pullRequest,
+    });
+    octokit.rest.pulls.list
+      .mockResolvedValueOnce({ data: [] })
+      .mockResolvedValueOnce({ data: [pullRequest] });
+    mockNotifyFastAgentParentOnPullRequestOpened
+      .mockRejectedValueOnce(new Error('Fast turn lock unavailable'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(
+      createOrUpdateSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({ repo: 'acme/web' }),
+        input: { ...githubInput },
+      }),
+    ).rejects.toThrow('Fast turn lock unavailable');
+
+    const retry = await createOrUpdateSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({ repo: 'acme/web' }),
+      input: { ...githubInput },
+    });
+
+    expect(retry.action).toBe('updated');
+    expect(octokit.rest.pulls.create).toHaveBeenCalledTimes(1);
+    expect(octokit.rest.pulls.update).toHaveBeenCalledTimes(1);
+    expect(mockNotifyFastAgentParentOnPullRequestOpened).toHaveBeenCalledTimes(
+      2,
+    );
   });
 
   it('rejects an unassociated remote PR and safely associates it on retry', async () => {
@@ -1482,7 +1573,7 @@ describe('optional targetBranch', () => {
     );
   });
 
-  it('uses fresh canonical attribution when updating a private pull request', async () => {
+  it('preserves the opener attribution when updating a private pull request', async () => {
     const existing = {
       number: 11,
       node_id: 'node-11',
@@ -1490,7 +1581,10 @@ describe('optional targetBranch', () => {
       title: 'Old title',
       draft: false,
       base: { ref: 'develop' },
-      body: attributionBody('Opened on behalf of Launch $& Owner.'),
+      body: attributionBody(
+        'Opened on behalf of Launch $& Owner.',
+        'Follow up through the old task link.',
+      ),
     };
     const octokit = makeOctokit({
       list: [existing],
@@ -1511,12 +1605,12 @@ describe('optional targetBranch', () => {
 
     expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: attributionBody('Opened on behalf of Participant.'),
+        body: attributionBody('Opened on behalf of Launch $& Owner.'),
       }),
     );
   });
 
-  it('does not preserve a private marked name when a public pull request is updated', async () => {
+  it('preserves the original marked attribution when a public pull request is updated', async () => {
     const existing = {
       number: 11,
       node_id: 'node-11',
@@ -1554,12 +1648,12 @@ describe('optional targetBranch', () => {
 
     expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: attributionBody('Opened on behalf of @participant.'),
+        body: attributionBody('Opened on behalf of Private Name.'),
       }),
     );
   });
 
-  it('uses the current linked handle when updating a public pull request', async () => {
+  it('preserves the original linked handle when updating a public pull request', async () => {
     const existing = {
       number: 11,
       node_id: 'node-11',
@@ -1597,7 +1691,7 @@ describe('optional targetBranch', () => {
 
     expect(octokit.rest.pulls.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        body: attributionBody('Opened on behalf of @participant.'),
+        body: attributionBody('Opened on behalf of @launch-owner.'),
       }),
     );
   });

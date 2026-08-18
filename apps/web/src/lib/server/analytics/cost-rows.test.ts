@@ -15,7 +15,11 @@ import { TaskPayloadKind } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 
-import { getCostAnalyticsRows } from './cost-rows';
+import {
+  aggregateCostAnalyticsRowsByTask,
+  getCostAnalyticsRows,
+} from './cost-rows';
+import type { AnalyticsRow } from './types';
 
 describe('getCostAnalyticsRows', () => {
   const usageEventIds: string[] = [];
@@ -137,5 +141,86 @@ describe('getCostAnalyticsRows', () => {
 
     expect(row?.dimensions.project?.label).toBe(environment.name);
     expect(row?.meta?.prKeys).toEqual(['github:github.com:roomote/test#42']);
+  });
+});
+
+describe('aggregateCostAnalyticsRowsByTask', () => {
+  function createRow({
+    id,
+    taskId,
+    cost,
+    model = 'gpt-5.6-sol',
+    timestamp,
+  }: {
+    id: string;
+    taskId?: string;
+    cost: number;
+    model?: string;
+    timestamp: string;
+  }): AnalyticsRow {
+    return {
+      id,
+      timestamp: new Date(timestamp),
+      value: cost,
+      dimensions: {},
+      details: {
+        id,
+        values: {
+          date: timestamp,
+          taskType: taskId ? 'Manual' : 'Non-task inference',
+          project: 'Roomote',
+          provider: 'openai',
+          model,
+          cost: cost.toFixed(2),
+          taskTitle: taskId ? 'Analyze analytics costs' : 'Non-task inference',
+        },
+      },
+      meta: { canonicalTaskId: taskId },
+    };
+  }
+
+  it('sums usage events into one row per task', () => {
+    const rows = aggregateCostAnalyticsRowsByTask([
+      createRow({
+        id: 'usage-2',
+        taskId: 'task-1',
+        cost: 1.25,
+        timestamp: '2026-08-15T12:00:00.000Z',
+      }),
+      createRow({
+        id: 'usage-1',
+        taskId: 'task-1',
+        cost: 2.5,
+        model: 'gpt-5.4',
+        timestamp: '2026-08-15T10:00:00.000Z',
+      }),
+      createRow({
+        id: 'usage-3',
+        taskId: 'task-2',
+        cost: 4,
+        timestamp: '2026-08-15T11:00:00.000Z',
+      }),
+      createRow({
+        id: 'usage-4',
+        cost: 0.5,
+        timestamp: '2026-08-15T09:00:00.000Z',
+      }),
+    ]);
+
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toMatchObject({
+      id: 'task:task-1',
+      value: 3.75,
+      details: {
+        id: 'task:task-1',
+        values: {
+          cost: '3.75',
+          model: 'Multiple',
+          taskTitle: 'Analyze analytics costs',
+        },
+      },
+    });
+    expect(rows[1]).toMatchObject({ id: 'task:task-2', value: 4 });
+    expect(rows[2]).toMatchObject({ id: 'usage-4', value: 0.5 });
   });
 });

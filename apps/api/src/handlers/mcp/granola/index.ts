@@ -1,62 +1,19 @@
 import { Hono } from 'hono';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import {
-  and,
-  db,
-  eq,
-  isNull,
-  mcpConnections,
-  taskRuns,
-} from '@roomote/db/server';
+import { and, db, eq, isNull, mcpConnections } from '@roomote/db/server';
 import { isMcpConnectionGranolaConfig } from '@roomote/types';
 
 import type { Variables } from '../../../types';
 
-import {
-  isRunTokenContext,
-  McpProxyError,
-  type McpAuthContext,
-} from '../proxy-utils';
+import { resolveDeploymentMcpAuth } from '../deployment-mcp-auth';
+import { McpProxyError } from '../proxy-utils';
 import { registerGranolaTools } from './tools';
 
 const GRANOLA_MCP_SERVER_INFO = {
   name: 'roomote-granola-mcp',
   version: '1.0.0',
 } as const;
-
-async function resolveGranolaMcpAuth(
-  authContext: Variables['authContext'],
-): Promise<McpAuthContext> {
-  if (!authContext) {
-    throw new McpProxyError(
-      401,
-      'Unauthorized: missing or invalid bearer token',
-    );
-  }
-
-  if (isRunTokenContext(authContext)) {
-    const taskRun = await db.query.taskRuns.findFirst({
-      columns: { id: true },
-      where: eq(taskRuns.id, authContext.runId),
-    });
-
-    if (!taskRun) {
-      throw new McpProxyError(404, 'Task run not found for this MCP token');
-    }
-
-    return {
-      userId: authContext.userId,
-      tokenType: 'run',
-      runId: authContext.runId,
-    };
-  }
-
-  throw new McpProxyError(
-    403,
-    'Granola MCP requires a task run token for server-side credential access',
-  );
-}
 
 async function resolveGranolaConnection() {
   const connection = await db.query.mcpConnections.findFirst({
@@ -105,7 +62,7 @@ granolaMcp.on(['POST', 'GET', 'DELETE'], '/', async (c) => {
   });
 
   try {
-    await resolveGranolaMcpAuth(c.get('authContext'));
+    await resolveDeploymentMcpAuth(c.get('authContext'), 'Granola');
     const connectionConfig = await resolveGranolaConnection();
     const server = createGranolaMcpServer(connectionConfig);
 

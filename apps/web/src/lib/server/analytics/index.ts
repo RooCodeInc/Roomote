@@ -18,7 +18,10 @@ import {
 } from '@/types';
 import type { UserAuthSuccess } from '@/types';
 
-import { getCostAnalyticsRows } from './cost-rows';
+import {
+  aggregateCostAnalyticsRowsByTask,
+  getCostAnalyticsRows,
+} from './cost-rows';
 import { getTaskAnalyticsRows } from './task-rows';
 import {
   buildPullRequestAnalyticsSummary,
@@ -300,7 +303,7 @@ export async function getAnalyticsDetails(
     input.granularity,
   );
 
-  const matchingRows = filteredRows
+  let matchingRows = filteredRows
     .filter(
       (row) =>
         (row.dimensions[viewBy]?.key === input.seriesKey ||
@@ -311,6 +314,10 @@ export async function getAnalyticsDetails(
     .sort(
       (left, right) => right.timestamp.getTime() - left.timestamp.getTime(),
     );
+
+  if (input.object === 'costs') {
+    matchingRows = aggregateCostAnalyticsRowsByTask(matchingRows);
+  }
 
   return {
     object: input.object,

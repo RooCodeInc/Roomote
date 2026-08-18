@@ -42,8 +42,8 @@ export async function handleDiscordPrReviewActionCallback(input: {
       },
       text,
     });
-  const replyToOffer = (resolution: string) => {
-    const formattedResolution = `-# ${resolution}`;
+  const replyToOffer = (resolution: string, asSubtext = true) => {
+    const formattedResolution = asSubtext ? `-# ${resolution}` : resolution;
     const content = input.interaction.message?.content;
     if (!content) return reply(formattedResolution);
 
@@ -115,8 +115,9 @@ export async function handleDiscordPrReviewActionCallback(input: {
 
     await replyToOffer(
       input.choice === 'auto'
-        ? "I'll resolve these and any future feedback on this PR automatically. Starting on the current feedback now."
+        ? `OK, <@${user?.id}>. Future review feedback on this PR will get resolved automatically.`
         : 'On it — resolving the review feedback.',
+      input.choice !== 'auto',
     );
   } catch (error) {
     apiLogger.error(

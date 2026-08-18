@@ -28,6 +28,9 @@ export { publicRoomoteMcp } from './mcp/roomote';
 // inference gateway
 export { inference } from './inference';
 
+// the deployment Brain's own inference, keyless on the Brain's side
+export { brainInference } from './brain-inference';
+
 // narration tts
 export { tts } from './tts';
 

@@ -14,6 +14,7 @@ import {
   eq,
   and,
   inArray,
+  isBrainProviderConfigured,
   isNull,
   isNotNull,
   or,
@@ -24,7 +25,9 @@ import {
   getMcpIntegrationUpstreamUrl,
   MCP_INTEGRATIONS,
   isMcpConnectionAsanaConfig,
+  isMcpConnectionNotionConfig,
   isMcpConnectionGranolaConfig,
+  isMcpConnectionGbrainConfig,
   isMcpConnectionGrafanaConfig,
   getMcpIntegration,
   getMcpIntegrationConnectionScope,
@@ -33,6 +36,8 @@ import {
   isMcpConnectionVercelConfig,
   isMcpConnectionXConfig,
   isDeploymentScopedMcpIntegration,
+  BRAIN_MCP_ID,
+  BRAIN_PROXY_PATH,
   CUSTOM_MCP_PROXY_PATH_PREFIX,
   customMcpConnectionId,
   PRODUCT_NAME,
@@ -177,6 +182,30 @@ export const mcpConnectionsRouter = router({
           servers[name] = config;
         }
       }
+    }
+
+    // The Brain: infrastructure, not a catalog integration, so it is
+    // delivered directly whenever the deployment has one. The name cannot
+    // collide ('gbrain' is reserved for custom servers); the worker injects
+    // the run token sandbox-side and the read-only upstream credential never
+    // leaves the API proxy.
+    //
+    // Delivery requires the operator's explicit R_BRAIN_* provider key, not
+    // just Brain plumbing (R_GBRAIN_URL and the gateway token are
+    // template-defaulted on some platforms): an agent told the Brain exists
+    // starts every substantive topic with a preflight against it, which must
+    // never happen on a deployment that only *could* have a Brain. The check
+    // is cached alongside provider resolution, so the common off state costs
+    // nothing.
+    if (
+      Env.R_GBRAIN_URL &&
+      !servers[BRAIN_MCP_ID] &&
+      (await isBrainProviderConfigured())
+    ) {
+      servers[BRAIN_MCP_ID] = {
+        url: `${getRequestOrigin(ctx.req) ?? ''}${BRAIN_PROXY_PATH}`,
+        headers: {},
+      };
     }
 
     console.info('[getMcpServerConfigs] Final resolved server keys:', [
@@ -491,9 +520,11 @@ async function buildCuratedMcpServerConfigs(ctx: {
       } else if (
         isMcpConnectionSnowflakeConfig(authConfig) ||
         isMcpConnectionAsanaConfig(authConfig) ||
+        isMcpConnectionNotionConfig(authConfig) ||
         isMcpConnectionGranolaConfig(authConfig) ||
         isMcpConnectionVercelConfig(authConfig) ||
         isMcpConnectionGrafanaConfig(authConfig) ||
+        isMcpConnectionGbrainConfig(authConfig) ||
         isMcpConnectionXConfig(authConfig)
       ) {
         servers[connection.mcpId] = {

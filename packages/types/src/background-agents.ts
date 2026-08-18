@@ -84,7 +84,7 @@ export const USER_FACING_AUTOMATION_KEYS = [
   'call_roomote_via_emoji',
   // Channel auto-start for ALL chat providers (Slack + Discord targets live in
   // this one row, distinguished by target provider/targetKind). The key keeps
-  // its historical Slack-only name because renaming an automations primary key
+  // its historical Slack-only name because renaming an automation's primary key
   // would break the N-1 rollback release.
   'slack_channel_auto_start',
   'manager_stats',

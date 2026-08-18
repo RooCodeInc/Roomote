@@ -145,12 +145,22 @@ export type RunTaskCallbacks = {
     taskId: string,
     event: CallbackEvent,
     context: RunTaskContext,
+    deliveryContext?: CallbackDeliveryContext,
   ) => Promise<void>;
   onExit?: (
     taskRun: TaskRun,
     status: RunStatus,
     context: RunTaskContext,
   ) => Promise<void>;
+};
+
+export type CallbackDeliveryContext = {
+  slackReplyTarget?: {
+    slackTeamId: string;
+    channel: string;
+    threadTs: string;
+    reactionsAllowed?: boolean;
+  };
 };
 
 export type RunTaskOptions = {

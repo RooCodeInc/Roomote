@@ -64,6 +64,7 @@ async function routeDecision(
     mappedUserId?: string | null;
     ownedThreadUserId?: string | null;
     isRoomoteThread?: boolean;
+    isOpenConversationThread?: boolean;
     botUserId?: string;
   } = {},
 ) {
@@ -80,6 +81,7 @@ async function routeDecision(
       options.ownedThreadUserId === undefined
         ? 'roomote-user-1'
         : options.ownedThreadUserId,
+    isOpenConversationThread: options.isOpenConversationThread,
     fetchThreadMessages: fetchThreadMessagesMock,
   });
 }
@@ -101,6 +103,27 @@ describe('shouldRouteUnmentionedDiscordThreadReplyToAgent', () => {
     ]);
 
     await expect(routeDecision(threadReplyMessage({}))).resolves.toBe(true);
+  });
+
+  it("routes Matt when he joins Dan's open fast-agent thread", async () => {
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanHistory(THREAD_ROOT_ID, USER_1, 'Can you summarize this?'),
+      botHistory('200', 'Hi Dan.'),
+    ]);
+
+    await expect(
+      routeDecision(
+        threadReplyMessage({
+          user: USER_2,
+          content: 'Hey Roomote, can you check this too?',
+        }),
+        {
+          mappedUserId: 'roomote-user-matt',
+          ownedThreadUserId: 'roomote-user-dan',
+          isOpenConversationThread: true,
+        },
+      ),
+    ).resolves.toBe(true);
   });
 
   it('keeps routing consecutive replies from the same sender before the bot answers', async () => {

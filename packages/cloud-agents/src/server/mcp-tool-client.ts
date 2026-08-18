@@ -11,6 +11,42 @@ type McpToolResult = {
   content?: Array<{ type?: string; text?: string }>;
 };
 
+export type McpToolDefinition = {
+  name: string;
+  description?: string;
+  inputSchema?: unknown;
+};
+
+/** List the tools exposed by a streamable-http MCP server. */
+export async function listMcpTools(options: {
+  url: string;
+  headers?: Record<string, string>;
+}): Promise<McpToolDefinition[]> {
+  const { createMCPClient } = await import('@ai-sdk/mcp');
+  const client = await createMCPClient({
+    transport: {
+      type: 'http',
+      url: options.url,
+      headers: options.headers,
+    },
+  });
+
+  try {
+    const definitions = await client.listTools();
+    return definitions.tools.map((definition) => ({
+      name: definition.name,
+      ...(definition.description
+        ? { description: definition.description }
+        : {}),
+      ...(definition.inputSchema
+        ? { inputSchema: definition.inputSchema }
+        : {}),
+    }));
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
+
 export function extractMcpToolResultPayload(result: unknown): unknown | null {
   if (!result || typeof result !== 'object') {
     return result ?? null;

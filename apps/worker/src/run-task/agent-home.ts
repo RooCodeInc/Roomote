@@ -16,6 +16,8 @@ import {
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   getInferenceGatewayProvider,
   getInferenceGatewayProviderByEnvVarName,
+  BRAIN_MCP_ID,
+  BRAIN_MCP_INSTRUCTIONS,
   getMcpIntegration,
   getOpenAiCompatibleRuntimeConfigs,
   INFERENCE_GATEWAY_CHATGPT_ENV_VAR_NAME,
@@ -36,12 +38,14 @@ import {
   mergeOpenRouterVariantAliasModels,
   normalizeOptionalReasoningEffort,
   parseInferenceGatewayKeys,
+  parseTaskModelContextWindows,
   renderManualSkillMarkdown,
   resolveOpenRouterVariantModelAlias,
   toBedrockMantleRuntimeModelId,
   OPENCODE_ARCHITECT_AGENT,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
   OPENCODE_GO_API_KEY_ENV_VAR_NAME,
+  TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
   TaskPayloadKind,
   type EnvironmentManualSkill,
   type OpenRouterVariantModelAlias,
@@ -558,6 +562,12 @@ function createIntegrationMcpInstructions(
   mcpServers: OpenCodeConfigMcpServer[] | undefined,
 ): string | undefined {
   const sections = (mcpServers ?? []).flatMap((mcpServer) => {
+    // The Brain is infrastructure rather than a catalog integration, so its
+    // recall-first guidance ships from the shared types contract.
+    if (mcpServer.name === BRAIN_MCP_ID) {
+      return [`# Connected: Brain\n\n${BRAIN_MCP_INSTRUCTIONS}`];
+    }
+
     const integration = getMcpIntegration(mcpServer.name);
 
     if (!integration) {
@@ -1312,6 +1322,10 @@ function resolveModelBackedOpenCodeConfig(
   reasoningEffortOverride?: ReasoningEffort,
 ): Record<string, unknown> | null {
   const isLiteLlmConfigured = isConfiguredEnvValue(runtimeEnv.LITELLM_BASE_URL);
+  const modelContextWindows = parseTaskModelContextWindows(
+    runtimeEnv[TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME],
+  );
+  delete runtimeEnv[TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME];
   const rawModel = applyImplicitLiteLlmModelPrefix(
     runtimeEnv.R_MODEL?.trim() ?? '',
     isLiteLlmConfigured,
@@ -1608,6 +1622,10 @@ function resolveModelBackedOpenCodeConfig(
     exploreModel,
     planningModel,
   ];
+  const openAiCompatibleModelIds = [
+    ...configuredModelIds,
+    ...Object.keys(modelContextWindows),
+  ];
   const providerModelConfig = chatGptFastMode
     ? mergeOpenCodeChatGptFastModeOptions(
         providerReasoningConfig,
@@ -1626,8 +1644,9 @@ function resolveModelBackedOpenCodeConfig(
                   variantAliases,
                 ),
                 runtimeEnv,
-                configuredModelIds,
+                openAiCompatibleModelIds,
                 visionModel ?? effectiveCodingModel,
+                modelContextWindows,
               ),
               runtimeEnv,
               configuredModelIds,
@@ -1643,7 +1662,7 @@ function resolveModelBackedOpenCodeConfig(
       configuredModelIds,
     ),
     runtimeEnv,
-    configuredModelIds,
+    openAiCompatibleModelIds,
   );
 
   return {

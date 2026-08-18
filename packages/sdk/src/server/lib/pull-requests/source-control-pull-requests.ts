@@ -26,6 +26,7 @@ import {
   buildPullRequestUrl,
   getSourceControlProviderLabel,
   findPrBodyAttributionLine,
+  preservePrBodyAttribution,
   getCommunicationProviderFromTaskPayload,
   getCommunicationGuildIdFromTaskPayload,
   getCommunicationTenantIdFromTaskPayload,
@@ -78,6 +79,7 @@ import {
   type FetchImpl,
   type RepositoryRow,
 } from './source-control-pull-request-shared';
+import { notifyFastAgentParentOnPullRequestOpened } from '../task-runs/notify-fast-agent-parent-on-pull-request-opened';
 
 const ADO_API_VERSION = '7.1';
 
@@ -398,6 +400,23 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
     repository,
   });
 
+  // Finish the open event before returning to the child so a very fast
+  // completion cannot overtake it in the parent conversation. Transient
+  // failures propagate after releasing their claim: the next source-control
+  // attempt finds this PR, updates it, and re-enters the deduplicated notifier.
+  await notifyFastAgentParentOnPullRequestOpened({
+    run: taskRun,
+    pullRequest: {
+      provider: result.provider,
+      host: repository.host,
+      repository: result.repositoryFullName,
+      number: result.number,
+      title: result.title,
+      url: result.url,
+      status: result.draft ? 'draft' : 'open',
+    },
+  });
+
   return result;
 }
 
@@ -568,7 +587,7 @@ async function createOrUpdateGitHubPullRequest({
       repo,
       pull_number: pullRequest.number,
       title: input.title,
-      body: input.body,
+      body: preservePrBodyAttribution(input.body, pullRequest.body ?? ''),
     });
     pullRequest = data;
   } else {

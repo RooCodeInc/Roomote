@@ -357,7 +357,7 @@ describe('launchActWorkItems', () => {
     ]);
   });
 
-  it('seeds late-bound Dependabot launches with single-closeout instructions and Slack channel only', async () => {
+  it('seeds late-bound Dependabot launches with conditional-closeout instructions and Slack channel only', async () => {
     const updateSets = setupDbUpdateMock();
     mockSuccessfulTaskEnqueue('task-direct-dependabot');
 
@@ -402,12 +402,17 @@ describe('launchActWorkItems', () => {
     );
     expect(enqueuePayload.description).toEqual(
       expect.stringContaining(
-        'Post to Slack only when you have a final successful result (for example, a shipped change or an opened draft PR), a final no-op/deferred result after reverting untrusted changes, a durable blocker that stops the run, or a concrete user input request',
+        'Default to finishing silently. Post to Slack only when there is something a human should see now',
       ),
     );
     expect(enqueuePayload.description).toEqual(
       expect.stringContaining(
-        'Keep the first Slack-visible closeout as one self-contained message instead of a separate opener plus a result',
+        'Routine success, no-change results, and no-op or deferred outcomes that require no human action should not produce a message',
+      ),
+    );
+    expect(enqueuePayload.description).toEqual(
+      expect.stringContaining(
+        'If you report, keep the first Slack-visible closeout as one self-contained message instead of a separate opener plus a result',
       ),
     );
     expect(enqueuePayload.description).toEqual(
@@ -487,7 +492,7 @@ describe('launchActWorkItems', () => {
     );
     expect(enqueuePayload.description).toEqual(
       expect.stringContaining(
-        'For blocker, no-op, deferred, or input-needed outcomes, keep the same single-message shape but report only the outcome-relevant details',
+        'For blocker, no-op, deferred, or input-needed outcomes that are worth reporting under the rule above, keep the same single-message shape but report only the outcome-relevant details',
       ),
     );
     expect(enqueuePayload.automationWorkItemId).toBe(workItem.id);
@@ -505,7 +510,7 @@ describe('launchActWorkItems', () => {
     ]);
   });
 
-  it('seeds late-bound implementation launches with generic single-closeout Slack instructions', async () => {
+  it('seeds late-bound implementation launches with generic conditional-closeout Slack instructions', async () => {
     const updateSets = setupDbUpdateMock();
     mockSuccessfulTaskEnqueue('task-direct-sentry');
 
@@ -526,7 +531,7 @@ describe('launchActWorkItems', () => {
     );
     expect(enqueuePayload.description).toEqual(
       expect.stringContaining(
-        'Keep the first Slack-visible closeout as one self-contained message instead of a separate opener plus a result',
+        'If you report, keep the first Slack-visible closeout as one self-contained message instead of a separate opener plus a result',
       ),
     );
     expect(enqueuePayload.description).toEqual(

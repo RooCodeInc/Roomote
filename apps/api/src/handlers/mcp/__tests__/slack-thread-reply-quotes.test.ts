@@ -8,9 +8,12 @@ const {
   clearLatestUserMessageForReplyQuoteIfIdMock,
   clearLatestUserMessageMock,
   getLatestUserMessageMock,
+  getActiveSlackRunReplyTargetMock,
+  getCustomAutomationByIdMock,
   getTaskChannelBindingsMock,
   maybeSendCommunicationThreadReplyMock,
   postMessageDetailedMock,
+  resolveAutomationResultSubtitleMock,
   slackInstallationFindFirstMock,
   taskRunFindFirstMock,
 } = vi.hoisted(() => ({
@@ -18,9 +21,12 @@ const {
   clearLatestUserMessageForReplyQuoteIfIdMock: vi.fn(),
   clearLatestUserMessageMock: vi.fn(),
   getLatestUserMessageMock: vi.fn(),
+  getActiveSlackRunReplyTargetMock: vi.fn(),
+  getCustomAutomationByIdMock: vi.fn(),
   getTaskChannelBindingsMock: vi.fn(),
   maybeSendCommunicationThreadReplyMock: vi.fn(),
   postMessageDetailedMock: vi.fn(),
+  resolveAutomationResultSubtitleMock: vi.fn(),
   slackInstallationFindFirstMock: vi.fn(),
   taskRunFindFirstMock: vi.fn(),
 }));
@@ -38,7 +44,8 @@ vi.mock('@roomote/db/server', () => ({
   },
   eq: vi.fn(),
   findBackgroundAutomationSlackThread: vi.fn().mockResolvedValue(null),
-  getCustomAutomationById: vi.fn(),
+  getAutomationRuntime: vi.fn().mockResolvedValue({ scheduleMode: 'daily' }),
+  getCustomAutomationById: getCustomAutomationByIdMock,
   getTaskAutomationInitiatorKey: vi.fn().mockResolvedValue(null),
   slackInstallations: { isActive: 'isActive', teamId: 'teamId' },
   taskRuns: { id: 'id' },
@@ -50,40 +57,44 @@ vi.mock('@roomote/db/server', () => ({
   workItems: { id: 'id' },
 }));
 
-vi.mock('@roomote/slack', async (importOriginal) => ({
-  SlackPostDeliveryError: (
-    await importOriginal<typeof import('@roomote/slack')>()
-  ).SlackPostDeliveryError,
-  buildSlackThreadFooterText: vi.fn().mockReturnValue('Task footer'),
-  buildSlackThreadReplyFooterBlock: vi.fn(({ footerText }) => ({
-    type: 'context',
-    block_id: 'footer',
-    elements: [{ type: 'mrkdwn', text: footerText }],
-  })),
-  clearLatestUserMessage: clearLatestUserMessageMock,
-  clearSlackThreadReplyFooterMessageTs: vi.fn(),
-  getLatestUserMessage: getLatestUserMessageMock,
-  getSlackThreadReplyFooterMessageTs: vi.fn().mockResolvedValue(null),
-  removeSlackThreadReplyFooter: vi.fn(),
-  resolveSlackThreadFooterContext: vi.fn().mockResolvedValue({
-    linkedPrs: [],
-    livePreviewUrl: null,
-  }),
-  ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID: 'roomote_thread_reply_quote',
-  setLatestSlackBotReply: vi.fn(),
-  setSlackThreadReplyFooterMessageTs: vi.fn(),
-  SlackNotifier: vi.fn(
-    class {
-      postMessageDetailed = postMessageDetailedMock;
-    },
-  ),
-  trackLatestUserMessageForSlackQuote: vi.fn(),
-  trackSlackBotReply: vi.fn(),
-  withSlackThreadReplyFooterLock: vi.fn(
-    async ({ fn }: { fn: () => Promise<unknown> }) => fn(),
-  ),
-  THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE: 'busy',
-}));
+vi.mock('@roomote/slack', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/slack')>();
+  return {
+    ...actual,
+    SlackPostDeliveryError: actual.SlackPostDeliveryError,
+    buildSlackThreadFooterText: vi.fn().mockReturnValue('Task footer'),
+    buildSlackThreadReplyFooterBlock: vi.fn(({ footerText }) => ({
+      type: 'context',
+      block_id: 'footer',
+      elements: [{ type: 'mrkdwn', text: footerText }],
+    })),
+    clearLatestUserMessage: clearLatestUserMessageMock,
+    clearSlackThreadReplyFooterMessageTs: vi.fn(),
+    getLatestUserMessage: getLatestUserMessageMock,
+    getActiveSlackRunReplyTarget: getActiveSlackRunReplyTargetMock,
+    getSlackThreadReplyFooterMessageTs: vi.fn().mockResolvedValue(null),
+    removeSlackThreadReplyFooter: vi.fn(),
+    resolveSlackThreadFooterContext: vi.fn().mockResolvedValue({
+      linkedPrs: [],
+      livePreviewUrl: null,
+    }),
+    resolveSlackThreadLinkedPrs: vi.fn().mockResolvedValue([]),
+    ROOMOTE_THREAD_REPLY_QUOTE_BLOCK_ID: 'roomote_thread_reply_quote',
+    setLatestSlackBotReply: vi.fn().mockResolvedValue(undefined),
+    setSlackThreadReplyFooterMessageTs: vi.fn(),
+    SlackNotifier: vi.fn(
+      class {
+        postMessageDetailed = postMessageDetailedMock;
+      },
+    ),
+    trackLatestUserMessageForSlackQuote: vi.fn(),
+    trackSlackBotReply: vi.fn().mockResolvedValue(undefined),
+    withSlackThreadReplyFooterLock: vi.fn(
+      async ({ fn }: { fn: () => Promise<unknown> }) => fn(),
+    ),
+    THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE: 'busy',
+  };
+});
 
 vi.mock('@roomote/communication/messages', () => ({
   clearLatestUserMessageForReplyQuoteIfId:
@@ -92,8 +103,14 @@ vi.mock('@roomote/communication/messages', () => ({
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
+  buildAutomationIconUrl: (icon: string) =>
+    `https://app.example.com/automation-icons/${icon}.png`,
+  buildCustomAutomationSettingsUrl: (id: string) =>
+    `https://app.example.com/automations#custom-automation-${id}`,
+  buildManagerSlackSettingsUrl: () => 'https://app.example.com/automations',
   findSlackConversationSubjectByUserId: vi.fn().mockResolvedValue(null),
   recordSlackConversationMessageBestEffort: vi.fn(),
+  resolveAutomationResultSubtitle: resolveAutomationResultSubtitleMock,
 }));
 
 vi.mock('../communication-thread-replies', () => ({
@@ -155,6 +172,7 @@ function createApp() {
 describe('Slack thread reply quotes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getActiveSlackRunReplyTargetMock.mockResolvedValue(null);
     taskRunFindFirstMock.mockResolvedValue({
       id: 42,
       actingUserId: null,
@@ -167,6 +185,10 @@ describe('Slack thread reply quotes', () => {
     });
     getTaskChannelBindingsMock.mockResolvedValue(null);
     maybeSendCommunicationThreadReplyMock.mockResolvedValue(null);
+    resolveAutomationResultSubtitleMock.mockResolvedValue({
+      type: 'plain_text',
+      text: 'Daily · GPT 5.6 High · $0.56 · 02:37s',
+    });
     getLatestUserMessageMock.mockResolvedValue({
       id: 'quote-image',
       text: 'Take a screenshot',
@@ -215,6 +237,37 @@ describe('Slack thread reply quotes', () => {
     );
   });
 
+  it('replies to the active turn target instead of the task source thread', async () => {
+    getActiveSlackRunReplyTargetMock.mockResolvedValue({
+      slackTeamId: 'T_ALERT',
+      channel: 'C_ALERT',
+      threadTs: '222.333',
+    });
+    getTaskChannelBindingsMock.mockResolvedValue({
+      slackChannelId: 'C_SOURCE',
+      slackThreadTs: '111.222',
+    });
+    slackInstallationFindFirstMock.mockResolvedValue({
+      botAccessToken: 'xoxb-alert',
+      teamId: 'T_ALERT',
+    });
+
+    const response = await createApp().request('/mcp/thread_reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'Responding in the alert thread' }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(eq).toHaveBeenCalledWith('teamId', 'T_ALERT');
+    expect(postMessageDetailedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C_ALERT',
+        thread_ts: '222.333',
+      }),
+    );
+  });
+
   it('uses the task Slack workspace when selecting the reply installation', async () => {
     taskRunFindFirstMock.mockResolvedValue({
       id: 42,
@@ -237,6 +290,64 @@ describe('Slack thread reply quotes', () => {
     expect(eq).toHaveBeenCalledWith('teamId', 'T_DM');
     expect(postMessageDetailedMock).toHaveBeenCalledWith(
       expect.objectContaining({ channel: 'D123' }),
+    );
+  });
+
+  it('wraps a custom automation root report in the structured container', async () => {
+    taskRunFindFirstMock.mockResolvedValue({
+      id: 42,
+      actingUserId: null,
+      taskId: 'task-1',
+      payload: { channel: 'C123', customAutomationId: 'automation-1' },
+    });
+    getCustomAutomationByIdMock.mockResolvedValue({
+      id: 'automation-1',
+      name: 'Daily demo ideas',
+      scheduleMode: 'daily',
+    });
+    buildThreadReplyImageBlocksMock.mockResolvedValue([]);
+
+    const response = await createApp().request('/mcp/thread_reply', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        text: '**Summary**\n\n| Idea | Priority |\n| --- | --- |\n| Demo | High |',
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(postMessageDetailedMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: 'C123',
+        blocks: [
+          expect.objectContaining({
+            type: 'container',
+            title: expect.objectContaining({ text: 'Daily demo ideas' }),
+            subtitle: {
+              type: 'plain_text',
+              text: 'Daily · GPT 5.6 High · $0.56 · 02:37s',
+            },
+            icon: expect.objectContaining({
+              image_url: 'https://app.example.com/automation-icons/zap.png',
+            }),
+            child_blocks: expect.arrayContaining([
+              expect.objectContaining({ type: 'table' }),
+              expect.objectContaining({
+                type: 'actions',
+                elements: expect.arrayContaining([
+                  expect.objectContaining({
+                    action_id: 'late_bound_automation_view_task',
+                  }),
+                  expect.objectContaining({
+                    action_id: 'late_bound_automation_configure',
+                    url: 'https://app.example.com/automations#custom-automation-automation-1',
+                  }),
+                ]),
+              }),
+            ]),
+          }),
+        ],
+      }),
     );
   });
 

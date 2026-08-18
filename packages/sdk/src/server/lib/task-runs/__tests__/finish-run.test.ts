@@ -22,10 +22,14 @@ const mockCleanupSandboxOidcTargetsForTaskRun = vi
 const mockResolveDiscordRuntimeCredentials = vi.fn();
 const mockDiscordPostMessage = vi.fn();
 const mockNotifySourceRunOnSettle = vi.fn().mockResolvedValue(undefined);
+const mockNotifyFastAgentParentOnSettle = vi.fn().mockResolvedValue(undefined);
 const mockDbTransaction = vi.fn();
 const mockCaptureTaskSettled = vi.fn();
 const mockResolveDefaultComputeProvider = vi.fn().mockResolvedValue('modal');
 const mockUpdatePendingEnvironmentSnapshot = vi.fn().mockResolvedValue(true);
+const mockGetCustomAutomationById = vi.fn();
+const mockRefreshAutomationRootFooter = vi.fn().mockResolvedValue(true);
+const mockResolveAutomationResultSubtitle = vi.fn();
 
 /**
  * Rows resolved by db.select() chains that join tasks with task_runs (the
@@ -148,6 +152,8 @@ vi.mock('@roomote/db/server', async () => {
     },
     recordTaskRunLifecycleEvent: (...args: unknown[]) =>
       mockRecordTaskRunLifecycleEvent(...args),
+    getCustomAutomationById: (...args: unknown[]) =>
+      mockGetCustomAutomationById(...args),
     resolveDefaultComputeProvider: (...args: unknown[]) =>
       mockResolveDefaultComputeProvider(...args),
     resolveDiscordRuntimeCredentials: (...args: unknown[]) =>
@@ -217,6 +223,8 @@ vi.mock('@roomote/slack', () => ({
     mockBuildTaskFailedMessage(...args),
   getSlackStartedMessageTs: (...args: unknown[]) =>
     mockGetSlackStartedMessageTs(...args),
+  refreshAutomationRootFooter: (...args: unknown[]) =>
+    mockRefreshAutomationRootFooter(...args),
   SLACK_STARTUP_FAILURE_TEXT:
     "I ran into a hiccup and couldn't get started. This is usually temporary -- try again and I'll give it another shot.",
   SLACK_RUNTIME_FAILURE_TEXT:
@@ -272,6 +280,16 @@ vi.mock('../../sandbox-oidc', () => ({
 vi.mock('../notify-source-run-on-settle', () => ({
   notifySourceRunOnSettle: (...args: unknown[]) =>
     mockNotifySourceRunOnSettle(...args),
+}));
+
+vi.mock('../notify-fast-agent-parent-on-settle', () => ({
+  notifyFastAgentParentOnSettle: (...args: unknown[]) =>
+    mockNotifyFastAgentParentOnSettle(...args),
+}));
+
+vi.mock('../../automation-result-metadata', () => ({
+  resolveAutomationResultSubtitle: (...args: unknown[]) =>
+    mockResolveAutomationResultSubtitle(...args),
 }));
 
 import { finishRun } from '../finish-run';
@@ -345,6 +363,8 @@ describe('finishRun', () => {
       slackOnboardingStage: 'awaiting_task_milestone',
     });
     mockFindFirstSlackInstallation.mockResolvedValue(null);
+    mockGetCustomAutomationById.mockResolvedValue(null);
+    mockResolveAutomationResultSubtitle.mockResolvedValue(undefined);
     mockFindFirstSlackUserMapping.mockResolvedValue(null);
     mockFindLinearDeploymentMcpConnection.mockResolvedValue(null);
     mockGetValidAccessToken.mockResolvedValue('decrypted-token');
@@ -396,6 +416,14 @@ describe('finishRun', () => {
           },
           select: () => makeTxSelectChain(),
           update: (...args: unknown[]) => mockDbUpdate(...args),
+          // Brain outbox insert (maybeEnqueueBrainMemoryEvent)
+          // runs inside the completion transaction when the mocked enablement
+          // read comes back non-empty.
+          insert: () => ({
+            values: () => ({
+              onConflictDoNothing: async () => undefined,
+            }),
+          }),
         }),
     );
     mockDbSelect.mockClear();
@@ -426,6 +454,60 @@ describe('finishRun', () => {
     });
 
     expect(mockCleanupSandboxOidcTargetsForTaskRun).toHaveBeenCalledWith(1);
+  });
+
+  it('refreshes finalized metadata on a custom automation Slack result', async () => {
+    const task = {
+      initiatorKind: 'automation',
+      initiatorAutomation: 'custom_automation',
+      slackChannelId: 'C123',
+      slackThreadTs: '1700000000.000001',
+    } satisfies Partial<Task>;
+    mockFindFirstRun.mockResolvedValue(
+      makeRun(
+        {
+          payload: {
+            repo: 'owner/repo',
+            customAutomationId: 'automation-1',
+            slackTeamId: 'T123',
+          },
+        },
+        task,
+      ),
+    );
+    mockFindFirstTask.mockResolvedValue({
+      slackChannelId: task.slackChannelId,
+      slackThreadTs: task.slackThreadTs,
+    });
+    mockFindManyRuns.mockResolvedValue([
+      { payload: { customAutomationId: 'automation-1' } },
+    ]);
+    mockGetCustomAutomationById.mockResolvedValue({
+      id: 'automation-1',
+      name: 'Daily report',
+      scheduleMode: 'daily',
+    });
+    mockFindFirstSlackInstallation.mockResolvedValue({
+      botAccessToken: 'xoxb-test',
+    });
+    mockResolveAutomationResultSubtitle.mockResolvedValue({
+      type: 'plain_text',
+      text: 'Daily · GPT 5.6 High · $0.56 · 02:37s',
+    });
+
+    await finishRun({ id: 1, status: RunStatus.Completed });
+
+    expect(mockRefreshAutomationRootFooter).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'C123',
+        messageTs: '1700000000.000001',
+        automationLabel: 'Daily report',
+        subtitle: {
+          type: 'plain_text',
+          text: 'Daily · GPT 5.6 High · $0.56 · 02:37s',
+        },
+      }),
+    );
   });
 
   it.each([
@@ -1400,6 +1482,42 @@ describe('finishRun', () => {
   });
 
   describe('Slack failure notification', () => {
+    it('routes Fast child failures through the parent without generic Slack delivery', async () => {
+      const job = makeRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: {
+          repo: 'owner/repo',
+          description: 'Implement the fix',
+          communicationProvider: 'slack',
+          communicationContextInherited: true,
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'slack',
+              workspaceId: 'T123',
+              conversationId: '111.222',
+              replyTarget: { channelId: 'C123', threadId: '111.222' },
+            },
+          },
+        },
+      });
+      mockFindFirstRun.mockResolvedValue(job);
+      mockFindFirstTask.mockResolvedValue(job.task);
+
+      await finishRun({
+        id: 1,
+        status: RunStatus.Failed,
+        error: 'spawn timeout',
+      });
+
+      expect(mockPostMessage).not.toHaveBeenCalled();
+      expect(mockNotifyFastAgentParentOnSettle).toHaveBeenCalledWith(
+        expect.objectContaining({ taskId: job.taskId }),
+        RunStatus.Failed,
+        job.task.title,
+      );
+    });
+
     it('posts a retryable generic thread reply when a non-setup Slack job fails', async () => {
       const job = makeRun(
         {

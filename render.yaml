@@ -36,6 +36,16 @@
 #   exception: environment groups cannot reference services, so MinIO owns
 #   the generated `MINIO_ROOT_PASSWORD` and the app services mirror it into
 #   `S3_SECRET_ACCESS_KEY` with a `fromService` reference.
+# - The Brain (roomote-gbrain) is a private service with a disk and no
+#   public hostname. It is inert until an explicit Brain provider key
+#   (R_BRAIN_OPENROUTER_API_KEY or R_BRAIN_OPENAI_API_KEY, on roomote-api or
+#   as a Settings environment value) and GBRAIN_ADMIN_BOOTSTRAP_TOKEN are
+#   set. The R_BRAIN_* name is the on switch: the deployment's general task
+#   provider keys never activate the Brain, and the generated gateway token
+#   is plumbing, not activation. The admin token cannot use generateValue
+#   (Render generates base64; gbrain requires [A-Za-z0-9_-]), which is why it
+#   is sync: false rather than generated. Deployments that want no memory at
+#   all can delete the service.
 # - Render has no Docker socket, so task execution must use a hosted
 #   sandbox provider (modal by default; e2b, daytona, blaxel, box, and azure
 #   also work).
@@ -107,6 +117,72 @@ services:
       - key: MINIO_ROOT_PASSWORD
         generateValue: true
 
+  # The Brain: shared memory for this deployment's agents. A private service,
+  # so it is reachable only over Render's internal network; agents read it
+  # through the api service's proxy with their run token and never talk to it
+  # directly. Idle and harmless until the two values below are filled in.
+  - type: pserv
+    name: roomote-gbrain
+    runtime: image
+    image:
+      url: ghcr.io/roocodeinc/roomote-gbrain:main
+    # Measured ~370 MB resident while idle, which leaves no headroom on
+    # starter's 512 MB once ingestion and embedding passes run. Downgrade
+    # deliberately if the corpus stays small.
+    plan: standard
+    disk:
+      name: gbrain-data
+      mountPath: /data
+      sizeGB: 10
+    envVars:
+      - key: GBRAIN_DATABASE_URL
+        fromDatabase:
+          name: roomote-postgres
+          property: connectionString
+      - key: PORT
+        value: 8931
+      - key: GBRAIN_PORT
+        value: 8931
+      # The admin bootstrap token lives here rather than in the
+      # roomote-shared group, following the MinIO precedent: the service that
+      # needs a value under its own name owns it, and the app services mirror
+      # it with a fromService reference.
+      #
+      # The Brain holds no provider key. It calls back into roomote-api,
+      # which injects whichever provider key an admin set in Settings, so
+      # switching or rotating it never touches this service. Blueprints
+      # cannot build a URL from a service reference, so the host arrives
+      # host-only and the image entrypoint composes the origin, the same way
+      # the app services derive TRPC_URL and S3_ENDPOINT.
+      - key: ROOMOTE_API_HOST
+        fromService:
+          type: web
+          name: roomote-api
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
+      - key: OPENAI_API_KEY
+        fromService:
+          type: web
+          name: roomote-api
+          envVarKey: R_BRAIN_GATEWAY_TOKEN
+      - key: GBRAIN_RERANKER_MODEL
+        fromService:
+          type: web
+          name: roomote-api
+          envVarKey: R_BRAIN_RERANKER_MODEL
+      # Create-time, and it has to be the container that receives these: the
+      # embedding model and its width are decided when the Brain is created,
+      # and the gateway must never substitute a different one afterwards.
+      - key: GBRAIN_EMBEDDING_MODEL
+        sync: false
+      - key: GBRAIN_EMBEDDING_DIMENSIONS
+        sync: false
+      # gbrain requires >= 32 characters of [A-Za-z0-9_-] and refuses to boot
+      # otherwise, so this cannot use generateValue: Render generates
+      # base64, which contains '+', '/', and '='. `openssl rand -hex 24`
+      # produces a conforming value; see deploy/render/README.md.
+      - key: GBRAIN_ADMIN_BOOTSTRAP_TOKEN
+        sync: false
+
   - type: web
     name: roomote-api
     runtime: image
@@ -157,6 +233,46 @@ services:
         fromService:
           type: web
           name: roomote-minio
+          property: hostport
+      # The Brain's secrets are owned by roomote-gbrain (see that service).
+      # Mirrored here so the app services see the same values; blank there
+      # means blank here, which is the Brain-off state.
+      - key: R_GBRAIN_ADMIN_TOKEN
+        fromService:
+          type: pserv
+          name: roomote-gbrain
+          envVarKey: GBRAIN_ADMIN_BOOTSTRAP_TOKEN
+      # The Brain's on switch. Leave blank and the gbrain service idles
+      # unused: no ingestion, no delivery to agents. Fill in either key (the
+      # same value as your task provider key works, or a separate one to
+      # bill the Brain independently) to turn the Brain on; the general
+      # OPENROUTER_API_KEY / OPENAI_API_KEY never activate it. This anchored
+      # env block is duplicated per app service, so set the value on all four
+      # services, or set it once as a Settings environment value instead.
+      - key: R_BRAIN_OPENROUTER_API_KEY
+        value: ''
+      - key: R_BRAIN_OPENAI_API_KEY
+        value: ''
+      # Shared secret the Brain presents to /api/brain/inference; the gateway
+      # swaps it for the configured Brain provider key. Owned here, on the
+      # service that verifies it, and mirrored onto the Brain. Plumbing only:
+      # a generated value never turns the Brain on.
+      - key: R_BRAIN_GATEWAY_TOKEN
+        generateValue: true
+      # Which models the Brain runs, in the configured provider's own naming.
+      # The synthesis model can change at any time; the embedding pair must be
+      # set before the Brain's first boot, because it sizes a vector column
+      # that cannot be resized in place.
+      - key: R_BRAIN_MODEL
+        sync: false
+      - key: R_BRAIN_EMBEDDING_MODEL
+        sync: false
+      - key: R_BRAIN_RERANKER_MODEL
+        value: ''
+      - key: ROOMOTE_GBRAIN_HOSTPORT
+        fromService:
+          type: pserv
+          name: roomote-gbrain
           property: hostport
 
   # This is the app origin users open in the browser.

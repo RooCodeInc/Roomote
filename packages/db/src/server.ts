@@ -76,6 +76,7 @@ export * from './lib/teams-runtime-credentials';
 export * from './lib/telegram-runtime-credentials';
 export * from './lib/discord-runtime-credentials';
 export * from './lib/router-debug-settings';
+export * from './lib/slack-fast-integration-calls';
 export * from './lib/pr-action-settings';
 export * from './lib/github-mention-settings';
 export * from './lib/account-link-help-settings';
@@ -88,6 +89,7 @@ export * from './lib/license-usage-observations';
 export * from './lib/pr-review-events';
 export * from './lib/invocation-identities';
 export * from './lib/webhook-retention';
+export * from './lib/brain';
 export * from './lib/managed-access';
 
 export {
@@ -153,6 +155,7 @@ export {
   slackInstallationChannelsRelations,
   slackUserMappings,
   slackUserMappingsRelations,
+  slackDirectoryUsers,
   telegramUserMappings,
   telegramUserMappingsRelations,
   discordInstallations,
@@ -171,6 +174,8 @@ export {
   slackConversationMessagesRelations,
   slackQuickAnswers,
   slackQuickAnswersRelations,
+  slackFastIntegrationCalls,
+  slackFastIntegrationCallsRelations,
   linearPendingSelections,
   linearPendingSelectionsRelations,
   automations,
@@ -206,6 +211,10 @@ export {
   mcpOauthReplaysRelations,
   userApiKeys,
   userApiKeysRelations,
+  brainMemoryEvents,
+  brainMemoryEventsRelations,
+  brainCollectorItems,
+  brainSyncState,
 } from './schema';
 
 export * from './fixtures/factories/index';

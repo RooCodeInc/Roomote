@@ -6,6 +6,7 @@ const {
   findActiveSlackTaskRunMock,
   queueSlackMessageMock,
   resolveSlackReactionNamesMock,
+  wrapSlackMessageMock,
 } = vi.hoisted(() => ({
   dbUpdateSetMock: vi.fn(),
   enqueueTaskMock: vi.fn(),
@@ -14,6 +15,7 @@ const {
   findActiveSlackTaskRunMock: vi.fn(),
   queueSlackMessageMock: vi.fn(),
   resolveSlackReactionNamesMock: vi.fn(),
+  wrapSlackMessageMock: vi.fn((text: string) => text),
 }));
 
 vi.mock('@roomote/cloud-agents', () => ({
@@ -21,7 +23,7 @@ vi.mock('@roomote/cloud-agents', () => ({
     (message: { user?: string; username?: string }) =>
       message.username?.trim() || message.user || 'user',
   ),
-  wrapSlackMessage: vi.fn((text: string) => text),
+  wrapSlackMessage: wrapSlackMessageMock,
   wrapSlackReplyingTo: vi.fn((message: { text: string }) => message.text),
   wrapSlackThreadContext: vi.fn((messages: { text: string }[]) =>
     messages.map((message) => message.text).join('\n'),
@@ -91,6 +93,7 @@ describe('startSlackAppMentionTask', () => {
       teamId: 'T123',
       slackUserId: 'U123',
       text: 'hello',
+      slackMessageContext: 'Slack block text:\nState: New',
       ts: '111.000',
       threadTs: '111.000',
       repo: 'owner/repo',
@@ -110,6 +113,7 @@ describe('startSlackAppMentionTask', () => {
         },
         task: expect.objectContaining({
           payload: expect.objectContaining({
+            slackMessageContext: 'Slack block text:\nState: New',
             slackConversationUrl:
               'https://acme-team.slack.com/archives/C123/p111000?thread_ts=111.000&cid=C123',
           }),
@@ -139,6 +143,7 @@ describe('startSlackAppMentionTask', () => {
       teamId: 'T123',
       slackUserId: 'U123',
       text: 'hello again',
+      slackMessageContext: 'Slack block text:\nPriority: High',
       ts: '111.000',
       threadTs: '111.000',
       repo: 'owner/repo',
@@ -166,6 +171,10 @@ describe('startSlackAppMentionTask', () => {
         text: 'hello again',
       }),
     );
+    expect(wrapSlackMessageMock).toHaveBeenCalledWith('hello again', {
+      ts: '111.000',
+      agentContext: 'Slack block text:\nPriority: High',
+    });
   });
 
   it('does not rewrite the reused job payload when the permalink is unchanged', async () => {

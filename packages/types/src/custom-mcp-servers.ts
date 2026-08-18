@@ -33,6 +33,9 @@ export const RESERVED_CUSTOM_MCP_SERVER_NAMES: ReadonlySet<string> = new Set([
   'roomote',
   'github',
   'slack',
+  // The Brain is infrastructure rather than a catalog integration, so the
+  // catalog cannot reserve its server name for it.
+  'gbrain',
   ...MCP_INTEGRATIONS.map((integration) => integration.id.toLowerCase()),
 ]);
 

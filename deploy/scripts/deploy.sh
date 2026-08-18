@@ -275,8 +275,37 @@ if [ -z "$modal_base_image_ref" ] || [ "$modal_base_image_ref" = "$previous_work
   set_env_value "$tmp_env" MODAL_BASE_IMAGE_REF "$worker_image"
 fi
 
+# Compose profiles are derived, not hand-managed: the Brain runs exactly
+# when the deployment has a Brain key, mirroring the app's own activation
+# signal so the two can never disagree.
+compose_profiles=""
 if [ "$database_mode" = "local" ]; then
-  set_env_value "$tmp_env" COMPOSE_PROFILES "local-postgres"
+  compose_profiles="local-postgres"
+fi
+
+# Must match isBrainConfigured: the app enqueues memories whenever it
+# believes a Brain exists, so the container has to run under exactly the same
+# condition or those memories pile up with nothing to drain them.
+if [ -n "$(read_env_value "$tmp_env" R_BRAIN_GATEWAY_TOKEN)" ] ||
+  [ -n "$(read_env_value "$tmp_env" R_BRAIN_OPENROUTER_API_KEY)" ] ||
+  [ -n "$(read_env_value "$tmp_env" R_BRAIN_OPENAI_API_KEY)" ]; then
+  if [ -n "$compose_profiles" ]; then
+    compose_profiles="$compose_profiles,brain"
+  else
+    compose_profiles="brain"
+  fi
+
+  # The gateway token is what the Brain authenticates with, so a deployment
+  # that only set a provider key would bring the container up with nothing to
+  # present and no way to embed. Generated here rather than asked for: it is
+  # shared between two of our own services and never typed by anyone.
+  if [ -z "$(read_env_value "$tmp_env" R_BRAIN_GATEWAY_TOKEN)" ]; then
+    set_env_value "$tmp_env" R_BRAIN_GATEWAY_TOKEN "$(openssl rand -hex 24)"
+  fi
+fi
+
+if [ -n "$compose_profiles" ]; then
+  set_env_value "$tmp_env" COMPOSE_PROFILES "$compose_profiles"
 else
   remove_env_key "$tmp_env" COMPOSE_PROFILES
 fi

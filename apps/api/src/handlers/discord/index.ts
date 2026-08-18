@@ -13,6 +13,7 @@ import {
   isDiscordBotMentioned,
   isDiscordTaskEntryEvent,
   parseDiscordGatewayEvent,
+  stripDiscordBotMention,
   type DiscordGatewayEvent,
 } from '@roomote/communication/discord-event';
 import {
@@ -24,7 +25,7 @@ import {
   setLatestInboundMessageId,
 } from '@roomote/communication/messages';
 import { reactionEmojiMatches } from '@roomote/communication/reaction-emoji';
-import { getTaskUrl } from '@roomote/cloud-agents/server';
+import { getTaskUrl, hasFastAgentSession } from '@roomote/cloud-agents/server';
 import {
   MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
   RunStatus,
@@ -43,6 +44,7 @@ import {
 } from '@roomote/sdk/server';
 
 import { apiLogger } from '../../logging.js';
+import { hasCommunicationsFastModeDefault } from '../fast-agent-entry.js';
 import { getCallRoomoteViaEmojiConfiguration } from '../call-roomote-via-emoji.js';
 import { syncActingUserForInboundMessage } from '../tasks/acting-user-sync.js';
 import {
@@ -67,6 +69,10 @@ import {
   handleDiscordSuggestionReaction,
 } from './callback-actions.js';
 import { maybeHandleDiscordChannelAutoStart } from './channel-auto-start.js';
+import {
+  getDiscordFastConversationId,
+  processDiscordFastAgentMessage,
+} from './fast-agent.js';
 import {
   claimPendingDiscordAccountLinkTask,
   rememberPendingDiscordAccountLinkTask,
@@ -574,11 +580,23 @@ async function processDiscordGatewayEvent(
           launchOwnerUserId: senderUserId,
         })
       : null;
+  const isFastAgentThread = channel.isThread
+    ? await hasFastAgentSession({
+        surface: 'discord',
+        workspaceId: channel.guildId ?? 'dm',
+        conversationId: channel.channelId,
+        replyTarget: {
+          channelId: metadata.communicationChannelId,
+          threadId: channel.channelId,
+        },
+      })
+    : false;
   const isRoomoteThread = Boolean(
     activeRun ||
     completedRun ||
     pendingRoutingReply ||
-    repliedToAutomationReport,
+    repliedToAutomationReport ||
+    isFastAgentThread,
   );
   const isTaskEntry = isDiscordTaskEntryEvent(event, {
     botUserId: resolved.botUserId,
@@ -658,6 +676,7 @@ async function processDiscordGatewayEvent(
           repliedToAutomationReport?.userId ??
           (pendingRoutingReply ? senderUserId : null),
         isAutomationReportThread: Boolean(repliedToAutomationReport),
+        isOpenConversationThread: isFastAgentThread,
         fetchThreadMessages: async () => {
           const history = await fetchDiscordThreadHistoryBestEffort({
             provider: resolved.provider,
@@ -688,6 +707,13 @@ async function processDiscordGatewayEvent(
       : {}),
     userId: senderUserId,
   });
+
+  const defaultFastMessage =
+    message != null &&
+    command == null &&
+    (await hasCommunicationsFastModeDefault(senderUserId))
+      ? message
+      : null;
 
   if (command?.name === 'goal') {
     if (!command.objective) {
@@ -728,6 +754,31 @@ async function processDiscordGatewayEvent(
       ephemeral: true,
     });
     return { ok: true, goalStarted: result.success, runId: activeRun.id };
+  }
+
+  const defaultFastQuestion = defaultFastMessage
+    ? stripDiscordBotMention(
+        getDiscordMessageContent(defaultFastMessage),
+        resolved.botUserId,
+      )
+    : '';
+  if (defaultFastMessage && defaultFastQuestion) {
+    await processDiscordFastAgentMessage({
+      event,
+      question: defaultFastQuestion,
+      sender,
+      senderUserId,
+      provider: resolved.provider,
+      applicationId: resolved.applicationId,
+      channel,
+      metadata,
+      conversationId: getDiscordFastConversationId(
+        channel,
+        defaultFastMessage.id,
+      ),
+      activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
+    });
+    return { ok: true, fastAnswered: true, fastDefaulted: true };
   }
 
   const messageAttachments = message

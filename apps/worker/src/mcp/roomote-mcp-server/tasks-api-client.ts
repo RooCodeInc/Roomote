@@ -616,3 +616,30 @@ export async function recordEnvironmentVerification(
     'Failed to record environment verification',
   );
 }
+
+/**
+ * Save this run's agent-authored task memory. The platform API places it in
+ * the Brain; the sandbox never touches the Brain's write credential.
+ */
+export async function saveTaskMemory(
+  config: RoomoteConfig,
+  runId: number,
+  params: {
+    outcome: string;
+    decisions?: string[];
+    rationale?: string;
+    reusableFacts?: string[];
+    unresolvedQuestions?: string[];
+  },
+): Promise<{ saved: boolean; reason?: string }> {
+  return apiFetch(
+    config,
+    `/api/mcp/tasks/runs/${runId}/memory`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
+    },
+    'Failed to save task memory',
+  );
+}

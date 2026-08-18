@@ -4,6 +4,7 @@ import {
   DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
+  TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
   parseInferenceGatewayKeys,
   parseModelProviderEnvKeys,
   RunStatus,
@@ -46,6 +47,7 @@ import {
 
 import { withBootstrapFailureSignal } from '../../../bootstrap-failure-signal';
 import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
+import { notifyFastAgentParentOnSettle } from './notify-fast-agent-parent-on-settle';
 
 /**
  * Resolved git author identity for commits made by the worker.
@@ -208,6 +210,7 @@ const MODEL_RUNTIME_ENV_VAR_NAMES: ReadonlySet<string> = new Set([
   ...DISABLED_MODEL_PROVIDER_ENV_VAR_NAMES,
   INFERENCE_GATEWAY_KEYS_ENV_VAR_NAME,
   OPENCODE_AUTH_CONTENT_ENV_VAR_NAME,
+  TASK_MODEL_CONTEXT_WINDOWS_ENV_VAR_NAME,
 ]);
 
 function withLegacySnapshotModelEnvAliases(
@@ -395,6 +398,16 @@ export async function notifyCanceledTaskRunOnSettle(
     void captureTaskSettled(taskRun.id, RunStatus.Canceled);
 
     await notifySourceRunOnSettle(
+      {
+        ...taskRun,
+        error: errorMessage ?? persistedRun?.error ?? taskRun.error,
+      },
+      RunStatus.Canceled,
+      taskTitle,
+    );
+    // Detached like the finishRun call site: never block the cancel path on
+    // the parent's turn lock plus an orchestrator turn.
+    void notifyFastAgentParentOnSettle(
       {
         ...taskRun,
         error: errorMessage ?? persistedRun?.error ?? taskRun.error,

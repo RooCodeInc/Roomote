@@ -47,9 +47,13 @@
 #   origin" errors.
 # - The api service must be publicly reachable: hosted sandboxes workers and
 #   GitHub webhooks call `TRPC_URL` directly.
-# - Both published images are public on GHCR: Railway pulls roomote-app and
-#   hosted-sandbox builders pull roomote-worker anonymously, so no registry
-#   credentials are needed.
+# - All published images are public on GHCR: Railway pulls roomote-app and
+#   roomote-gbrain, and hosted-sandbox builders pull roomote-worker,
+#   anonymously, so no registry credentials are needed.
+# - The Brain (gbrain service) is optional and inert until
+#   a Brain provider key is filled in on api. It has no public domain:
+#   agents reach it only through the api proxy with their run token, and
+#   Railway private networking is IPv6-only, hence GBRAIN_BIND=::.
 # - R_APP_URL on api is the single canonical-origin knob; the other
 #   app services reference ${{api.R_APP_URL}}. Note api's own value
 #   is itself a reference (https://${{web.RAILWAY_PUBLIC_DOMAIN}}), so this
@@ -95,6 +99,7 @@ image:
   app: ghcr.io/roocodeinc/roomote-app:main # main-channel template (stable)
   # app: ghcr.io/roocodeinc/roomote-app:develop # develop-channel template
   worker: derived # ghcr.io/roocodeinc/roomote-worker:<baked RELEASE_VERSION>, resolved by the app
+  gbrain: ghcr.io/roocodeinc/roomote-gbrain:main # the Brain; same channel as app
 
 # The api service anchors every shared value. Other app services reference
 # them with `${{api.NAME}}`.
@@ -120,6 +125,41 @@ services:
       The artifact bucket is not auto-created. After the first deploy, create
       `roomote-artifacts` once (see "Create the artifact bucket" in
       README.md). Replacing MinIO with external S3/R2 is a config-only swap.
+
+  gbrain:
+    image: gbrain
+    public_domain: no # private network only; the api service proxies agent access
+    volume: /data
+    backup_schedules: [DAILY, WEEKLY] # configure both on the /data volume in Template Composer
+    env:
+      GBRAIN_DATABASE_URL: ${{Postgres.DATABASE_URL}}
+      # Railway's private network is IPv6-only, so the Brain must bind :: to
+      # be reachable at all. Compose deployments keep the 0.0.0.0 default.
+      GBRAIN_BIND: '::'
+      GBRAIN_ADMIN_BOOTSTRAP_TOKEN: ${{api.R_GBRAIN_ADMIN_TOKEN}}
+      # The Brain holds no provider key. It calls back into the api service,
+      # which injects whichever provider key an admin set in Settings, so
+      # switching or rotating that key never touches this service. Railway's
+      # private network is IPv6-only and the api container binds IPv4, so this
+      # goes over the public origin, exactly as TRPC_URL already does.
+      OPENAI_BASE_URL: https://${{api.RAILWAY_PUBLIC_DOMAIN}}/api/brain/inference
+      OPENAI_API_KEY: ${{api.R_BRAIN_GATEWAY_TOKEN}}
+      GBRAIN_RERANKER_MODEL: ${{api.R_BRAIN_RERANKER_MODEL}}
+      # Create-time, and it has to be the container that receives these: the
+      # embedding model and its width are decided when the Brain is created,
+      # and the gateway must never substitute a different one afterwards.
+      GBRAIN_EMBEDDING_MODEL: ${{api.R_BRAIN_EMBEDDING_MODEL}}
+      GBRAIN_EMBEDDING_DIMENSIONS: ${{api.R_BRAIN_EMBEDDING_DIMENSIONS}}
+    notes: >
+      Shared memory for agents: completed tasks and activity from connected
+      integrations become pages this deployment's agents consult, read-only,
+      through the api service — the Brain itself has no public domain and is
+      never reachable from the internet. It stays idle until
+      a Brain provider key is set on api, so deploying with both keys
+      empty costs only the container. The volume holds the corpus and has
+      daily plus weekly Railway backups; deleting it is recoverable (task
+      history and integration sources re-ingest) but not free. Delete this
+      service entirely if the deployment should have no memory.
 
   api:
     image: app
@@ -153,6 +193,36 @@ services:
       NEXT_PUBLIC_PREVIEW_PROXY_BASE_URL: ''
       PREVIEW_DOMAINS: ''
       SETUP_TOKEN: ${{secret(32)}} # gates /setup; required outside local dev (see design notes)
+      # The Brain (shared memory). Leave the key empty and the gbrain service
+      # idles unused: no ingestion, no delivery to agents, no cost beyond the
+      # container. Fill in either key (one key covers both embeddings and
+      # synthesis) and the deployment provisions its own scoped clients on
+      # the next tick. Deployers who do not want memory can delete the gbrain
+      # service; nothing else references it at runtime.
+      # Optional: pin the Brain's provider key here instead of setting it in
+      # Settings after boot. Either works, and Settings needs no redeploy.
+      R_BRAIN_OPENROUTER_API_KEY: ''
+      R_BRAIN_OPENAI_API_KEY: ''
+      # Shared secret the Brain presents to /api/brain/inference. Never an
+      # upstream provider key: the gateway swaps it for the configured one.
+      R_BRAIN_GATEWAY_TOKEN: ${{secret(48)}}
+      # Which models the Brain runs, in the configured provider's own naming
+      # (openai/gpt-5.6-luna on OpenRouter, gpt-5.6-luna on OpenAI). Empty
+      # means the deployment's defaults. The synthesis model can change at any
+      # time; the embedding pair must be set before the Brain's first boot,
+      # because it sizes a vector column that cannot be resized in place.
+      R_BRAIN_MODEL: ''
+      R_BRAIN_EMBEDDING_MODEL: ''
+      R_BRAIN_EMBEDDING_DIMENSIONS: ''
+      R_BRAIN_RERANKER_MODEL: ''
+      # Railway's private network is IPv6-only and never leaves the project,
+      # so the Brain is unreachable from the internet by construction.
+      R_GBRAIN_URL: http://${{gbrain.RAILWAY_PRIVATE_DOMAIN}}:8931
+      # Roomote uses this once to register its own scoped clients against the
+      # Brain. Generated here and passed to the gbrain
+      # service as its bootstrap token; gbrain requires >= 32 characters of
+      # [A-Za-z0-9_-], so keep the generated form.
+      R_GBRAIN_ADMIN_TOKEN: ${{secret(48)}}
       R_PING_BASE_URL: https://ping.roomote.dev # anonymous-analytics / version-check pings
       R_INSTANCE_ID: '' # optional deterministic Ping instance identity
       DEFAULT_COMPUTE_PROVIDER: modal
@@ -187,6 +257,14 @@ services:
     public_domain: http proxy port 8080 # this is the app origin users open
     healthcheck_path: /health
     env: &app_service_env
+      R_BRAIN_OPENROUTER_API_KEY: ${{api.R_BRAIN_OPENROUTER_API_KEY}}
+      R_BRAIN_OPENAI_API_KEY: ${{api.R_BRAIN_OPENAI_API_KEY}}
+      R_BRAIN_GATEWAY_TOKEN: ${{api.R_BRAIN_GATEWAY_TOKEN}}
+      R_BRAIN_MODEL: ${{api.R_BRAIN_MODEL}}
+      R_BRAIN_EMBEDDING_MODEL: ${{api.R_BRAIN_EMBEDDING_MODEL}}
+      R_BRAIN_RERANKER_MODEL: ${{api.R_BRAIN_RERANKER_MODEL}}
+      R_GBRAIN_URL: ${{api.R_GBRAIN_URL}}
+      R_GBRAIN_ADMIN_TOKEN: ${{api.R_GBRAIN_ADMIN_TOKEN}}
       R_APP_ENV: ${{api.R_APP_ENV}}
       ROOMOTE_DOCKER_LOAD_ENV_FILE: ${{api.ROOMOTE_DOCKER_LOAD_ENV_FILE}}
       R_AUTO_GENERATE_KEYS: ${{api.R_AUTO_GENERATE_KEYS}}

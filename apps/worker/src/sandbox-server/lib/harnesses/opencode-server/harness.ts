@@ -10,6 +10,7 @@ import {
   asRecord,
   asString,
   buildAcpRequestUserInputRequestId,
+  normalizeAcpReasoningText,
   parseAcpFlattenedMcpToolName,
   OPENCODE_ARCHITECT_AGENT,
   OPENCODE_BUILD_AGENT,
@@ -143,6 +144,7 @@ interface OpenCodeServerHarnessOptions {
   }) => void;
   beforeQueuedPrompt?: (input: {
     userId?: string;
+    clientMessageId?: string;
     /**
      * Distinguishes deliveries that survive a reconnect (queued prompts are
      * restored and replayed) from ones that do not (user-input answers fail
@@ -334,7 +336,34 @@ type OpenCodeMessageRole = OpenCodeMessageInfo['role'];
 let lastOpenCodeMessageIdTimestamp = 0;
 let openCodeMessageIdCounter = 0;
 
-function createOpenCodeMessageId(): string {
+const OPENCODE_MESSAGE_ID_RANDOM_LENGTH = 14;
+const MAX_OPENCODE_MESSAGE_ID_SORTABLE = (BigInt(1) << BigInt(48)) - BigInt(1);
+
+function formatOpenCodeMessageId(sortable: bigint): string {
+  const timeBytes = Buffer.alloc(6);
+
+  for (let index = 0; index < 6; index += 1) {
+    timeBytes[index] = Number(
+      (sortable >> BigInt(40 - 8 * index)) & BigInt(0xff),
+    );
+  }
+
+  return `msg_${timeBytes.toString('hex')}${'0'.repeat(
+    OPENCODE_MESSAGE_ID_RANDOM_LENGTH,
+  )}`;
+}
+
+function openCodeMessageIdSortable(messageId: string): bigint | undefined {
+  const match = /^msg_([a-f0-9]{12})/u.exec(messageId);
+
+  if (!match?.[1]) {
+    return undefined;
+  }
+
+  return BigInt(`0x${match[1]}`);
+}
+
+function createOpenCodeMessageId(afterMessageId?: string): string {
   const currentTimestamp = Date.now();
 
   if (currentTimestamp !== lastOpenCodeMessageIdTimestamp) {
@@ -346,18 +375,27 @@ function createOpenCodeMessageId(): string {
 
   let sortable = BigInt(currentTimestamp) * BigInt(0x1000);
   sortable += BigInt(openCodeMessageIdCounter);
+  sortable &= MAX_OPENCODE_MESSAGE_ID_SORTABLE;
 
-  const timeBytes = Buffer.alloc(6);
+  const candidate = formatOpenCodeMessageId(sortable);
 
-  for (let index = 0; index < 6; index += 1) {
-    timeBytes[index] = Number(
-      (sortable >> BigInt(40 - 8 * index)) & BigInt(0xff),
-    );
+  if (!afterMessageId || candidate > afterMessageId) {
+    return candidate;
   }
 
-  // OpenCode compares message IDs lexicographically to decide whether an
-  // assistant answered after the latest user prompt.
-  return `msg_${timeBytes.toString('hex')}${'0'.repeat(14)}`;
+  const afterSortable = openCodeMessageIdSortable(afterMessageId);
+
+  if (
+    afterSortable !== undefined &&
+    afterSortable < MAX_OPENCODE_MESSAGE_ID_SORTABLE
+  ) {
+    return formatOpenCodeMessageId(afterSortable + BigInt(1));
+  }
+
+  // OpenCode only requires message IDs to start with `msg`. If an unknown ID
+  // shape (or the maximum 48-bit prefix) reaches us, extending it is the one
+  // format-agnostic way to preserve the ordering invariant.
+  return `${afterMessageId}0`;
 }
 
 function visibleQueuedMessages(
@@ -570,11 +608,13 @@ function extractAssistantText(message: OpenCodeSessionMessage): string {
 }
 
 function extractAssistantReasoning(message: OpenCodeSessionMessage): string {
-  return message.parts
-    .filter((part) => part.type === 'reasoning')
-    .map(extractPartText)
-    .filter((text) => text.length > 0)
-    .join('\n');
+  return normalizeAcpReasoningText(
+    message.parts
+      .filter((part) => part.type === 'reasoning')
+      .map(extractPartText)
+      .filter((text) => text.length > 0)
+      .join('\n'),
+  );
 }
 
 function parseOpenCodeMessageRole(value: unknown): OpenCodeMessageRole | null {
@@ -1570,6 +1610,8 @@ export class OpenCodeServerHarness
   private disposed = false;
   private sessionId: string | undefined;
   private resumedSessionPendingValidation = false;
+  /** Greatest message id observed in the current OpenCode session. */
+  private latestSessionMessageId: string | undefined;
   private inFlight = false;
   private nativeSteerSubmissionsInFlight = 0;
   private recoveringWedgedTurn = false;
@@ -1705,7 +1747,7 @@ export class OpenCodeServerHarness
     this.prompts = new RuntimePromptQueue({
       getSessionId: () => this.sessionId,
       getNextSequence: () => this.runtimeEvents.nextTs(),
-      emitRuntimeOutput: (event) => this.emit('runtimeOutput', event),
+      emitRuntimeUpdate: (event) => this.runtimeEvents.outputAndPersist(event),
     });
     this.stallWatchdogs = new OpenCodeStallWatchdogs({
       turnStallTimeoutMs:
@@ -2077,6 +2119,7 @@ export class OpenCodeServerHarness
         // session.
         this.sessionId = command.data;
         this.resumedSessionPendingValidation = true;
+        this.latestSessionMessageId = undefined;
         this.runtimeEvents.taskStarted(command.data);
         return;
       case TaskCommandName.RestoreQueuedMessages:
@@ -3360,6 +3403,7 @@ export class OpenCodeServerHarness
         signal: this.composeSessionCreateSignal(),
       });
       this.sessionId = session.id;
+      this.latestSessionMessageId = undefined;
       this.logger.info(
         `Created OpenCode session sessionId=${session.id} elapsedMs=${
           Date.now() - startedAt
@@ -3519,12 +3563,22 @@ export class OpenCodeServerHarness
   }
 
   private async validateResumedSession(sessionId: string): Promise<boolean> {
+    this.latestSessionMessageId = undefined;
+
     try {
-      await this.client.messages({
+      const messages = await this.client.messages({
         sessionId,
-        limit: 1,
+        // A failed prompt can be newer by wall-clock time while still sorting
+        // below an older assistant by id, so inspect a short tail and keep the
+        // greatest id rather than trusting the first result alone.
+        limit: 20,
         signal: this.eventAbortController.signal,
       });
+
+      for (const message of messages) {
+        this.recordSessionMessageId(message.info.id);
+      }
+
       return true;
     } catch (error) {
       this.logger.warn(
@@ -3620,7 +3674,12 @@ export class OpenCodeServerHarness
   private async submitPrompt(prompt: PromptInput): Promise<void> {
     this.suppressAssistantOutputUntilNextPrompt = false;
     const sessionId = await this.ensureSession(prompt.text);
-    const messageID = createOpenCodeMessageId();
+    // OpenCode determines whether a user turn is pending by comparing message
+    // IDs lexicographically. A snapshot can resume on a process whose clock or
+    // generator state trails the process that wrote the restored assistant
+    // message, so seed the new ID from the session history validated above.
+    const messageID = createOpenCodeMessageId(this.latestSessionMessageId);
+    this.recordSessionMessageId(messageID);
     const nonEmptyImages = (prompt.images ?? []).filter(
       (image) => image.trim().length > 0,
     );
@@ -4759,6 +4818,8 @@ export class OpenCodeServerHarness
       return;
     }
 
+    this.recordSessionMessageId(info.id);
+
     const role = parseOpenCodeMessageRole(info.role);
 
     if (role) {
@@ -5137,6 +5198,7 @@ export class OpenCodeServerHarness
   private persistAssistantMessage(
     message: OpenCodeSessionMessage,
   ): FinalizedAssistantTurn {
+    this.recordSessionMessageId(message.info.id);
     const text = extractAssistantText(message);
     const tokenUsage = createTokenUsage(message.info);
     const finalized = {
@@ -5177,6 +5239,15 @@ export class OpenCodeServerHarness
     this.finalizedAssistantTurn = finalized;
 
     return finalized;
+  }
+
+  private recordSessionMessageId(messageId: string | undefined): void {
+    if (
+      messageId &&
+      (!this.latestSessionMessageId || messageId > this.latestSessionMessageId)
+    ) {
+      this.latestSessionMessageId = messageId;
+    }
   }
 
   private scheduleQueuedPromptRetry(): void {
@@ -5265,6 +5336,7 @@ export class OpenCodeServerHarness
 
     const result = await this.beforeQueuedPrompt({
       userId: prompt.userId,
+      clientMessageId: prompt.clientMessageId,
       kind: 'queuedPrompt',
     });
 

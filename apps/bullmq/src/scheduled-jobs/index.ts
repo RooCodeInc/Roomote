@@ -7,3 +7,5 @@ export { licenseUsageSyncJob } from './license-usage-sync';
 export { webhookCleanupJob } from './webhook-cleanup';
 export { standbyRetentionJob } from './standby-retention';
 export { prReviewNotificationDispatchJob } from './pr-review-notification-dispatch';
+export { brainOutboxDrainJob, brainCollectorsJob } from './brain-outbox-drain';
+export { brainMaintenanceJob } from './brain-maintenance';

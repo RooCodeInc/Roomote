@@ -5,6 +5,7 @@ import {
   isCustomMcpDisabled,
 } from '@roomote/env';
 import {
+  getMcpIntegrationConnectionScope,
   isCredentialOnlyMcpIntegration,
   isNativeMcpIntegration,
   MCP_INTEGRATIONS,
@@ -18,12 +19,14 @@ import { environmentsRouter } from '../environments';
 import { customAutomationsRouter } from '../custom-automations';
 import { tasksRouter } from '../tasks';
 import { createCustomMcpProxy } from './custom-mcp';
+import { createGbrainMcpProxy } from './gbrain';
 import { createIntegrationMcpProxy } from './integration-mcp';
 import { granolaMcp } from './granola';
 import { grafanaMcp } from './grafana';
 import { getIntegrationMcpProxyOptions } from './integration-mcp-policy';
-import { linearMcp } from './linear';
+import { createLinearMcp } from './linear';
 import { mcpAuthMiddleware } from './middleware';
+import { notionMcp } from './notion';
 import { slackMcp } from './slack';
 import { snowflakeMcp } from './snowflake';
 import { vercelMcp } from './vercel';
@@ -61,10 +64,17 @@ const requireCustomMcp: MiddlewareHandler<{
 mcp.use('/custom/*', requireCustomMcp);
 mcp.route('/custom/:serverId', createCustomMcpProxy());
 
+// Brain (deployment-hosted gbrain): a native-mode catalog
+// integration with a custom handler, like snowflake/grafana below. The
+// handler 404s per request unless the integration is enabled and a
+// connection (admin-entered or R_GBRAIN_* env) exists.
+mcp.route('/gbrain', createGbrainMcpProxy({ allowAuthTokens: true }));
+
 mcp.route('/asana', asanaMcp);
 mcp.route('/granola', granolaMcp);
 mcp.route('/grafana', grafanaMcp);
-mcp.route('/linear', linearMcp);
+mcp.route('/linear', createLinearMcp({ allowAuthTokens: true }));
+mcp.route('/notion', notionMcp);
 mcp.route('/snowflake', snowflakeMcp);
 mcp.route('/vercel', vercelMcp);
 
@@ -76,10 +86,11 @@ for (const integration of MCP_INTEGRATIONS.filter(
 )) {
   mcp.route(
     `/${integration.id}`,
-    createIntegrationMcpProxy(
-      integration,
-      getIntegrationMcpProxyOptions(integration),
-    ),
+    createIntegrationMcpProxy(integration, {
+      ...getIntegrationMcpProxyOptions(integration),
+      allowAuthTokens:
+        getMcpIntegrationConnectionScope(integration) === 'deployment',
+    }),
   );
 }
 

@@ -367,7 +367,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gemini-3-7-flash': 'vercel/google/gemini-3.7-flash',
       'deepseek-v4-flash-0731': 'vercel/deepseek/deepseek-v4-flash-0731',
       'deepseek-v4-pro-0813': 'vercel/deepseek/deepseek-v4-pro-0813',
-      'glm-5-2': 'vercel/zai/glm-5.2',
+      'glm-5-3': 'vercel/zai/glm-5.3',
       'kimi-k3': 'vercel/moonshotai/kimi-k3',
       'kimi-k2-7-code': 'vercel/moonshotai/kimi-k2.7-code',
       'qwen3-8-max': 'vercel/alibaba/qwen3.8-max',
@@ -643,14 +643,14 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       href: 'https://opencode.ai/auth',
       linkLabel: 'Open OpenCode account',
     },
-    defaultRoomoteModel: 'opencode-go/glm-5.2',
+    defaultRoomoteModel: 'opencode-go/glm-5.3',
     authKind: 'api-key',
     // Go serves a broader catalog; only models in Roomote's central curated
     // recommendation list are suggested here.
     suggestedTaskModels: mapRecommendedTaskModels({
       'deepseek-v4-flash-0731': 'opencode-go/deepseek-v4-flash',
       'deepseek-v4-pro-0813': 'opencode-go/deepseek-v4-pro',
-      'glm-5-2': 'opencode-go/glm-5.2',
+      'glm-5-3': 'opencode-go/glm-5.3',
       'gpt-5-6-luna': 'opencode-go/gpt-5.6-luna',
       'grok-4-6': 'opencode-go/grok-4.6',
       'kimi-k2-7-code': 'opencode-go/kimi-k2.7-code',
@@ -770,7 +770,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
     label: 'Z.AI Coding Plan',
     envVarName: 'ZAI_CODING_PLAN_API_KEY',
     envVarLabel: 'Z.AI Coding Plan API key',
-    defaultRoomoteModel: 'zai-coding-plan/glm-5.2',
+    defaultRoomoteModel: 'zai-coding-plan/glm-5.3',
     authKind: 'api-key',
     credentialHelp: {
       text: 'Paste a Coding Plan API key for the selected region. Do not use a general platform API key here.',
@@ -787,7 +787,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       },
     ],
     suggestedTaskModels: mapRecommendedTaskModels({
-      'glm-5-2': 'zai-coding-plan/glm-5.2',
+      'glm-5-3': 'zai-coding-plan/glm-5.3',
     }),
     recommendedRoleModels: {
       vision: 'zai-coding-plan/glm-5v-turbo',

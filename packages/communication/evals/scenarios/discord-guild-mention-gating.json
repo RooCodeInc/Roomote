@@ -44,7 +44,7 @@
           "id": "$M2",
           "channel_id": "400000000000000001",
           "guild_id": "300000000000000001",
-          "content": "<@100000000000000001> !fast which handler processes Discord interactions?",
+          "content": "<@100000000000000001> investigate which handler processes Discord interactions",
           "author": { "id": "111000111000111001", "username": "grace_mock" },
           "mentions": [
             {

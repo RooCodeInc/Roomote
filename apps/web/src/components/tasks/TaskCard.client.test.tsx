@@ -128,6 +128,12 @@ vi.mock('@/components/sandbox', () => ({
   ),
 }));
 
+vi.mock('./TaskAutomationIcon', () => ({
+  TaskAutomationIcon: ({ automationKey }: { automationKey: string | null }) => (
+    <svg data-testid="automation-icon" data-automation-key={automationKey} />
+  ),
+}));
+
 import { TaskCard } from './TaskCard';
 
 type TaskCardTask = React.ComponentProps<typeof TaskCard>['task'];
@@ -226,6 +232,29 @@ describe('TaskCard', () => {
 
     expect(screen.getByText('Alice Slack')).toBeInTheDocument();
     expect(screen.getByText('started a task')).toBeInTheDocument();
+  });
+
+  it('shows the matching icon for automation launches', () => {
+    const { container } = render(
+      <TaskCard
+        task={createTask({
+          user: null,
+          initiatorKind: 'automation',
+          initiatorAutomation: 'sentry_triage',
+          attributionLabel: 'Sentry Triage Automation',
+          attributionKind: 'automation',
+        })}
+        filterState={{
+          hasSpecificUserFilter: false,
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId('automation-icon')).toHaveAttribute(
+      'data-automation-key',
+      'sentry_triage',
+    );
+    expect(container.querySelectorAll('svg')).toHaveLength(1);
   });
 
   it('uses the identity email fallback name when the creator has no stored name', () => {

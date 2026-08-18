@@ -3,7 +3,7 @@ name: roomote
 services:
   postgres:
     container_name: roomote-postgres
-    image: postgres:17.5@sha256:aadf2c0696f5ef357aa7a68da995137f0cf17bad0bf6e1f17de06ae5c769b302
+    image: pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adfd27b5707128f60956f62a793c3c9326ea8cfaf0eab7adccb5d700b21
     # Publish datastore ports to loopback only so Postgres, Redis, and MinIO are
     # never reachable from another host. The production Caddy overlay resets
     # these to none; use an SSH tunnel or reverse proxy if remote access is
@@ -82,10 +82,59 @@ services:
     extra_hosts:
       - 'host.docker.internal:host-gateway'
 
+  # The Brain (deployment-hosted gbrain), managed alongside the other local
+  # datastores. Opt in with COMPOSE_PROFILES=brain (or `pnpm
+  # brain:up`). The port is published to loopback only because the local
+  # api/bullmq processes run on the host rather than in this network; in the
+  # self-host and installer stacks the Brain publishes no ports at all and is
+  # reachable only from the app services.
+  gbrain:
+    profiles: [brain]
+    container_name: roomote-gbrain
+    build: .docker/gbrain
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      GBRAIN_DATABASE_URL: postgres://postgres:password@postgres:5432/roomote_development
+      GBRAIN_ADMIN_BOOTSTRAP_TOKEN: ${R_GBRAIN_ADMIN_TOKEN:-}
+      # The Brain holds no provider key. It calls back into this deployment,
+      # which injects whichever provider key an admin configured in Settings,
+      # so rotating or switching that key needs no restart here. Setting a
+      # provider key below instead makes the Brain call the provider directly.
+      OPENAI_BASE_URL: ${GBRAIN_OPENAI_BASE_URL:-http://host.docker.internal:3001/api/brain/inference}
+      OPENAI_API_KEY: ${R_BRAIN_GATEWAY_TOKEN:-}
+      GBRAIN_RERANKER_MODEL: ${R_BRAIN_RERANKER_MODEL:-}
+      # Create-time, and it has to be the container that receives these: the
+      # embedding model and its width are decided when the Brain is created,
+      # and the gateway must never substitute a different one afterwards.
+      # Set both before the first boot, or neither. The synthesis model is
+      # the opposite (R_BRAIN_MODEL, applied by the gateway per request).
+      GBRAIN_EMBEDDING_MODEL: ${R_BRAIN_EMBEDDING_MODEL:-}
+      GBRAIN_EMBEDDING_DIMENSIONS: ${R_BRAIN_EMBEDDING_DIMENSIONS:-}
+    ports:
+      - '127.0.0.1:8935:8931'
+    volumes:
+      - gbrain_data:/data
+    healthcheck:
+      # The image ships bun, not curl/wget.
+      test:
+        [
+          'CMD-SHELL',
+          'bun -e "const r = await fetch(\"http://127.0.0.1:8931/health\"); process.exit(r.ok ? 0 : 1)"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
 volumes:
   pg_data:
   redis_data:
   minio_data:
+  gbrain_data:
+    name: roomote_gbrain_data
 
 networks:
   default:

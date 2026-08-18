@@ -673,7 +673,7 @@ describe('enqueueTask initiator stamping', () => {
     const parentRun = await launchFresh({
       initiator: { kind: 'user', userId },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
       channels: { slackChannelId: 'C123', slackThreadTs: '123.456' },
       task: standardTaskInput({
@@ -714,7 +714,7 @@ describe('enqueueTask initiator stamping', () => {
     const parentRun = await launchFresh({
       initiator: { kind: 'user', userId },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
       channels: { slackChannelId: 'C123', slackThreadTs: '123.456' },
       task: standardTaskInput({
@@ -770,7 +770,7 @@ describe('enqueueTask initiator stamping', () => {
         displayName: 'Octo Fan',
       },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
       channels: {
         slackChannelId: 'C42',
@@ -839,7 +839,7 @@ describe('enqueueTask initiator stamping', () => {
         matchedUserId: userId,
       },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
     });
 
@@ -930,7 +930,7 @@ describe('enqueueTask snapshot resume', () => {
       }),
       initiator: { kind: 'user', userId },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
     });
 
@@ -963,6 +963,154 @@ describe('enqueueTask snapshot resume', () => {
       'roomote/Test ADO/Test ADO': 'ado',
       'group/web': 'gitlab',
     });
+  });
+
+  it('preserves Fast parent routing and communication isolation across resume', async () => {
+    const userId = await createUser();
+    const fastAgentSessionId = '11111111-1111-4111-8111-111111111111';
+    const fastAgentParent = {
+      sessionId: fastAgentSessionId,
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: '111.222',
+        replyTarget: { channelId: 'C123', threadId: '111.222' },
+      },
+    };
+    const freshRun = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: 'acme/widgets',
+          description: 'Do the thing',
+          communicationProvider: 'slack',
+          communicationChannelId: 'C123',
+          communicationThreadId: '111.222',
+          communicationContextInherited: true,
+          fastAgentSessionId,
+          fastAgentParent,
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'slack' as const,
+      trigger: 'message',
+    });
+    const resumeTask: SnapshotResumeTask = {
+      type: TaskPayloadKind.SnapshotResume,
+      payload: {
+        repo: 'acme/widgets',
+        sourceSnapshotId: 'snap-fast-1',
+        sourceRunId: freshRun.id,
+      },
+    } as SnapshotResumeTask;
+
+    const resumeRun = await enqueueTask(
+      { task: resumeTask, actingUserId: userId },
+      { enqueue: false },
+    );
+    const resumePayload = resumeRun.payload as Record<string, unknown>;
+
+    expect(resumePayload.communicationContextInherited).toBe(true);
+    expect(resumePayload.fastAgentParent).toEqual(fastAgentParent);
+    expect(resumePayload.fastAgentSessionId).toBe(fastAgentSessionId);
+  });
+
+  it('preserves a Discord Fast session across resume', async () => {
+    const userId = await createUser();
+    const fastAgentSessionId = '33333333-3333-4333-8333-333333333333';
+    const freshRun = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: 'acme/widgets',
+          description: 'Do the thing',
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          communicationThreadId: 'child-thread-1',
+          fastAgentSessionId,
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'discord',
+      trigger: 'message',
+    });
+    const resumeTask: SnapshotResumeTask = {
+      type: TaskPayloadKind.SnapshotResume,
+      payload: {
+        repo: 'acme/widgets',
+        sourceSnapshotId: 'snap-fast-discord-1',
+        sourceRunId: freshRun.id,
+      },
+    } as SnapshotResumeTask;
+
+    const resumeRun = await enqueueTask(
+      { task: resumeTask, actingUserId: userId },
+      { enqueue: false },
+    );
+
+    expect(
+      (resumeRun.payload as Record<string, unknown>).fastAgentSessionId,
+    ).toBe(fastAgentSessionId);
+  });
+
+  it('recovers Fast parent isolation from an older ancestor in a resume chain', async () => {
+    const userId = await createUser();
+    const fastAgentParent = {
+      sessionId: '22222222-2222-4222-8222-222222222222',
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: '333.444',
+        replyTarget: { channelId: 'C123', threadId: '333.444' },
+      },
+    };
+    const freshRun = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: 'acme/widgets',
+          description: 'Do the thing',
+          communicationContextInherited: true,
+          fastAgentParent,
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'slack' as const,
+      trigger: 'message',
+    });
+    const [legacyResume] = await db
+      .insert(taskRuns)
+      .values({
+        taskId: freshRun.taskId,
+        kind: 'resume',
+        sourceRunId: freshRun.id,
+        payloadKind: TaskPayloadKind.SnapshotResume,
+        status: RunStatus.Completed,
+        sourceSnapshotId: 'snap-fast-legacy',
+        payload: {
+          repo: 'acme/widgets',
+          sourceSnapshotId: 'snap-fast-legacy',
+          sourceRunId: freshRun.id,
+        },
+      })
+      .returning();
+    const resumeTask: SnapshotResumeTask = {
+      type: TaskPayloadKind.SnapshotResume,
+      payload: {
+        repo: 'acme/widgets',
+        sourceSnapshotId: 'snap-fast-latest',
+        sourceRunId: legacyResume!.id,
+      },
+    } as SnapshotResumeTask;
+
+    const resumeRun = await enqueueTask(
+      { task: resumeTask, actingUserId: userId },
+      { enqueue: false },
+    );
+    const resumePayload = resumeRun.payload as Record<string, unknown>;
+
+    expect(resumePayload.communicationContextInherited).toBe(true);
+    expect(resumePayload.fastAgentParent).toEqual(fastAgentParent);
   });
 
   it('inherits per-task model role overrides from the source run payload', async () => {
@@ -1077,7 +1225,7 @@ describe('enqueueTask snapshot resume', () => {
       }),
       initiator: { kind: 'user', userId },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
     });
 
@@ -1336,7 +1484,7 @@ describe('enqueueTaskRelaunch failed start', () => {
     const failedRun = await launchFresh({
       initiator: { kind: 'user', userId },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
     });
 

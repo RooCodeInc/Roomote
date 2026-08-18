@@ -1687,7 +1687,9 @@ export async function handleTaskConfiguration(
     // Replace user ID mentions with display names in the main message text
     const messageText = stripLeadingSlackProductMention(
       await slack.normalizeIncomingText(
-        stripLeadingRawSlackMention(originalEvent.text),
+        stripLeadingRawSlackMention(
+          originalEvent.authoredText ?? originalEvent.text,
+        ),
       ),
     );
     const taskText = appendSlackVideoDescriptionsToText({
@@ -1711,6 +1713,7 @@ export async function handleTaskConfiguration(
       teamDomain: slackInstallation.teamDomain ?? undefined,
       slackUserId: originalEvent.user,
       text: taskText,
+      slackMessageContext: originalEvent.agentContext,
       ackEmoji: prefill?.processingReactionName,
       ts: originalEvent.ts,
       threadTs: threadId,
@@ -1960,7 +1963,9 @@ async function startImmediateSlackTask({
   response: ImmediateSlackTaskStartResponse;
 }> {
   const messageText = stripLeadingSlackProductMention(
-    await slack.normalizeIncomingText(stripLeadingRawSlackMention(event.text)),
+    await slack.normalizeIncomingText(
+      stripLeadingRawSlackMention(event.authoredText ?? event.text),
+    ),
   );
   const images = event.processedImages || [];
   const taskText = appendSlackVideoDescriptionsToText({
@@ -1983,6 +1988,7 @@ async function startImmediateSlackTask({
     teamDomain: slackInstallation.teamDomain ?? undefined,
     slackUserId: event.user,
     text: taskText,
+    slackMessageContext: event.agentContext,
     ackEmoji: processingReactionName,
     ts: event.ts,
     threadTs: threadId,
@@ -2134,7 +2140,9 @@ async function createRunFromPrefill({
 
   const messageText = stripLeadingSlackProductMention(
     await slack.normalizeIncomingText(
-      stripLeadingRawSlackMention(originalEvent.text),
+      stripLeadingRawSlackMention(
+        originalEvent.authoredText ?? originalEvent.text,
+      ),
     ),
   );
   const images = originalEvent.processedImages || [];
@@ -2158,6 +2166,7 @@ async function createRunFromPrefill({
     teamDomain: prefill.teamDomain,
     slackUserId: originalEvent.user,
     text: taskText,
+    slackMessageContext: originalEvent.agentContext,
     ackEmoji: prefill.processingReactionName,
     ts: originalEvent.ts,
     threadTs: threadId,
@@ -3233,6 +3242,7 @@ export async function handleRetryFailedTask(
         undefined,
       slackUserId: originalPayload.user,
       text: originalPayload.text,
+      slackMessageContext: originalPayload.slackMessageContext,
       agentPromptText: originalPayload.agentPromptText,
       ackEmoji: originalPayload.ackEmoji,
       completionEmoji: originalPayload.completionEmoji,

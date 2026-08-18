@@ -32,6 +32,7 @@ import { createSlackWebClient } from './web-client';
 import {
   appendSlackAttachmentContext,
   appendSlackForwardedMessageFiles,
+  formatSlackAttachmentContext,
 } from './forwarded-message-context';
 
 type SlackApiThreadMessage = {
@@ -1439,8 +1440,15 @@ export class SlackNotifier {
           return null;
         }
 
+        const authoredText =
+          typeof message.text === 'string' ? message.text : '';
+        const agentContext = formatSlackAttachmentContext(
+          authoredText,
+          message.attachments,
+          message.blocks,
+        );
         const text = appendSlackAttachmentContext(
-          typeof message.text === 'string' ? message.text : '',
+          authoredText,
           message.attachments,
           message.blocks,
         );
@@ -1455,6 +1463,7 @@ export class SlackNotifier {
 
         return {
           text,
+          ...(agentContext ? { authoredText, agentContext } : {}),
           ts: message.ts,
           thread_ts:
             typeof message.thread_ts === 'string'
@@ -1468,7 +1477,7 @@ export class SlackNotifier {
           attachments: Array.isArray(message.attachments)
             ? message.attachments
             : undefined,
-          blocks: Array.isArray(message.blocks) ? message.blocks : undefined,
+          ...(Array.isArray(message.blocks) ? { blocks: message.blocks } : {}),
           files,
         };
       };

@@ -253,6 +253,18 @@ export const ROUTE_POLICY_RULES: readonly RoutePolicyRule[] = [
     policy: 'task-token',
   },
 
+  // Brain inference gateway: the deployment's Brain container calls model
+  // providers through this proxy so it never holds a provider key, and the
+  // key stays an admin-configurable Settings value instead of a container
+  // environment variable. Classified as a webhook because the caller is a
+  // sibling service presenting a shared deployment secret rather than a user
+  // or run token; the handler verifies that token itself.
+  {
+    name: 'brain-inference',
+    match: { type: 'prefix', path: '/api/brain/inference' },
+    policy: 'webhook',
+  },
+
   // Narration text-to-speech for task sandboxes: the ElevenLabs key is
   // injected server-side and never enters the sandbox. The client-keyed
   // limit is a global ceiling (server-to-server callers share one bucket)

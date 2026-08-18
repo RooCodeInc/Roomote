@@ -829,6 +829,41 @@ describe('generateOpenCodeConfig provider support', () => {
     expect(result.configContent).toContain('litellm');
   });
 
+  it('configures trusted LiteLLM context limits for proactive compaction', () => {
+    const runtimeEnv = {
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_TASK_MODEL_CONTEXT_WINDOWS: JSON.stringify({
+        'litellm/qwen3.6:35b-unsloth': 210_176,
+      }),
+      R_INFERENCE_GATEWAY_URL: 'https://api.example.com/api/inference/',
+    };
+    const result = generateOpenCodeConfig({
+      homeDir: createHomeDir(),
+      runtimeEnv,
+    });
+    const config = JSON.parse(result.configContent) as {
+      provider: Record<
+        string,
+        {
+          models: Record<string, { limit?: Record<string, number> }>;
+          options?: Record<string, unknown>;
+        }
+      >;
+    };
+
+    expect(
+      config.provider.litellm?.models['qwen3.6:35b-unsloth']?.limit,
+    ).toEqual({
+      context: 210_176,
+      output: 32_000,
+    });
+    expect(config.provider.litellm?.options).toMatchObject({
+      baseURL: 'https://api.example.com/api/inference/litellm/v1',
+      apiKey: '{env:ROOMOTE_CLOUD_TOKEN}',
+    });
+    expect(runtimeEnv).not.toHaveProperty('R_TASK_MODEL_CONTEXT_WINDOWS');
+  });
+
   it('configures named openai-compatible connections separately', () => {
     const result = generateOpenCodeConfig({
       homeDir: createHomeDir(),

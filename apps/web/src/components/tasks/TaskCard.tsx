@@ -30,6 +30,7 @@ import {
   WorkspaceBadge,
   PullRequestBadge,
 } from '@/components/sandbox';
+import { TaskAutomationIcon } from './TaskAutomationIcon';
 
 type TaskCardProps = {
   task: Task;
@@ -104,7 +105,14 @@ export const TaskCard = ({
             <Tooltip>
               <TooltipTrigger asChild>
                 <div className="size-8 flex items-center justify-center rounded-full border border-border bg-muted ring-1 ring-background">
-                  <FileText className="size-4 text-muted-foreground" />
+                  {task.attributionKind === 'automation' ? (
+                    <TaskAutomationIcon
+                      automationKey={task.initiatorAutomation}
+                      className="size-4 text-muted-foreground"
+                    />
+                  ) : (
+                    <FileText className="size-4 text-muted-foreground" />
+                  )}
                 </div>
               </TooltipTrigger>
               <TooltipContent>

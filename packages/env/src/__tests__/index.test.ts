@@ -11,6 +11,7 @@ import {
   getDefaultTrpcUrl,
   getWebBundledEnvFilePaths,
   isAutoGenerateKeysEnabled,
+  isBrainConfigured,
   isExposedBindHost,
   isRoomoteCloudEnabled,
   rehydrateEnv,
@@ -223,6 +224,22 @@ describe('Env', () => {
     expect(areCuratedIntegrationsDisabled(undefined)).toBe(false);
     expect(areCuratedIntegrationsDisabled('1')).toBe(true);
     expect(areCuratedIntegrationsDisabled('0')).toBe(false);
+  });
+
+  it('keeps the communications fast mode setting opt-in', () => {
+    const runtimeEnv = { ...process.env };
+    delete runtimeEnv.SKIP_ENV_VALIDATION;
+    delete runtimeEnv.R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED;
+
+    expect(
+      createRoomoteEnv(runtimeEnv).R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED,
+    ).toBe(false);
+    expect(
+      createRoomoteEnv({
+        ...runtimeEnv,
+        R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED: 'true',
+      }).R_COMMUNICATIONS_FAST_MODE_SETTING_ENABLED,
+    ).toBe(true);
   });
 
   it('accepts valid Ping instance IDs and rejects invalid ones', () => {
@@ -746,6 +763,7 @@ describe('Env', () => {
       R_PUBLIC_URL: '',
       R_INSTANCE_ID: '',
       R_STATUSPAGE_INCIDENTS_URL: '',
+      R_BRAIN_EMBEDDING_DIMENSIONS: '',
       R_TEAMS_BOT_APP_ID: '',
       R_TEAMS_BOT_APP_PASSWORD: '',
       R_TEAMS_BOT_TENANT_ID: '',
@@ -776,6 +794,7 @@ describe('Env', () => {
       expect(env.R_PUBLIC_URL).toBeUndefined();
       expect(env.R_INSTANCE_ID).toBeUndefined();
       expect(env.R_STATUSPAGE_INCIDENTS_URL).toBeUndefined();
+      expect(env.R_BRAIN_EMBEDDING_DIMENSIONS).toBeUndefined();
       expect(env.R_TEAMS_BOT_APP_ID).toBeUndefined();
       expect(env.R_TEAMS_BOT_NAME).toBeUndefined();
       expect(env.R_TELEGRAM_BOT_TOKEN).toBeUndefined();
@@ -1142,5 +1161,55 @@ describe('assertSecureBootBinding', () => {
         } as NodeJS.ProcessEnv,
       }),
     ).not.toThrow();
+  });
+});
+
+describe('isBrainConfigured', () => {
+  it('activates on either provider key', () => {
+    expect(
+      isBrainConfigured({ R_BRAIN_OPENROUTER_API_KEY: 'sk-or-test' }),
+    ).toBe(true);
+    expect(isBrainConfigured({ R_BRAIN_OPENAI_API_KEY: 'sk-test' })).toBe(true);
+    expect(
+      isBrainConfigured({
+        R_BRAIN_OPENROUTER_API_KEY: 'sk-or-test',
+        R_BRAIN_OPENAI_API_KEY: 'sk-test',
+      }),
+    ).toBe(true);
+  });
+
+  it('counts the gateway token as Brain wiring', () => {
+    // The token means a Brain could be wired here (templates generate it as
+    // plumbing), so held-memory enqueueing may begin. It is NOT activation:
+    // user-visible Brain behavior additionally requires an explicit
+    // R_BRAIN_* provider key via isBrainProviderConfigured in @roomote/db.
+    expect(isBrainConfigured({ R_BRAIN_GATEWAY_TOKEN: 'gateway-token' })).toBe(
+      true,
+    );
+  });
+
+  it('stays off with no key, and treats whitespace as no key', () => {
+    expect(isBrainConfigured({})).toBe(false);
+    expect(
+      isBrainConfigured({
+        R_BRAIN_GATEWAY_TOKEN: '',
+        R_BRAIN_OPENROUTER_API_KEY: '   ',
+        R_BRAIN_OPENAI_API_KEY: '',
+      }),
+    ).toBe(false);
+  });
+
+  it('is not satisfied by a value that deployments default for you', () => {
+    // R_GBRAIN_URL is the Brain's address, and every compose file defaults it
+    // to a service name whether or not that service runs. Counting it here
+    // once made this true on every self-hosted deployment, which quietly
+    // enqueued a memory per completed task with nothing to ever drain them.
+    // Anything added to this signal has to be something an operator set on
+    // purpose.
+    expect(
+      isBrainConfigured({
+        R_GBRAIN_URL: 'http://gbrain:8931',
+      } as Parameters<typeof isBrainConfigured>[0]),
+    ).toBe(false);
   });
 });

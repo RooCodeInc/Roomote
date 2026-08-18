@@ -46,7 +46,14 @@
       },
       {
         "group": "Using Roomote",
-        "pages": ["how-roomote-works", "use-cases", "tasks", "file-attachments"]
+        "pages": [
+          "how-roomote-works",
+          "use-cases",
+          "tasks",
+          "goal-mode",
+          "brain",
+          "file-attachments"
+        ]
       },
       {
         "group": "Cookbook",
@@ -151,6 +158,7 @@
           "integrations/pylon",
           "integrations/railway",
           "integrations/resend",
+          "integrations/rippling",
           "integrations/sentry",
           "integrations/snowflake",
           "integrations/supabase",

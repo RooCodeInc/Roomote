@@ -6,12 +6,18 @@ const {
   findRoomoteOwnedSlackThreadMock,
   markSlackThreadExplicitMentionRequiredMock,
   getSlackThreadReplyFooterMessageTsMock,
+  hasFastAgentSessionMock,
+  findActiveSlackTaskRunMock,
+  findCompletedSlackTaskRunWithSnapshotMock,
 } = vi.hoisted(() => ({
   fetchThreadMessagesMock: vi.fn(),
   hasPendingRoutingConfirmationMock: vi.fn(),
   findRoomoteOwnedSlackThreadMock: vi.fn(),
   markSlackThreadExplicitMentionRequiredMock: vi.fn(),
   getSlackThreadReplyFooterMessageTsMock: vi.fn(),
+  hasFastAgentSessionMock: vi.fn(),
+  findActiveSlackTaskRunMock: vi.fn(),
+  findCompletedSlackTaskRunWithSnapshotMock: vi.fn(),
 }));
 
 vi.mock('@roomote/env', () => ({
@@ -20,6 +26,8 @@ vi.mock('@roomote/env', () => ({
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   ROUTING_AUTO_CONFIRM_TIMEOUT_MS: 0,
+  createFastAgentSlackTaskLauncher: vi.fn(() => vi.fn()),
+  hasFastAgentSession: hasFastAgentSessionMock,
 }));
 
 vi.mock('@roomote/cloud-agents', () => ({
@@ -33,6 +41,9 @@ vi.mock('@roomote/slack', async (importOriginal) => ({
   markSlackThreadExplicitMentionRequired:
     markSlackThreadExplicitMentionRequiredMock,
   getSlackThreadReplyFooterMessageTs: getSlackThreadReplyFooterMessageTsMock,
+  findActiveSlackTaskRun: findActiveSlackTaskRunMock,
+  findCompletedSlackTaskRunWithSnapshot:
+    findCompletedSlackTaskRunWithSnapshotMock,
 }));
 
 vi.mock('../helpers/conversation-log.js', () => ({
@@ -109,7 +120,95 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     });
     markSlackThreadExplicitMentionRequiredMock.mockResolvedValue(undefined);
     getSlackThreadReplyFooterMessageTsMock.mockResolvedValue(null);
+    hasFastAgentSessionMock.mockResolvedValue(false);
+    findActiveSlackTaskRunMock.mockResolvedValue(null);
+    findCompletedSlackTaskRunWithSnapshotMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([]);
+  });
+
+  it('routes an unmentioned reply in an existing fast-agent thread', async () => {
+    hasFastAgentSessionMock.mockResolvedValue(true);
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanMessage('U111', THREAD_TS, '<@UBOT> !fast hi'),
+      botMessage('101.000', 'Hi there.'),
+    ]);
+
+    await expect(
+      routeDecision(
+        threadReplyEvent({
+          user: 'U111',
+          ts: '102.000',
+          text: 'How are you?',
+        }),
+      ),
+    ).resolves.toMatchObject({ shouldRoute: true });
+    expect(hasFastAgentSessionMock).toHaveBeenCalledWith({
+      surface: 'slack',
+      workspaceId: 'T123',
+      conversationId: THREAD_TS,
+      replyTarget: { channelId: 'C123', threadId: THREAD_TS },
+    });
+    expect(findRoomoteOwnedSlackThreadMock).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it("routes Matt when he joins Dan's existing fast-agent conversation", async () => {
+    hasFastAgentSessionMock.mockResolvedValue(true);
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanMessage('UDAN', THREAD_TS, '<@UBOT> !fast hi'),
+      botMessage('101.000', 'Hi Dan.'),
+    ]);
+
+    await expect(
+      routeDecision(
+        threadReplyEvent({
+          user: 'UMATT',
+          ts: '102.000',
+          text: 'Hey Roomote, can you check this too?',
+        }),
+      ),
+    ).resolves.toMatchObject({ shouldRoute: true });
+  });
+
+  it('keeps a peer-directed reply silent in an existing fast-agent thread', async () => {
+    hasFastAgentSessionMock.mockResolvedValue(true);
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
+
+    await expect(
+      routeDecision(
+        threadReplyEvent({
+          user: 'U111',
+          ts: '102.000',
+          text: '<@U333> what do you think?',
+        }),
+      ),
+    ).resolves.toEqual({ shouldRoute: false });
+    expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
+  });
+
+  it('requires an explicit mention after another user interjects in a fast-agent thread', async () => {
+    hasFastAgentSessionMock.mockResolvedValue(true);
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanMessage('U111', THREAD_TS, '<@UBOT> !fast hi'),
+      botMessage('101.000', 'Hi there.'),
+      humanMessage('U222', '102.000', 'I think that is probably right'),
+    ]);
+
+    await expect(
+      routeDecision(
+        threadReplyEvent({
+          user: 'U111',
+          ts: '103.000',
+          text: 'Can you continue?',
+        }),
+      ),
+    ).resolves.toEqual({ shouldRoute: false });
+    expect(markSlackThreadExplicitMentionRequiredMock).toHaveBeenCalledWith(
+      'C123',
+      THREAD_TS,
+    );
   });
 
   it('routes an unmentioned reply directly after the bot last spoke', async () => {
@@ -122,6 +221,43 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
       routeDecision(threadReplyEvent({ user: 'U111', ts: '102.000' })),
     ).resolves.toMatchObject({ shouldRoute: true });
   }, 15_000);
+
+  it('routes an unmentioned reply in an active task thread missing conversation ownership', async () => {
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
+    findActiveSlackTaskRunMock.mockResolvedValue({ id: 41 });
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanMessage('U111', THREAD_TS, '<@UBOT> please fix the bug'),
+      botMessage('101.000'),
+    ]);
+
+    await expect(
+      routeDecision(threadReplyEvent({ user: 'U111', ts: '102.000' })),
+    ).resolves.toMatchObject({ shouldRoute: true });
+    expect(findCompletedSlackTaskRunWithSnapshotMock).not.toHaveBeenCalled();
+  });
+
+  it('routes an unmentioned reply in a resumable task thread missing conversation ownership', async () => {
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
+    findCompletedSlackTaskRunWithSnapshotMock.mockResolvedValue({
+      id: 42,
+      snapshotId: 'snapshot-1',
+    });
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanMessage('U111', THREAD_TS, '<@UBOT> please fix the bug'),
+      botMessage('101.000'),
+    ]);
+
+    await expect(
+      routeDecision(threadReplyEvent({ user: 'U111', ts: '102.000' })),
+    ).resolves.toMatchObject({ shouldRoute: true });
+    expect(findActiveSlackTaskRunMock).toHaveBeenCalledWith(THREAD_TS, {
+      slackTeamId: 'T123',
+    });
+    expect(findCompletedSlackTaskRunWithSnapshotMock).toHaveBeenCalledWith(
+      THREAD_TS,
+      { slackTeamId: 'T123' },
+    );
+  });
 
   it('keeps routing consecutive replies from the same sender before the bot answers', async () => {
     fetchThreadMessagesMock.mockResolvedValue([
@@ -236,6 +372,69 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     ).resolves.toMatchObject({ shouldRoute: true });
   });
 
+  it('carries the source task binding for a tracked automation report alias', async () => {
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue({
+      taskId: 'task-source',
+      trackedAliasTaskId: 'task-source',
+      userId: 'user-4',
+      slackUserId: null,
+      isAutomationReportThread: true,
+    });
+    fetchThreadMessagesMock.mockResolvedValue([
+      botMessage(THREAD_TS, 'Platform issue reported'),
+    ]);
+
+    await expect(
+      routeDecision(threadReplyEvent({ user: 'U444', ts: '102.000' })),
+    ).resolves.toMatchObject({
+      shouldRoute: true,
+      taskId: 'task-source',
+    });
+  });
+
+  it('does not pin custom automation fallback threads to an arbitrary task', async () => {
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue({
+      taskId: 'task-from-unordered-fallback',
+      trackedAliasTaskId: null,
+      userId: null,
+      slackUserId: null,
+      isAutomationReportThread: true,
+    });
+    fetchThreadMessagesMock.mockResolvedValue([
+      botMessage(THREAD_TS, 'Custom automation report'),
+    ]);
+
+    await expect(
+      routeDecision(threadReplyEvent({ user: 'U444', ts: '102.000' })),
+    ).resolves.toEqual(
+      expect.not.objectContaining({ taskId: 'task-from-unordered-fallback' }),
+    );
+  });
+
+  it('resolves the same alert alias when the reply explicitly mentions Roomote', async () => {
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue({
+      taskId: 'task-source',
+      trackedAliasTaskId: 'task-source',
+      userId: 'user-4',
+      slackUserId: null,
+      isAutomationReportThread: true,
+    });
+    const { resolveMentionedSlackThreadAliasTaskId } =
+      await import('./message-entry.js');
+
+    await expect(
+      resolveMentionedSlackThreadAliasTaskId({
+        event: threadReplyEvent({
+          user: 'U444',
+          text: '<@UBOT> please continue',
+          ts: '102.000',
+        }),
+        botUserId: 'UBOT',
+        teamId: 'T123',
+      }),
+    ).resolves.toBe('task-source');
+  });
+
   it('treats the whole thread as the window when no bot message is found in history', async () => {
     fetchThreadMessagesMock.mockResolvedValue([
       humanMessage('U111', THREAD_TS, '<@UBOT> please fix the bug'),
@@ -320,5 +519,12 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
       routeDecision(threadReplyEvent({ user: 'U111', ts: '102.000' })),
     ).resolves.toEqual({ shouldRoute: false });
     expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
+    expect(findActiveSlackTaskRunMock).toHaveBeenCalledWith(THREAD_TS, {
+      slackTeamId: 'T123',
+    });
+    expect(findCompletedSlackTaskRunWithSnapshotMock).toHaveBeenCalledWith(
+      THREAD_TS,
+      { slackTeamId: 'T123' },
+    );
   });
 });

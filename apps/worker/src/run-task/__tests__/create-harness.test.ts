@@ -391,6 +391,7 @@ describe('createHarness', () => {
       | {
           beforeQueuedPrompt?: (input: {
             userId?: string;
+            clientMessageId?: string;
             kind: 'queuedPrompt' | 'userInputAnswer';
           }) => Promise<unknown>;
         }
@@ -400,11 +401,13 @@ describe('createHarness', () => {
     await expect(
       startOptions?.beforeQueuedPrompt?.({
         userId: 'user-2',
+        clientMessageId: 'slack:1710000000.456',
         kind: 'queuedPrompt',
       }),
     ).resolves.toBeUndefined();
     expect(beforeQueuedPrompt).toHaveBeenCalledWith('user-2', {
       kind: 'queuedPrompt',
+      clientMessageId: 'slack:1710000000.456',
     });
   });
 

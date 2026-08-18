@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
   createDirectMessage: vi.fn(),
   postMessage: vi.fn(),
   addReaction: vi.fn(),
+  hasFastDefault: vi.fn(),
+  processFast: vi.fn(),
 }));
 
 vi.mock('@roomote/redis', async (importOriginal) => {
@@ -39,6 +41,10 @@ vi.mock('@roomote/sdk/server', () => ({
   findDiscordMappedUserId: mocks.findMappedUserId,
 }));
 
+vi.mock('../../fast-agent-entry.js', () => ({
+  hasCommunicationsFastModeDefault: mocks.hasFastDefault,
+}));
+
 vi.mock('../../shared/channel-launch-gate.js', async (importOriginal) => ({
   ...(await importOriginal<
     typeof import('../../shared/channel-launch-gate.js')
@@ -48,6 +54,15 @@ vi.mock('../../shared/channel-launch-gate.js', async (importOriginal) => ({
 
 vi.mock('../attachments.js', () => ({
   processDiscordAttachments: mocks.processAttachments,
+}));
+
+vi.mock('../fast-agent.js', () => ({
+  getDiscordFastConversationId: (
+    channel: DiscordChannelContext,
+    eventId: string,
+  ) =>
+    channel.isDirectMessage || channel.isThread ? channel.channelId : eventId,
+  processDiscordFastAgentMessage: mocks.processFast,
 }));
 
 vi.mock('../task-orchestration.js', () => ({
@@ -189,6 +204,25 @@ describe('maybeHandleDiscordChannelAutoStart', () => {
     mocks.createDirectMessage.mockResolvedValue({ id: 'dm-1' });
     mocks.postMessage.mockResolvedValue({ messageId: 'dm-message-1' });
     mocks.addReaction.mockResolvedValue(undefined);
+    mocks.hasFastDefault.mockResolvedValue(false);
+    mocks.processFast.mockResolvedValue(undefined);
+  });
+
+  it('routes a linked user default to Fast mode before channel auto-start launch', async () => {
+    mocks.hasFastDefault.mockResolvedValue(true);
+
+    await expect(runHandler({})).resolves.toBe(true);
+    await flushBackgroundWork();
+
+    expect(mocks.processFast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'The login page 500s on refresh',
+        senderUserId: 'roomote-user-1',
+        conversationId: 'message-1',
+      }),
+    );
+    expect(mocks.evaluateGate).not.toHaveBeenCalled();
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
   describe('qualification', () => {

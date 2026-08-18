@@ -17,6 +17,8 @@ export interface SlackMessage {
   unfurl_links?: boolean;
   unfurl_media?: boolean;
   metadata?: SlackMessageMetadata;
+  /** Slack request idempotency key for retry-safe chat.postMessage calls. */
+  client_msg_id?: string;
 }
 
 export interface SlackResponse {
@@ -67,6 +69,7 @@ export interface SlackChannelMessage extends SlackThreadMessage {
 export interface SlackConversationMessage {
   text: string;
   authoredText?: string;
+  agentContext?: string;
   ts: string;
   thread_ts?: string;
   user?: string;
@@ -86,6 +89,7 @@ export interface SlackUserInfo {
     profile: {
       display_name: string;
       real_name: string;
+      title?: string;
       email?: string;
     };
   };
@@ -99,6 +103,7 @@ export interface SlackEvent {
   user: string;
   text: string;
   authoredText?: string;
+  agentContext?: string;
   ts: string;
   /** Internal turn ID when an event is synthesized from another Slack event. */
   deliveryTs?: string;

@@ -57,6 +57,9 @@ const mocks = vi.hoisted(() => ({
   callViaEmojiConfig: vi.fn(),
   appendAccountLinkHelpText: vi.fn(async (message: string) => message),
   startGoal: vi.fn(),
+  answerFast: vi.fn(),
+  hasFastDefault: vi.fn(),
+  hasFastSession: vi.fn(),
 }));
 
 vi.mock('../../account-link-help.js', () => ({
@@ -168,7 +171,13 @@ vi.mock('../callback-actions.js', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
+  answerFastAgentQuestion: mocks.answerFast,
   getTaskUrl: mocks.getTaskUrl,
+  hasFastAgentSession: mocks.hasFastSession,
+}));
+
+vi.mock('../../fast-agent-entry.js', () => ({
+  hasCommunicationsFastModeDefault: mocks.hasFastDefault,
 }));
 
 import { discord, discordGatewayEventProcessingTimeout } from '../index.js';
@@ -278,6 +287,9 @@ describe('Discord Gateway event handler', () => {
       launchResult: { id: 17, taskId: 'task-17' },
     });
     mocks.startGoal.mockResolvedValue({ success: true });
+    mocks.answerFast.mockResolvedValue('A quick answer');
+    mocks.hasFastDefault.mockResolvedValue(false);
+    mocks.hasFastSession.mockResolvedValue(false);
     mocks.reply.mockResolvedValue({ messageId: 'reply-1' });
     mocks.createDirectMessage.mockResolvedValue({ id: 'dm-private-1' });
     mocks.postMessage.mockResolvedValue({ messageId: 'dm-msg-1' });
@@ -721,6 +733,56 @@ describe('Discord Gateway event handler', () => {
     );
   });
 
+  it('routes an ordinary linked DM message through Fast mode when the user default is enabled', async () => {
+    mocks.hasFastDefault.mockResolvedValue(true);
+
+    const response = await postEvent(envelope(message()));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      fastAnswered: true,
+      fastDefaulted: true,
+    });
+    expect(mocks.answerFast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'Fix the flaky tests',
+        userId: 'roomote-user-1',
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'dm',
+          conversationId: 'dm-1',
+          replyTarget: { channelId: 'dm-1' },
+        },
+        activeTasks: [],
+      }),
+    );
+    expect(mocks.reply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        replyToMessageId: 'message-1',
+        text: 'A quick answer',
+      }),
+    );
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+    expect(mocks.queueMessage).not.toHaveBeenCalled();
+  });
+
+  it('gives defaulted Discord Fast mode the active task for thread continuation', async () => {
+    mocks.hasFastDefault.mockResolvedValue(true);
+    mocks.findActiveRun.mockResolvedValue({
+      id: 23,
+      taskId: 'task-23',
+      userId: 'roomote-user-1',
+    });
+    const response = await postEvent(envelope(message()));
+
+    expect(response.status).toBe(200);
+    expect(mocks.answerFast).toHaveBeenCalledWith(
+      expect.objectContaining({ activeTasks: [{ taskId: 'task-23' }] }),
+    );
+    expect(mocks.queueMessage).not.toHaveBeenCalled();
+  });
+
   it('forwards message_reference into startNewDiscordTask for channel reply mentions', async () => {
     mocks.getChannel.mockResolvedValue({
       id: 'channel-1',
@@ -1154,6 +1216,50 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.shouldRouteUnmentioned).toHaveBeenCalled();
     expect(mocks.queueMessage).not.toHaveBeenCalled();
     expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it("lets Matt join Dan's existing fast-agent thread and receive a response", async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      guildId: 'guild-1',
+      parentId: 'channel-1',
+      name: 'fast-thread',
+      type: 11,
+    });
+    mocks.hasFastSession.mockResolvedValue(true);
+    mocks.hasFastDefault.mockResolvedValue(true);
+    mocks.shouldRouteUnmentioned.mockResolvedValue(true);
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'thread-1',
+          guild_id: 'guild-1',
+          content: 'Hey Roomote, can you check this too?',
+          author: { id: 'discord-user-matt', username: 'matt' },
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.hasFastSession).toHaveBeenCalledWith({
+      surface: 'discord',
+      workspaceId: 'guild-1',
+      conversationId: 'thread-1',
+      replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+    });
+    expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
+      expect.objectContaining({
+        isOpenConversationThread: true,
+        isRoomoteThread: true,
+      }),
+    );
+    expect(mocks.answerFast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'Hey Roomote, can you check this too?',
+        conversation: expect.objectContaining({ surface: 'discord' }),
+      }),
+    );
   });
 
   it('nudges an unlinked mentioned user without launching work', async () => {

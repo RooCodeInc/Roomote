@@ -58,10 +58,7 @@ export function hasSlackThreadReplyContext(job: {
   );
 }
 
-export type QueuedSlackMessage = Omit<
-  QueuedCommunicationMessage,
-  'provider' | 'channel' | 'threadTs'
->;
+export type QueuedSlackMessage = Omit<QueuedCommunicationMessage, 'provider'>;
 
 /**
  * Queue a Slack message for delivery to an active task run.

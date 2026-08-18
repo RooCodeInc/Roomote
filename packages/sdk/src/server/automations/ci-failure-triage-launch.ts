@@ -19,7 +19,7 @@ import {
 } from '@roomote/db/server';
 import { getRedis } from '@roomote/redis';
 import {
-  buildAutomationRootFooterBlocks,
+  buildAutomationResultBlocks,
   refreshAutomationRootFooter,
   SlackNotifier,
 } from '@roomote/slack';
@@ -31,6 +31,12 @@ import {
 } from '@roomote/types';
 
 import { getCommunicationProviderAdapter } from '../lib/communication-providers';
+import {
+  buildAutomationIconUrl,
+  buildManagerSlackSettingsUrl,
+  CI_FAILURE_TRIAGE_SETTINGS_HASH,
+} from '../lib/manager-slack';
+import { resolveAutomationResultSubtitle } from '../lib/automation-result-metadata';
 import {
   buildDestinationTaskPayloadFields,
   listConnectedCommunicationProviders,
@@ -93,12 +99,14 @@ async function postSlackInvestigationAnnouncement(params: {
       return null;
     }
 
-    const blocks = [
-      { type: 'markdown' as const, text: params.text },
-      ...buildAutomationRootFooterBlocks({
-        automationLabel: params.automationLabel,
-      }),
-    ];
+    const blocks = buildAutomationResultBlocks({
+      title: params.automationLabel,
+      iconUrl: buildAutomationIconUrl('wrench'),
+      configureUrl: buildManagerSlackSettingsUrl(
+        CI_FAILURE_TRIAGE_SETTINGS_HASH,
+      ),
+      contentText: params.text,
+    });
     const messageTs = await slack.postMessage({
       channel: params.destination.channelId,
       text: params.text,
@@ -474,11 +482,20 @@ export async function launchCiFailureTriageForFailedRun(
     });
 
     if (announcementTs && destination.provider === 'slack' && slackNotifier) {
+      const subtitle = await resolveAutomationResultSubtitle({
+        taskId: launchResult.taskId,
+        runId: launchResult.id,
+      });
       await refreshAutomationRootFooter({
         slack: slackNotifier,
         channelId,
         messageTs: announcementTs,
         automationLabel,
+        automationIconUrl: buildAutomationIconUrl('wrench'),
+        configureUrl: buildManagerSlackSettingsUrl(
+          CI_FAILURE_TRIAGE_SETTINGS_HASH,
+        ),
+        subtitle,
         taskUrl: getTaskUrl({
           taskId: launchResult.taskId,
           utm: { source: 'slack', campaign: 'slack.thread_reply' },

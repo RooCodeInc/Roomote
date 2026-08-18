@@ -20,6 +20,7 @@ import { type TaskRun, sdk } from '@roomote/sdk/client';
 
 import type {
   CallbackEvent,
+  CallbackDeliveryContext,
   RunTaskCallbacks,
   RunTaskContext,
 } from '../run-task';
@@ -78,6 +79,54 @@ function getSlackRequestUserInputPromptMessageTs(
   return next;
 }
 
+type SlackConversation = { channel: string; thread_ts: string };
+
+function getSlackRequestUserInputReplyTargets(
+  context: RunTaskContext,
+): Map<string, SlackConversation> {
+  const existing = context.slackRequestUserInputReplyTargets;
+
+  if (existing instanceof Map) {
+    return existing as Map<string, SlackConversation>;
+  }
+
+  const next = new Map<string, SlackConversation>();
+  context.slackRequestUserInputReplyTargets = next;
+  return next;
+}
+
+async function resolveSlackConversation(
+  taskRun: TaskRun,
+  replyTarget?: NonNullable<CallbackDeliveryContext['slackReplyTarget']>,
+): Promise<SlackConversation> {
+  if (replyTarget) {
+    return {
+      channel: replyTarget.channel,
+      thread_ts: replyTarget.threadTs,
+    };
+  }
+
+  try {
+    const activeTarget = await sdk.taskRuns.getActiveSlackReplyTarget({
+      runId: taskRun.id,
+    });
+    if (activeTarget) {
+      return {
+        channel: activeTarget.channel,
+        thread_ts: activeTarget.threadTs,
+      };
+    }
+  } catch (error) {
+    console.warn(
+      `[slackMentionCallbacks] Failed to resolve active Slack reply target for run ${taskRun.id}; using canonical thread: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
+  return getSlackConversation(taskRun);
+}
+
 function getInitiatingSlackUserIdForStartedMessage(
   taskRun: TaskRun,
   startedData: {
@@ -108,13 +157,15 @@ async function recordOutboundSlackMessageForTaskRun(params: {
   messageTs: string | null | undefined;
   text: string;
   source: string;
+  conversation?: SlackConversation;
   metadata?: Record<string, unknown>;
 }): Promise<void> {
   if (!params.messageTs) {
     return;
   }
 
-  const { channel, thread_ts: threadTs } = getSlackConversation(params.taskRun);
+  const { channel, thread_ts: threadTs } =
+    params.conversation ?? (await resolveSlackConversation(params.taskRun));
 
   await sdk.taskRuns.recordOutboundSlackConversationMessage({
     runId: params.taskRun.id,
@@ -136,6 +187,15 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
   ) => {
     if (!context.sessionId) {
       context.sessionId = taskId;
+    }
+    try {
+      await sdk.taskRuns.clearActiveSlackReplyTarget({ runId: taskRun.id });
+    } catch (error) {
+      reportSlackCallbackError(
+        error,
+        'slackMentionCallbacks.onStart.clearActiveReplyTarget',
+        taskRun.id,
+      );
     }
     const slack = await getSlackNotifier();
 
@@ -223,30 +283,56 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
     _taskId: string,
     event: CallbackEvent,
     context: RunTaskContext,
+    deliveryContext?: CallbackDeliveryContext,
   ) => {
     if (event.type === 'completion') {
       await handleCompletion(taskRun, event, context);
     }
 
     if (event.type === 'request_user_input') {
-      await handleRequestUserInput(taskRun, event, context);
+      await handleRequestUserInput(
+        taskRun,
+        event,
+        context,
+        deliveryContext?.slackReplyTarget,
+      );
     }
 
     if (event.type === 'request_user_input_response') {
-      await handleRequestUserInputResponse(taskRun, event);
+      await handleRequestUserInputResponse(taskRun, event, context);
     }
 
     if (event.type === 'followup') {
-      await handleFollowup(taskRun, event, context);
+      await handleFollowup(
+        taskRun,
+        event,
+        context,
+        deliveryContext?.slackReplyTarget,
+      );
     }
   },
-  onExit: async (taskRun: TaskRun) => {
+  onExit: async (taskRun: TaskRun, _status, context: RunTaskContext) => {
     try {
-      const { thread_ts: threadTs } = getSlackConversation(taskRun);
-      await sdk.taskRuns.clearPendingSlackRequestUserInput({
+      const threadIds = new Set(
+        [...getSlackRequestUserInputReplyTargets(context).values()].map(
+          (target) => target.thread_ts,
+        ),
+      );
+      threadIds.add(getSlackConversation(taskRun).thread_ts);
+      const activeTarget = await sdk.taskRuns.getActiveSlackReplyTarget({
         runId: taskRun.id,
-        threadId: threadTs,
       });
+      if (activeTarget) {
+        threadIds.add(activeTarget.threadTs);
+      }
+      await Promise.all(
+        [...threadIds].map((threadId) =>
+          sdk.taskRuns.clearPendingSlackRequestUserInput({
+            runId: taskRun.id,
+            threadId,
+          }),
+        ),
+      );
     } catch (error) {
       reportSlackCallbackError(
         error,
@@ -257,6 +343,16 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
         `[slackMentionCallbacks#onExit] Failed to clear pending request_user_input state: ${
           error instanceof Error ? error.message : String(error)
         }`,
+      );
+    }
+
+    try {
+      await sdk.taskRuns.clearActiveSlackReplyTarget({ runId: taskRun.id });
+    } catch (error) {
+      reportSlackCallbackError(
+        error,
+        'slackMentionCallbacks.onExit.clearActiveReplyTarget',
+        taskRun.id,
       );
     }
   },
@@ -297,6 +393,7 @@ async function handleRequestUserInput(
   taskRun: TaskRun,
   event: CallbackEvent & { type: 'request_user_input' },
   context: RunTaskContext,
+  replyTarget?: NonNullable<CallbackDeliveryContext['slackReplyTarget']>,
 ) {
   const postedSignatures = getRequestUserInputPromptSignatures(context);
   const promptMessageTsByRequestId =
@@ -315,7 +412,12 @@ async function handleRequestUserInput(
 
   try {
     const slack = await getSlackNotifier();
-    const { channel, thread_ts: threadTs } = getSlackConversation(taskRun);
+    const conversation = await resolveSlackConversation(taskRun, replyTarget);
+    const { channel, thread_ts: threadTs } = conversation;
+    getSlackRequestUserInputReplyTargets(context).set(
+      event.request.requestId,
+      conversation,
+    );
     const taskUrl = buildRequestUserInputTaskUrl(taskRun, 'slack');
     const supportsSlackRequestUserInput = supportsIntegrationRequestUserInput(
       event.request,
@@ -383,6 +485,7 @@ async function handleRequestUserInput(
           messageTs: promptMessageTs,
           text: 'Posted structured request_user_input prompt in Slack.',
           source: 'request_user_input',
+          conversation,
         });
       }
       return;
@@ -406,6 +509,7 @@ async function handleRequestUserInput(
       messageTs: handoffMessageTs,
       text: `I need a private answer before I can continue. Please answer in ${PRODUCT_NAME}: ${taskUrl}`,
       source: 'request_user_input_handoff',
+      conversation,
     });
   } catch (error) {
     reportSlackCallbackError(
@@ -422,8 +526,13 @@ async function handleRequestUserInput(
 async function handleRequestUserInputResponse(
   taskRun: TaskRun,
   event: CallbackEvent & { type: 'request_user_input_response' },
+  context: RunTaskContext,
 ) {
-  const { channel, thread_ts: threadTs } = getSlackConversation(taskRun);
+  const replyTargets = getSlackRequestUserInputReplyTargets(context);
+  const conversation =
+    replyTargets.get(event.response.requestId) ??
+    (await resolveSlackConversation(taskRun));
+  const { channel, thread_ts: threadTs } = conversation;
   let pendingRequest;
 
   try {
@@ -447,6 +556,7 @@ async function handleRequestUserInputResponse(
   if (!pendingRequest?.promptMessageTs) {
     return;
   }
+  replyTargets.delete(event.response.requestId);
 
   const currentQuestion =
     getSlackRequestUserInputCurrentQuestion(pendingRequest);
@@ -498,6 +608,7 @@ async function handleFollowup(
   taskRun: TaskRun,
   event: CallbackEvent & { type: 'followup' },
   context: RunTaskContext,
+  replyTarget?: NonNullable<CallbackDeliveryContext['slackReplyTarget']>,
 ) {
   if (!context.postedFollowupTs) {
     context.postedFollowupTs = new Set<number>();
@@ -564,15 +675,17 @@ async function handleFollowup(
 
     const slack = await getSlackNotifier();
 
+    const conversation = await resolveSlackConversation(taskRun, replyTarget);
     const followupMessageTs = await slack.postMessage({
       blocks,
-      ...getSlackConversation(taskRun),
+      ...conversation,
     });
     await recordOutboundSlackMessageForTaskRun({
       taskRun,
       messageTs: followupMessageTs,
       text: event.question,
       source: 'followup_question',
+      conversation,
       metadata:
         event.suggestions.length > 0
           ? { suggestionCount: event.suggestions.length }

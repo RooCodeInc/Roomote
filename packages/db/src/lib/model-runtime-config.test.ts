@@ -35,9 +35,18 @@ vi.mock('../db', () => ({
   },
 }));
 
-vi.mock('./environment-variables', () => ({
-  stringifyDecryptedEnvVarValue: (value: unknown) => String(value),
-}));
+vi.mock('./environment-variables', async (importOriginal) => {
+  // Keep the real resolveDeploymentEnvVar: it reads through the mocked db
+  // and encryption modules above, and isBrainProviderConfigured exercises
+  // that persisted-settings path for real.
+  const actual =
+    await importOriginal<typeof import('./environment-variables')>();
+
+  return {
+    ...actual,
+    stringifyDecryptedEnvVarValue: (value: unknown) => String(value),
+  };
+});
 
 vi.mock('./chatgpt-subscription', () => ({
   resolveOpenCodeAuthContent: (...args: unknown[]) =>
@@ -62,6 +71,8 @@ vi.mock('../schema', () => ({
 }));
 
 import {
+  isBrainProviderConfigured,
+  resetBrainProviderConfiguredCache,
   resolveEffectiveModelRuntimeEnv,
   resolveSandboxModelRuntimeEnv,
 } from './model-runtime-config';
@@ -682,6 +693,69 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     expect(env.R_INFERENCE_GATEWAY_CHATGPT).toBe('1');
   });
 
+  it('emits trusted context windows for enabled sandbox models', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: { roomoteModel: 'litellm/qwen3.6:35b-unsloth' },
+      taskModelSettings: {
+        models: [
+          {
+            id: 'litellm/qwen3.6:35b-unsloth',
+            displayName: 'Qwen 3.6 35B',
+            family: 'Qwen',
+            metadata: {
+              contextWindow: 210_176,
+              inputTypes: ['text'],
+              inputPricePerToken: null,
+              outputPricePerToken: null,
+              lastRefreshedAt: null,
+            },
+          },
+          {
+            id: 'litellm/no-context-metadata',
+            displayName: 'Unknown context',
+            family: 'Custom',
+            metadata: {
+              contextWindow: null,
+              inputTypes: null,
+              inputPricePerToken: null,
+              outputPricePerToken: null,
+              lastRefreshedAt: null,
+            },
+          },
+          {
+            id: 'litellm/disabled-model',
+            displayName: 'Disabled',
+            family: 'Custom',
+            metadata: {
+              contextWindow: 999_999,
+              inputTypes: null,
+              inputPricePerToken: null,
+              outputPricePerToken: null,
+              lastRefreshedAt: null,
+            },
+          },
+        ],
+        allowedModelIds: [
+          'litellm/qwen3.6:35b-unsloth',
+          'litellm/no-context-metadata',
+        ],
+        defaultModelId: 'litellm/qwen3.6:35b-unsloth',
+      },
+    });
+
+    const env = await resolveSandboxModelRuntimeEnv({
+      runtimeEnv: {
+        R_TASK_MODEL_CONTEXT_WINDOWS: JSON.stringify({ stale: 1 }),
+        LITELLM_BASE_URL: 'https://litellm.example.com/v1',
+      },
+      deploymentEnvVars: {},
+    });
+
+    expect(JSON.parse(env.R_TASK_MODEL_CONTEXT_WINDOWS ?? '{}')).toEqual({
+      'litellm/qwen3.6:35b-unsloth': 210_176,
+    });
+  });
+
   it('does not emit the ChatGPT gateway marker when no subscription is connected', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: { roomoteModel: 'openai/gpt-5.4' },
@@ -987,5 +1061,61 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
       expect(env).not.toHaveProperty('LITELLM_API_KEY');
       expect(env).not.toHaveProperty('LITELLM_BASE_URL');
     });
+  });
+});
+
+describe('isBrainProviderConfigured', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.unstubAllEnvs();
+    resetBrainProviderConfiguredCache();
+    mockDecryptSecrets.mockImplementation(async (value) => value);
+    mockEnvironmentVariablesFindMany.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    resetBrainProviderConfiguredCache();
+  });
+
+  it('is off with nothing configured', async () => {
+    await expect(isBrainProviderConfigured()).resolves.toBe(false);
+  });
+
+  it('is never satisfied by the general task provider keys', async () => {
+    // Nearly every deployment has one of these to run tasks. Counting them
+    // would activate the Brain everywhere the templates generate the gateway
+    // token, which is the auto-activation bug this predicate exists to close.
+    vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-general');
+    vi.stubEnv('OPENAI_API_KEY', 'sk-general');
+
+    await expect(isBrainProviderConfigured()).resolves.toBe(false);
+  });
+
+  it('activates on an explicit Brain key in the runtime env', async () => {
+    vi.stubEnv('R_BRAIN_OPENROUTER_API_KEY', 'sk-or-brain');
+
+    await expect(isBrainProviderConfigured()).resolves.toBe(true);
+  });
+
+  it('activates on an explicit Brain key persisted in Settings', async () => {
+    mockEnvironmentVariablesFindMany.mockResolvedValue([
+      { name: 'R_BRAIN_OPENAI_API_KEY', value: 'sk-brain-persisted' },
+    ]);
+
+    await expect(isBrainProviderConfigured()).resolves.toBe(true);
+  });
+
+  it('caches the answer between calls', async () => {
+    vi.stubEnv('R_BRAIN_OPENAI_API_KEY', 'sk-brain');
+
+    await expect(isBrainProviderConfigured()).resolves.toBe(true);
+    await expect(isBrainProviderConfigured()).resolves.toBe(true);
+
+    // The second call answers from cache; only the first resolution may have
+    // touched persisted settings at all.
+    expect(
+      mockEnvironmentVariablesFindMany.mock.calls.length,
+    ).toBeLessThanOrEqual(1);
   });
 });

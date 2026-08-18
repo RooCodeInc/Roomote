@@ -10,6 +10,7 @@ import {
   tasks,
   taskRuns,
   getBackgroundAgentSettings,
+  upsertBackgroundAutomationSlackThread,
   slackInstallations,
   normalizeTaskActivityTimestamp,
   eq,
@@ -29,7 +30,9 @@ import {
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from '../discord-communication';
 import {
   appendManagerSlackFooter,
+  buildAutomationSettingsMessage,
   degradeSlackMrkdwnToMarkdown,
+  PLATFORM_ISSUE_ALERTS_SETTINGS_HASH,
 } from '../manager-slack';
 import {
   type AcpPersistedEnvelope,
@@ -187,6 +190,20 @@ function buildPlatformIssueAlertText(params: {
   );
 }
 
+function buildPlatformIssueSlackAlertMessage(params: {
+  taskId: string;
+  report: { title: string; summary: string };
+}) {
+  const taskUrl = buildPlatformIssueTaskUrl(params.taskId, 'slack');
+
+  return buildAutomationSettingsMessage(
+    `Platform issue reported: *${params.report.title}*\n` +
+      `> ${params.report.summary}`,
+    PLATFORM_ISSUE_ALERTS_SETTINGS_HASH,
+    { taskUrl, slackIcon: 'triangle-alert' },
+  );
+}
+
 // Marks the report row as delivered. slackPostedAt doubles as the
 // posted-anywhere marker so Discord deliveries also suppress re-posting.
 async function markPlatformIssueReportPosted(reportRowId: string) {
@@ -218,6 +235,7 @@ async function maybeNotifyPlatformIssue(params: {
       columns: {
         botAccessToken: true,
         isActive: true,
+        teamId: true,
       },
     }),
   ]);
@@ -274,14 +292,14 @@ async function maybeNotifyPlatformIssue(params: {
   }
 
   const slack = new SlackNotifier(slackInstallation.botAccessToken);
+  const message = buildPlatformIssueSlackAlertMessage({
+    taskId: params.taskId,
+    report: params.report,
+  });
 
   const messageTs = await slack.postMessage({
     channel: channelId,
-    text: buildPlatformIssueAlertText({
-      taskId: params.taskId,
-      report: params.report,
-      utmSource: 'slack',
-    }),
+    ...message,
     unfurl_links: false,
     unfurl_media: false,
   });
@@ -291,6 +309,28 @@ async function maybeNotifyPlatformIssue(params: {
       `[recordTaskMessageEnvelope] Failed to post platform issue Slack alert for task ${params.taskId}`,
     );
     return;
+  }
+
+  try {
+    await upsertBackgroundAutomationSlackThread(db, {
+      surface: 'slack',
+      automationKey: 'platform_issue_alerts',
+      slackTeamId: slackInstallation.teamId,
+      slackChannelId: channelId,
+      threadTs: messageTs,
+      summaryText: message.text,
+      postedAt: new Date(),
+      metadata: {
+        sourceTaskId: params.taskId,
+        slackTeamId: slackInstallation.teamId,
+      },
+    });
+  } catch (error) {
+    console.warn(
+      `[recordTaskMessageEnvelope] Failed to track platform issue Slack alert thread for task ${params.taskId}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 
   await markPlatformIssueReportPosted(params.reportRowId);

@@ -62,6 +62,7 @@ import { handleSendChatReactionEmoji } from './send-chat-reaction-emoji.js';
 import { handleReportPlatformIssue } from './report-platform-issue.js';
 import { handleManageSourceControl } from './source-control.js';
 import { getArtifactConfig, getRoomoteConfig } from './config.js';
+import { handleSaveTaskMemory } from './task-memory.js';
 import { ABOUT_ME_CONTENT } from './about-me.js';
 import { INTEGRATION_SETUP_CONTENT } from './integration-setup.js';
 import type { ToolResult } from './types.js';
@@ -470,12 +471,26 @@ function shouldRegisterEnvVarRequestTool(): boolean {
   return !!taskType && WEB_TASK_TYPES_WITH_SECURE_ENV_REQUESTS.has(taskType);
 }
 
+/**
+ * The Brain is delivered to the sandbox only when the deployment has one,
+ * and setup-mcps mirrors that into this flag — so agents without a Brain
+ * never see a memory tool that cannot work.
+ */
+function shouldRegisterTaskMemoryTool(): boolean {
+  return process.env.ROOMOTE_BRAIN_AVAILABLE === 'true';
+}
+
 function shouldRegisterSlackThreadReplyTool(): boolean {
   return (
-    Boolean(process.env.ROOMOTE_SLACK_CHANNEL?.trim()) ||
-    (Boolean(process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim()) &&
-      Boolean(process.env.ROOMOTE_COMMUNICATION_CHANNEL_ID?.trim()))
+    process.env.ROOMOTE_FAST_AGENT_CHILD !== 'true' &&
+    (Boolean(process.env.ROOMOTE_SLACK_CHANNEL?.trim()) ||
+      (Boolean(process.env.ROOMOTE_COMMUNICATION_PROVIDER?.trim()) &&
+        Boolean(process.env.ROOMOTE_COMMUNICATION_CHANNEL_ID?.trim())))
   );
+}
+
+function isFastAgentChild(): boolean {
+  return process.env.ROOMOTE_FAST_AGENT_CHILD === 'true';
 }
 
 function hasSlackChatContext(): boolean {
@@ -527,7 +542,7 @@ function getChatReplySurfaceLabel():
 }
 
 function shouldRegisterChannelPostTool(): boolean {
-  return Boolean(process.env.ROOMOTE_TASK_ID?.trim());
+  return !isFastAgentChild() && Boolean(process.env.ROOMOTE_TASK_ID?.trim());
 }
 
 function shouldRegisterPlatformIssueTool(): boolean {
@@ -1160,6 +1175,42 @@ roomoteMcpServer.registerTool(
   },
 );
 
+if (shouldRegisterTaskMemoryTool()) {
+  roomoteMcpServer.registerTool(
+    'save_task_memory',
+    {
+      title: 'Save Task Memory',
+      description:
+        "Record what this task learned into the deployment's shared Brain, so future tasks and teammates can find it. Call this once when you finish substantial work, before your final message. Write for someone who lands on this problem months from now with no context: what the outcome was, the decisions you made and why, facts about the codebase or systems worth reusing, and anything still unresolved. Skip trivial, failed, or purely administrative tasks. You cannot write to the Brain directly; Roomote stores this under this task's own entry after redacting secrets.",
+      inputSchema: {
+        outcome: z
+          .string()
+          .describe('What was accomplished, in a few sentences.'),
+        decisions: z
+          .array(z.string())
+          .optional()
+          .describe('Decisions made during the task, one per entry.'),
+        rationale: z
+          .string()
+          .optional()
+          .describe('Why those decisions were made; alternatives rejected.'),
+        reusableFacts: z
+          .array(z.string())
+          .optional()
+          .describe(
+            'Durable facts about the codebase or systems worth remembering.',
+          ),
+        unresolvedQuestions: z
+          .array(z.string())
+          .optional()
+          .describe('Open questions or follow-ups left behind.'),
+      },
+      annotations: { readOnlyHint: false },
+    },
+    async (input) => handleSaveTaskMemory(input),
+  );
+}
+
 if (shouldRegisterEnvVarRequestTool()) {
   roomoteMcpServer.registerTool(
     'request_environment_variables',
@@ -1223,114 +1274,116 @@ if (shouldRegisterAutomationWorkItemsTool()) {
   });
 }
 
-roomoteMcpServer.registerTool(
-  CHAT_CHANNELS_TOOL.name,
-  {
-    title: CHAT_CHANNELS_TOOL.title,
-    description: CHAT_CHANNELS_TOOL.description,
-    inputSchema: {},
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-  },
-  async (): Promise<ToolResult> => {
-    const roomoteConfig = getRoomoteConfig();
-    if (!roomoteConfig) {
-      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
-    }
-
-    return handleListChatChannels(roomoteConfig);
-  },
-);
-
-roomoteMcpServer.registerTool(
-  CHAT_CHANNEL_MESSAGES_TOOL.name,
-  {
-    title: CHAT_CHANNEL_MESSAGES_TOOL.title,
-    description: CHAT_CHANNEL_MESSAGES_TOOL.description,
-    inputSchema: {
-      channel: z
-        .string()
-        .optional()
-        .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.channel),
-      oldest: z
-        .string()
-        .optional()
-        .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.oldest),
-      latest: z
-        .string()
-        .optional()
-        .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.latest),
-    },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-  },
-  async (params): Promise<ToolResult> => {
-    const roomoteConfig = getRoomoteConfig();
-    if (!roomoteConfig) {
-      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
-    }
-
-    return handleGetChatChannelMessages(
-      {
-        channel: params.channel,
-        oldest: params.oldest,
-        latest: params.latest,
+if (!isFastAgentChild()) {
+  roomoteMcpServer.registerTool(
+    CHAT_CHANNELS_TOOL.name,
+    {
+      title: CHAT_CHANNELS_TOOL.title,
+      description: CHAT_CHANNELS_TOOL.description,
+      inputSchema: {},
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
       },
-      roomoteConfig,
-    );
-  },
-);
-
-roomoteMcpServer.registerTool(
-  CHAT_MESSAGE_CONTEXT_TOOL.name,
-  {
-    title: CHAT_MESSAGE_CONTEXT_TOOL.title,
-    description: CHAT_MESSAGE_CONTEXT_TOOL.description,
-    inputSchema: {
-      channel: z
-        .string()
-        .optional()
-        .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.channel),
-      messageId: z
-        .string()
-        .optional()
-        .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.messageId),
-      messageLink: z
-        .string()
-        .optional()
-        .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.messageLink),
     },
-    annotations: {
-      readOnlyHint: true,
-      destructiveHint: false,
-      idempotentHint: true,
-      openWorldHint: false,
-    },
-  },
-  async (params): Promise<ToolResult> => {
-    const roomoteConfig = getRoomoteConfig();
-    if (!roomoteConfig) {
-      return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
-    }
+    async (): Promise<ToolResult> => {
+      const roomoteConfig = getRoomoteConfig();
+      if (!roomoteConfig) {
+        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+      }
 
-    return handleGetChatMessageContext(
-      {
-        channel: params.channel,
-        messageId: params.messageId,
-        messageLink: params.messageLink,
+      return handleListChatChannels(roomoteConfig);
+    },
+  );
+
+  roomoteMcpServer.registerTool(
+    CHAT_CHANNEL_MESSAGES_TOOL.name,
+    {
+      title: CHAT_CHANNEL_MESSAGES_TOOL.title,
+      description: CHAT_CHANNEL_MESSAGES_TOOL.description,
+      inputSchema: {
+        channel: z
+          .string()
+          .optional()
+          .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.channel),
+        oldest: z
+          .string()
+          .optional()
+          .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.oldest),
+        latest: z
+          .string()
+          .optional()
+          .describe(CHAT_CHANNEL_MESSAGES_TOOL.inputDescriptions.latest),
       },
-      roomoteConfig,
-    );
-  },
-);
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (params): Promise<ToolResult> => {
+      const roomoteConfig = getRoomoteConfig();
+      if (!roomoteConfig) {
+        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+      }
+
+      return handleGetChatChannelMessages(
+        {
+          channel: params.channel,
+          oldest: params.oldest,
+          latest: params.latest,
+        },
+        roomoteConfig,
+      );
+    },
+  );
+
+  roomoteMcpServer.registerTool(
+    CHAT_MESSAGE_CONTEXT_TOOL.name,
+    {
+      title: CHAT_MESSAGE_CONTEXT_TOOL.title,
+      description: CHAT_MESSAGE_CONTEXT_TOOL.description,
+      inputSchema: {
+        channel: z
+          .string()
+          .optional()
+          .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.channel),
+        messageId: z
+          .string()
+          .optional()
+          .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.messageId),
+        messageLink: z
+          .string()
+          .optional()
+          .describe(CHAT_MESSAGE_CONTEXT_TOOL.inputDescriptions.messageLink),
+      },
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (params): Promise<ToolResult> => {
+      const roomoteConfig = getRoomoteConfig();
+      if (!roomoteConfig) {
+        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
+      }
+
+      return handleGetChatMessageContext(
+        {
+          channel: params.channel,
+          messageId: params.messageId,
+          messageLink: params.messageLink,
+        },
+        roomoteConfig,
+      );
+    },
+  );
+}
 
 if (shouldRegisterSlackThreadReplyTool()) {
   const chatReplySurfaceLabel = getChatReplySurfaceLabel();
@@ -1707,10 +1760,11 @@ if (shouldRegisterChannelPostTool()) {
   );
 
   if (
-    hasSlackChatContext() ||
-    hasTelegramChatContext() ||
-    hasTeamsChatContext() ||
-    hasDiscordChatContext()
+    !isFastAgentChild() &&
+    (hasSlackChatContext() ||
+      hasTelegramChatContext() ||
+      hasTeamsChatContext() ||
+      hasDiscordChatContext())
   ) {
     const reactionSurface = getChatReplySurfaceLabel();
 

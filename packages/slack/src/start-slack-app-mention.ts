@@ -65,6 +65,7 @@ function getLinkedInitiatorUserId(
 
 function buildActiveSlackFollowUpPrompt(input: {
   text: string;
+  agentContext?: string;
   ts: string;
   threadMessages?: SlackThreadMessage[];
   latestOwnBotReplyText?: string;
@@ -105,7 +106,10 @@ function buildActiveSlackFollowUpPrompt(input: {
         reactionsAllowed: hasPriorBotReply,
         preferEmojiAck: hasPriorBotReply,
       }),
-      wrapSlackMessage(input.text, { ts: input.ts }),
+      wrapSlackMessage(input.text, {
+        ts: input.ts,
+        agentContext: input.agentContext,
+      }),
     ]
       .filter(Boolean)
       .join('\n\n'),
@@ -130,6 +134,7 @@ export async function startSlackAppMentionTask(input: {
   slackUserId: string;
   persistedSlackUserId?: string | null;
   text: string;
+  slackMessageContext?: string;
   agentPromptText?: string;
   /**
    * Deprecated: acknowledgement/completion reactions are fixed defaults and
@@ -195,6 +200,7 @@ export async function startSlackAppMentionTask(input: {
     const builtPrompt = !agentPromptText
       ? buildActiveSlackFollowUpPrompt({
           text: input.text,
+          agentContext: input.slackMessageContext,
           ts: input.ts,
           threadMessages: promptRelevantThreadMessages,
           latestOwnBotReplyText: promptRelevantLatestOwnBotReply?.text,
@@ -278,6 +284,9 @@ export async function startSlackAppMentionTask(input: {
         ? {}
         : { user: input.persistedSlackUserId ?? input.slackUserId }),
       text: input.text,
+      ...(input.slackMessageContext?.trim()
+        ? { slackMessageContext: input.slackMessageContext.trim() }
+        : {}),
       ...(input.agentPromptText?.trim()
         ? { agentPromptText: input.agentPromptText.trim() }
         : {}),

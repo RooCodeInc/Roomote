@@ -207,27 +207,45 @@ jobs:
       matrix:
         include:
           - app: app
+            context: .
             dockerfile: .docker/app/Dockerfile
             target: runtime-app
             image: roomote-app
             arch: amd64
             runner: blacksmith-4vcpu-ubuntu-2404
           - app: app
+            context: .
             dockerfile: .docker/app/Dockerfile
             target: runtime-app
             image: roomote-app
             arch: arm64
-            runner: blacksmith-4vcpu-ubuntu-2404-arm
+            runner: blacksmith-8vcpu-ubuntu-2404-arm
           - app: worker
+            context: .
             dockerfile: apps/worker/Dockerfile
             target: runtime
             image: roomote-worker
             arch: amd64
             runner: blacksmith-4vcpu-ubuntu-2404
           - app: worker
+            context: .
             dockerfile: apps/worker/Dockerfile
             target: runtime
             image: roomote-worker
+            arch: arm64
+            runner: blacksmith-4vcpu-ubuntu-2404-arm
+          # The Brain (deployment-hosted gbrain). Published so template-based
+          # deployments (Railway) can run it without a build step.
+          - app: gbrain
+            context: .docker/gbrain
+            dockerfile: .docker/gbrain/Dockerfile
+            image: roomote-gbrain
+            arch: amd64
+            runner: blacksmith-4vcpu-ubuntu-2404
+          - app: gbrain
+            context: .docker/gbrain
+            dockerfile: .docker/gbrain/Dockerfile
+            image: roomote-gbrain
             arch: arm64
             runner: blacksmith-4vcpu-ubuntu-2404-arm
     steps:
@@ -252,7 +270,7 @@ jobs:
         id: build
         uses: useblacksmith/build-push-action@fb9e3e6a9299c78462bfadd0d93352c316adc9b8 # v2
         with:
-          context: .
+          context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
           target: ${{ matrix.target }}
           platforms: linux/${{ matrix.arch }}
@@ -293,6 +311,8 @@ jobs:
             image: roomote-app
           - app: worker
             image: roomote-worker
+          - app: gbrain
+            image: roomote-gbrain
     steps:
       - name: Download digests
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4

@@ -68,9 +68,16 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
   },
   notion: {
     capabilities: [
-      'Read Notion pages and databases',
+      'Search and read only explicitly shared Notion pages and data sources',
       'Pull requirements and product docs into task context',
-      'Answer questions against internal documentation',
+      'Create and update shared content when the Notion integration capabilities permit it',
+    ],
+  },
+  rippling: {
+    capabilities: [
+      'Keep Brain employee profiles current from an authoritative HRIS roster',
+      'Use explicit reporting lines and department or team memberships in task context',
+      'Keep the Rippling API token on the control plane rather than exposing it to agents',
     ],
   },
   jira: {

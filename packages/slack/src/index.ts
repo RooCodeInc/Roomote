@@ -7,6 +7,7 @@ export * from './find-active-slack-task-run';
 export * from './find-completed-slack-task-run-with-snapshot';
 export * from './forwarded-message-context';
 export * from './automation-root-footer';
+export * from './automation-result-blocks';
 export * from './handle-followup-answer';
 export * from './interactive-response';
 export * from './markdown-converter';
@@ -16,6 +17,7 @@ export * from './manager-mcp-setup';
 export * from './request-user-input-blocks';
 export * from './request-user-input';
 export * from './router-debug';
+export * from './run-reply-target';
 export * from './slack-api-base-url';
 export * from './slack-api-fetch';
 export * from './slack-channel-info-cache';
@@ -41,6 +43,7 @@ export * from './thread-footer';
 export * from './thread-reply-footer-ops';
 export * from './thread-image-utils';
 export * from './video-descriptions';
+export * from './web-client';
 export * from './work-object-utils';
 
 export type {

@@ -2,6 +2,11 @@ import type { SlackBlock } from '@roomote/types';
 import { resolveThreadReplyLinkedPrs } from '@roomote/communication';
 
 import type { SlackNotifier } from './slack-notifier';
+import {
+  AUTOMATION_RESULT_ACTIONS_BLOCK_ID,
+  AUTOMATION_RESULT_CONTAINER_BLOCK_ID,
+  buildAutomationResultBlocks,
+} from './automation-result-blocks';
 
 const AUTOMATION_ROOT_CONTEXT_BLOCK_ID =
   'roomote_late_bound_automation_context';
@@ -84,6 +89,9 @@ export async function refreshAutomationRootFooter(params: {
   channelId: string;
   messageTs: string;
   automationLabel: string;
+  automationIconUrl: string;
+  configureUrl: string;
+  subtitle?: { type: string; text: string };
   taskUrl?: string | null;
   taskId?: string | null;
   prRepo?: string | null;
@@ -98,24 +106,57 @@ export async function refreshAutomationRootFooter(params: {
   if (!existingBlocks) {
     return false;
   }
+  const typedExistingBlocks = existingBlocks.filter(
+    (block): block is SlackBlock =>
+      Boolean(
+        block &&
+        typeof block === 'object' &&
+        typeof (block as { type?: unknown }).type === 'string',
+      ),
+  );
 
   const linkedPrs = await resolveThreadReplyLinkedPrs({
     taskId: params.taskId ?? null,
     prRepo: params.prRepo ?? null,
     prNumber: params.prNumber ?? null,
   });
-
+  const existingContainer = typedExistingBlocks.find(
+    (block) =>
+      block.type === 'container' &&
+      block.block_id?.startsWith(AUTOMATION_RESULT_CONTAINER_BLOCK_ID),
+  );
+  const existingSubtitle =
+    existingContainer?.type === 'container'
+      ? existingContainer.subtitle
+      : undefined;
+  const contentBlocks = typedExistingBlocks.flatMap((block) => {
+    if (
+      block.type === 'container' &&
+      block.block_id?.startsWith(AUTOMATION_RESULT_CONTAINER_BLOCK_ID)
+    ) {
+      return block.child_blocks.filter(
+        (child) =>
+          !(
+            child.type === 'actions' &&
+            child.block_id?.startsWith(AUTOMATION_RESULT_ACTIONS_BLOCK_ID)
+          ),
+      );
+    }
+    return isAutomationRootFooterBlock(block) ? [] : [block];
+  });
+  const subtitle = params.subtitle ?? existingSubtitle;
   return (
     (await params.slack.updateMessage({
       channel: params.channelId,
       ts: params.messageTs,
       message: {
         blocks: [
-          ...existingBlocks.filter(
-            (block) => !isAutomationRootFooterBlock(block),
-          ),
-          ...buildAutomationRootFooterBlocks({
-            automationLabel: params.automationLabel,
+          ...buildAutomationResultBlocks({
+            title: params.automationLabel,
+            iconUrl: params.automationIconUrl,
+            configureUrl: params.configureUrl,
+            contentBlocks,
+            ...(subtitle ? { subtitle } : {}),
             taskUrl: params.taskUrl ?? null,
             linkedPrUrls: linkedPrs.map((pr) => pr.prUrl),
           }),

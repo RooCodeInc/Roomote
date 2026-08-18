@@ -85,6 +85,7 @@ import {
   buildMcpTaskEnv,
   getCommunicationReplyContext,
   getSlackReplyContext,
+  isFastAgentChildTaskRun,
 } from './mcp-task-env';
 import {
   type ActorMismatchPolicy,
@@ -104,6 +105,7 @@ import {
 import { wrapCommunicationMessage } from './communication-message-prompt';
 import { buildTaskGoalContinuationPrompt } from './task-goal';
 import { settleMissingChatCloseoutFallback } from './missing-chat-closeout-fallback-settlement';
+import { isMissingSlackReplyTargetProcedureError } from './slack-reply-target';
 
 function formatEnvironmentInstructions(
   instructions?: string,
@@ -355,12 +357,6 @@ function isSilentChannelAutomationLaunch(taskRun: {
     hasCustomAutomationId(taskRun) ||
     hasScheduledAutomationSource(taskRun)
   );
-}
-
-function requiresLateBoundAutomationCloseout(taskRun: {
-  payload: unknown;
-}): boolean {
-  return hasAutomationWorkItemId(taskRun) || hasCustomAutomationId(taskRun);
 }
 
 function shouldRequireInitialAckOnInitialTurn(taskRun: {
@@ -972,6 +968,9 @@ export const runTask = async ({
 
     const slackReplyContext = getSlackReplyContext(taskRun);
     const communicationReplyContext = getCommunicationReplyContext(taskRun);
+    if (isFastAgentChildTaskRun(taskRun)) {
+      runtimeEnv.ROOMOTE_FAST_AGENT_CHILD = 'true';
+    }
     if (slackReplyContext?.threadTs) {
       runtimeEnv.ROOMOTE_SLACK_CHANNEL = slackReplyContext.channel;
       runtimeEnv.ROOMOTE_SLACK_THREAD_TS = slackReplyContext.threadTs;
@@ -1006,14 +1005,6 @@ export const runTask = async ({
                 currentTurnReactionsAllowed:
                   shouldAllowEmojiReactionOnInitialTurn(taskRun),
               }
-            : {}),
-          // Late-bound automation tasks (work-item execution tasks and
-          // custom automation runs) have no inbound Slack turn, but must
-          // still end with one agent-written closeout; the Stop hook blocks
-          // silent completion when this flag is set.
-          ...(!initialTurnMessageTs &&
-          requiresLateBoundAutomationCloseout(taskRun)
-            ? { requiresTerminalCloseoutWithoutTurn: true }
             : {}),
         }),
         'utf8',
@@ -1177,7 +1168,10 @@ export const runTask = async ({
 
     const prepareQueuedPromptActorScope = async (
       targetUserId?: string,
-      delivery?: { kind: 'queuedPrompt' | 'userInputAnswer' },
+      delivery?: {
+        kind: 'queuedPrompt' | 'userInputAnswer';
+        clientMessageId?: string;
+      },
     ) => {
       if (
         pendingTaskModelSettingsRestart &&
@@ -1190,10 +1184,75 @@ export const runTask = async ({
         };
       }
 
+      const finishQueuedPromptPreparation = async (result: {
+        shouldReconnect: boolean;
+        reason?: string;
+      }) => {
+        const clientMessageId = delivery?.clientMessageId;
+        if (result.shouldReconnect || delivery?.kind !== 'queuedPrompt') {
+          return result;
+        }
+
+        try {
+          if (!clientMessageId?.startsWith('slack:')) {
+            await sdk.taskRuns.clearActiveSlackReplyTarget({
+              runId: taskRun.id,
+            });
+            delete context.slackReplyTarget;
+            return result;
+          }
+
+          const activeTarget = await sdk.taskRuns.activateSlackReplyTarget({
+            runId: taskRun.id,
+            messageTs: clientMessageId.slice('slack:'.length),
+          });
+          if (!activeTarget) {
+            delete context.slackReplyTarget;
+            logger.warn(
+              `[runTask] Slack reply target authorization is missing for ${clientMessageId}; delivering with canonical routing`,
+            );
+          } else {
+            context.slackReplyTarget = activeTarget;
+            recordChatTurnStart({
+              turnMessageTs: clientMessageId.slice('slack:'.length),
+              allowReaction: activeTarget.reactionsAllowed,
+              sessionId: pollingState.sessionId,
+              stateFilePath:
+                mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE,
+            });
+          }
+          return result;
+        } catch (error) {
+          // A rolled-back API (the supported N-1 target) predates these
+          // procedures entirely, and tRPC reports that as NOT_FOUND. The
+          // procedures themselves never answer NOT_FOUND (a missing
+          // authorization is a null result), so this is unambiguous version
+          // skew. Reply-target routing did not exist on that release either,
+          // so canonical routing IS its correct behavior; blocking would
+          // instead stall every queued prompt until the snapshot is
+          // replaced.
+          if (isMissingSlackReplyTargetProcedureError(error)) {
+            delete context.slackReplyTarget;
+            logger.warn(
+              `[runTask] Slack reply target procedures are unavailable on this API (rolled-back release?); delivering with canonical routing`,
+            );
+            return result;
+          }
+
+          return {
+            shouldReconnect: false,
+            shouldBlockPrompt: true,
+            reason: `Slack reply target activation failed: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          };
+        }
+      };
+
       if (!targetUserId) {
-        return {
+        return finishQueuedPromptPreparation({
           shouldReconnect: false,
-        };
+        });
       }
 
       const syncResult = await syncActorScopedTurnState({
@@ -1241,12 +1300,12 @@ export const runTask = async ({
 
       if (refreshResult.didFail) {
         if (!refreshResult.actorChanged) {
-          return {
+          return finishQueuedPromptPreparation({
             shouldReconnect: false,
             reason:
               refreshResult.reason ??
               'actor-scoped MCP refresh failed for the current actor; continuing with existing MCP state',
-          };
+          });
         }
 
         return {
@@ -1258,10 +1317,10 @@ export const runTask = async ({
         };
       }
 
-      return {
+      return finishQueuedPromptPreparation({
         shouldReconnect: refreshResult.didChange,
         reason: refreshResult.reason,
-      };
+      });
     };
 
     // Create the appropriate runtime harness. Harness setup wires the
