@@ -1178,9 +1178,11 @@ describe('isBrainConfigured', () => {
     ).toBe(true);
   });
 
-  it('activates on the gateway token, which is the whole point of it', () => {
-    // A deployment can leave the provider key to Settings, so the token is
-    // what says a Brain was wired up at all.
+  it('counts the gateway token as Brain wiring', () => {
+    // The token means a Brain could be wired here (templates generate it as
+    // plumbing), so held-memory enqueueing may begin. It is NOT activation:
+    // user-visible Brain behavior additionally requires an explicit
+    // R_BRAIN_* provider key via isBrainProviderConfigured in @roomote/db.
     expect(isBrainConfigured({ R_BRAIN_GATEWAY_TOKEN: 'gateway-token' })).toBe(
       true,
     );

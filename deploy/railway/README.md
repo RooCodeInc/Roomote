@@ -398,17 +398,17 @@ integrations (pull requests, public Slack channels, meeting notes, GitHub
 issues) become pages that agents consult with citations, and agents record
 what they decided and why when they finish substantial work.
 
-Nothing here, in most cases:
+One variable turns it on: set `R_BRAIN_OPENROUTER_API_KEY` or
+`R_BRAIN_OPENAI_API_KEY` on **api** (or as a Settings environment value).
+The explicit `R_BRAIN_*` name is the Brain's on switch: a deployment that
+only configured task models under **Settings → Models** keeps no Brain, no
+ingestion, and agents are never told one exists. The value can be the same
+key you use for tasks, or a separate one to bill the Brain independently.
+The Brain has no provider key of its own; it asks the api service for
+embeddings and synthesis using this key, and changing it later takes effect
+on the Brain's next request, with no redeploy.
 
-1. Configure a model provider under **Settings → Models** after first boot, if
-   you have not already. The Brain has no provider key of its own; it asks the
-   api service for embeddings and synthesis, and the api service uses the key
-   your deployment already has. Changing that key later takes effect on the
-   Brain's next request, with no redeploy.
-2. To bill the Brain separately from task inference, set
-   `R_BRAIN_OPENROUTER_API_KEY` or `R_BRAIN_OPENAI_API_KEY` on **api**.
-   Those take precedence over the deployment's general provider keys.
-Within a minute of a provider being configured, the deployment registers
+Within a minute of the Brain key being configured, the deployment registers
 its own scoped clients against the Brain (a read-only one for agents, a
 write-only one for ingestion), backfills the task history it already has, and
 starts delivering the Brain to new tasks. Watch the bullmq service logs for

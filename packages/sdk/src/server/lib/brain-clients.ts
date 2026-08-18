@@ -19,12 +19,13 @@ import {
   and,
   db,
   eq,
+  isBrainProviderConfigured,
   isNull,
   mcpConnections,
   resetBrainIngestionState,
 } from '@roomote/db/server';
 import { decrypt, encrypt } from '@roomote/db/encryption';
-import { Env, isBrainConfigured } from '@roomote/env';
+import { Env } from '@roomote/env';
 import {
   BRAIN_MCP_ID,
   isMcpConnectionGbrainConfig,
@@ -235,7 +236,10 @@ export async function mintGbrainAccessToken(
 export async function resolveBrainConnection(
   role: 'agent' | 'ingest' | 'maintenance',
 ): Promise<{ baseUrl: string; token: string } | null> {
-  if (!isBrainConfigured(Env)) {
+  // Explicit R_BRAIN_* provider key only: the gateway token and R_GBRAIN_URL
+  // are template-generated plumbing on some platforms, so neither can carry
+  // the operator's intent to turn the Brain on.
+  if (!(await isBrainProviderConfigured())) {
     return null;
   }
 

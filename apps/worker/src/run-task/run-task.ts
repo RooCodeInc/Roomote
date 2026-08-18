@@ -224,6 +224,29 @@ function buildEnvironmentSetupSettledWakePrompt(
   ].join('\n');
 }
 
+/**
+ * True when a tRPC call failed because the procedure does not exist on the
+ * server, which for the Slack reply-target procedures means the API is the
+ * previous release (the supported N-1 rollback target). Those procedures
+ * never answer NOT_FOUND themselves (a missing authorization is a null
+ * result and auth failures map to UNAUTHORIZED/FORBIDDEN), so NOT_FOUND can
+ * only mean the router has no such procedure.
+ */
+function isMissingSlackReplyTargetProcedureError(error: unknown): boolean {
+  if (!(error instanceof Error) || error.name !== 'TRPCClientError') {
+    return false;
+  }
+
+  const data = (error as { data?: { code?: string } }).data;
+
+  return (
+    data?.code === 'NOT_FOUND' ||
+    // Backstop for responses that lose the typed code (e.g. a proxy rewrote
+    // the body): tRPC's unknown-procedure message across versions.
+    /no .*procedure.* on path/i.test(error.message)
+  );
+}
+
 function getInitialSlackTurnMessageTs(taskRun: {
   payloadKind: string;
   payload: unknown;
@@ -1222,6 +1245,22 @@ export const runTask = async ({
           }
           return result;
         } catch (error) {
+          // A rolled-back API (the supported N-1 target) predates these
+          // procedures entirely, and tRPC reports that as NOT_FOUND. The
+          // procedures themselves never answer NOT_FOUND (a missing
+          // authorization is a null result), so this is unambiguous version
+          // skew. Reply-target routing did not exist on that release either,
+          // so canonical routing IS its correct behavior; blocking would
+          // instead stall every queued prompt until the snapshot is
+          // replaced.
+          if (isMissingSlackReplyTargetProcedureError(error)) {
+            delete context.slackReplyTarget;
+            logger.warn(
+              `[runTask] Slack reply target procedures are unavailable on this API (rolled-back release?); delivering with canonical routing`,
+            );
+            return result;
+          }
+
           return {
             shouldReconnect: false,
             shouldBlockPrompt: true,
