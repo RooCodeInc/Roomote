@@ -297,6 +297,7 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
           anchorMessageId: message.id,
         }),
         conversationId: getDiscordFastConversationId(channel, message.id),
+        directedAtRoomote: true,
       }).catch((error) => {
         apiLogger.error(
           `[DiscordChannelAutoStart] Failed to answer in Fast mode for ${logContext}: ${error instanceof Error ? error.message : String(error)}`,

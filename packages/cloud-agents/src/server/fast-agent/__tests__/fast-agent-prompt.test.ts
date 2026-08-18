@@ -165,6 +165,30 @@ describe('buildFastAgentSystemPrompt', () => {
     );
   });
 
+  it('allows ambient messages to stay silent only in multi-participant threads', () => {
+    const sharedThreadPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      multiParticipantThread: true,
+    });
+    const directThreadPrompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+    });
+
+    expect(sharedThreadPrompt).toContain(
+      'If the current message is ambient conversation between people rather than a request or reply directed at Roomote, use "ignore_message"',
+    );
+    expect(directThreadPrompt).toContain(
+      '"ignore_message" is invalid because this turn must receive a response',
+    );
+    expect(
+      buildFastAgentSystemPrompt({
+        availableEnvironments: [],
+        multiParticipantThread: true,
+        directedAtRoomote: true,
+      }),
+    ).not.toContain('use "ignore_message" to end the turn silently');
+  });
+
   it('does not offer a failed-start retry for ineligible platform events', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],

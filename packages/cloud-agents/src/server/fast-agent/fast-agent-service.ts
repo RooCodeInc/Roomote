@@ -55,6 +55,7 @@ const fastAgentDecisionSchema = z
       'send_task_message',
       'cancel_task',
       'call_integration',
+      'ignore_message',
       'ignore_event',
       'retry_task_start',
     ]),
@@ -370,6 +371,8 @@ function buildFastAgentMessages({
   sessionMessages,
   currentMessageTs,
   currentMessageSender,
+  multiParticipantThread,
+  directedAtRoomote,
 }: {
   question: string;
   currentMessageAgentContext?: string;
@@ -381,6 +384,8 @@ function buildFastAgentMessages({
     displayName?: string;
     githubLogin?: string;
   };
+  multiParticipantThread: boolean;
+  directedAtRoomote: boolean;
 }): ModelMessage[] {
   const normalizedQuestion = normalizeThreadText(question);
   const currentUserMessageText = currentMessageTs
@@ -426,7 +431,11 @@ function buildFastAgentMessages({
         ),
         replyingTo: undefined,
       };
-  const text = [slackThreadContext, replyingTo, currentUserMessageText]
+  const text = [
+    slackThreadContext,
+    multiParticipantThread && !directedAtRoomote ? undefined : replyingTo,
+    currentUserMessageText,
+  ]
     .filter((entry): entry is string => Boolean(entry))
     .join('\n\n');
 
@@ -480,6 +489,8 @@ export async function answerFastAgentQuestion({
   senderDisplayName,
   senderExternalId,
   activeTasks = [],
+  multiParticipantThread = false,
+  directedAtRoomote = false,
   adapter,
   turnSource = 'human',
 }: {
@@ -493,6 +504,10 @@ export async function answerFastAgentQuestion({
   senderDisplayName?: string;
   senderExternalId?: string;
   activeTasks?: FastAgentActiveTask[];
+  /** True when another human participant is present in the conversation. */
+  multiParticipantThread?: boolean;
+  /** True when the current message explicitly addressed Roomote. */
+  directedAtRoomote?: boolean;
   adapter: FastAgentTurnAdapter;
   /** Identifies whether this turn came from a person or an internal task update. */
   turnSource?: FastAgentTurnSource;
@@ -556,6 +571,8 @@ export async function answerFastAgentQuestion({
           senderDisplayName?.trim() || currentUser.displayName || undefined,
         githubLogin: currentUser.githubLogin || undefined,
       },
+      multiParticipantThread,
+      directedAtRoomote,
     });
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,
@@ -564,6 +581,8 @@ export async function answerFastAgentQuestion({
       surface: conversation.surface,
       turnSource,
       retryTaskStartAvailable: Boolean(retryTaskStart),
+      multiParticipantThread,
+      directedAtRoomote,
     });
     let prompt = serializeFastAgentMessages(fastAgentMessages);
     const integrationCallSignatures = new Set<string>();
@@ -639,6 +658,20 @@ export async function answerFastAgentQuestion({
         prompt,
       });
       const decision = generated.object;
+
+      if (decision.action === 'ignore_message') {
+        if (platformEvent || !multiParticipantThread || directedAtRoomote) {
+          prompt += `\n\n[MESSAGE ACTION REJECTED]\nignore_message is only valid for an ambient human-authored message in a multi-participant thread. Answer this turn with a chat-visible action.\n[END MESSAGE ACTION REJECTED]`;
+          continue;
+        }
+
+        pendingLifecycleReply = null;
+        await persistFastAgentSessionMessages({
+          sessionId: session.id,
+          messages: turnSessionMessages,
+        });
+        return '';
+      }
 
       if (decision.action === 'ignore_event') {
         if (!platformEvent) {

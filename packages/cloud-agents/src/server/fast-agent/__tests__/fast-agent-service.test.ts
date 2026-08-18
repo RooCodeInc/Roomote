@@ -312,6 +312,103 @@ describe('answerFastAgentQuestion', () => {
     );
   });
 
+  it('keeps ambient multi-participant thread messages silent', async () => {
+    mocks.generateObject.mockResolvedValueOnce({
+      object: decision({
+        action: 'ignore_message',
+        message: null,
+        purpose: null,
+      }),
+    });
+    const callbacks = chatCallbacks();
+
+    const result = await answerFastAgentQuestion({
+      ...baseParams,
+      multiParticipantThread: true,
+      threadContext: [
+        {
+          user: 'UBOT',
+          username: 'Roomote',
+          bot_id: 'B999',
+          text: 'What should I check?',
+          ts: '100.1',
+        },
+      ],
+      ...callbacks,
+    });
+
+    expect(result).toBe('');
+    expect(callbacks.postReply).not.toHaveBeenCalled();
+    expect(callbacks.postReaction).not.toHaveBeenCalled();
+    expect(mocks.generateObject.mock.calls[0]?.[0]?.prompt).not.toContain(
+      '<replying_to',
+    );
+    expect(mocks.appendSessionMessages).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messages: [expect.objectContaining({ role: 'user' })],
+      }),
+    );
+  });
+
+  it('rejects ignoring a direct single-participant turn', async () => {
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'ignore_message',
+          message: null,
+          purpose: null,
+        }),
+      })
+      .mockResolvedValueOnce({ object: decision() });
+    const callbacks = chatCallbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      ...callbacks,
+    });
+
+    expect(mocks.generateObject).toHaveBeenCalledTimes(2);
+    expect(mocks.generateObject.mock.calls[1]?.[0]?.prompt).toContain(
+      'ignore_message is only valid for an ambient human-authored message in a multi-participant thread',
+    );
+    expect(callbacks.postReply).toHaveBeenCalledOnce();
+  });
+
+  it('rejects ignoring an explicitly directed multi-participant turn', async () => {
+    mocks.generateObject
+      .mockResolvedValueOnce({
+        object: decision({
+          action: 'ignore_message',
+          message: null,
+          purpose: null,
+        }),
+      })
+      .mockResolvedValueOnce({ object: decision() });
+    const callbacks = chatCallbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      multiParticipantThread: true,
+      directedAtRoomote: true,
+      threadContext: [
+        {
+          user: 'UBOT',
+          username: 'Roomote',
+          bot_id: 'B999',
+          text: 'What should I check?',
+          ts: '100.1',
+        },
+      ],
+      ...callbacks,
+    });
+
+    expect(mocks.generateObject).toHaveBeenCalledTimes(2);
+    expect(mocks.generateObject.mock.calls[0]?.[0]?.prompt).toContain(
+      '<replying_to ts="100.1">\nRoomote: What should I check?\n</replying_to>',
+    );
+    expect(callbacks.postReply).toHaveBeenCalledOnce();
+  });
+
   it('allows at most one terminal reply for a delegated-task platform event', async () => {
     mocks.generateObject
       .mockResolvedValueOnce({

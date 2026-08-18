@@ -55,6 +55,7 @@ export async function processFastAgentMessage(params: {
   activeTasks?: FastAgentActiveTask[];
   launchTask: LaunchFastAgentTask;
   processingReactionName?: string;
+  directedAtRoomote?: boolean;
 }): Promise<void> {
   const {
     event,
@@ -67,6 +68,7 @@ export async function processFastAgentMessage(params: {
     activeTasks = [],
     launchTask,
     processingReactionName = 'eyes',
+    directedAtRoomote = false,
   } = params;
   const threadId = event.thread_ts || event.ts;
   const conversation = {
@@ -99,13 +101,12 @@ export async function processFastAgentMessage(params: {
   let didAddProcessingReaction = false;
 
   try {
-    didAddProcessingReaction = await slack.addReaction({
-      channel: event.channel,
-      timestamp: event.ts,
-      name: processingReactionName,
-    });
-
     if (!question) {
+      didAddProcessingReaction = await slack.addReaction({
+        channel: event.channel,
+        timestamp: event.ts,
+        name: processingReactionName,
+      });
       await postSlackThreadMarkdownMessage({
         slack,
         channel: event.channel,
@@ -139,6 +140,22 @@ export async function processFastAgentMessage(params: {
     const currentMessage = threadContext.find(
       (message) => message.ts === event.ts,
     );
+    const multiParticipantThread = threadContext.some(
+      (message) =>
+        message.ts !== event.ts &&
+        !message.bot_id &&
+        Boolean(message.user) &&
+        message.user !== event.user,
+    );
+
+    if (!multiParticipantThread) {
+      didAddProcessingReaction = await slack.addReaction({
+        channel: event.channel,
+        timestamp: event.ts,
+        name: processingReactionName,
+      });
+    }
+
     const serializedThreadContext = threadContext
       .filter((message) => message.ts !== event.ts)
       .map((message) => ({
@@ -163,6 +180,8 @@ export async function processFastAgentMessage(params: {
           ? currentMessage.username
           : undefined,
       activeTasks,
+      multiParticipantThread,
+      directedAtRoomote,
       adapter: {
         launchTask,
         postReply: async ({ message, kickoff }) => {

@@ -44,6 +44,7 @@ export async function processDiscordFastAgentMessage(input: {
   conversationId: string;
   interaction?: DiscordInteractionReplyContext;
   activeTasks?: { taskId: string }[];
+  directedAtRoomote?: boolean;
 }): Promise<void> {
   const history =
     input.channel.isThread || input.channel.isDirectMessage
@@ -56,6 +57,10 @@ export async function processDiscordFastAgentMessage(input: {
         })
       : [];
   const message = getDiscordMessageCreate(input.event);
+  const multiParticipantThread = history.some(
+    (entry) =>
+      !entry.botId && Boolean(entry.user) && entry.user !== input.sender.id,
+  );
   let didSendVisibleResponse = false;
   const conversation = {
     surface: 'discord' as const,
@@ -85,6 +90,8 @@ export async function processDiscordFastAgentMessage(input: {
       input.sender.global_name ??
       input.sender.username,
     activeTasks: input.activeTasks,
+    multiParticipantThread,
+    directedAtRoomote: input.directedAtRoomote,
     adapter: {
       launchTask: async ({ prompt, environmentId, parentSessionId }) => {
         const workspaceOverride = environmentId
