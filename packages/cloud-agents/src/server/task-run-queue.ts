@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import { z } from 'zod';
 
@@ -67,6 +68,7 @@ import {
   isNull,
   lt,
   recordSnapshotResumeEvent,
+  recordTaskRunLifecycleEvent,
   resolveDefaultComputeProvider,
   resolveWorkspaceRepositoryProviders,
   sql,
@@ -1829,6 +1831,128 @@ export async function canRetryFailedStart(sourceRun: {
   }
 
   return !(await hasNonKickoffTaskMessages(sourceRun.id));
+}
+
+const FAST_AGENT_STARTUP_MAX_RETRIES = 2;
+const FAST_AGENT_STARTUP_RETRY_BASE_DELAY_MS = 1_000;
+
+export type FastAgentFailedStartRetryResult =
+  | { success: true; runId: number }
+  | { success: false; error: string };
+
+/** Relaunch one Fast child failed start under the queue's canonical policy. */
+export async function retryFastAgentFailedStart(
+  input: {
+    sourceRunId: number;
+    actingUserId: string | null;
+  },
+  options: EnqueueTaskOptions = {},
+): Promise<FastAgentFailedStartRetryResult> {
+  const sourceRun = await db.query.taskRuns.findFirst({
+    where: eq(taskRuns.id, input.sourceRunId),
+  });
+  if (!sourceRun) {
+    return { success: false, error: 'The failed task run was not found.' };
+  }
+
+  const findExistingRetry = () =>
+    db.query.taskRuns.findFirst({
+      where: and(
+        eq(taskRuns.taskId, sourceRun.taskId),
+        eq(taskRuns.sourceRunId, sourceRun.id),
+      ),
+      columns: { id: true },
+    });
+  const existingRetry = await findExistingRetry();
+  if (existingRetry) {
+    return { success: true, runId: existingRetry.id };
+  }
+
+  if (!(await canRetryFailedStart(sourceRun))) {
+    return {
+      success: false,
+      error: 'This task is not eligible for a failed-start retry.',
+    };
+  }
+
+  const parent = getFastAgentParentFromPayload(sourceRun.payload);
+  if (!parent) {
+    return {
+      success: false,
+      error: 'This task is not linked to a Fast parent session.',
+    };
+  }
+
+  let retries = 0;
+  let ancestorRunId = sourceRun.sourceRunId;
+  while (ancestorRunId && retries < FAST_AGENT_STARTUP_MAX_RETRIES) {
+    const ancestorRun = await db.query.taskRuns.findFirst({
+      where: eq(taskRuns.id, ancestorRunId),
+      columns: { payload: true, sourceRunId: true },
+    });
+    const ancestorParent = ancestorRun
+      ? getFastAgentParentFromPayload(ancestorRun.payload)
+      : null;
+    if (!ancestorRun || ancestorParent?.sessionId !== parent.sessionId) {
+      break;
+    }
+
+    retries += 1;
+    ancestorRunId = ancestorRun.sourceRunId;
+  }
+
+  if (retries >= FAST_AGENT_STARTUP_MAX_RETRIES) {
+    return {
+      success: false,
+      error: 'The failed-start retry limit has been reached.',
+    };
+  }
+
+  const retryNumber = retries + 1;
+  const delayMs =
+    FAST_AGENT_STARTUP_RETRY_BASE_DELAY_MS * 2 ** (retryNumber - 1);
+  await delay(delayMs);
+
+  const retryAfterDelay = await findExistingRetry();
+  if (retryAfterDelay) {
+    return { success: true, runId: retryAfterDelay.id };
+  }
+
+  let relaunchedRun: TaskRun;
+  try {
+    relaunchedRun = await enqueueTaskRelaunch(
+      {
+        sourceRunId: sourceRun.id,
+        actingUserId: input.actingUserId,
+      },
+      options,
+    );
+  } catch (error) {
+    const concurrentRetry = await findExistingRetry();
+    if (concurrentRetry) {
+      return { success: true, runId: concurrentRetry.id };
+    }
+    throw error;
+  }
+  await recordTaskRunLifecycleEvent(db, {
+    runId: sourceRun.id,
+    taskId: sourceRun.taskId,
+    eventType: 'decision',
+    message: `Fast parent retried child sandbox startup (${retryNumber}/${FAST_AGENT_STARTUP_MAX_RETRIES}).`,
+    details: {
+      reason: 'fast_agent_parent_startup_retry',
+      fastAgentSessionId: parent.sessionId,
+      retryNumber,
+      maxRetries: FAST_AGENT_STARTUP_MAX_RETRIES,
+      delayMs,
+    },
+  }).catch((error) => {
+    console.warn(
+      `[retryFastAgentFailedStart] Failed to record startup retry for run ${sourceRun.id}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  });
+
+  return { success: true, runId: relaunchedRun.id };
 }
 
 export function isRelaunchableFailedStartPayloadKind(

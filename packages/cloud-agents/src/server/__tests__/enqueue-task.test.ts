@@ -26,6 +26,7 @@ import {
 } from '@roomote/types';
 import {
   db,
+  desc,
   eq,
   inArray,
   tasks,
@@ -47,6 +48,7 @@ import {
   TaskRunQueue,
   enqueueTask,
   enqueueTaskRelaunch,
+  retryFastAgentFailedStart,
   DeploymentReadOnlyError,
   persistEarlyGeneratedTaskTitle,
   PR_REVIEW_SYNC_DEBOUNCE_MS,
@@ -1338,6 +1340,28 @@ describe('enqueueTask snapshot resume', () => {
 });
 
 describe('enqueueTaskRelaunch failed start', () => {
+  const fastAgentParent = {
+    sessionId: '11111111-1111-4111-8111-111111111111',
+    slackTeamId: 'T123',
+    slackChannel: 'C123',
+    slackThreadTs: '100.001',
+  };
+
+  async function markFailed(run: { id: number; taskId: string }) {
+    await db
+      .update(taskRuns)
+      .set({
+        status: RunStatus.Failed,
+        error: 'Workspace startup failed',
+        completedAt: new Date(),
+      })
+      .where(eq(taskRuns.id, run.id));
+    await db
+      .update(tasks)
+      .set({ state: 'failed' })
+      .where(eq(tasks.id, run.taskId));
+  }
+
   it('creates a new fresh run on the same task after a failed start', async () => {
     const userId = await createUser();
 
@@ -1516,6 +1540,153 @@ describe('enqueueTaskRelaunch failed start', () => {
 
     expect(relaunchRun.taskId).toBe(failedRun.taskId);
     expect(relaunchRun.sourceRunId).toBe(failedRun.id);
+  });
+
+  it('owns Fast parent retry backoff and records the relaunch decision', async () => {
+    const userId = await createUser();
+    const failedRun = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'slack',
+      trigger: 'message',
+      task: standardTaskInput({
+        payload: {
+          repo: 'acme/widgets',
+          description: 'Do the thing',
+          fastAgentParent,
+        },
+      }),
+    });
+    await markFailed(failedRun);
+
+    const result = await retryFastAgentFailedStart(
+      {
+        sourceRunId: failedRun.id,
+        actingUserId: userId,
+      },
+      { enqueue: false },
+    );
+
+    expect(result).toMatchObject({ success: true });
+    await expect(
+      db.query.taskRunEvents.findFirst({
+        where: eq(taskRunEvents.runId, failedRun.id),
+        orderBy: [desc(taskRunEvents.id)],
+      }),
+    ).resolves.toMatchObject({
+      details: expect.objectContaining({
+        reason: 'fast_agent_parent_startup_retry',
+        retryNumber: 1,
+        maxRetries: 2,
+        delayMs: 1_000,
+      }),
+    });
+  });
+
+  it('returns an existing Fast parent relaunch instead of duplicating it', async () => {
+    const userId = await createUser();
+    const failedRun = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'slack',
+      trigger: 'message',
+      task: standardTaskInput({
+        payload: {
+          repo: 'acme/widgets',
+          description: 'Do the thing',
+          fastAgentParent,
+        },
+      }),
+    });
+    await markFailed(failedRun);
+    const existingRetry = await enqueueTaskRelaunch(
+      { sourceRunId: failedRun.id, actingUserId: userId },
+      { enqueue: false },
+    );
+
+    await expect(
+      retryFastAgentFailedStart(
+        {
+          sourceRunId: failedRun.id,
+          actingUserId: userId,
+        },
+        { enqueue: false },
+      ),
+    ).resolves.toEqual({ success: true, runId: existingRetry.id });
+  });
+
+  it('returns one Fast parent relaunch to concurrent retry callers', async () => {
+    const userId = await createUser();
+    const failedRun = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'slack',
+      trigger: 'message',
+      task: standardTaskInput({
+        payload: {
+          repo: 'acme/widgets',
+          description: 'Do the thing',
+          fastAgentParent,
+        },
+      }),
+    });
+    await markFailed(failedRun);
+    const retry = () =>
+      retryFastAgentFailedStart(
+        { sourceRunId: failedRun.id, actingUserId: userId },
+        { enqueue: false },
+      );
+
+    const [first, second] = await Promise.all([retry(), retry()]);
+
+    expect(first).toEqual(second);
+    expect(first).toMatchObject({ success: true });
+    await expect(
+      db.query.taskRuns.findMany({
+        where: eq(taskRuns.sourceRunId, failedRun.id),
+      }),
+    ).resolves.toHaveLength(1);
+  });
+
+  it('enforces the Fast parent retry budget across the run ancestry', async () => {
+    const userId = await createUser();
+    const firstRun = await launchFresh({
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'slack',
+      trigger: 'message',
+      task: standardTaskInput({
+        payload: {
+          repo: 'acme/widgets',
+          description: 'Do the thing',
+          fastAgentParent,
+        },
+      }),
+    });
+    await markFailed(firstRun);
+    const secondRun = await enqueueTaskRelaunch(
+      { sourceRunId: firstRun.id, actingUserId: userId },
+      { enqueue: false },
+    );
+    await markFailed(secondRun);
+    const thirdRun = await enqueueTaskRelaunch(
+      { sourceRunId: secondRun.id, actingUserId: userId },
+      { enqueue: false },
+    );
+    await markFailed(thirdRun);
+
+    await expect(
+      retryFastAgentFailedStart(
+        {
+          sourceRunId: thirdRun.id,
+          actingUserId: userId,
+        },
+        { enqueue: false },
+      ),
+    ).resolves.toEqual({
+      success: false,
+      error: 'The failed-start retry limit has been reached.',
+    });
   });
 });
 

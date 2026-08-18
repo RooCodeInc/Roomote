@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { type SQL, sql, taskRuns } from '@roomote/db/server';
 
 /** How long a 'delivering:<epochMs>' claim stays exclusive. Long enough for a
@@ -6,7 +8,7 @@ import { type SQL, sql, taskRuns } from '@roomote/db/server';
 const FAST_AGENT_DELIVERY_LEASE_MS = 15 * 60 * 1000;
 
 export function buildFastAgentDeliveringMarker(): string {
-  return `delivering:${Date.now()}`;
+  return `delivering:${Date.now()}:${randomUUID()}`;
 }
 
 export function isFastAgentDeliveringMarker(value: unknown): value is string {
