@@ -673,7 +673,7 @@ describe('enqueueTask initiator stamping', () => {
     const parentRun = await launchFresh({
       initiator: { kind: 'user', userId },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
       channels: { slackChannelId: 'C123', slackThreadTs: '123.456' },
       task: standardTaskInput({
@@ -714,7 +714,7 @@ describe('enqueueTask initiator stamping', () => {
     const parentRun = await launchFresh({
       initiator: { kind: 'user', userId },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
       channels: { slackChannelId: 'C123', slackThreadTs: '123.456' },
       task: standardTaskInput({
@@ -770,7 +770,7 @@ describe('enqueueTask initiator stamping', () => {
         displayName: 'Octo Fan',
       },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
       channels: {
         slackChannelId: 'C42',
@@ -839,7 +839,7 @@ describe('enqueueTask initiator stamping', () => {
         matchedUserId: userId,
       },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
     });
 
@@ -930,7 +930,7 @@ describe('enqueueTask snapshot resume', () => {
       }),
       initiator: { kind: 'user', userId },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
     });
 
@@ -970,9 +970,12 @@ describe('enqueueTask snapshot resume', () => {
     const fastAgentSessionId = '11111111-1111-4111-8111-111111111111';
     const fastAgentParent = {
       sessionId: fastAgentSessionId,
-      slackTeamId: 'T123',
-      slackChannel: 'C123',
-      slackThreadTs: '111.222',
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
     };
     const freshRun = await launchFresh({
       task: standardTaskInput({
@@ -989,7 +992,7 @@ describe('enqueueTask snapshot resume', () => {
       }),
       initiator: { kind: 'user', userId },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
     });
     const resumeTask: SnapshotResumeTask = {
@@ -1054,9 +1057,12 @@ describe('enqueueTask snapshot resume', () => {
     const userId = await createUser();
     const fastAgentParent = {
       sessionId: '22222222-2222-4222-8222-222222222222',
-      slackTeamId: 'T123',
-      slackChannel: 'C123',
-      slackThreadTs: '333.444',
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        channelId: 'C123',
+        threadId: '333.444',
+      },
     };
     const freshRun = await launchFresh({
       task: standardTaskInput({
@@ -1069,7 +1075,7 @@ describe('enqueueTask snapshot resume', () => {
       }),
       initiator: { kind: 'user', userId },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
     });
     const [legacyResume] = await db
@@ -1219,7 +1225,7 @@ describe('enqueueTask snapshot resume', () => {
       }),
       initiator: { kind: 'user', userId },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
     });
 
@@ -1478,7 +1484,7 @@ describe('enqueueTaskRelaunch failed start', () => {
     const failedRun = await launchFresh({
       initiator: { kind: 'user', userId },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
     });
 

@@ -1,13 +1,6 @@
-export type FastAgentSurface = 'slack' | 'discord';
+import type { FastAgentConversation } from '@roomote/types';
 
-/** Provider-neutral identity for one persisted Fast conversation. */
-export type FastAgentConversation = {
-  surface: FastAgentSurface;
-  /** Provider workspace/account boundary (for example a Slack team or Discord guild). */
-  workspaceId: string;
-  channelId: string;
-  threadId: string;
-};
+export type { FastAgentConversation, FastAgentSurface } from '@roomote/types';
 
 /** Preserve existing persisted/Redis workspace keys while the storage schema
  * remains Slack-shaped. New provider adapters always pass raw provider IDs. */

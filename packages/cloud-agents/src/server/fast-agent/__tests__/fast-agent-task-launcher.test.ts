@@ -86,9 +86,12 @@ describe('createFastAgentSlackTaskLauncher', () => {
             fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
             fastAgentParent: {
               sessionId: '11111111-1111-4111-8111-111111111111',
-              slackTeamId: 'T123',
-              slackChannel: 'C123',
-              slackThreadTs: '100.001',
+              conversation: {
+                surface: 'slack',
+                workspaceId: 'T123',
+                channelId: 'C123',
+                threadId: '100.001',
+              },
             },
             environmentId: 'env-1',
           },

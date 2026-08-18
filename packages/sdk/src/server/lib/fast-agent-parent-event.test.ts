@@ -65,9 +65,12 @@ import { deliverFastAgentParentEvent } from './fast-agent-parent-event';
 
 const parent = {
   sessionId: '11111111-1111-4111-8111-111111111111',
-  slackTeamId: 'T123',
-  slackChannel: 'C123',
-  slackThreadTs: '100.001',
+  conversation: {
+    surface: 'slack' as const,
+    workspaceId: 'T123',
+    channelId: 'C123',
+    threadId: '100.001',
+  },
 };
 
 const event = {
@@ -126,7 +129,7 @@ describe('deliverFastAgentParentEvent', () => {
 
     expect(mocks.acquireTurnLock).toHaveBeenCalledWith({
       conversation: {
-        surface: 'slack',
+        surface: 'slack' as const,
         workspaceId: 'T123',
         channelId: 'C123',
         threadId: '100.001',
@@ -170,6 +173,29 @@ describe('deliverFastAgentParentEvent', () => {
       deliverFastAgentParentEvent({ parent, event }),
     ).rejects.toThrow('turn lock did not become available');
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
+  });
+
+  it('fails permanently when the parent surface has no delivery adapter', async () => {
+    const delivery = deliverFastAgentParentEvent({
+      parent: {
+        ...parent,
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'guild-1',
+          channelId: 'channel-1',
+          threadId: 'thread-1',
+        },
+      },
+      event,
+    });
+
+    await expect(delivery).rejects.toMatchObject({
+      replyPosted: false,
+      permanent: true,
+    });
+    expect(mocks.findSession).not.toHaveBeenCalled();
+    expect(mocks.answerQuestion).not.toHaveBeenCalled();
+    expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
   });
 
   it('delivers a pull request event with a stable Slack idempotency key', async () => {

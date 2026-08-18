@@ -3,15 +3,15 @@ import { RunStatus, TaskRunErrorCode } from '@roomote/types';
 
 const mocks = vi.hoisted(() => {
   class FastAgentParentEventDeliveryError extends Error {
-    readonly slackPosted: boolean;
+    readonly replyPosted: boolean;
     readonly permanent: boolean;
 
     constructor(
       message: string,
-      options: { slackPosted: boolean; permanent?: boolean },
+      options: { replyPosted: boolean; permanent?: boolean },
     ) {
       super(message);
-      this.slackPosted = options.slackPosted;
+      this.replyPosted = options.replyPosted;
       this.permanent = options.permanent ?? false;
     }
   }
@@ -74,9 +74,12 @@ import { notifyFastAgentParentOnSettle } from '../notify-fast-agent-parent-on-se
 
 const fastParent = {
   sessionId: '11111111-1111-4111-8111-111111111111',
-  slackTeamId: 'T123',
-  slackChannel: 'C123',
-  slackThreadTs: '100.001',
+  conversation: {
+    surface: 'slack' as const,
+    workspaceId: 'T123',
+    channelId: 'C123',
+    threadId: '100.001',
+  },
 };
 
 function makeRun(
@@ -385,7 +388,7 @@ describe('notifyFastAgentParentOnSettle', () => {
   it('keeps the claim when the failure happened after the Slack post', async () => {
     mocks.deliverParentEvent.mockRejectedValueOnce(
       new mocks.FastAgentParentEventDeliveryError('lifecycle write failed', {
-        slackPosted: true,
+        replyPosted: true,
       }),
     );
 
