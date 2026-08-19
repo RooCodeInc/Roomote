@@ -288,7 +288,7 @@ describe('resolveOpenCodeSmallModel', () => {
           },
           tools: {
             '*': false,
-            roomote_fast_send_chat_reply: true,
+            send_chat_reply: true,
           },
           onSessionReady,
         },
@@ -308,7 +308,7 @@ describe('resolveOpenCodeSmallModel', () => {
         sessionID: 'session-1',
         tools: {
           '*': false,
-          roomote_fast_send_chat_reply: true,
+          send_chat_reply: true,
         },
       }),
       expect.any(Object),
@@ -338,7 +338,7 @@ describe('resolveOpenCodeSmallModel', () => {
         { id: 'missing-session' },
         {
           directory: '/tmp/roomote-fast-native-test',
-          tools: { '*': false, roomote_fast_send_chat_reply: true },
+          tools: { '*': false, send_chat_reply: true },
         },
       ),
     ).rejects.toBeInstanceOf(NonTaskOpenCodeSessionNotFoundError);

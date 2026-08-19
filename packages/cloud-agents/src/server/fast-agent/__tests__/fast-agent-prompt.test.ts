@@ -27,10 +27,11 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('conversational orchestrator');
     expect(prompt).toContain('Task ID: task-2 | Update docs | pending');
     expect(prompt).toContain('Existing active tasks do not block');
-    expect(prompt).toContain('roomote_fast_send_chat_reply');
-    expect(prompt).toContain('roomote_fast_send_chat_reaction');
-    expect(prompt).toContain('roomote_fast_launch_task');
-    expect(prompt).toContain('roomote_fast_integration_call');
+    expect(prompt).toContain('send_chat_reply');
+    expect(prompt).toContain('send_chat_reaction');
+    expect(prompt).toContain('launch_task');
+    expect(prompt).toContain('integration_call');
+    expect(prompt).not.toContain('roomote_fast_');
     expect(prompt).toContain(
       'Tool arguments, results, and reasoning are retained natively',
     );
@@ -90,8 +91,8 @@ describe('buildFastAgentSystemPrompt', () => {
     });
 
     expect(prompt).toContain('post exactly one closeout');
-    expect(prompt).toContain('roomote_fast_ignore_event');
-    expect(prompt).toContain('roomote_fast_retry_task_start');
+    expect(prompt).toContain('ignore_event');
+    expect(prompt).toContain('retry_task_start');
     expect(prompt).toContain('only when the failure appears transient');
     expect(prompt).toContain('creates a separate delegated task');
     expect(prompt).toContain(
@@ -112,7 +113,7 @@ describe('buildFastAgentSystemPrompt', () => {
       'No failed-start retry tool is available for this event',
     );
     expect(prompt).not.toContain(
-      'Call `roomote_fast_retry_task_start` only when the failure appears transient',
+      'Call `retry_task_start` only when the failure appears transient',
     );
   });
 

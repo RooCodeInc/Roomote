@@ -447,7 +447,7 @@ export async function answerFastAgentQuestion({
         ? {
             success: false as const,
             error:
-              'Post an acknowledgement with roomote_fast_send_chat_reply before this action.',
+              'Post an acknowledgement with send_chat_reply before this action.',
           }
         : null;
 

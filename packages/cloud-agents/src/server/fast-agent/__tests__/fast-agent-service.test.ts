@@ -21,14 +21,14 @@ const mocks = vi.hoisted(() => ({
 const nativeToolNames = vi.hoisted(
   () =>
     ({
-      cancelTask: 'roomote_fast_cancel_task',
-      ignoreEvent: 'roomote_fast_ignore_event',
-      integrationCall: 'roomote_fast_integration_call',
-      launchTask: 'roomote_fast_launch_task',
-      retryTaskStart: 'roomote_fast_retry_task_start',
-      sendChatReaction: 'roomote_fast_send_chat_reaction',
-      sendChatReply: 'roomote_fast_send_chat_reply',
-      sendTaskMessage: 'roomote_fast_send_task_message',
+      cancelTask: 'cancel_task',
+      ignoreEvent: 'ignore_event',
+      integrationCall: 'integration_call',
+      launchTask: 'launch_task',
+      retryTaskStart: 'retry_task_start',
+      sendChatReaction: 'send_chat_reaction',
+      sendChatReply: 'send_chat_reply',
+      sendTaskMessage: 'send_task_message',
     }) as const,
 );
 
@@ -68,7 +68,7 @@ vi.mock('../fast-agent-native-tool-bridge', () => ({
   FAST_AGENT_NATIVE_TOOL_NAMES: nativeToolNames,
   FAST_AGENT_NATIVE_TOOL_FILTER: {
     '*': false,
-    roomote_fast_send_chat_reply: true,
+    send_chat_reply: true,
   },
   getFastAgentNativeToolRuntime: vi.fn(async () => ({
     directory: '/tmp/fast-native-tools',
@@ -195,7 +195,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.objectContaining({
         directory: '/tmp/fast-native-tools',
         tools: expect.objectContaining({
-          roomote_fast_send_chat_reply: true,
+          send_chat_reply: true,
         }),
       }),
     );

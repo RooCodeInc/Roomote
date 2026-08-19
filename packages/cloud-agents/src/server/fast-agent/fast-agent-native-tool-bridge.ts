@@ -13,14 +13,14 @@ import { z } from 'zod';
 const FAST_AGENT_TOOL_BRIDGE_BODY_LIMIT_BYTES = 1_000_000;
 
 export const FAST_AGENT_NATIVE_TOOL_NAMES = {
-  cancelTask: 'roomote_fast_cancel_task',
-  ignoreEvent: 'roomote_fast_ignore_event',
-  integrationCall: 'roomote_fast_integration_call',
-  launchTask: 'roomote_fast_launch_task',
-  retryTaskStart: 'roomote_fast_retry_task_start',
-  sendChatReaction: 'roomote_fast_send_chat_reaction',
-  sendChatReply: 'roomote_fast_send_chat_reply',
-  sendTaskMessage: 'roomote_fast_send_task_message',
+  cancelTask: 'cancel_task',
+  ignoreEvent: 'ignore_event',
+  integrationCall: 'integration_call',
+  launchTask: 'launch_task',
+  retryTaskStart: 'retry_task_start',
+  sendChatReaction: 'send_chat_reaction',
+  sendChatReply: 'send_chat_reply',
+  sendTaskMessage: 'send_task_message',
 } as const;
 
 export type FastAgentNativeToolName =
@@ -58,10 +58,8 @@ const bridgeRequestSchema = z.object({
   args: z.record(z.unknown()),
 });
 
-const FAST_AGENT_NATIVE_TOOL_SOURCE = String.raw`
-import { z } from "zod"
-
-const invoke = async (name, args, context) => {
+const FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE = String.raw`
+export const invoke = async (name, args, context) => {
   const url = process.env.ROOMOTE_FAST_TOOL_BRIDGE_URL
   const token = process.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN
   if (!url || !token) throw new Error("Roomote Fast tool bridge is unavailable.")
@@ -84,73 +82,116 @@ const invoke = async (name, args, context) => {
     metadata: { roomoteResult: payload.result ?? null },
   }
 }
+`;
 
-export const send_chat_reply = {
+const FAST_AGENT_NATIVE_TOOL_SOURCES: Record<FastAgentNativeToolName, string> =
+  {
+    [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
   description: "Post a user-visible reply in the current Slack or Discord conversation.",
   args: {
     message: z.string().min(1).describe("Markdown reply text"),
     purpose: z.enum(["ack", "progress", "closeout", "clarification"]),
     imageArtifactIds: z.array(z.string()).optional(),
   },
-  execute: (args, context) => invoke("roomote_fast_send_chat_reply", args, context),
+  execute: (args, context) => invoke("send_chat_reply", args, context),
 }
+`,
 
-export const send_chat_reaction = {
+    [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReaction]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
   description: "Add a Slack emoji reaction to the current incoming message.",
   args: {
     name: z.string().min(1).describe("Slack emoji name without colons"),
     purpose: z.enum(["ack", "closeout"]),
   },
-  execute: (args, context) => invoke("roomote_fast_send_chat_reaction", args, context),
+  execute: (args, context) => invoke("send_chat_reaction", args, context),
 }
+`,
 
-export const launch_task = {
+    [FAST_AGENT_NATIVE_TOOL_NAMES.launchTask]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
   description: "Delegate new repository or workspace execution work to a Roomote task.",
   args: {
     prompt: z.string().min(1).describe("Complete task instruction"),
     environmentId: z.string().nullable().optional(),
     kickoffMessage: z.string().min(1).describe("Specific user-visible explanation of what is being delegated"),
   },
-  execute: (args, context) => invoke("roomote_fast_launch_task", args, context),
+  execute: (args, context) => invoke("launch_task", args, context),
 }
+`,
 
-export const send_task_message = {
+    [FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
   description: "Send a new instruction to an active task delegated by this Fast conversation.",
   args: {
     taskId: z.string().nullable().optional(),
     message: z.string().min(1),
   },
-  execute: (args, context) => invoke("roomote_fast_send_task_message", args, context),
+  execute: (args, context) => invoke("send_task_message", args, context),
 }
+`,
 
-export const cancel_task = {
+    [FAST_AGENT_NATIVE_TOOL_NAMES.cancelTask]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
   description: "Cancel an active task delegated by this Fast conversation.",
   args: { taskId: z.string().nullable().optional() },
-  execute: (args, context) => invoke("roomote_fast_cancel_task", args, context),
+  execute: (args, context) => invoke("cancel_task", args, context),
 }
+`,
 
-export const integration_call = {
+    [FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
   description: "Call one available deployment integration tool with its native JSON arguments.",
   args: {
     integrationId: z.string().min(1),
     toolName: z.string().min(1),
     arguments: z.record(z.string(), z.unknown()),
   },
-  execute: (args, context) => invoke("roomote_fast_integration_call", args, context),
+  execute: (args, context) => invoke("integration_call", args, context),
 }
+`,
 
-export const retry_task_start = {
+    [FAST_AGENT_NATIVE_TOOL_NAMES.retryTaskStart]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
   description: "Retry startup for the delegated task associated with an eligible failed platform event.",
   args: {},
-  execute: (args, context) => invoke("roomote_fast_retry_task_start", args, context),
+  execute: (args, context) => invoke("retry_task_start", args, context),
 }
+`,
 
-export const ignore_event = {
+    [FAST_AGENT_NATIVE_TOOL_NAMES.ignoreEvent]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
   description: "Close a platform-generated event turn without posting a user-visible reply.",
   args: { reason: z.string().min(1) },
-  execute: (args, context) => invoke("roomote_fast_ignore_event", args, context),
+  execute: (args, context) => invoke("ignore_event", args, context),
 }
-`;
+`,
+  };
 
 const activeExecutors = new Map<string, FastAgentNativeToolExecutor>();
 let runtimePromise: Promise<FastAgentNativeToolRuntime> | undefined;
@@ -209,10 +250,13 @@ async function startRuntime(): Promise<FastAgentNativeToolRuntime> {
     'dir',
   );
   writeFileSync(
-    join(toolsDirectory, 'roomote_fast.js'),
-    FAST_AGENT_NATIVE_TOOL_SOURCE,
+    join(directory, '.opencode', 'roomote-fast-tool-bridge.js'),
+    FAST_AGENT_NATIVE_TOOL_BRIDGE_SOURCE,
     'utf8',
   );
+  for (const [name, source] of Object.entries(FAST_AGENT_NATIVE_TOOL_SOURCES)) {
+    writeFileSync(join(toolsDirectory, `${name}.js`), source, 'utf8');
+  }
 
   const server = createServer(async (request, response) => {
     if (request.method !== 'POST' || request.url !== '/tool') {

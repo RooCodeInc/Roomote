@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import {
@@ -11,15 +11,32 @@ import {
 describe('Fast native OpenCode tool bridge', () => {
   it('installs Fast tools in an isolated OpenCode session directory', async () => {
     const runtime = await getFastAgentNativeToolRuntime();
-    const source = await readFile(
-      join(runtime.directory, '.opencode', 'tools', 'roomote_fast.js'),
+    const toolsDirectory = join(runtime.directory, '.opencode', 'tools');
+    const installedToolFiles = await readdir(toolsDirectory);
+    const replySource = await readFile(
+      join(toolsDirectory, 'send_chat_reply.js'),
+      'utf8',
+    );
+    const integrationSource = await readFile(
+      join(toolsDirectory, 'integration_call.js'),
+      'utf8',
+    );
+    const bridgeSource = await readFile(
+      join(runtime.directory, '.opencode', 'roomote-fast-tool-bridge.js'),
       'utf8',
     );
 
-    expect(source).toContain('export const send_chat_reply = {');
-    expect(source).toContain('export const integration_call = {');
-    expect(source).toContain('context.sessionID');
-    expect(source).toContain('metadata: { roomoteResult:');
+    expect(installedToolFiles.sort()).toEqual(
+      Object.values(FAST_AGENT_NATIVE_TOOL_NAMES)
+        .map((name) => `${name}.js`)
+        .sort(),
+    );
+    expect(replySource).toContain('export default {');
+    expect(replySource).toContain('invoke("send_chat_reply"');
+    expect(integrationSource).toContain('export default {');
+    expect(integrationSource).toContain('invoke("integration_call"');
+    expect(bridgeSource).toContain('context.sessionID');
+    expect(bridgeSource).toContain('metadata: { roomoteResult:');
     expect(FAST_AGENT_NATIVE_TOOL_FILTER).toMatchObject({
       '*': false,
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: true,
