@@ -55,6 +55,9 @@ type IntegrationAuditContext = BrokerContext & {
 };
 
 const FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS = 5 * 60_000;
+const FAST_AGENT_INTEGRATION_TOOL_CACHE_RETRY_MS = 30_000;
+const FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS = 10_000;
+const FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS = 60_000;
 
 type IntegrationToolCacheEntry = {
   expiresAt: number;
@@ -63,16 +66,76 @@ type IntegrationToolCacheEntry = {
 
 const integrationToolCache = new Map<string, IntegrationToolCacheEntry>();
 
+async function withFastIntegrationTimeout<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  timeoutMs: number,
+  operationName: string,
+): Promise<T> {
+  const abortController = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => {
+      const error = new Error(
+        `${operationName} timed out after ${timeoutMs}ms.`,
+      );
+      abortController.abort(error);
+      reject(error);
+    }, timeoutMs);
+    timeout.unref?.();
+  });
+
+  try {
+    return await Promise.race([
+      operation(abortController.signal),
+      timeoutPromise,
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 async function listCachedIntegrationTools(options: {
   url: string;
   headers: Record<string, string>;
 }): Promise<McpToolDefinition[]> {
   const cached = integrationToolCache.get(options.url);
-  if (cached && cached.expiresAt > Date.now()) {
+  if (cached) {
+    if (cached.expiresAt <= Date.now()) {
+      // Keep serving the last known-good catalog while refreshing. Fast turns
+      // must never wait behind a deployment integration that stopped answering
+      // after it was previously discovered successfully.
+      cached.expiresAt =
+        Date.now() + FAST_AGENT_INTEGRATION_TOOL_CACHE_RETRY_MS;
+      const refresh = withFastIntegrationTimeout(
+        (signal) => listMcpTools({ ...options, signal }),
+        FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS,
+        'Fast integration tool discovery',
+      );
+      void refresh
+        .then((tools) => {
+          if (integrationToolCache.get(options.url) === cached) {
+            integrationToolCache.set(options.url, {
+              expiresAt: Date.now() + FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS,
+              tools: Promise.resolve(tools),
+            });
+          }
+        })
+        .catch(() => {
+          if (integrationToolCache.get(options.url) === cached) {
+            cached.expiresAt =
+              Date.now() + FAST_AGENT_INTEGRATION_TOOL_CACHE_RETRY_MS;
+          }
+        });
+    }
+
     return cached.tools;
   }
 
-  const tools = listMcpTools(options);
+  const tools = withFastIntegrationTimeout(
+    (signal) => listMcpTools({ ...options, signal }),
+    FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS,
+    'Fast integration tool discovery',
+  );
   integrationToolCache.set(options.url, {
     expiresAt: Date.now() + FAST_AGENT_INTEGRATION_TOOL_CACHE_TTL_MS,
     tools,
@@ -268,13 +331,19 @@ export async function callFastAgentIntegration(
 
   try {
     const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
-    const result = await callMcpTool({
-      url: integrationProxyUrl(apiBaseUrl, integration.id),
-      headers: { Authorization: `Bearer ${authToken}` },
-      toolName: request.toolName,
-      args: request.args,
-      toolCallId: `fast:${audit.id}:${integration.id}:${request.toolName}`,
-    });
+    const result = await withFastIntegrationTimeout(
+      (signal) =>
+        callMcpTool({
+          url: integrationProxyUrl(apiBaseUrl, integration.id),
+          headers: { Authorization: `Bearer ${authToken}` },
+          toolName: request.toolName,
+          args: request.args,
+          toolCallId: `fast:${audit.id}:${integration.id}:${request.toolName}`,
+          signal,
+        }),
+      FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS,
+      `Fast ${integration.id}/${request.toolName} integration call`,
+    );
 
     try {
       await completeSlackFastIntegrationCall({

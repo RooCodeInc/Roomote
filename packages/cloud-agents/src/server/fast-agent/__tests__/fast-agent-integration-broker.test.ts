@@ -91,6 +91,10 @@ describe('fast-agent integration broker', () => {
     ]);
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('exposes the deployment GitHub App through its read-only router MCP', async () => {
     mocks.findGithubInstallation.mockResolvedValue({ id: 42 });
 
@@ -105,6 +109,7 @@ describe('fast-agent integration broker', () => {
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
       url: 'https://api.example.com/api/mcp-routing/github',
       headers: { Authorization: 'Bearer control-plane-token' },
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -130,6 +135,7 @@ describe('fast-agent integration broker', () => {
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
       url: 'https://api.example.com/api/mcp/gbrain',
       headers: { Authorization: 'Bearer control-plane-token' },
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -195,6 +201,55 @@ describe('fast-agent integration broker', () => {
     expect(mocks.listMcpTools).toHaveBeenCalledOnce();
   });
 
+  it('serves stale tools immediately while a bounded refresh hangs', async () => {
+    vi.useFakeTimers({ now: new Date('2026-08-19T00:00:00.000Z') });
+    mocks.enabledRows = [{ mcpId: 'notion' }];
+
+    await expect(
+      listFastAgentIntegrations({
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: 'notion',
+        tools: [expect.objectContaining({ name: 'search' })],
+      }),
+    ]);
+
+    mocks.listMcpTools.mockImplementationOnce(
+      () => new Promise(() => undefined),
+    );
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+
+    await expect(
+      listFastAgentIntegrations({
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: 'notion',
+        tools: [expect.objectContaining({ name: 'search' })],
+      }),
+    ]);
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(
+      listFastAgentIntegrations({
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: 'notion',
+        tools: [expect.objectContaining({ name: 'search' })],
+      }),
+    ]);
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
+  });
+
   it('excludes tools disabled by the deployment', async () => {
     mocks.enabledRows = [{ mcpId: 'notion', disabledTools: ['search'] }];
 
@@ -227,6 +282,31 @@ describe('fast-agent integration broker', () => {
       expect.objectContaining({ id: 'notion', tools: [{ name: 'search' }] }),
     ]);
 
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
+  });
+
+  it('times out hung tool discovery without poisoning the cache', async () => {
+    vi.useFakeTimers();
+    mocks.enabledRows = [{ mcpId: 'notion' }];
+    mocks.listMcpTools
+      .mockImplementationOnce(() => new Promise(() => undefined))
+      .mockResolvedValueOnce([{ name: 'search' }]);
+
+    const timedOut = listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.example.com',
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await expect(timedOut).resolves.toEqual([]);
+    await expect(
+      listFastAgentIntegrations({
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ id: 'notion', tools: [{ name: 'search' }] }),
+    ]);
     expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
   });
 
@@ -275,6 +355,7 @@ describe('fast-agent integration broker', () => {
       toolName: 'search',
       args: { query: 'roadmap' },
       toolCallId: 'fast:audit-1:notion:search',
+      signal: expect.any(AbortSignal),
     });
     expect(mocks.beginIntegrationCall).toHaveBeenCalledWith({
       slackQuickAnswerId: 'session-1',
@@ -338,6 +419,40 @@ describe('fast-agent integration broker', () => {
       id: 'audit-1',
       status: 'failed',
       error: 'integration unavailable',
+      startedAt: new Date('2026-08-16T00:00:00.000Z'),
+    });
+  });
+
+  it('times out a hung integration call and records the failure', async () => {
+    vi.useFakeTimers();
+    mocks.callMcpTool.mockImplementation(() => new Promise(() => undefined));
+
+    const call = callFastAgentIntegration(
+      auditContext,
+      [
+        {
+          id: 'notion',
+          name: 'Notion',
+          description: 'Knowledge',
+          tools: [{ name: 'search' }],
+        },
+      ],
+      {
+        integrationId: 'notion',
+        toolName: 'search',
+        args: { query: 'roadmap' },
+      },
+    );
+    const timedOut = expect(call).rejects.toThrow(
+      'Fast notion/search integration call timed out after 60000ms.',
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    await timedOut;
+    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith({
+      id: 'audit-1',
+      status: 'failed',
+      error: 'Fast notion/search integration call timed out after 60000ms.',
       startedAt: new Date('2026-08-16T00:00:00.000Z'),
     });
   });
