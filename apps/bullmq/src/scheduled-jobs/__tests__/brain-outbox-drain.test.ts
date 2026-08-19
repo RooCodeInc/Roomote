@@ -18,7 +18,10 @@ const {
   mockRunBrainCollectors: vi.fn(),
 }));
 
-vi.mock('@roomote/sdk/server', () => ({
+vi.mock('@roomote/sdk/server', async (importOriginal) => ({
+  // Keep the real gbrain transport: the classification tests drive it
+  // through the mocked global fetch.
+  ...(await importOriginal<typeof import('@roomote/sdk/server')>()),
   resolveBrainConnection: mockResolveConnection,
   resolveBrainInferenceProvider: mockResolveBrainProvider,
 }));

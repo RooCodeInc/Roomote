@@ -41,6 +41,8 @@ type SettingsNavigationItem = {
   icon: LucideIcon;
   adminOnly?: boolean;
   hiddenWhenCloud?: boolean;
+  /** Shown only on deployments that have enabled the Brain. */
+  requiresBrain?: boolean;
   newGroup?: boolean;
   matches: (pathname: string) => boolean;
 };
@@ -122,6 +124,7 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     href: SETTINGS_PATHS.brain,
     icon: Brain,
     adminOnly: true,
+    requiresBrain: true,
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.brain),
   },
   {
@@ -194,12 +197,16 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
 export function getAccessibleSettingsNavigation(opts: {
   isAdmin: boolean;
   cloudEnabled: boolean;
+  brainConfigured?: boolean;
 }) {
   return SETTINGS_NAVIGATION_ITEMS.filter((item) => {
     if (item.adminOnly && !opts.isAdmin) {
       return false;
     }
     if (item.hiddenWhenCloud && opts.cloudEnabled) {
+      return false;
+    }
+    if (item.requiresBrain && !opts.brainConfigured) {
       return false;
     }
     return true;

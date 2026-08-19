@@ -54,6 +54,16 @@ export type BrainNamespaceBucketId =
   | BrainNamespaceId
   | typeof BRAIN_OTHER_NAMESPACE_ID;
 
+/**
+ * The slug prefix a namespace's pages are written under. Writers derive
+ * their prefixes from here so a renamed prefix cannot leave the Settings
+ * chart attributing pages to the catch-all bucket while ingestion carries
+ * on under the old name.
+ */
+export function brainNamespacePrefix(id: BrainNamespaceId): string {
+  return BRAIN_NAMESPACES.find((namespace) => namespace.id === id)!.prefix;
+}
+
 export function resolveBrainNamespaceId(slug: string): BrainNamespaceBucketId {
   return (
     BRAIN_NAMESPACES.find((namespace) => slug.startsWith(namespace.prefix))

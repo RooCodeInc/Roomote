@@ -14,7 +14,10 @@ const {
   mockUpsertBrainSyncState: vi.fn(),
 }));
 
-vi.mock('@roomote/sdk/server', () => ({
+vi.mock('@roomote/sdk/server', async (importOriginal) => ({
+  // Keep the real gbrain transport (postBrainToolCall/parseBrainToolPayloads):
+  // these tests exercise it through the mocked global fetch.
+  ...(await importOriginal<typeof import('@roomote/sdk/server')>()),
   getBrainGatewayToken: () => 'brain-gateway-token',
   resolveBrainConnection: mockResolveConnection,
   resolveBrainInferenceProvider: mockResolveProvider,
@@ -24,7 +27,10 @@ vi.mock('@roomote/env', () => ({
   Env: mockEnv,
 }));
 
-vi.mock('@roomote/db/server', () => ({
+vi.mock('@roomote/db/server', async (importOriginal) => ({
+  // The sdk/server barrel (kept real above for its gbrain transport) reaches
+  // schema exports through this module, so the mock must carry them.
+  ...(await importOriginal<typeof import('@roomote/db/server')>()),
   db: {},
   getBrainSyncState: mockGetBrainSyncState,
   upsertBrainSyncState: mockUpsertBrainSyncState,

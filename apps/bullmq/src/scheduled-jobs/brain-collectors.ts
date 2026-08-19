@@ -38,6 +38,7 @@ import {
 import { ripplingApiRequestJson } from '@roomote/sdk/server/rippling-api';
 import { createSlackWebClient } from '@roomote/slack';
 import {
+  brainNamespacePrefix,
   isMcpConnectionGranolaConfig,
   isMcpConnectionNotionConfig,
   isMcpConnectionRipplingConfig,
@@ -604,7 +605,7 @@ export function groupSlackMessagesIntoDayPages(
         });
         const firstTs = chunk[0]!.ts.replace('.', '-');
         const lastTs = chunk.at(-1)!.ts.replace('.', '-');
-        const slug = `slack/${group.teamId}/${group.channelId}/${group.day}/${firstTs}-${lastTs}`;
+        const slug = `${brainNamespacePrefix('slack')}${group.teamId}/${group.channelId}/${group.day}/${firstTs}-${lastTs}`;
         const people = new Set<string>();
         for (const message of chunk) {
           if (!message.person) continue;
@@ -1240,7 +1241,7 @@ const LEGACY_SETUP_BOOTSTRAP_USER_ID = 'setup-bootstrap-user';
 /** Shared `people/<prefix>-<digest>` slug scheme for every person surface. */
 function hashedPeopleSlug(prefix: string, seed: string): string {
   const digest = createHash('sha256').update(seed).digest('hex').slice(0, 16);
-  return `people/${prefix}-${digest}`;
+  return `${brainNamespacePrefix('people')}${prefix}-${digest}`;
 }
 
 function personIdentitySlug(userId: string): string {
@@ -1633,7 +1634,7 @@ function slackDirectoryPersonSlug(teamId: string, userId: string): string {
     .update(`slack:${teamId}:${userId}`)
     .digest('hex')
     .slice(0, 16);
-  return `people/slack-member-${digest}`;
+  return `${brainNamespacePrefix('people')}slack-member-${digest}`;
 }
 
 export function slackDirectoryProfileFromApi(input: {
@@ -2441,7 +2442,7 @@ function ripplingWorkerSlug(workerId: string): string {
     .update(workerId)
     .digest('hex')
     .slice(0, 16);
-  return `people/rippling-worker-${digest}`;
+  return `${brainNamespacePrefix('people')}rippling-worker-${digest}`;
 }
 
 type RipplingMembership = {
@@ -3533,7 +3534,7 @@ export function buildNotionPage(
 
 function notionPageSlug(pageId: string): string | null {
   const stableId = pageId.toLowerCase().replace(/[^a-z0-9]/g, '');
-  return stableId ? `notion/${stableId}` : null;
+  return stableId ? `${brainNamespacePrefix('notion')}${stableId}` : null;
 }
 
 async function findNotionConnectionConfig(): Promise<McpConnectionNotionConfig | null> {
@@ -4400,7 +4401,7 @@ export function buildGranolaMeetingPage(
 
   return {
     page: {
-      slug: `meetings/${day}-${slugTail}`,
+      slug: `${brainNamespacePrefix('meetings')}${day}-${slugTail}`,
       title,
       content,
       timelineEvidence:
