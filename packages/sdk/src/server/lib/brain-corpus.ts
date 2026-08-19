@@ -22,9 +22,17 @@ const CORPUS_SAMPLE_LIMIT = 500;
 /**
  * A settings page must not hold a request open on an unreachable service.
  * Short enough that an admin gets the rest of the page promptly; the corpus
- * section degrades to "unavailable" on its own.
+ * section degrades to "unavailable" on its own. This bounds the WHOLE
+ * listing, not each paged window: five windows must not multiply it.
  */
 const CORPUS_REQUEST_TIMEOUT_MS = 8_000;
+
+/**
+ * Below this remaining budget a further window is not attempted, and it is
+ * also the floor passed to a window that still runs, so a request always
+ * gets a workable timeout even at the very edge of the deadline.
+ */
+const CORPUS_MIN_WINDOW_BUDGET_MS = 500;
 
 export type BrainCorpusPage = {
   slug: string;
@@ -166,6 +174,15 @@ export function resetBrainCorpusSampleCache(): void {
   corpusCache = null;
 }
 
+/**
+ * The most pages one `list_pages` call returns. gbrain caps `limit` at 100
+ * regardless of what is requested (verified empirically: `limit: 500`
+ * answers 100), so the sample must page with `offset` to see past the
+ * newest window — otherwise the composition chart lurches to whichever
+ * source backfilled most recently and presents that batch as the corpus.
+ */
+const CORPUS_LISTING_WINDOW = 100;
+
 async function fetchBrainCorpusSample(): Promise<BrainCorpusSnapshot | null> {
   const connection = await resolveBrainConnection('agent');
 
@@ -174,44 +191,102 @@ async function fetchBrainCorpusSample(): Promise<BrainCorpusSnapshot | null> {
   }
 
   try {
-    let payloads: unknown[];
-    let usedFallback = false;
+    const pages = new Map<string, BrainCorpusPage>();
+    let truncated = false;
+    // One deadline across every window, so paging cannot multiply the
+    // page's latency bound: each window gets whatever budget remains.
+    const deadlineAtMs = Date.now() + CORPUS_REQUEST_TIMEOUT_MS;
 
-    try {
-      payloads = await callBrainTool(
-        connection,
-        'list_pages',
-        { limit: CORPUS_SAMPLE_LIMIT },
-        { timeoutMs: CORPUS_REQUEST_TIMEOUT_MS },
-      );
-    } catch (error) {
-      if (!isRetryableToolError(error)) {
-        throw error;
+    for (let offset = 0; offset < CORPUS_SAMPLE_LIMIT;) {
+      const remainingMs = deadlineAtMs - Date.now();
+
+      if (offset > 0 && remainingMs < CORPUS_MIN_WINDOW_BUDGET_MS) {
+        // Firing a window that would be aborted almost immediately only adds
+        // a doomed round trip to a listing already reported as truncated.
+        truncated = true;
+        break;
       }
 
-      // The listing tool's arguments have changed shape between gbrain
-      // versions. A default-window listing still describes the corpus, so
-      // fall back to it rather than reporting the Brain as unreachable.
-      payloads = await callBrainTool(
-        connection,
-        'list_pages',
-        {},
-        { timeoutMs: CORPUS_REQUEST_TIMEOUT_MS },
-      );
-      usedFallback = true;
+      let payloads: unknown[];
+
+      try {
+        payloads = await callBrainTool(
+          connection,
+          'list_pages',
+          { limit: CORPUS_LISTING_WINDOW, offset },
+          { timeoutMs: Math.max(remainingMs, CORPUS_MIN_WINDOW_BUDGET_MS) },
+        );
+      } catch (error) {
+        if (offset > 0 || !isRetryableToolError(error)) {
+          // A later window failing (an offset the tool does not accept, or a
+          // mid-listing hiccup) does not invalidate what already came back:
+          // report it as a truncated sample rather than an unreachable Brain.
+          if (offset > 0) {
+            truncated = true;
+            break;
+          }
+
+          throw error;
+        }
+
+        // The listing tool's arguments have changed shape between gbrain
+        // versions. A default-window listing still describes the corpus, so
+        // fall back to it rather than reporting the Brain as unreachable —
+        // presented as a sample, since the default window's size is unknown.
+        // The fallback draws on the same listing deadline: if the failed
+        // probe already consumed it, retrying would push the page past its
+        // stated bound for a listing that failed once, so give up instead.
+        const fallbackBudgetMs = deadlineAtMs - Date.now();
+
+        if (fallbackBudgetMs < CORPUS_MIN_WINDOW_BUDGET_MS) {
+          throw error;
+        }
+
+        payloads = await callBrainTool(
+          connection,
+          'list_pages',
+          {},
+          { timeoutMs: fallbackBudgetMs },
+        );
+        const fallbackPages = extractBrainCorpusPages(payloads);
+
+        return {
+          pages: fallbackPages,
+          truncated: fallbackPages.length > 0,
+        };
+      }
+
+      const window = extractBrainCorpusPages(payloads);
+      const before = pages.size;
+
+      for (const page of window) {
+        if (!pages.has(page.slug)) {
+          pages.set(page.slug, page);
+        }
+      }
+
+      // A short window is the end of the corpus. A window of nothing new is
+      // a server that ignored `offset` and answered the first window again;
+      // paging further would loop forever on the same pages, so stop and be
+      // honest that only the newest window was seen.
+      if (window.length < CORPUS_LISTING_WINDOW) {
+        break;
+      }
+
+      if (pages.size === before) {
+        truncated = true;
+        break;
+      }
+
+      offset += CORPUS_LISTING_WINDOW;
+
+      if (offset >= CORPUS_SAMPLE_LIMIT) {
+        // Every window filled up to the cap, so more pages likely exist.
+        truncated = true;
+      }
     }
 
-    const pages = extractBrainCorpusPages(payloads);
-
-    return {
-      pages,
-      // The fallback listing used the tool's own default window, whose size
-      // is unknown, so its result is presented as a recent sample rather
-      // than risked as a total.
-      truncated:
-        pages.length >= CORPUS_SAMPLE_LIMIT ||
-        (usedFallback && pages.length > 0),
-    };
+    return { pages: [...pages.values()], truncated };
   } catch (error) {
     console.warn(
       `[brain] corpus listing failed: ${
