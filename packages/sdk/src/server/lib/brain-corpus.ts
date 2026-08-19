@@ -233,16 +233,20 @@ async function fetchBrainCorpusSample(): Promise<BrainCorpusSnapshot | null> {
         // versions. A default-window listing still describes the corpus, so
         // fall back to it rather than reporting the Brain as unreachable —
         // presented as a sample, since the default window's size is unknown.
+        // The fallback draws on the same listing deadline: if the failed
+        // probe already consumed it, retrying would push the page past its
+        // stated bound for a listing that failed once, so give up instead.
+        const fallbackBudgetMs = deadlineAtMs - Date.now();
+
+        if (fallbackBudgetMs < CORPUS_MIN_WINDOW_BUDGET_MS) {
+          throw error;
+        }
+
         payloads = await callBrainTool(
           connection,
           'list_pages',
           {},
-          {
-            timeoutMs: Math.max(
-              deadlineAtMs - Date.now(),
-              CORPUS_MIN_WINDOW_BUDGET_MS,
-            ),
-          },
+          { timeoutMs: fallbackBudgetMs },
         );
         const fallbackPages = extractBrainCorpusPages(payloads);
 

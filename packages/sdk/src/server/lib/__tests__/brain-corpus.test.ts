@@ -187,6 +187,27 @@ describe('readBrainCorpusSample', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('skips the argument-shape fallback when the probe consumed the deadline', async () => {
+    // The first call burns the whole listing budget before failing with a
+    // tool error. Retrying with a fresh floor would hold the settings page
+    // past its stated bound, so the listing gives up as unavailable.
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn(async () => {
+        vi.advanceTimersByTime(9_000);
+        return toolResponse(null, true);
+      });
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      const snapshot = await readBrainCorpusSample();
+
+      expect(snapshot).toBeNull();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('spends one deadline across all windows instead of one per window', async () => {
     // Three seconds per window against an eight-second listing budget: the
     // third window ends past the deadline, so a fourth is never attempted
