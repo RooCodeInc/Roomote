@@ -26,7 +26,7 @@ describe('buildNamespaceSegments', () => {
     ).toBe(100);
   });
 
-  it('gives every named namespace its own color and leaves the catch-all colorless', () => {
+  it('binds color to the namespace, not its rank, and leaves the catch-all colorless', () => {
     const segments = buildNamespaceSegments([
       { id: 'slack', label: 'Slack', pages: 3 },
       { id: 'other', label: 'Other', pages: 2 },
@@ -36,9 +36,19 @@ describe('buildNamespaceSegments', () => {
 
     expect(slack!.color).not.toBe(tasks!.color);
     expect(other!.color).toBe('var(--color-muted-foreground)');
-    // The catch-all must not consume a palette slot; the named namespace after
-    // it takes the next color rather than skipping one.
-    expect(tasks!.color).toBe('var(--color-chart-2)');
+    // Keyed off the registry, so a namespace keeps its hue when the
+    // size-sorted chart order changes between refetches.
+    const reordered = buildNamespaceSegments([
+      { id: 'tasks', label: 'Task memories', pages: 9 },
+      { id: 'slack', label: 'Slack', pages: 1 },
+    ]);
+
+    expect(reordered.find((segment) => segment.id === 'slack')!.color).toBe(
+      slack!.color,
+    );
+    expect(reordered.find((segment) => segment.id === 'tasks')!.color).toBe(
+      tasks!.color,
+    );
   });
 });
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { MISSING_MEMORY_EVENT_COUNT_CAP } from '@roomote/types';
 import { toast } from 'sonner';
 
 import { Section } from '@/components/settings';
@@ -119,9 +120,13 @@ export function BrainTaskMemorySection({
       {taskMemories.completedRunsWithoutEvent > 0 ? (
         <div className="flex flex-col items-start gap-3 rounded-lg border bg-background/50 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
           <span>
-            {formatNumber(taskMemories.completedRunsWithoutEvent)} completed
-            tasks finished before the Brain was watching. Ingesting them gives
-            agents that history.
+            {formatNumber(taskMemories.completedRunsWithoutEvent)}
+            {taskMemories.completedRunsWithoutEvent >=
+            MISSING_MEMORY_EVENT_COUNT_CAP
+              ? '+'
+              : ''}{' '}
+            completed tasks finished before the Brain was watching. Ingesting
+            them gives agents that history.
           </span>
           <Button
             variant="outline"

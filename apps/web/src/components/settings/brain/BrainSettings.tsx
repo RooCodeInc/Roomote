@@ -2,7 +2,13 @@
 
 import { useQuery } from '@tanstack/react-query';
 
-import { ErrorState, Skeleton } from '@/components/system';
+import {
+  AnalyticsSummaryCard,
+  AnalyticsSummaryCardsGrid,
+  AnalyticsSummaryCardSkeleton,
+  ErrorState,
+  Skeleton,
+} from '@/components/system';
 import { formatDistanceToNowCompact, formatNumber } from '@/lib/formatters';
 import { useTRPC } from '@/trpc/client';
 
@@ -12,28 +18,6 @@ import { BrainCorpusSection } from './BrainCorpusSection';
 import { BrainSourcesSection } from './BrainSourcesSection';
 import { BrainStatusSection } from './BrainStatusSection';
 import { BrainTaskMemorySection } from './BrainTaskMemorySection';
-
-function SummaryTile({
-  label,
-  value,
-  secondary,
-}: {
-  label: string;
-  value: string;
-  secondary: string;
-}) {
-  return (
-    <div className="flex flex-col gap-1 bg-card p-4">
-      <p className="text-sm leading-snug font-medium text-muted-foreground">
-        {label}
-      </p>
-      <div className="text-2xl leading-tight font-semibold tracking-tight md:text-3xl">
-        {value}
-      </div>
-      <div className="text-sm text-muted-foreground">{secondary}</div>
-    </div>
-  );
-}
 
 function SummaryTiles({ settings }: { settings: BrainSettingsData }) {
   const sourcesConnected = settings.sources.filter(
@@ -45,8 +29,8 @@ function SummaryTiles({ settings }: { settings: BrainSettingsData }) {
   const recorded = settings.taskMemories.byStatus.done;
 
   return (
-    <div className="grid gap-0.5 md:grid-cols-3">
-      <SummaryTile
+    <AnalyticsSummaryCardsGrid className="md:grid-cols-3">
+      <AnalyticsSummaryCard
         label="Pages stored"
         value={
           settings.corpus.reachable
@@ -61,7 +45,7 @@ function SummaryTiles({ settings }: { settings: BrainSettingsData }) {
             : 'in the corpus'
         }
       />
-      <SummaryTile
+      <AnalyticsSummaryCard
         label="Task memories"
         value={formatNumber(recorded)}
         secondary={
@@ -73,7 +57,7 @@ function SummaryTiles({ settings }: { settings: BrainSettingsData }) {
             : 'none recorded yet'
         }
       />
-      <SummaryTile
+      <AnalyticsSummaryCard
         label="Sources"
         value={formatNumber(sourcesConnected)}
         secondary={
@@ -82,22 +66,18 @@ function SummaryTiles({ settings }: { settings: BrainSettingsData }) {
             : `of ${settings.sources.length} connected`
         }
       />
-    </div>
+    </AnalyticsSummaryCardsGrid>
   );
 }
 
 function BrainSettingsSkeleton() {
   return (
     <div className="space-y-6">
-      <div className="grid gap-0.5 md:grid-cols-3">
+      <AnalyticsSummaryCardsGrid className="md:grid-cols-3">
         {Array.from({ length: 3 }).map((_, index) => (
-          <div key={index} className="space-y-2 bg-card p-4">
-            <Skeleton className="h-4 w-28" />
-            <Skeleton className="h-9 w-24" />
-            <Skeleton className="h-4 w-36" />
-          </div>
+          <AnalyticsSummaryCardSkeleton key={index} />
         ))}
-      </div>
+      </AnalyticsSummaryCardsGrid>
       <Skeleton className="h-40 w-full" />
       <Skeleton className="h-56 w-full" />
       <Skeleton className="h-80 w-full" />
@@ -122,9 +102,11 @@ export function BrainSettings() {
    * A deployment without a Brain has no corpus, no collector checkpoints,
    * and no outbox worth reading: those sections would all render the same
    * empty state, which reads as breakage rather than as an unconfigured
-   * feature.
+   * feature. The same goes for a key with no service URL, where offering
+   * actions like the history backfill would enqueue work nothing can drain
+   * into.
    */
-  if (data.status === 'not_configured') {
+  if (data.status === 'not_configured' || !data.url) {
     return (
       <div className="space-y-6">
         <BrainStatusSection settings={data} />

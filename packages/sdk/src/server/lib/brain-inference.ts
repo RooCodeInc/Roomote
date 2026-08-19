@@ -190,13 +190,18 @@ export type BrainModelSummary = {
 export function describeBrainModels(
   providerId: BrainInferenceProviderId,
 ): BrainModelSummary {
+  // Truthiness on the trimmed value, exactly like `mapBrainModelName`: a
+  // whitespace-only override falls through to the default in both places.
   const override = Env.R_BRAIN_MODEL?.trim();
   const chat = MODEL_TRANSLATIONS.find((entry) => entry.kind === 'chat')!;
+  const stockEmbedding = MODEL_TRANSLATIONS.find(
+    (entry) => entry.kind === 'embedding',
+  )!;
   const embeddingModel =
     Env.R_BRAIN_EMBEDDING_MODEL?.trim() ||
     (providerId === 'openrouter'
-      ? 'openai/text-embedding-3-small'
-      : 'text-embedding-3-small');
+      ? stockEmbedding.openrouter
+      : stockEmbedding.openai);
   const embeddingDimensions =
     Env.R_BRAIN_EMBEDDING_DIMENSIONS ??
     (embeddingModel.includes('text-embedding-3-large')
@@ -207,7 +212,7 @@ export function describeBrainModels(
 
   return {
     synthesisModel:
-      override ?? (providerId === 'openrouter' ? chat.openrouter : chat.openai),
+      override || (providerId === 'openrouter' ? chat.openrouter : chat.openai),
     synthesisSource: override ? 'override' : 'default',
     embeddingModel,
     embeddingDimensions,

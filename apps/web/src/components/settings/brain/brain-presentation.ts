@@ -1,4 +1,4 @@
-import { BRAIN_OTHER_NAMESPACE_ID } from '@roomote/types';
+import { BRAIN_NAMESPACES } from '@roomote/types';
 
 import type {
   BrainNamespaceSummary,
@@ -8,9 +8,7 @@ import type {
 
 /**
  * Same palette and same omission as the analytics charts: chart-6 is the red
- * used for failure, so it never colors a neutral category. Cycling is fine —
- * every segment is labelled, so a repeated hue reads as a coincidence rather
- * than as a claim that two namespaces are related.
+ * used for failure, so it never colors a neutral category.
  */
 const NAMESPACE_COLORS = [
   'var(--color-chart-1)',
@@ -23,6 +21,21 @@ const NAMESPACE_COLORS = [
 
 /** The catch-all bucket is deliberately colorless: it names nothing. */
 const OTHER_NAMESPACE_COLOR = 'var(--color-muted-foreground)';
+
+/**
+ * Color follows the namespace, never its rank: keyed off the registry's
+ * stable order rather than the size-sorted chart order, so Slack keeps its
+ * hue when it overtakes Meetings, and any second surface (the browse dialog's
+ * chips) can reproduce the same colors without reproducing the sort. A hue
+ * repeat across the ten namespaces is fine because every segment is labelled.
+ */
+export function brainNamespaceColor(id: string): string {
+  const index = BRAIN_NAMESPACES.findIndex((namespace) => namespace.id === id);
+
+  return index === -1
+    ? OTHER_NAMESPACE_COLOR
+    : NAMESPACE_COLORS[index % NAMESPACE_COLORS.length]!;
+}
 
 type BrainNamespaceSegment = BrainNamespaceSummary & {
   color: string;
@@ -39,16 +52,11 @@ export function buildNamespaceSegments(
     return [];
   }
 
-  let colorIndex = 0;
-
-  return namespaces.map((namespace) => {
-    const isOther = namespace.id === BRAIN_OTHER_NAMESPACE_ID;
-    const color = isOther
-      ? OTHER_NAMESPACE_COLOR
-      : NAMESPACE_COLORS[colorIndex++ % NAMESPACE_COLORS.length]!;
-
-    return { ...namespace, color, percent: (namespace.pages / total) * 100 };
-  });
+  return namespaces.map((namespace) => ({
+    ...namespace,
+    color: brainNamespaceColor(namespace.id),
+    percent: (namespace.pages / total) * 100,
+  }));
 }
 
 type BrainStatusPresentation = {
@@ -125,7 +133,10 @@ export function describeSourceStatus(
   }
 }
 
-export const BRAIN_INFERENCE_PROVIDER_LABELS: Record<string, string> = {
+export const BRAIN_INFERENCE_PROVIDER_LABELS: Record<
+  'openrouter' | 'openai',
+  string
+> = {
   openrouter: 'OpenRouter',
   openai: 'OpenAI',
 };

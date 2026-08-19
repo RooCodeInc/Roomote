@@ -67,6 +67,7 @@ function buildSettings(
     statusDetail: null,
     url: 'http://gbrain:8080',
     inferenceProvider: 'openrouter',
+    keySource: 'brain',
     models: {
       synthesisModel: 'openai/gpt-5.6-luna',
       synthesisSource: 'default',

@@ -1,7 +1,8 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { memo, useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { BRAIN_NAMESPACES } from '@roomote/types';
 
 import {
   Badge,
@@ -20,8 +21,24 @@ import { formatDistanceToNowCompact, formatNumber } from '@/lib/formatters';
 import { useTRPC } from '@/trpc/client';
 
 import type { BrainPageListing } from '@/trpc/commands/brain';
+import { brainNamespaceColor } from './brain-presentation';
 
 type ListedPage = BrainPageListing['pages'][number];
+
+/**
+ * Rows rendered at once. The sample caps at 500 pages and every keystroke
+ * re-filters, so an unbounded list re-renders hundreds of rows to show the
+ * eight that fit the viewport; past this bound the footer says to narrow the
+ * search instead.
+ */
+const RENDERED_PAGE_LIMIT = 150;
+
+/** Registry position, so the filter chips keep a stable, meaningful order. */
+function namespaceRank(id: string): number {
+  const index = BRAIN_NAMESPACES.findIndex((namespace) => namespace.id === id);
+
+  return index === -1 ? BRAIN_NAMESPACES.length : index;
+}
 
 function matchesSearch(page: ListedPage, needle: string): boolean {
   return (
@@ -30,19 +47,19 @@ function matchesSearch(page: ListedPage, needle: string): boolean {
   );
 }
 
-function PageListRow({
+const PageListRow = memo(function PageListRow({
   page,
   selected,
   onSelect,
 }: {
   page: ListedPage;
   selected: boolean;
-  onSelect: () => void;
+  onSelect: (slug: string) => void;
 }) {
   return (
     <button
       type="button"
-      onClick={onSelect}
+      onClick={() => onSelect(page.slug)}
       className={cn(
         'w-full cursor-pointer rounded-lg px-3 py-2 text-left transition-colors',
         selected ? 'bg-accent' : 'hover:bg-accent/60',
@@ -54,7 +71,7 @@ function PageListRow({
       </p>
     </button>
   );
-}
+});
 
 function PagePreview({ slug }: { slug: string }) {
   const trpc = useTRPC();
@@ -103,6 +120,11 @@ function PagePreview({ slug }: { slug: string }) {
         <pre className="font-mono text-xs whitespace-pre-wrap">
           {data.content ?? 'This page has no stored content.'}
         </pre>
+        {data.contentTruncated ? (
+          <p className="pt-2 text-xs text-muted-foreground">
+            Long page, preview cut. Agents still read the full page.
+          </p>
+        ) : null}
       </div>
     </div>
   );
@@ -138,7 +160,9 @@ export function BrainBrowseDialog({
       }
     }
 
-    return [...counts.entries()].map(([id, entry]) => ({ id, ...entry }));
+    return [...counts.entries()]
+      .map(([id, entry]) => ({ id, ...entry }))
+      .sort((left, right) => namespaceRank(left.id) - namespaceRank(right.id));
   }, [data?.pages]);
 
   const filtered = useMemo(() => {
@@ -151,10 +175,14 @@ export function BrainBrowseDialog({
     );
   }, [data?.pages, namespaceId, search]);
 
+  // Explicit clicks only: auto-selecting the head of the filtered list would
+  // issue a page read per keystroke as the first match changes.
   const selected =
     selectedSlug !== null && filtered.some((page) => page.slug === selectedSlug)
       ? selectedSlug
-      : (filtered[0]?.slug ?? null);
+      : null;
+
+  const handleSelect = useCallback((slug: string) => setSelectedSlug(slug), []);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -171,8 +199,12 @@ export function BrainBrowseDialog({
 
         <div className="space-y-3">
           <div className="relative">
-            <Search className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Search
+              aria-hidden="true"
+              className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+            />
             <Input
+              aria-label="Search pages"
               className="pl-9"
               placeholder="Search pages"
               value={search}
@@ -208,6 +240,13 @@ export function BrainBrowseDialog({
                     )
                   }
                 >
+                  <span
+                    aria-hidden="true"
+                    className="size-2 shrink-0 rounded-full"
+                    style={{
+                      backgroundColor: brainNamespaceColor(namespace.id),
+                    }}
+                  />
                   {namespace.label} {formatNumber(namespace.pages)}
                 </button>
               </Badge>
@@ -234,17 +273,19 @@ export function BrainBrowseDialog({
             <div className="grid h-[420px] grid-cols-1 gap-3 sm:grid-cols-[280px_1fr]">
               <div className="flex min-h-0 flex-col">
                 <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto scroll-thin pr-1">
-                  {filtered.map((page) => (
+                  {filtered.slice(0, RENDERED_PAGE_LIMIT).map((page) => (
                     <PageListRow
                       key={page.slug}
                       page={page}
                       selected={page.slug === selected}
-                      onSelect={() => setSelectedSlug(page.slug)}
+                      onSelect={handleSelect}
                     />
                   ))}
                 </div>
                 <p className="pt-2 text-xs text-muted-foreground">
-                  {formatNumber(filtered.length)} pages, newest first
+                  {filtered.length > RENDERED_PAGE_LIMIT
+                    ? `Showing ${formatNumber(RENDERED_PAGE_LIMIT)} of ${formatNumber(filtered.length)} pages, newest first. Search to narrow further.`
+                    : `${formatNumber(filtered.length)} pages, newest first`}
                 </p>
               </div>
               <div className="hidden min-h-0 rounded-lg border sm:block">

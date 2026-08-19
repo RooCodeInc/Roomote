@@ -8,6 +8,7 @@ import {
   getBrainMemoryEventSummary,
   isBrainProviderConfigured,
   isNull,
+  resolveModelProviderEnvValue,
   listBrainSyncStates,
   mcpConnections,
   requeueFailedBrainMemoryEvents,
@@ -45,6 +46,15 @@ import { assertAdmin } from '../setup/shared';
  * lately, short enough to stay a glance rather than a log.
  */
 const RECENT_PAGE_LIMIT = 8;
+
+const EMPTY_MEMORY_SUMMARY: Awaited<
+  ReturnType<typeof getBrainMemoryEventSummary>
+> = {
+  byStatus: { pending: 0, processing: 0, done: 0, skipped: 0, failed: 0 },
+  lastProcessedAt: null,
+  lastError: null,
+  completedRunsWithoutEvent: 0,
+};
 
 /**
  * - `connected`: a Brain is configured, provisioned, and answering.
@@ -117,6 +127,13 @@ export type BrainSettings = {
   statusDetail: string | null;
   url: string | null;
   inferenceProvider: 'openrouter' | 'openai' | null;
+  /**
+   * Whether the serving key is the Brain's own (`R_BRAIN_*`) or the
+   * deployment's general provider key. The provider preference order can
+   * legitimately pick a general key even when a brain-specific one exists
+   * for the other provider, and the page must not claim otherwise.
+   */
+  keySource: 'brain' | 'deployment' | null;
   /** The models the Brain runs, or null when no provider resolves. */
   models: BrainModelSummary | null;
   corpus: BrainCorpusSummary;
@@ -147,13 +164,15 @@ async function isDeploymentMcpConnected(mcpId: string): Promise<boolean> {
   return Boolean(connection);
 }
 
-async function isNotionConnected(): Promise<boolean> {
+async function isDeploymentMcpConnectedAndEnabled(
+  mcpId: string,
+): Promise<boolean> {
   const [connected, enablement] = await Promise.all([
-    isDeploymentMcpConnected('notion'),
+    isDeploymentMcpConnected(mcpId),
     db.query.deploymentMcpEnablements.findFirst({
       columns: { mcpId: true },
       where: and(
-        eq(deploymentMcpEnablements.mcpId, 'notion'),
+        eq(deploymentMcpEnablements.mcpId, mcpId),
         eq(deploymentMcpEnablements.enabled, true),
       ),
     }),
@@ -181,14 +200,15 @@ async function isSlackConnected(): Promise<boolean> {
 async function resolveSourceRequirements(): Promise<
   Record<BrainSourceRequirement, boolean>
 > {
-  const [slack, notion, granola, github] = await Promise.all([
+  const [slack, notion, granola, github, rippling] = await Promise.all([
     isSlackConnected(),
-    isNotionConnected(),
+    isDeploymentMcpConnectedAndEnabled('notion'),
     isDeploymentMcpConnected('granola'),
     hasBrainGithubSources(),
+    isDeploymentMcpConnectedAndEnabled('rippling'),
   ]);
 
-  return { slack, notion, granola, github };
+  return { slack, notion, granola, github, rippling };
 }
 
 /** Days of page-writing activity summarized for the ingestion chart. */
@@ -363,10 +383,10 @@ function summarizeSources(input: {
 
 /**
  * Whether Roomote holds usable Brain credentials, read without minting or
- * provisioning anything. Deliberately not `resolveBrainConnection`: that call
- * registers OAuth clients headlessly the first time, and viewing a settings
- * page should never be the thing that provisions them — least of all
- * concurrently with the corpus read, which already takes that path once.
+ * provisioning anything. Deliberately not `resolveBrainConnection` (which
+ * registers OAuth clients headlessly on first use): the corpus read already
+ * takes that path once per request, and this check runs strictly after it,
+ * so it reads whatever state that attempt left behind rather than racing it.
  */
 async function hasBrainCredentials(): Promise<boolean> {
   if (Env.R_GBRAIN_AGENT_TOKEN) {
@@ -394,9 +414,11 @@ export async function getBrainSettingsCommand(
   const configured = await isBrainProviderConfigured();
   const url = Env.R_GBRAIN_URL ?? null;
 
+  // The rollups only describe a Brain that exists; on an unconfigured
+  // deployment they would scan real tables (the missing-memory check
+  // anti-joins task runs) just to be thrown away by the status card.
   const [
     inference,
-    provisioned,
     corpusSnapshot,
     syncStates,
     itemCounts,
@@ -404,15 +426,32 @@ export async function getBrainSettingsCommand(
     requirements,
   ] = await Promise.all([
     resolveBrainInferenceProvider(),
-    configured ? hasBrainCredentials() : false,
     configured ? readBrainCorpusSample() : null,
-    listBrainSyncStates(db),
-    countBrainCollectorItemsByCollector(db),
-    getBrainMemoryEventSummary(db),
+    configured ? listBrainSyncStates(db) : [],
+    configured ? countBrainCollectorItemsByCollector(db) : [],
+    configured ? getBrainMemoryEventSummary(db) : EMPTY_MEMORY_SUMMARY,
     resolveSourceRequirements(),
   ]);
 
   const corpus = summarizeCorpus(corpusSnapshot);
+
+  // Read only after (and only when) the corpus failed to answer: it decides
+  // between "credentials not provisioned yet" and "service down", and the
+  // corpus read above is the call that may have just provisioned them.
+  const provisioned =
+    configured && !corpus.reachable ? await hasBrainCredentials() : true;
+
+  const keySource: BrainSettings['keySource'] = !inference
+    ? null
+    : (
+          await resolveModelProviderEnvValue([
+            inference.providerId === 'openrouter'
+              ? 'R_BRAIN_OPENROUTER_API_KEY'
+              : 'R_BRAIN_OPENAI_API_KEY',
+          ])
+        )?.trim()
+      ? 'brain'
+      : 'deployment';
   const memoryTotal = Object.values(memories.byStatus).reduce(
     (total, value) => total + value,
     0,
@@ -470,6 +509,7 @@ export async function getBrainSettingsCommand(
     statusDetail,
     url,
     inferenceProvider: inference?.providerId ?? null,
+    keySource,
     models: inference ? describeBrainModels(inference.providerId) : null,
     corpus,
     sources: summarizeSources({
@@ -522,10 +562,26 @@ export type BrainPageListing = {
   }>;
 };
 
+function toListedPage(page: {
+  slug: string;
+  title: string | null;
+  updatedAt: Date | null;
+}): BrainPageListing['pages'][number] {
+  const namespaceId = resolveBrainNamespaceId(page.slug);
+
+  return {
+    slug: page.slug,
+    title: page.title ?? page.slug,
+    namespaceId,
+    namespaceLabel: brainNamespaceLabel(namespaceId),
+    updatedAt: page.updatedAt,
+  };
+}
+
 /**
- * The recency-sorted page sample for the browse dialog. Same read and same
- * bound as the composition chart, so the two never disagree about what the
- * Brain holds; the dialog filters and searches it client-side.
+ * The recency-sorted page sample for the browse dialog. Same cached read and
+ * same bound as the composition chart, so the two agree about what the Brain
+ * holds; the dialog filters and searches it client-side.
  */
 export async function listBrainPagesCommand(
   auth: UserAuthSuccess,
@@ -543,20 +599,16 @@ export async function listBrainPagesCommand(
       (left, right) =>
         (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
     )
-    .map((page) => {
-      const namespaceId = resolveBrainNamespaceId(page.slug);
-
-      return {
-        slug: page.slug,
-        title: page.title ?? page.slug,
-        namespaceId,
-        namespaceLabel: brainNamespaceLabel(namespaceId),
-        updatedAt: page.updatedAt,
-      };
-    });
+    .map(toListedPage);
 
   return { reachable: true, truncated: snapshot.truncated, pages };
 }
+
+/**
+ * How much of a page body the preview ships. A Brain page can be an entire
+ * day of channel history; the dialog is a reading pane, not an export.
+ */
+const PAGE_CONTENT_PREVIEW_LIMIT = 32_000;
 
 type BrainPageContent = {
   slug: string;
@@ -567,6 +619,8 @@ type BrainPageContent = {
    * tasks and integrations: the client renders it as plain text.
    */
   content: string | null;
+  /** The body exceeded the preview bound and was cut. */
+  contentTruncated: boolean;
 };
 
 export async function getBrainPageCommand(
@@ -581,10 +635,16 @@ export async function getBrainPageCommand(
     return null;
   }
 
+  const contentTruncated =
+    (page.content?.length ?? 0) > PAGE_CONTENT_PREVIEW_LIMIT;
+
   return {
     slug: page.slug,
     title: page.title ?? page.slug,
     updatedAt: page.updatedAt,
-    content: page.content,
+    content: contentTruncated
+      ? page.content!.slice(0, PAGE_CONTENT_PREVIEW_LIMIT)
+      : page.content,
+    contentTruncated,
   };
 }

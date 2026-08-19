@@ -40,6 +40,13 @@ export const BRAIN_NAMESPACES = [
 
 export type BrainNamespaceId = (typeof BRAIN_NAMESPACES)[number]['id'];
 
+/**
+ * Bound on the missing-memory probe behind the Settings page's "ingest task
+ * history" offer. At the cap the count reads as "at least this many"; shared
+ * so the query that stops counting and the UI that renders the `+` agree.
+ */
+export const MISSING_MEMORY_EVENT_COUNT_CAP = 1_000;
+
 /** Bucket for a slug written under a prefix this registry does not name. */
 export const BRAIN_OTHER_NAMESPACE_ID = 'other';
 
@@ -103,6 +110,15 @@ export const BRAIN_SOURCES = [
     namespaceId: 'people',
     collectorIdPrefix: 'person-identities',
     requires: null,
+  },
+  {
+    id: 'rippling-workers',
+    label: 'Rippling workers',
+    description:
+      'Worker directory from Rippling, keeping role, team, and manager current on each person card.',
+    namespaceId: 'people',
+    collectorIdPrefix: 'rippling-workers',
+    requires: 'rippling',
   },
   {
     id: 'slack-person-directory',

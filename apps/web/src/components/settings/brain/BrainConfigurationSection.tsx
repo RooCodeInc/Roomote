@@ -44,8 +44,7 @@ export function BrainConfigurationSection({
   settings: BrainSettings;
 }) {
   const providerLabel = settings.inferenceProvider
-    ? (BRAIN_INFERENCE_PROVIDER_LABELS[settings.inferenceProvider] ??
-      settings.inferenceProvider)
+    ? BRAIN_INFERENCE_PROVIDER_LABELS[settings.inferenceProvider]
     : null;
 
   return (
@@ -84,7 +83,9 @@ export function BrainConfigurationSection({
         >
           <span>
             {providerLabel
-              ? `Brain-specific ${providerLabel} key`
+              ? settings.keySource === 'brain'
+                ? `Brain-specific ${providerLabel} key`
+                : `The deployment's ${providerLabel} key`
               : 'No provider key resolves'}
           </span>
           <Link

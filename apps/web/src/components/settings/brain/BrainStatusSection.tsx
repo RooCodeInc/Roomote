@@ -55,9 +55,7 @@ export function BrainStatusSection({ settings }: { settings: BrainSettings }) {
             label="Inference"
             value={
               settings.inferenceProvider
-                ? (BRAIN_INFERENCE_PROVIDER_LABELS[
-                    settings.inferenceProvider
-                  ] ?? settings.inferenceProvider)
+                ? BRAIN_INFERENCE_PROVIDER_LABELS[settings.inferenceProvider]
                 : 'Not configured'
             }
           />

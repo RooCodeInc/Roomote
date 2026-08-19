@@ -2,9 +2,9 @@
 // This barrel centralizes icon imports so consumers import from '@/components/system'
 // instead of directly from 'lucide-react'.
 export {
+  Activity,
   AlertCircle,
   AlertCircleIcon,
-  Activity,
   AlertTriangle,
   AppWindow,
   ArrowDownIcon,

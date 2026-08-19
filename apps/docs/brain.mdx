@@ -128,15 +128,14 @@ Brain runs: the synthesis model (changeable through `R_BRAIN_MODEL`, applied
 immediately) and the embedding model, which is fixed when the Brain is created
 because it sizes the vector store.
 
-**What has it learned?** A composition bar breaks the corpus down by namespace
-(people, task memories, pull requests, Slack, GitHub issues, Notion, meetings,
-and the digests the nightly pass writes), followed by a chart of the pages
-written over the last 30 days and the pages written most recently. **Browse
-memory** opens the corpus page by page, searchable and filterable by
-namespace, so an admin can read exactly what the Brain stored. The Brain lists
-its newest pages first and answers with a bounded window, so on a large
-deployment this is labelled as a recent sample rather than presented as a
-total.
+**What has it learned?** A composition bar breaks the corpus down by what
+each page came from, such as task memories, pull requests, Slack, meetings,
+and people, followed by a chart of the pages written over the last 30 days
+and the pages written most recently. **Browse memory** opens the corpus page
+by page, searchable and filterable by source, so an admin can read exactly
+what the Brain stored. The Brain lists its newest pages first and answers
+with a bounded window, so on a large deployment this is labelled as a recent
+sample rather than presented as a total.
 
 **Where does it learn from?** Each source shows whether its integration is
 connected, when it was last read, and how far its one-time history sweep has

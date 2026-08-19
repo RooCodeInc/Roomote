@@ -11,18 +11,18 @@ import {
   EmptyState,
   TriangleAlert,
 } from '@/components/system';
-import { formatDistanceToNowCompact, formatNumber } from '@/lib/formatters';
+import {
+  formatDistanceToNowCompact,
+  formatNumber,
+  formatShortDate,
+} from '@/lib/formatters';
 
 import type { BrainCorpusSummary } from '@/trpc/commands/brain';
 import { BrainBrowseDialog } from './BrainBrowseDialog';
 import { buildNamespaceSegments } from './brain-presentation';
 
 function formatActivityDate(date: string): string {
-  return new Date(`${date}T00:00:00Z`).toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    timeZone: 'UTC',
-  });
+  return formatShortDate(new Date(`${date}T00:00:00`));
 }
 
 function ActivityChart({

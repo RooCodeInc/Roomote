@@ -1,5 +1,5 @@
 import { and, count, desc, eq, inArray, lt, max, sql } from 'drizzle-orm';
-import { RunStatus } from '@roomote/types';
+import { MISSING_MEMORY_EVENT_COUNT_CAP, RunStatus } from '@roomote/types';
 
 import { type DatabaseOrTransaction } from '../db';
 import {
@@ -365,8 +365,11 @@ export async function getBrainMemoryEventSummary(
       .where(eq(brainMemoryEvents.status, 'failed'))
       .orderBy(desc(brainMemoryEvents.updatedAt))
       .limit(1),
+    // Capped rather than counted: the page only needs "how many are missing,
+    // roughly" to offer the history backfill, and an uncapped anti-join over
+    // all completed runs grows with total run history forever.
     database
-      .select({ total: count() })
+      .select({ id: taskRuns.id })
       .from(taskRuns)
       .where(
         and(
@@ -376,7 +379,8 @@ export async function getBrainMemoryEventSummary(
             WHERE ${brainMemoryEvents.runId} = ${taskRuns.id}
           )`,
         ),
-      ),
+      )
+      .limit(MISSING_MEMORY_EVENT_COUNT_CAP),
   ]);
 
   const byStatus = { ...EMPTY_MEMORY_EVENT_STATUS_COUNTS };
@@ -389,7 +393,7 @@ export async function getBrainMemoryEventSummary(
     byStatus,
     lastProcessedAt: processedRow[0]?.lastProcessedAt ?? null,
     lastError: failureRow[0]?.lastError ?? null,
-    completedRunsWithoutEvent: missingRow[0]?.total ?? 0,
+    completedRunsWithoutEvent: missingRow.length,
   };
 }
 

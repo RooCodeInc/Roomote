@@ -1,4 +1,7 @@
-import { extractBrainCorpusPages } from '../brain-corpus';
+import {
+  extractBrainCorpusPages,
+  extractBrainPageContent,
+} from '../brain-corpus';
 
 describe('extractBrainCorpusPages', () => {
   it('reads a bare array of page objects', () => {
@@ -65,5 +68,27 @@ describe('extractBrainCorpusPages', () => {
     expect(
       extractBrainCorpusPages([[{ title: 'no slug' }, '', null, 42]]),
     ).toEqual([]);
+  });
+});
+
+describe('extractBrainPageContent', () => {
+  it('reads the body from compiled_truth, the shape get_page actually answers', () => {
+    const page = extractBrainPageContent('tasks/run-9', [
+      {
+        slug: 'tasks/run-9',
+        title: 'Reworked the drainer',
+        compiled_truth: 'The drainer now reclaims stale claims.',
+        updated_at: '2026-08-18T10:00:00Z',
+      },
+    ]);
+
+    expect(page).not.toBeNull();
+    expect(page!.title).toBe('Reworked the drainer');
+    expect(page!.content).toBe('The drainer now reclaims stale claims.');
+    expect(page!.updatedAt).toEqual(new Date('2026-08-18T10:00:00Z'));
+  });
+
+  it('returns null when the answer carries neither body nor title', () => {
+    expect(extractBrainPageContent('tasks/run-9', [{ ok: true }])).toBeNull();
   });
 });
