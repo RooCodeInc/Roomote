@@ -11,6 +11,7 @@ import {
   type CommunicationProvider,
   queuedCommunicationMessageSchema,
 } from './communication';
+import { fastAgentParentSchema } from './fast-agent';
 import { SANDBOX_SNAPSHOT_EXPIRY_MS } from './compute-providers/worker-runtime';
 import { prActions } from './cloud-agents';
 import { ALL_REPOSITORIES } from './constants';
@@ -886,13 +887,6 @@ export type LinkedWorkItem = z.infer<typeof linkedWorkItemSchema>;
  * workspace configuration. When using environments, the `repo` field is ignored
  * (but still populated for backwards compatibility).
  */
-const fastAgentParentSchema = z.object({
-  sessionId: z.string().uuid(),
-  slackTeamId: z.string().min(1),
-  slackChannel: z.string().min(1),
-  slackThreadTs: z.string().min(1),
-});
-
 const sharedTaskPayloadSchema = z.object({
   /**
    * Legacy single-repository field in owner/repo format, or the
@@ -1357,22 +1351,6 @@ const delegatedTaskPayloadSchema = sharedTaskPayloadSchema.extend({
    */
   notifySourceRunOnSettle: z.boolean().optional(),
 });
-
-export type FastAgentParent = z.infer<typeof fastAgentParentSchema>;
-
-export function getFastAgentParentFromPayload(
-  payload: unknown,
-): FastAgentParent | null {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return null;
-  }
-
-  const parsed = z
-    .object({ fastAgentParent: fastAgentParentSchema })
-    .safeParse(payload);
-
-  return parsed.success ? parsed.data.fastAgentParent : null;
-}
 
 export function getNotifySourceRunOnSettleFromPayload(
   payload: unknown,

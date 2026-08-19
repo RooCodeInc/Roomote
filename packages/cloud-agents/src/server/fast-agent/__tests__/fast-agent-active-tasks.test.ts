@@ -1,10 +1,14 @@
 import { db, inArray, taskFactory, taskRuns, tasks } from '@roomote/db/server';
-import { RunStatus, TaskPayloadKind } from '@roomote/types';
+import {
+  RunStatus,
+  TaskPayloadKind,
+  type FastAgentParent,
+} from '@roomote/types';
 
 import { getActiveFastAgentTasks } from '../fast-agent-session';
 
-const SESSION_ID = '11111111-1111-4111-8111-111111111111';
-const OTHER_SESSION_ID = '22222222-2222-4222-8222-222222222222';
+const SESSION_ID = '7cc5bc38-9edc-4cb0-9fde-f6e44b32d66e';
+const OTHER_SESSION_ID = 'c1370cca-235f-43bf-9c26-e6f71f3ce2cc';
 const createdTaskIds: string[] = [];
 
 async function createTask(title: string, deletedAt: Date | null = null) {
@@ -19,12 +23,7 @@ async function createRun(input: {
   createdAt: Date;
   canceledAt?: Date;
   fastAgentSessionId?: string;
-  fastAgentParent?: {
-    sessionId: string;
-    slackTeamId: string;
-    slackChannel: string;
-    slackThreadTs: string;
-  };
+  fastAgentParent?: FastAgentParent;
 }) {
   const [run] = await db
     .insert(taskRuns)
@@ -157,9 +156,12 @@ describe('getActiveFastAgentTasks', () => {
       createdAt: new Date('2026-08-17T00:01:00Z'),
       fastAgentParent: {
         sessionId: SESSION_ID,
-        slackTeamId: 'T123',
-        slackChannel: 'C123',
-        slackThreadTs: '111.222',
+        conversation: {
+          surface: 'slack',
+          workspaceId: 'T123',
+          conversationId: '111.222',
+          replyTarget: { channelId: 'C123', threadId: '111.222' },
+        },
       },
     });
 

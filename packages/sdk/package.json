@@ -63,6 +63,10 @@
     "./server/notion-api": {
       "import": "./src/server/lib/notion-api.ts",
       "require": "./src/server/lib/notion-api.ts"
+    },
+    "./server/rippling-api": {
+      "import": "./src/server/lib/rippling-api.ts",
+      "require": "./src/server/lib/rippling-api.ts"
     }
   },
   "scripts": {

@@ -24,7 +24,7 @@ does not require an inbound webhook or public callback URL.
    token, and save.
 
 Roomote reads the bot and application identity from the token and registers
-the `/new`, `/goal`, `/fast`, `/link`, and `/help` commands automatically. You
+the `/new`, `/goal`, `/link`, and `/help` commands automatically. You
 do not need to copy an application ID or bot name into Roomote.
 
 <Warning>
@@ -113,12 +113,9 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
   current one
 - use `/goal objective:<objective>` to keep working toward an objective across
   multiple turns in an active task thread or DM; this does not create a new task
-- use `/fast request:<request>` to ask the fast orchestrator a question or
-  delegate work into a new task; unlike `/goal`, it does not require an active
-  task
 - when your deployment exposes **Default messages to fast mode**, enable it
   under **Settings > Personal** to send ordinary Discord DMs, mentions, and
-  eligible thread replies through the same fast orchestrator without `/fast`
+  eligible thread replies through the fast orchestrator
 - when Roomote asks where to run a task, use a button or reply naturally in the
   same thread or DM; `yes`, `never mind`, and `use API instead` confirm, cancel,
   or revise the pending route

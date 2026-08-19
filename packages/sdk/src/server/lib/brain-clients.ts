@@ -1,6 +1,6 @@
 /**
  * Brain (gbrain) client provisioning and access-token minting over
- * gbrain's admin HTTP API. Verified against gbrain 0.45.10.0:
+ * gbrain's admin HTTP API. Verified against gbrain 0.46.12.3:
  *
  * - POST /admin/login {token} -> Set-Cookie gbrain_admin (bootstrap token is
  *   exchanged for a cookie session; the token itself is never persisted).
@@ -19,12 +19,13 @@ import {
   and,
   db,
   eq,
+  isBrainProviderConfigured,
   isNull,
   mcpConnections,
   resetBrainIngestionState,
 } from '@roomote/db/server';
 import { decrypt, encrypt } from '@roomote/db/encryption';
-import { Env, isBrainConfigured } from '@roomote/env';
+import { Env } from '@roomote/env';
 import {
   BRAIN_MCP_ID,
   isMcpConnectionGbrainConfig,
@@ -235,7 +236,10 @@ export async function mintGbrainAccessToken(
 export async function resolveBrainConnection(
   role: 'agent' | 'ingest' | 'maintenance',
 ): Promise<{ baseUrl: string; token: string } | null> {
-  if (!isBrainConfigured(Env)) {
+  // Explicit R_BRAIN_* provider key only: the gateway token and R_GBRAIN_URL
+  // are template-generated plumbing on some platforms, so neither can carry
+  // the operator's intent to turn the Brain on.
+  if (!(await isBrainProviderConfigured())) {
     return null;
   }
 

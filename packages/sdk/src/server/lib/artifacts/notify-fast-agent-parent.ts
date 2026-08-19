@@ -151,7 +151,7 @@ export async function notifyFastAgentParentOnArtifact(input: {
     const deliveryError =
       error instanceof FastAgentParentEventDeliveryError ? error : null;
 
-    if (delivered || deliveryError?.slackPosted) {
+    if (delivered || deliveryError?.replyPosted) {
       // The parent thread already saw the event; releasing the claim would
       // make a retry double-post. Settle the marker best-effort instead.
       await writeDeliveryMarker('delivered').catch(() => {});

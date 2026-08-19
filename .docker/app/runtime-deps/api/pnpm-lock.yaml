@@ -14,6 +14,9 @@ importers:
       snowflake-sdk:
         specifier: 2.4.3
         version: 2.4.3(asn1.js@5.4.1)
+      zod:
+        specifier: 3.25.76
+        version: 3.25.76
 
 packages:
 
@@ -721,6 +724,9 @@ packages:
   xml-naming@0.3.0:
     resolution: {integrity: sha512-ghig2TBE/H11aOVgmahA3MhimvkBr6JIYknH/Dhdk10nXwdbIqBJsbfMxpvFPG8bAw77gN29aQWvKpmVoPlvPQ==}
     engines: {node: '>=16.0.0'}
+
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
 snapshots:
 
@@ -1678,3 +1684,5 @@ snapshots:
       is-wsl: 3.1.1
 
   xml-naming@0.3.0: {}
+
+  zod@3.25.76: {}

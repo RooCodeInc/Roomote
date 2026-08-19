@@ -367,7 +367,7 @@ export const SETUP_MODEL_PROVIDER_CATALOG = [
       'gemini-3-7-flash': 'vercel/google/gemini-3.7-flash',
       'deepseek-v4-flash-0731': 'vercel/deepseek/deepseek-v4-flash-0731',
       'deepseek-v4-pro-0813': 'vercel/deepseek/deepseek-v4-pro-0813',
-      'glm-5-2': 'vercel/zai/glm-5.2',
+      'glm-5-3': 'vercel/zai/glm-5.3',
       'kimi-k3': 'vercel/moonshotai/kimi-k3',
       'kimi-k2-7-code': 'vercel/moonshotai/kimi-k2.7-code',
       'qwen3-8-max': 'vercel/alibaba/qwen3.8-max',

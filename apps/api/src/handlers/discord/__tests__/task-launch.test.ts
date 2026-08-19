@@ -884,6 +884,68 @@ describe('launchDiscordTask', () => {
     );
   });
 
+  it('posts a caller-owned kickoff before enqueue and skips the generic acknowledgement', async () => {
+    const order: string[] = [];
+    mocks.enqueueTask.mockImplementationOnce(
+      async (
+        _input: unknown,
+        options: {
+          beforeEnqueue: (taskRun: { taskId: string }) => Promise<void>;
+        },
+      ) => {
+        await options.beforeEnqueue({ taskId: 'task-41' });
+        order.push('enqueued');
+        return { id: 41, taskId: 'task-41' };
+      },
+    );
+    const beforeEnqueueKickoff = vi.fn(async () => {
+      order.push('kickoff');
+    });
+    const provider = {
+      reserveTaskThread: vi.fn(),
+      completeTaskThread: vi.fn(),
+      postMessage: vi.fn(),
+      editChannel: vi.fn(),
+    };
+
+    const result = await launchDiscordTask({
+      provider: provider as never,
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix checkout',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-fast-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'dm-1',
+        communicationMessageId: 'message-fast-1',
+      },
+      channel: {
+        channelId: 'dm-1',
+        channelName: 'Direct message',
+        channelType: 1,
+        isDirectMessage: true,
+        isThread: false,
+      },
+      workspace: {
+        repoForPayload: 'acme/repo',
+        workspaceDisplayName: 'Acme',
+      },
+      beforeEnqueueKickoff,
+    });
+
+    expect(beforeEnqueueKickoff).toHaveBeenCalledWith({
+      taskId: 'task-41',
+      taskUrl: 'https://roomote.example/tasks/task-41',
+    });
+    expect(order).toEqual(['kickoff', 'enqueued']);
+    expect(provider.postMessage).not.toHaveBeenCalled();
+    expect(result.acknowledgement).toBeNull();
+  });
+
   it('carries an automation initiator and agent prompt override into the task payload', async () => {
     const provider = {
       reserveTaskThread: vi.fn(),
@@ -990,6 +1052,15 @@ describe('launchDiscordTask', () => {
       },
       forceNewThread: true,
       fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+      fastAgentParent: {
+        sessionId: '11111111-1111-4111-8111-111111111111',
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'guild-1',
+          conversationId: 'old-thread',
+          replyTarget: { channelId: 'channel-1', threadId: 'old-thread' },
+        },
+      },
     });
 
     expect(provider.reserveTaskThread).toHaveBeenCalledWith(
@@ -1000,7 +1071,20 @@ describe('launchDiscordTask', () => {
         task: expect.objectContaining({
           payload: expect.objectContaining({
             communicationThreadId: 'new-thread',
+            communicationContextInherited: true,
             fastAgentSessionId: '11111111-1111-4111-8111-111111111111',
+            fastAgentParent: {
+              sessionId: '11111111-1111-4111-8111-111111111111',
+              conversation: {
+                surface: 'discord',
+                workspaceId: 'guild-1',
+                conversationId: 'old-thread',
+                replyTarget: {
+                  channelId: 'channel-1',
+                  threadId: 'old-thread',
+                },
+              },
+            },
           }),
         }),
       }),

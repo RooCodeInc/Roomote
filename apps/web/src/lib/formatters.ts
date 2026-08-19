@@ -1,4 +1,4 @@
-import { formatDistanceToNowStrict } from 'date-fns';
+import { format, formatDistanceToNowStrict } from 'date-fns';
 import { enUS } from 'date-fns/locale';
 
 /**
@@ -104,6 +104,11 @@ const compactLocale: typeof enUS = {
     return compactDistance;
   },
 };
+
+/** Short calendar-day label ("Aug 19"), matching the analytics axes. */
+export function formatShortDate(date: Date): string {
+  return format(date, 'MMM d');
+}
 
 export function formatDistanceToNowCompact(
   date: Date | number,

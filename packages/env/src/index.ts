@@ -680,26 +680,27 @@ export function isRoomoteCloudEnabled(
  * deployment. Enabled unless explicitly disabled.
  */
 /**
- * Whether this deployment has a Brain at all. Deliberately a topology
- * question, not a credential one: the gateway token is only ever set when
- * someone wired a Brain on purpose (templates generate it, compose operators
- * set it), so the provider key that makes it useful can arrive later from
- * Settings without a redeploy.
+ * Whether this deployment *might* have a Brain: some Brain wiring exists in
+ * the environment. This is deliberately a superset question, not activation.
+ * The Render and Coolify templates auto-generate the gateway token as
+ * plumbing between the gbrain service and the inference gateway, so a set
+ * token means "a Brain could be wired here", never "an operator turned the
+ * Brain on". Activation — everything user-visible, from delivering the
+ * gbrain MCP server to agents to running ingestion — additionally requires
+ * an explicit R_BRAIN_* provider key and lives in isBrainProviderConfigured
+ * (@roomote/db), which also reads Settings.
  *
  * Not R_GBRAIN_URL, which every compose file defaults to a service address
  * whether or not that service runs. Keying on a defaulted value made this
  * true everywhere and quietly enqueued memories on deployments that have no
  * Brain and never will.
  *
- * The two are separate on purpose. This gates the cheap, synchronous paths
- * that only need to know a Brain exists, above all the outbox insert inside
- * the run-completion transaction, which must not do a database lookup of its
- * own. Whether the Brain is usable right now is an async question answered
- * where it is actually needed, by resolving a connection and a provider.
- *
- * Enqueuing memories for a Brain that has no key yet is intentional: the
- * drainer holds them until one is configured, so turning the Brain on later
- * picks up the history rather than starting from that moment.
+ * The split exists because this gates the cheap, synchronous paths that only
+ * need to know a Brain might exist, above all the outbox insert inside the
+ * run-completion transaction, which must not do a database lookup of its
+ * own. Enqueuing memories for a Brain that has no key yet is intentional:
+ * the drainer holds them until one is configured, so turning the Brain on
+ * later picks up the history rather than starting from that moment.
  */
 export function isBrainConfigured(env: {
   R_BRAIN_GATEWAY_TOKEN?: string;

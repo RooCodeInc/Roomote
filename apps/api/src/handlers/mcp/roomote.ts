@@ -31,6 +31,8 @@ import {
 } from '@roomote/auth';
 import { z } from 'zod';
 
+import packageJson from '../../../../../package.json';
+
 import type { Variables } from '../../types';
 
 import {
@@ -48,6 +50,7 @@ import {
 } from './communication-message-lookup';
 import { requireCommunicationLookupTaskRun } from './communication-lookup-run-context';
 import type { McpAuth } from './middleware';
+import { resolveAboutMeVersion } from './about-me-version';
 import { registerRoomoteMemberTools } from './roomote-member-tools';
 
 const ROOMOTE_MCP_SERVER_INFO = {
@@ -147,6 +150,11 @@ async function buildAboutMePayload(options: {
   userId: string | null;
   operation: 'overview' | 'integrations';
 }) {
+  const version = resolveAboutMeVersion(
+    Env.RELEASE_PRODUCT_VERSION,
+    Env.RELEASE_VERSION,
+    packageJson.version,
+  );
   const [
     environmentRows,
     linearRows,
@@ -224,6 +232,7 @@ async function buildAboutMePayload(options: {
     requestedOperation: options.operation,
     product: {
       name: PRODUCT_NAME,
+      ...(version ? { version } : {}),
       appUrl: Env.R_APP_URL,
       docsUrl: getDefaultDocsUrl(Env.APP_ENV ?? 'development'),
     },

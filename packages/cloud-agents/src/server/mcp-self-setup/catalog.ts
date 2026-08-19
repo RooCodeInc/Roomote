@@ -73,6 +73,13 @@ export const MCP_SETUP_INTEGRATION_METADATA: Record<
       'Create and update shared content when the Notion integration capabilities permit it',
     ],
   },
+  rippling: {
+    capabilities: [
+      'Keep Brain employee profiles current from an authoritative HRIS roster',
+      'Use explicit reporting lines and department or team memberships in task context',
+      'Keep the Rippling API token on the control plane rather than exposing it to agents',
+    ],
+  },
   jira: {
     capabilities: [
       'Read Jira issues and linked metadata',

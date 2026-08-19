@@ -2,22 +2,55 @@ const mocks = vi.hoisted(() => ({
   acquireTurnLock: vi.fn(),
   releaseTurnLock: vi.fn(),
   answerQuestion: vi.fn(),
+  createLauncher: vi.fn(),
+  launchTask: vi.fn(),
   findSession: vi.fn(),
   findInstallation: vi.fn(),
   findArtifacts: vi.fn(),
   findTaskRun: vi.fn(),
   postMessage: vi.fn(),
+  createDiscordProvider: vi.fn(),
+  discordPostMessage: vi.fn(),
+  createDiscordThread: vi.fn(),
+  enqueueTask: vi.fn(),
+  getTaskUrl: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
+  fastAgentConversationRepository: { findById: mocks.findSession },
+  createFastAgentSlackTaskLauncher: mocks.createLauncher,
+  createFastAgentTaskLauncher:
+    ({
+      buildTask,
+    }: {
+      buildTask: (input: {
+        prompt: string;
+        environmentId: string | null;
+        parentSessionId: string;
+      }) => unknown | Promise<unknown>;
+    }) =>
+    async (input: {
+      prompt: string;
+      environmentId: string | null;
+      parentSessionId: string;
+      postKickoff: (task: {
+        taskId: string;
+        taskUrl?: string;
+      }) => Promise<void>;
+    }) => {
+      const task = await buildTask(input);
+      const taskUrl = mocks.getTaskUrl();
+      await input.postKickoff({ taskId: 'child-task-1', taskUrl });
+      await mocks.enqueueTask({ task });
+      return { success: true, taskId: 'child-task-1', taskUrl };
+    },
 }));
 
 vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
-      slackQuickAnswers: { findFirst: mocks.findSession },
       slackInstallations: { findFirst: mocks.findInstallation },
       taskArtifacts: { findMany: mocks.findArtifacts },
       taskRuns: { findFirst: mocks.findTaskRun },
@@ -29,11 +62,6 @@ vi.mock('@roomote/db/server', () => ({
   slackInstallations: {
     isActive: 'slack_installations.is_active',
     teamId: 'slack_installations.team_id',
-  },
-  slackQuickAnswers: {
-    id: 'slack_quick_answers.id',
-    slackChannel: 'slack_quick_answers.slack_channel',
-    slackThreadTs: 'slack_quick_answers.slack_thread_ts',
   },
   taskArtifacts: { id: 'task_artifacts.id' },
   taskRuns: { id: 'task_runs.id' },
@@ -58,13 +86,21 @@ vi.mock('./artifacts/raw-url', () => ({
   currentEpochSeconds: vi.fn(() => 1234),
 }));
 
+vi.mock('./discord-communication', () => ({
+  createDiscordCommunicationProviderFromRuntimeCredentials:
+    mocks.createDiscordProvider,
+}));
+
 import { deliverFastAgentParentEvent } from './fast-agent-parent-event';
 
 const parent = {
   sessionId: '11111111-1111-4111-8111-111111111111',
-  slackTeamId: 'T123',
-  slackChannel: 'C123',
-  slackThreadTs: '100.001',
+  conversation: {
+    surface: 'slack' as const,
+    workspaceId: 'T123',
+    conversationId: '100.001',
+    replyTarget: { channelId: 'C123', threadId: '100.001' },
+  },
 };
 
 const event = {
@@ -86,8 +122,19 @@ describe('deliverFastAgentParentEvent', () => {
     vi.clearAllMocks();
     mocks.acquireTurnLock.mockResolvedValue(mocks.releaseTurnLock);
     mocks.releaseTurnLock.mockResolvedValue(undefined);
-    mocks.findSession.mockResolvedValue({ id: parent.sessionId, userId: 'u1' });
-    mocks.findInstallation.mockResolvedValue({ botAccessToken: 'xoxb-test' });
+    mocks.findSession.mockImplementation(
+      async ({ fallbackConversation }: { fallbackConversation: unknown }) => ({
+        id: parent.sessionId,
+        userId: 'u1',
+        conversation: fallbackConversation,
+        messages: [],
+      }),
+    );
+    mocks.findInstallation.mockResolvedValue({
+      botAccessToken: 'xoxb-test',
+      teamDomain: 'acme',
+    });
+    mocks.createLauncher.mockReturnValue(mocks.launchTask);
     mocks.findArtifacts.mockResolvedValue([
       {
         id: 'artifact-1',
@@ -100,13 +147,44 @@ describe('deliverFastAgentParentEvent', () => {
     ]);
     mocks.findTaskRun.mockResolvedValue({ status: 'running' });
     mocks.postMessage.mockResolvedValue('101.001');
+    mocks.discordPostMessage.mockResolvedValue({
+      provider: 'discord',
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      messageId: 'message-1',
+    });
+    mocks.createDiscordThread.mockResolvedValue({
+      channelId: 'child-thread-1',
+      parentChannelId: 'channel-1',
+      messageId: 'child-message-1',
+      name: 'Child task',
+      kind: 'thread',
+    });
+    mocks.createDiscordProvider.mockResolvedValue({
+      postMessage: mocks.discordPostMessage,
+      createTaskThread: mocks.createDiscordThread,
+    });
+    mocks.getTaskUrl.mockReturnValue(
+      'https://roomote.example/task/child-task-1',
+    );
+    mocks.enqueueTask.mockImplementation(
+      async (
+        _input: unknown,
+        options?: {
+          beforeEnqueue?: (run: { taskId: string }) => Promise<void>;
+        },
+      ) => {
+        await options?.beforeEnqueue?.({ taskId: 'child-task-1' });
+        return { taskId: 'child-task-1' };
+      },
+    );
     mocks.answerQuestion.mockImplementation(
       async ({
-        postSlackReply,
+        adapter,
       }: {
-        postSlackReply: (reply: unknown) => unknown;
+        adapter: { postReply: (reply: unknown) => unknown };
       }) =>
-        postSlackReply({
+        adapter.postReply({
           purpose: 'closeout',
           message: 'The proof is ready.',
           imageArtifactIds: ['artifact-1', 'artifact-1'],
@@ -118,15 +196,26 @@ describe('deliverFastAgentParentEvent', () => {
     await deliverFastAgentParentEvent({ parent, event });
 
     expect(mocks.acquireTurnLock).toHaveBeenCalledWith({
-      slackTeamId: 'T123',
-      slackChannel: 'C123',
-      slackThreadTs: '100.001',
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: '100.001',
+        replyTarget: { channelId: 'C123', threadId: '100.001' },
+      },
     });
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
-        platformEvent: true,
+        turnSource: 'platform_event',
+        adapter: expect.objectContaining({ launchTask: mocks.launchTask }),
       }),
     );
+    expect(mocks.createLauncher).toHaveBeenCalledWith({
+      userId: 'u1',
+      teamId: 'T123',
+      teamDomain: 'acme',
+      channelId: 'C123',
+      threadTs: '100.001',
+    });
     expect(mocks.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         channel: 'C123',
@@ -154,6 +243,146 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.answerQuestion).not.toHaveBeenCalled();
   });
 
+  it('delivers a guild parent event to its routable channel, not its session identity', async () => {
+    const discordParent = {
+      ...parent,
+      conversation: {
+        surface: 'discord' as const,
+        workspaceId: 'guild-1',
+        conversationId: 'interaction-fast-guild',
+        replyTarget: { channelId: 'channel-1' },
+      },
+    };
+
+    await expect(
+      deliverFastAgentParentEvent({ parent: discordParent, event }),
+    ).resolves.toBe('delivered');
+
+    expect(mocks.discordPostMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      idempotencyKey: 'fast-parent-artifact:artifact-1:v1',
+      text: 'The proof is ready.',
+      textFormat: 'markdown',
+      images: [
+        {
+          url: 'https://api.roomote.example/api/artifacts/artifact-1/raw?signed=1',
+          altText: 'result.png',
+          contentType: 'image/png',
+        },
+      ],
+    });
+    expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
+  });
+
+  it('delivers a threaded Discord parent event inside the provider thread', async () => {
+    await deliverFastAgentParentEvent({
+      parent: {
+        ...parent,
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'guild-1',
+          conversationId: 'thread-1',
+          replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+        },
+      },
+      event,
+    });
+
+    expect(mocks.discordPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+      }),
+    );
+  });
+
+  it('uses the repository current destination instead of stale child metadata', async () => {
+    mocks.findSession.mockResolvedValueOnce({
+      id: parent.sessionId,
+      userId: 'u1',
+      messages: [],
+      conversation: {
+        ...parent.conversation,
+        replyTarget: { channelId: 'C456', threadId: '200.002' },
+      },
+    });
+
+    await deliverFastAgentParentEvent({ parent, event });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversation: expect.objectContaining({
+          replyTarget: { channelId: 'C456', threadId: '200.002' },
+        }),
+      }),
+    );
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'C456', thread_ts: '200.002' }),
+    );
+  });
+
+  it('keeps launch_task available during a Discord parent event', async () => {
+    const postKickoff = vi.fn().mockResolvedValue(undefined);
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: { launchTask: (input: unknown) => unknown };
+      }) =>
+        adapter.launchTask({
+          prompt: 'Fix the follow-up regression',
+          environmentId: null,
+          parentSessionId: parent.sessionId,
+          postKickoff,
+        }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent: {
+        ...parent,
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'guild-1',
+          conversationId: 'thread-1',
+          replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+        },
+      },
+      event,
+    });
+
+    expect(mocks.createDiscordThread).toHaveBeenCalledWith(
+      expect.objectContaining({ channelId: 'channel-1' }),
+    );
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        task: expect.objectContaining({
+          payload: expect.objectContaining({
+            communicationProvider: 'discord',
+            communicationThreadId: 'child-thread-1',
+            communicationContextInherited: true,
+            fastAgentSessionId: parent.sessionId,
+            fastAgentParent: {
+              sessionId: parent.sessionId,
+              conversation: {
+                surface: 'discord',
+                workspaceId: 'guild-1',
+                conversationId: 'thread-1',
+                replyTarget: {
+                  channelId: 'channel-1',
+                  threadId: 'thread-1',
+                },
+              },
+            },
+          }),
+        }),
+      }),
+    );
+    expect(postKickoff).toHaveBeenCalledWith({
+      taskId: 'child-task-1',
+      taskUrl: 'https://roomote.example/task/child-task-1',
+    });
+  });
+
   it('delivers a pull request event with a stable Slack idempotency key', async () => {
     const pullRequestEvent = {
       type: 'pull_request_opened' as const,
@@ -172,11 +401,11 @@ describe('deliverFastAgentParentEvent', () => {
     };
     mocks.answerQuestion.mockImplementation(
       async ({
-        postSlackReply,
+        adapter,
       }: {
-        postSlackReply: (reply: unknown) => unknown;
+        adapter: { postReply: (reply: unknown) => unknown };
       }) =>
-        postSlackReply({
+        adapter.postReply({
           purpose: 'closeout',
           message: 'The pull request is open.',
         }),
@@ -193,7 +422,7 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         question: expect.stringContaining(pullRequestEvent.pullRequest.url),
-        platformEvent: true,
+        turnSource: 'platform_event',
       }),
     );
     expect(firstClientMessageId).toEqual(expect.any(String));
@@ -220,7 +449,7 @@ describe('deliverFastAgentParentEvent', () => {
     expect(input).toEqual(
       expect.objectContaining({
         question: expect.stringContaining('"type":"task_settled"'),
-        platformEvent: true,
+        turnSource: 'platform_event',
       }),
     );
     expect(input).not.toHaveProperty('activeTasks');

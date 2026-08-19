@@ -174,8 +174,9 @@ async function findFastAgentChildRunForPendingInput(params: {
   const parent = getFastAgentParentFromPayload(run.payload);
   if (
     !parent ||
-    parent.slackTeamId !== params.slackTeamId ||
-    parent.slackThreadTs !== params.threadId
+    parent.conversation.surface !== 'slack' ||
+    parent.conversation.workspaceId !== params.slackTeamId ||
+    parent.conversation.replyTarget.threadId !== params.threadId
   ) {
     return null;
   }

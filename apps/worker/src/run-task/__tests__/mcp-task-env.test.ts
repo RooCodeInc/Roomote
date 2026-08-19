@@ -63,9 +63,12 @@ describe('getCommunicationReplyContext', () => {
         communicationContextInherited: true,
         fastAgentParent: {
           sessionId: '11111111-1111-4111-8111-111111111111',
-          slackTeamId: 'T123',
-          slackChannel: 'C123',
-          slackThreadTs: '111.222',
+          conversation: {
+            surface: 'slack',
+            workspaceId: 'T123',
+            conversationId: '111.222',
+            replyTarget: { channelId: 'C123', threadId: '111.222' },
+          },
         },
       },
     };
@@ -121,6 +124,29 @@ describe('getCommunicationReplyContext', () => {
       channelId: 'channel-1',
       threadId: 'thread-1',
     });
+  });
+
+  it('does not activate direct Discord replies for a Fast child task', () => {
+    const taskRun = {
+      payload: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'channel-1',
+        communicationThreadId: 'child-thread-1',
+        communicationContextInherited: true,
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+          conversation: {
+            surface: 'discord',
+            workspaceId: 'guild-1',
+            conversationId: 'interaction-1',
+            replyTarget: { channelId: 'channel-1' },
+          },
+        },
+      },
+    };
+
+    expect(getCommunicationReplyContext(taskRun)).toBeNull();
+    expect(isFastAgentChildTaskRun(taskRun)).toBe(true);
   });
 
   it('does not activate inherited provider-neutral source context', () => {

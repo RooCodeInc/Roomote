@@ -2,7 +2,7 @@
 
 import type { ReactNode } from 'react';
 
-import { Skeleton } from '@/components/system';
+import { Skeleton } from '../primitives/skeleton';
 import { cn } from '@/lib/utils';
 
 export function AnalyticsSummaryCardsGrid({

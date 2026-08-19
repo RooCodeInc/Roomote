@@ -356,14 +356,19 @@ agents record what they decided and why when they finish substantial work.
 Render's Blueprint cannot generate the admin token for you (`generateValue`
 produces base64, and gbrain requires at least 32 characters of
 `[A-Za-z0-9_-]` or it refuses to boot), so enabling the Brain is two values
-rather than Railway's one. Both go on the **roomote-gbrain** service:
+rather than Railway's one:
 
-1. Configure a model provider under **Settings → Models** after first boot,
-   if you have not already. The roomote-gbrain service holds no provider key;
-   it asks roomote-api for embeddings and synthesis, and roomote-api uses the
-   key your deployment already has. Changing it later needs no redeploy. To
-   bill the Brain separately, set `R_BRAIN_OPENROUTER_API_KEY` or
-   `R_BRAIN_OPENAI_API_KEY` on the app services instead.
+1. Set `R_BRAIN_OPENROUTER_API_KEY` or `R_BRAIN_OPENAI_API_KEY` as a
+   Settings environment value, which reaches every app service from one
+   place. (Setting it as a Render environment variable also works, but the
+   Blueprint duplicates the env block per service, so it must be set on all
+   four app services.) The explicit `R_BRAIN_*` name is the Brain's on
+   switch: a deployment that only configured task models under
+   **Settings → Models** keeps no Brain, no ingestion, and agents are never
+   told one exists. The value can be the same key you use for tasks, or a
+   separate one to bill the Brain independently. The roomote-gbrain service
+   holds no provider key; it asks roomote-api for embeddings and synthesis
+   using this key, and changing it later needs no redeploy.
 2. Set `GBRAIN_ADMIN_BOOTSTRAP_TOKEN` to a fresh random value. Generate one
    with `openssl rand -hex 24`, which is 48 conforming characters. Roomote
    uses it only to register its own scoped clients; it is never handed to an

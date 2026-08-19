@@ -30,7 +30,7 @@
         "id": "600000000000000001",
         "application_id": "200000000000000001",
         "type": 2,
-        "token": "mock-fast-interaction-token",
+        "token": "mock-new-interaction-token",
         "channel_id": "500000000000000001",
         "user": {
           "id": "111000111000111001",
@@ -38,13 +38,13 @@
           "global_name": "Grace"
         },
         "data": {
-          "name": "fast",
+          "name": "new",
           "type": 1,
           "options": [
             {
               "name": "request",
               "type": 3,
-              "value": "what file handles Discord events?"
+              "value": "inspect the Discord events handler"
             }
           ]
         }

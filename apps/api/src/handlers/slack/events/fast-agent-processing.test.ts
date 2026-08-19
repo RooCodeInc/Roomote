@@ -2,7 +2,6 @@ const mocks = vi.hoisted(() => ({
   acquireLock: vi.fn(),
   releaseLock: vi.fn(),
   answerQuestion: vi.fn(),
-  processAttachments: vi.fn(),
   postThreadMessage: vi.fn(),
 }));
 
@@ -17,15 +16,19 @@ vi.mock('@roomote/cloud-agents', async (importOriginal) => ({
   stripLeadingSlackProductMention: (text: string) => text,
 }));
 
-vi.mock('../helpers/attachments.js', () => ({
-  processSlackAttachments: mocks.processAttachments,
-}));
-
 vi.mock('../helpers/thread-posting.js', () => ({
   postSlackThreadMarkdownMessage: mocks.postThreadMessage,
 }));
 
-import { processFastAgentMessage } from './fast-agent.js';
+import { processFastAgentMessage as processFastAgentMessageImpl } from './fast-agent.js';
+
+type ProcessFastAgentMessageParams = Parameters<
+  typeof processFastAgentMessageImpl
+>[0];
+const launchTask = vi.fn();
+const processFastAgentMessage = (
+  params: Omit<ProcessFastAgentMessageParams, 'launchTask'>,
+) => processFastAgentMessageImpl({ ...params, launchTask });
 
 describe('processFastAgentMessage', () => {
   beforeEach(() => {
@@ -33,18 +36,13 @@ describe('processFastAgentMessage', () => {
     mocks.acquireLock.mockResolvedValue(mocks.releaseLock);
     mocks.releaseLock.mockResolvedValue(undefined);
     mocks.postThreadMessage.mockResolvedValue('posted');
-    mocks.processAttachments.mockResolvedValue({
-      images: [],
-      attachmentTexts: [],
-      videoDescriptions: [],
-    });
     mocks.answerQuestion.mockImplementation(
       async ({
-        postSlackReply,
+        adapter,
       }: {
-        postSlackReply: (reply: unknown) => void;
+        adapter: { postReply: (reply: unknown) => void };
       }) => {
-        await postSlackReply({
+        await adapter.postReply({
           purpose: 'closeout',
           message: 'Doing well.',
         });
@@ -84,6 +82,7 @@ describe('processFastAgentMessage', () => {
       expect.objectContaining({
         question: 'investigate this',
         currentMessageAgentContext: 'Slack block text:\nState: New',
+        adapter: expect.objectContaining({ launchTask }),
         activeTasks: [
           { taskId: 'task-1', title: 'Fix API' },
           { taskId: 'task-2', title: 'Update docs' },
@@ -92,17 +91,193 @@ describe('processFastAgentMessage', () => {
     );
   });
 
+  it('passes an image from the initial Slack message to the Fast model', async () => {
+    const images = [
+      'data:image/png;base64,aW1hZ2UtMQ==',
+      'data:image/png;base64,aW1hZ2UtMg==',
+      'data:image/png;base64,aW1hZ2UtMw==',
+    ];
+    const files = Array.from({ length: 4 }, (_, index) => ({
+      id: `F_INITIAL_${index}`,
+      name: `initial-${index}.png`,
+      mimetype: 'image/png',
+      filetype: 'png',
+      url_private: `https://files.slack.com/F_INITIAL_${index}`,
+      url_private_download: `https://files.slack.com/F_INITIAL_${index}/download`,
+      size: 1024,
+    }));
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => [
+        {
+          user: 'U123',
+          text: '!fast inspect this screenshot',
+          ts: '100.001',
+          type: 'message',
+          files,
+        },
+      ]),
+      processSlackFiles: vi.fn().mockResolvedValue(images),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'D123',
+        channel_type: 'im',
+        user: 'U123',
+        text: '!fast inspect this screenshot',
+        ts: '100.001',
+        files,
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+    });
+
+    expect(slack.processSlackFiles).toHaveBeenCalledWith(files.slice(0, 3));
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ images }),
+    );
+  });
+
+  it('passes an image from a subsequent Slack thread message to the Fast model', async () => {
+    const image = 'data:image/jpeg;base64,Zm9sbG93LXVw';
+    const files = [
+      {
+        id: 'F_FOLLOW_UP',
+        name: 'follow-up.jpg',
+        mimetype: 'image/jpeg',
+        filetype: 'jpg',
+        url_private: 'https://files.slack.com/F_FOLLOW_UP',
+        url_private_download: 'https://files.slack.com/F_FOLLOW_UP/download',
+        size: 2048,
+      },
+    ];
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => [
+        {
+          user: 'U123',
+          text: '!fast inspect this screenshot',
+          ts: '100.001',
+          type: 'message',
+        },
+        {
+          user: 'U123',
+          text: 'What about this one?',
+          ts: '100.002',
+          type: 'message',
+          files,
+        },
+      ]),
+      processSlackFiles: vi.fn().mockResolvedValue([image]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'D123',
+        channel_type: 'im',
+        thread_ts: '100.001',
+        user: 'U123',
+        text: 'What about this one?',
+        ts: '100.002',
+        files,
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      continuation: true,
+    });
+
+    expect(slack.processSlackFiles).toHaveBeenCalledWith(files);
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'What about this one?',
+        images: [image],
+      }),
+    );
+  });
+
+  it('treats an image-only Fast follow-up as a multimodal question', async () => {
+    const image = 'data:image/png;base64,Zm9sbG93dXA=';
+    const files = [
+      {
+        id: 'F_IMAGE_ONLY',
+        name: 'follow-up.png',
+        mimetype: 'image/png',
+        filetype: 'png',
+        url_private: 'https://files.slack.com/F_IMAGE_ONLY',
+        url_private_download: 'https://files.slack.com/F_IMAGE_ONLY/download',
+        size: 1024,
+      },
+    ];
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => [
+        {
+          user: 'U123',
+          text: '!fast inspect this screenshot',
+          ts: '100.001',
+          type: 'message',
+        },
+        {
+          user: 'U123',
+          text: '',
+          ts: '100.002',
+          type: 'message',
+          files,
+        },
+      ]),
+      processSlackFiles: vi.fn().mockResolvedValue([image]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'D123',
+        channel_type: 'im',
+        thread_ts: '100.001',
+        user: 'U123',
+        text: '',
+        ts: '100.002',
+        files,
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      continuation: true,
+    });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: expect.stringContaining('shared an image'),
+        images: [image],
+      }),
+    );
+    expect(mocks.postThreadMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ text: expect.stringContaining('!fast') }),
+    );
+  });
+
   it('can answer with a reaction without posting a text fallback', async () => {
     mocks.answerQuestion.mockImplementationOnce(
       async ({
-        postSlackReaction,
+        adapter,
       }: {
-        postSlackReaction: (reaction: unknown) => void;
+        adapter: { postReaction: (reaction: unknown) => void };
       }) => {
-        await postSlackReaction({
+        await adapter.postReaction({
           name: 'thumbsup',
           purpose: 'closeout',
-          slackMessageTs: '100.001',
+          messageId: '100.001',
         });
         return '';
       },
@@ -149,14 +324,14 @@ describe('processFastAgentMessage', () => {
   it('keeps the processing reaction when it becomes the visible closeout', async () => {
     mocks.answerQuestion.mockImplementationOnce(
       async ({
-        postSlackReaction,
+        adapter,
       }: {
-        postSlackReaction: (reaction: unknown) => void;
+        adapter: { postReaction: (reaction: unknown) => void };
       }) => {
-        await postSlackReaction({
+        await adapter.postReaction({
           name: 'eyes',
           purpose: 'closeout',
-          slackMessageTs: '100.001',
+          messageId: '100.001',
         });
         return '';
       },
@@ -195,18 +370,19 @@ describe('processFastAgentMessage', () => {
   it('clears a same-name processing reaction after an intermediate acknowledgement', async () => {
     mocks.answerQuestion.mockImplementationOnce(
       async ({
-        postSlackReaction,
-        postSlackReply,
+        adapter,
       }: {
-        postSlackReaction: (reaction: unknown) => void;
-        postSlackReply: (reply: unknown) => void;
+        adapter: {
+          postReaction: (reaction: unknown) => void;
+          postReply: (reply: unknown) => void;
+        };
       }) => {
-        await postSlackReaction({
+        await adapter.postReaction({
           name: 'eyes',
           purpose: 'ack',
-          slackMessageTs: '100.001',
+          messageId: '100.001',
         });
-        await postSlackReply({
+        await adapter.postReply({
           purpose: 'closeout',
           message: 'I found the answer.',
         });
@@ -306,11 +482,11 @@ describe('processFastAgentMessage', () => {
     mocks.postThreadMessage.mockResolvedValue('suppressed');
     mocks.answerQuestion.mockImplementationOnce(
       async ({
-        postSlackReply,
+        adapter,
       }: {
-        postSlackReply: (reply: unknown) => void;
+        adapter: { postReply: (reply: unknown) => void };
       }) => {
-        await postSlackReply({
+        await adapter.postReply({
           purpose: 'closeout',
           message: 'Delegated the work.',
           kickoff: true,
@@ -417,16 +593,24 @@ describe('processFastAgentMessage', () => {
     expect(mocks.answerQuestion).toHaveBeenCalledOnce();
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
-        slackTeamId: 'T123',
+        conversation: {
+          surface: 'slack',
+          workspaceId: 'T123',
+          conversationId: '100.001',
+          replyTarget: { channelId: 'D123', threadId: '100.001' },
+        },
         senderDisplayName: 'Matt',
-        senderSlackUserId: 'U123',
+        senderExternalId: 'U123',
         threadContext: [],
       }),
     );
     expect(mocks.acquireLock).toHaveBeenCalledWith({
-      slackTeamId: 'T123',
-      slackChannel: 'D123',
-      slackThreadTs: '100.001',
+      conversation: {
+        surface: 'slack',
+        workspaceId: 'T123',
+        conversationId: '100.001',
+        replyTarget: { channelId: 'D123', threadId: '100.001' },
+      },
     });
     expect(mocks.postThreadMessage).toHaveBeenCalledOnce();
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
@@ -465,7 +649,7 @@ describe('processFastAgentMessage', () => {
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         senderDisplayName: undefined,
-        senderSlackUserId: 'U123',
+        senderExternalId: 'U123',
       }),
     );
   });
@@ -529,111 +713,6 @@ describe('processFastAgentMessage', () => {
 
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({ question: 'Good, tired' }),
-    );
-  });
-
-  it('passes Slack screenshots to Fast mode with the user question', async () => {
-    mocks.processAttachments.mockResolvedValueOnce({
-      images: [
-        'data:image/png;base64,aW1hZ2UtMQ==',
-        'data:image/png;base64,aW1hZ2UtMg==',
-        'data:image/png;base64,aW1hZ2UtMw==',
-      ],
-      attachmentTexts: [],
-      videoDescriptions: [],
-    });
-    const files = Array.from({ length: 4 }, (_, index) => ({
-      id: `F12${index}`,
-      name: `screenshot-${index}.png`,
-      mimetype: 'image/png',
-      size: 1024,
-    }));
-    const slack = {
-      addReaction: vi.fn().mockResolvedValue(true),
-      removeReaction: vi.fn().mockResolvedValue(true),
-      normalizeIncomingText: vi.fn(async (text: string) => text),
-      fetchThreadMessages: vi.fn(async () => []),
-    };
-
-    await processFastAgentMessage({
-      event: {
-        type: 'message',
-        channel: 'D123',
-        channel_type: 'im',
-        user: 'U123',
-        text: '!fast what is wrong here?',
-        ts: '100.001',
-        files,
-      } as never,
-      slack: slack as never,
-      userId: 'user-1',
-      teamId: 'T123',
-    });
-
-    expect(mocks.processAttachments).toHaveBeenCalledWith({
-      slack,
-      files: files.slice(0, 3),
-      userId: 'user-1',
-      userTextContext: '!fast what is wrong here?',
-    });
-    expect(mocks.answerQuestion).toHaveBeenCalledWith(
-      expect.objectContaining({
-        question: 'what is wrong here?',
-        images: [
-          'data:image/png;base64,aW1hZ2UtMQ==',
-          'data:image/png;base64,aW1hZ2UtMg==',
-          'data:image/png;base64,aW1hZ2UtMw==',
-        ],
-      }),
-    );
-  });
-
-  it('treats an image-only Fast follow-up as a multimodal question', async () => {
-    mocks.processAttachments.mockResolvedValueOnce({
-      images: ['data:image/png;base64,Zm9sbG93dXA='],
-      attachmentTexts: [],
-      videoDescriptions: [],
-    });
-    const slack = {
-      addReaction: vi.fn().mockResolvedValue(true),
-      removeReaction: vi.fn().mockResolvedValue(true),
-      normalizeIncomingText: vi.fn(async (text: string) => text),
-      fetchThreadMessages: vi.fn(async () => []),
-    };
-
-    await processFastAgentMessage({
-      event: {
-        type: 'message',
-        channel: 'D123',
-        channel_type: 'im',
-        thread_ts: '100.001',
-        user: 'U123',
-        text: '',
-        ts: '100.002',
-        files: [
-          {
-            id: 'F124',
-            name: 'screenshot.png',
-            mimetype: 'image/png',
-            size: 1024,
-          },
-        ],
-      } as never,
-      slack: slack as never,
-      userId: 'user-1',
-      teamId: 'T123',
-      continuation: true,
-    });
-
-    expect(mocks.answerQuestion).toHaveBeenCalledWith(
-      expect.objectContaining({
-        question: expect.stringContaining('shared an image'),
-        images: ['data:image/png;base64,Zm9sbG93dXA='],
-      }),
-    );
-    expect(mocks.postThreadMessage).toHaveBeenCalledOnce();
-    expect(mocks.postThreadMessage).not.toHaveBeenCalledWith(
-      expect.objectContaining({ text: expect.stringContaining('/fast') }),
     );
   });
 });

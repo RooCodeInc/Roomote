@@ -65,7 +65,12 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
             {
               slackTeamId: 'T1',
               slackUserId: 'U1',
-              user: { name: 'Alice Example <alice@example.com>' },
+              user: {
+                id: 'alice-user-id',
+                name: 'Alice Example <alice@example.com>',
+                createdAt: new Date('2026-01-01T00:00:00Z'),
+                deletedAt: null,
+              },
             },
           ],
         },
@@ -137,9 +142,12 @@ vi.mock('@roomote/slack', () => ({
   }),
 }));
 
-const { slackPublicChannelsCollector } = await import('../brain-collectors');
+const { slackPublicChannelsCollector } =
+  await import('../brain-collectors/slack-public-channels');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const slackStateId = (channelId: string) =>
+  `${slackPublicChannelsCollector.id}:T1/${channelId}`;
 
 function seedChannel(
   id: string,
@@ -199,7 +207,7 @@ function ingestedMessages(): Set<string> {
 async function drainToCaughtUp(from: Date | null = null, maxTicks = 60) {
   if (from) {
     for (const channel of workspace.channels) {
-      const stateId = `slack-public-channels:T1/${channel.id}`;
+      const stateId = slackStateId(channel.id);
       if (!workspace.syncState.has(stateId)) {
         workspace.syncState.set(stateId, { watermark: from });
       }
@@ -259,7 +267,7 @@ describe('slack collector against a fake Slack', () => {
     expect(ingested.size).toBe(25);
     expect(watermarks.size).toBe(2);
     expect([...workspace.brainPages.values()].join('\n')).toContain(
-      '<Alice Example (U1)>',
+      '[Alice Example](people/roomote-member-',
     );
     expect([...workspace.brainPages.values()].join('\n')).not.toContain(
       'alice@example.com',
@@ -301,10 +309,10 @@ describe('slack collector against a fake Slack', () => {
     ];
     workspace.failing.add('C2');
 
-    workspace.syncState.set('slack-public-channels:T1/C1', {
+    workspace.syncState.set(slackStateId('C1'), {
       watermark: new Date(now - 2 * DAY_MS),
     });
-    workspace.syncState.set('slack-public-channels:T1/C2', {
+    workspace.syncState.set(slackStateId('C2'), {
       watermark: new Date(now - 2 * DAY_MS),
     });
     const first = await slackPublicChannelsCollector.collect({
@@ -315,14 +323,10 @@ describe('slack collector against a fake Slack', () => {
     applyResult(first);
 
     expect(
-      workspace.syncState
-        .get('slack-public-channels:T1/C1')
-        ?.watermark?.getTime(),
+      workspace.syncState.get(slackStateId('C1'))?.watermark?.getTime(),
     ).toBeGreaterThan(now - 2 * DAY_MS);
     expect(
-      workspace.syncState
-        .get('slack-public-channels:T1/C2')
-        ?.watermark?.getTime(),
+      workspace.syncState.get(slackStateId('C2'))?.watermark?.getTime(),
     ).toBe(now - 2 * DAY_MS);
   });
 
@@ -334,10 +338,10 @@ describe('slack collector against a fake Slack', () => {
     ];
     workspace.failing.add('C2');
 
-    workspace.syncState.set('slack-public-channels:T1/C1', {
+    workspace.syncState.set(slackStateId('C1'), {
       watermark: new Date(now - 2 * DAY_MS),
     });
-    workspace.syncState.set('slack-public-channels:T1/C2', {
+    workspace.syncState.set(slackStateId('C2'), {
       watermark: new Date(now - 2 * DAY_MS),
     });
     const failed = await slackPublicChannelsCollector.collect({
@@ -359,7 +363,7 @@ describe('slack collector against a fake Slack', () => {
     // skip whatever was posted in the gap on every steady-state tick.
     const now = Date.now();
     workspace.channels = [seedChannel('C1', 'general', 3, 60 * 1000, now)];
-    workspace.syncState.set('slack-public-channels:T1/C1', {
+    workspace.syncState.set(slackStateId('C1'), {
       watermark: new Date(now - 60 * 1000),
     });
 
@@ -409,7 +413,7 @@ describe('slack collector against a fake Slack', () => {
         ],
       },
     ];
-    workspace.syncState.set('slack-public-channels:T1/C1', {
+    workspace.syncState.set(slackStateId('C1'), {
       watermark: new Date('2026-08-13T10:00:00Z'),
     });
 
@@ -438,10 +442,10 @@ describe('slack collector against a fake Slack', () => {
       seedChannel('C1', 'pathological', 10_001, 999, now),
       seedChannel('C2', 'normal', 3, 1000, now),
     ];
-    workspace.syncState.set('slack-public-channels:T1/C1', {
+    workspace.syncState.set(slackStateId('C1'), {
       watermark: new Date(now - 1000),
     });
-    workspace.syncState.set('slack-public-channels:T1/C2', {
+    workspace.syncState.set(slackStateId('C2'), {
       watermark: new Date(now - 1000),
     });
 
@@ -453,14 +457,10 @@ describe('slack collector against a fake Slack', () => {
     applyResult(result);
 
     expect(
-      workspace.syncState
-        .get('slack-public-channels:T1/C1')
-        ?.watermark?.getTime(),
+      workspace.syncState.get(slackStateId('C1'))?.watermark?.getTime(),
     ).toBe(now - 1000);
     expect(
-      workspace.syncState
-        .get('slack-public-channels:T1/C2')
-        ?.watermark?.getTime(),
+      workspace.syncState.get(slackStateId('C2'))?.watermark?.getTime(),
     ).toBe(now);
   });
 });

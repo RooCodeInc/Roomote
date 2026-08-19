@@ -13,6 +13,8 @@ export { useAsanaConnection } from './useAsanaConnection';
 export { useSaveAsanaConnection } from './useSaveAsanaConnection';
 export { useNotionConnection } from './useNotionConnection';
 export { useSaveNotionConnection } from './useSaveNotionConnection';
+export { useRipplingConnection } from './useRipplingConnection';
+export { useSaveRipplingConnection } from './useSaveRipplingConnection';
 export { useGranolaConnection } from './useGranolaConnection';
 export { useSaveGranolaConnection } from './useSaveGranolaConnection';
 export { useElevenLabsConnection } from './useElevenLabsConnection';
