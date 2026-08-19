@@ -166,6 +166,15 @@ export function resetBrainCorpusSampleCache(): void {
   corpusCache = null;
 }
 
+/**
+ * The most pages one `list_pages` call returns. gbrain caps `limit` at 100
+ * regardless of what is requested (verified empirically: `limit: 500`
+ * answers 100), so the sample must page with `offset` to see past the
+ * newest window — otherwise the composition chart lurches to whichever
+ * source backfilled most recently and presents that batch as the corpus.
+ */
+const CORPUS_LISTING_WINDOW = 100;
+
 async function fetchBrainCorpusSample(): Promise<BrainCorpusSnapshot | null> {
   const connection = await resolveBrainConnection('agent');
 
@@ -174,44 +183,81 @@ async function fetchBrainCorpusSample(): Promise<BrainCorpusSnapshot | null> {
   }
 
   try {
-    let payloads: unknown[];
-    let usedFallback = false;
+    const pages = new Map<string, BrainCorpusPage>();
+    let truncated = false;
 
-    try {
-      payloads = await callBrainTool(
-        connection,
-        'list_pages',
-        { limit: CORPUS_SAMPLE_LIMIT },
-        { timeoutMs: CORPUS_REQUEST_TIMEOUT_MS },
-      );
-    } catch (error) {
-      if (!isRetryableToolError(error)) {
-        throw error;
+    for (let offset = 0; offset < CORPUS_SAMPLE_LIMIT;) {
+      let payloads: unknown[];
+
+      try {
+        payloads = await callBrainTool(
+          connection,
+          'list_pages',
+          { limit: CORPUS_LISTING_WINDOW, offset },
+          { timeoutMs: CORPUS_REQUEST_TIMEOUT_MS },
+        );
+      } catch (error) {
+        if (offset > 0 || !isRetryableToolError(error)) {
+          // A later window failing (an offset the tool does not accept, or a
+          // mid-listing hiccup) does not invalidate what already came back:
+          // report it as a truncated sample rather than an unreachable Brain.
+          if (offset > 0) {
+            truncated = true;
+            break;
+          }
+
+          throw error;
+        }
+
+        // The listing tool's arguments have changed shape between gbrain
+        // versions. A default-window listing still describes the corpus, so
+        // fall back to it rather than reporting the Brain as unreachable —
+        // presented as a sample, since the default window's size is unknown.
+        payloads = await callBrainTool(
+          connection,
+          'list_pages',
+          {},
+          { timeoutMs: CORPUS_REQUEST_TIMEOUT_MS },
+        );
+        const fallbackPages = extractBrainCorpusPages(payloads);
+
+        return {
+          pages: fallbackPages,
+          truncated: fallbackPages.length > 0,
+        };
       }
 
-      // The listing tool's arguments have changed shape between gbrain
-      // versions. A default-window listing still describes the corpus, so
-      // fall back to it rather than reporting the Brain as unreachable.
-      payloads = await callBrainTool(
-        connection,
-        'list_pages',
-        {},
-        { timeoutMs: CORPUS_REQUEST_TIMEOUT_MS },
-      );
-      usedFallback = true;
+      const window = extractBrainCorpusPages(payloads);
+      const before = pages.size;
+
+      for (const page of window) {
+        if (!pages.has(page.slug)) {
+          pages.set(page.slug, page);
+        }
+      }
+
+      // A short window is the end of the corpus. A window of nothing new is
+      // a server that ignored `offset` and answered the first window again;
+      // paging further would loop forever on the same pages, so stop and be
+      // honest that only the newest window was seen.
+      if (window.length < CORPUS_LISTING_WINDOW) {
+        break;
+      }
+
+      if (pages.size === before) {
+        truncated = true;
+        break;
+      }
+
+      offset += CORPUS_LISTING_WINDOW;
+
+      if (offset >= CORPUS_SAMPLE_LIMIT) {
+        // Every window filled up to the cap, so more pages likely exist.
+        truncated = true;
+      }
     }
 
-    const pages = extractBrainCorpusPages(payloads);
-
-    return {
-      pages,
-      // The fallback listing used the tool's own default window, whose size
-      // is unknown, so its result is presented as a recent sample rather
-      // than risked as a total.
-      truncated:
-        pages.length >= CORPUS_SAMPLE_LIMIT ||
-        (usedFallback && pages.length > 0),
-    };
+    return { pages: [...pages.values()], truncated };
   } catch (error) {
     console.warn(
       `[brain] corpus listing failed: ${
