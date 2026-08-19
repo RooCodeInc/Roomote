@@ -7,9 +7,11 @@ const {
   createOpencodeClientMock,
   configProvidersMock,
   createServerMock,
+  eventSubscribeMock,
   execFileMock,
   execFileSyncMock,
   mockResolveEffectiveModelRuntimeEnv,
+  sessionAbortMock,
   spawnMock,
   sessionCreateMock,
   sessionPromptMock,
@@ -17,9 +19,11 @@ const {
   createOpencodeClientMock: vi.fn(),
   configProvidersMock: vi.fn(),
   createServerMock: vi.fn(),
+  eventSubscribeMock: vi.fn(),
   execFileMock: vi.fn(),
   execFileSyncMock: vi.fn(),
   mockResolveEffectiveModelRuntimeEnv: vi.fn(),
+  sessionAbortMock: vi.fn(),
   spawnMock: vi.fn(),
   sessionCreateMock: vi.fn(),
   sessionPromptMock: vi.fn(),
@@ -125,11 +129,16 @@ describe('resolveOpenCodeSmallModel', () => {
       config: {
         providers: configProvidersMock,
       },
+      event: {
+        subscribe: eventSubscribeMock,
+      },
       session: {
+        abort: sessionAbortMock,
         create: sessionCreateMock,
         prompt: sessionPromptMock,
       },
     });
+    sessionAbortMock.mockResolvedValue({ data: true, error: undefined });
     sessionCreateMock.mockResolvedValue({
       data: { id: 'session-1' },
       error: undefined,
@@ -671,6 +680,71 @@ describe('resolveOpenCodeSmallModel', () => {
       // fallback log names the model without a database lookup.
       'OpenCode structured prompt failed (model openrouter/z-ai/glm-5.2): StructuredOutputError: failed to satisfy schema',
     );
+  });
+
+  it('reports OpenCode provider retries and rejects with the live session error', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openai/gpt-5.6-sol',
+    });
+    const providerError = {
+      name: 'APIError',
+      data: {
+        message: 'Too Many Requests',
+        statusCode: 429,
+      },
+    };
+    eventSubscribeMock.mockResolvedValue({
+      stream: (async function* () {
+        yield {
+          type: 'session.status' as const,
+          properties: {
+            sessionID: 'session-1',
+            status: {
+              type: 'retry' as const,
+              attempt: 1,
+              message: 'Too Many Requests',
+              next: Date.now() + 5_000,
+            },
+          },
+        };
+        yield {
+          type: 'session.error' as const,
+          properties: {
+            sessionID: 'session-1',
+            error: providerError,
+          },
+        };
+      })(),
+    });
+    sessionPromptMock.mockReturnValue(new Promise(() => undefined));
+    const onProviderRetry = vi.fn();
+
+    const { generateTrackedNonTaskObject, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskObject({
+        surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+        modelRole: 'primary',
+        schema: z.object({ answer: z.string() }),
+        prompt: 'Answer.',
+        onProviderRetry,
+      }),
+    ).rejects.toBe(providerError);
+    expect(onProviderRetry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attempt: 1,
+        message: 'Too Many Requests',
+      }),
+    );
+    expect(sessionAbortMock).toHaveBeenCalledWith({
+      sessionID: 'session-1',
+      directory: expect.stringContaining('roomote-non-task-'),
+    });
   });
 
   it('returns the joined text parts from a plain SDK prompt', async () => {

@@ -130,7 +130,20 @@ interface GenerateTrackedNonTaskBaseParams extends NonTaskInferenceTrackingInput
   modelRole?: 'primary' | 'small';
   maxOutputTokens?: number;
   timeoutMs?: number;
+  /**
+   * OpenCode retries some provider failures internally before the prompt
+   * request settles. Long-running, user-visible callers such as Fast Mode can
+   * subscribe to those retry transitions instead of appearing hung until the
+   * outer timeout fires.
+   */
+  onProviderRetry?: (event: NonTaskProviderRetryEvent) => void | Promise<void>;
 }
+
+export type NonTaskProviderRetryEvent = {
+  attempt: number;
+  message: string;
+  nextRetryAtMs?: number;
+};
 
 export interface GenerateTrackedNonTaskTextParams extends GenerateTrackedNonTaskBaseParams {
   files?: NonTaskPromptFile[];
@@ -588,16 +601,102 @@ async function runNonTaskSdkPrompt(
     }
     await options.onSessionReady?.(sessionId);
 
-    const promptResult = await client.session.prompt(
-      {
-        sessionID: sessionId,
-        directory: sessionDirectory,
-        model: splitOpenCodeModelId(model),
-        tools: promptOptions.tools ?? NON_TASK_SESSION_TOOL_DISABLES,
-        ...promptOptions,
-      },
-      { signal: abortController.signal },
-    );
+    const eventAbortController = new AbortController();
+    const abortEventMonitor = () => {
+      eventAbortController.abort(abortController.signal.reason);
+    };
+    if (abortController.signal.aborted) {
+      abortEventMonitor();
+    } else {
+      abortController.signal.addEventListener('abort', abortEventMonitor, {
+        once: true,
+      });
+    }
+    let rejectSessionError: (error: unknown) => void = () => undefined;
+    const sessionError = new Promise<never>((_resolve, reject) => {
+      rejectSessionError = reject;
+    });
+    let eventMonitor: Promise<void> | undefined;
+
+    if (params.onProviderRetry) {
+      try {
+        const subscription = await client.event.subscribe(
+          { directory: sessionDirectory },
+          { signal: eventAbortController.signal },
+        );
+        eventMonitor = (async () => {
+          try {
+            for await (const event of subscription.stream) {
+              if (
+                event.type === 'session.status' &&
+                event.properties.sessionID === sessionId &&
+                event.properties.status.type === 'retry'
+              ) {
+                await params.onProviderRetry?.({
+                  attempt: event.properties.status.attempt,
+                  message: event.properties.status.message,
+                  ...(Number.isFinite(event.properties.status.next)
+                    ? { nextRetryAtMs: event.properties.status.next }
+                    : {}),
+                });
+              } else if (
+                event.type === 'session.error' &&
+                event.properties.sessionID === sessionId
+              ) {
+                rejectSessionError(
+                  event.properties.error ??
+                    new Error('OpenCode session failed without error detail.'),
+                );
+                return;
+              }
+            }
+          } catch (error) {
+            if (!eventAbortController.signal.aborted) {
+              console.warn(
+                `[NonTaskProviderUsage] OpenCode event monitor failed: ${formatOpenCodeSdkError(error)}`,
+              );
+            }
+          }
+        })();
+      } catch (error) {
+        // Event reporting is additive. Keep the prompt path available if an
+        // older externally configured OpenCode server cannot stream events.
+        if (!eventAbortController.signal.aborted) {
+          console.warn(
+            `[NonTaskProviderUsage] Could not subscribe to OpenCode events: ${formatOpenCodeSdkError(error)}`,
+          );
+        }
+      }
+    }
+
+    let promptResult;
+    try {
+      const promptRequest = client.session.prompt(
+        {
+          sessionID: sessionId,
+          directory: sessionDirectory,
+          model: splitOpenCodeModelId(model),
+          tools: promptOptions.tools ?? NON_TASK_SESSION_TOOL_DISABLES,
+          ...promptOptions,
+        },
+        { signal: abortController.signal },
+      );
+      promptResult = params.onProviderRetry
+        ? await Promise.race([promptRequest, sessionError])
+        : await promptRequest;
+    } catch (error) {
+      // Aborting the HTTP request does not guarantee that an OpenCode server
+      // stopped its model turn. Explicitly cancel it before the session or a
+      // leased server is reused for a bounded retry.
+      await client.session
+        .abort({ sessionID: sessionId, directory: sessionDirectory })
+        .catch(() => undefined);
+      throw error;
+    } finally {
+      abortController.signal.removeEventListener('abort', abortEventMonitor);
+      eventAbortController.abort();
+      void eventMonitor?.catch(() => undefined);
+    }
 
     if (promptResult.error || !promptResult.data) {
       if (isOpenCodeSessionMissing(promptResult.error)) {
@@ -788,7 +887,60 @@ export async function generateTrackedNonTaskObject<
   return generateTrackedNonTaskObjectWithSdk(params);
 }
 
-function classifyNonTaskInferenceValidationError(
+function findInferenceErrorStatusCode(error: unknown): number | undefined {
+  const pending: Array<{ value: unknown; depth: number }> = [
+    { value: error, depth: 0 },
+  ];
+  const seen = new Set<object>();
+
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (!current || current.depth > 4) {
+      continue;
+    }
+
+    const { value, depth } = current;
+    if (typeof value === 'string') {
+      try {
+        pending.push({ value: JSON.parse(value), depth: depth + 1 });
+      } catch {
+        // Provider prose is handled by the fallback signatures below.
+      }
+      continue;
+    }
+    if (!value || typeof value !== 'object' || seen.has(value)) {
+      continue;
+    }
+
+    seen.add(value);
+    const record = value as Record<string, unknown>;
+    for (const key of ['statusCode', 'status', 'code'] as const) {
+      const candidate = record[key];
+      const parsed =
+        typeof candidate === 'number'
+          ? candidate
+          : typeof candidate === 'string' && /^\d{3}$/u.test(candidate.trim())
+            ? Number(candidate.trim())
+            : undefined;
+      if (
+        parsed !== undefined &&
+        Number.isInteger(parsed) &&
+        parsed >= 400 &&
+        parsed <= 599
+      ) {
+        return parsed;
+      }
+    }
+
+    for (const nested of Object.values(record)) {
+      pending.push({ value: nested, depth: depth + 1 });
+    }
+  }
+
+  return undefined;
+}
+
+export function classifyNonTaskInferenceError(
   error: unknown,
 ): Pick<
   Extract<NonTaskInferenceValidationResult, { success: false }>,
@@ -807,8 +959,7 @@ function classifyNonTaskInferenceValidationError(
     record?.data && typeof record.data === 'object'
       ? (record.data as Record<string, unknown>)
       : undefined;
-  const statusCode =
-    typeof data?.statusCode === 'number' ? data.statusCode : undefined;
+  const statusCode = findInferenceErrorStatusCode(error);
   const responseBody =
     typeof data?.responseBody === 'string' ? data.responseBody : '';
   const detail =
@@ -1069,7 +1220,7 @@ export async function validateNonTaskInference(params: {
       model,
     };
   } catch (error) {
-    const classified = classifyNonTaskInferenceValidationError(error);
+    const classified = classifyNonTaskInferenceError(error);
 
     // The sanitized result hides the provider detail from the UI on purpose;
     // keep the detail in the server log so misclassifications stay

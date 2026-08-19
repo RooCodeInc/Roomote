@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
   getEnvironments: vi.fn(),
   generateText: vi.fn(),
+  classifyInferenceError: vi.fn(),
   listIntegrations: vi.fn(),
   callIntegration: vi.fn(),
   sendTaskMessage: vi.fn(),
@@ -46,7 +47,11 @@ vi.mock('../../non-task-provider-usage', () => ({
   NON_TASK_INFERENCE_SURFACES: {
     fastAgentQuestionAnswering: 'fast_agent_question_answering',
   },
+  classifyNonTaskInferenceError: mocks.classifyInferenceError,
   generateTrackedNonTaskTextInOpenCodeSession: mocks.generateText,
+  isNonTaskOpenCodeSessionNotFoundError: (error: unknown) =>
+    error instanceof Error &&
+    error.name === 'NonTaskOpenCodeSessionNotFoundError',
 }));
 
 vi.mock('../fast-agent-opencode-session', () => ({
@@ -160,6 +165,37 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.getUserIdentity.mockResolvedValue({
       displayName: 'Matt Rubens',
       githubLogin: 'mrubens',
+    });
+    mocks.classifyInferenceError.mockImplementation((error: unknown) => {
+      const detail = error instanceof Error ? error.message.toLowerCase() : '';
+
+      if (detail.includes('429') || detail.includes('rate limit')) {
+        return {
+          message: 'The inference provider is rate limiting requests.',
+          reason: 'rate_limited',
+          retryable: true,
+        };
+      }
+      if (detail.includes('fetch failed') || detail.includes('network error')) {
+        return {
+          message: 'Roomote could not reach the inference provider endpoint.',
+          reason: 'endpoint_unreachable',
+          retryable: true,
+        };
+      }
+      if (detail.includes('timed out') || detail.includes('timeout')) {
+        return {
+          message: 'The inference provider did not respond in time.',
+          reason: 'timeout',
+          retryable: true,
+        };
+      }
+
+      return {
+        message: 'The inference provider rejected the request.',
+        reason: 'provider_error',
+        retryable: false,
+      };
     });
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
@@ -487,21 +523,188 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('does not claim a retry after a transient native prompt failure', async () => {
-    mocks.generateText.mockRejectedValue(new Error('fetch failed'));
+  it('retries a transient native prompt failure with a visible notice', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.generateText
+        .mockRejectedValueOnce(new Error('TypeError: fetch failed'))
+        .mockImplementationOnce(async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'It coordinates incoming requests.',
+          });
+          return '';
+        });
+      const adapter = callbacks();
+
+      const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
+      await vi.runAllTimersAsync();
+
+      await expect(resultPromise).resolves.toBe(
+        'It coordinates incoming requests.',
+      );
+      expect(mocks.generateText).toHaveBeenCalledTimes(2);
+      expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
+        purpose: 'progress',
+        message: expect.stringContaining('Retrying in 1s (attempt 1/3)'),
+      });
+      expect(adapter.postReply).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ purpose: 'closeout' }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('backs off longer and reports a provider 429 before retrying', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.generateText
+        .mockRejectedValueOnce(
+          new Error('OpenCode structured prompt failed: 429 Too Many Requests'),
+        )
+        .mockImplementationOnce(async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'It coordinates incoming requests.',
+          });
+          return '';
+        });
+      const adapter = callbacks();
+
+      const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
+      await vi.runAllTimersAsync();
+
+      await expect(resultPromise).resolves.toBe(
+        'It coordinates incoming requests.',
+      );
+      expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
+        purpose: 'progress',
+        message:
+          'Fast mode’s inference provider is rate limiting requests. Retrying in 5s (attempt 1/3).',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports OpenCode internal provider retries while the prompt is pending', async () => {
+    mocks.generateText.mockImplementationOnce(
+      async (params, _session, options) => {
+        await params.onProviderRetry?.({
+          attempt: 1,
+          message: '429 Too Many Requests',
+        });
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'It coordinates incoming requests.',
+        });
+        return '';
+      },
+    );
     const adapter = callbacks();
 
     await expect(
       answerFastAgentQuestion({ ...baseParams, adapter }),
-    ).resolves.toBe(
-      'Fast mode could not reach the model. Please try again in a moment.',
-    );
-    expect(mocks.generateText).toHaveBeenCalledOnce();
-    expect(adapter.postReply).toHaveBeenCalledWith({
-      purpose: 'closeout',
+    ).resolves.toBe('It coordinates incoming requests.');
+    expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
+      purpose: 'progress',
       message:
-        'Fast mode could not reach the model. Please try again in a moment.',
+        'Fast mode’s inference provider is rate limiting requests. Retrying automatically…',
     });
+  });
+
+  it('reports the classified provider failure after retries are exhausted', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.generateText.mockRejectedValue(
+        new Error('TypeError: fetch failed'),
+      );
+      const adapter = callbacks();
+
+      const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
+      await vi.runAllTimersAsync();
+
+      await expect(resultPromise).resolves.toBe(
+        'Fast mode could not reach the inference provider after retrying. Please try again in a moment.',
+      );
+      expect(mocks.generateText).toHaveBeenCalledTimes(4);
+      expect(adapter.postReply).toHaveBeenLastCalledWith({
+        purpose: 'closeout',
+        message:
+          'Fast mode could not reach the inference provider after retrying. Please try again in a moment.',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not surface a duplicate retry notice for repeated failures', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.generateText
+        .mockRejectedValueOnce(new Error('TypeError: fetch failed'))
+        .mockRejectedValueOnce(new Error('TypeError: fetch failed'))
+        .mockImplementationOnce(async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'It coordinates incoming requests.',
+          });
+          return '';
+        });
+      const adapter = callbacks();
+
+      const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
+      await vi.runAllTimersAsync();
+      await resultPromise;
+
+      const progressMessages = vi
+        .mocked(adapter.postReply)
+        .mock.calls.filter(([reply]) => reply.purpose === 'progress');
+      expect(progressMessages).toHaveLength(2);
+      expect(progressMessages[0]?.[0]?.message).toContain('attempt 1/3');
+      expect(progressMessages[1]?.[0]?.message).toContain('attempt 2/3');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries platform events without posting retry notices', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.generateText
+        .mockRejectedValueOnce(new Error('TypeError: fetch failed'))
+        .mockImplementationOnce(async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'Startup recovered.',
+          });
+          return '';
+        });
+      const adapter = callbacks();
+
+      const resultPromise = answerFastAgentQuestion({
+        ...baseParams,
+        turnSource: 'platform_event',
+        adapter,
+      });
+      await vi.runAllTimersAsync();
+      await resultPromise;
+
+      expect(mocks.generateText).toHaveBeenCalledTimes(2);
+      expect(adapter.postReply).toHaveBeenCalledOnce();
+      expect(adapter.postReply).toHaveBeenCalledWith(
+        expect.objectContaining({ purpose: 'closeout' }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rethrows native prompt failures for platform event retry', async () => {

@@ -18,9 +18,12 @@ import {
   type FastAgentActiveTask,
 } from './fast-agent-session';
 import {
+  classifyNonTaskInferenceError,
   generateTrackedNonTaskTextInOpenCodeSession,
+  isNonTaskOpenCodeSessionNotFoundError,
   NON_TASK_INFERENCE_SURFACES,
   type NonTaskPromptFile,
+  type NonTaskProviderRetryEvent,
 } from '../non-task-provider-usage';
 import { fastAgentOpenCodeSessionManager } from './fast-agent-opencode-session';
 import {
@@ -113,16 +116,140 @@ function buildIntegrationCallSignature({
   ]);
 }
 
-function isRetryableFastAgentInferenceError(error: unknown): boolean {
-  const detail = formatErrorForLog(error).toLowerCase();
-  return [
-    'fetch failed',
-    'econnreset',
-    'econnrefused',
-    'enotfound',
-    'network error',
-    'socket hang up',
-  ].some((signature) => detail.includes(signature));
+export const FAST_AGENT_INFERENCE_MAX_RETRIES = 3;
+const FAST_AGENT_RATE_LIMIT_RETRY_BASE_DELAY_MS = 5_000;
+const FAST_AGENT_PROVIDER_RETRY_BASE_DELAY_MS = 1_000;
+const FAST_AGENT_RETRY_MAX_DELAY_MS = 60_000;
+
+type FastAgentInferenceFailure = ReturnType<
+  typeof classifyNonTaskInferenceError
+>;
+
+type FastAgentInferenceRetryNotice = {
+  failure: FastAgentInferenceFailure;
+  attemptNumber: number;
+  maxAttempts?: number;
+  delayMs?: number;
+};
+
+class FastAgentInferenceError extends Error {
+  constructor(
+    public readonly failure: FastAgentInferenceFailure,
+    cause: unknown,
+  ) {
+    super(
+      `Fast mode inference failed (${failure.reason}): ${formatErrorForLog(cause)}`,
+      { cause },
+    );
+    this.name = 'FastAgentInferenceError';
+  }
+}
+
+function resolveFastAgentInferenceRetryDelayMs(
+  failure: FastAgentInferenceFailure,
+  retryNumber: number,
+): number {
+  const baseDelayMs =
+    failure.reason === 'rate_limited'
+      ? FAST_AGENT_RATE_LIMIT_RETRY_BASE_DELAY_MS
+      : FAST_AGENT_PROVIDER_RETRY_BASE_DELAY_MS;
+
+  return Math.min(
+    baseDelayMs * 2 ** Math.max(0, retryNumber - 1),
+    FAST_AGENT_RETRY_MAX_DELAY_MS,
+  );
+}
+
+function formatFastAgentInferenceRetryNotice(
+  notice: FastAgentInferenceRetryNotice,
+): string {
+  const headline =
+    notice.failure.reason === 'rate_limited'
+      ? 'Fast mode’s inference provider is rate limiting requests.'
+      : notice.failure.reason === 'timeout'
+        ? 'Fast mode’s inference provider did not respond in time.'
+        : 'Fast mode’s inference provider returned a temporary error.';
+
+  if (notice.delayMs === undefined || notice.maxAttempts === undefined) {
+    return `${headline} Retrying automatically…`;
+  }
+
+  const seconds = Math.max(1, Math.round(notice.delayMs / 1_000));
+  return `${headline} Retrying in ${seconds}s (attempt ${notice.attemptNumber}/${notice.maxAttempts}).`;
+}
+
+function formatFastAgentInferenceFailure(
+  failure: FastAgentInferenceFailure,
+): string {
+  switch (failure.reason) {
+    case 'rate_limited':
+      return 'Fast mode is still being rate limited by the inference provider after retrying. Any delegated tasks can keep running; please try again when provider capacity is available.';
+    case 'timeout':
+      return 'Fast mode’s inference provider did not respond after retrying. Any delegated tasks can keep running; please try again in a moment.';
+    case 'endpoint_unreachable':
+      return 'Fast mode could not reach the inference provider after retrying. Please try again in a moment.';
+    case 'insufficient_credits':
+      return 'Fast mode cannot use the inference provider because the account has insufficient credits or quota.';
+    case 'invalid_credentials':
+      return 'Fast mode cannot authenticate with the configured inference provider. An administrator needs to reconnect or replace its credentials.';
+    case 'model_unavailable':
+      return 'Fast mode’s configured model is not available from the inference provider. An administrator needs to select an available model.';
+    default:
+      return 'Fast mode could not complete the request because its inference provider returned an error. Please try again in a moment.';
+  }
+}
+
+function waitForFastAgentInferenceRetry(delayMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, delayMs);
+  });
+}
+
+async function runFastAgentInferenceWithRetries<T>(
+  run: () => Promise<T>,
+  onRetry?: (notice: FastAgentInferenceRetryNotice) => Promise<void>,
+): Promise<T> {
+  for (
+    let retryNumber = 0;
+    retryNumber <= FAST_AGENT_INFERENCE_MAX_RETRIES;
+    retryNumber += 1
+  ) {
+    try {
+      return await run();
+    } catch (error) {
+      // Session loss is the session manager's bootstrap signal, not a
+      // provider failure this loop should absorb.
+      if (isNonTaskOpenCodeSessionNotFoundError(error)) {
+        throw error;
+      }
+
+      const failure = classifyNonTaskInferenceError(error);
+      if (
+        !failure.retryable ||
+        retryNumber >= FAST_AGENT_INFERENCE_MAX_RETRIES
+      ) {
+        throw new FastAgentInferenceError(failure, error);
+      }
+
+      const attemptNumber = retryNumber + 1;
+      const delayMs = resolveFastAgentInferenceRetryDelayMs(
+        failure,
+        attemptNumber,
+      );
+      console.warn(
+        `[Fast Agent] Retrying inference failure attempt=${attemptNumber}/${FAST_AGENT_INFERENCE_MAX_RETRIES} delayMs=${delayMs} reason=${failure.reason}: ${formatErrorForLog(error)}`,
+      );
+      await onRetry?.({
+        failure,
+        attemptNumber,
+        maxAttempts: FAST_AGENT_INFERENCE_MAX_RETRIES,
+        delayMs,
+      });
+      await waitForFastAgentInferenceRetry(delayMs);
+    }
+  }
+
+  throw new Error('Fast mode exhausted its inference retry loop.');
 }
 
 function buildUserTextMessage(text: string): ModelMessage {
@@ -449,6 +576,34 @@ export async function answerFastAgentQuestion({
       }
     };
 
+    const reportedInferenceNotices = new Set<string>();
+    const reportInferenceRetry = async (
+      notice: FastAgentInferenceRetryNotice,
+    ) => {
+      if (platformEvent) {
+        return;
+      }
+
+      const message = formatFastAgentInferenceRetryNotice(notice);
+      if (reportedInferenceNotices.has(message)) {
+        return;
+      }
+
+      reportedInferenceNotices.add(message);
+      // Deliberately not the postReply closure: a system retry notice must
+      // not satisfy the model's acknowledgement gate or close the turn.
+      await adapter.postReply({ purpose: 'progress', message });
+      turnVisibleMessages.push(buildAssistantTextMessage(message));
+    };
+    const reportProviderRetryEvent = async (
+      event: NonTaskProviderRetryEvent,
+    ) => {
+      await reportInferenceRetry({
+        failure: classifyNonTaskInferenceError(new Error(event.message)),
+        attemptNumber: event.attempt,
+      });
+    };
+
     const requireOpen = () =>
       closed
         ? { success: false as const, error: 'This Fast turn is closed.' }
@@ -689,33 +844,39 @@ export async function answerFastAgentQuestion({
       execute: async (openCodeSession, selectedPrompt) => {
         let unbind: (() => void) | undefined;
         try {
-          return await generateTrackedNonTaskTextInOpenCodeSession(
-            {
-              userId,
-              surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
-              modelRole: FAST_AGENT_MODEL_ROLE,
-              system,
-              prompt: selectedPrompt,
-              ...(imageFiles.length
-                ? {
-                    files: imageFiles,
-                    requiredInputModality: 'image' as const,
-                  }
-                : {}),
-            },
-            openCodeSession,
-            {
-              directory: nativeRuntime.directory,
-              env: nativeRuntime.env,
-              tools: FAST_AGENT_NATIVE_TOOL_FILTER,
-              onSessionReady: (openCodeSessionID) => {
-                unbind?.();
-                unbind = bindFastAgentNativeToolExecutor(
-                  openCodeSessionID,
-                  executeNativeTool,
-                );
-              },
-            },
+          return await runFastAgentInferenceWithRetries(
+            () =>
+              generateTrackedNonTaskTextInOpenCodeSession(
+                {
+                  userId,
+                  surface:
+                    NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+                  modelRole: FAST_AGENT_MODEL_ROLE,
+                  system,
+                  prompt: selectedPrompt,
+                  onProviderRetry: reportProviderRetryEvent,
+                  ...(imageFiles.length
+                    ? {
+                        files: imageFiles,
+                        requiredInputModality: 'image' as const,
+                      }
+                    : {}),
+                },
+                openCodeSession,
+                {
+                  directory: nativeRuntime.directory,
+                  env: nativeRuntime.env,
+                  tools: FAST_AGENT_NATIVE_TOOL_FILTER,
+                  onSessionReady: (openCodeSessionID) => {
+                    unbind?.();
+                    unbind = bindFastAgentNativeToolExecutor(
+                      openCodeSessionID,
+                      executeNativeTool,
+                    );
+                  },
+                },
+              ),
+            reportInferenceRetry,
           );
         } finally {
           unbind?.();
@@ -739,8 +900,8 @@ export async function answerFastAgentQuestion({
 
     const message = launchedTaskMessage
       ? 'I posted the task kickoff, but the task could not be queued. Please retry.'
-      : isRetryableFastAgentInferenceError(error)
-        ? 'Fast mode could not reach the model. Please try again in a moment.'
+      : error instanceof FastAgentInferenceError
+        ? formatFastAgentInferenceFailure(error.failure)
         : 'I hit an error while handling that request. Please try again in a moment.';
     try {
       await adapter.postReply({ purpose: 'closeout', message });
