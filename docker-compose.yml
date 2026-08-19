@@ -83,8 +83,9 @@ services:
       - 'host.docker.internal:host-gateway'
 
   # The Brain (deployment-hosted gbrain), managed alongside the other local
-  # datastores. Opt in with COMPOSE_PROFILES=brain (or `pnpm
-  # brain:up`). The port is published to loopback only because the local
+  # datastores. `pnpm dev` starts this profiled service explicitly; `pnpm
+  # brain:up` remains available to operate it independently. The port is
+  # published to loopback only because the local
   # api/bullmq processes run on the host rather than in this network; in the
   # self-host and installer stacks the Brain publishes no ports at all and is
   # reachable only from the app services.

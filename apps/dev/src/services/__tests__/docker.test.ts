@@ -23,6 +23,7 @@ vi.mock('ora', () => ({
     info: vi.fn(),
     start: () => ({
       succeed: vi.fn(),
+      fail: vi.fn(),
       warn: vi.fn(),
       info: vi.fn(),
     }),
@@ -71,10 +72,44 @@ describe('DockerService.checkContainers', () => {
         extendEnv: false,
       }),
     );
+    expect(execa).toHaveBeenCalledWith(
+      'docker',
+      ['compose', '--profile', 'brain', 'up', 'gbrain', '-d', '--wait'],
+      expect.objectContaining({
+        cwd: expectedCwd,
+        extendEnv: false,
+      }),
+    );
     expect(execa).not.toHaveBeenCalledWith(
       'pnpm',
       ['infra:up'],
       expect.anything(),
+    );
+  });
+
+  it('fails startup when the Brain does not become healthy', async () => {
+    const listContainers = vi
+      .fn()
+      .mockResolvedValue([
+        { Names: ['/roomote-postgres'] },
+        { Names: ['/roomote-redis'] },
+        { Names: ['/roomote-minio'] },
+        { Names: ['/roomote-caddy-dev'] },
+      ]);
+
+    vi.mocked(Docker).mockImplementation(function MockDocker() {
+      return {
+        ping: vi.fn().mockResolvedValue(undefined),
+        listContainers,
+      } as unknown as Docker;
+    } as unknown as typeof Docker);
+
+    vi.mocked(execa)
+      .mockResolvedValueOnce({} as Awaited<ReturnType<typeof execa>>)
+      .mockRejectedValueOnce(new Error('gbrain health check failed'));
+
+    await expect(DockerService.checkContainers(false)).rejects.toThrow(
+      'gbrain health check failed',
     );
   });
 
