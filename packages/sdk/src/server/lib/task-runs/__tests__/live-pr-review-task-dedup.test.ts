@@ -2,6 +2,7 @@ function getExpectedReviewTaskCount(): number {
   // Live push burst revision 1.
   // Live push burst revision 2.
   // Live push burst revision 3.
+  // Post-completion review revision.
   return 1;
 }
 
