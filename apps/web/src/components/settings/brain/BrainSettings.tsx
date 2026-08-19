@@ -3,18 +3,103 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { ErrorState, Skeleton } from '@/components/system';
+import { formatDistanceToNowCompact, formatNumber } from '@/lib/formatters';
 import { useTRPC } from '@/trpc/client';
 
+import type { BrainSettings as BrainSettingsData } from '@/trpc/commands/brain';
+import { BrainConfigurationSection } from './BrainConfigurationSection';
 import { BrainCorpusSection } from './BrainCorpusSection';
 import { BrainSourcesSection } from './BrainSourcesSection';
 import { BrainStatusSection } from './BrainStatusSection';
 import { BrainTaskMemorySection } from './BrainTaskMemorySection';
 
+function SummaryTile({
+  label,
+  value,
+  secondary,
+}: {
+  label: string;
+  value: string;
+  secondary: string;
+}) {
+  return (
+    <div className="flex flex-col gap-1 bg-card p-4">
+      <p className="text-sm leading-snug font-medium text-muted-foreground">
+        {label}
+      </p>
+      <div className="text-2xl leading-tight font-semibold tracking-tight md:text-3xl">
+        {value}
+      </div>
+      <div className="text-sm text-muted-foreground">{secondary}</div>
+    </div>
+  );
+}
+
+function SummaryTiles({ settings }: { settings: BrainSettingsData }) {
+  const sourcesConnected = settings.sources.filter(
+    (source) => source.status !== 'not_connected',
+  ).length;
+  const backfilling = settings.sources.filter(
+    (source) => source.status === 'backfilling',
+  ).length;
+  const recorded = settings.taskMemories.byStatus.done;
+
+  return (
+    <div className="grid gap-0.5 md:grid-cols-3">
+      <SummaryTile
+        label="Pages stored"
+        value={
+          settings.corpus.reachable
+            ? `${formatNumber(settings.corpus.sampledPages)}${
+                settings.corpus.truncated ? '+' : ''
+              }`
+            : 'Unknown'
+        }
+        secondary={
+          settings.corpus.truncated
+            ? 'most recent pages, more in the corpus'
+            : 'in the corpus'
+        }
+      />
+      <SummaryTile
+        label="Task memories"
+        value={formatNumber(recorded)}
+        secondary={
+          settings.taskMemories.lastProcessedAt
+            ? `last recorded ${formatDistanceToNowCompact(
+                settings.taskMemories.lastProcessedAt,
+                { addSuffix: true },
+              )}`
+            : 'none recorded yet'
+        }
+      />
+      <SummaryTile
+        label="Sources"
+        value={formatNumber(sourcesConnected)}
+        secondary={
+          backfilling > 0
+            ? `of ${settings.sources.length} connected, ${backfilling} backfilling`
+            : `of ${settings.sources.length} connected`
+        }
+      />
+    </div>
+  );
+}
+
 function BrainSettingsSkeleton() {
   return (
     <div className="space-y-6">
+      <div className="grid gap-0.5 md:grid-cols-3">
+        {Array.from({ length: 3 }).map((_, index) => (
+          <div key={index} className="space-y-2 bg-card p-4">
+            <Skeleton className="h-4 w-28" />
+            <Skeleton className="h-9 w-24" />
+            <Skeleton className="h-4 w-36" />
+          </div>
+        ))}
+      </div>
       <Skeleton className="h-40 w-full" />
-      <Skeleton className="h-64 w-full" />
+      <Skeleton className="h-56 w-full" />
       <Skeleton className="h-80 w-full" />
       <Skeleton className="h-56 w-full" />
     </div>
@@ -33,23 +118,28 @@ export function BrainSettings() {
     return <ErrorState title="Failed to load the Brain" />;
   }
 
+  /*
+   * A deployment without a Brain has no corpus, no collector checkpoints,
+   * and no outbox worth reading: those sections would all render the same
+   * empty state, which reads as breakage rather than as an unconfigured
+   * feature.
+   */
+  if (data.status === 'not_configured') {
+    return (
+      <div className="space-y-6">
+        <BrainStatusSection settings={data} />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
+      <SummaryTiles settings={data} />
       <BrainStatusSection settings={data} />
-
-      {/*
-       * A deployment without a Brain has no corpus, no collector checkpoints,
-       * and no outbox worth reading: the sections below would all render the
-       * same empty state, which reads as breakage rather than as an
-       * unconfigured feature.
-       */}
-      {data.status !== 'not_configured' ? (
-        <>
-          <BrainCorpusSection corpus={data.corpus} />
-          <BrainSourcesSection sources={data.sources} />
-          <BrainTaskMemorySection taskMemories={data.taskMemories} />
-        </>
-      ) : null}
+      <BrainConfigurationSection settings={data} />
+      <BrainSourcesSection sources={data.sources} />
+      <BrainCorpusSection corpus={data.corpus} />
+      <BrainTaskMemorySection taskMemories={data.taskMemories} />
     </div>
   );
 }

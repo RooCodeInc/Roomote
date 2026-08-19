@@ -6,6 +6,7 @@ import {
   deploymentMcpEnablements,
   eq,
   getBrainMemoryEventSummary,
+  isBrainProviderConfigured,
   isNull,
   listBrainSyncStates,
   mcpConnections,
@@ -13,9 +14,12 @@ import {
   slackInstallations,
 } from '@roomote/db/server';
 import {
+  describeBrainModels,
   hasBrainGithubSources,
   readBrainCorpusSample,
+  readBrainPage,
   resolveBrainInferenceProvider,
+  type BrainModelSummary,
 } from '@roomote/sdk/server';
 import {
   BRAIN_MCP_ID,
@@ -31,7 +35,7 @@ import {
 } from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
-import { Env, isBrainConfigured } from '@/lib/server/env';
+import { Env } from '@/lib/server/env';
 
 import { assertAdmin } from '../setup/shared';
 
@@ -92,6 +96,13 @@ export type BrainCorpusSummary = {
   sampledPages: number;
   truncated: boolean;
   namespaces: BrainNamespaceSummary[];
+  /**
+   * Pages written per UTC day over the trailing window, oldest first,
+   * zero-filled. Computed from the same recency-sorted sample as the rest of
+   * the summary, so on a `truncated` corpus it undercounts the oldest days
+   * rather than the newest.
+   */
+  activityByDay: Array<{ date: string; pages: number }>;
   recentPages: Array<{
     slug: string;
     title: string;
@@ -106,6 +117,8 @@ export type BrainSettings = {
   statusDetail: string | null;
   url: string | null;
   inferenceProvider: 'openrouter' | 'openai' | null;
+  /** The models the Brain runs, or null when no provider resolves. */
+  models: BrainModelSummary | null;
   corpus: BrainCorpusSummary;
   sources: BrainSourceSummary[];
   taskMemories: {
@@ -178,6 +191,39 @@ async function resolveSourceRequirements(): Promise<
   return { slack, notion, granola, github };
 }
 
+/** Days of page-writing activity summarized for the ingestion chart. */
+const ACTIVITY_WINDOW_DAYS = 30;
+
+function buildActivityByDay(
+  pages: Array<{ updatedAt: Date | null }>,
+): Array<{ date: string; pages: number }> {
+  const counts = new Map<string, number>();
+  const today = new Date();
+
+  for (let offset = ACTIVITY_WINDOW_DAYS - 1; offset >= 0; offset--) {
+    const day = new Date(today);
+    day.setUTCDate(day.getUTCDate() - offset);
+    counts.set(day.toISOString().slice(0, 10), 0);
+  }
+
+  for (const page of pages) {
+    if (!page.updatedAt) {
+      continue;
+    }
+
+    const key = page.updatedAt.toISOString().slice(0, 10);
+
+    if (counts.has(key)) {
+      counts.set(key, counts.get(key)! + 1);
+    }
+  }
+
+  return [...counts.entries()].map(([date, count]) => ({
+    date,
+    pages: count,
+  }));
+}
+
 function summarizeCorpus(
   snapshot: Awaited<ReturnType<typeof readBrainCorpusSample>>,
 ): BrainCorpusSummary {
@@ -187,6 +233,7 @@ function summarizeCorpus(
       sampledPages: 0,
       truncated: false,
       namespaces: [],
+      activityByDay: [],
       recentPages: [],
     };
   }
@@ -227,6 +274,7 @@ function summarizeCorpus(
     sampledPages: snapshot.pages.length,
     truncated: snapshot.truncated,
     namespaces,
+    activityByDay: buildActivityByDay(snapshot.pages),
     recentPages,
   };
 }
@@ -278,7 +326,9 @@ function summarizeSources(input: {
         state.watermark && (!latest || state.watermark > latest)
           ? state.watermark
           : latest,
-      source.collectorIdPrefix ? null : input.taskMemoriesLastProcessedAt,
+      // The outbox records when a memory actually landed, which is fresher
+      // than the backfill checkpoint its sync-state row carries.
+      source.id === 'task-memories' ? input.taskMemoriesLastProcessedAt : null,
     );
     const partitionsBackfilled = states.filter(
       (state) => state.backfillCompletedAt,
@@ -286,9 +336,10 @@ function summarizeSources(input: {
     const backfilling = states.some(
       (state) => state.backfillCursor && !state.backfillCompletedAt,
     );
-    const active = source.collectorIdPrefix
-      ? states.length > 0
-      : input.taskMemoriesActive;
+    const active =
+      source.id === 'task-memories'
+        ? input.taskMemoriesActive || states.length > 0
+        : states.length > 0;
 
     return {
       id: source.id,
@@ -337,7 +388,10 @@ export async function getBrainSettingsCommand(
 ): Promise<BrainSettings> {
   assertAdmin(auth);
 
-  const configured = isBrainConfigured();
+  // Activation is the explicit brain-specific provider key, in Settings or
+  // the environment. The gateway token and R_GBRAIN_URL exist as plumbing on
+  // deployments that never opted in, so neither can mean "the Brain is on".
+  const configured = await isBrainProviderConfigured();
   const url = Env.R_GBRAIN_URL ?? null;
 
   const [
@@ -368,11 +422,19 @@ export async function getBrainSettingsCommand(
     status: BrainStatus;
     statusDetail: string | null;
   } => {
-    if (!configured || !url) {
+    if (!configured) {
       return {
         status: 'not_configured',
         statusDetail:
-          'This deployment has no Brain. Supply a Brain provider key and Brain URL to give agents shared memory.',
+          'This deployment has no Brain. Set a Brain provider key to give agents shared memory.',
+      };
+    }
+
+    if (!url) {
+      return {
+        status: 'incomplete',
+        statusDetail:
+          'A Brain provider key is set, but no Brain service URL is configured, so there is nowhere to store memories.',
       };
     }
 
@@ -408,6 +470,7 @@ export async function getBrainSettingsCommand(
     statusDetail,
     url,
     inferenceProvider: inference?.providerId ?? null,
+    models: inference ? describeBrainModels(inference.providerId) : null,
     corpus,
     sources: summarizeSources({
       syncStates,
@@ -445,4 +508,83 @@ export async function retryFailedBrainTaskMemoriesCommand(
   assertAdmin(auth);
 
   return { requeued: await requeueFailedBrainMemoryEvents(db) };
+}
+
+export type BrainPageListing = {
+  reachable: boolean;
+  truncated: boolean;
+  pages: Array<{
+    slug: string;
+    title: string;
+    namespaceId: BrainNamespaceBucketId;
+    namespaceLabel: string;
+    updatedAt: Date | null;
+  }>;
+};
+
+/**
+ * The recency-sorted page sample for the browse dialog. Same read and same
+ * bound as the composition chart, so the two never disagree about what the
+ * Brain holds; the dialog filters and searches it client-side.
+ */
+export async function listBrainPagesCommand(
+  auth: UserAuthSuccess,
+): Promise<BrainPageListing> {
+  assertAdmin(auth);
+
+  const snapshot = await readBrainCorpusSample();
+
+  if (!snapshot) {
+    return { reachable: false, truncated: false, pages: [] };
+  }
+
+  const pages = [...snapshot.pages]
+    .sort(
+      (left, right) =>
+        (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
+    )
+    .map((page) => {
+      const namespaceId = resolveBrainNamespaceId(page.slug);
+
+      return {
+        slug: page.slug,
+        title: page.title ?? page.slug,
+        namespaceId,
+        namespaceLabel: brainNamespaceLabel(namespaceId),
+        updatedAt: page.updatedAt,
+      };
+    });
+
+  return { reachable: true, truncated: snapshot.truncated, pages };
+}
+
+type BrainPageContent = {
+  slug: string;
+  title: string;
+  updatedAt: Date | null;
+  /**
+   * The page body as the Brain stores it. Untrusted content distilled from
+   * tasks and integrations: the client renders it as plain text.
+   */
+  content: string | null;
+};
+
+export async function getBrainPageCommand(
+  auth: UserAuthSuccess,
+  input: { slug: string },
+): Promise<BrainPageContent | null> {
+  assertAdmin(auth);
+
+  const page = await readBrainPage(input.slug);
+
+  if (!page) {
+    return null;
+  }
+
+  return {
+    slug: page.slug,
+    title: page.title ?? page.slug,
+    updatedAt: page.updatedAt,
+    content: page.content,
+  };
 }

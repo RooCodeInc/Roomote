@@ -81,8 +81,18 @@ export const BRAIN_SOURCES = [
     description:
       'What each completed task learned: decisions, dead ends, and conventions the diff cannot show.',
     namespaceId: 'tasks',
-    // Ingested through the completed-run outbox, not a polling collector.
-    collectorIdPrefix: null,
+    // Ingested through the completed-run outbox; the one-time history
+    // backfill checkpoints under this collector id.
+    collectorIdPrefix: 'task-memory',
+    requires: null,
+  },
+  {
+    id: 'pull-request-facts',
+    label: 'Pull requests',
+    description:
+      'Merged pull requests as durable facts: what changed, why, and who reviewed it.',
+    namespaceId: 'prs',
+    collectorIdPrefix: 'pull-request-facts',
     requires: null,
   },
   {

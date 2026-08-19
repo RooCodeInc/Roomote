@@ -433,7 +433,9 @@ import {
 } from '../commands/misc-settings';
 import {
   backfillBrainTaskMemoriesCommand,
+  getBrainPageCommand,
   getBrainSettingsCommand,
+  listBrainPagesCommand,
   retryFailedBrainTaskMemoriesCommand,
 } from '../commands/brain';
 import {
@@ -2962,6 +2964,14 @@ export const appRouter = createRouter({
     get: protectedProcedure.query(({ ctx: { auth } }) =>
       getBrainSettingsCommand(auth),
     ),
+
+    listPages: protectedProcedure.query(({ ctx: { auth } }) =>
+      listBrainPagesCommand(auth),
+    ),
+
+    getPage: protectedProcedure
+      .input(z.object({ slug: z.string().min(1).max(512) }))
+      .query(({ ctx: { auth }, input }) => getBrainPageCommand(auth, input)),
 
     backfillTaskMemories: protectedProcedure.mutation(({ ctx: { auth } }) =>
       backfillBrainTaskMemoriesCommand(auth),

@@ -21,7 +21,12 @@ vi.mock('sonner', () => ({
 }));
 
 vi.mock('@tanstack/react-query', () => ({
-  useQuery: () => state.query,
+  // The browse dialog issues its own queries; those stay idle here so the
+  // page-level fixtures never leak into the dialog's typed results.
+  useQuery: (options: { queryKey?: unknown[] }) =>
+    Array.isArray(options?.queryKey) && options.queryKey[1] !== 'get'
+      ? { isPending: true, isError: false, data: undefined }
+      : state.query,
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
   useMutation: (options: { mutationKind?: string }) =>
     options.mutationKind === 'retryFailed'
@@ -35,6 +40,12 @@ vi.mock('@/trpc/client', () => ({
       get: {
         queryOptions: () => ({ queryKey: ['brain', 'get'] }),
         queryKey: () => ['brain', 'get'],
+      },
+      listPages: {
+        queryOptions: () => ({ queryKey: ['brain', 'listPages'] }),
+      },
+      getPage: {
+        queryOptions: () => ({ queryKey: ['brain', 'getPage'] }),
       },
       backfillTaskMemories: {
         mutationOptions: () => ({ mutationKind: 'backfill' }),
@@ -56,6 +67,12 @@ function buildSettings(
     statusDetail: null,
     url: 'http://gbrain:8080',
     inferenceProvider: 'openrouter',
+    models: {
+      synthesisModel: 'openai/gpt-5.6-luna',
+      synthesisSource: 'default',
+      embeddingModel: 'openai/text-embedding-3-small',
+      embeddingDimensions: 1536,
+    },
     corpus: {
       reachable: true,
       sampledPages: 30,
@@ -63,6 +80,10 @@ function buildSettings(
       namespaces: [
         { id: 'slack', label: 'Slack', pages: 20 },
         { id: 'tasks', label: 'Task memories', pages: 10 },
+      ],
+      activityByDay: [
+        { date: '2026-01-01', pages: 12 },
+        { date: '2026-01-02', pages: 6 },
       ],
       recentPages: [
         {
@@ -121,9 +142,21 @@ describe('BrainSettings', () => {
     expect(screen.getByText('Connected')).toBeInTheDocument();
     expect(screen.getByText('http://gbrain:8080')).toBeInTheDocument();
     expect(screen.getByText('OpenRouter')).toBeInTheDocument();
+    expect(screen.getByText('Semantic + keyword')).toBeInTheDocument();
+
+    expect(screen.getByText('Pages stored')).toBeInTheDocument();
+
+    expect(screen.getByText('Configuration')).toBeInTheDocument();
+    expect(screen.getByText('openai/gpt-5.6-luna')).toBeInTheDocument();
+    expect(
+      screen.getByText('openai/text-embedding-3-small'),
+    ).toBeInTheDocument();
+    expect(screen.getByText('Manage in Models')).toBeInTheDocument();
 
     expect(screen.getByText('What the Brain knows')).toBeInTheDocument();
     expect(screen.getByText('30 pages')).toBeInTheDocument();
+    expect(screen.getByText('Browse memory')).toBeInTheDocument();
+    expect(screen.getByText('Pages written, last 30 days')).toBeInTheDocument();
     expect(screen.getByText('Reworked the outbox drainer')).toBeInTheDocument();
 
     expect(screen.getByText('1 of 2 connected')).toBeInTheDocument();
@@ -195,6 +228,7 @@ describe('BrainSettings', () => {
         sampledPages: 0,
         truncated: false,
         namespaces: [],
+        activityByDay: [],
         recentPages: [],
       },
     };

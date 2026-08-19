@@ -1,9 +1,12 @@
 'use client';
 
+import { useState } from 'react';
+
 import { Section } from '@/components/settings';
 import {
   Badge,
   BasicTooltip,
+  Button,
   Database,
   EmptyState,
   TriangleAlert,
@@ -11,7 +14,59 @@ import {
 import { formatDistanceToNowCompact, formatNumber } from '@/lib/formatters';
 
 import type { BrainCorpusSummary } from '@/trpc/commands/brain';
+import { BrainBrowseDialog } from './BrainBrowseDialog';
 import { buildNamespaceSegments } from './brain-presentation';
+
+function formatActivityDate(date: string): string {
+  return new Date(`${date}T00:00:00Z`).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+function ActivityChart({
+  days,
+}: {
+  days: BrainCorpusSummary['activityByDay'];
+}) {
+  const max = Math.max(...days.map((day) => day.pages), 1);
+  const total = days.reduce((sum, day) => sum + day.pages, 0);
+
+  if (total === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        No pages written in the last 30 days.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="flex h-20 items-end gap-[3px] border-b border-foreground/10">
+        {days.map((day) => (
+          <BasicTooltip
+            key={day.date}
+            content={`${formatActivityDate(day.date)}: ${formatNumber(day.pages)} pages`}
+          >
+            <div
+              className="min-h-px flex-1 rounded-t-[2px]"
+              style={{
+                height: `${(day.pages / max) * 100}%`,
+                backgroundColor:
+                  day.pages > 0 ? 'var(--color-chart-4)' : 'transparent',
+              }}
+            />
+          </BasicTooltip>
+        ))}
+      </div>
+      <div className="flex justify-between text-xs text-muted-foreground">
+        <span>{formatActivityDate(days[0]!.date)}</span>
+        <span>{formatActivityDate(days[days.length - 1]!.date)}</span>
+      </div>
+    </div>
+  );
+}
 
 /**
  * A segment thinner than this is unreadable and unhoverable, so the bar stops
@@ -47,6 +102,7 @@ function CompositionBar({
 
 export function BrainCorpusSection({ corpus }: { corpus: BrainCorpusSummary }) {
   const segments = buildNamespaceSegments(corpus.namespaces);
+  const [browseOpen, setBrowseOpen] = useState(false);
 
   return (
     <Section
@@ -54,10 +110,19 @@ export function BrainCorpusSection({ corpus }: { corpus: BrainCorpusSummary }) {
       title="What the Brain knows"
       action={
         corpus.reachable && corpus.sampledPages > 0 ? (
-          <span className="text-sm text-muted-foreground">
-            {corpus.truncated
-              ? `${formatNumber(corpus.sampledPages)} most recent pages`
-              : `${formatNumber(corpus.sampledPages)} pages`}
+          <span className="flex items-center gap-3">
+            <span className="text-sm font-normal text-muted-foreground">
+              {corpus.truncated
+                ? `${formatNumber(corpus.sampledPages)} most recent pages`
+                : `${formatNumber(corpus.sampledPages)} pages`}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setBrowseOpen(true)}
+            >
+              Browse memory
+            </Button>
           </span>
         ) : null
       }
@@ -100,6 +165,26 @@ export function BrainCorpusSection({ corpus }: { corpus: BrainCorpusSummary }) {
             </p>
           ) : null}
 
+          {corpus.activityByDay.length > 0 ? (
+            <div className="space-y-2 border-t pt-4">
+              <div className="flex items-baseline justify-between">
+                <p className="text-sm font-medium">
+                  Pages written, last 30 days
+                </p>
+                <span className="text-xs text-muted-foreground">
+                  {formatNumber(
+                    corpus.activityByDay.reduce(
+                      (sum, day) => sum + day.pages,
+                      0,
+                    ),
+                  )}{' '}
+                  pages
+                </span>
+              </div>
+              <ActivityChart days={corpus.activityByDay} />
+            </div>
+          ) : null}
+
           {corpus.recentPages.length > 0 ? (
             <div className="space-y-2 border-t pt-4">
               <p className="text-sm font-medium">Recently learned</p>
@@ -125,6 +210,8 @@ export function BrainCorpusSection({ corpus }: { corpus: BrainCorpusSummary }) {
           ) : null}
         </div>
       )}
+
+      <BrainBrowseDialog open={browseOpen} onOpenChange={setBrowseOpen} />
     </Section>
   );
 }

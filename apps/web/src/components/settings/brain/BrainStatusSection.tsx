@@ -1,8 +1,7 @@
 'use client';
 
 import { Section } from '@/components/settings';
-import { BrainCircuit } from '@/components/system';
-import { formatNumber } from '@/lib/formatters';
+import { Activity } from '@/components/system';
 
 import type { BrainSettings } from '@/trpc/commands/brain';
 import {
@@ -23,14 +22,11 @@ function Fact({ label, value }: { label: string; value: string }) {
 
 export function BrainStatusSection({ settings }: { settings: BrainSettings }) {
   const status = describeBrainStatus(settings.status);
-  const sourcesConnected = settings.sources.filter(
-    (source) => source.status !== 'not_connected',
-  ).length;
 
   return (
     <Section
-      icon={BrainCircuit}
-      title="Brain"
+      icon={Activity}
+      title="Status"
       action={
         <span className="flex items-center gap-2 text-sm font-medium">
           <span
@@ -47,8 +43,14 @@ export function BrainStatusSection({ settings }: { settings: BrainSettings }) {
       </p>
 
       {settings.status !== 'not_configured' ? (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
           <Fact label="Endpoint" value={settings.url ?? 'Not set'} />
+          <Fact
+            label="Recall"
+            value={
+              settings.inferenceProvider ? 'Semantic + keyword' : 'Keyword only'
+            }
+          />
           <Fact
             label="Inference"
             value={
@@ -58,20 +60,6 @@ export function BrainStatusSection({ settings }: { settings: BrainSettings }) {
                   ] ?? settings.inferenceProvider)
                 : 'Not configured'
             }
-          />
-          <Fact
-            label="Pages"
-            value={
-              settings.corpus.reachable
-                ? `${formatNumber(settings.corpus.sampledPages)}${
-                    settings.corpus.truncated ? '+' : ''
-                  }`
-                : 'Unknown'
-            }
-          />
-          <Fact
-            label="Sources"
-            value={`${sourcesConnected} of ${settings.sources.length}`}
           />
         </div>
       ) : null}

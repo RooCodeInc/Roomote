@@ -2,7 +2,6 @@ import {
   BRAIN_MCP_INSTRUCTIONS,
   BRAIN_MCP_READ_INSTRUCTIONS,
   BRAIN_NAMESPACES,
-  BRAIN_SOURCES,
   brainNamespaceLabel,
   resolveBrainNamespaceId,
   resolveBrainSourceIdForCollector,
@@ -116,11 +115,12 @@ describe('resolveBrainSourceIdForCollector', () => {
     expect(resolveBrainSourceIdForCollector('roomote-daily-digest')).toBeNull();
   });
 
-  it('gives the outbox-fed source no collector prefix to match on', () => {
-    const taskMemories = BRAIN_SOURCES.find(
-      (source) => source.id === 'task-memories',
-    );
-
-    expect(taskMemories?.collectorIdPrefix).toBeNull();
+  it('maps the outbox-fed checkpoints back to their sources', () => {
+    expect(
+      resolveBrainSourceIdForCollector('task-memory:effective-date-v2'),
+    ).toBe('task-memories');
+    expect(
+      resolveBrainSourceIdForCollector('pull-request-facts:occurrence-date-v3'),
+    ).toBe('pull-request-facts');
   });
 });

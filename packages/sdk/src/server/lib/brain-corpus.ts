@@ -37,7 +37,7 @@ export type BrainCorpusSnapshot = {
   truncated: boolean;
 };
 
-function parseToolPayloads(body: string): unknown[] {
+function parseToolPayloads(tool: string, body: string): unknown[] {
   const envelope = JSON.parse(body) as {
     error?: { message?: string };
     result?: {
@@ -49,7 +49,7 @@ function parseToolPayloads(body: string): unknown[] {
 
   if (envelope.error) {
     throw new Error(
-      `gbrain list_pages failed: ${envelope.error.message ?? 'JSON-RPC error'}`,
+      `gbrain ${tool} failed: ${envelope.error.message ?? 'JSON-RPC error'}`,
     );
   }
 
@@ -59,7 +59,7 @@ function parseToolPayloads(body: string): unknown[] {
       .filter(Boolean)
       .join(' ');
 
-    throw new Error(`gbrain list_pages failed: ${detail ?? 'tool error'}`);
+    throw new Error(`gbrain ${tool} failed: ${detail ?? 'tool error'}`);
   }
 
   return [
@@ -168,8 +168,9 @@ export function extractBrainCorpusPages(
   return [...pages.values()];
 }
 
-async function callListPages(
+async function callBrainTool(
   connection: { baseUrl: string; token: string },
+  tool: string,
   args: Record<string, unknown>,
 ): Promise<unknown[]> {
   const response = await fetch(`${connection.baseUrl.replace(/\/$/, '')}/mcp`, {
@@ -183,7 +184,7 @@ async function callListPages(
       jsonrpc: '2.0',
       id: 1,
       method: 'tools/call',
-      params: { name: 'list_pages', arguments: args },
+      params: { name: tool, arguments: args },
     }),
     signal: AbortSignal.timeout(CORPUS_REQUEST_TIMEOUT_MS),
   });
@@ -191,11 +192,11 @@ async function callListPages(
 
   if (!response.ok) {
     throw new Error(
-      `gbrain list_pages failed: ${response.status} ${body.slice(0, 200)}`,
+      `gbrain ${tool} failed: ${response.status} ${body.slice(0, 200)}`,
     );
   }
 
-  return parseToolPayloads(body);
+  return parseToolPayloads(tool, body);
 }
 
 /**
@@ -214,14 +215,14 @@ export async function readBrainCorpusSample(): Promise<BrainCorpusSnapshot | nul
     let payloads: unknown[];
 
     try {
-      payloads = await callListPages(connection, {
+      payloads = await callBrainTool(connection, 'list_pages', {
         limit: CORPUS_SAMPLE_LIMIT,
       });
     } catch {
       // The listing tool's arguments have changed shape between gbrain
       // versions. A default-window listing still describes the corpus, so
       // fall back to it rather than reporting the Brain as unreachable.
-      payloads = await callListPages(connection, {});
+      payloads = await callBrainTool(connection, 'list_pages', {});
     }
 
     const pages = extractBrainCorpusPages(payloads);
@@ -230,6 +231,96 @@ export async function readBrainCorpusSample(): Promise<BrainCorpusSnapshot | nul
   } catch (error) {
     console.warn(
       `[brain] corpus listing failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+
+    return null;
+  }
+}
+
+export type BrainCorpusPageContent = BrainCorpusPage & {
+  /** The page body as the Brain stores it, or null when it answered without one. */
+  content: string | null;
+};
+
+/**
+ * Pull a single page's body out of whatever shape `get_page` answered with.
+ * The same generosity as the listing parser, for the same reason: a page that
+ * fails to parse would read as an empty page, which is the one wrong answer.
+ */
+export function extractBrainPageContent(
+  slug: string,
+  payloads: unknown[],
+): BrainCorpusPageContent | null {
+  let title: string | null = null;
+  let updatedAt: Date | null = null;
+  let content: string | null = null;
+
+  for (const payload of payloads) {
+    if (typeof payload === 'string') {
+      content ??= payload;
+      continue;
+    }
+
+    if (typeof payload !== 'object' || payload === null) {
+      continue;
+    }
+
+    const record = payload as Record<string, unknown>;
+    const nested =
+      typeof record.page === 'object' && record.page !== null
+        ? (record.page as Record<string, unknown>)
+        : record;
+
+    for (const key of ['content', 'markdown', 'body', 'text']) {
+      const value = nested[key];
+
+      if (typeof value === 'string' && value.trim()) {
+        content ??= value;
+        break;
+      }
+    }
+
+    if (typeof nested.title === 'string' && nested.title.trim()) {
+      title ??= nested.title.trim();
+    }
+
+    const page = toCorpusPage(nested);
+
+    if (page?.updatedAt) {
+      updatedAt ??= page.updatedAt;
+    }
+  }
+
+  if (content === null && title === null) {
+    return null;
+  }
+
+  return { slug, title, updatedAt, content };
+}
+
+/**
+ * Read one page with the read-only agent credential, or return null when the
+ * Brain is unconfigured, unreachable, or has no such page. Same non-throwing
+ * contract as the corpus sample: absence is a state the dialog renders.
+ */
+export async function readBrainPage(
+  slug: string,
+): Promise<BrainCorpusPageContent | null> {
+  const connection = await resolveBrainConnection('agent');
+
+  if (!connection) {
+    return null;
+  }
+
+  try {
+    const payloads = await callBrainTool(connection, 'get_page', { slug });
+
+    return extractBrainPageContent(slug, payloads);
+  } catch (error) {
+    console.warn(
+      `[brain] page read failed: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );

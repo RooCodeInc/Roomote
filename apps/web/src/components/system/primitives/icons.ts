@@ -4,6 +4,7 @@
 export {
   AlertCircle,
   AlertCircleIcon,
+  Activity,
   AlertTriangle,
   AppWindow,
   ArrowDownIcon,
@@ -20,7 +21,6 @@ export {
   BookCopy,
   BookMarked,
   Brain,
-  BrainCircuit,
   Bot,
   BotMessageSquare,
   Bug,
@@ -102,6 +102,7 @@ export {
   Info,
   KeyboardIcon,
   KeyRound,
+  Layers,
   LifeBuoyIcon,
   ListChevronsUpDown,
   Lightbulb,
