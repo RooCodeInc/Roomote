@@ -99,6 +99,38 @@ describe('FastAgentOpenCodeSessionManager', () => {
     expect(execute).toHaveBeenCalledTimes(3);
   });
 
+  it('rebuilds an invalidated conversation from compatibility history', async () => {
+    const manager = new FastAgentOpenCodeSessionManager();
+    const prompts: Array<{ prompt: string; sessionId?: string }> = [];
+    const execute = vi.fn(async (session, prompt: string) => {
+      prompts.push({ prompt, sessionId: session.id });
+      session.id ??= `session-${prompts.length}`;
+      return prompt;
+    });
+
+    await manager.run({
+      conversationId: 'conversation-1',
+      prompt: 'turn one',
+      bootstrapPrompt: 'bootstrap turn one',
+      execute,
+    });
+    manager.invalidate('conversation-1');
+    await manager.run({
+      conversationId: 'conversation-1',
+      prompt: 'turn two only',
+      bootstrapPrompt: 'visible history including the failure and turn two',
+      execute,
+    });
+
+    expect(prompts).toEqual([
+      { prompt: 'bootstrap turn one', sessionId: undefined },
+      {
+        prompt: 'visible history including the failure and turn two',
+        sessionId: undefined,
+      },
+    ]);
+  });
+
   it('forgets idle and least-recently-used sessions', async () => {
     let now = 0;
     const manager = new FastAgentOpenCodeSessionManager({
