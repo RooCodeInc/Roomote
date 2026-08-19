@@ -67,20 +67,28 @@ type IntegrationToolCacheEntry = {
 const integrationToolCache = new Map<string, IntegrationToolCacheEntry>();
 
 async function withFastIntegrationTimeout<T>(
-  operation: Promise<T>,
+  operation: (signal: AbortSignal) => Promise<T>,
   timeoutMs: number,
   operationName: string,
 ): Promise<T> {
+  const abortController = new AbortController();
   let timeout: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<never>((_resolve, reject) => {
     timeout = setTimeout(() => {
-      reject(new Error(`${operationName} timed out after ${timeoutMs}ms.`));
+      const error = new Error(
+        `${operationName} timed out after ${timeoutMs}ms.`,
+      );
+      abortController.abort(error);
+      reject(error);
     }, timeoutMs);
     timeout.unref?.();
   });
 
   try {
-    return await Promise.race([operation, timeoutPromise]);
+    return await Promise.race([
+      operation(abortController.signal),
+      timeoutPromise,
+    ]);
   } finally {
     if (timeout) clearTimeout(timeout);
   }
@@ -99,7 +107,7 @@ async function listCachedIntegrationTools(options: {
       cached.expiresAt =
         Date.now() + FAST_AGENT_INTEGRATION_TOOL_CACHE_RETRY_MS;
       const refresh = withFastIntegrationTimeout(
-        listMcpTools(options),
+        (signal) => listMcpTools({ ...options, signal }),
         FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS,
         'Fast integration tool discovery',
       );
@@ -124,7 +132,7 @@ async function listCachedIntegrationTools(options: {
   }
 
   const tools = withFastIntegrationTimeout(
-    listMcpTools(options),
+    (signal) => listMcpTools({ ...options, signal }),
     FAST_AGENT_INTEGRATION_DISCOVERY_TIMEOUT_MS,
     'Fast integration tool discovery',
   );
@@ -324,13 +332,15 @@ export async function callFastAgentIntegration(
   try {
     const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
     const result = await withFastIntegrationTimeout(
-      callMcpTool({
-        url: integrationProxyUrl(apiBaseUrl, integration.id),
-        headers: { Authorization: `Bearer ${authToken}` },
-        toolName: request.toolName,
-        args: request.args,
-        toolCallId: `fast:${audit.id}:${integration.id}:${request.toolName}`,
-      }),
+      (signal) =>
+        callMcpTool({
+          url: integrationProxyUrl(apiBaseUrl, integration.id),
+          headers: { Authorization: `Bearer ${authToken}` },
+          toolName: request.toolName,
+          args: request.args,
+          toolCallId: `fast:${audit.id}:${integration.id}:${request.toolName}`,
+          signal,
+        }),
       FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS,
       `Fast ${integration.id}/${request.toolName} integration call`,
     );

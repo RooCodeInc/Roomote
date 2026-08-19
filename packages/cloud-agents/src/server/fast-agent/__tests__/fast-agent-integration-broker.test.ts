@@ -109,6 +109,7 @@ describe('fast-agent integration broker', () => {
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
       url: 'https://api.example.com/api/mcp-routing/github',
       headers: { Authorization: 'Bearer control-plane-token' },
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -134,6 +135,7 @@ describe('fast-agent integration broker', () => {
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
       url: 'https://api.example.com/api/mcp/gbrain',
       headers: { Authorization: 'Bearer control-plane-token' },
+      signal: expect.any(AbortSignal),
     });
   });
 
@@ -353,6 +355,7 @@ describe('fast-agent integration broker', () => {
       toolName: 'search',
       args: { query: 'roadmap' },
       toolCallId: 'fast:audit-1:notion:search',
+      signal: expect.any(AbortSignal),
     });
     expect(mocks.beginIntegrationCall).toHaveBeenCalledWith({
       slackQuickAnswerId: 'session-1',
