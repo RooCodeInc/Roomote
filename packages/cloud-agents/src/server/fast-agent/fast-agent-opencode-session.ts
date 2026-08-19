@@ -65,16 +65,28 @@ export class FastAgentOpenCodeSessionManager {
 
     try {
       const selectedPrompt = entry.session.id ? prompt : bootstrapPrompt;
+      const executeAndInvalidateOnFailure = async (
+        nextPrompt: string,
+      ): Promise<T> => {
+        try {
+          return await execute(entry.session, nextPrompt);
+        } catch (error) {
+          // OpenCode persists the user turn before inference. Clear the failed
+          // session before releasing queued work so the next turn cannot send
+          // a delta into a poisoned transcript.
+          entry.session.id = undefined;
+          throw error;
+        }
+      };
 
       try {
-        return await execute(entry.session, selectedPrompt);
+        return await executeAndInvalidateOnFailure(selectedPrompt);
       } catch (error) {
         if (!isNonTaskOpenCodeSessionNotFoundError(error)) {
           throw error;
         }
 
-        entry.session.id = undefined;
-        return await execute(entry.session, bootstrapPrompt);
+        return await executeAndInvalidateOnFailure(bootstrapPrompt);
       }
     } finally {
       entry.pending -= 1;

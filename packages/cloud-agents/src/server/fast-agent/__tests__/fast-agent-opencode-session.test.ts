@@ -67,6 +67,52 @@ describe('FastAgentOpenCodeSessionManager', () => {
     expect(started).toEqual(['bootstrap one', 'delta two']);
   });
 
+  it('invalidates a failed session before a queued turn resumes', async () => {
+    const manager = new FastAgentOpenCodeSessionManager();
+    let releaseFailure!: () => void;
+    const failureGate = new Promise<void>((resolve) => {
+      releaseFailure = resolve;
+    });
+    const calls: Array<{ prompt: string; sessionId?: string }> = [];
+    const execute = vi.fn(async (session, prompt: string) => {
+      calls.push({ prompt, sessionId: session.id });
+      if (prompt === 'bootstrap one') {
+        session.id = 'failed-session';
+        await failureGate;
+        throw new Error('provider failed');
+      }
+      session.id ??= 'replacement-session';
+      return prompt;
+    });
+
+    const first = manager.run({
+      conversationId: 'conversation-1',
+      prompt: 'delta one',
+      bootstrapPrompt: 'bootstrap one',
+      execute,
+    });
+    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    const second = manager.run({
+      conversationId: 'conversation-1',
+      prompt: 'delta two',
+      bootstrapPrompt: 'bootstrap two with visible error',
+      execute,
+    });
+    const firstFailure = expect(first).rejects.toThrow('provider failed');
+
+    releaseFailure();
+
+    await firstFailure;
+    await expect(second).resolves.toBe('bootstrap two with visible error');
+    expect(calls).toEqual([
+      { prompt: 'bootstrap one', sessionId: undefined },
+      {
+        prompt: 'bootstrap two with visible error',
+        sessionId: undefined,
+      },
+    ]);
+  });
+
   it('recreates a missing OpenCode session from the bootstrap prompt once', async () => {
     const manager = new FastAgentOpenCodeSessionManager();
     const execute = vi

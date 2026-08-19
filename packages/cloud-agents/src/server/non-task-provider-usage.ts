@@ -1042,6 +1042,14 @@ export function classifyNonTaskInferenceError(
     };
   }
 
+  if (statusCode === 408) {
+    return {
+      message: 'The inference provider did not respond in time. Try again.',
+      reason: 'timeout',
+      retryable: true,
+    };
+  }
+
   if (errorName === 'ProviderAuthError') {
     return {
       message: 'The inference provider rejected these credentials.',

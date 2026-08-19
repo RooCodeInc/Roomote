@@ -1499,6 +1499,12 @@ describe('resolveOpenCodeSmallModel', () => {
       reason: 'rate_limited',
       retryable: true,
     },
+    {
+      providerMessage: 'request expired',
+      statusCode: 408,
+      reason: 'timeout',
+      retryable: true,
+    },
     // Other structured 4xx responses are client errors that resending the
     // same request cannot recover, so retry loops must not absorb them.
     {
