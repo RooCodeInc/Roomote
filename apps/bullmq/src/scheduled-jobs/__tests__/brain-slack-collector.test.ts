@@ -142,7 +142,8 @@ vi.mock('@roomote/slack', () => ({
   }),
 }));
 
-const { slackPublicChannelsCollector } = await import('../brain-collectors');
+const { slackPublicChannelsCollector } =
+  await import('../brain-collectors/slack-public-channels');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const slackStateId = (channelId: string) =>
