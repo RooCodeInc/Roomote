@@ -772,6 +772,60 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.queueMessage).not.toHaveBeenCalled();
   });
 
+  it('passes the model-authored Fast kickoff through the Discord enqueue gate', async () => {
+    mocks.hasFastDefault.mockResolvedValue(true);
+    const postKickoff = vi.fn().mockResolvedValue(undefined);
+    mocks.startNewTask.mockImplementation(
+      async (input: {
+        beforeEnqueueKickoff: (task: {
+          taskId: string;
+          taskUrl?: string;
+        }) => Promise<void>;
+      }) => {
+        await input.beforeEnqueueKickoff({
+          taskId: 'task-17',
+          taskUrl: 'https://roomote.example/task/task-17',
+        });
+        return {
+          status: 'started',
+          launchResult: { id: 17, taskId: 'task-17' },
+          taskUrl: 'https://roomote.example/task/task-17',
+        };
+      },
+    );
+    mocks.answerFast.mockImplementation(
+      async (input: {
+        adapter: {
+          launchTask: (params: {
+            prompt: string;
+            environmentId: null;
+            parentSessionId: string;
+            postKickoff: typeof postKickoff;
+          }) => Promise<unknown>;
+        };
+      }) => {
+        await input.adapter.launchTask({
+          prompt: 'Fix checkout',
+          environmentId: null,
+          parentSessionId: 'fast-session-1',
+          postKickoff,
+        });
+        return '';
+      },
+    );
+
+    const response = await postEvent(envelope(message()));
+
+    expect(response.status).toBe(200);
+    expect(mocks.startNewTask).toHaveBeenCalledWith(
+      expect.objectContaining({ beforeEnqueueKickoff: postKickoff }),
+    );
+    expect(postKickoff).toHaveBeenCalledWith({
+      taskId: 'task-17',
+      taskUrl: 'https://roomote.example/task/task-17',
+    });
+  });
+
   it('serializes complete Fast turns before the next Discord message enters the agent', async () => {
     mocks.hasFastDefault.mockResolvedValue(true);
     let grantSecondLock!: (release: () => Promise<void>) => void;

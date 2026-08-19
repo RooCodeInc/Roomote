@@ -85,6 +85,47 @@ describe('startNewDiscordTask', () => {
     });
   });
 
+  it('forwards a Fast kickoff gate to the Discord launcher', async () => {
+    const beforeEnqueueKickoff = vi.fn().mockResolvedValue(undefined);
+
+    const result = await startNewDiscordTask({
+      provider: {} as never,
+      applicationId: 'application-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix checkout',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-fast-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'dm-1',
+        communicationMessageId: 'message-fast-1',
+      },
+      channel: {
+        channelId: 'dm-1',
+        channelName: 'Direct message',
+        channelType: 1,
+        isDirectMessage: true,
+        isThread: false,
+      },
+      workspaceOverride: {
+        repoForPayload: 'acme/repo',
+        workspaceDisplayName: 'Acme',
+      },
+      skipRoutingConfirmation: true,
+      beforeEnqueueKickoff,
+    });
+
+    expect(result.status).toBe('started');
+    expect(mocks.launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({ beforeEnqueueKickoff }),
+    );
+  });
+
   it('does not route or launch a second task for a retried source event', async () => {
     mocks.findSourceRun.mockResolvedValue({
       id: 41,

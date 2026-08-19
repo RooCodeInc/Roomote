@@ -98,7 +98,12 @@ export async function processDiscordFastAgentMessage(input: {
         input.sender.username,
       activeTasks: input.activeTasks,
       adapter: {
-        launchTask: async ({ prompt, environmentId, parentSessionId }) => {
+        launchTask: async ({
+          prompt,
+          environmentId,
+          parentSessionId,
+          postKickoff,
+        }) => {
           const workspaceOverride = environmentId
             ? await resolveDiscordWorkspace({
                 type: 'environment',
@@ -143,6 +148,7 @@ export async function processDiscordFastAgentMessage(input: {
             },
             skipRoutingConfirmation: true,
             workspaceOverride,
+            beforeEnqueueKickoff: postKickoff,
           });
           if (started.status === 'started') {
             return {
