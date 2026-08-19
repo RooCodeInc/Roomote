@@ -16,6 +16,7 @@ import {
   getMcpIntegrationConnectionScope,
   formatErrorForLog,
   isCredentialOnlyMcpIntegration,
+  redactBrainText,
 } from '@roomote/types';
 
 import {
@@ -248,6 +249,27 @@ async function saveFastAgentUserMemory(
   return result;
 }
 
+function getIntegrationAuditArguments(
+  integrationId: string,
+  toolName: string,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  if (
+    integrationId !== BRAIN_MCP_ID ||
+    toolName !== FAST_AGENT_REMEMBER_USER_FACT_TOOL.name
+  ) {
+    return args;
+  }
+
+  return {
+    key: typeof args.key === 'string' ? redactBrainText(args.key) : '[invalid]',
+    value:
+      typeof args.value === 'string'
+        ? redactBrainText(args.value)
+        : '[invalid]',
+  };
+}
+
 /**
  * Deployment integrations only. Fast mode never receives MCP server configs,
  * local transports, filesystem tools, or arbitrary proxy URLs. Tools disabled
@@ -391,7 +413,11 @@ export async function callFastAgentIntegration(
     slackMessageTs: context.messageId,
     integrationId: integration.id,
     toolName: request.toolName,
-    arguments: request.args,
+    arguments: getIntegrationAuditArguments(
+      integration.id,
+      request.toolName,
+      request.args,
+    ),
   });
 
   try {

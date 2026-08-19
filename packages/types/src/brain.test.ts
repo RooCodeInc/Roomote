@@ -3,6 +3,7 @@ import {
   BRAIN_MCP_READ_INSTRUCTIONS,
   BRAIN_NAMESPACES,
   brainNamespaceLabel,
+  redactBrainText,
   resolveBrainNamespaceId,
   resolveBrainSourceIdForCollector,
 } from './brain';
@@ -48,6 +49,32 @@ describe('BRAIN_MCP_INSTRUCTIONS', () => {
     expect(BRAIN_MCP_READ_INSTRUCTIONS).not.toContain('save_task_memory');
     expect(BRAIN_MCP_INSTRUCTIONS).toContain(BRAIN_MCP_READ_INSTRUCTIONS);
     expect(BRAIN_MCP_INSTRUCTIONS).toContain('save_task_memory');
+  });
+});
+
+describe('redactBrainText', () => {
+  it('redacts repeated complete private-key blocks without consuming surrounding text', () => {
+    const input = [
+      'before',
+      '-----BEGIN PRIVATE KEY-----',
+      'first-secret',
+      '-----END PRIVATE KEY-----',
+      'middle',
+      '-----BEGIN RSA PRIVATE KEY-----',
+      'second-secret',
+      '-----END RSA PRIVATE KEY-----',
+      'after',
+    ].join('\n');
+
+    expect(redactBrainText(input)).toBe(
+      ['before', '[REDACTED]', 'middle', '[REDACTED]', 'after'].join('\n'),
+    );
+  });
+
+  it('leaves an incomplete private-key marker unchanged', () => {
+    const input = `${'-----BEGIN PRIVATE KEY-----\n'.repeat(1_000)}no footer`;
+
+    expect(redactBrainText(input)).toBe(input);
   });
 });
 

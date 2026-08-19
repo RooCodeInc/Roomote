@@ -405,7 +405,10 @@ describe('fast-agent integration broker', () => {
       {
         integrationId: 'gbrain',
         toolName: 'remember_user_fact',
-        args: { key: 'favorite number', value: '2' },
+        args: {
+          key: 'favorite number',
+          value: 'token ghp_abcdefghijklmnopqrstuvwxyz012345',
+        },
       },
     );
 
@@ -420,7 +423,7 @@ describe('fast-agent integration broker', () => {
         },
         body: JSON.stringify({
           key: 'favorite number',
-          value: '2',
+          value: 'token ghp_abcdefghijklmnopqrstuvwxyz012345',
           source: { surface: 'slack' },
         }),
         signal: expect.any(AbortSignal),
@@ -432,6 +435,10 @@ describe('fast-agent integration broker', () => {
         userId: 'user-1',
         integrationId: 'gbrain',
         toolName: 'remember_user_fact',
+        arguments: {
+          key: 'favorite number',
+          value: 'token [REDACTED]',
+        },
       }),
     );
     expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(

@@ -84,7 +84,6 @@ export function brainNamespaceLabel(id: BrainNamespaceBucketId): string {
  * leaves Roomote for the Brain without passing through it.
  */
 const BRAIN_SECRET_PATTERNS: RegExp[] = [
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b/g,
   /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
   /\bsk-[A-Za-z0-9_-]{20,}\b/g,
@@ -93,8 +92,56 @@ const BRAIN_SECRET_PATTERNS: RegExp[] = [
   /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/g,
 ];
 
+function redactPrivateKeyBlocks(text: string): string {
+  const beginMarker = '-----BEGIN ';
+  const labelSuffix = 'PRIVATE KEY';
+  let cursor = 0;
+  let redacted = '';
+
+  while (cursor < text.length) {
+    const beginIndex = text.indexOf(beginMarker, cursor);
+    if (beginIndex === -1) break;
+
+    const newlineIndex = text.indexOf('\n', beginIndex);
+    const headerEnd = newlineIndex === -1 ? text.length : newlineIndex;
+    const rawHeader = text.slice(beginIndex, headerEnd);
+    const header = rawHeader.endsWith('\r')
+      ? rawHeader.slice(0, -1)
+      : rawHeader;
+    const label = header.endsWith('-----')
+      ? header.slice(beginMarker.length, -'-----'.length)
+      : '';
+    const prefix = label.slice(0, -labelSuffix.length);
+    const validPrefix =
+      label.endsWith(labelSuffix) &&
+      prefix.length <= 64 &&
+      Array.from(prefix).every(
+        (character) =>
+          character === ' ' || (character >= 'A' && character <= 'Z'),
+      );
+    if (!validPrefix) {
+      const nextCursor = headerEnd;
+      redacted += text.slice(cursor, nextCursor);
+      cursor = nextCursor;
+      continue;
+    }
+
+    const endMarker = `-----END ${label}-----`;
+    const endIndex = text.indexOf(endMarker, headerEnd);
+
+    if (endIndex === -1) {
+      break;
+    }
+
+    redacted += `${text.slice(cursor, beginIndex)}[REDACTED]`;
+    cursor = endIndex + endMarker.length;
+  }
+
+  return redacted + text.slice(cursor);
+}
+
 export function redactBrainText(text: string): string {
-  let redacted = text;
+  let redacted = redactPrivateKeyBlocks(text);
 
   for (const pattern of BRAIN_SECRET_PATTERNS) {
     redacted = redacted.replace(pattern, '[REDACTED]');
