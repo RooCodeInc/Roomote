@@ -36,7 +36,7 @@ export function normalizeIdentityAlias(value: string): string {
   return singleLineIdentityValue(value).toLocaleLowerCase();
 }
 
-export function singleLineIdentityValue(value: string): string {
+function singleLineIdentityValue(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
 }
 

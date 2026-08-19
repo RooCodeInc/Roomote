@@ -6,12 +6,12 @@ import {
   upsertBrainCollectorItems,
   upsertBrainSyncState,
 } from '@roomote/db/server';
-import {
-  runBrainCollectors,
-  type BrainCollector,
-  type BrainSink,
-  type CollectorPage,
-} from '../brain-collectors';
+import { runBrainCollectors } from '../brain-collectors';
+import type {
+  BrainCollector,
+  BrainSink,
+  CollectorPage,
+} from '../brain-collectors/contracts';
 import { writeCollectorPages } from '../brain-collectors/write-pages';
 import { BrainRateLimitedError } from '../brain-outbox-drain';
 

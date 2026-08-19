@@ -26,7 +26,3 @@ export function slugifySegment(value: string): string {
 export function formatUtcDay(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
-
-export function formatUtcTime(date: Date): string {
-  return date.toISOString().slice(11, 16);
-}
