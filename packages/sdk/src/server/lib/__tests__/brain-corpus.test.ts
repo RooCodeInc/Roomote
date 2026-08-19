@@ -187,6 +187,33 @@ describe('readBrainCorpusSample', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it('spends one deadline across all windows instead of one per window', async () => {
+    // Three seconds per window against an eight-second listing budget: the
+    // third window ends past the deadline, so a fourth is never attempted
+    // and the result is honestly a truncated sample. Without the shared
+    // deadline this listing would run five windows and hold the settings
+    // page for the sum of the per-window timeouts.
+    vi.useFakeTimers();
+    try {
+      const fetchMock = vi.fn(async (_url: unknown, init: RequestInit) => {
+        vi.advanceTimersByTime(3_000);
+        const body = JSON.parse(init.body as string) as {
+          params: { arguments: { offset?: number } };
+        };
+        return toolResponse(windowOf(body.params.arguments.offset ?? 0, 100));
+      });
+      global.fetch = fetchMock as unknown as typeof fetch;
+
+      const snapshot = await readBrainCorpusSample();
+
+      expect(snapshot!.pages).toHaveLength(300);
+      expect(snapshot!.truncated).toBe(true);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('falls back to a bare listing on an argument-shape error, as a sample', async () => {
     let first = true;
     const fetchMock = vi.fn(async () => {

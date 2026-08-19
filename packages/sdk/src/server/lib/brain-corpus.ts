@@ -22,9 +22,17 @@ const CORPUS_SAMPLE_LIMIT = 500;
 /**
  * A settings page must not hold a request open on an unreachable service.
  * Short enough that an admin gets the rest of the page promptly; the corpus
- * section degrades to "unavailable" on its own.
+ * section degrades to "unavailable" on its own. This bounds the WHOLE
+ * listing, not each paged window: five windows must not multiply it.
  */
 const CORPUS_REQUEST_TIMEOUT_MS = 8_000;
+
+/**
+ * Below this remaining budget a further window is not attempted, and it is
+ * also the floor passed to a window that still runs, so a request always
+ * gets a workable timeout even at the very edge of the deadline.
+ */
+const CORPUS_MIN_WINDOW_BUDGET_MS = 500;
 
 export type BrainCorpusPage = {
   slug: string;
@@ -185,8 +193,20 @@ async function fetchBrainCorpusSample(): Promise<BrainCorpusSnapshot | null> {
   try {
     const pages = new Map<string, BrainCorpusPage>();
     let truncated = false;
+    // One deadline across every window, so paging cannot multiply the
+    // page's latency bound: each window gets whatever budget remains.
+    const deadlineAtMs = Date.now() + CORPUS_REQUEST_TIMEOUT_MS;
 
     for (let offset = 0; offset < CORPUS_SAMPLE_LIMIT;) {
+      const remainingMs = deadlineAtMs - Date.now();
+
+      if (offset > 0 && remainingMs < CORPUS_MIN_WINDOW_BUDGET_MS) {
+        // Firing a window that would be aborted almost immediately only adds
+        // a doomed round trip to a listing already reported as truncated.
+        truncated = true;
+        break;
+      }
+
       let payloads: unknown[];
 
       try {
@@ -194,7 +214,7 @@ async function fetchBrainCorpusSample(): Promise<BrainCorpusSnapshot | null> {
           connection,
           'list_pages',
           { limit: CORPUS_LISTING_WINDOW, offset },
-          { timeoutMs: CORPUS_REQUEST_TIMEOUT_MS },
+          { timeoutMs: Math.max(remainingMs, CORPUS_MIN_WINDOW_BUDGET_MS) },
         );
       } catch (error) {
         if (offset > 0 || !isRetryableToolError(error)) {
@@ -217,7 +237,12 @@ async function fetchBrainCorpusSample(): Promise<BrainCorpusSnapshot | null> {
           connection,
           'list_pages',
           {},
-          { timeoutMs: CORPUS_REQUEST_TIMEOUT_MS },
+          {
+            timeoutMs: Math.max(
+              deadlineAtMs - Date.now(),
+              CORPUS_MIN_WINDOW_BUDGET_MS,
+            ),
+          },
         );
         const fallbackPages = extractBrainCorpusPages(payloads);
 
