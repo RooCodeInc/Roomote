@@ -10,9 +10,10 @@ import { createMcpProxy, McpProxyError } from './proxy-utils';
  * hundred tools. The list is filtered on `tools/list` as well as on calls, so
  * an agent sees only these and never has to choose against the rest.
  *
- * `remember` and `forget` are deliberately absent: the agent path is
- * structurally incapable of mutation, and memory writes flow only through
- * the server-side ingestion pipeline with its own write-only credential.
+ * `remember` and `forget` are deliberately absent: the proxy is structurally
+ * incapable of mutation. Memory writes use narrow Roomote-owned API handlers
+ * that derive identity and placement server-side, then use the ingest
+ * credential without exposing it to the agent.
  *
  * Deliberately absent for a second reason, that nothing here populates what
  * they read:

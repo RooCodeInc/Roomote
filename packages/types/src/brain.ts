@@ -27,6 +27,7 @@ export const BRAIN_PROXY_PATH = '/api/mcp/gbrain';
  */
 export const BRAIN_NAMESPACES = [
   { id: 'people', prefix: 'people/', label: 'People' },
+  { id: 'memories', prefix: 'memories/', label: 'User memories' },
   { id: 'tasks', prefix: 'tasks/', label: 'Task memories' },
   { id: 'prs', prefix: 'prs/', label: 'Pull requests' },
   { id: 'github', prefix: 'github/', label: 'GitHub issues' },
@@ -75,6 +76,31 @@ export function brainNamespaceLabel(id: BrainNamespaceBucketId): string {
   return (
     BRAIN_NAMESPACES.find((namespace) => namespace.id === id)?.label ?? 'Other'
   );
+}
+
+/**
+ * Deterministic pre-ingestion redaction shared by every Brain writer. This is
+ * a structural boundary, not a prompt: user- and agent-authored text never
+ * leaves Roomote for the Brain without passing through it.
+ */
+const BRAIN_SECRET_PATTERNS: RegExp[] = [
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b/g,
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,
+  /\bsk-[A-Za-z0-9_-]{20,}\b/g,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g,
+  /\bAKIA[0-9A-Z]{16}\b/g,
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/g,
+];
+
+export function redactBrainText(text: string): string {
+  let redacted = text;
+
+  for (const pattern of BRAIN_SECRET_PATTERNS) {
+    redacted = redacted.replace(pattern, '[REDACTED]');
+  }
+
+  return redacted;
 }
 
 /**
@@ -230,7 +256,7 @@ Which tool:
 - \`query\` when you are describing a concept and do not know how the Brain words it. It expands your phrasing into related queries, so it finds pages that talk about the same thing in different language. This is the default, and the right choice for that first pass.
 - \`search\` when you already know the exact token: a slug, a repository name, an error string, a person's handle. Cheaper than \`query\` because it skips the expansion step.
 - \`entity\` for one known person. It resolves names and linked provider handles against canonical deployment-member cards without an LLM call.
-- \`list_pages\` to enumerate rather than guess, and to answer "what is in the Brain" or "what happened recently" (it sorts by recency). Use it before ever concluding the Brain is empty. Pages are namespaced: \`people/\`, \`tasks/\`, \`prs/\`, \`slack/\`, \`notion/\`, \`meetings/\`, \`github/\`.
+- \`list_pages\` to enumerate rather than guess, and to answer "what is in the Brain" or "what happened recently" (it sorts by recency). Use it before ever concluding the Brain is empty. Pages are namespaced: \`people/\`, \`memories/\`, \`tasks/\`, \`prs/\`, \`slack/\`, \`notion/\`, \`meetings/\`, \`github/\`.
 - \`get_page\` on a slug for a page's full text, once a search result looks relevant.
 
 A result set that comes back populated is not proof of coverage, and one query returning nothing is not proof of absence. If the answer matters, try the other phrasing or list the namespace before deciding the Brain has nothing.

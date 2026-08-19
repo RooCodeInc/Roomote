@@ -57,6 +57,9 @@ describe('resolveBrainNamespaceId', () => {
       'slack',
     );
     expect(resolveBrainNamespaceId('people/roomote-member-abc')).toBe('people');
+    expect(resolveBrainNamespaceId('memories/users/abc/favorite-number')).toBe(
+      'memories',
+    );
     expect(resolveBrainNamespaceId('daily/digests/2026-01-02')).toBe('daily');
   });
 
@@ -76,6 +79,7 @@ describe('resolveBrainNamespaceId', () => {
     // label, or the Settings page files those pages under "Other".
     for (const prefix of [
       'people/',
+      'memories/',
       'tasks/',
       'prs/',
       'slack/',

@@ -19,6 +19,7 @@ import { updateTaskModelSelection } from './updateModelSelection';
 import { listTaskModels } from './listModels';
 import { getGoal, manageGoal } from './manageGoal';
 import { saveTaskMemory } from './saveTaskMemory';
+import { saveUserMemory } from './saveUserMemory';
 
 export const tasksRouter = new Hono<{ Variables: Variables }>();
 
@@ -29,6 +30,7 @@ tasksRouter.get('/:taskId/messages', getTaskMessages);
 tasksRouter.get('/:taskId/compute_logs', getTaskComputeLogs);
 tasksRouter.get('/runs/:runId/goal', getGoal);
 tasksRouter.post('/', launchTask);
+tasksRouter.post('/memory', saveUserMemory);
 tasksRouter.post('/:taskId/cancel', cancelTask);
 tasksRouter.post('/:taskId/stop', stopTask);
 tasksRouter.post('/:taskId/send_message', sendMessage);
