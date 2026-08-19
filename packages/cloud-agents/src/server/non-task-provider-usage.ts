@@ -99,6 +99,7 @@ const NON_TASK_INFERENCE_VALIDATION_TIMEOUT_MS = 15_000;
 
 export type NonTaskInferenceValidationFailureReason =
   | 'endpoint_unreachable'
+  | 'gateway_blocked'
   | 'insufficient_credits'
   | 'invalid_credentials'
   | 'model_unavailable'
@@ -130,7 +131,20 @@ interface GenerateTrackedNonTaskBaseParams extends NonTaskInferenceTrackingInput
   modelRole?: 'primary' | 'small';
   maxOutputTokens?: number;
   timeoutMs?: number;
+  /**
+   * OpenCode retries some provider failures internally before the prompt
+   * request settles. Long-running, user-visible callers such as Fast Mode can
+   * subscribe to those retry transitions instead of appearing hung until the
+   * outer timeout fires.
+   */
+  onProviderRetry?: (event: NonTaskProviderRetryEvent) => void | Promise<void>;
 }
+
+export type NonTaskProviderRetryEvent = {
+  attempt: number;
+  message: string;
+  nextRetryAtMs?: number;
+};
 
 export interface GenerateTrackedNonTaskTextParams extends GenerateTrackedNonTaskBaseParams {
   files?: NonTaskPromptFile[];
@@ -180,6 +194,31 @@ export class NonTaskOpenCodeSessionNotFoundError extends Error {
     super('The OpenCode session is no longer available.');
     this.name = 'NonTaskOpenCodeSessionNotFoundError';
   }
+}
+
+export class NonTaskOpenCodePromptError extends Error {
+  constructor(
+    public readonly providerError: unknown,
+    label: string,
+  ) {
+    super(`${label}: ${formatOpenCodeSdkError(providerError)}`, {
+      cause: providerError,
+    });
+    this.name = 'NonTaskOpenCodePromptError';
+  }
+}
+
+export class NonTaskOpenCodePromptTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Timed out waiting for OpenCode output after ${timeoutMs}ms.`);
+    this.name = 'NonTaskOpenCodePromptTimeoutError';
+  }
+}
+
+export function isNonTaskOpenCodePromptTimeoutError(
+  error: unknown,
+): error is NonTaskOpenCodePromptTimeoutError {
+  return error instanceof NonTaskOpenCodePromptTimeoutError;
 }
 
 export function isNonTaskOpenCodeSessionNotFoundError(
@@ -500,9 +539,10 @@ async function resolveModelForInputModality(
 /**
  * Shared OpenCode SDK plumbing for non-task inference: leases a managed SDK
  * server, wires the abort/timeout controller, creates a session, and issues the
- * prompt. Returns the raw prompt payload (`{ info, parts }`) so each caller can
- * interpret it — structured object extraction or plain-text joining — without
- * duplicating the boilerplate or the terminal-scraping apparatus it replaced.
+ * prompt. Provider errors from either the event stream or prompt result are
+ * normalized before returning, so callers receive the same structured cause
+ * regardless of which transport settles first. Successful calls return the raw
+ * prompt payload for structured-object extraction or plain-text joining.
  */
 async function runNonTaskSdkPrompt(
   params: GenerateTrackedNonTaskBaseParams,
@@ -517,6 +557,7 @@ async function runNonTaskSdkPrompt(
     env?: Partial<Record<string, string>>;
     onSessionReady?: (sessionID: string) => Promise<void> | void;
     permission?: PermissionRuleset;
+    promptErrorLabel?: string;
     session?: NonTaskOpenCodeSession;
     signal?: AbortSignal;
     useConfiguredServer?: boolean;
@@ -527,6 +568,9 @@ async function runNonTaskSdkPrompt(
 }> {
   const { model, resolvedModelRuntimeEnv } = runtime;
   const timeoutMs = params.timeoutMs ?? 120_000;
+  const promptErrorLabel =
+    options.promptErrorLabel ??
+    `OpenCode structured prompt failed (model ${model})`;
   const sessionDirectory =
     options.directory ?? resolveNonTaskSessionDirectory();
   const server = await leaseOpenCodeSdkServer({
@@ -540,9 +584,7 @@ async function runNonTaskSdkPrompt(
   });
   const abortController = new AbortController();
   const timeout = setTimeout(() => {
-    abortController.abort(
-      new Error(`Timed out waiting for OpenCode output after ${timeoutMs}ms.`),
-    );
+    abortController.abort(new NonTaskOpenCodePromptTimeoutError(timeoutMs));
   }, timeoutMs);
   const externalSignal = options.signal;
   const abortFromExternalSignal = () => {
@@ -588,32 +630,135 @@ async function runNonTaskSdkPrompt(
     }
     await options.onSessionReady?.(sessionId);
 
-    const promptResult = await client.session.prompt(
-      {
-        sessionID: sessionId,
-        directory: sessionDirectory,
-        model: splitOpenCodeModelId(model),
-        tools: promptOptions.tools ?? NON_TASK_SESSION_TOOL_DISABLES,
-        ...promptOptions,
-      },
-      { signal: abortController.signal },
-    );
+    const eventAbortController = new AbortController();
+    const abortEventMonitor = () => {
+      eventAbortController.abort(abortController.signal.reason);
+    };
+    if (abortController.signal.aborted) {
+      abortEventMonitor();
+    } else {
+      abortController.signal.addEventListener('abort', abortEventMonitor, {
+        once: true,
+      });
+    }
+    let rejectSessionError: (error: unknown) => void = () => undefined;
+    const sessionError = new Promise<never>((_resolve, reject) => {
+      rejectSessionError = reject;
+    });
+    let eventMonitor: Promise<void> | undefined;
 
-    if (promptResult.error || !promptResult.data) {
-      if (isOpenCodeSessionMissing(promptResult.error)) {
-        throw new NonTaskOpenCodeSessionNotFoundError();
+    if (params.onProviderRetry) {
+      try {
+        const subscription = await client.event.subscribe(
+          { directory: sessionDirectory },
+          { signal: eventAbortController.signal },
+        );
+        eventMonitor = (async () => {
+          try {
+            for await (const event of subscription.stream) {
+              if (
+                event.type === 'session.status' &&
+                event.properties.sessionID === sessionId &&
+                event.properties.status.type === 'retry'
+              ) {
+                try {
+                  await params.onProviderRetry?.({
+                    attempt: event.properties.status.attempt,
+                    message: event.properties.status.message,
+                    ...(Number.isFinite(event.properties.status.next)
+                      ? { nextRetryAtMs: event.properties.status.next }
+                      : {}),
+                  });
+                } catch (error) {
+                  // Retry reporting is auxiliary. A transient Slack or Discord
+                  // post failure must not stop observation of the provider's
+                  // eventual session error.
+                  console.warn(
+                    `[NonTaskProviderUsage] OpenCode provider retry reporter failed: ${formatOpenCodeSdkError(error)}`,
+                  );
+                }
+              } else if (
+                event.type === 'session.error' &&
+                event.properties.sessionID === sessionId
+              ) {
+                rejectSessionError(
+                  new NonTaskOpenCodePromptError(
+                    event.properties.error ??
+                      new Error(
+                        'OpenCode session failed without error detail.',
+                      ),
+                    promptErrorLabel,
+                  ),
+                );
+                return;
+              }
+            }
+          } catch (error) {
+            if (!eventAbortController.signal.aborted) {
+              console.warn(
+                `[NonTaskProviderUsage] OpenCode event monitor failed: ${formatOpenCodeSdkError(error)}`,
+              );
+            }
+          }
+        })();
+      } catch (error) {
+        // Event reporting is additive. Keep the prompt path available if an
+        // older externally configured OpenCode server cannot stream events.
+        if (!eventAbortController.signal.aborted) {
+          console.warn(
+            `[NonTaskProviderUsage] Could not subscribe to OpenCode events: ${formatOpenCodeSdkError(error)}`,
+          );
+        }
       }
-
-      // The resolved `provider/model` id rides in the message because callers
-      // (the router's fallback log among them) only know the role alias —
-      // production diagnosis of a provider-specific rejection needs the real
-      // id and provider without a database lookup.
-      throw new Error(
-        `OpenCode structured prompt failed (model ${model}): ${formatOpenCodeSdkError(promptResult.error)}`,
-      );
     }
 
-    return promptResult.data;
+    try {
+      const promptRequest = client.session.prompt(
+        {
+          sessionID: sessionId,
+          directory: sessionDirectory,
+          model: splitOpenCodeModelId(model),
+          tools: promptOptions.tools ?? NON_TASK_SESSION_TOOL_DISABLES,
+          ...promptOptions,
+        },
+        { signal: abortController.signal },
+      );
+      const promptResult = params.onProviderRetry
+        ? await Promise.race([promptRequest, sessionError])
+        : await promptRequest;
+
+      if (promptResult.error || !promptResult.data) {
+        if (isOpenCodeSessionMissing(promptResult.error)) {
+          throw new NonTaskOpenCodeSessionNotFoundError();
+        }
+
+        throw new NonTaskOpenCodePromptError(
+          promptResult.error,
+          promptErrorLabel,
+        );
+      }
+
+      if (promptResult.data.info.error) {
+        throw new NonTaskOpenCodePromptError(
+          promptResult.data.info.error,
+          promptErrorLabel,
+        );
+      }
+
+      return promptResult.data;
+    } catch (error) {
+      // Aborting the HTTP request does not guarantee that an OpenCode server
+      // stopped its model turn. Explicitly cancel it before the session or a
+      // leased server is reused for a bounded retry.
+      await client.session
+        .abort({ sessionID: sessionId, directory: sessionDirectory })
+        .catch(() => undefined);
+      throw error;
+    } finally {
+      abortController.signal.removeEventListener('abort', abortEventMonitor);
+      eventAbortController.abort();
+      void eventMonitor?.catch(() => undefined);
+    }
   } finally {
     externalSignal?.removeEventListener('abort', abortFromExternalSignal);
     clearTimeout(timeout);
@@ -651,13 +796,8 @@ export async function generateTrackedNonTaskText(
         })),
       ],
     },
+    { promptErrorLabel: 'OpenCode text prompt failed' },
   );
-
-  if (data.info.error) {
-    throw new Error(
-      `OpenCode text prompt failed: ${formatOpenCodeSdkError(data.info.error)}`,
-    );
-  }
 
   const text = data.parts
     .filter(
@@ -712,16 +852,11 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       env: options.env,
       onSessionReady: options.onSessionReady,
       permission: options.permission,
+      promptErrorLabel: 'OpenCode native Fast prompt failed',
       session,
       useConfiguredServer: false,
     },
   );
-
-  if (data.info.error) {
-    throw new Error(
-      `OpenCode native Fast prompt failed: ${formatOpenCodeSdkError(data.info.error)}`,
-    );
-  }
 
   return data.parts
     .filter(
@@ -743,32 +878,33 @@ async function generateTrackedNonTaskObjectWithSdk<
     params.modelRole,
   );
 
-  const data = await runNonTaskSdkPrompt(params, resolvedRuntime, {
-    system: params.system,
-    format: {
-      type: 'json_schema',
-      schema: zodToJsonSchema(params.schema, {
-        $refStrategy: 'none',
-        target: 'jsonSchema7',
-      }) as Record<string, unknown>,
-      retryCount: DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT,
-    },
-    parts: [
-      {
-        type: 'text',
-        text: buildOpenCodePrompt({
-          prompt: params.prompt,
-          maxOutputTokens: params.maxOutputTokens,
-        }),
+  const data = await runNonTaskSdkPrompt(
+    params,
+    resolvedRuntime,
+    {
+      system: params.system,
+      format: {
+        type: 'json_schema',
+        schema: zodToJsonSchema(params.schema, {
+          $refStrategy: 'none',
+          target: 'jsonSchema7',
+        }) as Record<string, unknown>,
+        retryCount: DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT,
       },
-    ],
-  });
-
-  if (data.info.error) {
-    throw new Error(
-      `OpenCode structured prompt failed (model ${resolvedRuntime.model}): ${formatOpenCodeSdkError(data.info.error)}`,
-    );
-  }
+      parts: [
+        {
+          type: 'text',
+          text: buildOpenCodePrompt({
+            prompt: params.prompt,
+            maxOutputTokens: params.maxOutputTokens,
+          }),
+        },
+      ],
+    },
+    {
+      promptErrorLabel: `OpenCode structured prompt failed (model ${resolvedRuntime.model})`,
+    },
+  );
 
   const structured = (data.info as { structured?: unknown }).structured;
   if (structured == null) {
@@ -788,7 +924,66 @@ export async function generateTrackedNonTaskObject<
   return generateTrackedNonTaskObjectWithSdk(params);
 }
 
-function classifyNonTaskInferenceValidationError(
+function unwrapNonTaskInferenceError(error: unknown): unknown {
+  return error instanceof NonTaskOpenCodePromptError
+    ? error.providerError
+    : error;
+}
+
+function findInferenceErrorStatusCode(error: unknown): number | undefined {
+  const pending: Array<{ value: unknown; depth: number }> = [
+    { value: error, depth: 0 },
+  ];
+  const seen = new Set<object>();
+
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (!current || current.depth > 4) {
+      continue;
+    }
+
+    const { value, depth } = current;
+    if (typeof value === 'string') {
+      try {
+        pending.push({ value: JSON.parse(value), depth: depth + 1 });
+      } catch {
+        // Provider prose is handled by the fallback signatures below.
+      }
+      continue;
+    }
+    if (!value || typeof value !== 'object' || seen.has(value)) {
+      continue;
+    }
+
+    seen.add(value);
+    const record = value as Record<string, unknown>;
+    for (const key of ['statusCode', 'status', 'code'] as const) {
+      const candidate = record[key];
+      const parsed =
+        typeof candidate === 'number'
+          ? candidate
+          : typeof candidate === 'string' && /^\d{3}$/u.test(candidate.trim())
+            ? Number(candidate.trim())
+            : undefined;
+      if (
+        parsed !== undefined &&
+        Number.isInteger(parsed) &&
+        parsed >= 400 &&
+        parsed <= 599
+      ) {
+        return parsed;
+      }
+    }
+
+    for (const nested of Object.values(record)) {
+      pending.push({ value: nested, depth: depth + 1 });
+    }
+  }
+
+  return undefined;
+}
+
+export function classifyNonTaskInferenceError(
   error: unknown,
 ): Pick<
   Extract<NonTaskInferenceValidationResult, { success: false }>,
@@ -799,20 +994,25 @@ function classifyNonTaskInferenceValidationError(
   // present — provider wording varies too much for substring matching to be
   // the primary signal (Anthropic says "API key is invalid.", which no
   // keyword list reliably catches).
+  const inferenceError = unwrapNonTaskInferenceError(error);
   const record =
-    error && typeof error === 'object'
-      ? (error as Record<string, unknown>)
+    inferenceError && typeof inferenceError === 'object'
+      ? (inferenceError as Record<string, unknown>)
       : undefined;
   const data =
     record?.data && typeof record.data === 'object'
       ? (record.data as Record<string, unknown>)
       : undefined;
-  const statusCode =
-    typeof data?.statusCode === 'number' ? data.statusCode : undefined;
+  const statusCode = findInferenceErrorStatusCode(inferenceError);
   const responseBody =
     typeof data?.responseBody === 'string' ? data.responseBody : '';
   const detail =
-    `${formatOpenCodeSdkError(error)} ${responseBody}`.toLowerCase();
+    `${formatOpenCodeSdkError(inferenceError)} ${responseBody}`.toLowerCase();
+  const errorName = typeof record?.name === 'string' ? record.name : '';
+  const gatewayBlocked =
+    (statusCode === 403 && /^\s*(?:<!doctype|<html)/iu.test(responseBody)) ||
+    (detail.includes('forbidden:') &&
+      detail.includes('request was blocked by a gateway or proxy'));
 
   // Failures inside Roomote's own validation helper (the managed OpenCode
   // server) must not read as provider failures — the candidate credentials
@@ -827,6 +1027,55 @@ function classifyNonTaskInferenceValidationError(
         'Roomote could not run its validation helper. Try again, or check the server logs.',
       reason: 'provider_error',
       retryable: true,
+    };
+  }
+
+  // OpenCode normalizes HTML 403 responses from provider gateways and WAFs
+  // into this error. These are distinct from structured credential failures:
+  // the same request can succeed when routed through a healthy edge shortly
+  // afterward, so Fast may recover with its bounded outer retry.
+  if (gatewayBlocked) {
+    return {
+      message: 'The inference provider gateway blocked the request.',
+      reason: 'gateway_blocked',
+      retryable: true,
+    };
+  }
+
+  if (statusCode === 408) {
+    return {
+      message: 'The inference provider did not respond in time. Try again.',
+      reason: 'timeout',
+      retryable: true,
+    };
+  }
+
+  if (errorName === 'ProviderAuthError') {
+    return {
+      message: 'The inference provider rejected these credentials.',
+      reason: 'invalid_credentials',
+      retryable: false,
+    };
+  }
+
+  if (errorName === 'MessageAbortedError') {
+    return {
+      message: 'The inference provider did not respond in time. Try again.',
+      reason: 'timeout',
+      retryable: true,
+    };
+  }
+
+  if (
+    errorName === 'ContextOverflowError' ||
+    errorName === 'ContentFilterError' ||
+    errorName === 'MessageOutputLengthError' ||
+    errorName === 'StructuredOutputError'
+  ) {
+    return {
+      message: 'The inference provider rejected the request.',
+      reason: 'provider_error',
+      retryable: false,
     };
   }
 
@@ -951,6 +1200,22 @@ function classifyNonTaskInferenceValidationError(
     };
   }
 
+  // Remaining structured 4xx responses (400, 413, 422, …) are client errors:
+  // resending the same request cannot recover them. 408 stays retryable as a
+  // timeout; 401/402/403/404/429 were classified above.
+  if (
+    statusCode !== undefined &&
+    statusCode >= 400 &&
+    statusCode < 500 &&
+    statusCode !== 408
+  ) {
+    return {
+      message: 'The inference provider rejected the request.',
+      reason: 'provider_error',
+      retryable: false,
+    };
+  }
+
   return {
     message: 'The inference provider rejected the validation request.',
     reason: 'provider_error',
@@ -1041,6 +1306,7 @@ export async function validateNonTaskInference(params: {
         },
         {
           ephemeral: true,
+          promptErrorLabel: `OpenCode inference validation prompt failed (model ${model})`,
           signal: deadlineController.signal,
           useConfiguredServer: false,
         },
@@ -1048,11 +1314,6 @@ export async function validateNonTaskInference(params: {
     } finally {
       clearTimeout(deadlineTimer);
     }
-
-    if (data.info.error) {
-      throw data.info.error;
-    }
-
     const structured = (data.info as { structured?: unknown }).structured;
     if (
       !structured ||
@@ -1069,7 +1330,7 @@ export async function validateNonTaskInference(params: {
       model,
     };
   } catch (error) {
-    const classified = classifyNonTaskInferenceValidationError(error);
+    const classified = classifyNonTaskInferenceError(error);
 
     // The sanitized result hides the provider detail from the UI on purpose;
     // keep the detail in the server log so misclassifications stay
