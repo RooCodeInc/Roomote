@@ -134,6 +134,7 @@ export const activePrReviewFollowUpJob = async (
   }
 
   await enqueueTask({
+    existingTaskId: run.taskId,
     task: data.fallback.task,
     initiator: {
       kind: 'automation',

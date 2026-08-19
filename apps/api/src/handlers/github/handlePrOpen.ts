@@ -18,6 +18,7 @@ import type {
 } from './types';
 import { getGitHubAutomationTargets } from './getGitHubAutomationTargets';
 import { getBackgroundGithubTaskProperties } from './backgroundGithubTaskProperties';
+import { getCurrentGitHubPrHeadSha } from './currentPrHead';
 import { getReviewTaskRelayPayload } from './reviewTaskRelayPayload';
 
 export async function handlePrOpen(
@@ -72,6 +73,19 @@ export async function handlePrOpen(
     return { status: 'ok', message: 'No PR reviewer targets found.' };
   }
 
+  const headSha = await getCurrentGitHubPrHeadSha({
+    installationId: installation!.id,
+    repository: repository.full_name,
+    prNumber: pr.number,
+  });
+
+  if (!headSha) {
+    return {
+      status: 'error',
+      message: `Could not resolve the live head for ${repository.full_name}#${pr.number}.`,
+    };
+  }
+
   console.log(
     `[handlePrOpen] ${repository.full_name}#${pr.number} -> enqueueTask (background_review_task: true)`,
   );
@@ -94,7 +108,7 @@ export async function handlePrOpen(
           prNumber: pr.number,
           prTitle: pr.title,
           prUrl: pr.html_url,
-          headSha: pr.head.sha,
+          headSha,
           branchName: pr.head.ref,
           ...relayPayload,
         } satisfies TaskPayload<typeof TaskPayloadKind.GithubPrReview>,
@@ -115,7 +129,7 @@ export async function handlePrOpen(
         prNumber: pr.number,
         prUrl: pr.html_url,
         prTitle: pr.title,
-        prSha: pr.head.sha,
+        prSha: headSha,
         prBaseRef: pr.base?.ref ?? null,
         prBaseSha: pr.base?.sha ?? null,
       },
