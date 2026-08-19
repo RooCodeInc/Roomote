@@ -699,6 +699,12 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
             maxOutputTokens: params.maxOutputTokens,
           }),
         },
+        ...(params.files ?? []).map((file) => ({
+          type: 'file' as const,
+          mime: file.mime,
+          ...(file.filename ? { filename: file.filename } : {}),
+          url: file.url,
+        })),
       ],
     },
     {

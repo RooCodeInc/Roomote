@@ -315,6 +315,55 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
+  it('passes files into a held Fast OpenCode session prompt', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: {},
+        parts: [{ type: 'text', text: 'image inspected' }],
+      },
+      error: undefined,
+    });
+    const { generateTrackedNonTaskTextInOpenCodeSession } =
+      await import('../non-task-provider-usage.js');
+
+    await generateTrackedNonTaskTextInOpenCodeSession(
+      {
+        surface: 'fast_agent_question_answering',
+        prompt: 'Inspect this image.',
+        files: [
+          {
+            mime: 'image/png',
+            filename: 'screenshot.png',
+            url: 'data:image/png;base64,aGVsbG8=',
+          },
+        ],
+      },
+      {},
+      {
+        directory: '/tmp/roomote-fast-native-test',
+        tools: { '*': false, send_chat_reply: true },
+      },
+    );
+
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parts: [
+          expect.objectContaining({ type: 'text' }),
+          {
+            type: 'file',
+            mime: 'image/png',
+            filename: 'screenshot.png',
+            url: 'data:image/png;base64,aGVsbG8=',
+          },
+        ],
+      }),
+      expect.any(Object),
+    );
+  });
+
   it('classifies a missing held OpenCode session for cold bootstrap recovery', async () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/openai/gpt-5.4',
