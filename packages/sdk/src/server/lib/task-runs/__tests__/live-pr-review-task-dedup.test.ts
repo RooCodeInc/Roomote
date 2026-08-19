@@ -1,5 +1,6 @@
 function getExpectedReviewTaskCount(): number {
   // Live push burst revision 1.
+  // Live push burst revision 2.
   return 1;
 }
 
