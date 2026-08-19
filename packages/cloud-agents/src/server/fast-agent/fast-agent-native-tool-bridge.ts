@@ -233,6 +233,30 @@ async function readRequestBody(request: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
 }
 
+/**
+ * The generated tool sources import zod, and OpenCode's own runtime loads
+ * them from the tool directory — so a real zod package must exist on disk to
+ * symlink there. In development that's the workspace install; in the app
+ * image, where the api bundle inlines zod, it's the runtime-deps tree that
+ * ships next to the dist (the same mechanism as snowflake-sdk, asserted at
+ * image build). This wrapper exists so a packaging regression names the
+ * requirement instead of surfacing as a bare module-not-found mid-turn.
+ */
+function resolveZodDirectoryForTools(): string {
+  try {
+    return dirname(require.resolve('zod/package.json'));
+  } catch (error) {
+    throw new Error(
+      'Fast native tools need the zod package on disk to link into the ' +
+        'OpenCode tool directory, and none is resolvable from this process. ' +
+        'In the app image zod ships via .docker/app/runtime-deps/api ' +
+        '(asserted at image build); if this error reaches production, that ' +
+        'packaging step regressed. ' +
+        `${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 async function startRuntime(): Promise<FastAgentNativeToolRuntime> {
   const token = randomBytes(32).toString('hex');
   const directory = mkdtempSync(join(tmpdir(), 'roomote-fast-opencode-'));
@@ -246,7 +270,7 @@ async function startRuntime(): Promise<FastAgentNativeToolRuntime> {
   const toolNodeModules = join(directory, '.opencode', 'node_modules');
   mkdirSync(toolNodeModules, { recursive: true });
   symlinkSync(
-    dirname(require.resolve('zod/package.json')),
+    resolveZodDirectoryForTools(),
     join(toolNodeModules, 'zod'),
     'dir',
   );
