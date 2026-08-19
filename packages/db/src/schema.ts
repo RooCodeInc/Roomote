@@ -2471,6 +2471,31 @@ export const slackDirectoryUsers = pgTable(
 );
 
 /**
+ * notion_directory_users
+ *
+ * Durable snapshot of the Notion workspace user directory used to link Brain
+ * person cards to Notion identities. `email` holds only addresses Notion has
+ * verified; it is an internal linking hint and is never copied into Brain
+ * page content. Rows are marked deleted rather than removed when a user
+ * disappears from the workspace (or the integration loses its user-list
+ * capability) so the Brain can tombstone the projected person card.
+ */
+export const notionDirectoryUsers = pgTable(
+  'notion_directory_users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    notionUserId: text('notion_user_id').notNull(),
+    name: text('name').notNull(),
+    email: text('email'),
+    isDeleted: boolean('is_deleted').notNull().default(false),
+    lastSeenAt: timestamp('last_seen_at').notNull().defaultNow(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [unique('notion_directory_users_unique').on(table.notionUserId)],
+);
+
+/**
  * telegram_user_mappings
  */
 

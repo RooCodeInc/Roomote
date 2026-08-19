@@ -51,7 +51,10 @@ Notion only returns pages explicitly shared with its integration. Workspace
 guests and restricted users may omit email addresses, and some integration
 configurations cannot list users at all. Roomote still keeps stable Notion user
 references in page snapshots in those cases, but it does not guess a match from
-the display name.
+the display name. The workspace user directory is refreshed once a day; people
+removed from the workspace (or hidden when the integration loses its
+user-listing capability) have their Notion identity cards marked deleted on
+the next refresh.
 
 ## Turning it on
 

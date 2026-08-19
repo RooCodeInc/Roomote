@@ -11,7 +11,9 @@ import {
   isNull,
   listBrainCollectorItems,
   listBrainCollectorItemsBefore,
+  lt,
   mcpConnections,
+  notionDirectoryUsers,
   slackDirectoryUsers,
   slackInstallations,
   slackUserMappings,
@@ -1235,9 +1237,14 @@ type PersonIdentityReference = {
 
 const LEGACY_SETUP_BOOTSTRAP_USER_ID = 'setup-bootstrap-user';
 
+/** Shared `people/<prefix>-<digest>` slug scheme for every person surface. */
+function hashedPeopleSlug(prefix: string, seed: string): string {
+  const digest = createHash('sha256').update(seed).digest('hex').slice(0, 16);
+  return `people/${prefix}-${digest}`;
+}
+
 function personIdentitySlug(userId: string): string {
-  const digest = createHash('sha256').update(userId).digest('hex').slice(0, 16);
-  return `people/roomote-member-${digest}`;
+  return hashedPeopleSlug('roomote-member', userId);
 }
 
 function normalizeIdentityAlias(value: string): string {
@@ -1282,29 +1289,44 @@ function personIdentityAliases(record: PersonIdentityRecord): string[] {
   return [...aliases.values()].sort((a, b) => a.localeCompare(b));
 }
 
+/**
+ * Active records in ascending userId order — the single tie-break rule for
+ * which record owns an email or alias when several share one.
+ */
+function activeIdentityRecordsByUserId(
+  records: PersonIdentityRecord[],
+): PersonIdentityRecord[] {
+  return records
+    .filter((record) => !record.deletedAt)
+    .sort((a, b) => a.userId.localeCompare(b.userId));
+}
+
 export function linkNotionUsersToPersonIdentities(
   records: PersonIdentityRecord[],
   notionUsers: NotionUserIdentity[],
 ): PersonIdentityRecord[] {
+  const linkable = notionUsers.filter(
+    (user): user is NotionUserIdentity & { email: string } =>
+      Boolean(user.email),
+  );
+  if (linkable.length === 0) {
+    return records;
+  }
+
   const linked = records.map((record) => ({
     ...record,
     providers: [...record.providers],
   }));
   const byEmail = new Map<string, PersonIdentityRecord>();
 
-  for (const record of [...linked].sort((a, b) =>
-    a.userId.localeCompare(b.userId),
-  )) {
-    if (!record.deletedAt) {
-      const email = normalizeIdentityAlias(record.email);
-      if (email && !byEmail.has(email)) {
-        byEmail.set(email, record);
-      }
+  for (const record of activeIdentityRecordsByUserId(linked)) {
+    const email = normalizeIdentityAlias(record.email);
+    if (email && !byEmail.has(email)) {
+      byEmail.set(email, record);
     }
   }
 
-  for (const notionUser of notionUsers) {
-    if (!notionUser.email) continue;
+  for (const notionUser of linkable) {
     const record = byEmail.get(normalizeIdentityAlias(notionUser.email));
     if (!record) continue;
 
@@ -1383,10 +1405,7 @@ export function buildPersonIdentityLookup(
 ): Map<string, PersonIdentityReference> {
   const lookup = new Map<string, PersonIdentityReference>();
 
-  for (const record of [...records].sort((a, b) =>
-    a.userId.localeCompare(b.userId),
-  )) {
-    if (record.deletedAt) continue;
+  for (const record of activeIdentityRecordsByUserId(records)) {
     const reference = {
       slug: personIdentitySlug(record.userId),
       title: personIdentityDisplayName(record),
@@ -1426,6 +1445,7 @@ async function loadPersonIdentityRecords(): Promise<PersonIdentityRecord[]> {
     discordRows,
     teamsRows,
     slackDirectoryRows,
+    notionDirectoryRows,
   ] = await Promise.all([
     db.select().from(users),
     db.select().from(slackUserMappings),
@@ -1435,6 +1455,7 @@ async function loadPersonIdentityRecords(): Promise<PersonIdentityRecord[]> {
     db.select().from(discordUserMappings),
     db.select().from(teamsUserMappings),
     db.select().from(slackDirectoryUsers),
+    db.select().from(notionDirectoryUsers),
   ]);
   const byUserId = new Map<string, PersonIdentityRecord>(
     memberRows
@@ -1527,21 +1548,19 @@ async function loadPersonIdentityRecords(): Promise<PersonIdentityRecord[]> {
     });
   }
 
-  return [...byUserId.values()];
-}
-
-async function loadPersonIdentityRecordsWithNotion(): Promise<
-  PersonIdentityRecord[]
-> {
-  const records = await loadPersonIdentityRecords();
-  const notionConfig = await findNotionConnectionConfig();
-
-  return notionConfig
-    ? linkNotionUsersToPersonIdentities(
-        records,
-        await loadNotionUserDirectory(notionConfig),
-      )
-    : records;
+  // Link Notion identities from the durable directory snapshot, never the
+  // live Notion API: person-identity sync must not depend on Notion
+  // availability, and links may only change when a directory refresh lands.
+  return linkNotionUsersToPersonIdentities(
+    [...byUserId.values()],
+    notionDirectoryRows
+      .filter((row) => !row.isDeleted)
+      .map((row) => ({
+        id: row.notionUserId,
+        name: row.name,
+        email: row.email,
+      })),
+  );
 }
 
 const SLACK_DIRECTORY_COLLECTOR_ID =
@@ -2139,6 +2158,31 @@ function personIdentityProjectionHash(records: PersonIdentityRecord[]): string {
   return createHash('sha256').update(JSON.stringify(projection)).digest('hex');
 }
 
+/**
+ * One sweep slice over a stable id ordering. Sorting and cursor filtering use
+ * the same code-unit comparison so a persisted cursor can never skip ids the
+ * two orderings disagree on (localeCompare and `>` diverge on case-mixed ids).
+ */
+function selectSweepSlice<T>(input: {
+  items: T[];
+  idOf: (item: T) => string;
+  afterId: string;
+  limit: number;
+}): { batch: T[]; lastId: string | null; hasMore: boolean } {
+  const { idOf } = input;
+  const candidates = [...input.items]
+    .sort((a, b) => (idOf(a) < idOf(b) ? -1 : idOf(a) > idOf(b) ? 1 : 0))
+    .filter((item) => idOf(item) > input.afterId);
+  const batch = candidates.slice(0, input.limit);
+  const last = batch.at(-1);
+
+  return {
+    batch,
+    lastId: last ? idOf(last) : null,
+    hasMore: candidates.length > batch.length,
+  };
+}
+
 export function selectPersonIdentityBatch(input: {
   records: PersonIdentityRecord[];
   state: { watermark: Date | null; cursor: string | null } | null;
@@ -2164,24 +2208,24 @@ export function selectPersonIdentityBatch(input: {
   if (cursor.mode === 'sweep' || sweepDue || projectionChanged) {
     const afterUserId =
       cursor.mode === 'sweep' && !projectionChanged ? cursor.afterUserId : '';
-    const candidates = [...records]
-      .sort((a, b) => a.userId.localeCompare(b.userId))
-      .filter((record) => record.userId > (afterUserId ?? ''));
-    const batch = candidates.slice(0, limit);
-    const last = batch.at(-1);
-    const hasMore = candidates.length > batch.length;
+    const { batch, lastId, hasMore } = selectSweepSlice({
+      items: records,
+      idOf: (record) => record.userId,
+      afterId: afterUserId ?? '',
+      limit,
+    });
 
     return {
       records: batch,
       watermark: hasMore ? (state?.watermark ?? new Date(0)) : now,
       projectionChanged,
       cursor: serializePersonIdentityCursor(
-        hasMore && last
+        hasMore && lastId
           ? {
               mode: 'sweep',
               lastSweepAt: cursor.lastSweepAt,
               projectionHash,
-              afterUserId: last.userId,
+              afterUserId: lastId,
             }
           : {
               mode: 'idle',
@@ -2247,7 +2291,7 @@ const personIdentitiesCollector: BrainCollector = {
   async collect({ now, limit }) {
     const state = await getBrainSyncState(db, PERSON_IDENTITIES_STATE_ID);
     const batch = selectPersonIdentityBatch({
-      records: await loadPersonIdentityRecordsWithNotion(),
+      records: await loadPersonIdentityRecords(),
       state: state
         ? {
             watermark: state.watermark,
@@ -2906,10 +2950,12 @@ const ripplingWorkersCollector: BrainCollector = {
 const NOTION_PAGES_COLLECTOR_ID = 'notion-pages';
 const NOTION_INCREMENTAL_STATE_ID = `${NOTION_PAGES_COLLECTOR_ID}:incremental`;
 const NOTION_USERS_COLLECTOR_ID = 'notion-users';
+const NOTION_USERS_REFRESH_STATE_ID = `${NOTION_USERS_COLLECTOR_ID}:refresh`;
 const NOTION_SEARCH_PAGE_SIZE = 20;
 const NOTION_USERS_PAGE_SIZE = 100;
 const NOTION_USERS_REFRESH_MS = 24 * 60 * 60 * 1000;
-const NOTION_USERS_CACHE_MS = 5 * 60 * 1000;
+/** Bound per-tick /users pagination; longer directories continue next tick. */
+const NOTION_USERS_MAX_REQUESTS_PER_PASS = 5;
 const NOTION_FULL_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const NOTION_REQUEST_INTERVAL_MS = process.env.NODE_ENV === 'test' ? 0 : 350;
 const NOTION_MAX_SEARCH_REQUESTS_PER_PASS = 10;
@@ -2988,14 +3034,6 @@ type NotionUsersResponse = {
   next_cursor?: string | null;
 };
 
-let notionUsersCache:
-  | {
-      encryptedToken: string;
-      loadedAt: number;
-      users: NotionUserIdentity[];
-    }
-  | undefined;
-
 export function parseNotionUser(value: unknown): NotionUserIdentity | null {
   const record = asObject(value);
   const id = record ? asString(record.id) : null;
@@ -3015,111 +3053,203 @@ export function parseNotionUser(value: unknown): NotionUserIdentity | null {
   };
 }
 
-async function loadNotionUserDirectory(
-  config: McpConnectionNotionConfig,
-): Promise<NotionUserIdentity[]> {
-  const now = Date.now();
-  if (
-    notionUsersCache?.encryptedToken === config.encryptedToken &&
-    now - notionUsersCache.loadedAt < NOTION_USERS_CACHE_MS
-  ) {
-    return notionUsersCache.users;
+type NotionDirectoryUser = NotionUserIdentity & { deleted: boolean };
+
+/**
+ * The durable directory snapshot is the only source consumed by projections.
+ * The live /users API is read exclusively by refreshNotionUserDirectory, so
+ * Notion outages and permission changes can never abort or flap the person
+ * and page collectors.
+ */
+async function loadNotionDirectory(): Promise<NotionDirectoryUser[]> {
+  const rows = await db.select().from(notionDirectoryUsers);
+
+  return rows
+    .map((row) => ({
+      id: row.notionUserId,
+      name: row.name,
+      // A retracted row's email must stop linking canonical identities.
+      email: row.isDeleted ? null : row.email,
+      deleted: row.isDeleted,
+    }))
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+async function persistNotionDirectoryUsers(
+  users: NotionUserIdentity[],
+  now: Date,
+): Promise<void> {
+  for (const user of users) {
+    await db
+      .insert(notionDirectoryUsers)
+      .values({
+        notionUserId: user.id,
+        name: user.name,
+        email: user.email,
+        isDeleted: false,
+        lastSeenAt: now,
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [notionDirectoryUsers.notionUserId],
+        set: {
+          name: user.name,
+          email: user.email,
+          isDeleted: false,
+          lastSeenAt: now,
+          updatedAt: now,
+        },
+      });
+  }
+}
+
+/** Mark rows unseen since `before` (or every live row) as deleted. */
+async function tombstoneNotionDirectoryUsers(
+  before: Date | null,
+  now: Date,
+): Promise<void> {
+  await db
+    .update(notionDirectoryUsers)
+    .set({ isDeleted: true, updatedAt: now })
+    .where(
+      before
+        ? and(
+            eq(notionDirectoryUsers.isDeleted, false),
+            lt(notionDirectoryUsers.lastSeenAt, before),
+          )
+        : eq(notionDirectoryUsers.isDeleted, false),
+    );
+}
+
+type NotionUsersRefreshCursor = {
+  notionCursor: string;
+  sweepStartedAt: string;
+};
+
+function parseNotionUsersRefreshCursor(
+  raw: string | null,
+): NotionUsersRefreshCursor | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<NotionUsersRefreshCursor>;
+    return typeof parsed.notionCursor === 'string' &&
+      typeof parsed.sweepStartedAt === 'string'
+      ? {
+          notionCursor: parsed.notionCursor,
+          sweepStartedAt: parsed.sweepStartedAt,
+        }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Refresh the durable directory from GET /users on a daily cadence, paging a
+ * bounded number of requests per tick. Failure semantics: 403 (integration
+ * has no user-information capability) retracts the directory; a stale-cursor
+ * 400 restarts the sweep; anything else keeps the stored directory untouched
+ * and retries next tick.
+ */
+async function refreshNotionUserDirectory(input: {
+  config: McpConnectionNotionConfig;
+  state: { watermark: Date | null; backfillCursor: string | null } | null;
+  now: Date;
+}): Promise<CollectorStateUpdate | null> {
+  const saved = parseNotionUsersRefreshCursor(
+    input.state?.backfillCursor ?? null,
+  );
+  const refreshDue =
+    !input.state?.watermark ||
+    input.now.getTime() - input.state.watermark.getTime() >=
+      NOTION_USERS_REFRESH_MS;
+  if (!saved && !refreshDue) {
+    return null;
   }
 
-  const users: NotionUserIdentity[] = [];
-  let cursor: string | null = null;
+  const sweepStartedAt = saved
+    ? (parseDate(saved.sweepStartedAt) ?? input.now)
+    : input.now;
+  let cursor = saved?.notionCursor ?? null;
 
   try {
-    do {
-      const response: NotionUsersResponse =
-        await notionCollectorRequest<NotionUsersResponse>({
-          config,
-          path: 'users',
-          query: {
-            page_size: NOTION_USERS_PAGE_SIZE,
-            start_cursor: cursor ?? undefined,
-          },
-        });
-      users.push(
-        ...(response.results ?? [])
+    for (
+      let requests = 0;
+      requests < NOTION_USERS_MAX_REQUESTS_PER_PASS;
+      requests++
+    ) {
+      const response = await notionCollectorRequest<NotionUsersResponse>({
+        config: input.config,
+        path: 'users',
+        query: {
+          page_size: NOTION_USERS_PAGE_SIZE,
+          start_cursor: cursor ?? undefined,
+        },
+      });
+      await persistNotionDirectoryUsers(
+        (response.results ?? [])
           .map(parseNotionUser)
-          .filter(
-            (user: NotionUserIdentity | null): user is NotionUserIdentity =>
-              Boolean(user),
-          ),
+          .filter((user): user is NotionUserIdentity => Boolean(user)),
+        input.now,
       );
-      cursor =
+      const nextCursor =
         response.has_more && asString(response.next_cursor)
           ? response.next_cursor!.trim()
           : null;
-    } while (cursor);
+      if (!nextCursor) {
+        await tombstoneNotionDirectoryUsers(sweepStartedAt, input.now);
+        return {
+          collectorId: NOTION_USERS_REFRESH_STATE_ID,
+          watermark: input.now,
+          cursor: null,
+        };
+      }
+      cursor = nextCursor;
+    }
+
+    return {
+      collectorId: NOTION_USERS_REFRESH_STATE_ID,
+      cursor: JSON.stringify({
+        notionCursor: cursor!,
+        sweepStartedAt: sweepStartedAt.toISOString(),
+      } satisfies NotionUsersRefreshCursor),
+    };
   } catch (error) {
     if (error instanceof NotionApiError && error.status === 403) {
-      notionUsersCache = {
-        encryptedToken: config.encryptedToken,
-        loadedAt: now,
-        users: [],
+      await tombstoneNotionDirectoryUsers(null, input.now);
+      return {
+        collectorId: NOTION_USERS_REFRESH_STATE_ID,
+        watermark: input.now,
+        cursor: null,
       };
-      return [];
     }
-    if (notionUsersCache?.encryptedToken === config.encryptedToken) {
-      return notionUsersCache.users;
+    if (saved && error instanceof NotionApiError && error.status === 400) {
+      // Notion pagination cursors expire; restart the sweep from the top.
+      return { collectorId: NOTION_USERS_REFRESH_STATE_ID, cursor: null };
     }
-    throw error;
+    console.warn(
+      `${LOG_PREFIX} notion user directory refresh failed; keeping the stored directory: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return null;
   }
-
-  const deduplicated = [
-    ...new Map(users.map((user) => [user.id, user])).values(),
-  ].sort((a, b) => a.id.localeCompare(b.id));
-  notionUsersCache = {
-    encryptedToken: config.encryptedToken,
-    loadedAt: now,
-    users: deduplicated,
-  };
-  return deduplicated;
 }
 
 function notionUserSlug(userId: string): string {
-  const digest = createHash('sha256')
-    .update(`notion:${userId}`)
-    .digest('hex')
-    .slice(0, 16);
-  return `people/notion-user-${digest}`;
+  return hashedPeopleSlug('notion-user', `notion:${userId}`);
 }
 
 function notionQualifiedUserId(userId: string): string {
   return `notion/user/${userId.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
 }
 
-function canonicalIdentityByEmail(
-  records: PersonIdentityRecord[],
-): Map<string, PersonIdentityReference> {
-  const byEmail = new Map<string, PersonIdentityReference>();
-  for (const record of [...records].sort((a, b) =>
-    a.userId.localeCompare(b.userId),
-  )) {
-    if (record.deletedAt) continue;
-    const email = normalizeIdentityAlias(record.email);
-    if (email && !byEmail.has(email)) {
-      byEmail.set(email, {
-        slug: personIdentitySlug(record.userId),
-        title: personIdentityDisplayName(record),
-        effectiveDate: record.createdAt,
-      });
-    }
-  }
-  return byEmail;
-}
-
 export function buildNotionUserReferences(
   users: NotionUserIdentity[],
-  identities: PersonIdentityRecord[],
+  identities: ReadonlyMap<string, PersonIdentityReference>,
 ): Map<string, NotionUserReference> {
-  const byEmail = canonicalIdentityByEmail(identities);
   return new Map(
     users.map((user) => {
       const canonical = user.email
-        ? (byEmail.get(normalizeIdentityAlias(user.email)) ?? null)
+        ? (identities.get(normalizeIdentityAlias(user.email)) ?? null)
         : null;
       return [
         user.id,
@@ -3134,11 +3264,12 @@ export function buildNotionUserReferences(
 }
 
 export function buildNotionUserPage(
-  user: NotionUserIdentity,
+  user: NotionUserIdentity & { deleted?: boolean },
   reference: NotionUserReference,
 ): CollectorPage {
   const providerId = notionQualifiedUserId(user.id);
-  const canonical = reference.canonical;
+  const deleted = user.deleted === true;
+  const canonical = deleted ? null : reference.canonical;
   return {
     slug: notionUserSlug(user.id),
     title: user.name,
@@ -3146,17 +3277,22 @@ export function buildNotionUserPage(
       '---',
       `type: ${canonical ? 'person-alias' : 'person'}`,
       `notion_user_id: ${JSON.stringify(user.id)}`,
-      `aliases: ${JSON.stringify(canonical ? [] : [user.id, providerId])}`,
-      'status: active',
+      ...(canonical
+        ? [`canonical: ${JSON.stringify(canonical.slug)}`]
+        : [
+            `aliases: ${JSON.stringify(deleted ? [] : [user.id, providerId])}`,
+            `status: ${deleted ? 'deleted' : 'active'}`,
+          ]),
       'provenance: roomote-notion-users',
-      ...(canonical ? [`canonical: ${JSON.stringify(canonical.slug)}`] : []),
       '---',
       '',
       `# ${user.name}`,
       '',
-      ...(canonical
-        ? [`Notion identity for [${canonical.title}](${canonical.slug}).`]
-        : ['Notion workspace user.']),
+      canonical
+        ? `Notion identity for [${canonical.title}](${canonical.slug}).`
+        : deleted
+          ? 'This person is no longer a member of the Notion workspace.'
+          : 'Notion workspace user.',
       '',
     ].join('\n'),
   };
@@ -3223,7 +3359,12 @@ function notionPageTitle(page: NotionSearchPage): string {
 
 type NotionPageIdentityContext = {
   users: ReadonlyMap<string, NotionUserReference>;
-  identitiesByEmail: ReadonlyMap<string, PersonIdentityReference>;
+  identityLookup: ReadonlyMap<string, PersonIdentityReference>;
+};
+
+const EMPTY_NOTION_PAGE_IDENTITY_CONTEXT: NotionPageIdentityContext = {
+  users: new Map(),
+  identityLookup: new Map(),
 };
 
 function notionUserId(value: unknown): string | null {
@@ -3255,7 +3396,7 @@ function resolveNotionUserReference(
 
   const inline = parseNotionUser(value);
   const canonical = inline?.email
-    ? context.identitiesByEmail.get(normalizeIdentityAlias(inline.email))
+    ? context.identityLookup.get(normalizeIdentityAlias(inline.email))
     : null;
   return canonical?.slug ?? notionQualifiedUserId(id);
 }
@@ -3312,33 +3453,13 @@ function notionPageEntityReferences(
   };
 }
 
-function notionPageHasUserReferences(page: NotionSearchPage): boolean {
-  if (notionUserId(page.created_by) || notionUserId(page.last_edited_by)) {
-    return true;
-  }
-  return Object.values(page.properties ?? {}).some((property) => {
-    const record = asObject(property);
-    return Boolean(
-      record &&
-      ((record.type === 'people' && Array.isArray(record.people)) ||
-        ((record.type === 'title' || record.type === 'rich_text') &&
-          notionRichTextUsers(
-            record.type === 'title' ? record.title : record.rich_text,
-          ).length > 0)),
-    );
-  });
-}
-
 export function buildNotionPage(
   page: NotionSearchPage,
   markdown: NotionMarkdownResponse,
-  status: 'active' | 'deleted' | 'unavailable' = page.in_trash
-    ? 'deleted'
-    : 'active',
-  identityContext: NotionPageIdentityContext = {
-    users: new Map(),
-    identitiesByEmail: new Map(),
-  },
+  options: {
+    status?: 'active' | 'deleted' | 'unavailable';
+    identityContext?: NotionPageIdentityContext;
+  } = {},
 ): CollectorPage | null {
   const pageId = asString(page.id);
   if (!pageId) {
@@ -3349,12 +3470,16 @@ export function buildNotionPage(
     return null;
   }
 
+  const status = options.status ?? (page.in_trash ? 'deleted' : 'active');
   const title = notionPageTitle(page);
   const createdAt = parseDate(page.created_time);
   const updatedAt = parseDate(page.last_edited_time) ?? createdAt;
   const sourceUrl = asString(page.url);
   const body = asString(markdown.markdown);
-  const references = notionPageEntityReferences(page, identityContext);
+  const references = notionPageEntityReferences(
+    page,
+    options.identityContext ?? EMPTY_NOTION_PAGE_IDENTITY_CONTEXT,
+  );
 
   return {
     slug,
@@ -3459,18 +3584,52 @@ async function searchNotionPages(input: {
   };
 }
 
-async function loadNotionPageIdentityContext(
-  config: McpConnectionNotionConfig,
-): Promise<NotionPageIdentityContext> {
-  const users = await loadNotionUserDirectory(config);
-  if (users.length === 0) {
-    return { users: new Map(), identitiesByEmail: new Map() };
+let notionPageIdentityContextCache: {
+  loadedAt: number;
+  context: NotionPageIdentityContext;
+} | null = null;
+const NOTION_IDENTITY_CONTEXT_CACHE_MS = 60 * 1000;
+
+/**
+ * DB-only identity context for page snapshots, memoized so backfill steps do
+ * not reload the person-identity tables per step. Identity links are an
+ * enrichment: a load failure degrades to unlinked references (or the last
+ * loaded context) instead of blocking page collection.
+ */
+async function loadNotionPageIdentityContext(): Promise<NotionPageIdentityContext> {
+  const now = Date.now();
+  if (
+    notionPageIdentityContextCache &&
+    now - notionPageIdentityContextCache.loadedAt <
+      NOTION_IDENTITY_CONTEXT_CACHE_MS
+  ) {
+    return notionPageIdentityContextCache.context;
   }
-  const identities = await loadPersonIdentityRecords();
-  return {
-    users: buildNotionUserReferences(users, identities),
-    identitiesByEmail: canonicalIdentityByEmail(identities),
-  };
+
+  try {
+    const [directory, identities] = await Promise.all([
+      loadNotionDirectory(),
+      loadPersonIdentityRecords(),
+    ]);
+    const identityLookup = buildPersonIdentityLookup(identities);
+    const context: NotionPageIdentityContext = {
+      users: buildNotionUserReferences(
+        directory.filter((user) => !user.deleted),
+        identityLookup,
+      ),
+      identityLookup,
+    };
+    notionPageIdentityContextCache = { loadedAt: now, context };
+    return context;
+  } catch (error) {
+    console.warn(
+      `${LOG_PREFIX} notion identity context load failed; collecting pages without fresh identity links: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return (
+      notionPageIdentityContextCache?.context ??
+      EMPTY_NOTION_PAGE_IDENTITY_CONTEXT
+    );
+  }
 }
 
 export function buildNotionSearchBody(
@@ -3488,11 +3647,11 @@ export function buildNotionSearchBody(
 async function fetchNotionPage(
   config: McpConnectionNotionConfig,
   page: NotionSearchPage,
-  identityContext: NotionPageIdentityContext,
   unavailableOnNotFound = true,
 ): Promise<CollectorPage | null> {
+  const identityContext = await loadNotionPageIdentityContext();
   if (page.in_trash) {
-    return buildNotionPage(page, {}, undefined, identityContext);
+    return buildNotionPage(page, {}, { identityContext });
   }
 
   try {
@@ -3500,14 +3659,18 @@ async function fetchNotionPage(
       config,
       path: `pages/${encodeURIComponent(page.id)}/markdown`,
     });
-    return buildNotionPage(page, markdown, undefined, identityContext);
+    return buildNotionPage(page, markdown, { identityContext });
   } catch (error) {
     if (
       unavailableOnNotFound &&
       error instanceof NotionApiError &&
       error.status === 404
     ) {
-      return buildNotionPage(page, {}, 'unavailable', identityContext);
+      return buildNotionPage(
+        page,
+        {},
+        { status: 'unavailable', identityContext },
+      );
     }
     throw error;
   }
@@ -3586,7 +3749,7 @@ export function buildUnavailableNotionPage(item: {
   const page = buildNotionPage(
     { object: 'page', id: item.itemId },
     {},
-    'unavailable',
+    { status: 'unavailable' },
   );
 
   return {
@@ -3615,7 +3778,6 @@ export async function collectNotionReconciliation(input: {
   const pages: CollectorPage[] = [];
   const itemUpdates: CollectorItemUpdate[] = [];
   const itemIdsToDelete: string[] = [];
-  let identityContext: NotionPageIdentityContext | null = null;
 
   for (const item of batch) {
     try {
@@ -3628,15 +3790,7 @@ export async function collectNotionReconciliation(input: {
           `Notion returned an invalid page object for ${item.itemId}`,
         );
       }
-      if (!identityContext && notionPageHasUserReferences(page)) {
-        identityContext = await loadNotionPageIdentityContext(input.config);
-      }
-      const mapped = await fetchNotionPage(
-        input.config,
-        page,
-        identityContext ?? { users: new Map(), identitiesByEmail: new Map() },
-        false,
-      );
+      const mapped = await fetchNotionPage(input.config, page, false);
       if (mapped) {
         pages.push(mapped);
         itemUpdates.push(notionItemUpdate(page, mapped.slug, scanStartedAt));
@@ -3786,7 +3940,6 @@ async function collectNotionPages(input: {
   const itemUpdates: CollectorItemUpdate[] = [];
   let searchRequests = 0;
   let complete = false;
-  let identityContext: NotionPageIdentityContext | null = null;
 
   while (
     pages.length < input.limit &&
@@ -3820,14 +3973,7 @@ async function collectNotionPages(input: {
       });
 
     for (const page of candidates) {
-      if (!identityContext && notionPageHasUserReferences(page)) {
-        identityContext = await loadNotionPageIdentityContext(input.config);
-      }
-      const mapped = await fetchNotionPage(
-        input.config,
-        page,
-        identityContext ?? { users: new Map(), identitiesByEmail: new Map() },
-      );
+      const mapped = await fetchNotionPage(input.config, page);
       if (mapped) {
         pages.push(mapped);
         if (mode === 'incremental') {
@@ -3891,17 +4037,9 @@ async function backfillNotionPagesStep(
   const pages: CollectorPage[] = [];
   const itemUpdates: CollectorItemUpdate[] = [];
   const observedAt = new Date();
-  let identityContext: NotionPageIdentityContext | null = null;
 
   for (const page of batch.pages) {
-    if (!identityContext && notionPageHasUserReferences(page)) {
-      identityContext = await loadNotionPageIdentityContext(config);
-    }
-    const mapped = await fetchNotionPage(
-      config,
-      page,
-      identityContext ?? { users: new Map(), identitiesByEmail: new Map() },
-    );
+    const mapped = await fetchNotionPage(config, page);
     if (mapped) {
       pages.push(mapped);
       itemUpdates.push(notionItemUpdate(page, mapped.slug, observedAt));
@@ -3916,41 +4054,101 @@ async function backfillNotionPagesStep(
   };
 }
 
+type NotionUserProjectionEntry = {
+  user: NotionDirectoryUser;
+  reference: NotionUserReference;
+};
+
+/**
+ * Everything a Notion user card's content depends on. When this changes for
+ * any user — a rename, a deletion, or a canonical link appearing after a
+ * member signs up — the next tick re-emits the affected pages instead of
+ * waiting out the daily refresh.
+ */
+function notionUsersProjectionHash(
+  entries: NotionUserProjectionEntry[],
+): string {
+  const projection = entries.map(({ user, reference }) => ({
+    id: user.id,
+    name: user.name,
+    deleted: user.deleted,
+    title: reference.title,
+    canonical: reference.canonical?.slug ?? null,
+  }));
+
+  return createHash('sha256').update(JSON.stringify(projection)).digest('hex');
+}
+
+type NotionUsersEmitCursor = {
+  projectionHash: string | null;
+  afterUserId?: string;
+};
+
+function parseNotionUsersEmitCursor(raw: string | null): NotionUsersEmitCursor {
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as Partial<NotionUsersEmitCursor>;
+      return {
+        projectionHash:
+          typeof parsed.projectionHash === 'string'
+            ? parsed.projectionHash
+            : null,
+        ...(typeof parsed.afterUserId === 'string'
+          ? { afterUserId: parsed.afterUserId }
+          : {}),
+      };
+    } catch {
+      // Restart with a full idempotent sweep if the cursor is unreadable.
+    }
+  }
+
+  return { projectionHash: null };
+}
+
 export function selectNotionUserBatch(input: {
-  users: NotionUserIdentity[];
+  entries: NotionUserProjectionEntry[];
   state: { watermark: Date | null; cursor: string | null } | null;
   now: Date;
   limit: number;
 }): {
-  users: NotionUserIdentity[];
+  entries: NotionUserProjectionEntry[];
   watermark: Date;
-  cursor: string | null;
+  cursor: string;
 } {
-  const continuing = Boolean(input.state?.cursor);
-  const refreshDue =
+  const saved = parseNotionUsersEmitCursor(input.state?.cursor ?? null);
+  const projectionHash = notionUsersProjectionHash(input.entries);
+  const projectionChanged = saved.projectionHash !== projectionHash;
+  const continuing = saved.afterUserId !== undefined;
+  const sweepDue =
     !input.state?.watermark ||
     input.now.getTime() - input.state.watermark.getTime() >=
       NOTION_USERS_REFRESH_MS;
-  if (!continuing && !refreshDue) {
+
+  if (!continuing && !projectionChanged && !sweepDue) {
     return {
-      users: [],
+      entries: [],
       watermark: input.state!.watermark!,
-      cursor: null,
+      cursor: JSON.stringify({
+        projectionHash,
+      } satisfies NotionUsersEmitCursor),
     };
   }
 
-  const afterUserId = input.state?.cursor ?? '';
-  const candidates = [...input.users]
-    .sort((a, b) => a.id.localeCompare(b.id))
-    .filter((user) => user.id > afterUserId);
-  const batch = candidates.slice(0, input.limit);
-  const last = batch.at(-1);
-  const hasMore = candidates.length > batch.length;
+  const { batch, lastId, hasMore } = selectSweepSlice({
+    items: input.entries,
+    idOf: (entry) => entry.user.id,
+    afterId: continuing && !projectionChanged ? saved.afterUserId! : '',
+    limit: input.limit,
+  });
 
   return {
-    users: batch,
+    entries: batch,
     watermark: hasMore ? (input.state?.watermark ?? new Date(0)) : input.now,
-    cursor: hasMore && last ? last.id : null,
+    cursor: JSON.stringify(
+      (hasMore && lastId
+        ? { projectionHash, afterUserId: lastId }
+        : { projectionHash }) satisfies NotionUsersEmitCursor,
+    ),
   };
 }
 
@@ -3958,39 +4156,80 @@ const notionUsersCollector: BrainCollector = {
   id: NOTION_USERS_COLLECTOR_ID,
   displayName: 'Notion workspace users',
   async isEnabled() {
-    return Boolean(await findNotionConnectionConfig());
+    if (await findNotionConnectionConfig()) {
+      return true;
+    }
+    // Stored directory rows still need deletion tombstones after the
+    // integration is removed.
+    const rows = await db
+      .select({ id: notionDirectoryUsers.id })
+      .from(notionDirectoryUsers)
+      .limit(1);
+    return rows.length > 0;
   },
   async collect({ now, limit }) {
     const config = await findNotionConnectionConfig();
-    if (!config) return { pages: [], nextSince: null };
+    const stateUpdates: CollectorStateUpdate[] = [];
 
-    const users = await loadNotionUserDirectory(config);
-    const [identities, state] = await Promise.all([
-      loadPersonIdentityRecords(),
-      getBrainSyncState(db, NOTION_USERS_COLLECTOR_ID),
-    ]);
+    if (config) {
+      const refreshState = await getBrainSyncState(
+        db,
+        NOTION_USERS_REFRESH_STATE_ID,
+      );
+      const refreshUpdate = await refreshNotionUserDirectory({
+        config,
+        state: refreshState
+          ? {
+              watermark: refreshState.watermark,
+              backfillCursor: refreshState.backfillCursor,
+            }
+          : null,
+        now,
+      });
+      if (refreshUpdate) {
+        stateUpdates.push(refreshUpdate);
+      }
+    } else {
+      // The integration was removed: retract every stored directory row so
+      // the projected person cards tombstone below.
+      await tombstoneNotionDirectoryUsers(null, now);
+    }
+
+    const directory = await loadNotionDirectory();
+    if (directory.length === 0) {
+      return { pages: [], nextSince: null, stateUpdates };
+    }
+
+    // Deleted rows never link, so an all-deleted directory (integration
+    // removed or capability revoked) skips the person-identity load entirely.
+    const identityLookup = directory.some((user) => !user.deleted)
+      ? buildPersonIdentityLookup(await loadPersonIdentityRecords())
+      : new Map<string, PersonIdentityReference>();
+    const references = buildNotionUserReferences(directory, identityLookup);
+    const state = await getBrainSyncState(db, NOTION_USERS_COLLECTOR_ID);
     const batch = selectNotionUserBatch({
-      users,
+      entries: directory.map((user) => ({
+        user,
+        reference: references.get(user.id)!,
+      })),
       state: state
         ? { watermark: state.watermark, cursor: state.backfillCursor }
         : null,
       now,
       limit,
     });
-    const references = buildNotionUserReferences(users, identities);
+    stateUpdates.push({
+      collectorId: NOTION_USERS_COLLECTOR_ID,
+      watermark: batch.watermark,
+      cursor: batch.cursor,
+    });
 
     return {
-      pages: batch.users.map((user) =>
-        buildNotionUserPage(user, references.get(user.id)!),
+      pages: batch.entries.map(({ user, reference }) =>
+        buildNotionUserPage(user, reference),
       ),
       nextSince: null,
-      stateUpdates: [
-        {
-          collectorId: NOTION_USERS_COLLECTOR_ID,
-          watermark: batch.watermark,
-          cursor: batch.cursor,
-        },
-      ],
+      stateUpdates,
     };
   },
 };
