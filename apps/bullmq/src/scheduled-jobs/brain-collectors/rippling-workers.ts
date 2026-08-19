@@ -11,6 +11,7 @@ import {
 } from '@roomote/db/server';
 import { ripplingApiRequestJson } from '@roomote/sdk/server/rippling-api';
 import {
+  brainNamespacePrefix,
   isMcpConnectionRipplingConfig,
   type McpConnectionRipplingConfig,
 } from '@roomote/types';
@@ -118,7 +119,7 @@ function ripplingWorkerSlug(workerId: string): string {
     .update(workerId)
     .digest('hex')
     .slice(0, 16);
-  return `people/rippling-worker-${digest}`;
+  return `${brainNamespacePrefix('people')}rippling-worker-${digest}`;
 }
 
 type RipplingMembership = {

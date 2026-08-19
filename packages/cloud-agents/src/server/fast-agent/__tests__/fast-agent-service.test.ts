@@ -208,6 +208,28 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
+  it('passes image data URLs to the Fast model as image-capable file input', async () => {
+    await answerFastAgentQuestion({
+      ...baseParams,
+      images: ['data:image/png;base64,aGVsbG8=', 'not-an-image'],
+      adapter: callbacks(),
+    });
+
+    expect(mocks.generateText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        files: [
+          {
+            mime: 'image/png',
+            url: 'data:image/png;base64,aGVsbG8=',
+          },
+        ],
+        requiredInputModality: 'image',
+      }),
+      expect.any(Object),
+      expect.any(Object),
+    );
+  });
+
   it('posts final assistant text only as a defensive fallback', async () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {

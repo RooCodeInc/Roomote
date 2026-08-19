@@ -1,6 +1,7 @@
 import { and, db, eq, isNull, mcpConnections } from '@roomote/db/server';
 import { decrypt } from '@roomote/db/encryption';
 import {
+  brainNamespacePrefix,
   isMcpConnectionGranolaConfig,
   type McpConnectionGranolaConfig,
 } from '@roomote/types';
@@ -161,7 +162,7 @@ export function buildGranolaMeetingPage(
 
   return {
     page: {
-      slug: `meetings/${day}-${slugTail}`,
+      slug: `${brainNamespacePrefix('meetings')}${day}-${slugTail}`,
       title,
       content,
       timelineEvidence:

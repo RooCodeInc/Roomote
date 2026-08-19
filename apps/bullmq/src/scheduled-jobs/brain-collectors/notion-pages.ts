@@ -18,6 +18,7 @@ import {
   notionApiRequestJson,
 } from '@roomote/sdk/server/notion-api';
 import {
+  brainNamespacePrefix,
   isMcpConnectionNotionConfig,
   type McpConnectionNotionConfig,
 } from '@roomote/types';
@@ -641,7 +642,7 @@ export function buildNotionPage(
 
 function notionPageSlug(pageId: string): string | null {
   const stableId = pageId.toLowerCase().replace(/[^a-z0-9]/g, '');
-  return stableId ? `notion/${stableId}` : null;
+  return stableId ? `${brainNamespacePrefix('notion')}${stableId}` : null;
 }
 
 async function findNotionConnectionConfig(): Promise<McpConnectionNotionConfig | null> {

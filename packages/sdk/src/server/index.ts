@@ -378,5 +378,7 @@ export {
   resetInstancePingQueueForTests,
 } from './lib/request-instance-ping';
 export * from './lib/brain-clients';
+export * from './lib/brain-corpus';
+export * from './lib/brain-mcp';
 export * from './lib/brain-github';
 export * from './lib/brain-inference';

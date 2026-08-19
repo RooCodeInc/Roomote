@@ -5,7 +5,11 @@ import {
   type FastAgentActiveTask,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
-import { type SlackEvent, type SlackNotifier } from '@roomote/slack';
+import {
+  resolveCurrentSlackMessageFiles,
+  type SlackEvent,
+  type SlackNotifier,
+} from '@roomote/slack';
 import { stripLeadingSlackProductMention } from '@roomote/cloud-agents';
 
 import { LEADING_FAST_COMMAND_MENTION_PATTERN } from '../constants.js';
@@ -139,6 +143,19 @@ export async function processFastAgentMessage(params: {
     const currentMessage = threadContext.find(
       (message) => message.ts === event.ts,
     );
+    const currentMessageFiles = resolveCurrentSlackMessageFiles({
+      currentMessageTs: event.ts,
+      eventFiles: event.files,
+      messages: threadContext,
+    });
+    const images = currentMessageFiles?.length
+      ? await slack.processSlackFiles(currentMessageFiles).catch((error) => {
+          console.error(
+            `[SlackWebhook] Failed to process Fast message images: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          return [];
+        })
+      : [];
     const serializedThreadContext = threadContext
       .filter((message) => message.ts !== event.ts)
       .map((message) => ({
@@ -151,6 +168,7 @@ export async function processFastAgentMessage(params: {
 
     const responseText = await answerFastAgentQuestion({
       question,
+      images,
       currentMessageAgentContext: event.agentContext,
       threadContext: serializedThreadContext,
       userId,

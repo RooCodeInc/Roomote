@@ -89,6 +89,117 @@ describe('processFastAgentMessage', () => {
     );
   });
 
+  it('passes an image from the initial Slack message to the Fast model', async () => {
+    const image = 'data:image/png;base64,aW5pdGlhbA==';
+    const files = [
+      {
+        id: 'F_INITIAL',
+        name: 'initial.png',
+        mimetype: 'image/png',
+        filetype: 'png',
+        url_private: 'https://files.slack.com/F_INITIAL',
+        url_private_download: 'https://files.slack.com/F_INITIAL/download',
+        size: 1024,
+      },
+    ];
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => [
+        {
+          user: 'U123',
+          text: '!fast inspect this screenshot',
+          ts: '100.001',
+          type: 'message',
+          files,
+        },
+      ]),
+      processSlackFiles: vi.fn().mockResolvedValue([image]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'D123',
+        channel_type: 'im',
+        user: 'U123',
+        text: '!fast inspect this screenshot',
+        ts: '100.001',
+        files,
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+    });
+
+    expect(slack.processSlackFiles).toHaveBeenCalledWith(files);
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ images: [image] }),
+    );
+  });
+
+  it('passes an image from a subsequent Slack thread message to the Fast model', async () => {
+    const image = 'data:image/jpeg;base64,Zm9sbG93LXVw';
+    const files = [
+      {
+        id: 'F_FOLLOW_UP',
+        name: 'follow-up.jpg',
+        mimetype: 'image/jpeg',
+        filetype: 'jpg',
+        url_private: 'https://files.slack.com/F_FOLLOW_UP',
+        url_private_download: 'https://files.slack.com/F_FOLLOW_UP/download',
+        size: 2048,
+      },
+    ];
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => [
+        {
+          user: 'U123',
+          text: '!fast inspect this screenshot',
+          ts: '100.001',
+          type: 'message',
+        },
+        {
+          user: 'U123',
+          text: 'What about this one?',
+          ts: '100.002',
+          type: 'message',
+          files,
+        },
+      ]),
+      processSlackFiles: vi.fn().mockResolvedValue([image]),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'D123',
+        channel_type: 'im',
+        thread_ts: '100.001',
+        user: 'U123',
+        text: 'What about this one?',
+        ts: '100.002',
+        files,
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      continuation: true,
+    });
+
+    expect(slack.processSlackFiles).toHaveBeenCalledWith(files);
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'What about this one?',
+        images: [image],
+      }),
+    );
+  });
+
   it('can answer with a reaction without posting a text fallback', async () => {
     mocks.answerQuestion.mockImplementationOnce(
       async ({

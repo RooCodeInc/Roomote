@@ -17,10 +17,15 @@ import {
   or,
 } from '@roomote/db/server';
 import {
+  postBrainToolCall,
   resolveBrainInferenceProvider,
   resolveBrainConnection,
 } from '@roomote/sdk/server';
-import { getLinkedEnvironmentIdFromPayload, RunStatus } from '@roomote/types';
+import {
+  brainNamespacePrefix,
+  getLinkedEnvironmentIdFromPayload,
+  RunStatus,
+} from '@roomote/types';
 
 import { runBrainCollectors } from './brain-collectors';
 
@@ -114,29 +119,18 @@ export async function callBrainWriteTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<string> {
-  const response = await fetch(`${connection.baseUrl.replace(/\/$/, '')}/mcp`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      accept: 'application/json, text/event-stream',
-      authorization: `Bearer ${connection.token}`,
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/call',
-      params: { name, arguments: args },
-    }),
-  });
-  const body = await response.text().catch(() => '');
+  // Shared transport; the backpressure classification below is this write
+  // path's own and deliberately stays here. No timeout: put_page embeds
+  // synchronously and a slow embed is backpressure, not a failure.
+  const { status, ok, body } = await postBrainToolCall(connection, name, args);
 
-  if (response.status === 429) {
+  if (status === 429) {
     throw new BrainRateLimitedError(
       `gbrain ${name} rate limited: ${body.slice(0, 300)}`,
     );
   }
 
-  const failed = !response.ok || body.includes('"isError":true');
+  const failed = !ok || body.includes('"isError":true');
 
   if (failed && /embed\(|embedding/i.test(body)) {
     throw new BrainNotReadyError(
@@ -145,9 +139,7 @@ export async function callBrainWriteTool(
   }
 
   if (failed) {
-    throw new Error(
-      `gbrain ${name} failed: ${response.status} ${body.slice(0, 300)}`,
-    );
+    throw new Error(`gbrain ${name} failed: ${status} ${body.slice(0, 300)}`);
   }
 
   return body;
@@ -226,7 +218,7 @@ export function buildMemoryPage(input: {
   ].join('\n');
 
   return {
-    slug: `tasks/${input.taskId}/runs/${input.runId}`,
+    slug: `${brainNamespacePrefix('tasks')}${input.taskId}/runs/${input.runId}`,
     title: input.taskTitle,
     content: redactBrainText(content),
   };
@@ -609,7 +601,7 @@ export function buildPullRequestFactPage(fact: {
   ].join('\n');
 
   return {
-    slug: `prs/${fact.repositoryFullName}/${fact.prNumber}`,
+    slug: `${brainNamespacePrefix('prs')}${fact.repositoryFullName}/${fact.prNumber}`,
     title: `${fact.repositoryFullName}#${fact.prNumber}: ${fact.title}`,
     content: redactBrainText(content),
   };

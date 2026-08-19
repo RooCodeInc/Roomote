@@ -1,3 +1,4 @@
+import { brainNamespacePrefix } from '@roomote/types';
 import {
   db,
   eq,
@@ -180,7 +181,7 @@ export function groupSlackMessagesIntoDayPages(
         });
         const firstTs = chunk[0]!.ts.replace('.', '-');
         const lastTs = chunk.at(-1)!.ts.replace('.', '-');
-        const slug = `slack/${group.teamId}/${group.channelId}/${group.day}/${firstTs}-${lastTs}`;
+        const slug = `${brainNamespacePrefix('slack')}${group.teamId}/${group.channelId}/${group.day}/${firstTs}-${lastTs}`;
         const people = new Set<string>();
         for (const message of chunk) {
           if (!message.person) continue;

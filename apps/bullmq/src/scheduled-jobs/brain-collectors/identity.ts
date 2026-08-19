@@ -1,3 +1,4 @@
+import { brainNamespacePrefix } from '@roomote/types';
 import { createHash } from 'node:crypto';
 
 export type PersonIdentityProvider = {
@@ -30,7 +31,7 @@ export const LEGACY_SETUP_BOOTSTRAP_USER_ID = 'setup-bootstrap-user';
 /** Shared `people/<prefix>-<digest>` slug scheme for every person surface. */
 export function hashedPeopleSlug(prefix: string, seed: string): string {
   const digest = createHash('sha256').update(seed).digest('hex').slice(0, 16);
-  return `people/${prefix}-${digest}`;
+  return `${brainNamespacePrefix('people')}${prefix}-${digest}`;
 }
 
 export function personIdentitySlug(userId: string): string {

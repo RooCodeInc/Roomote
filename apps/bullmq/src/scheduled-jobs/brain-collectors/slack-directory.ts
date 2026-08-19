@@ -1,3 +1,4 @@
+import { brainNamespacePrefix } from '@roomote/types';
 import {
   and,
   db,
@@ -95,7 +96,7 @@ function slackDirectoryPersonSlug(teamId: string, userId: string): string {
     .update(`slack:${teamId}:${userId}`)
     .digest('hex')
     .slice(0, 16);
-  return `people/slack-member-${digest}`;
+  return `${brainNamespacePrefix('people')}slack-member-${digest}`;
 }
 
 export function slackDirectoryProfileFromApi(input: {
