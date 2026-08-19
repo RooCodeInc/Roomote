@@ -9,8 +9,11 @@ import {
   teamsUserMappings,
   telegramUserMappings,
   users,
+  notionDirectoryUsers,
 } from '@roomote/db/server';
 import { createHash } from 'node:crypto';
+
+import type { NotionUserIdentity } from './notion-pages';
 
 import type { BrainCollector, CollectorPage } from './contracts';
 import {
@@ -26,6 +29,57 @@ import {
 } from './identity';
 import { formatUtcDay } from './shared';
 
+/**
+ * Active records in ascending userId order — the single tie-break rule for
+ * which record owns an email or alias when several share one.
+ */
+function activeIdentityRecordsByUserId(
+  records: PersonIdentityRecord[],
+): PersonIdentityRecord[] {
+  return records
+    .filter((record) => !record.deletedAt)
+    .sort((a, b) => a.userId.localeCompare(b.userId));
+}
+
+export function linkNotionUsersToPersonIdentities(
+  records: PersonIdentityRecord[],
+  notionUsers: NotionUserIdentity[],
+): PersonIdentityRecord[] {
+  const linkable = notionUsers.filter(
+    (user): user is NotionUserIdentity & { email: string } =>
+      Boolean(user.email),
+  );
+  if (linkable.length === 0) {
+    return records;
+  }
+
+  const linked = records.map((record) => ({
+    ...record,
+    providers: [...record.providers],
+  }));
+  const byEmail = new Map<string, PersonIdentityRecord>();
+
+  for (const record of activeIdentityRecordsByUserId(linked)) {
+    const email = normalizeIdentityAlias(record.email);
+    if (email && !byEmail.has(email)) {
+      byEmail.set(email, record);
+    }
+  }
+
+  for (const notionUser of linkable) {
+    const record = byEmail.get(normalizeIdentityAlias(notionUser.email));
+    if (!record) continue;
+
+    record.providers.push({
+      provider: 'Notion',
+      identifier: notionUser.id,
+      display: notionUser.name,
+      updatedAt: record.updatedAt,
+    });
+  }
+
+  return linked;
+}
 export function buildPersonIdentityPage(
   record: PersonIdentityRecord,
 ): CollectorPage {
@@ -90,10 +144,7 @@ export function buildPersonIdentityLookup(
 ): Map<string, PersonIdentityReference> {
   const lookup = new Map<string, PersonIdentityReference>();
 
-  for (const record of [...records].sort((a, b) =>
-    a.userId.localeCompare(b.userId),
-  )) {
-    if (record.deletedAt) continue;
+  for (const record of activeIdentityRecordsByUserId(records)) {
     const reference = {
       slug: personIdentitySlug(record.userId),
       title: personIdentityDisplayName(record),
@@ -135,6 +186,7 @@ export async function loadPersonIdentityRecords(): Promise<
     discordRows,
     teamsRows,
     slackDirectoryRows,
+    notionDirectoryRows,
   ] = await Promise.all([
     db.select().from(users),
     db.select().from(slackUserMappings),
@@ -144,6 +196,7 @@ export async function loadPersonIdentityRecords(): Promise<
     db.select().from(discordUserMappings),
     db.select().from(teamsUserMappings),
     db.select().from(slackDirectoryUsers),
+    db.select().from(notionDirectoryUsers),
   ]);
   const byUserId = new Map<string, PersonIdentityRecord>(
     memberRows
@@ -236,7 +289,19 @@ export async function loadPersonIdentityRecords(): Promise<
     });
   }
 
-  return [...byUserId.values()];
+  // Link Notion identities from the durable directory snapshot, never the
+  // live Notion API: person-identity sync must not depend on Notion
+  // availability, and links may only change when a directory refresh lands.
+  return linkNotionUsersToPersonIdentities(
+    [...byUserId.values()],
+    notionDirectoryRows
+      .filter((row) => !row.isDeleted)
+      .map((row) => ({
+        id: row.notionUserId,
+        name: row.name,
+        email: row.email,
+      })),
+  );
 }
 const PERSON_IDENTITIES_STATE_ID =
   'person-identities:members:occurrence-date-v2';
@@ -315,6 +380,31 @@ function personIdentityProjectionHash(records: PersonIdentityRecord[]): string {
   return createHash('sha256').update(JSON.stringify(projection)).digest('hex');
 }
 
+/**
+ * One sweep slice over a stable id ordering. Sorting and cursor filtering use
+ * the same code-unit comparison so a persisted cursor can never skip ids the
+ * two orderings disagree on (localeCompare and `>` diverge on case-mixed ids).
+ */
+export function selectSweepSlice<T>(input: {
+  items: T[];
+  idOf: (item: T) => string;
+  afterId: string;
+  limit: number;
+}): { batch: T[]; lastId: string | null; hasMore: boolean } {
+  const { idOf } = input;
+  const candidates = [...input.items]
+    .sort((a, b) => (idOf(a) < idOf(b) ? -1 : idOf(a) > idOf(b) ? 1 : 0))
+    .filter((item) => idOf(item) > input.afterId);
+  const batch = candidates.slice(0, input.limit);
+  const last = batch.at(-1);
+
+  return {
+    batch,
+    lastId: last ? idOf(last) : null,
+    hasMore: candidates.length > batch.length,
+  };
+}
+
 export function selectPersonIdentityBatch(input: {
   records: PersonIdentityRecord[];
   state: { watermark: Date | null; cursor: string | null } | null;
@@ -340,24 +430,24 @@ export function selectPersonIdentityBatch(input: {
   if (cursor.mode === 'sweep' || sweepDue || projectionChanged) {
     const afterUserId =
       cursor.mode === 'sweep' && !projectionChanged ? cursor.afterUserId : '';
-    const candidates = [...records]
-      .sort((a, b) => a.userId.localeCompare(b.userId))
-      .filter((record) => record.userId > (afterUserId ?? ''));
-    const batch = candidates.slice(0, limit);
-    const last = batch.at(-1);
-    const hasMore = candidates.length > batch.length;
+    const { batch, lastId, hasMore } = selectSweepSlice({
+      items: records,
+      idOf: (record) => record.userId,
+      afterId: afterUserId ?? '',
+      limit,
+    });
 
     return {
       records: batch,
       watermark: hasMore ? (state?.watermark ?? new Date(0)) : now,
       projectionChanged,
       cursor: serializePersonIdentityCursor(
-        hasMore && last
+        hasMore && lastId
           ? {
               mode: 'sweep',
               lastSweepAt: cursor.lastSweepAt,
               projectionHash,
-              afterUserId: last.userId,
+              afterUserId: lastId,
             }
           : {
               mode: 'idle',

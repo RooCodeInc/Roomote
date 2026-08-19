@@ -156,6 +156,7 @@ export {
   slackUserMappings,
   slackUserMappingsRelations,
   slackDirectoryUsers,
+  notionDirectoryUsers,
   telegramUserMappings,
   telegramUserMappingsRelations,
   discordInstallations,

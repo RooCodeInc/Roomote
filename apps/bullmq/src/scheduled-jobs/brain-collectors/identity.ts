@@ -27,9 +27,14 @@ export type PersonIdentityReference = {
 
 export const LEGACY_SETUP_BOOTSTRAP_USER_ID = 'setup-bootstrap-user';
 
+/** Shared `people/<prefix>-<digest>` slug scheme for every person surface. */
+export function hashedPeopleSlug(prefix: string, seed: string): string {
+  const digest = createHash('sha256').update(seed).digest('hex').slice(0, 16);
+  return `people/${prefix}-${digest}`;
+}
+
 export function personIdentitySlug(userId: string): string {
-  const digest = createHash('sha256').update(userId).digest('hex').slice(0, 16);
-  return `people/roomote-member-${digest}`;
+  return hashedPeopleSlug('roomote-member', userId);
 }
 
 export function normalizeIdentityAlias(value: string): string {

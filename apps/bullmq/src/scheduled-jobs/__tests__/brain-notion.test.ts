@@ -7,10 +7,14 @@ import {
   buildNotionPage,
   buildNotionSearchBody,
   buildNotionSweepInventory,
+  buildNotionUserReferences,
   buildUnavailableNotionPage,
   collectNotionReconciliation,
   type NotionSearchPage,
+  type NotionUserIdentity,
 } from '../brain-collectors/notion-pages';
+import { buildPersonIdentityLookup } from '../brain-collectors/person-identities';
+import type { PersonIdentityRecord } from '../brain-collectors/identity';
 
 const mockNotionApiRequestJson = vi.hoisted(() => vi.fn());
 vi.mock('@roomote/sdk/server/notion-api', async (importOriginal) => {
@@ -61,6 +65,125 @@ describe('Notion page mapping', () => {
     expect(mapped?.content).toContain('## Decision\n\nShip the collector.');
   });
 
+  it('emits deterministic person and relation references from page metadata', () => {
+    const identities: PersonIdentityRecord[] = [
+      {
+        userId: 'roomote-ada',
+        name: 'Ada Lovelace',
+        email: 'ada@example.com',
+        role: 'member',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+        deletedAt: null,
+        providers: [],
+      },
+    ];
+    const notionUsers: NotionUserIdentity[] = [
+      { id: 'notion-ada', name: 'Ada', email: 'ada@example.com' },
+      { id: 'notion-alex', name: 'Alex', email: null },
+    ];
+    const identityLookup = buildPersonIdentityLookup(identities);
+    const users = buildNotionUserReferences(notionUsers, identityLookup);
+    const canonical = identityLookup.get('ada@example.com')!;
+    const mapped = buildNotionPage(
+      {
+        ...page,
+        // Authorship fields carry partial users ({object, id} only); the
+        // stored directory resolves them or they fall back to a stable id.
+        created_by: { object: 'user', id: 'notion-ada' },
+        last_edited_by: { object: 'user', id: 'unknown-user' },
+        properties: {
+          ...page.properties,
+          Owners: {
+            type: 'people',
+            people: [
+              { object: 'user', id: 'notion-ada' },
+              { object: 'user', id: 'notion-alex' },
+            ],
+          },
+          Summary: {
+            type: 'rich_text',
+            rich_text: [
+              {
+                type: 'mention',
+                mention: {
+                  type: 'user',
+                  user: { object: 'user', id: 'notion-ada' },
+                },
+              },
+            ],
+          },
+          Related: {
+            type: 'relation',
+            relation: [{ id: 'ABCDEF12-3456-7890-ABCD-EF1234567890' }],
+          },
+        },
+      },
+      { markdown: '# Body' },
+      { identityContext: { users, identityLookup } },
+    );
+
+    expect(mapped?.content).toContain(
+      `created_by: ${JSON.stringify(canonical.slug)}`,
+    );
+    expect(mapped?.content).toContain(
+      'last_edited_by: "notion/user/unknownuser"',
+    );
+    expect(mapped?.content).toContain(
+      `mentions: ${JSON.stringify([canonical.slug])}`,
+    );
+    expect(mapped?.content).toContain(users.get('notion-alex')!.slug);
+    expect(mapped?.content).toContain(
+      'relations: ["notion/abcdef1234567890abcdef1234567890"]',
+    );
+  });
+
+  it('uses only verified inline emails for canonical reconciliation', () => {
+    // Full user objects (with type/person.email) appear only in people
+    // properties and rich-text mentions, never in created_by/last_edited_by,
+    // which Notion returns as partial users.
+    const canonical = {
+      slug: 'people/roomote-member-ada',
+      title: 'Ada',
+    };
+    const identityLookup = new Map([['ada@example.com', canonical]]);
+    const withOwner = (user: Record<string, unknown>) => ({
+      ...page,
+      properties: {
+        ...page.properties,
+        Owners: { type: 'people', people: [user] },
+      },
+    });
+    const verified = buildNotionPage(
+      withOwner({
+        object: 'user',
+        id: 'verified-user',
+        type: 'person',
+        name: 'Ada',
+        person: { email: 'ADA@EXAMPLE.COM', email_verified: true },
+      }),
+      {},
+      { identityContext: { users: new Map(), identityLookup } },
+    );
+    const unverified = buildNotionPage(
+      withOwner({
+        object: 'user',
+        id: 'unverified-user',
+        type: 'person',
+        name: 'Ada',
+        person: { email: 'ada@example.com', email_verified: false },
+      }),
+      {},
+      { identityContext: { users: new Map(), identityLookup } },
+    );
+
+    expect(verified?.content).toContain(
+      'people: ["people/roomote-member-ada"]',
+    );
+    expect(unverified?.content).toContain(
+      'people: ["notion/user/unverifieduser"]',
+    );
+  });
   it('replaces the old body with a tombstone when Notion reports trash', () => {
     const mapped = buildNotionPage({ ...page, in_trash: true }, {});
 

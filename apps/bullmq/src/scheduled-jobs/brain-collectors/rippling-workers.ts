@@ -31,7 +31,7 @@ import {
   buildPersonIdentityLookup,
   loadPersonIdentityRecords,
 } from './person-identities';
-import { asString, parseDate } from './shared';
+import { asObject, asString, parseDate } from './shared';
 
 /**
  * Rippling: authoritative employee directory
@@ -77,12 +77,6 @@ type RipplingSnapshotCursor =
   | { mode: 'idle'; lastCompletedAt: string | null }
   | { mode: 'scan'; startedAt: string; nextLink: string | null }
   | { mode: 'reconcile'; startedAt: string };
-
-function asObject(value: unknown): RipplingObject | null {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as RipplingObject)
-    : null;
-}
 
 function firstString(...values: unknown[]): string | null {
   for (const value of values) {

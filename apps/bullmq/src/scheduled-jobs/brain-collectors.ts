@@ -24,7 +24,10 @@ import {
 } from './brain-collectors/write-pages';
 import { githubIssuesCollector } from './brain-collectors/github-issues';
 import { granolaMeetingsCollector } from './brain-collectors/granola-meetings';
-import { notionPagesCollector } from './brain-collectors/notion-pages';
+import {
+  notionPagesCollector,
+  notionUsersCollector,
+} from './brain-collectors/notion-pages';
 import { personIdentitiesCollector } from './brain-collectors/person-identities';
 import { ripplingWorkersCollector } from './brain-collectors/rippling-workers';
 import { slackPersonDirectoryCollector } from './brain-collectors/slack-directory';
@@ -305,6 +308,7 @@ const BRAIN_COLLECTORS: BrainCollector[] = [
   personIdentitiesCollector,
   ripplingWorkersCollector,
   slackPublicChannelsCollector,
+  notionUsersCollector,
   notionPagesCollector,
   granolaMeetingsCollector,
   githubIssuesCollector,

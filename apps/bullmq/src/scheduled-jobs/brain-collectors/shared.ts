@@ -26,3 +26,10 @@ export function slugifySegment(value: string): string {
 export function formatUtcDay(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
+
+/** Narrow an unknown to a plain object record, or null. */
+export function asObject(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
