@@ -89,6 +89,17 @@ export class FastAgentOpenCodeSessionManager {
     this.entries.clear();
   }
 
+  /**
+   * Discard a failed live transcript without disturbing queued turns. The next
+   * run will rebuild the conversation from Roomote's compatibility history.
+   */
+  invalidate(conversationId: string): void {
+    const entry = this.entries.get(conversationId);
+    if (entry) {
+      entry.session.id = undefined;
+    }
+  }
+
   get size(): number {
     return this.entries.size;
   }

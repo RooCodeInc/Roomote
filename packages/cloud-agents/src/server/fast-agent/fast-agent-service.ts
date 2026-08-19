@@ -20,6 +20,7 @@ import {
 import {
   classifyNonTaskInferenceError,
   generateTrackedNonTaskTextInOpenCodeSession,
+  isNonTaskOpenCodePromptTimeoutError,
   isNonTaskOpenCodeSessionNotFoundError,
   NON_TASK_INFERENCE_SURFACES,
   type NonTaskPromptFile,
@@ -132,6 +133,11 @@ type FastAgentInferenceRetryNotice = {
   delayMs?: number;
 };
 
+type FastAgentInferenceRetryOptions = {
+  canRetry?: (error: unknown, failure: FastAgentInferenceFailure) => boolean;
+  prepareRetry?: () => Promise<void> | void;
+};
+
 class FastAgentInferenceError extends Error {
   constructor(
     public readonly failure: FastAgentInferenceFailure,
@@ -166,9 +172,11 @@ function formatFastAgentInferenceRetryNotice(
   const headline =
     notice.failure.reason === 'rate_limited'
       ? 'Fast mode’s inference provider is rate limiting requests.'
-      : notice.failure.reason === 'timeout'
-        ? 'Fast mode’s inference provider did not respond in time.'
-        : 'Fast mode’s inference provider returned a temporary error.';
+      : notice.failure.reason === 'gateway_blocked'
+        ? 'Fast mode’s request was blocked by the inference provider gateway.'
+        : notice.failure.reason === 'timeout'
+          ? 'Fast mode’s inference provider did not respond in time.'
+          : 'Fast mode’s inference provider returned a temporary error.';
 
   if (notice.delayMs === undefined || notice.maxAttempts === undefined) {
     return `${headline} Retrying automatically…`;
@@ -188,6 +196,8 @@ function formatFastAgentInferenceFailure(
       return 'Fast mode’s inference provider did not respond after retrying. Any delegated tasks can keep running; please try again in a moment.';
     case 'endpoint_unreachable':
       return 'Fast mode could not reach the inference provider after retrying. Please try again in a moment.';
+    case 'gateway_blocked':
+      return 'Fast mode’s request is still being blocked by the inference provider gateway after retrying. Please try again in a moment.';
     case 'insufficient_credits':
       return 'Fast mode cannot use the inference provider because the account has insufficient credits or quota.';
     case 'invalid_credentials':
@@ -208,6 +218,7 @@ function waitForFastAgentInferenceRetry(delayMs: number): Promise<void> {
 async function runFastAgentInferenceWithRetries<T>(
   run: () => Promise<T>,
   onRetry?: (notice: FastAgentInferenceRetryNotice) => Promise<void>,
+  options: FastAgentInferenceRetryOptions = {},
 ): Promise<T> {
   for (
     let retryNumber = 0;
@@ -226,6 +237,7 @@ async function runFastAgentInferenceWithRetries<T>(
       const failure = classifyNonTaskInferenceError(error);
       if (
         !failure.retryable ||
+        options.canRetry?.(error, failure) === false ||
         retryNumber >= FAST_AGENT_INFERENCE_MAX_RETRIES
       ) {
         throw new FastAgentInferenceError(failure, error);
@@ -239,12 +251,19 @@ async function runFastAgentInferenceWithRetries<T>(
       console.warn(
         `[Fast Agent] Retrying inference failure attempt=${attemptNumber}/${FAST_AGENT_INFERENCE_MAX_RETRIES} delayMs=${delayMs} reason=${failure.reason}: ${formatErrorForLog(error)}`,
       );
-      await onRetry?.({
-        failure,
-        attemptNumber,
-        maxAttempts: FAST_AGENT_INFERENCE_MAX_RETRIES,
-        delayMs,
-      });
+      try {
+        await onRetry?.({
+          failure,
+          attemptNumber,
+          maxAttempts: FAST_AGENT_INFERENCE_MAX_RETRIES,
+          delayMs,
+        });
+      } catch (noticeError) {
+        console.warn(
+          `[Fast Agent] Failed to post inference retry notice: ${formatErrorForLog(noticeError)}`,
+        );
+      }
+      await options.prepareRetry?.();
       await waitForFastAgentInferenceRetry(delayMs);
     }
   }
@@ -541,6 +560,7 @@ export async function answerFastAgentQuestion({
     const completedTaskActions = new Set<string>();
     let visibleUpdatePosted = false;
     let closed = false;
+    let nativeToolInvoked = false;
     let retriedTaskStart = false;
 
     const mirrorPendingMessages = async (strict = false) => {
@@ -622,6 +642,7 @@ export async function answerFastAgentQuestion({
     ): Promise<unknown> => {
       const closedError = requireOpen();
       if (closedError) return closedError;
+      nativeToolInvoked = true;
 
       try {
         switch (call.name) {
@@ -837,12 +858,16 @@ export async function answerFastAgentQuestion({
 
     const nativeRuntime = await getFastAgentNativeToolRuntime();
     const imageFiles = getFastAgentImageFiles(images);
+    const serializedTurnPrompt = serializeFastAgentMessages([turnMessage]);
+    const serializedBootstrapPrompt =
+      serializeFastAgentMessages(bootstrapMessages);
     const promptText = await fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,
-      prompt: serializeFastAgentMessages([turnMessage]),
-      bootstrapPrompt: serializeFastAgentMessages(bootstrapMessages),
+      prompt: serializedTurnPrompt,
+      bootstrapPrompt: serializedBootstrapPrompt,
       execute: async (openCodeSession, selectedPrompt) => {
         let unbind: (() => void) | undefined;
+        let promptForAttempt = selectedPrompt;
         try {
           return await runFastAgentInferenceWithRetries(
             () =>
@@ -853,7 +878,7 @@ export async function answerFastAgentQuestion({
                     NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
                   modelRole: FAST_AGENT_MODEL_ROLE,
                   system,
-                  prompt: selectedPrompt,
+                  prompt: promptForAttempt,
                   onProviderRetry: reportProviderRetryEvent,
                   ...(imageFiles.length
                     ? {
@@ -877,6 +902,23 @@ export async function answerFastAgentQuestion({
                 },
               ),
             reportInferenceRetry,
+            {
+              // OpenCode already owns retries while a provider turn remains
+              // active. Roomote retries only a terminal failure that happened
+              // before the model invoked any native tool, so replay cannot
+              // duplicate a visible reply or external side effect.
+              canRetry: (error) =>
+                !nativeToolInvoked &&
+                !isNonTaskOpenCodePromptTimeoutError(error),
+              prepareRetry: () => {
+                // OpenCode persists the user message before inference starts,
+                // and abort does not roll it back. Discard the failed session
+                // and rebuild from visible compatibility history instead of
+                // appending the same turn to a poisoned transcript.
+                openCodeSession.id = undefined;
+                promptForAttempt = serializedBootstrapPrompt;
+              },
+            },
           );
         } finally {
           unbind?.();
@@ -896,6 +938,12 @@ export async function answerFastAgentQuestion({
     console.error(
       `[Fast Agent] Failed to answer question: ${formatErrorForLog(error)}`,
     );
+    if (canonicalConversationId) {
+      // The system-posted closeout below is mirrored to compatibility history,
+      // not to OpenCode's live transcript. Force the next turn to bootstrap so
+      // the model can see the failure the user saw in Slack or Discord.
+      fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
+    }
     if (platformEvent) throw error;
 
     const message = launchedTaskMessage

@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getEnvironments: vi.fn(),
   generateText: vi.fn(),
   classifyInferenceError: vi.fn(),
+  invalidateSession: vi.fn(),
   listIntegrations: vi.fn(),
   callIntegration: vi.fn(),
   sendTaskMessage: vi.fn(),
@@ -49,6 +50,9 @@ vi.mock('../../non-task-provider-usage', () => ({
   },
   classifyNonTaskInferenceError: mocks.classifyInferenceError,
   generateTrackedNonTaskTextInOpenCodeSession: mocks.generateText,
+  isNonTaskOpenCodePromptTimeoutError: (error: unknown) =>
+    error instanceof Error &&
+    error.name === 'NonTaskOpenCodePromptTimeoutError',
   isNonTaskOpenCodeSessionNotFoundError: (error: unknown) =>
     error instanceof Error &&
     error.name === 'NonTaskOpenCodeSessionNotFoundError',
@@ -56,13 +60,14 @@ vi.mock('../../non-task-provider-usage', () => ({
 
 vi.mock('../fast-agent-opencode-session', () => ({
   fastAgentOpenCodeSessionManager: {
+    invalidate: mocks.invalidateSession,
     run: ({
       prompt,
       execute,
     }: {
       prompt: string;
       execute: (
-        session: { id: string },
+        session: { id?: string },
         selectedPrompt: string,
       ) => Promise<unknown>;
     }) => execute({ id: 'opencode-session-1' }, prompt),
@@ -173,6 +178,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         return {
           message: 'The inference provider is rate limiting requests.',
           reason: 'rate_limited',
+          retryable: true,
+        };
+      }
+      if (detail.includes('gateway or proxy')) {
+        return {
+          message: 'The inference provider gateway blocked the request.',
+          reason: 'gateway_blocked',
           retryable: true,
         };
       }
@@ -521,6 +533,91 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).toHaveBeenCalledWith(
       expect.objectContaining({ purpose: 'closeout' }),
     );
+    expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+  });
+
+  it('retries a gateway block from a clean compatibility bootstrap', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.getSession.mockResolvedValue({
+        id: 'conversation-1',
+        compatibilityMessages: [
+          { role: 'user', content: 'Earlier question' },
+          { role: 'assistant', content: 'Earlier answer' },
+        ],
+      });
+      mocks.generateText
+        .mockRejectedValueOnce(
+          new Error('Forbidden: request was blocked by a gateway or proxy.'),
+        )
+        .mockImplementationOnce(async (_params, _session, options) => {
+          await options.onSessionReady('replacement-session');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'The retry recovered.',
+          });
+          return '';
+        });
+      const adapter = callbacks();
+
+      const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
+      await vi.runAllTimersAsync();
+
+      await expect(resultPromise).resolves.toBe('The retry recovered.');
+      expect(mocks.generateText).toHaveBeenCalledTimes(2);
+      expect(mocks.generateText.mock.calls[0]?.[0].prompt).not.toContain(
+        'Earlier answer',
+      );
+      expect(mocks.generateText.mock.calls[1]?.[0].prompt).toContain(
+        'Earlier answer',
+      );
+      expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
+        purpose: 'progress',
+        message:
+          'Fast mode’s request was blocked by the inference provider gateway. Retrying in 1s (attempt 1/3).',
+      });
+      expect(mocks.invalidateSession).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not replay a failed turn after a native tool was invoked', async () => {
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'ack',
+          message: 'I’m checking.',
+        });
+        throw new Error('TypeError: fetch failed');
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(mocks.generateText).toHaveBeenCalledOnce();
+    expect(adapter.postReply).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        purpose: 'progress',
+        message: expect.stringContaining('Retrying in'),
+      }),
+    );
+    expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+  });
+
+  it('leaves the OpenCode prompt deadline as the single retry budget', async () => {
+    const timeout = new Error(
+      'Timed out waiting for OpenCode output after 120000ms.',
+    );
+    timeout.name = 'NonTaskOpenCodePromptTimeoutError';
+    mocks.generateText.mockRejectedValue(timeout);
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.generateText).toHaveBeenCalledOnce();
+    expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
   });
 
   it('retries a transient native prompt failure with a visible notice', async () => {
