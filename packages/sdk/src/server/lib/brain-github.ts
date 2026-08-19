@@ -10,6 +10,7 @@ import {
   repositories,
 } from '@roomote/db/server';
 import { getInstallationOctokit } from '@roomote/github';
+import { brainNamespacePrefix } from '@roomote/types';
 
 /**
  * GitHub issues as Brain memory: the discussion around bugs, features, and
@@ -249,7 +250,7 @@ export function buildGithubIssuePage(input: {
   ].join('\n');
 
   return {
-    slug: `github/${fullName}/issues/${issue.number}`,
+    slug: `${brainNamespacePrefix('github')}${fullName}/issues/${issue.number}`,
     title: `${fullName}#${issue.number}: ${issue.title}`,
     content,
   };

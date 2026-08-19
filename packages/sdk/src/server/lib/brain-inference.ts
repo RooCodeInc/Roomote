@@ -171,6 +171,54 @@ export function mapBrainModelName(
   return resolved.providerId === 'openrouter' ? row.openrouter : row.openai;
 }
 
+export type BrainModelSummary = {
+  /** In the serving provider's own naming, as the gateway will forward it. */
+  synthesisModel: string;
+  synthesisSource: 'default' | 'override';
+  embeddingModel: string;
+  /** Known for the stock embedding models; null for an operator's own. */
+  embeddingDimensions: number | null;
+};
+
+/**
+ * The models the Brain is effectively running, for display. Mirrors
+ * `mapBrainModelName`: the synthesis model is whatever the override or the
+ * translation table produces at forward time, while the embedding model is
+ * whatever the container was told at init (`R_BRAIN_EMBEDDING_MODEL`, else
+ * the stock default), which is why the Settings page presents it as fixed.
+ */
+export function describeBrainModels(
+  providerId: BrainInferenceProviderId,
+): BrainModelSummary {
+  // Truthiness on the trimmed value, exactly like `mapBrainModelName`: a
+  // whitespace-only override falls through to the default in both places.
+  const override = Env.R_BRAIN_MODEL?.trim();
+  const chat = MODEL_TRANSLATIONS.find((entry) => entry.kind === 'chat')!;
+  const stockEmbedding = MODEL_TRANSLATIONS.find(
+    (entry) => entry.kind === 'embedding',
+  )!;
+  const embeddingModel =
+    Env.R_BRAIN_EMBEDDING_MODEL?.trim() ||
+    (providerId === 'openrouter'
+      ? stockEmbedding.openrouter
+      : stockEmbedding.openai);
+  const embeddingDimensions =
+    Env.R_BRAIN_EMBEDDING_DIMENSIONS ??
+    (embeddingModel.includes('text-embedding-3-large')
+      ? 3072
+      : embeddingModel.includes('text-embedding-3-small')
+        ? 1536
+        : null);
+
+  return {
+    synthesisModel:
+      override || (providerId === 'openrouter' ? chat.openrouter : chat.openai),
+    synthesisSource: override ? 'override' : 'default',
+    embeddingModel,
+    embeddingDimensions,
+  };
+}
+
 /**
  * The shared secret the Brain presents to /api/brain/inference. Absent means
  * the route is closed: a deployment without this configured has no Brain

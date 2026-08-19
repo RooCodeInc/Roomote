@@ -6,13 +6,14 @@ import type {
   AnalyticsGranularity,
   PullRequestAnalyticsSummary,
 } from '@/types';
-import { Card, CardContent, ErrorState } from '@/components/system';
-
 import {
   AnalyticsSummaryCard,
   AnalyticsSummaryCardsGrid,
   AnalyticsSummaryCardSkeleton,
-} from './AnalyticsSummaryCards';
+  Card,
+  CardContent,
+  ErrorState,
+} from '@/components/system';
 
 function formatCount(value: number) {
   return new Intl.NumberFormat('en-US').format(value);
