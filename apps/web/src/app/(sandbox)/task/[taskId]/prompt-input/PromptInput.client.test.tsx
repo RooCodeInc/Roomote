@@ -868,6 +868,7 @@ describe('PromptInput', () => {
       connectionError: false,
       reconnect: vi.fn(),
     });
+    useSandboxTaskPhaseMock.mockReturnValue('running');
     useSandboxClientMock.mockReturnValue({
       commands: {
         sendPrompt: { mutate: vi.fn() },
@@ -898,6 +899,10 @@ describe('PromptInput', () => {
       });
     });
     expect(sandboxSendPromptMutateMock).not.toHaveBeenCalled();
+    expect(appendOptimisticAcpEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({ text: 'ship the release' }),
+    );
+    expect(appendOptimisticQueuedMessageMock).not.toHaveBeenCalled();
     expect(toastSuccessMock).toHaveBeenCalledWith('Goal Mode enabled');
   });
 
@@ -994,56 +999,59 @@ describe('PromptInput', () => {
     expect(queryClientSetQueryDataMock).toHaveBeenCalledTimes(1);
   });
 
-  it('steers prompts into the transcript while the task is running', async () => {
-    useSandboxConnectedMock.mockReturnValue(true);
-    useSandboxConnectionStatusMock.mockReturnValue({
-      connected: true,
-      connectionError: false,
-      reconnect: vi.fn(),
-    });
-    useSandboxTaskPhaseMock.mockReturnValue('running');
-    useSandboxClientMock.mockReturnValue({
-      commands: {
-        sendPrompt: { mutate: vi.fn() },
-        touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
-      },
-    });
-
-    render(
-      <PromptInput
-        taskRun={createTaskRun(42, { taskId: 'task-running-send' })}
-        onFileSearchOpen={() => {}}
-        onCommandSearchOpen={() => {}}
-      />,
-    );
-
-    fireEvent.change(screen.getByPlaceholderText(/Message agent/i), {
-      target: { value: 'queued follow-up' },
-    });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-
-    await waitFor(() => {
-      expect(sandboxSendPromptMutateMock).toHaveBeenCalledWith({
-        taskId: 'task-running-send',
-        prompt: 'queued follow-up',
-        images: undefined,
-        source: 'web',
-        clientMessageId: expect.any(String),
-        userImageUrl: undefined,
-        autoSteerWhenQueued: true,
+  it.each(['running', 'waiting_for_user_input'] as const)(
+    'shows prompts as queued until runtime delivery while the task is %s',
+    async (taskPhase) => {
+      useSandboxConnectedMock.mockReturnValue(true);
+      useSandboxConnectionStatusMock.mockReturnValue({
+        connected: true,
+        connectionError: false,
+        reconnect: vi.fn(),
       });
-    });
+      useSandboxTaskPhaseMock.mockReturnValue(taskPhase);
+      useSandboxClientMock.mockReturnValue({
+        commands: {
+          sendPrompt: { mutate: vi.fn() },
+          touchKeepalive: { mutate: vi.fn().mockResolvedValue(undefined) },
+        },
+      });
 
-    expect(appendOptimisticAcpEventMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        eventType: 'roomote_runtime.user_prompt',
-        role: 'user',
-        text: 'queued follow-up',
-      }),
-    );
-    expect(appendOptimisticQueuedMessageMock).not.toHaveBeenCalled();
-    expect(queryClientSetQueryDataMock).toHaveBeenCalledTimes(1);
-  });
+      render(
+        <PromptInput
+          taskRun={createTaskRun(42, { taskId: 'task-running-send' })}
+          onFileSearchOpen={() => {}}
+          onCommandSearchOpen={() => {}}
+        />,
+      );
+
+      fireEvent.change(screen.getByPlaceholderText(/Message agent/i), {
+        target: { value: 'queued follow-up' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+      await waitFor(() => {
+        expect(sandboxSendPromptMutateMock).toHaveBeenCalledWith({
+          taskId: 'task-running-send',
+          prompt: 'queued follow-up',
+          images: undefined,
+          source: 'web',
+          clientMessageId: expect.any(String),
+          userImageUrl: undefined,
+          autoSteerWhenQueued: true,
+        });
+      });
+
+      expect(appendOptimisticQueuedMessageMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: expect.stringMatching(/^local:/),
+          text: 'queued follow-up',
+          optimistic: true,
+        }),
+      );
+      expect(appendOptimisticAcpEventMock).not.toHaveBeenCalled();
+      expect(queryClientSetQueryDataMock).not.toHaveBeenCalled();
+    },
+  );
 
   it('steers the oldest queued message from empty Enter even after the parent turn leaves running state', async () => {
     const steerQueuedMessageMutateMock = vi.fn().mockResolvedValue(undefined);
@@ -1176,7 +1184,7 @@ describe('PromptInput', () => {
     expect(toastErrorMock).toHaveBeenCalledWith('Failed to send message.');
   });
 
-  it('removes the optimistic transcript message and shows a toast when a running send fails', async () => {
+  it('removes the optimistic queued message and shows a toast when a running send fails', async () => {
     useSandboxConnectedMock.mockReturnValue(true);
     useSandboxConnectionStatusMock.mockReturnValue({
       connected: true,
@@ -1208,12 +1216,12 @@ describe('PromptInput', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(removeOptimisticMessageMock).toHaveBeenCalledWith(
+      expect(removeOptimisticQueuedMessageMock).toHaveBeenCalledWith(
         expect.any(String),
       );
     });
 
-    expect(removeOptimisticQueuedMessageMock).not.toHaveBeenCalled();
+    expect(removeOptimisticMessageMock).not.toHaveBeenCalled();
     expect(toastErrorMock).toHaveBeenCalledWith('Failed to send message.');
   });
 });

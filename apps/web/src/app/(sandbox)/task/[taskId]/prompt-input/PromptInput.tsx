@@ -148,6 +148,8 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
     const canSteerQueuedMessages =
       isSteerablePhase(taskPhase) &&
       (taskPhase !== 'waiting_for_prompt' || connected);
+    const shouldOptimisticallyQueuePrompt =
+      taskPhase === 'running' || taskPhase === 'waiting_for_user_input';
     const userImageUrl =
       currentUserInfo?.userImageUrl ?? user?.resource.imageUrl ?? undefined;
     const steerableQueuedMessages = queuedMessages.filter(
@@ -465,10 +467,12 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
             attachments: message.files,
           });
 
-          // Sends steer into an in-flight turn (native injection when the
-          // harness supports it), so the prompt lands in the transcript
-          // rather than sitting in the queue until the turn ends.
-          optimisticLocation = 'transcript';
+          // Active-turn sends may be steered immediately or remain queued.
+          // Keep them in the queue until the runtime confirms delivery.
+          optimisticLocation =
+            goalObjective === null && shouldOptimisticallyQueuePrompt
+              ? 'queue'
+              : 'transcript';
           const { clientMessageId } = startOptimisticPromptSubmission({
             taskId: taskRun.taskId,
             prompt: preparedPrompt.text,
@@ -534,6 +538,7 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
         handleMessageSent,
         taskRun,
         trpcClient,
+        shouldOptimisticallyQueuePrompt,
         rollbackOptimisticPromptSubmission,
         startOptimisticPromptSubmission,
         userImageUrl,
