@@ -11,6 +11,7 @@ import { createRequire } from 'node:module';
 import { z } from 'zod';
 
 const FAST_AGENT_TOOL_BRIDGE_BODY_LIMIT_BYTES = 1_000_000;
+const FAST_AGENT_TOOL_BRIDGE_ERROR = 'Fast tool execution failed.';
 
 export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   cancelTask: 'cancel_task',
@@ -282,9 +283,10 @@ async function startRuntime(): Promise<FastAgentNativeToolRuntime> {
       const result = await executor({ name: parsed.tool, args: parsed.args });
       writeJson(response, 200, { ok: true, result: result ?? null });
     } catch (error) {
+      console.error('[Fast Agent] Native tool bridge request failed.', error);
       writeJson(response, 400, {
         ok: false,
-        error: error instanceof Error ? error.message : String(error),
+        error: FAST_AGENT_TOOL_BRIDGE_ERROR,
       });
     }
   });

@@ -92,6 +92,47 @@ describe('Fast native OpenCode tool bridge', () => {
     }
   });
 
+  it('does not expose unexpected executor errors through the bridge', async () => {
+    const runtime = await getFastAgentNativeToolRuntime();
+    const unbind = bindFastAgentNativeToolExecutor(
+      'opencode-session-sensitive-error',
+      async () => {
+        throw new Error('database password appeared in a downstream stack');
+      },
+    );
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    try {
+      const response = await fetch(runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_URL!, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${runtime.env.ROOMOTE_FAST_TOOL_BRIDGE_TOKEN}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          sessionID: 'opencode-session-sensitive-error',
+          tool: FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall,
+          args: {},
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({
+        ok: false,
+        error: 'Fast tool execution failed.',
+      });
+      expect(consoleError).toHaveBeenCalledWith(
+        '[Fast Agent] Native tool bridge request failed.',
+        expect.any(Error),
+      );
+    } finally {
+      consoleError.mockRestore();
+      unbind();
+    }
+  });
+
   it('rejects unauthenticated and inactive-session calls', async () => {
     const runtime = await getFastAgentNativeToolRuntime();
     const body = JSON.stringify({

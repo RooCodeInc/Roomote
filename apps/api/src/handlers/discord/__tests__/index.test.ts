@@ -57,6 +57,7 @@ const mocks = vi.hoisted(() => ({
   callViaEmojiConfig: vi.fn(),
   appendAccountLinkHelpText: vi.fn(async (message: string) => message),
   startGoal: vi.fn(),
+  acquireFastTurnLock: vi.fn(),
   answerFast: vi.fn(),
   hasFastDefault: vi.fn(),
   hasFastSession: vi.fn(),
@@ -171,6 +172,7 @@ vi.mock('../callback-actions.js', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
+  acquireFastAgentTurnLock: mocks.acquireFastTurnLock,
   answerFastAgentQuestion: mocks.answerFast,
   getTaskUrl: mocks.getTaskUrl,
   hasFastAgentSession: mocks.hasFastSession,
@@ -287,6 +289,9 @@ describe('Discord Gateway event handler', () => {
       launchResult: { id: 17, taskId: 'task-17' },
     });
     mocks.startGoal.mockResolvedValue({ success: true });
+    mocks.acquireFastTurnLock.mockResolvedValue(
+      vi.fn().mockResolvedValue(undefined),
+    );
     mocks.answerFast.mockResolvedValue('A quick answer');
     mocks.hasFastDefault.mockResolvedValue(false);
     mocks.hasFastSession.mockResolvedValue(false);
@@ -765,6 +770,78 @@ describe('Discord Gateway event handler', () => {
     );
     expect(mocks.startNewTask).not.toHaveBeenCalled();
     expect(mocks.queueMessage).not.toHaveBeenCalled();
+  });
+
+  it('serializes complete Fast turns before the next Discord message enters the agent', async () => {
+    mocks.hasFastDefault.mockResolvedValue(true);
+    let grantSecondLock!: (release: () => Promise<void>) => void;
+    const secondLock = new Promise<() => Promise<void>>((resolve) => {
+      grantSecondLock = resolve;
+    });
+    const releaseSecondLock = vi.fn().mockResolvedValue(undefined);
+    const releaseFirstLock = vi.fn(async () => {
+      grantSecondLock(releaseSecondLock);
+    });
+    mocks.acquireFastTurnLock
+      .mockResolvedValueOnce(releaseFirstLock)
+      .mockImplementationOnce(async () => secondLock);
+
+    let finishFirstTurn!: (response: string) => void;
+    const firstTurn = new Promise<string>((resolve) => {
+      finishFirstTurn = resolve;
+    });
+    mocks.answerFast
+      .mockImplementationOnce(async () => firstTurn)
+      .mockResolvedValueOnce('Second answer');
+
+    const firstResponse = postEvent(
+      envelope(message({ id: 'message-concurrent-1', content: 'Launch it' })),
+    );
+    await vi.waitFor(() => expect(mocks.answerFast).toHaveBeenCalledOnce());
+
+    const secondResponse = postEvent(
+      envelope(
+        message({
+          id: 'message-concurrent-2',
+          content: 'Send it another message',
+        }),
+      ),
+    );
+    await vi.waitFor(() =>
+      expect(mocks.acquireFastTurnLock).toHaveBeenCalledTimes(2),
+    );
+    expect(mocks.answerFast).toHaveBeenCalledOnce();
+    expect(mocks.acquireFastTurnLock).toHaveBeenNthCalledWith(1, {
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'dm',
+        conversationId: 'dm-1',
+        replyTarget: { channelId: 'dm-1' },
+      },
+    });
+    expect(mocks.acquireFastTurnLock).toHaveBeenNthCalledWith(2, {
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'dm',
+        conversationId: 'dm-1',
+        replyTarget: { channelId: 'dm-1' },
+      },
+    });
+
+    finishFirstTurn('First answer');
+    expect((await firstResponse).status).toBe(200);
+    expect((await secondResponse).status).toBe(200);
+
+    expect(mocks.answerFast).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ question: 'Launch it' }),
+    );
+    expect(mocks.answerFast).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ question: 'Send it another message' }),
+    );
+    expect(releaseFirstLock).toHaveBeenCalledOnce();
+    expect(releaseSecondLock).toHaveBeenCalledOnce();
   });
 
   it('gives defaulted Discord Fast mode the active task for thread continuation', async () => {

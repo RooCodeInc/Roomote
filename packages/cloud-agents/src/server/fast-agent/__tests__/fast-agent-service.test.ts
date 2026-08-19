@@ -465,6 +465,23 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
+  it('does not claim a retry after a transient native prompt failure', async () => {
+    mocks.generateText.mockRejectedValue(new Error('fetch failed'));
+    const adapter = callbacks();
+
+    await expect(
+      answerFastAgentQuestion({ ...baseParams, adapter }),
+    ).resolves.toBe(
+      'Fast mode could not reach the model. Please try again in a moment.',
+    );
+    expect(mocks.generateText).toHaveBeenCalledOnce();
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message:
+        'Fast mode could not reach the model. Please try again in a moment.',
+    });
+  });
+
   it('rethrows native prompt failures for platform event retry', async () => {
     mocks.generateText.mockRejectedValue(new Error('OpenCode unavailable'));
 

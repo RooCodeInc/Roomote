@@ -722,7 +722,7 @@ export async function answerFastAgentQuestion({
     const message = launchedTaskMessage
       ? 'I posted the task kickoff, but the task could not be queued. Please retry.'
       : isRetryableFastAgentInferenceError(error)
-        ? 'Fast mode could not reach the model after retrying. Please try again in a moment.'
+        ? 'Fast mode could not reach the model. Please try again in a moment.'
         : 'I hit an error while handling that request. Please try again in a moment.';
     try {
       await adapter.postReply({ purpose: 'closeout', message });
