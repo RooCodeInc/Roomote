@@ -1102,6 +1102,22 @@ export function classifyNonTaskInferenceError(
     };
   }
 
+  // Remaining structured 4xx responses (400, 413, 422, …) are client errors:
+  // resending the same request cannot recover them. 408 stays retryable as a
+  // timeout; 401/402/403/404/429 were classified above.
+  if (
+    statusCode !== undefined &&
+    statusCode >= 400 &&
+    statusCode < 500 &&
+    statusCode !== 408
+  ) {
+    return {
+      message: 'The inference provider rejected the request.',
+      reason: 'provider_error',
+      retryable: false,
+    };
+  }
+
   return {
     message: 'The inference provider rejected the validation request.',
     reason: 'provider_error',

@@ -1328,6 +1328,27 @@ describe('resolveOpenCodeSmallModel', () => {
       reason: 'rate_limited',
       retryable: true,
     },
+    // Other structured 4xx responses are client errors that resending the
+    // same request cannot recover, so retry loops must not absorb them.
+    {
+      providerMessage: 'prompt is too long',
+      statusCode: 400,
+      reason: 'provider_error',
+      retryable: false,
+    },
+    {
+      providerMessage: 'unprocessable entity',
+      statusCode: 422,
+      reason: 'provider_error',
+      retryable: false,
+    },
+    // Server-side failures stay retryable.
+    {
+      providerMessage: 'overloaded',
+      statusCode: 529,
+      reason: 'provider_error',
+      retryable: true,
+    },
   ])(
     'classifies a structured status-$statusCode provider error as $reason',
     async ({ providerMessage, statusCode, reason, retryable }) => {
