@@ -151,17 +151,17 @@ validate_positive_integer "$image_retention_releases" "--image-retention-release
 
 state_dir="$(customer_state_dir "$customer")"
 tfvars_file="$(terraform_tfvars_file "$customer")"
+configured_preview_subdomain_suffix="$(read_env_value "$env_file" PREVIEW_PROXY_SUBDOMAIN_SUFFIX)"
 
 if [ -z "$preview_domain" ] && [ -f "$tfvars_file" ]; then
   preview_domain="$(awk -F= '/^preview_domain = / { gsub(/[ \t\"]/, "", $2); print $2; exit }' "$tfvars_file")"
-  if [ "$preview_domain" = "$domain" ]; then
-    preview_subdomain_suffix='preview'
-  fi
 fi
 
 if [ -z "$preview_domain" ]; then
   preview_domain="$domain"
-  preview_subdomain_suffix='preview'
+fi
+if [ "$preview_domain" = "$domain" ]; then
+  preview_subdomain_suffix="${configured_preview_subdomain_suffix:-preview}"
 fi
 validate_domain "$preview_domain"
 

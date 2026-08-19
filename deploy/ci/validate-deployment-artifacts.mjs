@@ -55,11 +55,16 @@ assert(
 );
 assert(
   deployer.includes('preview_domain="$domain"') &&
-    deployer.includes("preview_subdomain_suffix='preview'") &&
+    deployer.includes(
+      'configured_preview_subdomain_suffix="$(read_env_value "$env_file" PREVIEW_PROXY_SUBDOMAIN_SUFFIX)"',
+    ) &&
+    deployer.includes(
+      'preview_subdomain_suffix="${configured_preview_subdomain_suffix:-preview}"',
+    ) &&
     deployer.includes(
       'set_env_value "$tmp_env" PREVIEW_PROXY_SUBDOMAIN_SUFFIX "$preview_subdomain_suffix"',
     ),
-  'DigitalOcean deployer: new installs must default to flat preview hostnames',
+  'DigitalOcean deployer: flat previews must preserve custom suffixes and default to preview',
 );
 const digitalOceanTerraform = read('deploy/providers/digitalocean/main.tf');
 assert(
