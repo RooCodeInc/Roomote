@@ -69,6 +69,38 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain('automatically performs one Brain query');
   });
 
+  it('drives actionable messages through evidence and execution', () => {
+    const prompt = buildFastAgentSystemPrompt({ availableEnvironments: [] });
+
+    expect(prompt).toContain(
+      'including declarative feedback. Do not require explicit words',
+    );
+    expect(prompt).toContain(
+      "inspect the relevant sources, verify the user's premise, diagnose what is happening",
+    );
+    expect(prompt).toContain(
+      'Do not stop at acknowledgement, agreement, speculation, restatement, or a plan',
+    );
+    expect(prompt).toContain(
+      'Use deployment integrations as relevant sources of truth',
+    );
+    expect(prompt).toContain(
+      'Ask for clarification only when ambiguity blocks meaningful investigation',
+    );
+    expect(prompt).toContain(
+      'regardless of whether the message is phrased as a question, request, or declarative feedback',
+    );
+    expect(prompt).toContain(
+      'A message that requires repository or workspace inspection, execution, change, or validation should be delegated',
+    );
+    expect(prompt).not.toContain(
+      'A question that requires repository or workspace inspection',
+    );
+    expect(prompt).not.toContain(
+      'Do not launch a task merely to answer a question or make a plan',
+    );
+  });
+
   it('adapts native chat tool guidance for Discord', () => {
     const prompt = buildFastAgentSystemPrompt({
       availableEnvironments: [],
