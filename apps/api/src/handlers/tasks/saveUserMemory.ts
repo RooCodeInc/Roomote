@@ -25,7 +25,7 @@ function normalizeMemoryKey(key: string): string {
     .replace(/[\s_-]+/g, ' ');
 }
 
-export function buildUserMemoryPage(input: {
+function buildUserMemoryPage(input: {
   userId: string;
   key: string;
   value: string;

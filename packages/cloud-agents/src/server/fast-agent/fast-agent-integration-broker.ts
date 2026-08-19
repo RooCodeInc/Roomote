@@ -64,7 +64,7 @@ type IntegrationToolCacheEntry = {
   tools: Promise<McpToolDefinition[]>;
 };
 
-export const FAST_AGENT_REMEMBER_USER_FACT_TOOL: McpToolDefinition = {
+const FAST_AGENT_REMEMBER_USER_FACT_TOOL: McpToolDefinition = {
   name: 'remember_user_fact',
   description:
     'Persist an explicit durable fact or preference about the current sender in the shared Brain. Use this when the user asks to remember something. Choose a short stable semantic key such as "favorite number"; calling the tool again with the same key updates the existing memory instead of creating a duplicate. Never store secrets, credentials, or inferred sensitive traits, and never claim persistence unless this call succeeds.',
