@@ -20,6 +20,7 @@ import {
 import {
   generateTrackedNonTaskTextInOpenCodeSession,
   NON_TASK_INFERENCE_SURFACES,
+  type NonTaskPromptFile,
 } from '../non-task-provider-usage';
 import { fastAgentOpenCodeSessionManager } from './fast-agent-opencode-session';
 import {
@@ -130,6 +131,14 @@ function buildUserTextMessage(text: string): ModelMessage {
 
 function buildAssistantTextMessage(text: string): ModelMessage {
   return { role: 'assistant', content: [{ type: 'text', text }] };
+}
+
+function getFastAgentImageFiles(images: string[]): NonTaskPromptFile[] {
+  return images.flatMap((image) => {
+    const url = image.trim();
+    const mime = /^data:(image\/[^;,]+);base64,/i.exec(url)?.[1];
+    return mime ? [{ mime, url }] : [];
+  });
 }
 
 function extractModelMessageText(message: ModelMessage): string[] {
@@ -313,6 +322,7 @@ function toolFailure(error: unknown): { success: false; error: string } {
 
 export async function answerFastAgentQuestion({
   question,
+  images = [],
   currentMessageAgentContext,
   threadContext = [],
   userId,
@@ -326,6 +336,7 @@ export async function answerFastAgentQuestion({
   turnSource = 'human',
 }: {
   question: string;
+  images?: string[];
   currentMessageAgentContext?: string;
   threadContext?: FastAgentThreadMessage[];
   userId: string;
@@ -670,6 +681,7 @@ export async function answerFastAgentQuestion({
     };
 
     const nativeRuntime = await getFastAgentNativeToolRuntime();
+    const imageFiles = getFastAgentImageFiles(images);
     const promptText = await fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,
       prompt: serializeFastAgentMessages([turnMessage]),
@@ -684,6 +696,12 @@ export async function answerFastAgentQuestion({
               modelRole: FAST_AGENT_MODEL_ROLE,
               system,
               prompt: selectedPrompt,
+              ...(imageFiles.length
+                ? {
+                    files: imageFiles,
+                    requiredInputModality: 'image' as const,
+                  }
+                : {}),
             },
             openCodeSession,
             {
