@@ -1638,7 +1638,12 @@ describe('enqueueTask PR linkage', () => {
         workflow: 'pr_review',
         surface: 'github',
         trigger: 'webhook',
-        prLinkage: makeLinkage(firstSha),
+        prLinkage: {
+          ...makeLinkage(firstSha),
+          githubReactionId: 101,
+          githubCheckRunId: 202,
+          githubReviewCommentId: 303,
+        },
       },
       { enqueue: false, skipEarlyTitleGeneration: true },
     );
@@ -1701,6 +1706,9 @@ describe('enqueueTask PR linkage', () => {
     expect(persistedTask?.state).toBe('active');
     expect(persistedRuns).toHaveLength(2);
     expect(persistedLinkage?.prSha).toBe(secondSha);
+    expect(persistedLinkage?.githubReactionId).toBe(101);
+    expect(persistedLinkage?.githubCheckRunId).toBe(202);
+    expect(persistedLinkage?.githubReviewCommentId).toBe(303);
   });
 
   it('serializes concurrent first reviews into one durable PR task', async () => {

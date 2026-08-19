@@ -1689,15 +1689,23 @@ async function enqueueFreshLaunch(
           prSha: input.prLinkage.prSha ?? null,
           prBaseRef: input.prLinkage.prBaseRef ?? null,
           prBaseSha: input.prLinkage.prBaseSha ?? null,
-          githubReactionId: input.prLinkage.githubReactionId ?? null,
-          githubCheckRunId: input.prLinkage.githubCheckRunId ?? null,
-          githubReviewCommentId: input.prLinkage.githubReviewCommentId ?? null,
+        };
+        const githubArtifactIds = {
+          ...(input.prLinkage.githubReactionId !== undefined
+            ? { githubReactionId: input.prLinkage.githubReactionId }
+            : {}),
+          ...(input.prLinkage.githubCheckRunId !== undefined
+            ? { githubCheckRunId: input.prLinkage.githubCheckRunId }
+            : {}),
+          ...(input.prLinkage.githubReviewCommentId !== undefined
+            ? { githubReviewCommentId: input.prLinkage.githubReviewCommentId }
+            : {}),
         };
 
         if (existingTask) {
           const [updatedLinkage] = await tx
             .update(taskPullRequests)
-            .set(prLinkage)
+            .set({ ...prLinkage, ...githubArtifactIds })
             .where(
               and(
                 eq(taskPullRequests.taskId, taskId),
@@ -1717,7 +1725,14 @@ async function enqueueFreshLaunch(
             );
           }
         } else {
-          await tx.insert(taskPullRequests).values({ taskId, ...prLinkage });
+          await tx.insert(taskPullRequests).values({
+            taskId,
+            ...prLinkage,
+            githubReactionId: input.prLinkage.githubReactionId ?? null,
+            githubCheckRunId: input.prLinkage.githubCheckRunId ?? null,
+            githubReviewCommentId:
+              input.prLinkage.githubReviewCommentId ?? null,
+          });
         }
 
         await projectPendingPrReviewEventsForAssociation(tx, {
