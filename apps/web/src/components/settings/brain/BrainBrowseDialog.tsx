@@ -6,6 +6,8 @@ import { BRAIN_NAMESPACES } from '@roomote/types';
 
 import {
   Badge,
+  Button,
+  ChevronLeftIcon,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -271,7 +273,17 @@ export function BrainBrowseDialog({
             />
           ) : (
             <div className="grid h-[420px] grid-cols-1 gap-3 sm:grid-cols-[280px_1fr]">
-              <div className="flex min-h-0 flex-col">
+              {/*
+               * One column below `sm`: the list until a page is chosen, then
+               * the preview with a way back. Both panes side by side from
+               * `sm` up.
+               */}
+              <div
+                className={cn(
+                  'flex min-h-0 flex-col',
+                  selected !== null && 'hidden sm:flex',
+                )}
+              >
                 <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto scroll-thin pr-1">
                   {filtered.slice(0, RENDERED_PAGE_LIMIT).map((page) => (
                     <PageListRow
@@ -288,9 +300,28 @@ export function BrainBrowseDialog({
                     : `${formatNumber(filtered.length)} pages, newest first`}
                 </p>
               </div>
-              <div className="hidden min-h-0 rounded-lg border sm:block">
+              <div
+                className={cn(
+                  'flex min-h-0 flex-col rounded-lg border',
+                  selected === null && 'hidden sm:flex',
+                )}
+              >
                 {selected ? (
-                  <PagePreview slug={selected} />
+                  <>
+                    <div className="border-b p-2 sm:hidden">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSelectedSlug(null)}
+                      >
+                        <ChevronLeftIcon />
+                        Back to pages
+                      </Button>
+                    </div>
+                    <div className="min-h-0 flex-1">
+                      <PagePreview slug={selected} />
+                    </div>
+                  </>
                 ) : (
                   <EmptyState
                     title="Select a page"
