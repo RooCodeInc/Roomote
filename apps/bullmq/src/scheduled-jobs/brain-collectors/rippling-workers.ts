@@ -31,7 +31,7 @@ import {
   buildPersonIdentityLookup,
   loadPersonIdentityRecords,
 } from './person-identities';
-import { asString, parseDate, slugifySegment } from './shared';
+import { asString, parseDate } from './shared';
 
 /**
  * Rippling: authoritative employee directory

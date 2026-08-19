@@ -12,11 +12,7 @@ import {
 } from '@roomote/db/server';
 import { createHash } from 'node:crypto';
 
-import type {
-  BrainCollector,
-  CollectorPage,
-  CollectorResult,
-} from './contracts';
+import type { BrainCollector, CollectorPage } from './contracts';
 import {
   brainSafeIdentityValue,
   LEGACY_SETUP_BOOTSTRAP_USER_ID,

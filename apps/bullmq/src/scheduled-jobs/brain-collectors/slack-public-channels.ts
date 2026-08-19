@@ -3,7 +3,6 @@ import {
   eq,
   getBrainSyncState,
   slackInstallations,
-  slackUserMappings,
 } from '@roomote/db/server';
 import { createSlackWebClient } from '@roomote/slack';
 

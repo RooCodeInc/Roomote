@@ -6,7 +6,6 @@ import {
   inArray,
   slackDirectoryUsers,
   slackInstallations,
-  slackUserMappings,
 } from '@roomote/db/server';
 import { createSlackWebClient } from '@roomote/slack';
 import { createHash } from 'node:crypto';
@@ -14,7 +13,6 @@ import { createHash } from 'node:crypto';
 import type {
   BrainCollector,
   CollectorPage,
-  CollectorResult,
   CollectorStateUpdate,
 } from './contracts';
 import {
