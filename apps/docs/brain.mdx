@@ -31,7 +31,10 @@ Roomote fills the Brain from what it can already see:
 - **people identities**, projected from Roomote accounts, linked provider
   handles, and the human members in connected Slack workspace directories;
   Slack display names, real names, and job titles help agents connect people
-  across sources even when they do not have Roomote accounts
+  across sources even when they do not have Roomote accounts. When the Notion
+  integration can list workspace users, verified Notion email addresses link
+  those identities to matching Roomote members; users without a visible,
+  verified email remain separate identities rather than being matched by name
 
 Turning the Brain on also backfills history rather than starting from the
 moment you enabled it. Completed tasks are enqueued immediately, and each
@@ -43,6 +46,12 @@ public channel is what designates that channel as a source, so the corpus stays
 inside what your team has already made visible company-wide. Slack directory
 cards contain names, handles, and job titles, but never copy profile email,
 status, timezone, or avatar fields into the Brain.
+
+Notion only returns pages explicitly shared with its integration. Workspace
+guests and restricted users may omit email addresses, and some integration
+configurations cannot list users at all. Roomote still keeps stable Notion user
+references in page snapshots in those cases, but it does not guess a match from
+the display name.
 
 ## Turning it on
 

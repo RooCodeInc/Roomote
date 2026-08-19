@@ -1282,6 +1282,43 @@ function personIdentityAliases(record: PersonIdentityRecord): string[] {
   return [...aliases.values()].sort((a, b) => a.localeCompare(b));
 }
 
+export function linkNotionUsersToPersonIdentities(
+  records: PersonIdentityRecord[],
+  notionUsers: NotionUserIdentity[],
+): PersonIdentityRecord[] {
+  const linked = records.map((record) => ({
+    ...record,
+    providers: [...record.providers],
+  }));
+  const byEmail = new Map<string, PersonIdentityRecord>();
+
+  for (const record of [...linked].sort((a, b) =>
+    a.userId.localeCompare(b.userId),
+  )) {
+    if (!record.deletedAt) {
+      const email = normalizeIdentityAlias(record.email);
+      if (email && !byEmail.has(email)) {
+        byEmail.set(email, record);
+      }
+    }
+  }
+
+  for (const notionUser of notionUsers) {
+    if (!notionUser.email) continue;
+    const record = byEmail.get(normalizeIdentityAlias(notionUser.email));
+    if (!record) continue;
+
+    record.providers.push({
+      provider: 'Notion',
+      identifier: notionUser.id,
+      display: notionUser.name,
+      updatedAt: record.updatedAt,
+    });
+  }
+
+  return linked;
+}
+
 export function buildPersonIdentityPage(
   record: PersonIdentityRecord,
 ): CollectorPage {
@@ -1491,6 +1528,20 @@ async function loadPersonIdentityRecords(): Promise<PersonIdentityRecord[]> {
   }
 
   return [...byUserId.values()];
+}
+
+async function loadPersonIdentityRecordsWithNotion(): Promise<
+  PersonIdentityRecord[]
+> {
+  const records = await loadPersonIdentityRecords();
+  const notionConfig = await findNotionConnectionConfig();
+
+  return notionConfig
+    ? linkNotionUsersToPersonIdentities(
+        records,
+        await loadNotionUserDirectory(notionConfig),
+      )
+    : records;
 }
 
 const SLACK_DIRECTORY_COLLECTOR_ID =
@@ -2196,7 +2247,7 @@ const personIdentitiesCollector: BrainCollector = {
   async collect({ now, limit }) {
     const state = await getBrainSyncState(db, PERSON_IDENTITIES_STATE_ID);
     const batch = selectPersonIdentityBatch({
-      records: await loadPersonIdentityRecords(),
+      records: await loadPersonIdentityRecordsWithNotion(),
       state: state
         ? {
             watermark: state.watermark,
@@ -2854,7 +2905,11 @@ const ripplingWorkersCollector: BrainCollector = {
 
 const NOTION_PAGES_COLLECTOR_ID = 'notion-pages';
 const NOTION_INCREMENTAL_STATE_ID = `${NOTION_PAGES_COLLECTOR_ID}:incremental`;
+const NOTION_USERS_COLLECTOR_ID = 'notion-users';
 const NOTION_SEARCH_PAGE_SIZE = 20;
+const NOTION_USERS_PAGE_SIZE = 100;
+const NOTION_USERS_REFRESH_MS = 24 * 60 * 60 * 1000;
+const NOTION_USERS_CACHE_MS = 5 * 60 * 1000;
 const NOTION_FULL_SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const NOTION_REQUEST_INTERVAL_MS = process.env.NODE_ENV === 'test' ? 0 : 350;
 const NOTION_MAX_SEARCH_REQUESTS_PER_PASS = 10;
@@ -2910,8 +2965,202 @@ export type NotionSearchPage = {
   last_edited_time?: string;
   in_trash?: boolean;
   url?: string;
+  created_by?: unknown;
+  last_edited_by?: unknown;
   properties?: Record<string, unknown>;
 };
+
+export type NotionUserIdentity = {
+  id: string;
+  name: string;
+  email: string | null;
+};
+
+type NotionUserReference = {
+  slug: string;
+  title: string;
+  canonical: PersonIdentityReference | null;
+};
+
+type NotionUsersResponse = {
+  results?: unknown[];
+  has_more?: boolean;
+  next_cursor?: string | null;
+};
+
+let notionUsersCache:
+  | {
+      encryptedToken: string;
+      loadedAt: number;
+      users: NotionUserIdentity[];
+    }
+  | undefined;
+
+export function parseNotionUser(value: unknown): NotionUserIdentity | null {
+  const record = asObject(value);
+  const id = record ? asString(record.id) : null;
+  if (!record || !id || record.object !== 'user' || record.type !== 'person') {
+    return null;
+  }
+
+  const person = asObject(record.person);
+  const emailVerified =
+    record.email_verified === true || person?.email_verified === true;
+  const email = emailVerified ? asString(person?.email) : null;
+
+  return {
+    id,
+    name: brainSafeIdentityValue(asString(record.name) ?? '') || 'Notion user',
+    email: email ? normalizeIdentityAlias(email) : null,
+  };
+}
+
+async function loadNotionUserDirectory(
+  config: McpConnectionNotionConfig,
+): Promise<NotionUserIdentity[]> {
+  const now = Date.now();
+  if (
+    notionUsersCache?.encryptedToken === config.encryptedToken &&
+    now - notionUsersCache.loadedAt < NOTION_USERS_CACHE_MS
+  ) {
+    return notionUsersCache.users;
+  }
+
+  const users: NotionUserIdentity[] = [];
+  let cursor: string | null = null;
+
+  try {
+    do {
+      const response: NotionUsersResponse =
+        await notionCollectorRequest<NotionUsersResponse>({
+          config,
+          path: 'users',
+          query: {
+            page_size: NOTION_USERS_PAGE_SIZE,
+            start_cursor: cursor ?? undefined,
+          },
+        });
+      users.push(
+        ...(response.results ?? [])
+          .map(parseNotionUser)
+          .filter(
+            (user: NotionUserIdentity | null): user is NotionUserIdentity =>
+              Boolean(user),
+          ),
+      );
+      cursor =
+        response.has_more && asString(response.next_cursor)
+          ? response.next_cursor!.trim()
+          : null;
+    } while (cursor);
+  } catch (error) {
+    if (error instanceof NotionApiError && error.status === 403) {
+      notionUsersCache = {
+        encryptedToken: config.encryptedToken,
+        loadedAt: now,
+        users: [],
+      };
+      return [];
+    }
+    if (notionUsersCache?.encryptedToken === config.encryptedToken) {
+      return notionUsersCache.users;
+    }
+    throw error;
+  }
+
+  const deduplicated = [
+    ...new Map(users.map((user) => [user.id, user])).values(),
+  ].sort((a, b) => a.id.localeCompare(b.id));
+  notionUsersCache = {
+    encryptedToken: config.encryptedToken,
+    loadedAt: now,
+    users: deduplicated,
+  };
+  return deduplicated;
+}
+
+function notionUserSlug(userId: string): string {
+  const digest = createHash('sha256')
+    .update(`notion:${userId}`)
+    .digest('hex')
+    .slice(0, 16);
+  return `people/notion-user-${digest}`;
+}
+
+function notionQualifiedUserId(userId: string): string {
+  return `notion/user/${userId.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
+}
+
+function canonicalIdentityByEmail(
+  records: PersonIdentityRecord[],
+): Map<string, PersonIdentityReference> {
+  const byEmail = new Map<string, PersonIdentityReference>();
+  for (const record of [...records].sort((a, b) =>
+    a.userId.localeCompare(b.userId),
+  )) {
+    if (record.deletedAt) continue;
+    const email = normalizeIdentityAlias(record.email);
+    if (email && !byEmail.has(email)) {
+      byEmail.set(email, {
+        slug: personIdentitySlug(record.userId),
+        title: personIdentityDisplayName(record),
+        effectiveDate: record.createdAt,
+      });
+    }
+  }
+  return byEmail;
+}
+
+export function buildNotionUserReferences(
+  users: NotionUserIdentity[],
+  identities: PersonIdentityRecord[],
+): Map<string, NotionUserReference> {
+  const byEmail = canonicalIdentityByEmail(identities);
+  return new Map(
+    users.map((user) => {
+      const canonical = user.email
+        ? (byEmail.get(normalizeIdentityAlias(user.email)) ?? null)
+        : null;
+      return [
+        user.id,
+        {
+          slug: canonical?.slug ?? notionUserSlug(user.id),
+          title: canonical?.title ?? user.name,
+          canonical,
+        },
+      ];
+    }),
+  );
+}
+
+export function buildNotionUserPage(
+  user: NotionUserIdentity,
+  reference: NotionUserReference,
+): CollectorPage {
+  const providerId = notionQualifiedUserId(user.id);
+  const canonical = reference.canonical;
+  return {
+    slug: notionUserSlug(user.id),
+    title: user.name,
+    content: [
+      '---',
+      `type: ${canonical ? 'person-alias' : 'person'}`,
+      `notion_user_id: ${JSON.stringify(user.id)}`,
+      `aliases: ${JSON.stringify(canonical ? [] : [user.id, providerId])}`,
+      'status: active',
+      'provenance: roomote-notion-users',
+      ...(canonical ? [`canonical: ${JSON.stringify(canonical.slug)}`] : []),
+      '---',
+      '',
+      `# ${user.name}`,
+      '',
+      ...(canonical
+        ? [`Notion identity for [${canonical.title}](${canonical.slug}).`]
+        : ['Notion workspace user.']),
+      '',
+    ].join('\n'),
+  };
+}
 
 type NotionSearchResponse = {
   results?: unknown[];
@@ -2972,12 +3221,124 @@ function notionPageTitle(page: NotionSearchPage): string {
   return 'Untitled Notion page';
 }
 
+type NotionPageIdentityContext = {
+  users: ReadonlyMap<string, NotionUserReference>;
+  identitiesByEmail: ReadonlyMap<string, PersonIdentityReference>;
+};
+
+function notionUserId(value: unknown): string | null {
+  const record = asObject(value);
+  return record ? asString(record.id) : null;
+}
+
+function notionRichTextUsers(value: unknown): unknown[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const mention = asObject(asObject(entry)?.mention);
+    return mention?.type === 'user' && mention.user ? [mention.user] : [];
+  });
+}
+
+function uniqueSorted(values: string[]): string[] {
+  return [...new Set(values)].sort((a, b) => a.localeCompare(b));
+}
+
+function resolveNotionUserReference(
+  value: unknown,
+  context: NotionPageIdentityContext,
+): string | null {
+  const id = notionUserId(value);
+  if (!id) return null;
+
+  const listed = context.users.get(id);
+  if (listed) return listed.slug;
+
+  const inline = parseNotionUser(value);
+  const canonical = inline?.email
+    ? context.identitiesByEmail.get(normalizeIdentityAlias(inline.email))
+    : null;
+  return canonical?.slug ?? notionQualifiedUserId(id);
+}
+
+function notionPageEntityReferences(
+  page: NotionSearchPage,
+  context: NotionPageIdentityContext,
+): {
+  createdBy: string | null;
+  lastEditedBy: string | null;
+  people: string[];
+  mentions: string[];
+  relations: string[];
+} {
+  const people: string[] = [];
+  const mentions: string[] = [];
+  const relations: string[] = [];
+
+  for (const property of Object.values(page.properties ?? {})) {
+    const record = asObject(property);
+    if (!record) continue;
+
+    if (record.type === 'people' && Array.isArray(record.people)) {
+      for (const user of record.people) {
+        const reference = resolveNotionUserReference(user, context);
+        if (reference) people.push(reference);
+      }
+    }
+
+    if (record.type === 'title' || record.type === 'rich_text') {
+      const richText =
+        record.type === 'title' ? record.title : record.rich_text;
+      for (const user of notionRichTextUsers(richText)) {
+        const reference = resolveNotionUserReference(user, context);
+        if (reference) mentions.push(reference);
+      }
+    }
+
+    if (record.type === 'relation' && Array.isArray(record.relation)) {
+      for (const relation of record.relation) {
+        const id = notionUserId(relation);
+        const slug = id ? notionPageSlug(id) : null;
+        if (slug) relations.push(slug);
+      }
+    }
+  }
+
+  return {
+    createdBy: resolveNotionUserReference(page.created_by, context),
+    lastEditedBy: resolveNotionUserReference(page.last_edited_by, context),
+    people: uniqueSorted(people),
+    mentions: uniqueSorted(mentions),
+    relations: uniqueSorted(relations),
+  };
+}
+
+function notionPageHasUserReferences(page: NotionSearchPage): boolean {
+  if (notionUserId(page.created_by) || notionUserId(page.last_edited_by)) {
+    return true;
+  }
+  return Object.values(page.properties ?? {}).some((property) => {
+    const record = asObject(property);
+    return Boolean(
+      record &&
+      ((record.type === 'people' && Array.isArray(record.people)) ||
+        ((record.type === 'title' || record.type === 'rich_text') &&
+          notionRichTextUsers(
+            record.type === 'title' ? record.title : record.rich_text,
+          ).length > 0)),
+    );
+  });
+}
+
 export function buildNotionPage(
   page: NotionSearchPage,
   markdown: NotionMarkdownResponse,
   status: 'active' | 'deleted' | 'unavailable' = page.in_trash
     ? 'deleted'
     : 'active',
+  identityContext: NotionPageIdentityContext = {
+    users: new Map(),
+    identitiesByEmail: new Map(),
+  },
 ): CollectorPage | null {
   const pageId = asString(page.id);
   if (!pageId) {
@@ -2993,6 +3354,7 @@ export function buildNotionPage(
   const updatedAt = parseDate(page.last_edited_time) ?? createdAt;
   const sourceUrl = asString(page.url);
   const body = asString(markdown.markdown);
+  const references = notionPageEntityReferences(page, identityContext);
 
   return {
     slug,
@@ -3007,6 +3369,21 @@ export function buildNotionPage(
       ...(createdAt ? [`created_at: ${createdAt.toISOString()}`] : []),
       ...(updatedAt ? [`last_edited_at: ${updatedAt.toISOString()}`] : []),
       ...(sourceUrl ? [`source_url: ${JSON.stringify(sourceUrl)}`] : []),
+      ...(references.createdBy
+        ? [`created_by: ${JSON.stringify(references.createdBy)}`]
+        : []),
+      ...(references.lastEditedBy
+        ? [`last_edited_by: ${JSON.stringify(references.lastEditedBy)}`]
+        : []),
+      ...(references.people.length > 0
+        ? [`people: ${JSON.stringify(references.people)}`]
+        : []),
+      ...(references.mentions.length > 0
+        ? [`mentions: ${JSON.stringify(references.mentions)}`]
+        : []),
+      ...(references.relations.length > 0
+        ? [`relations: ${JSON.stringify(references.relations)}`]
+        : []),
       '---',
       '',
       `# ${title}`,
@@ -3082,6 +3459,20 @@ async function searchNotionPages(input: {
   };
 }
 
+async function loadNotionPageIdentityContext(
+  config: McpConnectionNotionConfig,
+): Promise<NotionPageIdentityContext> {
+  const users = await loadNotionUserDirectory(config);
+  if (users.length === 0) {
+    return { users: new Map(), identitiesByEmail: new Map() };
+  }
+  const identities = await loadPersonIdentityRecords();
+  return {
+    users: buildNotionUserReferences(users, identities),
+    identitiesByEmail: canonicalIdentityByEmail(identities),
+  };
+}
+
 export function buildNotionSearchBody(
   cursor: string | null,
   pageSize: number,
@@ -3097,10 +3488,11 @@ export function buildNotionSearchBody(
 async function fetchNotionPage(
   config: McpConnectionNotionConfig,
   page: NotionSearchPage,
+  identityContext: NotionPageIdentityContext,
   unavailableOnNotFound = true,
 ): Promise<CollectorPage | null> {
   if (page.in_trash) {
-    return buildNotionPage(page, {});
+    return buildNotionPage(page, {}, undefined, identityContext);
   }
 
   try {
@@ -3108,14 +3500,14 @@ async function fetchNotionPage(
       config,
       path: `pages/${encodeURIComponent(page.id)}/markdown`,
     });
-    return buildNotionPage(page, markdown);
+    return buildNotionPage(page, markdown, undefined, identityContext);
   } catch (error) {
     if (
       unavailableOnNotFound &&
       error instanceof NotionApiError &&
       error.status === 404
     ) {
-      return buildNotionPage(page, {}, 'unavailable');
+      return buildNotionPage(page, {}, 'unavailable', identityContext);
     }
     throw error;
   }
@@ -3223,6 +3615,7 @@ export async function collectNotionReconciliation(input: {
   const pages: CollectorPage[] = [];
   const itemUpdates: CollectorItemUpdate[] = [];
   const itemIdsToDelete: string[] = [];
+  let identityContext: NotionPageIdentityContext | null = null;
 
   for (const item of batch) {
     try {
@@ -3235,7 +3628,15 @@ export async function collectNotionReconciliation(input: {
           `Notion returned an invalid page object for ${item.itemId}`,
         );
       }
-      const mapped = await fetchNotionPage(input.config, page, false);
+      if (!identityContext && notionPageHasUserReferences(page)) {
+        identityContext = await loadNotionPageIdentityContext(input.config);
+      }
+      const mapped = await fetchNotionPage(
+        input.config,
+        page,
+        identityContext ?? { users: new Map(), identitiesByEmail: new Map() },
+        false,
+      );
       if (mapped) {
         pages.push(mapped);
         itemUpdates.push(notionItemUpdate(page, mapped.slug, scanStartedAt));
@@ -3385,6 +3786,7 @@ async function collectNotionPages(input: {
   const itemUpdates: CollectorItemUpdate[] = [];
   let searchRequests = 0;
   let complete = false;
+  let identityContext: NotionPageIdentityContext | null = null;
 
   while (
     pages.length < input.limit &&
@@ -3418,7 +3820,14 @@ async function collectNotionPages(input: {
       });
 
     for (const page of candidates) {
-      const mapped = await fetchNotionPage(input.config, page);
+      if (!identityContext && notionPageHasUserReferences(page)) {
+        identityContext = await loadNotionPageIdentityContext(input.config);
+      }
+      const mapped = await fetchNotionPage(
+        input.config,
+        page,
+        identityContext ?? { users: new Map(), identitiesByEmail: new Map() },
+      );
       if (mapped) {
         pages.push(mapped);
         if (mode === 'incremental') {
@@ -3482,9 +3891,17 @@ async function backfillNotionPagesStep(
   const pages: CollectorPage[] = [];
   const itemUpdates: CollectorItemUpdate[] = [];
   const observedAt = new Date();
+  let identityContext: NotionPageIdentityContext | null = null;
 
   for (const page of batch.pages) {
-    const mapped = await fetchNotionPage(config, page);
+    if (!identityContext && notionPageHasUserReferences(page)) {
+      identityContext = await loadNotionPageIdentityContext(config);
+    }
+    const mapped = await fetchNotionPage(
+      config,
+      page,
+      identityContext ?? { users: new Map(), identitiesByEmail: new Map() },
+    );
     if (mapped) {
       pages.push(mapped);
       itemUpdates.push(notionItemUpdate(page, mapped.slug, observedAt));
@@ -3498,6 +3915,85 @@ async function backfillNotionPagesStep(
     itemUpdates,
   };
 }
+
+export function selectNotionUserBatch(input: {
+  users: NotionUserIdentity[];
+  state: { watermark: Date | null; cursor: string | null } | null;
+  now: Date;
+  limit: number;
+}): {
+  users: NotionUserIdentity[];
+  watermark: Date;
+  cursor: string | null;
+} {
+  const continuing = Boolean(input.state?.cursor);
+  const refreshDue =
+    !input.state?.watermark ||
+    input.now.getTime() - input.state.watermark.getTime() >=
+      NOTION_USERS_REFRESH_MS;
+  if (!continuing && !refreshDue) {
+    return {
+      users: [],
+      watermark: input.state!.watermark!,
+      cursor: null,
+    };
+  }
+
+  const afterUserId = input.state?.cursor ?? '';
+  const candidates = [...input.users]
+    .sort((a, b) => a.id.localeCompare(b.id))
+    .filter((user) => user.id > afterUserId);
+  const batch = candidates.slice(0, input.limit);
+  const last = batch.at(-1);
+  const hasMore = candidates.length > batch.length;
+
+  return {
+    users: batch,
+    watermark: hasMore ? (input.state?.watermark ?? new Date(0)) : input.now,
+    cursor: hasMore && last ? last.id : null,
+  };
+}
+
+const notionUsersCollector: BrainCollector = {
+  id: NOTION_USERS_COLLECTOR_ID,
+  displayName: 'Notion workspace users',
+  async isEnabled() {
+    return Boolean(await findNotionConnectionConfig());
+  },
+  async collect({ now, limit }) {
+    const config = await findNotionConnectionConfig();
+    if (!config) return { pages: [], nextSince: null };
+
+    const users = await loadNotionUserDirectory(config);
+    const [identities, state] = await Promise.all([
+      loadPersonIdentityRecords(),
+      getBrainSyncState(db, NOTION_USERS_COLLECTOR_ID),
+    ]);
+    const batch = selectNotionUserBatch({
+      users,
+      state: state
+        ? { watermark: state.watermark, cursor: state.backfillCursor }
+        : null,
+      now,
+      limit,
+    });
+    const references = buildNotionUserReferences(users, identities);
+
+    return {
+      pages: batch.users.map((user) =>
+        buildNotionUserPage(user, references.get(user.id)!),
+      ),
+      nextSince: null,
+      stateUpdates: [
+        {
+          collectorId: NOTION_USERS_COLLECTOR_ID,
+          watermark: batch.watermark,
+          cursor: batch.cursor,
+        },
+      ],
+    };
+  },
+};
 
 const notionPagesCollector: BrainCollector = {
   id: NOTION_PAGES_COLLECTOR_ID,
@@ -4001,6 +4497,7 @@ const BRAIN_COLLECTORS: BrainCollector[] = [
   personIdentitiesCollector,
   ripplingWorkersCollector,
   slackPublicChannelsCollector,
+  notionUsersCollector,
   notionPagesCollector,
   granolaMeetingsCollector,
   githubIssuesCollector,
