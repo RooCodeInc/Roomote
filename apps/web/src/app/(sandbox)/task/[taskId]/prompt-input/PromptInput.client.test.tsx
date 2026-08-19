@@ -861,7 +861,7 @@ describe('PromptInput', () => {
     expect(directSandboxSendPromptMock).not.toHaveBeenCalled();
   });
 
-  it('enables Goal Mode and sends only the objective to the agent', async () => {
+  it('queues Goal Mode optimistically during an active turn', async () => {
     useSandboxConnectedMock.mockReturnValue(true);
     useSandboxConnectionStatusMock.mockReturnValue({
       connected: true,
@@ -899,10 +899,13 @@ describe('PromptInput', () => {
       });
     });
     expect(sandboxSendPromptMutateMock).not.toHaveBeenCalled();
-    expect(appendOptimisticAcpEventMock).toHaveBeenCalledWith(
-      expect.objectContaining({ text: 'ship the release' }),
+    expect(appendOptimisticQueuedMessageMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'ship the release',
+        optimistic: true,
+      }),
     );
-    expect(appendOptimisticQueuedMessageMock).not.toHaveBeenCalled();
+    expect(appendOptimisticAcpEventMock).not.toHaveBeenCalled();
     expect(toastSuccessMock).toHaveBeenCalledWith('Goal Mode enabled');
   });
 

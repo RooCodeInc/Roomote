@@ -469,10 +469,9 @@ export const PromptInput = forwardRef<PromptInputHandle, PromptInputProps>(
 
           // Active-turn sends may be steered immediately or remain queued.
           // Keep them in the queue until the runtime confirms delivery.
-          optimisticLocation =
-            goalObjective === null && shouldOptimisticallyQueuePrompt
-              ? 'queue'
-              : 'transcript';
+          optimisticLocation = shouldOptimisticallyQueuePrompt
+            ? 'queue'
+            : 'transcript';
           const { clientMessageId } = startOptimisticPromptSubmission({
             taskId: taskRun.taskId,
             prompt: preparedPrompt.text,
