@@ -12,7 +12,7 @@ terraform {
 provider "digitalocean" {}
 
 locals {
-  preview_domain = var.preview_domain != "" ? var.preview_domain : "preview.${var.domain}"
+  preview_domain = var.preview_domain != "" ? var.preview_domain : var.domain
   droplet_name   = "roomote-${var.customer_slug}"
   tags           = distinct(concat(["roomote", "roomote-self-host", "customer-${var.customer_slug}"], var.tags))
 
@@ -112,7 +112,7 @@ resource "digitalocean_record" "app" {
 }
 
 resource "digitalocean_record" "preview" {
-  count  = var.manage_dns ? 1 : 0
+  count  = var.manage_dns && local.preview_domain != var.domain ? 1 : 0
   domain = var.dns_zone
   type   = "A"
   name   = local.preview_record_name

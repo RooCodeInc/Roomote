@@ -54,7 +54,7 @@ What the script does:
   `DASHBOARD_PASSWORD`, and a one-time `SETUP_TOKEN`) into
   `/opt/roomote/.env`;
 - defaults the domain to `roomote.<your-ip>.sslip.io`, which needs zero DNS
-  setup and still supports HTTPS and wildcard preview subdomains;
+  setup and still supports HTTPS and flat wildcard preview subdomains;
 - installs a `roomote-compose` systemd unit so the stack survives reboots;
 - installs the `roomote` host CLI for day-2 operations.
 
@@ -65,17 +65,19 @@ domains share public Let's Encrypt rate limits and are tied to the host IP):
 curl -fsSL https://get.roomote.dev | bash -s -- --domain roomote.example.com
 ```
 
-Point `<domain>`, `preview.<domain>`, and `*.preview.<domain>` A records at
-the server first; the installer waits briefly for DNS and Caddy retries
-certificates until the records are in place.
+Point `<domain>` and `*.<domain>` A records at the server first; the installer
+waits briefly for DNS and Caddy retries certificates until the records are in
+place. New installs publish flat preview hostnames by default. Pass
+`--preview-domain preview.<domain>` when you prefer the dedicated
+`task-port.preview.<domain>` layout, and point both that hostname and its
+wildcard at the server.
 
 ### Flat preview hostnames
 
-**Recommended for Cloudflare Tunnel.** Cloudflare's standard certificate covers
-`*.example.com`, but not `*.preview.example.com`. Use flat preview hostnames so
-Roomote publishes `task-port-preview.example.com` without requiring an
-Advanced Certificate. Set the preview base to the parent domain and add a
-suffix:
+New one-command and `.env.production.example` installs use flat preview
+hostnames by default. Cloudflare's standard certificate covers `*.example.com`,
+but not `*.preview.example.com`, so this layout publishes
+`task-port-preview.example.com` without requiring an Advanced Certificate:
 
 ```sh
 ROOMOTE_APP_DOMAIN=example.com
@@ -89,7 +91,7 @@ Roomote then publishes `task-port-preview.example.com`, which is covered by
 `*.example.com`. Point `*.example.com` at Caddy or your tunnel, and reserve the
 `-preview` suffix so it does not collide with other first-level subdomains.
 
-If your certificate provider supports `*.preview.example.com`, the existing
+If your certificate provider supports `*.preview.example.com`, the dedicated
 `task-port.preview.example.com` layout remains an alternative. It keeps preview
 cookies within a dedicated preview namespace rather than sending them to other
 `example.com` subdomains.
@@ -162,11 +164,11 @@ originRequest:
 Use `noTLSVerify` only for the private tunnel-to-Caddy hop; Cloudflare still
 serves a publicly trusted certificate to browsers.
 
-Cloudflare's standard certificate for `example.com` and `*.example.com` does
-not cover Roomote's default `task-port.preview.example.com` preview shape.
-Provision a certificate that covers `preview.example.com` and
-`*.preview.example.com`, and configure the tunnel's wildcard hostname to reach
-Caddy.
+Cloudflare's standard certificate for `example.com` and `*.example.com` covers
+the default flat `task-port-preview.example.com` preview shape. If you opt into
+the dedicated `task-port.preview.example.com` layout, provision a certificate
+that covers `preview.example.com` and `*.preview.example.com`, and configure
+the tunnel's wildcard hostname to reach Caddy.
 
 Task sandboxes reject private, link-local, and Tailscale ranges to protect the
 host network. If a self-hosted Gitea or GitLab hostname resolves differently
@@ -255,10 +257,11 @@ healthy upgrade remains in place and the command prints a warning.
 
 The domain is baked into OAuth apps created during setup (GitHub App, Slack
 app, sign-in provider redirects). To move a deployment to a new domain: update
-DNS, set `ROOMOTE_APP_DOMAIN`, `ROOMOTE_PREVIEW_DOMAIN`, and `TRPC_URL` in
-`/opt/roomote/.env`, run `roomote up`, then re-create or update the GitHub App
-and Slack app (both use manifest flows, so this is a few clicks) and update
-your sign-in provider's redirect URLs.
+DNS, set `ROOMOTE_APP_DOMAIN`, `ROOMOTE_PREVIEW_DOMAIN`,
+`PREVIEW_PROXY_SUBDOMAIN_SUFFIX`, and `TRPC_URL` in `/opt/roomote/.env`, run
+`roomote up`, then re-create or update the GitHub App and Slack app (both use
+manifest flows, so this is a few clicks) and update your sign-in provider's
+redirect URLs.
 
 ## Prerequisites
 
@@ -275,8 +278,10 @@ For production-style use, also prepare:
 
 - A host with ports `80` and `443` reachable from the public internet.
 - An app domain, for example `roomote.example.com`.
-- A preview domain plus wildcard DNS, for example
-  `preview.roomote.example.com` and `*.preview.roomote.example.com`.
+- Wildcard DNS for flat preview hostnames, for example
+  `*.roomote.example.com`. A dedicated preview namespace such as
+  `preview.roomote.example.com` and `*.preview.roomote.example.com` remains
+  available when its certificate is provisioned separately.
 - A tested encrypted `roomote backup` schedule and an off-host copy of both the
   bundle and its separately stored passphrase.
 - A provider-level object backup when using external S3-compatible storage.
@@ -326,19 +331,21 @@ For production, set domains in `.env.production`:
 
 ```sh
 ROOMOTE_APP_DOMAIN=roomote.example.com
-ROOMOTE_PREVIEW_DOMAIN=preview.roomote.example.com
+ROOMOTE_PREVIEW_DOMAIN=roomote.example.com
+PREVIEW_PROXY_SUBDOMAIN_SUFFIX=preview
 TRPC_URL=https://roomote.example.com/_roomote-api
 ```
 
 The production Compose overlay derives these runtime URLs:
 
-| Runtime key              | Value                                      |
-| ------------------------ | ------------------------------------------ |
-| `R_PUBLIC_URL`           | `https://$ROOMOTE_APP_DOMAIN`              |
-| `R_APP_URL`              | `https://$ROOMOTE_APP_DOMAIN`              |
-| `TRPC_URL`               | `https://$ROOMOTE_APP_DOMAIN/_roomote-api` |
-| `PREVIEW_PROXY_BASE_URL` | `https://$ROOMOTE_PREVIEW_DOMAIN`          |
-| `PREVIEW_DOMAINS`        | `$ROOMOTE_PREVIEW_DOMAIN`                  |
+| Runtime key                      | Value                                      |
+| -------------------------------- | ------------------------------------------ |
+| `R_PUBLIC_URL`                   | `https://$ROOMOTE_APP_DOMAIN`              |
+| `R_APP_URL`                      | `https://$ROOMOTE_APP_DOMAIN`              |
+| `TRPC_URL`                       | `https://$ROOMOTE_APP_DOMAIN/_roomote-api` |
+| `PREVIEW_PROXY_BASE_URL`         | `https://$ROOMOTE_PREVIEW_DOMAIN`          |
+| `PREVIEW_DOMAINS`                | `$ROOMOTE_PREVIEW_DOMAIN`                  |
+| `PREVIEW_PROXY_SUBDOMAIN_SUFFIX` | `preview` for flat preview hostnames       |
 
 On production Caddy, `ROOMOTE_APP_DOMAIN` serves both the web app and the
 worker-facing API. Caddy routes the explicit `/_roomote-api/*` prefix to

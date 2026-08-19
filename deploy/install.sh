@@ -34,7 +34,8 @@ usage: install.sh [options]
 
 Options:
   --domain <host>            Public app hostname (default: roomote.<ip>.sslip.io)
-  --preview-domain <host>    Preview hostname (default: preview.<domain>)
+  --preview-domain <host>    Dedicated preview hostname (default: flat
+                             <task>-<port>-preview.<domain> hostnames)
   --tls-mode <acme|internal> TLS certificate mode (default: acme)
   --skip-dns-check           Skip public-DNS verification for --domain
   --version <tag>            Roomote image tag (default: latest GitHub release)
@@ -81,6 +82,7 @@ die() {
 
 domain=''
 preview_domain=''
+preview_subdomain_suffix=''
 tls_mode="${ROOMOTE_TLS_MODE:-}"
 skip_dns_check='false'
 roomote_version="${ROOMOTE_VERSION:-}"
@@ -357,8 +359,15 @@ else
   fi
 fi
 
+if [ -z "$preview_domain" ] && [ -f "$install_root/.env" ]; then
+  preview_domain="$(awk -F= '/^ROOMOTE_PREVIEW_DOMAIN=/ { print $2; exit }' "$install_root/.env")"
+  preview_subdomain_suffix="$(awk -F= '/^PREVIEW_PROXY_SUBDOMAIN_SUFFIX=/ { print $2; exit }' "$install_root/.env")"
+  preview_domain="${preview_domain:-preview.$domain}"
+fi
+
 if [ -z "$preview_domain" ]; then
-  preview_domain="preview.$domain"
+  preview_domain="$domain"
+  preview_subdomain_suffix='preview'
 fi
 
 # --- Docker ------------------------------------------------------------------
@@ -549,6 +558,7 @@ set_env_value ROOMOTE_VERSION "$roomote_version"
 set_env_value ROOMOTE_REPO "$repo"
 set_env_value ROOMOTE_APP_DOMAIN "$domain"
 set_env_value ROOMOTE_PREVIEW_DOMAIN "$preview_domain"
+set_env_value PREVIEW_PROXY_SUBDOMAIN_SUFFIX "$preview_subdomain_suffix"
 set_env_value ROOMOTE_TLS_MODE "$tls_mode"
 if [ "$tls_mode" = 'internal' ]; then
   set_env_value ROOMOTE_CADDY_LOCAL_CERTS 'local_certs'

@@ -17,7 +17,8 @@ Options:
   --region <slug>                DigitalOcean region (default: nyc3)
   --droplet-size <slug>          DigitalOcean size (default: s-2vcpu-4gb)
   --version <tag>                Immutable Roomote image tag (default: ROOMOTE_VERSION or v0.1.0)
-  --preview-domain <host>        Preview hostname (default: preview.<domain>)
+  --preview-domain <host>        Dedicated preview hostname (default: flat
+                                 <task>-<port>-preview.<domain> hostnames)
   --image-registry <host>        Registry (default: ghcr.io)
   --image-namespace <namespace>  Registry namespace (default: roocodeinc)
   --database local|external      local starts Compose Postgres; external requires DATABASE_URL (default: local)
@@ -25,7 +26,7 @@ Options:
   --ssh-key-fingerprint <fp>     Existing DigitalOcean SSH key fingerprint
   --ssh-private-key <path>       Private key for bootstrap SSH
   --ssh-allowed-cidr <cidr>      Repeatable SSH allowlist CIDR (default: 0.0.0.0/0 and ::/0)
-  --manage-dns                  Create app, preview, and wildcard preview A records
+  --manage-dns                  Create app and wildcard preview A records
   --dns-zone <zone>              DigitalOcean DNS zone used with --manage-dns
   --image-retention-releases <n> Keep this many Roomote release tags on the host after deploy (default: 3)
 EOF
@@ -37,6 +38,7 @@ region='nyc3'
 droplet_size='s-2vcpu-4gb'
 domain=''
 preview_domain=''
+preview_subdomain_suffix=''
 env_file=''
 roomote_version="${ROOMOTE_VERSION:-v0.1.0}"
 image_registry='ghcr.io'
@@ -147,8 +149,19 @@ validate_image_part "$image_registry"
 validate_image_part "$image_namespace"
 validate_positive_integer "$image_retention_releases" "--image-retention-releases"
 
+state_dir="$(customer_state_dir "$customer")"
+tfvars_file="$(terraform_tfvars_file "$customer")"
+
+if [ -z "$preview_domain" ] && [ -f "$tfvars_file" ]; then
+  preview_domain="$(awk -F= '/^preview_domain = / { gsub(/[ \t\"]/, "", $2); print $2; exit }' "$tfvars_file")"
+  if [ "$preview_domain" = "$domain" ]; then
+    preview_subdomain_suffix='preview'
+  fi
+fi
+
 if [ -z "$preview_domain" ]; then
-  preview_domain="preview.$domain"
+  preview_domain="$domain"
+  preview_subdomain_suffix='preview'
 fi
 validate_domain "$preview_domain"
 
@@ -181,7 +194,6 @@ require_cmd terraform
 require_cmd ssh
 require_cmd scp
 
-state_dir="$(customer_state_dir "$customer")"
 mkdir -p "$state_dir"
 
 public_key_value=''
@@ -189,7 +201,6 @@ if [ -n "$ssh_public_key" ]; then
   public_key_value="$(read_public_key "$ssh_public_key")"
 fi
 
-tfvars_file="$(terraform_tfvars_file "$customer")"
 {
   printf 'customer_slug = '
   hcl_string "$customer"
@@ -255,6 +266,7 @@ previous_worker_image="$(read_env_value "$tmp_env" DOCKER_WORKER_IMAGE)"
 set_env_value "$tmp_env" ROOMOTE_VERSION "$roomote_version"
 set_env_value "$tmp_env" ROOMOTE_APP_DOMAIN "$domain"
 set_env_value "$tmp_env" ROOMOTE_PREVIEW_DOMAIN "$preview_domain"
+set_env_value "$tmp_env" PREVIEW_PROXY_SUBDOMAIN_SUFFIX "$preview_subdomain_suffix"
 set_env_value "$tmp_env" TRPC_URL "https://$domain/_roomote-api"
 remove_env_key "$tmp_env" ROOMOTE_API_DOMAIN
 set_env_value "$tmp_env" IMAGE_REGISTRY "$image_registry"

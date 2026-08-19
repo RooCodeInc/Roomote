@@ -15,6 +15,9 @@ import YAML from 'yaml';
 const root = resolve(import.meta.dirname, '../..');
 const read = (path) => readFileSync(join(root, path), 'utf8');
 const catalog = JSON.parse(read('deploy/deployment-catalog.json'));
+const installer = read('deploy/install.sh');
+const deployer = read('deploy/scripts/deploy.sh');
+const productionEnvExample = read('.env.production.example');
 
 function fail(message) {
   throw new Error(message);
@@ -23,6 +26,51 @@ function fail(message) {
 function assert(condition, message) {
   if (!condition) fail(message);
 }
+
+assert(
+  installer.includes('preview_domain="$domain"') &&
+    installer.includes("preview_subdomain_suffix='preview'"),
+  'installer: new installs must default to flat preview hostnames',
+);
+assert(
+  installer.includes(
+    'preview_domain="$(awk -F= \'/^ROOMOTE_PREVIEW_DOMAIN=/ { print $2; exit }\' "$install_root/.env")"',
+  ) &&
+    installer.includes(
+      'preview_subdomain_suffix="$(awk -F= \'/^PREVIEW_PROXY_SUBDOMAIN_SUFFIX=/ { print $2; exit }\' "$install_root/.env")"',
+    ),
+  'installer: reruns must preserve existing preview hostname settings',
+);
+assert(
+  installer.includes(
+    'set_env_value PREVIEW_PROXY_SUBDOMAIN_SUFFIX "$preview_subdomain_suffix"',
+  ),
+  'installer: preview suffix must be persisted for Compose services',
+);
+assert(
+  productionEnvExample.includes(
+    'ROOMOTE_APP_DOMAIN=roomote.example.com\nROOMOTE_PREVIEW_DOMAIN=roomote.example.com\nPREVIEW_PROXY_SUBDOMAIN_SUFFIX=preview',
+  ),
+  'production env example: new installs must default to flat preview hostnames',
+);
+assert(
+  deployer.includes('preview_domain="$domain"') &&
+    deployer.includes("preview_subdomain_suffix='preview'") &&
+    deployer.includes(
+      'set_env_value "$tmp_env" PREVIEW_PROXY_SUBDOMAIN_SUFFIX "$preview_subdomain_suffix"',
+    ),
+  'DigitalOcean deployer: new installs must default to flat preview hostnames',
+);
+const digitalOceanTerraform = read('deploy/providers/digitalocean/main.tf');
+assert(
+  digitalOceanTerraform.includes(
+    'preview_domain = var.preview_domain != "" ? var.preview_domain : var.domain',
+  ) &&
+    digitalOceanTerraform.includes(
+      'count  = var.manage_dns && local.preview_domain != var.domain ? 1 : 0',
+    ),
+  'DigitalOcean Terraform: flat previews must not duplicate the app DNS record',
+);
 
 function commandText(command) {
   if (Array.isArray(command)) return command.join(' ');
@@ -60,12 +108,13 @@ const composeEnv = {
   R_DISCORD_GATEWAY_SECRET: 'deployment-ci-discord-gateway-secret',
   PREVIEW_AUTH_PRIVATE_KEY: 'deployment-ci-preview-private-key',
   PREVIEW_AUTH_PUBLIC_KEY: 'deployment-ci-preview-public-key',
+  PREVIEW_PROXY_SUBDOMAIN_SUFFIX: 'preview',
   REDIS_URL: 'redis://redis:6379',
   ROOMOTE_APP_DOMAIN: 'roomote.localhost',
   ROOMOTE_CADDY_LOCAL_CERTS: 'local_certs',
   ROOMOTE_CADDY_WILDCARD_TLS_SNIPPET: '',
   R_APP_URL: 'http://roomote.localhost',
-  ROOMOTE_PREVIEW_DOMAIN: 'preview.roomote.localhost',
+  ROOMOTE_PREVIEW_DOMAIN: 'roomote.localhost',
   ROOMOTE_VERSION: 'deployment-ci',
   S3_ACCESS_KEY_ID: 'roomote',
   S3_SECRET_ACCESS_KEY: 'deployment-ci-minio-password',
@@ -290,6 +339,14 @@ for (const serviceName of ['web', 'api', 'controller', 'preview-proxy']) {
     `production compose: ${serviceName} must receive PREVIEW_PROXY_SUBDOMAIN_SUFFIX`,
   );
 }
+const manualProductionCompose = YAML.parse(
+  read('docker-compose.production.yml'),
+);
+assert(
+  manualProductionCompose['x-roomote-production-env']
+    ?.PREVIEW_PROXY_SUBDOMAIN_SUFFIX !== undefined,
+  'manual production compose: services must receive PREVIEW_PROXY_SUBDOMAIN_SUFFIX',
+);
 assert(
   read('deploy/caddy/Caddyfile').includes('{$ROOMOTE_CADDY_LOCAL_CERTS:}'),
   'caddy: Caddyfile must support the installer-managed local certificate mode',
@@ -371,7 +428,7 @@ function validateCaddyfile(mode, contents, environment) {
 
 const caddyEnvironment = {
   ROOMOTE_APP_DOMAIN: 'roomote.example.test',
-  ROOMOTE_PREVIEW_DOMAIN: 'preview.roomote.example.test',
+  ROOMOTE_PREVIEW_DOMAIN: 'roomote.example.test',
   S3_BUCKET_ARTIFACTS: 'roomote-artifacts',
 };
 validateCaddyfile('acme', acmeCaddyfile, {
