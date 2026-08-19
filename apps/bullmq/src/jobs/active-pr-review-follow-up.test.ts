@@ -217,6 +217,7 @@ describe('activePrReviewFollowUpJob', () => {
     await activePrReviewFollowUpJob(makeJob());
 
     expect(mockEnqueueTask).toHaveBeenCalledWith({
+      existingTaskId: 'task-100',
       task: data.fallback.task,
       initiator: {
         kind: 'automation',
