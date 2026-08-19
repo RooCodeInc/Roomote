@@ -21,8 +21,10 @@ import {
 const DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT = 2;
 
 /**
- * Non-task sessions produce text or structured output only; no tool may ever
- * run. The leased servers already deny tools via their config
+ * Ordinary non-task sessions produce text or structured output only; no tool
+ * may run by default. Fast explicitly opts into its isolated native-tool
+ * directory and allowlist through generateTrackedNonTaskTextInOpenCodeSession.
+ * The leased servers already deny built-in tools via their config
  * (`withDeniedToolPermissions` in opencode-runtime), and this per-session
  * ruleset keeps a stale or externally configured server
  * (`OPENCODE_SDK_SERVER_URL`) equally locked down.
@@ -36,7 +38,7 @@ const NON_TASK_SESSION_PERMISSIONS: PermissionRuleset = Object.keys(
 ).map((permission) => ({ permission, pattern: '*', action: 'deny' }));
 
 /**
- * Per-prompt tool filter: disable every registered tool — including MCP or
+ * Default per-prompt tool filter: disable every registered tool — including MCP or
  * plugin tools an externally configured server (`OPENCODE_SDK_SERVER_URL`)
  * may define, which the enumerated permission denials cannot name — except
  * OpenCode's internal `StructuredOutput` tool, which fulfils
@@ -46,7 +48,8 @@ const NON_TASK_SESSION_PERMISSIONS: PermissionRuleset = Object.keys(
  * `StructuredOutput` and breaks structured calls. If a future OpenCode
  * release renames that internal tool, structured calls fail loudly ("Model
  * did not produce structured output") rather than any tool becoming
- * executable — this filter fails closed.
+ * executable — this filter fails closed. Fast supplies a separate explicit
+ * allowlist containing only its loopback bridge tools.
  */
 const NON_TASK_SESSION_TOOL_DISABLES: Record<string, boolean> = {
   '*': false,
@@ -153,6 +156,36 @@ export interface GenerateTrackedNonTaskObjectParams<
   TSchema extends z.ZodTypeAny,
 > extends GenerateTrackedNonTaskBaseParams {
   schema: TSchema;
+}
+
+/**
+ * An intentionally in-memory reference to an OpenCode conversation. Callers
+ * may reuse it while their process is warm, but must be able to bootstrap a
+ * replacement when the helper server no longer recognizes the id.
+ */
+export type NonTaskOpenCodeSession = {
+  id?: string;
+};
+
+export type NonTaskOpenCodeNativeSessionOptions = {
+  directory: string;
+  env?: Partial<Record<string, string>>;
+  onSessionReady?: (sessionID: string) => Promise<void> | void;
+  permission?: PermissionRuleset;
+  tools: Record<string, boolean>;
+};
+
+export class NonTaskOpenCodeSessionNotFoundError extends Error {
+  constructor() {
+    super('The OpenCode session is no longer available.');
+    this.name = 'NonTaskOpenCodeSessionNotFoundError';
+  }
+}
+
+export function isNonTaskOpenCodeSessionNotFoundError(
+  error: unknown,
+): error is NonTaskOpenCodeSessionNotFoundError {
+  return error instanceof NonTaskOpenCodeSessionNotFoundError;
 }
 
 function asString(value: unknown): string | undefined {
@@ -283,6 +316,26 @@ function formatOpenCodeSdkError(error: unknown): string {
   }
 }
 
+function isOpenCodeSessionMissing(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const record = error as Record<string, unknown>;
+  const data =
+    record.data && typeof record.data === 'object'
+      ? (record.data as Record<string, unknown>)
+      : undefined;
+  const statusCode =
+    typeof data?.statusCode === 'number'
+      ? data.statusCode
+      : typeof record.status === 'number'
+        ? record.status
+        : undefined;
+
+  return statusCode === 404 || record.name === 'NotFoundError';
+}
+
 async function resolveNonTaskModelRuntime(
   model?: string,
   modelRole: 'primary' | 'small' = 'small',
@@ -353,6 +406,7 @@ type NonTaskSdkPromptOptions = {
     schema: Record<string, unknown>;
     retryCount: number;
   };
+  tools?: Record<string, boolean>;
   parts: Array<
     | { type: 'text'; text: string }
     | {
@@ -458,7 +512,12 @@ async function runNonTaskSdkPrompt(
   },
   promptOptions: NonTaskSdkPromptOptions,
   options: {
+    directory?: string;
     ephemeral?: boolean;
+    env?: Partial<Record<string, string>>;
+    onSessionReady?: (sessionID: string) => Promise<void> | void;
+    permission?: PermissionRuleset;
+    session?: NonTaskOpenCodeSession;
     signal?: AbortSignal;
     useConfiguredServer?: boolean;
   } = {},
@@ -468,8 +527,10 @@ async function runNonTaskSdkPrompt(
 }> {
   const { model, resolvedModelRuntimeEnv } = runtime;
   const timeoutMs = params.timeoutMs ?? 120_000;
+  const sessionDirectory =
+    options.directory ?? resolveNonTaskSessionDirectory();
   const server = await leaseOpenCodeSdkServer({
-    env: resolvedModelRuntimeEnv,
+    env: { ...resolvedModelRuntimeEnv, ...options.env },
     ephemeral: options.ephemeral,
     startTimeoutMs: Math.min(
       timeoutMs,
@@ -480,9 +541,7 @@ async function runNonTaskSdkPrompt(
   const abortController = new AbortController();
   const timeout = setTimeout(() => {
     abortController.abort(
-      new Error(
-        `Timed out waiting for OpenCode structured output after ${timeoutMs}ms.`,
-      ),
+      new Error(`Timed out waiting for OpenCode output after ${timeoutMs}ms.`),
     );
   }, timeoutMs);
   const externalSignal = options.signal;
@@ -505,34 +564,46 @@ async function runNonTaskSdkPrompt(
       baseUrl: server.url,
       fetch: openCodeSdkFetch,
     });
-    const sessionDirectory = resolveNonTaskSessionDirectory();
-    const sessionResult = await client.session.create(
-      {
-        directory: sessionDirectory,
-        title: `Roomote ${params.surface}`,
-        permission: NON_TASK_SESSION_PERMISSIONS,
-      },
-      { signal: abortController.signal },
-    );
-
-    if (sessionResult.error || !sessionResult.data) {
-      throw new Error(
-        `OpenCode structured session creation failed (model ${model}): ${formatOpenCodeSdkError(sessionResult.error)}`,
+    let sessionId = options.session?.id;
+    if (!sessionId) {
+      const sessionResult = await client.session.create(
+        {
+          directory: sessionDirectory,
+          title: `Roomote ${params.surface}`,
+          permission: options.permission ?? NON_TASK_SESSION_PERMISSIONS,
+        },
+        { signal: abortController.signal },
       );
+
+      if (sessionResult.error || !sessionResult.data) {
+        throw new Error(
+          `OpenCode structured session creation failed (model ${model}): ${formatOpenCodeSdkError(sessionResult.error)}`,
+        );
+      }
+
+      sessionId = sessionResult.data.id;
+      if (options.session) {
+        options.session.id = sessionId;
+      }
     }
+    await options.onSessionReady?.(sessionId);
 
     const promptResult = await client.session.prompt(
       {
-        sessionID: sessionResult.data.id,
+        sessionID: sessionId,
         directory: sessionDirectory,
         model: splitOpenCodeModelId(model),
-        tools: NON_TASK_SESSION_TOOL_DISABLES,
+        tools: promptOptions.tools ?? NON_TASK_SESSION_TOOL_DISABLES,
         ...promptOptions,
       },
       { signal: abortController.signal },
     );
 
     if (promptResult.error || !promptResult.data) {
+      if (isOpenCodeSessionMissing(promptResult.error)) {
+        throw new NonTaskOpenCodeSessionNotFoundError();
+      }
+
       // The resolved `provider/model` id rides in the message because callers
       // (the router's fallback log among them) only know the role alias —
       // production diagnosis of a provider-specific rejection needs the real
@@ -604,18 +675,67 @@ export async function generateTrackedNonTaskText(
   return text;
 }
 
+export async function generateTrackedNonTaskTextInOpenCodeSession(
+  params: GenerateTrackedNonTaskTextParams,
+  session: NonTaskOpenCodeSession,
+  options: NonTaskOpenCodeNativeSessionOptions,
+): Promise<string> {
+  const runtime = await resolveNonTaskModelRuntime(
+    params.model,
+    params.modelRole,
+  );
+  const model = await resolveModelForInputModality(params, runtime);
+  const data = await runNonTaskSdkPrompt(
+    params,
+    { ...runtime, model },
+    {
+      system: params.system,
+      tools: options.tools,
+      parts: [
+        {
+          type: 'text',
+          text: buildOpenCodePrompt({
+            prompt: params.prompt,
+            maxOutputTokens: params.maxOutputTokens,
+          }),
+        },
+      ],
+    },
+    {
+      directory: options.directory,
+      env: options.env,
+      onSessionReady: options.onSessionReady,
+      permission: options.permission,
+      session,
+      useConfiguredServer: false,
+    },
+  );
+
+  if (data.info.error) {
+    throw new Error(
+      `OpenCode native Fast prompt failed: ${formatOpenCodeSdkError(data.info.error)}`,
+    );
+  }
+
+  return data.parts
+    .filter(
+      (part): part is { type: 'text'; text: string } =>
+        part.type === 'text' && typeof part.text === 'string',
+    )
+    .map((part) => part.text)
+    .join('')
+    .trim();
+}
+
 async function generateTrackedNonTaskObjectWithSdk<
   TSchema extends z.ZodTypeAny,
 >(
   params: GenerateTrackedNonTaskObjectParams<TSchema>,
-  runtime?: {
-    model: string;
-    resolvedModelRuntimeEnv: Partial<Record<string, string>>;
-  },
 ): Promise<{ object: z.output<TSchema> }> {
-  const resolvedRuntime =
-    runtime ??
-    (await resolveNonTaskModelRuntime(params.model, params.modelRole));
+  const resolvedRuntime = await resolveNonTaskModelRuntime(
+    params.model,
+    params.modelRole,
+  );
 
   const data = await runNonTaskSdkPrompt(params, resolvedRuntime, {
     system: params.system,

@@ -580,23 +580,24 @@ async function processDiscordGatewayEvent(
           launchOwnerUserId: senderUserId,
         })
       : null;
-  const isFastAgentThread = channel.isThread
-    ? await hasFastAgentSession({
-        surface: 'discord',
-        workspaceId: channel.guildId ?? 'dm',
-        conversationId: channel.channelId,
-        replyTarget: {
-          channelId: metadata.communicationChannelId,
-          threadId: channel.channelId,
-        },
-      })
-    : false;
+  const isFastAgentConversation =
+    channel.isThread || channel.isDirectMessage
+      ? await hasFastAgentSession({
+          surface: 'discord',
+          workspaceId: channel.guildId ?? 'dm',
+          conversationId: channel.channelId,
+          replyTarget: {
+            channelId: metadata.communicationChannelId,
+            ...(channel.isThread ? { threadId: channel.channelId } : {}),
+          },
+        })
+      : false;
   const isRoomoteThread = Boolean(
     activeRun ||
     completedRun ||
     pendingRoutingReply ||
     repliedToAutomationReport ||
-    isFastAgentThread,
+    isFastAgentConversation,
   );
   const isTaskEntry = isDiscordTaskEntryEvent(event, {
     botUserId: resolved.botUserId,
@@ -676,7 +677,7 @@ async function processDiscordGatewayEvent(
           repliedToAutomationReport?.userId ??
           (pendingRoutingReply ? senderUserId : null),
         isAutomationReportThread: Boolean(repliedToAutomationReport),
-        isOpenConversationThread: isFastAgentThread,
+        isOpenConversationThread: isFastAgentConversation,
         fetchThreadMessages: async () => {
           const history = await fetchDiscordThreadHistoryBestEffort({
             provider: resolved.provider,
@@ -756,6 +757,27 @@ async function processDiscordGatewayEvent(
     return { ok: true, goalStarted: result.success, runId: activeRun.id };
   }
 
+  if (message && !command && isFastAgentConversation) {
+    const question = stripDiscordBotMention(
+      getDiscordMessageContent(message),
+      resolved.botUserId,
+    );
+    if (question) {
+      await processDiscordFastAgentMessage({
+        event,
+        question,
+        sender,
+        senderUserId,
+        provider: resolved.provider,
+        applicationId: resolved.applicationId,
+        channel,
+        metadata,
+        conversationId: channel.channelId,
+        activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
+      });
+      return { ok: true, fastAnswered: true, fastContinued: true };
+    }
+  }
   const defaultFastQuestion = defaultFastMessage
     ? stripDiscordBotMention(
         getDiscordMessageContent(defaultFastMessage),

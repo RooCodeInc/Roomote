@@ -250,6 +250,101 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
+  it('runs a held Fast session with native tools and a session-ready binding', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4999',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: {},
+        parts: [{ type: 'text', text: 'native tool turn complete' }],
+      },
+      error: undefined,
+    });
+    const {
+      generateTrackedNonTaskTextInOpenCodeSession,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+    const onSessionReady = vi.fn();
+    const session: { id?: string } = {};
+
+    await expect(
+      generateTrackedNonTaskTextInOpenCodeSession(
+        {
+          surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+          prompt: 'Use the native tools.',
+          modelRole: 'primary',
+        },
+        session,
+        {
+          directory: '/tmp/roomote-fast-native-test',
+          env: {
+            ROOMOTE_FAST_TOOL_BRIDGE_URL: 'http://127.0.0.1:4321/tool',
+            ROOMOTE_FAST_TOOL_BRIDGE_TOKEN: 'bridge-token',
+          },
+          tools: {
+            '*': false,
+            send_chat_reply: true,
+          },
+          onSessionReady,
+        },
+      ),
+    ).resolves.toBe('native tool turn complete');
+
+    expect(session.id).toBe('session-1');
+    expect(onSessionReady).toHaveBeenCalledWith('session-1');
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(spawnMock.mock.calls[0]?.[2]?.env).toMatchObject({
+      ROOMOTE_FAST_TOOL_BRIDGE_URL: 'http://127.0.0.1:4321/tool',
+      ROOMOTE_FAST_TOOL_BRIDGE_TOKEN: 'bridge-token',
+    });
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        directory: '/tmp/roomote-fast-native-test',
+        sessionID: 'session-1',
+        tools: {
+          '*': false,
+          send_chat_reply: true,
+        },
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('classifies a missing held OpenCode session for cold bootstrap recovery', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: undefined,
+      error: { name: 'NotFoundError', data: { message: 'Session not found' } },
+    });
+    const {
+      generateTrackedNonTaskTextInOpenCodeSession,
+      NonTaskOpenCodeSessionNotFoundError,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskTextInOpenCodeSession(
+        {
+          surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+          prompt: 'turn delta',
+        },
+        { id: 'missing-session' },
+        {
+          directory: '/tmp/roomote-fast-native-test',
+          tools: { '*': false, send_chat_reply: true },
+        },
+      ),
+    ).rejects.toBeInstanceOf(NonTaskOpenCodeSessionNotFoundError);
+    expect(sessionCreateMock).not.toHaveBeenCalled();
+  });
+
   it('uses the deployment primary model when requested', async () => {
     process.env = {
       ...originalEnv,

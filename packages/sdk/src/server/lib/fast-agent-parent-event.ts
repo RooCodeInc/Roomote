@@ -4,9 +4,9 @@ import { basename } from 'node:path';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
-  buildFastAgentSessionChannelKey,
   createFastAgentSlackTaskLauncher,
   createFastAgentTaskLauncher,
+  fastAgentConversationRepository,
   type FastAgentTurnAdapter,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
@@ -18,7 +18,6 @@ import {
   eq,
   inArray,
   slackInstallations,
-  slackQuickAnswers,
   taskArtifacts,
   taskPullRequests,
   taskRuns,
@@ -218,6 +217,7 @@ function buildEventClientMessageSeed(event: FastAgentParentEvent): string {
 
 type FastAgentParentTurn = {
   userId: string;
+  conversation: FastAgentConversation;
   adapter: FastAgentTurnAdapter;
 };
 
@@ -226,40 +226,41 @@ async function createSlackFastAgentParentTurn(params: {
   event: FastAgentParentEvent;
   onReplyPosted: () => void;
 }): Promise<FastAgentParentTurn> {
-  const conversation = params.parent.conversation;
-  if (conversation.surface !== 'slack') {
+  const fallbackConversation = params.parent.conversation;
+  if (fallbackConversation.surface !== 'slack') {
     throw new Error('Expected a Slack Fast parent conversation.');
   }
 
-  const scopedChannel = buildFastAgentSessionChannelKey(conversation);
   const [session, installation] = await Promise.all([
-    db.query.slackQuickAnswers.findFirst({
-      where: and(
-        eq(slackQuickAnswers.id, params.parent.sessionId),
-        eq(slackQuickAnswers.slackChannel, scopedChannel),
-        eq(slackQuickAnswers.slackThreadTs, conversation.conversationId),
-      ),
-      columns: { id: true, userId: true },
+    fastAgentConversationRepository.findById({
+      id: params.parent.sessionId,
+      fallbackConversation,
     }),
     db.query.slackInstallations.findFirst({
       where: and(
         eq(slackInstallations.isActive, true),
-        eq(slackInstallations.teamId, conversation.workspaceId),
+        eq(slackInstallations.teamId, fallbackConversation.workspaceId),
       ),
       columns: { botAccessToken: true, teamDomain: true },
     }),
   ]);
 
-  if (!session || !installation?.botAccessToken) {
+  if (
+    !session ||
+    session.conversation.surface !== 'slack' ||
+    !installation?.botAccessToken
+  ) {
     throw new FastAgentParentEventDeliveryError(
       'Fast parent session or Slack installation was not found.',
       { replyPosted: false, permanent: true },
     );
   }
 
+  const conversation = session.conversation;
   const slack = new SlackNotifier(installation.botAccessToken);
   return {
     userId: session.userId,
+    conversation,
     adapter: {
       launchTask: createFastAgentSlackTaskLauncher({
         userId: session.userId,
@@ -372,34 +373,29 @@ async function createDiscordFastAgentParentTurn(params: {
   event: FastAgentParentEvent;
   onReplyPosted: () => void;
 }): Promise<FastAgentParentTurn> {
-  const conversation = params.parent.conversation;
-  if (conversation.surface !== 'discord') {
+  const fallbackConversation = params.parent.conversation;
+  if (fallbackConversation.surface !== 'discord') {
     throw new Error('Expected a Discord Fast parent conversation.');
   }
 
   const [session, provider] = await Promise.all([
-    db.query.slackQuickAnswers.findFirst({
-      where: and(
-        eq(slackQuickAnswers.id, params.parent.sessionId),
-        eq(
-          slackQuickAnswers.slackChannel,
-          buildFastAgentSessionChannelKey(conversation),
-        ),
-        eq(slackQuickAnswers.slackThreadTs, conversation.conversationId),
-      ),
-      columns: { id: true, userId: true },
+    fastAgentConversationRepository.findById({
+      id: params.parent.sessionId,
+      fallbackConversation,
     }),
     createDiscordCommunicationProviderFromRuntimeCredentials(),
   ]);
-  if (!session || !provider) {
+  if (!session || session.conversation.surface !== 'discord' || !provider) {
     throw new FastAgentParentEventDeliveryError(
       'Fast parent session or Discord credentials were not found.',
       { replyPosted: false, permanent: true },
     );
   }
 
+  const conversation = session.conversation;
   return {
     userId: session.userId,
+    conversation,
     adapter: {
       launchTask: createFastAgentDiscordTaskLauncher({
         provider,
@@ -485,7 +481,7 @@ export async function deliverFastAgentParentEvent(params: {
     await answerFastAgentQuestion({
       question: `<delegated_task_event>${JSON.stringify(params.event)}</delegated_task_event>`,
       userId: parentTurn.userId,
-      conversation,
+      conversation: parentTurn.conversation,
       turnSource: 'platform_event',
       adapter: {
         ...parentTurn.adapter,
