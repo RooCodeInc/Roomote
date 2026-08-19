@@ -174,6 +174,50 @@ describe('startNewDiscordTask', () => {
     );
   });
 
+  it('leaves retried Fast source acknowledgement to the model-owned kickoff', async () => {
+    mocks.findSourceRun.mockResolvedValue({
+      id: 41,
+      taskId: 'task-1',
+      status: 'running',
+      payload: {
+        communicationProvider: 'discord',
+        communicationSourceEventId: 'message-fast-1',
+      },
+    });
+
+    const result = await startNewDiscordTask({
+      provider: {} as never,
+      applicationId: 'application-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix checkout',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-fast-1',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'dm-1',
+        communicationMessageId: 'message-fast-1',
+      },
+      channel: {
+        channelId: 'dm-1',
+        channelName: 'Direct message',
+        channelType: 1,
+        isDirectMessage: true,
+        isThread: false,
+      },
+      beforeEnqueueKickoff: vi.fn(),
+    });
+
+    expect(result.status).toBe('already_started');
+    expect(mocks.reply).not.toHaveBeenCalled();
+    expect(mocks.routeTask).not.toHaveBeenCalled();
+    expect(mocks.launchTask).not.toHaveBeenCalled();
+  });
+
   it('clears intake eyes when a retried source event already started a task', async () => {
     mocks.findSourceRun.mockResolvedValue({
       id: 41,

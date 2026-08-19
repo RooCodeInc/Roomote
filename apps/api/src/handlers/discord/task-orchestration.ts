@@ -139,7 +139,7 @@ export async function startNewDiscordTask(input: {
       taskId: existingRun.taskId,
       utm: { source: 'discord', campaign: 'discord.idempotent_retry' },
     });
-    if (!input.channelAutoStart) {
+    if (!input.channelAutoStart && !input.beforeEnqueueKickoff) {
       await replyToDiscordEvent({
         provider: input.provider,
         applicationId: input.applicationId,
