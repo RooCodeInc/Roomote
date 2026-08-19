@@ -2,18 +2,30 @@ import { PRODUCT_NAME } from '@roomote/types';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  FAST_AGENT_MAX_IMAGE_ATTACHMENTS,
   type FastAgentActiveTask,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
 import {
+  isSlackImageFile,
   resolveCurrentSlackMessageFiles,
   type SlackEvent,
+  type SlackFile,
   type SlackNotifier,
 } from '@roomote/slack';
 import { stripLeadingSlackProductMention } from '@roomote/cloud-agents';
 
 import { LEADING_FAST_COMMAND_MENTION_PATTERN } from '../constants.js';
 import { postSlackThreadMarkdownMessage } from '../helpers/thread-posting.js';
+
+const IMAGE_ONLY_FAST_QUESTION =
+  'The user shared an image without additional text. Respond using the attached image and the preceding thread context.';
+
+function selectFastAgentImageFiles(files?: SlackFile[]): SlackFile[] {
+  return (files ?? [])
+    .filter(isSlackImageFile)
+    .slice(0, FAST_AGENT_MAX_IMAGE_ATTACHMENTS);
+}
 
 export function stripLeadingFastCommandMention(text: string): string {
   return text.replace(LEADING_FAST_COMMAND_MENTION_PATTERN, '').trimStart();
@@ -98,7 +110,7 @@ export async function processFastAgentMessage(params: {
       stripLeadingFastCommandMention(event.authoredText ?? event.text),
     ),
   );
-  const question = extractFastQuestion(normalizedText, continuation);
+  const textQuestion = extractFastQuestion(normalizedText, continuation);
 
   let didAddProcessingReaction = false;
 
@@ -108,22 +120,6 @@ export async function processFastAgentMessage(params: {
       timestamp: event.ts,
       name: processingReactionName,
     });
-
-    if (!question) {
-      await postSlackThreadMarkdownMessage({
-        slack,
-        channel: event.channel,
-        threadTs: threadId,
-        text: usageText,
-        sourceMessageTs: event.ts,
-        conversationLog: {
-          userId,
-          slackTeamId: teamId,
-          source: 'fast_agent',
-        },
-      });
-      return;
-    }
 
     let threadContext: Awaited<ReturnType<typeof slack.fetchThreadMessages>> =
       [];
@@ -148,14 +144,33 @@ export async function processFastAgentMessage(params: {
       eventFiles: event.files,
       messages: threadContext,
     });
-    const images = currentMessageFiles?.length
-      ? await slack.processSlackFiles(currentMessageFiles).catch((error) => {
+    const imageFiles = selectFastAgentImageFiles(currentMessageFiles);
+    const images = imageFiles.length
+      ? await slack.processSlackFiles(imageFiles).catch((error) => {
           console.error(
             `[SlackWebhook] Failed to process Fast message images: ${error instanceof Error ? error.message : String(error)}`,
           );
           return [];
         })
       : [];
+    const question =
+      textQuestion ?? (images.length > 0 ? IMAGE_ONLY_FAST_QUESTION : null);
+
+    if (!question) {
+      await postSlackThreadMarkdownMessage({
+        slack,
+        channel: event.channel,
+        threadTs: threadId,
+        text: usageText,
+        sourceMessageTs: event.ts,
+        conversationLog: {
+          userId,
+          slackTeamId: teamId,
+          source: 'fast_agent',
+        },
+      });
+      return;
+    }
     const serializedThreadContext = threadContext
       .filter((message) => message.ts !== event.ts)
       .map((message) => ({

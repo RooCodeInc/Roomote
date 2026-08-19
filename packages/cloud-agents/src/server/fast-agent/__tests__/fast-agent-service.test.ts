@@ -211,7 +211,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   it('passes image data URLs to the Fast model as image-capable file input', async () => {
     await answerFastAgentQuestion({
       ...baseParams,
-      images: ['data:image/png;base64,aGVsbG8=', 'not-an-image'],
+      images: [
+        'data:image/png;base64,aW1hZ2UtMQ==',
+        'not-an-image',
+        'data:image/png;base64,aW1hZ2UtMg==',
+        'data:image/png;base64,aW1hZ2UtMw==',
+        'data:image/png;base64,aW1hZ2UtNA==',
+      ],
       adapter: callbacks(),
     });
 
@@ -220,7 +226,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         files: [
           {
             mime: 'image/png',
-            url: 'data:image/png;base64,aGVsbG8=',
+            url: 'data:image/png;base64,aW1hZ2UtMQ==',
+          },
+          {
+            mime: 'image/png',
+            url: 'data:image/png;base64,aW1hZ2UtMg==',
+          },
+          {
+            mime: 'image/png',
+            url: 'data:image/png;base64,aW1hZ2UtMw==',
           },
         ],
         requiredInputModality: 'image',

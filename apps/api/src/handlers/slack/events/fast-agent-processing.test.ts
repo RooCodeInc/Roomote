@@ -8,9 +8,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
   answerFastAgentQuestion: mocks.answerQuestion,
+  FAST_AGENT_MAX_IMAGE_ATTACHMENTS: 3,
 }));
 
-vi.mock('@roomote/cloud-agents', () => ({
+vi.mock('@roomote/cloud-agents', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@roomote/cloud-agents')>()),
   stripLeadingSlackProductMention: (text: string) => text,
 }));
 
@@ -197,6 +199,71 @@ describe('processFastAgentMessage', () => {
         question: 'What about this one?',
         images: [image],
       }),
+    );
+  });
+
+  it('treats an image-only follow-up from thread history as a Fast question and caps downloads', async () => {
+    const images = [
+      'data:image/png;base64,aW1hZ2UtMQ==',
+      'data:image/png;base64,aW1hZ2UtMg==',
+      'data:image/png;base64,aW1hZ2UtMw==',
+    ];
+    const files = Array.from({ length: 4 }, (_, index) => ({
+      id: `F_FOLLOW_UP_${index}`,
+      name: `follow-up-${index}.png`,
+      mimetype: 'image/png',
+      filetype: 'png',
+      url_private: `https://files.slack.com/F_FOLLOW_UP_${index}`,
+      url_private_download: `https://files.slack.com/F_FOLLOW_UP_${index}/download`,
+      size: 1024,
+    }));
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => [
+        {
+          user: 'U123',
+          text: '!fast inspect this screenshot',
+          ts: '100.001',
+          type: 'message',
+        },
+        {
+          user: 'U123',
+          text: '',
+          ts: '100.002',
+          type: 'message',
+          files,
+        },
+      ]),
+      processSlackFiles: vi.fn().mockResolvedValue(images),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'D123',
+        channel_type: 'im',
+        thread_ts: '100.001',
+        user: 'U123',
+        text: '',
+        ts: '100.002',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      continuation: true,
+    });
+
+    expect(slack.processSlackFiles).toHaveBeenCalledWith(files.slice(0, 3));
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: expect.stringContaining('shared an image'),
+        images,
+      }),
+    );
+    expect(mocks.postThreadMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ text: expect.stringContaining('!fast') }),
     );
   });
 
