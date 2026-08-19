@@ -15,6 +15,8 @@ import {
   buildNotionPage,
   buildNotionSearchBody,
   buildNotionSweepInventory,
+  buildNotionUserPage,
+  buildNotionUserReferences,
   buildUnavailableNotionPage,
   collectNotionReconciliation,
   buildPersonIdentityLookup,
@@ -26,9 +28,12 @@ import {
   groupSlackMessagesIntoDayPages,
   isSlackDirectoryRefreshDue,
   isSlackHumanProfile,
+  linkNotionUsersToPersonIdentities,
+  parseNotionUser,
   parseRipplingSnapshotCursor,
   parseRipplingWorkersResponse,
   runBrainCollectors,
+  selectNotionUserBatch,
   selectPersonIdentityBatch,
   slackDirectoryPageUserIds,
   slackDirectoryProfileFromApi,
@@ -37,6 +42,7 @@ import {
   type CollectorPage,
   type PersonIdentityRecord,
   type NotionSearchPage,
+  type NotionUserIdentity,
   type SlackDirectoryProfile,
   type SlackChannelMessage,
 } from '../brain-collectors';
@@ -171,6 +177,126 @@ describe('Notion page mapping', () => {
       'last_edited_at: 2026-08-15T01:20:00.000Z',
     );
     expect(mapped?.content).toContain('## Decision\n\nShip the collector.');
+  });
+
+  it('emits deterministic person and relation references from page metadata', () => {
+    const identities: PersonIdentityRecord[] = [
+      {
+        userId: 'roomote-ada',
+        name: 'Ada Lovelace',
+        email: 'ada@example.com',
+        role: 'member',
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+        updatedAt: new Date('2026-01-01T00:00:00Z'),
+        deletedAt: null,
+        providers: [],
+      },
+    ];
+    const notionUsers: NotionUserIdentity[] = [
+      { id: 'notion-ada', name: 'Ada', email: 'ada@example.com' },
+      { id: 'notion-alex', name: 'Alex', email: null },
+    ];
+    const identityLookup = buildPersonIdentityLookup(identities);
+    const users = buildNotionUserReferences(notionUsers, identityLookup);
+    const canonical = identityLookup.get('ada@example.com')!;
+    const mapped = buildNotionPage(
+      {
+        ...page,
+        // Authorship fields carry partial users ({object, id} only); the
+        // stored directory resolves them or they fall back to a stable id.
+        created_by: { object: 'user', id: 'notion-ada' },
+        last_edited_by: { object: 'user', id: 'unknown-user' },
+        properties: {
+          ...page.properties,
+          Owners: {
+            type: 'people',
+            people: [
+              { object: 'user', id: 'notion-ada' },
+              { object: 'user', id: 'notion-alex' },
+            ],
+          },
+          Summary: {
+            type: 'rich_text',
+            rich_text: [
+              {
+                type: 'mention',
+                mention: {
+                  type: 'user',
+                  user: { object: 'user', id: 'notion-ada' },
+                },
+              },
+            ],
+          },
+          Related: {
+            type: 'relation',
+            relation: [{ id: 'ABCDEF12-3456-7890-ABCD-EF1234567890' }],
+          },
+        },
+      },
+      { markdown: '# Body' },
+      { identityContext: { users, identityLookup } },
+    );
+
+    expect(mapped?.content).toContain(
+      `created_by: ${JSON.stringify(canonical.slug)}`,
+    );
+    expect(mapped?.content).toContain(
+      'last_edited_by: "notion/user/unknownuser"',
+    );
+    expect(mapped?.content).toContain(
+      `mentions: ${JSON.stringify([canonical.slug])}`,
+    );
+    expect(mapped?.content).toContain(users.get('notion-alex')!.slug);
+    expect(mapped?.content).toContain(
+      'relations: ["notion/abcdef1234567890abcdef1234567890"]',
+    );
+  });
+
+  it('uses only verified inline emails for canonical reconciliation', () => {
+    // Full user objects (with type/person.email) appear only in people
+    // properties and rich-text mentions, never in created_by/last_edited_by,
+    // which Notion returns as partial users.
+    const canonical = {
+      slug: 'people/roomote-member-ada',
+      title: 'Ada',
+    };
+    const identityLookup = new Map([['ada@example.com', canonical]]);
+    const withOwner = (user: Record<string, unknown>) => ({
+      ...page,
+      properties: {
+        ...page.properties,
+        Owners: { type: 'people', people: [user] },
+      },
+    });
+    const verified = buildNotionPage(
+      withOwner({
+        object: 'user',
+        id: 'verified-user',
+        type: 'person',
+        name: 'Ada',
+        person: { email: 'ADA@EXAMPLE.COM', email_verified: true },
+      }),
+      {},
+      { identityContext: { users: new Map(), identityLookup } },
+    );
+    const unverified = buildNotionPage(
+      withOwner({
+        object: 'user',
+        id: 'unverified-user',
+        type: 'person',
+        name: 'Ada',
+        person: { email: 'ada@example.com', email_verified: false },
+      }),
+      {},
+      { identityContext: { users: new Map(), identityLookup } },
+    );
+
+    expect(verified?.content).toContain(
+      'people: ["people/roomote-member-ada"]',
+    );
+    expect(unverified?.content).toContain(
+      'people: ["notion/user/unverifieduser"]',
+    );
   });
 
   it('replaces the old body with a tombstone when Notion reports trash', () => {
@@ -1340,6 +1466,234 @@ describe('person identity pages', () => {
     );
     expect(lookup.get('dan@example.com')).toEqual(
       expect.objectContaining({ title: 'Dan Riccio' }),
+    );
+  });
+
+  it('links Notion IDs by verified email without merging duplicate names', () => {
+    const duplicateName: PersonIdentityRecord = {
+      ...record,
+      userId: 'user-other-dan',
+      email: 'other@example.com',
+      providers: [],
+    };
+    const linked = linkNotionUsersToPersonIdentities(
+      [record, duplicateName],
+      [
+        {
+          id: 'notion-dan',
+          name: 'Daniel Riccio',
+          email: 'dan@example.com',
+        },
+        { id: 'notion-name-only', name: 'Dan Riccio', email: null },
+      ],
+    );
+
+    expect(linked[0]?.providers).toContainEqual(
+      expect.objectContaining({
+        provider: 'Notion',
+        identifier: 'notion-dan',
+      }),
+    );
+    expect(linked[1]?.providers).toHaveLength(0);
+    expect(buildPersonIdentityLookup(linked).get('notion-dan')).toEqual(
+      expect.objectContaining({ title: 'Dan Riccio' }),
+    );
+    expect(buildPersonIdentityPage(linked[0]!).content).not.toContain(
+      'dan@example.com',
+    );
+    const notionReference = buildNotionUserReferences(
+      [
+        {
+          id: 'notion-dan',
+          name: 'Daniel Riccio',
+          email: 'dan@example.com',
+        },
+      ],
+      buildPersonIdentityLookup([record, duplicateName]),
+    ).get('notion-dan')!;
+    const notionPage = buildNotionUserPage(
+      {
+        id: 'notion-dan',
+        name: 'Daniel Riccio',
+        email: 'dan@example.com',
+      },
+      notionReference,
+    );
+    expect(notionPage.content).toContain('type: person-alias');
+    expect(notionPage.content).toContain(
+      `canonical: ${JSON.stringify(notionReference.canonical?.slug)}`,
+    );
+    expect(notionPage.content).not.toContain('dan@example.com');
+  });
+
+  it('keeps Notion user identity stable across renames and unresolved emails', () => {
+    const user = parseNotionUser({
+      object: 'user',
+      id: 'stable-notion-id',
+      type: 'person',
+      name: 'Original Name',
+      person: { email: 'person@example.com' },
+      email_verified: false,
+    })!;
+    const renamed = { ...user, name: 'Renamed Person' };
+    const references = buildNotionUserReferences(
+      [user],
+      buildPersonIdentityLookup([record]),
+    );
+    const first = buildNotionUserPage(user, references.get(user.id)!);
+    const second = buildNotionUserPage(renamed, references.get(user.id)!);
+
+    expect(user.email).toBeNull();
+    expect(first.slug).toBe(second.slug);
+    expect(first.content).toContain('aliases: ["stable-notion-id"');
+    expect(first.content).not.toContain('canonical:');
+    expect(second.title).toBe('Renamed Person');
+  });
+
+  it('normalizes only verified Notion person emails', () => {
+    // `email_verified` sits inside `person` on the documented user object.
+    expect(
+      parseNotionUser({
+        object: 'user',
+        id: 'verified',
+        type: 'person',
+        name: ' Ada  Lovelace ',
+        person: { email: ' ADA@EXAMPLE.COM ', email_verified: true },
+      }),
+    ).toEqual({
+      id: 'verified',
+      name: 'Ada Lovelace',
+      email: 'ada@example.com',
+    });
+    expect(
+      parseNotionUser({
+        object: 'user',
+        id: 'unverified',
+        type: 'person',
+        name: 'Ada',
+        person: { email: 'ada@example.com', email_verified: false },
+      })?.email,
+    ).toBeNull();
+  });
+
+  const notionEntry = (
+    id: string,
+    name: string,
+    overrides: { deleted?: boolean; canonicalSlug?: string } = {},
+  ) => ({
+    user: { id, name, email: null, deleted: overrides.deleted ?? false },
+    reference: {
+      slug: overrides.canonicalSlug ?? `people/notion-user-${id}`,
+      title: name,
+      canonical: overrides.canonicalSlug
+        ? { slug: overrides.canonicalSlug, title: name }
+        : null,
+    },
+  });
+
+  it('sweeps Notion user pages in stable bounded batches, then idles', () => {
+    const now = new Date('2026-08-15T12:00:00Z');
+    const later = new Date('2026-08-15T12:15:00Z');
+    const entries = [
+      notionEntry('user-c', 'C'),
+      notionEntry('user-a', 'A'),
+      notionEntry('user-b', 'B'),
+    ];
+    const first = selectNotionUserBatch({
+      entries,
+      state: null,
+      now,
+      limit: 2,
+    });
+    const second = selectNotionUserBatch({
+      entries,
+      state: { watermark: first.watermark, cursor: first.cursor },
+      now,
+      limit: 2,
+    });
+    const idle = selectNotionUserBatch({
+      entries,
+      state: { watermark: second.watermark, cursor: second.cursor },
+      now: later,
+      limit: 2,
+    });
+
+    expect(first.entries.map(({ user }) => user.id)).toEqual([
+      'user-a',
+      'user-b',
+    ]);
+    expect(JSON.parse(first.cursor)).toMatchObject({ afterUserId: 'user-b' });
+    expect(second.entries.map(({ user }) => user.id)).toEqual(['user-c']);
+    expect(second.watermark).toEqual(now);
+    expect(idle.entries).toEqual([]);
+    expect(idle.watermark).toEqual(now);
+  });
+
+  it('re-sweeps Notion user pages when the projection changes', () => {
+    const now = new Date('2026-08-15T12:00:00Z');
+    const later = new Date('2026-08-15T12:15:00Z');
+    const entries = [notionEntry('user-a', 'A'), notionEntry('user-b', 'B')];
+    const settled = selectNotionUserBatch({
+      entries,
+      state: null,
+      now,
+      limit: 10,
+    });
+    const unchanged = selectNotionUserBatch({
+      entries,
+      state: { watermark: settled.watermark, cursor: settled.cursor },
+      now: later,
+      limit: 10,
+    });
+    const changed = selectNotionUserBatch({
+      entries: [
+        notionEntry('user-a', 'A', {
+          canonicalSlug: 'people/roomote-member-a',
+        }),
+        notionEntry('user-b', 'B'),
+      ],
+      state: { watermark: settled.watermark, cursor: settled.cursor },
+      now: later,
+      limit: 10,
+    });
+
+    expect(unchanged.entries).toEqual([]);
+    expect(changed.entries.map(({ user }) => user.id)).toEqual([
+      'user-a',
+      'user-b',
+    ]);
+  });
+
+  it('keeps the sweep cursor ordering consistent for case-mixed ids', () => {
+    const now = new Date('2026-08-15T12:00:00Z');
+    const entries = [notionEntry('B', 'B'), notionEntry('a', 'a')];
+    const first = selectNotionUserBatch({
+      entries,
+      state: null,
+      now,
+      limit: 1,
+    });
+    const second = selectNotionUserBatch({
+      entries,
+      state: { watermark: first.watermark, cursor: first.cursor },
+      now,
+      limit: 1,
+    });
+
+    expect(first.entries.map(({ user }) => user.id)).toEqual(['B']);
+    expect(second.entries.map(({ user }) => user.id)).toEqual(['a']);
+  });
+
+  it('tombstones Notion users removed from the workspace', () => {
+    const entry = notionEntry('gone-user', 'Gone Person', { deleted: true });
+    const page = buildNotionUserPage(entry.user, entry.reference);
+
+    expect(page.content).toContain('type: person');
+    expect(page.content).toContain('status: deleted');
+    expect(page.content).toContain('aliases: []');
+    expect(page.content).not.toContain('canonical:');
+    expect(page.content).toContain(
+      'This person is no longer a member of the Notion workspace.',
     );
   });
 
