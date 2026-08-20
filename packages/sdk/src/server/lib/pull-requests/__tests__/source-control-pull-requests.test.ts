@@ -437,6 +437,7 @@ describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
     expect(result.warnings).toEqual([]);
     expect(mockNotifyFastAgentParentOnPullRequestOpened).toHaveBeenCalledWith({
       run: expect.objectContaining({ id: 123, taskId: 'task-123' }),
+      taskGeneratedContext: 'Body',
       pullRequest: expect.objectContaining({
         provider: 'ado',
         repository: 'acme/Platform/backend',
@@ -563,6 +564,7 @@ describe('platform-managed draft state', () => {
     expect(result.warnings).toEqual([]);
     expect(mockNotifyFastAgentParentOnPullRequestOpened).toHaveBeenCalledWith({
       run: expect.objectContaining({ id: 123, taskId: 'task-123' }),
+      taskGeneratedContext: 'Body',
       pullRequest: {
         provider: 'github',
         host: undefined,

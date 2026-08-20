@@ -116,6 +116,8 @@ describe('notifyFastAgentParentOnPullRequestOpened', () => {
   it('passes structured pull request context to the Fast parent', async () => {
     await notifyFastAgentParentOnPullRequestOpened({
       run: makeRun({ fastAgentParent: discordFastParent }),
+      taskGeneratedContext:
+        'Fixed startup by treating absent local secrets as optional.',
       pullRequest,
     });
 
@@ -127,6 +129,8 @@ describe('notifyFastAgentParentOnPullRequestOpened', () => {
         taskId: 'child-task',
         runId: 200,
         taskUrl: 'https://roomote.example/task/child-task',
+        taskGeneratedContext:
+          'Fixed startup by treating absent local secrets as optional.',
         pullRequest,
       },
     });
@@ -162,6 +166,22 @@ describe('notifyFastAgentParentOnPullRequestOpened', () => {
     await notifyFastAgentParentOnPullRequestOpened({ run, pullRequest });
 
     expect(mocks.deliverParentEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('omits blank task-generated context so metadata remains the fallback', async () => {
+    await notifyFastAgentParentOnPullRequestOpened({
+      run: makeRun({ fastAgentParent: fastParent }),
+      taskGeneratedContext: '   ',
+      pullRequest,
+    });
+
+    expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.not.objectContaining({
+          taskGeneratedContext: expect.anything(),
+        }),
+      }),
+    );
   });
 
   it('releases a failed claim so an update retry can deliver it', async () => {
