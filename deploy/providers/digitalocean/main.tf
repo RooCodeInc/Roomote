@@ -12,12 +12,15 @@ terraform {
 provider "digitalocean" {}
 
 locals {
-  preview_domain = var.preview_domain != "" ? var.preview_domain : "preview.${var.domain}"
+  preview_domain = var.preview_domain != "" ? var.preview_domain : var.domain
   droplet_name   = "roomote-${var.customer_slug}"
   tags           = distinct(concat(["roomote", "roomote-self-host", "customer-${var.customer_slug}"], var.tags))
 
-  app_record_raw               = var.dns_zone != "" ? trimsuffix(var.domain, ".${var.dns_zone}") : ""
-  preview_record_raw           = var.dns_zone != "" ? trimsuffix(local.preview_domain, ".${var.dns_zone}") : ""
+  # trimsuffix leaves a zone-apex hostname unchanged (the zone is not a strict
+  # suffix of itself), so map the apex to "" explicitly to get "@"/"*" records
+  # instead of doubled names like "*.example.com.example.com".
+  app_record_raw               = var.dns_zone == "" || var.domain == var.dns_zone ? "" : trimsuffix(var.domain, ".${var.dns_zone}")
+  preview_record_raw           = var.dns_zone == "" || local.preview_domain == var.dns_zone ? "" : trimsuffix(local.preview_domain, ".${var.dns_zone}")
   app_record_name              = local.app_record_raw == "" ? "@" : local.app_record_raw
   preview_record_name          = local.preview_record_raw == "" ? "@" : local.preview_record_raw
   wildcard_preview_record_name = local.preview_record_name == "@" ? "*" : "*.${local.preview_record_name}"
@@ -112,7 +115,7 @@ resource "digitalocean_record" "app" {
 }
 
 resource "digitalocean_record" "preview" {
-  count  = var.manage_dns ? 1 : 0
+  count  = var.manage_dns && local.preview_domain != var.domain ? 1 : 0
   domain = var.dns_zone
   type   = "A"
   name   = local.preview_record_name

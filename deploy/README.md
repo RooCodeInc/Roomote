@@ -243,18 +243,20 @@ upgrade expand window and will be removed once the N-1 window passes.
 
 ## DNS
 
-The app domain, preview domain, and wildcard preview domain must resolve to the
-droplet:
+The app domain and wildcard preview domain must resolve to the droplet. A
+separate preview domain is only needed when opting out of flat preview
+hostnames:
 
 ```text
 <domain>                 A  <droplet-ip>
-<preview-domain>         A  <droplet-ip>
-*.<preview-domain>       A  <droplet-ip>
+*.<domain>               A  <droplet-ip>
+<preview-domain>         A  <droplet-ip>  # dedicated preview namespace only
+*.<preview-domain>       A  <droplet-ip>  # dedicated preview namespace only
 ```
 
 To let Terraform create these records in DigitalOcean DNS, pass
-`--manage-dns --dns-zone <zone>`. The app and preview domains must be inside
-that zone.
+`--manage-dns --dns-zone <zone>`. The app domain and any explicit preview
+domain must be inside that zone.
 
 Caddy serves web and worker-facing API traffic on the app domain. The app
 domain routes the reserved `/_roomote-api/*` prefix to the API container after
@@ -281,7 +283,6 @@ With DigitalOcean DNS management:
 deploy/scripts/roomote-deploy create \
   --customer matt-test \
   --domain matt-test.roomote.dev \
-  --preview-domain preview.matt-test.roomote.dev \
   --provider digitalocean \
   --region nyc3 \
   --version v0.1.0 \
