@@ -41,11 +41,13 @@ function normalizeBaseUrl(url: string): string {
 async function adminLogin(
   baseUrl: string,
   adminToken: string,
+  signal?: AbortSignal,
 ): Promise<string> {
   const response = await fetch(`${normalizeBaseUrl(baseUrl)}/admin/login`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ token: adminToken }),
+    ...(signal ? { signal } : {}),
   });
 
   if (!response.ok) {
@@ -507,12 +509,16 @@ async function fetchBrainStats(): Promise<BrainAdminStats | null> {
   }
 
   try {
-    const cookie = await adminLogin(baseUrl, adminToken);
+    // One deadline across the login and the stats read: a Brain that accepts
+    // the connection but hangs the login must not hold brain.get beyond the
+    // stats budget — degrading to null is the whole contract here.
+    const deadline = AbortSignal.timeout(BRAIN_STATS_TIMEOUT_MS);
+    const cookie = await adminLogin(baseUrl, adminToken, deadline);
     const response = await fetch(
       `${normalizeBaseUrl(baseUrl)}/admin/api/full-stats`,
       {
         headers: { cookie },
-        signal: AbortSignal.timeout(BRAIN_STATS_TIMEOUT_MS),
+        signal: deadline,
       },
     );
 
