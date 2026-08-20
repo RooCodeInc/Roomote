@@ -28,6 +28,7 @@ import {
 } from '@roomote/types';
 
 import { runBrainCollectors } from './brain-collectors';
+import { runSlackDayPageCensus } from './brain-collectors/slack-day-page-inventory';
 
 const LOG_PREFIX = '[brainOutboxDrain]';
 /** Sync-state key for the one-time task-history backfill. */
@@ -316,6 +317,19 @@ export async function brainCollectorsJob(): Promise<void> {
 
   if (!connection) {
     return;
+  }
+
+  try {
+    // Before any Slack collection: the one-time inventory census the Slack
+    // collector holds on. Running it here, ahead of the pass, normally
+    // completes it within the first tick after a deploy.
+    await runSlackDayPageCensus();
+  } catch (error) {
+    console.warn(
+      `${LOG_PREFIX} slack day-page census failed; slack collection stays held: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 
   let includeIncremental = true;

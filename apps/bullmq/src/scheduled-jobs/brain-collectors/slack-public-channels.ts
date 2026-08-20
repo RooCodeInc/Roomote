@@ -9,7 +9,9 @@ import { createSlackWebClient } from '@roomote/slack';
 
 import type {
   BrainCollector,
+  CollectorItemUpdate,
   CollectorPage,
+  CollectorPageRetirement,
   CollectorResult,
   CollectorStateUpdate,
 } from './contracts';
@@ -18,6 +20,10 @@ import {
   personIdentitySlug,
   type PersonIdentityReference,
 } from './identity';
+import {
+  isSlackDayPageCensusComplete,
+  reconcileSlackDayPages,
+} from './slack-day-page-inventory';
 
 const LOG_PREFIX = '[brainCollectors]';
 
@@ -358,6 +364,14 @@ async function collectSlackPublicChannelMessages(input: {
   now: Date;
   limit: number;
 }): Promise<CollectorResult> {
+  if (!(await isSlackDayPageCensusComplete())) {
+    // Emitting a day before its legacy slugs are in the inventory would let
+    // those pages dodge retirement forever, because nothing revisits a day
+    // once its watermark passes. Watermarks have not started, so holding
+    // costs ticks, never messages.
+    return { pages: [], nextSince: null };
+  }
+
   const userLabels = await loadSlackAuthorLabels();
   const installations = await db
     .select()
@@ -421,6 +435,8 @@ async function collectSlackPublicChannelMessages(input: {
 
   const pages: CollectorPage[] = [];
   const stateUpdates: CollectorStateUpdate[] = [];
+  const itemUpdates: CollectorItemUpdate[] = [];
+  const pageRetirements: CollectorPageRetirement[] = [];
   const nowMs = input.now.getTime();
 
   for (const entry of entriesWithState) {
@@ -533,6 +549,13 @@ async function collectSlackPublicChannelMessages(input: {
 
     pages.push(...channelPages);
 
+    const reconciliation = await reconcileSlackDayPages({
+      pages: channelPages,
+      now: input.now,
+    });
+    itemUpdates.push(...reconciliation.itemUpdates);
+    pageRetirements.push(...reconciliation.pageRetirements);
+
     if (complete) {
       stateUpdates.push({
         collectorId: entry.stateId,
@@ -541,7 +564,7 @@ async function collectSlackPublicChannelMessages(input: {
     }
   }
 
-  return { pages, nextSince: null, stateUpdates };
+  return { pages, nextSince: null, stateUpdates, itemUpdates, pageRetirements };
 }
 
 /** Deep backfill reaches back this far through channel history. */
@@ -609,9 +632,19 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
   pages: CollectorPage[];
   nextCursor: string | null;
   done: boolean;
+  itemUpdates?: CollectorItemUpdate[];
+  pageRetirements?: CollectorPageRetirement[];
 }> {
-  const userLabels = await loadSlackAuthorLabels();
   const noProgress = { pages: [], nextCursor: rawCursor, done: false };
+
+  if (!(await isSlackDayPageCensusComplete())) {
+    // Same hold as the incremental path: the deep backfill is the replay
+    // that heals old pages, and it must not re-emit a day while that day's
+    // legacy slugs are still invisible to retirement.
+    return noProgress;
+  }
+
+  const userLabels = await loadSlackAuthorLabels();
   const installations = await db
     .select()
     .from(slackInstallations)
@@ -736,6 +769,13 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
       userLabels,
     ),
   );
+  // One Slack history page is a contiguous time slice of the channel, which
+  // is exactly what the range-coverage retirement rule needs: a day chunk
+  // spanning two cursor pages stays until a pass covers its whole range.
+  const { itemUpdates, pageRetirements } = await reconcileSlackDayPages({
+    pages,
+    now: new Date(),
+  });
 
   if (nextSlackCursor) {
     return {
@@ -747,6 +787,8 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
         latest,
       }),
       done: false,
+      itemUpdates,
+      pageRetirements,
     };
   }
 
@@ -764,19 +806,22 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
       latest: null,
     }),
     done: false,
+    itemUpdates,
+    pageRetirements,
   };
 }
 
 /** Exported for the fake-Slack integration test, which drives it directly. */
 export const slackPublicChannelsCollector: BrainCollector = {
-  // Deliberately NOT version-bumped for the title-heading change: a page's
-  // slug embeds the first/last message timestamps of the batch that emitted
-  // it, and batch boundaries depend on when past incremental reads ran. A
-  // replay would group whole days at once, mint different slugs, and leave
-  // the old timestamp-titled pages standing next to duplicates of their
-  // content. Healing existing pages needs slug retirement (collector-item
-  // tracking plus a reconciliation sweep), not a replay.
-  id: 'slack-public-channels:entity-timeline-v2',
+  // v3 is the healing replay the title-heading change (#1486) could not have:
+  // back then a replay would have minted different slugs (batch boundaries
+  // depend on when past reads ran) and left the old timestamp-titled pages
+  // standing next to duplicates. With the day-page inventory, the census,
+  // and range-coverage retirement in place, the replay's re-emissions now
+  // retire the pages they supersede. Pages older than the 90-day backfill
+  // window are never re-read and deliberately stay: they may hold history
+  // Slack no longer serves.
+  id: 'slack-public-channels:entity-timeline-v3',
   displayName: 'Slack public channels',
   async isEnabled() {
     const installation = await db.query.slackInstallations.findFirst({

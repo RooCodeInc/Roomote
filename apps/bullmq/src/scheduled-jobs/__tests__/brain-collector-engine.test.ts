@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   deleteBrainCollectorItems,
@@ -9,10 +9,14 @@ import {
 import { runBrainCollectors } from '../brain-collectors';
 import type {
   BrainCollector,
+  BrainRetireSink,
   BrainSink,
   CollectorPage,
 } from '../brain-collectors/contracts';
-import { writeCollectorPages } from '../brain-collectors/write-pages';
+import {
+  retireBrainPage,
+  writeCollectorPages,
+} from '../brain-collectors/write-pages';
 import { BrainRateLimitedError } from '../brain-outbox-drain';
 
 type FakeSyncState = {
@@ -128,6 +132,47 @@ describe('writeCollectorPages', () => {
   });
 });
 
+describe('retireBrainPage', () => {
+  const originalFetch = global.fetch;
+
+  afterEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  function bodyOf(status: number, body: string) {
+    global.fetch = vi.fn(
+      async () => new Response(body, { status }),
+    ) as unknown as typeof fetch;
+  }
+
+  it('treats an already-deleted page as retired', async () => {
+    bodyOf(
+      200,
+      '{"jsonrpc":"2.0","id":1,"result":{"isError":true,"content":[{"type":"text","text":"page_not_found: slack/T1/C1"}]}}',
+    );
+
+    await expect(
+      retireBrainPage('slack/T1/C1/2026-08-13/1-0-2-0', connection),
+    ).resolves.toBeUndefined();
+  });
+
+  it('keeps backpressure typed so the engine ends the pass', async () => {
+    bodyOf(429, 'rate limited');
+
+    await expect(
+      retireBrainPage('slack/T1/C1/2026-08-13/1-0-2-0', connection),
+    ).rejects.toBeInstanceOf(BrainRateLimitedError);
+  });
+
+  it('propagates other failures', async () => {
+    bodyOf(500, 'internal error');
+
+    await expect(
+      retireBrainPage('slack/T1/C1/2026-08-13/1-0-2-0', connection),
+    ).rejects.toThrow('delete_page failed');
+  });
+});
+
 describe('runBrainCollectors', () => {
   it('advances the watermark between runs', async () => {
     const firstNextSince = new Date('2026-08-13T10:00:00Z');
@@ -229,6 +274,113 @@ describe('runBrainCollectors', () => {
       'notion-pages',
       ['revoked-page'],
     );
+  });
+
+  it('retires superseded pages once the batch has landed', async () => {
+    const order: string[] = [];
+    const collector = makeCollector({
+      collect: async () => ({
+        pages: makePages(1),
+        nextSince: null,
+        pageRetirements: [
+          {
+            collectorId: 'slack-public-channels:day-pages',
+            itemId: 'slack/T1/C1/2026-08-13/1-0-2-0',
+            slug: 'slack/T1/C1/2026-08-13/1-0-2-0',
+          },
+        ],
+      }),
+    });
+    const sink: BrainSink = vi.fn(async (page) => {
+      order.push(`write:${page.slug}`);
+    });
+    const retireSink: BrainRetireSink = vi.fn(async (slug) => {
+      order.push(`retire:${slug}`);
+    });
+
+    await runBrainCollectors(connection, {
+      sink,
+      retireSink,
+      collectors: [collector],
+    });
+
+    // The superseding page lands before the superseded one goes, and only a
+    // successful retirement drops the inventory row.
+    expect(order).toEqual([
+      'write:page/0',
+      'retire:slack/T1/C1/2026-08-13/1-0-2-0',
+    ]);
+    expect(mockedDeleteCollectorItems).toHaveBeenCalledWith(
+      expect.anything(),
+      'slack-public-channels:day-pages',
+      ['slack/T1/C1/2026-08-13/1-0-2-0'],
+    );
+  });
+
+  it('holds retirements when a page fails', async () => {
+    const retireSink: BrainRetireSink = vi.fn(async () => {});
+    const collector = makeCollector({
+      collect: async () => ({
+        pages: makePages(1),
+        nextSince: null,
+        pageRetirements: [{ collectorId: 'c', itemId: 'i', slug: 'slack/old' }],
+      }),
+    });
+
+    await runBrainCollectors(connection, {
+      sink: vi.fn(async () => {
+        throw new Error('boom');
+      }),
+      retireSink,
+      collectors: [collector],
+    });
+
+    expect(retireSink).not.toHaveBeenCalled();
+    expect(mockedDeleteCollectorItems).not.toHaveBeenCalled();
+  });
+
+  it('holds retirements when the collector overshoots the page cap', async () => {
+    // On overshoot part of the emission never landed, so pages the dropped
+    // remainder would have superseded must stay until it does.
+    const retireSink: BrainRetireSink = vi.fn(async () => {});
+    const collector = makeCollector({
+      collect: async () => ({
+        pages: makePages(150),
+        nextSince: null,
+        pageRetirements: [{ collectorId: 'c', itemId: 'i', slug: 'slack/old' }],
+      }),
+    });
+
+    await runBrainCollectors(connection, {
+      sink: vi.fn(async () => {}),
+      retireSink,
+      collectors: [collector],
+    });
+
+    expect(retireSink).not.toHaveBeenCalled();
+  });
+
+  it('keeps the inventory row when a retirement fails, and holds state', async () => {
+    const collector = makeCollector({
+      collect: async () => ({
+        pages: makePages(1),
+        nextSince: new Date('2026-08-13T10:00:00Z'),
+        pageRetirements: [{ collectorId: 'c', itemId: 'i', slug: 'slack/old' }],
+      }),
+    });
+
+    await runBrainCollectors(connection, {
+      sink: vi.fn(async () => {}),
+      retireSink: vi.fn(async () => {
+        throw new Error('delete_page exploded');
+      }),
+      collectors: [collector],
+    });
+
+    // The failed retirement is retried next pass: its row survives and the
+    // watermark stays behind so the same window is recomputed.
+    expect(mockedDeleteCollectorItems).not.toHaveBeenCalled();
+    expect(syncStateStore.get(collector.id)).toBeUndefined();
   });
 
   it('holds collector inventory changes when a page fails', async () => {
@@ -566,6 +718,54 @@ describe('runBrainCollectors deep backfill', () => {
     // The first step's cursor landed; the failed second step's did not.
     expect(syncStateStore.get(collector.id)?.backfillCursor).toBe('c1');
     expect(syncStateStore.get(collector.id)?.backfillCompletedAt).toBeNull();
+  });
+
+  it("retires a step's superseded pages before its cursor persists", async () => {
+    const retireSink: BrainRetireSink = vi
+      .fn<BrainRetireSink>()
+      .mockRejectedValueOnce(new Error('delete_page exploded'))
+      .mockResolvedValue(undefined);
+    const backfill = vi
+      .fn<NonNullable<BrainCollector['backfill']>>()
+      .mockImplementation(async ({ cursor }) =>
+        cursor === null
+          ? {
+              pages: makePages(1, 'replay'),
+              nextCursor: 'c1',
+              done: false,
+              pageRetirements: [
+                { collectorId: 'c', itemId: 'i', slug: 'slack/old' },
+              ],
+            }
+          : { pages: [], nextCursor: cursor, done: false },
+      );
+    const collector = makeCollector({
+      collect: async () => ({ pages: [], nextSince: null }),
+      backfill,
+    });
+
+    await runBrainCollectors(connection, {
+      sink: vi.fn(async () => {}),
+      retireSink,
+      collectors: [collector],
+    });
+
+    // The failed retirement held the cursor, so the same step re-runs.
+    expect(syncStateStore.get(collector.id)?.backfillCursor).toBeUndefined();
+
+    await runBrainCollectors(connection, {
+      sink: vi.fn(async () => {}),
+      retireSink,
+      collectors: [collector],
+    });
+
+    expect(retireSink).toHaveBeenCalledTimes(2);
+    expect(syncStateStore.get(collector.id)?.backfillCursor).toBe('c1');
+    expect(mockedDeleteCollectorItems).toHaveBeenCalledWith(
+      expect.anything(),
+      'c',
+      ['i'],
+    );
   });
 
   it('marks the backfill complete when a step reports done', async () => {
