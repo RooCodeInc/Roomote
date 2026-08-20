@@ -382,3 +382,4 @@ export * from './lib/brain-corpus';
 export * from './lib/brain-mcp';
 export * from './lib/brain-github';
 export * from './lib/brain-inference';
+export * from './lib/brain-source-availability';

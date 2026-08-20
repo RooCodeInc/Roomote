@@ -1,10 +1,9 @@
-import { and, db, eq, isNull, mcpConnections } from '@roomote/db/server';
 import { decrypt } from '@roomote/db/encryption';
 import {
-  brainNamespacePrefix,
-  isMcpConnectionGranolaConfig,
-  type McpConnectionGranolaConfig,
-} from '@roomote/types';
+  findBrainSourceConnectionConfig,
+  isBrainSourceAvailable,
+} from '@roomote/sdk/server';
+import { brainNamespacePrefix } from '@roomote/types';
 
 import type { BrainCollector, CollectorPage } from './contracts';
 import {
@@ -250,26 +249,11 @@ async function hydrateGranolaNotes(
   return details;
 }
 
-async function findGranolaConnectionConfig(): Promise<McpConnectionGranolaConfig | null> {
-  const connection = await db.query.mcpConnections.findFirst({
-    where: and(
-      eq(mcpConnections.mcpId, 'granola'),
-      isNull(mcpConnections.userId),
-      eq(mcpConnections.enabled, true),
-      eq(mcpConnections.authStatus, 'authenticated'),
-    ),
-  });
-
-  return isMcpConnectionGranolaConfig(connection?.authConfig)
-    ? connection.authConfig
-    : null;
-}
-
 async function collectGranolaMeetings(input: {
   since: Date | null;
   limit: number;
 }): Promise<{ pages: CollectorPage[]; nextSince: Date | null }> {
-  const config = await findGranolaConnectionConfig();
+  const config = await findBrainSourceConnectionConfig('granola');
 
   if (!config) {
     return { pages: [], nextSince: null };
@@ -387,7 +371,7 @@ async function backfillGranolaNotesStep(cursor: string | null): Promise<{
   done: boolean;
 }> {
   const noProgress = { pages: [], nextCursor: cursor, done: false };
-  const config = await findGranolaConnectionConfig();
+  const config = await findBrainSourceConnectionConfig('granola');
 
   if (!config) {
     return noProgress;
@@ -460,7 +444,7 @@ export const granolaMeetingsCollector: BrainCollector = {
   id: GRANOLA_MEETINGS_COLLECTOR_ID,
   displayName: 'Granola meeting notes',
   async isEnabled() {
-    return Boolean(await findGranolaConnectionConfig());
+    return isBrainSourceAvailable('granola');
   },
   async collect({ since, limit }) {
     return collectGranolaMeetings({ since, limit });

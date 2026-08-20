@@ -1,18 +1,16 @@
 import {
-  and,
   db,
-  deploymentMcpEnablements,
-  eq,
   getBrainSyncState,
-  isNull,
   listBrainCollectorItems,
   listBrainCollectorItemsBefore,
-  mcpConnections,
 } from '@roomote/db/server';
+import {
+  findBrainSourceConnectionConfig,
+  isBrainSourceAvailable,
+} from '@roomote/sdk/server';
 import { ripplingApiRequestJson } from '@roomote/sdk/server/rippling-api';
 import {
   brainNamespacePrefix,
-  isMcpConnectionRipplingConfig,
   type McpConnectionRipplingConfig,
 } from '@roomote/types';
 import { createHash } from 'node:crypto';
@@ -413,30 +411,6 @@ export function buildUnavailableRipplingWorkerPage(item: {
   };
 }
 
-async function findRipplingConnectionConfig(): Promise<McpConnectionRipplingConfig | null> {
-  const [connection, enablement] = await Promise.all([
-    db.query.mcpConnections.findFirst({
-      where: and(
-        eq(mcpConnections.mcpId, 'rippling'),
-        isNull(mcpConnections.userId),
-        eq(mcpConnections.enabled, true),
-        eq(mcpConnections.authStatus, 'authenticated'),
-      ),
-    }),
-    db.query.deploymentMcpEnablements.findFirst({
-      where: and(
-        eq(deploymentMcpEnablements.mcpId, 'rippling'),
-        eq(deploymentMcpEnablements.enabled, true),
-      ),
-      columns: { mcpId: true },
-    }),
-  ]);
-
-  return enablement && isMcpConnectionRipplingConfig(connection?.authConfig)
-    ? connection.authConfig
-    : null;
-}
-
 async function collectRipplingReconciliation(
   startedAt: Date,
   limit: number,
@@ -600,14 +574,14 @@ export const ripplingWorkersCollector: BrainCollector = {
   id: RIPPLING_WORKERS_COLLECTOR_ID,
   displayName: 'Rippling employee directory',
   async isEnabled() {
-    const [config, tracked] = await Promise.all([
-      findRipplingConnectionConfig(),
+    const [available, tracked] = await Promise.all([
+      isBrainSourceAvailable('rippling'),
       listBrainCollectorItems(db, RIPPLING_WORKERS_COLLECTOR_ID, 1),
     ]);
-    return Boolean(config || tracked.length > 0);
+    return available || tracked.length > 0;
   },
   async collect({ now, limit }) {
-    const config = await findRipplingConnectionConfig();
+    const config = await findBrainSourceConnectionConfig('rippling');
     return config
       ? collectRipplingWorkers({ config, now, limit })
       : collectDisabledRipplingWorkers(limit);
