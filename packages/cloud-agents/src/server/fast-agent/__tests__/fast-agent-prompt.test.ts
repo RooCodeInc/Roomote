@@ -158,6 +158,12 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'Fall back to the pull request title and metadata only when that context is absent or unusable',
     );
+    expect(prompt).toContain(
+      'Pull-request-status-changed events contain an authoritative merged or closed status',
+    );
+    expect(prompt).toContain(
+      'Do not describe a closed pull request as merged or a merged pull request as merely closed',
+    );
   });
 
   it('does not offer retry when the platform event is ineligible', () => {
