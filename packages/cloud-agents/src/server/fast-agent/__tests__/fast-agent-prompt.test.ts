@@ -35,6 +35,9 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain(
       'These reads use the same deployment authorization semantics as delegated Roomote tasks.',
     );
+    expect(prompt).toContain(
+      'Use "launch_task", "send_task_message", or "cancel_task" for task changes',
+    );
     expect(prompt).not.toContain('roomote_fast_');
     expect(prompt).toContain(
       'Tool arguments, results, and reasoning are retained natively',

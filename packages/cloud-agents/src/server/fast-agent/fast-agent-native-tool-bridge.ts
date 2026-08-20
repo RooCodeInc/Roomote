@@ -138,7 +138,7 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Inspect tasks in this Roomote deployment using the same read-only task actions and authorization semantics available to delegated Roomote tasks. Search task history, inspect status and failure details, read transcript messages, or fetch compute output where supported.",
+  description: "Inspect tasks in this Roomote deployment using the same read-only task actions and authorization semantics available to delegated Roomote tasks. Search task history, inspect status and failure details, read transcript messages, or fetch compute output where supported. Use launch_task, send_task_message, or cancel_task for task changes so Fast conversation orchestration is preserved.",
   args: {
     action: z.enum(${JSON.stringify(ROOMOTE_TASK_INSPECTION_ACTIONS)}),
     taskId: z.string().optional().describe("The task ID (required for get_summary, get_compute_logs, and get_messages)"),

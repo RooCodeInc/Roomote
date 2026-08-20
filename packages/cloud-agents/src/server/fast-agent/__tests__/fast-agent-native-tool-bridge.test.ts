@@ -44,6 +44,9 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(manageTasksSource).toContain(
       `z.enum(${JSON.stringify(ROOMOTE_TASK_INSPECTION_ACTIONS)})`,
     );
+    expect(manageTasksSource).toContain(
+      'Use launch_task, send_task_message, or cancel_task for task changes',
+    );
     expect(bridgeSource).toContain('context.sessionID');
     expect(bridgeSource).toContain('metadata: { roomoteResult:');
     expect(FAST_AGENT_NATIVE_TOOL_FILTER).toMatchObject({
