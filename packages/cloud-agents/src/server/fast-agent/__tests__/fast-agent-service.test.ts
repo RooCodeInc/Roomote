@@ -1,7 +1,6 @@
 const mocks = vi.hoisted(() => ({
   appendVisibleMessages: vi.fn(),
   getActiveTasks: vi.fn(),
-  getTaskIds: vi.fn(),
   getSession: vi.fn(),
   getEnvironments: vi.fn(),
   generateText: vi.fn(),
@@ -40,7 +39,6 @@ const nativeToolNames = vi.hoisted(
 vi.mock('../fast-agent-session', () => ({
   appendFastAgentVisibleMessages: mocks.appendVisibleMessages,
   getActiveFastAgentTasks: mocks.getActiveTasks,
-  getFastAgentTaskIds: mocks.getTaskIds,
   getOrCreateFastAgentSession: mocks.getSession,
 }));
 
@@ -161,7 +159,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       compatibilityMessages: [],
     });
     mocks.getActiveTasks.mockResolvedValue([]);
-    mocks.getTaskIds.mockResolvedValue([]);
     mocks.getEnvironments.mockResolvedValue([
       {
         id: 'env-1',
@@ -486,8 +483,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('inspects only task IDs linked to the current Fast conversation', async () => {
-    mocks.getTaskIds.mockResolvedValue(['task-1', 'task-completed']);
+  it('uses deployment-wide task inspection without a conversation allow-list', async () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
@@ -508,7 +504,6 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.inspectTasks).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
       { action: 'get_summary', taskId: 'task-completed' },
-      new Set(['task-1', 'task-completed']),
     );
   });
 

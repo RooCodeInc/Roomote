@@ -5,10 +5,7 @@ import {
   type FastAgentParent,
 } from '@roomote/types';
 
-import {
-  getActiveFastAgentTasks,
-  getFastAgentTaskIds,
-} from '../fast-agent-session';
+import { getActiveFastAgentTasks } from '../fast-agent-session';
 
 const SESSION_ID = '7cc5bc38-9edc-4cb0-9fde-f6e44b32d66e';
 const OTHER_SESSION_ID = 'c1370cca-235f-43bf-9c26-e6f71f3ce2cc';
@@ -141,15 +138,6 @@ describe('getActiveFastAgentTasks', () => {
         status: RunStatus.Processing,
       },
     ]);
-    await expect(getFastAgentTaskIds(SESSION_ID)).resolves.toEqual(
-      expect.arrayContaining([
-        docsTask.id,
-        apiTask.id,
-        settledTask.id,
-        canceledTask.id,
-      ]),
-    );
-    await expect(getFastAgentTaskIds(SESSION_ID)).resolves.toHaveLength(4);
   });
 
   it('uses only the provider-neutral Fast session link', async () => {

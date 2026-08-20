@@ -18,7 +18,6 @@ import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import {
   appendFastAgentVisibleMessages,
   getActiveFastAgentTasks,
-  getFastAgentTaskIds,
   getOrCreateFastAgentSession,
   type FastAgentActiveTask,
 } from './fast-agent-session';
@@ -529,10 +528,7 @@ export async function answerFastAgentQuestion({
         }),
       ]);
     canonicalConversationId = session.id;
-    const [sessionActiveTasks, sessionTaskIds] = await Promise.all([
-      getActiveFastAgentTasks(session.id),
-      getFastAgentTaskIds(session.id),
-    ]);
+    const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
     const resolvedActiveTasks = [
       ...new Map(
         [...activeTasks, ...sessionActiveTasks].map((task) => [
@@ -544,7 +540,6 @@ export async function answerFastAgentQuestion({
     const currentActiveTasks = new Map(
       resolvedActiveTasks.map((task) => [task.taskId, task]),
     );
-    const inspectableTaskIds = new Set(sessionTaskIds);
     const { bootstrapMessages, turnMessage } = buildFastAgentMessages({
       question,
       currentMessageAgentContext,
@@ -786,7 +781,6 @@ export async function answerFastAgentQuestion({
             });
             if (result.success) {
               currentActiveTasks.set(result.taskId, { taskId: result.taskId });
-              inspectableTaskIds.add(result.taskId);
               if (!kickoffDelivered) {
                 await deliverKickoff(result);
               }
@@ -796,11 +790,7 @@ export async function answerFastAgentQuestion({
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.manageTasks: {
             const args = roomoteTaskInspectionArgsSchema.parse(call.args);
-            return inspectFastAgentTasks(
-              { userId, apiBaseUrl },
-              args,
-              inspectableTaskIds,
-            );
+            return inspectFastAgentTasks({ userId, apiBaseUrl }, args);
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage: {

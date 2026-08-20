@@ -33,7 +33,7 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('manage_tasks');
     expect(prompt).toContain('integration_call');
     expect(prompt).toContain(
-      "Search and direct reads are limited to this conversation's delegated tasks.",
+      'These reads use the same deployment authorization semantics as delegated Roomote tasks.',
     );
     expect(prompt).not.toContain('roomote_fast_');
     expect(prompt).toContain(

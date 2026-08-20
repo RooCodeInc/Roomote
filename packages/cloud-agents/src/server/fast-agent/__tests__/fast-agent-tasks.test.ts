@@ -39,7 +39,7 @@ describe('fast-agent task operations', () => {
     );
   });
 
-  it('uses the existing task API with a hidden conversation task filter', async () => {
+  it('searches deployment tasks through the existing task API', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ tasks: [], hasMore: false }), {
         status: 200,
@@ -54,44 +54,72 @@ describe('fast-agent task operations', () => {
         apiBaseUrl: 'https://app.example.test/_roomote-api',
         getAuthToken: async () => 'auth-token',
       },
-      { action: 'search', query: 'checkout', status: 'active' },
-      new Set(['task-1', 'task-2']),
+      {
+        action: 'search',
+        query: 'checkout',
+        status: 'active',
+        pullRequest: 'acme/app#42',
+        limit: 25,
+        cursor: '100:task-1',
+      },
     );
 
     const calledUrl = new URL(fetchMock.mock.calls[0]![0] as string);
     expect(calledUrl.pathname).toBe('/_roomote-api/api/mcp/tasks');
     expect(calledUrl.searchParams.get('query')).toBe('checkout');
     expect(calledUrl.searchParams.get('status')).toBe('active');
-    expect(calledUrl.searchParams.get('taskIds')).toBe('task-1,task-2');
+    expect(calledUrl.searchParams.get('pullRequest')).toBe('acme/app#42');
+    expect(calledUrl.searchParams.get('limit')).toBe('25');
+    expect(calledUrl.searchParams.get('cursor')).toBe('100:task-1');
+    expect(calledUrl.searchParams.has('taskIds')).toBe(false);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it('merges bounded scoped searches in global activity order', async () => {
-    const allowedTaskIds = new Set(
-      Array.from({ length: 101 }, (_, index) => `task-${index}`),
-    );
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            tasks: [
-              { id: 'task-1', lastMessageAt: 10 },
-              { id: 'task-2', lastMessageAt: 30 },
-            ],
-            hasMore: false,
-          }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            tasks: [{ id: 'task-100', lastMessageAt: 20 }],
-            hasMore: true,
-          }),
-          { status: 200, headers: { 'content-type': 'application/json' } },
-        ),
+  it.each([
+    ['get_summary', 'summary'],
+    ['get_messages', 'messages'],
+    ['get_compute_logs', 'compute_logs'],
+  ] as const)(
+    'passes deployment task %s reads through to the existing API',
+    async (action, path) => {
+      const fetchMock = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ id: 'task-from-another-conversation' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
       );
+      vi.stubGlobal('fetch', fetchMock);
+
+      await inspectFastAgentTasks(
+        {
+          userId: 'user-1',
+          apiBaseUrl: 'https://api.example.test',
+          getAuthToken: async () => 'auth-token',
+        },
+        { action, taskId: 'task-from-another-conversation', limit: 5 },
+      );
+
+      const calledUrl = new URL(fetchMock.mock.calls[0]![0] as string);
+      expect(calledUrl.pathname).toBe(
+        `/api/mcp/tasks/task-from-another-conversation/${path}`,
+      );
+      if (action === 'get_messages') {
+        expect(calledUrl.searchParams.get('limit')).toBe('5');
+        expect(calledUrl.searchParams.get('order')).toBe('desc');
+      } else {
+        expect(calledUrl.search).toBe('');
+      }
+      expect(fetchMock).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('returns normal task API authorization errors unchanged', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'Task not found' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(
@@ -101,68 +129,8 @@ describe('fast-agent task operations', () => {
           apiBaseUrl: 'https://api.example.test',
           getAuthToken: async () => 'auth-token',
         },
-        { action: 'search', limit: 2 },
-        allowedTaskIds,
+        { action: 'get_summary', taskId: 'hidden-task' },
       ),
-    ).resolves.toEqual({
-      tasks: [
-        { id: 'task-2', lastMessageAt: 30 },
-        { id: 'task-100', lastMessageAt: 20 },
-      ],
-      hasMore: true,
-      nextCursor: '20:task-100',
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    ).resolves.toEqual({ error: 'Task not found' });
   });
-
-  it('searches conversations with more than 1,000 delegated tasks in bounded chunks', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ tasks: [], hasMore: false }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-
-    await inspectFastAgentTasks(
-      {
-        userId: 'user-1',
-        apiBaseUrl: 'https://api.example.test',
-        getAuthToken: async () => 'auth-token',
-      },
-      { action: 'search' },
-      new Set(Array.from({ length: 1001 }, (_, index) => `task-${index}`)),
-    );
-
-    expect(fetchMock).toHaveBeenCalledTimes(11);
-    for (const [url] of fetchMock.mock.calls) {
-      expect(
-        new URL(url as string).searchParams.get('taskIds')!.split(',').length,
-      ).toBeLessThanOrEqual(100);
-    }
-  });
-
-  it.each(['get_summary', 'get_messages', 'get_compute_logs'] as const)(
-    'rejects unlinked %s inspection before calling the task API',
-    async (action) => {
-      const fetchMock = vi.fn();
-      vi.stubGlobal('fetch', fetchMock);
-
-      await expect(
-        inspectFastAgentTasks(
-          {
-            userId: 'user-1',
-            apiBaseUrl: 'https://api.example.test',
-            getAuthToken: async () => 'auth-token',
-          },
-          { action, taskId: 'task-from-other-thread' },
-          new Set(['task-1']),
-        ),
-      ).resolves.toEqual({
-        success: false,
-        error: 'That task was not delegated by this Fast conversation.',
-      });
-      expect(fetchMock).not.toHaveBeenCalled();
-    },
-  );
 });
