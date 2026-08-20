@@ -32,12 +32,24 @@ export type CollectorItemDelete = {
   itemIds: string[];
 };
 
+/**
+ * A previously emitted page this pass supersedes. The engine soft-deletes it
+ * from the Brain (gbrain keeps a recovery window) and then drops its
+ * inventory row, only after this pass's own pages have landed.
+ */
+export type CollectorPageRetirement = {
+  collectorId: string;
+  itemId: string;
+  slug: string;
+};
+
 export type CollectorResult = {
   pages: CollectorPage[];
   nextSince: Date | null;
   stateUpdates?: CollectorStateUpdate[];
   itemUpdates?: CollectorItemUpdate[];
   itemDeletes?: CollectorItemDelete[];
+  pageRetirements?: CollectorPageRetirement[];
 };
 
 export interface BrainCollector {
@@ -54,6 +66,7 @@ export interface BrainCollector {
     nextCursor: string | null;
     done: boolean;
     itemUpdates?: CollectorItemUpdate[];
+    pageRetirements?: CollectorPageRetirement[];
   }>;
 }
 
@@ -66,5 +79,10 @@ export type BrainSink = (
 
 export type BrainTimelineSink = (
   evidence: EntityTimelineEvidence,
+  connection: BrainConnection,
+) => Promise<void>;
+
+export type BrainRetireSink = (
+  slug: string,
   connection: BrainConnection,
 ) => Promise<void>;

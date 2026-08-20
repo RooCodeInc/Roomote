@@ -14,12 +14,15 @@ import {
 import type {
   BrainCollector,
   BrainConnection,
+  BrainRetireSink,
   BrainSink,
   BrainTimelineSink,
   CollectorItemUpdate,
+  CollectorPageRetirement,
 } from './brain-collectors/contracts';
 import {
   appendBrainTimelineEvidence,
+  retireBrainPage,
   writeCollectorPages,
 } from './brain-collectors/write-pages';
 import { githubIssuesCollector } from './brain-collectors/github-issues';
@@ -52,6 +55,25 @@ async function persistCollectorItemUpdates(
 
   for (const [collectorId, items] of byCollector) {
     await upsertBrainCollectorItems(db, collectorId, items);
+  }
+}
+
+/**
+ * Soft-delete superseded pages, dropping each inventory row only once its
+ * page retirement succeeded. Row by row on purpose: a failure mid-list keeps
+ * every completed retirement durable, and the retire sink tolerates a page
+ * that is already gone, so the retry converges.
+ */
+async function retireCollectorPages(
+  retirements: CollectorPageRetirement[],
+  connection: BrainConnection,
+  retireSink: BrainRetireSink,
+): Promise<void> {
+  for (const retirement of retirements) {
+    await retireSink(retirement.slug, connection);
+    await deleteBrainCollectorItems(db, retirement.collectorId, [
+      retirement.itemId,
+    ]);
   }
 }
 
@@ -108,6 +130,7 @@ export async function runBrainCollectors(
   options: {
     sink?: BrainSink;
     timelineSink?: BrainTimelineSink;
+    retireSink?: BrainRetireSink;
     collectors?: BrainCollector[];
     /** Skip upstream incremental polls during fast historical continuation. */
     includeIncremental?: boolean;
@@ -115,6 +138,7 @@ export async function runBrainCollectors(
 ): Promise<BrainCollectorRunResult> {
   const sink = options.sink ?? postToBrain;
   const timelineSink = options.timelineSink ?? appendBrainTimelineEvidence;
+  const retireSink = options.retireSink ?? retireBrainPage;
   const collectors = options.collectors ?? BRAIN_COLLECTORS;
   const includeIncremental = options.includeIncremental ?? true;
   let backfillProgressed = false;
@@ -137,6 +161,7 @@ export async function runBrainCollectors(
           stateUpdates = [],
           itemUpdates = [],
           itemDeletes = [],
+          pageRetirements = [],
         } = await collector.collect({
           since: state?.watermark ?? null,
           now: new Date(),
@@ -158,15 +183,24 @@ export async function runBrainCollectors(
           );
         }
 
-        // Advance only after every page landed; a mid-batch failure leaves the
-        // watermark behind so the next tick retries the same idempotent slugs.
-        if (nextSince && !overshot) {
-          await upsertBrainSyncState(db, collector.id, {
-            watermark: nextSince,
-          });
-        }
-
         if (!overshot) {
+          // Retirements were computed against the full emission; on overshoot
+          // part of that emission never landed, so retiring would delete
+          // pages whose replacements do not exist yet. Superseded pages come
+          // out only after every superseding page is in — and before any
+          // watermark advances, so a failed retirement is recomputed from the
+          // same window next tick instead of being lost behind a checkpoint.
+          await retireCollectorPages(pageRetirements, connection, retireSink);
+
+          // Advance only after every page landed; a mid-batch failure leaves
+          // the watermark behind so the next tick retries the same
+          // idempotent slugs.
+          if (nextSince) {
+            await upsertBrainSyncState(db, collector.id, {
+              watermark: nextSince,
+            });
+          }
+
           await persistCollectorItemUpdates(itemUpdates);
           for (const deletion of itemDeletes) {
             await deleteBrainCollectorItems(
@@ -208,6 +242,7 @@ export async function runBrainCollectors(
             connection,
             sink,
             timelineSink,
+            retireSink,
           })) || backfillProgressed;
       }
     } catch (error) {
@@ -247,9 +282,17 @@ async function drainCollectorBackfill(input: {
   connection: BrainConnection;
   sink: BrainSink;
   timelineSink: BrainTimelineSink;
+  retireSink: BrainRetireSink;
 }): Promise<boolean> {
-  const { collectorId, backfill, startCursor, connection, sink, timelineSink } =
-    input;
+  const {
+    collectorId,
+    backfill,
+    startCursor,
+    connection,
+    sink,
+    timelineSink,
+    retireSink,
+  } = input;
   let cursor = startCursor;
   let budget = MAX_BACKFILL_PAGES_PER_COLLECTOR_PER_PASS;
   let steps = 0;
@@ -267,6 +310,11 @@ async function drainCollectorBackfill(input: {
     });
 
     await persistCollectorItemUpdates(step.itemUpdates ?? []);
+    await retireCollectorPages(
+      step.pageRetirements ?? [],
+      connection,
+      retireSink,
+    );
 
     budget -= step.pages.length;
     ingested += step.pages.length;

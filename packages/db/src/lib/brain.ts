@@ -1,4 +1,4 @@
-import { and, count, desc, eq, inArray, lt, max, sql } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, like, lt, max, sql } from 'drizzle-orm';
 import { MISSING_MEMORY_EVENT_COUNT_CAP, RunStatus } from '@roomote/types';
 
 import { type DatabaseOrTransaction } from '../db';
@@ -32,6 +32,56 @@ export async function upsertBrainCollectorItems(
         updatedAt: sql`now()`,
       },
     });
+}
+
+/**
+ * Record inventory rows without touching ones that already exist. This is the
+ * census path: a one-time walk over the Brain's listing seeds pages emitted
+ * before item tracking existed, and must never overwrite the fresher
+ * lastSeenAt a live collector wrote for the same slug.
+ */
+export async function seedBrainCollectorItems(
+  database: DatabaseOrTransaction,
+  collectorId: string,
+  items: Array<{ itemId: string; slug: string; lastSeenAt: Date }>,
+): Promise<void> {
+  if (items.length === 0) {
+    return;
+  }
+
+  await database
+    .insert(brainCollectorItems)
+    .values(items.map((item) => ({ collectorId, ...item })))
+    .onConflictDoNothing({
+      target: [brainCollectorItems.collectorId, brainCollectorItems.itemId],
+    });
+}
+
+/**
+ * Inventory rows whose itemId starts with a literal prefix. gbrain's
+ * list_pages has no slug-prefix filter, so collectors that key items by slug
+ * (itemId = slug) use this local inventory to find the pages they previously
+ * emitted under a namespace, e.g. one Slack channel-day.
+ */
+export async function listBrainCollectorItemsBySlugPrefix(
+  database: DatabaseOrTransaction,
+  collectorId: string,
+  slugPrefix: string,
+  limit: number,
+): Promise<BrainCollectorItemRow[]> {
+  const literalPrefix = slugPrefix.replace(/[\\%_]/g, (char) => `\\${char}`);
+
+  return database
+    .select()
+    .from(brainCollectorItems)
+    .where(
+      and(
+        eq(brainCollectorItems.collectorId, collectorId),
+        like(brainCollectorItems.itemId, `${literalPrefix}%`),
+      ),
+    )
+    .orderBy(brainCollectorItems.itemId)
+    .limit(limit);
 }
 
 export async function listBrainCollectorItemsBefore(
