@@ -433,6 +433,101 @@ describe('writeSourceControlPullRequestForTaskRun', () => {
     });
   });
 
+  it('maps an explicit GitHub change-request review to REQUEST_CHANGES', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const createReview = vi.fn().mockResolvedValue({
+      data: {
+        id: 900,
+        html_url:
+          'https://github.com/acme/backend/pull/55#pullrequestreview-900',
+      },
+    });
+    mockGetOctokit.mockReturnValue({
+      rest: { pulls: { createReview } },
+    });
+
+    await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'github',
+      }),
+      input: {
+        action: 'submit_pull_request_review',
+        repositoryFullName: 'acme/backend',
+        prNumber: 55,
+        reviewEvent: 'request_changes',
+        body: 'Please address the findings.',
+        sourceControlProvider: 'github',
+      },
+    });
+
+    expect(createReview).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'backend',
+      pull_number: 55,
+      event: 'REQUEST_CHANGES',
+      body: 'Please address the findings.',
+    });
+  });
+
+  it('dismisses a GitHub change-request review through the installation token', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const dismissReview = vi.fn().mockResolvedValue({
+      data: {
+        id: 901,
+        html_url:
+          'https://github.com/acme/backend/pull/55#pullrequestreview-901',
+      },
+    });
+    mockGetOctokit.mockReturnValue({
+      rest: { pulls: { dismissReview } },
+    });
+
+    const result = await writeSourceControlPullRequestForTaskRun({
+      taskRun: makeTaskRun({
+        repo: 'acme/backend',
+        sourceControlProvider: 'github',
+      }),
+      input: {
+        action: 'dismiss_pull_request_review',
+        repositoryFullName: 'acme/backend',
+        prNumber: 55,
+        reviewId: '901',
+        body: 'Requested changes have been addressed.',
+        sourceControlProvider: 'github',
+      },
+    });
+
+    expect(dismissReview).toHaveBeenCalledWith({
+      owner: 'acme',
+      repo: 'backend',
+      pull_number: 55,
+      review_id: 901,
+      message: 'Requested changes have been addressed.',
+    });
+    expect(result).toMatchObject({
+      success: true,
+      action: 'dismiss_pull_request_review',
+      provider: 'github',
+      number: 55,
+      commentId: '901',
+      applied: true,
+      warnings: [],
+    });
+  });
+
   it('updates a GitLab note in place through the notes endpoint', async () => {
     mockRepositoriesFindFirst.mockResolvedValue({
       installationId: null,

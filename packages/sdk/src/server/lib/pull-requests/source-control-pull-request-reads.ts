@@ -150,6 +150,15 @@ type SourceControlPullRequestCommentThread = {
   comments: SourceControlPullRequestComment[];
 };
 
+type SourceControlPullRequestReview = {
+  reviewId: string;
+  author: string | null;
+  state: string;
+  body: string;
+  submittedAt: string | null;
+  url: string | null;
+};
+
 export type SourceControlPullRequestCommentsResult = {
   success: true;
   provider: SourceControlProvider;
@@ -157,6 +166,8 @@ export type SourceControlPullRequestCommentsResult = {
   number: number;
   threads: SourceControlPullRequestCommentThread[];
   issueComments: SourceControlPullRequestComment[];
+  /** Present when the provider exposes top-level review state (currently GitHub). */
+  reviews?: SourceControlPullRequestReview[];
   warnings: string[];
 };
 
@@ -990,7 +1001,7 @@ async function listGitHubPullRequestComments({
   );
   const warnings: string[] = [];
 
-  const [reviewComments, restIssueComments] = await Promise.all([
+  const [reviewComments, restIssueComments, restReviews] = await Promise.all([
     octokit.paginate(octokit.rest.pulls.listReviewComments, {
       owner,
       repo,
@@ -1001,6 +1012,12 @@ async function listGitHubPullRequestComments({
       owner,
       repo,
       issue_number: prNumber,
+      per_page: 100,
+    }),
+    octokit.paginate(octokit.rest.pulls.listReviews, {
+      owner,
+      repo,
+      pull_number: prNumber,
       per_page: 100,
     }),
   ]);
@@ -1039,6 +1056,14 @@ async function listGitHubPullRequestComments({
     number: prNumber,
     threads,
     issueComments,
+    reviews: restReviews.map((review) => ({
+      reviewId: String(review.id),
+      author: review.user?.login ?? null,
+      state: review.state,
+      body: review.body ?? '',
+      submittedAt: review.submitted_at ?? null,
+      url: review.html_url ?? null,
+    })),
     warnings,
   };
 }
