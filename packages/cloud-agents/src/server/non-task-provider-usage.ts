@@ -187,6 +187,7 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   env?: Partial<Record<string, string>>;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
   permission?: PermissionRuleset;
+  signal?: AbortSignal;
   tools: Record<string, boolean>;
 };
 
@@ -860,6 +861,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       permission: options.permission,
       promptErrorLabel: 'OpenCode native Fast prompt failed',
       session,
+      signal: options.signal,
       useConfiguredServer: false,
     },
   );

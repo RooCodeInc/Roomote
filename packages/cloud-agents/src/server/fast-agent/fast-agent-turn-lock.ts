@@ -11,6 +11,17 @@ const FAST_AGENT_TURN_LOCK_MAX_ATTEMPTS =
     (FAST_AGENT_TURN_LOCK_TTL_SECONDS * 1_000) / FAST_AGENT_TURN_LOCK_RETRY_MS,
   ) + 1;
 
+export class FastAgentTurnLockLostError extends Error {
+  constructor() {
+    super('Fast conversation lock ownership was lost.');
+    this.name = 'FastAgentTurnLockLostError';
+  }
+}
+
+export type FastAgentTurnLockHandle = (() => Promise<void>) & {
+  signal: AbortSignal;
+};
+
 /** Serialize every human and platform-generated Fast turn for one chat. */
 export function buildFastAgentTurnLockKey(
   conversation: FastAgentConversation,
@@ -38,6 +49,7 @@ export async function acquireFastAgentTurnLock(params: {
       ttlSeconds: FAST_AGENT_TURN_LOCK_TTL_SECONDS,
     });
     if (release) {
+      const ownership = new AbortController();
       let released = false;
       let renewalPending = false;
       const renewalTimer = setInterval(() => {
@@ -47,6 +59,8 @@ export async function acquireFastAgentTurnLock(params: {
           .renewDetailed()
           .then((result) => {
             if (!released && result === 'lost') {
+              ownership.abort(new FastAgentTurnLockLostError());
+              clearInterval(renewalTimer);
               console.error(
                 `[Fast Agent] Conversation lock ownership was lost for ${key}.`,
               );
@@ -58,11 +72,13 @@ export async function acquireFastAgentTurnLock(params: {
       }, FAST_AGENT_TURN_LOCK_RENEW_MS);
       renewalTimer.unref();
 
-      return async () => {
+      const releaseTurnLock = (async () => {
         released = true;
         clearInterval(renewalTimer);
         await release();
-      };
+      }) as FastAgentTurnLockHandle;
+      releaseTurnLock.signal = ownership.signal;
+      return releaseTurnLock;
     }
 
     if (attempt + 1 < maxAttempts) {

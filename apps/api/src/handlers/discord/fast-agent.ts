@@ -92,6 +92,7 @@ export async function processDiscordFastAgentMessage(input: {
       userId: input.senderUserId,
       apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
       conversation,
+      signal: releaseFastAgentLock.signal,
       senderDisplayName:
         input.interaction?.interaction.member?.nick ??
         input.sender.global_name ??
