@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { and, db, eq, taskRuns } from '@roomote/db/server';
 import { getFastAgentParentFromPayload } from '@roomote/types';
 
@@ -13,7 +15,7 @@ type FastAgentChildChatReplyPurpose =
 export async function relayFastAgentChildChatReply(input: {
   runId: number;
   taskId: string;
-  messageId: string;
+  deliverySignature: string;
   purpose: FastAgentChildChatReplyPurpose;
   message: string;
   imageArtifactIds?: string[];
@@ -28,13 +30,17 @@ export async function relayFastAgentChildChatReply(input: {
     return { relayed: false };
   }
 
+  const messageId = createHash('sha256')
+    .update(`${parent.sessionId}:${run.id}:${input.deliverySignature}`)
+    .digest('hex');
+
   const delivery = await deliverFastAgentParentEvent({
     parent,
     event: {
       type: 'child_message',
       taskId: run.taskId,
       runId: run.id,
-      messageId: input.messageId,
+      messageId,
       purpose: input.purpose,
       message: input.message,
       ...(input.imageArtifactIds?.length

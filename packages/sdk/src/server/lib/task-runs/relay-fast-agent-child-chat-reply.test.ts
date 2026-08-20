@@ -42,7 +42,7 @@ describe('relayFastAgentChildChatReply', () => {
       relayFastAgentChildChatReply({
         runId: 42,
         taskId: 'task-1',
-        messageId: '22222222-2222-4222-8222-222222222222',
+        deliverySignature: 'a'.repeat(64),
         purpose: 'progress',
         message: 'The targeted tests are running.',
         imageArtifactIds: ['artifact-1', 'artifact-1'],
@@ -55,7 +55,7 @@ describe('relayFastAgentChildChatReply', () => {
         type: 'child_message',
         taskId: 'task-1',
         runId: 42,
-        messageId: '22222222-2222-4222-8222-222222222222',
+        messageId: expect.stringMatching(/^[a-f0-9]{64}$/),
         purpose: 'progress',
         message: 'The targeted tests are running.',
         imageArtifactIds: ['artifact-1'],
@@ -74,11 +74,41 @@ describe('relayFastAgentChildChatReply', () => {
       relayFastAgentChildChatReply({
         runId: 42,
         taskId: 'task-1',
-        messageId: '22222222-2222-4222-8222-222222222222',
+        deliverySignature: 'a'.repeat(64),
         purpose: 'progress',
         message: 'Still working.',
       }),
     ).resolves.toEqual({ relayed: false });
     expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
+  });
+
+  it('scopes the deterministic message id to the Fast parent session', async () => {
+    const input = {
+      runId: 42,
+      taskId: 'task-1',
+      deliverySignature: 'a'.repeat(64),
+      purpose: 'progress' as const,
+      message: 'Still working.',
+    };
+    await relayFastAgentChildChatReply(input);
+    const firstMessageId = mocks.deliverParentEvent.mock.calls[0]?.[0]?.event
+      ?.messageId as string;
+
+    mocks.findRun.mockResolvedValueOnce({
+      id: 42,
+      taskId: 'task-1',
+      payload: {
+        fastAgentParent: {
+          ...parent,
+          sessionId: '33333333-3333-4333-8333-333333333333',
+        },
+      },
+    });
+    await relayFastAgentChildChatReply(input);
+
+    expect(firstMessageId).toMatch(/^[a-f0-9]{64}$/);
+    expect(
+      mocks.deliverParentEvent.mock.calls[1]?.[0]?.event?.messageId,
+    ).not.toBe(firstMessageId);
   });
 });

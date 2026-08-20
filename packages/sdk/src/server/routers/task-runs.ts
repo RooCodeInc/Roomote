@@ -785,7 +785,7 @@ export const taskRunsRouter = router({
     z.object({
       runId: z.number(),
       taskId: z.string().min(1),
-      messageId: z.string().uuid(),
+      deliverySignature: z.string().regex(/^[a-f0-9]{64}$/),
       purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
       message: z.string().trim().min(1),
       imageArtifactIds: z.array(z.string().min(1)).optional(),

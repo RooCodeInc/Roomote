@@ -1,7 +1,3 @@
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-
 const mocks = vi.hoisted(() => ({ relay: vi.fn() }));
 
 vi.mock('@roomote/sdk/client', () => ({
@@ -11,15 +7,10 @@ vi.mock('@roomote/sdk/client', () => ({
 import { handleRelayFastAgentChatReply } from '../relay-fast-agent-chat-reply';
 
 describe('handleRelayFastAgentChatReply', () => {
-  let tempDir: string;
-
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.relay.mockResolvedValue({ relayed: true });
-    tempDir = mkdtempSync(join(tmpdir(), 'roomote-fast-relay-'));
   });
-
-  afterEach(() => rmSync(tempDir, { recursive: true, force: true }));
 
   it('relays lifecycle text without posting to a communication provider', async () => {
     const result = await handleRelayFastAgentChatReply(
@@ -28,7 +19,6 @@ describe('handleRelayFastAgentChatReply', () => {
         taskId: 'task-1',
         purpose: 'progress',
         message: 'The implementation is ready for validation.',
-        relayStateDirectory: tempDir,
       },
       {
         token: 'token',
@@ -39,7 +29,7 @@ describe('handleRelayFastAgentChatReply', () => {
     expect(mocks.relay).toHaveBeenCalledWith({
       runId: 42,
       taskId: 'task-1',
-      messageId: expect.any(String),
+      deliverySignature: expect.stringMatching(/^[a-f0-9]{64}$/),
       purpose: 'progress',
       message: 'The implementation is ready for validation.',
     });
@@ -56,7 +46,6 @@ describe('handleRelayFastAgentChatReply', () => {
         taskId: 'task-1',
         purpose: 'progress',
         message: 'Still working.',
-        relayStateDirectory: tempDir,
       },
       {
         token: 'token',
@@ -76,7 +65,6 @@ describe('handleRelayFastAgentChatReply', () => {
       taskId: 'task-1',
       purpose: 'progress' as const,
       message: 'The targeted tests are running.',
-      relayStateDirectory: tempDir,
     };
 
     await handleRelayFastAgentChatReply(input, {
@@ -89,8 +77,8 @@ describe('handleRelayFastAgentChatReply', () => {
     });
 
     expect(mocks.relay).toHaveBeenCalledTimes(2);
-    expect(mocks.relay.mock.calls[0]?.[0]?.messageId).toBe(
-      mocks.relay.mock.calls[1]?.[0]?.messageId,
+    expect(mocks.relay.mock.calls[0]?.[0]?.deliverySignature).toBe(
+      mocks.relay.mock.calls[1]?.[0]?.deliverySignature,
     );
   });
 });
