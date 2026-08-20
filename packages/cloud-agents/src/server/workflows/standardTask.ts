@@ -182,8 +182,11 @@ export function standardTask({
       );
     }
     if (attribution.prAssigneeLogin) {
+      const providerLabel = sourceControlProvider
+        ? getSourceControlProviderLabel(sourceControlProvider)
+        : 'GitHub';
       delegatedPrMetadataInstructions.push(
-        `For this run, because the creating user has linked GitHub login \`${attribution.prAssigneeLogin}\`, the delegated PR-delivery skill must pass \`assignees: ['${attribution.prAssigneeLogin}']\` in its \`mcp__roomote__manage_source_control\` calls so the created or refreshed pull request is assigned to that user when the provider supports it.`,
+        `For this run, because the creating user has linked ${providerLabel} login \`${attribution.prAssigneeLogin}\`, the delegated PR-delivery skill must pass \`assignees: ['${attribution.prAssigneeLogin}']\` in its \`mcp__roomote__manage_source_control\` calls so the created or refreshed pull request is assigned to that user when the provider supports it.`,
       );
     }
   }

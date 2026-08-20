@@ -12,6 +12,7 @@ import {
   getSlackChannelFromTaskPayload,
   getSlackTeamDomainFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
+  resolveSourceControlHostFromPayload,
   resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
 import {
@@ -149,8 +150,14 @@ export async function generatePrompt({
       surface: true,
     },
   });
+  const sourceControlProvider = resolveSourceControlProviderFromPayload(
+    taskSpec.payload,
+  );
   const commitAuthor = taskRow
-    ? await resolveRunCommitAuthor(db, taskRun)
+    ? await resolveRunCommitAuthor(db, taskRun, {
+        provider: sourceControlProvider,
+        host: resolveSourceControlHostFromPayload(taskSpec.payload),
+      })
     : DEFAULT_ROOMOTE_COMMIT_AUTHOR;
   const {
     conflictResolverFrequency,
@@ -392,9 +399,7 @@ export async function generatePrompt({
         codeReviewsEnabled,
         codeReviewReviewOnCommit,
         codeReviewReviewDraftPrs,
-        sourceControlProvider: resolveSourceControlProviderFromPayload(
-          taskSpec.payload,
-        ),
+        sourceControlProvider,
         prAction,
       });
 
