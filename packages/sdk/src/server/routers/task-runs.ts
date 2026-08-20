@@ -78,6 +78,7 @@ import {
 } from '@roomote/linear';
 import { publishCommunicationRequestUserInput } from '../lib/communication-request-user-input';
 import { publishFastAgentRequestUserInput } from '../lib/task-runs/publish-fast-agent-request-user-input';
+import { relayFastAgentChildChatReply } from '../lib/task-runs/relay-fast-agent-child-chat-reply';
 import {
   authenticatedProcedure,
   isRunToken,
@@ -780,6 +781,17 @@ export const taskRunsRouter = router({
     }),
     'runId',
   ).mutation(async ({ input }) => publishFastAgentRequestUserInput(input)),
+  relayFastAgentChildChatReply: runScoped(
+    z.object({
+      runId: z.number(),
+      taskId: z.string().min(1),
+      messageId: z.string().uuid(),
+      purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
+      message: z.string().trim().min(1),
+      imageArtifactIds: z.array(z.string().min(1)).optional(),
+    }),
+    'runId',
+  ).mutation(async ({ input }) => relayFastAgentChildChatReply(input)),
   clearPendingSlackRequestUserInput: runScoped(
     z.object({
       runId: z.number(),
