@@ -2,6 +2,27 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.40.1 (2026-08-20)
+
+This patch improves Slack and self-hosted administration, fixes task and Discord delivery issues, and smooths PostgreSQL upgrades.
+
+### Highlights
+
+- Update existing Slack app manifests from Communication Settings while preserving custom configuration.
+- Keep Discord commands working when self-hosted deployments serve the Roomote API under a path prefix.
+- Make self-hosted preview certificates simpler and prevent PostgreSQL collation mismatch warnings after upgrades.
+- Show queued task follow-ups accurately and prevent duplicate pull-request review tasks during rapid pushes.
+
+### Patch changes
+
+- Add a guided Slack app manifest updater to Communication Settings so admins can apply current Roomote capabilities, permissions, events, and callback URLs with a fresh configuration token.
+- Fix Discord commands silently failing on self-hosted installs that serve the Roomote API under a path prefix.
+- Default new self-hosted installations to flat preview hostnames so standard wildcard certificates cover task previews without an extra preview subdomain.
+- Keep self-hosted PostgreSQL on the Trixie collation provider when enabling pgvector so existing databases do not report collation version mismatches after upgrading Roomote.
+- Keep task follow-up and pull-request review delivery state accurate by showing queued messages honestly and preventing duplicate review tasks during rapid pushes.
+- Include the running Roomote application version in About output so operators can identify the deployed release during support and troubleshooting.
+- Brain and Fast mode remain internal previews, with reliability, observability, identity, and task-inspection improvements. Let us know in Discord if you’re interested in testing them or contributing.
+
 ## 0.40.0 (2026-08-18)
 
 This release adds safer Notion workflows, environment diffs, automation history, model support, and reliability improvements across tasks and Slack.
