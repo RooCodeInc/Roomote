@@ -643,12 +643,30 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       'Timed out waiting for OpenCode output after 120000ms.',
     );
     timeout.name = 'NonTaskOpenCodePromptTimeoutError';
-    mocks.generateText.mockRejectedValue(timeout);
+    mocks.generateText.mockImplementation(async (params) => {
+      await params.onProviderRetry?.({
+        attempt: 1,
+        message: '429 Too Many Requests',
+      });
+      throw timeout;
+    });
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
 
-    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+    try {
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
 
-    expect(mocks.generateText).toHaveBeenCalledOnce();
-    expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+      expect(mocks.generateText).toHaveBeenCalledOnce();
+      expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining(
+          '[Fast Agent] Failed to answer question. surface="slack" workspaceId="team-1" conversationId="100.1" messageId="100.2" canonicalConversationId="conversation-1" modelRole="primary" reason="timeout" openCodeProviderRetryEventCount=1 roomoteInferenceRetryCount=0',
+        ),
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it('retries a transient native prompt failure with a visible notice', async () => {
