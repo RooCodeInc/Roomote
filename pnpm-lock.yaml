@@ -1148,6 +1148,9 @@ importers:
       '@roomote/auth':
         specifier: workspace:^
         version: link:../auth
+      '@roomote/communication':
+        specifier: workspace:^
+        version: link:../communication
       '@roomote/db':
         specifier: workspace:^
         version: link:../db
