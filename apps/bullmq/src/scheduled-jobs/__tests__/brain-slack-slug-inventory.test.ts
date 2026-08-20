@@ -16,6 +16,9 @@ const store = vi.hoisted(() => ({
     baseUrl: string;
     token: string;
   } | null,
+  canonicalizeResult: 0,
+  canonicalizeCalls: [] as string[],
+  deletedFamilies: [] as string[],
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -86,6 +89,17 @@ vi.mock('@roomote/db/server', () => ({
       }
     },
   ),
+  canonicalizeBrainCollectorItemSlugs: vi.fn(
+    async (_db: unknown, collectorId: string) => {
+      store.canonicalizeCalls.push(collectorId);
+      return store.canonicalizeResult;
+    },
+  ),
+  deleteBrainSyncStateFamily: vi.fn(
+    async (_db: unknown, collectorId: string) => {
+      store.deletedFamilies.push(collectorId);
+    },
+  ),
   listBrainCollectorItemsBySlugPrefix: vi.fn(
     async (_db: unknown, collectorId: string, prefix: string) =>
       [...store.items.values()]
@@ -103,6 +117,7 @@ const {
   parseSlackDayPageSlug,
   reconcileSlackDayPages,
   runSlackDayPageCensus,
+  runSlackDayPageInventoryMaintenance,
 } = await import('../brain-collectors/slack-day-page-inventory');
 
 const CENSUS_STATE_ID = 'slack-public-channels:day-pages:census';
@@ -110,7 +125,8 @@ const CENSUS_STATE_ID = 'slack-public-channels:day-pages:census';
 function daySlug(first: string, last: string, day = '2026-08-13') {
   const part = (iso: string) =>
     (Date.parse(iso) / 1000).toFixed(6).replace('.', '-');
-  return `slack/T1/C1/${day}/${part(first)}-${part(last)}`;
+  // Canonical (lowercase) like both emission and the corpus store.
+  return `slack/t1/c1/${day}/${part(first)}-${part(last)}`;
 }
 
 function trackItem(slug: string) {
@@ -132,26 +148,40 @@ beforeEach(() => {
   store.listings = [];
   store.listCalls = [];
   store.connection = { baseUrl: 'http://brain.test', token: 'read' };
+  store.canonicalizeResult = 0;
+  store.canonicalizeCalls = [];
+  store.deletedFamilies = [];
 });
 
 describe('parseSlackDayPageSlug', () => {
   it('parses the channel-day prefix and the embedded range', () => {
     const parsed = parseSlackDayPageSlug(
-      'slack/T1/C1/2026-08-13/1755079500-123456-1755080400-000001',
+      'slack/t1/c1/2026-08-13/1755079500-123456-1755080400-000001',
     );
 
     expect(parsed).not.toBeNull();
-    expect(parsed!.dayPrefix).toBe('slack/T1/C1/2026-08-13/');
+    expect(parsed!.dayPrefix).toBe('slack/t1/c1/2026-08-13/');
     expect(parsed!.firstKey).toBe(1755079500123456);
     expect(parsed!.lastKey).toBe(1755080400000001);
+  });
+
+  it('parses a mixed-case slug into the canonical lowercase form', () => {
+    // Inventory rows written before canonicalization carry the raw Slack
+    // team/channel case; they must still parse, into the form the corpus
+    // actually stores, or retirement can never find their pages.
+    const parsed = parseSlackDayPageSlug(
+      'slack/T08ELT3D154/C08ELT40A8N/2026-08-13/1755079500-000000-1755080400-000000',
+    );
+
+    expect(parsed?.dayPrefix).toBe('slack/t08elt3d154/c08elt40a8n/2026-08-13/');
   });
 
   it('rejects anything that is not a slack day page', () => {
     expect(parseSlackDayPageSlug('notion/abc123')).toBeNull();
     expect(parseSlackDayPageSlug('people/roomote-member-abc')).toBeNull();
     // Namespace without the day/range tail (e.g. a hypothetical index page).
-    expect(parseSlackDayPageSlug('slack/T1/C1/2026-08-13')).toBeNull();
-    expect(parseSlackDayPageSlug('slack/T1/C1/2026-08-13/summary')).toBeNull();
+    expect(parseSlackDayPageSlug('slack/t1/c1/2026-08-13')).toBeNull();
+    expect(parseSlackDayPageSlug('slack/t1/c1/2026-08-13/summary')).toBeNull();
   });
 });
 
@@ -224,10 +254,10 @@ describe('reconcileSlackDayPages', () => {
   it('leaves tracked rows it cannot parse alone', async () => {
     // An inventory row from a future slug shape must not be deleted by an
     // older reader that cannot prove coverage.
-    store.items.set('slack/T1/C1/2026-08-13/unparseable', {
+    store.items.set('slack/t1/c1/2026-08-13/unparseable', {
       collectorId: SLACK_DAY_PAGE_ITEMS_ID,
-      itemId: 'slack/T1/C1/2026-08-13/unparseable',
-      slug: 'slack/T1/C1/2026-08-13/unparseable',
+      itemId: 'slack/t1/c1/2026-08-13/unparseable',
+      slug: 'slack/t1/c1/2026-08-13/unparseable',
     });
 
     const result = await reconcileSlackDayPages({
@@ -375,7 +405,7 @@ describe('runSlackDayPageCensus', () => {
       backfillCursor: JSON.stringify({
         after: null,
         offset: 100,
-        lastSlug: 'slack/T1/C1/2026-08-01/re-stamped-away',
+        lastSlug: 'slack/t1/c1/2026-08-01/re-stamped-away',
       }),
       backfillCompletedAt: null,
     });
@@ -436,5 +466,39 @@ describe('runSlackDayPageCensus', () => {
     await runSlackDayPageCensus();
 
     expect(store.listCalls).toHaveLength(0);
+  });
+});
+
+describe('runSlackDayPageInventoryMaintenance', () => {
+  it('re-arms the healing replay only when mixed-case rows were rewritten', async () => {
+    store.canonicalizeResult = 736;
+
+    await runSlackDayPageInventoryMaintenance(
+      'slack-public-channels:entity-timeline-v3',
+    );
+
+    expect(store.canonicalizeCalls).toEqual([SLACK_DAY_PAGE_ITEMS_ID]);
+    // The deployment ran the replay with the case mismatch live and retired
+    // nothing; clearing the cursor makes the backfill re-cover history.
+    expect(
+      store.syncState.get('slack-public-channels:entity-timeline-v3'),
+    ).toMatchObject({ backfillCursor: null, backfillCompletedAt: null });
+    expect(store.deletedFamilies).toEqual([
+      'slack-public-channels:entity-timeline-v2',
+    ]);
+  });
+
+  it('leaves backfill state alone when the inventory is already canonical', async () => {
+    await runSlackDayPageInventoryMaintenance(
+      'slack-public-channels:entity-timeline-v3',
+    );
+
+    expect(
+      store.syncState.has('slack-public-channels:entity-timeline-v3'),
+    ).toBe(false);
+    // Superseded-version rows are still dropped.
+    expect(store.deletedFamilies).toEqual([
+      'slack-public-channels:entity-timeline-v2',
+    ]);
   });
 });

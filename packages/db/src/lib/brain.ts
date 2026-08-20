@@ -35,6 +35,66 @@ export async function upsertBrainCollectorItems(
 }
 
 /**
+ * Rewrite a slug-keyed collector's inventory rows to their lowercase form,
+ * merging case-duplicates by keeping the freshest lastSeenAt. gbrain
+ * canonicalizes slugs to lowercase before a page row is written, so an
+ * inventory row tracked under a mixed-case slug names a page the corpus
+ * never stores. Returns how many mixed-case rows were rewritten (0 when the
+ * inventory is already canonical, which makes this cheap to run every pass).
+ */
+export async function canonicalizeBrainCollectorItemSlugs(
+  database: DatabaseOrTransaction,
+  collectorId: string,
+): Promise<number> {
+  const mixedCase = and(
+    eq(brainCollectorItems.collectorId, collectorId),
+    sql`${brainCollectorItems.itemId} <> lower(${brainCollectorItems.itemId})`,
+  );
+  const [row] = await database
+    .select({ mixed: count() })
+    .from(brainCollectorItems)
+    .where(mixedCase);
+  const mixed = row?.mixed ?? 0;
+
+  if (mixed === 0) {
+    return 0;
+  }
+
+  // Insert the canonical rows first, then drop the originals: a crash in
+  // between leaves both forms present and the next pass finishes the job.
+  await database.execute(sql`
+    INSERT INTO ${brainCollectorItems} (collector_id, item_id, slug, last_seen_at)
+    SELECT collector_id, lower(item_id), lower(item_id), max(last_seen_at)
+    FROM ${brainCollectorItems}
+    WHERE collector_id = ${collectorId} AND item_id <> lower(item_id)
+    GROUP BY collector_id, lower(item_id)
+    ON CONFLICT (collector_id, item_id) DO UPDATE SET
+      last_seen_at = GREATEST(${brainCollectorItems}.last_seen_at, excluded.last_seen_at),
+      updated_at = now()
+  `);
+  await database.delete(brainCollectorItems).where(mixedCase);
+
+  return mixed;
+}
+
+/**
+ * Delete one collector's sync-state row together with every `:`-suffixed
+ * child row (per-channel or per-repository partitions). Used to drop the
+ * rows a collector version bump superseded, which otherwise linger forever
+ * and pollute anything that aggregates a source's partitions.
+ */
+export async function deleteBrainSyncStateFamily(
+  database: DatabaseOrTransaction,
+  collectorId: string,
+): Promise<void> {
+  await database
+    .delete(brainSyncState)
+    .where(
+      sql`${brainSyncState.collectorId} = ${collectorId} OR ${brainSyncState.collectorId} LIKE ${`${collectorId.replace(/[\\%_]/g, (ch) => `\\${ch}`)}:%`}`,
+    );
+}
+
+/**
  * Record inventory rows without touching ones that already exist. This is the
  * census path: a one-time walk over the Brain's listing seeds pages emitted
  * before item tracking existed, and must never overwrite the fresher

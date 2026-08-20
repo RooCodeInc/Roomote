@@ -196,7 +196,9 @@ function legacyChunkSlug(
 ) {
   const part = (iso: string) =>
     (Date.parse(iso) / 1000).toFixed(6).replace('.', '-');
-  return `slack/T1/${channelId}/${day}/${part(firstIso)}-${part(lastIso)}`;
+  // Lowercase like the corpus stores it (and like the census seeds it),
+  // even though the fake Slack's team/channel ids are uppercase.
+  return `slack/T1/${channelId}/${day}/${part(firstIso)}-${part(lastIso)}`.toLowerCase();
 }
 
 function seedChannel(
@@ -348,6 +350,11 @@ describe('slack collector against a fake Slack', () => {
     );
 
     expect(ingested.size).toBe(25);
+    // Emitted slugs are gbrain-canonical: the store lowercases on write, so
+    // tracking any other case would inventory pages that never exist.
+    for (const slug of workspace.brainPages.keys()) {
+      expect(slug).toBe(slug.toLowerCase());
+    }
     expect(watermarks.size).toBe(2);
     expect([...workspace.brainPages.values()].join('\n')).toContain(
       '[Alice Example](people/roomote-member-',
