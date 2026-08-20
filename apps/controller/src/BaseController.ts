@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
   type ComputeProvider,
   RunStatus,
   TaskRunErrorCode,
@@ -475,7 +476,7 @@ export abstract class BaseController {
       if (access.state === 'read_only') {
         await this.finishFailedTaskRun(
           taskRun,
-          'This deployment is read-only. New task launches are paused.',
+          MANAGED_DEPLOYMENT_READ_ONLY_MESSAGE,
           TaskRunErrorCode.DeploymentReadOnly,
         );
         return null;
