@@ -2,7 +2,12 @@ import { Hono } from 'hono';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
-import { ALL_REPOSITORIES, PRODUCT_NAME } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  PRODUCT_NAME,
+  ROOMOTE_TASK_INSPECTION_ACTIONS,
+  roomoteTaskInspectionFieldSchemas,
+} from '@roomote/types';
 
 import type { Variables } from '../../types';
 import { environmentsRouter } from '../environments';
@@ -54,22 +59,14 @@ function resultFromApi(result: MemberApiResult) {
 
 const manageTasksInputSchema = {
   action: z.enum([
-    'search',
-    'get_summary',
-    'get_compute_logs',
-    'get_messages',
+    ...ROOMOTE_TASK_INSPECTION_ACTIONS,
     'launch',
     'cancel',
     'send_message',
     'list_environments',
   ]),
-  taskId: z.string().optional(),
+  ...roomoteTaskInspectionFieldSchemas,
   message: z.string().optional(),
-  query: z.string().optional(),
-  status: z.enum(['active', 'completed', 'all']).optional(),
-  pullRequest: z.string().optional(),
-  limit: z.number().int().min(1).max(1000).optional(),
-  cursor: z.string().optional(),
   prompt: z.string().optional(),
   environmentId: z.string().optional(),
   branch: z.string().optional(),

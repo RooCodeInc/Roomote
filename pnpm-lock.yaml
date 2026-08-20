@@ -1139,6 +1139,9 @@ importers:
       '@ai-sdk/mcp':
         specifier: ^1.0.25
         version: 1.0.25(zod@3.25.76)
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.29.0
+        version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@3.25.76)
       '@opencode-ai/sdk':
         specifier: 1.18.10
         version: 1.18.10

@@ -4,6 +4,7 @@ import {
   Cpu,
   FlaskConical,
   GraduationCap,
+  Layers,
   GitMerge,
   IdCard,
   MessagesSquare,
@@ -26,6 +27,7 @@ export type SettingsPageId =
   | 'compute'
   | 'source-control'
   | 'models'
+  | 'brain'
   | 'skills'
   | 'experimental'
   | 'misc';
@@ -39,6 +41,8 @@ type SettingsNavigationItem = {
   icon: LucideIcon;
   adminOnly?: boolean;
   hiddenWhenCloud?: boolean;
+  /** Shown only on deployments that have enabled the Brain. */
+  requiresBrain?: boolean;
   newGroup?: boolean;
   matches: (pathname: string) => boolean;
 };
@@ -61,7 +65,7 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     description:
       'Choose your inference provider, which task models are enabled, and which one is the default.',
     href: SETTINGS_PATHS.models,
-    icon: Brain,
+    icon: Layers,
     adminOnly: true,
     newGroup: true,
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.models),
@@ -110,6 +114,18 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
     icon: PlugIcon,
     adminOnly: true,
     matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.integrations),
+  },
+  {
+    id: 'brain',
+    label: 'Brain',
+    title: 'Brain',
+    description:
+      'The shared memory agents read before they start: what it has learned, where it learns from, and how ingestion is doing.',
+    href: SETTINGS_PATHS.brain,
+    icon: Brain,
+    adminOnly: true,
+    requiresBrain: true,
+    matches: (pathname) => pathname.startsWith(SETTINGS_PATHS.brain),
   },
   {
     id: 'environments',
@@ -181,12 +197,16 @@ const SETTINGS_NAVIGATION_ITEMS: SettingsNavigationItem[] = [
 export function getAccessibleSettingsNavigation(opts: {
   isAdmin: boolean;
   cloudEnabled: boolean;
+  brainConfigured?: boolean;
 }) {
   return SETTINGS_NAVIGATION_ITEMS.filter((item) => {
     if (item.adminOnly && !opts.isAdmin) {
       return false;
     }
     if (item.hiddenWhenCloud && opts.cloudEnabled) {
+      return false;
+    }
+    if (item.requiresBrain && !opts.brainConfigured) {
       return false;
     }
     return true;

@@ -92,7 +92,7 @@ x-roomote-shared-env: &roomote-shared-env
 
 services:
   postgres:
-    image: pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adfd27b5707128f60956f62a793c3c9326ea8cfaf0eab7adccb5d700b21
+    image: pgvector/pgvector:0.8.1-pg17-trixie@sha256:137f044b0efe3d57f39b972b9b53641b1f2045b99d879e298bbf514a25787dcf
     restart: unless-stopped
     volumes:
       - pg_data:/var/lib/postgresql/data

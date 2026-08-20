@@ -4,7 +4,6 @@ import { execa } from 'execa';
 import ora from 'ora';
 import Docker from 'dockerode';
 import { WORKER_RUNTIME_SCHEMA_VERSION } from '@roomote/types';
-import { isBrainConfigured } from '@roomote/env';
 
 export const WORKER_IMAGE_SCHEMA_LABEL =
   'dev.roomote.worker-image.schema-version';
@@ -187,7 +186,7 @@ export class DockerService {
       },
     );
 
-    await this.startBrainIfConfigured(rootDir, verbose);
+    await this.startBrain(rootDir, verbose);
 
     if (missing.length === 0) {
       checkContainers.succeed();
@@ -215,26 +214,21 @@ export class DockerService {
   }
 
   /**
-   * Started under exactly the condition the app uses to decide it has a
-   * Brain (isBrainConfigured), because the app enqueues memories on that
-   * belief: if the two ever disagree, one side accumulates rows the other
-   * side has nothing to drain. Naming the profiled service explicitly enables
-   * its compose profile, so no COMPOSE_PROFILES juggling is needed.
+   * The Brain is standard local infrastructure even when no model provider is
+   * configured yet. Naming the service explicitly enables its Compose profile
+   * without COMPOSE_PROFILES, while --wait makes `pnpm dev` return only after
+   * gbrain is healthy like the rest of the local datastores.
    */
-  private static async startBrainIfConfigured(
+  private static async startBrain(
     rootDir: string,
     verbose: boolean,
   ): Promise<void> {
-    if (!isBrainConfigured(process.env)) {
-      return;
-    }
-
     const startBrain = ora('Starting the Brain').start();
 
     try {
       await execa(
         'docker',
-        ['compose', '--profile', 'brain', 'up', 'gbrain', '-d'],
+        ['compose', '--profile', 'brain', 'up', 'gbrain', '-d', '--wait'],
         {
           cwd: rootDir,
           env: this.getInfraUpEnv(),
@@ -245,13 +239,8 @@ export class DockerService {
 
       startBrain.succeed();
     } catch (error) {
-      // A Brain that will not start must not block the dev stack: the app
-      // degrades to no memory rather than failing to boot.
-      startBrain.warn(
-        `Brain container did not start: ${
-          error instanceof Error ? error.message.split('\n')[0] : String(error)
-        }`,
-      );
+      startBrain.fail('Brain container did not become healthy');
+      throw error;
     }
   }
 

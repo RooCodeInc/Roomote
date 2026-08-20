@@ -86,6 +86,7 @@ import {
 import { Section } from './Section';
 import { TelegramLinkAccountStep } from './TelegramLinkAccountStep';
 import { DiscordSetupStatus } from './DiscordSetupStatus';
+import { SlackManifestUpdateDialog } from './SlackManifestUpdateDialog';
 
 function getProviderIconId(providerId: CommsProviderId): string {
   return providerId === 'microsoft' ? 'teams' : providerId;
@@ -537,7 +538,10 @@ export function CommsProviderSection({
         title={provider.label}
         action={
           provider.id === 'slack' ? (
-            <SlackWorkspaceAuthButton configured={hasConfiguredValues} />
+            <div className="flex items-center gap-2">
+              <SlackManifestUpdateDialog />
+              <SlackWorkspaceAuthButton configured={hasConfiguredValues} />
+            </div>
           ) : null
         }
       >

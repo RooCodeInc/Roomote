@@ -36,6 +36,8 @@ import type {
   pullRequestSyncStates,
   repositories,
   slackAuthTokens,
+  fastAgentConversations,
+  fastAgentConversationAliases,
   slackInstallations,
   slackInstallationChannels,
   slackUserMappings,
@@ -258,6 +260,26 @@ export type SlackAuthToken = typeof slackAuthTokens.$inferSelect;
 
 export type CreateSlackAuthToken = Omit<
   typeof slackAuthTokens.$inferInsert,
+  Generated
+>;
+
+/**
+ * Provider-neutral Fast conversation persistence.
+ */
+
+export type FastAgentConversationRecord =
+  typeof fastAgentConversations.$inferSelect;
+
+export type CreateFastAgentConversationRecord = Omit<
+  typeof fastAgentConversations.$inferInsert,
+  Generated
+>;
+
+export type FastAgentConversationAlias =
+  typeof fastAgentConversationAliases.$inferSelect;
+
+export type CreateFastAgentConversationAlias = Omit<
+  typeof fastAgentConversationAliases.$inferInsert,
   Generated
 >;
 

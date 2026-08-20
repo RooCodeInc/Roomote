@@ -11,6 +11,36 @@ type McpToolResult = {
   content?: Array<{ type?: string; text?: string }>;
 };
 
+async function createCancellableMcpClient(options: {
+  url: string;
+  headers?: Record<string, string>;
+  signal?: AbortSignal;
+}) {
+  const [{ createMCPClient }, { StreamableHTTPClientTransport }] =
+    await Promise.all([
+      import('@ai-sdk/mcp'),
+      import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
+    ]);
+  const signal = options.signal;
+  signal?.throwIfAborted();
+  const transport = new StreamableHTTPClientTransport(new URL(options.url), {
+    requestInit: { headers: options.headers },
+    ...(signal
+      ? {
+          fetch: (url: string | URL, init?: RequestInit) =>
+            fetch(url, {
+              ...init,
+              signal: init?.signal
+                ? AbortSignal.any([signal, init.signal])
+                : signal,
+            }),
+        }
+      : {}),
+  });
+
+  return createMCPClient({ transport });
+}
+
 export type McpToolDefinition = {
   name: string;
   description?: string;
@@ -21,18 +51,14 @@ export type McpToolDefinition = {
 export async function listMcpTools(options: {
   url: string;
   headers?: Record<string, string>;
+  signal?: AbortSignal;
 }): Promise<McpToolDefinition[]> {
-  const { createMCPClient } = await import('@ai-sdk/mcp');
-  const client = await createMCPClient({
-    transport: {
-      type: 'http',
-      url: options.url,
-      headers: options.headers,
-    },
-  });
+  const client = await createCancellableMcpClient(options);
 
   try {
-    const definitions = await client.listTools();
+    const definitions = await client.listTools({
+      options: { signal: options.signal },
+    });
     return definitions.tools.map((definition) => ({
       name: definition.name,
       ...(definition.description
@@ -97,18 +123,14 @@ export async function callMcpTool(options: {
   toolName: string;
   args?: Record<string, unknown>;
   toolCallId?: string;
+  signal?: AbortSignal;
 }): Promise<unknown | null> {
-  const { createMCPClient } = await import('@ai-sdk/mcp');
-  const client = await createMCPClient({
-    transport: {
-      type: 'http',
-      url: options.url,
-      headers: options.headers,
-    },
-  });
+  const client = await createCancellableMcpClient(options);
 
   try {
-    const definitions = await client.listTools();
+    const definitions = await client.listTools({
+      options: { signal: options.signal },
+    });
     const toolDefinition = definitions.tools.find(
       (tool) => tool.name === options.toolName,
     );
@@ -125,6 +147,7 @@ export async function callMcpTool(options: {
     }
 
     const result = await tool.execute(options.args ?? {}, {
+      abortSignal: options.signal,
       toolCallId: options.toolCallId ?? `mcp-tool-call:${options.toolName}`,
       messages: [],
     });

@@ -1,4 +1,5 @@
-import { and, eq, inArray, lt, sql } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, like, lt, max, sql } from 'drizzle-orm';
+import { MISSING_MEMORY_EVENT_COUNT_CAP, RunStatus } from '@roomote/types';
 
 import { type DatabaseOrTransaction } from '../db';
 import {
@@ -31,6 +32,56 @@ export async function upsertBrainCollectorItems(
         updatedAt: sql`now()`,
       },
     });
+}
+
+/**
+ * Record inventory rows without touching ones that already exist. This is the
+ * census path: a one-time walk over the Brain's listing seeds pages emitted
+ * before item tracking existed, and must never overwrite the fresher
+ * lastSeenAt a live collector wrote for the same slug.
+ */
+export async function seedBrainCollectorItems(
+  database: DatabaseOrTransaction,
+  collectorId: string,
+  items: Array<{ itemId: string; slug: string; lastSeenAt: Date }>,
+): Promise<void> {
+  if (items.length === 0) {
+    return;
+  }
+
+  await database
+    .insert(brainCollectorItems)
+    .values(items.map((item) => ({ collectorId, ...item })))
+    .onConflictDoNothing({
+      target: [brainCollectorItems.collectorId, brainCollectorItems.itemId],
+    });
+}
+
+/**
+ * Inventory rows whose itemId starts with a literal prefix. gbrain's
+ * list_pages has no slug-prefix filter, so collectors that key items by slug
+ * (itemId = slug) use this local inventory to find the pages they previously
+ * emitted under a namespace, e.g. one Slack channel-day.
+ */
+export async function listBrainCollectorItemsBySlugPrefix(
+  database: DatabaseOrTransaction,
+  collectorId: string,
+  slugPrefix: string,
+  limit: number,
+): Promise<BrainCollectorItemRow[]> {
+  const literalPrefix = slugPrefix.replace(/[\\%_]/g, (char) => `\\${char}`);
+
+  return database
+    .select()
+    .from(brainCollectorItems)
+    .where(
+      and(
+        eq(brainCollectorItems.collectorId, collectorId),
+        like(brainCollectorItems.itemId, `${literalPrefix}%`),
+      ),
+    )
+    .orderBy(brainCollectorItems.itemId)
+    .limit(limit);
 }
 
 export async function listBrainCollectorItemsBefore(
@@ -312,6 +363,134 @@ export async function releaseBrainMemoryEvents(
       updatedAt: sql`now()`,
     })
     .where(inArray(brainMemoryEvents.id, ids));
+}
+
+export type BrainMemoryEventStatus = BrainMemoryEventRow['status'];
+
+export type BrainMemoryEventSummary = {
+  byStatus: Record<BrainMemoryEventStatus, number>;
+  /** Most recent successful (or deliberately skipped) ingestion. */
+  lastProcessedAt: Date | null;
+  /** Error text from the most recently updated terminal failure, if any. */
+  lastError: string | null;
+  /**
+   * Completed runs that never got an outbox row. Non-zero means task history
+   * predates the Brain (or a backfill has not been run), which is a state an
+   * admin can act on rather than a fault.
+   */
+  completedRunsWithoutEvent: number;
+};
+
+const EMPTY_MEMORY_EVENT_STATUS_COUNTS: Record<BrainMemoryEventStatus, number> =
+  {
+    pending: 0,
+    processing: 0,
+    done: 0,
+    skipped: 0,
+    failed: 0,
+  };
+
+/**
+ * Read-only rollup of the task-memory outbox for the Brain settings page.
+ * Kept as one function so the page renders a single consistent picture rather
+ * than a set of counts read at drifting moments.
+ */
+export async function getBrainMemoryEventSummary(
+  database: DatabaseOrTransaction,
+): Promise<BrainMemoryEventSummary> {
+  const [statusRows, processedRow, failureRow, missingRow] = await Promise.all([
+    database
+      .select({
+        status: brainMemoryEvents.status,
+        total: count(),
+      })
+      .from(brainMemoryEvents)
+      .groupBy(brainMemoryEvents.status),
+    database
+      .select({ lastProcessedAt: max(brainMemoryEvents.processedAt) })
+      .from(brainMemoryEvents),
+    database
+      .select({ lastError: brainMemoryEvents.lastError })
+      .from(brainMemoryEvents)
+      .where(eq(brainMemoryEvents.status, 'failed'))
+      .orderBy(desc(brainMemoryEvents.updatedAt))
+      .limit(1),
+    // Capped rather than counted: the page only needs "how many are missing,
+    // roughly" to offer the history backfill, and an uncapped anti-join over
+    // all completed runs grows with total run history forever.
+    database
+      .select({ id: taskRuns.id })
+      .from(taskRuns)
+      .where(
+        and(
+          eq(taskRuns.status, RunStatus.Completed),
+          sql`NOT EXISTS (
+            SELECT 1 FROM ${brainMemoryEvents}
+            WHERE ${brainMemoryEvents.runId} = ${taskRuns.id}
+          )`,
+        ),
+      )
+      .limit(MISSING_MEMORY_EVENT_COUNT_CAP),
+  ]);
+
+  const byStatus = { ...EMPTY_MEMORY_EVENT_STATUS_COUNTS };
+
+  for (const row of statusRows) {
+    byStatus[row.status] = row.total;
+  }
+
+  return {
+    byStatus,
+    lastProcessedAt: processedRow[0]?.lastProcessedAt ?? null,
+    lastError: failureRow[0]?.lastError ?? null,
+    completedRunsWithoutEvent: missingRow.length,
+  };
+}
+
+/**
+ * Hand exhausted memories back to the drainer. Attempts reset to zero on
+ * purpose: a retry an admin asked for is a fresh budget, not a continuation of
+ * the one that ran out, and the usual cause is an outage that has since been
+ * fixed rather than a poison row.
+ */
+export async function requeueFailedBrainMemoryEvents(
+  database: DatabaseOrTransaction,
+): Promise<number> {
+  const rows = await database
+    .update(brainMemoryEvents)
+    .set({
+      status: 'pending',
+      attempts: 0,
+      lastError: null,
+      updatedAt: sql`now()`,
+    })
+    .where(eq(brainMemoryEvents.status, 'failed'))
+    .returning({ id: brainMemoryEvents.id });
+
+  return rows.length;
+}
+
+/** Every durable collector checkpoint, including per-partition rows. */
+export async function listBrainSyncStates(
+  database: DatabaseOrTransaction,
+): Promise<BrainSyncStateRow[]> {
+  return database
+    .select()
+    .from(brainSyncState)
+    .orderBy(brainSyncState.collectorId);
+}
+
+/** Tracked upstream objects per collector, for reporting inventory size. */
+export async function countBrainCollectorItemsByCollector(
+  database: DatabaseOrTransaction,
+): Promise<Array<{ collectorId: string; items: number }>> {
+  return database
+    .select({
+      collectorId: brainCollectorItems.collectorId,
+      items: count(),
+    })
+    .from(brainCollectorItems)
+    .groupBy(brainCollectorItems.collectorId);
 }
 
 export async function markBrainMemoryEvent(

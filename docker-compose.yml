@@ -3,7 +3,7 @@ name: roomote
 services:
   postgres:
     container_name: roomote-postgres
-    image: pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adfd27b5707128f60956f62a793c3c9326ea8cfaf0eab7adccb5d700b21
+    image: pgvector/pgvector:0.8.1-pg17-trixie@sha256:137f044b0efe3d57f39b972b9b53641b1f2045b99d879e298bbf514a25787dcf
     # Publish datastore ports to loopback only so Postgres, Redis, and MinIO are
     # never reachable from another host. The production Caddy overlay resets
     # these to none; use an SSH tunnel or reverse proxy if remote access is
@@ -83,8 +83,9 @@ services:
       - 'host.docker.internal:host-gateway'
 
   # The Brain (deployment-hosted gbrain), managed alongside the other local
-  # datastores. Opt in with COMPOSE_PROFILES=brain (or `pnpm
-  # brain:up`). The port is published to loopback only because the local
+  # datastores. `pnpm dev` starts this profiled service explicitly; `pnpm
+  # brain:up` remains available to operate it independently. The port is
+  # published to loopback only because the local
   # api/bullmq processes run on the host rather than in this network; in the
   # self-host and installer stacks the Brain publishes no ports at all and is
   # reachable only from the app services.

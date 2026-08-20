@@ -24,6 +24,8 @@ import {
   deleteBrainCollectorItems,
   listBrainCollectorItems,
   listBrainCollectorItemsBefore,
+  listBrainCollectorItemsBySlugPrefix,
+  seedBrainCollectorItems,
   upsertBrainCollectorItems,
   upsertBrainSyncState,
 } from '../../server';
@@ -141,6 +143,82 @@ describe('Brain collector item inventory', () => {
     await deleteBrainCollectorItems(db, 'notion-pages', ['revoked']);
     const remaining = await listBrainCollectorItems(db, 'notion-pages', 100);
     expect(remaining.map((item) => item.itemId)).toEqual(['still-shared']);
+  });
+
+  it('seeding never overwrites a row the live collector already wrote', async () => {
+    const liveSeenAt = new Date('2026-08-15T00:00:00Z');
+    await upsertBrainCollectorItems(db, 'slack-public-channels:day-pages', [
+      {
+        itemId: 'slack/T1/C1/2026-08-13/1-0-2-0',
+        slug: 'slack/T1/C1/2026-08-13/1-0-2-0',
+        lastSeenAt: liveSeenAt,
+      },
+    ]);
+
+    await seedBrainCollectorItems(db, 'slack-public-channels:day-pages', [
+      {
+        itemId: 'slack/T1/C1/2026-08-13/1-0-2-0',
+        slug: 'slack/T1/C1/2026-08-13/1-0-2-0',
+        lastSeenAt: new Date(0),
+      },
+      {
+        itemId: 'slack/T1/C1/2026-08-12/3-0-4-0',
+        slug: 'slack/T1/C1/2026-08-12/3-0-4-0',
+        lastSeenAt: new Date(0),
+      },
+    ]);
+
+    const rows = await listBrainCollectorItems(
+      db,
+      'slack-public-channels:day-pages',
+      100,
+    );
+    expect(rows.map((row) => [row.itemId, row.lastSeenAt.getTime()])).toEqual([
+      ['slack/T1/C1/2026-08-12/3-0-4-0', 0],
+      ['slack/T1/C1/2026-08-13/1-0-2-0', liveSeenAt.getTime()],
+    ]);
+  });
+
+  it('lists items under a literal slug prefix', async () => {
+    await upsertBrainCollectorItems(db, 'slack-public-channels:day-pages', [
+      {
+        itemId: 'slack/T1/C1/2026-08-13/1-0-2-0',
+        slug: 'slack/T1/C1/2026-08-13/1-0-2-0',
+        lastSeenAt: new Date('2026-08-15T00:00:00Z'),
+      },
+      {
+        itemId: 'slack/T1/C1/2026-08-14/5-0-6-0',
+        slug: 'slack/T1/C1/2026-08-14/5-0-6-0',
+        lastSeenAt: new Date('2026-08-15T00:00:00Z'),
+      },
+      // LIKE metacharacters in the stored id must not widen the prefix.
+      {
+        itemId: 'slack/T_/C1/2026-08-13/7-0-8-0',
+        slug: 'slack/T_/C1/2026-08-13/7-0-8-0',
+        lastSeenAt: new Date('2026-08-15T00:00:00Z'),
+      },
+    ]);
+
+    const day = await listBrainCollectorItemsBySlugPrefix(
+      db,
+      'slack-public-channels:day-pages',
+      'slack/T1/C1/2026-08-13/',
+      100,
+    );
+    expect(day.map((item) => item.itemId)).toEqual([
+      'slack/T1/C1/2026-08-13/1-0-2-0',
+    ]);
+
+    // An underscore in the requested prefix matches itself, not any char.
+    const underscored = await listBrainCollectorItemsBySlugPrefix(
+      db,
+      'slack-public-channels:day-pages',
+      'slack/T_/',
+      100,
+    );
+    expect(underscored.map((item) => item.itemId)).toEqual([
+      'slack/T_/C1/2026-08-13/7-0-8-0',
+    ]);
   });
 });
 

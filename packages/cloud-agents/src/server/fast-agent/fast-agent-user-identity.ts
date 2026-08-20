@@ -2,7 +2,7 @@ import { db, eq, users } from '@roomote/db/server';
 
 import { findLatestGithubIdentityForUser } from '../commit-author';
 
-export interface FastAgentUserIdentity {
+interface FastAgentUserIdentity {
   displayName: string | null;
   githubLogin: string | null;
 }

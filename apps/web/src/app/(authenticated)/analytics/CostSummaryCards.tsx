@@ -9,7 +9,7 @@ import {
 import {
   AnalyticsSummaryCard,
   AnalyticsSummaryCardsGrid,
-} from './AnalyticsSummaryCards';
+} from '@/components/system';
 
 function format(value: number | null) {
   return value === null ? '—' : `$${value.toFixed(2)}`;

@@ -7,8 +7,8 @@ import {
 
 import { getActiveFastAgentTasks } from '../fast-agent-session';
 
-const SESSION_ID = '11111111-1111-4111-8111-111111111111';
-const OTHER_SESSION_ID = '22222222-2222-4222-8222-222222222222';
+const SESSION_ID = '7cc5bc38-9edc-4cb0-9fde-f6e44b32d66e';
+const OTHER_SESSION_ID = 'c1370cca-235f-43bf-9c26-e6f71f3ce2cc';
 const createdTaskIds: string[] = [];
 
 async function createTask(title: string, deletedAt: Date | null = null) {

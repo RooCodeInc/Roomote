@@ -17,12 +17,18 @@ import {
   or,
 } from '@roomote/db/server';
 import {
+  postBrainToolCall,
   resolveBrainInferenceProvider,
   resolveBrainConnection,
 } from '@roomote/sdk/server';
-import { getLinkedEnvironmentIdFromPayload, RunStatus } from '@roomote/types';
+import {
+  brainNamespacePrefix,
+  getLinkedEnvironmentIdFromPayload,
+  RunStatus,
+} from '@roomote/types';
 
 import { runBrainCollectors } from './brain-collectors';
+import { runSlackDayPageCensus } from './brain-collectors/slack-day-page-inventory';
 
 const LOG_PREFIX = '[brainOutboxDrain]';
 /** Sync-state key for the one-time task-history backfill. */
@@ -114,29 +120,18 @@ export async function callBrainWriteTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<string> {
-  const response = await fetch(`${connection.baseUrl.replace(/\/$/, '')}/mcp`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      accept: 'application/json, text/event-stream',
-      authorization: `Bearer ${connection.token}`,
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/call',
-      params: { name, arguments: args },
-    }),
-  });
-  const body = await response.text().catch(() => '');
+  // Shared transport; the backpressure classification below is this write
+  // path's own and deliberately stays here. No timeout: put_page embeds
+  // synchronously and a slow embed is backpressure, not a failure.
+  const { status, ok, body } = await postBrainToolCall(connection, name, args);
 
-  if (response.status === 429) {
+  if (status === 429) {
     throw new BrainRateLimitedError(
       `gbrain ${name} rate limited: ${body.slice(0, 300)}`,
     );
   }
 
-  const failed = !response.ok || body.includes('"isError":true');
+  const failed = !ok || body.includes('"isError":true');
 
   if (failed && /embed\(|embedding/i.test(body)) {
     throw new BrainNotReadyError(
@@ -145,9 +140,7 @@ export async function callBrainWriteTool(
   }
 
   if (failed) {
-    throw new Error(
-      `gbrain ${name} failed: ${response.status} ${body.slice(0, 300)}`,
-    );
+    throw new Error(`gbrain ${name} failed: ${status} ${body.slice(0, 300)}`);
   }
 
   return body;
@@ -226,7 +219,7 @@ export function buildMemoryPage(input: {
   ].join('\n');
 
   return {
-    slug: `tasks/${input.taskId}/runs/${input.runId}`,
+    slug: `${brainNamespacePrefix('tasks')}${input.taskId}/runs/${input.runId}`,
     title: input.taskTitle,
     content: redactBrainText(content),
   };
@@ -324,6 +317,19 @@ export async function brainCollectorsJob(): Promise<void> {
 
   if (!connection) {
     return;
+  }
+
+  try {
+    // Before any Slack collection: the one-time inventory census the Slack
+    // collector holds on. Running it here, ahead of the pass, normally
+    // completes it within the first tick after a deploy.
+    await runSlackDayPageCensus();
+  } catch (error) {
+    console.warn(
+      `${LOG_PREFIX} slack day-page census failed; slack collection stays held: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 
   let includeIncremental = true;
@@ -609,7 +615,7 @@ export function buildPullRequestFactPage(fact: {
   ].join('\n');
 
   return {
-    slug: `prs/${fact.repositoryFullName}/${fact.prNumber}`,
+    slug: `${brainNamespacePrefix('prs')}${fact.repositoryFullName}/${fact.prNumber}`,
     title: `${fact.repositoryFullName}#${fact.prNumber}: ${fact.title}`,
     content: redactBrainText(content),
   };

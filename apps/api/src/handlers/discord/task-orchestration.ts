@@ -104,6 +104,12 @@ export async function startNewDiscordTask(input: {
   forceNewThread?: boolean;
   fastAgentSessionId?: string;
   fastAgentParent?: FastAgentParent;
+  /** Fast owns the visible acknowledgement and must post it before the child
+   * becomes runnable. Other Discord launches use the standard task card. */
+  beforeEnqueueKickoff?: (task: {
+    taskId: string;
+    taskUrl?: string;
+  }) => Promise<void>;
   workspaceOverride?: DiscordWorkspaceSelection;
   /**
    * True when the Discord intake path successfully pinned 👀 on the origin
@@ -133,7 +139,7 @@ export async function startNewDiscordTask(input: {
       taskId: existingRun.taskId,
       utm: { source: 'discord', campaign: 'discord.idempotent_retry' },
     });
-    if (!input.channelAutoStart) {
+    if (!input.channelAutoStart && !input.beforeEnqueueKickoff) {
       await replyToDiscordEvent({
         provider: input.provider,
         applicationId: input.applicationId,
@@ -374,6 +380,9 @@ export async function startNewDiscordTask(input: {
         : {}),
       ...(input.fastAgentParent
         ? { fastAgentParent: input.fastAgentParent }
+        : {}),
+      ...(input.beforeEnqueueKickoff
+        ? { beforeEnqueueKickoff: input.beforeEnqueueKickoff }
         : {}),
       ...(kickoffMessage ? { kickoffMessage } : {}),
       ...(input.intakeAckPinned ? { intakeAckPinned: true } : {}),

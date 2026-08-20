@@ -7,9 +7,11 @@ const {
   createOpencodeClientMock,
   configProvidersMock,
   createServerMock,
+  eventSubscribeMock,
   execFileMock,
   execFileSyncMock,
   mockResolveEffectiveModelRuntimeEnv,
+  sessionAbortMock,
   spawnMock,
   sessionCreateMock,
   sessionPromptMock,
@@ -17,9 +19,11 @@ const {
   createOpencodeClientMock: vi.fn(),
   configProvidersMock: vi.fn(),
   createServerMock: vi.fn(),
+  eventSubscribeMock: vi.fn(),
   execFileMock: vi.fn(),
   execFileSyncMock: vi.fn(),
   mockResolveEffectiveModelRuntimeEnv: vi.fn(),
+  sessionAbortMock: vi.fn(),
   spawnMock: vi.fn(),
   sessionCreateMock: vi.fn(),
   sessionPromptMock: vi.fn(),
@@ -125,11 +129,16 @@ describe('resolveOpenCodeSmallModel', () => {
       config: {
         providers: configProvidersMock,
       },
+      event: {
+        subscribe: eventSubscribeMock,
+      },
       session: {
+        abort: sessionAbortMock,
         create: sessionCreateMock,
         prompt: sessionPromptMock,
       },
     });
+    sessionAbortMock.mockResolvedValue({ data: true, error: undefined });
     sessionCreateMock.mockResolvedValue({
       data: { id: 'session-1' },
       error: undefined,
@@ -248,6 +257,150 @@ describe('resolveOpenCodeSmallModel', () => {
       }),
       expect.any(Object),
     );
+  });
+
+  it('runs a held Fast session with native tools and a session-ready binding', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4999',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: {},
+        parts: [{ type: 'text', text: 'native tool turn complete' }],
+      },
+      error: undefined,
+    });
+    const {
+      generateTrackedNonTaskTextInOpenCodeSession,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+    const onSessionReady = vi.fn();
+    const session: { id?: string } = {};
+
+    await expect(
+      generateTrackedNonTaskTextInOpenCodeSession(
+        {
+          surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+          prompt: 'Use the native tools.',
+          modelRole: 'primary',
+        },
+        session,
+        {
+          directory: '/tmp/roomote-fast-native-test',
+          env: {
+            ROOMOTE_FAST_TOOL_BRIDGE_URL: 'http://127.0.0.1:4321/tool',
+            ROOMOTE_FAST_TOOL_BRIDGE_TOKEN: 'bridge-token',
+          },
+          tools: {
+            '*': false,
+            send_chat_reply: true,
+          },
+          onSessionReady,
+        },
+      ),
+    ).resolves.toBe('native tool turn complete');
+
+    expect(session.id).toBe('session-1');
+    expect(onSessionReady).toHaveBeenCalledWith('session-1');
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    expect(spawnMock.mock.calls[0]?.[2]?.env).toMatchObject({
+      ROOMOTE_FAST_TOOL_BRIDGE_URL: 'http://127.0.0.1:4321/tool',
+      ROOMOTE_FAST_TOOL_BRIDGE_TOKEN: 'bridge-token',
+    });
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        directory: '/tmp/roomote-fast-native-test',
+        sessionID: 'session-1',
+        tools: {
+          '*': false,
+          send_chat_reply: true,
+        },
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('passes files into a held Fast OpenCode session prompt', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: {},
+        parts: [{ type: 'text', text: 'image inspected' }],
+      },
+      error: undefined,
+    });
+    const { generateTrackedNonTaskTextInOpenCodeSession } =
+      await import('../non-task-provider-usage.js');
+
+    await generateTrackedNonTaskTextInOpenCodeSession(
+      {
+        surface: 'fast_agent_question_answering',
+        prompt: 'Inspect this image.',
+        files: [
+          {
+            mime: 'image/png',
+            filename: 'screenshot.png',
+            url: 'data:image/png;base64,aGVsbG8=',
+          },
+        ],
+      },
+      {},
+      {
+        directory: '/tmp/roomote-fast-native-test',
+        tools: { '*': false, send_chat_reply: true },
+      },
+    );
+
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parts: [
+          expect.objectContaining({ type: 'text' }),
+          {
+            type: 'file',
+            mime: 'image/png',
+            filename: 'screenshot.png',
+            url: 'data:image/png;base64,aGVsbG8=',
+          },
+        ],
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('classifies a missing held OpenCode session for cold bootstrap recovery', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: undefined,
+      error: { name: 'NotFoundError', data: { message: 'Session not found' } },
+    });
+    const {
+      generateTrackedNonTaskTextInOpenCodeSession,
+      NonTaskOpenCodeSessionNotFoundError,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskTextInOpenCodeSession(
+        {
+          surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+          prompt: 'turn delta',
+        },
+        { id: 'missing-session' },
+        {
+          directory: '/tmp/roomote-fast-native-test',
+          tools: { '*': false, send_chat_reply: true },
+        },
+      ),
+    ).rejects.toBeInstanceOf(NonTaskOpenCodeSessionNotFoundError);
+    expect(sessionCreateMock).not.toHaveBeenCalled();
   });
 
   it('uses the deployment primary model when requested', async () => {
@@ -527,6 +680,242 @@ describe('resolveOpenCodeSmallModel', () => {
       // fallback log names the model without a database lookup.
       'OpenCode structured prompt failed (model openrouter/z-ai/glm-5.2): StructuredOutputError: failed to satisfy schema',
     );
+  });
+
+  it('reports OpenCode provider retries and rejects with the live session error', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openai/gpt-5.6-sol',
+    });
+    const providerError = {
+      name: 'APIError',
+      data: {
+        message: 'Too Many Requests',
+        statusCode: 429,
+      },
+    };
+    eventSubscribeMock.mockResolvedValue({
+      stream: (async function* () {
+        yield {
+          type: 'session.status' as const,
+          properties: {
+            sessionID: 'session-1',
+            status: {
+              type: 'retry' as const,
+              attempt: 1,
+              message: 'Too Many Requests',
+              next: Date.now() + 5_000,
+            },
+          },
+        };
+        yield {
+          type: 'session.error' as const,
+          properties: {
+            sessionID: 'session-1',
+            error: providerError,
+          },
+        };
+      })(),
+    });
+    sessionPromptMock.mockReturnValue(new Promise(() => undefined));
+    const onProviderRetry = vi.fn();
+
+    const {
+      classifyNonTaskInferenceError,
+      generateTrackedNonTaskObject,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+
+    const result = generateTrackedNonTaskObject({
+      surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+      modelRole: 'primary',
+      schema: z.object({ answer: z.string() }),
+      prompt: 'Answer.',
+      onProviderRetry,
+    });
+    const error = await result.catch((caught: unknown) => caught);
+    expect(error).toMatchObject({
+      name: 'NonTaskOpenCodePromptError',
+      providerError,
+    });
+    expect(classifyNonTaskInferenceError(error)).toMatchObject({
+      reason: 'rate_limited',
+      retryable: true,
+    });
+    expect(onProviderRetry).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attempt: 1,
+        message: 'Too Many Requests',
+      }),
+    );
+    expect(sessionAbortMock).toHaveBeenCalledWith({
+      sessionID: 'session-1',
+      directory: expect.stringContaining('roomote-non-task-'),
+    });
+  });
+
+  it.each(['prompt_result', 'session_event'] as const)(
+    'preserves and classifies a gateway block when %s settles first',
+    async (settlement) => {
+      process.env = {
+        ...originalEnv,
+        OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+      };
+      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+        R_MODEL: 'openai/gpt-5.6-sol',
+      });
+      const providerError = {
+        name: 'APIError',
+        data: {
+          message:
+            'Forbidden: request was blocked by a gateway or proxy. You may not have permission to access this resource.',
+          statusCode: 403,
+          responseBody: '<html><title>Forbidden</title></html>',
+        },
+      };
+      eventSubscribeMock.mockResolvedValue({
+        stream:
+          settlement === 'session_event'
+            ? (async function* () {
+                yield {
+                  type: 'session.error' as const,
+                  properties: { sessionID: 'session-1', error: providerError },
+                };
+              })()
+            : [],
+      });
+      sessionPromptMock.mockImplementation(() =>
+        settlement === 'prompt_result'
+          ? Promise.resolve({
+              data: { info: { error: providerError }, parts: [] },
+              error: undefined,
+            })
+          : new Promise(() => undefined),
+      );
+
+      const {
+        classifyNonTaskInferenceError,
+        generateTrackedNonTaskObject,
+        NON_TASK_INFERENCE_SURFACES,
+      } = await import('../non-task-provider-usage.js');
+      const result = generateTrackedNonTaskObject({
+        surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+        modelRole: 'primary',
+        schema: z.object({ answer: z.string() }),
+        prompt: 'Answer.',
+        onProviderRetry: vi.fn(),
+      });
+
+      const error = await result.catch((caught: unknown) => caught);
+      expect(error).toMatchObject({
+        name: 'NonTaskOpenCodePromptError',
+        providerError,
+      });
+      expect(classifyNonTaskInferenceError(error)).toEqual({
+        message: 'The inference provider gateway blocked the request.',
+        reason: 'gateway_blocked',
+        retryable: true,
+      });
+      expect(sessionAbortMock).toHaveBeenCalledWith({
+        sessionID: 'session-1',
+        directory: expect.stringContaining('roomote-non-task-'),
+      });
+    },
+  );
+
+  it('keeps named terminal OpenCode errors out of outer retry loops', async () => {
+    const { classifyNonTaskInferenceError } =
+      await import('../non-task-provider-usage.js');
+
+    for (const [providerError, expectedReason] of [
+      [
+        {
+          name: 'ProviderAuthError',
+          data: { providerID: 'openai', message: 'No API key found' },
+        },
+        'invalid_credentials',
+      ],
+      [
+        {
+          name: 'ContextOverflowError',
+          data: { message: 'Input exceeds the context window' },
+        },
+        'provider_error',
+      ],
+      [
+        {
+          name: 'ContentFilterError',
+          data: { message: 'The response was blocked' },
+        },
+        'provider_error',
+      ],
+      [
+        {
+          name: 'MessageOutputLengthError',
+          data: {},
+        },
+        'provider_error',
+      ],
+    ] as const) {
+      expect(classifyNonTaskInferenceError(providerError)).toMatchObject({
+        reason: expectedReason,
+        retryable: false,
+      });
+    }
+  });
+
+  it('continues observing provider errors when retry reporting fails', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openai/gpt-5.6-sol',
+    });
+    const providerError = {
+      name: 'APIError',
+      data: { message: 'Unauthorized', statusCode: 401 },
+    };
+    eventSubscribeMock.mockResolvedValue({
+      stream: (async function* () {
+        yield {
+          type: 'session.status' as const,
+          properties: {
+            sessionID: 'session-1',
+            status: {
+              type: 'retry' as const,
+              attempt: 1,
+              message: 'Retrying',
+              next: Date.now() + 1_000,
+            },
+          },
+        };
+        yield {
+          type: 'session.error' as const,
+          properties: { sessionID: 'session-1', error: providerError },
+        };
+      })(),
+    });
+    sessionPromptMock.mockReturnValue(new Promise(() => undefined));
+
+    const { generateTrackedNonTaskObject, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+
+    await expect(
+      generateTrackedNonTaskObject({
+        surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+        modelRole: 'primary',
+        schema: z.object({ answer: z.string() }),
+        prompt: 'Answer.',
+        onProviderRetry: vi.fn().mockRejectedValue(new Error('Slack failed')),
+      }),
+    ).rejects.toMatchObject({
+      name: 'NonTaskOpenCodePromptError',
+      providerError,
+    });
   });
 
   it('returns the joined text parts from a plain SDK prompt', async () => {
@@ -1108,6 +1497,33 @@ describe('resolveOpenCodeSmallModel', () => {
       providerMessage: 'slow down',
       statusCode: 429,
       reason: 'rate_limited',
+      retryable: true,
+    },
+    {
+      providerMessage: 'request expired',
+      statusCode: 408,
+      reason: 'timeout',
+      retryable: true,
+    },
+    // Other structured 4xx responses are client errors that resending the
+    // same request cannot recover, so retry loops must not absorb them.
+    {
+      providerMessage: 'prompt is too long',
+      statusCode: 400,
+      reason: 'provider_error',
+      retryable: false,
+    },
+    {
+      providerMessage: 'unprocessable entity',
+      statusCode: 422,
+      reason: 'provider_error',
+      retryable: false,
+    },
+    // Server-side failures stay retryable.
+    {
+      providerMessage: 'overloaded',
+      statusCode: 529,
+      reason: 'provider_error',
       retryable: true,
     },
   ])(
