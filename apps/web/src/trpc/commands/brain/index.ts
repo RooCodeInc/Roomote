@@ -323,7 +323,7 @@ export function summarizeSources(input: {
     // A row that also carries a watermark is a live stream whose cursor is a
     // rolling checkpoint or mode-state (pull-request facts, member sweeps,
     // the Notion incremental scan): steady ingestion, not history reading.
-    const backfilling = states.some(
+    const backfilling = parents.some(
       (state) =>
         state.backfillCursor && !state.backfillCompletedAt && !state.watermark,
     );

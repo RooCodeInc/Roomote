@@ -45,11 +45,14 @@ const ALL_CONNECTED = {
   rippling: false,
 } as const;
 
-function summarize(syncStates: SyncRow[]) {
+function summarize(
+  syncStates: SyncRow[],
+  requirements: Partial<Record<keyof typeof ALL_CONNECTED, boolean>> = {},
+) {
   return summarizeSources({
     syncStates,
     itemCounts: [],
-    requirements: { ...ALL_CONNECTED },
+    requirements: { ...ALL_CONNECTED, ...requirements },
     taskMemoriesActive: true,
     taskMemoriesLastProcessedAt: new Date('2026-08-20T18:50:00Z'),
   });
@@ -125,6 +128,21 @@ describe('summarizeSources', () => {
     expect(sourceOf(sources, 'person-identities').status).toBe('ingesting');
     expect(sourceOf(sources, 'notion-pages').status).toBe('ingesting');
     expect(sourceOf(sources, 'pull-request-facts').backfillProgress).toBeNull();
+  });
+
+  it('does not treat a child snapshot cursor as a deep backfill', () => {
+    const sources = summarize(
+      [
+        row('rippling-workers:snapshot', {
+          backfillCursor: JSON.stringify({ page: 2 }),
+        }),
+      ],
+      { rippling: true },
+    );
+    const rippling = sourceOf(sources, 'rippling-workers');
+
+    expect(rippling.status).toBe('ingesting');
+    expect(rippling.backfillProgress).toBeNull();
   });
 
   it('shows a completed fan-out backfill as ingesting', () => {
