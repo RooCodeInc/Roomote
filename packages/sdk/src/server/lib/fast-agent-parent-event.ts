@@ -113,6 +113,16 @@ type FastAgentParentEvent =
       taskUrl: string;
       untrustedTaskGeneratedContext?: string;
       pullRequest: FastAgentPullRequestContext;
+    }
+  | {
+      type: 'pull_request_feedback';
+      feedbackId: string;
+      taskId: string;
+      runId: number;
+      taskUrl: string;
+      pullRequest: FastAgentPullRequestContext;
+      summary: string;
+      suggestedActionPrompt?: string;
     };
 
 export async function listFastAgentPullRequestContexts(
@@ -211,6 +221,8 @@ function buildEventClientMessageSeed(event: FastAgentParentEvent): string {
       return `fast-parent-artifact:${event.artifact.id}:v${event.artifact.version}`;
     case 'pull_request_opened':
       return `fast-parent-pr-opened:${event.taskId}:${event.pullRequest.url}`;
+    case 'pull_request_feedback':
+      return `fast-parent-pr-feedback:${event.feedbackId}`;
     case 'task_settled':
       return `fast-parent-settle:${event.runId}`;
   }

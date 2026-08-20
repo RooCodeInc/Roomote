@@ -435,6 +435,52 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
+  it('delivers pull request feedback as a platform event with a stable idempotency key', async () => {
+    const feedbackEvent = {
+      type: 'pull_request_feedback' as const,
+      feedbackId: 'feedback-123',
+      taskId: 'task-1',
+      runId: 42,
+      taskUrl: 'https://roomote.example/task/task-1',
+      pullRequest: {
+        provider: 'github' as const,
+        host: 'github.com',
+        repository: 'acme/web',
+        number: 42,
+        title: 'Fix review feedback',
+        url: 'https://github.com/acme/web/pull/42',
+        status: 'open' as const,
+      },
+      summary: 'Alice requested changes.',
+      suggestedActionPrompt: 'Address the requested changes.',
+    };
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'There is new PR feedback.',
+        }),
+    );
+
+    await deliverFastAgentParentEvent({ parent, event: feedbackEvent });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: expect.stringContaining('"type":"pull_request_feedback"'),
+        turnSource: 'platform_event',
+      }),
+    );
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        client_msg_id: expect.any(String),
+      }),
+    );
+  });
+
   it('lets a settled task event re-query the remaining active task set', async () => {
     await deliverFastAgentParentEvent({
       parent,
