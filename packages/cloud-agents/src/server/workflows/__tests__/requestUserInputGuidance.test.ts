@@ -258,6 +258,26 @@ describe('request_user_input guidance in workflow prompts', () => {
     );
   });
 
+  it('uses the task provider label for linked assignee instructions', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Implement a repository change',
+      repo: 'Roomote/example-app',
+      taskRunUrl: 'https://example.com/task/123',
+      sourceControlProvider: 'gitea',
+      attribution: {
+        ...matchedUserAttributionWithAssignee,
+        githubLogin: null,
+        publicDisplayName: '@monalisa',
+        prAssigneeLogin: 'monalisa',
+      },
+    });
+
+    expect(harnessInstructions).toContain(
+      "because the creating user has linked Gitea login `monalisa`, the delegated PR-delivery skill must pass `assignees: ['monalisa']`",
+    );
+    expect(harnessInstructions).not.toContain('linked GitHub login `monalisa`');
+  });
+
   it('uses a Slack conversation link for Slack-launched PR follow-up instructions when thread metadata is available', () => {
     const { harnessInstructions } = standardTask({
       description: 'Implement a repository change',
