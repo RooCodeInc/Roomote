@@ -63,8 +63,17 @@ function BrainProviderKeyForm({ onSaved }: { onSaved: () => void }) {
 
   const save = useMutation(
     trpc.brain.setProviderKey.mutationOptions({
-      onSuccess: () => {
-        toast.success('Brain provider key saved');
+      onSuccess: ({ activeProvider }, { provider: selected }) => {
+        if (activeProvider && activeProvider !== selected) {
+          // The deployment's general provider keys outrank the Brain key by
+          // design; say which provider actually serves rather than implying
+          // the selection won.
+          toast.info(
+            `Key saved. The Brain serves through ${BRAIN_INFERENCE_PROVIDER_LABELS[activeProvider]}: the deployment's ${BRAIN_INFERENCE_PROVIDER_LABELS[activeProvider]} key takes precedence.`,
+          );
+        } else {
+          toast.success('Brain provider key saved');
+        }
         setKey('');
         onSaved();
       },

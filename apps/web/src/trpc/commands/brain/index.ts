@@ -41,7 +41,10 @@ import {
 import type { UserAuthSuccess } from '@/types';
 import { Env } from '@/lib/server/env';
 
-import { upsertDeploymentEnvironmentVariables } from '../environment-variables';
+import {
+  deleteDeploymentEnvironmentVariables,
+  upsertDeploymentEnvironmentVariables,
+} from '../environment-variables';
 import { assertAdmin } from '../setup/shared';
 
 /**
@@ -715,21 +718,39 @@ export async function getBrainPageCommand(
 export async function setBrainProviderKeyCommand(
   auth: UserAuthSuccess,
   input: { provider: 'openrouter' | 'openai'; key: string },
-): Promise<{ success: true }> {
+): Promise<{ success: true; activeProvider: 'openrouter' | 'openai' | null }> {
   assertAdmin(auth);
 
   const name =
     input.provider === 'openrouter'
       ? 'R_BRAIN_OPENROUTER_API_KEY'
       : 'R_BRAIN_OPENAI_API_KEY';
+  const alternate =
+    input.provider === 'openrouter'
+      ? 'R_BRAIN_OPENAI_API_KEY'
+      : 'R_BRAIN_OPENROUTER_API_KEY';
 
-  await upsertDeploymentEnvironmentVariables(db, {
-    userId: auth.userId,
-    values: [{ name, value: input.key.trim() }],
+  // The selection is authoritative between the two Brain keys: the resolver
+  // prefers OpenRouter, so a stale alternate key would silently keep serving
+  // over the one the admin just chose. Clearing it rides the same
+  // transaction as the write.
+  await db.transaction(async (tx) => {
+    await upsertDeploymentEnvironmentVariables(tx, {
+      userId: auth.userId,
+      values: [{ name, value: input.key.trim() }],
+    });
+    await deleteDeploymentEnvironmentVariables(tx, [alternate]);
   });
 
   resetBrainProviderConfiguredCache();
   resetBrainInferenceProviderCache();
 
-  return { success: true };
+  // The deployment's GENERAL provider keys still outrank the other Brain
+  // key by design (a deployment with only a general OpenRouter key gets a
+  // working Brain for free). Report which provider actually serves so the
+  // UI can say when it differs from the selection instead of implying the
+  // choice won.
+  const active = await resolveBrainInferenceProvider();
+
+  return { success: true, activeProvider: active?.providerId ?? null };
 }
