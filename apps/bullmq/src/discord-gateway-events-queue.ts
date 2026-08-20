@@ -4,6 +4,7 @@ import { resolveDiscordGatewaySecret } from '@roomote/db/server';
 import { Env } from '@roomote/env';
 import type { DiscordGatewayEvent } from '@roomote/communication/discord-event';
 import { DISCORD_GATEWAY_EVENTS_QUEUE_NAME } from '@roomote/sdk/server';
+import { resolveApiUrl } from '@roomote/types';
 
 import { getRedis } from './redis';
 
@@ -15,10 +16,37 @@ function processUrl(): string {
     throw new Error('TRPC_URL is required to process Discord gateway events');
   }
 
-  return new URL(
-    '/api/internal/discord/events/process',
-    Env.TRPC_URL,
-  ).toString();
+  // TRPC_URL may carry a path prefix — the self-hosted installer default is
+  // `https://<domain>/_roomote-api`, which the edge strips before proxying to
+  // the API. The endpoint has to be appended to that prefix, not resolved
+  // against it, or the request misses the API route entirely.
+  return resolveApiUrl(Env.TRPC_URL, '/api/internal/discord/events/process');
+}
+
+// A misrouted request can still answer 2xx: an edge that does not recognize the
+// API prefix falls through to the web app, whose not-found page is HTML with a
+// 200 status. Requiring the API's JSON acknowledgement keeps that from
+// completing the job as if the event had been handled.
+async function assertProcessingAcknowledged(response: Response): Promise<void> {
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.toLowerCase().includes('application/json')) {
+    throw new Error(
+      `Discord event processing returned a non-JSON HTTP ${response.status} response (content-type: ${contentType || 'none'})`,
+    );
+  }
+
+  const acknowledgement: unknown = await response.json().catch(() => undefined);
+  if (typeof acknowledgement !== 'object' || acknowledgement === null) {
+    throw new Error(
+      `Discord event processing returned an unreadable HTTP ${response.status} acknowledgement`,
+    );
+  }
+
+  if ((acknowledgement as { ok?: unknown }).ok === false) {
+    throw new Error(
+      `Discord event processing reported failure in its HTTP ${response.status} acknowledgement`,
+    );
+  }
 }
 
 export async function processDiscordGatewayEventJob(
@@ -43,7 +71,10 @@ export async function processDiscordGatewayEventJob(
 
   // A completed event can outlive its retained BullMQ job. The API's durable
   // idempotency gate reports that state as a conflict, which is successful work.
-  if (response.ok || response.status === 409) return;
+  if (response.ok || response.status === 409) {
+    await assertProcessingAcknowledged(response);
+    return;
+  }
 
   throw new Error(
     `Discord event processing failed with HTTP ${response.status}`,
