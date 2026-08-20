@@ -21,7 +21,7 @@ type SlackManifestResponse = {
   permissions_updated?: boolean;
 };
 
-export type UpdateSlackAppManifestResult =
+type UpdateSlackAppManifestResult =
   | {
       success: true;
       changed: boolean;
