@@ -39,7 +39,7 @@ function buildNotifiedResultKey(prUrl: string): string {
 /** Pass a newly opened task PR to its Fast parent through the shared event path. */
 export async function notifyFastAgentParentOnPullRequestOpened(params: {
   run: TaskRun;
-  taskGeneratedContext?: string;
+  untrustedTaskGeneratedContext?: string;
   pullRequest: {
     provider: SourceControlProvider;
     host?: string | null;
@@ -107,8 +107,11 @@ export async function notifyFastAgentParentOnPullRequestOpened(params: {
             campaign: 'fast-delegation-pr-opened',
           },
         }),
-        ...(params.taskGeneratedContext?.trim()
-          ? { taskGeneratedContext: params.taskGeneratedContext.trim() }
+        ...(params.untrustedTaskGeneratedContext?.trim()
+          ? {
+              untrustedTaskGeneratedContext:
+                params.untrustedTaskGeneratedContext.trim(),
+            }
           : {}),
         pullRequest,
       },

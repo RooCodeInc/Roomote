@@ -406,7 +406,9 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   // attempt finds this PR, updates it, and re-enters the deduplicated notifier.
   await notifyFastAgentParentOnPullRequestOpened({
     run: taskRun,
-    ...(input.body.trim() ? { taskGeneratedContext: input.body.trim() } : {}),
+    ...(input.body.trim()
+      ? { untrustedTaskGeneratedContext: input.body.trim() }
+      : {}),
     pullRequest: {
       provider: result.provider,
       host: repository.host,

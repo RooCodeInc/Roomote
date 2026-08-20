@@ -389,7 +389,7 @@ describe('deliverFastAgentParentEvent', () => {
       taskId: 'task-1',
       runId: 42,
       taskUrl: 'https://roomote.example/task/task-1',
-      taskGeneratedContext:
+      untrustedTaskGeneratedContext:
         'Fixed startup by treating absent local secrets as optional.',
       pullRequest: {
         provider: 'github' as const,
@@ -424,7 +424,7 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
         question: expect.stringContaining(
-          pullRequestEvent.taskGeneratedContext,
+          pullRequestEvent.untrustedTaskGeneratedContext,
         ),
         turnSource: 'platform_event',
       }),
