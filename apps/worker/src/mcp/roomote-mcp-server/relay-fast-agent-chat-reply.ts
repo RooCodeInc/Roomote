@@ -1,4 +1,6 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 import { sdk } from '@roomote/sdk/client';
 
@@ -20,6 +22,7 @@ export async function handleRelayFastAgentChatReply(
     message: string;
     imagePaths?: string[];
     imageArtifactIds?: string[];
+    relayStateDirectory?: string;
   },
   artifactConfig: ArtifactConfig,
 ): Promise<ToolResult> {
@@ -30,6 +33,31 @@ export async function handleRelayFastAgentChatReply(
   const message = normalizeOptionalSlackText(input.message);
   const imagePaths = uniqueNonEmpty(input.imagePaths);
   const imageArtifactIds = uniqueNonEmpty(input.imageArtifactIds);
+  const relaySignature = createHash('sha256')
+    .update(
+      JSON.stringify({
+        runId: input.runId,
+        taskId: input.taskId,
+        purpose: input.purpose,
+        message,
+        imagePaths,
+        imageArtifactIds,
+      }),
+    )
+    .digest('hex');
+  const relayStateDirectory =
+    input.relayStateDirectory ??
+    join(
+      process.env.HOME ?? '/tmp',
+      '.config',
+      'opencode',
+      'fast-agent-relays',
+    );
+  const relayStateFilePath = join(
+    relayStateDirectory,
+    `${relaySignature}.json`,
+  );
+  const relayId = getOrCreateRelayId(relayStateFilePath, relaySignature);
 
   if (imagePaths.length > 0 && !artifactConfig.workspacePath) {
     return errorResult('ROOMOTE_WORKSPACE_PATH not set');
@@ -58,7 +86,6 @@ export async function handleRelayFastAgentChatReply(
       return contentValidation;
     }
 
-    const relayId = randomUUID();
     const result = await sdk.taskRuns.relayFastAgentChildChatReply({
       runId: input.runId,
       taskId: input.taskId,
@@ -71,6 +98,8 @@ export async function handleRelayFastAgentChatReply(
     if (!result.relayed) {
       return errorResult('The Fast parent could not receive this update.');
     }
+
+    clearRelayId(relayStateFilePath, relaySignature);
 
     return successResult({
       relayed: true,
@@ -87,5 +116,57 @@ export async function handleRelayFastAgentChatReply(
     }
 
     return catchError(error);
+  }
+}
+
+function readRelayState(
+  stateFilePath: string,
+): { signature: string; relayId: string } | null {
+  try {
+    const parsed = JSON.parse(readFileSync(stateFilePath, 'utf8')) as {
+      signature?: unknown;
+      relayId?: unknown;
+    };
+    return typeof parsed.signature === 'string' &&
+      typeof parsed.relayId === 'string'
+      ? { signature: parsed.signature, relayId: parsed.relayId }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function getOrCreateRelayId(stateFilePath: string, signature: string): string {
+  const existing = readRelayState(stateFilePath);
+  if (existing?.signature === signature) {
+    return existing.relayId;
+  }
+
+  const relayId = randomUUID();
+  mkdirSync(dirname(stateFilePath), { recursive: true });
+  try {
+    writeFileSync(stateFilePath, JSON.stringify({ signature, relayId }), {
+      encoding: 'utf8',
+      flag: 'wx',
+    });
+    return relayId;
+  } catch {
+    const persisted = readRelayState(stateFilePath);
+    if (persisted) {
+      return persisted.relayId;
+    }
+    throw new Error('Failed to persist the Fast relay delivery key.');
+  }
+}
+
+function clearRelayId(stateFilePath: string, signature: string): void {
+  if (readRelayState(stateFilePath)?.signature !== signature) {
+    return;
+  }
+
+  try {
+    unlinkSync(stateFilePath);
+  } catch {
+    // A later retry can safely reuse or replace stale state.
   }
 }
