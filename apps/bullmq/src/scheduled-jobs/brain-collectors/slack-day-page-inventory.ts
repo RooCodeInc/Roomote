@@ -4,7 +4,7 @@ import {
   resolveBrainConnection,
 } from '@roomote/sdk/server';
 import {
-  canonicalizeBrainCollectorItemSlugs,
+  canonicalizeBrainCollectorItemSlugsAndResetSyncState,
   db,
   deleteBrainSyncStateFamily,
   getBrainSyncState,
@@ -225,25 +225,24 @@ const SUPERSEDED_SLACK_COLLECTOR_IDS = [
  *   replay with the mismatch live and retired nothing — so re-arm the deep
  *   backfill by clearing its cursor. The replay re-reads the backfill
  *   window and the (now canonical) reconciliation retires what the first
- *   pass missed. Deployments that never tracked mixed-case rows skip this.
+ *   pass missed. The rewrite and reset commit atomically so a restart cannot
+ *   strand the repaired inventory behind the old cursor. Deployments that
+ *   never tracked mixed-case rows skip this.
  * - Drop sync-state rows left behind by superseded collector versions.
  */
 export async function runSlackDayPageInventoryMaintenance(
   activeCollectorId: string,
 ): Promise<void> {
-  const rewritten = await canonicalizeBrainCollectorItemSlugs(
+  const rewritten = await canonicalizeBrainCollectorItemSlugsAndResetSyncState(
     db,
     SLACK_DAY_PAGE_ITEMS_ID,
+    activeCollectorId,
   );
 
   if (rewritten > 0) {
     console.log(
       `${LOG_PREFIX} canonicalized ${rewritten} slack day-page inventory rows; re-arming the healing replay`,
     );
-    await upsertBrainSyncState(db, activeCollectorId, {
-      backfillCursor: null,
-      backfillCompletedAt: null,
-    });
   }
 
   for (const collectorId of SUPERSEDED_SLACK_COLLECTOR_IDS) {

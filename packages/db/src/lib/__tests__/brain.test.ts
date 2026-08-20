@@ -15,6 +15,7 @@ import {
   brainCollectorItems,
   brainSyncState,
   backfillBrainMemoryEvents,
+  canonicalizeBrainCollectorItemSlugsAndResetSyncState,
   claimPendingBrainMemoryEvents,
   markBrainMemoryEvent,
   releaseBrainMemoryEvents,
@@ -235,6 +236,61 @@ describe('Brain collector item inventory', () => {
         'slack-public-channels:day-pages',
       ),
     ).toBe(0);
+  });
+
+  it('atomically canonicalizes inventory and resets its replay', async () => {
+    const inventoryId = 'slack-public-channels:day-pages';
+    const replayId = 'slack-public-channels:entity-timeline-v3';
+    const mixedCaseSlug = 'slack/T1/C1/2026-08-13/1-0-2-0';
+    await upsertBrainCollectorItems(db, inventoryId, [
+      {
+        itemId: mixedCaseSlug,
+        slug: mixedCaseSlug,
+        lastSeenAt: new Date('2026-08-20T12:00:00Z'),
+      },
+    ]);
+    await upsertBrainSyncState(db, replayId, {
+      backfillCursor: '{"completed":["C1"]}',
+      backfillCompletedAt: new Date('2026-08-20T13:00:00Z'),
+    });
+
+    await expect(
+      db.transaction(async (tx) => {
+        await canonicalizeBrainCollectorItemSlugsAndResetSyncState(
+          tx,
+          inventoryId,
+          replayId,
+        );
+        throw new Error('force maintenance rollback');
+      }),
+    ).rejects.toThrow('force maintenance rollback');
+
+    expect(
+      (await listBrainCollectorItems(db, inventoryId, 100)).map(
+        (row) => row.itemId,
+      ),
+    ).toEqual([mixedCaseSlug]);
+    expect(await getBrainSyncState(db, replayId)).toMatchObject({
+      backfillCursor: '{"completed":["C1"]}',
+      backfillCompletedAt: new Date('2026-08-20T13:00:00Z'),
+    });
+
+    expect(
+      await canonicalizeBrainCollectorItemSlugsAndResetSyncState(
+        db,
+        inventoryId,
+        replayId,
+      ),
+    ).toBe(1);
+    expect(
+      (await listBrainCollectorItems(db, inventoryId, 100)).map(
+        (row) => row.itemId,
+      ),
+    ).toEqual([mixedCaseSlug.toLowerCase()]);
+    expect(await getBrainSyncState(db, replayId)).toMatchObject({
+      backfillCursor: null,
+      backfillCompletedAt: null,
+    });
   });
 
   it('deletes a superseded collector version with its child partitions', async () => {
