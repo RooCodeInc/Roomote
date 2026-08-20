@@ -23,36 +23,6 @@ function processUrl(): string {
   return resolveApiUrl(Env.TRPC_URL, '/api/internal/discord/events/process');
 }
 
-// A misrouted request can still answer 2xx: an edge that does not recognize the
-// API prefix falls through to a catch-all, and the web app's not-found page is
-// HTML with a 200 status. Other topologies front the deployment with proxies
-// that answer JSON, so a JSON content type alone does not prove the request
-// reached the API. Every success and duplicate path of `/events/process`
-// answers `{ ok: true, ... }`, so require exactly that: a handler return that
-// ever stops matching fails loudly through the queue's retries, which is the
-// safe direction to fail when the alternative is completing events silently.
-async function assertProcessingAcknowledged(response: Response): Promise<void> {
-  const contentType = response.headers.get('content-type') ?? '';
-  if (!contentType.toLowerCase().includes('application/json')) {
-    throw new Error(
-      `Discord event processing returned a non-JSON HTTP ${response.status} response (content-type: ${contentType || 'none'})`,
-    );
-  }
-
-  const acknowledgement: unknown = await response.json().catch(() => undefined);
-  if (typeof acknowledgement !== 'object' || acknowledgement === null) {
-    throw new Error(
-      `Discord event processing returned an unreadable HTTP ${response.status} acknowledgement`,
-    );
-  }
-
-  if ((acknowledgement as { ok?: unknown }).ok !== true) {
-    throw new Error(
-      `Discord event processing did not acknowledge HTTP ${response.status} with ok: true`,
-    );
-  }
-}
-
 export async function processDiscordGatewayEventJob(
   job: Job<DiscordGatewayEvent>,
 ): Promise<void> {
@@ -75,10 +45,7 @@ export async function processDiscordGatewayEventJob(
 
   // A completed event can outlive its retained BullMQ job. The API's durable
   // idempotency gate reports that state as a conflict, which is successful work.
-  if (response.ok || response.status === 409) {
-    await assertProcessingAcknowledged(response);
-    return;
-  }
+  if (response.ok || response.status === 409) return;
 
   throw new Error(
     `Discord event processing failed with HTTP ${response.status}`,

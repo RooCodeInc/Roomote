@@ -19,13 +19,6 @@ vi.mock('@roomote/sdk/server', () => ({
   DISCORD_GATEWAY_EVENTS_QUEUE_NAME: 'discord-gateway-events',
 }));
 
-function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  });
-}
-
 import { processDiscordGatewayEventJob } from './discord-gateway-events-queue';
 
 const event = {
@@ -51,7 +44,7 @@ describe('processDiscordGatewayEventJob', () => {
   });
 
   it('posts the event to the internal processing endpoint with gateway auth', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
+    fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
 
     await processDiscordGatewayEventJob({ data: event } as Job<typeof event>);
 
@@ -70,9 +63,7 @@ describe('processDiscordGatewayEventJob', () => {
   });
 
   it('treats an already completed event as successful', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse({ ok: true, duplicate: true }, 409),
-    );
+    fetchMock.mockResolvedValue(new Response(null, { status: 409 }));
 
     await expect(
       processDiscordGatewayEventJob({ data: event } as Job<typeof event>),
@@ -97,7 +88,7 @@ describe('processDiscordGatewayEventJob', () => {
 
   it('preserves a TRPC_URL path prefix without a trailing slash', async () => {
     envMock.TRPC_URL = 'https://roomote.example.com/_roomote-api';
-    fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
+    fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
 
     await processDiscordGatewayEventJob({ data: event } as Job<typeof event>);
 
@@ -109,7 +100,7 @@ describe('processDiscordGatewayEventJob', () => {
 
   it('preserves a TRPC_URL path prefix with a trailing slash', async () => {
     envMock.TRPC_URL = 'https://roomote.example.com/_roomote-api/';
-    fetchMock.mockResolvedValue(jsonResponse({ ok: true }));
+    fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
 
     await processDiscordGatewayEventJob({ data: event } as Job<typeof event>);
 
@@ -117,63 +108,6 @@ describe('processDiscordGatewayEventJob', () => {
       'https://roomote.example.com/_roomote-api/api/internal/discord/events/process',
       expect.any(Object),
     );
-  });
-
-  it('throws when a misrouted request answers 200 with an HTML page', async () => {
-    fetchMock.mockResolvedValue(
-      new Response('<!DOCTYPE html><title>404</title>', {
-        status: 200,
-        headers: { 'content-type': 'text/html; charset=utf-8' },
-      }),
-    );
-
-    await expect(
-      processDiscordGatewayEventJob({ data: event } as Job<typeof event>),
-    ).rejects.toThrow('non-JSON HTTP 200 response');
-  });
-
-  it('throws when a 2xx response carries an unreadable acknowledgement', async () => {
-    fetchMock.mockResolvedValue(
-      new Response('not json', {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
-    );
-
-    await expect(
-      processDiscordGatewayEventJob({ data: event } as Job<typeof event>),
-    ).rejects.toThrow('unreadable HTTP 200 acknowledgement');
-  });
-
-  it('throws when a 2xx acknowledgement reports failure', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ ok: false, error: 'nope' }));
-
-    await expect(
-      processDiscordGatewayEventJob({ data: event } as Job<typeof event>),
-    ).rejects.toThrow('did not acknowledge HTTP 200 with ok: true');
-  });
-
-  it.each([
-    ['an empty object', {}],
-    ['an unrelated JSON body', { status: 'ok' }],
-    ['a non-boolean ok field', { ok: 'true' }],
-  ])(
-    'throws when a misrouted 2xx answers with %s',
-    async (_label, body: unknown) => {
-      fetchMock.mockResolvedValue(jsonResponse(body));
-
-      await expect(
-        processDiscordGatewayEventJob({ data: event } as Job<typeof event>),
-      ).rejects.toThrow('did not acknowledge HTTP 200 with ok: true');
-    },
-  );
-
-  it('throws when a 409 duplicate answers without ok: true', async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ duplicate: true }, 409));
-
-    await expect(
-      processDiscordGatewayEventJob({ data: event } as Job<typeof event>),
-    ).rejects.toThrow('did not acknowledge HTTP 409 with ok: true');
   });
 
   it('fails fast when the worker API URL is missing', async () => {
