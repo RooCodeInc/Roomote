@@ -14,6 +14,8 @@ import {
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
   PRODUCT_NAME,
+  ROOMOTE_TASK_INSPECTION_ACTIONS,
+  roomoteTaskInspectionFieldSchemas,
   sourceControlProviderSchema,
   taskArtifactTypeSchema,
   workspaceReadinessSchema,
@@ -574,10 +576,7 @@ const manageTasksToolDescription =
 const manageTasksInputSchema = {
   action: z
     .enum([
-      'search',
-      'get_summary',
-      'get_compute_logs',
-      'get_messages',
+      ...ROOMOTE_TASK_INSPECTION_ACTIONS,
       'launch',
       'cancel',
       'send_message',
@@ -588,6 +587,7 @@ const manageTasksInputSchema = {
     .describe(
       'The task action to perform. Call "list_environments" immediately before "launch".',
     ),
+  ...roomoteTaskInspectionFieldSchemas,
   taskId: z
     .string()
     .optional()
@@ -600,34 +600,6 @@ const manageTasksInputSchema = {
     .describe(
       'Follow-up message text to send to a running task (required for send_message)',
     ),
-  query: z
-    .string()
-    .optional()
-    .describe('Text to search for in task prompts (for search action)'),
-  status: z
-    .enum(['active', 'completed', 'all'])
-    .optional()
-    .describe('Filter by task status (for search action)'),
-  pullRequest: z
-    .string()
-    .optional()
-    .describe(
-      'Filter by pull request for search action: "__has_pr__" for any linked PR or "owner/repo#123" for a specific PR',
-    ),
-  limit: z
-    .number()
-    .int()
-    .refine((value) => value >= 1 && value <= 1000, {
-      message: 'Limit must be between 1 and 1,000.',
-    })
-    .optional()
-    .describe(
-      'Positive result limit: 1 to 100 for search (default 20), or 1 to 1000 for get_messages',
-    ),
-  cursor: z
-    .string()
-    .optional()
-    .describe('Pagination cursor from a previous search response (nextCursor)'),
   prompt: z
     .string()
     .optional()

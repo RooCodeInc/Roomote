@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { createRequire } from 'node:module';
+import { ROOMOTE_TASK_INSPECTION_ACTIONS } from '@roomote/types';
 import { z } from 'zod';
 
 const FAST_AGENT_TOOL_BRIDGE_BODY_LIMIT_BYTES = 1_000_000;
@@ -18,6 +19,7 @@ export const FAST_AGENT_NATIVE_TOOL_NAMES = {
   ignoreEvent: 'ignore_event',
   integrationCall: 'integration_call',
   launchTask: 'launch_task',
+  manageTasks: 'manage_tasks',
   retryTaskStart: 'retry_task_start',
   sendChatReaction: 'send_chat_reaction',
   sendChatReply: 'send_chat_reply',
@@ -128,6 +130,25 @@ export default {
     kickoffMessage: z.string().min(1).describe("Specific user-visible explanation of what is being delegated"),
   },
   execute: (args, context) => invoke("launch_task", args, context),
+}
+`,
+
+    [FAST_AGENT_NATIVE_TOOL_NAMES.manageTasks]: String.raw`
+import { z } from "zod"
+import { invoke } from "../roomote-fast-tool-bridge.js"
+
+export default {
+  description: "Inspect tasks in this Roomote deployment using the same read-only task actions and authorization semantics available to delegated Roomote tasks. Search task history, inspect status and failure details, read transcript messages, or fetch compute output where supported. Use launch_task, send_task_message, or cancel_task for task changes so Fast conversation orchestration is preserved.",
+  args: {
+    action: z.enum(${JSON.stringify(ROOMOTE_TASK_INSPECTION_ACTIONS)}),
+    taskId: z.string().optional().describe("The task ID (required for get_summary, get_compute_logs, and get_messages)"),
+    query: z.string().optional().describe("Text to search for in task prompts (for search action)"),
+    status: z.enum(["active", "completed", "all"]).optional().describe("Filter by task status (for search action)"),
+    pullRequest: z.string().optional().describe("Filter by pull request for search action: __has_pr__ for any linked PR or owner/repo#123 for a specific PR"),
+    limit: z.number().int().min(1).max(1000).optional().describe("Positive result limit: 1 to 100 for search (default 20), or 1 to 1000 for get_messages"),
+    cursor: z.string().optional().describe("Pagination cursor from a previous search response (nextCursor)"),
+  },
+  execute: (args, context) => invoke("manage_tasks", args, context),
 }
 `,
 

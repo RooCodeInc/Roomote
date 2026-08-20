@@ -1,5 +1,9 @@
 import type { ModelMessage } from 'ai';
-import { BRAIN_MCP_ID, formatErrorForLog } from '@roomote/types';
+import {
+  BRAIN_MCP_ID,
+  formatErrorForLog,
+  roomoteTaskInspectionArgsSchema,
+} from '@roomote/types';
 import { z } from 'zod';
 
 import {
@@ -40,6 +44,7 @@ import {
 } from './fast-agent-integration-broker';
 import {
   cancelFastAgentTask,
+  inspectFastAgentTasks,
   sendFastAgentTaskMessage,
 } from './fast-agent-tasks';
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
@@ -781,6 +786,11 @@ export async function answerFastAgentQuestion({
               }
             }
             return result;
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.manageTasks: {
+            const args = roomoteTaskInspectionArgsSchema.parse(call.args);
+            return inspectFastAgentTasks({ userId, apiBaseUrl }, args);
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage: {
