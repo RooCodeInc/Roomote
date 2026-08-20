@@ -57,8 +57,16 @@ describe('groupSlackMessagesIntoDayPages', () => {
       `slack/T1/C1/2026-08-14/${day2Ts}-${day2Ts}`.replaceAll('.', '-'),
     ]);
     expect(pages[0]?.title).toBe('#general — 2026-08-13');
-    expect(pages[0]?.content).toMatch(/^---\ndate: 2026-08-13\n---\n\n/);
-    expect(pages[2]?.content).toMatch(/^---\ndate: 2026-08-14\n---\n\n/);
+    // The title must also lead the content as a markdown heading: put_page
+    // carries no title field, and gbrain derives a page's title from the
+    // first heading — without it the slug's timestamp range becomes the
+    // title on every surface.
+    expect(pages[0]?.content).toMatch(
+      /^---\ndate: 2026-08-13\n---\n\n# #general — 2026-08-13\n/,
+    );
+    expect(pages[2]?.content).toMatch(
+      /^---\ndate: 2026-08-14\n---\n\n# #general — 2026-08-14\n/,
+    );
     expect(pages[0]?.content).toContain(
       'Slack public channel #general (C1), messages on 2026-08-13',
     );

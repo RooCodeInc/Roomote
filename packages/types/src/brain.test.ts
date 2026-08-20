@@ -92,7 +92,7 @@ describe('resolveBrainSourceIdForCollector', () => {
   it('survives the version suffix collectors bump when page semantics change', () => {
     expect(
       resolveBrainSourceIdForCollector(
-        'slack-public-channels:entity-timeline-v2',
+        'slack-public-channels:entity-timeline-v3',
       ),
     ).toBe('slack-public-channels');
     expect(
@@ -103,7 +103,7 @@ describe('resolveBrainSourceIdForCollector', () => {
   it('folds a fanned-out collector’s per-partition rows into one source', () => {
     expect(
       resolveBrainSourceIdForCollector(
-        'slack-public-channels:entity-timeline-v2:T123/C456',
+        'slack-public-channels:entity-timeline-v3:T123/C456',
       ),
     ).toBe('slack-public-channels');
     expect(resolveBrainSourceIdForCollector('notion-pages:incremental')).toBe(

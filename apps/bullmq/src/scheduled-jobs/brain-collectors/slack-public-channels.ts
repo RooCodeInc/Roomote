@@ -196,6 +196,12 @@ export function groupSlackMessagesIntoDayPages(
             `date: ${group.day}`,
             '---',
             '',
+            // put_page has no title parameter: gbrain derives a page's title
+            // from the first markdown heading, and without one it falls back
+            // to the slug tail — a raw timestamp range on these pages. Every
+            // sibling collector leads with its title as a heading.
+            `# #${group.channelName} — ${group.day}`,
+            '',
             `Slack public channel #${group.channelName} (${group.channelId}), messages on ${group.day} (times UTC).`,
             '',
             ...lines,
@@ -763,7 +769,10 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
 
 /** Exported for the fake-Slack integration test, which drives it directly. */
 export const slackPublicChannelsCollector: BrainCollector = {
-  id: 'slack-public-channels:entity-timeline-v2',
+  // v3: day pages gained a title heading. Versioned so existing pages are
+  // replayed and corrected (idempotent slug upserts) instead of keeping
+  // slug-derived timestamp titles forever.
+  id: 'slack-public-channels:entity-timeline-v3',
   displayName: 'Slack public channels',
   async isEnabled() {
     const installation = await db.query.slackInstallations.findFirst({
