@@ -18,6 +18,7 @@ import {
 } from '@roomote/types';
 
 import { recordTaskMessageEnvelope } from './record-task-message-envelope';
+import { notifyFastAgentParentOnPullRequestStatusChanged } from './notify-fast-agent-parent-on-pull-request-status-changed';
 
 const STATUS_RECORDED_TTL_SECONDS = 30 * 24 * 60 * 60;
 
@@ -185,13 +186,26 @@ export async function recordPrStatusChangeInTaskHistory(
       const latestRun = await db.query.taskRuns.findFirst({
         where: eq(taskRuns.taskId, taskId),
         orderBy: [desc(taskRuns.createdAt)],
-        columns: { id: true },
+        columns: { id: true, taskId: true, payload: true },
       });
 
       if (!latestRun) {
         await redis.del(claimKey).catch(() => undefined);
         continue;
       }
+
+      await notifyFastAgentParentOnPullRequestStatusChanged({
+        run: latestRun,
+        pullRequest: {
+          provider: sourceControlProvider,
+          repository: parsedInput.repository,
+          number: parsedInput.prNumber,
+          title: parsedInput.prTitle,
+          url: parsedInput.prUrl,
+          status: parsedInput.status,
+        },
+        actorLogin: parsedInput.actorLogin,
+      });
 
       await recordTaskMessageEnvelope({
         runId: latestRun.id,

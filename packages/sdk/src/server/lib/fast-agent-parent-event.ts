@@ -123,6 +123,15 @@ type FastAgentParentEvent =
       pullRequest: FastAgentPullRequestContext;
       summary: string;
       suggestedActionPrompt?: string;
+    }
+  | {
+      type: 'pull_request_status_changed';
+      taskId: string;
+      runId: number;
+      taskUrl: string;
+      pullRequest: FastAgentPullRequestContext;
+      status: 'merged' | 'closed';
+      actorLogin: string;
     };
 
 export async function listFastAgentPullRequestContexts(
@@ -223,6 +232,8 @@ function buildEventClientMessageSeed(event: FastAgentParentEvent): string {
       return `fast-parent-pr-opened:${event.taskId}:${event.pullRequest.url}`;
     case 'pull_request_feedback':
       return `fast-parent-pr-feedback:${event.feedbackId}`;
+    case 'pull_request_status_changed':
+      return `fast-parent-pr-status:${event.taskId}:${event.pullRequest.url}:${event.status}`;
     case 'task_settled':
       return `fast-parent-settle:${event.runId}`;
   }

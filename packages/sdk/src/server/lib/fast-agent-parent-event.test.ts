@@ -481,6 +481,58 @@ describe('deliverFastAgentParentEvent', () => {
     );
   });
 
+  it('delivers a pull request status event with a stable idempotency key', async () => {
+    const statusEvent = {
+      type: 'pull_request_status_changed' as const,
+      taskId: 'task-1',
+      runId: 42,
+      taskUrl: 'https://roomote.example/task/task-1',
+      pullRequest: {
+        provider: 'github' as const,
+        host: 'github.com',
+        repository: 'acme/web',
+        number: 42,
+        title: 'Fix review feedback',
+        url: 'https://github.com/acme/web/pull/42',
+        status: 'merged' as const,
+      },
+      status: 'merged' as const,
+      actorLogin: 'alice',
+    };
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'The pull request was merged.',
+        }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: { ...statusEvent, runId: 43 },
+    });
+    const firstClientMessageId =
+      mocks.postMessage.mock.calls[0]?.[0]?.client_msg_id;
+    await deliverFastAgentParentEvent({ parent, event: statusEvent });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: expect.stringContaining(
+          '"type":"pull_request_status_changed"',
+        ),
+        turnSource: 'platform_event',
+      }),
+    );
+    expect(firstClientMessageId).toEqual(expect.any(String));
+    expect(mocks.postMessage.mock.calls[1]?.[0]?.client_msg_id).toBe(
+      firstClientMessageId,
+    );
+  });
+
   it('lets a settled task event re-query the remaining active task set', async () => {
     await deliverFastAgentParentEvent({
       parent,
