@@ -2,6 +2,7 @@ import type { ModelMessage } from 'ai';
 import {
   BRAIN_MCP_ID,
   formatErrorForLog,
+  formatSingleLineLog,
   roomoteTaskInspectionArgsSchema,
 } from '@roomote/types';
 import { z } from 'zod';
@@ -508,6 +509,8 @@ export async function answerFastAgentQuestion({
   let canonicalConversationId: string | null = null;
   let launchedTaskMessage: string | null = null;
   let lastVisibleMessage = '';
+  let openCodeProviderRetryEventCount = 0;
+  let roomoteInferenceRetryCount = 0;
 
   try {
     const [availableEnvironments, session, availableIntegrations, currentUser] =
@@ -623,10 +626,17 @@ export async function answerFastAgentQuestion({
     const reportProviderRetryEvent = async (
       event: NonTaskProviderRetryEvent,
     ) => {
+      openCodeProviderRetryEventCount += 1;
       await reportInferenceRetry({
         failure: classifyNonTaskInferenceError(new Error(event.message)),
         attemptNumber: event.attempt,
       });
+    };
+    const reportRoomoteInferenceRetry = async (
+      notice: FastAgentInferenceRetryNotice,
+    ) => {
+      roomoteInferenceRetryCount += 1;
+      await reportInferenceRetry(notice);
     };
 
     const requireOpen = () =>
@@ -911,7 +921,7 @@ export async function answerFastAgentQuestion({
                   },
                 },
               ),
-            reportInferenceRetry,
+            reportRoomoteInferenceRetry,
             {
               // OpenCode already owns retries while a provider turn remains
               // active. Roomote retries only a terminal failure that happened
@@ -946,7 +956,21 @@ export async function answerFastAgentQuestion({
     return lastVisibleMessage;
   } catch (error) {
     console.error(
-      `[Fast Agent] Failed to answer question: ${formatErrorForLog(error)}`,
+      formatSingleLineLog('[Fast Agent] Failed to answer question.', {
+        surface: conversation.surface,
+        workspaceId: conversation.workspaceId,
+        conversationId: conversation.conversationId,
+        messageId: currentMessageId,
+        canonicalConversationId,
+        modelRole: FAST_AGENT_MODEL_ROLE,
+        reason:
+          error instanceof FastAgentInferenceError
+            ? error.failure.reason
+            : 'unclassified',
+        openCodeProviderRetryEventCount,
+        roomoteInferenceRetryCount,
+        error: formatErrorForLog(error),
+      }),
     );
     if (canonicalConversationId) {
       // The system-posted closeout below is mirrored to compatibility history,
