@@ -9,6 +9,7 @@ import {
   slackInstallations,
 } from '@roomote/db/server';
 import { createSlackWebClient } from '@roomote/slack';
+import { isBrainSourceAvailable } from '@roomote/sdk/server';
 import { createHash } from 'node:crypto';
 
 import type {
@@ -430,11 +431,7 @@ export const slackPersonDirectoryCollector: BrainCollector = {
   id: SLACK_DIRECTORY_COLLECTOR_ID,
   displayName: 'Slack person directory',
   async isEnabled() {
-    const installation = await db.query.slackInstallations.findFirst({
-      columns: { id: true },
-      where: eq(slackInstallations.isActive, true),
-    });
-    return Boolean(installation);
+    return isBrainSourceAvailable('slack');
   },
   async collect({ now, limit }) {
     const collectorState = await getBrainSyncState(

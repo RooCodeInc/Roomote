@@ -3,23 +3,23 @@ import { createHash } from 'node:crypto';
 import {
   and,
   db,
-  deploymentMcpEnablements,
   eq,
   getBrainSyncState,
-  isNull,
   listBrainCollectorItems,
   listBrainCollectorItemsBefore,
   lt,
-  mcpConnections,
   notionDirectoryUsers,
 } from '@roomote/db/server';
+import {
+  findBrainSourceConnectionConfig,
+  isBrainSourceAvailable,
+} from '@roomote/sdk/server';
 import {
   NotionApiError,
   notionApiRequestJson,
 } from '@roomote/sdk/server/notion-api';
 import {
   brainNamespacePrefix,
-  isMcpConnectionNotionConfig,
   type McpConnectionNotionConfig,
 } from '@roomote/types';
 
@@ -645,30 +645,6 @@ function notionPageSlug(pageId: string): string | null {
   return stableId ? `${brainNamespacePrefix('notion')}${stableId}` : null;
 }
 
-async function findNotionConnectionConfig(): Promise<McpConnectionNotionConfig | null> {
-  const [connection, enablement] = await Promise.all([
-    db.query.mcpConnections.findFirst({
-      where: and(
-        eq(mcpConnections.mcpId, 'notion'),
-        isNull(mcpConnections.userId),
-        eq(mcpConnections.enabled, true),
-        eq(mcpConnections.authStatus, 'authenticated'),
-      ),
-    }),
-    db.query.deploymentMcpEnablements.findFirst({
-      where: and(
-        eq(deploymentMcpEnablements.mcpId, 'notion'),
-        eq(deploymentMcpEnablements.enabled, true),
-      ),
-      columns: { mcpId: true },
-    }),
-  ]);
-
-  return enablement && isMcpConnectionNotionConfig(connection?.authConfig)
-    ? connection.authConfig
-    : null;
-}
-
 async function searchNotionPages(input: {
   config: McpConnectionNotionConfig;
   cursor: string | null;
@@ -1265,7 +1241,7 @@ export const notionUsersCollector: BrainCollector = {
   id: NOTION_USERS_COLLECTOR_ID,
   displayName: 'Notion workspace users',
   async isEnabled() {
-    if (await findNotionConnectionConfig()) {
+    if (await isBrainSourceAvailable('notion')) {
       return true;
     }
     // Stored directory rows still need deletion tombstones after the
@@ -1277,7 +1253,7 @@ export const notionUsersCollector: BrainCollector = {
     return rows.length > 0;
   },
   async collect({ now, limit }) {
-    const config = await findNotionConnectionConfig();
+    const config = await findBrainSourceConnectionConfig('notion');
     const stateUpdates: CollectorStateUpdate[] = [];
 
     if (config) {
@@ -1346,20 +1322,20 @@ export const notionPagesCollector: BrainCollector = {
   id: NOTION_PAGES_COLLECTOR_ID,
   displayName: 'Notion pages',
   async isEnabled() {
-    const [config, tracked] = await Promise.all([
-      findNotionConnectionConfig(),
+    const [available, tracked] = await Promise.all([
+      isBrainSourceAvailable('notion'),
       listBrainCollectorItems(db, NOTION_PAGES_COLLECTOR_ID, 1),
     ]);
-    return Boolean(config || tracked.length > 0);
+    return available || tracked.length > 0;
   },
   async collect({ now, limit }) {
-    const config = await findNotionConnectionConfig();
+    const config = await findBrainSourceConnectionConfig('notion');
     return config
       ? collectNotionPages({ config, now, limit })
       : collectDisabledNotionPages(limit);
   },
   async backfill({ cursor, limit }) {
-    const config = await findNotionConnectionConfig();
+    const config = await findBrainSourceConnectionConfig('notion');
     return config
       ? backfillNotionPagesStep(config, cursor, limit)
       : { pages: [], nextCursor: cursor, done: false };

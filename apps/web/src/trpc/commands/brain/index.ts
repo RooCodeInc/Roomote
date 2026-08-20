@@ -3,7 +3,6 @@ import {
   backfillBrainMemoryEvents,
   countBrainCollectorItemsByCollector,
   db,
-  deploymentMcpEnablements,
   eq,
   getBrainMemoryEventSummary,
   isBrainProviderConfigured,
@@ -12,14 +11,13 @@ import {
   listBrainSyncStates,
   mcpConnections,
   requeueFailedBrainMemoryEvents,
-  slackInstallations,
 } from '@roomote/db/server';
 import {
   describeBrainModels,
-  hasBrainGithubSources,
   readBrainCorpusSample,
   readBrainPage,
   readBrainStats,
+  resolveBrainSourceRequirements,
   resolveBrainInferenceProvider,
   type BrainModelSummary,
 } from '@roomote/sdk/server';
@@ -166,67 +164,6 @@ export type BrainSettings = {
     completedRunsWithoutEvent: number;
   };
 };
-
-async function isDeploymentMcpConnected(mcpId: string): Promise<boolean> {
-  const connection = await db.query.mcpConnections.findFirst({
-    columns: { id: true },
-    where: and(
-      eq(mcpConnections.mcpId, mcpId),
-      isNull(mcpConnections.userId),
-      eq(mcpConnections.enabled, true),
-      eq(mcpConnections.authStatus, 'authenticated'),
-    ),
-  });
-
-  return Boolean(connection);
-}
-
-async function isDeploymentMcpConnectedAndEnabled(
-  mcpId: string,
-): Promise<boolean> {
-  const [connected, enablement] = await Promise.all([
-    isDeploymentMcpConnected(mcpId),
-    db.query.deploymentMcpEnablements.findFirst({
-      columns: { mcpId: true },
-      where: and(
-        eq(deploymentMcpEnablements.mcpId, mcpId),
-        eq(deploymentMcpEnablements.enabled, true),
-      ),
-    }),
-  ]);
-
-  return connected && Boolean(enablement);
-}
-
-async function isSlackConnected(): Promise<boolean> {
-  const installation = await db.query.slackInstallations.findFirst({
-    columns: { id: true },
-    where: eq(slackInstallations.isActive, true),
-  });
-
-  return Boolean(installation);
-}
-
-/**
- * Whether each source has something upstream to read. Mirrors the collectors'
- * own enablement checks rather than reading a stored flag, because there is no
- * flag: a source is on when its integration is connected. Resolved once per
- * request and shared, so six sources do not issue six copies of the same
- * lookup.
- */
-async function resolveSourceRequirements(): Promise<
-  Record<BrainSourceRequirement, boolean>
-> {
-  const [slack, notion, granola, github, rippling] = await Promise.all([
-    isSlackConnected(),
-    isDeploymentMcpConnectedAndEnabled('notion'),
-    isDeploymentMcpConnected('granola'),
-    hasBrainGithubSources(),
-    isDeploymentMcpConnectedAndEnabled('rippling'),
-  ]);
-
-  return { slack, notion, granola, github, rippling };
-}
 
 /** Days of page-writing activity summarized for the ingestion chart. */
 const ACTIVITY_WINDOW_DAYS = 30;
@@ -451,7 +388,7 @@ export async function getBrainSettingsCommand(
     configured ? listBrainSyncStates(db) : [],
     configured ? countBrainCollectorItemsByCollector(db) : [],
     configured ? getBrainMemoryEventSummary(db) : EMPTY_MEMORY_SUMMARY,
-    resolveSourceRequirements(),
+    resolveBrainSourceRequirements(),
   ]);
 
   const corpus = summarizeCorpus(corpusSnapshot);

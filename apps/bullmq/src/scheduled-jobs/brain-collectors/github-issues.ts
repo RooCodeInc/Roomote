@@ -1,7 +1,7 @@
 import {
   backfillBrainGithubIssuesStep,
   collectBrainGithubIssues,
-  hasBrainGithubSources,
+  isBrainSourceAvailable,
 } from '@roomote/sdk/server';
 
 import type { BrainCollector } from './contracts';
@@ -19,7 +19,7 @@ export const githubIssuesCollector: BrainCollector = {
   id: 'github-issues:occurrence-date-v3',
   displayName: 'GitHub issues',
   async isEnabled() {
-    return hasBrainGithubSources();
+    return isBrainSourceAvailable('github');
   },
   async collect({ now, limit }) {
     return collectBrainGithubIssues({ now, limit });

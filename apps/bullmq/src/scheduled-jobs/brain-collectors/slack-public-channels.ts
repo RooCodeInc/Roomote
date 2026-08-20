@@ -6,6 +6,7 @@ import {
   slackInstallations,
 } from '@roomote/db/server';
 import { createSlackWebClient } from '@roomote/slack';
+import { isBrainSourceAvailable } from '@roomote/sdk/server';
 
 import type {
   BrainCollector,
@@ -824,12 +825,7 @@ export const slackPublicChannelsCollector: BrainCollector = {
   id: 'slack-public-channels:entity-timeline-v3',
   displayName: 'Slack public channels',
   async isEnabled() {
-    const installation = await db.query.slackInstallations.findFirst({
-      columns: { id: true },
-      where: eq(slackInstallations.isActive, true),
-    });
-
-    return Boolean(installation);
+    return isBrainSourceAvailable('slack');
   },
   async collect({ now, limit }) {
     return collectSlackPublicChannelMessages({ now, limit });
