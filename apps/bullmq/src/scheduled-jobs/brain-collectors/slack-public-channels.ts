@@ -769,10 +769,14 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
 
 /** Exported for the fake-Slack integration test, which drives it directly. */
 export const slackPublicChannelsCollector: BrainCollector = {
-  // v3: day pages gained a title heading. Versioned so existing pages are
-  // replayed and corrected (idempotent slug upserts) instead of keeping
-  // slug-derived timestamp titles forever.
-  id: 'slack-public-channels:entity-timeline-v3',
+  // Deliberately NOT version-bumped for the title-heading change: a page's
+  // slug embeds the first/last message timestamps of the batch that emitted
+  // it, and batch boundaries depend on when past incremental reads ran. A
+  // replay would group whole days at once, mint different slugs, and leave
+  // the old timestamp-titled pages standing next to duplicates of their
+  // content. Healing existing pages needs slug retirement (collector-item
+  // tracking plus a reconciliation sweep), not a replay.
+  id: 'slack-public-channels:entity-timeline-v2',
   displayName: 'Slack public channels',
   async isEnabled() {
     const installation = await db.query.slackInstallations.findFirst({
