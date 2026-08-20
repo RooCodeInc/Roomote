@@ -83,6 +83,22 @@ describe('GET /api/caddy/ask', () => {
     ).toBe(false);
   });
 
+  it('allows the preview settings probe hostname', () => {
+    expect(
+      isAllowedCaddyPreviewDomain(
+        '0000000000000-preview-check-preview.roomote.test',
+        'roomote.test',
+        'preview',
+      ),
+    ).toBe(true);
+    expect(
+      isAllowedCaddyPreviewDomain(
+        '0000000000000-preview-check.preview.roomote.test',
+        'preview.roomote.test',
+      ),
+    ).toBe(true);
+  });
+
   it('enforces the subdomain suffix when one is configured', () => {
     expect(
       isAllowedCaddyPreviewDomain(
