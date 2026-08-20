@@ -47,6 +47,9 @@ vi.mock('@/trpc/client', () => ({
       getPage: {
         queryOptions: () => ({ queryKey: ['brain', 'getPage'] }),
       },
+      setProviderKey: {
+        mutationOptions: () => ({ mutationKind: 'setProviderKey' }),
+      },
       backfillTaskMemories: {
         mutationOptions: () => ({ mutationKind: 'backfill' }),
       },
@@ -68,6 +71,7 @@ function buildSettings(
     url: 'http://gbrain:8080',
     inferenceProvider: 'openrouter',
     keySource: 'brain',
+    needsKey: false,
     recall: { mode: 'semantic', embeddedCount: 771, chunkCount: 771 },
     models: {
       synthesisModel: 'openai/gpt-5.6-luna',
@@ -260,6 +264,28 @@ describe('BrainSettings', () => {
     // would have said semantic here (an OpenRouter provider resolves).
     expect(screen.getByText('Keyword only')).toBeInTheDocument();
     expect(screen.queryByText('Semantic + keyword')).not.toBeInTheDocument();
+  });
+
+  it('offers the provider-key form on a managed Brain awaiting its key', () => {
+    const settings = buildSettings();
+    state.query.data = {
+      ...settings,
+      status: 'incomplete',
+      statusDetail:
+        'A Brain is provisioned for this deployment. Add a provider key below to turn it on.',
+      needsKey: true,
+      inferenceProvider: null,
+      keySource: null,
+      models: null,
+    };
+
+    render(<BrainSettings />);
+
+    expect(screen.getByText('Needs attention')).toBeInTheDocument();
+    expect(screen.getByLabelText('Brain provider key')).toBeInTheDocument();
+    expect(screen.getByText('Save key')).toBeInTheDocument();
+    // The read-only model rows wait until the Brain actually runs.
+    expect(screen.queryByText('Synthesis model')).not.toBeInTheDocument();
   });
 
   it('shows the namespace badge only when it differs from the source label', () => {

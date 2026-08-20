@@ -437,6 +437,7 @@ import {
   getBrainSettingsCommand,
   listBrainPagesCommand,
   retryFailedBrainTaskMemoriesCommand,
+  setBrainProviderKeyCommand,
 } from '../commands/brain';
 import {
   getReleaseNotesCommand,
@@ -2972,6 +2973,17 @@ export const appRouter = createRouter({
     getPage: protectedProcedure
       .input(z.object({ slug: z.string().min(1).max(512) }))
       .query(({ ctx: { auth }, input }) => getBrainPageCommand(auth, input)),
+
+    setProviderKey: protectedProcedure
+      .input(
+        z.object({
+          provider: z.enum(['openrouter', 'openai']),
+          key: z.string().trim().min(16).max(512),
+        }),
+      )
+      .mutation(({ ctx: { auth }, input }) =>
+        setBrainProviderKeyCommand(auth, input),
+      ),
 
     backfillTaskMemories: protectedProcedure.mutation(({ ctx: { auth } }) =>
       backfillBrainTaskMemoriesCommand(auth),
