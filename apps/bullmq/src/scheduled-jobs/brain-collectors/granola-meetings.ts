@@ -3,7 +3,7 @@ import {
   findBrainSourceConnectionConfig,
   isBrainSourceAvailable,
 } from '@roomote/sdk/server';
-import { brainNamespacePrefix } from '@roomote/types';
+import { BRAIN_COLLECTOR_IDS, brainNamespacePrefix } from '@roomote/types';
 
 import type { BrainCollector, CollectorPage } from './contracts';
 import {
@@ -17,7 +17,7 @@ import {
 import { asString, formatUtcDay, parseDate, slugifySegment } from './shared';
 
 const LOG_PREFIX = '[brainCollectors]';
-const GRANOLA_MEETINGS_COLLECTOR_ID = 'granola-meetings:entity-timeline-v3';
+const GRANOLA_MEETINGS_COLLECTOR_ID = BRAIN_COLLECTOR_IDS.granolaMeetings;
 
 /**
  * Granola: meeting notes

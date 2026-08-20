@@ -1,4 +1,4 @@
-import { brainNamespacePrefix } from '@roomote/types';
+import { BRAIN_COLLECTOR_IDS, brainNamespacePrefix } from '@roomote/types';
 import {
   and,
   db,
@@ -27,8 +27,7 @@ import { formatUtcDay } from './shared';
 
 const LOG_PREFIX = '[brainCollectors]';
 
-const SLACK_DIRECTORY_COLLECTOR_ID =
-  'slack-person-directory:occurrence-date-v2';
+const SLACK_DIRECTORY_COLLECTOR_ID = BRAIN_COLLECTOR_IDS.slackPersonDirectory;
 const SLACK_DIRECTORY_REFRESH_MS = 24 * 60 * 60 * 1000;
 const SLACK_DIRECTORY_PAGE_SIZE = 100;
 

@@ -29,7 +29,11 @@ const workspace = vi.hoisted(() => ({
   historyCalls: 0,
   syncState: new Map<
     string,
-    { watermark: Date | null; backfillCompletedAt?: Date | null }
+    {
+      watermark: Date | null;
+      backfillCursor?: string | null;
+      backfillCompletedAt?: Date | null;
+    }
   >(),
   brainPages: new Map<string, string>(),
   /** The day-page inventory, as the engine would persist it. */
@@ -58,7 +62,7 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
             id: collectorId,
             collectorId,
             watermark: state.watermark,
-            backfillCursor: null,
+            backfillCursor: state.backfillCursor ?? null,
             backfillCompletedAt: state.backfillCompletedAt ?? null,
             createdAt: new Date(),
             updatedAt: new Date(),
@@ -789,5 +793,87 @@ describe('slug retirement heals pages from the incremental era', () => {
     expect(ingestedMessages()).toEqual(
       new Set(['C1 message 0', 'C1 message 1', 'C1 message 2']),
     );
+  });
+});
+
+describe('deep backfill completion and re-arming', () => {
+  it('reports done once every known channel has been read', async () => {
+    const now = Date.now();
+    workspace.channels = [
+      seedChannel('C1', 'general', 5, DAY_MS, now - 2 * DAY_MS),
+    ];
+
+    let cursor: string | null = null;
+    let done = false;
+    for (let steps = 0; steps < 10 && !done; steps++) {
+      const step = await slackPublicChannelsCollector.backfill!({
+        cursor,
+        limit: 100,
+      });
+      applyResult(step);
+      done = step.done;
+      cursor = step.nextCursor;
+    }
+
+    // Honest completion, with the completed-channel set preserved in the
+    // final cursor so a later re-arm resumes instead of re-reading.
+    expect(done).toBe(true);
+    expect(JSON.parse(cursor!)).toMatchObject({ completed: ['T1/C1'] });
+  });
+
+  it('re-arms a completed backfill when an unread channel appears', async () => {
+    const now = Date.now();
+    workspace.channels = [
+      seedChannel('C1', 'general', 2, DAY_MS, now),
+      seedChannel('C2', 'joined-later', 2, DAY_MS, now),
+    ];
+    workspace.syncState.set(slackPublicChannelsCollector.id, {
+      watermark: null,
+      backfillCursor: JSON.stringify({
+        completed: ['T1/C1'],
+        key: null,
+        slackCursor: null,
+        latest: null,
+      }),
+      backfillCompletedAt: new Date(now - DAY_MS),
+    });
+
+    const result = await slackPublicChannelsCollector.collect({
+      since: null,
+      now: new Date(now),
+      limit: 100,
+    });
+
+    expect(result.stateUpdates).toContainEqual({
+      collectorId: slackPublicChannelsCollector.id,
+      backfillCompletedAt: null,
+    });
+  });
+
+  it('leaves a completed backfill alone while it covers every channel', async () => {
+    const now = Date.now();
+    workspace.channels = [seedChannel('C1', 'general', 2, DAY_MS, now)];
+    workspace.syncState.set(slackPublicChannelsCollector.id, {
+      watermark: null,
+      backfillCursor: JSON.stringify({
+        completed: ['T1/C1'],
+        key: null,
+        slackCursor: null,
+        latest: null,
+      }),
+      backfillCompletedAt: new Date(now - DAY_MS),
+    });
+
+    const result = await slackPublicChannelsCollector.collect({
+      since: null,
+      now: new Date(now),
+      limit: 100,
+    });
+
+    expect(
+      (result.stateUpdates ?? []).filter(
+        (update) => update.collectorId === slackPublicChannelsCollector.id,
+      ),
+    ).toEqual([]);
   });
 });

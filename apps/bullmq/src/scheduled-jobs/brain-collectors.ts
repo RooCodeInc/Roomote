@@ -320,8 +320,12 @@ async function drainCollectorBackfill(input: {
     ingested += step.pages.length;
 
     if (step.done) {
+      // The final cursor is preserved rather than nulled: fan-out collectors
+      // keep their completed-partition set in it, and re-arming (clearing
+      // only backfillCompletedAt when a new channel or repository appears)
+      // must resume the walk instead of re-reading every partition.
       await upsertBrainSyncState(db, collectorId, {
-        backfillCursor: null,
+        backfillCursor: step.nextCursor,
         backfillCompletedAt: new Date(),
       });
       console.log(

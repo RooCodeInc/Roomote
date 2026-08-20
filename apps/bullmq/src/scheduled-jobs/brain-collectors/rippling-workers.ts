@@ -10,6 +10,7 @@ import {
 } from '@roomote/sdk/server';
 import { ripplingApiRequestJson } from '@roomote/sdk/server/rippling-api';
 import {
+  BRAIN_COLLECTOR_IDS,
   brainNamespacePrefix,
   type McpConnectionRipplingConfig,
 } from '@roomote/types';
@@ -42,7 +43,7 @@ import { asObject, asString, parseDate } from './shared';
  * optional entitlement. Reconciliation starts only after the final page.
  */
 
-const RIPPLING_WORKERS_COLLECTOR_ID = 'rippling-workers';
+const RIPPLING_WORKERS_COLLECTOR_ID = BRAIN_COLLECTOR_IDS.ripplingWorkers;
 const RIPPLING_SNAPSHOT_STATE_ID = `${RIPPLING_WORKERS_COLLECTOR_ID}:snapshot`;
 const RIPPLING_WORKER_EXPANSIONS =
   'user,manager,manager.user,department,employment_type,teams';

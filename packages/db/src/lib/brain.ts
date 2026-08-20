@@ -123,6 +123,35 @@ export async function deleteBrainSyncStateFamily(
 }
 
 /**
+ * Move one collector family's sync-state rows under a new id prefix,
+ * preserving watermarks and cursors. Used when a per-partition id drifted
+ * from its collector id (a hardcoded superseded version): renaming keeps the
+ * partitions' positions instead of forcing a re-read. Rows whose new id
+ * already exists are dropped in favor of the newer writer's row.
+ */
+export async function renameBrainSyncStateFamilyPrefix(
+  database: DatabaseOrTransaction,
+  fromCollectorId: string,
+  toCollectorId: string,
+): Promise<void> {
+  const likePrefix = `${fromCollectorId.replace(/[\\%_]/g, (ch) => `\\${ch}`)}:%`;
+
+  // Insert-then-delete, like canonicalizeBrainCollectorItemSlugs: a crash in
+  // between leaves both rows and the next pass finishes the job.
+  await database.execute(sql`
+    INSERT INTO ${brainSyncState} (collector_id, watermark, backfill_cursor, backfill_completed_at)
+    SELECT ${toCollectorId} || substr(collector_id, ${fromCollectorId.length + 1}),
+      watermark, backfill_cursor, backfill_completed_at
+    FROM ${brainSyncState}
+    WHERE collector_id LIKE ${likePrefix}
+    ON CONFLICT (collector_id) DO NOTHING
+  `);
+  await database
+    .delete(brainSyncState)
+    .where(like(brainSyncState.collectorId, likePrefix));
+}
+
+/**
  * Record inventory rows without touching ones that already exist. This is the
  * census path: a one-time walk over the Brain's listing seeds pages emitted
  * before item tracking existed, and must never overwrite the fresher

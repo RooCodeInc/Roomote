@@ -1,4 +1,4 @@
-import { brainNamespacePrefix } from '@roomote/types';
+import { BRAIN_COLLECTOR_IDS, brainNamespacePrefix } from '@roomote/types';
 import {
   db,
   eq,
@@ -434,6 +434,31 @@ async function collectSlackPublicChannelMessages(input: {
     })),
   );
 
+  const stateUpdates: CollectorStateUpdate[] = [];
+  // A completed deep backfill stays honest only while it covers every channel
+  // the bot is in. Membership is re-discovered every pass, so a channel the
+  // finished walk never read (the bot was added after completion) re-arms the
+  // backfill; the preserved completed-set cursor makes the resumed walk read
+  // just that channel's history.
+  const backfillState = await getBrainSyncState(
+    db,
+    slackPublicChannelsCollector.id,
+  );
+
+  if (backfillState?.backfillCompletedAt) {
+    const cursor = parseSlackBackfillCursor(
+      backfillState.backfillCursor ?? null,
+    );
+    const backfilled = new Set(cursor?.completed ?? []);
+
+    if (entries.some((entry) => !backfilled.has(entry.key))) {
+      stateUpdates.push({
+        collectorId: slackPublicChannelsCollector.id,
+        backfillCompletedAt: null,
+      });
+    }
+  }
+
   // Oldest partitions go first so a continuously busy channel cannot starve
   // another channel when the shared per-pass page budget is exhausted.
   entriesWithState.sort(
@@ -443,7 +468,6 @@ async function collectSlackPublicChannelMessages(input: {
   );
 
   const pages: CollectorPage[] = [];
-  const stateUpdates: CollectorStateUpdate[] = [];
   const itemUpdates: CollectorItemUpdate[] = [];
   const pageRetirements: CollectorPageRetirement[] = [];
   const nowMs = input.now.getTime();
@@ -717,11 +741,13 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
   }
 
   if (!entry) {
-    // Every known channel has been read. Deliberately not reported as done:
-    // done is permanent, and this collector has to stay reachable so that a
-    // channel joined later is noticed. The cost of staying open is one
-    // channel listing per pass, and returning the cursor unchanged with no
-    // pages ends the tick immediately.
+    // Every known channel has been read: the deep backfill is genuinely
+    // complete, and reporting it records that honestly (the settings page
+    // reads backfillCompletedAt as "history read"). Completion is not
+    // permanent: the incremental pass re-discovers membership every tick
+    // and re-arms the backfill when a channel this walk never read appears,
+    // and the engine preserves this cursor on completion so the resumed
+    // walk reads only the new channel.
     return {
       pages: [],
       nextCursor: JSON.stringify({
@@ -730,7 +756,7 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
         slackCursor: null,
         latest: null,
       }),
-      done: false,
+      done: true,
     };
   }
   const resuming = entry.key === state?.key;
@@ -830,7 +856,7 @@ export const slackPublicChannelsCollector: BrainCollector = {
   // retire the pages they supersede. Pages older than the 90-day backfill
   // window are never re-read and deliberately stay: they may hold history
   // Slack no longer serves.
-  id: 'slack-public-channels:entity-timeline-v3',
+  id: BRAIN_COLLECTOR_IDS.slackPublicChannels,
   displayName: 'Slack public channels',
   async isEnabled() {
     return isBrainSourceAvailable('slack');

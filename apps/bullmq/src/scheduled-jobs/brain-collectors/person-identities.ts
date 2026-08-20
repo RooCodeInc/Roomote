@@ -1,3 +1,5 @@
+import { BRAIN_COLLECTOR_IDS } from '@roomote/types';
+
 import {
   db,
   discordUserMappings,
@@ -303,10 +305,9 @@ export async function loadPersonIdentityRecords(): Promise<
       })),
   );
 }
-const PERSON_IDENTITIES_STATE_ID =
-  'person-identities:members:occurrence-date-v2';
+const PERSON_IDENTITIES_STATE_ID = BRAIN_COLLECTOR_IDS.personIdentities;
 const PERSON_IDENTITIES_RECONCILIATION_MS = 24 * 60 * 60 * 1000;
-const GRANOLA_MEETINGS_COLLECTOR_ID = 'granola-meetings:entity-timeline-v3';
+const GRANOLA_MEETINGS_COLLECTOR_ID = BRAIN_COLLECTOR_IDS.granolaMeetings;
 
 type PersonIdentityCursor = {
   mode: 'idle' | 'sweep' | 'incremental';

@@ -27,8 +27,10 @@ function formatActivityDate(date: string): string {
 
 function ActivityChart({
   days,
+  sampleTruncated,
 }: {
   days: BrainCorpusSummary['activityByDay'];
+  sampleTruncated: boolean;
 }) {
   const max = Math.max(...days.map((day) => day.pages), 1);
   const total = days.reduce((sum, day) => sum + day.pages, 0);
@@ -47,6 +49,19 @@ function ActivityChart({
   const firstActiveIndex = days.findIndex((day) => day.pages > 0);
 
   if (firstActiveIndex >= days.length - 2) {
+    // On a truncated sample this shape means the recency window is shallow
+    // (a burst of writes), not that the Brain is new: a corpus holding
+    // months of history looks exactly like this after a replay. Only an
+    // untruncated sample proves the corpus itself is young.
+    if (sampleTruncated) {
+      return (
+        <p className="text-xs text-muted-foreground">
+          The {formatNumber(total)} most recent pages were all written in the
+          last two days, which is as far back as this sample reaches.
+        </p>
+      );
+    }
+
     return (
       <p className="text-xs text-muted-foreground">
         Ingestion started{' '}
@@ -197,7 +212,10 @@ export function BrainCorpusSection({ corpus }: { corpus: BrainCorpusSummary }) {
                   pages
                 </span>
               </div>
-              <ActivityChart days={corpus.activityByDay} />
+              <ActivityChart
+                days={corpus.activityByDay}
+                sampleTruncated={corpus.truncated}
+              />
             </div>
           ) : null}
 

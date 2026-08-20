@@ -15,6 +15,7 @@ import {
   gt,
   gte,
   or,
+  renameBrainSyncStateFamilyPrefix,
 } from '@roomote/db/server';
 import {
   postBrainToolCall,
@@ -22,6 +23,7 @@ import {
   resolveBrainConnection,
 } from '@roomote/sdk/server';
 import {
+  BRAIN_COLLECTOR_IDS,
   brainNamespacePrefix,
   getLinkedEnvironmentIdFromPayload,
   RunStatus,
@@ -36,7 +38,7 @@ import { slackPublicChannelsCollector } from './brain-collectors/slack-public-ch
 
 const LOG_PREFIX = '[brainOutboxDrain]';
 /** Sync-state key for the one-time task-history backfill. */
-const TASK_MEMORY_COLLECTOR_ID = 'task-memory:effective-date-v2';
+const TASK_MEMORY_COLLECTOR_ID = BRAIN_COLLECTOR_IDS.taskMemories;
 const CLAIM_BATCH_SIZE = 10;
 // Backfill can enqueue a deployment's whole task history at once; drain up
 // to this many batches per tick so the backlog clears in minutes, not hours.
@@ -44,7 +46,7 @@ const MAX_BATCHES_PER_TICK = 20;
 const MAX_ATTEMPTS = 5;
 // Versioned when date semantics change so existing pages are replayed and
 // corrected instead of retaining stale effective dates forever.
-const PR_FACTS_COLLECTOR_ID = 'pull-request-facts:occurrence-date-v3';
+const PR_FACTS_COLLECTOR_ID = BRAIN_COLLECTOR_IDS.pullRequestFacts;
 // PR analytics gives every repository in one sync the same timestamp but
 // writes repositories sequentially. Re-read a bounded window on each normal
 // collector tick so a row committed late with that shared timestamp cannot
@@ -334,6 +336,24 @@ export async function brainCollectorsJob(): Promise<void> {
   } catch (error) {
     console.warn(
       `${LOG_PREFIX} slack day-page census failed; slack collection stays held: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
+  try {
+    // The GitHub per-repository stream rows were once keyed under a
+    // hardcoded superseded version while the collector moved on; move them
+    // under the current id so their watermarks and cursors keep counting as
+    // the source's live streams. No-op fast once clean.
+    await renameBrainSyncStateFamilyPrefix(
+      db,
+      'github-issues:occurrence-date-v2',
+      BRAIN_COLLECTOR_IDS.githubIssues,
+    );
+  } catch (error) {
+    console.warn(
+      `${LOG_PREFIX} github stream-row migration failed; retrying next tick: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );

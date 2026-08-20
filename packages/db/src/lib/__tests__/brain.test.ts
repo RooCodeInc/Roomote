@@ -26,6 +26,7 @@ import {
   deleteBrainCollectorItems,
   deleteBrainSyncStateFamily,
   getBrainSyncState,
+  renameBrainSyncStateFamilyPrefix,
   listBrainCollectorItems,
   listBrainCollectorItemsBefore,
   listBrainCollectorItemsBySlugPrefix,
@@ -329,6 +330,53 @@ describe('Brain collector item inventory', () => {
     ).not.toBeNull();
     expect(
       await getBrainSyncState(db, 'slack-public-channels:day-pages:census'),
+    ).not.toBeNull();
+  });
+
+  it('renames a stream family under a new prefix, keeping positions', async () => {
+    const watermark = new Date('2026-08-20T18:55:00Z');
+    await upsertBrainSyncState(db, 'github-issues:occurrence-date-v2:acme/a', {
+      watermark,
+      backfillCursor: '{"boundary":"2026-08-14"}',
+    });
+    await upsertBrainSyncState(db, 'github-issues:occurrence-date-v2:acme/b', {
+      watermark,
+    });
+    // The new writer already created acme/b under the new id: its row wins.
+    await upsertBrainSyncState(db, 'github-issues:occurrence-date-v3:acme/b', {
+      watermark: new Date('2026-08-20T19:00:00Z'),
+    });
+    // The parent (exact id) is not part of the family rename.
+    await upsertBrainSyncState(db, 'github-issues:occurrence-date-v2', {
+      backfillCursor: '{"completed":[]}',
+    });
+
+    await renameBrainSyncStateFamilyPrefix(
+      db,
+      'github-issues:occurrence-date-v2',
+      'github-issues:occurrence-date-v3',
+    );
+
+    const moved = await getBrainSyncState(
+      db,
+      'github-issues:occurrence-date-v3:acme/a',
+    );
+    expect(moved).toMatchObject({
+      watermark,
+      backfillCursor: '{"boundary":"2026-08-14"}',
+    });
+    expect(
+      (await getBrainSyncState(db, 'github-issues:occurrence-date-v3:acme/b'))
+        ?.watermark,
+    ).toEqual(new Date('2026-08-20T19:00:00Z'));
+    expect(
+      await getBrainSyncState(db, 'github-issues:occurrence-date-v2:acme/a'),
+    ).toBeNull();
+    expect(
+      await getBrainSyncState(db, 'github-issues:occurrence-date-v2:acme/b'),
+    ).toBeNull();
+    expect(
+      await getBrainSyncState(db, 'github-issues:occurrence-date-v2'),
     ).not.toBeNull();
   });
 

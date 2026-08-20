@@ -91,6 +91,26 @@ export function brainNamespaceLabel(id: BrainNamespaceBucketId): string {
  * produces anything, so the UI can distinguish "nothing collected yet" from
  * "nothing to collect from".
  */
+/**
+ * The CURRENT versioned collector ids, in one place so the collectors that
+ * write sync state and everything that reads it back (the Settings page's
+ * source summaries) cannot drift. A collector's id carries a version suffix
+ * that is bumped when page semantics change; a bump replays history, and the
+ * readers must follow in the same commit or they keep aggregating the
+ * superseded version's rows.
+ */
+export const BRAIN_COLLECTOR_IDS = {
+  taskMemories: 'task-memory:effective-date-v2',
+  pullRequestFacts: 'pull-request-facts:occurrence-date-v3',
+  personIdentities: 'person-identities:members:occurrence-date-v2',
+  ripplingWorkers: 'rippling-workers',
+  slackPersonDirectory: 'slack-person-directory:occurrence-date-v2',
+  slackPublicChannels: 'slack-public-channels:entity-timeline-v3',
+  githubIssues: 'github-issues:occurrence-date-v3',
+  notionPages: 'notion-pages',
+  granolaMeetings: 'granola-meetings:entity-timeline-v3',
+} as const;
+
 export const BRAIN_SOURCES = [
   {
     id: 'task-memories',
@@ -101,6 +121,7 @@ export const BRAIN_SOURCES = [
     // Ingested through the completed-run outbox; the one-time history
     // backfill checkpoints under this collector id.
     collectorIdPrefix: 'task-memory',
+    collectorIds: [BRAIN_COLLECTOR_IDS.taskMemories] as readonly string[],
     requires: null,
   },
   {
@@ -110,6 +131,7 @@ export const BRAIN_SOURCES = [
       'Merged pull requests as durable facts: what changed, why, and who reviewed it.',
     namespaceId: 'prs',
     collectorIdPrefix: 'pull-request-facts',
+    collectorIds: [BRAIN_COLLECTOR_IDS.pullRequestFacts] as readonly string[],
     requires: null,
   },
   {
@@ -119,6 +141,7 @@ export const BRAIN_SOURCES = [
       'Canonical person cards built from Roomote members and their linked provider handles. Never email addresses.',
     namespaceId: 'people',
     collectorIdPrefix: 'person-identities',
+    collectorIds: [BRAIN_COLLECTOR_IDS.personIdentities] as readonly string[],
     requires: null,
   },
   {
@@ -128,6 +151,7 @@ export const BRAIN_SOURCES = [
       'Worker directory from Rippling, keeping role, team, and manager current on each person card.',
     namespaceId: 'people',
     collectorIdPrefix: 'rippling-workers',
+    collectorIds: [BRAIN_COLLECTOR_IDS.ripplingWorkers] as readonly string[],
     requires: 'rippling',
   },
   {
@@ -137,6 +161,9 @@ export const BRAIN_SOURCES = [
       'Slack profiles, resolved against deployment members so one person is one entity.',
     namespaceId: 'people',
     collectorIdPrefix: 'slack-person-directory',
+    collectorIds: [
+      BRAIN_COLLECTOR_IDS.slackPersonDirectory,
+    ] as readonly string[],
     requires: 'slack',
   },
   {
@@ -146,6 +173,9 @@ export const BRAIN_SOURCES = [
       'History of the public channels the Roomote bot was added to. Private channels and DMs are never read.',
     namespaceId: 'slack',
     collectorIdPrefix: 'slack-public-channels',
+    collectorIds: [
+      BRAIN_COLLECTOR_IDS.slackPublicChannels,
+    ] as readonly string[],
     requires: 'slack',
   },
   {
@@ -155,6 +185,7 @@ export const BRAIN_SOURCES = [
       'Bug reports, feature discussions, and decisions from the repositories Roomote can already see.',
     namespaceId: 'github',
     collectorIdPrefix: 'github-issues',
+    collectorIds: [BRAIN_COLLECTOR_IDS.githubIssues] as readonly string[],
     requires: 'github',
   },
   {
@@ -164,6 +195,7 @@ export const BRAIN_SOURCES = [
       'Pages the connected Notion integration can reach, refreshed as they change upstream.',
     namespaceId: 'notion',
     collectorIdPrefix: 'notion-pages',
+    collectorIds: [BRAIN_COLLECTOR_IDS.notionPages] as readonly string[],
     requires: 'notion',
   },
   {
@@ -173,6 +205,7 @@ export const BRAIN_SOURCES = [
       'Granola meeting notes and their attendees, linked to the people they mention.',
     namespaceId: 'meetings',
     collectorIdPrefix: 'granola-meetings',
+    collectorIds: [BRAIN_COLLECTOR_IDS.granolaMeetings] as readonly string[],
     requires: 'granola',
   },
 ] as const;
@@ -198,6 +231,52 @@ export function resolveBrainSourceIdForCollector(
     BRAIN_SOURCES.find((source) => source.collectorIdPrefix === base)?.id ??
     null
   );
+}
+
+/**
+ * Map a sync-state row to its source ONLY when the row belongs to the
+ * source's current collector version (the id itself or one of its
+ * `:`-suffixed partitions). Rows from superseded versions, and auxiliary
+ * rows sharing a source's leading segment (inventories, censuses), return
+ * null: aggregating them is how a version bump quietly doubles a source's
+ * stream counts.
+ */
+export function resolveBrainSourceIdForCurrentCollector(
+  collectorId: string,
+): BrainSourceId | null {
+  return (
+    BRAIN_SOURCES.find((source) =>
+      source.collectorIds.some(
+        (id) => collectorId === id || collectorId.startsWith(`${id}:`),
+      ),
+    )?.id ?? null
+  );
+}
+
+/**
+ * How many partitions a fan-out collector's deep-backfill cursor has fully
+ * read, or null when the cursor does not carry that shape. Slack and GitHub
+ * record their walk as `{completed: [...partitionKeys]}`; the count is the
+ * honest backfill progress numerator, where counting rows with a completion
+ * timestamp is not (partition rows never carry one, only the parent does,
+ * and only at the end).
+ */
+export function parseBrainBackfillCompletedCount(
+  cursor: string | null,
+): number | null {
+  if (!cursor) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(cursor) as { completed?: unknown };
+
+    return Array.isArray(parsed.completed)
+      ? parsed.completed.filter((entry) => typeof entry === 'string').length
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /**
