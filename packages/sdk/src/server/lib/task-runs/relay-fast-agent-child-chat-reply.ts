@@ -3,7 +3,7 @@ import { getFastAgentParentFromPayload } from '@roomote/types';
 
 import { deliverFastAgentParentEvent } from '../fast-agent-parent-event';
 
-export type FastAgentChildChatReplyPurpose =
+type FastAgentChildChatReplyPurpose =
   | 'ack'
   | 'progress'
   | 'closeout'
