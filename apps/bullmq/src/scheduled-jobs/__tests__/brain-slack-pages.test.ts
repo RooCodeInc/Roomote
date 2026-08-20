@@ -52,9 +52,9 @@ describe('groupSlackMessagesIntoDayPages', () => {
 
     // Oldest day first, then workspace and channel for deterministic writes.
     expect(pages.map((page) => page.slug)).toEqual([
-      `slack/T1/C1/2026-08-13/${day1Ts}-${day1LaterTs}`.replaceAll('.', '-'),
-      `slack/T1/C2/2026-08-13/${day1Ts}-${day1Ts}`.replaceAll('.', '-'),
-      `slack/T1/C1/2026-08-14/${day2Ts}-${day2Ts}`.replaceAll('.', '-'),
+      `slack/t1/c1/2026-08-13/${day1Ts}-${day1LaterTs}`.replaceAll('.', '-'),
+      `slack/t1/c2/2026-08-13/${day1Ts}-${day1Ts}`.replaceAll('.', '-'),
+      `slack/t1/c1/2026-08-14/${day2Ts}-${day2Ts}`.replaceAll('.', '-'),
     ]);
     expect(pages[0]?.title).toBe('#general — 2026-08-13');
     // The title must also lead the content as a markdown heading: put_page

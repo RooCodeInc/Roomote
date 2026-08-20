@@ -188,7 +188,15 @@ export function groupSlackMessagesIntoDayPages(
         });
         const firstTs = chunk[0]!.ts.replace('.', '-');
         const lastTs = chunk.at(-1)!.ts.replace('.', '-');
-        const slug = `${brainNamespacePrefix('slack')}${group.teamId}/${group.channelId}/${group.day}/${firstTs}-${lastTs}`;
+        // Lowercased to gbrain's canonical form: put_page lowercases slugs
+        // before the row is written, so tracking the raw mixed-case string
+        // would inventory pages under names the corpus never stores — and
+        // retirement would never find them. (Slack team/channel ids are
+        // uppercase.) Timeline `source` keys below stay as-is: they are
+        // dedupe keys, not slugs, and changing their case would duplicate
+        // append-only timeline rows.
+        const slug =
+          `${brainNamespacePrefix('slack')}${group.teamId}/${group.channelId}/${group.day}/${firstTs}-${lastTs}`.toLowerCase();
         const people = new Set<string>();
         for (const message of chunk) {
           if (!message.person) continue;

@@ -28,7 +28,11 @@ import {
 } from '@roomote/types';
 
 import { runBrainCollectors } from './brain-collectors';
-import { runSlackDayPageCensus } from './brain-collectors/slack-day-page-inventory';
+import {
+  runSlackDayPageCensus,
+  runSlackDayPageInventoryMaintenance,
+} from './brain-collectors/slack-day-page-inventory';
+import { slackPublicChannelsCollector } from './brain-collectors/slack-public-channels';
 
 const LOG_PREFIX = '[brainOutboxDrain]';
 /** Sync-state key for the one-time task-history backfill. */
@@ -320,9 +324,12 @@ export async function brainCollectorsJob(): Promise<void> {
   }
 
   try {
-    // Before any Slack collection: the one-time inventory census the Slack
-    // collector holds on. Running it here, ahead of the pass, normally
-    // completes it within the first tick after a deploy.
+    // Before any Slack collection: repair pre-canonicalization inventories
+    // (re-arming the healing replay where the case mismatch neutered it),
+    // then the one-time inventory census the Slack collector holds on.
+    // Running these here, ahead of the pass, normally completes them within
+    // the first tick after a deploy.
+    await runSlackDayPageInventoryMaintenance(slackPublicChannelsCollector.id);
     await runSlackDayPageCensus();
   } catch (error) {
     console.warn(
