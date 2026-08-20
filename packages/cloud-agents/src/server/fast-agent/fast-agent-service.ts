@@ -124,6 +124,7 @@ function buildIntegrationCallSignature({
 }
 
 export const FAST_AGENT_INFERENCE_MAX_RETRIES = 3;
+export const FAST_AGENT_INFERENCE_IDLE_TIMEOUT_MS = 120_000;
 const FAST_AGENT_RATE_LIMIT_RETRY_BASE_DELAY_MS = 5_000;
 const FAST_AGENT_PROVIDER_RETRY_BASE_DELAY_MS = 1_000;
 const FAST_AGENT_RETRY_MAX_DELAY_MS = 60_000;
@@ -651,6 +652,7 @@ export async function answerFastAgentQuestion({
               'Post an acknowledgement with send_chat_reply before this action.',
           }
         : null;
+    let reportNativeToolActivity: () => void = () => undefined;
 
     const executeNativeTool = async (
       call: FastAgentNativeToolCall,
@@ -658,6 +660,12 @@ export async function answerFastAgentQuestion({
       const closedError = requireOpen();
       if (closedError) return closedError;
       nativeToolInvoked = true;
+      reportNativeToolActivity();
+      const activityHeartbeat = setInterval(
+        reportNativeToolActivity,
+        FAST_AGENT_INFERENCE_IDLE_TIMEOUT_MS / 2,
+      );
+      activityHeartbeat.unref();
 
       try {
         switch (call.name) {
@@ -873,6 +881,8 @@ export async function answerFastAgentQuestion({
         }
       } catch (error) {
         return toolFailure(error);
+      } finally {
+        clearInterval(activityHeartbeat);
       }
     };
 
@@ -897,6 +907,7 @@ export async function answerFastAgentQuestion({
                   surface:
                     NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
                   modelRole: FAST_AGENT_MODEL_ROLE,
+                  idleTimeoutMs: FAST_AGENT_INFERENCE_IDLE_TIMEOUT_MS,
                   system,
                   prompt: promptForAttempt,
                   onProviderRetry: reportProviderRetryEvent,
@@ -912,6 +923,12 @@ export async function answerFastAgentQuestion({
                   directory: nativeRuntime.directory,
                   env: nativeRuntime.env,
                   tools: FAST_AGENT_NATIVE_TOOL_FILTER,
+                  onActivityReady: (reportActivity) => {
+                    reportNativeToolActivity = reportActivity;
+                    return () => {
+                      reportNativeToolActivity = () => undefined;
+                    };
+                  },
                   onSessionReady: (openCodeSessionID) => {
                     unbind?.();
                     unbind = bindFastAgentNativeToolExecutor(

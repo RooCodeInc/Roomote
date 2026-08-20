@@ -243,6 +243,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.objectContaining({
+        idleTimeoutMs: 120_000,
         modelRole: 'primary',
         prompt: expect.stringContaining('What does this service do?'),
       }),
@@ -261,6 +262,27 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.objectContaining({ role: 'assistant' }),
       ],
     });
+  });
+
+  it('reports native tool execution as Fast prompt activity', async () => {
+    const reportActivity = vi.fn();
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        const removeActivityReporter =
+          options.onActivityReady?.(reportActivity);
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'Tool work completed.',
+        });
+        removeActivityReporter?.();
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(reportActivity).toHaveBeenCalled();
   });
 
   it('passes image data URLs to the Fast model as image-capable file input', async () => {
@@ -638,7 +660,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
   });
 
-  it('leaves the OpenCode prompt deadline as the single retry budget', async () => {
+  it('leaves the OpenCode inactivity timeout as the single retry budget', async () => {
     const timeout = new Error(
       'Timed out waiting for OpenCode output after 120000ms.',
     );
