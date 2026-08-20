@@ -5,10 +5,13 @@ import { GET, isAllowedCaddyPreviewDomain } from '../route';
 describe('GET /api/caddy/ask', () => {
   const originalPreviewProxyBaseUrl = process.env.PREVIEW_PROXY_BASE_URL;
   const originalRoomotePreviewDomain = process.env.ROOMOTE_PREVIEW_DOMAIN;
+  const originalPreviewProxySubdomainSuffix =
+    process.env.PREVIEW_PROXY_SUBDOMAIN_SUFFIX;
 
   beforeEach(() => {
     process.env.PREVIEW_PROXY_BASE_URL = 'https://preview.roomote.test';
     delete process.env.ROOMOTE_PREVIEW_DOMAIN;
+    delete process.env.PREVIEW_PROXY_SUBDOMAIN_SUFFIX;
   });
 
   afterEach(() => {
@@ -22,6 +25,13 @@ describe('GET /api/caddy/ask', () => {
       delete process.env.ROOMOTE_PREVIEW_DOMAIN;
     } else {
       process.env.ROOMOTE_PREVIEW_DOMAIN = originalRoomotePreviewDomain;
+    }
+
+    if (originalPreviewProxySubdomainSuffix === undefined) {
+      delete process.env.PREVIEW_PROXY_SUBDOMAIN_SUFFIX;
+    } else {
+      process.env.PREVIEW_PROXY_SUBDOMAIN_SUFFIX =
+        originalPreviewProxySubdomainSuffix;
     }
   });
 
@@ -54,6 +64,38 @@ describe('GET /api/caddy/ask', () => {
       isAllowedCaddyPreviewDomain(
         '-bad.preview.roomote.test',
         'preview.roomote.test',
+      ),
+    ).toBe(false);
+  });
+
+  it('denies labels without a taskId prefix', () => {
+    expect(
+      isAllowedCaddyPreviewDomain('www.roomote.test', 'roomote.test'),
+    ).toBe(false);
+    expect(
+      isAllowedCaddyPreviewDomain('mail.roomote.test', 'roomote.test'),
+    ).toBe(false);
+    expect(
+      isAllowedCaddyPreviewDomain(
+        'notataskid-web.preview.roomote.test',
+        'preview.roomote.test',
+      ),
+    ).toBe(false);
+  });
+
+  it('enforces the subdomain suffix when one is configured', () => {
+    expect(
+      isAllowedCaddyPreviewDomain(
+        '1npwciag739pk-web-preview.roomote.test',
+        'roomote.test',
+        'preview',
+      ),
+    ).toBe(true);
+    expect(
+      isAllowedCaddyPreviewDomain(
+        '1npwciag739pk-web.roomote.test',
+        'roomote.test',
+        'preview',
       ),
     ).toBe(false);
   });

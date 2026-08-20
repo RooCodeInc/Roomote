@@ -29,15 +29,17 @@ function assert(condition, message) {
 
 assert(
   installer.includes('preview_domain="$domain"') &&
-    installer.includes("preview_subdomain_suffix='preview'"),
-  'installer: new installs must default to flat preview hostnames',
+    installer.includes(
+      'preview_subdomain_suffix="${saved_preview_subdomain_suffix:-preview}"',
+    ),
+  'installer: new installs must default to flat preview hostnames with a suffix',
 );
 assert(
   installer.includes(
-    'preview_domain="$(awk -F= \'/^ROOMOTE_PREVIEW_DOMAIN=/ { print $2; exit }\' "$install_root/.env")"',
+    'read_saved_env_value "$install_root/.env" ROOMOTE_PREVIEW_DOMAIN',
   ) &&
     installer.includes(
-      'preview_subdomain_suffix="$(awk -F= \'/^PREVIEW_PROXY_SUBDOMAIN_SUFFIX=/ { print $2; exit }\' "$install_root/.env")"',
+      'read_saved_env_value "$install_root/.env" PREVIEW_PROXY_SUBDOMAIN_SUFFIX',
     ),
   'installer: reruns must preserve existing preview hostname settings',
 );
@@ -59,12 +61,17 @@ assert(
       'configured_preview_subdomain_suffix="$(read_env_value "$env_file" PREVIEW_PROXY_SUBDOMAIN_SUFFIX)"',
     ) &&
     deployer.includes(
-      'preview_subdomain_suffix="${configured_preview_subdomain_suffix:-preview}"',
+      'preview_subdomain_suffix="$configured_preview_subdomain_suffix"',
     ) &&
     deployer.includes(
       'set_env_value "$tmp_env" PREVIEW_PROXY_SUBDOMAIN_SUFFIX "$preview_subdomain_suffix"',
     ),
   'DigitalOcean deployer: flat previews must preserve custom suffixes and default to preview',
+);
+assert(
+  deployer.includes('read_tfvars_value "$tfvars_file" domain') &&
+    deployer.includes('read_tfvars_value "$tfvars_file" preview_domain'),
+  'DigitalOcean deployer: reruns must preserve the preview layout, not a stale preview domain',
 );
 const digitalOceanTerraform = read('deploy/providers/digitalocean/main.tf');
 assert(
@@ -75,6 +82,11 @@ assert(
       'count  = var.manage_dns && local.preview_domain != var.domain ? 1 : 0',
     ),
   'DigitalOcean Terraform: flat previews must not duplicate the app DNS record',
+);
+assert(
+  digitalOceanTerraform.includes('local.preview_domain == var.dns_zone') &&
+    digitalOceanTerraform.includes('var.domain == var.dns_zone'),
+  'DigitalOcean Terraform: zone-apex domains must map to "@"/"*" record names',
 );
 
 function commandText(command) {
@@ -202,6 +214,18 @@ function validateComposeShape(shape) {
           config.services.bullmq.environment?.R_DISCORD_GATEWAY_SECRET ===
             composeEnv.R_DISCORD_GATEWAY_SECRET,
           `${shape.name}: bullmq must receive R_DISCORD_GATEWAY_SECRET`,
+        );
+      }
+    }
+
+    if (['self-host-production', 'installer-production'].includes(shape.name)) {
+      for (const serviceName of ['web', 'api', 'controller', 'preview-proxy']) {
+        const service = config.services[serviceName];
+        if (!service) continue;
+        assert(
+          service.environment?.PREVIEW_PROXY_SUBDOMAIN_SUFFIX ===
+            composeEnv.PREVIEW_PROXY_SUBDOMAIN_SUFFIX,
+          `${shape.name}: ${serviceName} must receive PREVIEW_PROXY_SUBDOMAIN_SUFFIX`,
         );
       }
     }
@@ -344,14 +368,6 @@ for (const serviceName of ['web', 'api', 'controller', 'preview-proxy']) {
     `production compose: ${serviceName} must receive PREVIEW_PROXY_SUBDOMAIN_SUFFIX`,
   );
 }
-const manualProductionCompose = YAML.parse(
-  read('docker-compose.production.yml'),
-);
-assert(
-  manualProductionCompose['x-roomote-production-env']
-    ?.PREVIEW_PROXY_SUBDOMAIN_SUFFIX !== undefined,
-  'manual production compose: services must receive PREVIEW_PROXY_SUBDOMAIN_SUFFIX',
-);
 assert(
   read('deploy/caddy/Caddyfile').includes('{$ROOMOTE_CADDY_LOCAL_CERTS:}'),
   'caddy: Caddyfile must support the installer-managed local certificate mode',

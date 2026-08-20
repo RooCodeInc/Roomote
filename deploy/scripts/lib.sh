@@ -191,6 +191,21 @@ terraform_tfvars_file() {
   printf '%s/terraform.tfvars\n' "$(customer_state_dir "$customer")"
 }
 
+read_tfvars_value() {
+  # Reads a top-level string value from a tfvars file this tooling generated
+  # (one "key = \"value\"" per line, tolerating extra alignment whitespace).
+  local tfvars_file="$1"
+  local key="$2"
+  awk -v key="$key" '
+    $1 == key && $2 == "=" {
+      value = $3
+      gsub(/^"|"$/, "", value)
+      print value
+      exit
+    }
+  ' "$tfvars_file"
+}
+
 terraform_output_raw() {
   local customer="$1"
   local output_name="$2"

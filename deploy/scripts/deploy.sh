@@ -154,14 +154,30 @@ tfvars_file="$(terraform_tfvars_file "$customer")"
 configured_preview_subdomain_suffix="$(read_env_value "$env_file" PREVIEW_PROXY_SUBDOMAIN_SUFFIX)"
 
 if [ -z "$preview_domain" ] && [ -f "$tfvars_file" ]; then
-  preview_domain="$(awk -F= '/^preview_domain = / { gsub(/[ \t\"]/, "", $2); print $2; exit }' "$tfvars_file")"
+  previous_domain="$(read_tfvars_value "$tfvars_file" domain)"
+  previous_preview_domain="$(read_tfvars_value "$tfvars_file" preview_domain)"
+  if [ -n "$previous_preview_domain" ] && [ "$previous_preview_domain" = "$previous_domain" ]; then
+    # Flat layout: previews follow the app domain, including across a rerun
+    # that changes --domain.
+    preview_domain="$domain"
+  else
+    preview_domain="$previous_preview_domain"
+    if [ -n "$preview_domain" ] && [ "$previous_domain" != "$domain" ]; then
+      printf 'warning: keeping the dedicated preview domain %s from %s; pass --preview-domain if previews should follow the new app domain %s\n' \
+        "$preview_domain" "$tfvars_file" "$domain" >&2
+    fi
+  fi
 fi
 
 if [ -z "$preview_domain" ]; then
   preview_domain="$domain"
 fi
-if [ "$preview_domain" = "$domain" ]; then
-  preview_subdomain_suffix="${configured_preview_subdomain_suffix:-preview}"
+# Operator-configured suffixes always pass through; flat layouts (preview
+# domain == app domain) additionally require one so preview hostnames stay
+# inside the reserved "-<suffix>" namespace.
+preview_subdomain_suffix="$configured_preview_subdomain_suffix"
+if [ "$preview_domain" = "$domain" ] && [ -z "$preview_subdomain_suffix" ]; then
+  preview_subdomain_suffix='preview'
 fi
 validate_domain "$preview_domain"
 

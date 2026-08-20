@@ -94,7 +94,10 @@ Roomote then publishes `task-port-preview.example.com`, which is covered by
 If your certificate provider supports `*.preview.example.com`, the dedicated
 `task-port.preview.example.com` layout remains an alternative. It keeps preview
 cookies within a dedicated preview namespace rather than sending them to other
-`example.com` subdomains.
+`example.com` subdomains. It is also the layout to choose when tasks need
+nested previews (a preview published by a Roomote instance running inside
+another task's preview): the preview proxy does not route nested hostnames
+when a subdomain suffix is configured, so flat layouts do not serve them.
 
 One Cloudflare Tunnel can serve both the app and preview hostnames through the
 same Caddy instance. Install Roomote with `--tls-mode internal` so Caddy issues
