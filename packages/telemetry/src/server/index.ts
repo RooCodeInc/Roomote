@@ -37,12 +37,9 @@ import {
   type ActivationSetupMilestone,
   type ActivationSetupMilestoneProperties,
   type ActivationTaskProperties,
-  type FastTurnTelemetryProperties,
-  FAST_TURN_SETTLED_EVENT,
   buildActivationPrMergedProperties,
   buildActivationAutomationProperties,
   buildActivationCustomAutomationProperties,
-  buildFastTurnTelemetryProperties,
   buildActivationSetupMilestoneProperties,
   buildActivationTaskProperties,
 } from '../index';
@@ -378,19 +375,6 @@ export async function captureActivationPrMerged(properties: {
   return captureInstanceEvent(
     'activation_pr_merged',
     buildActivationPrMergedProperties(properties),
-  );
-}
-
-/**
- * Captures one anonymous terminal Fast turn. Query `fast_turn_settled` in the
- * Ping analytics event store for rates, latency distributions, and causes.
- */
-export async function captureFastTurnSettled(
-  properties: FastTurnTelemetryProperties,
-): Promise<void> {
-  return captureInstanceEvent(
-    FAST_TURN_SETTLED_EVENT,
-    buildFastTurnTelemetryProperties(properties),
   );
 }
 

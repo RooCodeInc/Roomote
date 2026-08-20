@@ -1,15 +1,7 @@
 import type { ModelMessage } from 'ai';
-import type { FastTurnFailureReason } from '@roomote/telemetry';
-import { captureFastTurnSettled } from '@roomote/telemetry/server';
 import {
   BRAIN_MCP_ID,
-  DIRECT_TASK_MODEL_PROVIDER_IDS,
   formatErrorForLog,
-  formatSingleLineLog,
-  GATEWAY_TASK_MODEL_PROVIDER_IDS,
-  isOpenAiCompatibleProviderId,
-  OPENAI_COMPATIBLE_PROVIDER_ID,
-  resolveRoomoteDeployMarkerEnv,
   roomoteTaskInspectionArgsSchema,
 } from '@roomote/types';
 import { z } from 'zod';
@@ -56,6 +48,7 @@ import {
   sendFastAgentTaskMessage,
 } from './fast-agent-tasks';
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
+import { FastAgentTurnDiagnostics } from './fast-agent-turn-diagnostics';
 import {
   type FastAgentConversation,
   type FastAgentReply,
@@ -134,13 +127,6 @@ export const FAST_AGENT_INFERENCE_MAX_RETRIES = 3;
 const FAST_AGENT_RATE_LIMIT_RETRY_BASE_DELAY_MS = 5_000;
 const FAST_AGENT_PROVIDER_RETRY_BASE_DELAY_MS = 1_000;
 const FAST_AGENT_RETRY_MAX_DELAY_MS = 60_000;
-const FAST_AGENT_TELEMETRY_MODEL_PROVIDERS = new Set<string>([
-  ...DIRECT_TASK_MODEL_PROVIDER_IDS,
-  ...GATEWAY_TASK_MODEL_PROVIDER_IDS,
-  'bedrock-mantle',
-  'bedrock-mantle-openai',
-]);
-let activeFastAgentTurnCount = 0;
 
 type FastAgentInferenceFailure = ReturnType<
   typeof classifyNonTaskInferenceError
@@ -486,20 +472,6 @@ function toolFailure(error: unknown): { success: false; error: string } {
   return { success: false, error: formatErrorForLog(error) };
 }
 
-function resolveFastAgentTelemetryModelProvider(
-  model: string | undefined,
-): string | null {
-  const separatorIndex = model?.indexOf('/') ?? -1;
-  if (!model || separatorIndex <= 0) return null;
-
-  const provider = model.slice(0, separatorIndex);
-  if (isOpenAiCompatibleProviderId(provider)) {
-    return OPENAI_COMPATIBLE_PROVIDER_ID;
-  }
-
-  return FAST_AGENT_TELEMETRY_MODEL_PROVIDERS.has(provider) ? provider : null;
-}
-
 export async function answerFastAgentQuestion({
   question,
   images = [],
@@ -529,37 +501,24 @@ export async function answerFastAgentQuestion({
   adapter: FastAgentTurnAdapter;
   turnSource?: FastAgentTurnSource;
 }): Promise<string> {
-  const turnStartedAt = Date.now();
-  activeFastAgentTurnCount += 1;
-  const processConcurrentTurnCountAtStart = activeFastAgentTurnCount;
-  const deployMarker = resolveRoomoteDeployMarkerEnv();
+  const diagnostics = new FastAgentTurnDiagnostics({
+    conversation,
+    currentMessageId,
+    hasImages: images.length > 0,
+    modelRole: FAST_AGENT_MODEL_ROLE,
+    turnSource,
+  });
   const platformEvent = turnSource === 'platform_event';
-  const turnVisibleMessages: ModelMessage[] = [
-    buildUserTextMessage(normalizeThreadText(question)),
-  ];
+  const turnVisibleMessages: ModelMessage[] = [];
   let mirroredMessageCount = 0;
   let canonicalConversationId: string | null = null;
   let launchedTaskMessage: string | null = null;
   let lastVisibleMessage = '';
-  let openCodeProviderRetryEventCount = 0;
-  let firstOpenCodeProviderRetryElapsedMs: number | undefined;
-  let lastOpenCodeProviderRetryElapsedMs: number | undefined;
-  let lastOpenCodeProviderRetryAttempt: number | undefined;
-  let roomoteInferenceRetryCount = 0;
-  let visibleReplyCount = 0;
-  let resolvedModel: string | undefined;
-  let inferenceStartedAt: number | undefined;
-  let inferenceFinishedAt: number | undefined;
-  let failureReason: FastTurnFailureReason | undefined;
-  let terminalError: unknown;
-  let nativeToolCallCount = 0;
-  const nativeToolStats: Record<
-    string,
-    { count: number; totalDurationMs: number; maxDurationMs: number }
-  > = {};
-  const activeNativeTools = new Map<string, number>();
 
   try {
+    turnVisibleMessages.push(
+      buildUserTextMessage(normalizeThreadText(question)),
+    );
     const [availableEnvironments, session, availableIntegrations, currentUser] =
       await Promise.all([
         getAvailableEnvironments(),
@@ -578,6 +537,7 @@ export async function answerFastAgentQuestion({
         }),
       ]);
     canonicalConversationId = session.id;
+    diagnostics.setCanonicalConversationId(session.id);
     const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
     const resolvedActiveTasks = [
       ...new Map(
@@ -640,7 +600,7 @@ export async function answerFastAgentQuestion({
       mirrorImmediately = false,
     ) => {
       await adapter.postReply(reply);
-      visibleReplyCount += 1;
+      diagnostics.recordVisibleReply();
       turnVisibleMessages.push(buildAssistantTextMessage(reply.message));
       lastVisibleMessage = reply.message;
       visibleUpdatePosted = true;
@@ -669,17 +629,13 @@ export async function answerFastAgentQuestion({
       // Deliberately not the postReply closure: a system retry notice must
       // not satisfy the model's acknowledgement gate or close the turn.
       await adapter.postReply({ purpose: 'progress', message });
-      visibleReplyCount += 1;
+      diagnostics.recordVisibleReply();
       turnVisibleMessages.push(buildAssistantTextMessage(message));
     };
     const reportProviderRetryEvent = async (
       event: NonTaskProviderRetryEvent,
     ) => {
-      openCodeProviderRetryEventCount += 1;
-      const elapsedMs = Date.now() - (inferenceStartedAt ?? turnStartedAt);
-      firstOpenCodeProviderRetryElapsedMs ??= elapsedMs;
-      lastOpenCodeProviderRetryElapsedMs = elapsedMs;
-      lastOpenCodeProviderRetryAttempt = event.attempt;
+      diagnostics.recordOpenCodeProviderRetry(event.attempt);
       await reportInferenceRetry({
         failure: classifyNonTaskInferenceError(new Error(event.message)),
         attemptNumber: event.attempt,
@@ -688,7 +644,7 @@ export async function answerFastAgentQuestion({
     const reportRoomoteInferenceRetry = async (
       notice: FastAgentInferenceRetryNotice,
     ) => {
-      roomoteInferenceRetryCount += 1;
+      diagnostics.recordRoomoteInferenceRetry();
       await reportInferenceRetry(notice);
     };
 
@@ -708,12 +664,7 @@ export async function answerFastAgentQuestion({
     const executeNativeTool = async (
       call: FastAgentNativeToolCall,
     ): Promise<unknown> => {
-      const toolStartedAt = Date.now();
-      nativeToolCallCount += 1;
-      activeNativeTools.set(
-        call.name,
-        (activeNativeTools.get(call.name) ?? 0) + 1,
-      );
+      const recordToolFinished = diagnostics.recordNativeToolStarted(call.name);
 
       try {
         const closedError = requireOpen();
@@ -939,23 +890,7 @@ export async function answerFastAgentQuestion({
       } catch (error) {
         return toolFailure(error);
       } finally {
-        const durationMs = Date.now() - toolStartedAt;
-        const stats = nativeToolStats[call.name] ?? {
-          count: 0,
-          totalDurationMs: 0,
-          maxDurationMs: 0,
-        };
-        stats.count += 1;
-        stats.totalDurationMs += durationMs;
-        stats.maxDurationMs = Math.max(stats.maxDurationMs, durationMs);
-        nativeToolStats[call.name] = stats;
-
-        const activeCount = (activeNativeTools.get(call.name) ?? 1) - 1;
-        if (activeCount > 0) {
-          activeNativeTools.set(call.name, activeCount);
-        } else {
-          activeNativeTools.delete(call.name);
-        }
+        recordToolFinished();
       }
     };
 
@@ -964,12 +899,13 @@ export async function answerFastAgentQuestion({
     const serializedTurnPrompt = serializeFastAgentMessages([turnMessage]);
     const serializedBootstrapPrompt =
       serializeFastAgentMessages(bootstrapMessages);
-    inferenceStartedAt = Date.now();
+    diagnostics.markInferenceQueued();
     const promptTextPromise = fastAgentOpenCodeSessionManager.run({
       conversationId: session.id,
       prompt: serializedTurnPrompt,
       bootstrapPrompt: serializedBootstrapPrompt,
       execute: async (openCodeSession, selectedPrompt) => {
+        diagnostics.markInferenceStarted();
         let unbind: (() => void) | undefined;
         let promptForAttempt = selectedPrompt;
         try {
@@ -997,7 +933,7 @@ export async function answerFastAgentQuestion({
                   env: nativeRuntime.env,
                   tools: FAST_AGENT_NATIVE_TOOL_FILTER,
                   onModelResolved: (model) => {
-                    resolvedModel = model;
+                    diagnostics.recordModelResolved(model);
                   },
                   onSessionReady: (openCodeSessionID) => {
                     unbind?.();
@@ -1033,7 +969,7 @@ export async function answerFastAgentQuestion({
       },
     });
     const promptText = await promptTextPromise.finally(() => {
-      inferenceFinishedAt = Date.now();
+      diagnostics.markInferenceFinished();
     });
 
     if (!closed) {
@@ -1045,11 +981,12 @@ export async function answerFastAgentQuestion({
     await mirrorPendingMessages();
     return lastVisibleMessage;
   } catch (error) {
-    terminalError = error;
-    failureReason =
+    diagnostics.recordFailure(
       error instanceof FastAgentInferenceError
         ? error.failure.reason
-        : 'unclassified';
+        : 'unclassified',
+      error,
+    );
     if (canonicalConversationId) {
       // The system-posted closeout below is mirrored to compatibility history,
       // not to OpenCode's live transcript. Force the next turn to bootstrap so
@@ -1065,7 +1002,7 @@ export async function answerFastAgentQuestion({
         : 'I hit an error while handling that request. Please try again in a moment.';
     try {
       await adapter.postReply({ purpose: 'closeout', message });
-      visibleReplyCount += 1;
+      diagnostics.recordVisibleReply();
       turnVisibleMessages.push(buildAssistantTextMessage(message));
       lastVisibleMessage = message;
     } catch (postError) {
@@ -1087,103 +1024,7 @@ export async function answerFastAgentQuestion({
     }
     return lastVisibleMessage || message;
   } finally {
-    const turnFinishedAt = Date.now();
-    const serviceDurationMs = turnFinishedAt - turnStartedAt;
-    const completedNativeToolStats = Object.values(nativeToolStats);
-    const completedNativeToolCallCount = completedNativeToolStats.reduce(
-      (total, stats) => total + stats.count,
-      0,
-    );
-    const preInferenceDurationMs =
-      (inferenceStartedAt ?? turnFinishedAt) - turnStartedAt;
-    const inferenceDurationMs =
-      inferenceStartedAt && inferenceFinishedAt
-        ? inferenceFinishedAt - inferenceStartedAt
-        : null;
-    const postInferenceDurationMs = inferenceFinishedAt
-      ? turnFinishedAt - inferenceFinishedAt
-      : null;
-    const nativeToolKinds = Object.keys(nativeToolStats).sort();
-    const activeNativeToolKinds = [...activeNativeTools.keys()].sort();
-    const nativeToolTotalDurationMs = completedNativeToolStats.reduce(
-      (total, stats) => total + stats.totalDurationMs,
-      0,
-    );
-    const nativeToolMaxDurationMs = completedNativeToolStats.reduce(
-      (max, stats) => Math.max(max, stats.maxDurationMs),
-      0,
-    );
-
-    void captureFastTurnSettled({
-      surface: conversation.surface,
-      turnSource,
-      outcome: terminalError ? 'failure' : 'success',
-      reason: failureReason ?? null,
-      serviceDurationMs,
-      preInferenceDurationMs,
-      inferenceDurationMs,
-      postInferenceDurationMs,
-      modelRole: FAST_AGENT_MODEL_ROLE,
-      modelProvider: resolveFastAgentTelemetryModelProvider(resolvedModel),
-      processConcurrentTurnCountAtStart,
-      openCodeProviderRetryEventCount,
-      firstOpenCodeProviderRetryElapsedMs:
-        firstOpenCodeProviderRetryElapsedMs ?? null,
-      lastOpenCodeProviderRetryElapsedMs:
-        lastOpenCodeProviderRetryElapsedMs ?? null,
-      lastOpenCodeProviderRetryAttempt:
-        lastOpenCodeProviderRetryAttempt ?? null,
-      roomoteInferenceRetryCount,
-      nativeToolCallCount,
-      completedNativeToolCallCount,
-      nativeToolKinds,
-      activeNativeToolKinds,
-      nativeToolTotalDurationMs,
-      nativeToolMaxDurationMs,
-      visibleReplyCount,
-      hasImages: images.length > 0,
-    });
-
-    activeFastAgentTurnCount -= 1;
-    if (terminalError) {
-      console.error(
-        formatSingleLineLog('[Fast Agent] Turn finished.', {
-          surface: conversation.surface,
-          workspaceId: conversation.workspaceId,
-          conversationId: conversation.conversationId,
-          messageId: currentMessageId,
-          canonicalConversationId,
-          turnSource,
-          modelRole: FAST_AGENT_MODEL_ROLE,
-          resolvedModel,
-          release: deployMarker.roomote_release,
-          releaseSource: deployMarker.roomote_release_source,
-          outcome: 'failure',
-          reason: failureReason,
-          serviceDurationMs,
-          preInferenceDurationMs,
-          inferenceDurationMs,
-          postInferenceDurationMs,
-          processConcurrentTurnCountAtStart,
-          openCodeProviderRetryEventCount,
-          firstOpenCodeProviderRetryElapsedMs,
-          lastOpenCodeProviderRetryElapsedMs,
-          lastOpenCodeProviderRetryAttempt,
-          roomoteInferenceRetryCount,
-          nativeToolCallCount,
-          completedNativeToolCallCount,
-          nativeToolStats:
-            completedNativeToolCallCount > 0 ? nativeToolStats : undefined,
-          activeNativeToolCounts:
-            activeNativeTools.size > 0
-              ? Object.fromEntries(activeNativeTools)
-              : undefined,
-          visibleReplyCount,
-          hasImages: images.length > 0,
-          error: formatErrorForLog(terminalError),
-        }),
-      );
-    }
+    diagnostics.finish();
   }
 }
 
