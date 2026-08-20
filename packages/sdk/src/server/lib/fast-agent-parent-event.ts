@@ -84,6 +84,15 @@ export type FastAgentPullRequestContext = {
 
 type FastAgentParentEvent =
   | {
+      type: 'child_message';
+      taskId: string;
+      runId: number;
+      messageId: string;
+      purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
+      message: string;
+      imageArtifactIds?: string[];
+    }
+  | {
       type: 'artifact_published';
       taskId: string;
       runId: number;
@@ -176,12 +185,24 @@ async function buildSelectedImages(params: {
   event: FastAgentParentEvent;
 }): Promise<FastAgentEventImage[]> {
   const artifactIds = [...new Set(params.artifactIds)];
-  if (params.event.type !== 'artifact_published' || artifactIds.length === 0) {
+  if (
+    artifactIds.length === 0 ||
+    (params.event.type !== 'artifact_published' &&
+      params.event.type !== 'child_message') ||
+    (params.event.type === 'child_message' &&
+      !params.event.imageArtifactIds?.length)
+  ) {
     return [];
   }
 
-  const allowedId = params.event.artifact.id;
-  if (artifactIds.some((id) => id !== allowedId)) {
+  const allowedIds = new Set(
+    params.event.type === 'artifact_published'
+      ? [params.event.artifact.id]
+      : params.event.type === 'child_message'
+        ? (params.event.imageArtifactIds ?? [])
+        : [],
+  );
+  if (artifactIds.some((id) => !allowedIds.has(id))) {
     throw new Error('Fast parent selected an artifact outside this event.');
   }
 
@@ -226,6 +247,8 @@ async function buildSelectedImages(params: {
 
 function buildEventClientMessageSeed(event: FastAgentParentEvent): string {
   switch (event.type) {
+    case 'child_message':
+      return `fast-parent-child-message:${event.messageId}`;
     case 'artifact_published':
       return `fast-parent-artifact:${event.artifact.id}:v${event.artifact.version}`;
     case 'pull_request_opened':

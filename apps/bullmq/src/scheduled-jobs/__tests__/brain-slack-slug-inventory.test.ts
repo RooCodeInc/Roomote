@@ -89,9 +89,15 @@ vi.mock('@roomote/db/server', () => ({
       }
     },
   ),
-  canonicalizeBrainCollectorItemSlugs: vi.fn(
-    async (_db: unknown, collectorId: string) => {
+  canonicalizeBrainCollectorItemSlugsAndResetSyncState: vi.fn(
+    async (_db: unknown, collectorId: string, syncStateCollectorId: string) => {
       store.canonicalizeCalls.push(collectorId);
+      if (store.canonicalizeResult > 0) {
+        store.syncState.set(syncStateCollectorId, {
+          backfillCursor: null,
+          backfillCompletedAt: null,
+        });
+      }
       return store.canonicalizeResult;
     },
   ),

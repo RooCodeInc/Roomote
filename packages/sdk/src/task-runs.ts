@@ -320,6 +320,10 @@ export const publishFastAgentRequestUserInput = (
   options: AppRouterInput['taskRuns']['publishFastAgentRequestUserInput'],
 ) => client.taskRuns.publishFastAgentRequestUserInput.mutate(options);
 
+export const relayFastAgentChildChatReply = (
+  options: AppRouterInput['taskRuns']['relayFastAgentChildChatReply'],
+) => client.taskRuns.relayFastAgentChildChatReply.mutate(options);
+
 export const clearPendingSlackRequestUserInput = (
   options: AppRouterInput['taskRuns']['clearPendingSlackRequestUserInput'],
 ) => client.taskRuns.clearPendingSlackRequestUserInput.mutate(options);

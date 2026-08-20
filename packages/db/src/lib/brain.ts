@@ -8,6 +8,7 @@ import {
   brainSyncState,
   taskRuns,
 } from '../schema';
+import { runInTransactionIfAvailable } from './transaction-utils';
 
 export type BrainSyncStateRow = typeof brainSyncState.$inferSelect;
 export type BrainCollectorItemRow = typeof brainCollectorItems.$inferSelect;
@@ -75,6 +76,33 @@ export async function canonicalizeBrainCollectorItemSlugs(
   await database.delete(brainCollectorItems).where(mixedCase);
 
   return mixed;
+}
+
+/**
+ * Canonicalize a slug inventory and, when rows changed, reset the replay that
+ * must revisit it. Both mutations commit together so a process exit cannot
+ * leave canonical rows behind with the old replay cursor still completed.
+ */
+export async function canonicalizeBrainCollectorItemSlugsAndResetSyncState(
+  database: DatabaseOrTransaction,
+  collectorId: string,
+  syncStateCollectorId: string,
+): Promise<number> {
+  return runInTransactionIfAvailable(database, async (tx) => {
+    const rewritten = await canonicalizeBrainCollectorItemSlugs(
+      tx,
+      collectorId,
+    );
+
+    if (rewritten > 0) {
+      await upsertBrainSyncState(tx, syncStateCollectorId, {
+        backfillCursor: null,
+        backfillCompletedAt: null,
+      });
+    }
+
+    return rewritten;
+  });
 }
 
 /**
