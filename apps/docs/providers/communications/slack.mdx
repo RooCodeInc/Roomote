@@ -37,6 +37,20 @@ If Slack is already configured, Settings → Communications shows the saved
 credentials and still offers **Create a new Slack app with a configuration
 token** when you need to replace them.
 
+### Update an existing Slack app
+
+After connecting a workspace, use **Settings → Communications → Slack → Update
+app** to bring the existing app manifest up to date with the current Roomote
+configuration. Generate and paste a fresh app configuration token when
+prompted. Roomote exports the app's current manifest, preserves custom fields,
+adds or updates Roomote's required capabilities, scopes, events, redirect URLs,
+and callback URLs, validates the result, and then applies it. The token is not
+stored.
+
+If the update changes permissions, Roomote shows **Reinstall in Slack**. Finish
+that approval step before testing the new capabilities because Slack does not
+add scopes to existing installations automatically.
+
 ### Alternative: env vars or an existing app
 
 If you already have a Slack app, or production secret management should own the
@@ -153,11 +167,12 @@ Roomote-created apps enable Slack's current **Agent messaging experience**
 opens Fast-mode responses in threads, and allows Slack to render native loading
 states and streamed task cards.
 
-For an existing manually configured app, open its Slack app settings, enable
-the **Agents** feature, and select the Agent messaging experience. Add the
-`assistant:write` scope and the `app_home_opened` and `app_context_changed`
-events listed above, then reinstall the app and hard-refresh Slack. Keep
-`message.im` enabled so direct messages continue reaching Roomote.
+For an existing app, use **Update app** in Settings → Communications to apply
+these settings. You can also configure them manually by enabling the **Agents**
+feature, selecting the Agent messaging experience, adding the `assistant:write`
+scope and the `app_home_opened` and `app_context_changed` events, and then
+reinstalling the app. Hard-refresh Slack afterward. Keep `message.im` enabled
+so direct messages continue reaching Roomote.
 
 ## Fast answers
 
