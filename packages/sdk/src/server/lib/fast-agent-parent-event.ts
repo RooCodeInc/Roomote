@@ -529,6 +529,7 @@ export async function deliverFastAgentParentEvent(params: {
       question: `<delegated_task_event>${JSON.stringify(params.event)}</delegated_task_event>`,
       userId: parentTurn.userId,
       conversation: parentTurn.conversation,
+      signal: releaseTurnLock.signal,
       turnSource: 'platform_event',
       adapter: {
         ...parentTurn.adapter,

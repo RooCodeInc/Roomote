@@ -175,6 +175,7 @@ export async function processFastAgentMessage(params: {
       apiBaseUrl,
       conversation,
       currentMessageId: event.ts,
+      signal: releaseFastAgentLock.signal,
       senderExternalId: event.user,
       senderDisplayName:
         currentMessage?.user === event.user

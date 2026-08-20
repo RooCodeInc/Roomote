@@ -245,6 +245,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect.objectContaining({
         modelRole: 'primary',
         prompt: expect.stringContaining('What does this service do?'),
+        timeoutMs: null,
       }),
       { id: 'opencode-session-1' },
       expect.objectContaining({
@@ -261,6 +262,38 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.objectContaining({ role: 'assistant' }),
       ],
     });
+  });
+
+  it('stops a cancelled turn without posting a stale error closeout', async () => {
+    const controller = new AbortController();
+    const lockLost = new Error('Fast conversation lock ownership was lost.');
+    mocks.generateText.mockImplementationOnce(
+      async (_params, _session, options) => {
+        expect(options.signal).toBe(controller.signal);
+        await options.onSessionReady('opencode-session-1');
+        controller.abort(lockLost);
+        await expect(
+          invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'This reply must not be posted.',
+          }),
+        ).resolves.toMatchObject({ success: false });
+        throw lockLost;
+      },
+    );
+    const adapter = callbacks();
+
+    await expect(
+      answerFastAgentQuestion({
+        ...baseParams,
+        adapter,
+        signal: controller.signal,
+      }),
+    ).rejects.toBe(lockLost);
+
+    expect(mocks.generateText).toHaveBeenCalledOnce();
+    expect(adapter.postReply).not.toHaveBeenCalled();
+    expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
   });
 
   it('passes image data URLs to the Fast model as image-capable file input', async () => {

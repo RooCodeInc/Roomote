@@ -485,6 +485,7 @@ export async function answerFastAgentQuestion({
   senderExternalId,
   activeTasks = [],
   adapter,
+  signal,
   turnSource = 'human',
 }: {
   question: string;
@@ -499,6 +500,7 @@ export async function answerFastAgentQuestion({
   senderExternalId?: string;
   activeTasks?: FastAgentActiveTask[];
   adapter: FastAgentTurnAdapter;
+  signal?: AbortSignal;
   turnSource?: FastAgentTurnSource;
 }): Promise<string> {
   const platformEvent = turnSource === 'platform_event';
@@ -643,6 +645,20 @@ export async function answerFastAgentQuestion({
       closed
         ? { success: false as const, error: 'This Fast turn is closed.' }
         : null;
+    const throwIfTurnCancelled = () => {
+      if (!signal?.aborted) return;
+      throw signal.reason instanceof Error
+        ? signal.reason
+        : new Error('This Fast turn was canceled.');
+    };
+    const requireLockOwnership = () => {
+      try {
+        throwIfTurnCancelled();
+        return null;
+      } catch (error) {
+        return toolFailure(error);
+      }
+    };
     const requireAcknowledgement = () =>
       !platformEvent && !visibleUpdatePosted
         ? {
@@ -657,6 +673,8 @@ export async function answerFastAgentQuestion({
     ): Promise<unknown> => {
       const closedError = requireOpen();
       if (closedError) return closedError;
+      const ownershipError = requireLockOwnership();
+      if (ownershipError) return ownershipError;
       nativeToolInvoked = true;
 
       try {
@@ -674,6 +692,7 @@ export async function answerFastAgentQuestion({
                   'Platform events may post only a closeout or clarification.',
               };
             }
+            throwIfTurnCancelled();
             await postReply({
               purpose: args.purpose,
               message: args.message,
@@ -696,6 +715,7 @@ export async function answerFastAgentQuestion({
             if (!name || /\s/.test(name)) {
               return { success: false, error: 'Invalid reaction name.' };
             }
+            throwIfTurnCancelled();
             await adapter.postReaction({
               name,
               purpose: args.purpose,
@@ -727,6 +747,7 @@ export async function answerFastAgentQuestion({
               };
             }
             integrationCallSignatures.add(signature);
+            throwIfTurnCancelled();
             const result = await callFastAgentIntegration(
               {
                 userId,
@@ -776,6 +797,7 @@ export async function answerFastAgentQuestion({
               ]
                 .filter((part): part is string => Boolean(part))
                 .join('\n\n');
+              throwIfTurnCancelled();
               await postReply(
                 { purpose: 'closeout', message, kickoff: true },
                 true,
@@ -783,6 +805,7 @@ export async function answerFastAgentQuestion({
               kickoffDelivered = true;
               launchedTaskMessage = message;
             };
+            throwIfTurnCancelled();
             const result = await adapter.launchTask({
               prompt: args.prompt,
               environmentId: args.environmentId ?? null,
@@ -817,6 +840,7 @@ export async function answerFastAgentQuestion({
               };
             }
             completedTaskActions.add(signature);
+            throwIfTurnCancelled();
             return sendFastAgentTaskMessage(
               { userId, apiBaseUrl },
               { taskId: target.taskId, message: args.message },
@@ -837,6 +861,7 @@ export async function answerFastAgentQuestion({
               };
             }
             completedTaskActions.add(signature);
+            throwIfTurnCancelled();
             const result = await cancelFastAgentTask(
               { userId, apiBaseUrl },
               target.taskId,
@@ -856,6 +881,7 @@ export async function answerFastAgentQuestion({
               return { success: false, error: 'Startup was already retried.' };
             }
             retriedTaskStart = true;
+            throwIfTurnCancelled();
             return adapter.retryTaskStart();
           }
 
@@ -897,6 +923,7 @@ export async function answerFastAgentQuestion({
                   surface:
                     NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
                   modelRole: FAST_AGENT_MODEL_ROLE,
+                  timeoutMs: null,
                   system,
                   prompt: promptForAttempt,
                   onProviderRetry: reportProviderRetryEvent,
@@ -911,6 +938,7 @@ export async function answerFastAgentQuestion({
                 {
                   directory: nativeRuntime.directory,
                   env: nativeRuntime.env,
+                  signal,
                   tools: FAST_AGENT_NATIVE_TOOL_FILTER,
                   onSessionReady: (openCodeSessionID) => {
                     unbind?.();
@@ -926,8 +954,11 @@ export async function answerFastAgentQuestion({
               // OpenCode already owns retries while a provider turn remains
               // active. Roomote retries only a terminal failure that happened
               // before the model invoked any native tool, so replay cannot
-              // duplicate a visible reply or external side effect.
+              // duplicate a visible reply or external side effect. The signal
+              // aborts only after definitive conversation-lock loss; retrying
+              // then would post into a conversation another worker may own.
               canRetry: (error) =>
+                !signal?.aborted &&
                 !nativeToolInvoked &&
                 !isNonTaskOpenCodePromptTimeoutError(error),
               prepareRetry: () => {
@@ -946,6 +977,7 @@ export async function answerFastAgentQuestion({
       },
     });
 
+    throwIfTurnCancelled();
     if (!closed) {
       const message =
         promptText.trim() ||
@@ -955,6 +987,12 @@ export async function answerFastAgentQuestion({
     await mirrorPendingMessages();
     return lastVisibleMessage;
   } catch (error) {
+    if (signal?.aborted) {
+      if (canonicalConversationId) {
+        fastAgentOpenCodeSessionManager.invalidate(canonicalConversationId);
+      }
+      throw signal.reason instanceof Error ? signal.reason : error;
+    }
     console.error(
       formatSingleLineLog('[Fast Agent] Failed to answer question.', {
         surface: conversation.surface,

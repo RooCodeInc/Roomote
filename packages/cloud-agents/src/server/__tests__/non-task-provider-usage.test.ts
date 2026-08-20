@@ -324,6 +324,52 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
+  it('lets OpenCode own a Fast prompt lifecycle when the deadline is disabled', async () => {
+    vi.useFakeTimers();
+    try {
+      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+        R_MODEL: 'openrouter/openai/gpt-5.4',
+      });
+      sessionPromptMock.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            setTimeout(
+              () =>
+                resolve({
+                  data: {
+                    info: {},
+                    parts: [{ type: 'text', text: 'completed' }],
+                  },
+                  error: undefined,
+                }),
+              180_000,
+            );
+          }),
+      );
+      const { generateTrackedNonTaskTextInOpenCodeSession } =
+        await import('../non-task-provider-usage.js');
+
+      const result = generateTrackedNonTaskTextInOpenCodeSession(
+        {
+          surface: 'fast_agent_question_answering',
+          prompt: 'Keep working.',
+          timeoutMs: null,
+        },
+        {},
+        {
+          directory: '/tmp/roomote-fast-native-test',
+          tools: { '*': false, send_chat_reply: true },
+        },
+      );
+      await vi.advanceTimersByTimeAsync(180_000);
+
+      await expect(result).resolves.toBe('completed');
+      expect(sessionAbortMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('passes files into a held Fast OpenCode session prompt', async () => {
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
       R_MODEL: 'openrouter/openai/gpt-5.4',

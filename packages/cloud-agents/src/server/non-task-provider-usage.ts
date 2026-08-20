@@ -130,7 +130,8 @@ interface GenerateTrackedNonTaskBaseParams extends NonTaskInferenceTrackingInput
   model?: string;
   modelRole?: 'primary' | 'small';
   maxOutputTokens?: number;
-  timeoutMs?: number;
+  /** null lets OpenCode own the prompt lifecycle without a Roomote deadline. */
+  timeoutMs?: number | null;
   /**
    * OpenCode retries some provider failures internally before the prompt
    * request settles. Long-running, user-visible callers such as Fast Mode can
@@ -186,6 +187,7 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   env?: Partial<Record<string, string>>;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
   permission?: PermissionRuleset;
+  signal?: AbortSignal;
   tools: Record<string, boolean>;
 };
 
@@ -492,13 +494,13 @@ async function resolveModelForInputModality(
       (candidate, index, values): candidate is string =>
         Boolean(candidate) && values.indexOf(candidate) === index,
     );
-  const timeoutMs = params.timeoutMs ?? 120_000;
+  const timeoutMs = params.timeoutMs === undefined ? 120_000 : params.timeoutMs;
   const server = await leaseOpenCodeSdkServer({
     env: runtime.resolvedModelRuntimeEnv,
-    startTimeoutMs: Math.min(
-      timeoutMs,
-      DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS,
-    ),
+    startTimeoutMs:
+      timeoutMs === null
+        ? DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS
+        : Math.min(timeoutMs, DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS),
   });
 
   try {
@@ -567,7 +569,7 @@ async function runNonTaskSdkPrompt(
   parts: Array<{ type?: unknown; text?: unknown }>;
 }> {
   const { model, resolvedModelRuntimeEnv } = runtime;
-  const timeoutMs = params.timeoutMs ?? 120_000;
+  const timeoutMs = params.timeoutMs === undefined ? 120_000 : params.timeoutMs;
   const promptErrorLabel =
     options.promptErrorLabel ??
     `OpenCode structured prompt failed (model ${model})`;
@@ -576,16 +578,21 @@ async function runNonTaskSdkPrompt(
   const server = await leaseOpenCodeSdkServer({
     env: { ...resolvedModelRuntimeEnv, ...options.env },
     ephemeral: options.ephemeral,
-    startTimeoutMs: Math.min(
-      timeoutMs,
-      DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS,
-    ),
+    startTimeoutMs:
+      timeoutMs === null
+        ? DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS
+        : Math.min(timeoutMs, DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS),
     useConfiguredServer: options.useConfiguredServer,
   });
   const abortController = new AbortController();
-  const timeout = setTimeout(() => {
-    abortController.abort(new NonTaskOpenCodePromptTimeoutError(timeoutMs));
-  }, timeoutMs);
+  const timeout =
+    timeoutMs === null
+      ? undefined
+      : setTimeout(() => {
+          abortController.abort(
+            new NonTaskOpenCodePromptTimeoutError(timeoutMs),
+          );
+        }, timeoutMs);
   const externalSignal = options.signal;
   const abortFromExternalSignal = () => {
     abortController.abort(
@@ -761,7 +768,7 @@ async function runNonTaskSdkPrompt(
     }
   } finally {
     externalSignal?.removeEventListener('abort', abortFromExternalSignal);
-    clearTimeout(timeout);
+    if (timeout) clearTimeout(timeout);
     server.release();
   }
 }
@@ -854,6 +861,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       permission: options.permission,
       promptErrorLabel: 'OpenCode native Fast prompt failed',
       session,
+      signal: options.signal,
       useConfiguredServer: false,
     },
   );
