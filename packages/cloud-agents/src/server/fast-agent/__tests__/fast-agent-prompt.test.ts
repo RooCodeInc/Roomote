@@ -106,6 +106,15 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).not.toContain(
       'Do not launch a task merely to answer a question or make a plan',
     );
+    expect(prompt).toContain(
+      'When an answer is shallow, uncertain, blocked, or incomplete',
+    );
+    expect(prompt).toContain(
+      'If an available integration or delegated task can perform that step, offer to do it',
+    );
+    expect(prompt).toContain(
+      'Do not add generic next-step boilerplate to complete answers',
+    );
   });
 
   it('adapts native chat tool guidance for Discord', () => {
