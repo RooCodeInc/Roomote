@@ -616,10 +616,6 @@ chmod 600 "$env_file"
 
 # --- systemd unit ------------------------------------------------------------
 
-# systemd ExecStart needs an absolute path, and a pre-existing Docker install
-# may live outside /usr/bin (snap, manual binary).
-docker_bin="$(command -v docker)"
-
 cat >/etc/systemd/system/roomote-compose.service <<EOF
 [Unit]
 Description=Roomote Docker Compose stack
@@ -631,8 +627,8 @@ Wants=network-online.target
 Type=oneshot
 WorkingDirectory=$install_root
 RemainAfterExit=yes
-ExecStart=$docker_bin compose --env-file $install_root/.env -f $install_root/docker-compose.prod.yml up -d --wait --wait-timeout 600
-ExecStop=$docker_bin compose --env-file $install_root/.env -f $install_root/docker-compose.prod.yml down
+ExecStart=/usr/local/bin/roomote up
+ExecStop=/usr/local/bin/roomote down
 TimeoutStartSec=0
 
 [Install]
@@ -651,7 +647,7 @@ log "Pulling application images (this can take a few minutes)"
 docker compose --env-file .env -f docker-compose.prod.yml pull
 
 log "Starting Roomote"
-docker compose --env-file .env -f docker-compose.prod.yml up -d --wait --wait-timeout 600
+/usr/local/bin/roomote up
 
 # The worker image is only needed once the first task runs, so it downloads
 # in the background while the operator finishes setup in the browser.

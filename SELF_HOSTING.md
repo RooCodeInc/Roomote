@@ -147,6 +147,13 @@ mode only when you know public DNS is not ready yet. The selected mode is
 retained in `/opt/roomote/.env`, so installer reruns and `roomote upgrade`
 preserve it.
 
+Roomote also preserves operator Compose overrides during host CLI operations,
+backups, upgrades, and systemd restarts. Place each override beside the managed
+base file as `/opt/roomote/docker-compose.<name>.yml` (or `.yaml`); for example,
+`/opt/roomote/docker-compose.caddy-dns.yml`. The base
+`docker-compose.prod.yml` and Caddyfile remain upgrade-managed, while matching
+override files are loaded after the base file and left untouched.
+
 ### Cloudflare Tunnel
 
 Cloudflare Tunnel works with the supported `internal` TLS mode: Cloudflare

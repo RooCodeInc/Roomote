@@ -18,6 +18,7 @@ const catalog = JSON.parse(read('deploy/deployment-catalog.json'));
 const installer = read('deploy/install.sh');
 const deployer = read('deploy/scripts/deploy.sh');
 const productionEnvExample = read('.env.production.example');
+const hostCli = read('deploy/host/roomote');
 
 function fail(message) {
   throw new Error(message);
@@ -82,6 +83,24 @@ assert(
       'count  = var.manage_dns && local.preview_domain != var.domain ? 1 : 0',
     ),
   'DigitalOcean Terraform: flat previews must not duplicate the app DNS record',
+);
+assert(
+  hostCli.includes(
+    'for candidate in "$install_root"/docker-compose.*.yml "$install_root"/docker-compose.*.yaml',
+  ) && hostCli.includes('compose_args+=(-f "$candidate")'),
+  'host CLI: Compose commands must include operator override files',
+);
+assert(
+  hostCli.includes("backup_cleanup_services_stopped='false'") &&
+    hostCli.includes(
+      'if [ "${backup_cleanup_services_stopped:-false}" = \'true\' ]; then',
+    ),
+  'host CLI: backup EXIT cleanup state must survive function scope',
+);
+assert(
+  installer.includes('ExecStart=/usr/local/bin/roomote up') &&
+    installer.includes('ExecStop=/usr/local/bin/roomote down'),
+  'installer: systemd must use the override-aware host CLI',
 );
 assert(
   digitalOceanTerraform.includes('local.preview_domain == var.dns_zone') &&
@@ -600,6 +619,7 @@ for (const script of [
   'deploy/ci/deployment-smoke.sh',
   'deploy/ci/upgrade-compatibility.sh',
   'deploy/host/tests/backup-restore.integration.sh',
+  'deploy/host/tests/backup-failed-restart.sh',
   'deploy/host/tests/upgrade-failed-pull.sh',
   '.docker/gbrain/entrypoint.sh',
 ]) {
