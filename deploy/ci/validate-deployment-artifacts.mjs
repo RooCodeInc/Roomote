@@ -18,6 +18,7 @@ const catalog = JSON.parse(read('deploy/deployment-catalog.json'));
 const installer = read('deploy/install.sh');
 const deployer = read('deploy/scripts/deploy.sh');
 const productionEnvExample = read('.env.production.example');
+const appDockerfile = read('.docker/app/Dockerfile');
 
 function fail(message) {
   throw new Error(message);
@@ -26,6 +27,17 @@ function fail(message) {
 function assert(condition, message) {
   if (!condition) fail(message);
 }
+
+assert(
+  appDockerfile.includes('RUN SKIP_ENV_VALIDATION=1 pnpm build'),
+  'app Dockerfile: skip env validation only for the web build command',
+);
+assert(
+  !/^\s*(?:ARG|ENV)\s+(?:S3_ACCESS_KEY_ID|S3_SECRET_ACCESS_KEY|JOB_AUTH_(?:PRIVATE|PUBLIC)_KEY|PREVIEW_AUTH_(?:PRIVATE|PUBLIC)_KEY|DASHBOARD_PASSWORD|ENCRYPTION_KEY|ARTIFACT_SIGNING_KEY)\b/m.test(
+    appDockerfile,
+  ),
+  'app Dockerfile: credential-shaped build placeholders must not use ARG or ENV',
+);
 
 assert(
   installer.includes('preview_domain="$domain"') &&
@@ -140,6 +152,22 @@ const composeEnv = {
 function validateComposeShape(shape) {
   const temporaryDirectory = mkdtempSync(join(tmpdir(), 'roomote-compose-'));
   let files = shape.files.map((file) => join(root, file));
+  const shapeEnv = { ...composeEnv };
+
+  if (shape.name === 'self-host') {
+    for (const key of [
+      'R_AUTO_GENERATE_KEYS',
+      'DASHBOARD_PASSWORD',
+      'ENCRYPTION_KEY',
+      'ARTIFACT_SIGNING_KEY',
+      'JOB_AUTH_PRIVATE_KEY',
+      'JOB_AUTH_PUBLIC_KEY',
+      'PREVIEW_AUTH_PRIVATE_KEY',
+      'PREVIEW_AUTH_PUBLIC_KEY',
+    ]) {
+      delete shapeEnv[key];
+    }
+  }
 
   try {
     if (shape.coolify) {
@@ -177,7 +205,7 @@ function validateComposeShape(shape) {
 
     const output = execFileSync('docker', args, {
       cwd: root,
-      env: composeEnv,
+      env: shapeEnv,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -195,6 +223,71 @@ function validateComposeShape(shape) {
         assert(
           service.healthcheck?.test?.length,
           `${shape.name}: ${serviceName} must have a production healthcheck`,
+        );
+      }
+    }
+
+    if (shape.name === 'self-host') {
+      for (const serviceName of [
+        'web',
+        'api',
+        'controller',
+        'bullmq',
+        'preview-proxy',
+      ]) {
+        const environment = config.services[serviceName].environment;
+        assert(
+          environment.R_AUTO_GENERATE_KEYS === 'true',
+          `self-host: ${serviceName} must auto-generate auth keypairs`,
+        );
+        assert(
+          environment.DASHBOARD_PASSWORD === 'roomote-local-admin' &&
+            environment.ENCRYPTION_KEY ===
+              'local-roomote-encryption-key-0001' &&
+            environment.ARTIFACT_SIGNING_KEY ===
+              'local-roomote-artifact-signing-key-1',
+          `self-host: ${serviceName} must receive the trusted local secret defaults`,
+        );
+        assert(
+          environment.ROOMOTE_ALLOW_INSECURE_LOCAL_KEYS === '1',
+          `self-host: ${serviceName} must explicitly allow local defaults inside the container`,
+        );
+        assert(
+          environment.JOB_AUTH_PRIVATE_KEY == null &&
+            environment.JOB_AUTH_PUBLIC_KEY == null &&
+            environment.PREVIEW_AUTH_PRIVATE_KEY == null &&
+            environment.PREVIEW_AUTH_PUBLIC_KEY == null,
+          `self-host: ${serviceName} must generate auth keypairs instead of using placeholders`,
+        );
+      }
+
+      for (const serviceName of ['web', 'api', 'bullmq', 'preview-proxy']) {
+        assert(
+          config.services[serviceName].ports.every(
+            (port) => port.host_ip === '127.0.0.1',
+          ),
+          `self-host: ${serviceName} ports must stay bound to host loopback`,
+        );
+      }
+    }
+
+    if (shape.name === 'self-host-production') {
+      for (const serviceName of [
+        'web',
+        'api',
+        'controller',
+        'bullmq',
+        'preview-proxy',
+      ]) {
+        assert(
+          config.services[serviceName].environment
+            .ROOMOTE_ALLOW_INSECURE_LOCAL_KEYS === 'false',
+          `self-host-production: ${serviceName} must disable the local-secret override`,
+        );
+        assert(
+          config.services[serviceName].environment.R_AUTO_GENERATE_KEYS ===
+            'false',
+          `self-host-production: ${serviceName} must require explicit auth keypairs`,
         );
       }
     }
