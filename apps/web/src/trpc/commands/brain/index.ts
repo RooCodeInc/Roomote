@@ -19,6 +19,7 @@ import {
   hasBrainGithubSources,
   readBrainCorpusSample,
   readBrainPage,
+  readBrainStats,
   resolveBrainInferenceProvider,
   type BrainModelSummary,
 } from '@roomote/sdk/server';
@@ -105,6 +106,12 @@ export type BrainCorpusSummary = {
   /** Pages in the sample, which is the whole corpus unless `truncated`. */
   sampledPages: number;
   truncated: boolean;
+  /**
+   * The corpus's exact page count from gbrain's admin census, or null when
+   * the admin API did not answer. The sample above stays authoritative for
+   * composition; this keeps the total honest past the sample bound.
+   */
+  totalPages: number | null;
   namespaces: BrainNamespaceSummary[];
   /**
    * Pages written per UTC day over the trailing window, oldest first,
@@ -136,6 +143,16 @@ export type BrainSettings = {
   keySource: 'brain' | 'deployment' | null;
   /** The models the Brain runs, or null when no provider resolves. */
   models: BrainModelSummary | null;
+  /**
+   * Recall health. `semantic`/`keyword-only` are measured from gbrain's own
+   * embedding counts; `unknown` means the admin census did not answer and
+   * the UI falls back to inferring from provider presence.
+   */
+  recall: {
+    mode: 'semantic' | 'keyword-only' | 'unknown';
+    embeddedCount: number | null;
+    chunkCount: number | null;
+  };
   corpus: BrainCorpusSummary;
   sources: BrainSourceSummary[];
   taskMemories: {
@@ -252,6 +269,7 @@ function summarizeCorpus(
       reachable: false,
       sampledPages: 0,
       truncated: false,
+      totalPages: null,
       namespaces: [],
       activityByDay: [],
       recentPages: [],
@@ -293,6 +311,7 @@ function summarizeCorpus(
     reachable: true,
     sampledPages: snapshot.pages.length,
     truncated: snapshot.truncated,
+    totalPages: null,
     namespaces,
     activityByDay: buildActivityByDay(snapshot.pages),
     recentPages,
@@ -420,6 +439,7 @@ export async function getBrainSettingsCommand(
   const [
     inference,
     corpusSnapshot,
+    stats,
     syncStates,
     itemCounts,
     memories,
@@ -427,6 +447,7 @@ export async function getBrainSettingsCommand(
   ] = await Promise.all([
     resolveBrainInferenceProvider(),
     configured ? readBrainCorpusSample() : null,
+    configured ? readBrainStats() : null,
     configured ? listBrainSyncStates(db) : [],
     configured ? countBrainCollectorItemsByCollector(db) : [],
     configured ? getBrainMemoryEventSummary(db) : EMPTY_MEMORY_SUMMARY,
@@ -434,6 +455,20 @@ export async function getBrainSettingsCommand(
   ]);
 
   const corpus = summarizeCorpus(corpusSnapshot);
+
+  corpus.totalPages = stats?.pageCount ?? null;
+
+  // Measured, not inferred: gbrain's own census says whether chunks are
+  // actually embedded. Chunks with zero embeddings is the keyword-only
+  // silent failure this page exists to catch.
+  const recall: BrainSettings['recall'] =
+    stats && (stats.chunkCount ?? 0) > 0
+      ? {
+          mode: (stats.embeddedCount ?? 0) > 0 ? 'semantic' : 'keyword-only',
+          embeddedCount: stats.embeddedCount,
+          chunkCount: stats.chunkCount,
+        }
+      : { mode: 'unknown', embeddedCount: null, chunkCount: null };
 
   // Read only after (and only when) the corpus failed to answer: it decides
   // between "credentials not provisioned yet" and "service down", and the
@@ -511,6 +546,7 @@ export async function getBrainSettingsCommand(
     inferenceProvider: inference?.providerId ?? null,
     keySource,
     models: inference ? describeBrainModels(inference.providerId) : null,
+    recall,
     corpus,
     sources: summarizeSources({
       syncStates,
