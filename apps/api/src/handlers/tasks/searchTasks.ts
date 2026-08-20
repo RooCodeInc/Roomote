@@ -6,6 +6,7 @@ import {
   db,
   desc,
   eq,
+  inArray,
   lt,
   ne,
   sql,
@@ -67,6 +68,7 @@ function parsePullRequestFilter(
  *   - status (string, optional): "active" | "completed" | "all"
  *   - limit (number, optional, default 20, max 100)
  *   - cursor (string, optional): pagination cursor (activityAt:id or legacy activityAt)
+ *   - taskIds (comma-separated string, optional): narrow results to exact task IDs
  */
 export async function searchTasks(
   c: Context<{ Variables: Variables & { mcpAuth: McpAuth } }>,
@@ -74,6 +76,16 @@ export async function searchTasks(
   const query = c.req.query('query')?.trim();
   const pullRequestParam = c.req.query('pullRequest');
   const status = c.req.query('status') ?? 'all';
+  const taskIdsParam = c.req.query('taskIds');
+  const scopedTaskIds = taskIdsParam
+    ? [...new Set(taskIdsParam.split(',').map((id) => id.trim()))].filter(
+        Boolean,
+      )
+    : undefined;
+
+  if (scopedTaskIds && scopedTaskIds.length > 1000) {
+    return c.json({ error: 'taskIds must contain at most 1,000 IDs' }, 400);
+  }
 
   if (!['active', 'completed', 'all'].includes(status)) {
     return c.json(
@@ -135,6 +147,10 @@ export async function searchTasks(
 
   try {
     const conditions = [visibleTaskHistoryCondition];
+
+    if (scopedTaskIds) {
+      conditions.push(inArray(tasks.id, scopedTaskIds));
+    }
 
     if (query) {
       // Escape LIKE metacharacters so literal %, _ in user input are matched verbatim

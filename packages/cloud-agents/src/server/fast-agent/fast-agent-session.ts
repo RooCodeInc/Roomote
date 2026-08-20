@@ -24,6 +24,26 @@ export type FastAgentActiveTask = {
   status?: RunStatus;
 };
 
+export async function getFastAgentTaskIds(
+  sessionId: string,
+): Promise<string[]> {
+  const lookupIds =
+    await fastAgentConversationRepository.getLookupIds(sessionId);
+
+  const rows = await db
+    .selectDistinct({ taskId: taskRuns.taskId })
+    .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(
+      and(
+        inArray(taskRuns.fastAgentSessionId, lookupIds),
+        isNull(tasks.deletedAt),
+      ),
+    );
+
+  return rows.flatMap(({ taskId }) => (taskId ? [taskId] : []));
+}
+
 export async function getOrCreateFastAgentSession({
   userId,
   conversation,

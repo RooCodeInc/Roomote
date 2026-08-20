@@ -1,6 +1,10 @@
 import { tool, type ToolSet } from 'ai';
 import { createAuthToken } from '@roomote/auth';
-import { ALL_REPOSITORIES } from '@roomote/types';
+import {
+  ALL_REPOSITORIES,
+  roomoteTaskInspectionArgsSchema,
+  type RoomoteTaskInspectionArgs,
+} from '@roomote/types';
 import { z } from 'zod';
 
 import { resolveApiBaseUrl } from '../shared-utils';
@@ -10,6 +14,13 @@ import {
 } from './fast-agent-constants';
 
 type FastAgentTaskToolResult = Record<string, unknown>;
+
+type FastAgentTaskSearchRow = Record<string, unknown> & {
+  id: string;
+  lastMessageAt: number;
+};
+
+const FAST_AGENT_TASK_SEARCH_SCOPE_CHUNK_SIZE = 100;
 
 type ResolveFastAgentAuthToken = () => Promise<string>;
 
@@ -206,6 +217,104 @@ export async function cancelFastAgentTask(
     ...context,
     method: 'POST',
     path: `${FAST_AGENT_TASKS_API_PATH}/${taskId}/cancel`,
+  });
+}
+
+export async function inspectFastAgentTasks(
+  context: FastAgentTaskApiContext,
+  params: RoomoteTaskInspectionArgs,
+  allowedTaskIds: ReadonlySet<string>,
+): Promise<FastAgentTaskToolResult> {
+  const args = roomoteTaskInspectionArgsSchema.parse(params);
+
+  if (args.action === 'search') {
+    if (allowedTaskIds.size === 0) {
+      return { tasks: [], hasMore: false };
+    }
+
+    const limit = Math.min(args.limit ?? 20, 100);
+    const taskIdChunks: string[][] = [];
+    const taskIds = [...allowedTaskIds];
+    for (
+      let index = 0;
+      index < taskIds.length;
+      index += FAST_AGENT_TASK_SEARCH_SCOPE_CHUNK_SIZE
+    ) {
+      taskIdChunks.push(
+        taskIds.slice(index, index + FAST_AGENT_TASK_SEARCH_SCOPE_CHUNK_SIZE),
+      );
+    }
+
+    const results = await Promise.all(
+      taskIdChunks.map((taskIdChunk) =>
+        callFastAgentTaskApi({
+          ...context,
+          method: 'GET',
+          path: FAST_AGENT_TASKS_API_PATH,
+          query: {
+            query: args.query,
+            status: args.status,
+            limit,
+            cursor: args.cursor,
+            pullRequest: args.pullRequest,
+            taskIds: taskIdChunk.join(','),
+          },
+        }),
+      ),
+    );
+    const invalidResult = results.find(
+      (result) => !Array.isArray(result.tasks),
+    );
+    if (invalidResult) return invalidResult;
+
+    const tasks = results
+      .flatMap((result) => result.tasks as FastAgentTaskSearchRow[])
+      .sort(
+        (left, right) =>
+          right.lastMessageAt - left.lastMessageAt ||
+          right.id.localeCompare(left.id),
+      );
+    const selectedTasks = tasks.slice(0, limit);
+    const hasMore =
+      tasks.length > limit || results.some((result) => result.hasMore === true);
+    const lastTask = hasMore ? selectedTasks.at(-1) : undefined;
+
+    return {
+      tasks: selectedTasks,
+      hasMore,
+      ...(lastTask
+        ? { nextCursor: `${lastTask.lastMessageAt}:${lastTask.id}` }
+        : {}),
+    };
+  }
+
+  const taskId = args.taskId?.trim();
+  if (!taskId) {
+    return {
+      success: false,
+      error: `taskId is required for ${args.action}`,
+    };
+  }
+  if (!allowedTaskIds.has(taskId)) {
+    return {
+      success: false,
+      error: 'That task was not delegated by this Fast conversation.',
+    };
+  }
+
+  const actionPath = {
+    get_summary: 'summary',
+    get_compute_logs: 'compute_logs',
+    get_messages: 'messages',
+  }[args.action];
+
+  return callFastAgentTaskApi({
+    ...context,
+    method: 'GET',
+    path: `${FAST_AGENT_TASKS_API_PATH}/${encodeURIComponent(taskId)}/${actionPath}`,
+    ...(args.action === 'get_messages'
+      ? { query: { limit: args.limit, order: 'desc' } }
+      : {}),
   });
 }
 

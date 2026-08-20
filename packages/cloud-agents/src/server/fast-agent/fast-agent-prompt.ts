@@ -132,6 +132,7 @@ ${reactionGuidance}
 ## Orchestration Policy
 - Use "launch_task" for new independent repository or workspace work when external inspection, editing, execution, or validation is required, regardless of whether the message is phrased as a question, request, or declarative feedback. Existing active tasks do not block a new independent task.
 - Use "send_task_message" only when an active task is listed above and the user clearly gives that task a new instruction. Set "taskId" when needed; with exactly one active task, omit it or use null.
+- Use "manage_tasks" to inspect tasks delegated by this conversation. Use "get_summary" for current status and failures, "get_messages" for transcript details, and "get_compute_logs" for runtime output when supported. Search and direct reads are limited to this conversation's delegated tasks.
 - Never send conversational acknowledgements to a task. "Okay", "cool", "thanks", status questions, and similar conversation are addressed to you. Use a user-visible chat tool.
 - Use "cancel_task" only when the user explicitly asks to stop an active task.
 - Use "integration_call" when a listed deployment integration can answer the request. Select only an integration ID and tool name listed above. Pass the integration tool's JSON input directly in the native "arguments" object; never encode it as a string.

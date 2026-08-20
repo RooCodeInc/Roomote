@@ -1,5 +1,9 @@
 import type { ModelMessage } from 'ai';
-import { BRAIN_MCP_ID, formatErrorForLog } from '@roomote/types';
+import {
+  BRAIN_MCP_ID,
+  formatErrorForLog,
+  roomoteTaskInspectionArgsSchema,
+} from '@roomote/types';
 import { z } from 'zod';
 
 import {
@@ -14,6 +18,7 @@ import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import {
   appendFastAgentVisibleMessages,
   getActiveFastAgentTasks,
+  getFastAgentTaskIds,
   getOrCreateFastAgentSession,
   type FastAgentActiveTask,
 } from './fast-agent-session';
@@ -40,6 +45,7 @@ import {
 } from './fast-agent-integration-broker';
 import {
   cancelFastAgentTask,
+  inspectFastAgentTasks,
   sendFastAgentTaskMessage,
 } from './fast-agent-tasks';
 import { getFastAgentUserIdentity } from './fast-agent-user-identity';
@@ -523,7 +529,10 @@ export async function answerFastAgentQuestion({
         }),
       ]);
     canonicalConversationId = session.id;
-    const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
+    const [sessionActiveTasks, sessionTaskIds] = await Promise.all([
+      getActiveFastAgentTasks(session.id),
+      getFastAgentTaskIds(session.id),
+    ]);
     const resolvedActiveTasks = [
       ...new Map(
         [...activeTasks, ...sessionActiveTasks].map((task) => [
@@ -535,6 +544,7 @@ export async function answerFastAgentQuestion({
     const currentActiveTasks = new Map(
       resolvedActiveTasks.map((task) => [task.taskId, task]),
     );
+    const inspectableTaskIds = new Set(sessionTaskIds);
     const { bootstrapMessages, turnMessage } = buildFastAgentMessages({
       question,
       currentMessageAgentContext,
@@ -776,11 +786,21 @@ export async function answerFastAgentQuestion({
             });
             if (result.success) {
               currentActiveTasks.set(result.taskId, { taskId: result.taskId });
+              inspectableTaskIds.add(result.taskId);
               if (!kickoffDelivered) {
                 await deliverKickoff(result);
               }
             }
             return result;
+          }
+
+          case FAST_AGENT_NATIVE_TOOL_NAMES.manageTasks: {
+            const args = roomoteTaskInspectionArgsSchema.parse(call.args);
+            return inspectFastAgentTasks(
+              { userId, apiBaseUrl },
+              args,
+              inspectableTaskIds,
+            );
           }
 
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendTaskMessage: {

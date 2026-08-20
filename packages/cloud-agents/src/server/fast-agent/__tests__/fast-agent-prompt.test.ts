@@ -30,7 +30,11 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('send_chat_reply');
     expect(prompt).toContain('send_chat_reaction');
     expect(prompt).toContain('launch_task');
+    expect(prompt).toContain('manage_tasks');
     expect(prompt).toContain('integration_call');
+    expect(prompt).toContain(
+      "Search and direct reads are limited to this conversation's delegated tasks.",
+    );
     expect(prompt).not.toContain('roomote_fast_');
     expect(prompt).toContain(
       'Tool arguments, results, and reasoning are retained natively',

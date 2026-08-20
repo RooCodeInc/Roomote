@@ -1,6 +1,7 @@
 const mocks = vi.hoisted(() => ({
   appendVisibleMessages: vi.fn(),
   getActiveTasks: vi.fn(),
+  getTaskIds: vi.fn(),
   getSession: vi.fn(),
   getEnvironments: vi.fn(),
   generateText: vi.fn(),
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   callIntegration: vi.fn(),
   sendTaskMessage: vi.fn(),
   cancelTask: vi.fn(),
+  inspectTasks: vi.fn(),
   getUserIdentity: vi.fn(),
   bindExecutor: vi.fn(),
   nativeExecutor: undefined as
@@ -27,6 +29,7 @@ const nativeToolNames = vi.hoisted(
       ignoreEvent: 'ignore_event',
       integrationCall: 'integration_call',
       launchTask: 'launch_task',
+      manageTasks: 'manage_tasks',
       retryTaskStart: 'retry_task_start',
       sendChatReaction: 'send_chat_reaction',
       sendChatReply: 'send_chat_reply',
@@ -37,6 +40,7 @@ const nativeToolNames = vi.hoisted(
 vi.mock('../fast-agent-session', () => ({
   appendFastAgentVisibleMessages: mocks.appendVisibleMessages,
   getActiveFastAgentTasks: mocks.getActiveTasks,
+  getFastAgentTaskIds: mocks.getTaskIds,
   getOrCreateFastAgentSession: mocks.getSession,
 }));
 
@@ -98,6 +102,7 @@ vi.mock('../fast-agent-integration-broker', () => ({
 vi.mock('../fast-agent-tasks', () => ({
   sendFastAgentTaskMessage: mocks.sendTaskMessage,
   cancelFastAgentTask: mocks.cancelTask,
+  inspectFastAgentTasks: mocks.inspectTasks,
 }));
 
 vi.mock('../fast-agent-user-identity', () => ({
@@ -156,6 +161,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       compatibilityMessages: [],
     });
     mocks.getActiveTasks.mockResolvedValue([]);
+    mocks.getTaskIds.mockResolvedValue([]);
     mocks.getEnvironments.mockResolvedValue([
       {
         id: 'env-1',
@@ -167,6 +173,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.callIntegration.mockResolvedValue({ matches: ['fast-agent.ts'] });
     mocks.sendTaskMessage.mockResolvedValue({ success: true });
     mocks.cancelTask.mockResolvedValue({ success: true });
+    mocks.inspectTasks.mockResolvedValue({
+      id: 'task-1',
+      taskRunStatus: 'running',
+    });
     mocks.getUserIdentity.mockResolvedValue({
       displayName: 'Matt Rubens',
       githubLogin: 'mrubens',
@@ -473,6 +483,32 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(mocks.cancelTask).toHaveBeenCalledWith(
       expect.objectContaining({ userId: 'user-1' }),
       'task-1',
+    );
+  });
+
+  it('inspects only task IDs linked to the current Fast conversation', async () => {
+    mocks.getTaskIds.mockResolvedValue(['task-1', 'task-completed']);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        const result = await invokeTool(nativeToolNames.manageTasks, {
+          action: 'get_summary',
+          taskId: 'task-completed',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The task completed.',
+        });
+        return JSON.stringify(result);
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.inspectTasks).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: 'user-1' }),
+      { action: 'get_summary', taskId: 'task-completed' },
+      new Set(['task-1', 'task-completed']),
     );
   });
 

@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { ROOMOTE_TASK_INSPECTION_ACTIONS } from '@roomote/types';
 
 import {
   bindFastAgentNativeToolExecutor,
@@ -21,6 +22,10 @@ describe('Fast native OpenCode tool bridge', () => {
       join(toolsDirectory, 'integration_call.js'),
       'utf8',
     );
+    const manageTasksSource = await readFile(
+      join(toolsDirectory, 'manage_tasks.js'),
+      'utf8',
+    );
     const bridgeSource = await readFile(
       join(runtime.directory, '.opencode', 'roomote-fast-tool-bridge.js'),
       'utf8',
@@ -35,12 +40,17 @@ describe('Fast native OpenCode tool bridge', () => {
     expect(replySource).toContain('invoke("send_chat_reply"');
     expect(integrationSource).toContain('export default {');
     expect(integrationSource).toContain('invoke("integration_call"');
+    expect(manageTasksSource).toContain('invoke("manage_tasks"');
+    expect(manageTasksSource).toContain(
+      `z.enum(${JSON.stringify(ROOMOTE_TASK_INSPECTION_ACTIONS)})`,
+    );
     expect(bridgeSource).toContain('context.sessionID');
     expect(bridgeSource).toContain('metadata: { roomoteResult:');
     expect(FAST_AGENT_NATIVE_TOOL_FILTER).toMatchObject({
       '*': false,
       [FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply]: true,
       [FAST_AGENT_NATIVE_TOOL_NAMES.integrationCall]: true,
+      [FAST_AGENT_NATIVE_TOOL_NAMES.manageTasks]: true,
     });
   });
 

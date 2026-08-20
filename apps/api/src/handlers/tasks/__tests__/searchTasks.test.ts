@@ -16,6 +16,7 @@ const {
   selectOrderByMock,
   selectLimitMock,
   andMock,
+  inArrayMock,
 } = vi.hoisted(() => ({
   mockDbSelect: vi.fn(),
   mockGetLatestTaskRunsByTaskIds: vi.fn(),
@@ -30,6 +31,7 @@ const {
   selectOrderByMock: vi.fn(),
   selectLimitMock: vi.fn(),
   andMock: vi.fn((...args) => ({ type: 'and', args })),
+  inArrayMock: vi.fn((...args) => ({ type: 'inArray', args })),
 }));
 
 vi.mock('../helpers', () => ({
@@ -62,6 +64,7 @@ vi.mock('@roomote/db/server', () => ({
   and: andMock,
   desc: vi.fn((arg) => ({ type: 'desc', arg })),
   lt: vi.fn((...args) => ({ type: 'lt', args })),
+  inArray: inArrayMock,
   ne: vi.fn((...args) => ({ type: 'ne', args })),
   sql: mockSql,
 }));
@@ -129,6 +132,15 @@ describe('searchTasks', () => {
         strings.join('?').includes('description'),
     );
     expect(promptSearchCondition).toBeDefined();
+  });
+
+  it('narrows results to an explicit task ID set', async () => {
+    const response = await createApp(authContext).request(
+      'http://localhost/tasks?taskIds=task-1%2Ctask-2%2Ctask-1',
+    );
+
+    expect(response.status).toBe(200);
+    expect(inArrayMock).toHaveBeenCalledWith('tasks.id', ['task-1', 'task-2']);
   });
 
   it('filters to tasks with any associated pull request', async () => {
