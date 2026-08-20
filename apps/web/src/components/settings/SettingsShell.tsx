@@ -28,15 +28,13 @@ export function SettingsShell({
   children,
 }: SettingsShellProps) {
   const router = useRouter();
-  const { isAdmin, cloudEnabled, brainConfigured, brainNeedsKey } =
-    useAuthorizedUser();
+  const { isAdmin, cloudEnabled, brainConfigured } = useAuthorizedUser();
 
   const navigationItem = getSettingsNavigationItem(pageId);
   const accessibleItems = getAccessibleSettingsNavigation({
     isAdmin,
     cloudEnabled,
     brainConfigured,
-    brainNeedsKey,
   });
   const activeItemId =
     (accessibleItems.some((item) => item.id === pageId)

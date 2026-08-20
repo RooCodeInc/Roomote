@@ -37,13 +37,6 @@ export type AuthorizedUser = {
    * `managedAccess`, so test fixtures and older payloads read as "no Brain".
    */
   brainConfigured?: boolean;
-  /**
-   * The fleet manager provisioned a Brain for this deployment but no
-   * provider key has been supplied yet. Shows the Brain page in a
-   * needs-your-key state instead of hiding it. Optional like
-   * `brainConfigured`.
-   */
-  brainNeedsKey?: boolean;
   /** When this user accepted optional Cloud cookies, serialized as epoch ms. */
   cookieConsentedAt: number | null;
   managedAccess?: ManagedDeploymentAccess;

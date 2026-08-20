@@ -41,7 +41,7 @@ vi.mock('next/headers', () => ({
 
 vi.mock('@roomote/db/server', () => ({
   recordLicenseUsageObservation: vi.fn(async () => undefined),
-  resolveBrainAvailability: vi.fn(async () => 'unconfigured'),
+  isBrainProviderConfigured: vi.fn(async () => false),
   db: {
     query: {
       deploymentSettings: {

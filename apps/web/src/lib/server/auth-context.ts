@@ -6,7 +6,7 @@ import {
   deploymentSettings,
   eq,
   invites,
-  resolveBrainAvailability,
+  isBrainProviderConfigured,
   recordLicenseUsageObservation,
   users,
 } from '@roomote/db/server';
@@ -443,13 +443,7 @@ export async function authorize(): Promise<UserAuthSuccess | AuthError> {
     featureFlags,
     anonymousAnalyticsEnabled,
     cloudEnabled: isRoomoteCloudEnabled(Env.R_CLOUD_ENABLED),
-    ...(await (async () => {
-      const brainAvailability = await resolveBrainAvailability();
-      return {
-        brainConfigured: brainAvailability === 'configured',
-        brainNeedsKey: brainAvailability === 'managed_needs_key',
-      };
-    })()),
+    brainConfigured: await isBrainProviderConfigured(),
     cookieConsentedAt: authContext.cookieConsentedAt,
     managedAccess: getManagedDeploymentAccessFromMetadata(
       authContext.deploymentMetadata,
