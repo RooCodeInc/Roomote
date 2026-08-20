@@ -6,6 +6,8 @@ import {
   buildActivationCustomAutomationProperties,
   buildActivationSetupMilestoneProperties,
   buildActivationTaskProperties,
+  buildFastTurnTelemetryProperties,
+  FAST_TURN_SETTLED_EVENT,
   PAGEVIEW_EVENT,
   TELEMETRY_EVENT_NAME_PATTERN,
   toActivationAutomationDestinationProvider,
@@ -179,6 +181,9 @@ describe('TELEMETRY_EVENT_NAME_PATTERN', () => {
     expect(TELEMETRY_EVENT_NAME_PATTERN.test('task_created')).toBe(true);
     expect(TELEMETRY_EVENT_NAME_PATTERN.test(PAGEVIEW_EVENT)).toBe(true);
     expect(TELEMETRY_EVENT_NAME_PATTERN.test('setup_completed')).toBe(true);
+    expect(TELEMETRY_EVENT_NAME_PATTERN.test(FAST_TURN_SETTLED_EVENT)).toBe(
+      true,
+    );
   });
 
   it('rejects names that could smuggle arbitrary content', () => {
@@ -186,6 +191,64 @@ describe('TELEMETRY_EVENT_NAME_PATTERN', () => {
     expect(TELEMETRY_EVENT_NAME_PATTERN.test('')).toBe(false);
     expect(TELEMETRY_EVENT_NAME_PATTERN.test('a'.repeat(120))).toBe(false);
     expect(TELEMETRY_EVENT_NAME_PATTERN.test('drop;table')).toBe(false);
+  });
+});
+
+describe('Fast turn telemetry properties', () => {
+  it('keeps only bounded classifications and aggregate timings', () => {
+    expect(
+      buildFastTurnTelemetryProperties({
+        surface: 'slack',
+        turnSource: 'human',
+        outcome: 'failure',
+        reason: 'timeout',
+        serviceDurationMs: 120_100,
+        preInferenceDurationMs: 80,
+        inferenceDurationMs: 120_000,
+        postInferenceDurationMs: 20,
+        modelRole: 'primary',
+        modelProvider: 'openrouter',
+        processConcurrentTurnCountAtStart: 2,
+        openCodeProviderRetryEventCount: 3,
+        firstOpenCodeProviderRetryElapsedMs: 2_000,
+        lastOpenCodeProviderRetryElapsedMs: 90_000,
+        lastOpenCodeProviderRetryAttempt: 3,
+        roomoteInferenceRetryCount: 0,
+        nativeToolCallCount: 1,
+        completedNativeToolCallCount: 0,
+        nativeToolKinds: [],
+        activeNativeToolKinds: ['manage_tasks'],
+        nativeToolTotalDurationMs: 0,
+        nativeToolMaxDurationMs: 0,
+        visibleReplyCount: 1,
+        hasImages: false,
+      }),
+    ).toEqual({
+      surface: 'slack',
+      turnSource: 'human',
+      outcome: 'failure',
+      reason: 'timeout',
+      serviceDurationMs: 120_100,
+      preInferenceDurationMs: 80,
+      inferenceDurationMs: 120_000,
+      postInferenceDurationMs: 20,
+      modelRole: 'primary',
+      modelProvider: 'openrouter',
+      processConcurrentTurnCountAtStart: 2,
+      openCodeProviderRetryEventCount: 3,
+      firstOpenCodeProviderRetryElapsedMs: 2_000,
+      lastOpenCodeProviderRetryElapsedMs: 90_000,
+      lastOpenCodeProviderRetryAttempt: 3,
+      roomoteInferenceRetryCount: 0,
+      nativeToolCallCount: 1,
+      completedNativeToolCallCount: 0,
+      nativeToolKinds: [],
+      activeNativeToolKinds: ['manage_tasks'],
+      nativeToolTotalDurationMs: 0,
+      nativeToolMaxDurationMs: 0,
+      visibleReplyCount: 1,
+      hasImages: false,
+    });
   });
 });
 

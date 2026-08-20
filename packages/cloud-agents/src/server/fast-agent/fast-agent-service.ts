@@ -1,8 +1,14 @@
 import type { ModelMessage } from 'ai';
+import type { FastTurnFailureReason } from '@roomote/telemetry';
+import { captureFastTurnSettled } from '@roomote/telemetry/server';
 import {
   BRAIN_MCP_ID,
+  DIRECT_TASK_MODEL_PROVIDER_IDS,
   formatErrorForLog,
   formatSingleLineLog,
+  GATEWAY_TASK_MODEL_PROVIDER_IDS,
+  isOpenAiCompatibleProviderId,
+  OPENAI_COMPATIBLE_PROVIDER_ID,
   resolveRoomoteDeployMarkerEnv,
   roomoteTaskInspectionArgsSchema,
 } from '@roomote/types';
@@ -128,6 +134,12 @@ export const FAST_AGENT_INFERENCE_MAX_RETRIES = 3;
 const FAST_AGENT_RATE_LIMIT_RETRY_BASE_DELAY_MS = 5_000;
 const FAST_AGENT_PROVIDER_RETRY_BASE_DELAY_MS = 1_000;
 const FAST_AGENT_RETRY_MAX_DELAY_MS = 60_000;
+const FAST_AGENT_TELEMETRY_MODEL_PROVIDERS = new Set<string>([
+  ...DIRECT_TASK_MODEL_PROVIDER_IDS,
+  ...GATEWAY_TASK_MODEL_PROVIDER_IDS,
+  'bedrock-mantle',
+  'bedrock-mantle-openai',
+]);
 let activeFastAgentTurnCount = 0;
 
 type FastAgentInferenceFailure = ReturnType<
@@ -474,6 +486,20 @@ function toolFailure(error: unknown): { success: false; error: string } {
   return { success: false, error: formatErrorForLog(error) };
 }
 
+function resolveFastAgentTelemetryModelProvider(
+  model: string | undefined,
+): string | null {
+  const separatorIndex = model?.indexOf('/') ?? -1;
+  if (!model || separatorIndex <= 0) return null;
+
+  const provider = model.slice(0, separatorIndex);
+  if (isOpenAiCompatibleProviderId(provider)) {
+    return OPENAI_COMPATIBLE_PROVIDER_ID;
+  }
+
+  return FAST_AGENT_TELEMETRY_MODEL_PROVIDERS.has(provider) ? provider : null;
+}
+
 export async function answerFastAgentQuestion({
   question,
   images = [],
@@ -524,7 +550,7 @@ export async function answerFastAgentQuestion({
   let resolvedModel: string | undefined;
   let inferenceStartedAt: number | undefined;
   let inferenceFinishedAt: number | undefined;
-  let failureReason: string | undefined;
+  let failureReason: FastTurnFailureReason | undefined;
   let terminalError: unknown;
   let nativeToolCallCount = 0;
   const nativeToolStats: Record<
@@ -1063,56 +1089,100 @@ export async function answerFastAgentQuestion({
   } finally {
     const turnFinishedAt = Date.now();
     const serviceDurationMs = turnFinishedAt - turnStartedAt;
-    const completedNativeToolCallCount = Object.values(nativeToolStats).reduce(
+    const completedNativeToolStats = Object.values(nativeToolStats);
+    const completedNativeToolCallCount = completedNativeToolStats.reduce(
       (total, stats) => total + stats.count,
       0,
     );
-    const logMessage = formatSingleLineLog('[Fast Agent] Turn finished.', {
+    const preInferenceDurationMs =
+      (inferenceStartedAt ?? turnFinishedAt) - turnStartedAt;
+    const inferenceDurationMs =
+      inferenceStartedAt && inferenceFinishedAt
+        ? inferenceFinishedAt - inferenceStartedAt
+        : null;
+    const postInferenceDurationMs = inferenceFinishedAt
+      ? turnFinishedAt - inferenceFinishedAt
+      : null;
+    const nativeToolKinds = Object.keys(nativeToolStats).sort();
+    const activeNativeToolKinds = [...activeNativeTools.keys()].sort();
+    const nativeToolTotalDurationMs = completedNativeToolStats.reduce(
+      (total, stats) => total + stats.totalDurationMs,
+      0,
+    );
+    const nativeToolMaxDurationMs = completedNativeToolStats.reduce(
+      (max, stats) => Math.max(max, stats.maxDurationMs),
+      0,
+    );
+
+    void captureFastTurnSettled({
       surface: conversation.surface,
-      workspaceId: conversation.workspaceId,
-      conversationId: conversation.conversationId,
-      messageId: currentMessageId,
-      canonicalConversationId,
       turnSource,
-      modelRole: FAST_AGENT_MODEL_ROLE,
-      resolvedModel,
-      release: deployMarker.roomote_release,
-      releaseSource: deployMarker.roomote_release_source,
       outcome: terminalError ? 'failure' : 'success',
-      reason: failureReason,
+      reason: failureReason ?? null,
       serviceDurationMs,
-      preInferenceDurationMs:
-        (inferenceStartedAt ?? turnFinishedAt) - turnStartedAt,
-      inferenceDurationMs:
-        inferenceStartedAt && inferenceFinishedAt
-          ? inferenceFinishedAt - inferenceStartedAt
-          : undefined,
-      postInferenceDurationMs: inferenceFinishedAt
-        ? turnFinishedAt - inferenceFinishedAt
-        : undefined,
+      preInferenceDurationMs,
+      inferenceDurationMs,
+      postInferenceDurationMs,
+      modelRole: FAST_AGENT_MODEL_ROLE,
+      modelProvider: resolveFastAgentTelemetryModelProvider(resolvedModel),
       processConcurrentTurnCountAtStart,
       openCodeProviderRetryEventCount,
-      firstOpenCodeProviderRetryElapsedMs,
-      lastOpenCodeProviderRetryElapsedMs,
-      lastOpenCodeProviderRetryAttempt,
+      firstOpenCodeProviderRetryElapsedMs:
+        firstOpenCodeProviderRetryElapsedMs ?? null,
+      lastOpenCodeProviderRetryElapsedMs:
+        lastOpenCodeProviderRetryElapsedMs ?? null,
+      lastOpenCodeProviderRetryAttempt:
+        lastOpenCodeProviderRetryAttempt ?? null,
       roomoteInferenceRetryCount,
       nativeToolCallCount,
       completedNativeToolCallCount,
-      nativeToolStats:
-        completedNativeToolCallCount > 0 ? nativeToolStats : undefined,
-      activeNativeToolCounts:
-        activeNativeTools.size > 0
-          ? Object.fromEntries(activeNativeTools)
-          : undefined,
+      nativeToolKinds,
+      activeNativeToolKinds,
+      nativeToolTotalDurationMs,
+      nativeToolMaxDurationMs,
       visibleReplyCount,
       hasImages: images.length > 0,
-      error: terminalError ? formatErrorForLog(terminalError) : undefined,
     });
+
     activeFastAgentTurnCount -= 1;
     if (terminalError) {
-      console.error(logMessage);
-    } else {
-      console.info(logMessage);
+      console.error(
+        formatSingleLineLog('[Fast Agent] Turn finished.', {
+          surface: conversation.surface,
+          workspaceId: conversation.workspaceId,
+          conversationId: conversation.conversationId,
+          messageId: currentMessageId,
+          canonicalConversationId,
+          turnSource,
+          modelRole: FAST_AGENT_MODEL_ROLE,
+          resolvedModel,
+          release: deployMarker.roomote_release,
+          releaseSource: deployMarker.roomote_release_source,
+          outcome: 'failure',
+          reason: failureReason,
+          serviceDurationMs,
+          preInferenceDurationMs,
+          inferenceDurationMs,
+          postInferenceDurationMs,
+          processConcurrentTurnCountAtStart,
+          openCodeProviderRetryEventCount,
+          firstOpenCodeProviderRetryElapsedMs,
+          lastOpenCodeProviderRetryElapsedMs,
+          lastOpenCodeProviderRetryAttempt,
+          roomoteInferenceRetryCount,
+          nativeToolCallCount,
+          completedNativeToolCallCount,
+          nativeToolStats:
+            completedNativeToolCallCount > 0 ? nativeToolStats : undefined,
+          activeNativeToolCounts:
+            activeNativeTools.size > 0
+              ? Object.fromEntries(activeNativeTools)
+              : undefined,
+          visibleReplyCount,
+          hasImages: images.length > 0,
+          error: formatErrorForLog(terminalError),
+        }),
+      );
     }
   }
 }

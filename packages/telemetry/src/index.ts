@@ -167,6 +167,53 @@ export function buildActivationCustomAutomationProperties(
   return { destinationProvider };
 }
 
+export const FAST_TURN_SETTLED_EVENT = 'fast_turn_settled';
+
+export type FastTurnFailureReason =
+  | 'endpoint_unreachable'
+  | 'gateway_blocked'
+  | 'insufficient_credits'
+  | 'invalid_credentials'
+  | 'model_unavailable'
+  | 'provider_error'
+  | 'rate_limited'
+  | 'timeout'
+  | 'unclassified';
+
+export interface FastTurnTelemetryProperties {
+  surface: string;
+  turnSource: 'human' | 'platform_event';
+  outcome: 'success' | 'failure';
+  reason: FastTurnFailureReason | null;
+  serviceDurationMs: number;
+  preInferenceDurationMs: number;
+  inferenceDurationMs: number | null;
+  postInferenceDurationMs: number | null;
+  modelRole: 'primary' | 'small';
+  modelProvider: string | null;
+  processConcurrentTurnCountAtStart: number;
+  openCodeProviderRetryEventCount: number;
+  firstOpenCodeProviderRetryElapsedMs: number | null;
+  lastOpenCodeProviderRetryElapsedMs: number | null;
+  lastOpenCodeProviderRetryAttempt: number | null;
+  roomoteInferenceRetryCount: number;
+  nativeToolCallCount: number;
+  completedNativeToolCallCount: number;
+  nativeToolKinds: string[];
+  activeNativeToolKinds: string[];
+  nativeToolTotalDurationMs: number;
+  nativeToolMaxDurationMs: number;
+  visibleReplyCount: number;
+  hasImages: boolean;
+}
+
+/** Fast telemetry contains bounded classifications and timings, never chat data. */
+export function buildFastTurnTelemetryProperties(
+  properties: FastTurnTelemetryProperties,
+): TelemetryEventProperties {
+  return { ...properties };
+}
+
 /**
  * Wire types for the hosted Ping service (`/v1/*`). Versioned: breaking
  * changes require a new API version, additive fields do not.

@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   cancelTask: vi.fn(),
   inspectTasks: vi.fn(),
   getUserIdentity: vi.fn(),
+  captureFastTurn: vi.fn(),
   bindExecutor: vi.fn(),
   nativeExecutor: undefined as
     | ((call: {
@@ -19,6 +20,10 @@ const mocks = vi.hoisted(() => ({
         args: Record<string, unknown>;
       }) => Promise<unknown>)
     | undefined,
+}));
+
+vi.mock('@roomote/telemetry/server', () => ({
+  captureFastTurnSettled: mocks.captureFastTurn,
 }));
 
 const nativeToolNames = vi.hoisted(
@@ -264,33 +269,102 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
   });
 
-  it('logs successful turns with model, duration, and native tool diagnostics', async () => {
+  it('captures successful turns with bounded duration and tool telemetry', async () => {
     const consoleInfo = vi
       .spyOn(console, 'info')
       .mockImplementation(() => undefined);
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
 
-    try {
+    expect(mocks.captureFastTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        surface: 'slack',
+        turnSource: 'human',
+        outcome: 'success',
+        reason: null,
+        modelRole: 'primary',
+        modelProvider: 'openrouter',
+        openCodeProviderRetryEventCount: 0,
+        roomoteInferenceRetryCount: 0,
+        nativeToolCallCount: 1,
+        completedNativeToolCallCount: 1,
+        nativeToolKinds: ['send_chat_reply'],
+        activeNativeToolKinds: [],
+        visibleReplyCount: 1,
+        hasImages: false,
+      }),
+    );
+    expect(mocks.captureFastTurn.mock.calls[0]?.[0]).not.toHaveProperty(
+      'conversationId',
+    );
+    expect(consoleInfo).not.toHaveBeenCalled();
+    consoleInfo.mockRestore();
+  });
+
+  it.each(['gpt-5.4', 'custom-provider/model', 'alice.smith/model'])(
+    'omits unrecognized resolved model %s from telemetry provider fields',
+    async (model) => {
+      mocks.generateText.mockImplementation(
+        async (_params, _session, options) => {
+          options.onModelResolved?.(model);
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'It coordinates incoming requests.',
+          });
+          return '';
+        },
+      );
+
       await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
 
-      expect(consoleInfo).toHaveBeenCalledWith(
-        expect.stringContaining(
-          '[Fast Agent] Turn finished. surface="slack" workspaceId="team-1" conversationId="100.1" messageId="100.2" canonicalConversationId="conversation-1" turnSource="human" modelRole="primary" resolvedModel="openrouter/openai/gpt-5.4" outcome="success"',
-        ),
+      expect(mocks.captureFastTurn).toHaveBeenCalledWith(
+        expect.objectContaining({ modelProvider: null }),
       );
-      expect(consoleInfo).toHaveBeenCalledWith(
-        expect.stringContaining('serviceDurationMs='),
-      );
-      expect(consoleInfo).toHaveBeenCalledWith(
-        expect.stringContaining(
-          'nativeToolCallCount=1 completedNativeToolCallCount=1',
-        ),
-      );
-      expect(consoleInfo).toHaveBeenCalledWith(
-        expect.stringContaining('nativeToolStats={"send_chat_reply":'),
-      );
-    } finally {
-      consoleInfo.mockRestore();
-    }
+    },
+  );
+
+  it.each([
+    ['anthropic/claude-sonnet-5', 'anthropic'],
+    ['bedrock-mantle/anthropic.claude-sonnet-5', 'bedrock-mantle'],
+    ['bedrock-mantle-openai/openai.gpt-5.6', 'bedrock-mantle-openai'],
+  ])('captures canonical provider %s as %s', async (model, provider) => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onModelResolved?.(model);
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'It coordinates incoming requests.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.captureFastTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ modelProvider: provider }),
+    );
+  });
+
+  it('normalizes named OpenAI-compatible providers for telemetry', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        options.onModelResolved?.('openai-compatible-private/gpt-5.4');
+        await options.onSessionReady('opencode-session-1');
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'It coordinates incoming requests.',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+    expect(mocks.captureFastTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ modelProvider: 'openai-compatible' }),
+    );
   });
 
   it('passes image data URLs to the Fast model as image-capable file input', async () => {
@@ -704,6 +778,16 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(consoleError).toHaveBeenCalledWith(
         expect.stringContaining('roomoteInferenceRetryCount=0'),
       );
+      expect(mocks.captureFastTurn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          outcome: 'failure',
+          reason: 'timeout',
+          modelProvider: 'openrouter',
+          openCodeProviderRetryEventCount: 1,
+          lastOpenCodeProviderRetryAttempt: 1,
+          roomoteInferenceRetryCount: 0,
+        }),
+      );
     } finally {
       consoleError.mockRestore();
     }
@@ -745,6 +829,15 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.stringContaining(
           'nativeToolCallCount=1 completedNativeToolCallCount=0',
         ),
+      );
+      expect(mocks.captureFastTurn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          reason: 'timeout',
+          nativeToolCallCount: 1,
+          completedNativeToolCallCount: 0,
+          nativeToolKinds: [],
+          activeNativeToolKinds: ['manage_tasks'],
+        }),
       );
     } finally {
       releaseTool?.();
