@@ -324,36 +324,16 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
-  it('keeps an active Fast prompt alive beyond its inactivity timeout', async () => {
+  it('lets OpenCode own a Fast prompt lifecycle when the deadline is disabled', async () => {
     vi.useFakeTimers();
     try {
       mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
         R_MODEL: 'openrouter/openai/gpt-5.4',
       });
-      eventSubscribeMock.mockResolvedValue({
-        stream: (async function* () {
-          for (const text of ['still', 'working', 'now']) {
-            await new Promise((resolve) => setTimeout(resolve, 80));
-            yield {
-              type: 'message.part.updated' as const,
-              properties: {
-                part: {
-                  id: 'part-1',
-                  messageID: 'message-1',
-                  sessionID: 'session-1',
-                  type: 'text' as const,
-                  text,
-                },
-                delta: text,
-              },
-            };
-          }
-        })(),
-      });
       sessionPromptMock.mockImplementation(
-        (_input, options: { signal: AbortSignal }) =>
-          new Promise((resolve, reject) => {
-            const completion = setTimeout(
+        () =>
+          new Promise((resolve) => {
+            setTimeout(
               () =>
                 resolve({
                   data: {
@@ -362,15 +342,7 @@ describe('resolveOpenCodeSmallModel', () => {
                   },
                   error: undefined,
                 }),
-              300,
-            );
-            options.signal.addEventListener(
-              'abort',
-              () => {
-                clearTimeout(completion);
-                reject(options.signal.reason);
-              },
-              { once: true },
+              180_000,
             );
           }),
       );
@@ -381,7 +353,7 @@ describe('resolveOpenCodeSmallModel', () => {
         {
           surface: 'fast_agent_question_answering',
           prompt: 'Keep working.',
-          idleTimeoutMs: 100,
+          timeoutMs: null,
         },
         {},
         {
@@ -389,273 +361,7 @@ describe('resolveOpenCodeSmallModel', () => {
           tools: { '*': false, send_chat_reply: true },
         },
       );
-      await vi.advanceTimersByTimeAsync(300);
-
-      await expect(result).resolves.toBe('completed');
-      expect(sessionAbortMock).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('aborts a Fast prompt after its inactivity timeout', async () => {
-    vi.useFakeTimers();
-    try {
-      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
-        R_MODEL: 'openrouter/openai/gpt-5.4',
-      });
-      eventSubscribeMock.mockResolvedValue({ stream: [] });
-      sessionPromptMock.mockImplementation(
-        (_input, options: { signal: AbortSignal }) =>
-          new Promise((_resolve, reject) => {
-            options.signal.addEventListener(
-              'abort',
-              () => reject(options.signal.reason),
-              { once: true },
-            );
-          }),
-      );
-      const {
-        generateTrackedNonTaskTextInOpenCodeSession,
-        NonTaskOpenCodePromptTimeoutError,
-      } = await import('../non-task-provider-usage.js');
-
-      const result = generateTrackedNonTaskTextInOpenCodeSession(
-        {
-          surface: 'fast_agent_question_answering',
-          prompt: 'Keep working.',
-          idleTimeoutMs: 100,
-        },
-        {},
-        {
-          directory: '/tmp/roomote-fast-native-test',
-          tools: { '*': false, send_chat_reply: true },
-        },
-      );
-      const rejection = expect(result).rejects.toBeInstanceOf(
-        NonTaskOpenCodePromptTimeoutError,
-      );
-      await vi.advanceTimersByTimeAsync(100);
-
-      await rejection;
-      expect(sessionAbortMock).toHaveBeenCalledWith({
-        sessionID: 'session-1',
-        directory: '/tmp/roomote-fast-native-test',
-      });
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('does not count activity from another OpenCode session', async () => {
-    vi.useFakeTimers();
-    try {
-      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
-        R_MODEL: 'openrouter/openai/gpt-5.4',
-      });
-      eventSubscribeMock.mockResolvedValue({
-        stream: (async function* () {
-          await new Promise((resolve) => setTimeout(resolve, 80));
-          yield {
-            type: 'message.part.updated' as const,
-            properties: {
-              part: {
-                id: 'part-1',
-                messageID: 'message-1',
-                sessionID: 'another-session',
-                type: 'text' as const,
-                text: 'unrelated activity',
-              },
-              delta: 'unrelated activity',
-            },
-          };
-        })(),
-      });
-      sessionPromptMock.mockImplementation(
-        (_input, options: { signal: AbortSignal }) =>
-          new Promise((_resolve, reject) => {
-            options.signal.addEventListener(
-              'abort',
-              () => reject(options.signal.reason),
-              { once: true },
-            );
-          }),
-      );
-      const {
-        generateTrackedNonTaskTextInOpenCodeSession,
-        NonTaskOpenCodePromptTimeoutError,
-      } = await import('../non-task-provider-usage.js');
-
-      const result = generateTrackedNonTaskTextInOpenCodeSession(
-        {
-          surface: 'fast_agent_question_answering',
-          prompt: 'Keep working.',
-          idleTimeoutMs: 100,
-        },
-        {},
-        {
-          directory: '/tmp/roomote-fast-native-test',
-          tools: { '*': false, send_chat_reply: true },
-        },
-      );
-      const rejection = expect(result).rejects.toBeInstanceOf(
-        NonTaskOpenCodePromptTimeoutError,
-      );
-      await vi.advanceTimersByTimeAsync(100);
-
-      await rejection;
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('keeps Fast alive through a scheduled provider retry backoff', async () => {
-    vi.useFakeTimers();
-    try {
-      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
-        R_MODEL: 'openrouter/openai/gpt-5.4',
-      });
-      eventSubscribeMock.mockResolvedValue({
-        stream: (async function* () {
-          yield {
-            type: 'session.status' as const,
-            properties: {
-              sessionID: 'session-1',
-              status: {
-                type: 'retry' as const,
-                attempt: 1,
-                message: 'Provider retry scheduled',
-                next: Date.now() + 300,
-              },
-            },
-          };
-        })(),
-      });
-      sessionPromptMock.mockImplementation(
-        (_input, options: { signal: AbortSignal }) =>
-          new Promise((resolve, reject) => {
-            const completion = setTimeout(
-              () =>
-                resolve({
-                  data: {
-                    info: {},
-                    parts: [{ type: 'text', text: 'recovered' }],
-                  },
-                  error: undefined,
-                }),
-              350,
-            );
-            options.signal.addEventListener(
-              'abort',
-              () => {
-                clearTimeout(completion);
-                reject(options.signal.reason);
-              },
-              { once: true },
-            );
-          }),
-      );
-      const { generateTrackedNonTaskTextInOpenCodeSession } =
-        await import('../non-task-provider-usage.js');
-
-      const result = generateTrackedNonTaskTextInOpenCodeSession(
-        {
-          surface: 'fast_agent_question_answering',
-          prompt: 'Keep working.',
-          idleTimeoutMs: 100,
-        },
-        {},
-        {
-          directory: '/tmp/roomote-fast-native-test',
-          tools: { '*': false, send_chat_reply: true },
-        },
-      );
-      await vi.advanceTimersByTimeAsync(350);
-
-      await expect(result).resolves.toBe('recovered');
-      expect(sessionAbortMock).not.toHaveBeenCalled();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('keeps observing Fast activity while retry reporting is still pending', async () => {
-    vi.useFakeTimers();
-    try {
-      mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
-        R_MODEL: 'openrouter/openai/gpt-5.4',
-      });
-      eventSubscribeMock.mockResolvedValue({
-        stream: (async function* () {
-          yield {
-            type: 'session.status' as const,
-            properties: {
-              sessionID: 'session-1',
-              status: {
-                type: 'retry' as const,
-                attempt: 1,
-                message: 'Provider retry scheduled',
-                next: Date.now() + 20,
-              },
-            },
-          };
-          await new Promise((resolve) => setTimeout(resolve, 80));
-          yield {
-            type: 'message.part.updated' as const,
-            properties: {
-              part: {
-                id: 'part-1',
-                messageID: 'message-1',
-                sessionID: 'session-1',
-                type: 'text' as const,
-                text: 'working again',
-              },
-              delta: 'working again',
-            },
-          };
-        })(),
-      });
-      sessionPromptMock.mockImplementation(
-        (_input, options: { signal: AbortSignal }) =>
-          new Promise((resolve, reject) => {
-            const completion = setTimeout(
-              () =>
-                resolve({
-                  data: {
-                    info: {},
-                    parts: [{ type: 'text', text: 'completed' }],
-                  },
-                  error: undefined,
-                }),
-              160,
-            );
-            options.signal.addEventListener(
-              'abort',
-              () => {
-                clearTimeout(completion);
-                reject(options.signal.reason);
-              },
-              { once: true },
-            );
-          }),
-      );
-      const { generateTrackedNonTaskTextInOpenCodeSession } =
-        await import('../non-task-provider-usage.js');
-
-      const result = generateTrackedNonTaskTextInOpenCodeSession(
-        {
-          surface: 'fast_agent_question_answering',
-          prompt: 'Keep working.',
-          idleTimeoutMs: 100,
-          onProviderRetry: () => new Promise(() => undefined),
-        },
-        {},
-        {
-          directory: '/tmp/roomote-fast-native-test',
-          tools: { '*': false, send_chat_reply: true },
-        },
-      );
-      await vi.advanceTimersByTimeAsync(160);
+      await vi.advanceTimersByTimeAsync(180_000);
 
       await expect(result).resolves.toBe('completed');
       expect(sessionAbortMock).not.toHaveBeenCalled();

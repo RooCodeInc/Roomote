@@ -130,13 +130,8 @@ interface GenerateTrackedNonTaskBaseParams extends NonTaskInferenceTrackingInput
   model?: string;
   modelRole?: 'primary' | 'small';
   maxOutputTokens?: number;
-  timeoutMs?: number;
-  /**
-   * When set, timeoutMs becomes a server-start bound while the prompt itself
-   * times out only after this much session inactivity. Fast uses this so a
-   * productive model or tool turn is not aborted by an absolute deadline.
-   */
-  idleTimeoutMs?: number;
+  /** null lets OpenCode own the prompt lifecycle without a Roomote deadline. */
+  timeoutMs?: number | null;
   /**
    * OpenCode retries some provider failures internally before the prompt
    * request settles. Long-running, user-visible callers such as Fast Mode can
@@ -190,7 +185,6 @@ export type NonTaskOpenCodeSession = {
 export type NonTaskOpenCodeNativeSessionOptions = {
   directory: string;
   env?: Partial<Record<string, string>>;
-  onActivityReady?: (reportActivity: () => void) => (() => void) | undefined;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
   permission?: PermissionRuleset;
   tools: Record<string, boolean>;
@@ -499,13 +493,13 @@ async function resolveModelForInputModality(
       (candidate, index, values): candidate is string =>
         Boolean(candidate) && values.indexOf(candidate) === index,
     );
-  const timeoutMs = params.timeoutMs ?? 120_000;
+  const timeoutMs = params.timeoutMs === undefined ? 120_000 : params.timeoutMs;
   const server = await leaseOpenCodeSdkServer({
     env: runtime.resolvedModelRuntimeEnv,
-    startTimeoutMs: Math.min(
-      timeoutMs,
-      DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS,
-    ),
+    startTimeoutMs:
+      timeoutMs === null
+        ? DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS
+        : Math.min(timeoutMs, DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS),
   });
 
   try {
@@ -562,7 +556,6 @@ async function runNonTaskSdkPrompt(
     directory?: string;
     ephemeral?: boolean;
     env?: Partial<Record<string, string>>;
-    onActivityReady?: (reportActivity: () => void) => (() => void) | undefined;
     onSessionReady?: (sessionID: string) => Promise<void> | void;
     permission?: PermissionRuleset;
     promptErrorLabel?: string;
@@ -575,8 +568,7 @@ async function runNonTaskSdkPrompt(
   parts: Array<{ type?: unknown; text?: unknown }>;
 }> {
   const { model, resolvedModelRuntimeEnv } = runtime;
-  const timeoutMs = params.timeoutMs ?? 120_000;
-  const promptTimeoutMs = params.idleTimeoutMs ?? timeoutMs;
+  const timeoutMs = params.timeoutMs === undefined ? 120_000 : params.timeoutMs;
   const promptErrorLabel =
     options.promptErrorLabel ??
     `OpenCode structured prompt failed (model ${model})`;
@@ -585,35 +577,22 @@ async function runNonTaskSdkPrompt(
   const server = await leaseOpenCodeSdkServer({
     env: { ...resolvedModelRuntimeEnv, ...options.env },
     ephemeral: options.ephemeral,
-    startTimeoutMs: Math.min(
-      timeoutMs,
-      DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS,
-    ),
+    startTimeoutMs:
+      timeoutMs === null
+        ? DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS
+        : Math.min(timeoutMs, DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS),
     useConfiguredServer: options.useConfiguredServer,
   });
   const abortController = new AbortController();
-  let promptSettled = false;
-  let timeout: ReturnType<typeof setTimeout>;
-  const abortForTimeout = () => {
-    abortController.abort(
-      new NonTaskOpenCodePromptTimeoutError(promptTimeoutMs),
-    );
-  };
-  const resetIdleTimeout = (delayMs = promptTimeoutMs) => {
-    if (
-      params.idleTimeoutMs === undefined ||
-      promptSettled ||
-      abortController.signal.aborted
-    ) {
-      return;
-    }
-
-    clearTimeout(timeout);
-    timeout = setTimeout(abortForTimeout, delayMs);
-  };
-  timeout = setTimeout(abortForTimeout, promptTimeoutMs);
+  const timeout =
+    timeoutMs === null
+      ? undefined
+      : setTimeout(() => {
+          abortController.abort(
+            new NonTaskOpenCodePromptTimeoutError(timeoutMs),
+          );
+        }, timeoutMs);
   const externalSignal = options.signal;
-  let removeActivityReporter: (() => void) | undefined;
   const abortFromExternalSignal = () => {
     abortController.abort(
       externalSignal?.reason ?? new Error('The prompt was aborted.'),
@@ -656,7 +635,6 @@ async function runNonTaskSdkPrompt(
       }
     }
     await options.onSessionReady?.(sessionId);
-    removeActivityReporter = options.onActivityReady?.(resetIdleTimeout);
 
     const eventAbortController = new AbortController();
     const abortEventMonitor = () => {
@@ -675,7 +653,7 @@ async function runNonTaskSdkPrompt(
     });
     let eventMonitor: Promise<void> | undefined;
 
-    if (params.onProviderRetry || params.idleTimeoutMs !== undefined) {
+    if (params.onProviderRetry) {
       try {
         const subscription = await client.event.subscribe(
           { directory: sessionDirectory },
@@ -684,58 +662,27 @@ async function runNonTaskSdkPrompt(
         eventMonitor = (async () => {
           try {
             for await (const event of subscription.stream) {
-              const eventSessionId =
-                event.type === 'message.part.updated'
-                  ? event.properties.part.sessionID
-                  : event.type === 'message.updated'
-                    ? event.properties.info.sessionID
-                    : event.type === 'session.status' ||
-                        event.type === 'session.error'
-                      ? event.properties.sessionID
-                      : undefined;
-
-              if (
-                eventSessionId === sessionId &&
-                (event.type === 'message.part.updated' ||
-                  event.type === 'message.updated' ||
-                  event.type === 'session.status')
-              ) {
-                const nextRetryAtMs =
-                  event.type === 'session.status' &&
-                  event.properties.status.type === 'retry' &&
-                  Number.isFinite(event.properties.status.next)
-                    ? event.properties.status.next
-                    : undefined;
-                resetIdleTimeout(
-                  nextRetryAtMs === undefined
-                    ? undefined
-                    : Math.max(
-                        promptTimeoutMs,
-                        nextRetryAtMs - Date.now() + promptTimeoutMs,
-                      ),
-                );
-              }
-
               if (
                 event.type === 'session.status' &&
                 event.properties.sessionID === sessionId &&
                 event.properties.status.type === 'retry'
               ) {
-                void Promise.resolve(
-                  params.onProviderRetry?.({
+                try {
+                  await params.onProviderRetry?.({
                     attempt: event.properties.status.attempt,
                     message: event.properties.status.message,
                     ...(Number.isFinite(event.properties.status.next)
                       ? { nextRetryAtMs: event.properties.status.next }
                       : {}),
-                  }),
-                ).catch((error) => {
-                  // Retry reporting is auxiliary. A slow or failed chat post
-                  // must not block observation of later provider activity.
+                  });
+                } catch (error) {
+                  // Retry reporting is auxiliary. A transient Slack or Discord
+                  // post failure must not stop observation of the provider's
+                  // eventual session error.
                   console.warn(
                     `[NonTaskProviderUsage] OpenCode provider retry reporter failed: ${formatOpenCodeSdkError(error)}`,
                   );
-                });
+                }
               } else if (
                 event.type === 'session.error' &&
                 event.properties.sessionID === sessionId
@@ -782,7 +729,7 @@ async function runNonTaskSdkPrompt(
         },
         { signal: abortController.signal },
       );
-      const promptResult = eventMonitor
+      const promptResult = params.onProviderRetry
         ? await Promise.race([promptRequest, sessionError])
         : await promptRequest;
 
@@ -819,10 +766,8 @@ async function runNonTaskSdkPrompt(
       void eventMonitor?.catch(() => undefined);
     }
   } finally {
-    promptSettled = true;
-    removeActivityReporter?.();
     externalSignal?.removeEventListener('abort', abortFromExternalSignal);
-    clearTimeout(timeout);
+    if (timeout) clearTimeout(timeout);
     server.release();
   }
 }
@@ -911,7 +856,6 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
     {
       directory: options.directory,
       env: options.env,
-      onActivityReady: options.onActivityReady,
       onSessionReady: options.onSessionReady,
       permission: options.permission,
       promptErrorLabel: 'OpenCode native Fast prompt failed',
