@@ -111,6 +111,7 @@ type FastAgentParentEvent =
       taskId: string;
       runId: number;
       taskUrl: string;
+      untrustedTaskGeneratedContext?: string;
       pullRequest: FastAgentPullRequestContext;
     };
 
