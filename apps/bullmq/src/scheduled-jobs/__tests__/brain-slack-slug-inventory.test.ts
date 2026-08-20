@@ -10,8 +10,8 @@ const store = vi.hoisted(() => ({
   items: new Map<string, FakeItem>(),
   seeded: [] as Array<{ itemId: string; slug: string; lastSeenAt: Date }>,
   /** Each entry is one list_pages window answered in order. */
-  listings: [] as Array<Array<{ slug: string }>>,
-  listCalls: [] as Array<{ limit: number; offset: number }>,
+  listings: [] as Array<Array<{ slug: string; updated_at?: string }>>,
+  listCalls: [] as Array<Record<string, unknown>>,
   connection: { baseUrl: 'http://brain.test', token: 'read' } as {
     baseUrl: string;
     token: string;
@@ -24,18 +24,20 @@ vi.mock('@roomote/sdk/server', () => ({
     async (
       _connection: unknown,
       _tool: string,
-      args: { limit: number; offset: number },
+      args: Record<string, unknown>,
     ) => {
       store.listCalls.push(args);
       return [store.listings.shift() ?? []];
     },
   ),
   extractBrainCorpusPages: vi.fn((payloads: unknown[]) =>
-    (payloads[0] as Array<{ slug: string }>).map((page) => ({
-      slug: page.slug,
-      title: null,
-      updatedAt: null,
-    })),
+    (payloads[0] as Array<{ slug: string; updated_at?: string }>).map(
+      (page) => ({
+        slug: page.slug,
+        title: null,
+        updatedAt: page.updated_at ? new Date(page.updated_at) : null,
+      }),
+    ),
   ),
 }));
 
@@ -247,14 +249,28 @@ describe('reconcileSlackDayPages', () => {
 });
 
 describe('runSlackDayPageCensus', () => {
-  function listingOf(count: number, baseMinutes: number) {
-    const base = Date.parse('2026-08-01T00:00:00Z') + baseMinutes * 60_000;
+  const minuteIso = (minute: number) =>
+    new Date(
+      Date.parse('2026-08-01T00:00:00Z') + minute * 60_000,
+    ).toISOString();
+
+  /** Rows in ascending updated_at order, one per minute from `fromMinute`. */
+  function listingOf(count: number, fromMinute: number) {
     return Array.from({ length: count }, (_, index) => ({
       slug: daySlug(
-        new Date(base + index * 60_000).toISOString(),
-        new Date(base + index * 60_000 + 30_000).toISOString(),
+        minuteIso(fromMinute + index),
+        minuteIso(fromMinute + index),
         '2026-08-01',
       ),
+      updated_at: minuteIso(fromMinute + index),
+    }));
+  }
+
+  /** Rows all sharing ONE updated_at, with distinct slugs. */
+  function clusterOf(count: number, fromMinute: number, stampedAt: string) {
+    return listingOf(count, fromMinute).map((row) => ({
+      ...row,
+      updated_at: stampedAt,
     }));
   }
 
@@ -277,40 +293,128 @@ describe('runSlackDayPageCensus', () => {
     expect(await isSlackDayPageCensusComplete()).toBe(true);
   });
 
-  it('pages with offset and persists the cursor between windows', async () => {
-    store.listings = [listingOf(100, 0), listingOf(37, 200)];
+  it('walks by updated_at keyset, not by listing offset', async () => {
+    // The first full window advances the boundary to its last FULLY seen
+    // timestamp (minute 98) and re-reads the trailing row from there, so a
+    // page written between windows can shift positions without any row being
+    // skipped.
+    store.listings = [listingOf(100, 0), listingOf(38, 99)];
 
     await runSlackDayPageCensus();
 
-    expect(store.listCalls.map((call) => call.offset)).toEqual([0, 100]);
-    expect(store.seeded).toHaveLength(137);
+    expect(store.listCalls[0]).toMatchObject({ sort: 'updated_asc' });
+    expect(store.listCalls[0]!.updated_after).toBeUndefined();
+    expect(store.listCalls[0]!.offset).toBeUndefined();
+    expect(store.listCalls[1]).toMatchObject({
+      sort: 'updated_asc',
+      updated_after: minuteIso(98),
+    });
+    // Minutes 0..136, with the boundary row read twice and seeded once.
+    expect(store.seeded).toHaveLength(138);
+    expect(store.items.size).toBe(137);
     expect(store.syncState.get(CENSUS_STATE_ID)?.backfillCursor).toBeNull();
     expect(await isSlackDayPageCensusComplete()).toBe(true);
   });
 
-  it('resumes from the persisted cursor after an interrupted run', async () => {
+  it('resumes from the persisted keyset cursor after an interrupted run', async () => {
+    store.syncState.set(CENSUS_STATE_ID, {
+      backfillCursor: JSON.stringify({
+        after: minuteIso(500),
+        offset: 0,
+        lastSlug: null,
+      }),
+      backfillCompletedAt: null,
+    });
+    store.listings = [listingOf(10, 501)];
+
+    await runSlackDayPageCensus();
+
+    expect(store.listCalls[0]).toMatchObject({
+      updated_after: minuteIso(500),
+    });
+    expect(await isSlackDayPageCensusComplete()).toBe(true);
+  });
+
+  it('restarts a cursor from before the keyset walk existed', async () => {
+    // A raw listing offset is not stable under concurrent writes, so a
+    // stored pre-keyset cursor is not trusted as a position.
     store.syncState.set(CENSUS_STATE_ID, {
       backfillCursor: JSON.stringify({ offset: 200 }),
       backfillCompletedAt: null,
     });
-    store.listings = [listingOf(10, 400)];
+    store.listings = [listingOf(10, 0)];
 
     await runSlackDayPageCensus();
 
-    expect(store.listCalls.map((call) => call.offset)).toEqual([200]);
+    expect(store.listCalls[0]!.updated_after).toBeUndefined();
+    expect(store.listCalls[0]!.offset).toBeUndefined();
     expect(await isSlackDayPageCensusComplete()).toBe(true);
   });
 
-  it('completes with a partial inventory when the listing ignores offset', async () => {
+  it('pages through a tie cluster wider than one window with an overlap row', async () => {
+    // Bulk imports stamp identical updated_at across a transaction; strict
+    // updated_after alone can never cross such a cluster. The walk holds the
+    // boundary, pages by offset, and re-reads the last seen row so a shifted
+    // cluster is detected rather than skipped over.
+    const stamp = minuteIso(700);
+    const cluster = clusterOf(120, 0, stamp);
+    store.listings = [cluster.slice(0, 100), cluster.slice(99)];
+
+    await runSlackDayPageCensus();
+
+    expect(store.listCalls[1]).toMatchObject({ offset: 99 });
+    expect(store.listCalls[1]!.updated_after).toBeUndefined();
+    expect(store.items.size).toBe(120);
+    expect(await isSlackDayPageCensusComplete()).toBe(true);
+  });
+
+  it('restarts a tie cluster whose overlap row moved', async () => {
+    const stamp = minuteIso(700);
+    const cluster = clusterOf(30, 0, stamp);
+    store.syncState.set(CENSUS_STATE_ID, {
+      backfillCursor: JSON.stringify({
+        after: null,
+        offset: 100,
+        lastSlug: 'slack/T1/C1/2026-08-01/re-stamped-away',
+      }),
+      backfillCompletedAt: null,
+    });
+    // The row at the overlap position is not the one the cursor remembers:
+    // a cluster member was re-stamped and everything shifted.
+    store.listings = [cluster.slice(5, 25), cluster];
+
+    await runSlackDayPageCensus();
+
+    expect(store.listCalls[0]).toMatchObject({ offset: 99 });
+    // Restarted from the cluster's beginning; nothing was skipped.
+    expect(store.listCalls[1]!.offset).toBeUndefined();
+    expect(store.items.size).toBe(30);
+    expect(await isSlackDayPageCensusComplete()).toBe(true);
+  });
+
+  it('completes with a partial inventory when the listing ignores the cursor', async () => {
     const repeated = listingOf(100, 600);
     store.listings = [repeated, repeated];
 
     await runSlackDayPageCensus();
 
-    // Two identical full windows: seeding is idempotent and the census
-    // completes rather than walking the same window forever.
+    // Two identical full windows advance nothing: seeding is idempotent and
+    // the census completes rather than walking the same window forever.
     expect(store.listCalls).toHaveLength(2);
     expect(store.items.size).toBe(100);
+    expect(await isSlackDayPageCensusComplete()).toBe(true);
+  });
+
+  it('completes with a partial inventory when rows carry no timestamps', async () => {
+    store.listings = [
+      Array.from({ length: 100 }, (_, index) => ({
+        slug: `notion/page${index}`,
+      })),
+    ];
+
+    await runSlackDayPageCensus();
+
+    expect(store.listCalls).toHaveLength(1);
     expect(await isSlackDayPageCensusComplete()).toBe(true);
   });
 

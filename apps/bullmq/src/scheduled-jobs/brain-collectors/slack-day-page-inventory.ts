@@ -203,19 +203,68 @@ const CENSUS_LISTING_WINDOW = 100;
 const CENSUS_MAX_WINDOWS_PER_RUN = 200;
 const CENSUS_REQUEST_TIMEOUT_MS = 30_000;
 
-function parseCensusOffset(raw: string | null): number {
+/**
+ * Durable census position. A raw listing offset would not survive concurrent
+ * writes: `list_pages` defaults to recency order, so pages written between
+ * windows shift every position and a resumed offset silently skips (or
+ * re-reads) rows — skips being the fatal case, because a skipped legacy slug
+ * is missing from the inventory forever and the census then reports itself
+ * complete. Instead the census walks `sort: 'updated_asc'` with an
+ * `updated_after` keyset, gbrain's own documented idiom for exhaustive
+ * pagination. Under ascending updated_at a row can only ever move LATER (its
+ * updated_at is monotonically non-decreasing), so anything that shifts out
+ * from under the cursor reappears ahead of it and deletions shift nothing:
+ * churn produces duplicate reads, never skips, and duplicate seeding is a
+ * no-op.
+ *
+ * `updated_after` is a strict > filter, so a cluster of pages sharing one
+ * updated_at (bulk imports stamp identical now() across a transaction) that
+ * is wider than one window cannot be crossed by timestamp alone. Inside such
+ * a cluster the walk holds `after` fixed and pages by `offset`, verifying an
+ * overlap row on each continuation so a cluster member re-stamped mid-walk
+ * (which shifts the remaining rows) restarts the cluster instead of skipping
+ * one.
+ */
+type SlackCensusCursor = {
+  /** Every page with updated_at at or before this boundary is inventoried. */
+  after: string | null;
+  /** Position inside one same-updated_at cluster wider than a window. */
+  offset: number;
+  /** Last slug seen in cluster mode; the continuation's overlap check. */
+  lastSlug: string | null;
+};
+
+const CENSUS_START: SlackCensusCursor = {
+  after: null,
+  offset: 0,
+  lastSlug: null,
+};
+
+function parseCensusCursor(raw: string | null): SlackCensusCursor {
   if (!raw) {
-    return 0;
+    return CENSUS_START;
   }
 
   try {
-    const parsed = JSON.parse(raw) as { offset?: unknown };
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
 
-    return typeof parsed.offset === 'number' && parsed.offset >= 0
-      ? Math.floor(parsed.offset)
-      : 0;
+    // Anything but this shape (including the pre-keyset `{offset}` cursor,
+    // whose position is not trustworthy) restarts the walk; re-seeding is
+    // idempotent.
+    if (typeof parsed.after !== 'string' && parsed.after !== null) {
+      return CENSUS_START;
+    }
+
+    return {
+      after: (parsed.after as string | null) ?? null,
+      offset:
+        typeof parsed.offset === 'number' && parsed.offset > 0
+          ? Math.floor(parsed.offset)
+          : 0,
+      lastSlug: typeof parsed.lastSlug === 'string' ? parsed.lastSlug : null,
+    };
   } catch {
-    return 0;
+    return CENSUS_START;
   }
 }
 
@@ -233,9 +282,10 @@ export async function isSlackDayPageCensusComplete(): Promise<boolean> {
 
 /**
  * Walk gbrain's full page listing once and seed the inventory with every
- * Slack day page that predates item tracking. Paged with `offset` under a
- * durable cursor, so a large corpus can span ticks; typically it completes in
- * the first one. Seeding never overwrites rows the live collector already
+ * Slack day page that predates item tracking. The walk is a keyset scan in
+ * updated_at order (see SlackCensusCursor for why a raw offset would skip
+ * rows under concurrent writes), durable across ticks; typically it completes
+ * in the first one. Seeding never overwrites rows the live collector already
  * wrote. Corpus recreation wipes brain_sync_state, which re-arms this census
  * against the fresh (empty) corpus automatically.
  */
@@ -257,18 +307,42 @@ export async function runSlackDayPageCensus(): Promise<void> {
     return;
   }
 
-  let offset = parseCensusOffset(state?.backfillCursor ?? null);
-  let previousWindowKey: string | null = null;
+  let cursor = parseCensusCursor(state?.backfillCursor ?? null);
+  let complete = false;
+  let partialReason: string | null = null;
 
   for (let windows = 0; windows < CENSUS_MAX_WINDOWS_PER_RUN; windows++) {
+    // Continuing inside a tie cluster re-reads the last seen row, so a
+    // cluster that shifted between windows (a member re-stamped and moved
+    // later) is detected instead of silently skipping its successor.
+    const overlapping = cursor.offset > 0 && cursor.lastSlug !== null;
+    const requestOffset = overlapping ? cursor.offset - 1 : cursor.offset;
     const payloads = await callBrainTool(
       connection,
       'list_pages',
-      { limit: CENSUS_LISTING_WINDOW, offset },
+      {
+        limit: CENSUS_LISTING_WINDOW,
+        sort: 'updated_asc',
+        ...(cursor.after ? { updated_after: cursor.after } : {}),
+        ...(requestOffset > 0 ? { offset: requestOffset } : {}),
+      },
       { timeoutMs: CENSUS_REQUEST_TIMEOUT_MS },
     );
-    const listed = extractBrainCorpusPages(payloads);
-    const windowKey = listed.map((page) => page.slug).join('\n');
+    let listed = extractBrainCorpusPages(payloads);
+    const windowFull = listed.length >= CENSUS_LISTING_WINDOW;
+
+    if (overlapping) {
+      if (listed[0]?.slug === cursor.lastSlug) {
+        listed = listed.slice(1);
+      } else {
+        cursor = { after: cursor.after, offset: 0, lastSlug: null };
+        await upsertBrainSyncState(db, SLACK_DAY_PAGE_CENSUS_STATE_ID, {
+          backfillCursor: JSON.stringify(cursor),
+        });
+        continue;
+      }
+    }
+
     const slackPrefix = brainNamespacePrefix('slack');
     const dayPages = listed.filter(
       (page) =>
@@ -287,31 +361,80 @@ export async function runSlackDayPageCensus(): Promise<void> {
       })),
     );
 
-    if (windows > 0 && windowKey === previousWindowKey) {
-      // The server ignored `offset` and answered the first window again.
-      // Complete rather than spin: retirement only ever touches slugs that
-      // ARE in the inventory, so an incomplete census costs healing coverage
-      // for the unlisted pages, never safety.
-      console.warn(
-        `${LOG_PREFIX} slack day-page census: listing ignored offset; completing with a partial inventory`,
+    if (!windowFull) {
+      complete = true;
+      break;
+    }
+
+    // Timestamps drive the keyset. A server that answers without them (or
+    // ignores the ascending sort, leaving nothing older than the window's
+    // last row) cannot be walked exhaustively; completing with what was
+    // seeded costs healing coverage for the unlisted pages, never safety —
+    // retirement only ever touches slugs that ARE in the inventory.
+    const lastAt = listed.at(-1)?.updatedAt ?? null;
+    const earlier = lastAt
+      ? listed.filter((page) => page.updatedAt && page.updatedAt < lastAt)
+      : [];
+    const someEarlier = Boolean(
+      lastAt &&
+      listed.some(
+        (page) =>
+          !page.updatedAt || page.updatedAt.getTime() !== lastAt.getTime(),
+      ),
+    );
+
+    let next: SlackCensusCursor;
+
+    if (!lastAt || (someEarlier && earlier.length === 0)) {
+      partialReason = 'listing is not walkable in updated_at order';
+      complete = true;
+      break;
+    } else if (someEarlier) {
+      // Advance the boundary to the last timestamp known to be fully seen
+      // and drop the window's trailing cluster: in ascending order every row
+      // older than the boundary sat inside this window. The trailing cluster
+      // is re-read (and idempotently re-seeded) from the new boundary.
+      const boundary = earlier.reduce((max, page) =>
+        page.updatedAt! > max.updatedAt! ? page : max,
       );
+      next = {
+        after: boundary.updatedAt!.toISOString(),
+        offset: 0,
+        lastSlug: null,
+      };
+    } else {
+      // The whole window shares one updated_at: a tie cluster wider than a
+      // window. Hold the boundary and page inside the cluster by offset.
+      next = {
+        after: cursor.after,
+        offset: cursor.offset + listed.length,
+        lastSlug: listed.at(-1)!.slug,
+      };
+    }
+
+    if (next.after === cursor.after && next.offset === cursor.offset) {
+      // No progress means the server ignored the keyset filter; walking
+      // further would loop on the same window forever.
+      partialReason = 'listing ignored the pagination cursor';
+      complete = true;
       break;
     }
 
-    if (listed.length < CENSUS_LISTING_WINDOW) {
-      break;
-    }
-
-    previousWindowKey = windowKey;
-    offset += listed.length;
+    cursor = next;
     await upsertBrainSyncState(db, SLACK_DAY_PAGE_CENSUS_STATE_ID, {
-      backfillCursor: JSON.stringify({ offset }),
+      backfillCursor: JSON.stringify(cursor),
     });
+  }
 
-    if (windows === CENSUS_MAX_WINDOWS_PER_RUN - 1) {
-      // Out of window budget; the cursor above resumes next tick.
-      return;
-    }
+  if (!complete) {
+    // Out of window budget; the persisted cursor resumes next tick.
+    return;
+  }
+
+  if (partialReason) {
+    console.warn(
+      `${LOG_PREFIX} slack day-page census: ${partialReason}; completing with a partial inventory`,
+    );
   }
 
   await upsertBrainSyncState(db, SLACK_DAY_PAGE_CENSUS_STATE_ID, {
