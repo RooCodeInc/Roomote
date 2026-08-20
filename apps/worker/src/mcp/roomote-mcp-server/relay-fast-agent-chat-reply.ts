@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 
-import { sdk } from '@roomote/sdk/client';
+import { createClient } from '@roomote/sdk/client';
 
+import { buildApiHeaders } from './api-client.js';
 import {
   errorResultWithArtifacts,
   normalizeOptionalSlackText,
@@ -70,7 +71,11 @@ export async function handleRelayFastAgentChatReply(
       return contentValidation;
     }
 
-    const result = await sdk.taskRuns.relayFastAgentChildChatReply({
+    const client = createClient({
+      url: artifactConfig.platformApiUrl,
+      headers: () => buildApiHeaders(artifactConfig),
+    });
+    const result = await client.taskRuns.relayFastAgentChildChatReply.mutate({
       runId: input.runId,
       taskId: input.taskId,
       deliverySignature,

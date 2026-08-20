@@ -1,7 +1,7 @@
-const mocks = vi.hoisted(() => ({ relay: vi.fn() }));
+const mocks = vi.hoisted(() => ({ createClient: vi.fn(), relay: vi.fn() }));
 
 vi.mock('@roomote/sdk/client', () => ({
-  sdk: { taskRuns: { relayFastAgentChildChatReply: mocks.relay } },
+  createClient: mocks.createClient,
 }));
 
 import { handleRelayFastAgentChatReply } from '../relay-fast-agent-chat-reply';
@@ -10,6 +10,11 @@ describe('handleRelayFastAgentChatReply', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.relay.mockResolvedValue({ relayed: true });
+    mocks.createClient.mockReturnValue({
+      taskRuns: {
+        relayFastAgentChildChatReply: { mutate: mocks.relay },
+      },
+    });
   });
 
   it('relays lifecycle text without posting to a communication provider', async () => {
@@ -23,9 +28,22 @@ describe('handleRelayFastAgentChatReply', () => {
       {
         token: 'token',
         platformApiUrl: 'https://api.roomote.example',
+        authBypassHeaderName: 'x-roomote-bypass',
+        authBypassHeaderValue: 'bypass-token',
       },
     );
 
+    expect(mocks.createClient).toHaveBeenCalledWith({
+      url: 'https://api.roomote.example',
+      headers: expect.any(Function),
+    });
+    const clientOptions = mocks.createClient.mock.calls[0]?.[0] as {
+      headers: () => Record<string, string>;
+    };
+    expect(clientOptions.headers()).toEqual({
+      Authorization: 'Bearer token',
+      'x-roomote-bypass': 'bypass-token',
+    });
     expect(mocks.relay).toHaveBeenCalledWith({
       runId: 42,
       taskId: 'task-1',
