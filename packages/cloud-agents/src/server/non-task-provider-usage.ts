@@ -184,6 +184,7 @@ export type NonTaskOpenCodeSession = {
 export type NonTaskOpenCodeNativeSessionOptions = {
   directory: string;
   env?: Partial<Record<string, string>>;
+  onModelResolved?: (model: string) => void;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
   permission?: PermissionRuleset;
   tools: Record<string, boolean>;
@@ -825,6 +826,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
     params.modelRole,
   );
   const model = await resolveModelForInputModality(params, runtime);
+  options.onModelResolved?.(model);
   const data = await runNonTaskSdkPrompt(
     params,
     { ...runtime, model },

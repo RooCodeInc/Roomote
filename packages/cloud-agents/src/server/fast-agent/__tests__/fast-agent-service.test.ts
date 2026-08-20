@@ -218,6 +218,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
+        options.onModelResolved?.('openrouter/openai/gpt-5.4');
         await options.onSessionReady('opencode-session-1');
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',
@@ -261,6 +262,35 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         expect.objectContaining({ role: 'assistant' }),
       ],
     });
+  });
+
+  it('logs successful turns with model, duration, and native tool diagnostics', async () => {
+    const consoleInfo = vi
+      .spyOn(console, 'info')
+      .mockImplementation(() => undefined);
+
+    try {
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      expect(consoleInfo).toHaveBeenCalledWith(
+        expect.stringContaining(
+          '[Fast Agent] Turn finished. surface="slack" workspaceId="team-1" conversationId="100.1" messageId="100.2" canonicalConversationId="conversation-1" turnSource="human" modelRole="primary" resolvedModel="openrouter/openai/gpt-5.4" outcome="success"',
+        ),
+      );
+      expect(consoleInfo).toHaveBeenCalledWith(
+        expect.stringContaining('serviceDurationMs='),
+      );
+      expect(consoleInfo).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'nativeToolCallCount=1 completedNativeToolCallCount=1',
+        ),
+      );
+      expect(consoleInfo).toHaveBeenCalledWith(
+        expect.stringContaining('nativeToolStats={"send_chat_reply":'),
+      );
+    } finally {
+      consoleInfo.mockRestore();
+    }
   });
 
   it('passes image data URLs to the Fast model as image-capable file input', async () => {
@@ -643,7 +673,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       'Timed out waiting for OpenCode output after 120000ms.',
     );
     timeout.name = 'NonTaskOpenCodePromptTimeoutError';
-    mocks.generateText.mockImplementation(async (params) => {
+    mocks.generateText.mockImplementation(async (params, _session, options) => {
+      options.onModelResolved?.('openrouter/openai/gpt-5.4');
       await params.onProviderRetry?.({
         attempt: 1,
         message: '429 Too Many Requests',
@@ -661,10 +692,63 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
       expect(consoleError).toHaveBeenCalledWith(
         expect.stringContaining(
-          '[Fast Agent] Failed to answer question. surface="slack" workspaceId="team-1" conversationId="100.1" messageId="100.2" canonicalConversationId="conversation-1" modelRole="primary" reason="timeout" openCodeProviderRetryEventCount=1 roomoteInferenceRetryCount=0',
+          '[Fast Agent] Turn finished. surface="slack" workspaceId="team-1" conversationId="100.1" messageId="100.2" canonicalConversationId="conversation-1" turnSource="human" modelRole="primary" resolvedModel="openrouter/openai/gpt-5.4" outcome="failure" reason="timeout"',
+        ),
+      );
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining('openCodeProviderRetryEventCount=1'),
+      );
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining('lastOpenCodeProviderRetryAttempt=1'),
+      );
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining('roomoteInferenceRetryCount=0'),
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('identifies a native tool still running when the prompt times out', async () => {
+    const timeout = new Error(
+      'Timed out waiting for OpenCode output after 120000ms.',
+    );
+    timeout.name = 'NonTaskOpenCodePromptTimeoutError';
+    let releaseTool: (() => void) | undefined;
+    const toolResult = new Promise<Record<string, unknown>>((resolve) => {
+      releaseTool = () => resolve({ success: true });
+    });
+    mocks.inspectTasks.mockReturnValueOnce(toolResult);
+    let pendingTool: Promise<unknown> | undefined;
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        pendingTool = invokeTool(nativeToolNames.manageTasks, {
+          action: 'get_summary',
+          taskId: 'task-completed',
+        });
+        await Promise.resolve();
+        throw timeout;
+      },
+    );
+    const consoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
+
+    try {
+      await answerFastAgentQuestion({ ...baseParams, adapter: callbacks() });
+
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining('activeNativeToolCounts={"manage_tasks":1}'),
+      );
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'nativeToolCallCount=1 completedNativeToolCallCount=0',
         ),
       );
     } finally {
+      releaseTool?.();
+      await pendingTool;
       consoleError.mockRestore();
     }
   });

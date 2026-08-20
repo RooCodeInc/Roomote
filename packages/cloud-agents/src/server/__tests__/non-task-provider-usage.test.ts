@@ -279,6 +279,7 @@ describe('resolveOpenCodeSmallModel', () => {
       NON_TASK_INFERENCE_SURFACES,
     } = await import('../non-task-provider-usage.js');
     const onSessionReady = vi.fn();
+    const onModelResolved = vi.fn();
     const session: { id?: string } = {};
 
     await expect(
@@ -299,12 +300,14 @@ describe('resolveOpenCodeSmallModel', () => {
             '*': false,
             send_chat_reply: true,
           },
+          onModelResolved,
           onSessionReady,
         },
       ),
     ).resolves.toBe('native tool turn complete');
 
     expect(session.id).toBe('session-1');
+    expect(onModelResolved).toHaveBeenCalledWith('openrouter/openai/gpt-5.4');
     expect(onSessionReady).toHaveBeenCalledWith('session-1');
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expect(spawnMock.mock.calls[0]?.[2]?.env).toMatchObject({
