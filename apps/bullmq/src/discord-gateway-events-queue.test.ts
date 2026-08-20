@@ -150,7 +150,30 @@ describe('processDiscordGatewayEventJob', () => {
 
     await expect(
       processDiscordGatewayEventJob({ data: event } as Job<typeof event>),
-    ).rejects.toThrow('reported failure in its HTTP 200 acknowledgement');
+    ).rejects.toThrow('did not acknowledge HTTP 200 with ok: true');
+  });
+
+  it.each([
+    ['an empty object', {}],
+    ['an unrelated JSON body', { status: 'ok' }],
+    ['a non-boolean ok field', { ok: 'true' }],
+  ])(
+    'throws when a misrouted 2xx answers with %s',
+    async (_label, body: unknown) => {
+      fetchMock.mockResolvedValue(jsonResponse(body));
+
+      await expect(
+        processDiscordGatewayEventJob({ data: event } as Job<typeof event>),
+      ).rejects.toThrow('did not acknowledge HTTP 200 with ok: true');
+    },
+  );
+
+  it('throws when a 409 duplicate answers without ok: true', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ duplicate: true }, 409));
+
+    await expect(
+      processDiscordGatewayEventJob({ data: event } as Job<typeof event>),
+    ).rejects.toThrow('did not acknowledge HTTP 409 with ok: true');
   });
 
   it('fails fast when the worker API URL is missing', async () => {

@@ -24,9 +24,13 @@ function processUrl(): string {
 }
 
 // A misrouted request can still answer 2xx: an edge that does not recognize the
-// API prefix falls through to the web app, whose not-found page is HTML with a
-// 200 status. Requiring the API's JSON acknowledgement keeps that from
-// completing the job as if the event had been handled.
+// API prefix falls through to a catch-all, and the web app's not-found page is
+// HTML with a 200 status. Other topologies front the deployment with proxies
+// that answer JSON, so a JSON content type alone does not prove the request
+// reached the API. Every success and duplicate path of `/events/process`
+// answers `{ ok: true, ... }`, so require exactly that: a handler return that
+// ever stops matching fails loudly through the queue's retries, which is the
+// safe direction to fail when the alternative is completing events silently.
 async function assertProcessingAcknowledged(response: Response): Promise<void> {
   const contentType = response.headers.get('content-type') ?? '';
   if (!contentType.toLowerCase().includes('application/json')) {
@@ -42,9 +46,9 @@ async function assertProcessingAcknowledged(response: Response): Promise<void> {
     );
   }
 
-  if ((acknowledgement as { ok?: unknown }).ok === false) {
+  if ((acknowledgement as { ok?: unknown }).ok !== true) {
     throw new Error(
-      `Discord event processing reported failure in its HTTP ${response.status} acknowledgement`,
+      `Discord event processing did not acknowledge HTTP ${response.status} with ok: true`,
     );
   }
 }
