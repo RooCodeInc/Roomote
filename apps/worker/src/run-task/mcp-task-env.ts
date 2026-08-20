@@ -150,5 +150,16 @@ export function buildMcpTaskEnv(input: {
     }
   }
 
+  if (input.runtimeEnv.ROOMOTE_FAST_AGENT_CHILD === 'true') {
+    // Fast children cannot post to the inherited chat surface directly, but
+    // their private parent relay still uses the normal lifecycle hooks.
+    mcpTaskEnv.ROOMOTE_SLACK_REPLY_SATISFACTION_STATE_FILE ??= [
+      input.runtimeEnv.HOME ?? '/tmp',
+      '.config',
+      'opencode',
+      'roomote-slack-reply-satisfaction.json',
+    ].join('/');
+  }
+
   return mcpTaskEnv;
 }

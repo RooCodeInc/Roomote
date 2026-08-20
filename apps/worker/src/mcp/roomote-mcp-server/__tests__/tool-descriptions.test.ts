@@ -695,7 +695,7 @@ describe('roomote MCP tool descriptions', () => {
     expect(latestField.description).toContain('message snowflake');
   });
 
-  it('removes every chat tool from Fast-delegated children while retaining artifacts', async () => {
+  it('gives Fast-delegated children only the private parent relay tool', async () => {
     const { registeredTools } = await importRoomoteMcpServer({
       ROOMOTE_FAST_AGENT_CHILD: 'true',
       ROOMOTE_SLACK_CHANNEL: 'C123',
@@ -704,17 +704,20 @@ describe('roomote MCP tool descriptions', () => {
     });
     const names = registeredTools.map(({ name }) => name);
 
+    expect(names).toContain('send_chat_reply');
     for (const name of [
       'list_chat_channels',
       'get_chat_channel_messages',
       'get_chat_message_context',
-      'send_chat_reply',
       'send_chat_reaction_emoji',
       'post_to_channel',
       'add_reaction_to_slack_message',
     ]) {
       expect(names).not.toContain(name);
     }
+    expect(
+      getRegisteredTool(registeredTools, 'send_chat_reply').config.description,
+    ).toContain('Fast-internal');
     expect(names).toContain('manage_artifacts');
   });
 

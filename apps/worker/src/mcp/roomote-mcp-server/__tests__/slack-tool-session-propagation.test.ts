@@ -10,6 +10,7 @@ const mockState = vi.hoisted(() => ({
   registeredTools: [] as RegisteredTool[],
   connect: vi.fn(async () => undefined),
   handleSendChatReply: vi.fn(),
+  handleRelayFastAgentChatReply: vi.fn(),
   handleSendChatReactionEmoji: vi.fn(),
   handleAddReactionToSlackMessage: vi.fn(),
   recordChatReplySatisfaction: vi.fn(),
@@ -45,6 +46,10 @@ vi.mock('../send-chat-reply.js', () => ({
   handleSendChatReply: mockState.handleSendChatReply,
 }));
 
+vi.mock('../relay-fast-agent-chat-reply.js', () => ({
+  handleRelayFastAgentChatReply: mockState.handleRelayFastAgentChatReply,
+}));
+
 vi.mock('../send-chat-reaction-emoji.js', () => ({
   handleSendChatReactionEmoji: mockState.handleSendChatReactionEmoji,
 }));
@@ -74,6 +79,7 @@ describe('roomote MCP Slack tool session propagation', () => {
     mockState.registeredTools.length = 0;
     mockState.connect.mockClear();
     mockState.handleSendChatReply.mockReset();
+    mockState.handleRelayFastAgentChatReply.mockReset();
     mockState.handleSendChatReactionEmoji.mockReset();
     mockState.handleAddReactionToSlackMessage.mockReset();
     mockState.recordChatReplySatisfaction.mockReset();
@@ -118,6 +124,43 @@ describe('roomote MCP Slack tool session propagation', () => {
       tool: 'send_chat_reply',
       replyPurpose: 'closeout',
       sessionId: 'thread-child',
+    });
+  });
+
+  it('records a successful Fast parent relay as lifecycle satisfaction', async () => {
+    vi.resetModules();
+    mockState.registeredTools.length = 0;
+    mockState.handleRelayFastAgentChatReply.mockResolvedValue({
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            relayed: true,
+            relayId: 'relay-1',
+          }),
+        },
+      ],
+    });
+    process.env = {
+      ...originalEnv,
+      ROOMOTE_CLOUD_TOKEN: 'cloud-token',
+      ROOMOTE_TASK_ID: 'task-1',
+      ROOMOTE_TASK_RUN_ID: '42',
+      ROOMOTE_FAST_AGENT_CHILD: 'true',
+    };
+    await import('../index.js');
+
+    await getRegisteredTool('send_chat_reply').handler!(
+      { message: 'still working', purpose: 'progress' },
+      { sessionId: 'fast-child-session' },
+    );
+
+    expect(mockState.recordChatReplySatisfaction).toHaveBeenCalledWith({
+      messageTs: 'relay-1',
+      tool: 'send_chat_reply',
+      replyPurpose: 'progress',
+      sessionId: 'fast-child-session',
     });
   });
 

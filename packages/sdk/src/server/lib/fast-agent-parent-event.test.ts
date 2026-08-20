@@ -234,6 +234,55 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
   });
 
+  it('keeps child lifecycle text private until the Fast parent composes a reply', async () => {
+    const childEvent = {
+      type: 'child_message' as const,
+      taskId: 'task-1',
+      runId: 42,
+      messageId: '22222222-2222-4222-8222-222222222222',
+      purpose: 'progress' as const,
+      message: 'The child is running targeted tests.',
+    };
+
+    await deliverFastAgentParentEvent({ parent, event: childEvent });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: expect.stringContaining(
+          '"message":"The child is running targeted tests."',
+        ),
+        turnSource: 'platform_event',
+      }),
+    );
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'The proof is ready.',
+        client_msg_id: expect.any(String),
+      }),
+    );
+    expect(mocks.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ text: childEvent.message }),
+    );
+  });
+
+  it('uses a stable delivery key when the same child update is retried', async () => {
+    const childEvent = {
+      type: 'child_message' as const,
+      taskId: 'task-1',
+      runId: 42,
+      messageId: '22222222-2222-4222-8222-222222222222',
+      purpose: 'progress' as const,
+      message: 'The child is running targeted tests.',
+    };
+
+    await deliverFastAgentParentEvent({ parent, event: childEvent });
+    await deliverFastAgentParentEvent({ parent, event: childEvent });
+
+    expect(mocks.postMessage.mock.calls[0]?.[0]?.client_msg_id).toBe(
+      mocks.postMessage.mock.calls[1]?.[0]?.client_msg_id,
+    );
+  });
+
   it('does not start a model turn when the shared chat lock is unavailable', async () => {
     mocks.acquireTurnLock.mockResolvedValueOnce(null);
 
