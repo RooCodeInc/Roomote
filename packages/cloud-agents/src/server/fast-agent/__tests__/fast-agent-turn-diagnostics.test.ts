@@ -43,8 +43,10 @@ describe('FastAgentTurnDiagnostics', () => {
     currentTime = 1_010;
     diagnostics.markInferenceQueued();
     currentTime = 1_040;
+    diagnostics.markInferenceSetupStarted();
+    currentTime = 1_060;
     diagnostics.markInferenceStarted();
-    currentTime = 1_055;
+    currentTime = 1_075;
     diagnostics.recordOpenCodeProviderRetry(2);
     currentTime = 1_100;
     diagnostics.markInferenceFinished();
@@ -56,7 +58,8 @@ describe('FastAgentTurnDiagnostics', () => {
     expect(logMessage).toContain('serviceDurationMs=110');
     expect(logMessage).toContain('preInferenceDurationMs=10');
     expect(logMessage).toContain('conversationQueueDurationMs=30');
-    expect(logMessage).toContain('inferenceDurationMs=60');
+    expect(logMessage).toContain('inferenceSetupDurationMs=20');
+    expect(logMessage).toContain('inferenceDurationMs=40');
     expect(logMessage).toContain('postInferenceDurationMs=10');
     expect(logMessage).toContain('firstOpenCodeProviderRetryElapsedMs=15');
     expect(logMessage).toContain('lastOpenCodeProviderRetryElapsedMs=15');

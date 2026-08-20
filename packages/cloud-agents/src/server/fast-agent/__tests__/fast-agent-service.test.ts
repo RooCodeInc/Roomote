@@ -224,6 +224,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       async (_params, _session, options) => {
         options.onModelResolved?.('openrouter/openai/gpt-5.4');
         await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',
           message: 'It coordinates incoming requests.',
@@ -335,6 +336,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
       expect(consoleInfo).toHaveBeenCalledWith(
         expect.stringContaining('conversationQueueDurationMs=50'),
+      );
+      expect(consoleInfo).toHaveBeenCalledWith(
+        expect.stringContaining('inferenceSetupDurationMs=0'),
       );
       expect(consoleInfo).toHaveBeenCalledWith(
         expect.stringContaining('inferenceDurationMs=0'),
@@ -759,6 +763,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     timeout.name = 'NonTaskOpenCodePromptTimeoutError';
     mocks.generateText.mockImplementation(async (params, _session, options) => {
       options.onModelResolved?.('openrouter/openai/gpt-5.4');
+      options.onPromptStarted?.();
       await params.onProviderRetry?.({
         attempt: 1,
         message: '429 Too Many Requests',
@@ -813,6 +818,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
         pendingTool = invokeTool(nativeToolNames.manageTasks, {
           action: 'get_summary',
           taskId: 'task-completed',
@@ -914,11 +920,12 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
   it('reports OpenCode internal provider retries while the prompt is pending', async () => {
     mocks.generateText.mockImplementationOnce(
       async (params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        options.onPromptStarted?.();
         await params.onProviderRetry?.({
           attempt: 1,
           message: '429 Too Many Requests',
         });
-        await options.onSessionReady('opencode-session-1');
         await invokeTool(nativeToolNames.sendChatReply, {
           purpose: 'closeout',
           message: 'It coordinates incoming requests.',

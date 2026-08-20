@@ -280,6 +280,7 @@ describe('resolveOpenCodeSmallModel', () => {
     } = await import('../non-task-provider-usage.js');
     const onSessionReady = vi.fn();
     const onModelResolved = vi.fn();
+    const onPromptStarted = vi.fn();
     const session: { id?: string } = {};
 
     await expect(
@@ -301,6 +302,7 @@ describe('resolveOpenCodeSmallModel', () => {
             send_chat_reply: true,
           },
           onModelResolved,
+          onPromptStarted,
           onSessionReady,
         },
       ),
@@ -308,7 +310,17 @@ describe('resolveOpenCodeSmallModel', () => {
 
     expect(session.id).toBe('session-1');
     expect(onModelResolved).toHaveBeenCalledWith('openrouter/openai/gpt-5.4');
+    expect(onPromptStarted).toHaveBeenCalledOnce();
     expect(onSessionReady).toHaveBeenCalledWith('session-1');
+    expect(onModelResolved.mock.invocationCallOrder[0]!).toBeLessThan(
+      onPromptStarted.mock.invocationCallOrder[0]!,
+    );
+    expect(onSessionReady.mock.invocationCallOrder[0]!).toBeLessThan(
+      onPromptStarted.mock.invocationCallOrder[0]!,
+    );
+    expect(onPromptStarted.mock.invocationCallOrder[0]!).toBeLessThan(
+      sessionPromptMock.mock.invocationCallOrder[0]!,
+    );
     expect(spawnMock).toHaveBeenCalledTimes(1);
     expect(spawnMock.mock.calls[0]?.[2]?.env).toMatchObject({
       ROOMOTE_FAST_TOOL_BRIDGE_URL: 'http://127.0.0.1:4321/tool',

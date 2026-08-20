@@ -62,6 +62,7 @@ export class FastAgentTurnDiagnostics {
   private visibleReplyCount = 0;
   private resolvedModel: string | undefined;
   private inferenceQueuedAt: number | undefined;
+  private inferenceSetupStartedAt: number | undefined;
   private inferenceStartedAt: number | undefined;
   private inferenceFinishedAt: number | undefined;
   private openCodeProviderRetryEventCount = 0;
@@ -108,10 +109,17 @@ export class FastAgentTurnDiagnostics {
     this.inferenceQueuedAt ??= this.now();
   }
 
+  markInferenceSetupStarted(): void {
+    const setupStartedAt = this.now();
+    this.inferenceQueuedAt ??= setupStartedAt;
+    this.inferenceSetupStartedAt ??= setupStartedAt;
+  }
+
   markInferenceStarted(): void {
-    const startedAt = this.now();
-    this.inferenceQueuedAt ??= startedAt;
-    this.inferenceStartedAt ??= startedAt;
+    const inferenceStartedAt = this.now();
+    this.inferenceQueuedAt ??= inferenceStartedAt;
+    this.inferenceSetupStartedAt ??= inferenceStartedAt;
+    this.inferenceStartedAt ??= inferenceStartedAt;
   }
 
   markInferenceFinished(): void {
@@ -219,8 +227,13 @@ export class FastAgentTurnDiagnostics {
       preInferenceDurationMs: preInferenceFinishedAt - this.turnStartedAt,
       conversationQueueDurationMs:
         this.inferenceQueuedAt !== undefined &&
+        this.inferenceSetupStartedAt !== undefined
+          ? this.inferenceSetupStartedAt - this.inferenceQueuedAt
+          : undefined,
+      inferenceSetupDurationMs:
+        this.inferenceSetupStartedAt !== undefined &&
         this.inferenceStartedAt !== undefined
-          ? this.inferenceStartedAt - this.inferenceQueuedAt
+          ? this.inferenceStartedAt - this.inferenceSetupStartedAt
           : undefined,
       inferenceDurationMs:
         this.inferenceStartedAt !== undefined &&

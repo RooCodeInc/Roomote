@@ -931,7 +931,7 @@ export async function answerFastAgentQuestion({
       prompt: serializedTurnPrompt,
       bootstrapPrompt: serializedBootstrapPrompt,
       execute: async (openCodeSession, selectedPrompt) => {
-        diagnostics.markInferenceStarted();
+        diagnostics.markInferenceSetupStarted();
         let unbind: (() => void) | undefined;
         let promptForAttempt = selectedPrompt;
         try {
@@ -962,6 +962,9 @@ export async function answerFastAgentQuestion({
                   tools: FAST_AGENT_NATIVE_TOOL_FILTER,
                   onModelResolved: (model) => {
                     diagnostics.recordModelResolved(model);
+                  },
+                  onPromptStarted: () => {
+                    diagnostics.markInferenceStarted();
                   },
                   onSessionReady: (openCodeSessionID) => {
                     unbind?.();

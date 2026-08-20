@@ -186,6 +186,7 @@ export type NonTaskOpenCodeNativeSessionOptions = {
   directory: string;
   env?: Partial<Record<string, string>>;
   onModelResolved?: (model: string) => void;
+  onPromptStarted?: () => void;
   onSessionReady?: (sessionID: string) => Promise<void> | void;
   permission?: PermissionRuleset;
   signal?: AbortSignal;
@@ -558,6 +559,7 @@ async function runNonTaskSdkPrompt(
     directory?: string;
     ephemeral?: boolean;
     env?: Partial<Record<string, string>>;
+    onPromptStarted?: () => void;
     onSessionReady?: (sessionID: string) => Promise<void> | void;
     permission?: PermissionRuleset;
     promptErrorLabel?: string;
@@ -721,6 +723,7 @@ async function runNonTaskSdkPrompt(
     }
 
     try {
+      options.onPromptStarted?.();
       const promptRequest = client.session.prompt(
         {
           sessionID: sessionId,
@@ -859,6 +862,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
     {
       directory: options.directory,
       env: options.env,
+      onPromptStarted: options.onPromptStarted,
       onSessionReady: options.onSessionReady,
       permission: options.permission,
       promptErrorLabel: 'OpenCode native Fast prompt failed',
