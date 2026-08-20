@@ -254,6 +254,7 @@ export {
 } from './lib/task-runs/pr-review-notification-delivery';
 export * from './lib/task-runs/pr-review-action';
 export * from './lib/task-runs/pr-review-follow-up-dispatch';
+export * from './lib/task-runs/notify-fast-agent-parent-on-pr-feedback';
 
 export {
   formatPrStatusChangeTaskHistoryText,
