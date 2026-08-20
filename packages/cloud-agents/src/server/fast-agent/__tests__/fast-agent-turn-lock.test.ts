@@ -1,6 +1,21 @@
-import { buildFastAgentTurnLockKey } from '../fast-agent-turn-lock';
+const { acquireRedisLockMock } = vi.hoisted(() => ({
+  acquireRedisLockMock: vi.fn(),
+}));
+
+vi.mock('@roomote/redis', () => ({
+  acquireRedisLock: acquireRedisLockMock,
+}));
+
+import {
+  acquireFastAgentTurnLock,
+  buildFastAgentTurnLockKey,
+} from '../fast-agent-turn-lock';
 
 describe('Fast conversation turn locking', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('serializes one stable conversation across reply destination changes', () => {
     const original = buildFastAgentTurnLockKey({
       surface: 'discord',
@@ -43,5 +58,42 @@ describe('Fast conversation turn locking', () => {
         }),
       ]).size,
     ).toBe(3);
+  });
+
+  it('renews an acquired conversation lock until the turn releases it', async () => {
+    vi.useFakeTimers();
+    try {
+      const releaseRedisLock = Object.assign(
+        vi.fn().mockResolvedValue(undefined),
+        {
+          renew: vi.fn().mockResolvedValue(true),
+          renewDetailed: vi.fn().mockResolvedValue('renewed'),
+        },
+      );
+      acquireRedisLockMock.mockResolvedValue(releaseRedisLock);
+
+      const releaseTurnLock = await acquireFastAgentTurnLock({
+        conversation: {
+          surface: 'slack',
+          workspaceId: 'workspace-1',
+          conversationId: 'conversation-1',
+          replyTarget: {
+            channelId: 'channel-1',
+            threadId: 'conversation-1',
+          },
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(200_000);
+      expect(releaseRedisLock.renewDetailed).toHaveBeenCalledOnce();
+
+      await releaseTurnLock?.();
+      await vi.advanceTimersByTimeAsync(200_000);
+
+      expect(releaseRedisLock.renewDetailed).toHaveBeenCalledOnce();
+      expect(releaseRedisLock).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

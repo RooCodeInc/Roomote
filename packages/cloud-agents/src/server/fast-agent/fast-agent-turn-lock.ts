@@ -3,6 +3,8 @@ import type { FastAgentConversation } from './fast-agent-conversation';
 
 const FAST_AGENT_TURN_LOCK_PREFIX = 'fast-agent:conversation-lock:';
 const FAST_AGENT_TURN_LOCK_TTL_SECONDS = 600;
+const FAST_AGENT_TURN_LOCK_RENEW_MS =
+  (FAST_AGENT_TURN_LOCK_TTL_SECONDS * 1_000) / 3;
 const FAST_AGENT_TURN_LOCK_RETRY_MS = 500;
 const FAST_AGENT_TURN_LOCK_MAX_ATTEMPTS =
   Math.ceil(
@@ -36,7 +38,31 @@ export async function acquireFastAgentTurnLock(params: {
       ttlSeconds: FAST_AGENT_TURN_LOCK_TTL_SECONDS,
     });
     if (release) {
-      return release;
+      let released = false;
+      let renewalPending = false;
+      const renewalTimer = setInterval(() => {
+        if (renewalPending) return;
+        renewalPending = true;
+        void release
+          .renewDetailed()
+          .then((result) => {
+            if (!released && result === 'lost') {
+              console.error(
+                `[Fast Agent] Conversation lock ownership was lost for ${key}.`,
+              );
+            }
+          })
+          .finally(() => {
+            renewalPending = false;
+          });
+      }, FAST_AGENT_TURN_LOCK_RENEW_MS);
+      renewalTimer.unref();
+
+      return async () => {
+        released = true;
+        clearInterval(renewalTimer);
+        await release();
+      };
     }
 
     if (attempt + 1 < maxAttempts) {
