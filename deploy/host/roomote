@@ -679,7 +679,10 @@ restore_image_identities() {
     [ -n "$digest" ] || die "backup has no restorable digest for image $ref ($image_id)"
     log "Restoring image identity $digest"
     docker pull "$digest"
-    docker tag "$digest" "$ref"
+    case "$ref" in
+      *@*) ;;
+      *) docker tag "$digest" "$ref" ;;
+    esac
   done <"$identities_file"
 }
 
