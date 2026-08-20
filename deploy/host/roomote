@@ -218,10 +218,10 @@ postgres_command() {
 
   if [ -n "$input_file" ]; then
     docker run --rm --network "$(compose_network_name)" --env-file "$env_file" -i \
-      pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adfd27b5707128f60956f62a793c3c9326ea8cfaf0eab7adccb5d700b21 sh -c "$*" <"$input_file"
+      pgvector/pgvector:0.8.1-pg17-trixie@sha256:137f044b0efe3d57f39b972b9b53641b1f2045b99d879e298bbf514a25787dcf sh -c "$*" <"$input_file"
   else
     docker run --rm --network "$(compose_network_name)" --env-file "$env_file" \
-      pgvector/pgvector:0.8.1-pg17@sha256:3e8b3adfd27b5707128f60956f62a793c3c9326ea8cfaf0eab7adccb5d700b21 sh -c "$*"
+      pgvector/pgvector:0.8.1-pg17-trixie@sha256:137f044b0efe3d57f39b972b9b53641b1f2045b99d879e298bbf514a25787dcf sh -c "$*"
   fi
 }
 
@@ -679,7 +679,10 @@ restore_image_identities() {
     [ -n "$digest" ] || die "backup has no restorable digest for image $ref ($image_id)"
     log "Restoring image identity $digest"
     docker pull "$digest"
-    docker tag "$digest" "$ref"
+    case "$ref" in
+      *@*) ;;
+      *) docker tag "$digest" "$ref" ;;
+    esac
   done <"$identities_file"
 }
 
