@@ -19,6 +19,7 @@ import {
   notionApiRequestJson,
 } from '@roomote/sdk/server/notion-api';
 import {
+  BRAIN_COLLECTOR_IDS,
   brainNamespacePrefix,
   type McpConnectionNotionConfig,
 } from '@roomote/types';
@@ -56,7 +57,7 @@ const LOG_PREFIX = '[brainCollectors]';
  * the initial backfill and incremental scans.
  */
 
-const NOTION_PAGES_COLLECTOR_ID = 'notion-pages';
+const NOTION_PAGES_COLLECTOR_ID = BRAIN_COLLECTOR_IDS.notionPages;
 const NOTION_INCREMENTAL_STATE_ID = `${NOTION_PAGES_COLLECTOR_ID}:incremental`;
 const NOTION_USERS_COLLECTOR_ID = 'notion-users';
 const NOTION_USERS_REFRESH_STATE_ID = `${NOTION_USERS_COLLECTOR_ID}:refresh`;

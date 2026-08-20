@@ -28,7 +28,9 @@ import {
   brainNamespaceLabel,
   resolveBrainNamespaceId,
   isMcpConnectionGbrainConfig,
+  parseBrainBackfillCompletedCount,
   resolveBrainSourceIdForCollector,
+  resolveBrainSourceIdForCurrentCollector,
   type BrainNamespaceBucketId,
   type BrainSourceId,
   type BrainSourceRequirement,
@@ -85,10 +87,10 @@ export type BrainSourceSummary = {
   status: BrainSourceStatus;
   /** Newest checkpoint across the source's partitions. */
   lastSyncedAt: Date | null;
-  /** Sync-state rows: one per workspace or channel for fanned-out sources. */
-  partitions: number;
-  /** Partitions whose one-time deep history sweep has finished. */
-  partitionsBackfilled: number;
+  /** Live partitions (channels, repositories, workspaces) being read. */
+  streams: number;
+  /** Deep-replay progress while `backfilling`, or null when unknowable. */
+  backfillProgress: { read: number; total: number } | null;
   /** Upstream objects this source is tracking (pages it owns and refreshes). */
   trackedItems: number;
 };
@@ -255,7 +257,8 @@ function summarizeCorpus(
   };
 }
 
-function summarizeSources(input: {
+/** Exported for unit tests; the command below is its only runtime caller. */
+export function summarizeSources(input: {
   syncStates: Awaited<ReturnType<typeof listBrainSyncStates>>;
   itemCounts: Awaited<ReturnType<typeof countBrainCollectorItemsByCollector>>;
   requirements: Record<BrainSourceRequirement, boolean>;
@@ -268,7 +271,11 @@ function summarizeSources(input: {
   >();
 
   for (const state of input.syncStates) {
-    const sourceId = resolveBrainSourceIdForCollector(state.collectorId);
+    // Current-version rows only: rows a version bump superseded, and
+    // auxiliary rows sharing a source's leading segment (inventories,
+    // censuses), would otherwise inflate stream counts and report their own
+    // completion as the source's.
+    const sourceId = resolveBrainSourceIdForCurrentCollector(state.collectorId);
 
     if (!sourceId) {
       continue;
@@ -306,12 +313,50 @@ function summarizeSources(input: {
       // than the backfill checkpoint its sync-state row carries.
       source.id === 'task-memories' ? input.taskMemoriesLastProcessedAt : null,
     );
-    const partitionsBackfilled = states.filter(
-      (state) => state.backfillCompletedAt,
-    ).length;
-    const backfilling = states.some(
-      (state) => state.backfillCursor && !state.backfillCompletedAt,
+    const parents = states.filter((state) =>
+      source.collectorIds.includes(state.collectorId),
     );
+    const children = states.filter(
+      (state) => !source.collectorIds.includes(state.collectorId),
+    );
+    // A deep replay in progress is a parent row holding only a cursor.
+    // A row that also carries a watermark is a live stream whose cursor is a
+    // rolling checkpoint or mode-state (pull-request facts, member sweeps,
+    // the Notion incremental scan): steady ingestion, not history reading.
+    const backfilling = states.some(
+      (state) =>
+        state.backfillCursor && !state.backfillCompletedAt && !state.watermark,
+    );
+    const streams = children.length > 0 ? children.length : states.length;
+    const backfillProgress = ((): { read: number; total: number } | null => {
+      if (!backfilling) {
+        return null;
+      }
+
+      for (const parent of parents) {
+        if (!parent.backfillCursor || parent.backfillCompletedAt) {
+          continue;
+        }
+
+        // Fan-out walks record their completed partitions in the cursor;
+        // counting rows with a completion timestamp instead would show 0
+        // forever, because partition rows never carry one.
+        const read = parseBrainBackfillCompletedCount(parent.backfillCursor);
+
+        if (read !== null && children.length > 0) {
+          return {
+            read: Math.min(read, children.length),
+            total: children.length,
+          };
+        }
+      }
+
+      const read = states.filter((state) => state.backfillCompletedAt).length;
+
+      return streams > 0
+        ? { read: Math.min(read, streams), total: streams }
+        : null;
+    })();
     const active =
       source.id === 'task-memories'
         ? input.taskMemoriesActive || states.length > 0
@@ -330,8 +375,8 @@ function summarizeSources(input: {
             ? ('ingesting' as const)
             : ('idle' as const),
       lastSyncedAt,
-      partitions: states.length,
-      partitionsBackfilled,
+      streams,
+      backfillProgress,
       trackedItems: itemsBySource.get(source.id) ?? 0,
     };
   });
