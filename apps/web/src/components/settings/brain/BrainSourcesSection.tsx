@@ -18,7 +18,9 @@ function SourceRow({ source }: { source: BrainSourceSummary }) {
     <li className="space-y-2 py-3 first:pt-0 last:pb-0">
       <div className="flex items-center gap-2">
         <span className="font-medium">{source.label}</span>
-        <Badge variant="outline">{source.namespaceLabel}</Badge>
+        {source.namespaceLabel !== source.label ? (
+          <Badge variant="outline">{source.namespaceLabel}</Badge>
+        ) : null}
         <Badge variant={status.variant} className="ml-auto">
           {status.label}
         </Badge>

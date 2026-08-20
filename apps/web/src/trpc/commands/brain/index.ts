@@ -6,8 +6,9 @@ import {
   deploymentMcpEnablements,
   eq,
   getBrainMemoryEventSummary,
-  isBrainProviderConfigured,
   isNull,
+  resetBrainProviderConfiguredCache,
+  resolveBrainAvailability,
   resolveModelProviderEnvValue,
   listBrainSyncStates,
   mcpConnections,
@@ -19,6 +20,8 @@ import {
   hasBrainGithubSources,
   readBrainCorpusSample,
   readBrainPage,
+  readBrainStats,
+  resetBrainInferenceProviderCache,
   resolveBrainInferenceProvider,
   type BrainModelSummary,
 } from '@roomote/sdk/server';
@@ -38,6 +41,7 @@ import {
 import type { UserAuthSuccess } from '@/types';
 import { Env } from '@/lib/server/env';
 
+import { upsertDeploymentEnvironmentVariables } from '../environment-variables';
 import { assertAdmin } from '../setup/shared';
 
 /**
@@ -105,6 +109,12 @@ export type BrainCorpusSummary = {
   /** Pages in the sample, which is the whole corpus unless `truncated`. */
   sampledPages: number;
   truncated: boolean;
+  /**
+   * The corpus's exact page count from gbrain's admin census, or null when
+   * the admin API did not answer. The sample above stays authoritative for
+   * composition; this keeps the total honest past the sample bound.
+   */
+  totalPages: number | null;
   namespaces: BrainNamespaceSummary[];
   /**
    * Pages written per UTC day over the trailing window, oldest first,
@@ -136,6 +146,21 @@ export type BrainSettings = {
   keySource: 'brain' | 'deployment' | null;
   /** The models the Brain runs, or null when no provider resolves. */
   models: BrainModelSummary | null;
+  /**
+   * A managed Brain is provisioned but awaits its provider key; the page
+   * renders the key form prominently in this state.
+   */
+  needsKey: boolean;
+  /**
+   * Recall health. `semantic`/`keyword-only` are measured from gbrain's own
+   * embedding counts; `unknown` means the admin census did not answer and
+   * the UI falls back to inferring from provider presence.
+   */
+  recall: {
+    mode: 'semantic' | 'keyword-only' | 'unknown';
+    embeddedCount: number | null;
+    chunkCount: number | null;
+  };
   corpus: BrainCorpusSummary;
   sources: BrainSourceSummary[];
   taskMemories: {
@@ -252,6 +277,7 @@ function summarizeCorpus(
       reachable: false,
       sampledPages: 0,
       truncated: false,
+      totalPages: null,
       namespaces: [],
       activityByDay: [],
       recentPages: [],
@@ -293,6 +319,7 @@ function summarizeCorpus(
     reachable: true,
     sampledPages: snapshot.pages.length,
     truncated: snapshot.truncated,
+    totalPages: null,
     namespaces,
     activityByDay: buildActivityByDay(snapshot.pages),
     recentPages,
@@ -411,7 +438,10 @@ export async function getBrainSettingsCommand(
   // Activation is the explicit brain-specific provider key, in Settings or
   // the environment. The gateway token and R_GBRAIN_URL exist as plumbing on
   // deployments that never opted in, so neither can mean "the Brain is on".
-  const configured = await isBrainProviderConfigured();
+  // A fleet-provisioned Brain awaiting its key is a distinct, visible state.
+  const availability = await resolveBrainAvailability();
+  const configured = availability === 'configured';
+  const present = availability !== 'unconfigured';
   const url = Env.R_GBRAIN_URL ?? null;
 
   // The rollups only describe a Brain that exists; on an unconfigured
@@ -420,6 +450,7 @@ export async function getBrainSettingsCommand(
   const [
     inference,
     corpusSnapshot,
+    stats,
     syncStates,
     itemCounts,
     memories,
@@ -427,13 +458,28 @@ export async function getBrainSettingsCommand(
   ] = await Promise.all([
     resolveBrainInferenceProvider(),
     configured ? readBrainCorpusSample() : null,
-    configured ? listBrainSyncStates(db) : [],
-    configured ? countBrainCollectorItemsByCollector(db) : [],
-    configured ? getBrainMemoryEventSummary(db) : EMPTY_MEMORY_SUMMARY,
+    present ? readBrainStats() : null,
+    present ? listBrainSyncStates(db) : [],
+    present ? countBrainCollectorItemsByCollector(db) : [],
+    present ? getBrainMemoryEventSummary(db) : EMPTY_MEMORY_SUMMARY,
     resolveSourceRequirements(),
   ]);
 
   const corpus = summarizeCorpus(corpusSnapshot);
+
+  corpus.totalPages = stats?.pageCount ?? null;
+
+  // Measured, not inferred: gbrain's own census says whether chunks are
+  // actually embedded. Chunks with zero embeddings is the keyword-only
+  // silent failure this page exists to catch.
+  const recall: BrainSettings['recall'] =
+    stats && (stats.chunkCount ?? 0) > 0
+      ? {
+          mode: (stats.embeddedCount ?? 0) > 0 ? 'semantic' : 'keyword-only',
+          embeddedCount: stats.embeddedCount,
+          chunkCount: stats.chunkCount,
+        }
+      : { mode: 'unknown', embeddedCount: null, chunkCount: null };
 
   // Read only after (and only when) the corpus failed to answer: it decides
   // between "credentials not provisioned yet" and "service down", and the
@@ -461,11 +507,19 @@ export async function getBrainSettingsCommand(
     status: BrainStatus;
     statusDetail: string | null;
   } => {
-    if (!configured) {
+    if (availability === 'unconfigured') {
       return {
         status: 'not_configured',
         statusDetail:
           'This deployment has no Brain. Set a Brain provider key to give agents shared memory.',
+      };
+    }
+
+    if (availability === 'managed_needs_key') {
+      return {
+        status: 'incomplete',
+        statusDetail:
+          'A Brain is provisioned for this deployment. Add a provider key below to turn it on.',
       };
     }
 
@@ -511,6 +565,8 @@ export async function getBrainSettingsCommand(
     inferenceProvider: inference?.providerId ?? null,
     keySource,
     models: inference ? describeBrainModels(inference.providerId) : null,
+    needsKey: availability === 'managed_needs_key',
+    recall,
     corpus,
     sources: summarizeSources({
       syncStates,
@@ -647,4 +703,33 @@ export async function getBrainPageCommand(
       : page.content,
     contentTruncated,
   };
+}
+
+/**
+ * Store the Brain's provider key in the persisted deployment environment
+ * store — the one place that survives fleet reprovisions, unlike a
+ * Railway-side variable the Cloud manager reconciles. Setting it IS the
+ * Brain opt-in: both activation caches are dropped so the nav entry, MCP
+ * delivery, and ingestion react on the next request instead of a TTL later.
+ */
+export async function setBrainProviderKeyCommand(
+  auth: UserAuthSuccess,
+  input: { provider: 'openrouter' | 'openai'; key: string },
+): Promise<{ success: true }> {
+  assertAdmin(auth);
+
+  const name =
+    input.provider === 'openrouter'
+      ? 'R_BRAIN_OPENROUTER_API_KEY'
+      : 'R_BRAIN_OPENAI_API_KEY';
+
+  await upsertDeploymentEnvironmentVariables(db, {
+    userId: auth.userId,
+    values: [{ name, value: input.key.trim() }],
+  });
+
+  resetBrainProviderConfiguredCache();
+  resetBrainInferenceProviderCache();
+
+  return { success: true };
 }

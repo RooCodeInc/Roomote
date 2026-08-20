@@ -264,6 +264,33 @@ export async function isBrainProviderConfigured(): Promise<boolean> {
   return value;
 }
 
+/**
+ * - `configured`: an operator set a brain-specific provider key; the Brain is
+ *   fully on.
+ * - `managed_needs_key`: the fleet manager provisioned a Brain for this
+ *   deployment (it stamps ROOMOTE_MANAGED_GBRAIN_DIGEST on the app services)
+ *   but no provider key has been supplied yet. The Brain exists and should be
+ *   visible in Settings so an admin can add the key there, but nothing may
+ *   ingest or serve recall until the key arrives.
+ * - `unconfigured`: this deployment has no Brain.
+ */
+export type BrainAvailability =
+  | 'configured'
+  | 'managed_needs_key'
+  | 'unconfigured';
+
+export async function resolveBrainAvailability(): Promise<BrainAvailability> {
+  if (await isBrainProviderConfigured()) {
+    return 'configured';
+  }
+
+  // Read from the process environment directly: the digest is fleet plumbing
+  // stamped by the Cloud manager, not part of the app's own env contract.
+  return process.env.ROOMOTE_MANAGED_GBRAIN_DIGEST?.trim()
+    ? 'managed_needs_key'
+    : 'unconfigured';
+}
+
 type ModelRuntimeEnvOptions = {
   runtimeEnv?: Partial<Record<string, string | undefined>>;
   deploymentEnvVars?: Record<string, string>;

@@ -47,6 +47,9 @@ vi.mock('@/trpc/client', () => ({
       getPage: {
         queryOptions: () => ({ queryKey: ['brain', 'getPage'] }),
       },
+      setProviderKey: {
+        mutationOptions: () => ({ mutationKind: 'setProviderKey' }),
+      },
       backfillTaskMemories: {
         mutationOptions: () => ({ mutationKind: 'backfill' }),
       },
@@ -68,6 +71,8 @@ function buildSettings(
     url: 'http://gbrain:8080',
     inferenceProvider: 'openrouter',
     keySource: 'brain',
+    needsKey: false,
+    recall: { mode: 'semantic', embeddedCount: 771, chunkCount: 771 },
     models: {
       synthesisModel: 'openai/gpt-5.6-luna',
       synthesisSource: 'default',
@@ -78,6 +83,7 @@ function buildSettings(
       reachable: true,
       sampledPages: 30,
       truncated: false,
+      totalPages: null,
       namespaces: [
         { id: 'slack', label: 'Slack', pages: 20 },
         { id: 'tasks', label: 'Task memories', pages: 10 },
@@ -228,6 +234,7 @@ describe('BrainSettings', () => {
         reachable: false,
         sampledPages: 0,
         truncated: false,
+        totalPages: null,
         namespaces: [],
         activityByDay: [],
         recentPages: [],
@@ -239,6 +246,57 @@ describe('BrainSettings', () => {
     expect(screen.getByText('Unreachable')).toBeInTheDocument();
     expect(screen.getByText('Corpus unavailable')).toBeInTheDocument();
     expect(screen.queryByText('Nothing collected yet')).not.toBeInTheDocument();
+  });
+
+  it('prefers the measured census: exact totals and measured recall', () => {
+    const settings = buildSettings();
+    state.query.data = {
+      ...settings,
+      recall: { mode: 'keyword-only', embeddedCount: 0, chunkCount: 771 },
+      corpus: { ...settings.corpus, totalPages: 625, truncated: true },
+    };
+
+    render(<BrainSettings />);
+
+    // The census total replaces the sampled "N+" reading on the tile.
+    expect(screen.getByText('625')).toBeInTheDocument();
+    // Measured keyword-only wins over the provider-presence inference, which
+    // would have said semantic here (an OpenRouter provider resolves).
+    expect(screen.getByText('Keyword only')).toBeInTheDocument();
+    expect(screen.queryByText('Semantic + keyword')).not.toBeInTheDocument();
+  });
+
+  it('offers the provider-key form on a managed Brain awaiting its key', () => {
+    const settings = buildSettings();
+    state.query.data = {
+      ...settings,
+      status: 'incomplete',
+      statusDetail:
+        'A Brain is provisioned for this deployment. Add a provider key below to turn it on.',
+      needsKey: true,
+      inferenceProvider: null,
+      keySource: null,
+      models: null,
+    };
+
+    render(<BrainSettings />);
+
+    expect(screen.getByText('Needs attention')).toBeInTheDocument();
+    expect(screen.getByLabelText('Brain provider key')).toBeInTheDocument();
+    expect(screen.getByText('Save key')).toBeInTheDocument();
+    // The read-only model rows wait until the Brain actually runs.
+    expect(screen.queryByText('Synthesis model')).not.toBeInTheDocument();
+  });
+
+  it('shows the namespace badge only when it differs from the source label', () => {
+    render(<BrainSettings />);
+
+    // "Slack public channels" carries its "Slack" namespace badge (the other
+    // "Slack" is the composition legend's namespace entry)...
+    expect(screen.getAllByText('Slack')).toHaveLength(2);
+    // ...while a source whose namespace repeats its own name gets no badge:
+    // exactly one "Notion" (the row title), not a second badge copy.
+    expect(screen.getAllByText('Notion')).toHaveLength(1);
   });
 
   it('stops at the explanation on a deployment with no Brain', () => {

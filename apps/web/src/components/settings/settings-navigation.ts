@@ -198,6 +198,8 @@ export function getAccessibleSettingsNavigation(opts: {
   isAdmin: boolean;
   cloudEnabled: boolean;
   brainConfigured?: boolean;
+  /** A managed Brain awaits its key: the page shows so an admin can add it. */
+  brainNeedsKey?: boolean;
 }) {
   return SETTINGS_NAVIGATION_ITEMS.filter((item) => {
     if (item.adminOnly && !opts.isAdmin) {
@@ -206,7 +208,7 @@ export function getAccessibleSettingsNavigation(opts: {
     if (item.hiddenWhenCloud && opts.cloudEnabled) {
       return false;
     }
-    if (item.requiresBrain && !opts.brainConfigured) {
+    if (item.requiresBrain && !opts.brainConfigured && !opts.brainNeedsKey) {
       return false;
     }
     return true;

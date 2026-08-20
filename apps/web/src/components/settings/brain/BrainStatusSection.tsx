@@ -48,7 +48,14 @@ export function BrainStatusSection({ settings }: { settings: BrainSettings }) {
           <Fact
             label="Recall"
             value={
-              settings.inferenceProvider ? 'Semantic + keyword' : 'Keyword only'
+              settings.recall.mode === 'semantic'
+                ? 'Semantic + keyword'
+                : settings.recall.mode === 'keyword-only'
+                  ? 'Keyword only'
+                  : // The admin census did not answer; fall back to inference.
+                    settings.inferenceProvider
+                    ? 'Semantic + keyword'
+                    : 'Keyword only'
             }
           />
           <Fact

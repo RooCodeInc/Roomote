@@ -430,3 +430,111 @@ async function provisionAndStoreBrainClients(
     return null;
   }
 }
+
+// ─── Admin stats ────────────────────────────────────────────────────────────
+
+export type BrainAdminStats = {
+  version: string | null;
+  pageCount: number | null;
+  chunkCount: number | null;
+  embeddedCount: number | null;
+};
+
+/**
+ * A settings page must not hold a request open on an unresponsive admin API;
+ * the stats consumer degrades to the sampled/inferred values on its own.
+ */
+const BRAIN_STATS_TIMEOUT_MS = 4_000;
+
+/**
+ * Same rationale as the corpus sample's cache: one settings view asks more
+ * than once, and the answer only moves as fast as ingestion does. Failures
+ * are cached briefly so a Brain coming back is noticed promptly.
+ */
+const BRAIN_STATS_CACHE_TTL_MS = 30_000;
+const BRAIN_STATS_FAILURE_CACHE_TTL_MS = 5_000;
+
+let brainStatsCache: {
+  value: BrainAdminStats | null;
+  expiresAtMs: number;
+} | null = null;
+
+/** Drop the cached stats, so the next call re-reads the admin API. */
+export function resetBrainStatsCache(): void {
+  brainStatsCache = null;
+}
+
+function toCount(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : null;
+}
+
+/**
+ * gbrain's own census of the corpus, from `/admin/api/full-stats`: the exact
+ * page count (the MCP listing answers a bounded recency window, never a
+ * total) and embedding coverage (`embedded_count` vs `chunk_count`), which
+ * is the direct measurement of whether semantic recall actually works —
+ * unlike inferring it from provider-key presence. Returns null when the
+ * deployment holds no admin token or the Brain does not answer; callers keep
+ * their inferred fallbacks.
+ */
+export async function readBrainStats(): Promise<BrainAdminStats | null> {
+  const cached = brainStatsCache;
+
+  if (cached && cached.expiresAtMs > Date.now()) {
+    return cached.value;
+  }
+
+  const value = await fetchBrainStats();
+
+  brainStatsCache = {
+    value,
+    expiresAtMs:
+      Date.now() +
+      (value ? BRAIN_STATS_CACHE_TTL_MS : BRAIN_STATS_FAILURE_CACHE_TTL_MS),
+  };
+
+  return value;
+}
+
+async function fetchBrainStats(): Promise<BrainAdminStats | null> {
+  const baseUrl = Env.R_GBRAIN_URL;
+  const adminToken = readGbrainAdminToken();
+
+  if (!baseUrl || !adminToken) {
+    return null;
+  }
+
+  try {
+    const cookie = await adminLogin(baseUrl, adminToken);
+    const response = await fetch(
+      `${normalizeBaseUrl(baseUrl)}/admin/api/full-stats`,
+      {
+        headers: { cookie },
+        signal: AbortSignal.timeout(BRAIN_STATS_TIMEOUT_MS),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`full-stats answered ${response.status}`);
+    }
+
+    const stats = (await response.json()) as Record<string, unknown>;
+
+    return {
+      version: typeof stats.version === 'string' ? stats.version : null,
+      pageCount: toCount(stats.page_count),
+      chunkCount: toCount(stats.chunk_count),
+      embeddedCount: toCount(stats.embedded_count),
+    };
+  } catch (error) {
+    console.warn(
+      `[brain] admin stats read failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+
+    return null;
+  }
+}

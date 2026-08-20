@@ -33,16 +33,20 @@ function SummaryTiles({ settings }: { settings: BrainSettingsData }) {
       <AnalyticsSummaryCard
         label="Pages stored"
         value={
-          settings.corpus.reachable
-            ? `${formatNumber(settings.corpus.sampledPages)}${
-                settings.corpus.truncated ? '+' : ''
-              }`
-            : 'Unknown'
+          settings.corpus.totalPages !== null
+            ? formatNumber(settings.corpus.totalPages)
+            : settings.corpus.reachable
+              ? `${formatNumber(settings.corpus.sampledPages)}${
+                  settings.corpus.truncated ? '+' : ''
+                }`
+              : 'Unknown'
         }
         secondary={
-          settings.corpus.truncated
-            ? 'most recent pages, more in the corpus'
-            : 'in the corpus'
+          settings.corpus.totalPages !== null
+            ? 'in the corpus'
+            : settings.corpus.truncated
+              ? 'most recent pages, more in the corpus'
+              : 'in the corpus'
         }
       />
       <AnalyticsSummaryCard

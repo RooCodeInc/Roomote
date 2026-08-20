@@ -41,6 +41,22 @@ function ActivityChart({
     );
   }
 
+  // A freshly enabled Brain has all of its activity in the last day or two,
+  // which renders as one tower over 29 empty days and reads as a broken
+  // chart rather than a young corpus. Say what is actually happening.
+  const firstActiveIndex = days.findIndex((day) => day.pages > 0);
+
+  if (firstActiveIndex >= days.length - 2) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Ingestion started{' '}
+        {firstActiveIndex === days.length - 1 ? 'today' : 'yesterday'}.{' '}
+        {formatNumber(total)} pages written so far; the chart appears as history
+        accumulates.
+      </p>
+    );
+  }
+
   return (
     <div className="space-y-1">
       <div className="flex h-20 items-end gap-[3px] border-b border-foreground/10">
