@@ -115,6 +115,7 @@ import {
   exchangeSlackOAuthCodeCommand,
   connectSlackAppCommand,
   createSlackAppFromManifestCommand,
+  updateSlackAppManifestCommand,
   disconnectSlackAppCommand,
   getSlackInstallationCommand,
   startAuthenticateSlackAccountCommand,
@@ -1283,6 +1284,12 @@ export const appRouter = createRouter({
       .input(z.object({ configToken: z.string().trim().min(1) }))
       .mutation(({ ctx: { auth }, input }) =>
         createSlackAppFromManifestCommand(auth, input),
+      ),
+
+    updateAppManifest: protectedProcedure
+      .input(z.object({ configToken: z.string().trim().min(1) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        updateSlackAppManifestCommand(auth, input),
       ),
 
     disconnectApp: protectedProcedure.mutation(({ ctx: { auth } }) =>

@@ -648,6 +648,89 @@ describe('MockSlackServer', () => {
     }
   });
 
+  it('exports, validates, and updates an existing app manifest with a config token', async () => {
+    const originalManifest = {
+      display_information: { name: 'Roomote' },
+      oauth_config: { scopes: { bot: ['chat:write'] } },
+    };
+    const updatedManifest = {
+      ...originalManifest,
+      features: { agent_view: { agent_description: 'Coding agents' } },
+    };
+    const server = new MockSlackServer({
+      state: {
+        team: { id: 'T1', domain: 'mock-roomote' },
+        acceptedBotTokens: ['xoxb-mock-token'],
+        acceptedConfigTokens: ['xoxe.xoxp-config-token'],
+        manifestPermissionsUpdated: true,
+        createdManifests: [{ appId: 'A0MANIFEST', manifest: originalManifest }],
+        channels: [{ id: 'C1', name: 'product-debug', isMember: true }],
+        users: [{ id: 'U1', name: 'alex', displayName: 'Alex' }],
+      },
+    });
+
+    try {
+      await server.start();
+      const headers = {
+        authorization: 'Bearer xoxe.xoxp-config-token',
+        'content-type': 'application/json',
+      };
+
+      const exportResponse = await fetch(
+        `${server.baseUrl}/api/apps.manifest.export`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ app_id: 'A0MANIFEST' }),
+        },
+      );
+      await expect(exportResponse.json()).resolves.toEqual({
+        ok: true,
+        manifest: originalManifest,
+      });
+
+      const validateResponse = await fetch(
+        `${server.baseUrl}/api/apps.manifest.validate`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            app_id: 'A0MANIFEST',
+            manifest: JSON.stringify(updatedManifest),
+          }),
+        },
+      );
+      await expect(validateResponse.json()).resolves.toEqual({
+        ok: true,
+        errors: [],
+      });
+
+      const updateResponse = await fetch(
+        `${server.baseUrl}/api/apps.manifest.update`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            app_id: 'A0MANIFEST',
+            manifest: JSON.stringify(updatedManifest),
+          }),
+        },
+      );
+      await expect(updateResponse.json()).resolves.toEqual({
+        ok: true,
+        app_id: 'A0MANIFEST',
+        permissions_updated: true,
+      });
+
+      expect(server.getState()).toMatchObject({
+        createdManifests: [{ appId: 'A0MANIFEST', manifest: updatedManifest }],
+        updatedManifests: [{ appId: 'A0MANIFEST', manifest: updatedManifest }],
+      });
+    } finally {
+      await server.stop();
+    }
+  });
+
   it('rejects apps.manifest.create with invalid_manifest when the manifest is not JSON', async () => {
     const server = new MockSlackServer({
       state: {
