@@ -242,6 +242,32 @@ describe('resolveWorkspaceSourceControlProvider', () => {
     ).resolves.toBeUndefined();
   });
 
+  it('returns undefined when all-repository resolution is incomplete', async () => {
+    mockRows = [
+      {
+        fullName: 'shared/api',
+        host: 'gitea.example.com',
+        sourceControlProvider: 'gitea',
+      },
+      {
+        fullName: 'shared/web',
+        host: 'gitea.example.com',
+        sourceControlProvider: 'gitea',
+      },
+      {
+        fullName: 'shared/web',
+        host: 'github.com',
+        sourceControlProvider: 'github',
+      },
+    ];
+
+    await expect(
+      resolveWorkspaceSourceControlProvider(dbOrTx, {
+        type: 'all_repositories',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it('returns undefined when no repository rows match', async () => {
     await expect(
       resolveWorkspaceSourceControlProvider(dbOrTx, {

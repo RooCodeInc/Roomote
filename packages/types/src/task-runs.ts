@@ -904,7 +904,8 @@ const sharedTaskPayloadSchema = z.object({
 
   /**
    * Source-control provider keyed by repository full name for workspaces that
-   * span multiple providers. Single-provider payloads omit this field.
+   * span multiple providers. Aggregate selections also include this map when
+   * homogeneous so downstream attribution can verify complete coverage.
    */
   repositoryProviders: z.record(sourceControlProviderSchema).optional(),
 

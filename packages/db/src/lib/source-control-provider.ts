@@ -210,10 +210,12 @@ async function resolveAllRepositoriesProviders(
     .where(eq(repositories.isActive, true))
     .orderBy(asc(repositories.createdAt), asc(repositories.id));
 
-  return toRepositoryProviderMap(
-    rows,
-    rows.map((row) => row.fullName),
-  );
+  const repositoryNames = [...new Set(rows.map((row) => row.fullName))];
+  const providers = toRepositoryProviderMap(rows, repositoryNames);
+
+  return Object.keys(providers).length === repositoryNames.length
+    ? providers
+    : {};
 }
 
 /** Resolve repository full names to providers in workspace order. */
