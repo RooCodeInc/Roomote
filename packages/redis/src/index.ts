@@ -54,6 +54,59 @@ export async function syncAutoStartChannelCacheBestEffort(params: {
 }
 
 let redis: Redis | null = null;
+let bullMqRedis: Redis | null = null;
+
+const REDIS_MAX_RETRIES_PER_REQUEST = 3;
+const REDIS_MAX_RECONNECT_DELAY_MS = 2_000;
+const REDIS_ERROR_LOG_INTERVAL_MS = 30_000;
+
+function observeRedisConnectivity(client: Redis): void {
+  let outageStartedAt: number | null = null;
+  let lastErrorLoggedAt = 0;
+  let errorsSinceLastLog = 0;
+  let totalErrors = 0;
+
+  client.on('error', (error: Error & { code?: string }) => {
+    const now = Date.now();
+    outageStartedAt ??= now;
+    errorsSinceLastLog += 1;
+    totalErrors += 1;
+
+    if (
+      totalErrors > 1 &&
+      now - lastErrorLoggedAt < REDIS_ERROR_LOG_INTERVAL_MS
+    ) {
+      return;
+    }
+
+    console.error(
+      '[redis] connection degraded; dependent operations may fail',
+      {
+        code: error.code,
+        message: error.message,
+        suppressedErrors: Math.max(0, errorsSinceLastLog - 1),
+      },
+    );
+    lastErrorLoggedAt = now;
+    errorsSinceLastLog = 0;
+  });
+
+  client.on('ready', () => {
+    if (outageStartedAt === null) {
+      return;
+    }
+
+    console.info('[redis] connection restored', {
+      outageDurationMs: Date.now() - outageStartedAt,
+      totalErrors,
+      suppressedErrors: errorsSinceLastLog,
+    });
+    outageStartedAt = null;
+    lastErrorLoggedAt = 0;
+    errorsSinceLastLog = 0;
+    totalErrors = 0;
+  });
+}
 
 function resolveRedisUrl(): string {
   // In apps/web on Vercel, dotenvx decrypts into process.env at runtime after
@@ -67,15 +120,32 @@ function resolveRedisUrl(): string {
   return redisUrl;
 }
 
+function createRedis(maxRetriesPerRequest: number | null): Redis {
+  const client = new Redis(resolveRedisUrl(), {
+    maxRetriesPerRequest,
+    connectTimeout: 5000,
+    retryStrategy: (attempt) =>
+      Math.min(attempt * 50, REDIS_MAX_RECONNECT_DELAY_MS),
+  });
+  observeRedisConnectivity(client);
+  return client;
+}
+
 export const getRedis = () => {
   if (!redis) {
-    redis = new Redis(resolveRedisUrl(), {
-      maxRetriesPerRequest: null,
-      connectTimeout: 5000,
-    });
+    redis = createRedis(REDIS_MAX_RETRIES_PER_REQUEST);
   }
 
   return redis;
+};
+
+export const getBullMqRedis = () => {
+  if (!bullMqRedis) {
+    // BullMQ blocking connections reject clients with a finite request retry limit.
+    bullMqRedis = createRedis(null);
+  }
+
+  return bullMqRedis;
 };
 
 export { acquireRedisLock, withRedisLock, withContention } from './lock';

@@ -1,7 +1,7 @@
 import { Queue, QueueEvents } from 'bullmq';
 import { z } from 'zod';
 
-import { getRedis } from '@roomote/redis';
+import { getBullMqRedis, getRedis } from '@roomote/redis';
 
 export const TASK_SLEEP_QUEUE_NAME = 'task-sleep-jobs';
 const TASK_SLEEP_RESULT_TIMEOUT_MS = 60_000;
@@ -42,7 +42,7 @@ function getTaskSleepQueue(): Queue<TaskSleepRequest> {
 function getTaskSleepQueueEvents(): QueueEvents {
   if (!taskSleepQueueEvents) {
     taskSleepQueueEvents = new QueueEvents(TASK_SLEEP_QUEUE_NAME, {
-      connection: getRedis(),
+      connection: getBullMqRedis(),
     });
   }
 

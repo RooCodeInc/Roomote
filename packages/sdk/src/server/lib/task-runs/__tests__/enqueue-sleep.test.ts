@@ -7,9 +7,9 @@ const {
   queueEventsConstructorMock,
   waitUntilFinishedMock,
   mockGetRedis,
+  mockGetBullMqRedis,
 } = vi.hoisted(() => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  type AnyMock = Mock<(...args: any[]) => any>;
+  type AnyMock = Mock<(...args: unknown[]) => unknown>;
   const queueAddMock = vi.fn() as AnyMock;
   const queueGetJobMock = vi.fn() as AnyMock;
   const waitUntilFinishedMock = vi.fn() as AnyMock;
@@ -26,6 +26,7 @@ const {
     }) as AnyMock,
     waitUntilFinishedMock,
     mockGetRedis: vi.fn(() => ({ status: 'ready' })) as AnyMock,
+    mockGetBullMqRedis: vi.fn(() => ({ status: 'blocking-ready' })) as AnyMock,
   };
 });
 
@@ -33,7 +34,10 @@ vi.mock('bullmq', () => ({
   Queue: queueConstructorMock,
   QueueEvents: queueEventsConstructorMock,
 }));
-vi.mock('@roomote/redis', () => ({ getRedis: mockGetRedis }));
+vi.mock('@roomote/redis', () => ({
+  getRedis: mockGetRedis,
+  getBullMqRedis: mockGetBullMqRedis,
+}));
 
 describe('enqueueTaskSleep', () => {
   beforeEach(() => {
@@ -61,6 +65,13 @@ describe('enqueueTaskSleep', () => {
       { kind: 'queue-events' },
       60_000,
     );
+    expect(queueConstructorMock).toHaveBeenCalledWith(
+      'task-sleep-jobs',
+      expect.objectContaining({ connection: { status: 'ready' } }),
+    );
+    expect(queueEventsConstructorMock).toHaveBeenCalledWith('task-sleep-jobs', {
+      connection: { status: 'blocking-ready' },
+    });
   });
 
   it('deduplicates a sleep action that is still waiting', async () => {
