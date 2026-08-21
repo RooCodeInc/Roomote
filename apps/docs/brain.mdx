@@ -140,7 +140,12 @@ sample rather than presented as a total.
 **Where does it learn from?** Each source shows whether its integration is
 connected, when it was last read, and how far its one-time history sweep has
 got. A source with nothing connected upstream says so, which distinguishes
-"nothing collected yet" from "nothing to collect from".
+"nothing collected yet" from "nothing to collect from". **Backfilling** means
+that historical sweep is actively running; rolling checkpoints and ongoing
+source streams remain active ingestion instead of appearing to backfill
+forever. Slack and GitHub automatically resume their history sweeps when a new
+public channel or repository becomes available after the previous sweep
+finished.
 
 The page ends with the task-memory queue: how many completed tasks have been
 recorded, how many are waiting, and how many failed. Two actions live there.
