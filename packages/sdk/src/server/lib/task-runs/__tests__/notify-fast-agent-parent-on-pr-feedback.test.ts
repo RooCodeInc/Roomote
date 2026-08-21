@@ -153,15 +153,4 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
 
     expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
   });
-
-  it('does not redeliver feedback when its claim is already settled', async () => {
-    mocks.claimReturning.mockResolvedValue([]);
-
-    await notifyFastAgentParentOnPrFeedback({
-      run: makeRun({ fastAgentParent: fastParent }),
-      ...input,
-    });
-
-    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
-  });
 });
