@@ -12,8 +12,6 @@ import {
   getSlackChannelFromTaskPayload,
   getSlackTeamDomainFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
-  resolveSourceControlHostFromPayload,
-  resolveSourceControlProviderFromPayload,
 } from '@roomote/types';
 import {
   type TaskRun,
@@ -24,6 +22,7 @@ import {
   DEFAULT_CONFLICT_RESOLVER_LABEL,
   getDeploymentPrAction,
   getReviewCodeAutomationSettings,
+  resolveRepositorySourceControl,
   resolveTelegramRuntimeCredentials,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
@@ -150,15 +149,14 @@ export async function generatePrompt({
       surface: true,
     },
   });
-  const sourceControlProvider = resolveSourceControlProviderFromPayload(
-    taskSpec.payload,
+  const targetSourceControl = await resolveRepositorySourceControl(
+    db,
+    taskSpec.payload.repo,
   );
-  const commitAuthor = taskRow
-    ? await resolveRunCommitAuthor(db, taskRun, {
-        provider: sourceControlProvider,
-        host: resolveSourceControlHostFromPayload(taskSpec.payload),
-      })
-    : DEFAULT_ROOMOTE_COMMIT_AUTHOR;
+  const commitAuthor =
+    taskRow && targetSourceControl
+      ? await resolveRunCommitAuthor(db, taskRun, targetSourceControl)
+      : DEFAULT_ROOMOTE_COMMIT_AUTHOR;
   const {
     conflictResolverFrequency,
     conflictResolverLabel,
@@ -399,7 +397,7 @@ export async function generatePrompt({
         codeReviewsEnabled,
         codeReviewReviewOnCommit,
         codeReviewReviewDraftPrs,
-        sourceControlProvider,
+        sourceControlProvider: targetSourceControl?.provider,
         prAction,
       });
 
