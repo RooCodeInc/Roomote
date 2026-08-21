@@ -590,6 +590,7 @@ async function runNonTaskSdkPrompt(
     onPromptStarted?: () => void;
     onSessionReady?: (sessionID: string) => Promise<void> | void;
     permission?: PermissionRuleset;
+    preserveReasoning?: boolean;
     promptErrorLabel?: string;
     session?: NonTaskOpenCodeSession;
     signal?: AbortSignal;
@@ -609,6 +610,7 @@ async function runNonTaskSdkPrompt(
   const server = await leaseOpenCodeSdkServer({
     env: { ...resolvedModelRuntimeEnv, ...options.env },
     ephemeral: options.ephemeral,
+    preserveReasoning: options.preserveReasoning,
     startTimeoutMs:
       timeoutMs === null
         ? DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS
@@ -893,6 +895,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       onPromptStarted: options.onPromptStarted,
       onSessionReady: options.onSessionReady,
       permission: options.permission,
+      preserveReasoning: true,
       promptErrorLabel: 'OpenCode native Fast prompt failed',
       session,
       signal: options.signal,

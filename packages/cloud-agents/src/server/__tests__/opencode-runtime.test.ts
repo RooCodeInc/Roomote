@@ -161,6 +161,31 @@ describe('buildOpenCodeCliEnv', () => {
     });
   });
 
+  it('preserves reasoning options for Fast native sessions', () => {
+    const env = buildOpenCodeCliEnv(
+      {
+        R_MODEL: 'openrouter/z-ai/glm-5.2',
+        R_MODEL_REASONING_EFFORT: 'low',
+      },
+      { preserveReasoning: true },
+    );
+
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? '{}')).toEqual({
+      model: 'openrouter/z-ai/glm-5.2',
+      small_model: 'openrouter/z-ai/glm-5.2',
+      permission: NON_TASK_TOOL_PERMISSION_DENIALS,
+      provider: {
+        openrouter: {
+          models: {
+            'z-ai/glm-5.2': {
+              options: { reasoning: { effort: 'low' } },
+            },
+          },
+        },
+      },
+    });
+  });
+
   it('rewrites Mantle GPT ids and registers their OpenAI-compatible provider', () => {
     // A helper model saved as `bedrock-mantle/openai.*` is served by Mantle's
     // OpenAI Responses endpoint under the dedicated runtime provider — the
