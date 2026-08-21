@@ -68,6 +68,31 @@ describe('Standard Task surface context', () => {
     );
   });
 
+  it('keeps initial automation chat delivery silent until the result', () => {
+    const { harnessInstructions } = standardTask({
+      description: 'Scan repositories and report suggestions',
+      repo: 'Roomote/example-app',
+      taskSurface: 'slack',
+      resultOnlyChatDelivery: true,
+    });
+
+    expect(harnessInstructions).toContain(
+      'This run was launched by an automation with slack as its report destination. It was not launched by a directed chat turn.',
+    );
+    expect(harnessInstructions).toContain(
+      "The automation's chat message must always be its result, never an in-progress message.",
+    );
+    expect(harnessInstructions).toContain(
+      'The automation-specific prompt remains authoritative for whether to report, which chat tools to use, and the number and shape of final messages.',
+    );
+    expect(harnessInstructions).not.toContain(
+      'The first and only chat-visible reply for this automation turn must use `send_chat_reply`',
+    );
+    expect(harnessInstructions).not.toContain(
+      'This run was launched from a Slack conversation surface',
+    );
+  });
+
   it('labels Gitea-started review tasks as Gitea pull request runs', () => {
     const { harnessInstructions } = standardTask({
       description: 'Review pull request',

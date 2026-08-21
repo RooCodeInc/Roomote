@@ -105,6 +105,30 @@ export function resolveStandardTaskSurface({
   }
 }
 
+export function isResultOnlyAutomationChatDelivery({
+  initiatorKind,
+  slackThreadTs,
+  communicationMessageId,
+}: {
+  initiatorKind?: string | null;
+  slackThreadTs?: string | null;
+  communicationMessageId?: string | null;
+}): boolean {
+  return (
+    initiatorKind === 'automation' && !slackThreadTs && !communicationMessageId
+  );
+}
+
+export function shouldAttachChatLifecycleInstructions({
+  inheritedCommunicationContext,
+  resultOnlyChatDelivery,
+}: {
+  inheritedCommunicationContext: boolean;
+  resultOnlyChatDelivery: boolean;
+}): boolean {
+  return !inheritedCommunicationContext && !resultOnlyChatDelivery;
+}
+
 export async function generatePrompt({
   taskRun,
   taskSpec,
@@ -147,6 +171,7 @@ export async function generatePrompt({
       actorDisplayName: true,
       slackThreadTs: true,
       surface: true,
+      initiatorKind: true,
     },
   });
   const commitAuthor = taskRow
@@ -316,6 +341,16 @@ export async function generatePrompt({
       const communicationMessageId = getCommunicationMessageIdFromTaskPayload(
         taskSpec.payload,
       );
+      const resultOnlyChatDelivery = isResultOnlyAutomationChatDelivery({
+        initiatorKind: taskRow?.initiatorKind,
+        slackThreadTs,
+        communicationMessageId,
+      });
+      const attachChatLifecycleInstructions =
+        shouldAttachChatLifecycleInstructions({
+          inheritedCommunicationContext,
+          resultOnlyChatDelivery,
+        });
       const teamsTenantId = getCommunicationTenantIdFromTaskPayload(
         taskSpec.payload,
       );
@@ -386,6 +421,7 @@ export async function generatePrompt({
         sourceChannelId: communicationChannelId ?? undefined,
         sourceThreadId: communicationThreadId ?? undefined,
         sourceMessageId: communicationMessageId ?? undefined,
+        resultOnlyChatDelivery,
         interactiveMode: taskSpec.payload.bootstrap?.interactiveMode,
         requestFormat,
         linkedWorkItems: taskSpec.payload.linkedWorkItems,
@@ -398,7 +434,7 @@ export async function generatePrompt({
         prAction,
       });
 
-      if (!inheritedCommunicationContext && slackChannel && slackThreadTs) {
+      if (attachChatLifecycleInstructions && slackChannel && slackThreadTs) {
         const slackInstructions = buildSlackMessageInstructions({
           includeRequestUserInputGuidance: true,
         });
@@ -407,7 +443,7 @@ export async function generatePrompt({
           : slackInstructions;
       }
 
-      if (!inheritedCommunicationContext && nonSlackChatProvider) {
+      if (attachChatLifecycleInstructions && nonSlackChatProvider) {
         const chatInstructions =
           nonSlackChatProvider === 'teams'
             ? buildTeamsMessageInstructions()

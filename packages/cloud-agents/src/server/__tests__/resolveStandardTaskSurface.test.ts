@@ -1,4 +1,8 @@
-import { resolveStandardTaskSurface } from '../cloud-agent-workflow';
+import {
+  isResultOnlyAutomationChatDelivery,
+  resolveStandardTaskSurface,
+  shouldAttachChatLifecycleInstructions,
+} from '../cloud-agent-workflow';
 
 describe('resolveStandardTaskSurface', () => {
   it('prefers Slack channel payload bindings', () => {
@@ -57,5 +61,54 @@ describe('resolveStandardTaskSurface', () => {
         taskSurface: null,
       }),
     ).toBe('web');
+  });
+});
+
+describe('isResultOnlyAutomationChatDelivery', () => {
+  it('uses result-only delivery for an initial automation report', () => {
+    expect(
+      isResultOnlyAutomationChatDelivery({ initiatorKind: 'automation' }),
+    ).toBe(true);
+  });
+
+  it('keeps directed automation follow-ups conversational', () => {
+    expect(
+      isResultOnlyAutomationChatDelivery({
+        initiatorKind: 'automation',
+        slackThreadTs: '123.456',
+      }),
+    ).toBe(false);
+    expect(
+      isResultOnlyAutomationChatDelivery({
+        initiatorKind: 'automation',
+        communicationMessageId: 'message-123',
+      }),
+    ).toBe(false);
+  });
+
+  it('does not change user-initiated chat delivery', () => {
+    expect(isResultOnlyAutomationChatDelivery({ initiatorKind: 'user' })).toBe(
+      false,
+    );
+  });
+});
+
+describe('shouldAttachChatLifecycleInstructions', () => {
+  it('omits generic lifecycle instructions from initial automation reports', () => {
+    expect(
+      shouldAttachChatLifecycleInstructions({
+        inheritedCommunicationContext: false,
+        resultOnlyChatDelivery: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('keeps lifecycle instructions for directed follow-ups', () => {
+    expect(
+      shouldAttachChatLifecycleInstructions({
+        inheritedCommunicationContext: false,
+        resultOnlyChatDelivery: false,
+      }),
+    ).toBe(true);
   });
 });
