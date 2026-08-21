@@ -206,6 +206,53 @@ describe('resolveEffectiveModelRuntimeEnv', () => {
     });
   });
 
+  it('resolves an orchestration model independently from the coding model', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'openrouter/openai/gpt-5.4',
+        roomoteOrchestrationModel: 'anthropic/claude-sonnet-4',
+        roomoteOrchestrationModelReasoningEffort: 'high',
+      },
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {
+        OPENROUTER_API_KEY: 'sk-openrouter',
+        ANTHROPIC_API_KEY: 'sk-anthropic',
+      },
+    });
+
+    expect(env).toMatchObject({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_ORCHESTRATION_MODEL: 'anthropic/claude-sonnet-4',
+      R_ORCHESTRATION_MODEL_REASONING_EFFORT: 'high',
+      R_MODEL_ENV_KEYS: 'OPENROUTER_API_KEY,ANTHROPIC_API_KEY',
+    });
+  });
+
+  it('defaults orchestration reasoning to low when no choice is persisted', async () => {
+    mockDeploymentSettingsFindFirst.mockResolvedValue({
+      runtimeModelConfig: {
+        roomoteModel: 'openrouter/openai/gpt-5.4',
+        roomoteOrchestrationModel: 'anthropic/claude-sonnet-4',
+      },
+    });
+
+    const env = await resolveEffectiveModelRuntimeEnv({
+      runtimeEnv: {},
+      deploymentEnvVars: {
+        OPENROUTER_API_KEY: 'sk-openrouter',
+        ANTHROPIC_API_KEY: 'sk-anthropic',
+      },
+    });
+
+    expect(env).toMatchObject({
+      R_ORCHESTRATION_MODEL: 'anthropic/claude-sonnet-4',
+      R_ORCHESTRATION_MODEL_REASONING_EFFORT: 'low',
+    });
+  });
+
   it('prefers the R_SMALL_MODEL env var over the persisted small model', async () => {
     mockDeploymentSettingsFindFirst.mockResolvedValue({
       runtimeModelConfig: {

@@ -313,6 +313,7 @@ async function resolveModelRuntimeEnv(
   const persistedRuntimeModelConfig = runtimeModelConfig;
   const runtimeOverrideModelConfig = normalizeDeploymentModelConfig({
     roomoteModel: runtimeEnv.R_MODEL,
+    roomoteOrchestrationModel: runtimeEnv.R_ORCHESTRATION_MODEL,
     roomoteSmallModel: runtimeEnv.R_SMALL_MODEL,
     roomoteVisionModel: runtimeEnv.R_VISION_MODEL,
     roomoteCodeReviewModel: runtimeEnv.R_CODE_REVIEW_MODEL,
@@ -333,6 +334,12 @@ async function resolveModelRuntimeEnv(
   const resolvedRoomoteModel = withLiteLlmPrefix(
     runtimeOverrideModelConfig.roomoteModel ??
       normalizeConfiguredValue(persistedRuntimeModelConfig.roomoteModel),
+  );
+  const resolvedRoomoteOrchestrationModel = withLiteLlmPrefix(
+    runtimeOverrideModelConfig.roomoteOrchestrationModel ??
+      normalizeConfiguredValue(
+        persistedRuntimeModelConfig.roomoteOrchestrationModel,
+      ),
   );
   const resolvedRoomoteSmallModel = withLiteLlmPrefix(
     runtimeOverrideModelConfig.roomoteSmallModel ??
@@ -377,6 +384,15 @@ async function resolveModelRuntimeEnv(
     persistedRuntimeModelConfig.roomoteModelReasoningEffort ??
     (modelSupportsReasoning(resolvedRoomoteModel)
       ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.coding
+      : undefined);
+  const resolvedRoomoteOrchestrationModelReasoningEffort =
+    normalizeConfiguredReasoningEffort(
+      runtimeEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT,
+    ) ??
+    persistedRuntimeModelConfig.roomoteOrchestrationModelReasoningEffort ??
+    (resolvedRoomoteOrchestrationModel &&
+    modelSupportsReasoning(resolvedRoomoteOrchestrationModel)
+      ? DEFAULT_MODEL_ROLE_REASONING_EFFORTS.orchestration
       : undefined);
   const resolvedRoomoteSmallModelReasoningEffort =
     normalizeConfiguredReasoningEffort(
@@ -428,6 +444,7 @@ async function resolveModelRuntimeEnv(
     normalizeConfiguredValue(persistedEnvVars.R_MODEL_ENV_KEYS);
   const resolvedRoleModels = [
     resolvedRoomoteModel,
+    ...(!inferenceGateway ? [resolvedRoomoteOrchestrationModel] : []),
     resolvedRoomoteSmallModel,
     resolvedRoomoteVisionModel,
     resolvedRoomoteCodeReviewModel,
@@ -580,6 +597,10 @@ async function resolveModelRuntimeEnv(
 
   return {
     ...(resolvedRoomoteModel && { R_MODEL: resolvedRoomoteModel }),
+    ...(!inferenceGateway &&
+      resolvedRoomoteOrchestrationModel && {
+        R_ORCHESTRATION_MODEL: resolvedRoomoteOrchestrationModel,
+      }),
     ...(resolvedRoomoteSmallModel && {
       R_SMALL_MODEL: resolvedRoomoteSmallModel,
     }),
@@ -598,6 +619,11 @@ async function resolveModelRuntimeEnv(
     ...(resolvedRoomoteModelReasoningEffort && {
       R_MODEL_REASONING_EFFORT: resolvedRoomoteModelReasoningEffort,
     }),
+    ...(!inferenceGateway &&
+      resolvedRoomoteOrchestrationModelReasoningEffort && {
+        R_ORCHESTRATION_MODEL_REASONING_EFFORT:
+          resolvedRoomoteOrchestrationModelReasoningEffort,
+      }),
     ...(resolvedRoomoteSmallModelReasoningEffort && {
       R_SMALL_MODEL_REASONING_EFFORT: resolvedRoomoteSmallModelReasoningEffort,
     }),

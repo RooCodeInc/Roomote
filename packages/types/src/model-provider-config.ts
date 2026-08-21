@@ -103,6 +103,7 @@ export type SetupModelProviderAuthKind = 'api-key' | 'endpoint' | 'oauth';
  */
 export type TaskModelRole =
   | 'coding'
+  | 'orchestration'
   | 'helper'
   | 'vision'
   | 'codeReview'
@@ -1103,12 +1104,14 @@ export function isSetupModelProviderId(
 
 export type DeploymentModelConfig = {
   roomoteModel: string | null;
+  roomoteOrchestrationModel: string | null;
   roomoteSmallModel: string | null;
   roomoteVisionModel: string | null;
   roomoteCodeReviewModel: string | null;
   roomoteExploreModel: string | null;
   roomotePlanningModel: string | null;
   roomoteModelReasoningEffort: ReasoningEffort | null;
+  roomoteOrchestrationModelReasoningEffort: ReasoningEffort | null;
   roomoteSmallModelReasoningEffort: ReasoningEffort | null;
   roomoteVisionModelReasoningEffort: ReasoningEffort | null;
   roomoteCodeReviewModelReasoningEffort: ReasoningEffort | null;
@@ -1124,6 +1127,7 @@ export type DeploymentModelConfig = {
  */
 export const DEFAULT_MODEL_ROLE_REASONING_EFFORTS = {
   coding: 'medium',
+  orchestration: 'low',
   helper: 'low',
   vision: 'low',
   codeReview: 'high',
@@ -1304,12 +1308,14 @@ export type SetupModelStatus = {
 export function createEmptyDeploymentModelConfig(): DeploymentModelConfig {
   return {
     roomoteModel: null,
+    roomoteOrchestrationModel: null,
     roomoteSmallModel: null,
     roomoteVisionModel: null,
     roomoteCodeReviewModel: null,
     roomoteExploreModel: null,
     roomotePlanningModel: null,
     roomoteModelReasoningEffort: null,
+    roomoteOrchestrationModelReasoningEffort: null,
     roomoteSmallModelReasoningEffort: null,
     roomoteVisionModelReasoningEffort: null,
     roomoteCodeReviewModelReasoningEffort: null,
@@ -1336,6 +1342,9 @@ export function normalizeDeploymentModelConfig(
 
   return {
     roomoteModel: normalizeEnabledModel(value?.roomoteModel),
+    roomoteOrchestrationModel: normalizeEnabledModel(
+      value?.roomoteOrchestrationModel,
+    ),
     roomoteSmallModel: normalizeEnabledModel(value?.roomoteSmallModel),
     roomoteVisionModel: normalizeEnabledModel(value?.roomoteVisionModel),
     roomoteCodeReviewModel: normalizeEnabledModel(
@@ -1345,6 +1354,9 @@ export function normalizeDeploymentModelConfig(
     roomotePlanningModel: normalizeEnabledModel(value?.roomotePlanningModel),
     roomoteModelReasoningEffort: normalizeOptionalReasoningEffort(
       value?.roomoteModelReasoningEffort,
+    ),
+    roomoteOrchestrationModelReasoningEffort: normalizeOptionalReasoningEffort(
+      value?.roomoteOrchestrationModelReasoningEffort,
     ),
     roomoteSmallModelReasoningEffort: normalizeOptionalReasoningEffort(
       value?.roomoteSmallModelReasoningEffort,
@@ -1391,12 +1403,15 @@ export function buildRecommendedDeploymentModelConfig(
 
   return normalizeDeploymentModelConfig({
     roomoteModel: roles.coding?.modelId ?? provider.defaultRoomoteModel,
+    roomoteOrchestrationModel: roles.orchestration?.modelId,
     roomoteSmallModel: roles.helper?.modelId,
     roomoteVisionModel: roles.vision?.modelId,
     roomoteCodeReviewModel: roles.codeReview?.modelId,
     roomoteExploreModel: roles.explore?.modelId,
     roomotePlanningModel: roles.planning?.modelId,
     roomoteModelReasoningEffort: roles.coding?.reasoningEffort,
+    roomoteOrchestrationModelReasoningEffort:
+      roles.orchestration?.reasoningEffort,
     roomoteSmallModelReasoningEffort: roles.helper?.reasoningEffort,
     roomoteVisionModelReasoningEffort: roles.vision?.reasoningEffort,
     roomoteCodeReviewModelReasoningEffort: roles.codeReview?.reasoningEffort,

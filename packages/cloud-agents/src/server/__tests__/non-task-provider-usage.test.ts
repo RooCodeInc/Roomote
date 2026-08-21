@@ -504,6 +504,119 @@ describe('resolveOpenCodeSmallModel', () => {
     );
   });
 
+  it('uses the deployment orchestration model when requested', async () => {
+    process.env = {
+      ...originalEnv,
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_MODEL_REASONING_EFFORT: 'medium',
+      R_ORCHESTRATION_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_ORCHESTRATION_MODEL_REASONING_EFFORT: 'high',
+      OPENROUTER_API_KEY: 'test-key',
+      OPENCODE_CONFIG_CONTENT: JSON.stringify({
+        model: 'openai/gpt-5.6-sol',
+        provider: {
+          openrouter: {
+            options: { apiKey: '{env:OPENROUTER_API_KEY}' },
+          },
+        },
+      }),
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: {},
+        parts: [{ type: 'text', text: 'ok' }],
+      },
+      error: undefined,
+    });
+
+    const {
+      generateTrackedNonTaskTextInOpenCodeSession,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+
+    await generateTrackedNonTaskTextInOpenCodeSession(
+      {
+        surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+        modelRole: 'orchestration',
+        prompt: 'Answer.',
+      },
+      { id: 'orchestration-session' },
+      {
+        directory: '/tmp/roomote-fast-orchestration-test',
+        tools: { '*': false, send_chat_reply: true },
+      },
+    );
+
+    expect(sessionPromptMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: {
+          providerID: 'openrouter',
+          modelID: 'z-ai/glm-5.2',
+        },
+      }),
+      expect.any(Object),
+    );
+    expect(spawnMock.mock.calls.at(-1)?.[2]?.env).toMatchObject({
+      R_MODEL: 'openrouter/z-ai/glm-5.2',
+      R_MODEL_REASONING_EFFORT: 'high',
+    });
+    expect(
+      JSON.parse(
+        spawnMock.mock.calls.at(-1)?.[2]?.env?.OPENCODE_CONFIG_CONTENT ?? '{}',
+      ),
+    ).toMatchObject({
+      provider: {
+        openrouter: {
+          models: {
+            'z-ai/glm-5.2': {
+              options: { reasoning: { effort: 'high' } },
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it('does not apply coding reasoning to a non-reasoning orchestration model', async () => {
+    process.env = {
+      ...originalEnv,
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_MODEL_REASONING_EFFORT: 'medium',
+      R_ORCHESTRATION_MODEL: 'openrouter/google/gemini-3.7-flash',
+      OPENROUTER_API_KEY: 'test-key',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: {
+          structured: { answer: 'ok' },
+        },
+        parts: [],
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskObject, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+
+    await generateTrackedNonTaskObject({
+      surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+      modelRole: 'orchestration',
+      schema: z.object({ answer: z.string() }),
+      prompt: 'Answer.',
+    });
+
+    expect(spawnMock.mock.calls.at(-1)?.[2]?.env).toMatchObject({
+      R_MODEL: 'openrouter/google/gemini-3.7-flash',
+    });
+    expect(spawnMock.mock.calls.at(-1)?.[2]?.env).not.toHaveProperty(
+      'R_MODEL_REASONING_EFFORT',
+    );
+  });
+
   it('starts a separate managed OpenCode SDK server when model env changes', async () => {
     process.env = {
       ...originalEnv,

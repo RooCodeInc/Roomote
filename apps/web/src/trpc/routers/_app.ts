@@ -2321,6 +2321,7 @@ export const appRouter = createRouter({
           ),
           allowedModelIds: z.array(z.string().trim().min(1)),
           defaultModelId: z.string().trim().min(1),
+          orchestrationModelId: z.string().trim().min(1).nullable().optional(),
           helperModelId: z.string().trim().min(1).nullable(),
           visionModelId: z.string().trim().min(1).nullable(),
           codeReviewModelId: z.string().trim().min(1).nullable(),
@@ -2329,6 +2330,10 @@ export const appRouter = createRouter({
           codingModelReasoningEffort: z
             .enum(REASONING_EFFORT_VALUES)
             .nullable(),
+          orchestrationModelReasoningEffort: z
+            .enum(REASONING_EFFORT_VALUES)
+            .nullable()
+            .optional(),
           helperModelReasoningEffort: z
             .enum(REASONING_EFFORT_VALUES)
             .nullable(),

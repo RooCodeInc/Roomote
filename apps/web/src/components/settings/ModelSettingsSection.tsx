@@ -101,6 +101,7 @@ type TaskModelSuggestion = {
 
 type TaskModelRuntimeKey =
   | 'codingModel'
+  | 'orchestrationModel'
   | 'helperModel'
   | 'visionModel'
   | 'codeReviewModel'
@@ -154,6 +155,7 @@ function useDebouncedValue<T>(value: T, delayMs: number) {
 
 const TASK_MODEL_ROLE_ORDER = [
   'coding',
+  'orchestration',
   'helper',
   'vision',
   'codeReview',
@@ -162,6 +164,7 @@ const TASK_MODEL_ROLE_ORDER = [
 ] as const satisfies readonly TaskModelRole[];
 
 const SECONDARY_TASK_MODEL_ROLES = [
+  'orchestration',
   'helper',
   'vision',
   'codeReview',
@@ -171,6 +174,7 @@ const SECONDARY_TASK_MODEL_ROLES = [
 
 const TASK_MODEL_ROLE_RUNTIME_KEYS = {
   coding: 'codingModel',
+  orchestration: 'orchestrationModel',
   helper: 'helperModel',
   vision: 'visionModel',
   codeReview: 'codeReviewModel',
@@ -190,6 +194,18 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
     placeholder: 'Select a default coding model',
     reasoningAriaLabel: 'Default coding model reasoning level',
     allowSameAsCoding: false,
+  },
+  {
+    role: 'orchestration',
+    label: 'Orchestration model',
+    description:
+      'Used by the fast orchestrator to answer requests and coordinate task launches.',
+    icon: Brain,
+    modelEnvVarName: 'R_ORCHESTRATION_MODEL',
+    reasoningEnvVarName: 'R_ORCHESTRATION_MODEL_REASONING_EFFORT',
+    placeholder: 'Select an orchestration model',
+    reasoningAriaLabel: 'Orchestration model reasoning level',
+    allowSameAsCoding: true,
   },
   {
     role: 'helper',
@@ -464,6 +480,7 @@ function getRecommendedRoleModelIds(
 
   return {
     coding: recommended.roomoteModel,
+    orchestration: recommended.roomoteOrchestrationModel,
     helper: recommended.roomoteSmallModel,
     vision: recommended.roomoteVisionModel,
     codeReview: recommended.roomoteCodeReviewModel,
@@ -483,6 +500,7 @@ function getRecommendedRoleReasoningEfforts(
 
   return {
     coding: recommended.roomoteModelReasoningEffort,
+    orchestration: recommended.roomoteOrchestrationModelReasoningEffort,
     helper: recommended.roomoteSmallModelReasoningEffort,
     vision: recommended.roomoteVisionModelReasoningEffort,
     codeReview: recommended.roomoteCodeReviewModelReasoningEffort,
@@ -523,6 +541,10 @@ function createEmptyTaskModelRoleDrafts(): TaskModelRoleDrafts {
   return {
     coding: {
       modelId: '',
+      reasoningEffort: null,
+    },
+    orchestration: {
+      modelId: null,
       reasoningEffort: null,
     },
     helper: {
@@ -964,6 +986,12 @@ export function ModelSettingsSection({
           reasoningEffort:
             settingsData.runtimeModels.codingModel.reasoningEffort,
         },
+        orchestration: {
+          modelId:
+            settingsData.runtimeModels.orchestrationModel.persistedModelId,
+          reasoningEffort:
+            settingsData.runtimeModels.orchestrationModel.reasoningEffort,
+        },
         helper: {
           modelId: settingsData.runtimeModels.helperModel.persistedModelId,
           reasoningEffort:
@@ -1107,6 +1135,7 @@ export function ModelSettingsSection({
     DisplayModelProviderGroup<EditableRuntimeModelOption>[]
   > = {
     coding: codingModelGroups,
+    orchestration: helperModelGroups,
     helper: helperModelGroups,
     vision: helperModelGroups,
     codeReview: helperModelGroups,
@@ -1162,6 +1191,7 @@ export function ModelSettingsSection({
     },
     {
       coding: null,
+      orchestration: null,
       helper: null,
       vision: null,
       codeReview: null,
@@ -1295,6 +1325,9 @@ export function ModelSettingsSection({
   };
 
   const updateRoleModel = (role: TaskModelRole, modelId: string | null) => {
+    const resolvedModelId =
+      role === 'coding' ? modelId : (modelId ?? roleDrafts.coding.modelId);
+
     applyDraftUpdates(
       {
         roles: {
@@ -1302,6 +1335,9 @@ export function ModelSettingsSection({
           [role]: {
             ...roleDrafts[role],
             modelId,
+            reasoningEffort: modelSupportsReasoning(resolvedModelId)
+              ? roleDrafts[role].reasoningEffort
+              : null,
           },
         },
       },
@@ -1354,12 +1390,15 @@ export function ModelSettingsSection({
         })),
         allowedModelIds: draft.enabledModelIds,
         defaultModelId: draft.roles.coding.modelId ?? '',
+        orchestrationModelId: draft.roles.orchestration.modelId,
         helperModelId: draft.roles.helper.modelId,
         visionModelId: draft.roles.vision.modelId,
         codeReviewModelId: draft.roles.codeReview.modelId,
         exploreModelId: draft.roles.explore.modelId,
         planningModelId: draft.roles.planning.modelId,
         codingModelReasoningEffort: draft.roles.coding.reasoningEffort,
+        orchestrationModelReasoningEffort:
+          draft.roles.orchestration.reasoningEffort,
         helperModelReasoningEffort: draft.roles.helper.reasoningEffort,
         visionModelReasoningEffort: draft.roles.vision.reasoningEffort,
         codeReviewModelReasoningEffort: draft.roles.codeReview.reasoningEffort,
@@ -1376,6 +1415,7 @@ export function ModelSettingsSection({
         toast.error(
           result.fieldErrors.models ??
             result.fieldErrors.defaultModelId ??
+            result.fieldErrors.orchestrationModelId ??
             result.fieldErrors.allowedModelIds ??
             result.fieldErrors.helperModelId ??
             result.fieldErrors.visionModelId ??

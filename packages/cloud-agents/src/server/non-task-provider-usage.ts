@@ -19,6 +19,7 @@ import {
 } from './opencode-runtime';
 
 const DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT = 2;
+type NonTaskModelRuntimeEnv = Partial<Record<string, string | undefined>>;
 
 /**
  * Ordinary non-task sessions produce text or structured output only; no tool
@@ -128,7 +129,7 @@ interface GenerateTrackedNonTaskBaseParams extends NonTaskInferenceTrackingInput
   prompt: string;
   system?: string;
   model?: string;
-  modelRole?: 'primary' | 'small';
+  modelRole?: 'primary' | 'small' | 'orchestration';
   maxOutputTokens?: number;
   /** null lets OpenCode own the prompt lifecycle without a Roomote deadline. */
   timeoutMs?: number | null;
@@ -381,13 +382,13 @@ function isOpenCodeSessionMissing(error: unknown): boolean {
 
 async function resolveNonTaskModelRuntime(
   model?: string,
-  modelRole: 'primary' | 'small' = 'small',
+  modelRole: 'primary' | 'small' | 'orchestration' = 'small',
 ): Promise<{
   model: string;
-  resolvedModelRuntimeEnv: Partial<Record<string, string>>;
+  resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
 }> {
   const requestedModel = model?.trim();
-  let resolvedModelRuntimeEnv: Partial<Record<string, string>> = {};
+  let resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv = {};
 
   try {
     resolvedModelRuntimeEnv = await resolveEffectiveModelRuntimeEnv();
@@ -405,11 +406,14 @@ async function resolveNonTaskModelRuntime(
 
   const resolvedModel =
     requestedModel ||
-    (modelRole === 'primary'
-      ? resolvedModelRuntimeEnv.R_MODEL
-      : resolvedModelRuntimeEnv.R_SMALL_MODEL ||
-        resolvedModelRuntimeEnv.R_MODEL) ||
-    (modelRole === 'primary'
+    (modelRole === 'orchestration'
+      ? resolvedModelRuntimeEnv.R_ORCHESTRATION_MODEL ||
+        resolvedModelRuntimeEnv.R_MODEL
+      : modelRole === 'primary'
+        ? resolvedModelRuntimeEnv.R_MODEL
+        : resolvedModelRuntimeEnv.R_SMALL_MODEL ||
+          resolvedModelRuntimeEnv.R_MODEL) ||
+    (modelRole === 'primary' || modelRole === 'orchestration'
       ? asString(parseOpenCodeConfigJson(readOpenCodeDebugConfig()).model)
       : resolveOpenCodeSmallModel());
 
@@ -417,6 +421,32 @@ async function resolveNonTaskModelRuntime(
     throw new Error(
       'Model configuration is required for non-task model calls. Set R_MODEL to a provider/model ID.',
     );
+  }
+
+  let selectedRuntimeEnv = resolvedModelRuntimeEnv;
+
+  if (
+    requestedModel ||
+    (modelRole === 'orchestration' &&
+      (resolvedModelRuntimeEnv.R_ORCHESTRATION_MODEL ||
+        resolvedModelRuntimeEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT))
+  ) {
+    selectedRuntimeEnv = {
+      ...resolvedModelRuntimeEnv,
+      R_MODEL: resolvedModel,
+    };
+
+    if (modelRole === 'orchestration') {
+      const orchestrationReasoningEffort =
+        resolvedModelRuntimeEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT;
+
+      if (orchestrationReasoningEffort) {
+        selectedRuntimeEnv.R_MODEL_REASONING_EFFORT =
+          orchestrationReasoningEffort;
+      } else {
+        selectedRuntimeEnv.R_MODEL_REASONING_EFFORT = undefined;
+      }
+    }
   }
 
   return {
@@ -430,9 +460,7 @@ async function resolveNonTaskModelRuntime(
     // OpenAI-compatible) id fails with ProviderModelNotFoundError before any
     // request is made. The lease cache keys on env, so distinct explicit
     // models get their own servers instead of colliding.
-    resolvedModelRuntimeEnv: requestedModel
-      ? { ...resolvedModelRuntimeEnv, R_MODEL: requestedModel }
-      : resolvedModelRuntimeEnv,
+    resolvedModelRuntimeEnv: selectedRuntimeEnv,
   };
 }
 
@@ -465,7 +493,7 @@ async function resolveModelForInputModality(
   params: GenerateTrackedNonTaskTextParams,
   runtime: {
     model: string;
-    resolvedModelRuntimeEnv: Partial<Record<string, string>>;
+    resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
   },
 ): Promise<string> {
   const modality = params.requiredInputModality;
@@ -552,7 +580,7 @@ async function runNonTaskSdkPrompt(
   params: GenerateTrackedNonTaskBaseParams,
   runtime: {
     model: string;
-    resolvedModelRuntimeEnv: Partial<Record<string, string>>;
+    resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
   },
   promptOptions: NonTaskSdkPromptOptions,
   options: {
@@ -562,6 +590,7 @@ async function runNonTaskSdkPrompt(
     onPromptStarted?: () => void;
     onSessionReady?: (sessionID: string) => Promise<void> | void;
     permission?: PermissionRuleset;
+    preserveReasoning?: boolean;
     promptErrorLabel?: string;
     session?: NonTaskOpenCodeSession;
     signal?: AbortSignal;
@@ -581,6 +610,7 @@ async function runNonTaskSdkPrompt(
   const server = await leaseOpenCodeSdkServer({
     env: { ...resolvedModelRuntimeEnv, ...options.env },
     ephemeral: options.ephemeral,
+    preserveReasoning: options.preserveReasoning,
     startTimeoutMs:
       timeoutMs === null
         ? DEFAULT_OPENCODE_SDK_SERVER_START_TIMEOUT_MS
@@ -865,6 +895,7 @@ export async function generateTrackedNonTaskTextInOpenCodeSession(
       onPromptStarted: options.onPromptStarted,
       onSessionReady: options.onSessionReady,
       permission: options.permission,
+      preserveReasoning: true,
       promptErrorLabel: 'OpenCode native Fast prompt failed',
       session,
       signal: options.signal,
