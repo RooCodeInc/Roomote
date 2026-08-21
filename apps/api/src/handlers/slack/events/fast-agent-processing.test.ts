@@ -620,7 +620,7 @@ describe('processFastAgentMessage', () => {
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
   });
 
-  it('accepts ordinary text when continuing an existing fast thread', async () => {
+  it('skips the processing reaction while continuing an active fast session', async () => {
     const slack = {
       addReaction: vi.fn().mockResolvedValue(true),
       removeReaction: vi.fn().mockResolvedValue(true),
@@ -642,10 +642,61 @@ describe('processFastAgentMessage', () => {
       userId: 'user-1',
       teamId: 'T123',
       continuation: true,
+      showProcessingReaction: false,
     });
 
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({ question: 'Good, tired' }),
     );
+    expect(slack.addReaction).not.toHaveBeenCalled();
+    expect(slack.removeReaction).not.toHaveBeenCalled();
+  });
+
+  it('allows an intentional eyes closeout without a processing reaction', async () => {
+    mocks.answerQuestion.mockImplementationOnce(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReaction: (reaction: unknown) => void };
+      }) => {
+        await adapter.postReaction({
+          name: 'eyes',
+          purpose: 'closeout',
+          messageId: '100.002',
+        });
+        return '';
+      },
+    );
+    const slack = {
+      addReaction: vi.fn().mockResolvedValue(true),
+      removeReaction: vi.fn().mockResolvedValue(true),
+      normalizeIncomingText: vi.fn(async (text: string) => text),
+      fetchThreadMessages: vi.fn(async () => []),
+    };
+
+    await processFastAgentMessage({
+      event: {
+        type: 'message',
+        channel: 'D123',
+        channel_type: 'im',
+        thread_ts: '100.001',
+        user: 'U123',
+        text: 'Anything else?',
+        ts: '100.002',
+      } as never,
+      slack: slack as never,
+      userId: 'user-1',
+      teamId: 'T123',
+      continuation: true,
+      showProcessingReaction: false,
+    });
+
+    expect(slack.addReaction).toHaveBeenCalledOnce();
+    expect(slack.addReaction).toHaveBeenCalledWith({
+      channel: 'D123',
+      timestamp: '100.002',
+      name: 'eyes',
+    });
+    expect(slack.removeReaction).not.toHaveBeenCalled();
   });
 });

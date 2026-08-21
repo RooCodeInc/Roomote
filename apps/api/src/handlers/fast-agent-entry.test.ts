@@ -10,7 +10,39 @@ vi.mock('@roomote/db/server', () => ({
   users: { id: 'users.id' },
 }));
 
-import { hasCommunicationsFastModeDefault } from './fast-agent-entry';
+import {
+  hasCommunicationsFastModeDefault,
+  shouldShowFastAgentProcessingReaction,
+} from './fast-agent-entry';
+
+describe('shouldShowFastAgentProcessingReaction', () => {
+  it('shows the reaction when default mode creates a session', () => {
+    expect(
+      shouldShowFastAgentProcessingReaction({
+        entryMode: 'default',
+        hasExistingSession: false,
+      }),
+    ).toBe(true);
+  });
+
+  it('skips the reaction for an active default session', () => {
+    expect(
+      shouldShowFastAgentProcessingReaction({
+        entryMode: 'default',
+        hasExistingSession: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('shows the wake reaction for explicit entry to an existing session', () => {
+    expect(
+      shouldShowFastAgentProcessingReaction({
+        entryMode: 'explicit',
+        hasExistingSession: true,
+      }),
+    ).toBe(true);
+  });
+});
 
 describe('hasCommunicationsFastModeDefault', () => {
   beforeEach(() => {

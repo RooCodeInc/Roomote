@@ -59,6 +59,7 @@ export async function processFastAgentMessage(params: {
   activeTasks?: FastAgentActiveTask[];
   launchTask: LaunchFastAgentTask;
   processingReactionName?: string;
+  showProcessingReaction?: boolean;
 }): Promise<void> {
   const {
     event,
@@ -71,6 +72,7 @@ export async function processFastAgentMessage(params: {
     activeTasks = [],
     launchTask,
     processingReactionName = 'eyes',
+    showProcessingReaction = true,
   } = params;
   const threadId = event.thread_ts || event.ts;
   const conversation = {
@@ -103,11 +105,13 @@ export async function processFastAgentMessage(params: {
   let didAddProcessingReaction = false;
 
   try {
-    didAddProcessingReaction = await slack.addReaction({
-      channel: event.channel,
-      timestamp: event.ts,
-      name: processingReactionName,
-    });
+    if (showProcessingReaction) {
+      didAddProcessingReaction = await slack.addReaction({
+        channel: event.channel,
+        timestamp: event.ts,
+        name: processingReactionName,
+      });
+    }
 
     if (!question) {
       await postSlackThreadMarkdownMessage({
