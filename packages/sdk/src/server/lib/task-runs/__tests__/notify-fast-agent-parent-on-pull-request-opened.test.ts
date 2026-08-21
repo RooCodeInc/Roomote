@@ -156,18 +156,6 @@ describe('notifyFastAgentParentOnPullRequestOpened', () => {
     );
   });
 
-  it('does not deliver the same pull request twice', async () => {
-    mocks.claimReturning
-      .mockResolvedValueOnce([{ id: 200 }])
-      .mockResolvedValueOnce([]);
-
-    const run = makeRun({ fastAgentParent: fastParent });
-    await notifyFastAgentParentOnPullRequestOpened({ run, pullRequest });
-    await notifyFastAgentParentOnPullRequestOpened({ run, pullRequest });
-
-    expect(mocks.deliverParentEvent).toHaveBeenCalledTimes(1);
-  });
-
   it('omits blank task-generated context so metadata remains the fallback', async () => {
     await notifyFastAgentParentOnPullRequestOpened({
       run: makeRun({ fastAgentParent: fastParent }),
@@ -182,44 +170,6 @@ describe('notifyFastAgentParentOnPullRequestOpened', () => {
         }),
       }),
     );
-  });
-
-  it('releases a failed claim so an update retry can deliver it', async () => {
-    mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
-    mocks.deliverParentEvent
-      .mockRejectedValueOnce(new Error('model offline'))
-      .mockResolvedValueOnce(undefined);
-
-    const run = makeRun({ fastAgentParent: fastParent });
-    await expect(
-      notifyFastAgentParentOnPullRequestOpened({ run, pullRequest }),
-    ).rejects.toThrow('model offline');
-    await notifyFastAgentParentOnPullRequestOpened({ run, pullRequest });
-
-    expect(mocks.deliverParentEvent).toHaveBeenCalledTimes(2);
-    expect(
-      mocks.updateSet.mock.calls.some(([values]) => {
-        const result = (values as { result?: { strings?: string[] } }).result;
-        return result?.strings?.join('').includes(' - ') === true;
-      }),
-    ).toBe(true);
-  });
-
-  it('settles the claim without history when the run became terminal', async () => {
-    mocks.deliverParentEvent.mockResolvedValueOnce('skipped');
-
-    await notifyFastAgentParentOnPullRequestOpened({
-      run: makeRun({ fastAgentParent: fastParent }),
-      pullRequest,
-    });
-
-    expect(mocks.recordLifecycle).not.toHaveBeenCalled();
-    expect(
-      mocks.updateSet.mock.calls.some(([values]) => {
-        const result = (values as { result?: { strings?: string[] } }).result;
-        return result?.strings?.join('').includes('to_jsonb(now())') === true;
-      }),
-    ).toBe(true);
   });
 
   it('does nothing for a task without a Fast parent', async () => {

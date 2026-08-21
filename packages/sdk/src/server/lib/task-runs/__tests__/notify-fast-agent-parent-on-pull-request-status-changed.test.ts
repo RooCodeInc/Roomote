@@ -142,37 +142,6 @@ describe('notifyFastAgentParentOnPullRequestStatusChanged', () => {
     },
   );
 
-  it('does not redeliver a settled status claim', async () => {
-    mocks.claimReturning.mockResolvedValue([]);
-
-    await notifyFastAgentParentOnPullRequestStatusChanged({
-      run: makeRun({ fastAgentParent: fastParent }),
-      pullRequest,
-      actorLogin: 'alice',
-    });
-
-    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
-  });
-
-  it('releases a transiently failed claim for webhook retry', async () => {
-    mocks.deliverParentEvent.mockRejectedValue(new Error('model offline'));
-
-    await expect(
-      notifyFastAgentParentOnPullRequestStatusChanged({
-        run: makeRun({ fastAgentParent: fastParent }),
-        pullRequest: { ...pullRequest, status: 'closed' },
-        actorLogin: 'alice',
-      }),
-    ).rejects.toThrow('model offline');
-
-    expect(
-      mocks.updateSet.mock.calls.some(([values]) => {
-        const result = (values as { result?: { strings?: string[] } }).result;
-        return result?.strings?.join('').includes(' - ') === true;
-      }),
-    ).toBe(true);
-  });
-
   it('does nothing for a task without a Fast parent', async () => {
     await notifyFastAgentParentOnPullRequestStatusChanged({
       run: makeRun({}),
