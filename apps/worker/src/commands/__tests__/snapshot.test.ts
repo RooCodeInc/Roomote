@@ -6,7 +6,6 @@ const {
   mockFindTaskRun,
   mockFindEnvironment,
   mockDone,
-  mockUpdateSnapshotStatus,
   mockSetup,
   mockInjectEnvVars,
   mockWorkerEnvFromProcessEnv,
@@ -20,7 +19,6 @@ const {
   mockFindTaskRun: vi.fn(),
   mockFindEnvironment: vi.fn(),
   mockDone: vi.fn(),
-  mockUpdateSnapshotStatus: vi.fn(),
   mockSetup: vi.fn(),
   mockInjectEnvVars: vi.fn(),
   mockWorkerEnvFromProcessEnv: vi.fn(),
@@ -38,10 +36,7 @@ vi.mock('@roomote/sdk/client', () => ({
       findFirstById: mockFindTaskRun,
       done: mockDone,
     },
-    environments: {
-      findEnvironment: mockFindEnvironment,
-      updateSnapshotStatus: mockUpdateSnapshotStatus,
-    },
+    environments: { findEnvironment: mockFindEnvironment },
   },
 }));
 
@@ -104,7 +99,6 @@ describe('snapshot', () => {
     mockWorkerEnvFromProcessEnv.mockReturnValue({});
     mockCreateStartupLogger.mockReturnValue({ userLog: { log: vi.fn() } });
     mockDone.mockResolvedValue(undefined);
-    mockUpdateSnapshotStatus.mockResolvedValue(undefined);
     mockSetup.mockRejectedValue(new Error('setup failed'));
   });
 
@@ -113,7 +107,7 @@ describe('snapshot', () => {
     expect(EXPLICIT_SNAPSHOT_TIMEOUT_MS).toBe(10 * 60 * 1_000);
   });
 
-  it('treats the failure cleanup status write as a best-effort no-op when it succeeds idempotently', async () => {
+  it('delegates snapshot failure state to the terminal run path', async () => {
     const result = await snapshot({
       runId: 42,
       environmentId: 'env-1',
@@ -125,10 +119,6 @@ describe('snapshot', () => {
       id: 42,
       status: RunStatus.Failed,
       error: 'setup failed',
-    });
-    expect(mockUpdateSnapshotStatus).toHaveBeenCalledWith({
-      environmentId: 'env-1',
-      snapshotStatus: 'failed',
     });
     expect(mockSetup).toHaveBeenCalledWith(
       expect.objectContaining({

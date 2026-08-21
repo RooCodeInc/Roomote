@@ -417,11 +417,14 @@ export const finishRun = async ({
   );
 
   // Anonymous analytics (no-op unless enabled): terminal task outcome with
-  // non-identifying routing facts only.
+  // non-identifying routing facts only. Snapshot maintenance is excluded from
+  // task_created, so exclude it here too to keep task reliability denominators
+  // aligned.
   if (
-    status === RunStatus.Completed ||
-    status === RunStatus.Failed ||
-    status === RunStatus.Canceled
+    payloadKind !== TaskPayloadKind.SnapshotEnvironment &&
+    (status === RunStatus.Completed ||
+      status === RunStatus.Failed ||
+      status === RunStatus.Canceled)
   ) {
     void captureTaskSettled(run.id, status, errorCode);
   }

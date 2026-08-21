@@ -838,6 +838,21 @@ describe('finishRun', () => {
       );
     });
 
+    it.each([
+      RunStatus.Completed,
+      RunStatus.Failed,
+      RunStatus.Canceled,
+    ] as const)(
+      'excludes %s snapshot maintenance from task settlement analytics',
+      async (status) => {
+        mockFindFirstRun.mockResolvedValue(makeSnapshotRun());
+
+        await finishRun({ id: 55, status, error: 'boom' });
+
+        expect(mockCaptureTaskSettled).not.toHaveBeenCalled();
+      },
+    );
+
     it('flips the pending row to failed when the run is canceled', async () => {
       mockFindFirstRun.mockResolvedValue(makeSnapshotRun());
 
