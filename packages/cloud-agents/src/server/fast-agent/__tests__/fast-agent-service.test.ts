@@ -49,7 +49,7 @@ vi.mock('../../router', () => ({
 
 vi.mock('../../non-task-provider-usage', () => ({
   NON_TASK_INFERENCE_SURFACES: {
-    fastAgentQuestionAnswering: 'fast_agent_question_answering',
+    fastAgentQuestionAnswering: 'fast_agent',
   },
   classifyNonTaskInferenceError: mocks.classifyInferenceError,
   generateTrackedNonTaskTextInOpenCodeSession: mocks.generateText,
