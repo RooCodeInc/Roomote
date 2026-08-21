@@ -170,6 +170,94 @@ describe('routeTask', () => {
     });
   });
 
+  it.each([
+    'https://acme.slack.com/archives/C123/p1710000000000100?thread_ts=1710000000.000000',
+    'https://discord.com/channels/123/456/789',
+  ])(
+    'fetches pasted communication context and reroutes from %s',
+    async (messageLink) => {
+      mockCallRouterMcpTool.mockResolvedValue({
+        messages: [
+          {
+            user: 'Alex',
+            text: 'The failing endpoint belongs to the API service.',
+          },
+        ],
+      });
+      mockGenerateTrackedNonTaskObject
+        .mockResolvedValueOnce({
+          object: {
+            workspaceValue: 'Full Stack',
+            reasoning: 'The message alone does not identify the workspace.',
+            confidence: 0.4,
+            needsExternalLookup: true,
+            externalReference: messageLink,
+          },
+        })
+        .mockResolvedValueOnce({
+          object: {
+            workspaceValue: 'API',
+            reasoning: 'The linked thread describes the API service.',
+            confidence: 0.92,
+            needsExternalLookup: false,
+            externalReference: null,
+          },
+        });
+
+      const result = await routeTask(
+        createContext({
+          taskDescription: `Please look into this ${messageLink}`,
+          routingActor: { userId: 'user-1', apiBaseUrl: 'https://api.test' },
+          availableEnvironments: [
+            ...environments,
+            {
+              id: 'env-api',
+              name: 'API',
+              description: 'Backend services',
+              repositoryNames: ['acme/api'],
+            },
+          ],
+        }),
+      );
+
+      expect(mockCallRouterMcpTool).toHaveBeenCalledWith({
+        context: expect.objectContaining({
+          taskDescription: `Please look into this ${messageLink}`,
+          routingActor: {
+            userId: 'user-1',
+            apiBaseUrl: 'https://api.test',
+          },
+        }),
+        serverId: 'roomote',
+        toolName: 'get_chat_message_context',
+        args: { messageLink },
+      });
+      expect(mockGenerateTrackedNonTaskObject).toHaveBeenCalledTimes(2);
+      expect(mockGenerateTrackedNonTaskObject).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          prompt: expect.stringContaining(
+            'The failing endpoint belongs to the API service.',
+          ),
+        }),
+      );
+      expect(result).toMatchObject({
+        status: 'routed',
+        result: {
+          workspace: {
+            type: 'environment',
+            id: 'env-api',
+            name: 'API',
+          },
+          debug: {
+            phase: 'mcp',
+            toolsUsed: ['roomote.get_chat_message_context'],
+            needsExternalLookup: true,
+          },
+        },
+      });
+    },
+  );
+
   it('skips the issue fetch when the precheck routes without external context', async () => {
     mockGenerateTrackedNonTaskObject.mockResolvedValue({
       object: {

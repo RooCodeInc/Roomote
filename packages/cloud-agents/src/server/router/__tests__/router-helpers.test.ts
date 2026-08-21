@@ -465,4 +465,12 @@ describe('router helpers', () => {
 
     expect(shouldIncludeRoomoteRouterLookup(null)).toBe(false);
   });
+
+  it('instructs underspecified communication permalinks to request external context', () => {
+    const prompt = buildWorkspaceRoutingPrompt();
+
+    expect(prompt).toContain('connected communication platforms');
+    expect(prompt).toContain('"look into this" followed by the link');
+    expect(prompt).not.toContain('Slack or Discord');
+  });
 });
