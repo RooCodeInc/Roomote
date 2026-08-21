@@ -142,7 +142,7 @@ describe('BrainSettings', () => {
   it('shows what the Brain holds, where it learns from, and what it recorded', () => {
     render(<BrainSettings />);
 
-    expect(screen.getByText('Connected')).toBeInTheDocument();
+    expect(screen.getAllByText('Connected')).toHaveLength(2);
     expect(screen.getByText('http://gbrain:8080')).toBeInTheDocument();
     expect(screen.getByText('OpenRouter')).toBeInTheDocument();
     expect(screen.getByText('Semantic + keyword')).toBeInTheDocument();
@@ -162,9 +162,11 @@ describe('BrainSettings', () => {
     expect(screen.getByText('Pages written, last 30 days')).toBeInTheDocument();
     expect(screen.getByText('Reworked the outbox drainer')).toBeInTheDocument();
 
-    expect(screen.getByText('1 of 2 connected')).toBeInTheDocument();
-    expect(screen.getByText('Ingesting')).toBeInTheDocument();
-    expect(screen.getByText('Not connected')).toBeInTheDocument();
+    expect(screen.queryByText('Sources')).not.toBeInTheDocument();
+    expect(screen.queryByText('1 of 2 connected')).not.toBeInTheDocument();
+    expect(screen.queryByText('Ingesting')).not.toBeInTheDocument();
+    expect(screen.queryByText('Not connected')).not.toBeInTheDocument();
+    expect(screen.queryByText('Notion')).not.toBeInTheDocument();
 
     expect(screen.getByText('Recorded')).toBeInTheDocument();
     expect(screen.getByText('Queued')).toBeInTheDocument();
@@ -268,9 +270,8 @@ describe('BrainSettings', () => {
     // "Slack public channels" carries its "Slack" namespace badge (the other
     // "Slack" is the composition legend's namespace entry)...
     expect(screen.getAllByText('Slack')).toHaveLength(2);
-    // ...while a source whose namespace repeats its own name gets no badge:
-    // exactly one "Notion" (the row title), not a second badge copy.
-    expect(screen.getAllByText('Notion')).toHaveLength(1);
+    // Disconnected sources are omitted from the list entirely.
+    expect(screen.queryByText('Notion')).not.toBeInTheDocument();
   });
 
   it('stops at the explanation on a deployment with no Brain', () => {
