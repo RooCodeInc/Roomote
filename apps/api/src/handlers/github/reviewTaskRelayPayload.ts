@@ -47,9 +47,6 @@ export async function getReviewTaskRelayPayload({
   });
 
   if (relayState.ownerLookupPending) {
-    if (!settings.relayReviewResultsToTask) {
-      return { relayReviewResultsToTask: false };
-    }
     return {
       relayReviewResultsToTask: true,
       linkedTaskRelayLookupPending: true,

@@ -42,11 +42,7 @@ describe('getReviewTaskRelayPayload', () => {
     });
   });
 
-  it('keeps the late owner lookup eligible to discover a Fast parent', async () => {
-    mocks.getSettings.mockResolvedValue({
-      relayReviewResultsToTask: true,
-      relayEligibleCreatorIds: ['user-1'],
-    });
+  it('keeps the late owner lookup eligible when ordinary relay is disabled', async () => {
     mocks.getRelayState.mockResolvedValue({
       linkedTaskId: null,
       relayEnabled: false,
