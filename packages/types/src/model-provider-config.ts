@@ -1127,7 +1127,7 @@ export type DeploymentModelConfig = {
  */
 export const DEFAULT_MODEL_ROLE_REASONING_EFFORTS = {
   coding: 'medium',
-  orchestration: 'medium',
+  orchestration: 'low',
   helper: 'low',
   vision: 'low',
   codeReview: 'high',

@@ -570,9 +570,9 @@ describe('ModelSettingsSection', () => {
     renderModelSettingsSection();
 
     const modelMappingSection = screen.getByTestId('section-Model mapping');
-    // coding + orchestration: Medium, helper + vision + explore: Low, code review + planning: High.
-    expect(within(modelMappingSection).getAllByText('Medium')).toHaveLength(2);
-    expect(within(modelMappingSection).getAllByText('Low')).toHaveLength(3);
+    // coding: Medium; orchestration + helper + vision + explore: Low; code review + planning: High.
+    expect(within(modelMappingSection).getByText('Medium')).toBeInTheDocument();
+    expect(within(modelMappingSection).getAllByText('Low')).toHaveLength(4);
     expect(within(modelMappingSection).getAllByText('High')).toHaveLength(2);
   });
 
@@ -589,8 +589,8 @@ describe('ModelSettingsSection', () => {
     expect(
       within(modelMappingSection).getByText('Extra high'),
     ).toBeInTheDocument();
-    // Helper, vision, and explore fall back to Low.
-    expect(within(modelMappingSection).getAllByText('Low')).toHaveLength(3);
+    // Orchestration, helper, vision, and explore fall back to Low.
+    expect(within(modelMappingSection).getAllByText('Low')).toHaveLength(4);
   });
 
   it('hides the reasoning selector for models that do not support reasoning', () => {
