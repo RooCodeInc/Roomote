@@ -1325,6 +1325,9 @@ export function ModelSettingsSection({
   };
 
   const updateRoleModel = (role: TaskModelRole, modelId: string | null) => {
+    const resolvedModelId =
+      role === 'coding' ? modelId : (modelId ?? roleDrafts.coding.modelId);
+
     applyDraftUpdates(
       {
         roles: {
@@ -1332,6 +1335,9 @@ export function ModelSettingsSection({
           [role]: {
             ...roleDrafts[role],
             modelId,
+            reasoningEffort: modelSupportsReasoning(resolvedModelId)
+              ? roleDrafts[role].reasoningEffort
+              : null,
           },
         },
       },

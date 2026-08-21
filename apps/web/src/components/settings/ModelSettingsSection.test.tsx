@@ -138,12 +138,14 @@ function buildSettingsData(
     planningReasoningManagedByEnv?: boolean;
     codingEffectiveModelId?: string;
     orchestrationEffectiveModelId?: string | null;
+    orchestrationPersistedModelId?: string | null;
     helperEffectiveModelId?: string | null;
     visionEffectiveModelId?: string | null;
     codeReviewEffectiveModelId?: string | null;
     exploreEffectiveModelId?: string | null;
     planningEffectiveModelId?: string | null;
     codingReasoningEffort?: ReasoningEffort | null;
+    orchestrationReasoningEffort?: ReasoningEffort | null;
     helperReasoningEffort?: ReasoningEffort | null;
   } = {},
 ) {
@@ -193,10 +195,10 @@ function buildSettingsData(
       },
       orchestrationModel: {
         effectiveModelId: overrides.orchestrationEffectiveModelId ?? null,
-        persistedModelId: null,
+        persistedModelId: overrides.orchestrationPersistedModelId ?? null,
         source: 'same-as-coding',
         managedByEnv: overrides.orchestrationManagedByEnv ?? false,
-        reasoningEffort: null as ReasoningEffort | null,
+        reasoningEffort: overrides.orchestrationReasoningEffort ?? null,
         reasoningManagedByEnv:
           overrides.orchestrationReasoningManagedByEnv ?? false,
       },
@@ -605,6 +607,40 @@ describe('ModelSettingsSection', () => {
     const triggers = container.querySelectorAll('[data-slot="select-trigger"]');
     // 7 model selects + the add-model provider select; no reasoning selectors.
     expect(triggers).toHaveLength(8);
+  });
+
+  it('clears orchestration reasoning when switching to a non-reasoning model', async () => {
+    const data = buildSettingsData({
+      orchestrationEffectiveModelId: 'openrouter/openai/gpt-5.4',
+      orchestrationPersistedModelId: 'openrouter/openai/gpt-5.4',
+      orchestrationReasoningEffort: 'high',
+    });
+    data.runtimeModels.orchestrationModel.source = 'database';
+    data.models[1]!.metadata.supportsReasoning = false;
+    settingsData.current = data;
+
+    const { container } = renderModelSettingsSection();
+    const triggers = container.querySelectorAll<HTMLButtonElement>(
+      '[data-slot="select-trigger"]',
+    );
+
+    fireEvent.click(triggers[2]!);
+    fireEvent.click(await screen.findByRole('option', { name: 'GLM 5.2' }));
+
+    await waitFor(() => {
+      expect(updateMutateAsyncMock).toHaveBeenCalledTimes(1);
+    });
+    expect(updateMutateAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orchestrationModelId: 'openrouter/z-ai/glm-5.2',
+        orchestrationModelReasoningEffort: null,
+      }),
+    );
+    expect(
+      screen.queryByRole('combobox', {
+        name: 'Orchestration model reasoning level',
+      }),
+    ).toBeNull();
   });
 
   it('renders model metadata in the available models list', () => {
