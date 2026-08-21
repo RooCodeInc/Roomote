@@ -210,4 +210,47 @@ describe('createFastAgentSlackTaskLauncher', () => {
     );
     expect(mocks.enqueueTask).not.toHaveBeenCalled();
   });
+
+  it('passes ownership cancellation through the post-kickoff queue window', async () => {
+    const controller = new AbortController();
+    let queued = false;
+    mocks.enqueueTask.mockImplementationOnce(
+      async (
+        _input: unknown,
+        options: {
+          signal?: AbortSignal;
+          beforeEnqueue: (taskRun: { taskId: string }) => Promise<void>;
+        },
+      ) => {
+        await options.beforeEnqueue({ taskId: 'task-1' });
+        controller.abort(
+          new Error('Fast conversation lock ownership was lost.'),
+        );
+        options.signal?.throwIfAborted();
+        queued = true;
+        return { taskId: 'task-1' };
+      },
+    );
+    const launchTask = createFastAgentSlackTaskLauncher({
+      userId: 'user-1',
+      teamId: 'T123',
+      channelId: 'C123',
+      threadTs: '100.001',
+    });
+
+    await expect(
+      launchTask({
+        prompt: 'Add a regression test',
+        environmentId: null,
+        parentSessionId: '11111111-1111-4111-8111-111111111111',
+        signal: controller.signal,
+        postKickoff: vi.fn(),
+      }),
+    ).rejects.toThrow('Fast conversation lock ownership was lost.');
+    expect(queued).toBe(false);
+    expect(mocks.enqueueTask).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ signal: controller.signal }),
+    );
+  });
 });

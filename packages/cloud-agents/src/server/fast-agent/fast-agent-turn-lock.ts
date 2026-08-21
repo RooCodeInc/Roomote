@@ -45,11 +45,11 @@ export async function acquireFastAgentTurnLock(params: {
         );
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const acquisitionStartedAt = Date.now();
     const release = await acquireRedisLock(key, {
       ttlSeconds: FAST_AGENT_TURN_LOCK_TTL_SECONDS,
     });
     if (release) {
+      const acquisitionConfirmedAt = Date.now();
       const ownership = new AbortController();
       let released = false;
       let renewalPending = false;
@@ -102,7 +102,7 @@ export async function acquireFastAgentTurnLock(params: {
           });
       }, FAST_AGENT_TURN_LOCK_RENEW_MS);
       renewalTimer.unref();
-      scheduleLeaseDeadline(acquisitionStartedAt);
+      scheduleLeaseDeadline(acquisitionConfirmedAt);
 
       const releaseTurnLock = (async () => {
         released = true;

@@ -211,4 +211,44 @@ describe('Fast conversation turn locking', () => {
       vi.useRealTimers();
     }
   });
+
+  it('starts the initial lease deadline after Redis confirms acquisition', async () => {
+    vi.useFakeTimers();
+    try {
+      const releaseRedisLock = Object.assign(
+        vi.fn().mockResolvedValue(undefined),
+        {
+          renew: vi.fn().mockResolvedValue(false),
+          renewDetailed: vi.fn().mockResolvedValue('error'),
+        },
+      );
+      acquireRedisLockMock.mockImplementationOnce(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 590_000));
+        return releaseRedisLock;
+      });
+
+      const acquisition = acquireFastAgentTurnLock({
+        conversation: {
+          surface: 'slack',
+          workspaceId: 'workspace-1',
+          conversationId: 'conversation-1',
+          replyTarget: {
+            channelId: 'channel-1',
+            threadId: 'conversation-1',
+          },
+        },
+      });
+      await vi.advanceTimersByTimeAsync(590_000);
+      const releaseTurnLock = await acquisition;
+
+      await vi.advanceTimersByTimeAsync(599_999);
+      expect(releaseTurnLock?.signal.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(releaseTurnLock?.signal.aborted).toBe(true);
+      await releaseTurnLock?.();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -520,6 +520,7 @@ export async function launchDiscordTask(input: {
       trigger: 'message',
     },
     {
+      signal: input.signal,
       // Automation initiators derive the 'automation' launch class; forcing
       // 'human' would misclassify bot-authored auto-respond launches.
       ...(initiator.kind === 'automation'

@@ -44,6 +44,7 @@ export function createFastAgentTaskLauncher(params: {
         trigger: 'message',
       },
       {
+        signal,
         beforeEnqueue: async (taskRun) => {
           signal?.throwIfAborted();
           taskUrl = getTaskUrl({
