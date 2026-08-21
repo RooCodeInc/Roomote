@@ -68,22 +68,14 @@ export function BrainSourcesSection({
 }: {
   sources: BrainSourceSummary[];
 }) {
-  const connected = sources.filter(
+  const connectedSources = sources.filter(
     (source) => source.status !== 'not_connected',
-  ).length;
+  );
 
   return (
-    <Section
-      icon={RadioTower}
-      title="Where it learns from"
-      action={
-        <span className="text-sm text-muted-foreground">
-          {connected} of {sources.length} connected
-        </span>
-      }
-    >
+    <Section icon={RadioTower} title="Where it learns from">
       <ul className="divide-y">
-        {sources.map((source) => (
+        {connectedSources.map((source) => (
           <SourceRow key={source.id} source={source} />
         ))}
       </ul>

@@ -110,7 +110,7 @@ export function describeSourceStatus(
 ): BrainSourceStatusPresentation {
   switch (status) {
     case 'ingesting':
-      return { label: 'Ingesting', variant: 'success', hint: null };
+      return { label: 'Connected', variant: 'success', hint: null };
     case 'backfilling':
       return {
         label: 'Backfilling',
