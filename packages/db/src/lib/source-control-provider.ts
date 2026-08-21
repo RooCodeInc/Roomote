@@ -29,6 +29,11 @@ type RepositoryProviderRow = {
   sourceControlProvider: SourceControlProvider;
 };
 
+export type RepositorySourceControl = {
+  provider: SourceControlProvider;
+  host?: string;
+};
+
 function selectRepositoryRows(
   rows: RepositoryProviderRow[],
   repositoryOrder: string[],
@@ -121,6 +126,31 @@ async function resolveProvidersByFullNames(
     .where(inArray(repositories.fullName, fullNames));
 
   return toRepositoryProviderMap(rows, fullNames, sourceControlHost);
+}
+
+/** Resolve the provider and host for one exact repository, or fail closed. */
+export async function resolveRepositorySourceControl(
+  dbOrTx: DatabaseOrTransaction,
+  fullName: string,
+): Promise<RepositorySourceControl | undefined> {
+  const rows = await dbOrTx
+    .select({
+      fullName: repositories.fullName,
+      host: repositories.host,
+      isActive: repositories.isActive,
+      sourceControlProvider: repositories.sourceControlProvider,
+    })
+    .from(repositories)
+    .where(eq(repositories.fullName, fullName));
+  const selected = selectRepositoryRows(rows, [fullName]);
+  const repository = selected?.[0];
+
+  return repository
+    ? {
+        provider: repository.sourceControlProvider,
+        ...(repository.host ? { host: repository.host } : {}),
+      }
+    : undefined;
 }
 
 async function resolveEnvironmentProviders(
