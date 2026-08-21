@@ -1184,6 +1184,9 @@ export const githubPullRequestReviewOpenSchema = sharedTaskSchema.extend({
     relayReviewResultsToTask: z.boolean().optional(),
     linkedTaskId: z.string().optional(),
     linkedTaskRelayLookupPending: z.boolean().optional(),
+    linkedReviewHandoffTarget: z
+      .enum(['fast_parent', 'implementation_task'])
+      .optional(),
   }),
 });
 
@@ -1203,6 +1206,9 @@ export const githubPullRequestReviewSyncSchema = sharedTaskSchema.extend({
     relayReviewResultsToTask: z.boolean().optional(),
     linkedTaskId: z.string().optional(),
     linkedTaskRelayLookupPending: z.boolean().optional(),
+    linkedReviewHandoffTarget: z
+      .enum(['fast_parent', 'implementation_task'])
+      .optional(),
   }),
 });
 

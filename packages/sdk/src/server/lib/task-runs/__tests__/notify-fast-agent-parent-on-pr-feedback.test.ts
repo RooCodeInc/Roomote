@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     claimReturning: vi.fn(),
+    findClaimRun: vi.fn(),
     updateSet: vi.fn(),
     recordLifecycle: vi.fn(),
     deliverParentEvent: vi.fn(),
@@ -27,6 +28,9 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('@roomote/db/server', () => ({
   db: {
+    query: {
+      taskRuns: { findFirst: mocks.findClaimRun },
+    },
     update: vi.fn(() => ({
       set: vi.fn((values: unknown) => {
         mocks.updateSet(values);
@@ -37,6 +41,8 @@ vi.mock('@roomote/db/server', () => ({
     })),
   },
   and: vi.fn((...args: unknown[]) => args),
+  asc: vi.fn((value: unknown) => value),
+  desc: vi.fn((value: unknown) => value),
   eq: vi.fn((...args: unknown[]) => args),
   recordTaskRunLifecycleEvent: mocks.recordLifecycle,
   sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
@@ -45,6 +51,8 @@ vi.mock('@roomote/db/server', () => ({
   })),
   taskRuns: {
     id: 'task_runs.id',
+    taskId: 'task_runs.task_id',
+    createdAt: 'task_runs.created_at',
     result: 'task_runs.result',
   },
 }));
@@ -99,6 +107,7 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
+    mocks.findClaimRun.mockResolvedValue({ id: 200 });
     mocks.deliverParentEvent.mockResolvedValue('delivered');
     mocks.recordLifecycle.mockResolvedValue(undefined);
   });
@@ -146,6 +155,50 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
     const firstEvent = mocks.deliverParentEvent.mock.calls[0]?.[0]?.event;
     const secondEvent = mocks.deliverParentEvent.mock.calls[1]?.[0]?.event;
     expect(secondEvent.feedbackId).toBe(firstEvent.feedbackId);
+  });
+
+  it('shares a feedback identity between direct review handoff and webhook delivery', async () => {
+    const run = makeRun({ fastAgentParent: fastParent });
+    await notifyFastAgentParentOnPrFeedback({
+      run,
+      ...input,
+      deliveryIds: ['linked-review:review-task:abc123'],
+      reviewTaskId: 'review-task',
+      reviewHeadSha: 'abc123',
+    });
+    await notifyFastAgentParentOnPrFeedback({
+      run,
+      ...input,
+      deliveryIds: ['durable-webhook-delivery'],
+      reviewTaskId: 'review-task',
+      reviewHeadSha: 'abc123',
+    });
+
+    const firstEvent = mocks.deliverParentEvent.mock.calls[0]?.[0]?.event;
+    const secondEvent = mocks.deliverParentEvent.mock.calls[1]?.[0]?.event;
+    expect(secondEvent.feedbackId).toBe(firstEvent.feedbackId);
+  });
+
+  it('preserves structured terminal review metadata in the Fast event', async () => {
+    const reviewResult = {
+      reviewKind: 'initial' as const,
+      outcome: 'findings_remain',
+      findingCount: 1,
+      approvalStatus: null,
+      headSha: 'abc123',
+    };
+
+    await notifyFastAgentParentOnPrFeedback({
+      run: makeRun({ fastAgentParent: fastParent }),
+      ...input,
+      reviewResult,
+    });
+
+    expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.objectContaining({ reviewResult }),
+      }),
+    );
   });
 
   it('does nothing for a task without a Fast parent', async () => {
