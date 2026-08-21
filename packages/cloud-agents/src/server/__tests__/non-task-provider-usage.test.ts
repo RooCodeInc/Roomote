@@ -376,7 +376,7 @@ describe('resolveOpenCodeSmallModel', () => {
 
     await generateTrackedNonTaskTextInOpenCodeSession(
       {
-        surface: 'fast_agent_question_answering',
+        surface: 'fast_agent',
         userId: 'user-1',
         prompt: 'Answer this.',
       },
@@ -388,10 +388,9 @@ describe('resolveOpenCodeSmallModel', () => {
     );
 
     expect(recordLlmUsageMock).toHaveBeenCalledWith({
-      source: 'fast_agent_question_answering',
+      source: 'fast_agent',
       usageType: 'inference',
-      eventKey:
-        'non-task:fast_agent_question_answering:session-1:message-fast-1',
+      eventKey: 'non-task:fast_agent:session-1:message-fast-1',
       taskId: null,
       userId: 'user-1',
       harnessSessionId: 'session-1',
@@ -410,7 +409,7 @@ describe('resolveOpenCodeSmallModel', () => {
       costSource: 'opencode_message',
       messageCreatedAt: new Date('2026-08-21T10:00:00.000Z'),
       messageCompletedAt: new Date('2026-08-21T10:00:02.000Z'),
-      details: { surface: 'fast_agent_question_answering' },
+      details: { surface: 'fast_agent' },
     });
   });
 
@@ -441,7 +440,7 @@ describe('resolveOpenCodeSmallModel', () => {
 
       const result = generateTrackedNonTaskTextInOpenCodeSession(
         {
-          surface: 'fast_agent_question_answering',
+          surface: 'fast_agent',
           prompt: 'Keep working.',
           timeoutMs: null,
         },
@@ -476,7 +475,7 @@ describe('resolveOpenCodeSmallModel', () => {
 
     await generateTrackedNonTaskTextInOpenCodeSession(
       {
-        surface: 'fast_agent_question_answering',
+        surface: 'fast_agent',
         prompt: 'Inspect this image.',
         files: [
           {
