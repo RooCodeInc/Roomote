@@ -1,4 +1,4 @@
-import { canRecoverAutomationRecommendationInitialRunClaim } from './automation-recommendations';
+import { canRecoverAutomationRecommendationInitialRunClaim } from './automation-recommendation-initial-runs';
 
 describe('canRecoverAutomationRecommendationInitialRunClaim', () => {
   const now = Date.parse('2026-08-14T18:00:00.000Z');

@@ -1,7 +1,3 @@
-import { createHash } from 'node:crypto';
-import { Queue } from 'bullmq';
-import { z } from 'zod';
-
 import { getInstallationOctokit } from '@roomote/github';
 import { getLatestAdoBuild, resolveAdoInstanceHost } from '@roomote/ado';
 import {
@@ -20,17 +16,12 @@ import {
   resolveGitLabInstanceHost,
 } from '@roomote/gitlab';
 import {
-  AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
-  AUTOMATION_RECOMMENDATION_CATALOG,
-  scoreAutomationRecommendations,
   type AutomationRecommendationBatch,
   type RepositoryAutomationSignals,
   type SourceControlProvider,
-  normalizeSetupNewState,
 } from '@roomote/types';
 import {
   db,
-  deploymentSettings,
   githubInstallations,
   pullRequestFacts,
   repositories,
@@ -39,25 +30,42 @@ import {
   eq,
   gte,
   inArray,
-  sql,
 } from '@roomote/db/server';
-import { getRedis } from '@roomote/redis';
-
-import { runCustomAutomationNow } from '../automations/custom-automations';
-import { runAutomationNow } from '../automations/run-now';
-
-export const AUTOMATION_RECOMMENDATIONS_QUEUE_NAME =
-  'automation-recommendations';
-export const AUTOMATION_SIGNAL_PREFETCH_QUEUE_NAME =
-  'automation-signal-prefetch';
-export const AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME =
-  'automation-recommendation-initial-runs';
-export const AUTOMATION_SIGNALS_VERSION = 2;
-export const AUTOMATION_RECOMMENDATION_REPOSITORY_CAP = 10;
-const AUTOMATION_SIGNAL_PREFETCH_CAP = AUTOMATION_RECOMMENDATION_REPOSITORY_CAP;
+import {
+  AUTOMATION_SIGNALS_VERSION,
+  automationRecommendationJobSchema,
+  automationSignalPrefetchJobSchema,
+  type AutomationRecommendationJob,
+  type AutomationSignalPrefetchJob,
+} from './automation-recommendation-queues';
+export {
+  AUTOMATION_RECOMMENDATIONS_QUEUE_NAME,
+  AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME,
+  AUTOMATION_RECOMMENDATION_REPOSITORY_CAP,
+  AUTOMATION_SIGNAL_PREFETCH_QUEUE_NAME,
+  AUTOMATION_SIGNALS_VERSION,
+  automationRecommendationInitialRunJobSchema,
+  automationRecommendationJobSchema,
+  automationSignalPrefetchJobSchema,
+  buildAutomationRecommendationFingerprint,
+  enqueueAutomationRecommendationInitialRun,
+  enqueueAutomationRecommendations,
+  enqueueAutomationSignalPrefetch,
+  type AutomationRecommendationInitialRunJob,
+  type AutomationRecommendationJob,
+  type AutomationSignalPrefetchJob,
+} from './automation-recommendation-queues';
+import {
+  AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
+  AUTOMATION_RECOMMENDATION_CATALOG,
+  scoreAutomationRecommendations,
+} from './automation-recommendations-policy';
+import {
+  isSetupAutomationRecommendationFingerprintCurrent,
+  updateSetupAutomationRecommendationBatchIfCurrent,
+} from './setup-automation-recommendations';
 
 const AUTOMATION_SIGNAL_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
-const AUTOMATION_RECOMMENDATION_INITIAL_RUN_CLAIM_TIMEOUT_MS = 15 * 60 * 1_000;
 const DEPENDENCY_MANIFEST_NAMES = new Set([
   'bun.lock',
   'bun.lockb',
@@ -82,165 +90,6 @@ const DEPENDENCY_MANIFEST_NAMES = new Set([
 
 type GitHubOctokit = Awaited<ReturnType<typeof getInstallationOctokit>>;
 type GitHubOctokitCache = Map<string, Promise<GitHubOctokit>>;
-
-export const automationRecommendationJobSchema = z.object({
-  fingerprint: z.string().min(1),
-  repositoryIds: z.array(z.string().uuid()),
-});
-export type AutomationRecommendationJob = z.infer<
-  typeof automationRecommendationJobSchema
->;
-
-export const automationSignalPrefetchJobSchema = z.object({
-  repositoryId: z.string().uuid(),
-  signalsVersion: z.number().int().positive(),
-});
-export type AutomationSignalPrefetchJob = z.infer<
-  typeof automationSignalPrefetchJobSchema
->;
-
-export const automationRecommendationInitialRunJobSchema = z.object({
-  fingerprint: z.string().min(1),
-  recommendationId: z.string().min(1),
-});
-export type AutomationRecommendationInitialRunJob = z.infer<
-  typeof automationRecommendationInitialRunJobSchema
->;
-
-let recommendationQueue: Queue<AutomationRecommendationJob> | null = null;
-let signalPrefetchQueue: Queue<AutomationSignalPrefetchJob> | null = null;
-let recommendationInitialRunQueue: Queue<AutomationRecommendationInitialRunJob> | null =
-  null;
-
-function getRecommendationQueue() {
-  recommendationQueue ??= new Queue<AutomationRecommendationJob>(
-    AUTOMATION_RECOMMENDATIONS_QUEUE_NAME,
-    {
-      connection: getRedis(),
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 1_000 },
-        removeOnComplete: { age: 3_600, count: 100 },
-        removeOnFail: { age: 24 * 3_600 },
-      },
-    },
-  );
-  return recommendationQueue;
-}
-
-function getSignalPrefetchQueue() {
-  signalPrefetchQueue ??= new Queue<AutomationSignalPrefetchJob>(
-    AUTOMATION_SIGNAL_PREFETCH_QUEUE_NAME,
-    {
-      connection: getRedis(),
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 2_000 },
-        removeOnComplete: { age: 24 * 3_600, count: 500 },
-        removeOnFail: { age: 7 * 24 * 3_600 },
-      },
-    },
-  );
-  return signalPrefetchQueue;
-}
-
-function getRecommendationInitialRunQueue() {
-  recommendationInitialRunQueue ??=
-    new Queue<AutomationRecommendationInitialRunJob>(
-      AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME,
-      {
-        connection: getRedis(),
-        defaultJobOptions: {
-          attempts: 3,
-          backoff: { type: 'exponential', delay: 5_000 },
-          removeOnComplete: { age: 24 * 3_600, count: 500 },
-          removeOnFail: { age: 7 * 24 * 3_600 },
-        },
-      },
-    );
-  return recommendationInitialRunQueue;
-}
-
-export function buildAutomationRecommendationFingerprint(
-  repositoryIds: readonly string[],
-  provider: SourceControlProvider | null,
-): string {
-  return createHash('sha256')
-    .update(
-      JSON.stringify({
-        repositoryIds: [...repositoryIds].sort(),
-        provider,
-        catalogVersion: AUTOMATION_RECOMMENDATIONS_CATALOG_VERSION,
-      }),
-    )
-    .digest('hex');
-}
-
-export async function enqueueAutomationRecommendations(
-  input: AutomationRecommendationJob,
-): Promise<void> {
-  const request = automationRecommendationJobSchema.parse(input);
-  const queue = getRecommendationQueue();
-  const jobId = `automation-recommendations-${request.fingerprint}`;
-  const existing = await queue.getJob(jobId);
-  if (existing) {
-    const state = await existing.getState();
-    if (state === 'completed' || state === 'failed') {
-      await existing.remove();
-    }
-  }
-  console.info(
-    `[automation-recommendations] Enqueuing recommendation scoring for ${request.repositoryIds.length} repositories`,
-  );
-  await queue.add('score-automation-recommendations', request, {
-    jobId,
-  });
-}
-
-export async function enqueueAutomationSignalPrefetch(
-  repositoryIds: readonly string[],
-): Promise<void> {
-  const queue = getSignalPrefetchQueue();
-  const collectionDay = new Date().toISOString().slice(0, 10);
-  const cappedIds = [...new Set(repositoryIds)].slice(
-    0,
-    AUTOMATION_SIGNAL_PREFETCH_CAP,
-  );
-
-  await Promise.all(
-    cappedIds.map((repositoryId) =>
-      queue.add(
-        'collect-automation-signals',
-        { repositoryId, signalsVersion: AUTOMATION_SIGNALS_VERSION },
-        {
-          jobId: `automation-signals-${repositoryId}-${AUTOMATION_SIGNALS_VERSION}-${collectionDay}`,
-        },
-      ),
-    ),
-  );
-}
-
-export async function enqueueAutomationRecommendationInitialRun(
-  input: AutomationRecommendationInitialRunJob,
-  delay: number,
-): Promise<void> {
-  const request = automationRecommendationInitialRunJobSchema.parse(input);
-  const queue = getRecommendationInitialRunQueue();
-  const jobId = `automation-recommendation-initial-run-${request.fingerprint}-${request.recommendationId}`;
-  const existing = await queue.getJob(jobId);
-  if (existing) {
-    const state = await existing.getState();
-    if (state === 'completed' || state === 'failed') {
-      await existing.remove();
-    } else {
-      return;
-    }
-  }
-  await queue.add('run-automation-recommendation', request, {
-    jobId,
-    delay,
-  });
-}
 
 async function getCachedGitHubOctokit(
   installationId: string,
@@ -827,6 +676,7 @@ async function buildRecommendationBatch(
     recommendations: scored.map(({ candidate, score, explanation }, index) => ({
       id: `${candidate.id}:${index + 1}`,
       candidateId: candidate.id,
+      title: candidate.title,
       rank: index + 1,
       score,
       explanation,
@@ -849,14 +699,10 @@ export async function processAutomationRecommendationsJob(
   console.info(
     `[automation-recommendations] Started recommendation scoring for ${request.repositoryIds.length} repositories`,
   );
-  const [settings] = await db
-    .select({ setupNewState: deploymentSettings.setupNewState })
-    .from(deploymentSettings)
-    .where(eq(deploymentSettings.id, 'default'))
-    .limit(1);
-  const state = normalizeSetupNewState(settings?.setupNewState ?? {});
   if (
-    state.automationRecommendations?.inputFingerprint !== request.fingerprint
+    !(await isSetupAutomationRecommendationFingerprintCurrent(
+      request.fingerprint,
+    ))
   ) {
     console.info(
       '[automation-recommendations] Skipped recommendation scoring because the request is stale',
@@ -869,31 +715,11 @@ export async function processAutomationRecommendationsJob(
       request.repositoryIds,
       request.fingerprint,
     );
-    const latest = await db
-      .select({ setupNewState: deploymentSettings.setupNewState })
-      .from(deploymentSettings)
-      .where(eq(deploymentSettings.id, 'default'))
-      .limit(1);
-    const latestState = normalizeSetupNewState(
-      latest?.[0]?.setupNewState ?? {},
+    const persisted = await updateSetupAutomationRecommendationBatchIfCurrent(
+      request.fingerprint,
+      (current) => mergeRecommendationState(batch, current),
     );
-    if (
-      latestState.automationRecommendations?.inputFingerprint !==
-      request.fingerprint
-    ) {
-      return;
-    }
-    const nextState = normalizeSetupNewState({
-      ...latestState,
-      automationRecommendations: mergeRecommendationState(
-        batch,
-        latestState.automationRecommendations,
-      ),
-    });
-    await db
-      .update(deploymentSettings)
-      .set({ setupNewState: nextState, updatedAt: new Date() })
-      .where(eq(deploymentSettings.id, 'default'));
+    if (!persisted) return;
     console.info(
       `[automation-recommendations] Completed recommendation scoring for ${request.repositoryIds.length} repositories in ${Date.now() - startedAt}ms`,
       {
@@ -902,283 +728,18 @@ export async function processAutomationRecommendationsJob(
       },
     );
   } catch (error) {
-    const current = await db
-      .select({ setupNewState: deploymentSettings.setupNewState })
-      .from(deploymentSettings)
-      .where(eq(deploymentSettings.id, 'default'))
-      .limit(1);
-    const currentState = normalizeSetupNewState(
-      current[0]?.setupNewState ?? {},
+    await updateSetupAutomationRecommendationBatchIfCurrent(
+      request.fingerprint,
+      (current) => ({
+        ...current,
+        status: 'failed',
+        completedAt: new Date().toISOString(),
+        errorCode: 'recommendation_generation_failed',
+      }),
     );
-    if (
-      currentState.automationRecommendations?.inputFingerprint !==
-      request.fingerprint
-    ) {
-      return;
-    }
-    const failedBatch = {
-      ...currentState.automationRecommendations,
-      status: 'failed' as const,
-      completedAt: new Date().toISOString(),
-      errorCode: 'recommendation_generation_failed',
-    };
-    await db
-      .update(deploymentSettings)
-      .set({
-        setupNewState: normalizeSetupNewState({
-          ...currentState,
-          automationRecommendations: failedBatch,
-        }),
-        updatedAt: new Date(),
-      })
-      .where(eq(deploymentSettings.id, 'default'));
     console.warn(
       `[automation-recommendations] Recommendation scoring failed after ${Date.now() - startedAt}ms`,
     );
-    throw error;
-  }
-}
-
-function recommendationApplicationState(
-  batch: AutomationRecommendationBatch,
-): 'pending' | 'applied' | 'skipped' {
-  return (
-    batch.applicationState ?? (batch.status === 'ready' ? 'applied' : 'pending')
-  );
-}
-
-export function canRecoverAutomationRecommendationInitialRunClaim(
-  recommendation: Pick<
-    AutomationRecommendationBatch['recommendations'][number],
-    'initialRunClaimedAt' | 'initialRunDispatchAttemptedAt'
-  >,
-  now = Date.now(),
-): boolean {
-  if (
-    !recommendation.initialRunClaimedAt ||
-    recommendation.initialRunDispatchAttemptedAt
-  ) {
-    return false;
-  }
-
-  const claimedAt = Date.parse(recommendation.initialRunClaimedAt);
-  return (
-    !Number.isFinite(claimedAt) ||
-    now - claimedAt >= AUTOMATION_RECOMMENDATION_INITIAL_RUN_CLAIM_TIMEOUT_MS
-  );
-}
-
-async function claimAutomationRecommendationInitialRun(
-  request: AutomationRecommendationInitialRunJob,
-) {
-  return db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
-    );
-    const [settings] = await tx
-      .select({ setupNewState: deploymentSettings.setupNewState })
-      .from(deploymentSettings)
-      .where(eq(deploymentSettings.id, 'default'))
-      .limit(1);
-    const state = normalizeSetupNewState(settings?.setupNewState ?? {});
-    const batch = state.automationRecommendations;
-    const recommendation = batch?.recommendations.find(
-      (item) => item.id === request.recommendationId,
-    );
-    if (
-      !batch ||
-      batch.inputFingerprint !== request.fingerprint ||
-      recommendationApplicationState(batch) !== 'applied' ||
-      !recommendation?.enabled ||
-      recommendation.lastRunTaskId ||
-      recommendation.initialRunTerminalAt
-    ) {
-      return null;
-    }
-
-    if (
-      recommendation.initialRunClaimedAt &&
-      !canRecoverAutomationRecommendationInitialRunClaim(recommendation)
-    ) {
-      return null;
-    }
-
-    const claimedAt = new Date().toISOString();
-    const nextBatch = {
-      ...batch,
-      recommendations: batch.recommendations.map((item) =>
-        item.id === request.recommendationId
-          ? {
-              ...item,
-              initialRunClaimedAt: claimedAt,
-              initialRunDispatchAttemptedAt: null,
-            }
-          : item,
-      ),
-    };
-    await tx
-      .update(deploymentSettings)
-      .set({
-        setupNewState: normalizeSetupNewState({
-          ...state,
-          automationRecommendations: nextBatch,
-        }),
-        updatedAt: new Date(),
-      })
-      .where(eq(deploymentSettings.id, 'default'));
-
-    return {
-      claimedAt,
-      candidateId: recommendation.candidateId,
-      automationId: recommendation.automationId,
-    };
-  });
-}
-
-async function markAutomationRecommendationInitialRunDispatchAttempted(
-  request: AutomationRecommendationInitialRunJob,
-  claimedAt: string,
-): Promise<boolean> {
-  let dispatchMarked = false;
-  await updateAutomationRecommendationInitialRun(request, (item) => {
-    if (
-      item.initialRunClaimedAt !== claimedAt ||
-      item.initialRunDispatchAttemptedAt ||
-      item.initialRunTerminalAt
-    ) {
-      return item;
-    }
-
-    dispatchMarked = true;
-    return {
-      ...item,
-      initialRunDispatchAttemptedAt: new Date().toISOString(),
-    };
-  });
-  return dispatchMarked;
-}
-
-async function updateAutomationRecommendationInitialRun(
-  request: AutomationRecommendationInitialRunJob,
-  update: (
-    recommendation: AutomationRecommendationBatch['recommendations'][number],
-  ) => AutomationRecommendationBatch['recommendations'][number],
-) {
-  await db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT pg_advisory_xact_lock(hashtext('automation-recommendations'))`,
-    );
-    const [settings] = await tx
-      .select({ setupNewState: deploymentSettings.setupNewState })
-      .from(deploymentSettings)
-      .where(eq(deploymentSettings.id, 'default'))
-      .limit(1);
-    const state = normalizeSetupNewState(settings?.setupNewState ?? {});
-    const batch = state.automationRecommendations;
-    if (!batch || batch.inputFingerprint !== request.fingerprint) return;
-    const nextBatch = {
-      ...batch,
-      recommendations: batch.recommendations.map((item) =>
-        item.id === request.recommendationId ? update(item) : item,
-      ),
-    };
-    await tx
-      .update(deploymentSettings)
-      .set({
-        setupNewState: normalizeSetupNewState({
-          ...state,
-          automationRecommendations: nextBatch,
-        }),
-        updatedAt: new Date(),
-      })
-      .where(eq(deploymentSettings.id, 'default'));
-  });
-}
-
-export async function runAutomationRecommendationInitialRunJob(
-  input: AutomationRecommendationInitialRunJob,
-): Promise<void> {
-  const request = automationRecommendationInitialRunJobSchema.parse(input);
-  const claimed = await claimAutomationRecommendationInitialRun(request);
-  if (!claimed) return;
-
-  const candidate = AUTOMATION_RECOMMENDATION_CATALOG.find(
-    (item) => item.id === claimed.candidateId,
-  );
-  if (!candidate) {
-    await updateAutomationRecommendationInitialRun(request, (item) => ({
-      ...item,
-      initialRunClaimedAt: null,
-      initialRunDispatchAttemptedAt: null,
-    }));
-    throw new Error(
-      `Recommendation candidate was not found: ${claimed.candidateId}`,
-    );
-  }
-
-  let launched = false;
-  try {
-    const dispatchMarked =
-      await markAutomationRecommendationInitialRunDispatchAttempted(
-        request,
-        claimed.claimedAt,
-      );
-    if (!dispatchMarked) return;
-
-    const result =
-      candidate.source === 'built_in'
-        ? candidate.automationKey === 'review_code'
-          ? {
-              outcome: 'skipped' as const,
-              reason: 'Review Code runs from pull-request events.',
-            }
-          : await runAutomationNow(candidate.automationKey)
-        : claimed.automationId
-          ? await runCustomAutomationNow(claimed.automationId)
-          : {
-              outcome: 'failed' as const,
-              error: 'Recommendation automation was not created.',
-            };
-
-    if (result.outcome === 'failed') {
-      throw new Error(result.error);
-    }
-
-    launched = result.outcome === 'launched';
-    await updateAutomationRecommendationInitialRun(request, (item) => ({
-      ...item,
-      initialRunClaimedAt: null,
-      initialRunDispatchAttemptedAt: null,
-      initialRunTerminalAt: new Date().toISOString(),
-      ...(result.outcome === 'launched'
-        ? { lastRunTaskId: result.taskId }
-        : {}),
-    }));
-  } catch (error) {
-    if (launched) {
-      // The task has already been enqueued. Persist a terminal marker when
-      // possible; if this fallback write also fails, retain the claim. Claims
-      // are never stale-reclaimed, so a retry cannot launch a duplicate.
-      try {
-        await updateAutomationRecommendationInitialRun(request, (item) => ({
-          ...item,
-          initialRunClaimedAt: null,
-          initialRunDispatchAttemptedAt: null,
-          initialRunTerminalAt: new Date().toISOString(),
-        }));
-      } catch (terminalError) {
-        console.error(
-          `[automation-recommendations] Initial run launched for ${request.recommendationId}, but recording its terminal state failed:`,
-          terminalError,
-        );
-      }
-      return;
-    }
-    await updateAutomationRecommendationInitialRun(request, (item) => ({
-      ...item,
-      initialRunClaimedAt: null,
-      initialRunDispatchAttemptedAt: null,
-    }));
     throw error;
   }
 }

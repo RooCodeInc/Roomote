@@ -90,6 +90,8 @@ export const SETUP_COMPUTE_PROVISIONING_STATE_FIELDS = {
 export type AutomationRecommendation = {
   id: string;
   candidateId: string;
+  /** Client-safe display metadata. Older persisted batches are hydrated server-side. */
+  title?: string;
   rank: number;
   score: number;
   explanation: string;
