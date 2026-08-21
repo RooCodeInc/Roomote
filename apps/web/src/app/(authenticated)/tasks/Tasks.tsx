@@ -30,6 +30,8 @@ import {
   Trash2,
   AlertTriangle,
   ListChecks,
+  Columns3,
+  List,
   X,
   FunnelX,
   Button,
@@ -51,6 +53,8 @@ import {
   TaskCard,
   TaskCardSkeleton,
   TaskCardError,
+  TaskBoard,
+  TaskBoardSkeleton,
 } from '@/components/tasks';
 import {
   parseTaskTypeFilterParam,
@@ -63,6 +67,7 @@ export const Tasks = () => {
 
   const router = useRouter();
   const searchParams = useSearchParams();
+  const isBoardView = searchParams.get('view') === 'board';
 
   /**
    * Filters
@@ -437,6 +442,26 @@ export const Tasks = () => {
     setIsSelectionMode(!isSelectionMode);
   };
 
+  const handleViewChange = (view: 'list' | 'board') => {
+    if (view === 'board') {
+      setSelectedTasks(new Set());
+      setIsSelectionMode(false);
+    }
+
+    const params = new URLSearchParams(searchParams.toString());
+
+    if (view === 'board') {
+      params.set('view', 'board');
+    } else {
+      params.delete('view');
+    }
+
+    router.replace(
+      params.toString() ? `?${params.toString()}` : window.location.pathname,
+      { scroll: false },
+    );
+  };
+
   // Preserve only selections that still exist in the current task list when
   // tasks change.
   useEffect(() => {
@@ -463,11 +488,14 @@ export const Tasks = () => {
     ) || timePeriod !== 'all';
 
   const canSelect = tasks.length > 0 && !isSelectionMode && !isLoading;
+  const isMineScope =
+    effectiveFilterUserId !== 'all' &&
+    (effectiveFilterUserId ?? userId) === userId;
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-card">
       <div className="bg-background border-b-4 border-b-card p-4">
-        <div className="flex items-center justify-between bg-b">
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-b">
           <TaskFilters
             userId={effectiveFilterUserId}
             defaultUserId={defaultsToAnyUser ? undefined : userId}
@@ -486,7 +514,51 @@ export const Tasks = () => {
             showTaskType={showTaskTypeFilter}
           />
 
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            {isBoardView && (
+              <div className="flex items-center rounded-md border border-border p-0.5">
+                <Button
+                  variant={isMineScope ? 'secondary' : 'ghost'}
+                  size="xs"
+                  onClick={() => handleUserChange(userId)}
+                >
+                  Mine
+                </Button>
+                <Button
+                  variant={
+                    effectiveFilterUserId === 'all' ? 'secondary' : 'ghost'
+                  }
+                  size="xs"
+                  onClick={() => handleUserChange(null)}
+                >
+                  Everyone
+                </Button>
+              </div>
+            )}
+
+            <div className="flex items-center rounded-md border border-border p-0.5">
+              <Button
+                variant={isBoardView ? 'ghost' : 'secondary'}
+                size="xs"
+                onClick={() => handleViewChange('list')}
+                aria-pressed={!isBoardView}
+                title="List view"
+              >
+                <List />
+                <span className="hidden sm:inline">List</span>
+              </Button>
+              <Button
+                variant={isBoardView ? 'secondary' : 'ghost'}
+                size="xs"
+                onClick={() => handleViewChange('board')}
+                aria-pressed={isBoardView}
+                title="Board view"
+              >
+                <Columns3 />
+                <span className="hidden sm:inline">Board</span>
+              </Button>
+            </div>
+
             {!isSelectionMode ? (
               <>
                 {isFiltering && (
@@ -500,20 +572,22 @@ export const Tasks = () => {
                     <FunnelX className="size-4" />
                   </Button>
                 )}
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={!canSelect}
-                  onClick={toggleSelectionMode}
-                  className={cn('size-8', isSelectionMode && 'opacity-0')}
-                  title={
-                    isSelectionMode
-                      ? 'Exit selection mode'
-                      : 'Enter selection mode'
-                  }
-                >
-                  <ListChecks className="size-4" />
-                </Button>
+                {!isBoardView && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={!canSelect}
+                    onClick={toggleSelectionMode}
+                    className={cn('size-8', isSelectionMode && 'opacity-0')}
+                    title={
+                      isSelectionMode
+                        ? 'Exit selection mode'
+                        : 'Enter selection mode'
+                    }
+                  >
+                    <ListChecks className="size-4" />
+                  </Button>
+                )}
               </>
             ) : (
               <div className="flex items-center gap-2">
@@ -562,7 +636,7 @@ export const Tasks = () => {
       {/* Content area: loading, error, or tasks */}
       {isLoading ? (
         <div className="flex min-h-0 flex-1 bg-background">
-          <TaskCardSkeleton />
+          {isBoardView ? <TaskBoardSkeleton /> : <TaskCardSkeleton />}
         </div>
       ) : isError ? (
         <div className="flex min-h-0 flex-1 bg-background">
@@ -638,28 +712,41 @@ export const Tasks = () => {
           </Dialog>
 
           <div className="flex min-h-0 flex-1 flex-col bg-background">
-            <div
-              ref={tasksListRef}
-              className="min-h-0 flex-1 divide-y divide-card overflow-y-auto overflow-x-hidden"
-            >
-              {tasks.map((task) => (
-                <TaskCard
-                  key={task.id}
-                  task={task}
-                  filterState={taskFilterState}
-                  isSelected={selectedTasks.has(task.id)}
-                  inSelectionMode={isSelectionMode}
-                  onSelectionChange={
-                    isSelectionMode ? handleSelectionChange : undefined
-                  }
+            {isBoardView ? (
+              <div
+                ref={tasksListRef}
+                className="min-h-0 flex-1 overflow-y-auto p-4"
+              >
+                <TaskBoard tasks={tasks} />
+                <CursorPagination
+                  pagination={pagination}
+                  scrollTargetRef={tasksListRef}
                 />
-              ))}
+              </div>
+            ) : (
+              <div
+                ref={tasksListRef}
+                className="min-h-0 flex-1 divide-y divide-card overflow-y-auto overflow-x-hidden"
+              >
+                {tasks.map((task) => (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    filterState={taskFilterState}
+                    isSelected={selectedTasks.has(task.id)}
+                    inSelectionMode={isSelectionMode}
+                    onSelectionChange={
+                      isSelectionMode ? handleSelectionChange : undefined
+                    }
+                  />
+                ))}
 
-              <CursorPagination
-                pagination={pagination}
-                scrollTargetRef={tasksListRef}
-              />
-            </div>
+                <CursorPagination
+                  pagination={pagination}
+                  scrollTargetRef={tasksListRef}
+                />
+              </div>
+            )}
           </div>
         </>
       )}
