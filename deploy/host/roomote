@@ -50,7 +50,16 @@ fi
 [ -f "$compose_file" ] || die "$compose_file not found; re-run the installer"
 
 compose() {
-  docker compose --env-file "$env_file" -f "$compose_file" "$@"
+  local candidate
+  local -a compose_args=(compose --env-file "$env_file" -f "$compose_file")
+
+  for candidate in "$install_root"/docker-compose.*.yml "$install_root"/docker-compose.*.yaml; do
+    [ -f "$candidate" ] || continue
+    [ "$candidate" = "$compose_file" ] && continue
+    compose_args+=(-f "$candidate")
+  done
+
+  docker "${compose_args[@]}" "$@"
 }
 
 backup_usage() {
@@ -694,7 +703,6 @@ cmd_backup() {
   local passphrase_file staging_dir schema_version roomote_version
   local storage_mode storage_included s3_endpoint s3_bucket
   local minio_volume redis_volume created_at
-  local services_stopped='false'
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -739,14 +747,21 @@ cmd_backup() {
   staging_dir="$(mktemp -d "$install_root/backups/.backup-staging.XXXXXX")"
   chmod 700 "$staging_dir"
 
+  # EXIT traps run after function-local variables leave scope. Keep cleanup
+  # state global so interrupted backups can restart services under set -u.
+  backup_cleanup_services_stopped='false'
+  backup_cleanup_staging_dir="$staging_dir"
+  backup_cleanup_generated_passphrase="$generated_passphrase"
+  backup_cleanup_passphrase_file="$passphrase_file"
+
   cleanup_backup() {
-    if [ "$services_stopped" = 'true' ]; then
+    if [ "${backup_cleanup_services_stopped:-false}" = 'true' ]; then
       log "Restarting Roomote after interrupted backup"
       compose up -d --wait --wait-timeout 600 || true
     fi
-    rm -rf "$staging_dir"
-    if [ "$generated_passphrase" = 'true' ]; then
-      rm -f "$passphrase_file"
+    rm -rf "${backup_cleanup_staging_dir:-}"
+    if [ "${backup_cleanup_generated_passphrase:-false}" = 'true' ]; then
+      rm -f "${backup_cleanup_passphrase_file:-}"
     fi
   }
   trap cleanup_backup EXIT
@@ -765,7 +780,7 @@ cmd_backup() {
   log "Quiescing Roomote application writers"
   compose stop web api controller bullmq preview-proxy
   stop_task_workers
-  services_stopped='true'
+  backup_cleanup_services_stopped='true'
 
   log "Dumping PostgreSQL"
   postgres_command '' 'pg_dump --clean --if-exists --no-owner --no-privileges "$DATABASE_URL"' \
@@ -837,7 +852,7 @@ EOF
 
   log "Restarting Roomote"
   compose up -d --wait --wait-timeout 600
-  services_stopped='false'
+  backup_cleanup_services_stopped='false'
   rm -rf "$staging_dir"
   if [ "$generated_passphrase" = 'true' ]; then
     rm -f "$passphrase_file"

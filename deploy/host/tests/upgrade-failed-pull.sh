@@ -27,6 +27,7 @@ MODAL_BASE_IMAGE_REF=ghcr.io/roocodeinc/roomote-worker:v1.0.0
 R_DISCORD_GATEWAY_SECRET=test-secret
 EOF
 printf 'original compose\n' >"$install_root/docker-compose.prod.yml"
+printf 'custom caddy override\n' >"$install_root/docker-compose.caddy-dns.yml"
 printf 'original caddy\n' >"$install_root/caddy/Caddyfile"
 cp "$install_root/.env" "$work_dir/original.env"
 cp "$install_root/docker-compose.prod.yml" "$work_dir/original-compose.yml"
@@ -64,7 +65,7 @@ cat >"$fake_bin/docker" <<'EOF'
 set -euo pipefail
 
 printf '%s\n' "$*" >>"$MOCK_DOCKER_LOG"
-if [ "${1:-}" = 'pull' ]; then
+if [ "${1:-}" = 'compose' ] && [ "${*: -1}" = 'pull' ]; then
   exit 1
 fi
 EOF
@@ -86,6 +87,8 @@ cmp "$work_dir/original.env" "$install_root/.env"
 cmp "$work_dir/original-compose.yml" "$install_root/docker-compose.prod.yml"
 cmp "$work_dir/original-Caddyfile" "$install_root/caddy/Caddyfile"
 grep -q '^compose .* start controller$' "$docker_log"
+grep -Fq -- "-f $install_root/docker-compose.prod.yml -f $install_root/docker-compose.caddy-dns.yml config" "$docker_log"
+grep -Fq -- "-f $install_root/docker-compose.prod.yml -f $install_root/docker-compose.caddy-dns.yml pull" "$docker_log"
 grep -q 'Upgrade failed; restoring the previous deployment configuration' "$output_log"
 if compgen -G "$install_root/backups/.upgrade-staging.*" >/dev/null; then
   printf 'upgrade staging directory was not cleaned up\n' >&2
