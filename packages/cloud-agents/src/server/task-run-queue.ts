@@ -2041,10 +2041,33 @@ async function stampWorkspaceSourceControlProviders(
     db,
     workspace,
   );
+  const isAggregateWorkspace =
+    workspace.type === 'repository_set' ||
+    workspace.type === 'all_repositories';
+  const expectedRepositoryCount =
+    workspace.type === 'repository_set'
+      ? new Set(workspace.repositories).size
+      : undefined;
+
+  if (isAggregateWorkspace) {
+    payload.repositoryProviders = repositoryProviders;
+  }
+
+  if (
+    isAggregateWorkspace &&
+    (Object.keys(repositoryProviders).length === 0 ||
+      (expectedRepositoryCount !== undefined &&
+        Object.keys(repositoryProviders).length !== expectedRepositoryCount))
+  ) {
+    payload.sourceControlProvider = undefined;
+    payload.sourceControlHost = undefined;
+    return;
+  }
+
   const providers = Object.values(repositoryProviders);
   const spansProviders = new Set(providers).size > 1;
 
-  if (spansProviders) {
+  if (spansProviders && !isAggregateWorkspace) {
     payload.repositoryProviders = repositoryProviders;
   }
 

@@ -1984,6 +1984,78 @@ describe('enqueueTask source-control provider stamping', () => {
     });
   });
 
+  it('stamps complete provider coverage for homogeneous selected repositories', async () => {
+    const userId = await createUser();
+    const apiRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitea',
+      linkedByUserId: userId,
+      fullName: 'group/homogeneous-api',
+      isActive: true,
+    });
+    const webRepository = await repositoryFactory.create({
+      sourceControlProvider: 'gitea',
+      linkedByUserId: userId,
+      fullName: 'group/homogeneous-web',
+      isActive: true,
+    });
+    createdRepositoryIds.push(apiRepository.id, webRepository.id);
+
+    const run = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: ALL_REPOSITORIES,
+          selectedRepositories: [
+            'group/homogeneous-api',
+            'group/homogeneous-web',
+          ],
+          description: 'Work across homogeneous repositories',
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    expect(run.payload).toMatchObject({
+      sourceControlProvider: 'gitea',
+      repositoryProviders: {
+        'group/homogeneous-api': 'gitea',
+        'group/homogeneous-web': 'gitea',
+      },
+    });
+  });
+
+  it('does not stamp a provider for incomplete selected repository coverage', async () => {
+    const userId = await createUser();
+    const repository = await repositoryFactory.create({
+      sourceControlProvider: 'gitea',
+      linkedByUserId: userId,
+      fullName: 'group/resolved-api',
+      isActive: true,
+    });
+    createdRepositoryIds.push(repository.id);
+
+    const run = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: ALL_REPOSITORIES,
+          selectedRepositories: ['group/resolved-api', 'group/missing-web'],
+          description: 'Work across an incomplete repository selection',
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'web',
+      trigger: 'manual',
+    });
+
+    expect(run.payload.repositoryProviders).toEqual({
+      'group/resolved-api': 'gitea',
+    });
+    expect(run.payload.sourceControlProvider).toBeUndefined();
+  });
+
   it('re-stamps a PR launch after auto-resolving a mixed environment', async () => {
     const userId = await createUser();
     const primaryRepository = await repositoryFactory.create({

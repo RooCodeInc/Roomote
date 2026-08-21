@@ -27,6 +27,18 @@ describe('resolveAggregateSourceControl', () => {
       }),
     ).toBeUndefined();
   });
+
+  it('fails closed when a selected aggregate mapping is incomplete', () => {
+    expect(
+      resolveAggregateSourceControl({
+        sourceControlProvider: 'gitea',
+        selectedRepositories: ['shared/api', 'shared/web'],
+        repositoryProviders: {
+          'shared/api': 'gitea',
+        },
+      }),
+    ).toBeUndefined();
+  });
 });
 
 describe('resolveStandardTaskSurface', () => {

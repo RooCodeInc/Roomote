@@ -112,9 +112,13 @@ export function resolveAggregateSourceControl({
   sourceControlProvider,
   sourceControlHost,
   repositoryProviders,
+  selectedRepositories,
 }: Pick<
   TaskSpec['payload'],
-  'sourceControlProvider' | 'sourceControlHost' | 'repositoryProviders'
+  | 'sourceControlProvider'
+  | 'sourceControlHost'
+  | 'repositoryProviders'
+  | 'selectedRepositories'
 >): RepositorySourceControl | undefined {
   if (!sourceControlProvider) {
     return undefined;
@@ -123,10 +127,21 @@ export function resolveAggregateSourceControl({
   const providers = repositoryProviders
     ? new Set(Object.values(repositoryProviders))
     : null;
+  const selectedRepositoryNames = selectedRepositories
+    ? [...new Set(selectedRepositories)]
+    : [];
+  const hasCompleteSelection =
+    selectedRepositoryNames.length === 0 ||
+    (Object.keys(repositoryProviders ?? {}).length ===
+      selectedRepositoryNames.length &&
+      selectedRepositoryNames.every((repository) =>
+        Object.hasOwn(repositoryProviders ?? {}, repository),
+      ));
 
   if (
-    providers &&
-    (providers.size !== 1 || !providers.has(sourceControlProvider))
+    !hasCompleteSelection ||
+    (providers &&
+      (providers.size !== 1 || !providers.has(sourceControlProvider)))
   ) {
     return undefined;
   }
