@@ -548,6 +548,9 @@ describe('processFastAgentMessage', () => {
         replyTarget: { channelId: 'D123', threadId: '100.001' },
       },
     });
+    expect(mocks.acquireLock.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.hasSession.mock.invocationCallOrder[0]!,
+    );
     expect(mocks.postThreadMessage).toHaveBeenCalledOnce();
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
   });
@@ -624,7 +627,6 @@ describe('processFastAgentMessage', () => {
   });
 
   it('does not add the processing reaction to an existing fast conversation', async () => {
-    mocks.hasSession.mockResolvedValueOnce(true);
     const slack = {
       addReaction: vi.fn().mockResolvedValue(true),
       removeReaction: vi.fn().mockResolvedValue(true),
@@ -646,13 +648,12 @@ describe('processFastAgentMessage', () => {
       userId: 'user-1',
       teamId: 'T123',
       continuation: true,
+      isExistingConversation: true,
     });
 
     expect(slack.addReaction).not.toHaveBeenCalled();
     expect(slack.removeReaction).not.toHaveBeenCalled();
-    expect(mocks.acquireLock.mock.invocationCallOrder[0]).toBeLessThan(
-      mocks.hasSession.mock.invocationCallOrder[0]!,
-    );
+    expect(mocks.hasSession).not.toHaveBeenCalled();
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({ question: 'Good, tired' }),
     );

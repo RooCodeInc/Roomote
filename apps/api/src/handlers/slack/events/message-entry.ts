@@ -1602,6 +1602,7 @@ function startFastAgentResponse(params: {
   continuation?: boolean;
   activeTasks?: { taskId: string }[];
   processingReactionName: string;
+  isExistingConversation?: boolean;
   errorLogPrefix: string;
 }): void {
   const { errorLogPrefix, ...fastAgentParams } = params;
@@ -1777,6 +1778,7 @@ async function handleSlackEntryEvent(params: {
       userId: userMapping.userId,
       teamId,
       continuation: true,
+      isExistingConversation: true,
       activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
       processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent continuation failed for thread ${threadId}:`,
