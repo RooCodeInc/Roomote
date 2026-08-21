@@ -550,6 +550,44 @@ describe('resolveOpenCodeSmallModel', () => {
     });
   });
 
+  it('does not apply coding reasoning to a non-reasoning orchestration model', async () => {
+    process.env = {
+      ...originalEnv,
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_MODEL_REASONING_EFFORT: 'medium',
+      R_ORCHESTRATION_MODEL: 'openrouter/google/gemini-3.7-flash',
+      OPENROUTER_API_KEY: 'test-key',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: {
+          structured: { answer: 'ok' },
+        },
+        parts: [],
+      },
+      error: undefined,
+    });
+
+    const { generateTrackedNonTaskObject, NON_TASK_INFERENCE_SURFACES } =
+      await import('../non-task-provider-usage.js');
+
+    await generateTrackedNonTaskObject({
+      surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+      modelRole: 'orchestration',
+      schema: z.object({ answer: z.string() }),
+      prompt: 'Answer.',
+    });
+
+    expect(spawnMock.mock.calls.at(-1)?.[2]?.env).toMatchObject({
+      R_MODEL: 'openrouter/google/gemini-3.7-flash',
+    });
+    expect(spawnMock.mock.calls.at(-1)?.[2]?.env).not.toHaveProperty(
+      'R_MODEL_REASONING_EFFORT',
+    );
+  });
+
   it('starts a separate managed OpenCode SDK server when model env changes', async () => {
     process.env = {
       ...originalEnv,

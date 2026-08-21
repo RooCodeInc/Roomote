@@ -353,13 +353,19 @@ function mergeBedrockRegistrationsIntoConfigContent(
 }
 
 export function buildOpenCodeCliEnv(
-  extraEnv?: Partial<Record<string, string>>,
+  extraEnv?: Partial<Record<string, string | undefined>>,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     ...extraEnv,
     NO_COLOR: process.env.NO_COLOR ?? '1',
   };
+
+  for (const [envVarName, value] of Object.entries(extraEnv ?? {})) {
+    if (value === undefined) {
+      delete env[envVarName];
+    }
+  }
 
   for (const modelEnvVarName of [
     'R_MODEL',
@@ -545,19 +551,20 @@ function resolveConfiguredOpenCodeSdkServerUrl(): string | undefined {
 }
 
 function stableStringifyRecord(
-  value: Partial<Record<string, string>> | undefined,
+  value: Partial<Record<string, string | undefined>> | undefined,
 ): string {
   return JSON.stringify(
     Object.fromEntries(
       Object.entries(value ?? {})
-        .filter((entry): entry is [string, string] => Boolean(entry[1]))
-        .sort(([left], [right]) => left.localeCompare(right)),
+        .filter(([, entryValue]) => entryValue !== '')
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entryValue]) => [key, entryValue ?? null]),
     ),
   );
 }
 
 function buildOpenCodeSdkServerCacheKey(
-  extraEnv?: Partial<Record<string, string>>,
+  extraEnv?: Partial<Record<string, string | undefined>>,
 ): string {
   const command = resolveOpenCodeCommand([
     'serve',
@@ -662,7 +669,7 @@ async function waitForOpenCodeSdkServerReady(
 
 async function startManagedOpenCodeSdkServer(
   timeoutMs: number,
-  extraEnv?: Partial<Record<string, string>>,
+  extraEnv?: Partial<Record<string, string | undefined>>,
 ): Promise<ManagedOpenCodeSdkServer> {
   const port = await reserveTcpPort(OPENCODE_SDK_SERVER_HOSTNAME);
   const url = `http://${OPENCODE_SDK_SERVER_HOSTNAME}:${port}`;
@@ -763,7 +770,7 @@ class OpenCodeSdkServerPool {
   >();
 
   async lease(params: {
-    env?: Partial<Record<string, string>>;
+    env?: Partial<Record<string, string | undefined>>;
     ephemeral?: boolean;
     startTimeoutMs: number;
     useConfiguredServer?: boolean;
@@ -922,7 +929,7 @@ class OpenCodeSdkServerPool {
 const sharedOpenCodeSdkServerPool = new OpenCodeSdkServerPool();
 
 export function leaseOpenCodeSdkServer(params: {
-  env?: Partial<Record<string, string>>;
+  env?: Partial<Record<string, string | undefined>>;
   /**
    * Close the managed server as soon as the last lease is released instead
    * of caching it for the idle TTL. For one-shot calls whose env carries

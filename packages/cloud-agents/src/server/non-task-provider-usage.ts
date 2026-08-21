@@ -19,6 +19,7 @@ import {
 } from './opencode-runtime';
 
 const DEFAULT_OPENCODE_STRUCTURED_OUTPUT_RETRY_COUNT = 2;
+type NonTaskModelRuntimeEnv = Partial<Record<string, string | undefined>>;
 
 /**
  * Ordinary non-task sessions produce text or structured output only; no tool
@@ -384,10 +385,10 @@ async function resolveNonTaskModelRuntime(
   modelRole: 'primary' | 'small' | 'orchestration' = 'small',
 ): Promise<{
   model: string;
-  resolvedModelRuntimeEnv: Partial<Record<string, string>>;
+  resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
 }> {
   const requestedModel = model?.trim();
-  let resolvedModelRuntimeEnv: Partial<Record<string, string>> = {};
+  let resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv = {};
 
   try {
     resolvedModelRuntimeEnv = await resolveEffectiveModelRuntimeEnv();
@@ -422,6 +423,32 @@ async function resolveNonTaskModelRuntime(
     );
   }
 
+  let selectedRuntimeEnv = resolvedModelRuntimeEnv;
+
+  if (
+    requestedModel ||
+    (modelRole === 'orchestration' &&
+      (resolvedModelRuntimeEnv.R_ORCHESTRATION_MODEL ||
+        resolvedModelRuntimeEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT))
+  ) {
+    selectedRuntimeEnv = {
+      ...resolvedModelRuntimeEnv,
+      R_MODEL: resolvedModel,
+    };
+
+    if (modelRole === 'orchestration') {
+      const orchestrationReasoningEffort =
+        resolvedModelRuntimeEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT;
+
+      if (orchestrationReasoningEffort) {
+        selectedRuntimeEnv.R_MODEL_REASONING_EFFORT =
+          orchestrationReasoningEffort;
+      } else {
+        selectedRuntimeEnv.R_MODEL_REASONING_EFFORT = undefined;
+      }
+    }
+  }
+
   return {
     // The prompt must address the same runtime provider id the helper
     // server's config registered (Bedrock Mantle GPT ids run under
@@ -433,23 +460,7 @@ async function resolveNonTaskModelRuntime(
     // OpenAI-compatible) id fails with ProviderModelNotFoundError before any
     // request is made. The lease cache keys on env, so distinct explicit
     // models get their own servers instead of colliding.
-    resolvedModelRuntimeEnv:
-      requestedModel ||
-      (modelRole === 'orchestration' &&
-        (resolvedModelRuntimeEnv.R_ORCHESTRATION_MODEL ||
-          resolvedModelRuntimeEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT))
-        ? {
-            ...resolvedModelRuntimeEnv,
-            R_MODEL: resolvedModel,
-            ...(modelRole === 'orchestration' &&
-            resolvedModelRuntimeEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT
-              ? {
-                  R_MODEL_REASONING_EFFORT:
-                    resolvedModelRuntimeEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT,
-                }
-              : {}),
-          }
-        : resolvedModelRuntimeEnv,
+    resolvedModelRuntimeEnv: selectedRuntimeEnv,
   };
 }
 
@@ -482,7 +493,7 @@ async function resolveModelForInputModality(
   params: GenerateTrackedNonTaskTextParams,
   runtime: {
     model: string;
-    resolvedModelRuntimeEnv: Partial<Record<string, string>>;
+    resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
   },
 ): Promise<string> {
   const modality = params.requiredInputModality;
@@ -569,7 +580,7 @@ async function runNonTaskSdkPrompt(
   params: GenerateTrackedNonTaskBaseParams,
   runtime: {
     model: string;
-    resolvedModelRuntimeEnv: Partial<Record<string, string>>;
+    resolvedModelRuntimeEnv: NonTaskModelRuntimeEnv;
   },
   promptOptions: NonTaskSdkPromptOptions,
   options: {
