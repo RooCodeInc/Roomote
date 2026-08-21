@@ -16,6 +16,7 @@ import {
   getMcpIntegrationConnectionScope,
   formatErrorForLog,
   isCredentialOnlyMcpIntegration,
+  redactBrainText,
 } from '@roomote/types';
 
 import {
@@ -62,6 +63,32 @@ const FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS = 60_000;
 type IntegrationToolCacheEntry = {
   expiresAt: number;
   tools: Promise<McpToolDefinition[]>;
+};
+
+const FAST_AGENT_REMEMBER_USER_FACT_TOOL: McpToolDefinition = {
+  name: 'remember_user_fact',
+  description:
+    'Persist an explicit durable fact or preference about the current sender in the shared Brain. Use this when the user asks to remember something. Choose a short stable semantic key such as "favorite number"; calling the tool again with the same key updates the existing memory instead of creating a duplicate. Never store secrets, credentials, or inferred sensitive traits, and never claim persistence unless this call succeeds.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      key: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 100,
+        description:
+          'A short stable semantic label for the fact, such as "favorite number".',
+      },
+      value: {
+        type: 'string',
+        minLength: 1,
+        maxLength: 2000,
+        description: 'The explicit fact or preference to remember.',
+      },
+    },
+    required: ['key', 'value'],
+    additionalProperties: false,
+  },
 };
 
 const integrationToolCache = new Map<string, IntegrationToolCacheEntry>();
@@ -188,6 +215,61 @@ async function resolveBrokerAuth(context: BrokerContext) {
   };
 }
 
+async function saveFastAgentUserMemory(
+  context: IntegrationAuditContext,
+  args: Record<string, unknown>,
+  signal: AbortSignal,
+): Promise<unknown> {
+  const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
+  const response = await fetch(
+    new URL('api/mcp/tasks/memory', `${apiBaseUrl}/`).toString(),
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        ...args,
+        source: { surface: context.conversation.surface },
+      }),
+      signal,
+    },
+  );
+  const result = (await response.json().catch(() => null)) as {
+    error?: string;
+  } | null;
+
+  if (!response.ok) {
+    throw new Error(
+      result?.error ?? `User memory request failed (${response.status}).`,
+    );
+  }
+
+  return result;
+}
+
+function getIntegrationAuditArguments(
+  integrationId: string,
+  toolName: string,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  if (
+    integrationId !== BRAIN_MCP_ID ||
+    toolName !== FAST_AGENT_REMEMBER_USER_FACT_TOOL.name
+  ) {
+    return args;
+  }
+
+  return {
+    key: typeof args.key === 'string' ? redactBrainText(args.key) : '[invalid]',
+    value:
+      typeof args.value === 'string'
+        ? redactBrainText(args.value)
+        : '[invalid]',
+  };
+}
+
 /**
  * Deployment integrations only. Fast mode never receives MCP server configs,
  * local transports, filesystem tools, or arbitrary proxy URLs. Tools disabled
@@ -260,12 +342,17 @@ export async function listFastAgentIntegrations(
   const results = await Promise.allSettled(
     candidates.map(async (integration) => ({
       ...integration,
-      tools: (
-        await listCachedIntegrationTools({
-          url: integrationProxyUrl(apiBaseUrl, integration.id),
-          headers: { Authorization: `Bearer ${authToken}` },
-        })
-      ).filter((tool) => !integration.disabledTools.has(tool.name)),
+      tools: [
+        ...(
+          await listCachedIntegrationTools({
+            url: integrationProxyUrl(apiBaseUrl, integration.id),
+            headers: { Authorization: `Bearer ${authToken}` },
+          })
+        ).filter((tool) => !integration.disabledTools.has(tool.name)),
+        ...(integration.id === BRAIN_MCP_ID
+          ? [FAST_AGENT_REMEMBER_USER_FACT_TOOL]
+          : []),
+      ],
     })),
   );
 
@@ -326,21 +413,33 @@ export async function callFastAgentIntegration(
     slackMessageTs: context.messageId,
     integrationId: integration.id,
     toolName: request.toolName,
-    arguments: request.args,
+    arguments: getIntegrationAuditArguments(
+      integration.id,
+      request.toolName,
+      request.args,
+    ),
   });
 
   try {
-    const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
     const result = await withFastIntegrationTimeout(
-      (signal) =>
-        callMcpTool({
+      async (signal) => {
+        if (
+          integration.id === BRAIN_MCP_ID &&
+          request.toolName === FAST_AGENT_REMEMBER_USER_FACT_TOOL.name
+        ) {
+          return saveFastAgentUserMemory(context, request.args, signal);
+        }
+
+        const { apiBaseUrl, authToken } = await resolveBrokerAuth(context);
+        return callMcpTool({
           url: integrationProxyUrl(apiBaseUrl, integration.id),
           headers: { Authorization: `Bearer ${authToken}` },
           toolName: request.toolName,
           args: request.args,
           toolCallId: `fast:${audit.id}:${integration.id}:${request.toolName}`,
           signal,
-        }),
+        });
+      },
       FAST_AGENT_INTEGRATION_CALL_TIMEOUT_MS,
       `Fast ${integration.id}/${request.toolName} integration call`,
     );

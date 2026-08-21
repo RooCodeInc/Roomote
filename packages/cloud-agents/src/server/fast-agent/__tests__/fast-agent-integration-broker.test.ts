@@ -93,6 +93,7 @@ describe('fast-agent integration broker', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it('exposes the deployment GitHub App through its read-only router MCP', async () => {
@@ -129,7 +130,10 @@ describe('fast-agent integration broker', () => {
         instructions: expect.stringContaining(
           'Use Brain as lightweight conversational context',
         ),
-        tools: [{ name: 'search', inputSchema: { type: 'object' } }],
+        tools: [
+          { name: 'search', inputSchema: { type: 'object' } },
+          expect.objectContaining({ name: 'remember_user_fact' }),
+        ],
       }),
     ]);
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
@@ -374,6 +378,72 @@ describe('fast-agent integration broker', () => {
       resultPreview: '{"results":["Roadmap"]}',
       startedAt: new Date('2026-08-16T00:00:00.000Z'),
     });
+  });
+
+  it('persists an authenticated sender fact through the Roomote memory endpoint', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ saved: true })),
+    );
+
+    const result = await callFastAgentIntegration(
+      auditContext,
+      [
+        {
+          id: 'gbrain',
+          name: 'Brain',
+          description: 'Shared memory',
+          tools: [
+            { name: 'search' },
+            {
+              name: 'remember_user_fact',
+              inputSchema: { type: 'object' },
+            },
+          ],
+        },
+      ],
+      {
+        integrationId: 'gbrain',
+        toolName: 'remember_user_fact',
+        args: {
+          key: 'favorite number',
+          value: 'token ghp_abcdefghijklmnopqrstuvwxyz012345',
+        },
+      },
+    );
+
+    expect(result).toEqual({ saved: true });
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.example.com/api/mcp/tasks/memory',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer control-plane-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          key: 'favorite number',
+          value: 'token ghp_abcdefghijklmnopqrstuvwxyz012345',
+          source: { surface: 'slack' },
+        }),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+    expect(mocks.callMcpTool).not.toHaveBeenCalled();
+    expect(mocks.beginIntegrationCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: 'user-1',
+        integrationId: 'gbrain',
+        toolName: 'remember_user_fact',
+        arguments: {
+          key: 'favorite number',
+          value: 'token [REDACTED]',
+        },
+      }),
+    );
+    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'succeeded' }),
+    );
   });
 
   it('does not execute a tool when its durable audit cannot be created', async () => {

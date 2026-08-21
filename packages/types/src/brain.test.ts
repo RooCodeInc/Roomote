@@ -3,6 +3,7 @@ import {
   BRAIN_MCP_READ_INSTRUCTIONS,
   BRAIN_NAMESPACES,
   brainNamespaceLabel,
+  redactBrainText,
   resolveBrainNamespaceId,
   resolveBrainSourceIdForCollector,
 } from './brain';
@@ -51,12 +52,41 @@ describe('BRAIN_MCP_INSTRUCTIONS', () => {
   });
 });
 
+describe('redactBrainText', () => {
+  it('redacts repeated complete private-key blocks without consuming surrounding text', () => {
+    const input = [
+      'before',
+      '-----BEGIN PRIVATE KEY-----',
+      'first-secret',
+      '-----END PRIVATE KEY-----',
+      'middle',
+      '-----BEGIN RSA PRIVATE KEY-----',
+      'second-secret',
+      '-----END RSA PRIVATE KEY-----',
+      'after',
+    ].join('\n');
+
+    expect(redactBrainText(input)).toBe(
+      ['before', '[REDACTED]', 'middle', '[REDACTED]', 'after'].join('\n'),
+    );
+  });
+
+  it('leaves an incomplete private-key marker unchanged', () => {
+    const input = `${'-----BEGIN PRIVATE KEY-----\n'.repeat(1_000)}no footer`;
+
+    expect(redactBrainText(input)).toBe(input);
+  });
+});
+
 describe('resolveBrainNamespaceId', () => {
   it('buckets a page by the namespace its slug was written under', () => {
     expect(resolveBrainNamespaceId('slack/T123/C456/2026-01-02/1-2')).toBe(
       'slack',
     );
     expect(resolveBrainNamespaceId('people/roomote-member-abc')).toBe('people');
+    expect(resolveBrainNamespaceId('memories/users/abc/favorite-number')).toBe(
+      'memories',
+    );
     expect(resolveBrainNamespaceId('daily/digests/2026-01-02')).toBe('daily');
   });
 
@@ -76,6 +106,7 @@ describe('resolveBrainNamespaceId', () => {
     // label, or the Settings page files those pages under "Other".
     for (const prefix of [
       'people/',
+      'memories/',
       'tasks/',
       'prs/',
       'slack/',

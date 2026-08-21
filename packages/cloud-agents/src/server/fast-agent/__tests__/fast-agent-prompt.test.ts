@@ -73,6 +73,10 @@ describe('buildFastAgentSystemPrompt', () => {
       "Never expose Brain's `source` field, architecture, or other internal provenance metadata",
     );
     expect(prompt).toContain('Do not add a `Source:` line for Brain results');
+    expect(prompt).toContain('call `remember_user_fact` before replying');
+    expect(prompt).toContain(
+      'Never claim that a fact was saved unless `remember_user_fact` succeeds',
+    );
     expect(prompt).not.toContain('automatically performs one Brain query');
   });
 
