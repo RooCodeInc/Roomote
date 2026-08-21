@@ -131,4 +131,124 @@ describe('Fast conversation turn locking', () => {
       vi.useRealTimers();
     }
   });
+
+  it('aborts when repeated renewal errors exhaust the last confirmed lease', async () => {
+    vi.useFakeTimers();
+    try {
+      const releaseRedisLock = Object.assign(
+        vi.fn().mockResolvedValue(undefined),
+        {
+          renew: vi.fn().mockResolvedValue(false),
+          renewDetailed: vi.fn().mockResolvedValue('error'),
+        },
+      );
+      acquireRedisLockMock.mockResolvedValue(releaseRedisLock);
+
+      const releaseTurnLock = await acquireFastAgentTurnLock({
+        conversation: {
+          surface: 'slack',
+          workspaceId: 'workspace-1',
+          conversationId: 'conversation-1',
+          replyTarget: {
+            channelId: 'channel-1',
+            threadId: 'conversation-1',
+          },
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(599_999);
+      expect(releaseRedisLock.renewDetailed).toHaveBeenCalledTimes(2);
+      expect(releaseTurnLock?.signal.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(releaseTurnLock?.signal.aborted).toBe(true);
+      expect(releaseTurnLock?.signal.reason).toBeInstanceOf(
+        FastAgentTurnLockLostError,
+      );
+      expect(releaseTurnLock?.signal.reason).toMatchObject({
+        message: expect.stringContaining('lease deadline'),
+      });
+      await releaseTurnLock?.();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('advances the lease deadline after a confirmed renewal', async () => {
+    vi.useFakeTimers();
+    try {
+      const releaseRedisLock = Object.assign(
+        vi.fn().mockResolvedValue(undefined),
+        {
+          renew: vi.fn().mockResolvedValue(false),
+          renewDetailed: vi
+            .fn()
+            .mockResolvedValueOnce('renewed')
+            .mockResolvedValue('error'),
+        },
+      );
+      acquireRedisLockMock.mockResolvedValue(releaseRedisLock);
+
+      const releaseTurnLock = await acquireFastAgentTurnLock({
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'workspace-1',
+          conversationId: 'conversation-1',
+          replyTarget: { channelId: 'channel-1' },
+        },
+      });
+
+      await vi.advanceTimersByTimeAsync(600_000);
+      expect(releaseTurnLock?.signal.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(199_999);
+      expect(releaseTurnLock?.signal.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(releaseTurnLock?.signal.aborted).toBe(true);
+      await releaseTurnLock?.();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('starts the initial lease deadline after Redis confirms acquisition', async () => {
+    vi.useFakeTimers();
+    try {
+      const releaseRedisLock = Object.assign(
+        vi.fn().mockResolvedValue(undefined),
+        {
+          renew: vi.fn().mockResolvedValue(false),
+          renewDetailed: vi.fn().mockResolvedValue('error'),
+        },
+      );
+      acquireRedisLockMock.mockImplementationOnce(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 590_000));
+        return releaseRedisLock;
+      });
+
+      const acquisition = acquireFastAgentTurnLock({
+        conversation: {
+          surface: 'slack',
+          workspaceId: 'workspace-1',
+          conversationId: 'conversation-1',
+          replyTarget: {
+            channelId: 'channel-1',
+            threadId: 'conversation-1',
+          },
+        },
+      });
+      await vi.advanceTimersByTimeAsync(590_000);
+      const releaseTurnLock = await acquisition;
+
+      await vi.advanceTimersByTimeAsync(599_999);
+      expect(releaseTurnLock?.signal.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(releaseTurnLock?.signal.aborted).toBe(true);
+      await releaseTurnLock?.();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -373,6 +373,7 @@ export async function launchDiscordTask(input: {
     taskId: string;
     taskUrl?: string;
   }) => Promise<void>;
+  signal?: AbortSignal;
   /**
    * An already-posted message to turn into the acknowledgement instead of
    * posting a new one — a routing card sitting in the task thread becomes the
@@ -392,11 +393,14 @@ export async function launchDiscordTask(input: {
    */
   intakeAckPinned?: boolean;
 }) {
+  input.signal?.throwIfAborted();
   let createdThread: DiscordTaskThread | null = null;
   const parentId = taskThreadParentId(input);
   if (parentId) {
     const initialText = `Task request from ${input.queuedMessage.user}:\n\n${input.queuedMessage.text}`;
+    input.signal?.throwIfAborted();
     createdThread = await reserveDiscordAnchoredThread(input);
+    input.signal?.throwIfAborted();
     if (!createdThread) {
       createdThread = await input.provider.reserveTaskThread({
         channelId: parentId,
@@ -411,15 +415,18 @@ export async function launchDiscordTask(input: {
             })
           )?.tagId ?? null,
       });
+      input.signal?.throwIfAborted();
       // Persist the external coordinate before the public-thread starter is
       // sent, so a failed send can resume in this exact thread on redelivery.
       await rememberPendingTaskThread(input.queuedMessage.ts, createdThread);
     }
 
+    input.signal?.throwIfAborted();
     const completedThread = await input.provider.completeTaskThread({
       thread: createdThread,
       initialText,
     });
+    input.signal?.throwIfAborted();
     if (completedThread !== createdThread) {
       createdThread = completedThread;
       await rememberPendingTaskThread(input.queuedMessage.ts, createdThread);
@@ -503,6 +510,7 @@ export async function launchDiscordTask(input: {
   const beforeEnqueueKickoff = input.beforeEnqueueKickoff;
 
   let taskUrl: string | undefined;
+  input.signal?.throwIfAborted();
   const launchResult = await enqueueTask(
     {
       task,
@@ -512,6 +520,7 @@ export async function launchDiscordTask(input: {
       trigger: 'message',
     },
     {
+      signal: input.signal,
       // Automation initiators derive the 'automation' launch class; forcing
       // 'human' would misclassify bot-authored auto-respond launches.
       ...(initiator.kind === 'automation'
@@ -572,6 +581,7 @@ export async function launchDiscordTask(input: {
       ...(beforeEnqueueKickoff
         ? {
             beforeEnqueue: async (taskRun: { taskId: string }) => {
+              input.signal?.throwIfAborted();
               taskUrl = getTaskUrl({
                 taskId: taskRun.taskId,
                 utm: { source: 'discord', campaign: 'discord.thread_start' },
@@ -580,6 +590,7 @@ export async function launchDiscordTask(input: {
                 taskId: taskRun.taskId,
                 ...(taskUrl ? { taskUrl } : {}),
               });
+              input.signal?.throwIfAborted();
             },
           }
         : {}),

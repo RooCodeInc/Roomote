@@ -34,6 +34,7 @@ export type LaunchFastAgentTask = (params: {
   prompt: string;
   environmentId: string | null;
   parentSessionId: string;
+  signal?: AbortSignal;
   postKickoff: (task: { taskId: string; taskUrl?: string }) => Promise<void>;
 }) => Promise<
   | { success: true; taskId: string; taskUrl?: string }

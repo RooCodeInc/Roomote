@@ -821,6 +821,7 @@ export async function answerFastAgentQuestion({
               prompt: args.prompt,
               environmentId: args.environmentId ?? null,
               parentSessionId: session.id,
+              signal,
               postKickoff: deliverKickoff,
             });
             if (result.success) {

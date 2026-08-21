@@ -103,8 +103,10 @@ export async function processDiscordFastAgentMessage(input: {
           prompt,
           environmentId,
           parentSessionId,
+          signal,
           postKickoff,
         }) => {
+          signal?.throwIfAborted();
           const workspaceOverride = environmentId
             ? await resolveDiscordWorkspace({
                 type: 'environment',
@@ -122,6 +124,7 @@ export async function processDiscordFastAgentMessage(input: {
             };
           }
 
+          signal?.throwIfAborted();
           const started = await startNewDiscordTask({
             provider: input.provider,
             applicationId: input.applicationId,
@@ -149,6 +152,7 @@ export async function processDiscordFastAgentMessage(input: {
             },
             skipRoutingConfirmation: true,
             workspaceOverride,
+            signal,
             beforeEnqueueKickoff: postKickoff,
           });
           if (started.status === 'started') {

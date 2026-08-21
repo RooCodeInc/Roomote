@@ -233,11 +233,57 @@ end
 return 0
 `;
 
+const ACTIVATE_DELAYED_ENTRY_SCRIPT = `
+local entryId = ARGV[1]
+local remainingDelayMs = tonumber(ARGV[2]) or 0
+local entryScope = redis.call('HGET', KEYS[2], entryId)
+
+if not entryScope or redis.call('HGET', KEYS[1], entryScope) ~= entryId then
+  return 0
+end
+
+if redis.call('GET', entryScope) ~= ('delay:' .. entryId) then
+  return 0
+end
+
+if remainingDelayMs > 0 then
+  redis.call('PSETEX', entryScope, remainingDelayMs, 'delay:' .. entryId)
+else
+  redis.call('DEL', entryScope)
+end
+
+return 1
+`;
+
+const REMOVE_DELAYED_ENTRY_SCRIPT = `
+local entryId = ARGV[1]
+local entryScope = redis.call('HGET', KEYS[4], entryId)
+
+if not entryScope then
+  return 0
+end
+
+redis.call('LREM', KEYS[1], 0, entryId)
+redis.call('HDEL', KEYS[3], entryId)
+redis.call('HDEL', KEYS[4], entryId)
+
+if redis.call('HGET', KEYS[2], entryScope) == entryId then
+  redis.call('HDEL', KEYS[2], entryScope)
+end
+
+if redis.call('GET', entryScope) == ('delay:' .. entryId) then
+  redis.call('DEL', entryScope)
+end
+
+return 1
+`;
+
 // BLPOP cannot atomically combine queue removal with the scope-lock claim in
 // ATOMIC_DEQUEUE_SCRIPT. Polling trades four idle EVAL calls per controller
 // per second for a bounded 250ms wake-up delay; a future dedicated wake-up
 // connection can remove that tradeoff without weakening claim atomicity.
 const DEQUEUE_POLL_INTERVAL_MS = 250;
+const SIGNAL_GUARDED_QUEUE_HOLD_MS = 10 * 60 * 1_000;
 
 const taskRunQueueEntrySchema = z.object({
   id: z.number(),
@@ -533,6 +579,35 @@ export class TaskRunQueue {
     }
 
     return evictedEntries;
+  }
+
+  public async activateDelayedEntry(
+    entryId: number,
+    availableAt?: number,
+  ): Promise<boolean> {
+    const remainingDelayMs = Math.max(0, (availableAt ?? 0) - Date.now());
+    const result = await this.redis.eval(
+      ACTIVATE_DELAYED_ENTRY_SCRIPT,
+      2,
+      TaskRunQueueKeys.Scopes,
+      TaskRunQueueKeys.EntryScopes,
+      entryId.toString(),
+      remainingDelayMs.toString(),
+    );
+    return result === 1;
+  }
+
+  public async removeDelayedEntry(entryId: number): Promise<boolean> {
+    const result = await this.redis.eval(
+      REMOVE_DELAYED_ENTRY_SCRIPT,
+      4,
+      TaskRunQueueKeys.Queue,
+      TaskRunQueueKeys.Scopes,
+      TaskRunQueueKeys.Entries,
+      TaskRunQueueKeys.EntryScopes,
+      entryId.toString(),
+    );
+    return result === 1;
   }
 
   public async dequeue(blocking = true): Promise<TaskRunQueueEntry | null> {
@@ -882,6 +957,11 @@ export interface EnqueueTaskOptions {
    * controller queue. If this throws, the run is canceled and never queued.
    */
   beforeEnqueue?: (taskRun: TaskRun) => Promise<void>;
+  /**
+   * Cancels the persisted run if ownership is revoked before the controller
+   * queue write begins, including while queue metadata is being prepared.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -1193,9 +1273,11 @@ async function pushRunOntoQueue(params: {
     return;
   }
 
-  if (options.beforeEnqueue) {
+  if (options.beforeEnqueue || options.signal) {
     try {
-      await options.beforeEnqueue(taskRun);
+      options.signal?.throwIfAborted();
+      await options.beforeEnqueue?.(taskRun);
+      options.signal?.throwIfAborted();
     } catch (error) {
       const message = getErrorMessage(error, 'Failed before task run enqueue');
 
@@ -1217,6 +1299,7 @@ async function pushRunOntoQueue(params: {
       .update(taskRuns)
       .set({ queueScope: scope })
       .where(eq(taskRuns.id, taskRun.id));
+    options.signal?.throwIfAborted();
 
     const sourceControlProvider =
       'sourceControlProvider' in taskRun.payload
@@ -1226,11 +1309,46 @@ async function pushRunOntoQueue(params: {
       payloadKind: taskRun.payloadKind,
       sourceControlProvider,
     });
-    const evictedEntries = await TaskRunQueue.getInstance().enqueue({
+    const queue = TaskRunQueue.getInstance();
+    const queueEntry = {
       id: taskRun.id,
       scope,
       ...queuePolicy,
-    });
+    };
+    let delayedEntryQueued = false;
+    const evictedEntries = await queue.enqueue(
+      options.signal
+        ? {
+            ...queueEntry,
+            availableAt: Math.max(
+              queueEntry.availableAt ?? 0,
+              Date.now() + SIGNAL_GUARDED_QUEUE_HOLD_MS,
+            ),
+          }
+        : queueEntry,
+    );
+
+    if (options.signal) {
+      delayedEntryQueued = true;
+      try {
+        options.signal.throwIfAborted();
+        if (
+          !(await queue.activateDelayedEntry(
+            taskRun.id,
+            queueEntry.availableAt,
+          ))
+        ) {
+          throw new Error(
+            `Failed to activate signal-guarded task run ${taskRun.id}.`,
+          );
+        }
+        delayedEntryQueued = false;
+      } finally {
+        if (delayedEntryQueued) {
+          await queue.removeDelayedEntry(taskRun.id);
+        }
+      }
+    }
 
     await cancelEvictedTaskRuns(
       evictedEntries,

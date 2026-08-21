@@ -110,6 +110,7 @@ export async function startNewDiscordTask(input: {
     taskId: string;
     taskUrl?: string;
   }) => Promise<void>;
+  signal?: AbortSignal;
   workspaceOverride?: DiscordWorkspaceSelection;
   /**
    * True when the Discord intake path successfully pinned 👀 on the origin
@@ -134,6 +135,7 @@ export async function startNewDiscordTask(input: {
     await clearDiscordIntakeAckBestEffort(input);
     throw error;
   });
+  input.signal?.throwIfAborted();
   if (existingRun) {
     const taskUrl = getTaskUrl({
       taskId: existingRun.taskId,
@@ -193,6 +195,7 @@ export async function startNewDiscordTask(input: {
         ? findDiscordInstallationByGuildId(input.channel.guildId)
         : Promise.resolve(null),
     ]);
+    input.signal?.throwIfAborted();
     const history = mergeDiscordRepliedToMessage({
       messages: historyBase,
       repliedTo: repliedToMessage,
@@ -244,6 +247,7 @@ export async function startNewDiscordTask(input: {
           })
         : await processDiscordAttachments(historyAttachments)
       : { images: [], attachmentTexts: [], warnings: [] };
+    input.signal?.throwIfAborted();
     for (const warning of threadAttachments.warnings) {
       console.warn(`[discord] Thread attachment warning: ${warning}`);
     }
@@ -281,7 +285,9 @@ export async function startNewDiscordTask(input: {
       ...(allImages.length ? { images: allImages } : {}),
       apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
     });
+    input.signal?.throwIfAborted();
     const routingDecision = await routeTask(routingContext);
+    input.signal?.throwIfAborted();
     if (
       routingDecision.status === 'platform_answer' &&
       !input.workspaceOverride
@@ -356,6 +362,7 @@ export async function startNewDiscordTask(input: {
         'Discord task routing selected an unavailable workspace.',
       );
     }
+    input.signal?.throwIfAborted();
     const kickoffMessage =
       routingDecision.status === 'routed'
         ? routingDecision.result.kickoffMessage
@@ -384,6 +391,7 @@ export async function startNewDiscordTask(input: {
       ...(input.beforeEnqueueKickoff
         ? { beforeEnqueueKickoff: input.beforeEnqueueKickoff }
         : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
       ...(kickoffMessage ? { kickoffMessage } : {}),
       ...(input.intakeAckPinned ? { intakeAckPinned: true } : {}),
     });

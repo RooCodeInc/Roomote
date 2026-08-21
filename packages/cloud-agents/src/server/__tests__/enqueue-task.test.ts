@@ -1802,6 +1802,87 @@ describe('enqueue-failure cancel task state', () => {
     expect(runs[0]!.status).toBe(RunStatus.Canceled);
     expect(runs[0]!.canceledAt).not.toBeNull();
   });
+
+  it('removes a staged queue entry when ownership aborts during enqueue', async () => {
+    const userId = await createUser();
+    const controller = new AbortController();
+    const previousQueue = TaskRunQueue.queue;
+    const queueRedis = new Redis();
+    const queue = new TaskRunQueue({ redis: queueRedis, timeout: 1 });
+    const enqueue = queue.enqueue.bind(queue);
+    let capturedTaskId: string | undefined;
+    TaskRunQueue.queue = queue;
+    vi.spyOn(queue, 'enqueue').mockImplementation(async (entry) => {
+      const result = await enqueue(entry);
+      controller.abort(new Error('Fast conversation lock ownership was lost.'));
+      return result;
+    });
+
+    try {
+      await expect(
+        enqueueTask(
+          {
+            task: standardTaskInput(),
+            initiator: { kind: 'user', userId },
+            workflow: 'standard',
+            surface: 'slack',
+            trigger: 'message',
+          },
+          {
+            skipEarlyTitleGeneration: true,
+            signal: controller.signal,
+            beforeEnqueue: async (taskRun) => {
+              capturedTaskId = taskRun.taskId;
+            },
+          },
+        ),
+      ).rejects.toThrow('Fast conversation lock ownership was lost.');
+
+      expect(capturedTaskId).toBeDefined();
+      createdTaskIds.push(capturedTaskId!);
+      expect(await queue.dequeue(false)).toBeNull();
+      const runs = await db.query.taskRuns.findMany({
+        where: eq(taskRuns.taskId, capturedTaskId!),
+      });
+      expect(runs).toHaveLength(1);
+      expect(runs[0]!.status).toBe(RunStatus.Canceled);
+    } finally {
+      TaskRunQueue.queue = previousQueue;
+      await queueRedis.quit();
+    }
+  });
+
+  it('activates a staged queue entry while ownership remains valid', async () => {
+    const userId = await createUser();
+    const controller = new AbortController();
+    const previousQueue = TaskRunQueue.queue;
+    const queueRedis = new Redis();
+    const queue = new TaskRunQueue({ redis: queueRedis, timeout: 1 });
+    TaskRunQueue.queue = queue;
+
+    try {
+      const run = await enqueueTask(
+        {
+          task: standardTaskInput(),
+          initiator: { kind: 'user', userId },
+          workflow: 'standard',
+          surface: 'slack',
+          trigger: 'message',
+        },
+        {
+          skipEarlyTitleGeneration: true,
+          signal: controller.signal,
+          beforeEnqueue: async () => undefined,
+        },
+      );
+      createdTaskIds.push(run.taskId);
+
+      await expect(queue.dequeue(false)).resolves.toMatchObject({ id: run.id });
+    } finally {
+      TaskRunQueue.queue = previousQueue;
+      await queueRedis.quit();
+    }
+  });
 });
 
 describe('enqueueTask source-control provider stamping', () => {
