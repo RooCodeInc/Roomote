@@ -3,6 +3,8 @@ name: roomote
 x-roomote-production-env: &roomote-production-env
   NODE_ENV: production
   R_APP_ENV: production
+  ROOMOTE_ALLOW_INSECURE_LOCAL_KEYS: 'false'
+  R_AUTO_GENERATE_KEYS: 'false'
   DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
   REDIS_URL: ${REDIS_URL:?REDIS_URL is required}
   S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
