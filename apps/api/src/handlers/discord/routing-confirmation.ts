@@ -4,6 +4,7 @@ import {
   getAvailableEnvironments,
   getRoutingAutoConfirmDelayMs,
   getTaskUrl,
+  recordRoutingPreference,
   resolveRoutingFollowUp,
   ROUTING_AUTO_CONFIRM_TIMEOUT_MS,
   type RoutingDecision,
@@ -777,6 +778,7 @@ export async function handleDiscordRoutingReply(input: {
         : null,
       userResponse: input.queuedMessage.text,
       userId: input.launchOwnerUserId,
+      apiBaseUrl: routingContext.routingActor?.apiBaseUrl,
       correctionMessage: {
         user: input.queuedMessage.user,
         text: input.queuedMessage.text,
@@ -1109,6 +1111,17 @@ export async function handleDiscordRoutingCallback(input: {
       text: 'That workspace is no longer available. Send the request again.',
     });
     return;
+  }
+  if (option.workspace.type === 'environment') {
+    await recordRoutingPreference({
+      userId: pending.launchOwnerUserId,
+      apiBaseUrl: pending.routingContext?.routingActor?.apiBaseUrl,
+      environmentId: option.workspace.id,
+      signal:
+        input.callback.selection === pending.suggestedIndex
+          ? 'accepted'
+          : 'corrected',
+    });
   }
   // The launch already answered a card that lived in the task thread.
   if (pending.cardChannel) return;

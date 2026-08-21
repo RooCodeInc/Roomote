@@ -32,6 +32,13 @@ export const MAX_THREAD_MESSAGES = 5;
 
 export const PLATFORM_WORKSPACE_VALUE = '__platform__';
 
+export interface RoutingEnvironmentPreference {
+  environmentId: string;
+  acceptedCount: number;
+  correctionCount: number;
+  lastSelectedAt: Date;
+}
+
 /**
  * Context provided to the router for making routing decisions.
  */
@@ -55,6 +62,8 @@ export interface RoutingContext {
     userId: string;
     apiBaseUrl?: string;
   };
+  /** Exact Brain-backed preference used only to break uncertain routes. */
+  environmentPreference?: RoutingEnvironmentPreference | null;
   previousSuggestion?: {
     workspaceValue: string | null;
     workspaceDisplayName: string;
@@ -175,6 +184,8 @@ export interface RoutingDebugInfo {
   needsExternalLookup: boolean | null;
   confidence?: number | null;
   workspaceRemapped?: boolean;
+  environmentSource?: 'router' | 'memory';
+  environmentPreferenceWeight?: number;
   selectedTaskModel?: RoutingTaskModelSelection;
 }
 
@@ -276,4 +287,6 @@ export type FollowUpIntent = 'confirm' | 'cancel' | 'correct';
 export interface FollowUpClassification {
   intent: FollowUpIntent;
   reasoning: string;
+  /** True when classification fell back after an inference failure. */
+  isFallback?: boolean;
 }

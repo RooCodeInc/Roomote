@@ -5,6 +5,7 @@ const {
   findActiveSlackTaskRunMock,
   classifyFollowUpMock,
   resolveRoutingFollowUpMock,
+  recordRoutingPreferenceMock,
   getTaskUrlMock,
   repositoriesFindManyMock,
   environmentsFindManyMock,
@@ -37,6 +38,7 @@ const {
   findActiveSlackTaskRunMock: vi.fn(),
   classifyFollowUpMock: vi.fn(),
   resolveRoutingFollowUpMock: vi.fn(),
+  recordRoutingPreferenceMock: vi.fn(),
   getTaskUrlMock: vi.fn(),
   repositoriesFindManyMock: vi.fn(),
   environmentsFindManyMock: vi.fn(),
@@ -70,6 +72,9 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: enqueueTaskMock,
   classifyFollowUp: classifyFollowUpMock,
   resolveRoutingFollowUp: resolveRoutingFollowUpMock,
+  normalizeRoutingPreferenceEnvironmentId: (value?: string | null) =>
+    value?.startsWith('env:') ? value.slice(4) : (value ?? null),
+  recordRoutingPreference: recordRoutingPreferenceMock,
   detectSlackMcpSetupRequirement: vi.fn().mockResolvedValue(null),
   getRoutingAutoConfirmDelayMs: vi.fn(() => 0),
   getTaskUrl: getTaskUrlMock,
@@ -420,6 +425,7 @@ describe('Slack deleted-mention suppression', () => {
       }),
       expect.anything(),
     );
+    expect(recordRoutingPreferenceMock).not.toHaveBeenCalled();
   });
 
   it('includes existing replies when a task starts from the thread root', async () => {
@@ -561,6 +567,12 @@ describe('Slack deleted-mention suppression', () => {
       }),
       expect.anything(),
     );
+    expect(recordRoutingPreferenceMock).toHaveBeenCalledWith({
+      userId: 'user_1',
+      apiBaseUrl: expect.any(String),
+      environmentId: 'env_1',
+      signal: 'accepted',
+    });
   });
 
   it('filters eval environments out of the workspace picker query', async () => {

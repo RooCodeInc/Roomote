@@ -1,11 +1,27 @@
 const mocks = vi.hoisted(() => ({
   classifyFollowUp: vi.fn(),
+  recordRoutingPreference: vi.fn(),
   routeTask: vi.fn(),
 }));
 
 vi.mock('../router-service', () => ({
   classifyFollowUp: mocks.classifyFollowUp,
   routeTask: mocks.routeTask,
+}));
+
+vi.mock('../routing-preference-memory', () => ({
+  normalizeRoutingPreferenceEnvironmentId: (value?: string | null) => {
+    if (
+      !value ||
+      value === 'all_repositories' ||
+      value === '__all_repositories__' ||
+      value.startsWith('repo:')
+    ) {
+      return null;
+    }
+    return value.startsWith('env:') ? value.slice(4) : value;
+  },
+  recordRoutingPreference: mocks.recordRoutingPreference,
 }));
 
 import { resolveRoutingFollowUp } from '../follow-up-service';
@@ -48,6 +64,12 @@ describe('resolveRoutingFollowUp', () => {
     ).resolves.toEqual({ intent: 'confirm' });
     expect(buildCorrectionContext).not.toHaveBeenCalled();
     expect(mocks.routeTask).not.toHaveBeenCalled();
+    expect(mocks.recordRoutingPreference).toHaveBeenCalledWith({
+      userId: 'user-1',
+      apiBaseUrl: undefined,
+      environmentId: 'web',
+      signal: 'accepted',
+    });
   });
 
   it('cancels without building context or routing again', async () => {
@@ -70,6 +92,26 @@ describe('resolveRoutingFollowUp', () => {
     ).resolves.toEqual({ intent: 'cancel' });
     expect(buildCorrectionContext).not.toHaveBeenCalled();
     expect(mocks.routeTask).not.toHaveBeenCalled();
+  });
+
+  it('does not store all-repositories confirmations as environment memory', async () => {
+    mocks.classifyFollowUp.mockResolvedValueOnce({
+      intent: 'confirm',
+      reasoning: 'accepted',
+    });
+
+    await expect(
+      resolveRoutingFollowUp({
+        suggestion: {
+          workspaceValue: 'repo:__all_repositories__',
+          workspaceDisplayName: 'All repositories',
+        },
+        userResponse: 'yes',
+        userId: 'user-1',
+        buildCorrectionContext: vi.fn(),
+      }),
+    ).resolves.toEqual({ intent: 'confirm' });
+    expect(mocks.recordRoutingPreference).not.toHaveBeenCalled();
   });
 
   it('routes a correction with the previous suggestion and reply in context', async () => {
@@ -111,6 +153,12 @@ describe('resolveRoutingFollowUp', () => {
         workspaceValue: 'web',
         workspaceDisplayName: 'Web App',
       },
+    });
+    expect(mocks.recordRoutingPreference).toHaveBeenCalledWith({
+      userId: 'user-1',
+      apiBaseUrl: undefined,
+      environmentId: 'api',
+      signal: 'corrected',
     });
   });
 

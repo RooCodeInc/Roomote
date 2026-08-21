@@ -17,8 +17,21 @@ import type {
   LinearRoutingSource,
   GitHubRoutingSource,
 } from './types';
+import { getRoutingPreference } from './routing-preference-memory';
 
 const DEFAULT_DEPLOYMENT_ID = 'default';
+
+function fetchRoutingPreference(params: {
+  userId?: string;
+  apiBaseUrl?: string;
+}) {
+  return params.userId
+    ? getRoutingPreference({
+        userId: params.userId,
+        apiBaseUrl: params.apiBaseUrl,
+      })
+    : Promise.resolve(null);
+}
 
 async function fetchDeploymentRoutingSettings() {
   const deployment = await db.query.deploymentSettings.findFirst({
@@ -123,10 +136,12 @@ export interface GitHubContextParams {
 export async function buildSlackRoutingContext(
   params: SlackContextParams,
 ): Promise<RoutingContext> {
-  const [envs, deploymentRoutingSettings] = await Promise.all([
-    getAvailableEnvironments(),
-    fetchDeploymentRoutingSettings(),
-  ]);
+  const [envs, deploymentRoutingSettings, environmentPreference] =
+    await Promise.all([
+      getAvailableEnvironments(),
+      fetchDeploymentRoutingSettings(),
+      fetchRoutingPreference(params),
+    ]);
 
   const source: SlackRoutingSource = {
     type: 'slack',
@@ -142,6 +157,7 @@ export async function buildSlackRoutingContext(
     source,
     availableEnvironments: envs,
     ...deploymentRoutingSettings,
+    ...(environmentPreference ? { environmentPreference } : {}),
     ...(params.userId
       ? {
           routingActor: {
@@ -159,10 +175,12 @@ export async function buildSlackRoutingContext(
 export async function buildTeamsRoutingContext(
   params: TeamsContextParams,
 ): Promise<RoutingContext> {
-  const [envs, deploymentRoutingSettings] = await Promise.all([
-    getAvailableEnvironments(),
-    fetchDeploymentRoutingSettings(),
-  ]);
+  const [envs, deploymentRoutingSettings, environmentPreference] =
+    await Promise.all([
+      getAvailableEnvironments(),
+      fetchDeploymentRoutingSettings(),
+      fetchRoutingPreference(params),
+    ]);
 
   const source: TeamsRoutingSource = {
     type: 'teams',
@@ -178,6 +196,7 @@ export async function buildTeamsRoutingContext(
     source,
     availableEnvironments: envs,
     ...deploymentRoutingSettings,
+    ...(environmentPreference ? { environmentPreference } : {}),
     ...(params.userId
       ? {
           routingActor: {
@@ -195,10 +214,12 @@ export async function buildTeamsRoutingContext(
 export async function buildTelegramRoutingContext(
   params: TelegramContextParams,
 ): Promise<RoutingContext> {
-  const [envs, deploymentRoutingSettings] = await Promise.all([
-    getAvailableEnvironments(),
-    fetchDeploymentRoutingSettings(),
-  ]);
+  const [envs, deploymentRoutingSettings, environmentPreference] =
+    await Promise.all([
+      getAvailableEnvironments(),
+      fetchDeploymentRoutingSettings(),
+      fetchRoutingPreference(params),
+    ]);
 
   const source: TelegramRoutingSource = {
     type: 'telegram',
@@ -213,6 +234,7 @@ export async function buildTelegramRoutingContext(
     source,
     availableEnvironments: envs,
     ...deploymentRoutingSettings,
+    ...(environmentPreference ? { environmentPreference } : {}),
     ...(params.userId
       ? {
           routingActor: {
@@ -228,10 +250,12 @@ export async function buildTelegramRoutingContext(
 export async function buildDiscordRoutingContext(
   params: DiscordContextParams,
 ): Promise<RoutingContext> {
-  const [envs, deploymentRoutingSettings] = await Promise.all([
-    getAvailableEnvironments(),
-    fetchDeploymentRoutingSettings(),
-  ]);
+  const [envs, deploymentRoutingSettings, environmentPreference] =
+    await Promise.all([
+      getAvailableEnvironments(),
+      fetchDeploymentRoutingSettings(),
+      fetchRoutingPreference(params),
+    ]);
   const source: DiscordRoutingSource = {
     type: 'discord',
     guildName: params.guildName,
@@ -245,6 +269,7 @@ export async function buildDiscordRoutingContext(
     source,
     availableEnvironments: envs,
     ...deploymentRoutingSettings,
+    ...(environmentPreference ? { environmentPreference } : {}),
     ...(params.userId
       ? {
           routingActor: {
@@ -262,10 +287,12 @@ export async function buildDiscordRoutingContext(
 export async function buildLinearRoutingContext(
   params: LinearContextParams,
 ): Promise<RoutingContext> {
-  const [envs, deploymentRoutingSettings] = await Promise.all([
-    getAvailableEnvironments(),
-    fetchDeploymentRoutingSettings(),
-  ]);
+  const [envs, deploymentRoutingSettings, environmentPreference] =
+    await Promise.all([
+      getAvailableEnvironments(),
+      fetchDeploymentRoutingSettings(),
+      fetchRoutingPreference(params),
+    ]);
 
   const source: LinearRoutingSource = {
     type: 'linear',
@@ -284,6 +311,7 @@ export async function buildLinearRoutingContext(
     source,
     availableEnvironments: envs,
     ...deploymentRoutingSettings,
+    ...(environmentPreference ? { environmentPreference } : {}),
     ...(params.userId
       ? {
           routingActor: {

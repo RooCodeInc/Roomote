@@ -9,6 +9,7 @@ import { getRedis } from '@roomote/redis';
 import {
   getAvailableEnvironments,
   getRoutingAutoConfirmDelayMs,
+  recordRoutingPreference,
   resolveRoutingFollowUp,
   type RoutingDecision,
   type RoutingContext,
@@ -600,6 +601,7 @@ export async function handleTelegramRoutingReply(input: {
         : null,
       userResponse: input.queuedMessage.text,
       userId: input.launchOwnerUserId,
+      apiBaseUrl: routingContext.routingActor?.apiBaseUrl,
       correctionMessage: {
         user: input.queuedMessage.user,
         text: input.queuedMessage.text,
@@ -884,6 +886,15 @@ export async function handleTelegramRoutingCallback(params: {
       text: 'Could not start the task — that workspace is no longer available. Send the request again.',
     });
     return;
+  }
+
+  if (option.workspace.type === 'environment') {
+    await recordRoutingPreference({
+      userId: claimed.launchOwnerUserId,
+      apiBaseUrl: claimed.routingContext?.routingActor?.apiBaseUrl,
+      environmentId: option.workspace.id,
+      signal: optionIndex === claimed.suggestedIndex ? 'accepted' : 'corrected',
+    });
   }
 
   await answerTelegramCallbackQueryBestEffort({

@@ -106,6 +106,144 @@ describe('routeTask', () => {
     });
   });
 
+  it('uses repeated Brain preference signals to break an uncertain route', async () => {
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: {
+        workspaceValue: 'Full Stack',
+        reasoning: 'The request could fit either workspace.',
+        confidence: 0.55,
+        kickoffMessage: 'Starting the ambiguous request in Full Stack.',
+        needsExternalLookup: false,
+        externalReference: null,
+      },
+    });
+
+    const result = await routeTask(
+      createContext({
+        availableEnvironments: [
+          ...environments,
+          {
+            id: 'env-api',
+            name: 'API',
+            repositoryNames: ['acme/api'],
+          },
+        ],
+        environmentPreference: {
+          environmentId: 'env-api',
+          acceptedCount: 2,
+          correctionCount: 0,
+          lastSelectedAt: new Date(),
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: 'routed',
+      result: {
+        workspace: { type: 'environment', id: 'env-api', name: 'API' },
+        kickoffMessage: undefined,
+        debug: {
+          environmentSource: 'memory',
+          environmentPreferenceWeight: expect.any(Number),
+        },
+      },
+    });
+  });
+
+  it('does not let Brain preference override an explicit environment mention', async () => {
+    mockGenerateTrackedNonTaskObject.mockResolvedValue({
+      object: {
+        workspaceValue: 'Full Stack',
+        reasoning: 'The user explicitly requested Full Stack.',
+        confidence: 0.55,
+        needsExternalLookup: false,
+        externalReference: null,
+      },
+    });
+
+    const result = await routeTask(
+      createContext({
+        taskDescription: 'Run this in Full Stack',
+        availableEnvironments: [
+          ...environments,
+          {
+            id: 'env-api',
+            name: 'API',
+            repositoryNames: ['acme/api'],
+          },
+        ],
+        environmentPreference: {
+          environmentId: 'env-api',
+          acceptedCount: 0,
+          correctionCount: 3,
+          lastSelectedAt: new Date(),
+        },
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: 'routed',
+      result: {
+        workspace: {
+          type: 'environment',
+          id: 'env-full-stack',
+          name: 'Full Stack',
+        },
+        debug: { environmentSource: 'router' },
+      },
+    });
+  });
+
+  it.each([
+    'Investigate acme/web#42',
+    'Investigate https://github.com/acme/web/issues/42',
+  ])(
+    'does not let Brain preference override configured repository reference: %s',
+    async (taskDescription) => {
+      mockGenerateTrackedNonTaskObject.mockResolvedValue({
+        object: {
+          workspaceValue: 'Full Stack',
+          reasoning: 'The configured repository belongs to Full Stack.',
+          confidence: 0.55,
+          needsExternalLookup: false,
+          externalReference: null,
+        },
+      });
+
+      const result = await routeTask(
+        createContext({
+          taskDescription,
+          availableEnvironments: [
+            ...environments,
+            {
+              id: 'env-api',
+              name: 'API',
+              repositoryNames: ['acme/api'],
+            },
+          ],
+          environmentPreference: {
+            environmentId: 'env-api',
+            acceptedCount: 0,
+            correctionCount: 3,
+            lastSelectedAt: new Date(),
+          },
+        }),
+      );
+
+      expect(result).toMatchObject({
+        status: 'routed',
+        result: {
+          workspace: {
+            type: 'environment',
+            id: 'env-full-stack',
+            name: 'Full Stack',
+          },
+          debug: { environmentSource: 'router' },
+        },
+      });
+    },
+  );
+
   it('fetches pasted GitHub issue context when the precheck asks for it', async () => {
     mockCallRouterMcpTool.mockResolvedValue({
       title: 'Fix the dashboard refresh failure',
