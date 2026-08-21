@@ -1,4 +1,5 @@
 import {
+  ALL_REPOSITORIES,
   type TaskSpec,
   type TaskSurface,
   TaskPayloadKind,
@@ -16,9 +17,11 @@ import {
   getSlackTeamDomainFromTaskPayload,
   getSlackTeamIdFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
+  resolveSourceControlHostFromPayload,
 } from '@roomote/types';
 import {
   type TaskRun,
+  type RepositorySourceControl,
   db,
   eq,
   tasks,
@@ -109,6 +112,36 @@ export function resolveStandardTaskSurface({
   }
 }
 
+export function resolveAggregateSourceControl({
+  sourceControlProvider,
+  sourceControlHost,
+  repositoryProviders,
+}: Pick<
+  TaskSpec['payload'],
+  'sourceControlProvider' | 'sourceControlHost' | 'repositoryProviders'
+>): RepositorySourceControl | undefined {
+  if (!sourceControlProvider) {
+    return undefined;
+  }
+
+  const providers = repositoryProviders
+    ? new Set(Object.values(repositoryProviders))
+    : null;
+
+  if (
+    providers &&
+    (providers.size !== 1 || !providers.has(sourceControlProvider))
+  ) {
+    return undefined;
+  }
+
+  const host = resolveSourceControlHostFromPayload({ sourceControlHost });
+  return {
+    provider: sourceControlProvider,
+    ...(host ? { host } : {}),
+  };
+}
+
 export async function generatePrompt({
   taskRun,
   taskSpec,
@@ -153,10 +186,14 @@ export async function generatePrompt({
       surface: true,
     },
   });
-  const targetSourceControl = await resolveRepositorySourceControl(
-    db,
-    taskSpec.payload.repo,
-  );
+  const targetSourceControl =
+    taskSpec.payload.repo === ALL_REPOSITORIES
+      ? resolveAggregateSourceControl(taskSpec.payload)
+      : await resolveRepositorySourceControl(
+          db,
+          taskSpec.payload.repo,
+          resolveSourceControlHostFromPayload(taskSpec.payload),
+        );
   const commitAuthor =
     taskRow && targetSourceControl
       ? await resolveRunCommitAuthor(db, taskRun, targetSourceControl)

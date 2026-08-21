@@ -132,6 +132,7 @@ async function resolveProvidersByFullNames(
 export async function resolveRepositorySourceControl(
   dbOrTx: DatabaseOrTransaction,
   fullName: string,
+  sourceControlHost?: string,
 ): Promise<RepositorySourceControl | undefined> {
   const rows = await dbOrTx
     .select({
@@ -142,7 +143,7 @@ export async function resolveRepositorySourceControl(
     })
     .from(repositories)
     .where(eq(repositories.fullName, fullName));
-  const selected = selectRepositoryRows(rows, [fullName]);
+  const selected = selectRepositoryRows(rows, [fullName], sourceControlHost);
   const repository = selected?.[0];
 
   return repository
