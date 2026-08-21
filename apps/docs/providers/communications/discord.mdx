@@ -127,6 +127,12 @@ under **Settings > Automations**, the same way you would pick a Slack channel.
   (lookups outside the originating task thread require a linked Discord account)
 - use `/help` to see the available commands
 
+When the fast orchestrator delegates work, it remains the owner of the Discord
+conversation. It relays useful progress and questions from the delegated task,
+adds task context when reporting an opened pull request, and reports review
+feedback or when the pull request is merged or closed. The delegated task does
+not post a separate competing conversation into the thread.
+
 Roomote does not quote every message it answers. In a task thread, the
 conversation itself supplies the context. When you start a task by tagging
 Roomote in an existing thread, Roomote reads earlier messages in that thread

@@ -180,6 +180,12 @@ Mention the app and use `!fast <request>` to ask the fast orchestrator a
 question or delegate work into a task. For example: `@Roomote !fast summarize
 this thread` or `@Roomote !fast fix the failing CI job`.
 
+When the fast orchestrator delegates work, it remains the owner of the Slack
+conversation. It relays useful progress and questions from the delegated task,
+adds task context when reporting an opened pull request, and reports review
+feedback or when the pull request is merged or closed. The delegated task does
+not post a separate competing conversation into the thread.
+
 When your deployment exposes **Default messages to fast mode**, enable it under
 **Settings > Personal** to send ordinary Slack and Discord messages through the
 fast orchestrator without an explicit command.
