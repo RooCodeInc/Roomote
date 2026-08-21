@@ -130,6 +130,20 @@ describe('configToYaml', () => {
     expect(yaml).toContain('docker_projects:');
   });
 
+  it('preserves an explicitly requested Docker runtime', () => {
+    const config: EnvironmentConfig = {
+      name: 'Docker Runtime Env',
+      repositories: [{ repository: 'Roomote/example-app' }],
+      nested_docker: true,
+    };
+
+    const yaml = configToYaml(config);
+    const parsed = YAML.parse(yaml);
+
+    expect(parsed.nested_docker).toBe(true);
+    expect(yaml).toContain('nested_docker: true');
+  });
+
   it('preserves manualSkills when serializing environment config', () => {
     const config: EnvironmentConfig = {
       name: 'Manual Skills Env',

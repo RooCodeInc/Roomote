@@ -195,6 +195,43 @@ describe('spawnModalWorker', () => {
     expect(mockFindTask).not.toHaveBeenCalled();
   });
 
+  it('uses a right-sized Modal VM sandbox when the environment requests a Docker runtime', async () => {
+    mockGetNamedPortsForTaskRun.mockResolvedValue({
+      namedPorts: [{ name: 'SANDBOX_SERVER', port: 7777 }],
+      environmentSnapshotId: undefined,
+      environmentConfig: { nested_docker: true },
+    });
+
+    await spawnModalWorker(
+      mockTaskRun({
+        payloadKind: TaskPayloadKind.StandardTask,
+        payload: { repo: 'test/repo', environmentId: 'env_123' },
+      }),
+      'auth_token',
+      {
+        deploymentSlug: 'roomote',
+        modalTokenId: 'token-id',
+        modalTokenSecret: 'token-secret',
+        modalBaseImageRef: 'image-ref',
+        modalVmMemoryMiB: 12_288,
+        modalTimeoutMs: 60_000,
+      },
+    );
+
+    expect(mockCreateComputeProviderClient).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'modal',
+        config: expect.objectContaining({
+          vmRuntime: true,
+          cpu: 2,
+          memoryMiB: 12_288,
+        }),
+      }),
+    );
+    expect(mockCreateModalMachine).toHaveBeenCalled();
+    expect(mockFindTask).not.toHaveBeenCalled();
+  });
+
   it('uses a Modal VM sandbox for setup onboarding before an environment config exists', async () => {
     mockFindTask.mockResolvedValue({ workflow: 'setup_onboarding' });
 

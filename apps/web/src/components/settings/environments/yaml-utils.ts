@@ -91,6 +91,10 @@ export function configToYaml(config: EnvironmentConfig): string {
     cleanConfig.docker_projects = config.docker_projects;
   }
 
+  if (config.nested_docker === true) {
+    cleanConfig.nested_docker = true;
+  }
+
   if (config.services && config.services.length > 0) {
     cleanConfig.services = config.services;
   }

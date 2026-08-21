@@ -542,5 +542,29 @@ describe('declarative environments', () => {
 
     expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
     expect(result.data?.name).toBe('Roomote');
+    expect(result.data?.nested_docker).toBe(true);
+    expect(result.data?.ports).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'preview',
+          port: 18081,
+          wildcard_prefix: true,
+        }),
+      ]),
+    );
+    expect(result.data?.ports).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ port: 13001 })]),
+    );
+
+    for (const port of result.data?.ports ?? []) {
+      expect(port.unauthenticated, port.name).not.toBe(true);
+    }
+
+    const controller = result.data?.repositories[0]?.commands?.find(
+      (command) => command.name === 'Start controller',
+    );
+    expect(controller?.run).toContain(
+      'PREVIEW_AUTH_COOKIE_NAME=preview_auth_inner',
+    );
   });
 });

@@ -20,6 +20,7 @@ description:
   (Redis, API, BullMQ, controller) plus a local Mintlify preview of the public
   docs site (apps/docs) on the `docs` port.
 initialUrl: http://127.0.0.1:3000/auth/dev-login
+nested_docker: true
 ports:
   - name: web
     port: 3000
@@ -27,6 +28,9 @@ ports:
     primary: true
   - name: docs
     port: 3333
+  - name: preview
+    port: 18081
+    wildcard_prefix: true
 services:
   - postgres16
 repositories:
@@ -41,7 +45,7 @@ repositories:
         timeout: 600
         continue_on_error: false
       - name: Write local env overrides
-        run: printf 'DATABASE_URL=postgresql://postgres@localhost:5432/roomote_development\nREDIS_URL=redis://localhost:16379\nR_APP_ENV=development\nWEB_DEV_LOGIN_ENABLED=true\n' > .env.local
+        run: printf 'DATABASE_URL=postgresql://postgres@localhost:5432/roomote_development\nREDIS_URL=redis://localhost:16379\nR_APP_ENV=development\nWEB_DEV_LOGIN_ENABLED=true\nDEFAULT_COMPUTE_PROVIDER=docker\n' > .env.local
         timeout: 600
         continue_on_error: false
       - name: Create development database
@@ -77,7 +81,7 @@ repositories:
       - name: Build local worker release
         run: pnpm --filter @roomote/dev build-worker-release
         timeout: 600
-        continue_on_error: true
+        continue_on_error: false
       - name: Start API server
         run: PORT=13001 R_APP_ENV=development pnpm --filter @roomote/api dev
         timeout: 600
@@ -85,7 +89,7 @@ repositories:
         detached: true
         logfile: /tmp/roomote-api.log
       - name: Start Next.js web dev server
-        run: PORT=3000 R_APP_ENV=development WEB_DEV_LOGIN_ENABLED=true pnpm --filter @roomote/web dev
+        run: bash .roomote/scripts/with-nested-preview-env.sh env PORT=3000 R_APP_ENV=development WEB_DEV_LOGIN_ENABLED=true pnpm --filter @roomote/web dev
         timeout: 600
         continue_on_error: false
         detached: true
@@ -97,11 +101,22 @@ repositories:
         detached: true
         logfile: /tmp/roomote-bullmq.log
       - name: Start controller
-        run: R_APP_ENV=development TRPC_URL="${ROOMOTE_API_HOST:-http://localhost:13001}" R_APP_URL="${ROOMOTE_WEB_HOST:-http://localhost:3000}" R_PUBLIC_URL="${ROOMOTE_WEB_HOST:-http://localhost:3000}" pnpm --filter @roomote/controller dev
+        run: bash .roomote/scripts/with-nested-preview-env.sh env R_APP_ENV=development DEFAULT_COMPUTE_PROVIDER=docker TRPC_URL="http://localhost:13001" R_APP_URL="${ROOMOTE_WEB_HOST:-http://localhost:3000}" R_PUBLIC_URL="${ROOMOTE_WEB_HOST:-http://localhost:3000}" PREVIEW_AUTH_COOKIE_NAME=preview_auth_inner pnpm --filter @roomote/controller dev
         timeout: 600
         continue_on_error: true
         detached: true
         logfile: /tmp/roomote-controller.log
+      - name: Start nested preview proxy
+        run: bash .roomote/scripts/with-nested-preview-env.sh env PORT=18081 R_APP_ENV=development R_APP_URL="${ROOMOTE_WEB_HOST:-http://localhost:3000}" PREVIEW_AUTH_COOKIE_NAME=preview_auth_inner pnpm --filter @roomote/preview-proxy dev
+        timeout: 600
+        continue_on_error: true
+        detached: true
+        logfile: /tmp/roomote-preview-proxy.log
+      - name: Verify task runtime services
+        run: >-
+          bash -lc 'set -eu; docker version --format "{{.Server.Version}}" >/dev/null; for endpoint in http://localhost:13001/health/liveness http://localhost:13001/health/controller http://localhost:13002/admin/health http://localhost:18081/health http://localhost:3000/auth/dev-login; do attempts=0; until curl -fsS "$endpoint" >/dev/null; do attempts=$((attempts + 1)); if [ "$attempts" -ge 90 ]; then echo "Timed out waiting for $endpoint" >&2; exit 1; fi; sleep 1; done; done'
+        timeout: 600
+        continue_on_error: false
       - name: Start Mintlify docs preview
         # Mint is needed only for this optional final service.
         run: mise install node@22.20.0 && mise exec node@22.20.0 -- npm install -g mint && cd apps/docs && mise exec node@22.20.0 -- mint dev --port 3333 --no-open
