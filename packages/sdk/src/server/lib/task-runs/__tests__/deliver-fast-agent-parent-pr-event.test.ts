@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     claimReturning: vi.fn(),
+    findClaimRun: vi.fn(),
     updateSet: vi.fn(),
     sql: vi.fn((strings: TemplateStringsArray, ...values: unknown[]) => ({
       strings: [...strings],
@@ -26,6 +27,9 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('@roomote/db/server', () => ({
   db: {
+    query: {
+      taskRuns: { findFirst: mocks.findClaimRun },
+    },
     update: vi.fn(() => ({
       set: vi.fn((values: unknown) => {
         mocks.updateSet(values);
@@ -36,10 +40,14 @@ vi.mock('@roomote/db/server', () => ({
     })),
   },
   and: vi.fn((...args: unknown[]) => args),
+  asc: vi.fn((value: unknown) => value),
+  desc: vi.fn((value: unknown) => value),
   eq: vi.fn((...args: unknown[]) => args),
   sql: mocks.sql,
   taskRuns: {
     id: 'task_runs.id',
+    taskId: 'task_runs.task_id',
+    createdAt: 'task_runs.created_at',
     result: 'task_runs.result',
   },
 }));
@@ -79,6 +87,7 @@ describe('deliverFastAgentParentPrEvent', () => {
     vi.clearAllMocks();
     vi.spyOn(console, 'error').mockImplementation(() => {});
     mocks.claimReturning.mockResolvedValue([{ id: run.id }]);
+    mocks.findClaimRun.mockResolvedValue({ id: run.id });
   });
 
   it('claims the event with stale-lease recovery before delivering it', async () => {
@@ -107,6 +116,16 @@ describe('deliverFastAgentParentPrEvent', () => {
     await deliver({ deliver: deliverEvent });
 
     expect(deliverEvent).not.toHaveBeenCalled();
+  });
+
+  it('stores the claim on the canonical task row across resumed runs', async () => {
+    mocks.findClaimRun.mockResolvedValue({ id: 100 });
+
+    await deliver();
+
+    expect(mocks.findClaimRun).toHaveBeenCalledWith(
+      expect.objectContaining({ columns: { id: true } }),
+    );
   });
 
   it('settles a skipped delivery without recording lifecycle history', async () => {

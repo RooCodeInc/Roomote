@@ -290,6 +290,22 @@ describe('prReviewNotificationJob', () => {
       followUpQuestion: 'Want me to take a look?',
       followUpPrompt: 'Address the review feedback on owner/repo#42.',
     });
+    mockConsumePending.mockResolvedValue([
+      {
+        kind: 'review_summary',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+        reviewTaskId: 'review-task',
+        reviewHeadSha: 'abc123',
+        reviewResult: {
+          reviewKind: 'initial',
+          outcome: 'findings_remain',
+          findingCount: 1,
+          approvalStatus: null,
+          headSha: 'abc123',
+        },
+      },
+    ]);
 
     await prReviewNotificationJob(
       makeJob({ deliveryIds: ['delivery-2', 'delivery-1'] }) as never,
@@ -308,6 +324,15 @@ describe('prReviewNotificationJob', () => {
         status: 'open',
       },
       summary: 'Alice requested changes on owner/repo#42.',
+      reviewTaskId: 'review-task',
+      reviewHeadSha: 'abc123',
+      reviewResult: {
+        reviewKind: 'initial',
+        outcome: 'findings_remain',
+        findingCount: 1,
+        approvalStatus: null,
+        headSha: 'abc123',
+      },
       suggestedActionPrompt: 'Address the review feedback on owner/repo#42.',
     });
   });

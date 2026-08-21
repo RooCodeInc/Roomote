@@ -25,24 +25,37 @@ function buildFeedbackId(params: {
   repository: string;
   prNumber: number;
   deliveryIds: string[];
+  reviewTaskId?: string;
+  reviewHeadSha?: string;
 }): string {
+  const identityParts =
+    params.reviewTaskId && params.reviewHeadSha
+      ? [
+          params.taskId,
+          params.repository,
+          String(params.prNumber),
+          params.reviewTaskId,
+          params.reviewHeadSha,
+        ]
+      : [
+          params.taskId,
+          params.repository,
+          String(params.prNumber),
+          ...[...params.deliveryIds].sort(),
+        ];
+
   return createHash('sha256')
-    .update(
-      [
-        params.taskId,
-        params.repository,
-        String(params.prNumber),
-        ...[...params.deliveryIds].sort(),
-      ].join(':'),
-    )
+    .update(identityParts.join(':'))
     .digest('hex')
     .slice(0, 24);
 }
 
 /** Pass triaged PR feedback to the Fast conversation that delegated the task. */
 export async function notifyFastAgentParentOnPrFeedback(params: {
-  run: TaskRun;
+  run: Pick<TaskRun, 'id' | 'taskId' | 'payload'>;
   deliveryIds: string[];
+  reviewTaskId?: string;
+  reviewHeadSha?: string;
   pullRequest: {
     provider: SourceControlProvider;
     host?: string | null;
@@ -54,6 +67,13 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
   };
   summary: string;
   suggestedActionPrompt?: string;
+  reviewResult?: {
+    reviewKind: 'initial' | 'sync' | null;
+    outcome: string | null;
+    findingCount: number | null;
+    approvalStatus: 'approved' | 'skipped' | null;
+    headSha: string | null;
+  };
 }): Promise<void> {
   const parent = getFastAgentParentFromPayload(params.run.payload);
   if (!parent) {
@@ -65,6 +85,8 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
     repository: params.pullRequest.repository,
     prNumber: params.pullRequest.number,
     deliveryIds: params.deliveryIds,
+    reviewTaskId: params.reviewTaskId,
+    reviewHeadSha: params.reviewHeadSha,
   });
   const notifiedResultKey = `fastAgentParentPrFeedback:${feedbackId}`;
   const pullRequest: FastAgentPullRequestContext = {
@@ -98,6 +120,7 @@ export async function notifyFastAgentParentOnPrFeedback(params: {
           }),
           pullRequest,
           summary: params.summary,
+          ...(params.reviewResult ? { reviewResult: params.reviewResult } : {}),
           ...(params.suggestedActionPrompt
             ? { suggestedActionPrompt: params.suggestedActionPrompt }
             : {}),

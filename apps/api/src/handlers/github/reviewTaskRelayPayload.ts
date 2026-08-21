@@ -1,7 +1,4 @@
-import {
-  DEFAULT_PR_REVIEW_SETTINGS,
-  type PrReviewSettings,
-} from '@roomote/types';
+import { type PrReviewSettings } from '@roomote/types';
 import { getReviewCodeAutomationSettings } from '@roomote/db/server';
 
 import { getLinkedTaskRelayState } from './linkedTaskRelay';
@@ -36,16 +33,10 @@ export async function getReviewTaskRelayPayload({
   relayReviewResultsToTask?: boolean;
   linkedTaskId?: string;
   linkedTaskRelayLookupPending?: boolean;
+  linkedReviewHandoffTarget?: 'fast_parent' | 'implementation_task';
 }> {
   const settings =
     reviewerSettings ?? (await getReviewCodeAutomationSettings());
-  const relayRequested =
-    settings.relayReviewResultsToTask ??
-    DEFAULT_PR_REVIEW_SETTINGS.relayReviewResultsToTask;
-
-  if (!relayRequested) {
-    return { relayReviewResultsToTask: false };
-  }
 
   const relayState = await getLinkedTaskRelayState({
     repository,
@@ -56,13 +47,22 @@ export async function getReviewTaskRelayPayload({
   });
 
   if (relayState.ownerLookupPending) {
-    return { linkedTaskRelayLookupPending: true };
+    if (!settings.relayReviewResultsToTask) {
+      return { relayReviewResultsToTask: false };
+    }
+    return {
+      relayReviewResultsToTask: true,
+      linkedTaskRelayLookupPending: true,
+    };
   }
 
   if (relayState.relayEnabled && relayState.linkedTaskId) {
     return {
       relayReviewResultsToTask: true,
       linkedTaskId: relayState.linkedTaskId,
+      ...(relayState.handoffTarget
+        ? { linkedReviewHandoffTarget: relayState.handoffTarget }
+        : {}),
     };
   }
 

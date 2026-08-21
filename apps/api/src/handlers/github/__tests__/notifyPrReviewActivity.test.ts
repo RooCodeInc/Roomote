@@ -559,6 +559,14 @@ describe('buildPrReviewSummaryNotification', () => {
         providerEventId: 'github-review-summary:99:2026-08-10T19:30:00.000Z',
         authorLogin: 'roomote[bot]',
         reviewHeadSha,
+        reviewTaskId: 'x',
+        reviewResult: {
+          reviewKind: 'initial',
+          outcome: 'findings_remain',
+          findingCount: 1,
+          approvalStatus: null,
+          headSha: reviewHeadSha,
+        },
         summary: '1 minor doc note; no blocking issues.',
         url: 'https://github.com/owner/repo/pull/42#issuecomment-99',
         observedAt,
@@ -754,6 +762,7 @@ describe('queuePrReviewSummaryNotification', () => {
           event: expect.objectContaining({
             kind: 'review_summary',
             reviewHeadSha,
+            reviewTaskId: 'x',
             observedAt,
           }),
         }),

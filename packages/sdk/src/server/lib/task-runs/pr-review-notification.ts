@@ -78,6 +78,18 @@ export const prReviewActivityEventSchema = z.object({
   body: z.string().max(10_000).optional(),
   /** Commit SHA reviewed by this event. */
   reviewHeadSha: z.string().optional(),
+  /** Roomote review task linked from the canonical review summary. */
+  reviewTaskId: z.string().optional(),
+  /** Structured terminal result parsed from a Roomote review summary. */
+  reviewResult: z
+    .object({
+      reviewKind: z.enum(['initial', 'sync']).nullable(),
+      outcome: z.string().nullable(),
+      findingCount: z.number().int().nonnegative().nullable(),
+      approvalStatus: z.enum(['approved', 'skipped']).nullable(),
+      headSha: z.string().nullable(),
+    })
+    .optional(),
   /**
    * Stable feedback-batch identity. Human review events use GitHub's review
    * id; Roomote events use the explicit lifecycle opened by its in-progress

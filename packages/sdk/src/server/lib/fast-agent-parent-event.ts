@@ -132,6 +132,13 @@ type FastAgentParentEvent =
       pullRequest: FastAgentPullRequestContext;
       summary: string;
       suggestedActionPrompt?: string;
+      reviewResult?: {
+        reviewKind: 'initial' | 'sync' | null;
+        outcome: string | null;
+        findingCount: number | null;
+        approvalStatus: 'approved' | 'skipped' | null;
+        headSha: string | null;
+      };
     }
   | {
       type: 'pull_request_status_changed';

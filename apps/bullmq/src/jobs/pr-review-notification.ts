@@ -386,6 +386,12 @@ export const prReviewNotificationJob = async (
     const textWithQuestion = followUp
       ? `${delivery.text}\n${followUp.question}`
       : delivery.text;
+    const roomoteReviewIdentity = events.find(
+      (event) => event.reviewTaskId && event.reviewHeadSha,
+    );
+    const roomoteReviewResult = events.find(
+      (event) => event.reviewResult,
+    )?.reviewResult;
 
     await notifyFastAgentParentOnPrFeedback({
       run: latestJob,
@@ -403,6 +409,14 @@ export const prReviewNotificationJob = async (
         status: prLink?.status,
       },
       summary: delivery.text,
+      ...(roomoteReviewIdentity?.reviewTaskId &&
+      roomoteReviewIdentity.reviewHeadSha
+        ? {
+            reviewTaskId: roomoteReviewIdentity.reviewTaskId,
+            reviewHeadSha: roomoteReviewIdentity.reviewHeadSha,
+          }
+        : {}),
+      ...(roomoteReviewResult ? { reviewResult: roomoteReviewResult } : {}),
       ...(followUp ? { suggestedActionPrompt: followUp.prompt } : {}),
     });
 

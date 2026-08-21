@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     claimReturning: vi.fn(),
+    findClaimRun: vi.fn(),
     updateSet: vi.fn(),
     inArray: vi.fn((...args: unknown[]) => args),
     not: vi.fn((...args: unknown[]) => args),
@@ -29,6 +30,9 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('@roomote/db/server', () => ({
   db: {
+    query: {
+      taskRuns: { findFirst: mocks.findClaimRun },
+    },
     update: vi.fn(() => ({
       set: vi.fn((values: unknown) => {
         mocks.updateSet(values);
@@ -39,6 +43,8 @@ vi.mock('@roomote/db/server', () => ({
     })),
   },
   and: vi.fn((...args: unknown[]) => args),
+  asc: vi.fn((value: unknown) => value),
+  desc: vi.fn((value: unknown) => value),
   eq: vi.fn((...args: unknown[]) => args),
   inArray: mocks.inArray,
   not: mocks.not,
@@ -49,6 +55,8 @@ vi.mock('@roomote/db/server', () => ({
   })),
   taskRuns: {
     id: 'task_runs.id',
+    taskId: 'task_runs.task_id',
+    createdAt: 'task_runs.created_at',
     result: 'task_runs.result',
     status: 'task_runs.status',
   },
@@ -109,6 +117,7 @@ describe('notifyFastAgentParentOnPullRequestOpened', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
+    mocks.findClaimRun.mockResolvedValue({ id: 200 });
     mocks.deliverParentEvent.mockResolvedValue(undefined);
     mocks.recordLifecycle.mockResolvedValue(undefined);
   });
