@@ -1823,10 +1823,11 @@ describe('enqueueTask source-control provider stamping', () => {
     }
   });
 
-  it('stamps gitlab on an environment-workspace launch for a gitlab-only deployment', async () => {
+  it('stamps the provider and host on a homogeneous environment-workspace launch', async () => {
     const userId = await createUser();
     const repository = await repositoryFactory.create({
-      sourceControlProvider: 'gitlab',
+      sourceControlProvider: 'gitea',
+      host: 'gitea.example.com',
       linkedByUserId: userId,
       fullName: 'group/project',
       isActive: true,
@@ -1836,7 +1837,7 @@ describe('enqueueTask source-control provider stamping', () => {
     const environment = await environmentFactory.create({
       createdByUserId: userId,
       config: {
-        name: 'GitLab environment',
+        name: 'Gitea environment',
         repositories: [{ repository: 'group/project' }],
       },
     });
@@ -1851,11 +1852,10 @@ describe('enqueueTask source-control provider stamping', () => {
       task: standardTaskInput({
         payload: {
           // environmentId makes this an environment workspace regardless of
-          // repo, so the provider must resolve via the environment-repository
-          // mapping (this repo is intentionally not in the repositories table).
-          repo: 'unmapped/repo',
+          // repo. The web UI uses the aggregate sentinel for these launches.
+          repo: ALL_REPOSITORIES,
           environmentId: environment.id,
-          description: 'Work in the gitlab environment',
+          description: 'Work in the Gitea environment',
         },
       }),
       initiator: { kind: 'user', userId },
@@ -1871,7 +1871,12 @@ describe('enqueueTask source-control provider stamping', () => {
     expect(
       (persistedRun!.payload as { sourceControlProvider?: string })
         .sourceControlProvider,
-    ).toBe('gitlab');
+    ).toBe('gitea');
+    expect(persistedRun!.payload.sourceControlHost).toBe('gitea.example.com');
+    expect(resolveAggregateSourceControl(persistedRun!.payload)).toEqual({
+      provider: 'gitea',
+      host: 'gitea.example.com',
+    });
     expect(
       (persistedRun!.payload as { repositoryProviders?: unknown })
         .repositoryProviders,

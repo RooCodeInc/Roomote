@@ -74,4 +74,36 @@ describe('resolveRunCommitAuthor', () => {
     });
     expect(findSourceControlMapping).toHaveBeenCalledOnce();
   });
+
+  it('does not expose username-based assignees for unsupported providers', async () => {
+    const tx = {
+      query: {
+        users: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: 'user-1',
+            name: 'Mona Lisa',
+          }),
+        },
+        sourceControlUserMappings: {
+          findFirst: vi.fn().mockResolvedValue({
+            externalAccountId: '42',
+            username: 'monalisa',
+            displayName: 'Mona Lisa',
+          }),
+        },
+      },
+    } as unknown as DatabaseOrTransaction;
+
+    const result = await resolveRunCommitAuthor(
+      tx,
+      { taskId: 'task-1', actingUserId: 'user-1' },
+      { provider: 'gitlab', host: 'gitlab.example.com' },
+    );
+
+    expect(result).toMatchObject({
+      publicDisplayName: '@monalisa',
+      githubLogin: null,
+      prAssigneeLogin: null,
+    });
+  });
 });

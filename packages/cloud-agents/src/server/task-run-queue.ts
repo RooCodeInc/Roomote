@@ -2068,7 +2068,10 @@ async function stampWorkspaceSourceControlProviders(
   const providers = Object.values(repositoryProviders);
   const spansProviders = new Set(providers).size > 1;
 
-  if (isAggregateWorkspace && !spansProviders) {
+  if (
+    (isAggregateWorkspace || workspace.type === 'environment') &&
+    !spansProviders
+  ) {
     payload.sourceControlHost = workspaceHost;
   }
 
