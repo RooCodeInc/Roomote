@@ -59,6 +59,7 @@ import {
   shouldCaptureTaskCreatedEvent,
   type FreshTaskLaunch,
 } from '../task-run-queue';
+import { resolveAggregateSourceControl } from '../cloud-agent-workflow';
 import { LLM_TITLE_LOCKED_CHECKPOINT } from '../llm-task-title';
 import { applyTaskModelSelectionToRun } from '../task-model-selection';
 import { getPrSha } from '../workflows/utils';
@@ -2278,12 +2279,14 @@ describe('enqueueTask source-control provider stamping', () => {
     const userId = await createUser();
     const apiRepository = await repositoryFactory.create({
       sourceControlProvider: 'gitea',
+      host: 'gitea.example.com',
       linkedByUserId: userId,
       fullName: 'group/homogeneous-api',
       isActive: true,
     });
     const webRepository = await repositoryFactory.create({
       sourceControlProvider: 'gitea',
+      host: 'gitea.example.com',
       linkedByUserId: userId,
       fullName: 'group/homogeneous-web',
       isActive: true,
@@ -2309,10 +2312,15 @@ describe('enqueueTask source-control provider stamping', () => {
 
     expect(run.payload).toMatchObject({
       sourceControlProvider: 'gitea',
+      sourceControlHost: 'gitea.example.com',
       repositoryProviders: {
         'group/homogeneous-api': 'gitea',
         'group/homogeneous-web': 'gitea',
       },
+    });
+    expect(resolveAggregateSourceControl(run.payload)).toEqual({
+      provider: 'gitea',
+      host: 'gitea.example.com',
     });
   });
 
