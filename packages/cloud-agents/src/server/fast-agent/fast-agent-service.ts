@@ -13,7 +13,10 @@ import {
   type SlackThreadPromptMessage,
 } from '../../utils';
 import { getAvailableEnvironments, type RoutableEnvironment } from '../router';
-import { FAST_AGENT_MODEL_ROLE } from './fast-agent-constants';
+import {
+  FAST_AGENT_MAX_IMAGE_ATTACHMENTS,
+  FAST_AGENT_MODEL_ROLE,
+} from './fast-agent-constants';
 import { buildFastAgentSystemPrompt } from './fast-agent-prompt';
 import {
   appendFastAgentVisibleMessages,
@@ -286,7 +289,7 @@ function buildAssistantTextMessage(text: string): ModelMessage {
 }
 
 function getFastAgentImageFiles(images: string[]): NonTaskPromptFile[] {
-  return images.flatMap((image) => {
+  return images.slice(0, FAST_AGENT_MAX_IMAGE_ATTACHMENTS).flatMap((image) => {
     const url = image.trim();
     const mime = /^data:(image\/[^;,]+);base64,/i.exec(url)?.[1];
     return mime ? [{ mime, url }] : [];

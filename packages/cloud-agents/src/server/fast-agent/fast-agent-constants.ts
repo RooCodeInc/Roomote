@@ -1,4 +1,5 @@
 export const FAST_AGENT_MODEL_ROLE = 'primary' as const;
+export const FAST_AGENT_MAX_IMAGE_ATTACHMENTS = 3;
 export const FAST_AGENT_BRAIN_INSTRUCTIONS = `Use Brain as lightweight conversational context, not as an exhaustive research assignment.
 
 - When Brain context would help, make the narrowest native integration call that is likely to answer the user's request.
