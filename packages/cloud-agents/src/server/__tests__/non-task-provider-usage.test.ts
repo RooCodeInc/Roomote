@@ -11,6 +11,7 @@ const {
   execFileMock,
   execFileSyncMock,
   mockResolveEffectiveModelRuntimeEnv,
+  recordLlmUsageMock,
   sessionAbortMock,
   spawnMock,
   sessionCreateMock,
@@ -23,6 +24,7 @@ const {
   execFileMock: vi.fn(),
   execFileSyncMock: vi.fn(),
   mockResolveEffectiveModelRuntimeEnv: vi.fn(),
+  recordLlmUsageMock: vi.fn(),
   sessionAbortMock: vi.fn(),
   spawnMock: vi.fn(),
   sessionCreateMock: vi.fn(),
@@ -44,6 +46,7 @@ vi.mock('node:net', () => ({
 }));
 
 vi.mock('@roomote/db/server', () => ({
+  recordLlmUsage: recordLlmUsageMock,
   resolveEffectiveModelRuntimeEnv: mockResolveEffectiveModelRuntimeEnv,
 }));
 
@@ -118,6 +121,7 @@ describe('resolveOpenCodeSmallModel', () => {
     vi.clearAllMocks();
     process.env = originalEnv;
     mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({});
+    recordLlmUsageMock.mockResolvedValue({ recorded: true });
     spawnedServers.length = 0;
     let nextServerPort = 4100;
     createServerMock.mockImplementation(() =>
@@ -337,6 +341,77 @@ describe('resolveOpenCodeSmallModel', () => {
       }),
       expect.any(Object),
     );
+  });
+
+  it('records completed Fast OpenCode usage with a stable event key', async () => {
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openrouter/openai/gpt-5.4',
+    });
+    sessionPromptMock.mockResolvedValue({
+      data: {
+        info: {
+          id: 'message-fast-1',
+          sessionID: 'session-1',
+          providerID: 'openrouter',
+          modelID: 'openai/gpt-5.4',
+          agent: 'build',
+          tokens: {
+            input: 120,
+            output: 30,
+            reasoning: 10,
+            cache: { read: 40, write: 5 },
+          },
+          cost: 0.001234,
+          time: {
+            created: Date.parse('2026-08-21T10:00:00.000Z'),
+            completed: Date.parse('2026-08-21T10:00:02.000Z'),
+          },
+        },
+        parts: [{ type: 'text', text: 'tracked answer' }],
+      },
+      error: undefined,
+    });
+    const { generateTrackedNonTaskTextInOpenCodeSession } =
+      await import('../non-task-provider-usage.js');
+
+    await generateTrackedNonTaskTextInOpenCodeSession(
+      {
+        surface: 'fast_agent_question_answering',
+        userId: 'user-1',
+        prompt: 'Answer this.',
+      },
+      {},
+      {
+        directory: '/tmp/roomote-fast-native-test',
+        tools: { '*': false, send_chat_reply: true },
+      },
+    );
+
+    expect(recordLlmUsageMock).toHaveBeenCalledWith({
+      source: 'fast_agent_question_answering',
+      usageType: 'inference',
+      eventKey:
+        'non-task:fast_agent_question_answering:session-1:message-fast-1',
+      taskId: null,
+      userId: 'user-1',
+      harnessSessionId: 'session-1',
+      messageId: 'message-fast-1',
+      providerId: 'openrouter',
+      modelId: 'openai/gpt-5.4',
+      agent: 'build',
+      inputTokens: 120,
+      outputTokens: 30,
+      reasoningTokens: 10,
+      cacheReadTokens: 40,
+      cacheWriteTokens: 5,
+      totalTokens: 205,
+      contextTokens: 160,
+      costMicroUsd: 1234,
+      costSource: 'opencode_message',
+      messageCreatedAt: new Date('2026-08-21T10:00:00.000Z'),
+      messageCompletedAt: new Date('2026-08-21T10:00:02.000Z'),
+      details: { surface: 'fast_agent_question_answering' },
+    });
   });
 
   it('lets OpenCode own a Fast prompt lifecycle when the deadline is disabled', async () => {

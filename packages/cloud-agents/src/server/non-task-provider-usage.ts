@@ -6,7 +6,10 @@ import {
   createOpencodeClient,
   type PermissionRuleset,
 } from '@opencode-ai/sdk/v2/client';
-import { resolveEffectiveModelRuntimeEnv } from '@roomote/db/server';
+import {
+  recordLlmUsage,
+  resolveEffectiveModelRuntimeEnv,
+} from '@roomote/db/server';
 import { toBedrockMantleRuntimeModelId } from '@roomote/types';
 import type { z } from 'zod';
 import zodToJsonSchema from 'zod-to-json-schema';
@@ -234,6 +237,112 @@ export function isNonTaskOpenCodeSessionNotFoundError(
 
 function asString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function asFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  return undefined;
+}
+
+function openCodeTimestampToDate(value: unknown): Date | undefined {
+  const timestamp = asFiniteNumber(value);
+  if (timestamp === undefined) return undefined;
+
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
+
+type NonTaskOpenCodeMessageInfo = {
+  id?: unknown;
+  sessionID?: unknown;
+  providerID?: unknown;
+  modelID?: unknown;
+  agent?: unknown;
+  mode?: unknown;
+  cost?: unknown;
+  error?: unknown;
+  structured?: unknown;
+  time?: {
+    created?: unknown;
+    completed?: unknown;
+  };
+  tokens?: {
+    input?: unknown;
+    output?: unknown;
+    reasoning?: unknown;
+    cache?: {
+      read?: unknown;
+      write?: unknown;
+    };
+  };
+};
+
+async function recordNonTaskOpenCodeUsage(
+  params: GenerateTrackedNonTaskBaseParams,
+  resolvedModel: string,
+  info: NonTaskOpenCodeMessageInfo,
+): Promise<void> {
+  const harnessSessionId = asString(info.sessionID);
+  const messageId = asString(info.id);
+  if (!harnessSessionId || !messageId) return;
+
+  const inputTokens = asFiniteNumber(info.tokens?.input) ?? 0;
+  const outputTokens = asFiniteNumber(info.tokens?.output) ?? 0;
+  const reasoningTokens = asFiniteNumber(info.tokens?.reasoning) ?? 0;
+  const cacheReadTokens = asFiniteNumber(info.tokens?.cache?.read) ?? 0;
+  const cacheWriteTokens = asFiniteNumber(info.tokens?.cache?.write) ?? 0;
+  const costUsd = asFiniteNumber(info.cost);
+  const fallbackModel = splitOpenCodeModelId(resolvedModel);
+
+  try {
+    await recordLlmUsage({
+      source: params.surface,
+      usageType: 'inference',
+      eventKey: `non-task:${params.surface}:${harnessSessionId}:${messageId}`,
+      taskId: params.taskId ?? null,
+      userId: params.userId ?? null,
+      harnessSessionId,
+      messageId,
+      providerId:
+        asString(info.providerID) ??
+        asString(params.provider) ??
+        fallbackModel.providerID,
+      modelId: asString(info.modelID) ?? fallbackModel.modelID,
+      agent: asString(info.agent) ?? asString(info.mode) ?? null,
+      inputTokens,
+      outputTokens,
+      reasoningTokens,
+      cacheReadTokens,
+      cacheWriteTokens,
+      totalTokens:
+        inputTokens +
+        outputTokens +
+        reasoningTokens +
+        cacheReadTokens +
+        cacheWriteTokens,
+      contextTokens: inputTokens + cacheReadTokens,
+      costMicroUsd:
+        costUsd === undefined
+          ? 0
+          : Math.max(0, Math.round(costUsd * 1_000_000)),
+      costSource: costUsd === undefined ? 'missing' : 'opencode_message',
+      messageCreatedAt: openCodeTimestampToDate(info.time?.created),
+      messageCompletedAt: openCodeTimestampToDate(info.time?.completed),
+      details: { surface: params.surface },
+    });
+  } catch (error) {
+    console.warn(
+      `[NonTaskProviderUsage] Failed to record usage for ${params.surface}: ${formatOpenCodeSdkError(error)}`,
+    );
+  }
 }
 
 function parseOpenCodeConfigJson(value: string): Record<string, unknown> {
@@ -597,7 +706,7 @@ async function runNonTaskSdkPrompt(
     useConfiguredServer?: boolean;
   } = {},
 ): Promise<{
-  info: { error?: unknown };
+  info: NonTaskOpenCodeMessageInfo;
   parts: Array<{ type?: unknown; text?: unknown }>;
 }> {
   const { model, resolvedModelRuntimeEnv } = runtime;
@@ -785,6 +894,8 @@ async function runNonTaskSdkPrompt(
           promptErrorLabel,
         );
       }
+
+      await recordNonTaskOpenCodeUsage(params, model, promptResult.data.info);
 
       return promptResult.data;
     } catch (error) {
