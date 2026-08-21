@@ -349,7 +349,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
-  it('stops a cancelled turn without posting a stale error closeout', async () => {
+  it('stops a cancelled turn without executing stale side-effect tools', async () => {
     const controller = new AbortController();
     const lockLost = new Error('Fast conversation lock ownership was lost.');
     mocks.generateText.mockImplementationOnce(
@@ -362,6 +362,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
             purpose: 'closeout',
             message: 'This reply must not be posted.',
           }),
+        ).resolves.toMatchObject({ success: false });
+        await expect(
+          invokeTool(nativeToolNames.launchTask, {}),
         ).resolves.toMatchObject({ success: false });
         throw lockLost;
       },
@@ -378,6 +381,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     expect(mocks.generateText).toHaveBeenCalledOnce();
     expect(adapter.postReply).not.toHaveBeenCalled();
+    expect(adapter.launchTask).not.toHaveBeenCalled();
     expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
   });
 

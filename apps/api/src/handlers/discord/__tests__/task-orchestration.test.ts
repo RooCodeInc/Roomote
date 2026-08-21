@@ -87,6 +87,7 @@ describe('startNewDiscordTask', () => {
 
   it('forwards a Fast kickoff gate to the Discord launcher', async () => {
     const beforeEnqueueKickoff = vi.fn().mockResolvedValue(undefined);
+    const signal = new AbortController().signal;
 
     const result = await startNewDiscordTask({
       provider: {} as never,
@@ -118,12 +119,70 @@ describe('startNewDiscordTask', () => {
       },
       skipRoutingConfirmation: true,
       beforeEnqueueKickoff,
+      signal,
     });
 
     expect(result.status).toBe('started');
     expect(mocks.launchTask).toHaveBeenCalledWith(
-      expect.objectContaining({ beforeEnqueueKickoff }),
+      expect.objectContaining({ beforeEnqueueKickoff, signal }),
     );
+  });
+
+  it('does not enter Discord launch after ownership expires during routing', async () => {
+    const controller = new AbortController();
+    let finishRouting: ((value: unknown) => void) | undefined;
+    mocks.routeTask.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishRouting = resolve;
+        }),
+    );
+
+    const result = startNewDiscordTask({
+      provider: {} as never,
+      applicationId: 'application-1',
+      requesterDiscordUserId: 'discord-user-1',
+      launchOwnerUserId: 'user-1',
+      queuedMessage: {
+        provider: 'discord',
+        text: 'Fix checkout',
+        user: 'Matt',
+        userId: 'user-1',
+        ts: 'message-fast-cancelled',
+      },
+      metadata: {
+        communicationProvider: 'discord',
+        communicationChannelId: 'dm-1',
+        communicationMessageId: 'message-fast-cancelled',
+      },
+      channel: {
+        channelId: 'dm-1',
+        channelName: 'Direct message',
+        channelType: 1,
+        isDirectMessage: true,
+        isThread: false,
+      },
+      workspaceOverride: {
+        repoForPayload: 'acme/repo',
+        workspaceDisplayName: 'Acme',
+      },
+      skipRoutingConfirmation: true,
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(mocks.routeTask).toHaveBeenCalledOnce());
+    controller.abort(new Error('Fast conversation lock ownership was lost.'));
+    finishRouting?.({
+      status: 'routed',
+      result: {
+        workspace: { type: 'environment', id: 'env-1' },
+        kickoffMessage: 'On it.',
+      },
+    });
+
+    await expect(result).rejects.toThrow(
+      'Fast conversation lock ownership was lost.',
+    );
+    expect(mocks.launchTask).not.toHaveBeenCalled();
   });
 
   it('does not route or launch a second task for a retried source event', async () => {

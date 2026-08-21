@@ -20,12 +20,20 @@ export function createFastAgentTaskLauncher(params: {
     parentSessionId: string;
   }) => StandardTask | Promise<StandardTask>;
 }): LaunchFastAgentTask {
-  return async ({ prompt, environmentId, parentSessionId, postKickoff }) => {
+  return async ({
+    prompt,
+    environmentId,
+    parentSessionId,
+    signal,
+    postKickoff,
+  }) => {
+    signal?.throwIfAborted();
     const task = await params.buildTask({
       prompt,
       environmentId,
       parentSessionId,
     });
+    signal?.throwIfAborted();
     let taskUrl: string | undefined;
     const launch = await enqueueTask(
       {
@@ -37,6 +45,7 @@ export function createFastAgentTaskLauncher(params: {
       },
       {
         beforeEnqueue: async (taskRun) => {
+          signal?.throwIfAborted();
           taskUrl = getTaskUrl({
             taskId: taskRun.taskId,
             utm: {
@@ -45,6 +54,7 @@ export function createFastAgentTaskLauncher(params: {
             },
           });
           await postKickoff({ taskId: taskRun.taskId, taskUrl });
+          signal?.throwIfAborted();
         },
       },
     );
