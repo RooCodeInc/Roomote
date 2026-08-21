@@ -305,6 +305,19 @@ async function createSlackFastAgentParentTurn(params: {
 
   const conversation = session.conversation;
   const slack = new SlackNotifier(installation.botAccessToken);
+
+  if (
+    params.event.type === 'pull_request_status_changed' &&
+    params.event.status === 'merged'
+  ) {
+    const { completionEmoji } = await resolveSlackReactionNames();
+    await slack.addReaction({
+      channel: conversation.replyTarget.channelId,
+      timestamp: conversation.replyTarget.threadId,
+      name: completionEmoji,
+    });
+  }
+
   return {
     userId: session.userId,
     conversation,
@@ -347,18 +360,6 @@ async function createSlackFastAgentParentTurn(params: {
           );
         }
         params.onReplyPosted();
-
-        if (
-          params.event.type === 'pull_request_status_changed' &&
-          params.event.status === 'merged'
-        ) {
-          const { completionEmoji } = await resolveSlackReactionNames();
-          await slack.addReaction({
-            channel: conversation.replyTarget.channelId,
-            timestamp: conversation.replyTarget.threadId,
-            name: completionEmoji,
-          });
-        }
       },
     },
   };

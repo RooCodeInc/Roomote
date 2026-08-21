@@ -608,6 +608,38 @@ describe('deliverFastAgentParentEvent', () => {
     });
   });
 
+  it('adds the merge reaction when the Fast agent ignores the status event', async () => {
+    mocks.answerQuestion.mockResolvedValue(undefined);
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'pull_request_status_changed',
+        taskId: 'task-1',
+        runId: 42,
+        taskUrl: 'https://roomote.example/task/task-1',
+        pullRequest: {
+          provider: 'github',
+          host: 'github.com',
+          repository: 'acme/web',
+          number: 42,
+          title: 'Fix review feedback',
+          url: 'https://github.com/acme/web/pull/42',
+          status: 'merged',
+        },
+        status: 'merged',
+        actorLogin: 'alice',
+      },
+    });
+
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(mocks.addReaction).toHaveBeenCalledWith({
+      channel: 'C123',
+      timestamp: '100.001',
+      name: 'white_check_mark',
+    });
+  });
+
   it('lets a settled task event re-query the remaining active task set', async () => {
     await deliverFastAgentParentEvent({
       parent,
