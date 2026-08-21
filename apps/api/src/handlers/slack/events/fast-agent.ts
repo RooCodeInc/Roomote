@@ -2,6 +2,7 @@ import { PRODUCT_NAME } from '@roomote/types';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  hasFastAgentSession,
   type FastAgentActiveTask,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
@@ -59,6 +60,7 @@ export async function processFastAgentMessage(params: {
   activeTasks?: FastAgentActiveTask[];
   launchTask: LaunchFastAgentTask;
   processingReactionName?: string;
+  isExistingConversation?: boolean;
 }): Promise<void> {
   const {
     event,
@@ -71,6 +73,7 @@ export async function processFastAgentMessage(params: {
     activeTasks = [],
     launchTask,
     processingReactionName = 'eyes',
+    isExistingConversation = false,
   } = params;
   const threadId = event.thread_ts || event.ts;
   const conversation = {
@@ -103,11 +106,16 @@ export async function processFastAgentMessage(params: {
   let didAddProcessingReaction = false;
 
   try {
-    didAddProcessingReaction = await slack.addReaction({
-      channel: event.channel,
-      timestamp: event.ts,
-      name: processingReactionName,
-    });
+    // A false routing result can become stale while waiting for the turn lock.
+    const hasExistingConversation =
+      isExistingConversation || (await hasFastAgentSession(conversation));
+    if (!hasExistingConversation) {
+      didAddProcessingReaction = await slack.addReaction({
+        channel: event.channel,
+        timestamp: event.ts,
+        name: processingReactionName,
+      });
+    }
 
     if (!question) {
       await postSlackThreadMarkdownMessage({
