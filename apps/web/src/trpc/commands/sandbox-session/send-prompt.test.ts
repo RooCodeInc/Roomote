@@ -4,13 +4,26 @@ const {
   mockClaimOutOfBandContext,
   mockSetLatestUserMessageForReplyQuote,
   mockClearLatestUserMessageForReplyQuoteIfId,
+  mockEnableAutoHandlePrReviewFeedback,
 } = vi.hoisted(() => ({
   mockCreateRunToken: vi.fn(),
   mockSendPromptMutate: vi.fn(),
   mockClaimOutOfBandContext: vi.fn(),
   mockSetLatestUserMessageForReplyQuote: vi.fn(),
   mockClearLatestUserMessageForReplyQuoteIfId: vi.fn(),
+  mockEnableAutoHandlePrReviewFeedback: vi.fn(),
 }));
+
+vi.mock('@roomote/sdk/server', async () => {
+  const actual = await vi.importActual<typeof import('@roomote/sdk/server')>(
+    '@roomote/sdk/server',
+  );
+
+  return {
+    ...actual,
+    enableAutoHandlePrReviewFeedback: mockEnableAutoHandlePrReviewFeedback,
+  };
+});
 
 vi.mock('@roomote/communication/messages', async () => {
   const actual = await vi.importActual<
@@ -67,14 +80,21 @@ import {
   eq,
   runFactory,
   taskFactory,
+  taskMessages,
   taskRuns,
   userFactory,
 } from '@roomote/db/server';
-import { RunStatus } from '@roomote/types';
+import {
+  ACP_ENVELOPE_EVENT_TYPES,
+  PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
+  ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+  RunStatus,
+} from '@roomote/types';
 
 import type { UserAuthSuccess } from '@/types';
 
 import {
+  handlePrReviewNotificationActionCommand,
   sendSandboxPromptCommand,
   sendSandboxPromptInputSchema,
 } from './index';
@@ -105,6 +125,46 @@ function buildMockAuth(
   return auth as UserAuthSuccess;
 }
 
+async function createPendingReviewActionTestContext() {
+  const user = await userFactory.create({ name: 'DB User' });
+  const task = await taskFactory.create({ initiatorUserId: user.id });
+  const run = await runFactory.create({
+    actingUserId: user.id,
+    taskId: task.id,
+    status: RunStatus.Running,
+    sandboxServerUrl: 'http://sandbox.example.test',
+    result: {},
+  });
+  const [message] = await db
+    .insert(taskMessages)
+    .values({
+      runId: run.id,
+      taskId: task.id,
+      ts: Date.now(),
+      eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+      role: 'assistant',
+      protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+      contentBlocks: [{ type: 'text', text: 'Review feedback.' }],
+      metadata: { source: PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE },
+      payload: {
+        text: 'Review feedback.',
+        prReviewAction: {
+          taskId: task.id,
+          repository: 'owner/repo',
+          prNumber: 42,
+          prUrl: 'https://github.com/owner/repo/pull/42',
+          sourceControlProvider: 'github',
+          question: 'Would you like me to resolve this issue?',
+          followUpPrompt: 'Resolve the review feedback.',
+          status: 'pending',
+        },
+      },
+    })
+    .returning({ id: taskMessages.id });
+
+  return { user, task, message: message! };
+}
+
 describe('sendSandboxPromptCommand', () => {
   const fetchMock = vi.fn();
 
@@ -125,6 +185,7 @@ describe('sendSandboxPromptCommand', () => {
       userName: 'Test User',
     });
     mockClearLatestUserMessageForReplyQuoteIfId.mockResolvedValue(true);
+    mockEnableAutoHandlePrReviewFeedback.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -537,5 +598,178 @@ describe('sendSandboxPromptCommand', () => {
     });
 
     expect(updatedRun?.actingUserId).toBeNull();
+  });
+
+  it('dispatches a persisted review notification action exactly once', async () => {
+    const user = await userFactory.create({ name: 'DB User' });
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    const run = await runFactory.create({
+      actingUserId: user.id,
+      taskId: task.id,
+      status: RunStatus.Running,
+      sandboxServerUrl: 'http://sandbox.example.test',
+      result: {},
+    });
+    const [message] = await db
+      .insert(taskMessages)
+      .values({
+        runId: run.id,
+        taskId: task.id,
+        ts: Date.now(),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant',
+        protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+        contentBlocks: [{ type: 'text', text: 'Review feedback.' }],
+        metadata: { source: PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE },
+        payload: {
+          text: 'Review feedback.',
+          prReviewAction: {
+            taskId: task.id,
+            repository: 'owner/repo',
+            prNumber: 42,
+            prUrl: 'https://github.com/owner/repo/pull/42',
+            sourceControlProvider: 'github',
+            question: 'Would you like me to resolve this issue?',
+            followUpPrompt: 'Resolve the review feedback.',
+            status: 'pending',
+          },
+        },
+      })
+      .returning({ id: taskMessages.id });
+
+    const result = await handlePrReviewNotificationActionCommand(
+      buildMockAuth({ userId: user.id }),
+      { taskId: task.id, messageId: message!.id, action: 'resolve' },
+    );
+    const duplicate = await handlePrReviewNotificationActionCommand(
+      buildMockAuth({ userId: user.id }),
+      { taskId: task.id, messageId: message!.id, action: 'resolve' },
+    );
+    const persisted = await db.query.taskMessages.findFirst({
+      where: eq(taskMessages.id, message!.id),
+      columns: { payload: true },
+    });
+
+    expect(result).toEqual({
+      status: 'resolved',
+      currentFeedbackDispatched: true,
+    });
+    expect(duplicate).toEqual({
+      status: 'resolved',
+      currentFeedbackDispatched: false,
+    });
+    expect(mockSendPromptMutate).toHaveBeenCalledTimes(1);
+    expect(mockSendPromptMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ quoteText: 'Resolve the review feedback.' }),
+    );
+    expect(persisted?.payload).toMatchObject({
+      prReviewAction: { status: 'resolved' },
+    });
+  });
+
+  it('reclaims an abandoned processing action before persisting dismissal', async () => {
+    const user = await userFactory.create({ name: 'DB User' });
+    const task = await taskFactory.create({ initiatorUserId: user.id });
+    const run = await runFactory.create({
+      taskId: task.id,
+      status: RunStatus.Idle,
+      result: {},
+    });
+    const [message] = await db
+      .insert(taskMessages)
+      .values({
+        runId: run.id,
+        taskId: task.id,
+        ts: Date.now(),
+        eventType: ACP_ENVELOPE_EVENT_TYPES.AssistantMessage,
+        role: 'assistant',
+        protocol: ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL,
+        contentBlocks: [{ type: 'text', text: 'Review feedback.' }],
+        metadata: { source: PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE },
+        payload: {
+          text: 'Review feedback.',
+          prReviewAction: {
+            taskId: task.id,
+            repository: 'owner/repo',
+            prNumber: 42,
+            prUrl: 'https://github.com/owner/repo/pull/42',
+            sourceControlProvider: 'github',
+            question: 'Would you like me to resolve this issue?',
+            followUpPrompt: 'Resolve the review feedback.',
+            status: 'processing',
+            processingStartedAt: Date.now() - 10 * 60 * 1000,
+            processingToken: 'abandoned-request',
+          },
+        },
+      })
+      .returning({ id: taskMessages.id });
+
+    await expect(
+      handlePrReviewNotificationActionCommand(
+        buildMockAuth({ userId: user.id }),
+        { taskId: task.id, messageId: message!.id, action: 'dismiss' },
+      ),
+    ).resolves.toEqual({
+      status: 'dismissed',
+      currentFeedbackDispatched: false,
+    });
+    expect(mockSendPromptMutate).not.toHaveBeenCalled();
+  });
+
+  it('returns an auto-resolve action to pending when setup fails', async () => {
+    mockEnableAutoHandlePrReviewFeedback.mockRejectedValueOnce(
+      new Error('could not enable auto handling'),
+    );
+    const { user, task, message } =
+      await createPendingReviewActionTestContext();
+
+    await expect(
+      handlePrReviewNotificationActionCommand(
+        buildMockAuth({ userId: user.id }),
+        { taskId: task.id, messageId: message.id, action: 'auto_resolve' },
+      ),
+    ).rejects.toThrow('could not enable auto handling');
+    const persisted = await db.query.taskMessages.findFirst({
+      where: eq(taskMessages.id, message.id),
+      columns: { payload: true },
+    });
+
+    expect(mockSendPromptMutate).not.toHaveBeenCalled();
+    expect(persisted?.payload).toMatchObject({
+      prReviewAction: { status: 'pending' },
+    });
+  });
+
+  it('keeps auto-resolve enabled when current feedback cannot dispatch', async () => {
+    mockSendPromptMutate.mockRejectedValueOnce(
+      new Error('sandbox unavailable'),
+    );
+    const { user, task, message } =
+      await createPendingReviewActionTestContext();
+
+    await expect(
+      handlePrReviewNotificationActionCommand(
+        buildMockAuth({ userId: user.id }),
+        { taskId: task.id, messageId: message.id, action: 'auto_resolve' },
+      ),
+    ).resolves.toEqual({
+      status: 'auto_resolved',
+      currentFeedbackDispatched: false,
+    });
+    const persisted = await db.query.taskMessages.findFirst({
+      where: eq(taskMessages.id, message.id),
+      columns: { payload: true },
+    });
+
+    expect(mockEnableAutoHandlePrReviewFeedback).toHaveBeenCalledWith({
+      taskId: task.id,
+      sourceControlProvider: 'github',
+      repository: 'owner/repo',
+      prNumber: 42,
+      userId: user.id,
+    });
+    expect(persisted?.payload).toMatchObject({
+      prReviewAction: { status: 'auto_resolved' },
+    });
   });
 });

@@ -1,4 +1,5 @@
 import { asBoolean } from './primitives';
+import type { SourceControlProvider } from './source-control';
 
 export const ROOMOTE_RUNTIME_TASK_MESSAGE_PROTOCOL = 'roomote_runtime' as const;
 
@@ -99,6 +100,70 @@ export const TRANSCRIPT_VISIBILITY_METADATA_KEY = 'visibleInTranscript';
  */
 export const PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE =
   'pr_review_notification';
+
+export type PrReviewNotificationActionStatus =
+  | 'pending'
+  | 'processing'
+  | 'resolved'
+  | 'auto_resolved'
+  | 'dismissed';
+
+export const PR_REVIEW_ACTION_PROCESSING_LEASE_MS = 5 * 60 * 1000;
+
+export interface PrReviewNotificationAction {
+  taskId: string;
+  repository: string;
+  prNumber: number;
+  prUrl: string;
+  sourceControlProvider: SourceControlProvider;
+  question: string;
+  followUpPrompt: string;
+  status: PrReviewNotificationActionStatus;
+  processingStartedAt?: number;
+  processingToken?: string;
+}
+
+export function getPrReviewNotificationAction(
+  payload: Record<string, unknown> | null | undefined,
+): PrReviewNotificationAction | null {
+  const action = payload?.prReviewAction;
+
+  if (!action || typeof action !== 'object' || Array.isArray(action)) {
+    return null;
+  }
+
+  const value = action as Record<string, unknown>;
+  const status = value.status;
+
+  if (
+    typeof value.taskId !== 'string' ||
+    typeof value.repository !== 'string' ||
+    typeof value.prNumber !== 'number' ||
+    typeof value.prUrl !== 'string' ||
+    !['github', 'gitlab', 'gitea', 'ado', 'bitbucket'].includes(
+      typeof value.sourceControlProvider === 'string'
+        ? value.sourceControlProvider
+        : '',
+    ) ||
+    typeof value.question !== 'string' ||
+    typeof value.followUpPrompt !== 'string' ||
+    (value.processingStartedAt !== undefined &&
+      typeof value.processingStartedAt !== 'number') ||
+    (value.processingToken !== undefined &&
+      typeof value.processingToken !== 'string') ||
+    ![
+      'pending',
+      'processing',
+      'resolved',
+      'auto_resolved',
+      'dismissed',
+    ].includes(typeof status === 'string' ? status : '')
+  ) {
+    return null;
+  }
+
+  return value as unknown as PrReviewNotificationAction;
+}
 
 /**
  * `metadata.source` value for transcript messages that record a linked pull

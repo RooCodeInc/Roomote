@@ -88,6 +88,7 @@ export async function handleDiscordPrReviewActionCallback(input: {
     if (input.choice === 'auto') {
       await enableAutoHandlePrReviewFeedback({
         taskId: pending.taskId,
+        sourceControlProvider: pending.sourceControlProvider ?? 'github',
         repository: pending.repository,
         prNumber: pending.prNumber,
         userId: mappedUserId!,

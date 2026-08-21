@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   TaskModelSelectionError,
   applyTaskModelSelectionToRun,
@@ -11,10 +13,14 @@ import {
   getCommunicationChannelFromTaskPayload,
   getCommunicationProviderFromTaskPayload,
   getEnvironmentDefinitionIdFromPayload,
+  getPrReviewNotificationAction,
   isBootingRunStatus,
   isExitedRunStatus,
+  PR_REVIEW_ACTION_PROCESSING_LEASE_MS,
+  PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE,
   resolveSourceControlProviderFromPayload,
   taskToolDispatchPayloadSchema,
+  type PrReviewNotificationActionStatus,
   type TaskGoal,
 } from '@roomote/types';
 import { createRunToken } from '@roomote/auth';
@@ -34,6 +40,7 @@ import {
   getTaskGoalForRun,
   not,
   resolveEffectivePreviewRuntimeConfig,
+  sql,
   taskMessages,
   taskRuns,
   tasks,
@@ -41,6 +48,7 @@ import {
 import { httpBatchLink, TRPCClientError } from '@trpc/client';
 import { TRPCError } from '@trpc/server';
 import { createSandboxServerRpcClient } from '@roomote/sdk/sandbox-router';
+import { enableAutoHandlePrReviewFeedback } from '@roomote/sdk/server';
 import superjson from 'superjson';
 import { z } from 'zod';
 
@@ -158,6 +166,318 @@ export const answerSandboxUserInputRequestInputSchema = z.object({
   requestId: z.string().min(1),
   answers: requestUserInputAnswersSchema,
 });
+
+export const handlePrReviewNotificationActionInputSchema = z.object({
+  taskId: z.string(),
+  messageId: z.string().uuid(),
+  action: z.enum(['resolve', 'auto_resolve', 'dismiss']),
+});
+
+async function updatePrReviewNotificationActionStatus(input: {
+  taskId: string;
+  messageId: string;
+  payload: Record<string, unknown>;
+  expectedStatus: PrReviewNotificationActionStatus;
+  expectedProcessingToken?: string;
+  status: PrReviewNotificationActionStatus;
+}) {
+  const action = getPrReviewNotificationAction(input.payload);
+
+  if (!action) {
+    return false;
+  }
+
+  const settledAction = { ...action };
+  delete settledAction.processingStartedAt;
+  delete settledAction.processingToken;
+  const [updated] = await db
+    .update(taskMessages)
+    .set({
+      payload: {
+        ...input.payload,
+        prReviewAction: { ...settledAction, status: input.status },
+      },
+    })
+    .where(
+      and(
+        eq(taskMessages.id, input.messageId),
+        eq(taskMessages.taskId, input.taskId),
+        sql`${taskMessages.payload}->'prReviewAction'->>'status' = ${input.expectedStatus}`,
+        ...(input.expectedProcessingToken
+          ? [
+              sql`${taskMessages.payload}->'prReviewAction'->>'processingToken' = ${input.expectedProcessingToken}`,
+            ]
+          : []),
+      ),
+    )
+    .returning({ id: taskMessages.id });
+
+  return Boolean(updated);
+}
+
+async function claimPrReviewNotificationAction(input: {
+  taskId: string;
+  messageId: string;
+  payload: Record<string, unknown>;
+}) {
+  const action = getPrReviewNotificationAction(input.payload);
+
+  if (!action) {
+    return null;
+  }
+
+  const processingStartedAt = Date.now();
+  const processingToken = randomUUID();
+  const [updated] = await db
+    .update(taskMessages)
+    .set({
+      payload: {
+        ...input.payload,
+        prReviewAction: {
+          ...action,
+          status: 'processing',
+          processingStartedAt,
+          processingToken,
+        },
+      },
+    })
+    .where(
+      and(
+        eq(taskMessages.id, input.messageId),
+        eq(taskMessages.taskId, input.taskId),
+        sql`(
+          ${taskMessages.payload}->'prReviewAction'->>'status' = 'pending'
+          OR (
+            ${taskMessages.payload}->'prReviewAction'->>'status' = 'processing'
+            AND coalesce((${taskMessages.payload}->'prReviewAction'->>'processingStartedAt')::bigint, 0) <= ${processingStartedAt - PR_REVIEW_ACTION_PROCESSING_LEASE_MS}
+          )
+        )`,
+      ),
+    )
+    .returning({ id: taskMessages.id });
+
+  return updated ? { processingStartedAt, processingToken } : null;
+}
+
+async function renewPrReviewNotificationActionClaim(input: {
+  taskId: string;
+  messageId: string;
+  payload: Record<string, unknown>;
+  processingToken: string;
+}) {
+  const action = getPrReviewNotificationAction(input.payload);
+
+  if (!action) {
+    return false;
+  }
+
+  const [updated] = await db
+    .update(taskMessages)
+    .set({
+      payload: {
+        ...input.payload,
+        prReviewAction: {
+          ...action,
+          processingStartedAt: Date.now(),
+        },
+      },
+    })
+    .where(
+      and(
+        eq(taskMessages.id, input.messageId),
+        eq(taskMessages.taskId, input.taskId),
+        sql`${taskMessages.payload}->'prReviewAction'->>'status' = 'processing'`,
+        sql`${taskMessages.payload}->'prReviewAction'->>'processingToken' = ${input.processingToken}`,
+      ),
+    )
+    .returning({ id: taskMessages.id });
+
+  return Boolean(updated);
+}
+
+async function getPersistedPrReviewNotificationActionStatus(input: {
+  taskId: string;
+  messageId: string;
+}) {
+  const [message] = await db
+    .select({ payload: taskMessages.payload })
+    .from(taskMessages)
+    .where(
+      and(
+        eq(taskMessages.id, input.messageId),
+        eq(taskMessages.taskId, input.taskId),
+      ),
+    )
+    .limit(1);
+
+  return (
+    getPrReviewNotificationAction(message?.payload)?.status ?? 'processing'
+  );
+}
+
+export async function handlePrReviewNotificationActionCommand(
+  auth: UserAuthSuccess,
+  input: z.input<typeof handlePrReviewNotificationActionInputSchema>,
+) {
+  const parsed = handlePrReviewNotificationActionInputSchema.parse(input);
+  const taskAccess = await resolveTaskByIdAccessCommand(auth, {
+    taskId: parsed.taskId,
+  });
+
+  if (taskAccess.kind !== 'resolved') {
+    throw new TRPCError({ code: 'NOT_FOUND', message: 'Task not found.' });
+  }
+
+  const [message] = await db
+    .select({
+      metadata: taskMessages.metadata,
+      payload: taskMessages.payload,
+    })
+    .from(taskMessages)
+    .where(
+      and(
+        eq(taskMessages.id, parsed.messageId),
+        eq(taskMessages.taskId, parsed.taskId),
+      ),
+    )
+    .limit(1);
+  const reviewAction = getPrReviewNotificationAction(message?.payload);
+
+  if (
+    message?.metadata?.source !== PR_REVIEW_NOTIFICATION_TASK_MESSAGE_SOURCE ||
+    !reviewAction ||
+    reviewAction.taskId !== parsed.taskId
+  ) {
+    throw new TRPCError({
+      code: 'NOT_FOUND',
+      message: 'Review action not found.',
+    });
+  }
+
+  const processingLeaseExpired =
+    reviewAction.status === 'processing' &&
+    (reviewAction.processingStartedAt ?? 0) <=
+      Date.now() - PR_REVIEW_ACTION_PROCESSING_LEASE_MS;
+
+  if (reviewAction.status !== 'pending' && !processingLeaseExpired) {
+    return { status: reviewAction.status, currentFeedbackDispatched: false };
+  }
+
+  const claim = await claimPrReviewNotificationAction({
+    taskId: parsed.taskId,
+    messageId: parsed.messageId,
+    payload: message.payload,
+  });
+
+  if (!claim) {
+    return { status: 'processing' as const, currentFeedbackDispatched: false };
+  }
+
+  const processingPayload = {
+    ...message.payload,
+    prReviewAction: {
+      ...reviewAction,
+      status: 'processing' as const,
+      ...claim,
+    },
+  };
+
+  if (parsed.action === 'dismiss') {
+    const settled = await updatePrReviewNotificationActionStatus({
+      taskId: parsed.taskId,
+      messageId: parsed.messageId,
+      payload: processingPayload,
+      expectedStatus: 'processing',
+      expectedProcessingToken: claim.processingToken,
+      status: 'dismissed',
+    });
+
+    if (!settled) {
+      return {
+        status: await getPersistedPrReviewNotificationActionStatus(parsed),
+        currentFeedbackDispatched: false,
+      };
+    }
+
+    return { status: 'dismissed' as const, currentFeedbackDispatched: false };
+  }
+
+  let autoHandleEnabled = false;
+  try {
+    const ownsClaim = await renewPrReviewNotificationActionClaim({
+      taskId: parsed.taskId,
+      messageId: parsed.messageId,
+      payload: processingPayload,
+      processingToken: claim.processingToken,
+    });
+
+    if (!ownsClaim) {
+      return {
+        status: await getPersistedPrReviewNotificationActionStatus(parsed),
+        currentFeedbackDispatched: false,
+      };
+    }
+
+    if (parsed.action === 'auto_resolve') {
+      await enableAutoHandlePrReviewFeedback({
+        taskId: parsed.taskId,
+        sourceControlProvider: reviewAction.sourceControlProvider,
+        repository: reviewAction.repository,
+        prNumber: reviewAction.prNumber,
+        userId: auth.userId,
+      });
+      autoHandleEnabled = true;
+    }
+
+    await sendSandboxPromptCommand(auth, {
+      taskId: parsed.taskId,
+      prompt: reviewAction.followUpPrompt,
+      source: 'web',
+      autoSteerWhenQueued: true,
+    });
+  } catch (error) {
+    const status = autoHandleEnabled ? 'auto_resolved' : 'pending';
+    const settled = await updatePrReviewNotificationActionStatus({
+      taskId: parsed.taskId,
+      messageId: parsed.messageId,
+      payload: processingPayload,
+      expectedStatus: 'processing',
+      expectedProcessingToken: claim.processingToken,
+      status,
+    });
+
+    if (autoHandleEnabled) {
+      return {
+        status: settled
+          ? status
+          : await getPersistedPrReviewNotificationActionStatus(parsed),
+        currentFeedbackDispatched: false,
+      };
+    }
+
+    throw error;
+  }
+
+  const status =
+    parsed.action === 'auto_resolve' ? 'auto_resolved' : 'resolved';
+  const settled = await updatePrReviewNotificationActionStatus({
+    taskId: parsed.taskId,
+    messageId: parsed.messageId,
+    payload: processingPayload,
+    expectedStatus: 'processing',
+    expectedProcessingToken: claim.processingToken,
+    status,
+  });
+
+  if (!settled) {
+    return {
+      status: await getPersistedPrReviewNotificationActionStatus(parsed),
+      currentFeedbackDispatched: false,
+    };
+  }
+
+  return { status, currentFeedbackDispatched: true };
+}
 
 /**
  * Trusted actor switch, applied BEFORE the prompt reaches the sandbox.

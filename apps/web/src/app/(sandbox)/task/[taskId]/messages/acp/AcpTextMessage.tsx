@@ -1,8 +1,12 @@
-import { useState, type ComponentType } from 'react';
+import { useEffect, useState, type ComponentType } from 'react';
 import Image from 'next/image';
+import { toast } from 'sonner';
 import {
   ACP_ENVELOPE_EVENT_TYPES,
+  getPrReviewNotificationAction,
+  PR_REVIEW_ACTION_PROCESSING_LEASE_MS,
   type AcpRequestUserInputPayload,
+  type PrReviewNotificationActionStatus,
   getProviderRetryNoticeFromMessageData,
   getTerminalProviderErrorFromMessageData,
   parseLinkedReviewResults,
@@ -10,11 +14,13 @@ import {
 } from '@roomote/types';
 
 import { cn } from '@/lib/utils';
+import { useTRPCClient } from '@/trpc/client';
 
 import {
   BasicTooltip,
   Button,
   ChevronDownIcon,
+  Loader2,
   MediaViewerDialog,
   MediaViewerImage,
 } from '@/components/system';
@@ -86,6 +92,138 @@ function getImageMediaType(url: string): string {
 
 interface AcpTextMessageProps {
   msg: AcpUiMessage;
+}
+
+function PrReviewNotificationActions({ msg }: { msg: AcpUiMessage }) {
+  const action = getPrReviewNotificationAction(
+    msg.data as Record<string, unknown>,
+  );
+  const trpcClient = useTRPCClient();
+  const [status, setStatus] = useState<PrReviewNotificationActionStatus | null>(
+    action?.status === 'processing' &&
+      (action.processingStartedAt ?? 0) <=
+        Date.now() - PR_REVIEW_ACTION_PROCESSING_LEASE_MS
+      ? 'pending'
+      : (action?.status ?? null),
+  );
+  const [submittingAction, setSubmittingAction] = useState<
+    'resolve' | 'auto_resolve' | 'dismiss' | null
+  >(null);
+
+  useEffect(() => {
+    if (action?.status !== 'processing' || !action.processingStartedAt) {
+      return;
+    }
+
+    const remainingMs =
+      action.processingStartedAt +
+      PR_REVIEW_ACTION_PROCESSING_LEASE_MS -
+      Date.now();
+
+    if (remainingMs <= 0) {
+      setStatus('pending');
+      return;
+    }
+
+    const timeout = window.setTimeout(() => setStatus('pending'), remainingMs);
+    return () => window.clearTimeout(timeout);
+  }, [action?.processingStartedAt, action?.status]);
+
+  if (!action || status === null) {
+    return null;
+  }
+
+  const submit = async (
+    selectedAction: 'resolve' | 'auto_resolve' | 'dismiss',
+  ) => {
+    setSubmittingAction(selectedAction);
+    setStatus('processing');
+
+    try {
+      const result =
+        await trpcClient.sandboxSession.handlePrReviewNotificationAction.mutate(
+          {
+            taskId: action.taskId,
+            messageId: msg.id,
+            action: selectedAction,
+          },
+        );
+      setStatus(result.status as PrReviewNotificationActionStatus);
+
+      if (
+        selectedAction === 'auto_resolve' &&
+        !result.currentFeedbackDispatched
+      ) {
+        toast.warning(
+          'Future feedback will be resolved automatically, but this task could not resume for the current feedback.',
+        );
+      }
+    } catch (error) {
+      setStatus('pending');
+      toast.error(
+        error instanceof Error ? error.message : 'Failed to handle feedback.',
+      );
+    } finally {
+      setSubmittingAction(null);
+    }
+  };
+
+  if (status !== 'pending' && status !== 'processing') {
+    const resolution = {
+      resolved: 'Resolution requested.',
+      auto_resolved:
+        'Future feedback on this PR will be resolved automatically.',
+      dismissed: 'Dismissed.',
+    }[status];
+
+    return (
+      <p className="mt-3 text-sm text-muted-foreground" role="status">
+        {resolution}
+      </p>
+    );
+  }
+
+  const isSubmitting = status === 'processing';
+
+  return (
+    <div
+      className="mt-3 flex flex-wrap items-center gap-2"
+      data-testid="pr-review-notification-actions"
+    >
+      <Button
+        size="sm"
+        disabled={isSubmitting}
+        onClick={() => void submit('resolve')}
+      >
+        {submittingAction === 'resolve' ? (
+          <Loader2 className="animate-spin" />
+        ) : null}
+        Resolve these issues
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={isSubmitting}
+        onClick={() => void submit('auto_resolve')}
+      >
+        {submittingAction === 'auto_resolve' ? (
+          <Loader2 className="animate-spin" />
+        ) : null}
+        Auto-resolve on this PR
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        disabled={isSubmitting}
+        onClick={() => void submit('dismiss')}
+      >
+        {submittingAction === 'dismiss' ? (
+          <Loader2 className="animate-spin" />
+        ) : null}
+        Dismiss
+      </Button>
+    </div>
+  );
 }
 
 function getUserTooltipContent(msg: AcpUiMessage): string {
@@ -333,6 +471,9 @@ export function AcpTextMessage({ msg }: AcpTextMessageProps) {
           ) : (
             <MessageResponse>{content}</MessageResponse>
           )}
+          {!isUser && msg.kind === 'text' ? (
+            <PrReviewNotificationActions msg={msg} />
+          ) : null}
         </MessageContent>
       </div>
       {showPersistentTimestamp && !msg.partial && (

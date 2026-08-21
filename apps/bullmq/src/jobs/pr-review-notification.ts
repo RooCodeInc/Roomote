@@ -41,6 +41,7 @@ import {
 import {
   buildPrReviewActionCallbackData,
   isTaskExecutingTurn,
+  type SourceControlProvider,
   WORKER_HEARTBEAT_STALE_MS,
 } from '@roomote/types';
 
@@ -88,6 +89,7 @@ type PrReviewNotificationAction = {
   summaryText: string;
   question: string;
   followUpPrompt: string;
+  sourceControlProvider: SourceControlProvider;
   repository: string;
   prNumber: number;
   prUrl: string;
@@ -127,6 +129,7 @@ async function postPrReviewNotification({
       repository: action.repository,
       prNumber: action.prNumber,
       prUrl: action.prUrl,
+      sourceControlProvider: action.sourceControlProvider,
       channelId: route.channelId,
       threadId: route.threadId ?? null,
       followUpPrompt: action.followUpPrompt,
@@ -470,6 +473,7 @@ ${delivery.text}`;
                 summaryText: delivery.text,
                 question: followUp.question,
                 followUpPrompt: followUp.prompt,
+                sourceControlProvider: data.sourceControlProvider ?? 'github',
                 repository: data.repository,
                 prNumber: data.prNumber,
                 prUrl: data.prUrl,
@@ -487,6 +491,18 @@ ${delivery.text}`;
       taskId: data.taskId,
       route: delivery.route,
       text: textWithQuestion,
+      ...(followUp && !delivery.route
+        ? {
+            action: {
+              sourceControlProvider: data.sourceControlProvider ?? 'github',
+              repository: data.repository,
+              prNumber: data.prNumber,
+              prUrl: data.prUrl,
+              question: followUp.question,
+              followUpPrompt: followUp.prompt,
+            },
+          }
+        : {}),
       ...(messageTs ? { messageTs } : {}),
     });
     await finalizePrReviewNotificationRequest(data);

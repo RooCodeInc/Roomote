@@ -172,6 +172,7 @@ async function dispatchAcceptedPrReviewAction({
   if (enableAutoHandle) {
     await enableAutoHandlePrReviewFeedback({
       taskId: pending.taskId,
+      sourceControlProvider: pending.sourceControlProvider ?? 'github',
       repository: pending.repository,
       prNumber: pending.prNumber,
       userId,

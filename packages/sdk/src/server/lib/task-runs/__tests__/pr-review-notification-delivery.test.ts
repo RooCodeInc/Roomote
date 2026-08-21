@@ -1404,4 +1404,42 @@ describe('recordPrReviewNotificationDeliveryBestEffort', () => {
     expect(mockTrackSlackBotReply).not.toHaveBeenCalled();
     expect(mockSetLatestSlackBotReply).not.toHaveBeenCalled();
   });
+
+  it('persists actionable review state for web transcript controls', async () => {
+    await recordPrReviewNotificationDeliveryBestEffort({
+      runId: 1,
+      taskId: 'task-1',
+      route: null,
+      text: 'formatted-message\nWould you like me to resolve this issue?',
+      action: {
+        sourceControlProvider: 'github',
+        repository: 'owner/repo',
+        prNumber: 42,
+        prUrl: 'https://github.com/owner/repo/pull/42',
+        question: 'Would you like me to resolve this issue?',
+        followUpPrompt: 'Resolve the review feedback.',
+      },
+    });
+
+    expect(mockRecordTaskMessageEnvelope).toHaveBeenCalledWith({
+      runId: 1,
+      taskId: 'task-1',
+      envelope: expect.objectContaining({
+        payload: {
+          text: 'formatted-message\nWould you like me to resolve this issue?',
+          source: 'pr_review_notification',
+          prReviewAction: {
+            taskId: 'task-1',
+            repository: 'owner/repo',
+            prNumber: 42,
+            prUrl: 'https://github.com/owner/repo/pull/42',
+            sourceControlProvider: 'github',
+            question: 'Would you like me to resolve this issue?',
+            followUpPrompt: 'Resolve the review feedback.',
+            status: 'pending',
+          },
+        },
+      }),
+    });
+  });
 });
