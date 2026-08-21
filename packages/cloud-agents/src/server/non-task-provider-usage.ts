@@ -128,7 +128,7 @@ interface GenerateTrackedNonTaskBaseParams extends NonTaskInferenceTrackingInput
   prompt: string;
   system?: string;
   model?: string;
-  modelRole?: 'primary' | 'small';
+  modelRole?: 'primary' | 'small' | 'orchestration';
   maxOutputTokens?: number;
   /** null lets OpenCode own the prompt lifecycle without a Roomote deadline. */
   timeoutMs?: number | null;
@@ -381,7 +381,7 @@ function isOpenCodeSessionMissing(error: unknown): boolean {
 
 async function resolveNonTaskModelRuntime(
   model?: string,
-  modelRole: 'primary' | 'small' = 'small',
+  modelRole: 'primary' | 'small' | 'orchestration' = 'small',
 ): Promise<{
   model: string;
   resolvedModelRuntimeEnv: Partial<Record<string, string>>;
@@ -405,11 +405,14 @@ async function resolveNonTaskModelRuntime(
 
   const resolvedModel =
     requestedModel ||
-    (modelRole === 'primary'
-      ? resolvedModelRuntimeEnv.R_MODEL
-      : resolvedModelRuntimeEnv.R_SMALL_MODEL ||
-        resolvedModelRuntimeEnv.R_MODEL) ||
-    (modelRole === 'primary'
+    (modelRole === 'orchestration'
+      ? resolvedModelRuntimeEnv.R_ORCHESTRATION_MODEL ||
+        resolvedModelRuntimeEnv.R_MODEL
+      : modelRole === 'primary'
+        ? resolvedModelRuntimeEnv.R_MODEL
+        : resolvedModelRuntimeEnv.R_SMALL_MODEL ||
+          resolvedModelRuntimeEnv.R_MODEL) ||
+    (modelRole === 'primary' || modelRole === 'orchestration'
       ? asString(parseOpenCodeConfigJson(readOpenCodeDebugConfig()).model)
       : resolveOpenCodeSmallModel());
 
@@ -430,9 +433,23 @@ async function resolveNonTaskModelRuntime(
     // OpenAI-compatible) id fails with ProviderModelNotFoundError before any
     // request is made. The lease cache keys on env, so distinct explicit
     // models get their own servers instead of colliding.
-    resolvedModelRuntimeEnv: requestedModel
-      ? { ...resolvedModelRuntimeEnv, R_MODEL: requestedModel }
-      : resolvedModelRuntimeEnv,
+    resolvedModelRuntimeEnv:
+      requestedModel ||
+      (modelRole === 'orchestration' &&
+        (resolvedModelRuntimeEnv.R_ORCHESTRATION_MODEL ||
+          resolvedModelRuntimeEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT))
+        ? {
+            ...resolvedModelRuntimeEnv,
+            R_MODEL: resolvedModel,
+            ...(modelRole === 'orchestration' &&
+            resolvedModelRuntimeEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT
+              ? {
+                  R_MODEL_REASONING_EFFORT:
+                    resolvedModelRuntimeEnv.R_ORCHESTRATION_MODEL_REASONING_EFFORT,
+                }
+              : {}),
+          }
+        : resolvedModelRuntimeEnv,
   };
 }
 

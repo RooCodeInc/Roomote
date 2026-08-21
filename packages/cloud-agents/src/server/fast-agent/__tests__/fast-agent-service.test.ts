@@ -249,7 +249,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     });
     expect(mocks.generateText).toHaveBeenCalledWith(
       expect.objectContaining({
-        modelRole: 'primary',
+        modelRole: 'orchestration',
         prompt: expect.stringContaining('What does this service do?'),
         timeoutMs: null,
       }),
@@ -280,7 +280,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
       expect(consoleInfo).toHaveBeenCalledWith(
         expect.stringContaining(
-          '[Fast Agent] Turn finished. surface="slack" workspaceId="team-1" conversationId="100.1" messageId="100.2" canonicalConversationId="conversation-1" turnSource="human" modelRole="primary"',
+          '[Fast Agent] Turn finished. surface="slack" workspaceId="team-1" conversationId="100.1" messageId="100.2" canonicalConversationId="conversation-1" turnSource="human" modelRole="orchestration"',
         ),
       );
       expect(consoleInfo).toHaveBeenCalledWith(
@@ -781,7 +781,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
       expect(consoleError).toHaveBeenCalledWith(
         expect.stringContaining(
-          '[Fast Agent] Turn finished. surface="slack" workspaceId="team-1" conversationId="100.1" messageId="100.2" canonicalConversationId="conversation-1" turnSource="human" modelRole="primary"',
+          '[Fast Agent] Turn finished. surface="slack" workspaceId="team-1" conversationId="100.1" messageId="100.2" canonicalConversationId="conversation-1" turnSource="human" modelRole="orchestration"',
         ),
       );
       expect(consoleError).toHaveBeenCalledWith(

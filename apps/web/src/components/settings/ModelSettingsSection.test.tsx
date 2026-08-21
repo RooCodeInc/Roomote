@@ -123,18 +123,21 @@ import { ModelSettingsSection } from './ModelSettingsSection';
 function buildSettingsData(
   overrides: {
     codingManagedByEnv?: boolean;
+    orchestrationManagedByEnv?: boolean;
     helperManagedByEnv?: boolean;
     visionManagedByEnv?: boolean;
     codeReviewManagedByEnv?: boolean;
     exploreManagedByEnv?: boolean;
     planningManagedByEnv?: boolean;
     codingReasoningManagedByEnv?: boolean;
+    orchestrationReasoningManagedByEnv?: boolean;
     helperReasoningManagedByEnv?: boolean;
     visionReasoningManagedByEnv?: boolean;
     codeReviewReasoningManagedByEnv?: boolean;
     exploreReasoningManagedByEnv?: boolean;
     planningReasoningManagedByEnv?: boolean;
     codingEffectiveModelId?: string;
+    orchestrationEffectiveModelId?: string | null;
     helperEffectiveModelId?: string | null;
     visionEffectiveModelId?: string | null;
     codeReviewEffectiveModelId?: string | null;
@@ -187,6 +190,15 @@ function buildSettingsData(
         managedByEnv: overrides.codingManagedByEnv ?? false,
         reasoningEffort: overrides.codingReasoningEffort ?? null,
         reasoningManagedByEnv: overrides.codingReasoningManagedByEnv ?? false,
+      },
+      orchestrationModel: {
+        effectiveModelId: overrides.orchestrationEffectiveModelId ?? null,
+        persistedModelId: null,
+        source: 'same-as-coding',
+        managedByEnv: overrides.orchestrationManagedByEnv ?? false,
+        reasoningEffort: null as ReasoningEffort | null,
+        reasoningManagedByEnv:
+          overrides.orchestrationReasoningManagedByEnv ?? false,
       },
       helperModel: {
         effectiveModelId: overrides.helperEffectiveModelId ?? null,
@@ -393,12 +405,14 @@ describe('ModelSettingsSection', () => {
   it('disables the runtime model selects when env-managed and omits the per-row Make default button', () => {
     settingsData.current = buildSettingsData({
       codingManagedByEnv: true,
+      orchestrationManagedByEnv: true,
       helperManagedByEnv: true,
       visionManagedByEnv: true,
       codeReviewManagedByEnv: true,
       exploreManagedByEnv: true,
       planningManagedByEnv: true,
       codingEffectiveModelId: 'openrouter/anthropic/claude-sonnet-4',
+      orchestrationEffectiveModelId: 'openrouter/anthropic/claude-sonnet-4',
       helperEffectiveModelId: 'openrouter/anthropic/claude-haiku-4',
       visionEffectiveModelId: 'openrouter/openai/gpt-5.5',
       codeReviewEffectiveModelId: 'openrouter/openai/gpt-5.5',
@@ -413,14 +427,15 @@ describe('ModelSettingsSection', () => {
         '[data-slot="select-trigger"]',
       ),
     );
-    // 6 model selects + 6 reasoning selects + the add-model provider select.
-    expect(triggers).toHaveLength(13);
+    // 7 model selects + 7 reasoning selects + the add-model provider select.
+    expect(triggers).toHaveLength(15);
     expect(triggers[0]).toBeDisabled();
     expect(triggers[2]).toBeDisabled();
     expect(triggers[4]).toBeDisabled();
     expect(triggers[6]).toBeDisabled();
     expect(triggers[8]).toBeDisabled();
     expect(triggers[10]).toBeDisabled();
+    expect(triggers[12]).toBeDisabled();
     // Reasoning selects stay enabled unless the reasoning env override is set.
     expect(triggers[1]).not.toBeDisabled();
     expect(triggers[3]).not.toBeDisabled();
@@ -428,9 +443,10 @@ describe('ModelSettingsSection', () => {
     expect(triggers[7]).not.toBeDisabled();
     expect(triggers[9]).not.toBeDisabled();
     expect(triggers[11]).not.toBeDisabled();
+    expect(triggers[13]).not.toBeDisabled();
     // The add-model provider select stays enabled regardless of env-managed
     // runtime models.
-    expect(triggers[12]).not.toBeDisabled();
+    expect(triggers[14]).not.toBeDisabled();
 
     expect(screen.queryByText('Make default')).toBeNull();
     expect(screen.queryByText('Env-managed')).toBeNull();
@@ -457,11 +473,11 @@ describe('ModelSettingsSection', () => {
       ),
     );
 
-    expect(triggers).toHaveLength(13);
+    expect(triggers).toHaveLength(15);
     expect(triggers[0]).not.toBeDisabled();
     expect(triggers[1]).toBeDisabled();
-    expect(triggers[10]).not.toBeDisabled();
-    expect(triggers[11]).toBeDisabled();
+    expect(triggers[12]).not.toBeDisabled();
+    expect(triggers[13]).toBeDisabled();
     expect(screen.queryByText('Reasoning env-managed')).toBeNull();
     expect(
       screen.getByLabelText(
@@ -535,7 +551,7 @@ describe('ModelSettingsSection', () => {
     const { container } = renderModelSettingsSection();
 
     const triggers = container.querySelectorAll('[data-slot="select-trigger"]');
-    expect(triggers).toHaveLength(13);
+    expect(triggers).toHaveLength(15);
     for (const trigger of Array.from(triggers)) {
       expect(trigger).not.toBeDisabled();
     }
@@ -554,8 +570,8 @@ describe('ModelSettingsSection', () => {
     renderModelSettingsSection();
 
     const modelMappingSection = screen.getByTestId('section-Model mapping');
-    // coding: Medium, helper + vision + explore: Low, code review + planning: High.
-    expect(within(modelMappingSection).getByText('Medium')).toBeInTheDocument();
+    // coding + orchestration: Medium, helper + vision + explore: Low, code review + planning: High.
+    expect(within(modelMappingSection).getAllByText('Medium')).toHaveLength(2);
     expect(within(modelMappingSection).getAllByText('Low')).toHaveLength(3);
     expect(within(modelMappingSection).getAllByText('High')).toHaveLength(2);
   });
@@ -587,8 +603,8 @@ describe('ModelSettingsSection', () => {
     const { container } = renderModelSettingsSection();
 
     const triggers = container.querySelectorAll('[data-slot="select-trigger"]');
-    // 6 model selects + the add-model provider select; no reasoning selects.
-    expect(triggers).toHaveLength(7);
+    // 7 model selects + the add-model provider select; no reasoning selectors.
+    expect(triggers).toHaveLength(8);
   });
 
   it('renders model metadata in the available models list', () => {
@@ -1147,7 +1163,7 @@ describe('ModelSettingsSection', () => {
     );
 
     const dialog = screen.getByRole('dialog');
-    expect(within(dialog).getAllByText('GLM 5.2')).toHaveLength(6);
+    expect(within(dialog).getAllByText('GLM 5.2')).toHaveLength(7);
   });
 
   it('previews inherited roles with the selected coding preset when it is not env-managed', async () => {
@@ -1167,7 +1183,7 @@ describe('ModelSettingsSection', () => {
     );
 
     const dialog = screen.getByRole('dialog');
-    expect(within(dialog).getAllByText('default-model')).toHaveLength(6);
+    expect(within(dialog).getAllByText('default-model')).toHaveLength(7);
   });
 
   it('matches preset display metadata to the resolved preview model', async () => {
@@ -1209,7 +1225,7 @@ describe('ModelSettingsSection', () => {
     );
 
     const dialog = screen.getByRole('dialog');
-    expect(within(dialog).getAllByText('Claude Sonnet 6')).toHaveLength(5);
+    expect(within(dialog).getAllByText('Claude Sonnet 6')).toHaveLength(6);
     expect(within(dialog).getByText('env-model')).toBeInTheDocument();
     expect(
       within(dialog).queryByText('Claude Haiku 6'),
@@ -1551,6 +1567,19 @@ describe('ModelSettingsSection', () => {
     expect(screen.getByText('Advisor model')).toBeInTheDocument();
     expect(
       screen.getByRole('combobox', { name: 'Advisor model reasoning level' }),
+    ).toBeInTheDocument();
+  });
+
+  it('shows the orchestration model role', () => {
+    settingsData.current = buildSettingsData();
+
+    renderModelSettingsSection();
+
+    expect(screen.getByText('Orchestration model')).toBeInTheDocument();
+    expect(
+      screen.getByRole('combobox', {
+        name: 'Orchestration model reasoning level',
+      }),
     ).toBeInTheDocument();
   });
 

@@ -19,7 +19,7 @@ type FastAgentTurnDiagnosticsContext = {
   conversation: FastAgentConversation;
   currentMessageId?: string;
   hasImages: boolean;
-  modelRole: 'primary' | 'small';
+  modelRole: 'primary' | 'small' | 'orchestration';
   turnSource: FastAgentTurnSource;
 };
 

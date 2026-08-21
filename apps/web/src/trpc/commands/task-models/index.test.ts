@@ -147,6 +147,7 @@ describe('lookupTaskModelCommand', () => {
   const originalProviderEnvValues = new Map<string, string | undefined>();
   const originalOpenRouterKey = process.env.OPENROUTER_API_KEY;
   const originalRoomoteModel = process.env.R_MODEL;
+  const originalRoomoteOrchestrationModel = process.env.R_ORCHESTRATION_MODEL;
   const originalRoomoteSmallModel = process.env.R_SMALL_MODEL;
   const originalRoomoteVisionModel = process.env.R_VISION_MODEL;
   const originalRoomoteCodeReviewModel = process.env.R_CODE_REVIEW_MODEL;
@@ -170,12 +171,14 @@ describe('lookupTaskModelCommand', () => {
       delete process.env[name];
     }
     delete process.env.R_MODEL;
+    delete process.env.R_ORCHESTRATION_MODEL;
     delete process.env.R_SMALL_MODEL;
     delete process.env.R_VISION_MODEL;
     delete process.env.R_CODE_REVIEW_MODEL;
     delete process.env.R_EXPLORE_MODEL;
     delete process.env.R_PLANNING_MODEL;
     delete process.env.R_MODEL_REASONING_EFFORT;
+    delete process.env.R_ORCHESTRATION_MODEL_REASONING_EFFORT;
     delete process.env.R_SMALL_MODEL_REASONING_EFFORT;
     delete process.env.R_VISION_MODEL_REASONING_EFFORT;
     delete process.env.R_CODE_REVIEW_MODEL_REASONING_EFFORT;
@@ -261,6 +264,12 @@ describe('lookupTaskModelCommand', () => {
       process.env.R_MODEL = originalRoomoteModel;
     }
 
+    if (originalRoomoteOrchestrationModel === undefined) {
+      delete process.env.R_ORCHESTRATION_MODEL;
+    } else {
+      process.env.R_ORCHESTRATION_MODEL = originalRoomoteOrchestrationModel;
+    }
+
     if (originalRoomoteSmallModel === undefined) {
       delete process.env.R_SMALL_MODEL;
     } else {
@@ -292,6 +301,7 @@ describe('lookupTaskModelCommand', () => {
     }
 
     delete process.env.R_MODEL_REASONING_EFFORT;
+    delete process.env.R_ORCHESTRATION_MODEL_REASONING_EFFORT;
     delete process.env.R_SMALL_MODEL_REASONING_EFFORT;
     delete process.env.R_VISION_MODEL_REASONING_EFFORT;
     delete process.env.R_CODE_REVIEW_MODEL_REASONING_EFFORT;
@@ -833,12 +843,14 @@ describe('lookupTaskModelCommand', () => {
         set: expect.objectContaining({
           runtimeModelConfig: {
             roomoteModel: 'openrouter/openai/gpt-5.6',
+            roomoteOrchestrationModel: null,
             roomoteSmallModel: 'openrouter/z-ai/glm-5.2',
             roomoteVisionModel: null,
             roomoteCodeReviewModel: null,
             roomoteExploreModel: null,
             roomotePlanningModel: null,
             roomoteModelReasoningEffort: null,
+            roomoteOrchestrationModelReasoningEffort: null,
             roomoteSmallModelReasoningEffort: null,
             roomoteVisionModelReasoningEffort: null,
             roomoteCodeReviewModelReasoningEffort: null,
@@ -848,6 +860,81 @@ describe('lookupTaskModelCommand', () => {
         }),
       }),
     );
+  });
+
+  it('persists a selected orchestration model independently', async () => {
+    const result = await updateTaskModelSettingsCommand(buildMockAuth(), {
+      models: [
+        {
+          id: 'openrouter/openai/gpt-5.6',
+          displayName: 'GPT 5.6',
+          family: 'GPT',
+        },
+        {
+          id: 'z-ai/glm-5.2',
+          displayName: 'GLM 5.2',
+          family: 'GLM',
+        },
+      ],
+      allowedModelIds: ['openrouter/openai/gpt-5.6', 'z-ai/glm-5.2'],
+      defaultModelId: 'openrouter/openai/gpt-5.6',
+      orchestrationModelId: 'z-ai/glm-5.2',
+      helperModelId: null,
+      visionModelId: null,
+      codeReviewModelId: null,
+      planningModelId: null,
+      codingModelReasoningEffort: null,
+      orchestrationModelReasoningEffort: 'high',
+      helperModelReasoningEffort: null,
+      visionModelReasoningEffort: null,
+      codeReviewModelReasoningEffort: null,
+      planningModelReasoningEffort: null,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    expect(mockUpdateDeploymentSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        set: expect.objectContaining({
+          runtimeModelConfig: expect.objectContaining({
+            roomoteModel: 'openrouter/openai/gpt-5.6',
+            roomoteOrchestrationModel: 'openrouter/z-ai/glm-5.2',
+            roomoteOrchestrationModelReasoningEffort: 'high',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('rejects an orchestration model outside the saved catalog', async () => {
+    const result = await updateTaskModelSettingsCommand(buildMockAuth(), {
+      models: [
+        {
+          id: 'openrouter/openai/gpt-5.6',
+          displayName: 'GPT 5.6',
+          family: 'GPT',
+        },
+      ],
+      allowedModelIds: ['openrouter/openai/gpt-5.6'],
+      defaultModelId: 'openrouter/openai/gpt-5.6',
+      orchestrationModelId: 'openrouter/anthropic/claude-opus-5',
+      helperModelId: null,
+      visionModelId: null,
+      codeReviewModelId: null,
+      planningModelId: null,
+      codingModelReasoningEffort: null,
+      orchestrationModelReasoningEffort: null,
+      helperModelReasoningEffort: null,
+      visionModelReasoningEffort: null,
+      codeReviewModelReasoningEffort: null,
+      planningModelReasoningEffort: null,
+    });
+
+    expect(result).toEqual({
+      success: false,
+      fieldErrors: {
+        orchestrationModelId: 'Choose a valid orchestration model.',
+      },
+    });
   });
 
   it('persists a selected vision model to runtimeModelConfig.roomoteVisionModel', async () => {
@@ -885,12 +972,14 @@ describe('lookupTaskModelCommand', () => {
         set: expect.objectContaining({
           runtimeModelConfig: {
             roomoteModel: 'openrouter/openai/gpt-5.6',
+            roomoteOrchestrationModel: null,
             roomoteSmallModel: null,
             roomoteVisionModel: 'openrouter/z-ai/glm-5.2',
             roomoteCodeReviewModel: null,
             roomoteExploreModel: null,
             roomotePlanningModel: null,
             roomoteModelReasoningEffort: null,
+            roomoteOrchestrationModelReasoningEffort: null,
             roomoteSmallModelReasoningEffort: null,
             roomoteVisionModelReasoningEffort: null,
             roomoteCodeReviewModelReasoningEffort: null,
@@ -949,12 +1038,14 @@ describe('lookupTaskModelCommand', () => {
         set: expect.objectContaining({
           runtimeModelConfig: {
             roomoteModel: 'openrouter/anthropic/claude-sonnet-4',
+            roomoteOrchestrationModel: null,
             roomoteSmallModel: null,
             roomoteVisionModel: null,
             roomoteCodeReviewModel: null,
             roomoteExploreModel: null,
             roomotePlanningModel: null,
             roomoteModelReasoningEffort: null,
+            roomoteOrchestrationModelReasoningEffort: null,
             roomoteSmallModelReasoningEffort: null,
             roomoteVisionModelReasoningEffort: null,
             roomoteCodeReviewModelReasoningEffort: null,
@@ -1013,12 +1104,14 @@ describe('lookupTaskModelCommand', () => {
         set: expect.objectContaining({
           runtimeModelConfig: {
             roomoteModel: 'openrouter/openai/gpt-5.6',
+            roomoteOrchestrationModel: null,
             roomoteSmallModel: 'openrouter/anthropic/claude-haiku-4',
             roomoteVisionModel: null,
             roomoteCodeReviewModel: null,
             roomoteExploreModel: null,
             roomotePlanningModel: null,
             roomoteModelReasoningEffort: null,
+            roomoteOrchestrationModelReasoningEffort: null,
             roomoteSmallModelReasoningEffort: null,
             roomoteVisionModelReasoningEffort: null,
             roomoteCodeReviewModelReasoningEffort: null,
@@ -1077,12 +1170,14 @@ describe('lookupTaskModelCommand', () => {
         set: expect.objectContaining({
           runtimeModelConfig: {
             roomoteModel: 'openrouter/openai/gpt-5.6',
+            roomoteOrchestrationModel: null,
             roomoteSmallModel: null,
             roomoteVisionModel: 'openrouter/anthropic/claude-sonnet-4',
             roomoteCodeReviewModel: null,
             roomoteExploreModel: null,
             roomotePlanningModel: null,
             roomoteModelReasoningEffort: null,
+            roomoteOrchestrationModelReasoningEffort: null,
             roomoteSmallModelReasoningEffort: null,
             roomoteVisionModelReasoningEffort: null,
             roomoteCodeReviewModelReasoningEffort: null,
