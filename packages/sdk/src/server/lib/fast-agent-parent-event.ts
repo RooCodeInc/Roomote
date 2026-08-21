@@ -23,7 +23,7 @@ import {
   taskRuns,
 } from '@roomote/db/server';
 import { Env, getArtifactSigningKey } from '@roomote/env';
-import { SlackNotifier } from '@roomote/slack';
+import { resolveSlackReactionNames, SlackNotifier } from '@roomote/slack';
 import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
@@ -312,6 +312,19 @@ async function createSlackFastAgentParentTurn(params: {
 
   const conversation = session.conversation;
   const slack = new SlackNotifier(installation.botAccessToken);
+
+  if (
+    params.event.type === 'pull_request_status_changed' &&
+    params.event.status === 'merged'
+  ) {
+    const { completionEmoji } = await resolveSlackReactionNames();
+    await slack.addReaction({
+      channel: conversation.replyTarget.channelId,
+      timestamp: conversation.replyTarget.threadId,
+      name: completionEmoji,
+    });
+  }
+
   return {
     userId: session.userId,
     conversation,

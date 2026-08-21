@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   findArtifacts: vi.fn(),
   findTaskRun: vi.fn(),
   postMessage: vi.fn(),
+  addReaction: vi.fn(),
+  resolveSlackReactionNames: vi.fn(),
   createDiscordProvider: vi.fn(),
   discordPostMessage: vi.fn(),
   createDiscordThread: vi.fn(),
@@ -75,7 +77,9 @@ vi.mock('@roomote/env', () => ({
 vi.mock('@roomote/slack', () => ({
   SlackNotifier: class SlackNotifier {
     postMessage = mocks.postMessage;
+    addReaction = mocks.addReaction;
   },
+  resolveSlackReactionNames: mocks.resolveSlackReactionNames,
 }));
 
 vi.mock('./artifacts/raw-url', () => ({
@@ -147,6 +151,11 @@ describe('deliverFastAgentParentEvent', () => {
     ]);
     mocks.findTaskRun.mockResolvedValue({ status: 'running' });
     mocks.postMessage.mockResolvedValue('101.001');
+    mocks.addReaction.mockResolvedValue(true);
+    mocks.resolveSlackReactionNames.mockResolvedValue({
+      ackEmoji: 'eyes',
+      completionEmoji: 'white_check_mark',
+    });
     mocks.discordPostMessage.mockResolvedValue({
       provider: 'discord',
       channelId: 'channel-1',
@@ -528,6 +537,7 @@ describe('deliverFastAgentParentEvent', () => {
         client_msg_id: expect.any(String),
       }),
     );
+    expect(mocks.addReaction).not.toHaveBeenCalled();
   });
 
   it('delivers a pull request status event with a stable idempotency key', async () => {
@@ -580,6 +590,54 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postMessage.mock.calls[1]?.[0]?.client_msg_id).toBe(
       firstClientMessageId,
     );
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        ...statusEvent,
+        status: 'closed',
+        pullRequest: { ...statusEvent.pullRequest, status: 'closed' },
+      },
+    });
+
+    expect(mocks.addReaction).toHaveBeenCalledTimes(2);
+    expect(mocks.addReaction).toHaveBeenLastCalledWith({
+      channel: 'C123',
+      timestamp: '100.001',
+      name: 'white_check_mark',
+    });
+  });
+
+  it('adds the merge reaction when the Fast agent ignores the status event', async () => {
+    mocks.answerQuestion.mockResolvedValue(undefined);
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'pull_request_status_changed',
+        taskId: 'task-1',
+        runId: 42,
+        taskUrl: 'https://roomote.example/task/task-1',
+        pullRequest: {
+          provider: 'github',
+          host: 'github.com',
+          repository: 'acme/web',
+          number: 42,
+          title: 'Fix review feedback',
+          url: 'https://github.com/acme/web/pull/42',
+          status: 'merged',
+        },
+        status: 'merged',
+        actorLogin: 'alice',
+      },
+    });
+
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(mocks.addReaction).toHaveBeenCalledWith({
+      channel: 'C123',
+      timestamp: '100.001',
+      name: 'white_check_mark',
+    });
   });
 
   it('lets a settled task event re-query the remaining active task set', async () => {
