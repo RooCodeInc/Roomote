@@ -104,6 +104,30 @@ describe('resolveRepositorySourceControl', () => {
       resolveRepositorySourceControl(dbOrTx, 'shared/app'),
     ).resolves.toBeUndefined();
   });
+
+  it('uses the target host to resolve same-name repositories exactly', async () => {
+    mockRows = [
+      {
+        fullName: 'shared/app',
+        host: 'gitea.example.com',
+        isActive: true,
+        sourceControlProvider: 'gitea',
+      },
+      {
+        fullName: 'shared/app',
+        host: 'github.com',
+        isActive: true,
+        sourceControlProvider: 'github',
+      },
+    ];
+
+    await expect(
+      resolveRepositorySourceControl(dbOrTx, 'shared/app', 'gitea.example.com'),
+    ).resolves.toEqual({
+      provider: 'gitea',
+      host: 'gitea.example.com',
+    });
+  });
 });
 
 describe('resolveWorkspaceSourceControlProvider', () => {
