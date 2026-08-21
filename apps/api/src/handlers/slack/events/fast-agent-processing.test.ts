@@ -1,5 +1,6 @@
 const mocks = vi.hoisted(() => ({
   acquireLock: vi.fn(),
+  hasSession: vi.fn(),
   releaseLock: vi.fn(),
   answerQuestion: vi.fn(),
   postThreadMessage: vi.fn(),
@@ -8,6 +9,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireLock,
   answerFastAgentQuestion: mocks.answerQuestion,
+  hasFastAgentSession: mocks.hasSession,
 }));
 
 vi.mock('@roomote/cloud-agents', () => ({
@@ -32,6 +34,7 @@ describe('processFastAgentMessage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.acquireLock.mockResolvedValue(mocks.releaseLock);
+    mocks.hasSession.mockResolvedValue(false);
     mocks.releaseLock.mockResolvedValue(undefined);
     mocks.postThreadMessage.mockResolvedValue('posted');
     mocks.answerQuestion.mockImplementation(
@@ -620,7 +623,8 @@ describe('processFastAgentMessage', () => {
     expect(mocks.releaseLock).toHaveBeenCalledOnce();
   });
 
-  it('accepts ordinary text when continuing an existing fast thread', async () => {
+  it('does not add the processing reaction to an existing fast conversation', async () => {
+    mocks.hasSession.mockResolvedValueOnce(true);
     const slack = {
       addReaction: vi.fn().mockResolvedValue(true),
       removeReaction: vi.fn().mockResolvedValue(true),
@@ -644,6 +648,11 @@ describe('processFastAgentMessage', () => {
       continuation: true,
     });
 
+    expect(slack.addReaction).not.toHaveBeenCalled();
+    expect(slack.removeReaction).not.toHaveBeenCalled();
+    expect(mocks.acquireLock.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.hasSession.mock.invocationCallOrder[0]!,
+    );
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({ question: 'Good, tired' }),
     );

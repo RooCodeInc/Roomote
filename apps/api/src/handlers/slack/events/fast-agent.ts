@@ -2,6 +2,7 @@ import { PRODUCT_NAME } from '@roomote/types';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  hasFastAgentSession,
   type FastAgentActiveTask,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
@@ -103,11 +104,14 @@ export async function processFastAgentMessage(params: {
   let didAddProcessingReaction = false;
 
   try {
-    didAddProcessingReaction = await slack.addReaction({
-      channel: event.channel,
-      timestamp: event.ts,
-      name: processingReactionName,
-    });
+    const isNewConversation = !(await hasFastAgentSession(conversation));
+    if (isNewConversation) {
+      didAddProcessingReaction = await slack.addReaction({
+        channel: event.channel,
+        timestamp: event.ts,
+        name: processingReactionName,
+      });
+    }
 
     if (!question) {
       await postSlackThreadMarkdownMessage({
