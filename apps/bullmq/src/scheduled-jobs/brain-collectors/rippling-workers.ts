@@ -11,7 +11,9 @@ import {
 import { ripplingApiRequestJson } from '@roomote/sdk/server/rippling-api';
 import {
   BRAIN_COLLECTOR_IDS,
+  BRAIN_PAGE_TYPES,
   brainNamespacePrefix,
+  renderBrainFrontmatter,
   type McpConnectionRipplingConfig,
 } from '@roomote/types';
 import { createHash } from 'node:crypto';
@@ -319,8 +321,13 @@ export function buildRipplingWorkerPage(input: {
     slug: ripplingWorkerSlug(workerId),
     title: name,
     content: [
-      '---',
-      `type: ${canonical ? 'person-alias' : 'person'}`,
+      ...renderBrainFrontmatter({
+        type: canonical
+          ? BRAIN_PAGE_TYPES.personAlias
+          : BRAIN_PAGE_TYPES.person,
+        title: name,
+        created: startDate ?? null,
+      }).slice(0, -1),
       `aliases: ${JSON.stringify(active ? aliases : [])}`,
       `status: ${active ? 'active' : 'inactive'}`,
       `source_status: ${JSON.stringify(exactStatus)}`,
@@ -395,8 +402,10 @@ export function buildUnavailableRipplingWorkerPage(item: {
     slug: item.slug,
     title: 'Unavailable Rippling worker',
     content: [
-      '---',
-      'type: person',
+      ...renderBrainFrontmatter({
+        type: BRAIN_PAGE_TYPES.person,
+        title: 'Unavailable Rippling worker',
+      }).slice(0, -1),
       'aliases: []',
       'status: unavailable',
       `rippling_worker_id: ${JSON.stringify(item.itemId)}`,

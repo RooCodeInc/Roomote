@@ -151,6 +151,9 @@ describe('buildGranolaMeetingPage', () => {
     );
 
     expect(result?.page.timelineEvidence).toEqual([]);
+    // No honest date means no `created` at all, never a placeholder.
+    expect(result?.page.content).not.toContain('\ncreated:');
+    expect(result?.page.content).toContain('\ntype: meeting\n');
   });
 
   it('tries both attendee name and email before leaving a person unresolved', () => {

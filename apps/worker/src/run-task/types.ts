@@ -152,6 +152,13 @@ export type RunTaskCallbacks = {
     status: RunStatus,
     context: RunTaskContext,
   ) => Promise<void>;
+  /** A booting status transition (Preparing, Spawning, Connecting, Running)
+   * the worker just persisted; lets surfaces mirror startup progress. */
+  onStatus?: (
+    taskRun: TaskRun,
+    status: RunStatus,
+    context: RunTaskContext,
+  ) => Promise<void>;
 };
 
 export type CallbackDeliveryContext = {

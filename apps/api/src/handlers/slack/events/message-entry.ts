@@ -6,7 +6,6 @@ import {
   syncAutoStartChannelCacheBestEffort,
 } from '@roomote/redis';
 import {
-  createFastAgentSlackTaskLauncher,
   hasFastAgentSession,
   ROUTING_AUTO_CONFIRM_TIMEOUT_MS,
 } from '@roomote/cloud-agents/server';
@@ -14,6 +13,7 @@ import {
   autoConfirmRouting,
   collectAndExtractThreadAttachmentTexts,
   collectAndProcessThreadImages,
+  createFastAgentSlackLiveTaskLauncher,
   fetchThreadMessagesSafe,
   findActiveSlackTaskRun,
   formatSlackRoutingWaitReplyText,
@@ -1610,7 +1610,8 @@ function startFastAgentResponse(params: {
   processFastAgentMessage({
     ...fastAgentParams,
     apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
-    launchTask: createFastAgentSlackTaskLauncher({
+    launchTask: createFastAgentSlackLiveTaskLauncher({
+      slack: params.slack,
       userId: params.userId,
       teamId: params.teamId,
       ...(params.slackInstallation.teamDomain

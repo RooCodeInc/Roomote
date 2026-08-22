@@ -1,9 +1,20 @@
-import { asFiniteNumber, asRecord, asString } from '@roomote/types';
+import {
+  INFERENCE_PROVIDER_ERROR_BASE_DELAY_MS,
+  INFERENCE_PROVIDER_ERROR_MAX_DELAY_MS,
+  INFERENCE_PROVIDER_MAX_RETRIES,
+  asFiniteNumber,
+  asRecord,
+  asString,
+  resolveInferenceProviderRetryDelayMs,
+} from '@roomote/types';
 
-const DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_RETRIES = 3;
+const DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_RETRIES =
+  INFERENCE_PROVIDER_MAX_RETRIES;
 const DEFAULT_OPENCODE_POLICY_REFUSAL_MAX_RETRIES = 2;
-export const DEFAULT_OPENCODE_PROVIDER_ERROR_BASE_DELAY_MS = 1_000;
-export const DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_DELAY_MS = 30_000;
+export const DEFAULT_OPENCODE_PROVIDER_ERROR_BASE_DELAY_MS =
+  INFERENCE_PROVIDER_ERROR_BASE_DELAY_MS;
+export const DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_DELAY_MS =
+  INFERENCE_PROVIDER_ERROR_MAX_DELAY_MS;
 
 const OPENCODE_PROVIDER_ERROR_RETRY_PROMPT_TEXT = [
   'Continue. The previous model request failed due to a provider error and was automatically retried.',
@@ -193,17 +204,12 @@ export function resolveOpenCodeProviderErrorRetryDelayMs(options: {
   baseDelayMs?: number;
   maxDelayMs?: number;
 }): number {
-  const baseDelayMs = Math.max(
-    1_000,
-    options.baseDelayMs ?? DEFAULT_OPENCODE_PROVIDER_ERROR_BASE_DELAY_MS,
-  );
-  const maxDelayMs = Math.max(
-    baseDelayMs,
-    options.maxDelayMs ?? DEFAULT_OPENCODE_PROVIDER_ERROR_MAX_DELAY_MS,
-  );
-  const attemptNumber = Math.max(1, options.attemptNumber);
-
-  return Math.min(baseDelayMs * 2 ** (attemptNumber - 1), maxDelayMs);
+  return resolveInferenceProviderRetryDelayMs({
+    attemptNumber: options.attemptNumber,
+    rateLimited: false,
+    baseDelayMs: options.baseDelayMs,
+    maxDelayMs: options.maxDelayMs,
+  });
 }
 
 const ERROR_SUMMARY_MAX_CHARS = 280;

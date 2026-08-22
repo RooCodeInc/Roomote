@@ -368,8 +368,223 @@ function generateJWT(appId: string, privateKey: string) {
  * Octokit
  */
 
+const GITHUB_RATE_LIMIT_MAX_RETRIES = 2;
+const GITHUB_RATE_LIMIT_MAX_DELAY_MS = 30_000;
+const GITHUB_RATE_LIMIT_FALLBACK_DELAY_MS = 1_000;
+const GITHUB_RATE_LIMIT_DEFAULT_DEFER_MS = 15 * 60 * 1_000;
+const GITHUB_RATE_LIMIT_MAX_DEFER_MS = 60 * 60 * 1_000;
+
+type GitHubOctokitRuntimeOptions = {
+  retryRateLimits?: boolean;
+};
+
+function getHeader(response: Response, name: string): string | null {
+  return response.headers.get(name);
+}
+
+function getHeaderValue(headers: unknown, name: string): string | null {
+  if (typeof headers !== 'object' || headers === null) {
+    return null;
+  }
+
+  if (headers instanceof Headers) {
+    return headers.get(name);
+  }
+
+  const value = Object.entries(headers as Record<string, unknown>).find(
+    ([key]) => key.toLowerCase() === name.toLowerCase(),
+  )?.[1];
+  return typeof value === 'string' ? value : null;
+}
+
+function getErrorHeader(error: unknown, name: string): string | null {
+  if (typeof error !== 'object' || error === null) {
+    return null;
+  }
+
+  const topLevelHeaders =
+    'headers' in error ? getHeaderValue(error.headers, name) : null;
+  if (topLevelHeaders !== null) {
+    return topLevelHeaders;
+  }
+
+  if (
+    !('response' in error) ||
+    typeof error.response !== 'object' ||
+    error.response === null ||
+    !('headers' in error.response)
+  ) {
+    return null;
+  }
+
+  return getHeaderValue(error.response.headers, name);
+}
+
+function isGraphQlRateLimitError(error: unknown): boolean {
+  if (
+    typeof error !== 'object' ||
+    error === null ||
+    !('errors' in error) ||
+    !Array.isArray(error.errors)
+  ) {
+    return false;
+  }
+
+  return error.errors.some((item) => {
+    if (typeof item !== 'object' || item === null) {
+      return false;
+    }
+
+    const type = 'type' in item ? item.type : null;
+    const extensions =
+      'extensions' in item &&
+      typeof item.extensions === 'object' &&
+      item.extensions !== null
+        ? item.extensions
+        : null;
+    const code = extensions && 'code' in extensions ? extensions.code : null;
+    return type === 'RATE_LIMITED' || code === 'RATE_LIMITED';
+  });
+}
+
+/** Returns a durable retry delay for GitHub primary or secondary rate limits. */
+export function getGitHubRateLimitRetryAfterMs(
+  error: unknown,
+  nowMs = Date.now(),
+): number | null {
+  if (typeof error !== 'object' || error === null) {
+    return null;
+  }
+
+  const status = 'status' in error ? Number(error.status) : null;
+  const graphQlRateLimited = isGraphQlRateLimitError(error);
+  if (status !== 403 && status !== 429 && !graphQlRateLimited) {
+    return null;
+  }
+
+  const retryAfter = getErrorHeader(error, 'retry-after');
+  const remaining = getErrorHeader(error, 'x-ratelimit-remaining');
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+  const isRateLimit =
+    graphQlRateLimited ||
+    status === 429 ||
+    retryAfter !== null ||
+    remaining === '0' ||
+    message.includes('api rate limit exceeded') ||
+    message.includes('secondary rate limit') ||
+    message.includes('abuse detection');
+
+  if (!isRateLimit) {
+    return null;
+  }
+
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    const retryAt = Date.parse(retryAfter);
+    const delayMs = Number.isFinite(seconds)
+      ? seconds * 1_000
+      : retryAt - nowMs;
+    if (Number.isFinite(delayMs) && delayMs > 0) {
+      return Math.min(delayMs, GITHUB_RATE_LIMIT_MAX_DEFER_MS);
+    }
+  }
+
+  const resetSeconds = Number(getErrorHeader(error, 'x-ratelimit-reset'));
+  if (Number.isFinite(resetSeconds) && resetSeconds > 0) {
+    const delayMs = resetSeconds * 1_000 - nowMs + 1_000;
+    if (delayMs > 0) {
+      return Math.min(delayMs, GITHUB_RATE_LIMIT_MAX_DEFER_MS);
+    }
+  }
+
+  return GITHUB_RATE_LIMIT_DEFAULT_DEFER_MS;
+}
+
+async function isGitHubRateLimitResponse(response: Response): Promise<boolean> {
+  if (response.status === 429) {
+    return true;
+  }
+
+  if (response.status !== 403) {
+    return false;
+  }
+
+  if (
+    getHeader(response, 'retry-after') !== null ||
+    getHeader(response, 'x-ratelimit-remaining') === '0'
+  ) {
+    return true;
+  }
+
+  const body = (await response.clone().text()).toLowerCase();
+  return (
+    body.includes('secondary rate limit') || body.includes('abuse detection')
+  );
+}
+
+function getGitHubRateLimitDelayMs(
+  response: Response,
+  retryNumber: number,
+): number {
+  const retryAfter = getHeader(response, 'retry-after');
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    const retryAt = Date.parse(retryAfter);
+    const delayMs = Number.isFinite(seconds)
+      ? seconds * 1_000
+      : retryAt - Date.now();
+
+    if (Number.isFinite(delayMs) && delayMs > 0) {
+      return Math.min(delayMs, GITHUB_RATE_LIMIT_MAX_DELAY_MS);
+    }
+  }
+
+  const resetSeconds = Number(getHeader(response, 'x-ratelimit-reset'));
+  if (Number.isFinite(resetSeconds) && resetSeconds > 0) {
+    // Give GitHub one second beyond the advertised epoch boundary.
+    const delayMs = resetSeconds * 1_000 - Date.now() + 1_000;
+    if (delayMs > 0) {
+      return Math.min(delayMs, GITHUB_RATE_LIMIT_MAX_DELAY_MS);
+    }
+  }
+
+  // GitHub advises pausing before retrying secondary limits when it omits an
+  // explicit delay. Use the request-safe ceiling rather than a tight loop.
+  if (response.status === 403) {
+    return GITHUB_RATE_LIMIT_MAX_DELAY_MS;
+  }
+
+  return Math.min(
+    GITHUB_RATE_LIMIT_FALLBACK_DELAY_MS * 2 ** retryNumber,
+    GITHUB_RATE_LIMIT_MAX_DELAY_MS,
+  );
+}
+
+function createGitHubRateLimitRetryFetch(): typeof fetch {
+  return async (input, init) => {
+    for (let retryNumber = 0; ; retryNumber++) {
+      const response = await globalThis.fetch(
+        input instanceof Request ? input.clone() : input,
+        init,
+      );
+      if (
+        retryNumber >= GITHUB_RATE_LIMIT_MAX_RETRIES ||
+        !(await isGitHubRateLimitResponse(response))
+      ) {
+        return response;
+      }
+
+      await response.body?.cancel();
+      await new Promise((resolve) =>
+        setTimeout(resolve, getGitHubRateLimitDelayMs(response, retryNumber)),
+      );
+    }
+  };
+}
+
 function createOctokit(
   options: ConstructorParameters<typeof Octokit>[0],
+  runtimeOptions: GitHubOctokitRuntimeOptions = {},
 ): Octokit {
   return new Octokit({
     ...options,
@@ -379,14 +594,19 @@ function createOctokit(
         'X-GitHub-Api-Version': '2022-11-28',
         ...(options?.request?.headers ?? {}),
       },
-      fetch: (input: RequestInfo | URL, init?: RequestInit) =>
-        globalThis.fetch(input, init),
+      fetch: runtimeOptions.retryRateLimits
+        ? createGitHubRateLimitRetryFetch()
+        : (input: RequestInfo | URL, init?: RequestInit) =>
+            globalThis.fetch(input, init),
     },
   });
 }
 
-export function getOctokit(auth: string): Octokit {
-  return createOctokit({ auth, userAgent: 'Roomote' });
+export function getOctokit(
+  auth: string,
+  runtimeOptions: GitHubOctokitRuntimeOptions = {},
+): Octokit {
+  return createOctokit({ auth, userAgent: 'Roomote' }, runtimeOptions);
 }
 
 /**

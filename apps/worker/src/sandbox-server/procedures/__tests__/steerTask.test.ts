@@ -9,11 +9,13 @@ const { mockPrepareActorScopedTurn } = vi.hoisted(() => ({
 const {
   mockFindFirstById,
   mockGetRoomoteConfig,
+  mockSuppressSlackReplyQuote,
   mockTrackSlackReplyQuote,
   mockClearSlackReplyQuote,
 } = vi.hoisted(() => ({
   mockFindFirstById: vi.fn(),
   mockGetRoomoteConfig: vi.fn(),
+  mockSuppressSlackReplyQuote: vi.fn(),
   mockTrackSlackReplyQuote: vi.fn(),
   mockClearSlackReplyQuote: vi.fn(),
 }));
@@ -53,6 +55,7 @@ vi.mock('../../../mcp/roomote-mcp-server/config', () => ({
 }));
 
 vi.mock('../../../mcp/roomote-mcp-server/slack-api-client', () => ({
+  suppressSlackReplyQuote: mockSuppressSlackReplyQuote,
   trackSlackReplyQuote: mockTrackSlackReplyQuote,
   clearSlackReplyQuote: mockClearSlackReplyQuote,
 }));
@@ -150,6 +153,10 @@ describe('steerTask procedure', () => {
       success: true,
       quoteId: 'quote-1',
     });
+    mockSuppressSlackReplyQuote.mockResolvedValue({
+      success: true,
+      quoteId: 'suppression-1',
+    });
     mockClearSlackReplyQuote.mockResolvedValue({ success: true });
   });
 
@@ -220,6 +227,36 @@ describe('steerTask procedure', () => {
     expect(sendFollowUpPrompt).toHaveBeenCalledWith({
       prompt: 'Steer this into the current turn',
       images: ['data:image/png;base64,abc'],
+      autoSteerWhenQueued: true,
+      userId: 'sender-user-1',
+    });
+  });
+
+  it('skips Slack reply quote tracking for orchestrated steers', async () => {
+    const { caller, sendFollowUpPrompt } = createCaller({
+      supportsNativeTurnSteering: true,
+    });
+
+    const result = await caller.commands.steerTask({
+      prompt: 'Continue the delegated task',
+      quoteText: 'Continue the delegated task',
+      suppressSlackReplyQuote: true,
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(mockTrackSlackReplyQuote).not.toHaveBeenCalled();
+    expect(mockSuppressSlackReplyQuote).toHaveBeenCalledWith(
+      {
+        token: 'run-token',
+        platformApiUrl: 'https://platform.example.com',
+      },
+      { runId: 1 },
+    );
+    expect(
+      mockSuppressSlackReplyQuote.mock.invocationCallOrder[0],
+    ).toBeLessThan(sendFollowUpPrompt.mock.invocationCallOrder[0]!);
+    expect(sendFollowUpPrompt).toHaveBeenCalledWith({
+      prompt: 'Continue the delegated task',
       autoSteerWhenQueued: true,
       userId: 'sender-user-1',
     });
@@ -360,6 +397,26 @@ describe('steerTask procedure', () => {
     // Tracked through an older API (no quoteId): the rollback stays pending
     // rather than risking an unscoped clear.
     expect(mockClearSlackReplyQuote).not.toHaveBeenCalled();
+  });
+
+  it('rolls back persisted quote suppression when an orchestrated steer cannot start', async () => {
+    const { caller } = createCaller({ sendFollowUpPrompt: () => false });
+
+    await expect(
+      caller.commands.steerTask({
+        prompt: 'Continue the delegated task',
+        quoteText: 'Continue the delegated task',
+        suppressSlackReplyQuote: true,
+      }),
+    ).rejects.toMatchObject({ code: 'INTERNAL_SERVER_ERROR' });
+
+    expect(mockClearSlackReplyQuote).toHaveBeenCalledWith(
+      {
+        token: 'run-token',
+        platformApiUrl: 'https://platform.example.com',
+      },
+      { runId: 1, quoteId: 'suppression-1' },
+    );
   });
 
   it('throws PRECONDITION_FAILED when the active turn cannot be interrupted', async () => {

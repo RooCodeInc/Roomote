@@ -555,7 +555,7 @@ async function createOrUpdateGitHubPullRequest({
     type: 'installationId',
     installationId: repository.installationId,
   });
-  const octokit = getOctokit(token);
+  const octokit = getOctokit(token, { retryRateLimits: true });
 
   const { data: existingPullRequests } = await octokit.rest.pulls.list({
     owner,

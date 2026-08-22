@@ -22,6 +22,7 @@ const {
   mockMigrateLegacy,
   mockRenewLease,
   mockEq,
+  MockPrReviewNotificationRateLimitError,
 } = vi.hoisted(() => ({
   mockFindFirstTaskRun: vi.fn(),
   mockFindFirstTaskPullRequest: vi.fn(),
@@ -44,6 +45,11 @@ const {
   mockMigrateLegacy: vi.fn(),
   mockRenewLease: vi.fn(),
   mockEq: vi.fn((...args: unknown[]) => ({ eq: args })),
+  MockPrReviewNotificationRateLimitError: class extends Error {
+    constructor(readonly retryAfterMs: number) {
+      super('GitHub installation API rate limited during PR review triage.');
+    }
+  },
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -89,6 +95,7 @@ vi.mock('@roomote/slack', async (importOriginal) => {
 vi.mock('@roomote/sdk/server', () => ({
   PR_REVIEW_NOTIFICATION_DEFER_MS: 5000,
   PR_REVIEW_NOTIFICATION_MAX_DEFERRALS: 3,
+  PrReviewNotificationRateLimitError: MockPrReviewNotificationRateLimitError,
   prReviewNotificationRequestSchema: z.object({
     taskId: z.string(),
     repository: z.string(),
@@ -899,6 +906,29 @@ describe('prReviewNotificationJob', () => {
       },
       events,
     });
+  });
+
+  it('durably defers installation rate limits without immediate job retry', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    mockPrepareDelivery.mockRejectedValue(
+      new MockPrReviewNotificationRateLimitError(900_000),
+    );
+    const job = makeJob({
+      deliveryIds: ['delivery-1'],
+      leaseToken: 'lease-1',
+      events,
+    });
+
+    await expect(
+      prReviewNotificationJob(job as never),
+    ).resolves.toBeUndefined();
+
+    expect(mockSchedule).toHaveBeenCalledWith({
+      request: job.data,
+      delayMs: 915_000,
+      countDeferral: false,
+    });
+    expect(mockRequeuePending).not.toHaveBeenCalled();
   });
 
   it('requeues drained events and rethrows when posting fails', async () => {

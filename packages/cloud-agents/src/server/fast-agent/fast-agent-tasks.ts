@@ -198,7 +198,7 @@ export async function sendFastAgentTaskMessage(
     ...context,
     method: 'POST',
     path: `${FAST_AGENT_TASKS_API_PATH}/${params.taskId}/steer_message`,
-    body: { message: params.message },
+    body: { message: params.message, senderMode: 'fast_agent' },
   });
 }
 

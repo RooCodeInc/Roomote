@@ -4,11 +4,13 @@ const {
   mockEnqueueTask,
   mockGetTaskChannelBindings,
   mockGetTaskGoalForRun,
+  mockGetRuntimeState,
   mockFindLatestTaskRun,
   mockFindReusableGitHubPrFollowUpOwner,
   mockHttpBatchLink,
   mockNotifyFastAgentParentOnPrFeedback,
   mockSendPromptMutate,
+  mockAnswerUserInputRequestMutate,
   mockSteerTaskMutate,
   mockTrackLatestUserMessageForReplyQuote,
   mockTrackLatestUserMessageForSlackQuote,
@@ -23,11 +25,13 @@ const {
   mockEnqueueTask: vi.fn(),
   mockGetTaskChannelBindings: vi.fn(),
   mockGetTaskGoalForRun: vi.fn(),
+  mockGetRuntimeState: vi.fn(),
   mockFindLatestTaskRun: vi.fn(),
   mockFindReusableGitHubPrFollowUpOwner: vi.fn(),
   mockHttpBatchLink: vi.fn((options) => options),
   mockNotifyFastAgentParentOnPrFeedback: vi.fn(),
   mockSendPromptMutate: vi.fn(),
+  mockAnswerUserInputRequestMutate: vi.fn(),
   mockSteerTaskMutate: vi.fn(),
   mockTrackLatestUserMessageForReplyQuote: vi.fn(),
   mockTrackLatestUserMessageForSlackQuote: vi.fn(),
@@ -191,6 +195,12 @@ describe('sendMessageToTask', () => {
     mockCreateRunToken.mockResolvedValue('run-token');
     mockCreateTRPCProxyClient.mockImplementation(() => ({
       commands: {
+        answerUserInputRequest: {
+          mutate: mockAnswerUserInputRequestMutate,
+        },
+        getRuntimeState: {
+          query: mockGetRuntimeState,
+        },
         sendPrompt: {
           mutate: mockSendPromptMutate,
         },
@@ -201,6 +211,8 @@ describe('sendMessageToTask', () => {
     }));
     mockHttpBatchLink.mockImplementation((options) => options);
     mockSendPromptMutate.mockResolvedValue({ ok: true });
+    mockAnswerUserInputRequestMutate.mockResolvedValue({ ok: true });
+    mockGetRuntimeState.mockResolvedValue({ pendingUserInputRequests: [] });
     mockSteerTaskMutate.mockResolvedValue({ ok: true });
     mockEnqueueTask.mockResolvedValue({ id: 77, taskId: 'task-1' });
     mockGetTaskChannelBindings.mockResolvedValue({
@@ -226,6 +238,97 @@ describe('sendMessageToTask', () => {
       name: 'Alice',
       email: 'alice@example.com',
     });
+  });
+
+  it('answers a pending Fast child input request with a custom text reply', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        payload: {
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'discord',
+              workspaceId: 'guild-1',
+              conversationId: 'channel-1:message-1',
+              replyTarget: { channelId: 'channel-1', threadId: 'message-1' },
+            },
+          },
+        },
+      }),
+    );
+    mockGetRuntimeState.mockResolvedValue({
+      pendingUserInputRequests: [
+        {
+          requestId: 'request-1',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          callId: 'call-1',
+          status: 'pending',
+          ts: 123,
+          questions: [
+            {
+              id: 'approach',
+              header: 'Approach',
+              question: 'Which approach should I use?',
+              isOther: true,
+              isSecret: false,
+              options: [
+                { label: 'Minimal', description: 'Make the smallest change.' },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Use a separate helper instead.',
+      senderMode: 'fast_agent',
+    });
+
+    expect(result).toEqual({ success: true, result: { ok: true } });
+    expect(mockAnswerUserInputRequestMutate).toHaveBeenCalledWith({
+      requestId: 'request-1',
+      answers: {
+        approach: { answers: ['Use a separate helper instead.'] },
+      },
+      suppressSlackReplyQuote: true,
+    });
+    expect(mockSteerTaskMutate).not.toHaveBeenCalled();
+  });
+
+  it('keeps steering Fast child messages when no input request is pending', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        payload: {
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'discord',
+              workspaceId: 'guild-1',
+              conversationId: 'channel-1:message-1',
+              replyTarget: { channelId: 'channel-1', threadId: 'message-1' },
+            },
+          },
+        },
+      }),
+    );
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Also add another test.',
+    });
+
+    expect(result).toEqual({ success: true, result: { ok: true } });
+    expect(mockGetRuntimeState).toHaveBeenCalledOnce();
+    expect(mockSteerTaskMutate).toHaveBeenCalledWith({
+      prompt: 'Also add another test.',
+      quoteText: 'Also add another test.',
+    });
+    expect(mockAnswerUserInputRequestMutate).not.toHaveBeenCalled();
   });
 
   it('delivers linked review results to the Fast parent without waking the implementation task', async () => {
@@ -832,6 +935,29 @@ describe('sendMessageToTask', () => {
     expect(mockSteerTaskMutate).toHaveBeenCalledWith({
       prompt: 'Pause the implementation and inspect the failing test.',
       quoteText: 'Pause the implementation and inspect the failing test.',
+    });
+  });
+
+  it('does not track or request Slack reply quotes for Fast-agent steers', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Continue the delegated task.',
+      senderMode: 'fast_agent',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: { ok: true },
+    });
+    expect(mockTrackLatestUserMessageForSlackQuote).not.toHaveBeenCalled();
+    expect(mockTrackLatestUserMessageForReplyQuote).not.toHaveBeenCalled();
+    expect(mockSteerTaskMutate).toHaveBeenCalledWith({
+      prompt: 'Continue the delegated task.',
+      quoteText: 'Continue the delegated task.',
+      suppressSlackReplyQuote: true,
     });
   });
 

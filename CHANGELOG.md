@@ -2,6 +2,27 @@
 
 This file tracks product releases for Roomote (single monorepo version). Automated release entries are prepended by `pnpm run version`.
 
+## 0.40.2 (2026-08-22)
+
+This patch improves Fast coordination, Slack task visibility, pull request review reliability, task feedback, and Brain preview operations.
+
+### Highlights
+
+- Configure a separate model and reasoning level for Fast orchestration.
+- Follow Fast-delegated Slack work through native streaming task cards and richer pull request updates.
+- Keep pull request review notifications and closeout work moving safely through GitHub API limits.
+- See renamed tasks immediately, get clearer billing pause guidance, and avoid empty Dependabot reports.
+
+### Patch changes
+
+- Explain when billing has paused new task launches and direct users to check billing across the web app and chat integrations.
+- Improve the Brain preview with truthful source and corpus status, full-corpus browsing, correct page metadata, more reliable Slack and GitHub ingestion, resilient nightly synthesis and fact extraction, and durable mirror credentials across redeploys.
+- Keep scheduled Dependabot triage quiet when a successful scan finds no open alerts or follow-up work.
+- Make Fast workflows easier to follow with native streaming Slack task cards, relayed coding progress, task-specific pull request updates, automated review feedback, terminal pull request status, actionable follow-up suggestions, and stronger recovery from long turns and transient provider failures.
+- Keep pull request review notifications and closeout work reliable under GitHub API limits by caching unchanged reads, deferring quota-limited work, and ignoring unrelated external bot activity.
+- Let deployment admins choose a separate model and reasoning level for Fast orchestration while keeping the coding model as the default fallback.
+- Refresh task lists and search results immediately after a task is renamed so the new title appears without reloading the page.
+
 ## 0.40.1 (2026-08-20)
 
 This patch improves Slack and self-hosted administration, fixes task and Discord delivery issues, and smooths PostgreSQL upgrades.

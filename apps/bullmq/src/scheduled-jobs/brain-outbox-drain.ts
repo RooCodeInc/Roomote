@@ -18,15 +18,18 @@ import {
   renameBrainSyncStateFamilyPrefix,
 } from '@roomote/db/server';
 import {
+  parseBrainToolPayloads,
   postBrainToolCall,
   resolveBrainInferenceProvider,
   resolveBrainConnection,
 } from '@roomote/sdk/server';
 import {
   BRAIN_COLLECTOR_IDS,
+  BRAIN_PAGE_TYPES,
+  RunStatus,
   brainNamespacePrefix,
   getLinkedEnvironmentIdFromPayload,
-  RunStatus,
+  renderBrainFrontmatter,
 } from '@roomote/types';
 
 import { runBrainCollectors } from './brain-collectors';
@@ -137,16 +140,29 @@ export async function callBrainWriteTool(
     );
   }
 
-  const failed = !ok || body.includes('"isError":true');
+  // Detect tool-level failure through the shared JSON-RPC parser rather than
+  // a substring match: the parser owns the envelope shape (including
+  // whitespace-tolerant isError detection) and error prose from the page body
+  // must never masquerade as failure classification.
+  let toolError: string | null = null;
 
-  if (failed && /embed\(|embedding/i.test(body)) {
+  try {
+    parseBrainToolPayloads(body, name);
+  } catch (error) {
+    toolError = error instanceof Error ? error.message : String(error);
+  }
+
+  const failed = !ok || toolError !== null;
+  const failureText = `${toolError ?? ''} ${body.slice(0, 300)}`;
+
+  if (failed && /embed\(|embedding/i.test(failureText)) {
     throw new BrainNotReadyError(
-      `gbrain ${name} could not embed: ${body.slice(0, 300)}`,
+      `gbrain ${name} could not embed: ${failureText.slice(0, 300)}`,
     );
   }
 
   if (failed) {
-    throw new Error(`gbrain ${name} failed: ${status} ${body.slice(0, 300)}`);
+    throw new Error(`gbrain ${name} failed: ${failureText.slice(0, 300)}`);
   }
 
   return body;
@@ -200,19 +216,28 @@ export function buildMemoryPage(input: {
   });
 
   const content = [
-    '---',
-    `roomote_task_id: ${input.taskId}`,
-    `roomote_run_id: ${input.runId}`,
-    // GBrain derives effective_date from this conventional field. Keep the
-    // full timestamp below as provenance, but make backfilled pages sort and
-    // filter by when the task completed rather than when it was ingested.
-    ...(completedDate ? [`date: ${completedDate}`] : []),
-    `completed_at: ${completed}`,
-    // Environment stamp: costs nothing now, enables environment-scoped
-    // retrieval (gbrain sources) or admin triage later without re-ingesting.
-    ...(input.environmentName ? [`environment: ${input.environmentName}`] : []),
-    'provenance: roomote-task-memory',
-    '---',
+    ...renderBrainFrontmatter({
+      type: BRAIN_PAGE_TYPES.taskMemory,
+      title: input.taskTitle,
+      // Legacy completed runs can lack a completion time; `completed` is the
+      // literal "unknown" then, which is no date at all.
+      created: completedAtIso ?? null,
+      fields: [
+        `roomote_task_id: ${input.taskId}`,
+        `roomote_run_id: ${input.runId}`,
+        // GBrain derives effective_date from this conventional field. Keep
+        // the full timestamp below as provenance, but make backfilled pages
+        // sort and filter by when the task completed rather than when it
+        // was ingested.
+        completedDate && `date: ${completedDate}`,
+        `completed_at: ${completed}`,
+        // Environment stamp: costs nothing now, enables environment-scoped
+        // retrieval (gbrain sources) or admin triage later without
+        // re-ingesting.
+        input.environmentName && `environment: ${input.environmentName}`,
+        'provenance: roomote-task-memory',
+      ],
+    }),
     '',
     `# ${input.taskTitle}`,
     '',
@@ -624,15 +649,20 @@ export function buildPullRequestFactPage(fact: {
   const occurredAt =
     fact.mergedAtRemote ?? fact.closedAtRemote ?? fact.createdAtRemote;
   const content = [
-    '---',
-    `event_date: ${occurredAt.toISOString().slice(0, 10)}`,
-    `repository: ${fact.repositoryFullName}`,
-    `pr_number: ${fact.prNumber}`,
-    `state: ${fact.state}`,
-    ...(fact.authorLogin ? [`author: ${fact.authorLogin}`] : []),
-    ...(merged ? [`merged_at: ${merged}`] : []),
-    'provenance: roomote-pull-requests',
-    '---',
+    ...renderBrainFrontmatter({
+      type: BRAIN_PAGE_TYPES.pullRequest,
+      title: `${fact.repositoryFullName}#${fact.prNumber}: ${fact.title}`,
+      created: fact.createdAtRemote,
+      fields: [
+        `event_date: ${occurredAt.toISOString().slice(0, 10)}`,
+        `repository: ${fact.repositoryFullName}`,
+        `pr_number: ${fact.prNumber}`,
+        `state: ${fact.state}`,
+        fact.authorLogin && `author: ${fact.authorLogin}`,
+        merged && `merged_at: ${merged}`,
+        'provenance: roomote-pull-requests',
+      ],
+    }),
     '',
     `# ${fact.repositoryFullName}#${fact.prNumber}: ${fact.title}`,
     '',

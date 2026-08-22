@@ -10,7 +10,12 @@ import {
   repositories,
 } from '@roomote/db/server';
 import { getInstallationOctokit } from '@roomote/github';
-import { BRAIN_COLLECTOR_IDS, brainNamespacePrefix } from '@roomote/types';
+import {
+  BRAIN_COLLECTOR_IDS,
+  BRAIN_PAGE_TYPES,
+  brainNamespacePrefix,
+  renderBrainFrontmatter,
+} from '@roomote/types';
 
 /**
  * GitHub issues as Brain memory: the discussion around bugs, features, and
@@ -230,18 +235,23 @@ export function buildGithubIssuePage(input: {
   });
 
   const content = [
-    '---',
-    ...(effectiveDate ? [`event_date: ${effectiveDate}`] : []),
-    `repository: ${fullName}`,
-    `issue_number: ${issue.number}`,
-    `state: ${issue.state ?? 'unknown'}`,
-    ...(issue.user?.login ? [`author: ${issue.user.login}`] : []),
-    ...(labels.length > 0 ? [`labels: ${labels.join(', ')}`] : []),
-    ...(issue.created_at ? [`created_at: ${issue.created_at}`] : []),
-    ...(issue.updated_at ? [`updated_at: ${issue.updated_at}`] : []),
-    ...(issue.closed_at ? [`closed_at: ${issue.closed_at}`] : []),
-    'provenance: roomote-github-issues',
-    '---',
+    ...renderBrainFrontmatter({
+      type: BRAIN_PAGE_TYPES.githubIssue,
+      title: `${fullName}#${issue.number}: ${issue.title}`,
+      created: issue.created_at ?? effectiveDate ?? null,
+      fields: [
+        effectiveDate && `event_date: ${effectiveDate}`,
+        `repository: ${fullName}`,
+        `issue_number: ${issue.number}`,
+        `state: ${issue.state ?? 'unknown'}`,
+        issue.user?.login && `author: ${issue.user.login}`,
+        labels.length > 0 && `labels: ${labels.join(', ')}`,
+        issue.created_at && `created_at: ${issue.created_at}`,
+        issue.updated_at && `updated_at: ${issue.updated_at}`,
+        issue.closed_at && `closed_at: ${issue.closed_at}`,
+        'provenance: roomote-github-issues',
+      ],
+    }),
     '',
     `# ${fullName}#${issue.number}: ${issue.title}`,
     '',

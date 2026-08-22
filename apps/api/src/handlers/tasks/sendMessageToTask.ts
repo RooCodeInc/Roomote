@@ -31,6 +31,7 @@ import {
   isLinkedReviewResultsMessage,
   isExitedRunStatus,
   isSnapshotResumable,
+  parseAcpRequestUserInputAnswerReply,
   parseLinkedReviewResults,
   populateSnapshotResumeCommunicationMetadata,
   populateSnapshotResumeSlackMetadata,
@@ -60,6 +61,7 @@ const REVIEW_HANDOFF_TASK_TYPES = new Set<TaskPayloadKind>([
 type SendMessageErrorStatus = 404 | 409 | 500 | 502;
 export type SendMessageSenderMode =
   | 'authenticated_user'
+  | 'fast_agent'
   | 'linked_review_handoff'
   | 'github_pr_follow_up';
 
@@ -77,6 +79,7 @@ const ACTOR_PRESERVING_MODES = new Set<SendMessageSenderMode>([
 ]);
 
 const SLACK_REPLY_QUOTE_SUPPRESSING_MODES = new Set<SendMessageSenderMode>([
+  'fast_agent',
   'linked_review_handoff',
   'github_pr_follow_up',
 ]);
@@ -1199,12 +1202,43 @@ export async function steerMessageToTask({
         sandboxServerUrl: run.sandboxServerUrl,
         fetch: fetchSandboxRpcResponseOrThrowIfNotReady,
         call: async (client) => {
+          if (getFastAgentParentFromPayload(run.payload)) {
+            const runtimeState = await client.commands.getRuntimeState.query();
+            const [pendingRequest] = runtimeState.pendingUserInputRequests;
+
+            if (
+              pendingRequest &&
+              runtimeState.pendingUserInputRequests.length === 1
+            ) {
+              const answer = parseAcpRequestUserInputAnswerReply(
+                pendingRequest.questions,
+                message,
+              );
+
+              if (answer) {
+                return client.commands.answerUserInputRequest.mutate({
+                  requestId: pendingRequest.requestId,
+                  answers: answer.answers,
+                  ...(resolvedQuoteUserName
+                    ? { userName: resolvedQuoteUserName }
+                    : {}),
+                  ...(senderMode === 'fast_agent'
+                    ? { suppressSlackReplyQuote: true }
+                    : {}),
+                });
+              }
+            }
+          }
+
           const goal = await getTaskGoalForRun(run.id);
           return client.commands.steerTask.mutate({
             prompt: message,
             quoteText,
             ...(resolvedQuoteUserName
               ? { userName: resolvedQuoteUserName }
+              : {}),
+            ...(senderMode === 'fast_agent'
+              ? { suppressSlackReplyQuote: true }
               : {}),
             ...(images?.length ? { images } : {}),
             ...(goal?.status === 'active' ? { goalContext: goal } : {}),

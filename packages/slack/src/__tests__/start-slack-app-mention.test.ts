@@ -123,6 +123,34 @@ describe('startSlackAppMentionTask', () => {
     );
   });
 
+  it('runs a surface hook before dispatching a fresh task run', async () => {
+    const beforeTaskRunDispatch = vi.fn();
+    enqueueTaskMock.mockImplementationOnce(async (_input, options) => {
+      await options.beforeEnqueue({ id: 42, taskId: 'task_123' });
+      return { id: 42, taskId: 'task_123' };
+    });
+    const { startSlackAppMentionTask } =
+      await import('../start-slack-app-mention');
+
+    await startSlackAppMentionTask({
+      initiator: { kind: 'user', userId: 'user_123' },
+      trigger: 'message',
+      channel: 'C123',
+      teamId: 'T123',
+      slackUserId: 'U123',
+      text: 'hello',
+      ts: '111.000',
+      threadTs: '111.000',
+      repo: 'owner/repo',
+      beforeTaskRunDispatch,
+    });
+
+    expect(beforeTaskRunDispatch).toHaveBeenCalledWith({
+      id: 42,
+      taskId: 'task_123',
+    });
+  });
+
   it('persists an exact Slack conversation permalink onto a reused active task run', async () => {
     findActiveSlackTaskRunMock.mockResolvedValueOnce({
       id: 99,
@@ -212,6 +240,42 @@ describe('startSlackAppMentionTask', () => {
       expect.objectContaining({
         text: 'hello again',
       }),
+    );
+  });
+
+  it('runs a surface hook before dispatching an active-task follow-up', async () => {
+    findActiveSlackTaskRunMock.mockResolvedValueOnce({
+      id: 99,
+      taskId: 'task_existing',
+      payload: {
+        channel: 'C123',
+        text: 'earlier text',
+        thread_ts: '111.000',
+      },
+    });
+    const beforeTaskRunDispatch = vi.fn();
+    const { startSlackAppMentionTask } =
+      await import('../start-slack-app-mention');
+
+    await startSlackAppMentionTask({
+      initiator: { kind: 'user', userId: 'user_123' },
+      trigger: 'message',
+      channel: 'C123',
+      teamId: 'T123',
+      slackUserId: 'U123',
+      text: 'hello again',
+      ts: '111.001',
+      threadTs: '111.000',
+      repo: 'owner/repo',
+      beforeTaskRunDispatch,
+    });
+
+    expect(beforeTaskRunDispatch).toHaveBeenCalledWith({
+      id: 99,
+      taskId: 'task_existing',
+    });
+    expect(beforeTaskRunDispatch.mock.invocationCallOrder[0]).toBeLessThan(
+      queueSlackMessageMock.mock.invocationCallOrder[0]!,
     );
   });
 });

@@ -57,6 +57,8 @@ import { formatMetadataSummary } from './model-metadata';
 import {
   CHATGPT_SUBSCRIPTION_PROVIDER_ID,
   DEFAULT_MODEL_ROLE_REASONING_EFFORTS,
+  TASK_MODEL_ROLE_DESCRIPTORS,
+  TASK_MODEL_ROLES,
   XAI_SUBSCRIPTION_PROVIDER_ID,
   buildRecommendedDeploymentModelConfig,
   getRecommendedModelPresets,
@@ -99,15 +101,6 @@ type TaskModelSuggestion = {
   displayName: string;
 };
 
-type TaskModelRuntimeKey =
-  | 'codingModel'
-  | 'orchestrationModel'
-  | 'helperModel'
-  | 'visionModel'
-  | 'codeReviewModel'
-  | 'exploreModel'
-  | 'planningModel';
-
 type ModelSettingsSectionDraft = {
   models: EditableTaskModel[];
   enabledModelIds: string[];
@@ -124,11 +117,8 @@ type TaskModelRoleConfig = {
   label: string;
   description: string;
   icon: LucideIcon;
-  modelEnvVarName: string;
-  reasoningEnvVarName: string;
   placeholder: string;
   reasoningAriaLabel: string;
-  allowSameAsCoding: boolean;
 };
 
 const SAME_AS_CODING_MODEL_VALUE = '__same_as_coding_model__';
@@ -153,34 +143,10 @@ function useDebouncedValue<T>(value: T, delayMs: number) {
   return debouncedValue;
 }
 
-const TASK_MODEL_ROLE_ORDER = [
-  'coding',
-  'orchestration',
-  'helper',
-  'vision',
-  'codeReview',
-  'explore',
-  'planning',
-] as const satisfies readonly TaskModelRole[];
-
-const SECONDARY_TASK_MODEL_ROLES = [
-  'orchestration',
-  'helper',
-  'vision',
-  'codeReview',
-  'explore',
-  'planning',
-] as const satisfies readonly TaskModelRole[];
-
-const TASK_MODEL_ROLE_RUNTIME_KEYS = {
-  coding: 'codingModel',
-  orchestration: 'orchestrationModel',
-  helper: 'helperModel',
-  vision: 'visionModel',
-  codeReview: 'codeReviewModel',
-  explore: 'exploreModel',
-  planning: 'planningModel',
-} as const satisfies Record<TaskModelRole, TaskModelRuntimeKey>;
+const TASK_MODEL_ROLE_ORDER = TASK_MODEL_ROLES;
+const SECONDARY_TASK_MODEL_ROLES = TASK_MODEL_ROLES.filter(
+  (role) => TASK_MODEL_ROLE_DESCRIPTORS[role].modelFallback === 'coding',
+);
 
 const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
   {
@@ -189,11 +155,8 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
     description:
       'Used for new task launches and persisted runtime coding model config.',
     icon: Code2,
-    modelEnvVarName: 'R_MODEL',
-    reasoningEnvVarName: 'R_MODEL_REASONING_EFFORT',
     placeholder: 'Select a default coding model',
     reasoningAriaLabel: 'Default coding model reasoning level',
-    allowSameAsCoding: false,
   },
   {
     role: 'orchestration',
@@ -201,11 +164,8 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
     description:
       'Used by the fast orchestrator to answer requests and coordinate task launches.',
     icon: Brain,
-    modelEnvVarName: 'R_ORCHESTRATION_MODEL',
-    reasoningEnvVarName: 'R_ORCHESTRATION_MODEL_REASONING_EFFORT',
     placeholder: 'Select an orchestration model',
     reasoningAriaLabel: 'Orchestration model reasoning level',
-    allowSameAsCoding: true,
   },
   {
     role: 'helper',
@@ -213,11 +173,8 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
     description:
       'Used for non-task calls such as routing, titles, and summaries.',
     icon: HandHelping,
-    modelEnvVarName: 'R_SMALL_MODEL',
-    reasoningEnvVarName: 'R_SMALL_MODEL_REASONING_EFFORT',
     placeholder: 'Select a helper model',
     reasoningAriaLabel: 'Helper model reasoning level',
-    allowSameAsCoding: true,
   },
   {
     role: 'vision',
@@ -225,11 +182,8 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
     description:
       'Used for image understanding and visual information extraction.',
     icon: Eye,
-    modelEnvVarName: 'R_VISION_MODEL',
-    reasoningEnvVarName: 'R_VISION_MODEL_REASONING_EFFORT',
     placeholder: 'Select a vision model',
     reasoningAriaLabel: 'Vision model reasoning level',
-    allowSameAsCoding: true,
   },
   {
     role: 'codeReview',
@@ -237,11 +191,8 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
     description:
       'Used for pull request review, implementation judge passes, issue triage, and code-focused analysis.',
     icon: GitPullRequest,
-    modelEnvVarName: 'R_CODE_REVIEW_MODEL',
-    reasoningEnvVarName: 'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
     placeholder: 'Select a code review model',
     reasoningAriaLabel: 'Code review model reasoning level',
-    allowSameAsCoding: true,
   },
   {
     role: 'explore',
@@ -249,11 +200,8 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
     description:
       'Used for read-only codebase exploration and investigation through the explore subagent.',
     icon: ScanSearch,
-    modelEnvVarName: 'R_EXPLORE_MODEL',
-    reasoningEnvVarName: 'R_EXPLORE_MODEL_REASONING_EFFORT',
     placeholder: 'Select an explore model',
     reasoningAriaLabel: 'Explore model reasoning level',
-    allowSameAsCoding: true,
   },
   {
     role: 'planning',
@@ -261,11 +209,8 @@ const TASK_MODEL_ROLE_CONFIGS: readonly TaskModelRoleConfig[] = [
     description:
       'Used for plan-mode turns in the planning workflow and for the advisor subagent that coding tasks consult when they need help.',
     icon: Lightbulb,
-    modelEnvVarName: 'R_PLANNING_MODEL',
-    reasoningEnvVarName: 'R_PLANNING_MODEL_REASONING_EFFORT',
     placeholder: 'Select an advisor model',
     reasoningAriaLabel: 'Advisor model reasoning level',
-    allowSameAsCoding: true,
   },
 ];
 
@@ -291,18 +236,19 @@ function TaskModelRoleEditor({
   onReasoningChange: (value: ReasoningEffort | null) => void;
 }) {
   const Icon = config.icon;
+  const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[config.role];
   const lockLabel =
     managedByEnv && reasoningManagedByEnv
       ? `${config.label} and reasoning are managed by env vars`
       : managedByEnv
-        ? `${config.label} is managed by ${config.modelEnvVarName}`
-        : `${config.label} reasoning is managed by ${config.reasoningEnvVarName}`;
+        ? `${config.label} is managed by ${descriptor.modelEnvVar}`
+        : `${config.label} reasoning is managed by ${descriptor.reasoningEnvVar}`;
   const lockTooltip =
     managedByEnv && reasoningManagedByEnv
-      ? `Set by ${config.modelEnvVarName} and ${config.reasoningEnvVarName}, not changeable in the UI.`
+      ? `Set by ${descriptor.modelEnvVar} and ${descriptor.reasoningEnvVar}, not changeable in the UI.`
       : managedByEnv
-        ? `Set by ${config.modelEnvVarName}, not changeable in the UI.`
-        : `Set by ${config.reasoningEnvVarName}, not changeable in the UI.`;
+        ? `Set by ${descriptor.modelEnvVar}, not changeable in the UI.`
+        : `Set by ${descriptor.reasoningEnvVar}, not changeable in the UI.`;
   const showProviderHeaders = optionGroups.length > 1;
 
   return (
@@ -335,7 +281,7 @@ function TaskModelRoleEditor({
               <SelectValue placeholder={config.placeholder} />
             </SelectTrigger>
             <SelectContent>
-              {config.allowSameAsCoding && (
+              {descriptor.modelFallback === 'coding' && (
                 <SelectItem value={SAME_AS_CODING_MODEL_VALUE}>
                   Same as coding model
                 </SelectItem>
@@ -1100,7 +1046,9 @@ export function ModelSettingsSection({
 
     for (const role of SECONDARY_TASK_MODEL_ROLES) {
       const status =
-        settingsData?.runtimeModels[TASK_MODEL_ROLE_RUNTIME_KEYS[role]];
+        settingsData?.runtimeModels[
+          TASK_MODEL_ROLE_DESCRIPTORS[role].runtimeStatusKey
+        ];
 
       if (status?.managedByEnv) {
         appendEffectiveModel(status.effectiveModelId);
@@ -1145,7 +1093,9 @@ export function ModelSettingsSection({
   const roleSelectValues = TASK_MODEL_ROLE_ORDER.reduce(
     (values, role) => {
       const status =
-        settingsData?.runtimeModels[TASK_MODEL_ROLE_RUNTIME_KEYS[role]];
+        settingsData?.runtimeModels[
+          TASK_MODEL_ROLE_DESCRIPTORS[role].runtimeStatusKey
+        ];
       const fallbackValue = role === 'coding' ? '' : SAME_AS_CODING_MODEL_VALUE;
 
       values[role] = status?.managedByEnv
@@ -1174,7 +1124,9 @@ export function ModelSettingsSection({
   const resolvedModelIds = TASK_MODEL_ROLE_ORDER.reduce(
     (resolved, role) => {
       const status =
-        settingsData?.runtimeModels[TASK_MODEL_ROLE_RUNTIME_KEYS[role]];
+        settingsData?.runtimeModels[
+          TASK_MODEL_ROLE_DESCRIPTORS[role].runtimeStatusKey
+        ];
 
       if (role === 'coding') {
         resolved.coding = status?.managedByEnv
@@ -1641,7 +1593,9 @@ export function ModelSettingsSection({
 
     for (const role of TASK_MODEL_ROLE_ORDER) {
       const status =
-        settingsData?.runtimeModels[TASK_MODEL_ROLE_RUNTIME_KEYS[role]];
+        settingsData?.runtimeModels[
+          TASK_MODEL_ROLE_DESCRIPTORS[role].runtimeStatusKey
+        ];
 
       nextRoles[role] = {
         modelId: status?.managedByEnv
@@ -1677,7 +1631,7 @@ export function ModelSettingsSection({
         return TASK_MODEL_ROLE_CONFIGS.map((config) => {
           const status =
             settingsData?.runtimeModels[
-              TASK_MODEL_ROLE_RUNTIME_KEYS[config.role]
+              TASK_MODEL_ROLE_DESCRIPTORS[config.role].runtimeStatusKey
             ];
           const managedByEnv = status?.managedByEnv ?? false;
           const codingModelId = settingsData?.runtimeModels.codingModel
@@ -1760,7 +1714,7 @@ export function ModelSettingsSection({
           {TASK_MODEL_ROLE_CONFIGS.map((config) => {
             const status =
               settingsData.runtimeModels[
-                TASK_MODEL_ROLE_RUNTIME_KEYS[config.role]
+                TASK_MODEL_ROLE_DESCRIPTORS[config.role].runtimeStatusKey
               ];
 
             return (
@@ -1776,8 +1730,8 @@ export function ModelSettingsSection({
                 onModelChange={(value) =>
                   updateRoleModel(
                     config.role,
-                    config.allowSameAsCoding &&
-                      value === SAME_AS_CODING_MODEL_VALUE
+                    TASK_MODEL_ROLE_DESCRIPTORS[config.role].modelFallback ===
+                      'coding' && value === SAME_AS_CODING_MODEL_VALUE
                       ? null
                       : value,
                   )
@@ -1823,10 +1777,10 @@ export function ModelSettingsSection({
                       <span className="truncate">{displayName}</span>
                       {managedByEnv && (
                         <BasicTooltip
-                          content={`Managed by ${config.modelEnvVarName}; this preset will leave it unchanged.`}
+                          content={`Managed by ${TASK_MODEL_ROLE_DESCRIPTORS[config.role].modelEnvVar}; this preset will leave it unchanged.`}
                         >
                           <Lock
-                            aria-label={`${config.label} is managed by ${config.modelEnvVarName}`}
+                            aria-label={`${config.label} is managed by ${TASK_MODEL_ROLE_DESCRIPTORS[config.role].modelEnvVar}`}
                             className="size-3.5 shrink-0"
                           />
                         </BasicTooltip>
