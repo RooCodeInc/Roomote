@@ -118,6 +118,39 @@ const centerNorm = (r) => ({
   y: (r.y + r.h / 2) / VIEWPORT.h,
 });
 
+// Full normalized bounding box — the anchor for annotations. Resolved AFTER
+// the beat's scroll settles, because rects are viewport-relative: an anchor
+// is only valid for the scroll position it was measured at, which is why
+// annotations live strictly inside their beat's window.
+const boxNorm = (r) => ({
+  x: r.x / VIEWPORT.w,
+  y: r.y / VIEWPORT.h,
+  w: r.w / VIEWPORT.w,
+  h: r.h / VIEWPORT.h,
+});
+
+// Tight content rect for annotation anchors. Block elements (headings,
+// paragraphs) report full-column boxes with dead space past the text; a
+// Range over the contents hugs what the viewer actually reads. Falls back
+// to the element box for empty/replaced elements.
+function tightRect(sel) {
+  const selB64 = Buffer.from(String(sel), 'utf8').toString('base64');
+  if (!/^[A-Za-z0-9+/=]*$/.test(selB64)) {
+    throw new Error(`unencodable selector: ${sel}`);
+  }
+  const js =
+    `(function(){var e=document.querySelector(atob("${selB64}"));` +
+    `if(!e)return null;var r=e.getBoundingClientRect();` +
+    `try{var g=document.createRange();g.selectNodeContents(e);` +
+    `var t=g.getBoundingClientRect();` +
+    `if(t&&t.width>1&&t.height>1)r=t;}catch(_){}` +
+    `return{x:r.x,y:r.y,w:r.width,h:r.height};})()`;
+  const out = ab('eval', js).trim();
+  const r = JSON.parse(out);
+  if (!r) throw new Error(`element not found: ${sel}`);
+  return r;
+}
+
 const timeline = {
   video: { path: 'recording.mp4', width: VIEWPORT.w, height: VIEWPORT.h },
   fps: 30,
@@ -125,6 +158,7 @@ const timeline = {
   cursorKeys: [{ t: 0, v: { x: 0.5, y: 1.1 } }],
   clicks: [],
   captions: [],
+  annotations: [],
   // Optional declarative caption styling from the demo script (position,
   // accent, pill, sizeScale); the renderer merges it over preset defaults.
   ...(script.captionStyle ? { captionStyle: script.captionStyle } : {}),
@@ -195,6 +229,23 @@ async function run() {
       sleep(beat.settleMs ?? 600); // scroll settles on screen
       const settled = now();
 
+      // `note` rides the beat: a highlight box (plus optional label chip)
+      // anchored to the beat's own element, shown for the beat's caption
+      // window. One per beat — it is a clarity device, not a diagram.
+      const noteBox = beat.note
+        ? boxNorm(tightRect(beat.note.sel ?? beat.sel))
+        : null;
+      const pushNote = (start, end) => {
+        if (!noteBox) return;
+        timeline.annotations.push({
+          start: Math.round(start * 1000) / 1000,
+          end: Math.round(end * 1000) / 1000,
+          box: noteBox,
+          ...(beat.note.text ? { text: beat.note.text } : {}),
+          style: beat.note.style ?? 'spotlight',
+        });
+      };
+
       if (beat.caption) {
         const lineSeconds = narration
           ? narration.clips[lineIndex].durationSeconds
@@ -215,10 +266,19 @@ async function run() {
         }
         lineIndex += 1;
 
+        // The note breathes with the caption: appears a beat after the line
+        // starts (the voice names the subject, then the box lands on it).
+        pushNote(lineStart + 0.35, lineEnd + 0.25);
+
         const holdSeconds = Math.max(0.5, lineEnd + LINE_GAP - now());
         sleep(holdSeconds * 1000);
       } else {
-        sleep(beat.holdMs ?? 900);
+        const holdMs = beat.holdMs ?? 900;
+        // End AT the hold boundary: the next beat may scroll immediately,
+        // and the anchor is only valid for this scroll position. The
+        // renderer's 0.35s fade-out completes inside the hold.
+        pushNote(settled + 0.15, settled + holdMs / 1000);
+        sleep(holdMs);
       }
       continue;
     }
