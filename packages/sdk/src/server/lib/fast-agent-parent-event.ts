@@ -555,6 +555,8 @@ export async function deliverFastAgentParentEvent(params: {
       conversation: parentTurn.conversation,
       signal: releaseTurnLock.signal,
       turnSource: 'platform_event',
+      platformEventVisibility:
+        params.event.type === 'pull_request_feedback' ? 'required' : 'optional',
       adapter: {
         ...parentTurn.adapter,
         ...(params.retryTaskStart

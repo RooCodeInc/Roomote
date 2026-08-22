@@ -1,6 +1,9 @@
 import { z } from 'zod';
 
-import { matchesRoomoteGitHubLogin } from '@roomote/types';
+import {
+  getRoomoteManagedGitHubLogins,
+  matchesRoomoteGitHubLogin,
+} from '@roomote/types';
 
 import { getEffectiveGitHubAppSlugs } from './app-slug';
 
@@ -125,6 +128,9 @@ export const isRoomoteGitHubLogin = (login: string) =>
   getEffectiveGitHubAppSlugs().some((slug) =>
     matchesRoomoteGitHubLogin(login, slug),
   );
+
+/** Exact managed-app identity check for security-sensitive allowlists. */
+export const isManagedRoomoteGitHubLogin = isRoomoteGitHubLogin;
 
 export const isRoomoteCommentAuthor = (user: { login: string; type: string }) =>
   isRoomoteGitHubLogin(user.login);

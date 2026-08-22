@@ -645,6 +645,36 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).not.toHaveBeenCalled();
   });
 
+  it('posts a closeout when a visibility-required event tries to ignore itself', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        expect(
+          await invokeTool(nativeToolNames.ignoreEvent, {
+            reason: 'duplicate',
+          }),
+        ).toEqual({
+          success: false,
+          error: 'This platform event requires a user-visible closeout.',
+        });
+        return 'There is new pull request feedback to review.';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      turnSource: 'platform_event',
+      platformEventVisibility: 'required',
+      adapter,
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'There is new pull request feedback to review.',
+    });
+  });
+
   it('retries eligible task startup through a native tool', async () => {
     const retryTaskStart = vi.fn().mockResolvedValue({
       success: true,

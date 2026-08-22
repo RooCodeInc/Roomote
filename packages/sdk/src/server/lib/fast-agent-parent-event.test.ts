@@ -531,6 +531,7 @@ describe('deliverFastAgentParentEvent', () => {
       expect.objectContaining({
         question: expect.stringContaining('"type":"pull_request_feedback"'),
         turnSource: 'platform_event',
+        platformEventVisibility: 'required',
       }),
     );
     expect(mocks.postMessage).toHaveBeenCalledWith(

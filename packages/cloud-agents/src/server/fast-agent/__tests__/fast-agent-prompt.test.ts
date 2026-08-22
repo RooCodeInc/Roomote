@@ -168,7 +168,24 @@ describe('buildFastAgentSystemPrompt', () => {
       'Pull-request-status-changed events contain an authoritative merged or closed status',
     );
     expect(prompt).toContain(
+      'Pull-request-feedback events contain triaged feedback',
+    );
+    expect(prompt).toContain(
       'Do not describe a closed pull request as merged or a merged pull request as merely closed',
+    );
+  });
+
+  it('requires a visible closeout for visibility-required platform events', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventVisibility: 'required',
+    });
+
+    expect(prompt).toContain('requires a user-visible closeout');
+    expect(prompt).toContain('Do not call "ignore_event"');
+    expect(prompt).not.toContain(
+      'Call "ignore_event" when it is routine, redundant, or not worth interrupting the user',
     );
   });
 

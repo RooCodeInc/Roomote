@@ -53,6 +53,7 @@ import { getFastAgentUserIdentity } from './fast-agent-user-identity';
 import { FastAgentTurnDiagnostics } from './fast-agent-turn-diagnostics';
 import {
   type FastAgentConversation,
+  type FastAgentPlatformEventVisibility,
   type FastAgentReply,
   type FastAgentTurnAdapter,
   type FastAgentTurnSource,
@@ -484,6 +485,7 @@ export async function answerFastAgentQuestion({
   adapter,
   signal,
   turnSource = 'human',
+  platformEventVisibility = 'optional',
 }: {
   question: string;
   images?: string[];
@@ -499,6 +501,7 @@ export async function answerFastAgentQuestion({
   adapter: FastAgentTurnAdapter;
   signal?: AbortSignal;
   turnSource?: FastAgentTurnSource;
+  platformEventVisibility?: FastAgentPlatformEventVisibility;
 }): Promise<string> {
   const diagnostics = new FastAgentTurnDiagnostics({
     conversation,
@@ -568,6 +571,7 @@ export async function answerFastAgentQuestion({
       activeTasks: resolvedActiveTasks,
       surface: conversation.surface,
       turnSource,
+      platformEventVisibility,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
     });
     const integrationCallSignatures = new Set<string>();
@@ -907,6 +911,12 @@ export async function answerFastAgentQuestion({
               return {
                 success: false,
                 error: 'Only a platform event can be ignored.',
+              };
+            }
+            if (platformEventVisibility === 'required') {
+              return {
+                success: false,
+                error: 'This platform event requires a user-visible closeout.',
               };
             }
             closed = true;

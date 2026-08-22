@@ -414,6 +414,36 @@ describe('buildPrReviewActivityNotificationInput', () => {
     });
   });
 
+  it('keeps review threads from a hosted sibling Roomote deployment', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        reviewCommentPayload({
+          login: 'roomote-community[bot]',
+          userId: 9002,
+          userType: 'Bot',
+        }),
+      ),
+    ).toMatchObject({
+      event: {
+        kind: 'review_comment',
+        authorLogin: 'roomote-community[bot]',
+        roomoteAuthored: true,
+      },
+    });
+  });
+
+  it('skips review threads from an untrusted roomote-prefixed bot', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        reviewCommentPayload({
+          login: 'roomote-unknown[bot]',
+          userId: 9003,
+          userType: 'Bot',
+        }),
+      ),
+    ).toBeNull();
+  });
+
   it('skips Roomote-authored replies to existing review threads', () => {
     expect(
       buildPrReviewActivityNotificationInput(
