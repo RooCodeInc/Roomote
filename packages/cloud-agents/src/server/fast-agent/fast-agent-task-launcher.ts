@@ -19,6 +19,8 @@ export type FastAgentTaskLaunchHooks = {
     taskRun: { id: number; taskId: string },
     context: { prompt: string; taskUrl: string },
   ) => Promise<void>;
+  /** Runs when queueing fails after afterKickoff completed. */
+  onQueueFailure?: (taskRun: { id: number; taskId: string }) => Promise<void>;
   /** The launcher renders the task link itself (for example on a card), so
    * the parent kickoff message should not include one. */
   rendersTaskLink?: boolean;
@@ -43,6 +45,8 @@ export function createFastAgentTaskLauncher(
       parentSessionId,
     });
     let taskUrl: string | undefined;
+    let preparedTaskRun: { id: number; taskId: string } | undefined;
+
     const launch = await enqueueTask(
       {
         task,
@@ -70,9 +74,21 @@ export function createFastAgentTaskLauncher(
             { id: taskRun.id, taskId: taskRun.taskId },
             { prompt, taskUrl: resolvedTaskUrl },
           );
+          preparedTaskRun = { id: taskRun.id, taskId: taskRun.taskId };
         },
       },
-    );
+    ).catch(async (error: unknown) => {
+      if (preparedTaskRun && params.onQueueFailure) {
+        try {
+          await params.onQueueFailure(preparedTaskRun);
+        } catch (settleError) {
+          console.error(
+            `[Fast Agent] Failed to settle task ${preparedTaskRun.taskId} after queueing failed: ${settleError instanceof Error ? settleError.message : String(settleError)}`,
+          );
+        }
+      }
+      throw error;
+    });
 
     if (!launch.taskId) {
       return {
@@ -104,6 +120,7 @@ export function createFastAgentSlackTaskLauncher(
     surface: 'slack',
     taskUrlCampaign: 'fast-delegation',
     afterKickoff: params.afterKickoff,
+    onQueueFailure: params.onQueueFailure,
     rendersTaskLink: params.rendersTaskLink,
     buildTask: ({ prompt, environmentId, parentSessionId }) => ({
       type: TaskPayloadKind.StandardTask,

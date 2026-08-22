@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   postMessage: vi.fn(),
   postMessageDetailed: vi.fn(),
   updateMessage: vi.fn(),
+  settleSlackLiveTaskCardForRun: vi.fn(),
 }));
 
 // Contract-faithful stand-in for the cloud-agents launcher (hook ordering is
@@ -18,9 +19,16 @@ vi.mock('@roomote/cloud-agents/server', () => ({
       taskRun: { id: number; taskId: string },
       context: { prompt: string; taskUrl: string },
     ) => Promise<void>;
+    onQueueFailure?: (taskRun: { id: number; taskId: string }) => Promise<void>;
     [key: string]: unknown;
   }) => {
-    const { liveTaskStream, afterKickoff, rendersTaskLink, ...rest } = params;
+    const {
+      liveTaskStream,
+      afterKickoff,
+      onQueueFailure,
+      rendersTaskLink,
+      ...rest
+    } = params;
     return async (input: {
       prompt: string;
       environmentId: string | null;
@@ -36,12 +44,17 @@ vi.mock('@roomote/cloud-agents/server', () => ({
         { id: 42, taskId: 'task-1' },
         { prompt: input.prompt, taskUrl },
       );
-      await mocks.enqueueTask({
-        ...rest,
-        liveTaskStream,
-        rendersTaskLink,
-        environmentId: input.environmentId,
-      });
+      try {
+        await mocks.enqueueTask({
+          ...rest,
+          liveTaskStream,
+          rendersTaskLink,
+          environmentId: input.environmentId,
+        });
+      } catch (error) {
+        await onQueueFailure?.({ id: 42, taskId: 'task-1' });
+        throw error;
+      }
       return { success: true, taskId: 'task-1', taskUrl };
     };
   },
@@ -52,6 +65,12 @@ vi.mock('../live-task-stream', () => ({
   getSlackLiveTaskStreamData: mocks.getSlackLiveTaskStreamData,
   setSlackLiveTaskStreamData: mocks.setSlackLiveTaskStreamData,
 }));
+
+vi.mock('../settle-live-task-card', () => ({
+  settleSlackLiveTaskCardForRun: mocks.settleSlackLiveTaskCardForRun,
+}));
+
+import { RunStatus } from '@roomote/types';
 
 import { createFastAgentSlackLiveTaskLauncher } from '../fast-agent-live-task-launcher';
 
@@ -80,6 +99,7 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
     mocks.postMessage.mockResolvedValue('fallback-ts');
     mocks.setSlackLiveTaskStreamData.mockResolvedValue(undefined);
     mocks.updateMessage.mockResolvedValue(true);
+    mocks.settleSlackLiveTaskCardForRun.mockResolvedValue(undefined);
   });
 
   const taskLinkFallback = {
@@ -180,6 +200,26 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
 
     expect(mocks.postMessageDetailed).not.toHaveBeenCalled();
     expect(mocks.setSlackLiveTaskStreamData).not.toHaveBeenCalled();
+  });
+
+  it('settles the card when queueing fails after card creation', async () => {
+    const queueError = new Error('Redis unavailable');
+    mocks.enqueueTask.mockRejectedValue(queueError);
+
+    await expect(
+      createLauncher()({
+        prompt: 'Add a regression test',
+        environmentId: null,
+        parentSessionId: '11111111-1111-4111-8111-111111111111',
+        postKickoff: vi.fn(),
+      }),
+    ).rejects.toBe(queueError);
+
+    expect(mocks.settleSlackLiveTaskCardForRun).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      payload: { liveTaskStream: true },
+      status: RunStatus.Canceled,
+    });
   });
 
   it('posts a plain task link when Slack rejects the card', async () => {

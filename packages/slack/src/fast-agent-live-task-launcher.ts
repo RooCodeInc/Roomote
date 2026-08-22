@@ -3,6 +3,7 @@ import {
   type FastAgentSlackTaskLauncherParams,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
+import { RunStatus } from '@roomote/types';
 import {
   buildSlackLiveTaskCardBlocks,
   SLACK_LIVE_TASK_CARD_MESSAGES,
@@ -13,6 +14,7 @@ import {
   setSlackLiveTaskStreamData,
 } from './live-task-stream';
 import type { SlackNotifier } from './slack-notifier';
+import { settleSlackLiveTaskCardForRun } from './settle-live-task-card';
 
 type SlackLiveTaskCardNotifier = Pick<
   SlackNotifier,
@@ -40,7 +42,7 @@ function describeError(error: unknown): string {
 export function createFastAgentSlackLiveTaskLauncher(
   params: Omit<
     FastAgentSlackTaskLauncherParams,
-    'liveTaskStream' | 'afterKickoff' | 'rendersTaskLink'
+    'liveTaskStream' | 'afterKickoff' | 'onQueueFailure' | 'rendersTaskLink'
   > & {
     slack: SlackLiveTaskCardNotifier;
   },
@@ -159,6 +161,13 @@ export function createFastAgentSlackLiveTaskLauncher(
     ...launcherParams,
     liveTaskStream: true,
     afterKickoff: startLiveTaskCard,
+    onQueueFailure: async (taskRun) => {
+      await settleSlackLiveTaskCardForRun({
+        taskId: taskRun.taskId,
+        payload: { liveTaskStream: true },
+        status: RunStatus.Canceled,
+      });
+    },
     rendersTaskLink: true,
   });
 }
