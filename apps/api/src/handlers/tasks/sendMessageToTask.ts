@@ -145,6 +145,7 @@ type LinkedReviewFastHandoff = {
     status: PullRequestStatus | null;
   };
   summary: string;
+  suggestedActionQuestion?: string;
   suggestedActionPrompt?: string;
   reviewResult: {
     reviewKind: 'initial' | 'sync' | null;
@@ -818,6 +819,8 @@ async function resolveLinkedReviewHandoff({
       },
       ...(hasActionableFindings
         ? {
+            suggestedActionQuestion:
+              'Would you like me to resolve this feedback?',
             suggestedActionPrompt: `Address the review feedback on ${handoffTarget.pullRequest.repository}#${handoffTarget.pullRequest.number}.`,
           }
         : {}),
@@ -917,6 +920,9 @@ export async function sendMessageToTask({
         pullRequest: fastHandoff.pullRequest,
         summary: fastHandoff.summary,
         reviewResult: fastHandoff.reviewResult,
+        ...(fastHandoff.suggestedActionQuestion
+          ? { suggestedActionQuestion: fastHandoff.suggestedActionQuestion }
+          : {}),
         ...(fastHandoff.suggestedActionPrompt
           ? { suggestedActionPrompt: fastHandoff.suggestedActionPrompt }
           : {}),

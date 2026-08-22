@@ -394,7 +394,7 @@ export const prReviewNotificationJob = async (
       (event) => event.reviewResult,
     )?.reviewResult;
 
-    await notifyFastAgentParentOnPrFeedback({
+    const deliveredToFastParent = await notifyFastAgentParentOnPrFeedback({
       run: latestJob,
       deliveryIds: data.deliveryIds ?? [],
       pullRequest: {
@@ -418,8 +418,24 @@ export const prReviewNotificationJob = async (
           }
         : {}),
       ...(roomoteReviewResult ? { reviewResult: roomoteReviewResult } : {}),
-      ...(followUp ? { suggestedActionPrompt: followUp.prompt } : {}),
+      ...(followUp
+        ? {
+            suggestedActionQuestion: followUp.question,
+            suggestedActionPrompt: followUp.prompt,
+          }
+        : {}),
     });
+
+    if (deliveredToFastParent) {
+      await recordPrReviewNotificationDeliveryBestEffort({
+        runId: latestJob.id,
+        taskId: data.taskId,
+        route: null,
+        text: textWithQuestion,
+      });
+      await finalizePrReviewNotificationRequest(data);
+      return;
+    }
 
     // Auto-handled PRs skip the offer entirely: the prepared follow-up is
     // dispatched straight into the owning task and the conversation gets an

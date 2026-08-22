@@ -82,3 +82,29 @@ describe('isRoomoteGitHubLogin', () => {
     expect(isRoomoteGitHubLogin('octocat')).toBe(false);
   });
 });
+
+describe('isManagedRoomoteGitHubLogin', () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it('uses the configured and additional app slug allowlist', async () => {
+    vi.doMock('@roomote/env', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@roomote/env')>();
+
+      return {
+        ...actual,
+        Env: {
+          R_GITHUB_APP_SLUG: 'acme',
+          R_GITHUB_ADDITIONAL_APP_SLUGS: ' roomote-community ',
+        },
+      };
+    });
+
+    const { isManagedRoomoteGitHubLogin } = await import('../schema');
+
+    expect(isManagedRoomoteGitHubLogin('roomote-community[bot]')).toBe(true);
+    expect(isManagedRoomoteGitHubLogin('acme[bot]')).toBe(true);
+    expect(isManagedRoomoteGitHubLogin('roomote-unknown[bot]')).toBe(false);
+  });
+});

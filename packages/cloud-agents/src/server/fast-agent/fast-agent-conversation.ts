@@ -14,6 +14,10 @@ export function getFastAgentConversationStorageWorkspaceId(
 
 export type FastAgentTurnSource = 'human' | 'platform_event';
 
+export type FastAgentPlatformEventVisibility = 'optional' | 'required';
+
+export type FastAgentPlatformEventHandling = 'default' | 'present_only';
+
 export type FastAgentReply = {
   purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
   message: string;

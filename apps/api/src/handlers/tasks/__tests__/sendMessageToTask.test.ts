@@ -417,6 +417,7 @@ describe('sendMessageToTask', () => {
         approvalStatus: null,
         headSha: 'abc123',
       },
+      suggestedActionQuestion: 'Would you like me to resolve this feedback?',
       suggestedActionPrompt: 'Address the review feedback on acme/app#42.',
     });
     expect(mockSendPromptMutate).not.toHaveBeenCalled();
