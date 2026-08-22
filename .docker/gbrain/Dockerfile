@@ -8,10 +8,10 @@
 # worker. The worker is required for Roomote-scheduled maintenance cycles.
 FROM oven/bun:1.3.14
 
-ARG GBRAIN_REF=ac402f5
+ARG GBRAIN_REF=f49ca569232dbc0d8e0783d84606115e3bfe5ab1
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends git postgresql-client \
+  && apt-get install -y --no-install-recommends ca-certificates git postgresql-client \
   && rm -rf /var/lib/apt/lists/*
 
 RUN bun install -g "github:garrytan/gbrain#${GBRAIN_REF}"

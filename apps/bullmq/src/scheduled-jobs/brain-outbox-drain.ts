@@ -15,18 +15,30 @@ import {
   gt,
   gte,
   or,
+  renameBrainSyncStateFamilyPrefix,
 } from '@roomote/db/server';
 import {
+  postBrainToolCall,
   resolveBrainInferenceProvider,
   resolveBrainConnection,
 } from '@roomote/sdk/server';
-import { getLinkedEnvironmentIdFromPayload, RunStatus } from '@roomote/types';
+import {
+  BRAIN_COLLECTOR_IDS,
+  brainNamespacePrefix,
+  getLinkedEnvironmentIdFromPayload,
+  RunStatus,
+} from '@roomote/types';
 
 import { runBrainCollectors } from './brain-collectors';
+import {
+  runSlackDayPageCensus,
+  runSlackDayPageInventoryMaintenance,
+} from './brain-collectors/slack-day-page-inventory';
+import { slackPublicChannelsCollector } from './brain-collectors/slack-public-channels';
 
 const LOG_PREFIX = '[brainOutboxDrain]';
 /** Sync-state key for the one-time task-history backfill. */
-const TASK_MEMORY_COLLECTOR_ID = 'task-memory:effective-date-v2';
+const TASK_MEMORY_COLLECTOR_ID = BRAIN_COLLECTOR_IDS.taskMemories;
 const CLAIM_BATCH_SIZE = 10;
 // Backfill can enqueue a deployment's whole task history at once; drain up
 // to this many batches per tick so the backlog clears in minutes, not hours.
@@ -34,7 +46,7 @@ const MAX_BATCHES_PER_TICK = 20;
 const MAX_ATTEMPTS = 5;
 // Versioned when date semantics change so existing pages are replayed and
 // corrected instead of retaining stale effective dates forever.
-const PR_FACTS_COLLECTOR_ID = 'pull-request-facts:occurrence-date-v3';
+const PR_FACTS_COLLECTOR_ID = BRAIN_COLLECTOR_IDS.pullRequestFacts;
 // PR analytics gives every repository in one sync the same timestamp but
 // writes repositories sequentially. Re-read a bounded window on each normal
 // collector tick so a row committed late with that shared timestamp cannot
@@ -109,6 +121,37 @@ export function isBrainNotReady(error: unknown): boolean {
   return error instanceof BrainNotReadyError;
 }
 
+export async function callBrainWriteTool(
+  connection: { baseUrl: string; token: string },
+  name: string,
+  args: Record<string, unknown>,
+): Promise<string> {
+  // Shared transport; the backpressure classification below is this write
+  // path's own and deliberately stays here. No timeout: put_page embeds
+  // synchronously and a slow embed is backpressure, not a failure.
+  const { status, ok, body } = await postBrainToolCall(connection, name, args);
+
+  if (status === 429) {
+    throw new BrainRateLimitedError(
+      `gbrain ${name} rate limited: ${body.slice(0, 300)}`,
+    );
+  }
+
+  const failed = !ok || body.includes('"isError":true');
+
+  if (failed && /embed\(|embedding/i.test(body)) {
+    throw new BrainNotReadyError(
+      `gbrain ${name} could not embed: ${body.slice(0, 300)}`,
+    );
+  }
+
+  if (failed) {
+    throw new Error(`gbrain ${name} failed: ${status} ${body.slice(0, 300)}`);
+  }
+
+  return body;
+}
+
 /**
  * Write one memory page via gbrain's MCP `put_page` op with a write-scoped
  * access token. Synchronous and immediately retrievable, so task completion
@@ -118,47 +161,10 @@ export async function postToBrain(
   page: IngestPage,
   connection: { baseUrl: string; token: string },
 ): Promise<void> {
-  const { baseUrl, token } = connection;
-
-  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/mcp`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      accept: 'application/json, text/event-stream',
-      authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/call',
-      params: {
-        name: 'put_page',
-        arguments: { slug: page.slug, content: page.content },
-      },
-    }),
+  await callBrainWriteTool(connection, 'put_page', {
+    slug: page.slug,
+    content: page.content,
   });
-
-  const body = await response.text().catch(() => '');
-
-  if (response.status === 429) {
-    throw new BrainRateLimitedError(
-      `gbrain put_page rate limited: ${body.slice(0, 300)}`,
-    );
-  }
-
-  const failed = !response.ok || body.includes('"isError":true');
-
-  if (failed && /embed\(|embedding/i.test(body)) {
-    throw new BrainNotReadyError(
-      `gbrain put_page could not embed: ${body.slice(0, 300)}`,
-    );
-  }
-
-  if (failed) {
-    throw new Error(
-      `gbrain put_page failed: ${response.status} ${body.slice(0, 300)}`,
-    );
-  }
 }
 
 /**
@@ -219,7 +225,7 @@ export function buildMemoryPage(input: {
   ].join('\n');
 
   return {
-    slug: `tasks/${input.taskId}/runs/${input.runId}`,
+    slug: `${brainNamespacePrefix('tasks')}${input.taskId}/runs/${input.runId}`,
     title: input.taskTitle,
     content: redactBrainText(content),
   };
@@ -317,6 +323,40 @@ export async function brainCollectorsJob(): Promise<void> {
 
   if (!connection) {
     return;
+  }
+
+  try {
+    // Before any Slack collection: repair pre-canonicalization inventories
+    // (re-arming the healing replay where the case mismatch neutered it),
+    // then the one-time inventory census the Slack collector holds on.
+    // Running these here, ahead of the pass, normally completes them within
+    // the first tick after a deploy.
+    await runSlackDayPageInventoryMaintenance(slackPublicChannelsCollector.id);
+    await runSlackDayPageCensus();
+  } catch (error) {
+    console.warn(
+      `${LOG_PREFIX} slack day-page census failed; slack collection stays held: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
+  try {
+    // The GitHub per-repository stream rows were once keyed under a
+    // hardcoded superseded version while the collector moved on; move them
+    // under the current id so their watermarks and cursors keep counting as
+    // the source's live streams. No-op fast once clean.
+    await renameBrainSyncStateFamilyPrefix(
+      db,
+      'github-issues:occurrence-date-v2',
+      BRAIN_COLLECTOR_IDS.githubIssues,
+    );
+  } catch (error) {
+    console.warn(
+      `${LOG_PREFIX} github stream-row migration failed; retrying next tick: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
   }
 
   let includeIncremental = true;
@@ -602,7 +642,7 @@ export function buildPullRequestFactPage(fact: {
   ].join('\n');
 
   return {
-    slug: `prs/${fact.repositoryFullName}/${fact.prNumber}`,
+    slug: `${brainNamespacePrefix('prs')}${fact.repositoryFullName}/${fact.prNumber}`,
     title: `${fact.repositoryFullName}#${fact.prNumber}: ${fact.title}`,
     content: redactBrainText(content),
   };

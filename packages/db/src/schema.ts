@@ -78,6 +78,7 @@ import type {
   UserRole,
   RepositoryAutomationSignals,
   McpToolAccessMode,
+  FastAgentSurface,
 } from '@roomote/types';
 import { DEFAULT_TASK_ARTIFACT_TYPE } from '@roomote/types';
 
@@ -1211,6 +1212,10 @@ export const taskRuns = pgTable(
     queueScope: text('queue_scope'),
     taskPhase: text('task_phase'),
     payload: jsonb('payload').notNull().$type<TaskPayload>(),
+    /** Indexed projection of payload.fastAgentSessionId for Fast task lookup. */
+    fastAgentSessionId: uuid('fast_agent_session_id').generatedAlwaysAs(
+      sql`((payload ->> 'fastAgentSessionId')::uuid)`,
+    ),
     // Per-attempt prompt, including the deferred resume prompt.
     prompt: text('prompt'),
     log: text('log'),
@@ -1330,6 +1335,7 @@ export const taskRuns = pgTable(
   },
   (table) => [
     index('task_runs_task_id_idx').on(table.taskId),
+    index('task_runs_fast_agent_session_id_idx').on(table.fastAgentSessionId),
     index('task_runs_queue_scope_idx').on(table.queueScope),
     index('task_runs_acting_user_id_idx').on(table.actingUserId),
     index('task_runs_snapshot_id_idx').on(table.snapshotId),
@@ -2465,6 +2471,31 @@ export const slackDirectoryUsers = pgTable(
 );
 
 /**
+ * notion_directory_users
+ *
+ * Durable snapshot of the Notion workspace user directory used to link Brain
+ * person cards to Notion identities. `email` holds only addresses Notion has
+ * verified; it is an internal linking hint and is never copied into Brain
+ * page content. Rows are marked deleted rather than removed when a user
+ * disappears from the workspace (or the integration loses its user-list
+ * capability) so the Brain can tombstone the projected person card.
+ */
+export const notionDirectoryUsers = pgTable(
+  'notion_directory_users',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    notionUserId: text('notion_user_id').notNull(),
+    name: text('name').notNull(),
+    email: text('email'),
+    isDeleted: boolean('is_deleted').notNull().default(false),
+    lastSeenAt: timestamp('last_seen_at').notNull().defaultNow(),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [unique('notion_directory_users_unique').on(table.notionUserId)],
+);
+
+/**
  * telegram_user_mappings
  */
 
@@ -2752,6 +2783,91 @@ export const slackAuthTokens = pgTable(
 export const slackAuthTokensRelations = relations(slackAuthTokens, () => ({}));
 
 /**
+ * fast_agent_conversations
+ *
+ * Provider-neutral persistence for runless Fast conversations. The unique
+ * identity intentionally excludes the mutable reply destination so moving a
+ * conversation's delivery address never forks its memory.
+ */
+export const fastAgentConversations = pgTable(
+  'fast_agent_conversations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    surface: text('surface').notNull().$type<FastAgentSurface>(),
+    workspaceId: text('workspace_id').notNull(),
+    conversationId: text('conversation_id').notNull(),
+    currentReplyChannelId: text('current_reply_channel_id').notNull(),
+    currentReplyThreadId: text('current_reply_thread_id'),
+    replyTargetVerified: boolean('reply_target_verified')
+      .notNull()
+      .default(true),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('fast_agent_conversations_identity_unique').on(
+      table.surface,
+      table.workspaceId,
+      table.conversationId,
+    ),
+    index('fast_agent_conversations_user_idx').on(table.userId),
+  ],
+);
+
+/**
+ * N-1 compatibility aliases for legacy Fast session UUIDs. Multiple legacy
+ * rows can collapse to one provider-neutral identity when a reply destination
+ * moved before this migration. Keep every UUID addressable while the legacy
+ * table remains available to the previous application release.
+ */
+export const fastAgentConversationAliases = pgTable(
+  'fast_agent_conversation_aliases',
+  {
+    legacyConversationId: uuid('legacy_conversation_id')
+      .primaryKey()
+      .references(() => slackQuickAnswers.id, { onDelete: 'cascade' }),
+    conversationId: uuid('conversation_id')
+      .notNull()
+      .references(() => fastAgentConversations.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at').notNull().defaultNow(),
+    updatedAt: timestamp('updated_at').notNull().defaultNow(),
+  },
+  (table) => [
+    index('fast_agent_conversation_aliases_conversation_idx').on(
+      table.conversationId,
+    ),
+  ],
+);
+
+export const fastAgentConversationsRelations = relations(
+  fastAgentConversations,
+  ({ one, many }) => ({
+    user: one(users, {
+      fields: [fastAgentConversations.userId],
+      references: [users.id],
+    }),
+    aliases: many(fastAgentConversationAliases),
+  }),
+);
+
+export const fastAgentConversationAliasesRelations = relations(
+  fastAgentConversationAliases,
+  ({ one }) => ({
+    conversation: one(fastAgentConversations, {
+      fields: [fastAgentConversationAliases.conversationId],
+      references: [fastAgentConversations.id],
+    }),
+    legacyConversation: one(slackQuickAnswers, {
+      fields: [fastAgentConversationAliases.legacyConversationId],
+      references: [slackQuickAnswers.id],
+    }),
+  }),
+);
+
+/**
  * slack_conversation_messages
  */
 
@@ -2791,6 +2907,7 @@ export const slackConversationMessages = pgTable(
     runId: integer('run_id').references(() => taskRuns.id, {
       onDelete: 'set null',
     }),
+    /** N-1 rollback column: retained while the previous release writes it. */
     slackQuickAnswerId: uuid('slack_quick_answer_id').references(
       () => slackQuickAnswers.id,
       {
@@ -2849,11 +2966,11 @@ export const slackConversationMessagesRelations = relations(
 /**
  * slack_quick_answers (renamed from fast_agent_sessions in Stage 4)
  *
- * Deliberately kept OUT of the task spine: these rows store the runless
- * Slack-thread quick-answer conversation for the fast agent. They intentionally
- * do NOT overlap with tasks/task_runs (no launched task, no run) — a quick
- * answer never becomes a task, so folding it into the task tables would break
- * the runless-chat storage the suggester feedback loop reads.
+ * N-1 rollback compatibility: keep this table and its columns for one release
+ * after Fast moves identity and routing to fast_agent_conversations. OpenCode
+ * owns warm conversation history in memory; visible user and assistant turns
+ * are mirrored here so the previous application release can still read,
+ * append, and resume a conversation after rollback.
  */
 export const slackQuickAnswers = pgTable(
   'slack_quick_answers',
@@ -2888,6 +3005,7 @@ export const slackQuickAnswersRelations = relations(
       references: [users.id],
     }),
     integrationCalls: many(slackFastIntegrationCalls),
+    fastAgentConversationAliases: many(fastAgentConversationAliases),
   }),
 );
 
@@ -2900,13 +3018,15 @@ export type SlackFastIntegrationCallStatus =
  * slack_fast_integration_calls
  *
  * Durable audit trail for deployment MCP tools executed directly by runless
- * Slack fast-mode conversations. An `executing` row is inserted before the
+ * Fast conversations. N-1 rollback compatibility keeps its Slack-named table
+ * and foreign key for this release. An `executing` row is inserted before the
  * external call so a missing terminal update remains visibly ambiguous.
  */
 export const slackFastIntegrationCalls = pgTable(
   'slack_fast_integration_calls',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    /** N-1 rollback column: retained while the previous release writes it. */
     slackQuickAnswerId: uuid('slack_quick_answer_id')
       .notNull()
       .references(() => slackQuickAnswers.id, { onDelete: 'cascade' }),

@@ -2393,6 +2393,182 @@ describe('OpenCodeServerHarness', () => {
     }
   });
 
+  it('persists an ordinary follow-up as queued until the next turn begins', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Start work.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: {
+          text: 'Handle this after the current turn.',
+          visibleInTranscript: true,
+          clientMessageId: 'queued-follow-up',
+        },
+      });
+
+      expect(
+        persistedEnvelopes
+          .filter(
+            (envelope) =>
+              envelope.eventType ===
+              ACP_ENVELOPE_EVENT_TYPES.QueuedMessagesUpdate,
+          )
+          .at(-1)?.payload,
+      ).toMatchObject({
+        cause: 'enqueue',
+        queuedMessages: [
+          expect.objectContaining({
+            text: 'Handle this after the current turn.',
+            clientMessageId: 'queued-follow-up',
+          }),
+        ],
+      });
+      expect(
+        persistedEnvelopes.filter(
+          (envelope) =>
+            envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+        ),
+      ).toHaveLength(1);
+
+      client.message.mockResolvedValueOnce(createFinalAssistantMessage());
+      await client.emit({
+        type: 'message.updated',
+        properties: {
+          info: {
+            id: 'msg_1',
+            sessionID: 'ses_1',
+            role: 'assistant',
+            time: { completed: 1 },
+          },
+        },
+      });
+      await client.emit({
+        type: 'session.idle',
+        properties: { sessionID: 'ses_1' },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+      expect(
+        persistedEnvelopes
+          .filter(
+            (envelope) =>
+              envelope.eventType ===
+              ACP_ENVELOPE_EVENT_TYPES.QueuedMessagesUpdate,
+          )
+          .at(-1)?.payload,
+      ).toMatchObject({ cause: 'dequeue', queuedMessages: [] });
+      expect(
+        persistedEnvelopes
+          .filter(
+            (envelope) =>
+              envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          )
+          .at(-1),
+      ).toMatchObject({
+        contentBlocks: [
+          { type: 'text', text: 'Handle this after the current turn.' },
+        ],
+        metadata: { clientMessageId: 'queued-follow-up' },
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
+  it('persists a queued follow-up as delivered when explicitly steered', async () => {
+    const { client, harness } = createHarness();
+    const persistedEnvelopes: AcpPersistedEnvelope[] = [];
+
+    harness.subscribeRuntimePersistedEnvelope((envelope) =>
+      persistedEnvelopes.push(envelope),
+    );
+
+    try {
+      await connectHarness(harness, client);
+
+      harness.sendCommand({
+        commandName: TaskCommandName.StartNewTask,
+        data: { text: 'Start work.', visibleInTranscript: true },
+      });
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(1);
+      });
+
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: {
+          text: 'Apply this now.',
+          visibleInTranscript: true,
+          clientMessageId: 'steered-follow-up',
+        },
+      });
+      const queuedMessage = harness.getQueuedMessageSnapshots?.()[0];
+
+      expect(queuedMessage).toMatchObject({
+        text: 'Apply this now.',
+        clientMessageId: 'steered-follow-up',
+      });
+      expect(queuedMessage?.id).toBeTruthy();
+
+      harness.sendCommand({
+        commandName: TaskCommandName.DeleteQueuedMessage,
+        data: { id: queuedMessage!.id },
+      });
+      harness.sendCommand({
+        commandName: TaskCommandName.SendMessage,
+        data: {
+          text: queuedMessage!.text,
+          visibleInTranscript: queuedMessage!.visibleInTranscript,
+          clientMessageId: queuedMessage!.clientMessageId,
+          autoSteerWhenQueued: true,
+        },
+      });
+
+      await vi.waitFor(() => {
+        expect(client.promptAsync).toHaveBeenCalledTimes(2);
+      });
+      expect(
+        persistedEnvelopes
+          .filter(
+            (envelope) =>
+              envelope.eventType ===
+              ACP_ENVELOPE_EVENT_TYPES.QueuedMessagesUpdate,
+          )
+          .at(-1)?.payload,
+      ).toMatchObject({ cause: 'delete', queuedMessages: [] });
+      expect(
+        persistedEnvelopes
+          .filter(
+            (envelope) =>
+              envelope.eventType === ACP_ENVELOPE_EVENT_TYPES.UserPrompt,
+          )
+          .at(-1),
+      ).toMatchObject({
+        contentBlocks: [{ type: 'text', text: 'Apply this now.' }],
+        metadata: { clientMessageId: 'steered-follow-up' },
+      });
+    } finally {
+      harness.dispose();
+    }
+  });
+
   it('advertises native turn steering so steerTask avoids terminal cancellation', () => {
     const { harness } = createHarness();
 

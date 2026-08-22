@@ -36,6 +36,7 @@ vi.mock('@roomote/cloud-agents', () => ({
 
 vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
+  createFastAgentSlackLiveTaskLauncher: vi.fn(() => vi.fn()),
   hasPendingRoutingConfirmation: hasPendingRoutingConfirmationMock,
   markSlackThreadExplicitMentionRequired:
     markSlackThreadExplicitMentionRequiredMock,
@@ -129,7 +130,7 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
     hasFastAgentSessionMock.mockResolvedValue(true);
     findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
     fetchThreadMessagesMock.mockResolvedValue([
-      humanMessage('U111', THREAD_TS, '<@UBOT> /fast hi'),
+      humanMessage('U111', THREAD_TS, '<@UBOT> !fast hi'),
       botMessage('101.000', 'Hi there.'),
     ]);
 
@@ -143,12 +144,72 @@ describe('shouldRouteUnmentionedSlackThreadReplyToAgent', () => {
       ),
     ).resolves.toMatchObject({ shouldRoute: true });
     expect(hasFastAgentSessionMock).toHaveBeenCalledWith({
-      slackTeamId: 'T123',
-      slackChannel: 'C123',
-      slackThreadTs: THREAD_TS,
+      surface: 'slack',
+      workspaceId: 'T123',
+      conversationId: THREAD_TS,
+      replyTarget: { channelId: 'C123', threadId: THREAD_TS },
     });
     expect(findRoomoteOwnedSlackThreadMock).not.toHaveBeenCalled();
   }, 15_000);
+
+  it("routes Matt when he joins Dan's existing fast-agent conversation", async () => {
+    hasFastAgentSessionMock.mockResolvedValue(true);
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanMessage('UDAN', THREAD_TS, '<@UBOT> !fast hi'),
+      botMessage('101.000', 'Hi Dan.'),
+    ]);
+
+    await expect(
+      routeDecision(
+        threadReplyEvent({
+          user: 'UMATT',
+          ts: '102.000',
+          text: 'Hey Roomote, can you check this too?',
+        }),
+      ),
+    ).resolves.toMatchObject({ shouldRoute: true });
+  });
+
+  it('keeps a peer-directed reply silent in an existing fast-agent thread', async () => {
+    hasFastAgentSessionMock.mockResolvedValue(true);
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
+
+    await expect(
+      routeDecision(
+        threadReplyEvent({
+          user: 'U111',
+          ts: '102.000',
+          text: '<@U333> what do you think?',
+        }),
+      ),
+    ).resolves.toEqual({ shouldRoute: false });
+    expect(fetchThreadMessagesMock).not.toHaveBeenCalled();
+  });
+
+  it('requires an explicit mention after another user interjects in a fast-agent thread', async () => {
+    hasFastAgentSessionMock.mockResolvedValue(true);
+    findRoomoteOwnedSlackThreadMock.mockResolvedValue(null);
+    fetchThreadMessagesMock.mockResolvedValue([
+      humanMessage('U111', THREAD_TS, '<@UBOT> !fast hi'),
+      botMessage('101.000', 'Hi there.'),
+      humanMessage('U222', '102.000', 'I think that is probably right'),
+    ]);
+
+    await expect(
+      routeDecision(
+        threadReplyEvent({
+          user: 'U111',
+          ts: '103.000',
+          text: 'Can you continue?',
+        }),
+      ),
+    ).resolves.toEqual({ shouldRoute: false });
+    expect(markSlackThreadExplicitMentionRequiredMock).toHaveBeenCalledWith(
+      'C123',
+      THREAD_TS,
+    );
+  });
 
   it('routes an unmentioned reply directly after the bot last spoke', async () => {
     fetchThreadMessagesMock.mockResolvedValue([

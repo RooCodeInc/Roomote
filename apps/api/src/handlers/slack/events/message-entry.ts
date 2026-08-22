@@ -13,6 +13,7 @@ import {
   autoConfirmRouting,
   collectAndExtractThreadAttachmentTexts,
   collectAndProcessThreadImages,
+  createFastAgentSlackLiveTaskLauncher,
   fetchThreadMessagesSafe,
   findActiveSlackTaskRun,
   formatSlackRoutingWaitReplyText,
@@ -59,7 +60,6 @@ import {
   processFastAgentMessage,
 } from './fast-agent.js';
 import { resolveFastAgentEntryMode } from '../../fast-agent-entry.js';
-import { createFastAgentTaskLauncher } from './fast-agent-task-launcher.js';
 import { processSnapshotResume } from './snapshot-resume.js';
 import {
   dispatchSlackThreadFollowUp,
@@ -490,6 +490,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
   let roomoteThreadMatch: Awaited<
     ReturnType<typeof findRoomoteOwnedSlackThread>
   > | null = null;
+  let isFastAgentThread = false;
 
   let eligibilityReason:
     | 'pending-routing-confirmation'
@@ -499,10 +500,11 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
   if (pendingRoutingConfirmation) {
     eligibilityReason = 'pending-routing-confirmation';
   } else {
-    const isFastAgentThread = await hasFastAgentSession({
-      slackTeamId: teamId,
-      slackChannel: event.channel,
-      slackThreadTs: event.thread_ts,
+    isFastAgentThread = await hasFastAgentSession({
+      surface: 'slack',
+      workspaceId: teamId,
+      conversationId: event.thread_ts,
+      replyTarget: { channelId: event.channel, threadId: event.thread_ts },
     });
 
     roomoteThreadMatch = isFastAgentThread
@@ -592,6 +594,7 @@ export async function shouldRouteUnmentionedSlackThreadReplyToAgent(params: {
     isAutomationReportThread: Boolean(
       roomoteThreadMatch?.isAutomationReportThread,
     ),
+    isOpenConversationThread: isFastAgentThread,
     threadMessages: sharedHistory,
     compareMessageIds: compareNumericMessageIds,
   });
@@ -1262,7 +1265,7 @@ async function maybeHandleChannelAutoStart(params: {
       slack: context.slack,
       userId: userMapping.userId,
       teamId: context.teamId,
-      usageText: 'Use `/fast <question>` in this channel.',
+      usageText: 'Use `!fast <question>` in this channel.',
       continuation: fastAgentEntryMode === 'default',
       processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent response failed for auto-start thread ${channelAutoStartEvent.ts}:`,
@@ -1597,8 +1600,9 @@ function startFastAgentResponse(params: {
   teamId: string;
   usageText?: string;
   continuation?: boolean;
-  activeTaskId?: string | null;
+  activeTasks?: { taskId: string }[];
   processingReactionName: string;
+  isExistingConversation?: boolean;
   errorLogPrefix: string;
 }): void {
   const { errorLogPrefix, ...fastAgentParams } = params;
@@ -1606,7 +1610,18 @@ function startFastAgentResponse(params: {
   processFastAgentMessage({
     ...fastAgentParams,
     apiBaseUrl: Env.TRPC_URL ?? Env.R_APP_URL,
-    launchTask: createFastAgentTaskLauncher(params),
+    launchTask: createFastAgentSlackLiveTaskLauncher({
+      slack: params.slack,
+      userId: params.userId,
+      teamId: params.teamId,
+      ...(params.slackInstallation.teamDomain
+        ? { teamDomain: params.slackInstallation.teamDomain }
+        : {}),
+      channelId: params.event.channel,
+      threadTs: params.event.thread_ts || params.event.ts,
+      messageId: params.event.ts,
+      recipientUserId: params.event.user ?? params.userMapping.slackUserId,
+    }),
   }).catch((error) => {
     console.error(
       errorLogPrefix,
@@ -1736,7 +1751,7 @@ async function handleSlackEntryEvent(params: {
       slack,
       userId: userMapping.userId,
       teamId,
-      activeTaskId: activeRun?.taskId ?? null,
+      activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
       continuation: fastAgentEntryMode === 'default',
       processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent response failed for thread ${threadId}:`,
@@ -1750,9 +1765,10 @@ async function handleSlackEntryEvent(params: {
   )
     ? false
     : await hasFastAgentSession({
-        slackTeamId: teamId,
-        slackChannel: event.channel,
-        slackThreadTs: threadId,
+        surface: 'slack',
+        workspaceId: teamId,
+        conversationId: threadId,
+        replyTarget: { channelId: event.channel, threadId },
       });
 
   if (isFastAgentContinuation) {
@@ -1764,7 +1780,8 @@ async function handleSlackEntryEvent(params: {
       userId: userMapping.userId,
       teamId,
       continuation: true,
-      activeTaskId: activeRun?.taskId ?? null,
+      isExistingConversation: true,
+      activeTasks: activeRun ? [{ taskId: activeRun.taskId }] : [],
       processingReactionName: ackEmoji,
       errorLogPrefix: `❌ Background fast-agent continuation failed for thread ${threadId}:`,
     });

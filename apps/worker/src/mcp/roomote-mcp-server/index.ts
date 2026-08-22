@@ -14,6 +14,8 @@ import {
   TaskPayloadKind,
   createTaskEnvVarRequestBaseSchema,
   PRODUCT_NAME,
+  ROOMOTE_TASK_INSPECTION_ACTIONS,
+  roomoteTaskInspectionFieldSchemas,
   sourceControlProviderSchema,
   taskArtifactTypeSchema,
   workspaceReadinessSchema,
@@ -48,6 +50,7 @@ import {
 import { handleRequestEnvironmentVariables } from './request-environment-variables.js';
 import { handleShowWidget } from './show-widget.js';
 import { handleSendChatReply } from './send-chat-reply.js';
+import { handleRelayFastAgentChatReply } from './relay-fast-agent-chat-reply.js';
 import {
   type ChatReplyPurpose,
   recordChatReplyDeliveryFailure,
@@ -574,10 +577,7 @@ const manageTasksToolDescription =
 const manageTasksInputSchema = {
   action: z
     .enum([
-      'search',
-      'get_summary',
-      'get_compute_logs',
-      'get_messages',
+      ...ROOMOTE_TASK_INSPECTION_ACTIONS,
       'launch',
       'cancel',
       'send_message',
@@ -588,6 +588,7 @@ const manageTasksInputSchema = {
     .describe(
       'The task action to perform. Call "list_environments" immediately before "launch".',
     ),
+  ...roomoteTaskInspectionFieldSchemas,
   taskId: z
     .string()
     .optional()
@@ -600,34 +601,6 @@ const manageTasksInputSchema = {
     .describe(
       'Follow-up message text to send to a running task (required for send_message)',
     ),
-  query: z
-    .string()
-    .optional()
-    .describe('Text to search for in task prompts (for search action)'),
-  status: z
-    .enum(['active', 'completed', 'all'])
-    .optional()
-    .describe('Filter by task status (for search action)'),
-  pullRequest: z
-    .string()
-    .optional()
-    .describe(
-      'Filter by pull request for search action: "__has_pr__" for any linked PR or "owner/repo#123" for a specific PR',
-    ),
-  limit: z
-    .number()
-    .int()
-    .refine((value) => value >= 1 && value <= 1000, {
-      message: 'Limit must be between 1 and 1,000.',
-    })
-    .optional()
-    .describe(
-      'Positive result limit: 1 to 100 for search (default 20), or 1 to 1000 for get_messages',
-    ),
-  cursor: z
-    .string()
-    .optional()
-    .describe('Pagination cursor from a previous search response (nextCursor)'),
   prompt: z
     .string()
     .optional()
@@ -1385,8 +1358,9 @@ if (!isFastAgentChild()) {
   );
 }
 
-if (shouldRegisterSlackThreadReplyTool()) {
+if (shouldRegisterSlackThreadReplyTool() || isFastAgentChild()) {
   const chatReplySurfaceLabel = getChatReplySurfaceLabel();
+  const relaysThroughFastParent = isFastAgentChild();
   const supportsChatReplySuggestions =
     process.env.ROOMOTE_AUTOMATION_TASK === 'true';
   const usesPinnedSuggestionContract =
@@ -1449,28 +1423,26 @@ if (shouldRegisterSlackThreadReplyTool()) {
   const chatReplySuggestionGuidance = supportsChatReplySuggestions
     ? 'Use the optional suggestions parameter when the automation prompt explicitly asks for task suggestions, launchable follow-ups, or help taking concrete actions. Do not infer suggested-task intent from a request that only asks for a summary or action-item list. Suggestions are posted inside the originating conversation. Do not use suggestions for ordinary summary bullets, status updates, questions, speculative ideas, or work explicitly identified in the conversation as already underway. When suggestions are present, the tool automatically adds the surface-specific instruction for starting one; do not write a separate launch instruction. '
     : '';
+  const chatReplyDescription = relaysThroughFastParent
+    ? 'Fast-internal: sends a lifecycle update privately to the Fast parent, which owns any user-visible reply. The raw message is never posted directly to the user. Use progress for new decision-useful state or silence prevention, closeout for the final result or blocker, and clarification when user input is needed. The Fast parent already posted the task kickoff, so use ack only when a new acknowledgement is genuinely useful. Ack and progress keep the coding task active.'
+    : `${chatReplySurfaceLabel}-visible: posts a lifecycle reply in the originating ${chatReplySurfaceLabel} thread. Choose the current ${chatReplySurfaceLabel} turn purpose before writing: ack, progress, closeout, or clarification. Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state or prevents a 10-minute silence gap; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the ${chatReplySurfaceLabel} turn open. Use it again on later ${chatReplySurfaceLabel} turns when they need another direct reply; an earlier thread reply does not count as the reply for the current turn. For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. ${chatReplyMarkdownGuidance}${chatReplySourceLinkingGuidance}${chatReplySuggestionGuidance}Write the message so its content clearly matches the selected purpose.`;
   roomoteMcpServer.registerTool(
     'send_chat_reply',
     {
       title: 'Send Chat Reply',
-      description:
-        `${chatReplySurfaceLabel}-visible: posts a lifecycle reply in the originating ${chatReplySurfaceLabel} thread. ` +
-        `Choose the current ${chatReplySurfaceLabel} turn purpose before writing: ack, progress, closeout, or clarification. ` +
-        `Use ack for the first visible response when work will continue; use progress only when the message adds new decision-useful state or prevents a 10-minute silence gap; use closeout for the answer, result, blocker, or handoff; use clarification for lightweight non-secret questions. Use closeout to finish a turn with an outcome; a clarification also ends the turn when the next step depends on the user's answer — do not follow it with a separate "waiting on your answer" message. Ack and progress keep the ${chatReplySurfaceLabel} turn open. ` +
-        `Use it again on later ${chatReplySurfaceLabel} turns when they need another direct reply; an earlier thread reply does not count as the reply for the current turn. ` +
-        "For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step; do not include exact validation commands, passed-check ledgers, or proof-applicability narration unless the user asked or that detail materially changes what they should do next. " +
-        chatReplyMarkdownGuidance +
-        chatReplySourceLinkingGuidance +
-        chatReplySuggestionGuidance +
-        'Write the message so its content clearly matches the selected purpose.',
+      description: chatReplyDescription,
       inputSchema: {
         purpose: z
           .enum(['ack', 'progress', 'closeout', 'clarification'])
           .describe(
-            `The lifecycle purpose for this ${chatReplySurfaceLabel}-visible reply. Choose ack for the first visible response before work that will not post to ${chatReplySurfaceLabel}, progress for new useful state or silence prevention, closeout for the final answer/result/blocker/handoff, or clarification for a lightweight question. Use closeout before final task completion.`,
+            relaysThroughFastParent
+              ? 'The lifecycle purpose of this private update to the Fast parent. Use progress for useful state or silence prevention, closeout for the final result or blocker, and clarification when user input is needed. The Fast parent already posted the task kickoff, so use ack only when new acknowledgement is genuinely useful.'
+              : `The lifecycle purpose for this ${chatReplySurfaceLabel}-visible reply. Choose ack for the first visible response before work that will not post to ${chatReplySurfaceLabel}, progress for new useful state or silence prevention, closeout for the final answer/result/blocker/handoff, or clarification for a lightweight question. Use closeout before final task completion.`,
           ),
         message: nonEmptyStringSchema.describe(
-          `Non-empty Markdown text to post in the ${chatReplySurfaceLabel} thread. Match the selected purpose, lead with the useful takeaway, and keep it conversational like a teammate in a thread. ` +
+          (relaysThroughFastParent
+            ? 'Non-empty Markdown source text for the Fast parent. State concrete task progress or the needed handoff; the Fast parent will compose the user-visible message. '
+            : `Non-empty Markdown text to post in the ${chatReplySurfaceLabel} thread. Match the selected purpose, lead with the useful takeaway, and keep it conversational like a teammate in a thread. `) +
             "For routine successful closeouts, focus on the shipped change and any blocker or delivery outcome that changes the user's next step instead of listing exact validation commands, passed checks, or proof-applicability notes unless the user asked for them or they materially change what the user should do next. " +
             chatReplyMessageMarkdownGuidance,
         ),
@@ -1519,28 +1491,43 @@ if (shouldRegisterSlackThreadReplyTool()) {
         return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
       }
 
-      const roomoteConfig = getRoomoteConfig();
-      if (!roomoteConfig) {
-        return errorResult('ROOMOTE_CLOUD_TOKEN environment variable not set');
-      }
-
       const taskId = process.env.ROOMOTE_TASK_ID;
       if (!taskId?.trim()) {
         return errorResult('ROOMOTE_TASK_ID environment variable not set');
       }
 
-      const result = await handleSendChatReply(
-        {
-          taskId,
-          summary: params.message,
-          imagePaths: params.imagePaths,
-          imageArtifactIds: params.imageArtifactIds,
-          suggestions: params.suggestions,
-          chatReplySurface: chatReplySurfaceLabel,
-        },
-        artifactConfig,
-        roomoteConfig,
-      );
+      const result = relaysThroughFastParent
+        ? await handleRelayFastAgentChatReply(
+            {
+              runId: Number(process.env.ROOMOTE_TASK_RUN_ID),
+              taskId,
+              purpose: params.purpose,
+              message: params.message,
+              imagePaths: params.imagePaths,
+              imageArtifactIds: params.imageArtifactIds,
+            },
+            artifactConfig,
+          )
+        : await (async () => {
+            const roomoteConfig = getRoomoteConfig();
+            if (!roomoteConfig) {
+              return errorResult(
+                'ROOMOTE_CLOUD_TOKEN environment variable not set',
+              );
+            }
+            return handleSendChatReply(
+              {
+                taskId,
+                summary: params.message,
+                imagePaths: params.imagePaths,
+                imageArtifactIds: params.imageArtifactIds,
+                suggestions: params.suggestions,
+                chatReplySurface: chatReplySurfaceLabel,
+              },
+              artifactConfig,
+              roomoteConfig,
+            );
+          })();
 
       if (
         params.suggestions &&
@@ -1583,11 +1570,19 @@ function recordSuccessfulSlackTurnSatisfactionResult(
     const parsed = JSON.parse(text) as {
       success?: unknown;
       messageTs?: unknown;
+      relayed?: unknown;
+      relayId?: unknown;
     };
 
-    if (parsed.success === true && typeof parsed.messageTs === 'string') {
+    const satisfactionId =
+      typeof parsed.messageTs === 'string'
+        ? parsed.messageTs
+        : parsed.relayed === true && typeof parsed.relayId === 'string'
+          ? parsed.relayId
+          : null;
+    if (parsed.success === true && satisfactionId) {
       recordChatReplySatisfaction({
-        messageTs: parsed.messageTs,
+        messageTs: satisfactionId,
         tool,
         replyPurpose: options.replyPurpose,
         sessionId: options.sessionId,

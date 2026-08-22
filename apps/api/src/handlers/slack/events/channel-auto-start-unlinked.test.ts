@@ -43,6 +43,7 @@ vi.mock('../helpers/event-normalization.js', () => ({
 
 vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
+  createFastAgentSlackLiveTaskLauncher: vi.fn(() => vi.fn()),
   resolveSlackReactionNames: vi.fn().mockResolvedValue({
     ackEmoji: 'eyes',
     completionEmoji: 'white_check_mark',

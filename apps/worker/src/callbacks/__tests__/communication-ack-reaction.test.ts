@@ -63,9 +63,12 @@ describe('getCommunicationRunTaskCallbacks ack reaction cleanup', () => {
       communicationThreadId: '100.001',
       fastAgentParent: {
         sessionId: '11111111-1111-4111-8111-111111111111',
-        slackTeamId: 'T123',
-        slackChannel: 'C123',
-        slackThreadTs: '100.001',
+        conversation: {
+          surface: 'slack',
+          workspaceId: 'T123',
+          conversationId: '100.001',
+          replyTarget: { channelId: 'C123', threadId: '100.001' },
+        },
       },
     });
     const callbacks = getCommunicationRunTaskCallbacks(run);

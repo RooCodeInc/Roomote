@@ -41,6 +41,7 @@ import {
   filterSchema,
   saveAsanaConnectionSchema,
   saveNotionConnectionSchema,
+  saveRipplingConnectionSchema,
   saveGranolaConnectionSchema,
   saveElevenLabsConnectionSchema,
   saveGrafanaConnectionSchema,
@@ -114,6 +115,7 @@ import {
   exchangeSlackOAuthCodeCommand,
   connectSlackAppCommand,
   createSlackAppFromManifestCommand,
+  updateSlackAppManifestCommand,
   disconnectSlackAppCommand,
   getSlackInstallationCommand,
   startAuthenticateSlackAccountCommand,
@@ -209,6 +211,7 @@ import {
   getUserMcpConnectionsCommand,
   getAsanaConnectionCommand,
   getNotionConnectionCommand,
+  getRipplingConnectionCommand,
   getGranolaConnectionCommand,
   getElevenLabsConnectionCommand,
   getGrafanaConnectionCommand,
@@ -218,6 +221,7 @@ import {
   listDeploymentMcpIntegrationToolsCommand,
   saveAsanaConnectionCommand,
   saveNotionConnectionCommand,
+  saveRipplingConnectionCommand,
   saveGranolaConnectionCommand,
   saveElevenLabsConnectionCommand,
   saveGrafanaConnectionCommand,
@@ -428,6 +432,13 @@ import {
   setDeploymentTimeZoneCommand,
   setAnonymousAnalyticsCommand,
 } from '../commands/misc-settings';
+import {
+  backfillBrainTaskMemoriesCommand,
+  getBrainPageCommand,
+  getBrainSettingsCommand,
+  listBrainPagesCommand,
+  retryFailedBrainTaskMemoriesCommand,
+} from '../commands/brain';
 import {
   getReleaseNotesCommand,
   getReleaseStatusCommand,
@@ -1275,6 +1286,12 @@ export const appRouter = createRouter({
         createSlackAppFromManifestCommand(auth, input),
       ),
 
+    updateAppManifest: protectedProcedure
+      .input(z.object({ configToken: z.string().trim().min(1) }))
+      .mutation(({ ctx: { auth }, input }) =>
+        updateSlackAppManifestCommand(auth, input),
+      ),
+
     disconnectApp: protectedProcedure.mutation(({ ctx: { auth } }) =>
       disconnectSlackAppCommand(auth),
     ),
@@ -1769,6 +1786,10 @@ export const appRouter = createRouter({
       getNotionConnectionCommand(auth),
     ),
 
+    ripplingConnection: protectedProcedure.query(({ ctx: { auth } }) =>
+      getRipplingConnectionCommand(auth),
+    ),
+
     granolaConnection: protectedProcedure.query(({ ctx: { auth } }) =>
       getGranolaConnectionCommand(auth),
     ),
@@ -1847,6 +1868,12 @@ export const appRouter = createRouter({
       .input(saveNotionConnectionSchema)
       .mutation(({ ctx: { auth }, input }) =>
         saveNotionConnectionCommand(auth, input),
+      ),
+
+    saveRipplingConnection: protectedProcedure
+      .input(saveRipplingConnectionSchema)
+      .mutation(({ ctx: { auth }, input }) =>
+        saveRipplingConnectionCommand(auth, input),
       ),
 
     saveGranolaConnection: protectedProcedure
@@ -2294,6 +2321,7 @@ export const appRouter = createRouter({
           ),
           allowedModelIds: z.array(z.string().trim().min(1)),
           defaultModelId: z.string().trim().min(1),
+          orchestrationModelId: z.string().trim().min(1).nullable().optional(),
           helperModelId: z.string().trim().min(1).nullable(),
           visionModelId: z.string().trim().min(1).nullable(),
           codeReviewModelId: z.string().trim().min(1).nullable(),
@@ -2302,6 +2330,10 @@ export const appRouter = createRouter({
           codingModelReasoningEffort: z
             .enum(REASONING_EFFORT_VALUES)
             .nullable(),
+          orchestrationModelReasoningEffort: z
+            .enum(REASONING_EFFORT_VALUES)
+            .nullable()
+            .optional(),
           helperModelReasoningEffort: z
             .enum(REASONING_EFFORT_VALUES)
             .nullable(),
@@ -2938,6 +2970,35 @@ export const appRouter = createRouter({
       .mutation(({ ctx: { auth }, input }) =>
         updateExperimentalFlagCommand(auth, input),
       ),
+  }),
+
+  brain: createRouter({
+    get: protectedProcedure.query(({ ctx: { auth } }) =>
+      getBrainSettingsCommand(auth),
+    ),
+
+    listPages: protectedProcedure
+      .input(
+        z.object({
+          search: z.string().max(200).optional(),
+          namespaceId: z.string().max(100).optional(),
+          offset: z.number().int().min(0).default(0),
+          limit: z.number().int().min(1).max(100).default(100),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) => listBrainPagesCommand(auth, input)),
+
+    getPage: protectedProcedure
+      .input(z.object({ slug: z.string().min(1).max(512) }))
+      .query(({ ctx: { auth }, input }) => getBrainPageCommand(auth, input)),
+
+    backfillTaskMemories: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      backfillBrainTaskMemoriesCommand(auth),
+    ),
+
+    retryFailedTaskMemories: protectedProcedure.mutation(({ ctx: { auth } }) =>
+      retryFailedBrainTaskMemoriesCommand(auth),
+    ),
   }),
 
   miscSettings: createRouter({

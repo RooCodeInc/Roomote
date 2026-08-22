@@ -105,6 +105,7 @@ import {
 import { wrapCommunicationMessage } from './communication-message-prompt';
 import { buildTaskGoalContinuationPrompt } from './task-goal';
 import { settleMissingChatCloseoutFallback } from './missing-chat-closeout-fallback-settlement';
+import { isMissingSlackReplyTargetProcedureError } from './slack-reply-target';
 
 function formatEnvironmentInstructions(
   instructions?: string,
@@ -1222,6 +1223,22 @@ export const runTask = async ({
           }
           return result;
         } catch (error) {
+          // A rolled-back API (the supported N-1 target) predates these
+          // procedures entirely, and tRPC reports that as NOT_FOUND. The
+          // procedures themselves never answer NOT_FOUND (a missing
+          // authorization is a null result), so this is unambiguous version
+          // skew. Reply-target routing did not exist on that release either,
+          // so canonical routing IS its correct behavior; blocking would
+          // instead stall every queued prompt until the snapshot is
+          // replaced.
+          if (isMissingSlackReplyTargetProcedureError(error)) {
+            delete context.slackReplyTarget;
+            logger.warn(
+              `[runTask] Slack reply target procedures are unavailable on this API (rolled-back release?); delivering with canonical routing`,
+            );
+            return result;
+          }
+
           return {
             shouldReconnect: false,
             shouldBlockPrompt: true,

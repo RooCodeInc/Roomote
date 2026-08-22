@@ -673,7 +673,7 @@ describe('enqueueTask initiator stamping', () => {
     const parentRun = await launchFresh({
       initiator: { kind: 'user', userId },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
       channels: { slackChannelId: 'C123', slackThreadTs: '123.456' },
       task: standardTaskInput({
@@ -714,7 +714,7 @@ describe('enqueueTask initiator stamping', () => {
     const parentRun = await launchFresh({
       initiator: { kind: 'user', userId },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
       channels: { slackChannelId: 'C123', slackThreadTs: '123.456' },
       task: standardTaskInput({
@@ -770,7 +770,7 @@ describe('enqueueTask initiator stamping', () => {
         displayName: 'Octo Fan',
       },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
       channels: {
         slackChannelId: 'C42',
@@ -839,7 +839,7 @@ describe('enqueueTask initiator stamping', () => {
         matchedUserId: userId,
       },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
     });
 
@@ -930,7 +930,7 @@ describe('enqueueTask snapshot resume', () => {
       }),
       initiator: { kind: 'user', userId },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
     });
 
@@ -967,11 +967,15 @@ describe('enqueueTask snapshot resume', () => {
 
   it('preserves Fast parent routing and communication isolation across resume', async () => {
     const userId = await createUser();
+    const fastAgentSessionId = '11111111-1111-4111-8111-111111111111';
     const fastAgentParent = {
-      sessionId: '11111111-1111-4111-8111-111111111111',
-      slackTeamId: 'T123',
-      slackChannel: 'C123',
-      slackThreadTs: '111.222',
+      sessionId: fastAgentSessionId,
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: '111.222',
+        replyTarget: { channelId: 'C123', threadId: '111.222' },
+      },
     };
     const freshRun = await launchFresh({
       task: standardTaskInput({
@@ -982,12 +986,13 @@ describe('enqueueTask snapshot resume', () => {
           communicationChannelId: 'C123',
           communicationThreadId: '111.222',
           communicationContextInherited: true,
+          fastAgentSessionId,
           fastAgentParent,
         },
       }),
       initiator: { kind: 'user', userId },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
     });
     const resumeTask: SnapshotResumeTask = {
@@ -1007,15 +1012,57 @@ describe('enqueueTask snapshot resume', () => {
 
     expect(resumePayload.communicationContextInherited).toBe(true);
     expect(resumePayload.fastAgentParent).toEqual(fastAgentParent);
+    expect(resumePayload.fastAgentSessionId).toBe(fastAgentSessionId);
+  });
+
+  it('preserves a Discord Fast session across resume', async () => {
+    const userId = await createUser();
+    const fastAgentSessionId = '33333333-3333-4333-8333-333333333333';
+    const freshRun = await launchFresh({
+      task: standardTaskInput({
+        payload: {
+          repo: 'acme/widgets',
+          description: 'Do the thing',
+          communicationProvider: 'discord',
+          communicationChannelId: 'channel-1',
+          communicationThreadId: 'child-thread-1',
+          fastAgentSessionId,
+        },
+      }),
+      initiator: { kind: 'user', userId },
+      workflow: 'standard',
+      surface: 'discord',
+      trigger: 'message',
+    });
+    const resumeTask: SnapshotResumeTask = {
+      type: TaskPayloadKind.SnapshotResume,
+      payload: {
+        repo: 'acme/widgets',
+        sourceSnapshotId: 'snap-fast-discord-1',
+        sourceRunId: freshRun.id,
+      },
+    } as SnapshotResumeTask;
+
+    const resumeRun = await enqueueTask(
+      { task: resumeTask, actingUserId: userId },
+      { enqueue: false },
+    );
+
+    expect(
+      (resumeRun.payload as Record<string, unknown>).fastAgentSessionId,
+    ).toBe(fastAgentSessionId);
   });
 
   it('recovers Fast parent isolation from an older ancestor in a resume chain', async () => {
     const userId = await createUser();
     const fastAgentParent = {
       sessionId: '22222222-2222-4222-8222-222222222222',
-      slackTeamId: 'T123',
-      slackChannel: 'C123',
-      slackThreadTs: '333.444',
+      conversation: {
+        surface: 'slack' as const,
+        workspaceId: 'T123',
+        conversationId: '333.444',
+        replyTarget: { channelId: 'C123', threadId: '333.444' },
+      },
     };
     const freshRun = await launchFresh({
       task: standardTaskInput({
@@ -1028,7 +1075,7 @@ describe('enqueueTask snapshot resume', () => {
       }),
       initiator: { kind: 'user', userId },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
     });
     const [legacyResume] = await db
@@ -1178,7 +1225,7 @@ describe('enqueueTask snapshot resume', () => {
       }),
       initiator: { kind: 'user', userId },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
     });
 
@@ -1437,7 +1484,7 @@ describe('enqueueTaskRelaunch failed start', () => {
     const failedRun = await launchFresh({
       initiator: { kind: 'user', userId },
       workflow: 'standard',
-      surface: 'slack',
+      surface: 'slack' as const,
       trigger: 'message',
     });
 
@@ -1553,6 +1600,158 @@ describe('enqueueTask PR linkage', () => {
         { enqueue: false },
       ),
     ).rejects.toThrow('prLinkage');
+  });
+
+  it('adds later review runs to the existing PR task and updates its linkage', async () => {
+    const prNumber = 79;
+    const firstSha = 'd'.repeat(40);
+    const secondSha = 'e'.repeat(40);
+    const prUrl = `https://github.com/acme/widgets/pull/${prNumber}`;
+    const makeTask = (headSha: string) =>
+      ({
+        type:
+          headSha === firstSha
+            ? TaskPayloadKind.GithubPrReview
+            : TaskPayloadKind.GithubPrReviewSync,
+        requestedWorkKindDecision: explicitWorkKind,
+        payload: {
+          repo: 'acme/widgets',
+          prNumber,
+          prTitle: 'Keep one review task',
+          prUrl,
+          headSha,
+        },
+      }) as FreshTaskLaunch['task'];
+    const makeLinkage = (prSha: string) => ({
+      provider: 'github' as const,
+      repository: 'acme/widgets',
+      prNumber,
+      prUrl,
+      prTitle: 'Keep one review task',
+      prSha,
+    });
+
+    const firstRun = await enqueueTask(
+      {
+        task: makeTask(firstSha),
+        initiator: { kind: 'automation', key: 'review_code' },
+        workflow: 'pr_review',
+        surface: 'github',
+        trigger: 'webhook',
+        prLinkage: {
+          ...makeLinkage(firstSha),
+          githubReactionId: 101,
+          githubCheckRunId: 202,
+          githubReviewCommentId: 303,
+        },
+      },
+      { enqueue: false, skipEarlyTitleGeneration: true },
+    );
+    createdTaskIds.push(firstRun.taskId);
+
+    await db
+      .update(taskRuns)
+      .set({
+        status: RunStatus.Completed,
+        startedAt: new Date(),
+        completedAt: new Date(),
+      })
+      .where(eq(taskRuns.id, firstRun.id));
+    await db
+      .update(tasks)
+      .set({ state: 'completed' })
+      .where(eq(tasks.id, firstRun.taskId));
+
+    const secondRun = await enqueueTask(
+      {
+        existingTaskId: firstRun.taskId,
+        task: makeTask(secondSha),
+        initiator: { kind: 'automation', key: 'review_code' },
+        workflow: 'pr_review',
+        surface: 'github',
+        trigger: 'webhook',
+        prLinkage: makeLinkage(secondSha),
+      },
+      { enqueue: false, skipEarlyTitleGeneration: true },
+    );
+
+    const racingRun = await enqueueTask(
+      {
+        existingTaskId: firstRun.taskId,
+        task: makeTask('f'.repeat(40)),
+        initiator: { kind: 'automation', key: 'review_code' },
+        workflow: 'pr_review',
+        surface: 'github',
+        trigger: 'webhook',
+        prLinkage: makeLinkage('f'.repeat(40)),
+      },
+      { enqueue: false, skipEarlyTitleGeneration: true },
+    );
+
+    const persistedTask = await db.query.tasks.findFirst({
+      where: eq(tasks.id, firstRun.taskId),
+    });
+    const persistedRuns = await db.query.taskRuns.findMany({
+      where: eq(taskRuns.taskId, firstRun.taskId),
+    });
+    const persistedLinkage = await db.query.taskPullRequests.findFirst({
+      where: eq(taskPullRequests.taskId, firstRun.taskId),
+    });
+
+    expect(secondRun.taskId).toBe(firstRun.taskId);
+    expect(secondRun.id).not.toBe(firstRun.id);
+    expect(racingRun.id).toBe(secondRun.id);
+    expect(secondRun.payloadKind).toBe(TaskPayloadKind.GithubPrReviewSync);
+    expect(secondRun.payload).toMatchObject({ headSha: secondSha });
+    expect(persistedTask?.state).toBe('active');
+    expect(persistedRuns).toHaveLength(2);
+    expect(persistedLinkage?.prSha).toBe(secondSha);
+    expect(persistedLinkage?.githubReactionId).toBe(101);
+    expect(persistedLinkage?.githubCheckRunId).toBe(202);
+    expect(persistedLinkage?.githubReviewCommentId).toBe(303);
+  });
+
+  it('serializes concurrent first reviews into one durable PR task', async () => {
+    const prNumber = 80;
+    const prUrl = `https://github.com/acme/widgets/pull/${prNumber}`;
+    const input = {
+      task: {
+        type: TaskPayloadKind.GithubPrReview,
+        requestedWorkKindDecision: explicitWorkKind,
+        payload: {
+          repo: 'acme/widgets',
+          prNumber,
+          prTitle: 'Serialize review creation',
+          prUrl,
+          headSha: 'a'.repeat(40),
+        },
+      },
+      initiator: { kind: 'automation', key: 'review_code' } as const,
+      workflow: 'pr_review' as const,
+      surface: 'github' as const,
+      trigger: 'webhook' as const,
+      prLinkage: {
+        provider: 'github' as const,
+        repository: 'acme/widgets',
+        prNumber,
+        prUrl,
+        prSha: 'a'.repeat(40),
+      },
+    } satisfies FreshTaskLaunch;
+
+    const [firstRun, racingRun] = await Promise.all([
+      enqueueTask(input, { enqueue: false, skipEarlyTitleGeneration: true }),
+      enqueueTask(input, { enqueue: false, skipEarlyTitleGeneration: true }),
+    ]);
+    createdTaskIds.push(firstRun.taskId);
+
+    const persistedRuns = await db.query.taskRuns.findMany({
+      where: eq(taskRuns.taskId, firstRun.taskId),
+    });
+
+    expect(racingRun.taskId).toBe(firstRun.taskId);
+    expect(racingRun.id).toBe(firstRun.id);
+    expect(persistedRuns).toHaveLength(1);
   });
 });
 
@@ -2055,7 +2254,7 @@ describe('pr_review queue scope dedup', () => {
     await redis.flushall();
   });
 
-  it('persists the scope and transactionally cancels the evicted run', async () => {
+  it('keeps one queued run and task for the same GitHub PR', async () => {
     const uniquePrNumber = 424_242;
     const scope = `acme/queue-atomic:${uniquePrNumber}`;
     const linkage = {
@@ -2091,26 +2290,24 @@ describe('pr_review queue scope dedup', () => {
     const newer = await enqueueTask(makeInput('b'.repeat(40)), {
       skipEarlyTitleGeneration: true,
     });
-    createdTaskIds.push(newer.taskId);
+    expect(newer.id).toBe(older.id);
+    expect(newer.taskId).toBe(older.taskId);
 
     const persistedRuns = await db.query.taskRuns.findMany({
       where: inArray(taskRuns.id, [older.id, newer.id]),
     });
     const persistedOlder = persistedRuns.find((run) => run.id === older.id);
-    const persistedNewer = persistedRuns.find((run) => run.id === newer.id);
 
     expect(persistedOlder?.queueScope).toBe(scope);
-    expect(persistedOlder?.status).toBe(RunStatus.Canceled);
-    expect(persistedOlder?.canceledAt).not.toBeNull();
-    expect(persistedNewer?.queueScope).toBe(scope);
-    expect(persistedNewer?.status).toBe(RunStatus.Pending);
+    expect(persistedOlder?.status).toBe(RunStatus.Pending);
+    expect(persistedRuns).toHaveLength(1);
 
     const queued = await TaskRunQueue.getInstance().dequeue(false);
     expect(queued).toEqual({ id: newer.id, scope });
     await TaskRunQueue.getInstance().releaseLock(scope, newer.id);
   });
 
-  it('keeps the first queued re-review and cancels only a racing incoming run', async () => {
+  it('returns the first queued GitHub re-review for a racing launch', async () => {
     const uniquePrNumber = 424_243;
     const linkage = {
       provider: 'github' as const,
@@ -2143,7 +2340,7 @@ describe('pr_review queue scope dedup', () => {
     const incoming = await enqueueTask(makeInput('b'.repeat(40)), {
       skipEarlyTitleGeneration: true,
     });
-    createdTaskIds.push(existing.taskId, incoming.taskId);
+    createdTaskIds.push(existing.taskId);
 
     const persistedRuns = await db.query.taskRuns.findMany({
       where: inArray(taskRuns.id, [existing.id, incoming.id]),
@@ -2152,9 +2349,9 @@ describe('pr_review queue scope dedup', () => {
     expect(persistedRuns.find((run) => run.id === existing.id)?.status).toBe(
       RunStatus.Pending,
     );
-    expect(persistedRuns.find((run) => run.id === incoming.id)?.status).toBe(
-      RunStatus.Canceled,
-    );
+    expect(incoming.id).toBe(existing.id);
+    expect(incoming.taskId).toBe(existing.taskId);
+    expect(persistedRuns).toHaveLength(1);
   });
 
   it('keeps non-GitHub re-reviews immediate and replaces a stale queued head', async () => {

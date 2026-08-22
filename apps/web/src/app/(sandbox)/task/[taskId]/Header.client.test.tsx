@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const { useSandboxLayoutMock, useTRPCMock, updateTitleMutationMock } =
@@ -66,11 +66,13 @@ function renderHeader(
     ...sessionOverride,
   } as Parameters<typeof Header>[0]['session'];
 
-  return render(
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <Header session={session} />
     </QueryClientProvider>,
   );
+
+  return { ...result, queryClient };
 }
 
 describe('Header', () => {
@@ -99,6 +101,9 @@ describe('Header', () => {
         },
         list: {
           queryKey: () => ['tasks.list'],
+        },
+        search: {
+          queryKey: () => ['tasks.search'],
         },
       },
     });
@@ -135,5 +140,32 @@ describe('Header', () => {
     });
 
     expect(screen.queryByText('OpenCode')).not.toBeInTheDocument();
+  });
+
+  it('refreshes task lists after renaming a task', async () => {
+    const { queryClient } = renderHeader();
+    const invalidateQueries = vi.spyOn(queryClient, 'invalidateQueries');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit task title' }));
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: 'Renamed task' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(updateTitleMutationMock).toHaveBeenCalledWith(
+        {
+          taskId: 'task-123',
+          title: 'Renamed task',
+        },
+        expect.any(Object),
+      );
+      expect(invalidateQueries).toHaveBeenCalledWith({
+        queryKey: ['tasks.list'],
+      });
+      expect(invalidateQueries).toHaveBeenCalledWith({
+        queryKey: ['tasks.search'],
+      });
+    });
   });
 });

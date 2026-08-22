@@ -110,6 +110,7 @@ type RuntimeModelFieldStatus = {
 
 type TaskModelSettingsRuntimeStatus = {
   codingModel: RuntimeModelFieldStatus;
+  orchestrationModel: RuntimeModelFieldStatus;
   helperModel: RuntimeModelFieldStatus;
   visionModel: RuntimeModelFieldStatus;
   codeReviewModel: RuntimeModelFieldStatus;
@@ -174,6 +175,11 @@ function resolveRuntimeModelStatus(options: {
   const envCodingModel = isConfiguredEnvValue(process.env.R_MODEL)
     ? process.env.R_MODEL!.trim()
     : null;
+  const envOrchestrationModel = isConfiguredEnvValue(
+    process.env.R_ORCHESTRATION_MODEL,
+  )
+    ? process.env.R_ORCHESTRATION_MODEL!.trim()
+    : null;
   const envHelperModel = isConfiguredEnvValue(process.env.R_SMALL_MODEL)
     ? process.env.R_SMALL_MODEL!.trim()
     : null;
@@ -192,6 +198,8 @@ function resolveRuntimeModelStatus(options: {
     ? process.env.R_PLANNING_MODEL!.trim()
     : null;
   const persistedCodingModel = options.persisted.roomoteModel;
+  const persistedOrchestrationModel =
+    options.persisted.roomoteOrchestrationModel;
   const persistedHelperModel = options.persisted.roomoteSmallModel;
   const persistedVisionModel = options.persisted.roomoteVisionModel;
   const persistedCodeReviewModel = options.persisted.roomoteCodeReviewModel;
@@ -204,6 +212,14 @@ function resolveRuntimeModelStatus(options: {
     : persistedCodingModel
       ? 'database'
       : 'default';
+  const orchestrationEffective =
+    envOrchestrationModel ?? persistedOrchestrationModel;
+  const orchestrationSource: RuntimeModelFieldStatus['source'] =
+    envOrchestrationModel
+      ? 'env'
+      : persistedOrchestrationModel
+        ? 'database'
+        : 'same-as-coding';
   const helperEffective = envHelperModel ?? persistedHelperModel;
   const helperSource: RuntimeModelFieldStatus['source'] = envHelperModel
     ? 'env'
@@ -245,6 +261,16 @@ function resolveRuntimeModelStatus(options: {
       ...resolveRuntimeReasoningStatus(
         'R_MODEL_REASONING_EFFORT',
         options.persisted.roomoteModelReasoningEffort,
+      ),
+    },
+    orchestrationModel: {
+      effectiveModelId: orchestrationEffective,
+      persistedModelId: persistedOrchestrationModel,
+      source: orchestrationSource,
+      managedByEnv: envOrchestrationModel !== null,
+      ...resolveRuntimeReasoningStatus(
+        'R_ORCHESTRATION_MODEL_REASONING_EFFORT',
+        options.persisted.roomoteOrchestrationModelReasoningEffort,
       ),
     },
     helperModel: {
@@ -338,6 +364,7 @@ export async function getTaskModelSettingsCommand(
     [
       settings.defaultModelId,
       persistedRuntimeModelConfig.roomoteModel,
+      persistedRuntimeModelConfig.roomoteOrchestrationModel,
       persistedRuntimeModelConfig.roomoteSmallModel,
       persistedRuntimeModelConfig.roomoteVisionModel,
       persistedRuntimeModelConfig.roomoteCodeReviewModel,
@@ -400,7 +427,13 @@ export async function getTaskModelRoleDefaultsCommand(
 ): Promise<{
   defaultModelId: string;
   roles: Record<
-    'coding' | 'helper' | 'vision' | 'codeReview' | 'explore' | 'planning',
+    | 'coding'
+    | 'orchestration'
+    | 'helper'
+    | 'vision'
+    | 'codeReview'
+    | 'explore'
+    | 'planning',
     TaskModelRoleDefault
   >;
 }> {
@@ -421,6 +454,7 @@ export async function getTaskModelRoleDefaultsCommand(
     defaultModelId: settings.defaultModelId,
     roles: {
       coding: pick(runtimeModels.codingModel),
+      orchestration: pick(runtimeModels.orchestrationModel),
       helper: pick(runtimeModels.helperModel),
       vision: pick(runtimeModels.visionModel),
       codeReview: pick(runtimeModels.codeReviewModel),
@@ -989,6 +1023,10 @@ function removeTaskModelsForProvider({
       runtimeModelConfig.roomoteModel,
       providerId,
     ),
+    roomoteOrchestrationModel: clearRuntimeModelForProvider(
+      runtimeModelConfig.roomoteOrchestrationModel,
+      providerId,
+    ),
     roomoteSmallModel: clearRuntimeModelForProvider(
       runtimeModelConfig.roomoteSmallModel,
       providerId,
@@ -1197,12 +1235,14 @@ export async function updateTaskModelSettingsCommand(
     }>;
     allowedModelIds: string[];
     defaultModelId: string;
+    orchestrationModelId?: string | null;
     helperModelId: string | null;
     visionModelId: string | null;
     codeReviewModelId: string | null;
     exploreModelId?: string | null;
     planningModelId: string | null;
     codingModelReasoningEffort: ReasoningEffort | null;
+    orchestrationModelReasoningEffort?: ReasoningEffort | null;
     helperModelReasoningEffort: ReasoningEffort | null;
     visionModelReasoningEffort: ReasoningEffort | null;
     codeReviewModelReasoningEffort: ReasoningEffort | null;
@@ -1220,6 +1260,7 @@ export async function updateTaskModelSettingsCommand(
         models?: string;
         allowedModelIds?: string;
         defaultModelId?: string;
+        orchestrationModelId?: string;
         helperModelId?: string;
         visionModelId?: string;
         codeReviewModelId?: string;
@@ -1234,6 +1275,7 @@ export async function updateTaskModelSettingsCommand(
     models?: string;
     allowedModelIds?: string;
     defaultModelId?: string;
+    orchestrationModelId?: string;
     helperModelId?: string;
     visionModelId?: string;
     codeReviewModelId?: string;
@@ -1254,6 +1296,18 @@ export async function updateTaskModelSettingsCommand(
     ...new Set(input.allowedModelIds.map(normalizeTaskModelId)),
   ].filter(Boolean);
   const normalizedDefaultModelId = normalizeTaskModelId(input.defaultModelId);
+  const normalizedOrchestrationModelId =
+    input.orchestrationModelId === undefined
+      ? undefined
+      : input.orchestrationModelId === null
+        ? null
+        : normalizeTaskModelId(input.orchestrationModelId);
+  const normalizedOrchestrationModelReasoningEffort =
+    input.orchestrationModelReasoningEffort === undefined
+      ? undefined
+      : normalizeOptionalReasoningEffort(
+          input.orchestrationModelReasoningEffort,
+        );
   const normalizedHelperModelId =
     input.helperModelId === null
       ? null
@@ -1302,6 +1356,14 @@ export async function updateTaskModelSettingsCommand(
   }
 
   if (
+    normalizedOrchestrationModelId !== undefined &&
+    normalizedOrchestrationModelId !== null &&
+    !knownModelIds.has(normalizedOrchestrationModelId)
+  ) {
+    fieldErrors.orchestrationModelId = 'Choose a valid orchestration model.';
+  }
+
+  if (
     normalizedHelperModelId !== null &&
     !knownModelIds.has(normalizedHelperModelId)
   ) {
@@ -1338,6 +1400,9 @@ export async function updateTaskModelSettingsCommand(
   }
 
   const codingManagedByEnv = isConfiguredEnvValue(process.env.R_MODEL);
+  const orchestrationManagedByEnv = isConfiguredEnvValue(
+    process.env.R_ORCHESTRATION_MODEL,
+  );
   const helperManagedByEnv = isConfiguredEnvValue(process.env.R_SMALL_MODEL);
   const visionManagedByEnv = isConfiguredEnvValue(process.env.R_VISION_MODEL);
   const codeReviewManagedByEnv = isConfiguredEnvValue(
@@ -1349,6 +1414,9 @@ export async function updateTaskModelSettingsCommand(
   );
   const codingReasoningManagedByEnv =
     resolveEnvReasoningEffort('R_MODEL_REASONING_EFFORT') !== null;
+  const orchestrationReasoningManagedByEnv =
+    resolveEnvReasoningEffort('R_ORCHESTRATION_MODEL_REASONING_EFFORT') !==
+    null;
   const helperReasoningManagedByEnv =
     resolveEnvReasoningEffort('R_SMALL_MODEL_REASONING_EFFORT') !== null;
   const visionReasoningManagedByEnv =
@@ -1372,6 +1440,11 @@ export async function updateTaskModelSettingsCommand(
     roomoteModel: codingManagedByEnv
       ? persistedRuntimeModelConfig.roomoteModel
       : normalizedDefaultModelId,
+    roomoteOrchestrationModel: orchestrationManagedByEnv
+      ? persistedRuntimeModelConfig.roomoteOrchestrationModel
+      : normalizedOrchestrationModelId === undefined
+        ? persistedRuntimeModelConfig.roomoteOrchestrationModel
+        : normalizedOrchestrationModelId,
     roomoteSmallModel: helperManagedByEnv
       ? persistedRuntimeModelConfig.roomoteSmallModel
       : normalizedHelperModelId,
@@ -1392,6 +1465,11 @@ export async function updateTaskModelSettingsCommand(
     roomoteModelReasoningEffort: codingReasoningManagedByEnv
       ? persistedRuntimeModelConfig.roomoteModelReasoningEffort
       : normalizeOptionalReasoningEffort(input.codingModelReasoningEffort),
+    roomoteOrchestrationModelReasoningEffort: orchestrationReasoningManagedByEnv
+      ? persistedRuntimeModelConfig.roomoteOrchestrationModelReasoningEffort
+      : normalizedOrchestrationModelReasoningEffort === undefined
+        ? persistedRuntimeModelConfig.roomoteOrchestrationModelReasoningEffort
+        : normalizedOrchestrationModelReasoningEffort,
     roomoteSmallModelReasoningEffort: helperReasoningManagedByEnv
       ? persistedRuntimeModelConfig.roomoteSmallModelReasoningEffort
       : normalizeOptionalReasoningEffort(input.helperModelReasoningEffort),

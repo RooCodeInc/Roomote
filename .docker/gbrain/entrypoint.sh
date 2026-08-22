@@ -259,13 +259,20 @@ fi
 # Roomote's collectors write through gbrain's MCP API. Pointing the default
 # source at a real directory makes every successful put_page also render a
 # Markdown artifact there. Roomote performs one bounded, cited daily digest
-# through gbrain's built-in `synthesize` memory verb; the older per-transcript
-# reflection fan-out and reflection-pattern pass are deliberately disabled.
+# through its provider-neutral gateway; native dream reflection/pattern pages
+# remain disabled because they do not refresh existing entity prose. That
+# missing supported capability is tracked upstream:
+# https://github.com/garrytan/gbrain/issues/4294
 mkdir -p "$BRAIN_DIR"
 gbrain config set sync.repo_path "$BRAIN_DIR" >/dev/null
 gbrain config set dream.synthesize.session_corpus_dir "$BRAIN_DIR" >/dev/null
 gbrain config set dream.synthesize.enabled false >/dev/null
 gbrain config set dream.patterns.enabled false >/dev/null
+# Pin the latest native synthesis contract even while the phase is disabled,
+# so enabling it later uses one bounded validated completion rather than the
+# legacy multi-turn child loop.
+gbrain config set dream.synthesize.mode oneshot >/dev/null
+gbrain config set dream.synthesize.link_manifest true >/dev/null
 # Roomote routes synthesis through an OpenAI-compatible gateway. gbrain's
 # legacy subagent loop only supports Anthropic directly, so non-Anthropic
 # models need the provider-neutral gateway loop or every dream child is
@@ -315,10 +322,9 @@ echo "[gbrain-entrypoint] reranker: $GBRAIN_RERANKER_MODEL"
 # invalidated"). Page content is preserved either way, and Roomote refuses to
 # ingest into a keyless brain at all, so there is rarely anything here yet.
 #
-# The middle step is not a typo. In gbrain 0.45.10.0 `config set
-# embedding_disabled false` prints "Set embedding_disabled = false" and does
-# not write the file, so the sentinel survives and keeps blocking embed. The
-# file edit is what actually clears it. Re-check on upgrade.
+# The middle step keeps the repair compatible with brains initialized by
+# older gbrain releases whose `config set embedding_disabled false` command
+# did not persist the change. The file edit is idempotent on newer releases.
 if [ "$BRAIN_PROVIDER" != "none" ] &&
   grep -q '"embedding_disabled": *true' "$CONFIG_FILE" 2>/dev/null; then
   echo "[gbrain-entrypoint] this brain predates its provider key; enabling semantic recall"

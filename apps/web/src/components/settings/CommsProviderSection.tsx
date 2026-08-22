@@ -86,6 +86,7 @@ import {
 import { Section } from './Section';
 import { TelegramLinkAccountStep } from './TelegramLinkAccountStep';
 import { DiscordSetupStatus } from './DiscordSetupStatus';
+import { SlackManifestUpdateDialog } from './SlackManifestUpdateDialog';
 
 function getProviderIconId(providerId: CommsProviderId): string {
   return providerId === 'microsoft' ? 'teams' : providerId;
@@ -537,7 +538,10 @@ export function CommsProviderSection({
         title={provider.label}
         action={
           provider.id === 'slack' ? (
-            <SlackWorkspaceAuthButton configured={hasConfiguredValues} />
+            <div className="flex items-center gap-2">
+              <SlackManifestUpdateDialog />
+              <SlackWorkspaceAuthButton configured={hasConfiguredValues} />
+            </div>
           ) : null
         }
       >
@@ -574,7 +578,7 @@ export function CommsProviderSection({
                 !provider.runtimeSatisfied && provider.id === 'telegram'
                   ? 'Roomote generates a webhook secret automatically, registers the webhook when you save, and defaults Telegram task launches to the admin who saves this configuration.'
                   : !provider.runtimeSatisfied && provider.id === 'discord'
-                    ? 'Roomote validates the token, derives the bot identity, and registers /new, /goal, /fast, /link, and /help when you save.'
+                    ? 'Roomote validates the token, derives the bot identity, and registers /new, /goal, /link, and /help when you save.'
                     : undefined
               }
               onCreateSlackApp={(configToken) =>

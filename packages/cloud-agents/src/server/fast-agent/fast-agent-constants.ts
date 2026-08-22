@@ -1,9 +1,7 @@
-export const FAST_AGENT_MODEL_ROLE = 'primary' as const;
-export const FAST_AGENT_MAX_STEPS = 50;
+export const FAST_AGENT_MODEL_ROLE = 'orchestration' as const;
 export const FAST_AGENT_BRAIN_INSTRUCTIONS = `Use Brain as lightweight conversational context, not as an exhaustive research assignment.
 
-- Fast mode automatically performs one Brain query before making its first decision. Treat that preflight result as the lay of the land; do not repeat it.
-- Make the narrowest lookup that is likely to help with the user's request.
+- When Brain context would help, make the narrowest native integration call that is likely to answer the user's request.
 - For ordinary conversation, one useful Brain result is usually enough. Answer as soon as you have helpful context.
 - Do not try to prove complete coverage, enumerate every possible source, or keep searching merely because more context might exist.
 - Make another Brain call only when the previous result reveals one specific gap that must be closed to answer accurately.

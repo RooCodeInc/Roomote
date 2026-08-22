@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   select: vi.fn(),
   findGithubInstallation: vi.fn(),
   brainEnv: { R_GBRAIN_URL: undefined as string | undefined },
-  isBrainConfigured: vi.fn(),
+  isBrainProviderConfigured: vi.fn(),
 }));
 
 vi.mock('@roomote/auth', () => ({
@@ -17,7 +17,6 @@ vi.mock('@roomote/auth', () => ({
 
 vi.mock('@roomote/env', () => ({
   Env: mocks.brainEnv,
-  isBrainConfigured: mocks.isBrainConfigured,
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -36,6 +35,7 @@ vi.mock('@roomote/db/server', () => ({
   },
   eq: vi.fn(() => 'enabled-filter'),
   githubInstallations: { suspendedAt: 'suspendedAt' },
+  isBrainProviderConfigured: mocks.isBrainProviderConfigured,
   isNull: vi.fn(() => 'not-suspended-filter'),
 }));
 
@@ -58,10 +58,13 @@ const auditContext = {
   userId: 'user-1',
   apiBaseUrl: 'https://api.example.com',
   sessionId: 'session-1',
-  slackTeamId: 'team-1',
-  slackChannel: 'channel-1',
-  slackThreadTs: '100.1',
-  slackMessageTs: '100.2',
+  conversation: {
+    surface: 'slack' as const,
+    workspaceId: 'team-1',
+    conversationId: '100.1',
+    replyTarget: { channelId: 'channel-1', threadId: '100.1' },
+  },
+  messageId: '100.2',
 };
 
 describe('fast-agent integration broker', () => {
@@ -77,7 +80,7 @@ describe('fast-agent integration broker', () => {
     mocks.createAuthToken.mockResolvedValue('control-plane-token');
     mocks.findGithubInstallation.mockResolvedValue(undefined);
     mocks.brainEnv.R_GBRAIN_URL = undefined;
-    mocks.isBrainConfigured.mockReturnValue(false);
+    mocks.isBrainProviderConfigured.mockResolvedValue(false);
     mocks.beginIntegrationCall.mockResolvedValue({
       id: 'audit-1',
       startedAt: new Date('2026-08-16T00:00:00.000Z'),
@@ -86,6 +89,10 @@ describe('fast-agent integration broker', () => {
     mocks.listMcpTools.mockResolvedValue([
       { name: 'search', inputSchema: { type: 'object' } },
     ]);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('exposes the deployment GitHub App through its read-only router MCP', async () => {
@@ -102,12 +109,13 @@ describe('fast-agent integration broker', () => {
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
       url: 'https://api.example.com/api/mcp-routing/github',
       headers: { Authorization: 'Bearer control-plane-token' },
+      signal: expect.any(AbortSignal),
     });
   });
 
   it('exposes the read-only Brain proxy when the Brain is configured', async () => {
     mocks.brainEnv.R_GBRAIN_URL = 'http://gbrain:8931';
-    mocks.isBrainConfigured.mockReturnValue(true);
+    mocks.isBrainProviderConfigured.mockResolvedValue(true);
 
     const integrations = await listFastAgentIntegrations({
       userId: 'user-1',
@@ -127,12 +135,13 @@ describe('fast-agent integration broker', () => {
     expect(mocks.listMcpTools).toHaveBeenCalledWith({
       url: 'https://api.example.com/api/mcp/gbrain',
       headers: { Authorization: 'Bearer control-plane-token' },
+      signal: expect.any(AbortSignal),
     });
   });
 
   it('does not probe or expose Brain when it is not fully configured', async () => {
     mocks.brainEnv.R_GBRAIN_URL = 'http://gbrain:8931';
-    mocks.isBrainConfigured.mockReturnValue(false);
+    mocks.isBrainProviderConfigured.mockResolvedValue(false);
 
     await expect(
       listFastAgentIntegrations({
@@ -146,7 +155,7 @@ describe('fast-agent integration broker', () => {
 
   it('does not expose a wired Brain whose proxy is not usable yet', async () => {
     mocks.brainEnv.R_GBRAIN_URL = 'http://gbrain:8931';
-    mocks.isBrainConfigured.mockReturnValue(true);
+    mocks.isBrainProviderConfigured.mockResolvedValue(true);
     mocks.listMcpTools.mockRejectedValue(
       new Error('The Brain inference provider is not configured'),
     );
@@ -192,6 +201,55 @@ describe('fast-agent integration broker', () => {
     expect(mocks.listMcpTools).toHaveBeenCalledOnce();
   });
 
+  it('serves stale tools immediately while a bounded refresh hangs', async () => {
+    vi.useFakeTimers({ now: new Date('2026-08-19T00:00:00.000Z') });
+    mocks.enabledRows = [{ mcpId: 'notion' }];
+
+    await expect(
+      listFastAgentIntegrations({
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: 'notion',
+        tools: [expect.objectContaining({ name: 'search' })],
+      }),
+    ]);
+
+    mocks.listMcpTools.mockImplementationOnce(
+      () => new Promise(() => undefined),
+    );
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+
+    await expect(
+      listFastAgentIntegrations({
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: 'notion',
+        tools: [expect.objectContaining({ name: 'search' })],
+      }),
+    ]);
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(
+      listFastAgentIntegrations({
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        id: 'notion',
+        tools: [expect.objectContaining({ name: 'search' })],
+      }),
+    ]);
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
+  });
+
   it('excludes tools disabled by the deployment', async () => {
     mocks.enabledRows = [{ mcpId: 'notion', disabledTools: ['search'] }];
 
@@ -224,6 +282,31 @@ describe('fast-agent integration broker', () => {
       expect.objectContaining({ id: 'notion', tools: [{ name: 'search' }] }),
     ]);
 
+    expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
+  });
+
+  it('times out hung tool discovery without poisoning the cache', async () => {
+    vi.useFakeTimers();
+    mocks.enabledRows = [{ mcpId: 'notion' }];
+    mocks.listMcpTools
+      .mockImplementationOnce(() => new Promise(() => undefined))
+      .mockResolvedValueOnce([{ name: 'search' }]);
+
+    const timedOut = listFastAgentIntegrations({
+      userId: 'user-1',
+      apiBaseUrl: 'https://api.example.com',
+    });
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await expect(timedOut).resolves.toEqual([]);
+    await expect(
+      listFastAgentIntegrations({
+        userId: 'user-1',
+        apiBaseUrl: 'https://api.example.com',
+      }),
+    ).resolves.toEqual([
+      expect.objectContaining({ id: 'notion', tools: [{ name: 'search' }] }),
+    ]);
     expect(mocks.listMcpTools).toHaveBeenCalledTimes(2);
   });
 
@@ -272,6 +355,7 @@ describe('fast-agent integration broker', () => {
       toolName: 'search',
       args: { query: 'roadmap' },
       toolCallId: 'fast:audit-1:notion:search',
+      signal: expect.any(AbortSignal),
     });
     expect(mocks.beginIntegrationCall).toHaveBeenCalledWith({
       slackQuickAnswerId: 'session-1',
@@ -335,6 +419,40 @@ describe('fast-agent integration broker', () => {
       id: 'audit-1',
       status: 'failed',
       error: 'integration unavailable',
+      startedAt: new Date('2026-08-16T00:00:00.000Z'),
+    });
+  });
+
+  it('times out a hung integration call and records the failure', async () => {
+    vi.useFakeTimers();
+    mocks.callMcpTool.mockImplementation(() => new Promise(() => undefined));
+
+    const call = callFastAgentIntegration(
+      auditContext,
+      [
+        {
+          id: 'notion',
+          name: 'Notion',
+          description: 'Knowledge',
+          tools: [{ name: 'search' }],
+        },
+      ],
+      {
+        integrationId: 'notion',
+        toolName: 'search',
+        args: { query: 'roadmap' },
+      },
+    );
+    const timedOut = expect(call).rejects.toThrow(
+      'Fast notion/search integration call timed out after 60000ms.',
+    );
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    await timedOut;
+    expect(mocks.completeIntegrationCall).toHaveBeenCalledWith({
+      id: 'audit-1',
+      status: 'failed',
+      error: 'Fast notion/search integration call timed out after 60000ms.',
       startedAt: new Date('2026-08-16T00:00:00.000Z'),
     });
   });

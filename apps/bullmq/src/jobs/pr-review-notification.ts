@@ -25,6 +25,7 @@ import {
   isDurablePrReviewNotificationRequest,
   renewPrReviewNotificationRequestLease,
   migrateLegacyPrReviewNotificationRequest,
+  notifyFastAgentParentOnPrFeedback,
   preparePrReviewNotificationDelivery,
   prReviewNotificationRequestSchema,
   recordPrReviewNotificationDeliveryBestEffort,
@@ -315,7 +316,16 @@ export const prReviewNotificationJob = async (
       eq(taskPullRequests.repository, data.repository),
       eq(taskPullRequests.prNumber, data.prNumber),
     ),
-    columns: { status: true, autoHandleFeedbackByUserId: true },
+    columns: {
+      sourceControlProvider: true,
+      host: true,
+      repository: true,
+      prNumber: true,
+      prTitle: true,
+      prUrl: true,
+      status: true,
+      autoHandleFeedbackByUserId: true,
+    },
   });
 
   if (prLink?.status === 'merged' || prLink?.status === 'closed') {
@@ -376,6 +386,39 @@ export const prReviewNotificationJob = async (
     const textWithQuestion = followUp
       ? `${delivery.text}\n${followUp.question}`
       : delivery.text;
+    const roomoteReviewIdentity = events.find(
+      (event) => event.reviewTaskId && event.reviewHeadSha,
+    );
+    const roomoteReviewResult = events.find(
+      (event) => event.reviewResult,
+    )?.reviewResult;
+
+    await notifyFastAgentParentOnPrFeedback({
+      run: latestJob,
+      deliveryIds: data.deliveryIds ?? [],
+      pullRequest: {
+        provider:
+          prLink?.sourceControlProvider ??
+          data.sourceControlProvider ??
+          'github',
+        host: prLink?.host,
+        repository: prLink?.repository ?? data.repository,
+        number: prLink?.prNumber ?? data.prNumber,
+        title: prLink?.prTitle,
+        url: prLink?.prUrl ?? data.prUrl,
+        status: prLink?.status,
+      },
+      summary: delivery.text,
+      ...(roomoteReviewIdentity?.reviewTaskId &&
+      roomoteReviewIdentity.reviewHeadSha
+        ? {
+            reviewTaskId: roomoteReviewIdentity.reviewTaskId,
+            reviewHeadSha: roomoteReviewIdentity.reviewHeadSha,
+          }
+        : {}),
+      ...(roomoteReviewResult ? { reviewResult: roomoteReviewResult } : {}),
+      ...(followUp ? { suggestedActionPrompt: followUp.prompt } : {}),
+    });
 
     // Auto-handled PRs skip the offer entirely: the prepared follow-up is
     // dispatched straight into the owning task and the conversation gets an

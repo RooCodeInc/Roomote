@@ -29,8 +29,10 @@ import {
   useDeploymentMcpEnablements,
   useMcpOauthReadiness,
   useNotionConnection,
+  useRipplingConnection,
   useSaveAsanaConnection,
   useSaveNotionConnection,
+  useSaveRipplingConnection,
   useSaveGrafanaConnection,
   useSaveGranolaConnection,
   useSaveElevenLabsConnection,
@@ -53,6 +55,7 @@ import { useCustomMcpServers } from './CustomMcpServers';
 import {
   saveAsanaConnectionSchema,
   saveNotionConnectionSchema,
+  saveRipplingConnectionSchema,
   saveGrafanaConnectionSchema,
   saveGranolaConnectionSchema,
   saveElevenLabsConnectionSchema,
@@ -110,6 +113,8 @@ const DEEP_LINK_ENABLE_DESCRIPTIONS: Record<string, string> = {
   neon: 'Roomote will get database access to inspect schemas and query data.',
   notion:
     'Roomote will use one deployment-wide Notion internal integration. Notion controls its capabilities and which pages and data sources it can access.',
+  rippling:
+    "Roomote will keep Brain's employee directory and reporting structure current from one deployment-wide Rippling connection.",
   pylon:
     'Roomote will be able to inspect customer issues, message history, and account context.',
   posthog:
@@ -185,6 +190,10 @@ type NotionFormState = {
   internalIntegrationSecret: string;
 };
 
+type RipplingFormState = {
+  apiToken: string;
+};
+
 type GranolaFormState = {
   apiKey: string;
 };
@@ -241,6 +250,10 @@ function buildEmptyAsanaForm(): AsanaFormState {
 
 function buildEmptyNotionForm(): NotionFormState {
   return { internalIntegrationSecret: '' };
+}
+
+function buildEmptyRipplingForm(): RipplingFormState {
+  return { apiToken: '' };
 }
 
 function buildEmptyGranolaForm(): GranolaFormState {
@@ -362,6 +375,13 @@ function getNotionFieldErrors(
     internalIntegrationSecret:
       result.error.flatten().fieldErrors.internalIntegrationSecret,
   };
+}
+
+function getRipplingFieldErrors(
+  result: ReturnType<typeof saveRipplingConnectionSchema.safeParse>,
+): Partial<Record<keyof RipplingFormState, string[]>> {
+  if (result.success) return {};
+  return { apiToken: result.error.flatten().fieldErrors.apiToken };
 }
 
 function getGranolaFieldErrors(
@@ -935,6 +955,60 @@ function NotionConnectionFields({
   );
 }
 
+function RipplingConnectionFields({
+  form,
+  fieldErrors,
+  formError,
+  allowBlankToken,
+  onFieldChange,
+}: {
+  form: RipplingFormState;
+  fieldErrors: Partial<Record<keyof RipplingFormState, string[]>>;
+  formError: string | null;
+  allowBlankToken: boolean;
+  onFieldChange: (field: keyof RipplingFormState, value: string) => void;
+}) {
+  const fieldClassName =
+    'mt-2 w-full border-border/70 bg-background data-[invalid=true]:border-destructive';
+
+  return (
+    <>
+      <div className="space-y-2">
+        <Label htmlFor="rippling-api-token">API token</Label>
+        <Input
+          id="rippling-api-token"
+          type="password"
+          value={form.apiToken}
+          onChange={(event) => onFieldChange('apiToken', event.target.value)}
+          data-invalid={fieldErrors.apiToken ? 'true' : undefined}
+          className={fieldClassName}
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          data-1p-ignore
+        />
+        <p className="text-sm text-muted-foreground">
+          Create a company-wide token in Rippling&apos;s API Tokens app with
+          workers.read and the user, department, team, employment type, and work
+          location read scopes needed for the roster. Roomote validates the
+          token before storing it.
+        </p>
+        {allowBlankToken ? (
+          <p className="text-sm text-muted-foreground">
+            Leave blank to keep and revalidate the existing token.
+          </p>
+        ) : null}
+        {fieldErrors.apiToken ? (
+          <p className="text-sm text-destructive">{fieldErrors.apiToken[0]}</p>
+        ) : null}
+      </div>
+      {formError ? (
+        <p className="text-sm text-destructive">{formError}</p>
+      ) : null}
+    </>
+  );
+}
+
 function XConnectionFields({
   form,
   fieldErrors,
@@ -1338,6 +1412,16 @@ export function Integrations() {
     Partial<Record<keyof NotionFormState, string[]>>
   >({});
   const [notionFormError, setNotionFormError] = useState<string | null>(null);
+  const [isRipplingDialogOpen, setIsRipplingDialogOpen] = useState(false);
+  const [ripplingForm, setRipplingForm] = useState<RipplingFormState>(
+    buildEmptyRipplingForm(),
+  );
+  const [ripplingFieldErrors, setRipplingFieldErrors] = useState<
+    Partial<Record<keyof RipplingFormState, string[]>>
+  >({});
+  const [ripplingFormError, setRipplingFormError] = useState<string | null>(
+    null,
+  );
   const [isGranolaDialogOpen, setIsGranolaDialogOpen] = useState(false);
   const [granolaForm, setGranolaForm] = useState<GranolaFormState>(
     buildEmptyGranolaForm(),
@@ -1415,6 +1499,7 @@ export function Integrations() {
   const disconnectMcp = useDisconnectMcp();
   const saveAsanaConnection = useSaveAsanaConnection();
   const saveNotionConnection = useSaveNotionConnection();
+  const saveRipplingConnection = useSaveRipplingConnection();
   const saveGrafanaConnection = useSaveGrafanaConnection();
   const saveGranolaConnection = useSaveGranolaConnection();
   const saveElevenLabsConnection = useSaveElevenLabsConnection();
@@ -1446,6 +1531,21 @@ export function Integrations() {
   const isNotionConnected =
     notionConnectionSummary?.authStatus === 'authenticated' &&
     notionConnection.data?.authStatus === 'authenticated';
+  const ripplingConnectionSummary = useMemo(
+    () =>
+      (userMcpConnections.data ?? []).find(
+        (entry) => entry.mcpId === 'rippling',
+      ),
+    [userMcpConnections.data],
+  );
+  const ripplingConnection = useRipplingConnection(
+    isAdmin &&
+      (ripplingConnectionSummary?.authStatus === 'authenticated' ||
+        isRipplingDialogOpen),
+  );
+  const isRipplingConnected =
+    ripplingConnectionSummary?.authStatus === 'authenticated' &&
+    ripplingConnection.data?.authStatus === 'authenticated';
   const granolaConnectionSummary = useMemo(() => {
     const connection = (userMcpConnections.data ?? []).find(
       (entry) => entry.mcpId === 'granola',
@@ -1547,6 +1647,14 @@ export function Integrations() {
     setNotionFormError(null);
     setNotionForm(buildEmptyNotionForm());
   }, [isNotionConnected, isNotionDialogOpen, notionConnection.isPending]);
+
+  useEffect(() => {
+    if (!isRipplingDialogOpen) return;
+    if (ripplingConnection.isPending && isRipplingConnected) return;
+    setRipplingFieldErrors({});
+    setRipplingFormError(null);
+    setRipplingForm(buildEmptyRipplingForm());
+  }, [isRipplingConnected, isRipplingDialogOpen, ripplingConnection.isPending]);
 
   useEffect(() => {
     if (!isGranolaDialogOpen) {
@@ -1848,6 +1956,26 @@ export function Integrations() {
             });
           }
 
+          if (integration.id === 'rippling') {
+            return buildAdminConfiguredIntegrationItem({
+              integration,
+              connection: ripplingConnectionSummary,
+              orgEnabled: orgEnablementMap.get(integration.id) ?? false,
+              highlightedIntegrationId,
+              savePending: saveRipplingConnection.isPending,
+              disconnectPending: disconnectMcp.isPending,
+              disconnectingMcpId: disconnectMcp.variables?.mcpId,
+              dialogOpen: isRipplingDialogOpen,
+              connectionPending: ripplingConnection.isPending,
+              canConfigure: isAdmin,
+              canManageTools: false,
+              openDialog: () => setIsRipplingDialogOpen(true),
+              openToolDialog: () => openMcpToolDialog(integration),
+              disconnectIntegration: () =>
+                disconnectAdminConfiguredIntegration(integration),
+            });
+          }
+
           if (integration.id === 'granola') {
             return buildAdminConfiguredIntegrationItem({
               integration,
@@ -2124,6 +2252,7 @@ export function Integrations() {
     isLinearOauthSetupOpen,
     saveAsanaConnection.isPending,
     saveNotionConnection.isPending,
+    saveRipplingConnection.isPending,
     saveGrafanaConnection.isPending,
     saveGranolaConnection.isPending,
     saveElevenLabsConnection.isPending,
@@ -2137,6 +2266,9 @@ export function Integrations() {
     isNotionDialogOpen,
     notionConnectionSummary,
     notionConnection.isPending,
+    isRipplingDialogOpen,
+    ripplingConnection.isPending,
+    ripplingConnectionSummary,
     snowflakeConnection.isPending,
     isSnowflakeDialogOpen,
     vercelConnection.isPending,
@@ -2247,6 +2379,17 @@ export function Integrations() {
       return { ...current, [field]: undefined };
     });
     setNotionFormError(null);
+  };
+
+  const handleRipplingFieldChange = (
+    field: keyof RipplingFormState,
+    value: string,
+  ) => {
+    setRipplingForm((current) => ({ ...current, [field]: value }));
+    setRipplingFieldErrors((current) =>
+      current[field] ? { ...current, [field]: undefined } : current,
+    );
+    setRipplingFormError(null);
   };
 
   const handleGranolaFieldChange = (
@@ -2393,6 +2536,13 @@ export function Integrations() {
     }
   };
 
+  const handleRipplingDialogOpenChange = (open: boolean) => {
+    setIsRipplingDialogOpen(open);
+    setRipplingFieldErrors({});
+    setRipplingFormError(null);
+    if (open) setRipplingForm(buildEmptyRipplingForm());
+  };
+
   const handleGranolaDialogOpenChange = (open: boolean) => {
     setIsGranolaDialogOpen(open);
 
@@ -2531,6 +2681,33 @@ export function Integrations() {
         handleNotionDialogOpenChange(false);
       },
       onError: (error) => setNotionFormError(error.message),
+    });
+  };
+
+  const handleRipplingSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const parsed = saveRipplingConnectionSchema.safeParse(ripplingForm);
+    if (!parsed.success) {
+      setRipplingFieldErrors(getRipplingFieldErrors(parsed));
+      return;
+    }
+    if (!isRipplingConnected && parsed.data.apiToken.length === 0) {
+      setRipplingFieldErrors({ apiToken: ['API token is required'] });
+      return;
+    }
+
+    setRipplingFieldErrors({});
+    setRipplingFormError(null);
+    saveRipplingConnection.mutate(parsed.data, {
+      onSuccess: () => {
+        toast.success(
+          isRipplingConnected
+            ? 'Rippling connection updated for this deployment.'
+            : 'Rippling connected for this deployment.',
+        );
+        handleRipplingDialogOpenChange(false);
+      },
+      onError: (error) => setRipplingFormError(error.message),
     });
   };
 
@@ -2819,6 +2996,30 @@ export function Integrations() {
           formError={notionFormError}
           allowBlankSecret={isNotionConnected}
           onFieldChange={handleNotionFieldChange}
+        />
+      </AdminConfiguredIntegrationDialog>
+      <AdminConfiguredIntegrationDialog
+        integrationName="Rippling"
+        open={isRipplingDialogOpen}
+        onOpenChange={handleRipplingDialogOpenChange}
+        isEditing={isRipplingConnected}
+        isPending={saveRipplingConnection.isPending}
+        isLoading={isRipplingConnected && ripplingConnection.isPending}
+        description={
+          <>
+            Connect Rippling&apos;s read-only HRIS API so Brain can maintain the
+            employee roster and authoritative reporting structure. The token
+            stays encrypted on the control plane and is never sent to agents.
+          </>
+        }
+        onSubmit={handleRipplingSubmit}
+      >
+        <RipplingConnectionFields
+          form={ripplingForm}
+          fieldErrors={ripplingFieldErrors}
+          formError={ripplingFormError}
+          allowBlankToken={isRipplingConnected}
+          onFieldChange={handleRipplingFieldChange}
         />
       </AdminConfiguredIntegrationDialog>
       <AdminConfiguredIntegrationDialog

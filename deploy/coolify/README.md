@@ -239,16 +239,16 @@ channels, meeting notes, GitHub issues) become pages that agents consult
 with citations, and agents record what they decided and why when they
 finish substantial work.
 
-One variable turns it on. Add it to the resource's environment variables
-panel in Coolify:
+One variable turns it on:
 
-1. Configure a model provider under **Settings → Models** after first boot,
-   if you have not already. The gbrain service holds no provider key; it asks
-   the api service for embeddings and synthesis, and the api service uses the
-   key your deployment already has. Changing it later needs no redeploy.
-2. To bill the Brain separately from task inference, set
-   `R_BRAIN_OPENROUTER_API_KEY` or `R_BRAIN_OPENAI_API_KEY` in the
-   resource's environment variables panel. Those take precedence.
+1. Set `R_BRAIN_OPENROUTER_API_KEY` or `R_BRAIN_OPENAI_API_KEY` in the
+   resource's environment variables panel. The explicit `R_BRAIN_*` name is
+   the Brain's on switch: a deployment that only configured task models
+   under **Settings → Models** keeps no Brain, no ingestion, and agents are
+   never told one exists. The value can be the same key you use for tasks,
+   or a separate one to bill the Brain independently. The gbrain service
+   holds no provider key; it asks the api service for embeddings and
+   synthesis using this key, and changing it later needs no redeploy.
 2. Redeploy the resource. Within a minute the deployment registers its own
    scoped clients against the Brain (read-only agent access, ingestion, and
    maintenance), backfills the task history it already has,

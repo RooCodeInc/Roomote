@@ -74,7 +74,6 @@ export async function searchTasks(
   const query = c.req.query('query')?.trim();
   const pullRequestParam = c.req.query('pullRequest');
   const status = c.req.query('status') ?? 'all';
-
   if (!['active', 'completed', 'all'].includes(status)) {
     return c.json(
       { error: 'status must be one of: active, completed, all' },

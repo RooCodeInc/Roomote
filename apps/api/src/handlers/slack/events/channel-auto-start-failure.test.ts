@@ -47,6 +47,7 @@ vi.mock('@roomote/redis', async (importOriginal) => ({
 
 vi.mock('@roomote/slack', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack')>()),
+  createFastAgentSlackLiveTaskLauncher: vi.fn(() => vi.fn()),
   startAutoRoutedSlackTask: mocks.startTask,
 }));
 

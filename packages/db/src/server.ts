@@ -39,6 +39,7 @@ export * from './db';
 
 export * from './lib/map-raw-row';
 export * from './lib/legacy-task-inference-usage';
+export * from './lib/llm-usage';
 export * from './lib/deployment-auth-keypairs';
 export * from './lib/environment-variables';
 export * from './lib/task-id';
@@ -156,6 +157,7 @@ export {
   slackUserMappings,
   slackUserMappingsRelations,
   slackDirectoryUsers,
+  notionDirectoryUsers,
   telegramUserMappings,
   telegramUserMappingsRelations,
   discordInstallations,
@@ -170,6 +172,10 @@ export {
   teamsUserMappingsRelations,
   slackAuthTokens,
   slackAuthTokensRelations,
+  fastAgentConversations,
+  fastAgentConversationsRelations,
+  fastAgentConversationAliases,
+  fastAgentConversationAliasesRelations,
   slackConversationMessages,
   slackConversationMessagesRelations,
   slackQuickAnswers,

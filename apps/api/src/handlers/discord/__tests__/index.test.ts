@@ -57,8 +57,10 @@ const mocks = vi.hoisted(() => ({
   callViaEmojiConfig: vi.fn(),
   appendAccountLinkHelpText: vi.fn(async (message: string) => message),
   startGoal: vi.fn(),
+  acquireFastTurnLock: vi.fn(),
   answerFast: vi.fn(),
   hasFastDefault: vi.fn(),
+  hasFastSession: vi.fn(),
 }));
 
 vi.mock('../../account-link-help.js', () => ({
@@ -170,8 +172,10 @@ vi.mock('../callback-actions.js', () => ({
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
+  acquireFastAgentTurnLock: mocks.acquireFastTurnLock,
   answerFastAgentQuestion: mocks.answerFast,
   getTaskUrl: mocks.getTaskUrl,
+  hasFastAgentSession: mocks.hasFastSession,
 }));
 
 vi.mock('../../fast-agent-entry.js', () => ({
@@ -285,8 +289,12 @@ describe('Discord Gateway event handler', () => {
       launchResult: { id: 17, taskId: 'task-17' },
     });
     mocks.startGoal.mockResolvedValue({ success: true });
+    mocks.acquireFastTurnLock.mockResolvedValue(
+      vi.fn().mockResolvedValue(undefined),
+    );
     mocks.answerFast.mockResolvedValue('A quick answer');
     mocks.hasFastDefault.mockResolvedValue(false);
+    mocks.hasFastSession.mockResolvedValue(false);
     mocks.reply.mockResolvedValue({ messageId: 'reply-1' });
     mocks.createDirectMessage.mockResolvedValue({ id: 'dm-private-1' });
     mocks.postMessage.mockResolvedValue({ messageId: 'dm-msg-1' });
@@ -745,9 +753,13 @@ describe('Discord Gateway event handler', () => {
       expect.objectContaining({
         question: 'Fix the flaky tests',
         userId: 'roomote-user-1',
-        slackThreadTs: 'dm-1',
-        activeTaskId: null,
-        surface: 'discord',
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'dm',
+          conversationId: 'dm-1',
+          replyTarget: { channelId: 'dm-1' },
+        },
+        activeTasks: [],
       }),
     );
     expect(mocks.reply).toHaveBeenCalledWith(
@@ -760,6 +772,132 @@ describe('Discord Gateway event handler', () => {
     expect(mocks.queueMessage).not.toHaveBeenCalled();
   });
 
+  it('passes the model-authored Fast kickoff through the Discord enqueue gate', async () => {
+    mocks.hasFastDefault.mockResolvedValue(true);
+    const postKickoff = vi.fn().mockResolvedValue(undefined);
+    mocks.startNewTask.mockImplementation(
+      async (input: {
+        beforeEnqueueKickoff: (task: {
+          taskId: string;
+          taskUrl?: string;
+        }) => Promise<void>;
+      }) => {
+        await input.beforeEnqueueKickoff({
+          taskId: 'task-17',
+          taskUrl: 'https://roomote.example/task/task-17',
+        });
+        return {
+          status: 'started',
+          launchResult: { id: 17, taskId: 'task-17' },
+          taskUrl: 'https://roomote.example/task/task-17',
+        };
+      },
+    );
+    mocks.answerFast.mockImplementation(
+      async (input: {
+        adapter: {
+          launchTask: (params: {
+            prompt: string;
+            environmentId: null;
+            parentSessionId: string;
+            postKickoff: typeof postKickoff;
+          }) => Promise<unknown>;
+        };
+      }) => {
+        await input.adapter.launchTask({
+          prompt: 'Fix checkout',
+          environmentId: null,
+          parentSessionId: 'fast-session-1',
+          postKickoff,
+        });
+        return '';
+      },
+    );
+
+    const response = await postEvent(envelope(message()));
+
+    expect(response.status).toBe(200);
+    expect(mocks.startNewTask).toHaveBeenCalledWith(
+      expect.objectContaining({ beforeEnqueueKickoff: postKickoff }),
+    );
+    expect(postKickoff).toHaveBeenCalledWith({
+      taskId: 'task-17',
+      taskUrl: 'https://roomote.example/task/task-17',
+    });
+  });
+
+  it('serializes complete Fast turns before the next Discord message enters the agent', async () => {
+    mocks.hasFastDefault.mockResolvedValue(true);
+    let grantSecondLock!: (release: () => Promise<void>) => void;
+    const secondLock = new Promise<() => Promise<void>>((resolve) => {
+      grantSecondLock = resolve;
+    });
+    const releaseSecondLock = vi.fn().mockResolvedValue(undefined);
+    const releaseFirstLock = vi.fn(async () => {
+      grantSecondLock(releaseSecondLock);
+    });
+    mocks.acquireFastTurnLock
+      .mockResolvedValueOnce(releaseFirstLock)
+      .mockImplementationOnce(async () => secondLock);
+
+    let finishFirstTurn!: (response: string) => void;
+    const firstTurn = new Promise<string>((resolve) => {
+      finishFirstTurn = resolve;
+    });
+    mocks.answerFast
+      .mockImplementationOnce(async () => firstTurn)
+      .mockResolvedValueOnce('Second answer');
+
+    const firstResponse = postEvent(
+      envelope(message({ id: 'message-concurrent-1', content: 'Launch it' })),
+    );
+    await vi.waitFor(() => expect(mocks.answerFast).toHaveBeenCalledOnce());
+
+    const secondResponse = postEvent(
+      envelope(
+        message({
+          id: 'message-concurrent-2',
+          content: 'Send it another message',
+        }),
+      ),
+    );
+    await vi.waitFor(() =>
+      expect(mocks.acquireFastTurnLock).toHaveBeenCalledTimes(2),
+    );
+    expect(mocks.answerFast).toHaveBeenCalledOnce();
+    expect(mocks.acquireFastTurnLock).toHaveBeenNthCalledWith(1, {
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'dm',
+        conversationId: 'dm-1',
+        replyTarget: { channelId: 'dm-1' },
+      },
+    });
+    expect(mocks.acquireFastTurnLock).toHaveBeenNthCalledWith(2, {
+      conversation: {
+        surface: 'discord',
+        workspaceId: 'dm',
+        conversationId: 'dm-1',
+        replyTarget: { channelId: 'dm-1' },
+      },
+    });
+
+    finishFirstTurn('First answer');
+    expect((await firstResponse).status).toBe(200);
+    expect((await secondResponse).status).toBe(200);
+
+    expect(mocks.answerFast).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ question: 'Launch it' }),
+    );
+    expect(mocks.answerFast).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ question: 'Send it another message' }),
+    );
+    expect(releaseFirstLock).toHaveBeenCalledOnce();
+    expect(releaseSecondLock).toHaveBeenCalledOnce();
+  });
+
   it('gives defaulted Discord Fast mode the active task for thread continuation', async () => {
     mocks.hasFastDefault.mockResolvedValue(true);
     mocks.findActiveRun.mockResolvedValue({
@@ -767,12 +905,11 @@ describe('Discord Gateway event handler', () => {
       taskId: 'task-23',
       userId: 'roomote-user-1',
     });
-
     const response = await postEvent(envelope(message()));
 
     expect(response.status).toBe(200);
     expect(mocks.answerFast).toHaveBeenCalledWith(
-      expect.objectContaining({ activeTaskId: 'task-23' }),
+      expect.objectContaining({ activeTasks: [{ taskId: 'task-23' }] }),
     );
     expect(mocks.queueMessage).not.toHaveBeenCalled();
   });
@@ -1209,6 +1346,87 @@ describe('Discord Gateway event handler', () => {
     );
     expect(mocks.shouldRouteUnmentioned).toHaveBeenCalled();
     expect(mocks.queueMessage).not.toHaveBeenCalled();
+    expect(mocks.startNewTask).not.toHaveBeenCalled();
+  });
+
+  it("lets Matt join Dan's existing fast-agent thread and receive a response", async () => {
+    mocks.getChannel.mockResolvedValue({
+      id: 'thread-1',
+      guildId: 'guild-1',
+      parentId: 'channel-1',
+      name: 'fast-thread',
+      type: 11,
+    });
+    mocks.hasFastSession.mockResolvedValue(true);
+    mocks.shouldRouteUnmentioned.mockResolvedValue(true);
+
+    const response = await postEvent(
+      envelope(
+        message({
+          channel_id: 'thread-1',
+          guild_id: 'guild-1',
+          content: 'Hey Roomote, can you check this too?',
+          author: { id: 'discord-user-matt', username: 'matt' },
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({ fastAnswered: true, fastContinued: true }),
+    );
+    expect(mocks.hasFastSession).toHaveBeenCalledWith({
+      surface: 'discord',
+      workspaceId: 'guild-1',
+      conversationId: 'thread-1',
+      replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+    });
+    expect(mocks.shouldRouteUnmentioned).toHaveBeenCalledWith(
+      expect.objectContaining({
+        isOpenConversationThread: true,
+        isRoomoteThread: true,
+      }),
+    );
+    expect(mocks.answerFast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'Hey Roomote, can you check this too?',
+        conversation: expect.objectContaining({ surface: 'discord' }),
+      }),
+    );
+  });
+
+  it('continues an existing fast-agent DM without Fast mode being the default', async () => {
+    mocks.hasFastSession.mockResolvedValue(true);
+
+    const response = await postEvent(
+      envelope(
+        message({
+          content: 'What did I ask you to remember?',
+        }),
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual(
+      expect.objectContaining({ fastAnswered: true, fastContinued: true }),
+    );
+    expect(mocks.hasFastSession).toHaveBeenCalledWith({
+      surface: 'discord',
+      workspaceId: 'dm',
+      conversationId: 'dm-1',
+      replyTarget: { channelId: 'dm-1' },
+    });
+    expect(mocks.answerFast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: 'What did I ask you to remember?',
+        conversation: {
+          surface: 'discord',
+          workspaceId: 'dm',
+          conversationId: 'dm-1',
+          replyTarget: { channelId: 'dm-1' },
+        },
+      }),
+    );
     expect(mocks.startNewTask).not.toHaveBeenCalled();
   });
 
@@ -1889,96 +2107,6 @@ describe('Discord Gateway event handler', () => {
       expect.objectContaining({
         text: expect.stringContaining('active Roomote task'),
         ephemeral: true,
-      }),
-    );
-  });
-
-  it('uses /fast as a top-level orchestrator that can launch a new task', async () => {
-    mocks.answerFast.mockImplementationOnce(async ({ launchTask }) => {
-      const launched = await launchTask({
-        prompt: 'Investigate the flaky build',
-        environmentId: null,
-      });
-      return launched.success
-        ? `Started ${launched.taskId}`
-        : `Failed: ${launched.error}`;
-    });
-    const interaction = {
-      id: 'interaction-fast',
-      application_id: 'app-1',
-      type: 2,
-      token: 'interaction-token',
-      channel_id: 'dm-1',
-      user: { id: 'discord-user-1', username: 'matt' },
-      data: {
-        name: 'fast',
-        type: 1,
-        options: [{ name: 'request', type: 3, value: 'Fix the flaky build' }],
-      },
-    };
-
-    const response = await postEvent(
-      envelope(interaction, 'INTERACTION_CREATE'),
-    );
-
-    expect(response.status).toBe(200);
-    expect(mocks.answerFast).toHaveBeenCalledWith(
-      expect.objectContaining({
-        question: 'Fix the flaky build',
-        userId: 'roomote-user-1',
-        surface: 'discord',
-        launchTask: expect.any(Function),
-      }),
-    );
-    expect(mocks.answerFast.mock.calls[0]?.[0].activeTaskId).toBeUndefined();
-    expect(mocks.startNewTask).toHaveBeenCalledWith(
-      expect.objectContaining({
-        forceNewThread: true,
-        skipRoutingConfirmation: true,
-        workspaceOverride: {
-          repoForPayload: '__all_repositories__',
-          workspaceDisplayName: 'all repos',
-        },
-        queuedMessage: expect.objectContaining({
-          text: 'Investigate the flaky build',
-          userId: 'roomote-user-1',
-          ts: 'interaction-fast',
-        }),
-      }),
-    );
-    expect(mocks.reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        interaction: { interaction, interactionDeferred: true },
-        text: 'Started task-17',
-      }),
-    );
-  });
-
-  it('lets /fast answer directly without launching a task', async () => {
-    const interaction = {
-      id: 'interaction-fast-answer',
-      application_id: 'app-1',
-      type: 2,
-      token: 'interaction-token',
-      channel_id: 'dm-1',
-      user: { id: 'discord-user-1', username: 'matt' },
-      data: {
-        name: 'fast',
-        type: 1,
-        options: [{ name: 'request', type: 3, value: 'What can Roomote do?' }],
-      },
-    };
-
-    const response = await postEvent(
-      envelope(interaction, 'INTERACTION_CREATE'),
-    );
-
-    expect(response.status).toBe(200);
-    expect(mocks.startNewTask).not.toHaveBeenCalled();
-    expect(mocks.reply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        interaction: { interaction, interactionDeferred: true },
-        text: 'A quick answer',
       }),
     );
   });

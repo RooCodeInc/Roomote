@@ -38,7 +38,10 @@ import {
   releaseAccountLinkDmSlot,
 } from './account-link.js';
 import { processDiscordAttachments } from './attachments.js';
-import { processDiscordFastAgentMessage } from './fast-agent.js';
+import {
+  getDiscordFastConversationId,
+  processDiscordFastAgentMessage,
+} from './fast-agent.js';
 import { rememberPendingDiscordAccountLinkTask } from './pending-account-link-task.js';
 import { startNewDiscordTask } from './task-orchestration.js';
 import {
@@ -293,7 +296,7 @@ export async function maybeHandleDiscordChannelAutoStart(input: {
           messageId: message.id,
           anchorMessageId: message.id,
         }),
-        sessionThreadId: message.id,
+        conversationId: getDiscordFastConversationId(channel, message.id),
       }).catch((error) => {
         apiLogger.error(
           `[DiscordChannelAutoStart] Failed to answer in Fast mode for ${logContext}: ${error instanceof Error ? error.message : String(error)}`,

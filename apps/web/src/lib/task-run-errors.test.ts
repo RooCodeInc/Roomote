@@ -108,6 +108,14 @@ describe('getTaskRunErrorDisplayMessage with error codes', () => {
     expect(display).toContain("couldn't reach the Docker daemon");
   });
 
+  it('explains that billing paused new tasks', () => {
+    expect(
+      getTaskRunErrorDisplayMessage(undefined, 'deployment_read_only'),
+    ).toBe(
+      'New tasks are paused due to a billing issue. Please check billing.',
+    );
+  });
+
   it('ignores prototype-chain property names as error codes', () => {
     const display = getTaskRunErrorDisplayMessage(
       'some opaque failure text',

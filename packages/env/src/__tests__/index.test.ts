@@ -85,12 +85,14 @@ describe('Env', () => {
     delete runtimeEnv.SKIP_ENV_VALIDATION;
     for (const key of [
       'R_MODEL',
+      'R_ORCHESTRATION_MODEL',
       'R_SMALL_MODEL',
       'R_VISION_MODEL',
       'R_CODE_REVIEW_MODEL',
       'R_EXPLORE_MODEL',
       'R_PLANNING_MODEL',
       'R_MODEL_REASONING_EFFORT',
+      'R_ORCHESTRATION_MODEL_REASONING_EFFORT',
       'R_SMALL_MODEL_REASONING_EFFORT',
       'R_VISION_MODEL_REASONING_EFFORT',
       'R_CODE_REVIEW_MODEL_REASONING_EFFORT',
@@ -135,12 +137,14 @@ describe('Env', () => {
       expect(env.BOX_STANDBY_MAX_COUNT).toBeUndefined();
       expect(env.BOX_STANDBY_MAX_AGE_HOURS).toBeUndefined();
       expect(env.R_MODEL).toBeUndefined();
+      expect(env.R_ORCHESTRATION_MODEL).toBeUndefined();
       expect(env.R_SMALL_MODEL).toBeUndefined();
       expect(env.R_VISION_MODEL).toBeUndefined();
       expect(env.R_CODE_REVIEW_MODEL).toBeUndefined();
       expect(env.R_EXPLORE_MODEL).toBeUndefined();
       expect(env.R_PLANNING_MODEL).toBeUndefined();
       expect(env.R_MODEL_REASONING_EFFORT).toBeUndefined();
+      expect(env.R_ORCHESTRATION_MODEL_REASONING_EFFORT).toBeUndefined();
       expect(env.R_SMALL_MODEL_REASONING_EFFORT).toBeUndefined();
       expect(env.R_VISION_MODEL_REASONING_EFFORT).toBeUndefined();
       expect(env.R_CODE_REVIEW_MODEL_REASONING_EFFORT).toBeUndefined();
@@ -406,12 +410,14 @@ describe('Env', () => {
     const env = createRoomoteEnv({
       ...process.env,
       R_MODEL: 'openrouter/openai/gpt-5.4',
+      R_ORCHESTRATION_MODEL: 'openrouter/anthropic/claude-sonnet-4',
       R_SMALL_MODEL: 'openrouter/openai/gpt-5.4-mini',
       R_VISION_MODEL: 'openrouter/openai/gpt-5.5',
       R_CODE_REVIEW_MODEL: 'openrouter/openai/gpt-5.5',
       R_EXPLORE_MODEL: 'openrouter/openai/gpt-5.4-mini',
       R_PLANNING_MODEL: 'openrouter/anthropic/claude-opus-4.7',
       R_MODEL_REASONING_EFFORT: 'medium',
+      R_ORCHESTRATION_MODEL_REASONING_EFFORT: 'high',
       R_SMALL_MODEL_REASONING_EFFORT: 'low',
       R_VISION_MODEL_REASONING_EFFORT: 'low',
       R_CODE_REVIEW_MODEL_REASONING_EFFORT: 'high',
@@ -421,12 +427,16 @@ describe('Env', () => {
     });
 
     expect(env.R_MODEL).toBe('openrouter/openai/gpt-5.4');
+    expect(env.R_ORCHESTRATION_MODEL).toBe(
+      'openrouter/anthropic/claude-sonnet-4',
+    );
     expect(env.R_SMALL_MODEL).toBe('openrouter/openai/gpt-5.4-mini');
     expect(env.R_VISION_MODEL).toBe('openrouter/openai/gpt-5.5');
     expect(env.R_CODE_REVIEW_MODEL).toBe('openrouter/openai/gpt-5.5');
     expect(env.R_EXPLORE_MODEL).toBe('openrouter/openai/gpt-5.4-mini');
     expect(env.R_PLANNING_MODEL).toBe('openrouter/anthropic/claude-opus-4.7');
     expect(env.R_MODEL_REASONING_EFFORT).toBe('medium');
+    expect(env.R_ORCHESTRATION_MODEL_REASONING_EFFORT).toBe('high');
     expect(env.R_SMALL_MODEL_REASONING_EFFORT).toBe('low');
     expect(env.R_VISION_MODEL_REASONING_EFFORT).toBe('low');
     expect(env.R_CODE_REVIEW_MODEL_REASONING_EFFORT).toBe('high');
@@ -1178,9 +1188,11 @@ describe('isBrainConfigured', () => {
     ).toBe(true);
   });
 
-  it('activates on the gateway token, which is the whole point of it', () => {
-    // A deployment can leave the provider key to Settings, so the token is
-    // what says a Brain was wired up at all.
+  it('counts the gateway token as Brain wiring', () => {
+    // The token means a Brain could be wired here (templates generate it as
+    // plumbing), so held-memory enqueueing may begin. It is NOT activation:
+    // user-visible Brain behavior additionally requires an explicit
+    // R_BRAIN_* provider key via isBrainProviderConfigured in @roomote/db.
     expect(isBrainConfigured({ R_BRAIN_GATEWAY_TOKEN: 'gateway-token' })).toBe(
       true,
     );

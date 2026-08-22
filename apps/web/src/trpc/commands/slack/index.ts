@@ -36,6 +36,7 @@ import {
 } from '@/lib/server/slack-oauth-state';
 
 export { createSlackAppFromManifestCommand } from './create-app-from-manifest';
+export { updateSlackAppManifestCommand } from './update-app-manifest';
 
 interface SlackOAuthResponse {
   ok: boolean;

@@ -15,22 +15,20 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       taskRuns: { findFirst: mocks.findRun },
-      slackQuickAnswers: { findFirst: mocks.findSession },
       slackInstallations: { findFirst: mocks.findInstallation },
     },
   },
   and: vi.fn((...args: unknown[]) => args),
   eq: vi.fn((...args: unknown[]) => args),
   taskRuns: { id: 'task_runs.id', taskId: 'task_runs.task_id' },
-  slackQuickAnswers: {
-    id: 'slack_quick_answers.id',
-    slackChannel: 'slack_quick_answers.slack_channel',
-    slackThreadTs: 'slack_quick_answers.slack_thread_ts',
-  },
   slackInstallations: {
     isActive: 'slack_installations.is_active',
     teamId: 'slack_installations.team_id',
   },
+}));
+
+vi.mock('@roomote/cloud-agents/server', () => ({
+  fastAgentConversationRepository: { findById: mocks.findSession },
 }));
 
 vi.mock('@roomote/redis', () => ({
@@ -51,9 +49,12 @@ import { publishFastAgentRequestUserInput } from './publish-fast-agent-request-u
 
 const parent = {
   sessionId: '11111111-1111-4111-8111-111111111111',
-  slackTeamId: 'T123',
-  slackChannel: 'C123',
-  slackThreadTs: '100.001',
+  conversation: {
+    surface: 'slack' as const,
+    workspaceId: 'T123',
+    conversationId: '100.001',
+    replyTarget: { channelId: 'C123', threadId: '100.001' },
+  },
 };
 
 const input = {
@@ -80,7 +81,12 @@ describe('publishFastAgentRequestUserInput', () => {
       taskId: 'task-1',
       payload: { fastAgentParent: parent },
     });
-    mocks.findSession.mockResolvedValue({ id: parent.sessionId });
+    mocks.findSession.mockResolvedValue({
+      id: parent.sessionId,
+      userId: 'u1',
+      conversation: parent.conversation,
+      messages: [],
+    });
     mocks.findInstallation.mockResolvedValue({ botAccessToken: 'xoxb-test' });
     mocks.acquireLock.mockResolvedValue(mocks.releaseLock);
     mocks.releaseLock.mockResolvedValue(undefined);

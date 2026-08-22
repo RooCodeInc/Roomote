@@ -37,13 +37,15 @@
 #   the generated `MINIO_ROOT_PASSWORD` and the app services mirror it into
 #   `S3_SECRET_ACCESS_KEY` with a `fromService` reference.
 # - The Brain (roomote-gbrain) is a private service with a disk and no
-#   public hostname. It is inert until GBRAIN_ADMIN_BOOTSTRAP_TOKEN and one
-#   of OPENROUTER_API_KEY / OPENAI_API_KEY are set on that service; the
-#   app services mirror them with fromService references, so blank there is blank
-#   everywhere and the deployment simply has no memory. The token cannot use
-#   generateValue (Render generates base64; gbrain requires [A-Za-z0-9_-]),
-#   which is why it is sync: false rather than generated. Deployments that
-#   want no memory at all can delete the service.
+#   public hostname. It is inert until an explicit Brain provider key
+#   (R_BRAIN_OPENROUTER_API_KEY or R_BRAIN_OPENAI_API_KEY, on roomote-api or
+#   as a Settings environment value) and GBRAIN_ADMIN_BOOTSTRAP_TOKEN are
+#   set. The R_BRAIN_* name is the on switch: the deployment's general task
+#   provider keys never activate the Brain, and the generated gateway token
+#   is plumbing, not activation. The admin token cannot use generateValue
+#   (Render generates base64; gbrain requires [A-Za-z0-9_-]), which is why it
+#   is sync: false rather than generated. Deployments that want no memory at
+#   all can delete the service.
 # - Render has no Docker socket, so task execution must use a hosted
 #   sandbox provider (modal by default; e2b, daytona, blaxel, box, and azure
 #   also work).
@@ -240,9 +242,21 @@ services:
           type: pserv
           name: roomote-gbrain
           envVarKey: GBRAIN_ADMIN_BOOTSTRAP_TOKEN
+      # The Brain's on switch. Leave blank and the gbrain service idles
+      # unused: no ingestion, no delivery to agents. Fill in either key (the
+      # same value as your task provider key works, or a separate one to
+      # bill the Brain independently) to turn the Brain on; the general
+      # OPENROUTER_API_KEY / OPENAI_API_KEY never activate it. This anchored
+      # env block is duplicated per app service, so set the value on all four
+      # services, or set it once as a Settings environment value instead.
+      - key: R_BRAIN_OPENROUTER_API_KEY
+        value: ''
+      - key: R_BRAIN_OPENAI_API_KEY
+        value: ''
       # Shared secret the Brain presents to /api/brain/inference; the gateway
-      # swaps it for the provider key configured in Settings. Owned here, on
-      # the service that verifies it, and mirrored onto the Brain.
+      # swaps it for the configured Brain provider key. Owned here, on the
+      # service that verifies it, and mirrored onto the Brain. Plumbing only:
+      # a generated value never turns the Brain on.
       - key: R_BRAIN_GATEWAY_TOKEN
         generateValue: true
       # Which models the Brain runs, in the configured provider's own naming.

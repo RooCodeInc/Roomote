@@ -7,6 +7,7 @@ import {
   TaskPayloadKind,
   RunStatus,
   exitedRunStatuses,
+  isExitedRunStatus,
 } from '@roomote/types';
 import {
   db,
@@ -14,6 +15,7 @@ import {
   taskRuns,
   tasks,
   and,
+  desc,
   eq,
   inArray,
   isNotNull,
@@ -31,6 +33,7 @@ import { toHostFromUrl } from '../utils';
 import type { WebhookPullRequestSynchronize } from './types';
 import { getGitHubAutomationTargets } from './getGitHubAutomationTargets';
 import { getBackgroundGithubTaskProperties } from './backgroundGithubTaskProperties';
+import { getCurrentGitHubPrHeadSha } from './currentPrHead';
 import { getReviewTaskRelayPayload } from './reviewTaskRelayPayload';
 
 async function findActiveReviewRun(repository: string, prNumber: number) {
@@ -42,6 +45,7 @@ async function findActiveReviewRun(repository: string, prNumber: number) {
       startedAt: taskRuns.startedAt,
       sandboxServerUrl: taskRuns.sandboxServerUrl,
       prSha: taskPullRequests.prSha,
+      payload: taskRuns.payload,
     })
     .from(tasks)
     .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, tasks.id))
@@ -58,6 +62,7 @@ async function findActiveReviewRun(repository: string, prNumber: number) {
         isNull(taskRuns.canceledAt),
       ),
     )
+    .orderBy(desc(tasks.createdAt))
     .limit(1);
 
   return activeRun;
@@ -79,8 +84,8 @@ async function findCompletedSameHeadReviewRun(
         eq(taskPullRequests.sourceControlProvider, 'github'),
         eq(taskPullRequests.repository, repository),
         eq(taskPullRequests.prNumber, prNumber),
-        eq(taskPullRequests.prSha, headSha),
-        sql`${taskRuns.status} != ${RunStatus.Failed}`,
+        sql`${taskRuns.payload}->>'headSha' = ${headSha}`,
+        eq(taskRuns.status, RunStatus.Completed),
         isNotNull(taskRuns.startedAt),
         isNull(taskRuns.canceledAt),
       ),
@@ -88,6 +93,26 @@ async function findCompletedSameHeadReviewRun(
     .limit(1);
 
   return completedRun;
+}
+
+async function findExistingReviewTask(repository: string, prNumber: number) {
+  const [existingTask] = await db
+    .select({ taskId: tasks.id })
+    .from(tasks)
+    .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, tasks.id))
+    .where(
+      and(
+        eq(tasks.workflow, 'pr_review'),
+        eq(taskPullRequests.sourceControlProvider, 'github'),
+        eq(taskPullRequests.repository, repository),
+        eq(taskPullRequests.prNumber, prNumber),
+        isNull(tasks.deletedAt),
+      ),
+    )
+    .orderBy(desc(tasks.createdAt))
+    .limit(1);
+
+  return existingTask;
 }
 
 async function acquirePrReviewLaunchLock(repository: string, prNumber: number) {
@@ -165,13 +190,25 @@ export async function handlePrSynchronize({
     }
 
     try {
+      const headSha = await getCurrentGitHubPrHeadSha({
+        installationId: installation!.id,
+        repository: repository.full_name,
+        prNumber: pr.number,
+      });
+
+      if (!headSha) {
+        throw new Error(
+          `Could not resolve the live head for ${repository.full_name}#${pr.number}.`,
+        );
+      }
+
       const activeReviewRun = await findActiveReviewRun(
         repository.full_name,
         pr.number,
       );
 
       if (activeReviewRun) {
-        if (activeReviewRun.prSha === pr.head.sha) {
+        if (activeReviewRun.prSha === headSha) {
           console.log(
             `[handlePrSynchronize] ${repository.full_name}#${pr.number} -> skip_active_review_same_head (target: ${currentTarget.id})`,
           );
@@ -179,7 +216,74 @@ export async function handlePrSynchronize({
           return null;
         }
 
-        if (activeReviewRun.startedAt && activeReviewRun.sandboxServerUrl) {
+        let followUpRun =
+          activeReviewRun.startedAt && activeReviewRun.sandboxServerUrl
+            ? activeReviewRun
+            : null;
+        let reconciliation: 'pending_updated' | 'terminal' = 'pending_updated';
+
+        if (!followUpRun) {
+          const result = await db.transaction(async (tx) => {
+            const canonicalKey = `github:${repository.full_name}:${pr.number}`;
+            await tx.execute(
+              sql`SELECT pg_advisory_xact_lock(hashtextextended(${canonicalKey}, 0))`,
+            );
+            await tx.execute(
+              sql`SELECT id FROM task_runs WHERE id = ${activeReviewRun.id} FOR UPDATE`,
+            );
+
+            const lockedRun = await tx.query.taskRuns.findFirst({
+              where: eq(taskRuns.id, activeReviewRun.id),
+              columns: {
+                id: true,
+                taskId: true,
+                status: true,
+                startedAt: true,
+                sandboxServerUrl: true,
+                payload: true,
+              },
+            });
+
+            if (!lockedRun || isExitedRunStatus(lockedRun.status)) {
+              return { kind: 'terminal' as const };
+            }
+
+            if (lockedRun.startedAt && lockedRun.sandboxServerUrl) {
+              return { kind: 'follow_up' as const, run: lockedRun };
+            }
+
+            await tx
+              .update(taskPullRequests)
+              .set({ prSha: headSha })
+              .where(eq(taskPullRequests.taskId, lockedRun.taskId));
+            await tx
+              .update(taskRuns)
+              .set({
+                payload: {
+                  ...lockedRun.payload,
+                  headSha,
+                  branchName: pr.head.ref,
+                  prTitle: pr.title,
+                  prUrl: pr.html_url,
+                },
+              })
+              .where(eq(taskRuns.id, lockedRun.id));
+
+            return { kind: 'pending_updated' as const };
+          });
+
+          if (result.kind === 'follow_up') {
+            followUpRun = {
+              ...activeReviewRun,
+              ...result.run,
+              prSha: activeReviewRun.prSha,
+            };
+          } else {
+            reconciliation = result.kind;
+          }
+        }
+
+        if (followUpRun) {
           const relayPayload = await getReviewTaskRelayPayload({
             repository: repository.full_name,
             prNumber: pr.number,
@@ -189,13 +293,13 @@ export async function handlePrSynchronize({
           });
 
           await enqueueActivePrReviewFollowUp({
-            runId: activeReviewRun.id,
-            taskId: activeReviewRun.taskId,
-            sandboxServerUrl: activeReviewRun.sandboxServerUrl,
+            runId: followUpRun.id,
+            taskId: followUpRun.taskId,
+            sandboxServerUrl: followUpRun.sandboxServerUrl!,
             repository: repository.full_name,
             prNumber: pr.number,
-            previousHeadSha: activeReviewRun.prSha,
-            eventHeadSha: pr.head.sha,
+            previousHeadSha: followUpRun.prSha,
+            eventHeadSha: headSha,
             fallback: {
               task: {
                 type: TaskPayloadKind.GithubPrReviewSync,
@@ -205,7 +309,7 @@ export async function handlePrSynchronize({
                   prNumber: pr.number,
                   prTitle: pr.title,
                   prUrl: pr.html_url,
-                  headSha: pr.head.sha,
+                  headSha,
                   branchName: pr.head.ref,
                   ...relayPayload,
                 },
@@ -225,35 +329,32 @@ export async function handlePrSynchronize({
                 prNumber: pr.number,
                 prUrl: pr.html_url,
                 prTitle: pr.title,
-                prSha: pr.head.sha,
+                prSha: headSha,
                 prBaseRef: pr.base?.ref ?? null,
                 prBaseSha: pr.base?.sha ?? null,
               },
             },
           });
           queuedActiveReviewFollowUp = true;
-        } else {
-          await db
-            .update(taskPullRequests)
-            .set({ prSha: pr.head.sha })
-            .where(eq(taskPullRequests.taskId, activeReviewRun.taskId));
         }
 
-        console.log(
-          `[handlePrSynchronize] ${repository.full_name}#${pr.number} -> ${
-            activeReviewRun.startedAt && activeReviewRun.sandboxServerUrl
-              ? 'queue_active_review_follow_up'
-              : 'update_pending_review_head'
-          } (target: ${currentTarget.id})`,
-        );
+        if (reconciliation !== 'terminal') {
+          console.log(
+            `[handlePrSynchronize] ${repository.full_name}#${pr.number} -> ${
+              followUpRun
+                ? 'queue_active_review_follow_up'
+                : 'update_pending_review_head'
+            } (target: ${currentTarget.id})`,
+          );
 
-        return null;
+          return null;
+        }
       }
 
       const completedSameHeadRun = await findCompletedSameHeadReviewRun(
         repository.full_name,
         pr.number,
-        pr.head.sha,
+        headSha,
       );
 
       if (completedSameHeadRun) {
@@ -265,27 +366,11 @@ export async function handlePrSynchronize({
         return null;
       }
 
-      const [siblingReviewRun] = await db
-        .select({ id: taskRuns.id })
-        .from(tasks)
-        .innerJoin(taskPullRequests, eq(taskPullRequests.taskId, tasks.id))
-        .innerJoin(taskRuns, eq(taskRuns.taskId, tasks.id))
-        .where(
-          and(
-            eq(tasks.workflow, 'pr_review'),
-            eq(taskPullRequests.sourceControlProvider, 'github'),
-            eq(taskPullRequests.repository, repository.full_name),
-            eq(taskPullRequests.prNumber, pr.number),
-            sql`${taskRuns.status} != ${RunStatus.Failed}`,
-            sql`${taskPullRequests.prSha} != ${pr.head.sha}`,
-            isNotNull(taskPullRequests.prSha),
-            isNotNull(taskRuns.startedAt),
-            isNull(taskRuns.canceledAt),
-          ),
-        )
-        .limit(1);
-
-      const shouldRunSyncReview = !!siblingReviewRun;
+      const existingReviewTask = await findExistingReviewTask(
+        repository.full_name,
+        pr.number,
+      );
+      const shouldRunSyncReview = !!existingReviewTask;
 
       console.log(
         `[handlePrSynchronize] ${repository.full_name}#${pr.number} -> ${
@@ -302,6 +387,7 @@ export async function handlePrSynchronize({
       });
 
       return enqueueTask({
+        existingTaskId: existingReviewTask?.taskId,
         task: {
           type: shouldRunSyncReview
             ? TaskPayloadKind.GithubPrReviewSync
@@ -312,7 +398,7 @@ export async function handlePrSynchronize({
             prNumber: pr.number,
             prTitle: pr.title,
             prUrl: pr.html_url,
-            headSha: pr.head.sha,
+            headSha,
             branchName: pr.head.ref,
             ...relayPayload,
           } satisfies TaskPayload<
@@ -339,7 +425,7 @@ export async function handlePrSynchronize({
           prNumber: pr.number,
           prUrl: pr.html_url,
           prTitle: pr.title,
-          prSha: pr.head.sha,
+          prSha: headSha,
           prBaseRef: pr.base?.ref ?? null,
           prBaseSha: pr.base?.sha ?? null,
         },

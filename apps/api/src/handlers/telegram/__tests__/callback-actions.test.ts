@@ -386,7 +386,7 @@ describe('handleTelegramCallbackQuery suggestion launch lifecycle', () => {
     });
     expect(postTelegramMessageBestEffortMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: 'This deployment is read-only. New task launches are paused.',
+        text: 'New tasks are paused due to a billing issue. Please check billing.',
       }),
     );
   });

@@ -6,6 +6,7 @@ import {
   getMcpIntegrationOauthScopeMode,
   getMcpIntegrationOauthScopes,
   isMcpConnectionNotionConfig,
+  isMcpConnectionRipplingConfig,
   isMcpConnectionElevenLabsConfig,
   isMcpConnectionGbrainConfig,
   LINEAR_APP_OAUTH_SCOPES,
@@ -77,6 +78,30 @@ describe('Notion internal integration', () => {
         registered_redirect_uri: 'https://example.com/callback',
       }),
     ).toBe(false);
+  });
+});
+
+describe('Rippling HRIS connection', () => {
+  it('keeps the deployment credential on the control plane', () => {
+    expect(getMcpIntegration('rippling')).toMatchObject({
+      name: 'Rippling',
+      connectionScope: 'deployment',
+      connectionMode: 'admin_configured',
+      serverMode: 'credential_only',
+    });
+    expect(getMcpIntegration('rippling')?.url).toBeUndefined();
+  });
+
+  it('recognizes only encrypted Rippling token configs', () => {
+    expect(
+      isMcpConnectionRipplingConfig({
+        type: 'rippling',
+        encryptedApiToken: 'encrypted',
+      }),
+    ).toBe(true);
+    expect(isMcpConnectionRipplingConfig({ type: 'rippling' } as never)).toBe(
+      false,
+    );
   });
 });
 

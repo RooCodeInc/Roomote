@@ -298,7 +298,7 @@ describe('launchClaimedTeamsSuggestion', () => {
       claimedAt: CLAIMED_AT,
     });
     expect(postMessage).toHaveBeenCalledWith(
-      'This deployment is read-only. New task launches are paused.',
+      'New tasks are paused due to a billing issue. Please check billing.',
     );
   });
 });

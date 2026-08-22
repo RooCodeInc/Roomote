@@ -34,7 +34,8 @@ usage: install.sh [options]
 
 Options:
   --domain <host>            Public app hostname (default: roomote.<ip>.sslip.io)
-  --preview-domain <host>    Preview hostname (default: preview.<domain>)
+  --preview-domain <host>    Dedicated preview hostname (default: flat
+                             <task>-<port>-preview.<domain> hostnames)
   --tls-mode <acme|internal> TLS certificate mode (default: acme)
   --skip-dns-check           Skip public-DNS verification for --domain
   --version <tag>            Roomote image tag (default: latest GitHub release)
@@ -81,6 +82,7 @@ die() {
 
 domain=''
 preview_domain=''
+preview_subdomain_suffix=''
 tls_mode="${ROOMOTE_TLS_MODE:-}"
 skip_dns_check='false'
 roomote_version="${ROOMOTE_VERSION:-}"
@@ -298,6 +300,22 @@ log "Installing Roomote $roomote_version"
 
 # --- Domains -----------------------------------------------------------------
 
+read_saved_env_value() {
+  # Accepts the same line shapes set_env_value writes and rewrites:
+  # optional leading whitespace, an optional "export " prefix, and values
+  # containing '='.
+  local file="$1"
+  local key="$2"
+  awk -v key="$key" '
+    BEGIN { pattern = "^[[:space:]]*(export[[:space:]]+)?" key "=" }
+    $0 ~ pattern {
+      sub(/^[^=]*=/, "")
+      print
+      exit
+    }
+  ' "$file"
+}
+
 detect_public_ip() {
   local ip
   for endpoint in 'https://api.ipify.org' 'https://ifconfig.me/ip' 'https://ipinfo.io/ip'; do
@@ -310,15 +328,22 @@ detect_public_ip() {
   return 1
 }
 
-if [ -z "$domain" ] && [ -f "$install_root/.env" ]; then
-  domain="$(awk -F= '/^ROOMOTE_APP_DOMAIN=/ { print $2; exit }' "$install_root/.env")"
-  if [ -n "$domain" ]; then
-    log "Reusing the existing domain $domain from $install_root/.env"
-  fi
+saved_app_domain=''
+saved_preview_domain=''
+saved_preview_subdomain_suffix=''
+if [ -f "$install_root/.env" ]; then
+  saved_app_domain="$(read_saved_env_value "$install_root/.env" ROOMOTE_APP_DOMAIN)"
+  saved_preview_domain="$(read_saved_env_value "$install_root/.env" ROOMOTE_PREVIEW_DOMAIN)"
+  saved_preview_subdomain_suffix="$(read_saved_env_value "$install_root/.env" PREVIEW_PROXY_SUBDOMAIN_SUFFIX)"
+fi
+
+if [ -z "$domain" ] && [ -n "$saved_app_domain" ]; then
+  domain="$saved_app_domain"
+  log "Reusing the existing domain $domain from $install_root/.env"
 fi
 
 if [ -z "$tls_mode" ] && [ -f "$install_root/.env" ]; then
-  tls_mode="$(awk -F= '/^ROOMOTE_TLS_MODE=/ { print $2; exit }' "$install_root/.env")"
+  tls_mode="$(read_saved_env_value "$install_root/.env" ROOMOTE_TLS_MODE)"
 fi
 tls_mode="${tls_mode:-acme}"
 case "$tls_mode" in
@@ -357,8 +382,32 @@ else
   fi
 fi
 
+if [ -z "$preview_domain" ] && [ -n "$saved_preview_domain" ]; then
+  if [ "$saved_preview_domain" = "$saved_app_domain" ]; then
+    # Flat layout: previews follow the app domain, including across a rerun
+    # that changes --domain.
+    preview_domain="$domain"
+  else
+    preview_domain="$saved_preview_domain"
+    if [ -n "$saved_app_domain" ] && [ "$saved_app_domain" != "$domain" ]; then
+      warn "Keeping the dedicated preview domain $preview_domain from $install_root/.env; pass --preview-domain if previews should follow the new app domain $domain."
+    fi
+  fi
+fi
+
 if [ -z "$preview_domain" ]; then
-  preview_domain="preview.$domain"
+  # Fresh installs (and reruns whose .env predates preview settings) default
+  # to flat preview hostnames.
+  preview_domain="$domain"
+fi
+
+if [ "$preview_domain" = "$domain" ]; then
+  # Flat layouts always carry a subdomain suffix so preview hostnames stay
+  # inside the reserved "-<suffix>" namespace, even when --preview-domain
+  # restates the app domain explicitly.
+  preview_subdomain_suffix="${saved_preview_subdomain_suffix:-preview}"
+else
+  preview_subdomain_suffix="$saved_preview_subdomain_suffix"
 fi
 
 # --- Docker ------------------------------------------------------------------
@@ -463,15 +512,7 @@ env_has_value() {
 }
 
 read_env_value() {
-  local key="$1"
-  awk -v key="$key" '
-    BEGIN { pattern = "^[[:space:]]*(export[[:space:]]+)?" key "=" }
-    $0 ~ pattern {
-      sub(/^[^=]*=/, "")
-      print
-      exit
-    }
-  ' "$env_file"
+  read_saved_env_value "$env_file" "$1"
 }
 
 generate_p256_keypair() {
@@ -549,6 +590,7 @@ set_env_value ROOMOTE_VERSION "$roomote_version"
 set_env_value ROOMOTE_REPO "$repo"
 set_env_value ROOMOTE_APP_DOMAIN "$domain"
 set_env_value ROOMOTE_PREVIEW_DOMAIN "$preview_domain"
+set_env_value PREVIEW_PROXY_SUBDOMAIN_SUFFIX "$preview_subdomain_suffix"
 set_env_value ROOMOTE_TLS_MODE "$tls_mode"
 if [ "$tls_mode" = 'internal' ]; then
   set_env_value ROOMOTE_CADDY_LOCAL_CERTS 'local_certs'
