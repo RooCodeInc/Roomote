@@ -304,14 +304,68 @@ describe('brainMaintenanceJob', () => {
     });
     mockDigestFetch(
       [searchResponse()],
-      [synthesisResponse(), new Response('{"error":"nope"}', { status: 500 })],
+      [synthesisResponse(), new Response('{"error":"nope"}', { status: 400 })],
     );
 
     await expect(brainMaintenanceJob()).rejects.toThrow(
-      'gbrain submit_job failed: 500',
+      'gbrain submit_job failed: 400',
     );
-    // The day was claimed before the submission and released after it
-    // failed, so the scheduler's retry can submit again.
+    // A 4xx is a definitive refusal: the day was claimed before the
+    // submission and released after it, so the scheduler's retry can submit
+    // again.
+    const autopilotWrites = mockUpsertBrainSyncState.mock.calls
+      .filter((call) => call[1] === 'roomote-autopilot-cycle')
+      .map((call) => call[2]);
+    expect(autopilotWrites).toEqual([
+      { watermark: new Date('2026-08-17T07:00:00.000Z') },
+      { watermark: null },
+    ]);
+  });
+
+  it('keeps the claim on a 5xx, which can follow an accepted submission', async () => {
+    // A gateway can answer 5xx after gbrain already queued the job, so the
+    // claim must stand and the retry must not resubmit.
+    mockResolveProvider.mockResolvedValue(TEST_PROVIDER);
+    mockResolveConnection.mockResolvedValue({
+      baseUrl: 'http://gbrain.test',
+      token: 'maintenance-token',
+    });
+    mockDigestFetch(
+      [searchResponse()],
+      [synthesisResponse(), new Response('bad gateway', { status: 502 })],
+    );
+
+    await expect(brainMaintenanceJob()).rejects.toThrow(
+      'gbrain submit_job failed: 502',
+    );
+    const autopilotWrites = mockUpsertBrainSyncState.mock.calls
+      .filter((call) => call[1] === 'roomote-autopilot-cycle')
+      .map((call) => call[2]);
+    expect(autopilotWrites).toEqual([
+      { watermark: new Date('2026-08-17T07:00:00.000Z') },
+    ]);
+  });
+
+  it('releases the claim when gbrain answers with a tool error', async () => {
+    mockResolveProvider.mockResolvedValue(TEST_PROVIDER);
+    mockResolveConnection.mockResolvedValue({
+      baseUrl: 'http://gbrain.test',
+      token: 'maintenance-token',
+    });
+    mockDigestFetch(
+      [searchResponse()],
+      [
+        synthesisResponse(),
+        new Response(
+          '{"jsonrpc":"2.0","id":1,"result":{"isError":true,"content":[{"type":"text","text":"unknown job"}]}}',
+          { status: 200 },
+        ),
+      ],
+    );
+
+    await expect(brainMaintenanceJob()).rejects.toThrow(
+      'gbrain submit_job failed: 200',
+    );
     const autopilotWrites = mockUpsertBrainSyncState.mock.calls
       .filter((call) => call[1] === 'roomote-autopilot-cycle')
       .map((call) => call[2]);

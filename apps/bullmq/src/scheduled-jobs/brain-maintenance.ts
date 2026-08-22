@@ -916,21 +916,32 @@ export async function brainMaintenanceJob(): Promise<void> {
       watermark: maintenanceNow,
     });
 
-    // A transport failure (no HTTP answer) is ambiguous: gbrain may have
-    // queued the job before the connection died, so the claim stays and the
-    // retry does not resubmit. Only a definitive rejection, where gbrain
-    // answered and did not take the job, releases the claim.
+    // Only a DEFINITIVE non-acceptance releases the claim: a 4xx (the
+    // request itself was refused, nothing was queued) or a tool-level
+    // isError result (gbrain answered and did not take the job). Anything
+    // ambiguous keeps it: a transport failure with no HTTP answer, or a 5xx,
+    // which a gateway can return after gbrain already queued the job. The
+    // retry then does not resubmit, trading at most one day's cycle for a
+    // duplicate corpus-wide cycle.
     const response = await postBrainToolCall(connection, 'submit_job', {
       name: 'autopilot-cycle',
       data: { pull: false, phases: [...BRAIN_MAINTENANCE_PHASES] },
       max_attempts: 2,
       timeout_ms: BRAIN_MAINTENANCE_TIMEOUT_MS,
     });
+    const accepted = response.ok && !/"isError"\s*:\s*true/.test(response.body);
 
-    if (!response.ok || /"isError"\s*:\s*true/.test(response.body)) {
-      await upsertBrainSyncState(db, BRAIN_AUTOPILOT_STATE_ID, {
-        watermark: autopilotState?.watermark ?? null,
-      });
+    if (!accepted) {
+      const definitelyRejected =
+        (response.status >= 400 && response.status < 500) ||
+        (response.ok && !accepted);
+
+      if (definitelyRejected) {
+        await upsertBrainSyncState(db, BRAIN_AUTOPILOT_STATE_ID, {
+          watermark: autopilotState?.watermark ?? null,
+        });
+      }
+
       throw new Error(
         `gbrain submit_job failed: ${response.status} ${response.body.slice(0, 300)}`,
       );
