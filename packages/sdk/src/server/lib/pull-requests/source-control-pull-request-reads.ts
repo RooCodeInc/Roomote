@@ -170,6 +170,8 @@ export type SourceControlPullRequestSummary = {
   externalId: number | null;
   url: string;
   title: string;
+  /** The description as the list payload carries it; null when the provider's list omits it. */
+  body: string | null;
   state: 'open' | 'closed' | 'merged';
   draft: boolean;
   sourceBranch: string;
@@ -551,6 +553,7 @@ const gitLabMergeRequestListItemSchema = z
     id: z.number().int().optional(),
     iid: z.number().int(),
     title: z.string(),
+    description: z.string().nullable().optional(),
     state: z.string(),
     merged_at: z.string().nullable().optional(),
     closed_at: z.string().nullable().optional(),
@@ -2020,6 +2023,7 @@ async function listGitHubPullRequests({
       externalId: pull.id ?? null,
       url: pull.html_url,
       title: pull.title,
+      body: pull.body ?? null,
       state: mapProviderPullRequestState({
         merged: Boolean(pull.merged_at),
         closed: pull.state === 'closed',
@@ -2125,6 +2129,7 @@ async function listGitLabMergeRequests({
           number: mergeRequest.iid,
         }),
       title: mergeRequest.title,
+      body: mergeRequest.description ?? null,
       state: mapProviderPullRequestState({
         merged: mergeRequest.state === 'merged',
         closed: mergeRequest.state === 'closed',
@@ -2247,6 +2252,7 @@ async function listGiteaPullRequests({
             number,
           }),
         title,
+        body: pullRequest.body ?? null,
         state: mapProviderPullRequestState({
           merged: Boolean(pullRequest.merged),
           closed: pullRequest.state === 'closed',
@@ -2378,6 +2384,7 @@ async function listBitbucketPullRequests({
             number: pullRequest.id,
           }),
         title,
+        body: pullRequest.description ?? null,
         state: mapProviderPullRequestState({
           merged: state === 'MERGED',
           closed: state === 'DECLINED' || state === 'SUPERSEDED',
@@ -2491,6 +2498,7 @@ async function listAdoPullRequests({
         number: pullRequest.pullRequestId,
       }),
       title: pullRequest.title,
+      body: pullRequest.description ?? null,
       state: mapProviderPullRequestState({
         merged: pullRequest.status === 'completed',
         closed: pullRequest.status === 'abandoned',

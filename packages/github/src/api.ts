@@ -125,6 +125,8 @@ export type PullRequestAnalyticsState = 'open' | 'draft' | 'closed' | 'merged';
 
 export type PullRequestAnalyticsItem = {
   authorLogin: string | null;
+  body: string | null;
+  labels: string[];
   createdAt: string;
   externalPullRequestId: number;
   updatedAt: string;
@@ -1460,6 +1462,10 @@ function mapPullRequestToAnalyticsItem(
 ): PullRequestAnalyticsItem {
   return {
     authorLogin: pullRequest.user?.login ?? null,
+    body: pullRequest.body ?? null,
+    labels: (pullRequest.labels ?? [])
+      .map((label) => label.name)
+      .filter((name): name is string => Boolean(name)),
     createdAt: pullRequest.created_at,
     externalPullRequestId: pullRequest.id,
     updatedAt: pullRequest.updated_at,

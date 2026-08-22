@@ -118,6 +118,54 @@ describe('pull request fact pages', () => {
     expect(page.content).toContain('\nmerged_at: 2026-08-14T10:00:00.000Z\n');
   });
 
+  it('carries the description and labels, capped and as evidence', () => {
+    const page = buildPullRequestFactPage({
+      repositoryFullName: 'owner/repo',
+      prNumber: 42,
+      title: 'Ship it',
+      htmlUrl: 'https://example.test/owner/repo/pull/42',
+      authorLogin: 'octocat',
+      body: 'Why: the old path raced.\n\nWhat: serialize the writer.',
+      labels: ['bug', 'brain'],
+      state: 'merged',
+      createdAtRemote: new Date('2026-08-01T09:00:00Z'),
+      closedAtRemote: new Date('2026-08-14T10:00:00Z'),
+      mergedAtRemote: new Date('2026-08-14T10:00:00Z'),
+    });
+
+    expect(page.content).toContain('\nlabels: ["bug","brain"]\n');
+    expect(page.content).toContain('\nLabels: bug, brain\n');
+    expect(page.content).toContain(
+      '\n## Description\n\nWhy: the old path raced.\n\nWhat: serialize the writer.\n',
+    );
+  });
+
+  it('truncates a long description and omits the section when empty', () => {
+    const base = {
+      repositoryFullName: 'owner/repo',
+      prNumber: 42,
+      title: 'Ship it',
+      htmlUrl: 'https://example.test/owner/repo/pull/42',
+      authorLogin: 'octocat',
+      state: 'open',
+      createdAtRemote: new Date('2026-08-01T09:00:00Z'),
+      closedAtRemote: null,
+      mergedAtRemote: null,
+    };
+
+    const long = buildPullRequestFactPage({ ...base, body: 'x'.repeat(5_000) });
+    expect(long.content).toContain('_Description truncated');
+    expect(long.content).not.toContain('x'.repeat(4_001));
+
+    const empty = buildPullRequestFactPage({
+      ...base,
+      body: '   ',
+      labels: [],
+    });
+    expect(empty.content).not.toContain('## Description');
+    expect(empty.content).not.toContain('labels:');
+  });
+
   it('uses close then creation dates for unmerged pull requests', () => {
     const base = {
       repositoryFullName: 'owner/repo',

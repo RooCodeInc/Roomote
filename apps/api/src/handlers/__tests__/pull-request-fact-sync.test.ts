@@ -42,6 +42,8 @@ describe('scheduleSourceControlPullRequestFactSync', () => {
       host: 'git.example.com',
       pullRequest: {
         authorLogin: 'gitea-user',
+        body: null,
+        labels: null,
         closedAt: '2026-07-10T00:00:00.000Z',
         createdAt: '2026-07-01T00:00:00.000Z',
         externalPullRequestId: 900,

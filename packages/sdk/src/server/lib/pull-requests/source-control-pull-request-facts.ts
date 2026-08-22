@@ -76,6 +76,8 @@ function toMergedPullRequestFactSnapshot(
 
   return {
     authorLogin: summary.author?.login ?? null,
+    body: summary.body ?? null,
+    labels: summary.labels ?? [],
     closedAt: summary.closedAt ?? mergedAt,
     createdAt,
     externalPullRequestId: summary.externalId ?? summary.number,
