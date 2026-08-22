@@ -3,6 +3,7 @@ const mocks = vi.hoisted(() => ({
   getSlackLiveTaskStreamData: vi.fn(),
   setSlackLiveTaskStreamData: vi.fn(),
   postMessage: vi.fn(),
+  postMessageDetailed: vi.fn(),
 }));
 
 // Contract-faithful stand-in for the cloud-agents launcher (hook ordering is
@@ -55,7 +56,10 @@ import { createFastAgentSlackLiveTaskLauncher } from '../fast-agent-live-task-la
 
 function createLauncher() {
   return createFastAgentSlackLiveTaskLauncher({
-    slack: { postMessage: mocks.postMessage },
+    slack: {
+      postMessage: mocks.postMessage,
+      postMessageDetailed: mocks.postMessageDetailed,
+    },
     userId: 'user-1',
     teamId: 'T123',
     teamDomain: 'acme',
@@ -70,7 +74,8 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
     vi.clearAllMocks();
     mocks.enqueueTask.mockResolvedValue(undefined);
     mocks.getSlackLiveTaskStreamData.mockResolvedValue(null);
-    mocks.postMessage.mockResolvedValue('card-ts');
+    mocks.postMessageDetailed.mockResolvedValue({ ts: 'card-ts' });
+    mocks.postMessage.mockResolvedValue('fallback-ts');
     mocks.setSlackLiveTaskStreamData.mockResolvedValue(undefined);
   });
 
@@ -90,10 +95,10 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
       taskUrl: 'https://roomote.example/task/task-1',
     });
 
-    expect(mocks.postMessage).toHaveBeenCalledWith({
+    expect(mocks.postMessageDetailed).toHaveBeenCalledWith({
       channel: 'C123',
       thread_ts: '100.001',
-      text: 'Starting task…',
+      text: 'Starting task…\n<https://roomote.example/task/task-1|Open the task>',
       blocks: [
         expect.objectContaining({
           type: 'task_card',
@@ -112,9 +117,9 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
       unfurl_links: false,
       unfurl_media: false,
     });
-    expect(mocks.postMessage.mock.calls[0]?.[0]?.blocks[0]).not.toHaveProperty(
-      'output',
-    );
+    expect(
+      mocks.postMessageDetailed.mock.calls[0]?.[0]?.blocks[0],
+    ).not.toHaveProperty('output');
     expect(mocks.setSlackLiveTaskStreamData).toHaveBeenCalledWith('task-1', {
       channel: 'C123',
       messageTs: 'card-ts',
@@ -154,12 +159,40 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
       postKickoff: vi.fn(),
     });
 
-    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(mocks.postMessageDetailed).not.toHaveBeenCalled();
+    expect(mocks.setSlackLiveTaskStreamData).not.toHaveBeenCalled();
+  });
+
+  it('posts a plain task link when Slack rejects the card', async () => {
+    mocks.postMessageDetailed.mockResolvedValue({
+      slackErrorCode: 'invalid_blocks',
+    });
+
+    await createLauncher()({
+      prompt: 'Add a regression test',
+      environmentId: null,
+      parentSessionId: '11111111-1111-4111-8111-111111111111',
+      postKickoff: vi.fn(),
+    });
+
+    expect(mocks.postMessage).toHaveBeenCalledWith({
+      channel: 'C123',
+      thread_ts: '100.001',
+      text: 'Open the task: https://roomote.example/task/task-1',
+      blocks: [
+        {
+          type: 'markdown',
+          text: '[Open the task](https://roomote.example/task/task-1)',
+        },
+      ],
+      unfurl_links: false,
+      unfurl_media: false,
+    });
     expect(mocks.setSlackLiveTaskStreamData).not.toHaveBeenCalled();
   });
 
   it('still launches the task when the card cannot be posted', async () => {
-    mocks.postMessage.mockRejectedValue(new Error('slack down'));
+    mocks.postMessageDetailed.mockRejectedValue(new Error('slack down'));
 
     await expect(
       createLauncher()({

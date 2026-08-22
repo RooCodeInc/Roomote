@@ -104,7 +104,7 @@ describe('Slack live task card', () => {
       channel: 'C123',
       ts: 'card-ts',
       message: {
-        text: 'Fix the button',
+        text: 'Fix the button\n<https://roomote.example/task/task-1|Open the task>',
         blocks: [
           {
             type: 'task_card',

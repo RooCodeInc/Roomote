@@ -20,6 +20,9 @@ export interface SlackLiveTaskCardContent {
  * `block_id` is pinned (Slack generates a new one per update otherwise) so
  * the client keeps treating every render as the same block; a changing id
  * remounts the card and snaps it shut on each update.
+ *
+ * `text` is what Slack shows in notifications and in clients too old to
+ * render the block, so it carries the whole card, link included.
  */
 export function buildSlackLiveTaskCardBlocks(
   content: SlackLiveTaskCardContent,
@@ -27,7 +30,13 @@ export function buildSlackLiveTaskCardBlocks(
   const message = content.message?.trim();
 
   return {
-    text: content.title,
+    text: [
+      content.title,
+      message,
+      content.taskUrl ? `<${content.taskUrl}|Open the task>` : undefined,
+    ]
+      .filter((line): line is string => Boolean(line))
+      .join('\n'),
     blocks: [
       {
         type: 'task_card',

@@ -11,7 +11,10 @@ import {
 } from './live-task-stream';
 import type { SlackNotifier } from './slack-notifier';
 
-type SlackLiveTaskCardNotifier = Pick<SlackNotifier, 'postMessage'>;
+type SlackLiveTaskCardNotifier = Pick<
+  SlackNotifier,
+  'postMessage' | 'postMessageDetailed'
+>;
 
 export const STARTING_TASK_TITLE = 'Starting task…';
 
@@ -50,7 +53,7 @@ export function createFastAgentSlackLiveTaskLauncher(
       // the real title.
       const title = buildSlackLiveTaskTitle(context.prompt);
       const taskUpdateId = `roomote-task-${taskRun.taskId}`;
-      const messageTs = await slack.postMessage({
+      const posted = await slack.postMessageDetailed({
         channel: launcherParams.channelId,
         thread_ts: launcherParams.threadTs,
         ...buildSlackLiveTaskCardBlocks({
@@ -62,8 +65,31 @@ export function createFastAgentSlackLiveTaskLauncher(
         unfurl_links: false,
         unfurl_media: false,
       });
+      const messageTs = posted.ts;
 
       if (!messageTs) {
+        // The kickoff deliberately omits the task link because the card
+        // carries it; when the card cannot be posted (for example a Slack
+        // app installed before task cards existed rejects the block), post
+        // the link on its own so the thread still leads to the task.
+        if (!posted.skippedMissingThreadRoot) {
+          console.warn(
+            `[Fast Agent] Slack rejected the task card for run ${taskRun.id} (${posted.slackErrorCode ?? (posted.transportError ? 'transport error' : 'unknown')}); posting the task link instead.`,
+          );
+          await slack.postMessage({
+            channel: launcherParams.channelId,
+            thread_ts: launcherParams.threadTs,
+            text: `Open the task: ${context.taskUrl}`,
+            blocks: [
+              {
+                type: 'markdown',
+                text: `[Open the task](${context.taskUrl})`,
+              },
+            ],
+            unfurl_links: false,
+            unfurl_media: false,
+          });
+        }
         return;
       }
 
