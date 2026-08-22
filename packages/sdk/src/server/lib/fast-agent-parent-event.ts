@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { basename } from 'node:path';
 
 import {
@@ -23,6 +23,7 @@ import {
 } from '@roomote/db/server';
 import { Env, getArtifactSigningKey } from '@roomote/env';
 import {
+  buildSlackPrReviewActionBlocks,
   createFastAgentSlackLiveTaskLauncher,
   resolveSlackReactionNames,
   SlackNotifier,
@@ -46,6 +47,10 @@ import {
   currentEpochSeconds,
 } from './artifacts/raw-url';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from './discord-communication';
+import {
+  attachPendingPrReviewActionMessage,
+  setPendingPrReviewAction,
+} from './task-runs/pr-review-action';
 
 const EXITED_RUN_STATUSES = new Set<RunStatus>(exitedRunStatuses);
 
@@ -134,6 +139,7 @@ type FastAgentParentEvent =
       taskUrl: string;
       pullRequest: FastAgentPullRequestContext;
       summary: string;
+      suggestedActionQuestion?: string;
       suggestedActionPrompt?: string;
       reviewResult?: {
         reviewKind: 'initial' | 'sync' | null;
@@ -347,18 +353,54 @@ async function createSlackFastAgentParentTurn(params: {
           artifactIds: imageArtifactIds,
           event: params.event,
         });
+        const action =
+          params.event.type === 'pull_request_feedback' &&
+          params.event.suggestedActionQuestion &&
+          params.event.suggestedActionPrompt &&
+          params.event.pullRequest.repository &&
+          params.event.pullRequest.number
+            ? {
+                nonce: randomUUID(),
+                question: params.event.suggestedActionQuestion,
+                followUpPrompt: params.event.suggestedActionPrompt,
+                repository: params.event.pullRequest.repository,
+                prNumber: params.event.pullRequest.number,
+                prUrl: params.event.pullRequest.url,
+              }
+            : null;
+
+        if (action) {
+          await setPendingPrReviewAction({
+            nonce: action.nonce,
+            provider: 'slack',
+            slackTeamId: conversation.workspaceId,
+            taskId: params.event.taskId,
+            repository: action.repository,
+            prNumber: action.prNumber,
+            prUrl: action.prUrl,
+            channelId: conversation.replyTarget.channelId,
+            threadId: conversation.replyTarget.threadId,
+            followUpPrompt: action.followUpPrompt,
+          });
+        }
         const messageTs = await slack.postMessage({
           channel: conversation.replyTarget.channelId,
           thread_ts: conversation.replyTarget.threadId,
-          text: message,
-          blocks: [
-            { type: 'markdown', text: message },
-            ...images.map((image) => ({
-              type: 'image' as const,
-              image_url: image.url,
-              alt_text: image.altText,
-            })),
-          ],
+          text: action ? `${message}\n${action.question}` : message,
+          blocks: action
+            ? buildSlackPrReviewActionBlocks({
+                text: message,
+                question: action.question,
+                nonce: action.nonce,
+              })
+            : [
+                { type: 'markdown', text: message },
+                ...images.map((image) => ({
+                  type: 'image' as const,
+                  image_url: image.url,
+                  alt_text: image.altText,
+                })),
+              ],
           unfurl_links: false,
           unfurl_media: false,
           client_msg_id: buildSlackClientMessageId(
@@ -369,6 +411,9 @@ async function createSlackFastAgentParentTurn(params: {
           throw new Error(
             'Slack did not return a Fast parent event timestamp.',
           );
+        }
+        if (action) {
+          await attachPendingPrReviewActionMessage(action.nonce, messageTs);
         }
         params.onReplyPosted();
       },
@@ -555,6 +600,10 @@ export async function deliverFastAgentParentEvent(params: {
       conversation: parentTurn.conversation,
       signal: releaseTurnLock.signal,
       turnSource: 'platform_event',
+      platformEventHandling:
+        params.event.type === 'pull_request_feedback'
+          ? 'present_only'
+          : 'default',
       platformEventVisibility:
         params.event.type === 'pull_request_feedback' ? 'required' : 'optional',
       adapter: {

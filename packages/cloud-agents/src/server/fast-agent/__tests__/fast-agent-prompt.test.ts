@@ -171,6 +171,9 @@ describe('buildFastAgentSystemPrompt', () => {
       'Pull-request-feedback events contain triaged feedback',
     );
     expect(prompt).toContain(
+      'Do not launch a fix or call "send_task_message" until the user explicitly responds or clicks an action',
+    );
+    expect(prompt).toContain(
       'Do not describe a closed pull request as merged or a merged pull request as merely closed',
     );
   });
@@ -186,6 +189,20 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('Do not call "ignore_event"');
     expect(prompt).not.toContain(
       'Call "ignore_event" when it is routine, redundant, or not worth interrupting the user',
+    );
+  });
+
+  it('requires presentation-only platform events to stop after posting', () => {
+    const prompt = buildFastAgentSystemPrompt({
+      availableEnvironments: [],
+      turnSource: 'platform_event',
+      platformEventHandling: 'present_only',
+    });
+
+    expect(prompt).toContain('This event is presentation-only');
+    expect(prompt).toContain('Post its supplied information, then stop');
+    expect(prompt).not.toContain(
+      'The normal tools remain available. Use them only when the event and conversation context justify the action',
     );
   });
 

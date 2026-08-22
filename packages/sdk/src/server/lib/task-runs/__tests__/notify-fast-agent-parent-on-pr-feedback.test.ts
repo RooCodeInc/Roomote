@@ -100,6 +100,7 @@ const input = {
     status: 'open' as const,
   },
   summary: 'Alice requested changes.',
+  suggestedActionQuestion: 'Want me to resolve these issues?',
   suggestedActionPrompt: 'Address the requested changes.',
 };
 
@@ -113,10 +114,12 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
   });
 
   it('passes structured, actionable feedback to the Fast parent', async () => {
-    await notifyFastAgentParentOnPrFeedback({
-      run: makeRun({ fastAgentParent: fastParent }),
-      ...input,
-    });
+    await expect(
+      notifyFastAgentParentOnPrFeedback({
+        run: makeRun({ fastAgentParent: fastParent }),
+        ...input,
+      }),
+    ).resolves.toBe(true);
 
     expect(mocks.deliverParentEvent).toHaveBeenCalledWith({
       parent: fastParent,
@@ -129,6 +132,7 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
         taskUrl: 'https://roomote.example/task/child-task',
         pullRequest: input.pullRequest,
         summary: input.summary,
+        suggestedActionQuestion: input.suggestedActionQuestion,
         suggestedActionPrompt: input.suggestedActionPrompt,
       },
     });
@@ -141,6 +145,17 @@ describe('notifyFastAgentParentOnPrFeedback', () => {
         }),
       }),
     );
+  });
+
+  it('returns false when the task has no Fast parent', async () => {
+    await expect(
+      notifyFastAgentParentOnPrFeedback({
+        run: makeRun({}),
+        ...input,
+      }),
+    ).resolves.toBe(false);
+
+    expect(mocks.deliverParentEvent).not.toHaveBeenCalled();
   });
 
   it('uses the same feedback identity regardless of delivery order', async () => {

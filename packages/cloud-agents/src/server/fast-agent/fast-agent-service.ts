@@ -53,6 +53,7 @@ import { getFastAgentUserIdentity } from './fast-agent-user-identity';
 import { FastAgentTurnDiagnostics } from './fast-agent-turn-diagnostics';
 import {
   type FastAgentConversation,
+  type FastAgentPlatformEventHandling,
   type FastAgentPlatformEventVisibility,
   type FastAgentReply,
   type FastAgentTurnAdapter,
@@ -485,6 +486,7 @@ export async function answerFastAgentQuestion({
   adapter,
   signal,
   turnSource = 'human',
+  platformEventHandling = 'default',
   platformEventVisibility = 'optional',
 }: {
   question: string;
@@ -501,6 +503,7 @@ export async function answerFastAgentQuestion({
   adapter: FastAgentTurnAdapter;
   signal?: AbortSignal;
   turnSource?: FastAgentTurnSource;
+  platformEventHandling?: FastAgentPlatformEventHandling;
   platformEventVisibility?: FastAgentPlatformEventVisibility;
 }): Promise<string> {
   const diagnostics = new FastAgentTurnDiagnostics({
@@ -571,6 +574,7 @@ export async function answerFastAgentQuestion({
       activeTasks: resolvedActiveTasks,
       surface: conversation.surface,
       turnSource,
+      platformEventHandling,
       platformEventVisibility,
       retryTaskStartAvailable: Boolean(adapter.retryTaskStart),
     });
@@ -690,9 +694,29 @@ export async function answerFastAgentQuestion({
         if (ownershipError) return ownershipError;
         nativeToolInvoked = true;
 
+        if (
+          platformEventHandling === 'present_only' &&
+          call.name !== FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply
+        ) {
+          return {
+            success: false,
+            error:
+              'This platform event may only be presented to the user with a closeout.',
+          };
+        }
+
         switch (call.name) {
           case FAST_AGENT_NATIVE_TOOL_NAMES.sendChatReply: {
             const args = chatReplyArgsSchema.parse(call.args);
+            if (
+              platformEventHandling === 'present_only' &&
+              args.purpose !== 'closeout'
+            ) {
+              return {
+                success: false,
+                error: 'This platform event must be presented with a closeout.',
+              };
+            }
             if (
               platformEvent &&
               args.purpose !== 'closeout' &&

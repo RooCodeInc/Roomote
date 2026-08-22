@@ -195,7 +195,7 @@ describe('prReviewNotificationJob', () => {
       text: 'formatted-message',
     });
     mockRecordDelivery.mockResolvedValue(undefined);
-    mockNotifyFastAgentParent.mockResolvedValue(undefined);
+    mockNotifyFastAgentParent.mockResolvedValue(false);
     mockStickyFooterPost.mockResolvedValue('999.888');
     mockPostMessage.mockResolvedValue({
       provider: 'slack',
@@ -292,11 +292,17 @@ describe('prReviewNotificationJob', () => {
     });
     mockPrepareDelivery.mockResolvedValue({
       post: true,
-      route: null,
+      route: {
+        provider: 'slack',
+        slackTeamId: 'T123',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
       text: 'Alice requested changes on owner/repo#42.',
       followUpQuestion: 'Want me to take a look?',
       followUpPrompt: 'Address the review feedback on owner/repo#42.',
     });
+    mockNotifyFastAgentParent.mockResolvedValue(true);
     mockConsumePending.mockResolvedValue([
       {
         kind: 'review_summary',
@@ -340,7 +346,17 @@ describe('prReviewNotificationJob', () => {
         approvalStatus: null,
         headSha: 'abc123',
       },
+      suggestedActionQuestion: 'Want me to take a look?',
       suggestedActionPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
+    expect(mockDispatchFollowUp).not.toHaveBeenCalled();
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
+    expect(mockRecordDelivery).toHaveBeenCalledWith({
+      runId: 1,
+      taskId: 'task-1',
+      route: null,
+      text: 'Alice requested changes on owner/repo#42.\nWant me to take a look?',
     });
   });
 

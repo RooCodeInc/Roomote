@@ -16,6 +16,9 @@ const mocks = vi.hoisted(() => ({
   createDiscordThread: vi.fn(),
   enqueueTask: vi.fn(),
   getTaskUrl: vi.fn(),
+  setPendingPrReviewAction: vi.fn(),
+  attachPendingPrReviewActionMessage: vi.fn(),
+  buildSlackPrReviewActionBlocks: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server', () => ({
@@ -78,8 +81,14 @@ vi.mock('@roomote/slack', () => ({
     postMessage = mocks.postMessage;
     addReaction = mocks.addReaction;
   },
+  buildSlackPrReviewActionBlocks: mocks.buildSlackPrReviewActionBlocks,
   resolveSlackReactionNames: mocks.resolveSlackReactionNames,
   createFastAgentSlackLiveTaskLauncher: mocks.createLauncher,
+}));
+
+vi.mock('./task-runs/pr-review-action', () => ({
+  setPendingPrReviewAction: mocks.setPendingPrReviewAction,
+  attachPendingPrReviewActionMessage: mocks.attachPendingPrReviewActionMessage,
 }));
 
 vi.mock('./artifacts/raw-url', () => ({
@@ -156,6 +165,19 @@ describe('deliverFastAgentParentEvent', () => {
       ackEmoji: 'eyes',
       completionEmoji: 'white_check_mark',
     });
+    mocks.setPendingPrReviewAction.mockResolvedValue(undefined);
+    mocks.attachPendingPrReviewActionMessage.mockResolvedValue(undefined);
+    mocks.buildSlackPrReviewActionBlocks.mockImplementation(
+      ({ text, question, nonce }) => [
+        { type: 'section', text: { type: 'mrkdwn', text } },
+        {
+          type: 'section',
+          block_id: 'pr_review_action_question',
+          text: { type: 'mrkdwn', text: question },
+        },
+        { type: 'actions', nonce },
+      ],
+    );
     mocks.discordPostMessage.mockResolvedValue({
       provider: 'discord',
       channelId: 'channel-1',
@@ -511,6 +533,7 @@ describe('deliverFastAgentParentEvent', () => {
         status: 'open' as const,
       },
       summary: 'Alice requested changes.',
+      suggestedActionQuestion: 'Want me to resolve these issues?',
       suggestedActionPrompt: 'Address the requested changes.',
     };
     mocks.answerQuestion.mockImplementation(
@@ -531,13 +554,37 @@ describe('deliverFastAgentParentEvent', () => {
       expect.objectContaining({
         question: expect.stringContaining('"type":"pull_request_feedback"'),
         turnSource: 'platform_event',
+        platformEventHandling: 'present_only',
         platformEventVisibility: 'required',
       }),
     );
     expect(mocks.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         client_msg_id: expect.any(String),
+        text: 'There is new PR feedback.\nWant me to resolve these issues?',
+        blocks: expect.arrayContaining([
+          expect.objectContaining({ block_id: 'pr_review_action_question' }),
+          expect.objectContaining({ type: 'actions' }),
+        ]),
       }),
+    );
+    expect(mocks.setPendingPrReviewAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'slack',
+        slackTeamId: 'T123',
+        taskId: 'task-1',
+        repository: 'acme/web',
+        prNumber: 42,
+        prUrl: 'https://github.com/acme/web/pull/42',
+        channelId: 'C123',
+        threadId: '100.001',
+        followUpPrompt: 'Address the requested changes.',
+        nonce: expect.any(String),
+      }),
+    );
+    expect(mocks.attachPendingPrReviewActionMessage).toHaveBeenCalledWith(
+      expect.any(String),
+      '101.001',
     );
     expect(mocks.addReaction).not.toHaveBeenCalled();
   });
