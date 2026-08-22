@@ -11,13 +11,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@roomote/cloud-agents/server', () => ({
   createFastAgentSlackTaskLauncher: (params: {
     liveTaskStream?: boolean;
+    rendersTaskLink?: boolean;
     afterKickoff?: (
       taskRun: { id: number; taskId: string },
       context: { prompt: string; taskUrl: string },
     ) => Promise<void>;
     [key: string]: unknown;
   }) => {
-    const { liveTaskStream, afterKickoff, ...rest } = params;
+    const { liveTaskStream, afterKickoff, rendersTaskLink, ...rest } = params;
     return async (input: {
       prompt: string;
       environmentId: string | null;
@@ -36,6 +37,7 @@ vi.mock('@roomote/cloud-agents/server', () => ({
       await mocks.enqueueTask({
         ...rest,
         liveTaskStream,
+        rendersTaskLink,
         environmentId: input.environmentId,
       });
       return { success: true, taskId: 'task-1', taskUrl };
@@ -130,6 +132,7 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
       threadTs: '100.001',
       messageId: '100.002',
       liveTaskStream: true,
+      rendersTaskLink: true,
       environmentId: 'env-1',
     });
   });

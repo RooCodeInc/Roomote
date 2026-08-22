@@ -799,10 +799,13 @@ export async function answerFastAgentQuestion({
             const deliverKickoff = async (task: {
               taskId: string;
               taskUrl?: string;
+              taskLinkRendered?: boolean;
             }) => {
               const message = [
                 args.kickoffMessage,
-                task.taskUrl && !args.kickoffMessage.includes(task.taskUrl)
+                task.taskUrl &&
+                !task.taskLinkRendered &&
+                !args.kickoffMessage.includes(task.taskUrl)
                   ? `[Open the task](${task.taskUrl})`
                   : undefined,
               ]

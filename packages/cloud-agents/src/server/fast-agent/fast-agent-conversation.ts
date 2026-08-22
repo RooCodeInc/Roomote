@@ -34,7 +34,13 @@ export type LaunchFastAgentTask = (params: {
   prompt: string;
   environmentId: string | null;
   parentSessionId: string;
-  postKickoff: (task: { taskId: string; taskUrl?: string }) => Promise<void>;
+  postKickoff: (task: {
+    taskId: string;
+    taskUrl?: string;
+    /** The surface shows the task link itself (for example on a task
+     * card), so the kickoff text should not repeat it. */
+    taskLinkRendered?: boolean;
+  }) => Promise<void>;
 }) => Promise<
   | { success: true; taskId: string; taskUrl?: string }
   | { success: false; error: string }

@@ -25,7 +25,7 @@ export const STARTING_TASK_TITLE = 'Starting task…';
 export function createFastAgentSlackLiveTaskLauncher(
   params: Omit<
     FastAgentSlackTaskLauncherParams,
-    'liveTaskStream' | 'afterKickoff'
+    'liveTaskStream' | 'afterKickoff' | 'rendersTaskLink'
   > & {
     slack: SlackLiveTaskCardNotifier;
   },
@@ -87,5 +87,6 @@ export function createFastAgentSlackLiveTaskLauncher(
     ...launcherParams,
     liveTaskStream: true,
     afterKickoff: startLiveTaskCard,
+    rendersTaskLink: true,
   });
 }

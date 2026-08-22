@@ -19,6 +19,9 @@ export type FastAgentTaskLaunchHooks = {
     taskRun: { id: number; taskId: string },
     context: { prompt: string; taskUrl: string },
   ) => Promise<void>;
+  /** The launcher renders the task link itself (for example on a card), so
+   * the parent kickoff message should not include one. */
+  rendersTaskLink?: boolean;
 };
 
 export function createFastAgentTaskLauncher(
@@ -58,7 +61,11 @@ export function createFastAgentTaskLauncher(
             },
           });
           taskUrl = resolvedTaskUrl;
-          await postKickoff({ taskId: taskRun.taskId, taskUrl });
+          await postKickoff({
+            taskId: taskRun.taskId,
+            taskUrl,
+            ...(params.rendersTaskLink ? { taskLinkRendered: true } : {}),
+          });
           await params.afterKickoff?.(
             { id: taskRun.id, taskId: taskRun.taskId },
             { prompt, taskUrl: resolvedTaskUrl },
@@ -97,6 +104,7 @@ export function createFastAgentSlackTaskLauncher(
     surface: 'slack',
     taskUrlCampaign: 'fast-delegation',
     afterKickoff: params.afterKickoff,
+    rendersTaskLink: params.rendersTaskLink,
     buildTask: ({ prompt, environmentId, parentSessionId }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {

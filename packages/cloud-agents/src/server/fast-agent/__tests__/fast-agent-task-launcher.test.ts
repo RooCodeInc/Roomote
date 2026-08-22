@@ -185,6 +185,28 @@ describe('createFastAgentSlackTaskLauncher', () => {
     });
   });
 
+  it('tells the kickoff when the launcher renders the task link itself', async () => {
+    const postKickoff = vi.fn();
+    await createFastAgentSlackTaskLauncher({
+      userId: 'user-1',
+      teamId: 'T123',
+      channelId: 'C123',
+      threadTs: '100.001',
+      rendersTaskLink: true,
+    })({
+      prompt: 'Add a regression test',
+      environmentId: null,
+      parentSessionId: '11111111-1111-4111-8111-111111111111',
+      postKickoff,
+    });
+
+    expect(postKickoff).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      taskUrl: 'https://roomote.example/task/task-1',
+      taskLinkRendered: true,
+    });
+  });
+
   it('does not make the child runnable when afterKickoff fails', async () => {
     const launchTask = createFastAgentSlackTaskLauncher({
       userId: 'user-1',
