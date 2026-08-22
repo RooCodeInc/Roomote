@@ -379,9 +379,32 @@ echo "[gbrain-entrypoint] starting gbrain serve on :$PORT (full surface)"
 gbrain serve --http --port "$PORT" --bind "${GBRAIN_BIND:-0.0.0.0}" --surface full &
 SERVER_PID=$!
 
+# The brain repo's git mirror (gbrain's durability hardening: a post-commit
+# auto-push plus a repo-scoped credential helper) is set up by
+# `gbrain sources harden`, which reads the PAT from GBRAIN_GITHUB_PAT. It
+# writes the credential file under $HOME/.gbrain. Run by hand in an ssh
+# session that meant /root, which the next deploy rebuilt, and every commit
+# since sat local-only (observed: 9.7k unpushed commits, three days of
+# silent "LOCAL-ONLY, NEEDS ATTENTION" in the push log). Re-run it on every
+# boot, under the volume-anchored HOME above, so the credential survives
+# redeploys and a freshly provisioned brain is hardened as soon as the PAT
+# is set. Idempotent by design, DB-backed (needs the server's registry, so
+# it runs after startup), and never fatal.
+if [ -n "${GBRAIN_GITHUB_PAT:-}" ]; then
+  (
+    sleep 30
+    echo "[gbrain-entrypoint] hardening the brain repo mirror (GBRAIN_GITHUB_PAT is set)"
+    gbrain sources harden --all --no-cron 2>&1 \
+      | sed 's/^/[gbrain-entrypoint] mirror: /' || true
+  ) &
+  HARDEN_PID=$!
+else
+  HARDEN_PID=""
+fi
+
 TERMINATING=0
 stop_processes() {
-  kill -TERM "$SERVER_PID" "$WORKER_PID" 2>/dev/null || true
+  kill -TERM "$SERVER_PID" "$WORKER_PID" ${HARDEN_PID:+"$HARDEN_PID"} 2>/dev/null || true
 }
 trap 'TERMINATING=1; stop_processes' TERM INT
 
