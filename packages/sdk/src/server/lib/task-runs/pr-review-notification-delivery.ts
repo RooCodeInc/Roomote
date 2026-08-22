@@ -28,6 +28,7 @@ import {
 import { z } from 'zod';
 
 import { readSourceControlPullRequestForTaskRun } from '../pull-requests/source-control-pull-request-reads';
+import { prReviewGitHubConditionalRequestCache } from '../pull-requests/github-conditional-request-cache';
 import { recordTaskMessageEnvelope } from './record-task-message-envelope';
 import {
   formatPrReviewActivityMessage,
@@ -296,11 +297,17 @@ async function fetchPrReviewLiveHeadState({
     const token = await createTaskRunGitHubToken(taskRun);
     const octokit = getOctokit(token);
 
-    const { data: pullRequest } = await octokit.rest.pulls.get({
-      owner,
-      repo,
-      pull_number: prNumber,
-    });
+    const { data: pullRequest } =
+      await prReviewGitHubConditionalRequestCache.request(
+        `pull:${taskRun.id}:${repository}#${prNumber}`,
+        (headers) =>
+          octokit.rest.pulls.get({
+            owner,
+            repo,
+            pull_number: prNumber,
+            request: { headers },
+          }),
+      );
     const headSha =
       typeof pullRequest.head?.sha === 'string' ? pullRequest.head.sha : null;
     const mergeable =
@@ -318,12 +325,17 @@ async function fetchPrReviewLiveHeadState({
     let statusContexts: Array<{ context: string; state: string }> = [];
 
     try {
-      const { data } = await octokit.rest.checks.listForRef({
-        owner,
-        repo,
-        ref: headSha,
-        per_page: 100,
-      });
+      const { data } = await prReviewGitHubConditionalRequestCache.request(
+        `checks:${taskRun.id}:${repository}@${headSha}`,
+        (headers) =>
+          octokit.rest.checks.listForRef({
+            owner,
+            repo,
+            ref: headSha,
+            per_page: 100,
+            request: { headers },
+          }),
+      );
 
       checkRuns = data.check_runs.map((run) => ({
         name: run.name,
@@ -340,11 +352,16 @@ async function fetchPrReviewLiveHeadState({
 
     try {
       const { data: combined } =
-        await octokit.rest.repos.getCombinedStatusForRef({
-          owner,
-          repo,
-          ref: headSha,
-        });
+        await prReviewGitHubConditionalRequestCache.request(
+          `status:${taskRun.id}:${repository}@${headSha}`,
+          (headers) =>
+            octokit.rest.repos.getCombinedStatusForRef({
+              owner,
+              repo,
+              ref: headSha,
+              request: { headers },
+            }),
+        );
 
       // GitHub returns an empty statuses list for Actions-only repos. Only
       // include classic commit statuses when total_count is positive.
@@ -681,6 +698,7 @@ async function fetchPrDiscussionSignals({
       repositoryFullName: repository,
       prNumber,
     },
+    useGitHubConditionalRequests: true,
   });
 
   if (!('threads' in result)) {

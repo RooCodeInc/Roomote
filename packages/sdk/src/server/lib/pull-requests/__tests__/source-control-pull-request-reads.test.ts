@@ -141,6 +141,128 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     );
   });
 
+  it('uses ETags for review-drain GitHub comment polling reads', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-etag',
+      externalRepoId: null,
+      fullName: 'acme/etag-backend',
+      htmlUrl: 'https://github.com/acme/etag-backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const notModified = () =>
+      Object.assign(new Error('Not modified'), {
+        status: 304,
+        response: { headers: {} },
+      });
+    const listReviewComments = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: [],
+        headers: { etag: '"reviews-v1"' },
+        status: 200,
+      })
+      .mockRejectedValueOnce(notModified());
+    const listComments = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: [
+          {
+            id: 1,
+            user: { login: 'alice' },
+            body: 'First page',
+            created_at: '2026-08-22T00:00:00Z',
+            html_url: null,
+          },
+        ],
+        headers: {
+          etag: '"issues-page-1"',
+          link: '<https://api.github.com/page=2>; rel="next"',
+        },
+        status: 200,
+      })
+      .mockResolvedValueOnce({
+        data: [
+          {
+            id: 2,
+            user: { login: 'bob' },
+            body: 'Second page',
+            created_at: '2026-08-22T00:01:00Z',
+            html_url: null,
+          },
+        ],
+        headers: { etag: '"issues-page-2"' },
+        status: 200,
+      })
+      .mockRejectedValueOnce(notModified())
+      .mockRejectedValueOnce(notModified());
+    const graphql = vi.fn().mockResolvedValue({
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            nodes: [],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      },
+    });
+    mockGetOctokit.mockReturnValue({
+      graphql,
+      paginate: vi.fn(),
+      rest: {
+        pulls: { listReviewComments },
+        issues: { listComments },
+      },
+    });
+    const input = {
+      action: 'list_pull_request_comments' as const,
+      repositoryFullName: 'acme/etag-backend',
+      prNumber: 55,
+      sourceControlProvider: 'github' as const,
+    };
+    const taskRun = makeTaskRun({
+      repo: 'acme/etag-backend',
+      sourceControlProvider: 'github',
+    });
+
+    const cachedResult = await readSourceControlPullRequestForTaskRun({
+      taskRun,
+      input,
+      useGitHubConditionalRequests: true,
+    });
+    await readSourceControlPullRequestForTaskRun({
+      taskRun,
+      input,
+      useGitHubConditionalRequests: true,
+    });
+
+    expect(listReviewComments).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        request: { headers: { 'if-none-match': '"reviews-v1"' } },
+      }),
+    );
+    expect(listComments).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        page: 1,
+        request: { headers: { 'if-none-match': '"issues-page-1"' } },
+      }),
+    );
+    expect(listComments).toHaveBeenNthCalledWith(
+      4,
+      expect.objectContaining({
+        page: 2,
+        request: { headers: { 'if-none-match': '"issues-page-2"' } },
+      }),
+    );
+    expect(
+      'issueComments' in cachedResult && cachedResult.issueComments,
+    ).toEqual([
+      expect.objectContaining({ id: '1' }),
+      expect.objectContaining({ id: '2' }),
+    ]);
+  });
+
   it('reads GitHub pull request details through the installation token', async () => {
     mockRepositoriesFindFirst.mockResolvedValue({
       installationId: 'installation-1',
