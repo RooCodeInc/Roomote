@@ -2,6 +2,7 @@ import { PRODUCT_NAME } from '@roomote/types';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
+  hasFastAgentSession,
   type FastAgentActiveTask,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
@@ -58,6 +59,8 @@ export async function processFastAgentMessage(params: {
   continuation?: boolean;
   activeTasks?: FastAgentActiveTask[];
   launchTask: LaunchFastAgentTask;
+  processingReactionName?: string;
+  isExistingConversation?: boolean;
 }): Promise<void> {
   const {
     event,
@@ -69,6 +72,8 @@ export async function processFastAgentMessage(params: {
     continuation = false,
     activeTasks = [],
     launchTask,
+    processingReactionName = 'eyes',
+    isExistingConversation = false,
   } = params;
   const threadId = event.thread_ts || event.ts;
   const conversation = {
@@ -98,11 +103,23 @@ export async function processFastAgentMessage(params: {
   );
   const question = extractFastQuestion(normalizedText, continuation);
 
+  let didAddProcessingReaction = false;
+
   try {
-    // Deliberately no assistant thread status or processing reaction here:
-    // Slack replaces custom status text with its own rotating "Generating
-    // response…" placeholders, and an automatic reaction reads as noise
-    // next to the task card, which is the progress surface.
+    // Deliberately no assistant thread status here: Slack replaces the
+    // custom status text with its own rotating "Generating response…"
+    // placeholders, which read as noise next to the task card.
+    // A false routing result can become stale while waiting for the turn lock.
+    const hasExistingConversation =
+      isExistingConversation || (await hasFastAgentSession(conversation));
+    if (!hasExistingConversation) {
+      didAddProcessingReaction = await slack.addReaction({
+        channel: event.channel,
+        timestamp: event.ts,
+        name: processingReactionName,
+      });
+    }
+
     if (!question) {
       await postSlackThreadMarkdownMessage({
         slack,
@@ -207,7 +224,19 @@ export async function processFastAgentMessage(params: {
           // aborted mid-flight.
           didSendVisibleResponse = true;
         },
-        postReaction: async ({ name, messageId }) => {
+        postReaction: async ({ name, purpose, messageId }) => {
+          if (
+            didAddProcessingReaction &&
+            name === processingReactionName &&
+            messageId === event.ts
+          ) {
+            if (purpose === 'closeout') {
+              didAddProcessingReaction = false;
+            }
+            didSendVisibleResponse = true;
+            return;
+          }
+
           const added = await slack.addReaction({
             channel: event.channel,
             timestamp: messageId,
@@ -236,6 +265,15 @@ export async function processFastAgentMessage(params: {
       });
     }
   } finally {
+    if (didAddProcessingReaction) {
+      await slack
+        .removeReaction({
+          channel: event.channel,
+          timestamp: event.ts,
+          name: processingReactionName,
+        })
+        .catch(() => {});
+    }
     await releaseFastAgentLock().catch(() => {});
   }
 }
