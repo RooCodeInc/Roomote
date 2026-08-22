@@ -39,6 +39,10 @@ export interface SlackLiveTaskCardContent {
  * task_update chunks (whose details/output/sources only ever append), the
  * whole block is replaced on every chat.update, so the card shows exactly
  * the latest state.
+ *
+ * `block_id` is pinned (Slack generates a new one per update otherwise) so
+ * the client keeps treating every render as the same block; a changing id
+ * remounts the card and snaps it shut on each update.
  */
 export function buildSlackLiveTaskCardBlocks(
   content: SlackLiveTaskCardContent,
@@ -51,6 +55,7 @@ export function buildSlackLiveTaskCardBlocks(
     blocks: [
       {
         type: 'task_card',
+        block_id: `${content.taskUpdateId}-card`,
         task_id: content.taskUpdateId,
         title: content.title,
         status: content.status,

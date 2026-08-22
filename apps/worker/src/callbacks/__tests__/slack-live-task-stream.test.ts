@@ -108,6 +108,7 @@ describe('Slack live task card', () => {
         blocks: [
           {
             type: 'task_card',
+            block_id: 'roomote-task-task-1-card',
             task_id: 'roomote-task-task-1',
             title: 'Fix the button',
             status: 'in_progress',
@@ -158,6 +159,7 @@ describe('Slack live task card', () => {
     expect(mocks.updateMessage).toHaveBeenCalledOnce();
     expect(renderedCard(1)).toEqual({
       type: 'task_card',
+      block_id: 'roomote-task-task-1-card',
       task_id: 'roomote-task-task-1',
       title: 'Fix the button',
       status: 'in_progress',
@@ -275,6 +277,7 @@ describe('Slack live task card', () => {
 
     expect(renderedCard(3)).toEqual({
       type: 'task_card',
+      block_id: 'roomote-task-task-1-card',
       task_id: 'roomote-task-task-1',
       title: 'Fix the button',
       status: 'complete',
