@@ -246,6 +246,7 @@ export {
 } from './lib/task-runs/pr-review-notification';
 export {
   gatherPrReviewTriageContext,
+  PrReviewNotificationRateLimitError,
   preparePrReviewNotificationDelivery,
   recordPrReviewNotificationDeliveryBestEffort,
   triagePrReviewActivity,

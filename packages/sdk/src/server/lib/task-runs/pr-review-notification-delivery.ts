@@ -13,6 +13,7 @@ import type { TaskRun } from '@roomote/db/server';
 import {
   Schemas as GitHubSchemas,
   createTaskRunGitHubToken,
+  getGitHubRateLimitRetryAfterMs,
   getOctokit,
   resolveConfiguredGitHubAppSlug,
 } from '@roomote/github';
@@ -42,6 +43,29 @@ const PR_REVIEW_TRIAGE_MAX_OUTPUT_TOKENS = 512;
 const MAX_REVIEW_STATUS_LENGTH = 300;
 const MAX_REVIEW_ACTIVITY_SECTION_LENGTH = 32_000;
 const REVIEW_ACTIVITY_TRUNCATION_NOTICE_LENGTH = 256;
+
+export class PrReviewNotificationRateLimitError extends Error {
+  constructor(
+    readonly retryAfterMs: number,
+    cause: unknown,
+  ) {
+    super('GitHub installation API rate limited during PR review triage.', {
+      cause,
+    });
+    this.name = 'PrReviewNotificationRateLimitError';
+  }
+}
+
+function rethrowGitHubRateLimit(error: unknown): void {
+  if (error instanceof PrReviewNotificationRateLimitError) {
+    throw error;
+  }
+
+  const retryAfterMs = getGitHubRateLimitRetryAfterMs(error);
+  if (retryAfterMs !== null) {
+    throw new PrReviewNotificationRateLimitError(retryAfterMs, error);
+  }
+}
 
 const prReviewTriageResponseSchema = z.object({
   worthNotifying: z.boolean(),
@@ -331,6 +355,7 @@ async function fetchPrReviewLiveHeadState({
         conclusion: run.conclusion,
       }));
     } catch (error) {
+      rethrowGitHubRateLimit(error);
       console.warn(
         `[PrReviewNotification] Failed to list check runs for ${repository}#${prNumber}: ${
           error instanceof Error ? error.message : String(error)
@@ -358,6 +383,7 @@ async function fetchPrReviewLiveHeadState({
         });
       }
     } catch (error) {
+      rethrowGitHubRateLimit(error);
       console.warn(
         `[PrReviewNotification] Failed to fetch combined status for ${repository}#${prNumber}: ${
           error instanceof Error ? error.message : String(error)
@@ -373,6 +399,7 @@ async function fetchPrReviewLiveHeadState({
       currentHeadSha: headSha,
     };
   } catch (error) {
+    rethrowGitHubRateLimit(error);
     console.warn(
       `[PrReviewNotification] Could not resolve live PR head state for ${repository}#${prNumber}: ${
         error instanceof Error ? error.message : String(error)
@@ -773,39 +800,42 @@ export async function gatherPrReviewTriageContext({
   prNumber: number;
   sourceControlProvider?: SourceControlProvider;
 }): Promise<PrReviewTriageContext> {
-  const [discussionResult, liveHeadState] = await Promise.all([
-    (async () => {
-      try {
-        return await fetchPrDiscussionSignals({
-          taskRun,
-          repository,
-          prNumber,
-        });
-      } catch (error) {
-        console.warn(
-          `[PrReviewNotification] Could not fetch PR discussion signals for ${repository}#${prNumber}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-
-        return {
-          resolvedThreadCount: null,
-          unresolvedThreadCount: null,
-          latestReviewStatus: null,
-          latestReviewSummaryComment: null,
-          latestTerminalReviewSummaryHeadSha: null,
-          currentHeadSha: null,
-          reviewThreads: [],
-        };
-      }
-    })(),
-    fetchPrReviewLiveHeadState({
+  let discussionResult: Omit<PrReviewTriageContext, 'ciStatus' | 'mergeable'>;
+  try {
+    discussionResult = await fetchPrDiscussionSignals({
       taskRun,
       repository,
       prNumber,
-      sourceControlProvider,
-    }),
-  ]);
+    });
+  } catch (error) {
+    if (normalizeSourceControlProvider(sourceControlProvider) === 'github') {
+      rethrowGitHubRateLimit(error);
+    }
+    console.warn(
+      `[PrReviewNotification] Could not fetch PR discussion signals for ${repository}#${prNumber}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+
+    discussionResult = {
+      resolvedThreadCount: null,
+      unresolvedThreadCount: null,
+      latestReviewStatus: null,
+      latestReviewSummaryComment: null,
+      latestTerminalReviewSummaryHeadSha: null,
+      currentHeadSha: null,
+      reviewThreads: [],
+    };
+  }
+
+  // Avoid starting the live-head request burst when discussion reads have
+  // already established that the installation is rate limited.
+  const liveHeadState = await fetchPrReviewLiveHeadState({
+    taskRun,
+    repository,
+    prNumber,
+    sourceControlProvider,
+  });
 
   return {
     ...discussionResult,

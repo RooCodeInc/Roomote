@@ -1,5 +1,5 @@
 import { createGitHubToken } from '@roomote/auth';
-import { getOctokit } from '@roomote/github';
+import { getGitHubRateLimitRetryAfterMs, getOctokit } from '@roomote/github';
 import { type TaskRun } from '@roomote/db/server';
 import {
   buildPullRequestUrl,
@@ -1024,6 +1024,9 @@ async function listGitHubPullRequestComments({
       prNumber: prNumber,
     });
   } catch (error) {
+    if (getGitHubRateLimitRetryAfterMs(error) !== null) {
+      throw error;
+    }
     warnings.push(
       `GitHub review thread resolution could not be fetched (${
         error instanceof Error ? error.message : String(error)

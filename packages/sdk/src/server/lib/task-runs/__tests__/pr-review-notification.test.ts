@@ -71,6 +71,7 @@ import {
   hasPrReviewNotificationThreadContext,
   migrateLegacyPrReviewNotificationRequest,
   resolvePrReviewNotificationRoute,
+  schedulePrReviewNotificationJob,
   startPrReviewNotificationCycle,
 } from '../pr-review-notification';
 
@@ -100,6 +101,33 @@ const claim = {
   deferrals: 0,
   events: [baseInput.event],
 };
+
+it('defers rate-limited deliveries without consuming task deferral budget', async () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-08-22T12:00:00.000Z'));
+
+  await schedulePrReviewNotificationJob({
+    request: {
+      taskId: claim.taskId,
+      repository: claim.repository,
+      prNumber: claim.prNumber,
+      prUrl: claim.prUrl,
+      deferrals: 0,
+      deliveryIds: claim.deliveryIds,
+      leaseToken: claim.leaseToken,
+      events: [],
+    },
+    delayMs: 900_000,
+    countDeferral: false,
+  });
+
+  expect(mockDeferPrReviewDeliveries).toHaveBeenCalledWith(
+    { deliveryIds: claim.deliveryIds, leaseToken: claim.leaseToken },
+    new Date('2026-08-22T12:15:00.000Z'),
+    { incrementDeferrals: false },
+  );
+  vi.useRealTimers();
+});
 
 describe('durable PR review notification ownership', () => {
   beforeEach(() => {

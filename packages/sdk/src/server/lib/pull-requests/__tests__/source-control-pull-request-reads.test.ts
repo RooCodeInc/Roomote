@@ -15,6 +15,7 @@ const {
   mockResolveAdoToken,
   mockResolveAdoBaseUrl,
   mockBuildAdoOrganizationApiBaseUrl,
+  mockGetGitHubRateLimitRetryAfterMs,
 } = vi.hoisted(() => ({
   mockCreateGitHubToken: vi.fn(),
   mockGetOctokit: vi.fn(),
@@ -27,6 +28,7 @@ const {
   mockResolveAdoToken: vi.fn(),
   mockResolveAdoBaseUrl: vi.fn(),
   mockBuildAdoOrganizationApiBaseUrl: vi.fn(),
+  mockGetGitHubRateLimitRetryAfterMs: vi.fn(),
 }));
 
 vi.mock('@roomote/auth', () => ({
@@ -35,6 +37,8 @@ vi.mock('@roomote/auth', () => ({
 
 vi.mock('@roomote/github', () => ({
   getOctokit: (...args: unknown[]) => mockGetOctokit(...args),
+  getGitHubRateLimitRetryAfterMs: (...args: unknown[]) =>
+    mockGetGitHubRateLimitRetryAfterMs(...args),
 }));
 
 vi.mock('@roomote/gitlab', () => ({
@@ -139,6 +143,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     mockBuildAdoOrganizationApiBaseUrl.mockReturnValue(
       'https://dev.azure.com/acme',
     );
+    mockGetGitHubRateLimitRetryAfterMs.mockReturnValue(null);
   });
 
   it('reads GitHub pull request details through the installation token', async () => {
@@ -451,6 +456,45 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         outdated: true,
       }),
     ]);
+  });
+
+  it('propagates GitHub rate limits from review-thread pagination', async () => {
+    mockRepositoriesFindFirst.mockResolvedValue({
+      installationId: 'installation-1',
+      externalRepoId: null,
+      fullName: 'acme/backend',
+      htmlUrl: 'https://github.com/acme/backend',
+    });
+    mockCreateGitHubToken.mockResolvedValue('github-token');
+    const rateLimitError = Object.assign(new Error('API rate limit exceeded'), {
+      status: 403,
+    });
+    mockGetGitHubRateLimitRetryAfterMs.mockImplementation((error: unknown) =>
+      error === rateLimitError ? 900_000 : null,
+    );
+    mockGetOctokit.mockReturnValue({
+      graphql: vi.fn().mockRejectedValue(rateLimitError),
+      paginate: vi.fn().mockResolvedValue([]),
+      rest: {
+        pulls: { listReviewComments: vi.fn() },
+        issues: { listComments: vi.fn() },
+      },
+    });
+
+    await expect(
+      readSourceControlPullRequestForTaskRun({
+        taskRun: makeTaskRun({
+          repo: 'acme/backend',
+          sourceControlProvider: 'github',
+        }),
+        input: {
+          action: 'list_pull_request_comments',
+          repositoryFullName: 'acme/backend',
+          prNumber: 55,
+          sourceControlProvider: 'github',
+        },
+      }),
+    ).rejects.toBe(rateLimitError);
   });
 
   it('paginates every GitHub review thread and every comment in a thread', async () => {

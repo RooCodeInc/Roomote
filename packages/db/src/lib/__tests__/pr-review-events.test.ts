@@ -385,6 +385,34 @@ describe('durable PR review events', () => {
     );
   });
 
+  it('defers provider rate limits without consuming task deferral budget', async () => {
+    const task = await taskFactory.create();
+    const repository = `owner/rate-limit-${task.id}`;
+    const dueAt = new Date(Date.now() + 15 * 60 * 1_000);
+    await associate(task.id, repository, 71);
+    await persistPrReviewEvent(
+      eventInput(repository, 71, `rate-limit-${task.id}`),
+    );
+    const claim = (await claimDuePrReviewDeliveries()).find(
+      ({ taskId }) => taskId === task.id,
+    )!;
+
+    await deferPrReviewDeliveries(claim, dueAt, {
+      incrementDeferrals: false,
+    });
+
+    const delivery = await db.query.prReviewEventDeliveries.findFirst({
+      where: eq(prReviewEventDeliveries.id, claim.deliveryIds[0]!),
+    });
+    expect(delivery).toMatchObject({
+      status: 'pending',
+      dueAt,
+      deferrals: 0,
+      leaseToken: null,
+      leaseExpiresAt: null,
+    });
+  });
+
   it('does not renew an expired or reclaimed delivery claim', async () => {
     const task = await taskFactory.create();
     const repository = `owner/renew-${task.id}`;
