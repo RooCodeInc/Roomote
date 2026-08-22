@@ -486,6 +486,7 @@ export async function executeTaskRun<TPrepared extends PreparedTaskRunBase>({
       id: taskRun.id,
       status: RunStatus.Preparing,
     });
+    await callbacks.onStatus?.(taskRun, RunStatus.Preparing, context);
 
     const workspace = await recordWorkerPhase({
       label: 'resolveWorkspaceConfig',

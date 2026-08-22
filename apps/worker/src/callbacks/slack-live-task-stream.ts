@@ -20,6 +20,16 @@ const updateQueues = new Map<number, Promise<void>>();
 /** Harness status noise that reads as an error but resolves on its own. */
 const TRANSIENT_NARRATION_PATTERN = /^(provider error|retrying)\b/i;
 
+/** Startup progress shown while the sandbox comes up, mirroring the web
+ * launcher's booting steps (the controller-side Pending/Dequeued stretch is
+ * covered by the launcher's "Starting task…" placeholder). */
+const STARTUP_STATUS_MESSAGES: Partial<Record<RunStatus, string>> = {
+  [RunStatus.Preparing]: 'Preparing the workspace…',
+  [RunStatus.Spawning]: 'Starting the agent…',
+  [RunStatus.Connecting]: 'Connecting to the agent…',
+  [RunStatus.Running]: 'Agent started, getting to work…',
+};
+
 const WAITING_FOR_INPUT_MESSAGE = 'Waiting for your input…';
 const CONTINUING_MESSAGE = 'Continuing with your answer…';
 
@@ -235,6 +245,24 @@ async function renderCard(
   });
 }
 
+export async function reportSlackLiveTaskStatus(
+  taskRun: TaskRun,
+  status: RunStatus,
+  context: RunTaskContext,
+): Promise<void> {
+  const message = STARTUP_STATUS_MESSAGES[status];
+  if (!message) {
+    return;
+  }
+
+  const state = getCardState(context);
+  state.status = 'in_progress';
+  state.message = message;
+  // The first startup render also swaps the launcher's placeholder title
+  // for the generated task title.
+  await renderCard(taskRun, context, { refreshData: true });
+}
+
 export async function startSlackLiveTaskStream(
   taskRun: TaskRun,
   context: RunTaskContext,
@@ -370,6 +398,13 @@ export function getSlackLiveTaskStreamRunTaskCallbacks(
         await finishSlackLiveTaskStream(run, status, context);
       } catch (error) {
         reportCardCallbackError(error, 'slackLiveTaskStream.onExit', run.id);
+      }
+    },
+    onStatus: async (run, status, context) => {
+      try {
+        await reportSlackLiveTaskStatus(run, status, context);
+      } catch (error) {
+        reportCardCallbackError(error, 'slackLiveTaskStream.onStatus', run.id);
       }
     },
   };

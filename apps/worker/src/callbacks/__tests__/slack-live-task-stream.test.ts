@@ -30,6 +30,7 @@ import type { TaskRun } from '@roomote/sdk/client';
 import {
   finishSlackLiveTaskStream,
   getSlackLiveTaskStreamRunTaskCallbacks,
+  reportSlackLiveTaskStatus,
   startSlackLiveTaskStream,
   updateSlackLiveTaskStream,
 } from '../slack-live-task-stream';
@@ -122,6 +123,33 @@ describe('Slack live task card', () => {
           },
         ],
       },
+    });
+  });
+
+  it('mirrors the worker startup statuses on the card', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+
+    await reportSlackLiveTaskStatus(taskRun, RunStatus.Preparing, context);
+    await reportSlackLiveTaskStatus(taskRun, RunStatus.Spawning, context);
+    await reportSlackLiveTaskStatus(taskRun, RunStatus.Connecting, context);
+    await reportSlackLiveTaskStatus(taskRun, RunStatus.Running, context);
+    await reportSlackLiveTaskStatus(taskRun, RunStatus.Idle, context);
+
+    expect(mocks.updateMessage).toHaveBeenCalledTimes(4);
+    expect(
+      mocks.updateMessage.mock.calls.map(
+        (call) => call[0].message.blocks[0].output,
+      ),
+    ).toEqual([
+      text('Preparing the workspace…'),
+      text('Starting the agent…'),
+      text('Connecting to the agent…'),
+      text('Agent started, getting to work…'),
+    ]);
+    expect(renderedCard(1)).toMatchObject({
+      title: 'Fix the button',
+      status: 'in_progress',
     });
   });
 
@@ -413,5 +441,6 @@ describe('Slack live task card', () => {
     expect(callbacks.onStart).toBeTypeOf('function');
     expect(callbacks.onMessage).toBeTypeOf('function');
     expect(callbacks.onExit).toBeTypeOf('function');
+    expect(callbacks.onStatus).toBeTypeOf('function');
   });
 });

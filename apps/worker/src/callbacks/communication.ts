@@ -251,7 +251,7 @@ export function mergeRunTaskCallbacks(
   ...callbackSets: RunTaskCallbacks[]
 ): RunTaskCallbacks {
   const sets = callbackSets.filter(
-    (set) => set.onStart || set.onMessage || set.onExit,
+    (set) => set.onStart || set.onMessage || set.onExit || set.onStatus,
   );
   if (sets.length === 0) {
     return {};
@@ -274,6 +274,11 @@ export function mergeRunTaskCallbacks(
     onExit: async (taskRun, status, context) => {
       for (const set of sets) {
         await set.onExit?.(taskRun, status, context);
+      }
+    },
+    onStatus: async (taskRun, status, context) => {
+      for (const set of sets) {
+        await set.onStatus?.(taskRun, status, context);
       }
     },
   };
