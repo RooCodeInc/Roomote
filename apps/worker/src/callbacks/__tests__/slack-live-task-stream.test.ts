@@ -1,8 +1,7 @@
 const mocks = vi.hoisted(() => ({
   updateMessage: vi.fn(),
   sdkGetStreamData: vi.fn(),
-  sdkClearStreamData: vi.fn(),
-  sdkFindFirstInstallation: vi.fn(),
+  sdkFindInstallationByTeamId: vi.fn(),
 }));
 
 vi.mock('@roomote/slack/client', async (importOriginal) => ({
@@ -16,10 +15,9 @@ vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     taskRuns: {
       getSlackLiveTaskStreamData: mocks.sdkGetStreamData,
-      clearSlackLiveTaskStreamData: mocks.sdkClearStreamData,
     },
     slackInstallations: {
-      findFirst: mocks.sdkFindFirstInstallation,
+      findByTeamId: mocks.sdkFindInstallationByTeamId,
     },
   },
 }));
@@ -36,6 +34,7 @@ import {
 } from '../slack-live-task-stream';
 
 const cardData = {
+  teamId: 'T123',
   channel: 'C123',
   messageTs: 'card-ts',
   taskId: 'task-1',
@@ -86,14 +85,18 @@ describe('Slack live task card', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.sdkGetStreamData.mockResolvedValue(cardData);
-    // Model the server: once the data is cleared, later fetches miss.
-    mocks.sdkClearStreamData.mockImplementation(async () => {
-      mocks.sdkGetStreamData.mockResolvedValue(null);
-    });
-    mocks.sdkFindFirstInstallation.mockResolvedValue({
+    mocks.sdkFindInstallationByTeamId.mockResolvedValue({
       botAccessToken: 'xoxb-test',
     });
     mocks.updateMessage.mockResolvedValue(true);
+  });
+
+  it('updates the card with the token of the workspace that owns it', async () => {
+    await startSlackLiveTaskStream(createTaskRun(), {});
+
+    expect(mocks.sdkFindInstallationByTeamId).toHaveBeenCalledWith({
+      teamId: 'T123',
+    });
   });
 
   it('renders the generated task title on start', async () => {
@@ -281,7 +284,7 @@ describe('Slack live task card', () => {
     expect(mocks.updateMessage).not.toHaveBeenCalled();
   });
 
-  it('settles the card with the final output and clears its state', async () => {
+  it('settles the card with the final output', async () => {
     const taskRun = createTaskRun();
     const context = {};
     await updateSlackLiveTaskStream(
@@ -310,12 +313,44 @@ describe('Slack live task card', () => {
         },
       ],
     });
-    expect(mocks.sdkClearStreamData).toHaveBeenCalledWith({
-      runId: taskRun.id,
-    });
   });
 
-  it('marks a canceled run as an error and releases the card', async () => {
+  it('ignores late events once the card settled', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'completion', ts: 1000, text: 'Ready for review.' },
+      context,
+    );
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1001, text: 'Cleaning up.' },
+      context,
+    );
+
+    expect(mocks.updateMessage).toHaveBeenCalledOnce();
+  });
+
+  it('re-opens the card when a later run of the task starts', async () => {
+    const taskRun = createTaskRun();
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'completion', ts: 1000, text: 'Ready for review.' },
+      {},
+    );
+
+    const resumed = createTaskRun({
+      payloadKind: TaskPayloadKind.SnapshotResume,
+      payload: { sourceRunId: taskRun.id, liveTaskStream: true },
+    });
+    await startSlackLiveTaskStream(resumed, {});
+
+    expect(renderedCard(2)).toMatchObject({ status: 'in_progress' });
+    expect(renderedCard(2)).not.toHaveProperty('output');
+  });
+
+  it('marks a canceled run as an error', async () => {
     const taskRun = createTaskRun();
     await finishSlackLiveTaskStream(taskRun, RunStatus.Canceled, {});
 
@@ -323,9 +358,45 @@ describe('Slack live task card', () => {
       status: 'error',
       output: text('Task canceled.'),
     });
-    expect(mocks.sdkClearStreamData).toHaveBeenCalledWith({
-      runId: taskRun.id,
-    });
+  });
+
+  it('coalesces a burst of messages into the latest state', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    let releaseFirst!: () => void;
+    mocks.updateMessage.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          releaseFirst = () => resolve(true);
+        }),
+    );
+
+    const first = updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1000, text: 'One.' },
+      context,
+    );
+    // Let the first render reach chat.update before the burst arrives.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const burst = Promise.all([
+      updateSlackLiveTaskStream(
+        taskRun,
+        { type: 'text', ts: 1001, text: 'Two.' },
+        context,
+      ),
+      updateSlackLiveTaskStream(
+        taskRun,
+        { type: 'text', ts: 1002, text: 'Three.' },
+        context,
+      ),
+    ]);
+    releaseFirst();
+    await Promise.all([first, burst]);
+
+    // "Two." never went out on its own: the burst collapsed into "Three.".
+    expect(mocks.updateMessage).toHaveBeenCalledTimes(2);
+    expect(renderedCard(1)).toMatchObject({ output: text('One.') });
+    expect(renderedCard(2)).toMatchObject({ output: text('Three.') });
   });
 
   it('keeps the card alive after a failed turn so the next run continues it', async () => {
@@ -342,7 +413,6 @@ describe('Slack live task card', () => {
       status: 'error',
       output: text('The task stopped because of an error.'),
     });
-    expect(mocks.sdkClearStreamData).not.toHaveBeenCalled();
 
     // The next run of the task flips the card back to in progress.
     const resumed = createTaskRun({
@@ -385,22 +455,37 @@ describe('Slack live task card', () => {
     });
   });
 
-  it('does not release the card when the settling update fails', async () => {
+  it('retries the settle on exit with the real output when its render was rejected', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
     mocks.updateMessage.mockResolvedValueOnce(false);
 
     await updateSlackLiveTaskStream(
-      createTaskRun(),
+      taskRun,
       { type: 'completion', ts: 1000, text: 'Ready for review.' },
-      {},
+      context,
     );
+    await finishSlackLiveTaskStream(taskRun, RunStatus.Completed, context);
 
-    expect(mocks.sdkClearStreamData).not.toHaveBeenCalled();
+    expect(mocks.updateMessage).toHaveBeenCalledTimes(2);
+    expect(renderedCard(2)).toMatchObject({
+      status: 'complete',
+      output: text('Ready for review.'),
+    });
   });
 
   it('settles a completed run as a fallback when the completion event was lost', async () => {
-    await finishSlackLiveTaskStream(createTaskRun(), RunStatus.Completed, {});
+    const taskRun = createTaskRun();
+    const context = {};
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1000, text: 'Running the tests now.' },
+      context,
+    );
+    await finishSlackLiveTaskStream(taskRun, RunStatus.Completed, context);
 
-    expect(renderedCard(1)).toMatchObject({
+    // The last narration line is never promoted to the final result.
+    expect(renderedCard(2)).toMatchObject({
       status: 'complete',
       output: text('Task completed.'),
     });
@@ -416,7 +501,7 @@ describe('Slack live task card', () => {
     );
     await finishSlackLiveTaskStream(taskRun, RunStatus.Completed, context);
 
-    // The data was cleared by the first settle, so the fallback is a no-op.
+    // The card already settled with the real output, so the fallback is a no-op.
     expect(mocks.updateMessage).toHaveBeenCalledOnce();
     expect(renderedCard(1)).toMatchObject({
       output: text('Ready for review.'),
@@ -427,7 +512,6 @@ describe('Slack live task card', () => {
     await finishSlackLiveTaskStream(createTaskRun(), RunStatus.Idle, {});
 
     expect(mocks.updateMessage).not.toHaveBeenCalled();
-    expect(mocks.sdkClearStreamData).not.toHaveBeenCalled();
   });
 
   it('wires callbacks only for runs that opted into a card', async () => {

@@ -3,7 +3,10 @@ import {
   type FastAgentSlackTaskLauncherParams,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
-import { buildSlackLiveTaskCardBlocks } from './live-task-card-blocks';
+import {
+  buildSlackLiveTaskCardBlocks,
+  SLACK_LIVE_TASK_CARD_MESSAGES,
+} from './live-task-card-blocks';
 import {
   buildSlackLiveTaskTitle,
   getSlackLiveTaskStreamData,
@@ -13,10 +16,14 @@ import type { SlackNotifier } from './slack-notifier';
 
 type SlackLiveTaskCardNotifier = Pick<
   SlackNotifier,
-  'postMessage' | 'postMessageDetailed'
+  'postMessage' | 'postMessageDetailed' | 'updateMessage'
 >;
 
 export const STARTING_TASK_TITLE = 'Starting task…';
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 /**
  * Fast delegation launcher that also posts a native task card (a
@@ -24,6 +31,11 @@ export const STARTING_TASK_TITLE = 'Starting task…';
  * "Starting task…" placeholder; once the sandbox is up the worker renders
  * the generated title and then re-renders the whole card through
  * chat.update for the task's lifetime, so it always shows the latest state.
+ *
+ * The kickoff message omits the task link because the card carries it, so
+ * every failure path here must still leave a link in the thread: either the
+ * card itself (flipped to an error state when it cannot be tracked) or a
+ * plain link message.
  */
 export function createFastAgentSlackLiveTaskLauncher(
   params: Omit<
@@ -35,10 +47,30 @@ export function createFastAgentSlackLiveTaskLauncher(
 ): LaunchFastAgentTask {
   const { slack, ...launcherParams } = params;
 
+  const postTaskLink = async (taskUrl: string): Promise<void> => {
+    try {
+      await slack.postMessage({
+        channel: launcherParams.channelId,
+        thread_ts: launcherParams.threadTs,
+        text: `Open the task: ${taskUrl}`,
+        blocks: [{ type: 'markdown', text: `[Open the task](${taskUrl})` }],
+        unfurl_links: false,
+        unfurl_media: false,
+      });
+    } catch (error) {
+      console.error(
+        `[Fast Agent] Failed to post the task link fallback: ${describeError(error)}`,
+      );
+    }
+  };
+
   const startLiveTaskCard = async (
     taskRun: { id: number; taskId: string },
     context: { prompt: string; taskUrl: string },
   ): Promise<void> => {
+    const taskUpdateId = `roomote-task-${taskRun.taskId}`;
+    let messageTs: string | undefined;
+
     try {
       // A card for this task already exists (for example an idempotent
       // relaunch of the same task); keep updating it instead of posting
@@ -47,12 +79,6 @@ export function createFastAgentSlackLiveTaskLauncher(
         return;
       }
 
-      // The stored title is the prompt-derived fallback the worker renders
-      // if no generated title exists yet; the card itself just says the
-      // task is starting until the sandbox is up and the worker renders
-      // the real title.
-      const title = buildSlackLiveTaskTitle(context.prompt);
-      const taskUpdateId = `roomote-task-${taskRun.taskId}`;
       const posted = await slack.postMessageDetailed({
         channel: launcherParams.channelId,
         thread_ts: launcherParams.threadTs,
@@ -65,47 +91,67 @@ export function createFastAgentSlackLiveTaskLauncher(
         unfurl_links: false,
         unfurl_media: false,
       });
-      const messageTs = posted.ts;
+      messageTs = posted.ts;
 
       if (!messageTs) {
-        // The kickoff deliberately omits the task link because the card
-        // carries it; when the card cannot be posted (for example a Slack
-        // app installed before task cards existed rejects the block), post
-        // the link on its own so the thread still leads to the task.
-        if (!posted.skippedMissingThreadRoot) {
-          console.warn(
-            `[Fast Agent] Slack rejected the task card for run ${taskRun.id} (${posted.slackErrorCode ?? (posted.transportError ? 'transport error' : 'unknown')}); posting the task link instead.`,
-          );
-          await slack.postMessage({
-            channel: launcherParams.channelId,
-            thread_ts: launcherParams.threadTs,
-            text: `Open the task: ${context.taskUrl}`,
-            blocks: [
-              {
-                type: 'markdown',
-                text: `[Open the task](${context.taskUrl})`,
-              },
-            ],
-            unfurl_links: false,
-            unfurl_media: false,
-          });
+        // The thread root is gone: nothing in this thread can be read any
+        // more, so a link would be as invisible as the card.
+        if (posted.skippedMissingThreadRoot) {
+          return;
         }
+        console.warn(
+          `[Fast Agent] Slack rejected the task card for run ${taskRun.id} (${posted.slackErrorCode ?? (posted.transportError ? 'transport error' : 'unknown')}); posting the task link instead.`,
+        );
+        await postTaskLink(context.taskUrl);
         return;
       }
 
+      // The stored title is the prompt-derived fallback the worker renders
+      // if no generated title exists yet.
       await setSlackLiveTaskStreamData(taskRun.taskId, {
+        teamId: launcherParams.teamId,
         channel: launcherParams.channelId,
         messageTs,
         taskId: taskRun.taskId,
         taskUpdateId,
         threadTs: launcherParams.threadTs,
-        title,
+        title: buildSlackLiveTaskTitle(context.prompt),
         taskUrl: context.taskUrl,
       });
     } catch (error) {
       console.error(
-        `[Fast Agent] Failed to post the Slack task card for run ${taskRun.id}: ${error instanceof Error ? error.message : String(error)}`,
+        `[Fast Agent] Failed to post the Slack task card for run ${taskRun.id}: ${describeError(error)}`,
       );
+
+      if (!messageTs) {
+        await postTaskLink(context.taskUrl);
+        return;
+      }
+
+      // The card was posted but its pointer was not recorded, so no worker
+      // will ever update it. Settle it now rather than leave it spinning;
+      // it still carries the task link.
+      let settled = false;
+      try {
+        settled = await slack.updateMessage({
+          channel: launcherParams.channelId,
+          ts: messageTs,
+          message: buildSlackLiveTaskCardBlocks({
+            taskUpdateId,
+            title: STARTING_TASK_TITLE,
+            status: 'error',
+            message: SLACK_LIVE_TASK_CARD_MESSAGES.trackingUnavailable,
+            taskUrl: context.taskUrl,
+          }),
+        });
+      } catch (updateError) {
+        console.error(
+          `[Fast Agent] Failed to settle the untracked task card for run ${taskRun.id}: ${describeError(updateError)}`,
+        );
+      }
+      if (!settled) {
+        await postTaskLink(context.taskUrl);
+      }
     }
   };
 

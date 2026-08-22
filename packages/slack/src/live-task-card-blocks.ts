@@ -1,5 +1,20 @@
 import { convertMarkdownToRichText } from './markdown-rich-text';
 import type { SlackTaskStreamStatus } from './slack-notifier';
+import { truncateWithEllipsis } from './truncate';
+
+/** Slack rejects oversized blocks outright (the update then fails and the
+ * card keeps its previous state), so the output is budgeted here. */
+export const SLACK_LIVE_TASK_CARD_MESSAGE_MAX_CHARS = 4000;
+
+/** Terminal messages shared by the worker and the control plane so a card
+ * settled from either side reads the same. */
+export const SLACK_LIVE_TASK_CARD_MESSAGES = {
+  completed: 'Task completed.',
+  canceled: 'Task canceled.',
+  failed: 'The task stopped because of an error.',
+  trackingUnavailable:
+    'Live updates are unavailable for this task; open it to follow progress.',
+} as const;
 
 export interface SlackLiveTaskCardContent {
   taskUpdateId: string;
@@ -27,7 +42,12 @@ export interface SlackLiveTaskCardContent {
 export function buildSlackLiveTaskCardBlocks(
   content: SlackLiveTaskCardContent,
 ): { text: string; blocks: unknown[] } {
-  const message = content.message?.trim();
+  const message = content.message
+    ? truncateWithEllipsis(
+        content.message,
+        SLACK_LIVE_TASK_CARD_MESSAGE_MAX_CHARS,
+      )
+    : undefined;
 
   return {
     text: [

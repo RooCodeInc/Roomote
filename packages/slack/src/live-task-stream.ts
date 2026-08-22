@@ -1,9 +1,13 @@
 import { getRedis } from '@roomote/redis';
 
+import { truncateWithEllipsis } from './truncate';
+
 const SLACK_LIVE_TASK_STREAM_TTL_SECONDS = 7 * 24 * 60 * 60;
 const SLACK_LIVE_TASK_TITLE_MAX_LENGTH = 160;
 
 export interface SlackLiveTaskStreamData {
+  /** Workspace that owns the card; every update must use this team's bot token. */
+  teamId: string;
   channel: string;
   messageTs: string;
   taskId: string;
@@ -14,19 +18,18 @@ export interface SlackLiveTaskStreamData {
 }
 
 // Keyed by task id: runs are replaced on snapshot resume, but the card in the
-// Slack thread belongs to the task for its whole lifetime.
+// Slack thread belongs to the task for its whole lifetime. The record is never
+// deleted on settle (a follow-up run re-opens the same card); it expires with
+// the TTL.
 function getSlackLiveTaskStreamKey(taskId: string): string {
   return `slack:live_task_stream:task:${taskId}`;
 }
 
 export function buildSlackLiveTaskTitle(prompt: string): string {
-  const normalized = prompt.replace(/\s+/g, ' ').trim();
-
-  if (normalized.length <= SLACK_LIVE_TASK_TITLE_MAX_LENGTH) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, SLACK_LIVE_TASK_TITLE_MAX_LENGTH - 1).trimEnd()}…`;
+  return truncateWithEllipsis(
+    prompt.replace(/\s+/g, ' '),
+    SLACK_LIVE_TASK_TITLE_MAX_LENGTH,
+  );
 }
 
 export async function setSlackLiveTaskStreamData(
@@ -54,6 +57,7 @@ export async function getSlackLiveTaskStreamData(
     const parsed = JSON.parse(raw) as Partial<SlackLiveTaskStreamData>;
 
     if (
+      typeof parsed.teamId !== 'string' ||
       typeof parsed.channel !== 'string' ||
       typeof parsed.messageTs !== 'string' ||
       typeof parsed.taskId !== 'string' ||
@@ -68,10 +72,4 @@ export async function getSlackLiveTaskStreamData(
   } catch {
     return null;
   }
-}
-
-export async function clearSlackLiveTaskStreamData(
-  taskId: string,
-): Promise<void> {
-  await getRedis().del(getSlackLiveTaskStreamKey(taskId));
 }

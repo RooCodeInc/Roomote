@@ -260,10 +260,6 @@ export const getSlackLiveTaskStreamData = (
   options: AppRouterInput['taskRuns']['getSlackLiveTaskStreamData'],
 ) => client.taskRuns.getSlackLiveTaskStreamData.query(options);
 
-export const clearSlackLiveTaskStreamData = (
-  options: AppRouterInput['taskRuns']['clearSlackLiveTaskStreamData'],
-) => client.taskRuns.clearSlackLiveTaskStreamData.mutate(options);
-
 export const getResolvedGitAuthor = (
   options: AppRouterInput['taskRuns']['getResolvedGitAuthor'],
 ) => client.taskRuns.getResolvedGitAuthor.query(options);

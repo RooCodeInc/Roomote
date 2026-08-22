@@ -1,6 +1,7 @@
 import { RunStatus } from '@roomote/types';
 import {
   buildSlackLiveTaskCardBlocks,
+  SLACK_LIVE_TASK_CARD_MESSAGES,
   SlackNotifier,
   type SlackLiveTaskStreamData,
   type SlackTaskStreamStatus,
@@ -53,7 +54,15 @@ type SlackLiveTaskCardState = {
   /** Latest narration from the agent (or a waiting notice), or the final
    * result once settled. */
   message?: string;
+  /** The completion text, kept apart from narration so the exit fallback
+   * never promotes a transient line to the final result. */
+  finalMessage?: string;
+  /** Set once a settling render was delivered; later events are ignored. */
+  settled?: boolean;
 };
+
+/** What the next render must do; merged across coalesced requests. */
+type PendingRender = { refreshData: boolean; settle: boolean };
 
 function getCardState(context: RunTaskContext): SlackLiveTaskCardState {
   const existing = context.slackLiveTaskCardState;
@@ -167,50 +176,78 @@ function resolveCardData(
   return lookup;
 }
 
-let slack: SlackNotifier | undefined = undefined;
+// One notifier per workspace: a deployment can hold several Slack
+// installations, and the card must be updated with the token of the team
+// that owns it.
+const notifiersByTeam = new Map<string, Promise<SlackNotifier>>();
 
-async function getSlackNotifier(): Promise<SlackNotifier> {
-  if (!slack) {
-    const slackInstallation = await sdk.slackInstallations.findFirst();
-
-    if (!slackInstallation) {
-      throw new Error('Slack installation not found.');
-    }
-
-    slack = new SlackNotifier(slackInstallation.botAccessToken);
+function getSlackNotifier(teamId: string): Promise<SlackNotifier> {
+  const cached = notifiersByTeam.get(teamId);
+  if (cached) {
+    return cached;
   }
 
-  return slack;
+  const lookup = sdk.slackInstallations
+    .findByTeamId({ teamId })
+    .then((installation) => {
+      if (!installation) {
+        throw new Error(`Slack installation not found for team ${teamId}.`);
+      }
+      return new SlackNotifier(installation.botAccessToken);
+    })
+    .catch((error) => {
+      notifiersByTeam.delete(teamId);
+      throw error;
+    });
+  notifiersByTeam.set(teamId, lookup);
+  return lookup;
 }
 
 /**
- * Re-render the card from its current state. Settled renders (complete, or
- * a terminal error) also release the card data so no later run revives it;
- * a failed turn is rendered as an error but keeps the data, because the
- * workspace is retained and the next run of the task continues this card.
+ * Render the card's latest state. Requests coalesce: while one chat.update
+ * is in flight, any number of further state changes collapse into a single
+ * follow-up render of whatever the state is by then, so a burst of agent
+ * messages never queues a stale update behind a newer one and never
+ * multiplies calls against Slack's rate limit.
+ *
+ * The card data is never released: a follow-up run of the task (after a
+ * completion or a failure) re-opens the same card.
  */
 async function renderCard(
   taskRun: TaskRun,
   context: RunTaskContext,
   options: { refreshData?: boolean; settle?: boolean } = {},
 ): Promise<void> {
-  // Snapshot now: later events may mutate the state before this render
-  // reaches the front of the queue, and each render must reflect its own
-  // moment so the final settled state is never overwritten by a stale one.
-  const state = { ...getCardState(context) };
+  const pending = (context.slackLiveTaskPendingRender as
+    | PendingRender
+    | undefined) ?? { refreshData: false, settle: false };
+  pending.refreshData ||= options.refreshData === true;
+  pending.settle ||= options.settle === true;
+  context.slackLiveTaskPendingRender = pending;
 
   await enqueueCardRender(taskRun.id, async () => {
+    const request = context.slackLiveTaskPendingRender as
+      | PendingRender
+      | undefined;
+    if (!request) {
+      // An earlier queued render already delivered this state.
+      return;
+    }
+    context.slackLiveTaskPendingRender = undefined;
+
+    const state = { ...getCardState(context) };
+
     // Nothing new since the last confirmed render. Settling renders always
-    // go out: they also release the card data.
+    // go out so the terminal state is never skipped.
     if (
-      !options.settle &&
+      !request.settle &&
       isSameCardState(getDeliveredCardState(context), state)
     ) {
       return;
     }
-    if (options.refreshData) {
-      // Fetch fresh data for the final render so the settled card carries
-      // the task's latest generated title.
+    if (request.refreshData) {
+      // Fetch fresh data so the card carries the task's latest generated
+      // title.
       cardDataCache.delete(taskRun.id);
     }
     const data = await resolveCardData(taskRun);
@@ -218,7 +255,7 @@ async function renderCard(
       return;
     }
 
-    const notifier = await getSlackNotifier();
+    const notifier = await getSlackNotifier(data.teamId);
     const updated = await notifier.updateMessage({
       channel: data.channel,
       ts: data.messageTs,
@@ -235,12 +272,8 @@ async function renderCard(
       return;
     }
     context.slackLiveTaskCardDelivered = state;
-
-    if (options.settle) {
-      await sdk.taskRuns.clearSlackLiveTaskStreamData({
-        runId: taskRun.id,
-      });
-      cardDataCache.set(taskRun.id, Promise.resolve(null));
+    if (request.settle) {
+      getCardState(context).settled = true;
     }
   });
 }
@@ -258,9 +291,7 @@ export async function reportSlackLiveTaskStatus(
   const state = getCardState(context);
   state.status = 'in_progress';
   state.message = message;
-  // The first startup render also swaps the launcher's placeholder title
-  // for the generated task title.
-  await renderCard(taskRun, context, { refreshData: true });
+  await renderCard(taskRun, context);
 }
 
 export async function startSlackLiveTaskStream(
@@ -269,9 +300,10 @@ export async function startSlackLiveTaskStream(
 ): Promise<void> {
   // The launcher posted the card with the prompt; the run-scoped lookup
   // substitutes the generated task title, so render it right away. A run
-  // resumed after a failed turn also flips the card back to in progress.
+  // resumed after a settled turn also flips the card back to in progress.
   const state = getCardState(context);
   state.status = 'in_progress';
+  state.settled = false;
   await renderCard(taskRun, context, { refreshData: true });
 }
 
@@ -287,9 +319,13 @@ export async function updateSlackLiveTaskStream(
   }
 
   const state = getCardState(context);
+  if (state.settled) {
+    return;
+  }
 
   if (event.type === 'completion') {
     state.status = 'complete';
+    state.finalMessage = event.text;
     state.message = event.text;
     await renderCard(taskRun, context, { refreshData: true, settle: true });
     return;
@@ -335,27 +371,31 @@ export async function finishSlackLiveTaskStream(
 
   if (status === RunStatus.Completed) {
     // Usually a no-op: the completion CallbackEvent already settled the
-    // card (and cleared its data) with the real output. This fallback
-    // guarantees the card cannot stay spinning when that event is lost.
+    // card with the real output. This fallback guarantees the card cannot
+    // stay spinning when that event is lost (or its render was rejected),
+    // and never promotes the last narration line to the final result.
+    if (state.settled) {
+      return;
+    }
     state.status = 'complete';
-    state.message ??= 'Task completed.';
+    state.message =
+      state.finalMessage ?? SLACK_LIVE_TASK_CARD_MESSAGES.completed;
     await renderCard(taskRun, context, { refreshData: true, settle: true });
     return;
   }
 
   if (status === RunStatus.Canceled) {
     state.status = 'error';
-    state.message = 'Task canceled.';
+    state.message = SLACK_LIVE_TASK_CARD_MESSAGES.canceled;
     await renderCard(taskRun, context, { refreshData: true, settle: true });
     return;
   }
 
   // A failed turn is not the end of the task: the workspace is retained and
-  // the next run (a follow-up or a retry) keeps driving this same card, so
-  // show the failure without releasing the card data.
+  // the next run (a follow-up or a retry) keeps driving this same card.
   state.status = 'error';
-  state.message = 'The task stopped because of an error.';
-  await renderCard(taskRun, context);
+  state.message = SLACK_LIVE_TASK_CARD_MESSAGES.failed;
+  await renderCard(taskRun, context, { settle: true });
 }
 
 function reportCardCallbackError(
@@ -370,6 +410,12 @@ function reportCardCallbackError(
  * Card updates for any run whose payload opted into liveTaskStream,
  * independent of payload kind: Fast children run as StandardTask and
  * resumes run as SnapshotResume, and all of them own a card.
+ *
+ * Start, status, and message renders are detached: they sit on the
+ * worker's startup path and the harness event hot path, and a slow or
+ * rate-limited Slack must never hold the run back. Ordering is preserved by
+ * the per-run render queue, and `onExit` awaits it so the settling render
+ * lands before the worker exits.
  */
 export function getSlackLiveTaskStreamRunTaskCallbacks(
   taskRun: TaskRun,
@@ -380,18 +426,14 @@ export function getSlackLiveTaskStreamRunTaskCallbacks(
 
   return {
     onStart: async (run, _taskId, context) => {
-      try {
-        await startSlackLiveTaskStream(run, context);
-      } catch (error) {
-        reportCardCallbackError(error, 'slackLiveTaskStream.onStart', run.id);
-      }
+      void startSlackLiveTaskStream(run, context).catch((error) =>
+        reportCardCallbackError(error, 'slackLiveTaskStream.onStart', run.id),
+      );
     },
     onMessage: async (run, _taskId, event, context) => {
-      try {
-        await updateSlackLiveTaskStream(run, event, context);
-      } catch (error) {
-        reportCardCallbackError(error, 'slackLiveTaskStream.onMessage', run.id);
-      }
+      void updateSlackLiveTaskStream(run, event, context).catch((error) =>
+        reportCardCallbackError(error, 'slackLiveTaskStream.onMessage', run.id),
+      );
     },
     onExit: async (run, status, context) => {
       try {
@@ -401,11 +443,9 @@ export function getSlackLiveTaskStreamRunTaskCallbacks(
       }
     },
     onStatus: async (run, status, context) => {
-      try {
-        await reportSlackLiveTaskStatus(run, status, context);
-      } catch (error) {
-        reportCardCallbackError(error, 'slackLiveTaskStream.onStatus', run.id);
-      }
+      void reportSlackLiveTaskStatus(run, status, context).catch((error) =>
+        reportCardCallbackError(error, 'slackLiveTaskStream.onStatus', run.id),
+      );
     },
   };
 }

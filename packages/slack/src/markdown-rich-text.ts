@@ -1,9 +1,11 @@
 /**
  * Markdown → Slack `rich_text` conversion for surfaces that take a
  * rich_text entity instead of a `markdown` block (task cards). Covers the
- * inline and block syntax agents actually emit: bold, italic,
+ * inline and block syntax agents actually emit: `**bold**`, italic,
  * strikethrough, inline code, links, bullet/numbered lists, headings, and
- * fenced code blocks. Anything else stays literal text.
+ * fenced code blocks. Anything else stays literal text. `__bold__` is
+ * deliberately not supported: agent prose mentions Python dunders
+ * (`__init__`) far more often than it uses that bold form.
  */
 
 export type SlackRichTextStyle = {
@@ -43,7 +45,11 @@ export interface SlackRichTextValue {
 // Every repetition is bounded so a pathological message (for example a
 // long run of "[" or "<http://|") cannot make matching superlinear.
 const INLINE_PATTERN =
-  /(`[^`\n]{1,500}`)|(\*\*[^*\n]{1,500}?\*\*)|(__[^_\n]{1,500}?__)|(~~[^~\n]{1,500}?~~)|(\[[^\]\n]{1,500}\]\((?:https?:\/\/)[^)\s]{1,2000}\))|(<(?:https?:\/\/)[^>\s|]{1,2000}(?:\|[^>\n]{1,500})?>)|(\b(?:https?:\/\/)[^\s<>)]{1,2000})|((?<![\w*])\*[^*\n]{1,500}?\*(?![\w*]))|((?<![\w_])_[^_\n]{1,500}?_(?![\w_]))/g;
+  /(`[^`\n]{1,500}`)|(\*\*[^*\n]{1,500}?\*\*)|(~~[^~\n]{1,500}?~~)|(\[[^\]\n]{1,500}\]\((?:https?:\/\/)(?:[^()\s]|\([^()\s]{0,200}\)){1,2000}\))|(<(?:https?:\/\/)[^>\s|]{1,2000}(?:\|[^>\n]{1,500})?>)|(\b(?:https?:\/\/)[^\s<>)]{1,2000})|((?<![\w*])\*(?!\s)[^*\n]{1,500}?(?<!\s)\*(?![\w*]))|((?<![\w_])_(?!\s)[^_\n]{1,500}?(?<!\s)_(?![\w_]))/g;
+
+// Sentence punctuation that ends a bare URL belongs to the prose, not the
+// link: "see https://a.io/docs." must not link to "docs.".
+const BARE_URL_TRAILING_PUNCTUATION = /[.,;:!?'"]+$/;
 
 function withStyle(
   element: SlackRichTextInlineElement,
@@ -63,9 +69,20 @@ export function convertMarkdownInlineToRichText(
   let last = 0;
 
   const pushText = (value: string) => {
-    if (value) {
-      elements.push(withStyle({ type: 'text', text: value }, style));
+    if (!value) {
+      return;
     }
+    // Adjacent plain text (for example the punctuation trimmed off a bare
+    // URL and the prose that follows it) becomes one element.
+    const previous = elements[elements.length - 1];
+    if (
+      previous?.type === 'text' &&
+      JSON.stringify(previous.style ?? {}) === JSON.stringify(style)
+    ) {
+      previous.text += value;
+      return;
+    }
+    elements.push(withStyle({ type: 'text', text: value }, style));
   };
 
   for (const match of text.matchAll(INLINE_PATTERN)) {
@@ -75,8 +92,7 @@ export function convertMarkdownInlineToRichText(
     const [
       ,
       code,
-      boldStars,
-      boldUnderscores,
+      bold,
       strike,
       markdownLink,
       slackLink,
@@ -92,10 +108,12 @@ export function convertMarkdownInlineToRichText(
           { ...style, code: true },
         ),
       );
-    } else if (boldStars || boldUnderscores) {
-      const inner = (boldStars ?? boldUnderscores)!.slice(2, -2);
+    } else if (bold) {
       elements.push(
-        ...convertMarkdownInlineToRichText(inner, { ...style, bold: true }),
+        ...convertMarkdownInlineToRichText(bold.slice(2, -2), {
+          ...style,
+          bold: true,
+        }),
       );
     } else if (strike) {
       elements.push(
@@ -105,7 +123,8 @@ export function convertMarkdownInlineToRichText(
         }),
       );
     } else if (markdownLink) {
-      const parsed = markdownLink.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      // Greedy to the final ")" so balanced parentheses in the URL survive.
+      const parsed = markdownLink.match(/^\[([^\]]+)\]\((.+)\)$/);
       if (parsed) {
         elements.push(
           withStyle({ type: 'link', url: parsed[2]!, text: parsed[1]! }, style),
@@ -120,7 +139,10 @@ export function convertMarkdownInlineToRichText(
         ),
       );
     } else if (bareUrl) {
-      elements.push(withStyle({ type: 'link', url: bareUrl }, style));
+      const trailing = bareUrl.match(BARE_URL_TRAILING_PUNCTUATION)?.[0] ?? '';
+      const url = bareUrl.slice(0, bareUrl.length - trailing.length);
+      elements.push(withStyle({ type: 'link', url }, style));
+      pushText(trailing);
     } else if (italicStar || italicUnderscore) {
       const inner = (italicStar ?? italicUnderscore)!.slice(1, -1);
       elements.push(

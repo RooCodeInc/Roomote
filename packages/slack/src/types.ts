@@ -27,11 +27,6 @@ export interface SlackResponse {
   ts?: string;
   message_ts?: string;
   error?: string;
-  warning?: string;
-  response_metadata?: {
-    warnings?: string[];
-    messages?: string[];
-  };
   message?: Record<string, unknown>;
 }
 

@@ -266,9 +266,9 @@ export function mergeRunTaskCallbacks(
         await set.onStart?.(taskRun, taskId, context);
       }
     },
-    onMessage: async (taskRun, taskId, event, context) => {
+    onMessage: async (taskRun, taskId, event, context, deliveryContext) => {
       for (const set of sets) {
-        await set.onMessage?.(taskRun, taskId, event, context);
+        await set.onMessage?.(taskRun, taskId, event, context, deliveryContext);
       }
     },
     onExit: async (taskRun, status, context) => {

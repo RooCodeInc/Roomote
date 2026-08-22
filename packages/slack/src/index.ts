@@ -13,6 +13,7 @@ export * from './handle-followup-answer';
 export * from './interactive-response';
 export * from './live-task-card-blocks';
 export * from './live-task-stream';
+export * from './settle-live-task-card';
 export * from './markdown-converter';
 export * from './markdown-rich-text';
 export * from './mcp-recommendations';

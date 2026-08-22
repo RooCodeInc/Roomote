@@ -1077,7 +1077,6 @@ describe('taskSpecSchema', () => {
       sourcePayload: {
         slackChannel: 'C123',
         slackTeamDomain: 'acme-team',
-        liveTaskStream: true,
       },
       threadTs: '111.222',
     });
@@ -1087,7 +1086,6 @@ describe('taskSpecSchema', () => {
       slackChannel: 'C123',
       teamDomain: 'acme-team',
       thread_ts: '111.222',
-      liveTaskStream: true,
     });
     expect(payload).not.toHaveProperty('slackTeamDomain');
   });

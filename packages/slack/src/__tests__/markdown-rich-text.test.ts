@@ -46,6 +46,44 @@ describe('convertMarkdownInlineToRichText', () => {
     expect(
       convertMarkdownInlineToRichText('set slack_user_id to 2*3*4'),
     ).toEqual([{ type: 'text', text: 'set slack_user_id to 2*3*4' }]);
+    expect(convertMarkdownInlineToRichText('5 * 3 * 2 = 30')).toEqual([
+      { type: 'text', text: '5 * 3 * 2 = 30' },
+    ]);
+    expect(
+      convertMarkdownInlineToRichText('Added __init__ and __repr__ to Model'),
+    ).toEqual([{ type: 'text', text: 'Added __init__ and __repr__ to Model' }]);
+  });
+
+  it('keeps balanced parentheses inside markdown link targets', () => {
+    expect(
+      convertMarkdownInlineToRichText(
+        'See [spec](https://en.wikipedia.org/wiki/Foo_(bar)) for details',
+      ),
+    ).toEqual([
+      { type: 'text', text: 'See ' },
+      {
+        type: 'link',
+        url: 'https://en.wikipedia.org/wiki/Foo_(bar)',
+        text: 'spec',
+      },
+      { type: 'text', text: ' for details' },
+    ]);
+  });
+
+  it('leaves sentence punctuation after a bare URL out of the link', () => {
+    expect(
+      convertMarkdownInlineToRichText(
+        'Opened https://github.com/o/r/pull/12. Then https://a.io/docs, done (https://b.io).',
+      ),
+    ).toEqual([
+      { type: 'text', text: 'Opened ' },
+      { type: 'link', url: 'https://github.com/o/r/pull/12' },
+      { type: 'text', text: '. Then ' },
+      { type: 'link', url: 'https://a.io/docs' },
+      { type: 'text', text: ', done (' },
+      { type: 'link', url: 'https://b.io' },
+      { type: 'text', text: ').' },
+    ]);
   });
 });
 

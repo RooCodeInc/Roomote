@@ -106,9 +106,6 @@ export async function processFastAgentMessage(params: {
   let didAddProcessingReaction = false;
 
   try {
-    // Deliberately no assistant thread status here: Slack replaces the
-    // custom status text with its own rotating "Generating response…"
-    // placeholders, which read as noise next to the task card.
     // A false routing result can become stale while waiting for the turn lock.
     const hasExistingConversation =
       isExistingConversation || (await hasFastAgentSession(conversation));

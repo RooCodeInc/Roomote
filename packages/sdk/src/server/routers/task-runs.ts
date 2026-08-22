@@ -79,10 +79,7 @@ import {
 import { publishCommunicationRequestUserInput } from '../lib/communication-request-user-input';
 import { publishFastAgentRequestUserInput } from '../lib/task-runs/publish-fast-agent-request-user-input';
 import { relayFastAgentChildChatReply } from '../lib/task-runs/relay-fast-agent-child-chat-reply';
-import {
-  clearSlackLiveTaskStreamDataForRun,
-  getSlackLiveTaskStreamDataForRun,
-} from '../lib/task-runs/slack-live-task-stream';
+import { getSlackLiveTaskStreamDataForRun } from '../lib/task-runs/slack-live-task-stream';
 import {
   authenticatedProcedure,
   isRunToken,
@@ -550,10 +547,6 @@ export const taskRunsRouter = router({
     z.object({ runId: z.number() }),
     'runId',
   ).query(({ input }) => getSlackLiveTaskStreamDataForRun(input.runId)),
-  clearSlackLiveTaskStreamData: runScoped(
-    z.object({ runId: z.number() }),
-    'runId',
-  ).mutation(({ input }) => clearSlackLiveTaskStreamDataForRun(input.runId)),
   getResolvedGitAuthor: runScoped(
     z.object({ runId: z.number() }),
     'runId',

@@ -32,22 +32,6 @@ type MockSlackStoredMessage = {
   files?: SlackFile[];
   ephemeral?: boolean;
   reactions?: string[];
-  chunks?: unknown[];
-  streaming_state?: 'in_progress' | 'completed';
-};
-
-export type MockSlackAssistantThreadStatus = {
-  channel: string;
-  threadTs: string;
-  status: string;
-};
-
-export type MockSlackStreamEvent = {
-  method: 'start' | 'append' | 'stop';
-  channel: string;
-  messageTs: string;
-  threadTs?: string;
-  chunks: unknown[];
 };
 
 export type MockSlackUser = {
@@ -115,8 +99,6 @@ export type MockSlackState = {
   manifestCredentials?: MockSlackManifestCredentials;
   /** Apps created through `apps.manifest.create`, oldest first. */
   createdManifests?: MockSlackCreatedManifest[];
-  assistantThreadStatuses?: MockSlackAssistantThreadStatus[];
-  streamEvents?: MockSlackStreamEvent[];
   /** Manifest replacements applied through `apps.manifest.update`. */
   updatedManifests?: MockSlackCreatedManifest[];
   /** Controls whether manifest updates report that OAuth approval is needed. */
@@ -175,8 +157,6 @@ function normalizeState(state: MockSlackState): MockSlackState {
       reactions: [],
       ...message,
     })),
-    assistantThreadStatuses: cloneState(state.assistantThreadStatuses ?? []),
-    streamEvents: cloneState(state.streamEvents ?? []),
   };
 }
 
@@ -475,49 +455,6 @@ export class MockSlackServer {
     const microseconds = `${this.sequence}`.padStart(6, '0');
     this.sequence += 1;
     return `${seconds}.${microseconds}`;
-  }
-
-  private mergeStreamChunks(
-    existing: unknown[] | undefined,
-    incoming: unknown[],
-  ): unknown[] {
-    const merged = [...(existing ?? [])];
-
-    for (const chunk of incoming) {
-      if (
-        chunk &&
-        typeof chunk === 'object' &&
-        !Array.isArray(chunk) &&
-        (chunk as JsonRecord).type === 'task_update' &&
-        typeof (chunk as JsonRecord).id === 'string'
-      ) {
-        const taskId = (chunk as JsonRecord).id;
-        const existingIndex = merged.findIndex(
-          (candidate) =>
-            candidate !== null &&
-            typeof candidate === 'object' &&
-            !Array.isArray(candidate) &&
-            (candidate as JsonRecord).type === 'task_update' &&
-            (candidate as JsonRecord).id === taskId,
-        );
-
-        if (existingIndex >= 0) {
-          merged.splice(existingIndex, 1, cloneState(chunk));
-          continue;
-        }
-      }
-
-      merged.push(cloneState(chunk));
-    }
-
-    return merged;
-  }
-
-  private recordStreamEvent(event: MockSlackStreamEvent): void {
-    this.state.streamEvents = [
-      ...(this.state.streamEvents ?? []),
-      cloneState(event),
-    ];
   }
 
   private async handleRequest(
@@ -952,80 +889,6 @@ export class MockSlackServer {
           ts,
           payload: jsonBody,
           ephemeral: false,
-        });
-        json(response, 200, this.successResponse(message));
-        return;
-      }
-
-      case 'POST assistant.threads.setStatus': {
-        const channel = String(jsonBody.channel_id ?? '');
-        const threadTs = String(jsonBody.thread_ts ?? '');
-        const status = String(jsonBody.status ?? '');
-        const remaining = (this.state.assistantThreadStatuses ?? []).filter(
-          (entry) => entry.channel !== channel || entry.threadTs !== threadTs,
-        );
-
-        this.state.assistantThreadStatuses = status
-          ? [...remaining, { channel, threadTs, status }]
-          : remaining;
-        json(response, 200, { ok: true });
-        return;
-      }
-
-      case 'POST chat.startStream': {
-        const ts = this.nextTs();
-        const chunks = Array.isArray(jsonBody.chunks) ? jsonBody.chunks : [];
-        const message = this.storeOutgoingMessage({
-          ts,
-          payload: jsonBody,
-          ephemeral: false,
-        });
-        message.chunks = cloneState(chunks);
-        message.streaming_state = 'in_progress';
-        this.recordStreamEvent({
-          method: 'start',
-          channel: message.channel,
-          messageTs: message.ts,
-          ...(message.thread_ts ? { threadTs: message.thread_ts } : {}),
-          chunks,
-        });
-        json(response, 200, this.successResponse(message));
-        return;
-      }
-
-      case 'POST chat.appendStream':
-      case 'POST chat.stopStream': {
-        const channel = String(jsonBody.channel ?? '');
-        const ts = String(jsonBody.ts ?? '');
-        const chunks = Array.isArray(jsonBody.chunks) ? jsonBody.chunks : [];
-        const message = (this.state.messages ?? []).find(
-          (entry) => entry.channel === channel && entry.ts === ts,
-        );
-
-        if (!message || !message.streaming_state) {
-          json(response, 200, { ok: false, error: 'message_not_found' });
-          return;
-        }
-
-        if (message.streaming_state === 'completed') {
-          json(response, 200, {
-            ok: false,
-            error: 'message_not_in_streaming_state',
-          });
-          return;
-        }
-
-        message.chunks = this.mergeStreamChunks(message.chunks, chunks);
-        const stopping = path === 'chat.stopStream';
-        if (stopping) {
-          message.streaming_state = 'completed';
-        }
-        this.recordStreamEvent({
-          method: stopping ? 'stop' : 'append',
-          channel,
-          messageTs: ts,
-          ...(message.thread_ts ? { threadTs: message.thread_ts } : {}),
-          chunks,
         });
         json(response, 200, this.successResponse(message));
         return;
