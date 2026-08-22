@@ -64,7 +64,7 @@ export function resolveInferenceProviderRetryDelayMs(options: {
     ? INFERENCE_PROVIDER_RATE_LIMIT_MAX_DELAY_MS
     : INFERENCE_PROVIDER_ERROR_MAX_DELAY_MS;
   const baseDelayMs = Math.max(
-    1_000,
+    options.rateLimited ? 0 : 1_000,
     options.baseDelayMs ?? defaultBaseDelayMs,
   );
   const maxDelayMs = Math.max(

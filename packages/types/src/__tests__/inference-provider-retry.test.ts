@@ -45,4 +45,16 @@ describe('resolveInferenceProviderRetryDelayMs', () => {
       }),
     ).toBe(7_000);
   });
+
+  it('preserves configured sub-second rate-limit backoff', () => {
+    expect(
+      [1, 2].map((attemptNumber) =>
+        resolveInferenceProviderRetryDelayMs({
+          attemptNumber,
+          rateLimited: true,
+          baseDelayMs: 100,
+        }),
+      ),
+    ).toEqual([100, 200]);
+  });
 });
