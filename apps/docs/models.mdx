@@ -222,6 +222,7 @@ where you want more speed, quality, or cost control.
 | Role                 | What it is for                                                                           | Optimize for                                                                              |
 | -------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
 | Default coding model | Normal Roomote tasks: code changes, debugging, tests, repo investigation, and follow-ups | Strong tool use, coding quality, long-context reliability, and good instruction following |
+| Orchestration model  | Fast answers and coordination of delegated task launches                                 | Low latency, conversational quality, and reliable tool routing                             |
 | Helper model         | Lightweight routing, titles, summaries, and quick internal decisions                     | Low latency, low cost, and enough accuracy for short judgments                            |
 | Vision model         | Visual inspection, screenshots, UI review, and image-heavy work                          | Image understanding, layout reasoning, and concise visual feedback                        |
 | Code review model    | Initial PR or MR review tasks and review-sync work                                       | Careful reasoning, bug finding, security awareness, and willingness to cite evidence      |
@@ -245,7 +246,7 @@ outcome, not everywhere by default.
 A practical starting point:
 
 - use **Medium** for the default coding model
-- use **Low** for helper, vision, and explore work unless you see quality issues
+- use **Low** for orchestration, helper, vision, and explore work unless you see quality issues
 - use **High** for code review and advisor work when you want more careful
   analysis
 - reserve **Extra high** or **Max** for models and workflows where the added
