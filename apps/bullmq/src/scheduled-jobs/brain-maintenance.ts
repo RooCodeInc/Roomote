@@ -916,28 +916,23 @@ export async function brainMaintenanceJob(): Promise<void> {
       watermark: maintenanceNow,
     });
 
-    let body: string;
+    // A transport failure (no HTTP answer) is ambiguous: gbrain may have
+    // queued the job before the connection died, so the claim stays and the
+    // retry does not resubmit. Only a definitive rejection, where gbrain
+    // answered and did not take the job, releases the claim.
+    const response = await postBrainToolCall(connection, 'submit_job', {
+      name: 'autopilot-cycle',
+      data: { pull: false, phases: [...BRAIN_MAINTENANCE_PHASES] },
+      max_attempts: 2,
+      timeout_ms: BRAIN_MAINTENANCE_TIMEOUT_MS,
+    });
 
-    try {
-      body = await callGbrainTool(connection, 'submit_job', {
-        name: 'autopilot-cycle',
-        data: { pull: false, phases: [...BRAIN_MAINTENANCE_PHASES] },
-        max_attempts: 2,
-        timeout_ms: BRAIN_MAINTENANCE_TIMEOUT_MS,
-      });
-    } catch (error) {
-      await upsertBrainSyncState(db, BRAIN_AUTOPILOT_STATE_ID, {
-        watermark: autopilotState?.watermark ?? null,
-      });
-      throw error;
-    }
-
-    if (/"isError"\s*:\s*true/.test(body)) {
+    if (!response.ok || /"isError"\s*:\s*true/.test(response.body)) {
       await upsertBrainSyncState(db, BRAIN_AUTOPILOT_STATE_ID, {
         watermark: autopilotState?.watermark ?? null,
       });
       throw new Error(
-        `gbrain maintenance submission failed: ${body.slice(0, 300)}`,
+        `gbrain submit_job failed: ${response.status} ${response.body.slice(0, 300)}`,
       );
     }
   }

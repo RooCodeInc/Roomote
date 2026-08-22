@@ -321,6 +321,27 @@ describe('brainMaintenanceJob', () => {
     ]);
   });
 
+  it('keeps the claim when the submission fails in transport', async () => {
+    // No HTTP answer means gbrain may already have queued the job; releasing
+    // the claim would let the retry queue a second corpus-wide cycle.
+    mockResolveProvider.mockResolvedValue(TEST_PROVIDER);
+    mockResolveConnection.mockResolvedValue({
+      baseUrl: 'http://gbrain.test',
+      token: 'maintenance-token',
+    });
+    const fetchSpy = mockDigestFetch([searchResponse()], [synthesisResponse()]);
+    fetchSpy.mockRejectedValueOnce(new TypeError('fetch failed'));
+
+    await expect(brainMaintenanceJob()).rejects.toThrow('fetch failed');
+
+    const autopilotWrites = mockUpsertBrainSyncState.mock.calls
+      .filter((call) => call[1] === 'roomote-autopilot-cycle')
+      .map((call) => call[2]);
+    expect(autopilotWrites).toEqual([
+      { watermark: new Date('2026-08-17T07:00:00.000Z') },
+    ]);
+  });
+
   it('claims the day before submitting the maintenance cycle', async () => {
     // A crash between the submission and a marker written afterwards would
     // let the retry queue a second corpus-wide cycle; the claim has to land
