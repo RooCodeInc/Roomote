@@ -360,6 +360,68 @@ describe('prReviewNotificationJob', () => {
     });
   });
 
+  it('keeps Discord review actions after Fast parent delivery', async () => {
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 1,
+      taskId: 'task-1',
+      payload: {
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+        },
+      },
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      workerHeartbeatAt: new Date(),
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+      },
+      text: 'Alice requested changes on owner/repo#42.',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockNotifyFastAgentParent.mockResolvedValue(true);
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockSetPendingPrReviewAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'discord',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+        followUpPrompt: 'Address the review feedback on owner/repo#42.',
+        nonce: expect.any(String),
+      }),
+    );
+    const storedNonce = mockSetPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
+    expect(mockDiscordPostMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'Alice requested changes on owner/repo#42.\nWant me to take a look?',
+        buttons: [
+          [
+            expect.objectContaining({
+              text: 'Resolve these issues',
+              callbackData: `prr:y:${storedNonce}`,
+            }),
+            expect.objectContaining({
+              text: 'Auto-resolve on this PR',
+              callbackData: `prr:a:${storedNonce}`,
+            }),
+            expect.objectContaining({
+              text: 'Dismiss',
+              callbackData: `prr:d:${storedNonce}`,
+            }),
+          ],
+        ],
+      }),
+    );
+    expect(mockFinalize).toHaveBeenCalled();
+  });
+
   it('uses the originating workspace installation when identifiers collide', async () => {
     mockPrepareDelivery.mockResolvedValue({
       post: true,

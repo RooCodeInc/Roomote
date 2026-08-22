@@ -426,7 +426,9 @@ export const prReviewNotificationJob = async (
         : {}),
     });
 
-    if (deliveredToFastParent) {
+    // Discord's Fast adapter posts the closeout but the generic route still
+    // owns its persisted review-action buttons.
+    if (deliveredToFastParent && delivery.route?.provider !== 'discord') {
       await recordPrReviewNotificationDeliveryBestEffort({
         runId: latestJob.id,
         taskId: data.taskId,
