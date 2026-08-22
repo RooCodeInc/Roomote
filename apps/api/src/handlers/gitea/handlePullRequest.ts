@@ -117,6 +117,7 @@ export async function handleGiteaPullRequest(
         number: payload.number,
         externalId: pullRequest.id ?? null,
         title: pullRequest.title,
+        body: pullRequest.body ?? null,
         url: getPullRequestUrl(payload),
         authorLogin: getGiteaUsername(pullRequest.user) ?? null,
         state: status,

@@ -1246,6 +1246,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         externalId: 5501,
         url: 'https://github.com/acme/backend/pull/55',
         title: '[Fix] Read surface',
+        body: null,
         state: 'open',
         draft: false,
         sourceBranch: 'codex/read-surface',
@@ -1332,6 +1333,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         externalId: null,
         url: 'https://gitlab.com/acme/backend/-/merge_requests/42',
         title: 'Conflicting MR',
+        body: null,
         state: 'open',
         draft: false,
         sourceBranch: 'feature/work',
@@ -1466,6 +1468,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         externalId: null,
         url: 'https://git.example.com/acme/backend/pulls/8',
         title: 'WIP: Gitea PR',
+        body: null,
         state: 'open',
         draft: true,
         sourceBranch: 'feature/work',
@@ -1573,7 +1576,8 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     ).toEqual([3, 2]);
     expect(result.pullRequests[0]).toMatchObject({
       author: { id: '{u-1}', login: 'bb-user' },
-      labels: [],
+      // Bitbucket's PR list carries no labels: unknown, not empty.
+      labels: null,
       mergeable: null,
       mergeStateDescription: null,
       headSha: 'head-sha',
@@ -1655,7 +1659,8 @@ describe('readSourceControlPullRequestForTaskRun', () => {
       author: { id: 'user-guid', login: 'author@acme.com' },
       updatedAt: null,
       createdAt: '2026-06-30T00:00:00Z',
-      labels: [],
+      // ADO omitted labels from this list payload: unknown, not empty.
+      labels: null,
       headSha: 'head-sha',
       baseSha: 'base-sha',
       mergeable: false,

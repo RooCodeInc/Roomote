@@ -70,6 +70,8 @@ function syncPullRequestFact(params: {
   repositoryFullName: string;
   pullRequest: {
     authorLogin: string | null;
+    body: string | null;
+    labels: string[];
     closedAt: string | null;
     createdAt: string;
     draft: boolean;
@@ -95,6 +97,8 @@ function syncPullRequestFact(params: {
     repositoryFullName: params.repositoryFullName,
     pullRequest: {
       authorLogin: params.pullRequest.authorLogin,
+      body: params.pullRequest.body,
+      labels: params.pullRequest.labels,
       closedAt: params.pullRequest.closedAt,
       createdAt: params.pullRequest.createdAt,
       externalPullRequestId: params.pullRequest.externalPullRequestId,
@@ -293,6 +297,10 @@ github.post('/', async (c) => {
           repositoryFullName: payload.repository.full_name,
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
+            body: payload.pull_request.body ?? null,
+            labels: (payload.pull_request.labels ?? []).map(
+              (label) => label.name,
+            ),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -329,6 +337,10 @@ github.post('/', async (c) => {
           repositoryFullName: payload.repository.full_name,
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
+            body: payload.pull_request.body ?? null,
+            labels: (payload.pull_request.labels ?? []).map(
+              (label) => label.name,
+            ),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -360,6 +372,10 @@ github.post('/', async (c) => {
           repositoryFullName: payload.repository.full_name,
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
+            body: payload.pull_request.body ?? null,
+            labels: (payload.pull_request.labels ?? []).map(
+              (label) => label.name,
+            ),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -396,6 +412,10 @@ github.post('/', async (c) => {
           repositoryFullName: payload.repository.full_name,
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
+            body: payload.pull_request.body ?? null,
+            labels: (payload.pull_request.labels ?? []).map(
+              (label) => label.name,
+            ),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -432,6 +452,10 @@ github.post('/', async (c) => {
           repositoryFullName: payload.repository.full_name,
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
+            body: payload.pull_request.body ?? null,
+            labels: (payload.pull_request.labels ?? []).map(
+              (label) => label.name,
+            ),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
@@ -552,6 +576,10 @@ github.post('/', async (c) => {
           repositoryFullName: payload.repository.full_name,
           pullRequest: {
             authorLogin: payload.pull_request.user?.login ?? null,
+            body: payload.pull_request.body ?? null,
+            labels: (payload.pull_request.labels ?? []).map(
+              (label) => label.name,
+            ),
             closedAt: payload.pull_request.closed_at,
             createdAt: payload.pull_request.created_at,
             draft: Boolean(payload.pull_request.draft),
