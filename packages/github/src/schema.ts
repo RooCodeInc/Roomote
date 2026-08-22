@@ -1,9 +1,6 @@
 import { z } from 'zod';
 
-import {
-  getRoomoteManagedGitHubLogins,
-  matchesRoomoteGitHubLogin,
-} from '@roomote/types';
+import { matchesRoomoteGitHubLogin } from '@roomote/types';
 
 import { getEffectiveGitHubAppSlugs } from './app-slug';
 

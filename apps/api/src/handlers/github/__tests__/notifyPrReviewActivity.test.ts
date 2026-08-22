@@ -15,7 +15,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
     ...actual,
     Env: {
       R_GITHUB_APP_SLUG: 'roomote',
-      R_GITHUB_ADDITIONAL_APP_SLUGS: 'review-helper',
+      R_GITHUB_ADDITIONAL_APP_SLUGS: 'review-helper, roomote-community',
     },
   };
 });
@@ -414,7 +414,7 @@ describe('buildPrReviewActivityNotificationInput', () => {
     });
   });
 
-  it('keeps review threads from a hosted sibling Roomote deployment', () => {
+  it('keeps review threads from an explicitly configured additional app', () => {
     expect(
       buildPrReviewActivityNotificationInput(
         reviewCommentPayload({
