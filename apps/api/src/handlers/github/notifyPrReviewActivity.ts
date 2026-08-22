@@ -43,6 +43,15 @@ function getReviewBody(value: string | null | undefined): string | undefined {
   return body ? body.slice(0, MAX_REVIEW_BODY_LENGTH) : undefined;
 }
 
+function isExternalBotAuthor(
+  user: { login?: string; type?: string } | null | undefined,
+): boolean {
+  return (
+    user?.type === 'Bot' &&
+    (!user.login || !GitHubSchemas.isRoomoteGitHubLogin(user.login))
+  );
+}
+
 function getAutomatedAuthorMetadata(
   user: { id?: number; type?: string } | null | undefined,
 ): { automatedAuthorId: string } | Record<string, never> {
@@ -112,12 +121,24 @@ export function buildPrReviewActivityNotificationInput(
   eventPayload: PrReviewActivityWebhookPayload,
   context: GitHubWebhookContext = {},
 ): EnqueuePrReviewNotificationInput | null {
+  const author =
+    'issue' in eventPayload
+      ? eventPayload.comment.user
+      : 'review' in eventPayload
+        ? eventPayload.review.user
+        : eventPayload.comment.user;
+
+  if (isExternalBotAuthor(author)) {
+    return null;
+  }
+
   if ('issue' in eventPayload) {
     if (!eventPayload.issue.pull_request) {
       return null;
     }
 
     const comment = eventPayload.comment;
+
     const revision = getIssueCommentRevision(eventPayload, context);
     const authorLogin = comment.user?.login;
     const body = getReviewBody(comment.body);
