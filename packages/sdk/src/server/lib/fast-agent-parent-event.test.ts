@@ -22,7 +22,6 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
   fastAgentConversationRepository: { findById: mocks.findSession },
-  createFastAgentSlackTaskLauncher: mocks.createLauncher,
   createFastAgentTaskLauncher:
     ({
       buildTask,
@@ -80,6 +79,7 @@ vi.mock('@roomote/slack', () => ({
     addReaction = mocks.addReaction;
   },
   resolveSlackReactionNames: mocks.resolveSlackReactionNames,
+  createFastAgentSlackLiveTaskLauncher: mocks.createLauncher,
 }));
 
 vi.mock('./artifacts/raw-url', () => ({
@@ -219,6 +219,7 @@ describe('deliverFastAgentParentEvent', () => {
       }),
     );
     expect(mocks.createLauncher).toHaveBeenCalledWith({
+      slack: expect.any(Object),
       userId: 'u1',
       teamId: 'T123',
       teamDomain: 'acme',

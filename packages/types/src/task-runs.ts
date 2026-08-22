@@ -1042,6 +1042,10 @@ const sharedTaskPayloadSchema = z.object({
   communicationContextInherited: z.boolean().optional(),
   /** Runless Fast parent that owns this task's user-visible lifecycle. */
   fastAgentParent: fastAgentParentSchema.optional(),
+  /** Native Slack task card in the parent thread of a Fast-mode delegation.
+   * Inherited onto every snapshot resume by the queue so the card follows
+   * the task. */
+  liveTaskStream: z.boolean().optional(),
   /** Runless Fast conversation that delegated this task on any chat provider. */
   fastAgentSessionId: z.string().uuid().optional(),
   /** Provider event that caused this fresh launch; used for idempotent retries. */

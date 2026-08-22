@@ -4,7 +4,6 @@ import { basename } from 'node:path';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
-  createFastAgentSlackTaskLauncher,
   createFastAgentTaskLauncher,
   fastAgentConversationRepository,
   type FastAgentTurnAdapter,
@@ -23,7 +22,11 @@ import {
   taskRuns,
 } from '@roomote/db/server';
 import { Env, getArtifactSigningKey } from '@roomote/env';
-import { resolveSlackReactionNames, SlackNotifier } from '@roomote/slack';
+import {
+  createFastAgentSlackLiveTaskLauncher,
+  resolveSlackReactionNames,
+  SlackNotifier,
+} from '@roomote/slack';
 import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
@@ -329,7 +332,8 @@ async function createSlackFastAgentParentTurn(params: {
     userId: session.userId,
     conversation,
     adapter: {
-      launchTask: createFastAgentSlackTaskLauncher({
+      launchTask: createFastAgentSlackLiveTaskLauncher({
+        slack,
         userId: session.userId,
         teamId: conversation.workspaceId,
         ...(installation.teamDomain

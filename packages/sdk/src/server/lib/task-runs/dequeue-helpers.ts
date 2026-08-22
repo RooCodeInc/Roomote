@@ -48,6 +48,7 @@ import {
 import { withBootstrapFailureSignal } from '../../../bootstrap-failure-signal';
 import { notifySourceRunOnSettle } from './notify-source-run-on-settle';
 import { notifyFastAgentParentOnSettle } from './notify-fast-agent-parent-on-settle';
+import { settleSlackLiveTaskCardOnExit } from './settle-slack-live-task-card-on-exit';
 
 /**
  * Resolved git author identity for commits made by the worker.
@@ -415,6 +416,7 @@ export async function notifyCanceledTaskRunOnSettle(
       RunStatus.Canceled,
       taskTitle,
     );
+    void settleSlackLiveTaskCardOnExit(taskRun, RunStatus.Canceled, taskTitle);
   } catch (error) {
     console.error(
       `[notifyCanceledTaskRunOnSettle] Failed for run ${taskRun.id}: ${
