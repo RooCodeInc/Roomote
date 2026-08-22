@@ -31,6 +31,7 @@ import {
   isLinkedReviewResultsMessage,
   isExitedRunStatus,
   isSnapshotResumable,
+  parseAcpRequestUserInputAnswerReply,
   parseLinkedReviewResults,
   populateSnapshotResumeCommunicationMetadata,
   populateSnapshotResumeSlackMetadata,
@@ -1199,6 +1200,31 @@ export async function steerMessageToTask({
         sandboxServerUrl: run.sandboxServerUrl,
         fetch: fetchSandboxRpcResponseOrThrowIfNotReady,
         call: async (client) => {
+          if (getFastAgentParentFromPayload(run.payload)) {
+            const runtimeState = await client.commands.getRuntimeState.query();
+            const [pendingRequest] = runtimeState.pendingUserInputRequests;
+
+            if (
+              pendingRequest &&
+              runtimeState.pendingUserInputRequests.length === 1
+            ) {
+              const answer = parseAcpRequestUserInputAnswerReply(
+                pendingRequest.questions,
+                message,
+              );
+
+              if (answer) {
+                return client.commands.answerUserInputRequest.mutate({
+                  requestId: pendingRequest.requestId,
+                  answers: answer.answers,
+                  ...(resolvedQuoteUserName
+                    ? { userName: resolvedQuoteUserName }
+                    : {}),
+                });
+              }
+            }
+          }
+
           const goal = await getTaskGoalForRun(run.id);
           return client.commands.steerTask.mutate({
             prompt: message,
