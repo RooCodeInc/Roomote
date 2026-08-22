@@ -10,11 +10,13 @@ const { mockPrepareActorScopedTurn } = vi.hoisted(() => ({
 const {
   mockFindFirstById,
   mockGetRoomoteConfig,
+  mockSuppressSlackReplyQuote,
   mockTrackSlackReplyQuote,
   mockClearSlackReplyQuote,
 } = vi.hoisted(() => ({
   mockFindFirstById: vi.fn(),
   mockGetRoomoteConfig: vi.fn(),
+  mockSuppressSlackReplyQuote: vi.fn(),
   mockTrackSlackReplyQuote: vi.fn(),
   mockClearSlackReplyQuote: vi.fn(),
 }));
@@ -54,6 +56,7 @@ vi.mock('../../../mcp/roomote-mcp-server/config', () => ({
 }));
 
 vi.mock('../../../mcp/roomote-mcp-server/slack-api-client', () => ({
+  suppressSlackReplyQuote: mockSuppressSlackReplyQuote,
   trackSlackReplyQuote: mockTrackSlackReplyQuote,
   clearSlackReplyQuote: mockClearSlackReplyQuote,
 }));
@@ -140,6 +143,10 @@ describe('answerUserInputRequest procedure', () => {
     mockTrackSlackReplyQuote.mockResolvedValue({
       success: true,
       quoteId: 'quote-1',
+    });
+    mockSuppressSlackReplyQuote.mockResolvedValue({
+      success: true,
+      quoteId: 'suppression-1',
     });
     mockClearSlackReplyQuote.mockResolvedValue({ success: true });
   });
@@ -230,6 +237,13 @@ describe('answerUserInputRequest procedure', () => {
 
     expect(result).toEqual({ success: true });
     expect(mockTrackSlackReplyQuote).not.toHaveBeenCalled();
+    expect(mockSuppressSlackReplyQuote).toHaveBeenCalledWith(
+      {
+        token: 'run-token',
+        platformApiUrl: 'https://platform.example.com',
+      },
+      { runId: 1 },
+    );
     expect(sendCommand).toHaveBeenCalledOnce();
   });
 

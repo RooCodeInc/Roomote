@@ -28,9 +28,11 @@ import {
   buildAutomationResultBlocks,
   buildSlackThreadFooterText,
   buildSlackThreadReplyFooterBlock,
+  clearNextSlackReplyQuoteSuppressionIfId,
   clearLatestUserMessage,
   clearSlackThreadReplyFooterMessageTs,
   getLatestUserMessage,
+  getNextSlackReplyQuoteSuppression,
   getActiveSlackRunReplyTarget,
   getSlackThreadReplyFooterMessageTs,
   removeSlackThreadReplyFooter,
@@ -41,6 +43,7 @@ import {
   setSlackThreadReplyFooterMessageTs,
   SlackNotifier,
   SlackPostDeliveryError,
+  suppressNextSlackReplyQuote,
   trackSlackBotReply,
   withSlackThreadReplyFooterLock,
   THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE as SLACK_THREAD_REPLY_FOOTER_LOCK_TIMEOUT_MESSAGE,
@@ -804,6 +807,40 @@ slackMcp.post('/track_reply_quote', async (c) => {
   return c.json({ success: true, quoteId: quote.id });
 });
 
+slackMcp.post('/suppress_reply_quote', async (c) => {
+  const { authContext } = c.get('mcpAuth');
+
+  if (!isRunTokenContext(authContext)) {
+    return c.json(
+      {
+        error:
+          'Slack reply quote suppression MCP is only available for task run tokens',
+      },
+      403,
+    );
+  }
+
+  let runId: number;
+  try {
+    runId = parseSlackReplyQuoteRunId(await c.req.json());
+  } catch (error) {
+    return c.json(
+      { error: error instanceof Error ? error.message : 'Invalid JSON body' },
+      400,
+    );
+  }
+
+  if (runId !== authContext.runId) {
+    return c.json(
+      { error: 'runId must match the authenticated task run' },
+      403,
+    );
+  }
+
+  const quoteId = await suppressNextSlackReplyQuote(runId);
+  return c.json({ success: true, quoteId });
+});
+
 slackMcp.post('/clear_reply_quote', async (c) => {
   const { authContext } = c.get('mcpAuth');
 
@@ -835,11 +872,17 @@ slackMcp.post('/clear_reply_quote', async (c) => {
   }
 
   if (parsedBody.quoteId) {
-    await clearLatestUserMessageForReplyQuoteIfId(
-      'slack',
-      parsedBody.runId,
-      parsedBody.quoteId,
-    );
+    await Promise.all([
+      clearLatestUserMessageForReplyQuoteIfId(
+        'slack',
+        parsedBody.runId,
+        parsedBody.quoteId,
+      ),
+      clearNextSlackReplyQuoteSuppressionIfId(
+        parsedBody.runId,
+        parsedBody.quoteId,
+      ),
+    ]);
   } else {
     // Bare runId requests come from previous-release workers whose clear
     // contract has always been run-scoped.
@@ -1232,24 +1275,26 @@ slackMcp.post('/thread_reply', async (c) => {
             slackReplyTarget.channel,
             existingThreadTs,
           );
-        const pendingQuote = await peekSlackThreadReplyQuote({
-          runId: taskRun.id,
-        });
+        const [pendingQuote, replyQuoteSuppressionId] = await Promise.all([
+          peekSlackThreadReplyQuote({ runId: taskRun.id }),
+          getNextSlackReplyQuoteSuppression(taskRun.id),
+        ]);
+        const renderedQuote = replyQuoteSuppressionId ? null : pendingQuote;
         const replyFallbackText =
           normalizedText ??
           (normalizedBlocks && normalizedBlocks.length > 0
             ? 'Slack reply'
             : getSlackFallbackText(undefined, imageBlocks.length));
         const fallbackText =
-          normalizedText && pendingQuote
-            ? `${pendingQuote.quote}\n${normalizedText}`
+          normalizedText && renderedQuote
+            ? `${renderedQuote.quote}\n${normalizedText}`
             : replyFallbackText;
         const blocks: unknown[] = [];
 
-        if (normalizedText && pendingQuote) {
+        if (normalizedText && renderedQuote) {
           blocks.push(
             buildSlackThreadReplyQuoteBlock({
-              quote: pendingQuote.quote,
+              quote: renderedQuote.quote,
             }),
           );
         }
@@ -1310,6 +1355,21 @@ slackMcp.post('/thread_reply', async (c) => {
           } catch (error) {
             console.error(
               `[slackMcp#thread_reply] Failed to clear latest user message for task run ${taskRun.id}: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          }
+        }
+
+        if (replyQuoteSuppressionId) {
+          try {
+            await clearNextSlackReplyQuoteSuppressionIfId(
+              taskRun.id,
+              replyQuoteSuppressionId,
+            );
+          } catch (error) {
+            console.error(
+              `[slackMcp#thread_reply] Failed to clear reply quote suppression for task run ${taskRun.id}: ${
                 error instanceof Error ? error.message : String(error)
               }`,
             );

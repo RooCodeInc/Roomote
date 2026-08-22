@@ -6,6 +6,7 @@ import { publicProcedure } from '../trpc';
 import { getFollowUpWorkflowPhase } from '../../run-task/workflow-phase';
 import {
   clearLatestUserMessageForSlackThreadQuote,
+  suppressNextSlackThreadReplyQuote,
   trackLatestUserMessageForSlackThreadQuote,
 } from './slackQuoteTracking';
 import { recordSandboxPromptSlackTurnStart } from './slackReplyTurnTracking';
@@ -82,15 +83,19 @@ export const steerTask = publicProcedure
       let trackedSlackQuote: { quoteId?: string } | null = null;
 
       try {
-        if (!input.suppressSlackReplyQuote) {
-          trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
-            runId: ctx.runId,
-            text: input.quoteText,
-            userName: input.userName,
-            logPrefix: 'steerTask',
-            warn: (message) => ctx.harnessLogger?.warn(message),
-          });
-        }
+        trackedSlackQuote = input.suppressSlackReplyQuote
+          ? await suppressNextSlackThreadReplyQuote({
+              runId: ctx.runId,
+              logPrefix: 'steerTask',
+              warn: (message) => ctx.harnessLogger?.warn(message),
+            })
+          : await trackLatestUserMessageForSlackThreadQuote({
+              runId: ctx.runId,
+              text: input.quoteText,
+              userName: input.userName,
+              logPrefix: 'steerTask',
+              warn: (message) => ctx.harnessLogger?.warn(message),
+            });
 
         const success = ctx.harnessManager.sendFollowUpPrompt({
           prompt: input.prompt,
@@ -142,15 +147,19 @@ export const steerTask = publicProcedure
       let trackedSlackQuote: { quoteId?: string } | null = null;
 
       try {
-        if (!input.suppressSlackReplyQuote) {
-          trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
-            runId: ctx.runId,
-            text: input.quoteText,
-            userName: input.userName,
-            logPrefix: 'steerTask',
-            warn: (message) => ctx.harnessLogger?.warn(message),
-          });
-        }
+        trackedSlackQuote = input.suppressSlackReplyQuote
+          ? await suppressNextSlackThreadReplyQuote({
+              runId: ctx.runId,
+              logPrefix: 'steerTask',
+              warn: (message) => ctx.harnessLogger?.warn(message),
+            })
+          : await trackLatestUserMessageForSlackThreadQuote({
+              runId: ctx.runId,
+              text: input.quoteText,
+              userName: input.userName,
+              logPrefix: 'steerTask',
+              warn: (message) => ctx.harnessLogger?.warn(message),
+            });
 
         const success = ctx.harnessManager.sendFollowUpPrompt({
           prompt: input.prompt,
@@ -215,15 +224,19 @@ export const steerTask = publicProcedure
     let trackedSlackQuote: { quoteId?: string } | null = null;
 
     try {
-      if (!input.suppressSlackReplyQuote) {
-        trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
-          runId: ctx.runId,
-          text: input.quoteText,
-          userName: input.userName,
-          logPrefix: 'steerTask',
-          warn: (message) => ctx.harnessLogger?.warn(message),
-        });
-      }
+      trackedSlackQuote = input.suppressSlackReplyQuote
+        ? await suppressNextSlackThreadReplyQuote({
+            runId: ctx.runId,
+            logPrefix: 'steerTask',
+            warn: (message) => ctx.harnessLogger?.warn(message),
+          })
+        : await trackLatestUserMessageForSlackThreadQuote({
+            runId: ctx.runId,
+            text: input.quoteText,
+            userName: input.userName,
+            logPrefix: 'steerTask',
+            warn: (message) => ctx.harnessLogger?.warn(message),
+          });
 
       const success = ctx.harnessManager.sendFollowUpPrompt({
         prompt: input.prompt,
