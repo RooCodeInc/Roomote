@@ -15,6 +15,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
     ...actual,
     Env: {
       R_GITHUB_APP_SLUG: 'roomote',
+      R_GITHUB_ADDITIONAL_APP_SLUGS: 'review-helper',
     },
   };
 });
@@ -723,6 +724,27 @@ describe('with a database-configured app slug', () => {
         summaryPayload({ login: 'othermote[bot]' }),
       ),
     ).toBeNull();
+  });
+
+  it('does not treat the process-env fallback bot as Roomote-authored', () => {
+    expect(
+      buildPrReviewSummaryNotification(
+        summaryPayload({ login: 'roomote[bot]' }),
+      ),
+    ).toBeNull();
+  });
+
+  it('marks additional trusted app activity as roomote-authored', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        reviewCommentPayload({ login: 'review-helper[bot]' }),
+      ),
+    ).toMatchObject({
+      event: {
+        authorLogin: 'review-helper[bot]',
+        roomoteAuthored: true,
+      },
+    });
   });
 
   it('marks new review threads from the configured bot as roomote-authored', () => {

@@ -74,6 +74,24 @@ describe('Env', () => {
     }
   });
 
+  it('accepts optional additional GitHub App slugs, including an empty value', () => {
+    expect(
+      createRoomoteEnv(productionCoreEnv).R_GITHUB_ADDITIONAL_APP_SLUGS,
+    ).toBeUndefined();
+    expect(
+      createRoomoteEnv({
+        ...productionCoreEnv,
+        R_GITHUB_ADDITIONAL_APP_SLUGS: ' roomote-dev, acme ',
+      }).R_GITHUB_ADDITIONAL_APP_SLUGS,
+    ).toBe(' roomote-dev, acme ');
+    expect(
+      createRoomoteEnv({
+        ...productionCoreEnv,
+        R_GITHUB_ADDITIONAL_APP_SLUGS: '',
+      }).R_GITHUB_ADDITIONAL_APP_SLUGS,
+    ).toBe('');
+  });
+
   it('preserves optional and defaulted values when creating env from a custom source', () => {
     const previousSkipEnvValidation = process.env.SKIP_ENV_VALIDATION;
     const runtimeEnv = { ...process.env };

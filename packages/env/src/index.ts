@@ -185,6 +185,7 @@ const serverSchema = {
   SANDBOX_OIDC_PUBLIC_KEY_SECONDARY: z.string().min(1).optional(),
   R_GITHUB_APP_ID: emptyStringDefault(),
   R_GITHUB_APP_SLUG: z.string().min(1).default('roomote'),
+  R_GITHUB_ADDITIONAL_APP_SLUGS: z.string().optional(),
   R_GITHUB_APP_PRIVATE_KEY: emptyStringDefault(),
   R_GITHUB_CLIENT_ID: emptyStringDefault(),
   R_GITHUB_CLIENT_SECRET: emptyStringDefault(),

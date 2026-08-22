@@ -506,7 +506,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
                   nodes: [
                     {
                       databaseId: 1,
-                      author: { login: 'roomote-dev[bot]' },
+                      author: { login: 'review-bot[bot]' },
                       body: 'Missing error handling here.',
                       createdAt: '2026-08-01T00:00:00Z',
                       url: null,
@@ -525,7 +525,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
                   nodes: [
                     {
                       databaseId: 2,
-                      author: { login: 'roomote-dev[bot]' },
+                      author: { login: 'review-bot[bot]' },
                       body: 'This comparison uses the wrong field.',
                       createdAt: '2026-08-01T00:00:00Z',
                       url: null,
