@@ -649,7 +649,7 @@ export function buildPullRequestFactPage(fact: {
   htmlUrl: string;
   authorLogin: string | null;
   body?: string | null;
-  labels?: string[];
+  labels?: string[] | null;
   state: string;
   createdAtRemote: Date;
   closedAtRemote: Date | null;

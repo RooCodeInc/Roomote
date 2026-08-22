@@ -125,8 +125,14 @@ export type PullRequestAnalyticsState = 'open' | 'draft' | 'closed' | 'merged';
 
 export type PullRequestAnalyticsItem = {
   authorLogin: string | null;
-  body: string | null;
-  labels: string[];
+  /**
+   * Carried for pull-request facts, not for analytics. Absent or null means
+   * "this reader did not look", so a write must leave a stored value alone;
+   * the fact-backed analytics query omits both rather than paying to select
+   * PR bodies nothing renders.
+   */
+  body?: string | null;
+  labels?: string[] | null;
   createdAt: string;
   externalPullRequestId: number;
   updatedAt: string;
