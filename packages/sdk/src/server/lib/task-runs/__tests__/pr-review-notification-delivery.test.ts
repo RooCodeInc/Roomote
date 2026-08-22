@@ -1152,6 +1152,68 @@ describe('gatherPrReviewTriageContext', () => {
       },
       mergeable: true,
     });
+    expect(mockReadSourceControlPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ useGitHubConditionalRequests: true }),
+    );
+  });
+
+  it('uses ETags for every GitHub live-head polling read', async () => {
+    const notModified = () =>
+      Object.assign(new Error('Not modified'), {
+        status: 304,
+        response: { headers: {} },
+      });
+    mockPullsGet
+      .mockResolvedValueOnce({
+        data: { head: { sha: 'etag-head' }, mergeable: true },
+        headers: { etag: '"pull-v1"' },
+        status: 200,
+      })
+      .mockRejectedValueOnce(notModified());
+    mockListCheckRunsForRef
+      .mockResolvedValueOnce({
+        data: { check_runs: [] },
+        headers: { etag: '"checks-v1"' },
+        status: 200,
+      })
+      .mockRejectedValueOnce(notModified());
+    mockGetCombinedStatusForRef
+      .mockResolvedValueOnce({
+        data: { statuses: [], total_count: 0 },
+        headers: { etag: '"status-v1"' },
+        status: 200,
+      })
+      .mockRejectedValueOnce(notModified());
+
+    await gatherPrReviewTriageContext({
+      taskRun,
+      repository: request.repository,
+      prNumber: request.prNumber,
+    });
+    await gatherPrReviewTriageContext({
+      taskRun,
+      repository: request.repository,
+      prNumber: request.prNumber,
+    });
+
+    expect(mockPullsGet).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        request: { headers: { 'if-none-match': '"pull-v1"' } },
+      }),
+    );
+    expect(mockListCheckRunsForRef).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        request: { headers: { 'if-none-match': '"checks-v1"' } },
+      }),
+    );
+    expect(mockGetCombinedStatusForRef).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        request: { headers: { 'if-none-match': '"status-v1"' } },
+      }),
+    );
   });
 
   it('includes mergeable false when the PR has conflicts', async () => {
