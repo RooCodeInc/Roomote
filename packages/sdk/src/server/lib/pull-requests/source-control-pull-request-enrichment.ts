@@ -58,11 +58,20 @@ export type PullRequestEnrichment = {
   /** True when the provider listing was cut off at the fetch cap. */
   filesTruncated: boolean;
   reviews: PullRequestReviewSummary[];
+  /** True when the review listing was cut off at the fetch cap. */
+  reviewsTruncated: boolean;
 };
 
 /** Files fetched per PR before giving up on completeness (3 provider pages). */
 const FILE_FETCH_CAP = 300;
 const FILE_PAGE_SIZE = 100;
+/**
+ * Reviews fetched per PR. Paginated for the same reason files are: a busy
+ * PR's later reviewers are exactly the ones a "who approved this" question
+ * is about, and a single unpaginated page would drop them silently.
+ */
+const REVIEW_FETCH_CAP = 300;
+const REVIEW_PAGE_SIZE = 100;
 const ADO_API_VERSION = '7.1';
 
 function sumOrNull(values: Array<number | null>): number | null {
@@ -128,20 +137,38 @@ async function readGitHubEnrichment(
     }
   }
 
-  const { data: reviews } = await octokit.rest.pulls.listReviews({
-    owner,
-    repo,
-    pull_number: prNumber,
-    per_page: 100,
-  });
+  const reviews: PullRequestReviewSummary[] = [];
+  let reviewsTruncated = false;
+  let reviewsRead = 0;
+
+  for (let page = 1; reviewsRead < REVIEW_FETCH_CAP; page++) {
+    const { data } = await octokit.rest.pulls.listReviews({
+      owner,
+      repo,
+      pull_number: prNumber,
+      per_page: REVIEW_PAGE_SIZE,
+      page,
+    });
+    reviewsRead += data.length;
+    reviews.push(
+      ...data.flatMap((review) => {
+        const state = mapGitHubReviewState(review.state);
+        return state ? [{ login: review.user?.login ?? null, state }] : [];
+      }),
+    );
+    if (data.length < REVIEW_PAGE_SIZE) {
+      break;
+    }
+    if (reviewsRead >= REVIEW_FETCH_CAP) {
+      reviewsTruncated = true;
+    }
+  }
 
   return {
     files: files.slice(0, FILE_FETCH_CAP),
     filesTruncated,
-    reviews: reviews.flatMap((review) => {
-      const state = mapGitHubReviewState(review.state);
-      return state ? [{ login: review.user?.login ?? null, state }] : [];
-    }),
+    reviews,
+    reviewsTruncated,
   };
 }
 
@@ -254,10 +281,12 @@ async function readGitLabEnrichment(
   return {
     files: files.slice(0, FILE_FETCH_CAP),
     filesTruncated,
+    // GitLab returns the whole approver set in one object.
     reviews: (approvals.approved_by ?? []).map((entry) => ({
       login: entry.user.username ?? null,
       state: 'approved' as const,
     })),
+    reviewsTruncated: false,
   };
 }
 
@@ -327,21 +356,41 @@ async function readGiteaEnrichment(
     }
   }
 
-  const reviews = await requestSourceControlJson({
-    fetchImpl,
-    url: buildApiUrl(apiBaseUrl, `${base}/reviews`, {}),
-    tokenHeader,
-    schema: giteaReviewSummaryListSchema,
-    acceptedStatuses: [200],
-  });
+  const reviews: PullRequestReviewSummary[] = [];
+  let reviewsTruncated = false;
+  let reviewsRead = 0;
+
+  for (let page = 1; reviewsRead < REVIEW_FETCH_CAP; page++) {
+    const rows = await requestSourceControlJson({
+      fetchImpl,
+      url: buildApiUrl(apiBaseUrl, `${base}/reviews`, {
+        limit: REVIEW_PAGE_SIZE,
+        page,
+      }),
+      tokenHeader,
+      schema: giteaReviewSummaryListSchema,
+      acceptedStatuses: [200],
+    });
+    reviewsRead += rows.length;
+    reviews.push(
+      ...rows.flatMap((review) => {
+        const state = mapGiteaReviewState(review.state ?? '');
+        return state ? [{ login: review.user?.login ?? null, state }] : [];
+      }),
+    );
+    if (rows.length < REVIEW_PAGE_SIZE) {
+      break;
+    }
+    if (reviewsRead >= REVIEW_FETCH_CAP) {
+      reviewsTruncated = true;
+    }
+  }
 
   return {
     files: files.slice(0, FILE_FETCH_CAP),
     filesTruncated,
-    reviews: reviews.flatMap((review) => {
-      const state = mapGiteaReviewState(review.state ?? '');
-      return state ? [{ login: review.user?.login ?? null, state }] : [];
-    }),
+    reviews,
+    reviewsTruncated,
   };
 }
 
@@ -487,6 +536,8 @@ async function readBitbucketEnrichment(
           ]
         : [];
     }),
+    // Bitbucket returns every participant with the PR itself.
+    reviewsTruncated: false,
   };
 }
 
@@ -615,6 +666,8 @@ async function readAdoEnrichment(
           ]
         : [];
     }),
+    // Azure DevOps returns every reviewer with the PR itself.
+    reviewsTruncated: false,
   };
 }
 

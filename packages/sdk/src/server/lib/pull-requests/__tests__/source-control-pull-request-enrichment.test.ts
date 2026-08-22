@@ -250,7 +250,7 @@ describe('readSourceControlPullRequestEnrichment', () => {
 
     expect(requestedUrls(fetchImpl)).toEqual([
       'https://git.example.com/api/v1/repos/acme/svc/pulls/3/files?limit=100&page=1',
-      'https://git.example.com/api/v1/repos/acme/svc/pulls/3/reviews',
+      'https://git.example.com/api/v1/repos/acme/svc/pulls/3/reviews?limit=100&page=1',
     ]);
     expect(result.files).toEqual([
       { path: 'main.go', status: 'modified', additions: 3, deletions: 2 },

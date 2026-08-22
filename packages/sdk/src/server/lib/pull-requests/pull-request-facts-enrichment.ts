@@ -91,9 +91,14 @@ async function selectEnrichmentCandidates(
             pullRequestFacts.updatedAtRemote,
           ),
         ),
+        // The hold applies to FAILED reads only. Gating on every attempt
+        // would park a row for six hours when its remote update time moved
+        // between candidate selection and the write, leaving
+        // enrichedForUpdatedAt stale and the change unseen until the hold
+        // expired.
         or(
-          isNull(pullRequestFacts.enrichmentAttemptedAt),
-          lt(pullRequestFacts.enrichmentAttemptedAt, retryBefore),
+          isNull(pullRequestFacts.enrichmentFailedAt),
+          lt(pullRequestFacts.enrichmentFailedAt, retryBefore),
         ),
       ),
     )
@@ -160,7 +165,7 @@ export async function enrichPullRequestFacts(
       failed += 1;
       await db
         .update(pullRequestFacts)
-        .set({ enrichmentAttemptedAt: now })
+        .set({ enrichmentFailedAt: now })
         .where(eq(pullRequestFacts.id, candidate.id));
       console.warn(
         `${LOG_PREFIX} ${candidate.repository.fullName}#${candidate.prNumber} failed: ${
@@ -186,15 +191,20 @@ export async function enrichPullRequestFacts(
         changedFiles: enrichment.files
           .slice(0, STORED_CHANGED_FILE_CAP)
           .map((file) => file.path),
-        changedFileCount: enrichment.filesTruncated
-          ? null
-          : enrichment.files.length,
+        // How many files were READ, which is the truth available: when the
+        // provider listing was capped this is a lower bound, and
+        // `filesCapped` says so. Storing null here would let the page fall
+        // back to the stored path count and publish "40 files changed" for
+        // a 301-file PR.
+        changedFileCount: enrichment.files.length,
+        filesCapped: enrichment.filesTruncated,
+        reviewsCapped: enrichment.reviewsTruncated,
         additions: totals.additions,
         deletions: totals.deletions,
         reviews: enrichment.reviews,
         enrichedAt: now,
         enrichedForUpdatedAt: candidate.updatedAtRemote,
-        enrichmentAttemptedAt: now,
+        enrichmentFailedAt: null,
         updatedAt: now,
       })
       .where(eq(pullRequestFacts.id, candidate.id));

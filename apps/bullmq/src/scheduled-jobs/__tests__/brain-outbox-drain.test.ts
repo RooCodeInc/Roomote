@@ -177,6 +177,35 @@ describe('pull request fact pages', () => {
     );
   });
 
+  it('discloses a capped file or review listing instead of implying a total', () => {
+    const page = buildPullRequestFactPage({
+      repositoryFullName: 'owner/repo',
+      prNumber: 42,
+      title: 'Ship it',
+      htmlUrl: 'https://example.test/owner/repo/pull/42',
+      authorLogin: 'octocat',
+      changedFiles: ['apps/web/src/page.tsx'],
+      changedFileCount: 300,
+      filesCapped: true,
+      reviewsCapped: true,
+      additions: 900,
+      deletions: 10,
+      reviews: [{ login: 'grace', state: 'approved' }],
+      state: 'merged',
+      createdAtRemote: new Date('2026-08-01T09:00:00Z'),
+      closedAtRemote: new Date('2026-08-14T10:00:00Z'),
+      mergedAtRemote: new Date('2026-08-14T10:00:00Z'),
+    });
+
+    expect(page.content).toContain('\nchanged_files: 300+\n');
+    expect(page.content).toContain(
+      'At least 300 files changed (+900 / -10 so far) across apps/web.',
+    );
+    expect(page.content).toContain('- … and 299 or more more');
+    expect(page.content).toContain('_The provider file listing was capped');
+    expect(page.content).toContain('_The provider review listing was capped');
+  });
+
   it('omits the changes and reviews sections when not enriched', () => {
     const page = buildPullRequestFactPage({
       repositoryFullName: 'owner/repo',

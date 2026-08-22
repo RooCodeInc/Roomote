@@ -80,7 +80,8 @@ async function rowsFor(repositoryId: string) {
       reviews: pullRequestFacts.reviews,
       enrichedAt: pullRequestFacts.enrichedAt,
       enrichedForUpdatedAt: pullRequestFacts.enrichedForUpdatedAt,
-      enrichmentAttemptedAt: pullRequestFacts.enrichmentAttemptedAt,
+      enrichmentFailedAt: pullRequestFacts.enrichmentFailedAt,
+      filesCapped: pullRequestFacts.filesCapped,
       updatedAt: pullRequestFacts.updatedAt,
     })
     .from(pullRequestFacts)
@@ -131,6 +132,7 @@ describe('enrichPullRequestFacts', () => {
           },
         ],
         filesTruncated: false,
+        reviewsTruncated: false,
         reviews: [{ login: 'grace', state: 'approved' as const }],
       }),
     );
@@ -167,6 +169,95 @@ describe('enrichPullRequestFacts', () => {
     expect(callsForRepository(read, repository.id)).toEqual([1]);
   });
 
+  it('re-enriches a row whose remote update moved, without a retry hold', async () => {
+    // A successful pass must not park the row: gating on every attempt left
+    // enrichedForUpdatedAt stale while the hold blocked the next pass.
+    const repository = await seedRepository();
+    const base = {
+      repositoryId: repository.id,
+      repositoryFullName: repository.fullName,
+      sourceControlProvider: 'gitlab' as const,
+      syncedAt: new Date('2026-07-10T01:00:00Z'),
+    };
+    await upsertPullRequestFacts({
+      ...base,
+      pullRequests: [snapshot(1, '2099-02-01T00:00:00Z')],
+    });
+    const read = vi.fn(
+      async (_input: { repository: { id: string }; prNumber: number }) => ({
+        files: [],
+        filesTruncated: false,
+        reviewsTruncated: false,
+        reviews: [],
+      }),
+    );
+
+    await enrichPullRequestFacts({
+      now: new Date('2026-07-11T00:00:00Z'),
+      budget: 10,
+      read,
+    });
+    expect(callsForRepository(read, repository.id)).toEqual([1]);
+
+    // The PR changed upstream a minute later.
+    await upsertPullRequestFacts({
+      ...base,
+      syncedAt: new Date('2026-07-11T00:01:00Z'),
+      pullRequests: [
+        {
+          ...snapshot(1, '2099-02-01T00:00:00Z'),
+          updatedAt: '2099-02-02T00:00:00Z',
+        },
+      ],
+    });
+
+    read.mockClear();
+    await enrichPullRequestFacts({
+      now: new Date('2026-07-11T00:02:00Z'),
+      budget: 10,
+      read,
+    });
+
+    // Well within the six-hour window, yet picked up again.
+    expect(callsForRepository(read, repository.id)).toEqual([1]);
+  });
+
+  it('records a capped file listing as a lower bound', async () => {
+    const repository = await seedRepository();
+    await upsertPullRequestFacts({
+      repositoryId: repository.id,
+      repositoryFullName: repository.fullName,
+      sourceControlProvider: 'gitlab',
+      syncedAt: new Date('2026-07-10T01:00:00Z'),
+      pullRequests: [snapshot(1, '2099-03-01T00:00:00Z')],
+    });
+    const read = vi.fn(
+      async (_input: { repository: { id: string }; prNumber: number }) => ({
+        files: Array.from({ length: 300 }, (_, index) => ({
+          path: `src/file-${index}.ts`,
+          status: 'modified',
+          additions: 1,
+          deletions: 0,
+        })),
+        filesTruncated: true,
+        reviewsTruncated: false,
+        reviews: [],
+      }),
+    );
+
+    await enrichPullRequestFacts({
+      now: new Date('2026-07-11T00:00:00Z'),
+      budget: 10,
+      read,
+    });
+
+    const [row] = await rowsFor(repository.id);
+    // The count is what was READ (a lower bound), never null: storing null
+    // let the page fall back to the 40 stored paths and claim "40 files".
+    expect(row).toMatchObject({ changedFileCount: 300, filesCapped: true });
+    expect(row?.changedFiles).toHaveLength(40);
+  });
+
   it('holds a failed row for a while and stops the pass on rate limiting', async () => {
     const repository = await seedRepository();
     await upsertPullRequestFacts({
@@ -197,7 +288,12 @@ describe('enrichPullRequestFacts', () => {
             'Source control API request failed: 429 Too Many Requests',
           );
         }
-        return { files: [], filesTruncated: false, reviews: [] };
+        return {
+          files: [],
+          filesTruncated: false,
+          reviewsTruncated: false,
+          reviews: [],
+        };
       },
     );
     const now = new Date('2026-07-11T00:00:00Z');
@@ -211,7 +307,7 @@ describe('enrichPullRequestFacts', () => {
     const rows = await rowsFor(repository.id);
     expect(rows[0]).toMatchObject({
       enrichedAt: null,
-      enrichmentAttemptedAt: now,
+      enrichmentFailedAt: now,
     });
 
     // Within the retry window the failed row is skipped; the other proceeds.

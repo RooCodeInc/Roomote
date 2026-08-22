@@ -1,5 +1,5 @@
 {
-  "id": "20cf589f-ab1e-4322-b38f-87f3045a86a3",
+  "id": "af328f05-b6e2-4d7a-aa59-5e947059051a",
   "prevId": "3c781ceb-7e70-4a71-92b6-1d6e9b1aed38",
   "version": "7",
   "dialect": "postgresql",
@@ -5446,6 +5446,18 @@
           "primaryKey": false,
           "notNull": false
         },
+        "files_capped": {
+          "name": "files_capped",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reviews_capped": {
+          "name": "reviews_capped",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": false
+        },
         "additions": {
           "name": "additions",
           "type": "integer",
@@ -5476,8 +5488,8 @@
           "primaryKey": false,
           "notNull": false
         },
-        "enrichment_attempted_at": {
-          "name": "enrichment_attempted_at",
+        "enrichment_failed_at": {
+          "name": "enrichment_failed_at",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false
