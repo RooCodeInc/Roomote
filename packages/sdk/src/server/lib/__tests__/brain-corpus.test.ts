@@ -1,15 +1,22 @@
 import {
   extractBrainCorpusPages,
   extractBrainPageContent,
-  readBrainCorpusSample,
-  resetBrainCorpusSampleCache,
+  readBrainCorpus,
+  resetBrainCorpusCache,
 } from '../brain-corpus';
 
+const { redisGet, redisSet, resolveBrainConnection } = vi.hoisted(() => ({
+  redisGet: vi.fn(),
+  redisSet: vi.fn(),
+  resolveBrainConnection: vi.fn(),
+}));
+
+vi.mock('@roomote/redis', () => ({
+  getRedis: () => ({ get: redisGet, set: redisSet }),
+}));
+
 vi.mock('../brain-clients', () => ({
-  resolveBrainConnection: vi.fn(async () => ({
-    baseUrl: 'http://brain.test',
-    token: 'read-token',
-  })),
+  resolveBrainConnection,
 }));
 
 describe('extractBrainCorpusPages', () => {
@@ -54,8 +61,6 @@ describe('extractBrainCorpusPages', () => {
   });
 
   it('keeps one entry per slug when the same page arrives twice', () => {
-    // gbrain answers with both structured content and a text rendering of the
-    // same result, so every payload is scanned and duplicates are expected.
     expect(
       extractBrainCorpusPages([
         [{ slug: 'tasks/run-1', title: 'Structured' }],
@@ -102,7 +107,7 @@ describe('extractBrainPageContent', () => {
   });
 });
 
-describe('readBrainCorpusSample', () => {
+describe('readBrainCorpus', () => {
   const originalFetch = global.fetch;
 
   function toolResponse(payload: unknown, isError = false) {
@@ -118,138 +123,153 @@ describe('readBrainCorpusSample', () => {
     );
   }
 
-  function windowOf(start: number, count: number) {
+  function windowOf(start: number, count: number, sameTimestamp = false) {
     return Array.from({ length: count }, (_, index) => ({
       slug: `tasks/run-${start + index}`,
       title: `Run ${start + index}`,
-      updated_at: '2026-08-19T10:00:00Z',
+      updated_at: sameTimestamp
+        ? '2026-08-19T10:00:00.000Z'
+        : new Date(Date.UTC(2026, 0, 1, 0, start + index)).toISOString(),
     }));
   }
 
-  function listedOffsets(mock: ReturnType<typeof vi.fn>) {
+  function listedArguments(mock: ReturnType<typeof vi.fn>) {
     return mock.mock.calls.map((call) => {
       const body = JSON.parse(call[1].body as string) as {
         params: { arguments: Record<string, unknown> };
       };
-      return body.params.arguments.offset;
+      return body.params.arguments;
     });
   }
 
   beforeEach(() => {
-    resetBrainCorpusSampleCache();
+    resetBrainCorpusCache();
+    resolveBrainConnection.mockReset();
+    resolveBrainConnection.mockResolvedValue({
+      baseUrl: 'http://brain.test',
+      token: 'read-token',
+    });
+    redisGet.mockReset();
+    redisGet.mockResolvedValue(null);
+    redisSet.mockReset();
+    redisSet.mockResolvedValue('OK');
   });
 
   afterEach(() => {
     global.fetch = originalFetch;
   });
 
-  it('pages past the listing window and reports a capped sample as truncated', async () => {
-    // gbrain caps list_pages at 100 per call; five full windows reach the
-    // 500-page sample bound with every window full, so more likely exist.
-    const fetchMock = vi.fn(async (_url: unknown, init: RequestInit) => {
-      const body = JSON.parse(init.body as string) as {
-        params: { arguments: { offset?: number } };
-      };
-      return toolResponse(windowOf(body.params.arguments.offset ?? 0, 100));
-    });
-    global.fetch = fetchMock as unknown as typeof fetch;
-
-    const snapshot = await readBrainCorpusSample();
-
-    expect(snapshot).not.toBeNull();
-    expect(snapshot!.pages).toHaveLength(500);
-    expect(snapshot!.truncated).toBe(true);
-    expect(listedOffsets(fetchMock)).toEqual([0, 100, 200, 300, 400]);
-  });
-
-  it('treats a short window as the end of the corpus', async () => {
-    const windows = [windowOf(0, 100), windowOf(100, 37)];
+  it('keyset-pages until a short window and returns the full corpus', async () => {
+    const windows = [windowOf(0, 100), windowOf(99, 38)];
     const fetchMock = vi.fn(async () => toolResponse(windows.shift() ?? []));
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const snapshot = await readBrainCorpusSample();
+    const snapshot = await readBrainCorpus();
+
+    expect(snapshot).not.toBeNull();
+    expect(snapshot!.pages).toHaveLength(137);
+    expect(listedArguments(fetchMock)).toEqual([
+      { limit: 100, sort: 'updated_asc' },
+      {
+        limit: 100,
+        sort: 'updated_asc',
+        updated_after: '2026-01-01T01:38:00.000Z',
+      },
+    ]);
+  });
+
+  it('uses an overlap-checked offset inside a timestamp tie cluster', async () => {
+    const windows = [windowOf(0, 100, true), windowOf(99, 38, true)];
+    const fetchMock = vi.fn(async () => toolResponse(windows.shift() ?? []));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const snapshot = await readBrainCorpus();
 
     expect(snapshot!.pages).toHaveLength(137);
-    expect(snapshot!.truncated).toBe(false);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
-  it('stops and reports truncation when the server ignores offset', async () => {
-    // The same full window answered twice means paging would loop on the
-    // newest slice forever; the sample must say it only saw that slice.
-    const fetchMock = vi.fn(async () => toolResponse(windowOf(0, 100)));
-    global.fetch = fetchMock as unknown as typeof fetch;
-
-    const snapshot = await readBrainCorpusSample();
-
-    expect(snapshot!.pages).toHaveLength(100);
-    expect(snapshot!.truncated).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
-  it('skips the argument-shape fallback when the probe consumed the deadline', async () => {
-    // The first call burns the whole listing budget before failing with a
-    // tool error. Retrying with a fresh floor would hold the settings page
-    // past its stated bound, so the listing gives up as unavailable.
-    vi.useFakeTimers();
-    try {
-      const fetchMock = vi.fn(async () => {
-        vi.advanceTimersByTime(9_000);
-        return toolResponse(null, true);
-      });
-      global.fetch = fetchMock as unknown as typeof fetch;
-
-      const snapshot = await readBrainCorpusSample();
-
-      expect(snapshot).toBeNull();
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('spends one deadline across all windows instead of one per window', async () => {
-    // Three seconds per window against an eight-second listing budget: the
-    // third window ends past the deadline, so a fourth is never attempted
-    // and the result is honestly a truncated sample. Without the shared
-    // deadline this listing would run five windows and hold the settings
-    // page for the sum of the per-window timeouts.
-    vi.useFakeTimers();
-    try {
-      const fetchMock = vi.fn(async (_url: unknown, init: RequestInit) => {
-        vi.advanceTimersByTime(3_000);
-        const body = JSON.parse(init.body as string) as {
-          params: { arguments: { offset?: number } };
-        };
-        return toolResponse(windowOf(body.params.arguments.offset ?? 0, 100));
-      });
-      global.fetch = fetchMock as unknown as typeof fetch;
-
-      const snapshot = await readBrainCorpusSample();
-
-      expect(snapshot!.pages).toHaveLength(300);
-      expect(snapshot!.truncated).toBe(true);
-      expect(fetchMock).toHaveBeenCalledTimes(3);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('falls back to a bare listing on an argument-shape error, as a sample', async () => {
-    let first = true;
-    const fetchMock = vi.fn(async () => {
-      if (first) {
-        first = false;
-        return toolResponse(null, true);
-      }
-      return toolResponse(windowOf(0, 42));
+    expect(listedArguments(fetchMock)[1]).toEqual({
+      limit: 100,
+      sort: 'updated_asc',
+      offset: 99,
     });
+  });
+
+  it('shares the cached full listing across settings reads', async () => {
+    const fetchMock = vi.fn(async () => toolResponse(windowOf(0, 42)));
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const snapshot = await readBrainCorpusSample();
+    const first = await readBrainCorpus();
+    const second = await readBrainCorpus();
 
-    expect(snapshot!.pages).toHaveLength(42);
-    expect(snapshot!.truncated).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(second).toBe(first);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(redisSet).toHaveBeenCalledTimes(1);
+  });
+
+  it('hydrates a completed census from shared storage without listing again', async () => {
+    redisGet.mockResolvedValue(
+      JSON.stringify({
+        generatedAt: new Date().toISOString(),
+        pages: [
+          {
+            slug: 'tasks/shared-run',
+            title: 'Shared run',
+            updatedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      }),
+    );
+    const fetchMock = vi.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const snapshot = await readBrainCorpus();
+
+    expect(snapshot?.pages).toEqual([
+      {
+        slug: 'tasks/shared-run',
+        title: 'Shared run',
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+      },
+    ]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('throttles refresh attempts when a stale cache loses its connection', async () => {
+    vi.useFakeTimers();
+    try {
+      redisGet.mockResolvedValue(
+        JSON.stringify({
+          generatedAt: new Date().toISOString(),
+          pages: [
+            {
+              slug: 'tasks/cached-run',
+              title: 'Cached run',
+              updatedAt: '2026-01-01T00:00:00.000Z',
+            },
+          ],
+        }),
+      );
+      await readBrainCorpus();
+
+      vi.advanceTimersByTime(10 * 60_000 + 1);
+      resolveBrainConnection.mockResolvedValue(null);
+
+      expect((await readBrainCorpus())?.pages).toHaveLength(1);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect((await readBrainCorpus())?.pages).toHaveLength(1);
+      expect(resolveBrainConnection).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not publish a partial corpus when a later window fails', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(toolResponse(windowOf(0, 100)))
+      .mockResolvedValueOnce(toolResponse(null, true));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    expect(await readBrainCorpus()).toBeNull();
   });
 });

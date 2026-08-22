@@ -2977,9 +2977,16 @@ export const appRouter = createRouter({
       getBrainSettingsCommand(auth),
     ),
 
-    listPages: protectedProcedure.query(({ ctx: { auth } }) =>
-      listBrainPagesCommand(auth),
-    ),
+    listPages: protectedProcedure
+      .input(
+        z.object({
+          search: z.string().max(200).optional(),
+          namespaceId: z.string().max(100).optional(),
+          offset: z.number().int().min(0).default(0),
+          limit: z.number().int().min(1).max(100).default(100),
+        }),
+      )
+      .query(({ ctx: { auth }, input }) => listBrainPagesCommand(auth, input)),
 
     getPage: protectedProcedure
       .input(z.object({ slug: z.string().min(1).max(512) }))
