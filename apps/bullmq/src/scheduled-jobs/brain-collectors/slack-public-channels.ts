@@ -1,4 +1,9 @@
-import { BRAIN_COLLECTOR_IDS, brainNamespacePrefix } from '@roomote/types';
+import {
+  BRAIN_COLLECTOR_IDS,
+  BRAIN_PAGE_TYPES,
+  brainNamespacePrefix,
+  renderBrainFrontmatter,
+} from '@roomote/types';
 import {
   db,
   eq,
@@ -207,9 +212,12 @@ export function groupSlackMessagesIntoDayPages(
           slug,
           title: `#${group.channelName} — ${group.day}`,
           content: [
-            '---',
-            `date: ${group.day}`,
-            '---',
+            ...renderBrainFrontmatter({
+              type: BRAIN_PAGE_TYPES.slackDay,
+              title: `#${group.channelName} — ${group.day}`,
+              created: group.day,
+              fields: [`date: ${group.day}`],
+            }),
             '',
             // put_page has no title parameter: gbrain derives a page's title
             // from the first markdown heading, and without one it falls back

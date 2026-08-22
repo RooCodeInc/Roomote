@@ -557,6 +557,7 @@ export function buildDailyDigestPage(input: {
     content: `---
 type: daily
 title: ${yamlString(title)}
+created: ${yamlString(date)}
 date: ${yamlString(date)}
 window_start: ${yamlString(input.since.toISOString())}
 window_end: ${yamlString(input.until.toISOString())}
@@ -614,6 +615,7 @@ export function buildWeeklySynthesisPage(input: {
     content: `---
 type: weekly
 title: ${yamlString(title)}
+created: ${yamlString(input.weekStart.toISOString().slice(0, 10))}
 week: ${yamlString(week)}
 window_start: ${yamlString(input.weekStart.toISOString())}
 window_end: ${yamlString(input.until.toISOString())}
