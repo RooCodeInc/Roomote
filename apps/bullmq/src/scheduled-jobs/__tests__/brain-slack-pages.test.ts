@@ -61,11 +61,13 @@ describe('groupSlackMessagesIntoDayPages', () => {
     // carries no title field, and gbrain derives a page's title from the
     // first heading — without it the slug's timestamp range becomes the
     // title on every surface.
+    // type/title/created are the fields gbrain's lint requires on every
+    // page; without `type` gbrain files the page as a generic concept.
     expect(pages[0]?.content).toMatch(
-      /^---\ndate: 2026-08-13\n---\n\n# #general — 2026-08-13\n/,
+      /^---\ntype: slack\ntitle: "#general — 2026-08-13"\ncreated: 2026-08-13\ndate: 2026-08-13\n---\n\n# #general — 2026-08-13\n/,
     );
     expect(pages[2]?.content).toMatch(
-      /^---\ndate: 2026-08-14\n---\n\n# #general — 2026-08-14\n/,
+      /^---\ntype: slack\ntitle: "#general — 2026-08-14"\ncreated: 2026-08-14\ndate: 2026-08-14\n---\n\n# #general — 2026-08-14\n/,
     );
     expect(pages[0]?.content).toContain(
       'Slack public channel #general (C1), messages on 2026-08-13',

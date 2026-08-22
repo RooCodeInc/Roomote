@@ -1,4 +1,9 @@
-import { BRAIN_COLLECTOR_IDS, brainNamespacePrefix } from '@roomote/types';
+import {
+  BRAIN_COLLECTOR_IDS,
+  BRAIN_PAGE_TYPES,
+  brainNamespacePrefix,
+  renderBrainFrontmatter,
+} from '@roomote/types';
 import {
   and,
   db,
@@ -184,12 +189,16 @@ export function buildSlackDirectoryPersonPage(
       slug,
       title: name,
       content: [
-        '---',
-        'type: person-alias',
-        `canonical: ${JSON.stringify(canonical.slug)}`,
-        `event_date: ${formatUtcDay(effectiveDate)}`,
-        'provenance: slack-directory',
-        '---',
+        ...renderBrainFrontmatter({
+          type: BRAIN_PAGE_TYPES.personAlias,
+          title: name,
+          created: effectiveDate,
+          fields: [
+            `canonical: ${JSON.stringify(canonical.slug)}`,
+            `event_date: ${formatUtcDay(effectiveDate)}`,
+            'provenance: slack-directory',
+          ],
+        }),
         '',
         `# ${name}`,
         '',
@@ -213,15 +222,19 @@ export function buildSlackDirectoryPersonPage(
     slug,
     title: name,
     content: [
-      '---',
-      'type: person',
-      `aliases: ${JSON.stringify(aliases)}`,
-      `status: ${profile.isDeleted ? 'deleted' : 'active'}`,
-      `event_date: ${formatUtcDay(effectiveDate)}`,
-      ...(safeTitle ? [`job_title: ${JSON.stringify(safeTitle)}`] : []),
-      'provenance: slack-directory',
-      `workspace: ${JSON.stringify(safeWorkspace)}`,
-      '---',
+      ...renderBrainFrontmatter({
+        type: BRAIN_PAGE_TYPES.person,
+        title: name,
+        created: effectiveDate,
+        fields: [
+          `aliases: ${JSON.stringify(aliases)}`,
+          `status: ${profile.isDeleted ? 'deleted' : 'active'}`,
+          `event_date: ${formatUtcDay(effectiveDate)}`,
+          safeTitle && `job_title: ${JSON.stringify(safeTitle)}`,
+          'provenance: slack-directory',
+          `workspace: ${JSON.stringify(safeWorkspace)}`,
+        ],
+      }),
       '',
       `# ${name}`,
       '',

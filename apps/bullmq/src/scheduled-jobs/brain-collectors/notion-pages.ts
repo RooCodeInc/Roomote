@@ -20,7 +20,9 @@ import {
 } from '@roomote/sdk/server/notion-api';
 import {
   BRAIN_COLLECTOR_IDS,
+  BRAIN_PAGE_TYPES,
   brainNamespacePrefix,
+  renderBrainFrontmatter,
   type McpConnectionNotionConfig,
 } from '@roomote/types';
 
@@ -384,17 +386,22 @@ export function buildNotionUserPage(
     slug: notionUserSlug(user.id),
     title: user.name,
     content: [
-      '---',
-      `type: ${canonical ? 'person-alias' : 'person'}`,
-      `notion_user_id: ${JSON.stringify(user.id)}`,
-      ...(canonical
-        ? [`canonical: ${JSON.stringify(canonical.slug)}`]
-        : [
-            `aliases: ${JSON.stringify(deleted ? [] : [user.id, providerId])}`,
-            `status: ${deleted ? 'deleted' : 'active'}`,
-          ]),
-      'provenance: roomote-notion-users',
-      '---',
+      ...renderBrainFrontmatter({
+        type: canonical
+          ? BRAIN_PAGE_TYPES.personAlias
+          : BRAIN_PAGE_TYPES.person,
+        title: user.name,
+        fields: [
+          `notion_user_id: ${JSON.stringify(user.id)}`,
+          ...(canonical
+            ? [`canonical: ${JSON.stringify(canonical.slug)}`]
+            : [
+                `aliases: ${JSON.stringify(deleted ? [] : [user.id, providerId])}`,
+                `status: ${deleted ? 'deleted' : 'active'}`,
+              ]),
+          'provenance: roomote-notion-users',
+        ],
+      }),
       '',
       `# ${user.name}`,
       '',
@@ -595,31 +602,30 @@ export function buildNotionPage(
     slug,
     title,
     content: [
-      '---',
-      'type: notion-page',
-      `notion_page_id: ${JSON.stringify(pageId)}`,
-      `status: ${status}`,
-      'provenance: roomote-notion',
-      ...(updatedAt ? [`date: ${formatUtcDay(updatedAt)}`] : []),
-      ...(createdAt ? [`created_at: ${createdAt.toISOString()}`] : []),
-      ...(updatedAt ? [`last_edited_at: ${updatedAt.toISOString()}`] : []),
-      ...(sourceUrl ? [`source_url: ${JSON.stringify(sourceUrl)}`] : []),
-      ...(references.createdBy
-        ? [`created_by: ${JSON.stringify(references.createdBy)}`]
-        : []),
-      ...(references.lastEditedBy
-        ? [`last_edited_by: ${JSON.stringify(references.lastEditedBy)}`]
-        : []),
-      ...(references.people.length > 0
-        ? [`people: ${JSON.stringify(references.people)}`]
-        : []),
-      ...(references.mentions.length > 0
-        ? [`mentions: ${JSON.stringify(references.mentions)}`]
-        : []),
-      ...(references.relations.length > 0
-        ? [`relations: ${JSON.stringify(references.relations)}`]
-        : []),
-      '---',
+      ...renderBrainFrontmatter({
+        type: BRAIN_PAGE_TYPES.notionPage,
+        title,
+        created: createdAt ?? updatedAt ?? null,
+        fields: [
+          `notion_page_id: ${JSON.stringify(pageId)}`,
+          `status: ${status}`,
+          'provenance: roomote-notion',
+          updatedAt && `date: ${formatUtcDay(updatedAt)}`,
+          createdAt && `created_at: ${createdAt.toISOString()}`,
+          updatedAt && `last_edited_at: ${updatedAt.toISOString()}`,
+          sourceUrl && `source_url: ${JSON.stringify(sourceUrl)}`,
+          references.createdBy &&
+            `created_by: ${JSON.stringify(references.createdBy)}`,
+          references.lastEditedBy &&
+            `last_edited_by: ${JSON.stringify(references.lastEditedBy)}`,
+          references.people.length > 0 &&
+            `people: ${JSON.stringify(references.people)}`,
+          references.mentions.length > 0 &&
+            `mentions: ${JSON.stringify(references.mentions)}`,
+          references.relations.length > 0 &&
+            `relations: ${JSON.stringify(references.relations)}`,
+        ],
+      }),
       '',
       `# ${title}`,
       ...(sourceUrl ? ['', `[Open in Notion](${sourceUrl})`] : []),
