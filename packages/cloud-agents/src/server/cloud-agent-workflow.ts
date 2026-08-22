@@ -1,4 +1,5 @@
 import {
+  ALL_REPOSITORIES,
   type TaskSpec,
   type TaskSurface,
   TaskPayloadKind,
@@ -12,10 +13,11 @@ import {
   getSlackChannelFromTaskPayload,
   getSlackTeamDomainFromTaskPayload,
   getSlackThreadTsFromTaskPayload,
-  resolveSourceControlProviderFromPayload,
+  resolveSourceControlHostFromPayload,
 } from '@roomote/types';
 import {
   type TaskRun,
+  type RepositorySourceControl,
   db,
   eq,
   tasks,
@@ -23,6 +25,7 @@ import {
   DEFAULT_CONFLICT_RESOLVER_LABEL,
   getDeploymentPrAction,
   getReviewCodeAutomationSettings,
+  resolveRepositorySourceControl,
   resolveTelegramRuntimeCredentials,
 } from '@roomote/db/server';
 import { Env } from '@roomote/env';
@@ -105,6 +108,51 @@ export function resolveStandardTaskSurface({
   }
 }
 
+export function resolveAggregateSourceControl({
+  sourceControlProvider,
+  sourceControlHost,
+  repositoryProviders,
+  selectedRepositories,
+}: Pick<
+  TaskSpec['payload'],
+  | 'sourceControlProvider'
+  | 'sourceControlHost'
+  | 'repositoryProviders'
+  | 'selectedRepositories'
+>): RepositorySourceControl | undefined {
+  if (!sourceControlProvider) {
+    return undefined;
+  }
+
+  const providers = repositoryProviders
+    ? new Set(Object.values(repositoryProviders))
+    : null;
+  const selectedRepositoryNames = selectedRepositories
+    ? [...new Set(selectedRepositories)]
+    : [];
+  const hasCompleteSelection =
+    selectedRepositoryNames.length === 0 ||
+    (Object.keys(repositoryProviders ?? {}).length ===
+      selectedRepositoryNames.length &&
+      selectedRepositoryNames.every((repository) =>
+        Object.hasOwn(repositoryProviders ?? {}, repository),
+      ));
+
+  if (
+    !hasCompleteSelection ||
+    (providers &&
+      (providers.size !== 1 || !providers.has(sourceControlProvider)))
+  ) {
+    return undefined;
+  }
+
+  const host = resolveSourceControlHostFromPayload({ sourceControlHost });
+  return {
+    provider: sourceControlProvider,
+    ...(host ? { host } : {}),
+  };
+}
+
 export async function generatePrompt({
   taskRun,
   taskSpec,
@@ -149,9 +197,18 @@ export async function generatePrompt({
       surface: true,
     },
   });
-  const commitAuthor = taskRow
-    ? await resolveRunCommitAuthor(db, taskRun)
-    : DEFAULT_ROOMOTE_COMMIT_AUTHOR;
+  const targetSourceControl =
+    taskSpec.payload.repo === ALL_REPOSITORIES
+      ? resolveAggregateSourceControl(taskSpec.payload)
+      : await resolveRepositorySourceControl(
+          db,
+          taskSpec.payload.repo,
+          resolveSourceControlHostFromPayload(taskSpec.payload),
+        );
+  const commitAuthor =
+    taskRow && targetSourceControl
+      ? await resolveRunCommitAuthor(db, taskRun, targetSourceControl)
+      : DEFAULT_ROOMOTE_COMMIT_AUTHOR;
   const {
     conflictResolverFrequency,
     conflictResolverLabel,
@@ -392,9 +449,7 @@ export async function generatePrompt({
         codeReviewsEnabled,
         codeReviewReviewOnCommit,
         codeReviewReviewDraftPrs,
-        sourceControlProvider: resolveSourceControlProviderFromPayload(
-          taskSpec.payload,
-        ),
+        sourceControlProvider: targetSourceControl?.provider,
         prAction,
       });
 

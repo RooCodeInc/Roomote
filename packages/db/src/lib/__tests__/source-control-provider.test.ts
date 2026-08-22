@@ -1,6 +1,7 @@
 // pnpm --filter @roomote/db exec vitest run src/lib/__tests__/source-control-provider.test.ts
 import type { DatabaseOrTransaction } from '../../db';
 import {
+  resolveRepositorySourceControl,
   resolveWorkspaceRepositoryProviders,
   resolveWorkspaceSourceControlHost,
   resolveWorkspaceSourceControlProvider,
@@ -52,6 +53,82 @@ const dbOrTx = {
     },
   },
 } as unknown as DatabaseOrTransaction;
+
+describe('resolveRepositorySourceControl', () => {
+  beforeEach(() => {
+    mockRows = [];
+    mockWhere.mockReset();
+  });
+
+  it('resolves the target repository instead of another workspace provider', async () => {
+    mockRows = [
+      {
+        fullName: 'gitlab-org/api',
+        host: 'gitlab.example.com',
+        isActive: true,
+        sourceControlProvider: 'gitlab',
+      },
+      {
+        fullName: 'gitea-org/app',
+        host: 'gitea.example.com',
+        isActive: true,
+        sourceControlProvider: 'gitea',
+      },
+    ];
+
+    await expect(
+      resolveRepositorySourceControl(dbOrTx, 'gitea-org/app'),
+    ).resolves.toEqual({
+      provider: 'gitea',
+      host: 'gitea.example.com',
+    });
+  });
+
+  it('fails closed when the target repository is ambiguous across hosts', async () => {
+    mockRows = [
+      {
+        fullName: 'shared/app',
+        host: 'gitea.example.com',
+        isActive: true,
+        sourceControlProvider: 'gitea',
+      },
+      {
+        fullName: 'shared/app',
+        host: 'github.com',
+        isActive: true,
+        sourceControlProvider: 'github',
+      },
+    ];
+
+    await expect(
+      resolveRepositorySourceControl(dbOrTx, 'shared/app'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('uses the target host to resolve same-name repositories exactly', async () => {
+    mockRows = [
+      {
+        fullName: 'shared/app',
+        host: 'gitea.example.com',
+        isActive: true,
+        sourceControlProvider: 'gitea',
+      },
+      {
+        fullName: 'shared/app',
+        host: 'github.com',
+        isActive: true,
+        sourceControlProvider: 'github',
+      },
+    ];
+
+    await expect(
+      resolveRepositorySourceControl(dbOrTx, 'shared/app', 'gitea.example.com'),
+    ).resolves.toEqual({
+      provider: 'gitea',
+      host: 'gitea.example.com',
+    });
+  });
+});
 
 describe('resolveWorkspaceSourceControlProvider', () => {
   beforeEach(() => {
@@ -153,6 +230,32 @@ describe('resolveWorkspaceSourceControlProvider', () => {
       },
       {
         fullName: 'octo/web',
+        host: 'github.com',
+        sourceControlProvider: 'github',
+      },
+    ];
+
+    await expect(
+      resolveWorkspaceSourceControlProvider(dbOrTx, {
+        type: 'all_repositories',
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it('returns undefined when all-repository resolution is incomplete', async () => {
+    mockRows = [
+      {
+        fullName: 'shared/api',
+        host: 'gitea.example.com',
+        sourceControlProvider: 'gitea',
+      },
+      {
+        fullName: 'shared/web',
+        host: 'gitea.example.com',
+        sourceControlProvider: 'gitea',
+      },
+      {
+        fullName: 'shared/web',
         host: 'github.com',
         sourceControlProvider: 'github',
       },
