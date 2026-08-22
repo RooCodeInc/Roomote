@@ -1106,7 +1106,7 @@ function isOpenCodeMessageAbortedError(error: unknown): boolean {
 const MAX_RESOLVED_USER_INPUT_REQUEST_IDS = 256;
 const MAX_PROVIDER_ERROR_SUMMARY_CHARS = 500;
 const UNSAFE_PROVIDER_ERROR_SUMMARY_PATTERN =
-  /\r|\n|https?:\/\/|\b(?:headers?|response[_ -]?body|stack|traceback)\b|\b(?:[a-z][a-z0-9-]*-[a-z0-9-]+|authorization|cookie|host|user-agent)\s*:\s*\S+/i;
+  /\r|\n|\b(?:headers?|response[_ -]?body|stack|traceback)\b|\b(?:[a-z][a-z0-9-]*-[a-z0-9-]+|authorization|cookie|host|user-agent)\s*:\s*\S+/i;
 
 function isJsonProviderErrorMessage(message: string): boolean {
   if (!message.startsWith('{') && !message.startsWith('[')) {
