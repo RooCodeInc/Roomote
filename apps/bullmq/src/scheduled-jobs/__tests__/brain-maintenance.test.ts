@@ -310,6 +310,44 @@ describe('brainMaintenanceJob', () => {
     await expect(brainMaintenanceJob()).rejects.toThrow(
       'gbrain submit_job failed: 500',
     );
+    // The day was claimed before the submission and released after it
+    // failed, so the scheduler's retry can submit again.
+    const autopilotWrites = mockUpsertBrainSyncState.mock.calls
+      .filter((call) => call[1] === 'roomote-autopilot-cycle')
+      .map((call) => call[2]);
+    expect(autopilotWrites).toEqual([
+      { watermark: new Date('2026-08-17T07:00:00.000Z') },
+      { watermark: null },
+    ]);
+  });
+
+  it('claims the day before submitting the maintenance cycle', async () => {
+    // A crash between the submission and a marker written afterwards would
+    // let the retry queue a second corpus-wide cycle; the claim has to land
+    // first.
+    mockResolveProvider.mockResolvedValue(TEST_PROVIDER);
+    mockResolveConnection.mockResolvedValue({
+      baseUrl: 'http://gbrain.test',
+      token: 'maintenance-token',
+    });
+    const order: string[] = [];
+    mockUpsertBrainSyncState.mockImplementation(
+      async (_db: unknown, collectorId: string) => {
+        if (collectorId === 'roomote-autopilot-cycle') order.push('claim');
+      },
+    );
+    // Queued responses cover the searches and the synthesis; the submission
+    // falls through to the implementation so its ordering can be observed.
+    const fetchSpy = mockDigestFetch([searchResponse()], [synthesisResponse()]);
+    fetchSpy.mockImplementation(async (...args) => {
+      const body = String((args[1] as RequestInit | undefined)?.body ?? '');
+      if (body.includes('submit_job')) order.push('submit');
+      return submitResponse();
+    });
+
+    await brainMaintenanceJob();
+
+    expect(order).toEqual(['claim', 'submit']);
   });
 
   it('still submits maintenance when daily synthesis fails', async () => {

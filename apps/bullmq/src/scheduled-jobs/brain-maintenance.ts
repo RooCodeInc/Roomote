@@ -904,22 +904,42 @@ export async function brainMaintenanceJob(): Promise<void> {
       '[brainMaintenance] maintenance cycle already submitted today; not queuing another',
     );
   } else {
-    const body = await callGbrainTool(connection, 'submit_job', {
-      name: 'autopilot-cycle',
-      data: { pull: false, phases: [...BRAIN_MAINTENANCE_PHASES] },
-      max_attempts: 2,
-      timeout_ms: BRAIN_MAINTENANCE_TIMEOUT_MS,
+    // Claim the day BEFORE the external side effect. gbrain's queue can
+    // de-duplicate by idempotency key, but its MCP submit_job does not
+    // expose one, so the claim is the only at-most-once guard: a crash
+    // between the submission and a marker written afterwards would let the
+    // retry queue a second corpus-wide cycle. Claiming first means a crash
+    // in that window costs at most one day's cycle instead, and a
+    // submission that fails outright releases the claim so the retry can
+    // submit again.
+    await upsertBrainSyncState(db, BRAIN_AUTOPILOT_STATE_ID, {
+      watermark: maintenanceNow,
     });
 
+    let body: string;
+
+    try {
+      body = await callGbrainTool(connection, 'submit_job', {
+        name: 'autopilot-cycle',
+        data: { pull: false, phases: [...BRAIN_MAINTENANCE_PHASES] },
+        max_attempts: 2,
+        timeout_ms: BRAIN_MAINTENANCE_TIMEOUT_MS,
+      });
+    } catch (error) {
+      await upsertBrainSyncState(db, BRAIN_AUTOPILOT_STATE_ID, {
+        watermark: autopilotState?.watermark ?? null,
+      });
+      throw error;
+    }
+
     if (/"isError"\s*:\s*true/.test(body)) {
+      await upsertBrainSyncState(db, BRAIN_AUTOPILOT_STATE_ID, {
+        watermark: autopilotState?.watermark ?? null,
+      });
       throw new Error(
         `gbrain maintenance submission failed: ${body.slice(0, 300)}`,
       );
     }
-
-    await upsertBrainSyncState(db, BRAIN_AUTOPILOT_STATE_ID, {
-      watermark: maintenanceNow,
-    });
   }
 
   if (synthesisError) {
