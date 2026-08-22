@@ -1,5 +1,7 @@
 import * as fs from 'fs';
 
+import { CODE_SERVER_NAMED_PORT } from '@roomote/types';
+
 import {
   injectEnvVars,
   writeBashrc,
@@ -210,6 +212,138 @@ describe('injectEnvVars', () => {
     });
 
     expect(envVars.ROOMOTE_EDITOR_PREVIEW_URL).toBeUndefined();
+  });
+
+  describe('Vite allowed-hosts derivation', () => {
+    it('pins the additional allowed hosts to the exact preview hostnames', async () => {
+      const envVars: Record<string, string> = {};
+      const taskRun = {
+        taskId: 'task-123',
+        machineDomains: {
+          WEB: 'https://sandbox-web.modal.host',
+          MY_APP: 'https://sandbox-my-app.modal.host',
+        },
+        proxyPorts: { WEB: 4321, MY_APP: 3000 },
+      } as unknown as TaskRun;
+
+      await injectEnvVars(envVars, taskRun, {
+        previewProxyBaseUrl: 'https://preview.octomote.run',
+      });
+
+      expect(
+        envVars.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS?.split(','),
+      ).toEqual([
+        'task-123-web.preview.octomote.run',
+        'task-123-my-app.preview.octomote.run',
+        'sandbox-web.modal.host',
+        'sandbox-my-app.modal.host',
+      ]);
+    });
+
+    it('includes the subdomain suffix used by nested previews', async () => {
+      const envVars: Record<string, string> = {};
+      const taskRun = {
+        taskId: 'task-123',
+        machineDomains: { WEB: 'https://sandbox-web.modal.host' },
+        proxyPorts: { WEB: 4321 },
+      } as unknown as TaskRun;
+
+      await injectEnvVars(envVars, taskRun, {
+        previewProxyBaseUrl: 'https://preview.octomote.run',
+        previewProxySubdomainSuffix: 'outer-task',
+      });
+
+      expect(
+        envVars.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS?.split(','),
+      ).toContain('task-123-web-outer-task.preview.octomote.run');
+    });
+
+    it('allowlists the sandbox host that proxied HTTP requests arrive with', async () => {
+      const envVars: Record<string, string> = {};
+      const taskRun = {
+        taskId: 'task-123',
+        machineDomains: { WEB: 'https://sandbox-web.modal.host' },
+        proxyPorts: { WEB: 4321 },
+      } as unknown as TaskRun;
+
+      await injectEnvVars(envVars, taskRun, {
+        previewProxyBaseUrl: 'https://preview.octomote.run',
+      });
+
+      expect(
+        envVars.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS?.split(','),
+      ).toContain('sandbox-web.modal.host');
+    });
+
+    it('deduplicates hosts shared across named ports', async () => {
+      const envVars: Record<string, string> = {};
+      const taskRun = {
+        taskId: 'task-123',
+        machineDomains: {
+          WEB: 'http://sandbox-abc:4321',
+          API: 'http://sandbox-abc:3001',
+        },
+        proxyPorts: { WEB: 4321, API: 3001 },
+      } as unknown as TaskRun;
+
+      await injectEnvVars(envVars, taskRun, {
+        previewProxyBaseUrl: 'https://preview.octomote.run',
+      });
+
+      const hosts =
+        envVars.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS?.split(',') ?? [];
+
+      expect(hosts.filter((host) => host === 'sandbox-abc')).toHaveLength(1);
+    });
+
+    it('omits the code-server host, which is not a user dev server', async () => {
+      const envVars: Record<string, string> = {};
+      const taskRun = {
+        taskId: 'task-123',
+        machineDomains: {
+          [CODE_SERVER_NAMED_PORT.name]: 'https://sandbox-editor.modal.host',
+        },
+        proxyPorts: {},
+      } as unknown as TaskRun;
+
+      await injectEnvVars(envVars, taskRun, {
+        previewProxyBaseUrl: 'https://preview.octomote.run',
+      });
+
+      expect(envVars.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS).toBeUndefined();
+    });
+
+    it('keeps a deployment-provided allowed-hosts value', async () => {
+      const envVars: Record<string, string> = {
+        __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: 'custom.example.com',
+      };
+      const taskRun = {
+        taskId: 'task-123',
+        machineDomains: { WEB: 'https://sandbox-web.modal.host' },
+        proxyPorts: { WEB: 4321 },
+      } as unknown as TaskRun;
+
+      await injectEnvVars(envVars, taskRun, {
+        previewProxyBaseUrl: 'https://preview.octomote.run',
+      });
+
+      expect(envVars.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS).toBe(
+        'custom.example.com',
+      );
+    });
+
+    it('leaves the variable unset without a preview-proxy base URL', async () => {
+      const envVars: Record<string, string> = {};
+      const taskRun = {
+        taskId: 'task-123',
+        machineDomains: { WEB: 'https://sandbox-web.modal.host' },
+        proxyPorts: { WEB: 4321 },
+      } as unknown as TaskRun;
+
+      await injectEnvVars(envVars, taskRun);
+
+      expect(envVars.__VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS).toBeUndefined();
+    });
   });
 
   describe('PREVIEW_DOMAINS derivation', () => {
