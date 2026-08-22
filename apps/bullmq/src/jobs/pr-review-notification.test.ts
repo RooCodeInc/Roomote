@@ -360,7 +360,7 @@ describe('prReviewNotificationJob', () => {
     });
   });
 
-  it('keeps Discord review actions after Fast parent delivery', async () => {
+  it('short-circuits generic Discord delivery after Fast parent delivery', async () => {
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
       taskId: 'task-1',
@@ -388,37 +388,14 @@ describe('prReviewNotificationJob', () => {
 
     await prReviewNotificationJob(makeJob() as never);
 
-    expect(mockSetPendingPrReviewAction).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: 'discord',
-        channelId: 'channel-1',
-        threadId: 'thread-1',
-        followUpPrompt: 'Address the review feedback on owner/repo#42.',
-        nonce: expect.any(String),
-      }),
-    );
-    const storedNonce = mockSetPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
-    expect(mockDiscordPostMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        text: 'Alice requested changes on owner/repo#42.\nWant me to take a look?',
-        buttons: [
-          [
-            expect.objectContaining({
-              text: 'Resolve these issues',
-              callbackData: `prr:y:${storedNonce}`,
-            }),
-            expect.objectContaining({
-              text: 'Auto-resolve on this PR',
-              callbackData: `prr:a:${storedNonce}`,
-            }),
-            expect.objectContaining({
-              text: 'Dismiss',
-              callbackData: `prr:d:${storedNonce}`,
-            }),
-          ],
-        ],
-      }),
-    );
+    expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
+    expect(mockDiscordPostMessage).not.toHaveBeenCalled();
+    expect(mockRecordDelivery).toHaveBeenCalledWith({
+      runId: 1,
+      taskId: 'task-1',
+      route: null,
+      text: 'Alice requested changes on owner/repo#42.\nWant me to take a look?',
+    });
     expect(mockFinalize).toHaveBeenCalled();
   });
 

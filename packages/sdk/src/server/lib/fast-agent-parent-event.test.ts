@@ -493,7 +493,6 @@ describe('deliverFastAgentParentEvent', () => {
           message: 'The pull request is open.',
         }),
     );
-
     await deliverFastAgentParentEvent({
       parent,
       event: { ...pullRequestEvent, runId: 43 },
@@ -587,6 +586,100 @@ describe('deliverFastAgentParentEvent', () => {
       '101.001',
     );
     expect(mocks.addReaction).not.toHaveBeenCalled();
+  });
+
+  it('delivers Discord pull request feedback with persisted inline actions', async () => {
+    const feedbackEvent = {
+      type: 'pull_request_feedback' as const,
+      feedbackId: 'feedback-123',
+      taskId: 'task-1',
+      runId: 42,
+      taskUrl: 'https://roomote.example/task/task-1',
+      pullRequest: {
+        provider: 'github' as const,
+        host: 'github.com',
+        repository: 'acme/web',
+        number: 42,
+        title: 'Fix review feedback',
+        url: 'https://github.com/acme/web/pull/42',
+        status: 'open' as const,
+      },
+      summary: 'Alice requested changes.',
+      suggestedActionQuestion: 'Want me to resolve these issues?',
+      suggestedActionPrompt: 'Address the requested changes.',
+    };
+    const discordParent = {
+      ...parent,
+      conversation: {
+        surface: 'discord' as const,
+        workspaceId: 'guild-1',
+        conversationId: 'thread-1',
+        replyTarget: { channelId: 'channel-1', threadId: 'thread-1' },
+      },
+    };
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'There is new PR feedback.',
+        }),
+    );
+    mocks.discordPostMessage.mockResolvedValueOnce({
+      provider: 'discord',
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      messageId: 'message-1',
+      lastTextMessageId: 'message-with-actions',
+    });
+
+    await deliverFastAgentParentEvent({
+      parent: discordParent,
+      event: feedbackEvent,
+    });
+
+    expect(mocks.setPendingPrReviewAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'discord',
+        taskId: 'task-1',
+        repository: 'acme/web',
+        prNumber: 42,
+        prUrl: 'https://github.com/acme/web/pull/42',
+        channelId: 'channel-1',
+        threadId: 'thread-1',
+        followUpPrompt: 'Address the requested changes.',
+        nonce: expect.any(String),
+      }),
+    );
+    const nonce = mocks.setPendingPrReviewAction.mock.calls[0]?.[0]?.nonce;
+    expect(mocks.discordPostMessage).toHaveBeenCalledWith({
+      channelId: 'channel-1',
+      threadId: 'thread-1',
+      idempotencyKey: 'fast-parent-pr-feedback:feedback-123',
+      text: 'There is new PR feedback.\nWant me to resolve these issues?',
+      textFormat: 'markdown',
+      images: [],
+      buttons: [
+        [
+          {
+            text: 'Resolve these issues',
+            callbackData: `prr:y:${nonce}`,
+          },
+          {
+            text: 'Auto-resolve on this PR',
+            callbackData: `prr:a:${nonce}`,
+          },
+          { text: 'Dismiss', callbackData: `prr:d:${nonce}` },
+        ],
+      ],
+    });
+    expect(mocks.attachPendingPrReviewActionMessage).toHaveBeenCalledWith(
+      nonce,
+      'message-with-actions',
+    );
   });
 
   it('delivers a pull request status event with a stable idempotency key', async () => {

@@ -31,6 +31,7 @@ import {
 import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
+  buildPrReviewActionCallbackData,
   TaskPayloadKind,
   exitedRunStatuses,
   type FastAgentConversation,
@@ -523,13 +524,78 @@ async function createDiscordFastAgentParentTurn(params: {
           artifactIds: imageArtifactIds,
           event: params.event,
         });
-        await provider.postMessage({
+        const action =
+          params.event.type === 'pull_request_feedback' &&
+          params.event.suggestedActionQuestion &&
+          params.event.suggestedActionPrompt &&
+          params.event.pullRequest.repository &&
+          params.event.pullRequest.number
+            ? {
+                nonce: randomUUID(),
+                question: params.event.suggestedActionQuestion,
+                followUpPrompt: params.event.suggestedActionPrompt,
+                repository: params.event.pullRequest.repository,
+                prNumber: params.event.pullRequest.number,
+                prUrl: params.event.pullRequest.url,
+              }
+            : null;
+
+        if (action) {
+          await setPendingPrReviewAction({
+            nonce: action.nonce,
+            provider: 'discord',
+            taskId: params.event.taskId,
+            repository: action.repository,
+            prNumber: action.prNumber,
+            prUrl: action.prUrl,
+            channelId: conversation.replyTarget.channelId,
+            threadId: conversation.replyTarget.threadId ?? null,
+            followUpPrompt: action.followUpPrompt,
+          });
+        }
+
+        const posted = await provider.postMessage({
           ...conversation.replyTarget,
           idempotencyKey: buildEventClientMessageSeed(params.event),
-          text: message,
+          text: action ? `${message}\n${action.question}` : message,
           textFormat: 'markdown',
           images,
+          ...(action
+            ? {
+                buttons: [
+                  [
+                    {
+                      text: 'Resolve these issues',
+                      callbackData: buildPrReviewActionCallbackData(
+                        'yes',
+                        action.nonce,
+                      ),
+                    },
+                    {
+                      text: 'Auto-resolve on this PR',
+                      callbackData: buildPrReviewActionCallbackData(
+                        'auto',
+                        action.nonce,
+                      ),
+                    },
+                    {
+                      text: 'Dismiss',
+                      callbackData: buildPrReviewActionCallbackData(
+                        'dismiss',
+                        action.nonce,
+                      ),
+                    },
+                  ],
+                ],
+              }
+            : {}),
         });
+        if (action) {
+          await attachPendingPrReviewActionMessage(
+            action.nonce,
+            posted.lastTextMessageId ?? posted.messageId,
+          );
+        }
         params.onReplyPosted();
       },
     },
