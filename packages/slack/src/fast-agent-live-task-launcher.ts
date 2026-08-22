@@ -55,7 +55,7 @@ export function createFastAgentSlackLiveTaskLauncher(
           taskUpdateId,
           title,
           status: 'in_progress',
-          step: 'Delegating to a Roomote agent…',
+          message: 'Delegating to a Roomote agent…',
           taskUrl: context.taskUrl,
         }),
         unfurl_links: false,
@@ -125,7 +125,7 @@ export function createFastAgentSlackLiveTaskLauncher(
             taskUpdateId: data.taskUpdateId,
             title,
             status: 'in_progress',
-            step: 'Delegating to a Roomote agent…',
+            message: 'Delegating to a Roomote agent…',
             ...(data.taskUrl ? { taskUrl: data.taskUrl } : {}),
           }),
         });

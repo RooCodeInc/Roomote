@@ -26,8 +26,6 @@ export interface SlackLiveTaskCardContent {
   taskUpdateId: string;
   title: string;
   status: SlackTaskStreamStatus;
-  /** Current step (todo) or waiting state; rendered as the card details. */
-  step?: string;
   /** Latest agent message, or the final result once settled; rendered as
    * the card output. Always the latest one, never accumulated. */
   message?: string;
@@ -47,7 +45,6 @@ export interface SlackLiveTaskCardContent {
 export function buildSlackLiveTaskCardBlocks(
   content: SlackLiveTaskCardContent,
 ): { text: string; blocks: unknown[] } {
-  const step = content.step?.trim();
   const message = content.message?.trim();
 
   return {
@@ -59,7 +56,6 @@ export function buildSlackLiveTaskCardBlocks(
         task_id: content.taskUpdateId,
         title: content.title,
         status: content.status,
-        ...(step ? { details: buildSlackRichTextValue(step) } : {}),
         ...(message ? { output: buildSlackRichTextValue(message) } : {}),
         ...(content.taskUrl
           ? {

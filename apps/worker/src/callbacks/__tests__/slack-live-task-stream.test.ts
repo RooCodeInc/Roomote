@@ -144,37 +144,7 @@ describe('Slack live task card', () => {
     });
   });
 
-  it('shows the current todo as the step without a count', async () => {
-    const taskRun = createTaskRun();
-    const context = {};
-    const event = {
-      type: 'todo_update' as const,
-      ts: 1000,
-      todos: todos('Make the change'),
-    };
-
-    await updateSlackLiveTaskStream(taskRun, event, context);
-    await updateSlackLiveTaskStream(taskRun, event, context);
-
-    expect(mocks.updateMessage).toHaveBeenCalledOnce();
-    expect(renderedCard(1)).toEqual({
-      type: 'task_card',
-      block_id: 'roomote-task-task-1-card',
-      task_id: 'roomote-task-task-1',
-      title: 'Fix the button',
-      status: 'in_progress',
-      details: text('Make the change'),
-      sources: [
-        {
-          type: 'url',
-          url: 'https://roomote.example/task/task-1',
-          text: 'View task',
-        },
-      ],
-    });
-  });
-
-  it('shows only the latest message next to the current step', async () => {
+  it('shows only the latest message, ignoring todo changes', async () => {
     const taskRun = createTaskRun();
     const context = {};
 
@@ -199,18 +169,45 @@ describe('Slack live task card', () => {
       context,
     );
 
-    expect(mocks.updateMessage).toHaveBeenCalledTimes(4);
-    expect(renderedCard(2)).toMatchObject({
-      details: text('Make the change'),
+    expect(mocks.updateMessage).toHaveBeenCalledTimes(2);
+    expect(renderedCard(1)).toEqual({
+      type: 'task_card',
+      block_id: 'roomote-task-task-1-card',
+      task_id: 'roomote-task-task-1',
+      title: 'Fix the button',
+      status: 'in_progress',
       output: text('Wiring the new model into spawning.'),
+      sources: [
+        {
+          type: 'url',
+          url: 'https://roomote.example/task/task-1',
+          text: 'View task',
+        },
+      ],
     });
-    expect(renderedCard(3)).toMatchObject({
-      details: text('Make the change'),
+    expect(renderedCard(2)).toMatchObject({
       output: text('Editing the selector metadata.'),
     });
-    expect(renderedCard(4)).toMatchObject({
-      details: text('Verify it'),
-      output: text('Editing the selector metadata.'),
+    expect(renderedCard(2)).not.toHaveProperty('details');
+  });
+
+  it('shows a waiting notice while the task needs input', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1000, text: 'Need a decision.' },
+      context,
+    );
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'request_user_input', ts: 1001, request: {} } as never,
+      context,
+    );
+
+    expect(renderedCard(2)).toMatchObject({
+      output: text('Waiting for your input…'),
     });
   });
 
@@ -261,21 +258,16 @@ describe('Slack live task card', () => {
     const context = {};
     await updateSlackLiveTaskStream(
       taskRun,
-      { type: 'todo_update', ts: 1000, todos: todos('Make the change') },
+      { type: 'text', ts: 1000, text: 'Almost there.' },
       context,
     );
     await updateSlackLiveTaskStream(
       taskRun,
-      { type: 'text', ts: 1001, text: 'Almost there.' },
-      context,
-    );
-    await updateSlackLiveTaskStream(
-      taskRun,
-      { type: 'completion', ts: 1002, text: 'Ready for review.' },
+      { type: 'completion', ts: 1001, text: 'Ready for review.' },
       context,
     );
 
-    expect(renderedCard(3)).toEqual({
+    expect(renderedCard(2)).toEqual({
       type: 'task_card',
       block_id: 'roomote-task-task-1-card',
       task_id: 'roomote-task-task-1',
@@ -303,7 +295,6 @@ describe('Slack live task card', () => {
       status: 'error',
       output: text('Task canceled.'),
     });
-    expect(renderedCard(1)).not.toHaveProperty('details');
     expect(mocks.sdkClearStreamData).toHaveBeenCalledWith({
       runId: taskRun.id,
     });
@@ -314,7 +305,7 @@ describe('Slack live task card', () => {
     const context = {};
     await updateSlackLiveTaskStream(
       taskRun,
-      { type: 'todo_update', ts: 1000, todos: todos('Make the change') },
+      { type: 'text', ts: 1000, text: 'Working on it.' },
       context,
     );
     await finishSlackLiveTaskStream(taskRun, RunStatus.Failed, context);
@@ -323,7 +314,6 @@ describe('Slack live task card', () => {
       status: 'error',
       output: text('The task stopped because of an error.'),
     });
-    expect(renderedCard(2)).not.toHaveProperty('details');
     expect(mocks.sdkClearStreamData).not.toHaveBeenCalled();
 
     // The next run of the task flips the card back to in progress.

@@ -20,9 +20,8 @@ const updateQueues = new Map<number, Promise<void>>();
 /** Harness status noise that reads as an error but resolves on its own. */
 const TRANSIENT_NARRATION_PATTERN = /^(provider error|retrying)\b/i;
 
-const WAITING_FOR_INPUT_STEP = 'Waiting for your input…';
-const CONTINUING_STEP = 'Continuing with your answer…';
-const WRAPPING_UP_STEP = 'Wrapping up…';
+const WAITING_FOR_INPUT_MESSAGE = 'Waiting for your input…';
+const CONTINUING_MESSAGE = 'Continuing with your answer…';
 
 function usesSlackLiveTaskStream(taskRun: TaskRun): boolean {
   return (
@@ -36,14 +35,13 @@ function usesSlackLiveTaskStream(taskRun: TaskRun): boolean {
 /**
  * The card's full current state. Every change re-renders the whole
  * `task_card` block through chat.update, so the card shows exactly the
- * current step and the LATEST agent message; nothing accumulates, and
- * transient states vanish on the next render.
+ * LATEST agent message; nothing accumulates, and transient states vanish
+ * on the next render.
  */
 type SlackLiveTaskCardState = {
   status: Extract<SlackTaskStreamStatus, 'in_progress' | 'complete' | 'error'>;
-  /** Current todo, or a waiting/continuing notice. */
-  step?: string;
-  /** Latest narration from the agent, or the final result once settled. */
+  /** Latest narration from the agent (or a waiting notice), or the final
+   * result once settled. */
   message?: string;
 };
 
@@ -186,7 +184,6 @@ async function renderCard(
         taskUpdateId: data.taskUpdateId,
         title: data.title,
         status: state.status,
-        ...(state.step ? { step: state.step } : {}),
         ...(state.message ? { message: state.message } : {}),
         ...(data.taskUrl ? { taskUrl: data.taskUrl } : {}),
       }),
@@ -228,7 +225,6 @@ export async function updateSlackLiveTaskStream(
 
   if (event.type === 'completion') {
     state.status = 'complete';
-    state.step = undefined;
     state.message = event.text;
     await renderCard(taskRun, context, { refreshData: true, settle: true });
     return;
@@ -248,28 +244,17 @@ export async function updateSlackLiveTaskStream(
     return;
   }
 
-  if (event.type === 'todo_update') {
-    const current =
-      event.todos.find((todo) => todo.status === 'in_progress') ??
-      event.todos.find((todo) => todo.status === 'pending');
-    const step = current ? current.content : WRAPPING_UP_STEP;
-
-    if (state.step === step) {
-      return;
-    }
-    state.step = step;
-    await renderCard(taskRun, context);
-    return;
-  }
+  // Todo changes are deliberately not shown: the latest message already
+  // says what the agent is doing, and a step line on top added noise.
 
   if (event.type === 'request_user_input' || event.type === 'followup') {
-    state.step = WAITING_FOR_INPUT_STEP;
+    state.message = WAITING_FOR_INPUT_MESSAGE;
     await renderCard(taskRun, context);
     return;
   }
 
   if (event.type === 'request_user_input_response') {
-    state.step = CONTINUING_STEP;
+    state.message = CONTINUING_MESSAGE;
     await renderCard(taskRun, context);
   }
 }
@@ -285,7 +270,6 @@ export async function finishSlackLiveTaskStream(
   }
 
   const state = getCardState(context);
-  state.step = undefined;
 
   if (status === RunStatus.Completed) {
     // Usually a no-op: the completion CallbackEvent already settled the
