@@ -247,6 +247,29 @@ describe('answerUserInputRequest procedure', () => {
     expect(sendCommand).toHaveBeenCalledOnce();
   });
 
+  it('rolls back persisted quote suppression when an orchestrated answer cannot be sent', async () => {
+    const { caller, sendCommand } = createCaller({ sendCommand: () => false });
+
+    await expect(
+      caller.commands.answerUserInputRequest({
+        requestId: 'rui:session:turn:call',
+        suppressSlackReplyQuote: true,
+        answers: { color: { answers: ['Blue'] } },
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+
+    expect(
+      mockSuppressSlackReplyQuote.mock.invocationCallOrder[0],
+    ).toBeLessThan(sendCommand.mock.invocationCallOrder[0]!);
+    expect(mockClearSlackReplyQuote).toHaveBeenCalledWith(
+      {
+        token: 'run-token',
+        platformApiUrl: 'https://platform.example.com',
+      },
+      { runId: 1, quoteId: 'suppression-1' },
+    );
+  });
+
   it('stores cancelled quote text when the input request is dismissed', async () => {
     const { caller } = createCaller({
       getPendingUserInputRequests: () => [
