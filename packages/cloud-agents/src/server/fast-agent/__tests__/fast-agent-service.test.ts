@@ -716,7 +716,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
           purpose: 'closeout',
           message: 'The review found one issue.',
         });
-        return '';
+        return 'This final text must not post a duplicate closeout.';
       },
     );
     const adapter = callbacks();
@@ -731,6 +731,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     expect(adapter.launchTask).not.toHaveBeenCalled();
     expect(mocks.sendTaskMessage).not.toHaveBeenCalled();
+    expect(adapter.postReply).toHaveBeenCalledOnce();
     expect(adapter.postReply).toHaveBeenCalledWith({
       purpose: 'closeout',
       message: 'The review found one issue.',
