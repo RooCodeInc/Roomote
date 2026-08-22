@@ -1,13 +1,6 @@
 import { z } from 'zod';
 
-import {
-  and,
-  db,
-  desc,
-  eq,
-  slackInstallations,
-  taskRuns,
-} from '@roomote/db/server';
+import { db, desc, eq, slackInstallations, taskRuns } from '@roomote/db/server';
 import { drainSlackMessagesToResumeRun } from '@roomote/slack';
 
 import { authenticatedProcedure, runScoped, router } from '../trpc';
@@ -19,18 +12,6 @@ export const slackInstallationsRouter = router({
       orderBy: [desc(slackInstallations.updatedAt)],
     });
   }),
-
-  /** The active installation for one workspace; deployments can hold several. */
-  findByTeamId: authenticatedProcedure
-    .input(z.object({ teamId: z.string().min(1) }))
-    .query(({ input }) => {
-      return db.query.slackInstallations.findFirst({
-        where: and(
-          eq(slackInstallations.isActive, true),
-          eq(slackInstallations.teamId, input.teamId),
-        ),
-      });
-    }),
 
   /**
    * Drain pending Slack messages after auto-snapshot.

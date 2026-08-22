@@ -3,7 +3,6 @@ import {
   buildSlackLiveTaskCardBlocks,
   SLACK_LIVE_TASK_CARD_MESSAGES,
   SlackNotifier,
-  type SlackLiveTaskStreamData,
   type SlackTaskStreamStatus,
 } from '@roomote/slack/client';
 import { sdk, type TaskRun } from '@roomote/sdk/client';
@@ -149,17 +148,18 @@ function shouldProcessEvent(
   return true;
 }
 
-// The card data is written once per task by the launcher; the worker reads
-// it through the platform API (control-plane Redis is unreachable from the
-// sandbox) and caches per run for the process lifetime.
-const cardDataCache = new Map<
-  number,
-  Promise<SlackLiveTaskStreamData | null>
->();
+/** Card pointer plus the bot token of the workspace that owns the card,
+ * both resolved server-side for this run only. */
+type SlackLiveTaskCardAccess = Awaited<
+  ReturnType<typeof sdk.taskRuns.getSlackLiveTaskStreamData>
+>;
 
-function resolveCardData(
-  taskRun: TaskRun,
-): Promise<SlackLiveTaskStreamData | null> {
+// The card data is written once per task by the launcher; the worker reads
+// it through the run-scoped platform API (control-plane Redis is unreachable
+// from the sandbox) and caches per run for the process lifetime.
+const cardDataCache = new Map<number, Promise<SlackLiveTaskCardAccess>>();
+
+function resolveCardData(taskRun: TaskRun): Promise<SlackLiveTaskCardAccess> {
   const cached = cardDataCache.get(taskRun.id);
   if (cached) {
     return cached;
@@ -178,29 +178,20 @@ function resolveCardData(
 
 // One notifier per workspace: a deployment can hold several Slack
 // installations, and the card must be updated with the token of the team
-// that owns it.
-const notifiersByTeam = new Map<string, Promise<SlackNotifier>>();
+// that owns it (the run-scoped lookup only ever hands out that one).
+const notifiersByTeam = new Map<string, SlackNotifier>();
 
-function getSlackNotifier(teamId: string): Promise<SlackNotifier> {
-  const cached = notifiersByTeam.get(teamId);
+function getSlackNotifier(
+  data: NonNullable<SlackLiveTaskCardAccess>,
+): SlackNotifier {
+  const cached = notifiersByTeam.get(data.teamId);
   if (cached) {
     return cached;
   }
 
-  const lookup = sdk.slackInstallations
-    .findByTeamId({ teamId })
-    .then((installation) => {
-      if (!installation) {
-        throw new Error(`Slack installation not found for team ${teamId}.`);
-      }
-      return new SlackNotifier(installation.botAccessToken);
-    })
-    .catch((error) => {
-      notifiersByTeam.delete(teamId);
-      throw error;
-    });
-  notifiersByTeam.set(teamId, lookup);
-  return lookup;
+  const notifier = new SlackNotifier(data.botAccessToken);
+  notifiersByTeam.set(data.teamId, notifier);
+  return notifier;
 }
 
 /**
@@ -255,8 +246,7 @@ async function renderCard(
       return;
     }
 
-    const notifier = await getSlackNotifier(data.teamId);
-    const updated = await notifier.updateMessage({
+    const updated = await getSlackNotifier(data).updateMessage({
       channel: data.channel,
       ts: data.messageTs,
       message: buildSlackLiveTaskCardBlocks({

@@ -6,10 +6,6 @@ export type SlackInstallation = NonNullable<
 
 export const findFirst = () => client.slackInstallations.findFirst.query();
 
-export const findByTeamId = (
-  input: AppRouterInput['slackInstallations']['findByTeamId'],
-) => client.slackInstallations.findByTeamId.query(input);
-
 export const drainSlackMessages = (
   input: AppRouterInput['slackInstallations']['drainSlackMessages'],
 ) => client.slackInstallations.drainSlackMessages.mutate(input);

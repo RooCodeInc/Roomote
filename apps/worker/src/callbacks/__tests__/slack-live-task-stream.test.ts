@@ -1,12 +1,15 @@
 const mocks = vi.hoisted(() => ({
   updateMessage: vi.fn(),
   sdkGetStreamData: vi.fn(),
-  sdkFindInstallationByTeamId: vi.fn(),
+  notifierTokens: [] as string[],
 }));
 
 vi.mock('@roomote/slack/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack/client')>()),
   SlackNotifier: class {
+    constructor(token: string) {
+      mocks.notifierTokens.push(token);
+    }
     updateMessage = mocks.updateMessage;
   },
 }));
@@ -15,9 +18,6 @@ vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     taskRuns: {
       getSlackLiveTaskStreamData: mocks.sdkGetStreamData,
-    },
-    slackInstallations: {
-      findByTeamId: mocks.sdkFindInstallationByTeamId,
     },
   },
 }));
@@ -42,6 +42,7 @@ const cardData = {
   threadTs: '100.001',
   title: 'Fix the button',
   taskUrl: 'https://roomote.example/task/task-1',
+  botAccessToken: 'xoxb-team-123',
 };
 
 // The module caches card data per run id for the process lifetime, so
@@ -85,18 +86,13 @@ describe('Slack live task card', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.sdkGetStreamData.mockResolvedValue(cardData);
-    mocks.sdkFindInstallationByTeamId.mockResolvedValue({
-      botAccessToken: 'xoxb-test',
-    });
     mocks.updateMessage.mockResolvedValue(true);
   });
 
-  it('updates the card with the token of the workspace that owns it', async () => {
+  it('updates the card with the token the run-scoped lookup resolved for its workspace', async () => {
     await startSlackLiveTaskStream(createTaskRun(), {});
 
-    expect(mocks.sdkFindInstallationByTeamId).toHaveBeenCalledWith({
-      teamId: 'T123',
-    });
+    expect(mocks.notifierTokens).toContain('xoxb-team-123');
   });
 
   it('renders the generated task title on start', async () => {
