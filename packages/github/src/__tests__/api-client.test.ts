@@ -200,6 +200,42 @@ describe('getOctokit', () => {
 });
 
 describe('getGitHubRateLimitRetryAfterMs', () => {
+  it('recognizes GraphQL RATE_LIMITED errors with top-level headers', () => {
+    const now = Date.parse('2026-08-22T12:00:00.000Z');
+    const error = Object.assign(new Error('Something went wrong'), {
+      headers: {
+        'x-ratelimit-remaining': '0',
+        'x-ratelimit-reset': String(now / 1_000 + 120),
+      },
+      errors: [{ type: 'RATE_LIMITED', message: 'Quota exhausted' }],
+    });
+
+    expect(getGitHubRateLimitRetryAfterMs(error, now)).toBe(121_000);
+  });
+
+  it('uses the durable fallback for headerless GraphQL quota errors', () => {
+    const error = Object.assign(new Error('Something went wrong'), {
+      headers: {},
+      errors: [
+        {
+          message: 'Quota exhausted',
+          extensions: { code: 'RATE_LIMITED' },
+        },
+      ],
+    });
+
+    expect(getGitHubRateLimitRetryAfterMs(error)).toBe(15 * 60 * 1_000);
+  });
+
+  it('rejects non-rate-limited GraphQL errors', () => {
+    const error = Object.assign(new Error('Field failed'), {
+      headers: {},
+      errors: [{ type: 'FORBIDDEN', message: 'Field failed' }],
+    });
+
+    expect(getGitHubRateLimitRetryAfterMs(error)).toBeNull();
+  });
+
   it('uses the installation reset header for primary limits', () => {
     const now = Date.parse('2026-08-22T12:00:00.000Z');
     const error = Object.assign(new Error('API rate limit exceeded'), {

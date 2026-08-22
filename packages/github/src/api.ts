@@ -382,21 +382,11 @@ function getHeader(response: Response, name: string): string | null {
   return response.headers.get(name);
 }
 
-function getErrorHeader(error: unknown, name: string): string | null {
-  if (
-    typeof error !== 'object' ||
-    error === null ||
-    !('response' in error) ||
-    typeof error.response !== 'object' ||
-    error.response === null ||
-    !('headers' in error.response) ||
-    typeof error.response.headers !== 'object' ||
-    error.response.headers === null
-  ) {
+function getHeaderValue(headers: unknown, name: string): string | null {
+  if (typeof headers !== 'object' || headers === null) {
     return null;
   }
 
-  const headers = error.response.headers;
   if (headers instanceof Headers) {
     return headers.get(name);
   }
@@ -407,17 +397,68 @@ function getErrorHeader(error: unknown, name: string): string | null {
   return typeof value === 'string' ? value : null;
 }
 
+function getErrorHeader(error: unknown, name: string): string | null {
+  if (typeof error !== 'object' || error === null) {
+    return null;
+  }
+
+  const topLevelHeaders =
+    'headers' in error ? getHeaderValue(error.headers, name) : null;
+  if (topLevelHeaders !== null) {
+    return topLevelHeaders;
+  }
+
+  if (
+    !('response' in error) ||
+    typeof error.response !== 'object' ||
+    error.response === null ||
+    !('headers' in error.response)
+  ) {
+    return null;
+  }
+
+  return getHeaderValue(error.response.headers, name);
+}
+
+function isGraphQlRateLimitError(error: unknown): boolean {
+  if (
+    typeof error !== 'object' ||
+    error === null ||
+    !('errors' in error) ||
+    !Array.isArray(error.errors)
+  ) {
+    return false;
+  }
+
+  return error.errors.some((item) => {
+    if (typeof item !== 'object' || item === null) {
+      return false;
+    }
+
+    const type = 'type' in item ? item.type : null;
+    const extensions =
+      'extensions' in item &&
+      typeof item.extensions === 'object' &&
+      item.extensions !== null
+        ? item.extensions
+        : null;
+    const code = extensions && 'code' in extensions ? extensions.code : null;
+    return type === 'RATE_LIMITED' || code === 'RATE_LIMITED';
+  });
+}
+
 /** Returns a durable retry delay for GitHub primary or secondary rate limits. */
 export function getGitHubRateLimitRetryAfterMs(
   error: unknown,
   nowMs = Date.now(),
 ): number | null {
-  if (typeof error !== 'object' || error === null || !('status' in error)) {
+  if (typeof error !== 'object' || error === null) {
     return null;
   }
 
-  const status = Number(error.status);
-  if (status !== 403 && status !== 429) {
+  const status = 'status' in error ? Number(error.status) : null;
+  const graphQlRateLimited = isGraphQlRateLimitError(error);
+  if (status !== 403 && status !== 429 && !graphQlRateLimited) {
     return null;
   }
 
@@ -425,6 +466,7 @@ export function getGitHubRateLimitRetryAfterMs(
   const remaining = getErrorHeader(error, 'x-ratelimit-remaining');
   const message = error instanceof Error ? error.message.toLowerCase() : '';
   const isRateLimit =
+    graphQlRateLimited ||
     status === 429 ||
     retryAfter !== null ||
     remaining === '0' ||
