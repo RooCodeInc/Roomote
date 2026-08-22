@@ -402,9 +402,62 @@ else
   HARDEN_PID=""
 fi
 
+# Hot-memory facts that gbrain's own put_page backstop extracts land in the
+# database without a markdown fence (row_num NULL). The nightly extract_facts
+# phase refuses to run while such rows exist for live entity pages, reading
+# them as an interrupted v0.32.2 upgrade, so on any brain that is written to
+# every day the phase jams permanently and consolidation starves. gbrain's
+# sanctioned drain is re-running the v0.32.2 fence backfill, which is
+# idempotent (only row_num IS NULL rows, de-duplicated against the page's
+# existing fence), so run it at boot and once a day ahead of Roomote's
+# 07:00 UTC maintenance cycle. Targeted with --migration on purpose: a
+# brain created on a recent gbrain still lists every older data
+# orchestrator as pending, and a bare apply-migrations would run them all.
+# Never fatal: a failed drain leaves the phase skipped, which is today's
+# behavior, and the log says why.
+FENCE_BACKFILL_UTC_SECONDS=$((6 * 3600 + 30 * 60))
+# The backfill refuses to write into a dirty working tree (it expects a human
+# to review the diff), but in a hosted brain nothing reviews: gbrain commits
+# its own write-through page writes, while the pages its maintenance phases
+# touch sit uncommitted until something commits them. Commit the tree on
+# both sides of the drain so it can run tonight and again tomorrow. The
+# identity matches gbrain's bootstrap commits; an unchanged tree is a no-op.
+commit_brain_tree() {
+  git -C "$BRAIN_DIR" add -A 2>/dev/null \
+    && git -C "$BRAIN_DIR" -c user.name=gbrain-bootstrap \
+      -c user.email=bootstrap@localhost commit -q -m "$1" 2>/dev/null \
+    || true
+}
+fence_backfill() {
+  echo "[gbrain-entrypoint] fencing unfenced facts (v0.32.2 backfill)"
+  commit_brain_tree "roomote: commit maintenance-written pages before fence backfill"
+  # Facts whose entity page does not exist can never be fenced, so the run
+  # reports "partial" every time, and three partials wedge the ledger. The
+  # retry marker clears that each night; on its own it only writes the marker.
+  gbrain apply-migrations --force-retry 0.32.2 --non-interactive >/dev/null 2>&1 || true
+  gbrain apply-migrations --migration 0.32.2 --non-interactive 2>&1 \
+    | sed 's/^/[gbrain-entrypoint] fence-backfill: /' || true
+  commit_brain_tree "roomote: fence backfill (v0.32.2)"
+}
+(
+  # Let the server and worker settle before the first drain.
+  sleep 60
+  fence_backfill
+  while :; do
+    now="$(date -u +%s)"
+    delay=$((FENCE_BACKFILL_UTC_SECONDS - now % 86400))
+    if [ "$delay" -le 0 ]; then
+      delay=$((delay + 86400))
+    fi
+    sleep "$delay"
+    fence_backfill
+  done
+) &
+FENCE_PID=$!
+
 TERMINATING=0
 stop_processes() {
-  kill -TERM "$SERVER_PID" "$WORKER_PID" ${HARDEN_PID:+"$HARDEN_PID"} 2>/dev/null || true
+  kill -TERM "$SERVER_PID" "$WORKER_PID" "$FENCE_PID" ${HARDEN_PID:+"$HARDEN_PID"} 2>/dev/null || true
 }
 trap 'TERMINATING=1; stop_processes' TERM INT
 
