@@ -88,6 +88,18 @@ async function rowsFor(repositoryId: string) {
     .orderBy(pullRequestFacts.prNumber);
 }
 
+/** PR numbers the pass read for one repository, ignoring other suites' rows. */
+function callsForRepository(
+  read: {
+    mock: { calls: Array<[{ repository: { id: string }; prNumber: number }]> };
+  },
+  repositoryId: string,
+): number[] {
+  return read.mock.calls
+    .filter((call) => call[0].repository.id === repositoryId)
+    .map((call) => call[0].prNumber);
+}
+
 describe('enrichPullRequestFacts', () => {
   it('enriches due rows merged-first within the budget and bumps updatedAt', async () => {
     const repository = await seedRepository();
@@ -103,10 +115,6 @@ describe('enrichPullRequestFacts', () => {
         snapshot(3, '2099-01-03T00:00:00Z'),
       ],
     });
-    const callsFor = (repositoryId: string) =>
-      read.mock.calls
-        .filter((call) => call[0].repository.id === repositoryId)
-        .map((call) => call[0].prNumber);
     const read = vi.fn(
       async ({
         prNumber,
@@ -156,7 +164,7 @@ describe('enrichPullRequestFacts', () => {
     // A second pass picks up only what is still due.
     read.mockClear();
     await enrichPullRequestFacts({ now, budget: 10, read });
-    expect(callsFor(repository.id)).toEqual([1]);
+    expect(callsForRepository(read, repository.id)).toEqual([1]);
   });
 
   it('holds a failed row for a while and stops the pass on rate limiting', async () => {
@@ -166,23 +174,40 @@ describe('enrichPullRequestFacts', () => {
       repositoryFullName: repository.fullName,
       sourceControlProvider: 'gitlab',
       syncedAt: new Date('2026-07-10T01:00:00Z'),
+      // Far-future merges so these rows sort ahead of whatever sibling
+      // real-DB suites left behind: the pass scans every repository.
       pullRequests: [
-        snapshot(1, '2026-07-09T00:00:00Z'),
-        snapshot(2, '2026-07-08T00:00:00Z'),
+        snapshot(1, '2099-01-09T00:00:00Z'),
+        snapshot(2, '2099-01-08T00:00:00Z'),
       ],
     });
-    const read = vi
-      .fn()
-      .mockRejectedValueOnce(
-        new Error('Source control API request failed: 429 Too Many Requests'),
-      )
-      .mockResolvedValue({ files: [], filesTruncated: false, reviews: [] });
+    // Scoped to this repository rather than "the first call" for the same
+    // reason; other repositories' rows resolve normally.
+    let rejected = false;
+    const read = vi.fn(
+      async ({
+        repository: candidateRepository,
+      }: {
+        repository: { id: string };
+        prNumber: number;
+      }) => {
+        if (candidateRepository.id === repository.id && !rejected) {
+          rejected = true;
+          throw new Error(
+            'Source control API request failed: 429 Too Many Requests',
+          );
+        }
+        return { files: [], filesTruncated: false, reviews: [] };
+      },
+    );
     const now = new Date('2026-07-11T00:00:00Z');
 
     const result = await enrichPullRequestFacts({ now, budget: 10, read });
 
-    expect(result).toMatchObject({ failed: 1, enriched: 0, rateLimited: true });
-    expect(read).toHaveBeenCalledTimes(1);
+    // PR #1 (the newest merge) is this repository's first candidate; its 429
+    // ends the pass, so #2 is never attempted.
+    expect(result.rateLimited).toBe(true);
+    expect(callsForRepository(read, repository.id)).toEqual([1]);
     const rows = await rowsFor(repository.id);
     expect(rows[0]).toMatchObject({
       enrichedAt: null,
@@ -193,10 +218,6 @@ describe('enrichPullRequestFacts', () => {
     read.mockClear();
     const soon = new Date(now.getTime() + 60 * 60 * 1000);
     await enrichPullRequestFacts({ now: soon, budget: 10, read });
-    expect(
-      read.mock.calls
-        .filter((call) => call[0].repository.id === repository.id)
-        .map((call) => call[0].prNumber),
-    ).toEqual([2]);
+    expect(callsForRepository(read, repository.id)).toEqual([2]);
   });
 });
