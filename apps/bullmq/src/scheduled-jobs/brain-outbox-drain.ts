@@ -18,6 +18,7 @@ import {
   renameBrainSyncStateFamilyPrefix,
 } from '@roomote/db/server';
 import {
+  parseBrainToolPayloads,
   postBrainToolCall,
   resolveBrainInferenceProvider,
   resolveBrainConnection,
@@ -139,16 +140,29 @@ export async function callBrainWriteTool(
     );
   }
 
-  const failed = !ok || body.includes('"isError":true');
+  // Detect tool-level failure through the shared JSON-RPC parser rather than
+  // a substring match: the parser owns the envelope shape (including
+  // whitespace-tolerant isError detection) and error prose from the page body
+  // must never masquerade as failure classification.
+  let toolError: string | null = null;
 
-  if (failed && /embed\(|embedding/i.test(body)) {
+  try {
+    parseBrainToolPayloads(body, name);
+  } catch (error) {
+    toolError = error instanceof Error ? error.message : String(error);
+  }
+
+  const failed = !ok || toolError !== null;
+  const failureText = `${toolError ?? ''} ${body.slice(0, 300)}`;
+
+  if (failed && /embed\(|embedding/i.test(failureText)) {
     throw new BrainNotReadyError(
-      `gbrain ${name} could not embed: ${body.slice(0, 300)}`,
+      `gbrain ${name} could not embed: ${failureText.slice(0, 300)}`,
     );
   }
 
   if (failed) {
-    throw new Error(`gbrain ${name} failed: ${status} ${body.slice(0, 300)}`);
+    throw new Error(`gbrain ${name} failed: ${failureText.slice(0, 300)}`);
   }
 
   return body;
