@@ -44,6 +44,7 @@ export * from './logging';
 export * from './llm-usage';
 export * from './bedrock-opencode-provider';
 export * from './inference-gateway';
+export * from './inference-provider-retry';
 export * from './model-provider-config';
 export * from './openai-compatible-providers';
 export * from './recommended-task-models';
