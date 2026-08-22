@@ -20,6 +20,7 @@ type ManageSourceControlParams = {
     | 'create_pull_request_review_comment'
     | 'resolve_pull_request_thread'
     | 'submit_pull_request_review'
+    | 'dismiss_pull_request_review'
     | 'update_pull_request_comment'
     | 'get_issue'
     | 'list_issue_comments'
@@ -31,6 +32,7 @@ type ManageSourceControlParams = {
   limit?: number;
   threadId?: string;
   commentId?: string;
+  reviewId?: string;
   resolved?: boolean;
   reviewEvent?: 'approve' | 'request_changes' | 'comment';
   path?: string;
@@ -228,11 +230,23 @@ export async function handleManageSourceControl(
       );
     }
 
+    if (params.action === 'dismiss_pull_request_review') {
+      if (!params.reviewId?.trim()) {
+        return errorResult(
+          'reviewId is required for dismiss_pull_request_review',
+        );
+      }
+      if (!params.body?.trim()) {
+        return errorResult('body is required for dismiss_pull_request_review');
+      }
+    }
+
     // Models often emit empty strings for unused optional fields. blank values
     // must not be forwarded as present ids (GitHub routes issue vs review
     // comment updates using the presence of threadId).
     const threadId = params.threadId?.trim() || undefined;
     const commentId = params.commentId?.trim() || undefined;
+    const reviewId = params.reviewId?.trim() || undefined;
     const path = params.path?.trim() || undefined;
 
     return jsonResult(
@@ -242,6 +256,7 @@ export async function handleManageSourceControl(
         prNumber: params.prNumber,
         threadId,
         commentId,
+        reviewId,
         body: params.body,
         resolved: params.resolved,
         reviewEvent: params.reviewEvent,

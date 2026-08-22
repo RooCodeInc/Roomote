@@ -411,12 +411,29 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         },
       },
     });
+    const listReviewComments = vi.fn();
+    const listComments = vi.fn();
+    const listReviews = vi.fn();
     mockGetOctokit.mockReturnValue({
       graphql,
-      paginate: vi.fn().mockResolvedValue([]),
+      paginate: vi
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          {
+            id: 900,
+            user: { login: 'roomote-dev[bot]' },
+            state: 'CHANGES_REQUESTED',
+            body: 'Please address the findings.',
+            submitted_at: '2026-08-01T00:00:00Z',
+            html_url:
+              'https://github.com/acme/backend/pull/55#pullrequestreview-900',
+          },
+        ]),
       rest: {
-        pulls: { listReviewComments: vi.fn() },
-        issues: { listComments: vi.fn() },
+        pulls: { listReviewComments, listReviews },
+        issues: { listComments },
       },
     });
 
@@ -450,6 +467,16 @@ describe('readSourceControlPullRequestForTaskRun', () => {
         line: 42,
         outdated: true,
       }),
+    ]);
+    expect(result.reviews).toEqual([
+      {
+        reviewId: '900',
+        author: 'roomote-dev[bot]',
+        state: 'CHANGES_REQUESTED',
+        body: 'Please address the findings.',
+        submittedAt: '2026-08-01T00:00:00Z',
+        url: 'https://github.com/acme/backend/pull/55#pullrequestreview-900',
+      },
     ]);
   });
 
@@ -549,7 +576,7 @@ describe('readSourceControlPullRequestForTaskRun', () => {
       graphql,
       paginate: vi.fn().mockResolvedValue([]),
       rest: {
-        pulls: { listReviewComments: vi.fn() },
+        pulls: { listReviewComments: vi.fn(), listReviews: vi.fn() },
         issues: { listComments: vi.fn() },
       },
     });
