@@ -1,7 +1,10 @@
 import { RunStatus } from '@roomote/types';
 import {
+  buildSlackLiveTaskCardBlocks,
+  SLACK_TASK_STREAM_GONE_ERRORS,
   SlackNotifier,
   type SlackLiveTaskStreamData,
+  type SlackTaskStreamResult,
   type SlackTaskStreamStatus,
 } from '@roomote/slack/client';
 import { sdk, type TaskRun } from '@roomote/sdk/client';
@@ -19,6 +22,11 @@ const updateQueues = new Map<number, Promise<void>>();
 /** Harness status noise that reads as an error but resolves on its own. */
 const TRANSIENT_NARRATION_PATTERN = /^(provider error|retrying)\b/i;
 
+const WAITING_FOR_INPUT_TITLE = 'Waiting for your input…';
+const CONTINUING_TITLE = 'Continuing with your answer…';
+const WRAPPING_UP_TITLE = 'Wrapping up…';
+const FAILED_TURN_TITLE = 'The task stopped because of an error.';
+
 function usesSlackLiveTaskStream(taskRun: TaskRun): boolean {
   return (
     taskRun.payload !== null &&
@@ -28,12 +36,15 @@ function usesSlackLiveTaskStream(taskRun: TaskRun): boolean {
   );
 }
 
-/** One card entry. `title` is the only replaceable text slot, so it carries
- * the CURRENT step (todo) and swaps cleanly on every change — no history,
- * just the latest step; on settle it returns to the task title. `output`
- * accumulates the narrative beneath it as newline-prefixed deltas. The
- * 'View task' source is sent once by the launcher (Slack appends sources
- * and details instead of replacing them). */
+/**
+ * The card is a single entry that shows ONE line at a time: `title` is the
+ * only task_update field Slack replaces on append (details/output/sources
+ * accumulate), so the latest progress line (current step, narration, or
+ * waiting state) lives there and each update swaps the previous one out.
+ * Nothing is written to the body until the card settles, when the title
+ * returns to the task title and `output` carries the final result once.
+ * The 'View task' source is sent once by the launcher.
+ */
 function buildCardUpdate(
   data: SlackLiveTaskStreamData,
   status: SlackTaskStreamStatus,
@@ -47,15 +58,30 @@ function buildCardUpdate(
   };
 }
 
-/** The card's current (rotating) title, so narrative appends don't reset it
- * back to the task title between todo changes. */
-function getCardTitle(context: RunTaskContext): string | undefined {
-  const existing = context.slackLiveTaskCardTitle;
-  return typeof existing === 'string' && existing ? existing : undefined;
+type CardState = {
+  title?: string;
+  status?: SlackTaskStreamStatus;
+};
+
+function getCardState(context: RunTaskContext): CardState {
+  const existing = context.slackLiveTaskCard;
+  return existing && typeof existing === 'object'
+    ? (existing as CardState)
+    : {};
 }
 
-function setCardTitle(context: RunTaskContext, title: string): void {
-  context.slackLiveTaskCardTitle = title;
+function setCardState(context: RunTaskContext, state: CardState): void {
+  context.slackLiveTaskCard = state;
+}
+
+/** Set once Slack reports the stream is gone; later changes go through
+ * chat.update on the same message instead of the stream API. */
+function isStreamGone(context: RunTaskContext): boolean {
+  return context.slackLiveTaskStreamGone === true;
+}
+
+function markStreamGone(context: RunTaskContext): void {
+  context.slackLiveTaskStreamGone = true;
 }
 
 async function enqueueStreamUpdate(
@@ -151,39 +177,74 @@ async function getSlackNotifier(): Promise<SlackNotifier> {
   return slack;
 }
 
-async function appendCardUpdate(params: {
+/**
+ * Deliver one card state to Slack. The native stream is preferred; once it
+ * reports the message is no longer streaming (expired server-side, or
+ * already stopped by an earlier run of this task), the same message is
+ * rewritten through chat.update so the card never freezes mid-task.
+ */
+async function deliverCard(params: {
+  context: RunTaskContext;
+  data: SlackLiveTaskStreamData;
+  status: SlackTaskStreamStatus;
+  title: string;
+  output?: string;
+  settle: boolean;
+}): Promise<boolean> {
+  const notifier = await getSlackNotifier();
+  const fallback = async (): Promise<boolean> =>
+    notifier.updateMessage({
+      channel: params.data.channel,
+      ts: params.data.messageTs,
+      message: buildSlackLiveTaskCardBlocks({
+        title: params.title,
+        status: params.status,
+        ...(params.output ? { message: params.output } : {}),
+        ...(params.data.taskUrl ? { taskUrl: params.data.taskUrl } : {}),
+      }),
+    });
+
+  if (isStreamGone(params.context)) {
+    return fallback();
+  }
+
+  const request = {
+    channel: params.data.channel,
+    messageTs: params.data.messageTs,
+    task: buildCardUpdate(params.data, params.status, {
+      title: params.title,
+      ...(params.output ? { output: `\n${params.output}` } : {}),
+    }),
+  };
+  const result: SlackTaskStreamResult = params.settle
+    ? await notifier.stopTaskStream(request)
+    : await notifier.appendTaskStream(request);
+
+  if (result.ok) {
+    return true;
+  }
+  if (result.error && SLACK_TASK_STREAM_GONE_ERRORS.has(result.error)) {
+    markStreamGone(params.context);
+    return fallback();
+  }
+  return false;
+}
+
+/** Replace the card's single progress line (and status) in place. */
+async function updateCard(params: {
   taskRun: TaskRun;
   context: RunTaskContext;
-  /** Replaces the entry title (the current step). */
-  title?: string;
-  /** Appended to the entry's output body as a newline-prefixed delta. */
-  output?: string;
+  title: string;
+  status?: Extract<SlackTaskStreamStatus, 'in_progress' | 'error'>;
 }): Promise<void> {
-  const outputLine = params.output?.trim();
-  const title = params.title ?? getCardTitle(params.context);
+  const status = params.status ?? 'in_progress';
+  const title = params.title.trim();
+  const current = getCardState(params.context);
 
-  if (params.title && params.title !== getCardTitle(params.context)) {
-    // A new step opens a fresh narration budget for the body.
-    params.context.slackLiveTaskStepNarrated = false;
-  }
-
-  // Skip no-op updates: nothing new to append and the title is unchanged.
-  if (
-    !outputLine &&
-    (!params.title || getCardTitle(params.context) === params.title)
-  ) {
+  if (!title || (current.title === title && current.status === status)) {
     return;
   }
-  if (outputLine && params.context.slackLiveTaskLastOutput === outputLine) {
-    return;
-  }
-
-  if (params.title) {
-    setCardTitle(params.context, params.title);
-  }
-  if (outputLine) {
-    params.context.slackLiveTaskLastOutput = outputLine;
-  }
+  setCardState(params.context, { title, status });
 
   await enqueueStreamUpdate(params.taskRun.id, async () => {
     const data = await resolveStreamData(params.taskRun);
@@ -191,20 +252,21 @@ async function appendCardUpdate(params: {
       return;
     }
 
-    const notifier = await getSlackNotifier();
-    await notifier.appendTaskStream({
-      channel: data.channel,
-      messageTs: data.messageTs,
-      task: buildCardUpdate(data, 'in_progress', {
-        ...(title ? { title } : {}),
-        ...(outputLine ? { output: `\n${outputLine}` } : {}),
-      }),
+    await deliverCard({
+      context: params.context,
+      data,
+      status,
+      title,
+      settle: false,
     });
   });
 }
 
-async function stopStream(params: {
+/** Settle the card: task title back on top, final output beneath, and the
+ * stream data released so no later run can revive it. */
+async function settleCard(params: {
   taskRun: TaskRun;
+  context: RunTaskContext;
   status: Extract<SlackTaskStreamStatus, 'complete' | 'error'>;
   output: string;
 }): Promise<void> {
@@ -217,16 +279,20 @@ async function stopStream(params: {
       return;
     }
 
-    const notifier = await getSlackNotifier();
-    const stopped = await notifier.stopTaskStream({
-      channel: data.channel,
-      messageTs: data.messageTs,
-      task: buildCardUpdate(data, params.status, {
-        output: `\n${params.output}`,
-      }),
+    const delivered = await deliverCard({
+      context: params.context,
+      data,
+      status: params.status,
+      title: data.title,
+      output: params.output,
+      settle: true,
     });
 
-    if (stopped) {
+    if (delivered) {
+      setCardState(params.context, {
+        title: data.title,
+        status: params.status,
+      });
       await sdk.taskRuns.clearSlackLiveTaskStreamData({
         runId: params.taskRun.id,
       });
@@ -237,10 +303,17 @@ async function stopStream(params: {
 
 export async function startSlackLiveTaskStream(
   taskRun: TaskRun,
+  context: RunTaskContext,
 ): Promise<void> {
-  // The card keeps the task title until the first real step arrives; this
-  // just warms the stream-data cache so the first event updates instantly.
-  await resolveStreamData(taskRun).catch(() => {});
+  // The launcher opened the card with the prompt; the run-scoped lookup
+  // already substitutes the generated task title, so put that on the card
+  // right away (a resumed run after a failed turn also flips it back from
+  // error to in_progress here).
+  const data = await resolveStreamData(taskRun);
+  if (!data) {
+    return;
+  }
+  await updateCard({ taskRun, context, title: data.title });
 }
 
 export async function updateSlackLiveTaskStream(
@@ -255,8 +328,9 @@ export async function updateSlackLiveTaskStream(
   }
 
   if (event.type === 'completion') {
-    await stopStream({
+    await settleCard({
       taskRun,
+      context,
       status: 'complete',
       output: event.text,
     });
@@ -264,60 +338,41 @@ export async function updateSlackLiveTaskStream(
   }
 
   if (event.type === 'text') {
-    // Appended body text is permanent, so transient status lines (provider
-    // retries) never enter it, and each step contributes at most one
-    // narration line to keep the card readable on long runs.
-    if (
-      TRANSIENT_NARRATION_PATTERN.test(event.text.trim()) ||
-      context.slackLiveTaskStepNarrated === true
-    ) {
+    // Transient status lines (provider retries) never reach the card.
+    if (TRANSIENT_NARRATION_PATTERN.test(event.text.trim())) {
       return;
     }
-    context.slackLiveTaskStepNarrated = true;
-    await appendCardUpdate({ taskRun, context, output: event.text });
+    await updateCard({ taskRun, context, title: event.text });
     return;
   }
 
   if (event.type === 'todo_update') {
-    const completedCount = event.todos.filter(
-      (todo) => todo.status === 'completed',
-    ).length;
-    const progress = `${completedCount}/${event.todos.length}`;
     const current =
       event.todos.find((todo) => todo.status === 'in_progress') ??
       event.todos.find((todo) => todo.status === 'pending');
 
-    await appendCardUpdate({
+    await updateCard({
       taskRun,
       context,
-      title: current
-        ? `${current.content} (${progress})`
-        : `${progress} steps complete`,
+      title: current ? current.content : WRAPPING_UP_TITLE,
     });
     return;
   }
 
   if (event.type === 'request_user_input' || event.type === 'followup') {
-    await appendCardUpdate({
-      taskRun,
-      context,
-      title: 'Waiting for your input…',
-    });
+    await updateCard({ taskRun, context, title: WAITING_FOR_INPUT_TITLE });
     return;
   }
 
   if (event.type === 'request_user_input_response') {
-    await appendCardUpdate({
-      taskRun,
-      context,
-      title: 'Continuing with your answer…',
-    });
+    await updateCard({ taskRun, context, title: CONTINUING_TITLE });
   }
 }
 
 export async function finishSlackLiveTaskStream(
   taskRun: TaskRun,
   status: RunStatus,
+  context: RunTaskContext,
 ): Promise<void> {
   // Idle runs retain the stream for a later resume.
   if (status === RunStatus.Idle) {
@@ -329,21 +384,33 @@ export async function finishSlackLiveTaskStream(
     // stream (and cleared its data) with the real output. This fallback
     // guarantees the card cannot stay spinning when that event is lost or
     // its single Slack call failed.
-    await stopStream({
+    await settleCard({
       taskRun,
+      context,
       status: 'complete',
       output: 'Task completed.',
     });
     return;
   }
 
-  await stopStream({
+  if (status === RunStatus.Canceled) {
+    await settleCard({
+      taskRun,
+      context,
+      status: 'error',
+      output: 'Task canceled.',
+    });
+    return;
+  }
+
+  // A failed turn is not the end of the task: the workspace is retained and
+  // the next run (a follow-up or a retry) keeps driving this same card. Show
+  // the failure without settling the stream or releasing its data.
+  await updateCard({
     taskRun,
+    context,
+    title: FAILED_TURN_TITLE,
     status: 'error',
-    output:
-      status === RunStatus.Canceled
-        ? 'Task canceled.'
-        : 'The task stopped because of an error.',
   });
 }
 
@@ -368,9 +435,9 @@ export function getSlackLiveTaskStreamRunTaskCallbacks(
   }
 
   return {
-    onStart: async (run) => {
+    onStart: async (run, _taskId, context) => {
       try {
-        await startSlackLiveTaskStream(run);
+        await startSlackLiveTaskStream(run, context);
       } catch (error) {
         reportStreamCallbackError(error, 'slackLiveTaskStream.onStart', run.id);
       }
@@ -386,9 +453,9 @@ export function getSlackLiveTaskStreamRunTaskCallbacks(
         );
       }
     },
-    onExit: async (run, status) => {
+    onExit: async (run, status, context) => {
       try {
-        await finishSlackLiveTaskStream(run, status);
+        await finishSlackLiveTaskStream(run, status, context);
       } catch (error) {
         reportStreamCallbackError(error, 'slackLiveTaskStream.onExit', run.id);
       }

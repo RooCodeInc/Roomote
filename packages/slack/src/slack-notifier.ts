@@ -89,6 +89,18 @@ export type SlackTaskStreamStatus =
   | 'complete'
   | 'error';
 
+/** Outcome of a stream append/stop; `error` is Slack's error code. */
+export type SlackTaskStreamResult =
+  | { ok: true }
+  | { ok: false; error: string | null };
+
+/** Slack errors that mean the stream is gone for good (expired server-side
+ * or stopped), so the card can only be changed through chat.update. */
+export const SLACK_TASK_STREAM_GONE_ERRORS: ReadonlySet<string> = new Set([
+  'message_not_in_streaming_state',
+  'stopped_by_user',
+]);
+
 export interface SlackTaskStreamUpdate {
   id: string;
   title: string;
@@ -128,6 +140,14 @@ function truncatePreservingWhitespace(text: string, maxLength: number): string {
   }
 
   return `${text.slice(0, maxLength - 1)}…`;
+}
+
+function toTaskStreamResult(
+  response: SlackResponse | null,
+): SlackTaskStreamResult {
+  return response?.ok === true
+    ? { ok: true }
+    : { ok: false, error: response?.error ?? null };
 }
 
 /** Cap each task_update field at its rendering-safe budget. */
@@ -1120,14 +1140,14 @@ export class SlackNotifier {
     channel: string;
     messageTs: string;
     task: SlackTaskStreamUpdate;
-  }): Promise<boolean> {
+  }): Promise<SlackTaskStreamResult> {
     const response = await this.callSlackAgentApi('chat.appendStream', {
       channel,
       ts: messageTs,
       chunks: [fitTaskStreamUpdate(task)],
     });
 
-    return response?.ok === true;
+    return toTaskStreamResult(response);
   }
 
   /** Settles a native Slack task stream with its final task-card state. */
@@ -1139,14 +1159,14 @@ export class SlackNotifier {
     channel: string;
     messageTs: string;
     task: SlackTaskStreamUpdate;
-  }): Promise<boolean> {
+  }): Promise<SlackTaskStreamResult> {
     const response = await this.callSlackAgentApi('chat.stopStream', {
       channel,
       ts: messageTs,
       chunks: [fitTaskStreamUpdate(task)],
     });
 
-    return response?.ok === true;
+    return toTaskStreamResult(response);
   }
 
   public async postMessage(message: SlackMessage) {

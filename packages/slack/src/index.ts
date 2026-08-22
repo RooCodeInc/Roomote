@@ -11,6 +11,7 @@ export * from './automation-root-footer';
 export * from './automation-result-blocks';
 export * from './handle-followup-answer';
 export * from './interactive-response';
+export * from './live-task-card-blocks';
 export * from './live-task-stream';
 export * from './markdown-converter';
 export * from './mcp-recommendations';

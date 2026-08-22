@@ -1,8 +1,10 @@
-export { SlackNotifier } from './slack-notifier';
+export { SlackNotifier, SLACK_TASK_STREAM_GONE_ERRORS } from './slack-notifier';
 export type {
+  SlackTaskStreamResult,
   SlackTaskStreamStatus,
   SlackTaskStreamUpdate,
 } from './slack-notifier';
+export { buildSlackLiveTaskCardBlocks } from './live-task-card-blocks';
 export {
   buildSlackLiveTaskTitle,
   clearSlackLiveTaskStreamData,

@@ -1010,7 +1010,7 @@ export class MockSlackServer {
         if (message.streaming_state === 'completed') {
           json(response, 200, {
             ok: false,
-            error: 'streaming_state_conflict',
+            error: 'message_not_in_streaming_state',
           });
           return;
         }

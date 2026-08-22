@@ -289,7 +289,7 @@ describe('SlackNotifier', () => {
           messageTs: 'stream-ts',
           task: { ...initialTask, status: 'in_progress' },
         }),
-      ).resolves.toBe(true);
+      ).resolves.toEqual({ ok: true });
       await expect(
         notifier.stopTaskStream({
           channel: 'C123',
@@ -300,7 +300,7 @@ describe('SlackNotifier', () => {
             output: 'Ready for review',
           },
         }),
-      ).resolves.toBe(true);
+      ).resolves.toEqual({ ok: true });
 
       expect(getGlobalWithFetch().fetch).toHaveBeenNthCalledWith(
         1,

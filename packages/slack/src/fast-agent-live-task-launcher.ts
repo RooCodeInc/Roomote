@@ -106,17 +106,18 @@ export function createFastAgentSlackLiveTaskLauncher(
     }
   };
 
-  // The generated task title usually lands right after enqueue, well
+  // The generated task title usually lands shortly after enqueue, well
   // before the worker's first event; refresh the card's opening
   // (prompt-derived) title as soon as it exists. Bounded to the
-  // pre-worker window so it never overwrites a step title.
+  // pre-worker window so it never overwrites a step title (the worker
+  // also pushes the generated title itself on start).
   const refreshLiveTaskCardTitle = async ({
     taskId,
   }: {
     taskId: string;
   }): Promise<void> => {
     try {
-      for (const delayMs of [0, 5_000]) {
+      for (const delayMs of [0, 3_000, 8_000, 15_000, 30_000]) {
         if (delayMs > 0) {
           await new Promise((resolve) => setTimeout(resolve, delayMs));
         }
