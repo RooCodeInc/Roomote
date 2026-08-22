@@ -1,26 +1,5 @@
+import { convertMarkdownToRichText } from './markdown-rich-text';
 import type { SlackTaskStreamStatus } from './slack-notifier';
-
-export interface SlackRichTextValue {
-  type: 'rich_text';
-  elements: Array<{
-    type: 'rich_text_section';
-    elements: Array<{ type: 'text'; text: string }>;
-  }>;
-}
-
-/** Wrap plain text as the single rich_text value task_card fields expect;
- * each non-empty line renders as its own section. */
-export function buildSlackRichTextValue(text: string): SlackRichTextValue {
-  const lines = text.split('\n').filter((line) => line.trim().length > 0);
-
-  return {
-    type: 'rich_text',
-    elements: (lines.length > 0 ? lines : ['']).map((line) => ({
-      type: 'rich_text_section',
-      elements: [{ type: 'text', text: line }],
-    })),
-  };
-}
 
 export interface SlackLiveTaskCardContent {
   taskUpdateId: string;
@@ -56,7 +35,7 @@ export function buildSlackLiveTaskCardBlocks(
         task_id: content.taskUpdateId,
         title: content.title,
         status: content.status,
-        ...(message ? { output: buildSlackRichTextValue(message) } : {}),
+        ...(message ? { output: convertMarkdownToRichText(message) } : {}),
         ...(content.taskUrl
           ? {
               sources: [

@@ -14,6 +14,7 @@ export * from './interactive-response';
 export * from './live-task-card-blocks';
 export * from './live-task-stream';
 export * from './markdown-converter';
+export * from './markdown-rich-text';
 export * from './mcp-recommendations';
 export * from './mcp-setup-suggestion';
 export * from './manager-mcp-setup';
