@@ -329,6 +329,34 @@ describe('Slack live task card', () => {
     expect(renderedCard(3)).not.toHaveProperty('output');
   });
 
+  it('retries an identical message after Slack rejects the render', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    mocks.updateMessage.mockResolvedValueOnce(false);
+
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1000, text: 'Inspecting the registry.' },
+      context,
+    );
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1001, text: 'Inspecting the registry.' },
+      context,
+    );
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1002, text: 'Inspecting the registry.' },
+      context,
+    );
+
+    // First render rejected, second delivered, third deduplicated.
+    expect(mocks.updateMessage).toHaveBeenCalledTimes(2);
+    expect(renderedCard(2)).toMatchObject({
+      output: text('Inspecting the registry.'),
+    });
+  });
+
   it('does not release the card when the settling update fails', async () => {
     mocks.updateMessage.mockResolvedValueOnce(false);
 

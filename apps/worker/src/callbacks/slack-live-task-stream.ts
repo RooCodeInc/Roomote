@@ -56,6 +56,30 @@ function getCardState(context: RunTaskContext): SlackLiveTaskCardState {
   return next;
 }
 
+/** The state Slack last confirmed, recorded only after a successful
+ * chat.update so a rejected render never suppresses the retry: the next
+ * event re-renders the full desired state and is compared against what
+ * was actually delivered. */
+function getDeliveredCardState(
+  context: RunTaskContext,
+): SlackLiveTaskCardState | undefined {
+  const delivered = context.slackLiveTaskCardDelivered;
+  return delivered && typeof delivered === 'object'
+    ? (delivered as SlackLiveTaskCardState)
+    : undefined;
+}
+
+function isSameCardState(
+  a: SlackLiveTaskCardState | undefined,
+  b: SlackLiveTaskCardState,
+): boolean {
+  return (
+    a !== undefined &&
+    a.status === b.status &&
+    (a.message ?? '') === (b.message ?? '')
+  );
+}
+
 async function enqueueCardRender(
   runId: number,
   render: () => Promise<void>,
@@ -166,6 +190,14 @@ async function renderCard(
   const state = { ...getCardState(context) };
 
   await enqueueCardRender(taskRun.id, async () => {
+    // Nothing new since the last confirmed render. Settling renders always
+    // go out: they also release the card data.
+    if (
+      !options.settle &&
+      isSameCardState(getDeliveredCardState(context), state)
+    ) {
+      return;
+    }
     if (options.refreshData) {
       // Fetch fresh data for the final render so the settled card carries
       // the task's latest generated title.
@@ -189,7 +221,12 @@ async function renderCard(
       }),
     });
 
-    if (updated && options.settle) {
+    if (!updated) {
+      return;
+    }
+    context.slackLiveTaskCardDelivered = state;
+
+    if (options.settle) {
       await sdk.taskRuns.clearSlackLiveTaskStreamData({
         runId: taskRun.id,
       });
@@ -234,9 +271,6 @@ export async function updateSlackLiveTaskStream(
     const text = event.text.trim();
     // Transient status lines (provider retries) never reach the card.
     if (!text || TRANSIENT_NARRATION_PATTERN.test(text)) {
-      return;
-    }
-    if (state.message === text) {
       return;
     }
     state.message = text;

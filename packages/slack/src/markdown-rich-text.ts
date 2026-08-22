@@ -40,8 +40,10 @@ export interface SlackRichTextValue {
   elements: SlackRichTextBlockElement[];
 }
 
+// Every repetition is bounded so a pathological message (for example a
+// long run of "[" or "<http://|") cannot make matching superlinear.
 const INLINE_PATTERN =
-  /(`[^`\n]+`)|(\*\*[^*\n]+?\*\*)|(__[^_\n]+?__)|(~~[^~\n]+?~~)|(\[[^\]\n]+\]\((?:https?:\/\/)[^)\s]+\))|(<(?:https?:\/\/)[^>\s|]+(?:\|[^>]+)?>)|(\b(?:https?:\/\/)[^\s<>)]+)|((?<![\w*])\*[^*\n]+?\*(?![\w*]))|((?<![\w_])_[^_\n]+?_(?![\w_]))/g;
+  /(`[^`\n]{1,500}`)|(\*\*[^*\n]{1,500}?\*\*)|(__[^_\n]{1,500}?__)|(~~[^~\n]{1,500}?~~)|(\[[^\]\n]{1,500}\]\((?:https?:\/\/)[^)\s]{1,2000}\))|(<(?:https?:\/\/)[^>\s|]{1,2000}(?:\|[^>\n]{1,500})?>)|(\b(?:https?:\/\/)[^\s<>)]{1,2000})|((?<![\w*])\*[^*\n]{1,500}?\*(?![\w*]))|((?<![\w_])_[^_\n]{1,500}?_(?![\w_]))/g;
 
 function withStyle(
   element: SlackRichTextInlineElement,
