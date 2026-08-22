@@ -15,6 +15,7 @@ import {
 import {
   PR_REVIEW_NOTIFICATION_DEFER_MS,
   PR_REVIEW_NOTIFICATION_MAX_DEFERRALS,
+  PrReviewNotificationRateLimitError,
   attachPendingPrReviewActionMessage,
   getCommunicationProviderAdapter,
   type PrReviewNotificationRequest,
@@ -515,6 +516,20 @@ ${delivery.text}`;
       );
     }
   } catch (error) {
+    if (error instanceof PrReviewNotificationRateLimitError) {
+      const jitterMs = Math.floor(Math.random() * 30_000);
+      const delayMs = error.retryAfterMs + jitterMs;
+      await schedulePrReviewNotificationJob({
+        request: data,
+        delayMs,
+        countDeferral: false,
+      });
+      console.warn(
+        `[PrReviewNotification] GitHub installation rate limited; deferred ${data.repository}#${data.prNumber} for ${delayMs}ms`,
+      );
+      return;
+    }
+
     // Put the drained events back so a retried job can deliver them.
     try {
       await requeuePendingPrReviewActivity({ target, events });

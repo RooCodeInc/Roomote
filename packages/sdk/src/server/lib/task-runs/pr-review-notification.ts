@@ -403,9 +403,11 @@ export async function resolvePrReviewNotificationRoute(
 export async function schedulePrReviewNotificationJob({
   request,
   delayMs,
+  countDeferral = true,
 }: {
   request: PrReviewNotificationRequest;
   delayMs: number;
+  countDeferral?: boolean;
 }): Promise<void> {
   if (!request.deliveryIds || !request.leaseToken) {
     throw new Error('Cannot defer a PR review notification without a lease');
@@ -414,6 +416,7 @@ export async function schedulePrReviewNotificationJob({
   await deferPrReviewDeliveries(
     { deliveryIds: request.deliveryIds, leaseToken: request.leaseToken },
     new Date(Date.now() + delayMs),
+    { incrementDeferrals: countDeferral },
   );
 }
 
