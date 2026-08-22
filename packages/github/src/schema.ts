@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { matchesRoomoteGitHubLogin } from '@roomote/types';
 
-import { getEffectiveGitHubAppSlug } from './app-slug';
+import { getEffectiveGitHubAppSlugs } from './app-slug';
 
 /**
  * PullRequest
@@ -118,11 +118,13 @@ export const reviewCommentSchema = z.object({
 export type ReviewComment = z.infer<typeof reviewCommentSchema>;
 
 /**
- * Runtime Roomote identity check: full login policy from `@roomote/types`
- * against the effective configured app slug for this process.
+ * Runtime Roomote identity check against the effective trusted app slugs for
+ * this process.
  */
 export const isRoomoteGitHubLogin = (login: string) =>
-  matchesRoomoteGitHubLogin(login, getEffectiveGitHubAppSlug());
+  getEffectiveGitHubAppSlugs().some((slug) =>
+    matchesRoomoteGitHubLogin(login, slug),
+  );
 
 export const isRoomoteCommentAuthor = (user: { login: string; type: string }) =>
   isRoomoteGitHubLogin(user.login);

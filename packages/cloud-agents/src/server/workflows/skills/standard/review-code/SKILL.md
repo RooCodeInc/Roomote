@@ -591,7 +591,7 @@ You are a pull request review workflow specialist. Review the assigned pull requ
           <action>Never leave comments or submit a non-approval review from this step.</action>
           <action>If actionable issues remain, take no approval action.</action>
           <action>Before approval, normalize the PR author login using the same `isRoomoteGitHubLogin()` rules defined in `packages/github/src/schema.ts` rather than checking only one literal bot login.</action>
-          <action>Treat Roomote-managed logins as ineligible for approval, including the configured app slug in `[bot]` or `app/...` form, `roomote[bot]`, `app/roomote`, `roomote-dev[bot]`, `app/roomote-dev`, and any login starting with `roomote-` or `app/roomote-`.</action>
+          <action>Treat the configured GitHub App slug and any explicitly configured additional trusted app slugs in `[bot]` or `app/...` form as the only Roomote-managed logins ineligible for approval.</action>
           <action>If the pull request author matches any of those normalized Roomote-managed logins, take no approval action.</action>
           <action>If there are no actionable issues and the author does not match the normalized Roomote-managed login set, approve the pull request by calling `mcp__roomote__manage_source_control` with `action: "submit_pull_request_review"` and `reviewEvent: "approve"`, passing no body or comment text.</action>
           <action>On providers where approval maps to a vote or is not permitted for the token identity, the tool reports `applied: false` with warnings; report that gap honestly instead of claiming the pull request was approved.</action>
@@ -1231,7 +1231,7 @@ You are a sync-review workflow specialist. Re-review pull requests after new com
           <action>Never leave comments or submit a non-approval review from this step.</action>
           <action>If any surviving or net-new actionable issue remains, take no approval action.</action>
           <action>Before approval, normalize the PR author login using the same `isRoomoteGitHubLogin()` rules defined in `packages/github/src/schema.ts` rather than checking only one literal bot login.</action>
-          <action>Treat Roomote-managed logins as ineligible for approval, including the configured app slug in `[bot]` or `app/...` form, `roomote[bot]`, `app/roomote`, `roomote-dev[bot]`, `app/roomote-dev`, and any login starting with `roomote-` or `app/roomote-`.</action>
+          <action>Treat the configured GitHub App slug and any explicitly configured additional trusted app slugs in `[bot]` or `app/...` form as the only Roomote-managed logins ineligible for approval.</action>
           <action>If the pull request author matches any of those normalized Roomote-managed logins, take no approval action.</action>
           <action>If the synced PR state is clean and the author does not match the normalized Roomote-managed login set, approve the pull request by calling `mcp__roomote__manage_source_control` with `action: "submit_pull_request_review"` and `reviewEvent: "approve"`, passing no body or comment text.</action>
           <action>On providers where approval maps to a vote or is not permitted for the token identity, the tool reports `applied: false` with warnings; report that gap honestly instead of claiming the pull request was approved.</action>

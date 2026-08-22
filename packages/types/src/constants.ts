@@ -218,49 +218,7 @@ export function rewritePrBodyAttribution(
 }
 
 /**
- * Hosted-product GitHub App slugs Roomote always treats as its own bots.
- * Custom deployments still add their configured slug via helpers below.
- */
-export const ROOMOTE_GITHUB_HOSTED_APP_SLUGS = [
-  'roomote',
-  'roomote-dev',
-] as const;
-
-/**
- * Closed set of app slugs whose exact bot/`app/` logins are managed by Roomote.
- * Includes the hosted product slugs plus any configured deployment slug.
- */
-export function getRoomoteGitHubAppSlugs(
-  githubAppSlug?: string | null,
-): string[] {
-  const slugs = new Set<string>(ROOMOTE_GITHUB_HOSTED_APP_SLUGS);
-  const normalizedSlug = githubAppSlug?.trim().toLowerCase();
-
-  if (normalizedSlug) {
-    slugs.add(normalizedSlug);
-  }
-
-  return Array.from(slugs);
-}
-
-/**
- * Exact Roomote-managed GitHub logins for finite allowlists (collaborators,
- * onboarding lists, etc.). Does not enumerate open `roomote-*` prefix forms —
- * those are recognized only by {@link matchesRoomoteGitHubLogin}.
- */
-export function getRoomoteManagedGitHubLogins(
-  githubAppSlug?: string | null,
-): string[] {
-  return getRoomoteGitHubAppSlugs(githubAppSlug).flatMap((slug) => [
-    getGitHubAppBotLogin(slug),
-    `app/${slug}`,
-  ]);
-}
-
-/**
- * Full Roomote GitHub login identity policy (pure):
- * - exact bot/`app/` logins for hosted + configured app slugs
- * - any `roomote-*` / `app/roomote-*` login form
+ * Match exact bot/`app/` logins for the configured GitHub App slug.
  *
  * Runtime call sites that need the deployment's effective slug should prefer
  * `@roomote/github` wrappers such as `Schemas.isRoomoteGitHubLogin`.
@@ -270,15 +228,14 @@ export function matchesRoomoteGitHubLogin(
   githubAppSlug?: string | null,
 ): boolean {
   const normalizedLogin = login.toLowerCase();
+  const normalizedSlug = githubAppSlug?.trim().toLowerCase();
 
-  for (const managedLogin of getRoomoteManagedGitHubLogins(githubAppSlug)) {
-    if (normalizedLogin === managedLogin.toLowerCase()) {
-      return true;
-    }
+  if (!normalizedSlug) {
+    return false;
   }
 
   return (
-    normalizedLogin.startsWith('roomote-') ||
-    normalizedLogin.startsWith('app/roomote-')
+    normalizedLogin === getGitHubAppBotLogin(normalizedSlug) ||
+    normalizedLogin === `app/${normalizedSlug}`
   );
 }

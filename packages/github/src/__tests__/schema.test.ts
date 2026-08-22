@@ -3,13 +3,16 @@ describe('isRoomoteGitHubLogin', () => {
     vi.resetModules();
   });
 
-  it('recognizes both roomote and roomote-dev app logins', async () => {
+  it('recognizes configured and additional app logins', async () => {
     vi.doMock('@roomote/env', async (importOriginal) => {
       const actual = await importOriginal<typeof import('@roomote/env')>();
 
       return {
         ...actual,
-        Env: { R_GITHUB_APP_SLUG: 'roomote-dev' },
+        Env: {
+          R_GITHUB_APP_SLUG: 'roomote-dev',
+          R_GITHUB_ADDITIONAL_APP_SLUGS: ' roomote, , Acme,roomote ',
+        },
       };
     });
 
@@ -19,16 +22,20 @@ describe('isRoomoteGitHubLogin', () => {
     expect(isRoomoteGitHubLogin('app/roomote')).toBe(true);
     expect(isRoomoteGitHubLogin('roomote-dev[bot]')).toBe(true);
     expect(isRoomoteGitHubLogin('app/roomote-dev')).toBe(true);
+    expect(isRoomoteGitHubLogin('acme[bot]')).toBe(true);
     expect(isRoomoteGitHubLogin('octocat')).toBe(false);
   });
 
-  it('recognizes open roomote-* prefix forms', async () => {
+  it('rejects unconfigured roomote-* prefix forms', async () => {
     vi.doMock('@roomote/env', async (importOriginal) => {
       const actual = await importOriginal<typeof import('@roomote/env')>();
 
       return {
         ...actual,
-        Env: { R_GITHUB_APP_SLUG: 'roomote' },
+        Env: {
+          R_GITHUB_APP_SLUG: 'roomote',
+          R_GITHUB_ADDITIONAL_APP_SLUGS: '',
+        },
       };
     });
 
@@ -37,8 +44,8 @@ describe('isRoomoteGitHubLogin', () => {
 
     setConfiguredGitHubAppSlugCache(null);
 
-    expect(isRoomoteGitHubLogin('roomote-staging[bot]')).toBe(true);
-    expect(isRoomoteGitHubLogin('app/roomote-canary')).toBe(true);
+    expect(isRoomoteGitHubLogin('roomote-staging[bot]')).toBe(false);
+    expect(isRoomoteGitHubLogin('app/roomote-canary')).toBe(false);
     expect(isRoomoteGitHubLogin('dependabot[bot]')).toBe(false);
   });
 
@@ -48,7 +55,10 @@ describe('isRoomoteGitHubLogin', () => {
 
       return {
         ...actual,
-        Env: { R_GITHUB_APP_SLUG: 'roomote' },
+        Env: {
+          R_GITHUB_APP_SLUG: 'roomote',
+          R_GITHUB_ADDITIONAL_APP_SLUGS: 'trusted-reviewer',
+        },
       };
     });
 
@@ -65,10 +75,10 @@ describe('isRoomoteGitHubLogin', () => {
 
     expect(isRoomoteGitHubLogin('acme[bot]')).toBe(true);
     expect(isRoomoteGitHubLogin('app/acme')).toBe(true);
-    // The hosted-product logins stay recognized alongside the configured one.
-    expect(isRoomoteGitHubLogin('roomote[bot]')).toBe(true);
-    expect(isRoomoteGitHubLogin('roomote-dev[bot]')).toBe(true);
-    expect(isRoomoteGitHubLogin('roomote-preview[bot]')).toBe(true);
+    expect(isRoomoteGitHubLogin('roomote[bot]')).toBe(false);
+    expect(isRoomoteGitHubLogin('roomote-dev[bot]')).toBe(false);
+    expect(isRoomoteGitHubLogin('roomote-preview[bot]')).toBe(false);
+    expect(isRoomoteGitHubLogin('trusted-reviewer[bot]')).toBe(true);
     expect(isRoomoteGitHubLogin('octocat')).toBe(false);
   });
 });
