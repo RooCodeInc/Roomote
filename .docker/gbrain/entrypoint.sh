@@ -431,6 +431,10 @@ commit_brain_tree() {
 fence_backfill() {
   echo "[gbrain-entrypoint] fencing unfenced facts (v0.32.2 backfill)"
   commit_brain_tree "roomote: commit maintenance-written pages before fence backfill"
+  # Facts whose entity page does not exist can never be fenced, so the run
+  # reports "partial" every time, and three partials wedge the ledger. The
+  # retry marker clears that each night; on its own it only writes the marker.
+  gbrain apply-migrations --force-retry 0.32.2 --non-interactive >/dev/null 2>&1 || true
   gbrain apply-migrations --migration 0.32.2 --non-interactive 2>&1 \
     | sed 's/^/[gbrain-entrypoint] fence-backfill: /' || true
   commit_brain_tree "roomote: fence backfill (v0.32.2)"
