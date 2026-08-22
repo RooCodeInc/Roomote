@@ -139,7 +139,9 @@ export function buildGranolaMeetingPage(
     ...renderBrainFrontmatter({
       type: BRAIN_PAGE_TYPES.meeting,
       title,
-      created: day,
+      // `day` is the literal "undated" when Granola omits the timestamp;
+      // only a real date may stand as `created`.
+      created: createdAt ? day : null,
       fields: [
         id && `granola_note_id: ${id}`,
         `date: ${day}`,

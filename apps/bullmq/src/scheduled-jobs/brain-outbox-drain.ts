@@ -205,7 +205,9 @@ export function buildMemoryPage(input: {
     ...renderBrainFrontmatter({
       type: BRAIN_PAGE_TYPES.taskMemory,
       title: input.taskTitle,
-      created: completed,
+      // Legacy completed runs can lack a completion time; `completed` is the
+      // literal "unknown" then, which is no date at all.
+      created: completedAtIso ?? null,
       fields: [
         `roomote_task_id: ${input.taskId}`,
         `roomote_run_id: ${input.runId}`,
