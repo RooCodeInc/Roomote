@@ -225,6 +225,26 @@ describe('steerTask procedure', () => {
     });
   });
 
+  it('skips Slack reply quote tracking for orchestrated steers', async () => {
+    const { caller, sendFollowUpPrompt } = createCaller({
+      supportsNativeTurnSteering: true,
+    });
+
+    const result = await caller.commands.steerTask({
+      prompt: 'Continue the delegated task',
+      quoteText: 'Continue the delegated task',
+      suppressSlackReplyQuote: true,
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(mockTrackSlackReplyQuote).not.toHaveBeenCalled();
+    expect(sendFollowUpPrompt).toHaveBeenCalledWith({
+      prompt: 'Continue the delegated task',
+      autoSteerWhenQueued: true,
+      userId: 'sender-user-1',
+    });
+  });
+
   it('forwards workflow phase for explicit steer prompts', async () => {
     const { caller, sendFollowUpPrompt } = createCaller({
       supportsNativeTurnSteering: true,

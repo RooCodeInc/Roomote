@@ -70,6 +70,7 @@ export const answerUserInputRequest = publicProcedure
       requestId: z.string().min(1),
       answers: requestUserInputAnswersSchema,
       userName: z.string().optional(),
+      suppressSlackReplyQuote: z.boolean().optional(),
     }),
   )
   .mutation(async ({ input, ctx }) => {
@@ -106,16 +107,18 @@ export const answerUserInputRequest = publicProcedure
     let trackedSlackQuote: { quoteId?: string } | null = null;
 
     try {
-      trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
-        runId: ctx.runId,
-        text: formatRequestUserInputResponseText(pendingRequest ?? null, {
-          resolution: getRequestUserInputResponseResolution(input.answers),
-          answers: input.answers,
-        }),
-        userName: input.userName,
-        logPrefix: 'answerUserInputRequest',
-        warn: (message) => ctx.harnessLogger?.warn(message),
-      });
+      if (!input.suppressSlackReplyQuote) {
+        trackedSlackQuote = await trackLatestUserMessageForSlackThreadQuote({
+          runId: ctx.runId,
+          text: formatRequestUserInputResponseText(pendingRequest ?? null, {
+            resolution: getRequestUserInputResponseResolution(input.answers),
+            answers: input.answers,
+          }),
+          userName: input.userName,
+          logPrefix: 'answerUserInputRequest',
+          warn: (message) => ctx.harnessLogger?.warn(message),
+        });
+      }
 
       const sent = ctx.harness.sendCommand({
         commandName: TaskCommandName.AnswerUserInputRequest,

@@ -61,6 +61,7 @@ const REVIEW_HANDOFF_TASK_TYPES = new Set<TaskPayloadKind>([
 type SendMessageErrorStatus = 404 | 409 | 500 | 502;
 export type SendMessageSenderMode =
   | 'authenticated_user'
+  | 'fast_agent'
   | 'linked_review_handoff'
   | 'github_pr_follow_up';
 
@@ -78,6 +79,7 @@ const ACTOR_PRESERVING_MODES = new Set<SendMessageSenderMode>([
 ]);
 
 const SLACK_REPLY_QUOTE_SUPPRESSING_MODES = new Set<SendMessageSenderMode>([
+  'fast_agent',
   'linked_review_handoff',
   'github_pr_follow_up',
 ]);
@@ -1220,6 +1222,9 @@ export async function steerMessageToTask({
                   ...(resolvedQuoteUserName
                     ? { userName: resolvedQuoteUserName }
                     : {}),
+                  ...(senderMode === 'fast_agent'
+                    ? { suppressSlackReplyQuote: true }
+                    : {}),
                 });
               }
             }
@@ -1231,6 +1236,9 @@ export async function steerMessageToTask({
             quoteText,
             ...(resolvedQuoteUserName
               ? { userName: resolvedQuoteUserName }
+              : {}),
+            ...(senderMode === 'fast_agent'
+              ? { suppressSlackReplyQuote: true }
               : {}),
             ...(images?.length ? { images } : {}),
             ...(goal?.status === 'active' ? { goalContext: goal } : {}),

@@ -211,6 +211,28 @@ describe('answerUserInputRequest procedure', () => {
     );
   });
 
+  it('skips Slack reply quote tracking for orchestrated answers', async () => {
+    const { caller, sendCommand } = createCaller({
+      getPendingUserInputRequests: () => [
+        createPendingRequest('rui:session:turn:call'),
+      ],
+    });
+
+    const result = await caller.commands.answerUserInputRequest({
+      requestId: 'rui:session:turn:call',
+      suppressSlackReplyQuote: true,
+      answers: {
+        color: {
+          answers: ['Blue'],
+        },
+      },
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(mockTrackSlackReplyQuote).not.toHaveBeenCalled();
+    expect(sendCommand).toHaveBeenCalledOnce();
+  });
+
   it('stores cancelled quote text when the input request is dismissed', async () => {
     const { caller } = createCaller({
       getPendingUserInputRequests: () => [

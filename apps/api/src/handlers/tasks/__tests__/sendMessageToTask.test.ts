@@ -285,6 +285,7 @@ describe('sendMessageToTask', () => {
       taskId: 'task-1',
       userId: 'user-1',
       message: 'Use a separate helper instead.',
+      senderMode: 'fast_agent',
     });
 
     expect(result).toEqual({ success: true, result: { ok: true } });
@@ -293,6 +294,7 @@ describe('sendMessageToTask', () => {
       answers: {
         approach: { answers: ['Use a separate helper instead.'] },
       },
+      suppressSlackReplyQuote: true,
     });
     expect(mockSteerTaskMutate).not.toHaveBeenCalled();
   });
@@ -933,6 +935,29 @@ describe('sendMessageToTask', () => {
     expect(mockSteerTaskMutate).toHaveBeenCalledWith({
       prompt: 'Pause the implementation and inspect the failing test.',
       quoteText: 'Pause the implementation and inspect the failing test.',
+    });
+  });
+
+  it('does not track or request Slack reply quotes for Fast-agent steers', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(createActiveRun());
+
+    const result = await steerMessageToTask({
+      taskId: 'task-1',
+      userId: 'user-1',
+      message: 'Continue the delegated task.',
+      senderMode: 'fast_agent',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: { ok: true },
+    });
+    expect(mockTrackLatestUserMessageForSlackQuote).not.toHaveBeenCalled();
+    expect(mockTrackLatestUserMessageForReplyQuote).not.toHaveBeenCalled();
+    expect(mockSteerTaskMutate).toHaveBeenCalledWith({
+      prompt: 'Continue the delegated task.',
+      quoteText: 'Continue the delegated task.',
+      suppressSlackReplyQuote: true,
     });
   });
 
