@@ -143,6 +143,8 @@ interface GenerateTrackedNonTaskBaseParams extends NonTaskInferenceTrackingInput
    * outer timeout fires.
    */
   onProviderRetry?: (event: NonTaskProviderRetryEvent) => void | Promise<void>;
+  /** Stop OpenCode's own provider retry loop at this attempt count. */
+  maxProviderRetryAttempts?: number;
 }
 
 export type NonTaskProviderRetryEvent = {
@@ -826,6 +828,25 @@ async function runNonTaskSdkPrompt(
                     `[NonTaskProviderUsage] OpenCode provider retry reporter failed: ${formatOpenCodeSdkError(error)}`,
                   );
                 }
+                if (
+                  params.maxProviderRetryAttempts !== undefined &&
+                  event.properties.status.attempt >=
+                    params.maxProviderRetryAttempts
+                ) {
+                  rejectSessionError(
+                    new NonTaskOpenCodePromptError(
+                      {
+                        name: 'APIError',
+                        data: {
+                          message: event.properties.status.message,
+                          isRetryable: false,
+                        },
+                      },
+                      promptErrorLabel,
+                    ),
+                  );
+                  return;
+                }
               } else if (
                 event.type === 'session.error' &&
                 event.properties.sessionID === sessionId
@@ -1139,6 +1160,38 @@ function findInferenceErrorStatusCode(error: unknown): number | undefined {
   return undefined;
 }
 
+function isInferenceErrorExplicitlyNonRetryable(error: unknown): boolean {
+  const pending: Array<{ value: unknown; depth: number }> = [
+    { value: error, depth: 0 },
+  ];
+  const seen = new Set<object>();
+
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (!current || current.depth > 4) continue;
+
+    const { value, depth } = current;
+    if (typeof value === 'string') {
+      try {
+        pending.push({ value: JSON.parse(value), depth: depth + 1 });
+      } catch {
+        // Provider prose is classified separately below.
+      }
+      continue;
+    }
+    if (!value || typeof value !== 'object' || seen.has(value)) continue;
+
+    seen.add(value);
+    const record = value as Record<string, unknown>;
+    if (record.isRetryable === false) return true;
+    for (const nested of Object.values(record)) {
+      pending.push({ value: nested, depth: depth + 1 });
+    }
+  }
+
+  return false;
+}
+
 export function classifyNonTaskInferenceError(
   error: unknown,
 ): Pick<
@@ -1169,6 +1222,14 @@ export function classifyNonTaskInferenceError(
     (statusCode === 403 && /^\s*(?:<!doctype|<html)/iu.test(responseBody)) ||
     (detail.includes('forbidden:') &&
       detail.includes('request was blocked by a gateway or proxy'));
+
+  if (isInferenceErrorExplicitlyNonRetryable(inferenceError)) {
+    return {
+      message: 'The inference provider rejected the request.',
+      reason: 'provider_error',
+      retryable: false,
+    };
+  }
 
   // Failures inside Roomote's own validation helper (the managed OpenCode
   // server) must not read as provider failures — the candidate credentials

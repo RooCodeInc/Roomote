@@ -917,6 +917,43 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     }
   });
 
+  it('honors provider Retry-After before retrying a 429', async () => {
+    vi.useFakeTimers();
+    try {
+      const rateLimitError = new Error('429 Too Many Requests') as Error & {
+        providerError: unknown;
+      };
+      rateLimitError.providerError = {
+        data: { responseHeaders: { 'retry-after': '12' } },
+      };
+      mocks.generateText
+        .mockRejectedValueOnce(rateLimitError)
+        .mockImplementationOnce(async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'It coordinates incoming requests.',
+          });
+          return '';
+        });
+      const adapter = callbacks();
+
+      const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
+      await vi.runAllTimersAsync();
+
+      await expect(resultPromise).resolves.toBe(
+        'It coordinates incoming requests.',
+      );
+      expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
+        purpose: 'progress',
+        message:
+          'Fast mode’s inference provider is rate limiting requests. Retrying in 12s (attempt 1/3).',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('reports OpenCode internal provider retries while the prompt is pending', async () => {
     mocks.generateText.mockImplementationOnce(
       async (params, _session, options) => {
@@ -938,6 +975,9 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     await expect(
       answerFastAgentQuestion({ ...baseParams, adapter }),
     ).resolves.toBe('It coordinates incoming requests.');
+    expect(mocks.generateText.mock.calls[0]?.[0]).toMatchObject({
+      maxProviderRetryAttempts: 3,
+    });
     expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
       purpose: 'progress',
       message:

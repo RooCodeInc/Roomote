@@ -1,7 +1,9 @@
 import type { ModelMessage } from 'ai';
 import {
   BRAIN_MCP_ID,
+  INFERENCE_PROVIDER_MAX_RETRIES,
   formatErrorForLog,
+  resolveInferenceProviderRetryDelayMs,
   roomoteTaskInspectionArgsSchema,
 } from '@roomote/types';
 import { z } from 'zod';
@@ -123,10 +125,7 @@ function buildIntegrationCallSignature({
   ]);
 }
 
-export const FAST_AGENT_INFERENCE_MAX_RETRIES = 3;
-const FAST_AGENT_RATE_LIMIT_RETRY_BASE_DELAY_MS = 5_000;
-const FAST_AGENT_PROVIDER_RETRY_BASE_DELAY_MS = 1_000;
-const FAST_AGENT_RETRY_MAX_DELAY_MS = 60_000;
+export const FAST_AGENT_INFERENCE_MAX_RETRIES = INFERENCE_PROVIDER_MAX_RETRIES;
 
 type FastAgentInferenceFailure = ReturnType<
   typeof classifyNonTaskInferenceError
@@ -158,18 +157,15 @@ class FastAgentInferenceError extends Error {
 }
 
 function resolveFastAgentInferenceRetryDelayMs(
+  error: unknown,
   failure: FastAgentInferenceFailure,
   retryNumber: number,
 ): number {
-  const baseDelayMs =
-    failure.reason === 'rate_limited'
-      ? FAST_AGENT_RATE_LIMIT_RETRY_BASE_DELAY_MS
-      : FAST_AGENT_PROVIDER_RETRY_BASE_DELAY_MS;
-
-  return Math.min(
-    baseDelayMs * 2 ** Math.max(0, retryNumber - 1),
-    FAST_AGENT_RETRY_MAX_DELAY_MS,
-  );
+  return resolveInferenceProviderRetryDelayMs({
+    error,
+    attemptNumber: retryNumber,
+    rateLimited: failure.reason === 'rate_limited',
+  });
 }
 
 function formatFastAgentInferenceRetryNotice(
@@ -251,6 +247,7 @@ async function runFastAgentInferenceWithRetries<T>(
 
       const attemptNumber = retryNumber + 1;
       const delayMs = resolveFastAgentInferenceRetryDelayMs(
+        error,
         failure,
         attemptNumber,
       );
@@ -947,6 +944,7 @@ export async function answerFastAgentQuestion({
                     NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
                   modelRole: FAST_AGENT_MODEL_ROLE,
                   timeoutMs: null,
+                  maxProviderRetryAttempts: FAST_AGENT_INFERENCE_MAX_RETRIES,
                   system,
                   prompt: promptForAttempt,
                   onProviderRetry: reportProviderRetryEvent,

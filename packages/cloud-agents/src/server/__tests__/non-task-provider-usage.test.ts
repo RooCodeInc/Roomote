@@ -1005,6 +1005,59 @@ describe('resolveOpenCodeSmallModel', () => {
     });
   });
 
+  it('stops OpenCode provider retries at the configured attempt limit', async () => {
+    process.env = {
+      ...originalEnv,
+      OPENCODE_SDK_SERVER_URL: 'http://127.0.0.1:4096',
+    };
+    mockResolveEffectiveModelRuntimeEnv.mockResolvedValue({
+      R_MODEL: 'openai/gpt-5.6-sol',
+    });
+    eventSubscribeMock.mockResolvedValue({
+      stream: (async function* () {
+        yield {
+          type: 'session.status' as const,
+          properties: {
+            sessionID: 'session-1',
+            status: {
+              type: 'retry' as const,
+              attempt: 3,
+              message: 'Provider retry limit exceeded.',
+              next: Date.now() + 4_000,
+            },
+          },
+        };
+      })(),
+    });
+    sessionPromptMock.mockReturnValue(new Promise(() => undefined));
+    const onProviderRetry = vi.fn();
+
+    const {
+      classifyNonTaskInferenceError,
+      generateTrackedNonTaskObject,
+      NON_TASK_INFERENCE_SURFACES,
+    } = await import('../non-task-provider-usage.js');
+    const error = await generateTrackedNonTaskObject({
+      surface: NON_TASK_INFERENCE_SURFACES.fastAgentQuestionAnswering,
+      modelRole: 'primary',
+      schema: z.object({ answer: z.string() }),
+      prompt: 'Answer.',
+      onProviderRetry,
+      maxProviderRetryAttempts: 3,
+    }).catch((caught: unknown) => caught);
+
+    expect(onProviderRetry).toHaveBeenCalledWith(
+      expect.objectContaining({ attempt: 3 }),
+    );
+    expect(classifyNonTaskInferenceError(error)).toMatchObject({
+      retryable: false,
+    });
+    expect(sessionAbortMock).toHaveBeenCalledWith({
+      sessionID: 'session-1',
+      directory: expect.stringContaining('roomote-non-task-'),
+    });
+  });
+
   it.each(['prompt_result', 'session_event'] as const)(
     'preserves and classifies a gateway block when %s settles first',
     async (settlement) => {
@@ -1113,6 +1166,22 @@ describe('resolveOpenCodeSmallModel', () => {
         retryable: false,
       });
     }
+  });
+
+  it('keeps explicitly non-retryable provider errors out of outer retries', async () => {
+    const { classifyNonTaskInferenceError } =
+      await import('../non-task-provider-usage.js');
+
+    expect(
+      classifyNonTaskInferenceError({
+        name: 'APIError',
+        data: {
+          message: 'Too Many Requests',
+          statusCode: 429,
+          isRetryable: false,
+        },
+      }),
+    ).toMatchObject({ retryable: false });
   });
 
   it('continues observing provider errors when retry reporting fails', async () => {
