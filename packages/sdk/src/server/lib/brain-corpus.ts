@@ -298,22 +298,30 @@ async function fetchBrainCorpus(
         throw new Error('list_pages is not walkable in updated_at order');
       }
 
+      let next: CorpusCursor;
+
       if (someEarlier) {
         const boundary = earlier.reduce((latest, page) =>
           page.updatedAt! > latest.updatedAt! ? page : latest,
         );
-        cursor = {
+        next = {
           after: boundary.updatedAt!.toISOString(),
           offset: 0,
           lastSlug: null,
         };
       } else {
-        cursor = {
+        next = {
           after: cursor.after,
           offset: cursor.offset + window.length,
           lastSlug: window.at(-1)!.slug,
         };
       }
+
+      if (next.after === cursor.after && next.offset === cursor.offset) {
+        throw new Error('list_pages ignored the pagination cursor');
+      }
+
+      cursor = next;
     }
 
     return {

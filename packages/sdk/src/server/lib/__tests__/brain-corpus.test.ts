@@ -193,6 +193,14 @@ describe('readBrainCorpus', () => {
     });
   });
 
+  it('returns unavailable when list_pages ignores the keyset cursor', async () => {
+    const fetchMock = vi.fn(async () => toolResponse(windowOf(0, 100)));
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    expect(await readBrainCorpus()).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('shares the cached full listing across settings reads', async () => {
     const fetchMock = vi.fn(async () => toolResponse(windowOf(0, 42)));
     global.fetch = fetchMock as unknown as typeof fetch;
