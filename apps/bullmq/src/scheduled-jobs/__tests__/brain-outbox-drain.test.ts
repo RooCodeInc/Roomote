@@ -284,7 +284,16 @@ describe('task memory page identity', () => {
     });
 
     expect(page.content).not.toContain('\ndate:');
+    expect(page.content).not.toContain('\ncreated:');
     expect(page.content).toContain('\ncompleted_at: unknown\n');
+  });
+
+  it('stamps type, title, and a stable created on memory pages', () => {
+    const page = buildMemoryPage({ ...base, runId: 101 });
+
+    expect(page.content).toMatch(
+      /^---\ntype: task-memory\ntitle: "[^"]+"\ncreated: 2026-08-13T10:00:00\.000Z\n/,
+    );
   });
 });
 

@@ -63,7 +63,12 @@ describe('describeBrainStatus', () => {
 
 describe('describeSourceStatus', () => {
   it('explains every state that is not simply working', () => {
-    expect(describeSourceStatus('ingesting').hint).toBeNull();
+    expect(describeSourceStatus('ingesting')).toMatchObject({
+      label: 'Connected',
+      hint: null,
+    });
+    expect(describeSourceStatus('backfilling').label).toBe('Backfilling');
+    expect(describeSourceStatus('idle').label).toBe('Waiting');
 
     for (const status of ['backfilling', 'idle', 'not_connected'] as const) {
       expect(describeSourceStatus(status).hint).toBeTruthy();

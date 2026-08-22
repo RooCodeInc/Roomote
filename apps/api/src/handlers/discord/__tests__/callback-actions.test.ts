@@ -453,7 +453,7 @@ describe('Discord component callbacks', () => {
     expect(mocks.releaseWorkItem).toHaveBeenCalled();
     expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        text: 'This deployment is read-only. New task launches are paused.',
+        text: 'New tasks are paused due to a billing issue. Please check billing.',
       }),
     );
   });

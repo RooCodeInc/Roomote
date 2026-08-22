@@ -1,4 +1,9 @@
-import { brainNamespacePrefix } from '@roomote/types';
+import {
+  BRAIN_COLLECTOR_IDS,
+  BRAIN_PAGE_TYPES,
+  brainNamespacePrefix,
+  renderBrainFrontmatter,
+} from '@roomote/types';
 import {
   db,
   eq,
@@ -6,6 +11,7 @@ import {
   slackInstallations,
 } from '@roomote/db/server';
 import { createSlackWebClient } from '@roomote/slack';
+import { isBrainSourceAvailable } from '@roomote/sdk/server';
 
 import type {
   BrainCollector,
@@ -187,7 +193,15 @@ export function groupSlackMessagesIntoDayPages(
         });
         const firstTs = chunk[0]!.ts.replace('.', '-');
         const lastTs = chunk.at(-1)!.ts.replace('.', '-');
-        const slug = `${brainNamespacePrefix('slack')}${group.teamId}/${group.channelId}/${group.day}/${firstTs}-${lastTs}`;
+        // Lowercased to gbrain's canonical form: put_page lowercases slugs
+        // before the row is written, so tracking the raw mixed-case string
+        // would inventory pages under names the corpus never stores — and
+        // retirement would never find them. (Slack team/channel ids are
+        // uppercase.) Timeline `source` keys below stay as-is: they are
+        // dedupe keys, not slugs, and changing their case would duplicate
+        // append-only timeline rows.
+        const slug =
+          `${brainNamespacePrefix('slack')}${group.teamId}/${group.channelId}/${group.day}/${firstTs}-${lastTs}`.toLowerCase();
         const people = new Set<string>();
         for (const message of chunk) {
           if (!message.person) continue;
@@ -198,9 +212,12 @@ export function groupSlackMessagesIntoDayPages(
           slug,
           title: `#${group.channelName} — ${group.day}`,
           content: [
-            '---',
-            `date: ${group.day}`,
-            '---',
+            ...renderBrainFrontmatter({
+              type: BRAIN_PAGE_TYPES.slackDay,
+              title: `#${group.channelName} — ${group.day}`,
+              created: group.day,
+              fields: [`date: ${group.day}`],
+            }),
             '',
             // put_page has no title parameter: gbrain derives a page's title
             // from the first markdown heading, and without one it falls back
@@ -425,6 +442,31 @@ async function collectSlackPublicChannelMessages(input: {
     })),
   );
 
+  const stateUpdates: CollectorStateUpdate[] = [];
+  // A completed deep backfill stays honest only while it covers every channel
+  // the bot is in. Membership is re-discovered every pass, so a channel the
+  // finished walk never read (the bot was added after completion) re-arms the
+  // backfill; the preserved completed-set cursor makes the resumed walk read
+  // just that channel's history.
+  const backfillState = await getBrainSyncState(
+    db,
+    slackPublicChannelsCollector.id,
+  );
+
+  if (backfillState?.backfillCompletedAt) {
+    const cursor = parseSlackBackfillCursor(
+      backfillState.backfillCursor ?? null,
+    );
+    const backfilled = new Set(cursor?.completed ?? []);
+
+    if (entries.some((entry) => !backfilled.has(entry.key))) {
+      stateUpdates.push({
+        collectorId: slackPublicChannelsCollector.id,
+        backfillCompletedAt: null,
+      });
+    }
+  }
+
   // Oldest partitions go first so a continuously busy channel cannot starve
   // another channel when the shared per-pass page budget is exhausted.
   entriesWithState.sort(
@@ -434,7 +476,6 @@ async function collectSlackPublicChannelMessages(input: {
   );
 
   const pages: CollectorPage[] = [];
-  const stateUpdates: CollectorStateUpdate[] = [];
   const itemUpdates: CollectorItemUpdate[] = [];
   const pageRetirements: CollectorPageRetirement[] = [];
   const nowMs = input.now.getTime();
@@ -708,11 +749,13 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
   }
 
   if (!entry) {
-    // Every known channel has been read. Deliberately not reported as done:
-    // done is permanent, and this collector has to stay reachable so that a
-    // channel joined later is noticed. The cost of staying open is one
-    // channel listing per pass, and returning the cursor unchanged with no
-    // pages ends the tick immediately.
+    // Every known channel has been read: the deep backfill is genuinely
+    // complete, and reporting it records that honestly (the settings page
+    // reads backfillCompletedAt as "history read"). Completion is not
+    // permanent: the incremental pass re-discovers membership every tick
+    // and re-arms the backfill when a channel this walk never read appears,
+    // and the engine preserves this cursor on completion so the resumed
+    // walk reads only the new channel.
     return {
       pages: [],
       nextCursor: JSON.stringify({
@@ -721,7 +764,7 @@ async function backfillSlackHistoryStep(rawCursor: string | null): Promise<{
         slackCursor: null,
         latest: null,
       }),
-      done: false,
+      done: true,
     };
   }
   const resuming = entry.key === state?.key;
@@ -821,15 +864,10 @@ export const slackPublicChannelsCollector: BrainCollector = {
   // retire the pages they supersede. Pages older than the 90-day backfill
   // window are never re-read and deliberately stay: they may hold history
   // Slack no longer serves.
-  id: 'slack-public-channels:entity-timeline-v3',
+  id: BRAIN_COLLECTOR_IDS.slackPublicChannels,
   displayName: 'Slack public channels',
   async isEnabled() {
-    const installation = await db.query.slackInstallations.findFirst({
-      columns: { id: true },
-      where: eq(slackInstallations.isActive, true),
-    });
-
-    return Boolean(installation);
+    return isBrainSourceAvailable('slack');
   },
   async collect({ now, limit }) {
     return collectSlackPublicChannelMessages({ now, limit });

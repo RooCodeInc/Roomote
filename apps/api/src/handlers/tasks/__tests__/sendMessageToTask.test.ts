@@ -5,7 +5,9 @@ const {
   mockGetTaskChannelBindings,
   mockGetTaskGoalForRun,
   mockFindLatestTaskRun,
+  mockFindReusableGitHubPrFollowUpOwner,
   mockHttpBatchLink,
+  mockNotifyFastAgentParentOnPrFeedback,
   mockSendPromptMutate,
   mockSteerTaskMutate,
   mockTrackLatestUserMessageForReplyQuote,
@@ -13,6 +15,8 @@ const {
   mockRestoreActingUserIdAfterFailedDelivery,
   mockUpdateActingUserIdIfNeeded,
   mockUserFindFirst,
+  mockTaskPullRequestFindFirst,
+  mockTaskRunFindFirst,
 } = vi.hoisted(() => ({
   mockCreateRunToken: vi.fn(),
   mockCreateTRPCProxyClient: vi.fn(),
@@ -20,7 +24,9 @@ const {
   mockGetTaskChannelBindings: vi.fn(),
   mockGetTaskGoalForRun: vi.fn(),
   mockFindLatestTaskRun: vi.fn(),
+  mockFindReusableGitHubPrFollowUpOwner: vi.fn(),
   mockHttpBatchLink: vi.fn((options) => options),
+  mockNotifyFastAgentParentOnPrFeedback: vi.fn(),
   mockSendPromptMutate: vi.fn(),
   mockSteerTaskMutate: vi.fn(),
   mockTrackLatestUserMessageForReplyQuote: vi.fn(),
@@ -28,6 +34,8 @@ const {
   mockRestoreActingUserIdAfterFailedDelivery: vi.fn(),
   mockUpdateActingUserIdIfNeeded: vi.fn(),
   mockUserFindFirst: vi.fn(),
+  mockTaskPullRequestFindFirst: vi.fn(),
+  mockTaskRunFindFirst: vi.fn(),
 }));
 
 vi.mock('../acting-user-sync', () => ({
@@ -52,6 +60,15 @@ vi.mock('@trpc/client', () => ({
     cause?: unknown;
   },
 }));
+
+vi.mock('@roomote/sdk/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@roomote/sdk/server')>();
+
+  return {
+    ...actual,
+    notifyFastAgentParentOnPrFeedback: mockNotifyFastAgentParentOnPrFeedback,
+  };
+});
 
 vi.mock('@roomote/cloud-agents/server', () => ({
   enqueueTask: mockEnqueueTask,
@@ -98,6 +115,7 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
 
   return {
     ...actual,
+    findReusableGitHubPrFollowUpOwner: mockFindReusableGitHubPrFollowUpOwner,
     getTaskGoalForRun: mockGetTaskGoalForRun,
     db: {
       query: {
@@ -105,7 +123,10 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
           findFirst: mockUserFindFirst,
         },
         taskPullRequests: {
-          findFirst: vi.fn(),
+          findFirst: mockTaskPullRequestFindFirst,
+        },
+        taskRuns: {
+          findFirst: mockTaskRunFindFirst,
         },
       },
       update: vi.fn(() => ({
@@ -117,7 +138,10 @@ vi.mock('@roomote/db/server', async (importOriginal) => {
   };
 });
 
-import { EXPIRED_SNAPSHOT_RESUME_ERROR } from '@roomote/types';
+import {
+  EXPIRED_SNAPSHOT_RESUME_ERROR,
+  type RunTokenContext,
+} from '@roomote/types';
 
 import { sendMessageToTask, steerMessageToTask } from '../sendMessageToTask';
 
@@ -187,6 +211,10 @@ describe('sendMessageToTask', () => {
       linearOrganizationId: null,
     });
     mockGetTaskGoalForRun.mockResolvedValue(null);
+    mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue(null);
+    mockNotifyFastAgentParentOnPrFeedback.mockResolvedValue(undefined);
+    mockTaskPullRequestFindFirst.mockResolvedValue(null);
+    mockTaskRunFindFirst.mockResolvedValue(null);
     mockTrackLatestUserMessageForSlackQuote.mockResolvedValue(undefined);
     mockTrackLatestUserMessageForReplyQuote.mockResolvedValue(undefined);
     mockRestoreActingUserIdAfterFailedDelivery.mockResolvedValue(undefined);
@@ -198,6 +226,150 @@ describe('sendMessageToTask', () => {
       name: 'Alice',
       email: 'alice@example.com',
     });
+  });
+
+  it('delivers linked review results to the Fast parent without waking the implementation task', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(
+      createActiveRun({
+        payload: {
+          fastAgentParent: {
+            sessionId: '11111111-1111-4111-8111-111111111111',
+            conversation: {
+              surface: 'slack',
+              workspaceId: 'T123',
+              conversationId: '100.001',
+              replyTarget: { channelId: 'C123', threadId: '100.001' },
+            },
+          },
+        },
+      }),
+    );
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 200,
+      taskId: 'review-task',
+      payloadKind: 'github_pr_review',
+      payload: {
+        repo: 'acme/app',
+        prNumber: 42,
+        prUrl: 'https://github.com/acme/app/pull/42',
+        headSha: 'abc123',
+      },
+    });
+    mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
+      taskId: 'task-1',
+    });
+    mockTaskPullRequestFindFirst.mockResolvedValue({
+      host: 'github.com',
+      prTitle: 'Fix the thing',
+      prUrl: 'https://github.com/acme/app/pull/42',
+      status: 'open',
+    });
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'reviewer-user',
+      authContext: {
+        tokenType: 'run',
+        runId: 200,
+        userId: 'reviewer-user',
+        principal: 'user',
+        version: 1,
+      } as RunTokenContext,
+      senderMode: 'linked_review_handoff',
+      message: `<review_result>
+<review_kind>initial</review_kind>
+<outcome>findings_remain</outcome>
+<finding_count>1</finding_count>
+<title>Review found an issue</title>
+<summary>One issue needs attention.</summary>
+<repository>acme/app</repository>
+<pull_request_number>42</pull_request_number>
+<current_head_sha>abc123</current_head_sha>
+</review_result>`,
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: { sent: true, deliveredToFastParent: true },
+    });
+    expect(mockNotifyFastAgentParentOnPrFeedback).toHaveBeenCalledWith({
+      run: expect.objectContaining({ id: 42, taskId: 'task-1' }),
+      deliveryIds: ['linked-review:review-task:abc123'],
+      reviewTaskId: 'review-task',
+      reviewHeadSha: 'abc123',
+      pullRequest: {
+        provider: 'github',
+        host: 'github.com',
+        repository: 'acme/app',
+        number: 42,
+        title: 'Fix the thing',
+        url: 'https://github.com/acme/app/pull/42',
+        status: 'open',
+      },
+      summary: 'Review found an issue: One issue needs attention.',
+      reviewResult: {
+        reviewKind: 'initial',
+        outcome: 'findings_remain',
+        findingCount: 1,
+        approvalStatus: null,
+        headSha: 'abc123',
+      },
+      suggestedActionPrompt: 'Address the review feedback on acme/app#42.',
+    });
+    expect(mockSendPromptMutate).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
+  });
+
+  it('does not wake the implementation task when its Fast parent is gone', async () => {
+    mockFindLatestTaskRun.mockResolvedValue(createActiveRun({ payload: {} }));
+    mockTaskRunFindFirst.mockResolvedValue({
+      id: 200,
+      taskId: 'review-task',
+      payloadKind: 'github_pr_review',
+      payload: {
+        repo: 'acme/app',
+        prNumber: 42,
+        prUrl: 'https://github.com/acme/app/pull/42',
+        headSha: 'abc123',
+        linkedReviewHandoffTarget: 'fast_parent',
+      },
+    });
+    mockFindReusableGitHubPrFollowUpOwner.mockResolvedValue({
+      taskId: 'task-1',
+    });
+    mockTaskPullRequestFindFirst.mockResolvedValue({
+      host: 'github.com',
+      prTitle: 'Fix the thing',
+      prUrl: 'https://github.com/acme/app/pull/42',
+      status: 'open',
+    });
+
+    const result = await sendMessageToTask({
+      taskId: 'task-1',
+      userId: 'reviewer-user',
+      authContext: {
+        tokenType: 'run',
+        runId: 200,
+        userId: 'reviewer-user',
+        principal: 'user',
+        version: 1,
+      } as RunTokenContext,
+      senderMode: 'linked_review_handoff',
+      message:
+        '<review_result><outcome>findings_remain</outcome><finding_count>1</finding_count></review_result>',
+    });
+
+    expect(result).toEqual({
+      success: true,
+      result: {
+        skipped: true,
+        reason:
+          'Linked review handoff skipped because the Fast parent is no longer available.',
+      },
+    });
+    expect(mockNotifyFastAgentParentOnPrFeedback).not.toHaveBeenCalled();
+    expect(mockSendPromptMutate).not.toHaveBeenCalled();
+    expect(mockEnqueueTask).not.toHaveBeenCalled();
   });
 
   it('writes the acting user BEFORE delivering the prompt to the sandbox', async () => {

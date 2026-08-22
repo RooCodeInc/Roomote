@@ -4,7 +4,6 @@ import { basename } from 'node:path';
 import {
   acquireFastAgentTurnLock,
   answerFastAgentQuestion,
-  createFastAgentSlackTaskLauncher,
   createFastAgentTaskLauncher,
   fastAgentConversationRepository,
   type FastAgentTurnAdapter,
@@ -23,7 +22,11 @@ import {
   taskRuns,
 } from '@roomote/db/server';
 import { Env, getArtifactSigningKey } from '@roomote/env';
-import { SlackNotifier } from '@roomote/slack';
+import {
+  createFastAgentSlackLiveTaskLauncher,
+  resolveSlackReactionNames,
+  SlackNotifier,
+} from '@roomote/slack';
 import {
   ALL_REPOSITORIES,
   buildFastAgentChildTaskMetadata,
@@ -84,6 +87,15 @@ export type FastAgentPullRequestContext = {
 
 type FastAgentParentEvent =
   | {
+      type: 'child_message';
+      taskId: string;
+      runId: number;
+      messageId: string;
+      purpose: 'ack' | 'progress' | 'closeout' | 'clarification';
+      message: string;
+      imageArtifactIds?: string[];
+    }
+  | {
       type: 'artifact_published';
       taskId: string;
       runId: number;
@@ -111,7 +123,34 @@ type FastAgentParentEvent =
       taskId: string;
       runId: number;
       taskUrl: string;
+      untrustedTaskGeneratedContext?: string;
       pullRequest: FastAgentPullRequestContext;
+    }
+  | {
+      type: 'pull_request_feedback';
+      feedbackId: string;
+      taskId: string;
+      runId: number;
+      taskUrl: string;
+      pullRequest: FastAgentPullRequestContext;
+      summary: string;
+      suggestedActionPrompt?: string;
+      reviewResult?: {
+        reviewKind: 'initial' | 'sync' | null;
+        outcome: string | null;
+        findingCount: number | null;
+        approvalStatus: 'approved' | 'skipped' | null;
+        headSha: string | null;
+      };
+    }
+  | {
+      type: 'pull_request_status_changed';
+      taskId: string;
+      runId: number;
+      taskUrl: string;
+      pullRequest: FastAgentPullRequestContext;
+      status: 'merged' | 'closed';
+      actorLogin: string;
     };
 
 export async function listFastAgentPullRequestContexts(
@@ -156,12 +195,24 @@ async function buildSelectedImages(params: {
   event: FastAgentParentEvent;
 }): Promise<FastAgentEventImage[]> {
   const artifactIds = [...new Set(params.artifactIds)];
-  if (params.event.type !== 'artifact_published' || artifactIds.length === 0) {
+  if (
+    artifactIds.length === 0 ||
+    (params.event.type !== 'artifact_published' &&
+      params.event.type !== 'child_message') ||
+    (params.event.type === 'child_message' &&
+      !params.event.imageArtifactIds?.length)
+  ) {
     return [];
   }
 
-  const allowedId = params.event.artifact.id;
-  if (artifactIds.some((id) => id !== allowedId)) {
+  const allowedIds = new Set(
+    params.event.type === 'artifact_published'
+      ? [params.event.artifact.id]
+      : params.event.type === 'child_message'
+        ? (params.event.imageArtifactIds ?? [])
+        : [],
+  );
+  if (artifactIds.some((id) => !allowedIds.has(id))) {
     throw new Error('Fast parent selected an artifact outside this event.');
   }
 
@@ -206,10 +257,16 @@ async function buildSelectedImages(params: {
 
 function buildEventClientMessageSeed(event: FastAgentParentEvent): string {
   switch (event.type) {
+    case 'child_message':
+      return `fast-parent-child-message:${event.messageId}`;
     case 'artifact_published':
       return `fast-parent-artifact:${event.artifact.id}:v${event.artifact.version}`;
     case 'pull_request_opened':
       return `fast-parent-pr-opened:${event.taskId}:${event.pullRequest.url}`;
+    case 'pull_request_feedback':
+      return `fast-parent-pr-feedback:${event.feedbackId}`;
+    case 'pull_request_status_changed':
+      return `fast-parent-pr-status:${event.taskId}:${event.pullRequest.url}:${event.status}`;
     case 'task_settled':
       return `fast-parent-settle:${event.runId}`;
   }
@@ -258,11 +315,25 @@ async function createSlackFastAgentParentTurn(params: {
 
   const conversation = session.conversation;
   const slack = new SlackNotifier(installation.botAccessToken);
+
+  if (
+    params.event.type === 'pull_request_status_changed' &&
+    params.event.status === 'merged'
+  ) {
+    const { completionEmoji } = await resolveSlackReactionNames();
+    await slack.addReaction({
+      channel: conversation.replyTarget.channelId,
+      timestamp: conversation.replyTarget.threadId,
+      name: completionEmoji,
+    });
+  }
+
   return {
     userId: session.userId,
     conversation,
     adapter: {
-      launchTask: createFastAgentSlackTaskLauncher({
+      launchTask: createFastAgentSlackLiveTaskLauncher({
+        slack,
         userId: session.userId,
         teamId: conversation.workspaceId,
         ...(installation.teamDomain
@@ -482,6 +553,7 @@ export async function deliverFastAgentParentEvent(params: {
       question: `<delegated_task_event>${JSON.stringify(params.event)}</delegated_task_event>`,
       userId: parentTurn.userId,
       conversation: parentTurn.conversation,
+      signal: releaseTurnLock.signal,
       turnSource: 'platform_event',
       adapter: {
         ...parentTurn.adapter,

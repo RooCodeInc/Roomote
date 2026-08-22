@@ -20,33 +20,23 @@ import { BrainStatusSection } from './BrainStatusSection';
 import { BrainTaskMemorySection } from './BrainTaskMemorySection';
 
 function SummaryTiles({ settings }: { settings: BrainSettingsData }) {
-  const sourcesConnected = settings.sources.filter(
-    (source) => source.status !== 'not_connected',
-  ).length;
-  const backfilling = settings.sources.filter(
-    (source) => source.status === 'backfilling',
-  ).length;
   const recorded = settings.taskMemories.byStatus.done;
 
   return (
-    <AnalyticsSummaryCardsGrid className="md:grid-cols-3">
+    <AnalyticsSummaryCardsGrid className="md:grid-cols-2">
       <AnalyticsSummaryCard
         label="Pages stored"
         value={
           settings.corpus.totalPages !== null
             ? formatNumber(settings.corpus.totalPages)
             : settings.corpus.reachable
-              ? `${formatNumber(settings.corpus.sampledPages)}${
-                  settings.corpus.truncated ? '+' : ''
-                }`
+              ? formatNumber(settings.corpus.listedPages)
               : 'Unknown'
         }
         secondary={
           settings.corpus.totalPages !== null
             ? 'in the corpus'
-            : settings.corpus.truncated
-              ? 'most recent pages, more in the corpus'
-              : 'in the corpus'
+            : 'in the corpus'
         }
       />
       <AnalyticsSummaryCard
@@ -61,15 +51,6 @@ function SummaryTiles({ settings }: { settings: BrainSettingsData }) {
             : 'none recorded yet'
         }
       />
-      <AnalyticsSummaryCard
-        label="Sources"
-        value={formatNumber(sourcesConnected)}
-        secondary={
-          backfilling > 0
-            ? `of ${settings.sources.length} connected, ${backfilling} backfilling`
-            : `of ${settings.sources.length} connected`
-        }
-      />
     </AnalyticsSummaryCardsGrid>
   );
 }
@@ -77,8 +58,8 @@ function SummaryTiles({ settings }: { settings: BrainSettingsData }) {
 function BrainSettingsSkeleton() {
   return (
     <div className="space-y-6">
-      <AnalyticsSummaryCardsGrid className="md:grid-cols-3">
-        {Array.from({ length: 3 }).map((_, index) => (
+      <AnalyticsSummaryCardsGrid className="md:grid-cols-2">
+        {Array.from({ length: 2 }).map((_, index) => (
           <AnalyticsSummaryCardSkeleton key={index} />
         ))}
       </AnalyticsSummaryCardsGrid>

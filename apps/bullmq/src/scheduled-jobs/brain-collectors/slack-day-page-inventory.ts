@@ -4,7 +4,9 @@ import {
   resolveBrainConnection,
 } from '@roomote/sdk/server';
 import {
+  canonicalizeBrainCollectorItemSlugsAndResetSyncState,
   db,
+  deleteBrainSyncStateFamily,
   getBrainSyncState,
   listBrainCollectorItemsBySlugPrefix,
   seedBrainCollectorItems,
@@ -101,9 +103,14 @@ type SlackDayPageSlugRange = {
 export function parseSlackDayPageSlug(
   slug: string,
 ): SlackDayPageSlugRange | null {
-  const match = slug.match(
-    /^(slack\/[^/]+\/[^/]+\/\d{4}-\d{2}-\d{2}\/)(\d+)-(\d+)-(\d+)-(\d+)$/,
-  );
+  // gbrain stores slugs lowercased, and emission lowercases to match; a
+  // mixed-case slug can still arrive from inventory rows written before
+  // canonicalization, so parse the canonical form rather than rejecting it.
+  const match = slug
+    .toLowerCase()
+    .match(
+      /^(slack\/[^/]+\/[^/]+\/\d{4}-\d{2}-\d{2}\/)(\d+)-(\d+)-(\d+)-(\d+)$/,
+    );
 
   if (!match) {
     return null;
@@ -194,6 +201,53 @@ export async function reconcileSlackDayPages(input: {
   }
 
   return { itemUpdates, pageRetirements };
+}
+
+/**
+ * Sync-state rows superseded by the collector's version bumps. Their
+ * watermarks and cursors are dead, but the rows linger and pollute anything
+ * that aggregates the source's partitions. Extend when bumping again.
+ */
+const SUPERSEDED_SLACK_COLLECTOR_IDS = [
+  'slack-public-channels:entity-timeline-v2',
+];
+
+/**
+ * One-time repairs for inventories written before slugs were canonicalized,
+ * run each collectors tick ahead of the census (both no-op fast once clean):
+ *
+ * - Rewrite mixed-case inventory rows to gbrain's lowercase form, merging
+ *   case-duplicates. Rows tracked under mixed-case slugs name pages the
+ *   corpus never stores, which made retirement miss every census-seeded
+ *   page: reconciliation compared emitted mixed-case prefixes against
+ *   lowercase inventory rows and found nothing.
+ * - When that rewrite actually changed rows, this deployment ran the healing
+ *   replay with the mismatch live and retired nothing — so re-arm the deep
+ *   backfill by clearing its cursor. The replay re-reads the backfill
+ *   window and the (now canonical) reconciliation retires what the first
+ *   pass missed. The rewrite and reset commit atomically so a restart cannot
+ *   strand the repaired inventory behind the old cursor. Deployments that
+ *   never tracked mixed-case rows skip this.
+ * - Drop sync-state rows left behind by superseded collector versions.
+ */
+export async function runSlackDayPageInventoryMaintenance(
+  activeCollectorId: string,
+): Promise<void> {
+  const rewritten = await canonicalizeBrainCollectorItemSlugsAndResetSyncState(
+    db,
+    SLACK_DAY_PAGE_ITEMS_ID,
+    activeCollectorId,
+  );
+
+  if (rewritten > 0) {
+    console.log(
+      `${LOG_PREFIX} canonicalized ${rewritten} slack day-page inventory rows; re-arming the healing replay`,
+    );
+  }
+
+  for (const collectorId of SUPERSEDED_SLACK_COLLECTOR_IDS) {
+    await deleteBrainSyncStateFamily(db, collectorId);
+  }
 }
 
 const SLACK_DAY_PAGE_CENSUS_STATE_ID = 'slack-public-channels:day-pages:census';

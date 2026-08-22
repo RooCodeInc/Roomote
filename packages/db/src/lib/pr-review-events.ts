@@ -793,13 +793,17 @@ export async function renewPrReviewDeliveryClaim(
 export async function deferPrReviewDeliveries(
   claim: Pick<ClaimedPrReviewDelivery, 'deliveryIds' | 'leaseToken'>,
   dueAt: Date,
+  options: { incrementDeferrals?: boolean } = {},
 ): Promise<void> {
+  const incrementDeferrals = options.incrementDeferrals ?? true;
   await db
     .update(prReviewEventDeliveries)
     .set({
       status: 'pending',
       dueAt,
-      deferrals: sql`${prReviewEventDeliveries.deferrals} + 1`,
+      ...(incrementDeferrals
+        ? { deferrals: sql`${prReviewEventDeliveries.deferrals} + 1` }
+        : {}),
       leaseToken: null,
       leaseExpiresAt: null,
     })

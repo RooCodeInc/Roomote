@@ -1,9 +1,13 @@
-import { and, db, eq, isNull, mcpConnections } from '@roomote/db/server';
 import { decrypt } from '@roomote/db/encryption';
 import {
+  findBrainSourceConnectionConfig,
+  isBrainSourceAvailable,
+} from '@roomote/sdk/server';
+import {
+  BRAIN_COLLECTOR_IDS,
+  BRAIN_PAGE_TYPES,
   brainNamespacePrefix,
-  isMcpConnectionGranolaConfig,
-  type McpConnectionGranolaConfig,
+  renderBrainFrontmatter,
 } from '@roomote/types';
 
 import type { BrainCollector, CollectorPage } from './contracts';
@@ -18,7 +22,7 @@ import {
 import { asString, formatUtcDay, parseDate, slugifySegment } from './shared';
 
 const LOG_PREFIX = '[brainCollectors]';
-const GRANOLA_MEETINGS_COLLECTOR_ID = 'granola-meetings:entity-timeline-v3';
+const GRANOLA_MEETINGS_COLLECTOR_ID = BRAIN_COLLECTOR_IDS.granolaMeetings;
 
 /**
  * Granola: meeting notes
@@ -132,14 +136,20 @@ export function buildGranolaMeetingPage(
   const excerpt = body.slice(0, GRANOLA_NOTE_EXCERPT_MAX_CHARS);
 
   const content = [
-    '---',
-    ...(id ? [`granola_note_id: ${id}`] : []),
-    `date: ${day}`,
-    'provenance: roomote-granola-meetings',
-    ...(attendeeSlugs.length > 0
-      ? [`attendees: ${JSON.stringify(attendeeSlugs)}`]
-      : []),
-    '---',
+    ...renderBrainFrontmatter({
+      type: BRAIN_PAGE_TYPES.meeting,
+      title,
+      // `day` is the literal "undated" when Granola omits the timestamp;
+      // only a real date may stand as `created`.
+      created: createdAt ? day : null,
+      fields: [
+        id && `granola_note_id: ${id}`,
+        `date: ${day}`,
+        'provenance: roomote-granola-meetings',
+        attendeeSlugs.length > 0 &&
+          `attendees: ${JSON.stringify(attendeeSlugs)}`,
+      ],
+    }),
     '',
     `# ${title}`,
     '',
@@ -250,26 +260,11 @@ async function hydrateGranolaNotes(
   return details;
 }
 
-async function findGranolaConnectionConfig(): Promise<McpConnectionGranolaConfig | null> {
-  const connection = await db.query.mcpConnections.findFirst({
-    where: and(
-      eq(mcpConnections.mcpId, 'granola'),
-      isNull(mcpConnections.userId),
-      eq(mcpConnections.enabled, true),
-      eq(mcpConnections.authStatus, 'authenticated'),
-    ),
-  });
-
-  return isMcpConnectionGranolaConfig(connection?.authConfig)
-    ? connection.authConfig
-    : null;
-}
-
 async function collectGranolaMeetings(input: {
   since: Date | null;
   limit: number;
 }): Promise<{ pages: CollectorPage[]; nextSince: Date | null }> {
-  const config = await findGranolaConnectionConfig();
+  const config = await findBrainSourceConnectionConfig('granola');
 
   if (!config) {
     return { pages: [], nextSince: null };
@@ -387,7 +382,7 @@ async function backfillGranolaNotesStep(cursor: string | null): Promise<{
   done: boolean;
 }> {
   const noProgress = { pages: [], nextCursor: cursor, done: false };
-  const config = await findGranolaConnectionConfig();
+  const config = await findBrainSourceConnectionConfig('granola');
 
   if (!config) {
     return noProgress;
@@ -460,7 +455,7 @@ export const granolaMeetingsCollector: BrainCollector = {
   id: GRANOLA_MEETINGS_COLLECTOR_ID,
   displayName: 'Granola meeting notes',
   async isEnabled() {
-    return Boolean(await findGranolaConnectionConfig());
+    return isBrainSourceAvailable('granola');
   },
   async collect({ since, limit }) {
     return collectGranolaMeetings({ since, limit });

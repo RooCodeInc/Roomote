@@ -119,7 +119,13 @@ describe('dependabotTriageJob buildScanTask', () => {
     );
     expect(payload.description).toContain('inspect its open pull requests');
     expect(payload.description).toContain(
-      'After triage reaches a final result, send exactly one concise report',
+      'the total number of open Dependabot alerts is 0, and no remediation work item was submitted or started',
+    );
+    expect(payload.description).toContain(
+      'do not call `send_chat_reply` and end the task response with only a terse internal no-op note',
+    );
+    expect(payload.description).toContain(
+      'Otherwise, after triage reaches a final result, send exactly one concise report',
     );
     expect(payload.description).toContain(
       'total number of open Dependabot alerts with a critical/high/medium/low severity breakdown',
@@ -146,6 +152,9 @@ describe('dependabotTriageJob buildScanTask', () => {
     expect(payload.description).toContain('send exactly one concise report');
     expect(payload.description).toContain('with `send_chat_reply`');
     expect(payload.description).toContain('using purpose `closeout`');
+    expect(payload.description).toContain(
+      'If GitHub setup or alert access is blocked, send the same concise report',
+    );
     expect(payload.description).not.toContain('with `post_to_channel`');
   });
 

@@ -78,6 +78,8 @@ import {
 } from '@roomote/linear';
 import { publishCommunicationRequestUserInput } from '../lib/communication-request-user-input';
 import { publishFastAgentRequestUserInput } from '../lib/task-runs/publish-fast-agent-request-user-input';
+import { relayFastAgentChildChatReply } from '../lib/task-runs/relay-fast-agent-child-chat-reply';
+import { renderSlackLiveTaskCardForRun } from '../lib/task-runs/slack-live-task-stream';
 import {
   authenticatedProcedure,
   isRunToken,
@@ -541,6 +543,32 @@ export const taskRunsRouter = router({
   getMessageSources: runScoped(z.object({ runId: z.number() }), 'runId').query(
     ({ input }) => getMessageSources(input.runId),
   ),
+  // Run-token only: the card is a worker-driven surface, and letting any
+  // authenticated caller rewrite a card by run id would let them put
+  // arbitrary text on another task's card.
+  renderSlackLiveTaskCard: runScoped(
+    z.object({
+      runId: z.number(),
+      status: z.enum(['in_progress', 'complete', 'error']),
+      message: z.string().optional(),
+    }),
+    'runId',
+  )
+    .use(({ ctx, next }) => {
+      if (!isRunToken(ctx.auth)) {
+        throw new TRPCError({
+          code: 'FORBIDDEN',
+          message: 'This endpoint is only available to run tokens',
+        });
+      }
+      return next();
+    })
+    .mutation(({ input }) =>
+      renderSlackLiveTaskCardForRun(input.runId, {
+        status: input.status,
+        ...(input.message ? { message: input.message } : {}),
+      }),
+    ),
   getResolvedGitAuthor: runScoped(
     z.object({ runId: z.number() }),
     'runId',
@@ -780,6 +808,17 @@ export const taskRunsRouter = router({
     }),
     'runId',
   ).mutation(async ({ input }) => publishFastAgentRequestUserInput(input)),
+  relayFastAgentChildChatReply: runScoped(
+    z.object({
+      runId: z.number(),
+      taskId: z.string().min(1),
+      deliverySignature: z.string().regex(/^[a-f0-9]{64}$/),
+      purpose: z.enum(['ack', 'progress', 'closeout', 'clarification']),
+      message: z.string().trim().min(1),
+      imageArtifactIds: z.array(z.string().min(1)).optional(),
+    }),
+    'runId',
+  ).mutation(async ({ input }) => relayFastAgentChildChatReply(input)),
   clearPendingSlackRequestUserInput: runScoped(
     z.object({
       runId: z.number(),

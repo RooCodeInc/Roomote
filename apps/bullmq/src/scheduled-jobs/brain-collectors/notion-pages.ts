@@ -3,23 +3,26 @@ import { createHash } from 'node:crypto';
 import {
   and,
   db,
-  deploymentMcpEnablements,
   eq,
   getBrainSyncState,
-  isNull,
   listBrainCollectorItems,
   listBrainCollectorItemsBefore,
   lt,
-  mcpConnections,
   notionDirectoryUsers,
 } from '@roomote/db/server';
+import {
+  findBrainSourceConnectionConfig,
+  isBrainSourceAvailable,
+} from '@roomote/sdk/server';
 import {
   NotionApiError,
   notionApiRequestJson,
 } from '@roomote/sdk/server/notion-api';
 import {
+  BRAIN_COLLECTOR_IDS,
+  BRAIN_PAGE_TYPES,
   brainNamespacePrefix,
-  isMcpConnectionNotionConfig,
+  renderBrainFrontmatter,
   type McpConnectionNotionConfig,
 } from '@roomote/types';
 
@@ -56,7 +59,7 @@ const LOG_PREFIX = '[brainCollectors]';
  * the initial backfill and incremental scans.
  */
 
-const NOTION_PAGES_COLLECTOR_ID = 'notion-pages';
+const NOTION_PAGES_COLLECTOR_ID = BRAIN_COLLECTOR_IDS.notionPages;
 const NOTION_INCREMENTAL_STATE_ID = `${NOTION_PAGES_COLLECTOR_ID}:incremental`;
 const NOTION_USERS_COLLECTOR_ID = 'notion-users';
 const NOTION_USERS_REFRESH_STATE_ID = `${NOTION_USERS_COLLECTOR_ID}:refresh`;
@@ -383,17 +386,22 @@ export function buildNotionUserPage(
     slug: notionUserSlug(user.id),
     title: user.name,
     content: [
-      '---',
-      `type: ${canonical ? 'person-alias' : 'person'}`,
-      `notion_user_id: ${JSON.stringify(user.id)}`,
-      ...(canonical
-        ? [`canonical: ${JSON.stringify(canonical.slug)}`]
-        : [
-            `aliases: ${JSON.stringify(deleted ? [] : [user.id, providerId])}`,
-            `status: ${deleted ? 'deleted' : 'active'}`,
-          ]),
-      'provenance: roomote-notion-users',
-      '---',
+      ...renderBrainFrontmatter({
+        type: canonical
+          ? BRAIN_PAGE_TYPES.personAlias
+          : BRAIN_PAGE_TYPES.person,
+        title: user.name,
+        fields: [
+          `notion_user_id: ${JSON.stringify(user.id)}`,
+          ...(canonical
+            ? [`canonical: ${JSON.stringify(canonical.slug)}`]
+            : [
+                `aliases: ${JSON.stringify(deleted ? [] : [user.id, providerId])}`,
+                `status: ${deleted ? 'deleted' : 'active'}`,
+              ]),
+          'provenance: roomote-notion-users',
+        ],
+      }),
       '',
       `# ${user.name}`,
       '',
@@ -594,31 +602,30 @@ export function buildNotionPage(
     slug,
     title,
     content: [
-      '---',
-      'type: notion-page',
-      `notion_page_id: ${JSON.stringify(pageId)}`,
-      `status: ${status}`,
-      'provenance: roomote-notion',
-      ...(updatedAt ? [`date: ${formatUtcDay(updatedAt)}`] : []),
-      ...(createdAt ? [`created_at: ${createdAt.toISOString()}`] : []),
-      ...(updatedAt ? [`last_edited_at: ${updatedAt.toISOString()}`] : []),
-      ...(sourceUrl ? [`source_url: ${JSON.stringify(sourceUrl)}`] : []),
-      ...(references.createdBy
-        ? [`created_by: ${JSON.stringify(references.createdBy)}`]
-        : []),
-      ...(references.lastEditedBy
-        ? [`last_edited_by: ${JSON.stringify(references.lastEditedBy)}`]
-        : []),
-      ...(references.people.length > 0
-        ? [`people: ${JSON.stringify(references.people)}`]
-        : []),
-      ...(references.mentions.length > 0
-        ? [`mentions: ${JSON.stringify(references.mentions)}`]
-        : []),
-      ...(references.relations.length > 0
-        ? [`relations: ${JSON.stringify(references.relations)}`]
-        : []),
-      '---',
+      ...renderBrainFrontmatter({
+        type: BRAIN_PAGE_TYPES.notionPage,
+        title,
+        created: createdAt ?? updatedAt ?? null,
+        fields: [
+          `notion_page_id: ${JSON.stringify(pageId)}`,
+          `status: ${status}`,
+          'provenance: roomote-notion',
+          updatedAt && `date: ${formatUtcDay(updatedAt)}`,
+          createdAt && `created_at: ${createdAt.toISOString()}`,
+          updatedAt && `last_edited_at: ${updatedAt.toISOString()}`,
+          sourceUrl && `source_url: ${JSON.stringify(sourceUrl)}`,
+          references.createdBy &&
+            `created_by: ${JSON.stringify(references.createdBy)}`,
+          references.lastEditedBy &&
+            `last_edited_by: ${JSON.stringify(references.lastEditedBy)}`,
+          references.people.length > 0 &&
+            `people: ${JSON.stringify(references.people)}`,
+          references.mentions.length > 0 &&
+            `mentions: ${JSON.stringify(references.mentions)}`,
+          references.relations.length > 0 &&
+            `relations: ${JSON.stringify(references.relations)}`,
+        ],
+      }),
       '',
       `# ${title}`,
       ...(sourceUrl ? ['', `[Open in Notion](${sourceUrl})`] : []),
@@ -643,30 +650,6 @@ export function buildNotionPage(
 function notionPageSlug(pageId: string): string | null {
   const stableId = pageId.toLowerCase().replace(/[^a-z0-9]/g, '');
   return stableId ? `${brainNamespacePrefix('notion')}${stableId}` : null;
-}
-
-async function findNotionConnectionConfig(): Promise<McpConnectionNotionConfig | null> {
-  const [connection, enablement] = await Promise.all([
-    db.query.mcpConnections.findFirst({
-      where: and(
-        eq(mcpConnections.mcpId, 'notion'),
-        isNull(mcpConnections.userId),
-        eq(mcpConnections.enabled, true),
-        eq(mcpConnections.authStatus, 'authenticated'),
-      ),
-    }),
-    db.query.deploymentMcpEnablements.findFirst({
-      where: and(
-        eq(deploymentMcpEnablements.mcpId, 'notion'),
-        eq(deploymentMcpEnablements.enabled, true),
-      ),
-      columns: { mcpId: true },
-    }),
-  ]);
-
-  return enablement && isMcpConnectionNotionConfig(connection?.authConfig)
-    ? connection.authConfig
-    : null;
 }
 
 async function searchNotionPages(input: {
@@ -1265,7 +1248,7 @@ export const notionUsersCollector: BrainCollector = {
   id: NOTION_USERS_COLLECTOR_ID,
   displayName: 'Notion workspace users',
   async isEnabled() {
-    if (await findNotionConnectionConfig()) {
+    if (await isBrainSourceAvailable('notion')) {
       return true;
     }
     // Stored directory rows still need deletion tombstones after the
@@ -1277,7 +1260,7 @@ export const notionUsersCollector: BrainCollector = {
     return rows.length > 0;
   },
   async collect({ now, limit }) {
-    const config = await findNotionConnectionConfig();
+    const config = await findBrainSourceConnectionConfig('notion');
     const stateUpdates: CollectorStateUpdate[] = [];
 
     if (config) {
@@ -1346,20 +1329,20 @@ export const notionPagesCollector: BrainCollector = {
   id: NOTION_PAGES_COLLECTOR_ID,
   displayName: 'Notion pages',
   async isEnabled() {
-    const [config, tracked] = await Promise.all([
-      findNotionConnectionConfig(),
+    const [available, tracked] = await Promise.all([
+      isBrainSourceAvailable('notion'),
       listBrainCollectorItems(db, NOTION_PAGES_COLLECTOR_ID, 1),
     ]);
-    return Boolean(config || tracked.length > 0);
+    return available || tracked.length > 0;
   },
   async collect({ now, limit }) {
-    const config = await findNotionConnectionConfig();
+    const config = await findBrainSourceConnectionConfig('notion');
     return config
       ? collectNotionPages({ config, now, limit })
       : collectDisabledNotionPages(limit);
   },
   async backfill({ cursor, limit }) {
-    const config = await findNotionConnectionConfig();
+    const config = await findBrainSourceConnectionConfig('notion');
     return config
       ? backfillNotionPagesStep(config, cursor, limit)
       : { pages: [], nextCursor: cursor, done: false };

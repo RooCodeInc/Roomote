@@ -43,6 +43,15 @@ function getReviewBody(value: string | null | undefined): string | undefined {
   return body ? body.slice(0, MAX_REVIEW_BODY_LENGTH) : undefined;
 }
 
+function isExternalBotAuthor(
+  user: { login?: string; type?: string } | null | undefined,
+): boolean {
+  return (
+    user?.type === 'Bot' &&
+    (!user.login || !GitHubSchemas.isRoomoteGitHubLogin(user.login))
+  );
+}
+
 function getAutomatedAuthorMetadata(
   user: { id?: number; type?: string } | null | undefined,
 ): { automatedAuthorId: string } | Record<string, never> {
@@ -55,6 +64,10 @@ function getObservedAt(value: string | null | undefined): number {
   const parsed = value ? Date.parse(value) : Number.NaN;
 
   return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
+function getReviewTaskId(body: string): string | undefined {
+  return body.match(/\/task\/([a-z0-9]+)(?:[/?#)]|$)/i)?.[1];
 }
 
 function getIssueCommentRevision(
@@ -108,12 +121,24 @@ export function buildPrReviewActivityNotificationInput(
   eventPayload: PrReviewActivityWebhookPayload,
   context: GitHubWebhookContext = {},
 ): EnqueuePrReviewNotificationInput | null {
+  const author =
+    'issue' in eventPayload
+      ? eventPayload.comment.user
+      : 'review' in eventPayload
+        ? eventPayload.review.user
+        : eventPayload.comment.user;
+
+  if (isExternalBotAuthor(author)) {
+    return null;
+  }
+
   if ('issue' in eventPayload) {
     if (!eventPayload.issue.pull_request) {
       return null;
     }
 
     const comment = eventPayload.comment;
+
     const revision = getIssueCommentRevision(eventPayload, context);
     const authorLogin = comment.user?.login;
     const body = getReviewBody(comment.body);
@@ -258,6 +283,48 @@ function getReviewSummaryMarkerSha(body: string): string | null {
   return match?.[1] ?? null;
 }
 
+function getReviewSummaryMarkerMode(body: string): 'initial' | 'sync' | null {
+  const mode = body.match(
+    /<!--\s*roomote-review-summary\s+[^>]*mode=(initial|sync)\b/i,
+  )?.[1];
+  return mode === 'initial' || mode === 'sync' ? mode : null;
+}
+
+function getReviewFindingCount(body: string, summary: string): number | null {
+  const uncheckedCount = body.match(/^- \[ \] /gm)?.length ?? 0;
+  if (uncheckedCount > 0) {
+    return uncheckedCount;
+  }
+
+  const statedCount = summary.match(/\b(\d+)\s+issues?\s+outstanding\b/i)?.[1];
+  return statedCount === undefined ? null : Number.parseInt(statedCount, 10);
+}
+
+function getReviewOutcome(
+  summary: string,
+  findingCount: number | null,
+): string | null {
+  if ((findingCount ?? 0) > 0) {
+    return 'findings_remain';
+  }
+  if (
+    /\bno (?:code|new) issues? found\b/i.test(summary) ||
+    /\ball \d+ issues? addressed\b/i.test(summary)
+  ) {
+    return 'clean';
+  }
+  return null;
+}
+
+function getReviewApprovalStatus(
+  summary: string,
+): 'approved' | 'skipped' | null {
+  if (/\bapproval\s+skipped\b/i.test(summary)) {
+    return 'skipped';
+  }
+  return /\bapproved\b/i.test(summary) ? 'approved' : null;
+}
+
 type PrReviewSummaryNotification = {
   input: EnqueuePrReviewNotificationInput;
 };
@@ -339,6 +406,7 @@ function buildPrReviewSummaryLifecycle(
     previousStatusLine !== null &&
     isReviewInProgressStatusLine(previousStatusLine);
   const markerSha = getReviewSummaryMarkerSha(body);
+  const reviewTaskId = getReviewTaskId(body);
   const revision = getIssueCommentRevision(eventPayload, context);
   const observedAt = getObservedAt(comment.updated_at ?? comment.created_at);
 
@@ -379,6 +447,7 @@ function buildPrReviewSummaryLifecycle(
   if (!summary) {
     return null;
   }
+  const findingCount = getReviewFindingCount(body, summary);
 
   return {
     kind: 'completed',
@@ -395,6 +464,14 @@ function buildPrReviewSummaryLifecycle(
           providerEventId: `github-review-summary:${comment.id}:${revision}`,
           authorLogin,
           ...(markerSha ? { reviewHeadSha: markerSha } : {}),
+          ...(reviewTaskId ? { reviewTaskId } : {}),
+          reviewResult: {
+            reviewKind: getReviewSummaryMarkerMode(body),
+            outcome: getReviewOutcome(summary, findingCount),
+            findingCount,
+            approvalStatus: getReviewApprovalStatus(summary),
+            headSha: markerSha,
+          },
           ...(!comment.updated_at && typeof previousBody === 'string'
             ? {
                 batchId: getTimestampLessSummaryCycleId(

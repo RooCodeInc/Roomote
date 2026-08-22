@@ -1,7 +1,9 @@
+import { BRAIN_COLLECTOR_IDS } from '@roomote/types';
+
 import {
   backfillBrainGithubIssuesStep,
   collectBrainGithubIssues,
-  hasBrainGithubSources,
+  isBrainSourceAvailable,
 } from '@roomote/sdk/server';
 
 import type { BrainCollector } from './contracts';
@@ -15,11 +17,12 @@ import type { BrainCollector } from './contracts';
  * limit can never masquerade as brain-side backpressure.
  */
 export const githubIssuesCollector: BrainCollector = {
-  // Version when date semantics change so the deep backfill rewrites history.
-  id: 'github-issues:occurrence-date-v3',
+  // Versioned in BRAIN_COLLECTOR_IDS; bump there when date semantics
+  // change so the deep backfill rewrites history.
+  id: BRAIN_COLLECTOR_IDS.githubIssues,
   displayName: 'GitHub issues',
   async isEnabled() {
-    return hasBrainGithubSources();
+    return isBrainSourceAvailable('github');
   },
   async collect({ now, limit }) {
     return collectBrainGithubIssues({ now, limit });

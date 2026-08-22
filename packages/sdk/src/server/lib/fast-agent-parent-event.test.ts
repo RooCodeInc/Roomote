@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   findArtifacts: vi.fn(),
   findTaskRun: vi.fn(),
   postMessage: vi.fn(),
+  addReaction: vi.fn(),
+  resolveSlackReactionNames: vi.fn(),
   createDiscordProvider: vi.fn(),
   discordPostMessage: vi.fn(),
   createDiscordThread: vi.fn(),
@@ -20,7 +22,6 @@ vi.mock('@roomote/cloud-agents/server', () => ({
   acquireFastAgentTurnLock: mocks.acquireTurnLock,
   answerFastAgentQuestion: mocks.answerQuestion,
   fastAgentConversationRepository: { findById: mocks.findSession },
-  createFastAgentSlackTaskLauncher: mocks.createLauncher,
   createFastAgentTaskLauncher:
     ({
       buildTask,
@@ -75,7 +76,10 @@ vi.mock('@roomote/env', () => ({
 vi.mock('@roomote/slack', () => ({
   SlackNotifier: class SlackNotifier {
     postMessage = mocks.postMessage;
+    addReaction = mocks.addReaction;
   },
+  resolveSlackReactionNames: mocks.resolveSlackReactionNames,
+  createFastAgentSlackLiveTaskLauncher: mocks.createLauncher,
 }));
 
 vi.mock('./artifacts/raw-url', () => ({
@@ -147,6 +151,11 @@ describe('deliverFastAgentParentEvent', () => {
     ]);
     mocks.findTaskRun.mockResolvedValue({ status: 'running' });
     mocks.postMessage.mockResolvedValue('101.001');
+    mocks.addReaction.mockResolvedValue(true);
+    mocks.resolveSlackReactionNames.mockResolvedValue({
+      ackEmoji: 'eyes',
+      completionEmoji: 'white_check_mark',
+    });
     mocks.discordPostMessage.mockResolvedValue({
       provider: 'discord',
       channelId: 'channel-1',
@@ -210,6 +219,7 @@ describe('deliverFastAgentParentEvent', () => {
       }),
     );
     expect(mocks.createLauncher).toHaveBeenCalledWith({
+      slack: expect.any(Object),
       userId: 'u1',
       teamId: 'T123',
       teamDomain: 'acme',
@@ -232,6 +242,55 @@ describe('deliverFastAgentParentEvent', () => {
       }),
     );
     expect(mocks.releaseTurnLock).toHaveBeenCalledOnce();
+  });
+
+  it('keeps child lifecycle text private until the Fast parent composes a reply', async () => {
+    const childEvent = {
+      type: 'child_message' as const,
+      taskId: 'task-1',
+      runId: 42,
+      messageId: '22222222-2222-4222-8222-222222222222',
+      purpose: 'progress' as const,
+      message: 'The child is running targeted tests.',
+    };
+
+    await deliverFastAgentParentEvent({ parent, event: childEvent });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: expect.stringContaining(
+          '"message":"The child is running targeted tests."',
+        ),
+        turnSource: 'platform_event',
+      }),
+    );
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: 'The proof is ready.',
+        client_msg_id: expect.any(String),
+      }),
+    );
+    expect(mocks.postMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ text: childEvent.message }),
+    );
+  });
+
+  it('uses a stable delivery key when the same child update is retried', async () => {
+    const childEvent = {
+      type: 'child_message' as const,
+      taskId: 'task-1',
+      runId: 42,
+      messageId: '22222222-2222-4222-8222-222222222222',
+      purpose: 'progress' as const,
+      message: 'The child is running targeted tests.',
+    };
+
+    await deliverFastAgentParentEvent({ parent, event: childEvent });
+    await deliverFastAgentParentEvent({ parent, event: childEvent });
+
+    expect(mocks.postMessage.mock.calls[0]?.[0]?.client_msg_id).toBe(
+      mocks.postMessage.mock.calls[1]?.[0]?.client_msg_id,
+    );
   });
 
   it('does not start a model turn when the shared chat lock is unavailable', async () => {
@@ -389,6 +448,8 @@ describe('deliverFastAgentParentEvent', () => {
       taskId: 'task-1',
       runId: 42,
       taskUrl: 'https://roomote.example/task/task-1',
+      untrustedTaskGeneratedContext:
+        'Fixed startup by treating absent local secrets as optional.',
       pullRequest: {
         provider: 'github' as const,
         host: 'github.com',
@@ -421,7 +482,9 @@ describe('deliverFastAgentParentEvent', () => {
 
     expect(mocks.answerQuestion).toHaveBeenCalledWith(
       expect.objectContaining({
-        question: expect.stringContaining(pullRequestEvent.pullRequest.url),
+        question: expect.stringContaining(
+          pullRequestEvent.untrustedTaskGeneratedContext,
+        ),
         turnSource: 'platform_event',
       }),
     );
@@ -429,6 +492,153 @@ describe('deliverFastAgentParentEvent', () => {
     expect(mocks.postMessage.mock.calls[1]?.[0]?.client_msg_id).toBe(
       firstClientMessageId,
     );
+  });
+
+  it('delivers pull request feedback as a platform event with a stable idempotency key', async () => {
+    const feedbackEvent = {
+      type: 'pull_request_feedback' as const,
+      feedbackId: 'feedback-123',
+      taskId: 'task-1',
+      runId: 42,
+      taskUrl: 'https://roomote.example/task/task-1',
+      pullRequest: {
+        provider: 'github' as const,
+        host: 'github.com',
+        repository: 'acme/web',
+        number: 42,
+        title: 'Fix review feedback',
+        url: 'https://github.com/acme/web/pull/42',
+        status: 'open' as const,
+      },
+      summary: 'Alice requested changes.',
+      suggestedActionPrompt: 'Address the requested changes.',
+    };
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'There is new PR feedback.',
+        }),
+    );
+
+    await deliverFastAgentParentEvent({ parent, event: feedbackEvent });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: expect.stringContaining('"type":"pull_request_feedback"'),
+        turnSource: 'platform_event',
+      }),
+    );
+    expect(mocks.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        client_msg_id: expect.any(String),
+      }),
+    );
+    expect(mocks.addReaction).not.toHaveBeenCalled();
+  });
+
+  it('delivers a pull request status event with a stable idempotency key', async () => {
+    const statusEvent = {
+      type: 'pull_request_status_changed' as const,
+      taskId: 'task-1',
+      runId: 42,
+      taskUrl: 'https://roomote.example/task/task-1',
+      pullRequest: {
+        provider: 'github' as const,
+        host: 'github.com',
+        repository: 'acme/web',
+        number: 42,
+        title: 'Fix review feedback',
+        url: 'https://github.com/acme/web/pull/42',
+        status: 'merged' as const,
+      },
+      status: 'merged' as const,
+      actorLogin: 'alice',
+    };
+    mocks.answerQuestion.mockImplementation(
+      async ({
+        adapter,
+      }: {
+        adapter: { postReply: (reply: unknown) => unknown };
+      }) =>
+        adapter.postReply({
+          purpose: 'closeout',
+          message: 'The pull request was merged.',
+        }),
+    );
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: { ...statusEvent, runId: 43 },
+    });
+    const firstClientMessageId =
+      mocks.postMessage.mock.calls[0]?.[0]?.client_msg_id;
+    await deliverFastAgentParentEvent({ parent, event: statusEvent });
+
+    expect(mocks.answerQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        question: expect.stringContaining(
+          '"type":"pull_request_status_changed"',
+        ),
+        turnSource: 'platform_event',
+      }),
+    );
+    expect(firstClientMessageId).toEqual(expect.any(String));
+    expect(mocks.postMessage.mock.calls[1]?.[0]?.client_msg_id).toBe(
+      firstClientMessageId,
+    );
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        ...statusEvent,
+        status: 'closed',
+        pullRequest: { ...statusEvent.pullRequest, status: 'closed' },
+      },
+    });
+
+    expect(mocks.addReaction).toHaveBeenCalledTimes(2);
+    expect(mocks.addReaction).toHaveBeenLastCalledWith({
+      channel: 'C123',
+      timestamp: '100.001',
+      name: 'white_check_mark',
+    });
+  });
+
+  it('adds the merge reaction when the Fast agent ignores the status event', async () => {
+    mocks.answerQuestion.mockResolvedValue(undefined);
+
+    await deliverFastAgentParentEvent({
+      parent,
+      event: {
+        type: 'pull_request_status_changed',
+        taskId: 'task-1',
+        runId: 42,
+        taskUrl: 'https://roomote.example/task/task-1',
+        pullRequest: {
+          provider: 'github',
+          host: 'github.com',
+          repository: 'acme/web',
+          number: 42,
+          title: 'Fix review feedback',
+          url: 'https://github.com/acme/web/pull/42',
+          status: 'merged',
+        },
+        status: 'merged',
+        actorLogin: 'alice',
+      },
+    });
+
+    expect(mocks.postMessage).not.toHaveBeenCalled();
+    expect(mocks.addReaction).toHaveBeenCalledWith({
+      channel: 'C123',
+      timestamp: '100.001',
+      name: 'white_check_mark',
+    });
   });
 
   it('lets a settled task event re-query the remaining active task set', async () => {

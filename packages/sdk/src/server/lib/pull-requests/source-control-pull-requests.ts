@@ -406,6 +406,9 @@ export async function createOrUpdateSourceControlPullRequestForTaskRun({
   // attempt finds this PR, updates it, and re-enters the deduplicated notifier.
   await notifyFastAgentParentOnPullRequestOpened({
     run: taskRun,
+    ...(input.body.trim()
+      ? { untrustedTaskGeneratedContext: input.body.trim() }
+      : {}),
     pullRequest: {
       provider: result.provider,
       host: repository.host,
@@ -552,7 +555,7 @@ async function createOrUpdateGitHubPullRequest({
     type: 'installationId',
     installationId: repository.installationId,
   });
-  const octokit = getOctokit(token);
+  const octokit = getOctokit(token, { retryRateLimits: true });
 
   const { data: existingPullRequests } = await octokit.rest.pulls.list({
     owner,

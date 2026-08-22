@@ -12,6 +12,7 @@ const {
   mockGetCombinedStatusForRef,
   mockIsRoomoteGitHubLogin,
   mockResolveConfiguredGitHubAppSlug,
+  mockGetGitHubRateLimitRetryAfterMs,
 } = vi.hoisted(() => ({
   mockGenerateObject: vi.fn(),
   mockReadSourceControlPullRequest: vi.fn(),
@@ -26,6 +27,7 @@ const {
   mockGetCombinedStatusForRef: vi.fn(),
   mockIsRoomoteGitHubLogin: vi.fn((login: string) => login === 'roomote[bot]'),
   mockResolveConfiguredGitHubAppSlug: vi.fn(),
+  mockGetGitHubRateLimitRetryAfterMs: vi.fn(),
 }));
 
 vi.mock('@roomote/cloud-agents/server/non-task-provider-usage', () => ({
@@ -107,6 +109,8 @@ vi.mock('@roomote/github', () => ({
       },
     },
   }),
+  getGitHubRateLimitRetryAfterMs: (...args: unknown[]) =>
+    mockGetGitHubRateLimitRetryAfterMs(...args),
 }));
 
 import type { TaskRun } from '@roomote/db/server';
@@ -115,6 +119,7 @@ import type { PrReviewActivityEvent } from '../pr-review-notification';
 import {
   collectCiChecks,
   gatherPrReviewTriageContext,
+  PrReviewNotificationRateLimitError,
   preparePrReviewNotificationDelivery,
   recordPrReviewNotificationDeliveryBestEffort,
   triagePrReviewActivity,
@@ -209,7 +214,50 @@ describe('preparePrReviewNotificationDelivery', () => {
       },
     });
     mockFormatMessage.mockReturnValue('formatted-message');
+    mockGetGitHubRateLimitRetryAfterMs.mockReturnValue(null);
     mockGreenCiChecks();
+  });
+
+  it('propagates GitHub rate limits so durable delivery can defer', async () => {
+    const rateLimitError = Object.assign(new Error('API rate limit exceeded'), {
+      status: 403,
+    });
+    mockReadSourceControlPullRequest.mockRejectedValue(rateLimitError);
+    mockGetGitHubRateLimitRetryAfterMs.mockImplementation((error: unknown) =>
+      error === rateLimitError ? 900_000 : null,
+    );
+
+    await expect(
+      gatherPrReviewTriageContext({
+        taskRun,
+        repository: request.repository,
+        prNumber: request.prNumber,
+        sourceControlProvider: 'github',
+      }),
+    ).rejects.toMatchObject({
+      name: 'PrReviewNotificationRateLimitError',
+      retryAfterMs: 900_000,
+    });
+    expect(mockPullsGet).not.toHaveBeenCalled();
+  });
+
+  it('propagates rate limits from nested live-head status reads', async () => {
+    const rateLimitError = Object.assign(new Error('API rate limit exceeded'), {
+      status: 403,
+    });
+    mockListCheckRunsForRef.mockRejectedValue(rateLimitError);
+    mockGetGitHubRateLimitRetryAfterMs.mockImplementation((error: unknown) =>
+      error === rateLimitError ? 900_000 : null,
+    );
+
+    await expect(
+      gatherPrReviewTriageContext({
+        taskRun,
+        repository: request.repository,
+        prNumber: request.prNumber,
+        sourceControlProvider: 'github',
+      }),
+    ).rejects.toBeInstanceOf(PrReviewNotificationRateLimitError);
   });
 
   it('prepares a routed, formatted delivery from the shared SDK flow', async () => {
@@ -1152,6 +1200,68 @@ describe('gatherPrReviewTriageContext', () => {
       },
       mergeable: true,
     });
+    expect(mockReadSourceControlPullRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ useGitHubConditionalRequests: true }),
+    );
+  });
+
+  it('uses ETags for every GitHub live-head polling read', async () => {
+    const notModified = () =>
+      Object.assign(new Error('Not modified'), {
+        status: 304,
+        response: { headers: {} },
+      });
+    mockPullsGet
+      .mockResolvedValueOnce({
+        data: { head: { sha: 'etag-head' }, mergeable: true },
+        headers: { etag: '"pull-v1"' },
+        status: 200,
+      })
+      .mockRejectedValueOnce(notModified());
+    mockListCheckRunsForRef
+      .mockResolvedValueOnce({
+        data: { check_runs: [] },
+        headers: { etag: '"checks-v1"' },
+        status: 200,
+      })
+      .mockRejectedValueOnce(notModified());
+    mockGetCombinedStatusForRef
+      .mockResolvedValueOnce({
+        data: { statuses: [], total_count: 0 },
+        headers: { etag: '"status-v1"' },
+        status: 200,
+      })
+      .mockRejectedValueOnce(notModified());
+
+    await gatherPrReviewTriageContext({
+      taskRun,
+      repository: request.repository,
+      prNumber: request.prNumber,
+    });
+    await gatherPrReviewTriageContext({
+      taskRun,
+      repository: request.repository,
+      prNumber: request.prNumber,
+    });
+
+    expect(mockPullsGet).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        request: { headers: { 'if-none-match': '"pull-v1"' } },
+      }),
+    );
+    expect(mockListCheckRunsForRef).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        request: { headers: { 'if-none-match': '"checks-v1"' } },
+      }),
+    );
+    expect(mockGetCombinedStatusForRef).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        request: { headers: { 'if-none-match': '"status-v1"' } },
+      }),
+    );
   });
 
   it('includes mergeable false when the PR has conflicts', async () => {

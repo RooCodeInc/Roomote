@@ -18,11 +18,33 @@ import {
   REASONING_EFFORT_OPTIONS,
   resolveSetupModelProviderIdFromModel,
   SETUP_MODEL_PROVIDER_CATALOG,
+  TASK_MODEL_ROLE_DESCRIPTORS,
+  TASK_MODEL_ROLES,
   type ReasoningEffort,
   type SetupModelProviderDescriptor,
 } from './index';
 
 describe('normalizeDeploymentModelConfig', () => {
+  it('normalizes every role through the canonical descriptor', () => {
+    const input = Object.fromEntries(
+      TASK_MODEL_ROLES.flatMap((role) => {
+        const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+        return [
+          [descriptor.modelConfigKey, `  openai/${role}  `],
+          [descriptor.reasoningConfigKey, 'high'],
+        ];
+      }),
+    );
+
+    const normalized = normalizeDeploymentModelConfig(input);
+
+    for (const role of TASK_MODEL_ROLES) {
+      const descriptor = TASK_MODEL_ROLE_DESCRIPTORS[role];
+      expect(normalized[descriptor.modelConfigKey]).toBe(`openai/${role}`);
+      expect(normalized[descriptor.reasoningConfigKey]).toBe('high');
+    }
+  });
+
   it('normalizes a fully populated config and trims whitespace', () => {
     expect(
       normalizeDeploymentModelConfig({
@@ -41,12 +63,14 @@ describe('normalizeDeploymentModelConfig', () => {
       }),
     ).toEqual({
       roomoteModel: 'openai/gpt-5.4',
+      roomoteOrchestrationModel: null,
       roomoteSmallModel: 'anthropic/claude-sonnet-4',
       roomoteVisionModel: 'openai/gpt-5.5',
       roomoteCodeReviewModel: 'openai/gpt-5.5',
       roomoteExploreModel: 'openai/gpt-5.4-mini',
       roomotePlanningModel: null,
       roomoteModelReasoningEffort: null,
+      roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
@@ -80,12 +104,14 @@ describe('normalizeDeploymentModelConfig', () => {
       normalizeDeploymentModelConfig({ roomoteModel: 'openai/gpt-5.4' }),
     ).toEqual({
       roomoteModel: 'openai/gpt-5.4',
+      roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: null,
       roomoteCodeReviewModel: null,
       roomoteExploreModel: null,
       roomotePlanningModel: null,
       roomoteModelReasoningEffort: null,
+      roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
@@ -112,12 +138,14 @@ describe('normalizeDeploymentModelConfig', () => {
       }),
     ).toEqual({
       roomoteModel: null,
+      roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: null,
       roomoteCodeReviewModel: null,
       roomoteExploreModel: null,
       roomotePlanningModel: null,
       roomoteModelReasoningEffort: null,
+      roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
@@ -153,12 +181,14 @@ describe('normalizeDeploymentModelConfig', () => {
       }),
     ).toEqual({
       roomoteModel: DEFAULT_TASK_MODEL_ID,
+      roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: null,
       roomoteCodeReviewModel: null,
       roomoteExploreModel: null,
       roomotePlanningModel: null,
       roomoteModelReasoningEffort: null,
+      roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
@@ -178,12 +208,14 @@ describe('normalizeDeploymentModelConfig', () => {
       }),
     ).toEqual({
       roomoteModel: 'openai/gpt-5.4',
+      roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: null,
       roomoteCodeReviewModel: null,
       roomoteExploreModel: null,
       roomotePlanningModel: 'anthropic/claude-opus-4.7',
       roomoteModelReasoningEffort: null,
+      roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
@@ -204,12 +236,14 @@ describe('normalizeDeploymentModelConfig', () => {
       }),
     ).toEqual({
       roomoteModel: 'openai/gpt-5.4',
+      roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: null,
       roomoteCodeReviewModel: null,
       roomoteExploreModel: null,
       roomotePlanningModel: null,
       roomoteModelReasoningEffort: 'high',
+      roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: 'xhigh',
@@ -985,12 +1019,14 @@ describe('buildRecommendedDeploymentModelConfig', () => {
 
       expect(buildRecommendedDeploymentModelConfig(provider)).toEqual({
         roomoteModel: 'openai/gpt-5.6-sol',
+        roomoteOrchestrationModel: null,
         roomoteSmallModel: 'openai/gpt-5.6-luna',
         roomoteVisionModel: 'openai/gpt-5.6-sol',
         roomoteCodeReviewModel: 'openai/gpt-5.6-terra',
         roomoteExploreModel: 'openai/gpt-5.6-luna',
         roomotePlanningModel: 'openai/gpt-5.6-sol',
         roomoteModelReasoningEffort: 'medium',
+        roomoteOrchestrationModelReasoningEffort: null,
         roomoteSmallModelReasoningEffort: 'low',
         roomoteVisionModelReasoningEffort: 'low',
         roomoteCodeReviewModelReasoningEffort: 'high',
@@ -1001,12 +1037,14 @@ describe('buildRecommendedDeploymentModelConfig', () => {
         buildRecommendedDeploymentModelConfig(provider, 'luna-max'),
       ).toEqual({
         roomoteModel: 'openai/gpt-5.6-luna',
+        roomoteOrchestrationModel: null,
         roomoteSmallModel: 'openai/gpt-5.6-luna',
         roomoteVisionModel: 'openai/gpt-5.6-sol',
         roomoteCodeReviewModel: 'openai/gpt-5.6-terra',
         roomoteExploreModel: 'openai/gpt-5.6-luna',
         roomotePlanningModel: 'openai/gpt-5.6-sol',
         roomoteModelReasoningEffort: 'max',
+        roomoteOrchestrationModelReasoningEffort: null,
         roomoteSmallModelReasoningEffort: 'low',
         roomoteVisionModelReasoningEffort: 'low',
         roomoteCodeReviewModelReasoningEffort: 'high',
@@ -1021,12 +1059,14 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       buildRecommendedDeploymentModelConfig(getSetupModelProvider('anthropic')),
     ).toEqual({
       roomoteModel: 'anthropic/claude-sonnet-5',
+      roomoteOrchestrationModel: null,
       roomoteSmallModel: 'anthropic/claude-haiku-4-5',
       roomoteVisionModel: null,
       roomoteCodeReviewModel: 'anthropic/claude-sonnet-5',
       roomoteExploreModel: 'anthropic/claude-haiku-4-5',
       roomotePlanningModel: 'anthropic/claude-opus-5',
       roomoteModelReasoningEffort: null,
+      roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: 'medium',
@@ -1095,12 +1135,14 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       ),
     ).toEqual({
       roomoteModel: 'github-copilot/gpt-5.6-luna',
+      roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: null,
       roomoteCodeReviewModel: null,
       roomoteExploreModel: null,
       roomotePlanningModel: null,
       roomoteModelReasoningEffort: 'medium',
+      roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
@@ -1153,12 +1195,14 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       ),
     ).toEqual({
       roomoteModel: 'moonshotai/kimi-k2.7-code',
+      roomoteOrchestrationModel: null,
       roomoteSmallModel: null,
       roomoteVisionModel: 'moonshotai/kimi-k3',
       roomoteCodeReviewModel: 'moonshotai/kimi-k3',
       roomoteExploreModel: null,
       roomotePlanningModel: 'moonshotai/kimi-k3',
       roomoteModelReasoningEffort: null,
+      roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,
@@ -1174,12 +1218,14 @@ describe('buildRecommendedDeploymentModelConfig', () => {
       ),
     ).toEqual({
       roomoteModel: 'kimi-for-coding/k3',
+      roomoteOrchestrationModel: null,
       roomoteSmallModel: 'kimi-for-coding/k2p7',
       roomoteVisionModel: 'kimi-for-coding/k3',
       roomoteCodeReviewModel: 'kimi-for-coding/k3',
       roomoteExploreModel: 'kimi-for-coding/k2p7',
       roomotePlanningModel: 'kimi-for-coding/k3',
       roomoteModelReasoningEffort: null,
+      roomoteOrchestrationModelReasoningEffort: null,
       roomoteSmallModelReasoningEffort: null,
       roomoteVisionModelReasoningEffort: null,
       roomoteCodeReviewModelReasoningEffort: null,

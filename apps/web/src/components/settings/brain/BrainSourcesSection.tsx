@@ -10,9 +10,9 @@ import { describeSourceStatus } from './brain-presentation';
 function SourceRow({ source }: { source: BrainSourceSummary }) {
   const status = describeSourceStatus(source.status);
   const backfillPercent =
-    source.partitions === 0
-      ? null
-      : (source.partitionsBackfilled / source.partitions) * 100;
+    source.backfillProgress && source.backfillProgress.total > 0
+      ? (source.backfillProgress.read / source.backfillProgress.total) * 100
+      : null;
 
   return (
     <li className="space-y-2 py-3 first:pt-0 last:pb-0">
@@ -44,8 +44,8 @@ function SourceRow({ source }: { source: BrainSourceSummary }) {
           {source.trackedItems > 0 ? (
             <span>{formatNumber(source.trackedItems)} tracked</span>
           ) : null}
-          {source.partitions > 1 ? (
-            <span>{formatNumber(source.partitions)} streams</span>
+          {source.streams > 1 ? (
+            <span>{formatNumber(source.streams)} streams</span>
           ) : null}
         </div>
       ) : null}
@@ -54,8 +54,8 @@ function SourceRow({ source }: { source: BrainSourceSummary }) {
         <div className="space-y-1">
           <Progress value={backfillPercent} />
           <p className="text-xs text-muted-foreground">
-            History read for {source.partitionsBackfilled} of{' '}
-            {source.partitions} streams.
+            History read for {source.backfillProgress!.read} of{' '}
+            {source.backfillProgress!.total} streams.
           </p>
         </div>
       ) : null}
@@ -68,22 +68,14 @@ export function BrainSourcesSection({
 }: {
   sources: BrainSourceSummary[];
 }) {
-  const connected = sources.filter(
+  const connectedSources = sources.filter(
     (source) => source.status !== 'not_connected',
-  ).length;
+  );
 
   return (
-    <Section
-      icon={RadioTower}
-      title="Where it learns from"
-      action={
-        <span className="text-sm text-muted-foreground">
-          {connected} of {sources.length} connected
-        </span>
-      }
-    >
+    <Section icon={RadioTower} title="Where it learns from">
       <ul className="divide-y">
-        {sources.map((source) => (
+        {connectedSources.map((source) => (
           <SourceRow key={source.id} source={source} />
         ))}
       </ul>

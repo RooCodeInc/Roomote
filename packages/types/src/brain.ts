@@ -91,6 +91,83 @@ export function brainNamespaceLabel(id: BrainNamespaceBucketId): string {
  * produces anything, so the UI can distinguish "nothing collected yet" from
  * "nothing to collect from".
  */
+/**
+ * The CURRENT versioned collector ids, in one place so the collectors that
+ * write sync state and everything that reads it back (the Settings page's
+ * source summaries) cannot drift. A collector's id carries a version suffix
+ * that is bumped when page semantics change; a bump replays history, and the
+ * readers must follow in the same commit or they keep aggregating the
+ * superseded version's rows.
+ */
+export const BRAIN_COLLECTOR_IDS = {
+  taskMemories: 'task-memory:effective-date-v2',
+  pullRequestFacts: 'pull-request-facts:occurrence-date-v3',
+  personIdentities: 'person-identities:members:occurrence-date-v2',
+  ripplingWorkers: 'rippling-workers',
+  slackPersonDirectory: 'slack-person-directory:occurrence-date-v2',
+  slackPublicChannels: 'slack-public-channels:entity-timeline-v3',
+  githubIssues: 'github-issues:occurrence-date-v3',
+  notionPages: 'notion-pages',
+  granolaMeetings: 'granola-meetings:entity-timeline-v3',
+} as const;
+
+/**
+ * Page types Roomote writes into the Brain. gbrain treats `type` as an open
+ * string (schema packs may add more), defaults a page without one to
+ * `concept`, and its lint requires the field; these are the values that make
+ * a Roomote-written page recognisable as what it is. `slack`, `meeting`,
+ * `person`, and `person-alias` are gbrain's own base types.
+ */
+export const BRAIN_PAGE_TYPES = {
+  taskMemory: 'task-memory',
+  pullRequest: 'pull-request',
+  githubIssue: 'github-issue',
+  slackDay: 'slack',
+  meeting: 'meeting',
+  notionPage: 'notion-page',
+  person: 'person',
+  personAlias: 'person-alias',
+  dailyDigest: 'daily',
+  weeklySynthesis: 'weekly',
+} as const;
+
+export type BrainPageType =
+  (typeof BRAIN_PAGE_TYPES)[keyof typeof BRAIN_PAGE_TYPES];
+
+/**
+ * The YAML frontmatter block for a Brain page, as a list of lines. Every
+ * page carries the three fields gbrain's lint requires (`type`, `title`,
+ * `created`) ahead of whatever the writer adds. `created` should be the
+ * page's own stable date (the Slack day, the run's completion, the merge),
+ * never the ingestion clock: collectors re-put pages idempotently, and a
+ * timestamp that moves per write would turn every replay into a content
+ * change. Pages without an honest date simply omit it.
+ */
+export function renderBrainFrontmatter(input: {
+  type: BrainPageType;
+  title: string;
+  created?: Date | string | null;
+  fields?: ReadonlyArray<string | false | null | undefined>;
+}): string[] {
+  const created =
+    input.created instanceof Date
+      ? input.created.toISOString()
+      : (input.created ?? null);
+
+  return [
+    '---',
+    `type: ${input.type}`,
+    // JSON string syntax is valid YAML and survives colons, hashes, quotes,
+    // and dashes that a bare scalar would not.
+    `title: ${JSON.stringify(input.title)}`,
+    ...(created ? [`created: ${created}`] : []),
+    ...(input.fields ?? []).filter(
+      (field): field is string => typeof field === 'string',
+    ),
+    '---',
+  ];
+}
+
 export const BRAIN_SOURCES = [
   {
     id: 'task-memories',
@@ -101,6 +178,7 @@ export const BRAIN_SOURCES = [
     // Ingested through the completed-run outbox; the one-time history
     // backfill checkpoints under this collector id.
     collectorIdPrefix: 'task-memory',
+    collectorIds: [BRAIN_COLLECTOR_IDS.taskMemories] as readonly string[],
     requires: null,
   },
   {
@@ -110,6 +188,7 @@ export const BRAIN_SOURCES = [
       'Merged pull requests as durable facts: what changed, why, and who reviewed it.',
     namespaceId: 'prs',
     collectorIdPrefix: 'pull-request-facts',
+    collectorIds: [BRAIN_COLLECTOR_IDS.pullRequestFacts] as readonly string[],
     requires: null,
   },
   {
@@ -119,6 +198,7 @@ export const BRAIN_SOURCES = [
       'Canonical person cards built from Roomote members and their linked provider handles. Never email addresses.',
     namespaceId: 'people',
     collectorIdPrefix: 'person-identities',
+    collectorIds: [BRAIN_COLLECTOR_IDS.personIdentities] as readonly string[],
     requires: null,
   },
   {
@@ -128,6 +208,7 @@ export const BRAIN_SOURCES = [
       'Worker directory from Rippling, keeping role, team, and manager current on each person card.',
     namespaceId: 'people',
     collectorIdPrefix: 'rippling-workers',
+    collectorIds: [BRAIN_COLLECTOR_IDS.ripplingWorkers] as readonly string[],
     requires: 'rippling',
   },
   {
@@ -137,6 +218,9 @@ export const BRAIN_SOURCES = [
       'Slack profiles, resolved against deployment members so one person is one entity.',
     namespaceId: 'people',
     collectorIdPrefix: 'slack-person-directory',
+    collectorIds: [
+      BRAIN_COLLECTOR_IDS.slackPersonDirectory,
+    ] as readonly string[],
     requires: 'slack',
   },
   {
@@ -146,6 +230,9 @@ export const BRAIN_SOURCES = [
       'History of the public channels the Roomote bot was added to. Private channels and DMs are never read.',
     namespaceId: 'slack',
     collectorIdPrefix: 'slack-public-channels',
+    collectorIds: [
+      BRAIN_COLLECTOR_IDS.slackPublicChannels,
+    ] as readonly string[],
     requires: 'slack',
   },
   {
@@ -155,6 +242,7 @@ export const BRAIN_SOURCES = [
       'Bug reports, feature discussions, and decisions from the repositories Roomote can already see.',
     namespaceId: 'github',
     collectorIdPrefix: 'github-issues',
+    collectorIds: [BRAIN_COLLECTOR_IDS.githubIssues] as readonly string[],
     requires: 'github',
   },
   {
@@ -164,6 +252,7 @@ export const BRAIN_SOURCES = [
       'Pages the connected Notion integration can reach, refreshed as they change upstream.',
     namespaceId: 'notion',
     collectorIdPrefix: 'notion-pages',
+    collectorIds: [BRAIN_COLLECTOR_IDS.notionPages] as readonly string[],
     requires: 'notion',
   },
   {
@@ -173,6 +262,7 @@ export const BRAIN_SOURCES = [
       'Granola meeting notes and their attendees, linked to the people they mention.',
     namespaceId: 'meetings',
     collectorIdPrefix: 'granola-meetings',
+    collectorIds: [BRAIN_COLLECTOR_IDS.granolaMeetings] as readonly string[],
     requires: 'granola',
   },
 ] as const;
@@ -198,6 +288,52 @@ export function resolveBrainSourceIdForCollector(
     BRAIN_SOURCES.find((source) => source.collectorIdPrefix === base)?.id ??
     null
   );
+}
+
+/**
+ * Map a sync-state row to its source ONLY when the row belongs to the
+ * source's current collector version (the id itself or one of its
+ * `:`-suffixed partitions). Rows from superseded versions, and auxiliary
+ * rows sharing a source's leading segment (inventories, censuses), return
+ * null: aggregating them is how a version bump quietly doubles a source's
+ * stream counts.
+ */
+export function resolveBrainSourceIdForCurrentCollector(
+  collectorId: string,
+): BrainSourceId | null {
+  return (
+    BRAIN_SOURCES.find((source) =>
+      source.collectorIds.some(
+        (id) => collectorId === id || collectorId.startsWith(`${id}:`),
+      ),
+    )?.id ?? null
+  );
+}
+
+/**
+ * How many partitions a fan-out collector's deep-backfill cursor has fully
+ * read, or null when the cursor does not carry that shape. Slack and GitHub
+ * record their walk as `{completed: [...partitionKeys]}`; the count is the
+ * honest backfill progress numerator, where counting rows with a completion
+ * timestamp is not (partition rows never carry one, only the parent does,
+ * and only at the end).
+ */
+export function parseBrainBackfillCompletedCount(
+  cursor: string | null,
+): number | null {
+  if (!cursor) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(cursor) as { completed?: unknown };
+
+    return Array.isArray(parsed.completed)
+      ? parsed.completed.filter((entry) => typeof entry === 'string').length
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

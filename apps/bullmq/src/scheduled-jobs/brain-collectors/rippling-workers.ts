@@ -1,18 +1,19 @@
 import {
-  and,
   db,
-  deploymentMcpEnablements,
-  eq,
   getBrainSyncState,
-  isNull,
   listBrainCollectorItems,
   listBrainCollectorItemsBefore,
-  mcpConnections,
 } from '@roomote/db/server';
+import {
+  findBrainSourceConnectionConfig,
+  isBrainSourceAvailable,
+} from '@roomote/sdk/server';
 import { ripplingApiRequestJson } from '@roomote/sdk/server/rippling-api';
 import {
+  BRAIN_COLLECTOR_IDS,
+  BRAIN_PAGE_TYPES,
   brainNamespacePrefix,
-  isMcpConnectionRipplingConfig,
+  renderBrainFrontmatter,
   type McpConnectionRipplingConfig,
 } from '@roomote/types';
 import { createHash } from 'node:crypto';
@@ -44,7 +45,7 @@ import { asObject, asString, parseDate } from './shared';
  * optional entitlement. Reconciliation starts only after the final page.
  */
 
-const RIPPLING_WORKERS_COLLECTOR_ID = 'rippling-workers';
+const RIPPLING_WORKERS_COLLECTOR_ID = BRAIN_COLLECTOR_IDS.ripplingWorkers;
 const RIPPLING_SNAPSHOT_STATE_ID = `${RIPPLING_WORKERS_COLLECTOR_ID}:snapshot`;
 const RIPPLING_WORKER_EXPANSIONS =
   'user,manager,manager.user,department,employment_type,teams';
@@ -320,8 +321,13 @@ export function buildRipplingWorkerPage(input: {
     slug: ripplingWorkerSlug(workerId),
     title: name,
     content: [
-      '---',
-      `type: ${canonical ? 'person-alias' : 'person'}`,
+      ...renderBrainFrontmatter({
+        type: canonical
+          ? BRAIN_PAGE_TYPES.personAlias
+          : BRAIN_PAGE_TYPES.person,
+        title: name,
+        created: startDate ?? null,
+      }).slice(0, -1),
       `aliases: ${JSON.stringify(active ? aliases : [])}`,
       `status: ${active ? 'active' : 'inactive'}`,
       `source_status: ${JSON.stringify(exactStatus)}`,
@@ -396,8 +402,10 @@ export function buildUnavailableRipplingWorkerPage(item: {
     slug: item.slug,
     title: 'Unavailable Rippling worker',
     content: [
-      '---',
-      'type: person',
+      ...renderBrainFrontmatter({
+        type: BRAIN_PAGE_TYPES.person,
+        title: 'Unavailable Rippling worker',
+      }).slice(0, -1),
       'aliases: []',
       'status: unavailable',
       `rippling_worker_id: ${JSON.stringify(item.itemId)}`,
@@ -411,30 +419,6 @@ export function buildUnavailableRipplingWorkerPage(item: {
       '',
     ].join('\n'),
   };
-}
-
-async function findRipplingConnectionConfig(): Promise<McpConnectionRipplingConfig | null> {
-  const [connection, enablement] = await Promise.all([
-    db.query.mcpConnections.findFirst({
-      where: and(
-        eq(mcpConnections.mcpId, 'rippling'),
-        isNull(mcpConnections.userId),
-        eq(mcpConnections.enabled, true),
-        eq(mcpConnections.authStatus, 'authenticated'),
-      ),
-    }),
-    db.query.deploymentMcpEnablements.findFirst({
-      where: and(
-        eq(deploymentMcpEnablements.mcpId, 'rippling'),
-        eq(deploymentMcpEnablements.enabled, true),
-      ),
-      columns: { mcpId: true },
-    }),
-  ]);
-
-  return enablement && isMcpConnectionRipplingConfig(connection?.authConfig)
-    ? connection.authConfig
-    : null;
 }
 
 async function collectRipplingReconciliation(
@@ -600,14 +584,14 @@ export const ripplingWorkersCollector: BrainCollector = {
   id: RIPPLING_WORKERS_COLLECTOR_ID,
   displayName: 'Rippling employee directory',
   async isEnabled() {
-    const [config, tracked] = await Promise.all([
-      findRipplingConnectionConfig(),
+    const [available, tracked] = await Promise.all([
+      isBrainSourceAvailable('rippling'),
       listBrainCollectorItems(db, RIPPLING_WORKERS_COLLECTOR_ID, 1),
     ]);
-    return Boolean(config || tracked.length > 0);
+    return available || tracked.length > 0;
   },
   async collect({ now, limit }) {
-    const config = await findRipplingConnectionConfig();
+    const config = await findBrainSourceConnectionConfig('rippling');
     return config
       ? collectRipplingWorkers({ config, now, limit })
       : collectDisabledRipplingWorkers(limit);

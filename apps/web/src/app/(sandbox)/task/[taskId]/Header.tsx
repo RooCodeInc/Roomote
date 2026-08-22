@@ -142,6 +142,9 @@ export const Header = ({ session: { taskRun, task, taskId } }: HeaderProps) => {
       void queryClient.invalidateQueries({
         queryKey: trpc.tasks.list.queryKey(),
       });
+      void queryClient.invalidateQueries({
+        queryKey: trpc.tasks.search.queryKey(),
+      });
     }
   };
 

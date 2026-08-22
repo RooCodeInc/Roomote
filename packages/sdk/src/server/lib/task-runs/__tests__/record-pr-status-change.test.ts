@@ -1,6 +1,7 @@
 const mockFindManyTaskPullRequests = vi.fn();
 const mockFindFirstTaskRun = vi.fn();
 const mockRecordTaskMessageEnvelope = vi.fn();
+const mockNotifyFastAgentParent = vi.fn();
 const mockRedisSet = vi.fn();
 const mockRedisDel = vi.fn();
 
@@ -36,6 +37,11 @@ vi.mock('@roomote/redis', () => ({
 vi.mock('../record-task-message-envelope', () => ({
   recordTaskMessageEnvelope: (...args: unknown[]) =>
     mockRecordTaskMessageEnvelope(...args),
+}));
+
+vi.mock('../notify-fast-agent-parent-on-pull-request-status-changed', () => ({
+  notifyFastAgentParentOnPullRequestStatusChanged: (...args: unknown[]) =>
+    mockNotifyFastAgentParent(...args),
 }));
 
 import {
@@ -143,8 +149,13 @@ describe('recordPrStatusChangeInTaskHistory', () => {
     vi.clearAllMocks();
     vi.useRealTimers();
     mockFindManyTaskPullRequests.mockResolvedValue([{ taskId: 'task-1' }]);
-    mockFindFirstTaskRun.mockResolvedValue({ id: 99 });
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 99,
+      taskId: 'task-1',
+      payload: {},
+    });
     mockRecordTaskMessageEnvelope.mockResolvedValue(undefined);
+    mockNotifyFastAgentParent.mockResolvedValue(undefined);
     mockRedisSet.mockResolvedValue('OK');
     mockRedisDel.mockResolvedValue(1);
   });
@@ -194,8 +205,8 @@ describe('recordPrStatusChangeInTaskHistory', () => {
       { taskId: 'task-2' },
     ]);
     mockFindFirstTaskRun
-      .mockResolvedValueOnce({ id: 11 })
-      .mockResolvedValueOnce({ id: 22 });
+      .mockResolvedValueOnce({ id: 11, taskId: 'task-1', payload: {} })
+      .mockResolvedValueOnce({ id: 22, taskId: 'task-2', payload: {} });
 
     await expect(
       recordPrStatusChangeInTaskHistory({
@@ -210,6 +221,19 @@ describe('recordPrStatusChangeInTaskHistory', () => {
     const expectedTs = Date.parse('2026-07-12T15:30:00.123Z');
 
     expect(mockRecordTaskMessageEnvelope).toHaveBeenCalledTimes(2);
+    expect(mockNotifyFastAgentParent).toHaveBeenCalledTimes(2);
+    expect(mockNotifyFastAgentParent).toHaveBeenNthCalledWith(1, {
+      run: { id: 11, taskId: 'task-1', payload: {} },
+      pullRequest: {
+        provider: 'github',
+        repository: 'owner/repo',
+        number: 42,
+        title: 'Fix auth',
+        url: 'https://github.com/owner/repo/pull/42',
+        status: 'closed',
+      },
+      actorLogin: 'alice',
+    });
     expect(mockRecordTaskMessageEnvelope).toHaveBeenNthCalledWith(1, {
       runId: 11,
       taskId: 'task-1',

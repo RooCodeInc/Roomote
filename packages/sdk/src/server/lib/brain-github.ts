@@ -10,7 +10,12 @@ import {
   repositories,
 } from '@roomote/db/server';
 import { getInstallationOctokit } from '@roomote/github';
-import { brainNamespacePrefix } from '@roomote/types';
+import {
+  BRAIN_COLLECTOR_IDS,
+  BRAIN_PAGE_TYPES,
+  brainNamespacePrefix,
+  renderBrainFrontmatter,
+} from '@roomote/types';
 
 /**
  * GitHub issues as Brain memory: the discussion around bugs, features, and
@@ -43,8 +48,9 @@ export type BrainGithubCollectionResult = {
   nextSince: null;
   stateUpdates: Array<{
     collectorId: string;
-    watermark: Date;
+    watermark?: Date;
     cursor?: string | null;
+    backfillCompletedAt?: Date | null;
   }>;
 };
 
@@ -229,18 +235,23 @@ export function buildGithubIssuePage(input: {
   });
 
   const content = [
-    '---',
-    ...(effectiveDate ? [`event_date: ${effectiveDate}`] : []),
-    `repository: ${fullName}`,
-    `issue_number: ${issue.number}`,
-    `state: ${issue.state ?? 'unknown'}`,
-    ...(issue.user?.login ? [`author: ${issue.user.login}`] : []),
-    ...(labels.length > 0 ? [`labels: ${labels.join(', ')}`] : []),
-    ...(issue.created_at ? [`created_at: ${issue.created_at}`] : []),
-    ...(issue.updated_at ? [`updated_at: ${issue.updated_at}`] : []),
-    ...(issue.closed_at ? [`closed_at: ${issue.closed_at}`] : []),
-    'provenance: roomote-github-issues',
-    '---',
+    ...renderBrainFrontmatter({
+      type: BRAIN_PAGE_TYPES.githubIssue,
+      title: `${fullName}#${issue.number}: ${issue.title}`,
+      created: issue.created_at ?? effectiveDate ?? null,
+      fields: [
+        effectiveDate && `event_date: ${effectiveDate}`,
+        `repository: ${fullName}`,
+        `issue_number: ${issue.number}`,
+        `state: ${issue.state ?? 'unknown'}`,
+        issue.user?.login && `author: ${issue.user.login}`,
+        labels.length > 0 && `labels: ${labels.join(', ')}`,
+        issue.created_at && `created_at: ${issue.created_at}`,
+        issue.updated_at && `updated_at: ${issue.updated_at}`,
+        issue.closed_at && `closed_at: ${issue.closed_at}`,
+        'provenance: roomote-github-issues',
+      ],
+    }),
     '',
     `# ${fullName}#${issue.number}: ${issue.title}`,
     '',
@@ -355,7 +366,11 @@ export async function collectBrainGithubIssues(input: {
   const commentBudget = { remaining: MAX_COMMENT_FETCHES_PER_PASS };
   const repositoriesWithState = await Promise.all(
     repositoriesToScan.map(async (repository) => {
-      const stateId = `github-issues:occurrence-date-v2:${repository.fullName}`;
+      // Keyed off the SAME versioned id as the collector: these rows are
+      // the source's live streams, and drifting from the collector id (as a
+      // hardcoded v2 once did here) strands them under a name nothing else
+      // recognizes.
+      const stateId = `${BRAIN_COLLECTOR_IDS.githubIssues}:${repository.fullName}`;
 
       return {
         ...repository,
@@ -371,6 +386,33 @@ export async function collectBrainGithubIssues(input: {
         (b.state?.watermark?.getTime() ?? 0) ||
       a.fullName.localeCompare(b.fullName),
   );
+
+  // A completed deep backfill stays honest only while it covers every
+  // eligible repository. Eligibility is re-derived every pass, so a
+  // repository the finished walk never read (connected after completion)
+  // re-arms the backfill; the preserved completed-set cursor makes the
+  // resumed walk read just that repository's history.
+  const backfillState = await getBrainSyncState(
+    db,
+    BRAIN_COLLECTOR_IDS.githubIssues,
+  );
+
+  if (backfillState?.backfillCompletedAt) {
+    const backfilled = new Set(
+      parseBackfillCursor(backfillState.backfillCursor ?? null).completed,
+    );
+
+    if (
+      repositoriesToScan.some(
+        (repository) => !backfilled.has(repository.fullName),
+      )
+    ) {
+      stateUpdates.push({
+        collectorId: BRAIN_COLLECTOR_IDS.githubIssues,
+        backfillCompletedAt: null,
+      });
+    }
+  }
 
   for (const repository of repositoriesWithState) {
     if (pages.length >= input.limit) {
@@ -682,13 +724,19 @@ export async function backfillBrainGithubIssuesStep(input: {
     repositoriesToScan.find((candidate) => !completed.has(candidate.fullName));
 
   if (!repository) {
+    // Every eligible repository has been read: the deep backfill is
+    // genuinely complete, and reporting it records that honestly. Completion
+    // is not permanent: the incremental pass re-lists repositories every
+    // tick and re-arms the backfill when one this walk never read appears,
+    // and the engine preserves this cursor on completion so the resumed
+    // walk reads only the new repository.
     const nextCursor = JSON.stringify({
       completed: [...completed].sort(),
       repository: null,
       page: 1,
     } satisfies BackfillCursor);
 
-    return { pages: [], nextCursor, done: false };
+    return { pages: [], nextCursor, done: true };
   }
 
   const page = repository.fullName === cursor.repository ? cursor.page : 1;

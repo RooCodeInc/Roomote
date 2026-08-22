@@ -311,7 +311,7 @@ export const slackMentionCallbacks: RunTaskCallbacks = {
       );
     }
   },
-  onExit: async (taskRun: TaskRun, _status, context: RunTaskContext) => {
+  onExit: async (taskRun: TaskRun, status, context: RunTaskContext) => {
     try {
       const threadIds = new Set(
         [...getSlackRequestUserInputReplyTargets(context).values()].map(

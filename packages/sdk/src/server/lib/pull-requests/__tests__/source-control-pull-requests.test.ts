@@ -437,6 +437,7 @@ describe('createOrUpdateSourceControlPullRequestForTaskRun', () => {
     expect(result.warnings).toEqual([]);
     expect(mockNotifyFastAgentParentOnPullRequestOpened).toHaveBeenCalledWith({
       run: expect.objectContaining({ id: 123, taskId: 'task-123' }),
+      untrustedTaskGeneratedContext: 'Body',
       pullRequest: expect.objectContaining({
         provider: 'ado',
         repository: 'acme/Platform/backend',
@@ -555,6 +556,9 @@ describe('platform-managed draft state', () => {
     finishNotification();
     const result = await resultPromise;
 
+    expect(mockGetOctokit).toHaveBeenCalledWith('github-token', {
+      retryRateLimits: true,
+    });
     expect(octokit.rest.pulls.create).toHaveBeenCalledWith(
       expect.objectContaining({ draft: true }),
     );
@@ -563,6 +567,7 @@ describe('platform-managed draft state', () => {
     expect(result.warnings).toEqual([]);
     expect(mockNotifyFastAgentParentOnPullRequestOpened).toHaveBeenCalledWith({
       run: expect.objectContaining({ id: 123, taskId: 'task-123' }),
+      untrustedTaskGeneratedContext: 'Body',
       pullRequest: {
         provider: 'github',
         host: undefined,

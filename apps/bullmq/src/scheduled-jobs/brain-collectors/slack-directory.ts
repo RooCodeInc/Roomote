@@ -1,4 +1,9 @@
-import { brainNamespacePrefix } from '@roomote/types';
+import {
+  BRAIN_COLLECTOR_IDS,
+  BRAIN_PAGE_TYPES,
+  brainNamespacePrefix,
+  renderBrainFrontmatter,
+} from '@roomote/types';
 import {
   and,
   db,
@@ -9,6 +14,7 @@ import {
   slackInstallations,
 } from '@roomote/db/server';
 import { createSlackWebClient } from '@roomote/slack';
+import { isBrainSourceAvailable } from '@roomote/sdk/server';
 import { createHash } from 'node:crypto';
 
 import type {
@@ -26,8 +32,7 @@ import { formatUtcDay } from './shared';
 
 const LOG_PREFIX = '[brainCollectors]';
 
-const SLACK_DIRECTORY_COLLECTOR_ID =
-  'slack-person-directory:occurrence-date-v2';
+const SLACK_DIRECTORY_COLLECTOR_ID = BRAIN_COLLECTOR_IDS.slackPersonDirectory;
 const SLACK_DIRECTORY_REFRESH_MS = 24 * 60 * 60 * 1000;
 const SLACK_DIRECTORY_PAGE_SIZE = 100;
 
@@ -184,12 +189,16 @@ export function buildSlackDirectoryPersonPage(
       slug,
       title: name,
       content: [
-        '---',
-        'type: person-alias',
-        `canonical: ${JSON.stringify(canonical.slug)}`,
-        `event_date: ${formatUtcDay(effectiveDate)}`,
-        'provenance: slack-directory',
-        '---',
+        ...renderBrainFrontmatter({
+          type: BRAIN_PAGE_TYPES.personAlias,
+          title: name,
+          created: effectiveDate,
+          fields: [
+            `canonical: ${JSON.stringify(canonical.slug)}`,
+            `event_date: ${formatUtcDay(effectiveDate)}`,
+            'provenance: slack-directory',
+          ],
+        }),
         '',
         `# ${name}`,
         '',
@@ -213,15 +222,19 @@ export function buildSlackDirectoryPersonPage(
     slug,
     title: name,
     content: [
-      '---',
-      'type: person',
-      `aliases: ${JSON.stringify(aliases)}`,
-      `status: ${profile.isDeleted ? 'deleted' : 'active'}`,
-      `event_date: ${formatUtcDay(effectiveDate)}`,
-      ...(safeTitle ? [`job_title: ${JSON.stringify(safeTitle)}`] : []),
-      'provenance: slack-directory',
-      `workspace: ${JSON.stringify(safeWorkspace)}`,
-      '---',
+      ...renderBrainFrontmatter({
+        type: BRAIN_PAGE_TYPES.person,
+        title: name,
+        created: effectiveDate,
+        fields: [
+          `aliases: ${JSON.stringify(aliases)}`,
+          `status: ${profile.isDeleted ? 'deleted' : 'active'}`,
+          `event_date: ${formatUtcDay(effectiveDate)}`,
+          safeTitle && `job_title: ${JSON.stringify(safeTitle)}`,
+          'provenance: slack-directory',
+          `workspace: ${JSON.stringify(safeWorkspace)}`,
+        ],
+      }),
       '',
       `# ${name}`,
       '',
@@ -430,11 +443,7 @@ export const slackPersonDirectoryCollector: BrainCollector = {
   id: SLACK_DIRECTORY_COLLECTOR_ID,
   displayName: 'Slack person directory',
   async isEnabled() {
-    const installation = await db.query.slackInstallations.findFirst({
-      columns: { id: true },
-      where: eq(slackInstallations.isActive, true),
-    });
-    return Boolean(installation);
+    return isBrainSourceAvailable('slack');
   },
   async collect({ now, limit }) {
     const collectorState = await getBrainSyncState(

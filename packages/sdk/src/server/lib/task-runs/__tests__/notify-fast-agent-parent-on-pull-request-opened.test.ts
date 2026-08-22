@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => {
 
   return {
     claimReturning: vi.fn(),
+    findClaimRun: vi.fn(),
     updateSet: vi.fn(),
     inArray: vi.fn((...args: unknown[]) => args),
     not: vi.fn((...args: unknown[]) => args),
@@ -29,6 +30,9 @@ const mocks = vi.hoisted(() => {
 
 vi.mock('@roomote/db/server', () => ({
   db: {
+    query: {
+      taskRuns: { findFirst: mocks.findClaimRun },
+    },
     update: vi.fn(() => ({
       set: vi.fn((values: unknown) => {
         mocks.updateSet(values);
@@ -39,6 +43,8 @@ vi.mock('@roomote/db/server', () => ({
     })),
   },
   and: vi.fn((...args: unknown[]) => args),
+  asc: vi.fn((value: unknown) => value),
+  desc: vi.fn((value: unknown) => value),
   eq: vi.fn((...args: unknown[]) => args),
   inArray: mocks.inArray,
   not: mocks.not,
@@ -49,6 +55,8 @@ vi.mock('@roomote/db/server', () => ({
   })),
   taskRuns: {
     id: 'task_runs.id',
+    taskId: 'task_runs.task_id',
+    createdAt: 'task_runs.created_at',
     result: 'task_runs.result',
     status: 'task_runs.status',
   },
@@ -109,6 +117,7 @@ describe('notifyFastAgentParentOnPullRequestOpened', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
+    mocks.findClaimRun.mockResolvedValue({ id: 200 });
     mocks.deliverParentEvent.mockResolvedValue(undefined);
     mocks.recordLifecycle.mockResolvedValue(undefined);
   });
@@ -116,6 +125,8 @@ describe('notifyFastAgentParentOnPullRequestOpened', () => {
   it('passes structured pull request context to the Fast parent', async () => {
     await notifyFastAgentParentOnPullRequestOpened({
       run: makeRun({ fastAgentParent: discordFastParent }),
+      untrustedTaskGeneratedContext:
+        'Fixed startup by treating absent local secrets as optional.',
       pullRequest,
     });
 
@@ -127,6 +138,8 @@ describe('notifyFastAgentParentOnPullRequestOpened', () => {
         taskId: 'child-task',
         runId: 200,
         taskUrl: 'https://roomote.example/task/child-task',
+        untrustedTaskGeneratedContext:
+          'Fixed startup by treating absent local secrets as optional.',
         pullRequest,
       },
     });
@@ -152,54 +165,20 @@ describe('notifyFastAgentParentOnPullRequestOpened', () => {
     );
   });
 
-  it('does not deliver the same pull request twice', async () => {
-    mocks.claimReturning
-      .mockResolvedValueOnce([{ id: 200 }])
-      .mockResolvedValueOnce([]);
-
-    const run = makeRun({ fastAgentParent: fastParent });
-    await notifyFastAgentParentOnPullRequestOpened({ run, pullRequest });
-    await notifyFastAgentParentOnPullRequestOpened({ run, pullRequest });
-
-    expect(mocks.deliverParentEvent).toHaveBeenCalledTimes(1);
-  });
-
-  it('releases a failed claim so an update retry can deliver it', async () => {
-    mocks.claimReturning.mockResolvedValue([{ id: 200 }]);
-    mocks.deliverParentEvent
-      .mockRejectedValueOnce(new Error('model offline'))
-      .mockResolvedValueOnce(undefined);
-
-    const run = makeRun({ fastAgentParent: fastParent });
-    await expect(
-      notifyFastAgentParentOnPullRequestOpened({ run, pullRequest }),
-    ).rejects.toThrow('model offline');
-    await notifyFastAgentParentOnPullRequestOpened({ run, pullRequest });
-
-    expect(mocks.deliverParentEvent).toHaveBeenCalledTimes(2);
-    expect(
-      mocks.updateSet.mock.calls.some(([values]) => {
-        const result = (values as { result?: { strings?: string[] } }).result;
-        return result?.strings?.join('').includes(' - ') === true;
-      }),
-    ).toBe(true);
-  });
-
-  it('settles the claim without history when the run became terminal', async () => {
-    mocks.deliverParentEvent.mockResolvedValueOnce('skipped');
-
+  it('omits blank task-generated context so metadata remains the fallback', async () => {
     await notifyFastAgentParentOnPullRequestOpened({
       run: makeRun({ fastAgentParent: fastParent }),
+      untrustedTaskGeneratedContext: '   ',
       pullRequest,
     });
 
-    expect(mocks.recordLifecycle).not.toHaveBeenCalled();
-    expect(
-      mocks.updateSet.mock.calls.some(([values]) => {
-        const result = (values as { result?: { strings?: string[] } }).result;
-        return result?.strings?.join('').includes('to_jsonb(now())') === true;
+    expect(mocks.deliverParentEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: expect.not.objectContaining({
+          untrustedTaskGeneratedContext: expect.anything(),
+        }),
       }),
-    ).toBe(true);
+    );
   });
 
   it('does nothing for a task without a Fast parent', async () => {

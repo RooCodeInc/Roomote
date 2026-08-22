@@ -125,12 +125,10 @@ export function BrainCorpusSection({ corpus }: { corpus: BrainCorpusSummary }) {
       icon={Database}
       title="What the Brain knows"
       action={
-        corpus.reachable && corpus.sampledPages > 0 ? (
+        corpus.reachable && corpus.listedPages > 0 ? (
           <span className="flex items-center gap-3">
             <span className="text-sm font-normal text-muted-foreground">
-              {corpus.truncated
-                ? `${formatNumber(corpus.sampledPages)} most recent pages`
-                : `${formatNumber(corpus.sampledPages)} pages`}
+              {formatNumber(corpus.listedPages)} pages
             </span>
             <Button
               variant="outline"
@@ -173,13 +171,6 @@ export function BrainCorpusSection({ corpus }: { corpus: BrainCorpusSummary }) {
               </div>
             ))}
           </div>
-
-          {corpus.truncated ? (
-            <p className="text-xs text-muted-foreground">
-              The Brain lists its most recent pages, so this describes what it
-              has learned lately rather than everything it holds.
-            </p>
-          ) : null}
 
           {corpus.activityByDay.length > 0 ? (
             <div className="space-y-2 border-t pt-4">
@@ -227,7 +218,11 @@ export function BrainCorpusSection({ corpus }: { corpus: BrainCorpusSummary }) {
         </div>
       )}
 
-      <BrainBrowseDialog open={browseOpen} onOpenChange={setBrowseOpen} />
+      <BrainBrowseDialog
+        open={browseOpen}
+        onOpenChange={setBrowseOpen}
+        corpus={corpus}
+      />
     </Section>
   );
 }

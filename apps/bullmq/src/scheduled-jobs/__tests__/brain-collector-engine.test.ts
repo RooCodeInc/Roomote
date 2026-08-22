@@ -768,6 +768,25 @@ describe('runBrainCollectors deep backfill', () => {
     );
   });
 
+  it("preserves a done step's cursor for later re-arming", async () => {
+    // Fan-out collectors keep their completed-partition set in the cursor;
+    // nulling it on completion would make a re-arm re-read every partition.
+    const finalCursor = '{"completed":["T1/C1","T1/C2"]}';
+    const backfill = vi
+      .fn<NonNullable<BrainCollector['backfill']>>()
+      .mockResolvedValue({ pages: [], nextCursor: finalCursor, done: true });
+    const collector = makeCollector({ backfill });
+
+    await runBrainCollectors(connection, {
+      sink: vi.fn(async () => {}),
+      collectors: [collector],
+    });
+
+    const state = syncStateStore.get(collector.id);
+    expect(state?.backfillCompletedAt).toBeInstanceOf(Date);
+    expect(state?.backfillCursor).toBe(finalCursor);
+  });
+
   it('marks the backfill complete when a step reports done', async () => {
     const backfill = vi
       .fn<NonNullable<BrainCollector['backfill']>>()

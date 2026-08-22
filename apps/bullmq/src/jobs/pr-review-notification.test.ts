@@ -16,11 +16,13 @@ const {
   mockStickyFooterPost,
   mockSetPendingPrReviewAction,
   mockDispatchFollowUp,
+  mockNotifyFastAgentParent,
   mockFinalize,
   mockIsDurable,
   mockMigrateLegacy,
   mockRenewLease,
   mockEq,
+  MockPrReviewNotificationRateLimitError,
 } = vi.hoisted(() => ({
   mockFindFirstTaskRun: vi.fn(),
   mockFindFirstTaskPullRequest: vi.fn(),
@@ -37,11 +39,17 @@ const {
   mockStickyFooterPost: vi.fn(),
   mockSetPendingPrReviewAction: vi.fn(),
   mockDispatchFollowUp: vi.fn(),
+  mockNotifyFastAgentParent: vi.fn(),
   mockFinalize: vi.fn(),
   mockIsDurable: vi.fn(),
   mockMigrateLegacy: vi.fn(),
   mockRenewLease: vi.fn(),
   mockEq: vi.fn((...args: unknown[]) => ({ eq: args })),
+  MockPrReviewNotificationRateLimitError: class extends Error {
+    constructor(readonly retryAfterMs: number) {
+      super('GitHub installation API rate limited during PR review triage.');
+    }
+  },
 }));
 
 vi.mock('@roomote/db/server', () => ({
@@ -87,6 +95,7 @@ vi.mock('@roomote/slack', async (importOriginal) => {
 vi.mock('@roomote/sdk/server', () => ({
   PR_REVIEW_NOTIFICATION_DEFER_MS: 5000,
   PR_REVIEW_NOTIFICATION_MAX_DEFERRALS: 3,
+  PrReviewNotificationRateLimitError: MockPrReviewNotificationRateLimitError,
   prReviewNotificationRequestSchema: z.object({
     taskId: z.string(),
     repository: z.string(),
@@ -116,6 +125,7 @@ vi.mock('@roomote/sdk/server', () => ({
   recordPrReviewNotificationDeliveryBestEffort: mockRecordDelivery,
   setPendingPrReviewAction: mockSetPendingPrReviewAction,
   dispatchPrReviewFollowUp: mockDispatchFollowUp,
+  notifyFastAgentParentOnPrFeedback: mockNotifyFastAgentParent,
   finalizePrReviewNotificationRequest: mockFinalize,
   renewPrReviewNotificationRequestLease: mockRenewLease,
   isDurablePrReviewNotificationRequest: mockIsDurable,
@@ -161,6 +171,12 @@ describe('prReviewNotificationJob', () => {
       workerHeartbeatAt: new Date(),
     });
     mockFindFirstTaskPullRequest.mockResolvedValue({
+      sourceControlProvider: 'github',
+      host: 'github.com',
+      repository: 'owner/repo',
+      prNumber: 42,
+      prTitle: 'PR title',
+      prUrl: 'https://github.com/owner/repo/pull/42',
       status: 'open',
       autoHandleFeedbackByUserId: null,
     });
@@ -179,6 +195,7 @@ describe('prReviewNotificationJob', () => {
       text: 'formatted-message',
     });
     mockRecordDelivery.mockResolvedValue(undefined);
+    mockNotifyFastAgentParent.mockResolvedValue(undefined);
     mockStickyFooterPost.mockResolvedValue('999.888');
     mockPostMessage.mockResolvedValue({
       provider: 'slack',
@@ -258,6 +275,73 @@ describe('prReviewNotificationJob', () => {
       messageTs: '999.888',
     });
     expect(mockSchedule).not.toHaveBeenCalled();
+  });
+
+  it('passes triaged feedback to the Fast parent event path', async () => {
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 1,
+      taskId: 'task-1',
+      payload: {
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+        },
+      },
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      workerHeartbeatAt: new Date(),
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: null,
+      text: 'Alice requested changes on owner/repo#42.',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockConsumePending.mockResolvedValue([
+      {
+        kind: 'review_summary',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+        reviewTaskId: 'review-task',
+        reviewHeadSha: 'abc123',
+        reviewResult: {
+          reviewKind: 'initial',
+          outcome: 'findings_remain',
+          findingCount: 1,
+          approvalStatus: null,
+          headSha: 'abc123',
+        },
+      },
+    ]);
+
+    await prReviewNotificationJob(
+      makeJob({ deliveryIds: ['delivery-2', 'delivery-1'] }) as never,
+    );
+
+    expect(mockNotifyFastAgentParent).toHaveBeenCalledWith({
+      run: expect.objectContaining({ id: 1, taskId: 'task-1' }),
+      deliveryIds: ['delivery-2', 'delivery-1'],
+      pullRequest: {
+        provider: 'github',
+        host: 'github.com',
+        repository: 'owner/repo',
+        number: 42,
+        title: 'PR title',
+        url: 'https://github.com/owner/repo/pull/42',
+        status: 'open',
+      },
+      summary: 'Alice requested changes on owner/repo#42.',
+      reviewTaskId: 'review-task',
+      reviewHeadSha: 'abc123',
+      reviewResult: {
+        reviewKind: 'initial',
+        outcome: 'findings_remain',
+        findingCount: 1,
+        approvalStatus: null,
+        headSha: 'abc123',
+      },
+      suggestedActionPrompt: 'Address the review feedback on owner/repo#42.',
+    });
   });
 
   it('uses the originating workspace installation when identifiers collide', async () => {
@@ -801,6 +885,7 @@ describe('prReviewNotificationJob', () => {
 
     await prReviewNotificationJob(makeJob() as never);
 
+    expect(mockNotifyFastAgentParent).not.toHaveBeenCalled();
     expect(mockPostMessage).not.toHaveBeenCalled();
     expect(mockRequeuePending).not.toHaveBeenCalled();
   });
@@ -821,6 +906,29 @@ describe('prReviewNotificationJob', () => {
       },
       events,
     });
+  });
+
+  it('durably defers installation rate limits without immediate job retry', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    mockPrepareDelivery.mockRejectedValue(
+      new MockPrReviewNotificationRateLimitError(900_000),
+    );
+    const job = makeJob({
+      deliveryIds: ['delivery-1'],
+      leaseToken: 'lease-1',
+      events,
+    });
+
+    await expect(
+      prReviewNotificationJob(job as never),
+    ).resolves.toBeUndefined();
+
+    expect(mockSchedule).toHaveBeenCalledWith({
+      request: job.data,
+      delayMs: 915_000,
+      countDeferral: false,
+    });
+    expect(mockRequeuePending).not.toHaveBeenCalled();
   });
 
   it('requeues drained events and rethrows when posting fails', async () => {

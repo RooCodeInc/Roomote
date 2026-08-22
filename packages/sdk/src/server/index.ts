@@ -246,6 +246,7 @@ export {
 } from './lib/task-runs/pr-review-notification';
 export {
   gatherPrReviewTriageContext,
+  PrReviewNotificationRateLimitError,
   preparePrReviewNotificationDelivery,
   recordPrReviewNotificationDeliveryBestEffort,
   triagePrReviewActivity,
@@ -254,6 +255,7 @@ export {
 } from './lib/task-runs/pr-review-notification-delivery';
 export * from './lib/task-runs/pr-review-action';
 export * from './lib/task-runs/pr-review-follow-up-dispatch';
+export * from './lib/task-runs/notify-fast-agent-parent-on-pr-feedback';
 
 export {
   formatPrStatusChangeTaskHistoryText,
@@ -382,3 +384,4 @@ export * from './lib/brain-corpus';
 export * from './lib/brain-mcp';
 export * from './lib/brain-github';
 export * from './lib/brain-inference';
+export * from './lib/brain-source-availability';

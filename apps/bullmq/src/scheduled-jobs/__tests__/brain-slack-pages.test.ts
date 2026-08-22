@@ -52,20 +52,22 @@ describe('groupSlackMessagesIntoDayPages', () => {
 
     // Oldest day first, then workspace and channel for deterministic writes.
     expect(pages.map((page) => page.slug)).toEqual([
-      `slack/T1/C1/2026-08-13/${day1Ts}-${day1LaterTs}`.replaceAll('.', '-'),
-      `slack/T1/C2/2026-08-13/${day1Ts}-${day1Ts}`.replaceAll('.', '-'),
-      `slack/T1/C1/2026-08-14/${day2Ts}-${day2Ts}`.replaceAll('.', '-'),
+      `slack/t1/c1/2026-08-13/${day1Ts}-${day1LaterTs}`.replaceAll('.', '-'),
+      `slack/t1/c2/2026-08-13/${day1Ts}-${day1Ts}`.replaceAll('.', '-'),
+      `slack/t1/c1/2026-08-14/${day2Ts}-${day2Ts}`.replaceAll('.', '-'),
     ]);
     expect(pages[0]?.title).toBe('#general — 2026-08-13');
     // The title must also lead the content as a markdown heading: put_page
     // carries no title field, and gbrain derives a page's title from the
     // first heading — without it the slug's timestamp range becomes the
     // title on every surface.
+    // type/title/created are the fields gbrain's lint requires on every
+    // page; without `type` gbrain files the page as a generic concept.
     expect(pages[0]?.content).toMatch(
-      /^---\ndate: 2026-08-13\n---\n\n# #general — 2026-08-13\n/,
+      /^---\ntype: slack\ntitle: "#general — 2026-08-13"\ncreated: 2026-08-13\ndate: 2026-08-13\n---\n\n# #general — 2026-08-13\n/,
     );
     expect(pages[2]?.content).toMatch(
-      /^---\ndate: 2026-08-14\n---\n\n# #general — 2026-08-14\n/,
+      /^---\ntype: slack\ntitle: "#general — 2026-08-14"\ncreated: 2026-08-14\ndate: 2026-08-14\n---\n\n# #general — 2026-08-14\n/,
     );
     expect(pages[0]?.content).toContain(
       'Slack public channel #general (C1), messages on 2026-08-13',

@@ -125,6 +125,20 @@ describe('postScheduledSuggestionsToTelegram', () => {
     selectLimitMock.mockResolvedValue([]);
   });
 
+  it('does not post a Dependabot summary without remediation suggestions', async () => {
+    const delivered = await postScheduledSuggestionsToTelegram({
+      sourceTaskId: 'dependabot-zero-alerts',
+      createdByUserId: null,
+      suggestionSource: 'dependabot_triage',
+      suggestions: [],
+    });
+
+    expect(delivered).toBe(false);
+    expect(buildRootMessageMock).not.toHaveBeenCalled();
+    expect(createTelegramForumTopicBestEffortMock).not.toHaveBeenCalled();
+    expect(postTelegramMessageBestEffortMock).not.toHaveBeenCalled();
+  });
+
   it('posts current-thread suggestions without creating a topic', async () => {
     postTelegramMessageBestEffortMock
       .mockResolvedValueOnce({ messageId: '950' })

@@ -3,7 +3,6 @@ import {
   backfillBrainMemoryEvents,
   countBrainCollectorItemsByCollector,
   db,
-  deploymentMcpEnablements,
   eq,
   getBrainMemoryEventSummary,
   isBrainProviderConfigured,
@@ -12,15 +11,15 @@ import {
   listBrainSyncStates,
   mcpConnections,
   requeueFailedBrainMemoryEvents,
-  slackInstallations,
 } from '@roomote/db/server';
 import {
   describeBrainModels,
-  hasBrainGithubSources,
-  readBrainCorpusSample,
+  readBrainCorpus,
   readBrainPage,
   readBrainStats,
+  resolveBrainSourceRequirements,
   resolveBrainInferenceProvider,
+  type BrainCorpusSnapshot,
   type BrainModelSummary,
 } from '@roomote/sdk/server';
 import {
@@ -30,7 +29,9 @@ import {
   brainNamespaceLabel,
   resolveBrainNamespaceId,
   isMcpConnectionGbrainConfig,
+  parseBrainBackfillCompletedCount,
   resolveBrainSourceIdForCollector,
+  resolveBrainSourceIdForCurrentCollector,
   type BrainNamespaceBucketId,
   type BrainSourceId,
   type BrainSourceRequirement,
@@ -87,10 +88,10 @@ export type BrainSourceSummary = {
   status: BrainSourceStatus;
   /** Newest checkpoint across the source's partitions. */
   lastSyncedAt: Date | null;
-  /** Sync-state rows: one per workspace or channel for fanned-out sources. */
-  partitions: number;
-  /** Partitions whose one-time deep history sweep has finished. */
-  partitionsBackfilled: number;
+  /** Live partitions (channels, repositories, workspaces) being read. */
+  streams: number;
+  /** Deep-replay progress while `backfilling`, or null when unknowable. */
+  backfillProgress: { read: number; total: number } | null;
   /** Upstream objects this source is tracking (pages it owns and refreshes). */
   trackedItems: number;
 };
@@ -103,21 +104,17 @@ export type BrainNamespaceSummary = {
 
 export type BrainCorpusSummary = {
   reachable: boolean;
-  /** Pages in the sample, which is the whole corpus unless `truncated`. */
-  sampledPages: number;
-  truncated: boolean;
+  /** Pages in the exhaustive cached corpus listing. */
+  listedPages: number;
   /**
    * The corpus's exact page count from gbrain's admin census, or null when
-   * the admin API did not answer. The sample above stays authoritative for
-   * composition; this keeps the total honest past the sample bound.
+   * the admin API did not answer.
    */
   totalPages: number | null;
   namespaces: BrainNamespaceSummary[];
   /**
    * Pages written per UTC day over the trailing window, oldest first,
-   * zero-filled. Computed from the same recency-sorted sample as the rest of
-   * the summary, so on a `truncated` corpus it undercounts the oldest days
-   * rather than the newest.
+   * zero-filled. Computed from the exhaustive corpus listing.
    */
   activityByDay: Array<{ date: string; pages: number }>;
   recentPages: Array<{
@@ -167,67 +164,6 @@ export type BrainSettings = {
   };
 };
 
-async function isDeploymentMcpConnected(mcpId: string): Promise<boolean> {
-  const connection = await db.query.mcpConnections.findFirst({
-    columns: { id: true },
-    where: and(
-      eq(mcpConnections.mcpId, mcpId),
-      isNull(mcpConnections.userId),
-      eq(mcpConnections.enabled, true),
-      eq(mcpConnections.authStatus, 'authenticated'),
-    ),
-  });
-
-  return Boolean(connection);
-}
-
-async function isDeploymentMcpConnectedAndEnabled(
-  mcpId: string,
-): Promise<boolean> {
-  const [connected, enablement] = await Promise.all([
-    isDeploymentMcpConnected(mcpId),
-    db.query.deploymentMcpEnablements.findFirst({
-      columns: { mcpId: true },
-      where: and(
-        eq(deploymentMcpEnablements.mcpId, mcpId),
-        eq(deploymentMcpEnablements.enabled, true),
-      ),
-    }),
-  ]);
-
-  return connected && Boolean(enablement);
-}
-
-async function isSlackConnected(): Promise<boolean> {
-  const installation = await db.query.slackInstallations.findFirst({
-    columns: { id: true },
-    where: eq(slackInstallations.isActive, true),
-  });
-
-  return Boolean(installation);
-}
-
-/**
- * Whether each source has something upstream to read. Mirrors the collectors'
- * own enablement checks rather than reading a stored flag, because there is no
- * flag: a source is on when its integration is connected. Resolved once per
- * request and shared, so six sources do not issue six copies of the same
- * lookup.
- */
-async function resolveSourceRequirements(): Promise<
-  Record<BrainSourceRequirement, boolean>
-> {
-  const [slack, notion, granola, github, rippling] = await Promise.all([
-    isSlackConnected(),
-    isDeploymentMcpConnectedAndEnabled('notion'),
-    isDeploymentMcpConnected('granola'),
-    hasBrainGithubSources(),
-    isDeploymentMcpConnectedAndEnabled('rippling'),
-  ]);
-
-  return { slack, notion, granola, github, rippling };
-}
-
 /** Days of page-writing activity summarized for the ingestion chart. */
 const ACTIVITY_WINDOW_DAYS = 30;
 
@@ -262,13 +198,12 @@ function buildActivityByDay(
 }
 
 function summarizeCorpus(
-  snapshot: Awaited<ReturnType<typeof readBrainCorpusSample>>,
+  snapshot: Awaited<ReturnType<typeof readBrainCorpus>>,
 ): BrainCorpusSummary {
   if (!snapshot) {
     return {
       reachable: false,
-      sampledPages: 0,
-      truncated: false,
+      listedPages: 0,
       totalPages: null,
       namespaces: [],
       activityByDay: [],
@@ -309,8 +244,7 @@ function summarizeCorpus(
 
   return {
     reachable: true,
-    sampledPages: snapshot.pages.length,
-    truncated: snapshot.truncated,
+    listedPages: snapshot.pages.length,
     totalPages: null,
     namespaces,
     activityByDay: buildActivityByDay(snapshot.pages),
@@ -318,7 +252,8 @@ function summarizeCorpus(
   };
 }
 
-function summarizeSources(input: {
+/** Exported for unit tests; the command below is its only runtime caller. */
+export function summarizeSources(input: {
   syncStates: Awaited<ReturnType<typeof listBrainSyncStates>>;
   itemCounts: Awaited<ReturnType<typeof countBrainCollectorItemsByCollector>>;
   requirements: Record<BrainSourceRequirement, boolean>;
@@ -331,7 +266,11 @@ function summarizeSources(input: {
   >();
 
   for (const state of input.syncStates) {
-    const sourceId = resolveBrainSourceIdForCollector(state.collectorId);
+    // Current-version rows only: rows a version bump superseded, and
+    // auxiliary rows sharing a source's leading segment (inventories,
+    // censuses), would otherwise inflate stream counts and report their own
+    // completion as the source's.
+    const sourceId = resolveBrainSourceIdForCurrentCollector(state.collectorId);
 
     if (!sourceId) {
       continue;
@@ -369,12 +308,50 @@ function summarizeSources(input: {
       // than the backfill checkpoint its sync-state row carries.
       source.id === 'task-memories' ? input.taskMemoriesLastProcessedAt : null,
     );
-    const partitionsBackfilled = states.filter(
-      (state) => state.backfillCompletedAt,
-    ).length;
-    const backfilling = states.some(
-      (state) => state.backfillCursor && !state.backfillCompletedAt,
+    const parents = states.filter((state) =>
+      source.collectorIds.includes(state.collectorId),
     );
+    const children = states.filter(
+      (state) => !source.collectorIds.includes(state.collectorId),
+    );
+    // A deep replay in progress is a parent row holding only a cursor.
+    // A row that also carries a watermark is a live stream whose cursor is a
+    // rolling checkpoint or mode-state (pull-request facts, member sweeps,
+    // the Notion incremental scan): steady ingestion, not history reading.
+    const backfilling = parents.some(
+      (state) =>
+        state.backfillCursor && !state.backfillCompletedAt && !state.watermark,
+    );
+    const streams = children.length > 0 ? children.length : states.length;
+    const backfillProgress = ((): { read: number; total: number } | null => {
+      if (!backfilling) {
+        return null;
+      }
+
+      for (const parent of parents) {
+        if (!parent.backfillCursor || parent.backfillCompletedAt) {
+          continue;
+        }
+
+        // Fan-out walks record their completed partitions in the cursor;
+        // counting rows with a completion timestamp instead would show 0
+        // forever, because partition rows never carry one.
+        const read = parseBrainBackfillCompletedCount(parent.backfillCursor);
+
+        if (read !== null && children.length > 0) {
+          return {
+            read: Math.min(read, children.length),
+            total: children.length,
+          };
+        }
+      }
+
+      const read = states.filter((state) => state.backfillCompletedAt).length;
+
+      return streams > 0
+        ? { read: Math.min(read, streams), total: streams }
+        : null;
+    })();
     const active =
       source.id === 'task-memories'
         ? input.taskMemoriesActive || states.length > 0
@@ -393,8 +370,8 @@ function summarizeSources(input: {
             ? ('ingesting' as const)
             : ('idle' as const),
       lastSyncedAt,
-      partitions: states.length,
-      partitionsBackfilled,
+      streams,
+      backfillProgress,
       trackedItems: itemsBySource.get(source.id) ?? 0,
     };
   });
@@ -446,12 +423,12 @@ export async function getBrainSettingsCommand(
     requirements,
   ] = await Promise.all([
     resolveBrainInferenceProvider(),
-    configured ? readBrainCorpusSample() : null,
+    configured ? readBrainCorpus() : null,
     configured ? readBrainStats() : null,
     configured ? listBrainSyncStates(db) : [],
     configured ? countBrainCollectorItemsByCollector(db) : [],
     configured ? getBrainMemoryEventSummary(db) : EMPTY_MEMORY_SUMMARY,
-    resolveSourceRequirements(),
+    resolveBrainSourceRequirements(),
   ]);
 
   const corpus = summarizeCorpus(corpusSnapshot);
@@ -588,7 +565,8 @@ export async function retryFailedBrainTaskMemoriesCommand(
 
 export type BrainPageListing = {
   reachable: boolean;
-  truncated: boolean;
+  total: number;
+  nextOffset: number | null;
   pages: Array<{
     slug: string;
     title: string;
@@ -614,30 +592,64 @@ function toListedPage(page: {
   };
 }
 
+/** Exported for focused command tests; the command below owns auth and I/O. */
+export function paginateBrainCorpus(
+  snapshot: BrainCorpusSnapshot,
+  input: {
+    search?: string;
+    namespaceId?: string;
+    offset: number;
+    limit: number;
+  },
+): Omit<BrainPageListing, 'reachable'> {
+  const needle = input.search?.trim().toLowerCase() ?? '';
+  const filtered = snapshot.pages.filter((page) => {
+    const namespaceId = resolveBrainNamespaceId(page.slug);
+
+    return (
+      (!input.namespaceId || namespaceId === input.namespaceId) &&
+      (!needle ||
+        page.slug.toLowerCase().includes(needle) ||
+        page.title?.toLowerCase().includes(needle))
+    );
+  });
+  const pages = filtered
+    .slice(input.offset, input.offset + input.limit)
+    .map(toListedPage);
+
+  return {
+    total: filtered.length,
+    nextOffset:
+      input.offset + pages.length < filtered.length
+        ? input.offset + pages.length
+        : null,
+    pages,
+  };
+}
+
 /**
- * The recency-sorted page sample for the browse dialog. Same cached read and
- * same bound as the composition chart, so the two agree about what the Brain
- * holds; the dialog filters and searches it client-side.
+ * One server-filtered page from the exhaustive cached corpus. The browser only
+ * renders this bounded result, so searching a large Brain does not ship or
+ * repeatedly filter the full listing on every keystroke.
  */
 export async function listBrainPagesCommand(
   auth: UserAuthSuccess,
+  input: {
+    search?: string;
+    namespaceId?: string;
+    offset: number;
+    limit: number;
+  },
 ): Promise<BrainPageListing> {
   assertAdmin(auth);
 
-  const snapshot = await readBrainCorpusSample();
+  const snapshot = await readBrainCorpus();
 
   if (!snapshot) {
-    return { reachable: false, truncated: false, pages: [] };
+    return { reachable: false, total: 0, nextOffset: null, pages: [] };
   }
 
-  const pages = [...snapshot.pages]
-    .sort(
-      (left, right) =>
-        (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0),
-    )
-    .map(toListedPage);
-
-  return { reachable: true, truncated: snapshot.truncated, pages };
+  return { reachable: true, ...paginateBrainCorpus(snapshot, input) };
 }
 
 /**

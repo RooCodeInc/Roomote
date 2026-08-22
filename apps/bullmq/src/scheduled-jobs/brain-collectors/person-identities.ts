@@ -1,4 +1,10 @@
 import {
+  BRAIN_COLLECTOR_IDS,
+  BRAIN_PAGE_TYPES,
+  renderBrainFrontmatter,
+} from '@roomote/types';
+
+import {
   db,
   discordUserMappings,
   getBrainSyncState,
@@ -103,14 +109,18 @@ export function buildPersonIdentityPage(
     slug: personIdentitySlug(record.userId),
     title: name,
     content: [
-      '---',
-      'type: person',
-      `aliases: ${JSON.stringify(aliases)}`,
-      `status: ${deleted ? 'deleted' : 'active'}`,
-      `event_date: ${formatUtcDay(record.createdAt)}`,
-      ...(jobTitle ? [`job_title: ${JSON.stringify(jobTitle)}`] : []),
-      'provenance: roomote-person-identities',
-      '---',
+      ...renderBrainFrontmatter({
+        type: BRAIN_PAGE_TYPES.person,
+        title: name,
+        created: record.createdAt,
+        fields: [
+          `aliases: ${JSON.stringify(aliases)}`,
+          `status: ${deleted ? 'deleted' : 'active'}`,
+          `event_date: ${formatUtcDay(record.createdAt)}`,
+          jobTitle && `job_title: ${JSON.stringify(jobTitle)}`,
+          'provenance: roomote-person-identities',
+        ],
+      }),
       '',
       `# ${name}`,
       '',
@@ -303,10 +313,9 @@ export async function loadPersonIdentityRecords(): Promise<
       })),
   );
 }
-const PERSON_IDENTITIES_STATE_ID =
-  'person-identities:members:occurrence-date-v2';
+const PERSON_IDENTITIES_STATE_ID = BRAIN_COLLECTOR_IDS.personIdentities;
 const PERSON_IDENTITIES_RECONCILIATION_MS = 24 * 60 * 60 * 1000;
-const GRANOLA_MEETINGS_COLLECTOR_ID = 'granola-meetings:entity-timeline-v3';
+const GRANOLA_MEETINGS_COLLECTOR_ID = BRAIN_COLLECTOR_IDS.granolaMeetings;
 
 type PersonIdentityCursor = {
   mode: 'idle' | 'sweep' | 'incremental';

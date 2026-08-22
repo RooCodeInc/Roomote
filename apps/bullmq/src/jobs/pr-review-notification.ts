@@ -15,6 +15,7 @@ import {
 import {
   PR_REVIEW_NOTIFICATION_DEFER_MS,
   PR_REVIEW_NOTIFICATION_MAX_DEFERRALS,
+  PrReviewNotificationRateLimitError,
   attachPendingPrReviewActionMessage,
   getCommunicationProviderAdapter,
   type PrReviewNotificationRequest,
@@ -25,6 +26,7 @@ import {
   isDurablePrReviewNotificationRequest,
   renewPrReviewNotificationRequestLease,
   migrateLegacyPrReviewNotificationRequest,
+  notifyFastAgentParentOnPrFeedback,
   preparePrReviewNotificationDelivery,
   prReviewNotificationRequestSchema,
   recordPrReviewNotificationDeliveryBestEffort,
@@ -315,7 +317,16 @@ export const prReviewNotificationJob = async (
       eq(taskPullRequests.repository, data.repository),
       eq(taskPullRequests.prNumber, data.prNumber),
     ),
-    columns: { status: true, autoHandleFeedbackByUserId: true },
+    columns: {
+      sourceControlProvider: true,
+      host: true,
+      repository: true,
+      prNumber: true,
+      prTitle: true,
+      prUrl: true,
+      status: true,
+      autoHandleFeedbackByUserId: true,
+    },
   });
 
   if (prLink?.status === 'merged' || prLink?.status === 'closed') {
@@ -376,6 +387,39 @@ export const prReviewNotificationJob = async (
     const textWithQuestion = followUp
       ? `${delivery.text}\n${followUp.question}`
       : delivery.text;
+    const roomoteReviewIdentity = events.find(
+      (event) => event.reviewTaskId && event.reviewHeadSha,
+    );
+    const roomoteReviewResult = events.find(
+      (event) => event.reviewResult,
+    )?.reviewResult;
+
+    await notifyFastAgentParentOnPrFeedback({
+      run: latestJob,
+      deliveryIds: data.deliveryIds ?? [],
+      pullRequest: {
+        provider:
+          prLink?.sourceControlProvider ??
+          data.sourceControlProvider ??
+          'github',
+        host: prLink?.host,
+        repository: prLink?.repository ?? data.repository,
+        number: prLink?.prNumber ?? data.prNumber,
+        title: prLink?.prTitle,
+        url: prLink?.prUrl ?? data.prUrl,
+        status: prLink?.status,
+      },
+      summary: delivery.text,
+      ...(roomoteReviewIdentity?.reviewTaskId &&
+      roomoteReviewIdentity.reviewHeadSha
+        ? {
+            reviewTaskId: roomoteReviewIdentity.reviewTaskId,
+            reviewHeadSha: roomoteReviewIdentity.reviewHeadSha,
+          }
+        : {}),
+      ...(roomoteReviewResult ? { reviewResult: roomoteReviewResult } : {}),
+      ...(followUp ? { suggestedActionPrompt: followUp.prompt } : {}),
+    });
 
     // Auto-handled PRs skip the offer entirely: the prepared follow-up is
     // dispatched straight into the owning task and the conversation gets an
@@ -472,6 +516,20 @@ ${delivery.text}`;
       );
     }
   } catch (error) {
+    if (error instanceof PrReviewNotificationRateLimitError) {
+      const jitterMs = Math.floor(Math.random() * 30_000);
+      const delayMs = error.retryAfterMs + jitterMs;
+      await schedulePrReviewNotificationJob({
+        request: data,
+        delayMs,
+        countDeferral: false,
+      });
+      console.warn(
+        `[PrReviewNotification] GitHub installation rate limited; deferred ${data.repository}#${data.prNumber} for ${delayMs}ms`,
+      );
+      return;
+    }
+
     // Put the drained events back so a retried job can deliver them.
     try {
       await requeuePendingPrReviewActivity({ target, events });

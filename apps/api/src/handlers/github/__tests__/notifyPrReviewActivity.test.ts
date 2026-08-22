@@ -293,6 +293,33 @@ describe('buildPrReviewActivityNotificationInput', () => {
     });
   });
 
+  it('skips top-level PR comments authored by bots', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        issueCommentPayload({
+          body: 'The preview deployment is ready.',
+          login: 'vercel[bot]',
+          userId: 35613825,
+          userType: 'Bot',
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it('skips edited bot comments before resolving their revision', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        issueCommentPayload({
+          body: 'Updated deployment status.',
+          edited: true,
+          login: 'deployment-bot[bot]',
+          userId: 9002,
+          userType: 'Bot',
+        }),
+      ),
+    ).toBeNull();
+  });
+
   it('uses the webhook delivery as the revision when an edit omits updated_at', () => {
     const payload = issueCommentPayload({
       body: 'Edited without a timestamp',
@@ -319,27 +346,36 @@ describe('buildPrReviewActivityNotificationInput', () => {
     );
   });
 
-  it('maps one external bot identity across summary and review activity', () => {
+  it('skips submitted reviews and inline comments from external bots', () => {
     const bot = {
       login: 'reviewer[bot]',
       userId: 9001,
       userType: 'Bot',
     };
-    const events = [
-      issueCommentPayload(bot),
-      reviewPayload(bot),
-      reviewCommentPayload(bot),
-    ].map((payload) => buildPrReviewActivityNotificationInput(payload));
+    const events = [reviewPayload(bot), reviewCommentPayload(bot)].map(
+      (payload) => buildPrReviewActivityNotificationInput(payload),
+    );
 
-    expect(events).toEqual(
-      Array.from({ length: 3 }, () =>
-        expect.objectContaining({
-          event: expect.objectContaining({
-            automatedAuthorId: 'github:9001',
-          }),
+    expect(events).toEqual([null, null]);
+  });
+
+  it('keeps submitted reviews authored by Roomote', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        reviewPayload({
+          body: 'I found an issue.',
+          login: 'roomote[bot]',
+          userId: 9001,
+          userType: 'Bot',
         }),
       ),
-    );
+    ).toMatchObject({
+      event: {
+        kind: 'review',
+        authorLogin: 'roomote[bot]',
+        roomoteAuthored: true,
+      },
+    });
   });
 
   it('skips top-level PR comments handled by the mention flow', () => {
@@ -559,6 +595,14 @@ describe('buildPrReviewSummaryNotification', () => {
         providerEventId: 'github-review-summary:99:2026-08-10T19:30:00.000Z',
         authorLogin: 'roomote[bot]',
         reviewHeadSha,
+        reviewTaskId: 'x',
+        reviewResult: {
+          reviewKind: 'initial',
+          outcome: 'findings_remain',
+          findingCount: 1,
+          approvalStatus: null,
+          headSha: reviewHeadSha,
+        },
         summary: '1 minor doc note; no blocking issues.',
         url: 'https://github.com/owner/repo/pull/42#issuecomment-99',
         observedAt,
@@ -754,6 +798,7 @@ describe('queuePrReviewSummaryNotification', () => {
           event: expect.objectContaining({
             kind: 'review_summary',
             reviewHeadSha,
+            reviewTaskId: 'x',
             observedAt,
           }),
         }),

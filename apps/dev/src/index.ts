@@ -19,8 +19,8 @@ import {
 
 // Host port of the local Caddy edge (the `caddy-dev` compose service). The
 // public tunnel targets this port so one origin serves the web app and, under
-// the reserved /_roomote-api/* prefix, the API — mirroring the production
-// routing in deploy/caddy/Caddyfile.
+// public webhook paths and the reserved /_roomote-api/* prefix to the API —
+// mirroring the production routing in deploy/caddy/Caddyfile.
 const CADDY_DEV_PORT = 18080;
 
 const DEVELOPMENT_WORKER_IMAGE_REPOSITORY = 'ghcr.io/roocodeinc/roomote-worker';
@@ -73,8 +73,8 @@ class LocalDevStarter {
       await DockerService.stopSelfHostAppContainers(options.verbose);
 
       // The tunnel targets the local Caddy edge, which serves the web app
-      // and proxies /_roomote-api/* to the API — the same routing deployed
-      // environments get from deploy/caddy/Caddyfile.
+      // and proxies public webhook paths plus /_roomote-api/* to the API — the
+      // same routing deployed environments get from deploy/caddy/Caddyfile.
       const publicUrlResolution = await NgrokService.resolvePublicUrl({
         port: CADDY_DEV_PORT,
         verbose: options.verbose,
