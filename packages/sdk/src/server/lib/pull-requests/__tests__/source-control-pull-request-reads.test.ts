@@ -1410,7 +1410,8 @@ describe('readSourceControlPullRequestForTaskRun', () => {
     ).toEqual([3, 2]);
     expect(result.pullRequests[0]).toMatchObject({
       author: { id: '{u-1}', login: 'bb-user' },
-      labels: [],
+      // Bitbucket's PR list carries no labels: unknown, not empty.
+      labels: null,
       mergeable: null,
       mergeStateDescription: null,
       headSha: 'head-sha',
@@ -1492,7 +1493,8 @@ describe('readSourceControlPullRequestForTaskRun', () => {
       author: { id: 'user-guid', login: 'author@acme.com' },
       updatedAt: null,
       createdAt: '2026-06-30T00:00:00Z',
-      labels: [],
+      // ADO omitted labels from this list payload: unknown, not empty.
+      labels: null,
       headSha: 'head-sha',
       baseSha: 'base-sha',
       mergeable: false,

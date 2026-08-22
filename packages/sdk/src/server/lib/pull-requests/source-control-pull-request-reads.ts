@@ -184,7 +184,12 @@ export type SourceControlPullRequestSummary = {
   mergedAt: string | null;
   /** Null for open PRs and when the provider exposes no close timestamp (Bitbucket). */
   closedAt: string | null;
-  labels: string[];
+  /**
+   * Null when the provider's list payload carries no labels at all (Azure
+   * DevOps), which is distinct from an explicitly empty label set: a writer
+   * that does not know the labels must not erase stored ones.
+   */
+  labels: string[] | null;
   headSha: string | null;
   baseSha: string | null;
   /** Null when the provider's list payload carries no mergeability signal. */
@@ -2406,7 +2411,9 @@ async function listBitbucketPullRequests({
         createdAt: pullRequest.created_on ?? null,
         mergedAt: null,
         closedAt: null,
-        labels: [],
+        // Bitbucket's pull request list carries no labels; null says "not
+        // known" so a stored label set is preserved rather than cleared.
+        labels: null,
         headSha: pullRequest.source?.commit?.hash ?? null,
         baseSha: pullRequest.destination?.commit?.hash ?? null,
         mergeable: null,
@@ -2523,9 +2530,13 @@ async function listAdoPullRequests({
           ? (pullRequest.closedDate ?? null)
           : null,
       closedAt: pullRequest.closedDate ?? null,
-      labels: (pullRequest.labels ?? [])
-        .map((label) => label.name)
-        .filter((name): name is string => Boolean(name)),
+      // Azure DevOps omits labels from some list responses (see the warning
+      // this listing emits); an omission is unknown, not an empty set.
+      labels: pullRequest.labels
+        ? pullRequest.labels
+            .map((label) => label.name)
+            .filter((name): name is string => Boolean(name))
+        : null,
       headSha: pullRequest.lastMergeSourceCommit?.commitId ?? null,
       baseSha: pullRequest.lastMergeTargetCommit?.commitId ?? null,
       mergeable:

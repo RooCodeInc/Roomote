@@ -19,6 +19,35 @@ describe('scheduleSourceControlPullRequestFactSync', () => {
     mockUpsertFact.mockResolvedValue(undefined);
   });
 
+  it('forwards a description the webhook carried', () => {
+    // Terminal webhooks advance the incremental cursor, so a PR whose
+    // description is dropped here is never revisited by the list sync to
+    // fill it in.
+    scheduleSourceControlPullRequestFactSync({
+      provider: 'gitlab',
+      repositoryFullName: 'acme/backend',
+      pullRequest: {
+        number: 42,
+        title: 'Update backend',
+        body: 'Why: the old path raced.',
+        url: 'https://gitlab.example.com/acme/backend/-/merge_requests/42',
+        state: 'merged',
+        mergedAt: '2026-07-10T00:00:00Z',
+      },
+    });
+
+    expect(mockUpsertFact).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pullRequest: expect.objectContaining({
+          body: 'Why: the old path raced.',
+          // Labels are absent from every provider's PR webhook, so they stay
+          // unknown and the upsert preserves whatever the list sync stored.
+          labels: null,
+        }),
+      }),
+    );
+  });
+
   it('builds a merged fact snapshot from complete webhook timestamps', () => {
     scheduleSourceControlPullRequestFactSync({
       provider: 'gitea',

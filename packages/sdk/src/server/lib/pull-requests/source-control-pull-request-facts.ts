@@ -77,7 +77,9 @@ function toMergedPullRequestFactSnapshot(
   return {
     authorLogin: summary.author?.login ?? null,
     body: summary.body ?? null,
-    labels: summary.labels ?? [],
+    // Null (the provider omitted labels) stays null so the upsert's COALESCE
+    // preserves whatever is stored; only an explicit [] clears them.
+    labels: summary.labels ?? null,
     closedAt: summary.closedAt ?? mergedAt,
     createdAt,
     externalPullRequestId: summary.externalId ?? summary.number,
