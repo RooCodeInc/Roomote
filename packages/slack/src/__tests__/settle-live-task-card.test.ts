@@ -29,7 +29,10 @@ vi.mock('../slack-notifier', () => ({
 
 import { RunStatus } from '@roomote/types';
 
-import { settleSlackLiveTaskCardForRun } from '../settle-live-task-card';
+import {
+  renderSlackLiveTaskCard,
+  settleSlackLiveTaskCardForRun,
+} from '../settle-live-task-card';
 
 const cardData = {
   teamId: 'T123',
@@ -87,6 +90,26 @@ describe('settleSlackLiveTaskCardForRun', () => {
         ],
       }),
     });
+  });
+
+  it('reports whether a card exists and whether Slack accepted the render', async () => {
+    await expect(
+      renderSlackLiveTaskCard({
+        taskId: 'task-1',
+        status: 'in_progress',
+        message: 'Working.',
+      }),
+    ).resolves.toEqual({ card: true, updated: true });
+
+    mocks.updateMessage.mockResolvedValue(false);
+    await expect(
+      renderSlackLiveTaskCard({ taskId: 'task-1', status: 'in_progress' }),
+    ).resolves.toEqual({ card: true, updated: false });
+
+    mocks.findInstallation.mockResolvedValue(undefined);
+    await expect(
+      renderSlackLiveTaskCard({ taskId: 'task-1', status: 'in_progress' }),
+    ).resolves.toEqual({ card: false, updated: false });
   });
 
   it('does nothing for runs without a card', async () => {

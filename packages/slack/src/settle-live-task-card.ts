@@ -11,6 +11,18 @@ import {
 } from './live-task-stream';
 import { SlackNotifier } from './slack-notifier';
 
+export type SlackLiveTaskCardRenderStatus =
+  | 'in_progress'
+  | 'complete'
+  | 'error';
+
+export interface SlackLiveTaskCardRenderResult {
+  /** False when the task has no card (or its workspace is no longer installed). */
+  card: boolean;
+  /** True when Slack accepted the update. */
+  updated: boolean;
+}
+
 function payloadUsesLiveTaskStream(payload: unknown): boolean {
   return (
     payload !== null &&
@@ -20,10 +32,59 @@ function payloadUsesLiveTaskStream(payload: unknown): boolean {
 }
 
 /**
- * Settle a task's Slack card from the control plane for terminations no
- * worker observes: a cancel before dequeue, a sandbox that died and was
- * finalized by the reaper, a failed bootstrap. The worker renders the same
- * terminal states itself, so this is idempotent with its `onExit` render.
+ * Re-render a task's Slack card from the control plane. This is the only
+ * place the card is ever updated: workers ask for renders through a
+ * run-scoped API and never hold the workspace's bot token themselves.
+ *
+ * The bot token is resolved from the card's own team id, so a render can
+ * only ever use the credential of the workspace the card lives in.
+ */
+export async function renderSlackLiveTaskCard(input: {
+  taskId: string;
+  status: SlackLiveTaskCardRenderStatus;
+  message?: string;
+  /** The task's generated title, rendered in place of the prompt-derived one. */
+  taskTitle?: string | null;
+}): Promise<SlackLiveTaskCardRenderResult> {
+  const data = await getSlackLiveTaskStreamData(input.taskId);
+  if (!data) {
+    return { card: false, updated: false };
+  }
+
+  const installation = await db.query.slackInstallations.findFirst({
+    where: and(
+      eq(slackInstallations.isActive, true),
+      eq(slackInstallations.teamId, data.teamId),
+    ),
+    columns: { botAccessToken: true },
+  });
+  if (!installation?.botAccessToken) {
+    return { card: false, updated: false };
+  }
+
+  const taskTitle = input.taskTitle?.trim();
+  const updated = await new SlackNotifier(
+    installation.botAccessToken,
+  ).updateMessage({
+    channel: data.channel,
+    ts: data.messageTs,
+    message: buildSlackLiveTaskCardBlocks({
+      taskUpdateId: data.taskUpdateId,
+      title: taskTitle ? buildSlackLiveTaskTitle(taskTitle) : data.title,
+      status: input.status,
+      ...(input.message ? { message: input.message } : {}),
+      ...(data.taskUrl ? { taskUrl: data.taskUrl } : {}),
+    }),
+  });
+
+  return { card: true, updated };
+}
+
+/**
+ * Settle a task's Slack card for terminations no worker observes: a cancel
+ * before dequeue, a sandbox that died and was finalized by the reaper, a
+ * failed bootstrap. The worker requests the same terminal render itself on
+ * exit, so this is idempotent with it. Never throws.
  *
  * Completed runs are deliberately not handled here: a run only completes
  * through a live worker, which settles the card with the real output.
@@ -39,36 +100,14 @@ export async function settleSlackLiveTaskCardForRun(input: {
   }
 
   try {
-    const data = await getSlackLiveTaskStreamData(input.taskId);
-    if (!data) {
-      return;
-    }
-
-    const installation = await db.query.slackInstallations.findFirst({
-      where: and(
-        eq(slackInstallations.isActive, true),
-        eq(slackInstallations.teamId, data.teamId),
-      ),
-      columns: { botAccessToken: true },
-    });
-    if (!installation?.botAccessToken) {
-      return;
-    }
-
-    const taskTitle = input.taskTitle?.trim();
-    await new SlackNotifier(installation.botAccessToken).updateMessage({
-      channel: data.channel,
-      ts: data.messageTs,
-      message: buildSlackLiveTaskCardBlocks({
-        taskUpdateId: data.taskUpdateId,
-        title: taskTitle ? buildSlackLiveTaskTitle(taskTitle) : data.title,
-        status: 'error',
-        message:
-          input.status === RunStatus.Canceled
-            ? SLACK_LIVE_TASK_CARD_MESSAGES.canceled
-            : SLACK_LIVE_TASK_CARD_MESSAGES.failed,
-        ...(data.taskUrl ? { taskUrl: data.taskUrl } : {}),
-      }),
+    await renderSlackLiveTaskCard({
+      taskId: input.taskId,
+      status: 'error',
+      message:
+        input.status === RunStatus.Canceled
+          ? SLACK_LIVE_TASK_CARD_MESSAGES.canceled
+          : SLACK_LIVE_TASK_CARD_MESSAGES.failed,
+      taskTitle: input.taskTitle,
     });
   } catch (error) {
     console.error(

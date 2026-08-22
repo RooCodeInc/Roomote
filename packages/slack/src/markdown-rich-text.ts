@@ -49,7 +49,24 @@ const INLINE_PATTERN =
 
 // Sentence punctuation that ends a bare URL belongs to the prose, not the
 // link: "see https://a.io/docs." must not link to "docs.".
-const BARE_URL_TRAILING_PUNCTUATION = /[.,;:!?'"]+$/;
+const BARE_URL_TRAILING_PUNCTUATION = new Set([
+  '.',
+  ',',
+  ';',
+  ':',
+  '!',
+  '?',
+  "'",
+  '"',
+]);
+
+function splitBareUrlTrailingPunctuation(url: string): [string, string] {
+  let end = url.length;
+  while (end > 0 && BARE_URL_TRAILING_PUNCTUATION.has(url[end - 1]!)) {
+    end -= 1;
+  }
+  return [url.slice(0, end), url.slice(end)];
+}
 
 function withStyle(
   element: SlackRichTextInlineElement,
@@ -139,8 +156,7 @@ export function convertMarkdownInlineToRichText(
         ),
       );
     } else if (bareUrl) {
-      const trailing = bareUrl.match(BARE_URL_TRAILING_PUNCTUATION)?.[0] ?? '';
-      const url = bareUrl.slice(0, bareUrl.length - trailing.length);
+      const [url, trailing] = splitBareUrlTrailingPunctuation(bareUrl);
       elements.push(withStyle({ type: 'link', url }, style));
       pushText(trailing);
     } else if (italicStar || italicUnderscore) {

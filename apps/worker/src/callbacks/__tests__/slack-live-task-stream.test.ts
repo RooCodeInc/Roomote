@@ -1,23 +1,11 @@
 const mocks = vi.hoisted(() => ({
-  updateMessage: vi.fn(),
-  sdkGetStreamData: vi.fn(),
-  notifierTokens: [] as string[],
-}));
-
-vi.mock('@roomote/slack/client', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@roomote/slack/client')>()),
-  SlackNotifier: class {
-    constructor(token: string) {
-      mocks.notifierTokens.push(token);
-    }
-    updateMessage = mocks.updateMessage;
-  },
+  renderCard: vi.fn(),
 }));
 
 vi.mock('@roomote/sdk/client', () => ({
   sdk: {
     taskRuns: {
-      getSlackLiveTaskStreamData: mocks.sdkGetStreamData,
+      renderSlackLiveTaskCard: mocks.renderCard,
     },
   },
 }));
@@ -33,19 +21,7 @@ import {
   updateSlackLiveTaskStream,
 } from '../slack-live-task-stream';
 
-const cardData = {
-  teamId: 'T123',
-  channel: 'C123',
-  messageTs: 'card-ts',
-  taskId: 'task-1',
-  taskUpdateId: 'roomote-task-task-1',
-  threadTs: '100.001',
-  title: 'Fix the button',
-  taskUrl: 'https://roomote.example/task/task-1',
-  botAccessToken: 'xoxb-team-123',
-};
-
-// The module caches card data per run id for the process lifetime, so
+// The module remembers runs without a card for the process lifetime, so
 // every test uses a fresh run id.
 let nextRunId = 100;
 
@@ -69,60 +45,42 @@ const todos = (current: string) => [
   { id: '3', content: 'Verify the change', status: 'pending' as const },
 ];
 
-const text = (value: string) => ({
-  type: 'rich_text',
-  elements: [
-    { type: 'rich_text_section', elements: [{ type: 'text', text: value }] },
-  ],
-});
-
-/** The task_card block of the N-th (1-based) chat.update call. */
+/** The state sent by the N-th (1-based) render request. */
 function renderedCard(nth: number) {
-  const call = mocks.updateMessage.mock.calls[nth - 1]?.[0];
-  return call?.message?.blocks?.[0];
+  const input = mocks.renderCard.mock.calls[nth - 1]?.[0];
+  return input ? { status: input.status, output: input.message } : undefined;
 }
 
 describe('Slack live task card', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.sdkGetStreamData.mockResolvedValue(cardData);
-    mocks.updateMessage.mockResolvedValue(true);
+    mocks.renderCard.mockResolvedValue({ card: true, updated: true });
   });
 
-  it('updates the card with the token the run-scoped lookup resolved for its workspace', async () => {
-    await startSlackLiveTaskStream(createTaskRun(), {});
-
-    expect(mocks.notifierTokens).toContain('xoxb-team-123');
-  });
-
-  it('renders the generated task title on start', async () => {
+  it('asks the control plane to render the card on start', async () => {
     const taskRun = createTaskRun();
     await startSlackLiveTaskStream(taskRun, {});
 
-    expect(mocks.sdkGetStreamData).toHaveBeenCalledWith({ runId: taskRun.id });
-    expect(mocks.updateMessage).toHaveBeenCalledWith({
-      channel: 'C123',
-      ts: 'card-ts',
-      message: {
-        text: 'Fix the button\n<https://roomote.example/task/task-1|Open the task>',
-        blocks: [
-          {
-            type: 'task_card',
-            block_id: 'roomote-task-task-1-card',
-            task_id: 'roomote-task-task-1',
-            title: 'Fix the button',
-            status: 'in_progress',
-            sources: [
-              {
-                type: 'url',
-                url: 'https://roomote.example/task/task-1',
-                text: 'View task',
-              },
-            ],
-          },
-        ],
-      },
+    expect(mocks.renderCard).toHaveBeenCalledWith({
+      runId: taskRun.id,
+      status: 'in_progress',
     });
+  });
+
+  it('stops rendering once the control plane reports no card for the run', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    mocks.renderCard.mockResolvedValue({ card: false, updated: false });
+
+    await startSlackLiveTaskStream(taskRun, context);
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1000, text: 'Working.' },
+      context,
+    );
+    await finishSlackLiveTaskStream(taskRun, RunStatus.Completed, context);
+
+    expect(mocks.renderCard).toHaveBeenCalledOnce();
   });
 
   it('mirrors the worker startup statuses on the card', async () => {
@@ -135,21 +93,14 @@ describe('Slack live task card', () => {
     await reportSlackLiveTaskStatus(taskRun, RunStatus.Running, context);
     await reportSlackLiveTaskStatus(taskRun, RunStatus.Idle, context);
 
-    expect(mocks.updateMessage).toHaveBeenCalledTimes(4);
-    expect(
-      mocks.updateMessage.mock.calls.map(
-        (call) => call[0].message.blocks[0].output,
-      ),
-    ).toEqual([
-      text('Preparing the workspace…'),
-      text('Starting the agent…'),
-      text('Connecting to the agent…'),
-      text('Agent started, getting to work…'),
+    expect(mocks.renderCard).toHaveBeenCalledTimes(4);
+    expect(mocks.renderCard.mock.calls.map((call) => call[0].message)).toEqual([
+      'Preparing the workspace…',
+      'Starting the agent…',
+      'Connecting to the agent…',
+      'Agent started, getting to work…',
     ]);
-    expect(renderedCard(1)).toMatchObject({
-      title: 'Fix the button',
-      status: 'in_progress',
-    });
+    expect(renderedCard(1)).toMatchObject({ status: 'in_progress' });
   });
 
   it('updates the card for resumed runs through the same run-scoped lookup', async () => {
@@ -164,10 +115,10 @@ describe('Slack live task card', () => {
       {},
     );
 
-    expect(mocks.sdkGetStreamData).toHaveBeenCalledWith({ runId: resumed.id });
-    expect(renderedCard(1)).toMatchObject({
+    expect(mocks.renderCard).toHaveBeenCalledWith({
+      runId: resumed.id,
       status: 'in_progress',
-      output: text('Resumed update.'),
+      message: 'Resumed update.',
     });
   });
 
@@ -196,26 +147,15 @@ describe('Slack live task card', () => {
       context,
     );
 
-    expect(mocks.updateMessage).toHaveBeenCalledTimes(2);
+    expect(mocks.renderCard).toHaveBeenCalledTimes(2);
     expect(renderedCard(1)).toEqual({
-      type: 'task_card',
-      block_id: 'roomote-task-task-1-card',
-      task_id: 'roomote-task-task-1',
-      title: 'Fix the button',
       status: 'in_progress',
-      output: text('Wiring the new model into spawning.'),
-      sources: [
-        {
-          type: 'url',
-          url: 'https://roomote.example/task/task-1',
-          text: 'View task',
-        },
-      ],
+      output: 'Wiring the new model into spawning.',
     });
-    expect(renderedCard(2)).toMatchObject({
-      output: text('Editing the selector metadata.'),
+    expect(renderedCard(2)).toEqual({
+      status: 'in_progress',
+      output: 'Editing the selector metadata.',
     });
-    expect(renderedCard(2)).not.toHaveProperty('details');
   });
 
   it('shows a waiting notice while the task needs input', async () => {
@@ -234,7 +174,7 @@ describe('Slack live task card', () => {
     );
 
     expect(renderedCard(2)).toMatchObject({
-      output: text('Waiting for your input…'),
+      output: 'Waiting for your input…',
     });
   });
 
@@ -263,9 +203,9 @@ describe('Slack live task card', () => {
       context,
     );
 
-    expect(mocks.updateMessage).toHaveBeenCalledOnce();
+    expect(mocks.renderCard).toHaveBeenCalledOnce();
     expect(renderedCard(1)).toMatchObject({
-      output: text('Inspecting the registry.'),
+      output: 'Inspecting the registry.',
     });
   });
 
@@ -276,8 +216,7 @@ describe('Slack live task card', () => {
       {},
     );
 
-    expect(mocks.sdkGetStreamData).not.toHaveBeenCalled();
-    expect(mocks.updateMessage).not.toHaveBeenCalled();
+    expect(mocks.renderCard).not.toHaveBeenCalled();
   });
 
   it('settles the card with the final output', async () => {
@@ -295,19 +234,8 @@ describe('Slack live task card', () => {
     );
 
     expect(renderedCard(2)).toEqual({
-      type: 'task_card',
-      block_id: 'roomote-task-task-1-card',
-      task_id: 'roomote-task-task-1',
-      title: 'Fix the button',
       status: 'complete',
-      output: text('Ready for review.'),
-      sources: [
-        {
-          type: 'url',
-          url: 'https://roomote.example/task/task-1',
-          text: 'View task',
-        },
-      ],
+      output: 'Ready for review.',
     });
   });
 
@@ -325,7 +253,7 @@ describe('Slack live task card', () => {
       context,
     );
 
-    expect(mocks.updateMessage).toHaveBeenCalledOnce();
+    expect(mocks.renderCard).toHaveBeenCalledOnce();
   });
 
   it('re-opens the card when a later run of the task starts', async () => {
@@ -342,8 +270,10 @@ describe('Slack live task card', () => {
     });
     await startSlackLiveTaskStream(resumed, {});
 
-    expect(renderedCard(2)).toMatchObject({ status: 'in_progress' });
-    expect(renderedCard(2)).not.toHaveProperty('output');
+    expect(renderedCard(2)).toEqual({
+      status: 'in_progress',
+      output: undefined,
+    });
   });
 
   it('marks a canceled run as an error', async () => {
@@ -352,7 +282,7 @@ describe('Slack live task card', () => {
 
     expect(renderedCard(1)).toMatchObject({
       status: 'error',
-      output: text('Task canceled.'),
+      output: 'Task canceled.',
     });
   });
 
@@ -360,10 +290,10 @@ describe('Slack live task card', () => {
     const taskRun = createTaskRun();
     const context = {};
     let releaseFirst!: () => void;
-    mocks.updateMessage.mockImplementationOnce(
+    mocks.renderCard.mockImplementationOnce(
       () =>
-        new Promise<boolean>((resolve) => {
-          releaseFirst = () => resolve(true);
+        new Promise<{ card: boolean; updated: boolean }>((resolve) => {
+          releaseFirst = () => resolve({ card: true, updated: true });
         }),
     );
 
@@ -390,9 +320,9 @@ describe('Slack live task card', () => {
     await Promise.all([first, burst]);
 
     // "Two." never went out on its own: the burst collapsed into "Three.".
-    expect(mocks.updateMessage).toHaveBeenCalledTimes(2);
-    expect(renderedCard(1)).toMatchObject({ output: text('One.') });
-    expect(renderedCard(2)).toMatchObject({ output: text('Three.') });
+    expect(mocks.renderCard).toHaveBeenCalledTimes(2);
+    expect(renderedCard(1)).toMatchObject({ output: 'One.' });
+    expect(renderedCard(2)).toMatchObject({ output: 'Three.' });
   });
 
   it('keeps the card alive after a failed turn so the next run continues it', async () => {
@@ -407,7 +337,7 @@ describe('Slack live task card', () => {
 
     expect(renderedCard(2)).toMatchObject({
       status: 'error',
-      output: text('The task stopped because of an error.'),
+      output: 'The task stopped because of an error.',
     });
 
     // The next run of the task flips the card back to in progress.
@@ -416,17 +346,16 @@ describe('Slack live task card', () => {
       payload: { sourceRunId: taskRun.id, liveTaskStream: true },
     });
     await startSlackLiveTaskStream(resumed, {});
-    expect(renderedCard(3)).toMatchObject({
-      title: 'Fix the button',
+    expect(renderedCard(3)).toEqual({
       status: 'in_progress',
+      output: undefined,
     });
-    expect(renderedCard(3)).not.toHaveProperty('output');
   });
 
   it('retries an identical message after Slack rejects the render', async () => {
     const taskRun = createTaskRun();
     const context = {};
-    mocks.updateMessage.mockResolvedValueOnce(false);
+    mocks.renderCard.mockResolvedValueOnce({ card: true, updated: false });
 
     await updateSlackLiveTaskStream(
       taskRun,
@@ -445,16 +374,16 @@ describe('Slack live task card', () => {
     );
 
     // First render rejected, second delivered, third deduplicated.
-    expect(mocks.updateMessage).toHaveBeenCalledTimes(2);
+    expect(mocks.renderCard).toHaveBeenCalledTimes(2);
     expect(renderedCard(2)).toMatchObject({
-      output: text('Inspecting the registry.'),
+      output: 'Inspecting the registry.',
     });
   });
 
   it('retries the settle on exit with the real output when its render was rejected', async () => {
     const taskRun = createTaskRun();
     const context = {};
-    mocks.updateMessage.mockResolvedValueOnce(false);
+    mocks.renderCard.mockResolvedValueOnce({ card: true, updated: false });
 
     await updateSlackLiveTaskStream(
       taskRun,
@@ -463,10 +392,10 @@ describe('Slack live task card', () => {
     );
     await finishSlackLiveTaskStream(taskRun, RunStatus.Completed, context);
 
-    expect(mocks.updateMessage).toHaveBeenCalledTimes(2);
+    expect(mocks.renderCard).toHaveBeenCalledTimes(2);
     expect(renderedCard(2)).toMatchObject({
       status: 'complete',
-      output: text('Ready for review.'),
+      output: 'Ready for review.',
     });
   });
 
@@ -483,7 +412,7 @@ describe('Slack live task card', () => {
     // The last narration line is never promoted to the final result.
     expect(renderedCard(2)).toMatchObject({
       status: 'complete',
-      output: text('Task completed.'),
+      output: 'Task completed.',
     });
   });
 
@@ -498,16 +427,16 @@ describe('Slack live task card', () => {
     await finishSlackLiveTaskStream(taskRun, RunStatus.Completed, context);
 
     // The card already settled with the real output, so the fallback is a no-op.
-    expect(mocks.updateMessage).toHaveBeenCalledOnce();
+    expect(mocks.renderCard).toHaveBeenCalledOnce();
     expect(renderedCard(1)).toMatchObject({
-      output: text('Ready for review.'),
+      output: 'Ready for review.',
     });
   });
 
   it('retains the card for idle runs awaiting a resume', async () => {
     await finishSlackLiveTaskStream(createTaskRun(), RunStatus.Idle, {});
 
-    expect(mocks.updateMessage).not.toHaveBeenCalled();
+    expect(mocks.renderCard).not.toHaveBeenCalled();
   });
 
   it('wires callbacks only for runs that opted into a card', async () => {
