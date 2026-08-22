@@ -127,7 +127,10 @@ export const isRoomoteGitHubLogin = (login: string) =>
   );
 
 /** Exact managed-app identity check for security-sensitive allowlists. */
-export const isManagedRoomoteGitHubLogin = isRoomoteGitHubLogin;
+export const isManagedRoomoteGitHubLogin = (login: string) =>
+  getEffectiveGitHubAppSlugs().some((slug) =>
+    matchesRoomoteGitHubLogin(login, slug),
+  );
 
 export const isRoomoteCommentAuthor = (user: { login: string; type: string }) =>
   isRoomoteGitHubLogin(user.login);
