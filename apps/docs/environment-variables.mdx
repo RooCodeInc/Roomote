@@ -172,12 +172,14 @@ as per-task auth tokens or workspace paths.
 | Env var                                | Required     | Used for                                                                                                                                |
 | -------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `R_MODEL`                              | Optional     | Env-level default coding model. Overrides the default selected in **Settings > Models** for new task starts.                            |
+| `R_ORCHESTRATION_MODEL`                | Optional     | Model used for Fast-mode answers and task coordination. Falls back to `R_MODEL`.                                                        |
 | `R_SMALL_MODEL`                        | Optional     | Helper model for routing, titles, summaries, and lightweight model calls.                                                               |
 | `R_VISION_MODEL`                       | Optional     | Vision-capable model for visual inspection and screenshot/image work.                                                                   |
 | `R_CODE_REVIEW_MODEL`                  | Optional     | Model for initial PR/MR review and review-sync tasks.                                                                                   |
 | `R_EXPLORE_MODEL`                      | Optional     | Exploration/helper model for investigation-oriented subtasks.                                                                           |
 | `R_PLANNING_MODEL`                     | Optional     | Advisor model used for planning turns and advisor consultations inside coding tasks.                                                    |
 | `R_MODEL_REASONING_EFFORT`             | Optional     | Reasoning level for the coding model: `low`, `medium`, `high`, `xhigh`, or `max`.                                                       |
+| `R_ORCHESTRATION_MODEL_REASONING_EFFORT` | Optional   | Reasoning level for the orchestration model.                                                                                            |
 | `R_SMALL_MODEL_REASONING_EFFORT`       | Optional     | Reasoning level for the helper model.                                                                                                   |
 | `R_VISION_MODEL_REASONING_EFFORT`      | Optional     | Reasoning level for the vision model.                                                                                                   |
 | `R_CODE_REVIEW_MODEL_REASONING_EFFORT` | Optional     | Reasoning level for the code review model.                                                                                              |
