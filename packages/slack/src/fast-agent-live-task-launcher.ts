@@ -3,8 +3,6 @@ import {
   type FastAgentSlackTaskLauncherParams,
   type LaunchFastAgentTask,
 } from '@roomote/cloud-agents/server';
-import { db, eq, tasks } from '@roomote/db/server';
-
 import { buildSlackLiveTaskCardBlocks } from './live-task-card-blocks';
 import {
   buildSlackLiveTaskTitle,
@@ -13,21 +11,21 @@ import {
 } from './live-task-stream';
 import type { SlackNotifier } from './slack-notifier';
 
-type SlackLiveTaskCardNotifier = Pick<
-  SlackNotifier,
-  'postMessage' | 'updateMessage'
->;
+type SlackLiveTaskCardNotifier = Pick<SlackNotifier, 'postMessage'>;
+
+export const STARTING_TASK_TITLE = 'Starting task…';
 
 /**
  * Fast delegation launcher that also posts a native task card (a
- * `task_card` block) in the parent thread. The worker re-renders the whole
- * card through chat.update for the task's lifetime, so it always shows the
- * latest state instead of an accumulating stream.
+ * `task_card` block) in the parent thread. The card opens as a bare
+ * "Starting task…" placeholder; once the sandbox is up the worker renders
+ * the generated title and then re-renders the whole card through
+ * chat.update for the task's lifetime, so it always shows the latest state.
  */
 export function createFastAgentSlackLiveTaskLauncher(
   params: Omit<
     FastAgentSlackTaskLauncherParams,
-    'liveTaskStream' | 'afterKickoff' | 'afterLaunch'
+    'liveTaskStream' | 'afterKickoff'
   > & {
     slack: SlackLiveTaskCardNotifier;
   },
@@ -46,6 +44,10 @@ export function createFastAgentSlackLiveTaskLauncher(
         return;
       }
 
+      // The stored title is the prompt-derived fallback the worker renders
+      // if no generated title exists yet; the card itself just says the
+      // task is starting until the sandbox is up and the worker renders
+      // the real title.
       const title = buildSlackLiveTaskTitle(context.prompt);
       const taskUpdateId = `roomote-task-${taskRun.taskId}`;
       const messageTs = await slack.postMessage({
@@ -53,9 +55,8 @@ export function createFastAgentSlackLiveTaskLauncher(
         thread_ts: launcherParams.threadTs,
         ...buildSlackLiveTaskCardBlocks({
           taskUpdateId,
-          title,
+          title: STARTING_TASK_TITLE,
           status: 'in_progress',
-          message: 'Delegating to a Roomote agent…',
           taskUrl: context.taskUrl,
         }),
         unfurl_links: false,
@@ -82,67 +83,9 @@ export function createFastAgentSlackLiveTaskLauncher(
     }
   };
 
-  // The generated task title usually lands shortly after enqueue, well
-  // before the worker's first event; swap the card's opening
-  // (prompt-derived) title for it as soon as it exists. Bounded to the
-  // pre-worker window (the worker re-renders with the generated title
-  // itself on start).
-  const refreshLiveTaskCardTitle = async ({
-    taskId,
-  }: {
-    taskId: string;
-  }): Promise<void> => {
-    try {
-      for (const delayMs of [0, 3_000, 8_000, 15_000, 30_000]) {
-        if (delayMs > 0) {
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
-        }
-
-        const [data, taskRow] = await Promise.all([
-          getSlackLiveTaskStreamData(taskId),
-          db.query.tasks.findFirst({
-            where: eq(tasks.id, taskId),
-            columns: { title: true },
-          }),
-        ]);
-        const generatedTitle = taskRow?.title?.trim();
-        if (!data) {
-          return;
-        }
-        if (!generatedTitle) {
-          continue;
-        }
-
-        const title = buildSlackLiveTaskTitle(generatedTitle);
-        if (title === data.title) {
-          return;
-        }
-
-        await slack.updateMessage({
-          channel: data.channel,
-          ts: data.messageTs,
-          message: buildSlackLiveTaskCardBlocks({
-            taskUpdateId: data.taskUpdateId,
-            title,
-            status: 'in_progress',
-            message: 'Delegating to a Roomote agent…',
-            ...(data.taskUrl ? { taskUrl: data.taskUrl } : {}),
-          }),
-        });
-        await setSlackLiveTaskStreamData(taskId, { ...data, title });
-        return;
-      }
-    } catch (error) {
-      console.error(
-        `[Fast Agent] Failed to refresh the Slack task card title for ${taskId}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
-  };
-
   return createFastAgentSlackTaskLauncher({
     ...launcherParams,
     liveTaskStream: true,
     afterKickoff: startLiveTaskCard,
-    afterLaunch: refreshLiveTaskCardTitle,
   });
 }

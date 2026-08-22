@@ -134,13 +134,10 @@ describe('createFastAgentSlackTaskLauncher', () => {
     expect(task.payload).not.toHaveProperty('liveTaskStream');
   });
 
-  it('runs afterKickoff inside the launch gate and afterLaunch once queued', async () => {
+  it('runs afterKickoff inside the launch gate', async () => {
     const order: string[] = [];
     const afterKickoff = vi.fn(async () => {
       order.push('afterKickoff');
-    });
-    const afterLaunch = vi.fn(() => {
-      order.push('afterLaunch');
     });
     mocks.enqueueTask.mockImplementationOnce(
       async (
@@ -164,7 +161,6 @@ describe('createFastAgentSlackTaskLauncher', () => {
       threadTs: '100.001',
       liveTaskStream: true,
       afterKickoff,
-      afterLaunch,
     });
 
     await launchTask({
@@ -176,7 +172,7 @@ describe('createFastAgentSlackTaskLauncher', () => {
       }),
     });
 
-    expect(order).toEqual(['kickoff', 'afterKickoff', 'queued', 'afterLaunch']);
+    expect(order).toEqual(['kickoff', 'afterKickoff', 'queued']);
     expect(afterKickoff).toHaveBeenCalledWith(
       { id: 42, taskId: 'task-1' },
       {
@@ -184,10 +180,6 @@ describe('createFastAgentSlackTaskLauncher', () => {
         taskUrl: 'https://roomote.example/task/task-1',
       },
     );
-    expect(afterLaunch).toHaveBeenCalledWith({
-      taskId: 'task-1',
-      prompt: 'Add a regression test',
-    });
     expect(mocks.enqueueTask.mock.calls[0]?.[0]?.task.payload).toMatchObject({
       liveTaskStream: true,
     });

@@ -19,14 +19,6 @@ export type FastAgentTaskLaunchHooks = {
     taskRun: { id: number; taskId: string },
     context: { prompt: string; taskUrl: string },
   ) => Promise<void>;
-  /**
-   * Fire-and-forget follow-up once the child is queued; errors must be
-   * handled by the hook itself.
-   */
-  afterLaunch?: (context: {
-    taskId: string;
-    prompt: string;
-  }) => void | Promise<void>;
 };
 
 export function createFastAgentTaskLauncher(
@@ -82,8 +74,6 @@ export function createFastAgentTaskLauncher(
       };
     }
 
-    void params.afterLaunch?.({ taskId: launch.taskId, prompt });
-
     return { success: true, taskId: launch.taskId, taskUrl };
   };
 }
@@ -107,7 +97,6 @@ export function createFastAgentSlackTaskLauncher(
     surface: 'slack',
     taskUrlCampaign: 'fast-delegation',
     afterKickoff: params.afterKickoff,
-    afterLaunch: params.afterLaunch,
     buildTask: ({ prompt, environmentId, parentSessionId }) => ({
       type: TaskPayloadKind.StandardTask,
       payload: {
