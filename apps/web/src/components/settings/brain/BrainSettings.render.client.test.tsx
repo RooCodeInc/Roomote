@@ -21,6 +21,7 @@ vi.mock('sonner', () => ({
 }));
 
 vi.mock('@tanstack/react-query', () => ({
+  keepPreviousData: (previousData: unknown) => previousData,
   // The browse dialog issues its own queries; those stay idle here so the
   // page-level fixtures never leak into the dialog's typed results.
   useQuery: (options: { queryKey?: unknown[] }) =>
@@ -77,8 +78,7 @@ function buildSettings(
     },
     corpus: {
       reachable: true,
-      sampledPages: 30,
-      truncated: false,
+      listedPages: 30,
       totalPages: null,
       namespaces: [
         { id: 'slack', label: 'Slack', pages: 20 },
@@ -172,21 +172,6 @@ describe('BrainSettings', () => {
     expect(screen.getByText('Queued')).toBeInTheDocument();
   });
 
-  it('says the corpus is a recent sample rather than a total when it is', () => {
-    const settings = buildSettings();
-    state.query.data = {
-      ...settings,
-      corpus: { ...settings.corpus, truncated: true },
-    };
-
-    render(<BrainSettings />);
-
-    expect(screen.getByText('30 most recent pages')).toBeInTheDocument();
-    expect(
-      screen.getByText(/describes what it has learned lately/),
-    ).toBeInTheDocument();
-  });
-
   it('offers to ingest history only when completed tasks are missing a memory', () => {
     render(<BrainSettings />);
     expect(screen.queryByText('Ingest task history')).not.toBeInTheDocument();
@@ -230,8 +215,7 @@ describe('BrainSettings', () => {
       statusDetail: 'The Brain did not answer.',
       corpus: {
         reachable: false,
-        sampledPages: 0,
-        truncated: false,
+        listedPages: 0,
         totalPages: null,
         namespaces: [],
         activityByDay: [],
@@ -251,7 +235,7 @@ describe('BrainSettings', () => {
     state.query.data = {
       ...settings,
       recall: { mode: 'keyword-only', embeddedCount: 0, chunkCount: 771 },
-      corpus: { ...settings.corpus, totalPages: 625, truncated: true },
+      corpus: { ...settings.corpus, totalPages: 625 },
     };
 
     render(<BrainSettings />);

@@ -30,17 +30,13 @@ function SummaryTiles({ settings }: { settings: BrainSettingsData }) {
           settings.corpus.totalPages !== null
             ? formatNumber(settings.corpus.totalPages)
             : settings.corpus.reachable
-              ? `${formatNumber(settings.corpus.sampledPages)}${
-                  settings.corpus.truncated ? '+' : ''
-                }`
+              ? formatNumber(settings.corpus.listedPages)
               : 'Unknown'
         }
         secondary={
           settings.corpus.totalPages !== null
             ? 'in the corpus'
-            : settings.corpus.truncated
-              ? 'most recent pages, more in the corpus'
-              : 'in the corpus'
+            : 'in the corpus'
         }
       />
       <AnalyticsSummaryCard
