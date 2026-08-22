@@ -9,6 +9,7 @@ import {
   fetchOpenRouterCreditBalance,
   getProviderCreditBalances,
   parseOpenRouterKeyBalance,
+  parseOpenRouterKeyDetails,
 } from '../provider-credit-balance';
 
 function jsonResponse(payload: unknown, status = 200) {
@@ -131,6 +132,39 @@ describe('fetchOpenRouterCreditBalance', () => {
         fetchImpl,
       }),
     ).resolves.toBeNull();
+  });
+});
+
+describe('parseOpenRouterKeyDetails', () => {
+  it('parses the key label and reset cadence used by usage warnings', () => {
+    expect(
+      parseOpenRouterKeyDetails({
+        data: {
+          label: 'Production reviews',
+          limit: 500,
+          limit_remaining: 75,
+          limit_reset: 'weekly',
+          usage: 900,
+        },
+      }),
+    ).toEqual({
+      label: 'Production reviews',
+      limit: 500,
+      limitRemaining: 75,
+      limitReset: 'weekly',
+      usage: 900,
+    });
+  });
+
+  it('rejects unlimited and invalid limits', () => {
+    expect(
+      parseOpenRouterKeyDetails({
+        data: { limit: null, limit_remaining: null },
+      }),
+    ).toBeNull();
+    expect(
+      parseOpenRouterKeyDetails({ data: { limit: 0, limit_remaining: 0 } }),
+    ).toBeNull();
   });
 });
 

@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import {
   OPENROUTER_KEY_ENDPOINT,
   type ProviderCreditBalance,
@@ -18,6 +20,15 @@ type BalanceFetchOptions = {
   executor?: DatabaseOrTransaction;
   fetchImpl?: typeof fetch;
   runtimeEnv?: Partial<Record<string, string | undefined>>;
+};
+
+export type OpenRouterKeyDetails = {
+  credentialFingerprint: string;
+  label?: string;
+  limit: number;
+  limitRemaining: number;
+  usage?: number;
+  limitReset?: string;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
@@ -101,9 +112,63 @@ export function parseOpenRouterKeyBalance(
   };
 }
 
-export async function fetchOpenRouterCreditBalance(
+export function parseOpenRouterKeyDetails(
+  payload: unknown,
+): Omit<OpenRouterKeyDetails, 'credentialFingerprint'> | null {
+  const root = asRecord(payload);
+  const data = asRecord(root?.data) ?? root;
+  if (!data) {
+    return null;
+  }
+
+  const limit = firstNumber(data, ['limit']);
+  const limitRemaining = firstNumber(data, ['limit_remaining']);
+  if (limit === undefined || limit <= 0 || limitRemaining === undefined) {
+    return null;
+  }
+
+  const label =
+    typeof data.label === 'string' && data.label.trim().length > 0
+      ? data.label.trim()
+      : undefined;
+  const limitReset =
+    typeof data.limit_reset === 'string' && data.limit_reset.trim().length > 0
+      ? data.limit_reset.trim().toLowerCase()
+      : undefined;
+  const usage = firstNumber(data, ['usage']);
+
+  return {
+    ...(label ? { label } : {}),
+    limit,
+    limitRemaining,
+    ...(usage !== undefined ? { usage } : {}),
+    ...(limitReset ? { limitReset } : {}),
+  };
+}
+
+export async function fetchOpenRouterKeyDetails(
   options: BalanceFetchOptions = {},
-): Promise<ProviderCreditBalance | null> {
+): Promise<OpenRouterKeyDetails | null> {
+  const response = await fetchOpenRouterKeyPayload(options);
+  if (!response) {
+    return null;
+  }
+
+  const details = parseOpenRouterKeyDetails(response.payload);
+  return details
+    ? {
+        credentialFingerprint: createHash('sha256')
+          .update(response.apiKey)
+          .digest('hex')
+          .slice(0, 12),
+        ...details,
+      }
+    : null;
+}
+
+async function fetchOpenRouterKeyPayload(
+  options: BalanceFetchOptions,
+): Promise<{ apiKey: string; payload: unknown } | null> {
   const fetchImpl = options.fetchImpl ?? fetch;
   const apiKey = await resolveModelProviderEnvValue(['OPENROUTER_API_KEY'], {
     ...(options.runtimeEnv && { runtimeEnv: options.runtimeEnv }),
@@ -118,8 +183,18 @@ export async function fetchOpenRouterCreditBalance(
     authorization: `Bearer ${apiKey}`,
     accept: 'application/json',
   });
+  return { apiKey, payload };
+}
 
-  const parsed = parseOpenRouterKeyBalance(payload);
+export async function fetchOpenRouterCreditBalance(
+  options: BalanceFetchOptions = {},
+): Promise<ProviderCreditBalance | null> {
+  const response = await fetchOpenRouterKeyPayload(options);
+  if (!response) {
+    return null;
+  }
+
+  const parsed = parseOpenRouterKeyBalance(response.payload);
   if (!parsed) {
     return null;
   }

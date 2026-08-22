@@ -63,6 +63,7 @@ vi.mock('./scheduled-jobs', () => ({
   brainOutboxDrainJob: vi.fn(),
   brainCollectorsJob: vi.fn(),
   brainMaintenanceJob: vi.fn(),
+  providerUsageLimitCheckJob: vi.fn(),
 }));
 
 import { ScheduledJobName } from './types';
@@ -110,6 +111,15 @@ describe('startScheduler', () => {
     expect(mocks.queue.upsertJobScheduler).toHaveBeenCalledWith(
       ScheduledJobName.BrainMaintenance,
       { pattern: '0 7 * * *' },
+    );
+  });
+
+  it('checks provider usage limits every 15 minutes', async () => {
+    await startScheduler();
+
+    expect(mocks.queue.upsertJobScheduler).toHaveBeenCalledWith(
+      ScheduledJobName.ProviderUsageLimitCheck,
+      { every: 15 * 60 * 1000 },
     );
   });
 });
