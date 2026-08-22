@@ -6,7 +6,6 @@ const mocks = vi.hoisted(() => ({
   launchTask: vi.fn(),
   findSession: vi.fn(),
   findInstallation: vi.fn(),
-  findUserMapping: vi.fn(),
   findArtifacts: vi.fn(),
   findTaskRun: vi.fn(),
   postMessage: vi.fn(),
@@ -54,7 +53,6 @@ vi.mock('@roomote/db/server', () => ({
   db: {
     query: {
       slackInstallations: { findFirst: mocks.findInstallation },
-      slackUserMappings: { findFirst: mocks.findUserMapping },
       taskArtifacts: { findMany: mocks.findArtifacts },
       taskRuns: { findFirst: mocks.findTaskRun },
     },
@@ -65,10 +63,6 @@ vi.mock('@roomote/db/server', () => ({
   slackInstallations: {
     isActive: 'slack_installations.is_active',
     teamId: 'slack_installations.team_id',
-  },
-  slackUserMappings: {
-    userId: 'slack_user_mappings.user_id',
-    slackTeamId: 'slack_user_mappings.slack_team_id',
   },
   taskArtifacts: { id: 'task_artifacts.id' },
   taskRuns: { id: 'task_runs.id' },
@@ -144,7 +138,6 @@ describe('deliverFastAgentParentEvent', () => {
       botAccessToken: 'xoxb-test',
       teamDomain: 'acme',
     });
-    mocks.findUserMapping.mockResolvedValue({ slackUserId: 'U1' });
     mocks.createLauncher.mockReturnValue(mocks.launchTask);
     mocks.findArtifacts.mockResolvedValue([
       {
@@ -232,7 +225,6 @@ describe('deliverFastAgentParentEvent', () => {
       teamDomain: 'acme',
       channelId: 'C123',
       threadTs: '100.001',
-      recipientUserId: 'U1',
     });
     expect(mocks.postMessage).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -1,6 +1,4 @@
 const mocks = vi.hoisted(() => ({
-  appendTaskStream: vi.fn(),
-  stopTaskStream: vi.fn(),
   updateMessage: vi.fn(),
   sdkGetStreamData: vi.fn(),
   sdkClearStreamData: vi.fn(),
@@ -10,8 +8,6 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@roomote/slack/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@roomote/slack/client')>()),
   SlackNotifier: class {
-    appendTaskStream = mocks.appendTaskStream;
-    stopTaskStream = mocks.stopTaskStream;
     updateMessage = mocks.updateMessage;
   },
 }));
@@ -38,9 +34,9 @@ import {
   updateSlackLiveTaskStream,
 } from '../slack-live-task-stream';
 
-const streamData = {
+const cardData = {
   channel: 'C123',
-  messageTs: 'stream-ts',
+  messageTs: 'card-ts',
   taskId: 'task-1',
   taskUpdateId: 'roomote-task-task-1',
   threadTs: '100.001',
@@ -48,7 +44,7 @@ const streamData = {
   taskUrl: 'https://roomote.example/task/task-1',
 };
 
-// The module caches stream data per run id for the process lifetime, so
+// The module caches card data per run id for the process lifetime, so
 // every test uses a fresh run id.
 let nextRunId = 100;
 
@@ -72,10 +68,23 @@ const todos = (current: string) => [
   { id: '3', content: 'Verify the change', status: 'pending' as const },
 ];
 
-describe('Slack live task stream', () => {
+const text = (value: string) => ({
+  type: 'rich_text',
+  elements: [
+    { type: 'rich_text_section', elements: [{ type: 'text', text: value }] },
+  ],
+});
+
+/** The task_card block of the N-th (1-based) chat.update call. */
+function renderedCard(nth: number) {
+  const call = mocks.updateMessage.mock.calls[nth - 1]?.[0];
+  return call?.message?.blocks?.[0];
+}
+
+describe('Slack live task card', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.sdkGetStreamData.mockResolvedValue(streamData);
+    mocks.sdkGetStreamData.mockResolvedValue(cardData);
     // Model the server: once the data is cleared, later fetches miss.
     mocks.sdkClearStreamData.mockImplementation(async () => {
       mocks.sdkGetStreamData.mockResolvedValue(null);
@@ -83,36 +92,36 @@ describe('Slack live task stream', () => {
     mocks.sdkFindFirstInstallation.mockResolvedValue({
       botAccessToken: 'xoxb-test',
     });
-    mocks.appendTaskStream.mockResolvedValue({ ok: true });
-    mocks.stopTaskStream.mockResolvedValue({ ok: true });
     mocks.updateMessage.mockResolvedValue(true);
   });
 
-  it('puts the generated task title on the card at start', async () => {
+  it('renders the generated task title on start', async () => {
     const taskRun = createTaskRun();
     await startSlackLiveTaskStream(taskRun, {});
 
     expect(mocks.sdkGetStreamData).toHaveBeenCalledWith({ runId: taskRun.id });
-    expect(mocks.appendTaskStream).toHaveBeenCalledWith({
+    expect(mocks.updateMessage).toHaveBeenCalledWith({
       channel: 'C123',
-      messageTs: 'stream-ts',
-      task: {
-        id: 'roomote-task-task-1',
-        title: 'Fix the button',
-        status: 'in_progress',
+      ts: 'card-ts',
+      message: {
+        text: 'Fix the button',
+        blocks: [
+          {
+            type: 'task_card',
+            task_id: 'roomote-task-task-1',
+            title: 'Fix the button',
+            status: 'in_progress',
+            sources: [
+              {
+                type: 'url',
+                url: 'https://roomote.example/task/task-1',
+                text: 'View task',
+              },
+            ],
+          },
+        ],
       },
     });
-  });
-
-  it('does not re-send the View task source on updates', async () => {
-    await updateSlackLiveTaskStream(
-      createTaskRun(),
-      { type: 'text', ts: 1000, text: 'First update.' },
-      {},
-    );
-
-    const task = mocks.appendTaskStream.mock.calls[0]?.[0]?.task;
-    expect(task.sources).toBeUndefined();
   });
 
   it('updates the card for resumed runs through the same run-scoped lookup', async () => {
@@ -128,14 +137,13 @@ describe('Slack live task stream', () => {
     );
 
     expect(mocks.sdkGetStreamData).toHaveBeenCalledWith({ runId: resumed.id });
-    expect(mocks.appendTaskStream).toHaveBeenCalledWith({
-      channel: 'C123',
-      messageTs: 'stream-ts',
-      task: expect.objectContaining({ status: 'in_progress' }),
+    expect(renderedCard(1)).toMatchObject({
+      status: 'in_progress',
+      output: text('Resumed update.'),
     });
   });
 
-  it('shows the current todo as the title without a step count', async () => {
+  it('shows the current todo as the step without a count', async () => {
     const taskRun = createTaskRun();
     const context = {};
     const event = {
@@ -147,19 +155,24 @@ describe('Slack live task stream', () => {
     await updateSlackLiveTaskStream(taskRun, event, context);
     await updateSlackLiveTaskStream(taskRun, event, context);
 
-    expect(mocks.appendTaskStream).toHaveBeenCalledOnce();
-    expect(mocks.appendTaskStream).toHaveBeenCalledWith({
-      channel: 'C123',
-      messageTs: 'stream-ts',
-      task: {
-        id: 'roomote-task-task-1',
-        title: 'Make the change',
-        status: 'in_progress',
-      },
+    expect(mocks.updateMessage).toHaveBeenCalledOnce();
+    expect(renderedCard(1)).toEqual({
+      type: 'task_card',
+      task_id: 'roomote-task-task-1',
+      title: 'Fix the button',
+      status: 'in_progress',
+      details: text('Make the change'),
+      sources: [
+        {
+          type: 'url',
+          url: 'https://roomote.example/task/task-1',
+          text: 'View task',
+        },
+      ],
     });
   });
 
-  it('shows only the latest message, replacing the previous one', async () => {
+  it('shows only the latest message next to the current step', async () => {
     const taskRun = createTaskRun();
     const context = {};
 
@@ -178,22 +191,28 @@ describe('Slack live task stream', () => {
       { type: 'text', ts: 1002, text: 'Editing the selector metadata.' },
       context,
     );
-
-    const titles = mocks.appendTaskStream.mock.calls.map(
-      (call) => call[0].task.title,
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'todo_update', ts: 1003, todos: todos('Verify it') },
+      context,
     );
-    expect(titles).toEqual([
-      'Make the change',
-      'Wiring the new model into spawning.',
-      'Editing the selector metadata.',
-    ]);
-    for (const call of mocks.appendTaskStream.mock.calls) {
-      expect(call[0].task).not.toHaveProperty('output');
-      expect(call[0].task).not.toHaveProperty('details');
-    }
+
+    expect(mocks.updateMessage).toHaveBeenCalledTimes(4);
+    expect(renderedCard(2)).toMatchObject({
+      details: text('Make the change'),
+      output: text('Wiring the new model into spawning.'),
+    });
+    expect(renderedCard(3)).toMatchObject({
+      details: text('Make the change'),
+      output: text('Editing the selector metadata.'),
+    });
+    expect(renderedCard(4)).toMatchObject({
+      details: text('Verify it'),
+      output: text('Editing the selector metadata.'),
+    });
   });
 
-  it('filters transient status lines and duplicate lines', async () => {
+  it('filters transient status lines and duplicate messages', async () => {
     const taskRun = createTaskRun();
     const context = {};
 
@@ -218,12 +237,10 @@ describe('Slack live task stream', () => {
       context,
     );
 
-    expect(mocks.appendTaskStream).toHaveBeenCalledOnce();
-    expect(mocks.appendTaskStream).toHaveBeenCalledWith(
-      expect.objectContaining({
-        task: expect.objectContaining({ title: 'Inspecting the registry.' }),
-      }),
-    );
+    expect(mocks.updateMessage).toHaveBeenCalledOnce();
+    expect(renderedCard(1)).toMatchObject({
+      output: text('Inspecting the registry.'),
+    });
   });
 
   it('does not expose reasoning events in Slack', async () => {
@@ -234,67 +251,77 @@ describe('Slack live task stream', () => {
     );
 
     expect(mocks.sdkGetStreamData).not.toHaveBeenCalled();
-    expect(mocks.appendTaskStream).not.toHaveBeenCalled();
+    expect(mocks.updateMessage).not.toHaveBeenCalled();
   });
 
-  it('settles the card with the task title, the output, and clears its state', async () => {
+  it('settles the card with the final output and clears its state', async () => {
     const taskRun = createTaskRun();
     const context = {};
     await updateSlackLiveTaskStream(
       taskRun,
-      { type: 'text', ts: 1000, text: 'Almost there.' },
+      { type: 'todo_update', ts: 1000, todos: todos('Make the change') },
       context,
     );
     await updateSlackLiveTaskStream(
       taskRun,
-      { type: 'completion', ts: 1001, text: 'Ready for review.' },
+      { type: 'text', ts: 1001, text: 'Almost there.' },
+      context,
+    );
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'completion', ts: 1002, text: 'Ready for review.' },
       context,
     );
 
-    expect(mocks.stopTaskStream).toHaveBeenCalledWith({
-      channel: 'C123',
-      messageTs: 'stream-ts',
-      task: {
-        id: 'roomote-task-task-1',
-        title: 'Fix the button',
-        status: 'complete',
-        output: '\nReady for review.',
-      },
+    expect(renderedCard(3)).toEqual({
+      type: 'task_card',
+      task_id: 'roomote-task-task-1',
+      title: 'Fix the button',
+      status: 'complete',
+      output: text('Ready for review.'),
+      sources: [
+        {
+          type: 'url',
+          url: 'https://roomote.example/task/task-1',
+          text: 'View task',
+        },
+      ],
     });
     expect(mocks.sdkClearStreamData).toHaveBeenCalledWith({
       runId: taskRun.id,
     });
   });
 
-  it('marks a canceled run as an error when no completion event settled it', async () => {
-    await finishSlackLiveTaskStream(createTaskRun(), RunStatus.Canceled, {});
+  it('marks a canceled run as an error and releases the card', async () => {
+    const taskRun = createTaskRun();
+    await finishSlackLiveTaskStream(taskRun, RunStatus.Canceled, {});
 
-    expect(mocks.stopTaskStream).toHaveBeenCalledWith({
-      channel: 'C123',
-      messageTs: 'stream-ts',
-      task: expect.objectContaining({
-        status: 'error',
-        output: '\nTask canceled.',
-      }),
+    expect(renderedCard(1)).toMatchObject({
+      status: 'error',
+      output: text('Task canceled.'),
+    });
+    expect(renderedCard(1)).not.toHaveProperty('details');
+    expect(mocks.sdkClearStreamData).toHaveBeenCalledWith({
+      runId: taskRun.id,
     });
   });
 
-  it('keeps the stream open after a failed turn so a later run can continue it', async () => {
+  it('keeps the card alive after a failed turn so the next run continues it', async () => {
     const taskRun = createTaskRun();
     const context = {};
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'todo_update', ts: 1000, todos: todos('Make the change') },
+      context,
+    );
     await finishSlackLiveTaskStream(taskRun, RunStatus.Failed, context);
 
-    expect(mocks.stopTaskStream).not.toHaveBeenCalled();
-    expect(mocks.sdkClearStreamData).not.toHaveBeenCalled();
-    expect(mocks.appendTaskStream).toHaveBeenCalledWith({
-      channel: 'C123',
-      messageTs: 'stream-ts',
-      task: {
-        id: 'roomote-task-task-1',
-        title: 'The task stopped because of an error.',
-        status: 'error',
-      },
+    expect(renderedCard(2)).toMatchObject({
+      status: 'error',
+      output: text('The task stopped because of an error.'),
     });
+    expect(renderedCard(2)).not.toHaveProperty('details');
+    expect(mocks.sdkClearStreamData).not.toHaveBeenCalled();
 
     // The next run of the task flips the card back to in progress.
     const resumed = createTaskRun({
@@ -302,100 +329,35 @@ describe('Slack live task stream', () => {
       payload: { sourceRunId: taskRun.id, liveTaskStream: true },
     });
     await startSlackLiveTaskStream(resumed, {});
-    expect(mocks.appendTaskStream).toHaveBeenLastCalledWith({
-      channel: 'C123',
-      messageTs: 'stream-ts',
-      task: {
-        id: 'roomote-task-task-1',
-        title: 'Fix the button',
-        status: 'in_progress',
-      },
+    expect(renderedCard(3)).toMatchObject({
+      title: 'Fix the button',
+      status: 'in_progress',
     });
+    expect(renderedCard(3)).not.toHaveProperty('output');
   });
 
-  it('falls back to chat.update once Slack reports the stream is gone', async () => {
-    const taskRun = createTaskRun();
-    const context = {};
-    mocks.appendTaskStream.mockResolvedValueOnce({
-      ok: false,
-      error: 'message_not_in_streaming_state',
-    });
-
-    await updateSlackLiveTaskStream(
-      taskRun,
-      { type: 'text', ts: 1000, text: 'Still working.' },
-      context,
-    );
-    await updateSlackLiveTaskStream(
-      taskRun,
-      { type: 'completion', ts: 1001, text: 'Ready for review.' },
-      context,
-    );
-
-    expect(mocks.appendTaskStream).toHaveBeenCalledOnce();
-    expect(mocks.stopTaskStream).not.toHaveBeenCalled();
-    expect(mocks.updateMessage).toHaveBeenNthCalledWith(1, {
-      channel: 'C123',
-      ts: 'stream-ts',
-      message: expect.objectContaining({
-        text: 'Still working.',
-        blocks: expect.arrayContaining([
-          expect.objectContaining({
-            text: expect.objectContaining({
-              text: expect.stringContaining('*Still working.*'),
-            }),
-          }),
-        ]),
-      }),
-    });
-    expect(mocks.updateMessage).toHaveBeenNthCalledWith(2, {
-      channel: 'C123',
-      ts: 'stream-ts',
-      message: expect.objectContaining({
-        text: 'Fix the button',
-        blocks: expect.arrayContaining([
-          expect.objectContaining({
-            text: expect.objectContaining({
-              text: expect.stringContaining('Ready for review.'),
-            }),
-          }),
-        ]),
-      }),
-    });
-    expect(mocks.sdkClearStreamData).toHaveBeenCalledWith({
-      runId: taskRun.id,
-    });
-  });
-
-  it('does not fall back on transient stream errors', async () => {
-    mocks.appendTaskStream.mockResolvedValueOnce({
-      ok: false,
-      error: 'ratelimited',
-    });
+  it('does not release the card when the settling update fails', async () => {
+    mocks.updateMessage.mockResolvedValueOnce(false);
 
     await updateSlackLiveTaskStream(
       createTaskRun(),
-      { type: 'text', ts: 1000, text: 'Still working.' },
+      { type: 'completion', ts: 1000, text: 'Ready for review.' },
       {},
     );
 
-    expect(mocks.updateMessage).not.toHaveBeenCalled();
+    expect(mocks.sdkClearStreamData).not.toHaveBeenCalled();
   });
 
   it('settles a completed run as a fallback when the completion event was lost', async () => {
     await finishSlackLiveTaskStream(createTaskRun(), RunStatus.Completed, {});
 
-    expect(mocks.stopTaskStream).toHaveBeenCalledWith({
-      channel: 'C123',
-      messageTs: 'stream-ts',
-      task: expect.objectContaining({
-        status: 'complete',
-        output: '\nTask completed.',
-      }),
+    expect(renderedCard(1)).toMatchObject({
+      status: 'complete',
+      output: text('Task completed.'),
     });
   });
 
-  it('does not settle the completion fallback twice after the real completion', async () => {
+  it('keeps the real output when the completion fallback follows the real completion', async () => {
     const taskRun = createTaskRun();
     const context = {};
     await updateSlackLiveTaskStream(
@@ -405,13 +367,17 @@ describe('Slack live task stream', () => {
     );
     await finishSlackLiveTaskStream(taskRun, RunStatus.Completed, context);
 
-    expect(mocks.stopTaskStream).toHaveBeenCalledOnce();
+    // The data was cleared by the first settle, so the fallback is a no-op.
+    expect(mocks.updateMessage).toHaveBeenCalledOnce();
+    expect(renderedCard(1)).toMatchObject({
+      output: text('Ready for review.'),
+    });
   });
 
-  it('retains the stream for idle runs awaiting a resume', async () => {
+  it('retains the card for idle runs awaiting a resume', async () => {
     await finishSlackLiveTaskStream(createTaskRun(), RunStatus.Idle, {});
 
-    expect(mocks.stopTaskStream).not.toHaveBeenCalled();
+    expect(mocks.updateMessage).not.toHaveBeenCalled();
     expect(mocks.sdkClearStreamData).not.toHaveBeenCalled();
   });
 

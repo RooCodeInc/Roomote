@@ -1617,7 +1617,6 @@ function startFastAgentResponse(params: {
       channelId: params.event.channel,
       threadTs: params.event.thread_ts || params.event.ts,
       messageId: params.event.ts,
-      recipientUserId: params.event.user ?? params.userMapping.slackUserId,
     }),
   }).catch((error) => {
     console.error(

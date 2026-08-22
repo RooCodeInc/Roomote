@@ -2,8 +2,8 @@ const mocks = vi.hoisted(() => ({
   enqueueTask: vi.fn(),
   getSlackLiveTaskStreamData: vi.fn(),
   setSlackLiveTaskStreamData: vi.fn(),
-  startTaskStream: vi.fn(),
-  appendTaskStream: vi.fn(),
+  postMessage: vi.fn(),
+  updateMessage: vi.fn(),
   findTask: vi.fn(),
 }));
 
@@ -64,8 +64,8 @@ import { createFastAgentSlackLiveTaskLauncher } from '../fast-agent-live-task-la
 function createLauncher() {
   return createFastAgentSlackLiveTaskLauncher({
     slack: {
-      startTaskStream: mocks.startTaskStream,
-      appendTaskStream: mocks.appendTaskStream,
+      postMessage: mocks.postMessage,
+      updateMessage: mocks.updateMessage,
     },
     userId: 'user-1',
     teamId: 'T123',
@@ -73,7 +73,6 @@ function createLauncher() {
     channelId: 'C123',
     threadTs: '100.001',
     messageId: '100.002',
-    recipientUserId: 'U123',
   });
 }
 
@@ -82,13 +81,13 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
     vi.clearAllMocks();
     mocks.enqueueTask.mockResolvedValue(undefined);
     mocks.getSlackLiveTaskStreamData.mockResolvedValue(null);
-    mocks.startTaskStream.mockResolvedValue('stream-ts');
-    mocks.appendTaskStream.mockResolvedValue(true);
+    mocks.postMessage.mockResolvedValue('card-ts');
+    mocks.updateMessage.mockResolvedValue(true);
     mocks.setSlackLiveTaskStreamData.mockResolvedValue(undefined);
     mocks.findTask.mockResolvedValue(null);
   });
 
-  it('opens a task card in the parent thread and records its stream', async () => {
+  it('posts a task card in the parent thread and records it', async () => {
     const launchTask = createLauncher();
 
     await expect(
@@ -104,36 +103,31 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
       taskUrl: 'https://roomote.example/task/task-1',
     });
 
-    expect(mocks.startTaskStream).toHaveBeenCalledWith({
+    expect(mocks.postMessage).toHaveBeenCalledWith({
       channel: 'C123',
-      threadTs: '100.001',
-      recipientTeamId: 'T123',
-      recipientUserId: 'U123',
-      task: {
-        id: 'roomote-task-task-1',
-        title: 'Add a regression test',
-        status: 'in_progress',
-        sources: [
-          {
-            type: 'url',
-            url: 'https://roomote.example/task/task-1',
-            text: 'View task',
-          },
-        ],
-      },
-    });
-    expect(mocks.appendTaskStream).toHaveBeenCalledWith({
-      channel: 'C123',
-      messageTs: 'stream-ts',
-      task: {
-        id: 'roomote-task-task-1',
-        title: 'Add a regression test',
-        status: 'in_progress',
-      },
+      thread_ts: '100.001',
+      text: 'Add a regression test',
+      blocks: [
+        expect.objectContaining({
+          type: 'task_card',
+          task_id: 'roomote-task-task-1',
+          title: 'Add a regression test',
+          status: 'in_progress',
+          sources: [
+            {
+              type: 'url',
+              url: 'https://roomote.example/task/task-1',
+              text: 'View task',
+            },
+          ],
+        }),
+      ],
+      unfurl_links: false,
+      unfurl_media: false,
     });
     expect(mocks.setSlackLiveTaskStreamData).toHaveBeenCalledWith('task-1', {
       channel: 'C123',
-      messageTs: 'stream-ts',
+      messageTs: 'card-ts',
       taskId: 'task-1',
       taskUpdateId: 'roomote-task-task-1',
       threadTs: '100.001',
@@ -152,7 +146,7 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
     });
   });
 
-  it('reuses an existing card instead of starting a second stream', async () => {
+  it('reuses an existing card instead of posting a second one', async () => {
     mocks.getSlackLiveTaskStreamData.mockResolvedValue({
       channel: 'C123',
       messageTs: 'existing-ts',
@@ -169,12 +163,12 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
       postKickoff: vi.fn(),
     });
 
-    expect(mocks.startTaskStream).not.toHaveBeenCalled();
+    expect(mocks.postMessage).not.toHaveBeenCalled();
     expect(mocks.setSlackLiveTaskStreamData).not.toHaveBeenCalled();
   });
 
-  it('still launches the task when the stream cannot be started', async () => {
-    mocks.startTaskStream.mockRejectedValue(new Error('slack down'));
+  it('still launches the task when the card cannot be posted', async () => {
+    mocks.postMessage.mockRejectedValue(new Error('slack down'));
 
     await expect(
       createLauncher()({
@@ -192,11 +186,12 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
       .mockResolvedValueOnce(null)
       .mockResolvedValue({
         channel: 'C123',
-        messageTs: 'stream-ts',
+        messageTs: 'card-ts',
         taskId: 'task-1',
         taskUpdateId: 'roomote-task-task-1',
         threadTs: '100.001',
         title: 'Add a regression test',
+        taskUrl: 'https://roomote.example/task/task-1',
       });
     mocks.findTask.mockResolvedValue({ title: 'Regression test for parser' });
 
@@ -207,13 +202,19 @@ describe('createFastAgentSlackLiveTaskLauncher', () => {
       postKickoff: vi.fn(),
     });
     await vi.waitFor(() => {
-      expect(mocks.appendTaskStream).toHaveBeenCalledWith({
+      expect(mocks.updateMessage).toHaveBeenCalledWith({
         channel: 'C123',
-        messageTs: 'stream-ts',
-        task: {
-          id: 'roomote-task-task-1',
-          title: 'Regression test for parser',
-          status: 'in_progress',
+        ts: 'card-ts',
+        message: {
+          text: 'Regression test for parser',
+          blocks: [
+            expect.objectContaining({
+              type: 'task_card',
+              task_id: 'roomote-task-task-1',
+              title: 'Regression test for parser',
+              status: 'in_progress',
+            }),
+          ],
         },
       });
     });

@@ -17,7 +17,6 @@ import {
   eq,
   inArray,
   slackInstallations,
-  slackUserMappings,
   taskArtifacts,
   taskPullRequests,
   taskRuns,
@@ -316,15 +315,6 @@ async function createSlackFastAgentParentTurn(params: {
 
   const conversation = session.conversation;
   const slack = new SlackNotifier(installation.botAccessToken);
-  // Platform events carry no Slack author; address the task card to the
-  // Fast session owner's Slack identity when one is linked.
-  const recipientMapping = await db.query.slackUserMappings.findFirst({
-    where: and(
-      eq(slackUserMappings.userId, session.userId),
-      eq(slackUserMappings.slackTeamId, conversation.workspaceId),
-    ),
-    columns: { slackUserId: true },
-  });
 
   if (
     params.event.type === 'pull_request_status_changed' &&
@@ -351,9 +341,6 @@ async function createSlackFastAgentParentTurn(params: {
           : {}),
         channelId: conversation.replyTarget.channelId,
         threadTs: conversation.replyTarget.threadId,
-        ...(recipientMapping?.slackUserId
-          ? { recipientUserId: recipientMapping.slackUserId }
-          : {}),
       }),
       postReply: async ({ message, imageArtifactIds = [] }) => {
         const images = await buildSelectedImages({
