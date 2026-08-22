@@ -402,9 +402,43 @@ else
   HARDEN_PID=""
 fi
 
+# Hot-memory facts that gbrain's own put_page backstop extracts land in the
+# database without a markdown fence (row_num NULL). The nightly extract_facts
+# phase refuses to run while such rows exist for live entity pages, reading
+# them as an interrupted v0.32.2 upgrade, so on any brain that is written to
+# every day the phase jams permanently and consolidation starves. gbrain's
+# sanctioned drain is re-running the v0.32.2 fence backfill, which is
+# idempotent (only row_num IS NULL rows, de-duplicated against the page's
+# existing fence), so run it at boot and once a day ahead of Roomote's
+# 07:00 UTC maintenance cycle. Never fatal: a failed drain leaves the phase
+# skipped, which is today's behavior, and the log says why.
+FENCE_BACKFILL_UTC_SECONDS=$((6 * 3600 + 30 * 60))
+fence_backfill() {
+  echo "[gbrain-entrypoint] fencing unfenced facts (v0.32.2 backfill)"
+  gbrain apply-migrations --force-retry 0.32.2 --non-interactive 2>&1 \
+    | sed 's/^/[gbrain-entrypoint] fence-backfill: /' || true
+  gbrain apply-migrations --non-interactive 2>&1 \
+    | sed 's/^/[gbrain-entrypoint] fence-backfill: /' || true
+}
+(
+  # Let the server and worker settle before the first drain.
+  sleep 60
+  fence_backfill
+  while :; do
+    now="$(date -u +%s)"
+    delay=$((FENCE_BACKFILL_UTC_SECONDS - now % 86400))
+    if [ "$delay" -le 0 ]; then
+      delay=$((delay + 86400))
+    fi
+    sleep "$delay"
+    fence_backfill
+  done
+) &
+FENCE_PID=$!
+
 TERMINATING=0
 stop_processes() {
-  kill -TERM "$SERVER_PID" "$WORKER_PID" ${HARDEN_PID:+"$HARDEN_PID"} 2>/dev/null || true
+  kill -TERM "$SERVER_PID" "$WORKER_PID" "$FENCE_PID" ${HARDEN_PID:+"$HARDEN_PID"} 2>/dev/null || true
 }
 trap 'TERMINATING=1; stop_processes' TERM INT
 
