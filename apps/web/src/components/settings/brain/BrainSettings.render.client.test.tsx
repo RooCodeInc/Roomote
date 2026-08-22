@@ -143,7 +143,8 @@ describe('BrainSettings', () => {
     render(<BrainSettings />);
 
     expect(screen.getAllByText('Connected')).toHaveLength(2);
-    expect(screen.getByText('http://gbrain:8080')).toBeInTheDocument();
+    expect(screen.queryByText('Endpoint')).not.toBeInTheDocument();
+    expect(screen.queryByText('http://gbrain:8080')).not.toBeInTheDocument();
     expect(screen.getByText('OpenRouter')).toBeInTheDocument();
     expect(screen.getByText('Semantic + keyword')).toBeInTheDocument();
 
