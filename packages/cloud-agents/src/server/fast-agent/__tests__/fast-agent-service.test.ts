@@ -871,7 +871,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
         purpose: 'progress',
         message:
-          'Fast mode’s request was blocked by the inference provider gateway. Retrying in 1s (attempt 1/3).',
+          'Fast mode’s request was blocked by the inference provider gateway. Retrying in 1s (attempt 1/6).',
       });
       expect(mocks.invalidateSession).not.toHaveBeenCalled();
     } finally {
@@ -902,6 +902,34 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       }),
     );
     expect(mocks.invalidateSession).toHaveBeenCalledWith('conversation-1');
+  });
+
+  it('uses the extended retry budget for provider timeouts', async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.generateText
+        .mockRejectedValueOnce(new Error('Provider request timed out'))
+        .mockImplementationOnce(async (_params, _session, options) => {
+          await options.onSessionReady('opencode-session-1');
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'closeout',
+            message: 'The retry recovered.',
+          });
+          return '';
+        });
+      const adapter = callbacks();
+
+      const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
+      await vi.runAllTimersAsync();
+
+      await expect(resultPromise).resolves.toBe('The retry recovered.');
+      expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
+        purpose: 'progress',
+        message: expect.stringContaining('attempt 1/6'),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('leaves the OpenCode prompt deadline as the single retry budget', async () => {
@@ -1021,7 +1049,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       expect(mocks.generateText).toHaveBeenCalledTimes(2);
       expect(adapter.postReply).toHaveBeenNthCalledWith(1, {
         purpose: 'progress',
-        message: expect.stringContaining('Retrying in 1s (attempt 1/3)'),
+        message: expect.stringContaining('Retrying in 1s (attempt 1/6)'),
       });
       expect(adapter.postReply).toHaveBeenNthCalledWith(
         2,
@@ -1135,11 +1163,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
   it('reports the classified provider failure after retries are exhausted', async () => {
     vi.useFakeTimers();
+    const random = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     try {
       mocks.generateText.mockRejectedValue(
         new Error('TypeError: fetch failed'),
       );
       const adapter = callbacks();
+      const startedAt = Date.now();
 
       const resultPromise = answerFastAgentQuestion({ ...baseParams, adapter });
       await vi.runAllTimersAsync();
@@ -1147,13 +1177,19 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
       await expect(resultPromise).resolves.toBe(
         'Fast mode could not reach the inference provider after retrying. Please try again in a moment.',
       );
-      expect(mocks.generateText).toHaveBeenCalledTimes(4);
+      expect(mocks.generateText).toHaveBeenCalledTimes(7);
+      expect(Date.now() - startedAt).toBe(67_100);
+      expect(adapter.postReply).toHaveBeenNthCalledWith(6, {
+        purpose: 'progress',
+        message: expect.stringContaining('Retrying in 33s (attempt 6/6)'),
+      });
       expect(adapter.postReply).toHaveBeenLastCalledWith({
         purpose: 'closeout',
         message:
           'Fast mode could not reach the inference provider after retrying. Please try again in a moment.',
       });
     } finally {
+      random.mockRestore();
       vi.useRealTimers();
     }
   });
@@ -1182,8 +1218,8 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         .mocked(adapter.postReply)
         .mock.calls.filter(([reply]) => reply.purpose === 'progress');
       expect(progressMessages).toHaveLength(2);
-      expect(progressMessages[0]?.[0]?.message).toContain('attempt 1/3');
-      expect(progressMessages[1]?.[0]?.message).toContain('attempt 2/3');
+      expect(progressMessages[0]?.[0]?.message).toContain('attempt 1/6');
+      expect(progressMessages[1]?.[0]?.message).toContain('attempt 2/6');
     } finally {
       vi.useRealTimers();
     }

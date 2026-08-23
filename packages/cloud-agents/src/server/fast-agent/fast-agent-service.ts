@@ -130,6 +130,8 @@ function buildIntegrationCallSignature({
 }
 
 export const FAST_AGENT_INFERENCE_MAX_RETRIES = INFERENCE_PROVIDER_MAX_RETRIES;
+export const FAST_AGENT_TRANSIENT_INFERENCE_MAX_RETRIES = 6;
+const FAST_AGENT_TRANSIENT_RETRY_JITTER_RATIO = 0.2;
 
 type FastAgentInferenceFailure = ReturnType<
   typeof classifyNonTaskInferenceError
@@ -160,16 +162,42 @@ class FastAgentInferenceError extends Error {
   }
 }
 
+function resolveFastAgentInferenceMaxRetries(
+  failure: FastAgentInferenceFailure,
+): number {
+  switch (failure.reason) {
+    case 'endpoint_unreachable':
+    case 'gateway_blocked':
+    case 'timeout':
+      return FAST_AGENT_TRANSIENT_INFERENCE_MAX_RETRIES;
+    default:
+      return FAST_AGENT_INFERENCE_MAX_RETRIES;
+  }
+}
+
 function resolveFastAgentInferenceRetryDelayMs(
   error: unknown,
   failure: FastAgentInferenceFailure,
   retryNumber: number,
 ): number {
-  return resolveInferenceProviderRetryDelayMs({
+  const delayMs = resolveInferenceProviderRetryDelayMs({
     error,
     attemptNumber: retryNumber,
     rateLimited: failure.reason === 'rate_limited',
   });
+
+  if (
+    resolveFastAgentInferenceMaxRetries(failure) ===
+    FAST_AGENT_INFERENCE_MAX_RETRIES
+  ) {
+    return delayMs;
+  }
+
+  // Positive jitter spreads concurrent recovery attempts without shortening
+  // the 61-second base backoff window. Six retries remain bounded below 75s.
+  return Math.round(
+    delayMs * (1 + Math.random() * FAST_AGENT_TRANSIENT_RETRY_JITTER_RATIO),
+  );
 }
 
 function formatFastAgentInferenceRetryNotice(
@@ -226,11 +254,7 @@ async function runFastAgentInferenceWithRetries<T>(
   onRetry?: (notice: FastAgentInferenceRetryNotice) => Promise<void>,
   options: FastAgentInferenceRetryOptions = {},
 ): Promise<T> {
-  for (
-    let retryNumber = 0;
-    retryNumber <= FAST_AGENT_INFERENCE_MAX_RETRIES;
-    retryNumber += 1
-  ) {
+  for (let retryNumber = 0; ; retryNumber += 1) {
     try {
       return await run();
     } catch (error) {
@@ -241,10 +265,11 @@ async function runFastAgentInferenceWithRetries<T>(
       }
 
       const failure = classifyNonTaskInferenceError(error);
+      const maxRetries = resolveFastAgentInferenceMaxRetries(failure);
       if (
         !failure.retryable ||
         options.canRetry?.(error, failure) === false ||
-        retryNumber >= FAST_AGENT_INFERENCE_MAX_RETRIES
+        retryNumber >= maxRetries
       ) {
         throw new FastAgentInferenceError(failure, error);
       }
@@ -256,13 +281,13 @@ async function runFastAgentInferenceWithRetries<T>(
         attemptNumber,
       );
       console.warn(
-        `[Fast Agent] Retrying inference failure attempt=${attemptNumber}/${FAST_AGENT_INFERENCE_MAX_RETRIES} delayMs=${delayMs} reason=${failure.reason}: ${formatErrorForLog(error)}`,
+        `[Fast Agent] Retrying inference failure attempt=${attemptNumber}/${maxRetries} delayMs=${delayMs} reason=${failure.reason}: ${formatErrorForLog(error)}`,
       );
       try {
         await onRetry?.({
           failure,
           attemptNumber,
-          maxAttempts: FAST_AGENT_INFERENCE_MAX_RETRIES,
+          maxAttempts: maxRetries,
           delayMs,
         });
       } catch (noticeError) {
