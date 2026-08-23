@@ -1,3 +1,4 @@
+import { getInstallationOctokit } from '@roomote/github';
 import {
   enqueuePrReviewNotification,
   type EnqueuePrReviewNotificationInput,
@@ -19,6 +20,9 @@ function getObservedAt(value: string | null): number {
 
 export function buildPrCiFailureNotificationInputs(
   payload: WebhookCheckRunCompleted,
+  pullRequestNumbers = payload.check_run.pull_requests.map(
+    (pullRequest) => pullRequest.number,
+  ),
 ): EnqueuePrReviewNotificationInput[] {
   const checkRun = payload.check_run;
 
@@ -29,9 +33,7 @@ export function buildPrCiFailureNotificationInputs(
     return [];
   }
 
-  const prNumbers = [
-    ...new Set(checkRun.pull_requests.map((pullRequest) => pullRequest.number)),
-  ];
+  const prNumbers = [...new Set(pullRequestNumbers)];
 
   return prNumbers.map((prNumber) => ({
     repository: payload.repository.full_name,
@@ -50,11 +52,59 @@ export function buildPrCiFailureNotificationInputs(
   }));
 }
 
+async function resolvePullRequestNumbers(
+  payload: WebhookCheckRunCompleted,
+): Promise<number[]> {
+  const associatedPrNumbers = payload.check_run.pull_requests.map(
+    (pullRequest) => pullRequest.number,
+  );
+
+  if (associatedPrNumbers.length > 0) {
+    return associatedPrNumbers;
+  }
+
+  const installationId = payload.installation?.id;
+  const [owner, repo] = payload.repository.full_name.split('/');
+
+  if (!installationId || !owner || !repo) {
+    throw new Error(
+      `Cannot resolve pull requests for ${payload.repository.full_name}@${payload.check_run.head_sha}`,
+    );
+  }
+
+  const octokit = await getInstallationOctokit({ installationId });
+  const response =
+    await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
+      owner,
+      repo,
+      commit_sha: payload.check_run.head_sha,
+    });
+
+  return response.data
+    .filter(
+      (pullRequest) =>
+        pullRequest.state === 'open' &&
+        pullRequest.head.sha === payload.check_run.head_sha,
+    )
+    .map((pullRequest) => pullRequest.number);
+}
+
 /** Persists failed GitHub checks for every associated task-linked PR. */
 export async function queuePrCiFailureNotification(
   payload: WebhookCheckRunCompleted,
 ): Promise<void> {
-  const inputs = buildPrCiFailureNotificationInputs(payload);
+  if (
+    !payload.check_run.conclusion ||
+    !FAILED_CHECK_CONCLUSIONS.has(payload.check_run.conclusion)
+  ) {
+    return;
+  }
+
+  const pullRequestNumbers = await resolvePullRequestNumbers(payload);
+  const inputs = buildPrCiFailureNotificationInputs(
+    payload,
+    pullRequestNumbers,
+  );
 
   await Promise.all(
     inputs.map((input) =>

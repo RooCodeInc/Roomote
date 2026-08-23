@@ -1,7 +1,17 @@
-const { mockEnqueuePrReviewNotification } = vi.hoisted(() => ({
+const {
+  mockEnqueuePrReviewNotification,
+  mockGetInstallationOctokit,
+  mockListPullRequestsAssociatedWithCommit,
+} = vi.hoisted(() => ({
   mockEnqueuePrReviewNotification: vi.fn().mockResolvedValue({
     notifiedTaskCount: 1,
   }),
+  mockGetInstallationOctokit: vi.fn(),
+  mockListPullRequestsAssociatedWithCommit: vi.fn(),
+}));
+
+vi.mock('@roomote/github', () => ({
+  getInstallationOctokit: mockGetInstallationOctokit,
 }));
 
 vi.mock('@roomote/sdk/server', () => ({
@@ -23,6 +33,7 @@ function checkRunPayload({
 } = {}): WebhookCheckRunCompleted {
   return {
     action: 'completed',
+    installation: { id: 123 },
     repository: {
       full_name: 'owner/repo',
       html_url: 'https://github.com/owner/repo',
@@ -86,7 +97,15 @@ describe('buildPrCiFailureNotificationInputs', () => {
 
 describe('queuePrCiFailureNotification', () => {
   beforeEach(() => {
-    mockEnqueuePrReviewNotification.mockClear();
+    vi.clearAllMocks();
+    mockGetInstallationOctokit.mockResolvedValue({
+      rest: {
+        repos: {
+          listPullRequestsAssociatedWithCommit:
+            mockListPullRequestsAssociatedWithCommit,
+        },
+      },
+    });
   });
 
   it('persists failures through the existing PR notification pipeline', async () => {
@@ -98,5 +117,42 @@ describe('queuePrCiFailureNotification', () => {
         event: expect.objectContaining({ kind: 'ci_failure' }),
       }),
     );
+    expect(mockGetInstallationOctokit).not.toHaveBeenCalled();
+  });
+
+  it('resolves a fork-based pull request from the failed check head SHA', async () => {
+    mockListPullRequestsAssociatedWithCommit.mockResolvedValue({
+      data: [
+        { number: 84, state: 'open', head: { sha: 'abc123' } },
+        { number: 85, state: 'closed', head: { sha: 'abc123' } },
+        { number: 86, state: 'open', head: { sha: 'newer-sha' } },
+      ],
+    });
+
+    await queuePrCiFailureNotification(
+      checkRunPayload({ pullRequestNumbers: [] }),
+    );
+
+    expect(mockListPullRequestsAssociatedWithCommit).toHaveBeenCalledWith({
+      owner: 'owner',
+      repo: 'repo',
+      commit_sha: 'abc123',
+    });
+    expect(mockEnqueuePrReviewNotification).toHaveBeenCalledTimes(1);
+    expect(mockEnqueuePrReviewNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prNumber: 84,
+        event: expect.objectContaining({ reviewHeadSha: 'abc123' }),
+      }),
+    );
+  });
+
+  it('does not resolve pull requests for a successful check', async () => {
+    await queuePrCiFailureNotification(
+      checkRunPayload({ conclusion: 'success', pullRequestNumbers: [] }),
+    );
+
+    expect(mockGetInstallationOctokit).not.toHaveBeenCalled();
+    expect(mockEnqueuePrReviewNotification).not.toHaveBeenCalled();
   });
 });
