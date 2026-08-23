@@ -103,6 +103,12 @@ function isButtonRouteProvider(
   return (BUTTON_ROUTE_PROVIDERS as readonly string[]).includes(provider);
 }
 
+function isButtonRoute(
+  route: PrReviewNotificationRoute,
+): route is PrReviewNotificationRoute & { provider: ButtonRouteProvider } {
+  return isButtonRouteProvider(route.provider);
+}
+
 async function postPrReviewNotification({
   taskId,
   route,
@@ -393,41 +399,20 @@ export const prReviewNotificationJob = async (
     const roomoteReviewResult = events.find(
       (event) => event.reviewResult,
     )?.reviewResult;
-    let autoHandledText: string | null = null;
-
-    // Auto-handling runs before Fast-parent delivery so delegated tasks honor
-    // the same persisted preference as every other notification route.
-    if (
+    const persistedAutoHandleUserId =
+      prLink?.autoHandleFeedbackByUserId ?? null;
+    const autoHandleRoute =
       followUp &&
-      prLink?.autoHandleFeedbackByUserId &&
+      persistedAutoHandleUserId &&
       delivery.route &&
-      isButtonRouteProvider(delivery.route.provider)
-    ) {
-      const dispatched = await dispatchPrReviewFollowUp({
-        provider: delivery.route.provider,
-        taskId: data.taskId,
-        ...(delivery.route.provider === 'slack'
-          ? { slackTeamId: delivery.route.slackTeamId }
-          : {}),
-        channelId: delivery.route.channelId,
-        threadId: delivery.route.threadId ?? null,
-        followUpPrompt: followUp.prompt,
-        actingUserId: prLink.autoHandleFeedbackByUserId,
-      });
+      isButtonRoute(delivery.route)
+        ? delivery.route
+        : null;
+    const autoHandleUserId = autoHandleRoute ? persistedAutoHandleUserId : null;
 
-      if (dispatched.outcome !== 'unavailable') {
-        autoHandledText = `New review feedback — I'm on it:
-${delivery.text}`;
-        console.log(
-          `[PrReviewNotification] Auto-dispatched review feedback for ${data.repository}#${data.prNumber} into task ${data.taskId} (${dispatched.outcome}, run ${dispatched.runId})`,
-        );
-      } else {
-        console.warn(
-          `[PrReviewNotification] Auto-handle dispatch unavailable for ${data.repository}#${data.prNumber}; falling back to the interactive offer`,
-        );
-      }
-    }
-
+    // Fast-parent delivery can fail and release this notification for retry.
+    // Complete it before auto-dispatch so a retry cannot enqueue the same
+    // resolve prompt twice.
     const deliveredToFastParent = await notifyFastAgentParentOnPrFeedback({
       run: latestJob,
       deliveryIds: data.deliveryIds ?? [],
@@ -443,7 +428,7 @@ ${delivery.text}`;
         url: prLink?.prUrl ?? data.prUrl,
         status: prLink?.status,
       },
-      summary: autoHandledText ?? delivery.text,
+      summary: delivery.text,
       ...(roomoteReviewIdentity?.reviewTaskId &&
       roomoteReviewIdentity.reviewHeadSha
         ? {
@@ -452,7 +437,7 @@ ${delivery.text}`;
           }
         : {}),
       ...(roomoteReviewResult ? { reviewResult: roomoteReviewResult } : {}),
-      ...(followUp && !autoHandledText
+      ...(followUp && !autoHandleUserId
         ? {
             suggestedActionQuestion: followUp.question,
             suggestedActionPrompt: followUp.prompt,
@@ -460,7 +445,34 @@ ${delivery.text}`;
         : {}),
     });
 
-    if (deliveredToFastParent) {
+    let autoHandledText: string | null = null;
+    if (followUp && autoHandleUserId && autoHandleRoute) {
+      const dispatched = await dispatchPrReviewFollowUp({
+        provider: autoHandleRoute.provider,
+        taskId: data.taskId,
+        ...(autoHandleRoute.provider === 'slack'
+          ? { slackTeamId: autoHandleRoute.slackTeamId }
+          : {}),
+        channelId: autoHandleRoute.channelId,
+        threadId: autoHandleRoute.threadId ?? null,
+        followUpPrompt: followUp.prompt,
+        actingUserId: autoHandleUserId,
+      });
+
+      if (dispatched.outcome !== 'unavailable') {
+        autoHandledText = `New review feedback — I'm on it:
+${delivery.text}`;
+        console.log(
+          `[PrReviewNotification] Auto-dispatched review feedback for ${data.repository}#${data.prNumber} into task ${data.taskId} (${dispatched.outcome}, run ${dispatched.runId})`,
+        );
+      } else {
+        console.warn(
+          `[PrReviewNotification] Auto-handle dispatch unavailable for ${data.repository}#${data.prNumber}; falling back to the interactive offer`,
+        );
+      }
+    }
+
+    if (deliveredToFastParent && (!autoHandleUserId || autoHandledText)) {
       await recordPrReviewNotificationDeliveryBestEffort({
         runId: latestJob.id,
         taskId: data.taskId,
@@ -470,6 +482,9 @@ ${delivery.text}`;
       await finalizePrReviewNotificationRequest(data);
       return;
     }
+
+    // If the automatic dispatch was unavailable, continue into the normal
+    // offer path even though the Fast parent already received the summary.
 
     if (autoHandledText && delivery.route) {
       const messageTs = await postPrReviewNotification({
