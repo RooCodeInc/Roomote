@@ -122,4 +122,20 @@ describe('EnvironmentRepositorySelector', () => {
       screen.getByRole('button', { name: 'Create a new repository' }),
     ).toBeInTheDocument();
   });
+
+  it('allows callers with an existing filter to suppress search', () => {
+    render(
+      <EnvironmentRepositorySelector
+        repositories={repositories}
+        selectedRepositoryIds={[]}
+        onToggleRepository={vi.fn()}
+        showSearch={false}
+      />,
+    );
+
+    expect(
+      screen.queryByRole('searchbox', { name: 'Search repositories' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByRole('checkbox')).toHaveLength(3);
+  });
 });

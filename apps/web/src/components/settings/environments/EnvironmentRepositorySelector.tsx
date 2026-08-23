@@ -20,6 +20,7 @@ export function EnvironmentRepositorySelector({
   selectedRepositoryIds,
   onToggleRepository,
   onCreateRepository,
+  showSearch = true,
   inputPrefix = 'environment-repository',
   heightClassName = 'max-h-[11.5rem] md:h-[18.75rem]',
 }: {
@@ -27,6 +28,7 @@ export function EnvironmentRepositorySelector({
   selectedRepositoryIds: string[];
   onToggleRepository: (repositoryId: string) => void;
   onCreateRepository?: () => void;
+  showSearch?: boolean;
   inputPrefix?: string;
   heightClassName?: string;
 }) {
@@ -54,7 +56,7 @@ export function EnvironmentRepositorySelector({
   return (
     <ScrollArea className={`overflow-auto ${heightClassName}`}>
       <div className="space-y-1">
-        {repositories.length > 0 ? (
+        {showSearch && repositories.length > 0 ? (
           <div className="sticky top-0 z-10 bg-card pb-2">
             <div className="relative">
               <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
