@@ -1,0 +1,27 @@
+---
+title: ElevenLabs
+description: Add voice narration to Roomote feature-demo videos.
+icon: 'https://api.iconify.design/simple-icons:elevenlabs.svg?color=currentColor'
+---
+
+Connect ElevenLabs when you want Roomote to add voice-over narration to
+[feature-demo videos](/cookbook/feature-demo-videos).
+
+## How setup works
+
+A deployment admin connects ElevenLabs once from **Settings > Integrations**
+with:
+
+- an ElevenLabs API key scoped to text-to-speech only, preferably with a credit
+  limit
+- the voice ID to use for narration
+
+## What to expect
+
+ElevenLabs is a credential-only integration. Roomote uses it on the control
+plane to synthesize narration; agents receive no ElevenLabs tools, and the API
+key is not sent to task sandboxes.
+
+Self-hosted operators can instead set `R_ELEVENLABS_API_KEY` and
+`R_ELEVENLABS_VOICE_ID`. The connection configured in **Settings >
+Integrations** takes precedence when both sources are available.
