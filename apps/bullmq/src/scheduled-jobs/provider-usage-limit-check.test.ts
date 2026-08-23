@@ -1,9 +1,28 @@
 import { describe, expect, it, vi } from 'vitest';
 
+const mocks = vi.hoisted(() => ({
+  findSlackInstallation: vi.fn(),
+  desc: vi.fn((column: unknown) => ({ desc: column })),
+}));
+
+vi.mock('@roomote/db/server', async (importOriginal) => {
+  const original = await importOriginal<typeof import('@roomote/db/server')>();
+  return {
+    ...original,
+    db: {
+      query: {
+        slackInstallations: { findFirst: mocks.findSlackInstallation },
+      },
+    },
+    desc: mocks.desc,
+  };
+});
+
 import type { ProviderUsageLimitSnapshot } from '@roomote/db/server';
 
 import {
   buildProviderUsageLimitWarningMessage,
+  getActiveSlackBotToken,
   getProviderUsageLimitPeriodId,
   providerUsageLimitCheckJob,
 } from './provider-usage-limit-check';
@@ -123,6 +142,33 @@ describe('buildProviderUsageLimitWarningMessage', () => {
 });
 
 describe('providerUsageLimitCheckJob', () => {
+  it('uses the most recently updated active Slack installation', async () => {
+    const installations = [
+      {
+        botAccessToken: 'xoxb-older-workspace',
+        updatedAt: new Date('2026-08-01T00:00:00.000Z'),
+      },
+      {
+        botAccessToken: 'xoxb-newest-workspace',
+        updatedAt: new Date('2026-08-20T00:00:00.000Z'),
+      },
+    ];
+    mocks.findSlackInstallation.mockImplementationOnce(
+      async ({ orderBy }: { orderBy?: unknown[] }) =>
+        orderBy?.length ? installations[1] : installations[0],
+    );
+
+    await expect(getActiveSlackBotToken()).resolves.toBe(
+      'xoxb-newest-workspace',
+    );
+    expect(mocks.findSlackInstallation).toHaveBeenCalledWith({
+      where: expect.anything(),
+      orderBy: [expect.objectContaining({ desc: expect.anything() })],
+      columns: { botAccessToken: true },
+    });
+    expect(mocks.desc).toHaveBeenCalledTimes(1);
+  });
+
   it('posts each newly crossed threshold only once in a limit period', async () => {
     const deps = dependencies({ snapshots: () => [snapshot()] });
 

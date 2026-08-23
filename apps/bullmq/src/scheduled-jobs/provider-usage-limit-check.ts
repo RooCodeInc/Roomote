@@ -4,6 +4,7 @@ import type Redis from 'ioredis';
 
 import {
   db,
+  desc,
   eq,
   getBackgroundAgentSettings,
   getProviderUsageLimitSnapshots,
@@ -35,18 +36,21 @@ type ProviderUsageLimitCheckDependencies = {
 const defaultDependencies: ProviderUsageLimitCheckDependencies = {
   getManagerSlackChannelId: async () =>
     (await getBackgroundAgentSettings()).managerSlackChannelId,
-  getSlackBotToken: async () => {
-    const installation = await db.query.slackInstallations.findFirst({
-      where: eq(slackInstallations.isActive, true),
-      columns: { botAccessToken: true },
-    });
-    return installation?.botAccessToken ?? null;
-  },
+  getSlackBotToken: getActiveSlackBotToken,
   getSnapshots: getProviderUsageLimitSnapshots,
   getRedisClient: getRedis,
   createNotifier: (token) => new SlackNotifier(token),
   now: () => new Date(),
 };
+
+export async function getActiveSlackBotToken(): Promise<string | null> {
+  const installation = await db.query.slackInstallations.findFirst({
+    where: eq(slackInstallations.isActive, true),
+    orderBy: [desc(slackInstallations.updatedAt)],
+    columns: { botAccessToken: true },
+  });
+  return installation?.botAccessToken ?? null;
+}
 
 function hashKeyPart(value: string): string {
   return createHash('sha256').update(value).digest('hex').slice(0, 16);

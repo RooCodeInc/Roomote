@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import {
   OPENROUTER_KEY_ENDPOINT,
   type ProviderCreditBalance,
@@ -7,6 +5,7 @@ import {
 
 import { type DatabaseOrTransaction } from '../db';
 import { resolveModelProviderEnvValue } from './model-runtime-config';
+import { fingerprintProviderCredential } from './provider-credential-fingerprint';
 
 /**
  * Server-side credit-balance lookups for API-key inference providers that
@@ -157,10 +156,7 @@ export async function fetchOpenRouterKeyDetails(
   const details = parseOpenRouterKeyDetails(response.payload);
   return details
     ? {
-        credentialFingerprint: createHash('sha256')
-          .update(response.apiKey)
-          .digest('hex')
-          .slice(0, 12),
+        credentialFingerprint: fingerprintProviderCredential(response.apiKey),
         ...details,
       }
     : null;

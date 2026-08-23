@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-
 import {
   OPENCODE_GO_API_KEY_ENV_VAR_NAME,
   type SubscriptionProviderUsage,
@@ -8,6 +6,7 @@ import {
 
 import { type DatabaseOrTransaction } from '../db';
 import { fetchOpenRouterKeyDetails } from './provider-credit-balance';
+import { fingerprintProviderCredential } from './provider-credential-fingerprint';
 import { resolveModelProviderEnvValue } from './model-runtime-config';
 import {
   fetchKimiForCodingUsage,
@@ -81,9 +80,7 @@ const API_KEY_USAGE_PROVIDERS: readonly ApiKeyUsageProvider[] = [
   },
 ];
 
-export function fingerprintProviderCredential(apiKey: string): string {
-  return createHash('sha256').update(apiKey).digest('hex').slice(0, 12);
-}
+export { fingerprintProviderCredential } from './provider-credential-fingerprint';
 
 function sanitizeCredentialLabel(label: string | undefined): string | null {
   const normalized = label?.replace(/[\r\n\t]+/g, ' ').trim();
