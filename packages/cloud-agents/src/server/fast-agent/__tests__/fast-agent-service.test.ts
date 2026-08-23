@@ -554,23 +554,32 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     );
   });
 
-  it('rejects a task model that is not enabled for the deployment', async () => {
-    const adapter = callbacks();
+  it('allows a corrected launch after rejecting an unavailable model', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+      success: true,
+      taskId: 'task-corrected',
+    }));
+    const adapter = callbacks({ launchTask });
     mocks.generateText.mockImplementation(
       async (_params, _session, options) => {
         await options.onSessionReady('opencode-session-1');
-        const result = await invokeTool(nativeToolNames.launchTask, {
+        const rejected = await invokeTool(nativeToolNames.launchTask, {
           prompt: 'Fix checkout.',
           model: 'openrouter/example/not-enabled',
           kickoffMessage: 'I’m delegating the checkout fix.',
         });
-        expect(result).toEqual({
+        expect(rejected).toEqual({
           success: false,
           error: expect.stringContaining('not enabled for new tasks'),
         });
-        await invokeTool(nativeToolNames.sendChatReply, {
-          purpose: 'closeout',
-          message: 'That model is not enabled.',
+        const corrected = await invokeTool(nativeToolNames.launchTask, {
+          prompt: 'Fix checkout.',
+          model: 'anthropic/claude-sonnet-5',
+          kickoffMessage: 'I’m delegating the checkout fix.',
+        });
+        expect(corrected).toEqual({
+          success: true,
+          taskId: 'task-corrected',
         });
         return '';
       },
@@ -578,7 +587,10 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
 
     await answerFastAgentQuestion({ ...baseParams, adapter });
 
-    expect(adapter.launchTask).not.toHaveBeenCalled();
+    expect(launchTask).toHaveBeenCalledOnce();
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'anthropic/claude-sonnet-5' }),
+    );
   });
 
   it('delivers the kickoff when a surface launcher does not invoke the gate callback', async () => {

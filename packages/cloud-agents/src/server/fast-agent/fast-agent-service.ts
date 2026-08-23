@@ -822,7 +822,6 @@ export async function answerFastAgentQuestion({
             if (completedTaskActions.has('launch_task')) {
               return { success: false, error: 'A task was already launched.' };
             }
-            completedTaskActions.add('launch_task');
             const validEnvironmentIds = new Set(
               availableEnvironments.map((environment) => environment.id),
             );
@@ -844,6 +843,7 @@ export async function answerFastAgentQuestion({
                 error: `Model "${args.model}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
               };
             }
+            completedTaskActions.add('launch_task');
             let kickoffDelivered = false;
             const deliverKickoff = async (task: {
               taskId: string;
