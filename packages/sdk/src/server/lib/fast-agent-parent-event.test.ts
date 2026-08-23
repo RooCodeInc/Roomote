@@ -32,12 +32,14 @@ vi.mock('@roomote/cloud-agents/server', () => ({
       buildTask: (input: {
         prompt: string;
         environmentId: string | null;
+        model?: string | null;
         parentSessionId: string;
       }) => unknown | Promise<unknown>;
     }) =>
     async (input: {
       prompt: string;
       environmentId: string | null;
+      model?: string | null;
       parentSessionId: string;
       postKickoff: (task: {
         taskId: string;
@@ -413,6 +415,7 @@ describe('deliverFastAgentParentEvent', () => {
         adapter.launchTask({
           prompt: 'Fix the follow-up regression',
           environmentId: null,
+          model: 'anthropic/claude-sonnet-5',
           parentSessionId: parent.sessionId,
           postKickoff,
         }),
@@ -440,6 +443,9 @@ describe('deliverFastAgentParentEvent', () => {
           payload: expect.objectContaining({
             communicationProvider: 'discord',
             communicationThreadId: 'child-thread-1',
+            harnessModelOverrides: {
+              'opencode-server': 'anthropic/claude-sonnet-5',
+            },
             communicationContextInherited: true,
             fastAgentSessionId: parent.sessionId,
             fastAgentParent: {

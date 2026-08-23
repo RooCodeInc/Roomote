@@ -3,6 +3,7 @@ const mocks = vi.hoisted(() => ({
   getActiveTasks: vi.fn(),
   getSession: vi.fn(),
   getEnvironments: vi.fn(),
+  getTaskModelOptions: vi.fn(),
   generateText: vi.fn(),
   classifyInferenceError: vi.fn(),
   invalidateSession: vi.fn(),
@@ -45,6 +46,10 @@ vi.mock('../fast-agent-session', () => ({
 
 vi.mock('../../router', () => ({
   getAvailableEnvironments: mocks.getEnvironments,
+}));
+
+vi.mock('@roomote/db/server', () => ({
+  getDeploymentTaskModelOptions: mocks.getTaskModelOptions,
 }));
 
 vi.mock('../../non-task-provider-usage', () => ({
@@ -170,6 +175,13 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         repositoryNames: ['acme/app'],
       },
     ]);
+    mocks.getTaskModelOptions.mockResolvedValue({
+      models: [
+        { id: 'openai/gpt-5.6', displayName: 'GPT-5.6' },
+        { id: 'anthropic/claude-sonnet-5', displayName: 'Claude Sonnet 5' },
+      ],
+      defaultModelId: 'openai/gpt-5.6',
+    });
     mocks.listIntegrations.mockResolvedValue([]);
     mocks.callIntegration.mockResolvedValue({ matches: ['fast-agent.ts'] });
     mocks.sendTaskMessage.mockResolvedValue({ success: true });
@@ -517,6 +529,7 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
         const result = await invokeTool(nativeToolNames.launchTask, {
           prompt: 'Fix checkout.',
           environmentId: 'env-1',
+          model: 'anthropic/claude-sonnet-5',
           kickoffMessage: 'I’m delegating the checkout fix.',
         });
         expect(result).toEqual(
@@ -536,6 +549,48 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(result).toContain('https://roomote.example/task-1');
     expect(order).toEqual(['kickoff', 'mirrored', 'queued']);
     expect(adapter.postReply).toHaveBeenCalledOnce();
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'anthropic/claude-sonnet-5' }),
+    );
+  });
+
+  it('allows a corrected launch after rejecting an unavailable model', async () => {
+    const launchTask = vi.fn<LaunchFastAgentTask>(async () => ({
+      success: true,
+      taskId: 'task-corrected',
+    }));
+    const adapter = callbacks({ launchTask });
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        const rejected = await invokeTool(nativeToolNames.launchTask, {
+          prompt: 'Fix checkout.',
+          model: 'openrouter/example/not-enabled',
+          kickoffMessage: 'I’m delegating the checkout fix.',
+        });
+        expect(rejected).toEqual({
+          success: false,
+          error: expect.stringContaining('not enabled for new tasks'),
+        });
+        const corrected = await invokeTool(nativeToolNames.launchTask, {
+          prompt: 'Fix checkout.',
+          model: 'anthropic/claude-sonnet-5',
+          kickoffMessage: 'I’m delegating the checkout fix.',
+        });
+        expect(corrected).toEqual({
+          success: true,
+          taskId: 'task-corrected',
+        });
+        return '';
+      },
+    );
+
+    await answerFastAgentQuestion({ ...baseParams, adapter });
+
+    expect(launchTask).toHaveBeenCalledOnce();
+    expect(launchTask).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'anthropic/claude-sonnet-5' }),
+    );
   });
 
   it('delivers the kickoff when a surface launcher does not invoke the gate callback', async () => {

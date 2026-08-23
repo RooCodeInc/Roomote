@@ -1,4 +1,4 @@
-import { PRODUCT_NAME } from '@roomote/types';
+import { PRODUCT_NAME, type TaskModelOption } from '@roomote/types';
 
 import type { RoutableEnvironment } from '../router';
 import type { FastAgentIntegration } from './fast-agent-integration-broker';
@@ -47,6 +47,22 @@ function formatActiveTasksForPrompt(
     .join('\n');
 }
 
+function formatTaskModelsForPrompt(
+  availableTaskModels: TaskModelOption[],
+  defaultTaskModelId?: string,
+): string {
+  if (availableTaskModels.length === 0) {
+    return '- Model selection is currently unavailable. Omit `model` to use the deployment default.';
+  }
+
+  return availableTaskModels
+    .map(
+      (model) =>
+        `- ${model.displayName} [id: ${model.id}]${model.id === defaultTaskModelId ? ' (deployment default)' : ''}`,
+    )
+    .join('\n');
+}
+
 function formatIntegrationsForPrompt(
   integrations: FastAgentIntegration[],
 ): string {
@@ -69,6 +85,8 @@ function formatIntegrationsForPrompt(
 
 export function buildFastAgentSystemPrompt({
   availableEnvironments,
+  availableTaskModels = [],
+  defaultTaskModelId,
   availableIntegrations = [],
   activeTasks = [],
   surface = 'slack',
@@ -78,6 +96,8 @@ export function buildFastAgentSystemPrompt({
   retryTaskStartAvailable = false,
 }: {
   availableEnvironments: RoutableEnvironment[];
+  availableTaskModels?: TaskModelOption[];
+  defaultTaskModelId?: string;
   availableIntegrations?: FastAgentIntegration[];
   activeTasks?: FastAgentActiveTask[];
   surface?: FastAgentSurface;
@@ -103,6 +123,9 @@ export function buildFastAgentSystemPrompt({
 
 ## All Environments
 ${formatRepositoriesForPrompt(availableEnvironments)}
+
+## Available Delegated Task Models
+${formatTaskModelsForPrompt(availableTaskModels, defaultTaskModelId)}
 
 ## Active Delegated Tasks
 ${formatActiveTasksForPrompt(activeTasks)}
@@ -137,6 +160,7 @@ ${reactionGuidance}
 
 ## Orchestration Policy
 - Use "launch_task" for new independent repository or workspace work when external inspection, editing, execution, or validation is required, regardless of whether the message is phrased as a question, request, or declarative feedback. Existing active tasks do not block a new independent task.
+- Set "model" on "launch_task" only to an exact ID from Available Delegated Task Models when a specific model is useful or requested. Omit it to use the deployment default. Never invent or abbreviate model IDs.
 - Use "send_task_message" only when an active task is listed above and the user clearly gives that task a new instruction. Set "taskId" when needed; with exactly one active task, omit it or use null.
 - Use "manage_tasks" to inspect tasks in this deployment. Use "get_summary" for current status and failures, "get_messages" for transcript details, and "get_compute_logs" for runtime output when supported. These reads use the same deployment authorization semantics as delegated Roomote tasks. Use "launch_task", "send_task_message", or "cancel_task" for task changes so Fast conversation kickoff and follow-up behavior is preserved.
 - Never send conversational acknowledgements to a task. "Okay", "cool", "thanks", status questions, and similar conversation are addressed to you. Use a user-visible chat tool.

@@ -14,6 +14,15 @@ describe('buildFastAgentSystemPrompt', () => {
           repositoryNames: ['Roomote/example-app'],
         },
       ],
+      availableTaskModels: [
+        { id: 'openai/gpt-5.6', displayName: 'GPT-5.6', family: 'GPT' },
+        {
+          id: 'anthropic/claude-sonnet-5',
+          displayName: 'Claude Sonnet 5',
+          family: 'Sonnet',
+        },
+      ],
+      defaultTaskModelId: 'openai/gpt-5.6',
       activeTasks: [
         { taskId: 'task-1', title: 'Fix API', status: RunStatus.Running },
         { taskId: 'task-2', title: 'Update docs', status: RunStatus.Pending },
@@ -30,6 +39,11 @@ describe('buildFastAgentSystemPrompt', () => {
     expect(prompt).toContain('send_chat_reply');
     expect(prompt).toContain('send_chat_reaction');
     expect(prompt).toContain('launch_task');
+    expect(prompt).toContain(
+      'GPT-5.6 [id: openai/gpt-5.6] (deployment default)',
+    );
+    expect(prompt).toContain('Claude Sonnet 5 [id: anthropic/claude-sonnet-5]');
+    expect(prompt).toContain('Omit it to use the deployment default');
     expect(prompt).toContain('manage_tasks');
     expect(prompt).toContain('integration_call');
     expect(prompt).toContain(

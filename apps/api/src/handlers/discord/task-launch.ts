@@ -365,6 +365,8 @@ export async function launchDiscordTask(input: {
   workspace: DiscordWorkspaceSelection;
   /** `/new` in an existing task thread creates a sibling, never a second run in-place. */
   forceNewThread?: boolean;
+  /** Exact deployment-enabled model selected by the Fast orchestrator. */
+  model?: string;
   fastAgentSessionId?: string;
   fastAgentParent?: FastAgentParent;
   /** Post the Fast model-authored kickoff before enqueueing and suppress the
@@ -457,6 +459,9 @@ export async function launchDiscordTask(input: {
         description: input.queuedMessage.text,
         ...(input.agentPromptText?.trim()
           ? { agentPromptText: input.agentPromptText.trim() }
+          : {}),
+        ...(input.model
+          ? { harnessModelOverrides: { 'opencode-server': input.model } }
           : {}),
         ...(input.queuedMessage.images?.length
           ? { images: input.queuedMessage.images }

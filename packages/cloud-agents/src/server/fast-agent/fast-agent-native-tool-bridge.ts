@@ -123,10 +123,11 @@ import { z } from "zod"
 import { invoke } from "../roomote-fast-tool-bridge.js"
 
 export default {
-  description: "Delegate new repository or workspace execution work to a Roomote task.",
+  description: "Delegate new repository or workspace execution work to a Roomote task, optionally using an exact deployment-enabled model ID from the system prompt.",
   args: {
     prompt: z.string().min(1).describe("Complete task instruction"),
     environmentId: z.string().nullable().optional(),
+    model: z.string().min(1).nullable().optional().describe("Exact deployment-enabled model ID; omit or pass null to use the deployment default"),
     kickoffMessage: z.string().min(1).describe("Specific user-visible explanation of what is being delegated"),
   },
   execute: (args, context) => invoke("launch_task", args, context),
