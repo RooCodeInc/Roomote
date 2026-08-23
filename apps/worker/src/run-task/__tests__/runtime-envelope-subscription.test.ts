@@ -181,6 +181,43 @@ describe('subscribeHarnessCallbacks', () => {
     await unsubscribe();
   });
 
+  it('forwards task starts as callback turn events', async () => {
+    const { harness, emitTaskEvent } = createRuntimeHarness();
+    const callbacks = { onMessage: vi.fn().mockResolvedValue(undefined) };
+
+    const unsubscribe = subscribeHarnessCallbacks({
+      harness: harness as never,
+      taskRun: { id: 46, taskId: 'task-live-turn' } as never,
+      callbacks,
+      context: {},
+      logger: {
+        runId: 46,
+        filePath: '/tmp/test.log',
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+        log: vi.fn(),
+      },
+    });
+
+    emitTaskEvent({
+      eventName: TaskEventName.TaskStarted,
+      payload: ['runtime-session-follow-up'],
+    });
+
+    expect(callbacks.onMessage).toHaveBeenCalledWith(
+      { id: 46, taskId: 'task-live-turn' },
+      'runtime-session-follow-up',
+      {
+        type: 'turn_started',
+        ts: expect.any(Number),
+      },
+      {},
+    );
+
+    await unsubscribe();
+  });
+
   it('delivers a returned show_widget fallback after persistence', async () => {
     const { harness, emitEnvelope } = createRuntimeHarness();
     const fallback = {

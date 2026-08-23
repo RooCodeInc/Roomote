@@ -258,13 +258,27 @@ export async function updateSlackLiveTaskStream(
   event: CallbackEvent,
   context: RunTaskContext,
 ): Promise<void> {
+  const state = getCardState(context);
+
+  if (event.type === 'turn_started') {
+    if (!state.settled && state.status !== 'complete') {
+      return;
+    }
+
+    state.status = 'in_progress';
+    state.message = undefined;
+    state.finalMessage = undefined;
+    state.settled = false;
+    await renderCard(taskRun, context);
+    return;
+  }
+
   // Internal reasoning is deliberately not exposed in Slack; the card
   // gets the safe semantic event stream without chain-of-thought content.
   if (event.type === 'reasoning' || !shouldProcessEvent(event, context)) {
     return;
   }
 
-  const state = getCardState(context);
   if (state.settled) {
     if (
       event.type !== 'followup' &&
