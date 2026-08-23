@@ -157,6 +157,8 @@ ANTHROPIC_API_KEY=...
 You can also split model roles with env vars:
 
 ```sh
+R_ORCHESTRATION_MODEL=openrouter/google/gemini-3.7-flash
+R_ORCHESTRATION_MODEL_REASONING_EFFORT=low
 R_SMALL_MODEL=openrouter/openai/gpt-4.1-mini
 R_VISION_MODEL=openrouter/openai/gpt-5.6-sol
 R_CODE_REVIEW_MODEL=openrouter/openai/gpt-5.6-sol
@@ -229,9 +231,10 @@ where you want more speed, quality, or cost control.
 | Explore model        | Repository search and focused codebase exploration                                      | Fast tool use, low latency, and reliable source-grounded investigation                    |
 | Advisor model        | Planning turns and advisor consultations inside longer coding tasks                      | Deliberate reasoning, decomposition, and ability to keep constraints in mind              |
 
-You do not need a separate model for every role. Many teams start with one
-strong default model, then add a cheaper helper model or a stronger review
-model after they can see real task usage.
+You do not need a separate model for every role. Set a specialized role to
+**Same as coding model** to inherit the default. Many teams start with one
+strong default model, then split out a faster orchestration or helper model, or
+a stronger review model, after they can see real usage.
 
 ## Reasoning settings
 
