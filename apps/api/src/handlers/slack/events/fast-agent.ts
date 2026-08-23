@@ -220,6 +220,24 @@ export async function processFastAgentMessage(params: {
           // message was deleted); treat it as delivered so the turn is not
           // aborted mid-flight.
           didSendVisibleResponse = true;
+          return typeof posted === 'object'
+            ? { messageId: posted.messageId }
+            : undefined;
+        },
+        replaceReply: async ({ messageId }, { message }) => {
+          const updated = await slack.updateMessage({
+            channel: event.channel,
+            ts: messageId,
+            message: {
+              text: message,
+              blocks: [{ type: 'markdown', text: message }],
+            },
+          });
+          if (!updated) {
+            throw new Error('Slack did not update the Fast parent reply.');
+          }
+          didSendVisibleResponse = true;
+          return { messageId };
         },
         postReaction: async ({ name, purpose, messageId }) => {
           if (

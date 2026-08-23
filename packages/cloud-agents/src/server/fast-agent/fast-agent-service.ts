@@ -57,6 +57,7 @@ import {
   type FastAgentPlatformEventHandling,
   type FastAgentPlatformEventVisibility,
   type FastAgentReply,
+  type FastAgentReplyHandle,
   type FastAgentTurnAdapter,
   type FastAgentTurnSource,
 } from './fast-agent-conversation';
@@ -546,6 +547,38 @@ export async function answerFastAgentQuestion({
   let canonicalConversationId: string | null = null;
   let launchedTaskMessage: string | null = null;
   let lastVisibleMessage = '';
+  let inferenceRetryReply: FastAgentReplyHandle | undefined;
+  let inferenceRetryMessageIndex: number | undefined;
+
+  const replaceInferenceRetryReply = async (
+    reply: FastAgentReply,
+    bestEffort = false,
+  ): Promise<boolean> => {
+    if (!inferenceRetryReply || !adapter.replaceReply) {
+      return false;
+    }
+
+    let replacement: FastAgentReplyHandle | void;
+    try {
+      replacement = await adapter.replaceReply(inferenceRetryReply, reply);
+    } catch (error) {
+      if (!bestEffort) {
+        throw error;
+      }
+      console.warn(
+        `[Fast Agent] Failed to replace inference retry notice: ${formatErrorForLog(error)}`,
+      );
+      inferenceRetryReply = undefined;
+      inferenceRetryMessageIndex = undefined;
+      return false;
+    }
+    inferenceRetryReply = replacement || inferenceRetryReply;
+    if (inferenceRetryMessageIndex !== undefined) {
+      turnVisibleMessages[inferenceRetryMessageIndex] =
+        buildAssistantTextMessage(reply.message);
+    }
+    return true;
+  };
 
   try {
     turnVisibleMessages.push(
@@ -646,9 +679,14 @@ export async function answerFastAgentQuestion({
       reply: FastAgentReply,
       mirrorImmediately = false,
     ) => {
-      await adapter.postReply(reply);
+      const replacedRetry = await replaceInferenceRetryReply(reply, true);
+      if (!replacedRetry) {
+        await adapter.postReply(reply);
+        turnVisibleMessages.push(buildAssistantTextMessage(reply.message));
+      }
+      inferenceRetryReply = undefined;
+      inferenceRetryMessageIndex = undefined;
       diagnostics.recordVisibleReply();
-      turnVisibleMessages.push(buildAssistantTextMessage(reply.message));
       lastVisibleMessage = reply.message;
       visibleUpdatePosted = true;
       if (reply.purpose === 'closeout' || reply.purpose === 'clarification') {
@@ -675,9 +713,13 @@ export async function answerFastAgentQuestion({
       reportedInferenceNotices.add(message);
       // Deliberately not the postReply closure: a system retry notice must
       // not satisfy the model's acknowledgement gate or close the turn.
-      await adapter.postReply({ purpose: 'progress', message });
+      const reply = { purpose: 'progress' as const, message };
+      if (!(await replaceInferenceRetryReply(reply))) {
+        inferenceRetryReply = (await adapter.postReply(reply)) || undefined;
+        inferenceRetryMessageIndex = turnVisibleMessages.length;
+        turnVisibleMessages.push(buildAssistantTextMessage(message));
+      }
       diagnostics.recordVisibleReply();
-      turnVisibleMessages.push(buildAssistantTextMessage(message));
     };
     const reportProviderRetryEvent = async (
       event: NonTaskProviderRetryEvent,
@@ -1131,9 +1173,14 @@ export async function answerFastAgentQuestion({
         ? formatFastAgentInferenceFailure(error.failure)
         : 'I hit an error while handling that request. Please try again in a moment.';
     try {
-      await adapter.postReply({ purpose: 'closeout', message });
+      const reply = { purpose: 'closeout' as const, message };
+      if (!(await replaceInferenceRetryReply(reply, true))) {
+        await adapter.postReply(reply);
+        turnVisibleMessages.push(buildAssistantTextMessage(message));
+      }
+      inferenceRetryReply = undefined;
+      inferenceRetryMessageIndex = undefined;
       diagnostics.recordVisibleReply();
-      turnVisibleMessages.push(buildAssistantTextMessage(message));
       lastVisibleMessage = message;
     } catch (postError) {
       console.error(

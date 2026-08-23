@@ -28,6 +28,10 @@ export type FastAgentReply = {
   kickoff?: boolean;
 };
 
+export type FastAgentReplyHandle = {
+  messageId: string;
+};
+
 export type FastAgentReaction = {
   name: string;
   purpose: 'ack' | 'closeout';
@@ -58,7 +62,11 @@ export type RetryFastAgentTaskStart = () => Promise<
 /** Surface adapter for side effects available during one Fast turn. */
 export type FastAgentTurnAdapter = {
   launchTask: LaunchFastAgentTask;
-  postReply: (reply: FastAgentReply) => Promise<void>;
+  postReply: (reply: FastAgentReply) => Promise<FastAgentReplyHandle | void>;
+  replaceReply?: (
+    handle: FastAgentReplyHandle,
+    reply: FastAgentReply,
+  ) => Promise<FastAgentReplyHandle | void>;
   postReaction?: (reaction: FastAgentReaction) => Promise<void>;
   retryTaskStart?: RetryFastAgentTaskStart;
 };
