@@ -205,7 +205,7 @@ describe('providerUsageLimitCheckJob', () => {
     expect(deps.postMessage).toHaveBeenCalledTimes(2);
   });
 
-  it('rearams rolling thresholds after usage drops below them', async () => {
+  it('re-arms rolling thresholds after usage drops below them', async () => {
     let usedPercent = 85;
     const deps = dependencies({
       snapshots: () => [
