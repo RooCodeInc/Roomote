@@ -353,8 +353,8 @@ export const finishRun = async ({
     // completion or not at all, so no completed task can silently skip
     // memory ingestion. Deployments without a Brain never enqueue; skip
     // rules and DLP live in the bullmq drainer, not here.
-    if (status === RunStatus.Completed && isBrainConfigured(Env)) {
-      await maybeEnqueueBrainMemoryEvent(tx, id);
+    if (status === RunStatus.Completed) {
+      await maybeEnqueueBrainMemoryForCompletedRun(tx, id);
     }
   });
 
@@ -617,6 +617,19 @@ export const finishRun = async ({
     }
   }
 };
+
+/**
+ * Keep every direct completion writer on the same Brain activation guard.
+ * The caller supplies its transaction so completion and enqueue stay atomic.
+ */
+export async function maybeEnqueueBrainMemoryForCompletedRun(
+  tx: Parameters<typeof maybeEnqueueBrainMemoryEvent>[0],
+  runId: number,
+): Promise<void> {
+  if (isBrainConfigured(Env)) {
+    await maybeEnqueueBrainMemoryEvent(tx, runId);
+  }
+}
 
 /**
  * Flip this snapshot run's environment_snapshots row from 'pending' to

@@ -126,7 +126,8 @@ function buildSettings(
       total: 11,
       lastProcessedAt: new Date('2026-01-02T00:00:00Z'),
       lastError: null,
-      completedRunsWithoutEvent: 0,
+      historicalCompletedRunsWithoutEvent: 0,
+      recentCompletedRunsWithoutEvent: 0,
     },
     ...overrides,
   };
@@ -171,6 +172,7 @@ describe('BrainSettings', () => {
 
     expect(screen.getByText('Recorded')).toBeInTheDocument();
     expect(screen.getByText('Queued')).toBeInTheDocument();
+    expect(screen.getAllByText(/last processed/i)).toHaveLength(2);
   });
 
   it('offers to ingest history only when completed tasks are missing a memory', () => {
@@ -180,12 +182,37 @@ describe('BrainSettings', () => {
     const settings = buildSettings();
     state.query.data = {
       ...settings,
-      taskMemories: { ...settings.taskMemories, completedRunsWithoutEvent: 12 },
+      taskMemories: {
+        ...settings.taskMemories,
+        historicalCompletedRunsWithoutEvent: 12,
+      },
     };
 
     render(<BrainSettings />);
 
     fireEvent.click(screen.getByText('Ingest task history'));
+    expect(mutations.backfill).toHaveBeenCalled();
+  });
+
+  it('reports recent missing events as a recording gap, not task history', () => {
+    const settings = buildSettings();
+    state.query.data = {
+      ...settings,
+      taskMemories: {
+        ...settings.taskMemories,
+        recentCompletedRunsWithoutEvent: 3,
+      },
+    };
+
+    render(<BrainSettings />);
+
+    expect(
+      screen.getByText(/recent completed tasks were not queued/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/finished before the Brain was watching/),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Queue missing memories'));
     expect(mutations.backfill).toHaveBeenCalled();
   });
 

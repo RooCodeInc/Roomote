@@ -36,7 +36,11 @@ import {
   type SourceInstanceSnapshot,
 } from '@roomote/compute-providers';
 import { drainLinearMessagesToResumeRun } from '@roomote/linear';
-import { finishRun, withSandboxServerRpcClient } from '@roomote/sdk/server';
+import {
+  finishRun,
+  maybeEnqueueBrainMemoryForCompletedRun,
+  withSandboxServerRpcClient,
+} from '@roomote/sdk/server';
 import { drainSlackMessagesToResumeRun } from '@roomote/slack';
 import { z } from 'zod';
 
@@ -757,6 +761,8 @@ export const snapshotJob = async (job: SnapshotJob): Promise<void> => {
       await syncTaskStateFromRuns(tx, taskRun.taskId);
     }
 
+    await maybeEnqueueBrainMemoryForCompletedRun(tx, runId);
+
     await markTaskStartParallelCountEndedAt(tx, {
       runId: runId,
       endedAt: now,
@@ -1264,6 +1270,9 @@ async function finalizeUnresumableRunAfterSnapshotFailure(input: {
     }
 
     await syncTaskStateFromRuns(tx, taskRun.taskId);
+    if (finalStatus === RunStatus.Completed) {
+      await maybeEnqueueBrainMemoryForCompletedRun(tx, taskRun.id);
+    }
     return true;
   });
 

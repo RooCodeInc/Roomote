@@ -10,6 +10,7 @@ const {
   mockGetInstanceStatus,
   mockCreateSnapshot,
   mockFinishRun,
+  mockMaybeEnqueueBrainMemoryForCompletedRun,
   mockRecordComputeProviderUsage,
   mockRecordMutation,
   mockCreateComputeProviderMutationEventRecorder,
@@ -74,6 +75,7 @@ const {
     mockGetInstanceStatus: vi.fn() as AnyMock,
     mockCreateSnapshot: vi.fn() as AnyMock,
     mockFinishRun: vi.fn() as AnyMock,
+    mockMaybeEnqueueBrainMemoryForCompletedRun: vi.fn() as AnyMock,
     mockRecordComputeProviderUsage: vi.fn() as AnyMock,
     mockRecordMutation: vi.fn() as AnyMock,
     mockCreateComputeProviderMutationEventRecorder: vi.fn() as AnyMock,
@@ -126,6 +128,8 @@ vi.mock('@roomote/compute-providers', () => ({
 vi.mock('@roomote/sdk/server', () => ({
   createSnapshot: mockCreateSnapshot,
   finishRun: mockFinishRun,
+  maybeEnqueueBrainMemoryForCompletedRun:
+    mockMaybeEnqueueBrainMemoryForCompletedRun,
   recordComputeProviderUsage: mockRecordComputeProviderUsage,
 }));
 
@@ -277,6 +281,10 @@ describe('sleepTaskRunNow', () => {
         snapshotId: 'docker-machine-1',
         status: RunStatus.Completed,
       }),
+    );
+    expect(mockMaybeEnqueueBrainMemoryForCompletedRun).toHaveBeenCalledWith(
+      expect.anything(),
+      123,
     );
   });
 
@@ -962,6 +970,10 @@ describe('sleepCheckJob', () => {
       status: RunStatus.Completed,
       completedAt: expect.any(Date),
     });
+    expect(mockMaybeEnqueueBrainMemoryForCompletedRun).toHaveBeenCalledWith(
+      expect.anything(),
+      99,
+    );
     expect(mockRecordComputeProviderUsage).toHaveBeenCalledWith({
       runId: 99,
       lifecycleAction: 'destroy',

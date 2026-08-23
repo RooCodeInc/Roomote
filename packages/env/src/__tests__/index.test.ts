@@ -1216,11 +1216,20 @@ describe('isBrainConfigured', () => {
     );
   });
 
+  it('counts a file-backed gateway token as Brain wiring', () => {
+    expect(
+      isBrainConfigured({
+        R_BRAIN_GATEWAY_TOKEN_FILE: '/gbrain-data/gateway-token',
+      }),
+    ).toBe(true);
+  });
+
   it('stays off with no key, and treats whitespace as no key', () => {
     expect(isBrainConfigured({})).toBe(false);
     expect(
       isBrainConfigured({
         R_BRAIN_GATEWAY_TOKEN: '',
+        R_BRAIN_GATEWAY_TOKEN_FILE: '   ',
         R_BRAIN_OPENROUTER_API_KEY: '   ',
         R_BRAIN_OPENAI_API_KEY: '',
       }),

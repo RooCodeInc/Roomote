@@ -12,7 +12,10 @@ export {
   optionalAuthProcedure,
 } from './trpc';
 
-export { finishRun } from './lib/task-runs/finish-run';
+export {
+  finishRun,
+  maybeEnqueueBrainMemoryForCompletedRun,
+} from './lib/task-runs/finish-run';
 export {
   AUTOMATION_RECOMMENDATIONS_QUEUE_NAME,
   AUTOMATION_RECOMMENDATION_INITIAL_RUN_QUEUE_NAME,
