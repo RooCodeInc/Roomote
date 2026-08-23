@@ -410,10 +410,16 @@ export function subscribeHarnessCallbacks({
       return;
     }
 
-    if (
-      event.eventName === TaskEventName.TaskAborted ||
-      event.eventName === TaskEventName.TaskStarted
-    ) {
+    if (event.eventName === TaskEventName.TaskStarted) {
+      clearPendingCompletionEvents(taskId);
+      forwardCallbackEvent(taskId, {
+        type: 'turn_started',
+        ts: Date.now(),
+      });
+      return;
+    }
+
+    if (event.eventName === TaskEventName.TaskAborted) {
       clearPendingCompletionEvents(taskId);
     }
   });

@@ -256,6 +256,132 @@ describe('Slack live task card', () => {
     expect(mocks.renderCard).toHaveBeenCalledOnce();
   });
 
+  it('re-opens a settled card when the live session starts a follow-up turn', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'completion', ts: 1000, text: 'Ready for review.' },
+      context,
+    );
+
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'turn_started', ts: 1001 },
+      context,
+    );
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1002, text: 'Checking the follow-up.' },
+      context,
+    );
+
+    expect(renderedCard(2)).toMatchObject({
+      status: 'in_progress',
+      output: undefined,
+    });
+    expect(renderedCard(3)).toMatchObject({
+      status: 'in_progress',
+      output: 'Checking the follow-up.',
+    });
+  });
+
+  it('queues a follow-up reopen behind an in-flight completion render', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    let releaseCompletion!: () => void;
+    mocks.renderCard.mockImplementationOnce(
+      () =>
+        new Promise<{ card: boolean; updated: boolean }>((resolve) => {
+          releaseCompletion = () => resolve({ card: true, updated: true });
+        }),
+    );
+
+    const completion = updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'completion', ts: 1000, text: 'Ready for review.' },
+      context,
+    );
+    await vi.waitFor(() => expect(mocks.renderCard).toHaveBeenCalledOnce());
+
+    const reopen = updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'turn_started', ts: 1001 },
+      context,
+    );
+    const firstFollowUp = updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1002, text: 'Checking the follow-up.' },
+      context,
+    );
+
+    releaseCompletion();
+    await Promise.all([completion, reopen, firstFollowUp]);
+
+    expect(renderedCard(2)).toEqual({
+      status: 'in_progress',
+      output: 'Checking the follow-up.',
+    });
+
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1003, text: 'Applying the follow-up.' },
+      context,
+    );
+    expect(renderedCard(3)).toEqual({
+      status: 'in_progress',
+      output: 'Applying the follow-up.',
+    });
+  });
+
+  it('replays narration that arrives while the queued reopen is rendering', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    let releaseCompletion!: () => void;
+    let releaseReopen!: () => void;
+    mocks.renderCard
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ card: boolean; updated: boolean }>((resolve) => {
+            releaseCompletion = () => resolve({ card: true, updated: true });
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<{ card: boolean; updated: boolean }>((resolve) => {
+            releaseReopen = () => resolve({ card: true, updated: true });
+          }),
+      );
+
+    const completion = updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'completion', ts: 1000, text: 'Ready for review.' },
+      context,
+    );
+    await vi.waitFor(() => expect(mocks.renderCard).toHaveBeenCalledOnce());
+
+    const reopen = updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'turn_started', ts: 1001 },
+      context,
+    );
+    releaseCompletion();
+    await vi.waitFor(() => expect(mocks.renderCard).toHaveBeenCalledTimes(2));
+
+    const narration = updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1002, text: 'Checking the follow-up.' },
+      context,
+    );
+    releaseReopen();
+    await Promise.all([completion, reopen, narration]);
+
+    expect(renderedCard(3)).toEqual({
+      status: 'in_progress',
+      output: 'Checking the follow-up.',
+    });
+  });
+
   it('re-opens the card when a later run of the task starts', async () => {
     const taskRun = createTaskRun();
     await updateSlackLiveTaskStream(
