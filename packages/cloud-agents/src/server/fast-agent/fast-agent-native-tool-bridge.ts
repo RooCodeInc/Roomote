@@ -258,10 +258,10 @@ async function readRequestBody(request: IncomingMessage): Promise<unknown> {
  * The generated tool sources import zod, and OpenCode's own runtime loads
  * them from the tool directory — so a real zod package must exist on disk to
  * symlink there. In development that's the workspace install; in the app
- * image, where the api bundle inlines zod, it's the runtime-deps tree that
- * ships next to the dist (the same mechanism as snowflake-sdk, asserted at
- * image build). This wrapper exists so a packaging regression names the
- * requirement instead of surfacing as a bare module-not-found mid-turn.
+ * image, where service bundles inline zod, it's the service runtime-deps tree
+ * that ships next to the dist (asserted at image build). This wrapper exists
+ * so a packaging regression names the requirement instead of surfacing as a
+ * bare module-not-found mid-turn.
  */
 function resolveZodDirectoryForTools(): string {
   try {
@@ -270,9 +270,9 @@ function resolveZodDirectoryForTools(): string {
     throw new Error(
       'Fast native tools need the zod package on disk to link into the ' +
         'OpenCode tool directory, and none is resolvable from this process. ' +
-        'In the app image zod ships via .docker/app/runtime-deps/api ' +
+        'In the app image zod ships in each service runtime-deps tree ' +
         '(asserted at image build); if this error reaches production, that ' +
-        'packaging step regressed. ' +
+        'service packaging step regressed. ' +
         `${error instanceof Error ? error.message : String(error)}`,
     );
   }
