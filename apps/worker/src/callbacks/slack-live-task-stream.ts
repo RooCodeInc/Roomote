@@ -212,7 +212,7 @@ async function renderCard(
       return;
     }
     context.slackLiveTaskCardDelivered = state;
-    if (request.settle) {
+    if (request.settle && isSameCardState(getCardState(context), state)) {
       getCardState(context).settled = true;
     }
   });
@@ -264,9 +264,6 @@ export async function updateSlackLiveTaskStream(
     state.finalMessage = undefined;
     state.settled = false;
     await renderCard(taskRun, context);
-    // A prior settling render can finish while this reopen waits in the
-    // per-run queue. The queued in-progress render owns the latest turn.
-    state.settled = false;
     return;
   }
 
