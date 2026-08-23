@@ -15,6 +15,7 @@ const {
   mockIsRepoSkipped,
   mockQueuePrReviewActivityNotification,
   mockQueuePrReviewSummaryNotification,
+  mockQueuePrCiFailureNotification,
   mockRecordWebhook,
   mockResolveConfiguredGitHubAppSlug,
   mockResolveGitHubRoomoteMentionEnabled,
@@ -48,6 +49,7 @@ const {
   mockIsRepoSkipped: vi.fn(),
   mockQueuePrReviewActivityNotification: vi.fn(),
   mockQueuePrReviewSummaryNotification: vi.fn(),
+  mockQueuePrCiFailureNotification: vi.fn(),
   mockRecordWebhook: vi.fn(),
   mockResolveConfiguredGitHubAppSlug: vi.fn(),
   mockResolveGitHubRoomoteMentionEnabled: vi.fn(),
@@ -180,6 +182,10 @@ vi.mock('../notifyPrReviewActivity', () => ({
   queuePrReviewSummaryNotification: mockQueuePrReviewSummaryNotification,
 }));
 
+vi.mock('../notifyPrCiFailure', () => ({
+  queuePrCiFailureNotification: mockQueuePrCiFailureNotification,
+}));
+
 describe('github webhook router', () => {
   let app: Hono;
 
@@ -201,6 +207,7 @@ describe('github webhook router', () => {
     mockIsRepoSkipped.mockReset();
     mockQueuePrReviewActivityNotification.mockReset();
     mockQueuePrReviewSummaryNotification.mockReset();
+    mockQueuePrCiFailureNotification.mockReset();
     mockRecordWebhook.mockReset();
     mockResolveConfiguredGitHubAppSlug.mockReset();
     mockResolveGitHubRoomoteMentionEnabled.mockReset();
@@ -347,6 +354,42 @@ describe('github webhook router', () => {
       expect.any(Function),
     );
     expect(mockHandlePrComment).toHaveBeenCalledTimes(1);
+  });
+
+  it('queues completed check runs before recording the webhook', async () => {
+    const payload = {
+      action: 'completed',
+      installation: { id: 1 },
+      repository: { id: 10, full_name: 'test-org/test-repo' },
+      check_run: {
+        id: 9001,
+        name: 'CI / Tests',
+        conclusion: 'failure',
+        pull_requests: [{ number: 42 }],
+      },
+    };
+
+    const response = await app.request('http://localhost/api/webhooks/github', {
+      method: 'POST',
+      headers: {
+        'x-github-delivery': 'delivery-check-1',
+        'x-github-event': 'check_run',
+        'x-hub-signature-256': 'sha256=test',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    expect(response.status).toBe(200);
+    expect(mockQueuePrCiFailureNotification).toHaveBeenCalledWith(payload);
+    expect(mockRecordWebhook).toHaveBeenCalledWith(
+      'delivery-check-1',
+      'check_run.completed',
+      payload,
+      expect.any(Function),
+    );
+    expect(
+      mockQueuePrCiFailureNotification.mock.invocationCallOrder[0],
+    ).toBeLessThan(mockRecordWebhook.mock.invocationCallOrder[0]!);
   });
 
   it('routes plain issue comments through handleGitHubIssueComment', async () => {

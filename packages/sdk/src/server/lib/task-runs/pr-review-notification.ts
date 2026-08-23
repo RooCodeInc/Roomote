@@ -68,8 +68,16 @@ const prReviewCycleStateSchema = z.object({
 });
 
 export const prReviewActivityEventSchema = z.object({
-  kind: z.enum(['issue_comment', 'review', 'review_comment', 'review_summary']),
+  kind: z.enum([
+    'ci_failure',
+    'issue_comment',
+    'review',
+    'review_comment',
+    'review_summary',
+  ]),
   authorLogin: z.string(),
+  /** Name of a failed CI check when this event was raised by CI. */
+  checkName: z.string().optional(),
   /** Stable provider identity for a non-Roomote automated reviewer. */
   automatedAuthorId: z.string().optional(),
   /** Provider ID of the parent comment when this event is a thread reply. */

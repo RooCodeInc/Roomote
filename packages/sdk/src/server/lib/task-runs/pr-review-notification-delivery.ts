@@ -438,6 +438,7 @@ so, write the complete chat message.
 
 Set "worthNotifying" to true when the activity contains something the PR owner
 would plausibly want to know or act on, for example:
+- a CI failure event reports a failed check on the current PR head
 - a human reviewer approved the PR, requested changes, or dismissed a review
 - a human reviewer left review comments
 - an automated review found concrete issues worth considering
@@ -580,6 +581,10 @@ function describePrReviewEvent(
       ? `\n  Untrusted review content (JSON string): ${JSON.stringify(event.body)}`
       : '';
 
+  if (event.kind === 'ci_failure') {
+    return `- CI check ${event.checkName ?? 'unknown'} failed${link}`;
+  }
+
   if (event.kind === 'review_comment') {
     return reply
       ? `- ${author}${automation}${reply}${link}${body}`
@@ -658,6 +663,10 @@ function hasPotentialActionableReviewContent(
   events: PrReviewActivityEvent[],
 ): boolean {
   return events.some((event) => {
+    if (event.kind === 'ci_failure') {
+      return true;
+    }
+
     // Automated reviewers only receive an action offer from live provider
     // state (an open thread, failed CI, or conflicts), never from stale text.
     if (event.automatedAuthorId) {
@@ -964,6 +973,10 @@ export async function triagePrReviewActivity({
   );
   const hasDeterministicActionSignal =
     events.some((event) => {
+      if (event.kind === 'ci_failure') {
+        return true;
+      }
+
       if (
         event.reviewState === 'changes_requested' &&
         !event.automatedAuthorId
@@ -1011,7 +1024,9 @@ export async function triagePrReviewActivity({
   const summary =
     object.summary.trim() ||
     (hasDeterministicActionSignal
-      ? `There is actionable review feedback on [${repository}#${prNumber}](${prUrl}).`
+      ? events.some((event) => event.kind === 'ci_failure')
+        ? `CI failed on [${repository}#${prNumber}](${prUrl}).`
+        : `There is actionable review feedback on [${repository}#${prNumber}](${prUrl}).`
       : '');
 
   if (!summary) {
@@ -1025,11 +1040,16 @@ export async function triagePrReviewActivity({
   const actionableFeedback =
     hasDeterministicActionSignal ||
     (object.actionableFeedback && hasPotentialActionableReviewContent(events));
+  const containsCiFailure = events.some((event) => event.kind === 'ci_failure');
   const hasModelFollowUp =
     followUpQuestion.length > 0 && followUpPrompt.length > 0;
-  const fallbackPrompt = `Resolve the actionable review feedback on [${repository}#${prNumber}](${prUrl}).${events
+  const fallbackPrompt = `${containsCiFailure ? 'Investigate and resolve the failed CI checks' : 'Resolve the actionable review feedback'} on [${repository}#${prNumber}](${prUrl}).${events
     .flatMap((event) =>
-      event.url ? [` Review [the feedback](${event.url}).`] : [],
+      event.url
+        ? [
+            ` Review [${event.kind === 'ci_failure' ? 'the failed check' : 'the feedback'}](${event.url}).`,
+          ]
+        : [],
     )
     .join('')}`;
 
@@ -1039,7 +1059,9 @@ export async function triagePrReviewActivity({
     followUpQuestion: actionableFeedback
       ? hasModelFollowUp
         ? followUpQuestion
-        : 'Would you like me to resolve this feedback?'
+        : containsCiFailure
+          ? 'Would you like me to resolve this CI failure?'
+          : 'Would you like me to resolve this feedback?'
       : null,
     followUpPrompt: actionableFeedback
       ? hasModelFollowUp
@@ -1086,7 +1108,7 @@ function filterHandledReviewEvents(
     return (
       !context.currentHeadSha ||
       !event.reviewHeadSha ||
-      event.kind !== 'review' ||
+      (event.kind !== 'review' && event.kind !== 'ci_failure') ||
       event.reviewHeadSha === context.currentHeadSha
     );
   });
