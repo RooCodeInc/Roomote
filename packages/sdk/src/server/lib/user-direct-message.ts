@@ -145,6 +145,52 @@ export async function findUserDirectMessageDestination(
   return null;
 }
 
+export async function hasUserDirectMessageIdentity(
+  provider: CommunicationProvider,
+  userId: string,
+): Promise<boolean> {
+  switch (provider) {
+    case 'slack': {
+      const installations = await db.query.slackInstallations.findMany({
+        where: eq(slackInstallations.isActive, true),
+        columns: { teamId: true },
+      });
+      for (const installation of installations) {
+        const mapping = await db.query.slackUserMappings.findFirst({
+          where: and(
+            eq(slackUserMappings.userId, userId),
+            eq(slackUserMappings.slackTeamId, installation.teamId),
+          ),
+          columns: { slackUserId: true },
+        });
+        if (mapping) return true;
+      }
+      return false;
+    }
+    case 'teams':
+      return Boolean(
+        await db.query.teamsUserMappings.findFirst({
+          where: eq(teamsUserMappings.userId, userId),
+          columns: { teamsUserId: true },
+        }),
+      );
+    case 'telegram':
+      return Boolean(
+        await db.query.telegramUserMappings.findFirst({
+          where: eq(telegramUserMappings.userId, userId),
+          columns: { telegramChatId: true },
+        }),
+      );
+    case 'discord':
+      return Boolean(
+        await db.query.discordUserMappings.findFirst({
+          where: eq(discordUserMappings.userId, userId),
+          columns: { discordUserId: true },
+        }),
+      );
+  }
+}
+
 async function sendSlackUserDirectMessage(
   userId: string,
   text: string,

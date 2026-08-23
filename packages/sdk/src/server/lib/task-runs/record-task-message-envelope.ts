@@ -30,7 +30,10 @@ import {
 } from '@roomote/slack';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from '../discord-communication';
 import { listConnectedCommunicationProviders } from '../../automations/destination';
-import { sendUserDirectMessage } from '../user-direct-message';
+import {
+  hasUserDirectMessageIdentity,
+  sendUserDirectMessage,
+} from '../user-direct-message';
 import {
   appendManagerSlackFooter,
   buildAutomationSettingsMessage,
@@ -225,7 +228,7 @@ async function markPlatformIssueReportPosted(reportRowId: string) {
 async function notifyDeploymentAdminsOfPlatformIssue(params: {
   taskId: string;
   report: { title: string; summary: string };
-}): Promise<boolean> {
+}): Promise<{ complete: boolean; delivered: boolean }> {
   const [admins, providers] = await Promise.all([
     db.query.users.findMany({
       where: and(eq(users.role, 'admin'), isNull(users.deletedAt)),
@@ -235,9 +238,22 @@ async function notifyDeploymentAdminsOfPlatformIssue(params: {
     listConnectedCommunicationProviders(),
   ]);
   let delivered = false;
+  let eligibleAdmins = 0;
+  let deliveredAdmins = 0;
 
   for (const admin of admins) {
+    const linkedProviders: CommunicationProvider[] = [];
     for (const provider of providers) {
+      if (await hasUserDirectMessageIdentity(provider, admin.id)) {
+        linkedProviders.push(provider);
+      }
+    }
+    if (linkedProviders.length === 0) {
+      continue;
+    }
+
+    eligibleAdmins += 1;
+    for (const provider of linkedProviders) {
       const slackText = buildPlatformIssueAlertText({
         taskId: params.taskId,
         report: params.report,
@@ -255,12 +271,16 @@ async function notifyDeploymentAdminsOfPlatformIssue(params: {
 
       if (sent) {
         delivered = true;
+        deliveredAdmins += 1;
         break;
       }
     }
   }
 
-  return delivered;
+  return {
+    complete: eligibleAdmins > 0 && deliveredAdmins === eligibleAdmins,
+    delivered,
+  };
 }
 
 async function maybeNotifyPlatformIssue(params: {
@@ -330,15 +350,17 @@ async function maybeNotifyPlatformIssue(params: {
     settings.platformIssueSlackChannelId ?? settings.managerSlackChannelId;
 
   if (!channelId) {
-    const delivered = await notifyDeploymentAdminsOfPlatformIssue({
+    const delivery = await notifyDeploymentAdminsOfPlatformIssue({
       taskId: params.taskId,
       report: params.report,
     });
-    if (delivered) {
+    if (delivery.complete) {
       await markPlatformIssueReportPosted(params.reportRowId);
     } else {
       console.warn(
-        `[recordTaskMessageEnvelope] No configured channel or linked admin DM destination for platform issue alert on task ${params.taskId}`,
+        delivery.delivered
+          ? `[recordTaskMessageEnvelope] Some linked admins did not receive the platform issue alert for task ${params.taskId}; leaving it pending for retry`
+          : `[recordTaskMessageEnvelope] No configured channel or linked admin DM destination for platform issue alert on task ${params.taskId}`,
       );
     }
     return;
