@@ -286,6 +286,54 @@ describe('Slack live task card', () => {
     });
   });
 
+  it('queues a follow-up reopen behind an in-flight completion render', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    let releaseCompletion!: () => void;
+    mocks.renderCard.mockImplementationOnce(
+      () =>
+        new Promise<{ card: boolean; updated: boolean }>((resolve) => {
+          releaseCompletion = () => resolve({ card: true, updated: true });
+        }),
+    );
+
+    const completion = updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'completion', ts: 1000, text: 'Ready for review.' },
+      context,
+    );
+    await vi.waitFor(() => expect(mocks.renderCard).toHaveBeenCalledOnce());
+
+    const reopen = updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'turn_started', ts: 1001 },
+      context,
+    );
+    const firstFollowUp = updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1002, text: 'Checking the follow-up.' },
+      context,
+    );
+
+    releaseCompletion();
+    await Promise.all([completion, reopen, firstFollowUp]);
+
+    expect(renderedCard(2)).toEqual({
+      status: 'in_progress',
+      output: 'Checking the follow-up.',
+    });
+
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1003, text: 'Applying the follow-up.' },
+      context,
+    );
+    expect(renderedCard(3)).toEqual({
+      status: 'in_progress',
+      output: 'Applying the follow-up.',
+    });
+  });
+
   it('re-opens the card when a later run of the task starts', async () => {
     const taskRun = createTaskRun();
     await updateSlackLiveTaskStream(

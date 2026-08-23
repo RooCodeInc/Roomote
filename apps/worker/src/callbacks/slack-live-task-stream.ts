@@ -255,7 +255,7 @@ export async function updateSlackLiveTaskStream(
   const state = getCardState(context);
 
   if (event.type === 'turn_started') {
-    if (!state.settled) {
+    if (!state.settled && state.status !== 'complete') {
       return;
     }
 
@@ -264,6 +264,9 @@ export async function updateSlackLiveTaskStream(
     state.finalMessage = undefined;
     state.settled = false;
     await renderCard(taskRun, context);
+    // A prior settling render can finish while this reopen waits in the
+    // per-run queue. The queued in-progress render owns the latest turn.
+    state.settled = false;
     return;
   }
 
