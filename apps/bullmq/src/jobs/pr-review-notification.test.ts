@@ -96,6 +96,15 @@ vi.mock('@roomote/sdk/server', () => ({
   PR_REVIEW_NOTIFICATION_DEFER_MS: 5000,
   PR_REVIEW_NOTIFICATION_MAX_DEFERRALS: 3,
   PrReviewNotificationRateLimitError: MockPrReviewNotificationRateLimitError,
+  createPrReviewNotificationTelemetry: (eventsReceived: number) => ({
+    githubApiCalls: 0,
+    eventsReceived,
+    eventsTriaged: 0,
+    triageInvoked: false,
+    triageCacheHit: false,
+    triageInputChars: 0,
+    triageInputTokenEstimate: 0,
+  }),
   prReviewNotificationRequestSchema: z.object({
     taskId: z.string(),
     repository: z.string(),
@@ -251,6 +260,7 @@ describe('prReviewNotificationJob', () => {
         deferrals: 0,
       },
       events,
+      telemetry: expect.objectContaining({ eventsReceived: 1 }),
     });
     expect(mockStickyFooterPost).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -634,6 +634,7 @@ export async function enqueuePrReviewNotification(
 export async function dispatchDuePrReviewNotifications(): Promise<number> {
   const claims = await claimDuePrReviewDeliveries();
   let enqueued = 0;
+  let enqueueFailures = 0;
 
   for (const claim of claims) {
     try {
@@ -655,11 +656,30 @@ export async function dispatchDuePrReviewNotifications(): Promise<number> {
       });
       enqueued += 1;
     } catch (error) {
+      enqueueFailures += 1;
       await releasePrReviewDeliveries(claim);
       console.warn(
         `[dispatchDuePrReviewNotifications] Failed to wake ${claim.repository}#${claim.prNumber}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+  }
+
+  if (claims.length > 0) {
+    console.log(
+      JSON.stringify({
+        event: 'pr_review_notification_dispatch',
+        instanceId: process.env.R_INSTANCE_ID ?? null,
+        prGroupsClaimed: claims.length,
+        eventsClaimed: claims.reduce(
+          (total, claim) => total + claim.events.length,
+          0,
+        ),
+        jobsEnqueued: enqueued,
+        enqueueFailures,
+        githubApiCalls: 0,
+        triageInvoked: false,
+      }),
+    );
   }
 
   return enqueued;

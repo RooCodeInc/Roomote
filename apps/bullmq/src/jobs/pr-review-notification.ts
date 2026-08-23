@@ -17,6 +17,7 @@ import {
   PR_REVIEW_NOTIFICATION_MAX_DEFERRALS,
   PrReviewNotificationRateLimitError,
   attachPendingPrReviewActionMessage,
+  createPrReviewNotificationTelemetry,
   getCommunicationProviderAdapter,
   type PrReviewNotificationRequest,
   type PrReviewNotificationRoute,
@@ -46,6 +47,37 @@ import {
 } from '@roomote/types';
 
 type PrReviewNotificationJob = Job<PrReviewNotificationRequest, void, string>;
+
+function logPrReviewNotificationTriage(input: {
+  data: PrReviewNotificationRequest;
+  eventsDrained: number;
+  outcome: 'notify' | 'suppress' | 'rate_limited' | 'error';
+  reason?: string;
+  durationMs: number;
+  telemetry: ReturnType<typeof createPrReviewNotificationTelemetry>;
+}): void {
+  console.log(
+    JSON.stringify({
+      event: 'pr_review_notification_triage',
+      instanceId: process.env.R_INSTANCE_ID ?? null,
+      taskId: input.data.taskId,
+      sourceControlProvider: input.data.sourceControlProvider ?? 'github',
+      repository: input.data.repository,
+      prNumber: input.data.prNumber,
+      batchKind: input.data.batchKind ?? null,
+      eventsDrained: input.eventsDrained,
+      eventsTriaged: input.telemetry.eventsTriaged,
+      githubApiCalls: input.telemetry.githubApiCalls,
+      triageInvoked: input.telemetry.triageInvoked,
+      triageCacheHit: input.telemetry.triageCacheHit,
+      triageInputChars: input.telemetry.triageInputChars,
+      triageInputTokenEstimate: input.telemetry.triageInputTokenEstimate,
+      outcome: input.outcome,
+      reason: input.reason ?? null,
+      durationMs: input.durationMs,
+    }),
+  );
+}
 
 function buildPrReviewNotificationPostInput(
   route: PrReviewNotificationRoute,
@@ -354,11 +386,24 @@ export const prReviewNotificationJob = async (
     return;
   }
 
+  const deliveryStartedAt = Date.now();
+  const telemetry = createPrReviewNotificationTelemetry(events.length);
+
   try {
     const delivery = await preparePrReviewNotificationDelivery({
       taskRun: latestJob,
       request: data,
       events,
+      telemetry,
+    });
+
+    logPrReviewNotificationTriage({
+      data,
+      eventsDrained: events.length,
+      outcome: delivery.post ? 'notify' : 'suppress',
+      ...(!delivery.post ? { reason: delivery.reason } : {}),
+      durationMs: Date.now() - deliveryStartedAt,
+      telemetry,
     });
 
     if (!delivery.post) {
@@ -558,10 +603,41 @@ ${delivery.text}`;
         countDeferral: false,
       });
       console.warn(
-        `[PrReviewNotification] GitHub installation rate limited; deferred ${data.repository}#${data.prNumber} for ${delayMs}ms`,
+        JSON.stringify({
+          event: 'pr_review_notification_github_rate_limit',
+          instanceId: process.env.R_INSTANCE_ID ?? null,
+          taskId: data.taskId,
+          repository: data.repository,
+          prNumber: data.prNumber,
+          status: error.rateLimit?.status ?? null,
+          remaining: error.rateLimit?.remaining ?? null,
+          resetAt: error.rateLimit?.resetAt ?? null,
+          retryAfter: error.rateLimit?.retryAfter ?? null,
+          retryAfterMs: error.retryAfterMs,
+          scheduledDelayMs: delayMs,
+          githubApiCalls:
+            error.telemetry?.githubApiCalls ?? telemetry.githubApiCalls,
+        }),
       );
+      logPrReviewNotificationTriage({
+        data,
+        eventsDrained: events.length,
+        outcome: 'rate_limited',
+        reason: 'github_rate_limit',
+        durationMs: Date.now() - deliveryStartedAt,
+        telemetry: error.telemetry ?? telemetry,
+      });
       return;
     }
+
+    logPrReviewNotificationTriage({
+      data,
+      eventsDrained: events.length,
+      outcome: 'error',
+      reason: error instanceof Error ? error.name : 'unknown_error',
+      durationMs: Date.now() - deliveryStartedAt,
+      telemetry,
+    });
 
     // Put the drained events back so a retried job can deliver them.
     try {

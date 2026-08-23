@@ -117,7 +117,9 @@ import type { TaskRun } from '@roomote/db/server';
 import type { PrReviewActivityEvent } from '../pr-review-notification';
 
 import {
+  clearPrReviewTriageDecisionCache,
   collectCiChecks,
+  createPrReviewNotificationTelemetry,
   gatherPrReviewTriageContext,
   PrReviewNotificationRateLimitError,
   preparePrReviewNotificationDelivery,
@@ -146,6 +148,10 @@ const events: PrReviewActivityEvent[] = [
     roomoteAuthored: true,
   },
 ];
+
+beforeEach(() => {
+  clearPrReviewTriageDecisionCache();
+});
 
 const eventsWithoutSelfReview: PrReviewActivityEvent[] = events.slice(0, 2);
 
@@ -961,6 +967,48 @@ describe('triagePrReviewActivity', () => {
       '(URL: https://github.com/owner/repo/pull/42#issuecomment-7)',
     );
     expect(prompt).not.toContain('Current pull request state:');
+  });
+
+  it('reuses one in-flight triage across concurrent linked task deliveries', async () => {
+    mockGenerateObject.mockResolvedValue({
+      object: {
+        worthNotifying: true,
+        actionableFeedback: false,
+        summary: 'alice approved the pull request.',
+        followUpQuestion: '',
+        followUpPrompt: '',
+      },
+    });
+    const firstTelemetry = createPrReviewNotificationTelemetry(events.length);
+    const secondTelemetry = createPrReviewNotificationTelemetry(events.length);
+
+    const [first, second] = await Promise.all([
+      triagePrReviewActivity({
+        ...request,
+        events,
+        telemetry: firstTelemetry,
+      }),
+      triagePrReviewActivity({
+        ...request,
+        taskId: 'task-2',
+        events,
+        telemetry: secondTelemetry,
+      }),
+    ]);
+
+    expect(second).toEqual(first);
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+    expect(firstTelemetry).toMatchObject({
+      eventsTriaged: events.length,
+      triageInvoked: true,
+      triageCacheHit: false,
+    });
+    expect(secondTelemetry).toMatchObject({
+      eventsTriaged: events.length,
+      triageInvoked: false,
+      triageCacheHit: true,
+    });
+    expect(secondTelemetry.triageInputTokenEstimate).toBeGreaterThan(0);
   });
 
   it('passes the source-control provider label into the triage prompt', async () => {
