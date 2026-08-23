@@ -785,6 +785,7 @@ function mapSettingsToFormState(
     announcerSlackChannelName?: string | null;
     announcerDiscordChannelId: string | null;
     announcerInstructions: string | null;
+    platformIssueAlertsEnabled: boolean;
     platformIssueSlackChannelId: string | null;
     platformIssueSlackChannelName?: string | null;
     platformIssueDiscordChannelId: string | null;
@@ -900,6 +901,7 @@ function mapSettingsToFormState(
       '',
     announcerDiscordChannel: settings.announcerDiscordChannelId ?? '',
     announcerInstructions: settings.announcerInstructions ?? '',
+    platformIssueAlertsEnabled: settings.platformIssueAlertsEnabled,
     platformIssueSlackChannel:
       settings.platformIssueSlackChannelName ??
       settings.platformIssueSlackChannelId ??
@@ -951,18 +953,9 @@ export function buildSlackWorkflowLaunchUrl(
 }
 
 export function isPlatformIssueAlertsEnabled(
-  formState:
-    | Pick<
-        FormState,
-        'platformIssueSlackChannel' | 'platformIssueDiscordChannel'
-      >
-    | null
-    | undefined,
+  formState: Pick<FormState, 'platformIssueAlertsEnabled'> | null | undefined,
 ): boolean {
-  return Boolean(
-    formState?.platformIssueSlackChannel.trim() ||
-    formState?.platformIssueDiscordChannel.trim(),
-  );
+  return formState?.platformIssueAlertsEnabled ?? true;
 }
 
 export function canSelectSentryTriageFrequency({
@@ -1168,13 +1161,16 @@ const DESTINATION_SOURCE_LABELS: Record<
 
 function AutomationReportsToLine({
   destination,
+  emptyFallbackText,
 }: {
   destination: ResolvedAutomationDestinationSummary | null | undefined;
+  emptyFallbackText?: string;
 }) {
   if (!destination) {
     return (
       <p className="text-xs text-muted-foreground md:max-w-160">
-        Reports to: not configured — set a Manager Channel.
+        {emptyFallbackText ??
+          'Reports to: not configured — set a Manager Channel.'}
       </p>
     );
   }
@@ -1200,6 +1196,7 @@ function AutomationSlackDestinationInput({
   slackAppMention,
   error,
   destination,
+  reportsToFallbackText,
   onChange,
 }: {
   inputId: string;
@@ -1213,6 +1210,7 @@ function AutomationSlackDestinationInput({
   slackAppMention: string;
   error?: string;
   destination: ResolvedAutomationDestinationSummary | null | undefined;
+  reportsToFallbackText?: string;
   onChange: (value: string | null) => void;
 }) {
   return (
@@ -1238,7 +1236,10 @@ function AutomationSlackDestinationInput({
           {helperText}
         </p>
       ) : null}
-      <AutomationReportsToLine destination={destination} />
+      <AutomationReportsToLine
+        destination={destination}
+        emptyFallbackText={reportsToFallbackText}
+      />
       {showWarning ? (
         <SlackChannelAccessWarning slackAppMention={slackAppMention} />
       ) : null}
@@ -2198,6 +2199,7 @@ export function AutomationsSettings() {
       savedChannelId,
       savedDiscordChannelId,
       warningChannelId,
+      reportsToFallbackText,
       allowTelegram = false,
       savedTelegramSelected = false,
       allowTeams = false,
@@ -2210,6 +2212,7 @@ export function AutomationsSettings() {
       savedChannelId: string | null;
       savedDiscordChannelId: string | null;
       warningChannelId: string | null;
+      reportsToFallbackText?: string;
       /** Suggest Ideas: offer sticky Telegram primary-chat topic. */
       allowTelegram?: boolean;
       savedTelegramSelected?: boolean;
@@ -2320,6 +2323,7 @@ export function AutomationsSettings() {
               SLACK_DESTINATION_FIELD_AUTOMATION_KEYS[field]
             ]
           }
+          reportsToFallbackText={reportsToFallbackText}
           slackAppMention={slackAppMention}
           showWarning={
             !discordValue &&
@@ -4197,12 +4201,34 @@ export function AutomationsSettings() {
               }
             >
               <div className="space-y-5">
+                <div className="flex items-center gap-3">
+                  <Switch
+                    id="platform-issue-alerts-enabled"
+                    checked={formState?.platformIssueAlertsEnabled ?? true}
+                    onCheckedChange={(enabled) =>
+                      setFormState((prev) =>
+                        prev
+                          ? { ...prev, platformIssueAlertsEnabled: enabled }
+                          : prev,
+                      )
+                    }
+                    aria-label="Alert on Config Errors enabled"
+                  />
+                  <Label
+                    htmlFor="platform-issue-alerts-enabled"
+                    className="text-sm"
+                  >
+                    Alert deployment admins about configuration issues
+                  </Label>
+                </div>
                 {renderSlackDestinationField({
                   field: 'platformIssueSlackChannel',
                   inputId: 'platform-issue-slack-channel',
                   label: 'Post alerts to this Slack channel',
                   helperText:
-                    'Choose where Roomote should post configuration issues that need an admin. Leave empty to use the Manager Channel.',
+                    'Choose where Roomote should post configuration issues. Leave empty to use the Manager Channel, then direct-message deployment admins.',
+                  reportsToFallbackText:
+                    'Reports to deployment admins via direct message (automatic).',
                   savedChannelId:
                     settingsQuery.data?.settings.platformIssueSlackChannelId ??
                     null,

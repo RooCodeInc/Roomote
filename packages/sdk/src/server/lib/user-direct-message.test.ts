@@ -4,6 +4,7 @@ const {
   mockOpenConversation,
   mockCreateDiscordDirectMessage,
   mockCreateTeamsDirectMessage,
+  mockDiscordPostMessage,
   mockDiscordUserMappingsFindFirst,
   mockPostDirectMessage,
   mockSlackInstallationsFindMany,
@@ -16,6 +17,7 @@ const {
   mockOpenConversation: vi.fn(),
   mockCreateDiscordDirectMessage: vi.fn(),
   mockCreateTeamsDirectMessage: vi.fn(),
+  mockDiscordPostMessage: vi.fn(),
   mockDiscordUserMappingsFindFirst: vi.fn(),
   mockPostDirectMessage: vi.fn(),
   mockSlackInstallationsFindMany: vi.fn(),
@@ -48,6 +50,7 @@ vi.mock('@roomote/db/server', () => ({
 vi.mock('./discord-communication', () => ({
   createDiscordCommunicationProviderFromRuntimeCredentials: vi.fn(async () => ({
     createDirectMessage: mockCreateDiscordDirectMessage,
+    postMessage: mockDiscordPostMessage,
   })),
 }));
 
@@ -85,6 +88,7 @@ import { createTelegramCommunicationProviderFromRuntimeCredentials } from './tel
 import {
   findSlackUserDirectMessageDestination,
   findUserDirectMessageDestination,
+  sendUserDirectMessage,
   sendUserDirectMessageBestEffort,
 } from './user-direct-message';
 
@@ -174,6 +178,35 @@ describe('findUserDirectMessageDestination', () => {
     expect(mockCreateDiscordDirectMessage).toHaveBeenCalledWith(
       'discord-user-1',
     );
+  });
+});
+
+describe('sendUserDirectMessage', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDiscordUserMappingsFindFirst.mockResolvedValue({
+      discordDmChannelId: 'discord-dm-1',
+      discordUserId: 'discord-user-1',
+    });
+    mockDiscordPostMessage.mockResolvedValue({
+      messageId: 'discord-message-1',
+    });
+  });
+
+  it('sends to a linked Discord DM', async () => {
+    await expect(
+      sendUserDirectMessage({
+        provider: 'discord',
+        userId: 'user-1',
+        text: 'hello',
+        logContext: 'test',
+      }),
+    ).resolves.toBe(true);
+    expect(mockDiscordPostMessage).toHaveBeenCalledWith({
+      channelId: 'discord-dm-1',
+      text: 'hello',
+      textFormat: 'markdown',
+    });
   });
 });
 

@@ -471,6 +471,7 @@ export async function ensureAutomationRows(
     .values(
       BACKGROUND_AUTOMATION_KEYS.map((key) => ({
         key,
+        enabled: key === 'platform_issue_alerts',
         internal: isInternalAutomationKey(key),
       })),
     )
@@ -912,6 +913,7 @@ export function normalizeBackgroundAgentSettings(
   const securityAuditor = automationMap.get('security_auditor');
   const codeQualityAuditor = automationMap.get('code_quality_auditor');
   const ciFailureTriage = automationMap.get('ci_failure_triage');
+  const platformIssueAlerts = automationMap.get('platform_issue_alerts');
 
   const managerSlackChannelId = row?.managerSlackChannelId ?? null;
   const managerDiscordChannelId = row?.managerDiscordChannelId ?? null;
@@ -969,6 +971,11 @@ export function normalizeBackgroundAgentSettings(
     ),
     announcerInstructions: announcer?.instructions ?? null,
     announcerLastRunAt: announcer?.lastRunAt ?? null,
+
+    // Platform issue alerts are on unless an admin explicitly opts out. This
+    // keeps legacy rows whose enabled bit was derived from channel presence on.
+    platformIssueAlertsEnabled:
+      getAutomationSettingBoolean(platformIssueAlerts, 'optedOut') !== true,
 
     callRoomoteViaEmojiEnabled:
       callRoomoteViaEmoji?.enabled === true &&

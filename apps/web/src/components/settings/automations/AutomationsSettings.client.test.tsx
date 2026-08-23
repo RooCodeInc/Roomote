@@ -82,6 +82,7 @@ const baseFormState: FormState = {
   announcerSlackChannel: '',
   announcerDiscordChannel: '',
   announcerInstructions: '',
+  platformIssueAlertsEnabled: true,
   platformIssueSlackChannel: '',
   platformIssueDiscordChannel: '',
 };
@@ -668,37 +669,21 @@ describe('Automations selection helpers', () => {
     );
   });
 
-  it('treats platform issue alerts as disabled without a selected channel', () => {
+  it('treats platform issue alerts as enabled without a selected channel', () => {
     expect(
       isPlatformIssueAlertsEnabled({
-        platformIssueSlackChannel: '',
-        platformIssueDiscordChannel: '',
-      }),
-    ).toBe(false);
-    expect(
-      isPlatformIssueAlertsEnabled({
-        platformIssueSlackChannel: '   ',
-        platformIssueDiscordChannel: '   ',
-      }),
-    ).toBe(false);
-  });
-
-  it('treats platform issue alerts as enabled when a Slack channel is selected', () => {
-    expect(
-      isPlatformIssueAlertsEnabled({
-        platformIssueSlackChannel: 'C123',
-        platformIssueDiscordChannel: '',
+        platformIssueAlertsEnabled: true,
       }),
     ).toBe(true);
+    expect(isPlatformIssueAlertsEnabled(undefined)).toBe(true);
   });
 
-  it('treats platform issue alerts as enabled when a Discord channel is selected', () => {
+  it('treats platform issue alerts as disabled only after explicit opt-out', () => {
     expect(
       isPlatformIssueAlertsEnabled({
-        platformIssueSlackChannel: '',
-        platformIssueDiscordChannel: '111222333444555666',
+        platformIssueAlertsEnabled: false,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('requires a Sentry connection before selecting an enabled Sentry triage schedule', () => {
