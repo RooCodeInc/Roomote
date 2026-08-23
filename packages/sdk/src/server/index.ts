@@ -250,6 +250,7 @@ export {
   type StartPrReviewNotificationCycleInput,
 } from './lib/task-runs/pr-review-notification';
 export {
+  createPrReviewNotificationTelemetry,
   gatherPrReviewTriageContext,
   PrReviewNotificationRateLimitError,
   preparePrReviewNotificationDelivery,

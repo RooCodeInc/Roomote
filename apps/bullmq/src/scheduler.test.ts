@@ -96,7 +96,7 @@ describe('startScheduler', () => {
 
     expect(mocks.queue.upsertJobScheduler).toHaveBeenCalledWith(
       ScheduledJobName.PrReviewNotificationDispatch,
-      { every: 10 * 1000 },
+      { every: 60 * 1000 },
     );
     expect(mocks.workerConstructor).toHaveBeenCalledTimes(1);
     expect(mocks.queueEventsConstructor).toHaveBeenCalledTimes(1);

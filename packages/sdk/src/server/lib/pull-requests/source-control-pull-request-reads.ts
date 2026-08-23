@@ -641,11 +641,13 @@ export async function readSourceControlPullRequestForTaskRun({
   input,
   fetchImpl = fetch,
   useGitHubConditionalRequests = false,
+  onGitHubApiRequest,
 }: {
   taskRun: TaskRun;
   input: SourceControlPullRequestReadInput;
   fetchImpl?: FetchImpl;
   useGitHubConditionalRequests?: boolean;
+  onGitHubApiRequest?: () => void;
 }): Promise<SourceControlPullRequestReadResult> {
   const payloadRecord = getPayloadRecord(taskRun.payload);
   const payloadProvider = resolveSourceControlProviderForRepositoryFromPayload(
@@ -708,6 +710,7 @@ export async function readSourceControlPullRequestForTaskRun({
         repository,
         provider,
         useConditionalRequests: useGitHubConditionalRequests,
+        onGitHubApiRequest,
       });
     case 'gitlab':
       return listGitLabMergeRequestComments({
@@ -991,11 +994,13 @@ async function listGitHubPullRequestComments({
   repository,
   provider,
   useConditionalRequests,
+  onGitHubApiRequest,
 }: {
   prNumber: number;
   repository: RepositoryRow;
   provider: 'github';
   useConditionalRequests: boolean;
+  onGitHubApiRequest?: () => void;
 }): Promise<SourceControlPullRequestCommentsResult> {
   const { octokit, owner, repo } = await createGitHubReadClient(
     repository,
@@ -1007,27 +1012,31 @@ async function listGitHubPullRequestComments({
     ? await Promise.all([
         listConditionalGitHubPages({
           cacheKey: `review-comments:${repository.installationId}:${repository.fullName}#${prNumber}`,
-          requestPage: (page, headers) =>
-            octokit.rest.pulls.listReviewComments({
+          requestPage: (page, headers) => {
+            onGitHubApiRequest?.();
+            return octokit.rest.pulls.listReviewComments({
               owner,
               repo,
               pull_number: prNumber,
               per_page: 100,
               page,
               request: { headers },
-            }),
+            });
+          },
         }),
         listConditionalGitHubPages({
           cacheKey: `issue-comments:${repository.installationId}:${repository.fullName}#${prNumber}`,
-          requestPage: (page, headers) =>
-            octokit.rest.issues.listComments({
+          requestPage: (page, headers) => {
+            onGitHubApiRequest?.();
+            return octokit.rest.issues.listComments({
               owner,
               repo,
               issue_number: prNumber,
               per_page: 100,
               page,
               request: { headers },
-            }),
+            });
+          },
         }),
       ])
     : await Promise.all([
@@ -1062,6 +1071,7 @@ async function listGitHubPullRequestComments({
       owner,
       repo,
       prNumber: prNumber,
+      onGitHubApiRequest,
     });
   } catch (error) {
     if (getGitHubRateLimitRetryAfterMs(error) !== null) {
@@ -1140,16 +1150,19 @@ async function fetchGitHubReviewThreadsViaGraphql({
   owner,
   repo,
   prNumber,
+  onGitHubApiRequest,
 }: {
   octokit: ReturnType<typeof getOctokit>;
   owner: string;
   repo: string;
   prNumber: number;
+  onGitHubApiRequest?: () => void;
 }): Promise<SourceControlPullRequestCommentThread[]> {
   const threads: z.infer<typeof gitHubReviewThreadSchema>[] = [];
   let cursor: string | null = null;
 
   do {
+    onGitHubApiRequest?.();
     const response = await octokit.graphql(
       `query PullRequestReviewThreads($owner: String!, $name: String!, $number: Int!, $cursor: String) {
       repository(owner: $owner, name: $name) {
@@ -1209,6 +1222,7 @@ async function fetchGitHubReviewThreadsViaGraphql({
     }
 
     while (commentCursor) {
+      onGitHubApiRequest?.();
       const response = await octokit.graphql(
         `query PullRequestReviewThreadComments($threadId: ID!, $cursor: String!) {
           node(id: $threadId) {
