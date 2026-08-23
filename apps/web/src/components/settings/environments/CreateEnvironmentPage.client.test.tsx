@@ -263,8 +263,11 @@ vi.mock('@/components/system', () => ({
   ),
   HandMetal: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Info: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  Input: (props: InputHTMLAttributes<HTMLInputElement>) => <input {...props} />,
   Loader2: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  PackagePlus: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   Plus: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
+  Search: (props: SVGProps<SVGSVGElement>) => <svg {...props} />,
   ScrollArea: ({
     children,
     ...props
