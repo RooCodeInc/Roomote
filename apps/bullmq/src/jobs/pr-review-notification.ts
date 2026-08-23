@@ -103,6 +103,12 @@ function isButtonRouteProvider(
   return (BUTTON_ROUTE_PROVIDERS as readonly string[]).includes(provider);
 }
 
+function isButtonRoute(
+  route: PrReviewNotificationRoute,
+): route is PrReviewNotificationRoute & { provider: ButtonRouteProvider } {
+  return isButtonRouteProvider(route.provider);
+}
+
 async function postPrReviewNotification({
   taskId,
   route,
@@ -164,7 +170,7 @@ async function postPrReviewNotification({
               nonce,
             }),
           }
-        : {}),
+        : { blocks: [{ type: 'markdown', text }] }),
       utmCampaign: 'slack.pr_review',
     });
 
@@ -393,7 +399,20 @@ export const prReviewNotificationJob = async (
     const roomoteReviewResult = events.find(
       (event) => event.reviewResult,
     )?.reviewResult;
+    const persistedAutoHandleUserId =
+      prLink?.autoHandleFeedbackByUserId ?? null;
+    const autoHandleRoute =
+      followUp &&
+      persistedAutoHandleUserId &&
+      delivery.route &&
+      isButtonRoute(delivery.route)
+        ? delivery.route
+        : null;
+    const autoHandleUserId = autoHandleRoute ? persistedAutoHandleUserId : null;
 
+    // Fast-parent delivery can fail and release this notification for retry.
+    // Complete it before auto-dispatch so a retry cannot enqueue the same
+    // resolve prompt twice.
     const deliveredToFastParent = await notifyFastAgentParentOnPrFeedback({
       run: latestJob,
       deliveryIds: data.deliveryIds ?? [],
@@ -418,7 +437,7 @@ export const prReviewNotificationJob = async (
           }
         : {}),
       ...(roomoteReviewResult ? { reviewResult: roomoteReviewResult } : {}),
-      ...(followUp
+      ...(followUp && !autoHandleUserId
         ? {
             suggestedActionQuestion: followUp.question,
             suggestedActionPrompt: followUp.prompt,
@@ -426,65 +445,63 @@ export const prReviewNotificationJob = async (
         : {}),
     });
 
-    if (deliveredToFastParent) {
+    let autoHandledText: string | null = null;
+    if (followUp && autoHandleUserId && autoHandleRoute) {
+      const dispatched = await dispatchPrReviewFollowUp({
+        provider: autoHandleRoute.provider,
+        taskId: data.taskId,
+        ...(autoHandleRoute.provider === 'slack'
+          ? { slackTeamId: autoHandleRoute.slackTeamId }
+          : {}),
+        channelId: autoHandleRoute.channelId,
+        threadId: autoHandleRoute.threadId ?? null,
+        followUpPrompt: followUp.prompt,
+        actingUserId: autoHandleUserId,
+      });
+
+      if (dispatched.outcome !== 'unavailable') {
+        autoHandledText = `New review feedback — I'm on it:
+${delivery.text}`;
+        console.log(
+          `[PrReviewNotification] Auto-dispatched review feedback for ${data.repository}#${data.prNumber} into task ${data.taskId} (${dispatched.outcome}, run ${dispatched.runId})`,
+        );
+      } else {
+        console.warn(
+          `[PrReviewNotification] Auto-handle dispatch unavailable for ${data.repository}#${data.prNumber}; falling back to the interactive offer`,
+        );
+      }
+    }
+
+    if (deliveredToFastParent && (!autoHandleUserId || autoHandledText)) {
       await recordPrReviewNotificationDeliveryBestEffort({
         runId: latestJob.id,
         taskId: data.taskId,
         route: null,
-        text: textWithQuestion,
+        text: autoHandledText ?? textWithQuestion,
       });
       await finalizePrReviewNotificationRequest(data);
       return;
     }
 
-    // Auto-handled PRs skip the offer entirely: the prepared follow-up is
-    // dispatched straight into the owning task and the conversation gets an
-    // informational line instead of buttons. Falls back to the normal offer
-    // when the task can no longer be reached (e.g. no resumable snapshot).
-    if (
-      followUp &&
-      prLink?.autoHandleFeedbackByUserId &&
-      delivery.route &&
-      isButtonRouteProvider(delivery.route.provider)
-    ) {
-      const dispatched = await dispatchPrReviewFollowUp({
-        provider: delivery.route.provider,
+    // If the automatic dispatch was unavailable, continue into the normal
+    // offer path even though the Fast parent already received the summary.
+
+    if (autoHandledText && delivery.route) {
+      const messageTs = await postPrReviewNotification({
         taskId: data.taskId,
-        ...(delivery.route.provider === 'slack'
-          ? { slackTeamId: delivery.route.slackTeamId }
-          : {}),
-        channelId: delivery.route.channelId,
-        threadId: delivery.route.threadId ?? null,
-        followUpPrompt: followUp.prompt,
-        actingUserId: prLink.autoHandleFeedbackByUserId,
+        route: delivery.route,
+        text: autoHandledText,
       });
 
-      if (dispatched.outcome !== 'unavailable') {
-        const autoText = `New review feedback — I'm on it:
-${delivery.text}`;
-        const messageTs = await postPrReviewNotification({
-          taskId: data.taskId,
-          route: delivery.route,
-          text: autoText,
-        });
-
-        await recordPrReviewNotificationDeliveryBestEffort({
-          runId: latestJob.id,
-          taskId: data.taskId,
-          route: delivery.route,
-          text: autoText,
-          ...(messageTs ? { messageTs } : {}),
-        });
-        console.log(
-          `[PrReviewNotification] Auto-dispatched review feedback for ${data.repository}#${data.prNumber} into task ${data.taskId} (${dispatched.outcome}, run ${dispatched.runId})`,
-        );
-        await finalizePrReviewNotificationRequest(data);
-        return;
-      }
-
-      console.warn(
-        `[PrReviewNotification] Auto-handle dispatch unavailable for ${data.repository}#${data.prNumber}; falling back to the interactive offer`,
-      );
+      await recordPrReviewNotificationDeliveryBestEffort({
+        runId: latestJob.id,
+        taskId: data.taskId,
+        route: delivery.route,
+        text: autoHandledText,
+        ...(messageTs ? { messageTs } : {}),
+      });
+      await finalizePrReviewNotificationRequest(data);
+      return;
     }
 
     // Chat delivery is optional (web-only tasks have no route). Task history is

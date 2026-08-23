@@ -692,7 +692,7 @@ function getPrReviewLinkFormatter(
 ): (label: string, url: string) => string {
   switch (provider) {
     case 'slack':
-      return (label, url) => `<${url}|${label}>`;
+      return (label, url) => `[${label}](${url})`;
     case 'teams':
       return (label, url) => `[${label}](${url})`;
     case 'telegram':
@@ -702,15 +702,16 @@ function getPrReviewLinkFormatter(
   }
 }
 
-const MARKDOWN_LINK_SOURCE = String.raw`\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)`;
+const MARKDOWN_LINK_SOURCE = String.raw`\[([^\]]+)\]\((?:<(https?:\/\/[^)\s>]+)>|(https?:\/\/[^)\s]+))\)`;
 
 /**
  * Formats the notification text for aggregated PR review activity. The
  * summary (an LLM-written message that weaves markdown links to the pull
  * request or specific comments inline) is the entire message body; its
- * markdown links are converted to each provider's link syntax (Slack mrkdwn,
- * Teams Markdown, Telegram plain text). When the summary carries no link at
- * all, a link to the pull request is appended so the target stays reachable.
+ * markdown links are normalized and converted to each provider's link syntax
+ * (Slack and Teams Markdown, Telegram plain text). When the summary carries no
+ * link at all, a link to the pull request is appended so the target stays
+ * reachable.
  */
 export function formatPrReviewActivityMessage({
   repository,
@@ -729,13 +730,10 @@ export function formatPrReviewActivityMessage({
   const trimmedSummary = summary.trim();
   const hasInlineLink = new RegExp(MARKDOWN_LINK_SOURCE).test(trimmedSummary);
 
-  const text =
-    provider === 'teams'
-      ? trimmedSummary
-      : trimmedSummary.replace(
-          new RegExp(MARKDOWN_LINK_SOURCE, 'g'),
-          (_match, label, url) => formatLink(label, url),
-        );
+  const text = trimmedSummary.replace(
+    new RegExp(MARKDOWN_LINK_SOURCE, 'g'),
+    (_match, label, wrappedUrl, url) => formatLink(label, wrappedUrl ?? url),
+  );
 
   if (hasInlineLink) {
     return text;

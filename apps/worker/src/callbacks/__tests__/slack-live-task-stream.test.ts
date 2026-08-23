@@ -382,6 +382,95 @@ describe('Slack live task card', () => {
     });
   });
 
+  it('re-opens a settled card when the agent asks for follow-up input', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'completion', ts: 1000, text: 'Ready for review.' },
+      context,
+    );
+    await updateSlackLiveTaskStream(
+      taskRun,
+      {
+        type: 'followup',
+        ts: 1001,
+        question: 'Which option?',
+        suggestions: ['One', 'Two'],
+      },
+      context,
+    );
+
+    expect(renderedCard(2)).toEqual({
+      status: 'in_progress',
+      output: 'Waiting for your input…',
+    });
+  });
+
+  it('does not settle completion over agent input that arrives during rendering', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    let releaseCompletion!: () => void;
+    mocks.renderCard.mockImplementationOnce(
+      () =>
+        new Promise<{ card: boolean; updated: boolean }>((resolve) => {
+          releaseCompletion = () => resolve({ card: true, updated: true });
+        }),
+    );
+
+    const completion = updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'completion', ts: 1000, text: 'Ready for review.' },
+      context,
+    );
+    await vi.waitFor(() => expect(mocks.renderCard).toHaveBeenCalledOnce());
+    const followup = updateSlackLiveTaskStream(
+      taskRun,
+      {
+        type: 'followup',
+        ts: 1001,
+        question: 'Which option?',
+        suggestions: ['One', 'Two'],
+      },
+      context,
+    );
+    releaseCompletion();
+    await Promise.all([completion, followup]);
+
+    expect(renderedCard(2)).toEqual({
+      status: 'in_progress',
+      output: 'Waiting for your input…',
+    });
+  });
+
+  it('does not let completed exit overwrite pending agent input', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'completion', ts: 1000, text: 'Ready for review.' },
+      context,
+    );
+    await updateSlackLiveTaskStream(
+      taskRun,
+      {
+        type: 'followup',
+        ts: 1001,
+        question: 'Which option?',
+        suggestions: ['One', 'Two'],
+      },
+      context,
+    );
+
+    await finishSlackLiveTaskStream(taskRun, RunStatus.Completed, context);
+
+    expect(mocks.renderCard).toHaveBeenCalledTimes(2);
+    expect(renderedCard(2)).toEqual({
+      status: 'in_progress',
+      output: 'Waiting for your input…',
+    });
+  });
+
   it('re-opens the card when a later run of the task starts', async () => {
     const taskRun = createTaskRun();
     await updateSlackLiveTaskStream(
