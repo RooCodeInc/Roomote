@@ -2,12 +2,14 @@ const {
   mockEnqueuePrReviewNotification,
   mockGetInstallationOctokit,
   mockListPullRequestsAssociatedWithCommit,
+  mockPaginate,
 } = vi.hoisted(() => ({
   mockEnqueuePrReviewNotification: vi.fn().mockResolvedValue({
     notifiedTaskCount: 1,
   }),
   mockGetInstallationOctokit: vi.fn(),
   mockListPullRequestsAssociatedWithCommit: vi.fn(),
+  mockPaginate: vi.fn(),
 }));
 
 vi.mock('@roomote/github', () => ({
@@ -99,6 +101,7 @@ describe('queuePrCiFailureNotification', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetInstallationOctokit.mockResolvedValue({
+      paginate: mockPaginate,
       rest: {
         repos: {
           listPullRequestsAssociatedWithCommit:
@@ -120,24 +123,30 @@ describe('queuePrCiFailureNotification', () => {
     expect(mockGetInstallationOctokit).not.toHaveBeenCalled();
   });
 
-  it('resolves a fork-based pull request from the failed check head SHA', async () => {
-    mockListPullRequestsAssociatedWithCommit.mockResolvedValue({
-      data: [
-        { number: 84, state: 'open', head: { sha: 'abc123' } },
-        { number: 85, state: 'closed', head: { sha: 'abc123' } },
-        { number: 86, state: 'open', head: { sha: 'newer-sha' } },
-      ],
-    });
+  it('paginates fork-based pull requests associated with the failed check head SHA', async () => {
+    mockPaginate.mockResolvedValue([
+      ...Array.from({ length: 30 }, (_, index) => ({
+        number: index + 1,
+        state: 'closed',
+        head: { sha: 'abc123' },
+      })),
+      { number: 84, state: 'open', head: { sha: 'abc123' } },
+      { number: 86, state: 'open', head: { sha: 'newer-sha' } },
+    ]);
 
     await queuePrCiFailureNotification(
       checkRunPayload({ pullRequestNumbers: [] }),
     );
 
-    expect(mockListPullRequestsAssociatedWithCommit).toHaveBeenCalledWith({
-      owner: 'owner',
-      repo: 'repo',
-      commit_sha: 'abc123',
-    });
+    expect(mockPaginate).toHaveBeenCalledWith(
+      mockListPullRequestsAssociatedWithCommit,
+      {
+        owner: 'owner',
+        repo: 'repo',
+        commit_sha: 'abc123',
+        per_page: 100,
+      },
+    );
     expect(mockEnqueuePrReviewNotification).toHaveBeenCalledTimes(1);
     expect(mockEnqueuePrReviewNotification).toHaveBeenCalledWith(
       expect.objectContaining({

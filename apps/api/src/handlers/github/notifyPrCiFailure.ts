@@ -73,14 +73,17 @@ async function resolvePullRequestNumbers(
   }
 
   const octokit = await getInstallationOctokit({ installationId });
-  const response =
-    await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
+  const pullRequests = await octokit.paginate(
+    octokit.rest.repos.listPullRequestsAssociatedWithCommit,
+    {
       owner,
       repo,
       commit_sha: payload.check_run.head_sha,
-    });
+      per_page: 100,
+    },
+  );
 
-  return response.data
+  return pullRequests
     .filter(
       (pullRequest) =>
         pullRequest.state === 'open' &&
