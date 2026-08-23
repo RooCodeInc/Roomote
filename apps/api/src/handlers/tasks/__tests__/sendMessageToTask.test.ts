@@ -4,13 +4,11 @@ const {
   mockEnqueueTask,
   mockGetTaskChannelBindings,
   mockGetTaskGoalForRun,
-  mockGetRuntimeState,
   mockFindLatestTaskRun,
   mockFindReusableGitHubPrFollowUpOwner,
   mockHttpBatchLink,
   mockNotifyFastAgentParentOnPrFeedback,
   mockSendPromptMutate,
-  mockAnswerUserInputRequestMutate,
   mockSteerTaskMutate,
   mockTrackLatestUserMessageForReplyQuote,
   mockTrackLatestUserMessageForSlackQuote,
@@ -25,13 +23,11 @@ const {
   mockEnqueueTask: vi.fn(),
   mockGetTaskChannelBindings: vi.fn(),
   mockGetTaskGoalForRun: vi.fn(),
-  mockGetRuntimeState: vi.fn(),
   mockFindLatestTaskRun: vi.fn(),
   mockFindReusableGitHubPrFollowUpOwner: vi.fn(),
   mockHttpBatchLink: vi.fn((options) => options),
   mockNotifyFastAgentParentOnPrFeedback: vi.fn(),
   mockSendPromptMutate: vi.fn(),
-  mockAnswerUserInputRequestMutate: vi.fn(),
   mockSteerTaskMutate: vi.fn(),
   mockTrackLatestUserMessageForReplyQuote: vi.fn(),
   mockTrackLatestUserMessageForSlackQuote: vi.fn(),
@@ -195,12 +191,6 @@ describe('sendMessageToTask', () => {
     mockCreateRunToken.mockResolvedValue('run-token');
     mockCreateTRPCProxyClient.mockImplementation(() => ({
       commands: {
-        answerUserInputRequest: {
-          mutate: mockAnswerUserInputRequestMutate,
-        },
-        getRuntimeState: {
-          query: mockGetRuntimeState,
-        },
         sendPrompt: {
           mutate: mockSendPromptMutate,
         },
@@ -211,8 +201,6 @@ describe('sendMessageToTask', () => {
     }));
     mockHttpBatchLink.mockImplementation((options) => options);
     mockSendPromptMutate.mockResolvedValue({ ok: true });
-    mockAnswerUserInputRequestMutate.mockResolvedValue({ ok: true });
-    mockGetRuntimeState.mockResolvedValue({ pendingUserInputRequests: [] });
     mockSteerTaskMutate.mockResolvedValue({ ok: true });
     mockEnqueueTask.mockResolvedValue({ id: 77, taskId: 'task-1' });
     mockGetTaskChannelBindings.mockResolvedValue({
@@ -240,7 +228,7 @@ describe('sendMessageToTask', () => {
     });
   });
 
-  it('answers a pending Fast child input request with a custom text reply', async () => {
+  it('delegates Fast child answer-or-steer dispatch to the worker', async () => {
     mockFindLatestTaskRun.mockResolvedValue(
       createActiveRun({
         payload: {
@@ -256,31 +244,6 @@ describe('sendMessageToTask', () => {
         },
       }),
     );
-    mockGetRuntimeState.mockResolvedValue({
-      pendingUserInputRequests: [
-        {
-          requestId: 'request-1',
-          sessionId: 'session-1',
-          turnId: 'turn-1',
-          callId: 'call-1',
-          status: 'pending',
-          ts: 123,
-          questions: [
-            {
-              id: 'approach',
-              header: 'Approach',
-              question: 'Which approach should I use?',
-              isOther: true,
-              isSecret: false,
-              options: [
-                { label: 'Minimal', description: 'Make the smallest change.' },
-              ],
-            },
-          ],
-        },
-      ],
-    });
-
     const result = await steerMessageToTask({
       taskId: 'task-1',
       userId: 'user-1',
@@ -289,17 +252,15 @@ describe('sendMessageToTask', () => {
     });
 
     expect(result).toEqual({ success: true, result: { ok: true } });
-    expect(mockAnswerUserInputRequestMutate).toHaveBeenCalledWith({
-      requestId: 'request-1',
-      answers: {
-        approach: { answers: ['Use a separate helper instead.'] },
-      },
+    expect(mockSteerTaskMutate).toHaveBeenCalledWith({
+      prompt: 'Use a separate helper instead.',
+      quoteText: 'Use a separate helper instead.',
+      answerPendingInput: true,
       suppressSlackReplyQuote: true,
     });
-    expect(mockSteerTaskMutate).not.toHaveBeenCalled();
   });
 
-  it('keeps steering Fast child messages when no input request is pending', async () => {
+  it('marks Fast child messages for worker-owned pending-input dispatch', async () => {
     mockFindLatestTaskRun.mockResolvedValue(
       createActiveRun({
         payload: {
@@ -323,12 +284,11 @@ describe('sendMessageToTask', () => {
     });
 
     expect(result).toEqual({ success: true, result: { ok: true } });
-    expect(mockGetRuntimeState).toHaveBeenCalledOnce();
     expect(mockSteerTaskMutate).toHaveBeenCalledWith({
       prompt: 'Also add another test.',
       quoteText: 'Also add another test.',
+      answerPendingInput: true,
     });
-    expect(mockAnswerUserInputRequestMutate).not.toHaveBeenCalled();
   });
 
   it('delivers linked review results to the Fast parent without waking the implementation task', async () => {

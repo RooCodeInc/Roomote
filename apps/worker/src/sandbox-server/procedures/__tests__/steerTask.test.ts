@@ -1,6 +1,9 @@
 import { appRouter } from '../../routers';
 import type { Context } from '../../trpc';
-import type { RunTokenContext } from '@roomote/types';
+import type {
+  AcpRequestUserInputQuestion,
+  RunTokenContext,
+} from '@roomote/types';
 
 const { mockPrepareActorScopedTurn } = vi.hoisted(() => ({
   mockPrepareActorScopedTurn: vi.fn(),
@@ -70,6 +73,16 @@ function createCaller(options?: {
     autoSteerWhenQueued?: boolean;
     userId?: string;
   }) => boolean;
+  sendCommand?: (command: unknown) => boolean;
+  pendingUserInputRequests?: Array<{
+    requestId: string;
+    sessionId: string;
+    turnId: string;
+    callId: string;
+    status: 'pending';
+    ts: number;
+    questions: AcpRequestUserInputQuestion[];
+  }>;
   supportsNativeTurnSteering?: boolean;
   status?: {
     phase: string;
@@ -86,6 +99,7 @@ function createCaller(options?: {
   );
 
   const sendFollowUpPrompt = vi.fn(options?.sendFollowUpPrompt ?? (() => true));
+  const sendCommand = vi.fn(options?.sendCommand ?? (() => true));
   const getStatus = vi.fn(
     () =>
       options?.status ?? {
@@ -112,7 +126,9 @@ function createCaller(options?: {
     workingDirectory: '/tmp',
     harness: {
       isConnected: true,
-      getPendingUserInputRequests: () => [],
+      getPendingUserInputRequests: () =>
+        options?.pendingUserInputRequests ?? [],
+      sendCommand,
     },
     harnessManager,
     auth: {
@@ -130,6 +146,7 @@ function createCaller(options?: {
     caller: appRouter.createCaller(ctx),
     cancelTaskAndWaitForTurnExit,
     sendFollowUpPrompt,
+    sendCommand,
     getStatus,
   };
 }
@@ -260,6 +277,119 @@ describe('steerTask procedure', () => {
       autoSteerWhenQueued: true,
       userId: 'sender-user-1',
     });
+  });
+
+  it('answers one pending input request before steering', async () => {
+    const { caller, sendCommand, sendFollowUpPrompt } = createCaller({
+      pendingUserInputRequests: [
+        {
+          requestId: 'request-1',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          callId: 'call-1',
+          status: 'pending',
+          ts: 123,
+          questions: [
+            {
+              id: 'approach',
+              header: 'Approach',
+              question: 'Which approach should I use?',
+              isOther: true,
+              isSecret: false,
+              options: [
+                { label: 'Minimal', description: 'Make the smallest change.' },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = await caller.commands.steerTask({
+      prompt: 'Use a separate helper instead.',
+      quoteText: 'Use a separate helper instead.',
+      answerPendingInput: true,
+      suppressSlackReplyQuote: true,
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(sendCommand).toHaveBeenCalledWith({
+      commandName: 'AnswerUserInputRequest',
+      data: {
+        requestId: 'request-1',
+        answers: {
+          approach: { answers: ['Use a separate helper instead.'] },
+        },
+        userId: 'sender-user-1',
+      },
+    });
+    expect(sendFollowUpPrompt).not.toHaveBeenCalled();
+    expect(mockSuppressSlackReplyQuote).toHaveBeenCalledOnce();
+  });
+
+  it('steers when more than one input request is pending', async () => {
+    const pendingRequest = {
+      requestId: 'request-1',
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      callId: 'call-1',
+      status: 'pending' as const,
+      ts: 123,
+      questions: [],
+    };
+    const { caller, sendCommand, sendFollowUpPrompt } = createCaller({
+      pendingUserInputRequests: [
+        pendingRequest,
+        { ...pendingRequest, requestId: 'request-2' },
+      ],
+      supportsNativeTurnSteering: true,
+    });
+
+    await caller.commands.steerTask({
+      prompt: 'Continue the delegated task',
+      quoteText: 'Continue the delegated task',
+      answerPendingInput: true,
+    });
+
+    expect(sendCommand).not.toHaveBeenCalled();
+    expect(sendFollowUpPrompt).toHaveBeenCalledOnce();
+  });
+
+  it('steers when one pending input request cannot parse the reply', async () => {
+    const { caller, sendCommand, sendFollowUpPrompt } = createCaller({
+      pendingUserInputRequests: [
+        {
+          requestId: 'request-1',
+          sessionId: 'session-1',
+          turnId: 'turn-1',
+          callId: 'call-1',
+          status: 'pending',
+          ts: 123,
+          questions: [
+            {
+              id: 'approach',
+              header: 'Approach',
+              question: 'Which approach should I use?',
+              isOther: false,
+              isSecret: false,
+              options: [
+                { label: 'Minimal', description: 'Make the smallest change.' },
+              ],
+            },
+          ],
+        },
+      ],
+      supportsNativeTurnSteering: true,
+    });
+
+    await caller.commands.steerTask({
+      prompt: 'Use a separate helper instead.',
+      quoteText: 'Use a separate helper instead.',
+      answerPendingInput: true,
+    });
+
+    expect(sendCommand).not.toHaveBeenCalled();
+    expect(sendFollowUpPrompt).toHaveBeenCalledOnce();
   });
 
   it('forwards workflow phase for explicit steer prompts', async () => {
