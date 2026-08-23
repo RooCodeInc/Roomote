@@ -360,6 +360,68 @@ describe('prReviewNotificationJob', () => {
     });
   });
 
+  it('auto-dispatches opted-in feedback before notifying the Fast parent', async () => {
+    mockFindFirstTaskRun.mockResolvedValue({
+      id: 1,
+      taskId: 'task-1',
+      payload: {
+        fastAgentParent: {
+          sessionId: '11111111-1111-4111-8111-111111111111',
+        },
+      },
+      status: RunStatus.Idle,
+      taskPhase: 'waiting_for_prompt',
+      workerHeartbeatAt: new Date(),
+    });
+    mockFindFirstTaskPullRequest.mockResolvedValue({
+      sourceControlProvider: 'github',
+      host: 'github.com',
+      repository: 'owner/repo',
+      prNumber: 42,
+      prTitle: 'PR title',
+      prUrl: 'https://github.com/owner/repo/pull/42',
+      status: 'open',
+      autoHandleFeedbackByUserId: 'user-9',
+    });
+    mockPrepareDelivery.mockResolvedValue({
+      post: true,
+      route: {
+        provider: 'slack',
+        slackTeamId: 'T123',
+        channelId: 'C123',
+        threadId: '111.222',
+      },
+      text: 'Alice requested changes on owner/repo#42.',
+      followUpQuestion: 'Want me to take a look?',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+    });
+    mockDispatchFollowUp.mockResolvedValue({ outcome: 'resumed', runId: 12 });
+    mockNotifyFastAgentParent.mockResolvedValue(true);
+
+    await prReviewNotificationJob(makeJob() as never);
+
+    expect(mockDispatchFollowUp).toHaveBeenCalledWith({
+      provider: 'slack',
+      taskId: 'task-1',
+      slackTeamId: 'T123',
+      channelId: 'C123',
+      threadId: '111.222',
+      followUpPrompt: 'Address the review feedback on owner/repo#42.',
+      actingUserId: 'user-9',
+    });
+    expect(mockNotifyFastAgentParent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        summary:
+          "New review feedback — I'm on it:\nAlice requested changes on owner/repo#42.",
+      }),
+    );
+    expect(mockNotifyFastAgentParent.mock.calls[0]?.[0]).not.toHaveProperty(
+      'suggestedActionPrompt',
+    );
+    expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
+    expect(mockStickyFooterPost).not.toHaveBeenCalled();
+  });
+
   it('short-circuits generic Discord delivery after Fast parent delivery', async () => {
     mockFindFirstTaskRun.mockResolvedValue({
       id: 1,
@@ -463,8 +525,8 @@ describe('prReviewNotificationJob', () => {
     const blocks = postedCall.blocks as Array<Record<string, unknown>>;
     expect(blocks).toEqual([
       expect.objectContaining({
-        type: 'section',
-        text: expect.objectContaining({ text: 'formatted-message' }),
+        type: 'markdown',
+        text: 'formatted-message',
       }),
       expect.objectContaining({
         block_id: 'pr_review_action_question',
@@ -602,7 +664,12 @@ describe('prReviewNotificationJob', () => {
     expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
     const postedCall = mockStickyFooterPost.mock.calls[0]?.[0];
     expect(postedCall.text).toContain("New review feedback — I'm on it");
-    expect(postedCall.blocks).toBeUndefined();
+    expect(postedCall.blocks).toEqual([
+      {
+        type: 'markdown',
+        text: expect.stringContaining("New review feedback — I'm on it"),
+      },
+    ]);
     expect(mockRecordDelivery).toHaveBeenCalledWith(
       expect.objectContaining({
         text: expect.stringContaining("New review feedback — I'm on it"),
@@ -641,7 +708,9 @@ describe('prReviewNotificationJob', () => {
     expect(mockSetPendingPrReviewAction).not.toHaveBeenCalled();
     const postedCall = mockStickyFooterPost.mock.calls[0]?.[0];
     expect(postedCall.text).toBe('formatted-message');
-    expect(postedCall.blocks).toBeUndefined();
+    expect(postedCall.blocks).toEqual([
+      { type: 'markdown', text: 'formatted-message' },
+    ]);
   });
 
   it('consumes an immediately promoted Roomote review cycle', async () => {

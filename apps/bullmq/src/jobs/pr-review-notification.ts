@@ -164,7 +164,7 @@ async function postPrReviewNotification({
               nonce,
             }),
           }
-        : {}),
+        : { blocks: [{ type: 'markdown', text }] }),
       utmCampaign: 'slack.pr_review',
     });
 
@@ -393,54 +393,10 @@ export const prReviewNotificationJob = async (
     const roomoteReviewResult = events.find(
       (event) => event.reviewResult,
     )?.reviewResult;
+    let autoHandledText: string | null = null;
 
-    const deliveredToFastParent = await notifyFastAgentParentOnPrFeedback({
-      run: latestJob,
-      deliveryIds: data.deliveryIds ?? [],
-      pullRequest: {
-        provider:
-          prLink?.sourceControlProvider ??
-          data.sourceControlProvider ??
-          'github',
-        host: prLink?.host,
-        repository: prLink?.repository ?? data.repository,
-        number: prLink?.prNumber ?? data.prNumber,
-        title: prLink?.prTitle,
-        url: prLink?.prUrl ?? data.prUrl,
-        status: prLink?.status,
-      },
-      summary: delivery.text,
-      ...(roomoteReviewIdentity?.reviewTaskId &&
-      roomoteReviewIdentity.reviewHeadSha
-        ? {
-            reviewTaskId: roomoteReviewIdentity.reviewTaskId,
-            reviewHeadSha: roomoteReviewIdentity.reviewHeadSha,
-          }
-        : {}),
-      ...(roomoteReviewResult ? { reviewResult: roomoteReviewResult } : {}),
-      ...(followUp
-        ? {
-            suggestedActionQuestion: followUp.question,
-            suggestedActionPrompt: followUp.prompt,
-          }
-        : {}),
-    });
-
-    if (deliveredToFastParent) {
-      await recordPrReviewNotificationDeliveryBestEffort({
-        runId: latestJob.id,
-        taskId: data.taskId,
-        route: null,
-        text: textWithQuestion,
-      });
-      await finalizePrReviewNotificationRequest(data);
-      return;
-    }
-
-    // Auto-handled PRs skip the offer entirely: the prepared follow-up is
-    // dispatched straight into the owning task and the conversation gets an
-    // informational line instead of buttons. Falls back to the normal offer
-    // when the task can no longer be reached (e.g. no resumable snapshot).
+    // Auto-handling runs before Fast-parent delivery so delegated tasks honor
+    // the same persisted preference as every other notification route.
     if (
       followUp &&
       prLink?.autoHandleFeedbackByUserId &&
@@ -460,31 +416,77 @@ export const prReviewNotificationJob = async (
       });
 
       if (dispatched.outcome !== 'unavailable') {
-        const autoText = `New review feedback — I'm on it:
+        autoHandledText = `New review feedback — I'm on it:
 ${delivery.text}`;
-        const messageTs = await postPrReviewNotification({
-          taskId: data.taskId,
-          route: delivery.route,
-          text: autoText,
-        });
-
-        await recordPrReviewNotificationDeliveryBestEffort({
-          runId: latestJob.id,
-          taskId: data.taskId,
-          route: delivery.route,
-          text: autoText,
-          ...(messageTs ? { messageTs } : {}),
-        });
         console.log(
           `[PrReviewNotification] Auto-dispatched review feedback for ${data.repository}#${data.prNumber} into task ${data.taskId} (${dispatched.outcome}, run ${dispatched.runId})`,
         );
-        await finalizePrReviewNotificationRequest(data);
-        return;
+      } else {
+        console.warn(
+          `[PrReviewNotification] Auto-handle dispatch unavailable for ${data.repository}#${data.prNumber}; falling back to the interactive offer`,
+        );
       }
+    }
 
-      console.warn(
-        `[PrReviewNotification] Auto-handle dispatch unavailable for ${data.repository}#${data.prNumber}; falling back to the interactive offer`,
-      );
+    const deliveredToFastParent = await notifyFastAgentParentOnPrFeedback({
+      run: latestJob,
+      deliveryIds: data.deliveryIds ?? [],
+      pullRequest: {
+        provider:
+          prLink?.sourceControlProvider ??
+          data.sourceControlProvider ??
+          'github',
+        host: prLink?.host,
+        repository: prLink?.repository ?? data.repository,
+        number: prLink?.prNumber ?? data.prNumber,
+        title: prLink?.prTitle,
+        url: prLink?.prUrl ?? data.prUrl,
+        status: prLink?.status,
+      },
+      summary: autoHandledText ?? delivery.text,
+      ...(roomoteReviewIdentity?.reviewTaskId &&
+      roomoteReviewIdentity.reviewHeadSha
+        ? {
+            reviewTaskId: roomoteReviewIdentity.reviewTaskId,
+            reviewHeadSha: roomoteReviewIdentity.reviewHeadSha,
+          }
+        : {}),
+      ...(roomoteReviewResult ? { reviewResult: roomoteReviewResult } : {}),
+      ...(followUp && !autoHandledText
+        ? {
+            suggestedActionQuestion: followUp.question,
+            suggestedActionPrompt: followUp.prompt,
+          }
+        : {}),
+    });
+
+    if (deliveredToFastParent) {
+      await recordPrReviewNotificationDeliveryBestEffort({
+        runId: latestJob.id,
+        taskId: data.taskId,
+        route: null,
+        text: autoHandledText ?? textWithQuestion,
+      });
+      await finalizePrReviewNotificationRequest(data);
+      return;
+    }
+
+    if (autoHandledText && delivery.route) {
+      const messageTs = await postPrReviewNotification({
+        taskId: data.taskId,
+        route: delivery.route,
+        text: autoHandledText,
+      });
+
+      await recordPrReviewNotificationDeliveryBestEffort({
+        runId: latestJob.id,
+        taskId: data.taskId,
+        route: delivery.route,
+        text: autoHandledText,
+        ...(messageTs ? { messageTs } : {}),
+      });
+      await finalizePrReviewNotificationRequest(data);
+      return;
     }
 
     // Chat delivery is optional (web-only tasks have no route). Task history is

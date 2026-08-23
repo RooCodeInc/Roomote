@@ -54,6 +54,9 @@ type SlackLiveTaskCardState = {
   /** The completion text, kept apart from narration so the exit fallback
    * never promotes a transient line to the final result. */
   finalMessage?: string;
+  /** Prevents the completed-exit fallback from overwriting a prompt that
+   * still needs the user's response. */
+  awaitingInput?: boolean;
   /** Set once a settling render was delivered; later events are ignored. */
   settled?: boolean;
 };
@@ -174,7 +177,9 @@ async function renderCard(
   const pending = (context.slackLiveTaskPendingRender as
     | PendingRender
     | undefined) ?? { settle: false };
-  pending.settle ||= options.settle === true;
+  // Coalescing follows the latest state transition. An interaction event that
+  // follows completion must cancel a pending settle rather than inherit it.
+  pending.settle = options.settle === true;
   context.slackLiveTaskPendingRender = pending;
 
   await enqueueCardRender(taskRun.id, async () => {
@@ -212,7 +217,7 @@ async function renderCard(
       return;
     }
     context.slackLiveTaskCardDelivered = state;
-    if (request.settle) {
+    if (request.settle && isSameCardState(getCardState(context), state)) {
       getCardState(context).settled = true;
     }
   });
@@ -244,6 +249,7 @@ export async function startSlackLiveTaskStream(
   const state = getCardState(context);
   state.status = 'in_progress';
   state.settled = false;
+  state.awaitingInput = false;
   await renderCard(taskRun, context);
 }
 
@@ -260,11 +266,19 @@ export async function updateSlackLiveTaskStream(
 
   const state = getCardState(context);
   if (state.settled) {
-    return;
+    if (
+      event.type !== 'followup' &&
+      event.type !== 'request_user_input' &&
+      event.type !== 'request_user_input_response'
+    ) {
+      return;
+    }
+    state.settled = false;
   }
 
   if (event.type === 'completion') {
     state.status = 'complete';
+    state.awaitingInput = false;
     state.finalMessage = event.text;
     state.message = event.text;
     await renderCard(taskRun, context, { settle: true });
@@ -277,6 +291,8 @@ export async function updateSlackLiveTaskStream(
     if (!text || TRANSIENT_NARRATION_PATTERN.test(text)) {
       return;
     }
+    state.status = 'in_progress';
+    state.awaitingInput = false;
     state.message = text;
     await renderCard(taskRun, context);
     return;
@@ -286,12 +302,16 @@ export async function updateSlackLiveTaskStream(
   // says what the agent is doing, and a step line on top added noise.
 
   if (event.type === 'request_user_input' || event.type === 'followup') {
+    state.status = 'in_progress';
+    state.awaitingInput = true;
     state.message = WAITING_FOR_INPUT_MESSAGE;
     await renderCard(taskRun, context);
     return;
   }
 
   if (event.type === 'request_user_input_response') {
+    state.status = 'in_progress';
+    state.awaitingInput = false;
     state.message = CONTINUING_MESSAGE;
     await renderCard(taskRun, context);
   }
@@ -314,7 +334,7 @@ export async function finishSlackLiveTaskStream(
     // card with the real output. This fallback guarantees the card cannot
     // stay spinning when that event is lost (or its render was rejected),
     // and never promotes the last narration line to the final result.
-    if (state.settled) {
+    if (state.settled || state.awaitingInput) {
       return;
     }
     state.status = 'complete';
