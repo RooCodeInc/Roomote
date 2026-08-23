@@ -15,7 +15,7 @@ vi.mock('@roomote/env', async (importOriginal) => {
     ...actual,
     Env: {
       R_GITHUB_APP_SLUG: 'roomote',
-      R_GITHUB_ADDITIONAL_APP_SLUGS: 'review-helper',
+      R_GITHUB_ADDITIONAL_APP_SLUGS: 'review-helper, roomote-community',
     },
   };
 });
@@ -412,6 +412,36 @@ describe('buildPrReviewActivityNotificationInput', () => {
         roomoteAuthored: true,
       },
     });
+  });
+
+  it('keeps review threads from an explicitly configured additional app', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        reviewCommentPayload({
+          login: 'roomote-community[bot]',
+          userId: 9002,
+          userType: 'Bot',
+        }),
+      ),
+    ).toMatchObject({
+      event: {
+        kind: 'review_comment',
+        authorLogin: 'roomote-community[bot]',
+        roomoteAuthored: true,
+      },
+    });
+  });
+
+  it('skips review threads from an untrusted roomote-prefixed bot', () => {
+    expect(
+      buildPrReviewActivityNotificationInput(
+        reviewCommentPayload({
+          login: 'roomote-unknown[bot]',
+          userId: 9003,
+          userType: 'Bot',
+        }),
+      ),
+    ).toBeNull();
   });
 
   it('skips Roomote-authored replies to existing review threads', () => {

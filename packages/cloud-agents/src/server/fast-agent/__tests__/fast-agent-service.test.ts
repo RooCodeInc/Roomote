@@ -645,6 +645,99 @@ describe('answerFastAgentQuestion native OpenCode tools', () => {
     expect(adapter.postReply).not.toHaveBeenCalled();
   });
 
+  it('posts a closeout when a visibility-required event tries to ignore itself', async () => {
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        expect(
+          await invokeTool(nativeToolNames.ignoreEvent, {
+            reason: 'duplicate',
+          }),
+        ).toEqual({
+          success: false,
+          error: 'This platform event requires a user-visible closeout.',
+        });
+        return 'There is new pull request feedback to review.';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      turnSource: 'platform_event',
+      platformEventVisibility: 'required',
+      adapter,
+    });
+
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'There is new pull request feedback to review.',
+    });
+  });
+
+  it('only permits a closeout for presentation-only platform events', async () => {
+    mocks.getActiveTasks.mockResolvedValue([
+      { taskId: 'task-1', title: 'Checkout', status: 'running' },
+    ]);
+    mocks.generateText.mockImplementation(
+      async (_params, _session, options) => {
+        await options.onSessionReady('opencode-session-1');
+        expect(
+          await invokeTool(nativeToolNames.sendTaskMessage, {
+            taskId: 'task-1',
+            message: 'Address the review feedback.',
+          }),
+        ).toEqual({
+          success: false,
+          error:
+            'This platform event may only be presented to the user with a closeout.',
+        });
+        expect(
+          await invokeTool(nativeToolNames.launchTask, {
+            prompt: 'Fix the review feedback.',
+            environmentId: null,
+            kickoffMessage: 'I’ll fix it.',
+          }),
+        ).toEqual({
+          success: false,
+          error:
+            'This platform event may only be presented to the user with a closeout.',
+        });
+        expect(
+          await invokeTool(nativeToolNames.sendChatReply, {
+            purpose: 'clarification',
+            message: 'Should I fix this?',
+          }),
+        ).toEqual({
+          success: false,
+          error: 'This platform event must be presented with a closeout.',
+        });
+        await invokeTool(nativeToolNames.sendChatReply, {
+          purpose: 'closeout',
+          message: 'The review found one issue.',
+        });
+        return 'This final text must not post a duplicate closeout.';
+      },
+    );
+    const adapter = callbacks();
+
+    await answerFastAgentQuestion({
+      ...baseParams,
+      turnSource: 'platform_event',
+      platformEventHandling: 'present_only',
+      platformEventVisibility: 'required',
+      adapter,
+    });
+
+    expect(adapter.launchTask).not.toHaveBeenCalled();
+    expect(mocks.sendTaskMessage).not.toHaveBeenCalled();
+    expect(adapter.postReply).toHaveBeenCalledOnce();
+    expect(adapter.postReply).toHaveBeenCalledWith({
+      purpose: 'closeout',
+      message: 'The review found one issue.',
+    });
+  });
+
   it('retries eligible task startup through a native tool', async () => {
     const retryTaskStart = vi.fn().mockResolvedValue({
       success: true,
