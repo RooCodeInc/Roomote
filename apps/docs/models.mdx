@@ -204,6 +204,13 @@ limits, or Grok included-usage windows.
 These numbers come from unofficial provider endpoints, so the usage line is
 hidden whenever the provider does not return usable data.
 
+When a Slack Manager Channel is configured under **Settings > Automations**,
+Roomote also checks queryable limits every 15 minutes for OpenRouter, Kimi for
+Coding, OpenCode Go, Z.AI, and Z.AI Coding Plan. It posts one warning when a
+credential crosses 80%, 90%, or 100% usage in a limit window. The warning names
+the provider, credential fingerprint or label, limit window, and reported
+usage. A provider that does not return usable quota data is skipped.
+
 xAI can be connected with an API key, a SuperGrok or eligible X Premium+
 subscription, or both. When both are configured, the subscription is preferred
 at runtime for `xai/` models.
