@@ -89,6 +89,7 @@ function getAnalyticsDetailsColumns(
         { key: 'user', label: 'User' },
         { key: 'taskType', label: 'Task Type' },
         { key: 'project', label: 'Environment' },
+        { key: 'source', label: 'Source' },
         { key: 'provider', label: 'Provider' },
         { key: 'model', label: 'Model' },
         { key: 'cost', label: 'Cost (USD)' },
