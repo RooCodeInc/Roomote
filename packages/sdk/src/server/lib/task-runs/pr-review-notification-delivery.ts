@@ -49,7 +49,7 @@ const REVIEW_ACTIVITY_TRUNCATION_NOTICE_LENGTH = 256;
 const PR_REVIEW_TRIAGE_CACHE_TTL_MS = 15 * 60 * 1000;
 const PR_REVIEW_TRIAGE_CACHE_MAX_ENTRIES = 500;
 
-export type PrReviewNotificationTelemetry = {
+type PrReviewNotificationTelemetry = {
   githubApiCalls: number;
   eventsReceived: number;
   eventsTriaged: number;
