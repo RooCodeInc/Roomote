@@ -12,6 +12,7 @@ import {
   getBackgroundAgentSettings,
   upsertBackgroundAutomationSlackThread,
   slackInstallations,
+  users,
   normalizeTaskActivityTimestamp,
   eq,
   and,
@@ -28,6 +29,8 @@ import {
   trackSlackBotReply,
 } from '@roomote/slack';
 import { createDiscordCommunicationProviderFromRuntimeCredentials } from '../discord-communication';
+import { listConnectedCommunicationProviders } from '../../automations/destination';
+import { sendUserDirectMessage } from '../user-direct-message';
 import {
   appendManagerSlackFooter,
   buildAutomationSettingsMessage,
@@ -49,6 +52,7 @@ import {
   isVisibleInTranscript,
   normalizeTranscriptUserText,
   platformIssueReportSchema,
+  type CommunicationProvider,
   withTranscriptVisibility,
 } from '@roomote/types';
 
@@ -166,7 +170,7 @@ function getPlatformIssueReportFromToolPayload(
 
 function buildPlatformIssueTaskUrl(
   taskId: string,
-  utmSource: 'slack' | 'discord',
+  utmSource: CommunicationProvider,
 ): string {
   const url = new URL(`/task/${taskId}`, process.env.R_APP_URL);
 
@@ -180,7 +184,7 @@ function buildPlatformIssueTaskUrl(
 function buildPlatformIssueAlertText(params: {
   taskId: string;
   report: { title: string; summary: string };
-  utmSource: 'slack' | 'discord';
+  utmSource: CommunicationProvider;
 }): string {
   const taskUrl = buildPlatformIssueTaskUrl(params.taskId, params.utmSource);
 
@@ -218,6 +222,47 @@ async function markPlatformIssueReportPosted(reportRowId: string) {
     );
 }
 
+async function notifyDeploymentAdminsOfPlatformIssue(params: {
+  taskId: string;
+  report: { title: string; summary: string };
+}): Promise<boolean> {
+  const [admins, providers] = await Promise.all([
+    db.query.users.findMany({
+      where: and(eq(users.role, 'admin'), isNull(users.deletedAt)),
+      columns: { id: true },
+      orderBy: asc(users.createdAt),
+    }),
+    listConnectedCommunicationProviders(),
+  ]);
+  let delivered = false;
+
+  for (const admin of admins) {
+    for (const provider of providers) {
+      const slackText = buildPlatformIssueAlertText({
+        taskId: params.taskId,
+        report: params.report,
+        utmSource: provider,
+      });
+      const sent = await sendUserDirectMessage({
+        provider,
+        userId: admin.id,
+        text:
+          provider === 'slack'
+            ? slackText
+            : degradeSlackMrkdwnToMarkdown(slackText),
+        logContext: 'recordTaskMessageEnvelope',
+      });
+
+      if (sent) {
+        delivered = true;
+        break;
+      }
+    }
+  }
+
+  return delivered;
+}
+
 async function maybeNotifyPlatformIssue(params: {
   reportRowId: string;
   taskId: string;
@@ -239,6 +284,10 @@ async function maybeNotifyPlatformIssue(params: {
       },
     }),
   ]);
+
+  if (!settings.platformIssueAlertsEnabled) {
+    return;
+  }
 
   // The automation's own destination wins, then the shared manager channel.
   // Preserve the existing Slack preference when both manager providers exist.
@@ -281,6 +330,17 @@ async function maybeNotifyPlatformIssue(params: {
     settings.platformIssueSlackChannelId ?? settings.managerSlackChannelId;
 
   if (!channelId) {
+    const delivered = await notifyDeploymentAdminsOfPlatformIssue({
+      taskId: params.taskId,
+      report: params.report,
+    });
+    if (delivered) {
+      await markPlatformIssueReportPosted(params.reportRowId);
+    } else {
+      console.warn(
+        `[recordTaskMessageEnvelope] No configured channel or linked admin DM destination for platform issue alert on task ${params.taskId}`,
+      );
+    }
     return;
   }
 

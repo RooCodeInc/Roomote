@@ -257,6 +257,60 @@ async function sendTelegramUserDirectMessage(
   }
 }
 
+async function sendDiscordUserDirectMessage(
+  userId: string,
+  text: string,
+  logContext: string,
+): Promise<boolean> {
+  try {
+    const destination = await findDiscordUserDirectMessageDestination(userId);
+    if (!destination) {
+      return false;
+    }
+
+    const provider =
+      await createDiscordCommunicationProviderFromRuntimeCredentials();
+    if (!provider) {
+      return false;
+    }
+
+    await provider.postMessage({
+      channelId: destination.channelId,
+      text,
+      textFormat: 'markdown',
+    });
+    return true;
+  } catch (error) {
+    console.warn(
+      `[${logContext}] Failed to send Discord DM: ${formatError(error)}`,
+    );
+    return false;
+  }
+}
+
+export async function sendUserDirectMessage({
+  provider,
+  userId,
+  text,
+  logContext,
+}: {
+  provider: CommunicationProvider;
+  userId: string;
+  text: string;
+  logContext: string;
+}): Promise<boolean> {
+  switch (provider) {
+    case 'slack':
+      return sendSlackUserDirectMessage(userId, text, logContext);
+    case 'teams':
+      return sendTeamsUserDirectMessage(userId, text, logContext);
+    case 'telegram':
+      return sendTelegramUserDirectMessage(userId, text, logContext);
+    case 'discord':
+      return sendDiscordUserDirectMessage(userId, text, logContext);
+  }
+}
+
 /**
  * Best-effort DM to a Roomote user on every chat integration that is both
  * connected on this deployment and linked to the user. Failures are logged

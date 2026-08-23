@@ -195,6 +195,7 @@ export {
 export {
   findSlackUserDirectMessageDestination,
   findUserDirectMessageDestination,
+  sendUserDirectMessage,
   sendUserDirectMessageBestEffort,
   type UserDirectMessageDestination,
   type UserDirectMessageProvider,

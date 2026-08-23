@@ -107,6 +107,7 @@ export type FormState = {
   suggesterUseTeams: boolean;
   announcerFrequency: AnnouncerFrequency;
   announcerInstructions: string;
+  platformIssueAlertsEnabled: boolean;
 } & DestinationChannelFormFields &
   ScheduleOnlyAutomationFormFields;
 
@@ -197,8 +198,10 @@ const ANNOUNCER_FIELDS: Array<keyof FormState> = [
   'announcerInstructions',
 ];
 
-const PLATFORM_ISSUE_ALERT_FIELDS: Array<keyof FormState> =
-  DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.platformIssueAlerts;
+const PLATFORM_ISSUE_ALERT_FIELDS: Array<keyof FormState> = [
+  'platformIssueAlertsEnabled',
+  ...DESTINATION_CHANNEL_FIELDS_BY_AUTOMATION_ID.platformIssueAlerts,
+];
 
 const SCHEDULE_ONLY_AUTOMATION_FIELDS = Object.fromEntries(
   SCHEDULE_ONLY_BACKGROUND_AUTOMATION_LIST.map((automation) => [
@@ -373,6 +376,7 @@ export function buildAutomationSettingsSaveInput(
     suggesterUseTeams: stateToSave.suggesterUseTeams,
     announcerFrequency: stateToSave.announcerFrequency,
     announcerInstructions: stateToSave.announcerInstructions.trim() || null,
+    platformIssueAlertsEnabled: stateToSave.platformIssueAlertsEnabled,
     ...buildDestinationChannelSaveInput(stateToSave),
   };
 }
