@@ -5,6 +5,9 @@ import {
   desc,
   eq,
   gt,
+  inArray,
+  isNotNull,
+  isNull,
   setTrustedRunActingUser,
   taskRuns,
   tasks,
@@ -22,6 +25,10 @@ import {
 } from '@roomote/slack';
 import {
   ALL_REPOSITORIES,
+  buildFastAgentChildTaskMetadata,
+  getFastAgentParentFromPayload,
+  RunStatus,
+  SANDBOX_SNAPSHOT_EXPIRY_MS,
   TaskPayloadKind,
   populateSnapshotResumeSlackMetadata,
   restoreSnapshotResumeVisiblePromptFields,
@@ -39,6 +46,54 @@ export type PrReviewFollowUpDispatchResult =
   | { outcome: 'queued'; runId: number }
   | { outcome: 'resumed'; runId: number }
   | { outcome: 'unavailable' };
+
+async function findCompletedFastAgentSlackTaskRunWithSnapshot(input: {
+  taskId: string;
+  slackTeamId: string;
+  channelId: string;
+  threadId: string;
+}) {
+  const snapshotCutoff = new Date(Date.now() - SANDBOX_SNAPSHOT_EXPIRY_MS);
+  const [completedRun] = await db
+    .select({
+      id: taskRuns.id,
+      taskId: taskRuns.taskId,
+      snapshotId: taskRuns.snapshotId,
+      payload: taskRuns.payload,
+      port: taskRuns.port,
+    })
+    .from(taskRuns)
+    .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
+    .where(
+      and(
+        eq(taskRuns.taskId, input.taskId),
+        inArray(taskRuns.status, [RunStatus.Completed, RunStatus.Idle]),
+        isNotNull(taskRuns.snapshotId),
+        isNull(taskRuns.snapshotFailedAt),
+        isNull(taskRuns.canceledAt),
+        isNull(tasks.deletedAt),
+        gt(taskRuns.snapshotCreatedAt, snapshotCutoff),
+      ),
+    )
+    .orderBy(desc(taskRuns.createdAt))
+    .limit(1);
+
+  if (!completedRun) {
+    return null;
+  }
+
+  const parent = getFastAgentParentFromPayload(completedRun.payload);
+  if (
+    parent?.conversation.surface !== 'slack' ||
+    parent.conversation.workspaceId !== input.slackTeamId ||
+    parent.conversation.replyTarget.channelId !== input.channelId ||
+    parent.conversation.replyTarget.threadId !== input.threadId
+  ) {
+    return null;
+  }
+
+  return { ...completedRun, parent };
+}
 
 /**
  * Delivers a prepared PR review follow-up instruction into its owning task,
@@ -106,10 +161,22 @@ async function dispatchSlackFollowUp(input: {
     return { outcome: 'queued', runId: activeRun.id };
   }
 
-  const completedRun = await findCompletedSlackTaskRunWithSnapshot(
+  const threadBoundCompletedRun = await findCompletedSlackTaskRunWithSnapshot(
     threadTs,
     lookupScope,
   );
+  // Fast children inherit the parent conversation but do not own its Slack
+  // thread binding, so validate the persisted parent coordinates explicitly.
+  const fastAgentCompletedRun =
+    !threadBoundCompletedRun && input.slackTeamId
+      ? await findCompletedFastAgentSlackTaskRunWithSnapshot({
+          taskId: input.taskId,
+          slackTeamId: input.slackTeamId,
+          channelId: input.channelId,
+          threadId: threadTs,
+        })
+      : null;
+  const completedRun = threadBoundCompletedRun ?? fastAgentCompletedRun;
 
   if (!completedRun?.snapshotId) {
     return { outcome: 'unavailable' };
@@ -137,6 +204,9 @@ async function dispatchSlackFollowUp(input: {
     slackOriginMessageTs: originMessageTs,
     ackEmoji,
     completionEmoji,
+    ...(fastAgentCompletedRun
+      ? buildFastAgentChildTaskMetadata(fastAgentCompletedRun.parent)
+      : {}),
   };
 
   populateSnapshotResumeSlackMetadata(resumePayload, {
@@ -178,7 +248,9 @@ async function dispatchSlackFollowUp(input: {
           .innerJoin(tasks, eq(tasks.id, taskRuns.taskId))
           .where(
             and(
-              eq(tasks.slackThreadTs, threadTs),
+              ...(fastAgentCompletedRun
+                ? []
+                : [eq(tasks.slackThreadTs, threadTs)]),
               eq(taskRuns.taskId, input.taskId),
               ...(input.slackTeamId
                 ? [getSlackTaskRunWorkspacePredicate(input.slackTeamId)]
