@@ -80,6 +80,10 @@ type Todo = {
  */
 export type CallbackEvent =
   | {
+      type: 'turn_started';
+      ts: number;
+    }
+  | {
       type: 'completion';
       text: string;
       ts: number;

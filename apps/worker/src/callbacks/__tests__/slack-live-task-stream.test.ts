@@ -256,6 +256,36 @@ describe('Slack live task card', () => {
     expect(mocks.renderCard).toHaveBeenCalledOnce();
   });
 
+  it('re-opens a settled card when the live session starts a follow-up turn', async () => {
+    const taskRun = createTaskRun();
+    const context = {};
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'completion', ts: 1000, text: 'Ready for review.' },
+      context,
+    );
+
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'turn_started', ts: 1001 },
+      context,
+    );
+    await updateSlackLiveTaskStream(
+      taskRun,
+      { type: 'text', ts: 1002, text: 'Checking the follow-up.' },
+      context,
+    );
+
+    expect(renderedCard(2)).toMatchObject({
+      status: 'in_progress',
+      output: undefined,
+    });
+    expect(renderedCard(3)).toMatchObject({
+      status: 'in_progress',
+      output: 'Checking the follow-up.',
+    });
+  });
+
   it('re-opens the card when a later run of the task starts', async () => {
     const taskRun = createTaskRun();
     await updateSlackLiveTaskStream(

@@ -8,6 +8,10 @@ import type { CallbackEvent } from '../run-task';
  * genuinely distinct events that happen to arrive at the same timestamp.
  */
 export function getCallbackEventKey(event: CallbackEvent): string {
+  if (event.type === 'turn_started') {
+    return event.type;
+  }
+
   if (event.type === 'completion') {
     return `${event.type}:${event.text}`;
   }
