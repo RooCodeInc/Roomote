@@ -102,6 +102,7 @@ export async function processDiscordFastAgentMessage(input: {
         launchTask: async ({
           prompt,
           environmentId,
+          model,
           parentSessionId,
           postKickoff,
         }) => {
@@ -148,6 +149,7 @@ export async function processDiscordFastAgentMessage(input: {
               conversation,
             },
             skipRoutingConfirmation: true,
+            model,
             workspaceOverride,
             beforeEnqueueKickoff: postKickoff,
           });

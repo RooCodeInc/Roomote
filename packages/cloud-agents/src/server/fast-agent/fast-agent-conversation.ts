@@ -37,6 +37,7 @@ export type FastAgentReaction = {
 export type LaunchFastAgentTask = (params: {
   prompt: string;
   environmentId: string | null;
+  model?: string | null;
   parentSessionId: string;
   postKickoff: (task: {
     taskId: string;

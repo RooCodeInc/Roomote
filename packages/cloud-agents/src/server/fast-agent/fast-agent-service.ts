@@ -6,6 +6,7 @@ import {
   resolveInferenceProviderRetryDelayMs,
   roomoteTaskInspectionArgsSchema,
 } from '@roomote/types';
+import { getDeploymentTaskModelOptions } from '@roomote/db/server';
 import { z } from 'zod';
 
 import {
@@ -74,6 +75,7 @@ const chatReactionArgsSchema = z.object({
 const launchTaskArgsSchema = z.object({
   prompt: z.string().trim().min(1),
   environmentId: z.string().trim().min(1).nullable().optional(),
+  model: z.string().trim().min(1).nullable().optional(),
   kickoffMessage: z.string().trim().min(1),
 });
 const taskMessageArgsSchema = z.object({
@@ -524,23 +526,34 @@ export async function answerFastAgentQuestion({
     turnVisibleMessages.push(
       buildUserTextMessage(normalizeThreadText(question)),
     );
-    const [availableEnvironments, session, availableIntegrations, currentUser] =
-      await Promise.all([
-        getAvailableEnvironments(),
-        getOrCreateFastAgentSession({ userId, conversation }),
-        listFastAgentIntegrations({ userId, apiBaseUrl }).catch((error) => {
-          console.warn(
-            `[Fast Agent] Deployment integrations unavailable: ${formatErrorForLog(error)}`,
-          );
-          return [];
-        }),
-        getFastAgentUserIdentity(userId).catch((error) => {
-          console.warn(
-            `[Fast Agent] User identity unavailable: ${formatErrorForLog(error)}`,
-          );
-          return { displayName: null, githubLogin: null };
-        }),
-      ]);
+    const [
+      availableEnvironments,
+      taskModelOptions,
+      session,
+      availableIntegrations,
+      currentUser,
+    ] = await Promise.all([
+      getAvailableEnvironments(),
+      getDeploymentTaskModelOptions().catch((error) => {
+        console.warn(
+          `[Fast Agent] Task model options unavailable: ${formatErrorForLog(error)}`,
+        );
+        return { models: [], defaultModelId: undefined };
+      }),
+      getOrCreateFastAgentSession({ userId, conversation }),
+      listFastAgentIntegrations({ userId, apiBaseUrl }).catch((error) => {
+        console.warn(
+          `[Fast Agent] Deployment integrations unavailable: ${formatErrorForLog(error)}`,
+        );
+        return [];
+      }),
+      getFastAgentUserIdentity(userId).catch((error) => {
+        console.warn(
+          `[Fast Agent] User identity unavailable: ${formatErrorForLog(error)}`,
+        );
+        return { displayName: null, githubLogin: null };
+      }),
+    ]);
     canonicalConversationId = session.id;
     diagnostics.setCanonicalConversationId(session.id);
     const sessionActiveTasks = await getActiveFastAgentTasks(session.id);
@@ -570,6 +583,8 @@ export async function answerFastAgentQuestion({
     });
     const system = buildFastAgentSystemPrompt({
       availableEnvironments,
+      availableTaskModels: taskModelOptions.models,
+      defaultTaskModelId: taskModelOptions.defaultModelId,
       availableIntegrations,
       activeTasks: resolvedActiveTasks,
       surface: conversation.surface,
@@ -820,6 +835,15 @@ export async function answerFastAgentQuestion({
                 error: 'The selected environment was not found.',
               };
             }
+            if (
+              args.model &&
+              !taskModelOptions.models.some((model) => model.id === args.model)
+            ) {
+              return {
+                success: false,
+                error: `Model "${args.model}" is not enabled for new tasks. Choose an exact ID from Available Delegated Task Models.`,
+              };
+            }
             let kickoffDelivered = false;
             const deliverKickoff = async (task: {
               taskId: string;
@@ -848,6 +872,7 @@ export async function answerFastAgentQuestion({
             const result = await adapter.launchTask({
               prompt: args.prompt,
               environmentId: args.environmentId ?? null,
+              model: args.model ?? null,
               parentSessionId: session.id,
               postKickoff: deliverKickoff,
             });

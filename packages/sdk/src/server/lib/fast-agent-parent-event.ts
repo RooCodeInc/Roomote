@@ -437,7 +437,7 @@ function createFastAgentDiscordTaskLauncher(params: {
     userId: params.userId,
     surface: 'discord',
     taskUrlCampaign: 'fast-delegation',
-    buildTask: async ({ prompt, environmentId, parentSessionId }) => {
+    buildTask: async ({ prompt, environmentId, model, parentSessionId }) => {
       const isDirectMessage = params.conversation.workspaceId === 'dm';
       const thread = isDirectMessage
         ? null
@@ -478,6 +478,9 @@ function createFastAgentDiscordTaskLauncher(params: {
           }),
           ...(environmentId && environmentId !== ALL_REPOSITORIES
             ? { environmentId }
+            : {}),
+          ...(model
+            ? { harnessModelOverrides: { 'opencode-server': model } }
             : {}),
         },
       } satisfies StandardTask;
