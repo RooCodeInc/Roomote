@@ -359,7 +359,6 @@ export function StepRepoSelection({
               selectedRepositoryIds={selectedRepositoryIds}
               onToggleRepository={toggleRepository}
               onCreateRepository={() => setCreateRepoDialogOpen(true)}
-              showSearch={false}
               inputPrefix="setup-repository"
               heightClassName="h-auto"
             />

@@ -33,7 +33,7 @@ export function EnvironmentRepositorySelector({
   heightClassName?: string;
 }) {
   const [search, setSearch] = useState('');
-  const deferredSearch = useDeferredValue(search);
+  const normalizedSearch = useDeferredValue(search.trim().toLowerCase());
   const sortedRepositories = useMemo(
     () =>
       [...repositories].sort((left, right) =>
@@ -42,16 +42,14 @@ export function EnvironmentRepositorySelector({
     [repositories],
   );
   const filteredRepositories = useMemo(() => {
-    const query = deferredSearch.trim().toLowerCase();
-
-    if (!query) {
+    if (!normalizedSearch) {
       return sortedRepositories;
     }
 
     return sortedRepositories.filter((repository) =>
-      repository.fullName.toLowerCase().includes(query),
+      repository.fullName.toLowerCase().includes(normalizedSearch),
     );
-  }, [deferredSearch, sortedRepositories]);
+  }, [normalizedSearch, sortedRepositories]);
 
   return (
     <ScrollArea className={`overflow-auto ${heightClassName}`}>
@@ -83,7 +81,7 @@ export function EnvironmentRepositorySelector({
             </button>
           </p>
         ) : null}
-        {filteredRepositories.length === 0 && deferredSearch.trim() ? (
+        {filteredRepositories.length === 0 && normalizedSearch ? (
           <p className="py-6 text-center text-sm text-muted-foreground">
             No repositories found.
           </p>
